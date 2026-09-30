@@ -60,6 +60,7 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const r2 = (v) => (v === null ? null : Number(v.toFixed(2)));
 
+export const STALE_NOTE = "This card describes an earlier session than the last closed one, so every grade is capped at weak. ";
 export const NEURON_PROSE_CAPS = Object.freeze({ summary: 600, title: 80, thesis: 500, invalidation: 200, horizon: 60 });
 const MARKUP = /[<>`{}]|\]\(|https?:|www\./i;
 
@@ -935,7 +936,7 @@ export function buildContext(card, extras) {
     coverage,
     state,
     levels: guardLevels(c),
-    engine: engineContext(c),
+    engine: engineContext(c, { stale: stale === true }),
   };
 }
 
@@ -1006,7 +1007,7 @@ function structureBrief(st) {
   };
 }
 
-export function engineContext(card) {
+export function engineContext(card, { stale = false } = {}) {
   const e = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) && Array.isArray(card.engine.structures)
     ? card.engine : null;
   if (!e) return null;
@@ -1019,7 +1020,8 @@ export function engineContext(card) {
   return {
     engine: str(e.engine), asOf: str(e.asOf), spot: num(e.spot), atr: num(e.atr), facts,
     state: e.state && typeof e.state === "object" ? {
-      state: str(e.state.state), direction: str(e.state.direction), confidence: num(e.state.confidence),
+      state: str(e.state.state), direction: str(e.state.direction),
+      confidence: stale && num(e.state.confidence) !== null ? Math.min(e.state.confidence, 1) : num(e.state.confidence),
       preferred: Array.isArray(e.state.preferred) ? e.state.preferred.slice() : [], avoid: Array.isArray(e.state.avoid) ? e.state.avoid.slice() : [],
     } : null,
     levels: e.levels && typeof e.levels === "object" ? e.levels : null,
@@ -1432,7 +1434,7 @@ export function deterministicSummary(context) {
     .map((f) => f.say);
   if (st) said.unshift(st.brief);
   if (said.length) {
-    return (stale ? "This card describes an earlier session than the last closed one, so every grade is capped at weak. " : "") +
+    return (stale ? STALE_NOTE : "") +
       said.join(" ");
   }
   return "The card for " + (ctx.ticker || "this name") + " publishes no feature with a reading to lean on this session.";
@@ -1495,11 +1497,26 @@ export function vetIdeas(rawIdeas, context) {
 }
 
 export function contextFingerprint(context) {
-  const joined = contextLines(context).join("\n");
+  const ctx = context && typeof context === "object" ? context : {};
+  const joined = [ctx.sessionDate || "", ctx.generatedAt || "", ctx.engine && ctx.engine.asOf ? ctx.engine.asOf : ""].join("|");
   let h = 5381;
   for (let i = 0; i < joined.length; i++) h = (((h << 5) + h) ^ joined.charCodeAt(i)) >>> 0;
-  return "n" + NEURON_CONTEXT_VERSION + "." + h.toString(36) + "." + (context && context.features ? context.features.length : 0) +
-    (context && context.engine ? ".e" + context.engine.structures.length : "");
+  return "n" + NEURON_CONTEXT_VERSION + "." + h.toString(36) + "." + (ctx.features ? ctx.features.length : 0) +
+    (ctx.engine ? ".e" + ctx.engine.structures.length : "");
+}
+
+export function applyStaleCap(row, context) {
+  if (!row || typeof row !== "object" || !context || context.stale !== true) return row;
+  const cap = (n) => Math.min(n, 1);
+  const ideas = (Array.isArray(row.ideas) ? row.ideas : []).map((i) => {
+    if (!i || typeof i !== "object") return i;
+    const out = { ...i };
+    if (num(i.grade) !== null) out.grade = cap(i.grade);
+    if (num(i.robustness) !== null) { out.robustness = cap(i.robustness); out.robustnessWord = ROBUSTNESS_WORD[out.robustness]; }
+    return out;
+  });
+  const summary = typeof row.summary === "string" && row.summary !== "" && !row.summary.startsWith(STALE_NOTE) ? STALE_NOTE + row.summary : row.summary;
+  return { ...row, ideas, summary };
 }
 
 export function publicContext(context) {

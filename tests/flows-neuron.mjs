@@ -4,7 +4,7 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
          engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
-         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS } from "../shared/flows-neuron.js";
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
@@ -124,7 +124,14 @@ const CARD = {
 
   const fp = contextFingerprint(ctx);
   ok(/^n4\./.test(fp), "the fingerprint carries the protocol version, now 4: the vet accepts only the engine's ranked ideas, so a row stored under 3 may hold a promoted structure and is read again once");
-  ok(fp !== contextFingerprint(stale), "and moves when the cap changes the grades");
+  ok(fp === contextFingerprint(stale),
+     "N-F6: and does NOT move when the next session closes and the cap lands on every grade: the same card gave n3.37jodr.25.e5 while fresh and n3.1bg51xk.25.e5 " +
+     "once the close had passed, so each viewed name was regenerated at 16:00 and again when the nightly landed");
+  ok(fp === contextFingerprint(buildContext(CARD, {})) && fp === contextFingerprint(buildContext(CARD, { expectedSession: "2030-01-01" })),
+     "whatever the wall clock says, and with no clock at all");
+  ok(fp !== contextFingerprint(buildContext({ ...CARD, generatedAt: "2026-09-16T08:05:00.000Z" }, { expectedSession: "2026-09-15" })) &&
+     fp !== contextFingerprint(buildContext({ ...CARD, sessionDate: "2026-09-16" }, { expectedSession: "2026-09-16" })),
+     "but moves with the card it was read from: a new generatedAt or a new session");
   ok(fp === contextFingerprint(buildContext(JSON.parse(JSON.stringify(CARD)), { expectedSession: "2026-09-15" })),
      "and is stable across a deep copy of the same card");
 
@@ -432,8 +439,10 @@ const CARD = {
   const staleSt = regimeState(CARD, { expectedSession: "2026-09-16" });
   ok(staleSt.stale === true && staleSt.confidence <= 1 && /capped/.test(stateSentence(staleSt, "SYN1")),
      "a card behind the last closed session caps the state's confidence at weak and says so");
-  ok(contextFingerprint(ctx) !== contextFingerprint(buildContext(squeeze, { expectedSession: "2026-09-15" })),
-     "the fingerprint moves when the state moves, so a changed state is re-read");
+  ok(contextFingerprint(ctx) === contextFingerprint(buildContext(squeeze, { expectedSession: "2026-09-15" })) &&
+     contextFingerprint(ctx) !== contextFingerprint(buildContext({ ...squeeze, generatedAt: "2026-09-16T09:00:00.000Z" }, { expectedSession: "2026-09-15" })),
+     "the fingerprint is the card's identity (session, generatedAt, engine as-of), not a hash of its text: a card published again is read again, " +
+     "and a hand-edited copy carrying the same stamps is the same card. (This line pinned 'moves when the state moves', which is what churned it at the close.)");
   ok(STATE_LINES.FLIP_ON_ATR === 0.5 && STATE_LINES.WALL_NEAR_ATR === 1.5 && STATE_LINES.VRP_RELATIVE === 0.1,
      "the lines the states are cut at are published constants, not literals in the branches");
 }
@@ -1235,6 +1244,33 @@ const CARD = {
   const long = { ...own, thesis: own.thesis + " " + "The ladder changes sign once. ".repeat(20) };
   ok(long.thesis.length > NEURON_PROSE_CAPS.thesis && vetIdeas([long], base).ideas.length === 1 && vetIdeas([{ ...long, fromState: false }], base).ideas.length === 0,
      `while the state's own idea, written by this module, keeps the room its readings need (${long.thesis.length} characters), and the same text from a model is over the cap`);
+}
+
+{
+  const ctx = buildContext(CARD, { expectedSession: "2026-09-15" });
+  const stale = buildContext(CARD, { expectedSession: "2026-09-16" });
+  ok(ctx.stale === false && stale.stale === true && contextFingerprint(ctx) === contextFingerprint(stale),
+     "N-F6: the context still knows it is stale, and the fingerprint does not");
+  const row = { summary: "SYN1 scored 58.", ideas: [{ structure: "S1", grade: 3, from: "engine" }, { title: "Put wall break", robustness: 3, robustnessWord: "robust", fromState: true }] };
+  same(applyStaleCap(row, ctx), row, "read time: a row read for a fresh card is served as it was written");
+  const capped = applyStaleCap(row, stale);
+  ok(capped.ideas[0].grade === 1 && capped.ideas[1].robustness === 1 && capped.ideas[1].robustnessWord === "weak" && capped.summary.startsWith(STALE_NOTE) &&
+     row.ideas[0].grade === 3 && !row.summary.startsWith(STALE_NOTE),
+     "and read for a card the next session has passed, every engine grade and idea robustness is capped at weak and the summary says why, on a copy");
+  same(applyStaleCap(capped, stale), capped, "the cap is idempotent: a row written while stale is not capped twice or prefixed twice");
+  ok(deterministicSummary(stale).startsWith(STALE_NOTE), "and the deterministic summary uses the same sentence");
+
+  const withEngine = JSON.parse(JSON.stringify(CARD));
+  withEngine.engine = { v: 1, engine: "q1", asOf: "2026-09-15T20:00:00.000Z", spot: 100, atr: 2.5, facts: [{ id: "iv.cm.30", v: 0.3, u: "vol", g: 3 }], structures: [],
+    state: { state: "squeeze", direction: "bearish", confidence: 3, preferred: ["put debit spread"], avoid: ["iron condor"] }, ideas: [], noTrade: { code: "candidates.none", closest: null } };
+  const fresh = buildContext(withEngine, { expectedSession: "2026-09-15" });
+  const late = buildContext(withEngine, { expectedSession: "2026-09-16" });
+  eq(fresh.engine.state.confidence, 3, "N-F18: the engine block's stored state keeps the confidence the nightly gave it while the card is current");
+  ok(late.state.confidence <= 1 && late.engine.state.confidence === 1,
+     `and once the card is behind the last close both the header state and the engine block's state are capped at 1 by the same rule (${late.state.confidence} and ${late.engine.state.confidence}), ` +
+     "where the header read 1 beside an engine block still reading 3");
+  ok(contextFingerprint(fresh) !== contextFingerprint(buildContext({ ...withEngine, engine: { ...withEngine.engine, asOf: "2026-09-16T20:00:00.000Z" } }, { expectedSession: "2026-09-15" })),
+     "and a new engine as-of is a new reading");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
