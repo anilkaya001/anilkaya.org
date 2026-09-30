@@ -853,6 +853,30 @@ const OUT = ENGINE.runEngine(BASE);
     ok(fit.params.b * (1 + Math.abs(fit.params.rho)) <= 2 + 1e-9,
       `an SVI fitted to quotes drawn from a ${label} smile is held to b(1+|rho|) <= 2 (got ${(fit.params.b * (1 + Math.abs(fit.params.rho))).toFixed(6)})`);
   }
+  const rng = WORLD.xoshiro128ss("lee");
+  const U = () => rng.uniform(), B = (lo, hi) => lo + (hi - lo) * U();
+  let inside = 0, leaking = 0, leakedOk = 0;
+  for (let i = 0; i < 60000 && (inside < 12 || leaking < 12); i++) {
+    const T = B(0.02, 0.5), rho = B(-0.95, 0.95), b = B(0.3, 3.0), p = { a: B(0, 0.03), b, rho, m: B(-0.1, 0.1), sigma: B(0.05, 0.8) };
+    const slope = b * (1 + Math.abs(rho));
+    const chk = SMILE.sliceChecks(p, T, -0.2, 0.2, null);
+    if (!(chk.butterfly.ok && chk.minVar.ok)) continue;
+    if (slope <= 1.0 && inside < 12) {
+      const mom = DENSITY.rndMoments({ method: "svi", T, F: 100, D: 1, params: p });
+      near(mom.mean / 100, 1, 0.01, `an accepted slice with wing slope ${slope.toFixed(2)} has a risk-neutral mean of F (${(mom.mean / 100).toFixed(4)} F) and unit mass (${mom.mass.toFixed(4)})`);
+      near(mom.mass, 1, 1e-3, "unit mass");
+      inside++;
+    } else if (slope > 2.05 && slope <= 4 && leaking < 12) {
+      let mom = null;
+      try { mom = DENSITY.rndMoments({ method: "svi", T, F: 100, D: 1, params: p }); } catch { mom = null; }
+      if (!mom) continue;
+      leaking++;
+      ok(!chk.ok && !chk.lee.ok, `slope ${slope.toFixed(2)} passes the butterfly and minimum-variance checks but is refused on the wing bound`);
+      if (mom.mean / 100 < 0.98 || mom.mass < 0.98) leakedOk++;
+    }
+  }
+  ok(inside === 12 && leaking === 12, `the scan found ${inside} accepted and ${leaking} over-steep slices`);
+  ok(leakedOk === leaking, `and each of the ${leaking} over-steep slices the old bound of 4 accepted loses mass or mean (${leakedOk} of ${leaking}: mean below 0.98 F or unit mass gone), the leak Lee's bound exists to prevent`);
 }
 
 {
