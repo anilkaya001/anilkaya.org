@@ -15,6 +15,8 @@ let pagesAsked = [];
 let openNow = 0, openPeak = 0;
 
 let slowUpstream = 0;
+const READ = "2026-08-25T22:00:00Z";
+const envelope = (data) => JSON.stringify({ data });
 const chainRows = [
 
   { option_symbol: "AAPL260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60",
@@ -32,6 +34,19 @@ const candles = [
   { date: "2026-08-24", close: "180.00" },
   { date: "2026-08-21", close: "174.00" },
 ];
+
+const sessionCandles = [
+  { date: "2026-08-25", market_time: "pr", close: "181.00" },
+  { date: "2026-08-25", market_time: "r", close: "183.40" },
+  { date: "2026-08-25", market_time: "po", close: "190.00" },
+  { date: "2026-08-24", market_time: "r", close: "180.00" },
+];
+
+const liveState = {
+  close: "183.40", prev_close: "179.10", open: "180.20",
+  high: "184.00", low: "179.80", market_time: "regular",
+  tape_time: "2026-08-25 18:06:00+00:00", total_volume: 23132119, volume: 12348,
+};
 
 const upstream = http.createServer((req, res) => {
   upstreamCalls++;
@@ -59,6 +74,14 @@ const upstream = http.createServer((req, res) => {
 
     const reroot = (sym) => String(sym).replace(/^[A-Z]+/, ticker);
     if (upstreamMode === "emptyChain") { send(200, JSON.stringify({ data: [] })); return; }
+    if (upstreamMode === "incoherent") {
+      send(200, JSON.stringify({ data: [
+        { option_symbol: `${ticker}260918C00170000`, nbbo_bid: "2.00", nbbo_ask: "2.10", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+        { option_symbol: `${ticker}260918C00175000`, nbbo_bid: "3.00", nbbo_ask: "3.10", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+        { option_symbol: `${ticker}260918P00160000`, nbbo_bid: "1.00", nbbo_ask: "1.05", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+      ] }));
+      return;
+    }
 
     if (upstreamMode === "big" || upstreamMode === "part") {
       const full = Array.from({ length: 500 }, (_, i) => ({
@@ -79,7 +102,7 @@ const upstream = http.createServer((req, res) => {
     return;
   }
   if (path.includes("/ohlc/")) {
-    send(200, JSON.stringify({ data: upstreamMode === "noSpot" ? [] : candles }));
+    send(200, JSON.stringify({ data: upstreamMode === "noSpot" ? [] : upstreamMode === "afterHours" ? sessionCandles : candles }));
     return;
   }
   if (path.endsWith("/info")) {
@@ -96,11 +119,12 @@ const upstream = http.createServer((req, res) => {
     if (upstreamMode === "noState" || upstreamMode === "noSpot") {
       send(404, "{}"); return;
     }
-    send(200, JSON.stringify({
-      close: "183.40", prev_close: "179.10", open: "180.20",
-      high: "184.00", low: "179.80", market_time: "regular",
-      tape_time: "2026-08-25 18:06:00+00:00", total_volume: 23132119, volume: 12348,
-    }));
+    if (upstreamMode === "bareState") { send(200, JSON.stringify(liveState)); return; }
+    if (upstreamMode === "afterHours") {
+      send(200, envelope({ ...liveState, close: "190.00", market_time: "postmarket", tape_time: "2026-08-25T21:30:00Z" }));
+      return;
+    }
+    send(200, envelope(liveState));
     return;
   }
   send(404, "{}");
@@ -109,7 +133,7 @@ await new Promise((r) => upstream.listen(0, "127.0.0.1", r));
 const upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
 
 const server = await startWorker({
-  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`],
+  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`, `UW_NOW:${READ}`],
 });
 
 const token = await signSession(
@@ -185,9 +209,14 @@ try {
     eq(body.marketTime, "regular", "the vendor's session name is passed through verbatim");
     eq(body.prevClose, 179.1, "the previous close ships alongside rather than as spot");
 
-    eq(body.asOf, "2026-08-25", "the session comes from the tape time, not the candle");
+    eq(body.asOf, "2026-08-25", "the date is the New York date of the READ, not the newest candle's and not the tape's UTC date");
+    eq(body.sessionDate, "2026-08-25", "the session the price belongs to ships beside it");
+    eq(body.basis.status, "ok", "the chain agrees with its spot");
+    eq(body.basis.printSource, "stock-state", "and the basis names the print's source");
+    eq(body.basis.printSpot, 183.4, "with the print");
+    eq(body.generatedAt, "2026-08-25T22:00:00.000Z", "the payload is stamped with the instant the vendor was read");
     eq(body.tapeTime, "2026-08-25 18:06:00+00:00",
-       "and the tape time itself ships, because the desk prices each line's time to expiry from the quote, not from the fetch");
+       "and the tape time itself ships beside the read instant");
 
     ok(body.engine && body.engine.status === "unavailable",
        "no card is published for AAPL here, so the engine block says the real-world law is unavailable");
@@ -207,10 +236,15 @@ try {
     ok(put.annualizedIsConvention === true,
        "annualized ships flagged as a convention so no reader prints it as a return");
 
-    const sigma = put.iv * Math.sqrt(put.days / 365);
+    const years = (Date.UTC(2026, 8, 18, 20) - Date.parse(READ)) / (365 * 86400000);
+    const sigma = put.ivMid * Math.sqrt(years);
     near(put.cushionSigmas, Math.log(body.spot / put.breakeven) / sigma, 1e-9,
-         "cushion is the move to breakeven in the option's own implied sigmas");
+         "cushion is the move to breakeven in the QUOTE's implied sigmas over the exact time from the read to the 4 pm expiry close, not the vendor's last-trade volatility over whole days");
+    ok(Math.abs(put.ivMid - put.iv) > 1e-4, "the volatility it uses is the mid's, which differs from the vendor's figure");
     ok(put.cushionSigmas > 0, "and it is positive for a breakeven below spot");
+    eq(put.intrinsic, 0, "the put is out of the money and carries no intrinsic value");
+    eq(put.extrinsic, 2.5, "so its time value is its whole bid");
+    eq(put.annualized, put.annualizedGross, "and the two annualizations agree");
 
     const call = body.rows.find((r) => r.type === "C");
     eq(call.collateral, Math.round(body.spot * 100 * 1e6) / 1e6,
@@ -394,9 +428,53 @@ try {
     const body = await res.json();
     eq(body.spot, 180, "it falls back to the latest daily close");
     eq(body.spotSource, "daily-close", "and says so, rather than passing a close off as a print");
-    eq(body.asOf, "2026-08-24", "dating falls back to the candle's own date");
+    eq(body.basis.printSource, "daily-bar", "the basis says the bar did not state its session");
+    eq(body.asOf, "2026-08-25", "dating comes from the read, not from a candle that may be a day or a weekend old");
+    eq(body.sessionDate, "2026-08-24", "while the session of the price is the candle's own");
     eq(body.marketTime, null, "with no session claimed that was not observed");
     ok(body.rows.length > 0, "and the chain still prices");
+    upstreamMode = "ok";
+  }
+
+  {
+    upstreamMode = "bareState";
+    const res = await get("/api/flows/chain?t=BARE&refresh=1");
+    const body = await res.json();
+    eq(body.spotSource, "stock-state", "a bare stock-state body, the shape earlier mocks returned, is still read as a live print");
+    eq(body.spot, 183.4, "at its close");
+    upstreamMode = "ok";
+  }
+
+  {
+    upstreamMode = "afterHours";
+    const res = await get("/api/flows/chain?t=AFTER&refresh=1");
+    eq(res.status, 200);
+    const body = await res.json();
+    eq(body.spot, 183.4, "AFTER THE CLOSE the spot is the regular-session close, not the 190.00 print that chain quotes do not follow");
+    eq(body.basis.printSource, "regular-close", "the basis says it is a regular close");
+    eq(body.basis.printNote, "regular close 4:00 pm ET", "in words");
+    eq(body.spotSource, "daily-close", "and the legacy source field says a close");
+    eq(body.marketTime, "postmarket", "the vendor's session name for the live state passes through");
+    eq(body.prevClose, 179.1, "with its own previous close");
+    upstreamMode = "ok";
+  }
+
+  {
+    const spread = await get("/api/flows/chain?t=OFFM&refresh=1");
+    const clean = await spread.json();
+    eq(clean.gated.offMarket, 0, "a coherent chain sets nothing aside as off the market");
+    ok("offMarket" in clean.gated, "but the gate is in the counts, so a reader can see it was applied");
+    eq(clean.basis.offMarket, 0, "and the basis counts none");
+
+    upstreamMode = "incoherent";
+    const res = await get("/api/flows/chain?t=INCOH&refresh=1");
+    eq(res.status, 200, "a chain that cannot belong to its spot is still an answer");
+    const body = await res.json();
+    eq(body.basis.status, "mismatch", "its basis says the two do not belong together");
+    eq(body.basis.offMarket, 2, "two calls whose asks are under their exercise value are counted");
+    assert.deepEqual(body.rows, []); checks++;
+    eq(body.gated.offMarket, 3, "and every contract is accounted for under the gate, so excluded plus priced is still the chain");
+    eq(body.priced, 0, "nothing is priced against a spot the quotes contradict");
     upstreamMode = "ok";
   }
 

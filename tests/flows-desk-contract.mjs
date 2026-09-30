@@ -16,6 +16,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 let upstreamCalls = 0;
 const callsByTicker = new Map();
+const READ = "2026-08-25T18:10:00Z";
 
 const CHAINS = {
   AAA: {
@@ -89,8 +90,8 @@ CHAINS.FFF = {
       open_interest: "200", volume: "100",
     })),
     ...Array.from({ length: 10 }, (_, i) => ({
-      option_symbol: "FFF260918P" + String((2000 + i) * 1000).padStart(8, "0"),
-      nbbo_bid: "5.00", nbbo_ask: "5.10", implied_volatility: "0.35",
+      option_symbol: "FFF260918P" + String((1100 + i) * 1000).padStart(8, "0"),
+      nbbo_bid: (100.5 + i).toFixed(2), nbbo_ask: (100.6 + i).toFixed(2), implied_volatility: "0.35",
       open_interest: "500", volume: "100",
     })),
   ],
@@ -101,6 +102,34 @@ CHAINS.GGG = {
   rows: CHAINS.AAA.rows.map((r) => ({
     ...r, option_symbol: r.option_symbol.replace(/^AAA/, "GGG"),
   })),
+};
+
+CHAINS.HHH = {
+  spot: CHAINS.AAA.spot,
+  rows: CHAINS.AAA.rows.map((r) => ({
+    ...r, option_symbol: r.option_symbol.replace(/^AAA/, "HHH"),
+  })),
+};
+
+CHAINS.NVD = {
+  spot: 231.02,
+  rows: [
+    ["C", 227.5, "260826", 1.47], ["C", 227.5, "260828", 2.77], ["P", 225, "260826", 0.68], ["P", 225, "260828", 1.78],
+    ["C", 230, "260828", 1.69], ["C", 230, "260826", 0.56], ["C", 227.5, "260831", 3.25], ["C", 227.5, "260902", 3.85],
+    ["C", 227.5, "260904", 4.65],
+  ].map(([type, strike, expiry, bid]) => ({
+    option_symbol: `NVD${expiry}${type}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+    nbbo_bid: String(bid), nbbo_ask: (bid + 0.02).toFixed(2), implied_volatility: "0.35", open_interest: "1000", volume: "50",
+  })),
+};
+
+CHAINS.MIS = {
+  spot: 231.02,
+  rows: [
+    { option_symbol: "MIS260918C00225000", nbbo_bid: "1.00", nbbo_ask: "1.10", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+    { option_symbol: "MIS260918C00227500", nbbo_bid: "0.80", nbbo_ask: "0.90", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+    { option_symbol: "MIS260918P00220000", nbbo_bid: "0.50", nbbo_ask: "0.55", implied_volatility: "0.3", open_interest: "900", volume: "10" },
+  ],
 };
 
 const upstream = http.createServer((req, res) => {
@@ -127,14 +156,17 @@ const upstream = http.createServer((req, res) => {
   }
   if (url.pathname.endsWith("/stock-state")) {
 
-    if (ticker !== "AAA") { res.writeHead(404); res.end("{}"); return; }
+    if (!["AAA", "HHH", "NVD", "MIS"].includes(ticker)) { res.writeHead(404); res.end("{}"); return; }
     res.writeHead(200);
-    res.end(JSON.stringify({
-      close: String(chain.spot * 1.02), prev_close: String(chain.spot),
-      open: String(chain.spot), high: String(chain.spot * 1.03), low: String(chain.spot * 0.99),
-      market_time: "regular", tape_time: "2026-08-25 18:06:00+00:00",
-      total_volume: 1000000, volume: 5000,
-    }));
+    const state = ticker === "NVD" || ticker === "MIS"
+      ? { close: String(chain.spot), prev_close: "229.00", open: "229.5", high: "232", low: "228", market_time: "regular", tape_time: "2026-08-25T18:06:00Z", total_volume: 1000000, volume: 5000 }
+      : {
+        close: String(chain.spot * 1.02), prev_close: String(chain.spot),
+        open: String(chain.spot), high: String(chain.spot * 1.03), low: String(chain.spot * 0.99),
+        market_time: "regular", tape_time: "2026-08-25 18:06:00+00:00",
+        total_volume: 1000000, volume: 5000,
+      };
+    res.end(JSON.stringify(ticker === "HHH" ? state : { data: state }));
     return;
   }
   if (url.pathname.includes("/ohlc/")) {
@@ -152,7 +184,7 @@ const upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
 
 const INGEST = "desk-ingest-token";
 const server = await startWorker({
-  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`, `FLOWS_INGEST_TOKEN:${INGEST}`],
+  extraVars: ["UW_API_KEY:test-uw-key", `UW_BASE:${upstreamURL}`, `UW_NOW:${READ}`, `FLOWS_INGEST_TOKEN:${INGEST}`],
 });
 
 const token = await signSession(
@@ -248,6 +280,35 @@ try {
     const frontier = await page.locator("#dkScatter .ui-silent").getAttribute("aria-label");
     ok(/Frontier/.test(frontier || ""), `the frontier says it is empty in the silence vocabulary rather than drawing empty axes (${frontier})`);
     eq(upstreamCalls, 0, "an empty desk spends no vendor call");
+  }
+
+  {
+    const chainOf = async (symbol) => {
+      const r = await fetch(`${server.baseURL}/api/flows/chain?t=${symbol}&strategy=both&rank=annualized`,
+        { headers: { Cookie: `flows_session=${token}`, Accept: "application/json" } });
+      return { status: r.status, body: await r.json() };
+    };
+    const bare = await chainOf("HHH");
+    eq(bare.status, 200, "a symbol whose stock-state is the bare shape earlier fixtures used still prices");
+    eq(bare.body.spotSource, "stock-state", "off the live print it contains");
+    eq(bare.body.spot, 51, "at its close");
+    eq(bare.body.basis.status, "ok", "on a chain that agrees with it");
+
+    const coherent = await chainOf("NVD");
+    eq(coherent.body.spotSource, "stock-state", "the real {data:{...}} envelope is read as a live print through the route");
+    eq(coherent.body.basis.status, "rebased", "THE SCREENSHOT'S NINE BIDS against a 231.02 print come back rebased onto the underlying they fit");
+    ok(Math.abs(coherent.body.spot / 227.28 - 1) < 0.002, `to about 227.28 (${coherent.body.spot})`);
+    eq(coherent.body.basis.printSpot, 231.02, "with the print beside it");
+    eq(coherent.body.priced, 9, "and all nine lines priced");
+    ok(coherent.body.rows.every((r) => r.ivMid > 0.25 && r.ivMid < 0.4), "each with a volatility a real term structure could have");
+    ok(coherent.body.rows.every((r) => Math.abs(r.moneyness) < 0.02), "and within 2% of the money, as the request for out-of-the-money contracts implies");
+
+    const wrong = await chainOf("MIS");
+    eq(wrong.status, 200, "a chain that contradicts its spot and is too thin to rebase is still an answer");
+    eq(wrong.body.basis.status, "mismatch", "whose basis says the quotes and the price do not belong together");
+    assert.deepEqual(wrong.body.rows, []); checks++;
+    eq(wrong.body.priced, 0, "and which prices nothing");
+    eq(wrong.body.gated.offMarket, wrong.body.screened, "every contract is accounted for under the gate that set it aside");
   }
 
   {
@@ -918,20 +979,20 @@ try {
     ok(/10 lines below the cut are not on this list/.test(foot), "and how many are missing");
 
     const byYield = await strikesOf();
-    ok(byYield.length === 120 && !byYield.some((k) => k >= 2000), "ranked by yield, the slice contains none of the ten deep in-the-money lines");
+    ok(byYield.length === 120 && !byYield.some((k) => k >= 1100), "ranked by yield, the slice contains none of the ten deep in-the-money lines");
 
     const asked = [];
     const watchRank = (req) => { if (req.url().includes("/api/flows/chain")) asked.push(new URL(req.url()).searchParams.get("rank")); };
     page.on("request", watchRank);
     const callsBefore = upstreamCalls;
     await page.selectOption("#deskRank", "premium");
-    await page.waitForFunction(() => Array.from(document.querySelectorAll("#dkList .dk-row")).some((r) => Number(r.dataset.strike) >= 2000),
+    await page.waitForFunction(() => Array.from(document.querySelectorAll("#dkList .dk-row")).some((r) => Number(r.dataset.strike) >= 1100),
       null, { timeout: 15000 }).catch(() => {});
     ok(upstreamCalls > callsBefore, "a re-rank on a CUT symbol goes back to the chain — the old slice cannot contain the new key's winners");
     ok(asked.includes("premium"), `and asks the route for the key it now wants (${asked.join(",")})`);
     const byPremium = await strikesOf();
-    eq(byPremium.filter((k) => k >= 2000).length, 10, "and the ten $500 lines the yield slice never contained are now on the list");
-    ok(byPremium.slice(0, 10).every((k) => k >= 2000), "at the top of it, which is what ranking by premium received means");
+    eq(byPremium.filter((k) => k >= 1100).length, 10, "and the ten $10,000 lines the yield slice never contained are now on the list");
+    ok(byPremium.slice(0, 10).every((k) => k >= 1100), "at the top of it, which is what ranking by premium received means");
     page.off("request", watchRank);
 
     {
@@ -951,15 +1012,15 @@ try {
       const itm = cells.filter((c) => / ITM$/.test(c.away));
       eq(itm.length, 10, "the ten puts struck above spot are marked in the money");
       ok(otm.length >= 100, "and the cheap ones below spot are marked out of it");
-      ok(itm.every((c) => c.strike >= 2000), "the ITM mark is on the strikes above spot");
+      ok(itm.every((c) => c.strike >= 1100), "the ITM mark is on the strikes above spot");
       ok(otm.every((c) => c.strike < 1000), "and the OTM mark on the ones below it");
-      const deep = itm.find((c) => c.strike === 2000);
-      eq(deep && deep.away, "100.0% ITM", "the distance is a percentage of spot, with its unit");
-      const info = await rowInfo('#dkList .dk-row[data-strike="2000"]');
+      const deep = itm.find((c) => c.strike === 1100);
+      eq(deep && deep.away, "10.0% ITM", "the distance is a percentage of spot, with its unit");
+      const info = await rowInfo('#dkList .dk-row[data-strike="1100"]');
       ok(/above spot/.test(info.facts.Distance || ""), `and the row's disclosure says which side of spot, in words (${info.facts.Distance})`);
       ok(/cash reserved/.test(info.facts.Yield || ""), "and which collateral it is — cash for a put, shares for a call");
       ok(/intrinsic/.test(info.text), "and how much of an in-the-money premium is intrinsic value that assignment returns, or that the bid is below it");
-      eq(await page.locator('#dkList .dk-row[data-strike="2000"]').evaluate((n) => n.classList.contains("is-itm")), true,
+      eq(await page.locator('#dkList .dk-row[data-strike="1100"]').evaluate((n) => n.classList.contains("is-itm")), true,
          "and the in-the-money row greys its yield, so a premium that is partly intrinsic does not read as income");
 
       const link = page.locator("#dkList .dk-row .dk-t").first();

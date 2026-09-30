@@ -155,6 +155,7 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/live.mjs`, `live-fake.mjs` | The Actions `--live` leg (Tier 2, `live:*` keys only) and its fake vendor for `--dry-run`. `runLiveLoop` keeps the loop alive between sessions when handed a `watch`, and `chainDispatch` sends any workflow_dispatch with the job's own token. |
 | `scripts/flows-legs/witness.mjs`, `starts.mjs`, `watch.mjs` | The loop's mutual witness (Tier 1 older than 25 minutes, `live:breadth` older than 45, the nightly not landed by 21:00 ET, a broken chain, a blind ingest door; one deduplicated GitHub Issue per check, written and adopted only as `github-actions[bot]`, closed after three healthy ticks and reopened on a flap), the 17:30 ET nightly dispatch with the job's own token (a permanent refusal capped at four calls, a transient one retried every half hour to 20:30 ET), and the per-tick composition of the two over the OIDC ingest door. |
 | `scripts/flows-legs/live-world-fake.mjs`, `live-day.mjs` | A fake GitHub API and a fake Worker world on a virtual clock, and the eight dry days `--live --dry-run` runs through them. |
+| `shared/flows-basis.js`, `tests/flows-basis-contract.mjs` | The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
@@ -522,6 +523,7 @@ flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
 flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
+flows-basis-contract
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the

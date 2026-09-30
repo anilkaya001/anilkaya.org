@@ -18,8 +18,11 @@ import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
-  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention,
+  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface,
+  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES,
 } from "./shared/flows-premium.js";
+import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
+import { etDayOf } from "./shared/flows-quant-time.js";
 import { isRefreshWindow, freshHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
@@ -1985,6 +1988,33 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
 }
 
+function chainReadMs(env) {
+  if (env.UW_BASE && env.UW_NOW) {
+    const pinned = Date.parse(env.UW_NOW);
+    if (Number.isFinite(pinned)) return pinned;
+  }
+  return Date.now();
+}
+
+function offMarketChain(list, ivBasis, rankBy) {
+  return {
+    rows: [],
+    gated: {
+      unpriceable: 0, nonStandard: 0, offMarket: list.length, spread: 0, openInterest: 0,
+      premium: 0, expiry: 0, strategy: 0,
+    },
+    screened: list.length,
+    priced: 0,
+    ivBasis,
+    rankedBy: rankBy,
+    gates: DEFAULT_GATES,
+    ivSurface: {
+      ...ivSurface([], { ivBasis }),
+      reason: "the chain and the underlying's price do not belong to the same moment, so no smile is drawn",
+    },
+  };
+}
+
 async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
   const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
@@ -2005,6 +2035,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     cachedTickerInfo(env, ctx, ticker),
     cardPending,
   ]);
+  const readMs = chainReadMs(env);
 
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
   const rows = unwrap(firstPage);
@@ -2019,51 +2050,66 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     truncated = second.length >= CHAIN_PAGE_SIZE;
   }
 
-  let dailyClose = null, dailyDate = null;
-  for (const b of bars) {
-    const close = Number(b && (b.close ?? b.c));
-    const date = b && (b.date || b.start_time || b.timestamp);
-    if (!Number.isFinite(close) || close <= 0 || !date) continue;
-    const day = String(date).slice(0, 10);
-    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
+  const print = printOf({ state, bars, readMs });
+  if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
+
+  const asOf = etDayOf(readMs);
+  const live = stateOf(state);
+
+  const engineRate = cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.rate &&
+    Number.isFinite(cardRead.card.engine.rate.r) ? cardRead.card.engine.rate.r : PRICING_RATE;
+  let found;
+  try {
+    found = coherence({
+      rows, spot: print.spot, asOf, printSource: print.source, readMs, rate: engineRate, ticker,
+    });
+  } catch (error) {
+    console.warn(JSON.stringify({ message: "chain coherence check failed", ticker,
+      error: error instanceof Error ? error.message : String(error) }));
+    found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
   }
+  const spot = found.spot;
 
-  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
-  const liveClose = live ? Number(live.close) : NaN;
-  const useLive = Number.isFinite(liveClose) && liveClose > 0;
-
-  const spot = useLive ? liveClose : dailyClose;
-  const spotSource = useLive ? "stock-state" : "daily-close";
-  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
-
-  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
-  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
-  const asOf = tapeDay || dailyDate;
-  if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
-
-  const ranked = rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker });
+  const ranked = found.status === "mismatch"
+    ? offMarketChain(rows, "not read: the quotes and the price disagree", rankBy)
+    : rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate });
 
   const earnDate = info ? info.nextEarningsDate : null;
+  const noEarnings = info ? earnDate === null && hasNoEarnings(info.issueType) : false;
   for (const row of ranked.rows) {
-    row.crossesEarnings = info ? crossesEarnings(row.expiry, earnDate, info.announceTime) : null;
+    row.crossesEarnings = !info ? null
+      : noEarnings ? false
+        : crossesEarnings(row.expiry, earnDate, info.announceTime, { asOf });
   }
   return {
     ticker, spot, asOf,
-    spotSource,
+    sessionDate: print.sessionDate,
+    spotSource: print.source === "stock-state" ? "stock-state" : "daily-close",
 
-    marketTime: live && live.market_time ? String(live.market_time) : null,
-    tapeTime,
-    prevClose: live && Number(live.prev_close) > 0 ? Number(live.prev_close) : dailyClose,
+    basis: {
+      status: found.status,
+      spot,
+      printSpot: found.printSpot,
+      printSource: print.source,
+      printNote: print.note,
+      impliedSpot: found.impliedSpot,
+      offMarket: found.offMarket.length,
+    },
+
+    marketTime: print.marketTime,
+    tapeTime: print.tapeTime,
+    prevClose: numOrNull(live && live.prev_close) > 0 ? numOrNull(live.prev_close) : print.spot,
     strategy, ...ranked,
 
     truncated,
     pageSize: CHAIN_PAGE_SIZE,
 
     earnings: info
-      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType }
+      ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType,
+        past: earnDate !== null && earnDate < asOf }
       : null,
     engine: deskEngine(cardRead && cardRead.card, Date.now()),
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date(readMs).toISOString(),
   };
 }
 
@@ -2127,28 +2173,13 @@ async function buildStrategyContext(env, ctx, ticker) {
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
     cachedTickerInfo(env, ctx, ticker),
   ]);
+  const readMs = chainReadMs(env);
 
-  const bars = unwrapRows(candles);
-  let dailyClose = null, dailyDate = null;
-  for (const b of bars) {
-    const close = numOrNull(b && (b.close ?? b.c));
-    const date = b && (b.date || b.start_time || b.timestamp);
-    if (close === null || close <= 0 || !date) continue;
-    const day = String(date).slice(0, 10);
-    if (dailyDate === null || day > dailyDate) { dailyDate = day; dailyClose = close; }
-  }
-
-  const live = state && !Array.isArray(state) ? state : (state && state.data) || null;
-  const liveClose = numOrNull(live && live.close);
-  const useLive = liveClose !== null && liveClose > 0;
-  const spot = useLive ? liveClose : dailyClose;
-
-  if (!(spot > 0)) throw new HttpError(502, "chain_no_spot", "No usable price for that symbol");
-
-  const tapeTime = live && live.tape_time ? String(live.tape_time) : null;
-  const tapeDay = tapeTime && /^\d{4}-\d{2}-\d{2}/.test(tapeTime) ? tapeTime.slice(0, 10) : null;
-
-  const asOf = tapeDay || dailyDate;
+  const print = printOf({ state, bars: unwrapRows(candles), readMs });
+  if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
+  const spot = print.spot;
+  const live = stateOf(state);
+  const asOf = print.sessionDate;
   if (!asOf) throw new HttpError(502, "chain_no_spot", "No usable session date for that symbol");
 
   const readExpiries = (raw) => readExpiryBreakdown(unwrapRows(raw));
@@ -2182,10 +2213,14 @@ async function buildStrategyContext(env, ctx, ticker) {
   return {
     mode: "context",
     ticker, spot, asOf,
-    spotSource: useLive ? "stock-state" : "daily-close",
-    marketTime: live && live.market_time ? String(live.market_time) : null,
-    tapeTime,
-    prevClose: numOrNull(live && live.prev_close) ?? dailyClose,
+    spotSource: print.source === "stock-state" ? "stock-state" : "daily-close",
+    basis: {
+      status: "unchecked", spot, printSpot: spot, printSource: print.source, printNote: print.note,
+      impliedSpot: null, offMarket: 0,
+    },
+    marketTime: print.marketTime,
+    tapeTime: print.tapeTime,
+    prevClose: numOrNull(live && live.prev_close) ?? print.spot,
 
     expiries,
     expiryStatus: breakdown === null ? "unreadable" : (expiries.length ? "ok" : "quiet"),
@@ -2206,7 +2241,7 @@ async function buildStrategyContext(env, ctx, ticker) {
 
 function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
-  const book = bookRows(calls, puts, ticker);
+  const book = bookRows(calls, puts, optionRoot(ticker));
   const rows = book.length ? [{ expiry, rows: book }] : [];
   if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
   if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };
