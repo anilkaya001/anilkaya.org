@@ -202,7 +202,7 @@ const CLOSES = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"
 const FACT_INPUT = () => ({
   built: slices.built, spot: SPOT, atr: 2, asOfDay: SESSION,
   card: {
-    strikeSumCrossing: 101.5, regime: { bookGammaRaw: 2e6, flowGamma: -4e5 },
+    strikeSumCrossing: 101.5, regime: { bookGammaRaw: 2e4, bookGamma: 2e6, flowGamma: -4e5 },
     panels: {
       pricedMove: { status: "ok", ivRank: 0.62, rv30: 0.21 },
       levels: { status: "ok", levels: [{ kind: "max_pain", px: 100 }] },
@@ -246,6 +246,18 @@ const FACT_INPUT = () => ({
   eq(by["level.strikeSumCrossing"].v, 101.5, "and the strike-sum crossing rides under its own id beside level.flip");
   ok(by["skew.rr25.30.pct"].x === true, "a cross-sectional percentile is tagged x");
   ok(by["move.event"].v > 0 && by["move.event.ratio"].v > 0, "an event between two fitted slices yields an implied jump and its ratio to history");
+  eq([by["gex.book"].v, by["gex.book"].u, by["gex.book"].g], [2e6, "usdPer1pct", 3],
+     "gex.book is the card's dollar book per 1%, the figure the ticker tile prints");
+  {
+    const rawOnly = FACT_INPUT();
+    rawOnly.card.regime = { bookGammaRaw: 2e4, flowGamma: -4e5 };
+    const gb = QC.engineFacts(rawOnly).find((f) => f.id === "gex.book");
+    ok(gb.v === null && gb.g === 0 && gb.why === "book.no-spot",
+       "UW-F3: with no dollar book (no spot) gex.book is withheld as book.no-spot, where it published the raw share-gamma under the usdPer1pct unit");
+    const none = FACT_INPUT();
+    none.card.regime = { flowGamma: -4e5 };
+    ok(QC.engineFacts(none).find((f) => f.id === "gex.book").why === "book.absent", "and a card with no book at all stays book.absent");
+  }
   const degenerate = QC.engineFacts({ ...FACT_INPUT(), garch: { ...GARCH, grade: 2, why: ["garch.alpha-degenerate"] } });
   const dg = Object.fromEntries(degenerate.map((f) => [f.id, f]));
   ok(dg["garch.avg.21"].g === 2 && dg["garch.avg.21"].why === "garch.alpha-degenerate" && dg["vrp.rel.21"].g <= 2,

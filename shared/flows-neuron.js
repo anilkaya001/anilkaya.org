@@ -192,28 +192,34 @@ export function gammaReading(card) {
   const P = c.panels && typeof c.panels === "object" ? c.panels : {};
   const flow = num(regime.flowGamma) !== null ? num(regime.flowGamma) : num(regime.netGamma);
   const from = str(regime.labelFrom);
-  const value = num(regime.labelValue) !== null ? num(regime.labelValue)
-    : from === "book" ? (num(regime.bookGammaRaw) !== null ? num(regime.bookGammaRaw) : num(regime.bookGamma))
+  const bookRaw = num(regime.bookGammaRaw);
+  const dollars = num(regime.bookGamma);
+  const signed = num(regime.labelValue) !== null ? num(regime.labelValue)
+    : from === "book" ? (bookRaw !== null ? bookRaw : dollars)
       : from === "flow" ? flow : null;
-  const label = value === null ? str(regime.label) : value >= 0 ? "long" : "short";
-  if ((from === "book" || from === "flow") && value !== null) {
+  const label = signed === null ? str(regime.label) : signed >= 0 ? "long" : "short";
+  const bookUsd = (lab) => (dollars !== null && dollars !== 0 && (dollars >= 0 ? "long" : "short") === lab ? dollars : null);
+  const share = num(regime.bookShare);
+  const bookSentence = (lab, usd) => "net dealer gamma across the open-interest book is " + lab +
+    (usd === null ? "" : ", " + signedMoney(usd) + " per 1% move") +
+    (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
+    (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", read as flow and never as the book" : "");
+  if ((from === "book" || from === "flow") && signed !== null) {
     if (from === "book") {
-      const share = num(regime.bookShare);
+      const usd = bookUsd(label);
       return {
-        from: "book", label, value, strength: share === null ? null : Math.abs(share),
-        sentence: "net dealer gamma across the open-interest book is " + label + ", " + signedMoney(value) + " per 1% move" +
-          (share === null ? "" : " (" + Math.round(Math.abs(share) * 100) + "% of its gross)") +
-          (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", read as flow and never as the book" : ""),
+        from: "book", label, value: usd, strength: share === null ? null : Math.abs(share),
+        sentence: bookSentence(label, usd),
       };
     }
     const bars = okPanel(P.gamma) && !P.gamma.bucketed && Array.isArray(P.gamma.bars) ? P.gamma.bars : [];
     const gross = num(regime.flowGross) !== null ? num(regime.flowGross)
       : bars.reduce((a, b) => a + Math.abs(num(b && b.g) || 0), 0);
-    const strength = gross > 0 ? Math.abs(value) / gross : null;
+    const strength = gross > 0 ? Math.abs(signed) / gross : null;
     return {
-      from: "flow", label, value, strength,
+      from: "flow", label, value: signed, strength,
       sentence: "the open-interest book is not on this card, so the label is the flow\u2019s: dealers added " +
-        signedMoney(value) + " of gamma per 1% move today, " + label +
+        signedMoney(signed) + " of gamma per 1% move today, " + label +
         (strength === null ? "" : " (" + Math.round(strength * 100) + "% of the ladder\u2019s gross)"),
     };
   }
@@ -222,11 +228,11 @@ export function gammaReading(card) {
       sentence: "the card labels dealer gamma " + label + " without the number it was read from" +
         (flow !== null ? "; today\u2019s trading added " + signedMoney(flow) + ", which is flow and is not read as the book" : "") };
   }
-  const bookRaw = num(regime.bookGammaRaw);
   if (bookRaw !== null) {
     const lab = bookRaw >= 0 ? "long" : "short";
-    return { from: "book", label: lab, value: bookRaw, strength: num(regime.bookShare) === null ? null : Math.abs(num(regime.bookShare)),
-      sentence: "net dealer gamma across the open-interest book is " + lab + ", " + signedMoney(bookRaw) + " per 1% move" };
+    const usd = bookUsd(lab);
+    return { from: "book", label: lab, value: usd, strength: share === null ? null : Math.abs(share),
+      sentence: "net dealer gamma across the open-interest book is " + lab + (usd === null ? "" : ", " + signedMoney(usd) + " per 1% move") };
   }
   if (flow !== null) {
     const lab = flow >= 0 ? "long" : "short";

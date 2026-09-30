@@ -10,7 +10,7 @@ import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js
 import { modelName, neuronProvenance } from "../shared/flows-pages.js";
 import { variation, cardVariationInput } from "../shared/flows-variation.js";
 import { gammaReading } from "../shared/flows-neuron.js";
-import { aggressorGamma } from "../shared/flows-features.js";
+import { aggressorGamma, openInterestGammaBook } from "../shared/flows-features.js";
 import { buildCard } from "../shared/flows-card.js";
 import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
@@ -1014,6 +1014,60 @@ const CARD = {
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
     "and the cap is written down in wrangler.toml, where a deploy shows it");
+}
+
+{
+  const S = 180, SESSION = "2026-09-30";
+  const expiryRows = [
+    { expiry: "2026-10-02", dte: 2, call_gex: "9.0e4", put_gex: "-6.5e4" },
+    { expiry: "2026-10-16", dte: 16, call_gex: "1.6e5", put_gex: "-1.0e5" },
+    { expiry: "2026-11-20", dte: 51, call_gex: "1.2e5", put_gex: "-0.7e5" },
+  ];
+  const book = openInterestGammaBook(expiryRows, { asOf: SESSION });
+  const strikes = [];
+  for (let k = 130; k <= 230; k += 5) {
+    strikes.push({ strike: String(k), call_gamma_oi: String(4e6 * Math.exp(-(((k - 195) / 12) ** 2))),
+      put_gamma_oi: String(-5e6 * Math.exp(-(((k - 165) / 12) ** 2))), call_gamma_vol: "1e5", put_gamma_vol: "-1e5",
+      call_gamma_ask: "-2e5", call_gamma_bid: "3e5", put_gamma_ask: "-1e5", put_gamma_bid: "2e5" });
+  }
+  const candles = [];
+  let px = 170;
+  for (let i = 0; i < 120; i++) {
+    const d = new Date(Date.UTC(2026, 3, 1) + i * 86400000);
+    if ([0, 6].includes(d.getUTCDay())) continue;
+    px *= 1 + 0.01 * Math.sin(i * 1.7);
+    candles.push([d.toISOString().slice(0, 10), px, px * 1.01, px * 0.99, px, 5e6]);
+  }
+  candles[candles.length - 1][0] = SESSION;
+  candles[candles.length - 1][4] = S;
+  const features = { ticker: "SYN", spot: S, atr: 4, netGamma: 3e5, gammaGross: 2e6, gammaBookRaw: book.net, gammaBookShare: book.share,
+    gammaBookGrossRaw: book.gross, candles, closes: candles.map((c) => c[4]), closeDates: candles.map((c) => c[0]), iv30: 0.3,
+    score: 40, conviction: 60, flipCount: 0, bandMin: 130, bandMax: 230 };
+  const card = buildCard({ ticker: "SYN", row: { close: S, prev_close: 178, nm: "Synthetic", sector: "Tech" }, features, strikes, ticks: [],
+    expiries: expiryRows, maxPain: [], congress: [], surface: [], chain: null, generatedAt: "2026-09-30T21:30:00Z", sessionDate: SESSION,
+    variation: { unit: { family: "share", used: "share", n: 60, source: "probe" }, probe: null, kc: null, vannaScale: null, next: null } });
+  near(card.regime.bookGammaRaw, 135000, 1e-6, "the vendor's share-gamma book sums to 135,000 shares per dollar");
+  near(card.regime.bookGamma, 135000 * S * S / 100, 1e-3, "and the card's dollar figure is that times S squared over 100");
+  const read = gammaReading(card);
+  ok(read.sentence.includes("+$43.74M per 1% move") && !read.sentence.includes("$135.0k") && !/135\.0k/.test(read.sentence),
+    `UW-F1: Neuron prints the book in dollars per 1% (${read.sentence.slice(0, 120)}), where it printed the raw share-gamma as +$135.0k, ` +
+    "wrong by S squared over 100 (324 times at 180) and 2.2 times smaller than one day's flow when it is 146 times larger");
+  eq(read.value, card.regime.bookGamma, "and the figure is the one the ticker page's tile prints: both read card.regime.bookGamma");
+  ok(/\+\$300\.0k/.test(read.sentence), "while the flow's own +$300.0k, already in dollars, is left as it was");
+  const ctx = buildContext(card, { expectedSession: SESSION });
+  ok(ctx.state.drivers.some((d) => d.key === "gamma" && d.reading.includes("$43.74M")) && ctx.state.gammaValue === card.regime.bookGamma,
+    "the state's gamma driver and its published value carry the dollar book too");
+  ok(!contextLines(ctx).join("\n").includes("135.0k"), "and no line of the context carries the share figure as money");
+
+  const noSpot = JSON.parse(JSON.stringify(card));
+  noSpot.regime.bookGamma = null;
+  const bare = gammaReading(noSpot);
+  ok(bare.value === null && bare.label === "long" && !/\$/.test(bare.sentence.split("; today")[0]) && /% of its gross/.test(bare.sentence),
+    `UW-F1: with no dollar figure the sentence prints none, keeping the sign and the share of gross (${bare.sentence.slice(0, 110)})`);
+  const disagree = JSON.parse(JSON.stringify(card));
+  disagree.regime.bookGamma = -4.374e7;
+  ok(gammaReading(disagree).value === null,
+    "and a dollar figure whose sign contradicts the card's label is not printed either: the sentence never asserts a number it disagrees with");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

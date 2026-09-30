@@ -426,8 +426,8 @@ export function engineFacts(input) {
   lvl("level.flowPeakLong", gp ? gp.flowPeakLong : null, gp ? 1 : 0, gp ? null : "flow.absent");
   lvl("level.flowPeakShort", gp ? gp.flowPeakShort : null, gp ? 1 : 0, gp ? null : "flow.absent");
   const reg = card && card.regime && typeof card.regime === "object" ? card.regime : {};
-  add("gex.book", fin(reg.bookGamma) ? sig(reg.bookGamma) : fin(reg.bookGammaRaw) ? sig(reg.bookGammaRaw) : null, "usdPer1pct", 3,
-    fin(reg.bookGamma) || fin(reg.bookGammaRaw) ? {} : { why: "book.absent" });
+  add("gex.book", fin(reg.bookGamma) ? sig(reg.bookGamma) : null, "usdPer1pct", 3,
+    fin(reg.bookGamma) ? {} : { why: fin(reg.bookGammaRaw) ? "book.no-spot" : "book.absent" });
   add("gex.flow", fin(reg.flowGamma) ? sig(reg.flowGamma) : null, "usdPer1pct", 1, fin(reg.flowGamma) ? {} : { why: "flow.absent" });
   add("event.days", evDays !== null && evDays >= 0 ? evDays : null, "days", event ? (event.confirmed ? 3 : 2) : 0,
     event ? (event.confirmed ? {} : { why: "event.estimated" }) : { why: "event.none-listed" });
