@@ -1,3 +1,6 @@
+import { impliedVolB76 } from "./flows-quant-bs.js";
+import { yearFraction } from "./flows-quant-time.js";
+
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = typeof value === "number" ? value : Number(value);
@@ -23,6 +26,32 @@ export function parseOptionSymbol(symbol) {
   return { ticker, expiry: `20${yy}-${mm}-${dd}`, type, strike };
 }
 
+export const PRICING_RATE = 0.04;
+
+export const OFF_MARKET_TOLERANCE = 0.01;
+
+const TOLERANCE_NOISE = 1e-9;
+
+export function intrinsic(type, S, K) {
+  if (!(S > 0) || !(K > 0)) return null;
+  return type === "P" ? Math.max(0, K - S) : Math.max(0, S - K);
+}
+
+export function impossibleQuote(type, S, K, ask) {
+  const floor = intrinsic(type, S, K);
+  return floor !== null && ask > 0 && floor - ask > OFF_MARKET_TOLERANCE + TOLERANCE_NOISE;
+}
+
+export function optionRoot(ticker) {
+  return typeof ticker === "string" ? ticker.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+}
+
+const FUND_ISSUE = /etf|index|fund/i;
+
+export function hasNoEarnings(issueType) {
+  return FUND_ISSUE.test(String(issueType || ""));
+}
+
 export function daysToExpiry(expiry, asOf) {
   const a = Date.parse(String(asOf).slice(0, 10) + "T00:00:00Z");
   const b = Date.parse(String(expiry).slice(0, 10) + "T00:00:00Z");
@@ -39,14 +68,49 @@ function median(values) {
 
 export const IV_PERCENT_THRESHOLD = 5;
 
-export function ivConvention(rawValues) {
+export const IV_PERCENT_CEILING = 500;
+
+export const IV_EVIDENCE_MIN = 5;
+
+export const IV_PERCENT_RATIO = 10;
+
+export function ivConvention(rawValues, { pairs = null } = {}) {
   const m = median(rawValues.map(numOrNull).filter((v) => v !== null && v > 0));
   if (m === null) return { divisor: 1, basis: "no implied vol on this chain" };
-  if (m > IV_PERCENT_THRESHOLD) return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent` };
+
+  const ratios = Array.isArray(pairs)
+    ? pairs.map(([raw, own]) => (raw > 0 && own > 0 ? raw / own : null)).filter((r) => r !== null)
+    : [];
+  if (ratios.length >= IV_EVIDENCE_MIN) {
+    const r = median(ratios);
+    if (r >= IV_PERCENT_RATIO) {
+      return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent (vendor figures run ${r.toFixed(0)}x the quotes' own)` };
+    }
+    return { divisor: 1, basis: `median ${m.toFixed(4)} reads as a fraction (vendor figures run ${r.toFixed(2)}x the quotes' own)` };
+  }
+
+  if (m > IV_PERCENT_THRESHOLD && m <= IV_PERCENT_CEILING) {
+    return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent` };
+  }
   return { divisor: 1, basis: `median ${m.toFixed(4)} reads as a fraction` };
 }
 
-export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null } = {}) {
+export function sigmaMove(level, from, iv, years) {
+  if (!(level > 0) || !(from > 0) || !(iv > 0) || !(years > 0)) return null;
+  const sigma = iv * Math.sqrt(years);
+  return sigma > 0 ? Math.log(level / from) / sigma : null;
+}
+
+export function midImpliedVol({ spot, strike, type, mid, years, rate = PRICING_RATE }) {
+  if (!(spot > 0) || !(strike > 0) || !(mid > 0) || !(years > 0)) return null;
+  const F = spot * Math.exp(rate * years), D = Math.exp(-rate * years);
+  const iv = impliedVolB76(F, D, strike, years, mid, type, null);
+  return Number.isFinite(iv) && iv > 0 ? iv : null;
+}
+
+export function priceSale(row, {
+  spot, asOf, ivDivisor = 1, parsed: given = null, readMs = null, rate = PRICING_RATE, midIv = true,
+} = {}) {
 
   const parsed = given && typeof given === "object" && typeof given.expiry === "string"
     ? given
@@ -71,8 +135,15 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null
   const collateral = strategy === "csp"
     ? parsed.strike * SHARES_PER_CONTRACT
     : spot * SHARES_PER_CONTRACT;
-  const yieldOnCollateral = collateral > 0 ? premium / collateral : null;
 
+  const inherent = intrinsic(parsed.type, spot, parsed.strike);
+  const extrinsic = Math.max(0, bid - inherent);
+  const yieldGross = collateral > 0 ? premium / collateral : null;
+  const yieldOnCollateral = collateral > 0 ? (extrinsic * SHARES_PER_CONTRACT) / collateral : null;
+
+  const annualizedGross = yieldGross !== null && days > 0
+    ? yieldGross * (DAYS_PER_YEAR / days)
+    : null;
   const annualized = yieldOnCollateral !== null && days > 0
     ? yieldOnCollateral * (DAYS_PER_YEAR / days)
     : null;
@@ -81,15 +152,7 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null
 
   const ivRaw = numOrNull(row.implied_volatility);
   const iv = ivRaw !== null && ivRaw > 0 ? ivRaw / ivDivisor : null;
-  const sigma = iv !== null && days > 0 ? iv * Math.sqrt(days / DAYS_PER_YEAR) : null;
-  const logToBreakeven = breakeven > 0 ? Math.log(spot / breakeven) : null;
-  const cushionSigmas = sigma !== null && sigma > 0 && logToBreakeven !== null
-    ? logToBreakeven / sigma
-    : null;
 
-  const capSigmas = strategy === "cc" && sigma !== null && sigma > 0 && parsed.strike > 0
-    ? Math.log(parsed.strike / spot) / sigma
-    : null;
   const assignedReturn = strategy === "cc"
     ? (parsed.strike - spot + bid) / spot
     : null;
@@ -97,7 +160,7 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null
   const oi = numOrNull(row.open_interest);
   const prevOi = numOrNull(row.prev_oi);
 
-  return {
+  const priced = {
     symbol: row.option_symbol,
     ticker: parsed.ticker,
     expiry: parsed.expiry,
@@ -108,15 +171,20 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null
     bid, ask, mid, spread,
     premium,
     collateral,
+    intrinsic: inherent,
+    extrinsic,
     yieldOnCollateral,
+    yieldGross,
     annualized,
+    annualizedGross,
     annualizedIsConvention: true,
     breakeven,
-    cushionSigmas,
-    capSigmas,
+    cushionSigmas: null,
+    capSigmas: null,
     assignedReturn,
     moneyness: parsed.strike / spot - 1,
     iv,
+    ivMid: null,
 
     ivTraded: (() => {
       const v = numOrNull(row.volume);
@@ -129,6 +197,15 @@ export function priceSale(row, { spot, asOf, ivDivisor = 1, parsed: given = null
     askVolume: numOrNull(row.ask_volume),
     bidVolume: numOrNull(row.bid_volume),
   };
+  return midIv === false ? priced : attachMidIv(priced, { spot, readMs, rate });
+}
+
+export function attachMidIv(p, { spot, readMs = null, rate = PRICING_RATE } = {}) {
+  const years = Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR;
+  p.ivMid = midImpliedVol({ spot, strike: p.strike, type: p.type, mid: p.mid, years, rate });
+  p.cushionSigmas = p.breakeven > 0 ? sigmaMove(spot, p.breakeven, p.ivMid, years) : null;
+  p.capSigmas = p.strategy === "cc" ? sigmaMove(p.strike, spot, p.ivMid, years) : null;
+  return p;
 }
 
 export const DEFAULT_GATES = Object.freeze({
@@ -144,30 +221,40 @@ export const DEFAULT_GATES = Object.freeze({
 
 export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollateral", "cushionSigmas"]);
 
+const before = (x, y) => {
+  if (x === null || x === undefined) return y === null || y === undefined ? 0 : 1;
+  if (y === null || y === undefined) return -1;
+  return y - x;
+};
+
+const byText = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
-  ticker = null,
+  ticker = null, readMs = null, rate = PRICING_RATE,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
-  const { divisor, basis } = ivConvention(list.map((r) => r && r.implied_volatility));
 
   const gated = {
-    unpriceable: 0, nonStandard: 0, spread: 0, openInterest: 0,
+    unpriceable: 0, nonStandard: 0, offMarket: 0, spread: 0, openInterest: 0,
     premium: 0, expiry: 0, strategy: 0,
   };
 
-  const want = typeof ticker === "string" && ticker ? ticker.trim().toUpperCase() : null;
-  const rows = [];
-
-  const forSurface = [];
+  const want = optionRoot(ticker) || null;
+  const standing = [];
 
   for (const raw of list) {
-    const p = priceSale(raw, { spot, asOf, ivDivisor: divisor });
+    const p = priceSale(raw, { spot, asOf, readMs, rate, midIv: false });
     if (!p) { gated.unpriceable++; continue; }
 
     if (want !== null && p.ticker !== want) { gated.nonStandard++; continue; }
-    forSurface.push(p);
+    if (impossibleQuote(p.type, spot, p.strike, p.ask)) { gated.offMarket++; continue; }
+    standing.push(p);
+  }
+
+  const rows = [];
+  for (const p of standing) {
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
     if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
     if (p.premium < g.minPremium) { gated.premium++; continue; }
@@ -177,17 +264,25 @@ export function rankChain(contracts, {
   }
 
   const key = RANK_KEYS.includes(rankBy) ? rankBy : "annualized";
+  const attach = (p) => attachMidIv(p, { spot, readMs, rate });
+  if (key === "cushionSigmas") rows.forEach(attach);
 
-  rows.sort((a, b) => {
-    const x = a[key], y = b[key];
-    if (x === null && y === null) return 0;
-    if (x === null) return 1;
-    if (y === null) return -1;
-    return y - x;
-  });
+  rows.sort((a, b) => before(a[key], b[key]) ||
+    before(a.annualized, b.annualized) ||
+    byText(a.expiry, b.expiry) ||
+    a.strike - b.strike ||
+    byText(a.symbol, b.symbol));
+
+  const kept = rows.slice(0, limit);
+  if (key !== "cushionSigmas") kept.forEach(attach);
+
+  const { divisor, basis } = ivConvention(
+    list.map((r) => r && r.implied_volatility),
+    { pairs: kept.map((p) => [p.iv, p.ivMid]) });
+  if (divisor !== 1) for (const p of standing) p.iv = p.iv === null ? null : p.iv / divisor;
 
   return {
-    rows: rows.slice(0, limit),
+    rows: kept,
     gated,
     screened: list.length,
     priced: rows.length,
@@ -195,7 +290,7 @@ export function rankChain(contracts, {
     rankedBy: key,
     gates: g,
 
-    ivSurface: ivSurface(forSurface, { ivBasis: basis }),
+    ivSurface: ivSurface(standing, { ivBasis: basis }),
   };
 }
 
@@ -415,10 +510,11 @@ function isRealDate(s) {
 const AFTER_CLOSE = new Set(["postmarket", "afterhours", "aftermarket", "after_hours"]);
 const BEFORE_OPEN = new Set(["premarket", "beforeopen", "before_open"]);
 
-export function crossesEarnings(expiry, earningsDate, announceTime) {
+export function crossesEarnings(expiry, earningsDate, announceTime, { asOf = null } = {}) {
 
   if (!isRealDate(expiry)) return null;
   if (!isRealDate(earningsDate)) return null;
+  if (isRealDate(asOf) && earningsDate < asOf) return null;
 
   if (earningsDate < expiry) return true;
   if (earningsDate > expiry) return false;
@@ -429,22 +525,30 @@ export function crossesEarnings(expiry, earningsDate, announceTime) {
   return null;
 }
 
+const cents = (dollars) => Math.round(dollars * 100);
+
 export function sizeToBuyingPower(row, buyingPower) {
   const bp = numOrNull(buyingPower);
   if (bp === null || !(bp > 0)) return null;
   if (!row || !(row.collateral > 0) || !(row.premium > 0)) return null;
 
-  const contracts = Math.floor(bp / row.collateral);
-  const deployed = contracts * row.collateral;
+  const bpCents = Math.floor(bp * 100 + 1e-6);
+  const collateralCents = cents(row.collateral);
+  const premiumCents = cents(row.premium);
+  if (!(collateralCents > 0)) return null;
+
+  const contracts = Math.floor(bpCents / collateralCents);
+  const deployedCents = contracts * collateralCents;
+  const collectibleCents = contracts * premiumCents;
   return {
     contracts,
 
     affordable: contracts > 0,
-    collectible: contracts * row.premium,
-    deployed,
-    idle: bp - deployed,
+    collectible: collectibleCents / 100,
+    deployed: deployedCents / 100,
+    idle: (bpCents - deployedCents) / 100,
 
-    yieldOnDeployed: deployed > 0 ? (contracts * row.premium) / deployed : null,
+    yieldOnDeployed: deployedCents > 0 ? collectibleCents / deployedCents : null,
   };
 }
 

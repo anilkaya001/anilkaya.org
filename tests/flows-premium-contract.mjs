@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   parseOptionSymbol, daysToExpiry, priceSale, rankChain, ivConvention,
   numOrNull, DEFAULT_GATES, SHARES_PER_CONTRACT, DAYS_PER_YEAR, crossesEarnings,
   sizeToBuyingPower, planBuyingPower,
   ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
+  intrinsic, impossibleQuote, optionRoot, hasNoEarnings, PRICING_RATE, OFF_MARKET_TOLERANCE,
 } from "../shared/flows-premium.js";
+import { ENGINE_LINES } from "../shared/flows-quant-engine.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -42,6 +45,25 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   eq(ivConvention([]).divisor, 1, "an empty chain defaults to fractions rather than throwing");
   ok(/no implied vol/.test(ivConvention([]).basis), "and says why");
+
+  eq(ivConvention(["800", "900", "950"]).divisor, 1,
+     "WITHOUT EVIDENCE a median past the sanity ceiling (500) is left undivided: 8.00 would be an 8% vol read from a number that is 800% either way, and a guess in that range is not offered");
+  eq(ivConvention(["5.1", "5.2", "5.3"]).divisor, 100, "just past the old threshold and inside the band still reads as percent when nothing contradicts it");
+  eq(ivConvention(["4.9", "4.8", "5"]).divisor, 1, "and at or below it as a fraction");
+
+  const own = [0.31, 0.28, 0.44, 0.29, 0.33];
+  const fractionOfFive = ivConvention(["5.5", "5.6", "5.4", "5.7", "5.3"],
+    { pairs: [[5.5, 5.2], [5.6, 5.9], [5.4, 5.1], [5.7, 5.5], [5.3, 5.6]] });
+  eq(fractionOfFive.divisor, 1,
+     "A FRACTION CHAIN WHOSE MEDIAN IS 5.5 STAYS A FRACTION when the quotes' own vols agree with it (the old rule divided by 100, making cushion 100x too large)");
+  ok(/reads as a fraction/.test(fractionOfFive.basis), "and says which reading it took");
+  const lowVolPercent = ivConvention(["3.1", "2.8", "4.4", "2.9", "3.3"], { pairs: own.map((v) => [v * 10, v / 10]) });
+  eq(lowVolPercent.divisor, 100,
+     "A PERCENT CHAIN OF A LOW-VOL FUND (median 3.1) IS STILL DETECTED when the quotes' own vols are a hundredth of it (the old rule read it as 310%)");
+  ok(/reads as percent/.test(lowVolPercent.basis), "and says so");
+  eq(ivConvention(["31", "28"], { pairs: [[31, 0.31], [28, 0.28]] }).divisor, 100,
+     "fewer than five paired quotes is not evidence, so the band rule decides");
+  eq(ivConvention(["0.31", "0.28"], { pairs: [] }).divisor, 1, "and an empty evidence list changes nothing");
 }
 
 {
@@ -55,14 +77,22 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(p.collateral, 17000, "a cash-secured put's collateral is the strike, not spot");
   near(p.yieldOnCollateral, 250 / 17000, 1e-12, "yield is on the collateral actually tied up");
   near(p.annualized, (250 / 17000) * (DAYS_PER_YEAR / 24), 1e-12, "annualization is simple 365/days");
+  eq(p.annualizedGross, p.annualized, "an out-of-the-money line's premium is all time value, so the two annualizations are one number");
+  eq(p.intrinsic, 0, "and it carries no intrinsic value");
+  eq(p.extrinsic, 2.5, "so its extrinsic value is the whole bid");
   ok(p.annualizedIsConvention === true, "annualized carries its own warning label");
   eq(p.breakeven, 167.5, "assigned, the basis is strike minus the premium kept");
   eq(p.days, 24);
   eq(p.oiChange, 200, "open interest change comes from prev_oi, not inferred");
 
-  const sigma = 0.28 * Math.sqrt(24 / 365);
+  ok(p.ivMid > 0.1 && p.ivMid < 0.6, `the volatility the cushion is measured in is inverted from the mid (${p.ivMid})`);
+  near(p.iv, 0.28, 1e-12, "while the vendor's own figure ships beside it, unchanged");
+  const sigma = p.ivMid * Math.sqrt(24 / 365);
   near(p.cushionSigmas, Math.log(180 / 167.5) / sigma, 1e-9,
-       "cushion is the move to breakeven in the option's own implied sigmas");
+       "cushion is the move to breakeven in the QUOTE's implied sigmas, the same volatility that delta and the chance of profit use");
+  const rival = priceSale({ ...base, implied_volatility: "0.90" }, { spot: 180, asOf: "2026-08-25" });
+  eq(rival.cushionSigmas, p.cushionSigmas,
+     "and the vendor's last-trade volatility does not enter it: a stale 90% print beside a 28% market moves nothing");
 
   ok(priceSale({ ...base, nbbo_bid: "0" }, { spot: 180, asOf: "2026-08-25" }) === null,
      "a zero bid is unsellable, not free money");
@@ -89,7 +119,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(cc.breakeven, 176.8, "the premium is the entire downside cushion on shares you already own");
   near(cc.assignedReturn, (190 - 180 + 3.2) / 180, 1e-12, "called away, the return is capped here");
 
-  const sigma = 0.26 * Math.sqrt(24 / 365);
+  const sigma = cc.ivMid * Math.sqrt(24 / 365);
   near(cc.capSigmas, Math.log(190 / 180) / sigma, 1e-9,
        "capSigmas is how far the market must run before the sale costs more than it paid");
   ok(priceSale({
@@ -149,7 +179,16 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const noIv = { option_symbol: "XYZ260918P00095000", nbbo_bid: "2.00", nbbo_ask: "2.05",
                  open_interest: "500" };
-  const withNull = rankChain([...rows, noIv], { spot, asOf, rankBy: "cushionSigmas" });
+  const measured = rankChain([...rows, noIv], { spot, asOf, rankBy: "cushionSigmas" });
+  ok(measured.rows.every((r) => r.cushionSigmas !== null),
+     "a line the vendor quoted no volatility for still has a cushion: it is measured in the volatility of its own mid");
+
+  const belowFloor = { option_symbol: "XYZ260918P00105000", nbbo_bid: "4.40", nbbo_ask: "4.99",
+                       implied_volatility: "0.40", open_interest: "500" };
+  const withNull = rankChain([...rows, belowFloor], { spot, asOf, rankBy: "cushionSigmas" });
+  const floored = withNull.rows.find((r) => r.strike === 105);
+  ok(floored && floored.ivMid === null && floored.cushionSigmas === null,
+     "a quote whose mid sits under the exercise floor has no volatility to invert, so its cushion is null");
   ok(withNull.rows[withNull.rows.length - 1].cushionSigmas === null,
      "an unmeasurable cushion sorts LAST, never first");
   ok(withNull.rows[0].cushionSigmas !== null, "and a measured one leads");
@@ -609,6 +648,201 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(daysToExpiry("2026-09-18", "2026-08-25"), 24);
   eq(daysToExpiry("bad", "2026-08-25"), null, "an unparseable date is null, not NaN days");
   eq(rankChain(null, { spot: 100, asOf: "2026-08-25" }).priced, 0, "a null chain is empty, not a throw");
+}
+
+{
+  const golden = JSON.parse(readFileSync(new URL("./fixtures-desk-golden.json", import.meta.url), "utf8"));
+  eq(golden.length, 15, "the independent fixture holds fifteen lines, the screenshot's nine among them");
+  const asOf = "2026-09-29";
+  const expiry = (days) => new Date(Date.parse(asOf + "T00:00:00Z") + days * 864e5).toISOString().slice(0, 10);
+  const symbol = (g) => `NVDA${expiry(g.days).slice(2).replace(/-/g, "")}${g.kind}${String(Math.round(g.strike * 1000)).padStart(8, "0")}`;
+  let itm = 0;
+  for (const g of golden) {
+    const p = priceSale({
+      option_symbol: symbol(g), nbbo_bid: String(g.bid), nbbo_ask: String(g.ask),
+      implied_volatility: String(g.iv), open_interest: "1000",
+    }, { spot: g.spot, asOf, midIv: false });
+    const label = `${g.kind} ${g.strike} ${g.days}d`;
+    near(p.premium, g.premium, 1e-9, `${label}: premium is 100 x the bid, as scipy's reference has it`);
+    near(p.collateral, g.collateral, 1e-9, `${label}: collateral`);
+    near(p.breakeven, g.breakeven, 1e-9, `${label}: breakeven`);
+    near(p.moneyness, g.moneyness, 1e-12, `${label}: moneyness`);
+    near(p.spread, g.spread, 1e-12, `${label}: spread`);
+    near(p.intrinsic, g.intrinsic, 1e-9, `${label}: intrinsic value`);
+    near(p.yieldGross, g.yieldOnCollateral, 1e-12, `${label}: premium over collateral`);
+    near(p.annualizedGross, g.annualized, 1e-9, `${label}: the gross annualization is the reference's`);
+    near(p.extrinsic, Math.max(0, g.extrinsic), 1e-9, `${label}: extrinsic value is the bid less intrinsic, never below zero`);
+    near(p.yieldOnCollateral, Math.max(0, g.extrinsicYield), 1e-12, `${label}: the yield is on TIME value`);
+    near(p.annualized, Math.max(0, g.extrinsicAnnualized), 1e-9, `${label}: and so is the annualization`);
+    if (g.assignedReturn === null) ok(p.assignedReturn === null, `${label}: a put has no called-away return`);
+    else near(p.assignedReturn, g.assignedReturn, 1e-12, `${label}: called-away return`);
+    ok(p.annualized <= p.annualizedGross + 1e-12, `${label}: annualized never exceeds the gross figure`);
+    if (g.intrinsic === 0) near(p.annualized, p.annualizedGross, 1e-12, `${label}: and equals it exactly when the line is out of the money`);
+    else { itm++; ok(p.annualized < p.annualizedGross, `${label}: and is strictly below it when the line is in the money`); }
+    eq(impossibleQuote(g.kind, g.spot, g.strike, g.ask), g.ask < g.intrinsic - 0.01 - 1e-9,
+       `${label}: the impossible-quote test is the reference's own arithmetic on the ask`);
+  }
+  ok(itm >= 8, `${itm} of the fifteen lines are in the money, so the in-the-money branch is exercised`);
+
+  const sep30 = golden[0], oct5 = golden[6];
+  ok(impossibleQuote(sep30.kind, sep30.spot, sep30.strike, sep30.ask), "the 227.5 call for 1.47/1.49 against a 231.02 spot is impossible: its ask is 2.03 under the exercise value");
+  ok(impossibleQuote(oct5.kind, oct5.spot, oct5.strike, oct5.ask), "and so is the 6-day 227.5 call at 3.25/3.27, although its bid is only 0.27 short");
+  ok(!impossibleQuote("C", 231.02, 227.5, 3.87), "while the 8-day line at 3.85/3.87 is a market: its ask clears the exercise value");
+}
+
+{
+  const iv = JSON.parse(readFileSync(new URL("./fixtures-desk-golden-iv.json", import.meta.url), "utf8"));
+  eq(iv.rate, PRICING_RATE, "the fixture's rate is the rate the desk prices with");
+  eq(PRICING_RATE, ENGINE_LINES.RATE_FALLBACK, "which is the engine's own fallback, so the server and the page invert the mid at one rate");
+  const asOf = "2026-09-29";
+  const expiry = (days) => new Date(Date.parse(asOf + "T00:00:00Z") + days * 864e5).toISOString().slice(0, 10);
+  const rowOf = (g) => ({
+    option_symbol: `NVDA${expiry(g.days).slice(2).replace(/-/g, "")}${g.kind}${String(Math.round(g.strike * 1000)).padStart(8, "0")}`,
+    nbbo_bid: String(g.bid), nbbo_ask: String(g.ask), implied_volatility: "0.9", open_interest: "1000",
+  });
+  for (const g of iv.rows) {
+    const p = priceSale(rowOf(g), { spot: g.spot, asOf });
+    const label = `${g.kind} ${g.strike} ${g.days}d`;
+    near(p.ivMid, g.ivMid, 2e-6, `${label}: the mid inverts to the volatility that priced it (scipy's brentq)`);
+    near(p.cushionSigmas, g.cushionSigmas, 5e-5, `${label}: cushion in the quote's own sigmas, to scipy`);
+    if (g.capSigmas === null) ok(p.capSigmas === null, `${label}: no cap on a put`);
+    else near(p.capSigmas, g.capSigmas, 5e-5, `${label}: cap in the quote's own sigmas, to scipy`);
+  }
+
+  const ladder = iv.ladder.map((g) => ({ g, row: rowOf(g) }));
+  const priced = ladder.map(({ g, row }) => priceSale(row, { spot: g.spot, asOf }));
+  priced.forEach((p, i) => {
+    const g = ladder[i].g;
+    near(p.annualizedGross, g.annualizedGross, 1e-9, `${g.strike}C: the gross annualization`);
+    near(p.annualized, g.annualized, 1e-9, `${g.strike}C: the annualization of its TIME value`);
+    near(p.yieldOnCollateral, g.yieldOnCollateral, 1e-12, `${g.strike}C: the yield on its time value`);
+    near(p.intrinsic, g.intrinsic, 1e-9, `${g.strike}C: intrinsic value`);
+    near(p.extrinsic, g.extrinsic, 1e-9, `${g.strike}C: extrinsic value`);
+  });
+  ok(priced[0].annualizedGross > 6 && priced[0].annualized < 0.1,
+     `the deepest in-the-money call shows ${(priced[0].annualizedGross * 100).toFixed(0)}% gross and ${(priced[0].annualized * 100).toFixed(0)}% on what it actually earns`);
+
+  const chain = ladder.map(({ row }) => row);
+  const byTime = rankChain(chain, { spot: 227.28, asOf, ticker: "NVDA", rankBy: "annualized" });
+  assert.deepEqual(byTime.rows.map((r) => r.strike), [225, 230, 220, 215]); checks++;
+  const shuffled = rankChain([...chain].reverse(), { spot: 227.28, asOf, ticker: "NVDA", rankBy: "annualized" });
+  assert.deepEqual(shuffled.rows.map((r) => r.strike), [225, 230, 220, 215]); checks++;
+  const gross = [...byTime.rows].sort((a, b) => b.annualizedGross - a.annualizedGross).map((r) => r.strike);
+  assert.deepEqual(gross, [215, 220, 225, 230]); checks++;
+  eq(byTime.rows[0].strike, 225,
+     "RANKED ON TIME VALUE the 225 call leads; ranked on the old gross figure the 215 call, all intrinsic, led every table");
+  ok(byTime.rows.every((r, i, a) => i === 0 || a[i - 1].annualized >= r.annualized), "and the order is monotone in the figure the column shows");
+  eq(rankChain(chain, { spot: 227.28, asOf, ticker: "NVDA", rankBy: "yieldOnCollateral" }).rows[0].strike, 225,
+     "yield on collateral ranks the same way");
+  eq(rankChain(chain, { spot: 227.28, asOf, ticker: "NVDA", rankBy: "premium" }).rows[0].strike, 215,
+     "while premium in dollars stays gross: a dollar is a dollar, and the contract with the largest bid pays it");
+}
+
+{
+  const spot = 231.02, asOf = "2026-09-29";
+  const C = (sym, bid, ask) => ({ option_symbol: sym, nbbo_bid: String(bid), nbbo_ask: String(ask), implied_volatility: "0.35", open_interest: "900", volume: "50" });
+  const rows = [
+    C("NVDA260930C00227500", 1.47, 1.49),
+    C("NVDA260930C00230000", 0.56, 0.58),
+    C("NVDA261002C00230000", 1.69, 1.71),
+    C("NVDA260930P00225000", 0.68, 0.70),
+    C("NVDA261007C00227500", 3.85, 3.87),
+  ];
+  const r = rankChain(rows, { spot, asOf, ticker: "NVDA" });
+  eq(r.gated.offMarket, 2, "the two calls whose ASK is under the exercise value are counted under their own gate");
+  ok(!r.rows.some((x) => x.symbol === "NVDA260930C00227500" || x.symbol === "NVDA260930C00230000"),
+     "and never ranked, so an impossible quote cannot top a table");
+  eq(r.priced, 3, "the other three are priced");
+  const excluded = Object.values(r.gated).reduce((a, b) => a + b, 0);
+  eq(excluded + r.priced, r.screened, "and the partition still accounts for every contract");
+  ok(r.rows.every((x) => x.annualized <= x.annualizedGross), "the extrinsic figure never exceeds the gross one on any ranked line");
+  const eightDay = r.rows.find((x) => x.symbol === "NVDA261007C00227500");
+  ok(eightDay && eightDay.annualized < eightDay.annualizedGross / 3,
+     "and the 8-day in-the-money call, a real market, is ranked on its 33 cents of time value rather than on its 3.85 bid");
+
+  eq(impossibleQuote("C", 100, 96, 3.99), false, "an ask exactly 0.01 under the exercise value is inside the tolerance");
+  eq(impossibleQuote("C", 100, 96, 3.98), true, "and 0.02 under it is not");
+  eq(impossibleQuote("P", 100, 104, 4.01), false, "a put's exercise value is the strike less the spot");
+  eq(impossibleQuote("P", 100, 104, 3.98), true, "and its floor binds the same way");
+  eq(impossibleQuote("C", 231.02, 227.5, 3.51), false, "the tolerance is not defeated by floating-point noise in 231.02 - 227.5");
+  eq(impossibleQuote("C", 100, 105, 0.01), false, "an out-of-the-money quote has no floor to violate");
+  eq(impossibleQuote("C", 100, 96, 0), false, "an absent ask is not a violation, it is no quote");
+  eq(intrinsic("C", 231.02, 227.5), 231.02 - 227.5, "intrinsic of a call is spot less strike");
+  eq(intrinsic("P", 100, 104), 4, "of a put strike less spot");
+  eq(intrinsic("C", 100, 104), 0, "and never negative");
+  eq(OFF_MARKET_TOLERANCE, 0.01, "the tolerance is a cent");
+}
+
+{
+  const cc = (sym, bid) => ({ option_symbol: sym, nbbo_bid: String(bid), nbbo_ask: String(bid + 0.02), implied_volatility: "0.30", open_interest: "500" });
+  const equal = [
+    cc("XYZ260918C00105000", 1.00), cc("XYZ261016C00105000", 1.00), cc("XYZ260918C00104000", 1.00), cc("XYZ260918C00106000", 1.00),
+  ];
+  const forward = rankChain(equal, { spot: 100, asOf: "2026-08-25", rankBy: "premium" }).rows.map((r) => r.symbol);
+  const backward = rankChain([...equal].reverse(), { spot: 100, asOf: "2026-08-25", rankBy: "premium" }).rows.map((r) => r.symbol);
+  assert.deepEqual(forward, backward); checks++;
+  eq(forward.length, 4, "four equal-premium lines are ranked");
+  const slots = rankChain(equal, { spot: 100, asOf: "2026-08-25", rankBy: "premium" }).rows;
+  ok(slots[0].annualized >= slots[1].annualized && slots[1].annualized >= slots[2].annualized,
+     "a tie on the ranking key falls to the annualized figure, then to expiry, then to strike, not to the vendor's row order");
+  assert.deepEqual(forward, ["XYZ260918C00104000", "XYZ260918C00105000", "XYZ260918C00106000", "XYZ261016C00105000"]); checks++;
+}
+
+{
+  const cc = { option_symbol: "BRKB260918C00520000", nbbo_bid: "3.20", nbbo_ask: "3.30", implied_volatility: "0.2", open_interest: "900" };
+  const put = { option_symbol: "BRKB260918P00480000", nbbo_bid: "2.20", nbbo_ask: "2.30", implied_volatility: "0.2", open_interest: "900" };
+  for (const t of ["BRK.B", "BRK-B", "brk.b", "BRKB"]) {
+    const r = rankChain([cc, put], { spot: 500, asOf: "2026-08-25", ticker: t });
+    eq(r.priced, 2, `${t}: a dotted or dashed ticker matches its dotless option root`);
+    eq(r.gated.nonStandard, 0, `${t}: and nothing is gated as an adjusted series`);
+  }
+  const adjusted = { ...cc, option_symbol: "BRKB1260918C00520000" };
+  eq(rankChain([cc, adjusted], { spot: 500, asOf: "2026-08-25", ticker: "BRK.B" }).gated.nonStandard, 1,
+     "an adjusted BRK.B series is still set aside");
+  eq(optionRoot(" brk.b "), "BRKB", "the root drops punctuation and case");
+  eq(optionRoot(null), "", "and a missing ticker has no root");
+}
+
+{
+  const c = crossesEarnings;
+  eq(c("2026-10-09", "2026-08-27", "afterhours", { asOf: "2026-09-29" }), null,
+     "A REPORT THAT ALREADY PRINTED is null, not true: a stale next_earnings_date made every line read as crossing an event");
+  eq(c("2026-10-09", "2026-08-27", "afterhours"), true, "without a read date the answer is the calendar's, as before");
+  eq(c("2026-10-09", "2026-09-29", "afterhours", { asOf: "2026-09-29" }), true, "a report dated today has not been ruled out");
+  eq(c("2026-10-09", "2026-10-02", "premarket", { asOf: "2026-09-29" }), true, "a report before expiry still crosses");
+  eq(c("2026-10-09", "2026-10-20", "premarket", { asOf: "2026-09-29" }), false, "and one after it still does not");
+  eq(c("2026-10-09", "2026-10-09", "premarket", { asOf: "2026-09-29" }), true, "same-day before the open crosses");
+  eq(c("2026-10-09", "2026-10-09", "afterhours", { asOf: "2026-09-29" }), false, "and after the close does not");
+  eq(c("2026-10-09", "2026-08-27", "afterhours", { asOf: "garbage" }), true, "an unusable read date is ignored rather than trusted");
+  eq(hasNoEarnings("ETF"), true, "an ETF has no earnings");
+  eq(hasNoEarnings("Index Fund"), true, "nor does a fund");
+  eq(hasNoEarnings("Common Stock"), false, "a common stock does");
+  eq(hasNoEarnings(null), false, "and an unstated issue type is unknown, not a fund");
+}
+
+{
+  const one = sizeToBuyingPower({ collateral: 1.1 * 100, premium: 10 }, 110);
+  eq(one.contracts, 1, "110 of buying power buys the 1.1 x 100 collateral once: floating point made the collateral 110.00000000000001 and the answer zero");
+  eq(one.deployed, 110, "deploying exactly 110");
+  eq(one.idle, 0, "with nothing idle");
+  eq(one.collectible, 10, "and collecting the premium once");
+  eq(sizeToBuyingPower({ collateral: 1.09 * 100, premium: 5 }, 109).contracts, 1, "1.09 x 100 = 109.00000000000001 against 109 buys one");
+  eq(sizeToBuyingPower({ collateral: 1.09 * 100, premium: 5 }, 108.99).contracts, 0, "and a cent short buys none");
+  let wrong = 0, cases = 0;
+  for (let cents = 100; cents < 50000; cents += 37) {
+    for (const strike of [1.09, 2.3, 4.35, 19.99, 47, 231.02, 412.7]) {
+      const collateral = strike * 100;
+      const bp = (Math.round(collateral * 100) * 3 + (cents % 7)) / 100;
+      const want = Math.floor(Math.round(bp * 100) / Math.round(collateral * 100));
+      cases++;
+      if (sizeToBuyingPower({ collateral, premium: 1 }, bp).contracts !== want) wrong++;
+    }
+  }
+  eq(wrong, 0, `${cases} budgets against float collateral all size as integer cents do`);
+  const noise = sizeToBuyingPower({ collateral: 23102, premium: 147.00000000000003 }, 50000);
+  eq(noise.collectible, 294, "a premium carrying float noise collects a whole number of cents");
+  eq(noise.idle, 50000 - 2 * 23102, "and the idle cash is exact");
+  near(noise.yieldOnDeployed, 294 / 46204, 1e-12, "with the yield on what is deployed");
 }
 
 console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
