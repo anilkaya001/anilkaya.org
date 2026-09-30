@@ -60,6 +60,33 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const r2 = (v) => (v === null ? null : Number(v.toFixed(2)));
 
+export const NEURON_PROSE_CAPS = Object.freeze({ summary: 600, title: 80, thesis: 500, invalidation: 200, horizon: 60 });
+const MARKUP = /[<>`{}]|\]\(|https?:|www\./i;
+
+export function cleanLabel(v, cap = 40) {
+  const t = str(v);
+  if (t === null) return null;
+  const c = t.replace(/[^A-Za-z0-9 .,&'-]/g, "").replace(/\s+/g, " ").trim().slice(0, cap).trim();
+  return c === "" ? null : c;
+}
+
+function cleanTicker(v) {
+  const t = str(v);
+  return t !== null && /^[A-Z0-9][A-Z0-9.\-]{0,9}$/.test(t) ? t : null;
+}
+
+const cleanReason = (v) => {
+  const t = str(v);
+  return t === null ? null : t.replace(/[<>`{}[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 200) || null;
+};
+
+export function proseIssue(text, field) {
+  if (typeof text !== "string") return "schema";
+  if (MARKUP.test(text)) return "markup";
+  const cap = NEURON_PROSE_CAPS[field];
+  return cap !== undefined && text.length > cap ? "length" : null;
+}
+
 function silence(status) {
   return status === "pending" || status === "unreadable" || status === "quiet" || status === "unavailable"
     ? status : "unavailable";
@@ -132,7 +159,7 @@ function panelRobustness(key, group, p, card) {
   if (p.status !== "ok") {
     return p.status === "quiet"
       ? { r: 1, why: "measured and empty: a reading, but nothing to lean on" }
-      : { r: 0, why: silence(p.status) + (str(p.reason) ? ": " + p.reason : "") };
+      : { r: 0, why: silence(p.status) + (cleanReason(p.reason) ? ": " + cleanReason(p.reason) : "") };
   }
   const conv = card.conv && typeof card.conv === "object" ? card.conv : {};
   switch (key) {
@@ -703,7 +730,7 @@ export function regimeState(card, extras) {
     preferred, avoid: [...new Set([...table.avoid, ...pinnedOut])], stale, notes,
   };
   out.chip = stateChip(out);
-  out.brief = stateBrief(out, str(c.ticker));
+  out.brief = stateBrief(out, cleanTicker(c.ticker));
   return out;
 }
 
@@ -765,6 +792,7 @@ export function buildContext(card, extras) {
   const regime = c.regime && typeof c.regime === "object" ? c.regime : {};
   const score = num(c.score), conviction = num(c.conviction);
   const standingGamma = gammaReading(c);
+  const tk = cleanTicker(c.ticker);
 
   const features = [];
   const push = (f) => { features.push(f); return f; };
@@ -788,7 +816,7 @@ export function buildContext(card, extras) {
       key: "standing", title: "Score and conviction", group: "signal",
       status: score === null ? "unavailable" : "ok", robustness: r, why,
       say: score === null ? null
-        : c.ticker + " scored " + score + " this session with conviction " +
+        : (tk || "this name") + " scored " + score + " this session with conviction " +
           (conviction === null ? "unpublished" : conviction + " of 100") +
           (standingGamma.label ? (standingGamma.from === "book" ? "; dealer gamma across the open-interest book is "
             : standingGamma.from === "flow" ? "; the gamma dealers added today is " : "; dealer gamma is labelled ") + standingGamma.label : "") +
@@ -817,7 +845,7 @@ export function buildContext(card, extras) {
       robustness: r, why,
       say: ok && p.lead && str(p.lead.say) ? p.lead.say.trim() : null,
       figures: ok ? { ...scalarFigures(p, FIGURE_KEYS[spec.key] || []), ...(spec.key === "levels" ? levelFigures(p) : {}) } : {},
-      reason: !ok && p && str(p.reason) ? p.reason.trim() : null,
+      reason: !ok && p && cleanReason(p.reason) ? cleanReason(p.reason) : null,
     });
   }
 
@@ -866,7 +894,7 @@ export function buildContext(card, extras) {
       why: !on ? (state.notes[0] || "no state is implied")
         : "confidence " + state.confidence + " of 3, read from " + [...new Set(named)].join(", ") +
           (state.stale ? ", capped: the card is behind the last closed session" : ""),
-      say: on ? stateSentence(state, str(c.ticker)) : null,
+      say: on ? stateSentence(state, tk) : null,
       figures: on ? {
         state: state.state, direction: state.direction, flow: state.flow, confidence: state.confidence, premium: state.premium,
         invalidation: state.invalidation ? f2(state.invalidation.px) : null,
@@ -895,9 +923,9 @@ export function buildContext(card, extras) {
 
   return {
     version: NEURON_CONTEXT_VERSION,
-    ticker: str(c.ticker),
-    name: str(c.nm),
-    sector: str(c.sector),
+    ticker: tk,
+    name: cleanLabel(c.nm),
+    sector: cleanLabel(c.sector),
     sessionDate: session,
     expectedSession: expected,
     stale,
@@ -906,8 +934,21 @@ export function buildContext(card, extras) {
     features,
     coverage,
     state,
+    levels: guardLevels(c),
     engine: engineContext(c),
   };
+}
+
+function guardLevels(card) {
+  const L = levelsOf(card);
+  const out = L.list.map((l) => ({ kind: l.kind, px: l.px }));
+  if (L.spot !== null) out.push({ kind: "spot", px: L.spot });
+  return out;
+}
+
+export function guardOptions(context) {
+  const ctx = context && typeof context === "object" ? context : {};
+  return { smallIntegers: false, modals: true, levels: Array.isArray(ctx.levels) ? ctx.levels : [] };
 }
 
 function figureText(figures) {
@@ -1422,6 +1463,10 @@ export function vetIdeas(rawIdeas, context) {
     const rests = [...new Set((Array.isArray(idea.rests_on) ? idea.rests_on : [])
       .map((k) => String(k).replace(/^\s*\[|\]\s*$/g, "").trim().toLowerCase()).filter(Boolean))];
     if (!title || !thesis || !structure || !invalidation || !horizon) { refused.push((title || "idea") + ": a field is missing"); continue; }
+    if (idea.fromState !== true) {
+      const bad = ["title", "thesis", "invalidation", "horizon"].map((f) => [f, proseIssue({ title, thesis, invalidation, horizon }[f], f)]).find((x) => x[1]);
+      if (bad) { refused.push(title + ": its " + bad[0] + (bad[1] === "markup" ? " carries markup or a link" : " runs past the " + NEURON_PROSE_CAPS[bad[0]] + "-character limit")); continue; }
+    }
     if (!NEURON_STRUCTURES.includes(structure)) { refused.push(title + ": structure not in the list"); continue; }
     if (!["bullish", "bearish", "neutral"].includes(direction)) { refused.push(title + ": direction not bullish, bearish or neutral"); continue; }
     if (!(IDEA_SIDES[structure] || []).includes(direction)) { refused.push(title + ": " + article(structure) + " is not " + direction); continue; }
@@ -1432,9 +1477,13 @@ export function vetIdeas(rawIdeas, context) {
     if (feats.length < 2 || feats.length !== rests.length) { refused.push(title + ": rests on fewer than two known features"); continue; }
     const robustness = Math.min(...feats.map((f) => f.robustness));
     if (robustness < 1) { refused.push(title + ": rests on a withheld feature"); continue; }
-    const text = [title, thesis, invalidation, horizon].join(" ");
-    const verdict = guardAnswer(text, facts, { smallIntegers: false });
-    if (!verdict.ok) { refused.push(title + ": " + (verdict.forecast ? "claims what happens next" : "names a figure the card does not carry")); continue; }
+    const text = [title, thesis, invalidation, horizon].join(". ");
+    const verdict = guardAnswer(text, facts, guardOptions(ctx));
+    if (!verdict.ok) {
+      refused.push(title + ": " + (verdict.forecast ? "claims what happens next" : verdict.mislabeled && !verdict.invented ? "puts a price next to the name of a level it does not belong to"
+        : "names a figure the card does not carry"));
+      continue;
+    }
     const signature = [structure, direction, invalidation.toLowerCase()].join("|");
     if (seen.has(signature) || seen.has(title.toLowerCase())) { refused.push(title + ": repeats an idea already kept"); continue; }
     seen.add(signature); seen.add(title.toLowerCase());

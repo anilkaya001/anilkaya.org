@@ -26,7 +26,59 @@ export function numeralsIn(text) {
   return text.replace(/−/g, "-").match(new RegExp(NUMERAL_SOURCE, "g")) || [];
 }
 
-const FORECAST = /\b(will|should|expect(?:ed)?|likely|going to|forecast|predict)\b/i;
+const FORECAST = /\b(?:will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds)\b/i;
+const MODALS = /\b(?:would|could(?!\s+not\b|n't)|might)\b/i;
+const MODAL_MAY = /\bmay\b/;
+
+const LEVEL_MARK = /\b(call[- ]wall|put[- ]wall|max(?:imum)?[- ]pain|zero[- ]gamma(?: level)?|strike[- ]sum crossing|(?:gamma )?flip|spot)\b/gi;
+const LEVEL_KIND_OF = (said) => {
+  const t = said.toLowerCase().replace(/-/g, " ");
+  if (t.startsWith("call wall")) return "call_wall";
+  if (t.startsWith("put wall")) return "put_wall";
+  if (t.startsWith("max")) return "max_pain";
+  if (t.startsWith("zero gamma")) return "zero_gamma";
+  if (t.startsWith("strike sum")) return "strike_sum_crossing";
+  if (t.endsWith("flip")) return "flip";
+  return "spot";
+};
+const LEVEL_UNIT = "(?!\\d)(?!\\s*(?:%|ATR|\u03c3|sd\\b|points?\\b|pts\\b|sessions?\\b|minutes?\\b|days?\\b))";
+const LEVEL_LINK = new RegExp("^(?:\\s+(?:at|is|was|sits|near|of|around)|\\s*[=:,])*\\s*\\$?\\s*(-?\\d+(?:,\\d+)*\\.\\d{2})" + LEVEL_UNIT);
+const LEVEL_REACH = 60;
+
+export function levelMislabels(text, levels) {
+  const list = (Array.isArray(levels) ? levels : []).filter((l) => l && typeof l.kind === "string" && typeof l.px === "number" && Number.isFinite(l.px));
+  if (typeof text !== "string" || !list.length) return [];
+  const pxOf = (kind) => list.filter((l) => l.kind === kind).map((l) => l.px);
+  const allowed = (kind) => (kind === "flip" ? [...pxOf("zero_gamma"), ...pxOf("strike_sum_crossing")] : pxOf(kind));
+  const isPx = (v) => list.some((l) => Math.abs(l.px - v) < 1e-9);
+  const t = text.replace(/−/g, "-");
+  const marks = [...t.matchAll(LEVEL_MARK)].map((m) => ({ at: m.index, end: m.index + m[0].length, said: m[0], kind: LEVEL_KIND_OF(m[0]) }));
+  const out = [];
+  const seen = new Set();
+  const say = (kind, said, token) => {
+    const key = said.toLowerCase() + "|" + token;
+    if (!seen.has(key)) { seen.add(key); out.push({ label: said, token }); }
+  };
+  for (const m of marks) {
+    const g = LEVEL_LINK.exec(t.slice(m.end));
+    if (!g) continue;
+    const v = Number(g[1].replace(/,/g, ""));
+    if (!allowed(m.kind).some((x) => Math.abs(x - v) < 1e-9)) say(m.kind, m.said, g[1]);
+  }
+  const PRICE = new RegExp("(?<![\\d.])-?\\d+(?:,\\d+)*\\.\\d{2}" + LEVEL_UNIT, "g");
+  for (const n of t.matchAll(PRICE)) {
+    const v = Number(n[0].replace(/,/g, ""));
+    if (!isPx(v)) continue;
+    const before = t.slice(Math.max(0, n.index - LEVEL_REACH), n.index);
+    const cut = Math.max(before.lastIndexOf(". "), before.lastIndexOf("; "), before.lastIndexOf("! "), before.lastIndexOf("? "));
+    const window = cut < 0 ? before : before.slice(cut + 1);
+    const start = n.index - window.length;
+    let near = null;
+    for (const m of marks) if (m.end <= n.index && m.at >= start) near = m;
+    if (near && !allowed(near.kind).some((x) => Math.abs(x - v) < 1e-9)) say(near.kind, near.said, n[0]);
+  }
+  return out;
+}
 
 const NAME_LIKE = /^[A-Z][A-Za-z0-9.]{0,9}$/;
 
@@ -1142,11 +1194,15 @@ export function guardAnswer(answer, picked, options) {
   for (const word of unsupportedWordNumbers(text, facts, allowed)) rejected.push(word);
   const invented = rejected.length;
 
-  const verbs = text.match(new RegExp(FORECAST.source, "gi")) || [];
+  const mislabels = Array.isArray(o.levels) ? levelMislabels(text, o.levels) : [];
+  for (const x of mislabels) rejected.push(x.label + " " + x.token);
+
+  const verbs = [...(text.match(new RegExp(FORECAST.source, "gi")) || []),
+    ...(o.modals === true ? [...(text.match(new RegExp(MODALS.source, "gi")) || []), ...(text.match(new RegExp(MODAL_MAY.source, "g")) || [])] : [])];
   for (const v of verbs) rejected.push(v);
 
   if (!rejected.length) {
-    return { ok: true, rejected: [], reason: null, numerals, invented: false, forecast: false };
+    return { ok: true, rejected: [], reason: null, numerals, invented: false, forecast: false, mislabeled: false };
   }
 
   const parts = [];
@@ -1154,13 +1210,16 @@ export function guardAnswer(answer, picked, options) {
     parts.push("The answer stated a figure that appears in none of the facts it was " +
       "given, which means it was computed or invented rather than quoted");
   }
+  if (mislabels.length) {
+    parts.push("The answer put a price next to the name of a level that price does not belong to");
+  }
   if (verbs.length) {
     parts.push("The answer claimed the future, and this product states what was " +
       "measured and what is already on the calendar");
   }
 
   return { ok: false, rejected, numerals,
-    invented: invented > 0, forecast: verbs.length > 0,
+    invented: invented > 0, forecast: verbs.length > 0, mislabeled: mislabels.length > 0,
     reason: parts.join(". ") + ". The refused tokens are listed in `rejected`, and the " +
       "deterministic reading is served in its place." };
 }

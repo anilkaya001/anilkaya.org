@@ -1579,6 +1579,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
   const facts = FLOWS_NEURON.guardFacts(ctx);
+  const guardOpts = FLOWS_NEURON.guardOptions(ctx);
   const messages = [{ role: "system", content: system }, { role: "user", content: user }];
   let parsed = null;
   let lastText = null;
@@ -1602,7 +1603,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   }
   if (parsed === null) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
-    const verdict = prose ? FLOWS_ASK.guardAnswer(lastText, facts, { smallIntegers: false }) : { ok: false };
+    const verdict = prose && FLOWS_NEURON.proseIssue(lastText, "summary") === null ? FLOWS_ASK.guardAnswer(lastText, facts, guardOpts) : { ok: false };
     await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model,
       verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable").catch(() => {});
     return;
@@ -1611,9 +1612,10 @@ async function generateNeuron(env, ticker, ctx, fingerprint) {
   let llm = false;
   let guard = null;
   if (parsed.summary) {
-    const verdict = FLOWS_ASK.guardAnswer(parsed.summary, facts, { smallIntegers: false });
+    const unsafe = FLOWS_NEURON.proseIssue(parsed.summary, "summary") !== null;
+    const verdict = unsafe ? { ok: false } : FLOWS_ASK.guardAnswer(parsed.summary, facts, guardOpts);
     if (verdict.ok) { summary = parsed.summary; llm = true; }
-    else guard = verdict.invented ? "invented" : "forecast";
+    else guard = unsafe ? "unsafe" : verdict.invented ? "invented" : verdict.mislabeled ? "mislabeled" : "forecast";
   } else {
     guard = refused || "summary:empty";
   }

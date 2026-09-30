@@ -234,6 +234,8 @@ export function neuronProvenance(summary) {
 
   if (guard === "invented") return "Deterministic reading. A model\u2019s wording named an unsupported figure and was refused.";
   if (guard === "forecast") return "Deterministic reading. A model\u2019s wording claimed what happens next and was refused.";
+  if (guard === "mislabeled") return "Deterministic reading. A model\u2019s wording put a price next to the name of a level it does not belong to and was refused.";
+  if (guard === "unsafe") return "Deterministic reading. A model\u2019s wording carried markup or a link, or ran past its length limit, and was refused.";
   if (guard === "ideas:unparsable") return "Deterministic reading: the model\u2019s reply could not be parsed.";
   if (guard === "summary:empty") return "Deterministic reading: the model returned ideas without a summary.";
   if (guard.startsWith("unreachable:reparse:")) {
