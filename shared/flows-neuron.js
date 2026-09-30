@@ -1266,10 +1266,14 @@ export function promptForEngine(context) {
       "preconditions do not hold is refused.",
     "3. relations: " + CLAIM_RELS.join(", ") + ". A claim compares two facts of the same unit (or a price fact with spot); " +
       "'between' takes a third id as \"c\". The server evaluates every claim on the facts and refuses a false one.",
-    "4. ideas use only the listed structure ids, at most " + ENGINE_LINES.MAX_IDEAS + ", no repeats, never a structure whose family " +
+    "4. ideas use only the structure ids on the line 'ranked ideas', which the engine has already chosen: you may reorder them and " +
+      "drop them, never add one. At most " + ENGINE_LINES.MAX_IDEAS + ", no repeats, never a structure whose family " +
       "the state avoids, and the first idea is defined-risk whenever a defined-risk structure is listed.",
-    "5. because names at least two fact ids with grade above zero; an idea ranks no higher than its weakest fact.",
-    "6. If nothing is worth doing, answer verdict stand-aside with no ideas.",
+    "5. because names at least two fact ids with grade above zero, at least one of them a fact the structure's own rules rest on " +
+      "(the state's level and book, the volatility premium, the IV percentile, the term slope, the skew or the event ratio); " +
+      "an idea ranks no higher than its weakest fact.",
+    "6. Answer verdict stand-aside with no ideas only when that line says the engine stands aside; a stand-aside over ranked " +
+      "ideas is refused.",
   ].join("\n");
   const user = "Engine read for " + t + (ctx.sessionDate ? ", session " + ctx.sessionDate : "") + ":\n" + engineLines(eng).join("\n");
   return { system, user };
