@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "235";
+export const ASSET_VERSION = "236";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -492,17 +492,32 @@ export function deskPage({ username = "" } = {}) {
     <p class="visually-hidden" id="deskFoot" role="note"></p>
   </div>
   <div id="dkCopy" hidden>
-      <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
-      <p data-k="frontier">Every sellable line on the desk as a point: annualised yield up, risk across. The frontier joins the lines no other line beats on both, so a point below it pays less for the same risk.</p>
-      <p data-k="frontier-x">Delta is the forward delta of the short option on its own implied volatility; the implied chance of profit is the engine&#39;s, on the same volatility. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Covered calls are sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted. Write 25000, 25,000 or 25k; a comma marks thousands only. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
+      <p data-k="bp-bad">That is not a balance this desk can read. Write 25000, 25,000 or 25k; a comma marks thousands only, so 25,5k is refused rather than guessed.</p>
+      <p data-k="cc-size">Sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted.</p>
+      <p data-k="frontier">Every line on the list that has an engine reading, as a point: annualised time-value yield up, risk across. The frontier joins the lines no other line beats on both, so a point below it pays less for the same risk. It follows the tenor window above, and annualising a line of one to three days mostly ranks shortness.</p>
+      <p data-k="unplotted">Not plotted, for want of an engine reading: {n}.</p>
+      <p data-k="frontier-x">The yield axis is a square-root scale: equal steps up are equal steps in the square root of the yield, which spreads the crowded low yields, and its ticks sit on that scale, zero included. The yield is the time value the bid pays, annualised. Net delta is the position&#39;s exposure to the stock, from the short option&#39;s forward delta on its own implied volatility: the put&#39;s delta, and for a covered call one minus the call&#39;s delta, because the shares add one. Win % (implied) is the risk-neutral chance the position ends in profit, on the same volatility; it is not a forecast. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="engine">Each line is priced by the same engine as the strategy lab, on a flat slice at the contract&#39;s own implied volatility, inverted from its mid: the model value is the mid, and the chance of profit is the lognormal one at that volatility. The smile&#39;s skew correction is not in this number; open the line in the lab for the smile-priced figure. The real-world figures use the GARCH law the name&#39;s card publishes, and are an em dash where no card carries one.</p>
-      <p data-k="premium">Premium is what the bid pays today; the mid is not a price anyone must trade at. Where a strike is in the money, part of the premium is intrinsic value that assignment returns rather than keeps.</p>
-      <p data-k="annualized">Simple 365 over days scaling of the yield. A convention for comparing tenors, not a return anyone earns.</p>
-      <p data-k="cushion">Distance from spot to breakeven in units of the move this option&#39;s own implied volatility prices over its remaining life. Not a probability.</p>
-      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
+      <p data-k="premium">Premium is what the bid pays today; the mid is not a price anyone must trade at. Where a strike is in the money, part of the premium is intrinsic value that assignment returns rather than keeps, and the annualised figure counts only the time value.</p>
+      <p data-k="annualized">Time value over the collateral, scaled by 365 over the days to expiry: a convention for comparing tenors, not a return anyone earns. A premium grows with the square root of time, not in proportion to it, so annualising a line of one to three days mostly ranks shortness. The per-week figure in a line&#39;s disclosure is the same yield scaled to seven days.</p>
+      <p data-k="cushion">Distance from spot to breakeven in units of the move a volatility prices over the line&#39;s remaining life. Not a probability. A line&#39;s disclosure states the volatility its cushion is measured in and the one delta, win % and EV use, which is inverted from the mid. The two can differ.</p>
+      <p data-k="t-ann">Time-value yield, annualised: the bid less any intrinsic value, over the collateral, scaled by 365 over the days to expiry.</p>
+      <p data-k="t-pq">Chance the position ends in profit under the market&#39;s own risk-neutral density, on this contract&#39;s implied volatility. Not a forecast.</p>
+      <p data-k="t-pp">Chance the position ends in profit under the real-world law this name&#39;s card publishes.</p>
+      <p data-k="t-ev">Expected profit per contract at the bid, under the real-world law.</p>
+      <p data-k="why-q">The engine bundle did not load.</p>
+      <p data-k="why-fit">No implied volatility inverts from this contract&#39;s mid.</p>
+      <p data-k="why-int">The mid is below intrinsic value at this price, so no volatility can reproduce this quote.</p>
+      <p data-k="why-eng">The engine could not price this line.</p>
+      <p data-k="int-below">The bid is below intrinsic: this quote cannot coexist with this price.</p>
+      <p data-k="int-in">Includes {i} of intrinsic value, which assignment returns rather than keeps; the time value is {t}.</p>
+      <p data-k="basis-rebased">{sym} priced against {spot}, the underlying the quotes imply; last regular print {print}{note}.</p>
+      <p data-k="basis-mismatch">{sym}: these quotes do not agree with the price ({print}), so nothing is ranked.</p>
+      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, the vendor&#39;s last-transaction figure, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
       <p data-k="sm-shade">The shade is that volatility against its own expiry&#39;s at-the-money quote — hatched below it, plain above — so the smile is readable without the term structure swamping it. The strip beneath the grid, read left to right, is the term structure.</p>
-      <p data-k="sm-num">The number in a cell is the contract&#39;s own quoted implied volatility.</p>
-      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead.</p>
+      <p data-k="sm-num">The number in a cell is the vendor&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
+      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
       <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
       <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
@@ -513,6 +528,43 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-crowd">contracts fall in this row of this column; the one shown is the print this surface prefers — today&#39;s first, then nearest the row&#39;s centre. The cell is never an average of quotes.</p>
       <p data-k="sm-untraded">This contract has NOT traded today, so its implied volatility is the last transaction&#39;s — of unknown age. It is drawn but it did not set this expiry&#39;s level.</p>
       <p data-k="sm-novol">The vendor reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
+      <p data-k="f-uni">{p} of {least}{s} quoted contracts are sellable</p>
+      <p data-k="f-gate">The rest fail a gate: {list} — each counted once, under the first gate it failed.</p>
+      <p data-k="f-unc">{who} {is} outside those two numbers: {that} did not say how many contracts were screened or how many are sellable, and a count this page never received is not a count of nought.</p>
+      <p data-k="f-slice">This list is a slice: {parts} — {n} {lines} below the cut {is} not on this list, and re-sorting the ones that are cannot bring them back — so changing the ranking refetches {names} rather than reordering what is already here.</p>
+      <p data-k="f-part">{sym} shows its top {kept} of {sell} sellable lines, ranked by {by}</p>
+      <p data-k="f-cut">{who} {has} more contracts than this desk fetches, so {its} ranking is taken over a partial chain.</p>
+      <p data-k="plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} {w} expiring {e} collects {c}, deploying {d} and leaving {i} idle ({y} on capital committed). Best means the largest gross premium one line collects — not annualised and not risk-adjusted, so it favours the longest tenor{itm}; the list ranks by {by}.</p>
+      <p data-k="plan-itm">and, here, an in-the-money strike whose premium is partly intrinsic value</p>
+      <p data-k="plan-no">{bp} does not cover a single contract here.</p>
+      <p data-k="plan-min">The cheapest line ties up {c}.</p>
+      <p data-k="bp-ask">Enter a balance to size every line.</p>
+      <p data-k="e-win">No line on the desk expires inside this window.</p>
+      <p data-k="e-sel">Select a symbol to see its lines.</p>
+      <p data-k="e-add">Add a symbol to see its option sales.</p>
+      <p data-k="col-none">This line has no quotable collateral or premium to size against.</p>
+      <p data-k="col-no">One contract ties up {c}, which is more than {b}. Nothing to collect here.</p>
+      <p data-k="col-ok">{n} contract{s} at {p} each. Deploys {d} of {b}, leaving {i} idle — a return of {y} on the capital actually committed.</p>
+      <p data-k="t-link">Open {t} on the analysis page. Cards are built only for the names on today&#39;s board; if this one is not among them the page says so.</p>
+      <p data-k="lab-a">Open the {t} {k} {w} expiring {e} in the strategy lab</p>
+      <p data-k="earn-crosses">Expires after the next earnings report: the cushion on this line is a diffusion number priced against a jump.</p>
+      <p data-k="earn-unknown">Whether this contract outlives the next earnings report could not be determined. Treat the cushion with that in mind.</p>
+      <p data-k="stale-q">Quotes are older than this desk will call a price, so treat the list as a record of the market rather than one you can trade; Refresh requotes it.</p>
+      <p data-k="sm-ex">Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion.</p>
+      <p data-k="sm-ex0">No earnings report falls before this expiry.</p>
+      <p data-k="sm-exu">Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.</p>
+      <p data-k="sm-lv0">{e} has no at-the-money level: {r}.</p>
+      <p data-k="sm-lv">{e} at the money: {v}% vendor volatility, from the {k} {w} — {m} from spot and traded today.</p>
+      <p data-k="sm-past">Past the shade cap of {c} vol points, so the shade understates it. Marked with a slash.</p>
+      <p data-k="sm-c1">One contract shares a row with another; the cell shows one quoted contract and is never an average of two.</p>
+      <p data-k="sm-cn">{n} contracts share a row with another; each cell shows one quoted contract and is never an average of two.</p>
+      <p data-k="sm-cap">The shade is capped at {c} vol points; {n} cell{s} past it and {is} marked with a slash.</p>
+      <p data-k="iv-old">this contract has not traded today, so its implied volatility is the last transaction&#39;s, of unknown age</p>
+      <p data-k="no-cap">a cash-secured put has no upside cap; its best case is keeping the premium</p>
+      <p data-k="e-gate">Nothing on {who} clears the liquidity gates right now. {n} quoted contracts were screened.</p>
+      <p data-k="unaged1">one symbol&#39;s quote age was not stated by the route</p>
+      <p data-k="unagedN">{n} symbols&#39; quote ages were not stated by the route</p>
+      <p data-k="full">The desk holds {n} symbols; each one is a live lookup. {dropped}Remove one to add another.</p>
       <p data-k="refuse">Selling options has unbounded loss on the call side and equity-sized loss on the put side. This is a screen, not advice.</p>
   </div>`,
   });
