@@ -200,12 +200,42 @@ export function priceSale(row, {
   return midIv === false ? priced : attachMidIv(priced, { spot, readMs, rate });
 }
 
+const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR);
+
 export function attachMidIv(p, { spot, readMs = null, rate = PRICING_RATE } = {}) {
-  const years = Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR;
+  const years = yearsTo(p, readMs);
   p.ivMid = midImpliedVol({ spot, strike: p.strike, type: p.type, mid: p.mid, years, rate });
   p.cushionSigmas = p.breakeven > 0 ? sigmaMove(spot, p.breakeven, p.ivMid, years) : null;
   p.capSigmas = p.strategy === "cc" ? sigmaMove(p.strike, spot, p.ivMid, years) : null;
   return p;
+}
+
+export function attachOpposite(kept, standing, { spot, readMs = null, rate = PRICING_RATE } = {}) {
+  const book = new Map();
+  for (const q of standing) book.set(q.expiry + "|" + q.strike + "|" + q.type, q);
+  for (const p of kept) {
+    const years = yearsTo(p, readMs);
+    const inside = p.type === "C" ? p.strike < spot * Math.exp(rate * (years > 0 ? years : 0)) : p.strike > spot;
+    if (!inside) continue;
+    const other = book.get(p.expiry + "|" + p.strike + "|" + (p.type === "C" ? "P" : "C"));
+    if (other) p.opposite = { bid: other.bid, ask: other.ask };
+  }
+  return kept;
+}
+
+const SVI_KEYS = ["a", "b", "rho", "m", "sigma"];
+
+export function deskSmiles(expiries) {
+  const out = [];
+  for (const e of Array.isArray(expiries) ? expiries : []) {
+    const smile = e && e.smile, raw = smile && smile.params;
+    if (!smile || (smile.method !== "svi" && smile.method !== "svi-repaired") || !raw || typeof e.expiry !== "string") continue;
+    const T = numOrNull(e.T), params = {};
+    for (const k of SVI_KEYS) params[k] = numOrNull(raw[k]);
+    if (!(T > 0) || SVI_KEYS.some((k) => params[k] === null)) continue;
+    out.push({ expiry: e.expiry, T, smile: { method: smile.method, params } });
+  }
+  return out;
 }
 
 export const DEFAULT_GATES = Object.freeze({
@@ -275,6 +305,7 @@ export function rankChain(contracts, {
 
   const kept = rows.slice(0, limit);
   if (key !== "cushionSigmas") kept.forEach(attach);
+  attachOpposite(kept, standing, { spot, readMs, rate });
 
   const { divisor, basis } = ivConvention(
     list.map((r) => r && r.implied_volatility),

@@ -6,13 +6,15 @@ import { sizeToBuyingPower } from "../shared/flows-premium.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 import * as WORLD from "../shared/flows-quant-world.js";
 import * as QC from "../shared/flows-quant-card.js";
-import * as ENG from "../shared/flows-quant-engine.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
+import { NODE_Q } from "./desk-fixtures.mjs";
+import { closeUtcMs, yearFraction } from "../shared/flows-quant-time.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 let upstreamCalls = 0;
 const callsByTicker = new Map();
@@ -97,6 +99,11 @@ CHAINS.FFF = {
   ],
 };
 
+CHAINS.EEE = {
+  spot: CHAINS.AAA.spot,
+  rows: CHAINS.AAA.rows.map((r) => ({ ...r, option_symbol: r.option_symbol.replace(/^AAA/, "EEE") })),
+};
+
 CHAINS.GGG = {
   spot: CHAINS.AAA.spot,
   rows: CHAINS.AAA.rows.map((r) => ({
@@ -123,6 +130,16 @@ CHAINS.NVD = {
   })),
 };
 
+CHAINS.OPP = {
+  spot: 100,
+  rows: [
+    ["C", 95, "5.75", "6.35"], ["P", 95, "0.62", "0.68"], ["C", 105, "0.85", "0.91"], ["P", 105, "5.20", "5.80"],
+  ].map(([type, strike, bid, ask]) => ({
+    option_symbol: `OPP260918${type}${String(strike * 1000).padStart(8, "0")}`,
+    nbbo_bid: bid, nbbo_ask: ask, implied_volatility: "0.31", open_interest: "500", volume: "50",
+  })),
+};
+
 CHAINS.MIS = {
   spot: 231.02,
   rows: [
@@ -146,7 +163,7 @@ const upstream = http.createServer((req, res) => {
   }
   if (url.pathname.endsWith("/info")) {
 
-    const dates = { AAA: "2026-09-10", CCC: "2026-11-05", DDD: "2026-11-05" };
+    const dates = { AAA: "2026-09-10", EEE: "2026-09-10", CCC: "2026-11-05", DDD: "2026-11-05" };
     if (!dates[ticker]) { res.writeHead(404); res.end("{}"); return; }
     res.writeHead(200);
     res.end(JSON.stringify({ data: {
@@ -156,9 +173,9 @@ const upstream = http.createServer((req, res) => {
   }
   if (url.pathname.endsWith("/stock-state")) {
 
-    if (!["AAA", "HHH", "NVD", "MIS"].includes(ticker)) { res.writeHead(404); res.end("{}"); return; }
+    if (!["AAA", "EEE", "HHH", "NVD", "MIS", "OPP"].includes(ticker)) { res.writeHead(404); res.end("{}"); return; }
     res.writeHead(200);
-    const state = ticker === "NVD" || ticker === "MIS"
+    const state = ticker === "NVD" || ticker === "MIS" || ticker === "OPP"
       ? { close: String(chain.spot), prev_close: "229.00", open: "229.5", high: "232", low: "228", market_time: "regular", tape_time: "2026-08-25T18:06:00Z", total_volume: 1000000, volume: 5000 }
       : {
         close: String(chain.spot * 1.02), prev_close: String(chain.spot),
@@ -193,6 +210,9 @@ const token = await signSession(
 const MINUS = "−";
 const DASH = "—";
 const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+const AAA_SVI = { a: 0.005528, b: 0.05, rho: -0.4, m: 0, sigma: 0.1 };
+const AAA_EVENT = { date: "2026-09-10", confirmed: true, moves: [0.05, -0.04, 0.07, -0.03, 0.06, -0.08, 0.04], jq: 0.06, realizedOverImplied: 1, ratio: null };
+const AAA_CARD_T = +yearFraction(closeUtcMs("2026-08-25"), "2026-09-18").toFixed(4);
 
 {
   const GARCH = { status: "ok", omega: 0.045, alpha: 0.05, beta: 0.9, nu: 7, lambda: -0.1, avg21Vol: 40, nextVol: 42,
@@ -204,30 +224,42 @@ const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
     engine: {
       v: 1, engine: "q1", asOf: "2026-08-25", spot: 51, atr: 1.2, rate: { r: 0.04, method: "constant", n: 0 },
       facts: [], state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich },
-      levels: { callWall: 55, putWall: 47, magnet: 50, flip: 49, maxPain: 50, atr: 1.2 }, event: null, pLaw,
+      levels: { callWall: 55, putWall: 47, magnet: 50, flip: 49, maxPain: 50, atr: 1.2 }, event: AAA_EVENT, pLaw,
+      expiries: [
+        { expiry: "2026-09-18", dte: 24, sessions: 17, hSessions: 17, T: AAA_CARD_T, forward: { F: 50.1, D: 0.9974, r: 0.04, qImpl: 0, pairs: 0, method: "rate-only" },
+          smile: { method: "svi", n: 12, fitInSpread: 0.9, rmseIvPts: 0.4, atmIv: 0.4, params: AAA_SVI, rr25: -0.03, bf25: 0.01, checks: { ok: true, minG: 0.2 } } },
+        { expiry: "2026-10-16", dte: 52, sessions: 37, hSessions: 37, T: 0.1425, smile: { method: "mixture", n: 9, atmIv: 0.41, params: { w: 0.5, s1: 0.3, s2: 0.5 } } },
+        { expiry: "2026-11-20", dte: 87, sessions: 62, hSessions: 62, T: 0.2384, smile: { method: "svi", n: 9, atmIv: 0.41, params: { a: 0.01, b: 0.06 } } },
+        { expiry: "2026-12-18", dte: 115, sessions: 82, hSessions: 82, T: 0.315, smile: { method: "flat", n: 2, atmIv: 0.41, params: { sigma: 0.41 } } },
+      ],
       structures: [], ideas: [], noTrade: null,
     },
   };
-  const put = await fetch(server.baseURL + "/api/flows/ingest?key=card%3AAAA", {
-    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST }, body: JSON.stringify(card),
+  const publish = (key, body) => fetch(server.baseURL + "/api/flows/ingest?key=" + encodeURIComponent(key), {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + INGEST }, body: JSON.stringify(body),
   });
-  ok(put.ok, `a card with an engine block and a GARCH law is published for AAA, and for no other symbol (${put.status})`);
+  const put = await publish("card:AAA", card);
+  ok(put.ok, `a card with an engine block, a GARCH law and the report it weighs is published for AAA (${put.status})`);
+  const bare = await publish("card:EEE", { ...card, ticker: "EEE", engine: { ...card.engine, event: null } });
+  ok(bare.ok, `and one with the same law and no report move for EEE, whose chain crosses the same report (${bare.status})`);
 }
 
 const recipe = (Q, p, r) => {
   const isNum = (v) => (v === null || v === undefined || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
   const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
+  const rate = eng && eng.rate ? eng.rate : null;
   const tape = p.tapeTime ? Date.parse(String(p.tapeTime).replace(" ", "T")) : NaN;
-  const asOfMs = Number.isFinite(tape) ? tape : Date.parse(p.asOf + "T20:00:00Z");
+  const read = Date.parse(p.generatedAt), close = Q.closeUtcMs(String(p.sessionDate || p.asOf || ""));
+  const asOfMs = Number.isFinite(tape) ? tape : !Number.isFinite(close) ? read : Number.isFinite(read) ? Math.min(close, read) : close;
+  const spot = p.basis && p.basis.status !== "mismatch" && isNum(p.basis.spot) !== null ? Number(p.basis.spot) : p.spot;
   const type = r.type === "P" ? "P" : "C";
-  const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv) };
-  const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot: p.spot, rate: eng && eng.rate ? eng.rate.r : null, row });
+  const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv), opposite: r.opposite };
+  const fit = Q.contractFit({ expiry: r.expiry, asOfMs, spot, rate: rate ? rate.r : null, rateMethod: rate ? rate.method : null, facts: eng ? eng.facts : [], expiries: eng ? eng.expiries : null, row });
   if (!fit) return null;
-  const setup = Q.labSetup({ asOfMs, spot: p.spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, books: [{ fit, rows: [row] }] });
+  const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [row] }] });
   const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
   return Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
 };
-const NODE_Q = { contractFit: QC.contractFit, labSetup: QC.labSetup, priceStructure: ENG.priceStructure };
 const pct0 = (v) => (v === null || v === undefined ? DASH : (v < 0 ? MINUS : "") + (Math.abs(v) * 100).toFixed(0) + "%");
 const usd = (v) => (v === null || v === undefined ? DASH : (v < 0 ? MINUS : v > 0 ? "+" : "") + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
 
@@ -260,10 +292,10 @@ try {
   };
   const factsOf = (pg = page) => pg.$$eval("#fxPop dt", (dts) =>
     Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));
-  const rowInfo = async (sel) => {
-    const text = await openInfo(page.locator(sel + " .ui-info").first());
-    const facts = await factsOf();
-    await closeInfo();
+  const rowInfo = async (sel, pg = page) => {
+    const text = await openInfo(pg.locator(sel + " .ui-info").first(), pg);
+    const facts = await factsOf(pg);
+    await closeInfo(pg);
     return { text, facts };
   };
   const statusText = async (pg = page) => flat(await pg.locator("#deskStatus").textContent());
@@ -421,9 +453,9 @@ try {
     const stale = page.locator("#dkList .dk-row[data-stale-iv]");
     ok(await stale.count() >= 1, "a contract that has not traded today is flagged on its row");
     const info = await rowInfo("#dkList .dk-row[data-stale-iv]");
-    ok(/not traded today/.test(info.facts.Cushion || ""), `and its cushion says why (${info.facts.Cushion})`);
-    ok(!(info.facts.Cushion || "").startsWith(DASH),
-       "the cushion is MARKED, not withheld — it is still the best reading available");
+    eq(info.facts.Cushion, "0.74 SD on 35.6% volatility",
+       "and its cushion is measured in the volatility inverted from its own mid, 35.6% and 0.7351 SD by scipy 1.17.1 brentq at F = S e^{rT}, breakeven 374, T = 0.065963, not in the 30% of a last trade that is not today's");
+    ok(!/not traded today|last transaction/.test(info.facts.Cushion || ""), "so it carries no caveat about a print it does not use");
     ok(await stale.count() < await rowCount(), "contracts that traded today are not flagged");
   }
 
@@ -673,6 +705,9 @@ try {
     ok(aaa && bbb, "the test holds the exact payloads the page priced");
     eq(aaa.engine && aaa.engine.status, "ok", "AAA's payload carries its card's engine block, law included");
     ok(aaa.engine.pLaw && Array.isArray(aaa.engine.pLaw.knots), "with the real-world law the card publishes");
+    eq(JSON.stringify(aaa.engine.expiries), JSON.stringify([{ expiry: "2026-09-18", T: AAA_CARD_T, smile: { method: "svi", params: AAA_SVI } }]),
+       "and, of the four expiries the card lists, only the one with an SVI smile, cut to the expiry, its year fraction, the method and the five parameters the desk needs to carry the shape over");
+    ok(JSON.stringify(aaa.engine.expiries).length < 200, `at ${JSON.stringify(aaa.engine.expiries).length} bytes for that expiry, not the whole summary the card holds`);
     eq(bbb.engine && bbb.engine.status, "unavailable", "BBB has no card, and its payload says so rather than inventing a law");
 
     for (const p of [aaa, bbb]) {
@@ -685,6 +720,8 @@ try {
         eq(inPage, JSON.stringify(node),
            `${r.ticker} ${r.strike} ${r.strategy}: the page's engine prices this line to the byte the server module does`);
         ok(node && node.prob && Number.isFinite(node.prob.popQ), `and it is a priced line (${r.ticker} ${r.strike})`);
+        if (p === aaa) ok(node.gradeWhy.includes("fit.card-shape"), `and AAA's line is priced on the card's smile shape, which the page can only do if it was sent the expiries (${node.gradeWhy.join(", ")})`);
+        else eq(node.gradeWhy.includes("fit.card-shape"), false, "while a name with no card has no shape to borrow");
         const cells = await probe.$eval(`#dkList .dk-row[data-t="${r.ticker}"][data-strike="${r.strike}"][data-strategy="${r.strategy}"]`, (n) => ({
           pq: n.querySelector(".dk-pq").lastChild.textContent, pp: n.querySelector(".dk-pp").lastChild.textContent, ev: n.querySelector(".dk-ev").lastChild.textContent,
         }));
@@ -706,8 +743,10 @@ try {
     const bText = await popText(probe);
     ok(/No real-world figure: no card is published for BBB/.test(bText),
        `the line says why its real-world figures are absent (${bText.slice(0, 80)}…)`);
-    ok(/same engine as the strategy lab/.test(bText) && /flat slice/.test(bText) && /skew correction is not in this number/.test(bText),
+    ok(/same engine as the strategy lab/.test(bText) && /flat slice/.test(bText) && /re-levelled to this contract's own implied volatility/.test(bText),
        "and every line's disclosure names its engine and the approximation it makes");
+    ok(/Priced at r 4\.00% \(the constant fallback, not measured\), dividend yield 0\.00%/.test(bText), `BBB has no card, so its rate is the constant fallback and the line says so (${bText.slice(bText.indexOf("Carry"), bText.indexOf("Carry") + 90)})`);
+    ok(/Flat at this contract's volatility: the card lists no smile near this expiry\./.test(bText), "and its smile is flat, and says why");
     await probe.keyboard.press("Escape");
 
     const lab = await probe.locator('#dkList .dk-row[data-t="AAA"][data-strategy="csp"] .dk-k').first().getAttribute("href");
@@ -747,6 +786,69 @@ try {
       await probe.locator("#dkTenor .ui-seg-i", { hasText: "All" }).click();
     }
     await probe.close();
+  }
+
+  {
+    const got = [];
+    const wired = await context.newPage();
+    wired.on("pageerror", (e) => pageErrors.push(String(e)));
+    wired.on("response", async (res) => {
+      if (!res.url().includes("/api/flows/chain")) return;
+      try { got.push(await res.json()); } catch { return; }
+    });
+    await wired.setViewportSize({ width: 1440, height: 1000 });
+    await wired.goto(server.baseURL + "/flows/desk/?t=AAA,EEE,OPP&strategy=both&rank=annualized", { waitUntil: "domcontentloaded" });
+    await settle(8, wired);
+    const aaa = got.find((p) => p && p.ticker === "AAA"), eee = got.find((p) => p && p.ticker === "EEE"), opp = got.find((p) => p && p.ticker === "OPP");
+    ok(aaa && eee && opp, "the test holds the exact payloads the page priced");
+
+    ok(eee.rows.length === 2 && eee.rows.every((r) => r.crossesEarnings === true), "EEE's two lines expire after its 2026-09-10 report");
+    eq(eee.engine.event, null, "and its card holds no report move to weigh it");
+    for (const r of eee.rows) {
+      const node = recipe(NODE_Q, eee, r);
+      eq(node.prob.popP, null, `EEE ${r.strike}: the engine gives no real-world chance for a line that outlives a report the card cannot weigh`);
+      eq(node.ev.p, null, "and no real-world EV");
+      eq(node.world.why, "world.event-missing", "and names why");
+      ok(Number.isFinite(node.prob.popQ) && Number.isFinite(node.ev.q), "while the implied figures, which need no card, stay");
+      const sel = `#dkList .dk-row[data-t="EEE"][data-strike="${r.strike}"]`;
+      const cells = await wired.$eval(sel, (n) => ({
+        why: n.dataset.why, earn: n.dataset.earn, pq: n.querySelector(".dk-pq").lastChild.textContent, pp: n.querySelector(".dk-pp").lastChild.textContent,
+        ev: n.querySelector(".dk-ev").lastChild.textContent, ppTitle: n.querySelector(".dk-pp").title, evTitle: n.querySelector(".dk-ev").title,
+      }));
+      eq(cells.why, "world.event-missing", "the row carries the code");
+      eq(cells.earn, "crosses", "beside its earnings glyph");
+      eq([cells.pp, cells.ev].join("|"), [DASH, DASH].join("|"), "and prints an em dash, not a real-world Win % or EV");
+      ok(/^\d+%$/.test(cells.pq), `while the implied chance stays (${cells.pq})`);
+      ok(/An earnings report falls inside this expiry and the card holds no report move to weigh it/.test(cells.ppTitle) && cells.ppTitle === cells.evTitle,
+         `and both dashes say why on hover (${cells.ppTitle.slice(0, 70)}…)`);
+      const info = await rowInfo(sel, wired);
+      ok(/No real-world figure: An earnings report falls inside this expiry/.test(info.text), "and so does the disclosure");
+    }
+    ok(aaa.rows.length === 2 && aaa.rows.every((r) => r.crossesEarnings === true && recipe(NODE_Q, aaa, r).prob.popP !== null),
+       "AAA, whose card carries the seven report moves, is priced in the real world on the same chain and the same report");
+
+    const bad = await wired.$$eval("#dkList .dk-row", (rs) => rs.flatMap((r) => [...r.querySelectorAll(".dk-pq, .dk-pp, .dk-ev")]
+      .filter((c) => c.lastChild.textContent.trim() === "—" && !(c.title || "").trim()).map((c) => r.dataset.t + " " + r.dataset.strike)));
+    eq(bad.length, 0, `no dash on the desk is bare: every one carries a reason (${bad.join(", ")})`);
+
+    const rowOf = (type, strike) => opp.rows.find((r) => r.type === type && r.strike === strike);
+    same(rowOf("C", 95).opposite, { bid: 0.62, ask: 0.68 }, "OPP's in-the-money 95 call arrives with the quote of the 95 put beside it");
+    same(rowOf("P", 105).opposite, { bid: 0.85, ask: 0.91 }, "and its in-the-money 105 put with the 105 call's");
+    ok(rowOf("P", 95).opposite === undefined && rowOf("C", 105).opposite === undefined, "while the out-of-the-money lines carry nothing, since they are read from their own quote");
+    ok(JSON.stringify(opp.rows).length > 0 && opp.engine.status === "unavailable", "OPP has no card, so its rate is the constant fallback and its smile flat");
+
+    for (const [type, strike, iv, own] of [["C", 95, "24.3%", "26.4%"], ["P", 105, "24.6%", "23.3%"]]) {
+      const r = rowOf(type, strike);
+      const node = recipe(NODE_Q, opp, r);
+      const inPage = await wired.evaluate(({ src, p, r }) => JSON.stringify(new Function("return " + src)()(window.FlowsQuant, p, r)), { src: recipe.toString(), p: opp, r });
+      eq(inPage, JSON.stringify(node), `OPP ${strike}${type}: the page prices the in-the-money line to the byte the server module does, opposite quote included`);
+      const sel = `#dkList .dk-row[data-t="OPP"][data-strike="${strike}"][data-strategy="${type === "C" ? "cc" : "csp"}"]`;
+      const info = await rowInfo(sel, wired);
+      ok(info.facts.Volatility.startsWith(iv), `${strike}${type} is priced on ${iv}, scipy brentq on the ${type === "C" ? "put" : "call"}'s mid at F = S e^{rT}, not on the ${own} its own wide quote inverts to (${info.facts.Volatility})`);
+      ok(new RegExp("read from the out-of-the-money " + (type === "C" ? "put" : "call") + " at this strike").test(info.facts.Smile), `and its disclosure says whose quote that is (${info.facts.Smile})`);
+      ok(/Priced at r 4\.00% \(the constant fallback, not measured\)/.test(info.facts.Carry), `and that it carries the fallback rate (${info.facts.Carry})`);
+    }
+    await wired.close();
   }
 
   {
@@ -1258,7 +1360,9 @@ try {
     `a header that stays put while the rows scroll, a quote age driven off a faked clock to prove it advances on its ` +
     `own, two select options that share one key on the wire and cost one round trip between them, a superseded slice ` +
     `that loses to the one the reader actually asked for, and three payloads a stub cannot produce — no age header, ` +
-    `no counts, no readable body — each answered with the sentence that says which silence it is`);
+    `no counts, no readable body — each answered with the sentence that says which silence it is, the card's smile ` +
+    `expiries cut to what the desk needs, the other side's quote sent with every in-the-money line, and an earnings ` +
+    `report the card cannot weigh giving a dash with its reason`);
 } finally {
   await browser.close();
   await server.stop();

@@ -219,9 +219,11 @@ try {
 
     const broken = page.locator(rowSel("AAA", 95, "2026-10-02"));
     eq(flat(await broken.locator(".dk-pq").textContent()).endsWith(DASH), true, "a line whose bid sits below intrinsic value has no implied chance: a dash");
-    ok(/mid is below intrinsic value/.test(await broken.locator(".dk-pq").getAttribute("title")), "and the dash says why, in a tooltip, instead of being blank");
-    ok(/mid is below intrinsic value/.test(await broken.locator(".dk-pp").getAttribute("title")) && /mid is below intrinsic value/.test(await broken.locator(".dk-ev").getAttribute("title")),
-       "the real-world chance and the EV give the same reason");
+    const brokenWhy = await broken.locator(".dk-pq").getAttribute("title");
+    ok(/The bid \(\$3\.20\) is below the option's discounted intrinsic value \(\$5\.\d\d\), so no volatility is consistent with it/.test(brokenWhy), `and the dash says why, in the engine's own words with the numbers it compared (${brokenWhy})`);
+    eq(await broken.getAttribute("data-why"), "iv.below-intrinsic", "and the row carries the engine's code for it");
+    eq(await broken.locator(".dk-pp").getAttribute("title"), brokenWhy, "the real-world chance gives the same reason");
+    eq(await broken.locator(".dk-ev").getAttribute("title"), brokenWhy, "and so does the EV");
     const noCard = page.locator(rowSel("BBB", 47, "2026-10-16", "csp"));
     eq(flat(await noCard.locator(".dk-pp").textContent()).endsWith(DASH), true, "a name with no card has no real-world chance: a dash");
     ok(/No real-world figure: no card is published for BBB/.test(await noCard.locator(".dk-pp").getAttribute("title")), "and its tooltip says there is no card");
@@ -232,7 +234,8 @@ try {
     eq(plot, "Not plotted, for want of an engine reading: 1.", "a line with no engine reading is counted under the frontier, not dropped without a word");
 
     const below = await lineInfo(page, rowSel("AAA", 95, "2026-10-02"));
-    ok(/The bid is below intrinsic: this quote cannot coexist with this price\./.test(below.text), "a bid under intrinsic value is called impossible, not described as time value");
+    ok(/The bid is below the option's intrinsic value, so none of the premium is time value/.test(below.text), "a bid under intrinsic value says none of the premium is time value, not that it includes some");
+    ok(/The bid \(\$3\.20\) is below the option's discounted intrinsic value/.test(below.text), "beside the engine's own reason it could not be priced");
     ok(!/Includes/.test(below.text) && !/time value is \$0/.test(below.text), "and no longer says 'includes $500 of intrinsic value ... time value is $0'");
     ok(/already through the strike/.test(below.facts["If called"]), `and a call already through the strike says so instead of 'has to run -0.9 SD' (${below.facts["If called"]})`);
     ok(!/has to run/.test(below.facts["If called"]), "with no 'has to run' on it");
@@ -256,6 +259,57 @@ try {
     ok(Math.abs(week - ann * 7 / 365) < 0.02, `and so is the yield per week (${otm.facts["Per week"]} = ${ann}% x 7/365)`);
     ok(/inverted from the mid/.test(otm.facts.Volatility), `the disclosure says which volatility delta, chance and EV use (${otm.facts.Volatility})`);
     ok(/on \d+(\.\d)?% volatility/.test(otm.facts.Cushion), "and the cushion states the volatility it is measured in");
+    await page.close();
+  }
+
+  {
+    const nop = chain({ ticker: "NOP", spot: 100, lines: [{ type: "C", strike: 95, expiry: "2026-10-09", bid: 4.2, ask: 4.3 }] });
+    const opp = chain({ ticker: "OPP", spot: 100, lines: [{ type: "C", strike: 95, expiry: "2026-10-09", bid: 4.2, ask: 4.3, opposite: { bid: 0.9, ask: 0.96 } }] });
+    const ern = chain({ ticker: "ERN", spot: 100, engine: engineBlock("ERN", "2026-09-29", 100), lines: [
+      { type: "P", strike: 95, expiry: "2026-10-16", bid: 1.1, earnings: true }, { type: "P", strike: 94, expiry: "2026-10-16", bid: 0.9, earnings: false }] });
+    const csh = chain({ ticker: "CSH", spot: 100, lines: [{ type: "P", strike: 95, expiry: "2026-10-16", bid: 1.1, iv: 0.9, volume: 0, ivMid: 0.3 }] });
+    const cry = chain({ ticker: "CRY", spot: 100, engine: engineBlock("CRY", "2026-09-29", 100, { facts: [{ id: "carry.implied", v: 0.03, u: "frac", g: 3 }] }), lines: [
+      { type: "P", strike: 95, expiry: "2026-10-16", bid: 1.1, ask: 1.14 }, { type: "C", strike: 105, expiry: "2026-10-16", bid: 0.9, ask: 0.94 }] });
+    const page = await openDesk(browser, { payloads: { NOP: nop, OPP: opp, ERN: ern, CSH: csh, CRY: cry }, query: "?t=NOP,OPP,ERN,CSH,CRY&strategy=both", errors });
+    await ready(page, 7);
+    const sel = (t, k) => `#dkList .dk-row[data-t="${t}"][data-strike="${k}"]`;
+
+    const bare = page.locator(sel("NOP", 95));
+    eq(await bare.getAttribute("data-why"), "iv.below-intrinsic", "a call whose bid is under the discounted intrinsic floor, with no other side to read, carries the engine's code on its row");
+    ok(/The bid \(\$4\.20\) is below the option's discounted intrinsic value \(\$5\.10\)/.test(await bare.locator(".dk-pq").getAttribute("title")), "and its dash says which numbers were compared: 4.20 against a floor of 5.10, from scipy at S 100, K 95, r 4%, ten days");
+    const via = page.locator(sel("OPP", 95));
+    eq(await via.getAttribute("data-why"), "model.none", "the same quote with the 95 put beside it is priced, and the only dash on it is the real-world one, which a name with no card cannot have");
+    ok(/^\d+%$/.test(flat(await via.locator(".dk-pq").textContent()).replace(/^Win % \(implied\)\s*/, "")), "with an implied chance on the row");
+    const viaInfo = await lineInfo(page, sel("OPP", 95));
+    ok(viaInfo.facts.Volatility.startsWith("43.0%"), `on 43.0%, the volatility scipy inverts from the put's 0.93 mid, and not on a number from the call's own quote (${viaInfo.facts.Volatility})`);
+    ok(/read from the out-of-the-money put at this strike/.test(viaInfo.facts.Smile), `and says whose quote it is (${viaInfo.facts.Smile})`);
+    ok(/Priced at r 4\.00% \(the constant fallback, not measured\), dividend yield 0\.00%/.test(viaInfo.facts.Carry), `and that no card gave the rate (${viaInfo.facts.Carry})`);
+    ok(/none of the premium is time value/.test(viaInfo.text) && !/Includes/.test(viaInfo.text), "and the intrinsic note follows the engine's time value for the short leg, which is negative at a 4.20 bid against 5.00 of intrinsic value, so it says the premium is below intrinsic and does not say it includes some");
+
+    const crossing = page.locator(sel("ERN", 95)), clear = page.locator(sel("ERN", 94));
+    eq(await crossing.getAttribute("data-why"), "world.event-missing", "a line that outlives a report the card cannot weigh carries that code");
+    eq(flat(await crossing.locator(".dk-pp").textContent()).endsWith(DASH) && flat(await crossing.locator(".dk-ev").textContent()).endsWith(DASH), true, "and prints no real-world Win % or EV");
+    ok(/An earnings report falls inside this expiry and the card holds no report move to weigh it/.test(await crossing.locator(".dk-pp").getAttribute("title")), "with the engine's sentence on hover");
+    ok(/^\d+%$/.test(flat(await crossing.locator(".dk-pq").textContent()).replace(/^Win % \(implied\)\s*/, "")), "while the implied chance stays");
+    eq(await clear.getAttribute("data-why"), null, "the same chain's line that expires before the report is priced in the real world");
+    ok(!flat(await clear.locator(".dk-pp").textContent()).endsWith(DASH), "with a real-world Win %");
+    const crossInfo = await lineInfo(page, sel("ERN", 95));
+    ok(/No real-world figure: An earnings report falls inside this expiry/.test(crossInfo.text), "and the disclosure names the reason");
+
+    const cush = await lineInfo(page, sel("CSH", 95));
+    eq(cush.facts.Cushion.replace(/^[\d.]+ SD /, ""), "on 30.0% volatility", "a cushion is measured in the volatility inverted from the mid the row states, 30.0%, and not in a stale 90.0% last trade");
+    ok(!/traded today|last transaction/.test(cush.facts.Cushion), "with no caveat about the print it does not use");
+
+    const put = await lineInfo(page, sel("CRY", 95)), call = await lineInfo(page, sel("CRY", 105));
+    ok(put.facts.Volatility.startsWith("35.7%") && call.facts.Volatility.startsWith("30.7%"), `a card that carries a 3% dividend yield moves the volatility each mid inverts to: 35.7% and 30.7%, not the 36.2% and 30.2% of no yield (scipy brentq at F = S e^{(r - q)T}, T = 17/365): ${put.facts.Volatility.slice(0, 6)} and ${call.facts.Volatility.slice(0, 6)}`);
+    ok(/dividend yield 3\.00%/.test(put.facts.Carry) && /dividend yield 3\.00%/.test(call.facts.Carry), `and both lines say the yield they were priced at (${call.facts.Carry.slice(0, 90)})`);
+    ok(/The shares are credited \$0\.14 a share of dividends to expiry/.test(call.facts.Carry), "the covered call says what the shares are credited, 0.13989 = S (e^{rT} - e^{(r - q)T})");
+    ok(!/shares are credited/.test(put.facts.Carry), "and the put, which holds no shares, does not");
+
+    for (const [t, k] of [["NOP", 95], ["OPP", 95], ["ERN", 95], ["ERN", 94], ["CSH", 95]]) {
+      const grade = (await lineInfo(page, sel(t, k))).facts.Grade;
+      ok(!/\b(fit|liq|edge|model|event|card|risk|world|iv)\.[a-z-]+/.test(grade), `${t} ${k}: the grade line is words, not codes (${grade.slice(0, 90)})`);
+    }
     await page.close();
   }
 
@@ -419,13 +473,14 @@ try {
     const spot = 100;
     const line = { type: "P", strike: 96, expiry: "2026-12-18", bid: 0.4, ask: 0.42 };
     const cases = [
+      ["on the half day after Thanksgiving the session ends at 1pm EST (18:00Z), not at 4pm", "2026-11-27T23:00:00Z", "2026-11-27T18:00:00Z"],
       ["after a winter close, the origin is 4pm EST (21:00Z), not the summer 20:00Z", "2026-12-17T23:00:00Z", "2026-12-17T21:00:00Z"],
       ["a read before the close prices from the read, not from a close that has not happened", "2026-12-17T15:00:00Z", "2026-12-17T15:00:00Z"],
       ["a read after a summer close still starts from 4pm EDT (20:00Z)", "2026-09-29T23:00:00Z", "2026-09-29T20:00:00Z"],
     ];
     for (const [why, generatedAt, origin] of cases) {
       const day = generatedAt.slice(0, 10);
-      const payload = chain({ ticker: "ORG", spot, asOf: day, lines: [{ ...line, expiry: day.startsWith("2026-12") ? "2026-12-18" : "2026-10-02" }], source: "daily-close", extra: { generatedAt } });
+      const payload = chain({ ticker: "ORG", spot, asOf: day, lines: [{ ...line, expiry: day.startsWith("2026-1") && day >= "2026-11" ? "2026-12-18" : "2026-10-02" }], source: "daily-close", extra: { generatedAt } });
       const page = await openDesk(browser, { payloads: { ORG: payload }, query: "?t=ORG&strategy=csp", errors });
       await ready(page, 1);
       const info = await lineInfo(page, "#dkList .dk-row");
@@ -484,4 +539,6 @@ console.log(`✓ flows-desk-client: ${checks} assertions — the frontier's Pare
   `a square-root axis that says so and whose ticks are placed on it, covered calls plotted at one minus their delta beside puts at theirs, ` +
   `the two chances named for what they are, a tooltip on every dash and on the EV, a bid under intrinsic value called impossible, ` +
   `one capital basis per line, a rebased or mismatched chain announced and never ranked, the plan computed over the tenor window, ` +
-  `a balance that refuses 25,5k and round-trips its cents, tenor buckets pinned by label at the day, and the smile's volatility basis stated, and a quote origin that follows the Eastern clock and never the future`);
+  `a balance that refuses 25,5k and round-trips its cents, tenor buckets pinned by label at the day, and the smile's volatility basis stated, and a quote origin that follows the Eastern clock, half days included, and never the future, ` +
+  `a dash that carries the engine's reason and code, an in-the-money line read from the other side's quote, an earnings gate, ` +
+  `the rate and dividend yield each line was priced at, and a grade in words`);

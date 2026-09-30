@@ -2,16 +2,21 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import * as QC from "../shared/flows-quant-card.js";
 import * as ENG from "../shared/flows-quant-engine.js";
+import { closeUtcMs } from "../shared/flows-quant-time.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import * as WORLD from "../shared/flows-quant-world.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
+import { midImpliedVol, sigmaMove } from "../shared/flows-premium.js";
 
 export const REPO = new URL("../", import.meta.url);
 const DAY = 86400000;
 
-export const NODE_Q = { contractFit: QC.contractFit, labSetup: QC.labSetup, priceStructure: ENG.priceStructure };
+export const NODE_Q = {
+  contractFit: QC.contractFit, contractDiagnosis: QC.contractDiagnosis, codeText: QC.codeText, labSetup: QC.labSetup,
+  priceStructure: ENG.priceStructure, closeUtcMs,
+};
 
-export function engineBlock(ticker, sessionDate, start = 50) {
+export function engineBlock(ticker, sessionDate, start = 50, extra = {}) {
   const GARCH = { status: "ok", omega: 0.045, alpha: 0.05, beta: 0.9, nu: 7, lambda: -0.1, avg21Vol: 40, nextVol: 42,
     sigma2Next: Math.pow(0.42, 2) / 252, persistence: 0.95, grade: 3, why: [], converged: true };
   const rng = WORLD.xoshiro128ss(ticker.toLowerCase());
@@ -19,13 +24,13 @@ export function engineBlock(ticker, sessionDate, start = 50) {
   for (let i = 0; i < 260; i++) closes.push(closes[closes.length - 1] * Math.exp(0.025 * WORLD.normalDraw(rng)));
   const pLaw = QC.compactLaw(QP.garchLaw({ garch: GARCH, ticker, sessionDate, closes, rate: 0.04, paths: 2048 }));
   return { status: "ok", rate: { r: 0.04, method: "constant", n: 0 }, facts: [],
-    state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, pLaw, event: null, stale: false };
+    state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, pLaw, event: null, stale: false, ...extra };
 }
 
 export const optionSymbol = (ticker, expiry, type, strike) =>
   ticker + expiry.slice(2).replace(/-/g, "") + type + String(Math.round(strike * 1000)).padStart(8, "0");
 
-export function sale({ ticker, spot, asOf, type, strike, expiry, bid, ask, iv = 0.34, oi = 500, volume = 50, contract = true, earnings = false }) {
+export function sale({ ticker, spot, asOf, type, strike, expiry, bid, ask, iv = 0.34, oi = 500, volume = 50, contract = true, earnings = false, opposite = null, ivMid = undefined }) {
   const a = ask === undefined ? +(bid + 0.02).toFixed(2) : ask;
   const strategy = type === "P" ? "csp" : "cc";
   const days = Math.round((Date.parse(expiry) - Date.parse(asOf)) / DAY);
@@ -48,7 +53,16 @@ export function sale({ ticker, spot, asOf, type, strike, expiry, bid, ask, iv = 
     moneyness: strike / spot - 1, iv, ivTraded: volume > 0, oi, oiChange: 0, volume,
     crossesEarnings: earnings,
   };
-  if (contract) Object.assign(row, { intrinsic, extrinsic, annualizedGross: gross });
+  if (contract) {
+    const years = days / 365;
+    const mid = midImpliedVol({ spot, strike, type, mid: row.mid, years });
+    const vol = ivMid === undefined ? mid : ivMid;
+    Object.assign(row, {
+      intrinsic, extrinsic, annualizedGross: gross, ivMid: vol,
+      cushionSigmas: sigmaMove(spot, breakeven, vol, years), capSigmas: strategy === "cc" ? sigmaMove(strike, spot, vol, years) : null,
+    });
+  }
+  if (opposite) row.opposite = opposite;
   return row;
 }
 
