@@ -1,12 +1,12 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
 import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance } from "./flows-quant-smile.js";
-import { impliedMove, lawFromSlice, lawBinned, interpolateBinned, driftNeutralBinned } from "./flows-quant-density.js";
+import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
   expiryFromFit, setupEngine,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-structures.js";
-import { etDayOf, calendarDays, yearFraction, sessionsBetween, isMonthly } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
 
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
@@ -566,7 +566,7 @@ export function contractFit(input) {
   if (!fin(iv) || !(iv > 0)) return null;
   const day = etDayOf(asOfMs);
   return {
-    expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), monthly: isMonthly(expiry),
+    expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), hSessions: remainingSessions(asOfMs, expiry), monthly: isMonthly(expiry),
     forward: { F, D, r, q: 0, pairs: 0, method: "rate-only" },
     slice: { method: "flat", T, F, D, params: { sigma: iv }, n: 1, fitInSpread: null, rmseIvPts: null, why: "fit.contract-iv" },
     points: 1,
@@ -590,33 +590,10 @@ export function sliceFromSummary(e) {
   return asSlice({ method: e.smile.method, T: e.T, F: e.forward.F, D: e.forward.D, params });
 }
 
-function aggregatedSd(params, h) {
-  if (!params || !fin(params.sigma2Next)) return Math.sqrt(h);
-  const persistence = (params.alpha || 0) + (params.gamma || 0) / 2 + (params.beta || 0);
-  const longRun = persistence < 1 && fin(params.omega) ? params.omega / (1 - persistence) : params.sigma2Next;
-  const avg = Math.abs(1 - persistence) < 1e-9 ? params.sigma2Next
-    : longRun + (params.sigma2Next - longRun) * (1 - Math.pow(persistence, h)) / (h * (1 - persistence));
-  return Math.sqrt(Math.max(avg, 0) * h);
-}
-
-export function lawAtSessions(pLaw, { sessions, forwardOverSpot = 1, S }) {
-  if (!pLaw || !Array.isArray(pLaw.knots) || !pLaw.knots.length || !(S > 0)) return null;
-  const h = Math.max(1, sessions || 1);
-  const ks = pLaw.knots.slice().sort((a, b) => a.h - b.h);
-  let lower = ks[0], upper = ks[ks.length - 1];
-  for (const k of ks) { if (k.h <= h) lower = k; }
-  for (let i = ks.length - 1; i >= 0; i--) { if (ks[i].h >= h) upper = ks[i]; }
-  if (h <= ks[0].h) { lower = ks[0]; upper = ks[0]; }
-  if (h >= ks[ks.length - 1].h) { lower = ks[ks.length - 1]; upper = lower; }
-  const sd = (x) => aggregatedSd(pLaw.params, x);
-  let bins;
-  if (lower.h === upper.h) {
-    const scale = sd(h) / sd(lower.h);
-    const re = (v) => (v === null ? null : v === 0 ? 0 : Math.exp(Math.log(v) * scale));
-    bins = driftNeutralBinned({ edges: lower.edges.map(re), means: lower.means.map(re) }, forwardOverSpot);
-  } else {
-    bins = interpolateBinned({ lower, upper, h, sd, forwardOverSpot });
-  }
+export function lawAtSessions(pLaw, { sessions, hSessions, forwardOverSpot = 1, S }) {
+  if (!pLaw || !(S > 0)) return null;
+  const h = fin(hSessions) ? Math.max(ENGINE_LINES.MIN_HORIZON_SESSIONS, hSessions) : Math.max(1, sessions || 1);
+  const bins = binsAtHorizon(pLaw, h, forwardOverSpot);
   return bins ? lawBinned({ S, edges: bins.edges, means: bins.means }) : null;
 }
 
@@ -640,7 +617,7 @@ export function repriceStructure(input) {
   const prof = expiryProfile(priced, cost);
   const qLaw = lawFromSlice(slice);
   const eq = lawExpect(qLaw, prof.pieces);
-  const pLaw = lawAtSessions(block.pLaw, { sessions: exp.sessions, forwardOverSpot: slice.F / S, S });
+  const pLaw = lawAtSessions(block.pLaw, { sessions: exp.sessions, hSessions: exp.hSessions, forwardOverSpot: slice.F / S, S });
   const ep = pLaw ? lawExpect(pLaw, prof.pieces) : null;
   const lot = 100;
   return {

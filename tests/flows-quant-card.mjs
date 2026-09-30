@@ -161,7 +161,8 @@ const CLOSES = (() => { const c = [100]; const rng = WORLD.xoshiro128ss("closes"
 
 {
   const law = QP.garchLaw({ garch: GARCH, ticker: "SYN", sessionDate: SESSION, closes: CLOSES, rate: R, paths: 2048 });
-  ok(law.model === "garch" && law.grade === 3 && law.knots.length === 6, "a graded GARCH fit is simulated into six horizons");
+  eq(law.knots.map((k) => k.h), [1, 2, 3, 5, 10, 21, 42, 63, 126], "a graded GARCH fit is simulated into nine horizons, with knots at 1, 2 and 3 sessions so a weekly is never a power-scaled copy of the 5-session law");
+  ok(law.model === "garch" && law.grade === 3, "and is graded");
   for (const k of law.knots) {
     near(DENSITY.lawMean(DENSITY.lawBinned({ S: 1, edges: k.edges, means: k.means })), Math.exp(R * k.h / 252), 1e-9,
       `the ${k.h}-session law is drift-neutral to the risk-free forward`);
@@ -269,7 +270,7 @@ const FACT_INPUT = () => ({
   eq(block.ideas, direct.ideas, "with the engine's ranking");
   ok(block.ideas.every((id) => block.structures.some((s) => s.id === id)), "and every idea id resolves to a published structure");
   eq(JSON.stringify(QC.runCardEngine(input)), JSON.stringify(block), "the block is byte-identical on a rerun");
-  ok(block.pLaw && block.pLaw.knots.length === 6 && QC.runCardEngine({ ...input, publishLaw: false }).pLaw === null,
+  ok(block.pLaw && block.pLaw.knots.length === 9 && QC.runCardEngine({ ...input, publishLaw: false }).pLaw === null,
      "the law rides the card and is left off when the caller already holds it");
 
   const idea = block.structures.find((s) => new Set(s.legs.map((l) => l.expiry)).size === 1);

@@ -384,7 +384,7 @@ export function binnedFromLognormal(input) {
 
 export function binnedFromSamples(input) {
   const n = input.bins || LAW_BINS;
-  const xs = input.logReturns.slice().sort((a, b) => a - b);
+  const xs = input.presorted ? input.logReturns : input.logReturns.slice().sort((a, b) => a - b);
   const N = xs.length;
   if (N < n * 2 || N % n) return null;
   const per = N / n;
@@ -452,6 +452,36 @@ export function interpolateBinned(input) {
   const edges = lower.edges.map((e, i) => mix(e, upper.edges[i]));
   const means = lower.means.map((m, i) => mix(m, upper.means[i]));
   return driftNeutralBinned({ edges, means }, fwd);
+}
+
+export function garchAggregatedSd(params, h) {
+  if (!params || !fin(params.sigma2Next) || !(h > 0)) return null;
+  const persistence = (params.alpha || 0) + (params.gamma || 0) / 2 + (params.beta || 0);
+  const longRun = persistence < 1 && fin(params.omega) ? params.omega / (1 - persistence) : params.sigma2Next;
+  const avg = Math.abs(1 - persistence) < 1e-9 ? params.sigma2Next
+    : longRun + (params.sigma2Next - longRun) * (1 - Math.pow(persistence, h)) / (h * (1 - persistence));
+  return Math.sqrt(Math.max(avg, 0) * h);
+}
+
+export function horizonSd(params) {
+  return params && fin(params.sigma2Next) ? (h) => garchAggregatedSd(params, h) : (h) => Math.sqrt(h);
+}
+
+export function binsAtHorizon(pLaw, h, forwardOverSpot) {
+  if (!pLaw || !Array.isArray(pLaw.knots) || !pLaw.knots.length) return null;
+  const ks = pLaw.knots.slice().sort((a, b) => a.h - b.h);
+  const sd = horizonSd(pLaw.params);
+  let lower = ks[0], upper = ks[ks.length - 1];
+  for (const k of ks) { if (k.h <= h) lower = k; }
+  for (let i = ks.length - 1; i >= 0; i--) { if (ks[i].h >= h) upper = ks[i]; }
+  if (h <= ks[0].h) { lower = ks[0]; upper = ks[0]; }
+  if (h >= ks[ks.length - 1].h) { lower = ks[ks.length - 1]; upper = lower; }
+  if (lower.h === upper.h) {
+    const scale = sd(h) / sd(lower.h);
+    const re = (v) => (v === null ? null : v === 0 ? 0 : Math.exp(Math.log(v) * scale));
+    return driftNeutralBinned({ edges: lower.edges.map(re), means: lower.means.map(re) }, forwardOverSpot);
+  }
+  return interpolateBinned({ lower, upper, h, sd, forwardOverSpot });
 }
 
 export function overlayJumps(input) {

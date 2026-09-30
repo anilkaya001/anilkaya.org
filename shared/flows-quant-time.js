@@ -128,6 +128,26 @@ export function closeUtcMs(day) {
   return p.t + (closeEt + (usDst(p.y, p.m, p.d) ? 4 : 5)) * 3600000;
 }
 
+export function openUtcMs(day) {
+  const p = parseDay(day);
+  if (!p) return null;
+  return p.t + (9.5 + (usDst(p.y, p.m, p.d) ? 4 : 5)) * 3600000;
+}
+
+export function sessionFractionLeft(asOfMs, day) {
+  const p = parseDay(day);
+  if (!p || !isSession(day) || typeof asOfMs !== "number" || !Number.isFinite(asOfMs)) return 0;
+  const open = openUtcMs(day), close = closeUtcMs(day);
+  return Math.min(1, Math.max(0, (close - asOfMs) / (close - open)));
+}
+
+export function remainingSessions(asOfMs, expiryDay) {
+  if (typeof asOfMs !== "number" || !Number.isFinite(asOfMs) || !parseDay(expiryDay)) return null;
+  const today = etDayOf(asOfMs);
+  if (expiryDay < today) return 0;
+  return sessionFractionLeft(asOfMs, today) + sessionsBetween(today, expiryDay);
+}
+
 export function yearFraction(asOfMs, expiryDay) {
   const close = closeUtcMs(expiryDay);
   if (close === null || typeof asOfMs !== "number" || !Number.isFinite(asOfMs)) return null;

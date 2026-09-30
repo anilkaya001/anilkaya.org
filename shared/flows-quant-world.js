@@ -1,10 +1,11 @@
 import { normInv } from "./flows-quant-bs.js";
-import { skewtConstants, skewtDensity, garchAverageVariance as garchAverageVarianceRaw, GARCH_EWMA_LAMBDA } from "./flows-garch.js";
-import { integrate, binnedFromSamples, driftNeutralBinned, LAW_BINS } from "./flows-quant-density.js";
+import { skewtConstants, skewtDensity, lnGamma, garchAverageVariance as garchAverageVarianceRaw, GARCH_EWMA_LAMBDA } from "./flows-garch.js";
+import { integrate, binnedFromSamples, driftNeutralBinned, garchAggregatedSd, lawBinned, lawQuantile, LAW_BINS } from "./flows-quant-density.js";
 
 export const WORLD_LINES = Object.freeze({
-  PATHS: 8192,
-  HORIZONS: Object.freeze([5, 10, 21, 42, 63, 126]),
+  PATHS: 32768,
+  MC_PATHS: 8192,
+  HORIZONS: Object.freeze([1, 2, 3, 5, 10, 21, 42, 63, 126]),
   ANNUAL_SESSIONS: 252,
   ENGINE_VERSION: "q1",
 });
@@ -104,12 +105,7 @@ export function garchAverageVariance(input) {
   return garchAverageVarianceRaw(next, longRun, persistence, sessions);
 }
 
-export function aggregatedSd(params, h) {
-  const persistence = params.alpha + (params.gamma || 0) / 2 + params.beta;
-  const longRun = persistence < 1 ? params.omega / (1 - persistence) : params.sigma2Next;
-  const avg = garchAverageVarianceRaw(params.sigma2Next, longRun, persistence, h);
-  return avg === null ? null : Math.sqrt(avg * h);
-}
+export const aggregatedSd = garchAggregatedSd;
 
 export function simulateGjr(params, opts = {}) {
   const n = opts.paths || WORLD_LINES.PATHS;
@@ -136,10 +132,206 @@ export function simulateGjr(params, opts = {}) {
   return out;
 }
 
-export function binnedLawsFromSimulation(sim, forwards) {
+function betaContinuedFraction(a, b, x) {
+  const TINY = 1e-300;
+  const qab = a + b, qap = a + 1, qam = a - 1;
+  let c = 1, d = 1 - qab * x / qap;
+  if (Math.abs(d) < TINY) d = TINY;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= 500; m++) {
+    const m2 = 2 * m;
+    let aa = m * (b - m) * x / ((qam + m2) * (a + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d; h *= d * c;
+    aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2));
+    d = 1 + aa * d; if (Math.abs(d) < TINY) d = TINY;
+    c = 1 + aa / c; if (Math.abs(c) < TINY) c = TINY;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-15) break;
+  }
+  return h;
+}
+
+export function regIncBeta(x, a, b) {
+  if (!(x > 0)) return 0;
+  if (!(x < 1)) return 1;
+  const front = Math.exp(lnGamma(a + b) - lnGamma(a) - lnGamma(b) + a * Math.log(x) + b * Math.log1p(-x));
+  if (x < (a + 1) / (a + b + 2)) return front * betaContinuedFraction(a, b, x) / a;
+  return 1 - front * betaContinuedFraction(b, a, 1 - x) / b;
+}
+
+export function studentCdf(t, nu) {
+  const tail = 0.5 * regIncBeta(nu / (nu + t * t), nu / 2, 0.5);
+  return t < 0 ? tail : 1 - tail;
+}
+
+function studentPdf(t, nu) {
+  return Math.exp(lnGamma((nu + 1) / 2) - lnGamma(nu / 2) - 0.5 * Math.log(nu * Math.PI) - (nu + 1) / 2 * Math.log1p(t * t / nu));
+}
+
+export function studentLowerQuantile(p, nu) {
+  if (!(p > 0)) return -Infinity;
+  if (p >= 0.5) return 0;
+  let hi = 0, lo = -1;
+  for (let g = 0; g < 400 && studentCdf(lo, nu) > p; g++) { hi = lo; lo *= 2; }
+  let t = normInv(p) * (1 + 1 / nu);
+  if (!(t > lo && t < hi)) t = (lo + hi) / 2;
+  for (let it = 0; it < 200; it++) {
+    const f = studentCdf(t, nu) - p;
+    if (f > 0) hi = t; else lo = t;
+    const d = studentPdf(t, nu);
+    let next = d > 0 ? t - f / d : NaN;
+    if (!(next > lo && next < hi)) next = (lo + hi) / 2;
+    const done = Math.abs(next - t) <= 1e-15 * Math.max(1, Math.abs(t)) || hi - lo <= 1e-15 * Math.max(1, Math.abs(lo));
+    t = next;
+    if (done) break;
+  }
+  return t;
+}
+
+export function skewtQuantile(u, nu, lambda, k) {
+  const { a, b } = k || skewtConstants(nu, lambda);
+  if (!(u > 0)) return -Infinity;
+  if (!(u < 1)) return Infinity;
+  const unit = Math.sqrt((nu - 2) / nu);
+  const cut = (1 - lambda) / 2;
+  if (u < cut) return ((1 - lambda) * unit * studentLowerQuantile(u / (1 - lambda), nu) - a) / b;
+  const right = (1 - u) / (1 + lambda);
+  return ((1 + lambda) * unit * -studentLowerQuantile(right, nu) - a) / b;
+}
+
+export function skewtQuantiler(nu, lambda, levels) {
+  const k = skewtConstants(nu, lambda);
+  const table = new Float64Array(levels);
+  for (let i = 0; i < levels; i++) table[i] = skewtQuantile((i + 0.5) / levels, nu, lambda, k);
+  return (u) => {
+    const x = u * levels - 0.5;
+    if (x <= 0 || x >= levels - 1) return skewtQuantile(u, nu, lambda, k);
+    const i = Math.floor(x);
+    return table[i] + (table[i + 1] - table[i]) * (x - i);
+  };
+}
+
+const SOBOL_DIRECTIONS = Object.freeze([
+  { s: 0, a: 0, m: [] },
+  { s: 1, a: 0, m: [1] },
+  { s: 2, a: 1, m: [1, 3] },
+  { s: 3, a: 1, m: [1, 3, 1] },
+  { s: 3, a: 2, m: [1, 1, 1] },
+  { s: 4, a: 1, m: [1, 1, 3, 3] },
+  { s: 4, a: 4, m: [1, 3, 5, 13] },
+  { s: 5, a: 2, m: [1, 1, 5, 5, 17] },
+  { s: 5, a: 4, m: [1, 1, 5, 5, 5] },
+  { s: 5, a: 7, m: [1, 1, 7, 11, 19] },
+]);
+
+function sobolDirections(dim) {
+  const V = new Uint32Array(32);
+  const spec = SOBOL_DIRECTIONS[dim];
+  if (spec.s === 0) {
+    for (let i = 0; i < 32; i++) V[i] = (0x80000000 >>> i) >>> 0;
+    return V;
+  }
+  const { s, a, m } = spec;
+  for (let i = 0; i < s; i++) V[i] = (m[i] << (31 - i)) >>> 0;
+  for (let i = s; i < 32; i++) {
+    let v = V[i - s] ^ (V[i - s] >>> s);
+    for (let j = 1; j < s; j++) if ((a >>> (s - 1 - j)) & 1) v ^= V[i - j];
+    V[i] = v >>> 0;
+  }
+  return V;
+}
+
+export const SOBOL_MAX_DIM = SOBOL_DIRECTIONS.length;
+
+export function sobolScrambled(n, dims, seed) {
+  if (!(dims >= 1 && dims <= SOBOL_MAX_DIM) || !(n >= 1) || (n & (n - 1)) !== 0) throw new RangeError("sobolScrambled: n must be a power of two and dims within " + SOBOL_MAX_DIM);
+  const rng = xoshiro128ss(seed);
+  const V = [];
+  const state = new Uint32Array(dims);
+  for (let j = 0; j < dims; j++) { V.push(sobolDirections(j)); state[j] = rng.next() >>> 0; }
+  const out = new Float64Array(n * dims);
+  const x = new Uint32Array(dims);
+  for (let i = 0; i < n; i++) {
+    if (i > 0) {
+      const c = 31 - Math.clz32(i & -i);
+      for (let j = 0; j < dims; j++) x[j] = (x[j] ^ V[j][c]) >>> 0;
+    }
+    for (let j = 0; j < dims; j++) out[i * dims + j] = ((x[j] ^ state[j]) >>> 0) / 4294967296 + 1 / 8589934592;
+  }
+  return out;
+}
+
+export function simulateGjrQmc(params, opts = {}) {
+  const n = opts.paths || WORLD_LINES.PATHS;
+  const horizons = (opts.horizons || WORLD_LINES.HORIZONS).slice().sort((a, b) => a - b);
+  const H = horizons[horizons.length - 1];
+  const dims = Math.min(H, SOBOL_MAX_DIM);
+  const seed = opts.seed === undefined ? 1 : opts.seed;
+  const u = sobolScrambled(n, dims, seed);
+  const rng = xoshiro128ss(typeof seed === "string" ? seed + "|tail" : seed + 1);
+  const { omega, alpha, beta } = params;
+  const gamma = params.gamma || 0;
+  const nu = params.nu, lambda = params.lambda || 0;
+  const normal = !(nu > 2);
+  const quantile = normal ? normInv : skewtQuantiler(nu, lambda, n);
+  const out = {};
+  for (const h of horizons) out[h] = new Float64Array(n);
+  for (let p = 0; p < n; p++) {
+    let s2 = params.sigma2Next, x = 0, hi = 0;
+    for (let t = 1; t <= H; t++) {
+      const z = quantile(t <= dims ? u[p * dims + (t - 1)] : rng.uniform());
+      const e = Math.sqrt(s2) * z;
+      x += e;
+      if (t === horizons[hi]) { out[t][p] = x; hi++; }
+      s2 = omega + (alpha + (e < 0 ? gamma : 0)) * e * e + beta * s2;
+    }
+  }
+  return out;
+}
+
+export function lawLogSd(bins, perBin = 256) {
+  const law = lawBinned({ S: 1, edges: bins.edges, means: bins.means });
+  const M = law.n * perBin;
+  let s = 0, s2 = 0;
+  for (let i = 0; i < M; i++) {
+    const x = Math.log(lawQuantile(law, (i + 0.5) / M));
+    s += x; s2 += x * x;
+  }
+  const m = s / M;
+  return Math.sqrt(Math.max(0, s2 / M - m * m));
+}
+
+export function binnedLawsFromSimulation(sim, forwards, opts = {}) {
   const laws = {};
   for (const h of Object.keys(sim).map(Number).sort((a, b) => a - b)) {
-    const bins = binnedFromSamples({ logReturns: Array.from(sim[h]), bins: LAW_BINS });
+    const target = typeof opts.sd === "function" ? opts.sd(h) : null;
+    const sorted = Float64Array.from(sim[h]).sort();
+    const N = sorted.length;
+    let m = 0;
+    for (let i = 0; i < N; i++) m += sorted[i];
+    m /= N;
+    let v = 0;
+    for (let i = 0; i < N; i++) v += (sorted[i] - m) * (sorted[i] - m);
+    const sd = Math.sqrt(v / N);
+    const matching = typeof target === "number" && Number.isFinite(target) && target > 0 && sd > 0;
+    let c = matching ? target / sd : 1;
+    const scaled = new Float64Array(N);
+    const build = () => {
+      for (let i = 0; i < N; i++) scaled[i] = matching ? (sorted[i] - m) * c : sorted[i];
+      return binnedFromSamples({ logReturns: scaled, presorted: true, bins: LAW_BINS });
+    };
+    let bins = build();
+    for (let it = 0; matching && bins && it < 4; it++) {
+      const ratio = target / lawLogSd(bins);
+      if (Math.abs(ratio - 1) < 2e-4) break;
+      c *= ratio;
+      bins = build();
+    }
     if (!bins) continue;
     const fwd = forwards && fin(forwards[h]) ? forwards[h] : 1;
     const dn = driftNeutralBinned(bins, fwd);
