@@ -1025,4 +1025,52 @@ class FakeCache {
   }
 }
 
+{
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const block = (ideas, noTrade) => ({
+    v: 1, engine: "q1", asOf: "2026-09-24T20:00:00.000Z", spot: 100, atr: 2.5,
+    facts: [{ id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 }, { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 }, { id: "level.magnet", v: 100.5, u: "px", g: 2 },
+      { id: "gex.book", v: 1.2e6, u: "usdPer1pct", g: 2 }],
+    state: { state: "pinned", direction: null, confidence: 2, preferred: ["iron condor"], avoid: ["long straddle"] }, levels: {},
+    structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 30, sessions: 22,
+      legs: [{ type: "P", k: 95, side: -1, qty: 1 }, { type: "P", k: 90, side: 1, qty: 1 }], grade: 3, gradeWhy: [], rules: ["state.pinned", "vrp.rich", "iv.high"],
+      prob: { popQ: 0.7, popP: 0.78 }, ev: { q: -3, p: 21, edge: 24 }, maxProfit: 140, maxLoss: -360 }],
+    ideas, noTrade,
+  });
+  const reading = async (engine, reply) => {
+    const f = fakeD1();
+    seed(f);
+    f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70, engine });
+    const ai = reply === null ? {} : { AI: { run: async () => ({ response: JSON.stringify(reply), usage: { prompt_tokens: 100, completion_tokens: 20 } }) } };
+    const get = await client(f.D1, { ...AI_ENV, ...ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    return (await get("/api/flows/summary?t=NVDA")).body;
+  };
+
+  const ranked = await reading(block(["S1"], null), { verdict: "stand-aside", ideas: [] });
+  ok(ranked.status === "ok" && ranked.engine === true && ranked.ideas.length === 1 && ranked.ideas[0].structure === "S1" && ranked.ideas[0].from === "engine" &&
+     ranked.verdict !== "stand-aside" && ranked.guard === "engine:refused" && ranked.llm === false,
+     `N-F2, end to end: a model that answers stand-aside while the engine ranks S1 is refused, and the reader gets the engine's idea and no Stand aside tag (${ranked.verdict}, ${ranked.guard})`);
+  ok(/every answer the model gave was refused \(verdict-false\)/.test(ranked.provenance), `and is told so (${ranked.provenance})`);
+
+  const aside = await reading(block([], { code: "candidates.none", closest: null }), { verdict: "stand-aside", ideas: [] });
+  ok(aside.status === "ok" && aside.ideas.length === 0 && aside.verdict === "stand-aside" && aside.llm === true && aside.verdictWord === "Stand aside",
+     "while the same words are accepted when the engine itself stood aside");
+  ok(/was asked and agreed: the engine’s own verdict is that no structure it priced clears its bar/.test(aside.provenance) && !/no model was asked/.test(aside.provenance),
+     `and the provenance says a model was asked, where an empty idea list read as 'no model was asked' (${aside.provenance})`);
+
+  const bare = await reading(block([], { code: "candidates.none", closest: null }), null);
+  ok(bare.verdict === "stand-aside" && bare.llm === false && /The engine stands aside: no structure it priced clears its bar/.test(bare.provenance) && !/engine’s own ranking/.test(bare.provenance),
+     `and with no model the provenance says the engine stands aside instead of calling an empty list its own ranking (${bare.provenance})`);
+
+  const promoted = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] });
+  ok(promoted.llm === true && promoted.ideas.length === 1 && promoted.ideas[0].from === "model" && promoted.ideas[0].structure === "S1" && promoted.verdict === "harvest-rich-premium",
+     "and a model that agrees with the engine's ranking, naming facts the structure's rules rest on, is kept");
+  const offRules = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["level.magnet", "gex.book"] }] });
+  ok(offRules.llm === true && offRules.ideas.length === 1,
+     "level.magnet and gex.book are named by the state rule, so that pair is kept too");
+}
+
 console.log(`flows-reads-contract: ${checks} checks passed`);

@@ -1505,7 +1505,12 @@ function engineProvenance(r) {
     ? refused.length + " of its answer" + (refused.length === 1 ? " was" : "s were") + " refused (" + codes.join(", ") + ")"
     : "";
   const head = "Figures, facts and structures computed by the engine; the summary is deterministic.";
-  if (!ideas.length && r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+  if (!ideas.length) {
+    if (r.verdict !== "stand-aside") return head + " The engine ranked no structure worth showing.";
+    return head + (r.llm === true && r.model
+      ? " " + modelName(r.model) + " was asked and agreed: the engine\u2019s own verdict is that no structure it priced clears its bar."
+      : " The engine stands aside: no structure it priced clears its bar.");
+  }
   if (ideas.some((i) => i && i.from === "model")) {
     return head + " " + modelName(r.model) + " chose the ideas as structure ids and verdict codes, each checked against " +
       "the facts" + (refusedSaid ? "; " + refusedSaid : "") + ".";
