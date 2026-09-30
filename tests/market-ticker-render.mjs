@@ -16,8 +16,10 @@ const index = (k) => MARKET_INDICES.find((i) => i.key === k);
 const daily = (hh, mm, closes) => closes.map((c, i) => [sec(...[[9, 23], [9, 24], [9, 25], [9, 28], [9, 29]][i], hh, mm), c]);
 
 const parsed = (key, response) => parseIndexQuote(index(key), response);
+const regular = (end, gmtoffset) => ({ regular: { timezone: "EDT", start: end - 23400, end, gmtoffset } });
 const tuesday = [
-  parsed("sp500", chart({ currency: "USD", gmtoffset: -14400, regularMarketPrice: 7670.84, regularMarketTime: sec(9, 29, 20, 38), chartPreviousClose: 7764.64 },
+  parsed("sp500", chart({ currency: "USD", gmtoffset: -14400, regularMarketPrice: 7670.84, regularMarketTime: sec(9, 29, 20, 38), chartPreviousClose: 7764.64,
+    currentTradingPeriod: regular(sec(9, 29, 20, 0), -14400) },
     daily(13, 30, [7700, 7710, 7720, 7686.7, 7670.84]))),
   parsed("nikkei", chart({ currency: "JPY", gmtoffset: 32400, regularMarketPrice: 40100, regularMarketTime: sec(9, 29, 6, 25), chartPreviousClose: 39000 },
     daily(0, 0, [39500, 39600, 39700, 39800, 40100]))),
@@ -57,8 +59,8 @@ async function tickerAt({ now, snapshot }) {
 {
   const { items, byName: by } = await tickerAt({ now: utc(9, 29, 20, 40), snapshot: buildSnapshot(tuesday, utc(9, 29, 20, 39)) });
   eq(Object.keys(by).length, 3, "three quotes render");
-  eq(by["S&P 500"].asof, "23:38", "THE S&P QUOTE SHOWS ITS OWN TIME, 20:38 UTC as İstanbul's 23:38, not a fetch stamp");
-  eq(by["S&P 500"].closed, "false", "and reads as a live quote, because it was struck within minutes of the fetch");
+  eq(by["S&P 500"].asof, "Close 23:38", "THE S&P QUOTE SHOWS ITS OWN TIME, 20:38 UTC as İstanbul's 23:38, not a fetch stamp");
+  eq(by["S&P 500"].closed, "true", "and reads as the close, because the exchange's session ended at 20:00 UTC and the quote was struck 38 minutes after it, within minutes of the fetch");
   eq(by["Nikkei 225"].asof, "Close 09:25", "Tokyo's 06:25 UTC close reads as a close, with its own İstanbul time");
   eq(by["Nikkei 225"].closed, "true", "flagged closed");
   eq(by["BIST 100"].asof, "Close 18:10", "and so does Istanbul's own, hours older than the fetch");
@@ -70,6 +72,30 @@ async function tickerAt({ now, snapshot }) {
   const note = items.find((i) => i.note);
   ok(note && !/\d\d:\d\d/.test(note.text), "the note carries no clock time at all");
   ok(note && /previous close/.test(note.text), "and says what the change is against");
+}
+
+{
+  const session = (asOf, sessionEnd) => ({ key: "sp500", label: "S&P 500", city: "New York", currency: "USD", price: 7670.84, changePct: -0.21,
+    prevClose: 7686.7, prevDay: "2026-09-28", asOf, asOfDay: "2026-09-29", sessionEnd });
+  const view = async (quote, fetched, now) => (await tickerAt({ now, snapshot: { quotes: [quote], updatedAt: fetched } })).byName["S&P 500"];
+  const shut = utc(9, 29, 20, 0);
+  const late = await view(session(shut, shut), utc(9, 29, 20, 5), utc(9, 29, 20, 40));
+  ok(late.closed === "true" && late.asof === "Close 23:00",
+    `A MARKET THAT CLOSED 40 MINUTES AGO READS AS A CLOSE though the fetch was five minutes after it and the viewer's clock is under an hour ahead (${late.asof})`);
+  const behind = await view(session(utc(9, 29, 15, 0), shut), utc(9, 29, 15, 40), utc(9, 29, 15, 45));
+  ok(behind.closed === "false" && behind.asof === "18:00",
+    `while a live session whose feed runs 40 minutes behind is a quote at its own time, never a close (${behind.asof})`);
+  ok(/^quote,/.test(behind.title.split("; ")[1]), "and its hover says quote");
+  const stuck = await view(session(utc(9, 29, 15, 0), shut), utc(9, 29, 22, 0), utc(9, 29, 22, 5));
+  ok(stuck.closed === "false" && stuck.asof === "Tue 18:00",
+    `and a mid-session print the snapshot never replaced is not promoted to a close either: it keeps its own time, with the weekday once İstanbul's date has moved on (${stuck.asof})`);
+  const edge = await view(session(utc(9, 29, 19, 56), shut), utc(9, 29, 20, 3), utc(9, 29, 20, 4));
+  ok(edge.closed === "true", "the last print within five minutes of the end is the close: an exchange's final tick is not always on the minute");
+  const noEnd = await view(session(utc(9, 29, 20, 38)), utc(9, 29, 21, 0), utc(9, 29, 21, 2));
+  ok(noEnd.closed === "false" && noEnd.asof === "Tue 23:38",
+    "WITHOUT A SESSION END (a snapshot stored before it was kept) the old reading applies: a quote within 25 minutes of the fetch is a quote");
+  const oldNoEnd = await view(session(utc(9, 29, 18, 0)), utc(9, 29, 19, 30), utc(9, 29, 19, 32));
+  ok(oldNoEnd.closed === "true", "and one more than 25 minutes behind the fetch is a close");
 }
 
 {
@@ -110,4 +136,4 @@ async function tickerAt({ now, snapshot }) {
 
 await browser.close();
 
-console.log(`✓ market-ticker-render: ${checks} assertions — each quote printed with its own İstanbul time, a close read as a close with the weekday when it is from an earlier day and the date when it is older than a week, no single fetch-time stamp over eight prices, the change stated against the previous session's close, and a dash for a quote with no base or one stored before the base was fixed`);
+console.log(`✓ market-ticker-render: ${checks} assertions — each quote printed with its own İstanbul time, a close read as a close from the exchange's own session end (a quote struck after it, a market that closed forty minutes ago, a delayed live feed that is not one) with the weekday when it is from an earlier day and the date when it is older than a week, no single fetch-time stamp over eight prices, the change stated against the previous session's close, and a dash for a quote with no base or one stored before the base was fixed`);

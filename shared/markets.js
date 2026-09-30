@@ -47,6 +47,11 @@ export function parseIndexQuote(index, data) {
   if (!Number.isFinite(prev)) prev = num(meta.previousClose);
   if (!Number.isFinite(price)) return null;
   const based = Number.isFinite(prev) && prev > 0;
+  const period = meta.currentTradingPeriod && meta.currentTradingPeriod.regular;
+  const endSec = period ? num(period.end) : NaN;
+  const endOffset = period && Number.isFinite(period.gmtoffset) ? period.gmtoffset : offset;
+  const sessionEnd = Number.isFinite(endSec) && endSec > 0 && asOfDay && localDay(endSec, endOffset) === asOfDay
+    ? Math.round(endSec * 1000) : null;
 
   return {
     key: index.key,
@@ -59,6 +64,7 @@ export function parseIndexQuote(index, data) {
     prevDay: based ? prevDay : null,
     asOf: Number.isFinite(asOfSec) && asOfSec > 0 ? Math.round(asOfSec * 1000) : null,
     asOfDay: asOfDay || null,
+    sessionEnd,
   };
 }
 

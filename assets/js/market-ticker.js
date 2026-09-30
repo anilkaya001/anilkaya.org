@@ -13,6 +13,7 @@
 
   const CLOSED_AFTER_MS = 25 * 60 * 1000;
   const FRESH_FOR_MS = 60 * 60 * 1000;
+  const CLOSE_GRACE_MS = 5 * 60 * 1000;
   const zone = "Europe/Istanbul";
   const hm = new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false });
   const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: zone });
@@ -24,7 +25,9 @@
     if (!Number.isFinite(at) || at <= 0) return null;
     const now = Date.now();
     const fetched = Number(updatedAt);
-    const closed = (Number.isFinite(fetched) && fetched > 0 ? fetched - at : now - at) > CLOSED_AFTER_MS || now - at > FRESH_FOR_MS;
+    const end = Number(q.sessionEnd);
+    const closed = end > 0 ? at >= end - CLOSE_GRACE_MS
+      : (Number.isFinite(fetched) && fetched > 0 ? fetched - at : now - at) > CLOSED_AFTER_MS || now - at > FRESH_FOR_MS;
     const today = ymd.format(now) === ymd.format(at);
     const recent = now - at < 6 * 24 * 3600 * 1000;
     const when = today ? hm.format(at) : recent ? wd.format(at) + (closed ? "" : " " + hm.format(at)) : dm.format(at);

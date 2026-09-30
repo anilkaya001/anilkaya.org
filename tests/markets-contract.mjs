@@ -95,6 +95,30 @@ const NEW_YORK = { currency: "USD", symbol: "^GSPC", gmtoffset: -14400, exchange
 }
 
 {
+  const stamps = [at(2026, 9, 24, 13, 30), at(2026, 9, 25, 13, 30), at(2026, 9, 28, 13, 30), at(2026, 9, 29, 13, 30)];
+  const period = (end, gmtoffset = -14400) => ({ pre: { start: end - 40000, end: end - 23400, gmtoffset },
+    regular: { timezone: "EDT", start: end - 23400, end, gmtoffset }, post: { start: end, end: end + 14400, gmtoffset } });
+  const make = (meta) => parseIndexQuote(index("sp500"), chart({
+    meta: { ...NEW_YORK, regularMarketPrice: 7670.84, regularMarketTime: at(2026, 9, 29, 20, 38), ...meta },
+    timestamp: stamps, close: [7710, 7720, 7686.7, 7670.84],
+  }));
+  eq(make({ currentTradingPeriod: period(at(2026, 9, 29, 20, 0)) }).sessionEnd, at(2026, 9, 29, 20, 0) * 1000,
+    "THE SESSION'S END travels with the quote, in milliseconds, so a quote struck 38 minutes after it can be read as the close");
+  eq(make({}).sessionEnd, null, "a response without a trading period carries none, and the strip falls back to the lag of the quote");
+  eq(make({ currentTradingPeriod: period(at(2026, 9, 30, 20, 0)) }).sessionEnd, null,
+    "AND A PERIOD THAT DESCRIBES ANOTHER DAY IS NOT TRUSTED: the next session's end says nothing about whether this quote was the close");
+  eq(make({ currentTradingPeriod: { regular: { end: "soon", gmtoffset: -14400 } } }).sessionEnd, null, "nor an end that is not a number");
+  eq(make({ currentTradingPeriod: { regular: { end: at(2026, 9, 29, 20, 0), gmtoffset: null } } }).sessionEnd, at(2026, 9, 29, 20, 0) * 1000,
+    "and a period without its own offset takes the response's");
+  const tokyo = parseIndexQuote(index("nikkei"), chart({
+    meta: { currency: "JPY", gmtoffset: 32400, regularMarketPrice: 40100, regularMarketTime: at(2026, 9, 29, 6, 25),
+      currentTradingPeriod: { regular: { end: at(2026, 9, 29, 6, 30), gmtoffset: 32400 } } },
+    timestamp: [at(2026, 9, 28, 0, 0), at(2026, 9, 29, 0, 0)], close: [39800, 40100],
+  }));
+  eq(tokyo.sessionEnd, at(2026, 9, 29, 6, 30) * 1000, "dated by the exchange's calendar: Tokyo's 15:30 close on the 29th is the 29th, though it is 06:30 UTC");
+}
+
+{
   ok(parseIndexQuote(index("sp500"), { chart: { result: [] } }) === null, "no result, no quote");
   ok(parseIndexQuote(index("sp500"), chart({ meta: { currency: "USD" }, close: [] })) === null, "no price at all, no quote");
   const snapshot = buildSnapshot([{ key: "dax" }, null, { key: "bist100" }, { key: "unknown" }], 1234);
@@ -102,4 +126,4 @@ const NEW_YORK = { currency: "USD", symbol: "^GSPC", gmtoffset: -14400, exchange
   eq(snapshot.updatedAt, 1234, "and stamps the fetch instant");
 }
 
-console.log(`✓ markets: ${checks} assertions — a day change taken against the previous session's close from the same response rather than the close before the range, dated by the exchange's own calendar, stamps paired with closes before nulls are dropped, weekends and Tokyo mornings, and a null change where no consistent base exists`);
+console.log(`✓ markets: ${checks} assertions — a day change taken against the previous session's close from the same response rather than the close before the range, dated by the exchange's own calendar, stamps paired with closes before nulls are dropped, weekends and Tokyo mornings, the session's end kept only when it is the quote's own day, and a null change where no consistent base exists`);
