@@ -700,12 +700,12 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
     fields: STRIP_FIELDS.map(([n]) => n),
     units: Object.fromEntries(STRIP_FIELDS.map(([n, , u]) => [n, u])),
     basis: "vendor screener, one call for every name; a null prev_close is filled from the last dated nightly close " +
-      "(prevFill); rows the vendor dated before the session are held out (off)",
+      "(prevFill); a row the vendor dated before the session is held out (off, missing) and stands as an all-null row",
   };
   const atMs = typeof at === "number" ? at : timeMs(at);
   const freshOf = (vendorAt) => freshEnvelope({ readAt: at, vendorAt, source: LIVE_KEYS[key].writer,
     cadenceS: LIVE_KEYS[key].cadenceS, session, writer });
-  if (silent) return { ...shape, fresh: freshOf(null), ...silent, rows: {}, asked: names.length, missing: names.slice() };
+  if (silent) return { ...shape, fresh: freshOf(null), ...silent, rows: {}, asked: names.length, missing: names.slice(), ahead: { n: 0, maxS: 0 } };
   const seen = new Set();
   const parsed = [];
   const dates = {};
@@ -737,13 +737,22 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
   const offDates = {};
   const filled = [];
   const from = {};
+  const held = new Set();
+  let wanted = null;
   let offN = 0;
   let newest = NaN;
+  let aheadN = 0;
+  let aheadMax = 0;
   for (let i = 0; i < parsed.length; i++) {
     const e = parsed[i];
     if (cut && e.d && e.d < cut) {
       offN++;
       if (offN <= OFF_ROWS_KEPT) offDates[e.t] = e.d;
+      if (!wanted) wanted = new Set(names);
+      if (wanted.has(e.t)) {
+        rows[e.t] = new Array(STRIP_FIELDS.length).fill(null);
+        held.add(e.t);
+      }
       continue;
     }
     const usable = base && !declined && Object.hasOwn(close, e.t) && vnum(e.r.prev_close) === null;
@@ -756,10 +765,16 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
     if (values[QA_AT] !== null) {
       const q = timeMs(e.r.quote_time);
       if (!(q <= newest)) newest = q;
+    } else if (Number.isFinite(atMs)) {
+      const q = timeMs(e.r.quote_time);
+      if (q > atMs) {
+        aheadN++;
+        aheadMax = Math.max(aheadMax, Math.round((q - atMs) / 1000));
+      }
     }
   }
-  const missing = names.filter((t) => !Object.hasOwn(rows, t));
-  const shaped = Object.keys(rows).length;
+  const missing = names.filter((t) => !Object.hasOwn(rows, t) || held.has(t));
+  const shaped = Object.keys(rows).length - held.size;
   return {
     ...shape, fresh: freshOf(Number.isFinite(newest) ? Math.min(newest, atMs) : null),
     status: !shaped ? "unreadable" : prior ? "prior" : "ok",
@@ -767,6 +782,7 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
     rowDate: rowDate ? rowDate[0] : null,
     asked: names.length, returned: shaped, missing,
     lag: lag ? lagSummary(Object.values(rows).map((v) => v[QA_AT])) : null,
+    ahead: { n: aheadN, maxS: aheadMax },
     off: { n: offN, dates: offDates },
     prevFill: base ? (declined ? { date: base.date, declined: "disagrees", agree: [agreed, checked] }
       : { date: base.date, n: filled.length, from, agree: [agreed, checked], tickers: filled }) : null,
@@ -776,7 +792,9 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
 
 export const SERIES_SCALE = Object.freeze({ px: 0.01, net: 1000, gex: 10000, iv: 0.0001 });
 
-const LAG_COLS = Object.freeze(["p50", "p90", "max"]);
+const LAG_COLS = Object.freeze(["p50", "p90", "max", "ahead"]);
+
+const lagValue = (strips, c) => (c === "ahead" ? (strips.ahead ? strips.ahead.n : null) : strips.lag ? strips.lag[c] : null);
 
 export function appendStripSeries(prev, strips, { at, session, writer, max = LIVE_BUDGET.seriesPoints,
   maxBytes = LIVE_KEYS["live:strips:series"].maxBytes } = {}) {
@@ -792,7 +810,8 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
       px: "integer x 0.01 USD, relative to base[T] (the first read of the session)",
       net: "integer x 1000 USD, ncp - npp", gex: "integer x 10000 USD per 1% move (gamma, OI)",
       iv: "integer x 0.0001, iv30d fraction", t: "ISO-8601 UTC read instant of each column",
-      lag: "seconds, the median, 90th percentile and largest of read instant minus the rows' quote_time, per column",
+      lag: "seconds, the median (p50), 90th percentile (p90) and largest (max) of read instant minus the rows' quote_time, per column; " +
+        "ahead: how many rows carried a quote_time later than the read by more than the skew allowance, per column",
     },
     reset: same ? null : (prev ? "session-boundary" : "cold"),
     t: same ? prev.t.slice() : [],
@@ -818,7 +837,8 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
     const held = out.lag[c];
     while (held.length < width) held.push(null);
     held.length = width;
-    held[at_] = strips.lag && Number.isFinite(strips.lag[c]) ? strips.lag[c] : null;
+    const value = lagValue(strips, c);
+    held[at_] = Number.isFinite(value) ? value : null;
   }
   const names = new Set([...Object.keys(strips.rows), ...Object.keys(out.cols.px)]);
   for (const t of names) {

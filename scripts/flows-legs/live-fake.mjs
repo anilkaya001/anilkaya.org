@@ -130,7 +130,7 @@ export function fakeSectorEtfs({ session } = {}) {
   }) };
 }
 
-export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, nullPrev = false } = {}) {
+export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, nullPrev = false, aheadS = 0 } = {}) {
   return { data: tickers.map((ticker) => {
     const rand = mulberry(seedOf("scr-" + ticker + session));
     const prev = 20 + rand() * 400;
@@ -165,6 +165,7 @@ export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, n
     const nullDraw = rand();
     if (Number.isFinite(now)) row.quote_time = Math.round(now) - Math.floor(lagDraw * 240) * 1000;
     if (nullPrev && nullDraw < 0.5) row.prev_close = null;
+    if (aheadS && Number.isFinite(now) && lagDraw < 0.1) row.quote_time = Math.round(now) + aheadS * 1000;
     if (!dated) row.intraday_change = money(close - prev);
     return row;
   }) };
@@ -315,7 +316,7 @@ export function fakeBoards({ n = 40, sessionDate = null, session = null } = {}) 
   };
 }
 
-export function fakeLiveVendor({ now, session, nullPrev = false }) {
+export function fakeLiveVendor({ now, session, nullPrev = false, aheadS = 0 }) {
   const calls = [];
   const clock = typeof now === "function" ? now : () => now;
   async function fakeUw(path, params = {}, { envelope = false } = {}) {
@@ -330,7 +331,7 @@ export function fakeLiveVendor({ now, session, nullPrev = false }) {
     else if (path === "/api/market/sector-etfs") body = fakeSectorEtfs({ session });
     else if (path === "/api/screener/stocks") {
       const list = String(params.ticker || "").split(",").filter(Boolean);
-      body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date, now: at, nullPrev });
+      body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date, now: at, nullPrev, aheadS });
     } else if (path === "/api/option-trades/flow-alerts") {
       const tickers = params.ticker_symbol ? String(params.ticker_symbol).split(",") : [];
       const count = params.older_than ? 40 : Math.min(Number(params.limit) || 200, tickers.length ? 30 : 200);

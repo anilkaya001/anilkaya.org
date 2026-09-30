@@ -229,9 +229,10 @@ export async function runLive({
     note(`screener strip: ${strips.returned ?? 0}/${plan.names.length} name(s), row date ${strips.rowDate || "absent"}, ` +
       `quote_time set on ${withQuote} row(s)`);
     const lag = strips.lag;
-    note(lag ? `quote lag: ${lag.n} row(s) stamped, p50 ${lag.p50} s, p90 ${lag.p90} s, max ${lag.max} s` +
+    const ahead = strips.ahead.n ? `; ${strips.ahead.n} row(s) stamped ahead of the read, by up to ${strips.ahead.maxS} s` : "";
+    note(lag ? `quote lag: ${lag.n} row(s) stamped, p50 ${lag.p50} s, p90 ${lag.p90} s, max ${lag.max} s${ahead}` +
       (strips.off.n ? `; ${strips.off.n} row(s) dated before the session held out (${Object.keys(strips.off.dates).slice(0, 6).join(", ")})` : "")
-      : "quote lag: no row carried a usable quote_time");
+      : `quote lag: no row carried a usable quote_time${ahead}`);
     const px = strips.fields.indexOf("px");
     const chg = strips.fields.indexOf("chg");
     const bare = Object.values(strips.rows).filter((v) => v[px] !== null && v[chg] === null).length;
@@ -292,6 +293,7 @@ export async function runLive({
     names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
     alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
     quoteLag: strips.lag || null,
+    quoteAhead: strips.ahead || null,
     prevFill: strips.prevFill ? { date: strips.prevFill.date, n: strips.prevFill.n ?? 0, declined: strips.prevFill.declined || null,
       from: strips.prevFill.from || null } : null,
   };

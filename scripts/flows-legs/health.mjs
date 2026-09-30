@@ -470,8 +470,13 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     const middle = (xs) => xs[Math.floor((xs.length - 1) / 2)];
     const top = (xs) => xs[xs.length - 1];
     notes.push(`live quote lag on ${sessionDate} over ${columns} fifteen-minute column(s): median of the medians ` +
-      `${spread(lag.p50, middle)} s, worst 90th percentile ${spread(lag.p90, top)} s, worst ${spread(lag.max, top)} s ` +
-      "(the distribution a frozen-feed rule is set against; none is enforced)");
+      `${spread(lag.p50, middle)} s, worst 90th percentile ${spread(lag.p90, top)} s, worst ${spread(lag.max, top)} s` +
+      (Array.isArray(lag.ahead) && lag.ahead.some((x) => typeof x === "number")
+        ? lag.ahead.some((x) => x > 0)
+          ? `, rows stamped ahead of the read in ${lag.ahead.filter((x) => x > 0).length} column(s), most ${Math.max(...lag.ahead.filter((x) => typeof x === "number"))} in one`
+          : ", no row stamped ahead of the read"
+        : "") +
+      " (the distribution a frozen-feed rule is set against; none is enforced)");
   }
   return { applies: true, why: null, failures, warnings, notes };
 }

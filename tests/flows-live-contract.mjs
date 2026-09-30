@@ -2401,6 +2401,11 @@ const cronMinutes = (cron) => {
     "THE NIGHTLY LOG KEEPS THE DAY'S QUOTE-LAG SPREAD AND THE FILL as notes, never as a failure or a warning: the median of the " +
       "per-column medians, the worst 90th percentile and the worst maximum, so the distribution a frozen-feed rule must be set " +
       "against accumulates in the log of every nightly, and the run's fill count");
+    const aheadNote = (ahead) => healthChecks({ ...good, seriesRead: series(S, { ...lag, ahead }) }).notes.find((n) => /quote lag/.test(n)) || "";
+    ok(/, rows stamped ahead of the read in 2 column\(s\), most 7 in one \(the distribution/.test(aheadNote([0, 7, null, 3])) &&
+       /, no row stamped ahead of the read \(the distribution/.test(aheadNote([0, 0, null, 0])) &&
+       !/ahead/.test(aheadNote([null, null, null, null])) && !/ahead/.test(aheadNote(undefined)),
+    "THE LOG SAYS WHETHER A QUOTE TIME EVER RAN AHEAD OF THE READ, the question a clamped quote age cannot answer: how many columns had such rows and the most in one, 'no row' when the columns hold zeros, and nothing for a series written before the count existed");
     const declined = healthChecks({ ...good, heartbeatRead: beat(S, { ...run, prevFill: { date: "2026-09-23", n: 0, declined: "disagrees" } }) });
     ok(declined.failures.length === 0 && declined.notes.some((n) => /declined the 2026-09-23 close \(disagrees\)/.test(n)),
       "and a base the vendor contradicted is named");
@@ -3478,8 +3483,17 @@ const cronMinutes = (cron) => {
   const partial = L.shapeStrips(vend(dated(8, 2)), { at: at0, session: S, names: askedAll });
   deep([partial.status, partial.returned, partial.off.n, Object.keys(partial.off.dates), partial.missing],
     ["ok", 8, 2, ["P0", "P1"], ["P0", "P1"]],
-    "A ROW THE VENDOR STILL DATES BEFORE THE SESSION is held out of a strip that is otherwise today's, listed with its date, and reported missing, so a reader falls back to the nightly value instead of showing a previous session's price as live");
+    "A ROW THE VENDOR STILL DATES BEFORE THE SESSION is held out of a strip that is otherwise today's, listed with its date, and reported missing, so a previous session's price is never shown as live");
   deep(partial.off.dates, { P0: P, P1: P }, "each with the date it carries");
+  deep([partial.rows.P0, partial.rows.P1, Object.keys(partial.rows).length],
+    [Array(partial.fields.length).fill(null), Array(partial.fields.length).fill(null), 10],
+    "AND STANDS IN THE ROWS AS AN ALL-NULL ROW, so a module that asks for it still finds a live row for every name and its other names stay live; the reader prints the held-out name as a dash, never a previous session's price");
+  deep([partial.asked, partial.returned + partial.missing.length], [10, 10], "asked is still returned plus missing: an all-null row is not a returned one");
+  const unasked = L.shapeStrips(vend(dated(8, 2)), { at: at0, session: S, names: askedAll.slice(0, 8) });
+  deep([unasked.off.n, Object.keys(unasked.rows).length, unasked.returned, unasked.missing], [2, 8, 8, []],
+    "while a held-out row nobody asked for adds no bytes: it is counted and listed in off and not carried");
+  const allHeld = L.shapeStrips(vend(dated(0, 3)), { at: at0, session: S, names: ["P0", "P1", "P2"] });
+  deep([allHeld.status, allHeld.returned], ["prior", 3], "and a strip whose every row is the previous session's is a prior strip with its rows, not a set of dashes");
   const mostly = L.shapeStrips(vend(dated(3, 7)), { at: at0, session: S, names: [] });
   deep([mostly.status, mostly.returned, mostly.off.n], ["prior", 10, 0],
     "while a strip that is mostly the previous session's stays a prior strip with every row kept, as before");
@@ -3502,6 +3516,12 @@ const cronMinutes = (cron) => {
   deep(stamped.lag, { n: 5, p50: 60, p90: 300, max: 300 },
     "and the spread of the row ages is published (5 rows: 0, 30, 60, 90, 300), median, 90th percentile and largest");
   eq(L.shapeStrips(vend([rowOf("A")]), { at: at0, session: S, names: [] }).lag, null, "the spread is computed only where asked, so the Worker's tick does not pay for it");
+  deep(stamped.ahead, { n: 1, maxS: 300 },
+    "AND A STAMP AHEAD OF THE READ IS COUNTED, not folded into 'no stamp': the row struck 30 s after the read is within the skew allowance and is not, the one struck five minutes after it is, with how far ahead it ran");
+  deep(L.shapeStrips(vend([rowOf("A", { quote_time: null }), rowOf("B", { quote_time: "not a time" })]), { at: at0, session: S, names: [] }).ahead,
+    { n: 0, maxS: 0 }, "while a row with no stamp, or one that does not parse, is not ahead of anything");
+  deep(L.shapeStrips(vend([rowOf("A", { quote_time: at0 + 120000 }), rowOf("B", { quote_time: at0 + 900000 }), rowOf("C")]),
+    { at: at0, session: S, names: [] }).ahead, { n: 2, maxS: 900 }, "and the count and the largest lead come from the same rows, on the Worker's path as on the leg's (no lag asked)");
   eq(L.shapeStrips(vend([rowOf("A", { quote_time: null })]), { at: at0, session: S, names: [], lag: true }).fresh.vendorAt, null,
     "a strip with no stamped row has no vendorAt, and no lag");
   ok(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][0] === "qa" && /seconds/.test(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][2]),
@@ -3512,9 +3532,9 @@ const cronMinutes = (cron) => {
     "LIVE:MOVERS RANKS EVERY NAME IT HAS A BASE FOR: the two filled names are ranked (H at +120% first), the one with no base is counted unranked");
 
   const key = { ...stamped, fields: stamped.fields };
-  const s1 = L.appendStripSeries(null, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 90, p90: 300, max: 300 } },
-    { at: at0, session: S });
-  deep(s1.lag, { p50: [90], p90: [300], max: [300] }, "THE LAG SPREAD IS KEPT PER COLUMN of the day's series");
+  const s1 = L.appendStripSeries(null, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 90, p90: 300, max: 300 },
+    ahead: { n: 2, maxS: 400 } }, { at: at0, session: S });
+  deep(s1.lag, { p50: [90], p90: [300], max: [300], ahead: [2] }, "THE LAG SPREAD IS KEPT PER COLUMN of the day's series, with how many rows were stamped ahead of the read");
   const s2 = L.appendStripSeries(s1, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 45, p90: 100, max: 120 } },
     { at: at0 + 15 * 60000, session: S });
   deep(s2.lag.p50, [90, 45], "one entry a column");
@@ -3525,12 +3545,16 @@ const cronMinutes = (cron) => {
   delete old.lag;
   const s4 = L.appendStripSeries(old, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 7, p90: 8, max: 9 } },
     { at: at0 + 15 * 60000, session: S });
-  deep(s4.lag.p50, [null, 7], "a held series written before the spread existed is padded with nulls, so its columns stay aligned");
+  deep([s4.lag.p50, s4.lag.ahead], [[null, 7], [null, null]], "a held series written before the spread existed is padded with nulls, so its columns stay aligned");
+  const pre = { ...s1, lag: { p50: [90], p90: [300], max: [300] } };
+  deep(L.appendStripSeries(pre, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 1, p90: 2, max: 3 }, ahead: { n: 0, maxS: 0 } },
+    { at: at0 + 15 * 60000, session: S }).lag.ahead, [null, 0], "and one written before the ahead count existed is padded the same way, a read with none ahead recording a zero");
   const s5 = L.appendStripSeries(s2, { status: "ok", fields: key.fields, rows: { A: key.rows.A }, lag: { p50: 1, p90: 2, max: 3 } },
     { at: at0 + 30 * 60000, session: S, max: 2 });
   deep([s5.t.length, s5.lag.p50.length, s5.lag.p50], [2, 2, [45, 1]], "and trimming the oldest column trims its spread with it");
   const s6 = L.appendStripSeries(s2, { status: "ok", fields: key.fields, rows: { A: key.rows.A } }, { at: at0 + 30 * 60000, session: S });
-  deep(s6.lag.p50, [90, 45, null], "a column read with no stamped row records null, never a zero");
+  deep([s6.lag.p50, s6.lag.ahead], [[90, 45, null], [2, null, null]],
+    "a column read with no stamped row records null, never a zero");
 
   const series = { status: "ok", t: ["2026-09-23T14:55:00Z"], px: [100], gOi: [5], gVol: [1], gDir: [0], flowFilled: true,
     last: { at: "2026-09-23T14:55:00Z", px: 100, gOi: 5, gVol: 1, gDir: 0 } };
@@ -3605,15 +3629,16 @@ const cronMinutes = (cron) => {
   "the closes come in the SAME statement as the groups, the last close of each name found in D1, so the base costs no extra round trip and the 4 KB of closes never reach the isolate");
   ok(names.every((t) => filled.payload.rows[t][fillIx(filled.payload, "qa")] !== null) && filled.payload.fresh.vendorAt !== null && filled.payload.lag === null,
     "the Worker's rows carry their quote age and the key its vendorAt, without the spread the leg computes");
+  deep(filled.payload.ahead, { n: 0, maxS: 0 }, "and the count of stamps ahead of the read, which costs a comparison only on a row whose age is null");
 }
 
 {
   const P = "2026-09-22";
   const S = "2026-09-23";
   const at = easternInstant(S, 11 * 60 + 7);
-  const runFill = async (boardDate) => {
+  const runFill = async (boardDate, extra = {}) => {
     let clock = at;
-    const uw = FAKE.fakeLiveVendor({ now: () => (clock += 250), session: S, nullPrev: true });
+    const uw = FAKE.fakeLiveVendor({ now: () => (clock += 250), session: S, nullPrev: true, ...extra });
     const boards = FAKE.fakeBoards({ sessionDate: boardDate, session: S });
     const published = {};
     const result = await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
@@ -3623,6 +3648,7 @@ const cronMinutes = (cron) => {
   };
   const withBase = await runFill(P);
   const without = await runFill("2026-09-18");
+  const skewed = await runFill(P, { aheadS: 300 });
   const strips = withBase.published["live:strips"];
   const chg = strips.fields.indexOf("chg");
   const prev = strips.fields.indexOf("prev");
@@ -3643,6 +3669,13 @@ const cronMinutes = (cron) => {
   ok(run.quoteLag && run.quoteLag.n > 100 && run.quoteLag.p50 >= 0 && run.quoteLag.max <= 260 && run.prevFill.n === strips.prevFill.n &&
      withBase.published["live:heartbeat"].run.quoteLag.n === run.quoteLag.n,
   "the run record keeps the lag spread and the fill count, so the next pass and the owner can read them");
+  deep([run.quoteAhead, strips.ahead, withBase.published["live:strips:series"].lag.ahead], [{ n: 0, maxS: 0 }, { n: 0, maxS: 0 }, [0]],
+    "and the count of rows stamped ahead of the read, none from the fake vendor, in the key, the series column and the run record");
+  const drift = skewed.published["live:strips"].ahead;
+  ok(drift.n > 3 && drift.maxS > 250 && drift.maxS <= 300 && skewed.result.run.quoteAhead.n === drift.n &&
+     skewed.published["live:strips:series"].lag.ahead[0] === drift.n &&
+     skewed.result.run.notes.some((n) => new RegExp(`quote lag: .*; ${drift.n} row\\(s\\) stamped ahead of the read, by up to ${drift.maxS} s`).test(n)),
+  `and a vendor whose stamps run five minutes ahead of the read is counted (${drift.n} rows, ${drift.maxS} s) in the key, the series column, the run record and the job's notes, and those rows' ages read null`);
   ok(strips.fresh.vendorAt && Date.parse(strips.fresh.vendorAt) <= Date.parse(strips.fresh.readAt) && strips.lag.max <= 260,
     "live:strips has its vendorAt and the spread of its rows' ages");
   const series = withBase.published["live:strips:series"];
@@ -3669,4 +3702,6 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `waits; a delivery log timed from the run's created_at; a day change against the last dated close wherever the ` +
   `vendor sent none (from the boards and the nightly focus closes, only when they are the prior session's and the vendor's own ` +
   `prev_close agrees), every strip row with its own quote age, the newest quote as vendorAt and the spread of the ages per ` +
-  `column, the nightly gate's note of that spread; and a client helper that only compares clocks`);
+  `column, the count of stamps that run ahead of the read, a row dated before the session standing as an all-null row ` +
+  `instead of taking its module off the live read, the nightly gate's note of that spread; and a client helper that ` +
+  `only compares clocks`);
