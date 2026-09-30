@@ -1299,6 +1299,21 @@ export function liveAlertsWin(nightlySession, liveSession) {
   return liveSession > nightlySession;
 }
 
+export function liveNewsWins(nightly, liveSession, liveReadAt) {
+  if (typeof liveSession !== "string" || !DAY_RE.test(liveSession) || !Number.isFinite(liveReadAt)) return false;
+  const day = nightly && typeof nightly.session === "string" && DAY_RE.test(nightly.session) ? nightly.session : null;
+  if (!day || liveSession !== day) return !day || liveSession > day;
+  const read = timeMs(nightly.readAt);
+  return !Number.isFinite(read) || liveReadAt > read;
+}
+
+export function newsWithLive(news, { session, readAt, cadenceS }) {
+  if (!news || typeof news !== "object" || news.status !== "ok" || !Array.isArray(news.rows) || !news.rows.length) return null;
+  const at = new Date(readAt).toISOString();
+  return { ...news, sessionDate: session, generatedAt: at, readAt: at, readDay: easternDay(readAt), refreshed: "intraday",
+    cadenceMinutes: cadenceS / 60, live: { key: "live:news", session } };
+}
+
 export function liveFeedsForBrief({ pulse = null, market = null, alerts = null, alertsSession = null,
   nightlyAlertsSession = null } = {}) {
   const feeds = {};

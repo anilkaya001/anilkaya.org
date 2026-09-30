@@ -395,6 +395,129 @@ const NYSE_PUBLISHED = Object.freeze({
   }
   {
     const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const rth = { phase: "rth", session: "2026-09-29", trading: true, endsAt: "2026-09-29T20:00:00.000Z" };
+    const p = pill("2026-09-29T13:45:00-04:00", { serverNow: Date.parse("2026-09-29T13:45:00-04:00"), expected: "2026-09-28", phase: rth, keys: {} });
+    const vmNow = () => p.ctx.Date.now();
+    p.ctx.fetch("/api/flows/now?k=market");
+    await p.release();
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    const entry = (state, session, extra = {}) => UI.freshFrom({ state, reason: state === "stale" ? "behind" : "session", klass: "nightly", session, readAt: "2026-09-29T02:00:00.000Z", ...extra },
+      { serverNow: vmNow(), phase: rth });
+    UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
+    UI.freshness({ readAt: new Date(vmNow() - 60000).toISOString(), live: true, source: "live:market" });
+    eq(UI.freshness.state(), "live", "the home page as it stood: boards current and a price read a minute ago is Live");
+    UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "regime" });
+    UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "market" });
+    eq(UI.freshness.state(), "live", "with every other payload current the pill stays Live");
+    ok(/Everything else is the last completed session/.test(UI.freshness.details().lead), "and says so");
+    UI.freshness({ ff: entry("stale", "2026-09-15", { reason: "behind" }), source: "events" });
+    UI.freshness({ ff: entry("stale", "2026-09-22", { reason: "behind" }), source: "scoretrack" });
+    eq(UI.freshness.state(), "stale",
+      "THE PILL IS THE WORST CASE: two payloads a week behind turn it stale under a fresh price read and a current board " +
+      "(it read Live, 'Everything else is the last completed session', with the two old dates only inside the popover)");
+    const d = UI.freshness.details();
+    ok(/Past the server.s stale line: Events, Scoretrack\./.test(d.lead) && !/Everything else is the last completed session/.test(d.lead),
+      "the popover's lead names the lagging payloads and no longer claims the rest is the last completed session");
+    const payloads = d.facts.find((f) => f[0] === "Payloads");
+    eq(payloads && payloads[1], "3 of 5 current", "counts them against every payload the page registered (boards, regime, market, events, scoretrack)");
+
+    UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "events" });
+    UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "scoretrack" });
+    eq(UI.freshness.state(), "live", "a payload that catches up (re-registered current) clears the pill");
+    const lapse = vmNow() + 10 * 60000;
+    UI.freshness({ ff: { stateAt: () => (vmNow() >= lapse ? "stale" : "live") }, source: "strips" });
+    eq(UI.freshness.state(), "live", "A SOURCE THAT LAPSES BY THE CLOCK: live while its window runs");
+    p.ctx.advance(11 * 60000);
+    eq(UI.freshness.state(), "stale", "and the pill turns stale on its own when the window ends, with no new data and no call from the page");
+    ok(/Past the server.s stale line: Live prices\./.test(UI.freshness.details().lead), "naming it");
+    eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
+    eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
+    eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
+    eq(UI.freshAggregate([], "rth"), "pending", "and pending before any payload");
+    eq(UI.freshAggregate(["fresh", "closed"], "rth"), "fresh", "a fresh module in session outranks a closed one");
+    eq(UI.freshAggregate(["closed", "closed"], "rth"), "closed", "and all closed is closed");
+    eq(UI.freshAggregate([null, { stateAt: () => "stale" }]), "stale", "an absent module is skipped and a module object is asked for its state");
+  }
+  {
+    const at = "2026-09-29T13:45:00-04:00";
+    const rth = { phase: "rth", session: "2026-09-29", trading: true, endsAt: "2026-09-29T20:00:00.000Z" };
+    const p = pill(at, { serverNow: Date.parse(at), expected: "2026-09-28", phase: rth, keys: {} });
+    p.ctx.fetch("/api/flows/now?k=market");
+    await p.release();
+    p.UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
+    p.UI.freshness({ readAt: new Date(Date.parse(at) - 60000).toISOString(), live: true, source: "live:market" });
+    p.UI.freshness({ sessionDate: "2026-09-28", source: "regime" });
+    eq(p.UI.freshness.state(), "live", "the home page as it stood, every dated source on the expected session");
+    ok(/Everything else is the last completed session/.test(p.UI.freshness.details().lead), "says the rest is the last completed session");
+    p.UI.freshness({ sessionDate: "2026-09-22", source: "regime" });
+    p.UI.freshness({ sessionDate: "2026-09-15", source: "events" });
+    const d = p.UI.freshness.details();
+    eq(p.UI.freshness.state(), "live",
+      "SESSION-DATED SOURCES ARE JUDGED BY THEIR NEWEST DATE: the pill stays Live under a price read a minute ago (only a source that carries the server's verdict can turn it stale)");
+    ok(!/Everything else is the last completed session/.test(d.lead) && /2 of 3 payloads are older: Regime Sep 22, Events Sep 15\./.test(d.lead),
+      `BUT THE LEAD NO LONGER CONTRADICTS ITS FACTS: it named 'Everything else is the last completed session' above Regime Sep 22 and Events Sep 15 (${d.lead})`);
+    eq(d.facts.find((f) => f[0] === "Payloads")[1], "1 of 3 current", "and the count agrees with the lead");
+  }
+  {
+    const p = pill("2026-09-29T13:45:00-04:00", null);
+    p.UI.freshness({ sessionDate: "2026-09-29", source: "board" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "live:strips" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "live:news" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "board?side=long" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "board?side=short" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "lk?k=market" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "flowalerts" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "pulse" });
+    const lead = p.UI.freshness.details().lead;
+    eq(lead, "Past the server\u2019s stale line: Live prices, Headlines, Board, Market, Flow alerts, Pulse.",
+      `READER-FACING NAMES: no live: prefix, no query string, a source's two queries named once, the internal keys in words (${lead})`);
+    eq(p.UI.freshness.details().facts.find((f) => f[0] === "Payloads")[1], "1 of 8 current",
+      "and the count is of sources, not of names: two boards behind one name are still two lapsed payloads");
+  }
+  {
+    const p = pill("2026-09-29T13:45:00-04:00", null);
+    p.UI.freshness({ sessionDate: "2026-09-28", source: "board" });
+    p.UI.freshness({ ff: { stateAt: () => "stale" }, source: "strips" });
+    eq(p.UI.freshness.state(), "stale", "A PAGE WITHOUT THE HELPER (the boards) registers its own verdict: a stale overlay turns the pill stale");
+    eq(p.UI.freshness.details().facts.find((f) => f[0] === "Expected")[1], null, "and the popover does not call the session behind");
+    ok(/Past the server.s stale line: Live prices\./.test(p.UI.freshness.details().lead), "it names the source that lapsed instead of repeating the session line");
+    const bar = { dataset: {}, setAttribute() {}, replaceChildren() {} };
+    const q = pill("2026-09-29T13:45:00-04:00", null);
+    const anyEl = () => new Proxy({ dataset: {}, style: {}, classList: { add() {}, remove() {} } }, { get: (t, k) => (k in t ? t[k] : () => anyEl()) });
+    q.ctx.Node = class {};
+    q.ctx.document.createElementNS = anyEl;
+    q.ctx.document.createElement = anyEl;
+    q.ctx.document.getElementById = (id) => (id === "fxFresh" ? bar : null);
+    q.UI.freshness({ sessionDate: "2026-09-29", source: "board" });
+    q.UI.freshness({ ff: { stateAt: () => "stale" }, source: "strips" });
+    eq(bar.dataset.label, "Stale", "and the pill's word is Stale, not the board's own date, when the session is current and a source is not");
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const rth = { phase: "rth", session: "2026-09-29", trading: true, endsAt: "2026-09-29T20:00:00.000Z" };
+    const at = Date.parse("2026-09-29T13:45:00-04:00");
+    const entry = (klass, readAgo, state, reason) => ({ updatedAt: 1, state, reason, klass, readAt: new Date(at - readAgo).toISOString(),
+      session: "2026-09-29", cadenceS: 900, liveUntil: new Date(at - readAgo + 1200000).toISOString(), staleAt: new Date(at - readAgo + 2700000).toISOString(), source: "actions" });
+    const body = { serverNow: at, expected: "2026-09-28", phase: rth, keys: {
+      "live:market": entry("market", 120000, "live", "cadence"), "live:strips": entry("breadth", 3 * 3600000, "stale", "behind") } };
+    const p = pill("2026-09-29T13:45:00-04:00", body);
+    vm.runInContext(fresh, p.ctx);
+    const UI = p.ctx.window.FlowsUI;
+    UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
+    UI.freshness({ readAt: new Date(at - 60000).toISOString(), live: true, source: "live:market" });
+    eq(UI.freshness.state(), "live", "before the first beat the page reads Live");
+    const hb = UI.heartbeat({ keys: ["market", "strips"], page: "overview" });
+    await p.release();
+    hb.stop();
+    eq(UI.freshness.state(), "stale",
+      "EVERY KEY THE HEARTBEAT READS IS A SOURCE: a strips key three hours old turns the pill stale on the first beat, with no call from the page " +
+      "(the page needed a line per region, and the home page made two of them)");
+    ok(/Past the server.s stale line: Live prices\./.test(UI.freshness.details().lead), "and the popover names it");
+    ok(UI.freshness.details().facts.find((f) => f[0] === "Payloads")[1] === "2 of 3 current", "against the sources registered (boards, market, strips)");
+  }
+  {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
     const closed = { phase: "closed", session: "2026-09-28", trading: false, endsAt: "2026-09-29T08:00:00.000Z" };
     const p = pill("2026-09-28T18:00:00-04:00", (i) => ({ serverNow: Date.now(), expected: i ? "2026-09-28" : "2026-09-25", phase: closed, keys: {} }));
     vm.runInContext(fresh, p.ctx);

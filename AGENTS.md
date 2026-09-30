@@ -145,12 +145,13 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/live-world-fake.mjs`, `live-day.mjs` | A fake GitHub API and a fake Worker world on a virtual clock, and the eight dry days `--live --dry-run` runs through them. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
-| `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `freshAggregate`, `heartbeat`). |
+| `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
 | `tests/flows-starts-contract.mjs` | The starts and the witness: the live workflow's grants and drill input, the nightly dispatch, the witness's lines, debounce, dedupe, three-tick recovery and reopen, the kept-alive loop through the night, the weekend and the hop, the cron starters through the concurrency group, a whole weekday's request cost, and the vendor client's deadline. |
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
+| `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
 
 ## Curriculum and stage contracts
 
@@ -507,6 +508,7 @@ flows-starts-contract
 flows-quant-card       flows-track-render
 flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
+flows-readers-contract   flows-readers-render
 markets-contract
 ```
 
@@ -544,6 +546,11 @@ needs Node 22.13 or newer like the ledger and reads suites.
 server. It drives the ledger's SQL and the real Tier 1, focus and heartbeat
 functions over a `node:sqlite` binding, so it needs Node 22.13 or newer and
 runs under `--disable-warning=ExperimentalWarning` like the reads suite.
+
+`flows-readers-contract` was measured on 2026-09-30: under 1 s with no server,
+on the same counting D1 fake and `node:sqlite` as `flows-reads-contract`, so it
+takes the same Node floor. `flows-readers-render` about 10 s: Chromium against
+stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
 was on neither list, so a source scan in it (every ingest call site must
