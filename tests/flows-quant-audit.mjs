@@ -127,6 +127,16 @@ const analyticSd = (h) => {
     for (let i = 0; i < 4096; i++) seen[Math.floor(V[i * 10 + d] * 4096)]++;
     ok(seen.every((v) => v === 1), `dimension ${d + 1} puts exactly one of 4,096 points in every stratum`);
   }
+  for (let i = 0; i < 10; i++) {
+    for (let j = i + 1; j < 10; j++) {
+      const cells = new Map();
+      for (let p = 0; p < 4096; p++) {
+        const key = Math.floor(V[p * 10 + i] * 64) * 64 + Math.floor(V[p * 10 + j] * 64);
+        cells.set(key, (cells.get(key) || 0) + 1);
+      }
+      ok(Math.max(...cells.values()) <= 2 && cells.size >= 2048, `dimensions ${i + 1} and ${j + 1} put 4,096 points on the 64 x 64 grid with at most two to a cell (${cells.size} cells used)`);
+    }
+  }
   let raised = false;
   try { WORLD.sobolScrambled(1000, 2, "x"); } catch { raised = true; }
   ok(raised, "and a count that is not a power of two is refused rather than silently unbalanced");
@@ -545,7 +555,7 @@ const b76 = (F, D, K, sig, T, type) => {
   eq(sources.filter((t) => /function aggregatedSd\w*\(/.test(t)).length, 0, "no quant module carries its own copy of the aggregate sd");
   ok(WORLD.aggregatedSd === DENSITY.garchAggregatedSd, "the world module re-exports the one in the density module");
   const block = QC.runCardEngine({ ticker: "SYN", asOfMs, spot: S, rate: { r, method: "constant", n: 0 }, expiries: [{ expiry, rows: skewedRows({ S, r, asOfMs, expiry, atm: 0.4, lo: 80, hi: 120, step: 1 }).rows }], facts: [], state: null });
-  eq(block.assumptions, { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0 }, "the card block states its modelling assumptions as data: European exercise, continuous carry, a forward-drifted real-world law with no equity premium");
+  eq(block.assumptions, { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0, intraday: "time-uniform" }, "the card block states its modelling assumptions as data: European exercise, continuous carry, a forward-drifted real-world law with no equity premium, and variance spread evenly over the session for the part of today still to come");
 }
 
 console.log(`✓ flows-quant-audit: ${n} assertions`);

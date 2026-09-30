@@ -505,7 +505,7 @@ export function compactEngine(out, extra = {}) {
     v: QUANT_CARD_VERSION, engine: ENGINE_VERSION, asOf: out.asOf, spot: out.spot,
     atr: fin(extra.atr) ? dp(extra.atr, 4) : null,
     rate: extra.rate ? { r: extra.rate.r, method: extra.rate.method, n: extra.rate.n || 0 } : null,
-    assumptions: { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0 },
+    assumptions: { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0, intraday: "time-uniform" },
     liquidity: out.liquidity, expiries: out.expiries,
     facts: extra.facts || [], state: extra.state || null, levels: extra.levels || null, event: extra.event || null,
     zeroGamma: extra.zeroGamma || null, pLaw: extra.pLaw || null,
