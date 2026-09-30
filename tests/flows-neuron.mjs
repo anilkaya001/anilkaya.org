@@ -4,7 +4,8 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
          engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
-         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE } from "../shared/flows-neuron.js";
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE,
+         neuronTier, abstentionIdea, structuresForState, NEURON_TIERS, TIER_WHY } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { BUCKET_LINES } from "../shared/flows-quant-structures.js";
 import { guardAnswer, selectFacts, buildFactIndex } from "../shared/flows-ask.js";
@@ -1385,6 +1386,51 @@ const CARD = {
   ok(!/soft tilt/.test(regimeState(fair, { expectedSession: "2026-09-15" }).drivers.find((d) => d.key === "pricedMove" && !d.sub).reading), "and a fair one has nothing to hedge");
   ok(guardAnswer(stateSentence(rr, "SYN1"), guardFacts(buildContext(rich, { expectedSession: "2026-09-15" })), guardOptions(buildContext(rich, { expectedSession: "2026-09-15" }))).ok,
      "the sentence still passes the guard it is quoted through");
+}
+
+{
+  const engineOf = (over = {}) => ({
+    facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
+    structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }],
+    ideas: ["S1"], noTrade: null, ...over });
+  const tierOf = (card) => neuronTier(card, { engine: engineContext(card) });
+  same(tierOf({ depth: "board", engine: engineOf() }), { tier: "priced", code: null, why: TIER_WHY.priced }, "TIERS: an engine block with ranked ideas is the priced tier");
+  same(tierOf({ depth: "focus", engine: engineOf({ ideas: [], noTrade: { code: "grade.none", closest: "S1" } }) }),
+    { tier: "stand-aside", code: "grade.none", why: TIER_WHY["grade.none"] }, "a block that stood aside is stand-aside, carrying the engine's own code and its words");
+  same(tierOf({ depth: "board", engine: engineOf({ ideas: [] }) }).code, "ideas.none", "and a block with no ideas and no code says ideas.none rather than nothing");
+  same(tierOf({ depth: "board", panels: { ivSurface: { status: "unavailable", reason: "x" } } }), { tier: "unpriceable", code: "chain.absent", why: TIER_WHY["chain.absent"] },
+    "a board card with no engine and a silent chain panel is unpriceable, chain.absent");
+  eq(tierOf({ depth: "focus", panels: { ivSurface: { status: "ok" } } }).code, "engine.absent", "with the chain read but no block, engine.absent");
+  same([tierOf({ depth: "cross-section" }), tierOf({ depth: "index" }), tierOf({ depth: "fund" }), tierOf({})].map((t) => t.tier), ["family", "family", "family", "family"],
+    "cross-section cards, dossiers and cards of unknown depth are the family tier");
+  same(tierOf({ depth: "board", engine: { status: "split", key: "card-x:T" } }), { tier: "family", code: "engine.unreadable", why: TIER_WHY["engine.unreadable"] },
+    "an unresolved overflow pointer is a read fault named engine.unreadable, never an unpriceable name");
+  ok(NEURON_TIERS.length === 7 && ["priced", "stand-aside", "family", "screen", "unpriceable", "expired", "none"].every((t) => NEURON_TIERS.includes(t)), "seven tiers");
+  const words = Object.values(TIER_WHY);
+  ok(words.length === 11 && words.every((w) => !/\b(will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds|would|could|might|may)\b/i.test(w)),
+    "every tier sentence is free of forecast and modal words");
+  ok(words.every((w) => guardAnswer(w, [{ say: w }], { smallIntegers: false, modals: true }).ok), "and passes the guard it would be quoted through");
+
+  const blind = JSON.parse(JSON.stringify(CARD));
+  blind.panels.gamma = { status: "unavailable", reason: "no ladder" };
+  blind.regime = { label: "short", crossings: 0 };
+  const bctx = buildContext(blind, { expectedSession: "2026-09-15" });
+  same(abstentionIdea(bctx), stateIdea(bctx), "ABSTENTION: an undetermined state's abstention is the state's own No position idea");
+  const weak = { ...bctx, state: { ...bctx.state, state: "pinned", confidence: 0, drivers: [], invalidation: null, horizon: null } };
+  eq(stateIdea(weak), null, "a determined state at confidence 0 still writes no idea of its own");
+  const ab = abstentionIdea(weak);
+  ok(ab && ab.structure === "no position" && ab.fromState === true && ab.title === "No position" && /^The greeks imply a pinned state for SYN1, but at a confidence too low to rest an idea on/.test(ab.thesis) && !/\d/.test(ab.thesis.replace("SYN1", "")),
+    `but it now abstains in words instead of leaving the reader nothing: ${ab && ab.thesis}`);
+  const kept = vetIdeas([ab], weak);
+  ok(kept.ideas.length === 1 && kept.refused.length === 0 && kept.ideas[0].title === "No position", `and the abstention passes the same vetting (${kept.refused.join("; ")})`);
+  ok(/no level that ends it/.test(abstentionIdea({ ...weak, state: { ...weak.state, confidence: 2 } }).thesis) &&
+     /no horizon/.test(abstentionIdea({ ...weak, state: { ...weak.state, confidence: 2, invalidation: { px: 1, label: "x", kind: "k" } } }).thesis),
+    "with a different reason when the confidence is fine and a level or a horizon is what is missing");
+  eq(abstentionIdea({ features: [] }), null, "and no state at all writes nothing to abstain from");
+  same(structuresForState("pinned", null, "rich"), STATE_STRUCTURES.pinned.rich, "structuresForState is the table selection regimeState uses: pinned takes its own row");
+  same(structuresForState("amplifying", "bearish", "cheap"), STATE_STRUCTURES.bear.cheap, "amplifying with a bearish lean takes the bear row");
+  same(structuresForState("amplifying", null, "fair"), STATE_STRUCTURES.shortNoSide.fair, "and with no lean the no-side row");
+  same(structuresForState("premium-rich", "bullish", "rich"), STATE_STRUCTURES["premium-rich"], "premium states take their own row whatever the lean");
 }
 
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +

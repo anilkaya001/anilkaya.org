@@ -755,6 +755,24 @@ function noPositionIdea(ctx, s) {
   };
 }
 
+export function abstentionIdea(context) {
+  const ctx = context && typeof context === "object" ? context : {};
+  const s = ctx.state && typeof ctx.state === "object" ? ctx.state : null;
+  if (!s) return null;
+  if (s.state === "undetermined") return noPositionIdea(ctx, s);
+  const why = s.confidence < 1 ? "at a confidence too low to rest an idea on"
+    : !s.invalidation ? "it names no level that ends it"
+      : !s.horizon ? "it names no horizon" : "too few readings agree on it";
+  const known = (ctx.features || []).filter((f) => f.key !== "state" && f.status === "ok" && f.robustness >= 1)
+    .sort((a, b) => b.robustness - a.robustness).slice(0, 2).map((f) => f.key);
+  return {
+    title: "No position", structure: "no position", direction: "neutral",
+    thesis: "The greeks imply " + article((STATE_WORD[s.state] || s.state).toLowerCase() + " state") + " for " + (ctx.ticker || "this name") + ", but " + why +
+      ". No position is the reading until the state firms.",
+    rests_on: known, invalidation: "the state gaining confidence", horizon: "the next card", fromState: true,
+  };
+}
+
 export function stateIdea(context) {
   const ctx = context && typeof context === "object" ? context : {};
   const s = ctx.state && typeof ctx.state === "object" ? ctx.state : null;
@@ -800,6 +818,44 @@ export function stateIdea(context) {
     horizon: s.horizon.kind === "priced_sessions" ? s.horizon.value + " sessions" : String(s.horizon.value),
     fromState: true,
   };
+}
+
+export const NEURON_TIERS = Object.freeze(["priced", "stand-aside", "family", "screen", "unpriceable", "expired", "none"]);
+
+export const TIER_WHY = Object.freeze({
+  priced: "Priced by the options engine on this name's own option chain.",
+  family: "State and structure family only: no option chain was priced for this name.",
+  "chain.absent": "No option chain was read for this name tonight, so nothing was priced for it.",
+  "engine.absent": "The options engine produced no block for this card, so nothing was priced for it.",
+  "engine.unreadable": "The engine's block for this name was unreadable from the store just now, so the reading is the state and its structure family.",
+  "ev.none-positive": "The engine priced this name's structures and none has a positive real-world payoff.",
+  "grade.none": "The structures with a positive real-world payoff all grade below one.",
+  "risk.undefined-only": "Every structure that cleared the bar carries undefined risk, and the first idea must be defined-risk.",
+  "model.none": "The engine priced no structure on this name's chain.",
+  "candidates.none": "No structure family fits this name's expiries and state.",
+  "ideas.none": "The engine ranked no structure for this name.",
+});
+
+export function neuronTier(card, context) {
+  const c = card && typeof card === "object" ? card : {};
+  const eng = context && context.engine ? context.engine : null;
+  if (eng) {
+    if (eng.noTrade || !eng.ideas.length) {
+      const code = eng.noTrade && eng.noTrade.code ? eng.noTrade.code : "ideas.none";
+      return { tier: "stand-aside", code, why: TIER_WHY[code] || TIER_WHY["ideas.none"] };
+    }
+    return { tier: "priced", code: null, why: TIER_WHY.priced };
+  }
+  const block = c.engine && typeof c.engine === "object" ? c.engine : null;
+  if (block && (block.status === "unreadable" || block.status === "unavailable" || block.status === "split")) {
+    return { tier: "family", code: "engine.unreadable", why: TIER_WHY["engine.unreadable"] };
+  }
+  if (c.depth === "board" || c.depth === "focus") {
+    const iv = c.panels && c.panels.ivSurface;
+    const code = iv && iv.status !== "ok" ? "chain.absent" : "engine.absent";
+    return { tier: "unpriceable", code, why: TIER_WHY[code] };
+  }
+  return { tier: "family", code: null, why: TIER_WHY.family };
 }
 
 export function buildContext(card, extras) {

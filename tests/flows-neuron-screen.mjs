@@ -268,6 +268,18 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
 }
 
 {
+  const code = (r) => r.noIdeaCode;
+  eq(code(read({})), null, "a reading that offers a family carries no no-idea code");
+  eq(code(read({ ed: 5 })), "event.window", "the earnings window is the code event.window");
+  eq(code(read({ vrp: 0.1, iv30: 0.4, rv20: 0.3, ivp: 10 })), "premium.conflict", "a rich premium at a low percentile is premium.conflict");
+  eq(code(read({ gexAdv: -0.03, tilt: 0.05, vrp: 0.05, iv30: 0.3, rv20: 0.25 })), "table.no-side", "short gamma, rich premium and no lean is table.no-side");
+  eq(code(read({ gexAdv: null, vrp: null })), "state.undetermined", "no gamma and no premium is state.undetermined");
+  eq(code(screenReading({ ticker: "SYN", u: {}, pct: {}, sessionDate: SESSION, expectedSession: SESSION })), "screen.no-inputs", "a row with none of the inputs is screen.no-inputs");
+  eq(code(read({}, { sessionDate: "2026-09-11" })), "expired.sessions", "and an old row is expired.sessions");
+  eq(read({}).limits, SCREEN_LIMITS, "every reading carries the sentence that says what was not read, on its own for a client to print");
+}
+
+{
   const cur = read({}, {});
   eq(cur.tier, "screen", "a row for the expected session is the screen tier");
   eq(cur.stale, false, "and is not stale");

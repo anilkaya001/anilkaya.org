@@ -5,6 +5,7 @@ import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from ".
 import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
 import { easternInstant } from "../shared/flows-freshness.js";
+import * as NEURON from "../shared/flows-neuron.js";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
@@ -115,6 +116,17 @@ function fakeD1() {
   const rowsRead = (from = 0) => trips.slice(from).reduce((sum, t) => sum + (t.rows || 0), 0);
   return { D1, db, trips, put, live, rowsRead, fail: (re) => { failing = re; }, throwSync: (re) => { thrown = re; }, hangOnce: (re) => { hang = re; }, slowOnce: (re, ms) => { slow = { re, ms }; }, latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n), count: (re, from = 0) => trips.slice(from).filter((t) => t.sqls.some((s) => re.test(s))).length };
+}
+
+const FIXTURE_NOW = "2026-09-25T13:00:00.000Z";
+function shiftClock(baseIso) {
+  const Real = Date;
+  const offset = Real.parse(baseIso) - Real.now();
+  globalThis.Date = class extends Real {
+    constructor(...a) { if (a.length) super(...a); else super(Real.now() + offset); }
+    static now() { return Real.now() + offset; }
+  };
+  return () => { globalThis.Date = Real; };
 }
 
 let instance = 0;
@@ -601,6 +613,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 }
 
 {
+  const unshift = shiftClock(FIXTURE_NOW);
   const f = fakeD1();
   seed(f);
   const get = await client(f.D1);
@@ -621,11 +634,15 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   eq(again.trips.length, 1, "from one trip: the card and the prior come back together and the fingerprint matches");
   ok(typeof again.body.summary === "string" && again.body.summary.includes("NVDA") && again.body.llm === false && again.body.context.ticker === "NVDA",
      `with the deterministic summary of the card's context (${JSON.stringify(again.body).slice(0, 120)})`);
-  deep(Object.keys(again.body).sort(), ["claims", "context", "engine", "generatedAt", "guard", "ideas", "llm", "model", "provenance", "refused", "scope", "status", "summary", "verdict", "verdictWord"],
-     "and the summary's shape is unchanged");
+  deep(Object.keys(again.body).sort(), ["claims", "code", "context", "engine", "generatedAt", "guard", "ideas", "llm", "model", "provenance", "refused", "scope", "status", "summary", "tier", "verdict", "verdictWord", "why"],
+     "and the summary's shape is the old one plus the three fields of the tier contract: tier, code and why");
+  deep([again.body.tier, again.body.code], ["family", null], "a card with no engine block and no board depth is the family tier: state and structure family only");
+  ok(/no option chain was priced/.test(again.body.why), "and says why in words");
 
   const none = await route("/api/flows/summary?t=ZZZZ");
-  ok(none.body.status === "pending" && none.trips.length === 1, "a name with no card is pending after the same single batch");
+  ok(none.body.status === "absent" && none.body.tier === "none" && none.body.code === "not-covered" && none.trips.length === 2,
+     "a name with no card and no universe row is tier none, not pending: the card-and-prior batch, then one batch for the roster's promise and the universe row");
+  ok(/not in the nightly universe/.test(none.body.why) && none.body.summary === null && none.body.ideas.length === 0, "with the honest reason and no idea");
   f.fail(/FROM flows_payload WHERE id = \?$/);
   const gone = await route("/api/flows/summary?t=NVDA");
   ok(gone.body.status === "unavailable" && gone.body.reason === "store", "and a store that cannot be read says unavailable, never that no card was published");
@@ -641,6 +658,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
      splitReading.trips[1].kind === "first" && /FROM flows_payload WHERE id = \?$/.test(splitReading.trips[1].sqls[0]) &&
      splitReading.trips[1].args[0][0] === "card-x:SPLIT" && splitReading.trips[2].kind === "run",
      "and the reading of a split card is its batch, the overflow row read by its card-x key, and the claim");
+  unshift();
 }
 
 {
@@ -735,7 +753,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 2],
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
-    ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3],
+    ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3], ["/api/flows/summary?t=LITE", names.length + 50], ["/api/flows/summary?t=ZZZZ", names.length + 50],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
     ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1],
     ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
@@ -756,13 +774,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     if (HOME.includes(path)) home += got.rows;
   }
   ok(home <= 30, `THE THIRTEEN HOME READS TOGETHER cost ${home} rows, so the 5,000,000-row daily cap holds ${Math.floor(5e6 / home)} cold home loads`);
-  const universeScan = names.length * 2 + 130;
+  const universeScan = names.length + 130;
   const lite = await cost("/api/flows/card?t=LITE");
   const absent = await cost("/api/flows/card?t=ZZZZ");
   const tape = await cost("/api/flows/tape?t=NVDA");
   ok(lite.rows <= universeScan + 120 && absent.rows <= universeScan + 120,
     `the two routes that read the universe name list are the costly ones: a lite card ${lite.rows} rows and an absent one ${absent.rows} ` +
-    `(json_each over the ${names.length} names, the sector column and the ${120} event rows; an upper bound, since SQLite stops at the first match)`);
+    `(json_each over the ${names.length} names, the sector read by index from the row it found, and the ${120} event rows; an upper bound, since SQLite stops at the first match)`);
   ok(tape.rows <= names.length + 10,
     `and the tape's admission check ${tape.rows}, an upper bound: its UNION ALL stops at the card row, so a covered name reads one row`);
   const worstPage = lite.rows + tape.rows + 20;
@@ -870,6 +888,102 @@ class FakeCache {
   ok(plain.res.status === 200, "with no Cache API at all (a test bench, a local runtime) nothing is kept and nothing fails");
 }
 
+{
+  const unshift = shiftClock(FIXTURE_NOW);
+  const f = fakeD1();
+  seed(f);
+  const names = ["NVDA", "LITE", "GATED", "SCRN", "EVNT", "CNFL"];
+  const col = (scale, ...v) => v.map((x) => (x === null ? null : Math.round(x * scale)));
+  f.put("universe", { ...NIGHTLY, n: names.length, t: names, sectors: ["Technology", "Energy"], sec: [0, 0, 0, 1, 1, 1],
+    units: { px: ["usd", 100], iv30: ["vol", 1000], rv20: ["vol", 1000], vrp: ["vol", 1000], ivp: ["pct100", 1], gexAdv: ["fraction", 1e4],
+      dex: ["fraction", 100], vanna: ["fraction", 1e4], charm: ["fraction", 10], im5: ["fraction", 1e3], im30: ["fraction", 1e3],
+      ed: ["sessions", 1], tilt: ["fraction", 100], dDelta: ["fraction", 1e4] },
+    cols: {
+      px: col(100, 170, 72.52, 9, 55, 55, 55),
+      iv30: col(1000, null, null, null, 0.3, 0.3, 0.3), rv20: col(1000, null, null, null, 0.25, 0.25, 0.25), vrp: col(1000, null, null, null, 0.05, 0.05, 0.05),
+      ivp: col(1, null, null, null, 50, 50, 20), gexAdv: col(1e4, null, null, null, 0.03, 0.03, 0.03),
+      dex: col(100, null, null, null, 2, 2, 2), vanna: col(1e4, null, null, null, 0.004, 0.004, 0.004), charm: col(10, null, null, null, -3, -3, -3),
+      im5: col(1e3, null, null, null, 0.03, 0.03, 0.03), im30: col(1e3, null, null, null, 0.08, 0.08, 0.08),
+      ed: col(1, null, null, null, null, 5, null), tilt: col(100, null, null, null, 0.05, 0.05, 0.05), dDelta: col(1e4, null, null, null, 0, 0, 0),
+    },
+    pct: { gexAdv: [null, null, null, 70, 70, 70] } });
+  const cache = new FakeCache();
+  globalThis.caches = { default: cache };
+  const calls = [];
+  const ai = { run: async () => { calls.push(1); return { response: "{}", usage: { prompt_tokens: 1, completion_tokens: 1 } }; } };
+  try {
+    const get = await client(f.D1, { AI: ai, FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" });
+    await get("/api/flows/meta");
+    const route = async (path) => { const n = f.trips.length; const r = await get(path); await r.settle(); return { ...r, trips: f.since(n), rows: f.rowsRead(n) }; };
+
+    const scr = await route("/api/flows/summary?t=SCRN");
+    ok(scr.body.status === "ok" && scr.body.tier === "screen" && scr.body.code === null && scr.body.engine === false && scr.body.llm === false,
+       "A UNIVERSE-ONLY NAME IS NOT PENDING: it gets a reading of the screen tier, status ok, from the universe row");
+    ok(scr.body.screen && scr.body.screen.state === "pinned" && scr.body.screen.gamma === "long" && scr.body.screen.premium === "rich" &&
+       scr.body.screen.confidence === 1 && scr.body.screen.priced === false && scr.body.why === "no chain read for this name",
+       "long gamma, options 20% rich to realised volatility: pinned and rich, confidence one, unpriced, and it says why");
+    deep(scr.body.screen.families, NEURON.STATE_STRUCTURES.pinned.rich.preferred, "the families are the consolidated table's row for it");
+    ok(scr.body.ideas.length === 0 && scr.body.summary === scr.body.screen.summary && /^Screener read:/.test(scr.body.summary) && /Read from the screener row alone/.test(scr.body.provenance),
+       "with the summary and provenance a reader needs");
+    eq(scr.trips.length, 2, "two trips: the card row with the prior reading, then one batch for the roster's promise and the universe row");
+    ok(scr.trips[1].kind === "batch" && /id = 'roster'/.test(scr.trips[1].sqls[0]) && /id = 'universe'/.test(scr.trips[1].sqls[1]), "in that order, the universe row read once");
+    eq(calls.length, 0, "NO MODEL IS CALLED for the screen tier");
+    eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron").get().n, 0, "and nothing is written: no generating marker, no row");
+    eq(f.db.prepare("SELECT count(*) AS n FROM flows_ai_usage").get().n, 0, "and no spend is recorded");
+    ok(cache.puts.filter((u) => u.includes("flows-screen")).join() === "https://flows-screen.internal/SCRN", "the reading is kept under a key of its own for five minutes");
+    const again = await route("/api/flows/summary?t=SCRN");
+    ok(again.trips.length === 1 && again.rows <= 3 && JSON.stringify(again.body) === JSON.stringify(scr.body),
+       `and a second read is the same reading from one trip and ${again.rows} rows: the universe is not scanned again`);
+    const kept = cache.entries.get("https://flows-screen.internal/SCRN");
+    ok(kept.headers.some(([k, v]) => k.toLowerCase() === "cache-control" && v === "max-age=300"), "with a five-minute life");
+
+    const ev = await route("/api/flows/summary?t=EVNT");
+    ok(ev.body.tier === "screen" && ev.body.code === "event.window" && ev.body.screen.idea.kind === "none" && ev.body.screen.families.length === 0,
+       "a report five sessions away turns the idea into No position, with a code for it");
+    const cf = await route("/api/flows/summary?t=CNFL");
+    ok(cf.body.code === "premium.conflict" && cf.body.screen.idea.kind === "none" && /disagree/.test(cf.body.screen.noIdeaReason),
+       "and a rich premium at the 20th percentile of its own year is a conflict, No position with the reason");
+
+    const lite = await route("/api/flows/summary?t=LITE");
+    ok(lite.body.status === "unavailable" && lite.body.tier === "unpriceable" && lite.body.code === "screen.no-inputs" && lite.body.screen.facts.length === 0,
+       "a universe row with a price and no option data is unpriceable, with the reason, and not pending");
+    const none = await route("/api/flows/summary?t=ZZZZ");
+    ok(none.body.tier === "none" && none.body.status === "absent" && none.body.summary === null, "a name outside the universe is tier none");
+    ok(cache.puts.includes("https://flows-screen.internal/ZZZZ"), "and even that answer is kept for the five minutes, so a poll of an unknown name costs one trip");
+    eq(calls.length, 0, "still no model call anywhere");
+
+    f.put("card:OLD", { ...NIGHTLY, sessionDate: "2026-09-16", ticker: "OLD", panels: PANELS, score: 61, conviction: 70 });
+    const old = await route("/api/flows/summary?t=OLD");
+    ok(old.body.status === "ok" && old.body.tier === "expired" && old.body.code === "expired.sessions" && old.body.ideas.length === 0 && old.body.llm === false,
+       "A CARD MORE THAN ONE SESSION OLD IS EXPIRED: the facts, no idea");
+    ok(/6 sessions before the last close \(2026-09-24\)/.test(old.body.why) && /What it recorded then/.test(old.body.summary) && old.body.context.ticker === "OLD",
+       "and it says how old it is, and keeps the card's own facts");
+    ok(old.trips.length === 1 && calls.length === 0 && f.db.prepare("SELECT count(*) AS n FROM flows_neuron").get().n === 0,
+       "one trip, no model, no generating marker: an expired card costs nothing to answer");
+    f.put("card:PREV", { ...NIGHTLY, sessionDate: "2026-09-23", ticker: "PREV", panels: PANELS, score: 61, conviction: 70 });
+    const prev = await route("/api/flows/summary?t=PREV");
+    ok(prev.body.tier === "family" && prev.body.context.stale === true, "while a card one session behind keeps its tier and its stale cap");
+
+    f.put("card:BRD", { ...NIGHTLY, ticker: "BRD", depth: "board", panels: { ...PANELS, ivSurface: { status: "unavailable", reason: "no chain" } }, score: 61, conviction: 70 });
+    const brd = await route("/api/flows/summary?t=BRD");
+    ok(brd.body.tier === "unpriceable" && brd.body.code === "chain.absent" && /No option chain was read/.test(brd.body.why),
+       "a board card with no engine block and no chain is unpriceable, chain.absent");
+    f.put("card:XSC", { ...NIGHTLY, ticker: "XSC", depth: "cross-section", panels: PANELS, score: 61, conviction: 70 });
+    const xsc = await route("/api/flows/summary?t=XSC");
+    ok(xsc.body.tier === "family" && xsc.body.code === null, "a cross-section card is the family tier");
+
+    f.put("card:ABS", { ...NIGHTLY, ticker: "ABS", panels: PANELS, score: 61, conviction: 70, regime: { labelFrom: "book", labelValue: 1, bookGammaRaw: 1, bookGamma: 1e6, bookShare: 0.5 } });
+    await route("/api/flows/summary?t=ABS");
+    const abs = await route("/api/flows/summary?t=ABS");
+    ok(abs.body.status === "ok" && abs.body.ideas.length === 1 && abs.body.ideas[0].title === "No position" && abs.body.ideas[0].structure === "no position" &&
+       /no level that ends it/.test(abs.body.ideas[0].thesis),
+       "A FAMILY-TIER CARD WITH A READ BUT UNFINISHED STATE ABSTAINS IN WORDS: long gamma with no level to end it wrote no idea at all before, and now says No position and why");
+  } finally {
+    delete globalThis.caches;
+    unshift();
+  }
+}
+
 
 {
   const f = fakeD1();
@@ -937,6 +1051,7 @@ class FakeCache {
 }
 
 {
+  const unshift = shiftClock(FIXTURE_NOW);
   const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
   const answer = JSON.stringify({ summary: "NVDA scored 61 this session with conviction 70 of 100.", ideas: [] });
   const rig = (script) => {
@@ -1023,9 +1138,11 @@ class FakeCache {
     await again.settle();
     ok(ai.calls.length === 2, "and a card published again (a new generatedAt) is read again");
   }
+  unshift();
 }
 
 {
+  const unshift = shiftClock(FIXTURE_NOW);
   const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
   const block = (ideas, noTrade) => ({
     v: 1, engine: "q1", asOf: "2026-09-24T20:00:00.000Z", spot: 100, atr: 2.5,
@@ -1054,10 +1171,13 @@ class FakeCache {
      ranked.verdict !== "stand-aside" && ranked.guard === "engine:refused" && ranked.llm === false,
      `N-F2, end to end: a model that answers stand-aside while the engine ranks S1 is refused, and the reader gets the engine's idea and no Stand aside tag (${ranked.verdict}, ${ranked.guard})`);
   ok(/every answer the model gave was refused \(verdict-false\)/.test(ranked.provenance), `and is told so (${ranked.provenance})`);
+  deep([ranked.tier, ranked.code, ranked.why], ["priced", null, "Priced by the options engine on this name's own option chain."], "an engine card with ranked ideas is the priced tier");
 
   const aside = await reading(block([], { code: "candidates.none", closest: null }), { verdict: "stand-aside", ideas: [] });
   ok(aside.status === "ok" && aside.ideas.length === 0 && aside.verdict === "stand-aside" && aside.llm === true && aside.verdictWord === "Stand aside",
      "while the same words are accepted when the engine itself stood aside");
+  deep([aside.tier, aside.code, aside.why], ["stand-aside", "candidates.none", "No structure family fits this name's expiries and state."],
+    "and an engine that stood aside is the stand-aside tier, carrying the engine's own noTrade code and its plain words");
   ok(/was asked and agreed: the engine’s own verdict is that no structure it priced clears its bar/.test(aside.provenance) && !/no model was asked/.test(aside.provenance),
      `and the provenance says a model was asked, where an empty idea list read as 'no model was asked' (${aside.provenance})`);
 
@@ -1071,6 +1191,7 @@ class FakeCache {
   const offRules = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["level.magnet", "gex.book"] }] });
   ok(offRules.llm === true && offRules.ideas.length === 1,
      "level.magnet and gex.book are named by the state rule, so that pair is kept too");
+  unshift();
 }
 
 console.log(`flows-reads-contract: ${checks} checks passed`);

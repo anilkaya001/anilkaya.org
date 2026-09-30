@@ -262,15 +262,21 @@ export function screenReading(input) {
   const setting = [gammaTxt, premiumTxt, flowTxt].filter(Boolean).join(", ");
 
   let noIdeaReason = null;
+  let noIdeaCode = null;
   if (behind >= L.EXPIRED_SESSIONS) {
+    noIdeaCode = "expired.sessions";
     noIdeaReason = "The screener row describes " + sessionDate + ", " + behind + " sessions before the last close" + (expected ? " (" + expected + ")" : "") + ", so no idea is offered from it.";
   } else if (state === "undetermined") {
+    noIdeaCode = facts.length ? "state.undetermined" : "screen.no-inputs";
     noIdeaReason = "Nothing in the screener row implies a state: " + notes.join(", and ") + ".";
   } else if (eventInside) {
+    noIdeaCode = "event.window";
     noIdeaReason = "An earnings report " + ed + " sessions away sits inside the " + L.EVENT_WINDOW_SESSIONS + " sessions any structure spans and inside the implied volatility itself, and a screener row cannot say how it is priced, so no structure family is named.";
   } else if (conflicts.length) {
+    noIdeaCode = "premium.conflict";
     noIdeaReason = "The readings disagree: " + conflicts.join("; ") + ". No position is the reading until they agree.";
   } else if (!preferred.length) {
+    noIdeaCode = "table.no-side";
     noIdeaReason = "With " + setting + ", none of the structure families this screen knows rests on a side, so no position is the reading.";
   }
   const offered = noIdeaReason === null;
@@ -304,8 +310,8 @@ export function screenReading(input) {
     sessionDate, behind, stale,
     state, stateWord: STATE_WORD[state], confidence, gamma, premium, lean,
     facts, withheld, conflicts, notes,
-    families, avoid: offered ? avoid : [], idea, noIdeaReason,
-    summary, priced: false, why: SCREEN_WHY,
+    families, avoid: offered ? avoid : [], idea, noIdeaReason, noIdeaCode,
+    summary, priced: false, why: SCREEN_WHY, limits: SCREEN_LIMITS,
   };
 }
 
