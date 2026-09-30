@@ -72,6 +72,9 @@ function skewedRows({ S = S0, r = 0.04, q = 0, asOfMs, expiry, atm = 0.42, rho =
   eq(TIME.remainingSessions(et("2026-10-03T15:00:00Z"), "2026-10-05"), 1, "on a Saturday nothing of today is left and Monday is one session");
   eq(TIME.remainingSessions(et("2026-09-07T15:00:00Z"), "2026-09-08"), 1, "on the Labor Day holiday likewise");
   eq(TIME.remainingSessions(et("2026-09-30T13:35:00Z"), "2026-09-29"), 0, "an expiry already gone has none");
+  near(TIME.remainingSessions(et("2026-03-06T15:00:00Z"), "2026-03-09"), 1 + 6 / 6.5, 1e-12, "10:00 EST on the Friday before the spring change: the session ends at 21:00 UTC, six of six and a half hours left, then Monday");
+  near(TIME.remainingSessions(et("2026-03-09T14:00:00Z"), "2026-03-09"), 6 / 6.5, 1e-12, "and on the Monday after it 14:00 UTC is 10:00 EDT, with 6 of 6.5 hours left");
+  near(TIME.remainingSessions(et("2026-11-02T15:00:00Z"), "2026-11-02"), 6 / 6.5, 1e-12, "as is 15:00 UTC on the Monday after the autumn change (EST again)");
   for (const day of ["2026-09-21", "2026-11-25", "2027-01-15"]) {
     const close = TIME.closeUtcMs(day);
     for (const exp of ["2026-12-18", "2027-03-19"]) {
