@@ -18,7 +18,7 @@ import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
-  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface,
+  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface, deskSmiles,
   hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES,
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
@@ -2132,7 +2132,7 @@ function deskEngine(card, nowMs) {
   return {
     status: "ok", v: QUANT_CARD_VERSION, cardSession: card.sessionDate || null, asOf: block.asOf || null,
     rate: block.rate || null, pLaw: block.pLaw || null, event: block.event || null, facts: block.facts,
-    levels: block.levels || null, state: block.state || null,
+    levels: block.levels || null, state: block.state || null, expiries: deskSmiles(block.expiries),
     stale: engineStale({
       cardSession: card.sessionDate, blockAsOf: block.asOf,
       expectedSession: card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs), FLOWS_LIVE.memoizedClock(nowMs)).expected : null,

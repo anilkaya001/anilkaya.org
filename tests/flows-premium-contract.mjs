@@ -6,6 +6,7 @@ import {
   sizeToBuyingPower, planBuyingPower,
   ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
   intrinsic, impossibleQuote, optionRoot, hasNoEarnings, PRICING_RATE, OFF_MARKET_TOLERANCE,
+  deskSmiles,
 } from "../shared/flows-premium.js";
 import { ENGINE_LINES } from "../shared/flows-quant-engine.js";
 
@@ -843,6 +844,64 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(noise.collectible, 294, "a premium carrying float noise collects a whole number of cents");
   eq(noise.idle, 50000 - 2 * 23102, "and the idle cash is exact");
   near(noise.yieldOnDeployed, 294 / 46204, 1e-12, "with the yield on what is deployed");
+}
+
+{
+  const row = { option_symbol: "XYZ261001P00100000", nbbo_bid: "0.89", nbbo_ask: "0.93", implied_volatility: "0.40", open_interest: "900", volume: "60" };
+  const read = priceSale(row, { spot: 100, asOf: "2026-09-30", readMs: Date.parse("2026-09-30T14:00:00Z") });
+  const days = priceSale(row, { spot: 100, asOf: "2026-09-30" });
+  near(read.ivMid, 0.3927450257, 1e-6, "at 10:00 the day before an expiry the option has 1.25 days to run, and its mid inverts to 39.27% (scipy 1.17.1 brentq at T = 1.25/365, F = S e^{rT}, r = 4%)");
+  near(read.cushionSigmas, 0.3889650274, 1e-6, "and the cushion is measured over that time: 0.38897 SD");
+  near(days.ivMid, 0.4384430599, 1e-6, "while a caller with no read instant gets the whole day, T = 1/365, and reads 43.84%");
+  ok(Math.abs(read.ivMid - days.ivMid) > 0.04, "four and a half volatility points apart, which is the error whole days made");
+}
+
+{
+  const spot = 100, asOf = "2026-08-25", readMs = Date.parse("2026-08-25T18:10:00Z");
+  const q = (sym, bid, ask, oi = 500) => ({ option_symbol: sym, nbbo_bid: String(bid), nbbo_ask: String(ask), implied_volatility: "0.30", open_interest: String(oi), volume: "40" });
+  const chain = [
+    q("XYZ260918C00095000", "5.75", "6.35"), q("XYZ260918P00095000", "0.62", "0.68"),
+    q("XYZ260918C00105000", "0.85", "0.91"), q("XYZ260918P00105000", "5.20", "5.80"),
+    q("XYZ260918C00100000", "2.60", "2.70"), q("XYZ260918P00100000", "2.40", "2.50"),
+    q("XYZ260918C00090000", "10.2", "10.9", 900), q("XYZ260918P00090000", "0.20", "0.27", 40),
+    q("XYZ260918C00102000", "1.55", "1.62"),
+    q("XYZ261016C00095000", "6.6", "7.1"),
+  ];
+  const r = rankChain(chain, { spot, asOf, readMs, ticker: "XYZ", limit: 50 });
+  const row = (type, strike, expiry = "2026-09-18") => r.rows.find((x) => x.type === type && x.strike === strike && x.expiry === expiry);
+  const two = (o) => (o ? { bid: o.bid, ask: o.ask } : o);
+  const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+  same(two(row("C", 95).opposite), { bid: 0.62, ask: 0.68 }, "an in-the-money call arrives with the bid and ask of the put struck beside it");
+  same(two(row("P", 105).opposite), { bid: 0.85, ask: 0.91 }, "an in-the-money put with the call's");
+  ok(row("P", 95).opposite === undefined && row("C", 105).opposite === undefined, "an out-of-the-money line carries none, since it is read from its own quote");
+  ok(row("C", 100).opposite !== undefined, "a call struck at the money is inside the forward the rate alone gives, so it carries its put");
+  ok(row("P", 100).opposite === undefined, "a put struck at the money is not in the money");
+  same(two(row("C", 90).opposite), { bid: 0.2, ask: 0.27 }, "the other side is taken even when it is too thin to be a line of its own (open interest 40), since what it lends is its price");
+  ok(row("C", 102).opposite === undefined, "a call above the forward the rate gives (100.66 for three weeks) carries none, and there is no put to take at 102 anyway");
+  ok(row("C", 95, "2026-10-16").opposite === undefined, "and an in-the-money line whose strike has no put on its expiry carries none rather than another expiry's");
+  ok(Object.keys(row("C", 95).opposite).sort().join() === "ask,bid", "and the quote holds a bid and an ask and nothing else");
+  const off = rankChain([q("XYZ260918C00095000", "5.75", "6.35"), q("XYZ260918P00095000", "0", "0.05")], { spot, asOf, readMs, ticker: "XYZ", limit: 50 });
+  ok(off.rows.every((x) => x.opposite === undefined), "a put with no bid is not a quote to read a volatility from, so the call carries nothing");
+  const cut = rankChain(chain, { spot, asOf, readMs, ticker: "XYZ", limit: 1, rankBy: "premium" });
+  ok(cut.rows.length === 1 && cut.rows[0].strike === 90 && cut.rows[0].type === "C", "ranked by premium and cut to one line, the deepest in-the-money call is what is kept");
+  same(two(cut.rows[0].opposite), { bid: 0.2, ask: 0.27 }, "and it still takes its put from the whole chain, not from the lines that were kept");
+
+  const svi = (a) => ({ a, b: 0.05, rho: -0.4, m: 0, sigma: 0.1 });
+  const smiles = deskSmiles([
+    { expiry: "2026-09-18", T: 0.0658, dte: 24, forward: { F: 100 }, smile: { method: "svi", n: 12, atmIv: 0.4, params: svi(0.0055), checks: { ok: true } } },
+    { expiry: "2026-10-16", T: 0.1425, smile: { method: "svi-repaired", params: svi(0.008) } },
+    { expiry: "2026-11-20", T: 0.2384, smile: { method: "mixture", params: { w: 0.5 } } },
+    { expiry: "2026-12-18", T: 0.315, smile: { method: "flat", params: { sigma: 0.4 } } },
+    { expiry: "2027-01-15", T: 0.39, smile: { method: "svi", params: { a: 0.01, b: 0.05 } } },
+    { expiry: "2027-02-19", T: 0, smile: { method: "svi", params: svi(0.01) } },
+    { expiry: "2027-03-19", T: "0.5", smile: { method: "svi", params: { ...svi(0.01), rho: "-0.3" } } },
+    null, { expiry: "x" },
+  ]);
+  same(smiles.map((e) => e.expiry), ["2026-09-18", "2026-10-16", "2027-03-19"], "of a card's expiries only the ones whose smile is an SVI with all five parameters and a positive year fraction go to the desk");
+  same(smiles[0], { expiry: "2026-09-18", T: 0.0658, smile: { method: "svi", params: svi(0.0055) } }, "cut to the expiry, its year fraction, the method and the five parameters");
+  ok(smiles[2].T === 0.5 && smiles[2].smile.params.rho === -0.3, "numbers that arrived as text are numbers when they leave");
+  same(deskSmiles(undefined), [], "and a card with no expiries sends none");
+  ok(JSON.stringify(smiles[0]).length < 170, `at ${JSON.stringify(smiles[0]).length} bytes an expiry`);
 }
 
 console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
