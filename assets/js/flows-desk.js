@@ -236,7 +236,7 @@
         body.__age = age === null ? undefined : age;
         body.__at = age === null ? undefined : Date.now();
         price(sym, body);
-        if (body.asOf) UI.freshness({ sessionDate: body.asOf, generatedAt: body.generatedAt, source: "desk " + sym });
+        if (body.sessionDate || body.asOf) UI.freshness({ sessionDate: body.sessionDate || body.asOf, generatedAt: body.generatedAt, source: "desk " + sym });
       }
     } catch {
       if (e.seq !== seq) return;
@@ -252,7 +252,8 @@
     const tape = p.tapeTime ? Date.parse(String(p.tapeTime).replace(" ", "T")) : NaN;
     if (Number.isFinite(tape)) return tape;
     const read = Date.parse(p.generatedAt);
-    const guess = /^\d{4}-\d{2}-\d{2}$/.test(String(p.asOf || "")) ? Date.parse(p.asOf + "T20:00:00Z") : NaN;
+    const day = String(p.sessionDate || p.asOf || "");
+    const guess = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(day + "T20:00:00Z") : NaN;
     if (!Number.isFinite(guess)) return read || Date.now();
     const close = guess + (16 - Number(ET_HOUR.format(guess))) * 3600000;
     return Number.isFinite(read) ? Math.min(close, read) : close;
@@ -415,7 +416,7 @@
     return k === null || k === undefined ? "an ordering the payload did not name" : r ? r[1].toLowerCase() : String(k);
   }
   function reasonWord(r) {
-    return { spread: "too wide", openInterest: "too thin", premium: "paying too little", expiry: "outside the tenor window", strategy: "on the other side", unpriceable: "with no quotable bid", offMarket: "with an ask below intrinsic value" }[r] || r;
+    return { spread: "too wide", openInterest: "too thin", premium: "paying too little", expiry: "outside the tenor window", strategy: "on the other side", unpriceable: "with no quotable bid", offMarket: "with an ask below intrinsic value", nonStandard: "on a non-standard contract" }[r] || r;
   }
   const intrinsicOf = (r) => shareIntrinsic(r, isNum(r.__spot)) * LOT;
 
