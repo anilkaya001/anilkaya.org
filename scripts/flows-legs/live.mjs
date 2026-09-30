@@ -2,9 +2,10 @@ import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
+  nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
 import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../shared/flows-focus.js";
-import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant } from "../../shared/flows-freshness.js";
+import { phaseAt, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
@@ -108,7 +109,12 @@ export async function runLive({
 
   const boards = {};
   for (const side of ["long", "short", "watch"]) boards[side] = await readStored("board:" + side);
-  const plan = boardPlan(boards, await readStored("focus"));
+  const focusRead = await readStored("focus");
+  const plan = boardPlan(boards, focusRead);
+  const priorBase = priorCloseBase(nightlySources({
+    boards: Object.fromEntries(Object.entries(boards).map(([side, read]) => [side, read && read.payload])),
+    focus: focusRead && focusRead.payload,
+  }), session, clock);
   const tick = Math.max(0, Math.floor((startedAt - open) / (15 * 60000)));
   const rotation = gexRotation({ ranked: plan.ranked, deep: plan.deep, tick });
   log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
@@ -216,12 +222,29 @@ export async function runLive({
   await put("live:breadth", breadth, { answered: anyAnswered([...Object.values(breadth.sectors.rows),
     ...BREADTH_ETFS.map((t) => breadth.etf[t]), breadth.dte.zero, breadth.dte.weekly]) });
 
-  const strips = shapeStrips(strip, { at, session, names: plan.names, writer });
+  const strips = shapeStrips(strip, { at, session, names: plan.names, writer, base: priorBase, lag: true });
   unshaped("screener strip", strip, strips.status);
   if (strips.status !== "unavailable") {
     const withQuote = rowsOf(strip).filter((r) => r && r.quote_time !== null && r.quote_time !== undefined).length;
     note(`screener strip: ${strips.returned ?? 0}/${plan.names.length} name(s), row date ${strips.rowDate || "absent"}, ` +
       `quote_time set on ${withQuote} row(s)`);
+    const lag = strips.lag;
+    const ahead = strips.ahead.n ? `; ${strips.ahead.n} row(s) stamped ahead of the read, by up to ${strips.ahead.maxS} s` : "";
+    note(lag ? `quote lag: ${lag.n} row(s) stamped, p50 ${lag.p50} s, p90 ${lag.p90} s, max ${lag.max} s${ahead}` +
+      (strips.off.n ? `; ${strips.off.n} row(s) dated before the session held out (${Object.keys(strips.off.dates).slice(0, 6).join(", ")})` : "")
+      : `quote lag: no row carried a usable quote_time${ahead}`);
+    const px = strips.fields.indexOf("px");
+    const chg = strips.fields.indexOf("chg");
+    const bare = Object.values(strips.rows).filter((v) => v[px] !== null && v[chg] === null).length;
+    const fill = strips.prevFill;
+    const gaps = `${bare} row(s) keep a null change`;
+    const others = priorBase && priorBase.other.length ? `; not used: ${priorBase.other.map(([k, d]) => k + " " + d).join(", ")}` : "";
+    note(!priorBase ? "day change: no dated prior session to read a base from"
+      : !fill ? `day change: no base offered, ${gaps}`
+        : fill.declined ? `day change: the ${fill.date} close disagrees with the vendor's prev_close on ` +
+          `${fill.agree[1] - fill.agree[0]}/${fill.agree[1]}, nothing filled, ${gaps}${others}`
+          : `day change: ${fill.n} null prev_close filled from the ${fill.date} close (${Object.entries(fill.from)
+            .map(([k, n]) => k + " " + n).join(", ") || "none"}), vendor agrees ${fill.agree[0]}/${fill.agree[1]}, ${gaps}${others}`);
   }
   const stripAnswered = strips.status !== "unavailable";
   await put("live:strips", strips, { answered: stripAnswered });
@@ -269,6 +292,10 @@ export async function runLive({
     calls: ledger.calls, failedCalls: ledger.failed, keys: bytes, errors, notes: notes.slice(0, 20),
     names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
     alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
+    quoteLag: strips.lag || null,
+    quoteAhead: strips.ahead || null,
+    prevFill: strips.prevFill ? { date: strips.prevFill.date, n: strips.prevFill.n ?? 0, declined: strips.prevFill.declined || null,
+      from: strips.prevFill.from || null } : null,
   };
   await put("live:heartbeat", {
     v: 1, key: "live:heartbeat", session,
@@ -413,7 +440,7 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
 
 export async function dryLiveTicks({ publish, store, shapeNews, log = console.log, warn = console.warn,
   session = "2026-08-24", minutes = [11 * 60 + 7, 11 * 60 + 22] } = {}) {
-  const boards = fakeBoards();
+  const boards = fakeBoards({ sessionDate: prevTradingDay(session, null), session });
   const readStored = async (key) => {
     if (key.startsWith("board:")) return { payload: boards[key.slice(6)] || null };
     const payload = store[key];
@@ -424,7 +451,7 @@ export async function dryLiveTicks({ publish, store, shapeNews, log = console.lo
     const at = easternInstant(session, m);
     let clock = at;
     const now = () => (clock += 250);
-    const uw = fakeLiveVendor({ now, session });
+    const uw = fakeLiveVendor({ now, session, nullPrev: true });
     log(`live (dry run): tick at ${isoSec(at)} (${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ET)`);
     results.push(await runLive({ uw, publish, readStored, now, log, warn, shapeNews, origin: "dry-run", force: true }));
   }

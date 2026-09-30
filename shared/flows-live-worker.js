@@ -2,6 +2,7 @@ import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
   nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictPatch, parseClosedDays, shapeStrips,
+  priorCloseBase,
 } from "./flows-live.js";
 import {
   FRESH_CLASSES, PHASE_MINUTES, LIVE_CLOCK, freshHeaders, pendingHeaders, phaseAt, tier1Due, liveDispatchDue,
@@ -463,6 +464,11 @@ export function focusNames(groupsText) {
   return focusStripNames({ groups }, LIVE_BUDGET.stripFocusMax);
 }
 
+export const FOCUS_NIGHTLY_SQL = "SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.groups') END AS groups, " +
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionDate') END AS session, " +
+  "CASE WHEN json_valid(payload) THEN (SELECT json_group_object(c.key, json_extract(c.value, '$[#-1]')) " +
+  "FROM json_each(payload, '$.closes') AS c) END AS closes FROM flows_payload WHERE id = 'focus'";
+
 export const FOCUS_HELD_SQL = "SELECT session, read_at, (SELECT json_group_array(r.key) FROM json_each(payload, '$.rows') AS r " +
   "WHERE json_extract(r.value, '$[' || (SELECT f.key FROM json_each(payload, '$.fields') AS f WHERE f.value = 'px') || ']') " +
   "IS NOT NULL) AS priced FROM flows_live WHERE id = 'live:focus' AND json_valid(payload)";
@@ -472,20 +478,22 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   if (liveMode(env) === "off") return { skipped: "off" };
   const read = await env.DB.batch([
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
-    env.DB.prepare("SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.groups') END AS groups " +
-      "FROM flows_payload WHERE id = 'focus'"),
+    env.DB.prepare(FOCUS_NIGHTLY_SQL),
     env.DB.prepare(FOCUS_HELD_SQL),
   ]).catch(() => null);
   const firstRow = (r) => (r && r.results && r.results[0] ? r.results[0] : null);
   const clock = read ? normalizeClock(firstRow(read[0])) : memoizedClock(at);
   if (!focusDue(at, clock)) return { due: false, why: "not-due" };
   if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { due: true, written: false, why: "no-key" };
-  const groups = read && firstRow(read[1]) ? firstRow(read[1]).groups : null;
-  const plan = focusNames(groups);
+  const nightly = read ? firstRow(read[1]) : null;
+  const plan = focusNames(nightly ? nightly.groups : null);
   const session = easternDay(at);
   const raw = await withTimeout(fetchVendor(FOCUS_READ.path, { ticker: plan.names.join(","), limit: FOCUS_READ.limit }),
     LIVE_BUDGET.tier1TimeoutMs);
-  const payload = shapeStrips(raw, { at, session, names: plan.names, writer: FOCUS_WRITER, key: "live:focus" });
+  let closes = null;
+  try { closes = nightly && typeof nightly.closes === "string" ? JSON.parse(nightly.closes) : null; } catch { closes = null; }
+  const base = priorCloseBase([{ name: "focus", sessionDate: nightly && nightly.session, close: closes }], session, clock);
+  const payload = shapeStrips(raw, { at, session, names: plan.names, writer: FOCUS_WRITER, key: "live:focus", base });
   const asked = plan.names.length;
   const px = payload.fields.indexOf("px");
   const got = plan.names.filter((t) => payload.rows[t] && payload.rows[t][px] !== null);

@@ -1080,7 +1080,7 @@ async function classifyTicker(env, ctx, ticker) {
 }
 
 function quoteCard(ticker, row, now) {
-  const vals = stripValues(row);
+  const vals = stripValues(row, { at: now });
   const u = {};
   STRIP_FIELDS.forEach(([name], i) => { u[name] = vals[i]; });
   const text = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);

@@ -1407,7 +1407,7 @@
       const px = num(v[ix.px]);
       if (px === null) continue;
       row.px = px;
-      if (ix.chg >= 0 && num(v[ix.chg]) !== null) row.chg = num(v[ix.chg]);
+      row.chg = ix.chg >= 0 ? num(v[ix.chg]) : null;
       row.__live = true;
       hit++;
     }

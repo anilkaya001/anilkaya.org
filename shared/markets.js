@@ -11,29 +11,60 @@ export const MARKET_INDICES = Object.freeze([
 
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : NaN);
 
+const localDay = (seconds, offset) => new Date((seconds + offset) * 1000).toISOString().slice(0, 10);
+
+const SAME_BAR = 0.005;
+
 export function parseIndexQuote(index, data) {
   const result = data && data.chart && Array.isArray(data.chart.result) ? data.chart.result[0] : null;
   const meta = result && result.meta ? result.meta : null;
   if (!meta) return null;
 
-  const closes = ((result.indicators && result.indicators.quote && result.indicators.quote[0] &&
-    result.indicators.quote[0].close) || []).filter((v) => Number.isFinite(v));
+  const raw = (result.indicators && result.indicators.quote && result.indicators.quote[0] &&
+    result.indicators.quote[0].close) || [];
+  const stamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const offset = Number.isFinite(meta.gmtoffset) ? meta.gmtoffset : 0;
+  const dated = stamps.length === raw.length;
+  const bars = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (Number.isFinite(raw[i]) && raw[i] > 0) bars.push({ close: raw[i], day: dated && Number.isFinite(stamps[i]) ? localDay(stamps[i], offset) : null });
+  }
+  const last = bars.length ? bars[bars.length - 1] : null;
   let price = num(meta.regularMarketPrice);
-  if (!Number.isFinite(price)) price = num(closes[closes.length - 1]);
-  let prev = num(meta.chartPreviousClose);
-  if (!Number.isFinite(prev)) prev = num(meta.previousClose);
-  if (!Number.isFinite(prev)) prev = num(closes[closes.length - 2]);
-  if (!Number.isFinite(price) || !Number.isFinite(prev) || prev === 0) return null;
+  if (!Number.isFinite(price) && last) price = last.close;
 
   const asOfSec = num(meta.regularMarketTime);
+  const asOfDay = Number.isFinite(asOfSec) && asOfSec > 0 ? localDay(asOfSec, offset) : last && last.day;
+  let prev = NaN;
+  let prevDay = null;
+  if (asOfDay && bars.some((bar) => bar.day)) {
+    for (let i = bars.length - 1; i >= 0; i--) {
+      if (bars[i].day && bars[i].day < asOfDay) { prev = bars[i].close; prevDay = bars[i].day; break; }
+    }
+  } else if (bars.length > 1 && Math.abs(last.close / price - 1) <= SAME_BAR) {
+    prev = bars[bars.length - 2].close;
+  }
+  if (!Number.isFinite(prev)) prev = num(meta.previousClose);
+  if (!Number.isFinite(price)) return null;
+  const based = Number.isFinite(prev) && prev > 0;
+  const period = meta.currentTradingPeriod && meta.currentTradingPeriod.regular;
+  const endSec = period ? num(period.end) : NaN;
+  const endOffset = period && Number.isFinite(period.gmtoffset) ? period.gmtoffset : offset;
+  const sessionEnd = Number.isFinite(endSec) && endSec > 0 && asOfDay && localDay(endSec, endOffset) === asOfDay
+    ? Math.round(endSec * 1000) : null;
+
   return {
     key: index.key,
     label: index.label,
     city: index.city,
     currency: typeof meta.currency === "string" && meta.currency ? meta.currency : index.currency,
     price,
-    changePct: ((price - prev) / prev) * 100,
+    changePct: based ? ((price - prev) / prev) * 100 : null,
+    prevClose: based ? prev : null,
+    prevDay: based ? prevDay : null,
     asOf: Number.isFinite(asOfSec) && asOfSec > 0 ? Math.round(asOfSec * 1000) : null,
+    asOfDay: asOfDay || null,
+    sessionEnd,
   };
 }
 
