@@ -38,14 +38,15 @@ export function tickWindow(day, clock = null) {
   };
 }
 
+const TICK_SQL =
+  "INSERT INTO flows_ledger (day, ticks, t1_last_at, t1_gap_ms, t1_gap_end, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?2) " +
+  "ON CONFLICT(day) DO UPDATE SET ticks = ticks + 1, " +
+  gapSets("t1_gap_ms", "t1_gap_end", "t1_last_at", 4, 5, 6) +
+  ", t1_last_at = max(coalesce(t1_last_at, ?2), ?2), updated_at = ?2";
+
 export function ledgerTickStatement(db, { day, at, start, end }) {
   const here = clamp(int(at), int(start), int(end));
-  return db.prepare(
-    "INSERT INTO flows_ledger (day, ticks, t1_last_at, t1_gap_ms, t1_gap_end, updated_at) VALUES (?1, 1, ?2, ?3, ?4, ?2) " +
-    "ON CONFLICT(day) DO UPDATE SET ticks = ticks + 1, " +
-    gapSets("t1_gap_ms", "t1_gap_end", "t1_last_at", 4, 5, 6) +
-    ", t1_last_at = max(coalesce(t1_last_at, ?2), ?2), updated_at = ?2",
-  ).bind(day, int(at), Math.max(0, here - int(start)), here, int(start), int(end));
+  return db.prepare(TICK_SQL).bind(day, int(at), Math.max(0, here - int(start)), here, int(start), int(end));
 }
 
 export function ledgerOutcomeStatement(db, { day, at, start, end, ok, failed, stale = null }) {
@@ -78,18 +79,19 @@ export function ledgerFocusStatement(db, { day, at, start, end, ok, partial, fai
     failed ? 1 : 0);
 }
 
+const PASS_SQL =
+  "INSERT INTO flows_ledger (day, t2_passes, t2_first_at, t2_last_at, t2_gap_ms, t2_gap_end, t2_calls, t2_failed, updated_at) " +
+  "VALUES (?1, 1, ?2, ?2, ?3, ?4, ?7, ?8, ?2) " +
+  "ON CONFLICT(day) DO UPDATE SET t2_passes = t2_passes + 1, t2_first_at = coalesce(t2_first_at, ?2), " +
+  gapSets("t2_gap_ms", "t2_gap_end", "t2_last_at", 4, 5, 6) +
+  ", t2_calls = t2_calls + ?7, t2_failed = t2_failed + ?8, t2_last_at = max(coalesce(t2_last_at, ?2), ?2), updated_at = ?2 " +
+  "WHERE t2_last_at IS NULL OR ?2 > t2_last_at";
+
 export function ledgerPassStatement(db, { day, at, calls = 0, failedCalls = 0 }) {
   const open = int(sessionOpen(day));
   const stop = int(easternInstant(day, 24 * 60));
   const here = clamp(int(at), open, stop);
-  return db.prepare(
-    "INSERT INTO flows_ledger (day, t2_passes, t2_first_at, t2_last_at, t2_gap_ms, t2_gap_end, t2_calls, t2_failed, updated_at) " +
-    "VALUES (?1, 1, ?2, ?2, ?3, ?4, ?7, ?8, ?2) " +
-    "ON CONFLICT(day) DO UPDATE SET t2_passes = t2_passes + 1, t2_first_at = coalesce(t2_first_at, ?2), " +
-    gapSets("t2_gap_ms", "t2_gap_end", "t2_last_at", 4, 5, 6) +
-    ", t2_calls = t2_calls + ?7, t2_failed = t2_failed + ?8, t2_last_at = max(coalesce(t2_last_at, ?2), ?2), updated_at = ?2 " +
-    "WHERE ?2 >= coalesce(t2_last_at, 0)",
-  ).bind(day, int(at), Math.max(0, here - open), here, open, stop, count(calls), count(failedCalls));
+  return db.prepare(PASS_SQL).bind(day, int(at), Math.max(0, here - open), here, open, stop, count(calls), count(failedCalls));
 }
 
 export function ledgerNightlyStatement(db, { day, at }) {
@@ -137,7 +139,9 @@ export function worstStale(rows, at, clock = null) {
   let worst = null;
   for (const r of rows || []) {
     if (!r || typeof r.id !== "string") continue;
-    const meta = { readAt: Number(r.read_at), session: r.session, cadenceS: Number(r.cadence_s), source: r.source };
+    const readAt = Number(r.read_at);
+    if (readAt >= phase.open && at - readAt <= LEDGER_LIMITS.tier1Ms) continue;
+    const meta = { readAt, session: r.session, cadenceS: Number(r.cadence_s), source: r.source };
     if (meta.readAt >= phase.open && at - meta.readAt <= FRESH_CLASSES[classOf(meta)].staleS * 1000) continue;
     const f = freshnessState(meta, at, clock);
     if (f.state !== "stale" || !Number.isFinite(f.staleAt)) continue;

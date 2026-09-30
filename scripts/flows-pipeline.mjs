@@ -2996,15 +2996,16 @@ const PUBLISH_RETRIES = 3;
 const PUBLISH_RETRY_BUDGET_MS = 90_000;
 let publishRetrySpentMs = 0;
 
+let quotaFirstAt = 0;
+
 export function resetPublishRetryBudget() {
   const spent = publishRetrySpentMs;
   publishRetrySpentMs = 0;
+  quotaFirstAt = 0;
   return spent;
 }
 
 const PUBLISH_RETRYABLE = new Set([403, 408, 429, 500, 502, 503, 504]);
-
-let quotaFirstAt = 0;
 
 export function publishRetryDelay(attempt, {
   retries = PUBLISH_RETRIES, budgetMs = PUBLISH_RETRY_BUDGET_MS, spentMs = 0,
@@ -3054,7 +3055,7 @@ async function publish(key, payload) {
   heard = refusal || await noteAnswer(response);
   const quotaWait = !response.ok && heard ? storeQuotaWait(response, heard.text, { firstAt: quotaFirstAt }) : null;
   if (quotaWait !== null) {
-    quotaFirstAt = quotaFirstAt || Date.now();
+    quotaFirstAt = quotaFirstAt || QUOTA_WAIT.now();
     lastDetail = heard.text;
     console.warn(
       `  ingest ${key}: HTTP ${response.status} store_quota — the store's daily quota is spent and resets at 00:00 UTC; ` +

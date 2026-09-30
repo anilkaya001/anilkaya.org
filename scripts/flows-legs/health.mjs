@@ -286,16 +286,18 @@ function statusRemedies(statuses) {
   return lines;
 }
 
-export const QUOTA_WAIT = { maxMs: 20 * 60 * 1000, marginMs: 30 * 1000 };
+export const QUOTA_WAIT = { maxMs: 20 * 60 * 1000, marginMs: 30 * 1000, lagWindowMs: 10 * 60 * 1000, lagStepMs: 60 * 1000, now: () => Date.now() };
 
-export function storeQuotaWait(response, text, { now = Date.now(), firstAt = 0 } = {}) {
+export function storeQuotaWait(response, text, { now = QUOTA_WAIT.now(), firstAt = 0 } = {}) {
   if (!response || response.status !== 503) return null;
   if (workerErrorCode(typeof text === "string" ? text : "") !== "store_quota") return null;
   const seconds = Number(headerOf(response.headers, "retry-after"));
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  const wait = Math.ceil(seconds * 1000) + QUOTA_WAIT.marginMs;
   const started = firstAt > 0 ? firstAt : now;
-  return now + wait - started <= QUOTA_WAIT.maxMs ? wait : null;
+  const wait = Math.ceil(seconds * 1000) + QUOTA_WAIT.marginMs;
+  if (now + wait - started <= QUOTA_WAIT.maxMs) return wait;
+  const lagging = firstAt > 0 && now % DAY_MS < QUOTA_WAIT.lagWindowMs;
+  return lagging && now + QUOTA_WAIT.lagStepMs - started <= QUOTA_WAIT.maxMs ? QUOTA_WAIT.lagStepMs : null;
 }
 
 export const burst5xx = (statuses) => statusSlots(statuses).filter(([status]) => status >= 500).reduce((sum, [, slot]) => sum + slot.n, 0);
@@ -616,7 +618,10 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   annotate = false, night = null, log = console.log, warn = console.warn } = {}) {
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
-    return { applies: false, failures: [], warnings: [], notes: [] };
+    const failures = runChecks(night);
+    if (night) log(`  run facts: ${night.planned} planned, ${night.rostered} rostered, ${night.cardsFailed} failed, ${night.deadlineSkipped} skipped; ${failures.length} failure(s)`);
+    for (const line of failures) warn(line);
+    return { applies: false, failures, warnings: [], notes: [] };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {

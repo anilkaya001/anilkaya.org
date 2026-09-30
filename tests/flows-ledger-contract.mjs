@@ -218,6 +218,59 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
 }
 
 {
+  const T = at(10, 30);
+  const liveRow = (id, ageMin, over = {}) => ({ id, read_at: T - ageMin * MIN, session: DAY, cadence_s: 900, source: "actions", ...over });
+  const workerRow = (id, ageMin, over = {}) => liveRow(id, ageMin, { cadence_s: 300, source: "worker", ...over });
+  eq(L.worstStale([liveRow("live:gex", 3), workerRow("live:market", 2)], T), null, "WORST KEY LAPSE: rows read inside their stale lines are no lapse");
+  eq(L.worstStale([liveRow("live:gex", 44), workerRow("live:market", 24)], T), null, "and a row a minute inside the line (44 of 45 min for an Actions key, 24 of 25 for a Worker key) is still no lapse");
+  deep(L.worstStale([liveRow("live:alerts", 50)], T), { key: "live:alerts", over: 300 }, "an Actions key read 50 min ago is five minutes (300 s) past its 45 min line");
+  deep(L.worstStale([workerRow("live:market", 30)], T), { key: "live:market", over: 300 }, "a Worker key read 30 min ago is five minutes past its 25 min line: the class decides the line");
+  deep(L.worstStale([liveRow("live:gex", 60), liveRow("live:alerts", 50), liveRow("live:tape", 46)], T), { key: "live:gex", over: 900 }, "THE LARGEST OVERRUN WINS, whichever row comes first");
+  deep(L.worstStale([liveRow("live:tape", 46), liveRow("live:alerts", 50), liveRow("live:gex", 60)], T), { key: "live:gex", over: 900 }, "in either order");
+  const yesterday = (id) => liveRow(id, 0, { read_at: at(15, 55, "2026-09-28"), session: "2026-09-28" });
+  eq(L.worstStale([yesterday("live:gex")], at(9, 40)), null, "a row from before the open is awaiting its first read until the open plus its live window (09:50 ET for an Actions key): no lapse at 09:40");
+  deep(L.worstStale([yesterday("live:gex")], at(10, 30)), { key: "live:gex", over: 40 * 60 }, "and a row still from yesterday at 10:30 ET missed the open: forty minutes past 09:50");
+  eq(L.worstStale([liveRow("live:gex", 90)], at(17, 0)), null, "outside the session (post-market) nothing is judged");
+  eq(L.worstStale([liveRow("live:gex", 90)], at(8, 0)), null, "nor before it");
+  eq(L.worstStale([liveRow("live:gex", 90)], easternInstant("2026-09-26", 11 * 60)), null, "nor on a Saturday");
+  deep(L.worstStale([null, { id: 7 }, {}, liveRow("live:alerts", 50)], T), { key: "live:alerts", over: 300 }, "rows that are not rows are skipped");
+  eq(L.worstStale(null, T), null, "and no rows are no lapse");
+  eq(L.worstStale([liveRow("live:alerts", 50)], NaN), null, "an unusable instant is no lapse");
+}
+
+{
+  const T = at(10, 30);
+  const seed = (s, rows) => {
+    for (const r of rows) {
+      s.db.prepare("INSERT INTO flows_live (id, payload, read_at, session, cadence_s, source, writer, updated_at) VALUES (?, '{}', ?, ?, ?, ?, 'test', ?)")
+        .run(r.id, r.readAt, DAY, r.cadenceS, r.source, r.readAt);
+    }
+  };
+  const lapse = sqliteD1();
+  seed(lapse, [{ id: "live:alerts", readAt: T - 50 * MIN, cadenceS: 900, source: "actions" }, { id: "live:gex", readAt: T - 20 * MIN, cadenceS: 900, source: "actions" }]);
+  const env = rthEnv(lapse);
+  const first = await W.rthTick(env, T, { fetchVendor: tier1Vendor(T), log: quiet });
+  ok(first.tier1.written, "the tick under test writes");
+  let r = lapse.row(DAY);
+  deep([r.stale_ticks, r.stale_over_s, r.stale_key], [1, 300, "live:alerts"],
+    "THE TICK READS THE LIVE ROWS AND LEDGERS THE WORST LAPSE IT SAW: live:alerts, read 50 min before the tick, is five minutes past its line");
+  const t2 = T + 5 * MIN;
+  await W.rthTick(env, t2, { fetchVendor: tier1Vendor(t2), log: quiet });
+  r = lapse.row(DAY);
+  deep([r.stale_ticks, r.stale_over_s, r.stale_key], [2, 600, "live:alerts"], "and the next tick, five minutes later with the row still unwritten, counts a second lapse and the larger overrun");
+  const clean = sqliteD1();
+  seed(clean, [{ id: "live:alerts", readAt: T - 20 * MIN, cadenceS: 900, source: "actions" }]);
+  await W.rthTick(rthEnv(clean), T, { fetchVendor: tier1Vendor(T), log: quiet });
+  r = clean.row(DAY);
+  deep([r.stale_ticks, r.stale_over_s, r.stale_key], [0, null, null], "a tick that finds every row inside its line records none");
+  const failing = sqliteD1();
+  seed(failing, [{ id: "live:alerts", readAt: T - 50 * MIN, cadenceS: 900, source: "actions" }]);
+  await W.rthTick(rthEnv(failing), T, { fetchVendor: dead, log: quiet });
+  r = failing.row(DAY);
+  deep([r.t1_fail, r.stale_ticks, r.stale_key], [1, 1, "live:alerts"], "and a tick whose vendor read failed still records what the Worker saw");
+}
+
+{
   const s = sqliteD1();
   const env = rthEnv(s);
   const seen = [];
@@ -312,6 +365,12 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const replay = await W.ingestLive(env, "live:heartbeat", "POST", beat(at(9, 40)), at(10, 36), { json });
   eq(replay.stored, "older-than-held", "an older heartbeat is refused by the live row");
   eq(s.row(DAY).t2_passes, 3, "and is not a pass");
+  const again = await W.ingestLive(env, "live:heartbeat", "POST", beat(at(10, 35), 40, 0), at(10, 35) + 9000, { json });
+  eq(again.stored, "written", "a heartbeat sent twice with the same read time (a retried POST) is accepted by the live row");
+  deep([s.row(DAY).t2_passes, s.row(DAY).t2_calls, s.row(DAY).t2_failed], [3, 120, 2], "A RETRIED HEARTBEAT IS NOT A SECOND PASS: the count, the calls and the failures stay as they were");
+  const next = await W.ingestLive(env, "live:heartbeat", "POST", beat(at(10, 40), 40, 1), at(10, 40) + 4000, { json });
+  eq(next.stored, "written", "and the next pass after it");
+  deep([s.row(DAY).t2_passes, s.row(DAY).t2_calls, s.row(DAY).t2_failed], [4, 160, 3], "counts once");
 }
 
 {
@@ -469,6 +528,17 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const gate = await runHealthGate({ sessionDate: S, now: () => T(20, 5), read: async (key) => ({ clock: good(null).clockRead })[key] || { payload: null, absent: true },
     night: { cardsFailed: 3, deadlineSkipped: 0 }, log: (l) => gateLines.push(l), warn: (l) => gateLines.push(l) });
   ok(gate.failures.some((f) => /3 card\(s\) failed/.test(f)), "runHealthGate hands the run's facts to the checks");
+  const dryLines = [];
+  const dryHealthy = await runHealthGate({ dry: true, night: { cardsFailed: 0, deadlineSkipped: 0, planned: 136, rostered: 136, rosterWritten: true, enriched: 124 },
+    log: (l) => dryLines.push(l), warn: (l) => dryLines.push(l) });
+  ok(!dryHealthy.applies && dryHealthy.failures.length === 0 && dryLines.includes("  run facts: 136 planned, 136 rostered, 0 failed, 0 skipped; 0 failure(s)"),
+    "A DRY RUN reads no store but still judges the run's own facts, and prints them");
+  const dryShort = await runHealthGate({ dry: true, night: { cardsFailed: 0, deadlineSkipped: 0, planned: 136, rostered: 135, rosterWritten: true },
+    log: () => {}, warn: (l) => dryLines.push(l) });
+  ok(dryShort.failures.length === 1 && /the roster lists 135 of the 136 names planned a card tonight/.test(dryShort.failures[0]) && dryLines.some((l) => /^HEALTH: the roster lists 135 of the 136/.test(l)),
+    "and a dry run whose roster is a name short is red, so a wiring fault in the plan is found before a night pays for it");
+  const dryBare = await runHealthGate({ dry: true, log: (l) => dryLines.push("bare " + l), warn: () => {} });
+  ok(dryBare.failures.length === 0 && !dryLines.some((l) => /^bare .*run facts/.test(l)), "with no run facts a dry run says only that it skipped");
   const pipeline = read("scripts/flows-pipeline.mjs");
   ok(/night: \{\s*cardsFailed: cardsFailed \+ extraFailed, deadlineSkipped: deadlineSkipped \+ extraSkipped,\s*planned: byCard\.size \+ dossierBuilt\.size, rostered: rosterSummary \? rosterSummary\.rostered : null,/.test(pipeline) &&
      /rosterThrew = true;/.test(pipeline) && /rostered: Object\.keys\(built\.payload\.depth\)\.length/.test(pipeline),
@@ -546,7 +616,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const res = (status, retryAfter) => new Response(quotaBody, { status, headers: retryAfter === undefined ? {} : { "Retry-After": String(retryAfter) } });
   const margin = QUOTA_WAIT.marginMs;
   eq(storeQuotaWait(res(503, 300), quotaBody), 300000 + margin, "A QUOTA ANSWER WITH A RESET WITHIN THE WAIT'S CAP is waited out, to the reset plus a margin");
-  eq(storeQuotaWait(res(503, 600), quotaBody, { now: 1000000, firstAt: 1000000 - 600000 }), null,
+  eq(storeQuotaWait(res(503, 600), quotaBody, { now: Date.UTC(2026, 8, 30, 12), firstAt: Date.UTC(2026, 8, 30, 12) - 600000 }), null,
     "but not when the wait would run past twenty minutes from the run's first quota answer: the cap is on the run, not on each key");
   eq(storeQuotaWait(res(503, 1200 - margin / 1000), quotaBody), 1200000, "and the cap is inclusive");
   eq(storeQuotaWait(res(503, 5 * 3600), quotaBody), null, "a reset hours away is a failure at once, not a night spent asleep");
@@ -555,6 +625,21 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(storeQuotaWait(res(503, 60), JSON.stringify({ error: { code: "unavailable", message: "x" } })), null, "nor is any other code from the Worker");
   eq(storeQuotaWait(res(503, 60), "<html>Service Unavailable</html>"), null, "nor an edge's own page");
   eq(storeQuotaWait(null, quotaBody), null, "nor no answer");
+  const M = Date.UTC(2026, 9, 1);
+  const lag = { lagStep: QUOTA_WAIT.lagStepMs, window: QUOTA_WAIT.lagWindowMs };
+  eq(storeQuotaWait(res(503, 50), quotaBody, { now: M - 50000, firstAt: M - 50000 }), 50000 + margin, "the first answer at 23:59:10 UTC waits to 00:00:00 plus the margin");
+  eq(storeQuotaWait(res(503, 86355), quotaBody, { now: M + 45000, firstAt: M - 50000 }), lag.lagStep,
+    "A RESET THAT HAS NOT LANDED BY 00:00:45 IS WAITED FOR ON A SHORT STEP: the same run's second answer carries a Retry-After of a day, and the wait no longer gives up");
+  eq(storeQuotaWait(res(503, 86355), quotaBody, { now: M + 45000, firstAt: 0 }), null, "but only for a run that has already waited for a reset: a first answer a day from its reset is a failure");
+  eq(storeQuotaWait(res(503, 86355), quotaBody, { now: M + lag.window - 1, firstAt: M - 50000 }), lag.lagStep, "up to the last millisecond of the window after midnight");
+  eq(storeQuotaWait(res(503, 86355), quotaBody, { now: M + lag.window, firstAt: M - 50000 }), null, "and not after it: a cap spent ten minutes into the day is spent");
+  eq(storeQuotaWait(res(503, 86355), quotaBody, { now: M + 12 * 3600000, firstAt: M - 50000 }), null, "nor at noon");
+  const capped = (firstAt) => storeQuotaWait(res(503, 86355), quotaBody, { now: M + 45000, firstAt });
+  eq(capped(M + 45000 - 10 * 60000), lag.lagStep, "the steps stay inside the twenty minutes the run may wait: ten minutes into the wait a step is taken");
+  eq(capped(M + 45000 + lag.lagStep - QUOTA_WAIT.maxMs), lag.lagStep, "one that ends exactly on the cap is taken");
+  eq(capped(M + 45000 + lag.lagStep - QUOTA_WAIT.maxMs - 1), null, "and one a millisecond past it is not");
+  eq(storeQuotaWait(res(503, 86355), "<html>x</html>", { now: M + 45000, firstAt: M - 50000 }), null, "a day-away answer that is not the Worker's store_quota is never a lag");
+  eq(storeQuotaWait(res(503), quotaBody, { now: M + 45000, firstAt: M - 50000 }), null, "nor one with no Retry-After");
   const pipeline = read("scripts/flows-pipeline.mjs");
   ok(/const quotaWait = !response\.ok && heard \? storeQuotaWait\(response, heard\.text, \{ firstAt: quotaFirstAt \}\) : null;\s*if \(quotaWait !== null\) \{[\s\S]*?ingestWrites\.defer\(quotaWait\);\s*await sleep\(quotaWait\);\s*attempt--;\s*continue;/.test(pipeline),
     "and the write loop takes that wait before the generic retry, defers every other writer with it, and does not spend a retry on it");

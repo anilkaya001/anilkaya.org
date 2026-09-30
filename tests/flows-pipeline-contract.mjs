@@ -314,6 +314,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const http = await import("node:http");
   const received = [];
   let quotaAnswers = 0;
+  let lagAnswers = 0;
   const server = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => { body += c; });
@@ -321,6 +322,11 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       received.push({ url: req.url, auth: req.headers.authorization, body });
       if (body.includes("QUOTAKEY") && ++quotaAnswers <= 2) {
         res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "1" });
+        res.end('{"error":{"code":"store_quota","message":"The store\'s daily quota is spent; it resets at 00:00 UTC"}}');
+        return;
+      }
+      if (body.includes("QUOTALAG") && ++lagAnswers <= 3) {
+        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": lagAnswers === 1 ? "1" : "86355" });
         res.end('{"error":{"code":"store_quota","message":"The store\'s daily quota is spent; it resets at 00:00 UTC"}}');
         return;
       }
@@ -368,6 +374,35 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(quotaMs >= 2000 - 50, `after waiting the two seconds the Worker asked for (${quotaMs} ms)`);
     ok(quotaLines.length === 2 && quotaLines.every((l) => /store_quota — the store's daily quota is spent and resets at 00:00 UTC; waiting 1s/.test(l)),
       "each wait logged, naming the cause");
+
+    resetPublishRetryBudget();
+    const lagRealNow = Date.now;
+    const lagClock = QUOTA_WAIT.now;
+    const lagStep = QUOTA_WAIT.lagStepMs;
+    const lagMargin = QUOTA_WAIT.marginMs;
+    const midnight = (Math.floor(lagRealNow() / 86400000) + 1) * 86400000;
+    const lagShift = midnight + 20000 - lagRealNow();
+    const lagSeen = received.length;
+    const lagLines = [];
+    const lagWarn = console.warn;
+    console.warn = (line) => lagLines.push(String(line));
+    QUOTA_WAIT.marginMs = 0;
+    QUOTA_WAIT.lagStepMs = 1000;
+    QUOTA_WAIT.now = () => lagRealNow() + lagShift;
+    const lagFrom = lagRealNow();
+    try { await publish("card:QUOTALAG", { ticker: "QUOTALAG" }); } finally {
+      QUOTA_WAIT.now = lagClock;
+      console.warn = lagWarn;
+      QUOTA_WAIT.marginMs = lagMargin;
+      QUOTA_WAIT.lagStepMs = lagStep;
+    }
+    const lagMs = lagRealNow() - lagFrom;
+    eq(received.length - lagSeen, 4, "A RESET THAT LANDS LATE IS WAITED OUT TOO: at 00:00:20 UTC a 503 whose Retry-After is a day away (the counter has not reset yet) " +
+      "is retried on a short step, and the fourth request lands");
+    ok(lagLines.length === 3 && lagLines.every((l) => /store_quota — the store's daily quota is spent and resets at 00:00 UTC; waiting 1s/.test(l)),
+      "each of the three waits logged as a quota wait, none spent on the generic schedule");
+    ok(lagMs >= 3000 - 50 && lagMs < 3000 + 2500, `for the three steps of a second the test sets, not the 1 s, 4 s, 9 s of the generic schedule (${lagMs} ms)`);
+    resetPublishRetryBudget();
 
     eq(summarize({ rows: [1, 2, 3] }), "3 rows", "a board is described by its row count");
     eq(summarize({ ticker: "AAPL" }), "no rows", "a card is described honestly, not by a crash");
@@ -1347,6 +1382,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
                { cwd: import.meta.dirname, encoding: "utf8" });
   eq(run.status, 0, "the dry run exits clean");
   const runLog = run.stdout + run.stderr;
+
+  {
+    const facts = /run facts: (\d+) planned, (\d+) rostered, (\d+) failed, (\d+) skipped; (\d+) failure\(s\)/.exec(runLog);
+    const cardsPlanned = /cards planned: (\d+) name\(s\)/.exec(runLog);
+    const dossiers = /dossiers: (\d+) of \d+ index built.*?; (\d+) of \d+ fund built/.exec(runLog);
+    const rostered = /roster: (\d+) carded name\(s\)/.exec(runLog);
+    ok(facts && cardsPlanned && dossiers && rostered, "the dry run reports the facts it hands the health gate, beside the plan, the dossiers and the roster it prints");
+    eq(Number(facts[1]), Number(cardsPlanned[1]) + Number(dossiers[1]) + Number(dossiers[2]),
+      "THE GATE IS HANDED THE PLAN AS THE RUN PRINTS IT: the names planned a card plus the index and fund dossiers built");
+    eq(Number(facts[2]), Number(rostered[1]), "and the roster as the run prints it");
+    eq(Number(facts[2]), Number(facts[1]), "so a healthy run's roster is exactly its plan, and the roster-shortfall check can neither miss a name nor fire on a healthy night");
+    ok(facts[3] === "0" && facts[4] === "0" && facts[5] === "0", "with no card failed, none skipped, and no failure line from the run's own checks");
+  }
 
   const probeLines = runLog.split("\n").filter((l) => l.includes("chain probe"));
   eq(probeLines.length, 1,
