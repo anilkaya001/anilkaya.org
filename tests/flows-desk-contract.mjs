@@ -799,6 +799,7 @@ try {
     await wired.setViewportSize({ width: 1440, height: 1000 });
     await wired.goto(server.baseURL + "/flows/desk/?t=AAA,EEE,OPP&strategy=both&rank=annualized", { waitUntil: "domcontentloaded" });
     await settle(8, wired);
+    for (let i = 0; i < 60 && !["AAA", "EEE", "OPP"].every((t) => got.some((p) => p && p.ticker === t)); i++) await wired.waitForTimeout(250);
     const aaa = got.find((p) => p && p.ticker === "AAA"), eee = got.find((p) => p && p.ticker === "EEE"), opp = got.find((p) => p && p.ticker === "OPP");
     ok(aaa && eee && opp, "the test holds the exact payloads the page priced");
 
