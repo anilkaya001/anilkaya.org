@@ -2698,3 +2698,107 @@ cannot. Check them after the first deploy:
 9. A transient dispatch failure cannot be summoned on demand. What the tests
    prove is the cadence given the answer; the answer itself (503, 429, no reply)
    is GitHub's.
+
+### 10.5l The per-name dossier: what each packet reads, what it costs, how to look
+
+`GET /api/flows/dossier?t=<ticker>` (behind the Flows session; AGENTS.md has the
+packet contract) assembles twelve packets for any name. It adds one table,
+`flows_dossier_cache`, and no secret, no cron and no workflow. Apply the table
+before the first read the way 10.1 describes; `ensureFlowsTables()` creates it on
+first use as well, so a database that has not had `migrations/0016_flows_dossier_cache.sql`
+applied still answers.
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0016_flows_dossier_cache.sql
+```
+
+**What each packet reads.** Nothing here is a new nightly write.
+
+| Packet | From | Vendor route (when the nightly or live layer does not hold it) |
+|---|---|---|
+| identity | the universe row (name, sector, market cap, rank) | `/api/stock/{t}/info`, `/api/companies/{t}/profile` |
+| price | `card:T` closes, the live strip, the tape, the quote path | `stock-state` through the existing quote path, only when the live strip is older than its line |
+| options | `card:T` and `card-x:T` engine, `universe`, the Neuron tier | none |
+| events | the `events` row and macro calendar | none |
+| earnings | `card-x:T` earnings, the universe's earnings columns | `/api/earnings/{t}` only when `card-x` holds none; `/api/companies/{t}/earnings-estimates` |
+| news | `live:news`, nightly `news` | `/api/news/headlines?ticker={t}&limit=12` |
+| analysts | none | `/api/screener/analysts?ticker={t}&limit=30` |
+| fundamentals | none | `/api/stock/{t}/financials`, `/api/stock/{t}/fundamental-breakdown` |
+| positioning | `card-x:T` short and insider parts | `/api/institution/{t}/ownership?limit=25&order=value&order_direction=desc`; `/api/shorts/{t}/interest-float/v2` and `/api/insider/{t}/ticker-flow` only when `card-x` holds none |
+| flow | `live:strips`, `live:alerts`, `flows_tape`, the card's dark pool | `/api/darkpool/{t}/price-levels` when the card holds none |
+| peers | the universe's sector columns and tilt | none |
+| macro | `regime`, `live:market` | none |
+
+**Cost.** The D1 batch is 13 primary-key statements in one round trip and reads
+about 16 rows cold and 19 warm (the tests hold it at 20 or fewer, and flat from a
+handful of payloads to a 670-name universe with 1,500 cards). A carded name makes
+eight vendor calls cold, a universe-only name nine with four queued for the next
+read, and a warm name none. The cap is nine a read, 2.5 s a source, 3 s overall.
+The refresh writes at most five `flows_dossier_cache` rows (one batch), so a name
+costs about 5 of the 100,000 daily row writes per refresh and no more than one
+refresh a day for the 24-hour kinds; the whole 670-name universe read once a day
+would be about 3,400 writes. Reads cost 16 to 19 rows of the 5,000,000. The
+vendor calls go through `uwFetch` and the `UW_ONDEMAND` limiter, the same
+bucket the ticker page's quote uses, so a burst of dossier reads can starve the
+quote for the window: when the limiter refuses, the packet is `pending` and the
+next read tries again, nothing is cached from the refusal.
+
+| Kind | Cached for | Where |
+|---|---|---|
+| identity, fundamentals, positioning | 24 h | `flows_dossier_cache` |
+| earnings | 12 h | `flows_dossier_cache` |
+| analysts | 6 h | `flows_dossier_cache` |
+| news | 5 min | Cache API `https://flows-dossier.internal/news/<T>` |
+| dark-pool levels | 60 s | Cache API `.../levels/<T>` |
+| quote | 5 s | Cache API `.../quote/<T>` |
+| the whole dossier, when complete | 30 s | Cache API `.../assembled/<T>` |
+
+A plan refusal (the spec lists the profile and earnings-estimates routes as
+Advanced-plan routes) is cached with its kind for the kind's TTL, so a refused route is not asked
+again for a day. A kind stale past its TTL is served and refreshed in
+`waitUntil` (stale-while-revalidate). The financials and fundamental-breakdown
+bodies are parsed only under a 256 KiB ceiling; a larger body is withheld with
+reason `large`, because parsing it can exceed the Worker's CPU limit.
+
+**How to look.** The text the model sees, and why it is that size:
+
+```bash
+curl -s -H "Cookie: <flows session>" "https://anilkaya.org/api/flows/dossier?t=NVDA&render=1" -D - | head -40
+curl -s -H "Cookie: <flows session>" "https://anilkaya.org/api/flows/dossier?t=NVDA" | jq '{tier, coverage: .dossier.coverage, tokens: .prompt.tokensEst, shed: .prompt.shed, trace}'
+```
+
+The response headers say what the read did: `X-Dossier-Vendor-Calls` (0 on a
+warm or hot read), `X-Dossier-Pending` (sources left to a timeout), `X-Dossier-Tokens`,
+`X-Dossier-Fingerprint`, and `X-Fresh-State` / `X-Fresh-Reason: store` when D1
+could not be read. `trace.queued` lists what the budget left for the next read;
+`trace.stale` the kinds being refreshed behind the response. What is cached for a
+name:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote \
+  --command="SELECT kind, fetched_at, length(payload) AS bytes FROM flows_dossier_cache WHERE ticker = 'NVDA';"
+```
+
+**The weekly probe.** Every vendor path the dossier reads, and the response
+fields it reads from each, is in `scripts/flows-probe-list.json` (`probes`, and
+`reads` under the strict check), so a renamed field fails Sunday's run instead of
+silently emptying a packet. `/api/companies/{t}/profile` and
+`/api/companies/{t}/earnings-estimates` are listed under `gated` with the 403 a
+plan without them answers; if either starts answering 200, the probe notes a plan change
+and the packets begin to fill with no deploy. The fixtures the suites run on were
+written from the spec (`docs/uw-openapi.yaml`), not from a live response: the
+vendor was not reachable when this was built. The first strict probe run after
+this deploys is the first time the reads are checked against live bytes; read its
+output for each dossier route before relying on the profile scale, `si_float` or
+the ownership `units` semantics.
+
+**What is not proven here.** The Worker's CPU for a first request in a fresh
+isolate was not measured in workerd. In Node, on the harness's fake D1, a warm
+dossier read costs about 7 ms and one served from the 30-second copy 2 to 3 ms,
+against 2 to 4 ms for the summary route on the same fake; the first request after
+process start costs about 1.6 times the summary route's, which is JIT and module
+work, not steady state. If a first request exceeds the Workers Free 10 ms CPU
+limit, Cloudflare reports error 1102 on that invocation. The large vendor bodies
+(financials, fundamental breakdown, ownership) are the first thing to move into
+the nightly in that case; the text variant and the 30-second copy are what the
+model protocol should read through.

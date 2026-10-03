@@ -315,9 +315,16 @@ function recorder() {
   };
 }
 
+const behindMemo = new Map();
+
 function behindBy(session, expected) {
   if (!session || !expected || session >= expected) return 0;
+  const key = session + "|" + expected;
+  const hit = behindMemo.get(key);
+  if (hit !== undefined) return hit;
   const n = sessionsBetween(session, expected);
+  if (behindMemo.size > 256) behindMemo.clear();
+  behindMemo.set(key, n === null ? 0 : n);
   return n === null ? 0 : n;
 }
 
@@ -1580,6 +1587,8 @@ function render(dossier, o, dropped) {
   return lines.join("\n");
 }
 
+const FULL_RENDER = new WeakMap();
+
 export function renderDossierForModel(dossier, { budgetTokens = DEFAULT_BUDGET_TOKENS } = {}) {
   const d = dossier && isObj(dossier) && isObj(dossier.packets) ? dossier : { ticker: "", asOf: null, order: [], packets: {} };
   const stages = [
@@ -1592,7 +1601,9 @@ export function renderDossierForModel(dossier, { budgetTokens = DEFAULT_BUDGET_T
   ];
   const shed = [];
   const dropped = new Set();
-  let text = render(d, stages[0], dropped);
+  const kept = FULL_RENDER.get(d);
+  let text = kept !== undefined && kept.fingerprint === d.fingerprint ? kept.text : render(d, stages[0], dropped);
+  if (kept === undefined && d.fingerprint) FULL_RENDER.set(d, { fingerprint: d.fingerprint, text });
   const done = () => ({ text, tokensEst: tokensOf(text), budgetTokens, shed, dropped: [...dropped] });
   if (tokensOf(text) <= budgetTokens) return done();
   for (let i = 1; i < stages.length; i++) {

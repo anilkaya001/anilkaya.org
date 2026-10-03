@@ -1700,7 +1700,7 @@ async function dossierResponse(env, ctx, ticker, url) {
     admit: (t) => vendorAdmits(env, ctx, t),
   }, { own: true, now });
   const { dossier, trace, neuron } = result;
-  const prompt = FLOWS_DOSSIER.renderDossierForModel(dossier, { budgetTokens });
+  const prompt = result.prompt && budgetTokens === FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS ? result.prompt : FLOWS_DOSSIER.renderDossierForModel(dossier, { budgetTokens });
   const fresh = FLOWS_DOSSIER.dossierFresh(result, now) || pendingHeaders("nightly", now, result.clock);
   const headers = {
     ...fresh,

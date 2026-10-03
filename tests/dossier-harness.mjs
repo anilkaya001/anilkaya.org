@@ -45,7 +45,12 @@ export function fakeD1() {
     }
     return rows + (searches ? Math.max(searches, returned) : 0);
   };
+  const clock = { sqlMs: 0 };
   const exec = (sql, args) => {
+    const started = performance.now();
+    try { return run(sql, args); } finally { clock.sqlMs += performance.now() - started; }
+  };
+  const run = (sql, args) => {
     if (failing && failing.test(sql)) throw new Error("fake D1 refused " + sql.slice(0, 40));
     const st = db.prepare(sql);
     if (reads.test(sql)) {
@@ -90,7 +95,7 @@ export function fakeD1() {
   const rowsRead = (from = 0) => trips.slice(from).reduce((sum, t) => sum + (t.rows || 0), 0);
   const written = (from = 0) => trips.slice(from).reduce((sum, t) => sum + (t.written || 0), 0);
   return {
-    D1, db, trips, put, live, tape, rowsRead, written,
+    D1, db, trips, put, live, tape, rowsRead, written, clock,
     fail: (re) => { failing = re; },
     latency: (ms) => { fake.latencyMs = ms; },
     since: (n) => trips.slice(n),
@@ -132,6 +137,7 @@ export function cacheFake() {
 export function vendorStub(o = {}) {
   const real = globalThis.fetch;
   const calls = [];
+  const spent = { ms: 0 };
   const state = { refuse: new Map(), delay: new Map(), bodies: new Map(), status: new Map(), tooLarge: new Set(), hold: new Map() };
   const routes = [
     [/^\/api\/stock\/[^/]+\/info$/, "info"], [/^\/api\/companies\/[^/]+\/profile$/, "profile"], [/^\/api\/stock\/[^/]+\/financials$/, "financials"],
@@ -146,17 +152,21 @@ export function vendorStub(o = {}) {
     if (url.hostname !== "uw.test") return real(input, init);
     const hit = routes.find(([re]) => re.test(url.pathname));
     const key = hit ? hit[1] : "unknown";
-    const symbol = key === "analysts" || key === "news" ? url.searchParams.get("ticker") : decodeURIComponent(url.pathname.split("/")[3] || "");
+    const symbol = key === "analysts" || key === "news" || key === "screener" ? url.searchParams.get("ticker") : decodeURIComponent(url.pathname.split("/")[3] || "");
     calls.push({ key, path: url.pathname, ticker: symbol, query: Object.fromEntries(url.searchParams), at: Date.now() });
     if (state.delay.has(key)) await new Promise((resolve) => setTimeout(resolve, state.delay.get(key)));
     if (state.hold.has(key)) await state.hold.get(key);
     if (state.status.has(key)) return new Response(JSON.stringify({ message: "refused" }), { status: state.status.get(key), headers: { "Content-Type": "application/json" } });
     if (state.tooLarge.has(key)) return new Response("{}", { status: 200, headers: { "Content-Type": "application/json", "Content-Length": "9999999" } });
-    if (key === "screener") return new Response(JSON.stringify({ data: [{ ticker: symbol || url.searchParams.get("ticker"), close: "10", prev_close: "9.9", full_name: "Screener Row" }] }), { status: 200 });
-    const body = state.bodies.has(key) ? state.bodies.get(key) : hit && key in VENDOR.bodies ? vendorBody(key) : { data: [] };
-    return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    const built = performance.now();
+    const body = state.bodies.has(key) ? state.bodies.get(key)
+      : key === "screener" ? { data: [{ ticker: symbol, close: "10", prev_close: "9.9", full_name: "Screener Row" }] }
+        : hit && key in VENDOR.bodies ? vendorBody(key) : { data: [] };
+    const text = JSON.stringify(body);
+    spent.ms += performance.now() - built;
+    return new Response(text, { status: 200, headers: { "Content-Type": "application/json" } });
   };
-  return { calls, state, restore: () => { globalThis.fetch = real; }, count: (key) => calls.filter((c) => c.key === key).length, reset: () => { calls.length = 0; } };
+  return { calls, state, spent, restore: () => { globalThis.fetch = real; }, count: (key) => calls.filter((c) => c.key === key).length, reset: () => { calls.length = 0; } };
 }
 
 let instance = 0;

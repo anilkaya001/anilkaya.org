@@ -21,6 +21,8 @@ export const CACHE_TTL_S = Object.freeze({
 
 export const FAST_TTL_S = Object.freeze({ news: 300, levels: 60, quote: 5 });
 
+export const ASSEMBLED_TTL_S = 30;
+
 export const BUDGET = Object.freeze({ maxCalls: 9, sourceMs: 2500, deadlineMs: 3000, payloadBytes: 8192 });
 
 export const NONE_WHY = "This name is not in the nightly universe, so no dealer positioning or option chain is held for it; the ticker page can read a quote for it on demand and nothing more.";
@@ -315,9 +317,36 @@ const flights = new Map();
 export function assembleDossier(env, ctx, ticker, deps, opts = {}) {
   const existing = flights.get(ticker);
   if (existing) return existing;
-  const flight = runAssembly(env, ctx, ticker, deps, opts).finally(() => { if (flights.get(ticker) === flight) flights.delete(ticker); });
+  const flight = (async () => {
+    const now = isNum(opts.now) ? opts.now : Date.now();
+    const hot = opts.fresh === true ? null : await readAssembled(ticker, now);
+    return hot || runAssembly(env, ctx, ticker, deps, opts);
+  })().finally(() => { if (flights.get(ticker) === flight) flights.delete(ticker); });
   flights.set(ticker, flight);
   return flight;
+}
+
+async function readAssembled(ticker, now) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (!cache) return null;
+  const hit = await cache.match(new Request("https://flows-dossier.internal/assembled/" + ticker, { method: "GET" })).catch(() => null);
+  const body = hit ? await hit.json().catch(() => null) : null;
+  if (!body || !isNum(body.at) || now - body.at > ASSEMBLED_TTL_S * 1000 || !isObj(body.dossier) || !isObj(body.neuron)) return null;
+  return {
+    dossier: body.dossier, neuron: body.neuron, known: body.known, admitted: body.admitted, metas: arr(body.metas), clock: memoizedClock(now),
+    prompt: isObj(body.prompt) && typeof body.prompt.text === "string" ? body.prompt : null,
+    trace: { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], failed: false, hot: true, assembledAt: body.at },
+  };
+}
+
+function writeAssembled(ticker, at, result) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (!cache) return Promise.resolve();
+  const { neuron } = result;
+  const lean = { status: neuron.status, tier: neuron.tier, code: neuron.code, why: neuron.why || null, note: neuron.note || null, sessionDate: neuron.sessionDate, generatedAt: neuron.generatedAt };
+  const response = new Response(JSON.stringify({ at, dossier: result.dossier, neuron: lean, known: result.known, admitted: result.admitted, metas: result.metas, prompt: result.prompt || null }),
+    { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=" + ASSEMBLED_TTL_S } });
+  return cache.put(new Request("https://flows-dossier.internal/assembled/" + ticker, { method: "GET" }), response).catch(() => {});
 }
 
 async function runAssembly(env, ctx, ticker, deps, opts) {
@@ -453,7 +482,23 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   const dossier = buildDossier({
     ticker, now, expectedSession: expected, held, vendor: extracts,
   });
-  return { dossier, trace, neuron, known, admitted, clock, held };
+  const metas = freshMetas(held, neuron);
+  const result = { dossier, trace, neuron, known, admitted, clock, metas };
+  const complete = !trace.failed && dossier.coverage.pending === 0 && trace.pending.length === 0 && !Object.values(extracts).some((x) => x && x.pending);
+  if (complete && opts.noHotWrite !== true) {
+    result.prompt = renderDossierForModel(dossier, { budgetTokens: DEFAULT_BUDGET_TOKENS });
+    const write = writeAssembled(ticker, Date.now(), result);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(write); else await write;
+  }
+  return result;
+}
+
+function freshMetas(held, neuron) {
+  const metas = [];
+  if (held.card && neuron && neuron.generatedAt) metas.push({ readAt: neuron.generatedAt, session: neuron.sessionDate, klass: "nightly", source: "nightly", cadenceS: 0 });
+  else if (held.universe && held.universe.generatedAt) metas.push({ readAt: held.universe.generatedAt, session: held.universe.sessionDate, klass: "nightly", source: "nightly", cadenceS: 0 });
+  if (held.strip && Number.isFinite(held.strip.readAt)) metas.push({ readAt: held.strip.readAt, session: held.strip.session, klass: "breadth", source: "actions", cadenceS: 900 });
+  return metas;
 }
 
 async function persistParts({ env, ticker, plan, results, cache, trace, now }) {
@@ -493,14 +538,9 @@ async function persistParts({ env, ticker, plan, results, cache, trace, now }) {
 }
 
 export function dossierFresh(result, now) {
-  const { dossier, neuron, held } = result;
-  const metas = [];
-  if (held.card && neuron && neuron.generatedAt) metas.push({ readAt: neuron.generatedAt, session: neuron.sessionDate, klass: "nightly", source: "nightly", cadenceS: 0 });
-  else if (held.universe && held.universe.generatedAt) metas.push({ readAt: held.universe.generatedAt, session: held.universe.sessionDate, klass: "nightly", source: "nightly", cadenceS: 0 });
-  if (held.strip && Number.isFinite(held.strip.readAt)) metas.push({ readAt: held.strip.readAt, session: held.strip.session, klass: "breadth", source: "actions", cadenceS: 900 });
   const rank = { live: 0, fresh: 1, closed: 2, stale: 3, pending: 4 };
   let worst = null;
-  for (const meta of metas) {
+  for (const meta of arr(result.metas)) {
     const f = freshHeaders(meta, now, result.clock);
     if (!worst || rank[f.headers["X-Fresh-State"]] > rank[worst.headers["X-Fresh-State"]]) worst = f;
   }

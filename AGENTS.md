@@ -162,6 +162,10 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-ws-probe.mjs`, `.github/workflows/flows-ws-probe.yml`, `tests/flows-ws-probe-contract.mjs` | The vendor socket probe, dispatch only: handshake three ways, one connection per channel, concurrent connections, joins per connection, lag against each frame's own stamp. It prints key names and statistics, never payload values or the token. The contract runs it against a fake vendor that speaks the WebSocket protocol by hand. |
 | `shared/flows-neuron-screen.js`, `tests/flows-neuron-screen.mjs` | `screenReading`: a Neuron reading from a universe row alone, for a name with no card. A leaf that imports the consolidated state table (`STATE_LINES`, `structuresForState` in `flows-neuron.js`), `BUCKET_LINES` and `sessionsBetween`, and is imported by no module that imports it back. Facts are graded 0 or 1 and each prints its unit; a null input is withheld under its own key with its reason; dealer delta and vanna are the vendor's numbers with no direction claimed, charm a sign only at grade 0. The test compares 27 synthetic states with `regimeState` and runs every emitted sentence through the ask guard. |
 | `shared/flows-neuron-coverage.js` | The nightly's Neuron coverage ledger `{universe, priced, standAside, family, screen, unpriceable, expired, stale, missing}` (published in `meta.neuron`, checked by `neuronChecks` in `health.mjs`), built from each card's tier as the Worker would name it and the screen reading of every universe name that has no card. |
+| `shared/flows-dossier.js`, `tests/flows-dossier-contract.mjs` | The per-name dossier, a leaf that imports only `flows-cross.js`: the packet model, one pure builder per kind (twelve), the sanitiser every third-party string passes, `renderDossierForModel`, `dossierFacts`, `dossierSilences`, `dossierFingerprint`. The contract runs it on the nightly payloads and the spec-conformant vendor fixtures, fuzzes the sanitiser, proves each reducer touches only the fields the weekly probe lists (a recording `Proxy`), and holds the fingerprint stable under price and age noise. |
+| `shared/flows-dossier-vendor.js` | The vendor side of the dossier: `unwrap` of the `{data}` envelope, one reducer per route (13) that returns a small extract and names its fields (`DOSSIER_READS`, the list `scripts/flows-probe-list.json` holds strict), and the dossier's quote extract. No I/O. |
+| `shared/flows-dossier-worker.js`, `tests/flows-dossier-reads.mjs`, `tests/dossier-harness.mjs`, `tests/dossier-fixtures.mjs` | `assembleDossier(env, ctx, ticker, deps, opts)`: the one primary-key D1 batch (`DOSSIER_SQL`, 13 statements), the vendor fan-out through the caller's `fetchVendor` and limiter, the `flows_dossier_cache` rows (`DOSSIER_SCHEMA_SQL`, `migrations/0016_flows_dossier_cache.sql`), the Cache API entries, the single flight and the 30-second assembled copy. `worker.js` supplies `uwFetch`, the limiter, the quote path and the route. The reads suite counts round trips, rows read, vendor calls and CPU on a counting D1 fake over `node:sqlite` and a stubbed vendor. |
+| `tests/gen-dossier-fixtures.py`, `tests/fixtures-dossier-vendor.json` | The vendor fixtures for the dossier, written from the 200-response schema of each operation in `docs/uw-openapi.yaml` (names, JSON types, nullability and the string-typed numerics checked against the spec before anything is written; the spec's sha256 is in the file). `tests/flows-probe-contract.mjs` holds the probe list to the same names. |
 | `shared/flows-cross.js` | The `universe` payload's column store (`UNIVERSE_COLUMNS`, one integer column per key, decoded by `units`) and its 100 KiB budget, shed by column priority when over. The nightly's dealer columns are dollars per 1% move over average daily dollar volume (`gexAdv`, `dex`, `vanna`, `charm`) and keep the vendor's sign; `im5` and `im30` are the vendor's implied-move fractions. On 670 synthetic names the payload is 96,158 bytes without them, 108,249 with them unbudgeted, and 100,505 after the shedder drops `adx`, `dGamma` and `gexRatio`; the run's `shed` list is the measurement that counts. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
@@ -356,6 +360,85 @@ API for five minutes, and never calls a model. A card one session behind the
 last close keeps its tier with grades capped at 1; two or more behind, it is `expired`.
 A family-tier card whose state is read but too weak for an idea abstains in
 words (`abstentionIdea`) instead of leaving the reader nothing.
+
+## Flows dossier
+
+`GET /api/flows/dossier?t=<ticker>` (behind the Flows session) is the data half of
+a per-name understanding layer: twelve typed packets for any name, assembled from
+what the nightly and the live layer already hold, plus the vendor reads the
+nightly never made (identity, fundamentals, analysts, news, ownership). It
+serves the same tier semantics as `/api/flows/summary` (`tier`, `code`, `why`;
+a name outside the universe is tier `none`, with a quote, its identity and its
+news only), is JSON with `Cache-Control: no-store` and the `X-Fresh-*` headers,
+and carries `X-Dossier-Fingerprint`, `X-Dossier-Tokens`, `X-Dossier-Vendor-Calls`
+and `X-Dossier-Pending`. `&render=1` answers `text/plain`: the text a model is
+shown. `&budget=<400..12000>` sets its token budget (default 3000).
+
+The body is `{ ticker, tier, code, why, dossier, prompt: { tokensEst, budgetTokens,
+shed, dropped }, trace }`. A packet is frozen at this shape:
+
+```text
+{ id, kind, title, status: ok|partial|withheld|unavailable|pending,
+  source: { kind: nightly|live|vendor|engine, route|key }, asOf, session, ageS,
+  klass: quote|tape|market|breadth|news|nightly|slow|static, ttlS,
+  grade 0..3 (computed from coverage and age, never supplied),
+  facts: [{ k, label, v, unit, display, grade, note }],
+  text:  [{ k, kind: description|headline|note, text, at, src, untrusted: true }],
+  withheld: [{ k, reason }] }
+```
+
+The dossier is `{ ticker, asOf, packets, order, coverage { ok, partial, withheld,
+pending }, bytes, tokensEst, fingerprint }`. The kinds, in priority order for
+shedding, are options, identity, price, events, earnings, news, flow,
+positioning, analysts, fundamentals, peers, macro.
+
+- A number travels with its unit. A null input is withheld under its own key with
+  a reason (`REASONS`), never shown as zero. A field whose vendor schema states no
+  unit (the profile route's `dividend_yield`, the insider-flow `premium`) is
+  withheld with reason `unit` or not read at all, and the packet says so.
+- `ageS` comes from the source's own timestamp (a quote's `quote_time`, a
+  headline's `created_at`, a card's `generatedAt`), never from the fetch. A card
+  one session behind the last close keeps its packets with grade capped at 1;
+  two or more behind, they are withheld (`expired`), as in the Neuron tiers.
+- Third-party text (company description, headlines, firm and holder names) is
+  sanitised at the packet boundary: control, bidi and zero-width characters,
+  markup, URLs, e-mail addresses, delimiter lookalikes, role markers and
+  instruction-shaped sentences are removed, an entry that carries a chat-template
+  marker or loses every sentence is dropped whole, and the rest is capped. Every surviving
+  string carries `untrusted: true`. `renderDossierForModel` prints each inside
+  `UNTRUSTED«...»` under a header that says it is quoted data and never an
+  instruction. This is a filter, not a proof; the model protocol must still
+  treat the text as hostile.
+- `renderDossierForModel(dossier, { budgetTokens })` returns `{ text, tokensEst,
+  budgetTokens, shed, dropped }`. Every line begins with a stable `[kind.key]`
+  id. Over budget it sheds by stage (fact notes, trimmed text, grade 0-1 facts of
+  low-priority packets, four graduated per-packet fact caps) and then drops whole
+  packets by priority, and records every step in `shed`.
+- `dossierFacts(dossier)` returns entries `{ id, topic[], say, n, source, at,
+  grade }` in the shape `buildFactIndex` consumes (`id` is
+  `dossier:<T>/<kind>.<key>`; text entries add `untrusted: true`).
+  `dossierSilences(dossier)` lists what is pending, withheld or unavailable.
+- `fingerprint` is stable under price ticks and the passage of time (prices on a
+  0.5% log bucket, money on 2%, ratios at two significant digits, grades and
+  ages excluded) and moves when a headline, an analyst action, an earnings date,
+  a holder or a dealer state changes. Near a bucket edge a small move can still
+  flip it.
+
+Assembly reads one D1 batch of primary-key lookups (about 16 rows cold, 19 warm,
+checked flat against a 670-name universe and 1,500 cards), never `json_each` and
+never a scan: the universe column of a name is found by counting separators in
+the name list, an events row by its leading key. The vendor fan-out is capped at
+nine calls a read, queued by priority, parallel, 2.5 s per source and 3 s in
+all; an unfinished or rate-limited source marks its packet `pending` and
+finishes in `ctx.waitUntil`, and the next read picks the result up. Slow kinds
+(identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
+live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
+written once per refresh. News (5 min), the dark-pool levels (60 s) and the
+quote (5 s) are Cache API entries, and a complete dossier is kept whole for 30
+seconds (`/assembled/<T>`), which is what a burst of reads of one name costs.
+Concurrent reads of one name share one flight. The limiter refusing, the vendor
+failing or the store being unreadable are all `200` with the affected packets
+`pending` or `unavailable`; none throws.
 
 ## Worker invariants
 
@@ -567,6 +650,7 @@ flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
 flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
+flows-dossier-contract   flows-dossier-reads
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -588,6 +672,19 @@ the vendor's own NVDA row through `buildUniverse` and the reading, and every sen
 the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClock`) to 2026-09-25 13:00 UTC for
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
+
+`flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
+every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a
+recording `Proxy` that each reducer reads only the fields `DOSSIER_READS` names and the probe list holds,
+fuzzes the sanitiser with instruction, markup, URL, bidi, role-marker and obfuscated text, runs the renderer to
+every budget from 400 to 12,000 tokens, and checks the fingerprint over 120 random price levels.
+`flows-dossier-reads` was measured the same day: 4.4 s and 232 checks. It imports `worker.js` into Node with the
+counting D1 fake over `node:sqlite` (Node 22.13 or newer, run under `--disable-warning=ExperimentalWarning`) and
+a stubbed vendor at `https://uw.test`, and asserts round trips, rows read cold and warm, vendor calls (eight cold
+for a carded name, nine for a universe-only name with four queued), parallelism, the deadline and `pending`, the
+single flight, the limiter's refusal, plan refusals cached, the 30-second copy and CPU as a ratio to the summary
+route on the same fake. A fixture-dated suite there shifts the clock with `shiftClock`; it awaits `ctx.waitUntil`
+before it clears the Cache fake, because the 30-second copy is written in the background.
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP
