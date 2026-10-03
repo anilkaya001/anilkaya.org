@@ -54,9 +54,10 @@ const cronMinutes = (cron) => {
 {
   deep(Object.fromEntries(Object.entries(FRESH_CLASSES).map(([k, v]) => [k, [v.cadenceS, v.liveS, v.staleS]])), {
     quote: [5, 20, 90], tape: [60, 150, 600], market: [300, 660, 1500], breadth: [900, 1200, 2700],
-    nightly: [0, null, null],
+    nightly: [0, null, null], rt: [5, 15, 60], rtSlow: [10, 30, 120], rtNews: [30, 75, 300],
   }, "THE THRESHOLD TABLE is one table in code: quote 5 s (live 20 s, fresh 90 s), tape 60 s (150 s, 10 min), " +
-    "market 300 s (11 min, 25 min), breadth 900 s (20 min, 45 min), nightly once per session");
+    "market 300 s (11 min, 25 min), breadth 900 s (20 min, 45 min), nightly once per session, and the hub's " +
+    "three stream classes: rt 5/15/60 s, rtSlow 10/30/120 s, rtNews 30/75/300 s");
   eq(FRESH_CLASSES.nightly.graceS, 5 * 3600, "and a nightly session is due five hours after its close, 21:00 ET, " +
     "after the 20:08 ET landing measured on 2026-09-24 rather than an hour before it");
   eq(REFRESH_CADENCE_MINUTES, 5, "the cadence the pulse stamp quotes is the Tier 1 clock's");

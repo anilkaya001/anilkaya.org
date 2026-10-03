@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession,
   isTradingDay, isHoliday, isEarlyCloseDay, prevTradingDay, nextTradingDay, phaseAt, expectedNightlySession,
-  freshnessState, sessionOpen, easternInstant, closeMinutes, PHASE_MINUTES, FRESH_CLASSES }
+  freshnessState, sessionOpen, easternInstant, closeMinutes, PHASE_MINUTES, FRESH_CLASSES, classOf }
   from "../shared/flows-freshness.js";
 import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/flows-quant-time.js";
 import { briefAge } from "../shared/flows-ask.js";
@@ -70,6 +70,25 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       `an unusable instant (${JSON.stringify(v)}) is null, never a coerced day — ` +
       `new Date(null) is the epoch and would have dated it 1969-12-31`);
   }
+}
+
+{
+  same([FRESH_CLASSES.rt, FRESH_CLASSES.rtSlow, FRESH_CLASSES.rtNews].map((c) => [c.cadenceS, c.liveS, c.staleS, c.source, c.extended]),
+    [[5, 15, 60, "hub", true], [10, 30, 120, "hub", true], [30, 75, 300, "hub", true]],
+    "the stream classes are in the table: rt 5/15/60, rtSlow 10/30/120, rtNews 30/75/300, source hub, extended hours on");
+  eq(classOf({ cadenceS: 10 }), "tape", "a bare cadence of 10 s is still a tape: the hub classes are named, never inferred");
+  eq(classOf({ cadenceS: 5 }), "quote", "and a bare 5 s is still a quote");
+  const mon = "2026-09-28";
+  const read = (h, m) => easternInstant(mon, h * 60 + m);
+  for (const [klass, live] of [["rt", true], ["market", false]]) {
+    const pre = freshnessState({ klass, readAt: read(8, 0) - 2000, session: mon }, read(8, 0));
+    eq(pre.state, live ? "live" : "closed", `${klass}: a read two seconds old at 08:00 ET is ${live ? "live, because the stream class applies its windows before the open" : "closed, as every legacy class is before the open"}`);
+    const post = freshnessState({ klass, readAt: read(17, 0) - 2000, session: mon }, read(17, 0));
+    eq(post.state, live ? "live" : "closed", `${klass}: and at 17:00 ET`);
+  }
+  eq(freshnessState({ klass: "rt", readAt: read(8, 0) - 2000, session: mon }, read(8, 0) + 61000).state, "stale", "rt: a pre-market read with no successor goes stale after a minute rather than staying closed");
+  eq(freshnessState({ klass: "rt", readAt: read(19, 59), session: mon }, read(20, 5)).reason, "session-final", "rt: after 20:00 ET the last read is the session's final one");
+  eq(freshnessState({ klass: "rt", readAt: read(10, 0), session: mon }, read(10, 0) + 20000).state, "fresh", "rt: in the session it is live to 15 s, fresh to 60 s");
 }
 
 const YEAR_NOW = new Date().getUTCFullYear();
