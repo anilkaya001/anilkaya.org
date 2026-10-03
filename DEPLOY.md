@@ -2802,3 +2802,98 @@ limit, Cloudflare reports error 1102 on that invocation. The large vendor bodies
 (financials, fundamental breakdown, ownership) are the first thing to move into
 the nightly in that case; the text variant and the 30-second copy are what the
 model protocol should read through.
+
+### 10.5m The per-name reading: what it does, what a generation costs, how to look, how to turn it off
+
+`GET /api/flows/summary?t=<ticker>` carries one more field, `read` (AGENTS.md "Flows
+reading" has the exact shape): the name read as a stock from its dossier (10.5l), in
+plain sentences each carrying the facts it rests on. It adds no table, no secret, no
+cron and no workflow: the reading lives in `flows_neuron` under scope `read:<T>`, and
+the only new setting is `FLOWS_READ_MODE` in `wrangler.toml` [vars].
+
+**What happens on a request.** The Worker looks up `read:<T>` in parallel with the
+Neuron's own batch. A model reading younger than 45 minutes (`AI_INTRADAY_REFRESH_MS`)
+is served as it was written: one row read, no dossier assembled. Otherwise the dossier
+is assembled (10.5l: the 30-second copy, or one primary-key batch), the 22 tag rules
+are evaluated, and the **deterministic reading** is returned at once, with status
+`generating` while a model call runs in `ctx.waitUntil`, or `fallback` when none will.
+The ticker page polls the summary and swaps the model's wording in when it lands. A
+stored reading whose dossier fingerprint (10.5l) and model signature still match is
+served whatever its age; one whose dossier moved is regenerated, never sooner than the
+floor.
+
+**What a generation costs.** One call through the same `cappedAi` as the Neuron and the
+Ask box, so `FLOWS_AI_DAILY_CAP_NEURONS` (30,000) and `FLOWS_AI_DAILY_CAP_CALLS` apply,
+and its usage is recorded in `flows_ai_usage*` where the cap reads it. Sizes are the
+suite's estimate (3.7 characters a token) on the harness dossiers: the system prompt is
+1,139 tokens, the rendered dossier at its 4,200-token budget with the tags about 4,100 to
+4,900 more, so a full prompt is 5,500 to 6,000 tokens (5,995 for the earnings-week
+momentum name) and a thin name's 2,200 to 2,700. A reply is about 650 tokens when it
+fills every section and cannot exceed 1,300 (`READING_MAX_TOKENS`). At the primary
+model's rates (`FLOWS_ASK_NEURONS = 5500,36400`, neurons per million tokens in and out):
+
+| | in | out | neurons |
+|---|---|---|---|
+| momentum name, typical reply | 5,995 x 5,500 / 1e6 = 33.0 | 650 x 36,400 / 1e6 = 23.7 | 57 |
+| momentum name, longest reply | 33.0 | 1,300 x 36,400 / 1e6 = 47.3 | 81 |
+| thin name (no card), typical | 2,729 x 5,500 / 1e6 = 15.0 | 23.7 | 39 |
+| momentum name on the fallback model (`26668,204805`), typical | 159.9 | 133.1 | 293 |
+
+So a day's 30,000 neurons buy about 520 typical readings on the primary model, 370 of
+the longest, or 100 if every one fell to the fallback; the free 10,000-neuron allowance
+alone about 175. A name is read at most once in 45 minutes and only when its dossier
+moved, so a name open all session costs at most nine readings, about 510 neurons. The
+neuron cost of each reading is stored with it and printed on the page beside the model's
+name. D1 writes per generation: four statements (the claim, the result and the two usage
+upserts), at most eight rows with their indexes, of the 100,000 a day; reads 3 rows on a hit and 18 on a miss (30 with the
+background generation's own reads of the day's spend), checked by
+`tests/flows-reads-contract.mjs`. Measured Worker CPU in Node for the reading's own code
+on the momentum dossier: tags 0.1 ms, fallback and shape 0.2 ms, prompt 0.5 ms, vet 1.7
+ms; the dossier's assembly (10.5l) is the larger part of a miss.
+
+**What 'fallback' means.** The reader is looking at the deterministic reading and no model
+wording is coming for this dossier. `read.why` says which: `off` (the kill switch),
+`no-model` (no `AI` binding or no `FLOWS_ASK_MODEL`), `store` (the claim could not be
+written, so no call was made), or `cooldown` (an earlier attempt for this name failed: the
+provenance names the reason). Cooldowns: a reply the vet refused or that was not JSON, 20
+minutes; the daily budget or the free allowance spent, 30; no capacity, 5; a model that
+left the plan, 60; an empty or length-cut answer, 60. Five requests in a cooldown are one
+model call. The deterministic reading is a complete reading: tags, drivers, tensions,
+unknowns and watch items, every sentence cited, built by templates over the same facts and
+checked by the same rules as a model's wording. It is not a degraded error state.
+
+**How to look.**
+
+```bash
+curl -s -H "Cookie: <flows session>" "https://anilkaya.org/api/flows/dossier?t=NVDA&render=1" | head -80
+curl -s -H "Cookie: <flows session>" "https://anilkaya.org/api/flows/summary?t=NVDA" | jq '.read | {status, why, generated, label, neurons, held, retryAfterS, tags: [.tags[].code], refused, provenance}'
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote \
+  --command="SELECT scope, guard, llm, model, generated_at, length(ideas) AS bytes FROM flows_neuron WHERE scope LIKE 'read:%' ORDER BY generated_at DESC LIMIT 20;"
+```
+
+The first is the dossier text the model is shown, with the stable ids a cite must use; the
+page's link "What the model saw" opens the same. `guard` in the table is `NULL` for a clean
+reading, `read:trimmed:N` when N parts were left out, `read:refused`, `read:unparsable`,
+`unreachable:*` (the Neuron's own vocabulary: `budget`, `allowance`, `capacity`, `plan`,
+`empty`, `length`) for an attempt that produced none, and `generating` while one is in
+flight. A refused attempt keeps its `refused` list (section, reason, detail) in `ideas`.
+After the first live day, count `read:refused` against clean rows: that is the refusal
+rate, and the reasons say which rule a real model trips most (`invented`, `quote`,
+`entity`, `unattributed`, `dealer-sign` are the likely ones).
+
+**How to turn it off.** `FLOWS_READ_MODE = "off"` in `wrangler.toml` [vars] and deploy. The
+summary field then carries the deterministic reading with `why: "off"`, no `read:` row is
+read and no model is called for it; the Neuron's own reading is untouched. Anything but
+`off` (including unset) is on, and the shipped value is `"on"`. The dashboard's variable
+list is overwritten by a deploy, so change the file. The Ask box's dossier facts need no
+switch: they cost no model call of their own, and a question with no ticker costs nothing.
+
+**What is not proven here.** That a live model keeps to the prompt: every suite replays
+scripted replies, so the refusal rate and the model's habit of copying a description are
+unknown until the first day of readings. The thresholds of the 22 tags are reasoned
+(each in the commit that set it) and not tuned against outcomes. The neuron figures use
+an estimate of tokens, not the model's tokenizer; the stored cost is from the usage the
+binding reports, and `FLOWS_ASK_NEURONS` must be the model's real rates for it to mean
+anything. The dossier route and the reading share the 3 s vendor deadline, so a name seen
+for the first time answers `generating` with no sections when its dossier takes longer
+than 1.5 seconds to assemble, and fills in on the next poll.

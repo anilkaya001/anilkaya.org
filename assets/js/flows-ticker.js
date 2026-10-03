@@ -1003,6 +1003,7 @@
     const cites = Array.isArray(item.cites) ? item.cites : [];
     return h(wrap || "span", { class: wrap === "li" ? "ft-read-i" : null },
       typo(String(item.text)),
+      item.template === true ? h("span", { class: "ft-read-cites" }, tag("From the vendor's profile, quoted: not model wording")) : null,
       cites.length ? h("span", { class: "ft-read-cites", role: "group", "aria-label": "Facts this rests on" }, cites.map((c) => citeChip(c, read))) : null);
   }
 

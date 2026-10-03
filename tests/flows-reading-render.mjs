@@ -191,6 +191,12 @@ try {
   });
   ok(order.length >= 10 && order.includes("price.last") && order.includes("dealer-pinned"), "every chip, tag and the link is reachable in reading order (" + order.length + " stops)");
 
+  const templated = clone(READ);
+  templated.sections.identity = { ...templated.sections.identity, template: true };
+  await mount(page, templated);
+  b = await block(page);
+  ok(b.text.includes("not model wording"), "AN IDENTITY LINE THAT IS THE PROFILE'S OWN, not the model's, says so");
+
   await mount(page, HOSTILE);
   b = await block(page);
   ok(b, "A HOSTILE READING still draws");

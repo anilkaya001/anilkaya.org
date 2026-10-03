@@ -242,6 +242,19 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
 {
   const f = world();
+  const copied = { ...GOOD, identity: { text: "Example Technologies sells subscription software and cloud infrastructure services to mid-sized enterprises.", cites: ["identity.description"] } };
+  const ai = rig(() => copied);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const r = (await summary(get)).body.read;
+  ok(r.status === "ready" && r.generated, "A COPIED IDENTITY: the reading stands without the model's line");
+  ok(r.refused.some((x) => x.section === "identity" && x.why === "quote"), "the refusal is recorded: " + JSON.stringify(r.refused));
+  ok(r.sections.identity && r.sections.identity.template === true && r.sections.identity.cites.some((c) => c.id === "identity.description"), "and the identity line is the profile's own first sentence, quoted, marked as a template and not model wording");
+  ok(r.sections.identity.text.includes(String.fromCharCode(0x201c)), "inside quotation marks");
+}
+
+{
+  const f = world();
   const ai = rig(() => "I am sorry, but I cannot produce JSON today.");
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);

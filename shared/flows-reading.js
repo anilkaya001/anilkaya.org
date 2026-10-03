@@ -968,6 +968,7 @@ function resolveItems(index, items) {
     text: it.text,
     cites: arr(it.cites).map((id) => resolveCite(index, id)).filter(Boolean),
     ...(typeof it.tag === "string" ? { tag: it.tag } : {}),
+    ...(it.template === true ? { template: true } : {}),
   }));
 }
 
@@ -1020,7 +1021,7 @@ export function readingShape(o) {
     coverage: coverageOf(clean),
     tags: tagOut,
     sections: {
-      identity: sections.identity ? { text: sections.identity.text, cites: resolveItems(index, [sections.identity])[0].cites } : null,
+      identity: sections.identity ? resolveItems(index, [sections.identity])[0] : null,
       now: sections.now ? { text: sections.now.text, cites: resolveItems(index, [sections.now])[0].cites } : null,
       drivers: resolveItems(index, sections.drivers),
       tensions: resolveItems(index, sections.tensions),

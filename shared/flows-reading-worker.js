@@ -129,11 +129,16 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
     await store("", null, false, said.model, "read:refused", vet.refused.slice(0, 16));
     return { stored: "failed", guard: "read:refused", refused: vet.refused };
   }
+  const sections = { ...vet.sections };
+  if (sections.identity === null) {
+    const fb = readingFallback(dossier, tags);
+    if (fb.identity) sections.identity = { ...fb.identity, template: true };
+  }
   const cost = neuronCost(env, billed || said.model, used);
   const label = deps.modelLabel ? deps.modelLabel(billed || said.model) : billed || said.model;
   const refusedCount = vet.refused.filter((x) => x.section !== "tags").length;
   const shape = readingShape({
-    dossier, tags, sections: vet.sections, chosen: vet.tags, status: "ready", generated: true, model: billed || said.model, modelLabel: label,
+    dossier, tags, sections, chosen: vet.tags, status: "ready", generated: true, model: billed || said.model, modelLabel: label,
     neurons: cost ? cost.neurons : null, tokens: cost ? { in: cost.tokensIn, out: cost.tokensOut } : null,
     provenance: readyProvenance(label, cost, refusedCount), generatedAt: startedAt, refused: vet.refused,
   });
