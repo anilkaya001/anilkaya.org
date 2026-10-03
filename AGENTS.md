@@ -179,6 +179,8 @@ header readback with this repository after any dashboard rule change.
 | `shared/flows-rt-routes.js` | `serveRt`: `/api/rt/ws`, `/api/rt/snap`, `/api/rt/status` inside `route()`; the kill switches, the audience gate, the origin check, and the forward to the one named object. |
 | `tests/flows-rt-contract.mjs`, `tests/rt-fixtures.mjs` | The rail with no server: envelope, shaper parity with the stored keys, merges, sequences, freshness classes and the lag guard, the adapter against a stub vendor, the hub on a fake clock (demand, closed sessions, degrade and recovery, hibernation, kill switches), the routes against a fake namespace, the roster SQL over `node:sqlite`, and CPU and bytes per poll. `rt-fixtures.mjs` is the shared fake vendor. |
 | `tests/flows-rt-server.mjs` | The rail in real workerd with persisted Durable Object storage, a loopback fake vendor and real WebSocket clients. |
+| `assets/js/flows-rt.js` | The rail's browser half, attached as `FlowsUI.rt`: one WebSocket per tab with refcounted topics, the ladder socket, then `GET /api/rt/snap` every 5 s, then the pages' own heartbeats (and `off` when the rail answers 401, 403 or 404), per-topic sequence and epoch handling (a gap sends `{t:"rs"}` and holds the topic until a snapshot; a new epoch discards its state), `rt:<topic>` freshness entries that are dropped when the transport falls, rAF-conflated listeners (`FlowsUI.rt.on`), and the adapters the pages read: `strips()` (px rows mapped back to the `live:strips` body, `fields` from `meta.cols`), `quote(t)`, `market(base)`, `alerts()`, `news()`, `gex(t)`, `feeds(k)`. It never touches the DOM. |
+| `tests/flows-rt-client.mjs` | The client in Chromium with `page.routeWebSocket` and `page.route` stubs, no workerd: merges by quote time, sequence gaps, epoch changes, control frames, the bye codes, reconnect backoff on a paused fake clock, the ladder down and back up, freshness entries dropped, a hidden tab, the 256-byte cap, the board, home, unusual, market and ticker pages fed from the stream, a hostile headline that never reaches `innerHTML`, timer and listener census after close, the existing heartbeat unchanged, and the client against the real `RtHub` over a bridged socket (a lost frame, a restart, a vendor outage). `RT_ONLY=measure` prints the receive-path cost, DOM writes and bytes a minute instead. |
 | `tests/flows-starts-contract.mjs` | The starts and the witness: the live workflow's grants and drill input, the nightly dispatch, the witness's lines, debounce, dedupe, three-tick recovery and reopen, the kept-alive loop through the night, the weekend and the hop, the cron starters through the concurrency group, a whole weekday's request cost, and the vendor client's deadline. |
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
@@ -633,6 +635,20 @@ against exactly this:
   calendar plus the `flows_clock` verdict); outside it sends `ctl.closed`
   once and makes no vendor call.
 
+The browser half is `assets/js/flows-rt.js`, `FlowsUI.rt`, loaded after
+`flows-ui.js` (and `flows-fresh.js` where the page has it) on the boards, the
+home page, the market page, the unusual page and the ticker. It codes against the
+envelope above and assumes no cadence. It walks a ladder: the socket; on a
+failure, a no-reconnect bye (4001, 4003, 4009, 4011, 4012) or repeated failures,
+`GET /api/rt/snap` every 5 s with the socket probed again after 1, 2, 4 and 8 s and
+then every minute; the pages' own heartbeats underneath always; and `off` for the
+page load when the snapshot answers 401, 403 or 404, in which case the page
+behaves exactly as it did before the rail. A tab hidden for 30 s closes its
+socket and holds no timer. Streamed prices reach a board as the `live:strips`
+body the board already reads, so its rule that a live price is never printed
+beside a nightly change holds without a second copy of it, and a polled read does
+not overwrite a streamed one while frames are arriving.
+
 ## Worker invariants
 
 1. **Preserve response objects when mutating them.** The single finalizer must
@@ -845,6 +861,7 @@ flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
 flows-dossier-contract   flows-dossier-reads
 flows-reading   flows-reading-worker   flows-reading-render
+flows-rt-client
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -973,6 +990,16 @@ of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was
 measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
 calls a minute at real cadence (px 12, fl 12, gx 59, mk 12, nw 2) and the
 alert-to-client latency it saw (p50 2.3 s, p95 4.8 s over 40 alerts).
+`flows-rt-client` needs Chromium and no server: `page.routeWebSocket` plays the
+hub for the stub tests, and for the integration block it bridges the page's
+socket to a real `RtHub` driven by `rt-fixtures.mjs` on a virtual clock. It was
+measured on 2026-10-03 at about 80 s with 260 checks, most of it real waiting
+while the paused fake clock is stepped (`page.clock.pauseAt`, because an
+installed clock otherwise keeps running in real time and fires the timers under
+test early). Set `RT_ONLY` to a regular expression of section names (`merge`,
+`gap`, `bye`, `backoff`, `poll`, `hub`, `board`, `home`, `unusual`, `market`,
+`ticker`, ...) to run part of it; `RT_ONLY=measure` runs the measurement block
+alone on the real clock and prints the numbers DEPLOY.md 10.5n quotes.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
@@ -1056,7 +1083,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsUI`, and `FlowsQuant`.
+  `LEARNING_PATHS`, `toast`, `FlowsUI`, and `FlowsQuant`. The rail's browser
+  half is `FlowsUI.rt` (`connect`, `on`, `transport` and the adapters), added to
+  the existing global rather than a new one.
   (`flowsCardPrefetch` was on this list and went with the card dialog: it
   warmed a card on hover so a modal would open instantly, and a board row is a
   link to `/flows/ticker/?t=` now. `FlowsPanels` went with the ticker rebuild:

@@ -3025,3 +3025,84 @@ client.
    screener cadence, the real quote-time lag, the production latency of the
    edge-to-object hop and the hibernation behaviour under a real idle period.
    The harness has measured the hub's own overhead only.
+
+#### The browser half: what the client does on each rung
+
+`assets/js/flows-rt.js` (`FlowsUI.rt`, no new global) is loaded by the boards, the
+home page, the market page, the unusual page and the ticker. It assumes no
+cadence, only the envelope in `shared/flows-rt.js`, so a vendor socket upstream
+replaces the REST one with no client change.
+
+| Rung | When | What the page does | Label |
+|---|---|---|---|
+| Socket | `hello` received | One `wss://<host>/api/rt/ws?k=<topics>&f=<focus>` per tab, topics refcounted across the page's handles. Snapshots replace a topic's state, deltas apply only at `sq + 1` in the same `ep`. A gap sends `{"t":"rs","k":...}` (retried every 2.6 s, past the server's 2 s floor) and holds the topic until its snapshot; a new `ep` discards the topic's state; `{"t":"p","sq":{...}}` goes out every 30 s. Silence for 16 s (100 s once a `closed` frame has said the market is shut) drops the socket. | `Socket` |
+| Poll | the socket failed, or `bye` said 4001, 4003, 4009, 4011 or 4012, or the upgrade never answered in 10 s | `GET /api/rt/snap?k=...` every 5 s, each answer a set of snapshots applied the same way. The socket is probed again after about 1, 2, 4 and 8 s, then once a minute; a `hello` ends the polling. A `closed` frame stops the polling until the open it names (never sooner than 30 s). | `Polling 5 s` |
+| Heartbeat | three snapshots in a row failed (network, 5xx, 429) | Only the pages' existing 20 to 60 s heartbeats and REST reads feed the page; the client keeps probing on its backoff. | `Heartbeat` |
+| Off | the snapshot answered 400, 401, 403 or 404 (not signed in, outside `FLOWS_RT_AUDIENCE`, `FLOWS_RT_MODE` off, route absent) | Nothing is asked again until the page is reloaded; the page behaves as it did before the rail. A 403 or 404 is also kept in `sessionStorage` (`flows:rt:off`) for ten minutes, so the other Flows pages of that tab do not probe. | none |
+
+The heartbeats and the REST reads run on every rung, unchanged. While frames are
+arriving a board ignores the polled `lk?k=strips` read (it still asks every 60 s)
+and the home page ignores the polled strips, and both pages append the streamed
+tide points to the polled series instead of replacing it, so an older polled read
+cannot overwrite a newer streamed one; after 20 s without a px frame the polled
+read takes the page back. A tab hidden for 30 s closes its socket and clears every
+timer; becoming visible reopens it at once.
+
+Freshness stays honest. Each frame, at most once a second per topic, registers an
+`rt:<topic>` entry built from the frame's own `fresh` and the hub's `at`, so a
+quote the vendor stamped 40 s ago is `fresh`, never live, and the pill is told
+"Live" (a price-read time) only by a px frame whose state is `live`. When the
+transport leaves the socket every `rt:*` entry is dropped, so a socket that died
+cannot leave the pill stale and the REST classes speak again.
+
+**Seeing the transport.** The freshness pill's tooltip and accessible name end in
+the feed (for example `Live · Socket`), and its popover has a `Feed` row. In the console,
+`FlowsUI.rt.transport()` is `socket`, `poll`, `heartbeat` or `off`;
+`FlowsUI.rt.status()` lists the closed and degraded state and, per topic, the
+sequence, whether it is synced or resyncing and the row count;
+`FlowsUI.rt.measure()` counts frames, bytes, gaps, duplicates, orphans, resync
+requests, socket opens, polls, timers and listeners held, and the time spent in
+the receive path (`ms`, `maxMs`, and `kinds` as `[frames, bytes, ms]` per frame
+type).
+
+**When it sticks on Polling.**
+
+1. `FlowsUI.rt.measure().opens` rising about once a minute means the socket is
+   being refused. Network, then WS, in the browser's developer tools shows the
+   upgrade's HTTP status, which the page's script cannot see: 403 is the
+   audience or the origin check, 404 `rt_off` the kill switch (the snapshot
+   would then say `off`, not `poll`), 426 a proxy that stripped `Upgrade`.
+2. A `ctl.bye` with code 4009 means the account already holds three sockets;
+   close other tabs, or read `sockets.byUser` in `/api/rt/status`.
+3. A Content-Security-Policy violation on `wss:` means `connect-src` lost
+   `wss://anilkaya.org`; the policy comes from `worker.js`, so compare the live
+   header with the repository after any dashboard Transform Rule change.
+4. The zone setting Network, WebSockets must be on.
+5. 4012 means the hub holds its 200 sockets.
+
+With the rail off, the first page load of a tab costs one refused upgrade and one
+404 snapshot, and the browser console prints two error lines for them; that is
+the whole price of finding out.
+
+Polling is a working rung, not a fault: it carries the same frames every 5 s.
+It costs more bytes than the socket because each answer is a whole snapshot.
+
+**Measured** (`RT_ONLY=measure node tests/flows-rt-client.mjs`, real clock, the
+real hub over a bridged socket against the fake vendor, 157 names, a vendor
+that moves every row on every poll, so the worst case for deltas; sandbox CPU):
+
+| | Result |
+|---|---|
+| Receive path for one px frame (32,042 B, 157 rows: parse, merge, queue, register) | 0.8 to 1.0 ms mean; fl, gx, mk and nw frames 0.2 ms |
+| Board listener in the animation frame, all 157 rows changing | about 9 ms mean, 15 to 18 ms worst; 270 DOM mutation records, no row rebuilt |
+| Bytes a minute on the socket, board (px only) | 384 KB |
+| Bytes a minute on the socket, all five topics | 433 KB: px 12 x 32.0 KB, fl 12 x 1.75 KB, gx 60 x 0.39 KB, mk 6 x 0.46 KB, nw 2 x 0.79 KB |
+| Bytes a minute on the poll rung | px alone 388 KB; all five topics 1.6 MB (a whole snapshot is 134 KB, 81 KB of it fl) |
+| Bytes a minute today, heartbeats and polled reads | `now` about 2 KB every 30 s, plus a 30 KB `lk?k=strips` body each time its stamp moves (every 5 to 15 minutes): under 10 KB a minute |
+
+The socket therefore moves roughly forty times the bytes of today's heartbeats
+when every quote changes on every poll. These are uncompressed JSON string
+lengths; whether Cloudflare compresses the WebSocket frames (permessage-deflate)
+or the snapshot answers is not measured here, and a quiet name changes no row.
+If the bytes matter, the lever is on the server: fewer px names, or a slower px
+cadence for the names no module on the page shows.
