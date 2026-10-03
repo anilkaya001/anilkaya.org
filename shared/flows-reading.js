@@ -437,7 +437,7 @@ const STOPWORDS = new Set(("about above after again against also among and any a
 
 const COMMON = new Set(("the this that these those it its both most many some several few each every any all no none one two three four five first second third last next latest recent current currently today yesterday tomorrow now then there here however meanwhile overall still yet also instead otherwise rather although though while whereas because since after before during until early late earlier later again further further notably separately historically typically generally mostly largely partly mainly mostly otherwise besides finally additionally moreover thus hence therefore where whether either neither which what when who how why if for with without within across among between against over under above below near beyond about around only just even more less much very quite fairly mildly sharply slightly modestly broadly roughly nearly almost about approximately momentum valuation sentiment liquidity volatility leverage growth risk risks margin margins cash debt income profit earnings revenue sales demand supply pricing guidance contract contracts customers customer clients products product services service software hardware cloud data infrastructure platform platforms business company companies sector sectors industry industries market markets investors analysts insiders shares stock stocks options option flow flows dealers dealer premium positioning positions position implied realised realized trend trends range price prices volume levels level wall walls flip gamma vanna charm state states news headlines headline report reports quarter quarters year years month months week weeks day days session sessions monday tuesday wednesday thursday friday saturday sunday january february march april may june july august september october november december american european asian chinese japanese indian canadian british german french korean united states america europe asia china japan india canada britain germany france korea pacific north south east west americas atlantic middle eastern western northern southern central latin emea apac").split(" "));
 
-const ACRONYMS = new Set(["IV", "RV", "OI", "EPS", "ETF", "ETFS", "ATR", "RSI", "ADX", "CEO", "CFO", "CPI", "GDP", "FOMC", "AI", "YOY", "QOQ", "TTM", "SEC", "FINRA", "NYSE", "NASDAQ", "S&P", "SPY", "QQQ", "IWM", "DTE", "VRP", "GEX", "DEX", "ADV", "IPO", "USD", "US", "UK", "EU", "FY", "HOD", "LOD", "VWAP", "PE", "PEG", "SMA", "DTC", "ITM", "OTM", "ATM", "TA"]);
+const ACRONYMS = new Set(["IV", "RV", "OI", "EPS", "ETF", "ETFS", "ATR", "RSI", "ADX", "CEO", "CFO", "CPI", "GDP", "FOMC", "AI", "YOY", "QOQ", "TTM", "SEC", "FINRA", "NYSE", "NASDAQ", "S&P", "SPY", "QQQ", "IWM", "DTE", "VRP", "GEX", "DEX", "ADV", "IPO", "USD", "US", "UK", "EU", "FY", "HOD", "LOD", "VWAP", "PE", "PEG", "SMA", "DTC", "ITM", "OTM", "ATM", "TA", "FCF", "EBIT", "EBITDA", "ROE", "ROIC", "EV", "CAGR", "NAV", "AUM", "REIT", "ESG", "GAAP", "IFRS", "MTD", "QTD", "YTD", "PPI", "PCE", "ISM", "PMI", "NFP", "OPEC", "WTI"]);
 
 const SHOUT = new Set(["BUY", "SELL", "HOLD", "NOW", "STRONG", "URGENT", "ALERT", "WARNING", "NOTE", "IMPORTANT", "SYSTEM", "USER", "ASSISTANT", "YES", "NO", "OK", "DONE", "STOP", "DAN", "PWNED", "AI"]);
 
@@ -1142,7 +1142,7 @@ export function askPick(dossier, question, { max = ASK_MAX_FACTS } = {}) {
       if (texts >= ASK_MAX_TEXTS) return false;
       texts++;
     }
-    picked.push(wrap(e));
+    picked.push(e);
     return true;
   };
   for (const kind of kinds) {
@@ -1164,5 +1164,5 @@ export function askPick(dossier, question, { max = ASK_MAX_FACTS } = {}) {
     ? "About " + clean.ticker + (name ? " (" + name + ")" : "") + ": the lines above that begin \"" + clean.ticker + " \u2014\" come from the company dossier." +
       (silent.length ? " Not known for " + clean.ticker + ": " + silent.join(", ") + ". Do not fill those from memory." : "")
     : null;
-  return { facts: picked, about, kinds, silent };
+  return { facts: picked, promptFacts: picked.map(wrap), about, kinds, silent };
 }

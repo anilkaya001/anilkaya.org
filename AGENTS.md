@@ -515,9 +515,10 @@ read: {
   younger than `AI_INTRADAY_REFRESH_MS` (45 minutes) is served without assembling the
   dossier (one row read); older, it is served if the fingerprint still matches and
   regenerated if not. The claim is `markNeuronGenerating` (90-second dead-generator
-  takeover) plus an in-isolate flight map. The call goes through `meteredAi`, so
-  `FLOWS_AI_DAILY_CAP_NEURONS` and the failure reasons are the Neuron's own, and its usage
-  is recorded where the cap reads it. One logical call per attempt, never a retry; a bad
+  takeover) plus an in-isolate flight map. The call goes through `cappedAi` at
+  `READ_BUDGET_SHARE` (75%) of `FLOWS_AI_DAILY_CAP_NEURONS`, so the failure reasons are
+  the Neuron's own and a day of readings leaves a quarter of the cap to the Neuron and
+  the Ask box; its usage is recorded where the cap reads it. One logical call per attempt, never a retry; a bad
   attempt cools down by kind (refused and unparsable 20 minutes, budget and allowance 30,
   capacity 5, plan 60, empty and length 60). The neuron cost of a reading is worked from
   the usage the binding reports and `FLOWS_ASK_NEURONS`, stored with it and shown.

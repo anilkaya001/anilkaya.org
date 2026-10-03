@@ -591,7 +591,10 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   const pick = R.askPick(BASES.momentum, "what does EXMP do", {});
   ok(pick.facts.length > 0 && pick.facts.length <= R.ASK_MAX_FACTS, "ASK PICK: at most " + R.ASK_MAX_FACTS + " facts (" + pick.facts.length + ")");
   ok(/\.description$/.test(pick.facts[0].id), "the description leads for a what-does-it-do question");
-  ok(pick.facts[0].say.includes(OPEN) && pick.facts[0].say.endsWith(String.fromCharCode(0xbb)), "and its text sits inside the UNTRUSTED quotation");
+  ok(pick.promptFacts[0].say.includes(OPEN) && pick.promptFacts[0].say.endsWith(String.fromCharCode(0xbb)), "and in the prompt its text sits inside the UNTRUSTED quotation");
+  ok(!pick.facts[0].say.includes(OPEN) && pick.facts[0].say.includes("quoted third-party text: Example Technologies sells"), "while the fact the answer is built from and shown with carries the plain quoted text");
+  eq(pick.promptFacts.length, pick.facts.length, "one prompt line per picked fact");
+  same(pick.promptFacts.map((f) => f.id), pick.facts.map((f) => f.id), "in the same order");
   ok(pick.facts.filter((f) => f.untrusted).length <= R.ASK_MAX_TEXTS, "at most " + R.ASK_MAX_TEXTS + " quoted texts");
   ok(pick.facts.every((f) => /^dossier:EXMP\//.test(f.id) && typeof f.say === "string" && f.grade >= 1), "every pick is a dossier fact with a say and a grade");
   ok(!pick.facts.some((f) => /\/options\.idea\./.test(f.id)), "none is an engine structure");

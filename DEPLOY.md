@@ -2822,9 +2822,11 @@ stored reading whose dossier fingerprint (10.5l) and model signature still match
 served whatever its age; one whose dossier moved is regenerated, never sooner than the
 floor.
 
-**What a generation costs.** One call through the same `cappedAi` as the Neuron and the
-Ask box, so `FLOWS_AI_DAILY_CAP_NEURONS` (30,000) and `FLOWS_AI_DAILY_CAP_CALLS` apply,
-and its usage is recorded in `flows_ai_usage*` where the cap reads it. Sizes are the
+**What a generation costs.** One call through `cappedAi`, as the Neuron and the Ask box
+make theirs, so `FLOWS_AI_DAILY_CAP_NEURONS` (30,000) and `FLOWS_AI_DAILY_CAP_CALLS`
+apply, with one difference: the reading stops at 75% of the neuron cap
+(`READ_BUDGET_SHARE`, 22,500) so a day of readings cannot take the Neuron's and the Ask
+box's quarter. Its usage is recorded in `flows_ai_usage*` where the cap reads it. Sizes are the
 suite's estimate (3.7 characters a token) on the harness dossiers: the system prompt is
 1,139 tokens, the rendered dossier at its 4,200-token budget with the tags about 4,100 to
 4,900 more, so a full prompt is 5,500 to 6,000 tokens (5,995 for the earnings-week
@@ -2839,9 +2841,9 @@ model's rates (`FLOWS_ASK_NEURONS = 5500,36400`, neurons per million tokens in a
 | thin name (no card), typical | 2,729 x 5,500 / 1e6 = 15.0 | 23.7 | 39 |
 | momentum name on the fallback model (`26668,204805`), typical | 159.9 | 133.1 | 293 |
 
-So a day's 30,000 neurons buy about 520 typical readings on the primary model, 370 of
-the longest, or 100 if every one fell to the fallback; the free 10,000-neuron allowance
-alone about 175. A name is read at most once in 45 minutes and only when its dossier
+So a day's 22,500 reading neurons buy about 395 typical readings on the primary model,
+280 of the longest, or 75 if every one fell to the fallback; the free 10,000-neuron
+allowance alone about 175. A name is read at most once in 45 minutes and only when its dossier
 moved, so a name open all session costs at most nine readings, about 510 neurons. The
 neuron cost of each reading is stored with it and printed on the page beside the model's
 name. D1 writes per generation: four statements (the claim, the result and the two usage

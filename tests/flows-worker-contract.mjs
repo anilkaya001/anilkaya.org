@@ -549,6 +549,9 @@ try {
       eq(perNameBody.code, "not-covered", "with its code");
       eq(perNameBody.scope, "AAPL", "and the payload names the scope it was asked for");
       eq(perNameBody.summary, null, "carrying no text a page could mistake for a reading");
+      ok(perNameBody.read && perNameBody.read.status === "absent" && perNameBody.read.generated === false && perNameBody.read.label === "Deterministic reading" &&
+         perNameBody.read.sections.now === null && perNameBody.read.sections.unknown.length === 12,
+         "and the additive read field agrees on workerd: absent, not generated, no sentence written, all twelve packets named unknown");
       eq((await get("/api/flows/summary?t=not-a-symbol", { headers: auth })).status, 400,
          "a subject that is not shaped like a symbol is refused before the store is read");
       eq((await get("/api/flows/dossier?t=AAPL")).status, 401,

@@ -1,13 +1,14 @@
 import { aiChain, aiCallSignature, askModels, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS } from "./flows-ai.js";
 import {
   READING_VERSION, READING_MAX_TOKENS, READING_TEMPERATURE, heldTags, readingFallback, readingShape, absentShape, hasSubstance, renderForReading, promptForReading,
-  parseReading, vetReading, askPick, ASK_QUOTE_RULE,
+  parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS,
 } from "./flows-reading.js";
 import { KINDS } from "./flows-dossier.js";
 
 export const READ_SCOPE = "read:";
 export const READ_GENERATING_MS = 90 * 1000;
 export const READ_BOX_MS = 1500;
+export const READ_BUDGET_SHARE = 0.75;
 
 export const READ_COOLDOWN_MS = Object.freeze({
   "read:refused": 20 * 60 * 1000,
@@ -118,6 +119,10 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
   if (!said.text) {
     await store("", null, false, said.model, said.guard || "unreachable:empty", []);
     return { stored: "failed", guard: said.guard || "unreachable:empty" };
+  }
+  if (said.text.length > SECTION_CAPS.reply) {
+    await store("", null, false, said.model, "read:overlong", []);
+    return { stored: "failed", guard: "read:overlong" };
   }
   const parsed = parseReading(said.text);
   if (parsed === null) {
@@ -247,9 +252,9 @@ export async function readingSafe(env, ctx, ticker, deps, opts) {
 export async function askDossierFor(ticker, question, deps) {
   const result = await deps.assemble({ own: false });
   const dossier = result.dossier;
-  if (!hasSubstance(dossier)) return { facts: [], about: null, silent: KINDS.slice(), rule: ASK_QUOTE_RULE };
+  if (!hasSubstance(dossier)) return { facts: [], promptFacts: [], about: null, silent: KINDS.slice(), rule: ASK_QUOTE_RULE };
   const pick = askPick(dossier, question, {});
-  return { facts: pick.facts, about: pick.about, silent: pick.silent, rule: ASK_QUOTE_RULE, fingerprint: dossier.fingerprint };
+  return { facts: pick.facts, promptFacts: pick.promptFacts, about: pick.about, silent: pick.silent, rule: ASK_QUOTE_RULE, fingerprint: dossier.fingerprint };
 }
 
 export function readingFlightsPending() {

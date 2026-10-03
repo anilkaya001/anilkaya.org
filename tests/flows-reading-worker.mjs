@@ -265,6 +265,16 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
 {
   const f = world();
+  const ai = rig(() => JSON.stringify({ ...GOOD, now: { text: "x ".repeat(5000), cites: ["price.last"] } }));
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  eq(readRow(f).guard, "read:overlong", "OVERSIZE OUTPUT is recorded before it is read");
+  const next = await summary(get);
+  ok(next.body.read.status === "fallback" && /longer than the limit/.test(next.body.read.provenance), "and cools down with the reason: " + next.body.read.provenance);
+}
+
+{
+  const f = world();
   const ai = rig(() => "```json\n" + JSON.stringify(GOOD) + "\n```");
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);
@@ -303,6 +313,34 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   ok(/model budget for this site is spent/.test(next.body.read.provenance), "and the reader is told the site's own budget is spent: " + next.body.read.provenance);
   ok(next.body.read.sections.now && next.body.read.sections.drivers.length > 0 && next.body.read.tags.length > 0, "with all of its sections");
   ok(next.body.read.retryAfterS > 1500 && next.body.read.retryAfterS <= 1800, "and a thirty-minute cooldown (" + next.body.read.retryAfterS + " s)");
+}
+
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/meta");
+  const day = new Date().toISOString().slice(0, 10);
+  f.db.prepare("INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 40, 0, 700000)").run(day);
+  const spent = f.db.prepare("SELECT tokens_out FROM flows_ai_usage").get().tokens_out;
+  ok(Math.ceil(spent * 36400 / 1e6) > 22500 && Math.ceil(spent * 36400 / 1e6) < 30000, "SHARE OF THE DAY'S CAP: the day has spent " + Math.ceil(spent * 36400 / 1e6) + " of 30,000 neurons, past the reading's 75% and short of the cap");
+  const r = await summary(get);
+  eq(ai.log.reads.length, 0, "the reading's model call is refused by the meter");
+  eq(readRow(f).guard, "unreachable:budget", "and recorded as a budget refusal");
+  eq(RW.READ_BUDGET_SHARE, 0.75, "the reading may spend three quarters of the cap, leaving a quarter for the Neuron and the Ask box");
+  ok(r.body.read.status === "generating", "the page is told generating on the first call, then fallback");
+  eq(ai.log.other.length >= 1, true, "while the Neuron's own call, past the reading's line, is allowed (" + ai.log.other.length + ")");
+}
+
+{
+  const source = (await import("node:fs")).readFileSync(new URL("../shared/flows-reading-worker.js", import.meta.url), "utf8");
+  const worker = (await import("node:fs")).readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  eq((source.match(/\.AI\.run\(/g) || []).length, 0, "EVERY MODEL CALL OF THE READING GOES THROUGH THE METER: the module never runs the binding");
+  eq((source.match(/askModels\(/g) || []).length, 1, "it has one call site");
+  eq((source.match(/askModels\(deps\.ai\(\),/g) || []).length, 1, "handed the dep");
+  eq((worker.match(/ai: \(\) => cappedAi\(/g) || []).length, 1, "which the Worker makes with cappedAi, at the reading's share of the cap");
+  eq((source.match(/maxTokens: READING_MAX_TOKENS/g) || []).length, 1, "within the output cap");
+  ok(!/retry|attempt\s*[<>]/.test(source.replace(/retryAfterS/g, "")), "and with no retry loop: one logical call per attempt");
 }
 
 {
@@ -475,6 +513,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   ok(prompt[0].content.includes("quoted third-party text") && prompt[0].content.includes(OPEN), "the system prompt carries the rule that quoted text is data");
   ok(prompt[1].content.includes("About EXMP (Example Technologies Inc):"), "and the user message an about-this-company section");
   ok(/dossier:EXMP/.test(JSON.stringify(a.body.facts)) && prompt[1].content.includes(OPEN + "Example Technologies sells subscription software"), "the description is quoted inside UNTRUSTED");
+  ok(!JSON.stringify(a.body.facts).includes(OPEN), "while the facts the page shows carry the plain quoted text");
   ok(prompt[1].content.includes("Example Technologies Inc"), "and the company's name is among the facts");
   eq(a.body.llm, true, "the clean answer is kept");
   ok(a.body.answer.includes("$127.40"), "the answer carries a figure that is in a picked fact");

@@ -10,7 +10,7 @@ import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
 import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
+import { aiCapNeurons, aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1705,7 +1705,7 @@ function readingDeps(env, ctx, ticker) {
     readRow: (scope) => env.DB.prepare(NEURON_ROW_SQL).bind(scope).first(),
     mark: (scope, fingerprint, model) => markNeuronGenerating(env, scope, fingerprint, model),
     write: (scope, fingerprint, summary, ideas, llm, model, guard, startedAt) => writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard, startedAt),
-    ai: () => meteredAi(env),
+    ai: () => cappedAi({ ...env, FLOWS_AI_DAILY_CAP_NEURONS: String(Math.floor(aiCapNeurons(env) * FLOWS_READING.READ_BUDGET_SHARE)) }, env.DB ? () => askSpendStrict(env) : null),
     recordSpend: (billed, usage) => askRecordSpend(env, usage, billed),
     modelLabel: modelName,
     describeGuard: (guard) => neuronProvenance({ llm: false, guard }),
@@ -1839,7 +1839,7 @@ function askTicker(question, subject) {
 }
 
 async function askDossier(env, ctx, subject, question) {
-  const none = { facts: [], about: null, rule: "" };
+  const none = { facts: [], promptFacts: [], about: null, rule: "" };
   const ticker = askTicker(question, subject);
   if (ticker === null || !env.DB) return none;
   try {
@@ -1925,7 +1925,7 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx) {
         "pipeline's own wording. Every figure in it was measured." });
   }
 
-  const built = FLOWS_ASK.promptFor(picked, framed, age);
+  const built = FLOWS_ASK.promptFor(dossier.facts.length ? selected.concat(dossier.promptFacts) : selected, framed, age);
   const system = dossier.facts.length ? built.system + "\n\n" + dossier.rule : built.system;
   const user = dossier.about ? built.user + "\n\n" + dossier.about : built.user;
   let afterCall = null;
