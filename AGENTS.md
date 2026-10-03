@@ -166,6 +166,8 @@ header readback with this repository after any dashboard rule change.
 | `shared/flows-dossier-vendor.js` | The vendor side of the dossier: `unwrap` of the `{data}` envelope, one reducer per route (13) that returns a small extract and names its fields (`DOSSIER_READS`, the list `scripts/flows-probe-list.json` holds strict), and the dossier's quote extract. No I/O. |
 | `shared/flows-dossier-worker.js`, `tests/flows-dossier-reads.mjs`, `tests/dossier-harness.mjs`, `tests/dossier-fixtures.mjs` | `assembleDossier(env, ctx, ticker, deps, opts)`: the one primary-key D1 batch (`DOSSIER_SQL`, 13 statements), the vendor fan-out through the caller's `fetchVendor` and limiter, the `flows_dossier_cache` rows (`DOSSIER_SCHEMA_SQL`, `migrations/0016_flows_dossier_cache.sql`), the Cache API entries, the single flight and the 30-second assembled copy. `worker.js` supplies `uwFetch`, the limiter, the quote path and the route. The reads suite counts round trips, rows read, vendor calls and CPU on a counting D1 fake over `node:sqlite` and a stubbed vendor. |
 | `tests/gen-dossier-fixtures.py`, `tests/fixtures-dossier-vendor.json` | The vendor fixtures for the dossier, written from the 200-response schema of each operation in `docs/uw-openapi.yaml` (names, JSON types, nullability and the string-typed numerics checked against the spec before anything is written; the spec's sha256 is in the file). `tests/flows-probe-contract.mjs` holds the probe list to the same names. |
+| `shared/flows-reading.js`, `tests/flows-reading.mjs`, `tests/reading-archetypes.mjs` | The per-name reading's pure half, a leaf over `flows-dossier.js` and the Ask guard: the 22-code tag table and `heldTags` (every rule over grade-2 facts of an ok or partial packet, thresholds in `TAG_LINES`), `promptForReading`, `parseReading`, `vetReading`, `readingFallback`, `readingShape`, and `askPick` for the Ask box. `reading-archetypes.mjs` builds six dossiers from the harness (the harness name, earnings-week momentum, crowded short, quiet, no card, all vendor packets withheld). The suite holds each threshold from both sides, the fallback to the checks a model's wording must pass, and some thirty adversarial replies. |
+| `shared/flows-reading-worker.js`, `tests/flows-reading-worker.mjs`, `tests/flows-reading-render.mjs` | `readingFor(env, ctx, ticker, deps, opts)`: the stored reading under `flows_neuron` scope `read:<T>`, the intraday floor, the fingerprint, the claim, the one capped model call in `ctx.waitUntil`, the cooldown after a refusal, `FLOWS_READ_MODE`. `worker.js` supplies the deps (`readingDeps`) and `summaryResponse`. The worker suite drives it through `worker.js` with a scripted AI binding and the dossier harness; the render suite is Chromium against `page.route` stubs of the ticker page. |
 | `shared/flows-cross.js` | The `universe` payload's column store (`UNIVERSE_COLUMNS`, one integer column per key, decoded by `units`) and its 100 KiB budget, shed by column priority when over. The nightly's dealer columns are dollars per 1% move over average daily dollar volume (`gexAdv`, `dex`, `vanna`, `charm`) and keep the vendor's sign; `im5` and `im30` are the vendor's implied-move fractions. On 670 synthetic names the payload is 96,158 bytes without them, 108,249 with them unbudgeted, and 100,505 after the shedder drops `adx`, `dGamma` and `gexRatio`; the run's `shed` list is the measurement that counts. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
@@ -361,6 +363,10 @@ last close keeps its tier with grades capped at 1; two or more behind, it is `ex
 A family-tier card whose state is read but too weak for an idea abstains in
 words (`abstentionIdea`) instead of leaving the reader nothing.
 
+`read` (every summary answer, added after the tier contract; no field above was
+removed or renamed): the name read as a stock, from the dossier. Its shape and rules
+are in "Flows reading" below.
+
 ## Flows dossier
 
 `GET /api/flows/dossier?t=<ticker>` (behind the Flows session) is the data half of
@@ -439,6 +445,93 @@ seconds (`/assembled/<T>`), which is what a burst of reads of one name costs.
 Concurrent reads of one name share one flight. The limiter refusing, the vendor
 failing or the store being unreadable are all `200` with the affected packets
 `pending` or `unavailable`; none throws.
+
+## Flows reading
+
+`read` on `GET /api/flows/summary?t=<ticker>` is the model half of the per-name
+understanding layer: what the company is, how its options market, flow, positioning,
+news, fundamentals, sector and the market backdrop fit together, where they disagree,
+and what is not known. It is separate from the Neuron's ideas: the options engine
+stays the authority on structures and on every number, no ranked structure is ever
+shown to or cited by the reading (`forReading` drops `options.idea.*`), and nothing in
+`ideas`, `verdict` or `claims` depends on it. The summary route runs `tickerNeuron`
+and `readingFor` concurrently and returns the Neuron's body plus `read`. A failure of
+the reading is a `read` with status `unavailable`, never a failed summary.
+
+```text
+read: {
+  version: 1,
+  status: ready | generating | fallback | absent | unavailable,
+  ticker, generated (bool), label: "Model wording" | "Deterministic reading",
+  model, modelName, neurons, tokens: { in, out }   // all null unless generated
+  provenance, note, why,                            // sentences; why is a short code
+  fingerprint, asOf, session, generatedAt,          // the dossier's, ISO; generatedAt only when generated
+  coverage: { ok, partial, withheld, pending },
+  tags: [{ code, label, sentence, evidence: [fact id] }],
+  sections: {
+    identity: { text, cites } | null,   now: { text, cites } | null,
+    drivers: [{ text, cites, tag? }],   tensions: [{ text, cites }],   watch: [{ text, cites }],
+    unknown: [{ text, missing: [packet kind] }],
+  },                                    // a cite is { id, label, display, asOf, kind, grade, ageS?, untrusted? }
+  refused: [{ section, why, detail? }], // what the vet dropped from a model reply
+  held?: "floor" | "fingerprint", retryAfterS?
+}
+```
+
+- `ready` is a stored model reading served as it was written: every cite resolved at
+  write time, so the prose and the chips describe the same figures. `generating` and
+  `fallback` carry the deterministic reading built from the current dossier by
+  `readingFallback` (templates over the same facts, every sentence cited, passing the
+  same checks a model's wording must). `generating` means a model call is in flight or
+  was just started and the page should poll the summary. `fallback` means none is
+  coming: `why` is `off` (`FLOWS_READ_MODE=off`), `no-model`, `store`, or `cooldown`
+  (a refused, unparsable or failed attempt; `retryAfterS` says how long, and the
+  provenance names the reason, the daily budget being spent among them). `absent` is a
+  name for which no packet holds anything about the name (the market backdrop does not
+  count): every packet is named unknown and no model is asked. A dossier that is still
+  assembling after 1.5 s answers `generating` with no sections and finishes in `waitUntil`.
+- The tags are a fixed table of 22 codes, each a deterministic rule with explicit
+  thresholds (`TAG_LINES`) over grade-2 or better facts of ok or partial packets. The
+  model may choose among the held tags and order them; a code that is not held is dropped
+  and recorded. The rationale for every threshold is in the commit that set it.
+- The prompt is the rendered dossier (budget 4,200 estimated tokens, the dossier's own
+  shedding order) plus the held tags with their evidence ids, which stay citable
+  whatever the render shed. The model answers one JSON object. `vetReading` drops a
+  section that fails and records why; no `now` section, or fewer than two sections,
+  refuses the whole reply and the deterministic reading stands. The checks: JSON shape and
+  length caps; every cite exists, sits in an ok or partial packet at grade 1 or better and
+  was shown to the model; every numeral appears in a cited fact (the Ask guard's
+  normalisation, plus a sign forgiven only where words say the figure fell, and a unit
+  check on %, x and K/M/B/T); the Ask guard's forecast and modal lexicon plus advice and
+  certainty phrases; no markup, link, chat marker, refusal or second person; an entity
+  guard (capitalised names, product codes and symbols the dossier never printed, and
+  shouted words such as BUY); no run of seven words copied from a description or headline;
+  a claim taken from a headline must say it is a headline's; dealer content needs the
+  clause "on the vendor's convention (dealers long calls, short puts)"; identity must be
+  grounded in the cited profile text; an unknown entry names packets that really are not
+  ok and carries no figure.
+- Storage and cost. One row per name in `flows_neuron`, scope `read:<T>` (no new table),
+  fingerprint = dossier fingerprint + the model signature + reading version. A reading
+  younger than `AI_INTRADAY_REFRESH_MS` (45 minutes) is served without assembling the
+  dossier (one row read); older, it is served if the fingerprint still matches and
+  regenerated if not. The claim is `markNeuronGenerating` (90-second dead-generator
+  takeover) plus an in-isolate flight map. The call goes through `cappedAi` at
+  `READ_BUDGET_SHARE` (75%) of `FLOWS_AI_DAILY_CAP_NEURONS`, so the failure reasons are
+  the Neuron's own and a day of readings leaves a quarter of the cap to the Neuron and
+  the Ask box; its usage is recorded where the cap reads it. One logical call per attempt, never a retry; a bad
+  attempt cools down by kind (refused, unparsable and oversize 20 minutes, budget and
+  allowance 30, capacity 5, plan 60, empty and length 60). The neuron cost of a reading is worked from
+  the usage the binding reports and `FLOWS_ASK_NEURONS`, stored with it and shown.
+- Ask. A ticker typed in the question, else the page's own, adds up to ten dossier facts
+  chosen by what the question is about (`askPick`) to the picked facts, with the
+  description and headlines inside UNTRUSTED quotes, a line saying what is not known, and
+  the rule that quoted text is data. `guardAnswer` is unchanged and validates against the
+  added facts. The answer carries `dossierFacts`.
+- `FLOWS_READ_MODE` (`wrangler.toml` [vars], default `on`): `off` makes `read` the
+  deterministic reading with no row read and no model call. Anything but `off` means on.
+- Not proven offline: that a real model keeps to these rules. Every test uses scripted
+  replies. The first live readings are the first evidence of the refusal rate; DEPLOY.md
+  10.5m says where to look.
 
 ## Worker invariants
 
@@ -651,6 +744,7 @@ markets-contract         flows-desk-client
 flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
 flows-dossier-contract   flows-dossier-reads
+flows-reading   flows-reading-worker   flows-reading-render
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -685,6 +779,26 @@ for a carded name, nine for a universe-only name with four queued), parallelism,
 single flight, the limiter's refusal, plan refusals cached, the 30-second copy and CPU as a ratio to the summary
 route on the same fake. A fixture-dated suite there shifts the clock with `shiftClock`; it awaits `ctx.waitUntil`
 before it clears the Cache fake, because the 30-second copy is written in the background.
+
+`flows-reading` was measured on 2026-10-03: 2.8 s, 1,528 checks, no server. Its tag block holds every threshold
+from both sides on the archetype dossiers (and the grade gate and the packet-status gate), the fallback is run
+through the same checks as a model's wording, and some thirty adversarial replies go through `vetReading`:
+invented figures, a difference of two cited figures, a forecast word of each kind, an invented customer, product
+and symbol, an instruction obeyed from a poisoned description and headline, a cite to a pending, unseen or
+unknown id, a tag not held, quote stuffing, oversize output, fenced JSON, prose, a dealer statement without the
+convention and markup of every kind, then a 3,000-reply fuzz. Reading CPU on the momentum dossier: tags 0.1 ms,
+fallback and shape 0.2 ms, prompt 0.5 ms, vet 1.7 ms.
+`flows-reading-worker` was measured the same day: 5.9 s, 179 checks, no workerd (the dossier harness's counting D1
+over `node:sqlite`, a scripted AI binding, Node 22.13 or newer, `--disable-warning=ExperimentalWarning`). It drives
+`worker.js`: cold, hit, floor, fingerprint, refusal and cooldown, budget refusal, single flight, another isolate's
+marker, kill switch, no model, store fault, the additive field, and the Ask box; it prints the CPU of a summary
+call on the fake (stored reading 2.0 ms, none stored 4.6 ms, the dossier route from its copy 1.9 ms).
+`flows-reading-render` needs Chromium and no server (set `PLAYWRIGHT_BROWSERS_PATH`): about 9 s, 63 checks, against
+a fixture card and `page.route` stubs of the summary. It checks chips, labels, the three states, polling, no markup
+from model text, keyboard focus and no horizontal scroll at 320, 390 and 1280.
+`flows-reads-contract` runs the Neuron's own assertions with `FLOWS_READ_MODE=off` and filters the dossier's trips
+out of them; a final block prices the reading: a summary hit reads 3 rows (the Neuron's two and the reading's one),
+a miss 18 before the response and 30 with the background generation.
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP

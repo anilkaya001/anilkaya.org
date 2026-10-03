@@ -10,7 +10,7 @@ import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
 import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
+import { aiCapNeurons, aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -28,6 +28,7 @@ import { etDayOf } from "./shared/flows-quant-time.js";
 import { isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
+import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
@@ -1689,16 +1690,45 @@ async function absentNeuron(env, ctx, ticker) {
   return json(body);
 }
 
-async function dossierResponse(env, ctx, ticker, url) {
-  const now = Date.now();
-  const asked = Number(url.searchParams.get("budget"));
-  const budgetTokens = Number.isFinite(asked) && asked >= 400 && asked <= 12000 ? Math.round(asked) : FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS;
-  const result = await FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, {
+function dossierDeps(env, ctx) {
+  return {
     fetchVendor: (p, params, opts) => uwFetch(env, p, params, opts),
     allowed: (e) => FLOWS_LIVE.ondemandAllowed(e),
     quote: async (t) => (await quoteResponse(env, ctx, t)).json(),
     admit: (t) => vendorAdmits(env, ctx, t),
-  }, { own: true, now });
+  };
+}
+
+function readingDeps(env, ctx, ticker) {
+  return {
+    assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), opts),
+    readRow: (scope) => env.DB.prepare(NEURON_ROW_SQL).bind(scope).first(),
+    mark: (scope, fingerprint, model) => markNeuronGenerating(env, scope, fingerprint, model),
+    write: (scope, fingerprint, summary, ideas, llm, model, guard, startedAt) => writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard, startedAt),
+    ai: () => cappedAi({ ...env, FLOWS_AI_DAILY_CAP_NEURONS: String(Math.floor(aiCapNeurons(env) * FLOWS_READING.READ_BUDGET_SHARE)) }, env.DB ? () => askSpendStrict(env) : null),
+    recordSpend: (billed, usage) => askRecordSpend(env, usage, billed),
+    modelLabel: modelName,
+    describeGuard: (guard) => neuronProvenance({ llm: false, guard }),
+  };
+}
+
+async function summaryResponse(env, ctx, ticker) {
+  if (env.DB) await ensureFlowsTables(env);
+  const [res, read] = await Promise.all([
+    tickerNeuron(env, ctx, ticker),
+    FLOWS_READING.readingSafe(env, ctx, ticker, readingDeps(env, ctx, ticker), { boxMs: FLOWS_READING.READ_BOX_MS }),
+  ]);
+  let body = null;
+  try { body = await res.clone().json(); } catch { body = null; }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return res;
+  return json({ ...body, read }, res.status);
+}
+
+async function dossierResponse(env, ctx, ticker, url) {
+  const now = Date.now();
+  const asked = Number(url.searchParams.get("budget"));
+  const budgetTokens = Number.isFinite(asked) && asked >= 400 && asked <= 12000 ? Math.round(asked) : FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS;
+  const result = await FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), { own: true, now });
   const { dossier, trace, neuron } = result;
   const prompt = result.prompt && budgetTokens === FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS ? result.prompt : FLOWS_DOSSIER.renderDossierForModel(dossier, { budgetTokens });
   const fresh = FLOWS_DOSSIER.dossierFresh(result, now) || pendingHeaders("nightly", now, result.clock);
@@ -1798,6 +1828,31 @@ async function tickerNeuron(env, ctx, ticker) {
   return json(shape("pending", null, { note: "Neuron is reading this card now." }));
 }
 
+const ASK_NOT_TICKERS = new Set(["IV", "OI", "ETF", "ETFS", "RSI", "ATR", "ADX", "GEX", "VRP", "DTE", "ITM", "OTM", "ATM", "CPI", "GDP", "FOMC", "EPS", "PE", "YTD", "IPO", "AI", "USD", "US", "VS", "PM", "AM", "ET", "UTC", "CEO", "CFO", "SEC", "FED", "FAQ", "OK", "TA", "IV30"]);
+
+function askTicker(question, subject) {
+  const text = typeof question === "string" ? question : "";
+  if (/[a-z]/.test(text)) {
+    for (const t of text.match(/\b[A-Z][A-Z0-9]{0,4}\b/g) || []) if (!ASK_NOT_TICKERS.has(t) && t.length >= 2) return t;
+  }
+  return subject;
+}
+
+async function askDossier(env, ctx, subject, question) {
+  const none = { facts: [], promptFacts: [], about: null, rule: "" };
+  const ticker = askTicker(question, subject);
+  if (ticker === null || !env.DB) return none;
+  try {
+    await ensureFlowsTables(env);
+    const got = await FLOWS_READING.askDossierFor(ticker, question, {
+      assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), opts),
+    });
+    return got.facts.length ? got : none;
+  } catch {
+    return none;
+  }
+}
+
 function askSubject(body) {
   const raw = body && typeof body.subject === "string" ? body.subject.trim().toUpperCase() : "";
   return /^[A-Z][A-Z0-9.\-]{0,9}$/.test(raw) ? raw : null;
@@ -1817,7 +1872,7 @@ async function askQuestion(request) {
   return { question: raw.slice(0, ASK_QUESTION_MAX), subject: askSubject(body) };
 }
 
-async function askAnswer(question, env, index, updatedAt, subject) {
+async function askAnswer(question, env, index, updatedAt, subject, ctx) {
 
   let pool = index;
   let neuronFacts = 0;
@@ -1837,7 +1892,10 @@ async function askAnswer(question, env, index, updatedAt, subject) {
   }
   const sel = FLOWS_ASK.selectFacts(pool, question,
     subject === null ? undefined : { subject: { tickers: [subject] } });
-  const { picked, why, withheld, capped } = sel;
+  const dossier = await askDossier(env, ctx, subject, question);
+  const { picked: selected, withheld, capped } = sel;
+  const picked = dossier.facts.length ? selected.concat(dossier.facts) : selected;
+  const why = dossier.facts.length ? sel.why + " Plus " + dossier.facts.length + (dossier.facts.length === 1 ? " fact" : " facts") + " from the company dossier." : sel.why;
 
   const framed = sel.subjectApplied && subject ? question + " " + subject : question;
 
@@ -1854,6 +1912,7 @@ async function askAnswer(question, env, index, updatedAt, subject) {
     subject: sel.subjectApplied && subject ? subject : null,
     subjectApplied: sel.subjectApplied === true,
     neuronFacts,
+    dossierFacts: dossier.facts.length,
     facts: picked, silences: index.silences || null,
     briefUpdatedAt: updatedAt || null, model: null, note: null, spend,
     session: age,
@@ -1866,7 +1925,9 @@ async function askAnswer(question, env, index, updatedAt, subject) {
         "pipeline's own wording. Every figure in it was measured." });
   }
 
-  const { system, user } = FLOWS_ASK.promptFor(picked, framed, age);
+  const built = FLOWS_ASK.promptFor(dossier.facts.length ? selected.concat(dossier.promptFacts) : selected, framed, age);
+  const system = dossier.facts.length ? built.system + "\n\n" + dossier.rule : built.system;
+  const user = dossier.about ? built.user + "\n\n" + dossier.about : built.user;
   let afterCall = null;
   const said = await askModels(meteredAi(env), chain,
     [{ role: "system", content: system }, { role: "user", content: user }],
@@ -3664,7 +3725,7 @@ async function route(request, env, url, ctx) {
         if (!FLOWS_TICKER_RE.test(subject)) {
           throw new HttpError(400, "invalid_ticker", "Unknown ticker");
         }
-        return tickerNeuron(env, ctx, subject);
+        return summaryResponse(env, ctx, subject);
       }
 
       const summary = await readFlowsSummary(env, "board");
@@ -3739,7 +3800,7 @@ async function route(request, env, url, ctx) {
           "The briefing was published and could not be read, so no answer is offered. " +
           "That is a fault on this site rather than a fact about the session.");
       }
-      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage);
+      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx);
     }
 
     if (path === "/api/flows/record") {

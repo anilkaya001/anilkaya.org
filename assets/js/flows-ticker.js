@@ -963,7 +963,106 @@
       h("p", { class: "ft-v-src" }, i.text), i.kind === "none" ? h("p", { class: "ft-v-src" }, s.limits) : null);
   }
 
+  const READ_LISTS = [["drivers", "What is driving it"], ["tensions", "Where the evidence disagrees"], ["watch", "What to watch"]];
+  const readIs = (r, ...states) => !!r && typeof r === "object" && states.includes(r.status);
+  const readPending = (neuron) => !!neuron && readIs(neuron.read, "generating");
+
+  function readAge(c, read) {
+    const at = Date.parse(c.asOf || "");
+    const base = Date.parse(read.asOf || "");
+    if (!Number.isFinite(at)) return "no source time";
+    const sec = Math.max(0, Math.round(((Number.isFinite(base) ? base : Date.now()) - at) / 1000));
+    const word = sec < 90 ? sec + " seconds" : sec < 5400 ? Math.round(sec / 60) + " minutes" : sec < 172800 ? Math.round(sec / 3600) + " hours" : Math.round(sec / 86400) + " days";
+    return "as of " + F.time(c.asOf) + ", " + word + " before the dossier was read";
+  }
+
+  function reveal(el, text) {
+    let note = null;
+    const show = () => { if (!note) { note = h("span", { class: "ft-read-age" }, text); el.append(note); } };
+    const hide = () => { if (note) { note.remove(); note = null; } };
+    el.addEventListener("mouseenter", show);
+    el.addEventListener("focus", show);
+    el.addEventListener("mouseleave", () => { if (document.activeElement !== el) hide(); });
+    el.addEventListener("blur", hide);
+    el.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  }
+
+  function citeChip(c, read) {
+    const quoted = c.untrusted === true;
+    const age = readAge(c, read);
+    const value = quoted ? "“" + c.display + "”" : c.display;
+    const chip = h("button", {
+      class: "ui-tag ft-read-chip", type: "button", "data-id": c.id, "data-kind": c.kind || null, "data-quoted": quoted ? "1" : null,
+      "aria-label": c.label + ": " + value + (quoted ? ", quoted third-party text" : "") + ", " + age, title: c.label + ": " + value + " (" + age + ")",
+    }, h("span", { class: "ft-read-chip-l" }, c.label.length > 30 ? c.label.slice(0, 29) + "…" : c.label), " ", h("b", null, value));
+    reveal(chip, age);
+    return chip;
+  }
+
+  function readLine(item, read, wrap) {
+    const cites = Array.isArray(item.cites) ? item.cites : [];
+    return h(wrap || "span", { class: wrap === "li" ? "ft-read-i" : null },
+      typo(String(item.text)),
+      item.template === true ? h("span", { class: "ft-read-cites" }, tag("From the vendor's profile, quoted: not model wording")) : null,
+      cites.length ? h("span", { class: "ft-read-cites", role: "group", "aria-label": "Facts this rests on" }, cites.map((c) => citeChip(c, read))) : null);
+  }
+
+  function readTag(t) {
+    const chip = h("button", { class: "ui-tag ft-read-chip", type: "button", "data-code": t.code, "aria-label": t.label + ": " + t.sentence, title: t.sentence }, t.label);
+    reveal(chip, t.sentence);
+    return chip;
+  }
+
+  function readingBlock(read) {
+    if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return null;
+    const sec = read.sections && typeof read.sections === "object" ? read.sections : {};
+    const root = h("section", { class: "ft-read", "aria-labelledby": "ftReadT", "data-status": read.status, "data-generated": read.generated ? "1" : "0" });
+    const meta = h("div", { class: "ft-v-meta" },
+      tag(read.generated ? "Model wording" : "Deterministic reading", { accent: !!read.generated }),
+      read.generated && read.modelName ? tag(String(read.modelName)) : null,
+      read.generated && typeof read.neurons === "number" ? tag(read.neurons + " neurons") : null,
+      read.status === "generating" ? tag("Model wording is being written") : null,
+      read.asOf ? h("span", { class: "ui-key" }, glyph("clock"), "Dossier as of " + F.time(read.asOf)) : null,
+      read.generated && read.generatedAt ? h("span", { class: "ui-key" }, "Written " + F.time(read.generatedAt)) : null);
+    root.append(h("h3", { id: "ftReadT" }, "The name, read as a stock"), meta);
+    if (read.provenance) root.append(h("p", { class: "ft-v-src", id: "ftReadSrc" }, String(read.provenance)));
+    if (read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !sec.now && !sec.identity)) {
+      root.append(h("p", { class: "ft-v-src", role: "status" }, String(read.note || (read.status === "generating" ? "The dossier is being assembled; the reading follows it." : "No reading is available for this name."))));
+    }
+    if (sec.identity) root.append(h("p", { class: "ft-read-identity" }, readLine(sec.identity, read)));
+    if (sec.now) root.append(h("h4", null, "Now"), h("p", { class: "ft-read-now" }, readLine(sec.now, read)));
+    for (const [key, title] of READ_LISTS) {
+      const list = Array.isArray(sec[key]) ? sec[key] : [];
+      if (list.length) root.append(h("h4", null, title), h("ul", { class: "ft-read-l", "data-list": key }, list.map((it) => readLine(it, read, "li"))));
+    }
+    const unknown = Array.isArray(sec.unknown) ? sec.unknown : [];
+    if (unknown.length) {
+      root.append(h("h4", null, "Not known"), h("ul", { class: "ft-read-l", "data-list": "unknown" },
+        unknown.map((u) => h("li", { class: "ft-read-i" }, typo(String(u.text)), h("span", { class: "ft-read-cites" }, (Array.isArray(u.missing) ? u.missing : []).map((k) => tag(String(k))))))));
+    }
+    const tags = Array.isArray(read.tags) ? read.tags : [];
+    if (tags.length) root.append(h("h4", null, "Character"), h("div", { class: "ui-tags", role: "group", "aria-label": "Character tags the rules found to hold" }, tags.map(readTag)));
+    if (read.ticker) {
+      root.append(h("p", { class: "ft-v-src" }, h("a", { class: "ft-read-link", href: "/api/flows/dossier?t=" + encodeURIComponent(read.ticker) + "&render=1", target: "_blank", rel: "noopener" }, "What the model saw"),
+        " — the dossier text this reading was written from, with every id a chip cites."));
+    }
+    return root;
+  }
+
+  function paintReading(read) {
+    const old = verdictEl.querySelector(".ft-read");
+    const next = readingBlock(read);
+    if (old && next) old.replaceWith(next);
+    else if (old) old.remove();
+    else if (next) verdictEl.append(next);
+  }
+
   function renderVerdict(card, neuron) {
+    renderVerdictCard(card, neuron);
+    paintReading(neuron && neuron.read);
+  }
+
+  function renderVerdictCard(card, neuron) {
     verdictEl.hidden = false;
     verdictEl.replaceChildren();
     const eng = engineOf(card);
@@ -2757,10 +2856,22 @@
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const s = nr && nr.status;
-      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); }
+      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (readPending(nr)) awaitReading(t, card); }
       else if (s !== "pending") settle(typeof s === "string" && s);
       else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1); }
     }), 5000 + i * 3500);
+  }
+
+  function awaitReading(t, card, i = 0) {
+    if (STATE.card !== card || i > 9) return;
+    setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
+      if (STATE.card !== card) return;
+      const read = nr && nr.read;
+      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return;
+      STATE.neuron = { ...STATE.neuron, read };
+      paintReading(read);
+      if (read.status === "generating") awaitReading(t, card, i + 1);
+    }), 4000 + i * 2500);
   }
 
   function jumpToHash() {
@@ -2801,6 +2912,7 @@
             STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
             paintAll();
             if (STATE.neuron && STATE.neuron.status === "pending") awaitNeuron(t, card);
+            else if (readPending(STATE.neuron)) awaitReading(t, card);
           });
       },
     });
@@ -2835,6 +2947,7 @@
     jumpToHash();
     if (!card.lite) {
       if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
+      else if (readPending(STATE.neuron)) awaitReading(ticker, card);
       const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
       idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
         if (!m || !isoOk(m.sessionDate) || STATE.card !== card) return;
