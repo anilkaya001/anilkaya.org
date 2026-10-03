@@ -2475,6 +2475,19 @@ focus read and no dispatch; pages fall back to the nightly rows.
   422), and when a field listed under `reads` (the fields the code reads) did
   not arrive. An expected refusal that starts answering is noted as a plan
   change. A dispatched run is informational unless `strict` is ticked.
+- **The socket probe** (`.github/workflows/flows-ws-probe.yml`, dispatch only)
+  answers the question the real-time rail turns on: whether the vendor key may
+  open `wss://api.unusualwhales.com/socket` and join which channels. It makes a
+  handshake with the token in the query, as a bearer header and with an Origin,
+  joins each channel the rail would use on its own connection, holds up to four
+  connections at once and joins up to 60 `price:<T>` channels on one. Each
+  record prints status, acknowledgements, message counts, the time to the first
+  frame and the median and 95th-percentile lag against the frame's own stamp,
+  and only the key names of a payload, never its values (the repository's logs
+  are public), and the token is redacted from every line. Run it off hours to
+  learn the entitlement and in the regular session to learn lag and rates
+  (`seconds` and `only` are inputs). `tests/flows-ws-probe-contract.mjs` proves
+  it against a fake vendor that speaks the protocol by hand.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.

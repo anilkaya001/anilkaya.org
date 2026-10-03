@@ -1,0 +1,41 @@
+name: flows-ws-probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds to listen on each channel (2 to 60)"
+        type: string
+        default: "12"
+      only:
+        description: "Run only these parts, comma-separated: handshake, channels, connections, joins (empty runs all)"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flows-ws-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 22
+
+      - name: Probe the vendor socket
+        env:
+          UW_API_KEY: ${{ secrets.UW_API_KEY }}
+          FLOWS_WS_PROBE_SECONDS: ${{ inputs.seconds }}
+          FLOWS_WS_PROBE_ONLY: ${{ inputs.only }}
+        run: node scripts/flows-ws-probe.mjs
