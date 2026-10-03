@@ -256,8 +256,3 @@ export async function askDossierFor(ticker, question, deps) {
   const pick = askPick(dossier, question, {});
   return { facts: pick.facts, promptFacts: pick.promptFacts, about: pick.about, silent: pick.silent, rule: ASK_QUOTE_RULE, fingerprint: dossier.fingerprint };
 }
-
-export function readingFlightsPending() {
-  return flights.size;
-}
-

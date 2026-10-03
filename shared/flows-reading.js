@@ -425,7 +425,7 @@ export function heldTags(dossier) {
 const WORD = /[a-z0-9]+/g;
 const wordsOf = (s) => (lower(s).normalize("NFKC").match(WORD) || []);
 
-const FORECAST_EXTRA = /\b(?:headed|heading (?:to|for|toward|towards)|bound to|set to|on track to|outlook|projected|projection|prospects?|probabl[ey]|upside|downside|bull case|bear case|certain to|sure to|guaranteed|destined|price objective of)\b/i;
+const FORECAST_EXTRA = /\b(?:headed|heading (?:to|for|toward|towards)|bound to|set to|on track to|outlook|projected|projection|prospects?|probabl[ey]|upside|downside|bull case|bear case|certain to|sure to|guaranteed|destined)\b/i;
 const ADVICE = /\b(?:recommend\w*|advis\w*|should consider|worth buying|a buy now|(?:buy|sell|load up on|pile into|dump|accumulate|avoid|trim|add to)\s+(?:the |this |its |these |those |some )?(?:stock|shares|calls|puts|it|them|position))\b/i;
 const ATTRIBUTION = /\b(?:headlines?|reports?|reported|reporting|says?|said|according|coverage|news|stor(?:y|ies)|publish\w*|announc\w*|writes?|wrote|cites?|notes?)\b/i;
 const SECOND_PERSON = /\byou(?:r|rs|rself)?\b/i;
@@ -839,13 +839,13 @@ function unknownEntries(dossier) {
     if (p.status === "ok") continue;
     if (p.status === "partial") {
       const named = arr(p.withheld).filter((w) => w && typeof w.k === "string").length;
-      if (named) out.push({ text: KIND_NAME[kind] + " is partly read: some of its items are withheld, so only what is shown is known.", missing: [kind] });
+      if (named) out.push({ text: KIND_NAME[kind] + ": partly read; some items are withheld, so only what is shown is known.", missing: [kind] });
       continue;
     }
     const first = arr(p.withheld)[0];
     const code = first ? shortReason(first.reason) : p.status;
     const why = Object.hasOwn(REASON_WORDS, code) ? REASON_WORDS[code] : "no reason was recorded";
-    out.push({ text: KIND_NAME[kind] + " is " + (STATUS_WORD[p.status] || p.status) + ": " + why + ", so nothing is claimed about it.", missing: [kind] });
+    out.push({ text: KIND_NAME[kind] + ": " + (STATUS_WORD[p.status] || p.status) + ", " + why + "; nothing is claimed about it.", missing: [kind] });
   }
   return out;
 }

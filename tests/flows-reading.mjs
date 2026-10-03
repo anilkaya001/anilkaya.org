@@ -381,6 +381,8 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   }
   const cond = vet(patch({ watch: [{ text: "Below the gamma flip at $124.00 dealers are net short gamma" + clause + "; above it they are net long.", cites: ["options.engine.level.flip"] }] }));
   ok(cond.ok && cond.sections.watch.length === 1, "A PRESENT-TENSE CONDITIONAL ON A LEVEL ALREADY IN THE FACTS is allowed");
+  const objective = vet(patch({ drivers: [{ text: "Analysts' median price objective is $168.00.", cites: ["analysts.target.median"] }, ...GOOD.drivers.slice(1)] }));
+  ok(!hasWhy(objective, "drivers.0", "forecast") && objective.sections.drivers.length === 4, "while the analysts' price objective, called that, is a stated figure and passes: " + JSON.stringify(why(objective)));
   const may = vet(patch({ now: { text: GOOD.now.text.replace("The last price", "In May the last price"), cites: GOOD.now.cites } }));
   ok(may.ok, "the month of May is not the modal may");
   for (const text of ["You should buy the shares before the 2026-10-07 report.", "I recommend buying the stock.", "Load up on calls before the 2026-10-07 report.", "Buy it now."]) {

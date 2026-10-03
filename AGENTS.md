@@ -519,8 +519,8 @@ read: {
   `READ_BUDGET_SHARE` (75%) of `FLOWS_AI_DAILY_CAP_NEURONS`, so the failure reasons are
   the Neuron's own and a day of readings leaves a quarter of the cap to the Neuron and
   the Ask box; its usage is recorded where the cap reads it. One logical call per attempt, never a retry; a bad
-  attempt cools down by kind (refused and unparsable 20 minutes, budget and allowance 30,
-  capacity 5, plan 60, empty and length 60). The neuron cost of a reading is worked from
+  attempt cools down by kind (refused, unparsable and oversize 20 minutes, budget and
+  allowance 30, capacity 5, plan 60, empty and length 60). The neuron cost of a reading is worked from
   the usage the binding reports and `FLOWS_ASK_NEURONS`, stored with it and shown.
 - Ask. A ticker typed in the question, else the page's own, adds up to ten dossier facts
   chosen by what the question is about (`askPick`) to the picked facts, with the
@@ -780,7 +780,7 @@ single flight, the limiter's refusal, plan refusals cached, the 30-second copy a
 route on the same fake. A fixture-dated suite there shifts the clock with `shiftClock`; it awaits `ctx.waitUntil`
 before it clears the Cache fake, because the 30-second copy is written in the background.
 
-`flows-reading` was measured on 2026-10-03: 2.7 s, 1,524 checks, no server. Its tag block holds every threshold
+`flows-reading` was measured on 2026-10-03: 2.8 s, 1,528 checks, no server. Its tag block holds every threshold
 from both sides on the archetype dossiers (and the grade gate and the packet-status gate), the fallback is run
 through the same checks as a model's wording, and some thirty adversarial replies go through `vetReading`:
 invented figures, a difference of two cited figures, a forecast word of each kind, an invented customer, product
@@ -788,11 +788,12 @@ and symbol, an instruction obeyed from a poisoned description and headline, a ci
 unknown id, a tag not held, quote stuffing, oversize output, fenced JSON, prose, a dealer statement without the
 convention and markup of every kind, then a 3,000-reply fuzz. Reading CPU on the momentum dossier: tags 0.1 ms,
 fallback and shape 0.2 ms, prompt 0.5 ms, vet 1.7 ms.
-`flows-reading-worker` was measured the same day: 3.8 s, 159 checks, no workerd (the dossier harness's counting D1
+`flows-reading-worker` was measured the same day: 5.9 s, 179 checks, no workerd (the dossier harness's counting D1
 over `node:sqlite`, a scripted AI binding, Node 22.13 or newer, `--disable-warning=ExperimentalWarning`). It drives
 `worker.js`: cold, hit, floor, fingerprint, refusal and cooldown, budget refusal, single flight, another isolate's
-marker, kill switch, no model, store fault, the additive field, and the Ask box.
-`flows-reading-render` needs Chromium and no server (set `PLAYWRIGHT_BROWSERS_PATH`): about 9 s, 62 checks, against
+marker, kill switch, no model, store fault, the additive field, and the Ask box; it prints the CPU of a summary
+call on the fake (stored reading 2.0 ms, none stored 4.6 ms, the dossier route from its copy 1.9 ms).
+`flows-reading-render` needs Chromium and no server (set `PLAYWRIGHT_BROWSERS_PATH`): about 9 s, 63 checks, against
 a fixture card and `page.route` stubs of the summary. It checks chips, labels, the three states, polling, no markup
 from model text, keyboard focus and no horizontal scroll at 320, 390 and 1280.
 `flows-reads-contract` runs the Neuron's own assertions with `FLOWS_READ_MODE=off` and filters the dossier's trips

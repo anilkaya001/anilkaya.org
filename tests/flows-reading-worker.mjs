@@ -564,4 +564,35 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   }
 }
 
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const cpu = () => (typeof process.threadCpuUsage === "function" ? process.threadCpuUsage() : process.cpuUsage());
+  const per = async (route, n = 30, between) => {
+    for (let i = 0; i < 6; i++) { if (between) between(); await get(route); }
+    const windows = [];
+    for (let w = 0; w < 5; w++) {
+      let used = 0;
+      for (let i = 0; i < n; i++) {
+        if (between) between();
+        const a = cpu();
+        const r = await get(route);
+        const b = cpu();
+        used += (b.user + b.system - a.user - a.system) / 1000;
+        r.settle();
+      }
+      windows.push(used / n);
+    }
+    windows.sort((x, y) => x - y);
+    return windows[2];
+  };
+  const hit = await per("/api/flows/summary?t=" + T);
+  const hot = await per("/api/flows/dossier?t=" + T);
+  const miss = await per("/api/flows/summary?t=" + T, 10, () => { f.db.prepare("DELETE FROM flows_neuron WHERE scope = 'read:EXMP'").run(); });
+  ok(hit < 25 && miss < 60, "CPU of a summary call on the fake: stored reading " + hit.toFixed(2) + " ms, no stored reading " + miss.toFixed(2) + " ms (the dossier route from its 30-second copy: " + hot.toFixed(2) + " ms)");
+  console.log("  reading CPU per summary request: hit " + hit.toFixed(2) + " ms, miss " + miss.toFixed(2) + " ms, dossier route from its copy " + hot.toFixed(2) + " ms");
+}
+
 console.log("flows-reading-worker: " + checks + " checks");

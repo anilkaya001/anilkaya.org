@@ -2857,8 +2857,8 @@ ms; the dossier's assembly (10.5l) is the larger part of a miss.
 wording is coming for this dossier. `read.why` says which: `off` (the kill switch),
 `no-model` (no `AI` binding or no `FLOWS_ASK_MODEL`), `store` (the claim could not be
 written, so no call was made), or `cooldown` (an earlier attempt for this name failed: the
-provenance names the reason). Cooldowns: a reply the vet refused or that was not JSON, 20
-minutes; the daily budget or the free allowance spent, 30; no capacity, 5; a model that
+provenance names the reason). Cooldowns: a reply the vet refused, that was not JSON or that ran past 7,000
+characters, 20 minutes; the daily budget or the free allowance spent, 30; no capacity, 5; a model that
 left the plan, 60; an empty or length-cut answer, 60. Five requests in a cooldown are one
 model call. The deterministic reading is a complete reading: tags, drivers, tensions,
 unknowns and watch items, every sentence cited, built by templates over the same facts and
