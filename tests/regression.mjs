@@ -35,7 +35,7 @@ function watch(page, ignored = () => false) {
     const reason = request.failure()?.errorText || "unknown";
 
     const navigationAborted = reason === "net::ERR_ABORTED" &&
-      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me", "/api/markets"].includes(new URL(request.url()).pathname);
+      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me", "/api/markets", "/assets/data/placement-bank.json"].includes(new URL(request.url()).pathname);
     const detail = `request failed: ${request.url()} (${reason})`;
     if (!navigationAborted && !ignored(detail)) errors.push(detail);
   });

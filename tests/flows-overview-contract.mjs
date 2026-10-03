@@ -938,6 +938,9 @@ try {
     ok(!/No name leaned/.test(bull.text),
        "in words that are not the empty-side reading, which is a claim about the market");
 
+    await page.waitForFunction(() => document.querySelectorAll("#ccVerdict [data-chip]").length === 5 &&
+      document.querySelectorAll("#ccBear .hm-lrow").length === 4 &&
+      document.querySelectorAll("#ccChgList .hm-crow").length === 7, null, { timeout: 15000 }).catch(() => {});
     eq(await page.locator("#ccVerdict [data-chip]").count(), 5,
        "the hero still states its five readings");
     eq(await page.locator("#ccBear .hm-lrow").count(), 4,
