@@ -20,13 +20,16 @@ Browser ──► Cloudflare edge
               └─ everything else ──► Cloudflare Worker (worker.js; runs first)
                     ├─ /auth/*  Google OAuth → HMAC-signed session cookie
                     ├─ /api/*   owner-scoped JSON API backed by D1 (SQLite)
+                    ├─ /api/rt/* Flows real-time rail → Pulse Durable Object
                     ├─ /lab/<course-slug>/ → crawlable course HTML via HTMLRewriter
                     └─ everything else → ASSETS binding
 ```
 
 - `wrangler.toml` is the Worker source of truth: name `anilkaya`, entrypoint
-  `worker.js`, static directory `.`, binding `ASSETS`, and D1 binding `DB` to
-  database name `iewt`.
+  `worker.js`, static directory `.`, binding `ASSETS`, D1 binding `DB` to
+  database name `iewt`, and the Durable Object binding `PULSE` to the
+  SQLite-backed class `Pulse` (migration `v1`), which `worker.js` exports from
+  `shared/flows-rt-hub.js`.
 - `assets.run_worker_first = ["/*", "!/assets/*"]`. Every route except
   `/assets/*` invokes `worker.js` first, which keeps response headers, cache
   policy, and course metadata rewriting in the Worker; a plain `true` would
@@ -171,6 +174,11 @@ header readback with this repository after any dashboard rule change.
 | `shared/flows-cross.js` | The `universe` payload's column store (`UNIVERSE_COLUMNS`, one integer column per key, decoded by `units`) and its 100 KiB budget, shed by column priority when over. The nightly's dealer columns are dollars per 1% move over average daily dollar volume (`gexAdv`, `dex`, `vanna`, `charm`) and keep the vendor's sign; `im5` and `im30` are the vendor's implied-move fractions. On 670 synthetic names the payload is 96,158 bytes without them, 108,249 with them unbudgeted, and 100,505 after the shedder drops `adx`, `dGamma` and `gexRatio`; the run's `shed` list is the measurement that counts. |
 | `assets/js/flows-fresh.js` | The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a heartbeat reads registers its server verdict with the pill, which is the worst case over its sources (`FlowsUI.freshAggregate`, in `flows-ui.js`), so a page needs no line per region. |
 | `tests/flows-live-contract.mjs` | Live-layer builders, phases and states, byte ceilings, the one-writer scans, the `--live` dry run and the client helper. |
+| `shared/flows-rt.js` | The real-time rail's pure half: the frozen envelope, topic table, row columns and close codes, the owner switches (`rtSwitches`), `streamEntry` (the `entryOf` shape plus the lag guard), the parse of the 256-byte client messages, per-topic sequence counter and `createSeq` gap detector, the 240-call budget, lag statistics, the latest-wins and append-dedupe merges, the REST shapers `shapePx`, `shapeFl`, `shapeGx`, `shapeMk`, `shapeNw` (vendor body to neutral frame, calling the stored live keys' own shapers), `mergeTopic`, and `RT_UPSTREAM`, the one table from topic to REST request and to vendor socket channels. |
+| `shared/flows-rt-hub.js` | `RtHub` (demand, roster, scheduler tick, merge, frames, degrade and resync, hello, status; no REST in it), `createRestUpstream` (the REST adapter: every path, cursor, rotation, deadline and 429 pause lives here), `createHub`, `loadRosterFromD1` (one read-only batch) and the `Pulse` Durable Object class wiring hibernatable sockets and alarms to the hub. Imports no `cloudflare:workers`, so Node loads it. |
+| `shared/flows-rt-routes.js` | `serveRt`: `/api/rt/ws`, `/api/rt/snap`, `/api/rt/status` inside `route()`; the kill switches, the audience gate, the origin check, and the forward to the one named object. |
+| `tests/flows-rt-contract.mjs`, `tests/rt-fixtures.mjs` | The rail with no server: envelope, shaper parity with the stored keys, merges, sequences, freshness classes and the lag guard, the adapter against a stub vendor, the hub on a fake clock (demand, closed sessions, degrade and recovery, hibernation, kill switches), the routes against a fake namespace, the roster SQL over `node:sqlite`, and CPU and bytes per poll. `rt-fixtures.mjs` is the shared fake vendor. |
+| `tests/flows-rt-server.mjs` | The rail in real workerd with persisted Durable Object storage, a loopback fake vendor and real WebSocket clients. |
 | `tests/flows-starts-contract.mjs` | The starts and the witness: the live workflow's grants and drill input, the nightly dispatch, the witness's lines, debounce, dedupe, three-tick recovery and reopen, the kept-alive loop through the night, the weekend and the hop, the cron starters through the concurrency group, a whole weekday's request cost, and the vendor client's deadline. |
 | `tests/flows-ledger-contract.mjs` | The ledger's SQL over a real SQLite (gaps clipped to the session, ok and failed ticks, partial focus reads, passes, the nightly's landing, retention), its zero-extra-round-trip and never-blocks-the-tick properties on the real tick functions, its ingest view, and the health gate's reading of it: gap lines at the stale lines, a nightly that never landed, cards failed or skipped, the roster shortfall and the 5xx burst. |
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
@@ -290,6 +298,8 @@ Errors use:
 - `GET /api/placement` → `{ placement: { band, score, total, completedDay, recommendedTopic } | null, generation }`
 - `PUT /api/placement` with `X-IEWT-Generation` and the five-field placement summary → `{ ok: true, placement, generation }`
 - `DELETE /api/placement` with `X-IEWT-Generation` → `{ ok: true, placement: null, generation }`
+- `GET /api/rt/ws`, `/api/rt/snap` and `/api/rt/status` are the Flows real-time
+  rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
   `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
 
@@ -533,6 +543,96 @@ read: {
   replies. The first live readings are the first evidence of the refusal rate; DEPLOY.md
   10.5m says where to look.
 
+## Real-time rail
+
+`/api/rt/*` is the fast data rail. One Durable Object class, `Pulse`
+(`shared/flows-rt-hub.js`, one named instance `pulse:1`, hosted in this Worker
+and written to move to its own Worker with only a `script_name` on the binding),
+polls the vendor over REST while at least one socket, or one `/api/rt/snap`
+request in the last 60 s, exists, and pushes what changed over hibernatable
+WebSockets. No viewer means no vendor call. Tier 1, Tier 2 and the nightly are
+unchanged and remain the fallback. The hub reads D1 (the roster and the clock
+row, one batch at start and every five minutes) and never writes it; it adds no
+`live:*` key, never touches the `UW_ONDEMAND` limiter (its own budget is
+`FLOWS_RT_CALLS_PER_MIN`, default 240), and never calls `env.AI`. The upstream
+sits behind `createRestUpstream` so a WebSocket upstream can replace it
+without touching the hub or the client: the hub calls only `start(plan,
+handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`, and receives
+neutral frames `{k, readAt, items, vendorAt, meta, full, answered}` whose
+`items` are already the wire's row shapes. `RT_UPSTREAM` maps each topic to its
+REST request and to the vendor socket channels (px: `price:<T>`, later
+`stock_screener`; fl: `flow-alerts`; gx: `gex:<T>`; mk: `market_tide`,
+`net_flow:<T>`; nw: `news`). The WebSocket upstream is not implemented.
+
+Routes, all inside `route()` so the finalizer sees every response (a 101 keeps
+its `webSocket` through `new Response(response.body, response)`):
+
+- `GET /api/rt/ws` (Upgrade): Flows session, same-origin, audience gate, then
+  the verified user and expiry travel to the object in `X-RT-User` and
+  `X-RT-Exp` (any client `X-RT-*` and the cookie are stripped). Query `k`
+  (topics, default all) and `f` (focus ticker). At most `FLOWS_RT_USER_CAP`
+  (3) sockets per user: the next gets a `ctl.bye` with code 4009 and is closed.
+- `GET /api/rt/snap?k=px,fl,mk`: the same envelopes as a JSON array, from the
+  object's memory, `no-store`, with `X-Fresh-*` of the worst frame. It wakes
+  the hub and waits up to 3 s for a cold topic.
+- `GET /api/rt/status`: owner only. Mode, audience, upstream, sockets by user,
+  per-topic sequence, last-frame age, last upstream error, vendor lag p50/p95
+  (hub receive time minus vendor timestamp), calls in the last minute and hour
+  by topic, the degraded episode and the kill switches.
+
+Kill switches fail closed. `FLOWS_RT_MODE` is `on` or anything else is off
+(routes answer JSON 404 `rt_off`, even to an anonymous caller; an absent
+`PULSE` binding is the same and never throws). `FLOWS_RT_AUDIENCE` is
+`members` or anything else is `owner`. Flows has no owner concept, so
+`FLOWS_RT_USERS` (comma-separated member names, default `anilkaya`) names the
+owners; an empty value admits nobody, and `status` is owner-only under either
+audience. `FLOWS_RT_HINT` is the Durable Object location hint (`enam`). Test
+only, honoured only while `UW_BASE` redirects the vendor: `UW_NOW` pins the hub
+clock (it then advances with real time) and `FLOWS_RT_SCALE` (0.05 to 1) scales
+every cadence, deadline and linger.
+
+The wire contract is frozen in `shared/flows-rt.js` and the client codes
+against exactly this:
+
+- Envelope: `{"v":1,"k":"px|fl|gx|mk|nw|ctl","ep":<epoch ms, new on every hub
+  (re)start>,"sq":<per-topic sequence, +1 per frame within an epoch>,"at":<hub
+  send time ms>,"snap":true on a snapshot,"fresh":<the `entryOf` shape>,"meta":{},"rows":[]}`.
+  `ctl` frames add `"t"` (`hello`, `hb`, `resync`, `degraded`, `closed`,
+  `bye`), carry `sq` 0 and no `fresh`. One counter per topic: a shared counter
+  manufactured 62,000 false gaps in the design measurement.
+- A snapshot taken for one socket carries the topic's current `sq`, so the next
+  broadcast is `sq + 1`. Every successful poll broadcasts one frame, with
+  `rows: []` when nothing changed, because the frame is what refreshes `fresh`.
+- Rows. `px`: `[ticker, qt, ...23 strip values]` (`meta.cols` on snapshots),
+  latest wins by vendor quote time, changed rows only (`qa` is not a change).
+  `fl`: the `live:alerts` row plus `id` and `ts`, ascending, appended and
+  deduped by alert id, at most 200 a frame, `meta.cursor`, `meta.dropped`,
+  `meta.truncated`. `gx`: `[ticker, atMs, px, gOi, gVol, gDir, flow, lagS]`,
+  one name per frame. `mk`: objects with an `id`, `tide` plus one per sector
+  ETF (the `live:market` sector rows). `nw`: the nightly news row plus `id` and
+  `ts`, at most 60.
+- Client to server, at most 256 bytes: `{"t":"sub","k":[...],"f":"NVDA"}`,
+  `{"t":"p","sq":{px:n}}` (a client more than 10 frames behind is closed with
+  4008), `{"t":"rs","k":"px"}`. Anything else closes 1009.
+- Close codes: 1009 bad message, 1008 flood, 4001 session expired, 4008
+  laggard, 4009 connection cap, 4011 rail off, 4012 hub full. A server-side
+  close is always preceded by `ctl.bye {reason, code}`, and that frame is the
+  authority: a client closes its own end on it and does not reconnect on 4009,
+  4011 or 4012. In the local workerd a close of a socket that has never sent a
+  client message is acknowledged but never raises `close` in the client; a close
+  of a socket that has sent one does.
+- Freshness: classes `rt` (5/15/60), `rtSlow` (10/30/120), `rtNews` (30/75/300)
+  apply their live and stale windows in the pre-market and post-market too. A
+  frame of a stamped topic (`px`, `gx`, `mk`) is `live` only when the newest
+  vendor timestamp in it is within `liveS` (plus the vendor's bar width, 60 s
+  for `gx`, 300 s for `mk`) of the hub's read; otherwise `fresh` with reason
+  `vendor-lag` (or `stale` past `staleS`), `vendor-unstamped` or `vendor-skew`,
+  and `liveUntil` is null so no client extrapolates it back to live. Event
+  topics (`fl`, `nw`) are live by the success of the poll.
+- The hub polls only 04:00 to 20:00 ET on trading days (the repository's
+  calendar plus the `flows_clock` verdict); outside it sends `ctl.closed`
+  once and makes no vendor call.
+
 ## Worker invariants
 
 1. **Preserve response objects when mutating them.** The single finalizer must
@@ -734,7 +834,7 @@ flows-vol-contract
 flows-positioning-contract
 flows-legs-contract
 flows-live-contract    flows-freshness-contract
-flows-starts-contract
+flows-starts-contract  flows-rt-contract
 flows-quant-card       flows-track-render
 flows-quant-audit
 flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
@@ -857,11 +957,27 @@ machine while the ratio held.
 `flows-quant-audit` was measured on 2026-09-30: under 6 s with no server. It
 builds three GARCH laws through the pipeline's 32,768-path draws and runs a
 1.5M-draw JavaScript reference for the earnings overlay.
+`flows-rt-contract` was measured on 2026-10-03: about 20 s with no server, 1,118
+assertions, on a machine shared with other suites. It drives the real hub on a
+fake clock and fake sockets against a stub vendor, loads `Pulse` with a fake
+`ctx`, runs the roster SQL over `node:sqlite` (so it needs Node 22.13 and runs
+under `--disable-warning=ExperimentalWarning`), and prints the CPU per poll and
+the bytes per frame it measured: on a 157-name roster with every row changing,
+px costs about 3 ms of CPU a poll and 31.7 KB a frame, fl 0.3 ms, gx 0.7 ms,
+mk 0.3 ms, nw 0.5 ms; a px snapshot is 32 KB, an fl snapshot 81 KB.
+`flows-rt-server` boots workerd four times (the rail, a Saturday, the switch off,
+production cadence) with persisted Durable Object storage, because raw workerd
+with in-memory Durable Object storage crashes when an alarm fires; the first
+three run at `FLOWS_RT_SCALE=0.2`, the last at real cadence and takes a minute
+of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was
+measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
+calls a minute at real cadence (px 12, fl 12, gx 59, mk 12, nw 2) and the
+alert-to-client latency it saw (p50 2.3 s, p95 4.8 s over 40 alerts).
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
 
-Confirmed to need one: `flows-overview-contract`, `flows-board-render`,
+Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
 `flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,

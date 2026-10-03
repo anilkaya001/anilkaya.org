@@ -96,6 +96,8 @@ cross-user isolation; do not split this batch into non-transactional writes.
 - Worker name: `anilkaya`
 - Static binding: `ASSETS`
 - D1 binding: `DB` → database `iewt`
+- Durable Object binding: `PULSE` → class `Pulse`, declared by migration `v1`
+  (`new_sqlite_classes`); see section 10.5n before the first deploy that carries it
 - `run_worker_first = ["/*", "!/assets/*"]`
 - `html_handling = "auto-trailing-slash"`
 - a root `_headers` file, uploaded with the static bundle and never served,
@@ -2899,3 +2901,127 @@ binding reports, and `FLOWS_ASK_NEURONS` must be the model's real rates for it t
 anything. The dossier route and the reading share the 3 s vendor deadline, so a name seen
 for the first time answers `generating` with no sections when its dossier takes longer
 than 1.5 seconds to assemble, and fills in on the next poll.
+
+### 10.5n The real-time rail: one Durable Object, demand-driven REST polling, hibernating WebSockets
+
+**Why.** The stored live keys are minutes behind the vendor (Tier 1 every five
+minutes, Tier 2 every fifteen), the quote card is 5 s and the tape 60 s on
+demand, and every reader pays for its own poll. `Pulse` holds one polling loop
+for everyone: a connected viewer sees prices and flow alerts about 5 s behind
+the vendor, the market tide and sector ETFs about 10 s, dealer gamma about
+10 to 15 s a name, and news about 30 s, each frame carrying its honest age.
+Tier 1, Tier 2 and the nightly are unchanged and are the fallback; the rail
+adds no `live:*` key and writes nothing to D1.
+
+**What runs.** One class, `Pulse` (SQLite-backed, migration `v1`), bound as
+`PULSE` and exported from `worker.js`. There is one named instance, `pulse:1`,
+placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
+polls only while a socket is connected or a `/api/rt/snap` request is less than
+60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
+own alarm every second. No viewer, no vendor call. Per minute, with someone
+watching: px 12 calls, fl 12, gx 60 (one name a second: the two indices, six
+fixed names and six rotating names Tier 2 reads, and up to three focus tickers
+viewers are looking at), mk 12 (two calls every 10 s), nw 2, so about 98 calls
+a minute against its own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+separate from the `UW_ONDEMAND` limiter, which the rail never touches.
+
+**Kill switches (vars in `wrangler.toml`, no secret).**
+
+| Var | Values | Effect |
+|---|---|---|
+| `FLOWS_RT_MODE` | `on`; anything else, or unset, is off | Off: all three routes answer JSON 404 `rt_off`, even to an anonymous caller, and every open socket is closed with 4011 and a `bye` frame. A missing `PULSE` binding is the same. |
+| `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
+| `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
+| `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
+| `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
+
+Turning the rail off is a one-line deploy (`FLOWS_RT_MODE = "off"`), or a dashboard
+edit of the var; the next deploy of the Worker also restarts the object and
+drops every socket, and clients reconnect with jitter. Deploy outside 04:00 to
+20:00 ET on trading days when you can.
+
+**Reading `/api/rt/status`** (owner session, JSON): `running`, the epoch `ep`,
+`session`, `phase`; `upstream` (`kind: "rest"`, whether the key is present,
+whether the base URL is redirected, the 429 pause); `sockets` by user;
+`roster` (names, focus tickers, the gamma rotation, the last D1 read and its
+error); `calls.minuteTotal` against 240; and per topic: `sq`, rows held,
+`lastFrameAgeMs`, `lastError` with its code and instant, `lagMs` (hub receive
+time minus the vendor's newest timestamp in the frame, p50, p95, max over the
+last 256 frames), `rowLagMs` for px (the same, per updated quote), `calls`
+in the last minute and hour, and the `fresh` entry the next frame would carry.
+`degraded` is non-null while a topic is down.
+
+**What to watch.**
+
+1. `topics.px.rowLagMs.p95` in the regular session. The rail's promise is a
+   frame at most about 5 s behind the vendor; if the vendor's own quote stamps
+   run 30 s behind, every px frame is `fresh` with reason `vendor-lag`, and that
+   is the vendor, not the rail. This is the number the old design could not
+   see; it is the first thing to read on the first Monday.
+2. `topics.<k>.fresh.reason`: `vendor-unstamped` on px means the screener sent
+   no `quote_time` and no frame can claim live.
+3. `calls.minuteTotal` stays near 100; a value at 240 means the budget is
+   refusing polls and `degraded.reason` is `budget`.
+4. `degraded.reason`: `vendor-throttled` (a 429; the pause honours `Retry-After`
+   and is jittered), `http_5xx`, `timeout`, `network`, `parse`, `no-key`.
+5. Workers Logs: the rail logs only unexpected failures (`rt tick failed`,
+   `rt message failed`, `rt roster read failed`, once a minute at most).
+6. Cost: with a viewer connected the object is awake for the session, 16 h x
+   0.128 GB is about 7,400 GB-s a day, under the 400,000 GB-s a month included;
+   alarms and polls are about 60,000 requests a day, and outgoing WebSocket
+   messages are free. With nobody connected it costs nothing.
+
+**The wire.** The envelope, the five topics, the control frames, the close codes
+and the 256-byte client messages are frozen in `shared/flows-rt.js` and
+summarised in AGENTS.md "Real-time rail". Two behaviours to know: every topic
+has its own sequence counter (a shared one fabricates gaps), and a client must
+treat `ctl.bye` as final and close its own end, reading the code from the frame:
+in the local runtime a server-initiated close of a socket that has never sent a
+message is acknowledged on the wire but never surfaces as a `close` event in the
+client.
+
+**The seam, and the two upgrades it is built for.**
+
+- **A separate Worker.** The class talks to nothing but its own `ctx`, `env` and
+  the request the main Worker forwards, and `worker.js` reaches it with
+  `env.PULSE.get(env.PULSE.idFromName("pulse:1"))`. To move it: create a Worker
+  (for example `anilkaya-rt`) whose entrypoint is `export { Pulse } from
+  "./shared/flows-rt-hub.js"`, with its own `[[migrations]] new_sqlite_classes`,
+  the `DB` binding (read-only by convention: it reads `flows_payload` and
+  `flows_clock`), the `UW_API_KEY` secret and the same vars, no routes and
+  `workers_dev = false`; then add `script_name = "anilkaya-rt"` to the binding
+  in `wrangler.toml` and remove the class export and migration from the main
+  Worker (the migration order matters; see Cloudflare's "transfer a class"
+  procedure). The point is that a site deploy would no longer restart the object.
+  Nothing in `shared/flows-rt*.js` changes.
+- **A WebSocket upstream.** The hub talks to its upstream only through
+  `start(plan, handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`; it
+  receives neutral frames `{ k, readAt, items, vendorAt, meta, full, answered }`
+  in the wire's own row shapes and merges, sequences, ages and broadcasts them.
+  Every REST detail (paths, the `newer_than` cursor, the gamma rotation, the 4 s
+  deadline, the 429 pause) lives in `createRestUpstream`. `RT_UPSTREAM` in
+  `shared/flows-rt.js` is the one table that maps a topic to its REST request and
+  to the vendor socket channels it would join: px to `price:<T>` (and
+  `stock_screener` later), fl to `flow-alerts`, gx to `gex:<T>`, mk to
+  `market_tide` and `net_flow:<T>`, nw to `news`. A socket upstream is a second
+  factory passed to `RtHub`; `tests/flows-rt-contract.mjs` drives the hub with a
+  push-style fake to prove no REST assumption is left in it. It is not
+  implemented, and the shapes of the vendor's frames and their lag are unmeasured
+  until a regular session has been read.
+
+**Verification, and what is unproven.**
+
+1. `FLOWS_TEST_SANDBOX=1 node tests/flows-rt-server.mjs` runs the rail in real
+   workerd with persisted Durable Object storage (raw workerd with in-memory
+   storage crashes when an alarm fires) against a fake vendor on loopback.
+2. `./tests/node_modules/.bin/wrangler deploy --dry-run` validates the binding and
+   the migration. The first real deploy applies migration `v1`.
+3. After the first deploy, as the owner: `curl -s -b <cookie> .../api/rt/status`
+   returns `running: false` with nobody connected, and a socket opened from the
+   browser console (`new WebSocket("wss://anilkaya.org/api/rt/ws")`) receives a
+   `hello` and then frames within a second. Confirm the 101 carries the seven
+   security headers and that the dashboard's Transform Rules did not rewrite them.
+4. Not proven anywhere in this repository: the live vendor's response to a 5 s
+   screener cadence, the real quote-time lag, the production latency of the
+   edge-to-object hop and the hibernation behaviour under a real idle period.
+   The harness has measured the hub's own overhead only.

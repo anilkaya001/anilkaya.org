@@ -33,6 +33,9 @@ import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
+import { serveRt } from "./shared/flows-rt-routes.js";
+
+export { Pulse } from "./shared/flows-rt-hub.js";
 
 const COURSE_ASSET_PATH = "/lab/course";
 
@@ -105,7 +108,7 @@ const CSP = [
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com",
-  "connect-src 'self' https://cdn.jsdelivr.net https://cloudflareinsights.com",
+  "connect-src 'self' wss://anilkaya.org https://cdn.jsdelivr.net https://cloudflareinsights.com",
   "worker-src 'self' blob:",
   "form-action 'self'",
   "upgrade-insecure-requests",
@@ -3881,6 +3884,10 @@ async function route(request, env, url, ctx) {
 
   if (path.startsWith("/flows/")) {
     throw new HttpError(404, "not_found", "Not found");
+  }
+
+  if (path.startsWith("/api/rt/")) {
+    return serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
   }
 
   if (path.startsWith("/api/")) {
