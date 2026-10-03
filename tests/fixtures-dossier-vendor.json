@@ -1,0 +1,1897 @@
+{
+ "bodies": {
+  "analysts": {
+   "data": [
+    {
+     "action": "upgraded",
+     "analyst_name": "Analyst 1",
+     "firm": "Citi",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "150.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-09-29 11:20:00+00:00"
+    },
+    {
+     "action": "maintained",
+     "analyst_name": "Analyst 2",
+     "firm": "UBS",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "154.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-09-23 11:20:00+00:00"
+    },
+    {
+     "action": "downgraded",
+     "analyst_name": "Analyst 3",
+     "firm": "Morgan Stanley",
+     "recommendation": "hold",
+     "sector": "Technology",
+     "target": "158.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-09-17 11:20:00+00:00"
+    },
+    {
+     "action": "target raised",
+     "analyst_name": "Analyst 4",
+     "firm": "Barclays",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "162.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-09-11 11:20:00+00:00"
+    },
+    {
+     "action": "reiterated",
+     "analyst_name": "Analyst 5",
+     "firm": "Jefferies",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "166.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-09-05 11:20:00+00:00"
+    },
+    {
+     "action": "maintained",
+     "analyst_name": "Analyst 6",
+     "firm": "Wells Fargo",
+     "recommendation": "hold",
+     "sector": "Technology",
+     "target": "170.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-08-30 11:20:00+00:00"
+    },
+    {
+     "action": "initiated",
+     "analyst_name": "Analyst 7",
+     "firm": "Mizuho",
+     "recommendation": "sell",
+     "sector": "Technology",
+     "target": "174.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-08-24 11:20:00+00:00"
+    },
+    {
+     "action": "maintained",
+     "analyst_name": "Analyst 8",
+     "firm": "Needham",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "178.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-08-18 11:20:00+00:00"
+    },
+    {
+     "action": "upgraded",
+     "analyst_name": "Analyst 9",
+     "firm": "Piper Sandler",
+     "recommendation": "buy",
+     "sector": "Technology",
+     "target": "182.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-08-12 11:20:00+00:00"
+    },
+    {
+     "action": "reiterated",
+     "analyst_name": "Analyst 10",
+     "firm": "Baird",
+     "recommendation": "hold",
+     "sector": "Technology",
+     "target": "186.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-08-06 11:20:00+00:00"
+    },
+    {
+     "action": "maintained",
+     "analyst_name": "Old Analyst",
+     "firm": "Stale Securities",
+     "recommendation": "sell",
+     "sector": "Technology",
+     "target": "90.0",
+     "ticker": "EXMP",
+     "timestamp": "2026-03-16 11:20:00+00:00"
+    }
+   ]
+  },
+  "breakdown": {
+   "data": {
+    "annual_only": false,
+    "general": [],
+    "rev_breakdown": [
+     {
+      "axis": [
+       "ProductOrServiceAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "Cloud Infrastructure"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "product",
+      "value": "2100000000"
+     },
+     {
+      "axis": [
+       "ProductOrServiceAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "Subscription Software"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "product",
+      "value": "1800000000"
+     },
+     {
+      "axis": [
+       "ProductOrServiceAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "Professional Services"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "product",
+      "value": "520000000"
+     },
+     {
+      "axis": [
+       "StatementGeographicalAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "United States"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "locations",
+      "value": "2600000000"
+     },
+     {
+      "axis": [
+       "StatementGeographicalAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "Europe"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "locations",
+      "value": "1100000000"
+     },
+     {
+      "axis": [
+       "StatementGeographicalAxis"
+      ],
+      "field": "RevenueFromContractWithCustomerExcludingAssessedTax",
+      "members": [
+       "Asia Pacific"
+      ],
+      "report_date": "2026-06-30",
+      "rev_group": "locations",
+      "value": "720000000"
+     }
+    ]
+   }
+  },
+  "earnings": {
+   "data": [
+    {
+     "actual_eps": "",
+     "ending_fiscal_quarter": "2026-09-30",
+     "expected_move": "6.80",
+     "expected_move_perc": "0.0534",
+     "long_straddle_1d": "",
+     "long_straddle_1w": "",
+     "post_earnings_move_1d": "",
+     "post_earnings_move_1w": "",
+     "post_earnings_move_2w": "",
+     "post_earnings_move_3d": "",
+     "pre_earnings_move_1d": "",
+     "pre_earnings_move_1w": "",
+     "pre_earnings_move_2w": "",
+     "pre_earnings_move_3d": "",
+     "report_date": "2026-10-22",
+     "report_time": "postmarket",
+     "short_straddle_1d": "",
+     "short_straddle_1w": "",
+     "source": "company",
+     "street_mean_est": "0.98"
+    },
+    {
+     "actual_eps": "0.78",
+     "ending_fiscal_quarter": "2026-06-30",
+     "expected_move": "7.80",
+     "expected_move_perc": "0.0650",
+     "long_straddle_1d": "-0.0500",
+     "long_straddle_1w": "-0.0400",
+     "post_earnings_move_1d": "0.0400",
+     "post_earnings_move_1w": "0.0520",
+     "post_earnings_move_2w": "0.0440",
+     "post_earnings_move_3d": "0.0480",
+     "pre_earnings_move_1d": "0.0000",
+     "pre_earnings_move_1w": "-0.0120",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2026-07-24",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0500",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.76"
+    },
+    {
+     "actual_eps": "0.76",
+     "ending_fiscal_quarter": "2026-03-31",
+     "expected_move": "8.04",
+     "expected_move_perc": "0.0670",
+     "long_straddle_1d": "-0.0200",
+     "long_straddle_1w": "-0.0200",
+     "post_earnings_move_1d": "-0.0520",
+     "post_earnings_move_1w": "-0.0676",
+     "post_earnings_move_2w": "-0.0572",
+     "post_earnings_move_3d": "-0.0624",
+     "pre_earnings_move_1d": "0.0040",
+     "pre_earnings_move_1w": "0.0000",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2026-04-24",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0200",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.74"
+    },
+    {
+     "actual_eps": "0.74",
+     "ending_fiscal_quarter": "2025-12-31",
+     "expected_move": "8.28",
+     "expected_move_perc": "0.0690",
+     "long_straddle_1d": "0.0100",
+     "long_straddle_1w": "0.0000",
+     "post_earnings_move_1d": "0.0640",
+     "post_earnings_move_1w": "0.0832",
+     "post_earnings_move_2w": "0.0704",
+     "post_earnings_move_3d": "0.0768",
+     "pre_earnings_move_1d": "0.0080",
+     "pre_earnings_move_1w": "0.0120",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2026-01-23",
+     "report_time": "postmarket",
+     "short_straddle_1d": "-0.0100",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.72"
+    },
+    {
+     "actual_eps": "0.72",
+     "ending_fiscal_quarter": "2025-09-30",
+     "expected_move": "7.80",
+     "expected_move_perc": "0.0650",
+     "long_straddle_1d": "0.0400",
+     "long_straddle_1w": "0.0200",
+     "post_earnings_move_1d": "-0.0760",
+     "post_earnings_move_1w": "-0.0988",
+     "post_earnings_move_2w": "-0.0836",
+     "post_earnings_move_3d": "-0.0912",
+     "pre_earnings_move_1d": "0.0000",
+     "pre_earnings_move_1w": "0.0240",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2025-10-24",
+     "report_time": "postmarket",
+     "short_straddle_1d": "-0.0400",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.70"
+    },
+    {
+     "actual_eps": "0.70",
+     "ending_fiscal_quarter": "2025-06-30",
+     "expected_move": "8.04",
+     "expected_move_perc": "0.0670",
+     "long_straddle_1d": "-0.0500",
+     "long_straddle_1w": "0.0400",
+     "post_earnings_move_1d": "0.0400",
+     "post_earnings_move_1w": "0.0520",
+     "post_earnings_move_2w": "0.0440",
+     "post_earnings_move_3d": "0.0480",
+     "pre_earnings_move_1d": "0.0040",
+     "pre_earnings_move_1w": "-0.0120",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2025-07-25",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0500",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.68"
+    },
+    {
+     "actual_eps": "0.68",
+     "ending_fiscal_quarter": "2025-03-31",
+     "expected_move": "8.28",
+     "expected_move_perc": "0.0690",
+     "long_straddle_1d": "-0.0200",
+     "long_straddle_1w": "-0.0400",
+     "post_earnings_move_1d": "-0.0520",
+     "post_earnings_move_1w": "-0.0676",
+     "post_earnings_move_2w": "-0.0572",
+     "post_earnings_move_3d": "-0.0624",
+     "pre_earnings_move_1d": "0.0080",
+     "pre_earnings_move_1w": "0.0000",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2025-04-25",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0200",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.66"
+    },
+    {
+     "actual_eps": "0.66",
+     "ending_fiscal_quarter": "2024-12-31",
+     "expected_move": "7.80",
+     "expected_move_perc": "0.0650",
+     "long_straddle_1d": "0.0100",
+     "long_straddle_1w": "-0.0200",
+     "post_earnings_move_1d": "0.0640",
+     "post_earnings_move_1w": "0.0832",
+     "post_earnings_move_2w": "0.0704",
+     "post_earnings_move_3d": "0.0768",
+     "pre_earnings_move_1d": "0.0000",
+     "pre_earnings_move_1w": "0.0120",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2025-01-24",
+     "report_time": "postmarket",
+     "short_straddle_1d": "-0.0100",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.64"
+    },
+    {
+     "actual_eps": "0.64",
+     "ending_fiscal_quarter": "2024-09-30",
+     "expected_move": "8.04",
+     "expected_move_perc": "0.0670",
+     "long_straddle_1d": "0.0400",
+     "long_straddle_1w": "0.0000",
+     "post_earnings_move_1d": "-0.0760",
+     "post_earnings_move_1w": "-0.0988",
+     "post_earnings_move_2w": "-0.0836",
+     "post_earnings_move_3d": "-0.0912",
+     "pre_earnings_move_1d": "0.0040",
+     "pre_earnings_move_1w": "0.0240",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2024-10-25",
+     "report_time": "postmarket",
+     "short_straddle_1d": "-0.0400",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.62"
+    },
+    {
+     "actual_eps": "0.62",
+     "ending_fiscal_quarter": "2024-06-30",
+     "expected_move": "8.28",
+     "expected_move_perc": "0.0690",
+     "long_straddle_1d": "-0.0500",
+     "long_straddle_1w": "0.0200",
+     "post_earnings_move_1d": "0.0400",
+     "post_earnings_move_1w": "0.0520",
+     "post_earnings_move_2w": "0.0440",
+     "post_earnings_move_3d": "0.0480",
+     "pre_earnings_move_1d": "0.0080",
+     "pre_earnings_move_1w": "-0.0120",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2024-07-26",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0500",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.60"
+    },
+    {
+     "actual_eps": "0.60",
+     "ending_fiscal_quarter": "2024-03-31",
+     "expected_move": "7.80",
+     "expected_move_perc": "0.0650",
+     "long_straddle_1d": "-0.0200",
+     "long_straddle_1w": "0.0400",
+     "post_earnings_move_1d": "-0.0520",
+     "post_earnings_move_1w": "-0.0676",
+     "post_earnings_move_2w": "-0.0572",
+     "post_earnings_move_3d": "-0.0624",
+     "pre_earnings_move_1d": "0.0000",
+     "pre_earnings_move_1w": "0.0000",
+     "pre_earnings_move_2w": "0.0100",
+     "pre_earnings_move_3d": "0.0060",
+     "report_date": "2024-04-26",
+     "report_time": "postmarket",
+     "short_straddle_1d": "0.0200",
+     "short_straddle_1w": "0.0200",
+     "source": "company",
+     "street_mean_est": "0.58"
+    }
+   ]
+  },
+  "estimates": {
+   "data": {
+    "estimates": [
+     {
+      "date": "2026-09-30",
+      "eps_estimate_analyst_count": 24,
+      "eps_estimate_average": 0.98,
+      "eps_estimate_high": 1.04,
+      "eps_estimate_low": 0.91,
+      "horizon": "0q",
+      "revenue_estimate_analyst_count": 22,
+      "revenue_estimate_average": 5650000000,
+      "revenue_estimate_high": 5800000000,
+      "revenue_estimate_low": 5500000000
+     },
+     {
+      "date": "2026-12-31",
+      "eps_estimate_analyst_count": 23,
+      "eps_estimate_average": 1.05,
+      "eps_estimate_high": 1.12,
+      "eps_estimate_low": 0.97,
+      "horizon": "+1q",
+      "revenue_estimate_analyst_count": 21,
+      "revenue_estimate_average": 5900000000,
+      "revenue_estimate_high": 6050000000,
+      "revenue_estimate_low": 5700000000
+     }
+    ],
+    "ticker": "EXMP"
+   }
+  },
+  "financials": {
+   "data": {
+    "balance_sheets": [
+     {
+      "cash_and_short_term_investments": "6440000000",
+      "common_stock_shares_outstanding": "512000000",
+      "fiscal_date_ending": "2026-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "short_long_term_debt_total": "3100000000",
+      "ticker": "EXMP",
+      "total_assets": "21000000000",
+      "total_current_assets": "9400000000",
+      "total_current_liabilities": "4700000000",
+      "total_liabilities": "11200000000",
+      "total_shareholder_equity": "9800000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "cash_and_short_term_investments": "6360000000",
+      "common_stock_shares_outstanding": "512000000",
+      "fiscal_date_ending": "2026-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "short_long_term_debt_total": "3100000000",
+      "ticker": "EXMP",
+      "total_assets": "21000000000",
+      "total_current_assets": "9400000000",
+      "total_current_liabilities": "4700000000",
+      "total_liabilities": "11200000000",
+      "total_shareholder_equity": "9800000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "cash_and_short_term_investments": "6280000000",
+      "common_stock_shares_outstanding": "512000000",
+      "fiscal_date_ending": "2025-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "short_long_term_debt_total": "3100000000",
+      "ticker": "EXMP",
+      "total_assets": "21000000000",
+      "total_current_assets": "9400000000",
+      "total_current_liabilities": "4700000000",
+      "total_liabilities": "11200000000",
+      "total_shareholder_equity": "9800000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "cash_and_short_term_investments": "6200000000",
+      "common_stock_shares_outstanding": "512000000",
+      "fiscal_date_ending": "2025-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "short_long_term_debt_total": "3100000000",
+      "ticker": "EXMP",
+      "total_assets": "21000000000",
+      "total_current_assets": "9400000000",
+      "total_current_liabilities": "4700000000",
+      "total_liabilities": "11200000000",
+      "total_shareholder_equity": "9800000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     }
+    ],
+    "cash_flows": [
+     {
+      "capital_expenditures": "-389484731",
+      "fiscal_date_ending": "2026-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1610194792",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-372712661",
+      "fiscal_date_ending": "2026-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1528121911",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-356662834",
+      "fiscal_date_ending": "2025-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1450131638",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-341304147",
+      "fiscal_date_ending": "2025-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1376024553",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-326606839",
+      "fiscal_date_ending": "2025-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1305610840",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-312542430",
+      "fiscal_date_ending": "2025-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1238709831",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-299083665",
+      "fiscal_date_ending": "2024-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1175149567",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-286204464",
+      "fiscal_date_ending": "2024-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1114766388",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-273879870",
+      "fiscal_date_ending": "2024-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1057404531",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-262086000",
+      "fiscal_date_ending": "2024-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "1002915760",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-250800000",
+      "fiscal_date_ending": "2023-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "951159000",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "capital_expenditures": "-240000000",
+      "fiscal_date_ending": "2023-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "operating_cashflow": "902000000",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     }
+    ],
+    "earnings": [
+     {
+      "estimated_eps": "0.95",
+      "fiscal_date_ending": "2026-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2026-07-24",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.98",
+      "surprise": "0.03",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.92",
+      "fiscal_date_ending": "2026-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2026-04-24",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.95",
+      "surprise": "0.03",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.88",
+      "fiscal_date_ending": "2025-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2026-01-23",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.86",
+      "surprise": "-0.02",
+      "surprise_percentage": "-2.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.85",
+      "fiscal_date_ending": "2025-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2025-10-24",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.87",
+      "surprise": "0.03",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.82",
+      "fiscal_date_ending": "2025-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2025-07-25",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.84",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.78",
+      "fiscal_date_ending": "2025-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2025-04-25",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.81",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.75",
+      "fiscal_date_ending": "2024-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2025-01-24",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.74",
+      "surprise": "-0.02",
+      "surprise_percentage": "-2.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.73",
+      "fiscal_date_ending": "2024-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2024-10-25",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.75",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.70",
+      "fiscal_date_ending": "2024-06-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2024-07-26",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.72",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.67",
+      "fiscal_date_ending": "2024-03-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2024-04-26",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.69",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.64",
+      "fiscal_date_ending": "2023-12-31",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2024-01-26",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.63",
+      "surprise": "-0.01",
+      "surprise_percentage": "-2.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "estimated_eps": "0.62",
+      "fiscal_date_ending": "2023-09-30",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "report_date": "2023-10-27",
+      "report_time": "postmarket",
+      "report_type": "quarterly",
+      "reported_eps": "0.64",
+      "surprise": "0.02",
+      "surprise_percentage": "3.0",
+      "ticker": "EXMP",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     }
+    ],
+    "income_statements": [
+     {
+      "ebitda": "1759432358",
+      "fiscal_date_ending": "2026-06-30",
+      "gross_profit": "4680308184",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "1288155834",
+      "operating_income": "1570921748",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "6491412183",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1669752722",
+      "fiscal_date_ending": "2026-03-31",
+      "gross_profit": "4472551935",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "1222497529",
+      "operating_income": "1490850645",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "6211877687",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1584534083",
+      "fiscal_date_ending": "2025-12-31",
+      "gross_profit": "4274009624",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "1160105310",
+      "operating_income": "1414762574",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "5944380562",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1503558536",
+      "fiscal_date_ending": "2025-09-30",
+      "gross_profit": "4084272960",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "1100819642",
+      "operating_income": "1342462979",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "5688402451",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1426618674",
+      "fiscal_date_ending": "2025-06-30",
+      "gross_profit": "3902951730",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "1044488672",
+      "operating_income": "1273766673",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "5443447322",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1353517083",
+      "fiscal_date_ending": "2025-03-31",
+      "gross_profit": "3729672998",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "990967865",
+      "operating_income": "1208497396",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "5209040499",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1284065869",
+      "fiscal_date_ending": "2024-12-31",
+      "gross_profit": "3564080342",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "940119654",
+      "operating_income": "1146487383",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4984727751",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1218086199",
+      "fiscal_date_ending": "2024-09-30",
+      "gross_profit": "3405833123",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "891813110",
+      "operating_income": "1087576964",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4770074402",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1155407878",
+      "fiscal_date_ending": "2024-06-30",
+      "gross_profit": "3254605788",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "845923625",
+      "operating_income": "1031614177",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4564664500",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1095868928",
+      "fiscal_date_ending": "2024-03-31",
+      "gross_profit": "3110087200",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "802332608",
+      "operating_income": "978454400",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4368100000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "1039315200",
+      "fiscal_date_ending": "2023-12-31",
+      "gross_profit": "2971980000",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "760927200",
+      "operating_income": "927960000",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4180000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "985600000",
+      "fiscal_date_ending": "2023-09-30",
+      "gross_profit": "2840000000",
+      "inserted_at": "2026-08-01 12:00:00+00:00",
+      "net_income": "721600000",
+      "operating_income": "880000000",
+      "report_type": "quarterly",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "4000000000",
+      "updated_at": "2026-08-01 12:00:00+00:00"
+     },
+     {
+      "ebitda": "4400000000",
+      "fiscal_date_ending": "2025-12-31",
+      "gross_profit": "11300000000",
+      "net_income": "3100000000",
+      "operating_income": "3900000000",
+      "report_type": "annual",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "16000000000"
+     },
+     {
+      "ebitda": "4400000000",
+      "fiscal_date_ending": "2024-12-31",
+      "gross_profit": "11300000000",
+      "net_income": "3100000000",
+      "operating_income": "3900000000",
+      "report_type": "annual",
+      "reported_currency": "USD",
+      "ticker": "EXMP",
+      "total_revenue": "14600000000"
+     }
+    ]
+   }
+  },
+  "info": {
+   "data": {
+    "announce_time": "afterhours",
+    "avg30_volume": "5400000",
+    "beta": "1.31",
+    "full_name": "EXAMPLE TECHNOLOGIES",
+    "has_dividend": false,
+    "has_earnings_history": true,
+    "has_investment_arm": false,
+    "has_options": true,
+    "issue_type": "Common Stock",
+    "logo": "https://example.invalid/exmp.png",
+    "marketcap": "84200000000",
+    "next_earnings_date": "2026-10-22",
+    "sector": "Technology",
+    "short_description": "Example Technologies sells subscription software and cloud infrastructure services to mid-sized enterprises. It earns most of its revenue from recurring contracts."
+   }
+  },
+  "insiders": {
+   "data": [
+    {
+     "avg_price": "150.00",
+     "buy_sell": "buy",
+     "date": "2026-09-27",
+     "premium": "400000",
+     "transactions": 3,
+     "uniq_insiders": 1,
+     "volume": 2500
+    },
+    {
+     "avg_price": "149.00",
+     "buy_sell": "sell",
+     "date": "2026-09-16",
+     "premium": "450000",
+     "transactions": 4,
+     "uniq_insiders": 2,
+     "volume": 2800
+    },
+    {
+     "avg_price": "148.00",
+     "buy_sell": "sell",
+     "date": "2026-09-05",
+     "premium": "500000",
+     "transactions": 5,
+     "uniq_insiders": 3,
+     "volume": 3100
+    },
+    {
+     "avg_price": "147.00",
+     "buy_sell": "buy",
+     "date": "2026-08-25",
+     "premium": "550000",
+     "transactions": 6,
+     "uniq_insiders": 1,
+     "volume": 3400
+    },
+    {
+     "avg_price": "146.00",
+     "buy_sell": "sell",
+     "date": "2026-08-14",
+     "premium": "600000",
+     "transactions": 7,
+     "uniq_insiders": 2,
+     "volume": 3700
+    },
+    {
+     "avg_price": "145.00",
+     "buy_sell": "sell",
+     "date": "2026-08-03",
+     "premium": "650000",
+     "transactions": 8,
+     "uniq_insiders": 3,
+     "volume": 4000
+    },
+    {
+     "avg_price": "144.00",
+     "buy_sell": "buy",
+     "date": "2026-07-23",
+     "premium": "700000",
+     "transactions": 9,
+     "uniq_insiders": 1,
+     "volume": 4300
+    },
+    {
+     "avg_price": "143.00",
+     "buy_sell": "sell",
+     "date": "2026-07-12",
+     "premium": "750000",
+     "transactions": 10,
+     "uniq_insiders": 2,
+     "volume": 4600
+    }
+   ],
+   "has_more": false
+  },
+  "levels": {
+   "data": [
+    {
+     "dark_pool_volume": 2444,
+     "price": "118.00",
+     "regular_volume": 7834
+    },
+    {
+     "dark_pool_volume": 3142,
+     "price": "118.50",
+     "regular_volume": 10707
+    },
+    {
+     "dark_pool_volume": 4629,
+     "price": "119.00",
+     "regular_volume": 15752
+    },
+    {
+     "dark_pool_volume": 7413,
+     "price": "119.50",
+     "regular_volume": 23950
+    },
+    {
+     "dark_pool_volume": 11974,
+     "price": "120.00",
+     "regular_volume": 36244
+    },
+    {
+     "dark_pool_volume": 18444,
+     "price": "120.50",
+     "regular_volume": 53191
+    },
+    {
+     "dark_pool_volume": 26261,
+     "price": "121.00",
+     "regular_volume": 74535
+    },
+    {
+     "dark_pool_volume": 34029,
+     "price": "121.50",
+     "regular_volume": 98863
+    },
+    {
+     "dark_pool_volume": 39838,
+     "price": "122.00",
+     "regular_volume": 123530
+    },
+    {
+     "dark_pool_volume": 42000,
+     "price": "122.50",
+     "regular_volume": 145027
+    },
+    {
+     "dark_pool_volume": 39838,
+     "price": "123.00",
+     "regular_volume": 159754
+    },
+    {
+     "dark_pool_volume": 34029,
+     "price": "123.50",
+     "regular_volume": 165000
+    },
+    {
+     "dark_pool_volume": 26261,
+     "price": "124.00",
+     "regular_volume": 159754
+    },
+    {
+     "dark_pool_volume": 18444,
+     "price": "124.50",
+     "regular_volume": 145027
+    },
+    {
+     "dark_pool_volume": 11974,
+     "price": "125.00",
+     "regular_volume": 123530
+    },
+    {
+     "dark_pool_volume": 7413,
+     "price": "125.50",
+     "regular_volume": 98863
+    },
+    {
+     "dark_pool_volume": 4629,
+     "price": "126.00",
+     "regular_volume": 74535
+    },
+    {
+     "dark_pool_volume": 3142,
+     "price": "126.50",
+     "regular_volume": 53191
+    },
+    {
+     "dark_pool_volume": 2444,
+     "price": "127.00",
+     "regular_volume": 36244
+    },
+    {
+     "dark_pool_volume": 2154,
+     "price": "127.50",
+     "regular_volume": 23950
+    },
+    {
+     "dark_pool_volume": 2048,
+     "price": "128.00",
+     "regular_volume": 15752
+    },
+    {
+     "dark_pool_volume": 2013,
+     "price": "128.50",
+     "regular_volume": 10707
+    },
+    {
+     "dark_pool_volume": 2003,
+     "price": "129.00",
+     "regular_volume": 7834
+    },
+    {
+     "dark_pool_volume": 2000,
+     "price": "129.50",
+     "regular_volume": 6316
+    }
+   ],
+   "date": "2026-10-01"
+  },
+  "news": {
+   "data": [
+    {
+     "created_at": "2026-10-02 12:00:00+00:00",
+     "headline": "Example Technologies raises full-year guidance after strong cloud demand",
+     "is_major": true,
+     "meta": {},
+     "sentiment": "positive",
+     "source": "Reuters",
+     "tags": [
+      "earnings"
+     ],
+     "tickers": [
+      "EXMP"
+     ]
+    },
+    {
+     "created_at": "2026-10-02 05:00:00+00:00",
+     "headline": "Example Technologies announces a new data-centre region in Frankfurt",
+     "is_major": false,
+     "meta": {},
+     "sentiment": "neutral",
+     "source": "BusinessWire",
+     "tags": [
+      "earnings"
+     ],
+     "tickers": [
+      "EXMP",
+      "OTHR"
+     ]
+    },
+    {
+     "created_at": "2026-10-01 18:00:00+00:00",
+     "headline": "Analysts split on Example Technologies ahead of October earnings",
+     "is_major": false,
+     "meta": {},
+     "sentiment": "neutral",
+     "source": "Barron's",
+     "tags": [
+      "earnings"
+     ],
+     "tickers": [
+      "EXMP"
+     ]
+    },
+    {
+     "created_at": "2026-10-01 08:00:00+00:00",
+     "headline": "Unrelated Corp shares slide on supply concerns",
+     "is_major": false,
+     "meta": {},
+     "sentiment": "negative",
+     "source": "Reuters",
+     "tags": [
+      "earnings"
+     ],
+     "tickers": [
+      "OTHR"
+     ]
+    },
+    {
+     "created_at": "2026-09-29 16:00:00+00:00",
+     "headline": "Example Technologies faces a regulatory inquiry in the EU over bundling",
+     "is_major": true,
+     "meta": {},
+     "sentiment": "negative",
+     "source": "Financial Times",
+     "tags": [
+      "earnings"
+     ],
+     "tickers": [
+      "EXMP"
+     ]
+    }
+   ]
+  },
+  "ownership": {
+   "data": [
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      51100000,
+      52000000
+     ],
+     "inst_share_value": "7800000000",
+     "inst_value": "46800000000",
+     "name": "VANGUARD GROUP INC",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "Vanguard",
+     "tags": [
+      "index"
+     ],
+     "units": 52000000,
+     "units_change": 900000,
+     "value": 7800000000
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      32950000,
+      32500000
+     ],
+     "inst_share_value": "4875000000",
+     "inst_value": "29250000000",
+     "name": "BLACKROCK INC.",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "BlackRock",
+     "tags": [
+      "index"
+     ],
+     "units": 32500000,
+     "units_change": -450000,
+     "value": 4875000000
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      23336363,
+      23636363
+     ],
+     "inst_share_value": "3545454450",
+     "inst_value": "21272726700",
+     "name": "STATE STREET CORP",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "State Street",
+     "tags": [
+      "index"
+     ],
+     "units": 23636363,
+     "units_change": 300000,
+     "value": 3545454450
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      18796428,
+      18571428
+     ],
+     "inst_share_value": "2785714200",
+     "inst_value": "16714285200",
+     "name": "FMR LLC",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "Fidelity",
+     "tags": [
+      "index"
+     ],
+     "units": 18571428,
+     "units_change": -225000,
+     "value": 2785714200
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      15114117,
+      15294117
+     ],
+     "inst_share_value": "2294117550",
+     "inst_value": "13764705300",
+     "name": "GEODE CAPITAL MANAGEMENT",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "Geode",
+     "tags": [
+      "index"
+     ],
+     "units": 15294117,
+     "units_change": 180000,
+     "value": 2294117550
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      13150000,
+      13000000
+     ],
+     "inst_share_value": "1950000000",
+     "inst_value": "11700000000",
+     "name": "T. ROWE PRICE",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "T. Rowe",
+     "tags": [
+      "index"
+     ],
+     "units": 13000000,
+     "units_change": -150000,
+     "value": 1950000000
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      11175776,
+      11304347
+     ],
+     "inst_share_value": "1695652050",
+     "inst_value": "10173912300",
+     "name": "NORTHERN TRUST CORP",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "Northern Trust",
+     "tags": [
+      "index"
+     ],
+     "units": 11304347,
+     "units_change": 128571,
+     "value": 1695652050
+    },
+    {
+     "avg_price": "112.40",
+     "filing_date": "2026-08-14",
+     "first_buy": "2019-03-31",
+     "historical_units": [
+      10112500,
+      10000000
+     ],
+     "inst_share_value": "1500000000",
+     "inst_value": "9000000000",
+     "name": "CAPITAL WORLD INVESTORS",
+     "people": [],
+     "report_date": "2026-06-30",
+     "shares_outstanding": "512000000",
+     "short_name": "Capital World",
+     "tags": [
+      "index"
+     ],
+     "units": 10000000,
+     "units_change": -112500,
+     "value": 1500000000
+    }
+   ]
+  },
+  "profile": {
+   "data": {
+    "analyst_target_price": 182.5,
+    "asset_type": "Common Stock",
+    "beta": 1.31,
+    "cik": "0001234567",
+    "country": "USA",
+    "currency": "USD",
+    "description": "Example Technologies Inc. develops cloud software and infrastructure for enterprises.",
+    "dividend_yield": null,
+    "ebitda": 5100000000,
+    "eps": 3.9,
+    "exchange": "NASDAQ",
+    "industry": "Software - Infrastructure",
+    "market_cap": 84200000000,
+    "name": "Example Technologies Inc",
+    "pe_ratio": 41.7,
+    "peg_ratio": 2.2,
+    "sector": "Technology",
+    "shares_outstanding": 512000000,
+    "ticker": "EXMP",
+    "week_52_high": 171.9,
+    "week_52_low": 96.4
+   }
+  },
+  "quote": {
+   "data": {
+    "close": "127.40",
+    "high": "128.10",
+    "low": "125.90",
+    "market_time": "market",
+    "open": "126.20",
+    "prev_close": "125.80",
+    "tape_time": "2026-10-02 14:29:40+00:00",
+    "total_volume": 2150000,
+    "volume": 800
+   }
+  },
+  "short": {
+   "data": [
+    {
+     "days_to_cover": "2.4",
+     "fee_rate": "0.31",
+     "market_date": "2026-09-15",
+     "rebate_rate": "4.1",
+     "short_interest": 9800000,
+     "short_shares_available": 10000000,
+     "si_float": "0.0210",
+     "si_float_with_synth_long_pct_of_total_shares": "0.0207",
+     "symbol": "EXMP",
+     "total_float": 466000000
+    },
+    {
+     "days_to_cover": "2.2",
+     "fee_rate": "0.30",
+     "market_date": "2026-08-31",
+     "rebate_rate": "4.2",
+     "short_interest": 9100000,
+     "short_shares_available": 10000000,
+     "si_float": "0.0195",
+     "si_float_with_synth_long_pct_of_total_shares": "0.0192",
+     "symbol": "EXMP",
+     "total_float": 466000000
+    }
+   ]
+  }
+ },
+ "documented": {
+  "/api/companies/{ticker}/earnings-estimates": [
+   "data",
+   "date",
+   "eps_estimate_analyst_count",
+   "eps_estimate_average",
+   "eps_estimate_high",
+   "eps_estimate_low",
+   "estimates",
+   "horizon",
+   "revenue_estimate_analyst_count",
+   "revenue_estimate_average",
+   "revenue_estimate_high",
+   "revenue_estimate_low",
+   "ticker"
+  ],
+  "/api/companies/{ticker}/profile": [
+   "analyst_target_price",
+   "asset_type",
+   "beta",
+   "cik",
+   "country",
+   "currency",
+   "data",
+   "description",
+   "dividend_yield",
+   "ebitda",
+   "eps",
+   "exchange",
+   "industry",
+   "market_cap",
+   "name",
+   "pe_ratio",
+   "peg_ratio",
+   "sector",
+   "shares_outstanding",
+   "ticker",
+   "week_52_high",
+   "week_52_low"
+  ],
+  "/api/darkpool/{ticker}/price-levels": [
+   "dark_pool_volume",
+   "data",
+   "date",
+   "price",
+   "regular_volume"
+  ],
+  "/api/earnings/{ticker}": [
+   "actual_eps",
+   "ending_fiscal_quarter",
+   "expected_move",
+   "expected_move_perc",
+   "long_straddle_1d",
+   "long_straddle_1w",
+   "post_earnings_move_1d",
+   "post_earnings_move_1w",
+   "post_earnings_move_2w",
+   "post_earnings_move_3d",
+   "pre_earnings_move_1d",
+   "pre_earnings_move_1w",
+   "pre_earnings_move_2w",
+   "pre_earnings_move_3d",
+   "report_date",
+   "report_time",
+   "short_straddle_1d",
+   "short_straddle_1w",
+   "source",
+   "street_mean_est"
+  ],
+  "/api/insider/{ticker}/ticker-flow": [
+   "avg_price",
+   "buy_sell",
+   "date",
+   "has_more",
+   "premium",
+   "transactions",
+   "uniq_insiders",
+   "volume"
+  ],
+  "/api/institution/{ticker}/ownership": [
+   "avg_price",
+   "filing_date",
+   "first_buy",
+   "historical_units",
+   "inst_share_value",
+   "inst_value",
+   "name",
+   "people",
+   "report_date",
+   "shares_outstanding",
+   "short_name",
+   "tags",
+   "units",
+   "units_change",
+   "value"
+  ],
+  "/api/news/headlines": [
+   "created_at",
+   "headline",
+   "is_major",
+   "meta",
+   "sentiment",
+   "source",
+   "tags",
+   "tickers"
+  ],
+  "/api/screener/analysts": [
+   "action",
+   "analyst_name",
+   "firm",
+   "recommendation",
+   "sector",
+   "target",
+   "ticker",
+   "timestamp"
+  ],
+  "/api/shorts/{ticker}/interest-float/v2": [
+   "days_to_cover",
+   "fee_rate",
+   "market_date",
+   "rebate_rate",
+   "short_interest",
+   "short_shares_available",
+   "si_float",
+   "si_float_with_synth_long_pct_of_total_shares",
+   "symbol",
+   "total_float"
+  ],
+  "/api/stock/{ticker}/financials": [
+   "accumulated_depreciation_amortization_ppe",
+   "balance_sheets",
+   "capital_expenditures",
+   "capital_lease_obligations",
+   "cash_and_cash_equivalents",
+   "cash_and_short_term_investments",
+   "cash_flows",
+   "cashflow_from_financing",
+   "cashflow_from_investment",
+   "change_in_cash_and_cash_equivalents",
+   "change_in_exchange_rate",
+   "change_in_inventory",
+   "change_in_operating_assets",
+   "change_in_operating_liabilities",
+   "change_in_receivables",
+   "common_stock",
+   "common_stock_shares_outstanding",
+   "comprehensive_income_net_of_tax",
+   "cost_of_goods_and_services_sold",
+   "cost_of_revenue",
+   "current_accounts_payable",
+   "current_debt",
+   "current_long_term_debt",
+   "current_net_receivables",
+   "data",
+   "deferred_revenue",
+   "depreciation",
+   "depreciation_and_amortization",
+   "depreciation_depletion_and_amortization",
+   "dividend_payout",
+   "dividend_payout_common_stock",
+   "dividend_payout_preferred_stock",
+   "earnings",
+   "ebit",
+   "ebitda",
+   "estimated_eps",
+   "fiscal_date_ending",
+   "goodwill",
+   "gross_profit",
+   "income_before_tax",
+   "income_statements",
+   "income_tax_expense",
+   "inserted_at",
+   "intangible_assets",
+   "intangible_assets_excluding_goodwill",
+   "interest_and_debt_expense",
+   "interest_expense",
+   "interest_income",
+   "inventory",
+   "investment_income_net",
+   "investments",
+   "long_term_debt",
+   "long_term_debt_noncurrent",
+   "long_term_investments",
+   "net_income",
+   "net_income_from_continuing_operations",
+   "net_interest_income",
+   "non_interest_income",
+   "operating_cashflow",
+   "operating_expenses",
+   "operating_income",
+   "other_current_assets",
+   "other_current_liabilities",
+   "other_non_current_assets",
+   "other_non_current_liabilities",
+   "other_non_operating_income",
+   "payments_for_operating_activities",
+   "payments_for_repurchase_of_common_stock",
+   "payments_for_repurchase_of_equity",
+   "payments_for_repurchase_of_preferred_stock",
+   "proceeds_from_issuance_of_common_stock",
+   "proceeds_from_issuance_of_long_term_debt",
+   "proceeds_from_issuance_of_preferred_stock",
+   "proceeds_from_operating_activities",
+   "proceeds_from_repayments_of_short_term_debt",
+   "proceeds_from_repurchase_of_equity",
+   "proceeds_from_sale_of_treasury_stock",
+   "profit_loss",
+   "property_plant_equipment",
+   "report_date",
+   "report_time",
+   "report_type",
+   "reported_currency",
+   "reported_eps",
+   "research_and_development",
+   "retained_earnings",
+   "selling_general_and_administrative",
+   "short_long_term_debt_total",
+   "short_term_debt",
+   "short_term_investments",
+   "stock_based_compensation",
+   "surprise",
+   "surprise_percentage",
+   "ticker",
+   "total_assets",
+   "total_current_assets",
+   "total_current_liabilities",
+   "total_liabilities",
+   "total_non_current_assets",
+   "total_non_current_liabilities",
+   "total_revenue",
+   "total_shareholder_equity",
+   "treasury_stock",
+   "updated_at"
+  ],
+  "/api/stock/{ticker}/fundamental-breakdown": [
+   "acc_receivable_net_current",
+   "accession_no",
+   "annual_only",
+   "axis",
+   "cash_and_cash_equivalents",
+   "cash_at_carrying_value",
+   "cash_flow_depreciation_and_amortization",
+   "cost_of_revenue",
+   "data",
+   "deffered_income_tax",
+   "depreciation_and_amortization",
+   "dividend",
+   "earnings_per_share",
+   "field",
+   "filing_date",
+   "formtype",
+   "general",
+   "goodwill",
+   "gross_profit",
+   "id",
+   "income_before_tax",
+   "income_tax_expense",
+   "interest_and_dividend_incomes",
+   "interest_expense",
+   "inventories",
+   "long_term_investments",
+   "members",
+   "net_cash_provided_by_operating_activities",
+   "net_income",
+   "net_income_loss",
+   "operating_income",
+   "other_current_assets",
+   "other_non_cash_items",
+   "other_non_current_assets",
+   "payments_for_repurchase",
+   "property_plant_and_equipment",
+   "report_date",
+   "report_period_end_date",
+   "report_year",
+   "repurchase_and_retire_shares",
+   "repurchase_and_retire_value",
+   "repurchase_shares",
+   "repurchase_value",
+   "research_and_development_expenses",
+   "rev_breakdown",
+   "rev_group",
+   "revenue",
+   "rsu_forfeited",
+   "rsu_granted",
+   "rsu_outstanding",
+   "rsu_vested",
+   "selling_general_and_administrative_expenses",
+   "share_holders_equity",
+   "share_price",
+   "shares_outstanding",
+   "short_term_investments",
+   "stock_based_compensation",
+   "ticker",
+   "total_assets",
+   "total_current_assets",
+   "total_liabilities",
+   "total_non_current_assets",
+   "unique_identifier",
+   "value"
+  ],
+  "/api/stock/{ticker}/info": [
+   "announce_time",
+   "avg30_volume",
+   "beta",
+   "full_name",
+   "has_dividend",
+   "has_earnings_history",
+   "has_investment_arm",
+   "has_options",
+   "issue_type",
+   "logo",
+   "marketcap",
+   "next_earnings_date",
+   "sector",
+   "short_description"
+  ],
+  "/api/stock/{ticker}/stock-state": [
+   "close",
+   "high",
+   "low",
+   "market_time",
+   "open",
+   "prev_close",
+   "tape_time",
+   "total_volume",
+   "volume"
+  ]
+ },
+ "ops": {
+  "analysts": "/api/screener/analysts",
+  "breakdown": "/api/stock/{ticker}/fundamental-breakdown",
+  "earnings": "/api/earnings/{ticker}",
+  "estimates": "/api/companies/{ticker}/earnings-estimates",
+  "financials": "/api/stock/{ticker}/financials",
+  "info": "/api/stock/{ticker}/info",
+  "insiders": "/api/insider/{ticker}/ticker-flow",
+  "levels": "/api/darkpool/{ticker}/price-levels",
+  "news": "/api/news/headlines",
+  "ownership": "/api/institution/{ticker}/ownership",
+  "profile": "/api/companies/{ticker}/profile",
+  "quote": "/api/stock/{ticker}/stock-state",
+  "short": "/api/shorts/{ticker}/interest-float/v2"
+ },
+ "provenance": {
+  "generator": "tests/gen-dossier-fixtures.py",
+  "nature": "synthetic bodies for the fictional ticker EXMP, built to the 200-response schema of each operation (names, JSON types and nullability checked against the spec by the generator); not vendor data",
+  "nowDay": "2026-10-02",
+  "spec": "docs/uw-openapi.yaml",
+  "specSha256": "c8686b3ff855cb5720900c23e17e7f49ff6c61df32835d977e60c85f340b76d7"
+ },
+ "ticker": "EXMP"
+}

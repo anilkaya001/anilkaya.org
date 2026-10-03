@@ -107,12 +107,16 @@ const ledgerMigration = read("migrations/0015_flows_ledger.sql");
 assert(ledgerMigration.includes("CREATE TABLE IF NOT EXISTS flows_ledger"), "0015 must create flows_ledger");
 assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(ledgerMigration),
   "the ledger migration must not store credential material in D1");
+const dossierMigration = read("migrations/0016_flows_dossier_cache.sql");
+assert(dossierMigration.includes("CREATE TABLE IF NOT EXISTS flows_dossier_cache"), "0016 must create flows_dossier_cache");
+assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(dossierMigration),
+  "the dossier cache migration must not store credential material in D1");
 const migrationTables = new Set([
   ...tablesIn(baseline), ...tablesIn(migration),
-  ...tablesIn(marketMigration), ...tablesIn(flowsMigration), ...tablesIn(liveMigration), ...tablesIn(ledgerMigration),
+  ...tablesIn(marketMigration), ...tablesIn(flowsMigration), ...tablesIn(liveMigration), ...tablesIn(ledgerMigration), ...tablesIn(dossierMigration),
 ]);
 const schemaTables = tablesIn(read("schema.sql"));
 assert(migrationTables.size === schemaTables.size && [...schemaTables].every((t) => migrationTables.has(t)),
-  "migrations/ (0001+0002+0004+0005+0010+0015) must create exactly the tables in schema.sql");
+  "migrations/ (0001+0002+0004+0005+0010+0015+0016) must create exactly the tables in schema.sql");
 
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");

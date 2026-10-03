@@ -24,8 +24,8 @@ const list = probe.loadList();
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 28, "every one of the 28 operations the code reads today is probed");
-  eq(byTier["1"].size, 17, "every Tier 1 operation of the adoption plan is probed");
+  eq(byTier.used.size, 38, "every one of the 38 operations the code reads today is probed: the 28 before, the eight the Flows dossier reads (company profile, full financials, revenue breakdown, forward estimates, analyst ratings, institutional ownership, short interest v2, insider ticker flow) and the two it moved up from the adoption plan (the earnings history and the dark-pool price levels)");
+  eq(byTier["1"].size, 15, "every Tier 1 operation of the adoption plan that no code reads yet is probed");
   eq(byTier["2"].size, 26, "every Tier 2 operation of the adoption plan is probed, and Tier 3 is left out");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
@@ -525,9 +525,11 @@ const mini = probe.validateList({
       `${op}: every name the code reads is one the spec documents, or one the 2026-09-23 probe saw arrive ` +
       `(${undocumented.join(", ") || "none outside the spec"})`);
   }
-  deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/politician-portfolios/holders/{ticker}": 422 },
+  deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/companies/{ticker}/profile": 403, "/api/companies/{ticker}/earnings-estimates": 403,
+    "/api/politician-portfolios/holders/{ticker}": 422 },
     "EXPECTED REFUSALS are the two the 2026-09-23 probe recorded: the VIX curve needs the volatility add-on (403) and " +
-      "politician holders is enterprise-only (422)");
+      "politician holders is enterprise-only (422), plus the two routes the spec marks Advanced+ (company profile and forward earnings estimates), " +
+      "expected 403 on a lower plan and unverified until the first weekly run on the production key");
 }
 
 {
@@ -594,8 +596,8 @@ const mini = probe.validateList({
        "and never through the shell: no ${{ }} is interpolated into a run line, so an input cannot inject a command");
 }
 
-console.log(`✓ flows-probe: ${checks} assertions — a probe list that covers the 28 operations read today and the ` +
-  `17 + 26 of Tiers 1 and 2 and nothing else, every token filled from one session date (weekly, both monthlies, ` +
+console.log(`✓ flows-probe: ${checks} assertions — a probe list that covers the 38 operations read today and the ` +
+  `15 + 26 of Tiers 1 and 2 and nothing else, every token filled from one session date (weekly, both monthlies, ` +
   `the next session, calendar look-backs) with the session itself read from SPY's daily candles the way the ` +
   `pipeline reads it, the pipeline's base URL, Bearer header, missing User-Agent and array encoding held in parity ` +
   `by reading the pipeline's own source, bound values taken from the largest open interest and skipped rather than ` +

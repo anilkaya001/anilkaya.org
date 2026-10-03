@@ -195,11 +195,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const answers = await Promise.all(HOME.map(get));
   ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all thirteen home-page reads at once");
   eq(f.count(SCHEMA_RE), 1,
-     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the eleven-statement schema batch once, " +
+     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the twelve-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of upgradeClockColumns once");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 12 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 13 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");
@@ -763,11 +763,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/chain?t=NVDA", 3, { vendor: true, status: 404 }],
     ["/api/flows/strategy?t=NVDA", 3, { vendor: true, status: 502 }],
     ["/api/flows/strategy?t=NVDA&expiry=2026-10-16", 3, { vendor: true }],
+    ["/api/flows/dossier?t=NVDA", 20, { vendor: true }], ["/api/flows/dossier?t=LITE", 20, { vendor: true }], ["/api/flows/dossier?t=ZZZZ", 20, { vendor: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
     const got = await cost(path, opts);
     ok(got.status === (opts.status || 200), `${path} answers ${opts.status || 200} (${got.status})`);
+    if (process.env.PRINT_ROWS) console.log(path, got.rows, got.trips);
     ok(got.rows <= ceiling,
       `ROWS READ, ${path}: ${got.rows} in ${got.trips} trip${got.trips > 1 ? "s" : ""}, ceiling ${ceiling} (the fake counts an index search as the rows it returns and a scan ` +
       "as the whole table, so a route that stopped using its primary key shows at once)");
