@@ -789,6 +789,9 @@
     const bits = [];
     if (day) bits.push(F.day(day));
     if (S.alertsKind === "ok" && a.record && n(a.record.reads) !== null) bits.push(count(a.record.reads) + plural(n(a.record.reads), " read", " reads"));
+    const live = UI.rt ? UI.rt.alerts() : null;
+    if (live && live.dropped > 0) bits.push(count(live.dropped) + " held back by the stream");
+    if (live && live.truncated) bits.push("stream missed a page");
     if (S.feedKind === "ok" && n(payload.namesSeen) !== null) bits.push(count(payload.namesSeen) + " chains");
     host.meta.textContent = bits.join(" " + MID + " ");
   }
@@ -941,16 +944,55 @@
     });
   }
 
+  const SEP = "\u0000";
+  const alertKey = (r) => (r && typeof r.t === "string" && r.t
+    ? (typeof r.spanStart === "string" && r.spanStart ? "w" + SEP + r.t + SEP + (typeof r.oc === "string" ? r.oc : "") + SEP + r.spanStart
+      : "u" + SEP + r.t + SEP + (typeof r.oc === "string" ? r.oc : "") + SEP + (typeof r.rule === "string" ? r.rule : "")) : null);
+  const byPremium = (a, b) => (n(b.prem) ?? -Infinity) - (n(a.prem) ?? -Infinity) || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
+  const ALERT_CAP = 180;
+
+  function streamAlerts(rows, at) {
+    const live = UI.rt.alerts();
+    const base = S.alerts && Array.isArray(S.alerts.rows) ? S.alerts : null;
+    const kept = base ? base.rows : [];
+    const have = new Set(kept.map(alertKey));
+    const stamp = new Date(at || Date.now()).toISOString();
+    const add = [];
+    for (const r of rows) {
+      const row = Object.assign({}, r);
+      delete row.id;
+      delete row.ts;
+      const key = alertKey(row);
+      if (!key || have.has(key)) continue;
+      have.add(key);
+      add.push(Object.assign(row, { firstAt: stamp, lastAt: stamp, reads: 1 }));
+    }
+    if (!add.length) { if (live.dropped || live.truncated) paintMeta(); return; }
+    const union = kept.concat(add).sort(byPremium);
+    const next = Object.assign({}, base || { status: "ok", sessionDate: (UI.rt.fresh("fl") || {}).session || null }, {
+      rows: union.slice(0, ALERT_CAP), seen: Math.max(n(base && base.seen) ?? kept.length, kept.length) + add.length,
+      shed: Math.max(0, union.length - ALERT_CAP), status: "ok",
+    });
+    takeAlerts(next, "ok", null);
+  }
+
+  function streamFlow() {
+    const rt = UI.rt && UI.rt.connect({ topics: ["fl"] });
+    if (rt) rt.on("fl", (c) => streamAlerts(c.rows, c.at));
+  }
+
   buildFilters();
   wireInfos();
   syncNote();
   Promise.all([loadAlerts(), loadFeed()]).then(() => {
     wireInfos();
+    streamFlow();
+    if (UI.rt && S.alertsKind === "ok") streamAlerts(UI.rt.alerts().rows, Date.now());
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
       keys: ["alerts"], nightly: ["flowalerts", "unusual"], page: "unusual",
       onChange: (changed) => {
-        if (changed.some((k) => k === "live:alerts" || k === "flowalerts")) loadAlerts();
+        if (changed.some((k) => k === "live:alerts" || k === "flowalerts")) loadAlerts().then(() => { if (UI.rt && S.alertsKind === "ok") streamAlerts(UI.rt.alerts().rows, Date.now()); });
         if (changed.indexOf("unusual") >= 0) loadFeed();
       },
     });

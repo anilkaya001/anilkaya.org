@@ -1338,11 +1338,11 @@
     }
   }
 
-  function refresh(keys, live) {
+  function refresh(keys, live, only) {
     const cols = shownCols().filter((c) => keys.includes(c.key));
     st.rows.forEach((row, index) => {
       const node = rowCache.get(row);
-      if (!node) return;
+      if (!node || (only && !only.has(row))) return;
       for (const c of cols) {
         const cell = node.querySelector(':scope > [data-col="' + c.key + '"]');
         const open = live && c.key === "t" && cell && cell.querySelector(".bd-open");
@@ -1374,6 +1374,7 @@
       }).then(() => { if (st.rows.length) { buildSortOptions(); refresh(["vrpP", "siP"]); } });
     }
     getJson("/api/flows/lk?k=strips").then(takeLive, () => null);
+    streamPrices();
   }
 
   function buildSortOptions() {
@@ -1399,6 +1400,8 @@
   function takeLive(live) {
     const p = st.payload;
     if (!live || live.status !== "ok" || !Array.isArray(live.fields) || !live.rows || !p) return;
+    const streamed = live.__rt === true;
+    if (!streamed && UI.rt && UI.rt.feeds("px")) { pollLive(6e4); return; }
     const session = typeof live.session === "string" ? live.session : null;
     if (!session || !p.sessionDate || session <= p.sessionDate) return;
     const ix = { px: live.fields.indexOf("px"), chg: live.fields.indexOf("chg") };
@@ -1409,7 +1412,7 @@
     if (lapsed()) {
       for (const [row, was] of held) Object.assign(row, was);
       held.clear();
-      pollLive(6e4);
+      if (!streamed) pollLive(6e4);
       refresh(["t", "px"], true);
       return;
     }
@@ -1417,21 +1420,44 @@
     const left = staleAt - Date.now() - skew;
     if (left < wait) wait = left + 1e3;
     let hit = 0;
+    const touched = new Map();
     for (const row of st.rows) {
       const v = live.rows[String(row.t || "").toUpperCase()];
       if (!Array.isArray(v)) continue;
       const px = num(v[ix.px]);
       if (px === null) continue;
       if (!held.has(row)) held.set(row, { px: row.px, chg: row.chg, __live: false });
+      const chg = ix.chg >= 0 ? num(v[ix.chg]) : null;
+      const was = row.__live === true;
+      const dir = streamed && row.__streamed === true ? (px > row.px ? "up" : px < row.px ? "down" : null) : null;
+      if (row.px !== px || row.chg !== chg || !was) touched.set(row, dir);
       row.px = px;
-      row.chg = ix.chg >= 0 ? num(v[ix.chg]) : null;
+      row.chg = chg;
       row.__live = true;
+      row.__streamed = streamed;
       hit++;
     }
     if (!hit) return;
-    pollLive(wait);
-    if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
-    refresh(["t", "px"], true);
+    if (!streamed) {
+      pollLive(wait);
+      if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
+    }
+    if (!touched.size) return;
+    refresh(["t", "px"], true, touched);
+    if (streamed && !calm.matches) flash(touched);
+  }
+
+  function flash(touched) {
+    for (const [row, dir] of touched) {
+      const node = rowCache.get(row);
+      const cell = dir && node ? node.querySelector(':scope > [data-col="px"]') : null;
+      if (cell) cell.animate([{ backgroundColor: "var(--" + dir + "-fill)" }, { backgroundColor: "transparent" }], { duration: 900, easing: "ease-out" });
+    }
+  }
+
+  function streamPrices() {
+    const rt = UI.rt && UI.rt.connect({ topics: ["px"] });
+    if (rt) rt.on("px", () => takeLive(UI.rt.strips()));
   }
 
   function render() {

@@ -400,6 +400,7 @@ ${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id=
 `, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
 </body>
 </html>`;
@@ -458,6 +459,7 @@ export function sidePage({ username = "", side = "long" } = {}) {
 ${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username,
     boardBody(bear ? "short" : "long", { status: "flowsStatus", body: "flowsBody", label: "Ranked candidates" }))}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
@@ -620,6 +622,7 @@ export function watchPage({ username = "" } = {}) {
 ${shell("Watchlist", "watch", username,
     boardBody("watch", { status: "watchStatus", body: "watchBody", label: "Names inside the dead band" }))}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
@@ -671,6 +674,7 @@ ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk
 `, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
 </body>
 </html>`;
@@ -768,6 +772,7 @@ ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"
 `, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;
@@ -781,7 +786,7 @@ export function tickerPage({ username = "" } = {}) {
     username,
     chrome: false,
     styles: ["/assets/css/flows-ticker.css"],
-    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"],
     body: `
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">

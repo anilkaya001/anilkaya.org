@@ -1537,7 +1537,7 @@
           getLive(ask).then((lk) => {
             const m = okFeed(lk.market), b = okFeed(lk.breadth);
             if (!m && !b) return;
-            if (m) live = m;
+            if (m) live = UI.rt && UI.rt.feeds("mk") ? UI.rt.market(m) : m;
             if (b) breadth = b;
             paintSectorTides(regime, breadth);
             paintExpiry(regime, breadth);
@@ -1545,6 +1545,16 @@
             paintTide(pulse, live, breadth);
           }).catch(() => {});
         } });
+    }
+    const rt = UI.rt && UI.rt.connect({ topics: ["mk"] });
+    if (rt) {
+      rt.on("mk", () => {
+        const m = UI.rt.feeds("mk") ? UI.rt.market(live) : null;
+        if (!m || m === live) return;
+        live = m;
+        paintEtfs(regime, live, breadth);
+        paintTide(pulse, live, breadth);
+      });
     }
   }).catch((error) => {
     if (statusEl) {
