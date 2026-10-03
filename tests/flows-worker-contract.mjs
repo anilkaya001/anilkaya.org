@@ -551,6 +551,18 @@ try {
       eq(perNameBody.summary, null, "carrying no text a page could mistake for a reading");
       eq((await get("/api/flows/summary?t=not-a-symbol", { headers: auth })).status, 400,
          "a subject that is not shaped like a symbol is refused before the store is read");
+      eq((await get("/api/flows/dossier?t=AAPL")).status, 401,
+         "a name's dossier is behind the same gate");
+      eq((await get("/api/flows/dossier?t=not-a-symbol", { headers: auth })).status, 400,
+         "and refuses a name that is not shaped like a symbol before the store is read");
+      const dossier = await get("/api/flows/dossier?t=AAPL", { headers: auth });
+      eq(dossier.status, 200,
+         "with no vendor key and no card the dossier still answers 200: every packet says why it is empty");
+      eq(dossier.headers.get("cache-control"), "no-store", "never cached");
+      const dossierBody = await dossier.json();
+      eq(dossierBody.tier, "none", "in the same tier the summary gives a name outside the universe");
+      eq(dossierBody.dossier.coverage.ok + dossierBody.dossier.coverage.partial, 0,
+         "and no packet claims a reading it did not have");
       eq((await get("/api/flows/live?t=AAPL")).status, 401,
          "the live quote is behind the gate too");
       const live = await get("/api/flows/live?t=AAPL", { headers: auth });

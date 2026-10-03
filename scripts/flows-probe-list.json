@@ -43,8 +43,8 @@
     {"id": "vol-sentiment", "tier": "2", "op": "/api/stock/{ticker}/volatility/option-sentiment", "path": "/api/stock/{t}/volatility/option-sentiment", "query": {"date": "{date}"}},
     {"id": "vol-character", "tier": "2", "op": "/api/stock/{ticker}/volatility/character", "path": "/api/stock/{t}/volatility/character", "query": {"date": "{date}"}},
     {"id": "darkpool", "tier": "used", "op": "/api/darkpool/{ticker}", "path": "/api/darkpool/{t}", "query": {"date": "{date}", "limit": "500"}},
-    {"id": "darkpool-levels", "tier": "1", "op": "/api/darkpool/{ticker}/price-levels", "path": "/api/darkpool/{t}/price-levels", "query": {"date": "{date}"}},
-    {"id": "earnings", "tier": "1", "op": "/api/earnings/{ticker}", "path": "/api/earnings/{t}"},
+    {"id": "darkpool-levels", "tier": "used", "op": "/api/darkpool/{ticker}/price-levels", "path": "/api/darkpool/{t}/price-levels", "query": {"date": "{date}"}},
+    {"id": "earnings", "tier": "used", "op": "/api/earnings/{ticker}", "path": "/api/earnings/{t}"},
     {"id": "shorts-data", "tier": "2", "op": "/api/shorts/{ticker}/data", "path": "/api/shorts/{t}/data", "query": {"newer_than": "{date-7d}"}},
     {"id": "shorts-volume", "tier": "2", "op": "/api/shorts/{ticker}/volume-and-ratio", "path": "/api/shorts/{t}/volume-and-ratio"},
     {"id": "multi-leg", "tier": "2", "op": "/api/option-trades/multi-leg", "path": "/api/option-trades/multi-leg", "query": {"ticker_symbol": "{t}", "limit": "100"}},
@@ -88,9 +88,26 @@
     {"id": "multi-leg-session", "tier": "2", "op": "/api/option-trades/multi-leg", "path": "/api/option-trades/multi-leg", "query": {"limit": "500", "exclude_other": "true", "newer_than": "{date}T14:30:00Z", "older_than": "{date}T20:00:00Z"}},
     {"id": "options-pulse-total", "tier": "2", "op": "/api/options-pulse/total", "path": "/api/options-pulse/total", "query": {"date": "{date}"}},
     {"id": "vol-anomaly-top", "tier": "2", "op": "/api/volatility/anomaly/top", "path": "/api/volatility/anomaly/top", "query": {"direction": "short_vol", "date": "{date}", "limit": "50"}},
-    {"id": "vol-sentiment-top", "tier": "2", "op": "/api/volatility/option-sentiment/top", "path": "/api/volatility/option-sentiment/top", "query": {"direction": "bullish", "date": "{date}", "limit": "50"}}
+    {"id": "vol-sentiment-top", "tier": "2", "op": "/api/volatility/option-sentiment/top", "path": "/api/volatility/option-sentiment/top", "query": {"direction": "bullish", "date": "{date}", "limit": "50"}},
+    {"id": "profile", "tier": "used", "op": "/api/companies/{ticker}/profile", "path": "/api/companies/{t}/profile"},
+    {"id": "financials", "tier": "used", "op": "/api/stock/{ticker}/financials", "path": "/api/stock/{t}/financials"},
+    {"id": "fundamental-breakdown", "tier": "used", "op": "/api/stock/{ticker}/fundamental-breakdown", "path": "/api/stock/{t}/fundamental-breakdown"},
+    {"id": "earnings-estimates", "tier": "used", "op": "/api/companies/{ticker}/earnings-estimates", "path": "/api/companies/{t}/earnings-estimates"},
+    {"id": "analysts-ticker", "tier": "used", "op": "/api/screener/analysts", "path": "/api/screener/analysts", "query": {"ticker": "{t}", "limit": "30"}},
+    {"id": "institution-ownership", "tier": "used", "op": "/api/institution/{ticker}/ownership", "path": "/api/institution/{t}/ownership", "query": {"limit": "25", "order": "value", "order_direction": "desc"}},
+    {"id": "short-interest-v2", "tier": "used", "op": "/api/shorts/{ticker}/interest-float/v2", "path": "/api/shorts/{t}/interest-float/v2"},
+    {"id": "insider-ticker-flow", "tier": "used", "op": "/api/insider/{ticker}/ticker-flow", "path": "/api/insider/{t}/ticker-flow", "query": {"limit": "60"}},
+    {"id": "news-ticker", "tier": "used", "op": "/api/news/headlines", "path": "/api/news/headlines", "query": {"ticker": "{t}", "limit": "12"}}
   ],
   "expect": {
+    "/api/companies/{ticker}/profile": ["analyst_target_price", "asset_type", "beta", "cik", "country", "currency", "data", "description", "dividend_yield", "ebitda", "eps", "exchange", "industry", "market_cap", "name", "pe_ratio", "peg_ratio", "sector", "shares_outstanding", "ticker", "week_52_high", "week_52_low"],
+    "/api/stock/{ticker}/financials": ["accumulated_depreciation_amortization_ppe", "balance_sheets", "capital_expenditures", "capital_lease_obligations", "cash_and_cash_equivalents", "cash_and_short_term_investments", "cash_flows", "cashflow_from_financing", "cashflow_from_investment", "change_in_cash_and_cash_equivalents", "change_in_exchange_rate", "change_in_inventory", "change_in_operating_assets", "change_in_operating_liabilities", "change_in_receivables", "common_stock", "common_stock_shares_outstanding", "comprehensive_income_net_of_tax", "cost_of_goods_and_services_sold", "cost_of_revenue", "current_accounts_payable", "current_debt", "current_long_term_debt", "current_net_receivables", "data", "deferred_revenue", "depreciation", "depreciation_and_amortization", "depreciation_depletion_and_amortization", "dividend_payout", "dividend_payout_common_stock", "dividend_payout_preferred_stock", "earnings", "ebit", "ebitda", "estimated_eps", "fiscal_date_ending", "goodwill", "gross_profit", "income_before_tax", "income_statements", "income_tax_expense", "inserted_at", "intangible_assets", "intangible_assets_excluding_goodwill", "interest_and_debt_expense", "interest_expense", "interest_income", "inventory", "investment_income_net", "investments", "long_term_debt", "long_term_debt_noncurrent", "long_term_investments", "net_income", "net_income_from_continuing_operations", "net_interest_income", "non_interest_income", "operating_cashflow", "operating_expenses", "operating_income", "other_current_assets", "other_current_liabilities", "other_non_current_assets", "other_non_current_liabilities", "other_non_operating_income", "payments_for_operating_activities", "payments_for_repurchase_of_common_stock", "payments_for_repurchase_of_equity", "payments_for_repurchase_of_preferred_stock", "proceeds_from_issuance_of_common_stock", "proceeds_from_issuance_of_long_term_debt", "proceeds_from_issuance_of_preferred_stock", "proceeds_from_operating_activities", "proceeds_from_repayments_of_short_term_debt", "proceeds_from_repurchase_of_equity", "proceeds_from_sale_of_treasury_stock", "profit_loss", "property_plant_equipment", "report_date", "report_time", "report_type", "reported_currency", "reported_eps", "research_and_development", "retained_earnings", "selling_general_and_administrative", "short_long_term_debt_total", "short_term_debt", "short_term_investments", "stock_based_compensation", "surprise", "surprise_percentage", "ticker", "total_assets", "total_current_assets", "total_current_liabilities", "total_liabilities", "total_non_current_assets", "total_non_current_liabilities", "total_revenue", "total_shareholder_equity", "treasury_stock", "updated_at"],
+    "/api/stock/{ticker}/fundamental-breakdown": ["acc_receivable_net_current", "accession_no", "annual_only", "axis", "cash_and_cash_equivalents", "cash_at_carrying_value", "cash_flow_depreciation_and_amortization", "cost_of_revenue", "data", "deffered_income_tax", "depreciation_and_amortization", "dividend", "earnings_per_share", "field", "filing_date", "formtype", "general", "goodwill", "gross_profit", "id", "income_before_tax", "income_tax_expense", "interest_and_dividend_incomes", "interest_expense", "inventories", "long_term_investments", "members", "net_cash_provided_by_operating_activities", "net_income", "net_income_loss", "operating_income", "other_current_assets", "other_non_cash_items", "other_non_current_assets", "payments_for_repurchase", "property_plant_and_equipment", "report_date", "report_period_end_date", "report_year", "repurchase_and_retire_shares", "repurchase_and_retire_value", "repurchase_shares", "repurchase_value", "research_and_development_expenses", "rev_breakdown", "rev_group", "revenue", "rsu_forfeited", "rsu_granted", "rsu_outstanding", "rsu_vested", "selling_general_and_administrative_expenses", "share_holders_equity", "share_price", "shares_outstanding", "short_term_investments", "stock_based_compensation", "ticker", "total_assets", "total_current_assets", "total_liabilities", "total_non_current_assets", "unique_identifier", "value"],
+    "/api/companies/{ticker}/earnings-estimates": ["data", "date", "eps_estimate_analyst_count", "eps_estimate_average", "eps_estimate_high", "eps_estimate_low", "estimates", "horizon", "revenue_estimate_analyst_count", "revenue_estimate_average", "revenue_estimate_high", "revenue_estimate_low", "ticker"],
+    "/api/screener/analysts": ["action", "analyst_name", "firm", "recommendation", "sector", "target", "ticker", "timestamp"],
+    "/api/institution/{ticker}/ownership": ["avg_price", "filing_date", "first_buy", "historical_units", "inst_share_value", "inst_value", "name", "people", "report_date", "shares_outstanding", "short_name", "tags", "units", "units_change", "value"],
+    "/api/shorts/{ticker}/interest-float/v2": ["days_to_cover", "fee_rate", "market_date", "rebate_rate", "short_interest", "short_shares_available", "si_float", "si_float_with_synth_long_pct_of_total_shares", "symbol", "total_float"],
+    "/api/insider/{ticker}/ticker-flow": ["avg_price", "buy_sell", "date", "has_more", "premium", "transactions", "uniq_insiders", "volume"],
     "/api/stock/{ticker}/ohlc/{candle_size}": ["close", "end_time", "high", "low", "market_time", "open", "start_time", "total_volume", "volume"],
     "/api/stock/{ticker}/stock-state": ["close", "high", "low", "market_time", "open", "prev_close", "tape_time", "total_volume", "volume"],
     "/api/stock/{ticker}/info": ["announce_time", "avg30_volume", "beta", "full_name", "has_dividend", "has_earnings_history", "has_investment_arm", "has_options", "issue_type", "logo", "marketcap", "next_earnings_date", "sector", "short_description"],
@@ -155,6 +172,17 @@
     "/api/option-activity/unusual": ["ask_side_volume", "avg_price", "bid_side_volume", "chain_prev_close", "close", "cross_volume", "er_time", "expiry", "floor_volume", "high", "last_fill", "low", "mid_volume", "multileg_volume", "next_earnings_date", "no_side_volume", "open", "open_interest", "option_symbol", "option_type", "premium", "sector", "stock_multi_leg_volume", "stock_price", "strike", "sweep_volume", "ticker_vol", "total_ask_changes", "total_bid_changes", "trades", "volume"]
   },
   "reads": {
+    "/api/companies/{ticker}/profile": ["name", "sector", "industry", "exchange", "country", "currency", "description", "market_cap", "pe_ratio", "peg_ratio", "beta", "week_52_high", "week_52_low", "analyst_target_price", "shares_outstanding"],
+    "/api/stock/{ticker}/financials": ["income_statements", "balance_sheets", "cash_flows", "earnings", "fiscal_date_ending", "report_type", "total_revenue", "gross_profit", "operating_income", "net_income", "ebitda", "cash_and_short_term_investments", "short_long_term_debt_total", "total_shareholder_equity", "total_assets", "total_liabilities", "total_current_assets", "total_current_liabilities", "common_stock_shares_outstanding", "operating_cashflow", "capital_expenditures", "report_date", "reported_eps", "estimated_eps", "reported_currency"],
+    "/api/stock/{ticker}/fundamental-breakdown": ["rev_breakdown", "report_date", "rev_group", "members", "value", "field"],
+    "/api/companies/{ticker}/earnings-estimates": ["estimates", "date", "horizon", "eps_estimate_average", "eps_estimate_high", "eps_estimate_low", "eps_estimate_analyst_count", "revenue_estimate_average", "revenue_estimate_analyst_count"],
+    "/api/screener/analysts": ["ticker", "timestamp", "firm", "action", "recommendation", "target"],
+    "/api/institution/{ticker}/ownership": ["name", "short_name", "units", "units_change", "report_date", "filing_date", "shares_outstanding", "value"],
+    "/api/shorts/{ticker}/interest-float/v2": ["market_date", "short_interest", "total_float", "days_to_cover"],
+    "/api/insider/{ticker}/ticker-flow": ["date", "buy_sell", "transactions", "uniq_insiders", "volume", "premium"],
+    "/api/stock/{ticker}/info": ["full_name", "sector", "issue_type", "marketcap", "avg30_volume", "beta", "has_options", "has_dividend", "has_earnings_history", "next_earnings_date", "announce_time", "short_description"],
+    "/api/earnings/{ticker}": ["report_date", "report_time", "source", "expected_move_perc", "post_earnings_move_1d", "post_earnings_move_1w", "pre_earnings_move_1w", "long_straddle_1d", "long_straddle_1w"],
+    "/api/darkpool/{ticker}/price-levels": ["date", "price", "dark_pool_volume", "regular_volume"],
     "/api/stock/{ticker}/ohlc/{candle_size}": ["open", "high", "low", "close", "volume"],
     "/api/stock/{ticker}/stock-state": ["close", "prev_close", "open", "high", "low", "volume", "tape_time", "market_time"],
     "/api/market/market-tide": ["timestamp", "net_call_premium", "net_put_premium", "net_volume"],
@@ -169,11 +197,13 @@
     "/api/market/total-options-volume": ["date", "call_volume", "put_volume", "call_premium", "put_premium"],
     "/api/market/top-net-impact": ["ticker", "net_premium"],
     "/api/darkpool/recent": ["executed_at", "canceled", "ext_hour_sold_codes", "ticker", "price", "size", "premium"],
-    "/api/news/headlines": ["created_at", "headline", "source", "is_major", "sentiment"],
+    "/api/news/headlines": ["created_at", "headline", "source", "is_major", "sentiment", "tickers"],
     "/api/etfs/{ticker}/holdings": ["ticker", "type", "weight"]
   },
   "gated": {
     "/api/volatility/vix-term-structure": 403,
+    "/api/companies/{ticker}/profile": 403,
+    "/api/companies/{ticker}/earnings-estimates": 403,
     "/api/politician-portfolios/holders/{ticker}": 422
   }
 }

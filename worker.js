@@ -25,8 +25,9 @@ import {
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
-import { isRefreshWindow, freshHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
+import { isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
+import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
@@ -134,6 +135,7 @@ const FLOWS_SCHEMA_SQL = [
   "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)",
   ...FLOWS_LIVE.LIVE_SCHEMA_SQL,
+  FLOWS_DOSSIER.DOSSIER_SCHEMA_SQL,
 ];
 
 const MARKET_FETCH_TIMEOUT_MS = 5000;
@@ -1687,6 +1689,41 @@ async function absentNeuron(env, ctx, ticker) {
   return json(body);
 }
 
+async function dossierResponse(env, ctx, ticker, url) {
+  const now = Date.now();
+  const asked = Number(url.searchParams.get("budget"));
+  const budgetTokens = Number.isFinite(asked) && asked >= 400 && asked <= 12000 ? Math.round(asked) : FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS;
+  const result = await FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, {
+    fetchVendor: (p, params, opts) => uwFetch(env, p, params, opts),
+    allowed: (e) => FLOWS_LIVE.ondemandAllowed(e),
+    quote: async (t) => (await quoteResponse(env, ctx, t)).json(),
+    admit: (t) => vendorAdmits(env, ctx, t),
+  }, { own: true, now });
+  const { dossier, trace, neuron } = result;
+  const prompt = result.prompt && budgetTokens === FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS ? result.prompt : FLOWS_DOSSIER.renderDossierForModel(dossier, { budgetTokens });
+  const fresh = FLOWS_DOSSIER.dossierFresh(result, now) || pendingHeaders("nightly", now, result.clock);
+  const headers = {
+    ...fresh,
+    "X-Dossier-Fingerprint": dossier.fingerprint,
+    "X-Dossier-Tokens": String(prompt.tokensEst),
+    "X-Dossier-Vendor-Calls": String(trace.vendorCalls),
+    "X-Dossier-Pending": trace.pending.join(","),
+  };
+  if (trace.failed) {
+    headers["X-Fresh-State"] = "stale";
+    headers["X-Fresh-Reason"] = "store";
+  }
+  if (url.searchParams.get("render") === "1") {
+    return new Response(prompt.text, { status: 200, headers: { "Content-Type": "text/plain; charset=utf-8", ...headers } });
+  }
+  return json({
+    ticker, tier: neuron.tier, code: neuron.code, why: neuron.why || neuron.note || null,
+    dossier,
+    prompt: { tokensEst: prompt.tokensEst, budgetTokens: prompt.budgetTokens, shed: prompt.shed, dropped: prompt.dropped },
+    trace: { vendorCalls: trace.vendorCalls, calls: trace.calls, pending: trace.pending, queued: trace.queued, stale: trace.stale, wrote: trace.wrote },
+  }, 200, headers);
+}
+
 async function tickerNeuron(env, ctx, ticker) {
   const scope = "ticker:" + ticker;
   if (!env.DB) {
@@ -1899,7 +1936,7 @@ const INFO_TTL_SECONDS = 6 * 3600;
 
 const CHAIN_REFRESH_FLOOR_SECONDS = 15;
 
-async function uwFetch(env, path, params) {
+async function uwFetch(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
   const url = new URL((env.UW_BASE || UW_BASE_DEFAULT) + path);
   for (const [k, v] of Object.entries(params || {})) {
@@ -1913,9 +1950,30 @@ async function uwFetch(env, path, params) {
   } catch {
     throw new HttpError(502, "chain_upstream", "Market data provider unreachable");
   }
-  if (response.status === 429) throw new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting");
-  if (!response.ok) throw new HttpError(502, "chain_upstream", "Market data provider returned an error");
+  if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
+  if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
 
+  const maxBytes = opts && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : null;
+  const tooLarge = () => new HttpError(502, "chain_too_large", "Market data provider body is over the parse ceiling");
+  if (maxBytes !== null) {
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      if (response.body) response.body.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    let text;
+    try {
+      text = await response.text();
+    } catch {
+      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+    }
+    if (text.length > maxBytes) throw tooLarge();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+    }
+  }
   try {
     return await response.json();
   } catch {
@@ -3620,6 +3678,15 @@ async function route(request, env, url, ctx) {
       return json({ status: "ok", scope: "board", summary: summary.text, llm: summary.llm,
         model: summary.model, guard: summary.guard, generatedAt: summary.generatedAt,
         provenance: neuronProvenance(summary) });
+    }
+
+    if (path === "/api/flows/dossier") {
+      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      if (!FLOWS_TICKER_RE.test(ticker)) {
+        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      }
+      await ensureFlowsTables(env);
+      return dossierResponse(env, ctx, ticker, url);
     }
 
     if (path === "/api/flows/live") {
