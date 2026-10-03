@@ -611,4 +611,31 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   ok(text.length < 3200, "the dossier's share of the Ask prompt is small (" + text.length + " characters)");
 }
 
+{
+  const cpu = () => (typeof process.threadCpuUsage === "function" ? process.threadCpuUsage() : process.cpuUsage());
+  const time = (fn) => {
+    for (let i = 0; i < 10; i++) fn();
+    const runs = [];
+    for (let w = 0; w < 7; w++) {
+      const a = cpu();
+      for (let i = 0; i < 40; i++) fn();
+      const b = cpu();
+      runs.push((b.user + b.system - a.user - a.system) / 1000 / 40);
+    }
+    runs.sort((x, y) => x - y);
+    return runs[3];
+  };
+  const dossier = BASES.momentum;
+  const tags = R.heldTags(dossier);
+  const prompt = R.promptForReading(dossier, tags);
+  const t = {
+    tags: time(() => R.heldTags(dossier)),
+    fallbackShape: time(() => { const fb = R.readingFallback(dossier, tags); JSON.stringify(R.readingShape({ dossier, tags, sections: fb, chosen: fb.tags, status: "fallback", generated: false })); }),
+    prompt: time(() => R.promptForReading(dossier, tags)),
+    vet: time(() => R.vetReading(JSON.stringify(GOOD), dossier, tags, { shown: prompt.shown, rendered: prompt.user })),
+  };
+  ok(t.tags < 6 && t.fallbackShape < 6 && t.prompt < 6 && t.vet < 6, "CPU, median of 7 windows of 40 on the momentum dossier: tags " + t.tags.toFixed(2) + " ms, fallback and shape " + t.fallbackShape.toFixed(2) + " ms, prompt " + t.prompt.toFixed(2) + " ms, vet " + t.vet.toFixed(2) + " ms (each under 6)");
+  console.log("  reading CPU (median of 7 windows of 40): tags " + t.tags.toFixed(2) + " ms, fallback and shape " + t.fallbackShape.toFixed(2) + " ms, prompt " + t.prompt.toFixed(2) + " ms, vet " + t.vet.toFixed(2) + " ms; prompt " + prompt.tokensEst + " estimated tokens");
+}
+
 console.log("flows-reading: " + checks + " checks");

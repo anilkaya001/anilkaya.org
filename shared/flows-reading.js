@@ -976,9 +976,14 @@ export function coverageOf(dossier) {
   return { ok: Number(c.ok) || 0, partial: Number(c.partial) || 0, withheld: (Number(c.withheld) || 0) + (Number(c.unavailable) || 0), pending: Number(c.pending) || 0 };
 }
 
+const NAME_KINDS = Object.freeze(["identity", "price", "options", "earnings", "news", "analysts", "fundamentals", "positioning", "flow", "peers"]);
+
 export function hasSubstance(dossier) {
-  const c = coverageOf(dossier);
-  return c.ok + c.partial > 0;
+  const packets = isObj(dossier) && isObj(dossier.packets) ? dossier.packets : {};
+  const readable = (p) => p && (p.status === "ok" || p.status === "partial");
+  const holds = (k) => readable(packets[k]) && (k !== "flow" || arr(packets[k].facts).some((f) => f.k !== "alerts.count"));
+  if (NAME_KINDS.some(holds)) return true;
+  return readable(packets.events) && arr(packets.events.facts).some((f) => f.k === "next");
 }
 
 export function readingShape(o) {
@@ -1120,28 +1125,34 @@ export function askKinds(question) {
 export function askPick(dossier, question, { max = ASK_MAX_FACTS } = {}) {
   const clean = forReading(dossier);
   const all = dossierFacts(clean, { text: true });
-  const kinds = askKinds(question);
-  const rank = (e) => {
-    const m = /^dossier:[^/]+\/([a-z]+)\./.exec(e.id);
-    const i = m ? kinds.indexOf(m[1]) : -1;
-    return i < 0 ? 99 : i;
-  };
+  const kinds = askKinds(question).slice(0, 5);
   const wrap = (e) => (e.untrusted === true ? { ...e, say: e.say.replace(/(quoted third-party text: )([\s\S]*)$/, "$1UNTRUSTED\u00ab$2\u00bb") } : e);
-  const order = all.map((e, i) => ({ e, i, r: rank(e) })).filter((x) => x.r < 99 && x.e.grade >= 1)
-    .sort((a, b) => a.r - b.r || (a.e.untrusted === b.e.untrusted ? 0 : a.e.untrusted ? 1 : -1) || a.i - b.i);
+  const kindOf = (e) => {
+    const m = /^dossier:[^/]+\/([a-z]+)\./.exec(e.id);
+    return m ? m[1] : null;
+  };
+  const usable = all.filter((e) => e.grade >= 1);
+  const quota = Math.max(2, Math.floor(max / kinds.length));
   const picked = [];
   let texts = 0;
-  const description = order.find((x) => /\.description$/.test(x.e.id));
-  const wantsIdentity = kinds[0] === "identity";
-  if (description && wantsIdentity) { picked.push(wrap(description.e)); texts++; }
-  for (const x of order) {
-    if (picked.length >= max) break;
-    if (picked.some((p) => p.id === x.e.id)) continue;
-    if (x.e.untrusted === true) {
-      if (texts >= ASK_MAX_TEXTS) continue;
+  const take = (e) => {
+    if (picked.length >= max || picked.some((p) => p.id === e.id)) return false;
+    if (e.untrusted === true) {
+      if (texts >= ASK_MAX_TEXTS) return false;
       texts++;
     }
-    picked.push(wrap(x.e));
+    picked.push(wrap(e));
+    return true;
+  };
+  for (const kind of kinds) {
+    const mine = usable.filter((e) => kindOf(e) === kind);
+    const facts = mine.filter((e) => e.untrusted !== true);
+    const words = mine.filter((e) => e.untrusted === true);
+    const lead = kind === "identity" ? words.filter((e) => /\.description$/.test(e.id)) : [];
+    for (const e of lead) take(e);
+    let n = 0;
+    for (const e of facts) { if (n >= quota) break; if (take(e)) n++; }
+    for (const e of words.filter((x) => !lead.includes(x)).slice(0, 1)) take(e);
   }
   const silent = KINDS.filter((k) => clean && clean.packets && clean.packets[k] && ["withheld", "unavailable", "pending"].includes(clean.packets[k].status));
   const name = (() => {

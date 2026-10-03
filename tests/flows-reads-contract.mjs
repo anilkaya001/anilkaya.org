@@ -131,7 +131,7 @@ function shiftClock(baseIso) {
 
 let instance = 0;
 async function client(D1, extra = {}) {
-  const env = { DB: D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
   const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route, init = {}) => {
@@ -161,6 +161,10 @@ async function ingestClient(D1) {
     return { res, body, text };
   };
 }
+
+const isReadingTrip = (t) => t.sqls.some((s) => /FROM flows_dossier_cache/.test(s));
+const neuronTrips = (list) => list.filter((t) => !isReadingTrip(t));
+const rowsOf = (list) => list.reduce((sum, t) => sum + (t.rows || 0), 0);
 
 const SESSION = "2026-09-24";
 const NIGHTLY = { v: 1, sessionDate: SESSION, generatedAt: "2026-09-25T00:10:00.000Z" };
@@ -618,7 +622,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
-  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: f.since(n) }; };
+  const route = async (path) => { const n = f.trips.length; const r = await get(path); return { ...r, trips: neuronTrips(f.since(n)) }; };
 
   const card = await route("/api/flows/card?t=NVDA");
   ok(card.trips.length === 1 && card.body.ticker === "NVDA" && card.body.score === 61, "a published card is one read");
@@ -634,8 +638,8 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   eq(again.trips.length, 1, "from one trip: the card and the prior come back together and the fingerprint matches");
   ok(typeof again.body.summary === "string" && again.body.summary.includes("NVDA") && again.body.llm === false && again.body.context.ticker === "NVDA",
      `with the deterministic summary of the card's context (${JSON.stringify(again.body).slice(0, 120)})`);
-  deep(Object.keys(again.body).sort(), ["claims", "code", "context", "engine", "generatedAt", "guard", "ideas", "llm", "model", "provenance", "refused", "scope", "status", "summary", "tier", "verdict", "verdictWord", "why"],
-     "and the summary's shape is the old one plus the three fields of the tier contract: tier, code and why");
+  deep(Object.keys(again.body).sort(), ["claims", "code", "context", "engine", "generatedAt", "guard", "ideas", "llm", "model", "provenance", "read", "refused", "scope", "status", "summary", "tier", "verdict", "verdictWord", "why"],
+     "and the summary's shape is the old one plus the three fields of the tier contract (tier, code and why) and the one additive field, read");
   deep([again.body.tier, again.body.code], ["family", null], "a card with no engine block and no board depth is the family tier: state and structure family only");
   ok(/no option chain was priced/.test(again.body.why), "and says why in words");
 
@@ -753,12 +757,12 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 2],
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
-    ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 3], ["/api/flows/summary?t=LITE", names.length + 50], ["/api/flows/summary?t=ZZZZ", names.length + 50],
+    ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
     ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1],
     ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
     ["/api/flows/ask", 9, { init: ASK({ question: "what is the market doing" }) }],
-    ["/api/flows/ask", 10, { init: ASK({ question: "what about NVDA", subject: "NVDA" }) }],
+    ["/api/flows/ask", 28, { init: ASK({ question: "what about NVDA", subject: "NVDA" }) }],
     ["/api/flows/live?t=NVDA", 2, { vendor: true }],
     ["/api/flows/chain?t=NVDA", 3, { vendor: true, status: 404 }],
     ["/api/flows/strategy?t=NVDA", 3, { vendor: true, status: 502 }],
@@ -916,7 +920,7 @@ class FakeCache {
   try {
     const get = await client(f.D1, { AI: ai, FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" });
     await get("/api/flows/meta");
-    const route = async (path) => { const n = f.trips.length; const r = await get(path); await r.settle(); return { ...r, trips: f.since(n), rows: f.rowsRead(n) }; };
+    const route = async (path) => { const n = f.trips.length; const r = await get(path); await r.settle(); const trips = neuronTrips(f.since(n)); return { ...r, trips, rows: rowsOf(trips) }; };
 
     const scr = await route("/api/flows/summary?t=SCRN");
     ok(scr.body.status === "ok" && scr.body.tier === "screen" && scr.body.code === null && scr.body.engine === false && scr.body.llm === false,
@@ -934,7 +938,8 @@ class FakeCache {
     eq(f.db.prepare("SELECT count(*) AS n FROM flows_ai_usage").get().n, 0, "and no spend is recorded");
     ok(cache.puts.filter((u) => u.includes("flows-screen")).join() === "https://flows-screen.internal/SCRN", "the reading is kept under a key of its own for five minutes");
     const again = await route("/api/flows/summary?t=SCRN");
-    ok(again.trips.length === 1 && again.rows <= 3 && JSON.stringify(again.body) === JSON.stringify(scr.body),
+    const lessRead = (b) => { const { read, ...rest } = b; return JSON.stringify(rest); };
+    ok(again.trips.length === 1 && again.rows <= 3 && lessRead(again.body) === lessRead(scr.body),
        `and a second read is the same reading from one trip and ${again.rows} rows: the universe is not scanned again`);
     const kept = cache.entries.get("https://flows-screen.internal/SCRN");
     ok(kept.headers.some(([k, v]) => k.toLowerCase() === "cache-control" && v === "max-age=300"), "with a five-minute life");
@@ -1193,6 +1198,47 @@ class FakeCache {
   const offRules = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["level.magnet", "gex.book"] }] });
   ok(offRules.llm === true && offRules.ideas.length === 1,
      "level.magnet and gex.book are named by the state rule, so that pair is kept too");
+  unshift();
+}
+
+{
+  const unshift = shiftClock(FIXTURE_NOW);
+  const RW = await import("../shared/flows-reading-worker.js");
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_READ_MODE: "on" };
+  const calls = [];
+  const ai = { run: async (model, input) => { calls.push(input.messages[0].content.slice(0, 30)); return { response: "{}", usage: { prompt_tokens: 100, completion_tokens: 10 } }; } };
+  const f = fakeD1();
+  seed(f);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/meta");
+  const cost = async (path) => {
+    const n = f.trips.length;
+    const r = await get(path);
+    const trips = f.since(n);
+    const foreground = rowsOf(trips);
+    await r.settle();
+    return { ...r, trips, rows: foreground, total: rowsOf(f.since(n)), reading: trips.filter((t) => t.args.some((a) => (Array.isArray(a) ? a : [a]).some((x) => typeof x === "string" && x.startsWith("read:")))), dossier: trips.filter(isReadingTrip) };
+  };
+  const miss = await cost("/api/flows/summary?t=NVDA");
+  ok(miss.body.read.status === "generating" && miss.body.read.generated === false, "READING, MISS: the deterministic reading at once, generating");
+  ok(miss.dossier.length === 1 && miss.dossier[0].kind === "batch", "the dossier is ONE batch");
+  ok(miss.rows <= 22, `rows read before the response by a summary call that finds no reading and starts one: ${miss.rows} (ceiling 22: the card and prior reading, the reading row, the dossier's primary-key batch)`);
+  ok(miss.total <= 34, `and ${miss.total} with the background generation's own reads of the day's spend (ceiling 34)`);
+  ok(calls.filter((c) => /stock reader/.test(c)).length === 1, "and one model call for the reading, in the background");
+  const row = f.db.prepare("SELECT fingerprint FROM flows_neuron WHERE scope = 'read:NVDA'").get();
+  ok(row && row.fingerprint.endsWith("|" + RW.readSignature({ ...AI_ENV })), "its row is keyed by the model signature");
+  const hit = (guard, llm, shape, at) => f.db.prepare(
+    "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('read:NVDA', 6, ?, 'x', ?, ?, ?, ?, ?)",
+  ).run("d1.any|" + RW.readSignature({ ...AI_ENV }), JSON.stringify({ v: 1, kind: "reading", shape, refused: [] }), llm, AI_ENV.FLOWS_ASK_MODEL, guard, at);
+  hit(null, 1, { status: "ready", sections: { identity: null, now: null, drivers: [], tensions: [], unknown: [], watch: [] }, tags: [] }, new Date().toISOString());
+  const stored = await cost("/api/flows/summary?t=NVDA");
+  ok(stored.body.read.status === "ready" && stored.body.read.held === "floor", "READING, HIT: a stored reading inside the floor is served as ready");
+  eq(stored.dossier.length, 0, "with no dossier assembled");
+  eq(stored.reading.length, 1, "and ONE read of the reading row");
+  ok(stored.rows <= 4, `rows read: ${stored.rows} (ceiling 4: the card, the Neuron's prior row and the reading row)`);
+  ok(stored.rows <= 3 + 1, "which is one row more than the summary route's own ceiling of 3 before the reading existed");
+  eq(stored.trips.length, 2, "in two trips, concurrent: the Neuron's batch and the reading's lookup");
+  console.log(`  reading rows read: miss ${miss.rows} before the response and ${miss.total} with the background generation, hit ${stored.rows}`);
   unshift();
 }
 
