@@ -88,6 +88,7 @@ async function mount(page, read_, o = {}) {
     if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: PAGE_HTML });
     return route.fulfill({ status: 404, body: "" });
   });
+  await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(T));
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name\u2026"; }, null, { timeout: 15000 });
   await page.waitForTimeout(150);
