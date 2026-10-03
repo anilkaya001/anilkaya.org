@@ -511,8 +511,10 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   ok(hasWhy(quote, "identity", "quote"), "A QUOTE-STUFFED REPLY: the description copied whole is refused");
   const six = ground("Example Technologies Inc sells subscription software and cloud infrastructure to mid-sized enterprises in many markets.");
   ok(six.sections.identity !== null, "six words in a row are within the cap");
-  const seven = ground("Example Technologies sells subscription software and cloud infrastructure services to enterprises, mostly midsized.");
-  ok(hasWhy(seven, "identity", "quote"), "seven in a row are over it");
+  const nine = ground("Example Technologies sells subscription software and cloud infrastructure services across many markets.");
+  ok(nine.sections.identity !== null, "nine words of a description in a row are within the cap the vet enforces, three above the six the model is told");
+  const ten = ground("Example Technologies sells subscription software and cloud infrastructure services to enterprises, mostly midsized.");
+  ok(hasWhy(ten, "identity", "quote"), "ten of a description in a row are over it");
   const headline = vet(patch({ drivers: [{ text: "Reuters reports Example Technologies lifts guidance as cloud demand accelerates.", cites: ["news.h1"] }, ...GOOD.drivers.slice(1)] }));
   ok(hasWhy(headline, "drivers.0", "quote"), "a headline copied nearly whole is refused");
   const stuffed = vet(patch({ drivers: [{ text: "Reuters reports on " + "headlines about Example Technologies lifts guidance as cloud demand accelerates and ".repeat(2), cites: ["news.h1"] }, ...GOOD.drivers.slice(1)] }));

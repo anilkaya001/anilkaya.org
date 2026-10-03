@@ -9,6 +9,7 @@ export const READING_TEMPERATURE = 0.15;
 export const SECTION_CAPS = Object.freeze({ identity: 320, now: 560, driver: 280, tension: 320, unknown: 200, watch: 240, reply: 7000 });
 export const SECTION_COUNTS = Object.freeze({ drivers: 4, tensions: 3, unknown: 6, watch: 3, cites: 8, tags: 6, missing: 4 });
 export const QUOTE_MAX_WORDS = 6;
+export const QUOTE_MAX_DESCRIPTION_WORDS = 9;
 export const GROUNDING_MIN = 0.6;
 export const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
 export const MINUS = "\u2212";
@@ -509,13 +510,18 @@ function ngrams(words, n) {
   return out;
 }
 
+const quoteCap = (kind) => (kind === "description" ? QUOTE_MAX_DESCRIPTION_WORDS : QUOTE_MAX_WORDS);
+
 function untrustedGrams(dossier) {
   const set = new Set();
   if (!isObj(dossier) || !isObj(dossier.packets)) return set;
   for (const kind of KINDS) {
     const p = dossier.packets[kind];
     if (!p) continue;
-    for (const t of arr(p.text)) if (t.kind === "description" || t.kind === "headline") for (const g of ngrams(wordsOf(t.text), QUOTE_MAX_WORDS + 1)) set.add(g);
+    for (const t of arr(p.text)) if (t.kind === "description" || t.kind === "headline") {
+      const n = quoteCap(t.kind) + 1;
+      for (const g of ngrams(wordsOf(t.text), n)) set.add(n + "|" + g);
+    }
   }
   return set;
 }
@@ -661,7 +667,8 @@ function checkEntities(text, vocab, ticker) {
 
 function checkQuote(text, grams) {
   if (!grams.size) return null;
-  for (const g of ngrams(wordsOf(text), QUOTE_MAX_WORDS + 1)) if (grams.has(g)) return bad("quote", g);
+  const words = wordsOf(text);
+  for (const n of [QUOTE_MAX_WORDS + 1, QUOTE_MAX_DESCRIPTION_WORDS + 1]) for (const g of ngrams(words, n)) if (grams.has(n + "|" + g)) return bad("quote", g);
   return null;
 }
 
