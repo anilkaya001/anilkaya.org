@@ -6,6 +6,9 @@ export const FRESH_CLASSES = Object.freeze({
   market: Object.freeze({ cadenceS: 300, liveS: 660, staleS: 1500, source: "worker" }),
   breadth: Object.freeze({ cadenceS: 900, liveS: 1200, staleS: 2700, source: "actions" }),
   nightly: Object.freeze({ cadenceS: 0, liveS: null, staleS: null, source: "nightly", graceS: 5 * 3600 }),
+  rt: Object.freeze({ cadenceS: 5, liveS: 15, staleS: 60, source: "hub", extended: true }),
+  rtSlow: Object.freeze({ cadenceS: 10, liveS: 30, staleS: 120, source: "hub", extended: true }),
+  rtNews: Object.freeze({ cadenceS: 30, liveS: 75, staleS: 300, source: "hub", extended: true }),
 });
 
 export const REFRESH_CADENCE_MINUTES = FRESH_CLASSES.market.cadenceS / 60;
@@ -272,7 +275,7 @@ export function classOf(meta) {
   if (meta && typeof meta.klass === "string" && Object.hasOwn(FRESH_CLASSES, meta.klass)) return meta.klass;
   const c = Number(meta && meta.cadenceS);
   if (!Number.isFinite(c) || c <= 0) return "nightly";
-  for (const [name, spec] of Object.entries(FRESH_CLASSES)) if (spec.cadenceS === c) return name;
+  for (const [name, spec] of Object.entries(FRESH_CLASSES)) if (spec.cadenceS === c && spec.source !== "hub") return name;
   return c <= 5 ? "quote" : c <= 60 ? "tape" : c <= 300 ? "market" : "breadth";
 }
 
@@ -305,9 +308,11 @@ export function freshnessState(meta, at, clock = null) {
 
   const liveMs = spec.liveS * 1000;
   const staleMs = spec.staleS * 1000;
-  if (phase.phase === "rth") {
-    if (readAt < phase.open) {
-      out.staleAt = phase.open + liveMs;
+  const extended = spec.extended === true && (phase.phase === "pre" || phase.phase === "post");
+  if (phase.phase === "rth" || extended) {
+    const from = extended ? easternInstant(phase.day, PHASE_MINUTES.preOpen) : phase.open;
+    if (readAt < from) {
+      out.staleAt = from + liveMs;
       return now < out.staleAt
         ? { ...out, state: "closed", reason: "awaiting-first-read" }
         : { ...out, reason: "missed-open" };

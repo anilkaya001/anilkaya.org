@@ -96,6 +96,8 @@ cross-user isolation; do not split this batch into non-transactional writes.
 - Worker name: `anilkaya`
 - Static binding: `ASSETS`
 - D1 binding: `DB` → database `iewt`
+- Durable Object binding: `PULSE` → class `Pulse`, declared by migration `v1`
+  (`new_sqlite_classes`); see section 10.5n before the first deploy that carries it
 - `run_worker_first = ["/*", "!/assets/*"]`
 - `html_handling = "auto-trailing-slash"`
 - a root `_headers` file, uploaded with the static bundle and never served,
@@ -2899,3 +2901,208 @@ binding reports, and `FLOWS_ASK_NEURONS` must be the model's real rates for it t
 anything. The dossier route and the reading share the 3 s vendor deadline, so a name seen
 for the first time answers `generating` with no sections when its dossier takes longer
 than 1.5 seconds to assemble, and fills in on the next poll.
+
+### 10.5n The real-time rail: one Durable Object, demand-driven REST polling, hibernating WebSockets
+
+**Why.** The stored live keys are minutes behind the vendor (Tier 1 every five
+minutes, Tier 2 every fifteen), the quote card is 5 s and the tape 60 s on
+demand, and every reader pays for its own poll. `Pulse` holds one polling loop
+for everyone: a connected viewer sees prices and flow alerts about 5 s behind
+the vendor, the market tide and sector ETFs about 10 s, dealer gamma about
+10 to 15 s a name, and news about 30 s, each frame carrying its honest age.
+Tier 1, Tier 2 and the nightly are unchanged and are the fallback; the rail
+adds no `live:*` key and writes nothing to D1.
+
+**What runs.** One class, `Pulse` (SQLite-backed, migration `v1`), bound as
+`PULSE` and exported from `worker.js`. There is one named instance, `pulse:1`,
+placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
+polls only while a socket is connected or a `/api/rt/snap` request is less than
+60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
+own alarm every second. No viewer, no vendor call. Per minute, with someone
+watching: px 12 calls, fl 12, gx 60 (one name a second: the two indices, six
+fixed names and six rotating names Tier 2 reads, and up to three focus tickers
+viewers are looking at), mk 12 (two calls every 10 s), nw 2, so about 98 calls
+a minute against its own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+separate from the `UW_ONDEMAND` limiter, which the rail never touches.
+
+**Kill switches (vars in `wrangler.toml`, no secret).**
+
+| Var | Values | Effect |
+|---|---|---|
+| `FLOWS_RT_MODE` | `on`; anything else, or unset, is off | Off: all three routes answer JSON 404 `rt_off`, even to an anonymous caller, and every open socket is closed with 4011 and a `bye` frame. A missing `PULSE` binding is the same. |
+| `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
+| `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
+| `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
+| `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
+
+Turning the rail off is a one-line deploy (`FLOWS_RT_MODE = "off"`), or a dashboard
+edit of the var; the next deploy of the Worker also restarts the object and
+drops every socket, and clients reconnect with jitter. Deploy outside 04:00 to
+20:00 ET on trading days when you can.
+
+**Reading `/api/rt/status`** (owner session, JSON): `running`, the epoch `ep`,
+`session`, `phase`; `upstream` (`kind: "rest"`, whether the key is present,
+whether the base URL is redirected, the 429 pause); `sockets` by user;
+`roster` (names, focus tickers, the gamma rotation, the last D1 read and its
+error); `calls.minuteTotal` against 240; and per topic: `sq`, rows held,
+`lastFrameAgeMs`, `lastError` with its code and instant, `lagMs` (hub receive
+time minus the vendor's newest timestamp in the frame, p50, p95, max over the
+last 256 frames), `rowLagMs` for px (the same, per updated quote), `calls`
+in the last minute and hour, and the `fresh` entry the next frame would carry.
+`degraded` is non-null while a topic is down.
+
+**What to watch.**
+
+1. `topics.px.rowLagMs.p95` in the regular session. The rail's promise is a
+   frame at most about 5 s behind the vendor; if the vendor's own quote stamps
+   run 30 s behind, every px frame is `fresh` with reason `vendor-lag`, and that
+   is the vendor, not the rail. This is the number the old design could not
+   see; it is the first thing to read on the first Monday.
+2. `topics.<k>.fresh.reason`: `vendor-unstamped` on px means the screener sent
+   no `quote_time` and no frame can claim live.
+3. `calls.minuteTotal` stays near 100; a value at 240 means the budget is
+   refusing polls and `degraded.reason` is `budget`.
+4. `degraded.reason`: `vendor-throttled` (a 429; the pause honours `Retry-After`
+   and is jittered), `http_5xx`, `timeout`, `network`, `parse`, `no-key`.
+5. Workers Logs: the rail logs only unexpected failures (`rt tick failed`,
+   `rt message failed`, `rt roster read failed`, once a minute at most).
+6. Cost: with a viewer connected the object is awake for the session, 16 h x
+   0.128 GB is about 7,400 GB-s a day, under the 400,000 GB-s a month included;
+   alarms and polls are about 60,000 requests a day, and outgoing WebSocket
+   messages are free. With nobody connected it costs nothing.
+
+**The wire.** The envelope, the five topics, the control frames, the close codes
+and the 256-byte client messages are frozen in `shared/flows-rt.js` and
+summarised in AGENTS.md "Real-time rail". Two behaviours to know: every topic
+has its own sequence counter (a shared one fabricates gaps), and a client must
+treat `ctl.bye` as final and close its own end, reading the code from the frame:
+in the local runtime a server-initiated close of a socket that has never sent a
+message is acknowledged on the wire but never surfaces as a `close` event in the
+client.
+
+**The seam, and the two upgrades it is built for.**
+
+- **A separate Worker.** The class talks to nothing but its own `ctx`, `env` and
+  the request the main Worker forwards, and `worker.js` reaches it with
+  `env.PULSE.get(env.PULSE.idFromName("pulse:1"))`. To move it: create a Worker
+  (for example `anilkaya-rt`) whose entrypoint is `export { Pulse } from
+  "./shared/flows-rt-hub.js"`, with its own `[[migrations]] new_sqlite_classes`,
+  the `DB` binding (read-only by convention: it reads `flows_payload` and
+  `flows_clock`), the `UW_API_KEY` secret and the same vars, no routes and
+  `workers_dev = false`; then add `script_name = "anilkaya-rt"` to the binding
+  in `wrangler.toml` and remove the class export and migration from the main
+  Worker (the migration order matters; see Cloudflare's "transfer a class"
+  procedure). The point is that a site deploy would no longer restart the object.
+  Nothing in `shared/flows-rt*.js` changes.
+- **A WebSocket upstream.** The hub talks to its upstream only through
+  `start(plan, handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`; it
+  receives neutral frames `{ k, readAt, items, vendorAt, meta, full, answered }`
+  in the wire's own row shapes and merges, sequences, ages and broadcasts them.
+  Every REST detail (paths, the `newer_than` cursor, the gamma rotation, the 4 s
+  deadline, the 429 pause) lives in `createRestUpstream`. `RT_UPSTREAM` in
+  `shared/flows-rt.js` is the one table that maps a topic to its REST request and
+  to the vendor socket channels it would join: px to `price:<T>` (and
+  `stock_screener` later), fl to `flow-alerts`, gx to `gex:<T>`, mk to
+  `market_tide` and `net_flow:<T>`, nw to `news`. A socket upstream is a second
+  factory passed to `RtHub`; `tests/flows-rt-contract.mjs` drives the hub with a
+  push-style fake to prove no REST assumption is left in it. It is not
+  implemented, and the shapes of the vendor's frames and their lag are unmeasured
+  until a regular session has been read.
+
+**Verification, and what is unproven.**
+
+1. `FLOWS_TEST_SANDBOX=1 node tests/flows-rt-server.mjs` runs the rail in real
+   workerd with persisted Durable Object storage (raw workerd with in-memory
+   storage crashes when an alarm fires) against a fake vendor on loopback.
+2. `./tests/node_modules/.bin/wrangler deploy --dry-run` validates the binding and
+   the migration. The first real deploy applies migration `v1`.
+3. After the first deploy, as the owner: `curl -s -b <cookie> .../api/rt/status`
+   returns `running: false` with nobody connected, and a socket opened from the
+   browser console (`new WebSocket("wss://anilkaya.org/api/rt/ws")`) receives a
+   `hello` and then frames within a second. Confirm the 101 carries the seven
+   security headers and that the dashboard's Transform Rules did not rewrite them.
+4. Not proven anywhere in this repository: the live vendor's response to a 5 s
+   screener cadence, the real quote-time lag, the production latency of the
+   edge-to-object hop and the hibernation behaviour under a real idle period.
+   The harness has measured the hub's own overhead only.
+
+#### The browser half: what the client does on each rung
+
+`assets/js/flows-rt.js` (`FlowsUI.rt`, no new global) is loaded by the boards, the
+home page, the market page, the unusual page and the ticker. It assumes no
+cadence, only the envelope in `shared/flows-rt.js`, so a vendor socket upstream
+replaces the REST one with no client change.
+
+| Rung | When | What the page does | Label |
+|---|---|---|---|
+| Socket | `hello` received | One `wss://<host>/api/rt/ws?k=<topics>&f=<focus>` per tab, topics refcounted across the page's handles. Snapshots replace a topic's state, deltas apply only at `sq + 1` in the same `ep`. A gap sends `{"t":"rs","k":...}` (retried every 2.6 s, past the server's 2 s floor) and holds the topic until its snapshot; a new `ep` discards the topic's state; `{"t":"p","sq":{...}}` goes out every 30 s. Silence for 16 s (100 s once a `closed` frame has said the market is shut) drops the socket. | `Socket` |
+| Poll | the socket failed, or `bye` said 4001, 4003, 4009, 4011 or 4012, or the upgrade never answered in 10 s | `GET /api/rt/snap?k=...` every 5 s, each answer a set of snapshots applied the same way. The socket is probed again after about 1, 2, 4 and 8 s, then once a minute; a `hello` ends the polling. A `closed` frame stops the polling until the open it names (never sooner than 30 s). | `Polling 5 s` |
+| Heartbeat | three snapshots in a row failed (network, 5xx, 429) | Only the pages' existing 20 to 60 s heartbeats and REST reads feed the page; the client keeps probing on its backoff. | `Heartbeat` |
+| Off | the snapshot answered 400, 401, 403 or 404 (not signed in, outside `FLOWS_RT_AUDIENCE`, `FLOWS_RT_MODE` off, route absent) | Nothing is asked again until the page is reloaded; the page behaves as it did before the rail. A 403 or 404 is also kept in `sessionStorage` (`flows:rt:off`) for ten minutes, so the other Flows pages of that tab do not probe. | none |
+
+The heartbeats and the REST reads run on every rung, unchanged. While frames are
+arriving a board ignores the polled `lk?k=strips` read (it still asks every 60 s)
+and the home page ignores the polled strips, and both pages append the streamed
+tide points to the polled series instead of replacing it, so an older polled read
+cannot overwrite a newer streamed one; after 20 s without a px frame the polled
+read takes the page back. A tab hidden for 30 s closes its socket and clears every
+timer; becoming visible reopens it at once.
+
+Freshness stays honest. Each frame, at most once a second per topic, registers an
+`rt:<topic>` entry built from the frame's own `fresh` and the hub's `at`, so a
+quote the vendor stamped 40 s ago is `fresh`, never live, and the pill is told
+"Live" (a price-read time) only by a px frame whose state is `live`. When the
+transport leaves the socket every `rt:*` entry is dropped, so a socket that died
+cannot leave the pill stale and the REST classes speak again.
+
+**Seeing the transport.** The freshness pill's tooltip and accessible name end in
+the feed (for example `Live · Socket`), and its popover has a `Feed` row. In the console,
+`FlowsUI.rt.transport()` is `socket`, `poll`, `heartbeat` or `off`;
+`FlowsUI.rt.status()` lists the closed and degraded state and, per topic, the
+sequence, whether it is synced or resyncing and the row count;
+`FlowsUI.rt.measure()` counts frames, bytes, gaps, duplicates, orphans, resync
+requests, socket opens, polls, timers and listeners held, and the time spent in
+the receive path (`ms`, `maxMs`, and `kinds` as `[frames, bytes, ms]` per frame
+type).
+
+**When it sticks on Polling.**
+
+1. `FlowsUI.rt.measure().opens` rising about once a minute means the socket is
+   being refused. Network, then WS, in the browser's developer tools shows the
+   upgrade's HTTP status, which the page's script cannot see: 403 is the
+   audience or the origin check, 404 `rt_off` the kill switch (the snapshot
+   would then say `off`, not `poll`), 426 a proxy that stripped `Upgrade`.
+2. A `ctl.bye` with code 4009 means the account already holds three sockets;
+   close other tabs, or read `sockets.byUser` in `/api/rt/status`.
+3. A Content-Security-Policy violation on `wss:` means `connect-src` lost
+   `wss://anilkaya.org`; the policy comes from `worker.js`, so compare the live
+   header with the repository after any dashboard Transform Rule change.
+4. The zone setting Network, WebSockets must be on.
+5. 4012 means the hub holds its 200 sockets.
+
+With the rail off, the first page load of a tab costs one refused upgrade and one
+404 snapshot, and the browser console prints two error lines for them; that is
+the whole price of finding out.
+
+Polling is a working rung, not a fault: it carries the same frames every 5 s.
+It costs more bytes than the socket because each answer is a whole snapshot.
+
+**Measured** (`RT_ONLY=measure node tests/flows-rt-client.mjs`, real clock, the
+real hub over a bridged socket against the fake vendor, 157 names, a vendor
+that moves every row on every poll, so the worst case for deltas; sandbox CPU):
+
+| | Result |
+|---|---|
+| Receive path for one px frame (32,042 B, 157 rows: parse, merge, queue, register) | 0.8 to 1.0 ms mean; fl, gx, mk and nw frames 0.2 ms |
+| Board listener in the animation frame, all 157 rows changing | about 9 ms mean, 15 to 18 ms worst; 270 DOM mutation records, no row rebuilt |
+| Bytes a minute on the socket, board (px only) | 384 KB |
+| Bytes a minute on the socket, all five topics | 433 KB: px 12 x 32.0 KB, fl 12 x 1.75 KB, gx 60 x 0.39 KB, mk 6 x 0.46 KB, nw 2 x 0.79 KB |
+| Bytes a minute on the poll rung | px alone 388 KB; all five topics 1.6 MB (a whole snapshot is 134 KB, 81 KB of it fl) |
+| Bytes a minute today, heartbeats and polled reads | `now` about 2 KB every 30 s, plus a 30 KB `lk?k=strips` body each time its stamp moves (every 5 to 15 minutes): under 10 KB a minute |
+
+The socket therefore moves roughly forty times the bytes of today's heartbeats
+when every quote changes on every poll. These are uncompressed JSON string
+lengths; whether Cloudflare compresses the WebSocket frames (permessage-deflate)
+or the snapshot answers is not measured here, and a quiet name changes no row.
+If the bytes matter, the lever is on the server: fewer px names, or a slower px
+cadence for the names no module on the page shows.

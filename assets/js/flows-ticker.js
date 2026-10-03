@@ -2884,7 +2884,26 @@
     requestAnimationFrame(() => { target.scrollIntoView({ block: "start", behavior: "instant" }); try { target.focus({ preventScroll: true }); } catch { target.focus(); } });
   }
 
+  function takeQuote(q) {
+    if (!STATE.card) return;
+    const was = !!liveQuote();
+    STATE.quote = q && typeof q === "object" ? q : null;
+    paintPrice(STATE.card, false);
+    paintFreshness(STATE.card);
+    if (!STATE.card.lite && was !== !!liveQuote()) renderHeroChart(STATE.card, okOf(STATE.card.panels.pricedMove) || {});
+  }
+
+  function streamQuote(t) {
+    const rt = UI.rt && UI.rt.connect({ topics: ["px"], focus: t });
+    if (!rt) return;
+    rt.on("px", () => {
+      const q = UI.rt.quote(t);
+      if (q) takeQuote(Object.assign({}, STATE.quote, Object.fromEntries(Object.entries(q).filter(([, v]) => v !== null))));
+    });
+  }
+
   function startLive(t) {
+    streamQuote(t);
     if (typeof UI.heartbeat !== "function") return;
     const lite = !!(STATE.card && STATE.card.lite);
     STATE.hb = UI.heartbeat({
@@ -2896,14 +2915,7 @@
         STATE.beats++;
         if (STATE.phase === "rth" ? STATE.beats % 3 === 0 : was === "rth") fetchTape(t);
       },
-      onQuote: (q) => {
-        if (!STATE.card) return;
-        const was = !!liveQuote();
-        STATE.quote = q && typeof q === "object" ? q : null;
-        paintPrice(STATE.card, false);
-        paintFreshness(STATE.card);
-        if (!lite && was !== !!liveQuote()) renderHeroChart(STATE.card, okOf(STATE.card.panels.pricedMove) || {});
-      },
+      onQuote: takeQuote,
       onChange: (changed) => {
         if (lite || !changed.includes("card:" + t)) return;
         Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))

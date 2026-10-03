@@ -1653,8 +1653,8 @@
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, live: false, sources: new Map(), ffs: new Map(), explicit: false, settled: false };
-  const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts" };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSource: null, live: false, transport: null, sources: new Map(), ffs: new Map(), explicit: false, settled: false };
+  const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts", "rt:px": "Streamed prices", "rt:fl": "Streamed flow alerts", "rt:gx": "Streamed gamma", "rt:mk": "Streamed market tide", "rt:nw": "Streamed headlines" };
   const named = (k) => { k = k.replace(/^(?:lk\?k=|live:)|\?.*/g, ""); return NAMES[k] || k[0].toUpperCase() + k.slice(1); };
   function freshAggregate(list, phase) {
     const s = (list || []).filter(Boolean).map((f) => (f.stateAt ? f.stateAt() : f)), has = (x) => s.includes(x);
@@ -1694,6 +1694,7 @@
       ["Built", FRESH.generatedAt ? F.time(FRESH.generatedAt) : null],
       ["Written", FRESH.updatedAt ? F.time(new Date(FRESH.updatedAt).toISOString()) : null],
       ["Price read", FRESH.readAt ? F.time(FRESH.readAt) : null],
+      ["Feed", FRESH.transport],
       ["Payloads", total ? (bad ? total - bad + " of " + total + " current" : total + " current") : null],
       ...behind.map(([k, v]) => [named(k), F.day(v)]),
     ];
@@ -1708,11 +1709,15 @@
     const { state, market: m, S, behind } = freshState();
     const def = STATES[state] || STATES.pending;
     const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
-    if (b.dataset.state === state && b.dataset.label === label) return;
+    const feed = FRESH.transport || "";
+    if (b.dataset.state === state && b.dataset.label === label && (b.dataset.feed || "") === feed) return;
     b.dataset.state = state;
     b.dataset.label = label;
+    b.dataset.feed = feed;
     b.replaceChildren(glyph(def.g), h("span", { class: "fx-fresh-l" }, label));
-    b.setAttribute("aria-label", "Freshness: " + def.word + (S ? ", session " + S : ""));
+    b.setAttribute("aria-label", "Freshness: " + def.word + (S ? ", session " + S : "") + (feed ? ", feed " + feed : ""));
+    if (feed) b.title = def.word + " · " + feed;
+    else if (b.title) b.title = "";
   }
   function freshness(o = {}) {
     if (o.explicit !== false && !o.ff) FRESH.explicit = true;
@@ -1725,11 +1730,25 @@
     }
     if (typeof o.generatedAt === "string" && (!FRESH.generatedAt || o.generatedAt > FRESH.generatedAt)) FRESH.generatedAt = o.generatedAt;
     if (num(o.updatedAt) !== null && o.updatedAt > 0) FRESH.updatedAt = Math.max(FRESH.updatedAt || 0, o.updatedAt);
-    if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.live = o.live !== false; }
+    if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.live = o.live !== false; FRESH.readSource = o.source || null; }
     FRESH.settled = true;
     paintFresh();
     return freshState().state;
   }
+  freshness.drop = (source) => {
+    const had = FRESH.ffs.delete(source);
+    FRESH.sources.delete(source);
+    const claimed = Boolean(source) && FRESH.readSource === source;
+    if (claimed) { FRESH.readAt = null; FRESH.live = false; FRESH.readSource = null; }
+    if (had || claimed) paintFresh();
+    return had;
+  };
+  freshness.transport = (label) => {
+    const next = typeof label === "string" && label ? label : null;
+    if (FRESH.transport === next) return;
+    FRESH.transport = next;
+    paintFresh();
+  };
   freshness.state = () => freshState().state;
   freshness.details = freshDetails;
   freshness.market = market;

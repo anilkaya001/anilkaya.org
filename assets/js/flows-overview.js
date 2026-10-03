@@ -1718,7 +1718,7 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const FOCUS = { focus: null, strips: null, series: null, live: null, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, live: null, streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
   const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
   leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
@@ -1772,13 +1772,74 @@
   const tick = (v) => h("b", { class: "hm-t" }, v.t);
   const chgOf = (v) => h("span", { class: "hm-chg", "data-tone": toneOf(v.chg) }, pct(v.chg));
   const premOf = (v) => h("span", { class: "hm-prem", "data-tone": toneOf(v.net) }, usdS(v.net));
+  const said = (v, label) => [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
+    (flowWord(v) || [0, "no flow read"])[1], "IV " + F.pct(v.iv30, 1)].filter(Boolean).join(", ") + ". Open the dossier.";
   const link = (v, cls, label, ...kids) => h("a", {
-    class: cls, href: dossier(v.t), "data-ticker": v.t, "data-src": v.src,
-    "aria-label": [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
-      (flowWord(v) || [0, "no flow read"])[1], "IV " + F.pct(v.iv30, 1)].filter(Boolean).join(", ") + ". Open the dossier.",
+    class: cls, href: dossier(v.t), "data-ticker": v.t, "data-src": v.src, "data-label": label || null, "aria-label": said(v, label),
   }, ...kids);
   const netCell = (v, cls) => h("span", { class: cls }, premOf(v),
     v.lean === null ? null : leanBar(v.lean, "Bullish against bearish premium " + pct(v.lean, 0)));
+
+  function mflow(v) {
+    const fw = flowWord(v);
+    return [fw ? UI.capsule(fw[1], { tone: fw[0] }) : h("span", { class: "ui-dash" }, DASH), netCell(v, "hm-mnet")];
+  }
+
+  function patchFocus(changed) {
+    const anchors = [...document.querySelectorAll("#ccMetals a[data-ticker], #ccLeaders a[data-ticker]")];
+    if (!anchors.length) return;
+    const rows = new Map(focusRows([...new Set(anchors.map((a) => a.dataset.ticker))]).map((v) => [v.t, v]));
+    for (const a of anchors) {
+      const v = rows.get(a.dataset.ticker);
+      if (!v || !changed.has(v.t)) continue;
+      const px = a.querySelector(".hm-mpx-v, .hm-qpx"), chg = a.querySelector(".hm-chg"), net = a.querySelector(".hm-qnet"), flow = a.querySelector(".hm-mflow"), iv = a.querySelector(".hm-qiv");
+      if (px) px.textContent = F.px(v.px);
+      if (chg) chg.replaceWith(chgOf(v));
+      if (net) net.replaceWith(netCell(v, "hm-qnet"));
+      const prem = a.classList.contains("hm-mrow") ? a.querySelector(".hm-prem") : null;
+      if (prem) prem.replaceWith(premOf(v));
+      if (flow) flow.replaceChildren(...mflow(v));
+      if (iv) iv.textContent = F.pct(v.iv30, 1);
+      a.dataset.src = v.src || "";
+      a.setAttribute("aria-label", said(v, a.dataset.label || null));
+    }
+    for (const k in FOCUS.pills) {
+      const [shown, title] = FOCUS.pills[k];
+      whenPill(k, focusRows(shown.map((v) => v.t)), title);
+    }
+  }
+
+  function mergeNews(body) {
+    const live = UI.rt ? UI.rt.news() : [];
+    if (!live.length || !body || typeof body !== "object" || !Array.isArray(body.rows)) return body;
+    const key = (r) => (isNum(r.createdAtMs) === null ? "u" : r.createdAtMs) + "|" + String(r.headline || "").slice(0, 80);
+    const have = new Set(body.rows.map(key));
+    const add = live.filter((r) => r && typeof r.headline === "string" && !have.has(key(r)));
+    if (!add.length) return body;
+    const rows = add.concat(body.rows).sort((a, b) => (isNum(b.createdAtMs) ?? -1) - (isNum(a.createdAtMs) ?? -1)).slice(0, 60);
+    const fr = UI.rt.fresh("nw");
+    return Object.assign({}, body, { rows, status: "ok", live: true, readAt: (fr && fr.readAt) || body.readAt });
+  }
+
+  function stream() {
+    const rt = UI.rt && UI.rt.connect({ topics: ["px", "mk", "nw"] });
+    if (!rt) return;
+    rt.on("px", (c) => {
+      const s = UI.rt.strips();
+      if (!s) return;
+      FOCUS.strips = s;
+      if (!FOCUS.streamed) { FOCUS.streamed = true; paintFocus(); } else patchFocus(new Set(c.ids));
+    });
+    rt.on("mk", () => {
+      if (!UI.rt.feeds("mk")) return;
+      const m = UI.rt.market(S.liveMkt);
+      if (m && m !== S.liveMkt) { S.liveMkt = m; hero(); }
+    });
+    rt.on("nw", () => {
+      const n = R.news ? mergeNews(R.news) : null;
+      if (n && n !== R.news) fill("ccNews", paintNews, R.news = n, index(R).cards, Date.now());
+    });
+  }
 
   function sparkIn(host, v, height) {
     const n = counted(v.spark), t = toneOf(v.chg);
@@ -1833,7 +1894,6 @@
     const sparks = [];
     into.append(h("div", { class: "hm-metals" }, groups.map((g) => {
       const lead = by.get(g.tickers.includes(g.lead) ? g.lead : g.tickers[0]);
-      const fw = flowWord(lead);
       const sp = h("span", { class: "hm-mspark" });
       sparks.push([sp, lead]);
       return h("div", { class: "hm-metal", role: "group", "aria-label": g.label || lead.t, "data-group": g.id || null },
@@ -1841,7 +1901,7 @@
           h("span", { class: "hm-mhead" }, h("span", { class: "hm-mlabel" }, g.label || lead.t), tick(lead)),
           h("span", { class: "hm-mpx" }, h("span", { class: "hm-mpx-v" }, F.px(lead.px)), chgOf(lead)),
           sp,
-          h("span", { class: "hm-mflow" }, fw ? UI.capsule(fw[1], { tone: fw[0] }) : h("span", { class: "ui-dash" }, DASH), netCell(lead, "hm-mnet"))),
+          h("span", { class: "hm-mflow" }, ...mflow(lead))),
         h("div", { class: "ui-list hm-mrel", role: "group", "aria-label": (g.label || lead.t) + " related" },
           g.tickers.filter((t) => t !== lead.t).map((t) => by.get(t)).map((v) => link(v, "ui-row hm-mrow", g.label, tick(v), chgOf(v), premOf(v)))));
     })));
@@ -2036,6 +2096,7 @@
   });
 
   function live(liveVol) {
+    stream();
     if (typeof UI.heartbeat !== "function") return;
     UI.heartbeat({
       keys: ["market", "breadth", "strips", "focus", "news"], nightly: ["pulse", "focus"], page: "overview",
@@ -2047,13 +2108,13 @@
         const keys = [mk && "market", br && "breadth", st && "strips", st && "strips:series", lf && "focus"].filter(Boolean);
         Promise.all([fo && loadRegion("/api/flows/focus"), pu && loadRegion("/api/flows/pulse"), keys.length && loadLive(keys), nw && loadRegion("/api/flows/news")]).then(([f, p, lk, n]) => {
           const l = lk || {};
-          if (n) fill("ccNews", paintNews, R.news = n, index(R).cards, Date.now());
+          if (n) fill("ccNews", paintNews, R.news = mergeNews(n), index(R).cards, Date.now());
           if (f) FOCUS.focus = f;
-          if (l.strips) FOCUS.strips = l.strips;
+          if (l.strips && !(UI.rt && UI.rt.feeds("px"))) { FOCUS.strips = l.strips; FOCUS.streamed = false; }
           if (l["strips:series"]) FOCUS.series = l["strips:series"];
           if (l.focus) FOCUS.live = l.focus;
           if (st || fo || lf) paintFocus();
-          if (l.market) S.liveMkt = l.market;
+          if (l.market) S.liveMkt = UI.rt && UI.rt.feeds("mk") ? UI.rt.market(l.market) : l.market;
           if (l.breadth) { S.liveBreadth = l.breadth; paintVol(S.regime, liveVol, l.breadth); }
           if (p) S.pulse = p;
           if (l.market || l.breadth || p) hero();
