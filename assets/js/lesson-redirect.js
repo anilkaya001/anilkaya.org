@@ -1,4 +1,5 @@
 (function () {
+  "use strict";
   const legacyCourseSlugs = {
     ols: "ordinary-least-squares",
     iv2sls: "instrumental-variables-2sls",

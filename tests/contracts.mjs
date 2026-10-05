@@ -1223,6 +1223,9 @@ let globalCount = 0;
   allowed.add(authoring[1]);
   const UI_FILE = path.join("assets", "js", "flows-ui.js");
   const REGEX_BEFORE = /[(,=:[!&|?{};+\-*%<>~^]/;
+  const BEFORE_OPERAND = /^(return|typeof|case|do|else|in|instanceof|new|of|throw|void|delete|yield|await)$/;
+  const afterWord = (word, before) => before !== "." && BEFORE_OPERAND.test(word) ? "(" : "a";
+  const WORD = /^[A-Za-z_$][\w$]*/;
   const skipQuoted = (src, i) => {
     const q = src[i];
     for (i++; i < src.length; i++) {
@@ -1257,6 +1260,7 @@ let globalCount = 0;
       const next = skipTrivia(src, i, prev);
       if (next >= 0) { i = next; prev = "a"; continue; }
       const c = src[i];
+      if (/[A-Za-z_$]/.test(c)) { const word = src.slice(i).match(WORD)[0]; i += word.length; prev = afterWord(word, prev); continue; }
       if (c === "{" || c === "(" || c === "[") depth++;
       else if (c === "}" || c === ")" || c === "]") { if (--depth === 0) return i + 1; }
       if (!/\s/.test(c)) prev = c;
@@ -1272,12 +1276,13 @@ let globalCount = 0;
       const c = src[i];
       if (depth === 0 && expect && !/\s/.test(c)) {
         if (c === "{" || c === "[") destructured = true;
-        const id = src.slice(i).match(/^[A-Za-z_$][\w$]*/);
+        const id = src.slice(i).match(WORD);
         if (id) { names.push(id[0]); i += id[0].length; prev = "a"; expect = false; continue; }
         expect = false;
       }
       const next = skipTrivia(src, i, prev);
       if (next >= 0) { i = next; prev = "a"; continue; }
+      if (/[A-Za-z_$]/.test(c)) { const word = src.slice(i).match(WORD)[0]; i += word.length; prev = afterWord(word, prev); continue; }
       if (c === "{" || c === "(" || c === "[") depth++;
       else if (c === "}" || c === ")" || c === "]") depth--;
       else if (depth === 0 && c === ";") break;
@@ -1298,7 +1303,7 @@ let globalCount = 0;
       const c = src[i];
       if (c === "\n") newline = true;
       if (/[A-Za-z_$]/.test(c)) {
-        const word = src.slice(i).match(/^[A-Za-z_$][\w$]*/)[0];
+        const word = src.slice(i).match(WORD)[0];
         let end = i + word.length;
         const startOfStatement = prev === "" || prev === ";" || prev === "}" ||
           (newline && !/[,=+\-*/%&|^?:.([{<>!~]/.test(prev));
@@ -1310,7 +1315,7 @@ let globalCount = 0;
           if (word !== "async" || end > i + word.length) declarations.push({ keyword: word === "async" ? "function" : word, at: end });
         }
         i = end;
-        prev = "a";
+        prev = afterWord(word, prev);
         newline = false;
         continue;
       }
@@ -1323,7 +1328,7 @@ let globalCount = 0;
   };
   const globalsCreatedBy = (file, src) => {
     const created = [], outright = [], hooks = [];
-    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*(?:\|\||&&|\?\?)?=(?![=>])/g)) {
+    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*(?:\|\||&&|\?\?|\*\*|<<|>>>?|[-+*/%&|^])?=(?![=>])/g)) {
       const name = m[2] || m[3];
       if (m[1] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
         const before = src.slice(Math.max(0, m.index - 80), m.index);
@@ -1345,7 +1350,7 @@ let globalCount = 0;
         if (destructured) outright.push(`${file}: a top-level destructuring ${keyword} hides the globals it creates`);
         for (const name of names) created.push({ name, how: `top-level ${name}` });
       } else {
-        const id = src.slice(at).match(/^\*?\s*([A-Za-z_$][\w$]*)/);
+        const id = src.slice(at).match(/^\s*\*?\s*([A-Za-z_$][\w$]*)/);
         if (id) created.push({ name: id[1], how: `top-level ${id[1]}` });
       }
     }
@@ -1383,12 +1388,19 @@ let globalCount = 0;
     "Object.defineProperties(self, { Foo: { value: 1 } });",
     "const { Foo } = bar;", "let [Foo] = bar;", "let a = 1, Foo = 2;", "const a = f(1, [2, 3]), Foo = `${1, 2}`;",
     "var a = /[,]/g, Foo;", "  const Foo = 1;", "foo()\nconst Foo = 1", "function Foo() {}",
-    "async function Foo() {}", "class Foo {}", "if (typeof document !== \"undefined\") { globalThis.__FooTest = 1; }",
+    "async function Foo() {}", "class Foo {}", "function *Foo() {}", "function* Foo() {}",
+    "window.Foo += 1;", "self[\"Foo\"] |= 1;", "globalThis.Foo **= 2;",
+    "(function () { return /\"/.test(x); })();\nconst Foo = 1;\n(function () { return /\"/; })();",
+    "(function () { return typeof /'/; })();\nlet Foo = 1;\n(function () { return void /'/; })();", "if (typeof document !== \"undefined\") { globalThis.__FooTest = 1; }",
   ]) assert(flagged(elsewhere, src) > 0, `the global scan misses ${JSON.stringify(src)}`);
   for (const src of [
     "(function () { const Foo = 1; window.Lab = {}; })();", "x = function Foo() {};",
     "for (let Foo = 0; Foo < 1; Foo++) {}", "Object.assign(window.CURRICULUM, { Foo: 1 });",
     "window.FlowsUI ||= {};",
+    "(function () { return /[(]/.test(x); })();", "(function () { return /\"/.test(x); })();",
+    "(function () { if (a) return /[{]/; else return /[\\]]/; })();",
+    "(function () { const s = `${typeof /[(]/}`; return s; })();",
+    "(function () { const a = b / c / d; return a; })();", "(function () { return x.of / 2; })();",
     "if (typeof document === \"undefined\") {\n  globalThis.__FooTest = 1;\n}",
   ]) assert.equal(flagged(elsewhere, src), 0, `the global scan flags ${JSON.stringify(src)}, which creates no unlisted global`);
   assert.equal(flagged(path.join("assets", "js", "flows-ui.js"), "window.fetch = function () {};"), 0,
