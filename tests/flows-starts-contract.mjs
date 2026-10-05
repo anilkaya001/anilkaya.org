@@ -646,7 +646,7 @@ const MIN = 60 * 1000;
 
 {
   const S = D;
-  const drive = async (world, { budgetMs, watchOver = {}, passes = null, chain = null } = {}) => {
+  const drive = async (world, { budgetMs, watchOver = {}, passes = null, chain = null, loopOver = {} } = {}) => {
     let body = null;
     const notes = [];
     const watch = createWatch({ readOnce: world.readOnce, latestClock: () => body, env: world.env(), fetchImpl: world.github.fetchImpl,
@@ -654,7 +654,7 @@ const MIN = 60 * 1000;
     const loop = await runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs, log() {}, warn: (l) => notes.push(l), watch,
       readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; } }),
       pass: passes || (async () => { world.advance(20000); return { skipped: null, answered: 10, landed: 5 }; }),
-      chain: chain || (async () => ({ sent: true, why: "sent", status: 204 })) });
+      chain: chain || (async () => ({ sent: true, why: "sent", status: 204 })), ...loopOver });
     return { loop, notes };
   };
   const issues = (w) => w.github.record.created.filter((c) => /flows-witness/.test(c.title));
@@ -762,6 +762,84 @@ const MIN = 60 * 1000;
   ]);
   clearTimeout(giveUp);
   ok(hung !== "hung" && hung.loop.exit === "budget", "and a read that never answers is given up on when the deadline falls, so the tick ends and the loop goes on");
+
+  eq(LIVE_LOOP.passDeadlineMs, 4 * MIN, "A PASS has a four-minute wall deadline, about ten times the slowest pass the log has published");
+  eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick a two-minute one");
+  const handover = LIVE_LOOP.chainRetryMs.reduce((a, b) => a + b, 0) + (LIVE_LOOP.chainRetryMs.length + 1) * LIVE_LOOP.githubTimeoutMs;
+  ok(LIVE_LOOP.passDeadlineMs < LIVE_LOOP.slotMs && LIVE_LOOP.passDeadlineMs + handover <= 6 * MIN,
+    `so a hung pass costs its deadline plus the hand-over (at worst ${Math.round((LIVE_LOOP.passDeadlineMs + handover) / 1000)} s with every ` +
+      "dispatch retried), not the workflow's 355 minutes");
+  const stuckPass = async ({ passDeadlineMs = 150, tickDeadlineMs = 2 * MIN, passes, sent = true }) => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const dispatched = [];
+    let calls = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const run = await Promise.race([
+      drive(world, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs, tickDeadlineMs },
+        passes: async (p) => { calls++; return passes(p, world); },
+        chain: async ({ at: when }) => { dispatched.push(when); return sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 422 }; } }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { run, dispatched, calls, wallMs: Date.now() - t0, world };
+  };
+  const never = await stuckPass({ passes: async ({ index }, world) => {
+    if (index < 2) { world.advance(20000); return { skipped: null, answered: 10, landed: 5 }; }
+    return new Promise(() => {});
+  } });
+  ok(never.run !== "hung" && never.run.loop.exit === "hung" && never.run.loop.why === "pass-deadline" && never.wallMs < 5000,
+    `A PASS THAT NEVER RESOLVES is abandoned when its deadline falls: the loop exits (${never.wallMs} ms of wall time for a 150 ms deadline) ` +
+      "instead of holding the concurrency group until the workflow's timeout");
+  ok(never.dispatched.length === 1 && never.run.loop.chained.sent && never.calls === 3,
+    `and sends the chain dispatch exactly once (${never.dispatched.length}), after two healthy passes and the hung third`);
+  ok(never.run.loop.passes.length === 3 && never.run.loop.passes[2].hung === true && never.run.loop.passes[2].errored === true &&
+     never.run.notes.some((l) => /pass 3 did not finish within 0\.15 s/.test(l)),
+  "the hung pass is recorded as one, and the log names it");
+  const hungVerdict = liveRunVerdict(never.run.loop);
+  ok(hungVerdict.failed && /a pass did not finish within its deadline/.test(hungVerdict.why) && /re-dispatched \(sent\)/.test(hungVerdict.why),
+    "AND THE RUN EXITS RED, saying a pass hung and that the successor was dispatched");
+  const refusedHang = await stuckPass({ passes: async () => new Promise(() => {}), sent: false });
+  ok(refusedHang.run.loop.exit === "hung" && refusedHang.dispatched.length === 1 && liveRunVerdict(refusedHang.run.loop).failed &&
+     /re-dispatched \(refused\)/.test(liveRunVerdict(refusedHang.run.loop).why),
+  "a hung first pass whose dispatch is refused still exits red, naming the refusal");
+  const slow = await stuckPass({ passDeadlineMs: 400, passes: async (p, world) => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    world.advance(20000);
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(slow.run.loop.exit === "budget" && slow.dispatched.length === 1 && slow.run.loop.passes.every((p) => !p.hung) && slow.calls > 10,
+    "while a pass that finishes inside its deadline, however slowly, is kept, and the loop runs to its budget as before");
+  const throwing = await stuckPass({ passes: async ({ index }, world) => {
+    world.advance(20000);
+    if (index === 1) throw new Error("vendor down");
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(throwing.run.loop.exit === "budget" && throwing.run.loop.passes[1].threw === "vendor down" && !throwing.run.loop.passes[1].hung,
+    "and a pass that throws inside the deadline still costs a slot, not the loop");
+  const stuckTick = await (async () => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const dispatched = [];
+    let ticked = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const sticky = { tick: async () => { ticked++; return ticked < 3 ? { busy: false } : new Promise(() => {}); },
+      summary: () => ({ breached: [], open: [] }) };
+    const loop = await Promise.race([
+      runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: 2 * HOUR, log() {}, warn() {}, watch: sticky, tickDeadlineMs: 150,
+        readClock: async () => null, pass: async () => { world.advance(20000); return { skipped: null, answered: 1, landed: 1 }; },
+        chain: async ({ at: when }) => { dispatched.push(when); return { sent: true, why: "sent", status: 204 }; } }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { loop, dispatched, ticked, wallMs: Date.now() - t0 };
+  })();
+  ok(stuckTick.loop !== "hung" && stuckTick.loop.exit === "hung" && stuckTick.loop.why === "tick-deadline" && stuckTick.loop.ticks === 3 &&
+     stuckTick.dispatched.length === 1 && stuckTick.wallMs < 5000 && /a watch tick did not finish/.test(liveRunVerdict(stuckTick.loop).why),
+  `A WATCH TICK THAT NEVER RESOLVES is given up on the same way: exit on its deadline (${stuckTick.wallMs} ms), one dispatch, a red run`);
+  const pipelineSrc = read("scripts/flows-pipeline.mjs");
+  ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
+    "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
 
   eq(LIVE_LOOP.clockDeadlineMs, 10000, "The loop's own clock read has a ten-second deadline like the watch's");
   const quiet = { tick: async () => ({ busy: false }), summary: () => ({ breached: [], open: [] }) };

@@ -335,6 +335,10 @@ export function liveRunVerdict(loop) {
   if (ran.length && ran.every(dead)) {
     why.push(`every one of ${ran.length} pass(es) answered no vendor call or landed no key`);
   }
+  if (loop && loop.exit === "hung") {
+    why.push(`${loop.why === "tick-deadline" ? "a watch tick" : "a pass"} did not finish within its deadline, so the loop exited ` +
+      `and re-dispatched (${loop.chained ? loop.chained.why : "not sent"}) to free the concurrency group for its successor`);
+  }
   if (loop && loop.exit === "budget" && !(loop.chained && loop.chained.sent)) {
     why.push("the time budget ran out and the chain dispatch was refused, so nothing keeps the loop going until a " +
       "GitHub starter arrives");
@@ -355,6 +359,8 @@ export const LIVE_LOOP = Object.freeze({
   chainRetryMs: Object.freeze([15 * 1000, 45 * 1000]),
   githubTimeoutMs: 15 * 1000,
   clockDeadlineMs: 10 * 1000,
+  passDeadlineMs: 4 * 60 * 1000,
+  tickDeadlineMs: 2 * 60 * 1000,
   workflow: "flows-live.yml",
   ref: "main",
 });
@@ -443,6 +449,14 @@ export async function chainWithRetry(send, { sleep = null, delays = LIVE_LOOP.ch
   return { ...last, attempts: tries.length };
 }
 
+const HUNG = Symbol("hung");
+
+const underDeadline = (work, ms) => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => resolve(HUNG), ms);
+  Promise.resolve().then(work).then((value) => { clearTimeout(timer); resolve(value); },
+    (error) => { clearTimeout(timer); reject(error); });
+});
+
 const nextOpenAt = (at, clock) => {
   const p = phaseAt(at, clock);
   const open = p && p.phase !== "rth" ? p.nextOpen : NaN;
@@ -450,23 +464,38 @@ const nextOpenAt = (at, clock) => {
 };
 
 async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs,
-  watch, log, warn }) {
+  watch, log, warn, passDeadlineMs, tickDeadlineMs }) {
   const passes = [];
   let waits = 0;
   let ticks = 0;
+  const hung = async (why, what, ms, clock) => {
+    warn(`live loop: ${what} did not finish within ${ms / 1000} s — abandoning it, re-dispatching and exiting ` +
+      "non-zero so the concurrency group frees for the successor");
+    const chained = await chain({ at: now() });
+    log(`live loop: exited on the ${why} after ${passes.length} pass(es) and ${ticks} watch tick(s) — ` +
+      `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
+    return { exit: "hung", why, passes, waits, ticks, chained, clock, preOpenMs: 0, keep: true,
+      watch: typeof watch.summary === "function" ? watch.summary() : null };
+  };
   for (;;) {
     await refresh();
     const clock = current();
     const here = window(now(), clock);
     if (here.run) {
       const index = passes.length;
+      let done = null;
       try {
-        passes.push(await pass({ first: index === 0, index, clock }));
+        done = await underDeadline(() => pass({ first: index === 0, index, clock }), passDeadlineMs);
       } catch (error) {
         const threw = error instanceof Error ? error.message : String(error);
         warn(`live loop: pass ${index + 1} threw — ${threw.slice(0, 300)}; the loop carries on to the next slot`);
-        passes.push({ errored: true, threw: threw.slice(0, 300) });
+        done = { errored: true, threw: threw.slice(0, 300) };
       }
+      if (done === HUNG) {
+        passes.push({ errored: true, hung: true, threw: `did not finish within ${passDeadlineMs / 1000} s` });
+        return hung("pass-deadline", `pass ${index + 1}`, passDeadlineMs, clock);
+      }
+      passes.push(done);
     } else if (here.wait) {
       waits++;
       log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
@@ -475,8 +504,13 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
     }
     let beat = {};
     try {
-      beat = (await watch.tick({ at: now(), clock, clockRead: currentRead(), first: ticks === 0, inSession: !!here.run,
-        passes })) || {};
+      const told = await underDeadline(() => watch.tick({ at: now(), clock, clockRead: currentRead(), first: ticks === 0,
+        inSession: !!here.run, passes }), tickDeadlineMs);
+      if (told === HUNG) {
+        ticks++;
+        return hung("tick-deadline", `watch tick ${ticks}`, tickDeadlineMs, clock);
+      }
+      beat = told || {};
     } catch (error) {
       warn(`live loop: the watch threw — ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}; ` +
         "the loop carries on");
@@ -503,7 +537,8 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
 
 export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
   readClock = async () => null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
-  warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs, clockDeadlineMs = LIVE_LOOP.clockDeadlineMs } = {}) {
+  warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs, clockDeadlineMs = LIVE_LOOP.clockDeadlineMs,
+  passDeadlineMs = LIVE_LOOP.passDeadlineMs, tickDeadlineMs = LIVE_LOOP.tickDeadlineMs } = {}) {
   const startedAt = now();
   const passes = [];
   let clock = null;
@@ -516,7 +551,7 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
   };
   if (watch) {
     return keepLoop({ startedAt, refresh, current: () => clock, currentRead: () => clockRead, pass, chain, now, sleep, window,
-      slotMs, budgetMs, idleMs, watch, log, warn });
+      slotMs, budgetMs, idleMs, watch, log, warn, passDeadlineMs, tickDeadlineMs });
   }
   await refresh();
   let opening = window(startedAt, clock);

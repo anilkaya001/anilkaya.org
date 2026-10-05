@@ -4669,7 +4669,9 @@ async function runLiveMode() {
       ? chainWithRetry(() => chainDispatch({ env: process.env, at }))
       : chainDispatch({ env: process.env, at })),
   });
-  return settle(loop);
+  settle(loop);
+  if (loop.exit === "hung") process.exit(process.exitCode || 1);
+  return loop;
 }
 
 async function main() {
