@@ -129,12 +129,37 @@ const ddlInitializer = (src, start) => {
   }
   throw new Error("unterminated initializer at " + start);
 };
+const ddlPattern = /CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER)\b/g;
+const outsideSpans = (src, spans) => [...src.matchAll(ddlPattern)]
+  .filter((m) => !spans.some(([from, to]) => m.index >= from && m.index < to))
+  .map((m) => `${src.slice(0, m.index).split("\n").length}: ${src.slice(m.index, m.index + 60)}`);
 const workerSource = read("worker.js");
 const workerDdl = [];
+const workerDdlSpans = [];
 for (const m of workerSource.matchAll(/^const \w+ =(?=\s*(?:Object\.freeze\(\s*)?\[?\s*"CREATE )/gm)) {
   const init = ddlInitializer(workerSource, m.index + m[0].length);
+  workerDdlSpans.push([m.index, m.index + m[0].length + init.length]);
   const value = new Function("FLOWS_LIVE", "FLOWS_DOSSIER", `return (${init});`)(FLOWS_LIVE, FLOWS_DOSSIER);
   workerDdl.push(...[value].flat());
+}
+assert.deepEqual(outsideSpans(workerSource, workerDdlSpans), [],
+  "worker.js declares DDL only in the top-level constants this check evaluates");
+const runtimeStatements = new Set(workerDdl);
+for (const file of readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort()) {
+  const src = read(`shared/${file}`);
+  if (!ddlPattern.test(src)) continue;
+  ddlPattern.lastIndex = 0;
+  const mod = await import(new URL(`shared/${file}`, root));
+  const spans = [];
+  for (const m of src.matchAll(/^export const (\w+) =(?=\s*(?:Object\.freeze\(\s*)?\[?\s*(?:"CREATE |\w+_SQL\b))/gm)) {
+    const init = ddlInitializer(src, m.index + m[0].length);
+    spans.push([m.index, m.index + m[0].length + init.length]);
+    const statements = [mod[m[1]]].flat();
+    assert.deepEqual(statements.filter((sql) => !runtimeStatements.has(sql)), [],
+      `shared/${file}: every statement of ${m[1]} is in the runtime DDL this check builds`);
+  }
+  assert.deepEqual(outsideSpans(src, spans), [],
+    `shared/${file} declares DDL only in exported constants whose statements reach the runtime DDL this check builds`);
 }
 const sqliteOf = (statements) => {
   const db = new DatabaseSync(":memory:");
@@ -147,6 +172,39 @@ const d1Of = (db) => ({
     run: async () => { db.exec(sql); return { success: true }; },
   }),
 });
+const balancedEnd = (sql, from) => {
+  let depth = 1;
+  let quote = null;
+  let i = from;
+  for (; depth && i < sql.length; i += 1) {
+    const c = sql[i];
+    if (quote) { if (c === quote) quote = null; }
+    else if (c === "'" || c === "\"") quote = c;
+    else if (c === "(") depth += 1;
+    else if (c === ")") depth -= 1;
+  }
+  return i;
+};
+const checkClauses = (sql) => [...sql.matchAll(/\bCHECK\s*\(/gi)]
+  .map((m) => sql.slice(m.index, balancedEnd(sql, m.index + m[0].length)).replace(/\s+/g, "").toLowerCase()).sort();
+const columnSegments = (sql) => {
+  const open = sql.indexOf("(");
+  const body = sql.slice(open + 1, balancedEnd(sql, open + 1) - 1);
+  const segments = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    const c = body[i];
+    if (quote) { if (c === quote) quote = null; }
+    else if (c === "'" || c === "\"") quote = c;
+    else if (c === "(") depth += 1;
+    else if (c === ")") depth -= 1;
+    else if (c === "," && depth === 0) { segments.push(body.slice(start, i).trim()); start = i + 1; }
+  }
+  segments.push(body.slice(start).trim());
+  return segments.filter((seg) => !/^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN)\b/i.test(seg));
+};
 const describeDb = (db) => {
   const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
   const tables = {};
@@ -154,17 +212,25 @@ const describeDb = (db) => {
     const shape = db.prepare(`PRAGMA table_list(${name})`).get();
     const unique = db.prepare(`PRAGMA index_list(${name})`).all().filter((i) => i.origin === "u")
       .map((i) => db.prepare(`PRAGMA index_info(${i.name})`).all().map((c) => c.name).join(",")).sort();
+    const sql = objects.find((o) => o.type === "table" && o.name === name).sql;
+    const collations = Object.fromEntries(columnSegments(sql).map((seg) => [seg.match(/^["`\[]?(\w+)/)[1], (seg.match(/\bCOLLATE\s+(\w+)/i) || [, "binary"])[1].toLowerCase()]));
     tables[name] = {
-      withoutRowid: shape.wr, strict: shape.strict, unique,
+      withoutRowid: shape.wr, strict: shape.strict, unique, checks: checkClauses(sql),
       columns: Object.fromEntries(db.prepare(`PRAGMA table_info(${name})`).all()
-        .map((c) => [c.name, `${c.type} notnull=${c.notnull} default=${c.dflt_value} pk=${c.pk}`])),
+        .map((c) => [c.name, `${c.type} notnull=${c.notnull} default=${c.dflt_value} pk=${c.pk} collate=${collations[c.name]}`])),
     };
   }
   const named = (type) => Object.fromEntries(objects.filter((o) => o.type === type && o.sql).map((o) => [o.name, `${o.tbl_name}: ${sqlText(o.sql)}`]));
   return { tables, indexes: named("index"), triggers: named("trigger") };
 };
-const migrationFiles = readdirSync(new URL("migrations/", root)).filter((f) => /^\d{4}_\w+\.sql$/.test(f)).sort();
+const migrationFiles = readdirSync(new URL("migrations/", root)).sort();
+assert.deepEqual(migrationFiles.filter((f) => !/^\d{4}_\w+\.sql$/.test(f)), [], "every file in migrations/ is a NNNN_name.sql migration");
+assert.equal(new Set(migrationFiles.map((f) => f.slice(0, 4))).size, migrationFiles.length, "no two migrations share a number");
 assert(migrationFiles.length >= 16 && migrationFiles[0] === "0001_baseline.sql", "the migrations directory is read in full, in number order");
+for (const file of migrationFiles) {
+  assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(read(`migrations/${file}`)),
+    `migrations/${file} must not store credential material in D1`);
+}
 const fromSchema = describeDb(sqliteOf([read("schema.sql")]));
 const fromMigrations = describeDb(sqliteOf(migrationFiles.map((f) => read(`migrations/${f}`))));
 assert.deepEqual(fromMigrations, fromSchema,
