@@ -863,9 +863,14 @@ registered in `tests/suites.json`, in that file's order and with `tests/` as
 the working directory, whatever an earlier suite did; kills a suite at its
 `timeoutS`, else at the larger of 120 s and three times its `medianS`; and
 exits 1 when any suite failed or timed out, 0 only when all passed, 2 on a
-usage or manifest error before anything runs, and 130 or 143 when interrupted
-(the signal is passed to the running suite, which gets two seconds to clean
-up before SIGKILL, and the table so far is still printed). It prints a table
+usage or manifest error before anything runs, and 128 plus the signal's
+number (130, 143 or 129) when interrupted by SIGINT, SIGTERM or SIGHUP. The
+signal is passed to the running suite's process group, which gets two seconds
+to clean up before SIGKILL, and the table so far is still printed. A repeat
+within 500 ms is the same interrupt (one Ctrl-C reaches the runner from the
+terminal and again from npm when the script shell execs it), and only a
+signal after that window kills the suite at once. When a suite exits,
+whatever is left in its process group is killed. It prints a table
 of every suite's result, seconds and assertions, and appends it as Markdown,
 with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
 is set. **Every `test:*` script in `tests/package.json` needs an entry in
@@ -873,7 +878,9 @@ is set. **Every `test:*` script in `tests/package.json` needs an entry in
 refuses to start and exits 2. `node run.mjs --only a,b` (from `tests/`, names
 without the `test:` prefix) runs those suites alone, `--bail` stops at the
 first failure as the old chain did, and `--timeout-scale=x` multiplies every
-timeout on a slow machine. `npm run test:x` still runs one suite by itself.
+timeout on a slow machine (a timeout past `setTimeout`'s 2^31-1 ms is held
+there, so a very large scale switches timeouts off rather than firing them at
+once). `npm run test:x` still runs one suite by itself.
 
 ### Which suites need the dev server, and which do not
 
@@ -1103,14 +1110,18 @@ alone on the real clock and prints the numbers DEPLOY.md 10.5n quotes.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
-`run-contract` (the `run` suite) was measured on 2026-10-05: 14 to 22 s with no
-server and 346 assertions, almost all of it waiting out the fixtures' timeouts
+`run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s with no
+server and 379 assertions, almost all of it waiting out the fixtures' timeouts
 and kill graces. It checks `tests/suites.json` against `package.json`, then
 spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
 hang that ignores SIGTERM, a flaky suite, a detached process that holds a
 suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide
-failures under the step-summary limit, and the runner itself sent SIGTERM and
-SIGINT mid-suite.
+failures under the step-summary limit, a ✓ split across the 64 KiB pipe chunk,
+a child left in a suite's group after the suite exits 0 and after it leaves on
+SIGTERM, a timeout scale past `setTimeout`'s range, and the runner itself sent
+SIGTERM, SIGINT, SIGHUP, two SIGINTs 5 ms apart and a second SIGINT 800 ms
+later mid-suite. Its process checks read `/proc` where it exists and `ps`
+elsewhere, so it runs on macOS too.
 
 Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,

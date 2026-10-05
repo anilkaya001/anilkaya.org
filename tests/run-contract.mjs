@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_DIR, TIMEOUT_FLOOR_S, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS,
-  loadManifest, timeoutFor, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
+  DEFAULT_DIR, TIMEOUT_FLOOR_S, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS, REPEAT_WINDOW_MS, MAX_TIMER_MS,
+  loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
 } from "./run.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +53,12 @@ process.on("exit", () => {
   eq(timeoutFor({ medianS: null }), TIMEOUT_FLOOR_S, "an unmeasured suite gets the floor");
   eq(timeoutFor({ medianS: 374.9, timeoutS: 30 }), 30, "an explicit timeoutS wins over the median");
   eq(timeoutFor({ medianS: 100 }, 2), 600, "--timeout-scale multiplies the timeout");
+  eq(timerDelayMs(1125), 1125000, "a timeout is armed in milliseconds");
+  eq(timerDelayMs(1125 * 100000), MAX_TIMER_MS, "a timeout past setTimeout's 2^31-1 ms is capped there, never wrapped to 1 ms by Node");
+  eq(timerDelayMs(120 * 17900), MAX_TIMER_MS, "the cap holds for a floor suite at a scale of 17,900 too");
+  deep(["SIGINT", "SIGTERM", "SIGHUP"].map(exitCodeFor), [130, 143, 129], "an interrupted run exits 128 plus the signal's number");
+  deep([interrupt("SIGINT", 1000), interrupt("SIGINT", 1005), interrupt("SIGTERM", 1000 + REPEAT_WINDOW_MS - 1), interrupt("SIGINT", 1000 + REPEAT_WINDOW_MS + 100)], ["forward", "repeat", "repeat", "kill"],
+    "the first signal is forwarded, a repeat inside the window (one Ctrl-C delivered by the terminal and by npm) is not an escalation, a later one is");
   eq(countAssertions("✓ flows-x: 1,204 assertions — a\nnoise\n✓ flows-y: 3 assertions\n"), 1207, "assertion counts of every ✓ line are summed, thousands separators read");
   eq(countAssertions("flows-reads-contract: 40 checks passed\nflows-reading: 2 checks\n"), 42, "the suites that print \"N checks\" are counted too");
   eq(countAssertions("a sentence that mentions 3 assertions: 4 checks\n"), null, "a count only counts at the head of a line");
@@ -134,7 +140,23 @@ const run = (args, { summary = null, env = {}, dir = fx } = {}) => {
   });
   return { ...r, ms: Date.now() - t0 };
 };
-const alive = (pid) => { try { process.kill(pid, 0); } catch { return false; } try { return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return false; } };
+const exitedOrZombie = (pid) => {
+  if (existsSync("/proc/self/stat")) {
+    try { return /^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, "utf8")); } catch { return true; }
+  }
+  const ps = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" });
+  if (ps.error) return false;
+  return ps.status !== 0 || /^\s*Z/.test(ps.stdout);
+};
+const alive = (pid) => { try { process.kill(pid, 0); } catch { return false; } return !exitedOrZombie(pid); };
+const goneSoon = async (pid, ms = 1500) => {
+  const until = Date.now() + ms;
+  while (alive(pid)) {
+    if (Date.now() > until) return false;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return true;
+};
 const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
 
 {
@@ -152,8 +174,8 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   eq(late.diff, "abc123", "the environment (ASSET_DIFF_BASE) reaches the suites");
 
   const pids = JSON.parse(readFileSync(path.join(marks, "hang.pids"), "utf8"));
-  ok(!alive(pids.self), "the hung suite was killed although it ignores SIGTERM");
-  ok(!alive(pids.grandchild), "the hung suite's own child process was killed with it (the whole process group)");
+  ok(await goneSoon(pids.self), "the hung suite was killed although it ignores SIGTERM");
+  ok(await goneSoon(pids.grandchild), "the hung suite's own child process was killed with it (the whole process group)");
   ok(r.ms < 1000 + KILL_GRACE_MS + 8000, `the hang cost its timeout and the kill grace, not the caller's limit (${r.ms} ms)`);
 
   const md = readFileSync(summary, "utf8");
@@ -238,8 +260,10 @@ file2("after.mjs", `import { writeFileSync } from "node:fs"; writeFileSync(${JSO
 file2("sweeper.mjs", `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";
 const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
 g.unref();
-for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => {
+let got = 0;
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => {
   console.log("sweeper: " + sig + " received, sweeping");
+  if (got++) return;
   setTimeout(() => {
     try { process.kill(-g.pid, "SIGKILL"); } catch {}
     writeFileSync(${JSON.stringify(mark("sweeper.swept"))}, sig);
@@ -257,6 +281,23 @@ const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 15000)"], { detac
 g.unref();
 writeFileSync(${JSON.stringify(mark("escapee.pid"))}, String(g.pid));
 console.log("✓ escapee: 1 assertions");\n`);
+file2("split.mjs", `const bytes = Buffer.from("a".repeat(65534) + "\\n✓ split: 5 assertions\\n✓ split-two: 7 assertions\\n", "utf8");
+process.stdout.write(bytes.subarray(0, 65536));
+setTimeout(() => { process.stdout.write(bytes.subarray(65536)); process.exitCode = 1; }, 300);\n`);
+file2("lingerer.mjs", `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";
+const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "inherit" });
+writeFileSync(${JSON.stringify(mark("lingerer.pid"))}, String(g.pid));
+console.log("✓ lingerer: 1 assertions");
+process.exit(0);\n`);
+file2("quitter.mjs", `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";
+const g = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setTimeout(() => {}, 30000)"], { stdio: ["ignore", "pipe", "ignore"] });
+g.stdout.once("data", () => {
+  g.stdout.destroy();
+  writeFileSync(${JSON.stringify(mark("quitter.pid"))}, String(g.pid));
+  console.log("quitter: started");
+});
+process.on("SIGTERM", () => process.exit(143));
+setInterval(() => {}, 1000);\n`);
 file2("loud.mjs", `process.stdout.write("x".repeat(3 * 1024 * 1024)); process.exitCode = 1;\n`);
 file2("wide.sh", `line=$(printf '%01000d' 0); i=0; while [ $i -lt 40 ]; do echo "$i $line"; i=$((i+1)); done; exit 1\n`);
 const WIDE = 80;
@@ -271,6 +312,9 @@ writeFileSync(path.join(fx2, "package.json"), JSON.stringify({
     "test:stubborn": "node stubborn.mjs",
     "test:escapee": "node escapee.mjs",
     "test:loud": "node loud.mjs",
+    "test:split": "node split.mjs",
+    "test:lingerer": "node lingerer.mjs",
+    "test:quitter": "node quitter.mjs",
     ...Object.fromEntries(wideNames.map((n) => [`test:${n}`, "sh wide.sh"])),
   },
 }, null, 2));
@@ -278,7 +322,9 @@ writeFileSync(path.join(fx2, "suites.json"), JSON.stringify({
   version: 1,
   suites: [
     { name: "escapee", class: "N", medianS: 0.1, timeoutS: 2 },
-    ...["pass", "sweeper", "stubborn", "after", "loud"].map((name) => ({ name, class: "N", medianS: 0.1 })),
+    ...["pass", "sweeper", "stubborn", "after", "loud", "split"].map((name) => ({ name, class: "N", medianS: 0.1 })),
+    { name: "lingerer", class: "N", medianS: 0.1, timeoutS: 10 },
+    { name: "quitter", class: "N", medianS: 0.1, timeoutS: 1 },
     ...wideNames.map((name) => ({ name, class: "N", medianS: 0.1 })),
   ],
 }, null, 2));
@@ -290,7 +336,7 @@ const waitFor = async (cond, ms, what) => {
     await new Promise((r) => setTimeout(r, 50));
   }
 };
-const signalled = async (args, { ready, signal, summary }) => {
+const signalled = async (args, { ready, signals, summary }) => {
   const child = spawn(process.execPath, [RUN, "--dir", fx2, ...args], {
     cwd: scratch,
     env: { ...process.env, GITHUB_STEP_SUMMARY: summary },
@@ -304,7 +350,11 @@ const signalled = async (args, { ready, signal, summary }) => {
   await waitFor(() => existsSync(ready), 20000, ready);
   await new Promise((r) => setTimeout(r, 200));
   const t0 = Date.now();
-  child.kill(signal);
+  for (const [signal, atMs] of signals) {
+    const wait = t0 + atMs - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    child.kill(signal);
+  }
   let guard;
   const end = await Promise.race([closed, new Promise((r) => { guard = setTimeout(() => r({ code: "hung" }), 20000); })]);
   clearTimeout(guard);
@@ -315,13 +365,13 @@ const signalled = async (args, { ready, signal, summary }) => {
 {
   const summary = path.join(scratch, "summary-sigterm.md");
   writeFileSync(summary, "previous\n");
-  const r = await signalled(["--only", "pass,sweeper,after"], { ready: mark("sweeper.pids"), signal: "SIGTERM", summary });
+  const r = await signalled(["--only", "pass,sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGTERM", 0]], summary });
   eq(r.code, 143, `SIGTERM to the runner exits 143 (got ${r.code}; ${r.stderr.slice(-300)})`);
   const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
   ok(existsSync(mark("sweeper.swept")), "the running suite got the SIGTERM itself and its own cleanup ran (not an immediate SIGKILL)");
   eq(readFileSync(mark("sweeper.swept"), "utf8"), "SIGTERM", "the runner passed on the signal it received");
-  ok(!alive(pids.self), "the interrupted suite is gone");
-  ok(!alive(pids.escapee), "and so is the detached process it swept on SIGTERM, which a SIGKILL of the group would have leaked");
+  ok(await goneSoon(pids.self), "the interrupted suite is gone");
+  ok(await goneSoon(pids.escapee), "and so is the detached process it swept on SIGTERM, which a SIGKILL of the group would have leaked");
   ok(!existsSync(mark("after.ran")), "no suite starts after an interrupt");
   const md = readFileSync(summary, "utf8");
   ok(md.startsWith("previous\n"), "the partial summary is appended");
@@ -336,11 +386,90 @@ const signalled = async (args, { ready, signal, summary }) => {
 
 {
   const summary = path.join(scratch, "summary-sigint.md");
-  const r = await signalled(["--only", "stubborn,after", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signal: "SIGINT", summary });
+  const r = await signalled(["--only", "stubborn,after", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0]], summary });
   eq(r.code, 130, `SIGINT to the runner exits 130 (got ${r.code})`);
-  ok(!alive(Number(readFileSync(mark("stubborn.pid"), "utf8"))), "a suite that ignores the signal is SIGKILLed after the grace");
+  ok(await goneSoon(Number(readFileSync(mark("stubborn.pid"), "utf8"))), "a suite that ignores the signal is SIGKILLed after the grace");
   ok(r.ms >= KILL_GRACE_MS - 100 && r.ms < KILL_GRACE_MS + 6000, `after the grace, not at once and not at its timeout (${r.ms} ms)`);
   ok(/`stubborn` \| ❌ failed \(interrupted by SIGINT\)/.test(readFileSync(summary, "utf8")), "and is recorded as interrupted");
+}
+
+const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { force: true }); };
+
+{
+  clearMarks("sweeper.pids", "sweeper.swept", "after.ran");
+  const summary = path.join(scratch, "summary-double.md");
+  const r = await signalled(["--only", "sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGINT", 0], ["SIGINT", 5]], summary });
+  eq(r.code, 130, `two SIGINTs 5 ms apart (one Ctrl-C, from the terminal and from npm) exit 130 (got ${r.code}; ${r.stderr.slice(-300)})`);
+  const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
+  ok(existsSync(mark("sweeper.swept")), "the repeat inside the window did not escalate: the suite's own sweep ran");
+  ok(await goneSoon(pids.escapee), "and the detached process it swept is gone");
+  ok(await goneSoon(pids.self), "the suite is gone");
+  ok(!r.stderr.includes("received again"), "the repeat was not taken as a second, escalating signal");
+  ok(/`sweeper` \| ❌ failed \(interrupted by SIGINT\)/.test(readFileSync(summary, "utf8")), "the suite is recorded as interrupted by SIGINT");
+}
+
+{
+  clearMarks("sweeper.pids", "sweeper.swept", "after.ran");
+  const summary = path.join(scratch, "summary-sighup.md");
+  const r = await signalled(["--only", "sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGHUP", 0]], summary });
+  eq(r.code, 129, `SIGHUP (the terminal closed) exits 129 (got ${r.code}; ${r.stderr.slice(-300)})`);
+  const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
+  eq(existsSync(mark("sweeper.swept")) && readFileSync(mark("sweeper.swept"), "utf8"), "SIGHUP", "the SIGHUP was passed to the suite in its own session, and its sweep ran");
+  ok(await goneSoon(pids.escapee) && await goneSoon(pids.self), "the suite and its swept escapee are gone");
+  ok(!existsSync(mark("after.ran")), "no suite starts after the hang-up");
+  ok(/run interrupted by SIGHUP/.test(readFileSync(summary, "utf8")), "the summary is still written");
+}
+
+{
+  clearMarks("stubborn.pid", "after.ran");
+  const summary = path.join(scratch, "summary-escalate.md");
+  const r = await signalled(["--only", "stubborn,after", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0], ["SIGINT", REPEAT_WINDOW_MS + 300]], summary });
+  eq(r.code, 130, `a second SIGINT after the window still exits 130 (got ${r.code})`);
+  ok(await goneSoon(Number(readFileSync(mark("stubborn.pid"), "utf8"))), "the suite that ignores signals is gone");
+  ok(r.ms >= REPEAT_WINDOW_MS + 200 && r.ms < KILL_GRACE_MS - 300, `a second signal after the window SIGKILLs at once, before the grace runs out (${r.ms} ms)`);
+  ok(r.stderr.includes("received again"), "and says so");
+}
+
+{
+  const summary = path.join(scratch, "summary-split.md");
+  const r = run(["--only", "split"], { dir: fx2, summary });
+  eq(r.status, 1, "the split fixture fails, so its tail is reported");
+  const md = readFileSync(summary, "utf8");
+  ok(/`split` \| ❌ failed \(exit 1\) \| [\d.]+ \| 12 \|/.test(tableRows(md)[0]), `a ✓ split across the 64 KiB pipe chunk is still counted: ${tableRows(md)[0]}`);
+  ok(r.stdout.includes("✓ split: 5 assertions") && !r.stdout.includes("\uFFFD"), "the echoed log holds the ✓, not U+FFFD");
+  ok(md.includes("✓ split: 5 assertions") && !md.includes("\uFFFD"), "and so does the failure's tail");
+}
+
+{
+  clearMarks("lingerer.pid");
+  const summary = path.join(scratch, "summary-lingerer.md");
+  const r = run(["--only", "lingerer,pass"], { dir: fx2, summary });
+  const pid = Number(readFileSync(mark("lingerer.pid"), "utf8"));
+  const left = !(await goneSoon(pid));
+  try { process.kill(pid, "SIGKILL"); } catch {}
+  eq(r.status, 0, `a suite that exits 0 with a child of its own group still holding its output passes (got ${r.status}; ${r.stderr.slice(-300)})`);
+  ok(!left, "the child left in the suite's group is killed when the suite exits");
+  ok(r.ms < 6000, `and the run does not wait for the suite's 10 s timeout (${r.ms} ms)`);
+  const rows = tableRows(readFileSync(summary, "utf8"));
+  ok(rows.length === 2 && rows.some((l) => /`lingerer` \| ✅ passed/.test(l)) && rows.some((l) => /`pass` \| ✅ passed/.test(l)), `both are reported as passed: ${rows.join(" / ")}`);
+}
+
+{
+  clearMarks("quitter.pid");
+  const summary = path.join(scratch, "summary-quitter.md");
+  const r = run(["--only", "quitter,pass"], { dir: fx2, summary });
+  const pid = Number(readFileSync(mark("quitter.pid"), "utf8"));
+  const left = !(await goneSoon(pid));
+  try { process.kill(pid, "SIGKILL"); } catch {}
+  ok(!left, "a child in the suite's group that ignores SIGTERM is SIGKILLed when the timed-out suite closes, though the suite itself left on SIGTERM");
+  eq(r.status, 1, "the timeout fails the run");
+  ok(tableRows(readFileSync(summary, "utf8")).some((l) => /`quitter` \| ⏱️ timed out at 1 s/.test(l)), "and is reported as a timeout");
+}
+
+{
+  const r = run(["--only", "pass", "--timeout-scale=100000"], { dir: fx2 });
+  eq(r.status, 0, `a scale that would overflow setTimeout does not kill every suite at once (got ${r.status}; ${r.stdout.slice(-300)})`);
+  ok(r.stdout.includes("1 suites: 1 passed, 0 failed, 0 timed out") && !r.stdout.includes("timed out at"), "the suite is reported as passed, not timed out");
 }
 
 {
@@ -381,4 +510,4 @@ const signalled = async (args, { ready, signal, summary }) => {
   ok(md.includes("earlier lines left out to keep the summary small") && md.includes("39 0000000000"), "shortened from the head, so each keeps its last line, and says so");
 }
 
-console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, and SIGINT or SIGTERM passed to the running suite with a partial summary written`);
+console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);

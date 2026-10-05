@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync, appendFileSync } from "node:fs";
+import { constants } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -7,6 +8,9 @@ export const DEFAULT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const TIMEOUT_FLOOR_S = 120;
 export const TIMEOUT_MEDIAN_FACTOR = 3;
 export const KILL_GRACE_MS = 2000;
+export const REPEAT_WINDOW_MS = 500;
+export const MAX_TIMER_MS = 2 ** 31 - 1;
+export const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 export const TAIL_LINES = 40;
 export const TAIL_LINE_CHARS = 400;
 export const SUMMARY_TAIL_BUDGET = 512 * 1024;
@@ -42,6 +46,15 @@ export function timeoutFor(suite, scale = 1) {
     ? suite.timeoutS
     : Math.max(TIMEOUT_FLOOR_S, Math.ceil(TIMEOUT_MEDIAN_FACTOR * (suite.medianS || 0)));
   return base * scale;
+}
+
+export function timerDelayMs(limitS) {
+  return Math.min(Math.max(0, limitS * 1000), MAX_TIMER_MS);
+}
+
+export function exitCodeFor(signal) {
+  const n = constants.signals[signal];
+  return Number.isInteger(n) ? 128 + n : 1;
 }
 
 export function loadManifest(dir = DEFAULT_DIR) {
@@ -130,12 +143,18 @@ function killGroup(child, signal) {
 
 let current = null;
 let interruptedBy = null;
+let interruptedAt = 0;
 
-export function interrupt(signal) {
-  const first = !interruptedBy;
-  interruptedBy = interruptedBy || signal;
-  if (current) current.stop(first ? signal : "SIGKILL", "interrupt");
-  return first;
+export function interrupt(signal, now = Date.now()) {
+  if (!interruptedBy) {
+    interruptedBy = signal;
+    interruptedAt = now;
+    if (current) current.stop(signal, "interrupt");
+    return "forward";
+  }
+  if (now - interruptedAt < REPEAT_WINDOW_MS) return "repeat";
+  if (current) current.stop("SIGKILL", "interrupt");
+  return "kill";
 }
 
 function runSuite(suite, dir, scale, out) {
@@ -144,8 +163,9 @@ function runSuite(suite, dir, scale, out) {
     const env = { ...process.env, PATH: [path.join(dir, "node_modules", ".bin"), process.env.PATH || ""].join(path.delimiter) };
     const child = spawn("/bin/sh", ["-c", suite.command], { cwd: dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const lines = tailCollector();
-    const take = (name, chunk) => {
-      const text = chunk.toString("utf8");
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    const take = (name, text) => {
       (name === "stdout" ? out.stdout : out.stderr).write(text);
       lines.take(name, text);
     };
@@ -178,7 +198,7 @@ function runSuite(suite, dir, scale, out) {
       if (stopping) return;
       timedOut = true;
       stop("SIGTERM", "timeout");
-    }, limitS * 1000);
+    }, timerDelayMs(limitS));
     child.on("error", (err) => { exit = exit || { code: null, signal: null, error: err.message }; });
     child.on("exit", (code, signal) => {
       exit = { code, signal };
@@ -323,15 +343,18 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
     try { appendFileSync(env.GITHUB_STEP_SUMMARY, markdownSummary(results, wallS, { interrupted: interruptedBy })); }
     catch (err) { io.stderr.write(`run.mjs: could not write the step summary: ${err.message}\n`); }
   }
-  if (interruptedBy) return interruptedBy === "SIGINT" ? 130 : 143;
+  if (interruptedBy) return exitCodeFor(interruptedBy);
   const t = tally(results);
   return t.fail + t.timeout > 0 ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  for (const sig of ["SIGINT", "SIGTERM"]) {
+  for (const stream of [process.stdout, process.stderr]) stream.on("error", () => {});
+  for (const sig of FORWARDED_SIGNALS) {
     process.on(sig, () => {
-      if (interrupt(sig)) process.stderr.write(`\nrun.mjs: ${sig} received; passing it to the running suite, SIGKILL in ${KILL_GRACE_MS} ms if it has not closed\n`);
+      const what = interrupt(sig);
+      if (what === "forward") process.stderr.write(`\nrun.mjs: ${sig} received; passing it to the running suite, SIGKILL in ${KILL_GRACE_MS} ms if it has not closed (a signal more than ${REPEAT_WINDOW_MS} ms later kills it now)\n`);
+      else if (what === "kill") process.stderr.write(`\nrun.mjs: ${sig} received again; killing the running suite now\n`);
     });
   }
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (err) => {
