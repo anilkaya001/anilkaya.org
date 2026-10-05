@@ -625,6 +625,9 @@ const MIN = 60 * 1000;
   const challengedClock = by("clock read is challenged");
   ok(challengedClock.issues.length === 0 && !challengedClock.failed && !challengedClock.problems.length,
     "A CLOCK READ CHALLENGED ON THREE TICKS IN A ROW (issue #144) raises nothing: the witness keeps the last good clock of the day and still reads Tier 1 and Tier 2");
+  const evening = by("idle ticks");
+  ok(evening.issues.length === 0 && !evening.failed && !evening.problems.length,
+    "AN IDLE EVENING WHOSE CLOCK READ IS CHALLENGED ONCE A TICK raises nothing: the clock is the only read there, and its retry answers");
   const blind = by("every read is challenged");
   ok(blind.issues.length === 1 && /^\[flows-witness:probe\]/.test(blind.issues[0].title) && blind.closed === 1 && !blind.problems.length,
     "while three ticks on which every read fails, each tried twice, still open the probe issue, and it closes when reads return");

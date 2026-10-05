@@ -2566,15 +2566,21 @@ see, and tells the owner when it is wrong. Five checks:
 
 | Id | Breach | Confirmed after | Cleared after |
 |---|---|---|---|
-| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
+| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). On a tick whose clock read failed, Tier 1's last tick is not judged (the kept clock's stamp is as old as its read), only the two keys. A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
 | `tier2` | From 45 minutes after the open to 25 minutes past the close, `live:breadth` is more than 45 minutes old (the readers' stale line for the breadth class, and the line the Worker's own `liveStalled` watchdog draws, which the tests hold equal minute by minute). The loop is the writer, so this catches passes that run and publish nothing. | Two consecutive ticks | Three consecutive healthy ticks |
 | `nightly` | At or after 21:00 ET (close plus the five-hour grace) `meta.sessionDate` is older than `expectedNightlySession`, so a missed Friday stays a breach through the weekend | The first tick when `meta` is readable and stale; two consecutive ticks when the store answered `pending` (the Worker answers `pending` for a missing row and for a failed D1 read alike, so one such answer proves nothing) | `meta` holds the expected session or a later one |
 | `chain` | The run reached its budget and could not dispatch its successor after three tries | At once | The next loop's first tick |
-| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer) | Three ticks | Three consecutive ticks that read something |
+| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer): the clock read and every key read failed, each after its retry | Three ticks | Three consecutive ticks that read something |
 
 A failed read is never a verdict: a 403 or a timeout is `inconclusive`, changes
 nothing, and only feeds `probe`; the one answer that can mean either (`pending`)
-needs to repeat. Each breach opens one GitHub Issue titled
+needs to repeat. A challenged read (a 403 that is not the Worker refusing the
+credential, a 408, a 429, a 5xx, a timeout or no answer), the loop's clock read
+included, is tried again once, one second later, inside its 10 second deadline:
+each attempt has 4.5 seconds. A clock that was not read this tick is used only on
+its own Eastern day and without its Tier 1 stamp, which is as old as the last read
+that answered, so on such a tick `tier1` is judged on `live:market` and
+`live:focus` alone. Each breach opens one GitHub Issue titled
 `[flows-witness:<id>] ...`, whose body mentions `@anilkaya001` (a mention
 notifies you under GitHub's default notification settings, watching or not), states the numbers and the
 repair, and links the run. A persisting breach adds one reminder comment per six
@@ -2661,7 +2667,9 @@ how many requests timed out. `FLOWS_UW_TIMEOUT_MS` (100 to 60000) overrides the
 20 seconds, which the tests use. The nightly's client is unchanged, and so are
 the ingest writes, which still carry no deadline of their own. The loop's own
 clock read, made before every tick, has the same 10 second deadline as each of
-the watch's reads: a stalled ingest connection costs one tick, where Node's
+the watch's reads, and spends it the same way: a first attempt of at most 4.5
+seconds, then, if it was challenged, one second's wait and a second attempt of at
+most 4.5 seconds. A stalled ingest connection costs one tick, where Node's
 default would have held the loop, and with it the witness's cadence, for its
 300 second headers timeout.
 

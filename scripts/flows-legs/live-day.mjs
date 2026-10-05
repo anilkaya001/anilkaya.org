@@ -19,7 +19,7 @@ async function drive(world, { budgetMs, notes }) {
   });
   const loop = await runLiveLoop({
     now: world.now, sleep: world.sleep, budgetMs, log: () => {}, warn: (line) => notes.push(line), watch,
-    readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; } }),
+    readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; }, sleep: world.sleep }),
     pass: async () => {
       world.advance(20000);
       return { skipped: null, answered: 38, landed: 10 };
@@ -159,11 +159,27 @@ export const DRY_SCENARIOS = Object.freeze([
       const problems = [];
       const during = w.stat.reads.filter((x) => x.at >= at(11, 0) && x.at < at(11, 15));
       const count = (key) => during.filter((x) => x.key === key).length;
-      if (count("clock") !== 3) problems.push(`the clock was read ${count("clock")} time(s) while challenged, not once on each of three ticks`);
+      if (count("clock") !== 6) problems.push(`the clock was read ${count("clock")} time(s) while challenged, not twice (a try and its retry) on each of three ticks`);
       for (const key of ["live:market", "live:focus", "live:breadth"]) {
         if (count(key) !== 3) problems.push(`${key} was read ${count(key)} time(s) while the clock was challenged, not once a tick`);
       }
       if (w.github.record.created.length) problems.push(`a challenged clock opened ${w.github.record.created.map((c) => c.title).join("; ")}`);
+      if (r.verdict.failed) problems.push(`the run was red: ${r.verdict.why}`);
+      return problems;
+    },
+  },
+  {
+    name: "an evening after the nightly landed, the clock read is challenged once on each of three idle ticks: its retry answers, and nothing opens",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(18, 30), landAt: at(17, 45), clockFlaky: [[at(19, 0), at(19, 40)]] }),
+    budgetMs: 2 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const during = w.stat.reads.filter((x) => x.at >= at(19, 0) && x.at <= at(19, 40));
+      const clock = during.filter((x) => x.key === "clock").length;
+      if (clock !== 6) problems.push(`the clock was read ${clock} time(s) over three challenged idle ticks, not twice a tick (a try and its retry)`);
+      const other = during.filter((x) => x.key !== "clock").map((x) => x.key);
+      if (other.length) problems.push(`the idle evening read ${[...new Set(other)].join(", ")} beside the clock`);
+      if (w.github.record.created.length) problems.push(`a clock read that its retry answered opened ${w.github.record.created.map((c) => c.title).join("; ")}`);
       if (r.verdict.failed) problems.push(`the run was red: ${r.verdict.why}`);
       return problems;
     },
@@ -181,7 +197,7 @@ export const DRY_SCENARIOS = Object.freeze([
       const market = w.stat.reads.filter((x) => x.key === "live:market" && x.at >= at(10, 0) && x.at < at(10, 15)).length;
       if (market !== 6) problems.push(`live:market was read ${market} time(s) over three challenged ticks, not twice a tick`);
       const clock = w.stat.reads.filter((x) => x.key === "clock" && x.at >= at(10, 0) && x.at < at(10, 15)).length;
-      if (clock !== 3) problems.push(`the loop's clock read was made ${clock} time(s) over three ticks, not once a tick`);
+      if (clock !== 6) problems.push(`the loop's clock read was made ${clock} time(s) over three ticks, not twice a tick (a try and its retry)`);
       if (!w.github.record.closed.length) problems.push("the probe issue was not closed when reads returned");
       return problems;
     },

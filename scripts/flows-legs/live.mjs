@@ -40,11 +40,12 @@ export function sessionClock(body) {
   return { day: c.day, trading: clockFlag(c.trading), earlyClose: clockFlag(c.earlyClose) };
 }
 
-export async function readLiveClock(readOnce, { seen = null } = {}) {
+export async function readLiveClock(readOnce, { seen = null, deadlineMs = LIVE_LOOP.clockDeadlineMs,
+  retryMs = WATCH_RETRY.delayMs, sleep = realSleep } = {}) {
   let body = null;
   let clock = null;
   try {
-    const read = await readOnce("clock");
+    const read = await readWithRetry(readOnce, "clock", { deadlineMs, retryMs, sleep });
     body = read && read.payload ? read.payload : null;
     clock = sessionClock(body);
   } catch {
@@ -384,11 +385,33 @@ export const githubSignal = (ms = LIVE_LOOP.githubTimeoutMs) => AbortSignal.time
 export const transientRefusal = (r) => !!r && !r.sent &&
   (r.why === "unreachable" || r.status === 408 || r.status === 429 || (Number.isInteger(r.status) && r.status >= 500));
 
+function realSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
 export const withDeadline = (promise, ms) => new Promise((resolve) => {
   const timer = setTimeout(() => resolve({ failed: true, status: 0, detail: "timeout" }), ms);
   promise.then((value) => { clearTimeout(timer); resolve(value); },
     (error) => { clearTimeout(timer); resolve({ failed: true, status: 0, detail: error && error.message ? error.message : String(error) }); });
 });
+
+export const WATCH_RETRY = Object.freeze({ delayMs: 1000, statuses: Object.freeze([0, 403, 408, 429]) });
+
+export function challenged(read) {
+  if (!read || read.failed !== true || read.final) return false;
+  const status = Number(read.status) || 0;
+  return WATCH_RETRY.statuses.includes(status) || status >= 500;
+}
+
+export async function readWithRetry(readOnce, key, { deadlineMs, retryMs = WATCH_RETRY.delayMs, sleep = realSleep } = {}) {
+  const attempt = (ms) => withDeadline(Promise.resolve().then(() => readOnce(key)), ms);
+  if (!(deadlineMs > retryMs)) return attempt(deadlineMs);
+  const each = Math.floor((deadlineMs - retryMs) / 2);
+  const first = await attempt(each);
+  if (!challenged(first)) return first;
+  await sleep(retryMs);
+  return attempt(each);
+}
 
 export async function chainDispatch({ env = {}, fetchImpl = fetch, at = Date.now(), workflow = LIVE_LOOP.workflow,
   ref = LIVE_LOOP.ref, inputs = null } = {}) {
@@ -419,8 +442,6 @@ export async function chainWithRetry(send, { sleep = null, delays = LIVE_LOOP.ch
   }
   return { ...last, attempts: tries.length };
 }
-
-const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 const nextOpenAt = (at, clock) => {
   const p = phaseAt(at, clock);

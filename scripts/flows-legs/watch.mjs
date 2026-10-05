@@ -3,7 +3,7 @@ import {
   WITNESS, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter, sessionOf,
 } from "./witness.mjs";
 import { createNightlyStart, NIGHTLY } from "./starts.mjs";
-import { withDeadline } from "./live.mjs";
+import { readWithRetry, WATCH_RETRY, challenged } from "./live.mjs";
 import { etTime } from "./health.mjs";
 
 export function normalizeRead(read) {
@@ -12,13 +12,7 @@ export function normalizeRead(read) {
   return { ok: true, payload: read.payload };
 }
 
-export const WATCH_RETRY = Object.freeze({ delayMs: 1000, statuses: Object.freeze([0, 403, 408, 429]) });
-
-export function challenged(read) {
-  if (!read || read.failed !== true || read.final) return false;
-  const status = Number(read.status) || 0;
-  return WATCH_RETRY.statuses.includes(status) || status >= 500;
-}
+export { WATCH_RETRY, challenged };
 
 export function keptView(view, at, fresh) {
   if (!view || fresh) return view;
@@ -46,15 +40,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
   const witness = createWitness({ reporter: reporter || createIssueReporter({ env, fetchImpl }), env, log, warn });
   const nightly = createNightlyStart({ env, fetchImpl, log, warn });
   const state = { landed: null };
-  const attempt = (key, ms) => withDeadline(Promise.resolve().then(() => readOnce(key)), ms);
-  const read = async (key) => {
-    if (!(readDeadlineMs > retryMs)) return normalizeRead(await attempt(key, readDeadlineMs));
-    const each = Math.floor((readDeadlineMs - retryMs) / 2);
-    const first = await attempt(key, each);
-    if (!challenged(first)) return normalizeRead(first);
-    await sleep(retryMs);
-    return normalizeRead(await attempt(key, each));
-  };
+  const read = async (key) => normalizeRead(await readWithRetry(readOnce, key, { deadlineMs: readDeadlineMs, retryMs, sleep }));
 
   return {
     async tick({ at, clock = null, clockRead = null, first = false }) {
@@ -90,7 +76,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       const seen = clockFresh || reads.some((r) => !r.failed);
       results.push({
         id: "probe", status: seen ? "ok" : "breach",
-        detail: `nothing could be read through the ingest route at ${etTime(at)} (a challenged read is tried twice): ` +
+        detail: `nothing could be read through the ingest route at ${etTime(at)} (the clock read and each challenged key read are tried twice): ` +
           [clockFresh ? "the clock answered" : "the clock read failed",
             ...reads.map((r) => (r.failed ? (r.status ? "HTTP " + r.status : r.detail || "no answer") : "answered"))].join(", "),
       });
