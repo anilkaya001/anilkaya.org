@@ -902,6 +902,8 @@ const CARD = {
   ok(user.includes("S1 put-credit-spread") && user.includes("vrp.rel.21 = 0.18"), "and hands the model the facts and structures");
   ok(/never add one/.test(system) && /only when that line says the engine stands aside/.test(system) && /at least one of them a fact the structure's own rules rest on/.test(system),
      "and tells it what the vet now enforces: reorder or drop the ranked ideas but never add one, stand aside only when the engine does, and rest each idea on a fact its rules name");
+  ok(/the volatility premium, the IV rank, the term slope/.test(system) && !/percentile/i.test(system),
+     "and names the IV axis the rules rest on as the IV rank, which is what iv.pct.30 holds today, never a percentile");
   same(parseEngineOutput("```json\n{\"verdict\":\"stand-aside\"}\n```"), { verdict: "stand-aside" }, "a fenced JSON reply parses");
   eq(parseEngineOutput("no json here"), null, "and prose is not a reply");
 
