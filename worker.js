@@ -34,6 +34,7 @@ import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shar
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
+import { RT_LIMITS } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
@@ -2021,7 +2022,7 @@ const INFO_TTL_SECONDS = 6 * 3600;
 
 const CHAIN_REFRESH_FLOOR_SECONDS = 15;
 
-const UW_DEADLINE_MS = 4000;
+const UW_DEADLINE_MS = RT_LIMITS.callTimeoutMs;
 
 const UW_OHLC_DEADLINE_MS = 6000;
 

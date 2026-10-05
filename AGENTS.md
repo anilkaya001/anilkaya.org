@@ -325,6 +325,17 @@ Errors use:
   rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
   `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
+- Every vendor call outside the real-time rail (whose hub keeps its own
+  adapter and `callTimeoutMs`) goes through `uwFetch`, whose fetch carries
+  `AbortSignal.timeout`, so the deadline covers the body read too: 4 s by
+  default (`RT_LIMITS.callTimeoutMs`, the rail's own per-call bound),
+  6 s for OHLC, the strategy desk's expiry breakdown, its dated retry and the
+  greek-exposure fallback, 8 s for chain pages (the chain route and the
+  strategy expiry pages), and `LIVE_BUDGET.tier1TimeoutMs` (6 s) for the
+  Tier 1 tick, the focus tick and the tape. An aborted call is JSON
+  `504 chain_timeout` for a route whose caller throws, `null` for a caller
+  that catches, and the quote card's `200` `unavailable` body with `why`
+  `chain_timeout`; a failure before the deadline keeps `502 chain_upstream`.
 
 Authenticated PUT/DELETE requests require an exact `X-IEWT-Owner` match with
 the verified session user. Conflicting `Origin` or `Sec-Fetch-Site` metadata is
@@ -469,7 +480,10 @@ never a scan: the universe column of a name is found by counting separators in
 the name list, an events row by its leading key. The vendor fan-out is capped at
 nine calls a read, queued by priority, parallel, 2.5 s per source and 3 s in
 all; an unfinished or rate-limited source marks its packet `pending` and
-finishes in `ctx.waitUntil`, and the next read picks the result up. Slow kinds
+finishes in `ctx.waitUntil` within `uwFetch`'s 4 s default deadline, and the
+next read picks the result up. A source still unanswered at 4 s is aborted,
+recorded as a transient failure (reason `failed`, the same as a vendor 5xx),
+stores nothing, and the next read calls the vendor again. Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
