@@ -645,4 +645,39 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   console.log("  reading CPU (median of 7 windows of 40): tags " + t.tags.toFixed(2) + " ms, fallback and shape " + t.fallbackShape.toFixed(2) + " ms, prompt " + t.prompt.toFixed(2) + " ms, vet " + t.vet.toFixed(2) + " ms; prompt " + prompt.tokensEst + " estimated tokens");
 }
 
+{
+  const m = BASES.momentum;
+  const book = withFacts(m, [["options.state", { v: "transitional" }], ["options.engine.gex.book", { v: -1.76e6, unit: "usd", display: "−$1.76M per 1% move" }]]);
+  const tag = R.heldTags(book).find((t) => t.code === "dealer-short-gamma");
+  ok(tag && tag.sentence.startsWith("Dealer book gamma is −$1.76M per 1% move:"), "A TRANSITIONAL STATE OVER NEGATIVE BOOK GAMMA: the short-gamma sentence names the book's gamma, not the state (" + (tag && tag.sentence) + ")");
+  ok(tag && !tag.evidence.includes("options.state"), "and does not cite the state chip, which reads transitional");
+  ok(tag && !/implied dealer state is/i.test(tag.sentence), "so the driver no longer says the state is short gamma while its chip says transitional");
+  const fb = R.readingFallback(book, R.heldTags(book));
+  const driver = fb.drivers.find((d) => d.tag === "dealer-short-gamma");
+  ok(driver && driver.cites.includes("options.engine.gex.book") && !driver.cites.includes("options.state"), "the fallback driver carries the same cites");
+  const prompt = R.promptForReading(book, R.heldTags(book));
+  const all = [fb.now, ...fb.drivers, ...fb.tensions, ...fb.watch].filter(Boolean);
+  const r = R.vetReading(JSON.stringify({ now: fb.now, drivers: fb.drivers, tensions: fb.tensions, watch: fb.watch, unknown: fb.unknown, tags: fb.tags }), book, R.heldTags(book), { shown: new Set([...prompt.shown, ...all.flatMap((a) => a.cites)]) });
+  same(r.refused, [], "and the reworded sentence passes the checks a model's wording must pass");
+  const amp = R.heldTags(withFacts(m, [["options.state", { v: "amplifying" }]])).find((t) => t.code === "dealer-short-gamma");
+  ok(amp && amp.sentence.startsWith("The implied dealer state is amplifying:") && amp.evidence.includes("options.state"), "an amplifying state still names the state and cites it");
+
+  eq(R.firstSentence("T-Mobile US, Inc. is an American wireless network operator headquartered in Overland Park, Kansas. It sells plans."),
+    "T-Mobile US, Inc. is an American wireless network operator headquartered in Overland Park, Kansas.", "A COMPANY NAME ENDING IN Inc. IS NOT A SENTENCE END: the profile sentence is quoted whole");
+  eq(R.firstSentence("Apple Inc. designs phones. It also sells services."), "Apple Inc. designs phones.", "Inc. followed by a verb");
+  eq(R.firstSentence("JPMorgan Chase & Co. is a bank holding company. It is based in New York."), "JPMorgan Chase & Co. is a bank holding company.", "Co.");
+  eq(R.firstSentence("The U.S. unit sells chips. Second."), "The U.S. unit sells chips.", "U.S.");
+  eq(R.firstSentence("Founded by J. Smith in 1990, it makes tools. Second."), "Founded by J. Smith in 1990, it makes tools.", "an initial");
+  eq(R.firstSentence("It has 3 segments. The first is retail."), "It has 3 segments.", "an ordinary sentence end still ends");
+  eq(R.firstSentence("No full stop at all"), "No full stop at all", "text with no end is kept");
+
+  const closed = withFacts(m, [["price.last", { label: "Last close" }], ["price.change", { label: "Change on the session" }]]);
+  const p = closed.packets.price.facts;
+  p.find((f) => f.k === "last").label = "Last close";
+  p.find((f) => f.k === "change").label = "Change on the session";
+  const now = R.readingFallback(closed, R.heldTags(closed)).now.text;
+  ok(/^The last close is \S+, \S+ on the session\./.test(now), "A LAST CLOSE IS CALLED A CLOSE, and its session change is not called a change from the previous close (" + now.slice(0, 60) + ")");
+  ok(/^The last price is \S+, \S+ from the previous close\./.test(R.readingFallback(m, R.heldTags(m)).now.text), "a live quote keeps its wording");
+}
+
 console.log("flows-reading: " + checks + " checks");

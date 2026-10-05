@@ -539,7 +539,18 @@ export function buildPricePacket(inp) {
   let session = null;
   const parts = [];
   let last = null;
-  if (q) {
+  const rolled = q && isNum(q.prev) && q.prev === q.price && nightlyUsable && uni.sessionDate === ctx.expected &&
+    isNum(u.px) && Math.abs(u.px - q.price) < 0.005 && isNum(u.chg);
+  if (q && rolled) {
+    last = q.price;
+    asOf = q.tapeTime || null;
+    parts.push({ kind: "live", key: "quote" });
+    const note = "the close of " + uni.sessionDate + "; no trade since, and the vendor's previous close has already moved to it";
+    rec.fact("last", "Last close", q.price, "usd/share", { grade: ng, note });
+    rec.fact("change", "Change on the session", u.chg, "fraction", { signed: true, grade: ng, note: "the session of " + uni.sessionDate + ", from the nightly screen" });
+    rec.fact("volume", "Volume on the session", q.volume, "shares", { silent: true });
+    session = uni.sessionDate;
+  } else if (q) {
     last = q.price;
     asOf = q.tapeTime || null;
     parts.push({ kind: "live", key: "quote" });
