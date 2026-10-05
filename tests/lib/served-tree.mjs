@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, statSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -14,8 +14,7 @@ const git = (root, args) => execFileSync("git", ["--literal-pathspecs", ...args]
 const regularFiles = (root, list) => list.filter((rel) => {
   const abs = path.join(root, rel);
   if (!existsSync(abs)) return false;
-  const st = lstatSync(abs);
-  return st.isFile() && !st.isSymbolicLink();
+  return statSync(abs).isFile();
 });
 
 export function assetsIgnorePatterns({ root = ROOT, defaults = true } = {}) {

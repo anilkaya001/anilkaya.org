@@ -5,6 +5,8 @@ import path from "node:path";
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SKIP_DIRS = new Set(["node_modules", "tests", "docs"]);
 const REFERENCE = /(\/assets\/[^"'()\s?#]+)\?v=(\d+)/g;
+const LOADED = /(["'(])(\/assets\/[^"')?#]+\.(?:css|js|woff2))(\?v=\d+)?/g;
+const END = /["')#\s]/;
 const SHELL = /(<html\b[^>]*\bdata-asset-version=")(\d+)(")/g;
 const PAGES = "shared/flows-pages.js";
 const CONSTANT = /^(export const ASSET_VERSION = ")(\d+)(";)$/gm;
@@ -43,9 +45,17 @@ export function plan(root = DEFAULT_ROOT, { to } = {}) {
   const writes = new Map();
   const moved = [];
   const fontsReset = [];
+  const unversioned = [];
   for (const rel of referenceFiles(root)) {
     const before = readFileSync(path.join(root, rel), "utf8");
     const after = before
+      .replace(LOADED, (all, quote, asset, v, offset, text) => {
+        if (v) return all;
+        const want = asset.endsWith(".woff2") ? fonts : next;
+        const fixable = END.test(text.charAt(offset + all.length));
+        unversioned.push({ file: rel, asset, from: null, to: want, fixable });
+        return fixable ? `${quote}${asset}?v=${want}` : all;
+      })
       .replace(REFERENCE, (all, asset, v) => {
         const want = asset.endsWith(".woff2") ? fonts : next;
         if (Number(v) === want) return all;
@@ -67,10 +77,12 @@ export function plan(root = DEFAULT_ROOT, { to } = {}) {
     writes.set(PAGES, pages.replace(CONSTANT, (all, head, v, tail) => `${head}${next}${tail}`));
   }
   if (next !== from) writes.set("assets/version.txt", `${next}\n`);
-  return { from, to: next, fonts, writes, moved, fontsReset };
+  return { from, to: next, fonts, writes, moved, fontsReset, unversioned };
 }
 
 export function apply(result, root = DEFAULT_ROOT) {
+  const refused = result.unversioned.filter((u) => !u.fixable);
+  if (refused.length) throw new Error(`${refused.map((u) => `${u.file}: ${u.asset}`).join(", ")} matches the contract's reference pattern with no ?v= and no closing quote, bracket or # after it; fix the reference by hand, nothing was written`);
   for (const [rel, text] of result.writes) writeFileSync(path.join(root, rel), text);
   return result;
 }
@@ -87,16 +99,18 @@ function main(argv) {
   if (check) {
     const current = token(root, "assets/version.txt");
     const result = plan(root, { to: current });
-    const stale = [...result.moved, ...result.fontsReset];
-    for (const s of stale) console.error(`${s.file}: ${s.asset} at ${s.from}, expected ${s.to}`);
+    const stale = [...result.unversioned, ...result.moved, ...result.fontsReset];
+    for (const s of stale) console.error(`${s.file}: ${s.asset} ${s.from === null ? "has no ?v=" : `at ${s.from}`}, expected ${s.to}`);
     if (stale.length) { console.error(`bump-assets --check: ${stale.length} reference(s) off their token`); return 1; }
     console.log(`bump-assets --check: every CSS and JavaScript reference at ?v=${current}, every font at ?v=${result.fonts}`);
     return 0;
   }
   const result = apply(plan(root, { to }), root);
   console.log(`bump-assets: asset version ${result.from} -> ${result.to}; ${result.moved.length} reference(s) moved in ${result.writes.size} file(s); fonts stay at ?v=${result.fonts}` +
-    (result.fontsReset.length ? `, ${result.fontsReset.length} font reference(s) set back to it` : ""));
+    (result.fontsReset.length ? `, ${result.fontsReset.length} font reference(s) set back to it` : "") +
+    (result.unversioned.length ? `; ${result.unversioned.length} reference(s) with no ?v= given one` : ""));
   for (const f of result.fontsReset) console.log(`  font reset: ${f.file}: ${f.asset} ${f.from} -> ${f.to}`);
+  for (const f of result.unversioned) console.log(`  token added: ${f.file}: ${f.asset}?v=${f.to}`);
   console.log("bump-assets: the course generator was not run; run node scripts/generate-course-payloads.mjs yourself when a Lab source it bundles changed");
   return 0;
 }

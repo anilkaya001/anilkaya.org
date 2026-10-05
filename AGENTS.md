@@ -740,8 +740,11 @@ and sets every woff2 `?v=` to `assets/fonts-version.txt` (normally a no-op).
 It never runs the course generator: a change to a Lab source that
 `lab-suite.bundle.js` bundles still needs
 `node scripts/generate-course-payloads.mjs`. `--check` changes nothing and
-exits non-zero when any reference is off its token, which is the quick test
-after a merge.
+exits non-zero when any reference is off its token or, read with the contract
+test's own pattern, carries no `?v=` at all, which is the quick test after a
+merge. A bump gives such a reference its token, and refuses, writing nothing,
+when the reference runs on past `.css`, `.js` or `.woff2` (a `.json` the
+pattern reads as `.js`).
 
 A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
 references (eight `@font-face` URLs in `base.css`, one Inter preload in each
@@ -818,9 +821,13 @@ The other shared test helpers live beside it, each held by
 `tests/lib-contract.mjs` (run after `contracts.mjs` in `test:contracts`):
 `tests/lib/browser.mjs` (`launch()` is `chromium.launch()` plus
 `executablePath` from `PW_CHROMIUM_PATH` when that variable is set; unset, it
-passes the caller's options untouched; a path that is not a file throws);
+passes the caller's options untouched; a path that is not a file throws; only
+`lib-contract` launches through it until the 29 `chromium.launch()` call sites
+move over, so the sandbox's browser suites still need `PLAYWRIGHT_BROWSERS_PATH`);
 `tests/lib/served-tree.mjs` (`servedFiles()`: the tracked and unignored
-untracked regular files minus `.assetsignore` and wrangler's own
+untracked files, a symlink to a file counted under its own name because
+wrangler's walk follows links and uploads it, a symlink to a directory or to
+nothing not, minus `.assetsignore` and wrangler's own
 `/.assetsignore`, `/_redirects`, `/_headers`, matched by git's own gitignore
 engine); `tests/lib/cpu-budget.mjs` (the thread CPU clock, the `flows-quant`
 reference workload, interleaved subject and reference windows, a budget held
@@ -930,12 +937,12 @@ the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClo
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
 
-`lib-contract` was measured on 2026-10-05: about 7 s with no server and 413 checks (414 with
+`lib-contract` was measured on 2026-10-05: about 4 s with no server and 226 checks (227 with
 `PW_CHROMIUM_PATH` set, which adds a real launch; in this sandbox it is
 `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`, and CI leaves it unset). It builds a
 throwaway git repository for the served-tree semantics, drives the CPU budget on an injected clock, and runs
-`scripts/bump-assets.mjs` on a copy of the tree and on the parent of each of the last six hand bumps, which it
-reproduces token for token. It needs Node 22.13 or newer for `node:sqlite`.
+`scripts/bump-assets.mjs` on a copy of the pages and sheets it lists from Git without the tool. It reads no
+history, so a later commit cannot turn it red. It needs Node 22.13 or newer for `node:sqlite`.
 
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
 every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a

@@ -73,9 +73,11 @@ const notes = [];
   rmSync(path.join(repo, "deleted.txt"));
   put("assets/new.js");
   symlinkSync("assets/x.css", path.join(repo, "link.css"));
+  symlinkSync("assets", path.join(repo, "dirlink"));
+  symlinkSync("absent.css", path.join(repo, "dangling.css"));
   const got = servedFiles({ root: repo });
-  deep(got, ["assets/data/a.json", "assets/new.js", "assets/x.css", "docs/spec.yaml", "lab/index.html"],
-    "served tree on a fixture repository with this .assetsignore: worker.js, tests/x, foo.md, _headers, shared/, flows/ and dot paths excluded; assets/x.css included; an untracked file counted, a deleted one and a symlink not");
+  deep(got, ["assets/data/a.json", "assets/new.js", "assets/x.css", "docs/spec.yaml", "lab/index.html", "link.css"],
+    "served tree on a fixture repository with this .assetsignore: worker.js, tests/x, foo.md, _headers, shared/, flows/ and dot paths excluded; assets/x.css included; an untracked file counted and a deleted one not; a symlink to a file served under its own name, as wrangler's stat-following walk uploads it, and a symlink to a directory or to nothing not served");
   writeFileSync(path.join(repo, ".assetsignore"), "*.css\n!keep.css\n/top.txt\nbuild/\n");
   put("keep.css"); put("deep/keep.css"); put("a.css"); put("top.txt"); put("deep/top.txt"); put("build/out.js"); put("deep/build/out.js");
   sh("add", "-f", ".");
@@ -167,13 +169,13 @@ const notes = [];
   eq((await bare.D1.prepare("SELECT count(*) AS n FROM t").first()).n, 0, "d1-fake: another schema can be supplied");
 }
 
-const refsOf = (text) => [...text.matchAll(/(\/assets\/[^"'()\s?#]+)\?v=(\d+)|data-asset-version="(\d+)"|export const ASSET_VERSION = "(\d+)"/g)]
-  .map((m) => (m[1] ? `${m[1]}?v=${m[2]}` : m[3] ? `data-asset-version=${m[3]}` : `ASSET_VERSION=${m[4]}`));
-const keyOf = (ref) => ref.replace(/(?:\?v)?=\d+$/, "");
-
 {
   const tree = path.join(scratch, "bump");
-  const files = [...referenceFiles(ROOT), "shared/flows-pages.js", "assets/version.txt", "assets/fonts-version.txt", "assets/js/lab-suite.bundle.js", "assets/js/storage.js", "assets/js/auth.js"];
+  const listed = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).split("\0").filter(Boolean);
+  const pagesAndSheets = [...new Set(listed.filter((n) => existsSync(path.join(ROOT, n)) && ((n.endsWith(".html") && !/^(tests|docs)\//.test(n) && !n.split("/").some((p) => p.startsWith(".") || p === "node_modules")) || /^assets\/css\/[^/]+\.css$/.test(n))))].sort();
+  const walked = new Set(referenceFiles(ROOT));
+  deep(pagesAndSheets.filter((n) => !walked.has(n)), [], `bump-assets: the tool walks every one of the ${pagesAndSheets.length} pages and sheets Git sees (HTML outside tests/ and docs/, plus assets/css/*.css), listed here without the tool`);
+  const files = [...pagesAndSheets, "shared/flows-pages.js", "assets/version.txt", "assets/fonts-version.txt", "assets/js/lab-suite.bundle.js", "assets/js/storage.js", "assets/js/auth.js"];
   for (const rel of files) { mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true }); copyFileSync(path.join(ROOT, rel), path.join(tree, rel)); }
   const v = Number(readFileSync(path.join(ROOT, "assets/version.txt"), "utf8").trim());
   const fv = Number(readFileSync(path.join(ROOT, "assets/fonts-version.txt"), "utf8").trim());
@@ -187,7 +189,7 @@ const keyOf = (ref) => ref.replace(/(?:\?v)?=\d+$/, "");
   eq(readFileSync(path.join(tree, "assets/fonts-version.txt"), "utf8"), snapshot["assets/fonts-version.txt"], "bump-assets: the fonts token is untouched");
   eq(readFileSync(path.join(tree, "shared/flows-pages.js"), "utf8").split("\n")[0], `export const ASSET_VERSION = "${v + 1}";`, "bump-assets: ASSET_VERSION follows");
   let css = 0, fonts = 0, shells = 0;
-  for (const rel of referenceFiles(tree)) {
+  for (const rel of pagesAndSheets) {
     const text = readFileSync(path.join(tree, rel), "utf8");
     for (const m of text.matchAll(/["'(](\/assets\/[^"')?#]+\.(?:css|js|woff2))(?:\?v=(\d+))?/g)) {
       if (m[1].endsWith(".woff2")) { fonts++; eq(Number(m[2]), fv, `bump-assets: ${rel}: ${m[1]} stays at the fonts token ${fv}`); }
@@ -199,9 +201,10 @@ const keyOf = (ref) => ref.replace(/(?:\?v)?=\d+$/, "");
     eq(after, before, `bump-assets: ${rel} changes in its version tokens and nowhere else`);
   }
   ok(css >= 40 && fonts >= 16 && shells >= 3, `bump-assets: ${css} CSS and JavaScript references moved, ${fonts} font references held, ${shells} shells`);
-  const placement = readFileSync(path.join(tree, "lab/placement/index.html"), "utf8");
-  for (const js of ["storage.js", "auth.js"]) ok(placement.includes(`/assets/js/${js}?v=${v + 1}"`), `bump-assets: lab/placement loads ${js} on its own and it moves with the rest`);
-  ok(readFileSync(path.join(tree, "lab/course.html"), "utf8").includes(`/assets/js/lab-suite.bundle.js?v=${v + 1}"`), "bump-assets: the Lab bundle's reference moves alike");
+  for (const [rel, asset] of [["lab/placement/index.html", "storage.js"], ["lab/placement/index.html", "auth.js"], ["lab/course.html", "lab-suite.bundle.js"]]) {
+    if (!(snapshot[rel] ?? "").includes(`/assets/js/${asset}?v=`)) { notes.push(`bump-assets: ${rel} no longer loads ${asset}; its spot check is skipped`); continue; }
+    ok(readFileSync(path.join(tree, rel), "utf8").includes(`/assets/js/${asset}?v=${v + 1}"`), `bump-assets: ${rel} loads ${asset} and it moves with the rest`);
+  }
   eq(readFileSync(path.join(tree, "assets/js/lab-suite.bundle.js"), "utf8"), snapshot["assets/js/lab-suite.bundle.js"], "bump-assets: the bundle itself is not rebuilt: the course generator is not run");
   ok(!/generate-course-payloads\.mjs["'`]\s*[,)\]]|spawn|execFile|fork\(/.test(readFileSync(BUMP, "utf8")), "bump-assets: the tool starts no child process");
   const post = run("--check");
@@ -216,50 +219,30 @@ const keyOf = (ref) => ref.replace(/(?:\?v)?=\d+$/, "");
   ok(again.status === 0 && /1 font reference\(s\) set back/.test(again.stdout), "bump-assets: the next bump sets the font back to its token and reports it");
   eq(run("--check").status, 0, "bump-assets: and leaves the tree consistent");
   ok(!readFileSync(base, "utf8").includes(`woff2?v=${v + 2}`), "bump-assets: no woff2 reference ever carries the asset version");
+  const home = path.join(tree, "index.html");
+  const homeText = readFileSync(home, "utf8");
+  const bare = homeText.match(/["'(](\/assets\/[^"')?#]+\.(?:css|js))\?v=\d+/)[1];
+  writeFileSync(home, homeText.replace(`${bare}?v=${v + 2}`, bare));
+  const missing = run("--check");
+  ok(missing.status === 1 && new RegExp(`index\\.html: ${bare.replace(/[.]/g, "\\.")} has no \\?v=, expected ${v + 2}`).test(missing.stderr), "bump-assets --check: a reference with no ?v= at all fails it, as it fails contracts.mjs: " + missing.stderr.trim());
+  const added = run();
+  ok(added.status === 0 && /token added/.test(added.stdout) && readFileSync(home, "utf8").includes(`${bare}?v=${v + 3}`), `bump-assets: the next bump gives ${bare} the token`);
+  eq(run("--check").status, 0, "bump-assets: and the tree is consistent again");
+  const unclosed = readFileSync(home, "utf8");
+  writeFileSync(home, unclosed.replace("</body>", `<script src="/assets/js/nav.json"></script></body>`));
+  const odd = run();
+  ok(odd.status === 1 && /nav\.js matches the contract's reference pattern with no \?v=/.test(odd.stderr), "bump-assets: a reference the contract's pattern reads as an unversioned .js but that runs on past it is refused rather than rewritten: " + odd.stderr.trim());
+  eq(readFileSync(path.join(tree, "assets/version.txt"), "utf8"), `${v + 3}\n`, "bump-assets: and nothing was written");
+  writeFileSync(home, unclosed);
   const pages = path.join(tree, "shared/flows-pages.js");
   writeFileSync(pages, readFileSync(pages, "utf8") + `\nexport const ASSET_VERSION = "1";\n`);
   const twice = run();
   ok(twice.status === 1 && /exactly once/.test(twice.stderr), "bump-assets: a second ASSET_VERSION is refused, and nothing is written");
-  eq(readFileSync(path.join(tree, "assets/version.txt"), "utf8"), `${v + 2}\n`, "bump-assets: the refused run left the version alone");
+  eq(readFileSync(path.join(tree, "assets/version.txt"), "utf8"), `${v + 3}\n`, "bump-assets: the refused run left the version alone");
   const bad = run("--to", String(v));
   ok(bad.status === 1, "bump-assets: --to never goes backwards");
 }
 
-{
-  const has = (rev) => spawnSync("git", ["cat-file", "-e", rev + "^{commit}"], { cwd: ROOT }).status === 0;
-  const bumps = execFileSync("git", ["log", "--format=%H", "-6", "--first-parent", "HEAD", "--", "assets/version.txt"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  let replayed = 0, compared = 0;
-  for (const rev of bumps) {
-    if (!has(rev + "^")) continue;
-    const show = (r, rel) => { try { return execFileSync("git", ["show", `${r}:${rel}`], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
-    const from = Number(show(rev + "^", "assets/version.txt"));
-    const to = Number(show(rev, "assets/version.txt"));
-    if (!(to === from + 1) || show(rev + "^", "assets/fonts-version.txt") === null || show(rev + "^", "shared/flows-pages.js") === null) continue;
-    const dir = path.join(scratch, "replay-" + rev.slice(0, 7));
-    const names = execFileSync("git", ["ls-tree", "-r", "--name-only", rev + "^"], { cwd: ROOT, encoding: "utf8" }).trim().split("\n")
-      .filter((n) => (n.endsWith(".html") && !/^(tests|docs)\//.test(n) && !n.split("/").some((p) => p.startsWith(".") || p === "node_modules")) || /^assets\/css\/[^/]+\.css$/.test(n)
-        || ["shared/flows-pages.js", "assets/version.txt", "assets/fonts-version.txt"].includes(n));
-    for (const n of names) { mkdirSync(path.dirname(path.join(dir, n)), { recursive: true }); writeFileSync(path.join(dir, n), show(rev + "^", n)); }
-    const res = spawnSync(process.execPath, [BUMP, "--root", dir], { encoding: "utf8" });
-    eq(res.status, 0, `bump-assets replay of ${rev.slice(0, 7)}: runs`);
-    for (const n of names) {
-      const mine = readFileSync(path.join(dir, n), "utf8");
-      const theirs = show(rev, n);
-      if (theirs === null) continue;
-      const keep = new Set(refsOf(show(rev + "^", n)).map(keyOf));
-      const pick = (text) => refsOf(text).filter((r) => keep.has(keyOf(r))).sort();
-      compared += pick(theirs).length;
-      deep(pick(mine), pick(theirs), `bump-assets replay of ${rev.slice(0, 7)} (${from} -> ${to}): ${n} carries the tokens the hand bump gave it`);
-    }
-    replayed++;
-  }
-  if (replayed) {
-    ok(compared >= 60 * replayed, `bump-assets: ${replayed} past hand bump(s) reproduced token for token (${compared} tokens compared)`);
-    console.log(`  bump-assets: ${replayed} past hand bump(s) reproduced token for token, ${compared} tokens compared`);
-  }
-  else notes.push("bump-assets replay: no past bump reachable (shallow clone)");
-}
-
 rmSync(scratch, { recursive: true, force: true });
 for (const n of notes) console.log("  note: " + n);
-console.log(`✓ lib-contract: ${checks} checks — the browser launcher's PW_CHROMIUM_PATH, the served tree under gitignore semantics, the CPU budget's ratio, floor and interleaving, the counting D1 fake, and the asset-bump tool (fonts held, past bumps reproduced)`);
+console.log(`✓ lib-contract: ${checks} checks — the browser launcher's PW_CHROMIUM_PATH, the served tree under gitignore semantics, the CPU budget's ratio, floor and interleaving, the counting D1 fake, and the asset-bump tool (fonts held, every page and sheet moved, unversioned references caught)`);
