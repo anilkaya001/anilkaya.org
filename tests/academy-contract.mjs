@@ -148,8 +148,8 @@ const ddlInitializer = (src, start) => {
   }
   throw new Error("unterminated initializer at " + start);
 };
-const ddlKinds = "CREATE (?:UNIQUE |TEMP |TEMPORARY |VIRTUAL )?(?:TABLE|INDEX|TRIGGER|VIEW)";
-const ddlPattern = new RegExp(`${ddlKinds}\\b`, "g");
+const ddlKinds = "\\bCREATE\\s+(?:(?:UNIQUE|TEMP|TEMPORARY|VIRTUAL)\\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)";
+const ddlPattern = new RegExp(`${ddlKinds}\\b|\\bDROP\\s+(?:TABLE|INDEX|TRIGGER|VIEW)\\b`, "gi");
 const outsideSpans = (src, spans) => [...src.matchAll(ddlPattern)]
   .filter((m) => !spans.some(([from, to]) => m.index >= from && m.index < to))
   .map((m) => `${src.slice(0, m.index).split("\n").length}: ${src.slice(m.index, m.index + 60)}`);
@@ -262,7 +262,7 @@ const runtimeDb = sqliteOf(workerDdl);
 await FLOWS_LIVE.upgradeClockColumns(d1Of(runtimeDb));
 const fromRuntime = describeDb(runtimeDb);
 const runtimeSources = [workerSource, ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).map((f) => read(`shared/${f}`))];
-const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(new RegExp(`${ddlKinds} IF NOT EXISTS (\\w+)`, "g"))].map((m) => m[1])));
+const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(new RegExp(`${ddlKinds}\\s+IF\\s+NOT\\s+EXISTS\\s+(\\w+)`, "gi"))].map((m) => m[1])));
 const builtAtRuntime = new Set([...Object.keys(fromRuntime.tables), ...Object.keys(fromRuntime.indexes), ...Object.keys(fromRuntime.triggers), ...Object.keys(fromRuntime.views)]);
 assert.deepEqual([...declaredAtRuntime].filter((name) => !builtAtRuntime.has(name)), [],
   "every CREATE statement in worker.js and shared/ reaches the runtime database this check builds");
