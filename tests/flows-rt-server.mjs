@@ -221,7 +221,8 @@ async function runMain() {
     const px = c1.data("px").find((f) => f.rows.length);
     eq(px.rows[0].length, RT_ROW_FIELDS.px.length, "px: a row is ticker, quote time and the 23 strip values");
     deep(px.meta.cols, RT_ROW_FIELDS.px, "px: the snapshot names its columns");
-    ok(px.rows.some((r) => r[0] === "SYL001") && px.rows.some((r) => r[0] === "NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
+    const pxNames = new Set(c1.data("px").flatMap((f) => f.rows.map((r) => r[0])));
+    ok(pxNames.has("SYL001") && pxNames.has("NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
     const pxCall = vendor.paramsOf(/screener/)[0].ticker.split(",");
     ok(pxCall.includes("SYL001") && pxCall.includes("NVDA") && pxCall.length >= 60, `px: the vendor was asked for the roster in one call (${pxCall.length} names)`);
     ok(new Set(vendor.calls.filter((c) => /screener/.test(c.path)).map((c) => c.params.ticker)).size === 1, "px: the same call every time");

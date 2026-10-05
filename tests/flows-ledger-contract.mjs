@@ -641,7 +641,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(storeQuotaWait(res(503, 86355), "<html>x</html>", { now: M + 45000, firstAt: M - 50000 }), null, "a day-away answer that is not the Worker's store_quota is never a lag");
   eq(storeQuotaWait(res(503), quotaBody, { now: M + 45000, firstAt: M - 50000 }), null, "nor one with no Retry-After");
   const pipeline = read("scripts/flows-pipeline.mjs");
-  ok(/const quotaWait = !response\.ok && heard \? storeQuotaWait\(response, heard\.text, \{ firstAt: quotaFirstAt \}\) : null;\s*if \(quotaWait !== null\) \{[\s\S]*?ingestWrites\.defer\(quotaWait\);\s*await sleep\(quotaWait\);\s*attempt--;\s*continue;/.test(pipeline),
+  ok(/const quotaWait = !response\.ok && heard \? storeQuotaWait\(response, heard\.text, \{ firstAt: quotaFirstAt \}\) : null;\s*if \(quotaWait !== null\) \{[\s\S]*?ingestWrites\.defer\(quotaWait\);\s*(?:wireProgress\.quiet\(quotaWait\);\s*)?await sleep\(quotaWait\);\s*attempt--;\s*continue;/.test(pipeline),
     "and the write loop takes that wait before the generic retry, defers every other writer with it, and does not spend a retry on it");
 }
 
