@@ -99,8 +99,8 @@ function expected(flow, { names = 10 } = {}) {
   };
 }
 
-async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion: reduced ? "reduce" : "no-preference" });
+async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -141,9 +141,10 @@ const shot = async (page, name, kind = "card") => {
   const clip = await page.evaluate((kind) => {
     const r = document.getElementById("uaNetCard").getBoundingClientRect(), l = document.querySelector("#uaNet .fn-legend").getBoundingClientRect();
     if (kind === "net") return { x: r.left, y: Math.max(0, r.top), width: r.width, height: Math.min(innerHeight, l.bottom + 12) - Math.max(0, r.top) };
+    if (kind === "first") return { x: 0, y: 0, width: innerWidth, height: innerHeight };
     return kind === "whole" ? { x: 0, y: 0, width: innerWidth, height: Math.min(r.bottom + scrollY + 40, 2400) } : { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height };
   }, kind);
-  await page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: kind !== "net", clip });
+  await page.screenshot({ path: path.join(SHOTS, name + ".png"), fullPage: kind === "card" || kind === "whole", clip });
 };
 const overlaps = (boxes) => {
   const bad = [];
@@ -154,6 +155,35 @@ const overlaps = (boxes) => {
   }
   return bad;
 };
+
+const RESID_ORDER = ["s:~", "s:none", "s:unread", "s:wait"];
+const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; }));`);
+async function ranked(page, tag, axis = "y") {
+  const L = await layout(page);
+  L.forEach((layer, li) => {
+    const screen = [...layer].sort((a, b) => a[axis] - b[axis]);
+    deep(screen.map((d) => d.id), layer.map((d) => d.id), `layer ${li} reads in rank order ${axis === "y" ? "top to bottom" : "left to right"} on screen (${tag})`);
+    const main = screen.filter((d) => !d.resid), rest = screen.filter((d) => d.resid);
+    ok(main.every((d, i) => !i || main[i - 1].v >= d.v), `layer ${li}: premium never increases down the ranking (${tag}: ${main.map((d) => d.label).join(", ")})`);
+    deep(screen.slice(main.length).map((d) => d.id), rest.map((d) => d.id), `layer ${li}: the residual buckets sit after every ranked node (${tag})`);
+    if (li === 1 && rest.length) ok(rest.every((d, i) => !i || RESID_ORDER.indexOf(rest[i - 1].id) < RESID_ORDER.indexOf(d.id)), `and in the stated order Other, No sector, unread, pending (${rest.map((d) => d.label).join(", ")})`);
+  });
+  return L;
+}
+const camera = (page) => net(page, "return net.camera();");
+const settle = (page) => page.waitForFunction(() => { const c = window.FlowsUI.net.of(document.getElementById("uaNet")).camera(); return c.auto && Math.abs(c.yaw - c.rest[0]) <= 9.6; }, null, { timeout: 8000 }).catch(() => {});
+const stageBox = (page) => page.evaluate(() => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+async function drag(page, dx, dy, { steps = 12, x = 0.5, y = 0.06 } = {}) {
+  const b = await stageBox(page);
+  const sx = b.x + b.w * x, sy = b.y + b.h * y;
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) await page.mouse.move(sx + dx * i / steps, sy + dy * i / steps);
+  await page.mouse.up();
+}
+function crosses(edge, node) {
+  return node.x + node.r > Math.min(edge.ax, edge.bx) && node.x - node.r < Math.max(edge.ax, edge.bx) && node.y + node.r > Math.min(edge.ay, edge.by) && node.y - node.r < Math.max(edge.ay, edge.by);
+}
 
 const browser = await chromium.launch();
 const cpu = {};
@@ -184,6 +214,19 @@ try {
     near(m.lean.bull, want.bull, "bullish lean is calls at ask plus puts at bid");
     near(m.lean.bear, want.bear, "bearish lean is calls at bid plus puts at ask");
     eq(node("s:none").label, "No sector", "index funds the universe does not carry are drawn under No sector, not guessed");
+    deep(m.layers[1].map((d) => d.label), ["Tech", "Cyclical", "Comms", "Energy", "Other", "No sector"],
+      "the sector layer is ranked by premium with Other and then No sector last, although No sector carries the second largest premium");
+    deep(m.layers[2].slice(0, 3).map((d) => d.label), ["NVDA", "SPY", "QQQ"], "the name layer is ranked by premium, not grouped by sector");
+    eq(m.layers[2][m.layers[2].length - 1].id, "n:~", "and Other names closes it");
+    await ranked(page, "at rest");
+    const lim = (await camera(page)).limits;
+    for (const [y, p] of [[-lim[0], 10], [lim[0], 10], [-20, lim[1]], [30, -lim[1]], [lim[0], lim[1]]]) {
+      await net(page, "net.orbit(arg[0], arg[1]); return null;", [y, p]);
+      await ranked(page, `yaw ${y}, pitch ${p}`);
+      const lm = await net(page, `const m = net.model(); return { t: m.total, s: m.layers.map((l) => l.reduce((a, d) => a + d.v, 0)) };`);
+      lm.s.forEach((v, i) => near(v, want.total, `layer ${i} still conserves the premium at yaw ${y}, pitch ${p}`));
+    }
+    await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
     ok(node("n:~") && node("n:~").label === "Other names", "names past the cap fold into one node, so the layer still sums");
 
     const aria = await page.evaluate(() => { const c = document.querySelector("#uaNet canvas"); return { role: c.getAttribute("role"), label: c.getAttribute("aria-label") }; });
@@ -227,17 +270,25 @@ try {
     const nv = await page.evaluate(() => { const a = document.querySelector('#uaNet .fn-hit[data-id="n:NVDA"]'); return { tag: a.tagName, href: a.getAttribute("href"), label: a.getAttribute("aria-label") }; });
     eq(nv.tag, "A", "a name node is a link");
     eq(nv.href, "/flows/ticker/?t=NVDA", "to the ticker page");
-    ok(/^NVDA, Tech: \$[\d.]+M, \d+% of flagged premium/.test(nv.label), `and names its premium and share (${nv.label})`);
+    ok(/^Rank 1, NVDA, Tech: \$[\d.]+M, \d+% of flagged premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
 
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.evaluate(() => { document.activeElement.blur(); window.scrollTo({ top: 0, behavior: "instant" }); });
+    await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
     await page.hover('#uaNet .fn-hit[data-id="n:NVDA"]');
-    await page.waitForTimeout(450);
+    await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).node("n:MSFT").lit === 0, null, { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(300);
     const lit = await net(page, `return ["n:NVDA", "s:tech", "i:ca", "o:bull", "n:MSFT", "s:energy", "n:SPY"].map((id) => [id, net.node(id).lit]);`);
     deep(Object.fromEntries(lit), { "n:NVDA": 1, "s:tech": 1, "i:ca": 1, "o:bull": 1, "n:MSFT": 0, "s:energy": 0, "n:SPY": 0 },
       "HOVERING A NAME lights its whole subgraph (its sector, its sides, its leans) and dims every other name and sector");
     const tip = await page.evaluate(() => { const t = document.querySelector("#uaNet .fn-tip"); return { hidden: t.hidden, text: t.textContent }; });
     ok(!tip.hidden && /NVDA/.test(tip.text) && /of flagged premium/.test(tip.text) && /Open NVDA/.test(tip.text), `and the tooltip lists its premium and share (${tip.text})`);
-    await shot(page, "flow-net-hover-1440", "net");
+    const sizeOf = (pred) => flow.rows.filter(pred).reduce((s, r) => s + r.size, 0).toLocaleString("en-US");
+    ok(tip.text.includes(sizeOf((r) => r.t === "NVDA") + " contracts"), `a name's tooltip shows the contracts its windows carry (${sizeOf((r) => r.t === "NVDA")})`);
+    await shot(page, "net-1440-hover", "net");
+    const tipOf = (id) => page.evaluate((id) => { const el = document.querySelector(`#uaNet .fn-hit[data-id="${id}"]`); el.focus({ preventScroll: true }); const t = document.querySelector("#uaNet .fn-tip").textContent; el.blur(); return t; }, id);
+    const techNames = new Set(NAMES.filter((x) => x[1] === "Technology").map((x) => x[0]));
+    ok((await tipOf("s:tech")).includes(sizeOf((r) => techNames.has(r.t)) + " contracts"), "a sector's tooltip shows its contracts");
+    for (const id of ["i:ca", "i:nx", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the vendor never splits by side (${id})`);
     await page.mouse.move(5, 5);
     await page.waitForTimeout(300);
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
@@ -252,7 +303,7 @@ try {
     await page.keyboard.press("Tab");
     const first = await page.evaluate(() => document.activeElement.dataset.id);
     const names = m.layers[2].map((d) => d.id);
-    eq(first, names[0], "Tab reaches the network once, on its largest-sector first name (one roving stop, not 25)");
+    eq(first, names[0], "Tab reaches the network once, on its largest name (one roving stop, not 25)");
     await page.keyboard.press("ArrowDown");
     eq(await page.evaluate(() => document.activeElement.dataset.id), names[1], "ArrowDown moves along the layer");
     const ring = await page.evaluate(() => getComputedStyle(document.activeElement).boxShadow);
@@ -267,13 +318,17 @@ try {
 
     await page.click('#uaNetCard .ui-seg-i:nth-of-type(2)');
     await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).model().mode === "dte", null, { timeout: 5000 }).catch(() => {});
-    const dte = await net(page, `const m = net.model(); return { mode: m.mode, out: m.layers[3].map((d) => d.label), sum: m.layers[3].reduce((s, d) => s + d.v, 0), hop: m.edges[2].reduce((s, e) => s + e.v, 0) };`);
+    const dte = await net(page, `const m = net.model(); return { mode: m.mode, out: m.layers[3].map((d) => d.label), sum: m.layers[3].reduce((s, d) => s + d.v, 0), hop: m.edges[2].reduce((s, e) => s + e.v, 0), ct: m.layers[3].map((d) => d.contracts) };`);
+    ok(dte.ct.every((c) => c > 0), `an expiry node carries the contracts of its windows (${dte.ct.join(", ")})`);
+    ok(/contracts/.test(await tipOf("o:" + (await net(page, "return net.model().layers[3][0].bucket;")))), "and its tooltip shows them");
+    await page.mouse.move(5, 5);
+    await ranked(page, "expiry output");
     eq(dte.mode, "dte", "the Expiry control switches the output layer");
     eq(dte.out.length, want.dteOut, `to the expiry horizons the data holds (${dte.out.join(", ")})`);
     near(dte.sum, want.total, "and the horizons still sum to the premium");
     near(dte.hop, want.total, "as do the edges into them");
     await page.waitForTimeout(800);
-    await shot(page, "flow-net-expiry-1440");
+    await shot(page, "net-1440-expiry", "net");
     await page.click('#uaNetCard .ui-seg-i:nth-of-type(1)');
     await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).model().mode === "lean", null, { timeout: 5000 });
 
@@ -291,6 +346,21 @@ try {
     eq(after.key, before, "a keyboard reader inside the table keeps their row when a new window rebuilds it");
     ok(after.shown === 24 && after.more === "true", "and an opened table stays open");
 
+    await page.evaluate(() => { document.activeElement.blur(); window.scrollTo({ top: 0, behavior: "instant" }); });
+    await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running, null, { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    const y0 = await net(page, `return [net.node("n:MSFT").y, net.node("n:NVDA").y];`);
+    const big = { ...more, rows: [{ ...flow.rows[0], t: "MSFT", oc: "MSFT-big", spanStart: "2026-09-29T18:39:00.000Z", prem: 60000000, askPrem: 50000000, bidPrem: 5000000, size: 200000 }, ...more.rows] };
+    await net(page, `net.take(arg, { state: "ok" }); return null;`, big);
+    const y1 = await net(page, `return [net.node("n:MSFT").y, net.model().layers[2][0].id];`);
+    eq(y1[1], "n:MSFT", "new data reorders the name layer in the model at once");
+    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), a = n.node("n:MSFT"), b = n.node("n:NVDA"), c = n.node("n:SPY"); return a.y < b.y - 20 && b.y < c.y - 20; }, null, { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(600);
+    const y2 = await net(page, `return [net.node("n:MSFT").y, net.node("n:NVDA").y];`);
+    ok(y2[0] < y2[1] && y0[0] > y0[1], `and on screen MSFT rises above NVDA (${y0.map(Math.round)} to ${y2.map(Math.round)})`);
+    ok(Math.abs(y1[0] - y2[0]) > 20, `gliding there rather than jumping (${Math.round(y0[0])}, then ${Math.round(y1[0])} as the data lands, then ${Math.round(y2[0])})`);
+    await ranked(page, "after new data reordered the names");
+
     await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
     const h0 = (await stats(page)).frames;
     await page.waitForTimeout(500);
@@ -306,7 +376,8 @@ try {
       return document.querySelector("#uaNet .fn-stage").getBoundingClientRect().bottom;
     }, to);
     ok((await scroller(true)) < 0, "the stage can be scrolled out of view");
-    await page.waitForTimeout(500);
+    await page.waitForFunction(() => !window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running, null, { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(200);
     const o0 = await stats(page);
     await page.waitForTimeout(400);
     const o1 = await stats(page);
@@ -318,6 +389,7 @@ try {
     const live = await stats(page);
     cpu.page = { median: live.median, frames: live.frames, pulses: live.pulses, edges: live.edges };
     deep(page.errors, [], "nothing threw and nothing logged an error");
+    await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
     await page.click('#uaNet .fn-hit[data-id="n:NVDA"]');
     await page.waitForURL(/\/flows\/ticker\/\?t=NVDA$/);
     ok(true, "clicking a name opens its ticker page");
@@ -335,19 +407,146 @@ try {
       });
       ok(box.sw <= box.iw, `no horizontal overflow at ${width}px in ${mode} (${box.sw} of ${box.iw})`);
       ok(box.stage[0] >= box.card[0] - 0.5 && box.stage[1] <= box.card[1] + 0.5, `the stage stays inside its card at ${width}px`);
-      for (const pass of [0, 1]) {
+      const cam = await camera(page), [ly, lp] = cam.limits;
+      for (const [y, p] of [cam.rest, [-ly, lp], [ly, -lp], [-ly, -lp], [ly, lp], [0, 0]]) {
+        await net(page, "net.orbit(arg[0], arg[1]); return null;", [y, p]);
         const s = await stats(page);
         const labels = await net(page, "return net.labels();");
-        ok(labels.length === s.layers.reduce((a, b) => a + b, 0), `every node is labelled at ${width}px (${mode})`);
+        const at = `${width}px, ${mode}, yaw ${Math.round(y)}, pitch ${Math.round(p)}`;
+        ok(labels.length === s.layers.reduce((a, b) => a + b, 0), `every node is labelled at ${at}`);
         const outside = labels.filter((l) => l.x < -1 || l.y < -1 || l.x + l.w > s.w + 1 || l.y + l.h > s.h + 1).map((l) => l.id + " " + [l.x, l.y, l.w, l.h].map(Math.round).join(",") + " in " + s.w + "x" + s.h);
-        deep(outside, [], `no label leaves the canvas at ${width}px (${mode}, pass ${pass})`);
-        if (overlaps(labels).length) console.log(JSON.stringify(labels.filter((l) => l.id.startsWith("n:")).map((l) => [l.id, Math.round(l.x), Math.round(l.y), l.w, l.h])), JSON.stringify(await net(page, "return net.model().layers[2].map((d) => d.id);")));
-        deep(overlaps(labels), [], `no two labels collide at ${width}px (${mode}, pass ${pass})`);
-        if (!pass) await page.waitForTimeout(2200);
+        deep(outside, [], `no label leaves the canvas at ${at}`);
+        deep(overlaps(labels), [], `no two labels collide at ${at}`);
+        await ranked(page, at, width < 560 ? "x" : "y");
       }
-      if (mode === "lean") { await shot(page, "flow-net-" + width); await shot(page, "flow-net-page-" + width, "whole"); }
+      await net(page, "net.recentre(); return null;");
+      await page.waitForTimeout(2200);
+      const labels = await net(page, "return net.labels();");
+      deep(overlaps(labels), [], `no two labels collide at ${width}px (${mode}) under the automatic sway`);
+      if (mode === "lean") {
+        await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
+        if (width === 1440) { await shot(page, "net-1440", "net"); await shot(page, "page-1440", "first"); }
+        else await shot(page, "net-" + width, "net");
+      }
     }
     deep(page.errors, [], `nothing threw at ${width}px`);
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.waitForTimeout(300);
+    const c0 = await camera(page);
+    ok(c0.auto && Math.abs(c0.yaw - c0.rest[0]) <= 9.5 && Math.abs(c0.pitch - c0.rest[1]) <= 2.5, `left alone, the camera sways slowly about its rest angle (${c0.yaw.toFixed(1)}, ${c0.pitch.toFixed(1)})`);
+    deep(c0.limits, [55, 22], "yaw is held to 55 degrees and pitch to 22 either way");
+    const before = await layout(page);
+    await drag(page, 240, 40);
+    const c1 = await camera(page);
+    const after = await layout(page);
+    ok(!c1.auto && c1.yaw > c0.yaw + 30 && c1.pitch > c0.pitch + 3, `A POINTER DRAG ORBITS the camera (yaw ${c0.yaw.toFixed(1)} to ${c1.yaw.toFixed(1)}, pitch ${c0.pitch.toFixed(1)} to ${c1.pitch.toFixed(1)})`);
+    const moved = before.flat().filter((d, i) => Math.hypot(d.x - after.flat()[i].x, d.y - after.flat()[i].y) > 8).length;
+    ok(moved >= before.flat().length - 2, `and the projected nodes move with it (${moved} of ${before.flat().length})`);
+    await ranked(page, "after a drag");
+    eq(page.url(), "https://example.test/flows/unusual/", "a drag that ends over a name does not open it");
+    await drag(page, 1200, 300, { x: 0.05, y: 0.3 });
+    let c = await camera(page);
+    ok(Math.abs(c.yaw - 55) < 1e-6 && Math.abs(c.pitch - 22) < 1e-6, `a long drag clamps at the limits (${c.yaw}, ${c.pitch})`);
+    await ranked(page, "dragged to the yaw and pitch limits");
+    await shot(page, "net-1440-orbit-right", "net");
+    await drag(page, -1300, -300, { x: 0.97, y: 0.6 });
+    c = await camera(page);
+    ok(Math.abs(c.yaw + 55) < 1e-6 && Math.abs(c.pitch + 22) < 1e-6, `and the other way (${c.yaw}, ${c.pitch})`);
+    await net(page, "net.orbit(-55, arg); return null;", c0.rest[1]);
+    await shot(page, "net-1440-orbit-left", "net");
+    await net(page, "net.orbit(0, 10); return null;");
+    const b = await stageBox(page);
+    await page.mouse.move(b.x + b.w * 0.5, b.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.w * 0.5 + 40, b.y + 20);
+    await page.mouse.move(b.x + b.w * 0.5 + 160, b.y + 20, { steps: 2 });
+    await page.mouse.up();
+    const fl0 = await camera(page);
+    await page.waitForTimeout(150);
+    const fl1 = await camera(page);
+    ok(fl0.spin > 0 && fl1.yaw > fl0.yaw, `a flick leaves the camera turning on its own (spin ${fl0.spin.toFixed(1)} degrees a second)`);
+    await page.waitForTimeout(2500);
+    const fl2 = await camera(page);
+    await page.waitForTimeout(300);
+    const fl3 = await camera(page);
+    ok(fl2.spin === 0 && fl3.yaw === fl2.yaw && !fl3.auto, `and the inertia decays to a stop (${fl2.yaw.toFixed(2)} then ${fl3.yaw.toFixed(2)})`);
+    await page.click("#uaNet .fn-home");
+    await settle(page);
+    c = await camera(page);
+    ok(c.auto && Math.abs(c.yaw - c.rest[0]) <= 9.6, `the recentre control returns the camera to its rest angle and sway (yaw ${c.yaw.toFixed(1)})`);
+    eq(await page.evaluate(() => document.querySelector("#uaNet .fn-home").getAttribute("aria-label")), "Recentre the view", "and has an accessible name");
+    await net(page, "net.orbit(50, 20); return null;");
+    await page.focus('#uaNet .fn-hit[tabindex="0"]');
+    await page.keyboard.press("Home");
+    ok((await page.evaluate(() => document.activeElement.dataset.id)) === (await net(page, "return net.model().layers[2][0].id;")), "Home still jumps to the top of the layer");
+    await page.keyboard.press("r");
+    await settle(page);
+    c = await camera(page);
+    ok(c.auto && Math.abs(c.yaw - c.rest[0]) <= 9.6, `R on a focused node recentres (yaw ${c.yaw.toFixed(1)})`);
+    await net(page, "net.orbit(-50, -15); return null;");
+    await page.mouse.dblclick(b.x + 30, b.y + b.h - 30);
+    await settle(page);
+    ok((await camera(page)).auto, "and so does a double click on the network");
+    ok((await camera(page)).auto && (await stats(page)).running, "the automatic sway runs again");
+
+    await net(page, "net.orbit(48, 16); return null;");
+    await page.mouse.move(5, 5);
+    const aapl = await net(page, `return net.node("n:AAPL");`);
+    await page.mouse.move(b.x + aapl.x, b.y + aapl.y);
+    await page.waitForTimeout(250);
+    const lit = await net(page, `return [net.node("n:AAPL").lit, net.node("n:NVDA").lit];`);
+    const tipText = await page.evaluate(() => document.querySelector("#uaNet .fn-tip").textContent);
+    ok(lit[0] === 1 && lit[1] === 0 && /AAPL/.test(tipText), `HIT TARGETS FOLLOW THE CAMERA: after a rotation the pointer over AAPL's sphere lights AAPL (${tipText.slice(0, 40)})`);
+
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(200);
+    await net(page, "net.orbit(-55, 18); return null;");
+    const order = await net(page, "return net.paints();");
+    ok(order.every((it, i) => !i || order[i - 1].z >= it.z), "the painter draws every edge, pulse slice and node from back to front");
+    const nodes = order.map((it, i) => ({ ...it, i })).filter((it) => it.k === "node"), edges = order.map((it, i) => ({ ...it, i })).filter((it) => it.k === "edge");
+    let front = 0, back = 0, wrong = [];
+    for (const n of nodes) for (const e of edges) {
+      if (e.id.split("|").includes(n.id) || !crosses(e, n)) continue;
+      if (n.z < e.z) { front++; if (n.i < e.i) wrong.push(n.id + " under " + e.id); }
+      else if (n.z > e.z) { back++; if (n.i > e.i) wrong.push(e.id + " under " + n.id); }
+    }
+    ok(front > 0 && back > 0, `the turned scene has spheres in front of edges that share their patch of screen, and spheres behind them (${front} and ${back} pairs)`);
+    deep(wrong, [], "DEPTH ORDER: a nearer sphere is drawn after the edge behind it, so it covers it, and a farther one before the edge in front of it");
+    ok(edges.every((e) => e.id.split("|").every((id) => nodes.find((n) => n.id === id).i > e.i)), "and every edge is drawn before both of the spheres it joins");
+    deep(page.errors, [], "nothing threw while orbiting");
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 390, height: 900, touch: true, reduced: true });
+    const cdp = await ctx.newCDPSession(page);
+    const b = await stageBox(page);
+    const touch = async (dx, dy) => {
+      const x = b.x + b.w * 0.5, y = b.y + 60;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 10; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + dx * i / 10, y: y + dy * i / 10 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.waitForTimeout(300);
+    };
+    eq(await page.evaluate(() => getComputedStyle(document.querySelector("#uaNet .fn-stage")).touchAction), "pan-y", "the stage leaves vertical panning to the page");
+    const c0 = await camera(page);
+    deep(c0.limits, [30, 22], "on a phone the yaw is held to 30 degrees so the rows stay legible");
+    await touch(150, 10);
+    const c1 = await camera(page);
+    ok(!c1.auto && c1.yaw !== c0.yaw, `a horizontal touch drag turns the network (yaw ${c0.yaw.toFixed(1)} to ${c1.yaw.toFixed(1)})`);
+    const sy0 = await page.evaluate(() => scrollY);
+    await touch(4, -240);
+    const sy1 = await page.evaluate(() => scrollY), c2 = await camera(page);
+    ok(sy1 > sy0 + 50, `a vertical touch drag still scrolls the page (${sy0} to ${sy1})`);
+    ok(c2.yaw === c1.yaw && c2.pitch === c1.pitch, `without turning the network, which under reduced motion moves only when dragged (yaw ${c1.yaw.toFixed(2)} then ${c2.yaw.toFixed(2)})`);
+    await net(page, "net.orbit(arg[0], arg[1]); return null;", c0.rest);
+    await ranked(page, "390px rows", "x");
+    deep(page.errors, [], "nothing threw on touch");
     await ctx.close();
   }
 
@@ -371,7 +570,24 @@ try {
     eq((await stats(page)).frames, 0, "by repainting the still frame, not by starting a loop");
     await page.mouse.move(5, 5);
     await page.waitForTimeout(150);
-    await shot(page, "flow-net-still-1440");
+    const c0 = await camera(page), p0 = await net(page, `return net.node("n:NVDA");`);
+    deep([c0.yaw, c0.pitch], c0.rest, "the still frame is drawn at the fixed rest angle");
+    await drag(page, 260, 60);
+    await page.waitForTimeout(400);
+    const c1 = await camera(page), p1 = await net(page, `return net.node("n:NVDA");`), s1 = await stats(page);
+    ok(c1.yaw > c0.yaw + 20 && c1.pitch > c0.pitch, `a drag still turns the network under reduced motion (yaw ${c0.yaw} to ${c1.yaw.toFixed(1)})`);
+    ok(Math.hypot(p1.x - p0.x, p1.y - p0.y) > 10, "and the still frame is repainted at the new angle");
+    ok(!s1.running && s1.frames === 0 && c1.spin === 0, `with no inertia and no animation frame left running (${JSON.stringify({ running: s1.running, frames: s1.frames, spin: c1.spin })})`);
+    await ranked(page, "reduced motion, after a drag");
+    await net(page, `net.take(arg, { state: "ok" }); return null;`, { ...alerts(), rows: [{ ...alerts().rows[0], t: "MU", oc: "MU-big", prem: 9e7, askPrem: 8e7, bidPrem: 1e6 }, ...alerts().rows] });
+    const mu = await net(page, `return [net.node("n:MU").y, net.node("n:NVDA").y, net.model().layers[2][0].id];`);
+    ok(mu[2] === "n:MU" && mu[0] < mu[1], "new data that reorders a layer repaints it in place, with no glide");
+    eq((await stats(page)).frames, 0, "still with no animation frame");
+    await page.keyboard.press("Tab");
+    await page.focus('#uaNet .fn-hit[tabindex="0"]');
+    await page.keyboard.press("r");
+    const c2 = await camera(page);
+    deep([c2.yaw, c2.pitch], c0.rest, "R on a node recentres the still frame at the rest angle");
     deep(page.errors, [], "nothing threw under reduced motion");
     await ctx.close();
   }
@@ -391,6 +607,21 @@ try {
         ca: node("i:ca").v, cb: node("i:cb").v, nx: node("i:nx").v, pb: node("i:pb").v, xyz: node("n:XYZ").v, none: node("s:none").label,
         empty: { windows: m0.windows, layers: m0.layers.map((l) => l.length), top: m0.top.length },
         dte: model([{ t: "A", cp: "C", prem: 1, askPrem: 1, exp: "2026-10-06", spanStart: "2026-09-30T01:00:00Z" }], { out: "dte" }).layers[3][0].label,
+        ct: (() => {
+          const rows = [{ t: "A", cp: "C", prem: 100, askPrem: 60, bidPrem: 30, size: 40, exp: "2026-10-02", spanStart: "2026-09-29T15:00:00Z" },
+            { t: "A", cp: "P", prem: 50, askPrem: 10, bidPrem: 30, size: "12", exp: "2026-10-02", spanStart: "2026-09-29T15:00:00Z" },
+            { t: "B", cp: "C", prem: 30, askPrem: 30, size: null, exp: "2026-10-02", spanStart: "2026-09-29T15:00:00Z" },
+            { t: "C", cp: "C", prem: 20, askPrem: 20, size: 0, exp: "2026-12-18", spanStart: "2026-09-29T15:00:00Z" }];
+          const pick = (m, id) => m.layers.flat().find((d) => d.id === id).contracts;
+          const lean = model(rows, { sectorOf: (t) => (t === "A" ? "Technology" : t === "B" ? "Technology" : "Energy") }), dte = model(rows, { out: "dte", sectorOf: () => "Energy" });
+          const two = model(rows.slice(0, 2), { out: "dte", sectorOf: () => "Energy" });
+          return { a: pick(lean, "n:A"), b: pick(lean, "n:B"), c: pick(lean, "n:C"), tech: pick(lean, "s:tech"), energy: pick(lean, "s:energy"), ca: pick(lean, "i:ca"), bull: pick(lean, "o:bull"), w1: pick(dte, "o:w1"), far: pick(dte, "o:far"), w1ok: pick(two, "o:w1"), secok: pick(two, "s:energy"), pa: pick(two, "i:pa") };
+        })(),
+        rank: (() => {
+          const at = "2026-09-29T15:00:00Z";
+          const m = model([{ t: "Q", prem: 5, exp: "2026-12-18", spanStart: at }, { t: "R", prem: 9, exp: "2026-09-29", spanStart: at }, { t: "S", prem: 9 }, { t: "T", prem: 1, exp: "nope" }, { t: "U", prem: 2 }], { names: 3, sectorOf: (t) => (t === "Q" ? null : "Energy"), out: "dte" });
+          return { names: m.layers[2].map((d) => d.label + (d.pos ? "#" + d.pos : "")), sectors: m.layers[1].map((d) => d.label), out: m.layers[3].map((d) => d.label) };
+        })(),
       };
     });
     eq(u.windows, 3, "the model counts a window only with a ticker and a positive premium");
@@ -404,6 +635,21 @@ try {
     eq(u.none, "No sector", "a name the universe does not carry is No sector");
     deep(u.empty, { windows: 0, layers: [0, 0, 0, 0], top: 0 }, "an empty record is an empty model, not an error");
     eq(u.dte, "1\u20137 days", "the horizon counts from the window's own Eastern date (Sep 29 evening ET to Oct 6 is 7 days)");
+    eq(u.ct.a, 52, "a name carries the contracts of its windows, summed once per window although each window splits across sides");
+    eq(u.ct.b, null, "a name with a window of unknown size shows no contract count rather than a partial one");
+    eq(u.ct.c, null, "and a count that sums to zero is omitted, never shown as zero");
+    eq(u.ct.tech, null, "a sector holding a window of unknown size shows none either");
+    eq(u.ct.energy, null, "nor a sector whose only window states zero");
+    eq(u.ct.ca, null, "a side node never carries contracts: the vendor attributes premium, not contracts, to the quote sides");
+    eq(u.ct.bull, null, "nor does a lean node");
+    eq(u.ct.far, null, "an expiry with only a zero-size window shows none");
+    eq(u.ct.w1, null, "an expiry holding the unknown-size window shows none");
+    deep(u.rank.names, ["R#1", "S#2", "Q#3", "Other names"], "names rank by premium, ties broken by id, with rank numerals, and Other names last");
+    deep(u.rank.sectors, ["Energy", "No sector"], "No sector sits below a smaller ranked sector");
+    deep(u.rank.out, ["0DTE", "32+ days", "No expiry"], "the expiry layer ranks by premium, and No expiry, its residual, sits last although it carries the most");
+    eq(u.ct.w1ok, 52, "an expiry whose every window states its size carries their contracts");
+    eq(u.ct.secok, 52, "and so does such a sector");
+    eq(u.ct.pa, null, "while the side nodes of the same windows carry none");
     const one = { ...alerts(), rows: alerts().rows.slice(0, 1) };
     await net(page, `net.take(arg, { state: "ok" }); return null;`, one);
     await page.waitForTimeout(300);
@@ -419,7 +665,7 @@ try {
     const pend = await page.evaluate(() => ({ text: document.querySelector("#uaNet .fn-empty").textContent, label: document.querySelector("#uaNet canvas").getAttribute("aria-label") }));
     ok(/Reading/.test(pend.text), `before the record arrives the network says it is reading (${pend.text})`);
     ok(/^Flow network: Reading the flagged windows/.test(pend.label), "and so does its accessible name");
-    await shot(page, "flow-net-pending-1440");
+    await shot(page, "net-pending-1440");
     page.release();
     await page.waitForFunction(() => document.querySelector("#uaNet .fn-empty").hidden);
     ok(true, "and the pending state clears when it does");
@@ -484,7 +730,9 @@ try {
 }
 console.log(`  CPU per frame on the unusual page at 1440px: median ${cpu.page.median === null ? "n/a" : cpu.page.median.toFixed(2)} ms over ${cpu.page.frames} frames (${cpu.page.pulses} pulses, ${cpu.page.edges} edges)`);
 console.log(`  CPU per frame, benchmark at ${cpu.bench.edges} edges and ${cpu.bench.pulses} pulses: loop median ${cpu.bench.loopMedian.toFixed(2)} ms, p90 ${cpu.bench.loopP90.toFixed(2)} ms, mean ${cpu.bench.loopMean.toFixed(2)} ms; animation-frame median ${cpu.bench.rafMedian === null ? "n/a" : cpu.bench.rafMedian.toFixed(2)} ms over ${cpu.bench.rafFrames} frames`);
-console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn on the unusual page from fixture alerts: layer and node counts from the data, ` +
-  `premium conserved through every layer and edge, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
-  `the expiry output, a flare on a new window, pause when hidden or off screen, reduced motion still, pending, empty, failed and unread states, ` +
-  `no overflow and no label collision at 320, 390 and 1440, and CPU per frame`);
+console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn in 3D on the unusual page from fixture alerts: layer and node counts from the data, ` +
+  `every layer ranked by premium top to bottom with the residual buckets last, at rest, at the yaw and pitch limits, after new data reorders a layer and under reduced motion, ` +
+  `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
+  `hit targets that follow the camera, back-to-front depth order, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
+  `the expiry output, a flare on a new window, pause when hidden or off screen, pending, empty, failed and unread states, ` +
+  `no overflow and no label collision at 320, 390 and 1440 at every extreme angle, and CPU per frame`);

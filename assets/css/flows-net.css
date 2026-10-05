@@ -22,7 +22,11 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 24px 60px rgba(0, 0, 0, 0.35);
   isolation: isolate;
   touch-action: pan-y;
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
 }
+.fn-stage.is-drag, .fn-stage.is-drag .fn-hit { cursor: grabbing; }
 .fn-cv { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .fn-hits { position: absolute; inset: 0; pointer-events: none; }
 .fn-hit {
@@ -73,7 +77,31 @@
 .fn-tip-l i[data-g="up"] .ui-g, .fn-k.is-up .ui-g, .fn-lean[data-lean="bull"] .ui-g { color: var(--up); }
 .fn-tip-l i[data-g="down"] .ui-g, .fn-k.is-down .ui-g, .fn-lean[data-lean="bear"] .ui-g { color: var(--down); }
 .fn-tip-l i[data-g="flat"] .ui-g, .fn-k.is-nx .ui-g, .fn-lean[data-lean="nx"] .ui-g { color: var(--accent-ink); }
+.fn-tip-c { color: var(--label-2); }
 .fn-tip-go { margin-top: 3px; color: var(--accent-ink); font-weight: 500; }
+
+.fn-home {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--label-3);
+  cursor: pointer;
+  transition: color var(--dur-fade) ease, background var(--dur-fade) ease;
+}
+.fn-home:hover { color: var(--label-1); background: rgba(255, 255, 255, 0.12); }
+.fn-home:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.fn-home[hidden] { display: none; }
+.fn-home .ui-g { font-size: 14px; }
+@media (pointer: coarse) { .fn-home { width: 44px; height: 44px; right: 4px; bottom: 4px; } }
 
 .fn-empty {
   position: absolute;
