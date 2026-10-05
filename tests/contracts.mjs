@@ -1224,7 +1224,9 @@ let globalCount = 0;
   const UI_FILE = path.join("assets", "js", "flows-ui.js");
   const REGEX_BEFORE = /[(,=:[!&|?{};+\-*%<>~^]/;
   const BEFORE_OPERAND = /^(return|typeof|case|do|else|in|instanceof|new|of|throw|void|delete|yield|await)$/;
-  const afterWord = (word, before) => before !== "." && BEFORE_OPERAND.test(word) ? "(" : "a";
+  const HEAD = /^(if|while|for|with)$/;
+  const afterWord = (word, before) => before === "." ? "a" : HEAD.test(word) ? "k" : BEFORE_OPERAND.test(word) ? "(" : "a";
+  const stepOp = (src, i) => (src[i] === "+" && src[i + 1] === "+") || (src[i] === "-" && src[i + 1] === "-");
   const WORD = /^[A-Za-z_$][\w$]*/;
   const skipQuoted = (src, i) => {
     const q = src[i];
@@ -1256,13 +1258,17 @@ let globalCount = 0;
   };
   function skipNested(src, i) {
     let depth = 1, prev = "{";
+    const heads = [];
     while (i < src.length) {
       const next = skipTrivia(src, i, prev);
       if (next >= 0) { i = next; prev = "a"; continue; }
       const c = src[i];
       if (/[A-Za-z_$]/.test(c)) { const word = src.slice(i).match(WORD)[0]; i += word.length; prev = afterWord(word, prev); continue; }
-      if (c === "{" || c === "(" || c === "[") depth++;
-      else if (c === "}" || c === ")" || c === "]") { if (--depth === 0) return i + 1; }
+      if (stepOp(src, i)) { i += 2; prev = "a"; continue; }
+      if (c === "(") { depth++; heads.push(prev === "k"); }
+      else if (c === "{" || c === "[") depth++;
+      else if (c === ")") { if (--depth === 0) return i + 1; prev = heads.pop() ? "(" : ")"; i++; continue; }
+      else if (c === "}" || c === "]") { if (--depth === 0) return i + 1; }
       if (!/\s/.test(c)) prev = c;
       i++;
     }
@@ -1272,6 +1278,7 @@ let globalCount = 0;
     const names = [];
     let destructured = false;
     let depth = 0, prev = "", expect = true, i = at;
+    const heads = [];
     while (i < src.length) {
       const c = src[i];
       if (depth === 0 && expect && !/\s/.test(c)) {
@@ -1283,8 +1290,11 @@ let globalCount = 0;
       const next = skipTrivia(src, i, prev);
       if (next >= 0) { i = next; prev = "a"; continue; }
       if (/[A-Za-z_$]/.test(c)) { const word = src.slice(i).match(WORD)[0]; i += word.length; prev = afterWord(word, prev); continue; }
-      if (c === "{" || c === "(" || c === "[") depth++;
-      else if (c === "}" || c === ")" || c === "]") depth--;
+      if (stepOp(src, i)) { i += 2; prev = "a"; continue; }
+      if (c === "(") { depth++; heads.push(prev === "k"); }
+      else if (c === "{" || c === "[") depth++;
+      else if (c === ")") { depth--; prev = heads.pop() ? "(" : ")"; i++; continue; }
+      else if (c === "}" || c === "]") depth--;
       else if (depth === 0 && c === ";") break;
       else if (depth === 0 && c === ",") expect = true;
       else if (depth === 0 && c === "\n" && !/[,=+\-*/%&|^?:.([{<>!~]/.test(prev) &&
@@ -1297,6 +1307,7 @@ let globalCount = 0;
   const topLevel = (src) => {
     const declarations = [];
     let depth = 0, prev = "", i = 0, newline = false;
+    const heads = [];
     while (i < src.length) {
       const next = skipTrivia(src, i, prev);
       if (next >= 0) { i = next; prev = "a"; newline = false; continue; }
@@ -1307,7 +1318,8 @@ let globalCount = 0;
         let end = i + word.length;
         const startOfStatement = prev === "" || prev === ";" || prev === "}" ||
           (newline && !/[,=+\-*/%&|^?:.([{<>!~]/.test(prev));
-        if (depth === 0 && startOfStatement && /^(var|let|const|class|function|async)$/.test(word)) {
+        const declares = prev !== "." && (/^(var|let|const)$/.test(word) || (startOfStatement && /^(class|function|async)$/.test(word)));
+        if (depth === 0 && declares) {
           if (word === "async") {
             const fn = src.slice(end).match(/^\s+function\b/);
             if (fn) end += fn[0].length;
@@ -1319,8 +1331,11 @@ let globalCount = 0;
         newline = false;
         continue;
       }
-      if (c === "{" || c === "(" || c === "[") depth++;
-      else if (c === "}" || c === ")" || c === "]") depth--;
+      if (stepOp(src, i)) { i += 2; prev = "a"; newline = false; continue; }
+      if (c === "(") { depth++; heads.push(prev === "k"); }
+      else if (c === "{" || c === "[") depth++;
+      else if (c === ")") { depth--; prev = heads.pop() ? "(" : ")"; newline = false; i++; continue; }
+      else if (c === "}" || c === "]") depth--;
       if (!/\s/.test(c)) { prev = c; newline = false; }
       i++;
     }
@@ -1328,19 +1343,20 @@ let globalCount = 0;
   };
   const globalsCreatedBy = (file, src) => {
     const created = [], outright = [], hooks = [];
-    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*(?:\|\||&&|\?\?|\*\*|<<|>>>?|[-+*/%&|^])?=(?![=>])/g)) {
-      const name = m[2] || m[3];
-      if (m[1] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
+    for (const m of src.matchAll(/(?<![\w$.])(?:(\+\+|--)[ \t]*)?(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])(?:\s*((?:\|\||&&|\?\?|\*\*|<<|>>>?|[-+*/%&|^])?=(?![=>]))|[ \t]*(\+\+|--))?/g)) {
+      if (!m[1] && !m[5] && !m[6]) continue;
+      const name = m[3] || m[4];
+      if (m[2] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
         const before = src.slice(Math.max(0, m.index - 80), m.index);
         if (/if \(typeof document === "undefined"\) \{\s*$/.test(before)) { hooks.push(name); continue; }
         outright.push(`${file}: the test hook ${name} is bound where a page has a document`);
         continue;
       }
-      if (m[1] === "window" && name === "fetch" && file === UI_FILE) continue;
-      created.push({ name, how: `${m[1]}.${name}` });
+      if (m[2] === "window" && name === "fetch" && file === UI_FILE) continue;
+      created.push({ name, how: `${m[2]}.${name}` });
     }
-    for (const m of src.matchAll(/(?<![\w$.])Object\s*\.\s*(assign|defineProperty|defineProperties)\s*\(\s*(window|globalThis|self)\s*[,)]/g)) {
-      outright.push(`${file}: Object.${m[1]}(${m[2]}, ...) creates globals the scan cannot name`);
+    for (const m of src.matchAll(/(?<![\w$.])(Object|Reflect)\s*\.\s*(assign|defineProperty|defineProperties|set)\s*\(\s*(window|globalThis|self)\s*[,)]/g)) {
+      outright.push(`${file}: ${m[1]}.${m[2]}(${m[3]}, ...) creates globals the scan cannot name`);
     }
     const top = topLevel(src);
     if (top.depth !== 0) outright.push(`${file}: the scan lost its place (depth ${top.depth} at the end), so it cannot vouch for this file`);
@@ -1390,7 +1406,14 @@ let globalCount = 0;
     "var a = /[,]/g, Foo;", "  const Foo = 1;", "foo()\nconst Foo = 1", "function Foo() {}",
     "async function Foo() {}", "class Foo {}", "function *Foo() {}", "function* Foo() {}",
     "window.Foo += 1;", "self[\"Foo\"] |= 1;", "globalThis.Foo **= 2;",
+    "window.Foo++;", "--self[\"Foo\"];", "globalThis.Foo--;", "++window.Foo;", "x = window.Foo++ + 1;",
+    "Reflect.set(window, \"Foo\", 1);", "Reflect.defineProperty(globalThis, \"Foo\", {});", "Reflect.set(self, \"Foo\", 1);",
+    "if (x) var Foo = 1;", "if (x) a(); else var Foo = 1;", "foo: var Foo = 1;", "if (x)\n  var Foo = 1;",
     "(function () { return /\"/.test(x); })();\nconst Foo = 1;\n(function () { return /\"/; })();",
+    "(function () { if (a) /\"/.test(b); })();\nconst Foo = 1;\n(function () { if (c) /\"/.test(d); })();",
+    "(function () { while (a) /\"/.test(b); })();\nlet Foo = 1;\n(function () { for (;;) /\"/.test(d); })();",
+    "(function () { return i++ / 2; })();\nconst Foo = 1;\n(function () { return j-- / 2; })();",
+    "i++\nconst Foo = 1;",
     "(function () { return typeof /'/; })();\nlet Foo = 1;\n(function () { return void /'/; })();", "if (typeof document !== \"undefined\") { globalThis.__FooTest = 1; }",
   ]) assert(flagged(elsewhere, src) > 0, `the global scan misses ${JSON.stringify(src)}`);
   for (const src of [
@@ -1399,6 +1422,12 @@ let globalCount = 0;
     "window.FlowsUI ||= {};",
     "(function () { return /[(]/.test(x); })();", "(function () { return /\"/.test(x); })();",
     "(function () { if (a) return /[{]/; else return /[\\]]/; })();",
+    "(function () { if (a) /[(]/.test(b); })();", "(function () { while (x) /[{]/.test(y); })();",
+    "(function () { for (const k of xs) /[\"]/.test(k); })();", "(function () { if ((a)) /[(]/.test(b); })();",
+    "(function () { return f(a) / 2; })();", "(function () { return (a + b) / 2; })();", "(function () { return i++ / 2; })();",
+    "(function () { return --i / 2; })();", "(function () { window.FlowsUI.count++; return window.FlowsUI.n--; })();",
+    "(function () { window.FlowsUI\n++x; })();", "(function () { const t = x ++ ; return t; })();",
+    "(function () { Reflect.set(window.CURRICULUM, \"Foo\", 1); })();", "x.var = 1; x.const = 2;",
     "(function () { const s = `${typeof /[(]/}`; return s; })();",
     "(function () { const a = b / c / d; return a; })();", "(function () { return x.of / 2; })();",
     "if (typeof document === \"undefined\") {\n  globalThis.__FooTest = 1;\n}",

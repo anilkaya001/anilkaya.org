@@ -1283,25 +1283,40 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   one. `tests/contracts.mjs` reads it from this paragraph and scans every
   script under `assets/js`. Each assignment to `window`, `globalThis` or
   `self` by a dotted or string-quoted key (`=` or any compound assignment,
-  the logical `||=`, `&&=` and `??=` among them), and each `var`, `let`,
-  `const`, `class` or `function` declaration (`function*` with the star on
-  either side) at the script's top level (by bracket depth, over a scan that
-  skips strings, templates, comments and regular expressions, a `/` after an
-  operator or after a keyword such as `return` or `typeof` opening one;
-  every declarator of a list, at any indentation), must name a global on it. It fails outright on
-  `Object.assign`, `defineProperty` or `defineProperties` with the global
-  object itself as the target, on a top-level destructuring declaration, and
-  on a file whose brackets it cannot balance. The only others it admits are
+  the logical `||=`, `&&=` and `??=` among them, and `++` or `--` on the
+  same line before or after the key), and each `var`, `let`, `const`,
+  `class` or `function` declaration (`function*` with the star on either
+  side) at the script's top level (by bracket depth, over a scan that skips
+  strings, templates, comments and regular expressions, a `/` after an
+  operator, after a keyword such as `return` or `typeof`, or after the `)`
+  that closes an `if`, `while`, `for` or `with` head opening one; a `var`,
+  `let` or `const` wherever it stands at that depth, the body of a braceless
+  `if` or `else` and a labelled statement included; every declarator of a
+  list, at any indentation), must name a global on it. It fails outright on
+  `Object.assign`, `Object.defineProperty`, `Object.defineProperties`,
+  `Reflect.set` or `Reflect.defineProperty` with the global object itself as
+  the target, on a top-level destructuring declaration, and on a file whose
+  brackets it cannot balance. The only others it admits are
   `CURRICULUM` below, the `fetch` wrapper in `flows-ui.js` (in that file
   alone), and `globalThis.__<Name>Test` hooks bound only where there is no
   `document`. It is a scanner, not a parser, and it judges the top level
-  by bracket depth alone, so these create globals and pass it: an alias of
-  the global object (`const g = window; g.Foo = 1`), a computed key,
-  `eval`, `new Function` and `with`; a `var` inside a top-level block,
-  `for` head, `try` or `switch` (`for (var Foo = 0;;)`,
-  `if (x) { var Foo = 1 }`); a function declared inside a top-level block in
-  sloppy code; and an assignment to an undeclared name in a file that is not
-  strict. Every script under `assets/js` is strict except `curriculum.js`,
+  by bracket depth alone, so the list of what it cannot see is not complete.
+  Among the forms that create globals and pass it are: `this.Foo = 1` at
+  the top level or inside a top-level arrow function (a classic script's
+  top-level `this` is the global object even in strict mode, and most
+  scripts here are `(() => { "use strict"; ... })()`); an alias of the
+  global object (`const g = window; g.Foo = 1`), a computed key, `eval`,
+  `new Function` and `with`; a destructuring or `for`-`in`/`of` assignment
+  target (`[window.Foo] = a`, `({ a: window.Foo } = o)`,
+  `for (window.Foo of xs)`); a `var` inside a top-level block, `for` head,
+  `try` or `switch` (`for (var Foo = 0;;)`, `if (x) { var Foo = 1 }`); a
+  function declared inside a top-level block in sloppy code; an assignment
+  to an undeclared name in a file that is not strict; and a `/` it still
+  misreads, such as a division after a `}` read as a regular expression
+  (`x = {} / 2`), which hides any top-level declaration inside the misread
+  span without the unbalanced-file failure whenever that span happens to
+  balance. Every
+  script under `assets/js` is strict except `curriculum.js`,
   `curriculum-data.js` (authoring inputs) and the two generated FlowsQuant
   bundles; keep a new script strict. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, and the
