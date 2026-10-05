@@ -42,18 +42,18 @@ export function sessionClock(body) {
 
 export async function readLiveClock(readOnce, { seen = null } = {}) {
   let body = null;
+  let clock = null;
   try {
     const read = await readOnce("clock");
     body = read && read.payload ? read.payload : null;
-    return sessionClock(body);
+    clock = sessionClock(body);
   } catch {
-    body = null;
-    return null;
-  } finally {
-    if (seen) {
-      try { seen(body); } catch { }
-    }
+    clock = null;
   }
+  if (clock && seen) {
+    try { seen(body); } catch { }
+  }
+  return clock;
 }
 
 const rowsOfBoard = (read) => {
@@ -428,8 +428,8 @@ const nextOpenAt = (at, clock) => {
   return Number.isFinite(open) ? open + LIVE_LOOP.openLagMs : NaN;
 };
 
-async function keepLoop({ startedAt, refresh, current, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs, watch,
-  log, warn }) {
+async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs,
+  watch, log, warn }) {
   const passes = [];
   let waits = 0;
   let ticks = 0;
@@ -454,7 +454,8 @@ async function keepLoop({ startedAt, refresh, current, pass, chain, now, sleep, 
     }
     let beat = {};
     try {
-      beat = (await watch.tick({ at: now(), clock, first: ticks === 0, inSession: !!here.run, passes })) || {};
+      beat = (await watch.tick({ at: now(), clock, clockRead: currentRead(), first: ticks === 0, inSession: !!here.run,
+        passes })) || {};
     } catch (error) {
       warn(`live loop: the watch threw — ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}; ` +
         "the loop carries on");
@@ -485,14 +486,16 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
   const startedAt = now();
   const passes = [];
   let clock = null;
+  let clockRead = false;
   const refresh = async () => {
     const read = await withDeadline(Promise.resolve().then(readClock), clockDeadlineMs);
-    if (read && !read.failed) clock = read;
+    clockRead = !!read && !read.failed;
+    if (clockRead) clock = read;
     return clock;
   };
   if (watch) {
-    return keepLoop({ startedAt, refresh, current: () => clock, pass, chain, now, sleep, window, slotMs, budgetMs, idleMs,
-      watch, log, warn });
+    return keepLoop({ startedAt, refresh, current: () => clock, currentRead: () => clockRead, pass, chain, now, sleep, window,
+      slotMs, budgetMs, idleMs, watch, log, warn });
   }
   await refresh();
   let opening = window(startedAt, clock);

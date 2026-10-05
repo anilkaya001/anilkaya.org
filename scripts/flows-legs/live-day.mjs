@@ -14,7 +14,7 @@ async function drive(world, { budgetMs, notes }) {
   const env = world.env();
   let body = null;
   const watch = createWatch({
-    readOnce: world.readOnce, latestClock: () => body, env, fetchImpl: world.github.fetchImpl,
+    readOnce: world.readOnce, latestClock: () => body, env, fetchImpl: world.github.fetchImpl, sleep: world.sleep,
     log: (line) => notes.push(line), warn: (line) => notes.push(line),
   });
   const loop = await runLiveLoop({
@@ -147,6 +147,41 @@ export const DRY_SCENARIOS = Object.freeze([
       const made = issueOf(w, "probe");
       if (!made) return ["no probe issue was opened"];
       if (issueOf(w, "tier1") || issueOf(w, "nightly")) problems.push("a read failure was taken for a freshness verdict");
+      if (!w.github.record.closed.length) problems.push("the probe issue was not closed when reads returned");
+      return problems;
+    },
+  },
+  {
+    name: "the clock read is challenged for three ticks while every other read answers: the witness keeps its last good clock, still reads Tier 1 and Tier 2, and opens nothing",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(10, 30), clockFail: [[at(11, 0), at(11, 14)]] }),
+    budgetMs: 1.5 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const during = w.stat.reads.filter((x) => x.at >= at(11, 0) && x.at < at(11, 15));
+      const count = (key) => during.filter((x) => x.key === key).length;
+      if (count("clock") !== 3) problems.push(`the clock was read ${count("clock")} time(s) while challenged, not once on each of three ticks`);
+      for (const key of ["live:market", "live:focus", "live:breadth"]) {
+        if (count(key) !== 3) problems.push(`${key} was read ${count(key)} time(s) while the clock was challenged, not once a tick`);
+      }
+      if (w.github.record.created.length) problems.push(`a challenged clock opened ${w.github.record.created.map((c) => c.title).join("; ")}`);
+      if (r.verdict.failed) problems.push(`the run was red: ${r.verdict.why}`);
+      return problems;
+    },
+  },
+  {
+    name: "every read is challenged for three ticks: each is tried twice, and the probe still opens on the third",
+    world: () => fakeWorld({ day: DRY_DAY, start: at(9, 50), readFail: [[at(10, 0), at(10, 14)]] }),
+    budgetMs: 1.5 * HOUR,
+    expect: (r, w) => {
+      const problems = [];
+      const made = issueOf(w, "probe");
+      if (!made) return ["no probe issue was opened"];
+      if (w.github.record.created.length !== 1) problems.push(`expected only the probe issue, saw ${w.github.record.created.map((c) => c.title).join("; ")}`);
+      if (made.at < at(10, 10) || made.at >= at(10, 15)) problems.push(`the probe issue opened at ${etTime(made.at)}, not on the third challenged tick`);
+      const market = w.stat.reads.filter((x) => x.key === "live:market" && x.at >= at(10, 0) && x.at < at(10, 15)).length;
+      if (market !== 6) problems.push(`live:market was read ${market} time(s) over three challenged ticks, not twice a tick`);
+      const clock = w.stat.reads.filter((x) => x.key === "clock" && x.at >= at(10, 0) && x.at < at(10, 15)).length;
+      if (clock !== 3) problems.push(`the loop's clock read was made ${clock} time(s) over three ticks, not once a tick`);
       if (!w.github.record.closed.length) problems.push("the probe issue was not closed when reads returned");
       return problems;
     },

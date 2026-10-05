@@ -2173,6 +2173,16 @@ const cronMinutes = (cron) => {
       "a Worker that predates the key answers 400, which reads as no clock, so either deploy order works");
     eq(await readLiveClock(async () => { throw new Error("offline"); }), null,
       "and an unreachable Worker reads as no clock too (the loop then keeps its last verdict, or the weekday calendar)");
+    const handed = [];
+    const seen = { seen: (b) => handed.push(b) };
+    await readLiveClock(async () => ({ payload: null, failed: true, status: 403 }), seen);
+    await readLiveClock(async () => { throw new Error("offline"); }, seen);
+    await readLiveClock(async () => ({ payload: { key: "clock", clock: { day: "2026-9-1" } }, status: 200 }), seen);
+    eq(handed.length, 0, "A CHALLENGED, UNREACHABLE OR MALFORMED CLOCK READ hands the witness nothing, so it keeps the last good clock " +
+      "(issue #144 was a single 403 here that blanked it)");
+    const good = { key: "clock", clock: at };
+    await readLiveClock(async () => ({ payload: good, status: 200 }), seen);
+    ok(handed.length === 1 && handed[0] === good, "and a clock that parses is handed over whole");
     deep([sessionClock({ clock: { day: "2026-9-1", trading: 1 } }), sessionClock({ clock: { day: S, trading: "0",
       earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
     "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
@@ -2223,7 +2233,7 @@ const cronMinutes = (cron) => {
   ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
      /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
      /const clock = force \? null : await readClock\(\);/.test(pipeline),
-  "and --live gates both the loop and a single pass on the Worker's clock");
+  "and --live gates both the loop and a single pass on the Worker's clock, the witness's copy of it set only by a read that parsed");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
   "--live runs the loop when the workflow asks for it, each pass after the first ignoring the heartbeat skip");

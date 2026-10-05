@@ -1,4 +1,4 @@
-import { phaseAt, LIVE_CLOCK } from "../../shared/flows-freshness.js";
+import { phaseAt, LIVE_CLOCK, easternDay } from "../../shared/flows-freshness.js";
 import {
   WITNESS, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter, sessionOf,
 } from "./witness.mjs";
@@ -10,6 +10,20 @@ export function normalizeRead(read) {
   if (!read || read.failed) return { failed: true, status: read && read.status ? read.status : 0, detail: read && read.detail ? read.detail : null };
   if (read.absent || read.payload === null || read.payload === undefined) return { pending: true };
   return { ok: true, payload: read.payload };
+}
+
+export const WATCH_RETRY = Object.freeze({ delayMs: 1000, statuses: Object.freeze([0, 403, 408, 429]) });
+
+export function challenged(read) {
+  if (!read || read.failed !== true || read.final) return false;
+  const status = Number(read.status) || 0;
+  return WATCH_RETRY.statuses.includes(status) || status >= 500;
+}
+
+export function keptView(view, at, fresh) {
+  if (!view || fresh) return view;
+  if (view.clock.day !== easternDay(at)) return null;
+  return view.tier1 && view.tier1.why !== "off" ? { ...view, tier1: null } : view;
 }
 
 export function tier1Window(at, view) {
@@ -24,20 +38,33 @@ export function tier2Window(at, view) {
   return !!p && p.trading && at - p.open >= WITNESS.tier2StaleMs && at <= p.close + LIVE_CLOCK.runAfterCloseMin * 60000;
 }
 
+const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
 export function createWatch({ readOnce, latestClock, env = process.env, fetchImpl = fetch, reporter = null,
-  readDeadlineMs = WITNESS.readDeadlineMs, log = console.log, warn = console.warn } = {}) {
+  readDeadlineMs = WITNESS.readDeadlineMs, retryMs = WATCH_RETRY.delayMs, sleep = realSleep, log = console.log,
+  warn = console.warn } = {}) {
   const witness = createWitness({ reporter: reporter || createIssueReporter({ env, fetchImpl }), env, log, warn });
   const nightly = createNightlyStart({ env, fetchImpl, log, warn });
   const state = { landed: null };
-  const read = async (key) => normalizeRead(await withDeadline(Promise.resolve().then(() => readOnce(key)), readDeadlineMs));
+  const attempt = (key, ms) => withDeadline(Promise.resolve().then(() => readOnce(key)), ms);
+  const read = async (key) => {
+    if (!(readDeadlineMs > retryMs)) return normalizeRead(await attempt(key, readDeadlineMs));
+    const each = Math.floor((readDeadlineMs - retryMs) / 2);
+    const first = await attempt(key, each);
+    if (!challenged(first)) return normalizeRead(first);
+    await sleep(retryMs);
+    return normalizeRead(await attempt(key, each));
+  };
 
   return {
-    async tick({ at, clock = null, first = false }) {
+    async tick({ at, clock = null, clockRead = null, first = false }) {
       if (first) {
         await witness.start();
         await witness.clear("chain", { at });
       }
-      const view = witnessView(latestClock());
+      const kept = witnessView(latestClock());
+      const clockFresh = clockRead === null ? !!kept : !!clockRead;
+      const view = keptView(kept, at, clockFresh);
       const wclock = view ? view.clock : clock;
       const p = phaseAt(at, wclock);
       const inTier1 = tier1Window(at, view);
@@ -60,11 +87,12 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       if (inTier2) results.push(evaluateTier2({ at, view, breadth }));
       if (meta) results.push(evaluateNightly({ at, view, meta }));
       const reads = [market, focus, breadth, meta].filter(Boolean);
-      const seen = !!view || reads.some((r) => !r.failed);
+      const seen = clockFresh || reads.some((r) => !r.failed);
       results.push({
         id: "probe", status: seen ? "ok" : "breach",
-        detail: `nothing could be read through the ingest route at ${etTime(at)}: ` +
-          `${reads.map((r) => (r.failed ? (r.status ? "HTTP " + r.status : r.detail || "no answer") : "answered")).join(", ") || "the clock read failed"}`,
+        detail: `nothing could be read through the ingest route at ${etTime(at)} (a challenged read is tried twice): ` +
+          [clockFresh ? "the clock answered" : "the clock read failed",
+            ...reads.map((r) => (r.failed ? (r.status ? "HTTP " + r.status : r.detail || "no answer") : "answered"))].join(", "),
       });
       await witness.apply(results, { at, dispatches: nightly.attempts() });
       return { busy: step.busy, results, step };

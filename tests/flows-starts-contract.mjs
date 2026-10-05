@@ -13,7 +13,9 @@ import {
   issueTitle, issueBody, ownerHandle, runUrl,
 } from "../scripts/flows-legs/witness.mjs";
 import { NIGHTLY, nightlyStartDue, createNightlyStart } from "../scripts/flows-legs/starts.mjs";
-import { createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill } from "../scripts/flows-legs/watch.mjs";
+import {
+  createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill, challenged, keptView, WATCH_RETRY,
+} from "../scripts/flows-legs/watch.mjs";
 import { fakeWorld, fakeGithub } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
 import { LIVE_VENDOR } from "../scripts/flows-pipeline.mjs";
@@ -620,6 +622,12 @@ const MIN = 60 * 1000;
     `AN INTERMITTENT FEED is one issue, reopened on each flap (${flapping.closed} closes, ${flapping.comments} comments), and still turns the run red`);
   ok(by("Tier 2 stops").issues.length === 1 && by("Tier 2 stops").closed === 1 && by("Tier 2 stops").failed,
     "A TIER 2 THAT PASSES BUT DOES NOT PUBLISH is one issue, closed on recovery");
+  const challengedClock = by("clock read is challenged");
+  ok(challengedClock.issues.length === 0 && !challengedClock.failed && !challengedClock.problems.length,
+    "A CLOCK READ CHALLENGED ON THREE TICKS IN A ROW (issue #144) raises nothing: the witness keeps the last good clock of the day and still reads Tier 1 and Tier 2");
+  const blind = by("every read is challenged");
+  ok(blind.issues.length === 1 && /^\[flows-witness:probe\]/.test(blind.issues[0].title) && blind.closed === 1 && !blind.problems.length,
+    "while three ticks on which every read fails, each tried twice, still open the probe issue, and it closes when reads return");
   ok(by("one pending answer").issues.length === 1 && by("one pending answer").closed === 1 && !by("after midnight").problems.length &&
      by("after midnight").closed === 1, "a pending answer from meta is a lapse only when it repeats, and a nightly that lands after midnight closes its issue");
   const src = read("scripts/flows-pipeline.mjs");
@@ -776,6 +784,76 @@ const MIN = 60 * 1000;
     pass: async () => ({ skipped: null, answered: 1, landed: 1 }), chain: async () => ({ sent: true, why: "sent", status: 204 }) });
   ok(seenFirst[0] === true && seenFirst.slice(1).every((f) => f === false) && rr.ticks === seenFirst.length && rr.exit === "budget",
     "THE LOOP tells the watch which tick is the first, once, and carries on when the watch throws");
+}
+
+{
+  const S = D;
+  deep([{ failed: true, status: 403 }, { failed: true, status: 408 }, { failed: true, status: 429 }, { failed: true, status: 500 },
+    { failed: true, status: 503 }, { failed: true, status: 0, detail: "timeout" }].map(challenged), [true, true, true, true, true, true],
+  "A CHALLENGED READ is a 403, a 408, a 429, a 5xx, a timeout or no answer");
+  deep([{ failed: true, status: 403, final: true }, { failed: true, status: 400 }, { failed: true, status: 404 }, { pending: true },
+    { ok: true, payload: {} }, null].map(challenged), [false, false, false, false, false, false],
+  "and not the Worker refusing the credential, a 4xx it means, a pending answer or a success");
+  eq(WATCH_RETRY.delayMs, 1000, "it is tried again once, one second later");
+
+  const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+  const clockBody = (await world.readOnce("clock")).payload;
+  const tickWith = async (fail, { times = 1, clockRead = true, body = clockBody, when = world.now(), over = {} } = {}) => {
+    const calls = [];
+    const slept = [];
+    const readOnce = async (key) => {
+      calls.push(key);
+      if (key !== "clock" && calls.filter((k) => k === key).length <= times) return typeof fail === "function" ? fail() : fail;
+      return world.readOnce(key);
+    };
+    const watch = createWatch({ readOnce, latestClock: () => body, env: world.env(), fetchImpl: world.github.fetchImpl,
+      sleep: async (ms) => { slept.push(ms); }, log() {}, warn() {}, ...over });
+    const out = await watch.tick({ at: when, clockRead });
+    const result = (id) => out.results.find((x) => x.id === id) || null;
+    return { calls, slept, result, market: calls.filter((k) => k === "live:market").length };
+  };
+  let t = await tickWith({ payload: null, failed: true, status: 403 });
+  ok(t.market === 2 && t.slept.length === 3 && t.slept.every((ms) => ms === 1000) && t.result("tier1").status === "ok",
+    "A WATCH READ CHALLENGED ONCE is read again a second later and the tick sees Tier 1 healthy");
+  t = await tickWith({ payload: null, failed: true, status: 503 }, { times: 5 });
+  ok(t.market === 2 && t.result("tier1").status === "inconclusive" && t.result("probe").status === "ok",
+    "a read that fails twice is given up on after the one retry, never a third, and the clock read that answered keeps the probe quiet");
+  for (const [fail, why] of [[{ payload: null, failed: true, status: 403, final: true }, "the Worker refusing the credential"],
+    [{ payload: null, failed: true, status: 400 }, "a 400"], [{ payload: null, absent: true, status: 200 }, "a pending answer"]]) {
+    t = await tickWith(fail);
+    ok(t.market === 1 && t.slept.length === 0, `${why} is not retried`);
+  }
+  let first = true;
+  t = await tickWith(() => (first ? (first = false, new Promise(() => {})) : { payload: null, failed: true, status: 403 }), { times: 1,
+    over: { readDeadlineMs: 400, retryMs: 100, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) } });
+  ok(t.market === 2 && t.result("tier1").status === "ok", "a first attempt that hangs is cut at its share of the deadline and retried inside it");
+  const startedAt = Date.now();
+  t = await tickWith(() => new Promise(() => {}), { times: 5,
+    over: { readDeadlineMs: 400, retryMs: 100, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) } });
+  const spent = Date.now() - startedAt;
+  ok(t.market === 2 && spent < 400 + 300, `and a read that never answers, retried, still ends inside the ten-second deadline's scale (${spent} ms of 400)`);
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, over: { readDeadlineMs: 150 } });
+  ok(t.market === 1 && t.slept.length === 0, "a deadline shorter than the retry delay leaves room for one attempt only");
+
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, clockRead: false });
+  ok(t.result("probe").status === "breach" && /the clock read failed, HTTP 403/.test(t.result("probe").detail) &&
+     t.result("tier1").status === "inconclusive",
+  "A TICK WHOSE CLOCK READ AND EVERY RETRIED READ FAILED is blind: the probe breaches");
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 0, clockRead: false });
+  ok(t.result("probe").status === "ok" && t.result("tier1").status === "ok" && t.market === 1,
+    "while a challenged clock read with healthy reads keeps the last good clock and evaluates Tier 1 on the keys alone");
+
+  const view = witnessView(clockBody);
+  const kept = keptView(view, at(S, 11, 0), false);
+  ok(kept.clock.day === S && kept.tier1 === null && view.tier1 !== null,
+    "THE KEPT CLOCK lends its calendar but not its Tier 1 stamp, which is as old as the last read that answered");
+  eq(keptView(view, at(S, 11, 0), true), view, "a clock read this tick is used whole");
+  eq(keptView(view, at(S, 24, 5), false), null, "and a kept clock is dropped once the Eastern day turns (the same-day rule)");
+  const off = witnessView({ clock: { day: S, trading: 1, tier1: { at: null, why: "off" } } });
+  eq(keptView(off, at(S, 11, 0), false).tier1.why, "off", "a kept clock that says Tier 1 is off keeps saying so");
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, clockRead: false, when: at(S, 24, 10) });
+  ok(t.result("tier1") === null && t.result("probe").status === "breach",
+    "after midnight a kept clock from the day before is no clock: no Tier 1 window, and a blind tick is still a probe breach");
 }
 
 {

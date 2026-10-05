@@ -66,7 +66,7 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
 }
 
 export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt = null, tier1Down = [], marketDown = [],
-  focusDown = [], breadthDown = [], metaPending = [], readFail = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
+  focusDown = [], breadthDown = [], metaPending = [], readFail = [], clockFail = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
   let t = start;
   const prev = prevTradingDay(day, null);
   const open = easternInstant(day, PHASE_MINUTES.open);
@@ -120,6 +120,7 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
   const readOnce = async (key) => {
     stat.reads.push({ key, at: t });
     if (inside(t, readFail)) return { payload: null, failed: true, status: 403 };
+    if (key === "clock" && inside(t, clockFail)) return { payload: null, failed: true, status: 403 };
     if (key === "clock") return { payload: clockBody(), status: 200 };
     if (key === "live:market") return { payload: { key, fresh: { readAt: iso(marketAt(t)) } }, status: 200 };
     if (key === "live:focus") return { payload: { key, fresh: { readAt: iso(focusAt(t)) } }, status: 200 };
