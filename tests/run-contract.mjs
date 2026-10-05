@@ -558,8 +558,16 @@ const CI_SHARDS = 6;
   const wf = readFileSync(path.join(HERE, "..", ".github", "workflows", "regression.yml"), "utf8");
   const shardJob = (/\n {2}shard:\n((?: {4}.*\n|\s*\n)+)/.exec(wf) || [])[1] || "";
   const cap = Number((/^ {4}timeout-minutes: (\d+)$/m.exec(shardJob) || [])[1]);
-  const slowest = Math.max(...shards.flat().map((s) => timeoutFor(s)));
-  ok(cap * 60 >= slowest + 300, `a shard job's cap (${cap} min) holds its slowest suite's own timeout (${slowest} s) and five minutes of setup, so a hung suite is killed by run.mjs and reported in the summary before the job is cancelled`);
+  const hangS = (sh) => {
+    const sum = sh.reduce((t, s) => t + (s.medianS || 0), 0);
+    return Math.max(...sh.map((s) => sum - (s.medianS || 0) + timeoutFor(s)));
+  };
+  shards.forEach((sh, i) => {
+    const worst = hangS(sh);
+    ok(cap * 60 >= worst + 300, `shard ${i + 1}/${CI_SHARDS}: the job's cap (${cap} min) holds the worst hang (${Math.round(worst)} s: one suite run to its own timeout and every other suite in the shard at its median) and five minutes of setup, so a hung suite is killed by run.mjs and reported in the summary before the job is cancelled`);
+  });
+  ok(hangS([{ medianS: 390, timeoutS: 780 }, { medianS: 110 }]) === 890 && hangS([{ medianS: 110, timeoutS: 900 }, { medianS: 390 }]) === 1290,
+    "worked by hand: the worst hang is the shard's medians with one suite's median replaced by its timeout, maximised over the suites (a 500 s shard holding a 110 s suite whose timeout is 900 s hangs for 1,290 s, which the slowest timeout plus setup alone would have read as 900)");
   deep([...shardJob.matchAll(/node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/(\d+)/g)].map((m) => Number(m[1])), [CI_SHARDS, CI_SHARDS],
     `the workflow's needs-browser step and its run step both split the chain into the ${CI_SHARDS} shards this table holds`);
 }

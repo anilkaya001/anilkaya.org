@@ -901,7 +901,9 @@ In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
 `--shard 1/6` to `6/6`, fail-fast off, a shallow checkout, Chromium installed
 only when `--needs-browser` answers `true`), and `test`, which needs both,
 runs `if: always()`, and is green only when the fast job and every shard
-succeeded. `test` is the one required check. **Adding a suite, or refreshing
+succeeded. `test` is the job a ruleset on `main` should require (A-15); as
+of 2026-10-05 `main` has no branch protection and no ruleset, so nothing
+requires it yet and Workers Builds still deploys `main` on merge. **Adding a suite, or refreshing
 a `medianS`, means changing `tests/suites.json` AND republishing
 `PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
 packing (unchanged when no suite moves), then running
