@@ -1091,6 +1091,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
 
   const row = firstOf(a), known = admit && admit.known ? firstOf(b) : null;
   const hasPayload = row && typeof row.payload === "string" && row.payload;
+  if (admit && typeof admit.remember === "function" && (known || hasPayload)) admit.remember();
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row, clock)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
