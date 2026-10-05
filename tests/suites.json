@@ -1,8 +1,8 @@
 {
   "version": 1,
   "suites": [
-    {"name": "contracts", "class": "N", "medianS": 0.8},
-    {"name": "run", "class": "N", "medianS": null},
+    {"name": "contracts", "class": "N", "group": "fast", "medianS": 0.8},
+    {"name": "run", "class": "N", "group": "fast", "medianS": null},
     {"name": "markets", "class": "N", "medianS": 0.1},
     {"name": "market-ticker", "class": "C", "medianS": 2.3},
     {"name": "flows", "class": "N", "medianS": 1.3},

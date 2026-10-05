@@ -3595,10 +3595,36 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "REGRESSION RUNS WEEKLY TOO (Monday 06:17 UTC), so a fixture date that the real clock overtakes fails within a " +
     "week instead of on the owner's next unrelated push"); checks++;
   ok(/push:\n\s+branches: \[main\]/.test(regOn) && /pull_request:/.test(regOn), "beside push and pull request");
-  const regTest = (/\n {2}test:\n((?: {4}.*\n|\s*\n)+)/.exec(regression) || [])[1] || "";
-  assert.deepEqual([...regTest.matchAll(/^ {4}timeout-minutes: (\S+)$/gm)].map((m) => m[1]), ["55"],
-    "THE REGRESSION JOB'S CAP IS 55 MINUTES: the slowest recent run took 2,205 s, 92% of the old 40, so the serial " +
-    "chain had no headroom left; 55 holds it until the shards land"); checks++;
+  const regJob = (id) => (new RegExp(`\\n {2}${id}:\\n((?: {4}.*\\n|\\s*\\n)+)`).exec(regression) || [])[1] || "";
+  const [regFast, regShard, regTest] = ["fast", "shard", "test"].map(regJob);
+  assert.deepEqual([regFast, regShard, regTest].map((job) => [...job.matchAll(/^ {4}timeout-minutes: (\S+)$/gm)].map((m) => m[1])),
+    [["10"], ["25"], ["5"]],
+    "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 25 (its slowest " +
+    "suite's own run.mjs timeout plus setup, which run-contract holds), and the aggregate test 5"); checks++;
+  ok(/^ {4}needs: \[fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
+    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs fast and every shard and runs if: always(), so a failed or " +
+    "cancelled shard turns it red instead of skipping it (a skipped required check would pass)");
+  ok(/FAST: \$\{\{ needs\.fast\.result \}\}/.test(regTest) && /SHARDS: \$\{\{ needs\.shard\.result \}\}/.test(regTest) &&
+     /test "\$FAST" = success && test "\$SHARDS" = success/.test(regTest) && !/uses:/.test(regTest),
+    "and it is green only when the fast job and the shard matrix both report success; it checks out nothing");
+  ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m.test(regShard),
+    "the shard matrix is 1 to 6 with fail-fast off, so one red shard never cancels the others' reports");
+  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 --needs-browser\)"/.test(regShard) &&
+     /echo "needs=\$needs" >> "\$GITHUB_OUTPUT"/.test(regShard) && /^ {8}id: browser$/m.test(regShard) &&
+     /- name: Install Chromium\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: npx playwright install --with-deps chromium\n/.test(regShard),
+    "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
+    "under bash -e) and the Chromium install runs on that output, so a failed install fails the shard");
+  ok(!/\|\| true/.test(regression), "no step swallows a failure with || true");
+  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
+     !/npm test/.test(regression),
+    "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");
+  ok(/fetch-depth: 0/.test(regFast) && /ASSET_DIFF_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/.test(regFast) &&
+     /wrangler deploy --dry-run --outdir \/tmp\/anilkaya-worker-dry-run/.test(regFast) && !/playwright/.test(regFast),
+    "the fast job alone fetches the history and sets ASSET_DIFF_BASE for the asset contract, validates the Worker " +
+    "bundle, and installs no Chromium");
+  ok(!/fetch-depth/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test");
+  ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
+    "a newer push cancels a superseded pull-request run only; every run on main finishes");
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
     const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);

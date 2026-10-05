@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_DIR, TIMEOUT_FLOOR_S, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS, REPEAT_WINDOW_MS, MAX_TIMER_MS,
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
+  packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
 } from "./run.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -510,4 +511,133 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
   ok(md.includes("earlier lines left out to keep the summary small") && md.includes("39 0000000000"), "shortened from the head, so each keeps its last line, and says so");
 }
 
-console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);
+const PUBLISHED_SHARDS = [
+  ["flows-worker"],
+  ["flows-ticker", "flows-overlay", "worker", "flows-desk-client", "flows-motion", "flows-desk-wiring", "flows-reading-render", "market-ticker",
+    "flows-freshness", "flows-basis", "flows-ledger", "flows-neuron-screen", "markets", "flows-pulse", "flows-brief"],
+  ["pipeline", "flows-ws-probe", "flows-positioning", "flows-watch-render", "flows-ask-render", "flows-chain", "flows-track-render", "flows-quant-audit",
+    "flows-quant-card", "flows-readers", "flows-mint", "academy", "flows-record", "flows-political"],
+  ["flows-rt-server", "flows-overview", "flows-events", "flows-reads", "flows-strategy", "flows-verdict", "flows-readers-render", "flows-ask", "flows-starts",
+    "flows-garch", "flows-chain-panels", "flows-sign", "flows-alerts", "flows-stock", "flows-warnings"],
+  ["flows-render", "flows-rt-client", "flows-board-render", "flows-payload-shape", "flows-market", "flows-live", "flows-rt", "flows-dossier", "flows-dossier-reads",
+    "flows-reading", "flows", "flows-vol", "flows-neuron", "flows-variation", "flows-permits"],
+  ["browser", "flows-strip", "flows-unusual", "flows-desk", "placement", "flows-political-render", "flows-legacy", "flows-sections", "flows-quant",
+    "flows-reading-worker", "flows-legs", "flows-probe", "flows-universe", "flows-scores", "mastery", "flows-weight"],
+];
+const CI_SHARDS = 6;
+
+{
+  const suites = loadManifest();
+  const names = (list) => list.map((s) => s.name);
+  const sorted = (list) => [...list].sort();
+  const fast = suites.filter((s) => groupOf(s) === "fast");
+  deep(names(fast), ["contracts", "run"], "the fast job runs the asset and curriculum contracts (the one suite that needs fetch-depth 0 and ASSET_DIFF_BASE) and this contract, neither of which needs Chromium or workerd");
+  const shards = packShards(suites, CI_SHARDS);
+  deep(shards.map((sh) => sorted(names(sh))), PUBLISHED_SHARDS.map(sorted),
+    "THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED TABLE (W09-P3 and its measured medians, contracts moved to the fast job): a median refresh or a new suite that moves a suite between shards fails here until the table is republished with it");
+  for (let n = 1; n <= 8; n++) {
+    const a = packShards(suites, n);
+    deep(packShards(suites, n), a, `${n} shards: the packing is deterministic`);
+    ok(a.every((sh) => sh.length > 0), `${n} shards: no shard is empty`);
+    const all = [...names(fast), ...a.flatMap(names)];
+    deep(sorted(all), sorted(names(suites)), `${n} shards: the fast job and the shards together run every registered suite exactly once (${all.length} of ${suites.length})`);
+    for (const sh of a) deep(names(sh), names(suites.filter((s) => sh.includes(s))), `${n} shards: a shard runs its suites in manifest order`);
+    deep(a.map((sh, i) => names(chooseSuites(suites, { shard: { index: i + 1, count: n } }))), a.map(names), `${n} shards: --shard i/${n} selects exactly the packed shard`);
+  }
+  deep(names(chooseSuites(suites, { group: "shard" })).length + fast.length, suites.length, "--group shard is everything but the fast job");
+  const unfasted = suites.map((s) => (s.name === "contracts" ? { ...s, group: undefined } : s));
+  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === 4 && s.name === "contracts")))),
+    "the packing weighs the whole chain, fast suites included, so moving contracts into or out of the fast job changes no other suite's shard");
+  ok(shards.every(needsBrowser), "every one of the six shards holds a browser or workerd suite, so each installs Chromium");
+  ok(!needsBrowser(fast), "the fast job holds none and installs no Chromium");
+  ok(fast.every((s) => s.class === "N"), "every fast suite is a Node suite");
+
+  const wf = readFileSync(path.join(HERE, "..", ".github", "workflows", "regression.yml"), "utf8");
+  const shardJob = (/\n {2}shard:\n((?: {4}.*\n|\s*\n)+)/.exec(wf) || [])[1] || "";
+  const cap = Number((/^ {4}timeout-minutes: (\d+)$/m.exec(shardJob) || [])[1]);
+  const slowest = Math.max(...shards.flat().map((s) => timeoutFor(s)));
+  ok(cap * 60 >= slowest + 300, `a shard job's cap (${cap} min) holds its slowest suite's own timeout (${slowest} s) and five minutes of setup, so a hung suite is killed by run.mjs and reported in the summary before the job is cancelled`);
+  deep([...shardJob.matchAll(/node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/(\d+)/g)].map((m) => Number(m[1])), [CI_SHARDS, CI_SHARDS],
+    `the workflow's needs-browser step and its run step both split the chain into the ${CI_SHARDS} shards this table holds`);
+}
+
+{
+  eq(CHROMIUM_SETUP_S, 24, "a shard that holds its first browser or workerd suite is charged the measured 24 s of Chromium install");
+  const w = (name, cls, medianS, group) => ({ name, class: cls, medianS, ...(group ? { group } : {}) });
+  const tiny = [w("f", "N", 0.1, "fast"), w("c", "N", 30), w("b", "C", 10), w("d", "W", 2), w("a", "N", 5), w("u", "N", null)];
+  deep(packShards(tiny, 2).map((sh) => sh.map((s) => s.name)), [["c", "a", "u"], ["b", "d"]],
+    "worked by hand: longest first into the cheapest shard, a browser suite charged the install only in a shard without one (b to the empty shard at 34, d beside it at 36 rather than 56, a to c at 35 rather than 41), the fast suite weighed and left out, the unmeasured suite at weight 0");
+  deep(packShards(tiny, 1).map((sh) => sh.map((s) => s.name)), [["c", "b", "d", "a", "u"]], "one shard is the whole shard group in manifest order");
+  const parsed = parseArgs(["--shard", "2/6", "--needs-browser"]);
+  deep([parsed.shard, parsed.needsBrowser], [{ index: 2, count: 6 }, true], "--shard i/n and --needs-browser are parsed");
+  eq(parseArgs(["--group=fast"]).group, "fast", "--group is parsed");
+  for (const bad of ["0/6", "7/6", "1/0", "x/6", "1/6/2", "-1/6", "1.5/6", `1/${MAX_SHARDS + 1}`, "01/6"]) {
+    throwsLike(() => parseArgs(["--shard", bad]), UsageError, `--shard ${bad} is refused`);
+  }
+  throwsLike(() => parseArgs(["--group", "slow"]), UsageError, "an unknown group is refused");
+  throwsLike(() => parseArgs(["--only", "a", "--shard", "1/2"]), UsageError, "--only with --shard is refused");
+  throwsLike(() => parseArgs(["--group", "fast", "--shard", "1/2"]), UsageError, "--shard with --group fast is refused");
+  throwsLike(() => chooseSuites(tiny, { shard: { index: 8, count: 8 } }), /holds no suite/, "an empty shard is refused, never a green run of nothing");
+  throwsLike(() => chooseSuites([w("a", "N", 1)], { group: "fast" }), /group fast holds no suite/, "and so is an empty group");
+}
+
+const fx3 = path.join(scratch, "fx3");
+mkdirSync(fx3);
+writeFileSync(path.join(fx3, "s.mjs"), `import { writeFileSync } from "node:fs";
+const n = process.argv[2];
+writeFileSync(${JSON.stringify(marks)} + "/ran-" + n, "1");
+console.log("✓ " + n + ": 1 assertions");
+if (n === "d") process.exitCode = 1;\n`);
+const fx3Names = ["f", "c", "b", "d", "a", "u"];
+writeFileSync(path.join(fx3, "package.json"), JSON.stringify({
+  name: "fixture3", private: true, type: "module",
+  scripts: { test: "node run.mjs", ...Object.fromEntries(fx3Names.map((n) => [`test:${n}`, `node s.mjs ${n}`])) },
+}, null, 2));
+const fx3Suites = [
+  { name: "f", class: "N", group: "fast", medianS: 0.1 },
+  { name: "c", class: "N", medianS: 30 },
+  { name: "b", class: "C", medianS: 10 },
+  { name: "d", class: "W", medianS: 2 },
+  { name: "a", class: "N", medianS: 5 },
+  { name: "u", class: "N", medianS: null },
+];
+writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: fx3Suites }, null, 2));
+const ran = () => fx3Names.filter((n) => existsSync(mark(`ran-${n}`)));
+const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { force: true }); };
+
+{
+  clearRan();
+  const nb = [run(["--shard", "1/2", "--needs-browser"], { dir: fx3 }), run(["--shard", "2/2", "--needs-browser"], { dir: fx3 }), run(["--group", "fast", "--needs-browser"], { dir: fx3 })];
+  deep(nb.map((r) => [r.status, r.stdout]), [[0, "false\n"], [0, "true\n"], [0, "false\n"]], "--needs-browser prints true or false for the selection alone, exits 0, for the workflow to write to $GITHUB_OUTPUT");
+  deep(ran(), [], "and runs nothing");
+  const summary = path.join(scratch, "summary-shard.md");
+  const one = run(["--shard", "1/2"], { dir: fx3, summary });
+  eq(one.status, 0, `shard 1/2 passes (${one.stderr.slice(-300)})`);
+  deep(ran(), ["c", "a", "u"], "shard 1/2 ran its three suites and no other");
+  ok(readFileSync(summary, "utf8").startsWith("### Regression suites, shard 1/2: all 3 passed"), "its step summary names the shard");
+  clearRan();
+  const two = run(["--shard", "2/2"], { dir: fx3, summary });
+  eq(two.status, 1, "shard 2/2 holds the failing suite and exits 1");
+  deep(ran(), ["b", "d"], "shard 2/2 ran its two suites");
+  ok(readFileSync(summary, "utf8").includes("### Regression suites, shard 2/2: 1 of 2 failed"), "and its summary is appended after shard 1's, named");
+  clearRan();
+  const fast = run(["--group", "fast"], { dir: fx3, summary });
+  eq(fast.status, 0, "the fast group passes");
+  deep(ran(), ["f"], "the fast group ran the fast suite alone");
+  ok(readFileSync(summary, "utf8").includes("### Regression suites, fast: all 1 passed"), "under its own heading");
+  clearRan();
+  const whole = run([], { dir: fx3 });
+  eq(whole.status, 1, "a run with no shard or group is the whole chain, as npm test runs it locally");
+  deep(ran(), fx3Names.slice().sort((x, y) => fx3Names.indexOf(x) - fx3Names.indexOf(y)), "every suite, the fast one included");
+  for (const [args, re] of [[["--shard", "8/8"], /holds no suite/], [["--shard", "0/2"], /--shard needs i\/n/], [["--group", "slow"], /fast or shard/], [["--only", "c", "--shard", "1/2"], /takes no --shard/]]) {
+    clearRan();
+    const r = run(args, { dir: fx3 });
+    eq(r.status, 2, `${args.join(" ")} exits 2`);
+    ok(re.test(r.stderr) && !ran().length, `${args.join(" ")} names the problem and runs nothing`);
+  }
+  writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: [...fx3Suites.slice(0, -1), { ...fx3Suites.at(-1), group: "slow" }] }, null, 2));
+  const g = run(["--shard", "1/2"], { dir: fx3 });
+  ok(g.status === 2 && g.stderr.includes("u has group \"slow\", not fast or shard"), "a suite in an unknown group is refused before anything runs");
+}
+
+console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, the six CI shards equal to the published table and, with the fast job, every suite exactly once for one to eight shards, --shard, --group and --needs-browser on a hand-worked fixture, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);

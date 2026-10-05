@@ -14,12 +14,15 @@ export const FORWARDED_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 export const TAIL_LINES = 40;
 export const TAIL_LINE_CHARS = 400;
 export const SUMMARY_TAIL_BUDGET = 512 * 1024;
+export const CHROMIUM_SETUP_S = 24;
+export const MAX_SHARDS = 32;
 const CLASSES = new Set(["N", "C", "W"]);
+const GROUPS = new Set(["fast", "shard"]);
 
 export class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1 };
+  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1, shard: null, group: null, needsBrowser: false };
   for (let i = 0; i < argv.length; i++) {
     const raw = argv[i];
     const eqAt = raw.indexOf("=");
@@ -36,8 +39,20 @@ export function parseArgs(argv) {
       const n = Number(value());
       if (!Number.isFinite(n) || n <= 0) throw new UsageError("--timeout-scale needs a positive number");
       opts.timeoutScale = n;
-    } else throw new UsageError(`unknown argument ${raw}`);
+    } else if (flag === "--shard") {
+      const v = value();
+      const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(v);
+      if (!m || Number(m[1]) > Number(m[2]) || Number(m[2]) > MAX_SHARDS) throw new UsageError(`--shard needs i/n with 1 <= i <= n <= ${MAX_SHARDS}, not ${JSON.stringify(v)}`);
+      opts.shard = { index: Number(m[1]), count: Number(m[2]) };
+    } else if (flag === "--group") {
+      const v = value();
+      if (!GROUPS.has(v)) throw new UsageError(`--group is fast or shard, not ${JSON.stringify(v)}`);
+      opts.group = v;
+    } else if (flag === "--needs-browser") opts.needsBrowser = true;
+    else throw new UsageError(`unknown argument ${raw}`);
   }
+  if (opts.only && (opts.shard || opts.group)) throw new UsageError("--only names its suites itself, so it takes no --shard or --group");
+  if (opts.shard && opts.group === "fast") throw new UsageError("--shard splits the shard group, so it cannot run with --group fast");
   return opts;
 }
 
@@ -70,6 +85,7 @@ export function loadManifest(dir = DEFAULT_DIR) {
     if (seen.has(s.name)) problems.push(`suites.json: ${s.name} is listed twice`);
     seen.add(s.name);
     if (typeof scripts[`test:${s.name}`] !== "string") problems.push(`suites.json: ${s.name} has no test:${s.name} script in package.json`);
+    if (s.group !== undefined && !GROUPS.has(s.group)) problems.push(`suites.json: ${s.name} has group ${JSON.stringify(s.group)}, not fast or shard`);
     if (s.class !== undefined && !CLASSES.has(s.class)) problems.push(`suites.json: ${s.name} has class ${JSON.stringify(s.class)}, not N, C or W`);
     if (s.medianS !== undefined && s.medianS !== null && !(Number.isFinite(s.medianS) && s.medianS >= 0)) problems.push(`suites.json: ${s.name} has a bad medianS`);
     if (s.timeoutS !== undefined && !(Number.isFinite(s.timeoutS) && s.timeoutS > 0)) problems.push(`suites.json: ${s.name} has a bad timeoutS`);
@@ -89,6 +105,40 @@ export function selectSuites(suites, only) {
   if (unknown.length) throw new UsageError(`--only names unknown suites: ${unknown.join(", ")}`);
   const want = new Set(only);
   return suites.filter((s) => want.has(s.name));
+}
+
+export const groupOf = (suite) => suite.group || "shard";
+
+export const needsBrowser = (suites) => suites.some((s) => s.class !== "N");
+
+export function packShards(suites, count) {
+  const bins = Array.from({ length: count }, () => ({ load: 0, browser: false, names: new Set() }));
+  const order = suites.map((s, i) => ({ s, i, w: s.medianS || 0 })).sort((a, b) => b.w - a.w || a.i - b.i);
+  for (const { s, w } of order) {
+    const cost = (b) => b.load + w + (!b.browser && s.class !== "N" ? CHROMIUM_SETUP_S : 0);
+    let best = 0;
+    for (let k = 1; k < count; k++) if (cost(bins[k]) < cost(bins[best])) best = k;
+    const b = bins[best];
+    b.load = cost(b);
+    b.browser = b.browser || s.class !== "N";
+    b.names.add(s.name);
+  }
+  return bins.map((b) => suites.filter((s) => b.names.has(s.name) && groupOf(s) === "shard"));
+}
+
+export function chooseSuites(suites, opts) {
+  if (opts.only) return selectSuites(suites, opts.only);
+  if (!opts.shard && !opts.group) return suites;
+  const chosen = opts.shard
+    ? packShards(suites, opts.shard.count)[opts.shard.index - 1]
+    : suites.filter((s) => groupOf(s) === opts.group);
+  if (!chosen.length) throw new UsageError(`${opts.shard ? `shard ${opts.shard.index}/${opts.shard.count}` : `group ${opts.group}`} holds no suite, and a run of no suite proves nothing`);
+  return chosen;
+}
+
+export function runLabel(opts) {
+  if (opts.shard) return `shard ${opts.shard.index}/${opts.shard.count}`;
+  return opts.group || null;
 }
 
 const COUNT_LINE = /^\s*(?:✓\s*)?[A-Za-z0-9][\w.-]*:\s*([\d,]+)\s+(?:assertions|checks)\b/gm;
@@ -287,11 +337,11 @@ function budgetTail(lines, budget) {
   return kept;
 }
 
-export function markdownSummary(results, wallS, { interrupted = null } = {}) {
+export function markdownSummary(results, wallS, { interrupted = null, label = null } = {}) {
   const t = tally(results);
   const icon = { pass: "✅", fail: "❌", timeout: "⏱️", skipped: "⏭️" };
   const out = [
-    `### Regression suites: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed`}${interrupted ? ` (run interrupted by ${interrupted})` : ""}`,
+    `### Regression suites${label ? `, ${label}` : ""}: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed`}${interrupted ? ` (run interrupted by ${interrupted})` : ""}`,
     "",
     `${t.pass} passed, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s.`,
     "",
@@ -314,11 +364,15 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   let suites;
   try {
     opts = parseArgs(argv);
-    suites = selectSuites(loadManifest(opts.dir), opts.only);
+    suites = chooseSuites(loadManifest(opts.dir), opts);
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     io.stderr.write(`run.mjs: ${err.message}\n`);
     return 2;
+  }
+  if (opts.needsBrowser) {
+    io.stdout.write(`${needsBrowser(suites)}\n`);
+    return 0;
   }
   const started = process.hrtime.bigint();
   const results = [];
@@ -340,7 +394,7 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   io.stdout.write(`\n${textTable(results, wallS)}\n`);
   if (interruptedBy) io.stderr.write(`run.mjs: interrupted by ${interruptedBy}; the suites after it were not run\n`);
   if (env.GITHUB_STEP_SUMMARY) {
-    try { appendFileSync(env.GITHUB_STEP_SUMMARY, markdownSummary(results, wallS, { interrupted: interruptedBy })); }
+    try { appendFileSync(env.GITHUB_STEP_SUMMARY, markdownSummary(results, wallS, { interrupted: interruptedBy, label: runLabel(opts) })); }
     catch (err) { io.stderr.write(`run.mjs: could not write the step summary: ${err.message}\n`); }
   }
   if (interruptedBy) return exitCodeFor(interruptedBy);
