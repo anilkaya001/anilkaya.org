@@ -43,13 +43,14 @@
 
   const state = {
     targetPitch: Math.PI / 8, targetYaw: Math.PI / 4,
-    pitch: 0, yaw: 0,
+    pitch: calm ? Math.PI / 8 : 0, yaw: calm ? Math.PI / 4 : 0,
     width: 0, height: 0, dpr: 1,
     isObserved: false, time: 0, running: false,
   };
   let lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
   let frameCount = 0;
   let loopToken = 0;
+  let ready = false;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -64,6 +65,7 @@
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (calm && ready) still();
   }
 
   function pointerMove(e) {
@@ -242,7 +244,18 @@
     }
   }
 
+  function still() {
+    frameCount++;
+    ctx.clearRect(0, 0, state.width, state.height);
+    try {
+      renderFrame(lastTime);
+    } catch (err) {
+      if (DEBUG) console.error("particles: frame error", err);
+    }
+  }
+
   function start() {
+    if (calm) { still(); return; }
     if (state.running) return;
     state.running = true;
     lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
@@ -296,17 +309,20 @@
     window.addEventListener("focus", () => { if (!document.hidden) start(); });
     window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
 
-    let seenFrames = -1;
-    setInterval(() => {
-      if (document.hidden) { seenFrames = frameCount; return; }
-      if (!state.running || frameCount === seenFrames) {
-        state.running = false;
-        start();
-      }
-      seenFrames = frameCount;
-    }, 1000);
+    if (!calm) {
+      let seenFrames = -1;
+      setInterval(() => {
+        if (document.hidden) { seenFrames = frameCount; return; }
+        if (!state.running || frameCount === seenFrames) {
+          state.running = false;
+          start();
+        }
+        seenFrames = frameCount;
+      }, 1000);
+    }
 
     if (DEBUG) startDebug();
+    ready = true;
     start();
   }
 

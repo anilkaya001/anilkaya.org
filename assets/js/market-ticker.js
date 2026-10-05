@@ -3,9 +3,23 @@
   const mount = document.getElementById("marketTicker");
   if (!mount || typeof fetch !== "function") return;
 
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "market-ticker__toggle";
+  const track = document.createElement("div");
+  track.className = "market-ticker__track";
   const row = document.createElement("div");
   row.className = "market-ticker__row";
-  mount.appendChild(row);
+  track.appendChild(row);
+  mount.append(toggle, track);
+
+  function setPaused(paused) {
+    mount.dataset.paused = paused ? "true" : "false";
+    toggle.textContent = paused ? "Play" : "Pause";
+    toggle.setAttribute("aria-label", (paused ? "Play" : "Pause") + " the scrolling index prices");
+  }
+  setPaused(false);
+  toggle.addEventListener("click", () => setPaused(mount.dataset.paused !== "true"));
 
   const priceFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const pctFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: "exceptZero" });

@@ -1,0 +1,164 @@
+import assert from "node:assert/strict";
+import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chromium } from "playwright";
+import { MARKET_INDICES, buildSnapshot } from "../shared/markets.js";
+
+let checks = 0;
+const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
+const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+
+const ROOT = new URL("../", import.meta.url).pathname;
+const ORIGIN = "http://landing.test";
+const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".webmanifest": "application/manifest+json" };
+const NOW = Date.UTC(2026, 8, 29, 14, 0);
+const SNAPSHOT = buildSnapshot(MARKET_INDICES.map((index, i) => {
+  const changePct = (i % 3 - 1) * 0.37 + 0.05;
+  const price = 1000 * (i + 2) + 0.25;
+  return { key: index.key, label: index.label, currency: index.currency, price, changePct, prevClose: price / (1 + changePct / 100),
+    asOf: NOW - 60000, asOfDay: "2026-09-29", prevDay: "2026-09-28", sessionEnd: null };
+}), NOW);
+
+const scratch = mkdtempSync(join(tmpdir(), "landing-motion-"));
+const browser = await chromium.launch();
+
+async function open(reducedMotion, viewport = { width: 1280, height: 800 }) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.route("**/*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== ORIGIN) return route.abort();
+    if (url.pathname === "/api/markets") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SNAPSHOT) });
+    if (url.pathname.startsWith("/api/")) return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+    const file = join(ROOT, url.pathname === "/" ? "index.html" : url.pathname);
+    if (!existsSync(file)) return route.fulfill({ status: 404, body: "" });
+    const ext = file.slice(file.lastIndexOf("."));
+    return route.fulfill({ status: 200, contentType: TYPES[ext] || "application/octet-stream", body: readFileSync(file) });
+  });
+  await page.goto(`${ORIGIN}/`);
+  await page.waitForSelector("#marketTicker:not([hidden]) .tk");
+  return { context, page, errors };
+}
+
+let traceN = 0;
+async function animationFrames(page, ms) {
+  const path = join(scratch, `trace-${traceN++}.json`);
+  await browser.startTracing(page, { path, categories: ["devtools.timeline", "toplevel"] });
+  await page.evaluate(() => console.timeStamp("LM|start"));
+  await page.waitForTimeout(ms);
+  await page.evaluate(() => console.timeStamp("LM|end"));
+  await browser.stopTracing();
+  const events = JSON.parse(readFileSync(path, "utf8")).traceEvents;
+  const marks = events.filter((e) => e.name === "TimeStamp" && String(e.args?.data?.message || "").startsWith("LM|"));
+  assert.equal(marks.length, 2, "both trace marks recorded");
+  const thread = marks[0].pid + ":" + marks[0].tid;
+  const from = marks[0].ts, to = marks[1].ts;
+  return events.filter((e) => e.ph === "X" && e.name === "FireAnimationFrame" && e.pid + ":" + e.tid === thread && e.ts >= from && e.ts <= to).length;
+}
+
+const inked = (page) => page.evaluate(() => {
+  const canvas = document.getElementById("field");
+  const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+  let lit = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] > 0) lit++;
+  return { lit, width: canvas.width, height: canvas.height };
+});
+
+{
+  const { context, page, errors } = await open("reduce");
+  await page.waitForTimeout(1000);
+  const frames = await animationFrames(page, 2000);
+  eq(frames, 0, `under reduced motion the particle field draws one frame and stops: ${frames} animation frames fired in the 2 s after the first second`);
+  const first = await inked(page);
+  ok(first.lit > 500, `the still frame is drawn (${first.lit} lit pixels)`);
+  eq(first.width, 1280, "the canvas buffer matches the viewport width");
+
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.waitForTimeout(600);
+  const after = await inked(page);
+  eq(after.width, 900, "a resize resizes the canvas buffer");
+  ok(after.lit > 500, `a resize redraws the still frame (${after.lit} lit pixels after the buffer was cleared)`);
+  const resized = await animationFrames(page, 1500);
+  eq(resized, 0, `no animation loop resumes after a resize (${resized} frames)`);
+
+  const toggle = await page.$eval(".market-ticker__toggle", (el) => getComputedStyle(el).display);
+  eq(toggle, "none", "nothing moves under reduced motion, so the marquee shows no pause control");
+  const play = await page.$eval(".market-ticker__row", (el) => getComputedStyle(el).animationName);
+  eq(play, "none", "the marquee row does not animate under reduced motion");
+  eq(errors.join(" | "), "", "no page error under reduced motion");
+  await context.close();
+}
+
+{
+  const { context, page, errors } = await open("no-preference");
+  await page.waitForTimeout(1000);
+  const frames = await animationFrames(page, 1500);
+  ok(frames > 5, `with no motion preference the particle field keeps animating (${frames} frames), so the trace counts frames when there are any`);
+
+  const state = () => page.$eval(".market-ticker__row", (el) => {
+    const [a] = el.getAnimations();
+    return { play: getComputedStyle(el).animationPlayState, state: a ? a.playState : null, t: a ? Number(a.currentTime) : null };
+  });
+  const running = await state();
+  eq(running.state, "running", "the marquee scrolls by default");
+
+  let reached = false;
+  for (let i = 0; i < 40 && !reached; i++) {
+    await page.keyboard.press("Tab");
+    reached = await page.evaluate(() => document.activeElement && document.activeElement.classList.contains("market-ticker__toggle"));
+  }
+  ok(reached, "Tab reaches the marquee's pause control");
+  const named = await page.evaluate(() => ({ text: document.activeElement.textContent, label: document.activeElement.getAttribute("aria-label"), tag: document.activeElement.tagName, type: document.activeElement.type }));
+  eq(named.tag, "BUTTON", "the control is a native button");
+  eq(named.type, "button", "the control does not submit");
+  eq(named.text, "Pause", "the control reads Pause while the marquee scrolls");
+  ok(named.label.startsWith(named.text), `the accessible name begins with the visible label (${named.label})`);
+  const box = await page.$eval(".market-ticker__toggle", (el) => el.getBoundingClientRect().toJSON());
+  ok(box.height >= 24 && box.width >= 24, `the control is at least 24 by 24 CSS pixels (${box.width.toFixed(1)} by ${box.height.toFixed(1)})`);
+
+  await page.keyboard.press("Enter");
+  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Play", "Enter pauses and the control then reads Play");
+  eq(await page.$eval("#marketTicker", (el) => el.dataset.paused), "true", "the paused state is on the marquee");
+  await page.evaluate(() => document.activeElement.blur());
+  await page.mouse.move(640, 10);
+  const held = await state();
+  eq(held.play, "paused", "the pause holds after focus leaves the marquee");
+  eq(held.state, "paused", "the scroll animation is paused, not merely hidden");
+  await page.waitForTimeout(600);
+  const later = await state();
+  eq(later.t, held.t, "the paused marquee does not move");
+
+  await page.focus(".market-ticker__toggle");
+  await page.keyboard.press("Space");
+  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Pause", "Space plays again and the control reads Pause");
+  await page.evaluate(() => document.activeElement.blur());
+  const resumed = await state();
+  eq(resumed.state, "running", "the marquee scrolls again once focus leaves");
+  await page.waitForTimeout(400);
+  ok((await state()).t > resumed.t, "the resumed marquee moves");
+
+  const before = await page.$eval(".market-ticker__toggle", (el) => el.getBoundingClientRect().x);
+  await page.waitForTimeout(500);
+  eq(await page.$eval(".market-ticker__toggle", (el) => el.getBoundingClientRect().x), before, "the control does not scroll with the prices");
+  eq(errors.join(" | "), "", "no page error with motion");
+  await context.close();
+}
+
+for (const width of [320, 390]) {
+  const { context, page, errors } = await open("no-preference", { width, height: 800 });
+  const fit = await page.evaluate(() => {
+    const t = document.querySelector(".market-ticker__toggle").getBoundingClientRect();
+    return { scroll: document.scrollingElement.scrollWidth, inner: innerWidth, left: t.left, right: t.right };
+  });
+  ok(fit.scroll <= fit.inner, `no horizontal page scroll at ${width} px (${fit.scroll} against ${fit.inner})`);
+  ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px`);
+  eq(errors.join(" | "), "", `no page error at ${width} px`);
+  await context.close();
+}
+
+await browser.close();
+rmSync(scratch, { recursive: true, force: true });
+console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that holds after focus leaves and does not scroll with the prices`);
