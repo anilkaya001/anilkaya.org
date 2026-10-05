@@ -889,9 +889,6 @@
   function line(host, o) {
     return mount(host, (el, w, animate) => drawLine(el, w, animate, o));
   }
-  function area(host, o) {
-    return line(host, { ...o, series: (o.series || []).map((sr) => ({ area: true, ...sr })) });
-  }
   function drawLine(host, w, animate, o) {
     const series = (o.series || []).filter((sr) => Array.isArray(sr.values));
     const X = Array.isArray(o.x) ? o.x : series.length ? series[0].values.map((_, i) => i) : [];
@@ -1348,70 +1345,6 @@
     put_wall: { color: "--lvl-put", shape: "dot", label: "Put wall" },
     max_pain: { color: "--lvl-pain", shape: "dia", label: "Max pain" },
   };
-
-  function levels(host, o) {
-    return mount(host, (el, w, animate) => {
-      const S = num(o.spot);
-      const lv = (o.levels || []).filter((l) => l && num(l.px) !== null && LEVELS[l.kind]);
-      const H = o.height || 74;
-      if (S === null) return gone(el, o, "No spot price.", "Levels", H);
-      const all = lv.map((l) => l.px).concat([S]);
-      let lo = o.domain ? o.domain[0] : Math.min(...all), hi = o.domain ? o.domain[1] : Math.max(...all);
-      const pad = (hi - lo) * 0.12 || S * 0.02;
-      lo -= pad; hi += pad;
-      const x = lin(lo, hi, 12, w - 12);
-      const ay = 40;
-      const svg = svgRoot(el, w, H, animate, o.label);
-      const g = s("g", null, svg);
-      s("line", { x1: 12, x2: w - 12, y1: ay, y2: ay, stroke: paint("--fill-2"), "stroke-width": 4, "stroke-linecap": "round" }, g);
-      const sorted = lv.slice().sort((a, b) => a.px - b.px);
-      if (sorted.length) {
-        const a = Math.min(S, sorted[0].px), b = Math.max(S, sorted[sorted.length - 1].px);
-        s("line", { x1: x(a), x2: x(b), y1: ay, y2: ay, stroke: paint("--fill-1"), "stroke-width": 4, "stroke-linecap": "round", class: "growx" }, g);
-      }
-      const sx = x(S);
-      const st = F.px(S);
-      const labs = sorted.map((l) => ({ y: x(l.px), y0: x(l.px), l })).concat([{ y: sx, y0: sx, spot: true }]);
-      spread(labs, 52, 30, w - 30);
-      labs.sort((a, b) => a.y0 - b.y0);
-      const half = (text) => String(text).length * 3.2 + 2;
-      const ink = paint("--label-1");
-      labs.forEach((t, i) => {
-        const above = i % 2 === 0;
-        if (t.spot) {
-          const pw = tw(st);
-          const px0 = clamp(t.y - pw / 2, 0, w - pw);
-          const py = above ? ay - 30 : ay + 12;
-          s("rect", { x: px0, y: py, width: pw, height: 18, rx: 9, fill: ink }, g);
-          s("text", { x: px0 + pw / 2, y: py + 12.5, text: st, ...TA, class: "tx-b tx-ink" }, g);
-          return;
-        }
-        const d = LEVELS[t.l.kind];
-        const v = F.px(t.l.px), k = d.label + " " + F.pct(t.l.px / S - 1, 1, true);
-        s("text", { x: clamp(t.y, half(v), w - half(v)), y: above ? ay - 14 : ay + 24, text: v, ...TA, class: "tx-1 tx-b" }, g);
-        s("text", { x: clamp(t.y, half(k), w - half(k)), y: above ? ay - 26 : ay + 36, text: k, ...TA, class: "tx-3" }, g);
-      });
-      s("rect", { x: sx - 1.25, y: ay - 8, width: 2.5, height: 16, rx: 1.25, fill: ink }, g);
-      const edge = paint("--mat-opaque");
-      for (const l of sorted) {
-        const d = LEVELS[l.kind];
-        const m = marker(g, d.shape, x(l.px), ay, paint(d.color), 5);
-        m.setAttribute("stroke", edge);
-        m.setAttribute("stroke-width", "2");
-        m.setAttribute("paint-order", "stroke");
-      }
-      const pts = sorted.map((l) => x(l.px)).concat([sx]).sort((a, b) => a - b);
-      const items = sorted.map((l) => ({ x: x(l.px), l })).concat([{ x: sx, spot: true }]).sort((a, b) => a.x - b.x);
-      scrub(el, svg, {
-        xs: pts, top: ay - 12, bottom: ay + 12, label: o.label,
-        onMove: (i) => {
-          const it = items[i];
-          if (it.spot) return { noLine: true, parts: [part("Spot", "k"), h("b", null, F.px(S))], top: H - 24 };
-          return { noLine: true, parts: [part(LEVELS[it.l.kind].label, "k"), h("b", null, F.px(it.l.px)), part(F.pct(it.l.px / S - 1, 2, true), "k")], top: H - 24 };
-        },
-      });
-    });
-  }
 
   function tent(c, wd, base, peak) { const out = []; for (let i = 0; i <= 40; i++) { const x = i / 40; out.push([x, base + (peak - base) * Math.exp(-(((x - c) / wd) ** 2))]); } return out; }
   const SHAPES = {
@@ -1902,7 +1835,7 @@
 
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
-    line, area, sparkline, bars, diverging, heatmap, gauge, levels, payoff,
+    line, sparkline, bars, diverging, heatmap, gauge, payoff,
     LEVELS, shapeOf,
   });
 

@@ -1265,7 +1265,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsUI`, and `FlowsQuant`. The rail's browser
+  `LEARNING_PATHS`, `toast`, `COURSE_STAGE_IDS`, `COURSE_SKILLS`,
+  `SKILL_CATALOG`, `SKILL_BY_ID`, `SkillMasteryScheduler`, `PROJECT_CATALOG`,
+  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`. The rail's browser
   half is `FlowsUI.rt` (`connect`, `on`, `transport` and the adapters), added to
   the existing global rather than a new one, and the flow network is
   `FlowsUI.net` (`model`, `mount`, `of`), added the same way by the one page
@@ -1275,9 +1277,15 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   link to `/flows/ticker/?t=` now. `FlowsPanels` went with the ticker rebuild:
   the dossier's modules are drawn from `FlowsUI` inside `flows-ticker.js`, the
   only page that ever called the panel library, and `flows-panels.js` and
-  `flows-drawers.js` are deleted.)
+  `flows-drawers.js` are deleted. `FlowsCursor` went with `flows-cursor.js`,
+  which no page emitted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
-  one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
+  one. `tests/contracts.mjs` reads it from this paragraph and fails on any
+  `window.`, `globalThis.` or `self.` assignment, or any top-level
+  declaration, under `assets/js` that names a global not on it; the only
+  others it admits are `CURRICULUM` below, the `fetch` wrapper in
+  `flows-ui.js`, and `globalThis.__<Name>Test` hooks bound only where there
+  is no `document`. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component

@@ -1194,58 +1194,6 @@ body.is-stale .flows-tablewrap {
   .ak-nn.is-live .ak-nn-e line, .ak-nn.is-live .ak-nn-n { animation: none; }
 }
 
-.fx-cursor line {
-  stroke: var(--ink-faint);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.9;
-}
-.fx-cursor[hidden] { display: none; }
-
-.fx-read {
-  position: fixed;
-  z-index: 60;
-  pointer-events: none;
-  min-width: 8rem;
-  max-width: 18rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  line-height: 1.45;
-  color: var(--ink);
-}
-.fx-read[hidden] { display: none; }
-.fx-read-k {
-  margin: 0 0 0.2rem;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-.fx-read-r {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.9rem;
-  margin: 0;
-}
-.fx-read-rk { color: var(--ink-dim); }
-.fx-read-rv { font-variant-numeric: tabular-nums; }
-.fx-read-rv.is-pos { color: var(--flow-up); }
-.fx-read-rv.is-neg { color: var(--flow-down); }
-.fx-read-rv.is-call { color: var(--call); }
-.fx-read-rv.is-put { color: var(--put); }
-
-svg[data-fx-cursor="on"]:focus-visible {
-  outline: 2px solid var(--gold-harvest);
-  outline-offset: 2px;
-}
-svg[data-fx-cursor="on"] { touch-action: pan-y; }
-
 td.c-num { white-space: nowrap; }
 
 .flows-head--quiet {

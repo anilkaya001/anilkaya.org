@@ -1211,4 +1211,51 @@ assert(cookie("session", "a.b", { maxAge: 10 }).includes("Max-Age=10"), "cookie 
     "and their COMMENTS are served with them. " + stray.slice(0, 2).join(" | "));
 }
 
-console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets at ?v=${version}, ${fontReferenceCount} font references at ?v=${fontsVersion}, session hardening`);
+let globalCount = 0;
+{
+  const agents = read("AGENTS.md");
+  const paragraph = agents.match(/production globals are\s+deliberate:([\s\S]*?)The rail's browser/);
+  assert(paragraph, "AGENTS.md no longer states the production global allowlist where this check reads it");
+  const allowed = new Set([...paragraph[1].matchAll(/`([A-Za-z_$][\w$]*)`/g)].map((m) => m[1]));
+  assert(allowed.size >= 14, `the allowlist read from AGENTS.md has ${allowed.size} names, so the pattern has drifted`);
+  const authoring = agents.match(/`([A-Za-z_$][\w$]*)` is an authoring\/generator input/);
+  assert(authoring, "AGENTS.md no longer names the authoring-only global");
+  allowed.add(authoring[1]);
+  const wrapped = new Set(["fetch"]);
+  const offenders = [];
+  const seen = new Set();
+  let hooks = 0;
+  for (const file of filesUnder("assets/js", (f) => f.endsWith(".js"))) {
+    const src = read(file);
+    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*=(?![=>])/g)) {
+      const name = m[2] || m[3];
+      if (m[1] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
+        const before = src.slice(Math.max(0, m.index - 80), m.index);
+        assert(/if \(typeof document === "undefined"\) \{\s*$/.test(before),
+          `${file}: the test hook ${name} is bound only where there is no document, never on a page`);
+        hooks++;
+        continue;
+      }
+      if (m[1] === "window" && wrapped.has(name)) continue;
+      seen.add(name);
+      if (!allowed.has(name)) offenders.push(`${file}: ${m[1]}.${name}`);
+    }
+    for (const m of src.matchAll(/^(?:var|let|const|class|function\*?|async\s+function\*?)\s+([A-Za-z_$][\w$]*)/gm)) {
+      seen.add(m[1]);
+      if (!allowed.has(m[1])) offenders.push(`${file}: top-level ${m[1]}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `every global a script under assets/js creates is on the AGENTS.md allowlist (Design and accessibility ` +
+    `invariants); list a deliberate one there or keep it inside the script's IIFE: ${offenders.join("; ")}`);
+  const stale = [...allowed].filter((name) => !seen.has(name));
+  assert.deepEqual(stale, [],
+    `every name on the AGENTS.md allowlist is still created by a script, so the list is not a budget for a ` +
+    `global that is gone: ${stale.join(", ")}`);
+  assert(hooks >= 2, `the scan saw ${hooks} document-free test hooks; it should see the desk's and the placement's`);
+  assert(!existsSync(path.join(ROOT, "assets/js/flows-cursor.js")),
+    "flows-cursor.js is deleted rather than orphaned: no page emitted it, and FlowsCursor was an undocumented global");
+  globalCount = seen.size;
+}
+
+console.log(`✓ contracts: ${topicIds.length} curricula, ${referenceCount} versioned assets at ?v=${version}, ${fontReferenceCount} font references at ?v=${fontsVersion}, ${globalCount} globals on the AGENTS.md allowlist, session hardening`);
