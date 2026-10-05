@@ -10,6 +10,7 @@ import { COURSE_STAGE_BY_ID } from "../shared/stage-manifest.js";
 import { PROJECT_BY_ID } from "../shared/project-manifest.js";
 import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "../shared/flows-dossier-worker.js";
+import { SIGNED_IN_COLUMN_SQL } from "../shared/lab-sign-in.js";
 
 const root = new URL("../", import.meta.url);
 const read = (file) => readFileSync(new URL(file, root), "utf8");
@@ -113,7 +114,25 @@ const dossierMigration = read("migrations/0016_flows_dossier_cache.sql");
 assert(dossierMigration.includes("CREATE TABLE IF NOT EXISTS flows_dossier_cache"), "0016 must create flows_dossier_cache");
 assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(dossierMigration),
   "the dossier cache migration must not store credential material in D1");
-const sqlText = (sql) => sql.replace(/\s+/g, " ").replace(/\(\s/g, "(").replace(/\s\)/g, ")").trim();
+const sqlPunctuation = "(),=<>!|+-*/;";
+const sqlText = (sql) => {
+  let out = "";
+  let quote = null;
+  let space = false;
+  for (const c of sql) {
+    if (quote) {
+      out += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (/\s/.test(c)) { space = true; continue; }
+    if (space && out && !sqlPunctuation.includes(out[out.length - 1]) && !sqlPunctuation.includes(c)) out += " ";
+    space = false;
+    if (c === "'" || c === "\"") quote = c;
+    out += c.toLowerCase();
+  }
+  return out;
+};
 const ddlInitializer = (src, start) => {
   let depth = 0;
   let quote = null;
@@ -129,7 +148,8 @@ const ddlInitializer = (src, start) => {
   }
   throw new Error("unterminated initializer at " + start);
 };
-const ddlPattern = /CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER)\b/g;
+const ddlKinds = "CREATE (?:UNIQUE |TEMP |TEMPORARY |VIRTUAL )?(?:TABLE|INDEX|TRIGGER|VIEW)";
+const ddlPattern = new RegExp(`${ddlKinds}\\b`, "g");
 const outsideSpans = (src, spans) => [...src.matchAll(ddlPattern)]
   .filter((m) => !spans.some(([from, to]) => m.index >= from && m.index < to))
   .map((m) => `${src.slice(0, m.index).split("\n").length}: ${src.slice(m.index, m.index + 60)}`);
@@ -186,7 +206,7 @@ const balancedEnd = (sql, from) => {
   return i;
 };
 const checkClauses = (sql) => [...sql.matchAll(/\bCHECK\s*\(/gi)]
-  .map((m) => sql.slice(m.index, balancedEnd(sql, m.index + m[0].length)).replace(/\s+/g, "").toLowerCase()).sort();
+  .map((m) => sqlText(sql.slice(m.index, balancedEnd(sql, m.index + m[0].length)))).sort();
 const columnSegments = (sql) => {
   const open = sql.indexOf("(");
   const body = sql.slice(open + 1, balancedEnd(sql, open + 1) - 1);
@@ -206,7 +226,8 @@ const columnSegments = (sql) => {
   return segments.filter((seg) => !/^(?:CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN)\b/i.test(seg));
 };
 const describeDb = (db) => {
-  const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+  const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' " +
+    "UNION ALL SELECT type, name, tbl_name, sql FROM sqlite_temp_master WHERE name NOT LIKE 'sqlite_%'").all();
   const tables = {};
   for (const { name } of objects.filter((o) => o.type === "table")) {
     const shape = db.prepare(`PRAGMA table_list(${name})`).get();
@@ -221,7 +242,7 @@ const describeDb = (db) => {
     };
   }
   const named = (type) => Object.fromEntries(objects.filter((o) => o.type === type && o.sql).map((o) => [o.name, `${o.tbl_name}: ${sqlText(o.sql)}`]));
-  return { tables, indexes: named("index"), triggers: named("trigger") };
+  return { tables, indexes: named("index"), triggers: named("trigger"), views: named("view") };
 };
 const migrationFiles = readdirSync(new URL("migrations/", root)).sort();
 assert.deepEqual(migrationFiles.filter((f) => !/^\d{4}_\w+\.sql$/.test(f)), [], "every file in migrations/ is a NNNN_name.sql migration");
@@ -236,13 +257,13 @@ const fromMigrations = describeDb(sqliteOf(migrationFiles.map((f) => read(`migra
 assert.deepEqual(fromMigrations, fromSchema,
   "SCHEMA PARITY: a database built from schema.sql and one built from every migration in number order hold the same tables, " +
   "the same columns by name (type, NOT NULL, default, key position), the same unique constraints, WITHOUT ROWID and STRICT flags, " +
-  "and the same indexes and triggers");
+  "and the same indexes, triggers and views");
 const runtimeDb = sqliteOf(workerDdl);
 await FLOWS_LIVE.upgradeClockColumns(d1Of(runtimeDb));
 const fromRuntime = describeDb(runtimeDb);
 const runtimeSources = [workerSource, ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).map((f) => read(`shared/${f}`))];
-const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(/CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)/g)].map((m) => m[1])));
-const builtAtRuntime = new Set([...Object.keys(fromRuntime.tables), ...Object.keys(fromRuntime.indexes), ...Object.keys(fromRuntime.triggers)]);
+const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(new RegExp(`${ddlKinds} IF NOT EXISTS (\\w+)`, "g"))].map((m) => m[1])));
+const builtAtRuntime = new Set([...Object.keys(fromRuntime.tables), ...Object.keys(fromRuntime.indexes), ...Object.keys(fromRuntime.triggers), ...Object.keys(fromRuntime.views)]);
 assert.deepEqual([...declaredAtRuntime].filter((name) => !builtAtRuntime.has(name)), [],
   "every CREATE statement in worker.js and shared/ reaches the runtime database this check builds");
 assert.deepEqual(Object.keys(fromSchema.tables).filter((t) => !fromRuntime.tables[t]).sort(), ["progress", "stats", "users"],
@@ -255,5 +276,45 @@ for (const table of Object.keys(fromRuntime.tables)) {
 }
 assert.deepEqual(fromRuntime.indexes, fromSchema.indexes, "the Worker's first-use DDL creates exactly schema.sql's indexes");
 assert.deepEqual(fromRuntime.triggers, fromSchema.triggers, "and exactly schema.sql's triggers");
+assert.deepEqual(fromRuntime.views, fromSchema.views, "and exactly schema.sql's views");
+const workerDayTables = [...workerSource.matchAll(/\baddDayColumn\(env, "(\w+)"\)/g)].map((m) => m[1]);
+assert.equal(workerSource.match(/\baddDayColumn\(/g).length, workerDayTables.length + 1,
+  "worker.js calls addDayColumn only with a literal table name");
+const alterSites = [
+  { file: "worker.js", site: /"ALTER TABLE " \+ table \+ " ADD COLUMN (\w+) (\w+)"/g,
+    columns: (m) => workerDayTables.map((table) => [table, m[1], m[2]]) },
+  { file: "shared/flows-live-worker.js", site: /`ALTER TABLE flows_clock ADD COLUMN \$\{column\} \$\{type\}`/g,
+    columns: () => FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([column, type]) => ["flows_clock", column, type]) },
+  { file: "shared/lab-sign-in.js", site: /^export const SIGNED_IN_COLUMN_SQL = "ALTER TABLE \w+ ADD COLUMN \w+ \w+";$/gm,
+    columns: () => [SIGNED_IN_COLUMN_SQL.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+)$/).slice(1)] },
+];
+const alterFiles = ["worker.js", ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort().map((f) => `shared/${f}`)];
+const unlistedAlters = [];
+const alteredColumns = [];
+for (const file of alterFiles) {
+  const src = file === "worker.js" ? workerSource : read(file);
+  const listed = alterSites.filter((entry) => entry.file === file).flatMap((entry) => {
+    const hits = [...src.matchAll(entry.site)];
+    assert.equal(hits.length, 1, `${file}: the listed ALTER TABLE site ${entry.site} appears exactly once`);
+    alteredColumns.push(...entry.columns(hits[0]).map(([table, column, type]) => ({ file, table, column, type })));
+    return hits.map((m) => [m.index, m.index + m[0].length]);
+  });
+  for (const m of src.matchAll(/\bALTER\s+TABLE\b/gi)) {
+    if (!listed.some(([from, to]) => m.index >= from && m.index < to)) {
+      unlistedAlters.push(`${file}:${src.slice(0, m.index).split("\n").length}: ${src.slice(m.index, m.index + 80)}`);
+    }
+  }
+}
+assert.deepEqual(unlistedAlters, [],
+  "worker.js and shared/ alter tables only at the listed ALTER TABLE sites; a new one is listed here and its column declared in schema.sql and a migration");
+assert(alteredColumns.length >= 10, "every listed ALTER TABLE site resolves to the columns it adds");
+for (const { file, table, column, type } of alteredColumns) {
+  const typeOf = (db) => db.tables[table] && db.tables[table].columns[column] && db.tables[table].columns[column].split(" ")[0];
+  assert.equal(typeOf(fromSchema), type, `${file} adds ${table}.${column} ${type}, and schema.sql declares that column with that type`);
+  assert.equal(typeOf(fromMigrations), type, `${file} adds ${table}.${column} ${type}, and the migrations declare that column with that type`);
+  if (fromRuntime.tables[table]) {
+    assert.equal(typeOf(fromRuntime), type, `${file} adds ${table}.${column} ${type}, and the Worker's first-use DDL declares that column with that type`);
+  }
+}
 
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");
