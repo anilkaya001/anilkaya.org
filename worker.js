@@ -1226,9 +1226,20 @@ async function absentKey(env, ctx, kind, ticker, session) {
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
+async function vendorAdmission(env, ctx, ticker, allowed) {
+  let refused = false;
+  const watched = async () => {
+    const yes = await allowed();
+    if (!yes) refused = true;
+    return yes;
+  };
+  const verdict = await classifyTicker(env, ctx, ticker, watched);
+  if (verdict) return verdict.known ? "known" : "unknown";
+  return refused ? "refused" : "open";
+}
+
 async function vendorAdmits(env, ctx, ticker, allowed) {
-  const verdict = await classifyTicker(env, ctx, ticker, allowed);
-  return !verdict || verdict.known;
+  return (await vendorAdmission(env, ctx, ticker, allowed)) !== "unknown";
 }
 
 async function tapeAdmission(env, ctx, ticker, allowed) {
@@ -1241,7 +1252,7 @@ async function tapeAdmission(env, ctx, ticker, allowed) {
     const put = cache.put(key, new Response("1", { headers: { "Cache-Control": `max-age=${CLASS_TTL_S}` } })).catch(() => {});
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
   };
-  return { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t, allowed), remember };
+  return { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmission(env, ctx, t, allowed), remember };
 }
 
 function passthrough(stored) {

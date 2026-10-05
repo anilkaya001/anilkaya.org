@@ -1095,8 +1095,12 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row, clock)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
-  if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
-    return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
+  if (!hasPayload && admit && !known) {
+    const verdict = await admit.vendor(ticker);
+    if (verdict === "refused") return pending("throttled");
+    if (!verdict || verdict === "unknown") {
+      return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
+    }
   }
 
   if (!env.UW_API_KEY) return usable ? respond(row, "stale-unconfigured") : pending("unconfigured");

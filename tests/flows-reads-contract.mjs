@@ -1544,6 +1544,15 @@ class FakeCache {
         `A TAPE MISS BY A REFUSED MEMBER makes 0 vendor calls and answers pending (${tapeA.res.status} ${JSON.stringify(tapeA.body).slice(0, 80)})`);
       const tapeB = await get(B, "/api/flows/tape?t=NVDA");
       ok(tapeB.vendor > 0, `while member B's tape miss reaches the vendor (${tapeB.vendor} calls)`);
+      const tapeRows = () => f.db.prepare("SELECT count(*) AS n FROM flows_tape").get().n;
+      const rowsBefore = tapeRows();
+      for (const t of ["QQZA", "QQZB", "QQZC"]) {
+        const junk = await get(A, "/api/flows/tape?t=" + t);
+        ok(junk.res.status === 200 && junk.vendor === 0 && junk.body && junk.body.status === "pending" && junk.body.why === "throttled" &&
+          junk.res.headers.get("X-Tape") === "throttled",
+          `A REFUSED MEMBER'S TAPE READ OF AN UNKNOWN NAME answers pending, throttled, with 0 vendor calls (${t}: ${JSON.stringify(junk.body).slice(0, 80)})`);
+      }
+      eq(tapeRows(), rowsBefore, `AND WRITES NO flows_tape ROW: the refused admit never reaches the insert or the lease claim (${rowsBefore} -> ${tapeRows()})`);
       const cardA = await get(A, "/api/flows/card?t=ZZQQ");
       ok(cardA.res.status === 200 && cardA.vendor === 0, `an unknown name's card read by a refused member makes no screener call (${cardA.vendor})`);
       const cardB = await get(B, "/api/flows/card?t=ZZQQ");

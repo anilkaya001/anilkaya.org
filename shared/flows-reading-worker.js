@@ -7,6 +7,7 @@ import { KINDS } from "./flows-dossier.js";
 
 export const READ_SCOPE = "read:";
 export const READ_GENERATING_MS = 90 * 1000;
+export const READ_LIMITED_RETRY_S = 60;
 export const READ_BOX_MS = 1500;
 export const READ_BUDGET_SHARE = 0.75;
 
@@ -40,6 +41,13 @@ export function readSignature(env) {
 }
 
 const fingerprintOf = (dossier, env) => dossier.fingerprint + "|" + readSignature(env);
+const LIMITED_RE = /^limited:/;
+const heldBack = (result) => {
+  const trace = result && isObj(result.trace) ? result.trace : null;
+  if (trace && Array.isArray(trace.limited) && trace.limited.length) return true;
+  const packets = result && isObj(result.dossier) && isObj(result.dossier.packets) ? Object.values(result.dossier.packets) : [];
+  return packets.some((p) => isObj(p) && Array.isArray(p.withheld) && p.withheld.some((w) => isObj(w) && typeof w.reason === "string" && LIMITED_RE.test(w.reason)));
+};
 
 export function neuronCost(env, model, usage) {
   const rates = modelRates(env, model);
@@ -77,6 +85,7 @@ function fallbackProvenance(why, describe, guard) {
     case "off": return "Deterministic reading: assembled from templates over the dossier's facts. Model wording is switched off on this site.";
     case "no-model": return "Deterministic reading: assembled from templates over the dossier's facts. No model is configured for this site.";
     case "generating": return "Deterministic reading: assembled from templates over the dossier's facts while a model writes its wording. The model's wording replaces this only if every sentence of it passes the checks against the facts it cites.";
+    case "limited": return "Deterministic reading: assembled from templates over the dossier's facts. Some of the dossier's vendor reads were held back by a rate limit, this site's own or the vendor's, so no model wording was asked for from an incomplete dossier; a later read asks again.";
     case "store": return "Deterministic reading: assembled from templates over the dossier's facts. The store could not record a request for model wording, so none was made.";
     case "cooldown": {
       if (guard === "read:refused") return "Deterministic reading: a model's wording for this dossier was refused by the checks against its facts, and the next attempt waits a short while.";
@@ -220,6 +229,11 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
   if (stored && !good(stored) && stored.guard !== "generating" && stored.guard) {
     const wait = cooldownMs(stored.guard);
     if (ageMs < wait) return fb("fallback", "cooldown", { guard: stored.guard, retryAfterS: Math.ceil((wait - ageMs) / 1000) });
+  }
+
+  if (heldBack(result)) {
+    if (good(stored) && stored.fingerprint.endsWith("|" + signature)) return readyFrom(stored, { held: "limited" });
+    return fb("fallback", "limited", { retryAfterS: READ_LIMITED_RETRY_S });
   }
 
   if (flights.has(ticker)) return fb("generating", "generating");

@@ -120,7 +120,10 @@ Browser ──► Cloudflare edge
   stamped `X-Fresh-State: stale`, `X-Fresh-Reason: throttled` with its true
   `X-Chain-Age`, or, with none kept, JSON `429 rate_limited` with
   `Retry-After: 60`. The quote keeps its `unavailable`/`throttled` body, the
-  tape answers `pending`, and the dossier's vendor packets go `pending`. Both
+  tape answers `pending` (`throttled`, before any `flows_tape` insert or lease
+  claim when the refused gate leaves an unknown name unclassified), the
+  dossier's vendor packets go `pending`, and the reading built from such a
+  dossier is neither generated nor stored (see "Flows reading"). Both
   bindings are flood brakes and fail open. The Tier 1 and focus ticks consult
   neither; `tests/flows-reads-contract.mjs` and `tests/flows-dossier-reads.mjs`
   hold both sides.
@@ -566,7 +569,7 @@ read: {
     unknown: [{ text, missing: [packet kind] }],
   },                                    // a cite is { id, label, display, asOf, kind, grade, ageS?, untrusted? }
   refused: [{ section, why, detail? }], // what the vet dropped from a model reply
-  held?: "floor" | "fingerprint", retryAfterS?
+  held?: "floor" | "fingerprint" | "limited", retryAfterS?
 }
 ```
 
@@ -576,9 +579,15 @@ read: {
   `readingFallback` (templates over the same facts, every sentence cited, passing the
   same checks a model's wording must). `generating` means a model call is in flight or
   was just started and the page should poll the summary. `fallback` means none is
-  coming: `why` is `off` (`FLOWS_READ_MODE=off`), `no-model`, `store`, or `cooldown`
+  coming: `why` is `off` (`FLOWS_READ_MODE=off`), `no-model`, `store`, `cooldown`
   (a refused, unparsable or failed attempt; `retryAfterS` says how long, and the
-  provenance names the reason, the daily budget being spent among them). `absent` is a
+  provenance names the reason, the daily budget being spent among them), or `limited`
+  (the assembly had a vendor packet held back by a rate limit, read from the result's
+  `trace.limited` or a `limited:` withheld reason, so it also covers a reader who joined
+  another member's flight; no claim, no model call and no row write, `retryAfterS` 60,
+  and a stored model reading of the same signature is served instead as `ready` with
+  `held: "limited"`). One member's refusal therefore never writes the shared
+  `read:<T>` row every member is served for the intraday floor. `absent` is a
   name for which no packet holds anything about the name (the market backdrop does not
   count): every packet is named unknown and no model is asked. A dossier that is still
   assembling after 1.5 s answers `generating` with no sections and finishes in `waitUntil`.

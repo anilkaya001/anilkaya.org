@@ -6,6 +6,7 @@ import { fakeD1, shiftClock, cacheFake, vendorStub, client } from "./dossier-har
 import * as F from "./dossier-fixtures.mjs";
 import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
 import { checkModelCalls, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
+import { FLOWS_USERNAMES } from "../shared/flows-auth.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -614,6 +615,73 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const miss = await per("/api/flows/summary?t=" + T, 10, () => { f.db.prepare("DELETE FROM flows_neuron WHERE scope = 'read:EXMP'").run(); });
   ok(hit < 25 && miss < 60, "CPU of a summary call on the fake: stored reading " + hit.toFixed(2) + " ms, no stored reading " + miss.toFixed(2) + " ms (the dossier route from its 30-second copy: " + hot.toFixed(2) + " ms)");
   console.log("  reading CPU per summary request: hit " + hit.toFixed(2) + " ms, miss " + miss.toFixed(2) + " ms, dossier route from its copy " + hot.toFixed(2) + " ms");
+}
+
+{
+  const [A, B] = FLOWS_USERNAMES;
+  const consulted = [];
+  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: key !== A }; } };
+  const UW_ONDEMAND = { limit: async () => ({ success: true }) };
+  const vendorCalls = () => stub.calls.filter((c) => c.key !== "screener").length;
+  const f = world();
+  const ai = rig();
+  const env = { ...AI_ENV, AI: ai, MEMBER_VENDOR, UW_ONDEMAND };
+  const getA = await client(f.D1, env, A);
+  const getB = await client(f.D1, env, B);
+
+  const a = await summary(getA);
+  eq(vendorCalls(), 0, "MEMBER VENDOR: member A, past A's own window, assembles with 0 vendor calls");
+  ok(consulted.length >= 1 && consulted.every((k) => k === A), "metered under A's key (" + consulted.join(",") + ")");
+  eq(a.res.status, 200, "A's summary still answers 200");
+  eq(a.body.read.status, "fallback", "A REFUSED MEMBER'S READING is the deterministic one, status fallback");
+  eq(a.body.read.why, "limited", "with why limited");
+  eq(a.body.read.retryAfterS, RW.READ_LIMITED_RETRY_S, "and a retry after the member window (" + RW.READ_LIMITED_RETRY_S + " s)");
+  ok(/held back by a rate limit/.test(a.body.read.provenance), "the provenance names the rate limit, not a model failure");
+  eq(ai.log.reads.length, 0, "A REFUSED MEMBER'S SUMMARY MAKES 0 MODEL CALLS (" + ai.log.reads.length + ")");
+  eq(readRow(f), undefined, "and leaves no read:" + T + " row that every member would be served for the intraday floor");
+
+  consulted.length = 0;
+  stub.reset();
+  dropHot();
+  const b = await summary(getB);
+  eq(vendorCalls(), 8, "MEMBER B, admitted, then assembles the dossier with its 8 vendor calls (" + vendorCalls() + ")");
+  eq(b.body.read.status, "generating", "B is not handed A's degraded reading: status generating");
+  eq(ai.log.reads.length, 1, "and B's summary generates: one model call");
+  const row = readRow(f);
+  ok(row && row.llm === 1 && row.guard === null, "the stored reading is B's, from a complete dossier");
+  const bReady = await summary(getB);
+  eq(bReady.body.read.status, "ready", "and is served to B");
+  eq(bReady.body.read.coverage.pending, 0, "with no pending packet in it");
+
+  setNow("2026-10-02T15:20:00.000Z");
+  dropHot();
+  stub.reset();
+  const getA2 = await client(f.D1, env, A);
+  const late = await summary(getA2);
+  eq(vendorCalls(), 0, "PAST THE FLOOR, refused member A again makes 0 vendor calls");
+  eq(late.body.read.status, "ready", "and is served the stored model reading");
+  eq(late.body.read.held, "limited", "held because the assembly was limited, not regenerated from it");
+  eq(ai.log.reads.length, 1, "no model call");
+  eq(readRow(f).fingerprint, row.fingerprint, "and the row is untouched");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const [A, B] = FLOWS_USERNAMES;
+  const MEMBER_VENDOR = { limit: async ({ key }) => ({ success: key !== A }) };
+  const UW_ONDEMAND = { limit: async () => ({ success: true }) };
+  const f = world();
+  const ai = rig();
+  const env = { ...AI_ENV, AI: ai, MEMBER_VENDOR, UW_ONDEMAND };
+  const getA = await client(f.D1, env, A);
+  const getB = await client(f.D1, env, B);
+  const [a, b] = await Promise.all([getA("/api/flows/summary?t=" + T), getB("/api/flows/summary?t=" + T)]);
+  await Promise.all([a.settle(), b.settle()]);
+  const joined = stub.calls.filter((c) => c.key !== "screener").length === 0;
+  ok(joined, "(setup) member B's summary, sent with A's, joins A's single flight of the dossier assembly");
+  eq(b.body.read.why, "limited", "A MEMBER WHO JOINS A REFUSED MEMBER'S FLIGHT is told the reading was limited too");
+  eq(ai.log.reads.length, 0, "no model call from either");
+  eq(readRow(f), undefined, "and no row");
 }
 
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, "EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js: the binding handed to worker.js throws on any other caller (" + aiGuardStats().allowed + " calls)");

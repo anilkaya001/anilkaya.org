@@ -335,7 +335,7 @@ async function readAssembled(ticker, now) {
   return {
     dossier: body.dossier, neuron: body.neuron, known: body.known, admitted: body.admitted, metas: arr(body.metas), clock: memoizedClock(now),
     prompt: isObj(body.prompt) && typeof body.prompt.text === "string" ? body.prompt : null,
-    trace: { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], failed: false, hot: true, assembledAt: body.at },
+    trace: { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], limited: [], failed: false, hot: true, assembledAt: body.at },
   };
 }
 
@@ -352,7 +352,7 @@ function writeAssembled(ticker, at, result) {
 async function runAssembly(env, ctx, ticker, deps, opts) {
   const now = isNum(opts.now) ? opts.now : Date.now();
   const budget = { ...BUDGET, ...(opts.budget || {}) };
-  const trace = { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], failed: false, own: opts.own === true };
+  const trace = { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], limited: [], failed: false, own: opts.own === true };
   const statements = env.DB ? dossierStatements(env.DB, ticker) : [];
   const read = env.DB ? await batchWithClock(env.DB, statements, now) : { results: null, clock: memoizedClock(now) };
   trace.trips = 1;
@@ -473,6 +473,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
       trace.pending.push(src.id);
     }
   }
+  trace.limited = Object.keys(extracts).filter((id) => extracts[id] && extracts[id].ok !== true && extracts[id].reason === "limited");
   const persist = Promise.all(settled).then(() => persistParts({ env, ticker, plan, results, cache, trace, now: Date.now(), deps }));
   if (settled.length) {
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(persist.catch(() => {}));

@@ -2349,7 +2349,11 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 - **Tier 3** is on demand: `/api/flows/tape?t=` (a D1 stale-while-revalidate cache
   with a 20-second single-flight lease, one leg per refresh in session) and the quote on
   `/api/flows/live?t=` (5 s in session, 30 s pre/post, 6 h closed), both behind
-  the `UW_ONDEMAND` rate-limit binding. A tape is final only when its read
+  the per-member `MEMBER_VENDOR` rate-limit binding (60 vendor-spending requests a
+  minute for each member, checked first, failing open) and then the shared
+  `UW_ONDEMAND` binding, which several members together can still spend. A refused
+  member's tape read of a name that is neither held nor classified answers
+  `pending` (`throttled`) before any `flows_tape` row is inserted or leased. A tape is final only when its read
   covers the last close (the classifier's own test: read at or after the close
   less one cadence); outside the session a row that does not is refreshed, the
   older leg on each view, so a complete row is final after at most two views
@@ -2749,10 +2753,18 @@ The refresh writes at most five `flows_dossier_cache` rows (one batch), so a nam
 costs about 5 of the 100,000 daily row writes per refresh and no more than one
 refresh a day for the 24-hour kinds; the whole 670-name universe read once a day
 would be about 3,400 writes. Reads cost 16 to 19 rows of the 5,000,000. The
-vendor calls go through `uwFetch` and the `UW_ONDEMAND` limiter, the same
-bucket the ticker page's quote uses, so a burst of dossier reads can starve the
-quote for the window: when the limiter refuses, the packet is `pending` and the
-next read tries again, nothing is cached from the refusal.
+vendor calls go through `uwFetch` and two limiters. The per-member
+`MEMBER_VENDOR` binding is checked first, once per assembly, at 60 vendor-spending
+requests a minute for each member; it fails open. The shared `UW_ONDEMAND` bucket
+follows, one token per vendor call, the same bucket the ticker page's quote uses.
+One member's burst therefore stops at that member's 60 a minute, but several
+members reading together can still spend the shared bucket and leave the quote or
+another member's packets waiting for the window. When either limiter refuses, the
+packet is `pending` and the next read tries again. Nothing is cached from the
+refusal: no `flows_dossier_cache` row, no 30-second assembled copy, and no
+`read:<T>` reading, which is neither generated nor written from a limited
+assembly (the summary answers `fallback` with `why: "limited"`, or the stored
+reading with `held: "limited"`).
 
 | Kind | Cached for | Where |
 |---|---|---|
