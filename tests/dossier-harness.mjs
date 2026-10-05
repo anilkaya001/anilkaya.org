@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
 import { VENDOR, NOW_ISO, vendorBody } from "./dossier-fixtures.mjs";
+import { guardAi } from "./lib/ai-guard.mjs";
 
 globalThis.HTMLRewriter ??= class { on() { return this; } transform(r) { return r; } };
 
@@ -172,6 +173,7 @@ export function vendorStub(o = {}) {
 let instance = 0;
 export async function client(D1, extra = {}) {
   const env = { DB: D1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "https://uw.test", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  if (env.AI) env.AI = guardAi(env.AI);
   const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?dossier=" + (++instance))).default;
   return async (route, init = {}) => {

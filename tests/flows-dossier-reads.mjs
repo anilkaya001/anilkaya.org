@@ -8,6 +8,7 @@ import { universeValue, buildUniverse } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
+import { assertAiGuarded } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -566,4 +567,5 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 restoreClock();
 cache.restore();
 stub.restore();
+assertAiGuarded();
 console.log(`flows-dossier-reads: ${checks} checks passed`);

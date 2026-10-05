@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
+import { workerSource } from "./lib/source-scan.mjs";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
 import { SIGN_IN_SQL, SIGNED_IN_COLUMN_SQL, LAB_SESSION_MS } from "../shared/lab-sign-in.js";
@@ -2063,7 +2064,7 @@ try {
         await live.d1("DELETE FROM progress WHERE user_id = 'g_lab'");
         await live.d1("DELETE FROM users WHERE id = 'g_lab'");
       }
-      const focusKnown = readFileSync(new URL("../worker.js", import.meta.url), "utf8").includes("|^focus$");
+      const focusKnown = workerSource().includes("|^focus$");
       eq((await ingest("focus", "GET", LIVE_TOKEN)).status, focusKnown ? 200 : 400,
         "the live role may ask for the focus key it plans the strip from (a Worker that does not know the key yet " +
           "answers 400, and the strip falls back to the focus roster)");

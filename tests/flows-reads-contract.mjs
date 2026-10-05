@@ -6,6 +6,8 @@ import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
 import { easternInstant } from "../shared/flows-freshness.js";
 import * as NEURON from "../shared/flows-neuron.js";
+import { workerSource, expect } from "./lib/source-scan.mjs";
+import { guardAi, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
@@ -132,6 +134,7 @@ function shiftClock(baseIso) {
 let instance = 0;
 async function client(D1, extra = {}) {
   const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  if (env.AI) env.AI = guardAi(env.AI);
   const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route, init = {}) => {
@@ -794,7 +797,8 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 
   globalThis.fetch = realFetch;
   const routed = new Set(CEILING.map(([path]) => path.split("?")[0]));
-  const source = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const source = workerSource();
+  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 20, why: "the Flows read routes are declared somewhere in the Worker's closure" });
   const declared = [...new Set([...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]))]
     .filter((path) => !["/api/flows/ingest", "/api/flows/tape"].includes(path));
   const unpriced = declared.filter((path) => !routed.has(path) && !HOME.some((h) => h.startsWith(path)));
@@ -1297,4 +1301,5 @@ class FakeCache {
   unshift();
 }
 
+ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);
 console.log(`flows-reads-contract: ${checks} checks passed`);

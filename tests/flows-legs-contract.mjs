@@ -36,6 +36,7 @@ import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-l
 import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
+import { workerSource } from "./lib/source-scan.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-legs-probe.json"), "utf8"));
@@ -888,7 +889,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const worker = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
+  const worker = workerSource();
   ok(/\^universe\$\|\^regime\$/.test(worker), "the ingest allowlist accepts universe and regime");
   ok(/\/\^\(card\|card-x\|hist\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
   ok(worker.includes('path === "/api/flows/universe" || path === "/api/flows/regime"'), "both read routes exist");

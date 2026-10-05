@@ -20,6 +20,8 @@ import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard
          askFailure, budgetVerdict, cappedAi, neuronsSpent, aiCapNeurons, aiCapCalls, AI_BUDGET_MARK, AI_CAP_DEFAULT_NEURONS,
          AI_CAP_DEFAULT_CALLS, AI_WORST_RATES } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
+import { workerSource, closure, slice, where, count, expect, absent, parseImports } from "./lib/source-scan.mjs";
+import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, AI_HOME } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -599,8 +601,8 @@ const CARD = {
      "and every other refusal of the second request keeps its own words");
   ok(/put a price next to the name of a level it does not belong to/.test(prov("mislabeled")) && /markup or a link, or ran past its length limit/.test(prov("unsafe")),
      "N-F5, N-F10: a summary refused for a mislabelled level, or for markup or length, says so in the provenance instead of falling to the default");
-  const guardSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  ok((guardSrc.match(/FLOWS_NEURON\.guardOptions\(ctx\)/g) || []).length === 1 && !/guardAnswer\([^)]*\{ smallIntegers: false \}\)/.test(guardSrc.slice(guardSrc.indexOf("async function generateNeuron"), guardSrc.indexOf("async function tickerNeuron"))) &&
+  const guardSrc = workerSource();
+  ok(count(guardSrc, /FLOWS_NEURON\.guardOptions\(ctx\)/) === 1 && !/guardAnswer\([^)]*\{ smallIntegers: false \}\)/.test(slice(guardSrc, "async function generateNeuron", "async function tickerNeuron")) &&
      /proseIssue\(parsed\.summary, "summary"\)/.test(guardSrc),
      "and the Worker guards Neuron's summary with the same options, the levels and the modal check, and screens it for markup and length first");
   ok(retryableGuard("unreachable:reparse:capacity", 0) && retryableGuard("unreachable:reparse:unreachable", 0),
@@ -801,17 +803,17 @@ const CARD = {
   ok(/FLOWS_ASK_FALLBACK_MODEL = "@cf\/meta\/llama-3\.3-70b-instruct-fp8-fast"/.test(toml) &&
      /FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"/.test(toml),
     "the fallback is a non-reasoning instruct model configured beside its published neuron rate");
-  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  eq((worker.match(/env\.AI\.run\(/g) || []).length, 0,
-    "no call site reaches the binding directly: all three go through askModels, so none can drop the thinking switch or the fallback");
-  eq((worker.match(/askModels\(meteredAi\(env\)/g) || []).length, 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it, each through the metered binding");
-  ok(!/max_tokens/.test(worker), "the worker no longer carries a max_tokens literal of its own");
+  const worker = workerSource();
+  same(checkModelCalls(), [],
+    "no call site reaches the binding directly: every one goes through askModels, so none can drop the thinking switch or the fallback");
+  eq(expect(worker, /askModels\(meteredAi\(env\)/, { min: 4, max: 4 }), 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it, each through the metered binding");
+  same(where(closure("worker.js"), /max_tokens/), [AI_HOME], "the only max_tokens literal the Worker runs is modelInput's, so no call site carries one of its own");
   ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
      /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
      /guard = refused \|\| "summary:empty";/.test(worker),
     "NEURON KEEPS A THROWN REPARSE AS A RETRYABLE GUARD: a capacity blip on the second request used to write ideas:unparsable " +
     "or summary:empty, which the same card never retries, where origin/main retried the same failure after five minutes");
-  ok((worker.match(/emptyNote\(said\.attempts\)/g) || []).length === 2 && !/so did the fallback model asked after it/.test(worker),
+  ok(count(worker, /emptyNote\(said\.attempts\)/) === 2 && where(closure("worker.js"), /so did the fallback model asked after it/).join() === AI_HOME,
     "both Ask notes about an empty reply are built from emptyNote over the attempts, not from the chain's combined guard");
   ok(/thrownThenEmptyNote\(said\.attempts, first && \(FALLBACK_FAILED\[first\.failed\]/.test(worker),
     "the Ask route builds that note from the primary's own failure phrase");
@@ -976,7 +978,7 @@ const CARD = {
   ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
   const aside = JSON.parse(JSON.stringify(ecard));
   aside.engine.ideas = []; aside.engine.noTrade = { code: "no-edge", closest: "S2" };
-  const w = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const w = workerSource();
   ok(/if \(ctx\.engine\) return generateEngineNeuron\(/.test(w) && /FLOWS_NEURON\.engineFallback\(ctx\)/.test(w) &&
      /FLOWS_NEURON\.vetEngineReply\(parsed, ctx\)/.test(w) && /\{ v: 3, verdict: res\.verdict, claims: res\.claims, ideas: res\.ideas, refused: res\.refused \}/.test(w),
      "the Worker takes the engine path whenever the card carries an engine, vets the reply, and stores the protocol-3 object " +
@@ -1090,14 +1092,75 @@ const CARD = {
   eq(raw.calls, 0, "with the model never called");
   eq(retryableGuard("unreachable:budget", 0), true, "the reading is retried when the day turns over, like any unreachable reading");
 
-  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  eq((worker.match(/\benv\.AI\.run\(/g) || []).length, 0, "EVERY MODEL CALL GOES THROUGH THE METER: no call site in the Worker runs the binding itself");
-  const sites = (worker.match(/askModels\(/g) || []).length;
-  const metered = (worker.match(/askModels\(meteredAi\(env\),/g) || []).length;
-  ok(sites >= 4 && sites === metered, `and all ${sites} askModels call sites are handed the metered binding (${metered})`);
+  const report = modelCallReport();
+  same(checkModelCalls(report), [], "EVERY MODEL CALL GOES THROUGH THE METER: over the Worker's whole import closure and every file under shared/ and server/, " +
+    "the binding is read into a value once, in " + AI_HOME + ", and run only there");
+  eq(report.reads.length, 1, "one read of the binding, cappedAi's");
+  ok(report.tests.length >= 1 && report.tests.every((t) => /^(?:!|Boolean\()/.test(t.text)), `every other mention of it is a truthiness test (${report.tests.length})`);
+  ok(report.files >= closure("worker.js").length && report.files > 40, `the guard reads ${report.files} modules, the closure of worker.js among them`);
+  const sites = report.askSites.length;
+  const metered = report.askSites.filter((a) => a.arg === "meteredAi(env)").length;
+  ok(sites >= 5 && metered >= 4 && report.askSites.every((a) => a.arg === "meteredAi(env)" || a.arg === "deps.ai()") && report.cappedDeps === 1,
+    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep`);
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
     "and the cap is written down in wrangler.toml, where a deploy shows it");
+}
+
+{
+  const throws = (fn, re, m) => { let e = null; try { fn(); } catch (x) { e = x; } ok(e && re.test(e.message), `${m} (${e ? e.message : "no throw"})`); };
+  const text = "alpha beta\nbeta gamma\n";
+  throws(() => slice(text, "delta"), /start marker not found/, "slice throws when its start marker is absent, so a moved function is never scanned as an empty string");
+  throws(() => slice(text, "alpha", "delta"), /end marker not found/, "and when its end marker is absent after the start");
+  eq(slice(text, "beta", "gamma"), "beta\nbeta ", "and otherwise cuts from the start marker to the first end marker after it");
+  throws(() => expect(text, /beta/, { min: 0 }), /min of at least 1/, "expect refuses min 0: a scan states a positive anchor and can never pass on an empty match");
+  throws(() => expect(text, /beta/, {}), /min of at least 1/, "and a missing min");
+  throws(() => expect(text, /delta/, { min: 1 }), /matched 0 times/, "an anchor that matches nothing fails");
+  throws(() => expect(text, /beta/, { min: 1, max: 1 }), /matched 2 times/, "and a count above its max fails");
+  eq(expect(text, "beta", { min: 2, max: 2 }), 2, "a literal string counts as itself");
+  throws(() => absent(text, /delta/, {}), /positive anchor/, "absent() needs a positive anchor");
+  throws(() => absent(text, /delta/, { anchor: /omega/ }), /anchor of an absence scan/, "and fails when the anchor matches nothing, so an absence read off the wrong text fails");
+  throws(() => absent(text, /gamma/, { anchor: /alpha/ }), /expected none/, "and fails on a match");
+  ok(absent(text, /delta/, { anchor: /alpha/ }), "and passes only with the anchor present and the pattern absent");
+  throws(() => parseImports('const m = await import(name);', "shared/x.js"), /non-literal import\(\)/, "the closure walk fails on a computed import(), which it could not follow");
+  throws(() => parseImports('const m = await import(`./${name}.js`);', "shared/x.js"), /non-literal/, "including a template with a substitution");
+  same(parseImports('import { a } from "./a.js";\nexport * from \'./b.js\';\nimport "./c.js";\nconst d = await import("./d.js?x=1");\nimport.meta.url;', "x").map((i) => i.spec + (i.dynamic ? "*" : "")),
+    ["./a.js", "./b.js", "./c.js", "./d.js?x=1*"], "static, re-export, bare and literal dynamic imports are all edges");
+  const walked = closure("worker.js");
+  ok(walked[0] === "worker.js" && walked.includes(AI_HOME) && walked.includes("shared/flows-reading-worker.js") && walked.includes("shared/flows-rt-hub.js"),
+    `the Worker's closure holds ${walked.length} modules, the AI module, the reading and the rail among them`);
+  ok(closure("scripts/flows-pipeline.mjs").includes("shared/flows-warnings.js"), "and the pipeline's closure follows its literal dynamic imports");
+
+  const real = modelCallFiles();
+  const mutate = (file, src) => { const files = real.includes(file) ? real : [...real, file]; return checkModelCalls(modelCallReport(files, (f) => f === file ? src : readFileSync(new URL("../" + f, import.meta.url), "utf8"))); };
+  ok(mutate("shared/flows-mutant.js", 'export const f = (env) => env.AI.run("m", {});\n').some((p) => /flows-mutant\.js:1 reads the AI binding/.test(p)),
+    "MUTATION: an env.AI.run( in a new shared/ module that nothing imports fails the guard");
+  ok(mutate("shared/flows-mutant.js", 'export const f = (env) => { const m = env.AI; return m.run("m", {}); };\n').some((p) => /flows-mutant\.js:1 reads the AI binding/.test(p)),
+    "MUTATION: const m = env.AI; m.run( fails it, the alias that a scan for env.AI.run( never saw");
+  ok(mutate("shared/flows-mutant.js", 'export const f = (env) => { const { AI } = env; return AI.run("m", {}); };\n').length > 0 &&
+     mutate("shared/flows-mutant.js", 'export const f = (env) => env["AI"].run("m", {});\n').length > 0,
+    "MUTATION: a destructured or bracketed read fails it");
+  ok(mutate("shared/flows-mutant.js", 'export const f = (ai) => ai.run("m", {});\n').some((p) => /runs ai\.run\( outside/.test(p)),
+    "MUTATION: an ai.run( outside the AI module fails it");
+  ok(mutate("server/flows-mutant.js", 'import { askModels } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(env.AI, c, m, {});\n').some((p) => /unmetered binding: env\.AI/.test(p)),
+    "MUTATION: askModels handed the raw binding from a new server/ module fails it");
+  const workerText = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  ok(mutate("worker.js", workerText.replace("if (!env.AI || !chain.length) {", "const direct = env.AI;\n  if (!direct || !chain.length) {")).some((p) => /^worker\.js:\d+ reads the AI binding/.test(p)),
+    "MUTATION: a value read of env.AI in worker.js fails it");
+  same(mutate("worker.js", workerText), [], "and the unmutated tree passes");
+
+  const calls = [];
+  const raw = { log: calls, async run(model) { calls.push(model); return { response: "ok" }; } };
+  const guarded = guardAi(raw);
+  eq(guarded.log, calls, "the guarded binding forwards every other property");
+  const before = aiGuardStats();
+  eq((await cappedAi({ AI: guarded }, async () => ({ neurons: 0, calls: 0 })).run("m1", {})).response, "ok", "a call through cappedAi passes the runtime guard");
+  let refused = null;
+  try { await guarded.run("m2", {}); } catch (e) { refused = e; }
+  ok(refused && /outside shared\/flows-ai\.js/.test(refused.message) && !calls.includes("m2"),
+    "and a direct run from any other module throws before the binding is reached");
+  const after = aiGuardStats();
+  same([after.allowed - before.allowed, after.refused - before.refused], [1, 1], "and the guard records both, so a caught bypass still fails the suite that drove it");
 }
 
 {

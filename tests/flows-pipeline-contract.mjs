@@ -45,6 +45,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
+import { workerSource, expect } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -2245,7 +2246,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "A sixth must join the builder rather than hand-rolling headers");
   eq(src.match(/ingestURL\(\) \+ "\?list="/g).length, 1, "one of them is the ?list= listing the retire step ages the store's keys with");
   eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
-  const workerSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const workerSrc = workerSource();
+  expect(workerSrc, /\bINGEST_META_KEYS_MAX = (\d+);/, { min: 1, max: 1, why: "the Worker declares the ingest's key cap once" });
   const metaCap = /\bINGEST_META_KEYS_MAX = (\d+);/.exec(workerSrc);
   ok(metaCap && LEDGER_PROBE_CHUNK <= Number(metaCap[1]),
      `the pipeline's chunk of ${LEDGER_PROBE_CHUNK} keys is within the Worker's INGEST_META_KEYS_MAX ` +

@@ -6,6 +6,7 @@ import {
   alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES, alertStamp, nightlyAlerts,
 } from "../shared/flows-alerts.js";
 import { briefAlertsFact } from "../shared/flows-brief.js";
+import { workerSource, slice, expect, absent } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -501,13 +502,12 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   ok(/if \(merged\.write\) await put\("live:alerts", merged\.write\);/.test(leg),
     "and that single write sits behind the merge's own verdict, so a declined read never publishes");
 
-  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  ok(!/async function refreshFlowsIntraday/.test(worker),
+  const worker = workerSource();
+  ok(absent(worker, /async function refreshFlowsIntraday/, { anchor: /async scheduled\(event, env, ctx\)/ }),
     "ONE WRITER PER KEY: the Worker's cron no longer rewrites the nightly flowalerts, pulse or brief " +
     "rows. Two writers on one key is how the 2026-09-22 morning union was lost");
-  const inserts = worker.split("INSERT INTO flows_payload").length - 1;
-  const ingest = worker.slice(worker.indexOf('if (path === "/api/flows/ingest")'),
-    worker.indexOf('if (path.startsWith("/api/flows/"))'));
+  const inserts = expect(worker, "INSERT INTO flows_payload", { min: 1, why: "the nightly's rows are written somewhere in the Worker" });
+  const ingest = slice(worker, 'if (path === "/api/flows/ingest")', 'if (path.startsWith("/api/flows/"))');
   eq(ingest.split("INSERT INTO flows_payload").length - 1, inserts,
     "and every write to flows_payload in worker.js is inside the ingest route, whose only caller is the " +
     "nightly token — the live layer writes flows_live and nothing else");
@@ -552,7 +552,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "into “foreign” — under the old default the first read stamped the word and " +
     "every read after it read that stamp back out and re-published it");
 
-  const worker = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const worker = workerSource();
   const liveSrc = readFileSync(new URL("../shared/flows-live.js", import.meta.url), "utf8");
   const handler = liveSrc.slice(liveSrc.indexOf("export function mergeLiveAlerts"));
 

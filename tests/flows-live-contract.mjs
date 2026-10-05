@@ -25,6 +25,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
+import { workerSource, closure, importEdges, slice, where, absent } from "./lib/source-scan.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -579,19 +580,18 @@ const cronMinutes = (cron) => {
        importsOf(src("scripts/flows-legs/live.mjs")).includes("../../shared/flows-focus.js"),
       "and both planners import the one focusStripNames, so the Worker's live:focus and the Actions strip ask for the " +
         "same names in the same order");
-    const rootPath = new URL(".", ROOT).pathname;
-    const edges = (file) => importsOf(readFileSync(file, "utf8")).filter((i) => i.startsWith("."))
-      .map((i) => new URL(i, "file://" + file).pathname);
+    const edges = (file) => importEdges(file).map((e) => e.file);
     const state = new Map();
     const cycles = [];
     const visit = (f, stack) => {
       if (state.get(f) === 2) return;
-      if (state.get(f) === 1) { cycles.push([...stack.slice(stack.indexOf(f)), f].map((x) => x.slice(rootPath.length))); return; }
+      if (state.get(f) === 1) { cycles.push([...stack.slice(stack.indexOf(f)), f]); return; }
       state.set(f, 1); stack.push(f);
       for (const g of edges(f)) visit(g, stack);
       stack.pop(); state.set(f, 2);
     };
-    for (const entry of ["worker.js", "scripts/flows-pipeline.mjs"]) visit(rootPath + entry, []);
+    for (const entry of ["worker.js", "scripts/flows-pipeline.mjs"]) visit(entry, []);
+    ok(state.size >= closure("worker.js").length && state.size > 60, `the walk follows static and literal dynamic imports (${state.size} modules)`);
     deep(cycles, [], `NO IMPORT CYCLE from worker.js or the pipeline (${state.size} modules walked): a cycle leaves a ` +
       "const in its temporal dead zone and the Worker throws at module evaluation, taking every route down");
   }
@@ -728,14 +728,14 @@ const cronMinutes = (cron) => {
 }
 
 {
-  const worker = read("worker.js");
+  const worker = workerSource();
   const liveWorker = read("shared/flows-live-worker.js");
   const leg = read("scripts/flows-legs/live.mjs");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const writes = /(INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM)\s+flows_payload/;
   ok(!writes.test(liveWorker),
     "LAYER 1 (code): the Worker's live module never writes flows_payload — only SELECTs the nightly rows it overlays");
-  const sched = worker.slice(worker.indexOf("async scheduled(event, env, ctx)"), worker.indexOf("async fetch(request, env, ctx)"));
+  const sched = slice(worker, "async scheduled(event, env, ctx)", "async fetch(request, env, ctx)");
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
   ok(puts.length >= 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
@@ -1368,9 +1368,12 @@ const cronMinutes = (cron) => {
   ok(!O.looksLikeJwt("test-live-token-abcdefghijklmnopqrstuv") && O.looksLikeJwt(token),
     "a static hex token never takes the OIDC path, and a JWT always does");
 
-  for (const file of ["worker.js", "shared/flows-live-worker.js"]) {
-    ok(!/redirect:\s*"error"/.test(read(file)),
-      `${file} never asks workerd for redirect "error", which it rejects with a TypeError on every fetch`);
+  {
+    const bundled = workerSource();
+    const runnerOnly = slice(bundled, "export async function actionsIdToken(", "\n}\n");
+    ok(absent(bundled.replace(runnerOnly, ""), /redirect:\s*"error"/, { anchor: /redirect:\s*"manual"/ }),
+      "no module the Worker bundles asks workerd for redirect \"error\", which it rejects with a TypeError on every fetch " +
+        "(actionsIdToken, which runs on the Actions runner under Node, is the one exception)");
   }
   let hits = 0;
   const logs = [];
@@ -1465,7 +1468,7 @@ const cronMinutes = (cron) => {
   deep([hostile.kind, hostile.unavailable, hits], [null, true, 0], "and any other override fetches nothing and grants nothing");
   eq(logs.pop().jwks, "bad-override", "saying why");
 
-  const ingestRoute = read("worker.js").slice(read("worker.js").indexOf('if (path === "/api/flows/ingest")'));
+  const ingestRoute = slice(workerSource(), 'if (path === "/api/flows/ingest")');
   ok(/if \(check\.unavailable\) \{\s*throw new HttpError\(503,/.test(ingestRoute.slice(0, 1500)),
     "the ingest route answers a key-set outage with 503, which the pipeline retries, rather than a 401 it gives up on");
   const spy = { imports: 0, importKey: (...a) => { spy.imports++; return crypto.subtle.importKey(...a); },
@@ -1735,9 +1738,9 @@ const cronMinutes = (cron) => {
   let threw = false;
   try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
   ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
-  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*flowsSchemaReady = true;/.test(read("worker.js")),
+  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*flowsSchemaReady = true;/.test(workerSource()),
     "and ensureFlowsTables marks the schema ready only after the upgrade");
-  ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(read("worker.js")) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
+  ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(workerSource()) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
     "whose column list is read by the PRAGMA riding the schema batch as its last statement, after the CREATE that makes the table");
   let pragmas = 0;
   upgrades.length = 0;
@@ -2230,7 +2233,7 @@ const cronMinutes = (cron) => {
     const liveSrc = read("shared/flows-live-worker.js");
     ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
-    const ingestSrc = read("worker.js");
+    const ingestSrc = workerSource();
     ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json, lab: tokenKind === "nightly" \}\);/
       .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
     "the ingest route serves the clock to a verified credential only, and to GET only");
@@ -2880,10 +2883,10 @@ const cronMinutes = (cron) => {
     [Q["stats:updated_at"]]: T("2026-09-01T00:00:00Z"), [Q["progress:updated_at"]]: T("2026-09-01T00:00:00Z") })),
   "2026-09-27T08:00:00.000Z", "and a returning learner's sign-in (users.signed_in_at) counts exactly");
   eq(LAB.LAB_SESSION_MS, 30 * DAY, "the session lifetime the lag stands on");
-  const workerSrc = read("worker.js");
+  const workerSrc = workerSource();
   ok(/exp: Date\.now\(\) \+ LAB_SESSION_MS \}/.test(workerSrc) && /cookie\("session", session, \{ maxAge: LAB_SESSION_MS \/ 1000 \}\)/.test(workerSrc),
     "and it is the Lab session's own lifetime, cookie and signed expiry alike, so the two cannot drift apart");
-  ok(/await recordSignIn\(env\.DB, user, Date\.now\(\)\);/.test(workerSrc) && !/INSERT INTO users/.test(workerSrc),
+  ok(/await recordSignIn\(env\.DB, user, Date\.now\(\)\);/.test(workerSrc) && where(closure("worker.js"), /INSERT INTO users/).join() === "shared/lab-sign-in.js",
     "EVERY GOOGLE SIGN-IN IS RECORDED: the OAuth callback writes users through recordSignIn and nowhere else, so a " +
       "returning learner's sign-in moves the count the alarm reads");
 
