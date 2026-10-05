@@ -874,13 +874,42 @@ whatever is left in its process group is killed. It prints a table
 of every suite's result, seconds and assertions, and appends it as Markdown,
 with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
 is set. **Every `test:*` script in `tests/package.json` needs an entry in
-`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`), or the runner
-refuses to start and exits 2. `node run.mjs --only a,b` (from `tests/`, names
-without the `test:` prefix) runs those suites alone, `--bail` stops at the
-first failure as the old chain did, and `--timeout-scale=x` multiplies every
-timeout on a slow machine (a timeout past `setTimeout`'s 2^31-1 ms is held
-there, so a very large scale switches timeouts off rather than firing them at
-once). `npm run test:x` still runs one suite by itself.
+`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`, and an
+optional `group`, `fast` or `shard`, default `shard`; only `contracts` and
+`run` are `fast`), or the runner refuses to start and exits 2.
+`node run.mjs --only a,b` (from `tests/`, names without the `test:` prefix)
+runs those suites alone, `--bail` stops at the first failure as the old
+chain did, and `--timeout-scale=x` multiplies every timeout on a slow
+machine (a timeout past `setTimeout`'s 2^31-1 ms is held there, so a very
+large scale switches timeouts off rather than firing them at once).
+`--group fast|shard` runs one group, in manifest order. `--shard i/n` runs
+the i-th of n shards of the `shard` group: longest `medianS` first into the
+cheapest shard, a shard charged 24 s of Chromium install when it takes its
+first `C` or `W` suite, equal medians taken in manifest order and an equal
+cost given to the lower shard, the fast suites weighed and then left out;
+each shard runs in manifest order.
+`--needs-browser` with either prints `true` or `false` (whether the
+selection holds a `C` or `W` suite) and runs nothing. An empty shard or
+group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
+`--group` are usage errors (exit 2) that run nothing. `npm run test:x`
+still runs one suite by itself, and `npm test` with no flag still runs the
+whole chain.
+
+In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
+(full history and `ASSET_DIFF_BASE`, the Worker dry run, then
+`node run.mjs --group fast`, no Chromium), six `shard` jobs (a matrix of
+`--shard 1/6` to `6/6`, fail-fast off, a shallow checkout, Chromium installed
+only when `--needs-browser` answers `true`), and `test`, which needs both,
+runs `if: always()`, and is green only when the fast job and every shard
+succeeded. `test` is the one required check. **Adding a suite, or refreshing
+a `medianS`, means changing `tests/suites.json` AND republishing
+`PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
+packing (unchanged when no suite moves), then running
+`node run-contract.mjs` from `tests/`.** The contract
+holds the packing equal to that table, so a suites.json entry alone turns
+`run` red in the fast job (`THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED
+TABLE`), and its message prints the packing computed now in the table's shape,
+ready to paste.
 
 ### Which suites need the dev server, and which do not
 

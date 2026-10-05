@@ -533,8 +533,11 @@ const CI_SHARDS = 6;
   const fast = suites.filter((s) => groupOf(s) === "fast");
   deep(names(fast), ["contracts", "run"], "the fast job runs the asset and curriculum contracts (the one suite that needs fetch-depth 0 and ASSET_DIFF_BASE) and this contract, neither of which needs Chromium or workerd");
   const shards = packShards(suites, CI_SHARDS);
-  deep(shards.map((sh) => sorted(names(sh))), PUBLISHED_SHARDS.map(sorted),
-    "THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED TABLE (W09-P3 and its measured medians, contracts moved to the fast job): a median refresh or a new suite that moves a suite between shards fails here until the table is republished with it");
+  const packed = shards.map((sh) => sorted(names(sh)));
+  const same = JSON.stringify(packed) === JSON.stringify(PUBLISHED_SHARDS.map(sorted));
+  deep(packed, PUBLISHED_SHARDS.map(sorted),
+    "THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED TABLE (W09-P3 and its measured medians, contracts moved to the fast job): a median refresh or a new suite that moves a suite between shards fails here until the table is republished with it" +
+      (same ? "" : `; republish PUBLISHED_SHARDS as the packing computed now: ${JSON.stringify(shards.map(names))}`));
   for (let n = 1; n <= 8; n++) {
     const a = packShards(suites, n);
     deep(packShards(suites, n), a, `${n} shards: the packing is deterministic`);
@@ -566,7 +569,7 @@ const CI_SHARDS = 6;
   const w = (name, cls, medianS, group) => ({ name, class: cls, medianS, ...(group ? { group } : {}) });
   const tiny = [w("f", "N", 0.1, "fast"), w("c", "N", 30), w("b", "C", 10), w("d", "W", 2), w("a", "N", 5), w("u", "N", null)];
   deep(packShards(tiny, 2).map((sh) => sh.map((s) => s.name)), [["c", "a", "u"], ["b", "d"]],
-    "worked by hand: longest first into the cheapest shard, a browser suite charged the install only in a shard without one (b to the empty shard at 34, d beside it at 36 rather than 56, a to c at 35 rather than 41), the fast suite weighed and left out, the unmeasured suite at weight 0");
+    "worked by hand: longest first into the cheapest shard, a browser suite charged the install only in a shard without one (b to the empty shard at 34 rather than 64, a beside c at 35 rather than 39, d beside b at 36 rather than 61), the fast suite weighed and left out, the unmeasured suite at weight 0");
   deep(packShards(tiny, 1).map((sh) => sh.map((s) => s.name)), [["c", "b", "d", "a", "u"]], "one shard is the whole shard group in manifest order");
   const parsed = parseArgs(["--shard", "2/6", "--needs-browser"]);
   deep([parsed.shard, parsed.needsBrowser], [{ index: 2, count: 6 }, true], "--shard i/n and --needs-browser are parsed");

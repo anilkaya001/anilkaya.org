@@ -3624,7 +3624,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "bundle, and installs no Chromium");
   ok(!/fetch-depth/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test");
   ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
-    "a newer push cancels a superseded pull-request run only; every run on main finishes");
+    "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
     const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
