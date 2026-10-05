@@ -733,6 +733,16 @@ When any file under `assets/css/`, `assets/js/`, or `assets/data/` changes:
    `assets/version.txt`;
 3. run the contract test.
 
+`node scripts/bump-assets.mjs` does steps 1 and 2: it increments the token,
+moves every non-font `/assets/...?v=` in the HTML outside `tests/` and `docs/`
+and in `assets/css/*.css`, every `data-asset-version` and `ASSET_VERSION`,
+and sets every woff2 `?v=` to `assets/fonts-version.txt` (normally a no-op).
+It never runs the course generator: a change to a Lab source that
+`lab-suite.bundle.js` bundles still needs
+`node scripts/generate-course-payloads.mjs`. `--check` changes nothing and
+exits non-zero when any reference is off its token, which is the quick test
+after a merge.
+
 A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
 references (eight `@font-face` URLs in `base.css`, one Inter preload in each
 of the eight pages that preload it), and a merge takes such a rewrite from
@@ -803,6 +813,22 @@ Source scans go through `tests/lib/source-scan.mjs`, never a raw read of
 throws on a missing marker or a cut across a module boundary, `expect()`
 takes a `min` of at least 1, and `absent()` requires a positive `anchor` that
 must match the same source, so no scan passes on an empty match.
+
+The other shared test helpers live beside it, each held by
+`tests/lib-contract.mjs` (run after `contracts.mjs` in `test:contracts`):
+`tests/lib/browser.mjs` (`launch()` is `chromium.launch()` plus
+`executablePath` from `PW_CHROMIUM_PATH` when that variable is set; unset, it
+passes the caller's options untouched; a path that is not a file throws);
+`tests/lib/served-tree.mjs` (`servedFiles()`: the tracked and unignored
+untracked regular files minus `.assetsignore` and wrangler's own
+`/.assetsignore`, `/_redirects`, `/_headers`, matched by git's own gitignore
+engine); `tests/lib/cpu-budget.mjs` (the thread CPU clock, the `flows-quant`
+reference workload, interleaved subject and reference windows, a budget held
+as a ratio to the reference with an absolute floor of the clock's resolution
+over a window's runs); and `tests/lib/d1-fake.mjs` (the counting D1 fake over
+`node:sqlite` that `flows-reads-contract` uses: trips, rows read by query
+plan, rows written, and the fail, throw, hang and slow switches). New CPU
+ceilings and new in-process D1 suites use these rather than another copy.
 
 GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
 manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
@@ -878,6 +904,7 @@ flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
 flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
+lib-contract
 flows-dossier-contract   flows-dossier-reads
 flows-reading   flows-reading-worker   flows-reading-render
 flows-rt-client
@@ -902,6 +929,13 @@ the vendor's own NVDA row through `buildUniverse` and the reading, and every sen
 the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClock`) to 2026-09-25 13:00 UTC for
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
+
+`lib-contract` was measured on 2026-10-05: about 7 s with no server and 413 checks (414 with
+`PW_CHROMIUM_PATH` set, which adds a real launch; in this sandbox it is
+`/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`, and CI leaves it unset). It builds a
+throwaway git repository for the served-tree semantics, drives the CPU budget on an injected clock, and runs
+`scripts/bump-assets.mjs` on a copy of the tree and on the parent of each of the last six hand bumps, which it
+reproduces token for token. It needs Node 22.13 or newer for `node:sqlite`.
 
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
 every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a
