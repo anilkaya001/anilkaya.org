@@ -2515,6 +2515,7 @@ turns the session loop of section 10.5i into a loop that is never done:
 | From 17:30 until `meta` lands | Ticks every five minutes, each reading `meta`. At 18:15, if the first dispatch was sent and `meta` is still behind, one more dispatch (30 minutes after the first at the earliest). Never a third. A refusal that is permanent (HTTP 401, 403, 404, 422: the token, the grant or the file) is capped at four calls in all. A refusal that is transient (HTTP 5xx, 429, 408 or no answer at all) is retried every 30 minutes from 18:15 until 20:30 ET, at most six more calls, so a GitHub outage of two hours still ends in a landed nightly before 21:00. The same cap applies to the repeat after a send. |
 | 21:00 | The nightly check of the witness (below). |
 | Every 340 minutes | The run re-dispatches `flows-live.yml` (origin `chain`, retried after 15 and 45 seconds if refused) and exits. The `timeout-minutes: 355` leaves 15 minutes of slack. |
+| A pass that settles no vendor or ingest call for 90 seconds, a pass still running after 10 minutes, or a watch tick still running after 2 | The loop abandons it, re-dispatches `flows-live.yml` the same way (retried after 15 and 45 seconds), raises the witness's `chain` issue (for a hung tick only when the dispatch was refused; the report is itself held to 2 minutes), logs `live loop: pass N settled no vendor or ingest call for 90 s` (or `did not finish within 600 s`) and, at that moment, how many vendor requests had timed out in it, and exits non-zero: the run turns red and the concurrency group frees for the successor. A pass that stopped altogether costs about 4 minutes from its last settled call instead of 355. A slow or partly stalled vendor does not trip this: every vendor call settles inside its two 20 second tries, so a pass whose market-tide calls all time out still runs to the end and publishes the strips, alerts, news and the heartbeat the vendor did answer (measured: 228 seconds with 17 of 38 calls stalled). Only a pass in which nearly every call times out comes near the 10 minute ceiling, which, with the hand-over and the report, still ends inside the 15 minutes `timeout-minutes: 355` leaves after the 340 minute budget. The 90 seconds is about three times the longest a running pass goes without a settled call (a 20 second try after up to 5 seconds of controller spacing); a 429 or store-quota wait is announced to the idle clock and does not count. In the `live loop:` line, `settled no vendor or ingest call` points at something without a deadline (an ingest request, the credential request, the runner) and is a defect to fix; `did not finish within 600 s` with a timed-out count near the pass's call count is a vendor stall, and nothing in the repository needs changing for that. When the dispatch was refused, nothing restarts the loop until a GitHub starter arrives, hours late: the Worker's watchdog re-dispatches only with `GITHUB_DISPATCH_TOKEN`, which it does not hold, so restart it by hand (`gh workflow run flows-live.yml`). |
 
 The `flows-pipeline.yml` gate proceeds for any event that is not a schedule
 ("Dispatched by: live-loop"), so the workflow needed no change beyond the
@@ -2566,15 +2567,21 @@ see, and tells the owner when it is wrong. Five checks:
 
 | Id | Breach | Confirmed after | Cleared after |
 |---|---|---|---|
-| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
+| `tier1` | From the open to ten minutes past the close, Tier 1's last tick, `live:market` or `live:focus` is more than 25 minutes old (the readers' stale line for the market class; a key not yet written today counts from the open). On a tick whose clock read failed, Tier 1's last tick is not judged (the kept clock's stamp is as old as its read), only the two keys. A Worker with `FLOWS_LIVE_MODE = "off"` is skipped. | Two consecutive ticks (about ten minutes) | Three consecutive ticks on which every one of the three has been written today and is inside the line |
 | `tier2` | From 45 minutes after the open to 25 minutes past the close, `live:breadth` is more than 45 minutes old (the readers' stale line for the breadth class, and the line the Worker's own `liveStalled` watchdog draws, which the tests hold equal minute by minute). The loop is the writer, so this catches passes that run and publish nothing. | Two consecutive ticks | Three consecutive healthy ticks |
 | `nightly` | At or after 21:00 ET (close plus the five-hour grace) `meta.sessionDate` is older than `expectedNightlySession`, so a missed Friday stays a breach through the weekend | The first tick when `meta` is readable and stale; two consecutive ticks when the store answered `pending` (the Worker answers `pending` for a missing row and for a failed D1 read alike, so one such answer proves nothing) | `meta` holds the expected session or a later one |
-| `chain` | The run reached its budget and could not dispatch its successor after three tries | At once | The next loop's first tick |
-| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer) | Three ticks | Three consecutive ticks that read something |
+| `chain` | The run reached its budget and could not dispatch its successor after three tries; or a pass was abandoned (no vendor or ingest call settled for 90 seconds, or still running after 10 minutes; whatever the dispatch answered), or a watch tick outran its 2-minute deadline and the dispatch was refused. Its title is "The live loop stopped: a pass hung or its successor could not be started" | At once | The next loop's first tick (a successor whose first pass hangs too never ticks, so the issue stays open while the stall lasts) |
+| `probe` | Three consecutive ticks read nothing through the ingest route (403, 5xx, no answer): the clock read and every key read failed, each after its retry | Three ticks | Three consecutive ticks that read something |
 
 A failed read is never a verdict: a 403 or a timeout is `inconclusive`, changes
 nothing, and only feeds `probe`; the one answer that can mean either (`pending`)
-needs to repeat. Each breach opens one GitHub Issue titled
+needs to repeat. A challenged read (a 403 that is not the Worker refusing the
+credential, a 408, a 429, a 5xx, a timeout or no answer), the loop's clock read
+included, is tried again once, one second later, inside its 10 second deadline:
+each attempt has 4.5 seconds. A clock that was not read this tick is used only on
+its own Eastern day and without its Tier 1 stamp, which is as old as the last read
+that answered, so on such a tick `tier1` is judged on `live:market` and
+`live:focus` alone. Each breach opens one GitHub Issue titled
 `[flows-witness:<id>] ...`, whose body mentions `@anilkaya001` (a mention
 notifies you under GitHub's default notification settings, watching or not), states the numbers and the
 repair, and links the run. A persisting breach adds one reminder comment per six
@@ -2591,7 +2598,7 @@ left open adopts it instead of opening a second, closes any further open issue f
 duplicate of the newest, and closes them all on recovery. An open whose answer never
 arrives (GitHub made the issue, the 15-second deadline fired first) is not
 retried blind: the retry lists the open issues first and adopts what it finds. The run
-itself also turns red when it confirmed a lapse or its chain failed, and every
+itself also turns red when it confirmed a lapse, its chain failed, or a pass or watch tick was abandoned, and every
 confirmed breach writes a `::error` annotation on the run's page, so a repository
 whose Issues cannot be written still gets a red run and an explanation. To prove the
 channel without waiting for a fault, dispatch the live workflow with `drill`
@@ -2661,7 +2668,9 @@ how many requests timed out. `FLOWS_UW_TIMEOUT_MS` (100 to 60000) overrides the
 20 seconds, which the tests use. The nightly's client is unchanged, and so are
 the ingest writes, which still carry no deadline of their own. The loop's own
 clock read, made before every tick, has the same 10 second deadline as each of
-the watch's reads: a stalled ingest connection costs one tick, where Node's
+the watch's reads, and spends it the same way: a first attempt of at most 4.5
+seconds, then, if it was challenged, one second's wait and a second attempt of at
+most 4.5 seconds. A stalled ingest connection costs one tick, where Node's
 default would have held the loop, and with it the witness's cadence, for its
 300 second headers timeout.
 
@@ -2918,11 +2927,14 @@ adds no `live:*` key and writes nothing to D1.
 placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
 polls only while a socket is connected or a `/api/rt/snap` request is less than
 60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
-own alarm every second. No viewer, no vendor call. Per minute, with someone
-watching: px 12 calls, fl 12, gx 60 (one name a second: the two indices, six
-fixed names and six rotating names Tier 2 reads, and up to three focus tickers
-viewers are looking at), mk 12 (two calls every 10 s), nw 2, so about 98 calls
-a minute against its own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+own alarm every second. No viewer, no vendor call, and only the topics a viewer
+names are polled: a socket's `k`, or a `/api/rt/snap` topic for 60 s after the
+request. Per minute, for each topic someone is watching: px 12 calls, fl 12, mk
+12 (two calls every 10 s), nw 2, and gx 4 per focus ticker (one name every 15
+s, at most three names, only for sockets that ask gx with a focus ticker; no
+page does today). The home page (px, mk, nw) costs about 26 calls a minute, a
+board, the ticker, the market or the unusual page about 12, against the rail's
+own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
 separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 
 **Kill switches (vars in `wrangler.toml`, no secret).**

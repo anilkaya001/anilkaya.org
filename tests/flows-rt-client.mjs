@@ -1001,7 +1001,7 @@ try {
   if (want("hub")) {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     const { clock, vendor, hub, lose, step, same } = rigHub(page, R);
-    await connect(page, { topics: ["px", "fl", "gx", "mk", "nw"] });
+    await connect(page, { topics: ["px", "fl", "gx", "mk", "nw"], focus: "NVDA" });
     await R.nextConn();
     await step(12);
     eq(await transport(page), "socket", "THE CLIENT AGAINST THE REAL HUB: hello over a bridged socket lands the page on the socket rung");

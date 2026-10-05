@@ -1229,6 +1229,19 @@ async function vendorAdmits(env, ctx, ticker) {
   return !verdict || verdict.known;
 }
 
+async function tapeAdmission(env, ctx, ticker) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const key = new Request(`https://flows-tape-admit.internal/${ticker}`, { method: "GET" });
+  const hit = cache ? await cache.match(key).catch(() => null) : null;
+  if (hit && (await hit.text().catch(() => "")) === "1") return null;
+  const remember = () => {
+    if (!cache) return;
+    const put = cache.put(key, new Response("1", { headers: { "Cache-Control": `max-age=${CLASS_TTL_S}` } })).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+  };
+  return { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t), remember };
+}
+
 function passthrough(stored) {
   return new Response(stored.payload, {
     status: 200,
@@ -3677,7 +3690,7 @@ async function route(request, env, url, ctx) {
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
         json, fetchVendor: (p, params) => uwFetch(env, p, params),
-        admit: { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t) } });
+        admit: await tapeAdmission(env, ctx, ticker) });
     }
 
     if (path === "/api/flows/political") {

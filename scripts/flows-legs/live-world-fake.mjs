@@ -6,7 +6,8 @@ const inside = (t, spans) => spans.some(([from, to]) => t >= from && t < to);
 
 export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chainStatus = 204, writeStatus = 201, listStatus = 200,
   seed = [], loseCreates = 0 } = {}) {
-  const record = { dispatches: [], created: [], comments: [], closed: [], reopened: [], calls: [] };
+  const record = { dispatches: [], created: [], comments: [], closed: [], reopened: [], calls: [], cancelled: [] };
+  const queue = liveGroup({ now, record });
   const issues = seed.map((it) => ({ state: "open", author: BOT, ...it }));
   let next = 100 + issues.length;
   let lost = loseCreates;
@@ -23,6 +24,7 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
       const status = typeof wanted === "function" ? wanted(entry.at) : wanted;
       record.dispatches.push({ ...entry, status });
       if (status === 0) throw new Error("fetch failed");
+      if (status === 204 && dispatch[1] === "flows-live.yml") queue.dispatched(entry);
       return reply(status, null);
     }
     if (/\/issues$/.test(u.pathname) && method === "GET") {
@@ -62,11 +64,41 @@ export function fakeGithub({ now = () => Date.now(), dispatchStatus = 204, chain
     }
     return reply(404, { message: "unrouted " + method + " " + u.pathname });
   };
-  return { fetchImpl, record, issues };
+  return { fetchImpl, record, issues, queue };
+}
+
+export function liveGroup({ now = () => Date.now(), record = { cancelled: [] } } = {}) {
+  const runs = [];
+  const state = { running: null, pending: null };
+  const begin = (run, at) => {
+    const started = { ...run, id: runs.length + 1, startedAt: at, endedAt: null };
+    runs.push(started);
+    state.running = started;
+    return started;
+  };
+  return {
+    runs,
+    running: () => state.running,
+    pending: () => state.pending,
+    start: (inputs, at = now()) => begin({ inputs, at }, at),
+    dispatched(entry) {
+      if (!state.running) return begin(entry, entry.at);
+      if (state.pending) record.cancelled.push({ ...state.pending, cancelledAt: entry.at });
+      state.pending = { inputs: entry.inputs, at: entry.at };
+      return state.pending;
+    },
+    finish(at = now()) {
+      if (state.running) state.running.endedAt = at;
+      state.running = null;
+      const next = state.pending;
+      state.pending = null;
+      return next ? begin(next, at) : null;
+    },
+  };
 }
 
 export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt = null, tier1Down = [], marketDown = [],
-  focusDown = [], breadthDown = [], metaPending = [], readFail = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
+  focusDown = [], breadthDown = [], metaPending = [], readFail = [], clockFail = [], clockFlaky = [], summaryAgeMs = 10 * 60 * 1000, github = {} } = {}) {
   let t = start;
   const prev = prevTradingDay(day, null);
   const open = easternInstant(day, PHASE_MINUTES.open);
@@ -117,9 +149,15 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
     },
   });
 
+  let lastClockAt = -Infinity;
   const readOnce = async (key) => {
     stat.reads.push({ key, at: t });
+    const clockGap = key === "clock" ? t - lastClockAt : 0;
+    if (key === "clock") lastClockAt = t;
     if (inside(t, readFail)) return { payload: null, failed: true, status: 403 };
+    if (key === "clock" && (inside(t, clockFail) || (inside(t, clockFlaky) && clockGap > 2000))) {
+      return { payload: null, failed: true, status: 403 };
+    }
     if (key === "clock") return { payload: clockBody(), status: 200 };
     if (key === "live:market") return { payload: { key, fresh: { readAt: iso(marketAt(t)) } }, status: 200 };
     if (key === "live:focus") return { payload: { key, fresh: { readAt: iso(focusAt(t)) } }, status: 200 };

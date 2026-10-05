@@ -221,7 +221,8 @@ async function runMain() {
     const px = c1.data("px").find((f) => f.rows.length);
     eq(px.rows[0].length, RT_ROW_FIELDS.px.length, "px: a row is ticker, quote time and the 23 strip values");
     deep(px.meta.cols, RT_ROW_FIELDS.px, "px: the snapshot names its columns");
-    ok(px.rows.some((r) => r[0] === "SYL001") && px.rows.some((r) => r[0] === "NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
+    const pxNames = new Set(c1.data("px").flatMap((f) => f.rows.map((r) => r[0])));
+    ok(pxNames.has("SYL001") && pxNames.has("NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
     const pxCall = vendor.paramsOf(/screener/)[0].ticker.split(",");
     ok(pxCall.includes("SYL001") && pxCall.includes("NVDA") && pxCall.length >= 60, `px: the vendor was asked for the roster in one call (${pxCall.length} names)`);
     ok(new Set(vendor.calls.filter((c) => /screener/.test(c.path)).map((c) => c.params.ticker)).size === 1, "px: the same call every time");
@@ -481,7 +482,7 @@ async function runCadence() {
   const base = server.baseURL;
   try {
     hubClock.offset = (await statusOf(base, OWNER)).body.now - Date.now();
-    const c = connect(base, OWNER);
+    const c = connect(base, OWNER, { query: "?f=nvda" });
     await until(() => c.data("px").some((f) => f.rows.length) && c.data("fl").some((f) => f.rows.length), 20000, "first frames at production cadence");
     await sleep(2000);
     const t0 = vendor.calls.length;
@@ -494,7 +495,8 @@ async function runCadence() {
     console.log(`rt vendor calls in ${secs.toFixed(0)} s at production cadence: ${JSON.stringify(rates)} (${window.length} total)`);
     ok(rates.px >= 11 && rates.px <= 13, `cadence: px about every 5 s (${rates.px} calls a minute)`);
     ok(rates.fl >= 11 && rates.fl <= 13, `cadence: fl about every 5 s (${rates.fl})`);
-    ok(rates.gx >= 55 && rates.gx <= 61, `cadence: gx one call a second (${rates.gx})`);
+    ok(rates.gx >= 3 && rates.gx <= 5, `cadence: gx reads the one focus name about every 15 s (${rates.gx})`);
+    ok(window.filter((x) => /spot-exposures/.test(x.path)).every((x) => x.path === "/api/stock/NVDA/spot-exposures"), "cadence: and no other name");
     ok(rates.mk >= 10 && rates.mk <= 14, `cadence: mk every 10 s, two calls a poll (${rates.mk})`);
     ok(rates.nw >= 1 && rates.nw <= 3, `cadence: news every 30 s (${rates.nw})`);
     ok(window.length <= 240, `cadence: under the 240-call budget (${window.length})`);

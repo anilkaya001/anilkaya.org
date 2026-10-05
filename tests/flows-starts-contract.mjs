@@ -6,17 +6,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FRESH_CLASSES, easternInstant, liveStalled } from "../shared/flows-freshness.js";
 import {
-  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP,
+  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP, createProgress,
+  liveWindow,
 } from "../scripts/flows-legs/live.mjs";
+import { etTime } from "../scripts/flows-legs/health.mjs";
 import {
   WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter,
   issueTitle, issueBody, ownerHandle, runUrl,
 } from "../scripts/flows-legs/witness.mjs";
-import { NIGHTLY, nightlyStartDue, createNightlyStart } from "../scripts/flows-legs/starts.mjs";
-import { createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill } from "../scripts/flows-legs/watch.mjs";
-import { fakeWorld, fakeGithub } from "../scripts/flows-legs/live-world-fake.mjs";
+import {
+  NIGHTLY, nightlyStartDue, createNightlyStart, STANDBY, standbyTick, readStandbyTick, crashRestart, standbyDue, createStandby,
+} from "../scripts/flows-legs/starts.mjs";
+import {
+  createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill, challenged, keptView, WATCH_RETRY,
+} from "../scripts/flows-legs/watch.mjs";
+import { fakeWorld, fakeGithub, liveGroup } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
-import { LIVE_VENDOR } from "../scripts/flows-pipeline.mjs";
+import { LIVE_VENDOR, RATE } from "../scripts/flows-pipeline.mjs";
+import { LIVE_BUDGET } from "../shared/flows-live.js";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -604,9 +611,18 @@ const MIN = 60 * 1000;
   const blip = by("Tier 1 stops");
   ok(blip.issues.length === 1 && blip.closed === 1 && blip.failed, "a Tier 1 stall opens one issue, closes it on recovery and turns the run red");
   const weekend = by("weekend");
-  ok(weekend.passes === 0 && weekend.githubCalls === 2 && weekend.reads === weekend.ticks + 1,
+  ok(weekend.passes === 0 && weekend.githubCalls === 3 && weekend.reads === weekend.ticks + 1,
     `A WEEKEND COSTS ONE CLOCK READ A QUARTER HOUR (${weekend.reads} store reads over ${weekend.ticks} ticks), one meta read to start ` +
-      "and two GitHub calls");
+      "and three GitHub calls: the open-issue list, the standby on the first tick and the hand-over");
+  const lost = by("runner is lost");
+  ok(!lost.problems.length && lost.issues.length === 0 && lost.chainDispatches.length === 2 &&
+     lost.world.github.queue.runs.map((x) => x.inputs.origin).join() === "chain,standby,chain",
+  "A RUNNER LOST AT 02:00 ET ON A SATURDAY is replaced by the standby pending behind it as soon as GitHub lets the lost job go, " +
+    "no cron line being due until Monday; the standby counts itself one crash restart, opens nothing and hands over at its own budget");
+  const crashLoop = by("crash loop");
+  ok(!crashLoop.problems.length && crashLoop.issues.length === 1 && /^\[flows-witness:chain\]/.test(crashLoop.issues[0].title) &&
+     crashLoop.failed && crashLoop.world.github.record.dispatches.length === 3,
+  "A CRASH LOOP is bounded: three standbys, then the third crash restart within six hours sends none and raises the chain issue at once");
   const nightlyMiss = by("never lands");
   ok(nightlyMiss.issues.length === 1 && nightlyMiss.failed && nightlyMiss.nightlyDispatches.length === 2,
     "a nightly that never lands is dispatched twice and reported once");
@@ -620,6 +636,15 @@ const MIN = 60 * 1000;
     `AN INTERMITTENT FEED is one issue, reopened on each flap (${flapping.closed} closes, ${flapping.comments} comments), and still turns the run red`);
   ok(by("Tier 2 stops").issues.length === 1 && by("Tier 2 stops").closed === 1 && by("Tier 2 stops").failed,
     "A TIER 2 THAT PASSES BUT DOES NOT PUBLISH is one issue, closed on recovery");
+  const challengedClock = by("clock read is challenged");
+  ok(challengedClock.issues.length === 0 && !challengedClock.failed && !challengedClock.problems.length,
+    "A CLOCK READ CHALLENGED ON THREE TICKS IN A ROW (issue #144) raises nothing: the witness keeps the last good clock of the day and still reads Tier 1 and Tier 2");
+  const evening = by("idle ticks");
+  ok(evening.issues.length === 0 && !evening.failed && !evening.problems.length,
+    "AN IDLE EVENING WHOSE CLOCK READ IS CHALLENGED ONCE A TICK raises nothing: the clock is the only read there, and its retry answers");
+  const blind = by("every read is challenged");
+  ok(blind.issues.length === 1 && /^\[flows-witness:probe\]/.test(blind.issues[0].title) && blind.closed === 1 && !blind.problems.length,
+    "while three ticks on which every read fails, each tried twice, still open the probe issue, and it closes when reads return");
   ok(by("one pending answer").issues.length === 1 && by("one pending answer").closed === 1 && !by("after midnight").problems.length &&
      by("after midnight").closed === 1, "a pending answer from meta is a lapse only when it repeats, and a nightly that lands after midnight closes its issue");
   const src = read("scripts/flows-pipeline.mjs");
@@ -635,7 +660,7 @@ const MIN = 60 * 1000;
 
 {
   const S = D;
-  const drive = async (world, { budgetMs, watchOver = {}, passes = null, chain = null } = {}) => {
+  const drive = async (world, { budgetMs, watchOver = {}, passes = null, chain = null, loopOver = {} } = {}) => {
     let body = null;
     const notes = [];
     const watch = createWatch({ readOnce: world.readOnce, latestClock: () => body, env: world.env(), fetchImpl: world.github.fetchImpl,
@@ -643,7 +668,7 @@ const MIN = 60 * 1000;
     const loop = await runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs, log() {}, warn: (l) => notes.push(l), watch,
       readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; } }),
       pass: passes || (async () => { world.advance(20000); return { skipped: null, answered: 10, landed: 5 }; }),
-      chain: chain || (async () => ({ sent: true, why: "sent", status: 204 })) });
+      chain: chain || (async () => ({ sent: true, why: "sent", status: 204 })), ...loopOver });
     return { loop, notes };
   };
   const issues = (w) => w.github.record.created.filter((c) => /flows-witness/.test(c.title));
@@ -678,7 +703,7 @@ const MIN = 60 * 1000;
   ok(issues(seeded).length === 0 && seeded.github.record.comments.length === 0, "A HOP AFTER 21:00 finds the issue the last run opened and adds nothing to it");
 
   const broken = fakeWorld({ day: S, start: at(S, 12, 0), github: {
-    seed: [{ number: 31, title: "[flows-witness:chain] The live loop could not start its successor", updatedAt: at(S, 6, 0) }] } });
+    seed: [{ number: 31, title: "[flows-witness:chain] The live loop stopped: a pass hung or its successor could not be started", updatedAt: at(S, 6, 0) }] } });
   r = await drive(broken, { budgetMs: 20 * MIN });
   ok(broken.github.record.closed.length === 1 && broken.github.record.closed[0].number === 31 && broken.github.record.closed[0].at < at(S, 12, 1) &&
      r.loop.watch.breached.length === 0,
@@ -752,6 +777,236 @@ const MIN = 60 * 1000;
   clearTimeout(giveUp);
   ok(hung !== "hung" && hung.loop.exit === "budget", "and a read that never answers is given up on when the deadline falls, so the tick ends and the loop goes on");
 
+  eq(LIVE_LOOP.passIdleMs, 90 * 1000, "A PASS IS ABANDONED when no vendor or ingest call has settled for 90 s");
+  eq(LIVE_LOOP.passDeadlineMs, 10 * MIN, "or when it is still running after 10 minutes");
+  eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick when it is still running after 2 minutes");
+  const settleGap = LIVE_VENDOR.timeoutMs + RATE.maxDelayMs;
+  ok(LIVE_LOOP.passIdleMs >= 3 * settleGap,
+    `the idle limit is at least three times the longest a running pass goes without a settled vendor call (${settleGap / 1000} s: ` +
+      "a 20 s try after up to 5 s of controller spacing), so a slow or timing-out vendor never trips it");
+  const handover = LIVE_LOOP.chainRetryMs.reduce((a, b) => a + b, 0) + (LIVE_LOOP.chainRetryMs.length + 1) * LIVE_LOOP.githubTimeoutMs;
+  const report = 2 * LIVE_LOOP.githubTimeoutMs;
+  ok(LIVE_LOOP.passIdleMs + handover + report <= 4 * MIN,
+    `so a pass that stopped costs its idle limit, the hand-over and the witness's report (at worst ${Math.round((LIVE_LOOP.passIdleMs + handover + report) / 1000)} s ` +
+      "with every dispatch retried and the issue listing and open each waiting out GitHub's 15 s), not the workflow's 355 minutes");
+  const tries = LIVE_VENDOR.timeoutRetries + 1;
+  const fullStall = LIVE_BUDGET.tier2MaxCalls * tries * RATE.maxDelayMs + tries * LIVE_VENDOR.timeoutMs;
+  ok(LIVE_LOOP.passDeadlineMs >= fullStall,
+    `the ceiling sits above a pass in which every one of ${LIVE_BUDGET.tier2MaxCalls} calls waits out both tries at the slowest ` +
+      `controller spacing (${Math.round(fullStall / 1000)} s), so it ends only a pass that would not finish`);
+  const jobMin = Number((read(".github/workflows/flows-live.yml").match(/timeout-minutes:\s*(\d+)/) || [])[1]);
+  ok(LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs <= jobMin * MIN - LIVE_LOOP.budgetMs,
+    `and the ceiling, the hand-over and a report held to a tick's deadline (${Math.round((LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs) / 1000)} s) ` +
+      `fit the ${jobMin - LIVE_LOOP.budgetMs / MIN} minutes the job's timeout leaves after the loop's budget, so the dispatch is always sent`);
+  const stuckPass = async ({ passDeadlineMs = 150, tickDeadlineMs = 2 * MIN, passIdleMs = LIVE_LOOP.passIdleMs, progress = null, onHung = null,
+    passes, sent = true, order = null }) => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const dispatched = [];
+    let calls = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const run = await Promise.race([
+      drive(world, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs, tickDeadlineMs, passIdleMs, progress, onHung },
+        passes: async (p) => { calls++; return passes(p, world); },
+        chain: async ({ at: when }) => {
+          dispatched.push(when);
+          if (order) order.push("chain");
+          return sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 422 };
+        } }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { run, dispatched, calls, wallMs: Date.now() - t0, world };
+  };
+  const never = await stuckPass({ passes: async ({ index }, world) => {
+    if (index < 2) { world.advance(20000); return { skipped: null, answered: 10, landed: 5 }; }
+    return new Promise(() => {});
+  } });
+  ok(never.run !== "hung" && never.run.loop.exit === "hung" && never.run.loop.why === "pass-deadline" && never.wallMs < 5000,
+    `A PASS THAT NEVER RESOLVES is abandoned when its deadline falls: the loop exits (${never.wallMs} ms of wall time for a 150 ms deadline) ` +
+      "instead of holding the concurrency group until the workflow's timeout");
+  ok(never.dispatched.length === 1 && never.run.loop.chained.sent && never.calls === 3,
+    `and sends the chain dispatch exactly once (${never.dispatched.length}), after two healthy passes and the hung third`);
+  ok(never.run.loop.passes.length === 3 && never.run.loop.passes[2].hung === true && never.run.loop.passes[2].errored === true &&
+     never.run.notes.some((l) => /pass 3 did not finish within 0\.15 s/.test(l)),
+  "the hung pass is recorded as one, and the log names it");
+  const hungVerdict = liveRunVerdict(never.run.loop);
+  ok(hungVerdict.failed && /a pass did not finish within its deadline/.test(hungVerdict.why) && /re-dispatched \(sent\)/.test(hungVerdict.why),
+    "AND THE RUN EXITS RED, saying a pass hung and that the successor was dispatched");
+  const refusedHang = await stuckPass({ passes: async () => new Promise(() => {}), sent: false });
+  ok(refusedHang.run.loop.exit === "hung" && refusedHang.dispatched.length === 1 && liveRunVerdict(refusedHang.run.loop).failed &&
+     /could not dispatch its successor \(refused\): nothing restarts the loop until a GitHub starter arrives/.test(liveRunVerdict(refusedHang.run.loop).why),
+  "a hung first pass whose dispatch is refused still exits red, naming the refusal and what is left to restart the loop");
+  const chainIssues = (w) => issues(w).filter((c) => /^\[flows-witness:chain\]/.test(c.title));
+  ok(chainIssues(refusedHang.world).length === 1 && issues(refusedHang.world).length === 1 &&
+     /Pass 1 of the live loop did not finish within 0\.15 s/.test(chainIssues(refusedHang.world)[0].body) &&
+     /could not dispatch its successor: refused \(HTTP 422\)/.test(chainIssues(refusedHang.world)[0].body) &&
+     /GITHUB_DISPATCH_TOKEN/.test(chainIssues(refusedHang.world)[0].body) && refusedHang.world.github.record.closed.length === 0 &&
+     refusedHang.run.loop.watch.open.includes("chain"),
+  "AND THE WITNESS RAISES EXACTLY ONE CHAIN ISSUE for a hung pass whose hand-over was refused: the Worker holds no dispatch token, so a cron starter hours late is all that is left");
+  ok(chainIssues(never.world).length === 1 && /Pass 3 of the live loop/.test(chainIssues(never.world)[0].body) &&
+     /dispatched its successor \(HTTP 204\), and exited red/.test(chainIssues(never.world)[0].body) &&
+     /still settling calls at its ceiling/.test(chainIssues(never.world)[0].body) &&
+     never.run.loop.watch.breached.includes("chain") && /witness confirmed a lapse in chain/.test(hungVerdict.why),
+  "and a hung pass whose successor was dispatched raises it too, so a vendor that stalls every pass is an open issue and not only a red run");
+  const outage = fakeWorld({ day: S, start: at(S, 11, 0) });
+  const runs = [];
+  for (let i = 0; i < 3; i++) {
+    let giveUpAt = null;
+    const one = await Promise.race([
+      drive(outage, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs: 100 }, passes: async () => new Promise(() => {}) }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    runs.push(one);
+    outage.advance(90 * 1000);
+  }
+  ok(runs.every((x) => x !== "hung" && x.loop.exit === "hung" && x.loop.ticks === 0 && liveRunVerdict(x.loop).failed) &&
+     chainIssues(outage).length === 1 && issues(outage).length === 1 && outage.github.record.closed.length === 0 &&
+     outage.github.record.comments.length === 0 && runs.every((x) => x.loop.watch.open.includes("chain")),
+  "A STALL IN WHICH EVERY PASS HANGS, run after run, keeps one chain issue open and every run red, though no run lives to its first watch tick");
+  const healed = await drive(outage, { budgetMs: 20 * MIN });
+  ok(healed.loop.exit === "budget" && outage.github.record.closed.length === 1 &&
+     outage.github.record.closed[0].number === chainIssues(outage)[0].number && healed.loop.watch.open.length === 0,
+  "and the first loop whose pass finishes closes it on its first tick");
+  const slow = await stuckPass({ passDeadlineMs: 400, passes: async (p, world) => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    world.advance(20000);
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(slow.run.loop.exit === "budget" && slow.dispatched.length === 1 && slow.run.loop.passes.every((p) => !p.hung) && slow.calls > 10,
+    "while a pass that finishes inside its deadline, however slowly, is kept, and the loop runs to its budget as before");
+  const spin = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const scaledIdle = 150;
+  const partial = createProgress();
+  const partialOrder = [];
+  const stalledBackend = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: partial.lastAt, order: partialOrder,
+    onHung: () => partialOrder.push("onHung"), passes: async ({ index }, world) => {
+      const t0 = Date.now();
+      if (index === 1) {
+        while (Date.now() - t0 < 1000) { await spin(40); partial.settled(); }
+      } else {
+        await spin(5);
+        partial.settled();
+      }
+      world.advance(20000);
+      return { skipped: null, answered: index === 1 ? 21 : 38, landed: index === 1 ? 6 : 7, slowMs: Date.now() - t0 };
+    } });
+  const longPass = stalledBackend.run.loop.passes[1];
+  ok(stalledBackend.run.loop.exit === "budget" && stalledBackend.run.loop.passes.every((p) => !p.hung) && longPass.landed === 6 &&
+     longPass.slowMs >= 1000 && longPass.slowMs > 6 * scaledIdle && stalledBackend.dispatched.length === 1 && !partialOrder.includes("onHung") &&
+     !liveRunVerdict(stalledBackend.run.loop).failed && chainIssues(stalledBackend.world).length === 0,
+  `A PASS THAT STALLS ONE BACKEND runs past the old four-minute line and still finishes and publishes: it settled a call every 40 ms against a ${scaledIdle} ms ` +
+    `idle limit and ran ${longPass.slowMs} ms (the reviewer's market-tide stall: 228 s, a settled call at least every 25 s, against 90 s), so it is kept, ` +
+    "the loop runs to its budget, the run stays green and no issue opens");
+  const quieted = createProgress();
+  const waited = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: quieted.lastAt, passes: async ({ index }, world) => {
+    if (index === 0) {
+      quieted.settled();
+      quieted.quiet(500);
+      await spin(500);
+      quieted.settled();
+    }
+    world.advance(20000);
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(waited.run.loop.exit === "budget" && waited.run.loop.passes.every((p) => !p.hung),
+    "a 429 or store-quota wait announced to the idle clock (500 ms against 150) is not a stall");
+  const fading = createProgress();
+  const fadeOrder = [];
+  const fadeNotes = [];
+  const faded = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: fading.lastAt, order: fadeOrder,
+    onHung: (x) => { fadeOrder.push("onHung"); fadeNotes.push(x); }, passes: async ({ index }, world) => {
+      if (index === 0) { world.advance(20000); fading.settled(); return { skipped: null, answered: 10, landed: 5 }; }
+      for (let i = 0; i < 5; i++) { await spin(40); fading.settled(); }
+      return new Promise(() => {});
+    } });
+  const fadeVerdict = liveRunVerdict(faded.run.loop);
+  ok(faded.run !== "hung" && faded.run.loop.exit === "hung" && faded.run.loop.why === "pass-idle" && faded.wallMs < 2000 &&
+     faded.run.loop.passes[1].hung === true && /settled no vendor or ingest call for 0\.15 s/.test(faded.run.loop.passes[1].threw) &&
+     faded.run.notes.some((l) => /pass 2 settled no vendor or ingest call for 0\.15 s/.test(l)) && faded.dispatched.length === 1,
+  `A PASS THAT STOPS SETTLING CALLS is abandoned one idle limit after its last settled call (${faded.wallMs} ms of wall time for five calls 40 ms apart ` +
+    "and a 150 ms limit), one dispatch, and the log says so");
+  ok(fadeVerdict.failed && /a pass settled no vendor or ingest call within its idle limit/.test(fadeVerdict.why) &&
+     chainIssues(faded.world).length === 1 && /Pass 2 of the live loop settled no vendor or ingest call for 0\.15 s/.test(chainIssues(faded.world)[0].body) &&
+     /something without a deadline stalled/.test(chainIssues(faded.world)[0].body),
+  "and the verdict and the chain issue name the idle stall and say a slow vendor never causes it");
+  ok(fadeNotes.length === 1 && fadeNotes[0].why === "pass-idle" && fadeOrder[0] === "onHung" && fadeOrder.filter((x) => x === "chain").length === 1,
+    "THE ABANDONMENT HOOK runs once, before the dispatch, so the pass's timed-out count is read when the pass is given up, not after the hand-over and the report");
+  const busy = createProgress();
+  let abandoned = false;
+  const endless = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 600, progress: busy.lastAt, passes: async ({ index }, world) => {
+    if (index === 0) { world.advance(20000); busy.settled(); return { skipped: null, answered: 10, landed: 5 }; }
+    while (!abandoned) { await spin(40); busy.settled(); }
+    return { skipped: null, answered: 0, landed: 0 };
+  } });
+  abandoned = true;
+  ok(endless.run !== "hung" && endless.run.loop.exit === "hung" && endless.run.loop.why === "pass-deadline" && endless.wallMs < 3000 &&
+     /did not finish within 0\.6 s/.test(endless.run.loop.passes[1].threw),
+  "and a pass that keeps settling calls but never ends is abandoned at the ceiling");
+  const throwing = await stuckPass({ passes: async ({ index }, world) => {
+    world.advance(20000);
+    if (index === 1) throw new Error("vendor down");
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(throwing.run.loop.exit === "budget" && throwing.run.loop.passes[1].threw === "vendor down" && !throwing.run.loop.passes[1].hung,
+    "and a pass that throws inside the deadline still costs a slot, not the loop");
+  const stuckTick = await (async () => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const dispatched = [];
+    let ticked = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const sticky = { tick: async () => { ticked++; return ticked < 3 ? { busy: false } : new Promise(() => {}); },
+      summary: () => ({ breached: [], open: [] }) };
+    const loop = await Promise.race([
+      runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: 2 * HOUR, log() {}, warn() {}, watch: sticky, tickDeadlineMs: 150,
+        readClock: async () => null, pass: async () => { world.advance(20000); return { skipped: null, answered: 1, landed: 1 }; },
+        chain: async ({ at: when }) => { dispatched.push(when); return { sent: true, why: "sent", status: 204 }; } }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { loop, dispatched, ticked, wallMs: Date.now() - t0 };
+  })();
+  ok(stuckTick.loop !== "hung" && stuckTick.loop.exit === "hung" && stuckTick.loop.why === "tick-deadline" && stuckTick.loop.ticks === 3 &&
+     stuckTick.dispatched.length === 1 && stuckTick.wallMs < 5000 && /a watch tick did not finish/.test(liveRunVerdict(stuckTick.loop).why),
+  `A WATCH TICK THAT NEVER RESOLVES is given up on the same way: exit on its deadline (${stuckTick.wallMs} ms), one dispatch, a red run`);
+  const tickHang = async (sent, report) => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const told = [];
+    const notes = [];
+    let ticked = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const sticky = { tick: async () => { ticked++; return ticked < 2 ? { busy: false } : new Promise(() => {}); },
+      loopHung: async (x) => { told.push(x); return report(); }, summary: () => ({ breached: [], open: [] }) };
+    const loop = await Promise.race([
+      runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: 2 * HOUR, log() {}, warn: (l) => notes.push(l), watch: sticky,
+        tickDeadlineMs: 150, readClock: async () => null,
+        pass: async () => { world.advance(20000); return { skipped: null, answered: 1, landed: 1 }; },
+        chain: async () => (sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 403 }) }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { loop, told, notes, wallMs: Date.now() - t0 };
+  };
+  const tickSent = await tickHang(true, async () => {});
+  const tickRefused = await tickHang(false, () => new Promise(() => {}));
+  ok(tickSent.told.length === 0 && tickRefused.told.length === 1 && tickRefused.told[0].why === "tick-deadline" &&
+     tickRefused.told[0].chained.why === "refused" && tickRefused.loop.exit === "hung" && tickRefused.wallMs < 5000 &&
+     tickRefused.notes.some((l) => /the witness could not report the hung watch tick 2 within 0\.15 s/.test(l)),
+  "a hung watch tick whose successor was dispatched raises nothing (the successor's watch is the report), one whose dispatch was refused is reported, and a report that itself hangs is held to a tick's deadline");
+  const pipelineSrc = read("scripts/flows-pipeline.mjs");
+  ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
+    "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
+  ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} vendor request\(s\) timed out/.test(pipelineSrc) &&
+     /in the abandoned pass before it was given up/.test(pipelineSrc) && !/if \(loop\.exit === "hung" && loop\.why === "pass-deadline"\)/.test(pipelineSrc),
+  "THE COMMAND LINE hands the loop the vendor and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
+  ok(/\)\.finally\(\(\) => wireProgress\.settled\(\)\);\n    const refusal = response\.status === 403/.test(pipelineSrc) &&
+     /body,\n    \},\n  \)\.finally\(\(\) => wireProgress\.settled\(\)\);/.test(pipelineSrc) &&
+     /wireProgress\.quiet\(quotaWait\);\n    await sleep\(quotaWait\);/.test(pipelineSrc) && /wireProgress\.quiet\(wait\);\n    await sleep\(wait\);/.test(pipelineSrc),
+  "and every ingest read and write settles the progress clock, and a store-quota or retry wait is announced to it");
+
   eq(LIVE_LOOP.clockDeadlineMs, 10000, "The loop's own clock read has a ten-second deadline like the watch's");
   const quiet = { tick: async () => ({ busy: false }), summary: () => ({ breached: [], open: [] }) };
   for (const [name, watching] of [["kept-alive", quiet], ["legacy", null]]) {
@@ -776,6 +1031,76 @@ const MIN = 60 * 1000;
     pass: async () => ({ skipped: null, answered: 1, landed: 1 }), chain: async () => ({ sent: true, why: "sent", status: 204 }) });
   ok(seenFirst[0] === true && seenFirst.slice(1).every((f) => f === false) && rr.ticks === seenFirst.length && rr.exit === "budget",
     "THE LOOP tells the watch which tick is the first, once, and carries on when the watch throws");
+}
+
+{
+  const S = D;
+  deep([{ failed: true, status: 403 }, { failed: true, status: 408 }, { failed: true, status: 429 }, { failed: true, status: 500 },
+    { failed: true, status: 503 }, { failed: true, status: 0, detail: "timeout" }].map(challenged), [true, true, true, true, true, true],
+  "A CHALLENGED READ is a 403, a 408, a 429, a 5xx, a timeout or no answer");
+  deep([{ failed: true, status: 403, final: true }, { failed: true, status: 400 }, { failed: true, status: 404 }, { pending: true },
+    { ok: true, payload: {} }, null].map(challenged), [false, false, false, false, false, false],
+  "and not the Worker refusing the credential, a 4xx it means, a pending answer or a success");
+  eq(WATCH_RETRY.delayMs, 1000, "it is tried again once, one second later");
+
+  const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+  const clockBody = (await world.readOnce("clock")).payload;
+  const tickWith = async (fail, { times = 1, clockRead = true, body = clockBody, when = world.now(), over = {} } = {}) => {
+    const calls = [];
+    const slept = [];
+    const readOnce = async (key) => {
+      calls.push(key);
+      if (key !== "clock" && calls.filter((k) => k === key).length <= times) return typeof fail === "function" ? fail() : fail;
+      return world.readOnce(key);
+    };
+    const watch = createWatch({ readOnce, latestClock: () => body, env: world.env(), fetchImpl: world.github.fetchImpl,
+      sleep: async (ms) => { slept.push(ms); }, log() {}, warn() {}, ...over });
+    const out = await watch.tick({ at: when, clockRead });
+    const result = (id) => out.results.find((x) => x.id === id) || null;
+    return { calls, slept, result, market: calls.filter((k) => k === "live:market").length };
+  };
+  let t = await tickWith({ payload: null, failed: true, status: 403 });
+  ok(t.market === 2 && t.slept.length === 3 && t.slept.every((ms) => ms === 1000) && t.result("tier1").status === "ok",
+    "A WATCH READ CHALLENGED ONCE is read again a second later and the tick sees Tier 1 healthy");
+  t = await tickWith({ payload: null, failed: true, status: 503 }, { times: 5 });
+  ok(t.market === 2 && t.result("tier1").status === "inconclusive" && t.result("probe").status === "ok",
+    "a read that fails twice is given up on after the one retry, never a third, and the clock read that answered keeps the probe quiet");
+  for (const [fail, why] of [[{ payload: null, failed: true, status: 403, final: true }, "the Worker refusing the credential"],
+    [{ payload: null, failed: true, status: 400 }, "a 400"], [{ payload: null, absent: true, status: 200 }, "a pending answer"]]) {
+    t = await tickWith(fail);
+    ok(t.market === 1 && t.slept.length === 0, `${why} is not retried`);
+  }
+  let first = true;
+  t = await tickWith(() => (first ? (first = false, new Promise(() => {})) : { payload: null, failed: true, status: 403 }), { times: 1,
+    over: { readDeadlineMs: 400, retryMs: 100, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) } });
+  ok(t.market === 2 && t.result("tier1").status === "ok", "a first attempt that hangs is cut at its share of the deadline and retried inside it");
+  const startedAt = Date.now();
+  t = await tickWith(() => new Promise(() => {}), { times: 5,
+    over: { readDeadlineMs: 400, retryMs: 100, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) } });
+  const spent = Date.now() - startedAt;
+  ok(t.market === 2 && spent < 400 + 300, `and a read that never answers, retried, still ends inside the ten-second deadline's scale (${spent} ms of 400)`);
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, over: { readDeadlineMs: 150 } });
+  ok(t.market === 1 && t.slept.length === 0, "a deadline shorter than the retry delay leaves room for one attempt only");
+
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, clockRead: false });
+  ok(t.result("probe").status === "breach" && /the clock read failed, HTTP 403/.test(t.result("probe").detail) &&
+     t.result("tier1").status === "inconclusive",
+  "A TICK WHOSE CLOCK READ AND EVERY RETRIED READ FAILED is blind: the probe breaches");
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 0, clockRead: false });
+  ok(t.result("probe").status === "ok" && t.result("tier1").status === "ok" && t.market === 1,
+    "while a challenged clock read with healthy reads keeps the last good clock and evaluates Tier 1 on the keys alone");
+
+  const view = witnessView(clockBody);
+  const kept = keptView(view, at(S, 11, 0), false);
+  ok(kept.clock.day === S && kept.tier1 === null && view.tier1 !== null,
+    "THE KEPT CLOCK lends its calendar but not its Tier 1 stamp, which is as old as the last read that answered");
+  eq(keptView(view, at(S, 11, 0), true), view, "a clock read this tick is used whole");
+  eq(keptView(view, at(S, 24, 5), false), null, "and a kept clock is dropped once the Eastern day turns (the same-day rule)");
+  const off = witnessView({ clock: { day: S, trading: 1, tier1: { at: null, why: "off" } } });
+  eq(keptView(off, at(S, 11, 0), false).tier1.why, "off", "a kept clock that says Tier 1 is off keeps saying so");
+  t = await tickWith({ payload: null, failed: true, status: 403 }, { times: 5, clockRead: false, when: at(S, 24, 10) });
+  ok(t.result("tier1") === null && t.result("probe").status === "breach",
+    "after midnight a kept clock from the day before is no clock: no Tier 1 window, and a blind tick is still a probe breach");
 }
 
 {
@@ -809,7 +1134,14 @@ const MIN = 60 * 1000;
      kinds["live:breadth"] >= 70 && kinds["live:breadth"] <= 76,
   `and it costs the Worker ${weekday.reads.length} ingest reads (${JSON.stringify(kinds)}), ${(weekday.reads.length / 1000).toFixed(2)}% of the Free plan's 100,000 requests a day, ` +
     "of which the breadth read is one a tick from 10:15 (45 minutes after the open) to 16:25 ET");
-  ok(weekday.calls.length <= 12, `and GitHub ${weekday.calls.length} calls (an issue listing and a chain dispatch per run, and the nightly)`);
+  const standbys = (d) => d.world.github.record.dispatches.filter((x) => x.workflow === "flows-live.yml" && x.inputs && x.inputs.origin === "standby");
+  const weekdayStandbys = standbys(weekday);
+  ok(weekday.calls.length <= 12 + 5 && weekday.calls.length - weekdayStandbys.length <= 12 && weekdayStandbys.length <= weekday.runs.length,
+    `and GitHub ${weekday.calls.length} calls: an issue listing and a chain dispatch per run and the nightly (${weekday.calls.length - weekdayStandbys.length}, ` +
+      `within the old ceiling of 12), plus ${weekdayStandbys.length} off-session standbys, at most one a run (the ceiling rises by 5 to 17)`);
+  ok(weekdayStandbys.length >= 4 && weekdayStandbys.every((x) => !liveWindow(x.at, null).run && !(x.at >= at(D, 9, 30) && x.at <= at(D, 16, 25))),
+  `INSIDE THE SESSION NOTHING CHANGES: no standby is sent between 09:30 and 16:25 ET (sent at ${weekdayStandbys.map((x) => etTime(x.at)).join(", ")}), ` +
+    "where the late cron lines already keep a run pending");
   const nightlySends = weekday.world.github.record.dispatches.filter((d) => d.workflow === "flows-pipeline.yml");
   ok(nightlySends.length === 1 && nightlySends[0].at === at(D, 17, 30),
     "with the nightly dispatched exactly once, at 17:30:00 ET sharp: the loop is idle from 16:25 and its 15-minute tick lands on the minute, with no special wake");
@@ -818,8 +1150,87 @@ const MIN = 60 * 1000;
   const wk = {};
   for (const r of weekend.reads) wk[r.key] = (wk[r.key] || 0) + 1;
   ok(weekend.reads.length <= 110 && Object.keys(wk).sort().join() === "clock,meta" && weekend.runs.every((r) => r.passes === 0) &&
-     weekend.calls.length <= 12 && weekend.world.github.record.dispatches.every((d) => d.workflow === "flows-live.yml"),
-  `A SATURDAY costs ${weekend.reads.length} reads (${JSON.stringify(wk)}), no pass and no nightly, and only the chain calls GitHub`);
+     weekend.calls.length <= 12 + 5 && standbys(weekend).length === weekend.runs.length &&
+     weekend.world.github.record.dispatches.every((d) => d.workflow === "flows-live.yml"),
+  `A SATURDAY costs ${weekend.reads.length} reads (${JSON.stringify(wk)}), no pass and no nightly, and only the chain and its standby ` +
+    `call GitHub (${weekend.calls.length} calls, ${standbys(weekend).length} of them standbys, one on each run's first tick)`);
+}
+
+{
+  const record = { cancelled: [] };
+  const group = liveGroup({ record });
+  const first = group.dispatched({ inputs: { origin: "chain" }, at: 1 });
+  ok(first.startedAt === 1 && group.running() === first && group.pending() === null,
+    "THE CONCURRENCY GROUP, AS MODELLED: a dispatch with nothing running starts at once");
+  group.dispatched({ inputs: { origin: "standby" }, at: 2 });
+  group.dispatched({ inputs: { origin: "chain" }, at: 3 });
+  ok(group.pending().inputs.origin === "chain" && record.cancelled.length === 1 && record.cancelled[0].inputs.origin === "standby" &&
+     record.cancelled[0].cancelledAt === 3,
+  "ONE RUNNING AND ONE PENDING, NEWEST WINS: a second dispatch while one is pending cancels the older pending run (the 131 cancelled runs of 09-28..10-02)");
+  const next = group.finish(10);
+  ok(next.inputs.origin === "chain" && next.startedAt === 10 && first.endedAt === 10 && group.pending() === null,
+    "and when the running job ends, the pending one starts that moment");
+  ok(group.finish(20) === null && group.running() === null, "while a job that ends with nothing pending leaves the group empty");
+  const gh = fakeGithub({ now: () => 50 });
+  gh.queue.start({ origin: "chain" }, 40);
+  const env = { GITHUB_TOKEN: "ghs_fake", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org" };
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50, inputs: { tick: standbyTick(40), origin: STANDBY.origin } });
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50 });
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50, workflow: NIGHTLY.workflow, inputs: { origin: NIGHTLY.origin } });
+  ok(gh.queue.pending().inputs.origin === "chain" && gh.record.cancelled.length === 1 && gh.record.cancelled[0].inputs.origin === STANDBY.origin,
+    "and the fake GitHub routes every accepted flows-live dispatch through it: the hand-over replaces the standby, the nightly's dispatch is another group");
+}
+
+{
+  const start = at(DRY_WEEKEND, 0, 30);
+  const budget = LIVE_LOOP.budgetMs;
+  eq(standbyTick(start, [start + 1000]), `${new Date(start).toISOString()} ${new Date(start + 1000).toISOString()}`,
+    "THE STANDBY'S TICK is the sending loop's start, then the crash restarts it knows of, as ISO instants");
+  deep(readStandbyTick(standbyTick(start, [start + 1000])), { from: start, crashes: [start + 1000] }, "and reads back exactly");
+  deep([readStandbyTick(null), readStandbyTick(""), readStandbyTick("soon"), readStandbyTick("2026-10-03"),
+    readStandbyTick([0, 1, 2, 3, 4].map((i) => new Date(start + i).toISOString()).join(" "))], [null, null, null, null, null],
+  "while a missing, malformed, date-only or over-long tick is no tick");
+  const restart = (atMs, tick = standbyTick(start), origin = STANDBY.origin) => crashRestart({ origin, tick, startedAt: atMs, budgetMs: budget });
+  const due = start + budget;
+  deep([restart(due - STANDBY.crashSlackMs).crash, restart(due - STANDBY.crashSlackMs - 1).crash, restart(start + 60000).crash],
+    [false, true, true],
+  "THE CRASH RULE: a standby that starts more than 15 minutes before its sender's start plus the budget found it dead, wherever in the budget; " +
+    "15 minutes early or later is the hand-over the chain was meant to make");
+  deep([restart(start + 60000, standbyTick(start), "chain").crash, restart(start + 60000, standbyTick(start), "schedule").standby,
+    restart(start + 60000, "junk").crash], [false, false, false],
+  "and only a standby is judged: a chain, a cron starter or a standby whose tick cannot be read is never a crash restart");
+  const t = start + 2 * HOUR;
+  const older = [t - 7 * HOUR, t - 2 * HOUR];
+  deep(restart(t, standbyTick(start, older)).crashes, [t - 2 * HOUR, t],
+    "THE CRASH WINDOW: restarts older than six hours drop off the count");
+  const third = restart(t, standbyTick(start, [t - 3 * HOUR, t - HOUR]));
+  ok(third.crash && third.crashes.length === 3 && third.stoodDown, "and the third crash restart within six hours stands the standby down");
+  ok(!restart(due, standbyTick(start, [t - 3 * HOUR, t - HOUR])).stoodDown,
+    "while a standby that starts at its sender's hand-over (the chain dispatch refused) is no crash, and does not stand down");
+  const weekday = at(D, 12, 0);
+  deep([standbyDue({ at: weekday }).why, standbyDue({ at: at(D, 16, 20) }).why, standbyDue({ at: at(D, 16, 30) }).why,
+    standbyDue({ at: at(D, 3, 0) }).why, standbyDue({ at: at(DRY_WEEKEND, 12, 0) }).why],
+  ["session", "session", "off-session", "off-session", "off-session"],
+  "THE STANDBY IS DUE outside the loop's pass window only: not from 09:31 to 16:25 ET, where the late cron lines keep a run pending");
+  deep([standbyDue({ at: at(D, 3, 0), tried: true }).why, standbyDue({ at: at(D, 3, 0), stoodDown: true }).why], ["pending", "stood-down"],
+    "once a run, and never after the stand-down");
+
+  const gh = fakeGithub({ now: () => 0, chainStatus: 403 });
+  const lines = [];
+  const sb = createStandby({ env: { GITHUB_TOKEN: "ghs_fake", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org" }, fetchImpl: gh.fetchImpl,
+    log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+  sb.begin({ startedAt: at(D, 2, 0) });
+  const refused = await sb.step({ at: at(D, 2, 0) });
+  const again = await sb.step({ at: at(D, 2, 15) });
+  ok(!refused.dispatched.sent && again.why === "pending" && gh.record.dispatches.length === 1 && lines.some((l) => /::warning title=Standby::.*refused \(HTTP 403\)/.test(l)),
+    "A REFUSED STANDBY is one call, a warning and no retry: it is a backup, and its cost is held to one call a run");
+  const live = read(".github/workflows/flows-live.yml");
+  ok(/FLOWS_LIVE_TICK: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.tick \|\| '' \}\}/.test(live) &&
+     /FLOWS_LIVE_ORIGIN: \$\{\{ github\.event_name == 'schedule' && 'schedule' \|\| inputs\.origin \|\| 'manual' \}\}/.test(live),
+  "THE WORKFLOW hands the loop its tick and origin, so a standby can tell when the loop that sent it was due to hand over");
+  ok(/watch\.tick\(\{ at: now\(\), clock, clockRead: currentRead\(\), first: ticks === 0,\s*inSession: !!here\.run, passes, startedAt, budgetMs \}\)/
+    .test(read("scripts/flows-legs/live.mjs")),
+  "and the kept-alive loop hands the watch its own start and budget, which the standby's tick carries");
 }
 
 {
@@ -908,9 +1319,16 @@ const MIN = 60 * 1000;
     return { dir, file };
   };
   const hangs = [];
+  let limitedOnce = false;
   const server = createServer((req, res) => {
     hangs.push(req.url);
-    if (req.url.startsWith("/ok")) {
+    if (req.url.startsWith("/limited") && !limitedOnce) {
+      limitedOnce = true;
+      res.writeHead(429, { "Retry-After": "1", "Content-Type": "application/json" });
+      res.end("{}");
+      return;
+    }
+    if (req.url.startsWith("/ok") || req.url.startsWith("/limited")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ t: "AAPL" }] }));
     }
@@ -928,9 +1346,17 @@ const MIN = 60 * 1000;
     const started = Date.now();
     if (process.env.SKIP_HANG !== "1") {
       try { await m.uw("/hang/x"); out.hang = "answered"; } catch (e) { out.hang = e.name; }
+      out.settledAfterHang = m.wireProgress.lastAt() - started;
     }
     out.hangMs = Date.now() - started;
     out.ok = (await m.uw("/ok/x")).length;
+    if (process.env.SKIP_HANG !== "1") {
+      const limited = m.uw("/limited/x");
+      const asked = Date.now();
+      while (m.wireProgress.lastAt() <= Date.now() && Date.now() - asked < 3000) await new Promise((r) => setTimeout(r, 10));
+      out.quietAheadMs = m.wireProgress.lastAt() - Date.now();
+      out.limited = (await limited).length;
+    }
     out.timeouts = timeouts;
     console.log(JSON.stringify(out));
     process.exit(0);
@@ -950,6 +1376,10 @@ const MIN = 60 * 1000;
       "and still reads a healthy endpoint");
   eq(hangs.filter((u) => u.startsWith("/hang")).length, 2, "one try and one retry after a timeout, then the error goes up: a dead endpoint costs two deadlines, not five");
   deep(liveRun.timeouts.slice(0, 2), [300, 300], "each try carries its own deadline");
+  ok(liveRun.settledAfterHang >= 550 && liveRun.settledAfterHang <= liveRun.hangMs + 50,
+    `AND EACH TIMED-OUT TRY SETTLES THE LOOP'S PROGRESS CLOCK (last settle ${liveRun.settledAfterHang} ms in, the second timeout), so a vendor that never answers is not a stall`);
+  ok(liveRun.quietAheadMs > 400 && liveRun.limited === 1,
+    `and a 429's Retry-After wait is announced to it (the clock ran ${liveRun.quietAheadMs} ms ahead of the time, inside a one-second wait), then the call is answered`);
   const defaults = JSON.parse(await run(true, { FLOWS_UW_TIMEOUT_MS: "", SKIP_HANG: "1" }));
   ok(defaults.timeouts.length === 1 && defaults.timeouts[0] === 20000 && LIVE_VENDOR.timeoutMs === 20000 && LIVE_VENDOR.timeoutRetries === 1,
     "and the deadline is 20 s by default, whatever a malformed override says");
@@ -1033,4 +1463,5 @@ console.log(`✓ flows-starts: ${checks} assertions — the live workflow's gran
   `(origin live-loop, no undeclared input), capped for a permanent refusal and ridden through a two-hour GitHub outage; the witness's Tier 1, ` +
   `Tier 2 and nightly lines at 25 minutes, 45 minutes and 21:00 ET with their debounce, three-tick recovery, reopen, dedupe, author check, ` +
   `reminder and duplicate cleanup; the issue reporter against a fake GitHub; the loop kept alive through the night, the weekend and the hop, ` +
-  `and its cron starters through the concurrency group; ${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);
+  `and its cron starters through the concurrency group; the off-session standby (one running, one pending, newest wins) and its crash rule; ` +
+  `${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);

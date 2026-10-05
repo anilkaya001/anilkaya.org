@@ -44,7 +44,7 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
     ok(Object.isFrozen(v), `${name} is frozen`);
   }
   for (const k of TOPICS) ok(Object.isFrozen(RT.RT_TOPICS[k]) && FRESH_CLASSES[RT.RT_TOPICS[k].klass], `${k} is a frozen topic with a freshness class`);
-  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 1000, 10000, 30000], "px 5 s, fl 5 s, gx one call a second, mk 10 s, nw 30 s");
+  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 10000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 10 s, nw 30 s");
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].klass), ["rt", "rt", "rtSlow", "rtSlow", "rtNews"], "classes follow the cadence");
   deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
   eq(RT.RT_ROW_FIELDS.px.length, 25, "twenty-five columns");
@@ -474,7 +474,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   ok(u.frames.every((f) => f.readAt >= SESSION_NOW && Number.isInteger(f.ms)), "adapter: frames carry the receive instant and the duration");
   const before = u.calls.length;
   t += 1000; await u.up.tick(t);
-  ok(u.calls.length - before <= 1, "adapter: a second later only the one-call-a-second gx is due");
+  eq(u.calls.length - before, 0, "adapter: a second later nothing is due, because gx asks each focus name every 15 s");
   u.up.stop();
   const quietCalls = u.calls.length;
   t += 60000; await u.up.tick(t);
@@ -658,7 +658,7 @@ const seqOk = (ws) => {
   eq(await r.hub.tick(), null, "demand: and the tick says there is nothing to schedule");
   eq(r.hub.running, false, "demand: the hub is not running");
 
-  const { ws, admitted } = r.join();
+  const { ws, admitted } = r.join("anilkaya", { f: "NVDA" });
   eq(admitted, true, "a socket is admitted");
   eq(r.hub.running, true, "and starts the hub");
   const hello = ws.sent[0];
@@ -713,12 +713,25 @@ const seqOk = (ws) => {
   eq(out.frames[0].fresh.state, "pending", "snap: the first request finds a cold hub and says pending, not a guess");
   await r.run(15);
   ok(r.vendor.calls.length > 0, "snap: and the hub polls for the next requests");
+  deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))).sort(), ["/api/market/market-tide", "/api/market/sector-etfs", "/api/screener/stocks"], "snap: only the topics a snapshot named are polled");
+  const warm = await r.hub.snap(["px", "mk"]);
+  ok(warm.frames.every((f) => f.fresh.state === "live"), "snap: warm, both are live");
+  eq(warm.headers["X-Fresh-State"], "live", "snap: X-Fresh-State is the worst entry");
+  eq(warm.headers["X-Fresh-Class"], "rt", "snap: X-Fresh-Class");
+  ok(warm.headers["X-Server-Now"], "snap: X-Server-Now");
+  const waiting = r.hub.snap(["fl", "nw"]);
+  await r.run(2);
+  const joined = await waiting;
+  ok(joined.frames.every((f) => f.fresh.state === "live" && f.meta.cold !== true), "snap: a topic no one polled joins the demand and is answered once its first poll lands");
+  const gxAt = Date.now();
+  const cold = await r.hub.snap(["gx"]);
+  ok(Date.now() - gxAt < 1000, `snap: gx with no focus answers at once, with nothing to wait for (${Date.now() - gxAt} ms)`);
+  deep([cold.frames[0].k, cold.frames[0].meta.cold, cold.frames[0].fresh.state], ["gx", true, "pending"], "snap: and answers cold");
   const again = await r.hub.snap(["px", "mk", "fl", "gx", "nw"]);
   deep(again.frames.map((f) => f.k), ["px", "mk", "fl", "gx", "nw"], "snap: five topics in the order asked");
-  ok(again.frames.every((f) => f.fresh.state === "live"), "snap: warm, all five are live");
-  eq(again.headers["X-Fresh-State"], "live", "snap: X-Fresh-State is the worst entry");
-  eq(again.headers["X-Fresh-Class"], "rt", "snap: X-Fresh-Class");
-  ok(again.headers["X-Server-Now"], "snap: X-Server-Now");
+  ok(again.frames.every((f) => f.fresh.state === (f.k === "gx" ? "pending" : "live")), "snap: four warm topics are live and gx, with no focus to read, is pending");
+  await r.run(5);
+  eq(r.vendor.count(/spot-exposures/), 0, "snap: and a gx snapshot without a focus never calls the vendor");
   const calls = r.vendor.calls.length;
   await r.run(50);
   ok(r.vendor.calls.length > calls, "snap: polling continues inside the 60-second linger");
@@ -868,8 +881,7 @@ const seqOk = (ws) => {
   deep(r.hub.focus, ["NVDA"], "sub: and reaches the hub's focus set");
   r.vendor.calls.length = 0;
   await r.run(30);
-  const names = r.vendor.paramsOf(/spot-exposures/).length;
-  ok(r.vendor.calls.filter((c) => c.path === "/api/stock/NVDA/spot-exposures").length >= Math.floor(names / 5), "sub: the focus ticker is read by gx about one call in four");
+  eq(r.vendor.count(/spot-exposures/), 0, "sub: a focus ticker on a socket that does not ask gx costs no gx call");
   ok(r.vendor.paramsOf(/screener/).every((p) => p.ticker.split(",").includes("NVDA")), "sub: and joins the px read");
   const n = a.ws.sent.length;
   r.state.t += 10000;
@@ -905,6 +917,98 @@ const seqOk = (ws) => {
   for (let i = 0; i < 2000; i++) r.hub.onMessage(keep.ws, JSON.stringify({ t: "p", sq: { px: r.hub.counter.peek("px") } }));
   const perMsg = Number(process.hrtime.bigint() - t0) / 2000 / 1000;
   ok(perMsg < 200, `a client message costs ${perMsg.toFixed(1)} µs, constant in the number of sockets`);
+}
+
+{
+  const r = rig({ start: at(10, 0) });
+  const a = r.join("anilkaya", { topics: ["px"], f: "NVDA" });
+  await r.run(60);
+  const m = r.hub.budget.minute(r.state.t);
+  deep([m.gx, m.fl, m.mk, m.nw], [0, 0, 0, 0], `demand: a px-only socket with a focus ticker, for 60 s, calls no gx, fl, mk or nw (${JSON.stringify(m)})`);
+  ok(m.px >= 11 && m.px <= 13, `demand: and px about every 5 s (${m.px} calls)`);
+  deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))), ["/api/screener/stocks"], "demand: the only vendor route read is the screener");
+  ok(r.vendor.paramsOf(/screener/).every((p) => p.ticker.split(",").includes("NVDA")), "demand: and the focus ticker still joins the px read");
+  const st = r.hub.status();
+  deep(Object.keys(st.topics), TOPICS.slice(), "status: still lists all five topics");
+  deep(TOPICS.map((k) => st.topics[k].demanded), [true, false, false, false, false], "status: and says which are demanded");
+  deep(Array.from(r.hub.plan.topics), ["px"], "demand: the plan's topics are the union of what sockets ask");
+  r.hub.lastBroadcastAt = 0;
+  r.hub.beat(r.state.t, false);
+  deep(Object.keys(ctlOf(a.ws, "hb").slice(-1)[0].meta.topics), ["px"], "hb: a heartbeat speaks only for demanded topics");
+
+  const fl0 = r.vendor.count(/flow-alerts/);
+  r.hub.onMessage(a.ws, JSON.stringify({ t: "sub", k: ["px", "fl"], f: "NVDA" }));
+  await r.run(1);
+  eq(r.vendor.count(/flow-alerts/) - fl0, 1, "demand: a sub that adds fl polls fl at the next tick");
+  ok(dataOf(a.ws, "fl").some((f) => f.rows.length > 0), "demand: and its rows reach the socket");
+
+  const waiting = r.hub.snap(["mk"]);
+  await r.run(1);
+  const mkSnap = await waiting;
+  ok(mkSnap.frames[0].rows.length > 0 && mkSnap.frames[0].meta.cold !== true && mkSnap.frames[0].fresh.state !== "pending", "demand: a /snap?k=mk adds mk and answers from its first poll");
+  const mk0 = r.vendor.count(/market-tide/);
+  await r.run(50);
+  ok(r.vendor.count(/market-tide/) - mk0 >= 4, `demand: mk stays polled inside the snapshot's linger (${r.vendor.count(/market-tide/) - mk0} polls in 50 s)`);
+  await r.run(15);
+  const mk1 = r.vendor.count(/market-tide/);
+  const px1 = r.vendor.count(/screener/);
+  await r.run(30);
+  eq(r.vendor.count(/market-tide/), mk1, "demand: and stops once the snapshot request is 60 s old");
+  ok(r.vendor.count(/screener/) > px1 && r.hub.running, "demand: while the socket's own topics go on");
+  eq(r.hub.status().topics.mk.demanded, false, "status: mk is no longer demanded");
+}
+
+{
+  const r = rig({
+    start: at(10, 0),
+    vendorOver: (v) => {
+      const inner = v.handle;
+      v.handle = async (path, params) => (v.flDown && path === "/api/option-trades/flow-alerts" ? { status: 500, body: { error: "down" } } : inner(path, params));
+    },
+  });
+  const a = r.join("anilkaya", { topics: ["px", "fl"] });
+  await r.run(10);
+  r.vendor.flDown = true;
+  await r.run(30);
+  deep(r.hub.degraded && r.hub.degraded.k, ["fl"], "drop: a failing fl alone holds the hub degraded");
+  deep(ctlOf(a.ws, "degraded").slice(-1)[0].meta.k, ["fl"], "drop: and says so to the socket");
+  const n = a.ws.sent.length;
+  const flCalls = r.vendor.count(/flow-alerts/);
+  r.hub.onMessage(a.ws, JSON.stringify({ t: "sub", k: ["px"] }));
+  await r.run(1);
+  eq(r.hub.degraded, null, "drop: dropping the failing topic ends the episode at the next tick");
+  ok(a.ws.sent.slice(n).some((f) => f.k === "ctl" && f.t === "resync" && f.meta.reason === "recovered"), "drop: with the recovered control frame the client clears its banner on");
+  deep([r.hub.topics.fl.fails, r.hub.topics.fl.lastError, r.hub.upstream.state().topics.fl.fails], [0, null, 0], "drop: its failures and last error are forgotten");
+  await r.run(30);
+  eq(r.hub.degraded, null, "drop: and the vendor still failing fl cannot bring it back");
+  eq(r.vendor.count(/flow-alerts/), flCalls, "drop: because fl is no longer polled");
+  eq(ctlOf(a.ws, "degraded").length, 1, "drop: one degraded frame in all");
+  r.hub.lastBroadcastAt = 0;
+  r.hub.beat(r.state.t, false);
+  const hb = ctlOf(a.ws, "hb").slice(-1)[0];
+  deep([Object.keys(hb.meta.topics), hb.meta.degraded, hb.meta.upstream], [["px"], null, "up"], "drop: the next heartbeat carries px alone, up, and no degraded episode");
+}
+
+{
+  const r = rig({ start: at(10, 0) });
+  r.join("anilkaya", { topics: ["gx"], f: "NVDA" });
+  await r.run(60);
+  const m = r.hub.budget.minute(r.state.t);
+  ok(m.gx >= 3 && m.gx <= 5, `gx: one focus name is read about every 15 s (${m.gx} calls in a minute)`);
+  eq(m.px + m.fl + m.mk + m.nw, 0, "gx: and a gx-only socket polls nothing else");
+  deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))), ["/api/stock/NVDA/spot-exposures"], "gx: only the focus ticker, no roster rotation");
+  r.join("other.user", { topics: ["gx", "px"], f: "TSLA" });
+  r.join("third.user", { topics: ["gx"], f: "AAPL" });
+  r.join("fourth.user", { topics: ["gx"], f: "MSFT" });
+  r.join("fifth.user", { topics: ["px"], f: "AMD" });
+  await r.run(5);
+  deep(r.hub.plan.gex().names, ["AAPL", "MSFT", "NVDA"], "gx: at most three focus names, and only those of sockets that ask gx");
+  const from = r.state.t;
+  await r.run(60);
+  const recent = r.vendor.calls.filter((c) => c.at >= from && /spot-exposures/.test(c.path)).map((c) => c.path.split("/")[3]);
+  const per = Object.fromEntries(["AAPL", "MSFT", "NVDA", "TSLA", "AMD"].map((t) => [t, recent.filter((x) => x === t).length]));
+  ok(per.AAPL >= 3 && per.AAPL <= 5 && per.MSFT >= 3 && per.MSFT <= 5 && per.NVDA >= 3 && per.NVDA <= 5, `gx: each of the three is read about every 15 s (${JSON.stringify(per)})`);
+  eq(per.TSLA + per.AMD, 0, "gx: a fourth gx name and a px-only focus cost no gx call");
 }
 
 {
@@ -1063,14 +1167,14 @@ const seqOk = (ws) => {
 
 {
   const r = rig({ start: at(10, 0) });
-  const a = r.join();
+  const a = r.join("anilkaya", { f: "NVDA" });
   await r.run(2000, 1000);
   const st = r.hub.status();
   ok(st.topics.fl.held <= 200 && st.topics.nw.held <= 60 && st.topics.px.held <= 200 && st.topics.gx.held <= 64 && st.topics.mk.held <= 16, `memory: held rows stay bounded after 2000 ticks (${JSON.stringify(Object.fromEntries(Object.entries(st.topics).map(([k, v]) => [k, v.held])))})`);
   ok(r.hub.topics.fl.state.seen.size <= RT.RT_LIMITS.seenMax && r.hub.topics.nw.state.seen.size <= RT.RT_LIMITS.seenMax, "memory: dedupe memory stays bounded");
   ok(st.calls.minuteTotal <= 240, `calls: never more than the budget in a minute (${st.calls.minuteTotal})`);
   const perMin = st.topics;
-  ok(perMin.px.calls.minute <= 13 && perMin.fl.calls.minute <= 13 && perMin.gx.calls.minute <= 61 && perMin.mk.calls.minute <= 14 && perMin.nw.calls.minute <= 3,
+  ok(perMin.px.calls.minute <= 13 && perMin.fl.calls.minute <= 13 && perMin.gx.calls.minute <= 5 && perMin.mk.calls.minute <= 14 && perMin.nw.calls.minute <= 3,
     `calls: a minute of calls by topic is px ${perMin.px.calls.minute}, fl ${perMin.fl.calls.minute}, gx ${perMin.gx.calls.minute}, mk ${perMin.mk.calls.minute} (two calls a poll), nw ${perMin.nw.calls.minute}`);
   const hour = Object.values(st.topics).reduce((n, t) => n + t.calls.hour, 0);
   ok(hour < 240 * 60, `calls: an hour of calls is ${hour}, under the 240 a minute ceiling`);
@@ -1125,7 +1229,7 @@ const seqOk = (ws) => {
         host: { sockets: () => [ws], wake() {} }, upstreamFactory: (o) => only({ ...o, fetchImpl: cached }),
         loadRoster: async () => ({ clock: null, boards: { long: { rows: roster.long.rows }, short: { rows: roster.short.rows }, watch: { rows: roster.watch.rows } }, focus: null }),
       });
-      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, topics: [k] });
+      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, topics: [k], f: k === "gx" ? "NVDA" : null });
       return { ws, hub };
     };
     const step = RT.RT_TOPICS[k].cadenceMs;
@@ -1284,11 +1388,12 @@ const seqOk = (ws) => {
   });
   const ws = mkSocket();
   sockets.push(ws);
-  hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3 });
+  hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
   await hub.tick();
   eq(pushed.started, 1, "seam: a push upstream is started once with the plan");
   deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
-  ok(pushed.plan.ready() && pushed.plan.session() === DAY && pushed.plan.names().length >= 25 && pushed.plan.gex().names.length === 2, "seam: the plan answers without any REST state");
+  ok(pushed.plan.ready() && pushed.plan.session() === DAY && pushed.plan.names().length >= 25, "seam: the plan answers without any REST state");
+  deep([Array.from(pushed.plan.topics), pushed.plan.gex().names], [TOPICS.slice(), ["NVDA"]], "seam: the plan's topics are the demanded ones and gx names only the focus ticker");
   const names = pushed.plan.names();
   const row = (t, qt, px) => [t, qt, px, 100, 0.01, ...new Array(RT.RT_ROW_FIELDS.px.length - 5).fill(null)];
   state.t += 1000;
@@ -1363,7 +1468,8 @@ const seqOk = (ws) => {
     ok(alarms.length > 1, "pulse: every alarm sets the next one");
     const next = alarms[alarms.length - 1] - Date.now();
     ok(next > -400 && next < 1500, `pulse: about a tick ahead (${next} ms at scale 0.2)`);
-    ok(dataOf(ws, "px").length >= 2 && dataOf(ws, "gx").length >= 5, "pulse: alarms drive the polls and the frames reach the socket");
+    ok(dataOf(ws, "px").length >= 2 && dataOf(ws, "fl").length >= 2, "pulse: alarms drive the polls and the frames reach the socket");
+    eq(vendor.count(/spot-exposures/), 0, "pulse: a socket with no focus ticker costs no gx call");
 
     const snap = await pulse.fetch(new Request("https://pulse.internal/snap?k=px,fl"));
     const frames = await snap.json();

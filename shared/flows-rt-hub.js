@@ -2,7 +2,7 @@ import {
   RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
   frame, ctlFrame, pendingStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
-  rosterPlan, gexBase, gexPick, pickFocus, rtSwitches,
+  rosterPlan, pickFocus, rtSwitches,
 } from "./flows-rt.js";
 import { phaseAt } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
@@ -12,6 +12,8 @@ import { MEMBER_NAME } from "./flows-auth.js";
 const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
 
 const T0 = Date.now();
+
+const GX_NAMES = 3;
 
 const clampInt = (v, lo, hi, d) => {
   const n = Number(v);
@@ -59,7 +61,8 @@ export function createRestUpstream({
   budget, timeoutMs = RT_LIMITS.callTimeoutMs,
 }) {
   const ORDER = ["px", "mk", "gx", "fl", "nw"];
-  const cadence = (k) => RT_TOPICS[k].cadenceMs * cfg.scale;
+  const gxNames = () => (plan ? plan.gex().names.slice(0, GX_NAMES) : []);
+  const cadence = (k) => (k === "gx" ? RT_TOPICS.gx.cadenceMs / Math.max(1, gxNames().length) : RT_TOPICS[k].cadenceMs) * cfg.scale;
   const topics = {};
   for (const k of ORDER) topics[k] = { due: 0, inflight: false, fails: 0 };
   const aborters = new Set();
@@ -123,9 +126,10 @@ export function createRestUpstream({
     }
     if (k === "fl") return { args: { newerThan: flowQuery(own.fl, session) }, shape: { session, stageOf: plan.stage, cursor: own.fl.cursor } };
     if (k === "gx") {
-      const g = plan.gex();
-      const name = gexPick(own.gx.i++, g.names, g.focus.slice(0, 3));
-      return name ? { args: { name }, shape: { session, name } } : null;
+      const names = gxNames();
+      if (!names.length) return null;
+      const name = names[own.gx.i++ % names.length];
+      return { args: { name }, shape: { session, name } };
     }
     return { args: {}, shape: { session } };
   }
@@ -198,7 +202,8 @@ export function createRestUpstream({
       const jobs = [];
       for (const k of ORDER) {
         const t = topics[k];
-        if (!plan.topics.has(k) || t.inflight || at < t.due) continue;
+        if (!plan.topics.has(k)) { t.fails = 0; continue; }
+        if (t.inflight || at < t.due) continue;
         jobs.push(poll(k, at).catch((error) => {
           t.inflight = false;
           handlers.onError({ k, at, code: "internal", status: null, message: String(error && error.message ? error.message : error).slice(0, 120) });
@@ -250,7 +255,7 @@ export async function loadRosterFromD1(env) {
 function newTopic(k) {
   return {
     k, state: createTopicState(k), hasData: false, readAt: null, vendorAt: null, meta: {}, full: {},
-    frames: 0, bytes: 0, lastFrameAt: null, lastOkAt: null, lastError: null, fails: 0, polls: 0,
+    frames: 0, bytes: 0, lastFrameAt: null, lastOkAt: null, lastError: null, fails: 0, polls: 0, demandAt: null,
     lag: createLagStats(), rowLag: createLagStats(), rowsHeld: 0,
   };
 }
@@ -268,12 +273,13 @@ export class RtHub {
     this.log = typeof log === "function" ? log : (entry) => console.error(JSON.stringify(entry));
     this.budget = createBudget({ perMinute: Math.max(1, Math.round(this.cfg.callsPerMinute / this.cfg.scale)) });
     this.upstream = upstreamFactory({ cfg: this.cfg, now: this.now, random, budget: this.budget });
+    const hub = this;
     this.plan = {
-      topics: new Set(RT_TOPIC_KEYS),
+      get topics() { return hub.demanded; },
       ready: () => !!this.roster && !!this.session,
       session: () => this.session,
       names: () => this.pxNames(),
-      gex: () => ({ names: this.gex.names, focus: this.focus }),
+      gex: () => ({ names: this.gxNames.slice() }),
       base: () => this.base,
       stage: (t) => (this.roster ? this.roster.stage.get(t) || null : null),
     };
@@ -284,6 +290,7 @@ export class RtHub {
     this.running = false;
     this.ep = 0;
     this.lastSnapAt = -Infinity;
+    this.snapAt = Object.create(null);
     this.roster = null;
     this.rosterAt = 0;
     this.rosterError = null;
@@ -297,7 +304,8 @@ export class RtHub {
     this.counter.reset();
     this.session = null;
     this.base = null;
-    this.gex = { names: [], tick: -1 };
+    this.gxNames = [];
+    this.demanded = new Set();
     this.namesKey = null;
     this.degraded = null;
     this.forceThrottle = false;
@@ -601,16 +609,43 @@ export class RtHub {
     const real = Date.now();
     const list = this.liveSockets();
     const focus = [];
+    const gx = [];
+    const want = new Set();
     let n = 0;
     for (const ws of list) {
       const st = this.sockState(ws);
       if (st.exp && st.exp <= real) { this.bye(ws, RT_CLOSE.expired, "session-expired"); continue; }
       n++;
-      if (st.f) focus.push(st.f);
+      for (const k of st.topics) want.add(k);
+      if (st.f) {
+        focus.push(st.f);
+        if (st.topics.has("gx")) gx.push(st.f);
+      }
     }
+    const linger = RT_LIMITS.snapLingerMs * this.cfg.scale;
+    for (const k of RT_TOPIC_KEYS) if (now - (this.snapAt[k] ?? -Infinity) < linger) want.add(k);
     this.socketCount = n;
     this.focus = pickFocus(focus);
+    this.gxNames = pickFocus(gx).slice(0, GX_NAMES);
+    if (!this.gxNames.length) want.delete("gx");
+    this.setDemand(want, now);
     return n;
+  }
+
+  setDemand(want, now) {
+    const prev = this.demanded;
+    this.demanded = new Set(RT_TOPIC_KEYS.filter((k) => want.has(k)));
+    for (const k of RT_TOPIC_KEYS) {
+      const t = this.topics[k];
+      if (this.demanded.has(k) === prev.has(k)) continue;
+      t.fails = 0;
+      t.lastError = null;
+      if (this.demanded.has(k)) { t.demandAt = now; continue; }
+      if (this.degraded) {
+        this.degraded.k = this.degraded.k.filter((x) => x !== k);
+        this.degraded.all = this.degraded.all.filter((x) => x !== k);
+      }
+    }
   }
 
   async ensureRoster(now) {
@@ -642,7 +677,6 @@ export class RtHub {
     this.sources = nightlySources({ boards: b, focus: r.focus || null });
     this.clock = r.clock || null;
     this.base = null;
-    this.gex.tick = -1;
   }
 
   refreshNames() {
@@ -653,15 +687,9 @@ export class RtHub {
     setPxNames(this.topics.px.state, names);
   }
 
-  refreshSession(now, session) {
+  refreshSession(session) {
     if (!this.roster) return;
     if (!this.base) this.base = priorCloseBase(this.sources || [], session, this.clock);
-    const g = gexBase(this.roster, session, now);
-    if (g.tick !== this.gex.tick) {
-      this.gex.tick = g.tick;
-      this.gex.names = g.names;
-      this.gex.rotation = g.rotation;
-    }
   }
 
   reasonFor(t, now) {
@@ -672,10 +700,10 @@ export class RtHub {
   evaluate(now) {
     const down = [];
     let reason = null;
-    for (const k of RT_TOPIC_KEYS) {
+    for (const k of this.demanded) {
       const t = this.topics[k];
       const limit = Math.max(3 * RT_TOPICS[k].cadenceMs, RT_LIMITS.degradeAfterMs) * this.cfg.scale;
-      const since = t.lastOkAt ?? this.startedAt;
+      const since = Math.max(t.lastOkAt ?? this.startedAt, t.demandAt ?? -Infinity);
       const held = now - since > limit || this.degraded !== null;
       const bad = this.forceThrottle || (t.fails > 0 && held) || (this.upstream.paused(now) && held);
       if (bad) {
@@ -694,7 +722,7 @@ export class RtHub {
         this.degraded.reason = reason;
         const retry = this.upstream.state().pausedUntil;
         this.broadcastCtl("degraded", {
-          reason, k: RT_TOPIC_KEYS.filter((k) => down.includes(k) || this.topics[k].fails > 0), since: new Date(this.degraded.since).toISOString(),
+          reason, k: RT_TOPIC_KEYS.filter((k) => this.demanded.has(k) && (down.includes(k) || this.topics[k].fails > 0)), since: new Date(this.degraded.since).toISOString(),
           retryAt: retry && retry > now ? new Date(retry).toISOString() : null,
         });
       }
@@ -708,7 +736,7 @@ export class RtHub {
     const gap = (closed ? RT_LIMITS.closedHbMs : RT_LIMITS.hbMs) * this.cfg.scale;
     if (now - this.lastBroadcastAt < gap) return;
     const topics = {};
-    for (const k of RT_TOPIC_KEYS) {
+    for (const k of this.demanded) {
       const t = this.topics[k];
       topics[k] = {
         sq: this.counter.peek(k), readAt: t.readAt, lagMs: t.vendorAt !== null && t.readAt !== null ? t.readAt - t.vendorAt : null,
@@ -752,7 +780,7 @@ export class RtHub {
     const session = phase.session;
     if (this.session && this.session !== session) this.start(now, { notify: this.socketCount > 0 ? "session" : null });
     this.session = session;
-    this.refreshSession(now, session);
+    this.refreshSession(session);
     this.refreshNames();
     await this.upstream.tick(now);
     const end = this.now();
@@ -781,11 +809,13 @@ export class RtHub {
   async snap(ks) {
     const now = this.now();
     this.lastSnapAt = now;
+    for (const k of ks) this.snapAt[k] = now;
     if (!this.running) this.start(now);
     const phase = phaseAt(now, this.clock);
-    if (inSession(phase) && ks.some((k) => !this.topics[k].hasData)) {
+    const polled = ks.filter((k) => k !== "gx" || this.gxNames.length > 0);
+    if (inSession(phase) && polled.some((k) => !this.topics[k].hasData)) {
       this.host.wake(10);
-      await this.waitData(ks, RT_LIMITS.snapWaitMs);
+      await this.waitData(polled, RT_LIMITS.snapWaitMs);
     } else this.host.wake(this.cfg.scale * RT_LIMITS.tickMs);
     const at = this.now();
     const frames = ks.map((k) => this.snapshotFrame(k, at));
@@ -816,7 +846,7 @@ export class RtHub {
     for (const k of RT_TOPIC_KEYS) {
       const t = this.topics[k];
       topics[k] = {
-        sq: this.counter.peek(k), hasData: t.hasData, held: t.rowsHeld, frames: t.frames, bytes: t.bytes,
+        sq: this.counter.peek(k), demanded: this.demanded.has(k), hasData: t.hasData, held: t.rowsHeld, frames: t.frames, bytes: t.bytes,
         polls: t.polls, lastFrameAt: t.lastFrameAt, lastFrameAgeMs: t.lastFrameAt === null ? null : now - t.lastFrameAt,
         lastOkAt: t.lastOkAt, fails: t.fails, lastError: t.lastError,
         lagMs: t.lag.summary(), rowLagMs: k === "px" ? t.rowLag.summary() : null,
@@ -833,7 +863,7 @@ export class RtHub {
       lastSnapAt: Number.isFinite(this.lastSnapAt) ? this.lastSnapAt : null,
       roster: {
         n: this.roster ? this.roster.names.length : 0, focus: this.focus, source: this.roster ? this.roster.focus.source : null,
-        at: this.rosterAt || null, error: this.rosterError, gex: this.gex.names, gexTick: this.gex.tick,
+        at: this.rosterAt || null, error: this.rosterError, gex: this.gxNames,
       },
       calls: { minuteTotal: this.budget.used(now), perMinute: this.budget.perMinute },
       degraded: this.degraded,

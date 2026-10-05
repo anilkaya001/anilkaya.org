@@ -552,7 +552,12 @@ read: {
 and written to move to its own Worker with only a `script_name` on the binding),
 polls the vendor over REST while at least one socket, or one `/api/rt/snap`
 request in the last 60 s, exists, and pushes what changed over hibernatable
-WebSockets. No viewer means no vendor call. Tier 1, Tier 2 and the nightly are
+WebSockets. No viewer means no vendor call, and a topic is polled only while a
+socket subscribes to it or a `/api/rt/snap` named it in the last 60 s; `gx` is
+polled only for the focus tickers of sockets that ask for it (at most three,
+each every 15 s), and `/api/rt/snap?k=gx` with none answers cold at once. A
+topic that leaves demand forgets its failures and leaves `degraded`; `status`
+lists all five with `demanded`. Tier 1, Tier 2 and the nightly are
 unchanged and remain the fallback. The hub reads D1 (the roster and the clock
 row, one batch at start and every five minutes) and never writes it; it adds no
 `live:*` key, never touches the `UW_ONDEMAND` limiter (its own budget is
@@ -988,8 +993,10 @@ with in-memory Durable Object storage crashes when an alarm fires; the first
 three run at `FLOWS_RT_SCALE=0.2`, the last at real cadence and takes a minute
 of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was
 measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
-calls a minute at real cadence (px 12, fl 12, gx 59, mk 12, nw 2) and the
-alert-to-client latency it saw (p50 2.3 s, p95 4.8 s over 40 alerts).
+calls a minute at real cadence for one socket on all five topics with one focus
+ticker (px 12, fl 12, gx 4, mk 12, nw 2 on 2026-10-05; gx was 59 before it
+read focus tickers only) and the alert-to-client latency it saw (p50 2.1 s,
+p95 4.5 s over 40 alerts).
 `flows-rt-client` needs Chromium and no server: `page.routeWebSocket` plays the
 hub for the stub tests, and for the integration block it bridges the page's
 socket to a real `RtHub` driven by `rt-fixtures.mjs` on a virtual clock. It was

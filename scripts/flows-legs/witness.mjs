@@ -52,11 +52,12 @@ export const WITNESS_CHECKS = Object.freeze({
     ],
   }),
   chain: Object.freeze({
-    title: "The live loop could not start its successor",
+    title: "The live loop stopped: a pass hung or its successor could not be started",
     remedy: [
-      "Until a GitHub starter arrives (they have arrived 4 to 8 hours late), Tier 2 and the nightly start are not running.",
+      "When the dispatch was refused: until a GitHub starter arrives (they have arrived 4 to 8 hours late), Tier 2 and the nightly start are not running.",
       "Check Settings, Actions, General, Workflow permissions, and that flows-live.yml still grants actions: write and issues: write.",
       "Restart it by hand: gh workflow run flows-live.yml. The next loop closes this issue.",
+      "When a pass hung and the successor was dispatched, the loop restarts by itself. A pass is abandoned only when no vendor or ingest call settled for 90 seconds or it ran past 10 minutes, so a slow or timing-out vendor never does this: read the run's `live loop:` lines and the `vendor request(s) timed out ... in the abandoned pass` line for what stalled. DEPLOY.md section 10.5k.",
     ],
   }),
   drill: Object.freeze({

@@ -65,7 +65,7 @@ import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "./flows-legs/index-dossier.mjs";
 import {
   runLive, runLiveLoop, chainDispatch, chainWithRetry, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
-  passOutcome, liveRunVerdict,
+  passOutcome, liveRunVerdict, createProgress,
 } from "./flows-legs/live.mjs";
 import { createWatch, witnessDrill } from "./flows-legs/watch.mjs";
 import { dryLiveDay } from "./flows-legs/live-day.mjs";
@@ -361,6 +361,8 @@ const stats = {
 };
 let delayMs = RATE.startDelayMs;
 
+export const wireProgress = createProgress();
+
 let delayFloorMs = RATE.minDelayMs;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -564,6 +566,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     } catch (error) {
       stats.networkMs += Date.now() - wireStarted;
       landed();
+      wireProgress.settled();
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
@@ -577,6 +580,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     }
     stats.networkMs += Date.now() - wireStarted;
     landed();
+    wireProgress.settled();
 
     if (response.status === 429) {
       stats.rateLimited++;
@@ -591,6 +595,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
 
       stats.rateLimitQueueMs += permits.defer(wait);
       stats.rateLimitWaitMs += wait;
+      wireProgress.quiet(wait);
       await sleep(wait);
       continue;
     }
@@ -613,6 +618,8 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     } catch (error) {
       if (limitMs && isTimeout(error)) stats.timedOut++;
       throw error;
+    } finally {
+      wireProgress.settled();
     }
     if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
@@ -1860,7 +1867,7 @@ async function readStoredOnce(key) {
         redirect: "error",
         headers: await ingestHeaders(),
       },
-    );
+    ).finally(() => wireProgress.settled());
     const refusal = response.status === 403 ? await noteRefusal(response) : null;
     if (refusal) {
       return { payload: null, failed: true, status: 403, refusal, final: refusal.kind === "worker" };
@@ -3076,7 +3083,7 @@ async function publish(key, payload) {
       headers: await ingestHeaders({ json: true }),
       body,
     },
-  );
+  ).finally(() => wireProgress.settled());
 
   refusal = response.status === 403 ? await noteRefusal(response) : null;
   heard = refusal || await noteAnswer(response);
@@ -3089,6 +3096,7 @@ async function publish(key, payload) {
       `waiting ${Math.round(quotaWait / 1000)}s for it (a wait of at most ${Math.round(QUOTA_WAIT.maxMs / 60000)} min a run, ` +
       "not counted against the retry budget)");
     ingestWrites.defer(quotaWait);
+    wireProgress.quiet(quotaWait);
     await sleep(quotaWait);
     attempt--;
     continue;
@@ -3107,6 +3115,7 @@ async function publish(key, payload) {
       `${PUBLISH_RETRY_BUDGET_MS / 1000}s retry budget spent)`);
 
     ingestWrites.defer(wait);
+    wireProgress.quiet(wait);
     await sleep(wait);
     continue;
   }
@@ -4654,11 +4663,18 @@ async function runLiveMode() {
   const watch = keep
     ? createWatch({ readOnce: readStoredOnce, latestClock: () => clockBody, env: process.env })
     : null;
+  let timedOutAtPass = stats.timedOut;
   const loop = await runLiveLoop({
-    readClock, watch,
+    readClock, watch, progress: wireProgress.lastAt,
+    onHung: ({ why }) => {
+      if (why === "tick-deadline") return;
+      console.warn(`live: ${stats.timedOut - timedOutAtPass} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
+        "in the abandoned pass before it was given up");
+    },
     pass: async ({ first, clock }) => {
       resetPublishRetryBudget();
       const timedOutBefore = stats.timedOut;
+      timedOutAtPass = timedOutBefore;
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
       const outcome = reportErrors(result);
       const timedOut = stats.timedOut - timedOutBefore;
@@ -4669,7 +4685,9 @@ async function runLiveMode() {
       ? chainWithRetry(() => chainDispatch({ env: process.env, at }))
       : chainDispatch({ env: process.env, at })),
   });
-  return settle(loop);
+  settle(loop);
+  if (loop.exit === "hung") process.exit(process.exitCode || 1);
+  return loop;
 }
 
 async function main() {

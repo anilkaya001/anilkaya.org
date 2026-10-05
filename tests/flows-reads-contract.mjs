@@ -895,6 +895,61 @@ class FakeCache {
 }
 
 {
+  const f = fakeD1();
+  seed(f);
+  const names = Array.from({ length: 670 }, (_, i) => "T" + String(i).padStart(3, "0"));
+  names[0] = "NVDA";
+  names[1] = "LITE";
+  f.put("universe", { ...NIGHTLY, n: names.length, t: names, sectors: ["Technology"], sec: names.map(() => 0),
+    units: { px: ["usd", 100] }, cols: { px: names.map(() => 10000) }, pct: { px: names.map(() => 50) } });
+  const cache = new FakeCache();
+  globalThis.caches = { default: cache };
+  try {
+    const get = await client(f.D1);
+    await get("/api/flows/meta");
+    W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
+    const view = async (path) => {
+      const n = f.trips.length;
+      const r = await get(path);
+      await r.settle();
+      return { ...r, trips: f.since(n), rows: f.rowsRead(n) };
+    };
+    const admitKey = (t) => "https://flows-tape-admit.internal/" + t;
+    const scans = (v) => v.trips.some((t) => t.sqls.some((q) => /json_each/.test(q)));
+    const cold = await view("/api/flows/tape?t=LITE");
+    ok(cold.res.status === 200 && cold.trips.length === 1 && scans(cold) && cold.rows > names.length,
+      `AN UNCARDED NAME'S FIRST TAPE VIEW runs the admission check once, in the tape's own batch (${cold.rows} rows: the ${names.length}-name universe list)`);
+    ok(cache.entries.has(admitKey("LITE")) && cache.entries.get(admitKey("LITE")).body === "1" &&
+       /max-age=43200/.test((cache.entries.get(admitKey("LITE")).headers.find(([k]) => k.toLowerCase() === "cache-control") || [])[1] || ""),
+      "and keeps the admission for twelve hours, as the classify verdict is kept");
+    const now = Date.now();
+    f.db.prepare("INSERT OR REPLACE INTO flows_tape (ticker, payload, read_at, session, legs, refreshing_until, last_served) VALUES (?, ?, ?, ?, ?, NULL, ?)")
+      .run("LITE", JSON.stringify({ ticker: "LITE", session: SESSION }), now, SESSION, 3, now);
+    for (let i = 0; i < 3; i++) {
+      const again = await view("/api/flows/tape?t=LITE");
+      if (process.env.PRINT_ROWS) console.log("/api/flows/tape?t=LITE refetch", again.rows, again.trips.length);
+      ok(again.res.status === 200 && again.body.ticker === "LITE" && again.trips.length === 1 && !scans(again) && again.rows <= 10,
+        `ROWS READ PER TAPE REFETCH of an uncarded name: ${again.rows} in ${again.trips.length} trip, ceiling 10, where it was the ${names.length}-name ` +
+        "universe list every 60 s: the admission is decided once, not on every poll");
+    }
+    const unknown = await view("/api/flows/tape?t=ZZZZ");
+    ok(unknown.body.status === "pending" && !cache.entries.has(admitKey("ZZZZ")),
+      "a name admitted only because nothing could refuse it (no vendor key, no verdict) is never remembered");
+    const unknownAgain = await view("/api/flows/tape?t=ZZZZ");
+    ok(scans(unknownAgain), "so its next view checks again");
+    const elsewhere = new FakeCache();
+    globalThis.caches = { default: elsewhere };
+    const colo = await view("/api/flows/tape?t=LITE");
+    ok(colo.res.status === 200 && colo.body.ticker === "LITE" && scans(colo) && elsewhere.entries.has(admitKey("LITE")),
+      "a data centre that never kept the admission checks once, finds the held tape, and keeps it from then on");
+    const coloAgain = await view("/api/flows/tape?t=LITE");
+    ok(!scans(coloAgain) && coloAgain.rows <= 10, "after which its refetches read the tape row alone");
+  } finally {
+    delete globalThis.caches;
+  }
+}
+
+{
   const unshift = shiftClock(FIXTURE_NOW);
   const f = fakeD1();
   seed(f);

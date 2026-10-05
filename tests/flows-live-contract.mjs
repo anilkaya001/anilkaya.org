@@ -2173,6 +2173,47 @@ const cronMinutes = (cron) => {
       "a Worker that predates the key answers 400, which reads as no clock, so either deploy order works");
     eq(await readLiveClock(async () => { throw new Error("offline"); }), null,
       "and an unreachable Worker reads as no clock too (the loop then keeps its last verdict, or the weekday calendar)");
+    const handed = [];
+    const naps = [];
+    const seen = { seen: (b) => handed.push(b), sleep: async (ms) => { naps.push(ms); } };
+    await readLiveClock(async () => ({ payload: null, failed: true, status: 403 }), seen);
+    await readLiveClock(async () => { throw new Error("offline"); }, seen);
+    await readLiveClock(async () => ({ payload: { key: "clock", clock: { day: "2026-9-1" } }, status: 200 }), seen);
+    eq(handed.length, 0, "A CHALLENGED, UNREACHABLE OR MALFORMED CLOCK READ hands the witness nothing, so it keeps the last good clock " +
+      "(issue #144 was a single 403 here that blanked it)");
+    const good = { key: "clock", clock: at };
+    await readLiveClock(async () => ({ payload: good, status: 200 }), seen);
+    ok(handed.length === 1 && handed[0] === good, "and a clock that parses is handed over whole");
+    {
+      const tries = [];
+      const flaky = async (key) => { tries.push(key); return tries.length === 1 ? { payload: null, failed: true, status: 403 } : { payload: good, status: 200 }; };
+      naps.length = 0;
+      handed.length = 0;
+      deep(await readLiveClock(flaky, seen), at,
+        "A CLOCK READ CHALLENGED ONCE is tried again and its answer used, as the witness's own reads are (an idle evening has no other read, so issue #144 lived on there)");
+      ok(tries.length === 2 && naps.length === 1 && naps[0] === 1000 && handed.length === 1 && handed[0] === good,
+        "one retry, one second after the challenge, and the clock it answers is handed to the witness");
+      const count = async (fail) => { const asked = []; naps.length = 0;
+        const clock = await readLiveClock(async () => { asked.push(1); return typeof fail === "function" ? fail() : fail; }, seen);
+        return [clock, asked.length, naps.length]; };
+      deep(await count({ payload: null, failed: true, status: 503 }), [null, 2, 1], "a clock challenged twice is no clock, after one retry and never a third try");
+      deep(await count(() => { throw new Error("offline"); }), [null, 2, 1], "an unreachable Worker is tried twice too");
+      deep(await count({ payload: null, failed: true, status: 400 }), [null, 1, 0], "a 400 (a Worker that predates the key) is not retried");
+      deep(await count({ payload: null, failed: true, status: 403, final: true }), [null, 1, 0],
+        "nor is the Worker refusing the credential");
+      deep(await count({ payload: null, absent: true, status: 200 }), [null, 1, 0], "nor a pending answer");
+      let first = true;
+      const started = Date.now();
+      const late = await readLiveClock(() => (first ? (first = false, new Promise(() => {})) : { payload: good, status: 200 }),
+        { deadlineMs: 400, retryMs: 100, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
+      const spent = Date.now() - started;
+      ok(late && late.day === S && spent < 400 + 300,
+        `a first attempt that hangs is cut at its share of the clock's deadline and retried inside it (${spent} ms of 400)`);
+      naps.length = 0;
+      deep(await readLiveClock(async () => ({ payload: null, failed: true, status: 403 }), { ...seen, deadlineMs: 150 }), null,
+        "and a deadline shorter than the retry delay leaves one attempt");
+      eq(naps.length, 0, "with no wait");
+    }
     deep([sessionClock({ clock: { day: "2026-9-1", trading: 1 } }), sessionClock({ clock: { day: S, trading: "0",
       earlyClose: 7 } })], [null, { day: S, trading: null, earlyClose: null }],
     "a malformed day is no clock, and a flag that is not exactly 0 or 1 is unknown, never a verdict");
@@ -2223,7 +2264,7 @@ const cronMinutes = (cron) => {
   ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
      /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
      /const clock = force \? null : await readClock\(\);/.test(pipeline),
-  "and --live gates both the loop and a single pass on the Worker's clock");
+  "and --live gates both the loop and a single pass on the Worker's clock, the witness's copy of it set only by a read that parsed");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
   "--live runs the loop when the workflow asks for it, each pass after the first ignoring the heartbeat skip");
