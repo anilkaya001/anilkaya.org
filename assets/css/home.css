@@ -466,9 +466,8 @@
 
 @media (max-height: 480px) { .market-ticker { display: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .market-ticker { animation: none; padding: calc(env(safe-area-inset-bottom, 0px) + 0.3rem) 0 0.3rem; }
+  .market-ticker { animation: none; }
   .market-ticker__track { overflow-x: auto; }
-  .market-ticker__toggle { display: none; }
   .market-ticker__row { animation: none; }
   .market-ticker__set[aria-hidden="true"] { display: none; }
 }

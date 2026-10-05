@@ -24,12 +24,14 @@ const PARTICLES = readFileSync(new URL("../assets/js/particles.js", import.meta.
 const STILL = "function still() {";
 assert.ok(PARTICLES.includes(STILL), "particles.js draws its reduced-motion frame in still()");
 const stillOf = (passes) => PARTICLES.replace(STILL, `${STILL} ctx.clearRect(0, 0, state.width, state.height); for (let n = 0; n < ${passes}; n++) renderFrame(lastTime); return;`);
+const COUNTED = PARTICLES.replace(STILL, `${STILL} window.__stills = (window.__stills || 0) + 1;`);
+const price = (snap) => new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(snap.quotes[0].price);
 
 const scratch = mkdtempSync(join(tmpdir(), "landing-motion-"));
 const browser = await chromium.launch();
 
-async function open(reducedMotion, viewport = { width: 1280, height: 800 }, { snaps = [SNAPSHOT], clock = false, particles = null, seeded = false } = {}) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion });
+async function open(reducedMotion, viewport = { width: 1280, height: 800 }, { snaps = [SNAPSHOT], clock = false, particles = null, seeded = false, dpr = 1 } = {}) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: dpr, reducedMotion });
   const page = await context.newPage();
   const errors = [];
   let calls = 0;
@@ -85,24 +87,32 @@ const inked = (page) => page.evaluate(() => {
 });
 
 {
-  const { context, page, errors } = await open("reduce");
+  const { context, page, errors } = await open("reduce", { width: 1280, height: 800 }, { particles: COUNTED });
   await page.waitForTimeout(1000);
   const frames = await animationFrames(page, 2000);
   eq(frames, 0, `under reduced motion the particle field draws one frame and stops: ${frames} animation frames fired in the 2 s after the first second`);
   const first = await inked(page);
   ok(first.lit > 500, `the still frame is drawn (${first.lit} lit pixels)`);
   eq(first.width, 1280, "the canvas buffer matches the viewport width");
+  const stills = () => page.evaluate(() => window.__stills);
+  eq(await stills(), 1, "the still frame is drawn once during load: the load, rAF, pageshow and timeout resizes find the size unchanged and keep the pixels");
+  await page.evaluate(() => dispatchEvent(new Event("resize")));
+  await page.waitForTimeout(400);
+  eq(await stills(), 1, "a resize event with the viewport unchanged does not clear and redraw the field");
 
   await page.setViewportSize({ width: 900, height: 700 });
   await page.waitForTimeout(600);
   const after = await inked(page);
   eq(after.width, 900, "a resize resizes the canvas buffer");
   ok(after.lit > 500, `a resize redraws the still frame (${after.lit} lit pixels after the buffer was cleared)`);
+  eq(await stills(), 2, "a viewport change redraws the still frame once");
   const resized = await animationFrames(page, 1500);
   eq(resized, 0, `no animation loop resumes after a resize (${resized} frames)`);
 
-  const toggle = await page.$eval(".market-ticker__toggle", (el) => getComputedStyle(el).display);
-  eq(toggle, "none", "nothing moves under reduced motion, so the marquee shows no pause control");
+  const toggle = await page.$eval(".market-ticker__toggle", (el) => ({ display: getComputedStyle(el).display, text: el.textContent, label: el.getAttribute("aria-label") }));
+  ok(toggle.display !== "none", "the prices still auto-update under reduced motion, so the Pause control stays (WCAG 2.2.2, auto-updating)");
+  eq(toggle.text, "Pause", "the control reads Pause under reduced motion");
+  ok(toggle.label.startsWith(toggle.text) && !/scroll/i.test(toggle.label), `the accessible name begins with the visible label and claims no scrolling (${toggle.label})`);
   const play = await page.$eval(".market-ticker__row", (el) => getComputedStyle(el).animationName);
   eq(play, "none", "the marquee row does not animate under reduced motion");
   eq(errors.join(" | "), "", "no page error under reduced motion");
@@ -198,6 +208,37 @@ const inked = (page) => page.evaluate(() => {
   await context.close();
 }
 
+{
+  const { context, page, errors } = await open("reduce", { width: 640, height: 500 }, { dpr: 2 });
+  await page.waitForTimeout(1000);
+  const quadrants = () => page.evaluate(() => {
+    const canvas = document.getElementById("field");
+    const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    const lit = [0, 0, 0, 0];
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i] === 0) continue;
+      const p = (i - 3) / 4, x = p % canvas.width, y = (p - x) / canvas.width;
+      lit[(y >= canvas.height / 2 ? 2 : 0) + (x >= canvas.width / 2 ? 1 : 0)]++;
+    }
+    return { width: canvas.width, height: canvas.height, lit };
+  });
+  const drawn = await quadrants();
+  eq(drawn.width, 1280, "at DPR 2 the buffer is twice the viewport width");
+  ok(drawn.lit.every((n) => n > 50), `the still frame reaches every quadrant of the buffer (${drawn.lit.join(", ")})`);
+  await page.evaluate(() => {
+    const canvas = document.getElementById("field");
+    const ctx = canvas.getContext("2d");
+    ctx.resetTransform();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.dispatchEvent(new Event("contextrestored"));
+  });
+  const restored = await quadrants();
+  ok(restored.lit.every((n) => n > 50), `after a context loss, which resets the transform, the restored still frame is drawn at the device scale again and reaches every quadrant (${restored.lit.join(", ")})`);
+  ok(Math.abs(restored.lit[3] - drawn.lit[3]) <= 0.05 * drawn.lit[3], `the restored frame matches the first in the bottom-right quadrant (${restored.lit[3]} against ${drawn.lit[3]})`);
+  eq(errors.join(" | "), "", "no page error across a context restore");
+  await context.close();
+}
+
 const brightness = (page) => page.evaluate(() => {
   const canvas = document.getElementById("field");
   const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
@@ -229,29 +270,53 @@ const brightness = (page) => page.evaluate(() => {
     `the measure tells a single pass from the settled field (${single.seen} visible pixels against ${settled.seen}), so it would catch a dimmed still frame`);
 }
 
-{
+for (const motion of ["no-preference", "reduce"]) {
   const fresh = snapshot(MARKET_INDICES.length, 0.5);
-  const { context, page, errors, calls } = await open("no-preference", { width: 1280, height: 800 }, { clock: true, particles: "", snaps: [SNAPSHOT, fresh] });
+  const third = snapshot(MARKET_INDICES.length, 1.0);
+  const { context, page, errors, calls } = await open(motion, { width: 1280, height: 800 }, { clock: true, particles: "", snaps: [SNAPSHOT, fresh, third] });
   const text = () => page.$eval(".market-ticker__row", (el) => el.textContent);
+  const first = () => page.$eval(".market-ticker__row .tk__price", (el) => el.textContent);
+  const label = () => page.$eval(".market-ticker__toggle", (el) => el.textContent);
   const shown = await text();
-  const firstPrice = await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent);
-  await page.click(".market-ticker__toggle");
-  eq(await page.$eval("#marketTicker", (el) => el.dataset.paused), "true", "the row is paused before the refresh");
+  const firstPrice = await first();
+  eq(firstPrice, price(SNAPSHOT), `the first snapshot is on screen, ${motion}`);
+  await page.focus(".market-ticker__toggle");
+  await page.keyboard.press("Enter");
+  eq(await page.$eval("#marketTicker", (el) => el.dataset.paused), "true", `the row is paused before the refresh, ${motion}`);
   await page.clock.runFor(5 * 60 * 1000 + 1000);
   for (let i = 0; i < 50 && calls() < 2; i++) await page.waitForTimeout(100);
-  eq(calls(), 2, "the five-minute refresh fetched a new snapshot while the row was paused");
+  eq(calls(), 2, `the five-minute refresh fetched a new snapshot while the row was paused, ${motion}`);
   await page.waitForTimeout(500);
   await page.clock.runFor(100);
-  eq(await text(), shown, `a paused row keeps the prices the reader stopped to read (first price still ${firstPrice})`);
-  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Play", "the control still reads Play");
-  await page.click(".market-ticker__toggle");
-  const after = await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent);
-  ok(after !== firstPrice && (await text()) !== shown, `Play shows the snapshot that arrived during the pause (first price ${firstPrice} becomes ${after})`);
+  eq(await text(), shown, `a paused row keeps the prices the reader stopped to read, ${motion} (first price still ${firstPrice})`);
+  eq(await label(), "Play", `the control still reads Play, ${motion}`);
+  await page.keyboard.press("Enter");
+  const after = await first();
+  eq(after, price(fresh), `Play shows the snapshot that arrived during the pause, ${motion} (first price ${firstPrice} becomes ${after})`);
+  const released = await text();
+  ok(released !== shown, `the whole row was replaced on Play, ${motion}`);
+
+  await page.keyboard.press("Enter");
+  eq(await label(), "Play", `a second Pause with nothing held pauses, ${motion}`);
+  await page.keyboard.press("Enter");
+  eq(await label(), "Pause", `a second Play with nothing held plays, ${motion}`);
+  const bar = await page.evaluate(() => {
+    const mount = document.getElementById("marketTicker");
+    const toggle = mount.querySelector(".market-ticker__toggle");
+    return { hidden: mount.hidden, display: getComputedStyle(mount).display, control: getComputedStyle(toggle).display, visible: toggle.getClientRects().length > 0, focused: document.activeElement === toggle };
+  });
+  ok(!bar.hidden && bar.display !== "none", `the bar stays after a Play with nothing held, ${motion} (hidden ${bar.hidden}, display ${bar.display})`);
+  ok(bar.control !== "none" && bar.visible, `the control stays visible, ${motion}`);
+  ok(bar.focused, `the control keeps focus, ${motion}`);
+  eq(await text(), released, `the row text is unchanged by a Pause and Play with nothing held, ${motion}`);
+
   await page.clock.runFor(5 * 60 * 1000 + 1000);
   for (let i = 0; i < 50 && calls() < 3; i++) await page.waitForTimeout(100);
+  eq(calls(), 3, `a third refresh was fetched while playing, ${motion}`);
   await page.waitForTimeout(500);
-  eq(await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent), after, "while playing a refresh renders at once");
-  eq(errors.join(" | "), "", "no page error across a held refresh");
+  await page.clock.runFor(100);
+  eq(await first(), price(third), `while playing a refresh renders at once, ${motion} (first price ${after} becomes ${price(third)})`);
+  eq(errors.join(" | "), "", `no page error across a held refresh, ${motion}`);
   await context.close();
 }
 
@@ -265,10 +330,10 @@ for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [
     return { scroll: document.scrollingElement.scrollWidth, inner: innerWidth, left: t.left, right: t.right, barTop: bar.top, barH: bar.height, footBottom: foot.bottom };
   });
   ok(fit.scroll <= fit.inner, `no horizontal page scroll at ${width} px, ${motion} (${fit.scroll} against ${fit.inner})`);
-  if (motion === "no-preference") ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px`);
+  ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px, ${motion}`);
   ok(fit.barTop >= fit.footBottom, `the marquee bar starts at or below the footer at ${width} px, ${motion} (bar top ${fit.barTop.toFixed(1)}, footer bottom ${fit.footBottom.toFixed(1)})`);
   ok(fit.barH <= 30.5, `the marquee bar keeps its height at ${width} px, ${motion} (${fit.barH.toFixed(1)} px)`);
-  if (motion === "no-preference") {
+  {
     const trackX = () => page.$eval(".market-ticker__track", (el) => el.getBoundingClientRect().x);
     await page.focus(".market-ticker__toggle");
     const at = [await trackX()];
@@ -284,4 +349,4 @@ for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [
 
 await browser.close();
 rmSync(scratch, { recursive: true, force: true });
-console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that plays again while it keeps focus, by key and by a click with the pointer still on it, holds after focus leaves and does not scroll with the prices, the prices keep their place when the label flips, a refresh that lands while paused waits for Play, the still field is as bright as the settled trail it replaced, and the bar stays clear of the footer at 320, 390 and 1280 px`);
+console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee does not move but keeps its Pause control for the auto-update; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that plays again while it keeps focus, by key and by a click with the pointer still on it, holds after focus leaves and does not scroll with the prices, the prices keep their place when the label flips, a refresh that lands while paused waits for Play in both views, a Pause and Play with nothing held leaves the bar and its focused control in place, a refresh while playing renders at once, the still field is drawn once at load and once per viewport change and at the device scale again after a context restore, the still field is as bright as the settled trail it replaced, and the bar stays clear of the footer at 320, 390 and 1280 px`);

@@ -17,8 +17,8 @@
   function setPaused(paused) {
     mount.dataset.paused = paused;
     toggle.textContent = paused ? "Play" : "Pause";
-    toggle.setAttribute("aria-label", toggle.textContent + " the scrolling index prices");
-    if (!paused && held) render(...held.splice(0));
+    toggle.setAttribute("aria-label", toggle.textContent + " the index prices");
+    if (!paused && held) { const h = held; held = null; render(h[0], h[1]); }
   }
   setPaused(false);
   toggle.addEventListener("click", () => setPaused(mount.dataset.paused !== "true"));

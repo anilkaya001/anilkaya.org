@@ -61,6 +61,7 @@
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     while (dpr > 0.75 && (w * dpr > 4096 || h * dpr > 4096 || w * dpr * h * dpr > 16777216)) dpr -= 0.25;
+    if (calm && ready && w === state.width && h === state.height && dpr === state.dpr) return;
     state.dpr = dpr; state.width = w; state.height = h;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
@@ -312,7 +313,7 @@
     if (DEBUG) startDebug();
     ready = true;
     if (calm) {
-      canvas.addEventListener("contextrestored", still);
+      canvas.addEventListener("contextrestored", () => { ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0); still(); });
       return still();
     }
 
