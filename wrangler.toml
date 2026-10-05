@@ -35,6 +35,11 @@ name = "AI_ASK"
 namespace_id = "1102"
 simple = { limit = 10, period = 60 }
 
+[[ratelimits]]
+name = "MEMBER_VENDOR"
+namespace_id = "1103"
+simple = { limit = 60, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"

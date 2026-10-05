@@ -943,7 +943,7 @@ export async function ondemandAllowed(env) {
   }
 }
 
-export async function serveQuote(env, ctx, ticker, now, { build, json }) {
+export async function serveQuote(env, ctx, ticker, now, { build, json, allowed = () => ondemandAllowed(env) }) {
   const clock = await cachedClock(env, now);
   const ttl = quoteTtlS(now, clock);
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
@@ -961,7 +961,7 @@ export async function serveQuote(env, ctx, ticker, now, { build, json }) {
     const body = await hit.json().catch(() => null);
     if (body) return respond(body, { "X-Chain-Cache": "hit", "X-Chain-Age": String(Math.round(age / 1000)) });
   }
-  if (!(await ondemandAllowed(env))) {
+  if (!(await allowed())) {
     const body = hit ? await hit.json().catch(() => null) : null;
     if (body) {
       const r = await respond(body, { "X-Chain-Cache": "throttled", "X-Fresh-Throttled": "1" });

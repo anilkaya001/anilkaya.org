@@ -1385,5 +1385,140 @@ class FakeCache {
   eq(down.res.status, 200, "a limiter that throws fails open, like UW_ONDEMAND: it is a flood brake, not the spend cap");
 }
 
+{
+  const f = fakeD1();
+  seed(f);
+  const [A, B] = FLOWS_USERNAMES;
+  const counts = new Map();
+  const memberKeys = [];
+  let ondemand = 0;
+  const MEMBER_VENDOR = { limit: async ({ key }) => {
+    memberKeys.push(key);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return { success: counts.get(key) <= 60 };
+  } };
+  const UW_ONDEMAND = { limit: async () => { ondemand++; return { success: true }; } };
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  const tape = new Date(Date.now() - 30000).toISOString();
+  globalThis.fetch = async (input, init) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    calls.push(u.pathname);
+    const data = /\/stock-state$/.test(u.pathname)
+      ? { close: "101.5", prev_close: "100", open: "100.5", high: "102", low: "100.1", volume: 1000, market_time: "r", tape_time: tape }
+      : [];
+    return new Response(JSON.stringify({ data }), { headers: { "Content-Type": "application/json" } });
+  };
+  const env = { DB: f.D1, SESSION_SECRET, FLOWS_READ_MODE: "off", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test",
+    MEMBER_VENDOR, UW_ONDEMAND, FLOWS_CREDENTIALS: JSON.stringify({ [A]: "x".repeat(43), [B]: "y".repeat(43) }) };
+  const tokens = { [A]: await signFlowsSession(A, SESSION_SECRET, 3600, sessionEpoch(env)),
+    [B]: await signFlowsSession(B, SESSION_SECRET, 3600, sessionEpoch(env)) };
+  const worker = (await import("../worker.js?reads=" + (++instance))).default;
+  const get = async (as, route, over = {}) => {
+    const n = calls.length;
+    const background = [];
+    const res = await worker.fetch(new Request("https://anilkaya.org" + route,
+      { headers: { cookie: FLOWS_COOKIE + "=" + tokens[as], "Sec-Fetch-Site": "same-origin" } }),
+    { ...env, ...over }, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
+    await Promise.all(background);
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { body = null; }
+    return { res, body, vendor: calls.length - n };
+  };
+  const refusedJson = (r, what) => {
+    eq(r.res.status, 429, `${what}: answers 429 (${r.res.status})`);
+    eq(r.body && r.body.error && r.body.error.code, "rate_limited", `${what}: with the rate_limited code`);
+    eq(r.res.headers.get("Retry-After"), "60", `${what}: and Retry-After of the binding's 60-second period`);
+    eq(r.res.headers.get("Cache-Control"), "no-store", `${what}: as a no-store API error`);
+    eq(r.vendor, 0, `${what}: THE REFUSAL MAKES 0 VENDOR CALLS`);
+  };
+  try {
+    await get(A, "/api/flows/meta");
+    memberKeys.length = 0;
+    for (let i = 1; i <= 60; i++) {
+      const r = await get(A, "/api/flows/chain?t=NVDA&refresh=1");
+      ok(r.res.status !== 429 && r.vendor > 0, `MEMBER VENDOR: member A's chain read ${i} of 60 in the window reaches the vendor (${r.res.status}, ${r.vendor} calls)`);
+    }
+    eq(counts.get(A), 60, "one limiter call per vendor-spending request, however many vendor calls the request makes");
+    eq(ondemand, 60, "and each admitted request also takes one token from the shared UW_ONDEMAND budget");
+    const before = ondemand;
+    refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "member A's 61st chain read in the window, with no copy held");
+    refusedJson(await get(A, "/api/flows/strategy?t=NVDA"), "a strategy context read by member A past the window");
+    refusedJson(await get(A, "/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1"), "a strategy expiry read by member A past the window");
+    eq(ondemand, before, "A REFUSED MEMBER NEVER SPENDS THE SHARED UW_ONDEMAND BUDGET: the member check runs first");
+    const live = await get(A, "/api/flows/live?t=NVDA");
+    ok(live.res.status === 200 && live.body.status === "unavailable" && live.body.why === "throttled" && live.vendor === 0,
+      `the stock-state quote read by member A is refused with no vendor call, as the existing throttled body (${live.res.status} ${JSON.stringify(live.body).slice(0, 80)})`);
+    ok(live.res.headers.get("X-Fresh-State") === "stale" && live.res.headers.get("X-Fresh-Reason") === "throttled",
+      "stamped X-Fresh-State: stale, X-Fresh-Reason: throttled");
+    const now = await get(A, "/api/flows/now?t=NVDA");
+    ok(now.res.status === 200 && now.body.quote && now.body.quote.why === "throttled" && now.vendor === 0,
+      `the heartbeat's quote leg is refused the same way, and the heartbeat itself still answers (${now.res.status})`);
+
+    const chainB = await get(B, "/api/flows/chain?t=NVDA");
+    ok(chainB.res.status !== 429 && chainB.vendor > 0, `MEMBER B IS SERVED while member A is refused: B's chain read reaches the vendor (${chainB.res.status}, ${chainB.vendor} calls)`);
+    const liveB = await get(B, "/api/flows/live?t=NVDA");
+    ok(liveB.res.status === 200 && liveB.body.status === "ok" && liveB.body.price === 101.5 && liveB.vendor === 1,
+      `and B's quote is read from the vendor (${JSON.stringify(liveB.body).slice(0, 80)})`);
+    deep([...new Set(memberKeys)], [A, B], "the limiter is keyed by memberId(session), one key per member");
+
+    const cache = new FakeCache();
+    globalThis.caches = { default: cache };
+    try {
+      const storedAt = Math.floor(Date.now() / 1000) - 60;
+      const held = (url, body) => cache.put(new Request(url), new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json; charset=utf-8", "X-Chain-Stored": String(storedAt) } }));
+      await held("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", spot: 99, held: "chain" });
+      await held("https://flows-strategy.internal/NVDA", { mode: "context", ticker: "NVDA", spot: 98, held: "strategy" });
+      await cache.put(new Request("https://flows-live.internal/NVDA"), new Response(JSON.stringify({ ticker: "NVDA", status: "ok",
+        readAt: new Date(Date.now() - 2 * 86400000).toISOString(), price: 97, prevClose: 96, changePct: 0.01, open: null, high: null,
+        low: null, volume: null, marketTime: null, tapeTime: null }), { headers: { "X-Quote-Stored": String(Date.now() - 2 * 86400000) } }));
+      for (const [route, field, value] of [["/api/flows/chain?t=NVDA&refresh=1", "held", "chain"], ["/api/flows/strategy?t=NVDA&refresh=1", "held", "strategy"]]) {
+        const r = await get(A, route);
+        ok(r.res.status === 200 && r.body && r.body[field] === value && r.vendor === 0,
+          `THE CACHED COPY IS THE THROTTLED ANSWER: ${route} past A's window serves the held copy with no vendor call (${r.res.status})`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Fresh-Throttled") === "1" && r.res.headers.get("X-Chain-Cache") === "throttled" &&
+          r.res.headers.get("X-Chain-Age") !== null && r.res.headers.get("Cache-Control") === "no-store",
+          `stamped X-Fresh-State: stale, X-Fresh-Reason: throttled, with its age and no-store (${route})`);
+      }
+      const quote = await get(A, "/api/flows/live?t=NVDA");
+      ok(quote.res.status === 200 && quote.body.price === 97 && quote.vendor === 0 && quote.res.headers.get("X-Fresh-State") === "stale" &&
+        quote.res.headers.get("X-Fresh-Reason") === "throttled",
+        `the quote's held copy is its throttled answer, stamped stale (${JSON.stringify(quote.body).slice(0, 60)})`);
+      const spentB = counts.get(B);
+      const fresh = await get(B, "/api/flows/chain?t=NVDA");
+      ok(fresh.res.status === 200 && fresh.body.held === "chain" && fresh.res.headers.get("X-Chain-Cache") === "hit" && fresh.vendor === 0 &&
+        counts.get(B) === spentB,
+        "a read inside the copy's TTL is a hit and never consults the limiter");
+    } finally {
+      delete globalThis.caches;
+    }
+
+    const down = await get(A, "/api/flows/chain?t=NVDA", { MEMBER_VENDOR: { limit: async () => { throw new Error("limiter down"); } } });
+    ok(down.res.status !== 429 && down.vendor > 0, "a member limiter that throws fails open, like UW_ONDEMAND: it is a flood brake");
+    const absent = await get(A, "/api/flows/chain?t=NVDA", { MEMBER_VENDOR: undefined });
+    ok(absent.res.status !== 429 && absent.vendor > 0, "and an absent binding admits the read");
+    const shared = await get(B, "/api/flows/chain?t=NVDA", { UW_ONDEMAND: { limit: async () => ({ success: false }) } });
+    refusedJson(shared, "member B under the window but with the shared UW_ONDEMAND budget spent");
+
+    const consulted = { member: 0, ondemand: 0 };
+    const counting = { MEMBER_VENDOR: { limit: async () => { consulted.member++; return { success: false }; } },
+      UW_ONDEMAND: { limit: async () => { consulted.ondemand++; return { success: false }; } } };
+    for (const [cron, at] of [[W.RTH_CRON, easternInstant("2026-09-23", 10 * 60 + 6)], [W.FOCUS_CRON, easternInstant("2026-09-23", 10 * 60 + 8)]]) {
+      const n = calls.length;
+      const background = [];
+      await worker.scheduled({ cron, scheduledTime: at }, { ...env, ...counting }, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(background);
+      ok(calls.length > n, `the ${W.cronJob(cron, at)} tick reached the vendor (${calls.length - n} calls)`);
+    }
+    deep(consulted, { member: 0, ondemand: 0 }, "THE TIER 1 AND FOCUS TICKS NEVER CONSULT A LIMITER: both refuse everything and the engines read the vendor anyway");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);
 console.log(`flows-reads-contract: ${checks} checks passed`);

@@ -614,6 +614,21 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   console.log("  dossier CPU per request: warm " + w.toFixed(2) + " ms, hot " + h.toFixed(2) + " ms, summary " + s.toFixed(2) + " ms");
 }
 
+{
+  const f = world();
+  const consulted = [];
+  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: false }; } };
+  const get = await client(f.D1, { MEMBER_VENDOR });
+  stub.reset();
+  dropHot();
+  const a = await get("/api/flows/dossier?t=EXMP");
+  await a.settle();
+  eq(a.res.status, 200, "MEMBER VENDOR SCOPE: with the member limiter refusing everything, the dossier route still answers 200");
+  ok(vendorCallsMade() === 8 && a.body.dossier.coverage.pending === 0,
+    `and completes cold with its 8 vendor calls (${vendorCallsMade()}, ${a.body.dossier.coverage.pending} pending)`);
+  eq(consulted.length, 0, "the dossier's fan-out and its quote are metered by UW_ONDEMAND alone and never consult MEMBER_VENDOR");
+}
+
 restoreClock();
 cache.restore();
 stub.restore();

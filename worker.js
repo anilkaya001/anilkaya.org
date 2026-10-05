@@ -1261,6 +1261,13 @@ const ASK_QUESTION_MAX = 400;
 const ASK_BODY_MAX_BYTES = 4096;
 const ASK_FLOOD_PERIOD_S = 60;
 
+const MEMBER_VENDOR_PERIOD_S = 60;
+
+async function vendorAllowed(env, session) {
+  if (!(await memberAllowed(env.MEMBER_VENDOR, session))) return false;
+  return FLOWS_LIVE.ondemandAllowed(env);
+}
+
 const FALLBACK_FAILED = Object.freeze({
   allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
   budget: "found the day's model budget for this site spent, which resets at 00:00 UTC",
@@ -2115,10 +2122,10 @@ async function cachedTickerInfo(env, ctx, ticker) {
   return out;
 }
 
-async function quoteResponse(env, ctx, ticker) {
+async function quoteResponse(env, ctx, ticker, session = null) {
   try {
     return await FLOWS_LIVE.serveQuote(env, ctx, ticker, Date.now(), {
-      json, build: () => buildLivePayload(env, ticker) });
+      json, build: () => buildLivePayload(env, ticker), allowed: () => vendorAllowed(env, session) });
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
     return json({ ticker, status: "unavailable", why: error.code,
@@ -2180,7 +2187,7 @@ async function buildLivePayload(env, ticker) {
   };
 }
 
-async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSeconds }) {
+async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSeconds, allowed }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
 
@@ -2195,6 +2202,21 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
     out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
 
     out.headers.set("Cache-Control", "no-store");
+    return out;
+  }
+
+  if (allowed && !(await allowed())) {
+    if (!hit) {
+      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
+        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
+    }
+    const out = new Response(hit.body, hit);
+    out.headers.set("X-Chain-Cache", "throttled");
+    out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
+    out.headers.set("Cache-Control", "no-store");
+    out.headers.set("X-Fresh-State", "stale");
+    out.headers.set("X-Fresh-Reason", "throttled");
+    out.headers.set("X-Fresh-Throttled", "1");
     return out;
   }
 
@@ -3702,7 +3724,7 @@ async function route(request, env, url, ctx) {
     if (path === "/api/flows/now") {
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveNow(env, url, Date.now(), { json, HttpError,
-        quote: async (t) => (await quoteResponse(env, ctx, t)).json() });
+        quote: async (t) => (await quoteResponse(env, ctx, t, session)).json() });
     }
 
     if (path === "/api/flows/tape") {
@@ -3794,7 +3816,7 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      return quoteResponse(env, ctx, ticker);
+      return quoteResponse(env, ctx, ticker, session);
     }
 
     if (path === "/api/flows/brief") {
@@ -3890,6 +3912,7 @@ async function route(request, env, url, ctx) {
           `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
+        allowed: () => vendorAllowed(env, session),
         build: () => buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 }),
       });
     }
@@ -3914,6 +3937,7 @@ async function route(request, env, url, ctx) {
           `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
+        allowed: () => vendorAllowed(env, session),
         build: () => (expiry
           ? buildStrategyExpiry(env, ctx, ticker, expiry, { engine })
           : buildStrategyContext(env, ctx, ticker)),

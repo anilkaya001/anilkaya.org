@@ -926,6 +926,14 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
   assert(simple[1] === "10" && simple[2] === "60" && period === simple[2],
     `AI_ASK must be 10 questions per 60 s and ASK_FLOOD_PERIOD_S (the Retry-After) must equal its period; ` +
     `found limit ${simple[1]}, period ${simple[2]}, ASK_FLOOD_PERIOD_S ${period}`);
+  const vendorBlock = blocks.find((b) => /^name\s*=\s*"MEMBER_VENDOR"\s*$/m.test(b));
+  assert(vendorBlock, "wrangler.toml must declare the [[ratelimits]] binding MEMBER_VENDOR: memberAllowed fails open " +
+    "when env.MEMBER_VENDOR is absent, so a renamed or dropped binding would let one member spend the shared vendor budget silently");
+  const vendorSimple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(vendorBlock) || [];
+  const vendorPeriod = (/^const MEMBER_VENDOR_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
+  assert(vendorSimple[1] === "60" && vendorSimple[2] === "60" && vendorPeriod === vendorSimple[2],
+    `MEMBER_VENDOR must be 60 vendor-spending reads per 60 s and MEMBER_VENDOR_PERIOD_S (the Retry-After) must equal its period; ` +
+    `found limit ${vendorSimple[1]}, period ${vendorSimple[2]}, MEMBER_VENDOR_PERIOD_S ${vendorPeriod}`);
   const ids = blocks.map((b) => (/^namespace_id\s*=\s*"(\d+)"\s*$/m.exec(b) || [])[1]);
   assert(ids.every(Boolean) && new Set(ids).size === ids.length,
     "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");

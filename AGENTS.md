@@ -105,6 +105,19 @@ Browser ──► Cloudflare edge
   a binding whose `run` throws unless it is called from inside `cappedAi`'s
   own lines.
 
+- A member's on-demand vendor reads (`/api/flows/chain`, which the desk reads,
+  `/api/flows/strategy`, and the stock-state quote behind `/api/flows/live`
+  and `/api/flows/now?t=`; the info and index reads run inside the first two)
+  pass `vendorAllowed` on a cache miss: the `MEMBER_VENDOR` rate-limit binding
+  (60 a minute, keyed by `memberId(session)`), then the shared `UW_ONDEMAND`
+  budget. A refusal makes no vendor call and serves the held copy stamped
+  `X-Fresh-State: stale`, `X-Fresh-Reason: throttled`, or, with none held,
+  JSON `429 rate_limited` with `Retry-After: 60` (the quote keeps its
+  `unavailable`/`throttled` body). Both bindings are flood brakes and fail
+  open. The Tier 1 and focus ticks and the dossier never consult
+  `MEMBER_VENDOR`; `tests/flows-reads-contract.mjs` and
+  `tests/flows-dossier-reads.mjs` hold both sides.
+
 ### External deployment state
 
 Repository files cannot prove Workers Builds branch mapping, dashboard secrets,
