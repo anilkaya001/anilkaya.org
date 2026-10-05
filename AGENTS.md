@@ -170,7 +170,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs` | The Premium desk's client alone: its pure functions (the frontier against a brute-force Pareto set, balance parsing, tenor buckets, cent sizing, net delta) in a Node `vm`, and the page in Chromium against payload fixtures built to the chain contract (basis, time-value yield, tooltips, banners); no server. |
 | `tests/flows-desk-wiring.mjs`, `tests/fixtures-desk-lab.json`, `tests/gen-desk-lab.py` | The desk's Win % (implied) against an independent reference: `gen-desk-lab.py` (mpmath at 40 digits) prices skewed SVI chains and takes the risk-neutral probability of profit by Breeden-Litzenberger, and the suite proves the page, given the card's smile expiries, lands within 0.5pp of it and of the strategy lab on every line, while the flat fit it replaced misses by 2.5pp; the carry and the smile each line was priced on are read back from its disclosure. Chromium against `page.route` stubs, no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
-| `tests/landing-motion.mjs` | The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter and Space, and holds after focus leaves. |
+| `tests/landing-motion.mjs` | The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter, Space and a click whether or not it keeps focus, and holds after focus leaves; the bar stays below the footer at 320, 390 and 1280 px. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
 | `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. A strip row ends in `qa`, the vendor's `quote_time` as seconds behind the read, and the key's `ahead { n, maxS }` counts the stamps that run later than the read; `priorCloseBase` and `shapeStrips` fill a null `prev_close` from the last dated nightly close and say so in `prevFill`, and hold out a row the vendor dates before the session as an all-null row (DEPLOY.md 10.5i). |
@@ -1018,8 +1018,9 @@ other browser suites.
 `/api/markets`. It traces the page under reduced motion and counts
 `FireAnimationFrame` events (none after the first second, none after a
 resize), checks the still frame is drawn and redrawn on resize, and drives the
-marquee's Pause button by keyboard. Measured on 2026-10-05: about 21 s, 33
-assertions.
+marquee's Pause button by keyboard and mouse, waiting on each animation's
+`ready` and polling `currentTime` rather than sleeping a fixed time. Measured
+on 2026-10-05: about 30 s, 61 assertions, at a load average of 10 to 17.
 
 `flows-desk-client` needs Chromium and no server either: `tests/desk-fixtures.mjs` serves the
 assets from disk and the chain payloads from `page.route`, so the Premium desk runs against

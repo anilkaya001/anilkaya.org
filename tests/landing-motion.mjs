@@ -102,15 +102,34 @@ const inked = (page) => page.evaluate(() => {
     const [a] = el.getAnimations();
     return { play: getComputedStyle(el).animationPlayState, state: a ? a.playState : null, t: a ? Number(a.currentTime) : null };
   });
+  const settle = () => page.$eval(".market-ticker__row", (el) => el.getAnimations()[0].ready.then(() => 0));
+  const moves = async () => {
+    await settle();
+    const t0 = (await state()).t;
+    return page.waitForFunction((t) => Number(document.querySelector(".market-ticker__row").getAnimations()[0].currentTime) > t, t0, { timeout: 5000 })
+      .then(() => true, () => false);
+  };
+  const still = async () => {
+    await settle();
+    const a = await state();
+    await page.waitForTimeout(600);
+    const b = await state();
+    return a.state === "paused" && b.state === "paused" && a.t === b.t;
+  };
+  const label = () => page.$eval(".market-ticker__toggle", (el) => el.textContent);
+  const focused = () => page.evaluate(() => document.activeElement && document.activeElement.classList.contains("market-ticker__toggle"));
+
   const running = await state();
   eq(running.state, "running", "the marquee scrolls by default");
+  ok(await moves(), "the marquee moves by default");
 
   let reached = false;
   for (let i = 0; i < 40 && !reached; i++) {
     await page.keyboard.press("Tab");
-    reached = await page.evaluate(() => document.activeElement && document.activeElement.classList.contains("market-ticker__toggle"));
+    reached = await focused();
   }
   ok(reached, "Tab reaches the marquee's pause control");
+  ok(await moves(), "focusing the control does not by itself stop the marquee it offers to pause");
   const named = await page.evaluate(() => ({ text: document.activeElement.textContent, label: document.activeElement.getAttribute("aria-label"), tag: document.activeElement.tagName, type: document.activeElement.type }));
   eq(named.tag, "BUTTON", "the control is a native button");
   eq(named.type, "button", "the control does not submit");
@@ -120,25 +139,40 @@ const inked = (page) => page.evaluate(() => {
   ok(box.height >= 24 && box.width >= 24, `the control is at least 24 by 24 CSS pixels (${box.width.toFixed(1)} by ${box.height.toFixed(1)})`);
 
   await page.keyboard.press("Enter");
-  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Play", "Enter pauses and the control then reads Play");
+  eq(await label(), "Play", "Enter pauses and the control then reads Play");
   eq(await page.$eval("#marketTicker", (el) => el.dataset.paused), "true", "the paused state is on the marquee");
+  ok(await still(), "the paused marquee stands still while the control keeps focus");
+  await page.keyboard.press("Enter");
+  eq(await label(), "Pause", "Enter again plays and the control reads Pause");
+  ok(await focused(), "the control still has focus");
+  ok(await moves(), "the marquee scrolls again while the control keeps focus");
+
+  await page.keyboard.press("Enter");
   await page.evaluate(() => document.activeElement.blur());
   await page.mouse.move(640, 10);
   const held = await state();
   eq(held.play, "paused", "the pause holds after focus leaves the marquee");
   eq(held.state, "paused", "the scroll animation is paused, not merely hidden");
-  await page.waitForTimeout(600);
-  const later = await state();
-  eq(later.t, held.t, "the paused marquee does not move");
+  ok(await still(), "the paused marquee does not move after focus leaves");
 
   await page.focus(".market-ticker__toggle");
   await page.keyboard.press("Space");
-  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Pause", "Space plays again and the control reads Pause");
-  await page.evaluate(() => document.activeElement.blur());
-  const resumed = await state();
-  eq(resumed.state, "running", "the marquee scrolls again once focus leaves");
-  await page.waitForTimeout(400);
-  ok((await state()).t > resumed.t, "the resumed marquee moves");
+  eq(await label(), "Pause", "Space plays again and the control reads Pause");
+  ok(await moves(), "the marquee resumes on Space with the control still focused");
+
+  const center = await page.$eval(".market-ticker__toggle", (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.click(center.x, center.y);
+  eq(await label(), "Play", "a click pauses");
+  ok(await still(), "the marquee stands still after the click with the pointer on the control");
+  await page.mouse.click(center.x, center.y);
+  eq(await label(), "Pause", "a second click plays");
+  ok(await moves(), "the marquee resumes with the pointer left on the control");
+
+  const track = await page.$eval(".market-ticker__track", (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(track.x, track.y);
+  eq((await state()).play, "paused", "hovering the prices still pauses them");
+  await page.mouse.move(640, 10);
+  ok(await moves(), "the prices move again once the pointer leaves them");
 
   const before = await page.$eval(".market-ticker__toggle", (el) => el.getBoundingClientRect().x);
   await page.waitForTimeout(500);
@@ -147,18 +181,23 @@ const inked = (page) => page.evaluate(() => {
   await context.close();
 }
 
-for (const width of [320, 390]) {
-  const { context, page, errors } = await open("no-preference", { width, height: 800 });
+for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [1280, "no-preference"], [390, "reduce"], [1280, "reduce"]]) {
+  const { context, page, errors } = await open(motion, { width, height: 800 });
+  await page.waitForTimeout(1500);
   const fit = await page.evaluate(() => {
     const t = document.querySelector(".market-ticker__toggle").getBoundingClientRect();
-    return { scroll: document.scrollingElement.scrollWidth, inner: innerWidth, left: t.left, right: t.right };
+    const bar = document.querySelector("#marketTicker").getBoundingClientRect();
+    const foot = document.querySelector(".home-foot").getBoundingClientRect();
+    return { scroll: document.scrollingElement.scrollWidth, inner: innerWidth, left: t.left, right: t.right, barTop: bar.top, barH: bar.height, footBottom: foot.bottom };
   });
-  ok(fit.scroll <= fit.inner, `no horizontal page scroll at ${width} px (${fit.scroll} against ${fit.inner})`);
-  ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px`);
+  ok(fit.scroll <= fit.inner, `no horizontal page scroll at ${width} px, ${motion} (${fit.scroll} against ${fit.inner})`);
+  if (motion === "no-preference") ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px`);
+  ok(fit.barTop >= fit.footBottom, `the marquee bar starts at or below the footer at ${width} px, ${motion} (bar top ${fit.barTop.toFixed(1)}, footer bottom ${fit.footBottom.toFixed(1)})`);
+  ok(fit.barH <= 30.5, `the marquee bar keeps its height at ${width} px, ${motion} (${fit.barH.toFixed(1)} px)`);
   eq(errors.join(" | "), "", `no page error at ${width} px`);
   await context.close();
 }
 
 await browser.close();
 rmSync(scratch, { recursive: true, force: true });
-console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that holds after focus leaves and does not scroll with the prices`);
+console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that plays again while it keeps focus, by key and by a click with the pointer still on it, holds after focus leaves and does not scroll with the prices, and the bar stays clear of the footer at 320, 390 and 1280 px`);
