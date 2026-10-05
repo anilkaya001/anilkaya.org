@@ -1,4 +1,4 @@
-import { buildDossier, renderDossierForModel, DEFAULT_BUDGET_TOKENS, cleanLabel, tms, isoOf, VENDOR_ROUTES } from "./flows-dossier.js";
+import { buildDossier, renderDossierForModel, DEFAULT_BUDGET_TOKENS, cleanLabel, tms, isoOf, VENDOR_ROUTES, EXTRACT_VERSIONS } from "./flows-dossier.js";
 import { REDUCERS, quoteExtract, unwrap } from "./flows-dossier-vendor.js";
 import { buildContext, neuronTier } from "./flows-neuron.js";
 import { screenReading, SCREEN_LINES } from "./flows-neuron-screen.js";
@@ -261,6 +261,8 @@ export function planFetches({ ticker, known, own, cache, fast, held, now, maxCal
     const part = src.fast ? fast[src.id] : cache[src.kind] && cache[src.kind].parts[src.id];
     const at = part && isNum(part.at) ? part.at : null;
     if (src.id === "quote") { need.push({ src, state: "missing", ttl }); continue; }
+    const rv = EXTRACT_VERSIONS[src.id];
+    if (rv !== undefined && part && isObj(part.x) && part.x.ok === true && part.x.rv !== rv) { need.push({ src, state: "outdated", ttl }); continue; }
     if (at !== null && now - at < ttl * 1000) continue;
     need.push({ src, state: at === null ? "missing" : "stale", ttl });
   }
@@ -454,7 +456,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
       }
     })().then((x) => { results[src.id] = { x, at: Date.now() }; return x; }, () => { results[src.id] = { x: { ok: false, reason: "failed", transient: true }, at: Date.now() }; });
     settled.push(run);
-    if (state === "missing") tasks.push({ src, run });
+    if (state === "missing" || state === "outdated") tasks.push({ src, run });
   }
   const timers = [];
   const guard = (src, run) => Promise.race([run, new Promise((resolve) => { timers.push(setTimeout(resolve, budget.sourceMs)); })]);

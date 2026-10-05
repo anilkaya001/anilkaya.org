@@ -236,11 +236,12 @@ function checkDossier(d, label, ticker = T) {
   eq(wire.top[0].dU, 18301514, "ownership: the wire's units_changed is read, as a string of shares");
   eq(wire.top[1].dU, -320, "ownership: and wins over the spec's units_change when both arrive");
   same([wire.change, wire.changeKnown, wire.up, wire.down], [18301194, 2, 1, 1], "ownership: the net change, the holders known, added and trimmed");
-  const derived = V.reduceOwnership({ data: [holder({ units: "1162996939", historical_units: ["1162996939", "1144695425"] }), holder({ short_name: "Other", units: 4103, historical_units: [4103, 4423] })] });
-  same(derived.top.map((t) => t.dU), [18301514, -320], "ownership: with neither name, the change is units less historical_units[1], the prior report (newest first, as the spec's own example and the AAPL sample read)");
+  const derived = V.reduceOwnership({ data: [holder({ units: "1162996939", historical_units: ["1162996939", "1144695425", "1154665731", "1146332274", "1148838990", "1140202870", "1123417607", "1097495138"] }), holder({ short_name: "Other", units: 4103, historical_units: [4103, 4423] })] });
+  same(derived.top.map((t) => t.dU), [18301514, -320], "ownership: with neither name, the change is units less historical_units[1], the prior report, not the oldest (newest first, as the spec's own example and the AAPL sample of eight reports read)");
   eq(derived.changeKnown, 2, "ownership: and a derived change counts as known");
-  const neither = V.reduceOwnership({ data: [holder({ units: 52000000 }), holder({ short_name: "Other", units: 4103, historical_units: [4103] }), holder({ short_name: "Third", units: 100, historical_units: [100, null] })] });
-  same([neither.n, neither.changeKnown, neither.change], [3, 0, 0], "ownership: no units_changed, no units_change and fewer than two usable historical_units leave the change unknown");
+  const neither = V.reduceOwnership({ data: [holder({ units: 52000000 }), holder({ short_name: "Other", units: 4103, historical_units: [4103] }), holder({ short_name: "Third", units: 100, historical_units: [100, null] }),
+    holder({ short_name: "Fourth", units: 5000, historical_units: [4900, 4800] }), holder({ short_name: "Fifth", units: 700, historical_units: [null, 650] })] });
+  same([neither.n, neither.changeKnown, neither.change], [5, 0, 0], "ownership: no units_changed, no units_change and fewer than two usable historical_units, or a history whose newest entry is not the units, leave the change unknown");
   ok(neither.top.every((t) => t.dU === null), "ownership: and no holder's change is invented as zero");
   const posOf = (ownership) => D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: {}, vendor: { ownership } }).packets.positioning;
   const wirePos = posOf(wire);
@@ -253,6 +254,10 @@ function checkDossier(d, label, ticker = T) {
     const w = neitherPos.withheld.find((x) => x.k === k);
     ok(w && w.reason.startsWith("absent: "), "positioning: " + k + " is withheld with reason absent, not silently dropped");
   }
+  ok([own, wire, derived, neither].every((x) => x.rv === D.EXTRACT_VERSIONS.ownership), "ownership: every extract carries the reducer's version stamp");
+  const { rv: _rv, ...unstamped } = neither;
+  const oldPos = posOf(unstamped);
+  ok(oldPos.facts.some((f) => f.k === "inst.holders") && !oldPos.withheld.some((w) => w.k.startsWith("inst.")), "positioning: an extract cached before the stamp withholds nothing about the change, as before, because its reducer never read the wire name");
   const sh = V.reduceShort(F.vendorBody("short"));
   eq(sh.date, "2026-09-15", "short interest: the newest settlement");
   eq(sh.shares, 9800000, "short interest: short_interest");

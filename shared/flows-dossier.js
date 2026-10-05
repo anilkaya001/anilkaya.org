@@ -393,6 +393,8 @@ export const VENDOR_ROUTES = Object.freeze({
   quote: "/api/stock/{ticker}/stock-state",
 });
 
+export const EXTRACT_VERSIONS = Object.freeze({ ownership: 2 });
+
 const ctxOf = (inp) => ({
   ticker: String((inp && inp.ticker) || "").toUpperCase(),
   now: isNum(inp && inp.now) ? inp.now : Date.now(),
@@ -1241,7 +1243,7 @@ export function buildPositioningPacket(inp) {
       rec.fact("inst.change", "Net change in their shares since the prior report", own.change, "shares", { signed: true, grade: 2 });
       rec.fact("inst.up", "Holders that added", own.up, "count", { grade: 2, silent: true });
       rec.fact("inst.down", "Holders that trimmed", own.down, "count", { grade: 2, silent: true });
-    } else {
+    } else if (own.rv === EXTRACT_VERSIONS.ownership) {
       const reason = why("absent", "no holder row carries units_changed, units_change or two historical_units");
       for (const k of ["inst.change", "inst.up", "inst.down"]) rec.hold(k, reason);
     }

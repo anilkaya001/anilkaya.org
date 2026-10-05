@@ -1,5 +1,5 @@
 import { vnum, isoDay } from "./flows-cross.js";
-import { cleanLabel, tms, isoOf, VENDOR_ROUTES } from "./flows-dossier.js";
+import { cleanLabel, tms, isoOf, VENDOR_ROUTES, EXTRACT_VERSIONS } from "./flows-dossier.js";
 import { unwrap, VENDOR_ENVELOPE } from "./flows-vendor-core.js";
 
 export { unwrap };
@@ -226,8 +226,8 @@ export function reduceAnalysts(raw, ticker) {
 
 function unitsChange(r, u) {
   const hist = arr(r.historical_units);
-  const prior = hist.length >= 2 ? vnum(hist[1]) : null;
-  const derived = u !== null && prior !== null ? u - prior : null;
+  const prior = hist.length >= 2 && u !== null && vnum(hist[0]) === u ? vnum(hist[1]) : null;
+  const derived = prior !== null ? u - prior : null;
   return vnum(r.units_changed) ?? vnum(r.units_change) ?? derived;
 }
 
@@ -248,6 +248,7 @@ export function reduceOwnership(raw) {
   const dates = rows.map((r) => r.rd).filter(Boolean).sort();
   return {
     ok: true,
+    rv: EXTRACT_VERSIONS.ownership,
     n: rows.length,
     so,
     reportDate: dates.length ? dates[dates.length - 1] : null,
