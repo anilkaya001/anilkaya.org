@@ -87,7 +87,11 @@ export function modelCallReport(files = modelCallFiles(), read = moduleSource) {
   return { files: files.length, reads, tests, runs, askSites, metered, cappedDeps, importErrors };
 }
 
-const twoArgs = (args) => Array.isArray(args) && args.length === 2 && args.every(Boolean);
+const NO_READER = /^\(*\s*(?:null|undefined|void\b[\s\S]*|false|true|0|NaN|""|''|``|\(\s*\))\s*\)*$/;
+
+export const spendReaderArg = (arg) => typeof arg === "string" && arg.length > 0 && !NO_READER.test(arg);
+
+const twoArgs = (args) => Array.isArray(args) && args.length === 2 && Boolean(args[0]) && spendReaderArg(args[1]);
 
 export function checkModelCalls(report = modelCallReport()) {
   const problems = [];

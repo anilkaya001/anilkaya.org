@@ -307,6 +307,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const first = await summary(get);
   eq(first.body.read.status, "generating", "BUDGET: the first call is generating");
   eq(ai.log.reads.length, 0, "the cap refuses the call before the model is reached");
+  eq(ai.log.other.length, 0, "and the Neuron's own call, through meteredAi in worker.js, is refused by the same cap");
   const row = readRow(f);
   eq(row.guard, "unreachable:budget", "and the row records the budget refusal: " + row.guard);
   const next = await summary(get);
@@ -550,6 +551,24 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   await h.settle();
   eq(h.body.dossierFacts, 0, "and an unknown ticker adds no fact and no error");
   eq(h.res.status, 200, "200");
+}
+
+{
+  const f = world();
+  F.seed(f, { live: false });
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/meta");
+  const day = new Date().toISOString().slice(0, 10);
+  f.db.prepare("INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 100, 7000000, 100000)").run(day);
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const a = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
+  await a.settle();
+  eq(a.res.status, 200, "ASK PAST THE CAP: the question still answers 200");
+  eq(ai.log.reads.length + ai.log.other.length, 0, "and the Ask box's call, through meteredAi in worker.js, is refused by the day's cap before the model is reached");
+  eq(a.body.llm, false, "the pipeline's own wording stands");
+  ok(/model budget this site allows itself for one day is spent/.test(a.body.note || ""), "and the reader is told the site's own budget is spent: " + a.body.note);
 }
 
 {

@@ -91,9 +91,19 @@ Browser ──► Cloudflare edge
   exactly one read of the `AI` binding into a value, in `shared/flows-ai.js`:
   a property access, a bracketed or destructured read, a destructured
   parameter and any other bare `AI` token elsewhere fail, and only
-  `!x.AI` and `Boolean(x && x.AI)` count as truthiness tests. At run time
-  (`guardAi`), the in-process suites hand `worker.js` a binding whose `run`
-  throws unless it is called from inside `cappedAi`'s own lines.
+  `!x.AI` and `Boolean(x && x.AI)` count as truthiness tests. A quoted `"AI"`
+  string is not treated as a read (the entity allowlists need it), so computed
+  access (`Reflect.get(env, "AI")`, a key held in a constant,
+  `String.fromCharCode`) is caught only by the runtime guard, and only on the
+  paths the in-process suites drive. Every `cappedAi` that builds `meteredAi`,
+  the reading's `deps.ai` or an inline `askModels` argument must have a second
+  argument that is not a `null`, `undefined`, `void` or other non-function
+  literal; that the reader really reads the day's spend is proved by
+  `flows-reading-worker`, which drives the summary and Ask routes through
+  `worker.js` with `flows_ai_usage` past the cap and requires that no model
+  is reached. At run time (`guardAi`), the in-process suites hand `worker.js`
+  a binding whose `run` throws unless it is called from inside `cappedAi`'s
+  own lines.
 
 ### External deployment state
 

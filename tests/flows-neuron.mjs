@@ -21,7 +21,7 @@ import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard
          AI_CAP_DEFAULT_CALLS, AI_WORST_RATES } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 import { workerSource, closure, slice, where, count, expect, absent, parseImports } from "./lib/source-scan.mjs";
-import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, AI_HOME } from "./lib/ai-guard.mjs";
+import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, spendReaderArg, AI_HOME } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -1102,7 +1102,7 @@ const CARD = {
   const metered = report.askSites.filter((a) => a.arg === "meteredAi(env)").length;
   ok(sites >= 5 && metered >= 4 && report.askSites.every((a) => a.arg === "meteredAi(env)" || a.arg === "deps.ai()") && report.cappedDeps.length === 1 &&
     report.metered.length === 1 && report.metered[0].args.length === 2 && report.cappedDeps[0].args.length === 2,
-    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep, each built once by cappedAi with env and a spend reader`);
+    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep, each built once by cappedAi with env and a second argument that is not a null, undefined or void literal (that it reads the day's spend is proved by driving worker.js past the cap in flows-reading-worker)`);
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
     "and the cap is written down in wrangler.toml, where a deploy shows it");
@@ -1175,6 +1175,16 @@ const CARD = {
     "MUTATION: meteredAi rebuilt as env[\"\\x41I\"], which no text scan reads as the binding, fails it on the missing cappedAi anchor");
   ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, "const meteredAi = (env) => cappedAi(env);")).some((p) => /builds meteredAi with cappedAi\(env\), not with env and a spend reader/.test(p)),
     "MUTATION: meteredAi built by cappedAi(env) with no spend reader fails it");
+  for (const reader of ["null", "undefined", "void 0", "(null)", "void (0)"]) {
+    ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, `const meteredAi = (env) => cappedAi(env, ${reader});`)).some((p) => p.includes(`builds meteredAi with cappedAi(env, ${reader}), not with env and a spend reader`)),
+      `MUTATION: meteredAi built by cappedAi(env, ${reader}), which never reads the day's spend, fails it`);
+    ok(mutate("server/flows-mutant.js", `import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env, ${reader}), c, m, {});\n`).some((p) => p.endsWith(`unmetered binding: cappedAi(env, ${reader})`)),
+      `MUTATION: askModels handed cappedAi(env, ${reader}) inline in a new server/ module fails it`);
+  }
+  ok(mutate("worker.js", workerText.replace(/(ai: \(\) => cappedAi\(\{[^\n]*\}), env\.DB \? \(\) => askSpendStrict\(env\) : null\)/, "$1, undefined)")).some((p) => /builds deps\.ai with cappedAi\(.*, undefined\), not with env and a spend reader/.test(p)),
+    "MUTATION: the reading's deps.ai built with an undefined spend reader fails it");
+  ok(["() => askSpendStrict(env)", "env.DB ? () => askSpendStrict(env) : null", "readSpend"].every(spendReaderArg) && !["", "null", " undefined ", "void 0", "false", "0", "''"].some(spendReaderArg),
+    "a spend reader is any expression but a literal that cannot be a function");
   ok(mutate("shared/flows-quant-mutant.js", 'export const load = (name) => import(name);\n').some((p) => /flows-quant-mutant\.js:1 has a non-literal import\(\)/.test(p)),
     "MUTATION: a computed import() in a shared/ module that no closure walk visits fails it");
   same(mutate("worker.js", workerText), [], "and the unmutated tree passes");
