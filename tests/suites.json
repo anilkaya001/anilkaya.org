@@ -56,7 +56,7 @@
     {"name": "flows-political-render", "class": "W", "medianS": 20.8},
     {"name": "flows-watch-render", "class": "W", "medianS": 24.1},
     {"name": "flows-board-render", "class": "W", "medianS": 43.3},
-    {"name": "flows-net-render", "class": "C", "medianS": 200},
+    {"name": "flows-net-render", "class": "C", "medianS": 180},
     {"name": "flows-weight", "class": "N", "medianS": 0.1},
     {"name": "flows-strip", "class": "C", "medianS": 78.8},
     {"name": "flows-strategy", "class": "W", "medianS": 21.8},

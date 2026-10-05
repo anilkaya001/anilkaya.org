@@ -512,17 +512,17 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 }
 
 const PUBLISHED_SHARDS = [
-  ["flows-legs", "flows-worker", "flows-basis", "flows-scores", "flows-pulse", "flows-ledger", "flows-warnings", "flows-quant-audit", "flows-reading-render"],
-  ["markets", "market-ticker", "worker", "flows-chain", "flows-desk-client", "flows-ticker", "flows-motion", "flows-stock", "flows-overlay",
-    "flows-board-render", "flows-sign", "flows-quant", "flows-vol"],
-  ["flows-probe", "flows-record", "flows-sections", "flows-legacy", "flows-unusual", "flows-freshness", "flows-reads", "flows-permits", "flows-net-render",
-    "flows-ask-render", "flows-neuron", "flows-positioning", "flows-dossier-reads"],
-  ["flows", "pipeline", "mastery", "placement", "flows-overview", "flows-events", "flows-mint", "flows-live", "flows-rt",
-    "flows-starts", "flows-political", "flows-ask", "flows-garch", "flows-neuron-screen"],
-  ["flows-ws-probe", "flows-universe", "flows-rt-server", "flows-desk", "flows-desk-wiring", "flows-alerts", "flows-readers", "flows-political-render", "flows-watch-render",
-    "flows-weight", "flows-strip", "flows-dossier", "flows-reading", "flows-reading-worker"],
-  ["flows-chain-panels", "academy", "flows-rt-client", "flows-market", "flows-render", "browser", "flows-payload-shape", "flows-readers-render", "flows-verdict",
-    "flows-strategy", "flows-brief", "flows-track-render", "flows-quant-card", "flows-variation"],
+  ["market-ticker", "flows-probe", "flows-worker", "flows-basis", "flows-warnings", "flows-neuron", "flows-variation", "flows-reading-render"],
+  ["markets", "flows-universe", "placement", "flows-ticker", "flows-readers-render", "flows-verdict", "flows-stock", "flows-overlay", "flows-political-render",
+    "flows-board-render", "flows-quant", "flows-quant-audit"],
+  ["pipeline", "flows-record", "academy", "flows-sections", "flows-legacy", "flows-unusual", "flows-payload-shape", "flows-reads", "flows-ledger",
+    "flows-permits", "flows-strategy", "flows-dossier-reads", "flows-reading"],
+  ["flows", "flows-rt-client", "flows-chain", "flows-market", "flows-motion", "flows-events", "flows-alerts", "flows-live", "flows-readers",
+    "flows-political", "flows-net-render", "flows-track-render", "flows-sign", "flows-quant-card"],
+  ["flows-ws-probe", "flows-chain-panels", "flows-rt-server", "flows-desk", "flows-desk-wiring", "flows-pulse", "flows-freshness", "flows-watch-render", "flows-strip",
+    "flows-brief", "flows-ask", "flows-ask-render", "flows-garch", "flows-neuron-screen", "flows-reading-worker"],
+  ["flows-legs", "mastery", "worker", "flows-desk-client", "flows-overview", "flows-render", "browser", "flows-scores", "flows-mint",
+    "flows-rt", "flows-starts", "flows-weight", "flows-vol", "flows-positioning", "flows-dossier"],
 ];
 const CI_SHARDS = 6;
 

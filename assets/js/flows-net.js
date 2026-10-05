@@ -622,7 +622,7 @@
 
     function rebuild() {
       compact = (stage.clientWidth || host.clientWidth || 640) < 560;
-      M = S.rows.length ? model(S.rows, { out: mode, names: cfg.names || (compact ? clamp(Math.floor((stage.clientWidth || 300) / 44), 5, 9) : 10), session: S.session, sectorOf: secFn(), unread: U.state === "fail" }) : null;
+      M = S.rows.length ? model(S.rows, { out: mode, names: cfg.names || (compact ? clamp(Math.floor((stage.clientWidth || 300) / 46), 5, 9) : 10), session: S.session, sectorOf: secFn(), unread: U.state === "fail" }) : null;
       if (M && !M.windows) M = null;
       const was = new Map(N);
       N.clear();
@@ -1157,15 +1157,21 @@
       for (let i = 0; i < k; i++) { const q = list[i].lb, m = i ? list[i - 1].lb[a] + list[i - 1].lb[s] + 2 : lo; if (q[a] < m) q[a] = m; }
     }
 
-    const ARR = [[1, 1, 0], [1, 1, 1], [0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 2], [0, 0, 2], [0, 1, 2]];
+    const ARR = [];
+    for (const f of [[0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [2, 1], [0, 2], [1, 2], [2, 2]]) for (const sd of [[1, 1], [0, 0], [0, 1]]) ARR.push([sd[0], sd[1], f[0], f[1]]);
     const FORMS = ["L", "T", "S"], CAPO = [0, 1, 2, 3].map((li) => ({ li, lb: [0, 0, 0, 0] })), CS = [];
     const sideOf = (cf, li) => (li === 0 ? 0 : li === 3 ? 1 : cf[li - 1]);
+    function pitchOf(list, a) {
+      let p = 1e9;
+      for (let i = 1; i < list.length; i++) { const d = Math.abs(list[i][a] - list[i - 1][a]); if (d < p) p = d; }
+      for (const n of list) n.pp = p;
+    }
     let CF = ARR[0];
     function lay(cf) {
       for (let li = 0; li < 4; li++) {
         const L = LN[li];
         if (!L.length) continue;
-        const right = sideOf(cf, li), form = li === 1 || li === 2 ? cf[2] : 0;
+        const right = sideOf(cf, li), form = li === 1 ? cf[2] : li === 2 ? cf[3] : 0;
         let row = VERT ? (li === 0 ? 1e9 : -1e9) : 0;
         if (VERT) for (const n of L) row = li === 0 ? Math.min(row, n.py - n.cr * n.ps) : Math.max(row, n.py + n.cr * n.ps);
         for (let j = 0; j < L.length; j++) {
@@ -1182,8 +1188,8 @@
             lb[1] = n.py - S.h / 2;
           }
         }
-        if (VERT) for (const T of LT[li]) spread(T, 0, 20, W - 2);
-        else spread(L, 1, 2, H - 2);
+        if (VERT) for (const T of LT[li]) { pitchOf(T, "px"); spread(T, 0, 20, W - 2); }
+        else { pitchOf(L, "py"); spread(L, 1, 2, H - 2); }
       }
       CS.length = 0;
       for (const o of CAPO) {
@@ -1215,11 +1221,13 @@
     }
     const over = (a, b) => a[0] < b[0] + b[2] - 0.5 && b[0] < a[0] + a[2] - 0.5 && a[1] < b[1] + b[3] - 0.5 && b[1] < a[1] + a[3] - 0.5;
     const SB = [0, 0, 0, 0];
+    const adrift = (n) => (VERT ? Math.abs(n.lb[0] + n.lb[2] / 2 - n.px) - Math.min(n.pp / 2, n.lb[2]) : Math.abs(n.lb[1] + n.lb[3] / 2 - n.py) - Math.min(n.pp / 2, n.lb[3]));
     function clash(stop) {
       let k = 0;
       for (let i = 0; i < NL.length; i++) {
         const a = NL[i].lb;
         if (a[0] < 0 || a[1] < 0 || a[0] + a[2] > W || a[1] + a[3] > H) k++;
+        if (adrift(NL[i]) > 0.01) k++;
         for (let j = i + 1; j < NL.length; j++) if (over(a, NL[j].lb)) k++;
         for (const o of CS) if (over(a, o.lb)) k++;
         for (const b of NL) {
@@ -1251,17 +1259,17 @@
       if (!LN[0].length && !LN[1].length) return;
       arrange();
       c.globalAlpha = 1;
-      c.strokeStyle = "rgba(200,210,235,0.5)";
-      c.lineWidth = 1;
-      c.beginPath();
+      c.lineWidth = 1.5;
       for (const n of NL) {
         const lb = n.lb, r = n.cr * n.ps;
         const off = VERT ? Math.abs(lb[0] + lb[2] / 2 - n.px) : Math.abs(lb[1] + lb[3] / 2 - n.py);
         if (off <= 4) continue;
+        c.strokeStyle = rgba(n.col, 0.75 * n.fog);
+        c.beginPath();
         if (VERT) { c.moveTo(n.px, n.py + (lb[1] > n.py ? r : -r)); c.lineTo(lb[0] + lb[2] / 2, lb[1] > n.py ? lb[1] : lb[1] + lb[3]); }
         else { c.moveTo(n.px + (lb[0] > n.px ? r : -r), n.py); c.lineTo(lb[0] > n.px ? lb[0] : lb[0] + lb[2], lb[1] + lb[3] / 2); }
+        c.stroke();
       }
-      c.stroke();
       c.fillStyle = "rgba(6,8,14,0.9)";
       c.beginPath();
       for (const n of NL) {
@@ -1298,7 +1306,8 @@
       if (!M || !NL.length) return;
       const sv = NL.map((n) => [n.x, n.y, n.z, n.cr]), y0 = cam.yaw, p0 = cam.pitch, [ry, rp] = REST;
       for (const n of NL) { n.x = n.tx; n.y = n.ty; n.z = n.tz; n.cr = n.r; }
-      for (const a of [9, 4.5]) if ([-1, 1].every((k) => fits(ry + k * a * DEG, rp + k * 1.8 * DEG) && fits(ry + k * a * DEG, rp - k * 1.8 * DEG))) { cam.sw = a * DEG; break; }
+      const sway = (a) => { for (let i = 0; i < 8; i++) { const y = ry + a * DEG * Math.sin(i * TAU / 8); if (!fits(y, rp + a * 0.2 * DEG) || !fits(y, rp - a * 0.2 * DEG)) return false; } return true; };
+      for (const a of [9, 4.5]) if (sway(a)) { cam.sw = a * DEG; break; }
       let t = 1;
       if (!fits(y0, p0) && fits(ry, rp)) {
         let lo = 0, hi = 1;
@@ -1533,7 +1542,8 @@
       orbit: (yaw, pitch) => { cam.vy = cam.vp = 0; orbit((yaw * DEG - cam.yaw) / (0.32 * DEG), (pitch * DEG - cam.pitch) / (0.22 * DEG)); paint(); return api.camera(); },
       recentre,
       paints: () => { TRACE = []; if (!COL) colors(); draw(); const o = TRACE; TRACE = null; return o; },
-      labels: () => NL.map((n) => ({ id: n.id, x: n.lb[0], y: n.lb[1], w: n.lb[2], h: n.lb[3], form: ["line", "two", "short"][n.form || 0] })).concat(CS.map((o) => ({ id: "cap:" + o.li, x: o.lb[0], y: o.lb[1], w: o.lb[2], h: o.lb[3] }))),
+      labels: () => NL.map((n) => ({ id: n.id, x: n.lb[0], y: n.lb[1], w: n.lb[2], h: n.lb[3], form: ["line", "two", "short"][n.form || 0], pitch: n.pp })).concat(CS.map((o) => ({ id: "cap:" + o.li, x: o.lb[0], y: o.lb[1], w: o.lb[2], h: o.lb[3] }))),
+      fits: (yaw, pitch) => { const y = cam.yaw, p = cam.pitch, f = fits(yaw * DEG, pitch * DEG); setCam(y, p); fit(NL, false); arrange(); return f; },
       node: (id) => { const n = N.get(id); return n ? { x: n.px, y: n.py, r: n.cr * n.ps, z: n.pz, lit: n.tl, label: n.d.label, v: n.d.v } : null; },
     };
     NETS.set(host, api);

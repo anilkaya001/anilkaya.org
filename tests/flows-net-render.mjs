@@ -156,8 +156,27 @@ const overlaps = (boxes) => {
   return bad;
 };
 
+const adrift = (labels, layout, vert) => {
+  const bad = [], at = new Map(layout.flat().map((d) => [d.id, d]));
+  const tiers = new Map();
+  for (const l of labels) {
+    if (!at.has(l.id)) continue;
+    const key = at.get(l.id).layer + ":" + (vert ? Math.round(l.y / 4) : 0);
+    if (!tiers.has(key)) tiers.set(key, []);
+    tiers.get(key).push(l);
+  }
+  for (const group of tiers.values()) {
+    const xs = group.map((l) => (vert ? at.get(l.id).x : at.get(l.id).y)).sort((a, b) => a - b);
+    const pitch = xs.length > 1 ? Math.min(...xs.slice(1).map((x, i) => x - xs[i])) : Infinity;
+    for (const l of group) {
+      const d = at.get(l.id), off = vert ? Math.abs(l.x + l.w / 2 - d.x) : Math.abs(l.y + l.h / 2 - d.y), lim = Math.min(pitch / 2, vert ? l.w : l.h);
+      if (off > lim + 0.05) bad.push(`${l.id} sits ${off.toFixed(1)} px from its sphere, over ${lim.toFixed(1)} (${vert ? "column" : "row"} pitch ${pitch.toFixed(1)})`);
+    }
+  }
+  return bad;
+};
 const RESID_ORDER = ["s:~", "s:none", "s:unread", "s:wait"];
-const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; }));`);
+const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; }));`);
 async function ranked(page, tag, axis = "y") {
   return rankedL(await layout(page), tag, axis);
 }
@@ -448,6 +467,7 @@ try {
         const outside = r.labels.filter((l) => l.x < -1 || l.y < -1 || l.x + l.w > r.w + 1 || l.y + l.h > r.h + 1).map((l) => l.id + " " + [l.x, l.y, l.w, l.h].map(Math.round).join(",") + " in " + r.w + "x" + r.h);
         deep(outside, [], `no label or caption leaves the canvas at ${at}`);
         deep(overlaps(r.labels), [], `no two labels or captions collide at ${at}`);
+        deep(adrift(r.labels, r.layout, width < 560), [], `EVERY LABEL STAYS WITHIN HALF A PITCH OF ITS OWN SPHERE at ${at}`);
         ok(Math.abs(r.yaw) <= ly + 1e-9 && Math.abs(r.pitch) <= lp + 1e-9, `the camera stays inside its limits at ${at}`);
         rankedL(r.layout, at, width < 560 ? "x" : "y");
       }
@@ -466,6 +486,16 @@ try {
       await page.waitForTimeout(2200);
       const labels = await net(page, "return net.labels();");
       deep(overlaps(labels), [], `no two labels collide at ${width}px (${mode}) under the automatic sway`);
+      deep(adrift(labels, await layout(page), width < 560), [], `and every label stays by its sphere under the sway at ${width}px (${mode})`);
+      const sw = await camera(page), path = [];
+      for (let i = 0; i < 8; i++) for (const k of [-1, 1]) path.push([sw.rest[0] + sw.sway * Math.sin(i * Math.PI / 4), sw.rest[1] + k * sw.sway * 0.2]);
+      const along = await sweep(page, path);
+      for (const r of along) {
+        const at = `${width}px, ${mode}, sway phase at yaw ${r.y.toFixed(1)} pitch ${r.p.toFixed(1)}`;
+        ok(Math.abs(r.yaw - r.y) < 1e-6 && Math.abs(r.pitch - r.p) < 1e-6, `the sway path is reached without clamping at ${at} (${r.yaw.toFixed(2)}, ${r.pitch.toFixed(2)})`);
+        deep(overlaps(r.labels), [], `no two labels or captions collide at ${at}`);
+        deep(adrift(r.labels, r.layout, width < 560), [], `every label stays within half a pitch of its sphere at ${at}`);
+      }
       if (mode === "lean") {
         await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
         if (width === 1440) { await shot(page, "net-1440", "net"); await shot(page, "page-1440", "first"); }
@@ -492,14 +522,25 @@ try {
     ok(moved >= before.flat().length - 2, `and the projected nodes move with it (${moved} of ${before.flat().length})`);
     await ranked(page, "after a drag");
     eq(page.url(), "https://example.test/flows/unusual/", "a drag that ends over a name does not open it");
+    const tight = async (c, dy, dp, tag) => {
+      const uy = Math.abs(Math.abs(c.yaw) - 55) < 1e-6 ? 0 : dy / Math.max(Math.abs(dy), Math.abs(dp)), up = Math.abs(Math.abs(c.pitch) - 22) < 1e-6 ? 0 : dp / Math.max(Math.abs(dy), Math.abs(dp));
+      const f = await net(page, "return [net.fits(arg[0], arg[1]), net.fits(arg[0] + arg[2], arg[1] + arg[3])];", [c.yaw, c.pitch, 1.5 * uy, 1.5 * up]);
+      ok(Math.abs(c.yaw) <= 55 + 1e-9 && Math.abs(c.pitch) <= 22 + 1e-9 && f[0], `${tag}: the camera stops inside its limits at an angle where every label fits (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+      ok((!uy && !up) || !f[1], `${tag}: the stop is the literal corner or no label arrangement fits 1.5 degrees further along the drag (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+      const L = await net(page, "return net.labels();");
+      deep(overlaps(L), [], `${tag}: no two labels collide where the drag stopped`);
+      deep(adrift(L, await layout(page), false), [], `${tag}: every label stays within half a pitch of its sphere where the drag stopped`);
+    };
     await drag(page, 1200, 300, { x: 0.05, y: 0.3 });
     let c = await camera(page);
-    ok(Math.abs(c.yaw - 55) < 1e-6 && Math.abs(c.pitch - 22) < 1e-6, `a long drag clamps at the limits (${c.yaw}, ${c.pitch})`);
+    ok(c.yaw > 50 && c.pitch > 18, `a long drag clamps at or just inside the yaw and pitch limits (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+    await tight(c, 1200 * 0.32, 300 * 0.22, "dragged to the right and up");
     await ranked(page, "dragged to the yaw and pitch limits");
     await shot(page, "net-1440-orbit-right", "net");
     await drag(page, -1300, -300, { x: 0.97, y: 0.6 });
     c = await camera(page);
-    ok(Math.abs(c.yaw + 55) < 1e-6 && Math.abs(c.pitch + 22) < 1e-6, `and the other way (${c.yaw}, ${c.pitch})`);
+    ok(c.yaw < -50 && c.pitch < -18, `and the other way (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+    await tight(c, -1300 * 0.32, -300 * 0.22, "dragged to the left and down");
     await net(page, "net.orbit(-55, arg); return null;", c0.rest[1]);
     await shot(page, "net-1440-orbit-left", "net");
     await net(page, "net.orbit(-40, 10); return null;");
@@ -707,10 +748,11 @@ try {
         const n = window.FlowsUI.net.mount(host, { universe: false });
         n.take(flow, { state: "ok" });
         n.orbit(40, 20);
-        return w + ":" + n.stats().layers.join("-") + ":" + (n.camera().zoom > 0);
+        return w + ":" + n.stats().layers.join("-") + ":" + (n.camera().zoom > 0) + ":" + n.stats().w;
       } catch (e) { return w + ":threw " + e; }
     }), alerts());
-    ok(tiny.every((t) => /^\d+:\d+-\d+-\d+-\d+:true$/.test(t)), `mounting in a host 0, 20 or 40 px wide draws without throwing, at a positive zoom (${tiny.join(" ")})`);
+    deep(tiny.map((t) => t.replace(/^(\d+):\d+-\d+-\d+-\d+:true:(\d+)$/, "$1>$2")), ["0>16", "20>36", "40>56"],
+      `mounting in a host 0, 20 or 40 px wide lays out at the stage's own width, 16 px wider than the host for its negative margins, at a positive zoom without throwing (${tiny.join(" ")}); none of them reaches size()'s 640 px fallback, which needs a stage with no width at all`);
     deep(u.rank.sectors, ["Energy", "No sector"], "No sector sits below a smaller ranked sector");
     deep(u.rank.out, ["0DTE", "32+ days", "No expiry"], "the expiry layer ranks by premium, and No expiry, its residual, sits last although it carries the most");
     eq(u.ct.w1ok, 52, "an expiry whose every window states its size carries their contracts");
@@ -801,4 +843,4 @@ console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn i
   `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
   `hit targets that follow the camera, back-to-front depth order, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
   `the expiry output, a flare on a new window, pause when hidden or off screen, pending, empty, failed and unread states, ` +
-  `no overflow and no label or caption collision at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host under 60 px, and CPU per frame`);
+  `no overflow, no label or caption collision and every label within half a pitch of its own sphere at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, along the sway path and where a long drag stops, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host 20 or 40 px wide and the 640 px fallback of a 0 px one, and CPU per frame`);
