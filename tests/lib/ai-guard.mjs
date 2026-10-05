@@ -13,11 +13,20 @@ export function bindingReads(files = modelCallFiles(), read = moduleSource) {
   const tests = [];
   for (const file of files) {
     const text = read(file);
+    const seen = [];
+    const take = (list, m) => {
+      seen.push([m.index, m.index + m[0].length]);
+      list.push({ file, line: lineOf(text, m.index), text: m[0].trim() });
+    };
     for (const m of text.matchAll(/(!\s*|Boolean\(\s*(?:[\w$]+\s*&&\s*)?)?[\w$\])]+\s*(?:\?\.|\.)\s*AI\b(\s*(?:\?\.|\.|\(|\[))?/g)) {
-      (m[1] && !m[2] ? tests : reads).push({ file, line: lineOf(text, m.index), text: m[0].trim() });
+      take(m[1] && !m[2] ? tests : reads, m);
     }
-    for (const m of text.matchAll(/\[\s*["'`]AI["'`]\s*\]|\{[^{}]*\bAI\b[^{}]*\}\s*=(?!=)/g)) {
-      reads.push({ file, line: lineOf(text, m.index), text: m[0].trim() });
+    for (const m of text.matchAll(/\[\s*["'`]AI["'`]\s*\]|\{[^{}]*\bAI\b[^{}]*\}\s*=(?!=)/g)) take(reads, m);
+    for (const m of text.matchAll(/(["'`])AI\1|(?<![\w$])AI(?![\w$])/g)) {
+      if (m[1] || seen.some(([from, to]) => m.index >= from && m.index < to)) continue;
+      const end = text.indexOf("\n", m.index);
+      const from = text.lastIndexOf("\n", m.index) + 1;
+      reads.push({ file, line: lineOf(text, m.index), text: text.slice(from, end < 0 ? text.length : end).trim() });
     }
   }
   return { reads, tests };

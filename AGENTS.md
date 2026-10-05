@@ -84,8 +84,16 @@ Browser ──► Cloudflare edge
   `FLOWS_AI_DAILY_CAP_CALLS` (2,500), or when the spend cannot be read. The
   refusal is the failure reason `budget`; the deterministic reading stands and
   the reader is told the site's own budget is spent. A model with no configured
-  rate is priced at the dearest model on the plan. `tests/flows-neuron.mjs`
-  scans `worker.js` so no call site can run the binding itself.
+  rate is priced at the dearest model on the plan. `tests/lib/ai-guard.mjs`
+  holds this in two halves. Statically (`checkModelCalls`, run by
+  `flows-neuron` and `flows-reading-worker`), it reads `worker.js`'s whole
+  import closure plus every file under `shared/` and `server/` and allows
+  exactly one read of the `AI` binding into a value, in `shared/flows-ai.js`:
+  a property access, a bracketed or destructured read, a destructured
+  parameter and any other bare `AI` token elsewhere fail, and only
+  `!x.AI` and `Boolean(x && x.AI)` count as truthiness tests. At run time
+  (`guardAi`), the in-process suites hand `worker.js` a binding whose `run`
+  throws unless it is called from inside `cappedAi`'s own lines.
 
 ### External deployment state
 
@@ -789,6 +797,12 @@ The suites prove:
   keyboard persistence, blocked/malformed/quota-limited storage, score
   reconciliation, boot live-region output, grading edge cases, exact rewards,
   and duplicate-award prevention.
+
+Source scans go through `tests/lib/source-scan.mjs`, never a raw read of
+`worker.js`: `workerSource()` is the Worker's whole import closure, `slice()`
+throws on a missing marker or a cut across a module boundary, `expect()`
+takes a `min` of at least 1, and `absent()` requires a positive `anchor` that
+must match the same source, so no scan passes on an empty match.
 
 GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
 manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.

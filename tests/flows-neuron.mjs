@@ -1147,6 +1147,19 @@ const CARD = {
   ok(mutate("shared/flows-mutant.js", 'export const f = (env) => { const { AI } = env; return AI.run("m", {}); };\n').length > 0 &&
      mutate("shared/flows-mutant.js", 'export const f = (env) => env["AI"].run("m", {});\n').length > 0,
     "MUTATION: a destructured or bracketed read fails it");
+  ok(mutate("shared/flows-mutant.js", 'export const f = ({ AI }) => AI.run("m", {});\n').some((p) => /flows-mutant\.js:1 reads the AI binding/.test(p)),
+    "MUTATION: a destructured parameter, ({ AI }) => AI.run(, fails it");
+  ok(mutate("server/flows-mutant.js", 'export default async ({ request, env: { AI } }) => AI.run("m", { request });\n').some((p) => /flows-mutant\.js:1 reads the AI binding/.test(p)),
+    "MUTATION: the router-style nested parameter, ({ request, env: { AI } }) => AI.run(, fails it");
+  for (const src of [
+    'export function handler(req, { AI, DB }) { return AI.run("m", { req, DB }); }\n',
+    'export const f = ({ AI: model }) => model.run("m", {});\n',
+    'export const f = (ctx) => { const { env: { AI } } = ctx; return AI.run("m", {}); };\n',
+    'export const f = ({ AI }, m) => AI.run(m, {});\n',
+  ]) ok(mutate("shared/flows-mutant.js", src).some((p) => /flows-mutant\.js:1 reads the AI binding/.test(p)),
+    "MUTATION: a binding read by destructuring in any position fails it: " + src.trim());
+  same(mutate("shared/flows-mutant.js", 'export const label = "AI";\nexport const has = (env) => !env.AI;\n'), [],
+    "and the quoted name and a truthiness test of the binding are not reads");
   ok(mutate("shared/flows-mutant.js", 'export const f = (ai) => ai.run("m", {});\n').some((p) => /runs ai\.run\( outside/.test(p)),
     "MUTATION: an ai.run( outside the AI module fails it");
   ok(mutate("server/flows-mutant.js", 'import { askModels } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(env.AI, c, m, {});\n').some((p) => /unmetered binding: env\.AI/.test(p)),
