@@ -6,9 +6,9 @@ import * as DW from "../shared/flows-dossier-worker.js";
 import * as D from "../shared/flows-dossier.js";
 import { universeValue, buildUniverse } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
-import { fakeD1, shiftClock, cacheFake, vendorStub, client } from "./dossier-harness.mjs";
+import { fakeD1, shiftClock, cacheFake, vendorStub, client as harnessClient } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
-import { assertAiGuarded } from "./lib/ai-guard.mjs";
+import { assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -20,6 +20,9 @@ const restoreClock = shiftClock();
 const cache = cacheFake();
 const stub = vendorStub();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const modelRuns = [];
+const scriptedAi = { run: async (model) => { modelRuns.push(model); throw new Error("dossier assembly must never call a model"); } };
+const client = (D1, extra = {}) => harnessClient(D1, { AI: scriptedAi, ...extra });
 const SCHEMA = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const SLOW = ["analysts", "earnings", "fundamentals", "identity", "positioning"];
 
@@ -538,7 +541,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 {
   const f = world();
   f.latency(0);
-  const get = await client(f.D1);
+  const get = await harnessClient(f.D1);
   const cpu = typeof process.threadCpuUsage === "function";
   const now = () => (cpu ? (() => { const c = process.threadCpuUsage(); return (c.user + c.system) / 1000; })() : performance.now());
   const timed = async (route, drop) => {
@@ -568,4 +571,6 @@ restoreClock();
 cache.restore();
 stub.restore();
 assertAiGuarded();
+eq(JSON.stringify([modelRuns.length, aiGuardStats().allowed, aiGuardStats().refused]), "[0,0,0]",
+  "every dossier read ran with a guarded scripted model binding in env.AI, and none of them called it, through cappedAi or around it");
 console.log(`flows-dossier-reads: ${checks} checks passed`);

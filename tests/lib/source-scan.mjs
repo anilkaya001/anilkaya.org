@@ -5,6 +5,7 @@ import path from "node:path";
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const MARK = (rel) => "\n@@ source " + rel + " @@\n";
+const BOUNDARY = /\n@@ source [^\n]* @@\n/;
 const cache = new Map();
 
 const toRel = (abs) => path.relative(ROOT, abs).split(path.sep).join("/");
@@ -18,7 +19,7 @@ export function moduleSource(rel) {
   return text;
 }
 
-const STATIC = /^\s*(?:import|export)\b[^;]*?\bfrom\s*(["'])([^"'\n]+)\1|^\s*import\s*(["'])([^"'\n]+)\3/gm;
+const STATIC = /(?:^|[;}])\s*(?:import|export)\b[^;]*?\bfrom\s*(["'])([^"'\n]+)\1|(?:^|[;}])\s*import\s*(["'])([^"'\n]+)\3/gm;
 const DYNAMIC = /\bimport\s*\(\s*/g;
 const LITERAL = /^(?:"([^"\\\n]*)"|'([^'\\\n]*)'|`([^`\\$]*)`)\s*[,)]/;
 
@@ -101,10 +102,18 @@ export function count(src, pattern) {
 export function slice(src, startMarker, endMarker) {
   const start = src.indexOf(startMarker);
   if (start < 0) throw new Error(`source-scan: slice start marker not found: ${JSON.stringify(startMarker)}`);
-  if (endMarker === undefined) return src.slice(start);
+  if (endMarker === undefined) {
+    const rest = src.slice(start);
+    const edge = rest.search(BOUNDARY);
+    return edge < 0 ? rest : rest.slice(0, edge);
+  }
   const end = src.indexOf(endMarker, start + startMarker.length);
   if (end < 0) throw new Error(`source-scan: slice end marker not found after the start: ${JSON.stringify(endMarker)}`);
-  return src.slice(start, end);
+  const cut = src.slice(start, end);
+  if (BOUNDARY.test(cut)) {
+    throw new Error(`source-scan: slice from ${JSON.stringify(startMarker)} to ${JSON.stringify(endMarker)} crosses a module boundary (${cut.match(BOUNDARY)[0].trim()})`);
+  }
+  return cut;
 }
 
 export function expect(src, pattern, opts = {}) {

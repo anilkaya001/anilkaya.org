@@ -25,7 +25,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
-import { workerSource, closure, importEdges, slice, where, absent } from "./lib/source-scan.mjs";
+import { workerSource, closure, importEdges, slice, where, absent, expect } from "./lib/source-scan.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -2233,7 +2233,9 @@ const cronMinutes = (cron) => {
     const liveSrc = read("shared/flows-live-worker.js");
     ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
-    const ingestSrc = workerSource();
+    const ingestSrc = slice(workerSource(), 'if (path === "/api/flows/ingest")', 'if (path.startsWith("/api/flows/"))');
+    expect(ingestSrc, 'if (!tokenKind) throw new HttpError(401', { min: 1, max: 1, why: "the ingest route's credential check" });
+    expect(ingestSrc, 'if (key === "clock")', { min: 1, max: 1, why: "the ingest route's clock key" });
     ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json, lab: tokenKind === "nightly" \}\);/
       .test(ingestSrc) && ingestSrc.indexOf('if (key === "clock")') > ingestSrc.indexOf('if (!tokenKind) throw new HttpError(401'),
     "the ingest route serves the clock to a verified credential only, and to GET only");

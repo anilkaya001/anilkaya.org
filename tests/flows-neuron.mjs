@@ -1100,8 +1100,9 @@ const CARD = {
   ok(report.files >= closure("worker.js").length && report.files > 40, `the guard reads ${report.files} modules, the closure of worker.js among them`);
   const sites = report.askSites.length;
   const metered = report.askSites.filter((a) => a.arg === "meteredAi(env)").length;
-  ok(sites >= 5 && metered >= 4 && report.askSites.every((a) => a.arg === "meteredAi(env)" || a.arg === "deps.ai()") && report.cappedDeps === 1,
-    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep`);
+  ok(sites >= 5 && metered >= 4 && report.askSites.every((a) => a.arg === "meteredAi(env)" || a.arg === "deps.ai()") && report.cappedDeps.length === 1 &&
+    report.metered.length === 1 && report.metered[0].args.length === 2 && report.cappedDeps[0].args.length === 2,
+    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep, each built once by cappedAi with env and a spend reader`);
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
     "and the cap is written down in wrangler.toml, where a deploy shows it");
@@ -1126,6 +1127,12 @@ const CARD = {
   throws(() => parseImports('const m = await import(`./${name}.js`);', "shared/x.js"), /non-literal/, "including a template with a substitution");
   same(parseImports('import { a } from "./a.js";\nexport * from \'./b.js\';\nimport "./c.js";\nconst d = await import("./d.js?x=1");\nimport.meta.url;', "x").map((i) => i.spec + (i.dynamic ? "*" : "")),
     ["./a.js", "./b.js", "./c.js", "./d.js?x=1*"], "static, re-export, bare and literal dynamic imports are all edges");
+  same(parseImports('import a from "./a.js"; import b from "./b.js";\nconst x = 1; export { y } from "./c.js";\nif (x) {} import "./d.js";', "x").map((i) => i.spec),
+    ["./a.js", "./b.js", "./c.js", "./d.js"], "a second import on one line, and an import or re-export after another statement, are edges too");
+  const joined = "\n@@ source a.js @@\nfunction one() {\n  tail();\n}\n@@ source b.js @@\nfunction two() {\n  end();\n}\n";
+  throws(() => slice(joined, "function one", "end()"), /crosses a module boundary.*b\.js/, "a slice whose end marker lies in a later module throws instead of scanning across files");
+  eq(slice(joined, "function one", "tail()"), "function one() {\n  ", "a slice inside one module is cut as before");
+  eq(slice(joined, "function one"), "function one() {\n  tail();\n}", "and a slice with no end marker stops at the end of its own module");
   const walked = closure("worker.js");
   ok(walked[0] === "worker.js" && walked.includes(AI_HOME) && walked.includes("shared/flows-reading-worker.js") && walked.includes("shared/flows-rt-hub.js"),
     `the Worker's closure holds ${walked.length} modules, the AI module, the reading and the rail among them`);
@@ -1147,7 +1154,19 @@ const CARD = {
   const workerText = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
   ok(mutate("worker.js", workerText.replace("if (!env.AI || !chain.length) {", "const direct = env.AI;\n  if (!direct || !chain.length) {")).some((p) => /^worker\.js:\d+ reads the AI binding/.test(p)),
     "MUTATION: a value read of env.AI in worker.js fails it");
+  ok(mutate("server/flows-mutant.js", 'import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env), c, m, {});\n').some((p) => /unmetered binding: cappedAi\(env\)$/.test(p)),
+    "MUTATION: askModels handed cappedAi(env), which never reads the day's spend, fails it");
+  same(mutate("server/flows-mutant.js", 'import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env, () => spendOf(env, { day: today(), fresh: true })), c, m, {});\n'), [],
+    "and cappedAi with env and a spend reader passes, its arguments read with balanced brackets");
+  ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, 'const meteredAi = (env) => env["\\x41I"];')).some((p) => /const meteredAi = \(env\) => cappedAi\( must appear exactly once \(found 0\)/.test(p)),
+    "MUTATION: meteredAi rebuilt as env[\"\\x41I\"], which no text scan reads as the binding, fails it on the missing cappedAi anchor");
+  ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, "const meteredAi = (env) => cappedAi(env);")).some((p) => /builds meteredAi with cappedAi\(env\), not with env and a spend reader/.test(p)),
+    "MUTATION: meteredAi built by cappedAi(env) with no spend reader fails it");
+  ok(mutate("shared/flows-quant-mutant.js", 'export const load = (name) => import(name);\n').some((p) => /flows-quant-mutant\.js:1 has a non-literal import\(\)/.test(p)),
+    "MUTATION: a computed import() in a shared/ module that no closure walk visits fails it");
   same(mutate("worker.js", workerText), [], "and the unmutated tree passes");
+  ok(modelCallReport().importErrors.length === 0 && modelCallFiles().includes("shared/flows-quant-browser.js") && modelCallFiles().includes("shared/mastery.js"),
+    "every module under worker.js, shared/ and server/ is parsed for a non-literal import(), the browser-only ones outside both closures included");
 
   const calls = [];
   const raw = { log: calls, async run(model) { calls.push(model); return { response: "ok" }; } };
@@ -1157,10 +1176,19 @@ const CARD = {
   eq((await cappedAi({ AI: guarded }, async () => ({ neurons: 0, calls: 0 })).run("m1", {})).response, "ok", "a call through cappedAi passes the runtime guard");
   let refused = null;
   try { await guarded.run("m2", {}); } catch (e) { refused = e; }
-  ok(refused && /outside shared\/flows-ai\.js/.test(refused.message) && !calls.includes("m2"),
+  ok(refused && /outside cappedAi in shared\/flows-ai\.js/.test(refused.message) && !calls.includes("m2"),
     "and a direct run from any other module throws before the binding is reached");
   const after = aiGuardStats();
   same([after.allowed - before.allowed, after.refused - before.refused], [1, 1], "and the guard records both, so a caught bypass still fails the suite that drove it");
+  const msgs1 = [{ role: "user", content: "x" }];
+  const bare = await askModels(guarded, ["m3"], msgs1, {});
+  const afterBare = aiGuardStats();
+  ok(!calls.includes("m3") && bare.attempts.length === 1 && afterBare.refused - after.refused === 1 && afterBare.allowed === after.allowed,
+    "MUTATION: askModels handed the raw binding is refused although askModels lives in shared/flows-ai.js, because only cappedAi's own lines may run it");
+  const metered1 = await askModels(cappedAi({ AI: guarded }, async () => ({ neurons: 0, calls: 0 })), ["m4"], msgs1, {});
+  const afterMetered = aiGuardStats();
+  ok(calls.includes("m4") && metered1.attempts.length >= 1 && afterMetered.allowed - afterBare.allowed === 1 && afterMetered.refused === afterBare.refused,
+    "and askModels handed cappedAi over the same binding is allowed");
 }
 
 {
