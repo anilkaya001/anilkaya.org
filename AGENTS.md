@@ -1021,7 +1021,7 @@ the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClo
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
 
-`lib-contract` was measured on 2026-10-05: about 3 s with no server and 231 checks (232 with
+`lib-contract` was measured on 2026-10-05: about 3 s with no server and 239 checks (240 with
 `PW_CHROMIUM_PATH` set, which adds a real launch; in this sandbox it is
 `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`, and CI leaves it unset). It builds a
 throwaway git repository for the served-tree semantics, drives the CPU budget on an injected clock, and runs
