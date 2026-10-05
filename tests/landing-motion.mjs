@@ -13,25 +13,42 @@ const ROOT = new URL("../", import.meta.url).pathname;
 const ORIGIN = "http://landing.test";
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".webmanifest": "application/manifest+json" };
 const NOW = Date.UTC(2026, 8, 29, 14, 0);
-const SNAPSHOT = buildSnapshot(MARKET_INDICES.map((index, i) => {
-  const changePct = (i % 3 - 1) * 0.37 + 0.05;
-  const price = 1000 * (i + 2) + 0.25;
+const snapshot = (n, bump = 0) => buildSnapshot(MARKET_INDICES.slice(0, n).map((index, i) => {
+  const changePct = (i % 3 - 1) * 0.37 + 0.05 + bump;
+  const price = 1000 * (i + 2) + 0.25 + bump * 100;
   return { key: index.key, label: index.label, currency: index.currency, price, changePct, prevClose: price / (1 + changePct / 100),
     asOf: NOW - 60000, asOfDay: "2026-09-29", prevDay: "2026-09-28", sessionEnd: null };
 }), NOW);
+const SNAPSHOT = snapshot(MARKET_INDICES.length);
+const PARTICLES = readFileSync(new URL("../assets/js/particles.js", import.meta.url), "utf8");
+const STILL = "function still() {";
+assert.ok(PARTICLES.includes(STILL), "particles.js draws its reduced-motion frame in still()");
+const stillOf = (passes) => PARTICLES.replace(STILL, `${STILL} ctx.clearRect(0, 0, state.width, state.height); for (let n = 0; n < ${passes}; n++) renderFrame(lastTime); return;`);
 
 const scratch = mkdtempSync(join(tmpdir(), "landing-motion-"));
 const browser = await chromium.launch();
 
-async function open(reducedMotion, viewport = { width: 1280, height: 800 }) {
+async function open(reducedMotion, viewport = { width: 1280, height: 800 }, { snaps = [SNAPSHOT], clock = false, particles = null, seeded = false } = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion });
   const page = await context.newPage();
   const errors = [];
+  let calls = 0;
   page.on("pageerror", (e) => errors.push(e.message));
+  if (seeded) await page.addInitScript(() => {
+    let a = 0x2f6b4a1d;
+    Math.random = () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  });
+  if (clock) await page.clock.install({ time: NOW });
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== ORIGIN) return route.abort();
-    if (url.pathname === "/api/markets") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SNAPSHOT) });
+    if (url.pathname === "/api/markets") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(snaps[Math.min(calls++, snaps.length - 1)]) });
+    if (particles !== null && url.pathname === "/assets/js/particles.js") return route.fulfill({ status: 200, contentType: "text/javascript", body: particles });
     if (url.pathname.startsWith("/api/")) return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
     const file = join(ROOT, url.pathname === "/" ? "index.html" : url.pathname);
     if (!existsSync(file)) return route.fulfill({ status: 404, body: "" });
@@ -40,7 +57,7 @@ async function open(reducedMotion, viewport = { width: 1280, height: 800 }) {
   });
   await page.goto(`${ORIGIN}/`);
   await page.waitForSelector("#marketTicker:not([hidden]) .tk");
-  return { context, page, errors };
+  return { context, page, errors, calls: () => calls };
 }
 
 let traceN = 0;
@@ -181,6 +198,63 @@ const inked = (page) => page.evaluate(() => {
   await context.close();
 }
 
+const brightness = (page) => page.evaluate(() => {
+  const canvas = document.getElementById("field");
+  const d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+  let seen = 0, lum = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 16) continue;
+    seen++;
+    lum += (d[i + 3] / 255) * (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+  }
+  return { seen, lum };
+});
+
+{
+  const field = {};
+  for (const [name, body] of [["shipped", PARTICLES], ["settled", stillOf(40)], ["single", stillOf(1)]]) {
+    const { context, page, errors } = await open("reduce", { width: 1280, height: 800 }, { particles: body, seeded: true });
+    await page.waitForTimeout(1200);
+    field[name] = await brightness(page);
+    eq(errors.join(" | "), "", `no page error drawing the ${name} still field`);
+    await context.close();
+  }
+  const { shipped, settled, single } = field;
+  const ratio = (a, b) => (a / b).toFixed(3);
+  ok(shipped.seen >= 0.92 * settled.seen && shipped.seen <= 1.02 * settled.seen,
+    `the still field shows as many visible pixels as the settled trail the reduced-motion loop used to build (${shipped.seen} against ${settled.seen}, ratio ${ratio(shipped.seen, settled.seen)})`);
+  ok(shipped.lum >= 0.92 * settled.lum && shipped.lum <= 1.02 * settled.lum,
+    `the still field is as bright as that settled trail (luminance ${shipped.lum.toFixed(0)} against ${settled.lum.toFixed(0)}, ratio ${ratio(shipped.lum, settled.lum)})`);
+  ok(single.seen < 0.7 * settled.seen,
+    `the measure tells a single pass from the settled field (${single.seen} visible pixels against ${settled.seen}), so it would catch a dimmed still frame`);
+}
+
+{
+  const fresh = snapshot(MARKET_INDICES.length, 0.5);
+  const { context, page, errors, calls } = await open("no-preference", { width: 1280, height: 800 }, { clock: true, particles: "", snaps: [SNAPSHOT, fresh] });
+  const text = () => page.$eval(".market-ticker__row", (el) => el.textContent);
+  const shown = await text();
+  const firstPrice = await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent);
+  await page.click(".market-ticker__toggle");
+  eq(await page.$eval("#marketTicker", (el) => el.dataset.paused), "true", "the row is paused before the refresh");
+  await page.clock.runFor(5 * 60 * 1000 + 1000);
+  for (let i = 0; i < 50 && calls() < 2; i++) await page.waitForTimeout(100);
+  eq(calls(), 2, "the five-minute refresh fetched a new snapshot while the row was paused");
+  await page.waitForTimeout(500);
+  await page.clock.runFor(100);
+  eq(await text(), shown, `a paused row keeps the prices the reader stopped to read (first price still ${firstPrice})`);
+  eq(await page.$eval(".market-ticker__toggle", (el) => el.textContent), "Play", "the control still reads Play");
+  await page.click(".market-ticker__toggle");
+  const after = await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent);
+  ok(after !== firstPrice && (await text()) !== shown, `Play shows the snapshot that arrived during the pause (first price ${firstPrice} becomes ${after})`);
+  await page.clock.runFor(5 * 60 * 1000 + 1000);
+  for (let i = 0; i < 50 && calls() < 3; i++) await page.waitForTimeout(100);
+  await page.waitForTimeout(500);
+  eq(await page.$eval(".market-ticker__row .tk__price", (el) => el.textContent), after, "while playing a refresh renders at once");
+  eq(errors.join(" | "), "", "no page error across a held refresh");
+  await context.close();
+}
+
 for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [1280, "no-preference"], [390, "reduce"], [1280, "reduce"]]) {
   const { context, page, errors } = await open(motion, { width, height: 800 });
   await page.waitForTimeout(1500);
@@ -194,10 +268,20 @@ for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [
   if (motion === "no-preference") ok(fit.left >= 0 && fit.right <= fit.inner, `the pause control sits inside the viewport at ${width} px`);
   ok(fit.barTop >= fit.footBottom, `the marquee bar starts at or below the footer at ${width} px, ${motion} (bar top ${fit.barTop.toFixed(1)}, footer bottom ${fit.footBottom.toFixed(1)})`);
   ok(fit.barH <= 30.5, `the marquee bar keeps its height at ${width} px, ${motion} (${fit.barH.toFixed(1)} px)`);
+  if (motion === "no-preference") {
+    const trackX = () => page.$eval(".market-ticker__track", (el) => el.getBoundingClientRect().x);
+    await page.focus(".market-ticker__toggle");
+    const at = [await trackX()];
+    await page.keyboard.press("Enter");
+    at.push(await trackX());
+    await page.keyboard.press("Enter");
+    at.push(await trackX());
+    ok(at[0] === at[1] && at[1] === at[2], `the prices keep their place when the control flips between Pause and Play at ${width} px (track x ${at.map((x) => x.toFixed(2)).join(", ")})`);
+  }
   eq(errors.join(" | "), "", `no page error at ${width} px`);
   await context.close();
 }
 
 await browser.close();
 rmSync(scratch, { recursive: true, force: true });
-console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that plays again while it keeps focus, by key and by a click with the pointer still on it, holds after focus leaves and does not scroll with the prices, and the bar stays clear of the footer at 320, 390 and 1280 px`);
+console.log(`✓ landing-motion: ${checks} assertions — under reduced motion the particle field draws one still frame, redraws it on resize and fires no animation frame after the first second, and the marquee neither moves nor offers a control; with motion the field animates and the marquee has a native Pause button that Tab reaches, Enter and Space toggle, that plays again while it keeps focus, by key and by a click with the pointer still on it, holds after focus leaves and does not scroll with the prices, the prices keep their place when the label flips, a refresh that lands while paused waits for Play, the still field is as bright as the settled trail it replaced, and the bar stays clear of the footer at 320, 390 and 1280 px`);

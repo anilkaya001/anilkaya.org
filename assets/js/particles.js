@@ -248,14 +248,14 @@
     frameCount++;
     ctx.clearRect(0, 0, state.width, state.height);
     try {
-      renderFrame(lastTime);
+      for (let n = 0; n < 8; n++) renderFrame(lastTime);
     } catch (err) {
       if (DEBUG) console.error("particles: frame error", err);
     }
   }
 
   function start() {
-    if (calm) { still(); return; }
+    if (calm) return;
     if (state.running) return;
     state.running = true;
     lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
@@ -309,20 +309,22 @@
     window.addEventListener("focus", () => { if (!document.hidden) start(); });
     window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
 
-    if (!calm) {
-      let seenFrames = -1;
-      setInterval(() => {
-        if (document.hidden) { seenFrames = frameCount; return; }
-        if (!state.running || frameCount === seenFrames) {
-          state.running = false;
-          start();
-        }
-        seenFrames = frameCount;
-      }, 1000);
-    }
-
     if (DEBUG) startDebug();
     ready = true;
+    if (calm) {
+      canvas.addEventListener("contextrestored", still);
+      return still();
+    }
+
+    let seenFrames = -1;
+    setInterval(() => {
+      if (document.hidden) { seenFrames = frameCount; return; }
+      if (!state.running || frameCount === seenFrames) {
+        state.running = false;
+        start();
+      }
+      seenFrames = frameCount;
+    }, 1000);
     start();
   }
 

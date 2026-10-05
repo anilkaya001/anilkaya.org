@@ -13,10 +13,12 @@
   track.appendChild(row);
   mount.append(toggle, track);
 
+  let held = null;
   function setPaused(paused) {
-    mount.dataset.paused = paused ? "true" : "false";
+    mount.dataset.paused = paused;
     toggle.textContent = paused ? "Play" : "Pause";
-    toggle.setAttribute("aria-label", (paused ? "Play" : "Pause") + " the scrolling index prices");
+    toggle.setAttribute("aria-label", toggle.textContent + " the scrolling index prices");
+    if (!paused && held) render(...held.splice(0));
   }
   setPaused(false);
   toggle.addEventListener("click", () => setPaused(mount.dataset.paused !== "true"));
@@ -100,7 +102,9 @@
       const resp = await fetch("/api/markets", { headers: { Accept: "application/json" } });
       if (!resp.ok) throw new Error("markets " + resp.status);
       const data = await resp.json();
-      render(Array.isArray(data.quotes) ? data.quotes : [], data.updatedAt);
+      const quotes = Array.isArray(data.quotes) ? data.quotes : [];
+      if (mount.dataset.paused === "true" && row.childElementCount) held = [quotes, data.updatedAt];
+      else render(quotes, data.updatedAt);
     } catch {
 
       if (!row.childElementCount) mount.hidden = true;

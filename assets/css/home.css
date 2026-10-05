@@ -389,6 +389,7 @@
 .market-ticker[hidden] { display: none; }
 .market-ticker__toggle {
   flex: 0 0 auto;
+  min-width: 5.8em;
   min-height: 1.5rem;
   margin: 0 0.35rem 0 max(2.5%, 0.6rem);
   padding: 0 0.6rem;
