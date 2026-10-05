@@ -1221,28 +1221,146 @@ let globalCount = 0;
   const authoring = agents.match(/`([A-Za-z_$][\w$]*)` is an authoring\/generator input/);
   assert(authoring, "AGENTS.md no longer names the authoring-only global");
   allowed.add(authoring[1]);
-  const wrapped = new Set(["fetch"]);
+  const UI_FILE = path.join("assets", "js", "flows-ui.js");
+  const REGEX_BEFORE = /[(,=:[!&|?{};+\-*%<>~^]/;
+  const skipQuoted = (src, i) => {
+    const q = src[i];
+    for (i++; i < src.length; i++) {
+      if (src[i] === "\\") { i++; continue; }
+      if (src[i] === q) return i + 1;
+      if (q === "`" && src[i] === "$" && src[i + 1] === "{") i = skipNested(src, i + 2) - 1;
+    }
+    return i;
+  };
+  const skipRegex = (src, i) => {
+    let inClass = false;
+    for (i++; i < src.length && src[i] !== "\n"; i++) {
+      if (src[i] === "\\") { i++; continue; }
+      if (src[i] === "[") inClass = true;
+      else if (src[i] === "]") inClass = false;
+      else if (src[i] === "/" && !inClass) { i++; break; }
+    }
+    while (i < src.length && /[a-z]/.test(src[i])) i++;
+    return i;
+  };
+  const skipTrivia = (src, i, prev) => {
+    const c = src[i];
+    if (c === "\"" || c === "'" || c === "`") return skipQuoted(src, i);
+    if (c === "/" && src[i + 1] === "/") { const n = src.indexOf("\n", i); return n < 0 ? src.length : n; }
+    if (c === "/" && src[i + 1] === "*") { const n = src.indexOf("*/", i + 2); return n < 0 ? src.length : n + 2; }
+    if (c === "/" && (!prev || REGEX_BEFORE.test(prev))) return skipRegex(src, i);
+    return -1;
+  };
+  function skipNested(src, i) {
+    let depth = 1, prev = "{";
+    while (i < src.length) {
+      const next = skipTrivia(src, i, prev);
+      if (next >= 0) { i = next; prev = "a"; continue; }
+      const c = src[i];
+      if (c === "{" || c === "(" || c === "[") depth++;
+      else if (c === "}" || c === ")" || c === "]") { if (--depth === 0) return i + 1; }
+      if (!/\s/.test(c)) prev = c;
+      i++;
+    }
+    return i;
+  }
+  const declarators = (src, at) => {
+    const names = [];
+    let destructured = false;
+    let depth = 0, prev = "", expect = true, i = at;
+    while (i < src.length) {
+      const c = src[i];
+      if (depth === 0 && expect && !/\s/.test(c)) {
+        if (c === "{" || c === "[") destructured = true;
+        const id = src.slice(i).match(/^[A-Za-z_$][\w$]*/);
+        if (id) { names.push(id[0]); i += id[0].length; prev = "a"; expect = false; continue; }
+        expect = false;
+      }
+      const next = skipTrivia(src, i, prev);
+      if (next >= 0) { i = next; prev = "a"; continue; }
+      if (c === "{" || c === "(" || c === "[") depth++;
+      else if (c === "}" || c === ")" || c === "]") depth--;
+      else if (depth === 0 && c === ";") break;
+      else if (depth === 0 && c === ",") expect = true;
+      else if (depth === 0 && c === "\n" && !/[,=+\-*/%&|^?:.([{<>!~]/.test(prev) &&
+        /^\S/.test(src.slice(i + 1)) && !/^[,.?:)\]}=+\-*/%&|^<>]/.test(src.slice(i + 1))) break;
+      if (!/\s/.test(c)) prev = c;
+      i++;
+    }
+    return { names, destructured };
+  };
+  const topLevel = (src) => {
+    const declarations = [];
+    let depth = 0, prev = "", i = 0, newline = false;
+    while (i < src.length) {
+      const next = skipTrivia(src, i, prev);
+      if (next >= 0) { i = next; prev = "a"; newline = false; continue; }
+      const c = src[i];
+      if (c === "\n") newline = true;
+      if (/[A-Za-z_$]/.test(c)) {
+        const word = src.slice(i).match(/^[A-Za-z_$][\w$]*/)[0];
+        let end = i + word.length;
+        const startOfStatement = prev === "" || prev === ";" || prev === "}" ||
+          (newline && !/[,=+\-*/%&|^?:.([{<>!~]/.test(prev));
+        if (depth === 0 && startOfStatement && /^(var|let|const|class|function|async)$/.test(word)) {
+          if (word === "async") {
+            const fn = src.slice(end).match(/^\s+function\b/);
+            if (fn) end += fn[0].length;
+          }
+          if (word !== "async" || end > i + word.length) declarations.push({ keyword: word === "async" ? "function" : word, at: end });
+        }
+        i = end;
+        prev = "a";
+        newline = false;
+        continue;
+      }
+      if (c === "{" || c === "(" || c === "[") depth++;
+      else if (c === "}" || c === ")" || c === "]") depth--;
+      if (!/\s/.test(c)) { prev = c; newline = false; }
+      i++;
+    }
+    return { declarations, depth };
+  };
+  const globalsCreatedBy = (file, src) => {
+    const created = [], outright = [], hooks = [];
+    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*(?:\|\||&&|\?\?)?=(?![=>])/g)) {
+      const name = m[2] || m[3];
+      if (m[1] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
+        const before = src.slice(Math.max(0, m.index - 80), m.index);
+        if (/if \(typeof document === "undefined"\) \{\s*$/.test(before)) { hooks.push(name); continue; }
+        outright.push(`${file}: the test hook ${name} is bound where a page has a document`);
+        continue;
+      }
+      if (m[1] === "window" && name === "fetch" && file === UI_FILE) continue;
+      created.push({ name, how: `${m[1]}.${name}` });
+    }
+    for (const m of src.matchAll(/(?<![\w$.])Object\s*\.\s*(assign|defineProperty|defineProperties)\s*\(\s*(window|globalThis|self)\s*[,)]/g)) {
+      outright.push(`${file}: Object.${m[1]}(${m[2]}, ...) creates globals the scan cannot name`);
+    }
+    const top = topLevel(src);
+    if (top.depth !== 0) outright.push(`${file}: the scan lost its place (depth ${top.depth} at the end), so it cannot vouch for this file`);
+    for (const { keyword, at } of top.declarations) {
+      if (keyword === "var" || keyword === "let" || keyword === "const") {
+        const { names, destructured } = declarators(src, at);
+        if (destructured) outright.push(`${file}: a top-level destructuring ${keyword} hides the globals it creates`);
+        for (const name of names) created.push({ name, how: `top-level ${name}` });
+      } else {
+        const id = src.slice(at).match(/^\*?\s*([A-Za-z_$][\w$]*)/);
+        if (id) created.push({ name: id[1], how: `top-level ${id[1]}` });
+      }
+    }
+    return { created, outright, hooks };
+  };
   const offenders = [];
   const seen = new Set();
   let hooks = 0;
   for (const file of filesUnder("assets/js", (f) => f.endsWith(".js"))) {
-    const src = read(file);
-    for (const m of src.matchAll(/(?<![\w$.])(window|globalThis|self)\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*=(?![=>])/g)) {
-      const name = m[2] || m[3];
-      if (m[1] === "globalThis" && /^__[A-Za-z]+Test$/.test(name)) {
-        const before = src.slice(Math.max(0, m.index - 80), m.index);
-        assert(/if \(typeof document === "undefined"\) \{\s*$/.test(before),
-          `${file}: the test hook ${name} is bound only where there is no document, never on a page`);
-        hooks++;
-        continue;
-      }
-      if (m[1] === "window" && wrapped.has(name)) continue;
+    const { created, outright, hooks: bound } = globalsCreatedBy(file, read(file));
+    offenders.push(...outright);
+    hooks += bound.length;
+    for (const { name, how } of created) {
       seen.add(name);
-      if (!allowed.has(name)) offenders.push(`${file}: ${m[1]}.${name}`);
-    }
-    for (const m of src.matchAll(/^(?:var|let|const|class|function\*?|async\s+function\*?)\s+([A-Za-z_$][\w$]*)/gm)) {
-      seen.add(m[1]);
-      if (!allowed.has(m[1])) offenders.push(`${file}: top-level ${m[1]}`);
+      if (!allowed.has(name)) offenders.push(`${file}: ${how}`);
     }
   }
   assert.deepEqual(offenders, [],
@@ -1253,6 +1371,28 @@ let globalCount = 0;
     `every name on the AGENTS.md allowlist is still created by a script, so the list is not a budget for a ` +
     `global that is gone: ${stale.join(", ")}`);
   assert(hooks >= 2, `the scan saw ${hooks} document-free test hooks; it should see the desk's and the placement's`);
+  const elsewhere = path.join("assets", "js", "x.js");
+  const flagged = (file, src) => {
+    const { created, outright } = globalsCreatedBy(file, src);
+    return outright.length + created.filter(({ name }) => !allowed.has(name)).length;
+  };
+  for (const src of [
+    "window.Foo = {};", "window.Foo ||= {};", "window.Foo ??= {};", "window.Foo &&= {};",
+    "globalThis[\"Foo\"] ||= 1;", "self.Foo = 1;", "window.fetch = function () {};",
+    "Object.assign(window, { Foo });", "Object.defineProperty(globalThis, \"Foo\", { value: 1 });",
+    "Object.defineProperties(self, { Foo: { value: 1 } });",
+    "const { Foo } = bar;", "let [Foo] = bar;", "let a = 1, Foo = 2;", "const a = f(1, [2, 3]), Foo = `${1, 2}`;",
+    "var a = /[,]/g, Foo;", "  const Foo = 1;", "foo()\nconst Foo = 1", "function Foo() {}",
+    "async function Foo() {}", "class Foo {}", "if (typeof document !== \"undefined\") { globalThis.__FooTest = 1; }",
+  ]) assert(flagged(elsewhere, src) > 0, `the global scan misses ${JSON.stringify(src)}`);
+  for (const src of [
+    "(function () { const Foo = 1; window.Lab = {}; })();", "x = function Foo() {};",
+    "for (let Foo = 0; Foo < 1; Foo++) {}", "Object.assign(window.CURRICULUM, { Foo: 1 });",
+    "window.FlowsUI ||= {};",
+    "if (typeof document === \"undefined\") {\n  globalThis.__FooTest = 1;\n}",
+  ]) assert.equal(flagged(elsewhere, src), 0, `the global scan flags ${JSON.stringify(src)}, which creates no unlisted global`);
+  assert.equal(flagged(path.join("assets", "js", "flows-ui.js"), "window.fetch = function () {};"), 0,
+    "the fetch wrapper is admitted in flows-ui.js");
   assert(!existsSync(path.join(ROOT, "assets/js/flows-cursor.js")),
     "flows-cursor.js is deleted rather than orphaned: no page emitted it, and FlowsCursor was an undocumented global");
   globalCount = seen.size;

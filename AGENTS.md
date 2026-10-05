@@ -1280,12 +1280,21 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   `flows-drawers.js` are deleted. `FlowsCursor` went with `flows-cursor.js`,
   which no page emitted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
-  one. `tests/contracts.mjs` reads it from this paragraph and fails on any
-  `window.`, `globalThis.` or `self.` assignment, or any top-level
-  declaration, under `assets/js` that names a global not on it; the only
-  others it admits are `CURRICULUM` below, the `fetch` wrapper in
-  `flows-ui.js`, and `globalThis.__<Name>Test` hooks bound only where there
-  is no `document`. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
+  one. `tests/contracts.mjs` reads it from this paragraph and scans every
+  script under `assets/js`. Each assignment to `window`, `globalThis` or
+  `self` by a dotted or string-quoted key (`=`, `||=`, `&&=` or `??=`), and
+  each `var`, `let`, `const`, `class` or `function` declaration at the
+  script's top level (by bracket depth, over a scan that skips strings,
+  templates, comments and regular expressions; every declarator of a list,
+  at any indentation), must name a global on it. It fails outright on
+  `Object.assign`, `defineProperty` or `defineProperties` with the global
+  object itself as the target, on a top-level destructuring declaration, and
+  on a file whose brackets it cannot balance. The only others it admits are
+  `CURRICULUM` below, the `fetch` wrapper in `flows-ui.js` (in that file
+  alone), and `globalThis.__<Name>Test` hooks bound only where there is no
+  `document`. It is a scanner, not a parser: an alias of the global object
+  (`const g = window; g.Foo = 1`), a computed key, `eval`, `new Function`
+  and `with` are beyond it. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component
