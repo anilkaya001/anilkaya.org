@@ -14,8 +14,6 @@
   const { h, s, F, chart: C } = UI;
   const DASH = UI.DASH, MINUS = UI.MINUS;
   const MIN_SESSIONS = 5;
-  const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
-  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
   const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
   const T975 = [0, 12.71, 4.3, 3.18, 2.78, 2.57, 2.45, 2.36, 2.31, 2.26, 2.23];
 
@@ -643,17 +641,15 @@
 
   function staleSaid(payload, updatedAt) {
     const now = Date.now();
-    if (updatedAt !== null && updatedAt > 0 && now - updatedAt > STALE_WRITE_MS) {
+    const verdict = UI.staleness ? UI.staleness({ __updatedAt: updatedAt, sessionDate: payload.sessionDate }, now) : { kind: "unknown" };
+    if (verdict.kind === "write" && updatedAt !== null && updatedAt > 0) {
       const hours = Math.floor((now - updatedAt) / 3600000);
       const days = Math.floor(hours / 24);
       const age = days >= 1 ? days + (days === 1 ? " day" : " days") : hours + (hours === 1 ? " hour" : " hours");
       return "This record was last written " + age + " ago. The pipeline has not published since — check the Actions tab. Every figure below is that run's, and no session has been scored into it since.";
     }
-    if (ISO_DAY.test(String(payload.sessionDate || ""))) {
-      const t = Date.parse(String(payload.sessionDate) + "T21:00:00Z");
-      if (Number.isFinite(t) && now - t > STALE_SESSION_MS) {
-        return "These numbers describe the " + payload.sessionDate + " session, which is more than four days old. The pipeline is running but its data is not advancing, so no new session has been scored into the record.";
-      }
+    if (verdict.kind === "session" && ISO_DAY.test(String(payload.sessionDate || ""))) {
+      return "These numbers describe the " + payload.sessionDate + " session, and later sessions have closed since. The pipeline is running but its data is not advancing, so no new session has been scored into the record.";
     }
     return null;
   }
