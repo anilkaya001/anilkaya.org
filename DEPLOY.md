@@ -2518,20 +2518,36 @@ focus read and no dispatch; pages fall back to the nightly rows.
   fails when an operation answers anything but 2xx, except the refusals listed
   under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
   403 without the volatility add-on, and politician holders' enterprise-only
-  422) and a 4xx from an operation listed under `entitlement`, and when a field
-  listed under `reads` (the fields the code reads) did not arrive. An expected
+  422) and a 4xx other than 429 from an operation listed under `entitlement`,
+  and when a field listed under `reads` (the fields the code reads) did not
+  arrive. A 429 still refused after three retries fails on every route: it
+  answers no question. An expected
   refusal that starts answering is noted as a plan change. A dispatched run is
   informational unless `strict` is ticked. Every operation a production call
   site reads is labelled `used` (`tests/flows-probe-contract.mjs` scans the
   sources), and `liveOnly` names the probed operations the committed spec lacks.
   The `entitlement` routes (option trades, lit flow, the quote, intraday flow
-  per strike, stock volume price levels, volatility context, the GCZ6 gold
+  per strike, stock volume price levels, volatility context, the front gold
   future and unusual congressional trades) are questions, not dependencies: the
-  summary's `entitled` and `refused` rows are the answer. The repository's logs
+  summary's `entitled` and `refused` rows are the answer. A refusal is noted as
+  "an entitlement or parameter answer" with the vendor's code beside it, because
+  the vendor answers a bad parameter with a 4xx too (politician holders' 422 is a
+  plan refusal); read the code before concluding the plan lacks the route. The
+  gold contract is derived from the session date (`{gold-front}`: the first of
+  February, April, June, August and December whose first notice day, the last
+  weekday of the month before, is at least five days away; GCZ6 until
+  2026-11-25, GCG7 from 2026-11-26), so an expired contract never reads as a
+  missing add-on. The repository's logs
   are public, so the output carries key names, JSON types, fill counts
   (`(n/m)` beside a key) and counts of the enum tokens the spec documents
-  (`report_flags∋intermarket_sweep: 3/50`), never a vendor value; a path filled
-  from a vendor row is printed with its template name. The `x-uw-daily-req-count`
+  (`report_flags∋intermarket_sweep: 3/50`, split on any separator, with
+  `field∋*isoi*: n/m` for a documented code inside an undocumented compound
+  token), never a vendor value. A path filled from a vendor row is printed with
+  its template name, and an error message that echoes it is printed with the
+  name in its place. A 2xx body that does not parse is described by its size
+  alone. A key that is not name-shaped (not an identifier, or carrying four
+  digits in a row, as a price, a date or a contract does) is counted as
+  `<n value-shaped keys>`, never printed. The `x-uw-daily-req-count`
   it prints counts every caller of the key, including any agent session that
   has `UW_API_KEY` set and reaches the vendor's MCP server through `.mcp.json`.
 - **The socket probe** (`.github/workflows/flows-ws-probe.yml`, dispatch only)
@@ -2861,7 +2877,7 @@ fields it reads from each, is in `scripts/flows-probe-list.json` (`probes`, and
 silently emptying a packet. `/api/companies/{t}/profile` and
 `/api/companies/{t}/earnings-estimates` were listed under `gated` with the 403 a
 plan without them answers; both answered 200 in the 2026-10-04 weekly run
-(37223455933), so they are no longer, and a refusal of either now fails the run. The fixtures the suites run on were
+(37223455933), so they are no longer gated, and a refusal of either now fails the run. The fixtures the suites run on were
 written from the spec (`docs/uw-openapi.yaml`), not from a live response: the
 vendor was not reachable when this was built. The first strict probe run after
 this deploys is the first time the reads are checked against live bytes; read its

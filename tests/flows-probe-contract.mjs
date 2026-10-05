@@ -57,6 +57,10 @@ const list = probe.loadList();
      /both gated/, "an operation is either expected-gated or an open entitlement question, not both");
   throwsLike(() => probe.validateList({ version: 1, probes: [base], enums: { "/api/a": { f: ["x", "X"] } } }), /distinct/,
      "documented enum tokens are distinct regardless of case, since they are counted case-blind");
+  throwsLike(() => probe.validateList({ version: 1, probes: [base], enums: { "/api/a": { f: ["a-b"] } } }), /distinct documented tokens/,
+     "a documented token is one code of letters, digits and underscores, since a value is split on anything else");
+  throwsLike(() => probe.validateList({ version: 1, probes: [{ ...base, tier: "2" }, { ...base, id: "b" }], entitlement: ["/api/a"] }),
+     /read by the code/, "MIXED TIERS: one used probe of an operation is enough to refuse it as an entitlement question, whatever tier the last probe carries");
 }
 
 {
@@ -141,8 +145,20 @@ const list = probe.loadList();
 {
   deep(probe.dateTokens(SESSION), {
     date: "2026-09-22", "next-session": "2026-09-23", weekly: "2026-09-25",
-    monthly: "2026-10-16", monthly2: "2026-11-20",
-  }, "one session date yields the weekly, the two monthlies and the next session");
+    monthly: "2026-10-16", monthly2: "2026-11-20", "gold-front": "GCZ6",
+  }, "one session date yields the weekly, the two monthlies, the next session and the front gold contract");
+  for (const [day, want, why] of [
+    ["2026-10-05", "GCZ6", "in October the front gold contract is December's, the one the list named by hand"],
+    ["2026-11-20", "GCZ6", "ten days before December's first notice day it is still December"],
+    ["2026-11-25", "GCZ6", "five days before the first notice day (Monday 2026-11-30) it is still December"],
+    ["2026-11-26", "GCG7", "four days before it, the probe rolls to February"],
+    ["2026-12-29", "GCG7", "so the probe never asks for GCZ6 once it has expired around 2026-12-29"],
+    ["2027-01-26", "GCJ7", "February's notice day (Friday 2027-01-29) is three days out, so April"],
+    ["2027-06-30", "GCQ7", "June delivered, August is the front"],
+    ["2029-07-10", "GCQ9", "the year digit is the year's last digit"],
+  ]) eq(probe.goldFront(day), want, `GOLD ROLL ${day}: ${why}`);
+  eq(probe.lastWeekdayOf(2027, 1), "2027-01-29", "the first notice day is the last weekday of the month before delivery");
+  eq(probe.lastWeekdayOf(2026, 5), "2026-05-29", "a month ending on a Sunday steps back to its Friday");
   eq(probe.thirdFriday(2026, 10), "2026-10-16", "third Friday of a month starting on Thursday");
   eq(probe.thirdFriday(2026, 5), "2026-05-15", "third Friday of a month starting on Friday");
   eq(probe.thirdFriday(2025, 4), "2025-04-18", "third Friday of a month starting on Tuesday");
@@ -336,6 +352,51 @@ const list = probe.loadList();
   const text = probe.analyse({ id: "t", tier: "used", op: "/t", expect: null },
     { url: "https://x.test/t", status: 200, ms: 1, text: "<html>" }, probe.makeRedactor(KEY));
   eq(text.cls, "empty", "a 200 that is not JSON counts as empty");
+
+  const csv = "ticker,price,size\nAAPL,187.25,400\nNVDA,121.10,900\n";
+  const csvResult = probe.analyse({ id: "c", tier: "2", op: "/c", expect: null },
+    { url: "https://x.test/c", status: 200, ms: 1, bytes: csv.length, text: csv }, probe.makeRedactor(KEY));
+  const csvBlock = probe.renderBlock(csvResult).join("\n");
+  for (const value of ["AAPL", "187.25", "400", "121.10", "900", "ticker,price"]) {
+    ok(!csvBlock.includes(value), `NOT JSON: a 200 CSV body's ${value} reaches no printed line`);
+  }
+  ok(csvBlock.includes(`body ${csv.length} B, not JSON: no part of it is printed`),
+    "a 2xx body that does not parse is described by its size alone");
+  const page = probe.analyse({ id: "p", tier: "2", op: "/p", expect: null },
+    { url: "https://x.test/p", status: 502, ms: 1, text: "<html>Bad gateway</html>" }, probe.makeRedactor(KEY));
+  ok(probe.renderBlock(page).join("\n").includes("error <html>Bad gateway</html>"),
+    "while a non-2xx error page is still clipped into the block, since it is the vendor's own error and not its data");
+
+  const keyed = { data: { "187.50": 1200, "190.00": 800, as_of: "2026-09-22" } };
+  const keyedResult = probe.analyse({ id: "k", tier: "2", op: "/k", expect: null },
+    { url: "https://x.test/k", status: 200, ms: 1, text: JSON.stringify(keyed) }, probe.makeRedactor(KEY));
+  const keyedBlock = probe.renderBlock(keyedResult).join("\n");
+  ok(!keyedBlock.includes("187.50") && !keyedBlock.includes("190.00") && !keyedBlock.includes("1200"),
+    "VALUE KEYS: a body keyed by price prints no price, as a field name or in the envelope");
+  ok(keyedBlock.includes("<2 value-shaped keys>") && keyedBlock.includes("as_of:str"),
+    "the value-shaped keys are counted and the named keys beside them still typed");
+  const onlyValues = probe.analyse({ id: "v", tier: "2", op: "/v", expect: null },
+    { url: "https://x.test/v", status: 200, ms: 1, text: JSON.stringify({ data: { "187.50": 1200 } }) }, probe.makeRedactor(KEY));
+  eq(onlyValues.cls, "ok", "a body keyed by values alone still arrived: it is ok, not empty");
+  ok(probe.renderBlock(onlyValues).includes("   spec not compared: the list holds no documented names for this operation"),
+    "an operation with no expect list says the list holds none, not that the spec documents no shape");
+  const specOps = new Set([...fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8")
+    .matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)].map((m) => m[1]));
+  deep(list.entitlement.filter((op) => specOps.has(op) && !list.expect[op]), [],
+    "EXPECT: every entitlement operation the committed spec documents has its documented names listed, so a missing one is named UNSEEN");
+  ok(list.expect["/api/lit-flow/{ticker}"].includes("nbbo_bid_quantity") && list.expect["/api/option-trades"].includes("report_flags"),
+    "among them the NBBO sizes P2-35 asks about and the report flags C-26 asks about");
+  ok(Object.keys(list.reads).every((op) => !list.entitlement.includes(op)),
+    "and none of them is in reads: their drift is informational, never a strict failure");
+  eq(probe.envelopeShape({ data: [{ a: 1 }], levels: { "187.50": 1, "190.00": 2 }, "2026-09-22": 3 }),
+    "{data:[1],levels:{<2 value-shaped keys>},<1 value-shaped key>}",
+    "the envelope collapses them the same way");
+  eq(probe.vendorError({ errors: { "AAPL261016C00200000": "bad" }, rows: [] }, "", probe.makeRedactor(KEY)),
+    "body {errors:{<1 value-shaped key>},rows:[0]}",
+    "and so does an error body described by its shape, where a key with a run of four digits (a contract, a date) counts as a value");
+  ok(["implied_move_365", "macd_12_26_9", "rv_1d_last_12q", "eps_growth_16q", "call_gex"].every(probe.isNameShaped) &&
+     !["187.50", "AAPL261016C00200000", "2026-09-22", "x-y"].some(probe.isNameShaped),
+    "the spec's own digit-bearing names stay names (none of its 945 property names has four digits in a row)");
 }
 
 {
@@ -639,7 +700,7 @@ const mini = probe.validateList({
     probes: [
       { id: "trades", tier: "2", op: "/api/option-trades", path: "/api/option-trades", query: { ticker_symbol: "{t}", limit: "50" } },
       { id: "prints", tier: "2", op: "/api/lit-flow/{ticker}", path: "/api/lit-flow/{t}", query: { limit: "50" } },
-      { id: "future", tier: "2", op: "/api/futures/{contract}/stats", path: "/api/futures/GCZ6/stats" },
+      { id: "future", tier: "2", op: "/api/futures/{contract}/stats", path: "/api/futures/{gold-front}/stats" },
       { id: "tide", tier: "used", op: "/api/market/market-tide", path: "/api/market/market-tide" },
     ],
     entitlement: ["/api/option-trades", "/api/lit-flow/{ticker}", "/api/futures/{contract}/stats"],
@@ -651,7 +712,7 @@ const mini = probe.validateList({
   const trades = Array.from({ length: 50 }, (_, i) => ({
     id: `9f1c${String(4000 + i)}-trade`, price: (3.17 + i / 100).toFixed(2), size: 41 + i, premium: String(13004 + i * 7),
     report_flags: i < 3 ? ["intermarket_sweep"] : i < 5 ? ["odd_lot", "cross_trade"] : [],
-    upstream_condition_detail: i < 2 ? "slan,isoi" : i < 40 ? "auto" : i < 45 ? "zzzq" : null,
+    upstream_condition_detail: i < 2 ? "slan,isoi" : i < 38 ? "auto" : i === 38 ? "slan isoi" : i === 39 ? "auto|isoi" : i < 45 ? "zzzq" : null,
   }));
   const prints = Array.from({ length: 50 }, (_, i) => ({
     tracking_id: 718843880 + i, price: String(211.37 + i), size: 100 + i,
@@ -682,9 +743,10 @@ const mini = probe.validateList({
     "ENUM TOKENS: a list field is counted per documented token, in the plan's own form report_flags∋intermarket_sweep: 3/50");
   ok(out.includes("report_flags undocumented: 2/50"), "a row carrying a token the spec does not document is counted, and the token is not printed");
   ok(!out.includes("cross_trade"), "so an undocumented token never appears");
-  ok(out.includes("upstream_condition_detail∋isoi: 2/50") && out.includes("upstream_condition_detail∋auto: 38/50") &&
-     out.includes("upstream_condition_detail∋slan: 2/50") && out.includes("upstream_condition_detail undocumented: 5/50"),
-    "a comma-joined OPRA code is split, so slan,isoi counts once for each, and an unknown code is counted, not printed");
+  ok(out.includes("upstream_condition_detail∋isoi: 4/50") && out.includes("upstream_condition_detail∋auto: 37/50") &&
+     out.includes("upstream_condition_detail∋slan: 3/50") && out.includes("upstream_condition_detail undocumented: 5/50"),
+    "a compound OPRA code is split on any separator, comma, space or pipe, so slan,isoi, slan isoi and auto|isoi count once " +
+      "for each code, and an unknown code is counted, not printed");
   ok(!out.includes("zzzq"), "the unknown code itself is not printed");
   ok(out.includes("tokens upstream_condition_detail  filled in 45 of 50 rows"), "the field's own fill is stated beside its tokens");
   ok(out.includes("trade_code∋intermarket_sweep: 1/50"), "the lit print's trade code is counted the same way");
@@ -704,13 +766,60 @@ const mini = probe.validateList({
   ok(/^ {3}refused +2 {2}prints:NVDA 403 lit_flow_scope_required {2}future 403 futures_addon_required$/m.test(out),
     "and which refused, with the vendor's code");
   deep(run.strict.failures, [], "STRICT: a refusal of an entitlement route is a finding, not a failure, so the weekly run stays green");
-  ok(run.strict.notes.includes("future 403: not entitled on this key, an entitlement finding"), "and it is noted as one");
+  ok(run.strict.notes.includes("future 403 futures_addon_required: refused, an entitlement or parameter answer; read the code"),
+    "and it is noted as a refusal to read by its code, not asserted to be the plan: a parameter refusal answers 4xx too");
+  ok(calls.some((u) => u.endsWith("/api/futures/GCZ6/stats")), "the gold contract is the front month of the session, December 2026 on 2026-09-22");
+  const limited = probe.strictVerdict([{ id: "quote:AAPL", op: "/api/stock/{ticker}/quote", cls: "4xx", status: 429, limited: 3, entitlement: true }], tape);
+  deep(limited, { failures: ["FAIL quote:AAPL 429 still rate-limited after 3 retries: no answer to read"], notes: [] },
+    "RATE LIMIT: a 429 still refused after the retries is no answer to the entitlement question, so it fails rather than read as one");
+  deep(probe.renderSummary([{ id: "quote:AAPL", cls: "4xx", status: 429, entitlement: true, limited: 3 }], { session: SESSION, elapsedMs: 1 })
+    .filter((l) => l.trimStart().startsWith("refused")), ["   refused    0  "].map((l) => l.trimEnd()),
+    "and the summary does not list it as refused");
   eq(run.code, 0, "the strict run exits 0");
   ok(lines.every((l) => !l.includes(KEY)), "and never prints the key");
   const hard = probe.strictVerdict([{ id: "prints:NVDA", op: "/api/lit-flow/{ticker}", cls: "5xx", status: 502, entitlement: true }], tape);
   deep(hard.failures, ["FAIL prints:NVDA 502"], "a 5xx from an entitlement route is still a failure: the vendor broke, the plan did not answer");
   ok(out.includes("x-uw-daily-req-count counts every caller of the key") && out.includes(".mcp.json"),
     "THE ACCOUNTING says the daily counter includes every caller, an agent session's vendor MCP server among them");
+}
+
+{
+  const within = probe.tokenCounts([
+    { c: "isoi_late" }, { c: "slan,isoi" }, { c: "auto" }, { c: "extended_hours_trade_late_or_out_of_sequence" },
+  ], { c: ["isoi", "slan", "auto", "extended_hours_trade", "extended_hours_trade_late_or_out_of_sequence"] })[0];
+  deep(within.counts, [["isoi", 1], ["slan", 1], ["auto", 1], ["extended_hours_trade", 0],
+    ["extended_hours_trade_late_or_out_of_sequence", 1]], "exact tokens are counted per row");
+  deep(within.within, [["isoi", 1]],
+    "CONTAINS: a code inside an undocumented compound token is counted beside the exact count, and a documented longer token " +
+      "is not read as containing a shorter one");
+  ok(probe.formatTokens(within).includes("c∋*isoi*: 1/4") && probe.formatTokens(within).includes("c undocumented: 1/4"),
+    "printed as c∋*isoi*, while the compound token itself is still only counted as undocumented");
+
+  const symbol = "AAPL261016C00200000";
+  const bindList = probe.validateList({
+    version: 1,
+    probes: [
+      { id: "chain", tier: "used", op: "/api/stock/{ticker}/option-contracts", path: "/api/stock/{t}/option-contracts" },
+      { id: "historic", tier: "used", op: "/api/option-contract/{id}/historic", path: "/api/option-contract/{symbol}/historic",
+        bind: { symbol: { from: "chain", field: "option_symbol" } } },
+    ],
+  });
+  let clock = 0;
+  const fetchBound = async (url) => {
+    clock += 10;
+    const p = new URL(url).pathname;
+    if (p.endsWith("/option-contracts")) {
+      return { status: 200, headers: new Headers(), text: async () => JSON.stringify({ data: [{ option_symbol: symbol }] }) };
+    }
+    return { status: 422, headers: new Headers(),
+      text: async () => JSON.stringify({ code: "bad_symbol", message: `contract ${symbol} (${encodeURIComponent(symbol)}) is not listed` }) };
+  };
+  const bound = [];
+  await probe.runProbe({ key: KEY, base: "https://vendor.test", tickers: ["AAPL"], filter: "", date: SESSION, list: bindList },
+    { fetch: fetchBound, log: (l) => bound.push(l), now: () => clock, sleep: async (ms) => { clock += ms; } });
+  const boundOut = bound.join("\n");
+  ok(!boundOut.includes(symbol) && boundOut.includes("message=contract {symbol} ({symbol}) is not listed"),
+    "BOUND VALUES: a vendor error that echoes the bound contract prints its template name instead, raw or URL-encoded");
 }
 
 {

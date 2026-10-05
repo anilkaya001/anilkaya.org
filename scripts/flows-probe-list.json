@@ -97,15 +97,14 @@
     {"id": "institution-ownership", "tier": "used", "op": "/api/institution/{ticker}/ownership", "path": "/api/institution/{t}/ownership", "query": {"limit": "25", "order": "value", "order_direction": "desc"}},
     {"id": "short-interest-v2", "tier": "used", "op": "/api/shorts/{ticker}/interest-float/v2", "path": "/api/shorts/{t}/interest-float/v2"},
     {"id": "insider-ticker-flow", "tier": "used", "op": "/api/insider/{ticker}/ticker-flow", "path": "/api/insider/{t}/ticker-flow", "query": {"limit": "60"}},
-    {"id": "news-ticker", "tier": "used", "op": "/api/news/headlines", "path": "/api/news/headlines", "query": {"ticker": "{t}", "limit": "12"}}
-,
+    {"id": "news-ticker", "tier": "used", "op": "/api/news/headlines", "path": "/api/news/headlines", "query": {"ticker": "{t}", "limit": "12"}},
     {"id": "option-trades", "tier": "2", "op": "/api/option-trades", "path": "/api/option-trades", "query": {"ticker_symbol": "{t}", "limit": "50"}},
     {"id": "lit-flow", "tier": "2", "op": "/api/lit-flow/{ticker}", "path": "/api/lit-flow/{t}", "query": {"limit": "50"}},
     {"id": "quote", "tier": "2", "op": "/api/stock/{ticker}/quote", "path": "/api/stock/{t}/quote"},
     {"id": "flow-per-strike-intraday", "tier": "2", "op": "/api/stock/{ticker}/flow-per-strike-intraday", "path": "/api/stock/{t}/flow-per-strike-intraday", "query": {"date": "{date}"}},
     {"id": "stock-volume-price-levels", "tier": "2", "op": "/api/stock/{ticker}/stock-volume-price-levels", "path": "/api/stock/{t}/stock-volume-price-levels", "query": {"date": "{date}"}},
     {"id": "volatility-context", "tier": "2", "op": "/api/stock/{ticker}/volatility/context", "path": "/api/stock/{t}/volatility/context"},
-    {"id": "futures-stats", "tier": "2", "op": "/api/futures/{contract}/stats", "path": "/api/futures/GCZ6/stats"},
+    {"id": "futures-stats", "tier": "2", "op": "/api/futures/{contract}/stats", "path": "/api/futures/{gold-front}/stats"},
     {"id": "congress-unusual", "tier": "2", "op": "/api/congress/unusual-trades", "path": "/api/congress/unusual-trades", "query": {"limit": "50"}}
   ],
   "expect": {
@@ -178,7 +177,14 @@
     "/api/group-flow/{flow_group}/greek-flow": ["dir_delta_flow", "dir_vega_flow", "flow_group", "net_call_premium", "net_call_volume", "net_put_premium", "net_put_volume", "otm_dir_delta_flow", "otm_dir_vega_flow", "otm_total_delta_flow", "otm_total_vega_flow", "timestamp", "total_delta_flow", "total_vega_flow", "transactions", "volume"],
     "/api/market/{sector}/sector-tide": ["net_call_premium", "net_put_premium", "net_volume", "timestamp"],
     "/api/market/fda-calendar": ["catalyst", "description", "drug", "end_date", "has_options", "indication", "marketcap", "notes", "outcome", "outcome_brief", "source_link", "start_date", "status", "ticker"],
-    "/api/option-activity/unusual": ["ask_side_volume", "avg_price", "bid_side_volume", "chain_prev_close", "close", "cross_volume", "er_time", "expiry", "floor_volume", "high", "last_fill", "low", "mid_volume", "multileg_volume", "next_earnings_date", "no_side_volume", "open", "open_interest", "option_symbol", "option_type", "premium", "sector", "stock_multi_leg_volume", "stock_price", "strike", "sweep_volume", "ticker_vol", "total_ask_changes", "total_bid_changes", "trades", "volume"]
+    "/api/option-activity/unusual": ["ask_side_volume", "avg_price", "bid_side_volume", "chain_prev_close", "close", "cross_volume", "er_time", "expiry", "floor_volume", "high", "last_fill", "low", "mid_volume", "multileg_volume", "next_earnings_date", "no_side_volume", "open", "open_interest", "option_symbol", "option_type", "premium", "sector", "stock_multi_leg_volume", "stock_price", "strike", "sweep_volume", "ticker_vol", "total_ask_changes", "total_bid_changes", "trades", "volume"],
+    "/api/option-trades": ["ask_vol", "bid_vol", "canceled", "data", "delta", "er_time", "ewma_nbbo_ask", "ewma_nbbo_bid", "exchange", "executed_at", "expiry", "flow_alert_id", "full_name", "gamma", "id", "implied_volatility", "industry_type", "is_agg", "issue_type", "marketcap", "mid_vol", "multi_vol", "nbbo_ask", "nbbo_bid", "next_earnings_date", "no_side_vol", "open_interest", "option_chain_id", "option_type", "premium", "price", "report_flags", "rho", "rule_id", "sector", "size", "stock_multi_vol", "strike", "tags", "theo", "theta", "trade_ids", "underlying_price", "underlying_symbol", "upstream_condition_detail", "vega", "volume"],
+    "/api/lit-flow/{ticker}": ["canceled", "executed_at", "ext_hour_sold_codes", "market_center", "nbbo_ask", "nbbo_ask_quantity", "nbbo_bid", "nbbo_bid_quantity", "premium", "price", "sale_cond_codes", "size", "ticker", "tracking_id", "trade_code", "trade_settlement", "volume"],
+    "/api/stock/{ticker}/quote": ["ask", "bid", "data", "last_trade", "market_time", "midpoint", "midpoint_changes", "postmarket", "premarket", "price", "quote", "quote_age_ms", "quote_changes", "quote_statistics", "quote_values", "regular", "size", "size_imbalance", "size_only_changes", "size_weighted_midpoint", "spread", "spread_bps", "spread_tightened", "spread_unchanged", "spread_widened", "time", "vol"],
+    "/api/stock/{ticker}/flow-per-strike-intraday": ["call_premium", "call_premium_ask_side", "call_premium_bid_side", "call_trades", "call_volume", "call_volume_ask_side", "call_volume_bid_side", "date", "put_premium", "put_premium_ask_side", "put_premium_bid_side", "put_trades", "put_volume", "put_volume_ask_side", "put_volume_bid_side", "strike", "ticker", "timestamp"],
+    "/api/stock/{ticker}/stock-volume-price-levels": ["data", "lit_vol", "off_vol", "price"],
+    "/api/futures/{contract}/stats": ["data", "open_interest", "session_volume", "settlement", "settlement_date"],
+    "/api/congress/unusual-trades": ["amount", "asset", "asset_type", "company_name", "data", "description", "filing_date", "id", "politician_id", "politician_name", "ticker", "transaction_date", "transaction_type", "unusual_activity_meta", "unusual_activity_tags"]
   },
   "reads": {
     "/api/companies/{ticker}/profile": ["name", "sector", "industry", "exchange", "country", "currency", "description", "market_cap", "pe_ratio", "peg_ratio", "beta", "week_52_high", "week_52_low", "analyst_target_price", "shares_outstanding"],
