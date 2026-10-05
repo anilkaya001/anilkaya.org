@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       tick:
-        description: "The Worker clock instant that dispatched this run"
+        description: "The instant that dispatched this run; for a standby, the start of the loop that sent it, then that loop's crash restarts of the last six hours"
         type: string
         required: false
       origin:
-        description: "Who dispatched it: worker, watchdog, chain or manual"
+        description: "Who dispatched it: worker, watchdog, chain, standby or manual"
         type: string
         required: false
         default: manual
@@ -114,6 +114,7 @@ jobs:
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_LIVE_ORIGIN: ${{ github.event_name == 'schedule' && 'schedule' || inputs.origin || 'manual' }}
+          FLOWS_LIVE_TICK: ${{ github.event_name == 'workflow_dispatch' && inputs.tick || '' }}
           FLOWS_LIVE_LOOP: "1"
           FLOWS_LIVE_KEEP: "1"
           FLOWS_LIVE_DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.drill && '1' || '' }}

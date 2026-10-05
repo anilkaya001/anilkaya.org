@@ -559,7 +559,7 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
     let beat = {};
     try {
       const told = await underDeadline(() => watch.tick({ at: now(), clock, clockRead: currentRead(), first: ticks === 0,
-        inSession: !!here.run, passes }), tickDeadlineMs);
+        inSession: !!here.run, passes, startedAt, budgetMs }), tickDeadlineMs);
       if (told === HUNG) {
         ticks++;
         return hung("tick-deadline", `watch tick ${ticks}`, tickDeadlineMs, clock);

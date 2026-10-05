@@ -1,5 +1,6 @@
 import { easternInstant } from "../../shared/flows-freshness.js";
-import { runLiveLoop, chainDispatch, chainWithRetry, readLiveClock, liveRunVerdict, LIVE_LOOP } from "./live.mjs";
+import { runLiveLoop, chainDispatch, chainWithRetry, readLiveClock, liveRunVerdict, liveWindow, LIVE_LOOP } from "./live.mjs";
+import { STANDBY, readStandbyTick } from "./starts.mjs";
 import { createWatch } from "./watch.mjs";
 import { fakeWorld } from "./live-world-fake.mjs";
 import { etTime } from "./health.mjs";
@@ -30,8 +31,67 @@ async function drive(world, { budgetMs, notes }) {
   return { loop, verdict: liveRunVerdict(loop) };
 }
 
+const LOST = Symbol("runner-lost");
+
+async function driveRuns(world, { budgetMs, notes, until, lostMs, deathAt = () => Infinity }) {
+  const group = world.github.queue;
+  let run = group.start({ origin: "chain", tick: new Date(world.now()).toISOString() }, world.now());
+  const runs = [];
+  while (run) {
+    const env = { ...world.env(), FLOWS_LIVE_ORIGIN: run.inputs.origin, FLOWS_LIVE_TICK: run.inputs.tick || "" };
+    const dies = deathAt(run, runs.length);
+    let body = null;
+    let ticks = 0;
+    const watch = createWatch({
+      readOnce: world.readOnce, latestClock: () => body, env, fetchImpl: world.github.fetchImpl, sleep: world.sleep,
+      log: (line) => notes.push(line), warn: (line) => notes.push(line),
+    });
+    const counted = { ...watch, tick: (args) => { ticks++; return watch.tick(args); } };
+    const sleep = async (ms) => {
+      if (world.now() + ms >= dies) {
+        world.advance(Math.max(0, dies - world.now()));
+        throw LOST;
+      }
+      return world.sleep(ms);
+    };
+    let loop = null;
+    try {
+      loop = await runLiveLoop({
+        now: world.now, sleep, budgetMs, log: () => {}, warn: (line) => notes.push(line), watch: counted,
+        readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; }, sleep: world.sleep }),
+        pass: async () => {
+          world.advance(20000);
+          return { skipped: null, answered: 38, landed: 10 };
+        },
+        chain: ({ at: when }) => chainWithRetry(() => chainDispatch({ env, fetchImpl: world.github.fetchImpl, at: when }),
+          { sleep: world.sleep }),
+      });
+    } catch (error) {
+      if (error !== LOST) throw error;
+    }
+    const summary = watch.summary();
+    runs.push({
+      id: run.id, origin: run.inputs.origin, tick: run.inputs.tick || null, startedAt: run.startedAt, endedAt: world.now(),
+      died: !loop, ticks, loop, standby: summary.standby, open: summary.open,
+      verdict: loop ? liveRunVerdict(loop) : { failed: true, why: "the runner was lost" },
+    });
+    if (!loop) world.advance(lostMs);
+    run = world.now() < until ? group.finish(world.now()) : null;
+  }
+  const last = runs[runs.length - 1];
+  const red = runs.filter((r) => r.verdict.failed);
+  return {
+    runs,
+    loop: { exit: last.died ? "lost" : last.loop.exit, passes: runs.flatMap((r) => (r.loop ? r.loop.passes : [])),
+      ticks: runs.reduce((n, r) => n + r.ticks, 0) },
+    verdict: { failed: red.length > 0, why: red.map((r) => `run ${r.id}: ${r.verdict.why}`).join("; ") || null },
+  };
+}
+
 const pipelineSends = (world) => world.github.record.dispatches.filter((d) => d.workflow === "flows-pipeline.yml");
-const chainSends = (world) => world.github.record.dispatches.filter((d) => d.workflow === "flows-live.yml");
+const liveSends = (world) => world.github.record.dispatches.filter((d) => d.workflow === "flows-live.yml");
+const standbySends = (world) => liveSends(world).filter((d) => d.inputs && d.inputs.origin === STANDBY.origin);
+const chainSends = (world) => liveSends(world).filter((d) => !d.inputs || d.inputs.origin !== STANDBY.origin);
 const issueOf = (world, id) => world.github.record.created.find((c) => c.title.startsWith(`[flows-witness:${id}]`)) || null;
 const minutesOf = (ms, day = DRY_DAY) => Math.round((ms - easternInstant(day, 0)) / 60000);
 
@@ -54,6 +114,10 @@ export const DRY_SCENARIOS = Object.freeze([
       if (r.verdict.failed) problems.push(`the run was red: ${r.verdict.why}`);
       if (w.github.record.created.length) problems.push("a healthy day opened an issue");
       if (chainSends(w).length !== 1) problems.push(`expected one chain dispatch, saw ${chainSends(w).length}`);
+      const standbys = standbySends(w);
+      if (standbys.length !== 1 || liveWindow(standbys[0].at, null).run || standbys[0].at > at(17, 30)) {
+        problems.push(`expected one standby on the first tick after the Tier 2 window, saw ${standbys.map((d) => etTime(d.at)).join(", ") || "none"}`);
+      }
       if (r.loop.passes.length !== 8) problems.push(`expected 8 passes from 15:50 to 16:25, saw ${r.loop.passes.length}`);
       return problems;
     },
@@ -274,8 +338,62 @@ export const DRY_SCENARIOS = Object.freeze([
       if (other.join() !== "meta") problems.push(`read ${[...new Set(other)].join(", ") || "nothing"} beside the clock on a Saturday, not meta once at the start`);
       if (asked.filter((k) => k === "clock").length !== r.loop.ticks) problems.push("the clock was not read exactly once a tick");
       const calls = w.github.record.calls.map((c) => c.method + " " + c.path.split("/").pop());
-      if (calls.length !== 2) problems.push(`GitHub was called ${calls.length} times (${calls.join(", ")}), not twice (the open-issue list and the chain)`);
+      if (calls.length !== 3) problems.push(`GitHub was called ${calls.length} times (${calls.join(", ")}), not three times (the open-issue list, the standby and the chain)`);
+      if (standbySends(w).length !== 1 || standbySends(w)[0].at !== at(12, 0, DRY_WEEKEND)) problems.push("the standby was not sent on the first tick");
       if (r.loop.exit !== "budget" || !r.loop.chained.sent) problems.push("the loop did not hand over at its budget");
+      return problems;
+    },
+  },
+  {
+    name: "the runner is lost at 02:00 ET on a Saturday: the standby pending behind the loop replaces it at once, and the next hand-over replaces the standby",
+    world: () => fakeWorld({ day: DRY_WEEKEND, start: at(0, 30, DRY_WEEKEND) }),
+    budgetMs: LIVE_LOOP.budgetMs,
+    runs: { until: at(10, 0, DRY_WEEKEND), lostMs: 10 * 60 * 1000, deathAt: (run, i) => (i === 0 ? at(2, 0, DRY_WEEKEND) : Infinity) },
+    expect: (r, w) => {
+      const problems = [];
+      const [lost, standby, next] = r.runs;
+      if (r.runs.length !== 3) return [`expected three runs (the lost one, its standby, the standby's hand-over), saw ${r.runs.length}`];
+      if (!lost.died || lost.endedAt !== at(2, 0, DRY_WEEKEND)) problems.push("the first runner was not lost at 02:00 ET");
+      if (standby.origin !== STANDBY.origin || standby.startedAt !== at(2, 10, DRY_WEEKEND)) {
+        problems.push(`the successor was ${standby.origin} at ${etTime(standby.startedAt)}, not the standby the moment GitHub let the lost job go (02:10 ET)`);
+      }
+      if (!standby.standby.crash || standby.standby.crashes.length !== 1) problems.push("the standby did not count itself a crash restart");
+      if (standby.died || standby.loop.exit !== "budget" || !standby.loop.chained.sent) problems.push("the standby did not run to its own hand-over");
+      if (next.origin !== "chain" || next.startedAt !== standby.endedAt || next.standby.crash) problems.push("the standby's hand-over did not start the next run at once");
+      const cancelled = w.github.record.cancelled;
+      const handovers = chainSends(w).map((d) => d.at);
+      const sent = readStandbyTick(cancelled.length ? cancelled[0].inputs.tick : null);
+      if (cancelled.length !== 2 || cancelled.some((c) => c.inputs.origin !== STANDBY.origin || !handovers.includes(c.cancelledAt)) ||
+          !sent || sent.from !== standby.startedAt || sent.crashes.join() !== String(standby.startedAt)) {
+        problems.push("each standby a live loop left pending was not replaced by that loop's own hand-over (one running, one pending, newest wins), " +
+          "or the restarted loop's standby did not carry its start and its crash");
+      }
+      const standbys = standbySends(w);
+      if (standbys.length !== 3 || standbys.some((d, i) => d.at !== r.runs[i].startedAt)) problems.push(`expected one standby on each run's first tick, saw ${standbys.length}`);
+      if (w.github.record.created.length) problems.push(`one lost runner opened ${w.github.record.created.map((c) => c.title).join("; ")}`);
+      return problems;
+    },
+  },
+  {
+    name: "a crash loop: every run dies 20 minutes in, and the third crash restart within six hours sends no standby and raises chain",
+    world: () => fakeWorld({ day: DRY_WEEKEND, start: at(1, 0, DRY_WEEKEND) }),
+    budgetMs: LIVE_LOOP.budgetMs,
+    runs: { until: at(12, 0, DRY_WEEKEND), lostMs: 10 * 60 * 1000, deathAt: (run) => run.startedAt + 20 * 60 * 1000 },
+    expect: (r, w) => {
+      const problems = [];
+      const starts = r.runs.map((x) => `${x.origin} ${etTime(x.startedAt)}`).join(", ");
+      if (r.runs.length !== 4) return [`expected four runs (the first and three crash restarts), saw ${starts}`];
+      if (r.runs.slice(1).some((x) => x.origin !== STANDBY.origin || !x.standby.crash)) problems.push(`the restarts were ${starts}, not three crash-restarted standbys`);
+      if (r.runs.map((x) => x.standby.crashes.length).join() !== "0,1,2,3") problems.push("the crash count was not carried from each standby to the next");
+      if (!r.runs[3].standby.stoodDown || r.runs.slice(0, 3).some((x) => x.standby.stoodDown)) problems.push("the third crash restart did not stand the standby down");
+      if (standbySends(w).length !== 3 || standbySends(w).some((d) => d.at >= r.runs[3].startedAt)) problems.push(`expected three standbys and none from the third crash restart, saw ${standbySends(w).length}`);
+      const made = w.github.record.created;
+      if (made.length !== 1 || !made[0].title.startsWith("[flows-witness:chain]") || made[0].at !== r.runs[3].startedAt ||
+          !/restarted from its standby 3 times in the last 6 hours/.test(made[0].body)) {
+        problems.push(`expected one chain issue opened on the third crash restart's first tick, saw ${made.map((c) => c.title + " at " + etTime(c.at)).join("; ") || "none"}`);
+      }
+      if (w.github.queue.running() || w.github.queue.pending() || w.github.record.closed.length) problems.push("something restarted the loop after the stand-down, or the chain issue closed");
+      if (!r.verdict.failed) problems.push("the crash loop stayed green");
       return problems;
     },
   },
@@ -300,7 +418,9 @@ export async function dryLiveDay({ log = console.log, warn = console.warn, scena
   for (const scenario of scenarios) {
     const world = scenario.world();
     const notes = [];
-    const run = await drive(world, { budgetMs: scenario.budgetMs, notes });
+    const run = scenario.runs
+      ? await driveRuns(world, { budgetMs: scenario.budgetMs, notes, ...scenario.runs })
+      : await drive(world, { budgetMs: scenario.budgetMs, notes });
     const found = scenario.expect(run, world);
     const record = world.github.record;
     const summary = {

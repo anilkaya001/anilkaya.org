@@ -2,8 +2,8 @@ import { phaseAt, LIVE_CLOCK, easternDay } from "../../shared/flows-freshness.js
 import {
   WITNESS, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter, sessionOf,
 } from "./witness.mjs";
-import { createNightlyStart, NIGHTLY } from "./starts.mjs";
-import { readWithRetry, WATCH_RETRY, challenged } from "./live.mjs";
+import { createNightlyStart, createStandby, NIGHTLY, STANDBY } from "./starts.mjs";
+import { readWithRetry, WATCH_RETRY, challenged, LIVE_LOOP } from "./live.mjs";
 import { etTime } from "./health.mjs";
 
 export function normalizeRead(read) {
@@ -39,14 +39,26 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
   warn = console.warn } = {}) {
   const witness = createWitness({ reporter: reporter || createIssueReporter({ env, fetchImpl }), env, log, warn });
   const nightly = createNightlyStart({ env, fetchImpl, log, warn });
+  const standby = createStandby({ env, fetchImpl, log, warn });
   const state = { landed: null };
   const read = async (key) => normalizeRead(await readWithRetry(readOnce, key, { deadlineMs: readDeadlineMs, retryMs, sleep }));
 
   return {
-    async tick({ at, clock = null, clockRead = null, first = false }) {
+    async tick({ at, clock = null, clockRead = null, first = false, startedAt = null, budgetMs = LIVE_LOOP.budgetMs }) {
       if (first) {
         await witness.start();
-        await witness.clear("chain", { at });
+        const begun = standby.begin({ startedAt: Number.isFinite(startedAt) ? startedAt : at, budgetMs });
+        if (begun.stoodDown) {
+          await witness.raiseNow("chain", {
+            id: "chain", status: "breach",
+            detail: `The live loop has restarted from its standby ${begun.crashes.length} times in the last ` +
+              `${STANDBY.crashWindowMs / 3600000} hours (${begun.crashes.map((t) => etTime(t)).join(", ")}), each more than ` +
+              `${STANDBY.crashSlackMs / 60000} minutes before the loop that sent it was due to hand over, so each of those loops ` +
+              "died without handing over: a lost runner, a killed process or a crash. This loop sends no standby, so when it dies " +
+              "too nothing restarts it until its own hand-over at the end of its budget or a GitHub starter. Read the failed " +
+              "flows-live runs before it for how each ended.",
+          }, { at });
+        } else await witness.clear("chain", { at });
       }
       const kept = witnessView(latestClock());
       const clockFresh = clockRead === null ? !!kept : !!clockRead;
@@ -68,6 +80,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       if (p && typeof metaSession === "string" && metaSession >= p.day) state.landed = { day: p.day, session: metaSession };
       else if (metaSession === undefined && landedToday) metaSession = state.landed.session;
       const step = await nightly.step({ at, clock: wclock, metaSession });
+      const stood = await standby.step({ at, clock: wclock });
       const results = [];
       if (inTier1) results.push(evaluateTier1({ at, view, market, focus }));
       if (inTier2) results.push(evaluateTier2({ at, view, breadth }));
@@ -81,7 +94,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
             ...reads.map((r) => (r.failed ? (r.status ? "HTTP " + r.status : r.detail || "no answer") : "answered"))].join(", "),
       });
       await witness.apply(results, { at, dispatches: nightly.attempts() });
-      return { busy: step.busy, results, step };
+      return { busy: step.busy, results, step, standby: stood };
     },
     async chainFailed({ at, chained }) {
       await witness.raiseNow("chain", {
@@ -113,7 +126,7 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
           `${etTime(at)}, so the loop abandoned it, ${handed}, and exited red to free the concurrency group. ${cause}`,
       }, { at });
     },
-    summary: () => witness.summary(),
+    summary: () => ({ ...witness.summary(), standby: standby.state() }),
   };
 }
 

@@ -7,16 +7,20 @@ import { join } from "node:path";
 import { FRESH_CLASSES, easternInstant, liveStalled } from "../shared/flows-freshness.js";
 import {
   runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP, createProgress,
+  liveWindow,
 } from "../scripts/flows-legs/live.mjs";
+import { etTime } from "../scripts/flows-legs/health.mjs";
 import {
   WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter,
   issueTitle, issueBody, ownerHandle, runUrl,
 } from "../scripts/flows-legs/witness.mjs";
-import { NIGHTLY, nightlyStartDue, createNightlyStart } from "../scripts/flows-legs/starts.mjs";
+import {
+  NIGHTLY, nightlyStartDue, createNightlyStart, STANDBY, standbyTick, readStandbyTick, crashRestart, standbyDue, createStandby,
+} from "../scripts/flows-legs/starts.mjs";
 import {
   createWatch, normalizeRead, tier1Window, tier2Window, witnessDrill, challenged, keptView, WATCH_RETRY,
 } from "../scripts/flows-legs/watch.mjs";
-import { fakeWorld, fakeGithub } from "../scripts/flows-legs/live-world-fake.mjs";
+import { fakeWorld, fakeGithub, liveGroup } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
 import { LIVE_VENDOR, RATE } from "../scripts/flows-pipeline.mjs";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
@@ -607,9 +611,18 @@ const MIN = 60 * 1000;
   const blip = by("Tier 1 stops");
   ok(blip.issues.length === 1 && blip.closed === 1 && blip.failed, "a Tier 1 stall opens one issue, closes it on recovery and turns the run red");
   const weekend = by("weekend");
-  ok(weekend.passes === 0 && weekend.githubCalls === 2 && weekend.reads === weekend.ticks + 1,
+  ok(weekend.passes === 0 && weekend.githubCalls === 3 && weekend.reads === weekend.ticks + 1,
     `A WEEKEND COSTS ONE CLOCK READ A QUARTER HOUR (${weekend.reads} store reads over ${weekend.ticks} ticks), one meta read to start ` +
-      "and two GitHub calls");
+      "and three GitHub calls: the open-issue list, the standby on the first tick and the hand-over");
+  const lost = by("runner is lost");
+  ok(!lost.problems.length && lost.issues.length === 0 && lost.chainDispatches.length === 2 &&
+     lost.world.github.queue.runs.map((x) => x.inputs.origin).join() === "chain,standby,chain",
+  "A RUNNER LOST AT 02:00 ET ON A SATURDAY is replaced by the standby pending behind it as soon as GitHub lets the lost job go, " +
+    "no cron line being due until Monday; the standby counts itself one crash restart, opens nothing and hands over at its own budget");
+  const crashLoop = by("crash loop");
+  ok(!crashLoop.problems.length && crashLoop.issues.length === 1 && /^\[flows-witness:chain\]/.test(crashLoop.issues[0].title) &&
+     crashLoop.failed && crashLoop.world.github.record.dispatches.length === 3,
+  "A CRASH LOOP is bounded: three standbys, then the third crash restart within six hours sends none and raises the chain issue at once");
   const nightlyMiss = by("never lands");
   ok(nightlyMiss.issues.length === 1 && nightlyMiss.failed && nightlyMiss.nightlyDispatches.length === 2,
     "a nightly that never lands is dispatched twice and reported once");
@@ -1121,7 +1134,14 @@ const MIN = 60 * 1000;
      kinds["live:breadth"] >= 70 && kinds["live:breadth"] <= 76,
   `and it costs the Worker ${weekday.reads.length} ingest reads (${JSON.stringify(kinds)}), ${(weekday.reads.length / 1000).toFixed(2)}% of the Free plan's 100,000 requests a day, ` +
     "of which the breadth read is one a tick from 10:15 (45 minutes after the open) to 16:25 ET");
-  ok(weekday.calls.length <= 12, `and GitHub ${weekday.calls.length} calls (an issue listing and a chain dispatch per run, and the nightly)`);
+  const standbys = (d) => d.world.github.record.dispatches.filter((x) => x.workflow === "flows-live.yml" && x.inputs && x.inputs.origin === "standby");
+  const weekdayStandbys = standbys(weekday);
+  ok(weekday.calls.length <= 12 + 5 && weekday.calls.length - weekdayStandbys.length <= 12 && weekdayStandbys.length <= weekday.runs.length,
+    `and GitHub ${weekday.calls.length} calls: an issue listing and a chain dispatch per run and the nightly (${weekday.calls.length - weekdayStandbys.length}, ` +
+      `within the old ceiling of 12), plus ${weekdayStandbys.length} off-session standbys, at most one a run (the ceiling rises by 5 to 17)`);
+  ok(weekdayStandbys.length >= 4 && weekdayStandbys.every((x) => !liveWindow(x.at, null).run && !(x.at >= at(D, 9, 30) && x.at <= at(D, 16, 25))),
+  `INSIDE THE SESSION NOTHING CHANGES: no standby is sent between 09:30 and 16:25 ET (sent at ${weekdayStandbys.map((x) => etTime(x.at)).join(", ")}), ` +
+    "where the late cron lines already keep a run pending");
   const nightlySends = weekday.world.github.record.dispatches.filter((d) => d.workflow === "flows-pipeline.yml");
   ok(nightlySends.length === 1 && nightlySends[0].at === at(D, 17, 30),
     "with the nightly dispatched exactly once, at 17:30:00 ET sharp: the loop is idle from 16:25 and its 15-minute tick lands on the minute, with no special wake");
@@ -1130,8 +1150,87 @@ const MIN = 60 * 1000;
   const wk = {};
   for (const r of weekend.reads) wk[r.key] = (wk[r.key] || 0) + 1;
   ok(weekend.reads.length <= 110 && Object.keys(wk).sort().join() === "clock,meta" && weekend.runs.every((r) => r.passes === 0) &&
-     weekend.calls.length <= 12 && weekend.world.github.record.dispatches.every((d) => d.workflow === "flows-live.yml"),
-  `A SATURDAY costs ${weekend.reads.length} reads (${JSON.stringify(wk)}), no pass and no nightly, and only the chain calls GitHub`);
+     weekend.calls.length <= 12 + 5 && standbys(weekend).length === weekend.runs.length &&
+     weekend.world.github.record.dispatches.every((d) => d.workflow === "flows-live.yml"),
+  `A SATURDAY costs ${weekend.reads.length} reads (${JSON.stringify(wk)}), no pass and no nightly, and only the chain and its standby ` +
+    `call GitHub (${weekend.calls.length} calls, ${standbys(weekend).length} of them standbys, one on each run's first tick)`);
+}
+
+{
+  const record = { cancelled: [] };
+  const group = liveGroup({ record });
+  const first = group.dispatched({ inputs: { origin: "chain" }, at: 1 });
+  ok(first.startedAt === 1 && group.running() === first && group.pending() === null,
+    "THE CONCURRENCY GROUP, AS MODELLED: a dispatch with nothing running starts at once");
+  group.dispatched({ inputs: { origin: "standby" }, at: 2 });
+  group.dispatched({ inputs: { origin: "chain" }, at: 3 });
+  ok(group.pending().inputs.origin === "chain" && record.cancelled.length === 1 && record.cancelled[0].inputs.origin === "standby" &&
+     record.cancelled[0].cancelledAt === 3,
+  "ONE RUNNING AND ONE PENDING, NEWEST WINS: a second dispatch while one is pending cancels the older pending run (the 131 cancelled runs of 09-28..10-02)");
+  const next = group.finish(10);
+  ok(next.inputs.origin === "chain" && next.startedAt === 10 && first.endedAt === 10 && group.pending() === null,
+    "and when the running job ends, the pending one starts that moment");
+  ok(group.finish(20) === null && group.running() === null, "while a job that ends with nothing pending leaves the group empty");
+  const gh = fakeGithub({ now: () => 50 });
+  gh.queue.start({ origin: "chain" }, 40);
+  const env = { GITHUB_TOKEN: "ghs_fake", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org" };
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50, inputs: { tick: standbyTick(40), origin: STANDBY.origin } });
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50 });
+  await chainDispatch({ env, fetchImpl: gh.fetchImpl, at: 50, workflow: NIGHTLY.workflow, inputs: { origin: NIGHTLY.origin } });
+  ok(gh.queue.pending().inputs.origin === "chain" && gh.record.cancelled.length === 1 && gh.record.cancelled[0].inputs.origin === STANDBY.origin,
+    "and the fake GitHub routes every accepted flows-live dispatch through it: the hand-over replaces the standby, the nightly's dispatch is another group");
+}
+
+{
+  const start = at(DRY_WEEKEND, 0, 30);
+  const budget = LIVE_LOOP.budgetMs;
+  eq(standbyTick(start, [start + 1000]), `${new Date(start).toISOString()} ${new Date(start + 1000).toISOString()}`,
+    "THE STANDBY'S TICK is the sending loop's start, then the crash restarts it knows of, as ISO instants");
+  deep(readStandbyTick(standbyTick(start, [start + 1000])), { from: start, crashes: [start + 1000] }, "and reads back exactly");
+  deep([readStandbyTick(null), readStandbyTick(""), readStandbyTick("soon"), readStandbyTick("2026-10-03"),
+    readStandbyTick([0, 1, 2, 3, 4].map((i) => new Date(start + i).toISOString()).join(" "))], [null, null, null, null, null],
+  "while a missing, malformed, date-only or over-long tick is no tick");
+  const restart = (atMs, tick = standbyTick(start), origin = STANDBY.origin) => crashRestart({ origin, tick, startedAt: atMs, budgetMs: budget });
+  const due = start + budget;
+  deep([restart(due - STANDBY.crashSlackMs).crash, restart(due - STANDBY.crashSlackMs - 1).crash, restart(start + 60000).crash],
+    [false, true, true],
+  "THE CRASH RULE: a standby that starts more than 15 minutes before its sender's start plus the budget found it dead, wherever in the budget; " +
+    "15 minutes early or later is the hand-over the chain was meant to make");
+  deep([restart(start + 60000, standbyTick(start), "chain").crash, restart(start + 60000, standbyTick(start), "schedule").standby,
+    restart(start + 60000, "junk").crash], [false, false, false],
+  "and only a standby is judged: a chain, a cron starter or a standby whose tick cannot be read is never a crash restart");
+  const t = start + 2 * HOUR;
+  const older = [t - 7 * HOUR, t - 2 * HOUR];
+  deep(restart(t, standbyTick(start, older)).crashes, [t - 2 * HOUR, t],
+    "THE CRASH WINDOW: restarts older than six hours drop off the count");
+  const third = restart(t, standbyTick(start, [t - 3 * HOUR, t - HOUR]));
+  ok(third.crash && third.crashes.length === 3 && third.stoodDown, "and the third crash restart within six hours stands the standby down");
+  ok(!restart(due, standbyTick(start, [t - 3 * HOUR, t - HOUR])).stoodDown,
+    "while a standby that starts at its sender's hand-over (the chain dispatch refused) is no crash, and does not stand down");
+  const weekday = at(D, 12, 0);
+  deep([standbyDue({ at: weekday }).why, standbyDue({ at: at(D, 16, 20) }).why, standbyDue({ at: at(D, 16, 30) }).why,
+    standbyDue({ at: at(D, 3, 0) }).why, standbyDue({ at: at(DRY_WEEKEND, 12, 0) }).why],
+  ["session", "session", "off-session", "off-session", "off-session"],
+  "THE STANDBY IS DUE outside the loop's pass window only: not from 09:31 to 16:25 ET, where the late cron lines keep a run pending");
+  deep([standbyDue({ at: at(D, 3, 0), tried: true }).why, standbyDue({ at: at(D, 3, 0), stoodDown: true }).why], ["pending", "stood-down"],
+    "once a run, and never after the stand-down");
+
+  const gh = fakeGithub({ now: () => 0, chainStatus: 403 });
+  const lines = [];
+  const sb = createStandby({ env: { GITHUB_TOKEN: "ghs_fake", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org" }, fetchImpl: gh.fetchImpl,
+    log: (l) => lines.push(l), warn: (l) => lines.push(l) });
+  sb.begin({ startedAt: at(D, 2, 0) });
+  const refused = await sb.step({ at: at(D, 2, 0) });
+  const again = await sb.step({ at: at(D, 2, 15) });
+  ok(!refused.dispatched.sent && again.why === "pending" && gh.record.dispatches.length === 1 && lines.some((l) => /::warning title=Standby::.*refused \(HTTP 403\)/.test(l)),
+    "A REFUSED STANDBY is one call, a warning and no retry: it is a backup, and its cost is held to one call a run");
+  const live = read(".github/workflows/flows-live.yml");
+  ok(/FLOWS_LIVE_TICK: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.tick \|\| '' \}\}/.test(live) &&
+     /FLOWS_LIVE_ORIGIN: \$\{\{ github\.event_name == 'schedule' && 'schedule' \|\| inputs\.origin \|\| 'manual' \}\}/.test(live),
+  "THE WORKFLOW hands the loop its tick and origin, so a standby can tell when the loop that sent it was due to hand over");
+  ok(/watch\.tick\(\{ at: now\(\), clock, clockRead: currentRead\(\), first: ticks === 0,\s*inSession: !!here\.run, passes, startedAt, budgetMs \}\)/
+    .test(read("scripts/flows-legs/live.mjs")),
+  "and the kept-alive loop hands the watch its own start and budget, which the standby's tick carries");
 }
 
 {
@@ -1364,4 +1463,5 @@ console.log(`✓ flows-starts: ${checks} assertions — the live workflow's gran
   `(origin live-loop, no undeclared input), capped for a permanent refusal and ridden through a two-hour GitHub outage; the witness's Tier 1, ` +
   `Tier 2 and nightly lines at 25 minutes, 45 minutes and 21:00 ET with their debounce, three-tick recovery, reopen, dedupe, author check, ` +
   `reminder and duplicate cleanup; the issue reporter against a fake GitHub; the loop kept alive through the night, the weekend and the hop, ` +
-  `and its cron starters through the concurrency group; ${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);
+  `and its cron starters through the concurrency group; the off-session standby (one running, one pending, newest wins) and its crash rule; ` +
+  `${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);
