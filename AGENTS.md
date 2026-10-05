@@ -84,8 +84,26 @@ Browser ──► Cloudflare edge
   `FLOWS_AI_DAILY_CAP_CALLS` (2,500), or when the spend cannot be read. The
   refusal is the failure reason `budget`; the deterministic reading stands and
   the reader is told the site's own budget is spent. A model with no configured
-  rate is priced at the dearest model on the plan. `tests/flows-neuron.mjs`
-  scans `worker.js` so no call site can run the binding itself.
+  rate is priced at the dearest model on the plan. `tests/lib/ai-guard.mjs`
+  holds this in two halves. Statically (`checkModelCalls`, run by
+  `flows-neuron` and `flows-reading-worker`), it reads `worker.js`'s whole
+  import closure plus every file under `shared/` and `server/` and allows
+  exactly one read of the `AI` binding into a value, in `shared/flows-ai.js`:
+  a property access, a bracketed or destructured read, a destructured
+  parameter and any other bare `AI` token elsewhere fail, and only
+  `!x.AI` and `Boolean(x && x.AI)` count as truthiness tests. A quoted `"AI"`
+  string is not treated as a read (the entity allowlists need it), so computed
+  access (`Reflect.get(env, "AI")`, a key held in a constant,
+  `String.fromCharCode`) is caught only by the runtime guard, and only on the
+  paths the in-process suites drive. Every `cappedAi` that builds `meteredAi`,
+  the reading's `deps.ai` or an inline `askModels` argument must have a second
+  argument that is not a `null`, `undefined`, `void` or other non-function
+  literal; that the reader really reads the day's spend is proved by
+  `flows-reading-worker`, which drives the summary and Ask routes through
+  `worker.js` with `flows_ai_usage` past the cap and requires that no model
+  is reached. At run time (`guardAi`), the in-process suites hand `worker.js`
+  a binding whose `run` throws unless it is called from inside `cappedAi`'s
+  own lines.
 
 ### External deployment state
 
@@ -720,10 +738,39 @@ stay revalidatable. `/assets/fonts-version.txt` gets the same one-hour rule as
 When any file under `assets/css/`, `assets/js/`, or `assets/data/` changes:
 
 1. increment `assets/version.txt`;
-2. update every versioned CSS/JS reference and `ASSET_VERSION` in
-   `shared/flows-pages.js`, which `tests/flows-features.mjs` holds equal to
-   `assets/version.txt`;
-3. run the contract test.
+2. update every non-font `/assets/...?v=` reference (CSS and JavaScript, and
+   also the image and data references such as `atmosphere.svg?v=` in
+   `base.css` and `flows.css`), every `data-asset-version` on the seven Lab
+   shells (`lab/course.html`, `lab/review/`, `lab/placement/`,
+   `lab/challenge/` and the three `lab/projects/*/` pages), and
+   `ASSET_VERSION` in `shared/flows-pages.js`, which
+   `tests/flows-features.mjs` holds equal to `assets/version.txt`; running
+   `node scripts/bump-assets.mjs` does steps 1 and 2 and is the safe way;
+3. run the contract test (`npm run test:contracts`).
+
+`test:contracts` runs `contracts.mjs` and then `lib-contract.mjs`, and
+`lib-contract` holds the committed tree to `node scripts/bump-assets.mjs
+--check`. That gate is stricter than `contracts.mjs`, which checks only the
+CSS and JavaScript references, the fonts and three of the seven shells
+(course, review, placement): `--check` also fails on an image or data
+`?v=` in any page or sheet that is off the asset version, and on a
+`data-asset-version` on `lab/challenge/` or a `lab/projects/*/` page that
+is. A hand bump that moves only CSS and JavaScript can therefore pass
+`contracts.mjs` and still turn CI red; the failure names each stale file
+and reference.
+
+`node scripts/bump-assets.mjs` does steps 1 and 2: it increments the token,
+moves every non-font `/assets/...?v=` in the HTML outside `tests/` and `docs/`
+and in `assets/css/*.css`, every `data-asset-version` and `ASSET_VERSION`,
+and sets every woff2 `?v=` to `assets/fonts-version.txt` (normally a no-op).
+It never runs the course generator: a change to a Lab source that
+`lab-suite.bundle.js` bundles still needs
+`node scripts/generate-course-payloads.mjs`. `--check` changes nothing and
+exits non-zero when any reference is off its token or, read with the contract
+test's own pattern, carries no `?v=` at all, which is the quick test after a
+merge. A bump gives such a reference its token, and refuses, writing nothing,
+when the reference runs on past `.css`, `.js` or `.woff2` (a `.json` the
+pattern reads as `.js`).
 
 A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
 references (eight `@font-face` URLs in `base.css`, one Inter preload in each
@@ -790,8 +837,91 @@ The suites prove:
   reconciliation, boot live-region output, grading edge cases, exact rewards,
   and duplicate-award prevention.
 
+Source scans go through `tests/lib/source-scan.mjs`, never a raw read of
+`worker.js`: `workerSource()` is the Worker's whole import closure, `slice()`
+throws on a missing marker or a cut across a module boundary, `expect()`
+takes a `min` of at least 1, and `absent()` requires a positive `anchor` that
+must match the same source, so no scan passes on an empty match.
+
+The other shared test helpers live beside it, each held by
+`tests/lib-contract.mjs` (run after `contracts.mjs` in `test:contracts`):
+`tests/lib/browser.mjs` (`launch()` is `chromium.launch()` plus
+`executablePath` from `PW_CHROMIUM_PATH` when that variable is set; unset, it
+passes the caller's options untouched; a path that is not a file throws; only
+`lib-contract` launches through it until the 29 `chromium.launch()` call sites
+move over, so the sandbox's browser suites still need `PLAYWRIGHT_BROWSERS_PATH`);
+`tests/lib/served-tree.mjs` (`servedFiles()`: the tracked and unignored
+untracked files, a symlink to a file counted under its own name because
+wrangler's walk follows links and uploads it, a symlink to a directory not;
+a symlink to nothing that `.assetsignore` does not cover throws, because
+wrangler `fs.stat`s every unignored entry and that rejection fails the whole
+asset upload; all of it minus `.assetsignore` and wrangler's own
+`/.assetsignore`, `/_redirects`, `/_headers`, matched by git's own gitignore
+engine); `tests/lib/cpu-budget.mjs` (the thread CPU clock, the `flows-quant`
+reference workload, interleaved subject and reference windows, a budget held
+as a ratio to the reference with an absolute floor of the clock's resolution
+over a window's runs); and `tests/lib/d1-fake.mjs` (the counting D1 fake over
+`node:sqlite` that `flows-reads-contract` uses: trips, rows read by query
+plan, rows written, and the fail, throw, hang and slow switches). New CPU
+ceilings and new in-process D1 suites use these rather than another copy.
+
 GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
 manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
+
+`npm test` is `node run.mjs`, the fail-late runner. It runs every suite
+registered in `tests/suites.json`, in that file's order and with `tests/` as
+the working directory, whatever an earlier suite did; kills a suite at its
+`timeoutS`, else at the larger of 120 s and three times its `medianS`; and
+exits 1 when any suite failed or timed out, 0 only when all passed, 2 on a
+usage or manifest error before anything runs, and 128 plus the signal's
+number (130, 143 or 129) when interrupted by SIGINT, SIGTERM or SIGHUP. The
+signal is passed to the running suite's process group, which gets two seconds
+to clean up before SIGKILL, and the table so far is still printed. A repeat
+within 500 ms is the same interrupt (one Ctrl-C reaches the runner from the
+terminal and again from npm when the script shell execs it), and only a
+signal after that window kills the suite at once. When a suite exits,
+whatever is left in its process group is killed. It prints a table
+of every suite's result, seconds and assertions, and appends it as Markdown,
+with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
+is set. **Every `test:*` script in `tests/package.json` needs an entry in
+`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`, and an
+optional `group`, `fast` or `shard`, default `shard`; only `contracts` and
+`run` are `fast`), or the runner refuses to start and exits 2.
+`node run.mjs --only a,b` (from `tests/`, names without the `test:` prefix)
+runs those suites alone, `--bail` stops at the first failure as the old
+chain did, and `--timeout-scale=x` multiplies every timeout on a slow
+machine (a timeout past `setTimeout`'s 2^31-1 ms is held there, so a very
+large scale switches timeouts off rather than firing them at once).
+`--group fast|shard` runs one group, in manifest order. `--shard i/n` runs
+the i-th of n shards of the `shard` group: longest `medianS` first into the
+cheapest shard, a shard charged 24 s of Chromium install when it takes its
+first `C` or `W` suite, equal medians taken in manifest order and an equal
+cost given to the lower shard, the fast suites weighed and then left out;
+each shard runs in manifest order.
+`--needs-browser` with either prints `true` or `false` (whether the
+selection holds a `C` or `W` suite) and runs nothing. An empty shard or
+group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
+`--group` are usage errors (exit 2) that run nothing. `npm run test:x`
+still runs one suite by itself, and `npm test` with no flag still runs the
+whole chain.
+
+In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
+(full history and `ASSET_DIFF_BASE`, the Worker dry run, then
+`node run.mjs --group fast`, no Chromium), six `shard` jobs (a matrix of
+`--shard 1/6` to `6/6`, fail-fast off, a shallow checkout, Chromium installed
+only when `--needs-browser` answers `true`), and `test`, which needs both,
+runs `if: always()`, and is green only when the fast job and every shard
+succeeded. `test` is the job a ruleset on `main` should require (A-15); as
+of 2026-10-05 `main` has no branch protection and no ruleset, so nothing
+requires it yet and Workers Builds still deploys `main` on merge. **Adding a suite, or refreshing
+a `medianS`, means changing `tests/suites.json` AND republishing
+`PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
+packing (unchanged when no suite moves), then running
+`node run-contract.mjs` from `tests/`.** The contract
+holds the packing equal to that table, so a suites.json entry alone turns
+`run` red in the fast job (`THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED
+TABLE`), and its message prints the packing computed now in the table's shape,
+ready to paste.
 
 ### Which suites need the dev server, and which do not
 
@@ -864,9 +994,11 @@ flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
 flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
+lib-contract
 flows-dossier-contract   flows-dossier-reads
 flows-reading   flows-reading-worker   flows-reading-render
 flows-rt-client
+run-contract
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -888,6 +1020,15 @@ the vendor's own NVDA row through `buildUniverse` and the reading, and every sen
 the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClock`) to 2026-09-25 13:00 UTC for
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
+
+`lib-contract` was measured on 2026-10-05: about 3 s with no server and 239 checks (240 with
+`PW_CHROMIUM_PATH` set, which adds a real launch; in this sandbox it is
+`/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`, and CI leaves it unset). It builds a
+throwaway git repository for the served-tree semantics, drives the CPU budget on an injected clock, and runs
+`scripts/bump-assets.mjs` on a copy of the pages and sheets it lists from Git without the tool. It reads no
+history, so no diff against a base can turn it red, but it does constrain the tree: it fails when the committed
+pages and sheets do not pass `bump-assets --check` (see "Asset versioning"), and when an unignored symlink to
+nothing would fail the asset upload. It needs Node 22.13 or newer for `node:sqlite`.
 
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
 every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a
@@ -1010,6 +1151,18 @@ alone on the real clock and prints the numbers DEPLOY.md 10.5n quotes.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
+`run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s with no
+server and 379 assertions, almost all of it waiting out the fixtures' timeouts
+and kill graces. It checks `tests/suites.json` against `package.json`, then
+spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
+hang that ignores SIGTERM, a flaky suite, a detached process that holds a
+suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide
+failures under the step-summary limit, a ✓ split across the 64 KiB pipe chunk,
+a child left in a suite's group after the suite exits 0 and after it leaves on
+SIGTERM, a timeout scale past `setTimeout`'s range, and the runner itself sent
+SIGTERM, SIGINT, SIGHUP, two SIGINTs 5 ms apart and a second SIGINT 800 ms
+later mid-suite. Its process checks read `/proc` where it exists and `ps`
+elsewhere, so it runs on macOS too.
 
 Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
@@ -1041,11 +1194,13 @@ bar heights meant nothing, and an SVG label clipped off its own canvas by
 the switch to Inter. All three were invisible to every check that WAS being
 run, and all three cost a CI round trip each.
 
-**Ordering matters too.** The suites run in sequence and the run stops at the
-first failure, so a suite near the front hides every suite behind it. A count
-or a threshold in a late suite can be stale for a long time and say nothing.
-When a long-failing suite finally goes green, expect the ones behind it to
-have something to say.
+**Ordering matters less than it did.** Until 2026-10-05 `npm test` was one
+chain of `&&` links that stopped at the first failure, so a suite near the
+front hid every suite behind it, and a count or a threshold in a late suite
+could be stale for a long time and say nothing. The runner now attempts every
+suite and reports every failure of a run in its table, so read the whole table,
+not the first red row. Under `--bail` the old masking returns: a suite after
+the first failure is listed as not run, which says nothing about it.
 
 ## Local development
 

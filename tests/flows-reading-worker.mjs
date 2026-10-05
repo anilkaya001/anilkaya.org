@@ -4,6 +4,8 @@ import * as RW from "../shared/flows-reading-worker.js";
 import { AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
+import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
+import { checkModelCalls, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -305,6 +307,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const first = await summary(get);
   eq(first.body.read.status, "generating", "BUDGET: the first call is generating");
   eq(ai.log.reads.length, 0, "the cap refuses the call before the model is reached");
+  eq(ai.log.other.length, 0, "and the Neuron's own call, through meteredAi in worker.js, is refused by the same cap");
   const row = readRow(f);
   eq(row.guard, "unreachable:budget", "and the row records the budget refusal: " + row.guard);
   const next = await summary(get);
@@ -333,13 +336,13 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 }
 
 {
-  const source = (await import("node:fs")).readFileSync(new URL("../shared/flows-reading-worker.js", import.meta.url), "utf8");
-  const worker = (await import("node:fs")).readFileSync(new URL("../worker.js", import.meta.url), "utf8");
-  eq((source.match(/\.AI\.run\(/g) || []).length, 0, "EVERY MODEL CALL OF THE READING GOES THROUGH THE METER: the module never runs the binding");
-  eq((source.match(/askModels\(/g) || []).length, 1, "it has one call site");
-  eq((source.match(/askModels\(deps\.ai\(\),/g) || []).length, 1, "handed the dep");
-  eq((worker.match(/ai: \(\) => cappedAi\(/g) || []).length, 1, "which the Worker makes with cappedAi, at the reading's share of the cap");
-  eq((source.match(/maxTokens: READING_MAX_TOKENS/g) || []).length, 1, "within the output cap");
+  const source = moduleSource("shared/flows-reading-worker.js");
+  const worker = workerSource();
+  same(checkModelCalls(), [], "EVERY MODEL CALL OF THE READING GOES THROUGH THE METER: no module the Worker runs, the reading's included, runs the binding outside the AI module");
+  eq(expect(source, /askModels\(/, { min: 1, max: 1 }), 1, "it has one call site");
+  eq(expect(source, /askModels\(deps\.ai\(\),/, { min: 1, max: 1 }), 1, "handed the dep");
+  eq(expect(worker, /ai: \(\) => cappedAi\(/, { min: 1, max: 1 }), 1, "which the Worker makes with cappedAi, at the reading's share of the cap");
+  eq(expect(source, /maxTokens: READING_MAX_TOKENS/, { min: 1, max: 1 }), 1, "within the output cap");
   ok(!/retry|attempt\s*[<>]/.test(source.replace(/retryAfterS/g, "")), "and with no retry loop: one logical call per attempt");
 }
 
@@ -552,6 +555,24 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
 {
   const f = world();
+  F.seed(f, { live: false });
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/meta");
+  const day = new Date().toISOString().slice(0, 10);
+  f.db.prepare("INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 100, 7000000, 100000)").run(day);
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const a = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
+  await a.settle();
+  eq(a.res.status, 200, "ASK PAST THE CAP: the question still answers 200");
+  eq(ai.log.reads.length + ai.log.other.length, 0, "and the Ask box's call, through meteredAi in worker.js, is refused by the day's cap before the model is reached");
+  eq(a.body.llm, false, "the pipeline's own wording stands");
+  ok(/model budget this site allows itself for one day is spent/.test(a.body.note || ""), "and the reader is told the site's own budget is spent: " + a.body.note);
+}
+
+{
+  const f = world();
   const ai = rig();
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const r = await summary(get);
@@ -595,4 +616,5 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   console.log("  reading CPU per summary request: hit " + hit.toFixed(2) + " ms, miss " + miss.toFixed(2) + " ms, dossier route from its copy " + hot.toFixed(2) + " ms");
 }
 
+ok(assertAiGuarded({ minAllowed: 1 }) >= 1, "EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js: the binding handed to worker.js throws on any other caller (" + aiGuardStats().allowed + " calls)");
 console.log("flows-reading-worker: " + checks + " checks");

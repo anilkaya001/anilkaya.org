@@ -11,6 +11,7 @@ import { earningsHistory } from "../shared/flows-catalysts.js";
 import { universeValue } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
 import * as F from "./dossier-fixtures.mjs";
+import { workerSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -587,7 +588,7 @@ function checkDossier(d, label, ticker = T) {
 
 {
   const norm = (sql) => sql.replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").replace(/;\s*$/, "").trim().toLowerCase();
-  const worker = read("worker.js");
+  const worker = workerSource();
   ok(/FLOWS_DOSSIER\.DOSSIER_SCHEMA_SQL/.test(worker), "the Worker's schema bootstrap creates flows_dossier_cache with the rest of the Flows tables");
   const schema = norm(/CREATE TABLE IF NOT EXISTS flows_dossier_cache[\s\S]*?WITHOUT ROWID;/.exec(read("schema.sql"))[0]);
   const migration = norm(read("migrations/0016_flows_dossier_cache.sql"));

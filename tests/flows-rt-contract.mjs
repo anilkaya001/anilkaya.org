@@ -21,6 +21,7 @@ import { boardPlan } from "../scripts/flows-legs/live.mjs";
 import { shapeNews } from "../scripts/flows-pipeline.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { createFakeVendor, fetchFor, ALERT_EVERY_MS } from "./rt-fixtures.mjs";
+import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -1540,9 +1541,8 @@ const seqOk = (ws) => {
     ok(!/UW_ONDEMAND/.test(src), `${f}: the on-demand rate limit is never consumed`);
     ok(!/console\.(log|warn|info|debug)/.test(src), `${f}: no chatter; only structured errors`);
   }
-  const worker = read("worker.js");
-  ok(/export \{ Pulse \} from "\.\/shared\/flows-rt-hub\.js"/.test(worker), "worker.js exports the Pulse class");
-  ok(/path\.startsWith\("\/api\/rt\/"\)/.test(worker), "worker.js routes /api/rt/ inside route(), so the finalizer sees every response");
+  eq(expect(moduleSource("worker.js"), /export \{ Pulse \} from "\.\/shared\/flows-rt-hub\.js"/, { min: 1, max: 1 }), 1, "worker.js, the entry, exports the Pulse class");
+  ok(expect(workerSource(), /path\.startsWith\("\/api\/rt\/"\)/, { min: 1 }) >= 1, "the Worker routes /api/rt/ inside route(), so the finalizer sees every response");
   const toml = read("wrangler.toml");
   ok(/\[\[durable_objects\.bindings\]\]\nname = "PULSE"\nclass_name = "Pulse"/.test(toml), "wrangler.toml binds PULSE to Pulse");
   ok(/\[\[migrations\]\]\ntag = "v1"\nnew_sqlite_classes = \["Pulse"\]/.test(toml), "wrangler.toml declares the SQLite-backed class migration");

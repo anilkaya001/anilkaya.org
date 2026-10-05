@@ -8,6 +8,7 @@ import { gzipSync } from "node:zlib";
 import { COURSE_STAGE_POINTS } from "../shared/course-points.js";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { cookie, getCookie, signSession, verifySession } from "../shared/session.js";
+import { workerSource, expect } from "./lib/source-scan.mjs";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TEST_DIR, "..");
@@ -844,7 +845,9 @@ assert(read("wrangler.toml").includes('run_worker_first = ["/*", "!/assets/*"]')
     const [name, ...rest] = line.trim().split(":");
     current.set(name.trim(), rest.join(":").trim());
   }
-  const securityHeaders = Object.fromEntries([...read("worker.js").match(/const SECURITY_HEADERS = \{([^}]*)\}/)[1]
+  const workerText = workerSource();
+  expect(workerText, /const SECURITY_HEADERS = \{/, { min: 1, max: 1, why: "the Worker declares its security headers once" });
+  const securityHeaders = Object.fromEntries([...workerText.match(/const SECURITY_HEADERS = \{([^}]*)\}/)[1]
     .matchAll(/"([^"]+)":\s*"([^"]*)"/g)].map((match) => [match[1], match[2]]));
   assert(Object.keys(securityHeaders).length >= 7, "worker.js SECURITY_HEADERS could not be read");
   assert.deepEqual(Object.fromEntries(rules.get("/assets/*") || []), securityHeaders,

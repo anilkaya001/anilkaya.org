@@ -45,6 +45,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
+import { workerSource, expect } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -2245,7 +2246,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "A sixth must join the builder rather than hand-rolling headers");
   eq(src.match(/ingestURL\(\) \+ "\?list="/g).length, 1, "one of them is the ?list= listing the retire step ages the store's keys with");
   eq(src.match(/ingestURL\(\) \+ "\?keys="/g).length, 1, "one of them is the ?keys= metadata form");
-  const workerSrc = readFileSync(new URL("../worker.js", import.meta.url), "utf8");
+  const workerSrc = workerSource();
+  expect(workerSrc, /\bINGEST_META_KEYS_MAX = (\d+);/, { min: 1, max: 1, why: "the Worker declares the ingest's key cap once" });
   const metaCap = /\bINGEST_META_KEYS_MAX = (\d+);/.exec(workerSrc);
   ok(metaCap && LEDGER_PROBE_CHUNK <= Number(metaCap[1]),
      `the pipeline's chunk of ${LEDGER_PROBE_CHUNK} keys is within the Worker's INGEST_META_KEYS_MAX ` +
@@ -3593,6 +3595,36 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "REGRESSION RUNS WEEKLY TOO (Monday 06:17 UTC), so a fixture date that the real clock overtakes fails within a " +
     "week instead of on the owner's next unrelated push"); checks++;
   ok(/push:\n\s+branches: \[main\]/.test(regOn) && /pull_request:/.test(regOn), "beside push and pull request");
+  const regJob = (id) => (new RegExp(`\\n {2}${id}:\\n((?: {4}.*\\n|\\s*\\n)+)`).exec(regression) || [])[1] || "";
+  const [regFast, regShard, regTest] = ["fast", "shard", "test"].map(regJob);
+  assert.deepEqual([regFast, regShard, regTest].map((job) => [...job.matchAll(/^ {4}timeout-minutes: (\S+)$/gm)].map((m) => m[1])),
+    [["10"], ["25"], ["5"]],
+    "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 25 (its slowest " +
+    "suite's own run.mjs timeout plus setup, which run-contract holds), and the aggregate test 5"); checks++;
+  ok(/^ {4}needs: \[fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
+    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs fast and every shard and runs if: always(), so a failed or " +
+    "cancelled shard turns it red instead of skipping it (a skipped required check would pass)");
+  ok(/FAST: \$\{\{ needs\.fast\.result \}\}/.test(regTest) && /SHARDS: \$\{\{ needs\.shard\.result \}\}/.test(regTest) &&
+     /test "\$FAST" = success && test "\$SHARDS" = success/.test(regTest) && !/uses:/.test(regTest),
+    "and it is green only when the fast job and the shard matrix both report success; it checks out nothing");
+  ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m.test(regShard),
+    "the shard matrix is 1 to 6 with fail-fast off, so one red shard never cancels the others' reports");
+  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 --needs-browser\)"/.test(regShard) &&
+     /echo "needs=\$needs" >> "\$GITHUB_OUTPUT"/.test(regShard) && /^ {8}id: browser$/m.test(regShard) &&
+     /- name: Install Chromium\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: npx playwright install --with-deps chromium\n/.test(regShard),
+    "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
+    "under bash -e) and the Chromium install runs on that output, so a failed install fails the shard");
+  ok(!/\|\| true/.test(regression), "no step swallows a failure with || true");
+  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
+     !/npm test/.test(regression),
+    "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");
+  ok(/fetch-depth: 0/.test(regFast) && /ASSET_DIFF_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/.test(regFast) &&
+     /wrangler deploy --dry-run --outdir \/tmp\/anilkaya-worker-dry-run/.test(regFast) && !/playwright/.test(regFast),
+    "the fast job alone fetches the history and sets ASSET_DIFF_BASE for the asset contract, validates the Worker " +
+    "bundle, and installs no Chromium");
+  ok(!/fetch-depth/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test");
+  ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
+    "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
     const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
@@ -3605,6 +3637,24 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
     `${file} keeps no credential in .git/config after checkout`);
   }
+  const images = [];
+  for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url)).sort()) {
+    const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+    const jobsAt = text.search(/^jobs:\s*$/m);
+    const jobsBlock = jobsAt < 0 ? "" : text.slice(jobsAt);
+    const jobs = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)].map((m) => m[1]);
+    const runsOn = [...text.matchAll(/^\s*runs-on:\s*(.*?)\s*$/gm)].map((m) => m[1]);
+    ok(jobs.length > 0 && runsOn.length === jobs.length && runsOn.every((r) => r === "ubuntu-24.04"),
+      `${file} PINS EVERY JOB'S RUNNER IMAGE to ubuntu-24.04 (jobs ${jobs.join(", ")}; runs-on ${runsOn.join(", ")}): ` +
+      "ubuntu-latest moves to Ubuntu 26.04 from 2026-10-19, and the engines and probes must not change image unannounced");
+    ok(!/ubuntu-latest/.test(text), `${file} names ubuntu-latest nowhere`);
+    images.push(...jobs.map((j) => `${file}:${j}`));
+  }
+  const pinned = ["flows-live.yml:live", "flows-pipeline.yml:build", "flows-pipeline.yml:keepalive",
+    "flows-probe.yml:probe", "flows-ws-probe.yml:probe", "regression.yml:test"];
+  ok(pinned.every((j) => images.includes(j)),
+    `the image pin was read on the six jobs that ran on ubuntu-latest (${pinned.join(", ")}), so a renamed job or a ` +
+    `workflow the loop missed cannot pass it vacuously; every job read: ${images.join(", ")}`);
   ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
      `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
   ok(!/05:15/.test(src), "and the pipeline no longer names 05:15 anywhere");
