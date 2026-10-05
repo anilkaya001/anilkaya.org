@@ -2547,7 +2547,10 @@ focus read and no dispatch; pages fall back to the nightly rows.
   name in its place. A 2xx body that does not parse is described by its size
   alone. A key that is not name-shaped (not an identifier, or carrying four
   digits in a row, as a price, a date or a contract does) is counted as
-  `<n value-shaped keys>`, never printed. The `x-uw-daily-req-count`
+  `<n value-shaped keys>`, never printed: in a field list, in the envelope,
+  in a set label (the objects under such keys are typed as one set,
+  `fields data.<2 value-shaped keys>`) and in a row location
+  (`rows N at <value-shaped key>[]`). The `x-uw-daily-req-count`
   it prints counts every caller of the key, including any agent session that
   has `UW_API_KEY` set and reaches the vendor's MCP server through `.mcp.json`.
 - **The socket probe** (`.github/workflows/flows-ws-probe.yml`, dispatch only)

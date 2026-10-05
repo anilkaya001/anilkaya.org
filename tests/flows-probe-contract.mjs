@@ -12,6 +12,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const throwsLike = (fn, pattern, msg) => { assert.throws(fn, pattern, msg); checks++; };
 
+const printedLabels = (lines) => lines.flatMap((l) => {
+  const set = /^ {3}(?:fields|values) (.*?)  /.exec(l);
+  const at = /^ {3}envelope .* rows \d+ at (.*)$/.exec(l);
+  return set ? [set[1]] : at ? [at[1]] : [];
+});
+const DIGIT_RUN = /\d{4}/;
+
 const KEY = "uwkey-7f3c9e1a-SECRET-4b2d-8e6f-0a1b2c3d4e5f";
 const SESSION = "2026-09-22";
 const list = probe.loadList();
@@ -380,6 +387,29 @@ const list = probe.loadList();
   eq(onlyValues.cls, "ok", "a body keyed by values alone still arrived: it is ok, not empty");
   ok(probe.renderBlock(onlyValues).includes("   spec not compared: the list holds no documented names for this operation"),
     "an operation with no expect list says the list holds none, not that the spec documents no shape");
+  const leaky = [
+    [{ data: { "2026-10-02": { close: "187.50" }, "2026-10-03": { close: "188.10" } } },
+      "data.<2 value-shaped keys>", "a body keyed by date under data folds its rows into one set"],
+    [{ "2026-10-02": [{ close: "1" }], meta: 1 }, "<value-shaped key>[]", "rows found under a date are located without naming it"],
+    [{ data: { "2026-10-02": [{ close: "1" }] } }, "data.<value-shaped key>[]", "and so are rows under a date inside data"],
+    [{ data: [{ close: "1", AAPL261016C00200000: { bid: "1.2" } }] }, "data[].<1 value-shaped key>",
+      "an object under a contract inside a row is typed under a counted label"],
+    [{ data: [{ close: "1", "2026-10-02": [{ bid: "1.2" }] }] }, "data[].<1 value-shaped key>[]",
+      "rows under a date inside a row are typed under a counted label"],
+    [{ data: [{ close: "1" }], "187.50": { size: 3 } }, "<1 value-shaped key>", "an envelope object under a price is typed under a counted label"],
+  ];
+  for (const [body, label, why] of leaky) {
+    const result = probe.analyse({ id: "l", tier: "2", op: "/l", expect: ["close"] },
+      { url: "https://x.test/l", status: 200, ms: 1, text: JSON.stringify(body) }, probe.makeRedactor(KEY));
+    const printed = probe.renderBlock(result);
+    ok(printedLabels(printed).includes(label), `LABELS: ${why} (${label})`);
+    const leaked = printed.filter((l) => ["2026-10-02", "2026-10-03", "187.50", "188.10", "AAPL261016C00200000"].some((v) => l.includes(v)));
+    deep(leaked, [], `LABELS: ${JSON.stringify(body)} prints no date, price or contract as a set or row label`);
+    deep(printedLabels(printed).filter((l) => DIGIT_RUN.test(l)), [], `LABELS: no printed label of ${JSON.stringify(body)} has four digits in a row`);
+  }
+  deep(probe.fieldSets({ data: { AAPL: { close: "1" }, "2026-10-02": { close: "2" }, "2026-10-03": { close: "3" } }, x: { a: 1 } })
+    .map((s) => s.label), ["data", "x", "data.AAPL", "data.<2 value-shaped keys>"],
+    "a name-shaped key keeps its own set, and the value-shaped keys beside it share one counted set");
   const specOps = new Set([...fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8")
     .matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)].map((m) => m[1]));
   deep(list.entitlement.filter((op) => specOps.has(op) && !list.expect[op]), [],
@@ -563,6 +593,8 @@ const mini = probe.validateList({
   deep(lines.filter((l) => !l.startsWith("   GET ") && valueAfterName.test(l)), [],
     "VALUE-FREE: no printed line has a digit-bearing value after a field name (the request line prints our own query, " +
       "and the one vendor value it could carry, a bound contract, is checked above)");
+  deep(printedLabels(lines).filter((l) => DIGIT_RUN.test(l)), [],
+    "VALUE-FREE: no fields, values or rows-at label carries a run of four digits (a date, a price, a contract)");
   ok(/^== summary {2}session 2026-09-22 {2}10 calls {2}1 x 429/m.test(out), "the summary counts calls and 429s");
   for (const cls of ["ok", "empty", "4xx", "5xx"]) {
     ok(new RegExp(`^ {3}${cls} +\\d+`, "m").test(out), `the summary always shows the ${cls} row`);
@@ -760,6 +792,8 @@ const mini = probe.validateList({
   const valueAfterName = new RegExp(`\\b(${names.join("|")})"?\\s*[:=]\\s*"?[-+.]?\\d`);
   deep(lines.filter((l) => !l.startsWith("   GET ") && valueAfterName.test(l)), [],
     "VALUE-FREE: no digit-bearing value follows a field name; a count follows a documented token instead");
+  deep(printedLabels(lines).filter((l) => DIGIT_RUN.test(l)), [],
+    "VALUE-FREE: no fields, values or rows-at label carries a run of four digits");
   ok(/^ {3}entitled +3 {2}trades:AAPL 200 \(50 rows, [\d.]+ KB\)/m.test(out) &&
      /trades:NVDA 200 \(50 rows, [\d.]+ KB\)/.test(out) && /prints:AAPL 200 \(50 rows, [\d.]+ KB\)/.test(out),
     "the summary says which entitlement routes answered, with their row counts and sizes");

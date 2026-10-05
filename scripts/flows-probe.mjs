@@ -498,39 +498,49 @@ export function formatTokens(entry) {
   ];
 }
 
+export const VALUE_KEY = "<value-shaped key>";
+
+const shownKey = (key) => (isNameShaped(key) ? key : VALUE_KEY);
+
 export function locateRows(body) {
-  if (Array.isArray(body)) return { at: "$", rows: body, single: false };
-  if (!isObj(body)) return { at: null, rows: [], single: false };
-  if (Array.isArray(body.data)) return { at: "data", rows: body.data, single: false };
-  const arrays = Object.entries(body).filter(([, v]) => Array.isArray(v));
+  if (Array.isArray(body)) return { at: "$", shown: "$", rows: body, single: false };
+  if (!isObj(body)) return { at: null, shown: null, rows: [], single: false };
+  if (Array.isArray(body.data)) return { at: "data", shown: "data", rows: body.data, single: false };
+  const arrays = Object.entries(body).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v, shownKey(k)]);
   if (isObj(body.data)) {
-    for (const [k, v] of Object.entries(body.data)) if (Array.isArray(v)) arrays.push([`data.${k}`, v]);
+    for (const [k, v] of Object.entries(body.data)) if (Array.isArray(v)) arrays.push([`data.${k}`, v, `data.${shownKey(k)}`]);
   }
   if (arrays.length) {
     const score = ([, v]) => (v.some(isObj) ? 1e12 : 0) + v.length;
-    const [at, rows] = arrays.reduce((best, entry) => (score(entry) > score(best) ? entry : best));
-    return { at, rows, single: false };
+    const [at, rows, shown] = arrays.reduce((best, entry) => (score(entry) > score(best) ? entry : best));
+    return { at, shown, rows, single: false };
   }
-  if (isObj(body.data)) return { at: "data", rows: [body.data], single: true };
-  return { at: "$", rows: [body], single: true };
+  if (isObj(body.data)) return { at: "data", shown: "data", rows: [body.data], single: true };
+  return { at: "$", shown: "$", rows: [body], single: true };
 }
 
 export function rowsLabel(located) {
   if (located.at === null) return "none";
   if (located.at === "$") return located.single ? "$" : "[]";
-  return located.single ? located.at : `${located.at}[]`;
+  const shown = located.shown ?? located.at;
+  return located.single ? shown : `${shown}[]`;
 }
 
 export function envelopeObjects(body, located) {
   if (!isObj(body) || (located.at === "$" && located.single)) return [];
   const out = [];
-  const consider = (key, value) => {
-    if (isObj(value) && key !== located.at && !String(located.at).startsWith(key + ".")) out.push([key, value]);
+  const level = (object, prefix) => {
+    const folded = [];
+    for (const [k, v] of Object.entries(object)) {
+      const key = prefix + k;
+      if (!isObj(v) || key === located.at || String(located.at).startsWith(key + ".")) continue;
+      if (isNameShaped(k)) out.push([key, [v]]);
+      else folded.push(v);
+    }
+    if (folded.length) out.push([prefix + valueKeysToken(folded.length), folded]);
   };
-  for (const [k, v] of Object.entries(body)) consider(k, v);
-  if (isObj(body.data) && located.at !== "data") {
-    for (const [k, v] of Object.entries(body.data)) consider(`data.${k}`, v);
-  }
+  level(body, "");
+  if (isObj(body.data) && located.at !== "data") level(body.data, "data.");
   return out.slice(0, MAX_EXTRAS);
 }
 
@@ -555,20 +565,31 @@ function nestedSets(rows, label) {
   const sample = rows.slice(0, SAMPLE_ROWS).filter(isObj);
   const keys = [...new Set(sample.flatMap((row) => Object.keys(row)))];
   const out = [];
+  const foldedArrays = new Set();
+  const foldedObjects = new Set();
+  const arrayRows = [];
+  const objectRows = [];
   for (const key of keys) {
     const values = sample.map((row) => row[key]);
     const array = values.find((v) => Array.isArray(v) && v.some(isObj));
+    const objects = array ? [] : values.filter(isObj);
+    if (!isNameShaped(key)) {
+      if (array) { foldedArrays.add(key); arrayRows.push(...array); }
+      else if (objects.length) { foldedObjects.add(key); objectRows.push(...objects); }
+      continue;
+    }
     if (array) { out.push({ label: `${label}.${key}[]`, rows: array }); continue; }
-    const objects = values.filter(isObj);
     if (objects.length) out.push({ label: `${label}.${key}`, rows: objects });
   }
+  if (foldedArrays.size) out.push({ label: `${label}.${valueKeysToken(foldedArrays.size)}[]`, rows: arrayRows });
+  if (foldedObjects.size) out.push({ label: `${label}.${valueKeysToken(foldedObjects.size)}`, rows: objectRows });
   return out;
 }
 
 export function fieldSets(body, located = locateRows(body)) {
   const label = rowsLabel(located);
   const sets = [{ label, rows: located.rows }];
-  for (const [key, value] of envelopeObjects(body, located)) sets.push({ label: key, rows: [value] });
+  for (const [setLabel, rows] of envelopeObjects(body, located)) sets.push({ label: setLabel, rows });
   const nested = [];
   for (const set of sets) nested.push(...nestedSets(set.rows, set.label));
   return [...sets, ...nested.slice(0, MAX_NESTED)]
