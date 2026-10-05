@@ -513,6 +513,52 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 
 {
   const f = world();
+  const get = await client(f.D1, { FLOWS_READ_MODE: "off" });
+  const SLOW_MS = 5000;
+  const below = globalThis.fetch;
+  const slowCalls = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input instanceof URL ? input.href : typeof input === "string" ? input : input.url);
+    if (url.hostname === "uw.test" && /\/financials$/.test(url.pathname)) {
+      const signal = init && init.signal;
+      const entry = { aborted: false, at: Date.now() };
+      slowCalls.push(entry);
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, SLOW_MS);
+        if (signal) signal.addEventListener("abort", () => { entry.aborted = true; clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+    }
+    return below(input, init);
+  };
+  const partsOf = (kind) => {
+    const row = f.db.prepare("SELECT payload FROM flows_dossier_cache WHERE ticker = ? AND kind = ?").get(T, kind);
+    return row ? Object.keys(JSON.parse(row.payload).parts || {}).sort() : [];
+  };
+  try {
+    const first = await get("/api/flows/summary?t=" + T);
+    eq(first.body.read.status, "generating", "A SOURCE SLOWER THAN THE DEFAULT VENDOR DEADLINE: the first summary read answers generating while financials takes " + SLOW_MS + " ms");
+    await first.settle();
+    const until = Date.now() + SLOW_MS + 4000;
+    while (!partsOf("fundamentals").includes("financials") && Date.now() < until) await wait(100);
+    eq(slowCalls.length, 1, "the slow route is called once by the first read");
+    ok(!slowCalls[0].aborted, "and the dossier's background call is not aborted at uwFetch's 4 s default");
+    ok(partsOf("fundamentals").includes("financials"), "so the slow source is stored in flows_dossier_cache after the first read (" + partsOf("fundamentals").join(",") + ")");
+    const second = await get("/api/flows/summary?t=" + T);
+    await second.settle();
+    const third = await get("/api/flows/summary?t=" + T);
+    await third.settle();
+    for (const [n, r] of [["second", second], ["third", third]]) {
+      const read = r.body.read;
+      ok(read.status === "fallback" && read.why === "off", "the " + n + " summary read is the finished reading, not still assembling (" + read.status + "/" + read.why + ")");
+      ok(read.sections && read.sections.identity && read.sections.now, "and carries its identity and now sections");
+    }
+    eq(slowCalls.length, 1, "and no later read calls the slow route again");
+  } finally {
+    globalThis.fetch = below;
+  }
+}
+{
+  const f = world();
   const get = await client(f.D1);
   const a = await get("/api/flows/dossier?t=EXMP");
   await a.settle();

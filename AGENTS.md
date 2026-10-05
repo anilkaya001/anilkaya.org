@@ -325,17 +325,26 @@ Errors use:
   rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
   `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
-- Every vendor call outside the real-time rail (whose hub keeps its own
-  adapter and `callTimeoutMs`) goes through `uwFetch`, whose fetch carries
-  `AbortSignal.timeout`, so the deadline covers the body read too: 4 s by
-  default (`RT_LIMITS.callTimeoutMs`, the rail's own per-call bound),
-  6 s for OHLC, the strategy desk's expiry breakdown, its dated retry and the
-  greek-exposure fallback, 8 s for chain pages (the chain route and the
-  strategy expiry pages), and `LIVE_BUDGET.tier1TimeoutMs` (6 s) for the
-  Tier 1 tick, the focus tick and the tape. An aborted call is JSON
-  `504 chain_timeout` for a route whose caller throws, `null` for a caller
-  that catches, and the quote card's `200` `unavailable` body with `why`
-  `chain_timeout`; a failure before the deadline keeps `502 chain_upstream`.
+- Every vendor call the Worker makes outside the real-time rail (whose hub
+  keeps its own adapter and `callTimeoutMs`) goes through `uwFetch`, whose
+  fetch carries `AbortSignal.timeout`, so the deadline covers the body read
+  too: 4 s by default (`RT_LIMITS.callTimeoutMs`, the rail's own per-call
+  bound), 6 s for OHLC, the strategy desk's expiry breakdown, its dated retry
+  and the greek-exposure fallback, 8 s for chain pages (the chain route and
+  the strategy expiry pages), `LIVE_BUDGET.tier1TimeoutMs` (6 s) for the
+  Tier 1 tick, the focus tick and the tape, and `UW_DOSSIER_DEADLINE_MS`
+  (20 s) for the dossier's sources, whose foreground wait is its own 2.5 s
+  per source and 3 s in all and whose remainder runs in `ctx.waitUntil`. The
+  nightly pipeline's `uw()` client (20 s) and the Actions `--live` leg call
+  the vendor outside the Worker and do not use `uwFetch`. An aborted call is
+  JSON `504 chain_timeout` for a route whose caller throws, `null` for a
+  caller that catches, and the quote card's `200` `unavailable` body with
+  `why` `chain_timeout`. Before the deadline, a network failure or a body
+  that cannot be read or parsed is `502 chain_upstream`, and the other codes
+  are unchanged: a missing key `503 chain_unconfigured`, a vendor 429
+  `429 chain_rate_limited`, any other vendor error status
+  `502 chain_upstream`, and a body over the parse ceiling
+  `502 chain_too_large`.
 
 Authenticated PUT/DELETE requests require an exact `X-IEWT-Owner` match with
 the verified session user. Conflicting `Origin` or `Sec-Fetch-Site` metadata is
@@ -480,10 +489,15 @@ never a scan: the universe column of a name is found by counting separators in
 the name list, an events row by its leading key. The vendor fan-out is capped at
 nine calls a read, queued by priority, parallel, 2.5 s per source and 3 s in
 all; an unfinished or rate-limited source marks its packet `pending` and
-finishes in `ctx.waitUntil` within `uwFetch`'s 4 s default deadline, and the
-next read picks the result up. A source still unanswered at 4 s is aborted,
-recorded as a transient failure (reason `failed`, the same as a vendor 5xx),
-stores nothing, and the next read calls the vendor again. Slow kinds
+finishes in `ctx.waitUntil` within the dossier's own vendor deadline
+(`UW_DOSSIER_DEADLINE_MS`, 20 s, under the 30 s `waitUntil` allowance), and
+the next read picks the result up. A source still unanswered at 20 s is
+aborted, recorded as a transient failure (reason `failed`, the same as a
+vendor 5xx), stores nothing, and the next read calls the vendor again. The
+dossier does not take `uwFetch`'s 4 s default: a healthy source answering
+in 5 s would then never be stored, every read would wait 2.5 s for it, the
+reading's 1.5 s box would always fire first, and the reading would stay
+`generating` (`flows-dossier-reads` holds this). Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
@@ -1089,7 +1103,7 @@ every packet from the nightly payload fixtures and from `tests/fixtures-dossier-
 recording `Proxy` that each reducer reads only the fields `DOSSIER_READS` names and the probe list holds,
 fuzzes the sanitiser with instruction, markup, URL, bidi, role-marker and obfuscated text, runs the renderer to
 every budget from 400 to 12,000 tokens, and checks the fingerprint over 120 random price levels.
-`flows-dossier-reads` was measured the same day: 4.4 s and 232 checks. It imports `worker.js` into Node with the
+`flows-dossier-reads` was measured the same day: 4.4 s and 232 checks; on 2026-10-05, with the 5 s source held through the summary route, about 12 s and 241 checks. It imports `worker.js` into Node with the
 counting D1 fake over `node:sqlite` (Node 22.13 or newer, run under `--disable-warning=ExperimentalWarning`) and
 a stubbed vendor at `https://uw.test`, and asserts round trips, rows read cold and warm, vendor calls (eight cold
 for a carded name, nine for a universe-only name with four queued), parallelism, the deadline and `pending`, the

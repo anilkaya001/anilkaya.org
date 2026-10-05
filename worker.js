@@ -1712,7 +1712,7 @@ async function absentNeuron(env, ctx, ticker) {
 
 function dossierDeps(env, ctx) {
   return {
-    fetchVendor: (p, params, opts) => uwFetch(env, p, params, opts),
+    fetchVendor: (p, params, opts) => uwFetch(env, p, params, { ...opts, deadlineMs: UW_DOSSIER_DEADLINE_MS }),
     allowed: (e) => FLOWS_LIVE.ondemandAllowed(e),
     quote: async (t) => (await quoteResponse(env, ctx, t)).json(),
     admit: (t) => vendorAdmits(env, ctx, t),
@@ -2027,6 +2027,8 @@ const UW_DEADLINE_MS = RT_LIMITS.callTimeoutMs;
 const UW_OHLC_DEADLINE_MS = 6000;
 
 const UW_CHAIN_DEADLINE_MS = 8000;
+
+const UW_DOSSIER_DEADLINE_MS = 20000;
 
 async function uwFetch(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
