@@ -234,7 +234,7 @@ export function showValue(v, unit, o = {}) {
     case "days": return Math.round(v) + (Math.round(v) === 1 ? " day" : " days");
     case "shares": {
       const c = compact(v);
-      return (v < 0 ? MINUS : "") + (c !== null ? c : String(Math.abs(Math.round(v)))) + " shares";
+      return plus + (v < 0 ? MINUS : "") + (c !== null ? c : String(Math.abs(Math.round(v)))) + " shares";
     }
     case "contracts": {
       const c = compact(v);
@@ -1240,11 +1240,14 @@ export function buildPositioningPacket(inp) {
     rec.fact("inst.holders", "Institutional holders read (largest first)", own.n, "count", { grade: 3, note: "reports dated " + own.reportDate });
     if (isNum(own.so) && own.so > 0) rec.fact("inst.share", "Shares held by those holders over shares outstanding", own.units / own.so, "fraction", { grade: 2, note: "derived; only the holders read, so a floor" });
     if (own.changeKnown > 0) {
-      rec.fact("inst.change", "Net change in their shares since the prior report", own.change, "shares", { signed: true, grade: 2 });
-      rec.fact("inst.up", "Holders that added", own.up, "count", { grade: 2, silent: true });
-      rec.fact("inst.down", "Holders that trimmed", own.down, "count", { grade: 2, silent: true });
+      const part = own.changeKnown < own.n;
+      const partNote = part ? own.changeKnown + " of " + own.n + " holders report a change; the others are not counted" : null;
+      const cg = part ? 1 : 2;
+      rec.fact("inst.change", "Net change in their shares since the prior report", own.change, "shares", { signed: true, grade: cg, note: partNote });
+      rec.fact("inst.up", "Holders that added", own.up, "count", { grade: cg, silent: true, note: partNote });
+      rec.fact("inst.down", "Holders that trimmed", own.down, "count", { grade: cg, silent: true, note: partNote });
     } else if (own.rv === EXTRACT_VERSIONS.ownership) {
-      const reason = why("absent", "no holder row carries units_changed, units_change or two historical_units");
+      const reason = why("absent", "no holder row carries units_changed or units_change, or a history whose newest entry is the current units");
       for (const k of ["inst.change", "inst.up", "inst.down"]) rec.hold(k, reason);
     }
     own.top.slice(0, 3).forEach((t, i) => {

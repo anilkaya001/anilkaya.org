@@ -247,6 +247,20 @@ function checkDossier(d, label, ticker = T) {
   const wirePos = posOf(wire);
   eq(wirePos.facts.find((f) => f.k === "inst.change")?.v, 18301194, "positioning: the wire's name gives inst.change");
   ok(!wirePos.withheld.some((w) => w.k.startsWith("inst.")), "positioning: and withholds nothing about institutions");
+  const wireChange = wirePos.facts.find((f) => f.k === "inst.change");
+  same([wireChange.display, wireChange.grade, wireChange.note], ["+18.3M shares", 2, null], "positioning: a net change every holder reports prints its sign, at grade 2, with no qualification");
+  eq(wirePos.text.find((x) => x.k === "holder1")?.text, "Holder holds 1.16B shares, changed by +18.3M shares", "positioning: a holder's added shares print with a plus, like every other signed figure");
+  eq(wirePos.text.find((x) => x.k === "holder2")?.text, "Other holds 4.10K shares, changed by \u2212320 shares", "positioning: and a trim with the minus sign");
+  eq(D.showValue(-5000000, "shares", { signed: true }), "\u22125.00M shares", "shares: a signed negative keeps the minus and gains no plus");
+  eq(D.showValue(18301514, "shares"), "18.3M shares", "shares: an unsigned figure gains no plus");
+  const partOwn = V.reduceOwnership({ data: [holder({ units: "1162996939", units_changed: "18301514" }), holder({ short_name: "Other", units: 300000000, units_changed: "-5000000" }), holder({ short_name: "Third", units: 52000000, historical_units: [52000000] })] });
+  same([partOwn.n, partOwn.changeKnown, partOwn.change], [3, 2, 13301514], "ownership: a holder with no known change is not counted in the net change");
+  const mixedPos = posOf(partOwn);
+  for (const k of ["inst.change", "inst.up", "inst.down"]) {
+    const f = mixedPos.facts.find((x) => x.k === k);
+    ok(f && f.grade === 1 && f.note === "2 of 3 holders report a change; the others are not counted", "positioning: when only some holders report a change, " + k + " says how many and is capped at grade 1");
+  }
+  eq(mixedPos.facts.find((f) => f.k === "inst.change")?.display, "+13.3M shares", "positioning: the partial net change still prints, signed");
   eq(posOf(derived).facts.find((f) => f.k === "inst.change")?.v, 18301194, "positioning: the derived change gives inst.change");
   const neitherPos = posOf(neither);
   ok(neitherPos.facts.some((f) => f.k === "inst.holders") && !neitherPos.facts.some((f) => ["inst.change", "inst.up", "inst.down"].includes(f.k)), "positioning: with neither, the holders are read and no change fact is emitted");
