@@ -811,6 +811,7 @@ async function openEvents(browser, payload, opts = {}) {
       }));
     };
   }, [payload, opts.mode || "", opts.updatedAt || Date.now(), opts.cx || null]);
+  if (opts.now) await page.clock.setFixedTime(opts.now);
   await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
   if (opts.css) for (const sheet of SHEETS) await page.addStyleTag({ path: path.join(ROOT, sheet) });
   await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-ui.js") });
@@ -1095,7 +1096,8 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
        "behind them that is missing");
 
     const HOUR = 3600000;
-    const old3 = await render(CAL, { updatedAt: Date.now() - 72 * HOUR });
+    const WED = Date.parse("2026-10-07T15:00:00Z");
+    const old3 = await render(CAL, { now: WED, updatedAt: WED - 72 * HOUR });
     eq(old3.stale && old3.stale.hidden, false, "a calendar written three days ago raises the stale pill");
     ok(/last written 3 days ago/.test(old3.stalePop || ""),
        `whose disclosure counts in whole days: "${String(old3.stalePop).slice(0, 80)}…"`);
@@ -1103,11 +1105,17 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
        `and the status sentence carries the qualifier ON the day counts it qualifies ` +
        `("${old3.status.text.slice(-90)}")`);
 
-    const old1 = await render(CAL, { updatedAt: Date.now() - 34 * HOUR });
+    const old1 = await render(CAL, { now: WED, updatedAt: WED - 34 * HOUR });
     ok(/last written 1 day ago/.test(old1.stalePop || ""),
        `one day is "1 day", not "1 day(s)": "${String(old1.stalePop).slice(0, 60)}…"`);
     ok(!/day\(s\)/.test(String(old1.stalePop) + old1.status.text),
        "and no parenthesised plural is left anywhere in the pair");
+    const MON = Date.parse("2026-10-05T15:01:00Z");
+    const weekend = await render(CAL, { now: MON, updatedAt: Date.parse("2026-10-03T00:30:00Z") });
+    eq(weekend.stale && weekend.stale.hidden, true,
+       "A CALENDAR WRITTEN FRIDAY EVENING IS STILL CURRENT ON MONDAY MORNING: 62 hours of weekend is not a missed run, so no stale pill (the owner saw one on 2026-10-05)");
+    const missed = await render(CAL, { now: Date.parse("2026-10-06T03:00:00Z"), updatedAt: Date.parse("2026-10-03T00:30:00Z") });
+    eq(missed.stale && missed.stale.hidden, false, "while the same calendar once Monday's run is overdue (after 02:00 UTC Tuesday) raises it");
     eq(wide.stale && wide.stale.hidden, true, "while a fresh payload raises no pill");
     ok(!/that run's, not today's/.test(wide.status.text),
        "and adds no qualifier, so the day counts are stated flat only when they ARE today's");

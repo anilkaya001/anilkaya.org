@@ -26,27 +26,31 @@
     return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(dp === undefined ? 0 : dp);
   };
 
-  const STALE_WRITE_MS = 30 * 60 * 60 * 1000;
-  const STALE_SESSION_MS = 4 * 24 * 60 * 60 * 1000;
+  const DAY = 864e5, off = (d) => new Date(d).getUTCDay() % 6 === 0;
+  const due = (d) => { do d += DAY; while (off(d)); return d + DAY + 72e5; };
 
   function staleness(payload, now, opts) {
     const at = isNum(now) ?? Date.now();
     if (!payload || typeof payload !== "object") return { kind: "unknown", message: null };
-    const stamped = isNum(payload.__updatedAt);
-    const written = stamped !== null && stamped > 0 ? stamped : null;
-    if (written !== null && at - written > STALE_WRITE_MS) {
-      const hours = Math.floor((at - written) / 3600000), days = Math.floor(hours / 24);
-      const age = days >= 1 ? days + (days === 1 ? " day" : " days") : hours + (hours === 1 ? " hour" : " hours");
-      return { kind: "write", message: ((opts || {}).subject || "This page") + " was last written " + age +
+    const ff = payload.__ff, server = ff && ff.stateAt ? ff.stateAt(at) : null;
+    if (server && server !== "stale") return { kind: "fresh", message: null };
+    const w = isNum(payload.__updatedAt), written = w > 0 ? w : null;
+    let s = written && Math.floor((written - 72e6) / DAY) * DAY;
+    while (s && off(s)) s -= DAY;
+    if (written && at >= due(s)) {
+      const h = Math.floor((at - written) / 36e5), d = Math.floor(h / 24);
+      return { kind: "write", message: ((opts || {}).subject || "This page") + " was last written " + (d ? d + (d === 1 ? " day" : " days") : h + (h === 1 ? " hour" : " hours")) +
         " ago. The pipeline has not published since — check the Actions tab." };
     }
-    const parsed = isoDay(payload.sessionDate) ? Date.parse(String(payload.sessionDate) + "T21:00:00Z") : NaN;
-    const session = Number.isFinite(parsed) ? parsed : null;
-    if (session !== null && at - session > STALE_SESSION_MS) {
-      return { kind: "session", message: "These numbers describe the " + payload.sessionDate + " session, " +
-        "which is more than four days old. The pipeline is running but its data is not advancing." };
+    const day = isoDay(payload.sessionDate) ? Date.parse(payload.sessionDate.slice(0, 10) + "T00:00:00Z") : NaN;
+    let n = 0;
+    for (let d = day; due(d) <= at && n < 60; d = due(d) - DAY - 72e5) n++;
+    if (n || (day === day && server)) {
+      return { kind: "session", message: "These numbers describe the " + payload.sessionDate + " session, " + (n ? n + " session" + (n === 1 ? "" : "s") + " behind" : "no longer current") +
+        ". The pipeline is running but its data is not advancing." };
     }
-    return written === null && session === null ? { kind: "unknown", message: null } : { kind: "fresh", message: null };
+    if (server) return { kind: "write", message: "The server marks this stale — check the Actions tab." };
+    return written === null && day !== day ? { kind: "unknown", message: null } : { kind: "fresh", message: null };
   }
 
   const emptyState = (kind, text) => {
@@ -1345,119 +1349,6 @@
     max_pain: { color: "--lvl-pain", shape: "dia", label: "Max pain" },
   };
 
-  function cone(host, o) {
-    return mount(host, (el, w, animate) => {
-      const hist = (o.history || []).filter((r) => r && isoDay(r.d) && num(r.c) !== null);
-      const S = num(o.spot) ?? (hist.length ? hist[hist.length - 1].c : null);
-      const phone = w < 600;
-      const H = heightFor(o.height, w, [260, 300, 330]);
-      if (!hist.length || S === null) return gone(el, o, "No price history.", "Price", H);
-      const N = hist.length;
-      const Hs = num(o.horizon) || 10;
-      const gutter = phone ? 58 : 66;
-      const top = 30, stripH = o.strip ? 30 : 0, axisH = 20;
-      const plotB = H - axisH - stripH - (o.strip ? 12 : 4);
-      const plotW = w - gutter;
-      const fw = Math.max(plotW * Hs / (N + Hs), plotW * (phone ? 0.3 : 0.26));
-      const xNow = plotW - fw;
-      const xh = (i) => (N === 1 ? xNow : (i / (N - 1)) * (xNow - 4));
-      const xf = (t) => xNow + (t / Hs) * (fw - 8);
-      const hiEnd = num(o.hi), loEnd = num(o.lo);
-      const band = hiEnd !== null && loEnd !== null && S > 0 && hiEnd > 0 && loEnd > 0;
-      const hiT = (t) => S * (hiEnd / S) ** Math.sqrt(t / Hs);
-      const loT = (t) => S * (loEnd / S) ** Math.sqrt(t / Hs);
-      const lv = (o.levels || []).filter((l) => l && num(l.px) !== null && LEVELS[l.kind] && Math.abs(l.px / S - 1) <= (o.levelWindow || 0.12));
-      const vals = hist.map((r) => r.c).concat([S]);
-      if (band) vals.push(hiEnd, loEnd);
-      if (o.realized && num(o.realized.hi) !== null) vals.push(o.realized.hi, o.realized.lo);
-      for (const l of lv) vals.push(l.px);
-      let y0 = Math.min(...vals), y1 = Math.max(...vals);
-      const pad = (y1 - y0) * 0.06 || S * 0.01;
-      y0 -= pad; y1 += pad;
-      const y = lin(y0, y1, plotB, top);
-      const svg = svgRoot(el, w, H, animate, o.label);
-      const first = hist[0].c, last = hist[N - 1].c;
-      const lineC = paint(last >= first ? "--up" : "--down");
-      const pts = hist.map((r, i) => [xh(i), y(r.c)]);
-      pts.push([xNow, y(S)]);
-      s("path", { d: pathOf(pts) + `L${fx1(xNow)} ${fx1(plotB)}L${fx1(pts[0][0])} ${fx1(plotB)}Z`, fill: vGrad(svg, lineC, 0.13, 0), ...fade("250ms") }, svg);
-      s("line", { x1: xNow, x2: xNow, y1: top - 6, y2: H - axisH, class: "hair" }, svg);
-      const accent = paint("--accent");
-      if (band) {
-        const up = [], dn = [];
-        for (let k = 0; k <= 24; k++) { const t = (k / 24) * Hs; up.push([xf(t), y(hiT(t))]); dn.push([xf(t), y(loT(t))]); }
-        s("path", { d: pathOf(up) + dn.slice().reverse().map((p) => "L" + fx1(p[0]) + " " + fx1(p[1])).join("") + "Z", fill: vGrad(svg, accent, 0.34, 0.12, true), ...fade("420ms") }, svg);
-        for (const P of [up, dn]) s("path", { d: pathOf(P), class: "ln draw", stroke: accent, "stroke-opacity": 0.7, "stroke-width": 1, pathLength: 1, style: { "--delay": "520ms" } }, svg);
-      }
-      if (o.realized && num(o.realized.hi) !== null && num(o.realized.lo) !== null) {
-        s("rect", { x: xf(Hs) - 1, y: y(o.realized.hi), width: 4, height: Math.max(2, y(o.realized.lo) - y(o.realized.hi)), rx: 2, fill: paint("--s-gray"), ...fade("650ms") }, svg);
-      }
-      const lvG = s("g", fade("600ms"), svg);
-      for (const l of lv) s("line", { x1: xNow, x2: xf(Hs), y1: y(l.px), y2: y(l.px), stroke: paint(LEVELS[l.kind].color), "stroke-width": 1, "stroke-opacity": 0.75 }, lvG);
-      s("path", { d: pathOf(pts), class: "ln draw", stroke: lineC, pathLength: 1 }, svg);
-      if (o.live) s("circle", { cx: xNow, cy: y(S), r: 4, fill: lineC, class: "pulse" }, svg);
-      s("circle", { cx: xNow, cy: y(S), r: 4, fill: paint("--label-1"), class: "ring" }, svg);
-      const tags = [{ y: y(S), y0: y(S), text: F.px(S), kind: "spot" }];
-      if (band) for (const v of [hiEnd, loEnd]) tags.push({ y: y(v), y0: y(v), text: F.px(v), kind: "band" });
-      for (const l of lv) tags.push({ y: y(l.px), y0: y(l.px), text: F.px(l.px), kind: l.kind });
-      spread(tags, 17, top, plotB);
-      const tg = s("g", fade("700ms"), svg);
-      const tx = plotW + 8;
-      for (const t of tags) {
-        if (Math.abs(t.y - t.y0) > 2) s("path", { d: `M${fx1(xf(Hs) + 3)} ${fx1(t.y0)}L${fx1(tx - 3)} ${fx1(t.y)}`, stroke: paint("--label-4"), "stroke-width": 1, fill: "none" }, tg);
-        if (t.kind === "spot") {
-          const pw = tw(t.text);
-          s("rect", { x: tx - 2, y: t.y - 9, width: pw, height: 18, rx: 9, fill: paint("--label-1") }, tg);
-          s("text", { x: tx + 4, y: t.y + 3.8, text: t.text, class: "tx-b tx-ink" }, tg);
-        } else if (t.kind === "band") {
-          s("rect", { x: tx, y: t.y - 4, width: 6, height: 8, rx: 2, fill: accent, opacity: 0.6 }, tg);
-          s("text", { x: tx + 10, y: t.y + 3.8, text: t.text, style: { fill: paint("--accent-soft") } }, tg);
-        } else {
-          const d = LEVELS[t.kind];
-          marker(tg, d.shape, tx + 3, t.y, paint(d.color), 3.2);
-          s("text", { x: tx + 10, y: t.y + 3.8, text: t.text, class: "tx-1" }, tg);
-        }
-      }
-      const sm = new Map();
-      if (o.strip) for (const k of Object.keys(o.strip)) if (num(o.strip[k]) !== null) sm.set(k, o.strip[k]);
-      if (o.strip) {
-        const sy = plotB + 12 + stripH / 2;
-        s("line", { x1: 0, x2: xNow, y1: sy, y2: sy, class: "hair" }, svg);
-        const stepX = N > 1 ? (xNow - 4) / (N - 1) : 8;
-        const bw = clamp(stepX * 0.62, 1.5, 6);
-        hist.forEach((r, i) => {
-          const v = sm.get(r.d);
-          if (v === undefined) { s("circle", { cx: xh(i), cy: sy, r: 1, fill: paint("--label-4") }, svg); return; }
-          const hh = Math.max(1.5, (Math.abs(v) / 100) * (stripH / 2));
-          s("rect", { x: xh(i) - bw / 2, y: v >= 0 ? sy - hh : sy, width: bw, height: hh, rx: Math.min(1.5, bw / 2), fill: paint(v >= 0 ? "--up-mark" : "--down-mark"), class: "grow", style: { "--i": i, "--origin": v >= 0 ? "bottom" : "top" } }, svg);
-        });
-        s("text", { x: tx, y: sy + 4, text: o.stripLabel || "Score", class: "tx-3" }, svg);
-      }
-      for (const t of dateTicks(hist.map((r) => r.d), xh, 5, 0, xNow, phone)) s("text", { x: xh(t.i), y: H - 5, text: t.text, ...TA }, svg);
-      s("text", { x: xf(Hs), y: H - 5, text: "+" + Hs + "d", ...TA }, svg);
-      const xs = hist.map((_, i) => xh(i));
-      for (let t = 1; t <= Hs; t++) xs.push(xf(t));
-      scrub(el, svg, {
-        xs, top, bottom: plotB, label: o.label,
-        onMove: (i) => {
-          if (i < N) {
-            const r = hist[i];
-            const v = sm.get(r.d);
-            const p1 = i > 0 ? r.c / hist[i - 1].c - 1 : null;
-            return {
-              dots: [{ x: xh(i), y: y(r.c), color: last >= first ? "--up" : "--down" }],
-              parts: [part(F.day(r.d), "k"), h("b", null, F.px(r.c)), p1 === null ? null : part(F.pct(p1, 2, true), null, tone(p1)),
-                o.strip ? (v === undefined ? part("no score", "k") : part("score " + F.signed(v), null, tone(v))) : null],
-            };
-          }
-          const t = i - N + 1;
-          if (!band) return { parts: [part("+" + t + "d", "k")] };
-          return { dots: [{ x: xf(t), y: y(hiT(t)), color: "--accent" }, { x: xf(t), y: y(loT(t)), color: "--accent" }], parts: [part("+" + t + " sessions", "k"), h("b", null, F.px(loT(t)) + " " + String.fromCharCode(8211) + " " + F.px(hiT(t)))] };
-        },
-      });
-    });
-  }
-
   function levels(host, o) {
     return mount(host, (el, w, animate) => {
       const S = num(o.spot);
@@ -2011,7 +1902,7 @@
 
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
-    line, area, sparkline, bars, diverging, heatmap, gauge, cone, levels, payoff,
+    line, area, sparkline, bars, diverging, heatmap, gauge, levels, payoff,
     LEVELS, shapeOf,
   });
 

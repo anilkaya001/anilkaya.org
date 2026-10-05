@@ -1105,8 +1105,8 @@ try {
       };
     });
 
-    ok(/more than four days old/.test(aged.stale),
-       `a session nine days old raises the banner (${aged.stale})`);
+    ok(/\d+ sessions? behind\./.test(aged.stale),
+       `a session nine days old raises the banner, counted in sessions the calendar has closed since (${aged.stale})`);
     ok(/not advancing/.test(aged.stale),
        "and names the failure: the pipeline is running, its data is not moving. A dead " +
        "pipeline is the other failure and has the other remedy");

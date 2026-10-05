@@ -2214,6 +2214,11 @@ try {
         realFresh: S({ __updatedAt: now - 60000, sessionDate: "2026-09-04" }, now).kind,
         realStaleSession: S({ __updatedAt: now - 60000, sessionDate: "2026-08-01" }, now).kind,
         nothing: S({}, now).kind,
+        mondayMorning: S({ __updatedAt: Date.parse("2026-10-03T00:30:00Z"), sessionDate: "2026-10-02" }, Date.parse("2026-10-05T15:01:00Z")).kind,
+        saturday: S({ __updatedAt: Date.parse("2026-10-03T00:30:00Z"), sessionDate: "2026-10-02" }, Date.parse("2026-10-03T16:00:00Z")).kind,
+        mondayRunMissed: S({ __updatedAt: Date.parse("2026-10-03T00:30:00Z"), sessionDate: "2026-10-02" }, Date.parse("2026-10-03T00:30:00Z") + 74 * 3600000).kind,
+        serverFresh: S({ __updatedAt: Date.parse("2026-09-28T00:30:00Z"), sessionDate: "2026-09-25", __ff: { stateAt: () => "fresh" } }, Date.parse("2026-10-05T15:00:00Z")).kind,
+        serverStale: S({ __ff: { stateAt: () => "stale" } }, now).kind,
       };
     });
     eq(verdicts.zeroStamp, "unknown",
@@ -2228,6 +2233,12 @@ try {
     eq(verdicts.realStaleSession, "session",
        "and one whose session is five weeks old still raises the session warning");
     eq(verdicts.nothing, "unknown", "and a payload with nothing datable claims nothing");
+    eq(verdicts.mondayMorning, "fresh",
+       "FRIDAY'S NIGHTLY ON MONDAY MORNING IS CURRENT: no later session has closed, so 62 hours of weekend is not staleness (the owner saw Stale on 2026-10-05)");
+    eq(verdicts.saturday, "fresh", "nor on Saturday");
+    eq(verdicts.mondayRunMissed, "write", "but once Monday's run is overdue (02:00 UTC Tuesday) it is, and says the pipeline has not published");
+    eq(verdicts.serverFresh, "fresh", "the server's verdict, which knows the exchange holidays, wins when the payload carries it");
+    eq(verdicts.serverStale, "write", "including when it says stale and the payload carries nothing else datable");
 
     await serve(today, Date.now() - 5 * 24 * 60 * 60 * 1000);
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });

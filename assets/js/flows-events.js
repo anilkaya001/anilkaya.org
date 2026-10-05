@@ -619,13 +619,10 @@
   }
 
   function stale(payload, updatedAt) {
-    if (updatedAt) {
-      const ageHours = (Date.now() - updatedAt) / 3600000;
-      if (ageHours > 30) {
-        S.staleDays = Math.round(ageHours / 24);
-        S.staleText = "This calendar was last written " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago. The pipeline has not published since, so every day count is measured from that run's date and not from today — each name is nearer to its report than this page says.";
-        return;
-      }
+    if (updatedAt && UI.staleness && UI.staleness({ __updatedAt: updatedAt }, Date.now()).kind === "write") {
+      S.staleDays = Math.max(1, Math.round((Date.now() - updatedAt) / 864e5));
+      S.staleText = "This calendar was last written " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago. The pipeline has not published since, so every day count is measured from that run's date and not from today — each name is nearer to its report than this page says.";
+      return;
     }
     const lag = Math.round((dayMs(payload.gateOrigin) - dayMs(payload.sessionDate)) / 864e5);
     if (Number.isFinite(lag) && lag > 4) {
