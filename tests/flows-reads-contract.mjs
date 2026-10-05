@@ -1070,13 +1070,32 @@ class FakeCache {
   deep(Object.keys(one.body.keys), ["hist:CB"], "one kind may be asked alone");
   eq((await get("/api/flows/ingest?list=board")).res.status, 400, "a kind that is not a ticker key is refused");
   eq((await get("/api/flows/ingest?list=")).res.status, 400, "and an empty list");
-  const live = await (async () => {
-    const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: "reads-live-token-abcdefghijklmnopqrstuvwxyz",
+  const LIVE_STATIC = "reads-live-token-abcdefghijklmnopqrstuvwxyz";
+  const liveWorker = (await import("../worker.js?reads=" + (++instance))).default;
+  const liveAt = async (origin, path, extra = {}) => {
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: LIVE_STATIC, ...extra,
       FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
-    const worker = (await import("../worker.js?reads=" + (++instance))).default;
-    return worker.fetch(new Request("https://anilkaya.org/api/flows/ingest?list=card", { headers: { Authorization: "Bearer " + env.FLOWS_LIVE_TOKEN } }), env, { waitUntil() {} });
-  })();
-  eq(live.status, 403, "the live credential may not list the nightly's keys");
+    const res = await liveWorker.fetch(new Request(origin + path, { headers: { Authorization: "Bearer " + LIVE_STATIC } }), env, { waitUntil() {} });
+    let body = null;
+    try { body = JSON.parse(await res.text()); } catch { body = null; }
+    return { status: res.status, code: body && body.error ? body.error.code : null, body };
+  };
+  const live = await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?list=card");
+  ok(live.status === 403 && live.code === "live_token_scope", "the live credential may not list the nightly's keys");
+  const nightlyToo = { FLOWS_INGEST_TOKEN: INGEST_TOKEN };
+  const prod = [await liveAt("https://anilkaya.org", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("https://anilkaya.org", "/api/flows/ingest?list=card", nightlyToo),
+    await liveAt("https://anilkaya.org", "/api/flows/ingest?key=live:breadth", nightlyToo)];
+  deep(prod.map((r) => [r.status, r.code]), [[401, "unauthorized"], [401, "unauthorized"], [401, "unauthorized"]],
+    "THE STATIC LIVE TOKEN IS A STRANGER OVER https://anilkaya.org: the clock, the listing and a live key all answer 401, so only OIDC is a live credential in production");
+  const loop = [await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("http://localhost:8787", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?key=clock")];
+  ok(loop.every((r) => r.status === 200 && r.body && !Object.hasOwn(r.body, "labActiveAt")),
+    "and the same token over http://127.0.0.1:8787 or localhost is accepted as the live role, with or without the nightly token beside it");
+  const alone = await liveAt("https://anilkaya.org", "/api/flows/ingest?key=clock");
+  ok(alone.status === 503 && alone.code === "unavailable",
+    "a production Worker whose only ingest secret is the static live token has no ingest configured at all");
   f.fail(/FROM flows_payload WHERE \(id >=/);
   const gone = await get("/api/flows/ingest?list=card");
   ok(gone.res.status === 503 && gone.body.error.code === "store_unreadable", "an unreadable store is the 503 the metadata form gives");

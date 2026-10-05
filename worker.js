@@ -3568,11 +3568,11 @@ async function route(request, env, url, ctx) {
     requireMethod(request, ["GET", "POST", "DELETE"]);
     const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
     const oidc = FLOWS_LIVE.looksLikeJwt(offered);
-    if (!env.FLOWS_INGEST_TOKEN && !env.FLOWS_LIVE_TOKEN && !oidc) {
+    if (!env.FLOWS_INGEST_TOKEN && !FLOWS_LIVE.staticLiveToken(env, url) && !oidc) {
       throw new HttpError(503, "unavailable", "Ingest is not configured");
     }
 
-    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr, url);
     if (!tokenKind && oidc) {
       const check = await FLOWS_LIVE.oidcKind(offered, env);
       if (check.unavailable) {

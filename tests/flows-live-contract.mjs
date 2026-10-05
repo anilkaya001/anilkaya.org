@@ -1484,8 +1484,28 @@ const cronMinutes = (cron) => {
   eq((await O.verifyLiveOidc(token, async () => null, now)).why, "keys-unavailable",
     "ONE VERIFIER: the Worker's path is verifyLiveOidc with a key resolver, so the claim suite above tests what runs");
   W.resetJwksMemo();
-  eq(await W.tokenKind(token, { FLOWS_INGEST_TOKEN: "n", FLOWS_LIVE_TOKEN: "l" }, (a, b) => a === b), null,
+  eq(await W.tokenKind(token, { FLOWS_INGEST_TOKEN: "n", FLOWS_LIVE_TOKEN: "l" }, (a, b) => a === b, "http://127.0.0.1:8787/api/flows/ingest"), null,
     "the static comparison never mistakes a JWT for a configured token");
+  {
+    const both = { FLOWS_INGEST_TOKEN: "n", FLOWS_LIVE_TOKEN: "l" };
+    const same = (a, b) => a === b;
+    const kind = (offered, url, env = both) => W.tokenKind(offered, env, same, url);
+    deep([kind("l", "https://anilkaya.org/api/flows/ingest"), kind("l", "https://anilkaya.example.workers.dev/api/flows/ingest")],
+      [null, null], "THE STATIC LIVE TOKEN IS REFUSED ON EVERY PUBLIC HOST: production and workers.dev alike");
+    deep([kind("l", "http://127.0.0.1:8787/api/flows/ingest"), kind("l", "http://localhost:8787/api/flows/ingest"),
+      kind("l", "https://localhost/api/flows/ingest")], ["live", "live", "live"],
+    "and honoured on a loopback hostname, the local --live run DEPLOY.md describes");
+    deep([kind("l", "http://127.0.0.1.anilkaya.org/api/flows/ingest"), kind("l", "http://localhost.anilkaya.org/api/flows/ingest"),
+      kind("l", "https://anilkaya.org/api/flows/ingest?h=127.0.0.1"), kind("l", "http://127.0.0.2:8787/"), kind("l", "http://[::1]:8787/")],
+    [null, null, null, null, null], "a lookalike host, a loopback name in the query and any other address are not loopback");
+    deep([kind("l", undefined), kind("l", ""), kind("l", "not a url")], [null, null, null],
+      "with no URL, or one that does not parse, the static live token fails closed");
+    deep([kind("n", "https://anilkaya.org/api/flows/ingest"), kind("n", "http://127.0.0.1:8787/api/flows/ingest")], ["nightly", "nightly"],
+      "the nightly token is unchanged on every host");
+    deep([W.staticLiveToken(both, "https://anilkaya.org/"), W.staticLiveToken(both, "http://localhost:8787/"),
+      W.staticLiveToken({ FLOWS_INGEST_TOKEN: "n" }, "http://localhost:8787/"), W.staticLiveToken(null, "http://localhost/")],
+    [null, "l", null, null], "staticLiveToken names the live token only where it is honoured, so the route's not-configured test agrees");
+  }
   deep([W.ingestScope("live:breadth", "POST", "live").ok, W.ingestScope("board:long", "POST", "live").ok,
     W.ingestScope("live:breadth", "DELETE", "live").ok], [true, false, false],
   "and the OIDC role IS the live role: live:* writes only, no nightly key, no delete");

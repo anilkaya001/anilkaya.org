@@ -2410,13 +2410,17 @@ Out-of-band steps before the first deploy of this layer:
    the job is pinned to a commit SHA, because `id-token: write` lets any step
    mint the credential.
 
-   The Worker still honours a static `FLOWS_LIVE_TOKEN` when one is set. That
-   is for a local `--live` run against a local Worker: put it in `.dev.vars`,
-   export the same value, and point the pipeline at the local route with
-   `FLOWS_INGEST_URL=http://127.0.0.1:8787/api/flows/ingest` (the default is
-   production). Never set it on the production Worker, where it would be a
-   second, long-lived live credential beside OIDC. If an earlier revision of
-   this step had you set it, delete both copies:
+   The Worker honours a static `FLOWS_LIVE_TOKEN` only on a loopback
+   hostname (`127.0.0.1` or `localhost`); over any other host, the production
+   apex and `workers.dev` included, the same token answers 401, and a Worker
+   whose only ingest secret is that token reports ingest as not configured.
+   That is for a local `--live` run against a local Worker: put it in
+   `.dev.vars`, export the same value, and point the pipeline at the local
+   route with `FLOWS_INGEST_URL=http://127.0.0.1:8787/api/flows/ingest` (the
+   default is production, where the token is refused). Do not set it on the
+   production Worker even so: it does nothing there, and a secret that does
+   nothing is one more to leak. If an earlier revision of this step had you
+   set it, delete both copies:
    `./tests/node_modules/.bin/wrangler secret delete FLOWS_LIVE_TOKEN` and the
    repository secret of the same name.
 

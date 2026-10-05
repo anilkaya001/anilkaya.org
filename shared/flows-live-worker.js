@@ -598,10 +598,20 @@ export async function pruneTape(env, now) {
   return res && res.meta ? Number(res.meta.changes) || 0 : 0;
 }
 
-export function tokenKind(offered, env, equal) {
+export const STATIC_LIVE_HOSTS = Object.freeze(["127.0.0.1", "localhost"]);
+
+export function staticLiveToken(env, url) {
+  if (!env || !env.FLOWS_LIVE_TOKEN) return null;
+  let host;
+  try { host = new URL(url).hostname; } catch { return null; }
+  return STATIC_LIVE_HOSTS.includes(host) ? env.FLOWS_LIVE_TOKEN : null;
+}
+
+export function tokenKind(offered, env, equal, url) {
   if (!offered) return null;
   if (env.FLOWS_INGEST_TOKEN && equal(offered, env.FLOWS_INGEST_TOKEN)) return "nightly";
-  if (env.FLOWS_LIVE_TOKEN && equal(offered, env.FLOWS_LIVE_TOKEN)) return "live";
+  const live = staticLiveToken(env, url);
+  if (live && equal(offered, live)) return "live";
   return null;
 }
 
