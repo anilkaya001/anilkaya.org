@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync, readFileSync } from "node:fs";
+import { existsSync, statSync, lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -17,6 +17,13 @@ const regularFiles = (root, list) => list.filter((rel) => {
   return statSync(abs).isFile();
 });
 
+const brokenLinks = (root, list) => list.filter((rel) => {
+  const abs = path.join(root, rel);
+  let link;
+  try { link = lstatSync(abs); } catch { return false; }
+  return link.isSymbolicLink() && !existsSync(abs);
+});
+
 export function assetsIgnorePatterns({ root = ROOT, defaults = true } = {}) {
   const file = path.join(root, IGNORE_FILE);
   const own = existsSync(file) ? readFileSync(file, "utf8").split(/\r?\n/) : [];
@@ -24,10 +31,13 @@ export function assetsIgnorePatterns({ root = ROOT, defaults = true } = {}) {
 }
 
 export function candidateFiles({ root = ROOT } = {}) {
-  const tracked = regularFiles(root, git(root, ["ls-files", "-z", "--cached"]));
-  const known = new Set(tracked);
-  const untracked = regularFiles(root, git(root, ["ls-files", "-z", "--others", "--exclude-standard"])).filter((rel) => !known.has(rel));
-  return { tracked, untracked };
+  const cached = git(root, ["ls-files", "-z", "--cached"]);
+  const others = git(root, ["ls-files", "-z", "--others", "--exclude-standard"]);
+  const tracked = regularFiles(root, cached);
+  const known = new Set(cached);
+  const untracked = regularFiles(root, others).filter((rel) => !known.has(rel));
+  const broken = { tracked: brokenLinks(root, cached), untracked: brokenLinks(root, others).filter((rel) => !known.has(rel)) };
+  return { tracked, untracked, broken };
 }
 
 const ignoredAmong = (root, mode, files, excludes) => {
@@ -39,12 +49,18 @@ const ignoredAmong = (root, mode, files, excludes) => {
 };
 
 export function servedFiles({ root = ROOT, defaults = true } = {}) {
-  const { tracked, untracked } = candidateFiles({ root });
+  const { tracked, untracked, broken } = candidateFiles({ root });
   const all = [...tracked, ...untracked].sort();
   const file = path.join(root, IGNORE_FILE);
   const excludes = [];
   if (existsSync(file)) excludes.push("--exclude-from=" + file);
   if (defaults) for (const p of WRANGLER_DEFAULT_IGNORES) excludes.push("--exclude=" + p);
+  const ignoredBroken = new Set(excludes.length ? [
+    ...(broken.tracked.length ? ignoredAmong(root, "--cached", broken.tracked, excludes) : []),
+    ...(broken.untracked.length ? ignoredAmong(root, "--others", broken.untracked, excludes) : []),
+  ] : []);
+  const unignoredBroken = [...broken.tracked, ...broken.untracked].filter((rel) => !ignoredBroken.has(rel)).sort();
+  if (unignoredBroken.length) throw new Error(`served tree: ${unignoredBroken.join(", ")} ${unignoredBroken.length === 1 ? "is a symbolic link" : "are symbolic links"} to nothing outside ${IGNORE_FILE}; wrangler stats every unignored entry and a dangling link fails the whole asset upload, so remove the link or ignore it`);
   if (!excludes.length) return all;
   const ignored = new Set([
     ...(tracked.length ? ignoredAmong(root, "--cached", tracked, excludes) : []),

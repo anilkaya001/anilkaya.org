@@ -18,6 +18,8 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const throwsLike = (fn, re, msg) => { assert.throws(fn, re, msg); checks++; };
 const scratch = mkdtempSync(path.join(tmpdir(), "lib-contract-"));
+process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
+const said = (r) => ((r.stderr || "").trim() || (r.stdout || "").trim()).split("\n").join(" | ");
 const notes = [];
 
 {
@@ -75,9 +77,20 @@ const notes = [];
   symlinkSync("assets/x.css", path.join(repo, "link.css"));
   symlinkSync("assets", path.join(repo, "dirlink"));
   symlinkSync("absent.css", path.join(repo, "dangling.css"));
+  throwsLike(() => servedFiles({ root: repo }), /dangling\.css is a symbolic link to nothing outside \.assetsignore; wrangler stats every unignored entry and a dangling link fails the whole asset upload/, "served tree: an unignored untracked symlink to nothing throws, because wrangler's fs.stat of it rejects and fails the upload, so it cannot be reported as not served");
+  rmSync(path.join(repo, "dangling.css"));
+  symlinkSync("absent.js", path.join(repo, "gone.js"));
+  sh("add", "-f", "gone.js");
+  throwsLike(() => servedFiles({ root: repo }), /gone\.js is a symbolic link to nothing/, "served tree: a tracked one throws too");
+  sh("rm", "-q", "--cached", "gone.js");
+  rmSync(path.join(repo, "gone.js"));
+  symlinkSync("absent.md", path.join(repo, "gone.md"));
+  symlinkSync("absent", path.join(repo, "tests/gone"));
   const got = servedFiles({ root: repo });
   deep(got, ["assets/data/a.json", "assets/new.js", "assets/x.css", "docs/spec.yaml", "lab/index.html", "link.css"],
-    "served tree on a fixture repository with this .assetsignore: worker.js, tests/x, foo.md, _headers, shared/, flows/ and dot paths excluded; assets/x.css included; an untracked file counted and a deleted one not; a symlink to a file served under its own name, as wrangler's stat-following walk uploads it, and a symlink to a directory or to nothing not served");
+    "served tree on a fixture repository with this .assetsignore: worker.js, tests/x, foo.md, _headers, shared/, flows/ and dot paths excluded; assets/x.css included; an untracked file counted and a deleted one not; a symlink to a file served under its own name, as wrangler's stat-following walk uploads it, a symlink to a directory not served, and a symlink to nothing that .assetsignore covers (gone.md, tests/gone) skipped without an error, since wrangler never stats an ignored entry");
+  rmSync(path.join(repo, "gone.md"));
+  rmSync(path.join(repo, "tests/gone"));
   writeFileSync(path.join(repo, ".assetsignore"), "*.css\n!keep.css\n/top.txt\nbuild/\n");
   put("keep.css"); put("deep/keep.css"); put("a.css"); put("top.txt"); put("deep/top.txt"); put("build/out.js"); put("deep/build/out.js");
   sh("add", "-f", ".");
@@ -181,19 +194,25 @@ const notes = [];
   const fv = Number(readFileSync(path.join(ROOT, "assets/fonts-version.txt"), "utf8").trim());
   const run = (...args) => spawnSync(process.execPath, [BUMP, "--root", tree, ...args], { encoding: "utf8" });
   const pre = run("--check");
-  eq(pre.status, 0, "bump-assets --check: the committed tree is consistent: " + pre.stdout.trim());
+  eq(pre.status, 0, "bump-assets --check: the committed tree is consistent: " + said(pre));
   const snapshot = Object.fromEntries(files.map((rel) => [rel, readFileSync(path.join(tree, rel), "utf8")]));
   const out = run();
   eq(out.status, 0, "bump-assets: runs: " + out.stdout.split("\n")[0]);
   eq(readFileSync(path.join(tree, "assets/version.txt"), "utf8"), `${v + 1}\n`, `bump-assets: assets/version.txt goes from ${v} to ${v + 1}`);
   eq(readFileSync(path.join(tree, "assets/fonts-version.txt"), "utf8"), snapshot["assets/fonts-version.txt"], "bump-assets: the fonts token is untouched");
   eq(readFileSync(path.join(tree, "shared/flows-pages.js"), "utf8").split("\n")[0], `export const ASSET_VERSION = "${v + 1}";`, "bump-assets: ASSET_VERSION follows");
-  let css = 0, fonts = 0, shells = 0;
+  let css = 0, fonts = 0, shells = 0, other = 0, img = 0;
   for (const rel of pagesAndSheets) {
     const text = readFileSync(path.join(tree, rel), "utf8");
     for (const m of text.matchAll(/["'(](\/assets\/[^"')?#]+\.(?:css|js|woff2))(?:\?v=(\d+))?/g)) {
       if (m[1].endsWith(".woff2")) { fonts++; eq(Number(m[2]), fv, `bump-assets: ${rel}: ${m[1]} stays at the fonts token ${fv}`); }
       else { css++; eq(Number(m[2]), v + 1, `bump-assets: ${rel}: ${m[1]} moves to ${v + 1}`); }
+    }
+    for (const m of text.matchAll(/(\/assets\/[^"'()\s?#]+)\?v=(\d+)/g)) {
+      if (m[1].endsWith(".woff2") || /\.(?:css|js)$/.test(m[1])) continue;
+      other++;
+      if (m[1].startsWith("/assets/img/")) img++;
+      eq(Number(m[2]), v + 1, `bump-assets: ${rel}: ${m[1]} (neither CSS, JavaScript nor a font) moves to ${v + 1}`);
     }
     for (const m of text.matchAll(/data-asset-version="(\d+)"/g)) { shells++; eq(Number(m[1]), v + 1, `bump-assets: ${rel}: data-asset-version moves`); }
     const before = snapshot[rel].replace(/(\/assets\/[^"'()\s?#]+)\?v=\d+/g, "$1?v=").replace(/data-asset-version="\d+"/g, 'data-asset-version=""');
@@ -201,6 +220,7 @@ const notes = [];
     eq(after, before, `bump-assets: ${rel} changes in its version tokens and nowhere else`);
   }
   ok(css >= 40 && fonts >= 16 && shells >= 3, `bump-assets: ${css} CSS and JavaScript references moved, ${fonts} font references held, ${shells} shells`);
+  ok(img >= 1, `bump-assets: ${other} other /assets/ references moved, ${img} of them under /assets/img/ (at least one, so the check above is not vacuous)`);
   for (const [rel, asset] of [["lab/placement/index.html", "storage.js"], ["lab/placement/index.html", "auth.js"], ["lab/course.html", "lab-suite.bundle.js"]]) {
     if (!(snapshot[rel] ?? "").includes(`/assets/js/${asset}?v=`)) { notes.push(`bump-assets: ${rel} no longer loads ${asset}; its spot check is skipped`); continue; }
     ok(readFileSync(path.join(tree, rel), "utf8").includes(`/assets/js/${asset}?v=${v + 1}"`), `bump-assets: ${rel} loads ${asset} and it moves with the rest`);
@@ -208,7 +228,7 @@ const notes = [];
   eq(readFileSync(path.join(tree, "assets/js/lab-suite.bundle.js"), "utf8"), snapshot["assets/js/lab-suite.bundle.js"], "bump-assets: the bundle itself is not rebuilt: the course generator is not run");
   ok(!/generate-course-payloads\.mjs["'`]\s*[,)\]]|spawn|execFile|fork\(/.test(readFileSync(BUMP, "utf8")), "bump-assets: the tool starts no child process");
   const post = run("--check");
-  eq(post.status, 0, "bump-assets --check: the bumped tree is consistent");
+  eq(post.status, 0, "bump-assets --check: the bumped tree is consistent: " + said(post));
   const base = path.join(tree, "assets/css/base.css");
   writeFileSync(base, readFileSync(base, "utf8").replace(`Inter-latin.woff2?v=${fv}`, `Inter-latin.woff2?v=${v + 1}`));
   const lab = path.join(tree, "lab/index.html");
@@ -217,7 +237,8 @@ const notes = [];
   ok(stale.status === 1 && /Inter-latin\.woff2 at \d+, expected/.test(stale.stderr) && /nav\.js at \d+, expected/.test(stale.stderr), "bump-assets --check: a font moved by a blanket rewrite and a reference left behind both fail it: " + stale.stderr.trim().split("\n").join(" | "));
   const again = run();
   ok(again.status === 0 && /1 font reference\(s\) set back/.test(again.stdout), "bump-assets: the next bump sets the font back to its token and reports it");
-  eq(run("--check").status, 0, "bump-assets: and leaves the tree consistent");
+  const settled = run("--check");
+  eq(settled.status, 0, "bump-assets: and leaves the tree consistent: " + said(settled));
   ok(!readFileSync(base, "utf8").includes(`woff2?v=${v + 2}`), "bump-assets: no woff2 reference ever carries the asset version");
   const home = path.join(tree, "index.html");
   const homeText = readFileSync(home, "utf8");
@@ -227,7 +248,8 @@ const notes = [];
   ok(missing.status === 1 && new RegExp(`index\\.html: ${bare.replace(/[.]/g, "\\.")} has no \\?v=, expected ${v + 2}`).test(missing.stderr), "bump-assets --check: a reference with no ?v= at all fails it, as it fails contracts.mjs: " + missing.stderr.trim());
   const added = run();
   ok(added.status === 0 && /token added/.test(added.stdout) && readFileSync(home, "utf8").includes(`${bare}?v=${v + 3}`), `bump-assets: the next bump gives ${bare} the token`);
-  eq(run("--check").status, 0, "bump-assets: and the tree is consistent again");
+  const again2 = run("--check");
+  eq(again2.status, 0, "bump-assets: and the tree is consistent again: " + said(again2));
   const unclosed = readFileSync(home, "utf8");
   writeFileSync(home, unclosed.replace("</body>", `<script src="/assets/js/nav.json"></script></body>`));
   const odd = run();
@@ -243,6 +265,5 @@ const notes = [];
   ok(bad.status === 1, "bump-assets: --to never goes backwards");
 }
 
-rmSync(scratch, { recursive: true, force: true });
 for (const n of notes) console.log("  note: " + n);
 console.log(`✓ lib-contract: ${checks} checks — the browser launcher's PW_CHROMIUM_PATH, the served tree under gitignore semantics, the CPU budget's ratio, floor and interleaving, the counting D1 fake, and the asset-bump tool (fonts held, every page and sheet moved, unversioned references caught)`);

@@ -728,10 +728,26 @@ stay revalidatable. `/assets/fonts-version.txt` gets the same one-hour rule as
 When any file under `assets/css/`, `assets/js/`, or `assets/data/` changes:
 
 1. increment `assets/version.txt`;
-2. update every versioned CSS/JS reference and `ASSET_VERSION` in
-   `shared/flows-pages.js`, which `tests/flows-features.mjs` holds equal to
-   `assets/version.txt`;
-3. run the contract test.
+2. update every non-font `/assets/...?v=` reference (CSS and JavaScript, and
+   also the image and data references such as `atmosphere.svg?v=` in
+   `base.css` and `flows.css`), every `data-asset-version` on the seven Lab
+   shells (`lab/course.html`, `lab/review/`, `lab/placement/`,
+   `lab/challenge/` and the three `lab/projects/*/` pages), and
+   `ASSET_VERSION` in `shared/flows-pages.js`, which
+   `tests/flows-features.mjs` holds equal to `assets/version.txt`; running
+   `node scripts/bump-assets.mjs` does steps 1 and 2 and is the safe way;
+3. run the contract test (`npm run test:contracts`).
+
+`test:contracts` runs `contracts.mjs` and then `lib-contract.mjs`, and
+`lib-contract` holds the committed tree to `node scripts/bump-assets.mjs
+--check`. That gate is stricter than `contracts.mjs`, which checks only the
+CSS and JavaScript references, the fonts and three of the seven shells
+(course, review, placement): `--check` also fails on an image or data
+`?v=` in any page or sheet that is off the asset version, and on a
+`data-asset-version` on `lab/challenge/` or a `lab/projects/*/` page that
+is. A hand bump that moves only CSS and JavaScript can therefore pass
+`contracts.mjs` and still turn CI red; the failure names each stale file
+and reference.
 
 `node scripts/bump-assets.mjs` does steps 1 and 2: it increments the token,
 moves every non-font `/assets/...?v=` in the HTML outside `tests/` and `docs/`
@@ -826,8 +842,10 @@ passes the caller's options untouched; a path that is not a file throws; only
 move over, so the sandbox's browser suites still need `PLAYWRIGHT_BROWSERS_PATH`);
 `tests/lib/served-tree.mjs` (`servedFiles()`: the tracked and unignored
 untracked files, a symlink to a file counted under its own name because
-wrangler's walk follows links and uploads it, a symlink to a directory or to
-nothing not, minus `.assetsignore` and wrangler's own
+wrangler's walk follows links and uploads it, a symlink to a directory not;
+a symlink to nothing that `.assetsignore` does not cover throws, because
+wrangler `fs.stat`s every unignored entry and that rejection fails the whole
+asset upload; all of it minus `.assetsignore` and wrangler's own
 `/.assetsignore`, `/_redirects`, `/_headers`, matched by git's own gitignore
 engine); `tests/lib/cpu-budget.mjs` (the thread CPU clock, the `flows-quant`
 reference workload, interleaved subject and reference windows, a budget held
@@ -937,12 +955,14 @@ the ask guard with modals on. `flows-reads-contract` shifts the clock (`shiftClo
 the blocks that read a card dated 2026-09-24, because a card two sessions behind the real date is now tier
 `expired`; a new fixture with a fixed session needs the same.
 
-`lib-contract` was measured on 2026-10-05: about 4 s with no server and 226 checks (227 with
+`lib-contract` was measured on 2026-10-05: about 3 s with no server and 231 checks (232 with
 `PW_CHROMIUM_PATH` set, which adds a real launch; in this sandbox it is
 `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`, and CI leaves it unset). It builds a
 throwaway git repository for the served-tree semantics, drives the CPU budget on an injected clock, and runs
 `scripts/bump-assets.mjs` on a copy of the pages and sheets it lists from Git without the tool. It reads no
-history, so a later commit cannot turn it red. It needs Node 22.13 or newer for `node:sqlite`.
+history, so no diff against a base can turn it red, but it does constrain the tree: it fails when the committed
+pages and sheets do not pass `bump-assets --check` (see "Asset versioning"), and when an unignored symlink to
+nothing would fail the asset upload. It needs Node 22.13 or newer for `node:sqlite`.
 
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
 every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a
