@@ -42,6 +42,8 @@ const SURFACES = [
   { key: "scoretrack", file: "assets/js/flows-track.js", fn: null, vars: ["payload"] },
 
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
+  { key: "flowalerts", file: "assets/js/flows-net.js", fn: "take", vars: ["alerts"] },
+  { key: "universe", file: "assets/js/flows-net.js", fn: "loadUniverse", vars: ["u"] },
   { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },
 
   { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },

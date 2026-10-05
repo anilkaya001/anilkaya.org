@@ -512,17 +512,17 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 }
 
 const PUBLISHED_SHARDS = [
-  ["flows-worker"],
-  ["flows-ticker", "flows-overlay", "worker", "flows-desk-client", "flows-motion", "flows-desk-wiring", "flows-reading-render", "market-ticker",
-    "flows-freshness", "flows-basis", "flows-ledger", "flows-neuron-screen", "markets", "flows-pulse", "flows-brief"],
-  ["pipeline", "flows-ws-probe", "flows-positioning", "flows-watch-render", "flows-ask-render", "flows-chain", "flows-track-render", "flows-quant-audit",
-    "flows-quant-card", "flows-readers", "flows-mint", "academy", "flows-record", "flows-political"],
-  ["flows-rt-server", "flows-overview", "flows-events", "flows-reads", "flows-strategy", "flows-verdict", "flows-readers-render", "flows-ask", "flows-starts",
-    "flows-garch", "flows-chain-panels", "flows-sign", "flows-alerts", "flows-stock", "flows-warnings"],
-  ["flows-render", "flows-rt-client", "flows-board-render", "flows-payload-shape", "flows-market", "flows-live", "flows-rt", "flows-dossier", "flows-dossier-reads",
-    "flows-reading", "flows", "flows-vol", "flows-neuron", "flows-variation", "flows-permits"],
-  ["browser", "flows-strip", "flows-unusual", "flows-desk", "placement", "flows-political-render", "flows-legacy", "flows-sections", "flows-quant",
-    "flows-reading-worker", "flows-legs", "flows-probe", "flows-universe", "flows-scores", "mastery", "flows-weight"],
+  ["flows-legs", "flows-worker", "flows-basis", "flows-scores", "flows-pulse", "flows-ledger", "flows-warnings", "flows-quant-audit", "flows-reading-render"],
+  ["markets", "market-ticker", "worker", "flows-chain", "flows-desk-client", "flows-ticker", "flows-motion", "flows-stock", "flows-overlay",
+    "flows-board-render", "flows-sign", "flows-quant", "flows-vol"],
+  ["flows-probe", "flows-record", "flows-sections", "flows-legacy", "flows-unusual", "flows-freshness", "flows-reads", "flows-permits", "flows-net-render",
+    "flows-ask-render", "flows-neuron", "flows-positioning", "flows-dossier-reads"],
+  ["flows", "pipeline", "mastery", "placement", "flows-overview", "flows-events", "flows-mint", "flows-live", "flows-rt",
+    "flows-starts", "flows-political", "flows-ask", "flows-garch", "flows-neuron-screen"],
+  ["flows-ws-probe", "flows-universe", "flows-rt-server", "flows-desk", "flows-desk-wiring", "flows-alerts", "flows-readers", "flows-political-render", "flows-watch-render",
+    "flows-weight", "flows-strip", "flows-dossier", "flows-reading", "flows-reading-worker"],
+  ["flows-chain-panels", "academy", "flows-rt-client", "flows-market", "flows-render", "browser", "flows-payload-shape", "flows-readers-render", "flows-verdict",
+    "flows-strategy", "flows-brief", "flows-track-render", "flows-quant-card", "flows-variation"],
 ];
 const CI_SHARDS = 6;
 
@@ -549,7 +549,7 @@ const CI_SHARDS = 6;
   }
   deep(names(chooseSuites(suites, { group: "shard" })).length + fast.length, suites.length, "--group shard is everything but the fast job");
   const unfasted = suites.map((s) => (s.name === "contracts" ? { ...s, group: undefined } : s));
-  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === 4 && s.name === "contracts")))),
+  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === 2 && s.name === "contracts")))),
     "the packing weighs the whole chain, fast suites included, so moving contracts into or out of the fast job changes no other suite's shard");
   ok(shards.every(needsBrowser), "every one of the six shards holds a browser or workerd suite, so each installs Chromium");
   ok(!needsBrowser(fast), "the fast job holds none and installs no Chromium");

@@ -19,6 +19,7 @@
     urgency: $("uaUrgency"),
     feed: $("uaFeed"),
     surprise: $("uaSurprise"),
+    net: $("uaNet"),
   };
 
   const n = (v) => {
@@ -68,6 +69,7 @@
     alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: new Set(),
   };
   const charts = { timeline: null };
+  const net = UI.net && host.net ? UI.net.mount(host.net) : null;
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");
@@ -843,6 +845,7 @@
         reason,
       };
     }
+    if (net) net.take(kind === "ok" ? alerts : null, S.alertsState);
     if (kind !== "ok" || !alerts.rows.length) {
       for (const el of [host.timeline, host.names, host.urgency]) silence(el, S.alertsState, el === host.timeline ? "Timeline" : el === host.names ? "Names" : "Urgency", el === host.timeline ? 250 : 200);
     } else {

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "242";
+export const ASSET_VERSION = "243";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -744,7 +744,7 @@ export function trackPage({ username = "" } = {}) {
 }
 
 export function unusualPage({ username = "" } = {}) {
-  return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", FEEDS_CSS)}
+  return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
   <div class="fd-about" id="uaAbout" hidden>
@@ -759,6 +759,10 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
     <p>A dash where a vendor flag belongs means the vendor did not carry that flag on the window,
     which is not the same fact as the flag being off.</p>
   </div>
+  <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
+    <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
+    <div class="fn-host" id="uaNet"></div>
+  </section>
   <div class="fd-chips" id="uaChips"></div>
   <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
   <p class="visually-hidden" id="uaFilterNote" role="status"></p>
@@ -773,6 +777,7 @@ ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
+<script src="${v("/assets/js/flows-net.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;
