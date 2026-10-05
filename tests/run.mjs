@@ -8,7 +8,8 @@ export const TIMEOUT_FLOOR_S = 120;
 export const TIMEOUT_MEDIAN_FACTOR = 3;
 export const KILL_GRACE_MS = 2000;
 export const TAIL_LINES = 40;
-const TAIL_LINE_CHARS = 400;
+export const TAIL_LINE_CHARS = 400;
+export const SUMMARY_TAIL_BUDGET = 512 * 1024;
 const CLASSES = new Set(["N", "C", "W"]);
 
 export class UsageError extends Error {}
@@ -69,6 +70,7 @@ export function loadManifest(dir = DEFAULT_DIR) {
 
 export function selectSuites(suites, only) {
   if (!only) return suites;
+  if (!only.length) throw new UsageError("--only names no suite, and a run of no suite proves nothing");
   const names = new Set(suites.map((s) => s.name));
   const unknown = only.filter((n) => !names.has(n));
   if (unknown.length) throw new UsageError(`--only names unknown suites: ${unknown.join(", ")}`);
@@ -76,17 +78,49 @@ export function selectSuites(suites, only) {
   return suites.filter((s) => want.has(s.name));
 }
 
-const COUNT_WORD = /assertions|checks/;
+const COUNT_LINE = /^\s*(?:✓\s*)?[A-Za-z0-9][\w.-]*:\s*([\d,]+)\s+(?:assertions|checks)\b/gm;
 const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
 
 export function countAssertions(text) {
   let total = 0;
   let found = false;
-  for (const m of text.matchAll(/^\s*(?:✓\s*)?[A-Za-z0-9][\w.-]*:\s*([\d,]+)\s+(?:assertions|checks)\b/gm)) {
+  for (const m of text.matchAll(COUNT_LINE)) {
     total += Number(m[1].replace(/,/g, ""));
     found = true;
   }
   return found ? total : null;
+}
+
+export function capLine(line) {
+  return line.length > TAIL_LINE_CHARS ? line.slice(0, TAIL_LINE_CHARS) + "…" : line;
+}
+
+export function tailCollector() {
+  const tail = [];
+  const partial = { stdout: "", stderr: "" };
+  let assertions = null;
+  const keep = (line) => {
+    const clean = capLine(line.replace(ANSI, ""));
+    const n = countAssertions(clean);
+    if (n != null) assertions = (assertions || 0) + n;
+    tail.push(clean);
+    if (tail.length > TAIL_LINES) tail.shift();
+  };
+  return {
+    take(name, text) {
+      const lines = (partial[name] + text).split("\n");
+      partial[name] = lines.pop().slice(0, TAIL_LINE_CHARS + 1);
+      for (const line of lines) keep(line);
+    },
+    note: keep,
+    end() {
+      for (const name of ["stdout", "stderr"]) if (partial[name]) keep(partial[name]);
+      partial.stdout = partial.stderr = "";
+    },
+    pending: () => partial.stdout.length + partial.stderr.length,
+    get tail() { return tail.slice(); },
+    get assertions() { return assertions; },
+  };
 }
 
 function killGroup(child, signal) {
@@ -95,73 +129,85 @@ function killGroup(child, signal) {
 }
 
 let current = null;
+let interruptedBy = null;
+
+export function interrupt(signal) {
+  const first = !interruptedBy;
+  interruptedBy = interruptedBy || signal;
+  if (current) current.stop(first ? signal : "SIGKILL", "interrupt");
+  return first;
+}
 
 function runSuite(suite, dir, scale, out) {
   return new Promise((resolve) => {
     const started = process.hrtime.bigint();
     const env = { ...process.env, PATH: [path.join(dir, "node_modules", ".bin"), process.env.PATH || ""].join(path.delimiter) };
     const child = spawn("/bin/sh", ["-c", suite.command], { cwd: dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
-    current = child;
-    const tail = [];
-    let partial = { stdout: "", stderr: "" };
-    let assertionText = "";
+    const lines = tailCollector();
     const take = (name, chunk) => {
       const text = chunk.toString("utf8");
       (name === "stdout" ? out.stdout : out.stderr).write(text);
-      const joined = partial[name] + text;
-      const lines = joined.split("\n");
-      partial[name] = lines.pop();
-      for (const line of lines) {
-        const clean = line.replace(ANSI, "");
-        if (COUNT_WORD.test(clean)) assertionText += clean + "\n";
-        tail.push(clean.length > TAIL_LINE_CHARS ? clean.slice(0, TAIL_LINE_CHARS) + "…" : clean);
-        if (tail.length > TAIL_LINES) tail.shift();
-      }
+      lines.take(name, text);
     };
     child.stdout.on("data", (c) => take("stdout", c));
     child.stderr.on("data", (c) => take("stderr", c));
     const limitS = timeoutFor(suite, scale);
+    let stopping = null;
     let timedOut = false;
-    let graceTimer = null;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup(child, "SIGTERM");
-      graceTimer = setTimeout(() => killGroup(child, "SIGKILL"), KILL_GRACE_MS);
-    }, limitS * 1000);
+    let held = false;
     let exit = null;
+    const timers = new Set();
+    const later = (fn, ms) => { const t = setTimeout(() => { timers.delete(t); fn(); }, ms); timers.add(t); };
+    const cutStreams = () => {
+      if (exit) held = true;
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+    const stop = (signal, why) => {
+      if (why === "interrupt" || !stopping) stopping = why;
+      if (exit) { cutStreams(); return; }
+      killGroup(child, signal);
+      if (signal === "SIGKILL") { later(cutStreams, KILL_GRACE_MS); return; }
+      later(() => {
+        killGroup(child, "SIGKILL");
+        later(cutStreams, KILL_GRACE_MS);
+      }, KILL_GRACE_MS);
+    };
+    current = { stop };
+    later(() => {
+      if (stopping) return;
+      timedOut = true;
+      stop("SIGTERM", "timeout");
+    }, limitS * 1000);
     child.on("error", (err) => { exit = exit || { code: null, signal: null, error: err.message }; });
     child.on("exit", (code, signal) => {
       exit = { code, signal };
-      clearTimeout(timer);
-      if (!timedOut) killGroup(child, "SIGKILL");
+      if (!stopping) killGroup(child, "SIGKILL");
     });
     child.on("close", (code, signal) => {
-      clearTimeout(timer);
-      if (graceTimer) { clearTimeout(graceTimer); killGroup(child, "SIGKILL"); }
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
+      killGroup(child, "SIGKILL");
       current = null;
-      for (const name of ["stdout", "stderr"]) {
-        if (partial[name]) {
-          const clean = partial[name].replace(ANSI, "");
-          if (COUNT_WORD.test(clean)) assertionText += clean + "\n";
-          tail.push(clean);
-          if (tail.length > TAIL_LINES) tail.shift();
-        }
-      }
+      lines.end();
       const e = exit || { code, signal };
+      if (held) lines.note(`run.mjs: the suite had exited (${e.signal || `exit ${e.code}`}) but a process outside its group still held its output open, so the output was cut`);
       const seconds = Number(process.hrtime.bigint() - started) / 1e9;
-      const status = timedOut ? "timeout" : e.code === 0 ? "pass" : "fail";
+      const interrupted = stopping === "interrupt" ? interruptedBy : null;
+      const status = interrupted ? "fail" : timedOut ? "timeout" : e.code === 0 ? "pass" : "fail";
       resolve({
         name: suite.name,
         status,
         code: e.code,
         signal: e.signal,
-        error: e.error || null,
+        error: interrupted ? `interrupted by ${interrupted}` : e.error || null,
         seconds,
         limitS,
-        assertions: countAssertions(assertionText),
-        tail: status === "pass" ? [] : tail.slice(),
+        assertions: lines.assertions,
+        tail: status === "pass" ? [] : lines.tail,
       });
     });
+    if (interruptedBy) stop(interruptedBy, "interrupt");
   });
 }
 
@@ -209,11 +255,23 @@ function fence(lines) {
   return `${f}text\n${text}\n${f}`;
 }
 
-export function markdownSummary(results, wallS) {
+function budgetTail(lines, budget) {
+  const kept = [];
+  let bytes = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const size = Buffer.byteLength(lines[i], "utf8") + 1;
+    if (bytes + size > budget) break;
+    kept.unshift(lines[i]);
+    bytes += size;
+  }
+  return kept;
+}
+
+export function markdownSummary(results, wallS, { interrupted = null } = {}) {
   const t = tally(results);
   const icon = { pass: "✅", fail: "❌", timeout: "⏱️", skipped: "⏭️" };
   const out = [
-    `### Regression suites: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed`}`,
+    `### Regression suites: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed`}${interrupted ? ` (run interrupted by ${interrupted})` : ""}`,
     "",
     `${t.pass} passed, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s.`,
     "",
@@ -221,9 +279,12 @@ export function markdownSummary(results, wallS) {
     "|---:|---|---|---:|---:|",
     ...results.map((r, i) => `| ${i + 1} | \`${r.name}\` | ${icon[r.status]} ${resultWord(r)} | ${fmtSeconds(r.seconds)} | ${r.assertions == null ? "" : r.assertions} |`),
   ];
-  for (const r of results) {
-    if (r.status !== "fail" && r.status !== "timeout") continue;
-    out.push("", `<details><summary><code>${r.name}</code>: ${resultWord(r)}, last ${r.tail.length} lines</summary>`, "", fence(r.tail), "", "</details>");
+  const failed = results.filter((r) => r.status === "fail" || r.status === "timeout");
+  const share = failed.length ? Math.floor(SUMMARY_TAIL_BUDGET / failed.length) : 0;
+  for (const r of failed) {
+    const lines = budgetTail(r.tail.map(capLine), share);
+    const cut = lines.length < r.tail.length ? ` (${r.tail.length - lines.length} earlier lines left out to keep the summary small)` : "";
+    out.push("", `<details><summary><code>${r.name}</code>: ${resultWord(r)}, last ${lines.length} lines${cut}</summary>`, "", fence(lines), "", "</details>");
   }
   return out.join("\n") + "\n";
 }
@@ -243,7 +304,7 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   const results = [];
   let stop = false;
   for (const suite of suites) {
-    if (stop) {
+    if (stop || interruptedBy) {
       results.push({ name: suite.name, status: "skipped", seconds: null, assertions: null, tail: [] });
       continue;
     }
@@ -257,10 +318,12 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   }
   const wallS = Number(process.hrtime.bigint() - started) / 1e9;
   io.stdout.write(`\n${textTable(results, wallS)}\n`);
+  if (interruptedBy) io.stderr.write(`run.mjs: interrupted by ${interruptedBy}; the suites after it were not run\n`);
   if (env.GITHUB_STEP_SUMMARY) {
-    try { appendFileSync(env.GITHUB_STEP_SUMMARY, markdownSummary(results, wallS)); }
+    try { appendFileSync(env.GITHUB_STEP_SUMMARY, markdownSummary(results, wallS, { interrupted: interruptedBy })); }
     catch (err) { io.stderr.write(`run.mjs: could not write the step summary: ${err.message}\n`); }
   }
+  if (interruptedBy) return interruptedBy === "SIGINT" ? 130 : 143;
   const t = tally(results);
   return t.fail + t.timeout > 0 ? 1 : 0;
 }
@@ -268,8 +331,7 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => {
-      if (current) killGroup(current, "SIGKILL");
-      process.exit(sig === "SIGINT" ? 130 : 143);
+      if (interrupt(sig)) process.stderr.write(`\nrun.mjs: ${sig} received; passing it to the running suite, SIGKILL in ${KILL_GRACE_MS} ms if it has not closed\n`);
     });
   }
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (err) => {

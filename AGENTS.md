@@ -858,6 +858,23 @@ ceilings and new in-process D1 suites use these rather than another copy.
 GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
 manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
 
+`npm test` is `node run.mjs`, the fail-late runner. It runs every suite
+registered in `tests/suites.json`, in that file's order and with `tests/` as
+the working directory, whatever an earlier suite did; kills a suite at its
+`timeoutS`, else at the larger of 120 s and three times its `medianS`; and
+exits 1 when any suite failed or timed out, 0 only when all passed, 2 on a
+usage or manifest error before anything runs, and 130 or 143 when interrupted
+(the signal is passed to the running suite, which gets two seconds to clean
+up before SIGKILL, and the table so far is still printed). It prints a table
+of every suite's result, seconds and assertions, and appends it as Markdown,
+with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
+is set. **Every `test:*` script in `tests/package.json` needs an entry in
+`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`), or the runner
+refuses to start and exits 2. `node run.mjs --only a,b` (from `tests/`, names
+without the `test:` prefix) runs those suites alone, `--bail` stops at the
+first failure as the old chain did, and `--timeout-scale=x` multiplies every
+timeout on a slow machine. `npm run test:x` still runs one suite by itself.
+
 ### Which suites need the dev server, and which do not
 
 Some suites boot workerd (`wrangler dev`, through `tests/worker-server.mjs`)
@@ -933,6 +950,7 @@ lib-contract
 flows-dossier-contract   flows-dossier-reads
 flows-reading   flows-reading-worker   flows-reading-render
 flows-rt-client
+run-contract
 ```
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
@@ -1085,6 +1103,14 @@ alone on the real clock and prints the numbers DEPLOY.md 10.5n quotes.
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
+`run-contract` (the `run` suite) was measured on 2026-10-05: 14 to 22 s with no
+server and 346 assertions, almost all of it waiting out the fixtures' timeouts
+and kill graces. It checks `tests/suites.json` against `package.json`, then
+spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
+hang that ignores SIGTERM, a flaky suite, a detached process that holds a
+suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide
+failures under the step-summary limit, and the runner itself sent SIGTERM and
+SIGINT mid-suite.
 
 Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
@@ -1116,11 +1142,13 @@ bar heights meant nothing, and an SVG label clipped off its own canvas by
 the switch to Inter. All three were invisible to every check that WAS being
 run, and all three cost a CI round trip each.
 
-**Ordering matters too.** The suites run in sequence and the run stops at the
-first failure, so a suite near the front hides every suite behind it. A count
-or a threshold in a late suite can be stale for a long time and say nothing.
-When a long-failing suite finally goes green, expect the ones behind it to
-have something to say.
+**Ordering matters less than it did.** Until 2026-10-05 `npm test` was one
+chain of `&&` links that stopped at the first failure, so a suite near the
+front hid every suite behind it, and a count or a threshold in a late suite
+could be stale for a long time and say nothing. The runner now attempts every
+suite and reports every failure of a run in its table, so read the whole table,
+not the first red row. Under `--bail` the old masking returns: a suite after
+the first failure is listed as not run, which says nothing about it.
 
 ## Local development
 
