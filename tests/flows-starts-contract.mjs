@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FRESH_CLASSES, easternInstant, liveStalled } from "../shared/flows-freshness.js";
 import {
-  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP,
+  runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP, createProgress,
 } from "../scripts/flows-legs/live.mjs";
 import {
   WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter,
@@ -18,7 +18,8 @@ import {
 } from "../scripts/flows-legs/watch.mjs";
 import { fakeWorld, fakeGithub } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
-import { LIVE_VENDOR } from "../scripts/flows-pipeline.mjs";
+import { LIVE_VENDOR, RATE } from "../scripts/flows-pipeline.mjs";
+import { LIVE_BUDGET } from "../shared/flows-live.js";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -689,7 +690,7 @@ const MIN = 60 * 1000;
   ok(issues(seeded).length === 0 && seeded.github.record.comments.length === 0, "A HOP AFTER 21:00 finds the issue the last run opened and adds nothing to it");
 
   const broken = fakeWorld({ day: S, start: at(S, 12, 0), github: {
-    seed: [{ number: 31, title: "[flows-witness:chain] The live loop could not start its successor", updatedAt: at(S, 6, 0) }] } });
+    seed: [{ number: 31, title: "[flows-witness:chain] The live loop stopped: a pass hung or its successor could not be started", updatedAt: at(S, 6, 0) }] } });
   r = await drive(broken, { budgetMs: 20 * MIN });
   ok(broken.github.record.closed.length === 1 && broken.github.record.closed[0].number === 31 && broken.github.record.closed[0].at < at(S, 12, 1) &&
      r.loop.watch.breached.length === 0,
@@ -763,26 +764,42 @@ const MIN = 60 * 1000;
   clearTimeout(giveUp);
   ok(hung !== "hung" && hung.loop.exit === "budget", "and a read that never answers is given up on when the deadline falls, so the tick ends and the loop goes on");
 
-  eq(LIVE_LOOP.passDeadlineMs, 4 * MIN, "A PASS has a four-minute wall deadline, about ten times the slowest pass the log has published");
-  eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick a two-minute one");
+  eq(LIVE_LOOP.passIdleMs, 90 * 1000, "A PASS IS ABANDONED when no vendor or ingest call has settled for 90 s");
+  eq(LIVE_LOOP.passDeadlineMs, 10 * MIN, "or when it is still running after 10 minutes");
+  eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick when it is still running after 2 minutes");
+  const settleGap = LIVE_VENDOR.timeoutMs + RATE.maxDelayMs;
+  ok(LIVE_LOOP.passIdleMs >= 3 * settleGap,
+    `the idle limit is at least three times the longest a running pass goes without a settled vendor call (${settleGap / 1000} s: ` +
+      "a 20 s try after up to 5 s of controller spacing), so a slow or timing-out vendor never trips it");
   const handover = LIVE_LOOP.chainRetryMs.reduce((a, b) => a + b, 0) + (LIVE_LOOP.chainRetryMs.length + 1) * LIVE_LOOP.githubTimeoutMs;
   const report = 2 * LIVE_LOOP.githubTimeoutMs;
-  ok(LIVE_LOOP.passDeadlineMs < LIVE_LOOP.slotMs && LIVE_LOOP.passDeadlineMs + handover + report <= 6.5 * MIN &&
-     LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs <= 8 * MIN,
-    `so a hung pass costs its deadline, the hand-over and the witness's report (at worst ${Math.round((LIVE_LOOP.passDeadlineMs + handover + report) / 1000)} s ` +
-      "with every dispatch retried and the issue listing and open each waiting out GitHub's 15 s, and never more than " +
-      `${Math.round((LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs) / 1000)} s, the report being held to a tick's deadline), ` +
-      "not the workflow's 355 minutes");
-  const stuckPass = async ({ passDeadlineMs = 150, tickDeadlineMs = 2 * MIN, passes, sent = true }) => {
+  ok(LIVE_LOOP.passIdleMs + handover + report <= 4 * MIN,
+    `so a pass that stopped costs its idle limit, the hand-over and the witness's report (at worst ${Math.round((LIVE_LOOP.passIdleMs + handover + report) / 1000)} s ` +
+      "with every dispatch retried and the issue listing and open each waiting out GitHub's 15 s), not the workflow's 355 minutes");
+  const tries = LIVE_VENDOR.timeoutRetries + 1;
+  const fullStall = LIVE_BUDGET.tier2MaxCalls * tries * RATE.maxDelayMs + tries * LIVE_VENDOR.timeoutMs;
+  ok(LIVE_LOOP.passDeadlineMs >= fullStall,
+    `the ceiling sits above a pass in which every one of ${LIVE_BUDGET.tier2MaxCalls} calls waits out both tries at the slowest ` +
+      `controller spacing (${Math.round(fullStall / 1000)} s), so it ends only a pass that would not finish`);
+  const jobMin = Number((read(".github/workflows/flows-live.yml").match(/timeout-minutes:\s*(\d+)/) || [])[1]);
+  ok(LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs <= jobMin * MIN - LIVE_LOOP.budgetMs,
+    `and the ceiling, the hand-over and a report held to a tick's deadline (${Math.round((LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs) / 1000)} s) ` +
+      `fit the ${jobMin - LIVE_LOOP.budgetMs / MIN} minutes the job's timeout leaves after the loop's budget, so the dispatch is always sent`);
+  const stuckPass = async ({ passDeadlineMs = 150, tickDeadlineMs = 2 * MIN, passIdleMs = LIVE_LOOP.passIdleMs, progress = null, onHung = null,
+    passes, sent = true, order = null }) => {
     const world = fakeWorld({ day: S, start: at(S, 11, 0) });
     const dispatched = [];
     let calls = 0;
     let giveUpAt = null;
     const t0 = Date.now();
     const run = await Promise.race([
-      drive(world, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs, tickDeadlineMs },
+      drive(world, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs, tickDeadlineMs, passIdleMs, progress, onHung },
         passes: async (p) => { calls++; return passes(p, world); },
-        chain: async ({ at: when }) => { dispatched.push(when); return sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 422 }; } }),
+        chain: async ({ at: when }) => {
+          dispatched.push(when);
+          if (order) order.push("chain");
+          return sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 422 };
+        } }),
       new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
     ]);
     clearTimeout(giveUpAt);
@@ -816,7 +833,7 @@ const MIN = 60 * 1000;
   "AND THE WITNESS RAISES EXACTLY ONE CHAIN ISSUE for a hung pass whose hand-over was refused: the Worker holds no dispatch token, so a cron starter hours late is all that is left");
   ok(chainIssues(never.world).length === 1 && /Pass 3 of the live loop/.test(chainIssues(never.world)[0].body) &&
      /dispatched its successor \(HTTP 204\), and exited red/.test(chainIssues(never.world)[0].body) &&
-     /accepts connections and never answers/.test(chainIssues(never.world)[0].body) &&
+     /still settling calls at its ceiling/.test(chainIssues(never.world)[0].body) &&
      never.run.loop.watch.breached.includes("chain") && /witness confirmed a lapse in chain/.test(hungVerdict.why),
   "and a hung pass whose successor was dispatched raises it too, so a vendor that stalls every pass is an open issue and not only a red run");
   const outage = fakeWorld({ day: S, start: at(S, 11, 0) });
@@ -834,7 +851,7 @@ const MIN = 60 * 1000;
   ok(runs.every((x) => x !== "hung" && x.loop.exit === "hung" && x.loop.ticks === 0 && liveRunVerdict(x.loop).failed) &&
      chainIssues(outage).length === 1 && issues(outage).length === 1 && outage.github.record.closed.length === 0 &&
      outage.github.record.comments.length === 0 && runs.every((x) => x.loop.watch.open.includes("chain")),
-  "A VENDOR OUTAGE IN WHICH EVERY PASS EXCEEDS ITS DEADLINE, run after run, keeps one chain issue open and every run red, though no run lives to its first watch tick");
+  "A STALL IN WHICH EVERY PASS HANGS, run after run, keeps one chain issue open and every run red, though no run lives to its first watch tick");
   const healed = await drive(outage, { budgetMs: 20 * MIN });
   ok(healed.loop.exit === "budget" && outage.github.record.closed.length === 1 &&
      outage.github.record.closed[0].number === chainIssues(outage)[0].number && healed.loop.watch.open.length === 0,
@@ -846,6 +863,74 @@ const MIN = 60 * 1000;
   } });
   ok(slow.run.loop.exit === "budget" && slow.dispatched.length === 1 && slow.run.loop.passes.every((p) => !p.hung) && slow.calls > 10,
     "while a pass that finishes inside its deadline, however slowly, is kept, and the loop runs to its budget as before");
+  const spin = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const scaledIdle = 150;
+  const partial = createProgress();
+  const partialOrder = [];
+  const stalledBackend = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: partial.lastAt, order: partialOrder,
+    onHung: () => partialOrder.push("onHung"), passes: async ({ index }, world) => {
+      const t0 = Date.now();
+      if (index === 1) {
+        while (Date.now() - t0 < 1000) { await spin(40); partial.settled(); }
+      } else {
+        await spin(5);
+        partial.settled();
+      }
+      world.advance(20000);
+      return { skipped: null, answered: index === 1 ? 21 : 38, landed: index === 1 ? 6 : 7, slowMs: Date.now() - t0 };
+    } });
+  const longPass = stalledBackend.run.loop.passes[1];
+  ok(stalledBackend.run.loop.exit === "budget" && stalledBackend.run.loop.passes.every((p) => !p.hung) && longPass.landed === 6 &&
+     longPass.slowMs >= 1000 && longPass.slowMs > 6 * scaledIdle && stalledBackend.dispatched.length === 1 && !partialOrder.includes("onHung") &&
+     !liveRunVerdict(stalledBackend.run.loop).failed && chainIssues(stalledBackend.world).length === 0,
+  `A PASS THAT STALLS ONE BACKEND runs past the old four-minute line and still finishes and publishes: it settled a call every 40 ms against a ${scaledIdle} ms ` +
+    `idle limit and ran ${longPass.slowMs} ms (the reviewer's market-tide stall: 228 s, a settled call at least every 25 s, against 90 s), so it is kept, ` +
+    "the loop runs to its budget, the run stays green and no issue opens");
+  const quieted = createProgress();
+  const waited = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: quieted.lastAt, passes: async ({ index }, world) => {
+    if (index === 0) {
+      quieted.settled();
+      quieted.quiet(500);
+      await spin(500);
+      quieted.settled();
+    }
+    world.advance(20000);
+    return { skipped: null, answered: 10, landed: 5 };
+  } });
+  ok(waited.run.loop.exit === "budget" && waited.run.loop.passes.every((p) => !p.hung),
+    "a 429 or store-quota wait announced to the idle clock (500 ms against 150) is not a stall");
+  const fading = createProgress();
+  const fadeOrder = [];
+  const fadeNotes = [];
+  const faded = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 5000, progress: fading.lastAt, order: fadeOrder,
+    onHung: (x) => { fadeOrder.push("onHung"); fadeNotes.push(x); }, passes: async ({ index }, world) => {
+      if (index === 0) { world.advance(20000); fading.settled(); return { skipped: null, answered: 10, landed: 5 }; }
+      for (let i = 0; i < 5; i++) { await spin(40); fading.settled(); }
+      return new Promise(() => {});
+    } });
+  const fadeVerdict = liveRunVerdict(faded.run.loop);
+  ok(faded.run !== "hung" && faded.run.loop.exit === "hung" && faded.run.loop.why === "pass-idle" && faded.wallMs < 2000 &&
+     faded.run.loop.passes[1].hung === true && /settled no vendor or ingest call for 0\.15 s/.test(faded.run.loop.passes[1].threw) &&
+     faded.run.notes.some((l) => /pass 2 settled no vendor or ingest call for 0\.15 s/.test(l)) && faded.dispatched.length === 1,
+  `A PASS THAT STOPS SETTLING CALLS is abandoned one idle limit after its last settled call (${faded.wallMs} ms of wall time for five calls 40 ms apart ` +
+    "and a 150 ms limit), one dispatch, and the log says so");
+  ok(fadeVerdict.failed && /a pass settled no vendor or ingest call within its idle limit/.test(fadeVerdict.why) &&
+     chainIssues(faded.world).length === 1 && /Pass 2 of the live loop settled no vendor or ingest call for 0\.15 s/.test(chainIssues(faded.world)[0].body) &&
+     /something without a deadline stalled/.test(chainIssues(faded.world)[0].body),
+  "and the verdict and the chain issue name the idle stall and say a slow vendor never causes it");
+  ok(fadeNotes.length === 1 && fadeNotes[0].why === "pass-idle" && fadeOrder[0] === "onHung" && fadeOrder.filter((x) => x === "chain").length === 1,
+    "THE ABANDONMENT HOOK runs once, before the dispatch, so the pass's timed-out count is read when the pass is given up, not after the hand-over and the report");
+  const busy = createProgress();
+  let abandoned = false;
+  const endless = await stuckPass({ passIdleMs: scaledIdle, passDeadlineMs: 600, progress: busy.lastAt, passes: async ({ index }, world) => {
+    if (index === 0) { world.advance(20000); busy.settled(); return { skipped: null, answered: 10, landed: 5 }; }
+    while (!abandoned) { await spin(40); busy.settled(); }
+    return { skipped: null, answered: 0, landed: 0 };
+  } });
+  abandoned = true;
+  ok(endless.run !== "hung" && endless.run.loop.exit === "hung" && endless.run.loop.why === "pass-deadline" && endless.wallMs < 3000 &&
+     /did not finish within 0\.6 s/.test(endless.run.loop.passes[1].threw),
+  "and a pass that keeps settling calls but never ends is abandoned at the ceiling");
   const throwing = await stuckPass({ passes: async ({ index }, world) => {
     world.advance(20000);
     if (index === 1) throw new Error("vendor down");
@@ -901,6 +986,13 @@ const MIN = 60 * 1000;
   const pipelineSrc = read("scripts/flows-pipeline.mjs");
   ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
     "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
+  ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} vendor request\(s\) timed out/.test(pipelineSrc) &&
+     /in the abandoned pass before it was given up/.test(pipelineSrc) && !/if \(loop\.exit === "hung" && loop\.why === "pass-deadline"\)/.test(pipelineSrc),
+  "THE COMMAND LINE hands the loop the vendor and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
+  ok(/\)\.finally\(\(\) => wireProgress\.settled\(\)\);\n    const refusal = response\.status === 403/.test(pipelineSrc) &&
+     /body,\n    \},\n  \)\.finally\(\(\) => wireProgress\.settled\(\)\);/.test(pipelineSrc) &&
+     /wireProgress\.quiet\(quotaWait\);\n    await sleep\(quotaWait\);/.test(pipelineSrc) && /wireProgress\.quiet\(wait\);\n    await sleep\(wait\);/.test(pipelineSrc),
+  "and every ingest read and write settles the progress clock, and a store-quota or retry wait is announced to it");
 
   eq(LIVE_LOOP.clockDeadlineMs, 10000, "The loop's own clock read has a ten-second deadline like the watch's");
   const quiet = { tick: async () => ({ busy: false }), summary: () => ({ breached: [], open: [] }) };
@@ -1128,9 +1220,16 @@ const MIN = 60 * 1000;
     return { dir, file };
   };
   const hangs = [];
+  let limitedOnce = false;
   const server = createServer((req, res) => {
     hangs.push(req.url);
-    if (req.url.startsWith("/ok")) {
+    if (req.url.startsWith("/limited") && !limitedOnce) {
+      limitedOnce = true;
+      res.writeHead(429, { "Retry-After": "1", "Content-Type": "application/json" });
+      res.end("{}");
+      return;
+    }
+    if (req.url.startsWith("/ok") || req.url.startsWith("/limited")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ t: "AAPL" }] }));
     }
@@ -1148,9 +1247,17 @@ const MIN = 60 * 1000;
     const started = Date.now();
     if (process.env.SKIP_HANG !== "1") {
       try { await m.uw("/hang/x"); out.hang = "answered"; } catch (e) { out.hang = e.name; }
+      out.settledAfterHang = m.wireProgress.lastAt() - started;
     }
     out.hangMs = Date.now() - started;
     out.ok = (await m.uw("/ok/x")).length;
+    if (process.env.SKIP_HANG !== "1") {
+      const limited = m.uw("/limited/x");
+      const asked = Date.now();
+      while (m.wireProgress.lastAt() <= Date.now() && Date.now() - asked < 3000) await new Promise((r) => setTimeout(r, 10));
+      out.quietAheadMs = m.wireProgress.lastAt() - Date.now();
+      out.limited = (await limited).length;
+    }
     out.timeouts = timeouts;
     console.log(JSON.stringify(out));
     process.exit(0);
@@ -1170,6 +1277,10 @@ const MIN = 60 * 1000;
       "and still reads a healthy endpoint");
   eq(hangs.filter((u) => u.startsWith("/hang")).length, 2, "one try and one retry after a timeout, then the error goes up: a dead endpoint costs two deadlines, not five");
   deep(liveRun.timeouts.slice(0, 2), [300, 300], "each try carries its own deadline");
+  ok(liveRun.settledAfterHang >= 550 && liveRun.settledAfterHang <= liveRun.hangMs + 50,
+    `AND EACH TIMED-OUT TRY SETTLES THE LOOP'S PROGRESS CLOCK (last settle ${liveRun.settledAfterHang} ms in, the second timeout), so a vendor that never answers is not a stall`);
+  ok(liveRun.quietAheadMs > 400 && liveRun.limited === 1,
+    `and a 429's Retry-After wait is announced to it (the clock ran ${liveRun.quietAheadMs} ms ahead of the time, inside a one-second wait), then the call is answered`);
   const defaults = JSON.parse(await run(true, { FLOWS_UW_TIMEOUT_MS: "", SKIP_HANG: "1" }));
   ok(defaults.timeouts.length === 1 && defaults.timeouts[0] === 20000 && LIVE_VENDOR.timeoutMs === 20000 && LIVE_VENDOR.timeoutRetries === 1,
     "and the deadline is 20 s by default, whatever a malformed override says");
