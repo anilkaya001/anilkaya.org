@@ -845,6 +845,7 @@ const CARD = {
     facts: [
       { id: "iv.cm.30", v: 0.32, u: "vol", g: 3 },
       { id: "iv.cm.90", v: 0.29, u: "vol", g: 2 },
+      { id: "iv.rank.1y", v: 0.82, u: "frac", g: 2 },
       { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
       { id: "garch.avg.21", v: 0.27, u: "vol", g: 3 },
       { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
@@ -902,8 +903,9 @@ const CARD = {
   ok(user.includes("S1 put-credit-spread") && user.includes("vrp.rel.21 = 0.18"), "and hands the model the facts and structures");
   ok(/never add one/.test(system) && /only when that line says the engine stands aside/.test(system) && /at least one of them a fact the structure's own rules rest on/.test(system),
      "and tells it what the vet now enforces: reorder or drop the ranked ideas but never add one, stand aside only when the engine does, and rest each idea on a fact its rules name");
-  ok(/the volatility premium, the IV rank, the term slope/.test(system) && !/percentile/i.test(system),
-     "and names the IV axis the rules rest on as the IV rank, which is what iv.pct.30 holds today, never a percentile");
+  ok(/the volatility premium vrp\.rel\.21; the IV rank iv\.pct\.30; the term slope term\.slope\.30_90\.exEvent; the skew skew\.rr25\.30\.pct; or the event ratio move\.event\.ratio\)/.test(system) &&
+     /the state's level level\.magnet when pinned, else level\.flip, and its book gex\.book/.test(system) && !/percentile/i.test(system),
+     "and names each axis the rules rest on by the one id the vet accepts for it: the IV rank is iv.pct.30, the id RULE_FACT.iv holds, never a percentile and never the iv.rank.1y line beside it");
   same(parseEngineOutput("```json\n{\"verdict\":\"stand-aside\"}\n```"), { verdict: "stand-aside" }, "a fenced JSON reply parses");
   eq(parseEngineOutput("no json here"), null, "and prose is not a reply");
 
@@ -948,7 +950,7 @@ const CARD = {
   same(code({ claims: [{ a: "iv.cm.30", rel: "gt", b: "level.flip" }] }), ["claim-false"], "so is a comparison across units");
   same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
        "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
-  same(code({ claims: [{ a: "iv.pct.30", rel: "cheap" }] }), ["claim-false"], "a percentile at 0.82 is not cheap");
+  same(code({ claims: [{ a: "iv.pct.30", rel: "cheap" }] }), ["claim-false"], "an IV rank at 0.82 is not cheap");
   same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
   same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
   same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
@@ -974,7 +976,7 @@ const CARD = {
   eq(fb.ideas[0].verdict, "harvest-rich-premium", "the put credit spread reads as harvesting rich premium");
   same(fb.ideas[0].because, ["vrp.rel.21", "level.magnet"],
        "and rests on the facts with the largest affinity contribution: rich VRP at grade 3 adds 2, the pinned state at " +
-       "confidence 2 adds 4/3 and comes before the IV percentile's equal 4/3 in rule order");
+       "confidence 2 adds 4/3 and comes before the IV rank's equal 4/3 in rule order");
   const asReply = { verdict: fb.verdict, ideas: fb.ideas.map(({ structure, verdict, because }) => ({ structure, verdict, because })) };
   const fv = vetEngineReply(asReply, ectx);
   ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
@@ -1027,6 +1029,15 @@ const CARD = {
     same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S7", because: ["vrp.rel.21", "iv.pct.30"] }] }, buildContext(twin, { expectedSession: "2026-09-15" })), ["dup"],
          "and two structures of one family are never kept together, the engine's own one-per-family rule");
 
+    const ivOnly = JSON.parse(JSON.stringify(ecard));
+    ivOnly.engine.structures[0].rules = ["iv.high"];
+    const ivCtx = buildContext(ivOnly, { expectedSession: "2026-09-15" });
+    same(codes({ ideas: [{ structure: "S1", because: ["iv.rank.1y", "iv.cm.30"] }] }, ivCtx), ["off-rules"],
+         "a put credit spread whose rules rest on the IV axis alone, 'because' iv.rank.1y, the rank line every real card prints beside iv.pct.30 at the same value, is refused as off-rules: the vet reads the IV axis only through RULE_FACT.iv, which is why the prompt names that id");
+    same(codes({ ideas: [{ structure: "S1", because: ["iv.rank.1y", "vrp.rel.21"] }] }, ivCtx), ["off-rules"],
+         "and so is the same rank line beside the volatility premium, a fact this structure's rules do not name");
+    ok(vetEngineReply({ ideas: [{ structure: "S1", because: ["iv.pct.30", "iv.cm.30"] }] }, ivCtx).ideas.length === 1,
+       "while the same idea citing iv.pct.30, the id the prompt names, is kept");
     same(codes({ ideas: [{ structure: "S2", because: ["iv.cm.90", "garch.avg.21"] }] }), ["off-rules"],
          "N-F4: an iron condor 'because' the 90-day implied vol and the GARCH average, which none of its rules names, is refused as off-rules, where any two graded facts were accepted");
     ok(vetEngineReply({ ideas: [{ structure: "S2", because: ["iv.cm.90", "vrp.rel.21"] }] }, ectx).ideas.length === 1,
@@ -1440,7 +1451,7 @@ const CARD = {
   ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pct.30", 0.8, 2]])), "but not with IV rank in the top quartile");
   ok(claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.76, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.72, 2]])).ok &&
      claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.2, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.25, 2]])).ok,
-     "and the claims 'rich' and 'cheap' on an IV percentile read the same two lines, strictly, as the engine's buckets do");
+     "and the claims 'rich' and 'cheap' on an IV rank read the same two lines, strictly, as the engine's buckets do");
 
   const at = (rank) => {
     const c = JSON.parse(JSON.stringify(CARD));

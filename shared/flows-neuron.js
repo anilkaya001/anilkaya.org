@@ -1151,6 +1151,7 @@ export const ENGINE_LINES = Object.freeze({
   MAX_IDEAS: 3, MAX_STRUCTURES: 5,
 });
 const RULE_FACT = Object.freeze({ iv: "iv.pct.30", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
+const STATE_FACT = Object.freeze({ pinned: "level.magnet", other: "level.flip", book: "gex.book" });
 
 function structureBrief(st) {
   const fam = STRUCTURE_BY_ID[st.family] || null;
@@ -1351,7 +1352,7 @@ function weighedRules(st, eng) {
     const [axis, bucket] = rule.split(".");
     if (axis === "state") {
       const conf = eng.state && num(eng.state.confidence) !== null ? Math.max(0, Math.min(3, eng.state.confidence)) : 0;
-      weighed.push({ c: 2 * conf / 3, i, ids: [eng.state && eng.state.state === "pinned" ? "level.magnet" : "level.flip", "gex.book"] });
+      weighed.push({ c: 2 * conf / 3, i, ids: [eng.state && eng.state.state === "pinned" ? STATE_FACT.pinned : STATE_FACT.other, STATE_FACT.book] });
     } else if (RULE_FACT[axis] && aff && aff[axis] && num(aff[axis][bucket]) !== null) {
       weighed.push({ c: aff[axis][bucket] * gradeOf(RULE_FACT[axis]) / 3, i, ids: [RULE_FACT[axis]] });
     }
@@ -1410,7 +1411,9 @@ export function promptForEngine(context) {
       "drop them, never add one. At most " + ENGINE_LINES.MAX_IDEAS + ", no repeats, never a structure whose family " +
       "the state avoids, and the first idea is defined-risk whenever a defined-risk structure is listed.",
     "5. because names at least two fact ids with grade above zero, at least one of them a fact the structure's own rules rest on " +
-      "(the state's level and book, the volatility premium, the IV rank, the term slope, the skew or the event ratio); " +
+      "(the state's level " + STATE_FACT.pinned + " when pinned, else " + STATE_FACT.other + ", and its book " + STATE_FACT.book +
+      "; the volatility premium " + RULE_FACT.vrp + "; the IV rank " + RULE_FACT.iv + "; the term slope " + RULE_FACT.term +
+      "; the skew " + RULE_FACT.skew + "; or the event ratio " + RULE_FACT.event + "), cited by exactly those ids; " +
       "an idea ranks no higher than its weakest fact.",
     "6. Answer verdict stand-aside with no ideas only when that line says the engine stands aside; a stand-aside over ranked " +
       "ideas is refused.",
