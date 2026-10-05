@@ -336,8 +336,12 @@ export function liveRunVerdict(loop) {
     why.push(`every one of ${ran.length} pass(es) answered no vendor call or landed no key`);
   }
   if (loop && loop.exit === "hung") {
-    why.push(`${loop.why === "tick-deadline" ? "a watch tick" : "a pass"} did not finish within its deadline, so the loop exited ` +
-      `and re-dispatched (${loop.chained ? loop.chained.why : "not sent"}) to free the concurrency group for its successor`);
+    const what = loop.why === "tick-deadline" ? "a watch tick" : "a pass";
+    why.push(loop.chained && loop.chained.sent
+      ? `${what} did not finish within its deadline, so the loop exited and re-dispatched (${loop.chained.why}) to free the ` +
+        "concurrency group for its successor"
+      : `${what} did not finish within its deadline, so the loop exited and could not dispatch its successor ` +
+        `(${loop.chained ? loop.chained.why : "not sent"}): nothing restarts the loop until a GitHub starter arrives`);
   }
   if (loop && loop.exit === "budget" && !(loop.chained && loop.chained.sent)) {
     why.push("the time budget ran out and the chain dispatch was refused, so nothing keeps the loop going until a " +
@@ -474,6 +478,15 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
     const chained = await chain({ at: now() });
     log(`live loop: exited on the ${why} after ${passes.length} pass(es) and ${ticks} watch tick(s) — ` +
       `re-dispatched: ${chained.why}${chained.status ? " (" + chained.status + ")" : ""}`);
+    if ((why === "pass-deadline" || !chained.sent) && typeof watch.loopHung === "function") {
+      try {
+        const told = await underDeadline(() => watch.loopHung({ at: now(), why, what, ms, chained }), tickDeadlineMs);
+        if (told === HUNG) warn(`live loop: the witness could not report the hung ${what} within ${tickDeadlineMs / 1000} s`);
+      } catch (error) {
+        warn(`live loop: the witness could not report the hung ${what} — ` +
+          `${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`);
+      }
+    }
     return { exit: "hung", why, passes, waits, ticks, chained, clock, preOpenMs: 0, keep: true,
       watch: typeof watch.summary === "function" ? watch.summary() : null };
   };

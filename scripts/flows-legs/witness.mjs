@@ -54,9 +54,10 @@ export const WITNESS_CHECKS = Object.freeze({
   chain: Object.freeze({
     title: "The live loop could not start its successor",
     remedy: [
-      "Until a GitHub starter arrives (they have arrived 4 to 8 hours late), Tier 2 and the nightly start are not running.",
+      "When the dispatch was refused: until a GitHub starter arrives (they have arrived 4 to 8 hours late), Tier 2 and the nightly start are not running.",
       "Check Settings, Actions, General, Workflow permissions, and that flows-live.yml still grants actions: write and issues: write.",
       "Restart it by hand: gh workflow run flows-live.yml. The next loop closes this issue.",
+      "When a pass hung and the successor was dispatched, the loop restarts every five to six minutes and nothing here needs changing: the runs' `vendor request(s) timed out` lines say whether the vendor stalled. DEPLOY.md section 10.5k.",
     ],
   }),
   drill: Object.freeze({

@@ -4654,11 +4654,13 @@ async function runLiveMode() {
   const watch = keep
     ? createWatch({ readOnce: readStoredOnce, latestClock: () => clockBody, env: process.env })
     : null;
+  let timedOutAtPass = stats.timedOut;
   const loop = await runLiveLoop({
     readClock, watch,
     pass: async ({ first, clock }) => {
       resetPublishRetryBudget();
       const timedOutBefore = stats.timedOut;
+      timedOutAtPass = timedOutBefore;
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
       const outcome = reportErrors(result);
       const timedOut = stats.timedOut - timedOutBefore;
@@ -4669,6 +4671,10 @@ async function runLiveMode() {
       ? chainWithRetry(() => chainDispatch({ env: process.env, at }))
       : chainDispatch({ env: process.env, at })),
   });
+  if (loop.exit === "hung" && loop.why === "pass-deadline") {
+    console.warn(`live: ${stats.timedOut - timedOutAtPass} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
+      "in the abandoned pass before it was given up");
+  }
   settle(loop);
   if (loop.exit === "hung") process.exit(process.exitCode || 1);
   return loop;

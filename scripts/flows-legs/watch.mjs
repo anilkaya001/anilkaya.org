@@ -90,6 +90,24 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
           `${chained.why}${chained.status ? " (HTTP " + chained.status + ")" : ""}${chained.attempts ? " after " + chained.attempts + " attempt(s)" : ""}.`,
       }, { at });
     },
+    async loopHung({ at, why, what, ms, chained }) {
+      const status = chained.status ? " (HTTP " + chained.status + ")" : "";
+      const tries = chained.attempts ? " after " + chained.attempts + " attempt(s)" : "";
+      const handed = chained.sent
+        ? `dispatched its successor${status}`
+        : `could not dispatch its successor: ${chained.why}${status}${tries}. Nothing restarts the loop until a GitHub starter ` +
+          "arrives, because the Worker's watchdog re-dispatches only when it holds GITHUB_DISPATCH_TOKEN";
+      const cause = why === "pass-deadline"
+        ? "A vendor that accepts connections and never answers looks like this: every call waits out its deadline twice, and the " +
+          "pass cannot finish in time. While each successor's first pass hangs too, this issue stays open; the first watch tick " +
+          "of a loop whose pass finishes closes it."
+        : "The watch's own reads or GitHub calls stalled; the next loop's first watch tick closes this issue.";
+      await witness.raiseNow("chain", {
+        id: "chain", status: "breach",
+        detail: `${what[0].toUpperCase()}${what.slice(1)} of the live loop did not finish within ${ms / 1000} s at ` +
+          `${etTime(at)}, so the loop abandoned it, ${handed}, and exited red to free the concurrency group. ${cause}`,
+      }, { at });
+    },
     summary: () => witness.summary(),
   };
 }

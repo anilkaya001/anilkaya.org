@@ -766,9 +766,13 @@ const MIN = 60 * 1000;
   eq(LIVE_LOOP.passDeadlineMs, 4 * MIN, "A PASS has a four-minute wall deadline, about ten times the slowest pass the log has published");
   eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick a two-minute one");
   const handover = LIVE_LOOP.chainRetryMs.reduce((a, b) => a + b, 0) + (LIVE_LOOP.chainRetryMs.length + 1) * LIVE_LOOP.githubTimeoutMs;
-  ok(LIVE_LOOP.passDeadlineMs < LIVE_LOOP.slotMs && LIVE_LOOP.passDeadlineMs + handover <= 6 * MIN,
-    `so a hung pass costs its deadline plus the hand-over (at worst ${Math.round((LIVE_LOOP.passDeadlineMs + handover) / 1000)} s with every ` +
-      "dispatch retried), not the workflow's 355 minutes");
+  const report = 2 * LIVE_LOOP.githubTimeoutMs;
+  ok(LIVE_LOOP.passDeadlineMs < LIVE_LOOP.slotMs && LIVE_LOOP.passDeadlineMs + handover + report <= 6.5 * MIN &&
+     LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs <= 8 * MIN,
+    `so a hung pass costs its deadline, the hand-over and the witness's report (at worst ${Math.round((LIVE_LOOP.passDeadlineMs + handover + report) / 1000)} s ` +
+      "with every dispatch retried and the issue listing and open each waiting out GitHub's 15 s, and never more than " +
+      `${Math.round((LIVE_LOOP.passDeadlineMs + handover + LIVE_LOOP.tickDeadlineMs) / 1000)} s, the report being held to a tick's deadline), ` +
+      "not the workflow's 355 minutes");
   const stuckPass = async ({ passDeadlineMs = 150, tickDeadlineMs = 2 * MIN, passes, sent = true }) => {
     const world = fakeWorld({ day: S, start: at(S, 11, 0) });
     const dispatched = [];
@@ -801,8 +805,40 @@ const MIN = 60 * 1000;
     "AND THE RUN EXITS RED, saying a pass hung and that the successor was dispatched");
   const refusedHang = await stuckPass({ passes: async () => new Promise(() => {}), sent: false });
   ok(refusedHang.run.loop.exit === "hung" && refusedHang.dispatched.length === 1 && liveRunVerdict(refusedHang.run.loop).failed &&
-     /re-dispatched \(refused\)/.test(liveRunVerdict(refusedHang.run.loop).why),
-  "a hung first pass whose dispatch is refused still exits red, naming the refusal");
+     /could not dispatch its successor \(refused\): nothing restarts the loop until a GitHub starter arrives/.test(liveRunVerdict(refusedHang.run.loop).why),
+  "a hung first pass whose dispatch is refused still exits red, naming the refusal and what is left to restart the loop");
+  const chainIssues = (w) => issues(w).filter((c) => /^\[flows-witness:chain\]/.test(c.title));
+  ok(chainIssues(refusedHang.world).length === 1 && issues(refusedHang.world).length === 1 &&
+     /Pass 1 of the live loop did not finish within 0\.15 s/.test(chainIssues(refusedHang.world)[0].body) &&
+     /could not dispatch its successor: refused \(HTTP 422\)/.test(chainIssues(refusedHang.world)[0].body) &&
+     /GITHUB_DISPATCH_TOKEN/.test(chainIssues(refusedHang.world)[0].body) && refusedHang.world.github.record.closed.length === 0 &&
+     refusedHang.run.loop.watch.open.includes("chain"),
+  "AND THE WITNESS RAISES EXACTLY ONE CHAIN ISSUE for a hung pass whose hand-over was refused: the Worker holds no dispatch token, so a cron starter hours late is all that is left");
+  ok(chainIssues(never.world).length === 1 && /Pass 3 of the live loop/.test(chainIssues(never.world)[0].body) &&
+     /dispatched its successor \(HTTP 204\), and exited red/.test(chainIssues(never.world)[0].body) &&
+     /accepts connections and never answers/.test(chainIssues(never.world)[0].body) &&
+     never.run.loop.watch.breached.includes("chain") && /witness confirmed a lapse in chain/.test(hungVerdict.why),
+  "and a hung pass whose successor was dispatched raises it too, so a vendor that stalls every pass is an open issue and not only a red run");
+  const outage = fakeWorld({ day: S, start: at(S, 11, 0) });
+  const runs = [];
+  for (let i = 0; i < 3; i++) {
+    let giveUpAt = null;
+    const one = await Promise.race([
+      drive(outage, { budgetMs: 2 * HOUR, loopOver: { passDeadlineMs: 100 }, passes: async () => new Promise(() => {}) }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    runs.push(one);
+    outage.advance(90 * 1000);
+  }
+  ok(runs.every((x) => x !== "hung" && x.loop.exit === "hung" && x.loop.ticks === 0 && liveRunVerdict(x.loop).failed) &&
+     chainIssues(outage).length === 1 && issues(outage).length === 1 && outage.github.record.closed.length === 0 &&
+     outage.github.record.comments.length === 0 && runs.every((x) => x.loop.watch.open.includes("chain")),
+  "A VENDOR OUTAGE IN WHICH EVERY PASS EXCEEDS ITS DEADLINE, run after run, keeps one chain issue open and every run red, though no run lives to its first watch tick");
+  const healed = await drive(outage, { budgetMs: 20 * MIN });
+  ok(healed.loop.exit === "budget" && outage.github.record.closed.length === 1 &&
+     outage.github.record.closed[0].number === chainIssues(outage)[0].number && healed.loop.watch.open.length === 0,
+  "and the first loop whose pass finishes closes it on its first tick");
   const slow = await stuckPass({ passDeadlineMs: 400, passes: async (p, world) => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     world.advance(20000);
@@ -837,6 +873,31 @@ const MIN = 60 * 1000;
   ok(stuckTick.loop !== "hung" && stuckTick.loop.exit === "hung" && stuckTick.loop.why === "tick-deadline" && stuckTick.loop.ticks === 3 &&
      stuckTick.dispatched.length === 1 && stuckTick.wallMs < 5000 && /a watch tick did not finish/.test(liveRunVerdict(stuckTick.loop).why),
   `A WATCH TICK THAT NEVER RESOLVES is given up on the same way: exit on its deadline (${stuckTick.wallMs} ms), one dispatch, a red run`);
+  const tickHang = async (sent, report) => {
+    const world = fakeWorld({ day: S, start: at(S, 11, 0) });
+    const told = [];
+    const notes = [];
+    let ticked = 0;
+    let giveUpAt = null;
+    const t0 = Date.now();
+    const sticky = { tick: async () => { ticked++; return ticked < 2 ? { busy: false } : new Promise(() => {}); },
+      loopHung: async (x) => { told.push(x); return report(); }, summary: () => ({ breached: [], open: [] }) };
+    const loop = await Promise.race([
+      runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: 2 * HOUR, log() {}, warn: (l) => notes.push(l), watch: sticky,
+        tickDeadlineMs: 150, readClock: async () => null,
+        pass: async () => { world.advance(20000); return { skipped: null, answered: 1, landed: 1 }; },
+        chain: async () => (sent ? { sent: true, why: "sent", status: 204 } : { sent: false, why: "refused", status: 403 }) }),
+      new Promise((resolve) => { giveUpAt = setTimeout(() => resolve("hung"), 20000); }),
+    ]);
+    clearTimeout(giveUpAt);
+    return { loop, told, notes, wallMs: Date.now() - t0 };
+  };
+  const tickSent = await tickHang(true, async () => {});
+  const tickRefused = await tickHang(false, () => new Promise(() => {}));
+  ok(tickSent.told.length === 0 && tickRefused.told.length === 1 && tickRefused.told[0].why === "tick-deadline" &&
+     tickRefused.told[0].chained.why === "refused" && tickRefused.loop.exit === "hung" && tickRefused.wallMs < 5000 &&
+     tickRefused.notes.some((l) => /the witness could not report the hung watch tick 2 within 0\.15 s/.test(l)),
+  "a hung watch tick whose successor was dispatched raises nothing (the successor's watch is the report), one whose dispatch was refused is reported, and a report that itself hangs is held to a tick's deadline");
   const pipelineSrc = read("scripts/flows-pipeline.mjs");
   ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
     "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
