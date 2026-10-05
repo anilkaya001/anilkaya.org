@@ -987,6 +987,13 @@
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
   }
 
+  function chipLabel(label) {
+    const t = String(label);
+    if (t.length <= 32) return t;
+    const cut = t.slice(0, 31).replace(/[\s,;:(\u2013\u2014-]+\S*$/, "").replace(/[\s,;:(]+$/, "");
+    return (cut || t.slice(0, 31)) + "…";
+  }
+
   function citeChip(c, read) {
     const quoted = c.untrusted === true;
     const age = readAge(c, read);
@@ -994,7 +1001,7 @@
     const chip = h("button", {
       class: "ui-tag ft-read-chip", type: "button", "data-id": c.id, "data-kind": c.kind || null, "data-quoted": quoted ? "1" : null,
       "aria-label": c.label + ": " + value + (quoted ? ", quoted third-party text" : "") + ", " + age, title: c.label + ": " + value + " (" + age + ")",
-    }, h("span", { class: "ft-read-chip-l" }, c.label.length > 30 ? c.label.slice(0, 29) + "…" : c.label), " ", h("b", null, value));
+    }, h("span", { class: "ft-read-chip-l" }, chipLabel(c.label)), " ", h("b", null, value));
     reveal(chip, age);
     return chip;
   }

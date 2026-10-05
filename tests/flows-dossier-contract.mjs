@@ -601,6 +601,26 @@ function checkDossier(d, label, ticker = T) {
   ok(JSON.stringify(ev).startsWith('{"t":"ABC"'), "the events SQL finds a row by its leading key: eventRow still writes t first");
 }
 
+{
+  const uni = heldUniverse(T);
+  const px = uni.u.px;
+  const rolledQuote = V.quoteExtract({ status: "ok", price: px, prevClose: px, changePct: 0, open: null, high: null, low: null, volume: 1200000, tapeTime: "2026-10-02 20:00:00+00:00" });
+  const r = D.buildDossier(inputs({ vendor: reduceAll({ quote: rolledQuote }) }));
+  const last = r.packets.price.facts.find((f) => f.k === "last");
+  const chg = r.packets.price.facts.find((f) => f.k === "change");
+  eq(last.label, "Last close", "BEFORE THE OPEN THE VENDOR ROLLS ITS PREVIOUS CLOSE TO THE LAST CLOSE: a quote equal to both is named the last close");
+  eq(chg.v, uni.u.chg, "and its change is the session's own change from the nightly screen, not the 0.00% the rolled base gives");
+  eq(chg.label, "Change on the session", "labelled as the session's change");
+  eq(r.packets.price.session, uni.sessionDate, "the packet's session is that close's session");
+  const moved = V.quoteExtract({ status: "ok", price: px * 0.999, prevClose: px, changePct: -0.001, tapeTime: "2026-10-05 11:39:00+00:00" });
+  const pre = D.buildDossier(inputs({ vendor: reduceAll({ quote: moved }) }));
+  eq(pre.packets.price.facts.find((f) => f.k === "last").label, "Last price", "a quote that has moved off the close keeps its own price and change");
+  eq(pre.packets.price.facts.find((f) => f.k === "change").v, -0.001, "with the vendor's change");
+  const flat = V.quoteExtract({ status: "ok", price: px + 1, prevClose: px + 1, changePct: 0, tapeTime: "2026-10-02 20:00:00+00:00" });
+  const other = D.buildDossier(inputs({ vendor: reduceAll({ quote: flat }) }));
+  eq(other.packets.price.facts.find((f) => f.k === "last").label, "Last price", "an equal price and previous close that is not the nightly close is left as the vendor gave it");
+}
+
 console.log(`✓ flows-dossier: ${checks} assertions — twelve typed packets built from the documented fields of thirteen vendor routes and the nightly's own payloads, every field the code reads proven against the spec by a recording proxy and carried in the weekly probe's strict list, ` +
   `a sanitiser that refuses or cleans instruction-shaped, markup, URL, bidi and role-marker text in headlines, descriptions, firm and holder names, a prompt renderer that quotes it inside delimiters and sheds by priority to a token budget, ` +
   `a fingerprint stable under price and age noise and sensitive to every fact a reading rests on, and dossierFacts in the entry shape Ask already indexes`);

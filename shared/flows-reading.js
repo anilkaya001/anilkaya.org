@@ -203,9 +203,15 @@ function rulesFor(v) {
       const bySate = state === "amplifying" || state === "squeeze";
       const byBook = gex !== null && gex < 0;
       if (!bySate && !byBook) return null;
+      if (bySate) {
+        return {
+          evidence: ["options.state", "options.engine.gex.book", "options.engine.level.flip"],
+          sentence: "The implied dealer state is " + state + ": " + DEALER_CLAUSE + " the book is net short gamma, so hedging flows follow price rather than offset it.",
+        };
+      }
       return {
-        evidence: ["options.state", "options.engine.gex.book", "options.engine.level.flip"],
-        sentence: "The implied dealer state is " + (bySate ? state : "short gamma") + ": " + DEALER_CLAUSE + " the book is net short gamma, so hedging flows follow price rather than offset it.",
+        evidence: ["options.engine.gex.book", "options.engine.level.flip"],
+        sentence: "Dealer book gamma is " + v.show("options.engine.gex.book") + ": " + DEALER_CLAUSE + " the book is net short gamma, so hedging flows follow price rather than offset it.",
       };
     },
     "dealer-pinned": () => {
@@ -825,10 +831,20 @@ const REASON_WORDS = Object.freeze({
 
 const STATUS_WORD = Object.freeze({ withheld: "withheld", unavailable: "unavailable", pending: "pending", partial: "partly read" });
 
-function firstSentence(text) {
+const NOT_AN_END = /(?:^|[\s(])(?:inc|corp|co|ltd|llc|plc|lp|llp|ag|nv|sa|se|bv|spa|ab|asa|oyj|bhd|tbk|cie|mfg|intl|bros|hldgs|no|vs|etc|approx|dept|est|st|mt|ft|jr|sr|dr|mr|mrs|ms|u\.s|u\.k|e\.g|i\.e|[a-z])$/i;
+
+export function firstSentence(text) {
   const t = String(text).trim();
-  const m = /^.*?[.!?](?=\s|$)/.exec(t);
-  const s = (m ? m[0] : t).trim();
+  const re = /[.!?](?=\s+|$)/g;
+  let end = -1;
+  for (let m = re.exec(t); m; m = re.exec(t)) {
+    const rest = t.slice(m.index + 1).trimStart();
+    if (!rest) { end = m.index + 1; break; }
+    if (m[0] === "." && (NOT_AN_END.test(t.slice(0, m.index)) || !/^["'\u201c\u2018(]?[A-Z0-9]/.test(rest))) continue;
+    end = m.index + 1;
+    break;
+  }
+  const s = (end > 0 ? t.slice(0, end) : t).trim();
   return s.length > 200 ? s.slice(0, 199).replace(/\s+\S*$/, "") + "\u2026" : s;
 }
 
@@ -913,7 +929,9 @@ export function readingFallback(dossier, tags) {
   const nowCites = [];
   if (v.get("price.last")) {
     const chg = v.get("price.change");
-    nowParts.push("The last price is " + v.show("price.last") + (chg ? ", " + v.show("price.change") + " from the previous close" : "") + ".");
+    const closed = v.get("price.last").label === "Last close";
+    const onSession = chg && chg.label === "Change on the session";
+    nowParts.push("The " + (closed ? "last close" : "last price") + " is " + v.show("price.last") + (chg ? ", " + v.show("price.change") + (onSession ? " on the session" : " from the previous close") : "") + ".");
     nowCites.push("price.last");
     if (chg) nowCites.push("price.change");
   }
