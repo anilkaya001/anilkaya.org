@@ -621,6 +621,31 @@ try {
          "the reader who needs the gauge most, and a gauge that appears only on success is " +
          "absent exactly when it is being asked about");
 
+      await new Promise((resolve) => setTimeout(resolve, 60000 - (Date.now() % 60000) + 300));
+      const windowStart = Math.floor(Date.now() / 60000);
+      const inWindow = [];
+      for (let i = 0; i < 10; i++) inWindow.push((await ask({ question: "flood " + i }, auth)).status);
+      const flooded = await ask({ question: "one more?" }, auth);
+      eq(Math.floor(Date.now() / 60000), windowStart,
+         "the eleven questions just sent land inside one minute of the local limiter, which counts in " +
+         "fixed windows aligned to the wall-clock minute; the wait above starts a fresh one, so the " +
+         "ten valid questions earlier in this block (this session's budget too) no longer count");
+      eq(inWindow.join(","), "200,200,200,200,200,200,200,200,200,200",
+         "AI_ASK (wrangler.toml, 10 a minute per member) lets a member ask ten valid questions in a minute");
+      eq(flooded.status, 429,
+         "and refuses the eleventh: this pins the real binding's name, its limit and its wiring, which " +
+         "memberAllowed would silently skip if the binding were renamed or dropped. The window is now " +
+         "spent, so a valid question added after this point is refused. The ten earlier in this block " +
+         "are exactly the budget, so an eleventh there is refused whenever all eleven fall in one " +
+         "minute: put a new one after this block's window has rolled over, or ask as another member");
+      const floodedBody = await flooded.json();
+      eq(floodedBody.error && floodedBody.error.code, "rate_limited",
+         "and the refusal is the JSON error shape with its own code");
+      eq(flooded.headers.get("Retry-After"), "60",
+         "it says when to ask again, one period of the binding");
+      eq(flooded.headers.get("Cache-Control"), "no-store",
+         "and like every API answer it is never cached");
+
       const api = await get("/api/flows/unusual", { headers: { Cookie: "flows_session=" + token } });
       eq(api.status, 200, "an authenticated unusual request succeeds");
       const payload = await api.json();

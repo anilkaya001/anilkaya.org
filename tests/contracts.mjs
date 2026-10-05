@@ -915,6 +915,21 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
     "the pinned workerd supports: past it, wrangler dev silently runs every server suite on an older date than " +
     "production, so the tests stop describing the runtime that serves the site");
 }
+{
+  const toml = read("wrangler.toml");
+  const blocks = toml.split(/^\[\[ratelimits\]\]\s*$/m).slice(1).map((b) => b.split(/^\[/m)[0]);
+  const askBlock = blocks.find((b) => /^name\s*=\s*"AI_ASK"\s*$/m.test(b));
+  assert(askBlock, "wrangler.toml must declare the [[ratelimits]] binding AI_ASK: memberAllowed fails open " +
+    "when env.AI_ASK is absent, so a renamed or dropped binding would turn the Ask flood brake off silently");
+  const simple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(askBlock) || [];
+  const period = (/^const ASK_FLOOD_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
+  assert(simple[1] === "10" && simple[2] === "60" && period === simple[2],
+    `AI_ASK must be 10 questions per 60 s and ASK_FLOOD_PERIOD_S (the Retry-After) must equal its period; ` +
+    `found limit ${simple[1]}, period ${simple[2]}, ASK_FLOOD_PERIOD_S ${period}`);
+  const ids = blocks.map((b) => (/^namespace_id\s*=\s*"(\d+)"\s*$/m.exec(b) || [])[1]);
+  assert(ids.every(Boolean) && new Set(ids).size === ids.length,
+    "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");
+}
 for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
   assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
 }

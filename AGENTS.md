@@ -559,7 +559,16 @@ read: {
   chosen by what the question is about (`askPick`) to the picked facts, with the
   description and headlines inside UNTRUSTED quotes, a line saying what is not known, and
   the rule that quoted text is data. `guardAnswer` is unchanged and validates against the
-  added facts. The answer carries `dossierFacts`.
+  added facts. The answer carries `dossierFacts`. `POST /api/flows/ask` is same-origin
+  only (403), takes `application/json` only (415), reads at most 4,096 bytes
+  (`ASK_BODY_MAX_BYTES`, 413; a pasted question past that is refused, not cut to 400
+  characters) and allows 10 valid questions a minute per member through the `AI_ASK`
+  rate-limit binding, keyed by `memberId(session)` (`shared/flows-access.js`), with
+  `429 rate_limited` and `Retry-After: 60` past it and no D1 trip or model call. The
+  binding is a flood brake and fails open when absent or throwing; money stays on
+  `cappedAi`. `tests/flows-worker-contract.mjs` spends exactly this budget from one
+  session and asserts the eleventh is refused, and `tests/contracts.mjs` holds the
+  binding's name, limit and period to `ASK_FLOOD_PERIOD_S`.
 - `FLOWS_READ_MODE` (`wrangler.toml` [vars], default `on`): `off` makes `read` the
   deterministic reading with no row read and no model call. Anything but `off` means on.
 - Not proven offline: that a real model keeps to these rules. Every test uses scripted
