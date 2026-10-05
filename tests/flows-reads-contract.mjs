@@ -1401,10 +1401,13 @@ class FakeCache {
   const calls = [];
   const realFetch = globalThis.fetch;
   const tape = new Date(Date.now() - 30000).toISOString();
+  let world = null;
   globalThis.fetch = async (input, init) => {
     const u = new URL(input instanceof Request ? input.url : String(input));
     if (u.origin !== "http://vendor.test") return realFetch(input, init);
     calls.push(u.pathname);
+    const shaped = world ? world(u) : undefined;
+    if (shaped !== undefined) return new Response(JSON.stringify(shaped), { headers: { "Content-Type": "application/json" } });
     const data = /\/stock-state$/.test(u.pathname)
       ? { close: "101.5", prev_close: "100", open: "100.5", high: "102", low: "100.1", volume: 1000, market_time: "r", tape_time: tape }
       : [];
@@ -1493,6 +1496,58 @@ class FakeCache {
       ok(fresh.res.status === 200 && fresh.body.held === "chain" && fresh.res.headers.get("X-Chain-Cache") === "hit" && fresh.vendor === 0 &&
         counts.get(B) === spentB,
         "a read inside the copy's TTL is a hit and never consults the limiter");
+
+      const aged = (url, body, ageS) => cache.put(new Request(url), new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=21600",
+          "X-Chain-Stored": String(Math.floor(Date.now() / 1000) - ageS) } }));
+      for (const [route, url, mark] of [
+        ["/api/flows/chain?t=NVDA", "https://flows-chain.internal/NVDA?strategy=both&rank=annualized", "chain"],
+        ["/api/flows/strategy?t=NVDA", "https://flows-strategy.internal/NVDA", "strategy"],
+        ["/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1", "https://flows-strategy.internal/NVDA/2026-10-16?engine=1", "expiry"],
+      ]) {
+        await aged(url, { ticker: "NVDA", held: mark }, 300);
+        const spentA = counts.get(A);
+        const r = await get(A, route);
+        ok(r.res.status === 200 && r.body && r.body.held === mark && r.vendor === 0,
+          `A PLAIN READ PAST THE TTL BY A REFUSED MEMBER SERVES THE KEPT COPY: ${route} with a 300 s old copy, no refresh, 0 vendor calls (${r.res.status}, ${r.vendor})`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Chain-Cache") === "throttled" && Math.abs(Number(r.res.headers.get("X-Chain-Age")) - 300) <= 1 &&
+          r.res.headers.get("Cache-Control") === "no-store",
+          `stamped stale and throttled with its true age of 300 s (${route}: ${r.res.headers.get("X-Chain-Age")})`);
+        eq(counts.get(A), spentA + 1, `and the copy past its TTL asks the limiter once (${route})`);
+      }
+      await aged("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", held: "chain" }, 300);
+      world = (u) => {
+        if (u.pathname.endsWith("/option-contracts")) return { data: [
+          { option_symbol: "NVDA260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60", implied_volatility: "0.28", open_interest: "1200", volume: "340" },
+          { option_symbol: "NVDA260918C00190000", nbbo_bid: "3.20", nbbo_ask: "3.35", implied_volatility: "0.26", open_interest: "950", volume: "400" }] };
+        if (u.pathname.includes("/ohlc/")) return { data: [{ date: "2026-08-25", market_time: "r", close: "183.40" }, { date: "2026-08-24", market_time: "r", close: "180.00" }] };
+        if (u.pathname.endsWith("/stock-state")) return { data: { close: "183.40", prev_close: "179.10", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+        if (u.pathname.endsWith("/info")) return { data: { next_earnings_date: "2026-12-30", announce_time: "premarket", issue_type: "Common Stock" } };
+        return undefined;
+      };
+      const rebuilt = await get(B, "/api/flows/chain?t=NVDA", { UW_NOW: "2026-08-25T18:10:00Z" });
+      world = null;
+      ok(rebuilt.res.status === 200 && rebuilt.res.headers.get("X-Chain-Cache") === "miss" && rebuilt.vendor > 0 && rebuilt.body.held === undefined,
+        `an admitted member's plain read past the TTL is a miss that rebuilds from the vendor (${rebuilt.res.status} ${JSON.stringify(rebuilt.body).slice(0, 120)}, ${rebuilt.res.headers.get("X-Chain-Cache")}, ${rebuilt.vendor} calls)`);
+      const kept = cache.entries.get("https://flows-chain.internal/NVDA?strategy=both&rank=annualized");
+      const keptHeaders = new Headers(kept.headers);
+      eq(keptHeaders.get("Cache-Control"), "max-age=21600", "THE REBUILT COPY IS KEPT SIX HOURS, past its 120 s TTL, so a later refusal has it to serve");
+      ok(Math.abs(Number(keptHeaders.get("X-Chain-Stored")) - Date.now() / 1000) < 5, "stamped with the time it was stored, from which its TTL is measured");
+      const again = await get(B, "/api/flows/chain?t=NVDA");
+      ok(again.res.headers.get("X-Chain-Cache") === "hit" && again.vendor === 0, "and a read inside the 120 s TTL is served from it as an ordinary hit");
+      await aged("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", held: "chain" }, 7 * 3600);
+      refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "a refused member's read when the only copy is past the six-hour keep");
+
+      const tapeA = await get(A, "/api/flows/tape?t=NVDA");
+      ok(tapeA.res.status === 200 && tapeA.vendor === 0 && tapeA.body && tapeA.body.status === "pending",
+        `A TAPE MISS BY A REFUSED MEMBER makes 0 vendor calls and answers pending (${tapeA.res.status} ${JSON.stringify(tapeA.body).slice(0, 80)})`);
+      const tapeB = await get(B, "/api/flows/tape?t=NVDA");
+      ok(tapeB.vendor > 0, `while member B's tape miss reaches the vendor (${tapeB.vendor} calls)`);
+      const cardA = await get(A, "/api/flows/card?t=ZZQQ");
+      ok(cardA.res.status === 200 && cardA.vendor === 0, `an unknown name's card read by a refused member makes no screener call (${cardA.vendor})`);
+      const cardB = await get(B, "/api/flows/card?t=ZZQQ");
+      ok(cardB.vendor === 1, `while member B's classifies the name with one screener call (${cardB.vendor})`);
     } finally {
       delete globalThis.caches;
     }

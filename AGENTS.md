@@ -105,18 +105,25 @@ Browser ──► Cloudflare edge
   a binding whose `run` throws unless it is called from inside `cappedAi`'s
   own lines.
 
-- A member's on-demand vendor reads (`/api/flows/chain`, which the desk reads,
-  `/api/flows/strategy`, and the stock-state quote behind `/api/flows/live`
-  and `/api/flows/now?t=`; the info and index reads run inside the first two)
-  pass `vendorAllowed` on a cache miss: the `MEMBER_VENDOR` rate-limit binding
-  (60 a minute, keyed by `memberId(session)`), then the shared `UW_ONDEMAND`
-  budget. A refusal makes no vendor call and serves the held copy stamped
-  `X-Fresh-State: stale`, `X-Fresh-Reason: throttled`, or, with none held,
-  JSON `429 rate_limited` with `Retry-After: 60` (the quote keeps its
-  `unavailable`/`throttled` body). Both bindings are flood brakes and fail
-  open. The Tier 1 and focus ticks and the dossier never consult
-  `MEMBER_VENDOR`; `tests/flows-reads-contract.mjs` and
-  `tests/flows-dossier-reads.mjs` hold both sides.
+- Every member-facing vendor read passes a per-request `vendorGate(env,
+  session)` where a vendor call would follow: the `MEMBER_VENDOR` rate-limit
+  binding (60 a minute, keyed by `memberId(session)`, consulted at most once
+  per request), then the shared `UW_ONDEMAND` budget per call. It covers
+  `/api/flows/chain` (which the desk reads), `/api/flows/strategy` (the info
+  and index reads run inside both), the stock-state quote behind
+  `/api/flows/live` and `/api/flows/now?t=`, the tape miss, the screener
+  classify behind an unknown name's card, and the dossier fan-out of
+  `/api/flows/dossier`, the summary route's reading and the Ask box (one member
+  token per assembly). A refusal makes no vendor call. Chain and strategy keep
+  their copy six hours (`VENDOR_COPY_KEEP_SECONDS`) and serve it as a hit only
+  inside its 120 s TTL; past the TTL a refused member gets the kept copy
+  stamped `X-Fresh-State: stale`, `X-Fresh-Reason: throttled` with its true
+  `X-Chain-Age`, or, with none kept, JSON `429 rate_limited` with
+  `Retry-After: 60`. The quote keeps its `unavailable`/`throttled` body, the
+  tape answers `pending`, and the dossier's vendor packets go `pending`. Both
+  bindings are flood brakes and fail open. The Tier 1 and focus ticks consult
+  neither; `tests/flows-reads-contract.mjs` and `tests/flows-dossier-reads.mjs`
+  hold both sides.
 
 ### External deployment state
 

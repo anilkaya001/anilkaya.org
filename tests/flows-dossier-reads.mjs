@@ -9,6 +9,7 @@ import { eventRow } from "../shared/flows-events.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client as harnessClient } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
 import { assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
+import { FLOWS_USERNAMES } from "../shared/flows-auth.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -615,18 +616,48 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 }
 
 {
-  const f = world();
+  const [A, B] = FLOWS_USERNAMES;
   const consulted = [];
-  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: false }; } };
-  const get = await client(f.D1, { MEMBER_VENDOR });
+  const ondemand = { n: 0 };
+  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: key !== A }; } };
+  const UW_ONDEMAND = { limit: async () => { ondemand.n++; return { success: true }; } };
+  const f = world();
+  const getA = await client(f.D1, { MEMBER_VENDOR, UW_ONDEMAND }, A);
+  const getB = await client(f.D1, { MEMBER_VENDOR, UW_ONDEMAND }, B);
   stub.reset();
   dropHot();
-  const a = await get("/api/flows/dossier?t=EXMP");
+  const a = await getA("/api/flows/dossier?t=EXMP");
   await a.settle();
-  eq(a.res.status, 200, "MEMBER VENDOR SCOPE: with the member limiter refusing everything, the dossier route still answers 200");
-  ok(vendorCallsMade() === 8 && a.body.dossier.coverage.pending === 0,
-    `and completes cold with its 8 vendor calls (${vendorCallsMade()}, ${a.body.dossier.coverage.pending} pending)`);
-  eq(consulted.length, 0, "the dossier's fan-out and its quote are metered by UW_ONDEMAND alone and never consult MEMBER_VENDOR");
+  eq(a.res.status, 200, "MEMBER VENDOR: a cold dossier read by member A past A's window still answers 200");
+  eq(vendorCallsMade(), 0, "A REFUSED MEMBER'S DOSSIER MAKES 0 VENDOR CALLS (" + vendorCallsMade() + ")");
+  eq(a.res.headers.get("X-Dossier-Vendor-Calls"), "0", "and says so on its header");
+  ok(a.body.dossier.coverage.pending > 0, "the vendor packets are pending (" + a.body.dossier.coverage.pending + " pending), not failed and not shown as empty");
+  same(consulted, [A], "the member limiter is consulted ONCE for the whole assembly, before the fan-out, keyed by the member");
+  eq(ondemand.n, 0, "and a refused member never spends a token of the shared UW_ONDEMAND budget");
+  eq(storedKinds(f).length, 0, "nothing is written to flows_dossier_cache from a refused assembly");
+  ok(!cache.store.has("https://flows-dossier.internal/assembled/EXMP"), "and no 30-second assembled copy is kept, so the next member is not handed A's pending packets");
+
+  consulted.length = 0;
+  stub.reset();
+  dropHot();
+  const b = await getB("/api/flows/dossier?t=EXMP");
+  await b.settle();
+  ok(b.res.status === 200 && vendorCallsMade() === 8 && b.body.dossier.coverage.pending === 0,
+    "MEMBER B IS SERVED while A is refused: B's cold read makes its 8 vendor calls with 0 pending (" + vendorCallsMade() + ", " + b.body.dossier.coverage.pending + ")");
+  same(consulted, [B], "one member token for B's whole assembly, however many vendor calls it makes");
+  eq(ondemand.n, 8, "and one shared UW_ONDEMAND token per vendor call, as before");
+
+  const g = world();
+  const sumA = await client(g.D1, { MEMBER_VENDOR, UW_ONDEMAND, FLOWS_READ_MODE: "on" }, A);
+  consulted.length = 0;
+  stub.reset();
+  dropHot();
+  const s = await sumA("/api/flows/summary?t=EXMP");
+  await s.settle();
+  ok(s.res.status === 200 && s.body && s.body.read && typeof s.body.read.status === "string",
+    "THE SUMMARY ROUTE'S READING for a refused member still answers, with a read field (" + (s.body && s.body.read && s.body.read.status) + ")");
+  eq(vendorCallsMade(), 0, "and its dossier makes 0 vendor calls for a refused member");
+  ok(consulted.length >= 1 && consulted.every((k) => k === A), "the reading's assembly is metered under A's key (" + consulted.join(",") + ")");
 }
 
 restoreClock();

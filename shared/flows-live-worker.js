@@ -1065,7 +1065,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
 const TAPE_ROW_SQL = "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?";
 const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
 
-export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
+export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null, allowed = () => ondemandAllowed(env) }) {
   const db = env.DB;
   const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
   const keyed = [db.prepare(TAPE_ROW_SQL).bind(ticker)];
@@ -1110,7 +1110,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const release = () => db.prepare("UPDATE flows_tape SET refreshing_until = NULL WHERE ticker = ?").bind(ticker).run();
   const refresh = async () => {
     try {
-      if (!(await ondemandAllowed(env))) { await release(); return { throttled: true }; }
+      if (!(await allowed())) { await release(); return { throttled: true }; }
       const fresh = await refreshTape(env, ticker, now, { fetchVendor,
         heldText: hasPayload ? row.payload : null, heldLegs: row ? row.legs : 0 });
       if (!fresh) { await release(); return null; }
