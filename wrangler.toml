@@ -13,6 +13,9 @@ run_worker_first = ["/*", "!/assets/*"]
 enabled = true
 head_sampling_rate = 1
 
+[observability.traces]
+enabled = false
+
 [[d1_databases]]
 binding = "DB"
 database_name = "iewt"

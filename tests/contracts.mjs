@@ -938,6 +938,31 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
   assert(ids.every(Boolean) && new Set(ids).size === ids.length,
     "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");
 }
+{
+  const credentialInUrl = [
+    ["scripts/flows-ws-probe.mjs", /searchParams\.set\("token", token\)/],
+    ["shared/flows-rt.js", /channels: Object\.freeze\(\["price:<T>"/],
+  ].filter(([file, pattern]) => pattern.test(read(file))).map(([file]) => file);
+  assert(credentialInUrl.length === 2,
+    "the traces anchor no longer matches: the vendor socket probe put the key in the socket URL's query and " +
+    "RT_UPSTREAM named the socket channels a Worker upstream would open the same way; if neither holds any more, " +
+    "retire this block with that reason rather than loosening it, found " + JSON.stringify(credentialInUrl));
+  const tables = read("wrangler.toml").split(/^(?=\[)/m).map((chunk) => ({
+    name: ((/^\[\[?([^\]]+)\]\]?\s*$/m.exec(chunk) || [])[1] || "").trim(),
+    body: chunk.replace(/^[^\n]*\n?/, ""),
+  }));
+  const logs = tables.find((t) => t.name === "observability");
+  const traces = tables.find((t) => t.name === "observability.traces");
+  assert(logs && /^enabled\s*=\s*true\s*$/m.test(logs.body) && !/^traces\b/m.test(logs.body),
+    "wrangler.toml keeps [observability] enabled = true (invocation logs stay on) and sets traces only in its own table");
+  assert(traces && /^enabled\s*=\s*false\s*$/m.test(traces.body),
+    "wrangler.toml must declare [observability.traces] enabled = false explicitly: Cloudflare has announced that " +
+    "observability.enabled = true will switch on automatic tracing by default, and a fetch span records url.full " +
+    "and url.query, so the vendor key in a socket URL's query would be written into the account's trace store the " +
+    "day the default lands; an explicit false holds the choice whatever the default becomes");
+  assert(!/^(head_sampling_rate|persist)\s*=/m.test(traces.body),
+    "[observability.traces] carries only the off switch: a sampling rate or persist beside it would read as half-enabled");
+}
 for (const file of ["assets/js/lab-ui.js", "assets/js/gamify.js"]) {
   assert(read(file).includes('document.readyState === "loading"'), `${file}: must initialize when DOMContentLoaded is delayed`);
 }
