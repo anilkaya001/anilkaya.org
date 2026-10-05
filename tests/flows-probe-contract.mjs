@@ -517,12 +517,13 @@ const mini = probe.validateList({
     "/api/stock/{ticker}/spot-exposures": ["start_time"],
     "/api/option-trades/flow-alerts": ["start_time", "end_time", "iv_start", "iv_end"],
     "/api/etfs/{ticker}/holdings": ["type", "weight"],
+    "/api/institution/{ticker}/ownership": ["units_changed"],
   };
   for (const [op, names] of Object.entries(reads)) {
     const documented = new Set(list.expect[op] || []);
     const undocumented = names.filter((n) => !documented.has(n));
     ok(undocumented.every((n) => (SEEN_OUTSIDE_SPEC[op] || []).includes(n)),
-      `${op}: every name the code reads is one the spec documents, or one the 2026-09-23 probe saw arrive ` +
+      `${op}: every name the code reads is one the spec documents, or one a probe run saw arrive (2026-09-23; units_changed in the 2026-10-04 weekly run, 37223455933) ` +
       `(${undocumented.join(", ") || "none outside the spec"})`);
   }
   deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/companies/{ticker}/profile": 403, "/api/companies/{ticker}/earnings-estimates": 403,

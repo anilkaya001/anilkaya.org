@@ -1241,6 +1241,9 @@ export function buildPositioningPacket(inp) {
       rec.fact("inst.change", "Net change in their shares since the prior report", own.change, "shares", { signed: true, grade: 2 });
       rec.fact("inst.up", "Holders that added", own.up, "count", { grade: 2, silent: true });
       rec.fact("inst.down", "Holders that trimmed", own.down, "count", { grade: 2, silent: true });
+    } else {
+      const reason = why("absent", "no holder row carries units_changed, units_change or two historical_units");
+      for (const k of ["inst.change", "inst.up", "inst.down"]) rec.hold(k, reason);
     }
     own.top.slice(0, 3).forEach((t, i) => {
       if (t.n) rec.say("holder" + (i + 1), "note", t.n + " holds " + showValue(t.u, "shares") + (isNum(t.dU) ? ", changed by " + showValue(t.dU, "shares", { signed: true }) : ""), own.reportDate, "UW institutional ownership", 120);

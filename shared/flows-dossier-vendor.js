@@ -30,11 +30,15 @@ export const DOSSIER_READS = Object.freeze({
   [VENDOR_OPS.analysts]: ["ticker", "timestamp", "firm", "action", "recommendation", "target"],
   [VENDOR_OPS.earnings]: ["report_date", "report_time", "source", "expected_move_perc", "post_earnings_move_1d", "post_earnings_move_1w",
     "pre_earnings_move_1w", "long_straddle_1d", "long_straddle_1w"],
-  [VENDOR_OPS.ownership]: ["name", "short_name", "units", "units_change", "report_date", "shares_outstanding"],
+  [VENDOR_OPS.ownership]: ["name", "short_name", "units", "units_changed", "units_change", "historical_units", "report_date", "shares_outstanding"],
   [VENDOR_OPS.short]: ["market_date", "short_interest", "total_float", "days_to_cover"],
   [VENDOR_OPS.insiders]: ["date", "buy_sell", "transactions", "uniq_insiders", "volume", "premium"],
   [VENDOR_OPS.news]: ["created_at", "headline", "source", "sentiment", "is_major", "tickers"],
   [VENDOR_OPS.levels]: ["date", "price", "dark_pool_volume", "regular_volume"],
+});
+
+export const WIRE_RENAMES = Object.freeze({
+  [VENDOR_OPS.ownership]: Object.freeze({ units_change: "units_changed" }),
 });
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -220,6 +224,13 @@ export function reduceAnalysts(raw, ticker) {
   return { ok: true, newest: rows[0].ts, rows };
 }
 
+function unitsChange(r, u) {
+  const hist = arr(r.historical_units);
+  const prior = hist.length >= 2 ? vnum(hist[1]) : null;
+  const derived = u !== null && prior !== null ? u - prior : null;
+  return vnum(r.units_changed) ?? vnum(r.units_change) ?? derived;
+}
+
 export function reduceOwnership(raw) {
   const list = rowsOf(raw);
   if (list === null) return fail("unshaped");
@@ -227,7 +238,7 @@ export function reduceOwnership(raw) {
   const rows = list.map((r) => ({
     n: [r.short_name, r.name].map((x) => cleanLabel(x, 28)).find(Boolean) || null,
     u: vnum(r.units),
-    dU: vnum(r.units_change),
+    dU: unitsChange(r, vnum(r.units)),
     rd: isoDay(typeof r.report_date === "string" ? r.report_date : ""),
     so: vnum(r.shares_outstanding),
   })).filter((r) => r.u !== null);

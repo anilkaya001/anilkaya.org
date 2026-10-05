@@ -177,7 +177,7 @@
     "/api/stock/{ticker}/fundamental-breakdown": ["rev_breakdown", "report_date", "rev_group", "members", "value", "field"],
     "/api/companies/{ticker}/earnings-estimates": ["estimates", "date", "horizon", "eps_estimate_average", "eps_estimate_high", "eps_estimate_low", "eps_estimate_analyst_count", "revenue_estimate_average", "revenue_estimate_analyst_count"],
     "/api/screener/analysts": ["ticker", "timestamp", "firm", "action", "recommendation", "target"],
-    "/api/institution/{ticker}/ownership": ["name", "short_name", "units", "units_change", "report_date", "filing_date", "shares_outstanding", "value"],
+    "/api/institution/{ticker}/ownership": ["name", "short_name", "units", "units_changed", "historical_units", "report_date", "filing_date", "shares_outstanding", "value"],
     "/api/shorts/{ticker}/interest-float/v2": ["market_date", "short_interest", "total_float", "days_to_cover"],
     "/api/insider/{ticker}/ticker-flow": ["date", "buy_sell", "transactions", "uniq_insiders", "volume", "premium"],
     "/api/stock/{ticker}/info": ["full_name", "sector", "issue_type", "marketcap", "avg30_volume", "beta", "has_options", "has_dividend", "has_earnings_history", "next_earnings_date", "announce_time", "short_description"],
