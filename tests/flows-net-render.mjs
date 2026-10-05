@@ -159,7 +159,9 @@ const overlaps = (boxes) => {
 const RESID_ORDER = ["s:~", "s:none", "s:unread", "s:wait"];
 const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; }));`);
 async function ranked(page, tag, axis = "y") {
-  const L = await layout(page);
+  return rankedL(await layout(page), tag, axis);
+}
+function rankedL(L, tag, axis = "y") {
   L.forEach((layer, li) => {
     const screen = [...layer].sort((a, b) => a[axis] - b[axis]);
     deep(screen.map((d) => d.id), layer.map((d) => d.id), `layer ${li} reads in rank order ${axis === "y" ? "top to bottom" : "left to right"} on screen (${tag})`);
@@ -281,6 +283,7 @@ try {
     deep(Object.fromEntries(lit), { "n:NVDA": 1, "s:tech": 1, "i:ca": 1, "o:bull": 1, "n:MSFT": 0, "s:energy": 0, "n:SPY": 0 },
       "HOVERING A NAME lights its whole subgraph (its sector, its sides, its leans) and dims every other name and sector");
     const tip = await page.evaluate(() => { const t = document.querySelector("#uaNet .fn-tip"); return { hidden: t.hidden, text: t.textContent }; });
+    ok(/each layer ranked by premium, largest at the top, leftover buckets last\./.test(await page.evaluate(() => document.querySelector("#uaNet .fn-lede").textContent)), "the lede states the ranking rule the screen follows: largest at the top, leftover buckets last");
     ok(!tip.hidden && /NVDA/.test(tip.text) && /of flagged premium/.test(tip.text) && /Open NVDA/.test(tip.text), `and the tooltip lists its premium and share (${tip.text})`);
     const sizeOf = (pred) => flow.rows.filter(pred).reduce((s, r) => s + r.size, 0).toLocaleString("en-US");
     ok(tip.text.includes(sizeOf((r) => r.t === "NVDA") + " contracts"), `a name's tooltip shows the contracts its windows carry (${sizeOf((r) => r.t === "NVDA")})`);
@@ -292,6 +295,25 @@ try {
     await page.mouse.move(5, 5);
     await page.waitForTimeout(300);
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
+
+    await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(400);
+    const pinned = await page.evaluate(() => {
+      const st = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(), t = document.querySelector("#uaNet .fn-tip"), r = t.getBoundingClientRect();
+      return { hidden: t.hidden, text: t.textContent, pressed: document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').getAttribute("aria-pressed"), x: r.left - st.left, y: r.top - st.top, w: r.width, h: r.height };
+    });
+    const pl = await net(page, `const l = net.labels(); return { nvda: l.find((b) => b.id === "n:NVDA"), tech: l.find((b) => b.id === "s:tech"), lit: net.node("n:NVDA").lit, sph: net.node("n:NVDA") };`);
+    const meets = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) > 0 && Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) > 0;
+    ok(pinned.pressed === "true" && !pinned.hidden && /Tech/.test(pinned.text) && pl.lit === 1, `pinning Tech shows its tooltip and lights NVDA, its largest member (${pinned.text.slice(0, 30)})`);
+    ok(!meets(pinned, pl.nvda) && !meets(pinned, { x: pl.sph.x - pl.sph.r, y: pl.sph.y - pl.sph.r, w: 2 * pl.sph.r, h: 2 * pl.sph.r }), `THE TOOLTIP CLEARS THE LIT SUBGRAPH: it covers neither NVDA's label nor its sphere (tip ${[pinned.x, pinned.y, pinned.w, pinned.h].map(Math.round)}, NVDA ${[pl.nvda.x, pl.nvda.y, pl.nvda.w, pl.nvda.h].map(Math.round)})`);
+    ok(!meets(pinned, pl.tech), "nor Tech's own label");
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.mouse.move(5, 5);
+    await page.waitForTimeout(200);
+    eq(await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').getAttribute("aria-pressed")), "false", "a second click releases the pin");
+    await page.evaluate(() => document.activeElement.blur());
 
     await page.hover("#uaNet tbody tr:first-child td:nth-child(3)");
     await page.waitForTimeout(250);
@@ -346,18 +368,18 @@ try {
     eq(after.key, before, "a keyboard reader inside the table keeps their row when a new window rebuilds it");
     ok(after.shown === 24 && after.more === "true", "and an opened table stays open");
 
-    await page.evaluate(() => { document.activeElement.blur(); window.scrollTo({ top: 0, behavior: "instant" }); });
-    await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running, null, { timeout: 5000 }).catch(() => {});
+    await page.evaluate(() => { document.activeElement.blur(); window.scrollTo({ top: 0, behavior: "instant" }); document.querySelector("#uaNet .fn-stage").scrollIntoView({ block: "start", behavior: "instant" }); });
+    await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running, null, { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(300);
     const y0 = await net(page, `return [net.node("n:MSFT").y, net.node("n:NVDA").y];`);
     const big = { ...more, rows: [{ ...flow.rows[0], t: "MSFT", oc: "MSFT-big", spanStart: "2026-09-29T18:39:00.000Z", prem: 60000000, askPrem: 50000000, bidPrem: 5000000, size: 200000 }, ...more.rows] };
-    await net(page, `net.take(arg, { state: "ok" }); return null;`, big);
-    const y1 = await net(page, `return [net.node("n:MSFT").y, net.model().layers[2][0].id];`);
+    await page.route("**/api/flows/flowalerts", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(big) }));
+    const y1 = await net(page, `net.take(arg, { state: "ok" }); return [net.node("n:MSFT").y, net.model().layers[2][0].id];`, big);
     eq(y1[1], "n:MSFT", "new data reorders the name layer in the model at once");
     await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), a = n.node("n:MSFT"), b = n.node("n:NVDA"), c = n.node("n:SPY"); return a.y < b.y - 20 && b.y < c.y - 20; }, null, { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(600);
-    const y2 = await net(page, `return [net.node("n:MSFT").y, net.node("n:NVDA").y];`);
-    ok(y2[0] < y2[1] && y0[0] > y0[1], `and on screen MSFT rises above NVDA (${y0.map(Math.round)} to ${y2.map(Math.round)})`);
+    const y2 = await net(page, `const s = net.stats(), r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return [net.node("n:MSFT").y, net.node("n:NVDA").y, s.frames, s.running, Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + innerHeight + (document.activeElement ? " focus " + document.activeElement.tagName : "")];`);
+    ok(y2[0] < y2[1] && y0[0] > y0[1], `and on screen MSFT rises above NVDA (${y0.map(Math.round)} to ${y2.slice(0, 2).map(Math.round)}; ${y2[2]} frames, running ${y2[3]}, stage ${y2[4]})`);
     ok(Math.abs(y1[0] - y2[0]) > 20, `gliding there rather than jumping (${Math.round(y0[0])}, then ${Math.round(y1[0])} as the data lands, then ${Math.round(y2[0])})`);
     await ranked(page, "after new data reordered the names");
 
@@ -396,7 +418,13 @@ try {
     await ctx.close();
   }
 
-  for (const width of [320, 390, 1440]) {
+  const sweep = (page, pts) => net(page, `return arg.map(([y, p]) => { net.orbit(y, p); const c = net.camera(), s = net.stats(), m = net.model();
+    const cv = document.querySelector("#uaNet canvas"), g = cv.getContext("2d"), k = cv.width / s.w, nv = net.labels().find((l) => l.id === "n:NVDA");
+    const px = nv ? [...g.getImageData(Math.round((nv.x + 4) * k), Math.round((nv.y + nv.h / 2) * k), 1, 1).data] : null;
+    return { y, p, yaw: c.yaw, pitch: c.pitch, w: s.w, h: s.h, labels: net.labels(), px,
+      layout: m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; })) }; });`, pts);
+  const lin = (a, n) => Array.from({ length: n }, (_, i) => -a + 2 * a * i / (n - 1));
+  for (const width of [320, 390, 700, 768, 1024, 1280, 1440]) {
     const { ctx, page } = await mount(browser, { width, height: 1400 });
     for (const mode of ["lean", "dte"]) {
       await net(page, `net.mode(arg); return null;`, mode);
@@ -407,17 +435,32 @@ try {
       });
       ok(box.sw <= box.iw, `no horizontal overflow at ${width}px in ${mode} (${box.sw} of ${box.iw})`);
       ok(box.stage[0] >= box.card[0] - 0.5 && box.stage[1] <= box.card[1] + 0.5, `the stage stays inside its card at ${width}px`);
-      const cam = await camera(page), [ly, lp] = cam.limits;
-      for (const [y, p] of [cam.rest, [-ly, lp], [ly, -lp], [-ly, -lp], [ly, lp], [0, 0]]) {
-        await net(page, "net.orbit(arg[0], arg[1]); return null;", [y, p]);
-        const s = await stats(page);
-        const labels = await net(page, "return net.labels();");
-        const at = `${width}px, ${mode}, yaw ${Math.round(y)}, pitch ${Math.round(p)}`;
-        ok(labels.length === s.layers.reduce((a, b) => a + b, 0), `every node is labelled at ${at}`);
-        const outside = labels.filter((l) => l.x < -1 || l.y < -1 || l.x + l.w > s.w + 1 || l.y + l.h > s.h + 1).map((l) => l.id + " " + [l.x, l.y, l.w, l.h].map(Math.round).join(",") + " in " + s.w + "x" + s.h);
-        deep(outside, [], `no label leaves the canvas at ${at}`);
-        deep(overlaps(labels), [], `no two labels collide at ${at}`);
-        await ranked(page, at, width < 560 ? "x" : "y");
+      const cam = await camera(page), [ly, lp] = cam.limits, grid = [cam.rest];
+      for (const y of lin(ly, 9)) for (const p of lin(lp, 5)) grid.push([y, p]);
+      grid.push([-ly, cam.rest[1]], [ly, cam.rest[1]], cam.rest);
+      const seen = await sweep(page, grid);
+      let caps = 0;
+      for (const r of seen) {
+        const at = `${width}px, ${mode}, asked yaw ${Math.round(r.y)} pitch ${Math.round(r.p)}, at ${r.yaw.toFixed(1)}, ${r.pitch.toFixed(1)}`;
+        const nodes = r.labels.filter((l) => !l.id.startsWith("cap:"));
+        caps += r.labels.length - nodes.length;
+        ok(nodes.length === r.layout.flat().length, `every node is labelled at ${at}`);
+        const outside = r.labels.filter((l) => l.x < -1 || l.y < -1 || l.x + l.w > r.w + 1 || l.y + l.h > r.h + 1).map((l) => l.id + " " + [l.x, l.y, l.w, l.h].map(Math.round).join(",") + " in " + r.w + "x" + r.h);
+        deep(outside, [], `no label or caption leaves the canvas at ${at}`);
+        deep(overlaps(r.labels), [], `no two labels or captions collide at ${at}`);
+        ok(Math.abs(r.yaw) <= ly + 1e-9 && Math.abs(r.pitch) <= lp + 1e-9, `the camera stays inside its limits at ${at}`);
+        rankedL(r.layout, at, width < 560 ? "x" : "y");
+      }
+      ok(caps >= seen.length * 2, `the layer captions are in the collision set (${caps} caption boxes over ${seen.length} angles)`);
+      const named = (r) => r.labels.filter((l) => /^[sn]:/.test(l.id));
+      if (width === 768) deep(named(seen[0]).filter((l) => l.form === "short").map((l) => l.id), [], `at 768px at rest every sector and name label shows its premium (${mode})`);
+      if (width === 1440) {
+        const [left, right] = seen.slice(-3, -1);
+        ok(Math.abs(left.yaw + ly) < 1e-6 && Math.abs(right.yaw - ly) < 1e-6, `at 1440px the reader reaches both yaw limits (${left.yaw}, ${right.yaw})`);
+        for (const r of [seen[0], left, right]) {
+          deep(named(r).filter((l) => l.form === "short").map((l) => l.id), [], `at 1440px every sector and name label shows its premium at yaw ${Math.round(r.yaw)} (${mode})`);
+          ok(r.px && r.px[0] < 40 && r.px[1] < 40 && r.px[2] < 48, `the pixel just left of NVDA's rank numeral is the dark chip, not a ribbon, at yaw ${Math.round(r.yaw)} (${r.px})`);
+        }
       }
       await net(page, "net.recentre(); return null;");
       await page.waitForTimeout(2200);
@@ -459,7 +502,7 @@ try {
     ok(Math.abs(c.yaw + 55) < 1e-6 && Math.abs(c.pitch + 22) < 1e-6, `and the other way (${c.yaw}, ${c.pitch})`);
     await net(page, "net.orbit(-55, arg); return null;", c0.rest[1]);
     await shot(page, "net-1440-orbit-left", "net");
-    await net(page, "net.orbit(0, 10); return null;");
+    await net(page, "net.orbit(-40, 10); return null;");
     const b = await stageBox(page);
     await page.mouse.move(b.x + b.w * 0.5, b.y + 20);
     await page.mouse.down();
@@ -544,6 +587,17 @@ try {
     const sy1 = await page.evaluate(() => scrollY), c2 = await camera(page);
     ok(sy1 > sy0 + 50, `a vertical touch drag still scrolls the page (${sy0} to ${sy1})`);
     ok(c2.yaw === c1.yaw && c2.pitch === c1.pitch, `without turning the network, which under reduced motion moves only when dragged (yaw ${c1.yaw.toFixed(2)} then ${c2.yaw.toFixed(2)})`);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await page.waitForTimeout(200);
+    await touch(150, 10);
+    const c3 = await camera(page);
+    ok(c3.yaw !== c0.yaw, `another horizontal touch drag turns it again (yaw ${c3.yaw.toFixed(1)})`);
+    const hb = await page.evaluate(() => { const h = document.querySelector("#uaNet .fn-home"); h.scrollIntoView({ block: "center", behavior: "instant" }); const r = h.getBoundingClientRect(); return { x: r.left + r.width / 2 + 14, y: r.top + r.height / 2 + 14 }; });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [hb] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.waitForFunction((y) => window.FlowsUI.net.of(document.getElementById("uaNet")).camera().yaw !== y, c3.yaw, { timeout: 3000 }).catch(() => {});
+    const c4 = await camera(page);
+    deep([c4.yaw, c4.pitch], c0.rest, `THE FIRST TAP ON RECENTRE AFTER A TOUCH DRAG RECENTRES (yaw ${c3.yaw.toFixed(1)} to ${c4.yaw.toFixed(1)})`);
     await net(page, "net.orbit(arg[0], arg[1]); return null;", c0.rest);
     await ranked(page, "390px rows", "x");
     deep(page.errors, [], "nothing threw on touch");
@@ -645,6 +699,18 @@ try {
     eq(u.ct.far, null, "an expiry with only a zero-size window shows none");
     eq(u.ct.w1, null, "an expiry holding the unknown-size window shows none");
     deep(u.rank.names, ["R#1", "S#2", "Q#3", "Other names"], "names rank by premium, ties broken by id, with rank numerals, and Other names last");
+    const tiny = await page.evaluate((flow) => [0, 20, 40].map((w) => {
+      const host = document.createElement("div");
+      host.style.cssText = "width:" + w + "px;overflow:hidden";
+      document.body.append(host);
+      try {
+        const n = window.FlowsUI.net.mount(host, { universe: false });
+        n.take(flow, { state: "ok" });
+        n.orbit(40, 20);
+        return w + ":" + n.stats().layers.join("-") + ":" + (n.camera().zoom > 0);
+      } catch (e) { return w + ":threw " + e; }
+    }), alerts());
+    ok(tiny.every((t) => /^\d+:\d+-\d+-\d+-\d+:true$/.test(t)), `mounting in a host 0, 20 or 40 px wide draws without throwing, at a positive zoom (${tiny.join(" ")})`);
     deep(u.rank.sectors, ["Energy", "No sector"], "No sector sits below a smaller ranked sector");
     deep(u.rank.out, ["0DTE", "32+ days", "No expiry"], "the expiry layer ranks by premium, and No expiry, its residual, sits last although it carries the most");
     eq(u.ct.w1ok, 52, "an expiry whose every window states its size carries their contracts");
@@ -735,4 +801,4 @@ console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn i
   `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
   `hit targets that follow the camera, back-to-front depth order, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
   `the expiry output, a flare on a new window, pause when hidden or off screen, pending, empty, failed and unread states, ` +
-  `no overflow and no label collision at 320, 390 and 1440 at every extreme angle, and CPU per frame`);
+  `no overflow and no label or caption collision at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host under 60 px, and CPU per frame`);

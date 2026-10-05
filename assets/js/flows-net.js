@@ -260,9 +260,9 @@
     let pn = 0, acc = 0, raf = 0, last = 0, inView = true, focusAmt = 0, focusTarget = 0;
     let hoverId = null, focusId = null, pinId = null, rowLit = null, rove = null, hitAt = 0, tipId = null, TRACE = null;
     const REST = [-15 * DEG, 13 * DEG];
-    const cam = { yaw: REST[0], pitch: REST[1], vy: 0, vp: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, z: 1, ox: 0, oy: 0, zr: 1, lo: 0, hi: 1 };
+    const cam = { yaw: REST[0], pitch: REST[1], vy: 0, vp: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, z: 1, ox: 0, oy: 0, zr: 1, lo: 0, hi: 1, sw: 9 * DEG };
     const G = { HU: 300, HV: 200, ARC: 60, ZC: 0, D: 1600, YF: 260, lw0: 0, lw3: 0, lw: 0, pt: 38, pb: 24, planes: [], tier: [0, 0, 0, 0] };
-    const DRAG = { id: null, on: false, x: 0, y: 0, t: 0, vx: 0, vy: 0, eat: false, tap: 0, tx: 0, ty: 0 };
+    const DRAG = { id: null, on: false, x: 0, y: 0, t: 0, vx: 0, vy: 0, eat: 0, tap: 0, tx: 0, ty: 0 };
     const stats = { frames: 0, ms: 0, last: 0, max: 0, ring: [] };
     const NB = 4, BIN = [], BN = new Int32Array(NB), BM = new Int32Array(NB), BZ = new Float64Array(NB);
     let COL = null, SPR = null, PCOL = null, SPH = new Map();
@@ -284,32 +284,26 @@
 
     let FF = "system-ui, sans-serif", MEAS = null, VERT = false;
     function label(lines, glyph, col, align, chip) {
-      const pad = chip ? 4 : 3, g = glyph ? 13 : 0;
+      const pl = chip || 3, pr = chip ? 5 : 3, pv = chip ? 4 : 3, g = glyph ? 13 : 0;
       const m = MEAS || (MEAS = document.createElement("canvas").getContext("2d"));
-      let w = 0, hh = pad * 2;
+      let w = 0, hh = pv * 2;
       lines.forEach((l, i) => {
         l.w = i === 0 ? g : 0;
         l.r.forEach((r, k) => { m.font = r[1] + " " + FF; m.letterSpacing = r[3] || "0px"; r.w = m.measureText(r[0]).width; l.w += r.w + (k ? 5 : 0); });
         w = Math.max(w, l.w);
         hh += l.lh;
       });
-      const cw = Math.ceil(w + pad * 2 + 2), ch = Math.ceil(hh);
+      const cw = Math.ceil(w + pl + pr), ch = Math.ceil(hh);
       const c = document.createElement("canvas");
       c.width = cw * dpr;
       c.height = ch * dpr;
       const x = c.getContext("2d");
       x.scale(dpr, dpr);
-      if (chip) {
-        x.fillStyle = "rgba(6,8,14,0.62)";
-        x.beginPath();
-        if (x.roundRect) x.roundRect(0.5, 0.5, cw - 1, ch - 1, 6); else x.rect(0.5, 0.5, cw - 1, ch - 1);
-        x.fill();
-      }
       x.lineJoin = "round";
       x.textBaseline = "middle";
-      let y = pad;
+      let y = pv;
       lines.forEach((l, i) => {
-        let tx = pad + (align === "end" ? w - l.w : align === "center" ? (w - l.w) / 2 : 0);
+        let tx = pl + (align === "end" ? w - l.w : align === "center" ? (w - l.w) / 2 : 0);
         const my = y + l.lh / 2;
         if (i === 0 && glyph) {
           const gx = tx + 4.5;
@@ -324,29 +318,35 @@
         l.r.forEach((r) => {
           x.font = r[1] + " " + FF;
           x.letterSpacing = r[3] || "0px";
-          x.strokeStyle = "rgba(6,8,13,0.88)";
-          x.lineWidth = 3.6;
-          x.strokeText(r[0], tx, my);
+          if (!chip) {
+            x.strokeStyle = "rgba(6,8,13,0.88)";
+            x.lineWidth = 3.6;
+            x.strokeText(r[0], tx, my);
+          }
           x.fillStyle = r[2];
           x.fillText(r[0], tx, my);
           tx += r.w + 5;
         });
         y += l.lh;
       });
-      return { c, w: cw, h: ch };
+      return { c, w: cw, h: ch, chip: !!chip };
     }
 
-    function nodeLabel(n, short) {
+    function nodeLabel(n, form) {
       const d = n.d, big = d.layer === 2 && d.ticker;
-      const W1 = "rgba(245,245,247,0.97)", W2 = "rgba(235,235,245,0.6)", W3 = "rgba(235,235,245,0.42)";
+      const W1 = "rgba(245,245,247,0.97)", W2 = "rgba(235,235,245,0.62)";
       const sub = d.layer === 3 ? pct(d.share) + (compact ? "" : " " + MID + " " + money(d.v)) : money(d.v);
       const glyph = d.layer === 3 && d.lean ? LEAN_GLYPH[d.lean] : null;
-      const rank = d.pos ? [String(d.pos), VERT ? "600 9.5px" : "600 11px", W3] : null;
+      const rank = d.pos ? [String(d.pos), VERT ? "600 9.5px" : "600 11px", W2] : null;
       if (VERT) {
         const t = d.id === "n:~" ? "+" + d.members.length + " more" : d.label;
-        return label([{ r: [rank, [t, big ? "650 10.5px" : "600 10px", W1]].filter(Boolean), lh: 12 }, { r: [[sub, "500 9.5px", W2]], lh: 11 }], glyph, n.col, "center", true);
+        return label([{ r: [rank, [t, big ? "650 10.5px" : "600 10px", W1]].filter(Boolean), lh: 12 }, { r: [[sub, "500 9.5px", W2]], lh: 11 }], glyph, n.col, "center", 4);
       }
-      if (d.layer === 1 || d.layer === 2) return label([{ r: [rank, [d.label, big ? "650 13px" : "600 12px", W1], short ? null : [sub, "500 11px", W2]].filter(Boolean), lh: 16 }], null, n.col, "start", true);
+      if (d.layer === 1 || d.layer === 2) {
+        const head = [rank, [d.label, big ? "650 13px" : "600 12px", W1]].filter(Boolean), val = [sub, "500 11px", W2], lp = rank ? 8 : 5;
+        if (form === 1) return label([{ r: head, lh: 15 }, { r: [val], lh: 13 }], null, n.col, "start", lp);
+        return label([{ r: form ? head : head.concat([val]), lh: 16 }], null, n.col, "start", lp);
+      }
       return label([{ r: [[d.label, "600 12.5px", W1]], lh: 16 }, { r: [[sub, "500 11px", W2]], lh: 14 }], glyph, n.col, d.layer === 0 ? "end" : "start");
     }
 
@@ -403,7 +403,7 @@
 
     function paintLede() {
       const bits = ["Where flagged option premium is flowing: from the side of the quote it met, through sector and name, to its " + (mode === "lean" ? "lean" : "expiry") +
-        ", each layer ranked by premium, largest " + (VERT ? "first" : "at the top") + " and Other last. "];
+        ", each layer ranked by premium, largest " + (VERT ? "first" : "at the top") + ", leftover buckets last. "];
       if (M && M.windows) {
         bits.push(h("b", null, money(M.total)), " across " + count(M.windows) + " " + plural(M.windows, "window", "windows") + ", ",
           h("b", null, pct(M.lean.bull / M.total)), " leaning bullish and ", h("b", null, pct(M.lean.bear / M.total)), " bearish by convention. ");
@@ -587,18 +587,37 @@
       tip.hidden = false;
       placeTip();
     }
+    const TB = [0, 0, 0, 0], TQ = [0, 0, 0, 0];
+    const area = (a, b) => Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+    function tipCost() {
+      let k = 0;
+      for (const m of NL) {
+        if (!m.tl && m.id !== tipId) continue;
+        const r = m.cr * m.ps;
+        TQ[0] = m.px - r; TQ[1] = m.py - r; TQ[2] = TQ[3] = r * 2;
+        k += area(TB, m.lb) + area(TB, TQ);
+      }
+      for (const o of CS) k += area(TB, o.lb);
+      return k;
+    }
     function placeTip() {
       if (!tipId || tip.hidden) return;
       const n = N.get(tipId);
       if (!n) return;
-      const tw = tip.offsetWidth, th = tip.offsetHeight;
-      const r = n.cr * n.ps;
-      const lb = n.lb && !VERT && n.lb[0] > n.px ? n.lb[0] + n.lb[2] + 8 : n.px + r + 14;
-      let x = lb, y = n.py - th / 2;
-      if (x + tw > W - 6) x = (n.lb && !VERT && n.lb[0] < n.px ? n.lb[0] : n.px - r) - 10 - tw;
-      x = clamp(x, 6, Math.max(6, W - tw - 6));
-      y = clamp(y, 6, Math.max(6, H - th - 6));
-      tip.style.transform = "translate(" + x.toFixed(0) + "px," + y.toFixed(0) + "px)";
+      const tw = tip.offsetWidth, th = tip.offsetHeight, r = n.cr * n.ps, lb = n.lb;
+      const L = LN[n.d.layer + 1] || [], away = !VERT && n.d.layer === 1 && L.length && L[0].px > n.px;
+      const rx = Math.max(n.px + r, lb[0] > n.px ? lb[0] + lb[2] : 0) + 8, lx = Math.min(n.px - r, lb[0] < n.px ? lb[0] : 1e9) - 8 - tw;
+      const top = Math.min(n.py - r, lb[1]) - 8 - th, bot = Math.max(n.py + r, lb[1] + lb[3]) + 8;
+      let bx = 0, by = 0, bk = 1e18;
+      for (let i = 0; i < 4 && bk > 0; i++) {
+        const c = away ? [1, 0, 2, 3][i] : i;
+        TB[0] = clamp(c === 0 ? rx : c === 1 ? lx : n.px - tw / 2, 6, Math.max(6, W - tw - 6));
+        TB[1] = clamp(c === 2 ? top : c === 3 ? bot : n.py - th / 2, 6, Math.max(6, H - th - 6));
+        TB[2] = tw; TB[3] = th;
+        const k = tipCost();
+        if (k < bk) { bk = k; bx = TB[0]; by = TB[1]; }
+      }
+      tip.style.transform = "translate(" + bx.toFixed(0) + "px," + by.toFixed(0) + "px)";
     }
 
     function rebuild() {
@@ -656,14 +675,16 @@
       size();
       for (const n of NL) {
         n.r = (compact ? 3.6 : 4.6) + (compact ? 10 : 15) * Math.sqrt(n.d.share);
-        n.L = nodeLabel(n, false);
-        n.S = !VERT && (n.d.layer === 1 || n.d.layer === 2) ? nodeLabel(n, true) : n.L;
+        n.L = nodeLabel(n, 0);
+        n.T = n.S = n.L;
+        if (!VERT && (n.d.layer === 1 || n.d.layer === 2)) { n.T = nodeLabel(n, 1); n.S = nodeLabel(n, 2); }
       }
       CAPS = CAPTIONS[mode].map((t) => label([{ r: [[t.toUpperCase(), "650 " + (VERT ? 9 : 10) + "px", "rgba(235,235,245,0.5)", "0.12em"]], lh: 12 }]));
       place();
       for (const n of NL) {
         if (n.born || still) { n.x = n.tx; n.y = n.ty; n.z = n.tz; n.cr = still ? n.r : 0; n.born = false; }
       }
+      settle();
       while (BIN.length < NB) BIN.push(null);
       for (let b = 0; b < NB; b++) if (!BIN[b] || BIN[b].length < cfg.cap * 6) BIN[b] = new Float32Array(cfg.cap * 6);
       ITEMS = NL.map((n) => n.item).concat(E.map((e) => e.item), [0, 1, 2, 3].map((b) => ({ k: 2, o: b, z: 0 })));
@@ -782,7 +803,7 @@
       }
       const pl = VERT ? 22 + G.lw / 2 : G.lw0 + 16, pr = VERT ? 6 + G.lw / 2 : G.lw3 + 14;
       const pb = VERT ? G.pb : 26 + 40 * floorA();
-      const z = Math.min(cam.zr, (W - pl - pr) / Math.max(1, x1 - x0), (H - G.pt - pb) / Math.max(1, y1 - y0));
+      const z = Math.max(0.05, Math.min(cam.zr, (W - pl - pr) / Math.max(1, x1 - x0), (H - G.pt - pb) / Math.max(1, y1 - y0)));
       cam.z = z;
       cam.ox = pl + (W - pl - pr - z * (x1 - x0)) / 2 - z * x0;
       cam.oy = G.pt + (H - G.pt - pb - z * (y1 - y0)) / 2 - z * y0;
@@ -816,10 +837,18 @@
 
     const YAWMAX = () => (VERT ? 30 : 55) * DEG, PMAX = 22 * DEG;
     function turn(yaw, pitch) {
-      const y = clamp(yaw, -YAWMAX(), YAWMAX()), p = clamp(pitch, -PMAX, PMAX);
+      let y = clamp(yaw, -YAWMAX(), YAWMAX()), p = clamp(pitch, -PMAX, PMAX);
       if (y !== yaw) cam.vy = 0;
       if (p !== pitch) cam.vp = 0;
+      const y0 = cam.yaw, p0 = cam.pitch;
+      if (M && NL.length && !fits(y, p) && fits(y0, p0)) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 6; i++) { const m = (lo + hi) / 2; if (fits(y0 + (y - y0) * m, p0 + (p - p0) * m)) lo = m; else hi = m; }
+        y = y0 + (y - y0) * lo; p = p0 + (p - p0) * lo;
+        cam.vy = cam.vp = 0;
+      }
       setCam(y, p);
+      if (M) fit(NL, false);
     }
     function stepCam(dt, now) {
       if (DRAG.on) { cam.idle = now; return; }
@@ -833,7 +862,7 @@
       } else if (cam.user && now - cam.idle > 4500) cam.user = false;
       if (cam.user || (cam.hold && !cam.home)) return;
       const t = now / 1000, k = Math.min(1, dt * (cam.home ? 4.5 : 0.9));
-      const ty = REST[0] + 9 * DEG * Math.sin(t * TAU / 46), tp = REST[1] + 1.8 * DEG * Math.sin(t * TAU / 61);
+      const ty = REST[0] + cam.sw * Math.sin(t * TAU / 46), tp = REST[1] + cam.sw * 0.2 * Math.sin(t * TAU / 61);
       setCam(cam.yaw + (ty - cam.yaw) * k, cam.pitch + (tp - cam.pitch) * k);
       if (Math.abs(ty - cam.yaw) < 0.2 * DEG) cam.home = false;
     }
@@ -1128,44 +1157,21 @@
       for (let i = 0; i < k; i++) { const q = list[i].lb, m = i ? list[i - 1].lb[a] + list[i - 1].lb[s] + 2 : lo; if (q[a] < m) q[a] = m; }
     }
 
-    const SIDES = [[1, 1, 0], [1, 1, 1], [0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1]], NC = new Float64Array(8), LC = new Float64Array(8);
+    const ARR = [[1, 1, 0], [1, 1, 1], [0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 1, 2], [0, 0, 2], [0, 1, 2]];
+    const FORMS = ["L", "T", "S"], CAPO = [0, 1, 2, 3].map((li) => ({ li, lb: [0, 0, 0, 0] })), CS = [];
     const sideOf = (cf, li) => (li === 0 ? 0 : li === 3 ? 1 : cf[li - 1]);
-    function sides() {
-      for (let li = 0; li < 4; li++) {
-        NC[li * 2] = 1e9; NC[li * 2 + 1] = -1e9;
-        for (const n of LN[li]) { const r = n.cr * n.ps; NC[li * 2] = Math.min(NC[li * 2], n.px - r); NC[li * 2 + 1] = Math.max(NC[li * 2 + 1], n.px + r); }
-      }
-      for (const cf of SIDES) {
-        let bad = false;
-        for (let li = 0; li < 4; li++) {
-          const right = sideOf(cf, li);
-          LC[li * 2] = 1e9; LC[li * 2 + 1] = -1e9;
-          for (const n of LN[li]) {
-            const w = (cf[2] ? n.S : n.L).w, r = n.cr * n.ps, x0 = right ? n.px + r + 4 : n.px - r - 6 - w;
-            LC[li * 2] = Math.min(LC[li * 2], x0); LC[li * 2 + 1] = Math.max(LC[li * 2 + 1], x0 + w);
-          }
-          if (LC[li * 2] < 1 || LC[li * 2 + 1] > W - 1) bad = true;
-        }
-        for (let i = 0; i < 4 && !bad; i++) for (let j = 0; j < 4 && !bad; j++) {
-          if (i === j || !LN[i].length || !LN[j].length) continue;
-          if ((LC[i * 2] < LC[j * 2 + 1] + 3 && LC[j * 2] < LC[i * 2 + 1] + 3) || (LC[i * 2] < NC[j * 2 + 1] + 3 && NC[j * 2] < LC[i * 2 + 1] + 3)) bad = true;
-        }
-        if (!bad) return cf;
-      }
-      return SIDES[1];
-    }
-
-    function drawLabels(c, dim) {
-      const cf = VERT ? SIDES[0] : sides();
+    let CF = ARR[0];
+    function lay(cf) {
       for (let li = 0; li < 4; li++) {
         const L = LN[li];
         if (!L.length) continue;
-        const short = cf[2], right = sideOf(cf, li);
+        const right = sideOf(cf, li), form = li === 1 || li === 2 ? cf[2] : 0;
         let row = VERT ? (li === 0 ? 1e9 : -1e9) : 0;
         if (VERT) for (const n of L) row = li === 0 ? Math.min(row, n.py - n.cr * n.ps) : Math.max(row, n.py + n.cr * n.ps);
         for (let j = 0; j < L.length; j++) {
-          const n = L[j], S = short ? n.S : n.L, r = n.cr * n.ps, lb = n.lb;
+          const n = L[j], S = n[FORMS[form]], r = n.cr * n.ps, lb = n.lb;
           n.cur = S;
+          n.form = S === n.L ? 0 : form;
           lb[2] = S.w; lb[3] = S.h;
           if (VERT) {
             const t = G.tier[li] > 1 && j % 2 ? 1 : 0;
@@ -1179,34 +1185,129 @@
         if (VERT) for (const T of LT[li]) spread(T, 0, 20, W - 2);
         else spread(L, 1, 2, H - 2);
       }
-      for (const n of NL) {
-        const lit = n.lit + (1 - n.lit) * (1 - focusAmt), lb = n.lb, r = n.cr * n.ps;
-        c.globalAlpha = Math.max(0.3, (dim + (1 - dim) * lit) * (0.82 + 0.18 * n.fog));
-        const off = VERT ? Math.abs(lb[0] + lb[2] / 2 - n.px) : Math.abs(lb[1] + lb[3] / 2 - n.py);
-        if (off > 4) {
-          c.strokeStyle = "rgba(200,210,235,0.5)";
-          c.lineWidth = 1;
-          c.beginPath();
-          if (VERT) { c.moveTo(n.px, n.py + (lb[1] > n.py ? r : -r)); c.lineTo(lb[0] + lb[2] / 2, lb[1] > n.py ? lb[1] : lb[1] + lb[3]); }
-          else { c.moveTo(n.px + (lb[0] > n.px ? r : -r), n.py); c.lineTo(lb[0] > n.px ? lb[0] : lb[0] + lb[2], lb[1] + lb[3] / 2); }
-          c.stroke();
-        }
-        c.drawImage(n.cur.c, lb[0], lb[1], lb[2], lb[3]);
-      }
-      c.globalAlpha = 1;
-      for (let li = 0; li < 4; li++) {
-        const L = CAPS[li], ns = LN[li];
-        if (!L || !ns.length) continue;
+      CS.length = 0;
+      for (const o of CAPO) {
+        const C = CAPS[o.li], ns = LN[o.li], q = o.lb;
+        if (!C || !ns.length) continue;
         if (VERT) {
           let y = 0;
           for (const n of ns) y += n.py;
-          c.save();
-          c.translate(8, y / ns.length);
-          c.rotate(-Math.PI / 2);
-          c.drawImage(L.c, -L.w / 2, -L.h / 2, L.w, L.h);
-          c.restore();
-        } else c.drawImage(L.c, clamp(ns[0].px - L.w / 2, 2, W - L.w - 2), 8, L.w, L.h);
+          y /= ns.length;
+          q[0] = 8 - C.h / 2; q[1] = y - C.w / 2; q[2] = C.h; q[3] = C.w;
+        } else {
+          const n = ns[0], r = n.cr * n.ps;
+          q[1] = 8; q[2] = C.w; q[3] = C.h;
+          let hit = true;
+          for (const x of [n.px - C.w / 2, sideOf(cf, o.li) ? n.px + r - C.w : n.px - r]) {
+            q[0] = clamp(x, 2, W - C.w - 2);
+            hit = false;
+            for (const m of NL) if (over(q, m.lb)) { hit = true; break; }
+            if (!hit) break;
+          }
+          if (hit) continue;
+        }
+        CS.push(o);
       }
+      if (!VERT && CS.length > 1) {
+        CS.sort((x, y) => x.lb[0] - y.lb[0]);
+        spread(CS, 0, 2, W - 2);
+      }
+    }
+    const over = (a, b) => a[0] < b[0] + b[2] - 0.5 && b[0] < a[0] + a[2] - 0.5 && a[1] < b[1] + b[3] - 0.5 && b[1] < a[1] + a[3] - 0.5;
+    const SB = [0, 0, 0, 0];
+    function clash(stop) {
+      let k = 0;
+      for (let i = 0; i < NL.length; i++) {
+        const a = NL[i].lb;
+        if (a[0] < 0 || a[1] < 0 || a[0] + a[2] > W || a[1] + a[3] > H) k++;
+        for (let j = i + 1; j < NL.length; j++) if (over(a, NL[j].lb)) k++;
+        for (const o of CS) if (over(a, o.lb)) k++;
+        for (const b of NL) {
+          const r = b.cr * b.ps;
+          SB[0] = b.px - r; SB[1] = b.py - r; SB[2] = SB[3] = r * 2;
+          if (over(a, SB)) k++;
+        }
+        if (k >= stop) return k;
+      }
+      for (let i = 0; i < CS.length; i++) for (let j = i + 1; j < CS.length; j++) if (over(CS[i].lb, CS[j].lb)) k++;
+      return k;
+    }
+    let laid = -1;
+    function arrange(test) {
+      if (VERT) { lay(CF = ARR[laid = 0]); return test ? !clash(1) : true; }
+      let best = 0, bk = 1e9;
+      for (let i = 0; i < ARR.length && bk; i++) {
+        lay(ARR[laid = i]);
+        const k = clash(test ? 1 : bk);
+        if (k < bk) { bk = k; best = i; }
+      }
+      if (test) return !bk;
+      if (laid !== best) lay(ARR[laid = best]);
+      CF = ARR[best];
+      return !bk;
+    }
+
+    function drawLabels(c, dim) {
+      if (!LN[0].length && !LN[1].length) return;
+      arrange();
+      c.globalAlpha = 1;
+      c.strokeStyle = "rgba(200,210,235,0.5)";
+      c.lineWidth = 1;
+      c.beginPath();
+      for (const n of NL) {
+        const lb = n.lb, r = n.cr * n.ps;
+        const off = VERT ? Math.abs(lb[0] + lb[2] / 2 - n.px) : Math.abs(lb[1] + lb[3] / 2 - n.py);
+        if (off <= 4) continue;
+        if (VERT) { c.moveTo(n.px, n.py + (lb[1] > n.py ? r : -r)); c.lineTo(lb[0] + lb[2] / 2, lb[1] > n.py ? lb[1] : lb[1] + lb[3]); }
+        else { c.moveTo(n.px + (lb[0] > n.px ? r : -r), n.py); c.lineTo(lb[0] > n.px ? lb[0] : lb[0] + lb[2], lb[1] + lb[3] / 2); }
+      }
+      c.stroke();
+      c.fillStyle = "rgba(6,8,14,0.9)";
+      c.beginPath();
+      for (const n of NL) {
+        const lb = n.lb;
+        if (!n.cur.chip) continue;
+        if (c.roundRect) c.roundRect(lb[0] + 0.5, lb[1] + 0.5, lb[2] - 1, lb[3] - 1, 6); else c.rect(lb[0] + 0.5, lb[1] + 0.5, lb[2] - 1, lb[3] - 1);
+      }
+      c.fill();
+      for (const n of NL) {
+        const lit = n.lit + (1 - n.lit) * (1 - focusAmt), lb = n.lb;
+        c.globalAlpha = Math.max(0.3, (dim + (1 - dim) * lit) * (0.82 + 0.18 * n.fog));
+        c.drawImage(n.cur.c, lb[0], lb[1], lb[2], lb[3]);
+      }
+      c.globalAlpha = 1;
+      for (const o of CS) {
+        const C = CAPS[o.li], q = o.lb;
+        if (VERT) {
+          c.save();
+          c.translate(q[0] + q[2] / 2, q[1] + q[3] / 2);
+          c.rotate(-Math.PI / 2);
+          c.drawImage(C.c, -C.w / 2, -C.h / 2, C.w, C.h);
+          c.restore();
+        } else c.drawImage(C.c, q[0], q[1], C.w, C.h);
+      }
+    }
+
+    function fits(y, p) {
+      setCam(y, p);
+      fit(NL, false);
+      return arrange(true);
+    }
+    function settle() {
+      cam.sw = 0;
+      if (!M || !NL.length) return;
+      const sv = NL.map((n) => [n.x, n.y, n.z, n.cr]), y0 = cam.yaw, p0 = cam.pitch, [ry, rp] = REST;
+      for (const n of NL) { n.x = n.tx; n.y = n.ty; n.z = n.tz; n.cr = n.r; }
+      for (const a of [9, 4.5]) if ([-1, 1].every((k) => fits(ry + k * a * DEG, rp + k * 1.8 * DEG) && fits(ry + k * a * DEG, rp - k * 1.8 * DEG))) { cam.sw = a * DEG; break; }
+      let t = 1;
+      if (!fits(y0, p0) && fits(ry, rp)) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 7; i++) { const m = (lo + hi) / 2; if (fits(ry + (y0 - ry) * m, rp + (p0 - rp) * m)) lo = m; else hi = m; }
+        t = lo;
+      }
+      NL.forEach((n, i) => { [n.x, n.y, n.z, n.cr] = sv[i]; });
+      setCam(ry + (y0 - ry) * t, rp + (p0 - rp) * t);
+      fit(NL, false);
     }
 
     function drawGhosts(c) {
@@ -1218,7 +1319,7 @@
       for (const g of GH) {
         c.fillStyle = "rgba(9,12,20,0.9)";
         c.beginPath();
-        c.arc(g.px, g.py, 7 * g.ps, 0, TAU);
+        c.arc(g.px, g.py, Math.max(0, 7 * g.ps), 0, TAU);
         c.fill();
         c.strokeStyle = "rgba(160,180,220,0.28)";
         c.stroke();
@@ -1337,7 +1438,7 @@
       DRAG.id = null;
       if (DRAG.on) {
         DRAG.on = false;
-        DRAG.eat = true;
+        DRAG.eat = e.timeStamp;
         stage.classList.remove("is-drag");
         const k = Math.exp(-Math.max(0, e.timeStamp - DRAG.t) / 150);
         if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -4, 4); cam.vp = clamp(DRAG.vy * k, -2, 2); }
@@ -1349,8 +1450,9 @@
       }
     };
     stage.addEventListener("pointerdown", (e) => {
+      DRAG.eat = 0;
       if (!M || e.button || e.target === home) return;
-      DRAG.id = e.pointerId; DRAG.on = false; DRAG.eat = false;
+      DRAG.id = e.pointerId; DRAG.on = false;
       DRAG.x = e.clientX; DRAG.y = e.clientY; DRAG.t = e.timeStamp; DRAG.vx = DRAG.vy = 0;
       cam.vy = cam.vp = 0;
     });
@@ -1376,7 +1478,7 @@
     stage.addEventListener("pointerup", done);
     stage.addEventListener("pointercancel", done);
     stage.addEventListener("lostpointercapture", done);
-    stage.addEventListener("click", (e) => { if (DRAG.eat) { DRAG.eat = false; e.preventDefault(); e.stopPropagation(); } }, true);
+    stage.addEventListener("click", (e) => { const t = DRAG.eat; DRAG.eat = 0; if (t && e.timeStamp - t < 300) { e.preventDefault(); e.stopPropagation(); } }, true);
     stage.addEventListener("dragstart", (e) => e.preventDefault());
     stage.addEventListener("dblclick", (e) => { if (e.target !== home) recentre(); });
     home.addEventListener("click", recentre);
@@ -1427,11 +1529,11 @@
         times.sort((a, b) => a - b);
         return { median: times[times.length >> 1], p90: times[Math.floor(times.length * 0.9)], mean: times.reduce((a, b) => a + b, 0) / times.length, pulses: pn, edges: E.length + MESH.length };
       },
-      camera: () => ({ yaw: cam.yaw / DEG, pitch: cam.pitch / DEG, rest: REST.map((x) => x / DEG), limits: [VERT ? 30 : 55, 22], auto: !cam.user, spin: Math.hypot(cam.vy, cam.vp) / DEG, zoom: cam.z }),
+      camera: () => ({ yaw: cam.yaw / DEG, pitch: cam.pitch / DEG, rest: REST.map((x) => x / DEG), limits: [VERT ? 30 : 55, 22], sway: cam.sw / DEG, auto: !cam.user, spin: Math.hypot(cam.vy, cam.vp) / DEG, zoom: cam.z }),
       orbit: (yaw, pitch) => { cam.vy = cam.vp = 0; orbit((yaw * DEG - cam.yaw) / (0.32 * DEG), (pitch * DEG - cam.pitch) / (0.22 * DEG)); paint(); return api.camera(); },
       recentre,
       paints: () => { TRACE = []; if (!COL) colors(); draw(); const o = TRACE; TRACE = null; return o; },
-      labels: () => NL.map((n) => ({ id: n.id, x: n.lb[0], y: n.lb[1], w: n.lb[2], h: n.lb[3] })),
+      labels: () => NL.map((n) => ({ id: n.id, x: n.lb[0], y: n.lb[1], w: n.lb[2], h: n.lb[3], form: ["line", "two", "short"][n.form || 0] })).concat(CS.map((o) => ({ id: "cap:" + o.li, x: o.lb[0], y: o.lb[1], w: o.lb[2], h: o.lb[3] }))),
       node: (id) => { const n = N.get(id); return n ? { x: n.px, y: n.py, r: n.cr * n.ps, z: n.pz, lit: n.tl, label: n.d.label, v: n.d.v } : null; },
     };
     NETS.set(host, api);
