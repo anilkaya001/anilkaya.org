@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import vm from "node:vm";
 import { INTERVAL_DAYS, applySkillMastery, selectWeakestSkills } from "../shared/skill-mastery.js";
 import { SKILL_IDS } from "../shared/skill-manifest.js";
 import { COURSE_STAGE_BY_ID } from "../shared/stage-manifest.js";
 import { PROJECT_BY_ID } from "../shared/project-manifest.js";
+import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
+import * as FLOWS_DOSSIER from "../shared/flows-dossier-worker.js";
 
 const root = new URL("../", import.meta.url);
 const read = (file) => readFileSync(new URL(file, root), "utf8");
@@ -85,7 +88,6 @@ const migration = read("migrations/0002_learning_v3.sql");
 for (const table of ["progress_v3", "skill_mastery", "skill_attempts", "learning_preferences", "project_progress"]) assert(migration.includes(`CREATE TABLE IF NOT EXISTS ${table}`));
 assert(!/\b(code|output|free_text|placement_answer)\b/i.test(migration), "D1 academy migration must not store code, outputs, free text, or placement answers");
 
-const tablesIn = (sql) => new Set([...sql.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]));
 const baseline = read("migrations/0001_baseline.sql");
 for (const table of ["users", "progress", "stats", "learning_sync", "mastery", "mastery_attempts", "placement"]) assert(baseline.includes(`CREATE TABLE IF NOT EXISTS ${table}`), `0001 baseline must create ${table}`);
 const marketMigration = read("migrations/0004_market_snapshot.sql");
@@ -111,12 +113,81 @@ const dossierMigration = read("migrations/0016_flows_dossier_cache.sql");
 assert(dossierMigration.includes("CREATE TABLE IF NOT EXISTS flows_dossier_cache"), "0016 must create flows_dossier_cache");
 assert(!/\b(password|passwd|hash|secret|pepper|token)\b/i.test(dossierMigration),
   "the dossier cache migration must not store credential material in D1");
-const migrationTables = new Set([
-  ...tablesIn(baseline), ...tablesIn(migration),
-  ...tablesIn(marketMigration), ...tablesIn(flowsMigration), ...tablesIn(liveMigration), ...tablesIn(ledgerMigration), ...tablesIn(dossierMigration),
-]);
-const schemaTables = tablesIn(read("schema.sql"));
-assert(migrationTables.size === schemaTables.size && [...schemaTables].every((t) => migrationTables.has(t)),
-  "migrations/ (0001+0002+0004+0005+0010+0015+0016) must create exactly the tables in schema.sql");
+const sqlText = (sql) => sql.replace(/\s+/g, " ").replace(/\(\s/g, "(").replace(/\s\)/g, ")").trim();
+const ddlInitializer = (src, start) => {
+  let depth = 0;
+  let quote = null;
+  for (let i = start; i < src.length; i += 1) {
+    const c = src[i];
+    if (quote) {
+      if (c === "\\") i += 1;
+      else if (c === quote) quote = null;
+    } else if (c === "\"" || c === "'" || c === "`") quote = c;
+    else if ("([{".includes(c)) depth += 1;
+    else if (")]}".includes(c)) depth -= 1;
+    else if (c === ";" && depth === 0) return src.slice(start, i);
+  }
+  throw new Error("unterminated initializer at " + start);
+};
+const workerSource = read("worker.js");
+const workerDdl = [];
+for (const m of workerSource.matchAll(/^const \w+ =(?=\s*(?:Object\.freeze\(\s*)?\[?\s*"CREATE )/gm)) {
+  const init = ddlInitializer(workerSource, m.index + m[0].length);
+  const value = new Function("FLOWS_LIVE", "FLOWS_DOSSIER", `return (${init});`)(FLOWS_LIVE, FLOWS_DOSSIER);
+  workerDdl.push(...[value].flat());
+}
+const sqliteOf = (statements) => {
+  const db = new DatabaseSync(":memory:");
+  for (const sql of statements) db.exec(sql);
+  return db;
+};
+const d1Of = (db) => ({
+  prepare: (sql) => ({
+    all: async () => ({ results: db.prepare(sql).all() }),
+    run: async () => { db.exec(sql); return { success: true }; },
+  }),
+});
+const describeDb = (db) => {
+  const objects = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all();
+  const tables = {};
+  for (const { name } of objects.filter((o) => o.type === "table")) {
+    const shape = db.prepare(`PRAGMA table_list(${name})`).get();
+    const unique = db.prepare(`PRAGMA index_list(${name})`).all().filter((i) => i.origin === "u")
+      .map((i) => db.prepare(`PRAGMA index_info(${i.name})`).all().map((c) => c.name).join(",")).sort();
+    tables[name] = {
+      withoutRowid: shape.wr, strict: shape.strict, unique,
+      columns: Object.fromEntries(db.prepare(`PRAGMA table_info(${name})`).all()
+        .map((c) => [c.name, `${c.type} notnull=${c.notnull} default=${c.dflt_value} pk=${c.pk}`])),
+    };
+  }
+  const named = (type) => Object.fromEntries(objects.filter((o) => o.type === type && o.sql).map((o) => [o.name, `${o.tbl_name}: ${sqlText(o.sql)}`]));
+  return { tables, indexes: named("index"), triggers: named("trigger") };
+};
+const migrationFiles = readdirSync(new URL("migrations/", root)).filter((f) => /^\d{4}_\w+\.sql$/.test(f)).sort();
+assert(migrationFiles.length >= 16 && migrationFiles[0] === "0001_baseline.sql", "the migrations directory is read in full, in number order");
+const fromSchema = describeDb(sqliteOf([read("schema.sql")]));
+const fromMigrations = describeDb(sqliteOf(migrationFiles.map((f) => read(`migrations/${f}`))));
+assert.deepEqual(fromMigrations, fromSchema,
+  "SCHEMA PARITY: a database built from schema.sql and one built from every migration in number order hold the same tables, " +
+  "the same columns by name (type, NOT NULL, default, key position), the same unique constraints, WITHOUT ROWID and STRICT flags, " +
+  "and the same indexes and triggers");
+const runtimeDb = sqliteOf(workerDdl);
+await FLOWS_LIVE.upgradeClockColumns(d1Of(runtimeDb));
+const fromRuntime = describeDb(runtimeDb);
+const runtimeSources = [workerSource, ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).map((f) => read(`shared/${f}`))];
+const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(/CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)/g)].map((m) => m[1])));
+const builtAtRuntime = new Set([...Object.keys(fromRuntime.tables), ...Object.keys(fromRuntime.indexes), ...Object.keys(fromRuntime.triggers)]);
+assert.deepEqual([...declaredAtRuntime].filter((name) => !builtAtRuntime.has(name)), [],
+  "every CREATE statement in worker.js and shared/ reaches the runtime database this check builds");
+assert.deepEqual(Object.keys(fromSchema.tables).filter((t) => !fromRuntime.tables[t]).sort(), ["progress", "stats", "users"],
+  "the Worker creates every table schema.sql declares on first use, except users, progress and stats, which it never creates");
+assert.deepEqual(Object.keys(fromRuntime.tables).filter((t) => !fromSchema.tables[t]), [],
+  "and creates no table schema.sql does not declare");
+for (const table of Object.keys(fromRuntime.tables)) {
+  assert.deepEqual(fromRuntime.tables[table], fromSchema.tables[table],
+    `SCHEMA PARITY: the Worker's first-use DDL for ${table} declares what schema.sql declares`);
+}
+assert.deepEqual(fromRuntime.indexes, fromSchema.indexes, "the Worker's first-use DDL creates exactly schema.sql's indexes");
+assert.deepEqual(fromRuntime.triggers, fromSchema.triggers, "and exactly schema.sql's triggers");
 
 console.log("Academy contract OK: 12 courses, 365 stages, 84 skills, 252 challenge variants, 3 verified synthetic snapshots.");

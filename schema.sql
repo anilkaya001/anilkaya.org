@@ -146,6 +146,44 @@ CREATE TABLE IF NOT EXISTS flows_login_failures (
   first_at INTEGER NOT NULL CHECK (first_at > 0)
 );
 
+CREATE TABLE IF NOT EXISTS flows_ai_usage (
+  day        TEXT PRIMARY KEY,
+  calls      INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0),
+  tokens_in  INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
+  tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS flows_ai_usage_model (
+  day        TEXT NOT NULL,
+  model      TEXT NOT NULL,
+  calls      INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0),
+  tokens_in  INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0),
+  tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0),
+  PRIMARY KEY (day, model)
+);
+
+CREATE TABLE IF NOT EXISTS flows_ai_summary (
+  scope        TEXT PRIMARY KEY,
+  text         TEXT NOT NULL,
+  llm          INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)),
+  model        TEXT,
+  fingerprint  TEXT NOT NULL,
+  guard        TEXT,
+  generated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS flows_neuron (
+  scope        TEXT PRIMARY KEY,
+  version      INTEGER NOT NULL,
+  fingerprint  TEXT NOT NULL,
+  summary      TEXT NOT NULL,
+  ideas        TEXT NOT NULL,
+  llm          INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)),
+  model        TEXT,
+  guard        TEXT,
+  generated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS flows_live (
   id         TEXT PRIMARY KEY CHECK (id GLOB 'live:*'),
   payload    TEXT NOT NULL,
