@@ -3611,6 +3611,24 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
     `${file} keeps no credential in .git/config after checkout`);
   }
+  const images = [];
+  for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url)).sort()) {
+    const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+    const jobsAt = text.search(/^jobs:\s*$/m);
+    const jobsBlock = jobsAt < 0 ? "" : text.slice(jobsAt);
+    const jobs = [...jobsBlock.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)].map((m) => m[1]);
+    const runsOn = [...text.matchAll(/^\s*runs-on:\s*(.*?)\s*$/gm)].map((m) => m[1]);
+    ok(jobs.length > 0 && runsOn.length === jobs.length && runsOn.every((r) => r === "ubuntu-24.04"),
+      `${file} PINS EVERY JOB'S RUNNER IMAGE to ubuntu-24.04 (jobs ${jobs.join(", ")}; runs-on ${runsOn.join(", ")}): ` +
+      "ubuntu-latest moves to Ubuntu 26.04 from 2026-10-19, and the engines and probes must not change image unannounced");
+    ok(!/ubuntu-latest/.test(text), `${file} names ubuntu-latest nowhere`);
+    images.push(...jobs.map((j) => `${file}:${j}`));
+  }
+  const pinned = ["flows-live.yml:live", "flows-pipeline.yml:build", "flows-pipeline.yml:keepalive",
+    "flows-probe.yml:probe", "flows-ws-probe.yml:probe", "regression.yml:test"];
+  ok(pinned.every((j) => images.includes(j)),
+    `the image pin was read on the six jobs that ran on ubuntu-latest (${pinned.join(", ")}), so a renamed job or a ` +
+    `workflow the loop missed cannot pass it vacuously; every job read: ${images.join(", ")}`);
   ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
      `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
   ok(!/05:15/.test(src), "and the pipeline no longer names 05:15 anywhere");
