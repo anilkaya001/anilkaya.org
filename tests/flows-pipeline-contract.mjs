@@ -3595,6 +3595,10 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "REGRESSION RUNS WEEKLY TOO (Monday 06:17 UTC), so a fixture date that the real clock overtakes fails within a " +
     "week instead of on the owner's next unrelated push"); checks++;
   ok(/push:\n\s+branches: \[main\]/.test(regOn) && /pull_request:/.test(regOn), "beside push and pull request");
+  const regTest = (/\n {2}test:\n((?: {4}.*\n|\s*\n)+)/.exec(regression) || [])[1] || "";
+  assert.deepEqual([...regTest.matchAll(/^ {4}timeout-minutes: (\S+)$/gm)].map((m) => m[1]), ["55"],
+    "THE REGRESSION JOB'S CAP IS 55 MINUTES: the slowest recent run took 2,205 s, 92% of the old 40, so the serial " +
+    "chain had no headroom left; 55 holds it until the shards land"); checks++;
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
     const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
