@@ -30,6 +30,11 @@ name = "UW_ONDEMAND"
 namespace_id = "1101"
 simple = { limit = 120, period = 60 }
 
+[[ratelimits]]
+name = "AI_ASK"
+namespace_id = "1102"
+simple = { limit = 10, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"

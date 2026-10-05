@@ -1204,5 +1204,99 @@ class FakeCache {
   unshift();
 }
 
+{
+  const f = fakeD1();
+  seed(f);
+  const [A, B] = FLOWS_USERNAMES;
+  const seen = [];
+  const counts = new Map();
+  const limiter = { limit: async ({ key }) => {
+    seen.push(key);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return { success: counts.get(key) <= 10 };
+  } };
+  const env = { DB: f.D1, SESSION_SECRET, FLOWS_READ_MODE: "off", AI_ASK: limiter,
+    FLOWS_CREDENTIALS: JSON.stringify({ [A]: "x".repeat(43), [B]: "y".repeat(43) }) };
+  const tokens = { [A]: await signFlowsSession(A, SESSION_SECRET, 3600, sessionEpoch(env)),
+    [B]: await signFlowsSession(B, SESSION_SECRET, 3600, sessionEpoch(env)) };
+  const worker = (await import("../worker.js?reads=" + (++instance))).default;
+  const ask = async ({ as = A, body = JSON.stringify({ question: "what is the market doing" }), headers = {}, stream = false, env: over = {} } = {}) => {
+    const n = f.trips.length;
+    const init = { method: "POST", headers: { cookie: FLOWS_COOKIE + "=" + tokens[as], "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", ...headers } };
+    if (stream) {
+      const bytes = new TextEncoder().encode(body);
+      init.body = new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += 512) c.enqueue(bytes.slice(i, i + 512)); c.close(); } });
+      init.duplex = "half";
+    } else {
+      init.body = body;
+    }
+    const res = await worker.fetch(new Request("https://anilkaya.org/api/flows/ask", init), { ...env, ...over }, { waitUntil() {} });
+    const text = await res.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+    return { res, body: parsed, trips: f.trips.length - n };
+  };
+  await worker.fetch(new Request("https://anilkaya.org/api/flows/meta", { headers: { cookie: FLOWS_COOKIE + "=" + tokens[A] } }), env, { waitUntil() {} });
+
+  const padded = (bytes) => {
+    const shell = JSON.stringify({ question: "what is the market doing", pad: "" });
+    return JSON.stringify({ question: "what is the market doing", pad: "p".repeat(bytes - shell.length) });
+  };
+  const big = padded(5 * 1024);
+  eq(new TextEncoder().encode(big).length, 5120, "the oversized body is exactly 5 KiB");
+  const declared = await ask({ body: big, headers: { "Content-Length": "5120" }, env: { AI_ASK: undefined } });
+  eq(declared.res.status, 413, `ASK BODY BOUND: a 5 KiB body with its length declared answers 413 (${declared.res.status})`);
+  eq(declared.body && declared.body.error && declared.body.error.code, "payload_too_large", "with the payload_too_large code");
+  eq(declared.trips, 0, "and costs no D1 trip");
+  const streamed = await ask({ body: big, stream: true, env: { AI_ASK: undefined } });
+  eq(streamed.res.status, 413, `a 5 KiB body streamed with no declared length is cut off at 4,096 bytes and answers 413 (${streamed.res.status})`);
+  eq(streamed.trips, 0, "with no D1 trip");
+  const edge = padded(4096);
+  eq(new TextEncoder().encode(edge).length, 4096, "the boundary body is exactly 4,096 bytes");
+  const fits = await ask({ body: edge, stream: true, env: { AI_ASK: undefined } });
+  eq(fits.res.status, 200, `a body of exactly 4,096 bytes is still read and answered (${fits.res.status})`);
+
+  const typed = await ask({ headers: { "Content-Type": "text/plain" }, env: { AI_ASK: undefined } });
+  eq(typed.res.status, 415, `a body sent without the JSON media type answers 415 (${typed.res.status})`);
+  eq(typed.trips, 0, "with no D1 trip");
+  const charset = await ask({ headers: { "Content-Type": "application/json; charset=utf-8" }, env: { AI_ASK: undefined } });
+  eq(charset.res.status, 200, "and the JSON media type with a charset parameter is accepted");
+  const junk = await ask({ body: "{not json", env: { AI_ASK: undefined } });
+  ok(junk.res.status === 400 && junk.body.error.code === "bad_json" && junk.trips === 0, "malformed JSON keeps its bad_json 400 and costs no trip");
+  const empty = await ask({ body: JSON.stringify({ question: "  " }), env: { AI_ASK: undefined } });
+  ok(empty.res.status === 400 && empty.body.error.code === "no_question" && empty.trips === 0, "an empty question keeps its no_question 400");
+
+  const crossSite = await ask({ headers: { "Sec-Fetch-Site": "cross-site" }, env: { AI_ASK: undefined } });
+  eq(crossSite.res.status, 403, `ASK ORIGIN: a cross-site Sec-Fetch-Site answers 403 (${crossSite.res.status})`);
+  eq(crossSite.trips, 0, "with no D1 trip");
+  const foreign = await ask({ headers: { Origin: "https://evil.example" }, env: { AI_ASK: undefined } });
+  eq(foreign.res.status, 403, `a foreign Origin answers 403 (${foreign.res.status})`);
+  eq(foreign.trips, 0, "with no D1 trip");
+  const same = await ask({ headers: { Origin: "https://anilkaya.org" }, env: { AI_ASK: undefined } });
+  eq(same.res.status, 200, "the site's own Origin is served");
+
+  seen.length = 0;
+  for (let i = 1; i <= 10; i++) {
+    const r = await ask({ as: A });
+    eq(r.res.status, 200, `ASK FLOOD: member A's question ${i} of 10 in the window is served (${r.res.status})`);
+  }
+  const refused = await ask({ as: A });
+  eq(refused.res.status, 429, `member A's eleventh question in the window answers 429 (${refused.res.status})`);
+  eq(refused.body && refused.body.error && refused.body.error.code, "rate_limited", "with the rate_limited code");
+  eq(refused.res.headers.get("Retry-After"), "60", "and Retry-After of the binding's 60-second period");
+  eq(refused.res.headers.get("Cache-Control"), "no-store", "as a no-store API error");
+  eq(refused.trips, 0, "THE REFUSAL COSTS 0 D1 TRIPS: the flood never reaches the store or the model");
+  const other = await ask({ as: B });
+  eq(other.res.status, 200, `member B is served while member A is refused (${other.res.status})`);
+  deep([...new Set(seen)], [A, B], "the limiter is keyed by the member's name, one key per member");
+  const before = seen.length;
+  await ask({ headers: { "Sec-Fetch-Site": "cross-site" } });
+  await ask({ body: big, headers: { "Content-Length": "5120" } });
+  eq(seen.length, before, "a refused origin or an oversized body never consumes the member's allowance");
+
+  const down = await ask({ as: A, env: { AI_ASK: { limit: async () => { throw new Error("limiter down"); } } } });
+  eq(down.res.status, 200, "a limiter that throws fails open, like UW_ONDEMAND: it is a flood brake, not the spend cap");
+}
+
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);
 console.log(`flows-reads-contract: ${checks} checks passed`);

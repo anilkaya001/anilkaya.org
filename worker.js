@@ -34,6 +34,7 @@ import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
+import { memberAllowed } from "./shared/flows-access.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -1256,6 +1257,8 @@ function passthrough(stored) {
 const askModel = (env) => aiChain(env)[0] || null;
 
 const ASK_QUESTION_MAX = 400;
+const ASK_BODY_MAX_BYTES = 4096;
+const ASK_FLOOD_PERIOD_S = 60;
 
 const FALLBACK_FAILED = Object.freeze({
   allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
@@ -1875,9 +1878,14 @@ function askSubject(body) {
 }
 
 async function askQuestion(request) {
+  const mediaType = (request.headers.get("Content-Type") || "").split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
+    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
+  }
+  const bytes = await readBounded(request, ASK_BODY_MAX_BYTES, "The question is too large to read.");
   let body;
   try {
-    body = await request.json();
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(400, "bad_json", "Send a JSON object with a `question` field.");
   }
@@ -2086,7 +2094,7 @@ async function cachedTickerInfo(env, ctx, ticker) {
         "Cache-Control": `max-age=${INFO_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
     else await cache.put(key, store).catch(() => {});
   }
   return out;
@@ -2187,8 +2195,8 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
       },
     });
 
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
-    else await cache.put(cacheKey, store);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store).catch(() => {}));
+    else await cache.put(cacheKey, store).catch(() => {});
   }
 
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
@@ -2363,7 +2371,7 @@ async function cachedIndexSpot(env, ctx) {
         "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
     else await cache.put(key, store).catch(() => {});
   }
   return out;
@@ -3792,7 +3800,12 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/ask") {
 
+      requireSameOrigin(request);
       const { question: asked, subject: onPage } = await askQuestion(request);
+      if (!(await memberAllowed(env.AI_ASK, session))) {
+        throw new HttpError(429, "rate_limited", "Too many questions in the last minute; ask again shortly.",
+          { "Retry-After": String(ASK_FLOOD_PERIOD_S) });
+      }
 
       const trace = {};
       const stored = await readFlowsPayload(env, "brief", trace);
