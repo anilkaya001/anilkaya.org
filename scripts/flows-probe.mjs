@@ -13,8 +13,7 @@ export const LIST_PATH = fileURLToPath(new URL("./flows-probe-list.json", import
 export const DEFAULT_TICKERS = Object.freeze(["AAPL", "NVDA"]);
 export const MAX_TICKERS = 10;
 export const MIN_GAP_MS = 250;
-export const SAMPLE_ROWS = 5;
-export const SAMPLE_CHARS = 700;
+export const SAMPLE_ROWS = 500;
 export const CALL_TIMEOUT_MS = 30_000;
 export const MAX_LIMITED_RETRIES = 3;
 export const MAX_RETRY_AFTER_MS = 30_000;
@@ -231,6 +230,28 @@ export function validateList(list) {
       throw new Error(`probe list: gated status for ${op} must be a 4xx status`);
     }
   }
+  const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
+  for (const key of ["liveOnly", "entitlement"]) {
+    const named = list[key];
+    if (named === undefined) continue;
+    if (!Array.isArray(named) || named.some((op) => typeof op !== "string" || !ops.has(op)) || new Set(named).size !== named.length) {
+      throw new Error(`probe list: ${key} must list distinct operations a probe exercises`);
+    }
+  }
+  for (const op of list.entitlement || []) {
+    if (tierOf.get(op) === "used") throw new Error(`probe list: ${op} is read by the code, so a refusal is a failure, not an entitlement finding`);
+    if (Object.hasOwn(list.gated || {}, op)) throw new Error(`probe list: ${op} is both gated and an entitlement question`);
+  }
+  for (const [op, fields] of Object.entries(list.enums || {})) {
+    if (!ops.has(op)) throw new Error(`probe list: enums names ${op}, which no probe exercises`);
+    if (!isObj(fields) || !Object.keys(fields).length) throw new Error(`probe list: enums for ${op} must name fields`);
+    for (const [field, tokens] of Object.entries(fields)) {
+      if (!Array.isArray(tokens) || !tokens.length || tokens.some((t) => typeof t !== "string" || !t) ||
+          new Set(tokens.map((t) => t.toLowerCase())).size !== tokens.length) {
+        throw new Error(`probe list: enums for ${op} ${field} must be distinct documented tokens`);
+      }
+    }
+  }
   return list;
 }
 
@@ -264,6 +285,9 @@ export function expandProbes(list, tickers) {
         expect: (list.expect && list.expect[p.op]) || null,
         reads: (list.reads && list.reads[p.op]) || null,
         gated: (list.gated && list.gated[p.op]) || null,
+        liveOnly: (list.liveOnly || []).includes(p.op),
+        entitlement: (list.entitlement || []).includes(p.op),
+        enums: (list.enums && list.enums[p.op]) || null,
       });
     }
   }
@@ -362,16 +386,23 @@ export function typeOf(value) {
   return typeof value;
 }
 
+export function isFilled(value) {
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
 export function unionKeys(rows, limit = SAMPLE_ROWS) {
   const sample = (Array.isArray(rows) ? rows : []).slice(0, limit);
   const objects = sample.filter(isObj);
   const fields = new Map();
   for (const row of objects) {
     for (const [key, value] of Object.entries(row)) {
-      const field = fields.get(key) || { key, types: [], present: 0 };
+      const field = fields.get(key) || { key, types: [], present: 0, filled: 0 };
       const type = typeOf(value);
       if (!field.types.includes(type)) field.types.push(type);
       field.present += 1;
+      if (isFilled(value)) field.filled += 1;
       fields.set(key, field);
     }
   }
@@ -383,7 +414,39 @@ export function unionKeys(rows, limit = SAMPLE_ROWS) {
 }
 
 export function formatField(field, objects) {
-  return `${field.key}:${field.types.join("|")}${field.present < objects ? "?" : ""}`;
+  const filled = Number.isInteger(field.filled) && field.filled < objects ? `(${field.filled}/${objects})` : "";
+  return `${field.key}:${field.types.join("|")}${field.present < objects ? "?" : ""}${filled}`;
+}
+
+export function tokenCounts(rows, enums, limit = SAMPLE_ROWS) {
+  if (!isObj(enums)) return [];
+  const objects = (Array.isArray(rows) ? rows : []).slice(0, limit).filter(isObj);
+  const out = [];
+  for (const [field, tokens] of Object.entries(enums)) {
+    const lower = tokens.map((t) => t.toLowerCase());
+    const counts = tokens.map(() => 0);
+    let filled = 0;
+    let other = 0;
+    for (const row of objects) {
+      const value = row[field];
+      const parts = (Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [])
+        .filter((v) => typeof v === "string").map((v) => v.trim().toLowerCase()).filter(Boolean);
+      if (!parts.length) continue;
+      filled += 1;
+      const seen = new Set(parts);
+      lower.forEach((t, i) => { if (seen.has(t)) counts[i] += 1; });
+      if (parts.some((v) => !lower.includes(v))) other += 1;
+    }
+    out.push({ field, rows: objects.length, filled, other, counts: tokens.map((t, i) => [t, counts[i]]) });
+  }
+  return out;
+}
+
+export function formatTokens(entry) {
+  return [
+    ...entry.counts.map(([token, n]) => `${entry.field}∋${token}: ${n}/${entry.rows}`),
+    `${entry.field} undocumented: ${entry.other}/${entry.rows}`,
+  ];
 }
 
 export function locateRows(body) {
@@ -508,7 +571,7 @@ export function vendorError(body, text, redact) {
       const v = body[k];
       if (typeof v === "string" || typeof v === "number") parts.push(`${k}=${clip(redact(String(v)), 160)}`);
     }
-    return parts.length ? parts.join("  ") : clip(redact(JSON.stringify(body)), 240);
+    return parts.length ? parts.join("  ") : `body ${clip(envelopeShape(body), 240)}`;
   }
   const flat = redact(String(text || "")).replace(/\s+/g, " ").trim();
   return flat ? clip(flat, 240) : "(empty body)";
@@ -531,7 +594,8 @@ export function classify(result) {
 
 export function analyse(probe, call, redact) {
   const result = {
-    id: probe.id, tier: probe.tier, op: probe.op, url: call.url,
+    id: probe.id, tier: probe.tier, op: probe.op, url: call.url, shown: call.shown || call.url,
+    liveOnly: Boolean(probe.liveOnly), entitlement: Boolean(probe.entitlement),
     status: call.status, ms: call.ms, bytes: call.bytes, limited: call.limited || 0,
     error: call.error ? redact(call.error) : null,
     limits: limitHeaders(call.headers, redact),
@@ -566,7 +630,7 @@ export function analyse(probe, call, redact) {
     const live = collectKeys(body);
     result.reads = { checked: probe.reads.length, unseen: probe.reads.filter((k) => !live.has(k)) };
   }
-  result.sample = located.rows.length ? clip(redact(JSON.stringify(located.rows[0])), SAMPLE_CHARS) : null;
+  result.tokens = result.empty ? [] : tokenCounts(located.rows, probe.enums);
   result.cls = classify(result);
   return result;
 }
@@ -653,7 +717,7 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
   head.push(result.status ? String(result.status) : "no response", `${result.ms} ms`);
   if (Number.isFinite(result.bytes)) head.push(formatBytes(result.bytes));
   if (result.limited) head.push(`after ${result.limited} x 429`);
-  const lines = [head.join("  "), `   GET ${displayUrl(result.url, { relative: true })}`];
+  const lines = [head.join("  "), `   GET ${displayUrl(result.shown || result.url, { relative: true })}`];
   if (result.cls === "network") return [...lines, `   error ${result.error}`];
   if (result.limits.length) lines.push(...wrapLabelled("   limits ", result.limits.map(([n, v]) => `${n}=${v}`)));
   if (showHeaderNames && result.headerNames.length) lines.push(...wrapLabelled("   headers ", result.headerNames));
@@ -668,6 +732,10 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
     }
     if (u.scalars.length) lines.push(`   values ${set.label}  ${u.scalars.join("|")} over ${u.sampled} sampled`);
   }
+  for (const entry of result.tokens || []) {
+    lines.push(`   tokens ${entry.field}  filled in ${entry.filled} of ${entry.rows} rows`);
+    lines.push(...wrapTokens(formatTokens(entry), "     "));
+  }
   if (result.empty) {
     lines.push("   spec unchecked: no rows arrived");
   } else if (result.spec) {
@@ -680,10 +748,11 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
       lines.push(`   spec ${s.undocumented.length} undocumented`);
       lines.push(...wrapTokens(nameList(s.undocumented), "     "));
     }
+  } else if (result.liveOnly) {
+    lines.push("   spec live docs only: the committed spec does not hold this operation");
   } else {
     lines.push("   spec shape undocumented");
   }
-  if (result.sample) lines.push(`   sample ${result.sample}`);
   return lines;
 }
 
@@ -712,6 +781,14 @@ export function renderSummary(results, { session, elapsedMs }) {
     if (list.length || ["ok", "empty", "4xx", "5xx"].includes(cls)) lines.push(...row(cls, list.map(describe)));
   }
   if (drift.length) lines.push(...row("drift", drift.map((r) => `${r.id} (${r.spec.unseen.length} unseen)`)));
+  const asked = results.filter((r) => r.entitlement && r.cls !== "skipped");
+  if (asked.length) {
+    const answer = (r) => (r.cls === "ok" || r.cls === "empty"
+      ? `${r.id} ${r.status} (${r.rowCount ?? 0} rows, ${formatBytes(r.bytes)})`
+      : `${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
+    lines.push(...row("entitled", asked.filter((r) => r.cls === "ok" || r.cls === "empty").map(answer)));
+    lines.push(...row("refused", asked.filter((r) => r.cls === "4xx").map(answer)));
+  }
   return lines;
 }
 
@@ -730,6 +807,7 @@ export function strictVerdict(results, list) {
     const expected = Object.hasOwn(gated, r.op) ? gated[r.op] : null;
     if (["4xx", "5xx", "network", "other"].includes(r.cls)) {
       if (expected !== null && r.status === expected) notes.push(`${r.id} ${r.status}: gated, as expected`);
+      else if (r.entitlement && r.cls === "4xx") notes.push(`${r.id} ${r.status}: not entitled on this key, an entitlement finding`);
       else failures.push(`FAIL ${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
       continue;
     }
@@ -762,7 +840,10 @@ export async function runProbe(options, deps = {}) {
   emit(`flows-probe  base ${base}  tickers ${tickers.join(",")}  filter ${options.filter ? JSON.stringify(options.filter) : "(all)"}  ` +
     `${selected.length} probes${options.dryRun ? "  dry run" : ""}`);
   emit("   key:type  str# = a number sent as a string  ? = absent from some sampled rows  " +
-    "spec = names the OpenAPI spec documents for the operation");
+    "(n/m) = filled in n of m rows  spec = names the OpenAPI spec documents for the operation");
+  emit("   names, types, fill counts and documented enum tokens only: no vendor value is printed");
+  emit("   calls counts this run; x-uw-daily-req-count counts every caller of the key: the Worker, the pipeline, " +
+    "the live leg and any agent session with UW_API_KEY set through the vendor MCP server in .mcp.json");
 
   const results = [];
   const ctx = { fetchImpl, key, pace: makePacer(MIN_GAP_MS, { now, sleep }), now, sleep };
@@ -822,6 +903,7 @@ export async function runProbe(options, deps = {}) {
       continue;
     }
     const call = await callVendor(buildUrl(base, path, p.query), ctx);
+    call.shown = buildUrl(base, p.path, p.query);
     const result = analyse(p, call, redact);
     if (sources.has(p.id)) kept.set(p.id, result.rows);
     result.rows = null;

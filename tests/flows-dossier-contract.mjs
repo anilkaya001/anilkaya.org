@@ -186,8 +186,8 @@ function checkDossier(d, label, ticker = T) {
   same([...earn].filter((k) => !earnDocumented.has(k) && !/^\d+$/.test(k) && !["length", "map", "filter", "slice", "sort", "find", "some", "every", "reduce", "toJSON"].includes(k)), [],
     "the nightly's earningsHistory, reused for the vendor's earnings route, reads only documented names");
   for (const k of V.DOSSIER_READS[D.VENDOR_ROUTES.earnings]) ok(earn.has(k), "earningsHistory reads " + k);
-  eq(probeList.gated["/api/companies/{ticker}/profile"], 403, "the Advanced+ profile route is expected-gated in the weekly probe");
-  eq(probeList.gated["/api/companies/{ticker}/earnings-estimates"], 403, "and so are the forward estimates");
+  eq(probeList.gated["/api/companies/{ticker}/profile"], undefined, "the Advanced+ profile route answered 200 in the 2026-10-04 weekly probe (37223455933), so it is no longer expected-gated");
+  eq(probeList.gated["/api/companies/{ticker}/earnings-estimates"], undefined, "and neither are the forward estimates");
   for (const op of ["/api/stock/{ticker}/stock-state"]) ok(probeList.probes.some((p) => p.op === op), op + " (the quote path) is probed");
 }
 

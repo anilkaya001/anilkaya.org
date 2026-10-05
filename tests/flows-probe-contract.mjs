@@ -24,9 +24,9 @@ const list = probe.loadList();
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 38, "every one of the 38 operations the code reads today is probed: the 28 before, the eight the Flows dossier reads (company profile, full financials, revenue breakdown, forward estimates, analyst ratings, institutional ownership, short interest v2, insider ticker flow) and the two it moved up from the adoption plan (the earnings history and the dark-pool price levels)");
-  eq(byTier["1"].size, 15, "every Tier 1 operation of the adoption plan that no code reads yet is probed");
-  eq(byTier["2"].size, 26, "every Tier 2 operation of the adoption plan is probed, and Tier 3 is left out");
+  eq(byTier.used.size, 75, "every one of the 75 operations a production call site reads is probed and labelled used: the 38 labelled before and the 37 the nightly legs read that were still filed under Tiers 1 and 2");
+  eq(byTier["1"].size, 1, "the one Tier 1 operation of the adoption plan that no code reads yet is probed");
+  eq(byTier["2"].size, 11, "the three Tier 2 operations no code reads yet are probed, plus the eight entitlement probes, and Tier 3 is left out");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -49,6 +49,93 @@ const list = probe.loadList();
      /no probe exercises/, "an expectation for an operation no probe calls is refused");
   throwsLike(() => probe.validateList({ version: 1, probes: [{ ...base, query: { n: 5 } }] }),
      /strings/, "query values are strings, so the URL is exactly what the list says");
+  throwsLike(() => probe.validateList({ version: 1, probes: [base], liveOnly: ["/api/zzz"] }), /liveOnly/,
+     "a live-only operation no probe calls is refused");
+  throwsLike(() => probe.validateList({ version: 1, probes: [base], entitlement: ["/api/a"] }), /read by the code/,
+     "an operation the code reads cannot be an entitlement question: its refusal is a failure");
+  throwsLike(() => probe.validateList({ version: 1, probes: [{ ...base, tier: "2" }], entitlement: ["/api/a"], gated: { "/api/a": 403 } }),
+     /both gated/, "an operation is either expected-gated or an open entitlement question, not both");
+  throwsLike(() => probe.validateList({ version: 1, probes: [base], enums: { "/api/a": { f: ["x", "X"] } } }), /distinct/,
+     "documented enum tokens are distinct regardless of case, since they are counted case-blind");
+}
+
+{
+  const spec = new Set([...fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8")
+    .matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)].map((m) => m[1]));
+  ok(spec.size > 200, `the committed spec's operations are read from docs/uw-openapi.yaml (${spec.size})`);
+  const listOps = [...new Set(list.probes.map((p) => p.op))];
+  deep(listOps.filter((op) => !spec.has(op)).sort(), [...list.liveOnly].sort(),
+    "LIVE ONLY: every probed operation the committed spec lacks is named in liveOnly, and nothing else is");
+  deep(list.liveOnly.slice().sort(), ["/api/market/daily-report", "/api/stock/{ticker}/interpolated-iv/distribution",
+    "/api/stock/{ticker}/volatility/context", "/api/stock/{ticker}/volatility/option-sentiment",
+    "/api/stock/{ticker}/volatility/term-structure/distribution", "/api/volatility/option-sentiment/top"],
+    "the five live-only operations the nightly reads, and the volatility context the reading wants");
+
+  const files = spawnSync("git", ["ls-files", "worker.js", "shared", "scripts"], { cwd: ROOT, encoding: "utf8" }).stdout
+    .split("\n").filter((f) => /\.m?js$/.test(f))
+    .filter((f) => !/fake|live-day\.mjs$|flows-probe\.mjs$|flows-ws-probe\.mjs$/.test(f));
+  ok(files.length > 40 && files.includes("worker.js") && files.includes("scripts/flows-pipeline.mjs"),
+    `the production sources are scanned: worker.js, shared/ and scripts/ less the fakes and the probes (${files.length} files)`);
+  const OWN = /^\/api\/(flows|rt|me|bootstrap|progress|stats|mastery|placement|v2|markets|auth)(\/|$)|^\/api\/?$/;
+  const sites = new Map();
+  const note = (tok, at) => { if (!OWN.test(tok)) sites.set(tok, [...(sites.get(tok) || []), at]); };
+  for (const f of files) {
+    const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+    const routes = [...text.matchAll(/route: "([a-z-]+)"/g)].map((m) => m[1]);
+    text.split("\n").forEach((line, i) => {
+      if (!line.includes("/api/")) return;
+      const s = line.replace(/\$\{[^}]*\}/g, "{X}").replace(/"\s*\+\s*[A-Za-z_][\w.()]*\s*\+\s*"/g, "{X}")
+        .replace(/"\s*\+\s*[A-Za-z_][\w.()]*\s*(?=[,)])/g, '{X}"');
+      for (const m of s.matchAll(/["'`](\/api\/[A-Za-z0-9_{}./:-]*)/g)) {
+        const tok = m[1].split("?")[0].replace(/\/+$/, "");
+        if (line.includes("${step.route}")) for (const r of new Set(routes)) note(tok.replace("{X}", r), `${f}:${i + 1}`);
+        else note(tok, `${f}:${i + 1}`);
+      }
+    });
+  }
+  const segs = (p) => p.split("/");
+  const fits = (op, tok) => {
+    const a = segs(op);
+    const b = segs(tok);
+    return a.length === b.length && a.every((x, i) => (/^\{[^}]+\}$/.test(x) ? b[i] !== "" : x === b[i]));
+  };
+  const opOf = (tok) => listOps.filter((op) => fits(op, tok))
+    .sort((x, y) => (x.match(/\{/g) || []).length - (y.match(/\{/g) || []).length)[0] || null;
+  const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
+  const read = new Set();
+  const unprobed = [];
+  for (const [tok, at] of sites) {
+    const op = opOf(tok);
+    if (!op || tierOf.get(op) !== "used") unprobed.push(`${tok} (${at[0]}${op ? ", tier " + tierOf.get(op) : ""})`);
+    else read.add(op);
+  }
+  deep(unprobed, [], "USED IS TRUE: every vendor path a production call site names has a probe labelled used");
+  ok(sites.has("/api/earnings/premarket") && sites.has("/api/earnings/afterhours"),
+    "including the two earnings calendars the events leg names through ${step.route}");
+  deep(listOps.filter((op) => tierOf.get(op) === "used" && !read.has(op)), [],
+    "and no operation is labelled used that no production call site reads");
+  eq(read.size, 75, "75 operations are read in production");
+
+  const entitled = list.entitlement;
+  deep(entitled.slice().sort(), ["/api/congress/unusual-trades", "/api/futures/{contract}/stats", "/api/lit-flow/{ticker}",
+    "/api/option-trades", "/api/stock/{ticker}/flow-per-strike-intraday", "/api/stock/{ticker}/quote",
+    "/api/stock/{ticker}/stock-volume-price-levels", "/api/stock/{ticker}/volatility/context"],
+    "ENTITLEMENT: the order-flow, quote, volatility-context, futures and unusual-congress routes are asked, not assumed");
+  const tickers = ["AAPL", "NVDA"];
+  const expanded = probe.expandProbes(list, tickers);
+  const asked = expanded.filter((p) => entitled.includes(p.op)).map((p) => p.id);
+  deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "lit-flow:AAPL", "lit-flow:NVDA", "quote:AAPL", "quote:NVDA",
+    "flow-per-strike-intraday:AAPL", "flow-per-strike-intraday:NVDA", "stock-volume-price-levels:AAPL",
+    "stock-volume-price-levels:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "futures-stats", "congress-unusual"],
+    "each per-name route is asked for AAPL and NVDA, the gold future and the unusual congressional trades once");
+  ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
+    "and each carries the entitlement mark into its run");
+  eq(expanded.length + 1, 170, "a weekly strict run is 169 list calls plus the session call: 14 more than the 156 before");
+  ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
+     list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
+    "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
+  deep(Object.keys(list.enums["/api/lit-flow/{ticker}"]), ["trade_code", "sale_cond_codes", "ext_hour_sold_codes", "trade_settlement"],
+    "and every enum the spec documents on a lit print is counted");
 }
 
 {
@@ -168,14 +255,15 @@ const list = probe.loadList();
     ok(!r2(`<${form}>`).includes(form), `the ${form === odd ? "raw" : "escaped"} form of the key is redacted`);
   }
 
-  const row = { pad: "x".repeat(670), echo: KEY };
-  const at = JSON.stringify(row).indexOf(KEY);
-  ok(at < probe.SAMPLE_CHARS && at + KEY.length > probe.SAMPLE_CHARS, "the fixture's key straddles the clip");
+  const row = { pad: "x".repeat(670), echo: KEY, px: "187.25" };
   const analysed = probe.analyse({ id: "s", tier: "used", op: "/x", expect: null },
     { url: "https://x.test/s", status: 200, ms: 1, text: JSON.stringify({ data: [row] }) }, redact);
-  ok(!analysed.sample.includes(KEY.slice(0, 8)),
-     "the sample is redacted before it is clipped, so a key cut in half cannot leak its first half");
-  ok(analysed.sample.length <= probe.SAMPLE_CHARS, "the sample is at most 700 characters");
+  ok(!("sample" in analysed) && probe.SAMPLE_CHARS === undefined, "no sample row is kept or printed: the log is public");
+  const printed = probe.renderBlock(analysed).join("\n");
+  ok(!printed.includes("187.25") && !printed.includes("xxxx") && !printed.includes(KEY.slice(0, 8)),
+     "so neither a vendor value nor the key reaches the block");
+  eq(probe.vendorError({ rows: [{ px: "187.25" }], n: 3 }, "", redact), "body {rows:[1],n:num}",
+     "an error body with no message is described by its shape, not printed");
 }
 
 {
@@ -193,10 +281,13 @@ const list = probe.loadList();
     { a: "9", b: 8, late: 1 },
   ];
   const u = probe.unionKeys(rows);
-  eq(u.sampled, 5, "only the first five rows are sampled");
+  eq(u.sampled, 6, "every row is typed, up to the 500 a probe asks for, so a fill count means something");
+  eq(probe.unionKeys(rows, 5).sampled, 5, "and the cap holds");
   deep(u.fields.map((f) => probe.formatField(f, u.objects)),
-       ["a:str#|str", "b:num", "c:null|str#|num?", "d:str?", "e:str#?", "f:str?", "g:bool?", "h:obj?", "i:arr?"],
-       "each key carries every JS type seen, str# for a number sent as a string, ? when some rows lack it");
+       ["a:str#|str", "b:num", "c:null|str#|num?(2/6)", "d:str?(1/6)", "e:str#?(1/6)", "f:str?(0/6)", "g:bool?(1/6)",
+        "h:obj?(1/6)", "i:arr?(1/6)", "late:num?(1/6)"],
+       "each key carries every JS type seen, str# for a number sent as a string, ? when some rows lack it, and " +
+         "(n/m) when only n of m rows fill it: null, an empty string and an empty list are not filled");
   deep(probe.unionKeys(["A", "B", 3]).scalars, ["str", "num"], "scalar rows are typed as values");
 }
 
@@ -400,7 +491,17 @@ const mini = probe.validateList({
   ok(out.includes("envelope {chains:[1]}  rows 1 at chains[]"), "rows under chains are found and counted");
   ok(out.includes("fields data[]  3 keys over 1 of 1 sampled") &&
      out.includes("timestamp:str  dir_delta_flow:str#  echo:str"), "the key union is printed with types");
-  ok(out.includes("   sample {"), "one sample row is printed");
+  ok(!out.includes("   sample "), "no sample row is printed");
+  for (const value of ["12.5", "2026-09-22T14:00:00Z", "AAPL261016C00200000", "0.31", "90000"]) {
+    ok(!out.includes(value), `the vendor value ${value} reaches no printed line`);
+  }
+  ok(out.includes("GET /api/option-contract/{symbol}/historic?limit=60"),
+     "a path filled from a vendor row is printed with its template name, not the contract the vendor sent");
+  const names = ["timestamp", "dir_delta_flow", "echo", "option_symbol", "open_interest", "date", "iv", "net_call_premium", "start_time"];
+  const valueAfterName = new RegExp(`\\b(${names.join("|")})"?\\s*[:=]\\s*"?[-+.]?\\d`);
+  deep(lines.filter((l) => !l.startsWith("   GET ") && valueAfterName.test(l)), [],
+    "VALUE-FREE: no printed line has a digit-bearing value after a field name (the request line prints our own query, " +
+      "and the one vendor value it could carry, a bound contract, is checked above)");
   ok(/^== summary {2}session 2026-09-22 {2}10 calls {2}1 x 429/m.test(out), "the summary counts calls and 429s");
   for (const cls of ["ok", "empty", "4xx", "5xx"]) {
     ok(new RegExp(`^ {3}${cls} +\\d+`, "m").test(out), `the summary always shows the ${cls} row`);
@@ -526,11 +627,90 @@ const mini = probe.validateList({
       `${op}: every name the code reads is one the spec documents, or one a probe run saw arrive (2026-09-23; units_changed in the 2026-10-04 weekly run, 37223455933) ` +
       `(${undocumented.join(", ") || "none outside the spec"})`);
   }
-  deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/companies/{ticker}/profile": 403, "/api/companies/{ticker}/earnings-estimates": 403,
-    "/api/politician-portfolios/holders/{ticker}": 422 },
+  deep(list.gated, { "/api/volatility/vix-term-structure": 403, "/api/politician-portfolios/holders/{ticker}": 422 },
     "EXPECTED REFUSALS are the two the 2026-09-23 probe recorded: the VIX curve needs the volatility add-on (403) and " +
-      "politician holders is enterprise-only (422), plus the two routes the spec marks Advanced+ (company profile and forward earnings estimates), " +
-      "expected 403 on a lower plan and unverified until the first weekly run on the production key");
+      "politician holders is enterprise-only (422); the company profile and forward estimates answered 200 in the " +
+      "2026-10-04 weekly run (37223455933), so they are no longer expected to refuse");
+}
+
+{
+  const tape = probe.validateList({
+    version: 1,
+    probes: [
+      { id: "trades", tier: "2", op: "/api/option-trades", path: "/api/option-trades", query: { ticker_symbol: "{t}", limit: "50" } },
+      { id: "prints", tier: "2", op: "/api/lit-flow/{ticker}", path: "/api/lit-flow/{t}", query: { limit: "50" } },
+      { id: "future", tier: "2", op: "/api/futures/{contract}/stats", path: "/api/futures/GCZ6/stats" },
+      { id: "tide", tier: "used", op: "/api/market/market-tide", path: "/api/market/market-tide" },
+    ],
+    entitlement: ["/api/option-trades", "/api/lit-flow/{ticker}", "/api/futures/{contract}/stats"],
+    enums: {
+      "/api/option-trades": { report_flags: ["intermarket_sweep", "odd_lot"], upstream_condition_detail: ["auto", "isoi", "slan"] },
+      "/api/lit-flow/{ticker}": { trade_code: ["intermarket_sweep", "derivative_priced"] },
+    },
+  });
+  const trades = Array.from({ length: 50 }, (_, i) => ({
+    id: `9f1c${String(4000 + i)}-trade`, price: (3.17 + i / 100).toFixed(2), size: 41 + i, premium: String(13004 + i * 7),
+    report_flags: i < 3 ? ["intermarket_sweep"] : i < 5 ? ["odd_lot", "cross_trade"] : [],
+    upstream_condition_detail: i < 2 ? "slan,isoi" : i < 40 ? "auto" : i < 45 ? "zzzq" : null,
+  }));
+  const prints = Array.from({ length: 50 }, (_, i) => ({
+    tracking_id: 718843880 + i, price: String(211.37 + i), size: 100 + i,
+    nbbo_bid_quantity: i < 48 ? 300 + i : null, nbbo_ask_quantity: i < 46 ? 500 + i : "",
+    trade_code: i === 7 ? "intermarket_sweep" : null,
+  }));
+  let t = 0;
+  const calls = [];
+  const fetchTape = async (url) => {
+    calls.push(url);
+    t += 40;
+    const p = new URL(url).pathname;
+    const reply = (status, body) => ({ status, headers: new Headers({ "x-uw-daily-req-count": "57" }),
+      text: async () => JSON.stringify(body) });
+    if (p === "/api/option-trades") return reply(200, { data: trades });
+    if (p === "/api/lit-flow/AAPL") return reply(200, { data: prints });
+    if (p === "/api/lit-flow/NVDA") return reply(403, { code: "lit_flow_scope_required", message: "plan" });
+    if (p.startsWith("/api/futures/")) return reply(403, { code: "futures_addon_required", message: "add-on" });
+    return reply(200, { data: [{ net_call_premium: "1.5", timestamp: "2026-09-22T19:55:00Z" }] });
+  };
+  const lines = [];
+  const run = await probe.runProbe(
+    { key: KEY, base: "https://vendor.test", tickers: ["AAPL", "NVDA"], filter: "", strict: true, date: SESSION, list: tape },
+    { fetch: fetchTape, log: (l) => lines.push(l), now: () => t, sleep: async (ms) => { t += ms; } });
+  const out = lines.join("\n");
+  eq(calls.length, 6, "two names for each per-name route, the future and the tide once");
+  ok(out.includes("report_flags∋intermarket_sweep: 3/50") && out.includes("report_flags∋odd_lot: 2/50"),
+    "ENUM TOKENS: a list field is counted per documented token, in the plan's own form report_flags∋intermarket_sweep: 3/50");
+  ok(out.includes("report_flags undocumented: 2/50"), "a row carrying a token the spec does not document is counted, and the token is not printed");
+  ok(!out.includes("cross_trade"), "so an undocumented token never appears");
+  ok(out.includes("upstream_condition_detail∋isoi: 2/50") && out.includes("upstream_condition_detail∋auto: 38/50") &&
+     out.includes("upstream_condition_detail∋slan: 2/50") && out.includes("upstream_condition_detail undocumented: 5/50"),
+    "a comma-joined OPRA code is split, so slan,isoi counts once for each, and an unknown code is counted, not printed");
+  ok(!out.includes("zzzq"), "the unknown code itself is not printed");
+  ok(out.includes("tokens upstream_condition_detail  filled in 45 of 50 rows"), "the field's own fill is stated beside its tokens");
+  ok(out.includes("trade_code∋intermarket_sweep: 1/50"), "the lit print's trade code is counted the same way");
+  ok(out.includes("nbbo_bid_quantity:num|null(48/50)") && out.includes("nbbo_ask_quantity:num|str(46/50)"),
+    "FILL RATES: how often a print carries the NBBO sizes is a count of rows, the question P2-35 needs answered");
+  for (const value of ["3.17", "13004", "211.37", "718843880", "9f1c4000", "300", "1.5", "2026-09-22T19:55:00Z"]) {
+    ok(!out.includes(value), `the vendor value ${value} reaches no printed line`);
+  }
+  const names = ["id", "price", "size", "premium", "report_flags", "upstream_condition_detail", "tracking_id",
+    "nbbo_bid_quantity", "nbbo_ask_quantity", "trade_code", "net_call_premium", "timestamp"];
+  const valueAfterName = new RegExp(`\\b(${names.join("|")})"?\\s*[:=]\\s*"?[-+.]?\\d`);
+  deep(lines.filter((l) => !l.startsWith("   GET ") && valueAfterName.test(l)), [],
+    "VALUE-FREE: no digit-bearing value follows a field name; a count follows a documented token instead");
+  ok(/^ {3}entitled +3 {2}trades:AAPL 200 \(50 rows, [\d.]+ KB\)/m.test(out) &&
+     /trades:NVDA 200 \(50 rows, [\d.]+ KB\)/.test(out) && /prints:AAPL 200 \(50 rows, [\d.]+ KB\)/.test(out),
+    "the summary says which entitlement routes answered, with their row counts and sizes");
+  ok(/^ {3}refused +2 {2}prints:NVDA 403 lit_flow_scope_required {2}future 403 futures_addon_required$/m.test(out),
+    "and which refused, with the vendor's code");
+  deep(run.strict.failures, [], "STRICT: a refusal of an entitlement route is a finding, not a failure, so the weekly run stays green");
+  ok(run.strict.notes.includes("future 403: not entitled on this key, an entitlement finding"), "and it is noted as one");
+  eq(run.code, 0, "the strict run exits 0");
+  ok(lines.every((l) => !l.includes(KEY)), "and never prints the key");
+  const hard = probe.strictVerdict([{ id: "prints:NVDA", op: "/api/lit-flow/{ticker}", cls: "5xx", status: 502, entitlement: true }], tape);
+  deep(hard.failures, ["FAIL prints:NVDA 502"], "a 5xx from an entitlement route is still a failure: the vendor broke, the plan did not answer");
+  ok(out.includes("x-uw-daily-req-count counts every caller of the key") && out.includes(".mcp.json"),
+    "THE ACCOUNTING says the daily counter includes every caller, an agent session's vendor MCP server among them");
 }
 
 {
@@ -575,7 +755,7 @@ const mini = probe.validateList({
   const crons = [...on.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
   deep(crons, ["23 14 * * 0"],
     "THE PROBE IS A WEEKLY MONITOR now (Sunday 14:23 UTC, off the hour GitHub drops most), not only a hand-run " +
-      "measurement: about 140 calls a week against a 100M-call plan, so vendor drift turns a run red within a week");
+      "measurement: 170 calls a week against a 100M-call plan, so vendor drift turns a run red within a week");
   ok(/^\s*workflow_dispatch:/m.test(on) && !/push|pull_request/.test(on), "and it can still be dispatched by hand");
   ok(/FLOWS_PROBE_STRICT: \$\{\{ \(github\.event_name == 'schedule' \|\| inputs\.strict\) && '1' \|\| '' \}\}/.test(wf),
     "the scheduled run is always strict; a dispatched one is strict only when asked");
@@ -597,13 +777,15 @@ const mini = probe.validateList({
        "and never through the shell: no ${{ }} is interpolated into a run line, so an input cannot inject a command");
 }
 
-console.log(`✓ flows-probe: ${checks} assertions — a probe list that covers the 38 operations read today and the ` +
-  `15 + 26 of Tiers 1 and 2 and nothing else, every token filled from one session date (weekly, both monthlies, ` +
+console.log(`✓ flows-probe: ${checks} assertions — a probe list whose used label is true (every vendor path a ` +
+  `production call site names is probed as used, and nothing else is), the live-only operations named, the eight ` +
+  `entitlement routes asked for AAPL and NVDA (a refusal a finding, not a failure), output that names keys, types, ` +
+  `fill counts and documented enum tokens and never a vendor value, every token filled from one session date (weekly, both monthlies, ` +
   `the next session, calendar look-backs) with the session itself read from SPY's daily candles the way the ` +
   `pipeline reads it, the pipeline's base URL, Bearer header, missing User-Agent and array encoding held in parity ` +
   `by reading the pipeline's own source, bound values taken from the largest open interest and skipped rather than ` +
-  `guessed when absent, rows found under data, si, chains, trades or a {latest, history} object, a key union typed ` +
-  `over five rows with numbers-as-strings marked, the spec's documented names diffed against what arrived so a ` +
+  `guessed when absent and printed by their template name, rows found under data, si, chains, trades or a ` +
+  `{latest, history} object, a key union typed over every row with numbers-as-strings marked, the spec's documented names diffed against what arrived so a ` +
   `renamed field like call_gex is named in the summary, calls paced 250 ms apart with a 429 retried on its ` +
   `Retry-After, exit 1 only when nothing answered — or, strict, on an unexpected refusal or a field the code reads ` +
   `that did not arrive — a weekly strict workflow whose inputs reach the script through the environment and never ` +
