@@ -1847,7 +1847,7 @@
           const xx = left + j * (cw + gap);
           if (!cell) { s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar("--fill-4") }, svg); s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4, text: DASH, "text-anchor": "middle", class: "tx-3" }, svg); return; }
           const a = clamp(Math.abs(num(cell.pctAdv) || 0) / maxA, 0, 1);
-          s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow >= 0 ? "--up-mark" : "--down-mark"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
+          s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow > 0 ? "--up-mark" : cell.flow < 0 ? "--down-mark" : "--label-3"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
           if (r.kS === 0 && c.kV === 0) s("rect", { x: xx + 0.75, y: yy + 0.75, width: cw - 1.5, height: ch - 1.5, rx: 8.5, fill: "none", stroke: cssVar("--label-1"), "stroke-width": 1.5 }, svg);
           s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4.5, text: F.money(cell.flow, true), "text-anchor": "middle", class: "tx-1 tx-b", style: { "font-size": phone ? "12px" : "13px" } }, svg);
         });
@@ -2337,7 +2337,7 @@
       rows.forEach((r, i) => {
         const m = num(r[iM]), em = num(r[iE]);
         if (m === null) s("circle", { cx: xc(i), cy: H - bot, r: 1.6, fill: cssVar("--label-4") }, svg);
-        else s("rect", { x: xc(i) - bw / 2, y: y(Math.abs(m)), width: bw, height: Math.max(1.5, y(0) - y(Math.abs(m))), rx: Math.min(3, bw / 2), fill: cssVar(m >= 0 ? "--up-mark" : "--down-mark"), class: "grow", style: { "--i": String(i * 3) } }, svg);
+        else s("rect", { x: xc(i) - bw / 2, y: y(Math.abs(m)), width: bw, height: Math.max(1.5, y(0) - y(Math.abs(m))), rx: Math.min(3, bw / 2), fill: cssVar(m > 0 ? "--up-mark" : m < 0 ? "--down-mark" : "--label-3"), class: "grow", style: { "--i": String(i * 3) } }, svg);
         if (em !== null) s("line", { x1: xc(i) - bw / 2 - 3, x2: xc(i) + bw / 2 + 3, y1: y(em), y2: y(em), stroke: cssVar("--accent-ink"), "stroke-width": 2, "stroke-linecap": "round", class: "fade" }, svg);
       });
       const med = num(STATE.cardX && STATE.cardX.earnings && STATE.cardX.earnings.medianAbsMove);

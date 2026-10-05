@@ -1159,8 +1159,9 @@
         const cx = xAt(i);
         if (cx < -2 || cx > w + 2) return;
         if (v === null) { s("circle", { cx, cy: mid, r: 1.6, fill: paint("--label-4") }, svg); return; }
+        if (v === 0) { s("rect", { x: cx - bw / 2, y: mid - 0.5, width: bw, height: 1, fill: paint("--label-3"), class: "zero" }, svg); return; }
         const hh = hOf(v);
-        const pos = v >= 0;
+        const pos = v > 0;
         s("rect", {
           x: cx - bw / 2, y: pos ? mid - hh : mid, width: bw, height: hh, rx: Math.min(3, bw / 2),
           fill: paint(pos ? pal.pos : pal.neg), "fill-opacity": hl.size && !hl.has(X[i]) ? 0.8 : 1,
@@ -1224,7 +1225,7 @@
           if (o.readout) return { parts: o.readout(i) };
           return {
             parts: [part(xf(X[i]), "k"), v === null ? part("no reading", "k") : h("b", { "data-tone": v < 0 ? pal.negT : v > 0 ? pal.posT : null }, fmt(v))],
-            dots: v === null ? [] : [{ x: xAt(i), y: v >= 0 ? mid - hOf(v) : mid + hOf(v), color: v >= 0 ? pal.pos : pal.neg }],
+            dots: v === null ? [] : [{ x: xAt(i), y: v > 0 ? mid - hOf(v) : v < 0 ? mid + hOf(v) : mid, color: v > 0 ? pal.pos : v < 0 ? pal.neg : "--label-3" }],
           };
         },
       });
@@ -1252,7 +1253,8 @@
         for (let c = 0; c < C; c++) {
           const v = num(grid[r] && grid[r][c]);
           const cell = { x: left + c * cw + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5 };
-          if (v === null || v === 0) { s("rect", { ...cell, fill: paint("--fill-4") }, svg); continue; }
+          if (v === null) { s("rect", { ...cell, fill: "none", stroke: paint("--label-4"), "stroke-width": 1, "stroke-dasharray": "2 2", class: "void" }, svg); continue; }
+          if (v === 0) { s("rect", { ...cell, fill: paint("--fill-4"), class: "zero" }, svg); continue; }
           const a = clamp(Math.sqrt(Math.abs(v) / cap), 0.08, 1);
           s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : pal.neg), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
         }
@@ -1450,7 +1452,7 @@
       for (const t of niceTicks(Math.min(...xs), Math.max(...xs), w < 600 ? 4 : 6)) s("text", { x: x(t), y: H - 6, text: String(t), ...TA }, svg);
       scrub(el, svg, {
         xs: P.map((p) => p[0]), top, bottom: H - bot, label: o.label,
-        onMove: (i) => ({ dots: [{ x: P[i][0], y: P[i][1], color: P0[i][1] >= 0 ? "--up" : "--down" }], parts: [part("At " + F.px(P0[i][0]), "k"), h("b", { "data-tone": tone(P0[i][1]) }, fmt(P0[i][1]))] }),
+        onMove: (i) => ({ dots: [{ x: P[i][0], y: P[i][1], color: P0[i][1] > 0 ? "--up" : P0[i][1] < 0 ? "--down" : "--label-3" }], parts: [part("At " + F.px(P0[i][0]), "k"), h("b", { "data-tone": tone(P0[i][1]) }, fmt(P0[i][1]))] }),
       });
     });
   }

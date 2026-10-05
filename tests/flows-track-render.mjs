@@ -687,6 +687,91 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.close();
 }
 
+{
+  const page = await open();
+  const zero = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const C = window.FlowsUI.chart, cssVar = window.FlowsUI.cssVar;
+    const mk = () => { const d = document.createElement("div"); d.style.cssText = "width:640px;margin:40px 0 0 40px"; document.body.prepend(d); return d; };
+    const tokens = { up: cssVar("--up-mark"), down: cssVar("--down-mark"), long: cssVar("--g-long"), short: cssVar("--g-short"), neutral: cssVar("--label-3"), fill4: cssVar("--fill-4"), absent: cssVar("--label-4") };
+    const values = [2, 0, -1, null, 0.5];
+    const read = (host) => {
+      const svg = host.querySelector(":scope > svg");
+      const base = svg.querySelector("line.base");
+      const mid = +base.getAttribute("y1");
+      const bars = [...svg.querySelectorAll("rect.grow")].map((r) => ({ fill: r.getAttribute("fill"), y: +r.getAttribute("y"), h: +r.getAttribute("height") }));
+      const z = svg.querySelector("rect.zero");
+      const dot = svg.querySelector("circle:not(.ring)");
+      return { mid, bars, zero: z ? { fill: z.getAttribute("fill"), y: +z.getAttribute("y"), h: +z.getAttribute("height"), x: +z.getAttribute("x"), w: +z.getAttribute("width") } : null, absent: dot ? dot.getAttribute("fill") : null, rects: svg.querySelectorAll("rect").length };
+    };
+    const dir = mk();
+    window.__div = C.diverging(dir, { values, label: "Diverging" });
+    const gam = mk();
+    C.diverging(gam, { values, palette: "gamma", label: "Gamma" });
+    const heat = mk();
+    C.heatmap(heat, { rows: ["A"], cols: ["x", "y", "z"], grid: [[1, 0, null]], label: "Heat" });
+    await frame();
+    await frame();
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    dir.scrollIntoView({ block: "center", behavior: "instant" });
+    const svg = dir.querySelector(":scope > svg");
+    const b = svg.getBoundingClientRect();
+    const vw = svg.viewBox.baseVal.width, vh = svg.viewBox.baseVal.height;
+    const d = read(dir);
+    const cells = [...heat.querySelector(":scope > svg").querySelectorAll("rect")].slice(0, 3).map((r) => ({ cls: r.getAttribute("class"), fill: r.getAttribute("fill"), stroke: r.getAttribute("stroke"), dash: r.getAttribute("stroke-dasharray"), op: r.getAttribute("fill-opacity") }));
+    heat.focus();
+    heat.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    const hr = heat.querySelector(".ui-readout");
+    const heatReadout = { on: hr.classList.contains("is-on"), text: hr.textContent, value: hr.lastElementChild && hr.lastElementChild.textContent, toned: hr.querySelectorAll("[data-tone]").length };
+    window.__dir = dir;
+    return { tokens, dir: d, gam: read(gam), cells, heatReadout, at: { x: b.left + (d.zero ? d.zero.x + d.zero.w / 2 : 0) * (b.width / vw), y: b.top + d.mid * (b.height / vh) }, plus: { x: b.left + (8 + ((vw - 16) / 5) * 0.5) * (b.width / vw) } };
+  });
+  const T = zero.tokens;
+  ok(T.up && T.down && T.long && T.short && T.neutral && T.fill4 && T.up !== T.neutral && T.down !== T.neutral && T.fill4 !== T.neutral, "the palette and neutral tokens resolve to distinct colours");
+  for (const [name, d] of [["direction", zero.dir], ["gamma", zero.gam]]) {
+    const pos = name === "direction" ? T.up : T.long, neg = name === "direction" ? T.down : T.short;
+    eq(d.bars.length, 3, `ZERO (${name}): three signed readings draw three bars`);
+    eq(d.bars[0].fill, pos, `ZERO (${name}): the positive reading keeps the positive fill`);
+    eq(d.bars[1].fill, neg, `ZERO (${name}): the negative reading keeps the negative fill`);
+    ok(d.bars[0].y < d.mid && d.bars[1].y >= d.mid, `ZERO (${name}): and they sit on their own sides of the axis`);
+    ok(d.zero, `ZERO (${name}): an exact zero is drawn as its own element, not as a bar`);
+    ok(d.zero.fill !== pos && d.zero.fill !== neg, `ZERO (${name}): the zero has neither the positive nor the negative fill (${d.zero.fill})`);
+    eq(d.zero.fill, T.neutral, `ZERO (${name}): it is the neutral --label-3`);
+    eq(d.zero.h, 1, `ZERO (${name}): one pixel tall`);
+    ok(Math.abs(d.zero.y + 0.5 - d.mid) < 1e-9, `ZERO (${name}): centred on the axis (y ${d.zero.y}, axis ${d.mid})`);
+    eq(d.absent, T.absent, `ZERO (${name}): and the null reading is still the absent dot, which the zero is not`);
+  }
+  await page.mouse.move(zero.at.x, zero.at.y);
+  await page.waitForFunction(() => window.__dir.querySelector(".ui-readout.is-on"));
+  const hover = await page.evaluate(() => {
+    const host = window.__dir;
+    const ring = host.querySelector(":scope > svg circle.ring");
+    const ro = host.querySelector(".ui-readout");
+    const base = host.querySelector("line.base");
+    return { at: host._scrubAt, text: ro.textContent, value: ro.querySelector("b") && ro.querySelector("b").textContent, toned: ro.querySelectorAll("[data-tone]").length, dot: ring ? { fill: ring.getAttribute("fill"), cy: +ring.getAttribute("cy") } : null, mid: +base.getAttribute("y1") };
+  });
+  eq(hover.at, 1, `the pointer rests on the zero reading (${hover.text})`);
+  eq(hover.value, "0", `its readout prints the zero, unsigned (${hover.text})`);
+  eq(hover.toned, 0, "with no direction tone on it");
+  ok(hover.dot && hover.dot.fill === T.neutral, `and the scrub dot follows: neutral, not up or down (${hover.dot && hover.dot.fill})`);
+  ok(hover.dot && Math.abs(hover.dot.cy - hover.mid) < 1e-9, `on the axis (cy ${hover.dot && hover.dot.cy}, axis ${hover.mid})`);
+  await page.mouse.move(zero.plus.x, zero.at.y);
+  await page.waitForFunction(() => window.__dir._scrubAt === 0);
+  const plus = await page.evaluate(() => { const r = window.__dir.querySelector(":scope > svg circle.ring"); return r && r.getAttribute("fill"); });
+  eq(plus, T.up, "while the dot on the positive reading beside it is the positive colour, so the neutral is not a lost token");
+  const [pos, zc, nc] = zero.cells;
+  eq(pos.fill, T.long, `HEAT: a positive cell is the gamma palette's long fill at its own opacity (${pos.op})`);
+  eq(zc.cls, "zero", "HEAT: an exact zero is a drawn cell");
+  eq(zc.fill, T.fill4, "HEAT: in the neutral --fill-4");
+  eq(nc.cls, "void", "HEAT: a null is a void");
+  eq(nc.fill, "none", "HEAT: with no fill");
+  ok(nc.dash && nc.stroke === T.absent, `HEAT: and a dashed outline in --label-4 (${nc.dash})`);
+  ok(zc.fill !== nc.fill, "HEAT: so the zero cell and the null cell no longer draw the same");
+  ok(zero.heatReadout.on && zero.heatReadout.value === "0", `HEAT: the keyboard readout of the zero cell is the reading 0, not "no reading" (${zero.heatReadout.text})`);
+  eq(zero.heatReadout.toned, 0, "HEAT: with no long or short tone");
+  await page.close();
+}
+
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));
 await browser.close();
 
@@ -700,4 +785,5 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `at mount and no observer loop error, one throwing draw starving no other chart, a host that leaves and ` +
   `returns before its first frame still drawn, the width re-read where no observer keeps it, and root tokens ` +
   `read from one computed style; a live line updated in place, its svg, crosshair, readout and focus kept, ` +
-  `the newest point drawn and nothing re-animated`);
+  `the newest point drawn and nothing re-animated; an exact zero drawn neutral by diverging and heatmap, ` +
+  `its dot and readout without a side, and apart from an absence`);

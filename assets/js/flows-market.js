@@ -16,10 +16,7 @@
     const n = isNum(v);
     return n === null ? DASH : signGlyph(n) + Math.abs(n).toFixed(dp === undefined ? 2 : dp);
   };
-  const pct = (v, dp) => {
-    const n = isNum(v);
-    return n === null ? DASH : (n * 100).toFixed(dp === undefined ? 1 : dp) + "%";
-  };
+  const pct = (v, dp) => F.pct(isNum(v), dp);
   const usd = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;

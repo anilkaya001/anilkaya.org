@@ -374,7 +374,7 @@
           if (px[i] !== null) parts.push(C.part(F.px(px[i]), "k"));
           if (S[i].source === "boards") parts.push(C.part("board-only", "k"));
           const dots = [];
-          if (v !== null) dots.push({ x: xAt(i), y: sy(v), color: v >= 0 ? "--up" : "--down" });
+          if (v !== null) dots.push({ x: xAt(i), y: sy(v), color: v > 0 ? "--up" : v < 0 ? "--down" : "--label-3" });
           if (py && px[i] !== null) dots.push({ x: xAt(i), y: py(px[i]), color: "--accent" });
           return { parts, dots };
         },

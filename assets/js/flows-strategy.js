@@ -1208,7 +1208,7 @@
         const X = xsAll[i];
         const e = expAt(ser.exp, X);
         const tv = ser.today && ser.today[i] ? ser.today[i][1] : null;
-        const dots = [{ x: x(X), y: y(e), color: e >= 0 ? "--up" : "--down" }];
+        const dots = [{ x: x(X), y: y(e), color: e > 0 ? "--up" : e < 0 ? "--down" : "--label-3" }];
         if (tv !== null) dots.push({ x: x(X), y: y(tv), color: "--accent" });
         return {
           dots, top: 0,
