@@ -2918,11 +2918,14 @@ adds no `live:*` key and writes nothing to D1.
 placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
 polls only while a socket is connected or a `/api/rt/snap` request is less than
 60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
-own alarm every second. No viewer, no vendor call. Per minute, with someone
-watching: px 12 calls, fl 12, gx 60 (one name a second: the two indices, six
-fixed names and six rotating names Tier 2 reads, and up to three focus tickers
-viewers are looking at), mk 12 (two calls every 10 s), nw 2, so about 98 calls
-a minute against its own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+own alarm every second. No viewer, no vendor call, and only the topics a viewer
+names are polled: a socket's `k`, or a `/api/rt/snap` topic for 60 s after the
+request. Per minute, for each topic someone is watching: px 12 calls, fl 12, mk
+12 (two calls every 10 s), nw 2, and gx 4 per focus ticker (one name every 15
+s, at most three names, only for sockets that ask gx with a focus ticker; no
+page does today). The home page (px, mk, nw) costs about 26 calls a minute, a
+board, the ticker, the market or the unusual page about 12, against the rail's
+own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
 separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 
 **Kill switches (vars in `wrangler.toml`, no secret).**
