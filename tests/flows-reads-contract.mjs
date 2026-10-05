@@ -446,6 +446,93 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 {
   const f = fakeD1();
   seed(f);
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const quick = (u) => {
+    if (/\/ohlc\//.test(u.pathname)) return { data: [] };
+    return { data: {} };
+  };
+  globalThis.fetch = async (input, init = {}) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    const name = /^\/api\/stock\/([^/]+)\//.exec(u.pathname);
+    const call = { path: u.pathname, name: name ? name[1] : u.searchParams.get("ticker_symbol"), at: Date.now(),
+      signalled: !!(init && init.signal), abortedAt: null };
+    calls.push(call);
+    const signal = init && init.signal;
+    const onAbort = (fn) => { if (signal) signal.addEventListener("abort", () => { call.abortedAt = Date.now(); fn(signal.reason); }, { once: true }); };
+    if (call.name === "AMD" && !/option-contracts/.test(u.pathname)) {
+      return new Response(JSON.stringify(quick(u)), { headers: { "Content-Type": "application/json" } });
+    }
+    if (call.name === "MSFT") {
+      const body = new ReadableStream({ start(controller) { onAbort((reason) => controller.error(reason)); } });
+      return new Response(body, { headers: { "Content-Type": "application/json" } });
+    }
+    return new Promise((_, reject) => onAbort(reject));
+  };
+  const CAP_MS = 8000 + 1500;
+  const timed = async (get, route) => {
+    const t0 = Date.now();
+    const got = await Promise.race([get(route), new Promise((r) => setTimeout(() => r(null), CAP_MS))]);
+    return { got, at: Date.now(), t0 };
+  };
+  const firstCall = (name) => Math.min(...calls.filter((c) => c.name === name).map((c) => c.at));
+  const within = (ms, deadline) => ms >= deadline - TIMER_SLACK_MS && ms <= deadline + TIMER_SLACK_MS;
+  try {
+    const get = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+    const [live, stalled, chain, pages, tape] = await Promise.all([
+      timed(get, "/api/flows/live?t=GOOG"),
+      timed(get, "/api/flows/live?t=MSFT"),
+      timed(get, "/api/flows/chain?t=NVDA"),
+      timed(get, "/api/flows/chain?t=AMD"),
+      timed(get, "/api/flows/tape?t=NVDA"),
+    ]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    ok(live.got !== null, `A VENDOR THAT NEVER ANSWERS NO LONGER HOLDS THE QUOTE ROUTE OPEN: it answered before the ${CAP_MS} ms cap`);
+    const liveMs = live.at - firstCall("GOOG");
+    ok(live.got.res.status === 200 && live.got.body.status === "unavailable" && live.got.body.why === "chain_timeout",
+      `the quote card says why: unavailable, chain_timeout (${live.got.res.status} ${JSON.stringify(live.got.body).slice(0, 80)})`);
+    ok(within(liveMs, 4000), `by the default 4,000 ms deadline plus at most ${TIMER_SLACK_MS} ms (${liveMs} ms after the vendor call)`);
+
+    ok(stalled.got !== null, "a vendor that sends its headers and then stalls the body is bounded by the same deadline");
+    const stalledMs = stalled.at - firstCall("MSFT");
+    ok(stalled.got.body.status === "unavailable" && stalled.got.body.why === "chain_timeout" && within(stalledMs, 4000),
+      `the body read ends at 4,000 ms as chain_timeout, not as malformed data (${stalledMs} ms, ${JSON.stringify(stalled.got.body).slice(0, 80)})`);
+
+    ok(chain.got !== null, "the chain route ends too");
+    const chainMs = chain.at - firstCall("NVDA");
+    ok(chain.got.res.status === 504 && chain.got.body.error && chain.got.body.error.code === "chain_timeout",
+      `a chain read whose vendor never answers is JSON 504 chain_timeout (${chain.got.res.status} ${chain.got.text.slice(0, 80)})`);
+    eq(chain.got.res.headers.get("Cache-Control"), "no-store", "as a no-store API error");
+    ok(within(chainMs, 6000), `at the OHLC deadline of 6,000 ms, the first deadline among the calls it cannot do without (${chainMs} ms)`);
+
+    const aborted = (name, re) => calls.filter((c) => c.name === name && re.test(c.path));
+    const abortsAt = (list, deadline) => list.length > 0 && list.every((c) => c.signalled && c.abortedAt !== null && within(c.abortedAt - c.at, deadline));
+    ok(abortsAt(aborted("NVDA", /\/ohlc\/1d$/), 6000), "EACH SUBREQUEST IS ABORTED AT ITS OWN DEADLINE: OHLC at 6,000 ms");
+    ok(abortsAt(aborted("NVDA", /\/stock-state$/), 4000), "the stock state at the default 4,000 ms");
+    ok(abortsAt(aborted("NVDA", /\/option-contracts$/), 8000),
+      `the chain page at 8,000 ms (${aborted("NVDA", /\/option-contracts$/).map((c) => c.abortedAt === null ? "never" : c.abortedAt - c.at).join(",")} ms)`);
+
+    ok(pages.got !== null, "a chain whose page alone hangs ends too");
+    const pagesMs = pages.at - firstCall("AMD");
+    ok(pages.got.res.status === 504 && pages.got.body?.error?.code === "chain_timeout" && within(pagesMs, 8000),
+      `with every other call answered, the chain page's own 8,000 ms deadline ends the route as 504 chain_timeout (${pages.got.res.status}, ${pagesMs} ms)`);
+
+    ok(tape.got !== null && tape.got.res.status === 200, `the tape route answers (${tape.got && tape.got.res.status})`);
+    const legs = calls.filter((c) => /net-prem-ticks$|flow-alerts$/.test(c.path));
+    ok(legs.length === 2 && abortsAt(legs, 6000),
+      `THE TAPE'S RACE NOW CANCELS THE SUBREQUEST: both legs are aborted at tier1TimeoutMs, 6,000 ms, not left running behind the race (${legs.map((c) => c.abortedAt === null ? "never" : c.abortedAt - c.at).join(",")} ms)`);
+
+    ok(calls.every((c) => c.signalled), `every vendor call carries an abort signal (${calls.filter((c) => !c.signalled).map((c) => c.path).join(", ")})`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());

@@ -960,9 +960,13 @@ const cronMinutes = (cron) => {
         "never written, and the nightly health gate's live:focus check is what says so");
   }
   ok(/const job = FLOWS_LIVE\.cronJob\(event && event\.cron, at\);\s*if \(job === "rth"\)/.test(worker) &&
-     /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params\) \}\);/.test(worker),
+     /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\) \}\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
     "the focus job reads the vendor through the same uwFetch as Tier 1");
+  ok(/return FLOWS_LIVE\.rthTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\) \}\);/.test(worker) &&
+     /fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\),\s*admit:/.test(worker),
+    "the Tier 1 tick, the focus tick and the tape pass tier1TimeoutMs to uwFetch, so the subrequest a race gives up on is aborted " +
+    "at the same instant rather than left running behind it");
   ok(/if \(job === "summary"\) \{\s*guard\("flows summary refresh failed", summaryFiring\(env, at\)\);\s*return;\s*\}/.test(worker) &&
      !/guard\("flows nightly dispatch failed"[\s\S]*?guard\("flows summary refresh failed"/.test(worker),
     "the summary job is the summary firing's alone and the housekeeping branch no longer carries it");

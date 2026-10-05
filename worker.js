@@ -30,7 +30,7 @@ import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
-import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
+import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
@@ -2021,19 +2021,31 @@ const INFO_TTL_SECONDS = 6 * 3600;
 
 const CHAIN_REFRESH_FLOOR_SECONDS = 15;
 
+const UW_DEADLINE_MS = 4000;
+
+const UW_OHLC_DEADLINE_MS = 6000;
+
+const UW_CHAIN_DEADLINE_MS = 8000;
+
 async function uwFetch(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
   const url = new URL((env.UW_BASE || UW_BASE_DEFAULT) + path);
   for (const [k, v] of Object.entries(params || {})) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
+  const signal = AbortSignal.timeout(deadlineMs);
+  const failed = (message) => signal.aborted
+    ? new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms")
+    : new HttpError(502, "chain_upstream", message);
   let response;
   try {
     response = await fetch(url, {
       headers: { Authorization: "Bearer " + env.UW_API_KEY, Accept: "application/json" },
+      signal,
     });
   } catch {
-    throw new HttpError(502, "chain_upstream", "Market data provider unreachable");
+    throw failed("Market data provider unreachable");
   }
   if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
   if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
@@ -2050,7 +2062,7 @@ async function uwFetch(env, path, params, opts) {
     try {
       text = await response.text();
     } catch {
-      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+      throw failed("Market data provider returned malformed data");
     }
     if (text.length > maxBytes) throw tooLarge();
     try {
@@ -2062,7 +2074,7 @@ async function uwFetch(env, path, params, opts) {
   try {
     return await response.json();
   } catch {
-    throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+    throw failed("Market data provider returned malformed data");
   }
 }
 
@@ -2237,12 +2249,12 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
     exclude_zero_oi_chains: "true",
     limit: CHAIN_PAGE_SIZE,
     ...(page > 1 ? { page } : {}),
-  });
+  }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
 
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
 
@@ -2382,8 +2394,8 @@ const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
 async function buildStrategyContext(env, ctx, ticker) {
   const t = encodeURIComponent(ticker);
   const [breakdown, candles, state, info] = await Promise.all([
-    uwFetch(env, `/api/stock/${t}/expiry-breakdown`, {}).catch(() => null),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    uwFetch(env, `/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(() => null),
+    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
     uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
     cachedTickerInfo(env, ctx, ticker),
   ]);
@@ -2402,7 +2414,7 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expiryDate = null;
   if (breakdown !== null && !expiries.length && asOf) {
-    const retry = await uwFetch(env, `/api/stock/${t}/expiry-breakdown`, { date: asOf })
+    const retry = await uwFetch(env, `/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(() => null);
     if (retry !== null) {
       const dated = readExpiries(retry);
@@ -2412,7 +2424,7 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expirySource = "breakdown";
   if (breakdown !== null && !expiries.length && asOf) {
-    const exposure = await uwFetch(env, `/api/stock/${t}/greek-exposure/expiry`, {})
+    const exposure = await uwFetch(env, `/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(() => null);
     if (exposure !== null) {
       const listed = readExpiries(exposure)
@@ -2486,7 +2498,7 @@ async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } 
     option_type: optionType,
     limit: CHAIN_PAGE_SIZE,
     ...(n > 1 ? { page: n } : {}),
-  });
+  }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
   const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
@@ -3697,7 +3709,7 @@ async function route(request, env, url, ctx) {
       }
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params),
+        json, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
         admit: await tapeAdmission(env, ctx, ticker) });
     }
 
@@ -3985,14 +3997,14 @@ export default {
     if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
       })());
       return;
     }
     if (job === "focus") {
       guard("flows focus tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
       })());
       return;
     }
