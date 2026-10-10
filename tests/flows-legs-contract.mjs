@@ -959,11 +959,29 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "PUBLISH_RETRYABLE", "publishRetryDelay", "publishedStore", "activeStages", "bindStages", "landedKeys",
       "summarize", "publish",
     ],
+    "clock.mjs": [
+      "SESSION_OPEN_MINUTES", "SESSION_CLOSE_MINUTES", "PIPELINE_CADENCE", "easternNow", "sessionBarOverdue",
+      "clockSaid", "intradayRefusal", "closedPriceWindow", "easternDayOf", "readDayOf",
+    ],
+    "rank.mjs": [
+      "eligible", "GATED_LIQUIDITY_MARGIN", "screenerDollarVolume", "gatedWorthEnriching", "screenerTilt",
+      "ivRankFraction", "daysToEarnings", "vendorNum", "onWire", "fixed", "candlesAscending", "medianDollarVolume",
+      "atr14", "CANDLE_BREAK_LOG", "CANDLE_BREAK_VOLUME", "medianVolume", "repairCandles", "sessionReference",
+      "sessionRow", "readPxOf", "computeFeatures", "candleDate", "sessionCandles", "candleCut", "sessionRows",
+      "week52Position", "ret", "returnCorrelation", "collapseShareClasses", "measureVariationProbes",
+      "boardVariationMeta", "featuresVariationInput", "variationOptions", "SIGNED", "DEAD_BAND",
+      "BOARD_SCHEMA_VERSION", "scoreBoard", "partitionSides", "B64", "packSpark", "boardRow", "hz", "toRows",
+      "WATCH_ROWS", "toWatchRows", "selectExtremes", "MOVER_ROWS", "netPremiumOf", "moverRow", "buildMovers",
+      "SECTOR_ETFS", "TRIX_SPAN", "TRIX_SERIES", "TRIX_WARMUP", "TRIX_MIN_CANDLES", "ema", "trixSeriesBp",
+      "TRIX_FULL_SCALE_BP", "scaleTrix", "sectorTrix", "sectorLean", "NEWS_ROWS", "shapeNews", "HOLDERS_RETRY_DAYS",
+      "holdersRefusal", "unusualContractId", "markNewContracts", "priorNote", "ideasPayload", "congressRows",
+      "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
   };
-  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3};
+  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5};
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
   let homed = 0;
