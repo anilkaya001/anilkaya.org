@@ -92,7 +92,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   ok(read({ ...rel(0.24, 0.30), ivp: 74 }).conflicts.length === 0, "and 74 is under the 75th-percentile line");
   const ivpFact = factOf(read({ ivp: 37 }), "ivp");
   eq(ivpFact.label, "Vendor 1-year IV percentile (tenor not documented)", "the percentile's label says it is the vendor's and that its tenor is not documented");
-  ok(/tenor the vendor does not document/.test(ivpFact.unit) && ivpFact.display.endsWith(ivpFact.unit), "its unit says the same and is printed with the figure");
+  ok(/tenor no document held for it states/.test(ivpFact.unit) && ivpFact.display.endsWith(ivpFact.unit), "its unit says the same and is printed with the figure");
   ok(/not read as the 30-day figure/.test(ivpFact.note) && !/past year of 30-day/.test(ivpFact.unit + ivpFact.note), "and its note no longer claims the percentile ranks 30-day implied volatility");
   eq(ivpFact.text, "37th", "the figure prints as before");
   ok(ivpFact.grade === 1, "and stays graded weak");
