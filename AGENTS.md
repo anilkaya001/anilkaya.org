@@ -1219,7 +1219,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites.json` registers 82 suites: 50 that need only Node (N), 15 that also
+`tests/suites.json` registers 83 suites: 50 that need only Node (N), 16 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1248,8 +1248,8 @@ Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_P
 ```
 market-ticker             landing-motion            placement                 flows-rt-client
 flows-desk-client         flows-desk-wiring         flows-ticker              flows-render
-flows-events              flows-readers-render      flows-net-render          flows-strip
-flows-ask                 flows-track-render        flows-reading-render
+flows-events              flows-readers-render      flows-export              flows-net-render
+flows-strip               flows-ask                 flows-track-render        flows-reading-render
 ```
 <!-- /gen:suites-local -->
 
