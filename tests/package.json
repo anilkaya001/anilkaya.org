@@ -21,6 +21,7 @@
     "test:academy": "node --disable-warning=ExperimentalWarning academy-contract.mjs",
     "test:lab-write": "node --disable-warning=ExperimentalWarning lab-write-contract.mjs",
     "test:staging": "node staging-contract.mjs",
+    "test:launch-readiness": "node launch-readiness.mjs",
     "test:placement": "node placement-contract.mjs",
     "test:worker": "node worker-regression.mjs",
     "test:browser": "node regression.mjs",
