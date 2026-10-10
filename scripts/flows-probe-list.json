@@ -84,7 +84,7 @@
     {"id": "sector-tide-technology", "tier": "used", "op": "/api/market/{sector}/sector-tide", "path": "/api/market/Technology/sector-tide", "query": {"date": "{date}"}},
     {"id": "sector-tide-consumer-cyclical", "tier": "used", "op": "/api/market/{sector}/sector-tide", "path": "/api/market/Consumer%20Cyclical/sector-tide", "query": {"date": "{date}"}},
     {"id": "fda-calendar", "tier": "used", "op": "/api/market/fda-calendar", "path": "/api/market/fda-calendar", "query": {"limit": "100"}},
-    {"id": "option-activity-unusual", "tier": "2", "op": "/api/option-activity/unusual", "path": "/api/option-activity/unusual", "query": {"date": "{date}", "limit": "200"}},
+    {"id": "option-activity-unusual", "tier": "used", "op": "/api/option-activity/unusual", "path": "/api/option-activity/unusual", "query": {"date": "{date}", "limit": "200"}},
     {"id": "multi-leg-session", "tier": "used", "op": "/api/option-trades/multi-leg", "path": "/api/option-trades/multi-leg", "query": {"limit": "500", "exclude_other": "true", "newer_than": "{date}T14:30:00Z", "older_than": "{date}T20:00:00Z"}},
     {"id": "options-pulse-total", "tier": "used", "op": "/api/options-pulse/total", "path": "/api/options-pulse/total", "query": {"date": "{date}"}},
     {"id": "vol-anomaly-top", "tier": "used", "op": "/api/volatility/anomaly/top", "path": "/api/volatility/anomaly/top", "query": {"direction": "short_vol", "date": "{date}", "limit": "50"}},

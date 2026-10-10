@@ -31,9 +31,9 @@ const list = probe.loadList();
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 75, "every one of the 75 operations a production call site reads is probed and labelled used: the 38 labelled before and the 37 the nightly legs read that were still filed under Tiers 1 and 2");
+  eq(byTier.used.size, 76, "every one of the 76 operations a production call site reads is probed and labelled used: the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, and the unusual-activity leg's one");
   eq(byTier["1"].size, 1, "the one Tier 1 operation of the adoption plan that no code reads yet is probed");
-  eq(byTier["2"].size, 11, "the three Tier 2 operations no code reads yet are probed, plus the eight entitlement probes, and Tier 3 is left out");
+  eq(byTier["2"].size, 10, "the two Tier 2 operations no code reads yet are probed, plus the eight entitlement probes, and Tier 3 is left out");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -125,7 +125,7 @@ const list = probe.loadList();
     "including the two earnings calendars the events leg names through ${step.route}");
   deep(listOps.filter((op) => tierOf.get(op) === "used" && !read.has(op)), [],
     "and no operation is labelled used that no production call site reads");
-  eq(read.size, 75, "75 operations are read in production");
+  eq(read.size, 76, "76 operations are read in production");
 
   const entitled = list.entitlement;
   deep(entitled.slice().sort(), ["/api/congress/unusual-trades", "/api/futures/{contract}/stats", "/api/lit-flow/{ticker}",
