@@ -1,4 +1,5 @@
-import { json, requireTicker } from "../http.js";
+import { HttpError, json, requireTicker, internalKey, edgeCache } from "../http.js";
+import { projectionColumns, projectUniverse } from "../../shared/flows-cross.js";
 import * as FLOWS_ASK from "../../shared/flows-ask.js";
 import * as FLOWS_LIVE from "../../shared/flows-live-worker.js";
 
@@ -28,6 +29,8 @@ const NIGHTLY = Object.freeze([
 const OVERLAID = Object.freeze(["flowalerts", "pulse", "news"]);
 const CARDS = Object.freeze(["card", "card-x", "hist"]);
 const BOARD_SIDES = Object.freeze(["short", "watch"]);
+const UNIVERSE_COLS_TTL_S = 300;
+const parseObject = (text) => { try { const v = JSON.parse(text); return v && typeof v === "object" ? v : null; } catch { return null; } };
 
 const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + name, methods: ["GET"], auth: "flows", handler });
 
@@ -39,6 +42,35 @@ export function flowsReadRows(deps) {
     const stored = await readServed(env, key);
     if (stored === null) return json(pending);
     return passthrough(stored);
+  };
+
+  const universeColumns = async ({ env, ctx, url }) => {
+    const wanted = projectionColumns(url.searchParams.get("cols"));
+    if (!wanted) throw HttpError.of("invalid_cols");
+    const key = internalKey("universe-cols", wanted.join(","));
+    const headersOf = (updatedAt, fresh) => ({
+      "Content-Type": "application/json; charset=utf-8",
+      "X-Payload-Updated": String(updatedAt || 0),
+      ...nightlyFreshHeaders({ fresh }),
+    });
+    const hit = await edgeCache.get(key);
+    if (hit) {
+      const text = await hit.text().catch(() => "");
+      const meta = parseObject(hit.headers.get("X-Nightly-Meta") || "");
+      if (parseObject(text) && meta) return new Response(text, { status: 200, headers: headersOf(hit.headers.get("X-Payload-Updated"), meta) });
+    }
+    const stored = await readServed(env, "universe");
+    if (stored === null) return json(PENDING);
+    const universe = parseObject(stored.payload);
+    if (!universe) return json({ status: "unreadable" });
+    const text = JSON.stringify(projectUniverse(universe, wanted));
+    const kept = new Response(text, { headers: { "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "max-age=" + UNIVERSE_COLS_TTL_S, "X-Payload-Updated": String(stored.updatedAt || 0),
+      "X-Nightly-Meta": JSON.stringify(stored.fresh || {}) } });
+    const put = edgeCache.put(key, kept);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+    else await put;
+    return new Response(text, { status: 200, headers: headersOf(stored.updatedAt, stored.fresh) });
   };
 
   const overlaid = (name) => async ({ env }) => {
@@ -108,7 +140,10 @@ export function flowsReadRows(deps) {
     row("board", board),
     row("calib", servedView("calib")),
     row("dispersion", servedView("dispersion")),
-    ...NIGHTLY.map(([name, key, pending]) => row(name, nightly(key, pending))),
+    ...NIGHTLY.map(([name, key, pending]) => {
+      const plain = nightly(key, pending);
+      return row(name, name === "universe" ? (rc) => (rc.url.searchParams.has("cols") ? universeColumns(rc) : plain(rc)) : plain);
+    }),
     ...OVERLAID.map((name) => row(name, overlaid(name))),
     ...CARDS.map((kind) => row(kind, card(kind))),
     row("brief", brief),

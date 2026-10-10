@@ -338,7 +338,7 @@ try {
     const s = await strips(page);
     deep(s.fields, FIELDS, "px rows map back to the live:strips field order the pages already read");
     deep(Object.keys(s.rows).sort(), ["AMD", "NVDA", "SPY"], "one row per ticker");
-    eq(s.rows.NVDA.length, FIELDS.length, "each row is the 23 strip values, without the ticker and the vendor stamp");
+    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the vendor stamp");
     eq(s.rows.NVDA[0], 200, "px first");
     eq(s.rows.NVDA[FIELDS.indexOf("chg")], chgOf(200, 190), "and the change the server computed from the same row's prev");
     eq(s.session, DAY, "the session comes from the frame's fresh entry");

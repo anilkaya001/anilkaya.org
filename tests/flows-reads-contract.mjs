@@ -809,7 +809,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
-    ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
+    ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/universe?cols=t,sec,chg,iv30p,ed", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
     ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1], ["/api/flows/calib", 1], ["/api/flows/dispersion", 1],
     ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
     ["/api/flows/ask", 9, { init: ASK({ question: "what is the market doing" }) }],
@@ -950,6 +950,64 @@ class FakeCache {
   const plain = await bare("/api/flows/board?side=long");
   await plain.settle();
   ok(plain.res.status === 200, "with no Cache API at all (a test bench, a local runtime) nothing is kept and nothing fails");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const names = Array.from({ length: 670 }, (_, i) => "T" + String(i).padStart(3, "0"));
+  const sectors = ["Technology", "Energy", "Healthcare", "Financial Services", "Industrials"];
+  const chg = names.map((_, i) => Math.round((((i * 37) % 200) - 100) * 3.1));
+  const iv30p = names.map((_, i) => (i % 9 === 0 ? null : 180 + ((i * 53) % 520)));
+  const ed = names.map((_, i) => (i % 2 ? null : (i * 7) % 60));
+  f.put("universe", { ...NIGHTLY, status: "ok", n: names.length, t: names, sectors, sec: names.map((_, i) => i % sectors.length),
+    units: { chg: ["fraction", 1e4], iv30: ["vol", 1e3], iv30p: ["vol", 1e3], ed: ["sessions", 1], dex: ["fraction", 100] },
+    cols: { chg, iv30: names.map((_, i) => 300 + i % 400), iv30p, ed, dex: names.map((_, i) => i % 50) },
+    pct: { iv30: names.map(() => 50) }, shed: [], bytes: 99000 });
+  const cache = new FakeCache();
+  globalThis.caches = { default: cache };
+  try {
+    const get = await client(f.D1);
+    const rows = (from) => f.rowsRead(from);
+    let n = f.trips.length;
+    const cold = await get("/api/flows/universe?cols=t,sec,chg,iv30p,ed");
+    await cold.settle();
+    const coldRows = rows(n);
+    ok(cold.res.status === 200 && cold.body.status === "ok" && cold.body.projection.join() === "chg,ed,iv30p,sec,t",
+      "THE UNIVERSE COLUMN PROJECTION answers the columns asked for, in a fixed order");
+    ok(coldRows <= 1, `and costs the one payload row the whole universe route costs, no more (${coldRows})`);
+    deep(Object.keys(cold.body.cols).sort(), ["chg", "ed", "iv30p"], "only the asked columns travel: no iv30, no dex, no percentiles");
+    ok(cold.body.t.length === 670 && cold.body.sec.length === 670 && cold.body.sectors.length === 5, "the name list and the sector index travel with it");
+    ok(cold.body.pct === undefined && cold.body.shed === undefined, "and nothing else of the payload does");
+    const i = names.indexOf("T123");
+    eq(cold.body.cols.iv30p[i] / cold.body.units.iv30p[1], iv30p[i] / 1e3, "iv30p decodes through its own published scale to the fixture's prior-close value");
+    ok(cold.text.length <= 16 * 1024, `${cold.text.length} bytes for 670 names and five columns (ceiling 16 KiB)`);
+    ok(cold.res.headers.get("X-Fresh-State") !== null && cold.res.headers.get("X-Payload-Updated") !== null, "it carries the nightly's freshness headers and the payload stamp");
+    ok(cache.puts.length === 1 && cache.puts[0] === "https://flows-universe-cols.internal/chg,ed,iv30p,sec,t",
+      "the projection is kept in the Cache API under the normalised column list, and the last good copy of the whole universe is not overwritten with it");
+    n = f.trips.length;
+    const warm = await get("/api/flows/universe?cols=ed,iv30p,chg,sec,t,t");
+    ok(warm.text === cold.text && rows(n) === 0 && f.trips.length === n,
+      `A SECOND READ, in any column order, is served from the cache with 0 D1 rows (${rows(n)}) and the same bytes`);
+    ok(warm.res.headers.get("X-Fresh-State") !== null, "and still stamps freshness on the instant it is read");
+    const other = await get("/api/flows/universe?cols=t,dex,nope");
+    deep([other.body.absent, Object.keys(other.body.cols)], [["nope"], ["dex"]], "a column the payload does not carry is named absent, never answered as zeros");
+    for (const bad of ["", "t;DROP", "a,b,c,d,e,f,g,h,i,j,k,l,m", "t,1x", "t,%00"]) {
+      const r = await get("/api/flows/universe?cols=" + encodeURIComponent(bad));
+      ok(r.res.status === 400 && r.body.error.code === "invalid_cols", `cols=${JSON.stringify(bad)} is refused with a JSON 400`);
+    }
+    const plain = await get("/api/flows/universe");
+    await plain.settle();
+    ok(plain.body.pct && plain.body.cols.dex && cache.puts.some((u) => u.endsWith("/api/flows/universe")),
+      "and the unprojected route is unchanged: the whole payload, kept as its own last good copy");
+    f.fail(/FROM flows_payload/);
+    const down = await get("/api/flows/universe?cols=t,chg,iv30p,sec,ed,dex");
+    ok(down.res.status === 200 && down.res.headers.get("X-Fresh-Last-Good") && down.body.pct,
+      "with the store unreadable, a projection not yet cached is answered by the whole last good universe, a superset of what it asked for");
+    f.fail(null);
+  } finally {
+    delete globalThis.caches;
+  }
 }
 
 {

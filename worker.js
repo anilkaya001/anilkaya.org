@@ -947,7 +947,7 @@ function lastGoodKey(request, url) {
 function rememberLastGood(request, url, response, ctx, now = Date.now()) {
   const cache = edgeCache.handle();
   if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
-  const key = lastGoodKey(request, url);
+  const key = url.searchParams.has("cols") ? null : lastGoodKey(request, url);
   if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
   const seen = state.lastGoodStamped.get(key.url);
   if (seen !== undefined && now - seen < LAST_GOOD_REFRESH_MS) return;

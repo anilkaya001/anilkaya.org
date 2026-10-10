@@ -333,6 +333,8 @@ export const UNIVERSE_COLUMNS = Object.freeze([
     get: (r) => { const v = vnum(r.marketcap); return v !== null && v > 0 ? v : null; } },
   { key: "iv30", unit: "vol", scale: 1e3, prio: 1,
     get: (r) => iv30Of(r) },
+  { key: "iv30p", unit: "vol", scale: 1e3, prio: 2,
+    get: (r) => firstPositive(r.iv30d_1d) },
   { key: "ivp", unit: "pct100", scale: 1, prio: 1,
     get: (r) => { const v = vnum(r.iv_percentile_1y); return v !== null && v >= 0 && v <= 100 ? v : null; } },
   { key: "ts", unit: "fraction", scale: 1e3, prio: 1,
@@ -538,4 +540,40 @@ export function universeValue(universe, ticker, key) {
   if (!col || !unit) return null;
   const v = col[i];
   return Number.isFinite(v) ? v / unit[1] : null;
+}
+
+export const UNIVERSE_PROJECTION_MAX = 12;
+
+export const UNIVERSE_PROJECTION_KEY = /^[A-Za-z][A-Za-z0-9]{0,15}$/;
+
+export function projectionColumns(raw) {
+  if (typeof raw !== "string") return null;
+  const names = [...new Set(raw.split(",").map((x) => x.trim()).filter(Boolean))];
+  if (!names.length || names.length > UNIVERSE_PROJECTION_MAX || !names.every((x) => UNIVERSE_PROJECTION_KEY.test(x))) return null;
+  return names.sort();
+}
+
+export function projectUniverse(universe, wanted) {
+  const u = universe && typeof universe === "object" ? universe : {};
+  const want = Array.isArray(wanted) ? wanted : [];
+  const out = {
+    v: u.v ?? null, generatedAt: u.generatedAt ?? null, sessionDate: u.sessionDate ?? null,
+    ...(u.fresh ? { fresh: u.fresh } : {}),
+    status: u.status ?? "unavailable",
+    ...(u.reason ? { reason: u.reason } : {}),
+    n: Number.isFinite(u.n) ? u.n : null,
+    projection: want.slice(),
+  };
+  if (u.status !== "ok" || !Array.isArray(u.t)) return { ...out, absent: want.slice() };
+  const units = {}, cols = {}, absent = [];
+  for (const key of want) {
+    if (key === "t") out.t = u.t;
+    else if (key === "sec") { out.sectors = u.sectors || []; out.sec = u.sec || []; }
+    else if (u.cols && Array.isArray(u.cols[key]) && u.units && u.units[key]) { cols[key] = u.cols[key]; units[key] = u.units[key]; }
+    else absent.push(key);
+  }
+  out.units = units;
+  out.cols = cols;
+  out.absent = absent;
+  return out;
 }

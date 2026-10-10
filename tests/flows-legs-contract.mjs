@@ -6,7 +6,7 @@ import {
   vnum, isoDay, addDays, sessionsBetween, nextWeekdayIso, pctRanks, pctOf, zScores, ownZ, termSlope, frontStress,
   ivChange, vrpTrailing, gexPerAdv, sharesPerAdv, gammaDollarsPerAdv, vegaDollarsPerAdv, netTilt,
   sectorTilts, bandPosition, impliedCorrelation, compactNumbers, buildUniverse, universeValue,
-  decodeColumn, UNIVERSE_COLUMNS, UNIVERSE_BUDGET_BYTES, SILENCE,
+  decodeColumn, UNIVERSE_COLUMNS, UNIVERSE_BUDGET_BYTES, SILENCE, projectUniverse, projectionColumns,
 } from "../shared/flows-cross.js";
 import {
   seriesPoints, sessionNet, parseNetFlow, zeroDteShare, buildZeroDte, tideSummary, greekFlowTotals,
@@ -157,6 +157,31 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(universeValue(u, "AAA", "si"), 0.086, "short interest keeps its fraction");
   eq(universeValue(u, "AAA", "ed"), 3, "three sessions from Tuesday to Friday's report");
   eq(universeValue(u, "AAA", "chg"), 0.0526, "one-day change in basis points");
+  eq(universeValue(u, "AAA", "iv30p"), 0.38, "iv30p is the previous trading day's 30-day implied volatility (the vendor's iv30d_1d), not today's");
+  eq(u.cols.iv30p[1], null, "BBB sent no iv30d_1d, so iv30p is null and the name has no IV-days");
+  {
+    const shock = buildUniverse([{ ticker: "MOVE", marketcap: "1e10", close: "92", prev_close: "100", sector: "Energy", iv30d: "0.56", iv30d_1d: "0.40" },
+      { ticker: "ZERO", marketcap: "1e9", close: "10", prev_close: "10", sector: "Energy", iv30d: "0.3", iv30d_1d: "0" },
+      { ticker: "NEG", marketcap: "1e8", close: "10", prev_close: "10", sector: "Energy", iv30d: "0.3", iv30d_1d: "-0.2" }], { sessionDate: S, generatedAt: "t" });
+    eq(universeValue(shock, "MOVE", "iv30p"), 0.4, "A NAME WHOSE IV ROSE 40% AFTER THE MOVE carries the prior-close 0.40 in iv30p");
+    eq(universeValue(shock, "MOVE", "iv30"), 0.56, "and today's 0.56 stays in iv30, so the two columns are never the same number");
+    deep([shock.cols.iv30p[1], shock.cols.iv30p[2]], [null, null], "a zero or negative prior volatility is null: no denominator, so no IV-days");
+    ok(UNIVERSE_COLUMNS.find((c) => c.key === "iv30p").prio === 2, "iv30p is shed after the priority 4 and 5 columns, never before");
+  }
+  {
+    const full = buildUniverse([{ ticker: "AAA", marketcap: "2e9", close: "10", prev_close: "9.5", sector: "Technology", iv30d: "0.4", iv30d_1d: "0.38", next_earnings_date: "2026-09-25" },
+      { ticker: "BBB", marketcap: "1e9", close: "20", sector: "Energy" }], { sessionDate: S, generatedAt: "t" });
+    const p = projectUniverse(full, projectionColumns("sec, ed,t,iv30p,chg,t"));
+    deep(p.projection, ["chg", "ed", "iv30p", "sec", "t"], "the projection's column list is deduplicated and sorted, so one set of columns is one cache key");
+    deep(Object.keys(p.cols), ["chg", "ed", "iv30p"], "only the asked columns are copied");
+    eq(universeValue(p, "AAA", "iv30p"), 0.38, "and the projection answers universeValue exactly as the whole payload does");
+    eq(universeValue(p, "AAA", "iv30"), null, "a column that was not asked for is not there");
+    deep(projectUniverse(full, ["t", "nope"]).absent, ["nope"], "a column the payload does not carry is named, not zeroed");
+    const refused = projectUniverse({ v: 1, status: "unavailable", reason: "over_budget", n: 5 }, ["t", "chg"]);
+    deep([refused.status, refused.reason, refused.absent, refused.t], ["unavailable", "over_budget", ["t", "chg"], undefined], "an unavailable universe projects to its status and reason, with no rows");
+    deep([projectionColumns(""), projectionColumns(null), projectionColumns("a;b"), projectionColumns("1a"), projectionColumns(Array.from({ length: 13 }, (_, i) => "c" + i).join(","))], [null, null, null, null, null],
+      "an empty, malformed or oversized column list is refused");
+  }
   eq(u.cols.ts[1], null, "BBB has no 90-day IV, so its slope is null — never a 0 that reads as flat");
   eq(u.cols.vrp[1], null, "and no RV, so no VRP");
   eq(u.counts.ts, 1, "the column count says how many names carry a value");

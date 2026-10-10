@@ -51,7 +51,7 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 20000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 20 s, nw 30 s in the regular session");
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].klass), ["rt", "rt", "rtSlow", "rtSlow", "rtNews"], "classes follow the cadence");
   deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
-  eq(RT.RT_ROW_FIELDS.px.length, 25, "twenty-five columns");
+  eq(RT.RT_ROW_FIELDS.px.length, 30, "thirty columns");
   deep(RT.RT_ROW_FIELDS.gx, ["t", "at", "px", "gOi", "gVol", "gDir", "flow", "lagS"], "gx rows");
   for (const k of TOPICS.filter((t) => t !== "gx")) {
     eq(LIVE_KEYS[RT.RT_TOPICS[k].key] !== undefined, true, `${k} names a live key that exists (${RT.RT_TOPICS[k].key}), so every row has a stored twin`);
