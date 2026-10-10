@@ -538,6 +538,59 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 {
   const f = fakeD1();
   seed(f);
+  const realFetch = globalThis.fetch;
+  const full = (type) => Array.from({ length: 500 }, (_, i) => ({ option_symbol: "NVDA261016" + type + String((i + 1) * 1000).padStart(8, "0") }));
+  const few = (type) => [{ option_symbol: "NVDA261016" + type + "00999000" }];
+  const run = async (secondPage) => {
+    const pages = [];
+    globalThis.fetch = async (input, init = {}) => {
+      const u = new URL(input instanceof Request ? input.url : String(input));
+      if (u.origin !== "http://vendor.test") return realFetch(input, init);
+      const type = u.searchParams.get("option_type") === "put" ? "P" : "C";
+      const page = Number(u.searchParams.get("page") || 1);
+      const call = { type, page, at: Date.now(), doneAt: null, abortedAt: null };
+      if (/option-contracts$/.test(u.pathname)) pages.push(call);
+      const reply = (rows) => new Response(JSON.stringify({ data: rows }), { headers: { "Content-Type": "application/json" } });
+      if (!/option-contracts$/.test(u.pathname)) return reply([]);
+      if (page === 1) return reply(full(type));
+      if (secondPage.hang) {
+        return new Promise((_, reject) => init.signal.addEventListener("abort", () => { call.abortedAt = Date.now(); reject(init.signal.reason); }, { once: true }));
+      }
+      await new Promise((r) => setTimeout(r, secondPage.delayMs));
+      call.doneAt = Date.now();
+      return reply(few(type));
+    };
+    const get = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+    const t0 = Date.now();
+    const keepAlive = setInterval(() => {}, 100);
+    const got = await get("/api/flows/strategy?t=NVDA&expiry=2026-10-16&refresh=1").finally(() => clearInterval(keepAlive));
+    return { got, pages, ms: Date.now() - t0 };
+  };
+  try {
+    const slow = await run({ delayMs: 600 });
+    const second = (type) => slow.pages.find((c) => c.type === type && c.page === 2);
+    ok(slow.got.res.status === 200 && slow.got.body.calls.length === 501 && slow.got.body.puts.length === 501,
+      `a strategy expiry with a second page of each type answers with both (${slow.got.res.status}, ${slow.got.body && slow.got.body.calls && slow.got.body.calls.length}, ${slow.got.body && slow.got.body.puts && slow.got.body.puts.length} rows)`);
+    ok(second("C") && second("P") && Math.abs(second("C").at - second("P").at) < 300,
+      `THE CALL AND PUT SECOND PAGES ARE ASKED TOGETHER, not one after the other (${second("C") && second("P") ? Math.abs(second("C").at - second("P").at) : "missing"} ms apart; 600 ms or more when sequential)`);
+    ok(slow.ms < 1100, `so the two 600 ms pages cost one wait, not two (${slow.ms} ms)`);
+
+    const hung = await run({ hang: true });
+    const hc = hung.pages.find((c) => c.type === "C" && c.page === 2);
+    const hp = hung.pages.find((c) => c.type === "P" && c.page === 2);
+    ok(hung.got.res.status === 200 && hung.got.body.calls.length === 500 && hung.got.body.puts.length === 500 && hung.got.body.callsTruncated === false,
+      `a second page that never answers is dropped and the expiry answers with the first pages (${hung.got.res.status})`);
+    ok(hc && hp && hc.abortedAt !== null && hp.abortedAt !== null && Math.abs(hc.abortedAt - hp.abortedAt) < 300,
+      `BOTH HUNG SECOND PAGES ARE ABORTED AT THE SAME 8,000 MS DEADLINE (${hc && hc.abortedAt !== null ? hc.abortedAt - hc.at : "never"}, ${hp && hp.abortedAt !== null ? hp.abortedAt - hp.at : "never"} ms)`);
+    ok(hung.ms >= 8000 - TIMER_SLACK_MS && hung.ms < 8000 + 1500, `so the worst case is 8 s after the first pages, not 16 s (${hung.ms} ms)`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());

@@ -2525,8 +2525,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
     return { rows, truncated };
   };
 
-  const calls = await gather("call", callsFirst);
-  const puts = await gather("put", putsFirst);
+  const [calls, puts] = await Promise.all([gather("call", callsFirst), gather("put", putsFirst)]);
 
   const ivRaw = [];
   for (const r of calls.rows) ivRaw.push(r && r.implied_volatility);
