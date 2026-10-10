@@ -414,6 +414,44 @@
     return mod;
   }
 
+  function paintConviction(c) {
+    const has = c && typeof c === "object" && Array.isArray(c.horizons);
+    const stated = has ? c.horizons.find((r) => r.k === c.horizon) || null : null;
+    const label = has && c.verdict === "relabel" ? "Agreement index" : "Conviction";
+    const notes = has && c.notes && typeof c.notes === "object" ? c.notes : {};
+    const power = stated && stated.power ? stated.power : null;
+    const diff = stated && stated.diff ? stated.diff : null;
+    const pts = (v) => (isNum(v) === null ? DASH : signed(v * 100, 1));
+    let lead;
+    if (!has) lead = "The conviction evaluation has not been run yet. It is computed from the retained boards on each pipeline run, so it appears with the first run after this page shipped.";
+    else if (c.verdict === "keep") lead = "Conviction keeps its name: the hit rate rises from the low to the high third and the slope's 95% interval is above zero." + (c.addBreadth ? " Breadth carries its own signal and is read beside it." : "");
+    else if (c.verdict === "relabel") lead = "Conviction does not clear its test, so the number is an agreement index: it says how far the families agree, and this record does not show that more agreement means more hits.";
+    else lead = "Not yet evaluated. " + UI.cap(c.reason || "The evaluation could not be made on this run");
+    const powerSaid = power && power.mde !== null
+      ? "The top-minus-bottom gap has a standard error of " + (diff && diff.se !== null ? (diff.se * 100).toFixed(1) : DASH) + " points, so a gap under about " + (power.mde * 100).toFixed(1) + " points cannot be told from none: a " + (power.effect * 100).toFixed(0) + "-point effect " + (power.detectable ? "could" : "cannot") + " be detected here."
+      : null;
+    const names = ["Lowest third", "Middle third", "Highest third"];
+    const tiles = stated ? stated.terciles.map((t, i) => UI.metric(names[i], t.rate === null ? DASH : hitPct(t.rate, 1), {
+      sub: t.n ? "n " + F.int(t.n) + (t.lo !== null ? " · 95% " + hitPct(t.lo) + " to " + hitPct(t.hi) : "") : "no rows",
+    })) : [];
+    if (diff) tiles.push(UI.metric("Top minus bottom", pts(diff.value), { unit: "pts", sub: diff.lo !== null ? "95% " + pts(diff.lo) + " to " + pts(diff.hi) : null }));
+    const body = h("div", { id: "recConvBody" },
+      h("p", { class: "rec-conv-lead", id: "recConvLead" }, lead),
+      tiles.length ? UI.metrics(tiles, { min: 150 }) : null,
+      powerSaid ? h("p", { class: "rec-conv-power", id: "recConvPower" }, powerSaid) : null);
+    return UI.moduleCard({
+      id: "recConvMod", title: label, index: 5,
+      state: has && c.status === "ok" ? null : { state: "pending", reason: has ? lead : "Not evaluated yet." },
+      info: () => ({
+        title: "Does conviction order outcomes?",
+        lead,
+        facts: stated ? [["Horizon", kSaid(stated.k)], ["Rows", F.int(stated.rows)], ["Sessions", F.int(stated.sessions)], ["Slope per 10 points", stated.slope ? "odds " + stated.slope.or10 + "x, 95% " + stated.slope.or10Lo + " to " + stated.slope.or10Hi : DASH], ["Rank correlation", stated.spearman ? signed(stated.spearman.rho, 3) + (stated.spearman.se === null ? "" : " ± " + stated.spearman.se.toFixed(3)) : DASH], ["Breadth", stated.breadth ? signed(stated.breadth.c, 3) + " per family, 95% " + signed(stated.breadth.lo, 3) + " to " + signed(stated.breadth.hi, 3) : DASH]] : [],
+        sections: ["rule", "market", "cluster", "overlap", "floor"].filter((k) => typeof notes[k] === "string").map((k) => ({ title: k[0].toUpperCase() + k.slice(1), lines: [notes[k]] })).concat(powerSaid ? [{ title: "Power", lines: [powerSaid] }] : []),
+      }),
+      body,
+    });
+  }
+
   function sessionRows(sessions) {
     return sessions.map((r) => ({
       d: typeof r.d === "string" ? r.d : null, long: isNum(r.long), short: isNum(r.short), ls: isNum(r.ls),
@@ -730,7 +768,8 @@
         h("div", { class: "rc-chips" }, summaryChips(payload, rows)),
         hit, spread,
         sessionsModule(sessions, meta, isNum(payload.statedHorizon)),
-        paintFeatures(payload.features));
+        paintFeatures(payload.features),
+        paintConviction(payload.conviction));
       paintHit(hit, rows, meta);
       paintSpread(spread, rows, meta);
     })

@@ -915,18 +915,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   for (const k of keys) {
 
-    const m = /^(?:board:(?:long|short)|scores):(\d{4}-\d{2}-\d{2})$/.exec(k);
+    const m = /^board:(?:long|short):(\d{4}-\d{2}-\d{2})$/.exec(k);
     ok(m, `every swept key is a dated archive key and nothing else (${k})`);
     ok(Date.parse(m[1] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
        `${k} is strictly older than the retention window`);
   }
-  ok(keys.some((k) => k.startsWith("scores:")),
-     "and the dated scores pool IS in the sweep — an archive key the prune " +
-     "does not name grows forever");
+  ok(!keys.some((k) => k.startsWith("scores:")),
+     "the dated scores pool is EXEMPT from the sweep: it is a few kilobytes a session and the conviction " +
+     "evaluation and the score track read as far back as the archive reaches, so it is kept");
 
-  eq(keys.length, 3 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
-     "THE BOUND: one run deletes at most three archive keys x the lookback " +
-     "(two board sides and the scores pool), and that number is knowable before it runs");
+  eq(keys.length, 2 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
+     "THE BOUND: one run deletes at most two archive keys x the lookback " +
+     "(the two board sides), and that number is knowable before it runs");
   eq(new Set(keys).size, keys.length, "and never names the same row twice");
 
   ok(!keys.some((k) => k.startsWith("card:") || k === "meta" || k === "board:watch" ||
@@ -975,13 +975,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(refused.seen[0].method, "DELETE", "the sweep deletes rather than overwriting with a tombstone");
 
     const missing = await run(404);
-    eq(missing.seen.length, 3 * LOOKBACK,
+    eq(missing.seen.length, 2 * LOOKBACK,
        "a 404 is an ordinary empty day, so the sweep runs the whole skirt rather than stopping at the first gap");
     ok(!missing.result.abandoned, "and reports no abandonment");
     eq(missing.result.removed, 0, "with nothing removed, honestly");
 
     const done = await run(200);
-    eq(done.result.removed, 3 * LOOKBACK,
+    eq(done.result.removed, 2 * LOOKBACK,
        "and every key that really was there is counted as removed");
   } finally {
     process.env.FLOWS_INGEST_URL = prevUrl;
@@ -3049,8 +3049,35 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
         `${String(r.split).padStart(4)} ${String(r.withOi).padStart(4)} ${(r.withOi ? r.oiSum / r.withOi / KIB : 0).toFixed(1).padStart(6)} ${(r.oi / KIB).toFixed(1).padStart(6)} ${(r.cardXMax / KIB).toFixed(1).padStart(7)}`);
     }
     console.log(lines.join("\n"));
+    const scoresFiles = emitted.filter((name) => /^w-scores-\d{4}-\d{2}-\d{2}\.json$/.test(name));
+    eq(scoresFiles.length, 1, "the dry run archives one dated scores pool");
+    const scoresBytes = fs.statSync(path.join(dir, scoresFiles[0])).size;
+    const scoreNames = JSON.parse(fs.readFileSync(path.join(dir, scoresFiles[0]), "utf8")).rows.length;
+    const perName = scoresBytes / scoreNames;
+    const yearMiB = perName * 670 * 252 / KIB / KIB;
+    console.log(`scores ledger: ${scoresFiles[0]} is ${(scoresBytes / KIB).toFixed(1)} KiB for ${scoreNames} names, ${perName.toFixed(0)} bytes a name; ` +
+      `at 670 names kept past the 126-day prune it adds ${yearMiB.toFixed(1)} MiB a year`);
+    ok(perName < 64 && yearMiB < 12, `a dated scores pool costs ${perName.toFixed(0)} bytes a name, which keeps every session of 670 names under 12 MiB a year (${yearMiB.toFixed(1)})`);
     const deep = [...table.entries()].filter(([depth]) => depth !== "card-x" && table.get(depth).withOi > 0);
     ok(deep.length > 0, "the dry run reaches the open-interest grids on at least one card depth, so the ledger above measured them rather than their absence");
+  }
+
+  {
+    const KIB = 1024;
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, base + "-record.json"), "utf8"));
+    const c = rec.conviction;
+    ok(c && typeof c === "object", "the record carries the conviction evaluation");
+    ok(["ok", "pending", "unavailable"].includes(c.status) && ["keep", "relabel", "pending"].includes(c.verdict),
+       `with a status (${c.status}) and a verdict (${c.verdict}) from the closed sets`);
+    eq(c.label, c.verdict === "relabel" ? "Agreement index" : "Conviction", "whose label follows the verdict");
+    ok(Array.isArray(c.horizons) && c.horizons.length === 2 && c.horizons.every((h) => Number.isInteger(h.k) && Array.isArray(h.terciles) && h.terciles.length === 3),
+       "reads the two horizons with three terciles each");
+    eq(c.horizon, 10, "and states the ten-session horizon");
+    ok(c.status === "ok" || (typeof c.reason === "string" && c.reason.length > 20), "a pending evaluation says why");
+    ok(c.notes && c.notes.rule && c.notes.market && c.notes.cluster && c.notes.overlap && c.notes.floor, "and carries the rule, the market, the clustering and the overlap in words");
+    const recBytes = fs.statSync(path.join(dir, base + "-record.json")).size;
+    ok(recBytes < 64 * 1024, `the record is ${(recBytes / KIB).toFixed(1)}KiB with it, inside the 128KiB the ingest route accepts and the 64KiB this payload keeps to`);
+    ok(/conviction: (keep|relabel|pending) \((Conviction|Agreement index)\)/.test(runLog), "and the run log states the verdict");
   }
 
   {

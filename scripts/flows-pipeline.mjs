@@ -19,6 +19,7 @@ import {
   buildCard, SURFACE_EXPIRIES, indexMarketCross, CROSS_FEEDS, SPOT_EXPOSURE_PAGE,
 } from "../shared/flows-card.js";
 import { tradingCalendar, scoreSessions, icTable, RECORD_NOTES } from "../shared/flows-record.js";
+import { evaluateConviction, CONVICTION_LABELS } from "../shared/flows-conviction.js";
 import { makePermitQueue } from "../shared/flows-permits.js";
 import { fitGarch } from "../shared/flows-garch.js";
 import { runFlowLeg } from "./flows-legs/flow.mjs";
@@ -2966,7 +2967,6 @@ function pruneKeys(sessionDate, {
   for (let back = retentionDays + 1; back <= retentionDays + lookbackDays; back++) {
     const day = new Date(t0 - back * 86400000).toISOString().slice(0, 10);
     for (const side of ["long", "short"]) keys.push(`board:${side}:${day}`);
-    keys.push(`scores:${day}`);
   }
   return keys;
 }
@@ -5426,11 +5426,24 @@ async function main() {
       through: sessionDate,
       hrSessions: HORIZON_SESSIONS,
     });
+    let conviction;
+    try {
+      conviction = evaluateConviction(datedBoards, recordCloses, calendar, {
+        epoch: SELECTION_EPOCH, breaks: recordBreaks, through: sessionDate,
+      });
+    } catch (error) {
+      console.warn(`  conviction: ${error.message} — the record publishes without a verdict`);
+      conviction = {
+        v: 1, status: "unavailable", verdict: "pending", label: CONVICTION_LABELS.pending, addBreadth: false,
+        reason: "the evaluation failed on this run", horizons: [],
+      };
+    }
     await publish("record", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
       status: "ok",
       statedHorizon: HORIZON_SESSIONS,
+      conviction,
       archiveProbed,
 
       archiveFailed, archiveAbsent, archiveRecovered,
@@ -5464,6 +5477,13 @@ async function main() {
         cols: features.cols,
       },
     });
+    {
+      const stated = (conviction.horizons || []).find((h) => h.k === conviction.horizon);
+      console.log(`  conviction: ${conviction.verdict} (${conviction.label})` +
+        (stated ? `, ${stated.rows} rows over ${stated.sessions} session(s) at k=${stated.k}` +
+          (stated.slope ? `, slope ${stated.slope.b} (${stated.slope.lo} to ${stated.slope.hi})` : "") : "") +
+        (conviction.reason ? `; ${conviction.reason}` : ""));
+    }
     const measuredCols = features.cols.filter((c) => c.ic !== null).length;
     const sessionCols = features.cols.filter((c) => c.icMean !== null);
     console.log(

@@ -1638,9 +1638,14 @@ Two keys, both zero vendor calls.
 beside the dated boards. The boards archive a ranking's two tails; this key
 keeps the distribution, `{t, s}` per name and nothing else. Written under the
 same immutability contract as the dated boards (a re-run writes identical
-bytes — the rows are sorted by ticker for exactly that), swept by the same
-prune (which now names three keys a day, so the bound is 90 named deletes a
-run), and deletable through the same narrowed DELETE gate.
+bytes — the rows are sorted by ticker for exactly that) and deletable through
+the same narrowed DELETE gate, but EXEMPT from the 126-day prune (OD-31): the
+prune names only the two board sides, so its bound is 60 named deletes a run.
+A scores key is about 45 bytes a name in the dry-run corpus (4.7 KiB for its 106
+names, so roughly 30 KB for 670), which keeps every session at 7 to 8 MiB a
+year of D1 storage and adds no row writes beyond the one a session; the walk
+still reads only the retention window, so nothing about the nightly's reads
+changes. `tests/flows-pipeline-contract.mjs` prints the ledger.
 
 **`scoretrack`** — the pooled trace, REBUILT from the archive every run
 rather than incrementally updated, so it can never drift from the keys it is

@@ -182,7 +182,7 @@
 }
 
 @media (min-width: 1200px) {
-  .rec-grid > #recSessions, .rec-grid > #recFeatWrap { grid-column: span 12; }
+  .rec-grid > #recSessions, .rec-grid > #recFeatWrap, .rec-grid > #recConvMod { grid-column: span 12; }
 }
 .ui-key > i.is-tri { width: 10px; height: 9px; border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 
@@ -302,3 +302,6 @@
   .st-grid > #stOutcomes { grid-column: 1 / span 4; grid-row: 3; }
   .st-grid > #stCalib { grid-column: 5 / span 4; grid-row: 3; }
 }
+
+.rec-conv-lead { margin: 0 0 var(--sp-4); color: var(--label-1); font: var(--t-callout); }
+.rec-conv-power { margin: var(--sp-4) 0 0; color: var(--label-2); font: var(--t-footnote); }
