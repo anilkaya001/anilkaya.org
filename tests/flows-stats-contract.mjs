@@ -163,4 +163,15 @@ for (const e of FX.effectiveN) near(S.effectiveN(e), e.want, 1e-12, "effectiveN"
   }
 }
 
+{
+  const VARIATION = await import("../shared/flows-variation.js");
+  eq(VARIATION.medianOf, S.median, "flows-variation serves medianOf from the leaf");
+  for (const [file, decl] of [["shared/flows-political.js", /^const median = /m], ["shared/flows-premium.js", /^function median\(/m],
+    ["shared/flows-dossier.js", /^const median = /m], ["shared/flows-variation.js", /^export function medianOf\(/m]]) {
+    const src = moduleSource(file);
+    expect(src, /from "\.\/flows-stats\.js"/, { min: 1, max: 1, why: file + " takes its median from the leaf" });
+    absent(src, decl, { anchor: "from \"./flows-stats.js\"", why: file + " keeps no copy of the median" });
+  }
+}
+
 console.log(`✓ flows-stats: ${checks} assertions — the statistics leaf against scipy, numpy and statsmodels references (median and quantiles, average ranks, Pearson and Spearman, Wilson, the t quantile and mean interval, Newey-West, a seeded stationary bootstrap reproduced in Python, Brier, log score and the Murphy decomposition, Benjamini-Hochberg), its edge cases, and the consumers that take their statistics from it`);

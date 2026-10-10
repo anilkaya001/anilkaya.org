@@ -1,4 +1,5 @@
 import { rowsOf as unwrapRows } from "./flows-rows.js";
+import { median } from "./flows-stats.js";
 
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
@@ -158,13 +159,6 @@ export function filingRow(raw) {
     notes: str(raw.notes),
   };
 }
-
-const median = (xs) => {
-  const v = xs.filter((x) => x !== null && Number.isFinite(x)).sort((a, b) => a - b);
-  if (!v.length) return null;
-  const i = Math.floor(v.length / 2);
-  return v.length % 2 ? v[i] : (v[i - 1] + v[i]) / 2;
-};
 
 export function rankBuyers(rows, { cap = POLITICAL_CAPS.buyers, latestFiled = null } = {}) {
 

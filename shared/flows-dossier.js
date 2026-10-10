@@ -1,4 +1,5 @@
 import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
+import { median } from "./flows-stats.js";
 
 export const DOSSIER_VERSION = 1;
 
@@ -643,12 +644,6 @@ export function buildPricePacket(inp) {
 const DAY_MS = 86400000;
 const dayOf = (iso) => (typeof iso === "string" ? iso.slice(0, 10) : null);
 const sum = (xs) => xs.reduce((a, x) => a + x, 0);
-const median = (xs) => {
-  if (!xs.length) return null;
-  const s = xs.slice().sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
 
 function lastPrice(inp) {
   const q = okOf(vend(inp, "quote"));

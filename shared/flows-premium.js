@@ -1,5 +1,6 @@
 import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
 import { yearFraction } from "./flows-quant-time.js";
+import { median } from "./flows-stats.js";
 
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -57,13 +58,6 @@ export function daysToExpiry(expiry, asOf) {
   const b = Date.parse(String(expiry).slice(0, 10) + "T00:00:00Z");
   if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
   return Math.round((b - a) / 86400000);
-}
-
-function median(values) {
-  const ok = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
-  if (!ok.length) return null;
-  const mid = ok.length >> 1;
-  return ok.length % 2 ? ok[mid] : (ok[mid - 1] + ok[mid]) / 2;
 }
 
 export const IV_PERCENT_THRESHOLD = 5;
