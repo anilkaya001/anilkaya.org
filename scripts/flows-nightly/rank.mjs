@@ -891,6 +891,36 @@ export function ideasPayload(ideaByTicker, { sessionDate, generatedAt, built = 0
   return { v: 1, status: rows.length ? "ok" : "quiet", sessionDate, generatedAt, built, n: rows.length, rows };
 }
 
+const IDEAS_REVISION_CAP = 9;
+
+export function ideasArchiveKey(sessionDate, revision = 0) {
+  if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
+  return revision > 0 ? `ideas:${sessionDate}:r${revision}` : `ideas:${sessionDate}`;
+}
+
+export async function archiveIdeas(payload, sessionDate, publishFn) {
+  if (!ideasArchiveKey(sessionDate)) {
+    return { state: "skipped", key: null, line: `  ideas archive: session date ${JSON.stringify(sessionDate)} is not an archive date — nothing recorded` };
+  }
+  for (let revision = 0; revision <= IDEAS_REVISION_CAP; revision++) {
+    const key = ideasArchiveKey(sessionDate, revision);
+    try {
+      await publishFn(key, payload);
+      return { state: revision ? "revision" : "written", key, revision,
+        line: revision
+          ? `  ideas archive: ideas:${sessionDate} already holds a different payload, so this run's ideas are recorded as ${key}`
+          : `  ideas archive: ${key} recorded (permanent)` };
+    } catch (error) {
+      const refused = error && error.status === 409 && /archive_permanent/.test(String(error.message));
+      if (!refused) {
+        return { state: "lost", key, revision, line: `  ideas archive ${key}: NOT RECORDED — ${error && error.message ? error.message : error}` };
+      }
+    }
+  }
+  return { state: "capped", key: ideasArchiveKey(sessionDate, IDEAS_REVISION_CAP), revision: IDEAS_REVISION_CAP,
+    line: `  ideas archive: ideas:${sessionDate} and its ${IDEAS_REVISION_CAP} revisions all hold other payloads — this run's ideas are not recorded` };
+}
+
 export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {
   const rows = byTicker ? byTicker.get(ticker) : undefined;
   if (rows) return rows;

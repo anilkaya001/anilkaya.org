@@ -983,6 +983,45 @@ try {
     eq((await post(POOL, boardZ, INGEST_TOKEN)).status, 409,
        "and is immutable too: the write guard and the delete branch share one pattern");
 
+    {
+      const IDEAS = "ideas:2026-08-24";
+      const ideasA = JSON.stringify({ v: 1, rows: [{ t: "AAA", legs: 2 }] });
+      const ideasZ = JSON.stringify({ v: 1, rows: [{ t: "ZZZ", legs: 1 }] });
+      const readIdeas = async (key) => JSON.parse(await (await fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)),
+        { headers: { Authorization: "Bearer " + INGEST_TOKEN } })).text());
+      const del = (key) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)),
+        { method: "DELETE", headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+
+      eq(ARCHIVE_REFUSALS.refuse_permanent.status, 409, "a permanent key holding another payload is a 409, a 4xx the pipeline does not retry");
+      eq(ARCHIVE_REFUSALS.refuse_permanent.code, "archive_permanent", "with a code of its own");
+      ok(!/delete the key first/i.test(ARCHIVE_REFUSALS.refuse_permanent.message) && /:r1/.test(ARCHIVE_REFUSALS.refuse_permanent.message),
+        "whose message never tells the operator to delete the key, because it cannot be deleted, and names the revision key instead");
+      eq(archiveWriteAction({ readable: true, exists: true, same: false, permanent: true }), "refuse_permanent", "a permanent key with a different payload is refused as permanent");
+      eq(archiveWriteAction({ readable: true, exists: true, same: false }), "refuse_immutable", "and a dated one as immutable, as before");
+      eq(archiveWriteAction({ readable: true, exists: true, same: true, permanent: true }), "unchanged", "an identical repeat of a permanent key is a no-op");
+
+      eq((await post(IDEAS, ideasA, INGEST_TOKEN)).status, 200, "ideas:<date> is accepted by the ingest door and written once");
+      const again = await post(IDEAS, ideasA, INGEST_TOKEN);
+      eq((await again.json()).stored, "unchanged", "an identical repeat stores nothing");
+      const clash = await post(IDEAS, ideasZ, INGEST_TOKEN);
+      eq(clash.status, 409, "A DIFFERENT PAYLOAD FOR THE SAME DATE IS REFUSED, not turned into a trigger error");
+      eq((await clash.json()).error.code, "archive_permanent", "with the permanent code");
+      deep(await readIdeas(IDEAS), JSON.parse(ideasA), "and the key still holds the first payload");
+      const gone = await del(IDEAS);
+      eq(gone.status, 400, "A PERMANENT KEY CANNOT BE DELETED through the ingest route");
+      eq((await gone.json()).error.code, "undeletable_key", "with the undeletable code");
+      deep(await readIdeas(IDEAS), JSON.parse(ideasA), "and it is still there afterwards");
+      eq((await post(IDEAS + ":r1", ideasZ, INGEST_TOKEN)).status, 200, "the revision key takes the new payload");
+      eq((await post(IDEAS + ":r1", ideasA, INGEST_TOKEN)).status, 409, "and is permanent itself");
+      eq((await del(IDEAS + ":r1")).status, 400, "and cannot be deleted either");
+      eq((await post("ideas-out:2026-08-24", ideasA, INGEST_TOKEN)).status, 200, "ideas-out:<date> is admitted the same way");
+      eq((await post("ideas-out:2026-08-24", ideasZ, INGEST_TOKEN)).status, 409, "and is write-once");
+      for (const bad of ["ideas:2026-8-24", "ideas:2026-08-24x", "ideas:2026-08-24:r", "ideas:2026-08-24:rx", "ideas-out:2026-08-24:r1x", "ideas:latest", "ideas-in:2026-08-24"]) {
+        eq((await post(bad, ideasA, INGEST_TOKEN)).status, 400, `${bad} is refused as an unknown key`);
+      }
+      eq((await del("ideas")).status, 400, "the bare ideas view is not deletable, as before");
+    }
+
     for (const method of ["PUT", "PATCH"]) {
       eq((await fetch(url("/api/flows/ingest?key=board:long"), {
         method, headers: { Authorization: "Bearer " + INGEST_TOKEN },

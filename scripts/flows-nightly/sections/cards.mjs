@@ -10,7 +10,7 @@ import { DEADLINE_MS, IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { foldCardOutcomes, poolWidth, runPooled, stats, uw } from "../vendor.mjs";
 import { ARCHIVE_DATE_RE, publish } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
-import { congressRows, ideasPayload, readPxOf, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
+import { archiveIdeas, congressRows, ideasPayload, readPxOf, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
 import {
   fakeEarnings, fakeIvRank, fakeMaxPain, fakeStockDarkpool, fakeStockOiChange, fakeSurface, fakeTermStructure,
 } from "../fixtures.mjs";
@@ -264,8 +264,11 @@ export async function runCards(ctx) {
   }
   if (quantStats.built) {
     await stages.run("ideas", async () => {
-      await publish("ideas", ideasPayload(ideaByTicker, { sessionDate, generatedAt, built: quantStats.built }));
+      const ideasBody = ideasPayload(ideaByTicker, { sessionDate, generatedAt, built: quantStats.built });
+      await publish("ideas", ideasBody);
       console.log(`  ideas: the engine's lead structure for ${ideaByTicker.size} of ${quantStats.built} engine card(s)`);
+      const recorded = await archiveIdeas(ideasBody, sessionDate, publish);
+      (recorded.state === "written" || recorded.state === "revision" ? console.log : console.warn)(recorded.line);
     }, (error) => {
       console.warn(`  ideas: ${error.message} — the boards draw no idea column this session`);
     });

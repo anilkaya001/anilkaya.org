@@ -56,7 +56,7 @@ export {
   MOVER_ROWS, NEWS_ROWS, SECTOR_ETFS, TICK_FIELDS_READ, TRIX_FULL_SCALE_BP, TRIX_MIN_CANDLES, TRIX_SERIES, TRIX_SPAN,
   TRIX_WARMUP, WATCH_ROWS, atr14, boardRow, boardVariationMeta, buildMovers, candleCut, candlesAscending,
   collapseShareClasses, computeFeatures, congressRows, daysToEarnings, describeTickFields, eligible, ema,
-  featuresVariationInput, gatedWorthEnriching, holdersRefusal, ideasPayload, markNewContracts, measureVariationProbes,
+  featuresVariationInput, gatedWorthEnriching, holdersRefusal, ideasPayload, ideasArchiveKey, archiveIdeas, markNewContracts, measureVariationProbes,
   medianDollarVolume, moverRow, packSpark, partitionSides, priorNote, readPxOf, repairCandles, ret, returnCorrelation,
   scaleTrix, scoreBoard, screenerDollarVolume, screenerTilt, sectorLean, sectorTrix, selectExtremes, sessionCandles,
   sessionReference, sessionRow, sessionRows, shapeNews, toRows, toWatchRows, trixSeriesBp, unusualContractId,

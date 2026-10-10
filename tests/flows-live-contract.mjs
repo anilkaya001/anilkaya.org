@@ -903,6 +903,55 @@ const cronMinutes = (cron) => {
   deep(cols(workerDdl, "flows_clock"), clockCols,
     "and flows_clock with 0010's columns plus 0011's, 0012's and 0014's, in the order an upgraded production table has them");
   deep(cols(schema, "flows_clock"), clockCols, "as schema.sql declares it");
+
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const payloadTable = read("migrations/0005_flows.sql");
+    const builds = {
+      "the Worker's first-use DDL": () => { const db = new DatabaseSync(":memory:"); db.exec(payloadTable); for (const sql of W.LIVE_SCHEMA_SQL) db.exec(sql); return db; },
+      "schema.sql": () => { const db = new DatabaseSync(":memory:"); db.exec(schema); return db; },
+      "migrations 0005, 0010 and 0020": () => { const db = new DatabaseSync(":memory:"); db.exec(payloadTable); db.exec(migration); db.exec(read("migrations/0020_flows_permanent_archive.sql")); return db; },
+    };
+    const permanent = ["ideas:2026-09-29", "ideas-out:2026-09-29", "ideas:2026-09-29:r1", "ideas-out:2026-09-29:r12"];
+    const ordinary = ["ideas", "ideas:latest", "ideas-in:2026-09-29", "card:AAA", "universe", "scores:2026-09-29x"];
+    for (const [where, build] of Object.entries(builds)) {
+      const db = build();
+      const put = (id) => db.prepare("INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, 1)").run(id, "{}");
+      for (const id of [...permanent, ...ordinary, "board:long:2026-09-29"]) put(id);
+      const throws = (fn, re) => { try { fn(); return false; } catch (error) { return re.test(String(error.message)); } };
+      for (const id of permanent) {
+        ok(throws(() => db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = ?").run(id), /cannot be changed/),
+          `A PERMANENT ARCHIVE ROW CANNOT BE UPDATED (${id}) under ${where}`);
+        ok(throws(() => db.prepare("DELETE FROM flows_payload WHERE id = ?").run(id), /cannot be removed/),
+          `nor deleted (${id}) under ${where}`);
+        eq(db.prepare("INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, '{\"x\":2}', 2) ON CONFLICT(id) DO NOTHING").run(id).changes, 0,
+          `and the write-once insert changes nothing (${id})`);
+        eq(db.prepare("SELECT payload FROM flows_payload WHERE id = ?").get(id).payload, "{}", `the row still holds what was first written (${id})`);
+      }
+      for (const id of ordinary) {
+        eq(db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = ?").run(id).changes, 1, `${id} stays updatable under ${where}`);
+        eq(db.prepare("DELETE FROM flows_payload WHERE id = ?").run(id).changes, 1, `and deletable (${id})`);
+      }
+      ok(throws(() => db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = 'board:long:2026-09-29'").run(), /immutable/),
+        `the dated boards keep their own trigger and its message under ${where}`);
+      eq(db.prepare("DELETE FROM flows_payload WHERE id = 'board:long:2026-09-29'").run().changes, 1,
+        `and a dated board stays deletable, which is how the 126-day prune works (${where})`);
+      ok(throws(() => db.prepare("DELETE FROM flows_payload WHERE id LIKE 'ideas%'").run(), /cannot be removed/),
+        `a sweep that names a permanent row among others aborts whole (${where})`);
+      const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name").all().map((r) => r.name);
+      ok(names.includes("flows_permanent_no_update") && names.includes("flows_permanent_no_delete") && names.includes("flows_archive_immutable"),
+        `all three triggers exist side by side under ${where} (${names.join(", ")})`);
+      db.close();
+    }
+    for (const [where, text] of [["the Worker's first-use DDL", W.LIVE_SCHEMA_SQL.join("\n")], ["schema.sql", schema], ["0020", read("migrations/0020_flows_permanent_archive.sql")]]) {
+      const patterns = [...text.matchAll(/GLOB '([^']*)'/g)].map((m) => m[1]);
+      ok(patterns.length >= 4 && patterns.every((g) => Buffer.byteLength(g) <= 50),
+        `D1 REFUSES A GLOB PATTERN OVER 50 BYTES ("LIKE or GLOB pattern too complex") at the first UPDATE or DELETE it guards, and node:sqlite does not, so every pattern in ${where} is at most 50 bytes (longest ${Math.max(...patterns.map((g) => Buffer.byteLength(g)))})`);
+    }
+    ok(!/flows_archive_immutable/.test(read("migrations/0020_flows_permanent_archive.sql")),
+      "the new triggers carry new names, because CREATE TRIGGER IF NOT EXISTS under the old name would silently do nothing on production");
+    ok(!/ALTER TABLE|DROP /.test(read("migrations/0020_flows_permanent_archive.sql")), "and the migration only creates, so applying it twice is safe");
+  }
   const toml = read("wrangler.toml");
   eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
   eq(W.cronJob(W.FOCUS_CRON, T("2026-09-23T15:18:00Z")), "focus", "the focus cron runs the focus tick");

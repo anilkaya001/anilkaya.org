@@ -856,6 +856,9 @@ no outbox holds a variant id.
 | `focus` | each run | `/api/flows/focus` (the home page's metals, Mag 7 and NDX 10) | overwritten daily |
 | `roster` | each run, after every per-ticker key | `/api/flows/roster` (search, "Open instead", absent-card classification) | overwritten daily; also the retire ledger |
 | `meta` | each run | diagnostics | overwritten |
+| `ideas` | each run | the boards' idea column | overwritten daily |
+| `ideas:<date>`, `ideas:<date>:r<n>` | each run, once per session; a republish with different ideas writes the next `:r<n>` | calibration (later) | PERMANENT: write-once, never updated, never deleted, never pruned |
+| `ideas-out:<date>` | reserved for the outcome record | calibration (later) | PERMANENT, as above |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
 morning's `board:long` overwrote the previous one, so by the time any forward
@@ -868,6 +871,29 @@ forecast horizon). Steady state is about 270 rows and +3 row writes per run
 (`scores:<date>` alongside the two dated boards; it said 180 and +2 until the
 `scores:` key joined the archive and the multiplication was not re-run),
 against a 100,000/day budget **shared with the live learning app**.
+
+**PERMANENT KEYS.** `ideas:<date>` is the ranked ideas the engine published for a
+session, kept so that probabilities can later be scored against what was actually
+said. Three layers hold it: the ingest route treats the key as write-once (an
+identical repeat answers `stored: "unchanged"`, a different payload answers 409
+`archive_permanent`, and the nightly then writes `ideas:<date>:r1`, `:r2` and so on),
+the DELETE branch refuses it with `undeletable_key`, and two triggers,
+`flows_permanent_no_update` and `flows_permanent_no_delete`, abort an UPDATE or a
+DELETE of any `ideas:` or `ideas-out:` row at the storage layer. `pruneKeys` never
+names them, so the 126-day sweep leaves them alone; the cost is one row of about
+20 to 40 KB a night. Nothing in the repository can correct such a row, by design.
+The triggers are in the Worker's first-use DDL, so a deploy creates them on first
+use; apply the migration as well so a fresh database built from `migrations/`
+matches:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0020_flows_permanent_archive.sql
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote \
+  --command="SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name;"
+```
+
+The read-back lists `flows_archive_immutable`, `flows_permanent_no_delete` and
+`flows_permanent_no_update`.
 
 The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
 **dated boards, and — for the nightly token only — `card:`, `card-x:` and
