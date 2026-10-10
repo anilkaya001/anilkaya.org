@@ -948,11 +948,22 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "POOL_EVIDENCE_MIN", "POOL_REFUSAL_HALT", "POOL_REFUSAL_EASE", "meterRead", "poolWidth", "runPooled",
       "foldCardOutcomes", "describeFloorVerdict", "uw",
     ],
+    "store.mjs": [
+      "ingestURL", "INGEST_UA", "LIVE_BEARER_MARGIN_MS", "liveBearer", "liveMinting", "liveCredentialSource",
+      "liveCredential", "ingestHeaders", "PUBLISH_SPACING_MS", "ingestWrites", "READ_RETRIES", "READ_RETRYABLE",
+      "edgeRefusals", "resetEdgeRefusals", "edgeSnapshot", "noteAnswer", "noteRefusal", "readSaid", "readStoredOnce",
+      "keysAnswer", "probeStoredOnce", "listStoredOnce", "readWithRetries", "readStored", "probeStored",
+      "LEDGER_LIST_KINDS", "listStored", "ARCHIVE_RETENTION_DAYS", "ARCHIVE_PRUNE_LOOKBACK_DAYS", "ARCHIVE_DATE_RE",
+      "datedKey", "pruneKeys", "retire", "pruneArchive", "sessionArchiveKeys", "retireSession", "PUBLISH_RETRIES",
+      "PUBLISH_RETRY_BUDGET_MS", "publishRetrySpentMs", "quotaFirstAt", "resetPublishRetryBudget",
+      "PUBLISH_RETRYABLE", "publishRetryDelay", "publishedStore", "activeStages", "bindStages", "landedKeys",
+      "summarize", "publish",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
   };
-  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2};
+  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3};
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
   let homed = 0;
