@@ -36,6 +36,7 @@ import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
+import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -2062,8 +2063,6 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx, session)
     answer: generated, llm: true, model, fallback, guard });
 }
 
-const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
-
 const CHAIN_TTL_SECONDS = 120;
 
 const CHAIN_PAGE_SIZE = 500;
@@ -2083,10 +2082,7 @@ const UW_DOSSIER_DEADLINE_MS = 20000;
 
 async function uwFetch(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
-  const url = new URL((env.UW_BASE || UW_BASE_DEFAULT) + path);
-  for (const [k, v] of Object.entries(params || {})) {
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-  }
+  const url = vendorUrl(vendorBase(env), path, params);
   const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
   const signal = AbortSignal.timeout(deadlineMs);
   const failed = (message) => signal.aborted
@@ -2294,7 +2290,7 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
 }
 
 function chainReadMs(env) {
-  if (env.UW_BASE && env.UW_NOW) {
+  if (vendorRedirected(env) && env.UW_NOW) {
     const pinned = Date.parse(env.UW_NOW);
     if (Number.isFinite(pinned)) return pinned;
   }

@@ -486,6 +486,20 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   const pinned = await route("/api/flows/chain?t=AAPL&refresh=1", worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") }),
     { UW_NOW: "2001-01-02T15:00:00Z", UW_BASE: undefined });
   eq(pinned.body.asOf, today, "and a pin is ignored unless the vendor origin has been redirected away from production too");
+
+  const hosts = new Set();
+  const hostile = await route("/api/flows/chain?t=AAPL&refresh=1", (url, t) => {
+    hosts.add(url.host);
+    return worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") })(url, t);
+  }, { UW_NOW: "2001-01-02T15:00:00Z", UW_BASE: "https://evil.example" });
+  deep(Array.from(hosts), ["api.unusualwhales.com"], "a hostile UW_BASE is ignored: the vendor key goes only to the production host");
+  eq(hostile.body.asOf, today, "and it does not unlock the pinned read clock");
+  const loop = new Set();
+  await route("/api/flows/chain?t=AAPL&refresh=1", (url, t) => {
+    loop.add(url.host);
+    return worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") })(url, t);
+  }, { UW_BASE: "http://127.0.0.1:9" });
+  deep(Array.from(loop), ["127.0.0.1:9"], "a loopback UW_BASE still redirects the Worker's vendor calls");
 }
 
 {

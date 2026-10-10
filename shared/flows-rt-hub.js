@@ -8,8 +8,7 @@ import { phaseAt } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
 import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
 import { MEMBER_NAME } from "./flows-auth.js";
-
-const UW_BASE_DEFAULT = "https://api.unusualwhales.com";
+import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs } from "./flows-vendor-core.js";
 
 const T0 = Date.now();
 
@@ -22,20 +21,22 @@ const clampInt = (v, lo, hi, d) => {
 
 export function hubConfig(env) {
   const e = env || {};
-  const redirected = typeof e.UW_BASE === "string" && e.UW_BASE !== "";
+  const vendor = vendorBaseInfo(e.UW_BASE);
+  const redirected = vendor.status === "redirect";
   const pinned = redirected && e.UW_NOW ? Date.parse(e.UW_NOW) : NaN;
   const scale = redirected ? Math.min(1, Math.max(0.05, Number(e.FLOWS_RT_SCALE) || 1)) : 1;
   const sw = rtSwitches(e);
   return {
     mode: sw.mode,
     audience: sw.audience,
-    base: redirected ? e.UW_BASE : UW_BASE_DEFAULT,
+    base: vendor.base,
     key: typeof e.UW_API_KEY === "string" ? e.UW_API_KEY : "",
     pinned: Number.isFinite(pinned) ? pinned : NaN,
     scale,
     callsPerMinute: clampInt(e.FLOWS_RT_CALLS_PER_MIN, 10, 1200, RT_LIMITS.callsPerMinute),
     userCap: clampInt(e.FLOWS_RT_USER_CAP, 1, 10, RT_LIMITS.userSockets),
     redirected,
+    baseStatus: vendor.status,
   };
 }
 
@@ -47,14 +48,6 @@ export function rtClock(env) {
 const closedKeyOf = (info) => info.reason + ":" + info.day;
 
 const jitter = (ms, random) => Math.round(ms * (0.8 + 0.4 * random()));
-
-function retryAfterMs(value, now) {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const s = Number(value);
-  if (Number.isFinite(s) && s >= 0) return Math.round(s * 1000);
-  const d = Date.parse(value);
-  return Number.isFinite(d) ? Math.max(0, d - now) : null;
-}
 
 export function createRestUpstream({
   cfg, fetchImpl = (...a) => fetch(...a), now = () => Date.now(), random = Math.random,
@@ -75,10 +68,7 @@ export function createRestUpstream({
   let own = { fl: { cursor: null }, gx: { i: 0 } };
 
   async function call(c) {
-    const url = new URL(cfg.base + c.path);
-    for (const [name, value] of Object.entries(c.params || {})) {
-      if (value !== undefined && value !== null && value !== "") url.searchParams.set(name, String(value));
-    }
+    const url = vendorUrl(cfg.base, c.path, c.params);
     const ac = new AbortController();
     aborters.add(ac);
     const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -86,10 +76,11 @@ export function createRestUpstream({
       const res = await fetchImpl(url, {
         headers: { Authorization: "Bearer " + cfg.key, Accept: "application/json" }, signal: ac.signal,
       });
-      if (res.status === 429) {
-        return { ok: false, error: { code: "http_429", status: 429, retryAfterMs: retryAfterMs(res.headers.get("Retry-After"), now()) } };
+      const bad = classifyStatus(res.status);
+      if (bad === "http_429") {
+        return { ok: false, error: { code: bad, status: 429, retryAfterMs: retryAfterMs(res.headers.get("Retry-After"), now()) } };
       }
-      if (!res.ok) return { ok: false, error: { code: res.status >= 500 ? "http_5xx" : "http_4xx", status: res.status } };
+      if (bad || !res.ok) return { ok: false, error: { code: bad || "http_4xx", status: res.status } };
       try {
         return { ok: true, body: await res.json() };
       } catch {
@@ -214,7 +205,7 @@ export function createRestUpstream({
     },
     paused: (at) => at < pausedUntil,
     state: () => ({
-      running, pausedUntil: pausedUntil || null, n429, key: !!cfg.key, base: cfg.redirected ? "redirected" : "production",
+      running, pausedUntil: pausedUntil || null, n429, key: !!cfg.key, base: cfg.redirected ? "redirected" : cfg.baseStatus === "invalid" ? "invalid" : "production",
       topics: Object.fromEntries(ORDER.map((k) => [k, { due: topics[k].due, inflight: topics[k].inflight, fails: topics[k].fails }])),
     }),
   };

@@ -7,6 +7,7 @@ import {
   RtHub, createHub, createRestUpstream, hubConfig, loadRosterFromD1, RT_BOARDS_SQL, rtClock,
 } from "../shared/flows-rt-hub.js";
 import { rtTopics } from "../shared/flows-rt-routes.js";
+import { vendorBase, vendorBaseInfo, vendorRedirected, vendorUrl, unwrap as vendorUnwrap, classifyStatus, retryAfterMs as vendorRetryAfterMs, VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 import {
   FRESH_CLASSES, freshnessState, classOf, easternInstant, sessionOpen, phaseAt,
 } from "../shared/flows-freshness.js";
@@ -1053,14 +1054,14 @@ const seqOk = (ws) => {
   ok(RT.rtAdmits(RT.rtSwitches({}), "anilkaya") && !RT.rtAdmits(RT.rtSwitches({}), "firatgok"), "owner audience admits the owner and refuses a member");
   ok(RT.rtAdmits(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "members audience admits a member");
   ok(!RT.rtIsOwner(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "but never makes a member the owner");
-  eq(hubConfig({ UW_BASE: "http://x", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
   eq(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 1, "and ignored in production");
   ok(Number.isNaN(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z" }).pinned), "a pinned clock is ignored in production too");
-  const pinned = rtClock({ UW_BASE: "http://x", UW_NOW: "2026-09-30T14:00:00Z" });
+  const pinned = rtClock({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z" });
   const p0 = pinned();
   await new Promise((res) => setTimeout(res, 30));
   ok(pinned() - p0 >= 20 && pinned() - p0 < 400, "a pinned clock advances with real time");
-  eq(hubConfig({ UW_BASE: "http://x" }).base, "http://x", "UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test" }).base, "http://x.test", "UW_BASE redirects the vendor");
   eq(hubConfig({}).base, "https://api.unusualwhales.com", "and the default is production");
   eq(hubConfig({ FLOWS_RT_CALLS_PER_MIN: "5000" }).callsPerMinute, 1200, "the call budget is clamped");
   eq(hubConfig({}).callsPerMinute, 240, "240 calls a minute by default");
@@ -1431,7 +1432,7 @@ const seqOk = (ws) => {
   deep(RT.RT_UPSTREAM_API.methods, ["start(plan, handlers)", "stop()", "tick(now)", "paused(now)", "state()"], "seam: the adapter's method list is part of the contract");
   deep(RT.RT_UPSTREAM_API.frame, ["k", "readAt", "items", "vendorAt", "meta", "full", "answered"], "seam: and so is the neutral frame");
 
-  const rest = createRestUpstream({ cfg: hubConfig({ UW_BASE: "http://x", UW_API_KEY: "k" }), budget: RT.createBudget() });
+  const rest = createRestUpstream({ cfg: hubConfig({ UW_BASE: "http://x.test", UW_API_KEY: "k" }), budget: RT.createBudget() });
   deep(["kind", "start", "stop", "tick", "paused", "state"].filter((m) => !(m in rest)), [], "seam: the REST adapter implements every method of the interface");
 
   const live = Object.keys(RT.RT_REST_SHAPE);
@@ -1596,6 +1597,65 @@ const seqOk = (ws) => {
     globalThis.fetch = realFetch;
     delete globalThis.WebSocketRequestResponsePair;
   }
+}
+
+{
+  const PROD = "https://api.unusualwhales.com";
+  const allowed = [
+    ["https://api.unusualwhales.com", PROD, "default"],
+    ["https://api.unusualwhales.com/", PROD, "default"],
+    ["https://api.unusualwhales.com:443", PROD, "default"],
+    ["http://127.0.0.1:8787", "http://127.0.0.1:8787", "redirect"],
+    ["https://127.0.0.1:8787", "https://127.0.0.1:8787", "redirect"],
+    ["http://127.0.0.1", "http://127.0.0.1", "redirect"],
+    ["http://localhost:3000", "http://localhost:3000", "redirect"],
+    ["http://uw.test", "http://uw.test", "redirect"],
+    ["https://uw.test", "https://uw.test", "redirect"],
+    ["http://vendor.test/", "http://vendor.test", "redirect"],
+    ["http://a.b.test:9000", "http://a.b.test:9000", "redirect"],
+  ];
+  for (const [raw, base, status] of allowed) {
+    deep(vendorBaseInfo(raw), { base, status }, `vendor base: ${raw} is ${status}`);
+  }
+  const refused = [
+    "https://evil.example", "http://evil.example", "https://api.unusualwhales.com.evil.example", "http://api.unusualwhales.com",
+    "https://evil.example/api.unusualwhales.com", "https://api.unusualwhales.com@evil.example", "https://user:pw@api.unusualwhales.com",
+    "http://127.0.0.1@evil.example", "http://127.0.0.1.evil.example", "http://localhost.evil.example", "http://test", "http://uw.test.evil.example",
+    "http://evil.example/uw.test", "http://uw.test/x", "http://uw.test?x=1", "http://uw.test#x", "ftp://uw.test", "file:///etc/passwd", "javascript:alert(1)",
+    "//uw.test", "uw.test", " http://uw.test", "http://uw.test ", "http://[::1]:8787", "http://0.0.0.0:8787", "http://169.254.169.254", "http://10.0.0.1",
+    "http://uw.TEST.evil.example", "http://xn--uw.test.evil", "https://api.unusualwhales.com/api", "http://" + "a".repeat(250) + ".test", 12, {}, [], true,
+  ];
+  for (const raw of refused) {
+    deep(vendorBaseInfo(raw), { base: PROD, status: "invalid" }, `vendor base: ${JSON.stringify(raw).slice(0, 60)} is ignored and reported invalid`);
+  }
+  for (const raw of [undefined, null, ""]) deep(vendorBaseInfo(raw), { base: PROD, status: "unset" }, `vendor base: ${JSON.stringify(raw)} is unset`);
+  eq(vendorBase({ UW_BASE: "https://evil.example" }), PROD, "vendorBase: a refused base is the default");
+  eq(vendorBase({}), VENDOR_BASE_DEFAULT, "vendorBase: no env var is the default");
+  eq(vendorBase(undefined), VENDOR_BASE_DEFAULT, "vendorBase: no env is the default");
+  ok(vendorRedirected({ UW_BASE: "http://uw.test" }) && !vendorRedirected({ UW_BASE: PROD }) && !vendorRedirected({ UW_BASE: "https://evil.example" }) && !vendorRedirected({}),
+    "vendorRedirected: only a loopback or .test base redirects");
+  const evil = hubConfig({ UW_BASE: "https://evil.example", UW_API_KEY: "k", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" });
+  eq(evil.base, PROD, "hub: a hostile UW_BASE leaves the vendor at production");
+  eq(evil.redirected, false, "hub: and does not count as a redirect");
+  eq(evil.scale, 1, "hub: so it does not unlock the test scale");
+  ok(Number.isNaN(evil.pinned), "hub: nor the pinned clock");
+  eq(evil.baseStatus, "invalid", "hub: and is reported invalid");
+  eq(hubConfig({ UW_BASE: PROD, FLOWS_RT_SCALE: "0.2" }).scale, 1, "hub: the production URL spelled out does not unlock the test scale either");
+  const upstreamBase = (e) => createRestUpstream({ cfg: hubConfig({ UW_API_KEY: "k", ...e }), budget: RT.createBudget() }).state().base;
+  eq(upstreamBase({ UW_BASE: "https://evil.example" }), "invalid", "upstream: the rail reports the refused base");
+  eq(upstreamBase({}), "production", "upstream: production when none is set");
+  eq(upstreamBase({ UW_BASE: "http://uw.test" }), "redirected", "upstream: redirected for a test base");
+  eq(vendorUrl("http://uw.test", "/api/x", { a: 1, b: "", c: null, d: undefined, e: "z y" }).href, "http://uw.test/api/x?a=1&e=z+y", "vendorUrl: drops empty parameters and encodes the rest");
+  eq(vendorUrl(PROD, "/api/x").href, PROD + "/api/x", "vendorUrl: no parameters");
+  deep(vendorUnwrap({ data: [1] }), [1], "unwrap: the data envelope around an array");
+  deep(vendorUnwrap({ data: { a: 1 } }), { a: 1 }, "unwrap: the data envelope around an object");
+  deep(vendorUnwrap({ data: "x" }), { data: "x" }, "unwrap: a scalar payload is left whole");
+  deep(vendorUnwrap([1]), [1], "unwrap: a bare array is left whole");
+  eq(vendorUnwrap(null), null, "unwrap: null");
+  deep([200, 204, 301, 400, 404, 429, 500, 503].map(classifyStatus), [null, null, "http_4xx", "http_4xx", "http_4xx", "http_429", "http_5xx", "http_5xx"], "classify: status to the rail's codes");
+  deep(["7", "0", "", "  ", "abc", undefined].map((v) => vendorRetryAfterMs(v, 0)), [7000, 0, null, null, null, null], "retryAfterMs: seconds");
+  eq(vendorRetryAfterMs("Thu, 01 Jan 1970 00:00:09 GMT", 4000), 5000, "retryAfterMs: an HTTP date is a delay from now");
+  eq(vendorRetryAfterMs("Thu, 01 Jan 1970 00:00:01 GMT", 4000), 0, "retryAfterMs: a date in the past is zero");
 }
 
 {

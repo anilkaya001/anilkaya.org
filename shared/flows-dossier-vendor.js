@@ -1,7 +1,10 @@
 import { vnum, isoDay } from "./flows-cross.js";
 import { cleanLabel, tms, isoOf, VENDOR_ROUTES } from "./flows-dossier.js";
+import { unwrap, VENDOR_ENVELOPE } from "./flows-vendor-core.js";
 
-export const RESPONSE_ENVELOPE = "data";
+export { unwrap };
+
+export const RESPONSE_ENVELOPE = VENDOR_ENVELOPE;
 
 export const ANALYST_ACTIONS = Object.freeze(["initiated", "reiterated", "downgraded", "upgraded", "maintained", "target raised", "target lowered"]);
 
@@ -40,11 +43,6 @@ const str = (v, cap = 400) => (typeof v === "string" && v.trim() ? v.trim().slic
 const bool = (v) => (typeof v === "boolean" ? v : null);
 const pick = (v, list) => (typeof v === "string" && list.includes(v.trim().toLowerCase()) ? v.trim().toLowerCase() : null);
 const fail = (reason) => ({ ok: false, reason });
-
-export function unwrap(raw) {
-  if (isObj(raw) && Object.hasOwn(raw, RESPONSE_ENVELOPE) && (isObj(raw.data) || Array.isArray(raw.data))) return raw.data;
-  return raw;
-}
 
 function rowsOf(raw) {
   const d = unwrap(raw);
