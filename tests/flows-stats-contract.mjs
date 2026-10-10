@@ -151,4 +151,16 @@ for (const e of FX.effectiveN) near(S.effectiveN(e), e.want, 1e-12, "effectiveN"
   for (const r of FX.rank) FEATURES.percentileRank(r.x).forEach((v, i) => near(v, r.pct[i], 1e-12, "flows-features percentileRank"));
 }
 
+{
+  const CROSS = await import("../shared/flows-cross.js");
+  eq(CROSS.mean, S.mean, "flows-cross serves its mean from the leaf");
+  eq(CROSS.sampleSd, S.sampleSd, "and its sampleSd");
+  eq(CROSS.medianOf, S.median, "and its medianOf, which is the leaf's median");
+  const cross = moduleSource("shared/flows-cross.js");
+  expect(cross, /from "\.\/flows-stats\.js"/, { min: 1, max: 1, why: "flows-cross takes its statistics from the leaf" });
+  for (const name of ["mean", "sampleSd", "medianOf"]) {
+    absent(cross, new RegExp("^export function " + name + "\\b", "m"), { anchor: "from \"./flows-stats.js\"", why: "flows-cross keeps no copy of " + name });
+  }
+}
+
 console.log(`✓ flows-stats: ${checks} assertions — the statistics leaf against scipy, numpy and statsmodels references (median and quantiles, average ranks, Pearson and Spearman, Wilson, the t quantile and mean interval, Newey-West, a seeded stationary bootstrap reproduced in Python, Brier, log score and the Murphy decomposition, Benjamini-Hochberg), its edge cases, and the consumers that take their statistics from it`);
