@@ -3755,6 +3755,43 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
     `${file} keeps no credential in .git/config after checkout`);
   }
+  const dependabot = readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
+  ok(/^version: 2\n/.test(dependabot) && !/^\s*#/m.test(dependabot) && !/\s#\s/.test(dependabot),
+    "DEPENDABOT IS CONFIGURED in version 2 and, like every other YAML file here, carries no comments");
+  const updates = dependabot.split(/\n {2}- package-ecosystem: /).slice(1).map((chunk) => {
+    const [ecosystem, ...rest] = chunk.split("\n");
+    return { ecosystem, body: rest.join("\n") + "\n" };
+  });
+  assert.deepEqual(updates.map((u) => u.ecosystem), ["npm", "github-actions"],
+    "and it watches exactly the two ecosystems the repository uses: npm under tests/ and the workflows' actions");
+  checks++;
+  assert.deepEqual(updates.map((u) => /^ {4}directory: (\S+)$/m.exec(u.body)?.[1]), ["/tests", "/"],
+    "the npm manifest is tests/package.json, the only one, and the actions are read from .github/workflows at the root");
+  checks++;
+  ok(fs.existsSync(new URL("../tests/package.json", import.meta.url)) && fs.existsSync(new URL("../tests/package-lock.json", import.meta.url)) &&
+     !fs.existsSync(new URL("../package.json", import.meta.url)), "(and there is no other package.json for it to miss)");
+  for (const u of updates) {
+    ok(/^ {6}interval: monthly$/m.test(u.body) && !/interval: (daily|weekly)/.test(u.body),
+      `${u.ecosystem} refreshes MONTHLY: one dependency pull request a month, not one per release`);
+    const limit = Number(/^ {4}open-pull-requests-limit: (\d+)$/m.exec(u.body)?.[1]);
+    ok(limit >= 1 && limit <= 3, `${u.ecosystem} holds at most ${limit} open pull requests at a time`);
+    ok(/^ {4}groups:\n {6}[a-z-]+:\n {8}patterns:\n/m.test(u.body), `${u.ecosystem} updates arrive GROUPED, so one month is one pull request per group`);
+    ok(!/^ {4}(ignore|allow|target-branch|reviewers|assignees|registries|vendor|rebase-strategy|insecure-external-code-execution):/m.test(u.body),
+      `${u.ecosystem} narrows nothing and redirects nothing: every update is proposed, to the default branch`);
+  }
+  const npmGroups = [...updates[0].body.matchAll(/^ {6}([a-z-]+):\n {8}patterns:\n((?: {10}- "[^"]+"\n)+)(?: {8}exclude-patterns:\n((?: {10}- "[^"]+"\n)+))?/gm)]
+    .map((m) => ({ name: m[1], patterns: [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]), exclude: m[3] ? [...m[3].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [] }));
+  assert.deepEqual(npmGroups.map((g) => g.name), ["toolchain", "development"],
+    "the npm updates split into the toolchain (wrangler and playwright, the two that move the Worker bundle and the " +
+    "Chromium every browser suite launches) and everything else"); checks++;
+  const devDeps = Object.keys(JSON.parse(readFileSync(new URL("../tests/package.json", import.meta.url), "utf8")).devDependencies);
+  const grouped = (name) => npmGroups.filter((g) => (g.patterns.includes("*") || g.patterns.includes(name)) && !g.exclude.includes(name));
+  ok(devDeps.length > 0 && devDeps.every((d) => grouped(d).length === 1),
+    `every development dependency (${devDeps.join(", ")}) falls in exactly one npm group, so none is skipped and none is proposed twice`);
+  ok(npmGroups[0].patterns.join() === "wrangler,playwright" && grouped("wrangler")[0].name === "toolchain" && grouped("playwright")[0].name === "toolchain",
+    "wrangler and playwright move together in the toolchain group");
+  ok(/^ {6}actions:\n {8}patterns:\n {10}- "\*"\n$/m.test(updates[1].body), "and the two SHA-pinned actions move together in one group");
+
   const images = [];
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url)).sort()) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
