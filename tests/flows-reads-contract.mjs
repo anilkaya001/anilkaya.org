@@ -1221,7 +1221,7 @@ class FakeCache {
   const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
   const block = (ideas, noTrade) => ({
     v: 1, engine: "q1", asOf: "2026-09-24T20:00:00.000Z", spot: 100, atr: 2.5,
-    facts: [{ id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 }, { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 }, { id: "level.magnet", v: 100.5, u: "px", g: 2 },
+    facts: [{ id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 }, { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 2 }, { id: "level.magnet", v: 100.5, u: "px", g: 2 },
       { id: "gex.book", v: 1.2e6, u: "usdPer1pct", g: 2 }],
     state: { state: "pinned", direction: null, confidence: 2, preferred: ["iron condor"], avoid: ["long straddle"] }, levels: {},
     structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 30, sessions: 22,
@@ -1260,7 +1260,7 @@ class FakeCache {
   ok(bare.verdict === "stand-aside" && bare.llm === false && /The engine stands aside: no structure it priced clears its bar/.test(bare.provenance) && !/engine’s own ranking/.test(bare.provenance),
      `and with no model the provenance says the engine stands aside instead of calling an empty list its own ranking (${bare.provenance})`);
 
-  const promoted = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] });
+  const promoted = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] });
   ok(promoted.llm === true && promoted.ideas.length === 1 && promoted.ideas[0].from === "model" && promoted.ideas[0].structure === "S1" && promoted.verdict === "harvest-rich-premium",
      "and a model that agrees with the engine's ranking, naming facts the structure's rules rest on, is kept");
   const offRules = await reading(block(["S1"], null), { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["level.magnet", "gex.book"] }] });

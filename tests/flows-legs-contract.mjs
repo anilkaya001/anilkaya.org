@@ -290,7 +290,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   }, { sessionDate: S }));
   rows[6] = { ticker: "N06", close: "50", marketcap: "9e9", sector: "Technology" };
   const uni = buildUniverse(rows, { sessionDate: S, generatedAt: "t" });
-  const engineCard = { depth: "board", engine: { facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }], structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }], ideas: ["S1"], noTrade: null } };
+  const engineCard = { depth: "board", engine: { facts: [{ id: "iv.pctile.30.1y", v: 0.5, u: "frac", g: 2 }], structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }], ideas: ["S1"], noTrade: null } };
   const asideCard = { depth: "focus", engine: { ...engineCard.engine, ideas: [], noTrade: { code: "ev.none-positive", closest: null } } };
   deep([cardTier(engineCard).tier, cardTier(asideCard).tier, cardTier(asideCard).code], ["priced", "stand-aside", "ev.none-positive"], "an engine card with ranked ideas is priced, one that stood aside is stand-aside with the engine's code");
   deep([cardTier({ depth: "cross-section" }).tier, cardTier({ depth: "index" }).tier, cardTier({ depth: "fund", panels: {} }).tier], ["family", "family", "family"], "cross-section cards and dossiers are family");

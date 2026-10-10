@@ -10,6 +10,7 @@ import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { priceSale } from "../shared/flows-premium.js";
+import { bucketsOf, BUCKET_LINES } from "../shared/flows-quant-structures.js";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -357,6 +358,22 @@ const FACT_INPUT = () => ({
   eq([get(withVol({ v: 1, iv30Pct: 0 }), "iv.pctile.30.1y").v, get(withVol({ v: 1, iv30Pct: 1 }), "iv.pctile.30.1y").v], [0, 1], "and both ends of the unit interval are values, not absences");
   const sizeWith = JSON.stringify(real).length, sizeWithout = JSON.stringify(real.filter((f) => f.id !== "iv.pctile.30.1y")).length;
   ok(sizeWith - sizeWithout > 30 && sizeWith - sizeWithout < 90, `the fact costs about sixty bytes a card (${sizeWith - sizeWithout})`);
+  {
+    const bucketOf = (facts) => bucketsOf(Object.fromEntries(facts.map((f) => [f.id, f])), "A").iv;
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
+      "P0-35: a rank of 0.07 with a percentile of 0.70 buckets mid, not low: the IV axis is read from the percentile");
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
+      "and a rank of 0.90 with a percentile of 0.10 buckets low, at the percentile's own grade");
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+      "a card with a rank and no percentile has no IV bucket: the rank is never put in its place");
+    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.pct.30", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+      "nor does one whose percentile is withheld");
+    eq([0.2499, 0.25, 0.5, 0.75, 0.7501].map((v) => bucketOf([{ id: "iv.pctile.30.1y", v, g: 2 }]).bucket), ["low", "mid", "mid", "mid", "high"],
+      "the buckets keep the lines 0.25 and 0.75, inclusive on the mid side");
+    eq([BUCKET_LINES.IV_LOW, BUCKET_LINES.IV_HIGH], [0.25, 0.75], "which are the lines the reading and the screen tier apply to a real percentile");
+    const withRank = withVol({ v: 1, iv30Pct: 0.7 }, { coneThin: false });
+    ok(get(withRank, "iv.pctile.30.1y").v === 0.7, "and the card's fact the bucket reads is the cone's percentile");
+  }
 }
 
 {

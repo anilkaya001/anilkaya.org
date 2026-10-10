@@ -1456,7 +1456,7 @@ try {
     const sessionDate = expectedNightlySession(new Date());
     const at = new Date().toISOString();
     const block = { v: 1, engine: "q1", asOf: sessionDate + "T20:00:00.000Z", spot: 420.5, atr: 8,
-      facts: [{ id: "iv.cm.30", v: 0.31, u: "vol", g: 3 }, { id: "iv.pct.30", v: 0.8, u: "frac", g: 2 },
+      facts: [{ id: "iv.cm.30", v: 0.31, u: "vol", g: 3 }, { id: "iv.pctile.30.1y", v: 0.8, u: "frac", g: 2 },
         { id: "vrp.rel.21", v: 0.2, u: "frac", g: 3 }],
       state: { state: "premium-rich", direction: null, confidence: 2, preferred: ["put credit spread"], avoid: ["long straddle"] },
       structures: [{ id: "S1", family: "put-credit-spread", risk: "defined", dir: "bull", expiry: "2026-10-16", dte: 24,

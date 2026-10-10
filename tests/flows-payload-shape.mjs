@@ -210,6 +210,25 @@ assert.deepEqual(missingReport, [],
     assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, graded 1 on a thin 30-day cone and 2 on a full one, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
     ok(present > 0, `the dry run reaches the percentile fact with a value (${present}) and without one (${absent})`);
     ok(thin > 0 && full > 0, `and it reaches both grades: grade 1 on a thin cone (${thin}) and grade 2 on a full one (${full})`);
+    {
+      const { bucketsOf } = await import("../shared/flows-quant-structures.js");
+      const bucketFrom = (c) => bucketsOf(Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "A").iv.bucket;
+      const onRank = (c) => {
+        const r = c.engine.facts.find((x) => x.id === "iv.pct.30");
+        const f = { ...Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "iv.pctile.30.1y": r };
+        return bucketsOf(f, "A").iv.bucket;
+      };
+      let changed = 0, lost = 0, both = 0;
+      for (const c of cards) {
+        const now = bucketFrom(c), was = onRank(c);
+        if (was === null) continue;
+        both++;
+        if (now === null) lost++;
+        else if (now !== was) changed++;
+      }
+      ok(both > 0, `the IV bucket moved from the rank to the percentile is measurable on the dry run's cards (${both})`);
+      console.log(`  P0-35: ${changed} of ${both} fixture cards change IV bucket (${(100 * changed / both).toFixed(1)}%), ${lost} lose it for want of a percentile`);
+    }
   }
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
   const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];

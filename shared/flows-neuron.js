@@ -1150,7 +1150,15 @@ export const ENGINE_LINES = Object.freeze({
   SKEW_STEEP: BUCKET_LINES.SKEW_STEEP, SKEW_FLAT: BUCKET_LINES.SKEW_FLAT, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02,
   MAX_IDEAS: 3, MAX_STRUCTURES: 5,
 });
-const RULE_FACT = Object.freeze({ iv: "iv.pct.30", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
+export const RULE_FACT = Object.freeze({ iv: "iv.pctile.30.1y", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
+const IV_CLAIM = Object.freeze({ hi: ENGINE_LINES.IV_HIGH, lo: ENGINE_LINES.IV_LOW, strict: true });
+const SKEW_CLAIM = Object.freeze({ hi: ENGINE_LINES.SKEW_STEEP, lo: ENGINE_LINES.SKEW_FLAT, strict: false });
+export const CLAIM_LINES = Object.freeze({
+  "iv.pctile.30.1y": IV_CLAIM,
+  "iv.pct.30": IV_CLAIM,
+  "iv.rank.1y": IV_CLAIM,
+  "skew.rr25.30.pct": SKEW_CLAIM,
+});
 const STATE_FACT = Object.freeze({ pinned: "level.magnet", other: "level.flip", book: "gex.book" });
 
 function structureBrief(st) {
@@ -1234,7 +1242,7 @@ function nearLevel(eng, st, levelIds) {
 export function verdictHolds(code, st, eng) {
   const m = factIndex(eng);
   const g = (id) => { const f = m.get(id); return f ? f.g : 0; };
-  const vrp = val(m, "vrp.rel.21"), ivp = val(m, "iv.pct.30"), ratio = val(m, "move.event.ratio");
+  const vrp = val(m, "vrp.rel.21"), ivp = val(m, "iv.pctile.30.1y"), ratio = val(m, "move.event.ratio");
   const skewPct = val(m, "skew.rr25.30.pct"), front = val(m, "term.front.7_30");
   const L = ENGINE_LINES;
   const state = eng.state || {};
@@ -1314,7 +1322,8 @@ export function claimHolds(claim, eng) {
     case "rich": case "cheap": {
       const rich = claim.rel === "rich";
       if (/^vrp\./.test(a.id)) return { ok: rich ? a.v >= (a.id === "vrp.rel.21" ? L.VRP_RICH : 0) : a.v <= (a.id === "vrp.rel.21" ? L.VRP_CHEAP : 0), code: "claim-false" };
-      if (/\.pct\b|\.pct\.|\.rank\./.test(a.id)) return { ok: rich ? a.v > L.IV_HIGH : a.v < L.IV_LOW, code: "claim-false" };
+      const line = CLAIM_LINES[a.id];
+      if (line) return { ok: rich ? (line.strict ? a.v > line.hi : a.v >= line.hi) : (line.strict ? a.v < line.lo : a.v <= line.lo), code: "claim-false" };
       if (a.id === "move.event.ratio") return { ok: rich ? a.v >= L.EVENT_OVER : a.v <= L.EVENT_UNDER, code: "claim-false" };
       return { ok: false, code: "claim-false" };
     }
@@ -1370,7 +1379,7 @@ function becauseOf(st, eng) {
   const out = [];
   const add = (id) => { const f = m.get(id); if (f && f.v !== null && f.g > 0 && !out.includes(id)) out.push(id); };
   for (const w of weighedRules(st, eng)) for (const id of w.ids) add(id);
-  for (const id of ["vrp.rel.21", "iv.pct.30", "level.flip", "gex.book", "iv.cm.30"]) { if (out.length >= 2) break; add(id); }
+  for (const id of ["vrp.rel.21", RULE_FACT.iv, "level.flip", "gex.book", "iv.cm.30"]) { if (out.length >= 2) break; add(id); }
   return out.slice(0, 2);
 }
 
@@ -1412,7 +1421,7 @@ export function promptForEngine(context) {
       "the state avoids, and the first idea is defined-risk whenever a defined-risk structure is listed.",
     "5. because names at least two fact ids with grade above zero, at least one of them a fact the structure's own rules rest on " +
       "(the state's level " + STATE_FACT.pinned + " when pinned, else " + STATE_FACT.other + ", and its book " + STATE_FACT.book +
-      "; the volatility premium " + RULE_FACT.vrp + "; the IV rank " + RULE_FACT.iv + "; the term slope " + RULE_FACT.term +
+      "; the volatility premium " + RULE_FACT.vrp + "; the IV percentile " + RULE_FACT.iv + "; the term slope " + RULE_FACT.term +
       "; the skew " + RULE_FACT.skew + "; or the event ratio " + RULE_FACT.event + "), cited by exactly those ids; " +
       "an idea ranks no higher than its weakest fact.",
     "6. Answer verdict stand-aside with no ideas only when that line says the engine stands aside; a stand-aside over ranked " +

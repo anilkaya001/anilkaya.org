@@ -492,7 +492,7 @@ function synthInput(over = {}) {
       ewmaVol: 0.36, coneMedianVol: 0.31, params: GJR,
     },
     facts: {
-      "iv.pct.30": { v: 0.82, g: 3 }, "vrp.rel.21": { v: 0.16, g: 3 }, "term.slope.30_90.exEvent": { v: -0.02, g: 2 },
+      "iv.pctile.30.1y": { v: 0.82, g: 3 }, "vrp.rel.21": { v: 0.16, g: 3 }, "term.slope.30_90.exEvent": { v: -0.02, g: 2 },
       "skew.rr25.30.pct": { v: 0.62, g: 2 },
     },
     state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich },
@@ -644,7 +644,7 @@ const OUT = ENGINE.runEngine(BASE);
 {
   const cal = synthInput({
     expiryList: ["2026-10-16", "2026-11-20"],
-    facts: { ...BASE.facts, "term.slope.30_90.exEvent": { v: 0.09, g: 3 }, "iv.pct.30": { v: 0.3, g: 3 }, "vrp.rel.21": { v: 0, g: 3 } },
+    facts: { ...BASE.facts, "term.slope.30_90.exEvent": { v: 0.09, g: 3 }, "iv.pctile.30.1y": { v: 0.3, g: 3 }, "vrp.rel.21": { v: 0, g: 3 } },
     state: { state: "premium-cheap", direction: null, confidence: 2, ...STATE_STRUCTURES["premium-cheap"] },
     sviFor: (i) => (i === 0 ? { ...SVI_TRUE, a: 0.009 } : { ...SVI_TRUE, a: 0.02 }),
     topFamilies: 8,
@@ -726,7 +726,7 @@ const OUT = ENGINE.runEngine(BASE);
   const cheapP = vetoed({ pLaw: { ...BASE.pLaw, knots: [5, 10, 21, 42].map((h) => ({ h, ...DENSITY.binnedFromLognormal({ sigma: 0.9, T: h / 252, forwardOverSpot: 1 }) })), ewmaVol: 0.9, coneMedianVol: 0.9 } });
   ok(cheapP.ideas.length === 0 && cheapP.noTrade && cheapP.noTrade.code === "ev.none-positive" && cheapP.noTrade.closest,
     "when the real world is far wilder than the smile no short-premium idea has positive EV, and the closest is shown greyed");
-  const bull = vetoed({ state: { state: "squeeze", direction: "bullish", confidence: 3, ...STATE_STRUCTURES.bull.cheap }, facts: { ...BASE.facts, "iv.pct.30": { v: 0.2, g: 3 }, "vrp.rel.21": { v: -0.15, g: 3 } } });
+  const bull = vetoed({ state: { state: "squeeze", direction: "bullish", confidence: 3, ...STATE_STRUCTURES.bull.cheap }, facts: { ...BASE.facts, "iv.pctile.30.1y": { v: 0.2, g: 3 }, "vrp.rel.21": { v: -0.15, g: 3 } } });
   ok(bull.structures.every((s) => !["bear"].includes(s.dir)), "a bullish squeeze prices no bearish structure");
   ok(bull.structures.some((s) => s.family === "long-call" || s.family === "call-debit-spread"), "and reaches for calls when vol is cheap");
 }

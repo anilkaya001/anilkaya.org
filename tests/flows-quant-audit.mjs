@@ -241,7 +241,7 @@ const analyticSd = (h) => {
   const expiry = "2026-10-02";
   const chain = skewedRows({ asOfMs, expiry });
   const input = { ticker: "NVDA", asOfMs, spot: S0, rate: { r: 0.04, method: "constant", n: 0 }, expiries: [{ expiry, rows: chain.rows }], facts: [
-    { id: "iv.pct.30", v: 0.82, u: "frac", g: 3 }, { id: "vrp.rel.21", v: 0.16, u: "frac", g: 3 },
+    { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 3 }, { id: "vrp.rel.21", v: 0.16, u: "frac", g: 3 },
     { id: "term.slope.30_90.exEvent", v: -0.02, u: "frac", g: 2 }, { id: "skew.rr25.30.pct", v: 0.62, u: "frac", g: 2 },
   ], state: { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich }, levels: { callWall: 240, putWall: 222, magnet: 231, flip: 228, atr: 5, maxPain: 231 }, pLaw, fits: true };
   const block = QC.runCardEngine(input);
