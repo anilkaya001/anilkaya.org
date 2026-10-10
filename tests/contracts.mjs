@@ -9,6 +9,7 @@ import { COURSE_STAGE_POINTS } from "../shared/course-points.js";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { cookie, getCookie, signSession, verifySession } from "../shared/session.js";
 import { workerSource, expect } from "./lib/source-scan.mjs";
+import { servedFiles } from "./lib/served-tree.mjs";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TEST_DIR, "..");
@@ -1217,10 +1218,35 @@ if (diffBase) {
 
 const assetIgnore = read(".assetsignore");
 for (const entry of [
-  ".*", ".wrangler/", "articles/_template/", ".dev.vars*", ".env*", "CNAME", "scripts/",
+  ".*", ".wrangler/", "articles/_template/", ".dev.vars*", ".env*", "CNAME", "scripts/", "docs/", "server/",
   "assets/js/curriculum.js", "assets/js/curriculum-data.js", "assets/js/curriculum-questions.js",
 ]) {
   assert(assetIgnore.split(/\r?\n/).includes(entry), `.assetsignore must exclude ${entry}`);
+}
+
+const SERVED_PAGES = [
+  "404.html", "LICENSE", "index.html", "robots.txt", "site.webmanifest", "sitemap.xml",
+  "articles/index.html",
+  "lab/challenge/index.html", "lab/course.html", "lab/index.html", "lab/lesson.html",
+  "lab/placement/index.html", "lab/review/index.html",
+  "lab/projects/factor-pricing-lab/index.html", "lab/projects/fx-volatility-risk/index.html",
+  "lab/projects/macro-forecasting-desk/index.html",
+];
+const SERVED_ASSET_TOKENS = ["assets/version.txt", "assets/fonts-version.txt"];
+const SERVED_ASSET_DIRS = ["assets/css/", "assets/js/", "assets/data/", "assets/fonts/", "assets/img/"];
+{
+  const served = servedFiles({ root: ROOT });
+  const isAsset = (file) => file.startsWith("assets/");
+  assert.deepEqual(served.filter((file) => !isAsset(file)), [...SERVED_PAGES].sort(),
+    "the pages and root files in the static bundle must equal the declared list: a new top-level file, directory or page is either declared here or excluded in .assetsignore");
+  const stray = served.filter(isAsset).filter((file) => !SERVED_ASSET_TOKENS.includes(file) && !SERVED_ASSET_DIRS.some((dir) => file.startsWith(dir)));
+  assert.deepEqual(stray, [], "every served asset sits under css, js, data, fonts or img, or is one of the two version tokens");
+  for (const dir of ["docs/", "server/", "shared/", "scripts/", "tests/", "migrations/"]) {
+    assert(!served.some((file) => file.startsWith(dir)), `${dir} must not be in the static bundle`);
+  }
+  assert(!served.includes("docs/uw-openapi.yaml"), "the 1 MB vendor specification must not be uploaded or served");
+  for (const token of SERVED_ASSET_TOKENS) assert(served.includes(token), `${token} must be served`);
+  assert(served.some((file) => file.startsWith("assets/data/projects/")), "assets/data/projects is served by design");
 }
 
 const secret = "contract-test-secret-abcdefghijklmnopqrstuvwxyz";

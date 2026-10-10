@@ -8,6 +8,8 @@ shared/
 server/
 functions/
 scripts/
+docs/
+server/
 articles/_template/
 flows/
 assets/js/curriculum.js
