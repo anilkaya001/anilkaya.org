@@ -308,6 +308,8 @@ const pageHead = (title, active) => `
   </header>`;
 
 const UI_SCRIPT = `<script src="${v("/assets/js/flows-ui.js")}" defer></script>`;
+const CHART_SCRIPT = `<script src="${v("/assets/js/flows-chart.js")}" defer></script>`;
+const UI_CHART_SCRIPTS = `${UI_SCRIPT}\n${CHART_SCRIPT}`;
 
 const shell = (title, active, username, body, { chrome = true } = {}) => {
   const lead = chrome ? pageHead(title, active) : "";
@@ -398,7 +400,7 @@ ${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id=
 
   <p class="flows-foot hm-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">Track record</a></span></p>
 `, { chrome: false })}
-${UI_SCRIPT}
+${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-overview.js")}" defer></script>
@@ -458,7 +460,7 @@ export function sidePage({ username = "", side = "long" } = {}) {
   return `${head("Flows \u2014 " + title, lede, ["/assets/css/flows-boards.css"])}
 ${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username,
     boardBody(bear ? "short" : "long", { status: "flowsStatus", body: "flowsBody", label: "Ranked candidates" }))}
-${UI_SCRIPT}
+${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-export.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
@@ -470,7 +472,7 @@ export function deskPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Premium desk",
     description: "Option sales across your names, priced by the engine and ranked on a frontier.",
-    active: "desk", username,
+    active: "desk", username, chart: true,
     styles: ["/assets/css/flows-tools.css"],
     scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-export.js", "/assets/js/flows-desk.js"],
     body: `
@@ -622,7 +624,7 @@ export function watchPage({ username = "" } = {}) {
   return `${head("Flows \u2014 Watch", lede, ["/assets/css/flows-boards.css"])}
 ${shell("Watchlist", "watch", username,
     boardBody("watch", { status: "watchStatus", body: "watchBody", label: "Names inside the dead band" }))}
-${UI_SCRIPT}
+${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-export.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
@@ -674,7 +676,7 @@ ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}
-${UI_SCRIPT}
+${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
@@ -727,7 +729,7 @@ export function trackPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Track",
     description: "Each name's daily score traced across sessions, with what followed each call. A gap is a session the name was not scored, never zero.",
-    active: "track",
+    active: "track", chart: true,
     username,
     chrome: false,
     styles: ["/assets/css/flows-record.css"],
@@ -776,7 +778,7 @@ ${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"><
 ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { span: 6 })}
   </div>
 `, { chrome: false })}
-${UI_SCRIPT}
+${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-net.js")}" defer></script>
@@ -789,7 +791,7 @@ export function tickerPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
-    active: "ticker",
+    active: "ticker", chart: true,
     username,
     chrome: false,
     styles: ["/assets/css/flows-ticker.css"],
@@ -844,7 +846,7 @@ export function historyPage({ username = "" } = {}) {
   return flowsDocument({
     title: "History",
     description: "What the board said, and what happened next.",
-    active: "history",
+    active: "history", chart: true,
     username,
     chrome: false,
     styles: ["/assets/css/flows-record.css"],
@@ -918,7 +920,7 @@ export function strategyPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Strategy",
     description: "Price any listed option structure on the smile, with the same engine as the server.",
-    active: "strategy", username, chrome: false,
+    active: "strategy", username, chrome: false, chart: true,
     styles: ["/assets/css/flows-tools.css"],
     scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-strategy.js"],
     body: `
@@ -1035,12 +1037,12 @@ export function strategyPage({ username = "" } = {}) {
 export const FLOWS_SPRITE = SPRITE;
 
 export function flowsDocument({
-  title = "Flows", description = "", active = "", username = "", body = "", scripts = [], styles = [], chrome = true,
+  title = "Flows", description = "", active = "", username = "", body = "", scripts = [], styles = [], chrome = true, chart = false,
 } = {}) {
   const t = escapeHTML(String(title));
   return `${head("Flows — " + t, escapeHTML(String(description)), styles)}
 ${shell(t, String(active), username, String(body), { chrome })}
-${UI_SCRIPT}
+${chart ? UI_CHART_SCRIPTS : UI_SCRIPT}
 ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("\n")}
 </body>
 </html>`;

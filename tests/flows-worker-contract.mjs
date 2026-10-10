@@ -211,9 +211,9 @@ try {
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
       const tickHtml = await tick.text();
       ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
-      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
+      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-chart.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
       ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
-         "with the Depth primitives, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
+         "with the Depth primitives, the chart library, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
       ok(!tickHtml.includes("/assets/js/flows-panels.js") && !tickHtml.includes("/assets/js/flows-drawers.js"),
          "and no longer the retired panel library or its deferred drawers");
       ok(tickHtml.includes("/assets/css/flows-ticker.css"), "with the route stylesheet linked through the per-route hook");
@@ -694,8 +694,9 @@ try {
       const stHtml = await st.text();
       ok(stHtml.includes("/assets/js/flows-track.js"), "the track page loads its own controller");
       ok(stHtml.includes("/assets/js/flows-ui.js"), "and the shared UI module");
-      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-track.js"),
-         "with the module BEFORE the controller — the load order is the dependency order");
+      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-chart.js") &&
+         stHtml.indexOf("/assets/js/flows-chart.js") < stHtml.indexOf("/assets/js/flows-track.js"),
+         "with the module and the chart library BEFORE the controller — the load order is the dependency order");
       ok(stHtml.includes('id="stTrack"'), "and carries the trace host");
       ok(stHtml.includes('id="stBasis"'), "and the basis panel, which is the page's honesty");
       ok(/never zero/i.test(stHtml),

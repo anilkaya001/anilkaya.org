@@ -229,10 +229,11 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const at = (s) => served.indexOf(s);
   ok(at(`/assets/css/flows-ticker.css?v=${VERSION}`) > at(`/assets/css/flows.css?v=${VERSION}`),
      "the route stylesheet is linked after the shared one, at the canonical asset version, through the per-route stylesheet hook");
-  const ui = at(`/assets/js/flows-ui.js?v=${VERSION}`), fresh = at(`/assets/js/flows-fresh.js?v=${VERSION}`);
+  const ui = at(`/assets/js/flows-ui.js?v=${VERSION}`), chart = at(`/assets/js/flows-chart.js?v=${VERSION}`);
+  const fresh = at(`/assets/js/flows-fresh.js?v=${VERSION}`);
   const quant = at(`/assets/js/flows-quant-read.bundle.js?v=${VERSION}`), tick = at(`/assets/js/flows-ticker.js?v=${VERSION}`);
-  ok(ui > 0 && ui < fresh && fresh < quant && quant < tick,
-     "the scripts load in dependency order: the Depth primitives, the freshness layer, the pricing bundle, then the controller");
+  ok(ui > 0 && ui < chart && chart < fresh && fresh < quant && quant < tick,
+     "the scripts load in dependency order: the Depth primitives, the chart library, the freshness layer, the pricing bundle, then the controller");
   for (const gone of ["flows-panels.js", "flows-drawers.js", "flows-cursor.js"]) ok(!served.includes(gone), `the page no longer links ${gone}`);
   ok(!/<style[\s>]/.test(served), "the page serves no inline stylesheet");
   ok(!/document\.createElement\("style"\)|adoptedStyleSheets|insertRule\(/.test(TICKER_SRC),

@@ -305,7 +305,7 @@ ok(files.length >= 10,
      "  Zero takes its own arm and a neutral token: `v > 0 ? pal.pos : v < 0 ? pal.neg : \"--label-3\"`.\n" +
      "  The scan has no allow-list, for the same reason the sign scan has none.");
 
-  const ui = readFileSync(new URL("flows-ui.js", JS_DIR), "utf8");
+  const ui = readFileSync(new URL("flows-chart.js", JS_DIR), "utf8");
   const div = ui.slice(ui.indexOf("function diverging("), ui.indexOf("function heatmap("));
   ok(/if \(v === 0\) \{ s\("rect", \{[^}]*height: 1, fill: paint\("--label-3"\), class: "zero" \}/.test(div),
      "diverging draws an exact zero as a 1 px neutral tick on the axis in --label-3, not as a bar with a side");

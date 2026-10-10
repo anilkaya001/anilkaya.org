@@ -135,7 +135,7 @@ for (const name of Object.keys(CEILING_KIB)) {
   }
 
   {
-    const ui = readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8");
+    const ui = readFileSync(new URL("assets/js/flows-chart.js", REPO), "utf8");
     const exported = ui.match(/const chart = Object\.freeze\(\{([\s\S]*?)\}\);/);
     ok(exported && /\bline\b/.test(exported[1]) && /\bLEVELS\b/.test(exported[1]),
        "the chart export list is found, so the next line reads it rather than nothing");
@@ -147,6 +147,31 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(!route.parts.some((part) => /^flows-cursor\.js/.test(part)), `no route links flows-cursor.js (${route.name})`);
     }
     ok(!existsSync(new URL("assets/js/flows-cursor.js", REPO)), "and flows-cursor.js is deleted rather than orphaned");
+  }
+
+  {
+    const CHART_ROUTES = ["deskPage", "historyPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage", "trackPage",
+      "unusualPage", "watchPage"];
+    const FREE_ROUTES = ["askPage", "eventsPage", "loginPage", "politicalPage"];
+    const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
+    eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
+       "the chart library ships on exactly the ten routes that draw a chart, and the routes that draw none never download it");
+    for (const name of FREE_ROUTES) {
+      ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
+    }
+    for (const name of CHART_ROUTES) {
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL" }));
+      const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
+      const at = order.indexOf("/assets/js/flows-ui.js");
+      ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
+         `${name} links flows-chart.js directly after flows-ui.js, so no script between them captures a FlowsUI without chart`);
+      ok(/<script src="[^"]*flows-chart\.js\?v=\d+" defer><\/script>/.test(html), `${name} loads it deferred at the asset version`);
+    }
+    const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
+    console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
+    ok(core < 60000, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
+       "and none of the chart drawing functions is left behind in the core");
   }
 
   const askBytes = sizeOf("/assets/js/flows-ask.js");

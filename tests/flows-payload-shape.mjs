@@ -3,6 +3,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { moduleSource, slice } from "./lib/source-scan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -704,8 +705,8 @@ assert.deepEqual(missingReport, [],
        "board carrying a column its dated archive never will");
     eq(ideas.sessionDate, longB && longB.sessionDate,
        "stamped with the board's own session, which is what lets the board page refuse yesterday's ideas");
-    const shapeSrc = readFileSync(join(ROOT, "assets/js/flows-ui.js"), "utf8");
-    const shapes = new Set([...shapeSrc.slice(shapeSrc.indexOf("const SHAPES")).matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
+    const shapeSrc = slice(moduleSource("assets/js/flows-chart.js"), "const SHAPES", "const shapeOf");
+    const shapes = new Set([...shapeSrc.matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
     ok(shapes.size > 10, `the board glyph's shape names are read from the primitive (${shapes.size})`);
     for (const r of ideas.rows) {
       for (const k of ["t", "id", "structure", "dir", "grade"]) {

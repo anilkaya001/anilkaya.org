@@ -1201,6 +1201,52 @@ const cronMinutes = (cron) => {
 }
 
 {
+  const chartSrc = read("assets/js/flows-chart.js");
+  const uiSrc = read("assets/js/flows-ui.js");
+  const wanted = [...chartSrc.match(/const \{([^}]*)\} = UI;/)[1].split(",").map((n) => n.trim())];
+  const published = uiSrc.slice(uiSrc.indexOf("window.FlowsUI = Object.freeze({"), uiSrc.lastIndexOf("});"));
+  const missing = wanted.filter((n) => !new RegExp("(^|[\\s,{])" + n + "(?=[,\\s}])").test(published));
+  deep(missing, [], `the chart library destructures only members flows-ui.js publishes (${wanted.join(", ")})`);
+  ok(!/\bchart\b/.test(published) && !/Object\.freeze\(\{\s*mount,/.test(uiSrc),
+    "and flows-ui.js no longer publishes chart: a page that never loads flows-chart.js has no FlowsUI.chart");
+  const members = Object.fromEntries(wanted.map((n) => [n, n === "F" ? Object.freeze({ px: 1 }) : n === "DASH" ? "-" : () => null]));
+  const plant = (ui) => {
+    const ctx = { window: ui === undefined ? {} : { FlowsUI: ui, ResizeObserver: undefined }, document: {}, requestAnimationFrame: (f) => f() };
+    vm.createContext(ctx);
+    return ctx;
+  };
+  const frozenUi = Object.freeze({ ...members, reduced: () => false, heartbeat: () => 1, rt: Object.freeze({}) });
+  const ctx = plant(frozenUi);
+  vm.runInContext('"use strict";\n' + chartSrc, ctx);
+  const after = ctx.window.FlowsUI;
+  ok(after !== frozenUi && Object.isFrozen(after) && Object.isFrozen(after.chart),
+    "flows-chart.js re-publishes a new frozen FlowsUI with a frozen chart: assigning into the frozen original would throw");
+  ok(after.heartbeat === frozenUi.heartbeat && after.rt === frozenUi.rt && wanted.every((n) => after[n] === frozenUi[n]),
+    "and keeps every member the page already had, the freshness layer's and the rail's among them");
+  deep(Object.keys(after.chart).sort(), ["LEVELS", "bars", "clipRect", "diverging", "gauge", "heatmap", "line", "lin", "marker", "monoPath", "mount",
+    "niceTicks", "part", "pathOf", "payoff", "scrub", "shapeOf", "sparkline", "spread", "svgRoot", "vGrad"].sort(),
+  "FlowsUI.chart carries the same twenty-one members the library exported inside flows-ui.js");
+  const again = ctx.window.FlowsUI;
+  vm.runInContext('"use strict";\n' + chartSrc, ctx);
+  ok(ctx.window.FlowsUI === again, "a second run changes nothing: the first chart wins");
+  const bare = plant(undefined);
+  vm.runInContext('"use strict";\n' + chartSrc, bare);
+  ok(bare.window.FlowsUI === undefined, "and without flows-ui.js the library installs nothing and throws nothing");
+  const shared = { document: { hidden: false, addEventListener() {}, removeEventListener() {} }, Date, isFinite, Number, String, Math, setTimeout, clearTimeout };
+  const freshSrc = read("assets/js/flows-fresh.js");
+  const chartFirst = Object.assign(plant(Object.freeze({ ...members, reduced: () => false })), shared);
+  vm.runInContext('"use strict";\n' + chartSrc, chartFirst);
+  vm.runInContext('"use strict";\n' + freshSrc, chartFirst);
+  ok(typeof chartFirst.window.FlowsUI.chart.line === "function" && typeof chartFirst.window.FlowsUI.heartbeat === "function",
+    "loaded before the freshness layer, the layer's re-publish keeps chart");
+  const freshFirst = Object.assign(plant(Object.freeze({ ...members, reduced: () => false })), shared);
+  vm.runInContext('"use strict";\n' + freshSrc, freshFirst);
+  vm.runInContext('"use strict";\n' + chartSrc, freshFirst);
+  ok(typeof freshFirst.window.FlowsUI.chart.line === "function" && typeof freshFirst.window.FlowsUI.heartbeat === "function",
+    "and loaded after it, chart keeps heartbeat: either order leaves both");
+}
+
+{
   const src = read("assets/js/flows-fresh.js");
   const listeners = [];
   const ctx = { window: { FlowsUI: {} }, document: { hidden: false, addEventListener: (t, f) => listeners.push([t, f]),
