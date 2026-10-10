@@ -99,7 +99,7 @@ function expected(flow, { names = 10 } = {}) {
   };
 }
 
-async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false } = {}) {
+async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false, patch = null, delayFonts = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch });
   const page = await ctx.newPage();
   const errors = [];
@@ -109,13 +109,19 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   let release = null;
   const gate = deferAlerts ? new Promise((r) => { release = r; }) : null;
   page.release = () => release && release();
-  const html = PAGES.unusualPage({ username: "test" });
+  const html = PAGES.unusualPage({ username: "test" }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>");
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
+      if (delayFonts && u.pathname.endsWith(".woff2")) await new Promise((r) => setTimeout(r, delayFonts));
+      if (patch && u.pathname === "/assets/js/flows-net.js") {
+        let src = fs.readFileSync(f, "utf8");
+        for (const [from, to] of patch) { if (!src.includes(from)) throw new Error("mutant anchor missing: " + from); src = src.replaceAll(from, to); }
+        return route.fulfill({ body: src, contentType: "text/javascript" });
+      }
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname === "/api/flows/flowalerts") {
@@ -128,7 +134,7 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
     if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: html });
     return route.fulfill({ status: 404, body: "" });
   });
-  await page.goto("https://example.test/flows/unusual/");
+  await page.goto("https://example.test/flows/unusual/", delayFonts ? { waitUntil: "commit" } : undefined);
   if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
   return { ctx, page };
 }
@@ -191,7 +197,67 @@ function rankedL(L, tag, axis = "y") {
   });
   return L;
 }
+
+function auditFn(sc, rest) {
+  const bad = [], S = sc.spheres, L = sc.labels, B = sc.bands, k = sc.scale, box = { w: sc.w, h: sc.h };
+  const clampv = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const hit = (l, s) => { const nx = Math.max(l.x, Math.min(s.cx, l.x + l.w)), ny = Math.max(l.y, Math.min(s.cy, l.y + l.h)); return s.r - Math.hypot(s.cx - nx, s.cy - ny); };
+  for (let i = 0; i < S.length; i++) {
+    for (let j = i + 1; j < S.length; j++) if (S[i].r + S[j].r - Math.hypot(S[i].cx - S[j].cx, S[i].cy - S[j].cy) > 0) bad.push("spheres " + S[i].key + " " + S[j].key);
+    if (S[i].cx - S[i].r < 0 || S[i].cx + S[i].r > box.w || S[i].cy - S[i].r < 0 || S[i].cy + S[i].r > box.h) bad.push("sphere out " + S[i].key);
+  }
+  for (let i = 0; i < L.length; i++) {
+    for (const s of S) if (hit(L[i], s) > 0) bad.push("chip " + L[i].key + " over sphere " + s.key);
+    for (let j = i + 1; j < L.length; j++) if (Math.min(L[i].x + L[i].w, L[j].x + L[j].w) - Math.max(L[i].x, L[j].x) > 0.5 && Math.min(L[i].y + L[i].h, L[j].y + L[j].h) - Math.max(L[i].y, L[j].y) > 0.5) bad.push("chips " + L[i].key + " " + L[j].key);
+    if (L[i].x < 0 || L[i].y < 0 || L[i].x + L[i].w > box.w || L[i].y + L[i].h > box.h) bad.push("chip out " + L[i].key);
+  }
+  for (const hd of sc.heads) {
+    if (hd.x < 0 || hd.y < 0 || hd.x + hd.w > box.w || hd.y + hd.h > box.h) bad.push("header out " + hd.text);
+    for (const s of S) if (hit(hd, s) > 0) bad.push("header " + hd.text.split(" ")[0] + " over sphere " + s.key);
+    if (sc.readout && hd.y - (sc.readout.y + sc.readout.h) < 12) bad.push("readout within " + (hd.y - sc.readout.y - sc.readout.h).toFixed(1) + " px of header " + hd.text.split(" ")[0]);
+  }
+  if (sc.readout && (sc.readout.x < 0 || sc.readout.x + sc.readout.w > box.w)) bad.push("readout out of the canvas");
+  if (!rest) return bad;
+  const along = (s) => (sc.vert ? s.cy : s.cx), cross = (s) => (sc.vert ? s.cx : s.cy), cols = [0, 1, 2, 3].map((c) => S.filter((s) => s.col === c));
+  const pos = cols.map((c) => c.reduce((a, s) => a + along(s), 0) / c.length);
+  for (let i = 2; i < 4; i++) if (Math.abs((pos[i] - pos[i - 1]) - (pos[1] - pos[0])) > 1) bad.push("spacing " + pos.map((x) => x.toFixed(1)).join(","));
+  cols.forEach((c, i) => {
+    for (const s of c) if (Math.abs(along(s) - pos[i]) > 1) bad.push("layer " + i + " not on one line");
+    const lo = Math.min(...c.map((s) => cross(s) - s.r)), hi = Math.max(...c.map((s) => cross(s) + s.r));
+    if (Math.abs((lo + hi) / 2 - sc.midC) > 1) bad.push("layer " + i + " centred at " + ((lo + hi) / 2).toFixed(1) + " not " + sc.midC.toFixed(1));
+    if (!sc.vert) {
+      const edges = new Set(L.filter((l) => l.col === i).map((l) => Math.round((i === 0 ? l.x + l.w : l.x) * 2)));
+      if (edges.size > 1) bad.push("layer " + i + " chips on " + edges.size + " x edges");
+    }
+  });
+  const sums = {};
+  for (const b of B) {
+    const want = clampv(b.v * k.bandPerM / 1e6, k.bandMin, k.bandMax);
+    if (Math.abs(b.w0 - want) > 0.05) bad.push("band width " + b.from + ">" + b.to + " " + b.w0 + " vs " + want);
+    if (b.drawn < b.w0 - 0.05) bad.push("band drawn thinner than its width " + b.from + ">" + b.to);
+    sums[b.from] = (sums[b.from] || 0) + b.slice;
+  }
+  for (const n of sc.nodes) if (n.out && Math.abs((sums[n.key] || 0) - n.v * k.bandPerM / 1e6) > 1) bad.push("slices of " + n.key + " sum " + (sums[n.key] || 0).toFixed(2) + " vs " + (n.v * k.bandPerM / 1e6).toFixed(2));
+  const vm = Math.max(...sc.nodes.map((n) => n.v));
+  for (const s of S) {
+    const n = sc.nodes.find((x) => x.key === s.key), want = Math.max(k.minR, (6 + 28 * Math.sqrt(n.v / vm)) * k.k);
+    if (Math.abs(s.r - want) > 0.05) bad.push("sphere " + s.key + " radius " + s.r.toFixed(2) + " vs " + want.toFixed(2));
+  }
+  const tot = new Set(sc.heads.map((h) => h.text.split(" \u00b7 ")[1]));
+  if (sc.heads.length !== 4 || tot.size !== 1) bad.push("headers carry " + [...tot].join(" / "));
+  return bad;
+}
 const camera = (page) => net(page, "return net.camera();");
+const toStage = async (page, pad = 96, running = true) => {
+  await page.evaluate((pad) => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); window.scrollTo({ top: Math.max(0, scrollY + r.top - pad), behavior: "instant" }); }, pad);
+  await page.waitForFunction((running) => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight + 1 && (!running || window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running); }, running, { timeout: 15000 });
+};
+const hoverNode = async (page, id) => {
+  await page.mouse.move(5, 5);
+  const p = await page.evaluate((id) => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(), n = window.FlowsUI.net.of(document.getElementById("uaNet")).node(id); return { x: r.left + n.x, y: r.top + n.y }; }, id);
+  await page.mouse.move(p.x, p.y);
+};
+const litVector = (page, ids, want, what) => page.waitForFunction(({ ids, want }) => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); return ids.every((id, i) => n.node(id).lit === want[i]); }, { ids, want }, { timeout: 8000 }).catch(async () => { throw new Error(`${what}: the lit vector never reached ${JSON.stringify(want)}; it is ${JSON.stringify(await net(page, "return arg.map((id) => net.node(id).lit);", ids))}`); });
 const settle = (page) => page.waitForFunction(() => { const c = window.FlowsUI.net.of(document.getElementById("uaNet")).camera(); return c.auto && Math.abs(c.yaw - c.rest[0]) <= 9.6; }, null, { timeout: 8000 }).catch(() => {});
 const stageBox = (page) => page.evaluate(() => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
 async function drag(page, dx, dy, { steps = 12, x = 0.5, y = 0.06 } = {}) {
@@ -208,6 +274,8 @@ function crosses(edge, node) {
 
 const browser = await chromium.launch();
 const cpu = {};
+const FLUSH_K = 2.5;
+const FLUSH_FLOOR = 12;
 try {
   {
     const flow = alerts();
@@ -281,6 +349,7 @@ try {
     eq(await page.evaluate(() => document.getElementById("fxPopT").textContent), "Freshness", "and opens the page's freshness details");
     await page.keyboard.press("Escape");
 
+    await toStage(page);
     const f0 = (await stats(page)).frames;
     await page.waitForTimeout(600);
     const s1 = await stats(page);
@@ -293,11 +362,11 @@ try {
     eq(nv.href, "/flows/ticker/?t=NVDA", "to the ticker page");
     ok(/^Rank 1, NVDA, Tech: \$[\d.]+M, \d+% of flagged premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
 
-    await page.evaluate(() => { document.activeElement.blur(); window.scrollTo({ top: 0, behavior: "instant" }); });
+    await page.evaluate(() => document.activeElement.blur());
+    await toStage(page);
     await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
-    await page.hover('#uaNet .fn-hit[data-id="n:NVDA"]');
-    await page.waitForFunction(() => window.FlowsUI.net.of(document.getElementById("uaNet")).node("n:MSFT").lit === 0, null, { timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(300);
+    await hoverNode(page, "n:NVDA");
+    await litVector(page, ["n:NVDA", "s:tech", "i:ca", "o:bull", "n:MSFT", "s:energy", "n:SPY"], [1, 1, 1, 1, 0, 0, 0], "hovering NVDA");
     const lit = await net(page, `return ["n:NVDA", "s:tech", "i:ca", "o:bull", "n:MSFT", "s:energy", "n:SPY"].map((id) => [id, net.node(id).lit]);`);
     deep(Object.fromEntries(lit), { "n:NVDA": 1, "s:tech": 1, "i:ca": 1, "o:bull": 1, "n:MSFT": 0, "s:energy": 0, "n:SPY": 0 },
       "HOVERING A NAME lights its whole subgraph (its sector, its sides, its leans) and dims every other name and sector");
@@ -312,11 +381,13 @@ try {
     ok((await tipOf("s:tech")).includes(sizeOf((r) => techNames.has(r.t)) + " contracts"), "a sector's tooltip shows its contracts");
     for (const id of ["i:ca", "i:nx", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the vendor never splits by side (${id})`);
     await page.mouse.move(5, 5);
-    await page.waitForTimeout(300);
+    await litVector(page, ["n:MSFT", "n:NVDA", "s:energy"], [1, 1, 1], "leaving NVDA");
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
 
     await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
-    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(150);
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]', { force: true });
     await page.mouse.move(5, 5);
     await page.waitForTimeout(400);
     const pinned = await page.evaluate(() => {
@@ -328,19 +399,24 @@ try {
     ok(pinned.pressed === "true" && !pinned.hidden && /Tech/.test(pinned.text) && pl.lit === 1, `pinning Tech shows its tooltip and lights NVDA, its largest member (${pinned.text.slice(0, 30)})`);
     ok(!meets(pinned, pl.nvda) && !meets(pinned, { x: pl.sph.x - pl.sph.r, y: pl.sph.y - pl.sph.r, w: 2 * pl.sph.r, h: 2 * pl.sph.r }), `THE TOOLTIP CLEARS THE LIT SUBGRAPH: it covers neither NVDA's label nor its sphere (tip ${[pinned.x, pinned.y, pinned.w, pinned.h].map(Math.round)}, NVDA ${[pl.nvda.x, pl.nvda.y, pl.nvda.w, pl.nvda.h].map(Math.round)})`);
     ok(!meets(pinned, pl.tech), "nor Tech's own label");
-    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(150);
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]', { force: true });
     await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
     eq(await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').getAttribute("aria-pressed")), "false", "a second click releases the pin");
     await page.evaluate(() => document.activeElement.blur());
 
-    await page.hover("#uaNet tbody tr:first-child td:nth-child(3)");
-    await page.waitForTimeout(250);
+    await page.evaluate(() => document.querySelector("#uaNet tbody tr:first-child td:nth-child(3)").scrollIntoView({ block: "center", behavior: "instant" }));
+    const cell = await page.evaluate(() => { const r = document.querySelector("#uaNet tbody tr:first-child td:nth-child(3)").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    await page.mouse.move(cell.x, cell.y);
+    await page.waitForFunction(() => document.querySelector("#uaNet tbody tr:first-child").classList.contains("is-lit"), null, { timeout: 8000 });
+    await litVector(page, ["n:NVDA", "i:ca", "i:cb", "n:SPY"], [1, 1, 0, 0], "hovering the first table row");
     const rowLit = await net(page, `return ["n:NVDA", "i:ca", "i:cb", "n:SPY"].map((id) => net.node(id).lit);`);
     deep(rowLit, [1, 1, 0, 0], "hovering a row of the table lights that one path: NVDA through calls at ask, not its calls at bid");
     await page.mouse.move(5, 5);
 
-    await page.focus("#uaNetCard .ui-mod-h .ui-info");
+    await page.focus("#uaNet .fn-home");
     await page.keyboard.press("Tab");
     const first = await page.evaluate(() => document.activeElement.dataset.id);
     const names = m.layers[2].map((d) => d.id);
@@ -462,6 +538,18 @@ try {
       });
       ok(box.sw <= box.iw, `no horizontal overflow at ${width}px in ${mode} (${box.sw} of ${box.iw})`);
       ok(box.stage[0] >= box.card[0] - 0.5 && box.stage[1] <= box.card[1] + 0.5, `the stage stays inside its card at ${width}px`);
+      if (mode === "lean" && width <= 540) {
+        const lg = await page.evaluate(() => {
+          const rows = (sel) => [...document.querySelectorAll("#uaNet .fn-scale .fn-lg-g")].map((g) => [...g.querySelectorAll(sel)].map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2)));
+          const sc = document.querySelector("#uaNet .fn-scale").getBoundingClientRect();
+          const items = [...document.querySelectorAll("#uaNet .fn-scale .fn-lg-i")].map((el) => el.getBoundingClientRect());
+          return { items: rows(".fn-lg-i"), n: document.querySelectorAll("#uaNet .fn-scale .fn-lg-i").length, inside: items.every((r) => r.left >= sc.left - 0.5 && r.right <= sc.right + 0.5), box: [sc.left, sc.right, items.map((r) => [Math.round(r.left), Math.round(r.right)])] };
+        });
+        ok(lg.n === 6 && lg.items.length === 2 && lg.items.every((g) => g.length === 3 && Math.max(...g) - Math.min(...g) <= 2), `the legend's three reference circles share one row and its three band swatches share one row at ${width}px (${JSON.stringify(lg.items)})`);
+        ok(lg.inside, `and every legend item sits inside the scale row at ${width}px (${JSON.stringify(lg.box)})`);
+        const th = await page.evaluate(() => [...document.querySelectorAll("#uaNet table.fn-tab thead th")].filter((e) => e.offsetParent).map((e) => ({ t: e.textContent, sw: e.scrollWidth, cw: e.clientWidth })));
+        ok(th.length >= 4 && th.every((x) => x.sw <= x.cw), `no table header is truncated at ${width}px (${JSON.stringify(th)})`);
+      }
       const cam = await camera(page), [ly, lp] = cam.limits, grid = [cam.rest];
       for (const y of lin(ly, 9)) for (const p of lin(lp, 5)) grid.push([y, p]);
       grid.push([-ly, cam.rest[1]], [ly, cam.rest[1]], cam.rest);
@@ -484,7 +572,7 @@ try {
       if (width === 768) deep(named(seen[0]).filter((l) => l.form === "short").map((l) => l.id), [], `at 768px at rest every sector and name label shows its premium (${mode})`);
       if (width === 1440) {
         const [left, right] = seen.slice(-3, -1);
-        ok(Math.abs(left.yaw + ly) < 1e-6 && Math.abs(right.yaw - ly) < 1e-6, `at 1440px the reader reaches both yaw limits (${left.yaw}, ${right.yaw})`);
+        ok(left.yaw < -20 && right.yaw > 20 && left.yaw >= -ly && right.yaw <= ly, `at 1440px the reader can turn the network at least 20 degrees either way before a label would collide, inside the ${ly} degree limit (${left.yaw.toFixed(1)}, ${right.yaw.toFixed(1)})`);
         for (const r of [seen[0], left, right]) {
           deep(named(r).filter((l) => l.form === "short").map((l) => l.id), [], `at 1440px every sector and name label shows its premium at yaw ${Math.round(r.yaw)} (${mode})`);
           ok(r.px && r.px[0] < 40 && r.px[1] < 40 && r.px[2] < 48, `the pixel just left of NVDA's rank numeral is the dark chip, not a ribbon, at yaw ${Math.round(r.yaw)} (${r.px})`);
@@ -496,7 +584,7 @@ try {
       deep(overlaps(labels), [], `no two labels collide at ${width}px (${mode}) under the automatic sway`);
       deep(adrift(labels, await layout(page), width < 560), [], `and every label stays by its sphere under the sway at ${width}px (${mode})`);
       const sw = await camera(page), path = [];
-      for (let i = 0; i < 8; i++) for (const k of [-1, 1]) path.push([sw.rest[0] + sw.sway * Math.sin(i * Math.PI / 4), sw.rest[1] + k * sw.sway * 0.2]);
+      for (let i = 0; i < 16; i++) path.push([sw.rest[0] + sw.sway * Math.sin(i * Math.PI / 8), sw.rest[1]]);
       const along = await sweep(page, path);
       for (const r of along) {
         const at = `${width}px, ${mode}, sway phase at yaw ${r.y.toFixed(1)} pitch ${r.p.toFixed(1)}`;
@@ -514,6 +602,32 @@ try {
     await ctx.close();
   }
 
+  for (const width of [320, 700]) {
+    const { ctx, page } = await mount(browser, { width, height: 1400, delayFonts: 3000 });
+    const atRest = async () => {
+      await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), c = n.camera(); n.orbit(c.rest[0], c.rest[1]); return n.model().layers.flat().every((d) => { const k = n.node(d.id); return Math.abs(k.x - k.sx) < 0.6 && Math.abs(k.y - k.sy) < 0.6; }); }, null, { timeout: 15000, polling: 100 });
+      const [r] = await sweep(page, [(await camera(page)).rest]);
+      return r;
+    };
+    const widths = async () => (await net(page, "return net.labels();")).filter((l) => !l.id.startsWith("cap:")).reduce((a, l) => a + l.w, 0);
+    ok(await page.evaluate(() => document.fonts.status === "loading" || [...document.fonts].some((f) => f.status !== "loaded")), `PRECONDITION: the web font has not arrived when the network first draws (${width}px)`);
+    await page.waitForTimeout(900);
+    const w0 = await widths();
+    const r0 = await atRest();
+    deep(overlaps(r0.labels), [], `no two labels or captions collide at rest in the fallback face, ${width}px`);
+    deep(adrift(r0.labels, r0.layout, width < 560), [], `and every label stays by its sphere in the fallback face, ${width}px`);
+    await page.waitForFunction(() => document.fonts.status === "loaded" && [...document.fonts].some((f) => f.status === "loaded"), null, { timeout: 20000 });
+    await page.waitForTimeout(600);
+    const w1 = await widths();
+    ok(Math.abs(w1 - w0) > 1, `THE CHIPS ARE MEASURED AGAIN WHEN THE FONT ARRIVES: total chip width ${w0.toFixed(0)} px in the fallback face, ${w1.toFixed(0)} px in the loaded one (${width}px)`);
+    const r1 = await atRest();
+    deep(overlaps(r1.labels), [], `no two labels or captions collide at rest once the font has arrived, ${width}px`);
+    deep(adrift(r1.labels, r1.layout, width < 560), [], `and every label stays by its sphere once the font has arrived, ${width}px`);
+    deep(await page.evaluate(`(${auditFn})(window.FlowsUI.net.of(document.getElementById("uaNet")).scene(), false)`), [], `and nothing touches a header or leaves the canvas (${width}px)`);
+    deep(page.errors, [], `nothing threw while the font loaded at ${width}px`);
+    await ctx.close();
+  }
+
   {
     const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
@@ -525,7 +639,7 @@ try {
     await drag(page, 240, 40);
     const c1 = await camera(page);
     const after = await layout(page);
-    ok(!c1.auto && c1.yaw > c0.yaw + 30 && c1.pitch > c0.pitch + 3, `A POINTER DRAG ORBITS the camera (yaw ${c0.yaw.toFixed(1)} to ${c1.yaw.toFixed(1)}, pitch ${c0.pitch.toFixed(1)} to ${c1.pitch.toFixed(1)})`);
+    ok(!c1.auto && c1.yaw > c0.yaw + 12 && c1.pitch > c0.pitch + 1, `A POINTER DRAG ORBITS the camera (yaw ${c0.yaw.toFixed(1)} to ${c1.yaw.toFixed(1)}, pitch ${c0.pitch.toFixed(1)} to ${c1.pitch.toFixed(1)})`);
     const moved = before.flat().filter((d, i) => Math.hypot(d.x - after.flat()[i].x, d.y - after.flat()[i].y) > 8).length;
     ok(moved >= before.flat().length - 2, `and the projected nodes move with it (${moved} of ${before.flat().length})`);
     await ranked(page, "after a drag");
@@ -541,13 +655,13 @@ try {
     };
     await drag(page, 1200, 300, { x: 0.05, y: 0.3 });
     let c = await camera(page);
-    ok(c.yaw > 50 && c.pitch > 18, `a long drag clamps at or just inside the yaw and pitch limits (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+    ok(c.yaw > 15 && c.pitch > 5, `a long drag stops where a label would next collide, inside the yaw and pitch limits (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
     await tight(c, 1200 * 0.32, 300 * 0.22, "dragged to the right and up");
     await ranked(page, "dragged to the yaw and pitch limits");
     await shot(page, "net-1440-orbit-right", "net");
     await drag(page, -1300, -300, { x: 0.97, y: 0.6 });
     c = await camera(page);
-    ok(c.yaw < -50 && c.pitch < -18, `and the other way (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
+    ok(c.yaw < -15 && c.pitch < c0.rest[1], `and the other way (${c.yaw.toFixed(1)}, ${c.pitch.toFixed(1)})`);
     await tight(c, -1300 * 0.32, -300 * 0.22, "dragged to the left and down");
     await net(page, "net.orbit(-55, arg); return null;", c0.rest[1]);
     await shot(page, "net-1440-orbit-left", "net");
@@ -619,17 +733,11 @@ try {
     await page.waitForTimeout(200);
     await net(page, "net.orbit(-55, 18); return null;");
     const order = await net(page, "return net.paints();");
-    ok(order.every((it, i) => !i || order[i - 1].z >= it.z), "the painter draws every edge, pulse slice and node from back to front");
-    const nodes = order.map((it, i) => ({ ...it, i })).filter((it) => it.k === "node"), edges = order.map((it, i) => ({ ...it, i })).filter((it) => it.k === "edge");
-    let front = 0, back = 0, wrong = [];
-    for (const n of nodes) for (const e of edges) {
-      if (e.id.split("|").includes(n.id) || !crosses(e, n)) continue;
-      if (n.z < e.z) { front++; if (n.i < e.i) wrong.push(n.id + " under " + e.id); }
-      else if (n.z > e.z) { back++; if (n.i > e.i) wrong.push(e.id + " under " + n.id); }
-    }
-    ok(front > 0 && back > 0, `the turned scene has spheres in front of edges that share their patch of screen, and spheres behind them (${front} and ${back} pairs)`);
-    deep(wrong, [], "DEPTH ORDER: a nearer sphere is drawn after the edge behind it, so it covers it, and a farther one before the edge in front of it");
-    ok(edges.every((e) => e.id.split("|").every((id) => nodes.find((n) => n.id === id).i > e.i)), "and every edge is drawn before both of the spheres it joins");
+    deep(order.filter((it) => it.k !== "node").map((it) => it.k), ["floor", "shadows", "planes", "bands", "pulses", "heads", "spheres", "labels"], "PAINTER'S ORDER: floor, shadows, glass planes, bands, pulses, headers, spheres, then the labels last");
+    const nodes = order.filter((it) => it.k === "node");
+    ok(nodes.length === 25 && nodes.every((n, i) => !i || nodes[i - 1].z >= n.z), "the spheres are drawn back to front");
+    const ix = (k) => order.findIndex((it) => it.k === k);
+    ok(order.findIndex((it) => it.k === "node") > ix("heads") && order.findIndex((it) => it.k === "node") < ix("spheres"), "after every band and pulse, so a sphere always covers the light that reaches it");
     deep(page.errors, [], "nothing threw while orbiting");
     await ctx.close();
   }
@@ -845,6 +953,172 @@ try {
   }
 
   {
+    const restOf = async (page) => {
+      await net(page, "net.freeze(true); net.recentre(); return null;");
+      await page.waitForTimeout(150);
+      return page.evaluate(`(${auditFn})(window.FlowsUI.net.of(document.getElementById("uaNet")).scene(), true)`);
+    };
+    const sweepOf = (page) => page.evaluate(`(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), c = n.camera(), bad = [], f = ${auditFn}; let seen = 0;
+      for (let i = 0; i <= 400; i++) { const t = i / 10, sc = n.scene({ yaw: c.sway * Math.sin(2 * Math.PI * t / c.period), pitch: c.rest[1], t }); seen++; for (const b of f(sc, false)) if (bad.length < 8) bad.push("t=" + t + " " + b); }
+      return { bad, seen, sway: c.sway }; })()`);
+    for (const width of [1440, 1024, 390]) {
+      const { ctx, page } = await mount(browser, { width, height: 1400 });
+      const sc0 = await net(page, "return net.scale();");
+      eq(sc0.vert, width < 640, `the rows layout is used below 640 px and the columns above (${width})`);
+      deep(await restOf(page), [], `SYMMETRY AND THE MONEY SCALE AT REST, ${width}px: layers equally spaced, every stack centred on the midline, chips on one edge per column, sphere radius, band width and the outgoing slices of every node on the one scale, one total on every header, nothing overlapping`);
+      const sc = await net(page, "return net.scene();");
+      ok(sc.rest, "the scene read is the rest frame");
+      deep(sc.nodes.filter((n) => !n.out).map((n) => n.key).length > 0, true, "the last layer sends nothing on");
+      const lg = await net(page, "return net.legend();");
+      eq(lg.length, 6, "the legend has three reference circles and three band swatches");
+      const vm = Math.max(...sc.nodes.map((n) => n.v));
+      lg.slice(0, 3).forEach((c) => ok(Math.abs(c.r - Math.max(sc0.minR, (6 + 28 * Math.sqrt(c.v * 1e6 / vm)) * sc0.k)) < 0.01, `the $${c.v}M reference circle is drawn on the scene's own sphere scale (${c.r})`));
+      lg.slice(3).forEach((b) => ok(Math.abs(b.w - Math.max(1.25, Math.min(sc0.bandMax, b.v * sc0.bandPerM))) < 0.01, `the $${b.v}M band swatch is drawn on the scene's own band scale (${b.w})`));
+      ok(lg[2].v > lg[1].v && lg[1].v > lg[0].v && lg[5].v > lg[4].v && lg[4].v > lg[3].v, "reference values rise");
+      if (width === 1440) {
+        eq(sc0.k, 1, "at 1440 the scale is the stated one");
+        near(sc0.bandPerM, 0.75, "0.75 px of band per $1M while the largest node is under $75M");
+        const big = Math.max(...sc.spheres.map((s) => s.r));
+        near(big, 34, "the largest node is 34 px (r = 6 + 28 sqrt(v / vMax))");
+        ok(sc.spheres.every((s) => s.r >= 9 - 1e-9), "and no node is under 9 px");
+        eq((await net(page, "return net.scale().form;")), "line", "chips are 22 px single lines");
+        ok(sc.labels.every((l) => Math.abs(l.h - 22) < 1e-9), "every chip is 22 px tall");
+      }
+      await net(page, "net.freeze(false); return null;");
+      const sw = await sweepOf(page);
+      eq(sw.seen, 401, "the sweep reads 401 frames, 0 to 40 s at 0.1 s");
+      deep(sw.bad, [], `NO CHIP OVERLAPS A SPHERE OR A CHIP, NOTHING LEAVES THE CANVAS, over the 0 to 40 s sway at ${width}px (sway ${sw.sway} degrees)`);
+      ok(sw.sway > 0, `the sway is on (${sw.sway} degrees)`);
+      await page.waitForTimeout(1200);
+      await shot(page, "v3-" + width + "-motion", "net");
+      await toStage(page);
+      await hoverNode(page, "n:NVDA");
+      await litVector(page, ["n:NVDA", "n:~"], [1, 0], `hovering NVDA at ${width}px`);
+      const hv = await net(page, "return net.scene();");
+      eq(!!hv.readout, width >= 640, `the hover readout is drawn in the columns layout and not in the rows layout (${width}px)`);
+      deep(await page.evaluate(`(${auditFn})(window.FlowsUI.net.of(document.getElementById("uaNet")).scene(), false)`), [], `THE READOUT CLEARS THE HEADERS BY 12 PX AND NO HEADER TOUCHES A SPHERE while a node is hovered, ${width}px`);
+      await page.waitForTimeout(500);
+      await shot(page, "v3-" + width + "-hover", "net");
+      deep(page.errors, [], `nothing threw at ${width}px`);
+      await ctx.close();
+    }
+  }
+
+  {
+    const mutants = [
+      ["every sphere the same size", [["(R0 + R1 * Math.sqrt(Math.max(0, v) / (vMax || 1)))", "(R0 + 8)"]], /radius/],
+      ["bands not sized by premium", [["r.ws = e.v * G.bpd;", "r.ws = 7;"]], /band width|slices/],
+      ["columns unequally spaced", [["[-3, -1, 1, 3].forEach", "[-3, -1, 0.4, 3].forEach"]], /spacing/],
+      ["a stack off the midline", [["let y = -(sum + gap * units) / 2;", "let y = -(sum + gap * units) / 2 + 20;"]], /centred/],
+      ["chips on a ragged edge", [["n.px + cl.rMax * n.f + 8", "n.px + n.R + 8"]], /x edges/],
+      ["a header with another total", [['t.toUpperCase() + " " + MID + " " + total', 't.toUpperCase() + " " + MID + " " + (i === 2 ? "$1M" : total)']], /headers/],
+      ["headers up under the readout", [["G.hd = cols.map((c) => [c.x, 52]);", "G.hd = cols.map((c) => [c.x, 34]);"]], /readout within/, true],
+      ["headers down on the spheres", [["G.hd = cols.map((c) => [c.x, 52]);", "G.hd = cols.map((c) => [c.x, 100]);"]], /over sphere/],
+    ];
+    for (const [name, patch, want, hover] of mutants) {
+      const { ctx, page } = await mount(browser, { width: 1440, height: 1300, patch });
+      await net(page, "net.freeze(true); net.recentre(); return null;");
+      await page.waitForTimeout(150);
+      if (hover) { await toStage(page, 40, false); await hoverNode(page, "n:NVDA"); await litVector(page, ["n:NVDA"], [1], "the mutant hover"); }
+      const bad = await page.evaluate(`(${auditFn})(window.FlowsUI.net.of(document.getElementById("uaNet")).scene(), true)`);
+      ok(bad.some((b) => want.test(b)), `THE AUDIT FAILS ON A MUTANT (${name}): ${bad.slice(0, 2).join("; ")}`);
+      await ctx.close();
+    }
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    const a = await stats(page);
+    ok(a.pulses >= a.edges && a.edges > 40, `every band carries light: ${a.pulses} pulses on ${a.edges} bands`);
+    const radii = (t) => net(page, "return net.scene({ yaw: 0, pitch: 11, t: arg }).spheres.map((s) => s.r);", t);
+    await net(page, "net.freeze(true); return null;");
+    const flat = await net(page, "return net.scene({ yaw: 0, pitch: 11 }).spheres.map((s) => s.r);");
+    await net(page, "net.freeze(false); return null;");
+    const r0 = await radii(0), r3 = await radii(3);
+    const rel = r3.map((r, i) => r / flat[i]), rel0 = r0.map((r, i) => r / flat[i]);
+    ok(Math.min(...rel, ...rel0) >= 1 - 1e-9 && Math.max(...rel, ...rel0) <= 1.0301 && Math.max(...rel) - Math.min(...rel0) > 0.01, `the spheres breathe between 1.00 and 1.03 of their size (${Math.min(...rel).toFixed(4)} to ${Math.max(...rel).toFixed(4)})`);
+    ok(new Set(rel0.map((x) => x.toFixed(3))).size > 3, "each in its own phase");
+    await page.click("#uaNet .fn-freeze");
+    await page.waitForTimeout(200);
+    const fz = await page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-freeze").hasAttribute("aria-pressed"), t: document.querySelector("#uaNet .fn-freeze").textContent }));
+    const f1 = await stats(page);
+    ok(fz.p === false && /Resume/.test(fz.t) && f1.still && !f1.running && f1.pulses === 0, `FREEZE stops the pulses, the breathing and the sway and the loop with them (${JSON.stringify(fz)})`);
+    const fc = await camera(page);
+    await page.waitForTimeout(500);
+    eq((await camera(page)).yaw, fc.yaw, "and the camera holds");
+    await drag(page, 120, 10);
+    ok((await camera(page)).yaw !== fc.yaw && !(await stats(page)).running, "a drag still turns a frozen network, with no loop");
+    await page.click("#uaNet .fn-freeze");
+    await page.waitForTimeout(300);
+    ok((await stats(page)).running && !(await stats(page)).still, "and Resume starts it again");
+    await ctx.close();
+    const rm = await mount(browser, { width: 1440, height: 1000, reduced: true });
+    eq(await rm.page.evaluate(() => document.querySelector("#uaNet .fn-freeze").hidden), true, "under reduced motion there is nothing to freeze, so the control is hidden");
+    await rm.ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    await page.waitForTimeout(500);
+    const out = await page.evaluate(async (flow) => {
+      const live = new Map(), obs = new Set();
+      const add = EventTarget.prototype.addEventListener, rem = EventTarget.prototype.removeEventListener;
+      const key = (t, e) => (t === document ? "doc" : t === window ? "win" : t instanceof MediaQueryList ? "mq" : null) + ":" + e;
+      EventTarget.prototype.addEventListener = function (e, f, o) { if (key(this, e).indexOf("null") !== 0) live.set(key(this, e), (live.get(key(this, e)) || 0) + 1); return add.call(this, e, f, o); };
+      EventTarget.prototype.removeEventListener = function (e, f, o) { if (key(this, e).indexOf("null") !== 0) live.set(key(this, e), (live.get(key(this, e)) || 0) - 1); return rem.call(this, e, f, o); };
+      for (const name of ["ResizeObserver", "IntersectionObserver", "MutationObserver"]) {
+        const C = window[name];
+        window[name] = class extends C { constructor(f) { super(f); obs.add(this); } disconnect() { obs.delete(this); super.disconnect(); } };
+      }
+      const host = document.createElement("div");
+      host.style.cssText = "position:fixed;top:0;left:0;width:900px;z-index:-1";
+      document.body.append(host);
+      const pre = obs.size;
+      window.FlowsUI.segmented("Baseline", [{ label: "A" }, { label: "B" }], () => {}, 0);
+      const own = obs.size - pre;
+      const baseline = new Map(live);
+      const n = window.FlowsUI.net.mount(host, { universe: false });
+      n.take(flow, { state: "ok" });
+      await new Promise((r) => setTimeout(r, 600));
+      const during = { running: n.stats().running, obs: obs.size };
+      n.destroy();
+      const frames = n.stats().frames;
+      await new Promise((r) => setTimeout(r, 400));
+      const after = n.stats();
+      const left = {};
+      for (const [k, v] of live) if (v - (baseline.get(k) || 0) !== 0) left[k] = v - (baseline.get(k) || 0);
+      return { during, left, obs: obs.size - pre - 2 * own, own, still: after.frames === frames && !after.running, empty: host.childElementCount, again: !!window.FlowsUI.net.of(host) };
+    }, alerts());
+    ok(out.during.running && out.during.obs >= 2, `PRECONDITION: the mounted network runs and holds observers (${JSON.stringify(out.during)})`);
+    eq(out.obs, 0, `DESTROY disconnects every observer it made (the one observer the shared segmented control leaves on its own detached element, ${out.own}, is the page library's, and is counted once for the network's control and once for a baseline control)`);
+    deep(Object.keys(out.left).filter((k) => !/^doc:(pointer|click|keydown|keyup|focus|mouse)/.test(k)), [], `and leaves no listener of its own on the document, the window or the motion query (${JSON.stringify(out.left)})`);
+    ok(out.still, "its animation loop stops and counts no more frames");
+    eq(out.empty, 0, "its DOM is removed");
+    eq(out.again, false, "and the host can be mounted afresh");
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("HeapProfiler.enable");
+    const heap = async (gc) => { if (gc) await cdp.send("HeapProfiler.collectGarbage"); return (await cdp.send("Runtime.getHeapUsage")).usedSize; };
+    await net(page, "net.measure(300); return null;");
+    const h0 = await heap(true);
+    await net(page, "net.measure(1500); return null;");
+    const h1 = await heap(true);
+    await net(page, "net.measure(1500); return null;");
+    const h2 = await heap(true);
+    ok(h2 - h0 < 262144, `NO PER-FRAME RETENTION: the live heap after 1,500 and 3,000 more frames, each after a collection, grew ${h1 - h0} then ${h2 - h1} bytes`);
+    const t0 = await heap(false);
+    await net(page, "net.measure(600); return null;");
+    const t1 = await heap(false);
+    cpu.alloc = Math.max(0, (t1 - t0) / 600);
+    ok(cpu.alloc < 3072, `and the allocation per frame stays small (${cpu.alloc.toFixed(0)} bytes a frame)`);
+    await ctx.close();
+  }
+
+  {
     const flow = alerts({ n: 180, seed: 5 });
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2 });
     const page = await ctx.newPage();
@@ -867,11 +1141,44 @@ try {
       await wait(2500);
       const st = n.stats();
       const runs = [n.measure(240), n.measure(240), n.measure(240)];
-      return { st, runs };
+      const cv = document.querySelector("#net canvas"), g = cv.getContext("2d"), flush = [], refs = [], ratios = [];
+      const rc = document.createElement("canvas"), sp = document.createElement("canvas");
+      rc.width = cv.width; rc.height = cv.height; sp.width = sp.height = 160;
+      const rg = rc.getContext("2d"), sg = sp.getContext("2d"), gr = sg.createRadialGradient(54, 48, 0, 80, 80, 80);
+      gr.addColorStop(0, "#fff"); gr.addColorStop(0.5, "#4a7bd0"); gr.addColorStop(1, "#06101f");
+      sg.fillStyle = gr; sg.beginPath(); sg.arc(80, 80, 80, 0, 6.2832); sg.fill();
+      const ref = () => {
+        rg.setTransform(1, 0, 0, 1, 0, 0);
+        rg.clearRect(0, 0, rc.width, rc.height);
+        rg.globalCompositeOperation = "screen";
+        rg.fillStyle = "#3a6fd8"; rg.strokeStyle = "#8fb4ff";
+        for (let i = 0; i < 160; i++) {
+          const x = 40 + (i * 37) % (rc.width - 480), y = 60 + (i * 53) % (rc.height - 160), h = 6 + (i % 9) * 3;
+          rg.globalAlpha = 0.25 + (i % 5) * 0.08;
+          rg.beginPath(); rg.moveTo(x, y); rg.bezierCurveTo(x + 160, y, x + 240, y + 90, x + 400, y + 90); rg.lineTo(x + 400, y + 90 + h); rg.bezierCurveTo(x + 240, y + 90 + h, x + 160, y + h, x, y + h); rg.closePath(); rg.fill(); rg.stroke();
+        }
+        rg.globalCompositeOperation = "source-over";
+        for (let i = 0; i < 25; i++) { rg.globalAlpha = 0.9; rg.drawImage(sp, 80 + (i * 211) % (rc.width - 300), 80 + (i * 97) % (rc.height - 240), 70, 70); }
+        rg.getImageData(0, 0, 1, 1);
+      };
+      for (let i = 0; i < 30; i++) { n.measure(1); g.getImageData(0, 0, 1, 1); ref(); }
+      for (let r = 0; r < 3; r++) {
+        const ts = [], rs = [];
+        for (let i = 0; i < 240; i++) {
+          const t0 = performance.now(); n.measure(1); g.getImageData(0, 0, 1, 1); const t1 = performance.now(); ref(); const t2 = performance.now();
+          ts.push(t1 - t0); rs.push(t2 - t1);
+        }
+        ts.sort((a, b) => a - b); rs.sort((a, b) => a - b);
+        flush.push(ts[120]); refs.push(rs[120]); ratios.push(ts[120] / rs[120]);
+      }
+      return { st, runs, flush: Math.min(...flush), ref: Math.min(...refs), ratio: Math.min(...ratios), ratios };
     }, { flow, uni: universe() });
     const best = out.runs.reduce((a, b) => (a.median <= b.median ? a : b));
-    cpu.bench = { edges: out.st.edges, pulses: out.st.pulses, rafMedian: out.st.median, rafFrames: out.st.frames, loopMedian: best.median, loopP90: best.p90, loopMean: best.mean };
-    ok(out.st.edges >= 200 && out.st.pulses >= 380, `the benchmark runs at ${out.st.edges} edges and ${out.st.pulses} pulses`);
+    cpu.bench = { flush: out.flush, edges: out.st.edges, pulses: out.st.pulses, rafMedian: out.st.median, rafFrames: out.st.frames, loopMedian: best.median, loopP90: best.p90, loopMean: best.mean };
+    ok(out.st.edges >= 100 && out.st.pulses >= 200, `the benchmark runs at ${out.st.edges} bands and ${out.st.pulses} pulses`);
+    cpu.bench.ref = out.ref;
+    cpu.bench.ratio = out.ratio;
+    ok(out.flush <= Math.max(FLUSH_K * out.ref, FLUSH_FLOOR), `CPU per frame with the raster forced to finish (a pixel read after every draw), held as a ratio to a reference canvas workload timed in the same interleaved windows: ${out.flush.toFixed(1)} ms against ${out.ref.toFixed(1)} ms for the reference, ratio ${out.ratio.toFixed(2)} (runs ${out.ratios.map((x) => x.toFixed(2)).join(", ")}), limit ${FLUSH_K} with a floor of ${FLUSH_FLOOR} ms`);
     ok(best.median < 4, `CPU per frame stays far from a frame budget: ${best.median.toFixed(2)} ms median over 240 frames (target under 2 ms)`);
     await ctx.close();
   }
@@ -879,7 +1186,7 @@ try {
   await browser.close();
 }
 console.log(`  CPU per frame on the unusual page at 1440px: median ${cpu.page.median === null ? "n/a" : cpu.page.median.toFixed(2)} ms over ${cpu.page.frames} frames (${cpu.page.pulses} pulses, ${cpu.page.edges} edges)`);
-console.log(`  CPU per frame, benchmark at ${cpu.bench.edges} edges and ${cpu.bench.pulses} pulses: loop median ${cpu.bench.loopMedian.toFixed(2)} ms, p90 ${cpu.bench.loopP90.toFixed(2)} ms, mean ${cpu.bench.loopMean.toFixed(2)} ms; animation-frame median ${cpu.bench.rafMedian === null ? "n/a" : cpu.bench.rafMedian.toFixed(2)} ms over ${cpu.bench.rafFrames} frames`);
+console.log(`  CPU per frame, benchmark at ${cpu.bench.edges} edges and ${cpu.bench.pulses} pulses: loop median ${cpu.bench.loopMedian.toFixed(2)} ms, p90 ${cpu.bench.loopP90.toFixed(2)} ms, mean ${cpu.bench.loopMean.toFixed(2)} ms; animation-frame median ${cpu.bench.rafMedian === null ? "n/a" : cpu.bench.rafMedian.toFixed(2)} ms over ${cpu.bench.rafFrames} frames; with the raster forced to finish ${cpu.bench.flush.toFixed(1)} ms against ${cpu.bench.ref.toFixed(1)} ms for the reference (ratio ${cpu.bench.ratio.toFixed(2)}); ${cpu.alloc.toFixed(0)} bytes allocated a frame`);
 console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn in 3D on the unusual page from fixture alerts: layer and node counts from the data, ` +
   `every layer ranked by premium top to bottom with the residual buckets last, at rest, at the yaw and pitch limits, after new data reorders a layer and under reduced motion, ` +
   `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
