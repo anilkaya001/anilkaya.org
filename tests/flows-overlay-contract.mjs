@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { joinScoreToPrice, scoreRowFor, OVERLAY_NOTES } from "../shared/flows-overlay.js";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -180,12 +180,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
 
-  const dir = path.join(ROOT, "tests", ".overlay-emit");
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-  execFileSync(process.execPath,
-    [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", dir + "/"],
-    { stdio: "ignore" });
+  const dir = nightlyEmit();
 
   const cards = fs.readdirSync(dir).filter((f) => /^-card-[A-Z]/.test(f))
     .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
@@ -239,7 +234,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      `at least one emitted card actually joins (${joined} do) — a corpus where every ` +
      `join comes back empty cannot exercise this panel at all, which is the state ` +
      `the candle fixture was in before its dates were anchored to the session`);
-  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 console.log(`✓ flows-overlay: ${checks} assertions — a join by date that a fixture built ` +

@@ -25,7 +25,7 @@
     "test:flows": "node flows-features.mjs && node flows-auth-contract.mjs && node flows-card-contract.mjs && node flows-premium-contract.mjs",
     "test:flows-worker": "node flows-worker-contract.mjs",
     "test:flows-legacy": "node flows-legacy-payload.mjs",
-    "test:pipeline": "node ../scripts/flows-pipeline.mjs --dry-run && node flows-pipeline-contract.mjs",
+    "test:pipeline": "node flows-pipeline-golden.mjs && node flows-pipeline-contract.mjs",
     "test:flows-probe": "node flows-probe-contract.mjs",
     "test:flows-ws-probe": "node flows-ws-probe-contract.mjs",
     "test:flows-chain": "node flows-chain-contract.mjs",

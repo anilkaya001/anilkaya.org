@@ -77,9 +77,11 @@ import {
 } from "./flows-legs/health.mjs";
 import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
+import { pinStamp, stampNow } from "./flows-legs/stamp.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
+pinStamp(process.env.FLOWS_DRY_NOW, { dryRun: DRY_RUN });
 const LIVE_MODE = ARGS.has("--live");
 const EMIT = process.argv.includes("--emit")
   ? process.argv[process.argv.indexOf("--emit") + 1]
@@ -4128,7 +4130,7 @@ async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
         }
       }
     }
-    const readAt = new Date().toISOString();
+    const readAt = stampNow();
 
     raws.darkpool = sessionPrints(raws.darkpool, sessionDate, { limit: MARKET_CROSS_LIMIT });
     crossRaws = { oiChange: raws.oiChange, darkpool: raws.darkpool, readAt };
@@ -4170,7 +4172,7 @@ async function publishSectorPremium({ sessionDate, generatedAt }) {
     const raw = DRY_RUN
       ? fakeSectorEtfs()
       : await uw("/api/market/sector-etfs", {});
-    const readAt = new Date().toISOString();
+    const readAt = stampNow();
     const wire = unwrapVendorRows(raw);
     const sectors = sectorLean(raw);
     const measured = sectors.filter((s) => s.read === "ok").length;
@@ -4240,7 +4242,7 @@ async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
     const raw = DRY_RUN
       ? fakeNewsHeadlines(tickers)
       : await uw("/api/news/headlines", { limit: NEWS_VENDOR_LIMIT });
-    const readAt = new Date().toISOString();
+    const readAt = stampNow();
     const wire = unwrapVendorRows(raw);
 
     const news = shapeNews(raw, { requested: NEWS_VENDOR_LIMIT });
@@ -4788,7 +4790,7 @@ async function main() {
       "workflow should be dispatched again once it has.");
   }
   if (gate.skip) {
-    const refreshedAt = new Date().toISOString();
+    const refreshedAt = stampNow();
     await publishPulse({ sessionDate, generatedAt: refreshedAt });
     await publishSectorPremium({ sessionDate, generatedAt: refreshedAt });
     await publishNews({ sessionDate, generatedAt: refreshedAt });
@@ -4837,13 +4839,13 @@ async function main() {
   const vendor = DRY_RUN ? makeFakeVendor({ sessionDate, screenerRows: dryScreener }) : uw;
   if (DRY_RUN) {
     screener = dryScreener.filter((r) => num(r.marketcap) >= UNIVERSE.minMarketCap);
-    screenerReadAt = new Date().toISOString();
+    screenerReadAt = stampNow();
   } else if (harvest) {
     screener = harvest.rows;
-    screenerReadAt = new Date().toISOString();
+    screenerReadAt = stampNow();
   } else {
     const byTicker = new Map();
-    const sweepStartedAt = new Date().toISOString();
+    const sweepStartedAt = stampNow();
     let saturated = 0, split = 0, sweepReads = 0;
     const readBand = (min, max) => uw("/api/screener/stocks", {
       min_underlying_price: UNIVERSE.minPrice,
@@ -4873,7 +4875,7 @@ async function main() {
                     : ""));
     }
     screener = [...byTicker.values()];
-    screenerReadAt = new Date().toISOString();
+    screenerReadAt = stampNow();
     screenerTruncated = saturated;
     universeSource = {
       rows: screener, calls: sweepReads, pages: sweepReads, limit: SCREENER_PAGE_ROWS,
@@ -5070,7 +5072,7 @@ async function main() {
     unique.map((e) => num(e.row.marketcap)),
   );
 
-  const generatedAt = new Date().toISOString();
+  const generatedAt = stampNow();
   const sides = partitionSides(scored);
   console.log(
     `sides: ${sides.long.length} long, ${sides.short.length} short, ` +
@@ -6104,7 +6106,7 @@ async function main() {
       const raw = DRY_RUN
         ? fakeFlowAlerts((payloads.long.rows || []).map((r) => r.t))
         : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
-      const alertsReadAt = new Date().toISOString();
+      const alertsReadAt = stampNow();
 
       const vendorRows = unwrapVendorRows(raw);
       const alertRowCount = vendorRows.length;
@@ -6217,7 +6219,7 @@ async function main() {
     const POLITICAL_PAGE_LIMIT = 200;
     const POLITICAL_MAX_PAGES = 8;
     const POLITICAL_HOLDER_NAMES = 6;
-    const from = new Date(Date.parse((sessionDate || new Date().toISOString().slice(0, 10)) +
+    const from = new Date(Date.parse((sessionDate || stampNow().slice(0, 10)) +
       "T00:00:00Z") - POLITICAL_WINDOW_DAYS * 86400000).toISOString().slice(0, 10);
 
     const raws = {};
@@ -6337,7 +6339,7 @@ async function main() {
     await publish("political", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
-      readAt: new Date().toISOString(),
+      readAt: stampNow(),
 
       carded: [...deepSet].sort(),
       window: { from, to: sessionDate || null, days: POLITICAL_WINDOW_DAYS },

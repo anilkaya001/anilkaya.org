@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 import { chromium } from "playwright-core";
 import { stripComments, stripTree } from "../scripts/strip-comments.mjs";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -70,19 +70,9 @@ eq(run.broken.length, 0,
   }
 }
 
-const emitDir = path.join(ROOT, "tests/.review-emit");
-const listCards = () => (fs.existsSync(emitDir)
-  ? fs.readdirSync(emitDir).filter((f) => /-card-(?!x-)/.test(f)) : []);
-if (!listCards().length) {
-
-  fs.mkdirSync(emitDir, { recursive: true });
-  const r = spawnSync(process.execPath,
-    ["scripts/flows-pipeline.mjs", "--dry-run", "--emit", "tests/.review-emit/"],
-    { cwd: ROOT, encoding: "utf8" });
-  ok(r.status === 0,
-     `the dry run emits a card corpus to render against ` +
-     `(exit ${r.status}${r.stderr ? ": " + r.stderr.trim().split("\n").pop() : ""})`);
-}
+const emitDir = nightlyEmit();
+const listCards = () => fs.readdirSync(emitDir).filter((f) => /-card-(?!x-)/.test(f));
+ok(listCards().length > 0, "the dry run emits a card corpus to render against");
 const cards = listCards().slice(0, 20);
 ok(cards.length > 0,
    "there are emitted cards to render — without them this suite proves only that " +

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFileSync, appendFileSync } from "node:fs";
-import { constants } from "node:os";
+import { readFileSync, appendFileSync, rmSync } from "node:fs";
+import { constants, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readQuarantine, recordedFor, todayUtc } from "./lib/quarantine.mjs";
@@ -215,10 +215,10 @@ export function interrupt(signal, now = Date.now()) {
   return "kill";
 }
 
-function runSuite(suite, dir, scale, out) {
+function runSuite(suite, dir, scale, out, extraEnv = {}) {
   return new Promise((resolve) => {
     const started = process.hrtime.bigint();
-    const env = { ...process.env, PATH: [path.join(dir, "node_modules", ".bin"), process.env.PATH || ""].join(path.delimiter) };
+    const env = { ...process.env, ...extraEnv, PATH: [path.join(dir, "node_modules", ".bin"), process.env.PATH || ""].join(path.delimiter) };
     const child = spawn("/bin/sh", ["-c", suite.command], { cwd: dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     const lines = tailCollector();
     child.stdout.setEncoding("utf8");
@@ -402,31 +402,39 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   const started = process.hrtime.bigint();
   const results = [];
   let stop = false;
-  for (const suite of suites) {
-    if (stop || interruptedBy) {
-      results.push({ name: suite.name, status: "skipped", seconds: null, assertions: null, tail: [] });
-      continue;
-    }
-    io.stdout.write(`\n> ${suite.script}\n> ${suite.command}\n\n`);
-    let r = await runSuite(suite, opts.dir, opts.timeoutScale, io);
-    if (r.status === "fail" && !interruptedBy && retryAllowed(suite, env)) {
-      io.stderr.write(`\n↻ ${suite.script} failed after ${fmtSeconds(r.seconds)} s; it is tagged timing, so it runs once more (a second failure is a failure)\n`);
-      io.stdout.write(`\n> ${suite.script} (retry)\n> ${suite.command}\n\n`);
-      const first = r;
-      r = await runSuite(suite, opts.dir, opts.timeoutScale, io);
-      if (r.status === "pass") {
-        const hit = recordedFor(quarantine, suite.name, todayUtc());
-        r = { ...r, flaky: { first: { seconds: first.seconds, code: first.code, signal: first.signal, tail: first.tail, assertions: first.assertions }, recorded: hit ? hit.expires : null } };
-        io.stderr.write(`\n⚠ FLAKY ${suite.script}: failed once, passed on retry; ${hit ? `recorded in tests/quarantine.json until ${hit.expires}` : "NOT RECORDED in tests/quarantine.json (suite, assertion, firstSeen, expires within 7 days, issue)"}\n`);
-        if (env.GITHUB_ACTIONS) io.stdout.write(`::warning title=FLAKY ${suite.name}::${suite.script} failed once and passed on retry; ${hit ? `recorded until ${hit.expires}` : "add a tests/quarantine.json entry or fix the test"}\n`);
-      } else {
-        r = { ...r, retried: true };
+  const emitDir = env.FLOWS_EMIT_DIR || path.join(tmpdir(), `flows-emit-run-${process.pid}-${Date.now()}`);
+  const ownsEmit = !env.FLOWS_EMIT_DIR;
+  try {
+    for (const suite of suites) {
+      if (stop || interruptedBy) {
+        results.push({ name: suite.name, status: "skipped", seconds: null, assertions: null, tail: [] });
+        continue;
+      }
+      io.stdout.write(`\n> ${suite.script}\n> ${suite.command}\n\n`);
+      let r = await runSuite(suite, opts.dir, opts.timeoutScale, io, { FLOWS_EMIT_DIR: emitDir });
+      if (r.status === "fail" && !interruptedBy && retryAllowed(suite, env)) {
+        io.stderr.write(`\n↻ ${suite.script} failed after ${fmtSeconds(r.seconds)} s; it is tagged timing, so it runs once more (a second failure is a failure)\n`);
+        io.stdout.write(`\n> ${suite.script} (retry)\n> ${suite.command}\n\n`);
+        const first = r;
+        r = await runSuite(suite, opts.dir, opts.timeoutScale, io, { FLOWS_EMIT_DIR: emitDir });
+        if (r.status === "pass") {
+          const hit = recordedFor(quarantine, suite.name, todayUtc());
+          r = { ...r, flaky: { first: { seconds: first.seconds, code: first.code, signal: first.signal, tail: first.tail, assertions: first.assertions }, recorded: hit ? hit.expires : null } };
+          io.stderr.write(`\n⚠ FLAKY ${suite.script}: failed once, passed on retry; ${hit ? `recorded in tests/quarantine.json until ${hit.expires}` : "NOT RECORDED in tests/quarantine.json (suite, assertion, firstSeen, expires within 7 days, issue)"}\n`);
+          if (env.GITHUB_ACTIONS) io.stdout.write(`::warning title=FLAKY ${suite.name}::${suite.script} failed once and passed on retry; ${hit ? `recorded until ${hit.expires}` : "add a tests/quarantine.json entry or fix the test"}\n`);
+        } else {
+          r = { ...r, retried: true };
+        }
+      }
+      results.push(r);
+      if (r.status !== "pass") {
+        io.stderr.write(`\n✗ ${suite.script} ${resultWord(r)} after ${fmtSeconds(r.seconds)} s\n`);
+        if (opts.bail) stop = true;
       }
     }
-    results.push(r);
-    if (r.status !== "pass") {
-      io.stderr.write(`\n✗ ${suite.script} ${resultWord(r)} after ${fmtSeconds(r.seconds)} s\n`);
-      if (opts.bail) stop = true;
+  } finally {
+    if (ownsEmit) {
+      try { rmSync(emitDir, { recursive: true, force: true }); } catch {}
     }
   }
   const wallS = Number(process.hrtime.bigint() - started) / 1e9;

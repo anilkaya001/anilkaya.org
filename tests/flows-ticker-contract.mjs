@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import * as NEURON from "../shared/flows-neuron.js";
@@ -12,6 +11,7 @@ import { DEALER_CLAUSE } from "../shared/flows-reading.js";
 import { earningsHistory } from "../shared/flows-catalysts.js";
 import { cardXPayload } from "../scripts/flows-legs/card-x.mjs";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -19,10 +19,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-const EMIT_DIR = path.join(ROOT, "tests", ".ticker-emit");
-fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-fs.mkdirSync(EMIT_DIR, { recursive: true });
-execFileSync(process.execPath, [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", EMIT_DIR + "/"], { stdio: "ignore" });
+const EMIT_DIR = nightlyEmit();
 const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; };
 const cards = fs.readdirSync(EMIT_DIR).filter((f) => /^-card-[A-Z][A-Z0-9.\-]*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
@@ -55,6 +52,7 @@ function neuronFor(card) {
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".txt": "text/plain" };
 const PAGE_HTML = FLOWS_PAGES.tickerPage({ username: "test" });
+const WEEKS_LATER = 47 * 864e5;
 
 async function mount(page, card, o = {}) {
   const ticker = o.ticker === undefined ? card && card.ticker : o.ticker;
@@ -936,7 +934,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { cardX: cx, hist: { ...(histOf(card.ticker) || {}), sessionDate: next } });
+    await mount(page, card, { cardX: cx, hist: { ...(histOf(card.ticker) || {}), sessionDate: next }, at: Date.parse(card.generatedAt) + WEEKS_LATER });
     const got = await page.evaluate((s) => ({ pill: document.getElementById("fxFresh").innerText, mine: window.FlowsUI.F.day(s[0]), other: window.FlowsUI.F.day(s[1]),
       chip: (document.querySelector("#m-events .ui-mod-t .ui-tag") || {}).textContent }), [card.sessionDate, next]);
     ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `T8: companions from another session never lift the page pill off the card's own (${got.pill})`);
@@ -951,7 +949,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev } });
+    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev }, at: Date.parse(card.generatedAt) + WEEKS_LATER });
     const got = await page.evaluate(async (s) => {
       const tags = (id) => [...document.querySelectorAll("#" + id + " .ui-mod-t .ui-tag")].map((n) => n.textContent);
       const b = [...document.querySelectorAll("#m-gamma .ui-seg-i")].find((n) => n.textContent === "1Y");
@@ -2485,6 +2483,5 @@ try {
 
 } finally {
   await browser.close();
-  fs.rmSync(EMIT_DIR, { recursive: true, force: true });
 }
 console.log(`flows-ticker-contract: ${checks} checks passed`);

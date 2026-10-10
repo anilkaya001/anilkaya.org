@@ -1,3 +1,4 @@
+import { stampNow } from "./stamp.mjs";
 import {
   VOL_SCHEMA_VERSION, VOL_WHY, buildConePanel, buildRvPanel, buildVrpPanel, harVrp, buildTermPanel, buildSkewPanel,
   buildIvDynamics, buildAnomalyPanel, buildSentimentPanel, buildCharacterPanel, characterVote, buildVolRadar,
@@ -230,7 +231,7 @@ function brokenEntry(name) {
 
 export async function runVolLeg({
   uw, names = [], sessionDate = null, repair = null, pool = null,
-  now = () => new Date().toISOString(), radar = true,
+  now = stampNow, radar = true,
 } = {}) {
   const stats = { names: names.length, calls: 0, failed: 0, byRead: {}, depth: {}, broken: [] };
   const notes = {};

@@ -1,3 +1,4 @@
+import { stampNow } from "./stamp.mjs";
 import { vendorGate } from "../../shared/flows-regime.js";
 
 export const LEG_WRITER = "flows-pipeline";
@@ -31,7 +32,7 @@ export function silenceOf(result, { what = "read" } = {}) {
 }
 
 export function freshStamp({ readAt, vendorAt = null, session = null, cadenceS = 0, source = "nightly", writer = LEG_WRITER } = {}) {
-  return { v: 1, readAt: readAt || new Date().toISOString(), vendorAt, source, cadenceS, session, writer };
+  return { v: 1, readAt: readAt || stampNow(), vendorAt, source, cadenceS, session, writer };
 }
 
 export function makeCallMeter(stats) {

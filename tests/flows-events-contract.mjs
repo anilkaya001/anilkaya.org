@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 
 import {
@@ -14,6 +13,7 @@ import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 import { nextTradingDay } from "../shared/flows-freshness.js";
 import { historyDigest } from "../shared/flows-catalysts.js";
+import { nightlyEmit, emitRead } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -25,19 +25,7 @@ const near = (a, b, msg, tol = 1e-9) => {
   checks++;
 };
 
-const EMIT_DIR = path.join(ROOT, "tests", ".events-emit");
-fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-fs.mkdirSync(EMIT_DIR, { recursive: true });
-
-let PAYLOAD;
-try {
-  execFileSync(process.execPath,
-    [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", EMIT_DIR + "/"],
-    { stdio: "ignore" });
-  PAYLOAD = JSON.parse(fs.readFileSync(path.join(EMIT_DIR, "-events.json"), "utf8"));
-} finally {
-  fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-}
+const PAYLOAD = emitRead(nightlyEmit(), "events");
 
 const ROWS = PAYLOAD.rows;
 

@@ -1,19 +1,15 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { mkdtemp, rm } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { buildSurface, buildPath } from "../shared/flows-card.js";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const SCRATCH = await mkdtemp(path.join(os.tmpdir(), "flows-render-"));
-execFileSync(process.execPath, [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", SCRATCH + path.sep],
-  { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
+const SCRATCH = nightlyEmit();
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
@@ -526,5 +522,4 @@ try {
     "the path signature, the quality pair and the dealer-gamma share at spot reach the reader, and a pre-surface, pre-scale, pre-signature card degrades");
 } finally {
   await browser.close();
-  await rm(SCRATCH, { recursive: true, force: true });
 }

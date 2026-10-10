@@ -1,3 +1,4 @@
+import { stampDate } from "./stamp.mjs";
 import {
   gexHistory, volumeHistory, gexLevels, flowExpiry, flowStrike, nopeSection, gexPath, oiWalls,
   pickLifelineContracts, lifeline, darkpoolLevels, alertsTape, multiLeg, rowsOf, failedRead, readCode,
@@ -210,7 +211,7 @@ async function flowLeg(ctx) {
     uw, publish, stored = () => null, readStored = async () => ({ payload: null, absent: true }),
     runPooled, deadline = Infinity, sessionDate, generatedAt, deep = [], cross = [],
     featuresOf = () => null, strikesOf = () => null, cardOf = () => null, variation = null,
-    width = 2, log = () => {}, now = () => new Date(),
+    width = 2, log = () => {}, now = stampDate,
   } = ctx;
   const win = sessionWindow(sessionDate);
   const dated = isDay(sessionDate) ? { date: sessionDate } : {};
