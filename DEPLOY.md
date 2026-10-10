@@ -2942,7 +2942,7 @@ separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 | Var | Values | Effect |
 |---|---|---|
 | `FLOWS_RT_MODE` | `on`; anything else, or unset, is off | Off: all three routes answer JSON 404 `rt_off`, even to an anonymous caller, and every open socket is closed with 4011 and a `bye` frame. A missing `PULSE` binding is the same. |
-| `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
+| `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner`. Shipped: `members` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
 | `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
 | `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
 | `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
@@ -2951,6 +2951,23 @@ Turning the rail off is a one-line deploy (`FLOWS_RT_MODE = "off"`), or a dashbo
 edit of the var; the next deploy of the Worker also restarts the object and
 drops every socket, and clients reconnect with jitter. Deploy outside 04:00 to
 20:00 ET on trading days when you can.
+
+**Who may use the rail.** The shipped audience is `members`: with the owner's
+explicit go-ahead the rail was opened to every signed-in Flows member, and the
+dashboard variable was set to `members` first, so the file now carries the same
+value and a Workers Builds deploy of `main` does not put it back. Vendor load
+does not grow with the number of members, because a topic is polled once for
+everyone; what grows is sockets, held at 3 per user and 200 in all, and the
+bytes sent. To take the rail back to the owner alone, set
+`FLOWS_RT_AUDIENCE = "owner"` in `wrangler.toml` and deploy. An edit of only the
+dashboard variable lasts until the next deploy, which restores the file's value.
+Either change is a new deployment that restarts the object and drops every
+socket; a member then reconnecting is refused with 403 and the page falls back to
+its own heartbeats, as it did before the rail. `/api/rt/status` stays owner-only
+under either value. `tests/flows-rt-server.mjs` runs the shipped value and
+proves a member who is not an owner is admitted (socket, snapshot and a cap of
+its own) and cannot read status, then runs an explicit `FLOWS_RT_AUDIENCE:owner`
+and proves the same member is refused with 403 and never wakes the hub.
 
 **Reading `/api/rt/status`** (owner session, JSON): `running`, the epoch `ep`,
 `session`, `phase`; `upstream` (`kind: "rest"`, whether the key is present,
