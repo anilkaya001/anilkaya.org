@@ -316,26 +316,61 @@ export function dispatchBase(env) {
   return /^https:\/\/api\.github\.com$|^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(raw) ? raw : null;
 }
 
-export async function dispatchWorkflow(env, workflow, inputs, fetchImpl = fetch) {
+const githubTarget = (env) => {
   const token = env && typeof env.GITHUB_DISPATCH_TOKEN === "string" ? env.GITHUB_DISPATCH_TOKEN.trim() : "";
-  if (!token) return { sent: false, why: "no-token" };
+  if (!token) return { why: "no-token" };
   const base = dispatchBase(env);
-  if (!base) return { sent: false, why: "bad-base" };
+  if (!base) return { why: "bad-base" };
   const repo = env.FLOWS_LIVE_REPO || "anilkaya001/anilkaya.org";
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { sent: false, why: "bad-repo" };
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) return { why: "bad-repo" };
+  const headers = {
+    Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "anilkaya-flows-worker",
+  };
+  return { base, repo, headers };
+};
+
+export async function dispatchWorkflow(env, workflow, inputs, fetchImpl = fetch) {
+  const target = githubTarget(env);
+  if (target.why) return { sent: false, why: target.why };
   try {
-    const res = await fetchImpl(`${base}/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
+    const res = await fetchImpl(`${target.base}/repos/${target.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
       method: "POST",
-      headers: {
-        Authorization: "Bearer " + token, Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "anilkaya-flows-worker",
-        "Content-Type": "application/json",
-      },
+      headers: { ...target.headers, "Content-Type": "application/json" },
       body: JSON.stringify({ ref: env.FLOWS_LIVE_REF || "main", inputs }),
     });
     return { sent: res.status === 204, status: res.status, why: res.status === 204 ? "sent" : "refused" };
   } catch (error) {
     return { sent: false, why: "unreachable", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const CANCEL_DEADLINE_MS = 8000;
+
+export async function cancelHungRun(env, workflow, startedBefore, fetchImpl = fetch) {
+  const target = githubTarget(env);
+  if (target.why) return { cancelled: false, why: target.why };
+  const signal = () => (typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(CANCEL_DEADLINE_MS) : undefined);
+  try {
+    const list = await fetchImpl(
+      `${target.base}/repos/${target.repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?status=in_progress&per_page=10`,
+      { method: "GET", headers: target.headers, signal: signal() });
+    if (list.status !== 200) return { cancelled: false, why: "list-refused", status: list.status };
+    let body = null;
+    try { body = await list.json(); } catch { body = null; }
+    const runs = body && Array.isArray(body.workflow_runs) ? body.workflow_runs : [];
+    const hung = runs
+      .map((r) => ({ id: r && Number(r.id), at: r ? Date.parse(r.run_started_at || r.created_at) : NaN }))
+      .filter((r) => Number.isSafeInteger(r.id) && r.id > 0 && Number.isFinite(r.at) && r.at < startedBefore)
+      .sort((a, b) => a.at - b.at)[0];
+    if (!hung) return { cancelled: false, why: "none", listed: runs.length };
+    const res = await fetchImpl(`${target.base}/repos/${target.repo}/actions/runs/${hung.id}/cancel`,
+      { method: "POST", headers: target.headers, signal: signal() });
+    return res.status === 202
+      ? { cancelled: true, runId: hung.id, status: 202 }
+      : { cancelled: false, why: "cancel-refused", status: res.status, runId: hung.id };
+  } catch (error) {
+    return { cancelled: false, why: "unreachable", error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -420,6 +455,15 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
       failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged) })
     : null;
+  const stalled = liveStalled(at, breadthReadAt, merged);
+  const again = Number(merged.liveRedispatchedAt);
+  const episode = Number.isFinite(again) && again > 0 && at - again < LIVE_CLOCK.watchdogMs;
+  const canDispatch = !!env.GITHUB_DISPATCH_TOKEN;
+  let cancel = null;
+  if (stalled && canDispatch && !episode) {
+    cancel = await cancelHungRun(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml", at - LIVE_CLOCK.watchdogMs, fetchImpl);
+    out.cancel = cancel;
+  }
   const due = liveDispatchDue(at, merged);
   if (due.due) {
     const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
@@ -430,13 +474,11 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     else if (sent.why !== "no-token") log.error(JSON.stringify({ message: "live dispatch failed", ...sent }));
   } else out.dispatch = { sent: false, why: due.why };
 
-  if (liveStalled(at, breadthReadAt, merged)) {
+  if (stalled) {
     const ageMin = Number.isFinite(breadthReadAt) && breadthReadAt > 0 ? Math.round((at - breadthReadAt) / 60000) : null;
-    const canDispatch = !!env.GITHUB_DISPATCH_TOKEN;
     log.error(JSON.stringify({ message: "live layer stalled", ageMin, canDispatch,
-      dispatchedAt: merged.liveDispatchedAt || null, doneAt: merged.liveDoneAt || null }));
-    const again = Number(merged.liveRedispatchedAt);
-    const episode = Number.isFinite(again) && again > 0 && at - again < LIVE_CLOCK.watchdogMs;
+      dispatchedAt: merged.liveDispatchedAt || null, doneAt: merged.liveDoneAt || null,
+      cancel: cancel ? (cancel.cancelled ? "cancelled:" + cancel.runId : cancel.why) : null }));
     if (canDispatch && !episode && !(out.dispatch && out.dispatch.sent)) {
       const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
         { tick: new Date(at).toISOString(), origin: "watchdog" }, fetchImpl);
@@ -444,6 +486,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
       if (dispatchOutcome(sent)) patch.dispatchWhy = dispatchOutcome(sent);
       if (sent.sent) { patch.liveRedispatchedAt = at; patch.liveDispatchedAt = at; }
     } else out.watchdog = { stalled: true, ageMin, redispatch: null };
+    if (cancel && cancel.cancelled && patch.liveDispatchedAt === at) patch.liveRedispatchedAt = at;
   }
 
   if (Object.keys(patch).length) statements.push(clockPatchStatement(env.DB, patch, at));

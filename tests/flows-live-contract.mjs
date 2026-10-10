@@ -2430,6 +2430,98 @@ const cronMinutes = (cron) => {
   "THE STALL IS LOGGED WITHOUT THE TOKEN: live:breadth 56 minutes old at 11:06 logs 'live layer stalled' " +
     "(canDispatch false) even though no watchdog dispatch can be sent");
 
+  const hungWorld = (runs, { cancelStatus = 202, listStatus = 200, dispatchStatus = 204 } = {}) => {
+    const calls = [];
+    const fetchImpl = async (url, init = {}) => {
+      const method = init.method || "GET";
+      calls.push({ method, url });
+      if (method === "GET" && /\/actions\/workflows\/flows-live\.yml\/runs\?status=in_progress/.test(url)) {
+        return { status: listStatus, json: async () => ({ workflow_runs: runs }) };
+      }
+      if (method === "POST" && /\/actions\/runs\/\d+\/cancel$/.test(url)) return { status: cancelStatus };
+      if (method === "POST" && /\/dispatches$/.test(url)) return { status: dispatchStatus };
+      return { status: 404 };
+    };
+    return { calls, fetchImpl };
+  };
+  const stallTick = async (world, at, { env = {}, clock = clockRow, breadthAt = easternInstant(S, 10 * 60 + 10) } = {}) => {
+    const db = tickDb();
+    db.batch = async (list) => {
+      db.statements.push(...list);
+      if (/SELECT \* FROM flows_clock/.test(list[0].sql)) {
+        return [{ results: [clock] }, { results: [{ id: "live:breadth", read_at: breadthAt, session: S, cadence_s: 900, source: "actions" }] }];
+      }
+      return list.map(() => ({ results: [] }));
+    };
+    const said = [];
+    const out = await W.rthTick({ DB: db, UW_API_KEY: "k", GITHUB_DISPATCH_TOKEN: "t", ...env }, at,
+      { fetchVendor: async (p) => JSON.parse(bodies[p]), fetchImpl: world.fetchImpl, log: { error: (l) => said.push(JSON.parse(l)) } });
+    const patch = db.statements.filter((x) => /INSERT INTO flows_clock/.test(x.sql)).pop();
+    return { out, said, patch };
+  };
+  const iso = (m) => new Date(easternInstant(S, m)).toISOString();
+  const hungRun = { id: 9001, status: "in_progress", run_started_at: iso(9 * 60 + 31), created_at: iso(9 * 60 + 30) };
+  const youngRun = { id: 9002, status: "in_progress", run_started_at: iso(10 * 60 + 40), created_at: iso(10 * 60 + 40) };
+  const kinds = (w) => w.calls.map((c) => c.method + " " + (/\/runs\?/.test(c.url) ? "list" : /\/cancel$/.test(c.url) ? "cancel" : "dispatch"));
+
+  const cancelWorld = hungWorld([hungRun, youngRun]);
+  const cancelled = await stallTick(cancelWorld, easternInstant(S, 11 * 60 + 6));
+  deep(kinds(cancelWorld), ["GET list", "POST cancel", "POST dispatch"],
+    "A HUNG RUN IS CANCELLED BEFORE THE RE-DISPATCH: at 11:06 with live:breadth 56 minutes old the Worker lists the in-progress " +
+      "runs of flows-live.yml, cancels the one that started before the stall and only then dispatches, so the new run is not queued behind it");
+  ok(/\/actions\/runs\/9001\/cancel$/.test(cancelWorld.calls[1].url) && cancelled.out.cancel.cancelled === true &&
+     cancelled.out.cancel.runId === 9001 && cancelled.out.watchdog.redispatch.sent === true,
+  "and it is the 09:31 run, never the 10:40 run a restart started inside the stall window");
+  ok(cancelled.said.some((e) => e.message === "live layer stalled" && e.cancel === "cancelled:9001") &&
+     cancelled.patch && cancelled.patch.args.includes(easternInstant(S, 11 * 60 + 6)),
+  "the stall log names the run it cancelled, and the episode is stamped in the clock row");
+
+  const episodeWorld = hungWorld([hungRun]);
+  const inEpisode = await stallTick(episodeWorld, easternInstant(S, 11 * 60 + 11),
+    { clock: { ...clockRow, live_redispatched_at: easternInstant(S, 11 * 60 + 6), live_dispatched_at: easternInstant(S, 11 * 60 + 6) } });
+  deep([episodeWorld.calls.length, inEpisode.out.cancel || null], [0, null],
+    "ONCE PER EPISODE: five minutes later, inside the 45-minute episode, the Worker makes no GitHub call at all");
+  const nextWorld = hungWorld([hungRun]);
+  await stallTick(nextWorld, easternInstant(S, 11 * 60 + 56),
+    { clock: { ...clockRow, live_redispatched_at: easternInstant(S, 11 * 60 + 6), live_dispatched_at: easternInstant(S, 11 * 60 + 6) },
+      breadthAt: easternInstant(S, 10 * 60 + 10) });
+  deep(kinds(nextWorld), ["GET list", "POST cancel", "POST dispatch"], "and a stall that outlives the episode is handled again from the top");
+
+  const quietWorld = hungWorld([]);
+  const quiet = await stallTick(quietWorld, easternInstant(S, 11 * 60 + 6));
+  deep([kinds(quietWorld), quiet.out.cancel.why], [["GET list", "POST dispatch"], "none"],
+    "WITH NO RUN TO CANCEL (the loop died rather than hung) the Worker lists once and dispatches as before");
+  const youngWorld = hungWorld([youngRun]);
+  await stallTick(youngWorld, easternInstant(S, 11 * 60 + 6));
+  deep(kinds(youngWorld), ["GET list", "POST dispatch"], "a run younger than the stall is never cancelled");
+
+  const refusedList = hungWorld([hungRun], { listStatus: 403 });
+  const refused = await stallTick(refusedList, easternInstant(S, 11 * 60 + 6));
+  deep([kinds(refusedList), refused.out.cancel.why, refused.out.watchdog.redispatch.sent], [["GET list", "POST dispatch"], "list-refused", true],
+    "A TOKEN THAT CANNOT LIST RUNS costs the re-dispatch nothing: the cancel is skipped and the dispatch still goes");
+  const refusedCancel = hungWorld([hungRun], { cancelStatus: 403 });
+  const rc = await stallTick(refusedCancel, easternInstant(S, 11 * 60 + 6));
+  deep([kinds(refusedCancel), rc.out.cancel.why, rc.patch.args.includes(easternInstant(S, 11 * 60 + 6))],
+    [["GET list", "POST cancel", "POST dispatch"], "cancel-refused", true], "a refused cancel is recorded and the dispatch still goes");
+  const throwing = { calls: [], fetchImpl: async (url, init = {}) => {
+    if ((init.method || "GET") === "GET") throw new Error("boom");
+    return { status: 204 };
+  } };
+  const thrown = await stallTick(throwing, easternInstant(S, 11 * 60 + 6));
+  deep([thrown.out.cancel.why, thrown.out.watchdog.redispatch.sent], ["unreachable", true], "an unreachable GitHub does not stop the dispatch");
+
+  const noToken = hungWorld([hungRun]);
+  await stallTick(noToken, easternInstant(S, 11 * 60 + 6), { env: { GITHUB_DISPATCH_TOKEN: undefined } });
+  eq(noToken.calls.length, 0, "WITHOUT THE TOKEN the stall path calls GitHub not at all");
+  const healthy = hungWorld([hungRun]);
+  await stallTick(healthy, easternInstant(S, 11 * 60 + 6), { breadthAt: easternInstant(S, 11 * 60 + 1) });
+  eq(healthy.calls.length, 0, "and a healthy breadth read costs no listing");
+  const onTick = hungWorld([hungRun]);
+  const dueTick = await stallTick(onTick, easternInstant(S, 11 * 60 + 16));
+  deep(kinds(onTick), ["GET list", "POST cancel", "POST dispatch"],
+    "ON A GRID TICK (11:16) the cancel still comes before the one dispatch, and the watchdog adds none of its own");
+  eq(dueTick.out.dispatch.sent, true, "that dispatch is the tick's own");
+
   const nightlyAt = (h, m) => easternInstant(S, h * 60 + m);
   const missing = async (at) => {
     const said = [];

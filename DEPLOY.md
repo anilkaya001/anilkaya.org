@@ -1905,7 +1905,11 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   vendor calls into `live:market`: the five-minute market tide and the sector-ETF
   snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
-  `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
+  `live:breadth` is 45 minutes old, after cancelling the in-progress `flows-live`
+  run that started before that stall (one list call and one cancel call, so the
+  new run is not queued behind a hung job; a token that cannot list or cancel
+  only skips the cancel, and a run that started inside the stall is left
+  alone). Every dispatch needs `GITHUB_DISPATCH_TOKEN`
   (section 10.0); without it Tier 1 still runs and the dispatches are no-ops.
   The stall is logged (`live layer stalled`, with `canDispatch`) whether or not
   the token is set. Every dispatch outcome is kept in
