@@ -1546,7 +1546,13 @@ const seqOk = (ws) => {
   const toml = read("wrangler.toml");
   ok(/\[\[durable_objects\.bindings\]\]\nname = "PULSE"\nclass_name = "Pulse"/.test(toml), "wrangler.toml binds PULSE to Pulse");
   ok(/\[\[migrations\]\]\ntag = "v1"\nnew_sqlite_classes = \["Pulse"\]/.test(toml), "wrangler.toml declares the SQLite-backed class migration");
-  ok(/FLOWS_RT_MODE = "on"/.test(toml) && /FLOWS_RT_AUDIENCE = "owner"/.test(toml), "wrangler.toml: mode on, audience owner");
+  ok(/FLOWS_RT_MODE = "on"/.test(toml) && /FLOWS_RT_AUDIENCE = "members"/.test(toml), "wrangler.toml: mode on, audience members");
+  const shippedEnv = Object.fromEntries(["FLOWS_RT_MODE", "FLOWS_RT_AUDIENCE", "FLOWS_RT_USERS", "FLOWS_RT_HINT"].map((k) => [k, new RegExp("^" + k + ' = "([^"]*)"$', "m").exec(toml)?.[1]]));
+  const shipped = RT.rtSwitches(shippedEnv);
+  deep([shipped.mode, shipped.audience, shipped.users, shipped.hint], ["on", "members", ["anilkaya"], "enam"], "wrangler.toml: the Worker reads mode on, audience members, owner anilkaya, hint enam");
+  ok(RT.rtAdmits(shipped, "firatgok") && !RT.rtIsOwner(shipped, "firatgok"), "wrangler.toml: the shipped audience admits a signed-in member who is not an owner, and never makes them one");
+  ok(RT.rtAdmits(shipped, "anilkaya") && RT.rtIsOwner(shipped, "anilkaya"), "wrangler.toml: and still admits the owner, who alone reads status");
+  ok(!RT.rtAdmits(RT.rtSwitches({ ...shippedEnv, FLOWS_RT_AUDIENCE: "owner" }), "firatgok"), "wrangler.toml: setting the audience back to owner refuses that member again");
   ok(!/\bhead_sampling_rate\s*=\s*0\b/.test(toml), "observability is unchanged");
   const cron = /crons\s*=\s*\[([^\]]*)\]/.exec(toml)[1];
   ok(cron.includes("1-59/5 13-21") && cron.includes("3-58/5 13-21") && cron.includes("*/30 * * * *") && cron.includes("15,45 * * * *"), "the four crons are untouched: Tier 1 stays the fallback");

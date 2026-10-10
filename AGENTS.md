@@ -610,7 +610,10 @@ its `webSocket` through `new Response(response.body, response)`):
 Kill switches fail closed. `FLOWS_RT_MODE` is `on` or anything else is off
 (routes answer JSON 404 `rt_off`, even to an anonymous caller; an absent
 `PULSE` binding is the same and never throws). `FLOWS_RT_AUDIENCE` is
-`members` or anything else is `owner`. Flows has no owner concept, so
+`members` or anything else is `owner`; the shipped value is `members`, so any
+signed-in Flows member may open a socket or read `/api/rt/snap`, and `owner`
+in `wrangler.toml` is the way back (a deploy overwrites the dashboard's variable
+list, so the file is what the next deploy runs). Flows has no owner concept, so
 `FLOWS_RT_USERS` (comma-separated member names, default `anilkaya`) names the
 owners; an empty value admits nobody, and `status` is owner-only under either
 audience. `FLOWS_RT_HINT` is the Durable Object location hint (`enam`). Test

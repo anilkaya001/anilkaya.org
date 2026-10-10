@@ -138,7 +138,7 @@ async function runMain() {
       eq(s0.res.status, 200, "status: the owner reads it");
       hubClock.offset = s0.body.now - Date.now();
       eq(s0.body.running, false, "idle: with nobody connected the hub is not running");
-      deep(s0.body.worker, { mode: "on", audience: "owner", users: ["anilkaya"], hint: "enam", binding: true }, "status: carries the Worker's switches");
+      deep(s0.body.worker, { mode: "on", audience: "members", users: ["anilkaya"], hint: "enam", binding: true }, "status: carries the Worker's switches, and the shipped audience is members");
       eq(s0.body.phase.phase, "rth", "the harness clock is pinned to 10:00 ET on a Wednesday");
       eq(vendor.calls.length, 0, "idle: no viewer, no vendor call");
     }
@@ -154,11 +154,8 @@ async function runMain() {
         eq(res.headers.get("cache-control"), "no-store", `anonymous: ${path} is no-store`);
         eq(res.headers.get("x-content-type-options"), "nosniff", `anonymous: ${path} carries the security headers`);
       }
-      const memberWs = await rawUpgrade(base, "/api/rt/ws", { Cookie: MEMBER });
-      eq(memberWs.status, 403, "member: audience owner refuses a signed-in member at the upgrade");
-      const memberSnap = await fetch(base + "/api/rt/snap", { headers: { Cookie: MEMBER } });
-      deep([memberSnap.status, (await memberSnap.json()).error.code], [403, "rt_forbidden"], "member: and the snapshot route");
-      eq((await fetch(base + "/api/rt/status", { headers: { Cookie: MEMBER } })).status, 403, "member: and status");
+      const memberStatus = await fetch(base + "/api/rt/status", { headers: { Cookie: MEMBER } });
+      deep([memberStatus.status, (await memberStatus.json()).error.code], [403, "forbidden"], "member: status stays owner-only under the members audience");
       const learn = await signFlowsSession("anilkaya", "wrong-secret", 3600, "1", 0);
       eq((await rawUpgrade(base, "/api/rt/ws", { Cookie: "flows_session=" + learn })).status, 401, "a session signed with another secret is anonymous");
       eq((await fetch(base + "/api/rt/ws", { headers: { Cookie: OWNER } })).status, 426, "owner: a plain GET of the socket route is 426");
@@ -199,7 +196,7 @@ async function runMain() {
     opened.push(c1);
     await until(() => c1.frames.length > 0, 8000, "the hello");
     const hello = c1.frames[0];
-    deep([hello.k, hello.t, hello.meta.transport, hello.meta.upstream, hello.meta.mode, hello.meta.audience], ["ctl", "hello", "ws", "rest", "on", "owner"], "owner: hello is the first frame, over a websocket, from a REST upstream");
+    deep([hello.k, hello.t, hello.meta.transport, hello.meta.upstream, hello.meta.mode, hello.meta.audience], ["ctl", "hello", "ws", "rest", "on", "members"], "owner: hello is the first frame, over a websocket, from a REST upstream, under the shipped members audience");
     deep(hello.rows.map((f) => f.k), RT_TOPIC_KEYS, "hello: a snapshot frame for each of the five topics");
     eq(hello.meta.f, "NVDA", "hello: the focus ticker from the query, upper-cased");
     ok(hello.rows.every((f) => f.snap === true && f.ep === hello.ep), "hello: snapshots in the hello's epoch");
@@ -267,7 +264,7 @@ async function runMain() {
       eq(body.running, true, "status: running while sockets are connected");
       deep(body.sockets.byUser, { anilkaya: 2 }, "status: sockets by user");
       eq(body.upstream.kind, "rest", "status: upstream kind");
-      deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner" }, "status: kill switches");
+      deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members" }, "status: kill switches");
       for (const k of RT_TOPIC_KEYS) {
         const t = body.topics[k];
         ok(t.hasData && t.sq > 0 && t.frames > 0 && t.lastFrameAgeMs !== null && t.calls.minute > 0, `status ${k}: sq ${t.sq}, ${t.frames} frames, last frame ${t.lastFrameAgeMs} ms ago, ${t.calls.minute} calls in the last minute`);
@@ -333,6 +330,11 @@ async function runMain() {
       ok(four.ctl("hello").length === 0, "cap: and never received a hello");
       const held = (await statusOf(base, OWNER)).body.sockets;
       deep([held.n, held.byUser.anilkaya], [3, 3], "cap: the server counts three sockets for the user, the refused one released");
+      const other = connect(base, MEMBER);
+      opened.push(other);
+      await until(() => other.frames.length > 0, 8000, "a member's hello while the owner holds three sockets");
+      ok(other.ctl("hello").length === 1 && !other.state.bye && !other.state.closed, "cap: it is per user, so a member is admitted while the owner holds three");
+      other.close();
       for (const c of cap) c.close();
       await sleep(300);
     }
@@ -351,6 +353,33 @@ async function runMain() {
       deep(frames.map((f) => f.k), ["px", "fl", "mk"], "snap: an array of envelopes, in the order asked");
       ok(frames.every((f) => f.snap === true && checkFrame(f).length === 0 && f.rows.length > 0), "snap: clean snapshots, from the hub's memory");
       eq((await fetch(base + "/api/rt/snap?k=px,zz", { headers: { Cookie: OWNER } })).status, 400, "snap: an unknown topic is 400");
+    }
+
+    {
+      const mup = await rawUpgrade(base, "/api/rt/ws", { Cookie: MEMBER });
+      eq(mup.status, 101, "member: a signed-in member who is not an owner gets the 101 under the shipped config");
+      const msnap = await fetch(base + "/api/rt/snap?k=px,fl,mk", { headers: { Cookie: MEMBER } });
+      eq(msnap.status, 200, "member: and reads the snapshot");
+      eq(msnap.headers.get("cache-control"), "no-store", "member: snap is no-store");
+      eq(msnap.headers.get("x-fresh-source"), "hub", "member: and carries the hub's X-Fresh headers");
+      const mframes = await msnap.json();
+      deep(mframes.map((f) => f.k), ["px", "fl", "mk"], "member: the same envelopes, in the order asked");
+      ok(mframes.every((f) => f.snap === true && checkFrame(f).length === 0 && f.rows.length > 0), "member: clean snapshots with rows");
+      const m = connect(base, MEMBER, { query: "?k=px,fl" });
+      opened.push(m);
+      await until(() => m.frames.length > 0, 8000, "the member's hello");
+      const mh = m.frames[0];
+      deep([mh.k, mh.t, mh.meta.audience, mh.rows.map((f) => f.k)], ["ctl", "hello", "members", ["px", "fl"]], "member: hello names the members audience and carries the topics asked for");
+      ok(mh.rows.every((f) => f.rows.length > 0 && f.fresh.state !== "pending"), "member: the hello carries real snapshots from the warm hub");
+      await until(() => m.data("px").filter((f) => !f.snap).length >= 2, 8000, "deltas on the member's socket");
+      cleanFrames(m, "member");
+      const mv = seqVerdicts(m);
+      ok(!mv.gap && !mv.dup && !mv.orphan, `member: sequences are clean: ${JSON.stringify(mv)}`);
+      ok(m.state.opened && !m.state.bye && !m.state.closed, "member: the socket stays open");
+      await until(async () => (await statusOf(base, OWNER)).body.sockets.byUser.firatgok === 1, 8000, "the abandoned raw member socket to be released");
+      ok(true, "member: status counts one socket under the member's own name");
+      eq((await fetch(base + "/api/rt/status", { headers: { Cookie: MEMBER } })).status, 403, "member: and still cannot read status");
+      m.close();
     }
 
     {
@@ -425,6 +454,51 @@ async function runMain() {
       await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the hub to stop after its only socket expired");
       ok(true, "expiry: and with no socket left the hub stops");
     }
+  } finally {
+    for (const c of opened) c.close();
+    await server.stop();
+    await uw.close();
+  }
+}
+
+async function runOwnerAudience() {
+  const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
+  const uw = await startVendor(vendor);
+  const server = await startWorker({
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner"],
+  });
+  const base = server.baseURL;
+  const opened = [];
+  try {
+    const s0 = await statusOf(base, OWNER);
+    eq(s0.res.status, 200, "owner audience: the owner reads status");
+    hubClock.offset = s0.body.now - Date.now();
+    deep(s0.body.worker, { mode: "on", audience: "owner", users: ["anilkaya"], hint: "enam", binding: true }, "owner audience: the variable overrides the shipped members");
+
+    const memberWs = await rawUpgrade(base, "/api/rt/ws", { Cookie: MEMBER });
+    deep([memberWs.status, JSON.parse(memberWs.body).error.code], [403, "rt_forbidden"], "owner audience: a signed-in member is refused at the upgrade with the rail's own code");
+    const memberSnap = await fetch(base + "/api/rt/snap", { headers: { Cookie: MEMBER } });
+    deep([memberSnap.status, (await memberSnap.json()).error.code], [403, "rt_forbidden"], "owner audience: and on the snapshot route");
+    const memberStatus = await fetch(base + "/api/rt/status", { headers: { Cookie: MEMBER } });
+    deep([memberStatus.status, (await memberStatus.json()).error.code], [403, "forbidden"], "owner audience: and on status");
+    const refused = connect(base, MEMBER);
+    await until(() => refused.state.closed || refused.state.error, 5000, "a refused member socket");
+    eq(refused.state.opened, false, "owner audience: a member's client never opens");
+    eq(vendor.calls.length, 0, "owner audience: refused members never wake the hub: no vendor call");
+
+    const up = await rawUpgrade(base, "/api/rt/ws", { Cookie: OWNER });
+    eq(up.status, 101, "owner audience: the owner still gets the 101");
+    await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the abandoned raw socket to be released");
+
+    const c = connect(base, OWNER, { query: "?k=px" });
+    opened.push(c);
+    await until(() => c.frames.length > 0, 8000, "the owner's hello");
+    deep([c.frames[0].t, c.frames[0].meta.audience], ["hello", "owner"], "owner audience: hello names the owner audience");
+    const snap = await fetch(base + "/api/rt/snap?k=px", { headers: { Cookie: OWNER } });
+    eq(snap.status, 200, "owner audience: the owner reads the snapshot");
+    const st = (await statusOf(base, OWNER)).body;
+    deep(st.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner" }, "owner audience: status reports the switch the Worker was given");
+    deep(st.sockets.byUser, { anilkaya: 1 }, "owner audience: and only the owner holds a socket");
   } finally {
     for (const c of opened) c.close();
     await server.stop();
@@ -519,8 +593,9 @@ async function runCadence() {
 }
 
 await runMain();
+await runOwnerAudience();
 await runClosed();
 await runOff();
 await runCadence();
 
-console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake vendor on loopback and real WebSocket clients: 401 without a session, 403 for a member under the owner audience, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a vendor outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no vendor call, the kill switch, and the vendor call rate at production cadence`);
+console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake vendor on loopback and real WebSocket clients: 401 without a session, a signed-in member who is not an owner admitted under the shipped members audience (socket, snapshot, own cap) and refused 403 under an explicit owner audience, status owner-only under both, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a vendor outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no vendor call, the kill switch, and the vendor call rate at production cadence`);
