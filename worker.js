@@ -21,7 +21,7 @@ import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, bui
 
 import {
   rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface, deskSmiles,
-  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES,
+  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES, deskCarry,
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
@@ -2373,7 +2373,10 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
 
   const ranked = found.status === "mismatch"
     ? offMarketChain(rows, "not read: the quotes and the price disagree", rankBy)
-    : rankChain(rows, { spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate });
+    : rankChain(rows, {
+      spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate,
+      carry: deskCarry(cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.facts, found.status),
+    });
 
   const earnDate = info ? info.nextEarningsDate : null;
   const noEarnings = info ? earnDate === null && hasNoEarnings(info.issueType) : false;

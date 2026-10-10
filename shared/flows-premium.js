@@ -1,4 +1,4 @@
-import { impliedVolB76 } from "./flows-quant-bs.js";
+import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
 import { yearFraction } from "./flows-quant-time.js";
 
 export function numOrNull(value) {
@@ -101,9 +101,9 @@ export function sigmaMove(level, from, iv, years) {
   return sigma > 0 ? Math.log(level / from) / sigma : null;
 }
 
-export function midImpliedVol({ spot, strike, type, mid, years, rate = PRICING_RATE }) {
+export function midImpliedVol({ spot, strike, type, mid, years, rate = PRICING_RATE, forward = null }) {
   if (!(spot > 0) || !(strike > 0) || !(mid > 0) || !(years > 0)) return null;
-  const F = spot * Math.exp(rate * years), D = Math.exp(-rate * years);
+  const F = forward > 0 ? forward : spot * Math.exp(rate * years), D = Math.exp(-rate * years);
   const iv = impliedVolB76(F, D, strike, years, mid, type, null);
   return Number.isFinite(iv) && iv > 0 ? iv : null;
 }
@@ -202,9 +202,68 @@ export function priceSale(row, {
 
 const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR);
 
-export function attachMidIv(p, { spot, readMs = null, rate = PRICING_RATE } = {}) {
+export const FORWARD_MIN_PAIRS = 3;
+export const FORWARD_MAX_PAIRS = 10;
+export const FORWARD_MIN_MID = 0.05;
+export const FORWARD_MAX_REL_SPREAD = 0.5;
+export const FORWARD_MAX_LOG_GAP = 0.15;
+
+export function deskCarry(facts, status) {
+  if (status !== "ok" || !Array.isArray(facts)) return null;
+  const f = facts.find((x) => x && x.id === "carry.implied");
+  return f && Number.isFinite(f.v) && f.g >= 2 ? f.v : null;
+}
+
+export function forwardPlan(standing, { spot, readMs = null, rate = PRICING_RATE, carry = null } = {}) {
+  const groups = new Map();
+  for (const p of Array.isArray(standing) ? standing : []) {
+    if (!p || !(p.mid > 0) || (p.type !== "C" && p.type !== "P")) continue;
+    let g = groups.get(p.expiry);
+    if (!g) { g = { sample: p, byStrike: new Map() }; groups.set(p.expiry, g); }
+    let s = g.byStrike.get(p.strike);
+    if (!s) { s = {}; g.byStrike.set(p.strike, s); }
+    s[p.type] = p;
+  }
+  const q = Number.isFinite(carry) && carry !== 0 ? carry : null;
+  const memo = new Map();
+  const none = { F: null, method: "rate-only", pairs: 0 };
+  return (expiry) => {
+    if (memo.has(expiry)) return memo.get(expiry);
+    const g = groups.get(expiry);
+    const years = g ? yearsTo(g.sample, readMs) : NaN;
+    let out = none;
+    if (g && years > 0 && spot > 0) {
+      const base = spot * Math.exp(rate * years);
+      const pairs = [];
+      for (const [K, s] of g.byStrike) {
+        const c = s.C, u = s.P;
+        if (!c || !u) continue;
+        if (!(c.mid >= FORWARD_MIN_MID && u.mid >= FORWARD_MIN_MID)) continue;
+        if (!(c.spread <= FORWARD_MAX_REL_SPREAD && u.spread <= FORWARD_MAX_REL_SPREAD)) continue;
+        pairs.push({
+          K, call: c.mid, put: u.mid, spreadCall: c.ask - c.bid, spreadPut: u.ask - u.bid,
+          gap: Math.abs(Math.log(K / spot)),
+        });
+      }
+      pairs.sort((a, b) => a.gap - b.gap || a.K - b.K);
+      pairs.length = Math.min(pairs.length, FORWARD_MAX_PAIRS);
+      const f = pairs.length >= FORWARD_MIN_PAIRS
+        ? parityForward({ S: spot, T: years, chain: pairs, D: Math.exp(-rate * years) })
+        : null;
+      if (f && Number.isFinite(f.F) && f.F > 0 && Math.abs(Math.log(f.F / base)) <= FORWARD_MAX_LOG_GAP) {
+        out = { F: f.F, method: "parity", pairs: f.pairs };
+      } else if (q !== null) {
+        out = { F: spot * Math.exp((rate - q) * years), method: "carry", pairs: 0 };
+      }
+    }
+    memo.set(expiry, out);
+    return out;
+  };
+}
+
+export function attachMidIv(p, { spot, readMs = null, rate = PRICING_RATE, forward = null } = {}) {
   const years = yearsTo(p, readMs);
-  p.ivMid = midImpliedVol({ spot, strike: p.strike, type: p.type, mid: p.mid, years, rate });
+  p.ivMid = midImpliedVol({ spot, strike: p.strike, type: p.type, mid: p.mid, years, rate, forward });
   p.cushionSigmas = p.breakeven > 0 ? sigmaMove(spot, p.breakeven, p.ivMid, years) : null;
   p.capSigmas = p.strategy === "cc" ? sigmaMove(p.strike, spot, p.ivMid, years) : null;
   return p;
@@ -261,7 +320,7 @@ const byText = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
-  ticker = null, readMs = null, rate = PRICING_RATE,
+  ticker = null, readMs = null, rate = PRICING_RATE, carry = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
@@ -294,7 +353,8 @@ export function rankChain(contracts, {
   }
 
   const key = RANK_KEYS.includes(rankBy) ? rankBy : "annualized";
-  const attach = (p) => attachMidIv(p, { spot, readMs, rate });
+  const forwardAt = forwardPlan(standing, { spot, readMs, rate, carry });
+  const attach = (p) => attachMidIv(p, { spot, readMs, rate, forward: forwardAt(p.expiry).F });
   if (key === "cushionSigmas") rows.forEach(attach);
 
   rows.sort((a, b) => before(a[key], b[key]) ||
@@ -306,6 +366,10 @@ export function rankChain(contracts, {
   const kept = rows.slice(0, limit);
   if (key !== "cushionSigmas") kept.forEach(attach);
   attachOpposite(kept, standing, { spot, readMs, rate });
+  const forwards = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => {
+    const f = forwardAt(expiry);
+    return { expiry, method: f.method, pairs: f.pairs };
+  });
 
   const { divisor, basis } = ivConvention(
     list.map((r) => r && r.implied_volatility),
@@ -320,6 +384,7 @@ export function rankChain(contracts, {
     ivBasis: basis,
     rankedBy: key,
     gates: g,
+    forwards,
 
     ivSurface: ivSurface(standing, { ivBasis: basis }),
   };

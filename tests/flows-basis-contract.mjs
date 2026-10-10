@@ -4,7 +4,7 @@ import {
   stateOf, isRegularSession, printOf, offMarket, bracket, fitUnderlying, coherence,
   BASIS_TOLERANCE, FIT_MIN_QUOTES,
 } from "../shared/flows-basis.js";
-import { rankChain, PRICING_RATE } from "../shared/flows-premium.js";
+import { rankChain, PRICING_RATE, deskCarry } from "../shared/flows-premium.js";
 import { black76 } from "../shared/flows-quant-bs.js";
 import { etDayOf, closeUtcMs, yearFraction } from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
@@ -340,6 +340,47 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
   }
   windows.sort((a, b) => a - b);
   ok(windows[3] < 8, `THE CHECK FITS THE FREE TIER: a 1000-contract chain is judged in ${windows[3].toFixed(2)} ms of CPU at the median, under the 10 ms a request is allowed`);
+}
+
+{
+  const readMs = Date.parse("2026-09-29T15:00:00Z");
+  const addDays = (day, n) => new Date(Date.parse(day + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+  const S = 100, div = 1.5, exT = 8 / 365, sigma = 0.30, r = PRICING_RATE;
+  const chain = (days, strikes) => {
+    const rows = [];
+    for (const d of days) {
+      const expiry = addDays("2026-09-29", d);
+      const T = yearFraction(readMs, expiry);
+      const F = (S - div * Math.exp(-r * exT)) * Math.exp(r * T);
+      for (const K of strikes) {
+        const type = K < S ? "P" : "C";
+        const px = black76(F, Math.exp(-r * T), K, sigma, T, type);
+        const half = Math.max(0.01, 0.02 * px) / 2;
+        rows.push({
+          option_symbol: `TST${expiry.slice(2).replace(/-/g, "")}${type}${String(Math.round(K * 1000)).padStart(8, "0")}`,
+          nbbo_bid: (px - half).toFixed(6), nbbo_ask: (px + half).toFixed(6), open_interest: "500", volume: "40",
+        });
+      }
+    }
+    return rows;
+  };
+  const strikes = [85, 90, 92.5, 95, 97.5, 100, 102.5, 105, 107.5, 110, 115];
+  const rows = chain([14, 28, 45, 70], strikes);
+  const c = coherence({ rows, spot: S, readMs, ticker: "TST" });
+  eq(c.status, "rebased", "A DIVIDEND INSIDE THE NEAREST EXPIRY MAKES THE CHAIN A REBASED ONE: the print is 1.5% above the spot the quotes were struck from");
+  near(c.spot, S - div * Math.exp(-r * exT), 0.05, "and the rebased spot is the print less the dividend's present value");
+
+  const facts = [{ id: "carry.implied", v: 0.045, u: "frac", g: 3 }];
+  eq(deskCarry(facts, c.status), null, "so the desk takes no carry for it: the rebased spot has absorbed it");
+
+  const worst = (ranked) => Math.max(...ranked.rows.map((x) => Math.abs(x.ivMid - sigma)));
+  const right = rankChain(rows, { spot: c.spot, asOf: "2026-09-29", readMs, ticker: "TST", limit: 100, gates: { minOi: 0, maxSpread: 1, minPremium: 0 }, carry: deskCarry(facts, c.status) });
+  ok(right.rows.length >= 30, `${right.rows.length} lines are priced`);
+  ok(worst(right) < 0.001, `ON THE REBASED CHAIN THE WORST MID VOLATILITY IS ${(worst(right) * 100).toFixed(4)} POINTS FROM THE 30% THAT PRICED IT, under the 0.1 point allowed`);
+  ok(right.forwards.every((f) => f.method === "rate-only"), "every expiry's forward is the rate alone");
+
+  const doubled = rankChain(rows, { spot: c.spot, asOf: "2026-09-29", readMs, ticker: "TST", limit: 100, gates: { minOi: 0, maxSpread: 1, minPremium: 0 }, carry: 0.045 });
+  ok(worst(doubled) > 0.003, `counting the carry again would be ${(worst(doubled) * 100).toFixed(2)} points out, which is what the rebase rule prevents`);
 }
 
 const SESSION_SECRET = "basis-session-secret-abcdefghijklmnopqrstuvwxyz";
