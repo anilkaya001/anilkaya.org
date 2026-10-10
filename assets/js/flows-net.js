@@ -1492,6 +1492,7 @@
     stage.addEventListener("dragstart", (e) => e.preventDefault());
     stage.addEventListener("dblclick", (e) => { if (e.target !== home) recentre(); });
     home.addEventListener("click", recentre);
+    home.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") recentre(); });
     if (window.IntersectionObserver) {
       new IntersectionObserver((list) => {
         inView = list[list.length - 1].isIntersecting;

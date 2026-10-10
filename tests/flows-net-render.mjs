@@ -661,10 +661,24 @@ try {
     await touch(150, 10);
     const c3 = await camera(page);
     ok(c3.yaw !== c0.yaw, `another horizontal touch drag turns it again (yaw ${c3.yaw.toFixed(1)})`);
-    const hb = await page.evaluate(() => { const h = document.querySelector("#uaNet .fn-home"); h.scrollIntoView({ block: "center", behavior: "instant" }); const r = h.getBoundingClientRect(); return { x: r.left + r.width / 2 + 14, y: r.top + r.height / 2 + 14 }; });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [hb] });
+    const hb = await page.evaluate(() => new Promise((done) => {
+      const h = document.querySelector("#uaNet .fn-home");
+      let last = NaN, calm = 0, n = 0;
+      const tick = () => {
+        h.scrollIntoView({ block: "center", behavior: "instant" });
+        const r = h.getBoundingClientRect(), at = scrollY + "," + r.top;
+        calm = at === last ? calm + 1 : 0; last = at;
+        if (calm < 10 && ++n < 600) { requestAnimationFrame(tick); return; }
+        const x = r.left + r.width / 2 + 14, y = r.top + r.height / 2 + 14;
+        done({ x, y, calm, on: h.contains(document.elementFromPoint(x, y)) });
+      };
+      tick();
+    }));
+    ok(hb.calm >= 10 && hb.on, `PRECONDITION: the page has stopped scrolling and the tap point lies on the Recentre button (settled ${hb.calm} frames, on the button ${hb.on})`);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: hb.x, y: hb.y }] });
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await page.waitForFunction((y) => window.FlowsUI.net.of(document.getElementById("uaNet")).camera().yaw !== y, c3.yaw, { timeout: 3000 }).catch(() => {});
+    const moved = await page.waitForFunction((y) => window.FlowsUI.net.of(document.getElementById("uaNet")).camera().yaw !== y, c3.yaw, { timeout: 3000 }).then(() => true, () => false);
+    ok(moved, `PRECONDITION: the camera answered the tap on Recentre within 3 s (yaw still ${c3.yaw.toFixed(1)})`);
     const c4 = await camera(page);
     deep([c4.yaw, c4.pitch], c0.rest, `THE FIRST TAP ON RECENTRE AFTER A TOUCH DRAG RECENTRES (yaw ${c3.yaw.toFixed(1)} to ${c4.yaw.toFixed(1)})`);
     await net(page, "net.orbit(arg[0], arg[1]); return null;", c0.rest);
