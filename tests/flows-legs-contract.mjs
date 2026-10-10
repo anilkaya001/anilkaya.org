@@ -26,6 +26,7 @@ import {
   fetchMissingMembers, readFocusRows, HOLDINGS_PATH,
 } from "../scripts/flows-legs/universe.mjs";
 import { volNames, VOL_DEPTH_READS, runVolLeg, coneThinOf, attachVol } from "../scripts/flows-legs/vol.mjs";
+import { CONE_MIN_SAMPLES } from "../shared/flows-vol.js";
 import { fakeVolVendor } from "../scripts/flows-legs/vol-fake.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
@@ -860,6 +861,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const thinFlags = names.map((n) => coneThinOf(leg, n.ticker));
   ok(thinFlags.every((c) => c === true || c === false), "P0-34: the engine is told whether the 30-day cone is thin, from the flag the leg already sets against its sample floor");
   ok(thinFlags.includes(true) && thinFlags.includes(false), "and the roster reaches both the full cone (251 samples) and the thin one (150)");
+  const sampleOf = (t) => leg.byTicker.get(t).panels.cone.tenors.find((d) => d.days === 30).samples;
+  ok(names.every((n, i) => thinFlags[i] === (sampleOf(n.ticker) < CONE_MIN_SAMPLES)), "the flag is the cone's own 30-day sample count against the floor, not its negation");
+  deep([...new Set(names.filter((n, i) => thinFlags[i] === true).map((n) => sampleOf(n.ticker)))], [150], "a thin cone is the vol fake's 150-sample one");
+  deep([...new Set(names.filter((n, i) => thinFlags[i] === false).map((n) => sampleOf(n.ticker)))], [251], "a full cone is its 251-sample one");
   const thin = names.find((n, i) => thinFlags[i] === true).ticker, full = names.find((n, i) => thinFlags[i] === false).ticker;
   const card = (t) => attachVol({ ticker: t }, leg, t);
   const pct = (t) => card(t).x.vol.iv30Pct;

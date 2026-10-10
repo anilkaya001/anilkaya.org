@@ -190,16 +190,26 @@ assert.deepEqual(missingReport, [],
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
   {
     const wrong = [];
-    let present = 0, absent = 0;
+    let present = 0, absent = 0, thin = 0, full = 0;
     for (const c of cards) {
       const f = c.engine.facts.find((x) => x.id === "iv.pctile.30.1y");
       const want = c.x && c.x.vol && Number.isFinite(c.x.vol.iv30Pct) ? c.x.vol.iv30Pct : null;
       if (!f) { wrong.push(`${c.ticker}: no iv.pctile.30.1y fact`); continue; }
+      const xf = join(dir, "p-card-x-" + c.ticker + ".json");
+      const cone = existsSync(xf) ? JSON.parse(readFileSync(xf, "utf8")).cone : null;
+      const tenor = cone && Array.isArray(cone.tenors) ? cone.tenors.find((t) => t.days === 30) : null;
       if (want === null) { absent++; if (f.v !== null || f.g !== 0 || f.why !== "iv.pctile-absent") wrong.push(`${c.ticker}: an absent percentile is not withheld`); }
-      else { present++; if (Math.abs(f.v - want) > 5e-5 || f.u !== "frac" || ![1, 2].includes(f.g)) wrong.push(`${c.ticker}: the fact ${f.v} is not x.vol.iv30Pct ${want}`); }
+      else {
+        present++;
+        if (!tenor || typeof tenor.lowSample !== "boolean") { wrong.push(`${c.ticker}: no 30-day cone tenor with a lowSample flag in card-x`); continue; }
+        const wantG = tenor.lowSample ? 1 : 2;
+        if (tenor.lowSample) thin++; else full++;
+        if (Math.abs(f.v - want) > 5e-5 || f.u !== "frac" || f.g !== wantG) wrong.push(`${c.ticker}: the fact ${f.v} grade ${f.g} is not x.vol.iv30Pct ${want} at grade ${wantG} (lowSample ${tenor.lowSample})`);
+      }
     }
-    assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
+    assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, graded 1 on a thin 30-day cone and 2 on a full one, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
     ok(present > 0, `the dry run reaches the percentile fact with a value (${present}) and without one (${absent})`);
+    ok(thin > 0 && full > 0, `and it reaches both grades: grade 1 on a thin cone (${thin}) and grade 2 on a full one (${full})`);
   }
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
   const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];
