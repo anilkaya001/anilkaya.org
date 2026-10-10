@@ -591,6 +591,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   }), { UW_NOW: "2026-09-29T19:00:00Z" });
   eq(gone.body.basis.status, "mismatch", "a print 2.6 times the chain's own price is beyond any rebase window and is refused, not chased");
   deep(gone.body.rows, [], "with no rows");
+  deep(gone.body.forwards, [], "and the same payload shape as a ranked chain: an empty list of forwards");
 }
 
 {
@@ -605,6 +606,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(r.res.status, 200, "a chain that contradicts its spot and cannot be rebased is still an answer");
   eq(r.body.basis.status, "mismatch", "with a status that says so");
   deep(r.body.rows, [], "and no rows: no Implied, Real-world or EV is shown on a basis that failed");
+  deep(r.body.forwards, [], "with the forwards field present and empty");
   eq(r.body.priced, 0, "nothing is priced");
   eq(r.body.gated.offMarket, 4, "every contract is accounted for under the gate that set it aside");
   eq(r.body.screened, 4, "out of the four the vendor sent");
@@ -681,6 +683,83 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(utc.body.asOf, "2026-12-18", "a tape at 00:30Z is dated by its New York day, not by its UTC one");
   const bare = await ctx(REGULAR, BARS, NOW);
   eq(bare.body.spotSource, "stock-state", "and a bare body still reads");
+}
+
+{
+  const S = 100, sigma = 0.30, r = PRICING_RATE, q = 0.03, readIso = "2026-09-29T15:00:00Z", readMs = Date.parse(readIso);
+  const addDays = (n) => new Date(Date.parse("2026-09-29T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+  const cardD1 = (facts) => ({
+    prepare(sql) {
+      const st = {
+        bind: (key) => ({
+          first: async () => (key === "card:XYZ"
+            ? { payload: JSON.stringify({ ticker: "XYZ", sessionDate: "2026-09-28", engine: { status: "ok", rate: { r }, facts, expiries: [] } }), updated_at: readMs, session: "2026-09-28", read_iso: "2026-09-28T21:00:00Z" }
+            : null),
+          all: async () => ({ results: [] }),
+          run: async () => ({ meta: {} }),
+        }),
+        first: async () => null, all: async () => ({ results: [] }), run: async () => ({ meta: {} }),
+      };
+      return st;
+    },
+    batch: async (list) => list.map(() => ({ results: [] })),
+  });
+  const carryFacts = [{ id: "carry.implied", v: q, u: "frac", g: 3 }];
+  const build = (days, { div = 0 } = {}) => {
+    const rows = [];
+    for (const d of days) {
+      const expiry = addDays(d), T = yearFraction(readMs, expiry);
+      const F = (S - div * Math.exp(-r * 8 / 365)) * Math.exp((r - q) * T);
+      for (const K of [85, 90, 95, 100, 105, 110, 115]) {
+        const type = K < S ? "P" : "C";
+        const px = black76(F, Math.exp(-r * T), K, sigma, T, type);
+        if (px < 0.15) continue;
+        rows.push({
+          option_symbol: `XYZ${expiry.slice(2).replace(/-/g, "")}${type}${String(K * 1000).padStart(8, "0")}`,
+          nbbo_bid: (px - 0.01).toFixed(6), nbbo_ask: (px + 0.01).toFixed(6), implied_volatility: String(sigma), open_interest: "900", volume: "50",
+        });
+      }
+    }
+    return rows;
+  };
+  const state = { data: { close: String(S), prev_close: "99.50", market_time: "regular", tape_time: "2026-09-29T14:58:00Z" } };
+  const bars = [{ date: "2026-09-28", market_time: "r", close: "99.50" }];
+  const asked = (chain) => route("/api/flows/chain?t=XYZ&refresh=1&limit=200", worldOf({ state, bars, chain }),
+    { UW_NOW: readIso, DB: cardD1(carryFacts) });
+  const at = (res, days, type, K) => res.body.rows.find((x) => x.expiry === addDays(days) && x.type === type && x.strike === K);
+
+  const near3 = await asked(build([7, 14, 30, 180, 360]));
+  eq(near3.res.status, 200, "THE CARRY IS READ BY THE ROUTE: a chain priced at a 3% carry is answered");
+  eq(near3.body.basis.status, "ok", "its nearest expiries are short enough that the print and the quotes agree");
+  const m = Object.fromEntries(near3.body.forwards.map((f) => [f.expiry, f.method]));
+  eq(m[addDays(180)], "carry", "and the 180-day expiry takes the card's carry for its forward");
+  eq(m[addDays(360)], "carry", "as does the 360-day");
+  near(at(near3, 180, "P", 90).ivMid, sigma, 1e-6, "SO THE 180-DAY 90 PUT READS 0.3000, not the 1.68 points high of the rate-only forward");
+  near(at(near3, 180, "C", 110).ivMid, sigma, 1e-6, "and the 110 call 0.3000, not 2.10 low");
+
+  const nocard = await route("/api/flows/chain?t=XYZ&refresh=1&limit=200", worldOf({ state, bars, chain: build([7, 14, 30, 180, 360]) }), { UW_NOW: readIso });
+  eq(nocard.body.forwards.find((f) => f.expiry === addDays(180)).method, "rate-only", "without a card the same chain keeps the rate alone");
+  near(at(nocard, 180, "P", 90).ivMid - sigma, 0.0168, 0.001, "and reads the 90 put 1.68 points high");
+
+  const lowGrade = await route("/api/flows/chain?t=XYZ&refresh=1&limit=200", worldOf({ state, bars, chain: build([7, 14, 30, 180, 360]) }),
+    { UW_NOW: readIso, DB: cardD1([{ id: "carry.implied", v: q, u: "frac", g: 1 }]) });
+  eq(lowGrade.body.forwards.find((f) => f.expiry === addDays(180)).method, "rate-only", "a carry the card grades below 2 is not used");
+
+  const rebased = await asked(build([14, 28, 45, 70], { div: 1.5 }));
+  eq(rebased.body.basis.status, "rebased", "A DIVIDEND INSIDE THE NEAREST EXPIRY MAKES THE CHAIN A REBASED ONE");
+  ok(rebased.body.forwards.length >= 4 && rebased.body.forwards.every((f) => f.method === "rate-only"), "and every expiry keeps the rate alone, whatever carry the card holds");
+
+  const prod = await asked(build([14, 45, 90, 180, 360]));
+  eq(prod.body.basis.status, "rebased", "A PRODUCTION-SHAPED CHAIN, out-of-the-money only at a 3% carry, is rebased: the fit absorbs part of the carry");
+  ok(prod.body.forwards.every((f) => f.method === "rate-only"), "and every expiry keeps the rate-only forward");
+  const resid = (days, type, K) => { const x = at(prod, days, type, K); return x ? (x.ivMid - sigma) * 100 : null; };
+  near(resid(180, "P", 90), 1.11, 0.1, "THE LIMIT IS ON RECORD: the rebased spot absorbs the carry over the fit horizon only, so at 180 days the 90 put still reads 1.1 points high");
+  near(resid(180, "C", 110), -1.37, 0.1, "and the 110 call 1.4 low");
+  near(resid(360, "P", 90), 2.07, 0.15, "at 360 days the 90 put is 2.1 points high");
+  near(resid(360, "C", 110), -2.83, 0.15, "and the 110 call 2.8 low");
+  near(resid(90, "P", 90), 0.34, 0.1, "at 90 days it is 0.3");
+  near(resid(45, "P", 95), -0.33, 0.1, "and inside the fit horizon the sign is the other way, 0.3 low at 45 days");
+  ok(Math.abs(resid(360, "P", 90)) > Math.abs(resid(180, "P", 90)) && Math.abs(resid(180, "P", 90)) > Math.abs(resid(90, "P", 90)), "the residual grows with the expiry");
 }
 
 console.log(`✓ flows-basis: ${checks} assertions — the vendor's real stock-state envelope, a spot that is only ever a regular-session price, ` +

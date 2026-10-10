@@ -6,7 +6,7 @@ import {
   sizeToBuyingPower, planBuyingPower,
   ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
   intrinsic, impossibleQuote, optionRoot, hasNoEarnings, PRICING_RATE, OFF_MARKET_TOLERANCE,
-  deskSmiles, deskCarry, forwardPlan, midImpliedVol, FORWARD_MIN_PAIRS, FORWARD_MAX_LOG_GAP,
+  deskSmiles, deskCarry, forwardPlan, forwardGapLimit, midImpliedVol, FORWARD_MIN_PAIRS, FORWARD_MAX_LOG_GAP, FORWARD_GAP_FLOOR,
 } from "../shared/flows-premium.js";
 import { ENGINE_LINES } from "../shared/flows-quant-engine.js";
 import { black76 } from "../shared/flows-quant-bs.js";
@@ -975,6 +975,50 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const gappy = rank(paired.map((x) => ({ ...x, nbbo_ask: String(Number(x.nbbo_bid) * 3) })), { carry: q });
   eq(gappy.forwards[0].method, "carry", "pairs whose spreads are wider than half their mid are not used");
+
+  const quoteAt = (type, K, F, half = 0.02, iv = sigma) => {
+    const mid = black76(F, D, K, iv, T, type);
+    return { option_symbol: sym(type, K), nbbo_bid: (mid - half).toFixed(9), nbbo_ask: (mid + half).toFixed(9), implied_volatility: String(iv), open_interest: "500", volume: "40" };
+  };
+  const rowsAt = (ks, F) => ks.flatMap((K) => [quoteAt("C", K, F), quoteAt("P", K, F)]);
+  const nearTen = [90, 92.5, 95, 97.5, 100, 102.5, 105, 107.5, 110, 112.5];
+  const farWings = [75, 77.5, 80, 82.5, 85, 87.5, 115, 117.5, 120, 122.5, 125];
+  const driftF = trueF * 1.03;
+  const crowded = rank([...rowsAt(nearTen, trueF), ...rowsAt(farWings, driftF)]);
+  eq(crowded.forwards[0].method, "parity", "a chain of twenty-one paired strikes places a parity forward");
+  eq(crowded.forwards[0].pairs, 10, "FROM THE TEN PAIRS NEAREST THE MONEY and no more");
+  near(row(crowded, "P", 95).ivMid, sigma, 1e-6, "so the wings priced off a forward 3% higher do not move it: the 95 put reads 0.3000");
+  near(row(crowded, "C", 105).ivMid, sigma, 1e-6, "nor the 105 call");
+
+  const tight = (type, K) => ({ option_symbol: sym(type, K), nbbo_bid: "0.035", nbbo_ask: "0.045", implied_volatility: "0.3", open_interest: "500", volume: "1" });
+  const cheap = rank([...rowsAt([90, 95, 105, 110], trueF), tight("C", 100), tight("P", 100)]);
+  eq(cheap.forwards[0].method, "parity", "a pair at the money whose legs both mid at four cents with a one-cent spread weighs 2,500 against the 156 of a good pair");
+  eq(cheap.forwards[0].pairs, 4, "AND IS NOT ONE OF THE PAIRS: the mid floor leaves it out");
+  near(row(cheap, "P", 95).ivMid, sigma, 1e-6, "so it cannot pull the forward: the 95 put reads 0.3000");
+
+  const shortExpiry = "2026-09-01", Ts = yearFraction(readMs, shortExpiry);
+  ok(Ts * 365 > 6 && Ts * 365 < 8, `the short expiry is a week out (${(Ts * 365).toFixed(2)} days)`);
+  const Ds = Math.exp(-r * Ts), restF = spot * Math.exp(r * Ts);
+  const symS = (type, K) => `XYZ${shortExpiry.slice(2).replace(/-/g, "")}${type}${String(Math.round(K * 1000)).padStart(8, "0")}`;
+  const quoteS = (type, K, F) => {
+    const mid = black76(F, Ds, K, sigma, Ts, type);
+    return { option_symbol: symS(type, K), nbbo_bid: (mid - 0.01).toFixed(9), nbbo_ask: (mid + 0.01).toFixed(9), implied_volatility: String(sigma), open_interest: "500", volume: "40" };
+  };
+  const weekRows = (F) => [97, 98, 99, 100, 101, 102, 103].flatMap((K) => [quoteS("C", K, F), quoteS("P", K, F)]);
+  const week = rank(weekRows(restF * Math.exp(-0.001)));
+  eq(week.forwards[0].method, "parity", "a week out, a parity forward a tenth of a percent from the rate forward is believed");
+  const stale = rank(weekRows(restF * 1.05));
+  eq(stale.forwards[0].method, "rate-only", "BUT ONE 5% FROM IT IS NOT: a week of carry cannot move a forward that far, so it is a stale or one-sided book");
+  eq(rank(weekRows(restF * 1.05), { carry: 0.03 }).forwards[0].method, "carry", "and the card's carry stands in for it");
+  eq(forwardGapLimit(7 / 365) < 0.035, true, "the gap allowed a week out is under 3.5%");
+  near(forwardGapLimit(2), FORWARD_MAX_LOG_GAP, 0, "and it never exceeds the cap");
+  ok(forwardGapLimit(0) === FORWARD_GAP_FLOOR, "with a floor at expiry");
+
+  eq(rank(otm, { carry: 0.2 }).forwards[0].method, "carry", "a 20% carry over 180 days is a 10% forward shift, inside the cap");
+  eq(rank(otm, { carry: 0.4 }).forwards[0].method, "rate-only", "A 40% CARRY IS NOT BELIEVED: 20% over 180 days is past the cap");
+  eq(rank(otm, { carry: -0.4 }).forwards[0].method, "rate-only", "nor is a negative one of that size");
+  eq(rank(otm, { carry: 3 }).forwards[0].method, "rate-only", "nor 300%");
+  near(row(rank(otm, { carry: 3 }), "P", 90).ivMid, row(bare, "P", 90).ivMid, 1e-12, "and the line reads as it did on the rate alone");
 
   const plan = forwardPlan([], { spot, readMs });
   deep(plan("2027-02-21"), { F: null, method: "rate-only", pairs: 0 }, "an empty chain has no forward and says so");

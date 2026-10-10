@@ -207,6 +207,12 @@ export const FORWARD_MAX_PAIRS = 10;
 export const FORWARD_MIN_MID = 0.05;
 export const FORWARD_MAX_REL_SPREAD = 0.5;
 export const FORWARD_MAX_LOG_GAP = 0.15;
+export const FORWARD_GAP_FLOOR = 0.02;
+export const FORWARD_GAP_PER_YEAR = 0.5;
+
+export function forwardGapLimit(years) {
+  return Math.min(FORWARD_MAX_LOG_GAP, FORWARD_GAP_FLOOR + FORWARD_GAP_PER_YEAR * Math.max(0, years));
+}
 
 export function deskCarry(facts, status) {
   if (status !== "ok" || !Array.isArray(facts)) return null;
@@ -250,9 +256,10 @@ export function forwardPlan(standing, { spot, readMs = null, rate = PRICING_RATE
       const f = pairs.length >= FORWARD_MIN_PAIRS
         ? parityForward({ S: spot, T: years, chain: pairs, D: Math.exp(-rate * years) })
         : null;
-      if (f && Number.isFinite(f.F) && f.F > 0 && Math.abs(Math.log(f.F / base)) <= FORWARD_MAX_LOG_GAP) {
+      const limit = forwardGapLimit(years);
+      if (f && Number.isFinite(f.F) && f.F > 0 && Math.abs(Math.log(f.F / base)) <= limit) {
         out = { F: f.F, method: "parity", pairs: f.pairs };
-      } else if (q !== null) {
+      } else if (q !== null && Math.abs(q * years) <= limit) {
         out = { F: spot * Math.exp((rate - q) * years), method: "carry", pairs: 0 };
       }
     }

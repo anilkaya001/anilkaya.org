@@ -2309,6 +2309,7 @@ function offMarketChain(list, ivBasis, rankBy) {
     ivBasis,
     rankedBy: rankBy,
     gates: DEFAULT_GATES,
+    forwards: [],
     ivSurface: {
       ...ivSurface([], { ivBasis }),
       reason: "the chain and the underlying's price do not belong to the same moment, so no smile is drawn",

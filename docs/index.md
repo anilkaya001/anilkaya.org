@@ -16,12 +16,12 @@ in `tests/suites.json` name it, from `tests/suites.json`'s own fields; `**` cove
 - [site](#site): The landing page, articles and site-wide assets (36 files)
 - [lab](#lab): The Econometrics Lab: courses, review, placement, projects and their storage (133 files)
 - [worker](#worker): The Worker, its configuration, schema and migrations (22 files)
-- [flows-server](#flows-server): Flows logic shared by the Worker, the pipeline and the browser bundles (73 files)
+- [flows-server](#flows-server): Flows logic shared by the Worker, the pipeline and the browser bundles (74 files)
 - [flows-rail](#flows-rail): The real-time rail (4 files)
 - [flows-pipeline](#flows-pipeline): The nightly pipeline, the live leg and their tools (29 files)
 - [flows-client](#flows-client): Flows pages, scripts and styles (30 files)
 - [tooling](#tooling): Generators and authoring tools (16 files)
-- [tests](#tests): Suites, helpers and fixtures (112 files)
+- [tests](#tests): Suites, helpers and fixtures (111 files)
 - [ci](#ci): GitHub Actions workflows (5 files)
 - [config](#config): Repository configuration (3 files)
 - [docs](#docs): Documents and the generated index (7 files)
@@ -611,7 +611,7 @@ The live credential: the GitHub OIDC claim policy (this repository by id, `flows
 
 ### `shared/flows-basis.js`, `tests/flows-basis-contract.mjs`
 
-The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid. The desk's mid implied volatility inverts against a per-expiry forward (`forwardPlan` in `shared/flows-premium.js`): the chain's own put-call parity over up to ten near-the-money two-sided pairs when there are three or more, else the card's implied carry (`deskCarry`: grade 2 or better, and only when `coherence` returned `ok`), else the rate alone; a rebased chain takes no carry because its spot has already absorbed it. `rankChain` returns the choice per expiry as `forwards`.
+The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid.
 
 | File | Exports | Suites |
 |---|---|---|
@@ -626,6 +626,15 @@ The pure leaf every vendor client reads: `vendorBaseInfo` and `vendorBase` accep
 |---|---|---|
 | `shared/flows-vendor-core.js` | `shared/flows-vendor-core.js#VENDOR_BASE_DEFAULT`, `shared/flows-vendor-core.js#VENDOR_ENVELOPE`, `shared/flows-vendor-core.js#classifyStatus`, `shared/flows-vendor-core.js#retryAfterMs`, `shared/flows-vendor-core.js#unwrap`, `shared/flows-vendor-core.js#vendorBase`, `shared/flows-vendor-core.js#vendorBaseInfo`, `shared/flows-vendor-core.js#vendorRedirected`, `shared/flows-vendor-core.js#vendorUrl` | academy, architecture, flows-ask, flows-basis, flows-dossier, flows-dossier-reads and 4 more |
 | `tests/flows-rt-contract.mjs` |  | flows-rt |
+
+### `shared/flows-premium.js`, `tests/flows-premium-contract.mjs`
+
+The premium desk's ranking: gates, annualization, the strike divisor and `rankChain`. Its mid implied volatility inverts against a per-expiry forward (`forwardPlan`): the chain's own put-call parity over up to ten near-the-money two-sided pairs (mid of at least 0.05, spread under half the mid) when there are three or more, else the card's implied carry (`deskCarry`: grade 2 or better, and only when `coherence` returned `ok`), else the rate alone. A parity forward or a carry whose log gap from the rate forward exceeds `forwardGapLimit(years)` (2% plus 0.5 a year, capped at 15%) is not believed. A rebased chain takes no carry because its fitted spot has already absorbed the carry over the fit horizon, the nearest expiries, only: later expiries of a rebased chain keep the rate-only forward unless parity places them, so their mid IV stays biased (about 1.1 vol points at 180 days and 2.1 at 360 days at a 3% carry on an out-of-the-money-only chain), a limit pinned in `tests/flows-basis-contract.mjs`. `rankChain` returns the choice per expiry as `forwards` (an empty list on a `mismatch` payload).
+
+| File | Exports | Suites |
+|---|---|---|
+| `shared/flows-premium.js` | `shared/flows-premium.js#ATM_BAND_LOG`, `shared/flows-premium.js#DAYS_PER_YEAR`, `shared/flows-premium.js#DEFAULT_GATES`, `shared/flows-premium.js#FORWARD_GAP_FLOOR`, `shared/flows-premium.js#FORWARD_GAP_PER_YEAR`, `shared/flows-premium.js#FORWARD_MAX_LOG_GAP`, `shared/flows-premium.js#FORWARD_MAX_PAIRS`, `shared/flows-premium.js#FORWARD_MAX_REL_SPREAD`, `shared/flows-premium.js#FORWARD_MIN_MID`, `shared/flows-premium.js#FORWARD_MIN_PAIRS`, `shared/flows-premium.js#IV_EVIDENCE_MIN`, `shared/flows-premium.js#IV_PERCENT_CEILING`, `shared/flows-premium.js#IV_PERCENT_RATIO`, `shared/flows-premium.js#IV_PERCENT_THRESHOLD`, `shared/flows-premium.js#OFF_MARKET_TOLERANCE`, `shared/flows-premium.js#PRICING_RATE`, `shared/flows-premium.js#RANK_KEYS`, `shared/flows-premium.js#SHARES_PER_CONTRACT`, `shared/flows-premium.js#SKEW_CAP_FLOOR`, `shared/flows-premium.js#SKEW_CAP_QUANTILE`, `shared/flows-premium.js#SURFACE_MAX_EXPIRIES`, `shared/flows-premium.js#SURFACE_MAX_ROWS`, `shared/flows-premium.js#SURFACE_ROW_STEPS`, `shared/flows-premium.js#attachMidIv`, `shared/flows-premium.js#attachOpposite`, `shared/flows-premium.js#crossesEarnings`, `shared/flows-premium.js#daysToExpiry`, `shared/flows-premium.js#deskCarry`, `shared/flows-premium.js#deskSmiles`, `shared/flows-premium.js#forwardGapLimit`, `shared/flows-premium.js#forwardPlan`, `shared/flows-premium.js#hasNoEarnings`, `shared/flows-premium.js#impossibleQuote`, `shared/flows-premium.js#intrinsic`, `shared/flows-premium.js#ivConvention`, `shared/flows-premium.js#ivSurface`, `shared/flows-premium.js#midImpliedVol`, `shared/flows-premium.js#numOrNull`, `shared/flows-premium.js#optionRoot`, `shared/flows-premium.js#parseOptionSymbol`, `shared/flows-premium.js#planBuyingPower`, `shared/flows-premium.js#priceSale`, `shared/flows-premium.js#rankChain`, `shared/flows-premium.js#sigmaMove`, `shared/flows-premium.js#sizeToBuyingPower` | academy, contracts, flows, flows-alerts, flows-ask, flows-basis and 40 more |
+| `tests/flows-premium-contract.mjs` |  | flows |
 
 ### `shared/flows-focus.js`
 
@@ -900,14 +909,6 @@ Positioning from side volumes and open interest, with tenor buckets and flow cod
 | File | Exports | Suites |
 |---|---|---|
 | `shared/flows-positioning.js` | `shared/flows-positioning.js#FLOW_CODES`, `shared/flows-positioning.js#POSITIONING_LINES`, `shared/flows-positioning.js#POSITIONING_VERSION`, `shared/flows-positioning.js#TENOR_BUCKETS`, `shared/flows-positioning.js#UNITS`, `shared/flows-positioning.js#alertsTape`, `shared/flows-positioning.js#bookLevels`, `shared/flows-positioning.js#darkpoolLevels`, `shared/flows-positioning.js#dayOf`, `shared/flows-positioning.js#daysBetween`, `shared/flows-positioning.js#dollarGammaPer1pct`, `shared/flows-positioning.js#etDay`, `shared/flows-positioning.js#failedRead`, `shared/flows-positioning.js#flowExpiry`, `shared/flows-positioning.js#flowStrike`, `shared/flows-positioning.js#freshStamp`, `shared/flows-positioning.js#gexHistory`, `shared/flows-positioning.js#gexLevels`, `shared/flows-positioning.js#gexPath`, `shared/flows-positioning.js#inSession`, `shared/flows-positioning.js#isDay`, `shared/flows-positioning.js#lifeline`, `shared/flows-positioning.js#minuteOf`, `shared/flows-positioning.js#multiLeg`, `shared/flows-positioning.js#nopeSection`, `shared/flows-positioning.js#nyOffsetMinutes`, `shared/flows-positioning.js#offPricePrint`, `shared/flows-positioning.js#oiWalls`, `shared/flows-positioning.js#olsSlope`, `shared/flows-positioning.js#ownHistory`, `shared/flows-positioning.js#packSeries`, `shared/flows-positioning.js#pickLifelineContracts`, `shared/flows-positioning.js#readCode`, `shared/flows-positioning.js#readExpiryBreakdown`, `shared/flows-positioning.js#rowsOf`, `shared/flows-positioning.js#sessionCandle`, `shared/flows-positioning.js#sessionPrintParams`, `shared/flows-positioning.js#sessionPrints`, `shared/flows-positioning.js#sessionWindow`, `shared/flows-positioning.js#signFlips`, `shared/flows-positioning.js#signRun`, `shared/flows-positioning.js#silence`, `shared/flows-positioning.js#toMs`, `shared/flows-positioning.js#unpackSeries`, `shared/flows-positioning.js#vnum`, `shared/flows-positioning.js#volumeHistory` | flows, flows-basis, flows-dossier-reads, flows-events, flows-garch, flows-ledger and 9 more |
-
-### `shared/flows-premium.js`
-
-Option symbol parsing, pricing rate and quote sanity checks for the premium desk.
-
-| File | Exports | Suites |
-|---|---|---|
-| `shared/flows-premium.js` | `shared/flows-premium.js#ATM_BAND_LOG`, `shared/flows-premium.js#DAYS_PER_YEAR`, `shared/flows-premium.js#DEFAULT_GATES`, `shared/flows-premium.js#FORWARD_MAX_LOG_GAP`, `shared/flows-premium.js#FORWARD_MAX_PAIRS`, `shared/flows-premium.js#FORWARD_MAX_REL_SPREAD`, `shared/flows-premium.js#FORWARD_MIN_MID`, `shared/flows-premium.js#FORWARD_MIN_PAIRS`, `shared/flows-premium.js#IV_EVIDENCE_MIN`, `shared/flows-premium.js#IV_PERCENT_CEILING`, `shared/flows-premium.js#IV_PERCENT_RATIO`, `shared/flows-premium.js#IV_PERCENT_THRESHOLD`, `shared/flows-premium.js#OFF_MARKET_TOLERANCE`, `shared/flows-premium.js#PRICING_RATE`, `shared/flows-premium.js#RANK_KEYS`, `shared/flows-premium.js#SHARES_PER_CONTRACT`, `shared/flows-premium.js#SKEW_CAP_FLOOR`, `shared/flows-premium.js#SKEW_CAP_QUANTILE`, `shared/flows-premium.js#SURFACE_MAX_EXPIRIES`, `shared/flows-premium.js#SURFACE_MAX_ROWS`, `shared/flows-premium.js#SURFACE_ROW_STEPS`, `shared/flows-premium.js#attachMidIv`, `shared/flows-premium.js#attachOpposite`, `shared/flows-premium.js#crossesEarnings`, `shared/flows-premium.js#daysToExpiry`, `shared/flows-premium.js#deskCarry`, `shared/flows-premium.js#deskSmiles`, `shared/flows-premium.js#forwardPlan`, `shared/flows-premium.js#hasNoEarnings`, `shared/flows-premium.js#impossibleQuote`, `shared/flows-premium.js#intrinsic`, `shared/flows-premium.js#ivConvention`, `shared/flows-premium.js#ivSurface`, `shared/flows-premium.js#midImpliedVol`, `shared/flows-premium.js#numOrNull`, `shared/flows-premium.js#optionRoot`, `shared/flows-premium.js#parseOptionSymbol`, `shared/flows-premium.js#planBuyingPower`, `shared/flows-premium.js#priceSale`, `shared/flows-premium.js#rankChain`, `shared/flows-premium.js#sigmaMove`, `shared/flows-premium.js#sizeToBuyingPower` | academy, contracts, flows, flows-alerts, flows-ask, flows-basis and 40 more |
 
 ### `shared/flows-pulse.js`
 
@@ -1563,7 +1564,6 @@ A test suite, registered in `tests/suites.json` with its class, group, files and
 | `tests/flows-political-contract.mjs` |  | flows-political |
 | `tests/flows-political-render.mjs` |  | flows-political-render |
 | `tests/flows-positioning-contract.mjs` |  | flows-positioning |
-| `tests/flows-premium-contract.mjs` |  | flows |
 | `tests/flows-probe-contract.mjs` |  | flows-probe |
 | `tests/flows-pulse-contract.mjs` |  | flows-pulse |
 | `tests/flows-quant-card.mjs` |  | flows-quant-card |
