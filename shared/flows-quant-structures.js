@@ -1,4 +1,4 @@
-import { normCdf, bsmGreeks } from "./flows-quant-bs.js";
+import { normCdf } from "./flows-quant-bs.js";
 import { sliceVol, sliceDeltaStrike, sliceDnsStrike, asSlice } from "./flows-quant-smile.js";
 import { riskNeutralQuantile, impliedMove, ONE_SIGMA_LOW, ONE_SIGMA_HIGH } from "./flows-quant-density.js";
 
@@ -510,31 +510,4 @@ export function wallsFromBook(input) {
     if (Math.abs(cg + pg) > mBest) { mBest = Math.abs(cg + pg); magnet = r.strike; }
   }
   return { callWall, putWall, magnet, gex: rows.reduce((s, r) => s + (fin(r.callGammaOi) ? r.callGammaOi : 0) + (fin(r.putGammaOi) ? r.putGammaOi : 0), 0) };
-}
-
-export function gammaProfile(input) {
-  const { spot, contracts } = input;
-  const points = input.points || 121, span = input.span || 0.15;
-  const r = fin(input.r) ? input.r : 0, q = fin(input.q) ? input.q : 0;
-  const grid = [], gex = [];
-  for (let i = 0; i < points; i++) {
-    const x = spot * (1 - span + 2 * span * i / (points - 1));
-    let g = 0;
-    for (const c of contracts) {
-      const gr = bsmGreeks({ S: x, K: c.K, r, q, sigma: c.sigma, T: c.T, type: c.type });
-      if (!gr) continue;
-      const sgn = c.type === "C" ? 1 : -1;
-      g += sgn * c.oi * 100 * gr.gamma * x * x * 0.01;
-    }
-    grid.push(x); gex.push(g);
-  }
-  const flips = [];
-  for (let i = 1; i < points; i++) {
-    if ((gex[i - 1] < 0) !== (gex[i] < 0)) {
-      const t = gex[i - 1] / (gex[i - 1] - gex[i]);
-      flips.push(grid[i - 1] + t * (grid[i] - grid[i - 1]));
-    }
-  }
-  flips.sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot) || a - b);
-  return { grid, gex, flip: flips.length ? flips[0] : null, flips };
 }
