@@ -278,9 +278,12 @@ const FACT_INPUT = () => ({
   ok(by["vrp.trailing.21"].g === 1 && by["vrp.trailing.21"].why === "vrp.trailing-rv",
      "the VRP against trailing realised is published graded weak and says so (defect 7)");
   const cm30 = QC.constantMaturity(slices.built, 30);
-  const ivEx = Math.sqrt((cm30.w - 0.05 * 0.05) / (30 / 365));
+  const exW = (e) => SMILE.sliceTotalVariance(e.slice, 0) - (e.expiry >= "2026-10-20" ? 0.05 * 0.05 : 0);
+  const lo30 = { d: cm30.lo.T * 365, w: exW(cm30.lo) }, hi30 = { d: cm30.hi.T * 365, w: exW(cm30.hi) };
+  ok(cm30.lo.expiry < "2026-10-20" && cm30.hi.expiry >= "2026-10-20", "the fixture's thirty-day point sits between a slice before the event and one after it");
+  const ivEx = Math.sqrt((lo30.w + (30 - lo30.d) / (hi30.d - lo30.d) * (hi30.w - lo30.w)) / (30 / 365));
   near(by["vrp.rel.21"].v, (ivEx - 0.24) / 0.24, 1e-3,
-    "while vrp.rel.21 is implied against the GARCH forward, ex-event on the implied side when earnings fall inside thirty days (D4)");
+    "while vrp.rel.21 is implied against the GARCH forward, ex-event on the implied side: the jump comes out of each slice that holds it, then the thirty-day point is interpolated (D4, W06-P10)");
   near(by["vrp.var.21"].v, ivEx * ivEx - 0.24 * 0.24, 1e-4, "and in variance terms");
   ok(by["level.putWall"].v <= SPOT && by["level.callWall"].v >= SPOT, "walls in the facts are the book's");
   eq(by["level.strikeSumCrossing"].v, 101.5, "and the strike-sum crossing rides under its own id beside level.flip");
@@ -318,6 +321,43 @@ const FACT_INPUT = () => ({
   const dg = Object.fromEntries(degenerate.map((f) => [f.id, f]));
   ok(dg["garch.avg.21"].g === 2 && dg["garch.avg.21"].why === "garch.alpha-degenerate" && dg["vrp.rel.21"].g <= 2,
      "a degenerate GARCH grades its forecast and every VRP built on it at most 2, naming the reason (defect 6)");
+}
+
+{
+  const SD = 0.3, J = 0.06, AVG = GARCH.avg21Vol / 100;
+  const dayAt = (d) => new Date(Date.parse(SESSION + "T00:00:00Z") + d * 86400000).toISOString().slice(0, 10);
+  const slice = (d, ev) => {
+    const T = d / 365, w = SD * SD * T + (ev <= d ? J * J : 0);
+    return { expiry: dayAt(d), T, dte: d, rows: [], slice: { method: "flat", T, F: 100, D: 1, params: { sigma: Math.sqrt(w / T) } } };
+  };
+  const CASES = [
+    ["A, interior, the event between the slices and before thirty days", [21, 49], 25, 24.55],
+    ["B, interior, the event between the slices and after thirty days", [21, 49], 35, 32.26],
+    ["C, one 21-day slice that holds the event", [21], 10, 32.98],
+    ["C, one 21-day slice, the event after it and inside thirty days", [21], 25, 21.49],
+    ["C, one 40-day slice that holds the event", [40], 10, 28.12],
+    ["C, one 40-day slice, the event after thirty days and inside it", [40], 35, 35.05],
+  ];
+  for (const [label, days, ev, oldReading] of CASES) {
+    const built = days.map((d) => slice(d, ev));
+    const event = { date: dayAt(ev), confirmed: true, moves: [0.05, -0.04, 0.06, -0.03, 0.07, -0.05] };
+    const cm = QC.constantMaturity(built, 30, { date: event.date, J2: J * J });
+    near(cm.vol * 100, 30, 0.01, `W06-P10 case ${label}: the thirty-day ex-event vol is the diffusion's 30.00% (the old removal read ${oldReading}%)`);
+    const by = Object.fromEntries(QC.engineFacts({ ...FACT_INPUT(), built, zero: null, event, jump: { J, meanAbs: J * Math.sqrt(2 / Math.PI), why: null } })
+      .map((f) => [f.id, f]));
+    near((by["vrp.vol.21"].v + AVG) * 100, 30, 0.01, `and vrp.vol.21 is read against that 30.00% in case ${label}`);
+    near(Math.sqrt(by["vrp.var.21"].v + AVG * AVG) * 100, 30, 0.01, `as is vrp.var.21 in case ${label}`);
+    ok(by["vrp.vol.21"].why === undefined, `with no vrp.event-inside code once the jump is removed in case ${label}`);
+    if (days.length === 2) {
+      near(by["term.slope.30_90.exEvent"].v, 0, 1e-4, `and the ex-event term slope of a flat diffusion is flat in case ${label} (${by["term.slope.30_90.exEvent"].v})`);
+    }
+  }
+  const built = [slice(21, 35), slice(49, 35)];
+  const raw = QC.constantMaturity(built, 30), none = QC.constantMaturity(built, 30, null);
+  eq([none.vol, none.w], [raw.vol, raw.w], "with no event to remove the constant maturity is the market's own, event included");
+  ok(raw.vol > 0.3 + 1e-3, `and iv.cm.30 still carries the share of the jump the interpolation holds (${raw.vol})`);
+  const far = QC.constantMaturity([slice(21, 200), slice(49, 200)], 30, { date: dayAt(200), J2: J * J });
+  near(far.vol * 100, 30, 1e-9, "an event after every slice the point reads removes nothing");
 }
 
 {

@@ -220,9 +220,11 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
 
 const atmVolOf = (ex) => sliceVolK(ex.slice, 0);
 
-export function constantMaturity(built, days) {
+export function constantMaturity(built, days, exEvent = null) {
+  const j2 = exEvent && typeof exEvent.date === "string" && fin(exEvent.J2) && exEvent.J2 > 0 ? exEvent.J2 : 0;
   const pts = built.map((e) => ({ days: e.T * 365, w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0);
   if (!pts.length) return null;
+  if (j2) for (const p of pts) if (p.e.expiry >= exEvent.date) p.w -= j2;
   pts.sort((a, b) => a.days - b.days);
   let lo = null, hi = null;
   for (const p of pts) { if (p.days <= days) lo = p; if (p.days >= days && !hi) hi = p; }
@@ -234,7 +236,7 @@ export function constantMaturity(built, days) {
   const only = lo || hi;
   if (!only) return null;
   if (Math.abs(only.days - days) > Math.max(5, days * 0.5)) return null;
-  return { vol: Math.sqrt(only.w / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
+  return { vol: Math.sqrt(Math.max(only.w, 0) / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
 }
 
 function fitGradeOf(slice) {
@@ -370,14 +372,13 @@ export function engineFacts(input) {
   add("term.front.7_30", iv7 !== null && iv30 !== null && iv30 > 0 ? dp(iv7 / iv30 - 1, 4) : null, "frac", Math.min(gOf("iv.cm.7"), gOf("iv.cm.30")));
   let slopeEx = slope, exWhy = null;
   const evDays = event && event.date && input.asOfDay ? calendarDays(input.asOfDay, event.date) : null;
-  if (slope !== null && evDays !== null && evDays > 0 && evDays <= 90) {
-    if (jump && fin(jump.J)) {
-      const exOf = (d) => (cm[d] ? Math.sqrt(Math.max(0, cm[d].w - (evDays <= d ? jump.J * jump.J : 0)) / (d / 365)) : null);
-      const e30 = exOf(30), e90 = exOf(90);
-      slopeEx = e30 !== null && e90 !== null && e90 > 0 ? e30 / e90 - 1 : null;
-    } else {
-      exWhy = "event.unremoved";
-    }
+  const exEvent = evDays !== null && evDays > 0 && jump && fin(jump.J) ? { date: event.date, J2: jump.J * jump.J } : null;
+  const exOf = (d) => { const c = constantMaturity(built, d, exEvent); return c ? c.vol : null; };
+  if (slope !== null && exEvent) {
+    const e30 = exOf(30), e90 = exOf(90);
+    slopeEx = e30 !== null && e90 !== null && e90 > 0 ? e30 / e90 - 1 : null;
+  } else if (slope !== null && evDays !== null && evDays > 0 && evDays <= 90) {
+    exWhy = "event.unremoved";
   }
   add("term.slope.30_90.exEvent", slopeEx === null ? null : dp(slopeEx, 4), "frac",
     Math.min(gOf("term.slope.30_90"), exWhy ? 1 : 3), exWhy ? { why: exWhy } : {});
@@ -403,10 +404,8 @@ export function engineFacts(input) {
   add("garch.halfLife", hl === null ? null : dp(hl, 2), "sessions", gGrade, gWhy ? { why: gWhy } : {});
   add("garch.grade", gg ? gGrade : null, "count", gg ? 3 : 0, gWhy ? { why: gWhy } : {});
   let ivEx = iv30, vrpWhy = null;
-  if (iv30 !== null && evDays !== null && evDays > 0 && evDays <= 30) {
-    if (jump && fin(jump.J)) ivEx = Math.sqrt(Math.max(0, cm[30].w - jump.J * jump.J) / (30 / 365));
-    else vrpWhy = "vrp.event-inside";
-  }
+  if (iv30 !== null && exEvent) ivEx = exOf(30);
+  else if (iv30 !== null && evDays !== null && evDays > 0 && evDays <= 30) vrpWhy = "vrp.event-inside";
   const vrpG = Math.min(gOf("iv.cm.30"), gGrade, vrpWhy ? 1 : 3);
   const vVol = ivEx !== null && avg !== null ? ivEx - avg : null;
   add("vrp.var.21", ivEx !== null && avg !== null ? dp(ivEx * ivEx - avg * avg, 5) : null, "var", vrpG, vrpWhy ? { why: vrpWhy } : gWhy ? { why: gWhy } : {});
