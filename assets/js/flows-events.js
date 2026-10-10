@@ -497,7 +497,7 @@
         title: String(x[0]) + " " + MID + " moved " + F.pct(real, 1, true) + " against an implied " + move(n(x[2])) + " " + MID + " " + ratio.toFixed(2) + "× the priced move" },
       h("span", { class: "fu-tk is-2" }, h("b", null, String(x[0])), h("small", { "data-tone": real === null ? null : real > 0 ? "up" : real < 0 ? "down" : null }, real === null ? DASH : F.pct(real, 1, true))),
       h("span", { class: "fe-dv", ...HIDE },
-        h("i", { class: dev >= 0 ? "is-more" : "is-less", style: dev >= 0 ? { left: "50%", width: w, "--i": String(i) } : { right: "50%", width: w, "--i": String(i) } })),
+        h("i", { class: dev > 0 ? "is-more" : dev < 0 ? "is-less" : "is-flat", style: dev >= 0 ? { left: "50%", width: w, "--i": String(i) } : { right: "50%", width: w, "--i": String(i) } })),
       h("span", { class: "fu-v fu-strong" }, ratio.toFixed(2) + "×"));
     });
     host.react.replaceChildren(

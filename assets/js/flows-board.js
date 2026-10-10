@@ -301,7 +301,7 @@
       const hg = Math.max(1.5, (Math.min(100, Math.abs(v)) / 100) * (mid - 1));
       s("rect", {
         x: x.toFixed(2), y: (v > 0 ? mid - hg : mid).toFixed(2), width: bw, height: hg.toFixed(2), rx: 1.5,
-        class: (v > 0 ? "up" : "down") + (i === n - 1 ? " last" : ""), style: `--i:${i}`,
+        class: (v > 0 ? "up" : v < 0 ? "down" : "zero") + (i === n - 1 ? " last" : ""), style: `--i:${i}`,
       }, svg);
     });
     return svg;

@@ -376,7 +376,7 @@
         if (adj) track.append(h("i", { class: "rf-wh", style: { left: at(adj[0]), right: "calc(100% - " + at(adj[1]) + ")" } }));
         else if (sd !== null) track.append(h("i", { class: "rf-wh is-open" }));
         if (naive) track.append(h("i", { class: "rf-ci", style: { left: at(naive[0]), right: "calc(100% - " + at(naive[1]) + ")" } }));
-        track.append(h("i", { class: "rf-dot" + (ranked ? " is-ranked" : ""), "data-tone": clear ? (mean < 0 ? "down" : "up") : null, style: { left: at(mean), "--i": String(i) } }));
+        track.append(h("i", { class: "rf-dot" + (ranked ? " is-ranked" : ""), "data-tone": clear ? (mean > 0 ? "up" : mean < 0 ? "down" : null) : null, style: { left: at(mean), "--i": String(i) } }));
       }
       const build = () => ({
         title: LABELS[key] || key,
@@ -455,9 +455,8 @@
         const x = xAt(i);
         if (r.ls === null) { s("circle", { cx: x, cy: mid, r: 1.8, class: "rt-gap" }, svg); }
         else {
-          const hh = Math.max(1.5, Math.abs(r.ls) / max * half);
-          const pos = r.ls >= 0;
-          s("rect", { x: x - bw / 2, y: pos ? mid - hh : mid, width: bw, height: hh, rx: Math.min(3, bw / 2), class: "grow rt-bar " + (pos ? "is-pos" : "is-neg") + (sel !== null && sel !== i ? " is-dim" : ""), style: { "--i": String(i * 2), "--origin": pos ? "bottom" : "top" } }, svg);
+          const hh = r.ls === 0 ? 1 : Math.max(1.5, Math.abs(r.ls) / max * half);
+          s("rect", { x: x - bw / 2, y: r.ls > 0 ? mid - hh : r.ls < 0 ? mid : mid - hh / 2, width: bw, height: hh, rx: Math.min(3, bw / 2), class: "grow rt-bar " + (r.ls > 0 ? "is-pos" : r.ls < 0 ? "is-neg" : "is-flat") + (sel !== null && sel !== i ? " is-dim" : ""), style: { "--i": String(i * 2), "--origin": r.ls > 0 ? "bottom" : r.ls < 0 ? "top" : "center" } }, svg);
         }
         const hy = H - bot + 12;
         if (r.hit !== null) s("circle", { cx: x, cy: hy, r: 2 + 3 * Math.abs(r.hit - 0.5) * 2, class: "rt-hit " + (r.hit > 0.5 ? "is-pos" : r.hit < 0.5 ? "is-neg" : "is-flat") + " fade", style: { "--delay": 300 + i * 20 + "ms" } }, svg);
@@ -476,7 +475,7 @@
           cur = i;
           const r = rows[i];
           return {
-            parts: [C.part(F.day(r.d), "k"), h("b", { "data-tone": r.ls === null ? null : r.ls < 0 ? "down" : "up" }, pct(r.ls)), C.part("hit " + hitPct(r.hit), "k"), r.pre ? C.part("prior rule", "k") : null, attrition(r) ? C.part("lost " + r.lost + "/" + r.names, "k") : null],
+            parts: [C.part(F.day(r.d), "k"), h("b", { "data-tone": r.ls === null ? null : r.ls > 0 ? "up" : r.ls < 0 ? "down" : "flat" }, pct(r.ls)), C.part("hit " + hitPct(r.hit), "k"), r.pre ? C.part("prior rule", "k") : null, attrition(r) ? C.part("lost " + r.lost + "/" + r.names, "k") : null],
             dots: [],
           };
         },

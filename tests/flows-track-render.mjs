@@ -558,6 +558,266 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.close();
 }
 
+{
+  const page = await open();
+  await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const C = window.FlowsUI.chart;
+    const days = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"];
+    const vals = [3, 5, 4, 6, 2, 7, 1, 9];
+    window.__opts = (n, extra) => Object.assign({ x: days.slice(0, n), series: [{ values: vals.slice(0, n) }], yFormat: (v) => "v" + v, label: "Live line",
+      readout: (i, d) => [C.part(d, "k"), C.part("v" + vals[i], "k")] }, extra || null);
+    const host = document.createElement("div");
+    host.style.cssText = "width:640px;margin:40px 0 0 40px";
+    document.body.prepend(host);
+    window.__host = host;
+    window.__starts = 0;
+    host.addEventListener("animationstart", () => { window.__starts++; });
+    host.addEventListener("transitionrun", () => { window.__starts++; });
+    window.__chart = C.line(host, window.__opts(5));
+    await frame();
+    await frame();
+  });
+  const first = await page.evaluate(() => {
+    const svg = window.__host.querySelector(":scope > svg");
+    const out = { noAnim: svg.classList.contains("no-anim"), anims: window.__host.getAnimations({ subtree: true }).length };
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    window.__svg = svg;
+    const b = svg.getBoundingClientRect();
+    const w = svg.viewBox.baseVal.width, x2 = 2 + (w - 62 - 2) * 2 / 4;
+    return { ...out, x: b.left + x2 * (b.width / w), y: b.top + b.height / 2 };
+  });
+  ok(!first.noAnim && first.anims > 0, `IN PLACE: a live line's first paint still animates (${first.anims} animations, no no-anim flag)`);
+  await page.mouse.move(first.x, first.y);
+  await page.waitForFunction(() => window.__host.querySelector(".ui-readout.is-on"));
+  const hovered = await page.evaluate(() => ({ at: window.__host._scrubAt, text: window.__host.querySelector(".ui-readout").textContent }));
+  ok(hovered.text.includes("2026-09-03") && hovered.text.includes("v4"), `the reader's pointer rests on the third reading and its readout shows it (${hovered.text})`);
+  await page.evaluate(() => window.__host.focus());
+  const updates = [];
+  for (const n of [6, 7, 8]) {
+    updates.push(await page.evaluate(async (n) => {
+      const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+      const host = window.__host;
+      window.__starts = 0;
+      let threw = null;
+      try { window.__chart.set(window.__opts(n)); } catch (e) { threw = String(e && e.message || e); }
+      const sync = host.getAnimations({ subtree: true }).length;
+      await frame();
+      await frame();
+      const svg = host.querySelector(":scope > svg") || document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      const xh = svg.querySelector("line.xh");
+      const ro = host.querySelector(".ui-readout");
+      const tags = [...svg.querySelectorAll("text.tx-1.tx-b")].map((t) => t.textContent);
+      const ring = [...svg.querySelectorAll(":scope > circle.ring")].pop();
+      return {
+        same: svg === window.__svg, svgs: host.querySelectorAll("svg").length, noAnim: svg.classList.contains("no-anim"),
+        sync, anims: host.getAnimations({ subtree: true }).length, mine: host.getAnimations({ subtree: true }).map((a) => (a.animationName || a.transitionProperty) + "@" + (a.effect.target.getAttribute("class") || a.effect.target.tagName)).join(","), other: document.getAnimations().filter((a) => !host.contains(a.effect && a.effect.target)).map((a) => a.animationName || a.transitionProperty).slice(0, 4).join(","), starts: window.__starts, at: host._scrubAt,
+        readout: ro && ro.classList.contains("is-on") ? ro.textContent : null, line: xh ? +xh.getAttribute("opacity") : null,
+        xhX: xh ? +xh.getAttribute("x1") : null, endTag: tags.join(" "), endX: ring ? +ring.getAttribute("cx") : null,
+        w: svg.viewBox.baseVal.width || 0, focused: document.activeElement === host, threw,
+      };
+    }, n));
+  }
+  updates.forEach((u, k) => {
+    const n = 6 + k;
+    eq(u.threw, null, `IN PLACE: update ${k + 2} is one set(options) call on the handle the first paint returned (${u.threw})`);
+    ok(u.same, `IN PLACE: update ${k + 2} keeps the same svg node instead of tearing the chart down and building another`);
+    eq(u.svgs, 1, `update ${k + 2}: one svg in the host`);
+    ok(u.noAnim, `update ${k + 2}: set() draws with no-anim, so no line redraws and no label fades in again`);
+    eq(u.sync + u.anims, 0, `update ${k + 2}: no animation runs in the chart after the update (its getAnimations is empty: ${u.mine}; elsewhere: ${u.other || "none"})`);
+    eq(u.starts, 0, `update ${k + 2}: and no animationstart or transitionrun fired in the chart`);
+    eq(u.endTag, "v" + [3, 5, 4, 6, 2, 7, 1, 9][n - 1], `update ${k + 2}: the newest point is drawn and labelled (${u.endTag})`);
+    ok(Math.abs(u.endX - (u.w - 62)) < 0.5, `update ${k + 2}: at the right edge of the plot (${u.endX})`);
+    ok(u.readout && u.readout.includes("2026-09-03") && u.readout.includes("v4"), `update ${k + 2}: the hover readout survives, still on the reading the reader was on (${u.readout})`);
+    eq(u.at, 2, `update ${k + 2}: the crosshair keeps the reader's index`);
+    ok(u.line > 0 && Math.abs(u.xhX - (2 + (u.w - 62 - 2) * 2 / (n - 1))) < 0.5, `update ${k + 2}: the crosshair is drawn at that reading's new x (${u.xhX})`);
+    ok(u.focused, `update ${k + 2}: keyboard focus stays on the chart`);
+  });
+  const later = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const host = window.__host;
+    host.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    const end = host._scrubAt;
+    host.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    window.__chart.set(window.__opts(8));
+    await frame();
+    const hidden = { at: host._scrubAt, on: !!host.querySelector(".ui-readout.is-on") };
+    window.__chart.set(window.__opts(8), true);
+    await frame();
+    const asked = host.querySelector(":scope > svg").classList.contains("no-anim");
+    window.__chart.destroy();
+    const again = window.FlowsUI.chart.line(host, window.__opts(8));
+    await frame();
+    await frame();
+    const remount = host.querySelector(":scope > svg").classList.contains("no-anim");
+    again.destroy();
+    const live = document.createElement("div");
+    live.style.width = "640px";
+    document.body.append(live);
+    const lc = window.FlowsUI.chart.line(live, window.__opts(5, { live: true }));
+    await frame();
+    await frame();
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    const phase = () => {
+      const a = live.getAnimations({ subtree: true }).find((x) => x.animationName === "ui-pulse");
+      if (!a) return null;
+      const t = a.effect.getComputedTiming();
+      return (((t.localTime - t.delay) - document.timeline.currentTime) % 2400 + 2400) % 2400;
+    };
+    const p0 = phase();
+    await new Promise((r) => setTimeout(r, 1000));
+    lc.set(window.__opts(6, { live: true }));
+    await frame();
+    await frame();
+    const p = p0 === null ? null : { p0, p1: phase() };
+    const others = live.getAnimations({ subtree: true }).filter((x) => x.animationName !== "ui-pulse").length;
+    const pulses = live.querySelectorAll("circle.pulse").length;
+    lc.destroy();
+    live.remove();
+    return { end, hidden, asked, remount, p, others, pulses };
+  });
+  eq(later.end, 7, "the End key still moves the crosshair to the newest reading");
+  ok(later.hidden.at === -1 && !later.hidden.on, "a readout the reader dismissed with Escape is not brought back by an update");
+  ok(!later.asked, "set(next, true) still animates when a caller asks for it");
+  ok(later.remount, "and a host that has been drawn once does not replay its entrance when a chart is mounted on it again");
+  eq(later.pulses, 1, "a live line keeps one pulse on its newest point");
+  eq(later.others, 0, "and nothing but that pulse is animating after an update");
+  const drift = later.p && later.p.p1 !== null ? Math.min(Math.abs(later.p.p1 - later.p.p0), 2400 - Math.abs(later.p.p1 - later.p.p0)) : Infinity;
+  ok(drift < 150, `the pulse continues on the document clock's phase instead of restarting at zero on every update (${Math.round(drift)} ms off)`);
+  await page.close();
+}
+
+{
+  const page = await open();
+  const zero = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const C = window.FlowsUI.chart, cssVar = window.FlowsUI.cssVar;
+    const mk = () => { const d = document.createElement("div"); d.style.cssText = "width:640px;margin:40px 0 0 40px"; document.body.prepend(d); return d; };
+    const tokens = { up: cssVar("--up-mark"), down: cssVar("--down-mark"), long: cssVar("--g-long"), short: cssVar("--g-short"), neutral: cssVar("--label-3"), fill4: cssVar("--fill-4"), absent: cssVar("--label-4") };
+    const values = [2, 0, -1, null, 0.5];
+    const read = (host) => {
+      const svg = host.querySelector(":scope > svg");
+      const base = svg.querySelector("line.base");
+      const mid = +base.getAttribute("y1");
+      const bars = [...svg.querySelectorAll("rect.grow")].map((r) => ({ fill: r.getAttribute("fill"), y: +r.getAttribute("y"), h: +r.getAttribute("height") }));
+      const z = svg.querySelector("rect.zero");
+      const dot = svg.querySelector("circle:not(.ring)");
+      return { mid, bars, zero: z ? { fill: z.getAttribute("fill"), y: +z.getAttribute("y"), h: +z.getAttribute("height"), x: +z.getAttribute("x"), w: +z.getAttribute("width") } : null, absent: dot ? dot.getAttribute("fill") : null, rects: svg.querySelectorAll("rect").length };
+    };
+    const dir = mk();
+    window.__div = C.diverging(dir, { values, label: "Diverging" });
+    const gam = mk();
+    C.diverging(gam, { values, palette: "gamma", label: "Gamma" });
+    const heat = mk();
+    C.heatmap(heat, { rows: ["A"], cols: ["x", "y", "z"], grid: [[1, 0, null]], label: "Heat" });
+    await frame();
+    await frame();
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    dir.scrollIntoView({ block: "center", behavior: "instant" });
+    const svg = dir.querySelector(":scope > svg");
+    const b = svg.getBoundingClientRect();
+    const vw = svg.viewBox.baseVal.width, vh = svg.viewBox.baseVal.height;
+    const d = read(dir);
+    const cells = [...heat.querySelector(":scope > svg").querySelectorAll("rect")].slice(0, 3).map((r) => ({ cls: r.getAttribute("class"), fill: r.getAttribute("fill"), stroke: r.getAttribute("stroke"), dash: r.getAttribute("stroke-dasharray"), op: r.getAttribute("fill-opacity") }));
+    heat.focus();
+    heat.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    const hr = heat.querySelector(".ui-readout");
+    const heatReadout = { on: hr.classList.contains("is-on"), text: hr.textContent, value: hr.lastElementChild && hr.lastElementChild.textContent, toned: hr.querySelectorAll("[data-tone]").length };
+    heat.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const nullReadout = { on: hr.classList.contains("is-on"), text: hr.textContent, value: hr.lastElementChild && hr.lastElementChild.textContent };
+    const voidRect = heat.querySelector(":scope > svg rect.void");
+    const legend = window.FlowsUI.legend([window.FlowsUI.key("--label-4", "void", "Not quoted")]);
+    document.body.append(legend);
+    const ki = getComputedStyle(legend.querySelector(".ui-key > i"));
+    const vs = getComputedStyle(voidRect);
+    const notQuoted = { bg: ki.backgroundColor, image: ki.backgroundImage, style: ki.borderTopStyle, width: ki.borderTopWidth, color: ki.borderTopColor, voidStroke: vs.stroke, voidFill: vs.fill };
+    window.__dir = dir;
+    return { tokens, dir: d, gam: read(gam), cells, heatReadout, nullReadout, notQuoted, at: { x: b.left + (d.zero ? d.zero.x + d.zero.w / 2 : 0) * (b.width / vw), y: b.top + d.mid * (b.height / vh) }, plus: { x: b.left + (8 + ((vw - 16) / 5) * 0.5) * (b.width / vw) } };
+  });
+  const T = zero.tokens;
+  ok(T.up && T.down && T.long && T.short && T.neutral && T.fill4 && T.up !== T.neutral && T.down !== T.neutral && T.fill4 !== T.neutral, "the palette and neutral tokens resolve to distinct colours");
+  for (const [name, d] of [["direction", zero.dir], ["gamma", zero.gam]]) {
+    const pos = name === "direction" ? T.up : T.long, neg = name === "direction" ? T.down : T.short;
+    eq(d.bars.length, 3, `ZERO (${name}): three signed readings draw three bars`);
+    eq(d.bars[0].fill, pos, `ZERO (${name}): the positive reading keeps the positive fill`);
+    eq(d.bars[1].fill, neg, `ZERO (${name}): the negative reading keeps the negative fill`);
+    ok(d.bars[0].y < d.mid && d.bars[1].y >= d.mid, `ZERO (${name}): and they sit on their own sides of the axis`);
+    ok(d.zero, `ZERO (${name}): an exact zero is drawn as its own element, not as a bar`);
+    ok(d.zero.fill !== pos && d.zero.fill !== neg, `ZERO (${name}): the zero has neither the positive nor the negative fill (${d.zero.fill})`);
+    eq(d.zero.fill, T.neutral, `ZERO (${name}): it is the neutral --label-3`);
+    eq(d.zero.h, 1, `ZERO (${name}): one pixel tall`);
+    ok(Math.abs(d.zero.y + 0.5 - d.mid) < 1e-9, `ZERO (${name}): centred on the axis (y ${d.zero.y}, axis ${d.mid})`);
+    eq(d.absent, T.absent, `ZERO (${name}): and the null reading is still the absent dot, which the zero is not`);
+  }
+  await page.mouse.move(zero.at.x, zero.at.y);
+  await page.waitForFunction(() => window.__dir.querySelector(".ui-readout.is-on"));
+  const hover = await page.evaluate(() => {
+    const host = window.__dir;
+    const ring = host.querySelector(":scope > svg circle.ring");
+    const ro = host.querySelector(".ui-readout");
+    const base = host.querySelector("line.base");
+    return { at: host._scrubAt, text: ro.textContent, value: ro.querySelector("b") && ro.querySelector("b").textContent, toned: ro.querySelectorAll("[data-tone]").length, dot: ring ? { fill: ring.getAttribute("fill"), cy: +ring.getAttribute("cy") } : null, mid: +base.getAttribute("y1") };
+  });
+  eq(hover.at, 1, `the pointer rests on the zero reading (${hover.text})`);
+  eq(hover.value, "0", `its readout prints the zero, unsigned (${hover.text})`);
+  eq(hover.toned, 0, "with no direction tone on it");
+  ok(hover.dot && hover.dot.fill === T.neutral, `and the scrub dot follows: neutral, not up or down (${hover.dot && hover.dot.fill})`);
+  ok(hover.dot && Math.abs(hover.dot.cy - hover.mid) < 1e-9, `on the axis (cy ${hover.dot && hover.dot.cy}, axis ${hover.mid})`);
+  await page.mouse.move(zero.plus.x, zero.at.y);
+  await page.waitForFunction(() => window.__dir._scrubAt === 0);
+  const plus = await page.evaluate(() => { const r = window.__dir.querySelector(":scope > svg circle.ring"); return r && r.getAttribute("fill"); });
+  eq(plus, T.up, "while the dot on the positive reading beside it is the positive colour, so the neutral is not a lost token");
+  const [pos, zc, nc] = zero.cells;
+  eq(pos.fill, T.long, `HEAT: a positive cell is the gamma palette's long fill at its own opacity (${pos.op})`);
+  eq(zc.cls, "zero", "HEAT: an exact zero is a drawn cell");
+  eq(zc.fill, T.fill4, "HEAT: in the neutral --fill-4");
+  eq(nc.cls, "void", "HEAT: a null is a void");
+  eq(nc.fill, "none", "HEAT: with no fill");
+  ok(nc.dash && nc.stroke === T.absent, `HEAT: and a dashed outline in --label-4 (${nc.dash})`);
+  ok(zc.fill !== nc.fill, "HEAT: so the zero cell and the null cell no longer draw the same");
+  ok(zero.heatReadout.on && zero.heatReadout.value === "0", `HEAT: the keyboard readout of the zero cell prints the reading 0 (${zero.heatReadout.text})`);
+  eq(zero.heatReadout.toned, 0, "HEAT: with no long or short tone");
+  ok(zero.nullReadout.on && zero.nullReadout.value === "no reading", `HEAT: while the null cell beside it reads "no reading", so the readout keeps the zero and the absence apart as the cells do (${zero.nullReadout.text})`);
+  const K = zero.notQuoted;
+  ok(K.bg === "rgba(0, 0, 0, 0)" && K.image === "none", `HEAT legend: the "Not quoted" key is unfilled, like the void cell it names (${K.bg}, cell fill ${K.voidFill})`);
+  ok(K.style === "dashed" && K.width === "1px", `HEAT legend: with a 1px dashed outline, like the void cell's dashed stroke (${K.style} ${K.width})`);
+  eq(K.color, K.voidStroke, "HEAT legend: in the void's own colour, --label-4");
+  await page.close();
+}
+
+{
+  trackBody = { ...TRACK, deadBand: null };
+  const page = await open();
+  await page.waitForFunction(() => document.querySelector("#stChart svg line.base") && document.querySelector('.st-row[data-t="AAA"] .st-strip'), null, { timeout: 15000 });
+  const z = await page.evaluate(() => {
+    const svg = document.querySelector("#stChart svg");
+    const mid = +svg.querySelector("line.base").getAttribute("y1");
+    const bars = [...svg.querySelectorAll("rect.grow")].map((r) => ({ cls: r.getAttribute("class"), y: +r.getAttribute("y"), h: +r.getAttribute("height"), fill: getComputedStyle(r).fill }));
+    const strip = document.querySelector('.st-row[data-t="AAA"] .st-strip');
+    const smid = +strip.querySelector("line.st-zero").getAttribute("y1");
+    const srects = [...strip.querySelectorAll("rect")].map((r) => ({ cls: r.getAttribute("class"), y: +r.getAttribute("y"), h: +r.getAttribute("height"), fill: getComputedStyle(r).fill }));
+    const probe = document.createElement("i");
+    probe.style.color = "var(--label-3)";
+    document.body.append(probe);
+    const neutral = getComputedStyle(probe).color;
+    probe.style.color = "var(--up-mark)";
+    const up = getComputedStyle(probe).color;
+    probe.remove();
+    return { mid, bars, smid, srects, neutral, up };
+  });
+  trackBody = TRACK;
+  eq(z.bars.length, 4, "NO BAND: AAA's chart still draws its four measurements when the payload carries no dead band");
+  const zc = z.bars[2], sz = z.srects[2];
+  ok(/\bst-in\b/.test(zc.cls) && !/st-pos|st-neg/.test(zc.cls), `NO BAND: the measured zero is the neutral mark, not a positive bar (${zc.cls})`);
+  eq(zc.fill, z.neutral, "NO BAND: drawn in --label-3, like the score dot above it");
+  ok(zc.fill !== z.up, "NO BAND: and not in the up colour");
+  ok(Math.abs(zc.y + zc.h / 2 - z.mid) < 1e-9, `NO BAND: centred on the axis rather than standing above it (y ${zc.y}, h ${zc.h}, axis ${z.mid})`);
+  ok(/\bst-pos\b/.test(z.bars[3].cls) && /\bst-neg\b/.test(z.bars[1].cls), "NO BAND: while the signed readings keep their sides");
+  ok(sz && sz.cls === "st-in" && sz.fill === z.neutral, `NO BAND: the row's strip draws the same zero neutral (${sz && sz.cls})`);
+  ok(sz && Math.abs(sz.y + sz.h / 2 - z.smid) < 1e-9, "NO BAND: centred on the strip's rule");
+  await page.close();
+}
+
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));
 await browser.close();
 
@@ -570,4 +830,7 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `that draw at the width the observer reports, after layout and before paint, with no forced layout ` +
   `at mount and no observer loop error, one throwing draw starving no other chart, a host that leaves and ` +
   `returns before its first frame still drawn, the width re-read where no observer keeps it, and root tokens ` +
-  `read from one computed style`);
+  `read from one computed style; a live line updated in place, its svg, crosshair, readout and focus kept, ` +
+  `the newest point drawn and nothing re-animated; an exact zero drawn neutral by diverging and heatmap, ` +
+  `its dot and readout without a side, and apart from an absence in the cell, the readout and the legend key; ` +
+  `and a score track with no published dead band still draws its zero neutral on the axis`);

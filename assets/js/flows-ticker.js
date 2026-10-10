@@ -8,6 +8,7 @@
   const { h, s, F, glyph, num, clamp, tone, cap, cssVar } = UI;
   const C = UI.chart;
   const DASH = UI.DASH, MINUS = UI.MINUS, SEP = " " + UI.MID + " ";
+  const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
   const $ = (id) => document.getElementById(id);
   const statusEl = $("ftStatus");
   const gridEl = $("ftGrid");
@@ -468,11 +469,11 @@
       isIndex(card) && num(card.conviction) === null ? null : UI.gaugeChip({ ring: num(card.conviction) === null ? null : card.conviction / 100, color: "--label-1", value: num(card.conviction) === null ? chipDash("unavailable") : String(card.conviction), label: "Conviction",
         info: () => ({ title: "Conviction", lead: "How far the families agree, how much of the card was measured, and how long the flow persisted.", facts: convFacts(card), notes: [convMath(card)] }) }),
       UI.gaugeChip({ icon: "gamma", color: gl === "short" ? "--g-short-ink" : "--g-long-ink", value: gl ? (gl === "short" ? "Short" : "Long") : chipDash("unavailable"), label: "Dealer γ", tone: gl,
-        info: () => ({ title: "Dealer gamma", lead: gl === "short" ? "Dealers are short gamma: their hedging buys rallies and sells dips, which amplifies moves." : gl === "long" ? "Dealers are long gamma: their hedging sells rallies and buys dips, which dampens moves." : "No regime reading on this card.",
+        info: () => ({ title: "Dealer gamma", lead: gl ? "Dealers are " + gl + " gamma " + DEALER_CLAUSE + ": their hedging " + (gl === "short" ? "buys rallies and sells dips, which amplifies moves." : "sells rallies and buys dips, which dampens moves.") : "No regime reading on this card.",
           facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Read from", reg.labelFrom || null], ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)],
             ["1Y z", cx && num(cx.z) !== null ? F.signed(cx.z, 2) : null], ["Same sign for", cx && num(cx.persist) !== null ? SESSIONS(cx.persist) : null], ["Long share of the year", cx ? F.pct(cx.longShare, 0) : null]] }) }),
       UI.gaugeChip({ ring: ivr.v, color: "--s-blue", value: ivr.v === null ? chipDash(ivr.st.state) : String(Math.round(ivr.v * 100)), label: "IV rank",
-        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "Where 30-day implied volatility sits inside its own one-year range, as a percentile of its own year: " + Math.round(ivr.v * 100) + " of 100." : ivr.st.reason,
+        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks." : ivr.st.reason,
           facts: [["IV 30d", F.pct(pm.iv30)], ["Momentum", num(pm.ivMomentum) === null ? null : F.pts(pm.ivMomentum) + " pts"]] }) }),
       UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: im === null ? chipDash(stOf(card.panels.pricedMove, "priced move").state) : "±" + F.pct(im), label: (num(pm.sessions) || 10) + "d move",
         info: () => ({ title: "Priced move", state: stOf(card.panels.pricedMove, "priced move").state === "ok" ? null : stOf(card.panels.pricedMove, "priced move").state,
@@ -872,7 +873,7 @@
       st ? h("div", { class: "ft-aside-c", "aria-label": "Closest structure" },
         h("span", { class: "ft-aside-l" }, "Closest"), h("b", null, famWord(st.family)),
         h("span", { class: "ft-slot-v", "data-tone": evC === null ? "silent" : tone(evC) }, h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evC === null ? DASH : (evC > 0 ? "+" : "") + usd0(evC)),
-        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP))) : null,
+        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP)), UI.calibTag()) : null,
       info("standing aside", () => ({ title: "Stand aside", state: "quiet", asOf: eng.asOf || null, lead, facts: st ? ideaFacts(st, null, eng) : [],
         sections: [{ title: "Families", lines: (eng.families || []).map((fm) => famWord(fm.family) + SEP + "score " + fx(fm.score, 2) + (fm.veto && fm.veto.length ? ", vetoed: " + fm.veto.join(", ") : "")) }] })));
   }
@@ -1140,7 +1141,7 @@
     row.classList.toggle("is-single", row.childElementCount === 1 && row.firstElementChild.classList.contains("is-wide"));
     verdictEl.append(row);
     if (entries.some((e) => e.kind === "engine" && e.st)) {
-      verdictEl.append(h("div", { class: "ft-ideas-k" }, legend([keyOf("--label-1", "ln", "At expiry"), dashKey("--accent", "Today"), keyOf("--accent", "dot", "Implied"), keyOf("--label-2", "dot", "Real world")])));
+      verdictEl.append(h("div", { class: "ft-ideas-k" }, legend([keyOf("--label-1", "ln", "At expiry"), dashKey("--accent", "Today"), keyOf("--accent", "dot", "Implied"), keyOf("--label-2", "dot", "Real world"), UI.calibTag()])));
     }
     const cut = () => {
       const max = row.scrollWidth - row.clientWidth;
@@ -1158,18 +1159,23 @@
       info, infoLabel: o.infoLabel || String(o.title).toLowerCase(), body: o.body, index: o.index || 0, enter: STATE.first });
     sec.classList.add("ft-m", "ft-lg" + o.span[1], "ft-md" + o.span[0]);
     const old = $(o.id);
+    const had = !!(old && document.activeElement && old.contains(document.activeElement));
     if (old && old.parentNode === gridEl) old.replaceWith(sec); else gridEl.append(sec);
+    if (had) { const b = sec.querySelector(".ui-seg-i[aria-selected=true]"); if (b) b.focus({ preventScroll: true }); }
     return sec;
   }
 
+  const PICKED = new Map();
   function viewer(label, all, first) {
     const list = all.filter((v) => !v.never);
     const box = h("div", { class: "ft-cbox" });
     const leg = h("div", { class: "ft-leg-row" });
-    let cur = first !== undefined && list[first] && list[first].st.state === "ok" ? first : list.findIndex((v) => v.st.state === "ok");
+    const kept = PICKED.has(label) ? list.findIndex((v) => v.label === PICKED.get(label) && v.st.state === "ok") : -1;
+    let cur = kept >= 0 ? kept : first !== undefined && list[first] && list[first].st.state === "ok" ? first : list.findIndex((v) => v.st.state === "ok");
     if (cur < 0) cur = 0;
     let handle = null;
-    const show = (i) => {
+    const still = !STATE.first;
+    const show = (i, user) => {
       cur = i;
       if (handle && handle.destroy) handle.destroy();
       handle = null;
@@ -1177,13 +1183,13 @@
       leg.replaceChildren();
       const v = list[i];
       if (v.st.state !== "ok") { box.append(UI.silent(v.st, v.name || v.label, v.h || 220)); return; }
-      const host = h("div", { class: "ft-view", "data-view": v.label });
+      const host = h("div", { class: "ft-view" + (still && !user ? " is-still" : ""), "data-view": v.label });
       box.append(host);
       const r = v.draw(host) || {};
       handle = r.handle || null;
       if (r.legend && r.legend.length) leg.append(legend(r.legend));
     };
-    const seg = list.length > 1 ? UI.segmented(label, list.map((v) => ({ label: v.label })), show, cur) : null;
+    const seg = list.length > 1 ? UI.segmented(label, list.map((v) => ({ label: v.label })), (i) => { PICKED.set(label, list[i].label); show(i, true); }, cur) : null;
     return { seg, box, leg, start: () => show(cur), views: list };
   }
 
@@ -1315,7 +1321,7 @@
           const sy = base + 8;
           const g = fadeG(700, svg);
           let runStart = d.lo, runSign = Math.sign(at(d.lo));
-          const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : "--down-mark"), "fill-opacity": 0.85 }, g); };
+          const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : sg < 0 ? "--down-mark" : "--label-3"), "fill-opacity": 0.85 }, g); };
           for (let i = 1; i <= 120; i++) {
             const xv = d.lo + (d.hi - d.lo) * i / 120;
             const sg = Math.sign(at(xv));
@@ -1364,7 +1370,7 @@
         },
       });
     });
-    return { handle, legend: [keyOf("--accent", "", "Implied"), d.pCdf ? keyOf("--label-2", "ln", "Real world") : null, keyOf("--label-1", "ln", "Spot"),
+    return { handle, legend: [keyOf("--accent", "", "Implied"), d.pCdf ? keyOf("--label-2", "ln", "Real world") : null, d.pCdf ? UI.calibTag() : null, keyOf("--label-1", "ln", "Spot"),
       leadHere ? keyOf("--label-1", "ring", "Breakeven") : null, leadHere ? keyOf("--up-mark", "", "Profit") : null,
       ...Object.values(levelsOf(card)).filter((l) => LVL_KEY[l.kind] && l.px >= d.lo && l.px <= d.hi).map((l) => keyOf(...LVL_KEY[l.kind]))] };
   }
@@ -1840,9 +1846,10 @@
         G.cols.forEach((c, j) => {
           const cell = G.cells[r.i] && G.cells[r.i][j];
           const xx = left + j * (cw + gap);
-          if (!cell) { s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar("--fill-4") }, svg); s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4, text: DASH, "text-anchor": "middle", class: "tx-3" }, svg); return; }
+          if (!cell || num(cell.flow) === null) { s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar("--fill-4"), class: "is-absent" }, svg); s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4, text: DASH, "text-anchor": "middle", class: "tx-3" }, svg); return; }
           const a = clamp(Math.abs(num(cell.pctAdv) || 0) / maxA, 0, 1);
-          s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow >= 0 ? "--up-mark" : "--down-mark"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
+          if (cell.flow === 0) s("rect", { x: xx + 0.5, y: yy + 0.5, width: cw - 1, height: ch - 1, rx: 8.5, fill: cssVar("--fill-4"), stroke: cssVar("--label-3"), "stroke-width": 1, class: "is-zero fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
+          else s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow > 0 ? "--up-mark" : cell.flow < 0 ? "--down-mark" : "--label-3"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
           if (r.kS === 0 && c.kV === 0) s("rect", { x: xx + 0.75, y: yy + 0.75, width: cw - 1.5, height: ch - 1.5, rx: 8.5, fill: "none", stroke: cssVar("--label-1"), "stroke-width": 1.5 }, svg);
           s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4.5, text: F.money(cell.flow, true), "text-anchor": "middle", class: "tx-1 tx-b", style: { "font-size": phone ? "12px" : "13px" } }, svg);
         });
@@ -2054,7 +2061,7 @@
           label: card.ticker + " implied volatility by moneyness and expiry, shaded from " + F.pct(lo) + " to " + F.pct(hi) }),
           legend: [h("span", { class: "ui-key ft-ramp", role: "img", "aria-label": "Shade from " + F.pct(lo) + " to " + F.pct(hi) + " implied volatility" },
             h("span", { class: "ft-ramp-s", "aria-hidden": "true" }, RAMP_OPACITY.map((a) => h("i", { style: { "--c": cssVar("--g-long"), opacity: String(a) } }))), F.pct(lo, 0) + " – " + F.pct(hi, 0) + " IV"),
-            keyOf("--fill-4", "", "Not quoted")] };
+            keyOf("--label-4", "void", "Not quoted")] };
       } },
       { label: "History", st: ivRows.length > 4 ? OK : vc && vc.ivRank ? stOf(vc.ivRank, "implied volatility history") : panelSt(card, "volContext", "implied volatility history"), name: "Volatility history", draw: (host) => {
         const gm = new Map(), em = new Map();
@@ -2088,7 +2095,7 @@
         title: "Volatility", state: st.state === "ok" ? null : st.state, asOf: pm.asOf || null, lead: leadOf(vc) || leadOf(P.pricedMove),
         facts: [["IV 30d", F.pct(pm.iv30)], ["RV 30d", F.pct(pm.rv30)], ["Premium (ex-ante)", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrp) + " pts, z " + F.signed(vrp.exAnte.z, 2) : num(pm.vrp) !== null ? pts1(pm.vrp) + " pts" : null],
           ["Premium ex-event", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrpExEvent) + " pts" : null], ["Seller won", vrp ? F.pct(vrp.hitRate, 0) + " of " + vrp.n + " completed windows" : null],
-          ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100, a percentile of its own year"],
+          ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100: where today sits between its 1-year low and high"],
           ["RR25", skew ? pts1(skew.rr25) + " pts, z " + F.signed(skew.z, 2) + " (" + (skew.zBasis || "raw") + "), 5-day change " + pts1(skew.mom5) : null], ["RR10", skew && num(skew.rr10) !== null ? pts1(skew.rr10) + " pts" : null],
           ["Crash ratio", skew && num(skew.crash) !== null ? skew.crash.toFixed(2) + " (median " + (num(skew.crashMedian) === null ? DASH : skew.crashMedian.toFixed(2)) + ")" : null],
           ["Skew (put − call)", sk && num(sk.skew) !== null ? F.pts(sk.skew) + " pts" + SEP + (sk.skewBasis ? sk.skewBasis.days + "d" : "") : null], ["Term (far − near)", sk && num(sk.term) !== null ? F.pts(sk.term) + " pts" : null],
@@ -2332,7 +2339,7 @@
       rows.forEach((r, i) => {
         const m = num(r[iM]), em = num(r[iE]);
         if (m === null) s("circle", { cx: xc(i), cy: H - bot, r: 1.6, fill: cssVar("--label-4") }, svg);
-        else s("rect", { x: xc(i) - bw / 2, y: y(Math.abs(m)), width: bw, height: Math.max(1.5, y(0) - y(Math.abs(m))), rx: Math.min(3, bw / 2), fill: cssVar(m >= 0 ? "--up-mark" : "--down-mark"), class: "grow", style: { "--i": String(i * 3) } }, svg);
+        else s("rect", { x: xc(i) - bw / 2, y: y(Math.abs(m)), width: bw, height: Math.max(1.5, y(0) - y(Math.abs(m))), rx: Math.min(3, bw / 2), fill: cssVar(m > 0 ? "--up-mark" : m < 0 ? "--down-mark" : "--label-3"), class: "grow", style: { "--i": String(i * 3) } }, svg);
         if (em !== null) s("line", { x1: xc(i) - bw / 2 - 3, x2: xc(i) + bw / 2 + 3, y1: y(em), y2: y(em), stroke: cssVar("--accent-ink"), "stroke-width": 2, "stroke-linecap": "round", class: "fade" }, svg);
       });
       const med = num(STATE.cardX && STATE.cardX.earnings && STATE.cardX.earnings.medianAbsMove);
@@ -2354,23 +2361,27 @@
     const implied = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
     const cols = E && Array.isArray(E.eventCols) ? E.eventCols : [];
     const ev = E && Array.isArray(E.events) ? E.events : [];
+    const cut = Array.isArray(X.shed) && X.shed.includes("earnings.events");
+    const nOf = (k, n) => { if (num(n) !== null) return n; const i = cols.indexOf(k); return cut || i < 0 ? null : ev.filter((r) => Array.isArray(r) && num(r[i]) !== null).length; };
+    const of = (share, n) => num(share) !== null && num(n) !== null && n > 0 ? Math.round(share * n) + " of " + n : null;
+    const beatOf = E ? of(E.beat, E.n) : null, ls1dOf = E ? of(E.ls1dHit, nOf("long straddle 1d", E.ls1dN)) : null, ls1wOf = E ? of(E.ls1wHit, nOf("long straddle 1w", E.ls1wN)) : null;
     const box = h("div", { class: "ft-cbox" });
     const sec = mod({ id: "m-events", title: "Events", span: [12, 5], st: stE, index: 3, body: [
       mets([
         metric("Next report", next && isoOk(next.d) ? day(next.d) : DASH, { sub: next ? (num(next.sessions) !== null ? SESSIONS(next.sessions) : "") + (next.confirmed ? "" : SEP + "est.") : null, state: next ? null : E ? ST("quiet", "No upcoming report on the calendar.") : stE }),
         metric("Implied", implied === null ? DASH : "±" + F.pct(implied, 1), { key: keyOf("--accent-ink", "ln", ""), state: implied === null ? ST("quiet", "No implied earnings move: the report is not inside the listed expiries or the next five sessions.") : null }),
         metric("Realized", E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH, { sub: E && num(E.medianRatio) !== null ? "×" + E.medianRatio.toFixed(2) + " priced" : null, state: E ? null : stE }),
-        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: "moved > priced", state: E ? null : stE }),
-        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
+        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: (beatOf ? beatOf + " " : "") + "moved > priced", state: E ? null : stE }),
+        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: ls1dOf ? ls1dOf + " hit, 1d" : "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
       ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), dashKey("--label-3", "Median")])],
       info: () => ({
         title: "Events", state: stE.state === "ok" ? null : stE.state, asOf: next && next.d ? "Next " + next.d : null,
         lead: E ? "The last " + ev.length + " reports: the bar is the move the day after, the tick the move the options priced beforehand." : stE.reason,
         facts: E ? [["Next", next ? next.d + " (" + (next.when || "time unknown") + ", " + (next.confirmed ? "confirmed" : "estimated from " + (next.source || "the calendar")) + ")" : null],
           ["Implied now", implied === null ? null : "±" + F.pct(implied, 2)], ["Today against history", num(E.ratioToday) !== null ? "×" + E.ratioToday.toFixed(2) + " of the median realized move" : null],
-          ["Median ratio", num(E.medianRatio) !== null ? E.medianRatio.toFixed(2) : null], ["Beat share", F.pct(E.beat, 0)], ["Median move", F.pct(E.medianAbsMove, 1)], ["Median priced", F.pct(E.medianExpected, 1)],
+          ["Median ratio", num(E.medianRatio) !== null ? E.medianRatio.toFixed(2) : null], ["Beat share", F.pct(E.beat, 0) + (beatOf ? " (" + beatOf + " reports)" : "")], ["Median move", F.pct(E.medianAbsMove, 1)], ["Median priced", F.pct(E.medianExpected, 1)],
           ["Day-one drift", num(E.drift) !== null ? F.pct(E.drift, 2, true) + " (" + (E.drift > 0 ? "moves kept going" : "moves faded") + ")" : null], ["Run-up", num(E.runup) !== null ? F.pct(E.runup, 2, true) : null],
-          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
+          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" + (ls1dOf ? " (" + ls1dOf + " / " + (ls1wOf || DASH) + " reports)" : "") : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
         sections: [{ title: "Rules", lines: E && E.rules ? Object.values(E.rules) : [] }, { title: "Term", lines: [term && term.eventExpiry ? "The first expiry after the report is " + term.eventExpiry + "." : null] }],
       }) });
     if (X.off) sec.querySelector(".ui-mod-t").append(tag(day(X.off)));
@@ -2554,7 +2565,7 @@
         chg.status === "ok" && chg.d1
           ? metric("Change", F.signed(chg.d1.v), { tone: tone(chg.d1.v), sub: SESSIONS(chg.d1.gap) + (chg.stale ? SEP + chg.stale + " old" : ""), id: "ftD1" })
           : metric("Change", DASH, { state: chg.status === "ok" ? ST("quiet", "Only one session in this window carries a score for this name, so there is no move to state — which is not a move of zero.") : ST(chg.status === "quiet" ? "quiet" : "unavailable", cap(chg.reason)), id: "ftD1" })));
-    const ev = chg.status !== "ok" ? null : chg.cross ? { cleared: ["Cleared", "up"], faded: ["Faded", "down"], flipped: ["Flipped", chg.d1 && chg.d1.v < 0 ? "down" : "up"] }[chg.cross]
+    const ev = chg.status !== "ok" ? null : chg.cross ? { cleared: ["Cleared", "up"], faded: ["Faded", "down"], flipped: ["Flipped", chg.d1 && chg.d1.v > 0 ? "up" : chg.d1 && chg.d1.v < 0 ? "down" : null] }[chg.cross]
       : chg.crossKnown ? ["No crossing", null] : null;
     const evTag = h("div", { class: "ft-sig-ev", id: "ftCross", "data-cross": chg.status === "ok" ? chg.cross || (chg.crossKnown ? "none" : "unknown") : chg.status },
       ev ? tag(ev[0], { tone: ev[1] || undefined, glyph: ev[1] === "up" ? "up" : ev[1] === "down" ? "down" : null }) : UI.dash(ST(chg.status === "ok" ? (chg.band === null ? "unavailable" : "quiet") : chg.status === "quiet" ? "quiet" : "unavailable", said.lines[0] || said.lead), "Dead band"),
@@ -2566,7 +2577,7 @@
       const tr = h("div", { class: "ft-fam-t" + (signed ? "" : " is-meter") });
       if (val !== null) {
         const pct = clamp(Math.abs(val), 0, 100) / 100;
-        tr.append(signed ? h("span", { class: "ft-fam-f", style: { "--c": val < 0 ? "var(--down-mark)" : "var(--up-mark)", left: val < 0 ? 50 - pct * 50 + "%" : "50%", width: pct * 50 + "%", "transform-origin": val < 0 ? "right" : "left", "--i": String(i) } })
+        tr.append(signed ? h("span", { class: "ft-fam-f", style: { "--c": val > 0 ? "var(--up-mark)" : val < 0 ? "var(--down-mark)" : "var(--label-3)", left: val < 0 ? 50 - pct * 50 + "%" : "50%", width: pct * 50 + "%", "transform-origin": val < 0 ? "right" : "left", "--i": String(i) } })
           : h("span", { class: "ft-fam-f", style: { "--c": "var(--label-2)", left: "0", width: pct * 100 + "%", "--i": String(i) } }));
       }
       row.append(tr, val === null ? h("span", { class: "ft-fam-v", "data-tone": "silent" }, UI.dash(legacyFam(card, k) ? ST("withheld", T("legacy-vo")) : ST("quiet", "No " + lab.toLowerCase() + " reading entered this session's score."), lab))
@@ -2671,7 +2682,7 @@
     const ik = num(u.ivp) === null ? "ivRank" : "ivp", il = ik === "ivp" ? "IV pct" : "IV rank", iv = num(u[ik]), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
     const why = (t, lead) => () => ({ title: t, lead }), gs = g < 0 ? "short" : g > 0 ? "long" : null;
     return [
-      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with 30-day implied volatility below today's." : "Where 30-day implied volatility sits between its one-year low and high.") }),
+      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with implied volatility below today's. The vendor does not document which tenor it reads." : "Where implied volatility sits between its one-year low and high. The vendor does not document which tenor it ranks.") }),
       UI.gaugeChip({ icon: "vega", color: "--s-blue", value: num(u.iv30) === null ? chipDash("unavailable") : F.pct(u.iv30, 0), label: "IV 30d", info: why("IV 30d", "Thirty-day implied volatility.") }),
       g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: gs === "short" ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : gs ? (gs === "short" ? "Short" : "Long") : "Zero", label: "Dealer γ", tone: gs,
         info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the vendor's dealer gamma for " + card.ticker + ".") }),

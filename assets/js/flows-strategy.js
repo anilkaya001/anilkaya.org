@@ -746,6 +746,7 @@
     m.grade = h("span", { class: "tl-grade" });
     const odds = UI.moduleCard({ id: "sgOddsM", title: "Odds", index: 1, info: oddsInfo, body: [m.pop, UI.metrics([m.evQ, m.evP, m.edge], { min: 88 })] });
     odds.querySelector(".ui-mod-t").append(m.grade);
+    odds.querySelector(".ui-mod-sp").after(UI.calibTag() || "");
     m.dl = slot("Delta"); m.gm = slot("Gamma"); m.vg = slot("Vega"); m.th = slot("Theta"); m.cap = slot("Capital"); m.ror = slot("Return");
     const greeks = UI.moduleCard({ id: "sgGreeksM", title: "Greeks", index: 3, info: greeksInfo, body: [UI.metrics([m.dl, m.gm, m.vg, m.th, m.cap, m.ror], { min: 112 })] });
     m.scn = h("div", { class: "tl-scn" });
@@ -938,7 +939,7 @@
       row._guide.style.setProperty("--a", String(both ? popQ : 0));
     }
     m.popP._gap.hidden = !both;
-    m.popP._gap.dataset.tone = d >= 0 ? "up" : "down";
+    m.popP._gap.dataset.tone = d > 0 ? "up" : d < 0 ? "down" : "flat";
     m.popP._gap.style.setProperty("--a", String(both ? Math.min(popQ, popP) : 0));
     m.popP._gap.style.setProperty("--b", String(both ? Math.max(popQ, popP) : 0));
     fillLoupe(m.popD, popQ, popP, lawState || es);
@@ -1208,7 +1209,7 @@
         const X = xsAll[i];
         const e = expAt(ser.exp, X);
         const tv = ser.today && ser.today[i] ? ser.today[i][1] : null;
-        const dots = [{ x: x(X), y: y(e), color: e >= 0 ? "--up" : "--down" }];
+        const dots = [{ x: x(X), y: y(e), color: e > 0 ? "--up" : e < 0 ? "--down" : "--label-3" }];
         if (tv !== null) dots.push({ x: x(X), y: y(tv), color: "--accent" });
         return {
           dots, top: 0,

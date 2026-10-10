@@ -3,9 +3,25 @@
   const mount = document.getElementById("marketTicker");
   if (!mount || typeof fetch !== "function") return;
 
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "market-ticker__toggle";
+  const track = document.createElement("div");
+  track.className = "market-ticker__track";
   const row = document.createElement("div");
   row.className = "market-ticker__row";
-  mount.appendChild(row);
+  track.appendChild(row);
+  mount.append(toggle, track);
+
+  let held = null;
+  function setPaused(paused) {
+    mount.dataset.paused = paused;
+    toggle.textContent = paused ? "Play" : "Pause";
+    toggle.setAttribute("aria-label", toggle.textContent + " the index prices");
+    if (!paused && held) { const h = held; held = null; render(h[0], h[1]); }
+  }
+  setPaused(false);
+  toggle.addEventListener("click", () => setPaused(mount.dataset.paused !== "true"));
 
   const priceFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const pctFmt = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2, signDisplay: "exceptZero" });
@@ -86,7 +102,9 @@
       const resp = await fetch("/api/markets", { headers: { Accept: "application/json" } });
       if (!resp.ok) throw new Error("markets " + resp.status);
       const data = await resp.json();
-      render(Array.isArray(data.quotes) ? data.quotes : [], data.updatedAt);
+      const quotes = Array.isArray(data.quotes) ? data.quotes : [];
+      if (mount.dataset.paused === "true" && row.childElementCount) held = [quotes, data.updatedAt];
+      else render(quotes, data.updatedAt);
     } catch {
 
       if (!row.childElementCount) mount.hidden = true;

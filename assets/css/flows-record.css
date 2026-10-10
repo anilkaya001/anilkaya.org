@@ -25,6 +25,7 @@
 .rt-host { min-height: 150px; }
 .ui-chart .rt-bar.is-pos { fill: var(--up-mark); }
 .ui-chart .rt-bar.is-neg { fill: var(--down-mark); }
+.ui-chart .rt-bar.is-flat { fill: var(--label-3); }
 .ui-chart .rt-bar.is-dim { fill-opacity: 0.5; }
 .ui-chart .rt-sel { fill: var(--fill-3); }
 .ui-chart .rt-wash { fill: var(--fill-4); }

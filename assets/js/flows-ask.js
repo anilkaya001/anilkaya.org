@@ -381,7 +381,7 @@
       UI.infoButton("model credits", { title: "Model credits", lead, sections: [{ title: "How this is counted", lines: how }] }, { small: true }));
   }
 
-  const GUARANTEE = "This box answers from the payloads this site has already published. It reads nothing live, it places no vendor call, and it performs no arithmetic: every figure in an answer is quoted from a payload. An answer that states a figure no payload published is refused before it reaches this page, and the measured reading is served instead.";
+  const GUARANTEE = "This box answers from the nightly payloads, with the live readings it keeps through the session laid over them. When a question names a stock, or is asked on a stock's page, it also reads that stock's dossier, which can call the market-data vendor, up to nine requests a question, for what the site does not hold yet: the stock's quote, profile, financials, earnings, news, analysts, holders, dark-pool levels, short interest and insider trades. It performs no arithmetic: every figure in an answer is quoted from those readings. An answer that states a figure none of them published is refused before it reaches this page, and the measured reading is served instead.";
 
   const box = h("section", { class: "ak-compose" + (DOCKED ? " is-docked" : " ui-card"), id: "askBox", "aria-label": "Ask" });
   const exampleHost = h("div", { class: "ak-examples", id: "askExamples" });

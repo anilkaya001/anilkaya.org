@@ -293,6 +293,7 @@ export class RtHub {
     this.snapAt = Object.create(null);
     this.roster = null;
     this.rosterAt = 0;
+    this.rosterDueAt = 0;
     this.rosterError = null;
     this.clock = null;
     this.waiters = [];
@@ -649,8 +650,7 @@ export class RtHub {
   }
 
   async ensureRoster(now) {
-    if (this.roster && now - this.rosterAt < RT_LIMITS.rosterMs) return;
-    if (!this.roster && this.rosterAt && now - this.rosterAt < 30000) return;
+    if (this.roster && now < this.rosterDueAt) return;
     this.rosterAt = now;
     let timer = null;
     try {
@@ -658,9 +658,11 @@ export class RtHub {
       const r = await Promise.race([this.loadRoster(this.env, now), timeout]);
       this.applyRoster(r || { clock: null, boards: {}, focus: null });
       this.rosterError = null;
+      this.rosterDueAt = now + RT_LIMITS.rosterMs;
     } catch (error) {
       this.rosterError = { at: now, message: String(error && error.message ? error.message : error).slice(0, 120) };
       if (!this.roster) this.applyRoster({ clock: null, boards: {}, focus: null });
+      this.rosterDueAt = this.now() + RT_LIMITS.rosterRetryMs * this.cfg.scale;
       this.logOnce("roster", { message: "rt roster read failed", error: this.rosterError.message });
     } finally {
       clearTimeout(timer);

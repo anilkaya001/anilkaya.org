@@ -358,7 +358,7 @@
     mods.list = h("div", { class: "dk-list", id: "dkList", role: "list", "aria-label": "Sellable lines" });
     mods.more = h("button", { type: "button", class: "ui-disclose", "aria-expanded": "false", hidden: true, onclick: () => { mods.open = !mods.open; renderList(); } }, h("span"), glyph("chev"));
     const lines = UI.moduleCard({ id: "dkLinesM", title: "Lines", span: 12, index: 2, info: linesInfo, body: [mods.list, mods.more] });
-    lines.querySelector(".ui-mod-h").insertBefore(mods.rankSel, lines.querySelector(".ui-mod-h .ui-info"));
+    lines.querySelector(".ui-mod-h").insertBefore(h("span", { class: "dk-rank" }, UI.calibTag(), mods.rankSel), lines.querySelector(".ui-mod-h .ui-info"));
     mods.smileSel = h("select", { id: "deskSurfaceSymbol", class: "dk-select", "aria-label": "Smile for symbol" });
     mods.smileSel.addEventListener("change", () => { surfaceSymbol = mods.smileSel.value || null; writeURL(); if (mods.smileChart) mods.smileChart.redraw(true); });
     mods.smile = h("div", { class: "dk-smile", id: "dkSmile" });
@@ -644,8 +644,7 @@
       if (!p) { readout.classList.remove("is-on"); return; }
       const r = p.r;
       readout.replaceChildren(C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"),
-        popP(r) === null ? null : C.part("Real " + fmtPct(popP(r), 0), "k"));
+        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"));
       readout.classList.add("is-on");
       const rw = readout.offsetWidth;
       readout.style.left = Math.max(0, Math.min(w - rw, x(p.x) - rw / 2)) + "px";

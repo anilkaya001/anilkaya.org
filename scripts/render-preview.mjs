@@ -116,7 +116,7 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
 await shot("board-long",
   inline(stubFetch({ "board?side=long": FIX.boardLong }) +
     pages.FLOWS_PAGES.sidePage({ username: "preview", side: "long" }),
-    ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-board.js"]),
+    ["nav.js", "flows-ui.js", "flows-board.js"]),
   { probe: () => {
       const c = [...document.querySelectorAll(".fd-card")];
       return { cards: c.length,
@@ -128,7 +128,7 @@ await shot("board-long",
 await shot("overview",
   inline(stubFetch(FIX.overview) +
     pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
-    ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-overview.js"]),
+    ["nav.js", "flows-ui.js", "flows-overview.js"]),
   { height: 1600, probe: () => {
       const r = [...document.querySelectorAll(".cc-region")];
       return { regions: r.length,
@@ -157,31 +157,12 @@ await shot("overview",
           const drawn = [...document.querySelectorAll("#flowsMain svg")]
             .filter((s) => s.getAttribute("aria-hidden") !== "true")
             .filter((s) => s.querySelector("path, rect, circle, line, polyline, polygon"));
-          const bare = drawn.filter((s) => s.dataset.fxCursor !== "on");
-          const left = bare.filter((s) => s.dataset.fxRead !== "face");
           const where = (s) => {
             const r = s.closest("section, .cc-region, [id]");
             return (r && (r.id || r.className) || "?") + "." +
               (s.getAttribute("class") || "-");
           };
-          return { drawn: drawn.length, cursor: drawn.length - bare.length,
-                   face: bare.length - left.length,
-                   bare: [...new Set(left.map(where))].join(" ") };
-        })(),
-
-        reads: (() => {
-          const seenKind = new Set(), out = [];
-          for (const s of document.querySelectorAll('svg[data-fx-cursor="on"]')) {
-            const kind = s.getAttribute("class") || "-";
-            if (seenKind.has(kind)) continue;
-            seenKind.add(kind);
-            s.focus();
-            s.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-            const box = document.querySelector(".fx-read");
-            out.push(kind + ": " + (box && !box.hidden ? box.textContent.trim() : "SAID NOTHING"));
-            s.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-          }
-          return out;
+          return { drawn: drawn.length, where: [...new Set(drawn.map(where))].join(" ") };
         })() };
     } });
 
@@ -189,7 +170,7 @@ for (const [name, width] of [["overview-1000", 1000], ["overview-600", 600]]) {
   await shot(name,
     inline(stubFetch(FIX.overview) +
       pages.FLOWS_PAGES.overviewPage({ username: "preview", summary: FIX.summary }),
-      ["nav.js", "flows-cursor.js", "flows-ui.js", "flows-overview.js"]),
+      ["nav.js", "flows-ui.js", "flows-overview.js"]),
     { width, height: 1600, probe: () => ({
         tiles: document.querySelectorAll(".cc-tile").length,
         tileValueLines: new Set([...document.querySelectorAll(".cc-tile-v")]
@@ -411,30 +392,13 @@ if (CARDS && existsSync(CARDS)) {
           const drawn = [...document.querySelectorAll(".ft-panel svg, #ftGrid svg")]
             .filter((s) => s.getAttribute("aria-hidden") !== "true")
             .filter((s) => s.querySelector("path, rect, circle, line, polyline, polygon"));
-          const bare = drawn.filter((s) => s.dataset.fxCursor !== "on");
           const where = (s) => {
             const p = s.closest("[data-panel]");
-
             return ((p && p.dataset.panel) || (s.closest("section") || {}).id || "?") +
               "." + (s.getAttribute("class") || "-");
           };
-
-          const face = bare.filter((s) => s.dataset.fxRead === "face");
-          const left = bare.filter((s) => s.dataset.fxRead !== "face");
-          return { drawn: drawn.length, cursor: drawn.length - bare.length,
-                   face: face.length, bare: [...new Set(left.map(where))].join(" ") };
-        })(),
-        cursors: document.querySelectorAll('svg[data-fx-cursor="on"]').length,
-
-        reads: [...document.querySelectorAll('svg[data-fx-cursor="on"]')].map((s) => {
-          s.focus();
-          s.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-          const box = document.querySelector(".fx-read");
-          const said = box && !box.hidden ? box.textContent.trim() : "";
-          s.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-          const p = s.closest("[data-panel]");
-          return ((p && p.dataset.panel) || "?") + ": " + (said || "SAID NOTHING");
-        }) };
+          return { drawn: drawn.length, where: [...new Set(drawn.map(where))].join(" ") };
+        })() };
     });
 
     await page.evaluate(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));

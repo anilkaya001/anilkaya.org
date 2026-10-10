@@ -8,6 +8,9 @@ import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import * as NEURON from "../shared/flows-neuron.js";
 import { screenReading } from "../shared/flows-neuron-screen.js";
 import { briefAge } from "../shared/flows-ask.js";
+import { DEALER_CLAUSE } from "../shared/flows-reading.js";
+import { earningsHistory } from "../shared/flows-catalysts.js";
+import { cardXPayload } from "../scripts/flows-legs/card-x.mjs";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1238,7 +1241,7 @@ try {
     const ivr = (v) => { const c = clone(card); c.panels.pricedMove.ivRank = v; return c; };
     await mount(page, ivr(0.52));
     ok(/IV rank\n52\b/.test(await page.evaluate(() => document.querySelector("#m-vol .ui-metrics").innerText)), "a 0–1 rank reads as 52 of 100");
-    ok(/percentile of its own year/.test(await modInfo(page, "m-vol")), "and says whose year it is a percentile of");
+    ok(/where today sits between its 1-year low and high/.test(await modInfo(page, "m-vol")), "and says what the rank measures: today's place between the year's low and high");
     await mount(page, ivr(52.15));
     const w1 = await page.evaluate(() => { const m = [...document.querySelectorAll("#m-vol .ui-metric")].find((n) => /IV rank/.test(n.innerText)); const b = m && m.querySelector(".ui-state"); return b ? [b.dataset.state, (window.FlowsUI.openInfo(b), document.getElementById("fxPop").innerText)] : null; });
     ok(w1 && w1[0] === "withheld" && /52\.15/.test(w1[1]) && /fraction of one/.test(w1[1]), "a rank in the wrong unit is withheld under its own mark, never multiplied into a percentage");
@@ -1253,6 +1256,22 @@ try {
     eq(await band({ richness: "rich", richnessFrom: "forward", iv30: 0.419, rv30: 0.356, rvForward: 0.46, vrpTrailing: 0.063, vrpForward: -0.041 }), "fair", "a schema-3 card derives the band from the forward premium against the GARCH forecast");
     eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned", "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
     eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");
+    const sq = clone(card);
+    sq.panels.ivSurface.iv[0][0] = null;
+    await mount(page, sq);
+    ok(await pickView(page, "m-vol", "Surface"), "the volatility module offers the Surface view");
+    const nq = await page.evaluate(() => {
+      const mod = document.getElementById("m-vol");
+      const key = [...mod.querySelectorAll(".ui-key")].find((k) => /Not quoted/.test(k.textContent));
+      const cell = mod.querySelector("svg rect.void");
+      if (!key || !cell) return { key: !!key, cell: !!cell };
+      const ki = getComputedStyle(key.querySelector("i")), cs = getComputedStyle(cell);
+      return { key: true, cell: true, bg: ki.backgroundColor, style: ki.borderTopStyle, color: ki.borderTopColor, cellFill: cs.fill, cellStroke: cs.stroke, cellDash: cell.getAttribute("stroke-dasharray") };
+    });
+    ok(nq.key && nq.cell, `SURFACE: an unquoted cell is drawn as a void and the legend keys it (key ${nq.key}, void ${nq.cell})`);
+    ok(nq.bg === "rgba(0, 0, 0, 0)" && nq.cellFill === "none", `SURFACE: the "Not quoted" key has no fill, as the void cell has none (${nq.bg})`);
+    ok(nq.style === "dashed" && !!nq.cellDash, "SURFACE: and a dashed outline, as the void cell has");
+    eq(nq.color, nq.cellStroke, "SURFACE: in the void's own colour, so the key shows the mark the chart draws");
     eq(errors.length, 0, `the volatility readings throw nothing (${errors.join("; ")})`);
     await page.close();
   }
@@ -1386,6 +1405,29 @@ try {
     dead.panels.variation = { status: "unavailable", reason: "neither the open-interest gamma book nor the day's flow ladder is on this card" };
     await mount(page, dead);
     ok(/neither the open-interest gamma book/i.test(await modInfo(page, "m-hedge")), "a silent model draws its reason and no number");
+    const zg = clone(card);
+    const live = [];
+    zg.panels.variation.grid.cells.forEach((row, r) => (row || []).forEach((c, j) => { if (c && typeof c.flow === "number") live.push([r, j]); }));
+    ok(live.length >= 2, "the hedge grid fixture has two measured cells to set to zero and to an unmeasured flow");
+    const [zr, zj] = live[0], [nr, nj] = live[1];
+    zg.panels.variation.grid.cells[zr][zj].flow = 0;
+    zg.panels.variation.grid.cells[nr][nj].flow = null;
+    const absentBefore = zg.panels.variation.grid.cells.flat().filter((c) => !c).length;
+    await mount(page, zg);
+    await pickView(page, "m-hedge", "Grid");
+    const g = await page.evaluate(() => {
+      const svg = [...document.querySelectorAll("#m-hedge svg")].find((x) => x.querySelector("rect.is-absent, rect.is-zero"));
+      if (!svg) return null;
+      const rect = (r) => ({ fill: r.getAttribute("fill"), stroke: r.getAttribute("stroke"), op: r.getAttribute("fill-opacity") });
+      return { zero: [...svg.querySelectorAll("rect.is-zero")].map(rect), absent: [...svg.querySelectorAll("rect.is-absent")].map(rect),
+        fill4: window.FlowsUI.cssVar("--fill-4"), label3: window.FlowsUI.cssVar("--label-3") };
+    });
+    ok(g, "the hedge grid is drawn with its zero and absent cells marked");
+    eq(g.zero.length, 1, "HEDGE GRID: a flow of exactly zero is its own cell");
+    eq(g.zero[0].fill, g.fill4, "HEDGE GRID: a fixed neutral --fill-4, not a magnitude-scaled tint of --label-3");
+    ok(g.zero[0].stroke === g.label3 && g.zero[0].op === null, `HEDGE GRID: outlined in --label-3 at full opacity (${g.zero[0].stroke})`);
+    eq(g.absent.length, absentBefore + 1, "HEDGE GRID: a present cell whose flow is null is drawn as absent, beside the cells that were never sent, not as zero");
+    ok(g.absent.every((c) => c.stroke === null && c.fill === g.fill4), "HEDGE GRID: and an absent cell carries no outline, so zero and absence differ without the text");
     await page.close();
   }
 
@@ -1827,7 +1869,7 @@ try {
     ok(a && /Stand aside/.test(a.text) && /priced · No positive edge/.test(a.text), `a card the engine stands aside on says so as a verdict with its count and reason (${a && a.text})`);
     ok(a && !a.silent, "and draws no silence box inside a card: standing aside is a finding");
     ok(a && a.text.includes(close.family.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())), "the closest structure is named");
-    const t = await infoText(page, "#ftVerdict .ft-aside");
+    const t = await infoText(page, "#ftVerdict .ft-aside > .ui-info");
     ok(/no structure it priced has a positive expected P&L/.test(t) && t.includes(close.id), "and the disclosure states the rule it failed and the closest structure's figures");
     const idx = clone(full);
     idx.depth = "index"; idx.score = null; idx.conviction = null; idx.fam = {};
@@ -2227,6 +2269,44 @@ try {
     }
     {
       const card = clone(full);
+      const calls = [];
+      const tape = (n) => {
+        calls.push(n);
+        const body = tapeOf(session, n === 1 ? "18:00" : "20:00", at + (n - 1) * 5000);
+        body.ticker = card.ticker;
+        return { body, headers: verdict(n === 1 ? "stale" : "closed", n === 1 ? "missed-close" : "session-final") };
+      };
+      const { page, errors } = await open(tape, undefined, { card });
+      await page.waitForSelector("#m-flow .ui-seg-i", { timeout: 10000 });
+      const labels = await page.evaluate(() => [...document.querySelectorAll("#m-flow .ui-seg-i")].map((b) => ({ t: b.textContent.trim(), on: b.getAttribute("aria-selected") === "true" })));
+      const start = (labels.find((l) => l.on) || {}).t;
+      let picked = null;
+      for (const l of labels.filter((x) => !x.on).reverse()) {
+        if (!(await pickView(page, "m-flow", l.t))) continue;
+        if (await page.evaluate((t) => !!document.querySelector(`#m-flow .ft-view[data-view="${t}"]`), l.t)) { picked = l.t; break; }
+      }
+      ok(picked && picked !== start, `VIEW KEPT: the reader moves the Flow module off its default view (${start} → ${picked})`);
+      await page.evaluate(() => { const b = document.querySelector("#m-flow .ui-seg-i[aria-selected=true]"); b.focus(); document.getElementById("m-flow").dataset.old = "1"; });
+      await page.waitForFunction(() => { const m = document.getElementById("m-flow"); return m && !m.dataset.old; }, null, { timeout: 15000 });
+      const got = await page.evaluate(() => {
+        const m = document.getElementById("m-flow");
+        const view = m.querySelector(".ft-view");
+        const sel = m.querySelector(".ui-seg-i[aria-selected=true]");
+        const running = view ? view.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
+        return { view: view && view.dataset.view, still: !!(view && view.classList.contains("is-still")), sel: sel && sel.textContent.trim(),
+          focus: document.activeElement === sel, running };
+      });
+      ok(calls.length >= 2, `the stale tape was read again and the module rebuilt from the new read (${calls.length} reads)`);
+      eq(got.view, picked, `a tape refresh keeps the view the reader chose (data-view ${got.view}), where it used to fall back to ${start}`);
+      eq(got.sel, picked, "and the segmented control still marks that view");
+      ok(got.focus, "focus returns to the segmented control the reader was on, instead of falling to the page body");
+      ok(got.still, "the rebuilt view is marked still");
+      eq(got.running, 0, "so no chart in it replays its entrance on the refresh");
+      eq(errors.length, 0, `and the refresh throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
       const rthAt = Date.parse(card.sessionDate + "T15:30:00Z");
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
       const errors = [];
@@ -2270,6 +2350,124 @@ try {
       eq(errors.length, 0, "without throwing");
       await page.close();
     }
+  }
+
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const held = TICKER_SRC.match(/const DEALER_CLAUSE = "([^"]*)";/);
+    eq(held && held[1], DEALER_CLAUSE, "the ticker's dealer clause is the reading's DEALER_CLAUSE, word for word, so the page and the model's vet hold one convention");
+    const chipLead = (label) => page.evaluate((label) => {
+      const b = [...document.querySelectorAll("#ftChips .ui-gchip")].find((n) => n.querySelector(".ui-chip-l").textContent === label);
+      if (!b) return null;
+      window.FlowsUI.openInfo(b);
+      const t = document.querySelector("#fxPop .ui-lead").textContent;
+      window.FlowsUI.closeInfo();
+      return t;
+    }, label);
+    const engineSummary = (card) => ({ status: "ok", scope: card.ticker, llm: false, model: null, generatedAt: card.generatedAt, engine: true, verdict: null, verdictWord: null, claims: [], refused: [], ideas: [],
+      summary: "The engine priced this name. A second sentence.", provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.", context: null });
+    for (const [label, hedge] of [["short", "buys rallies and sells dips, which amplifies moves."], ["long", "sells rallies and buys dips, which dampens moves."]]) {
+      const c = clone(full);
+      c.regime = { ...(c.regime || {}), label };
+      await mount(page, c);
+      eq(await chipLead("Dealer γ"), "Dealers are " + label + " gamma " + DEALER_CLAUSE + ": their hedging " + hedge,
+        `the ${label}-gamma chip asserts a hedging direction only on the vendor's convention, and says so in DEALER_CLAUSE's words`);
+    }
+    const flat = clone(full);
+    flat.regime = { ...(flat.regime || {}), label: null };
+    await mount(page, flat);
+    eq(await chipLead("Dealer γ"), "No regime reading on this card.", "and a card with no regime asserts no direction, so it carries no convention clause either");
+    const ranked = clone(full);
+    ranked.panels.pricedMove.ivRank = 0.52;
+    ranked.engine.noTrade = null;
+    await mount(page, ranked, { neuron: engineSummary(ranked) });
+    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks.",
+      "the IV rank chip names the statistic it shows: a place between the year's low and high, not a percentile of the year");
+    ok(/\nIV rank\n52 of 100: where today sits between its 1-year low and high\n/.test(await modInfo(page, "m-vol")), "and so does the volatility module's own line for it");
+    ok(!/percentile of its own year/.test(TICKER_SRC), "no line of the ticker calls the rank a percentile any more");
+    ok(!/high, for 30-day|30-day implied volatility (sits|below)/.test(TICKER_SRC),
+      "and no line states the rank's or the percentile's tenor: the screener's iv_rank and iv percentile document none (the rank's schema reference in the vendor spec is a copy of the 30-day IV's), so no chip guesses it");
+    eq((TICKER_SRC.match(/The vendor does not document which tenor (of implied volatility )?it (ranks|reads)\./g) || []).length, 3,
+      "each of the three leads that describe the screener's rank or percentile (the card's IV rank chip and the screen tier's IV rank and IV pct chips) says the tenor is undocumented");
+    const ideas = await page.evaluate(() => {
+      const k = document.querySelector("#ftVerdict .ft-ideas-k");
+      const tag = k && k.querySelector(".ui-calib");
+      if (!tag) return { ideas: document.querySelectorAll("#ftVerdict .ft-idea[data-structure]").length, tag: null };
+      window.FlowsUI.openInfo(tag);
+      const out = { ideas: document.querySelectorAll("#ftVerdict .ft-idea[data-structure]").length, tag: tag.textContent, title: document.getElementById("fxPopT").textContent,
+        lead: document.querySelector("#fxPop .ui-lead").textContent, after: tag.previousElementSibling ? tag.previousElementSibling.textContent : null };
+      window.FlowsUI.closeInfo();
+      return out;
+    });
+    ok(ideas.ideas > 0, `the engine's ideas are drawn (${ideas.ideas})`);
+    eq(ideas.tag, "Not yet calibrated", "and their key, where the real-world chance and EV are named, says the probability is not yet calibrated");
+    eq(ideas.after, "Real world", "beside the real-world key itself");
+    eq(ideas.title + " | " + ideas.lead, "Not yet calibrated | Model probability, not yet checked against outcomes.", "its popover is the plan's sentence");
+    const worlds = await page.evaluate(() => {
+      const m = document.getElementById("m-worlds");
+      const keys = m ? [...m.querySelectorAll(".ui-legend .ui-key")].map((n) => n.textContent) : [];
+      return { real: keys.includes("Real world"), tags: m ? m.querySelectorAll(".ui-legend .ui-calib").length : 0 };
+    });
+    ok(worlds.real, "the two-worlds module draws a real-world law for this card");
+    eq(worlds.tags, 1, "and its legend, above the lead idea's real-world chance, carries the same note once");
+    const aside = clone(full);
+    aside.engine.ideas = [];
+    aside.engine.noTrade = { code: "ev.none-positive", closest: aside.engine.structures[0].id };
+    await mount(page, aside, { neuron: { ...engineSummary(aside), tier: "stand-aside", code: "ev.none-positive", verdict: "stand-aside", verdictWord: "Stand aside" } });
+    const close = await page.evaluate(() => { const c = document.querySelector("#ftVerdict .ft-aside .ft-aside-c"); return c ? { text: c.innerText.replace(/\s+/g, " "), tag: !!c.querySelector(".ui-calib") } : null; });
+    ok(close && close.tag, `a stand-aside that prints its closest structure's real-world chance and EV carries the note too (${close && close.text})`);
+    const cols = ["report date", "report time", "expected move (fraction)", "1d move", "1w move", "pre 1w move", "long straddle 1d", "long straddle 1w"];
+    const prior = new Date(Date.parse(full.sessionDate + "T00:00:00Z") - 120 * 864e5).toISOString().slice(0, 10);
+    const rows = [[prior, "postmarket", 0.05, 0.08, 0.09, 0.01, 1.4, 0.6], [prior, "postmarket", 0.05, -0.02, -0.03, 0.0, -0.3, -0.5],
+      [prior, "premarket", 0.04, 0.06, 0.04, -0.01, 0.9, null], [prior, "postmarket", 0.06, 0.03, 0.05, 0.02, null, null]];
+    const earnings = { status: "ok", next: null, n: 4, beat: 0.5, ls1dHit: 2 / 3, ls1wHit: 0.5, medianRatio: 1.1, medianAbsMove: 0.045, medianExpected: 0.05,
+      drift: null, runup: 0.005, events: rows, eventCols: cols, masked: 0, minEvents: 4, rules: {} };
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), earnings } });
+    const ev = await page.evaluate(() => {
+      const m = document.getElementById("m-events");
+      if (!m) return null;
+      const subs = Object.fromEntries([...m.querySelectorAll(".ui-metric")].map((x) => [(x.querySelector(".ui-metric-l") || {}).textContent, (x.querySelector(".ui-metric-s") || {}).textContent || null]));
+      return { subs };
+    });
+    ok(ev, "the Events module draws for a card-x that holds an earnings history");
+    eq(ev.subs.Beat, "2 of 4 moved > priced", "D6: the beat share says how many reports it is a share of, beside the share itself, so 50% of four reports is not read as a rate");
+    eq(ev.subs.Straddle, "2 of 3 hit, 1d", "and the straddle hit rate counts only the reports the vendor published a straddle value for: three of the four here, not the four the beat share reads");
+    const evInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Beat share 50% \(2 of 4 reports\)/.test(evInfo), `the popover's beat share carries the same count (${evInfo.slice(0, 400)})`);
+    ok(/Long straddle 1d \/ 1w 67% \/ 50% profitable \(2 of 3 \/ 1 of 2 reports\)/.test(evInfo), "and the 1d and 1w straddle rates each carry their own count");
+    const s0 = Date.parse(full.sessionDate + "T00:00:00Z");
+    const d1 = [0.6, -0.4, 0.8, 0.3, -0.2, 0.5, -0.1, 0.9, 0.4, -0.3, 0.7, -0.5], w1 = [0.5, -0.4, 0.6, -0.3, 0.2, -0.2, -0.1, 0.4, 0.3, -0.3, 0.6, -0.5];
+    const vendorRows = d1.map((v, i) => ({ report_date: new Date(s0 - (40 + 91 * i) * 864e5).toISOString().slice(0, 10), report_time: "postmarket", expected_move_perc: 0.05,
+      post_earnings_move_1d: i % 2 ? -0.04 : 0.06, post_earnings_move_1w: i % 2 ? -0.05 : 0.07, pre_earnings_move_1w: 0.01, long_straddle_1d: v, long_straddle_1w: w1[i] }));
+    const hist12 = earningsHistory(vendorRows, { sessionDate: full.sessionDate });
+    eq(hist12.status + " " + hist12.events.length + " " + hist12.ls1dN + " " + hist12.ls1wN, "ok 12 12 12", "the nightly publishes the straddle denominators beside the shares: twelve reports, every one with a 1d and a 1w straddle value");
+    eq(Math.round(hist12.ls1dHit * 12) + " " + Math.round(hist12.ls1wHit * 12), "7 6", "seven of the twelve 1d straddles and six of the twelve 1w straddles paid");
+    const whole = cardXPayload(full.ticker, { earnings: hist12 }, { sessionDate: full.sessionDate });
+    const cutX = cardXPayload(full.ticker, { earnings: hist12 }, { sessionDate: full.sessionDate, budgetBytes: whole.bytes - 40 });
+    ok(cutX.shed.includes("earnings.events") && cutX.earnings.events.length === 8, `a card-x over its budget sheds the event rows to the eight newest while the shares stay over twelve (${cutX.shed.join(",")})`);
+    const cutRows = cutX.earnings.events.filter((r) => r[6] !== null);
+    eq(cutRows.filter((r) => r[6] > 0).length + " of " + cutRows.length, "5 of 8", "so a count rebuilt from the rows that are left would read 5 of 8 against a 58% share");
+    const evSubs = () => page.evaluate(() => {
+      const m = document.getElementById("m-events");
+      return m ? Object.fromEntries([...m.querySelectorAll(".ui-metric")].map((x) => [(x.querySelector(".ui-metric-l") || {}).textContent, (x.querySelector(".ui-metric-s") || {}).textContent || null])) : null;
+    });
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), ...cutX } });
+    const cutSubs = await evSubs();
+    eq(cutSubs && cutSubs.Straddle, "7 of 12 hit, 1d", "with the denominators published, the straddle count is the nightly's own: 7 of 12, not 5 of 8");
+    const cutInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Long straddle 1d \/ 1w 58% \/ 50% profitable \(7 of 12 \/ 6 of 12 reports\)/.test(cutInfo) && !/of 8/.test(cutInfo), `and the popover gives the same counts and no count over the shed rows (${cutInfo.slice(0, 600)})`);
+    const oldX = clone(cutX);
+    delete oldX.earnings.ls1dN;
+    delete oldX.earnings.ls1wN;
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), ...oldX } });
+    const oldSubs = await evSubs();
+    eq(oldSubs && oldSubs.Straddle, "1d hit rate", "a card-x written before the denominators were published, whose event rows were shed, prints no count rather than one over the rows that are left");
+    const oldInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Long straddle 1d \/ 1w 58% \/ 50% profitable/.test(oldInfo) && !/of 8/.test(oldInfo) && !/profitable \(/.test(oldInfo), `and its popover keeps the shares and drops the count (${oldInfo.slice(0, 600)})`);
+    eq(errors.length, 0, `the honesty copy throws nothing (${errors.join("; ")})`);
+    await page.close();
   }
 
 } finally {

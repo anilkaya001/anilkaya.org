@@ -503,6 +503,45 @@ try {
     await page.close();
   }
 
+  for (const width of [320, 390, 1440]) {
+    const page = await openDesk(browser, { payloads: { NVDA: nvdaAfter() }, query, viewport: { width, height: 900 }, errors });
+    await ready(page, 9);
+    const head = await page.evaluate(() => {
+      const hd = document.querySelector("#dkLinesM .ui-mod-h");
+      const tag = hd && hd.querySelector(".ui-calib");
+      const b = tag ? tag.getBoundingClientRect() : null, r = hd ? hd.getBoundingClientRect() : null;
+      return { text: tag ? tag.textContent : null, next: tag && tag.nextElementSibling ? tag.nextElementSibling.id : null,
+        inside: !!(b && r && b.left >= r.left - 1 && b.right <= r.right + 1), clipped: tag ? tag.scrollWidth > tag.clientWidth + 1 : null,
+        page: document.documentElement.scrollWidth > innerWidth + 1, tags: document.querySelectorAll(".ui-calib").length };
+    });
+    eq(head.text, "Not yet calibrated", `at ${width}px the Lines header, which ranks by EV real world and shows the real-world Win %, says the probability is not calibrated`);
+    eq(head.next, "deskRank", "and it sits beside the rank option that can order the lines by that uncalibrated figure");
+    eq(head.tags, 1, "one note on the page, not one per line");
+    ok(head.inside && !head.clipped && !head.page, `and at ${width}px it fits its header, unclipped, with no page overflow`);
+    if (width === 1440) {
+      const text = await openInfo(page, page.locator("#dkLinesM .ui-calib"));
+      const pop = await page.evaluate(() => ({ title: document.getElementById("fxPopT").textContent, lead: document.querySelector("#fxPop .ui-lead").textContent }));
+      same(pop, { title: "Not yet calibrated", lead: "Model probability, not yet checked against outcomes." }, `its popover says what the chip means, in the words the plan fixed (${text})`);
+      ok(/until 100 effectively independent outcomes are scored/.test(text), "and when it will come off");
+      await closeInfo(page);
+      const cond = await page.evaluate(() => [undefined, null, {}, { nEff: 99 }, { nEff: 99.9 }, { nEff: "150" }, { nEff: NaN }, { nEff: 100 }, { nEff: 412 }]
+        .map((c) => { const n = window.FlowsUI.calibTag(c); return n ? n.textContent : null; }));
+      same(cond, ["Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", null, null],
+        "the note shows while no calibration record is held, or its effective n is under 100 or not a number, and comes off only at nEff 100 or more");
+      await page.locator("#dkScatter .tl-scrub").focus();
+      const reads = [];
+      for (let k = 0; k < 12; k++) {
+        await page.keyboard.press("ArrowRight");
+        const t = await page.$eval("#dkScatter .ui-readout", (n) => n.classList.contains("is-on") ? n.textContent : null);
+        if (t && !reads.includes(t)) reads.push(t);
+      }
+      const realRows = await page.$$eval("#dkList .dk-row", (rs) => rs.filter((r) => /\d%/.test((r.querySelector(".dk-pp") || {}).textContent || "")).length);
+      ok(reads.length > 1 && realRows > 0, `the frontier is walked point by point over lines that hold a real-world chance (${reads.length} points, ${realRows} rows)`);
+      ok(reads.every((t) => !/Real/.test(t)), `and its readout, in a module with no calibration note, prints no real-world chance; that figure stays in the Lines module under the note (${reads.join(" | ")})`);
+    }
+    await page.close();
+  }
+
   for (const width of [1060, 1440]) {
     const page = await openDesk(browser, { payloads: { NVDA: nvdaAfter() }, query: query + "&bp=25000", viewport: { width, height: 900 }, errors });
     await ready(page, 9);
@@ -541,4 +580,4 @@ console.log(`✓ flows-desk-client: ${checks} assertions — the frontier's Pare
   `one capital basis per line, a rebased or mismatched chain announced and never ranked, the plan computed over the tenor window, ` +
   `a balance that refuses 25,5k and round-trips its cents, tenor buckets pinned by label at the day, and the smile's volatility basis stated, and a quote origin that follows the Eastern clock, half days included, and never the future, ` +
   `a dash that carries the engine's reason and code, an in-the-money line read from the other side's quote, an earnings gate, ` +
-  `the rate and dividend yield each line was priced at, and a grade in words`);
+  `the rate and dividend yield each line was priced at, a grade in words, and a real-world chance that says it is not yet calibrated`);

@@ -275,6 +275,278 @@ try {
     eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
     await page.close();
   }
+  {
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: ["NVDA", "AMD"].map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
+    const html = PAGES.sidePage({ username: "test", side: "long" });
+    const noPopover = () => {
+      for (const k of ["popover", "showPopover", "hidePopover", "togglePopover"]) delete HTMLElement.prototype[k];
+      const m = Element.prototype.matches;
+      Element.prototype.matches = function (sel) {
+        if (/:popover-open/.test(sel)) throw new DOMException("'" + sel + "' is not a valid selector.", "SyntaxError");
+        return m.call(this, sel);
+      };
+    };
+    const tapAll = async (page) => {
+      await page.click("#fxFresh");
+      const infos = await page.$$("#flowsMain [data-info]");
+      for (const b of infos.slice(0, 6)) { await b.scrollIntoViewIfNeeded(); await b.click(); }
+      await page.mouse.click(5, 400);
+      await page.keyboard.press("Escape");
+      return infos.length;
+    };
+    const look = (page) => page.evaluate(() => {
+      const o = document.getElementById("fxOld"), r = o && o.getBoundingClientRect();
+      const l = o && o.querySelector(".fx-fresh-l"), lr = l && l.getBoundingClientRect();
+      return {
+        old: o ? { text: o.textContent, shown: o.innerText, title: o.title, w: r.width, right: r.right, tag: o.tagName, labelW: lr.width, labelRight: lr.right } : null,
+        pop: !!document.getElementById("fxPop"),
+        expanded: [...document.querySelectorAll('[aria-expanded="true"][data-info], #fxFresh[aria-expanded="true"]')].length,
+        over: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth,
+        vw: innerWidth,
+      };
+    });
+
+    for (const width of [1280, 320]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.addInitScript(noPopover);
+      await mount(page, { html, url: "/flows/long/", answer });
+      ok(await page.evaluate(() => !("popover" in HTMLElement.prototype) && typeof HTMLElement.prototype.showPopover === "undefined"), "the emulated browser has no Popover API");
+      const n = await tapAll(page);
+      ok(n > 0, `the board offers disclosures to tap (${n})`);
+      const seen = await look(page);
+      eq(errors.length, 0, `A BROWSER WITHOUT THE POPOVER API: tapping the freshness pill and ${Math.min(n, 6)} disclosures, a tap outside and Escape throw nothing at ${width} px (${errors.join("; ")})`);
+      ok(seen.old && seen.old.w > 0 && seen.old.labelW > 0 && /Old browser/.test(seen.old.shown), `THE BAR SAYS SO: the old-browser banner is shown with its label at ${width} px (${JSON.stringify(seen.old)})`);
+      ok(seen.old.labelRight <= seen.vw, `and the label sits inside the viewport at ${width} px (right edge ${seen.old.labelRight})`);
+      ok(/older than Flows supports/.test(seen.old.title) && /older than Flows supports/.test(seen.old.text), "and carries the sentence, visible to a pointer as its title and to a screen reader as text");
+      eq(seen.old.tag, "SPAN", "the banner is not a control: there is nothing behind it to open");
+      if (width === 1280) {
+        const paint = () => page.evaluate(() => { const s = getComputedStyle(document.getElementById("fxOld")); return [s.color, s.backgroundColor, s.cursor].join(" "); });
+        const rest = await paint();
+        await page.hover("#fxOld");
+        eq(await paint(), rest, "and a pointer over it changes neither its colour, its background nor its cursor");
+      }
+      ok(seen.old.right <= seen.vw, `the banner sits inside the viewport at ${width} px (right edge ${seen.old.right})`);
+      eq(seen.over, 0, `and the page does not scroll sideways at ${width} px`);
+      eq(seen.pop, false, "no popover element is made where it cannot be shown");
+      eq(seen.expanded, 0, "and no trigger is left claiming it is expanded");
+      await page.close();
+    }
+
+    const gated = (key) => (key.startsWith("board?side=long") ? { status: 401, body: { error: { code: "unauthorized", message: "Authentication required" } } } : null);
+    const edges = (page) => page.evaluate(() => {
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, w: r.width }; };
+      const g = document.getElementById("fxGate"), o = document.getElementById("fxOld");
+      return {
+        vw: innerWidth, gate: box(g), gateLabel: box(g && g.querySelector(".fx-fresh-l")), gateText: g ? g.innerText : null,
+        old: box(o), oldLabel: box(o && o.querySelector(".fx-fresh-l")), gated: document.getElementById("fxBar").classList.contains("is-gated"),
+      };
+    });
+    for (const popover of [false, true]) {
+      for (const width of [320, 375, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: 800 } });
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(String(e)));
+        if (!popover) await page.addInitScript(noPopover);
+        await page.addInitScript((t) => { try { sessionStorage.setItem("flows:gate", String(t)); } catch {} }, TUE_1330);
+        await mount(page, { html, url: "/flows/long/", answer: gated });
+        const e = await edges(page);
+        const who = popover ? "WITH the Popover API" : "WITHOUT the Popover API";
+        ok(e.gate && e.gate.w > 0, `SIGNED OUT ${who} at ${width} px: the sign-in gate is shown (${JSON.stringify(e)})`);
+        ok(/sign in/.test(e.gateText) && e.gateLabel.w > 0, `and it reads "sign in" at ${width} px (${JSON.stringify(e.gateText)})`);
+        ok(e.gate.right <= e.vw && e.gateLabel.right <= e.vw, `and the whole gate, its link included, sits inside the viewport at ${width} px (right edge ${e.gate.right} of ${e.vw})`);
+        eq(e.gated, true, "the bar knows a gate is shown");
+        if (popover) eq(e.old, null, "and no old-browser banner competes with it");
+        else {
+          ok(e.old.w > 0 && e.old.right <= e.gate.left, `the old-browser glyph stays beside the gate, not under it (${JSON.stringify(e.old)})`);
+          eq(e.oldLabel.w, 0, `and gives the gate its label's room at ${width} px`);
+        }
+        eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+        await page.close();
+      }
+    }
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, { html, url: "/flows/long/", answer });
+    eq(await page.evaluate(() => !!document.getElementById("fxOld")), false, "A BROWSER WITH THE POPOVER API shows no old-browser banner");
+    const b = await page.$("#flowsMain [data-info]");
+    await b.click();
+    ok(await page.evaluate(() => document.getElementById("fxPop").matches(":popover-open")), "and a tapped disclosure still opens its popover");
+    await page.keyboard.press("Escape");
+    eq(await page.evaluate(() => document.getElementById("fxPop").matches(":popover-open")), false, "which Escape still closes");
+    eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+    await page.close();
+  }
+  {
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: ["NVDA", "AMD", "MSFT"].map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
+    const html = PAGES.sidePage({ username: "test", side: "long" });
+    const lostFrom = (before, after) => before.all.filter((k) => !after.all.includes(k));
+    const state = (page) => page.evaluate(() => {
+      const dock = document.getElementById("askDock");
+      const panel = document.getElementById("askDockPanel");
+      const sel = 'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]';
+      const behind = [...document.querySelectorAll(sel)].filter((el) => {
+        if (dock.contains(el) || el.closest("[inert]") || el.disabled || el.tabIndex < 0) return false;
+        if (!el.getClientRects().length || getComputedStyle(el).visibility === "hidden") return false;
+        return true;
+      });
+      const a = document.activeElement;
+      return {
+        open: dock.classList.contains("is-open"), hidden: panel.hidden,
+        role: panel.getAttribute("role"), modal: panel.getAttribute("aria-modal"),
+        behind: behind.length, sample: behind.slice(0, 4).map((el) => el.id || el.tagName + "." + el.className),
+        all: behind.map((el) => el.id || el.getAttribute("href") || el.tagName + "." + el.className + "." + (el.textContent || "").trim().slice(0, 20)),
+        inert: ["fxSide", "fxBar", "flowsMain", "fxTabs"].filter((id) => { const n = document.getElementById(id); return n && n.inert; }),
+        skipInert: document.querySelector(".flows-skip").inert,
+        anyInert: document.querySelectorAll("[inert]").length,
+        focusIn: !!a && dock.contains(a), focus: a ? (a.id || a.tagName) : null,
+        pop: (() => { const p = document.getElementById("fxPop"); return !!(p && p.matches(":popover-open")); })(),
+        pal: (() => { const d = document.getElementById("fxPal"); return !!(d && d.open); })(),
+      };
+    });
+
+    {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      ok(before.behind >= 10 && !before.open, `THE ASK DOCK AT 390 PX: closed, the page offers ${before.behind} tabbable elements, so the count below is measuring something`);
+      eq(before.role, "dialog", "the panel is announced as a dialog below 1200 px, before it is ever opened");
+      const opener = await page.evaluate(() => {
+        const a = [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length);
+        a.focus();
+        return a === document.activeElement ? a.getAttribute("href") : null;
+      });
+      ok(opener, "a link in the page holds the focus before the dock opens");
+      await page.keyboard.press("?");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      ok(open.open && !open.hidden, "\"?\" opens the dock at 390 px, where its tab is not drawn");
+      eq(open.role, "dialog", "and the open panel is a dialog");
+      eq(open.modal, "true", "a modal one: aria-modal is true");
+      eq(open.behind, 0, `ZERO TABBABLE ELEMENTS BEHIND THE OPEN DOCK at 390 px, where the complementary panel left every one of them reachable: ${JSON.stringify(open.sample)}`);
+      eq(open.inert.join(","), "fxSide,fxBar,flowsMain,fxTabs", "because the rail, the bar, the page and the tab bar are inert");
+      eq(open.skipInert, true, "and the skip link with them");
+      const walk = [];
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press("Tab");
+        walk.push(await page.evaluate(() => {
+          const a = document.activeElement;
+          const dock = document.getElementById("askDock");
+          return !a || a === document.body || a === document.documentElement ? "page" : dock.contains(a) ? "dock" : (a.id || a.tagName);
+        }));
+      }
+      ok(walk.every((w) => w === "dock" || w === "page") && walk.filter((w) => w === "dock").length >= 20,
+         `thirty presses of Tab never leave the dock for the page behind it (${walk.join(" ")})`);
+
+      await page.focus("#askQ");
+      await page.evaluate(() => window.FlowsUI.openInfo(document.querySelector(".ak-dock-close"), { title: "A note", lead: "Opened from inside the dock." }));
+      ok((await state(page)).pop, "an explanation popover opened from inside the dock is open");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(700);
+      const afterPop = await state(page);
+      ok(!afterPop.pop && afterPop.open, `ESCAPE CLOSES THE POPOVER FIRST and leaves the dock open (${JSON.stringify(afterPop)})`);
+      eq(afterPop.behind, 0, `with the page behind it still inert (${JSON.stringify(afterPop.sample)})`);
+
+      await page.focus("#askQ");
+      await page.keyboard.press("Control+k");
+      await page.waitForFunction(() => { const d = document.getElementById("fxPal"); return !!(d && d.open); }, null, { timeout: 5000 });
+      await page.keyboard.press("Escape");
+      const afterPal = await state(page);
+      ok(!afterPal.pal && afterPal.open, `Escape in the search palette closes the palette and not the dock under it (${JSON.stringify(afterPal)})`);
+
+      await page.focus("#askQ");
+      await page.keyboard.press("Escape");
+      const shut = await state(page);
+      ok(!shut.open && shut.hidden, "a second Escape closes the dock");
+      eq(shut.anyInert, 0, "and gives the page back: nothing is left inert");
+      const lost = lostFrom(before, shut);
+      eq(lost.length, 0, `every element that was tabbable before the dock opened is tabbable again (${shut.behind} now, ${before.behind} before; lost ${JSON.stringify(lost)}; new ${JSON.stringify(shut.all.filter((k) => !before.all.includes(k)))})`);
+      eq(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("href")), opener,
+         "and the focus returns to the link that held it, not to a tab that is not drawn at this width");
+
+      await page.evaluate(() => [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length).focus());
+      await page.keyboard.press("?");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 5000 });
+      await page.click(".ak-dock-close");
+      const closed = await state(page);
+      ok(!closed.open && lostFrom(before, closed).length === 0 && closed.focus !== "BODY", `the close button gives the page and the focus back the same way (${JSON.stringify(closed)})`);
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      await page.click("#askDockTab");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      ok(open.role === "dialog" && open.modal === "true" && open.behind === 0, `AT 1100 PX the side sheet over its scrim is a modal dialog too (${JSON.stringify(open)})`);
+      await page.setViewportSize({ width: 1000, height: 900 });
+      await page.waitForTimeout(100);
+      eq((await state(page)).behind, 0, "and stays one when the window crosses the drawer's 1025 px line, which used to clear the inert flag on the page");
+      await page.keyboard.press("Escape");
+      const shut = await state(page);
+      ok(!shut.open && lostFrom(before, shut).length === 0, "Escape closes it and gives the page back");
+      eq(shut.focus, "askDockTab", "with the focus on the tab that opened it");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      await page.click("#askDockTab");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      eq(open.role, "complementary", "AT 1280 PX the open dock stays a side panel beside a usable page");
+      eq(open.modal, null, "with no aria-modal");
+      eq(open.anyInert, 0, "and nothing on the page is inert");
+      ok(open.behind >= 20, `the page beside it stays reachable by Tab (${open.behind} elements)`);
+      ok(await page.evaluate(() => {
+        const a = [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length);
+        a.focus();
+        return document.activeElement === a;
+      }), "a link in the page beside the open panel takes the focus");
+      await page.keyboard.press("Escape");
+      ok((await state(page)).open, "Escape pressed in the page does not close the side panel");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(100);
+      const narrowed = await state(page);
+      ok(narrowed.role === "dialog" && narrowed.modal === "true" && narrowed.behind === 0 && narrowed.focusIn,
+         `narrowed to 390 px while open, it becomes the modal dialog and takes the focus (${JSON.stringify(narrowed)})`);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.waitForTimeout(100);
+      const widened = await state(page);
+      ok(widened.open && widened.role === "complementary" && widened.modal === null && widened.anyInert === 0 && widened.behind >= 20,
+         `widened back to 1280 px, it is a side panel again and the page is live (${JSON.stringify(widened)})`);
+      await page.focus("#askQ");
+      await page.keyboard.press("Escape");
+      ok(!(await state(page)).open, "and Escape inside it still closes it");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
 } finally {
   await browser.close();
 }

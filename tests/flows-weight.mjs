@@ -134,6 +134,21 @@ for (const name of Object.keys(CEILING_KIB)) {
        "runs — the old page arrived at 422k and fetched 89k of drawers after it, which this table never saw");
   }
 
+  {
+    const ui = readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8");
+    const exported = ui.match(/const chart = Object\.freeze\(\{([\s\S]*?)\}\);/);
+    ok(exported && /\bline\b/.test(exported[1]) && /\bLEVELS\b/.test(exported[1]),
+       "the chart export list is found, so the next line reads it rather than nothing");
+    const dead = ["cone", "levels", "area"].filter((name) => new RegExp("\\b" + name + "\\b").test(exported[1]));
+    eq(dead.join(", "), "",
+       "FlowsUI.chart exports none of cone, levels or area: no page drew them, and they shipped on every Flows route");
+    ok(!/function (cone|levels|area)\(/.test(ui), "and their bodies are deleted, not merely unexported");
+    for (const route of measured) {
+      ok(!route.parts.some((part) => /^flows-cursor\.js/.test(part)), `no route links flows-cursor.js (${route.name})`);
+    }
+    ok(!existsSync(new URL("assets/js/flows-cursor.js", REPO)), "and flows-cursor.js is deleted rather than orphaned");
+  }
+
   const askBytes = sizeOf("/assets/js/flows-ask.js");
   const askKib = Math.round(askBytes / 1024);
   const dockRoutes = measured.filter((m) => m.parts.some((p) => /^flows-dock\.js/.test(p)));

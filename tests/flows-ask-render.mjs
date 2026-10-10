@@ -477,7 +477,7 @@ await page.unroute("**/api/flows/ask");
      "characters of guarantee and then the credit meter, 469 characters of chrome above an " +
      "empty box — first said was " + (opensOnto ? JSON.stringify(opensOnto.said) : "nothing"));
   const railRead = await readIn("#askApp");
-  ok(!/It reads nothing live/.test(railRead.open) && /It reads nothing live/.test(railRead.info),
+  ok(!/live readings it keeps through the session/.test(railRead.open) && /live readings it keeps through the session/.test(railRead.info),
      "the guarantee is kept, whole, inside a disclosure that is closed until tapped: it is " +
      "reassurance about what the box will NOT do, and the fold rule allows reassurance to fold");
 

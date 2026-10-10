@@ -43,13 +43,14 @@
 
   const state = {
     targetPitch: Math.PI / 8, targetYaw: Math.PI / 4,
-    pitch: 0, yaw: 0,
+    pitch: calm ? Math.PI / 8 : 0, yaw: calm ? Math.PI / 4 : 0,
     width: 0, height: 0, dpr: 1,
     isObserved: false, time: 0, running: false,
   };
   let lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
   let frameCount = 0;
   let loopToken = 0;
+  let ready = false;
 
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -60,10 +61,12 @@
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     while (dpr > 0.75 && (w * dpr > 4096 || h * dpr > 4096 || w * dpr * h * dpr > 16777216)) dpr -= 0.25;
+    if (calm && ready && w === state.width && h === state.height && dpr === state.dpr) return;
     state.dpr = dpr; state.width = w; state.height = h;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (calm && ready) still();
   }
 
   function pointerMove(e) {
@@ -242,7 +245,18 @@
     }
   }
 
+  function still() {
+    frameCount++;
+    ctx.clearRect(0, 0, state.width, state.height);
+    try {
+      for (let n = 0; n < 8; n++) renderFrame(lastTime);
+    } catch (err) {
+      if (DEBUG) console.error("particles: frame error", err);
+    }
+  }
+
   function start() {
+    if (calm) return;
     if (state.running) return;
     state.running = true;
     lastTime = (typeof performance !== "undefined" ? performance.now() : 0);
@@ -296,6 +310,13 @@
     window.addEventListener("focus", () => { if (!document.hidden) start(); });
     window.addEventListener("pageshow", () => { requestAnimationFrame(resize); if (!document.hidden) start(); });
 
+    if (DEBUG) startDebug();
+    ready = true;
+    if (calm) {
+      canvas.addEventListener("contextrestored", () => { ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0); still(); });
+      return still();
+    }
+
     let seenFrames = -1;
     setInterval(() => {
       if (document.hidden) { seenFrames = frameCount; return; }
@@ -305,8 +326,6 @@
       }
       seenFrames = frameCount;
     }, 1000);
-
-    if (DEBUG) startDebug();
     start();
   }
 

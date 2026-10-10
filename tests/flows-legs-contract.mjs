@@ -522,6 +522,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   near(h.medianRatio, (0.5 + 2) / 2, 1e-12, "median |m1d|/em over ratios 2 and 0.5");
   eq(h.beat, 0.5, "half the reports beat the implied move");
   eq(h.ls1dHit, 0.5, "half the long straddles paid on day one");
+  eq(h.ls1dN + " " + h.ls1wN, "8 8", "the straddle shares publish their denominators, so a reader of a card-x whose event rows were shed still counts over every report");
   near(h.drift, (0.02 + (-0.005)) / 2, 1e-12, "drift = median sign(m1d)*(m1w - m1d)");
   const recent = earningsHistory([{ report_date: "2026-09-18", report_time: "postmarket", expected_move_perc: "0.05",
     post_earnings_move_1d: "0.04", post_earnings_move_1w: "0.05", long_straddle_1w: "0.2" }], { sessionDate: S });

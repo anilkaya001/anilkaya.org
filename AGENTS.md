@@ -170,6 +170,7 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs` | The Premium desk's client alone: its pure functions (the frontier against a brute-force Pareto set, balance parsing, tenor buckets, cent sizing, net delta) in a Node `vm`, and the page in Chromium against payload fixtures built to the chain contract (basis, time-value yield, tooltips, banners); no server. |
 | `tests/flows-desk-wiring.mjs`, `tests/fixtures-desk-lab.json`, `tests/gen-desk-lab.py` | The desk's Win % (implied) against an independent reference: `gen-desk-lab.py` (mpmath at 40 digits) prices skewed SVI chains and takes the risk-neutral probability of profit by Breeden-Litzenberger, and the suite proves the page, given the card's smile expiries, lands within 0.5pp of it and of the strategy lab on every line, while the flat fit it replaced misses by 2.5pp; the carry and the smile each line was priced on are read back from its disclosure. Chromium against `page.route` stubs, no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
+| `tests/landing-motion.mjs` | The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame (eight passes, as bright as the settled trail the old loop built; a single pass measures 0.56 of it), draws it once at load and once per viewport change, redraws it at the device scale after a context restore, and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter, Space and a click whether or not it keeps focus, holds after focus leaves, and stays under reduced motion because the prices still auto-update; a refresh that lands while paused is held until Play in both views, a Pause and Play with nothing held leaves the bar and its focused control in place, and a refresh while playing renders at once; the bar stays below the footer at 320, 390 and 1280 px. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-ledger.js` | The per-day session ledger: the `flows_ledger` DDL, the statement builders the Tier 1 tick, the focus tick, the heartbeat write and the nightly's `meta` write append to a batch they already issue, the gap limits (the stale lines of `FRESH_CLASSES`), the view served as `ledger` on the ingest `clock` key, and the worst-key lapse the Tier 1 tick reads from the live rows. |
 | `shared/flows-live.js`, `shared/flows-live-worker.js` | The live layer's key registry and pure builders; the Worker's Tier 1 tick, dispatch, watchdog, live ingest, `/api/flows/lk`, `/now`, `/tape` and read-time overlays. A strip row ends in `qa`, the vendor's `quote_time` as seconds behind the read, and the key's `ahead { n, maxS }` counts the stamps that run later than the read; `priorCloseBase` and `shapeStrips` fill a null `prev_close` from the last dated nightly close and say so in `prevFill`, and hold out a row the vendor dates before the session as an all-null row (DEPLOY.md 10.5i). |
@@ -579,9 +580,11 @@ each every 15 s), and `/api/rt/snap?k=gx` with none answers cold at once. A
 topic that leaves demand forgets its failures and leaves `degraded`; `status`
 lists all five with `demanded`. Tier 1, Tier 2 and the nightly are
 unchanged and remain the fallback. The hub reads D1 (the roster and the clock
-row, one batch at start and every five minutes) and never writes it; it adds no
-`live:*` key, never touches the `UW_ONDEMAND` limiter (its own budget is
-`FLOWS_RT_CALLS_PER_MIN`, default 240), and never calls `env.AI`. The upstream
+row, one batch at start and every five minutes, and again after 30 seconds
+when a read failed or timed out, keeping the roster it holds or the base names
+meanwhile) and never writes it; it adds no `live:*` key, never touches the
+`UW_ONDEMAND` limiter (its own budget is `FLOWS_RT_CALLS_PER_MIN`, default 240),
+and never calls `env.AI`. The upstream
 sits behind `createRestUpstream` so a WebSocket upstream can replace it
 without touching the hub or the client: the hub calls only `start(plan,
 handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`, and receives
@@ -997,6 +1000,7 @@ flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
 flows-verdict-contract
 flows-readers-contract   flows-readers-render
 markets-contract         flows-desk-client
+landing-motion
 flows-basis-contract     flows-desk-wiring
 flows-neuron-screen
 lib-contract
@@ -1010,6 +1014,21 @@ run-contract
 landing script and a snapshot from `page.route` on a fake origin and fixes
 `Date.now` in the page. Run it with `PLAYWRIGHT_BROWSERS_PATH` set like the
 other browser suites.
+
+`landing-motion` needs Chromium and no server either: it serves the real
+`index.html` and its assets from disk through `page.route` and a stubbed
+`/api/markets`. It traces the page under reduced motion and counts
+`FireAnimationFrame` events (none after the first second, none after a
+resize), checks the still frame is drawn and redrawn on resize, counts its
+draws through a served copy of `particles.js` (one at load, one per viewport
+change, a synthetic `contextrestored` at DPR 2 redrawn into every quadrant),
+compares its brightness with a 40-pass settled reference and a single pass
+served the same way, and drives the marquee's Pause button by keyboard and
+mouse, waiting on each animation's `ready` and polling `currentTime` rather
+than sleeping a fixed time. The held-refresh block installs `page.clock`,
+serves an empty `particles.js` and three distinct snapshots, and runs once
+with motion and once under reduced motion. Measured on 2026-10-05: about 35 s,
+116 assertions, at a load average of about 5 (48 s at a load average of 15).
 
 `flows-desk-client` needs Chromium and no server either: `tests/desk-fixtures.mjs` serves the
 assets from disk and the chain payloads from `page.route`, so the Premium desk runs against
@@ -1265,7 +1284,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 - JavaScript remains IIFE-based and framework-free; production globals are
   deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
-  `LEARNING_PATHS`, `toast`, `FlowsUI`, and `FlowsQuant`. The rail's browser
+  `LEARNING_PATHS`, `toast`, `COURSE_STAGE_IDS`, `COURSE_SKILLS`,
+  `SKILL_CATALOG`, `SKILL_BY_ID`, `SkillMasteryScheduler`, `PROJECT_CATALOG`,
+  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`. The rail's browser
   half is `FlowsUI.rt` (`connect`, `on`, `transport` and the adapters), added to
   the existing global rather than a new one, and the flow network is
   `FlowsUI.net` (`model`, `mount`, `of`), added the same way by the one page
@@ -1275,9 +1296,48 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   link to `/flows/ticker/?t=` now. `FlowsPanels` went with the ticker rebuild:
   the dossier's modules are drawn from `FlowsUI` inside `flows-ticker.js`, the
   only page that ever called the panel library, and `flows-panels.js` and
-  `flows-drawers.js` are deleted.)
+  `flows-drawers.js` are deleted. `FlowsCursor` went with `flows-cursor.js`,
+  which no page emitted.)
   This list is an ALLOWLIST: a global that is not on it is an undocumented
-  one. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
+  one. `tests/contracts.mjs` reads it from this paragraph and scans every
+  script under `assets/js`. Each assignment to `window`, `globalThis` or
+  `self` by a dotted or string-quoted key (`=` or any compound assignment,
+  the logical `||=`, `&&=` and `??=` among them, and `++` or `--` on the
+  same line before or after the key), and each `var`, `let`, `const`,
+  `class` or `function` declaration (`function*` with the star on either
+  side) at the script's top level (by bracket depth, over a scan that skips
+  strings, templates, comments and regular expressions, a `/` after an
+  operator, after a keyword such as `return` or `typeof`, or after the `)`
+  that closes an `if`, `while`, `for` or `with` head opening one; a `var`,
+  `let` or `const` wherever it stands at that depth, the body of a braceless
+  `if` or `else` and a labelled statement included; every declarator of a
+  list, at any indentation), must name a global on it. It fails outright on
+  `Object.assign`, `Object.defineProperty`, `Object.defineProperties`,
+  `Reflect.set` or `Reflect.defineProperty` with the global object itself as
+  the target, on a top-level destructuring declaration, and on a file whose
+  brackets it cannot balance. The only others it admits are
+  `CURRICULUM` below, the `fetch` wrapper in `flows-ui.js` (in that file
+  alone), and `globalThis.__<Name>Test` hooks bound only where there is no
+  `document`. It is a scanner, not a parser, and it judges the top level
+  by bracket depth alone, so the list of what it cannot see is not complete.
+  Among the forms that create globals and pass it are: `this.Foo = 1` at
+  the top level or inside a top-level arrow function (a classic script's
+  top-level `this` is the global object even in strict mode, and most
+  scripts here are `(() => { "use strict"; ... })()`); an alias of the
+  global object (`const g = window; g.Foo = 1`), a computed key, `eval`,
+  `new Function` and `with`; a destructuring or `for`-`in`/`of` assignment
+  target (`[window.Foo] = a`, `({ a: window.Foo } = o)`,
+  `for (window.Foo of xs)`); a `var` inside a top-level block, `for` head,
+  `try` or `switch` (`for (var Foo = 0;;)`, `if (x) { var Foo = 1 }`); a
+  function declared inside a top-level block in sloppy code; an assignment
+  to an undeclared name in a file that is not strict; and a `/` it still
+  misreads, such as a division after a `}` read as a regular expression
+  (`x = {} / 2`), which hides any top-level declaration inside the misread
+  span without the unbalanced-file failure whenever that span happens to
+  balance. Every
+  script under `assets/js` is strict except `curriculum.js`,
+  `curriculum-data.js` (authoring inputs) and the two generated FlowsQuant
+  bundles; keep a new script strict. `FlowsUI` is the shared Flows UI primitives (formatters that keep the
   minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component

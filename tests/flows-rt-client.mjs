@@ -893,6 +893,20 @@ try {
     await R.pump(40);
     const tide = await page.evaluate(() => ({ v: document.getElementById("hmTideV").textContent, river: !!document.querySelector("#hmTide .hm-river") }));
     ok(/\$|M|K|B/.test(tide.v) && tide.river, `a market-tide delta redraws the hero river (${tide.v})`);
+    const look = (sel) => { const svg = document.querySelector(sel); const host = svg && svg.parentElement;
+      const was = !!(svg && svg.__rtMark); if (svg) svg.__rtMark = true;
+      const run = host ? host.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
+      return { svg: !!svg, was, still: !!(svg && svg.classList.contains("no-anim")), run, svgs: host ? host.querySelectorAll(":scope > svg").length : 0 }; };
+    await page.waitForFunction((sel) => document.querySelector(sel), "#hmTide .hm-river > svg", { timeout: 5000 }).catch(() => {});
+    const t0 = await page.evaluate(look, "#hmTide .hm-river > svg");
+    ok(t0.svg && !t0.was, "the river's first paint draws one svg");
+    for (const k of [10, 15]) {
+      R.send(c1, R.delta("mk", [tidePoint(k, 2.5e8 + k * 1e6)]));
+      await R.pump(40);
+      const t1 = await page.evaluate(look, "#hmTide .hm-river > svg");
+      ok(t1.svg && t1.was && t1.svgs === 1, `IN PLACE: tide point ${k} keeps the same river svg node on Home (${JSON.stringify(t1)})`);
+      ok(t1.still && t1.run === 0, `and nothing in it replays its entrance (${JSON.stringify(t1)})`);
+    }
     R.send(c1, R.delta("nw", [{ ...hostileRow, id: "h2", ts: R.now + 1, headline: "plain headline two", createdAt: iso(R.now + 1), createdAtMs: R.now + 1 }]));
     await R.pump(40);
     eq(await page.evaluate(() => document.querySelector("#ccNews .hm-news-h").textContent), "plain headline two", "a new headline lands at the top of the card");
@@ -928,10 +942,19 @@ try {
     const meta1 = await page.evaluate(() => ({ meta: document.getElementById("uaMeta").textContent, chips: document.getElementById("uaChips").textContent }));
     ok(/3 held back by the stream/.test(meta1.meta), `the dropped counter is on the page (${meta1.meta})`);
     ok(/3\s*Windows|Windows\s*3/.test(meta1.chips), `the alert already on the page is not counted twice: three windows, not four (${meta1.chips})`);
+    const look = (sel) => { const svg = document.querySelector(sel); const host = svg && svg.parentElement;
+      const was = !!(svg && svg.__rtMark); if (svg) svg.__rtMark = true;
+      const run = host ? host.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
+      return { svg: !!svg, was, still: !!(svg && svg.classList.contains("no-anim")), run, svgs: host ? host.querySelectorAll(":scope > svg").length : 0 }; };
+    await page.waitForFunction((sel) => document.querySelector(sel), "#uaTimeline .fu-chart > svg", { timeout: 5000 }).catch(() => {});
+    const u0 = await page.evaluate(look, "#uaTimeline .fu-chart > svg");
     R.send(c1, R.delta("fl", [wire(alert("AAPL", 700000, T0 - 1000), "a4", T0 - 1000), wire(base[0], "a1", T0 - 3600000)], { meta: { cursor: iso(R.now), read: 2, unusable: 0, dropped: 5, truncated: true } }));
     await R.pump(80);
     const meta2 = await page.evaluate(() => ({ meta: document.getElementById("uaMeta").textContent, chips: document.getElementById("uaChips").textContent }));
     ok(/4\s*Windows|Windows\s*4/.test(meta2.chips), `a new alert appends (four) and the repeated id does not (${meta2.chips})`);
+    const u1 = await page.evaluate(look, "#uaTimeline .fu-chart > svg");
+    ok(u0.svg && u1.svg && u1.was && u1.svgs === 1, `IN PLACE: a streamed alert keeps the same timeline svg node (${JSON.stringify(u1)})`);
+    ok(u1.still && u1.run === 0, `and no bubble replays its entrance (${JSON.stringify(u1)})`);
     ok(/5 held back by the stream/.test(meta2.meta) && /stream missed a page/.test(meta2.meta), `and the counters move (${meta2.meta})`);
     deep(page.errors, [], "nothing threw");
     await ctx.close();
@@ -957,6 +980,22 @@ try {
     const b = await page.evaluate(() => ({ river: document.querySelectorAll("#mkTide .mk-river").length, legs: document.getElementById("mkTideLegs").textContent }));
     eq(b.river, 1, "the second point draws the river on the market page");
     ok(/240|\$/.test(b.legs), `with the stream's own latest net (${b.legs.slice(0, 60)})`);
+    const look = (sel) => { const svg = document.querySelector(sel); const host = svg && svg.parentElement;
+      const was = !!(svg && svg.__rtMark); if (svg) svg.__rtMark = true;
+      const run = host ? host.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
+      return { svg: !!svg, was, still: !!(svg && svg.classList.contains("no-anim")), run, svgs: host ? host.querySelectorAll(":scope > svg").length : 0 }; };
+    await page.waitForFunction((sel) => document.querySelector(sel), "#mkTide .mk-river > svg", { timeout: 5000 }).catch(() => {});
+    await page.evaluate(look, "#mkTide .mk-river > svg");
+    for (const k of [10, 15]) {
+      R.now += 1000;
+      await page.clock.runFor(1000);
+      R.send(c1, R.delta("mk", [tidePoint(k, 2.4e8 + k * 1e6)]));
+      await R.pump(80);
+      const m1 = await page.evaluate(look, "#mkTide .mk-river > svg");
+      ok(m1.svg && m1.was && m1.svgs === 1, `IN PLACE: tide point ${k} keeps the same river svg node on Market (${JSON.stringify(m1)})`);
+      ok(m1.still && m1.run === 0, `and nothing in it replays its entrance (${JSON.stringify(m1)})`);
+    }
+    eq(await page.evaluate(() => document.querySelectorAll("#mkTide .mk-river").length), 1, "still one river");
     deep(page.errors, [], "nothing threw");
     await ctx.close();
   }

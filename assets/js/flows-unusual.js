@@ -412,7 +412,7 @@
       return;
     }
     if (charts.timeline && charts.timeline.el === host.timeline.querySelector(".fu-chart")) {
-      charts.timeline.set(drawTimeline, animate !== false);
+      charts.timeline.set(drawTimeline, animate);
       return;
     }
     const chartHost = h("div", { class: "fu-chart" });
@@ -830,7 +830,7 @@
     setModuleInfo(host.surprise, "volume surprise", surpriseInfo);
   }
 
-  function takeAlerts(alerts, kind, reason) {
+  function takeAlerts(alerts, kind, reason, animate) {
     S.alerts = alerts;
     S.alertsKind = kind;
     S.alertKeys = null;
@@ -850,7 +850,7 @@
       for (const el of [host.timeline, host.names, host.urgency]) silence(el, S.alertsState, el === host.timeline ? "Timeline" : el === host.names ? "Names" : "Urgency", el === host.timeline ? 250 : 200);
     } else {
       setModuleState(host.timeline, { state: "ok" }, "Timeline");
-      paintTimeline(true);
+      paintTimeline(animate);
       paintNames();
       paintUrgency();
     }
@@ -976,7 +976,7 @@
       rows: union.slice(0, ALERT_CAP), seen: Math.max(n(base && base.seen) ?? kept.length, kept.length) + add.length,
       shed: Math.max(0, union.length - ALERT_CAP), status: "ok",
     });
-    takeAlerts(next, "ok", null);
+    takeAlerts(next, "ok", null, false);
   }
 
   function streamFlow() {

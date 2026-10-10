@@ -586,6 +586,17 @@ try {
     const tenth = (v) => Math.round(v * 1000);
     eq(rp, (tenth(idea.prob.popP) / 10).toFixed(1) + "%", `the real-world chance of profit is the Worker's, under the card's law (${rp})`);
     eq(rq, (tenth(idea.prob.popQ) / 10).toFixed(1) + "%", `and the implied one too (${rq})`);
+    const calib = await page.evaluate(() => {
+      const t = document.querySelector("#sgOddsM .ui-mod-h > .ui-calib");
+      if (!t) return null;
+      window.FlowsUI.openInfo(t);
+      const out = { tag: t.textContent, n: document.querySelectorAll(".ui-calib").length, title: document.getElementById("fxPopT").textContent, lead: document.querySelector("#fxPop .ui-lead").textContent };
+      window.FlowsUI.closeInfo();
+      return out;
+    });
+    eq(calib && calib.tag + " | " + calib.title + " | " + calib.lead, "Not yet calibrated | Not yet calibrated | Model probability, not yet checked against outcomes.",
+       "the Odds module, which prints the real-world chance and EV, says once in its header that the probability is not yet calibrated");
+    eq(calib.n, 1, "and says it once on the page");
     const gapWant = tenth(idea.prob.popP) - tenth(idea.prob.popQ);
     const gap = await page.$eval('.tl-lp .tl-lp-v b', (b) => b.textContent);
     eq(gap, (gapWant < 0 ? MINUS : gapWant > 0 ? "+" : "") + (Math.abs(gapWant) / 10).toFixed(1),
@@ -706,6 +717,8 @@ try {
       await page.waitForTimeout(200);
       const over = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
       eq(over, false, `the strategy lab overflows nothing at ${width}px`);
+      const tag = await page.evaluate(() => { const t = document.querySelector("#sgOddsM .ui-calib"), hd = t && t.parentElement.getBoundingClientRect(), b = t && t.getBoundingClientRect(); return t ? b.left >= hd.left - 1 && b.right <= hd.right + 1 && t.scrollWidth <= t.clientWidth + 1 : false; });
+      ok(tag, `and the calibration note fits the Odds header, unclipped, at ${width}px`);
     }
     await page.setViewportSize({ width: 390, height: 900 });
     const edges = async (x) => page.$eval(".tl-stripw", (w, to) => new Promise((res) => {

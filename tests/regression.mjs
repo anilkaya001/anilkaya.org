@@ -406,6 +406,36 @@ try {
   }
 
   {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    const violations = [];
+    await page.exposeFunction("__cspViolation", (detail) => { violations.push(detail); });
+    await page.addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", (event) => window.__cspViolation(`${event.violatedDirective} ${event.blockedURI} ${event.sample}`));
+    });
+    let bankRequests = 0;
+    await page.route("**/assets/data/challenge-bank.json*", (route) => { bankRequests++; return route.fulfill({ status: 500, contentType: "application/json", body: "{}" }); });
+    const clean = watch(page, (text) => /status of 500/.test(text));
+    const response = await page.goto(BASE + "/lab/challenge/", { waitUntil: "load" });
+    assert.match(response.headers()["content-security-policy"] || "", /script-src 'self'/, "the challenge page was served without its CSP");
+    const retry = page.getByRole("button", { name: "Try again" });
+    await retry.waitFor();
+    assert.equal(await page.getByRole("heading", { name: "The challenge could not load." }).count(), 1);
+    assert.equal(await retry.getAttribute("onclick"), null, "the retry button still carries an inline handler");
+    assert.equal(bankRequests, 1);
+    const reloaded = page.waitForEvent("framenavigated", { predicate: (frame) => frame === page.mainFrame(), timeout: 5000 });
+    await retry.click();
+    await reloaded;
+    await page.waitForLoadState("load");
+    await page.getByRole("button", { name: "Try again" }).waitFor();
+    assert.equal(await page.evaluate(() => performance.getEntriesByType("navigation")[0].type), "reload", "Try again did not reload the challenge page");
+    assert.equal(bankRequests, 2, "the reload did not fetch the challenge bank again");
+    assert.deepEqual(violations, [], "the challenge page raised a securitypolicyviolation");
+    clean();
+    await context.close();
+  }
+
+  {
     const page = await browser.newPage();
     await page.goto(BASE + "/lab/", { waitUntil: "load" });
     const faint = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--ink-faint").trim());

@@ -373,8 +373,10 @@
   left: 0; right: 0;
   bottom: 0;
   z-index: 6;
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  padding: calc(env(safe-area-inset-bottom, 0px) + 0.3rem) 0 0.3rem;
+  padding: calc(env(safe-area-inset-bottom, 0px) + 0.15rem) 0 0.15rem;
   border-top: 1px solid var(--hairline);
   background: color-mix(in srgb, var(--bg-deep) 86%, transparent);
   -webkit-backdrop-filter: blur(9px) saturate(1.1);
@@ -385,14 +387,40 @@
   animation: rise 1s var(--ease) 0.4s both;
 }
 .market-ticker[hidden] { display: none; }
+.market-ticker__toggle {
+  flex: 0 0 auto;
+  min-width: 5.8em;
+  min-height: 1.5rem;
+  margin: 0 0.35rem 0 max(2.5%, 0.6rem);
+  padding: 0 0.6rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.market-ticker__toggle:hover { color: var(--ink); }
+.market-ticker__toggle:focus-visible { outline-offset: 0; }
+.market-ticker__track {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 1rem);
+  mask-image: linear-gradient(90deg, transparent, #000 1rem);
+}
 .market-ticker__row {
   display: flex;
   width: max-content;
   will-change: transform;
   animation: ticker-flow var(--ticker-duration, 40s) linear infinite;
 }
-.market-ticker:hover .market-ticker__row,
-.market-ticker:focus-within .market-ticker__row { animation-play-state: paused; }
+.market-ticker__track:hover .market-ticker__row,
+.market-ticker[data-paused="true"] .market-ticker__row { animation-play-state: paused; }
 .market-ticker__set { display: flex; flex: 0 0 auto; }
 @keyframes ticker-flow {
   from { transform: translateX(0); }
@@ -438,7 +466,8 @@
 
 @media (max-height: 480px) { .market-ticker { display: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .market-ticker { overflow-x: auto; animation: none; }
+  .market-ticker { animation: none; }
+  .market-ticker__track { overflow-x: auto; }
   .market-ticker__row { animation: none; }
   .market-ticker__set[aria-hidden="true"] { display: none; }
 }

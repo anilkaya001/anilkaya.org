@@ -1167,6 +1167,79 @@ const seqOk = (ws) => {
 }
 
 {
+  const boards = fakeBoards({ n: 60 });
+  const good = { clock: null, boards: { long: { rows: boards.long.rows }, short: { rows: boards.short.rows }, watch: { rows: boards.watch.rows } }, focus: null };
+  const baseNames = RT.rosterPlan({}).names;
+  const fullNames = RT.rosterPlan({ long: boards.long.rows, short: boards.short.rows, watch: boards.watch.rows, focusPayload: null }).names;
+  ok(baseNames.length >= 20 && fullNames.length >= baseNames.length + 20, `retry: the base roster (${baseNames.length}) and the boards' roster (${fullNames.length}) are told apart by their size`);
+  const askedAt = (r, i) => r.vendor.paramsOf(/screener/).at(i).ticker.split(",");
+  const callsSince = (r, n) => r.vendor.paramsOf(/screener/).slice(n).map((p) => p.ticker.split(",").length);
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), roster: () => { reads++; return reads === 1 ? new Promise(() => {}) : Promise.resolve(good); } });
+    const a = r.join();
+    const t0 = r.state.t;
+    await r.run(25);
+    eq(reads, 1, "retry: a roster read that never answers is read once while the first thirty seconds run");
+    ok(r.hub.rosterError && /roster timeout/.test(r.hub.rosterError.message), "retry: and the timeout is the stated reason");
+    eq(r.hub.status().roster.n, baseNames.length, "retry: the hub holds the base names meanwhile");
+    const early = r.vendor.paramsOf(/screener/);
+    ok(early.length >= 4 && early.every((p) => p.ticker === baseNames.join(",")), `retry: every px poll of those thirty seconds asks the base names (${early.length} polls)`);
+    await r.run(10);
+    eq(r.state.t - t0, 35000, "retry: thirty-five seconds of fake time have passed");
+    eq(reads, 2, "retry: the read is repeated about thirty seconds after the failure, not five minutes");
+    eq(r.hub.rosterError, null, "retry: and the success clears the error");
+    deep(askedAt(r, -1), fullNames, "retry: px then asks the boards' roster");
+    eq(r.hub.status().roster.n, fullNames.length, "retry: status shows it");
+    const seen = r.vendor.paramsOf(/screener/).length;
+    await r.run(250);
+    eq(reads, 2, "retry: after a success the five-minute cadence holds, no read in the next four minutes");
+    ok(callsSince(r, seen).every((n) => n === fullNames.length), "retry: and every poll in them asks the boards' roster");
+    await r.run(60);
+    eq(reads, 3, "retry: the next read comes five minutes after the one that succeeded");
+    r.hub.onClose(a.ws);
+  }
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), roster: () => { reads++; return reads === 1 ? Promise.reject(new Error("D1 down")) : Promise.resolve(good); } });
+    r.join();
+    await r.run(10);
+    eq(reads, 1, "retry: a roster read that throws is not repeated inside thirty seconds");
+    eq(r.hub.status().roster.n, baseNames.length, "retry: the base names meanwhile");
+    await r.run(25);
+    eq(reads, 2, "retry: it is repeated after thirty seconds");
+    eq(r.hub.status().roster.n, fullNames.length, "retry: and the boards' roster replaces the base names");
+  }
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), roster: () => { reads++; return reads === 2 ? Promise.reject(new Error("D1 busy")) : Promise.resolve(good); } });
+    r.join();
+    await r.run(10);
+    eq(reads, 1, "retry: a good first read");
+    await r.run(300);
+    eq(reads, 2, "retry: and its five-minute refresh is attempted");
+    ok(r.hub.rosterError && /D1 busy/.test(r.hub.rosterError.message), "retry: a failed refresh says why");
+    eq(r.hub.status().roster.n, fullNames.length, "retry: a failed refresh keeps the roster the hub holds");
+    await r.run(40);
+    eq(reads, 3, "retry: a failed refresh is repeated after thirty seconds, not five minutes");
+    eq(r.hub.rosterError, null, "retry: and the error clears");
+  }
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), scale: 0.2, roster: () => { reads++; return reads === 1 ? Promise.reject(new Error("D1 down")) : Promise.resolve(good); } });
+    r.join();
+    await r.run(4);
+    eq(reads, 1, "retry: at a test scale of 0.2 the retry has not fallen due after four seconds");
+    await r.run(4);
+    eq(reads, 2, "retry: and it has after eight, the thirty seconds scaled with every other cadence");
+  }
+}
+
+{
   const r = rig({ start: at(10, 0) });
   const a = r.join("anilkaya", { f: "NVDA" });
   await r.run(2000, 1000);

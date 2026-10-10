@@ -59,7 +59,13 @@
       const items = choose(payload.items);
       if (!items.length) throw new Error("empty-challenge");
       state = { items, index: 0, correct: 0 }; render();
-    } catch { app.innerHTML = '<div class="review-empty"><h2>The challenge could not load.</h2><p>Your progress is safe. Check the connection and try again.</p><button class="btn btn--gold" onclick="location.reload()">Try again</button></div>'; }
+    } catch {
+      app.innerHTML = '<div class="review-empty"><h2>The challenge could not load.</h2><p>Your progress is safe. Check the connection and try again.</p></div>';
+      const retry = document.createElement("button");
+      retry.className = "btn btn--gold"; retry.type = "button"; retry.textContent = "Try again";
+      retry.addEventListener("click", () => location.reload());
+      app.querySelector(".review-empty").append(retry);
+    }
   }
   void init();
 })();

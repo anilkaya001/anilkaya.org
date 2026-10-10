@@ -360,7 +360,8 @@
     });
     return pop;
   }
-  const popOpen = () => { const p = $("fxPop"); return !!(p && p.matches(":popover-open")); };
+  const POPS = !window.HTMLElement || "popover" in HTMLElement.prototype;
+  const popOpen = () => { const p = POPS && $("fxPop"); return !!(p && p.matches(":popover-open")); };
   function fillPop(d) {
     const body = $("fxPopB");
     $("fxPopT").textContent = d.title || "";
@@ -381,7 +382,7 @@
   }
   function openInfo(trigger, content) {
     const build = content !== undefined ? () => content : trigger && INFO.get(trigger.dataset.info);
-    if (!build) return;
+    if (!build || !POPS) return;
     const d = build() || {};
     const pop = ensurePop();
     if (anchor && anchor !== trigger) { anchor.style.removeProperty("anchor-name"); anchor.setAttribute("aria-expanded", "false"); }
@@ -513,7 +514,7 @@
     if (num(v) !== null && v !== 0) {
       const a = clamp(Math.abs(v) / max, 0, 1) * 100;
       s("circle", {
-        ...RING, class: "ui-ring-v", stroke: paint(v < 0 ? "--down-mark" : "--up-mark"), "stroke-width": 3,
+        ...RING, class: "ui-ring-v", stroke: paint(v > 0 ? "--up-mark" : v < 0 ? "--down-mark" : "--label-3"), "stroke-width": 3,
         "stroke-linecap": "round", pathLength: 100, "stroke-dasharray": `${a} 100`,
         transform: v < 0 ? "rotate(-90 13 13) scale(1 -1) translate(0 -26)" : "rotate(-90 13 13)",
       }, n);
@@ -582,6 +583,11 @@
 
   function tag(text, o = {}) {
     return h("span", { class: "ui-tag" + (o.accent ? " is-accent" : ""), "data-tone": o.tone || null }, o.glyph ? glyph(o.glyph) : null, text);
+  }
+  function calibTag(c) {
+    const t = "Not yet calibrated";
+    return c && num(c.nEff) >= 100 ? null : h("button", { class: "ui-tag ui-calib", type: "button", ...POP, "aria-expanded": "false",
+      "data-info": info({ title: t, lead: "Model probability, not yet checked against outcomes.", notes: ["It stays until 100 effectively independent outcomes are scored."] }) }, t);
   }
   function capsule(text, o = {}) {
     const t = o.tone || "flat";
@@ -681,10 +687,8 @@
     for (const e of entries) {
       const rec = e.target._fxChart;
       if (!rec.host.isConnected) { if (rec.drawn) drop(rec); continue; }
-      const first = !rec.seen;
-      rec.seen = true;
       rec.w = Math.round(e.contentRect.width);
-      if (rec.w && rec.w !== rec.drawn) try { repaint(rec, first, false); } catch (err) { setTimeout(() => { throw err; }); }
+      if (rec.w && rec.w !== rec.drawn) try { repaint(rec, undefined, false); } catch (err) { setTimeout(() => { throw err; }); }
     }
   }) : null;
   function repaint(rec, animate, force) {
@@ -694,8 +698,13 @@
     if (!w) { if (force) rec.drawn = 0; return; }
     if (w === rec.drawn && !force) return;
     rec.w = rec.drawn = w;
+    rec.keep = rec.svg && rec.svg.parentNode === host ? rec.svg : null;
+    rec.svg = null;
+    releaseHost(host);
     if (rec.probe) host.replaceChildren(rec.probe); else host.replaceChildren();
-    rec.draw(host, w, animate && moving());
+    const go = animate === undefined ? !host._fxPainted : animate;
+    host._fxPainted = true;
+    try { rec.draw(host, w, go && moving()); } finally { rec.keep = null; }
   }
   const fade = (d) => ({ class: "fade", style: { "--delay": d } });
   const TA = { "text-anchor": "middle" };
@@ -703,8 +712,9 @@
   function mount(host, draw) {
     if (host._fxChart) drop(host._fxChart);
     releaseHost(host);
+    host._scrubAt = -1;
     host.classList.add("ui-chart");
-    const rec = { host, draw, w: 0, drawn: 0, seen: false, probe: null };
+    const rec = { host, draw, w: 0, drawn: 0, probe: null, svg: null, keep: null };
     host._fxChart = rec;
     CHARTS.add(rec);
     if (RO) {
@@ -712,18 +722,27 @@
       probe._fxChart = rec;
       host.append(probe);
       RO.observe(probe);
-    } else repaint(rec, true, true);
+    } else repaint(rec, undefined, true);
     return {
       el: host,
       redraw: (animate) => repaint(rec, !!animate, true),
-      set: (next, animate) => { rec.draw = next; repaint(rec, animate !== false, true); },
-      destroy: () => { drop(rec); host._fxChart = null; releaseHost(host); host.replaceChildren(); },
+      set: (next, animate) => { rec.draw = next; repaint(rec, animate === undefined ? undefined : !!animate, true); },
+      destroy: () => { drop(rec); host._fxChart = null; host._scrubAt = -1; releaseHost(host); host.replaceChildren(); },
     };
   }
   function svgRoot(host, w, H, animate, label) {
-    const svg = s("svg", { width: w, height: H, viewBox: `0 0 ${w} ${H}`, role: "img", "aria-label": label || "" });
+    const rec = host._fxChart;
+    const at = { width: w, height: H, viewBox: `0 0 ${w} ${H}`, role: "img", "aria-label": label || "" };
+    let svg = rec && rec.keep;
+    if (svg) {
+      rec.keep = null;
+      for (const a of [...svg.attributes]) svg.removeAttribute(a.name);
+      svg.replaceChildren();
+      for (const k in at) svg.setAttribute(k, at[k]);
+    } else svg = s("svg", at);
     if (!animate) svg.classList.add("no-anim");
     host.append(svg);
+    if (rec) rec.svg = svg;
     return svg;
   }
   const lin = (d0, d1, r0, r1) => {
@@ -818,7 +837,8 @@
   function scrub(host, svg, o) {
     const xs = o.xs;
     const on = hostSignal(host, "_scrubOff");
-    const readout = h("div", { class: "ui-readout", ...AH });
+    const keep = host._scrubAt >= 0 && xs.length ? Math.min(host._scrubAt, xs.length - 1) : -1;
+    const readout = h("div", { class: "ui-readout" + (keep >= 0 ? " is-on" : ""), ...AH });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
     const dots = s("g", null, svg);
@@ -833,8 +853,8 @@
       return Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
     };
     const show = (i, speak) => {
-      if (i < 0 || i >= xs.length) return;
-      idx = i;
+      if (i < 0 || i >= xs.length || on.signal.aborted) return;
+      idx = host._scrubAt = i;
       const r = o.onMove(i) || {};
       const x = r.x ?? xs[i];
       xh.setAttribute("x1", x); xh.setAttribute("x2", x); xh.setAttribute("opacity", r.noLine ? 0 : 0.7);
@@ -848,7 +868,7 @@
       if (speak) announce(spoken(readout));
     };
     let raf = 0, px = 0;
-    const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
+    const hide = () => { host._scrubAt = -1; if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
     const at = (cx) => { const b = svg.getBoundingClientRect(); return (cx - b.left) * (svg.viewBox.baseVal.width / b.width); };
     host.addEventListener("pointermove", (e) => {
       px = e.clientX;
@@ -865,6 +885,7 @@
       else if (k === "End") { e.preventDefault(); show(xs.length - 1, true); }
       else if (k === "Escape") hide();
     }, on);
+    if (keep >= 0) show(keep);
     return { show, hide };
   }
 
@@ -887,10 +908,10 @@
   }
 
   function line(host, o) {
-    return mount(host, (el, w, animate) => drawLine(el, w, animate, o));
-  }
-  function area(host, o) {
-    return line(host, { ...o, series: (o.series || []).map((sr) => ({ area: true, ...sr })) });
+    const m = mount(host, (el, w, animate) => drawLine(el, w, animate, o));
+    const set = m.set;
+    m.set = (next, animate) => set(typeof next === "function" ? next : (el, w, a) => drawLine(el, w, a, next), animate);
+    return m;
   }
   function drawLine(host, w, animate, o) {
     const series = (o.series || []).filter((sr) => Array.isArray(sr.values));
@@ -963,8 +984,8 @@
       for (let i = N - 1; i >= 0; i--) if (num(sr.values[i]) !== null) { li = i; break; }
       if (li >= 0 && o.endDots !== false) {
         const cx = xAt(li), cy = y(sr.values[li]);
-        const dotC = o.twoTone && si === 0 ? paint(sr.values[li] < 0 ? "--down" : "--up") : color;
-        if (o.live && si === 0) s("circle", { cx, cy, r: 4, fill: dotC, class: "pulse" }, svg);
+        const dotC = o.twoTone && si === 0 ? paint(sr.values[li] > 0 ? "--up" : sr.values[li] < 0 ? "--down" : "--label-3") : color;
+        if (o.live && si === 0) s("circle", { cx, cy, r: 4, fill: dotC, class: "pulse", style: { "animation-delay": -Math.round(((document.timeline && document.timeline.currentTime) || performance.now()) % 2400) + "ms" } }, svg);
         s("circle", { cx, cy, r: 3.5, fill: dotC, class: "ring" }, svg);
         if (o.endLabels !== false) tags.push({ y: cy, y0: cy, text: (sr.format || yf)(sr.values[li]), color: dotC, x0: cx, pri: 1 });
       }
@@ -1020,7 +1041,7 @@
           const v = sr.values[i];
           if (series.length > 1 && sr.label) parts.push(part(sr.label, "k"));
           parts.push(num(v) === null ? part("no reading", "k") : h("b", { "data-tone": o.twoTone ? tone(v) : null }, (sr.format || yf)(v)));
-          if (num(v) !== null) dots.push({ x: xAt(i), y: y(v), color: o.twoTone ? (v < 0 ? "--down" : "--up") : sr.color || (si ? "--s-gray" : "--accent") });
+          if (num(v) !== null) dots.push({ x: xAt(i), y: y(v), color: o.twoTone ? (v > 0 ? "--up" : v < 0 ? "--down" : "--label-3") : sr.color || (si ? "--s-gray" : "--accent") });
         });
         return { parts, dots };
       },
@@ -1144,8 +1165,9 @@
         const cx = xAt(i);
         if (cx < -2 || cx > w + 2) return;
         if (v === null) { s("circle", { cx, cy: mid, r: 1.6, fill: paint("--label-4") }, svg); return; }
+        if (v === 0) { s("rect", { x: cx - bw / 2, y: mid - 0.5, width: bw, height: 1, fill: paint("--label-3"), class: "zero" }, svg); return; }
         const hh = hOf(v);
-        const pos = v >= 0;
+        const pos = v > 0;
         s("rect", {
           x: cx - bw / 2, y: pos ? mid - hh : mid, width: bw, height: hh, rx: Math.min(3, bw / 2),
           fill: paint(pos ? pal.pos : pal.neg), "fill-opacity": hl.size && !hl.has(X[i]) ? 0.8 : 1,
@@ -1209,7 +1231,7 @@
           if (o.readout) return { parts: o.readout(i) };
           return {
             parts: [part(xf(X[i]), "k"), v === null ? part("no reading", "k") : h("b", { "data-tone": v < 0 ? pal.negT : v > 0 ? pal.posT : null }, fmt(v))],
-            dots: v === null ? [] : [{ x: xAt(i), y: v >= 0 ? mid - hOf(v) : mid + hOf(v), color: v >= 0 ? pal.pos : pal.neg }],
+            dots: v === null ? [] : [{ x: xAt(i), y: v > 0 ? mid - hOf(v) : v < 0 ? mid + hOf(v) : mid, color: v > 0 ? pal.pos : v < 0 ? pal.neg : "--label-3" }],
           };
         },
       });
@@ -1237,9 +1259,10 @@
         for (let c = 0; c < C; c++) {
           const v = num(grid[r] && grid[r][c]);
           const cell = { x: left + c * cw + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5 };
-          if (v === null || v === 0) { s("rect", { ...cell, fill: paint("--fill-4") }, svg); continue; }
+          if (v === null) { s("rect", { ...cell, fill: "none", stroke: paint("--label-4"), "stroke-width": 1, "stroke-dasharray": "2 2", class: "void" }, svg); continue; }
+          if (v === 0) { s("rect", { ...cell, fill: paint("--fill-4"), class: "zero" }, svg); continue; }
           const a = clamp(Math.sqrt(Math.abs(v) / cap), 0.08, 1);
-          s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : pal.neg), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
+          s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : v < 0 ? pal.neg : "--fill-4"), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
         }
         if (r % every === 0 || r === o.highlightRow) s("text", { x: left - 8, y: yy + ch / 2 + 3.5, text: rf(rows[r]), "text-anchor": "end", class: r === o.highlightRow ? "tx-1 tx-b" : null }, svg);
       }
@@ -1321,7 +1344,7 @@
       const f = clamp((v - min) / ((max - min) || 1), 0, 1);
       if (o.diverging) {
         const fz = clamp((0 - min) / ((max - min) || 1), 0, 1);
-        if (Math.abs(f - fz) > 0.002) s("path", { d: f < fz ? arcPath(f, fz) : arcPath(fz, f), ...ARC, stroke: paint(o.color || (v < 0 ? "--down-mark" : "--up-mark")) }, svg);
+        if (Math.abs(f - fz) > 0.002) s("path", { d: f < fz ? arcPath(f, fz) : arcPath(fz, f), ...ARC, stroke: paint(o.color || (v > 0 ? "--up-mark" : v < 0 ? "--down-mark" : "--label-3")) }, svg);
         const [tx0, ty0] = pt(fz);
         const dx = tx0 - cx, dy = ty0 - cy, dl = Math.hypot(dx, dy) || 1;
         s("line", { x1: cx + dx / dl * (R - stroke), y1: cy + dy / dl * (R - stroke), x2: cx + dx / dl * (R + stroke), y2: cy + dy / dl * (R + stroke), stroke: paint("--label-3"), "stroke-width": 1.5 }, svg);
@@ -1348,70 +1371,6 @@
     put_wall: { color: "--lvl-put", shape: "dot", label: "Put wall" },
     max_pain: { color: "--lvl-pain", shape: "dia", label: "Max pain" },
   };
-
-  function levels(host, o) {
-    return mount(host, (el, w, animate) => {
-      const S = num(o.spot);
-      const lv = (o.levels || []).filter((l) => l && num(l.px) !== null && LEVELS[l.kind]);
-      const H = o.height || 74;
-      if (S === null) return gone(el, o, "No spot price.", "Levels", H);
-      const all = lv.map((l) => l.px).concat([S]);
-      let lo = o.domain ? o.domain[0] : Math.min(...all), hi = o.domain ? o.domain[1] : Math.max(...all);
-      const pad = (hi - lo) * 0.12 || S * 0.02;
-      lo -= pad; hi += pad;
-      const x = lin(lo, hi, 12, w - 12);
-      const ay = 40;
-      const svg = svgRoot(el, w, H, animate, o.label);
-      const g = s("g", null, svg);
-      s("line", { x1: 12, x2: w - 12, y1: ay, y2: ay, stroke: paint("--fill-2"), "stroke-width": 4, "stroke-linecap": "round" }, g);
-      const sorted = lv.slice().sort((a, b) => a.px - b.px);
-      if (sorted.length) {
-        const a = Math.min(S, sorted[0].px), b = Math.max(S, sorted[sorted.length - 1].px);
-        s("line", { x1: x(a), x2: x(b), y1: ay, y2: ay, stroke: paint("--fill-1"), "stroke-width": 4, "stroke-linecap": "round", class: "growx" }, g);
-      }
-      const sx = x(S);
-      const st = F.px(S);
-      const labs = sorted.map((l) => ({ y: x(l.px), y0: x(l.px), l })).concat([{ y: sx, y0: sx, spot: true }]);
-      spread(labs, 52, 30, w - 30);
-      labs.sort((a, b) => a.y0 - b.y0);
-      const half = (text) => String(text).length * 3.2 + 2;
-      const ink = paint("--label-1");
-      labs.forEach((t, i) => {
-        const above = i % 2 === 0;
-        if (t.spot) {
-          const pw = tw(st);
-          const px0 = clamp(t.y - pw / 2, 0, w - pw);
-          const py = above ? ay - 30 : ay + 12;
-          s("rect", { x: px0, y: py, width: pw, height: 18, rx: 9, fill: ink }, g);
-          s("text", { x: px0 + pw / 2, y: py + 12.5, text: st, ...TA, class: "tx-b tx-ink" }, g);
-          return;
-        }
-        const d = LEVELS[t.l.kind];
-        const v = F.px(t.l.px), k = d.label + " " + F.pct(t.l.px / S - 1, 1, true);
-        s("text", { x: clamp(t.y, half(v), w - half(v)), y: above ? ay - 14 : ay + 24, text: v, ...TA, class: "tx-1 tx-b" }, g);
-        s("text", { x: clamp(t.y, half(k), w - half(k)), y: above ? ay - 26 : ay + 36, text: k, ...TA, class: "tx-3" }, g);
-      });
-      s("rect", { x: sx - 1.25, y: ay - 8, width: 2.5, height: 16, rx: 1.25, fill: ink }, g);
-      const edge = paint("--mat-opaque");
-      for (const l of sorted) {
-        const d = LEVELS[l.kind];
-        const m = marker(g, d.shape, x(l.px), ay, paint(d.color), 5);
-        m.setAttribute("stroke", edge);
-        m.setAttribute("stroke-width", "2");
-        m.setAttribute("paint-order", "stroke");
-      }
-      const pts = sorted.map((l) => x(l.px)).concat([sx]).sort((a, b) => a - b);
-      const items = sorted.map((l) => ({ x: x(l.px), l })).concat([{ x: sx, spot: true }]).sort((a, b) => a.x - b.x);
-      scrub(el, svg, {
-        xs: pts, top: ay - 12, bottom: ay + 12, label: o.label,
-        onMove: (i) => {
-          const it = items[i];
-          if (it.spot) return { noLine: true, parts: [part("Spot", "k"), h("b", null, F.px(S))], top: H - 24 };
-          return { noLine: true, parts: [part(LEVELS[it.l.kind].label, "k"), h("b", null, F.px(it.l.px)), part(F.pct(it.l.px / S - 1, 2, true), "k")], top: H - 24 };
-        },
-      });
-    });
-  }
 
   function tent(c, wd, base, peak) { const out = []; for (let i = 0; i <= 40; i++) { const x = i / 40; out.push([x, base + (peak - base) * Math.exp(-(((x - c) / wd) ** 2))]); } return out; }
   const SHAPES = {
@@ -1499,7 +1458,7 @@
       for (const t of niceTicks(Math.min(...xs), Math.max(...xs), w < 600 ? 4 : 6)) s("text", { x: x(t), y: H - 6, text: String(t), ...TA }, svg);
       scrub(el, svg, {
         xs: P.map((p) => p[0]), top, bottom: H - bot, label: o.label,
-        onMove: (i) => ({ dots: [{ x: P[i][0], y: P[i][1], color: P0[i][1] >= 0 ? "--up" : "--down" }], parts: [part("At " + F.px(P0[i][0]), "k"), h("b", { "data-tone": tone(P0[i][1]) }, fmt(P0[i][1]))] }),
+        onMove: (i) => ({ dots: [{ x: P[i][0], y: P[i][1], color: P0[i][1] > 0 ? "--up" : P0[i][1] < 0 ? "--down" : "--label-3" }], parts: [part("At " + F.px(P0[i][0]), "k"), h("b", { "data-tone": tone(P0[i][1]) }, fmt(P0[i][1]))] }),
       });
     });
   }
@@ -1684,6 +1643,7 @@
     const bar = $("fxBar"), fresh = $("fxFresh"), old = $("fxGate");
     if (old) old.remove();
     if (fresh) fresh.hidden = !!kind;
+    if (bar) bar.classList.toggle("is-gated", !!kind);
     if (!bar || !kind) return;
     const out = kind === "out", name = out ? "Signed out, sign in" : "Unavailable";
     const A = { class: "ui-fresh", id: "fxGate", "data-state": kind, "aria-label": name, title: name };
@@ -1838,7 +1798,7 @@
       });
       if (scrim) scrim.addEventListener("click", () => closeDrawer(true));
       onDoc("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
-      WIDE.addEventListener("change", () => setDrawer(false));
+      WIDE.addEventListener("change", () => { closeDrawer(false); syncBtn(); });
       syncBtn();
     }
 
@@ -1877,6 +1837,10 @@
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); closeDrawer(false); openPalette(); }
     });
 
+    if (!POPS) {
+      const why = "This browser is older than Flows supports, so explanations cannot open in it. A newer browser or device shows them.";
+      bar.append(h("span", { class: "ui-fresh", id: "fxOld", "data-state": "old", title: why }, glyph("unavailable"), h("span", { class: "fx-fresh-l" }, "Old browser"), h("span", { class: "visually-hidden" }, why)));
+    }
     const fresh = $("fxFresh");
     if (fresh) {
       fresh.setAttribute("aria-controls", "fxPop");
@@ -1902,7 +1866,7 @@
 
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
-    line, area, sparkline, bars, diverging, heatmap, gauge, levels, payoff,
+    line, sparkline, bars, diverging, heatmap, gauge, payoff,
     LEVELS, shapeOf,
   });
 
@@ -1918,7 +1882,7 @@
     info, infoButton, stateButton, openInfo, closeInfo, announce,
     roll, metric, updateMetric, metrics,
     ring, divRing, iconChip, gaugeChip, chips,
-    segmented, tag, capsule, key, legend, robustness,
+    segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
     freshness, freshAggregate, shell, chart, depths: PAL_G,
   });

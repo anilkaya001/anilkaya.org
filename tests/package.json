@@ -14,6 +14,7 @@
     "test:flows-dossier-reads": "node --disable-warning=ExperimentalWarning flows-dossier-reads.mjs",
     "test:markets": "node markets-contract.mjs",
     "test:market-ticker": "node market-ticker-render.mjs",
+    "test:landing-motion": "node landing-motion.mjs",
     "test:mastery": "node mastery-contract.mjs",
     "test:academy": "node academy-contract.mjs",
     "test:placement": "node placement-contract.mjs",

@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=243") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=244") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -1194,58 +1194,6 @@ body.is-stale .flows-tablewrap {
   .ak-nn.is-live .ak-nn-e line, .ak-nn.is-live .ak-nn-n { animation: none; }
 }
 
-.fx-cursor line {
-  stroke: var(--ink-faint);
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
-  opacity: 0.9;
-}
-.fx-cursor[hidden] { display: none; }
-
-.fx-read {
-  position: fixed;
-  z-index: 60;
-  pointer-events: none;
-  min-width: 8rem;
-  max-width: 18rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  font-family: var(--font-figure);
-  font-size: var(--fs-fine);
-  line-height: 1.45;
-  color: var(--ink);
-}
-.fx-read[hidden] { display: none; }
-.fx-read-k {
-  margin: 0 0 0.2rem;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-.fx-read-r {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.9rem;
-  margin: 0;
-}
-.fx-read-rk { color: var(--ink-dim); }
-.fx-read-rv { font-variant-numeric: tabular-nums; }
-.fx-read-rv.is-pos { color: var(--flow-up); }
-.fx-read-rv.is-neg { color: var(--flow-down); }
-.fx-read-rv.is-call { color: var(--call); }
-.fx-read-rv.is-put { color: var(--put); }
-
-svg[data-fx-cursor="on"]:focus-visible {
-  outline: 2px solid var(--gold-harvest);
-  outline-offset: 2px;
-}
-svg[data-fx-cursor="on"] { touch-action: pan-y; }
-
 td.c-num { white-space: nowrap; }
 
 .flows-head--quiet {
@@ -1750,9 +1698,11 @@ td.c-num { white-space: nowrap; }
 .ui-fresh[data-state="live"] .ui-g { color: var(--up); }
 .ui-fresh[data-state="stale"] .ui-g { color: var(--warn); }
 .ui-fresh[data-state="pending"] .ui-g { color: var(--label-3); animation: ui-spin 6s linear infinite; }
-.ui-fresh[data-state="out"] .ui-g, .ui-fresh[data-state="off"] .ui-g { color: var(--warn); }
+.ui-fresh[data-state="out"] .ui-g, .ui-fresh[data-state="off"] .ui-g, .ui-fresh[data-state="old"] .ui-g { color: var(--warn); }
 a.ui-fresh { text-decoration: none; }
-@media (max-width: 380px) { .ui-fresh:not([data-state="out"]) .fx-fresh-l { display: none; } }
+span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; background: none; }
+@media (max-width: 380px) { .ui-fresh:not([data-state="out"], [data-state="old"]) .fx-fresh-l { display: none; } }
+@media (max-width: 599.98px) { .fx-bar.is-gated #fxOld .fx-fresh-l { display: none; } }
 
 .fx-tabs { display: none; }
 @media (max-width: 767.98px) {
@@ -1978,6 +1928,7 @@ a.ui-fresh { text-decoration: none; }
   .ui-mod-h > .ui-mod-sp { grid-column: 2; grid-row: 1; }
   .ui-mod-h > .ui-info { grid-column: 3; grid-row: 1; }
   .ui-mod-h > .ui-seg { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+  .ui-mod-h > :is(.ui-calib, .dk-rank) { grid-column: 1 / -1; justify-self: start; }
 }
 .ui-grid {
   display: grid;
@@ -2149,6 +2100,9 @@ a.ui-fresh { text-decoration: none; }
 .ui-tag.is-accent { background: var(--accent-fill); color: var(--accent-soft); }
 .ui-tag[data-tone] { color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent); }
 .ui-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.ui-calib { position: relative; flex: none; border: 0; cursor: pointer; }
+.ui-calib::after { content: ""; position: absolute; inset: -11px 0; }
+.ui-calib:hover, .ui-calib[aria-expanded="true"] { color: var(--label-1); background: var(--fill-4); }
 .ui-capsule {
   display: inline-flex;
   align-items: center;
@@ -2249,6 +2203,7 @@ a.ui-fresh { text-decoration: none; }
 .ui-key > i.is-dot { width: 8px; height: 8px; border-radius: 50%; }
 .ui-key > i.is-dia { width: 8px; height: 8px; border-radius: 1.5px; transform: rotate(45deg); }
 .ui-key > i.is-ring { width: 9px; height: 9px; border-radius: 50%; background: none; border: 1.5px solid var(--c); }
+.ui-key > i.is-void { box-sizing: border-box; background: none; border: 1px dashed var(--c); }
 .ui-key > i.is-split { background: linear-gradient(90deg, var(--down-mark) 50%, var(--up-mark) 50%); }
 .ui-key b { color: var(--label-1); font-weight: 600; }
 
