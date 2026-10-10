@@ -13,6 +13,7 @@ import { compare as cpuCompare, assertBudget } from "./lib/cpu-budget.mjs";
 import * as ENGINE from "../shared/flows-quant-engine.js";
 import * as TIME from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
+import * as SURF from "../shared/flows-quant-surface.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { ivConvention, parseOptionSymbol } from "../shared/flows-premium.js";
 import { stripComments } from "../scripts/strip-comments.mjs";
@@ -968,6 +969,154 @@ const OUT = ENGINE.runEngine(BASE);
   ok(leakedOk === leaking, `and each of the ${leaking} over-steep slices the old bound of 4 accepted loses mass or mean (${leakedOk} of ${leaking}: mean below 0.98 F or unit mass gone), the leak Lee's bound exists to prevent`);
 }
 
+const surfaceReport = { surfaces: 0, clean: 0, settled: 0, left: 0, repairedSlices: 0, worstDrop: 0, pairsChecked: 0, ms: 0 };
+{
+  const T1 = 30 / 365, T2 = 60 / 365;
+  const base = (T, over = {}) => ({ T, F: 100, D: 1, method: "svi", params: { ...SVI_TRUE, ...over }, n: 21, kMin: -0.3, kMax: 0.3 });
+  const A = base(T1), B = base(T2, { a: SVI_TRUE.a + 0.004 });
+  const clean = SURF.settleSurface([{ T: T1, slice: A }, { T: T2, slice: B }]);
+  ok(clean.checks.ok && !clean.changed && clean.slices[0] === A && clean.slices[1] === B,
+    "a surface whose later slice sits above the earlier one at every strike is returned as it came: the same slice objects, nothing refitted");
+  eq([clean.checks.calendar.checked, clean.checks.calendar.pairs.length, clean.unrepaired.length], [1, 0, 0], "one pair checked, none violated, nothing left over");
+  const low = base(T2, { a: SVI_TRUE.a - 0.01 });
+  const bad = SURF.surfaceChecks([A, low]);
+  ok(!bad.calendar.ok && !bad.ok && bad.calendar.pairs.length === 1, "a later slice 0.01 of total variance below the earlier one is a calendar violation");
+  near(bad.calendar.worstGap, -0.01, 1e-12, "whose worst gap is the 0.01 by which a was lowered, at every strike alike");
+  eq([bad.calendar.pairs[0].from, bad.calendar.pairs[0].to], [0, 1], "named as the earlier slice and the later one");
+  const [dLo, dHi] = SURF.pairDomain(A, low);
+  near(dLo, -0.8, 1e-12, "and judged over the strikes both expiries are quoted at, each widened by the 0.5 the single-slice checks use");
+  near(dHi, 0.8, 1e-12, "(below and above alike)");
+  const shuffled = SURF.surfaceChecks([low, A]);
+  eq([shuffled.calendar.pairs[0].from, shuffled.calendar.pairs[0].to], [1, 0], "the order the slices are handed in does not matter: indices follow the caller's list");
+  const flat = { method: "flat", T: 45 / 365, F: 100, D: 1, params: { sigma: 0.05 }, n: 1, fitInSpread: null };
+  const withFlat = SURF.surfaceChecks([A, flat, B]);
+  eq([withFlat.calendar.checked, withFlat.flat], [1, [1]],
+    "a flat slice states one number and no smile, so it is listed as unchecked and never judged against a smile's wings");
+  const steep = SURF.surfaceChecks([base(T1, { b: 1.6, rho: 0.5 })]);
+  ok(!steep.lee.ok && steep.lee.index === 0, "a wing slope above Lee's bound is reported on the surface checks");
+  const vogt = SURF.surfaceChecks([{ ...base(1, { a: -0.041, b: 0.1331, rho: 0.306, m: 0.3586, sigma: 0.4153 }), kMin: -0.6, kMax: 1.2 }]);
+  ok(!vogt.butterfly.ok && vogt.butterfly.worstG < -1e-3, `and so is a negative butterfly density (worst g ${vogt.butterfly.worstG.toFixed(4)} on Vogt's slice)`);
+
+  const sviPoints = (T, svi) => {
+    const sd = Math.sqrt(SMILE.sviW(svi, 0));
+    return Array.from({ length: 21 }, (_, j) => {
+      const k = sd * (-2.5 + 4.5 * j / 20), iv = Math.sqrt(SMILE.sviW(svi, k) / T);
+      return { k, iv, ivBid: iv - 0.004, ivAsk: iv + 0.004, weight: 1 / Math.pow(0.013, 2) };
+    });
+  };
+  const ptsA = sviPoints(T1, SVI_TRUE);
+  const sA = SMILE.fitSlice({ F: 100, D: 1, T: T1, points: ptsA });
+  const sB0 = SMILE.fitSlice({ F: 100, D: 1, T: T2, points: sviPoints(T2, { ...SVI_TRUE, a: SVI_TRUE.a * 0.9985, b: SVI_TRUE.b * 0.9985 }) });
+  const mild = SURF.settleSurface([{ T: T1, slice: sA, points: ptsA }, { T: T2, slice: sB0, points: sviPoints(T2, { ...SVI_TRUE, a: SVI_TRUE.a * 0.9985, b: SVI_TRUE.b * 0.9985 }) }]);
+  ok(!mild.before.ok && mild.checks.ok && mild.changed, "a later slice that sits a hair under the earlier one is repaired");
+  ok(mild.repaired.length >= 1 && mild.repaired.every((j) => mild.slices[j].method === "svi-repaired" && mild.slices[j].why === "surface.calendar" && mild.slices[j].checks.ok),
+    "by refitting the slices the crossing runs between, each labelled as the surface's repair and passing the single-slice checks");
+  const fine = SMILE.calendarCheck({ slices: [mild.slices[0], mild.slices[1]], kGrid: [-0.8, 0.7995, 0.0005] });
+  ok(fine.ok, `an independent calendar check on a grid eight times finer finds no gap below zero (worst ${fine.worstGap.toExponential(2)})`);
+
+  const bf = (slice) => SMILE.sviButterflyCheck({ svi: SURF.surfaceKind(slice) === "smile" ? SMILE.sliceSvi(slice) : null, kGrid: [slice.kMin - SMILE.SMILE_LINES.CHECK_PAD, slice.kMax + SMILE.SMILE_LINES.CHECK_PAD, 0.002] });
+  const rng = WORLD.xoshiro128ss("surface");
+  const Us = () => rng.uniform(), Bs = (lo, hi) => lo + (hi - lo) * Us();
+  const DAYS = [7, 14, 21, 35, 63, 98, 160];
+  const N = 500;
+  let soundBad = 0, notListed = 0, unrepairedWrong = 0, identityBad = 0, labelBad = 0;
+  for (let i = 0; i < N; i++) {
+    const rho = Bs(-0.8, 0.2), gamma = Bs(0.2, 0.5), eta = Bs(0.3, 1.9) / (1 + Math.abs(rho)), atm0 = Bs(0.15, 0.6);
+    const days = DAYS.slice(0, 5 + Math.floor(Us() * 3));
+    const entries = [];
+    let prev = null;
+    for (const d of days) {
+      const T = d / 365, theta = atm0 * atm0 * T * (1 + 0.05 * Us());
+      const params = SMILE.ssviToSvi({ theta, rho, eta, gamma });
+      const sd = Math.sqrt(SMILE.sviW(params, 0)), points = [];
+      for (let j = 0; j < 21; j++) {
+        const k = sd * (-2.5 + 4.5 * j / 20), iv = Math.sqrt(SMILE.sviW(params, k) / T);
+        const spread = 0.004 + 0.006 * Math.abs(k) / sd + 0.004 * Us(), mid = iv + (Us() - 0.5) * spread;
+        points.push({ k, iv: mid, ivBid: mid - spread / 2, ivAsk: mid + spread / 2, weight: 1 / Math.pow(spread + 0.005, 2) });
+      }
+      const slice = SMILE.fitSlice({ F: 100, D: 1, T, points, prev });
+      if (!slice) continue;
+      entries.push({ T, slice, points });
+      prev = slice;
+    }
+    const t0 = clockNow();
+    const r = SURF.settleSurface(entries);
+    surfaceReport.ms += clockNow() - t0;
+    surfaceReport.surfaces++;
+    surfaceReport.pairsChecked += r.checks.calendar.checked;
+    if (r.before.ok) {
+      surfaceReport.clean++;
+      if (r.changed || r.slices.some((s, j) => s !== entries[j].slice)) identityBad++;
+    }
+    r.slices.forEach((s, j) => {
+      const was = entries[j].slice;
+      if (s === was) return;
+      surfaceReport.repairedSlices++;
+      if (s.method !== "svi-repaired" || s.why !== "surface.calendar" || !s.checks.ok) labelBad++;
+      if (was.fitInSpread !== null && s.fitInSpread !== null) surfaceReport.worstDrop = Math.max(surfaceReport.worstDrop, was.fitInSpread - s.fitInSpread);
+    });
+    const smiles = r.slices.filter((s) => SURF.surfaceKind(s) === "smile").sort((a, b) => a.T - b.T);
+    const truthy = [];
+    for (let a = 0; a < smiles.length; a++) for (let b = a + 1; b < smiles.length; b++) {
+      const d = SURF.pairDomain(smiles[a], smiles[b]);
+      if (!d) continue;
+      truthy.push(SMILE.calendarCheck({ slices: [smiles[a], smiles[b]], kGrid: [d[0], d[1] - 0.0003, 0.0005] }).ok);
+    }
+    const allOk = truthy.every(Boolean) && smiles.every((s) => bf(s).ok);
+    if (r.checks.ok) {
+      surfaceReport.settled++;
+      if (!allOk) soundBad++;
+    } else {
+      surfaceReport.left++;
+      if (!r.unrepaired.length) notListed++;
+      if (allOk) unrepairedWrong++;
+    }
+  }
+  surfaceReport.ms /= N;
+  eq(soundBad, 0, `a surface the pass calls settled is arbitrage-free on an independent grid in all ${surfaceReport.settled} of ${N} noisy SSVI surfaces: every pair of expiries, over the strikes both are quoted at, and the butterfly density g >= -1e-9 on every smile`);
+  ok(surfaceReport.clean >= 0.5 * N && surfaceReport.clean <= 0.95 * N,
+    `the sequential fits already left ${N - surfaceReport.clean} of ${N} surfaces with a crossing between expiries (${surfaceReport.clean} clean), so the pass has work to do and is not a no-op`);
+  eq(identityBad, 0, "a surface that needed nothing comes back with the same slice objects");
+  ok(surfaceReport.settled >= 0.99 * N, `${surfaceReport.settled} of ${N} noisy surfaces end calendar-free (${surfaceReport.left} left)`);
+  eq([notListed, unrepairedWrong], [0, 0], "and each surface left with a crossing names it (from, to, gap, strike), and the crossing is real");
+  eq(labelBad, 0, `${surfaceReport.repairedSlices} refitted slices are all labelled svi-repaired / surface.calendar and pass the single-slice checks`);
+  ok(surfaceReport.worstDrop <= SMILE.SMILE_LINES.REPAIR_MAX_FIT_DROP + 1e-12,
+    `no refit gave up more than ${SMILE.SMILE_LINES.REPAIR_MAX_FIT_DROP} of its fraction of quotes in spread (worst ${surfaceReport.worstDrop.toFixed(3)})`);
+
+  const same = SMILE.fitSviRepaired({ T: T1, points: ptsA, prev: sB0 }, SVI_TRUE);
+  const asList = SMILE.fitSviRepaired({ T: T1, points: ptsA, prev: [sB0] }, SVI_TRUE);
+  eq(asList.params, same.params, "the single-slice repair takes one earlier slice or a list of them alike");
+  const capped = SMILE.fitSviRepaired({ T: T2, points: sviPoints(T2, SVI_TRUE), next: [sA] }, SVI_TRUE);
+  const reach = SMILE.sliceTotalVariance({ method: "svi", T: T2, F: 100, D: 1, params: capped.params }, 0.2) - SMILE.sliceTotalVariance(sA, 0.2);
+  ok(reach <= 1e-4, `and a slice can be held below a later one: refit under a bound its own quotes exceed, it ends within ${reach.toExponential(1)} of it`);
+
+  const list = ["2026-10-23", "2026-11-20"].map((expiry, i) => ENGINE.buildExpiry({
+    expiry, rows: synthChain({ expiry, svi: i === 0 ? SVI_TRUE : { ...SVI_TRUE, a: SVI_TRUE.a * 0.9992, b: SVI_TRUE.b * 0.9992 } }).rows,
+    spot: 100, asOfMs: Date.parse(AS_OF), rate: 0.04, prev: null,
+  }));
+  const settled = ENGINE.settleExpiries(list);
+  ok(settled.surface && settled.surface.checked === 1, "the engine settles the expiries it built, as a list of built expiries");
+  const inverted = ENGINE.settleExpiries(["2026-10-23", "2026-11-20"].map((expiry, i) => ENGINE.buildExpiry({
+    expiry, rows: synthChain({ expiry, svi: i === 0 ? SVI_TRUE : { ...SVI_TRUE, a: SVI_TRUE.a * 0.8, b: SVI_TRUE.b * 0.8 } }).rows,
+    spot: 100, asOfMs: Date.parse(AS_OF), rate: 0.04, prev: null,
+  })));
+  ok(!inverted.surface.ok && inverted.surface.violations.length === 1 && inverted.surface.violations[0].from === "2026-10-23" &&
+     inverted.surface.violations[0].to === "2026-11-20" && inverted.surface.violations[0].gap < 0,
+  "a back month priced a fifth lower in variance than the front month is a violation the card reports with the two expiry dates; the quotes cannot be moved that far, so it is not hidden");
+  ok(inverted.list.every((e, i) => e.slice === list[i].slice || e.slice.fitInSpread >= list[i].slice.fitInSpread - 0.1 - 1e-12) && inverted.list.length === 2,
+    "and the refusal leaves both expiries usable");
+  eq(ENGINE.settleExpiries([list[0]]).surface, null, "one expiry has no pair to check and publishes no surface block");
+  const growing = (i) => ({ ...SVI_TRUE, a: SVI_TRUE.a * (1 + 0.8 * i), b: SVI_TRUE.b * (1 + 0.8 * i) });
+  const one = ENGINE.runEngine(synthInput({ expiryList: ["2026-10-23"] }));
+  eq(one.surface, null, "a single-expiry engine run carries no surface");
+  const two = ENGINE.runEngine(synthInput({ expiryList: ["2026-10-23", "2026-11-20"], sviFor: growing }));
+  eq([two.surface.ok, two.surface.checked, two.surface.violations, two.surface.repaired], [true, 1, [], []], "two clean expiries: one pair checked, no violation, nothing repaired");
+  const block = QC.compactEngine(two, {});
+  eq(block.surface, two.surface, "and the card's engine block carries the same summary");
+  ok(!("surface" in QC.compactEngine(one, {})), "while a single-expiry block carries none");
+  ok(JSON.stringify(two.surface).length < 400, `the summary is ${JSON.stringify(two.surface).length} bytes`);
+}
+
 {
   for (const f of fs.readdirSync(path.join(ROOT, "shared")).filter((x) => x.startsWith("flows-quant-"))) {
     const src = fs.readFileSync(path.join(ROOT, "shared", f), "utf8");
@@ -1000,4 +1149,6 @@ console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answ
   "edge, a drift-neutral 64-bin P law, byte-identical reruns under shuffled rows and expiries, the selection vetoes, and the " +
   `Worker CPU budget on the ${cpu.clock} clock, held as a ratio to a same-process reference workload: fit + 24 structures median ${cpu.worst.median.toFixed(2)} ms (${rel(cpu.worst.median).toFixed(2)}x), p95 ${cpu.worst.p95.toFixed(2)} ms, ` +
   `min ${cpu.worst.min.toFixed(2)} ms; the default ${cpu.normal.structures} structures median ${cpu.normal.median.toFixed(2)} ms, p95 ${cpu.normal.p95.toFixed(2)} ms; ` +
-  `the strategy route's engine path from ${cpu.route.rows} vendor rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms`);
+  `the strategy route's engine path from ${cpu.route.rows} vendor rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms; ` +
+  `and the surface pass over ${surfaceReport.surfaces} noisy SSVI surfaces (${surfaceReport.clean} already clean, ${surfaceReport.settled} calendar-free after, ${surfaceReport.left} named and left, ` +
+  `${surfaceReport.repairedSlices} slices refitted, worst fit-in-spread drop ${surfaceReport.worstDrop.toFixed(3)}, ${surfaceReport.ms.toFixed(1)} ms a surface on the ${cpu.clock} clock)`);

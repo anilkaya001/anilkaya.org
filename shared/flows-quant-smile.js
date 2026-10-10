@@ -676,9 +676,21 @@ export function fitSviRepaired(input, start) {
   const { ks, ws, W } = pointsToArrays(points, T, "iv");
   const kMin = ks[0], kMax = ks[ks.length - 1];
   const grid = penaltyGrid(kMin, kMax, 121);
-  const prev = input.prev || null;
-  const prevW = prev ? grid.map((k) => sliceTotalVariance(prev, k)) : null;
-  const lam = SMILE_LINES.REPAIR_LAMBDA;
+  const bound = (side, pick) => {
+    const list = [].concat(input[side] || []);
+    if (!list.length) return null;
+    return grid.map((k) => {
+      let v = null;
+      for (const s of list) {
+        const w = sliceTotalVariance(s, k);
+        if (fin(w) && (v === null || pick(w, v))) v = w;
+      }
+      return v;
+    });
+  };
+  const prevW = bound("prev", (w, v) => w > v);
+  const nextW = bound("next", (w, v) => w < v);
+  const lam = fin(input.lambda) ? input.lambda : SMILE_LINES.REPAIR_LAMBDA;
   const unpack = (v) => ({ a: v[0], b: Math.exp(v[1]), rho: Math.tanh(v[2]), m: v[3], sigma: Math.exp(v[4]) });
   const f = (v) => {
     const p = unpack(v);
@@ -692,6 +704,7 @@ export function fitSviRepaired(input, start) {
       const g = gatheralG(k, w, sviW1(p, k), sviW2(p, k));
       if (g < 0) pen += g * g;
       if (prevW && prevW[j] !== null && prevW[j] > w) pen += (prevW[j] - w) * (prevW[j] - w);
+      if (nextW && nextW[j] !== null && nextW[j] < w) pen += (w - nextW[j]) * (w - nextW[j]);
     }
     const lee = p.b * (1 + Math.abs(p.rho)) - SMILE_LINES.LEE_BOUND;
     if (lee > 0) pen += lee * lee;
