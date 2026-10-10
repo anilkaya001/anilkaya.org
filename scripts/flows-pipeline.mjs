@@ -56,7 +56,8 @@ export {
   MOVER_ROWS, NEWS_ROWS, SECTOR_ETFS, TICK_FIELDS_READ, TRIX_FULL_SCALE_BP, TRIX_MIN_CANDLES, TRIX_SERIES, TRIX_SPAN,
   TRIX_WARMUP, WATCH_ROWS, atr14, boardRow, boardVariationMeta, buildMovers, candleCut, candlesAscending,
   collapseShareClasses, computeFeatures, congressRows, daysToEarnings, describeTickFields, eligible, ema,
-  featuresVariationInput, gatedWorthEnriching, holdersRefusal, ideasPayload, ideasArchiveKey, archiveIdeas, markNewContracts, measureVariationProbes,
+  featuresVariationInput, gatedWorthEnriching, holdersRefusal, ideasPayload, ideasArchiveKey, archiveIdeas, archivePermanent,
+  permanentArchiveKey, barsInHand, markNewContracts, measureVariationProbes,
   medianDollarVolume, moverRow, packSpark, partitionSides, priorNote, readPxOf, repairCandles, ret, returnCorrelation,
   scaleTrix, scoreBoard, screenerDollarVolume, screenerTilt, sectorLean, sectorTrix, selectExtremes, sessionCandles,
   sessionReference, sessionRow, sessionRows, shapeNews, toRows, toWatchRows, trixSeriesBp, unusualContractId,
@@ -74,7 +75,7 @@ export {
   sameSessionGate,
 } from "./flows-nightly/archive.mjs";
 export { PULSE_TOTALS_HISTORY } from "./flows-nightly/sections/alerts.mjs";
-export { CARD_SELF_CHECK_BYTES, CARD_SHED, markGate, shedCardToCap } from "./flows-nightly/sections/cards.mjs";
+export { CARD_SELF_CHECK_BYTES, CARD_SHED, fetchCloseBars, markGate, shedCardToCap } from "./flows-nightly/sections/cards.mjs";
 export { describeChainProbe, nearestProbeExpiry, vannaProbeSample } from "./flows-nightly/sections/chains.mjs";
 export { describeGammaRange } from "./flows-nightly/sections/close.mjs";
 export {

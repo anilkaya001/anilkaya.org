@@ -37,6 +37,7 @@ const CARD = {
 const browser = await chromium.launch();
 const errors = [];
 let trackBody = TRACK;
+let calibBody = { status: "pending" };
 
 async function open(query = "", viewport = { width: 1440, height: 900 }, init = null) {
   const page = await browser.newPage({ viewport });
@@ -47,6 +48,7 @@ async function open(query = "", viewport = { width: 1440, height: 900 }, init = 
     const u = new URL(route.request().url());
     const json = (b) => route.fulfill({ contentType: "application/json", body: JSON.stringify(b) });
     if (u.pathname === "/api/flows/scoretrack") return json(trackBody);
+    if (u.pathname === "/api/flows/calib") return json(calibBody);
     if (u.pathname === "/api/flows/card") return json(u.searchParams.get("t") === "AAA" ? CARD : { ticker: u.searchParams.get("t"), status: "pending" });
     if (u.pathname.startsWith("/api/")) return json({ status: "pending" });
     if (u.pathname.startsWith("/assets/")) {
@@ -816,6 +818,54 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   ok(sz && sz.cls === "st-in" && sz.fill === z.neutral, `NO BAND: the row's strip draws the same zero neutral (${sz && sz.cls})`);
   ok(sz && Math.abs(sz.y + sz.h / 2 - z.smid) < 1e-9, "NO BAND: centred on the strip's rule");
   await page.close();
+}
+
+{
+  const bins = (rows) => Array.from({ length: 10 }, (_, i) => (rows[i] ? { lo: i / 10, hi: (i + 1) / 10, n: rows[i][0], p: rows[i][1], y: rows[i][2], ci: [Math.max(0, rows[i][2] - 0.1), Math.min(1, rows[i][2] + 0.1)] } : { lo: i / 10, hi: (i + 1) / 10, n: 0, p: null, y: null, ci: null }));
+  const CALIB = {
+    v: 1, status: "ok", sessionDate: "2026-09-05", generatedAt: "2026-09-06T02:00:00.000Z", through: "2026-09-05", firstArchive: "2026-03-02",
+    needed: 100, measured: false, nEff: 31.4, n: 88, clusters: 19, icc: 0.12, rho: 0.12, rhoFloored: true,
+    counts: { resolved: 88, pending: 4, lost: 1, excluded: { "multi-expiry": 6 }, noPopP: 0, unresolvedShare: 0.0538 },
+    popP: null, popQ: null, note: "popP is the model's real-world chance of profit.",
+  };
+  const text = (page, sel) => page.evaluate((sel) => { const e = document.querySelector(sel); return e ? e.textContent.replace(/\s+/g, " ").trim() : null; }, sel);
+  const overflow = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+  calibBody = { status: "pending" };
+  let page = await open();
+  await page.waitForSelector("#stIdeas");
+  ok(/Not yet measured/.test(await text(page, "#stIdeas")), "IDEA CALIBRATION: before any idea has settled, Track says it is not yet measured");
+  eq(await page.evaluate(() => document.querySelectorAll("#stIdeas table").length), 0, "and draws no table of numbers it does not have");
+  eq(await page.evaluate(() => document.getElementById("stIdeas").nextElementSibling === document.getElementById("stNames")), true, "the module sits ahead of the names list");
+  await page.close();
+
+  calibBody = CALIB;
+  page = await open();
+  await page.waitForSelector("#stIdeas");
+  const t1 = await text(page, "#stIdeas");
+  ok(/Not yet measured/.test(t1) && /effective n 31\.4 of 100/.test(t1), `BELOW n_eff 100 the module says not yet measured and why (${t1.slice(0, 160)})`);
+  ok(/88/.test(t1) && /31\.4/.test(t1) && /5%/.test(t1), "with the resolved count, the effective n and the share still without a close");
+  eq(await page.evaluate(() => document.querySelectorAll("#stIdeas table, #stIdeas .ui-chart").length), 0, "and no reliability table or diagram");
+  ok(/Clusters/.test(await popOf(page, "#stIdeas .ui-info")) , "its popover names the clusters it counted");
+  await page.close();
+
+  calibBody = { ...CALIB, measured: true, nEff: 112.6, n: 410, counts: { ...CALIB.counts, resolved: 410 },
+    popP: { n: 410, base: 0.61, brier: 0.2301, logScore: 0.6612, reliability: 0.0142, resolution: 0.0301, uncertainty: 0.2379, withinBin: 0.0, withinCovariance: 0.0, bins: bins({ 3: [40, 0.35, 0.3], 5: [90, 0.55, 0.52], 7: [150, 0.75, 0.7], 9: [130, 0.95, 0.84] }) },
+    popQ: { n: 410, base: 0.61, brier: 0.2461, logScore: 0.69, reliability: 0.02, resolution: 0.03, uncertainty: 0.2379, withinBin: 0, withinCovariance: 0, bins: bins({}) } };
+  for (const vp of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    page = await open("", vp);
+    await page.waitForSelector("#stIdeas");
+    const rows = await page.evaluate(() => [...document.querySelectorAll("#stIdeas tbody tr")].map((r) => [...r.children].map((c) => c.textContent.trim())));
+    eq(rows.length, 4, `${vp.width}px: once n_eff reaches 100 the reliability table has a row for each occupied bin`);
+    eq(JSON.stringify(rows[0]), JSON.stringify(["30%\u00b740%", "40", "35%", "30%", "20%\u00b740%"]), `${vp.width}px: a row reads stated range, ideas, mean stated, observed and its interval`);
+    const t = await text(page, "#stIdeas");
+    ok(/0\.230/.test(t) && /0\.014/.test(t) && /0\.030/.test(t) && /0\.661/.test(t), `${vp.width}px: the Brier score, reliability, resolution and log score are printed`);
+    ok(/risk-neutral chance/.test(t) && /0\.246/.test(t), `${vp.width}px: the risk-neutral chance is named as not meant to match, with its own score`);
+    ok(!/Not yet measured/.test(t), `${vp.width}px: and the not-yet-measured line is gone`);
+    ok((await overflow(page)) <= 0, `${vp.width}px: the module adds no horizontal page scroll (${await overflow(page)})`);
+    await page.close();
+  }
+  calibBody = { status: "pending" };
 }
 
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));

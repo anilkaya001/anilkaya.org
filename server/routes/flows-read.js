@@ -49,6 +49,19 @@ export function flowsReadRows(deps) {
     return passthrough(stored);
   };
 
+  const calib = async ({ env }) => {
+    const stored = await readServed(env, "calib");
+    if (stored === null) return json(PENDING);
+    let view;
+    try {
+      view = JSON.parse(stored.payload);
+      delete view.state;
+    } catch {
+      throw storeGone();
+    }
+    return passthrough({ ...stored, payload: JSON.stringify(view) });
+  };
+
   const board = async ({ request, env, url }) => {
     const raw = url.searchParams.get("side");
     const side = BOARD_SIDES.includes(raw) ? raw : "long";
@@ -93,6 +106,7 @@ export function flowsReadRows(deps) {
 
   return [
     row("board", board),
+    row("calib", calib),
     ...NIGHTLY.map(([name, key, pending]) => row(name, nightly(key, pending))),
     ...OVERLAID.map((name) => row(name, overlaid(name))),
     ...CARDS.map((kind) => row(kind, card(kind))),

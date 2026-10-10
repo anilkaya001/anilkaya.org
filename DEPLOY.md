@@ -857,8 +857,9 @@ no outbox holds a variant id.
 | `roster` | each run, after every per-ticker key | `/api/flows/roster` (search, "Open instead", absent-card classification) | overwritten daily; also the retire ledger |
 | `meta` | each run | diagnostics | overwritten |
 | `ideas` | each run | the boards' idea column | overwritten daily |
-| `ideas:<date>`, `ideas:<date>:r<n>` | each run, once per session; a republish with different ideas writes the next `:r<n>` | calibration (later) | PERMANENT: write-once, never updated, never deleted, never pruned |
-| `ideas-out:<date>` | reserved for the outcome record | calibration (later) | PERMANENT, as above |
+| `ideas:<date>`, `ideas:<date>:r<n>` | each run, once per session; a republish with different ideas writes the next `:r<n>`; since P3-01 each row carries its trial (legs, fill, spot, both chances) as well as the thin view | the calibration step, which reads only dates before its own session | PERMANENT: write-once, never updated, never deleted, never pruned |
+| `ideas-out:<date>` | each run that settles, expires or gives up on at least one idea; the date is the run's session | the audit trail of `calib` | PERMANENT, as above |
+| `calib` | each run | `/api/flows/calib` (Track's idea calibration; the Worker drops `state`) | overwritten; the one mutable row, it carries the accumulators between nights |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
 morning's `board:long` overwrote the previous one, so by the time any forward
@@ -882,6 +883,20 @@ the DELETE branch refuses it with `undeletable_key`, and two triggers,
 DELETE of any `ideas:` or `ideas-out:` row at the storage layer. `pruneKeys` never
 names them, so the 126-day sweep leaves them alone; the cost is one row of about
 20 to 40 KB a night. Nothing in the repository can correct such a row, by design.
+
+**CALIBRATION.** After the engine loop and the ideas archive, `scripts/flows-legs/calibration.mjs`
+reads `calib` and the `ideas:<date>` rows of the previous 100 days (a weekday each, never the
+run's own date or later, and never before the first archive it has seen), takes each identity
+(ticker, family, legs, expiry) once at the night it first appeared, and settles every identity
+whose expiry has passed since `calib.through` from the daily close on its expiry: in-hand
+candles for a name still in the deep set, otherwise a one-year candle fetch, at most 15 a night.
+An unreadable archive row stops the night rather than let an idea expire in the gap. Ideas with
+no close yet stay in `calib.state.pending` for 14 days and are then recorded as lost; the share
+of due ideas without an outcome is published as `counts.unresolvedShare`. The outcomes of the
+night go to `ideas-out:<date>`, and only after that is written is `calib` published, so a failed
+night repeats whole the next night and folds each idea once. Reads are about 75 rows and writes
+one or two. Until the effective n (ideas that expire in one ISO week count as one cluster)
+reaches 100, `calib` publishes counts only and Track says "Not yet measured".
 The triggers are in the Worker's first-use DDL, so a deploy creates them on first
 use; apply the migration as well so a fresh database built from `migrations/`
 matches:

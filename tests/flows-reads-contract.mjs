@@ -787,7 +787,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
-  for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix"]) f.put(key, { ...NIGHTLY, rows: [] });
+  for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix", "calib"]) f.put(key, { ...NIGHTLY, rows: [], state: { pending: [] } });
   f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 } });
   f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const realFetch = globalThis.fetch;
@@ -810,7 +810,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
-    ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1],
+    ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1], ["/api/flows/calib", 1],
     ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
     ["/api/flows/ask", 9, { init: ASK({ question: "what is the market doing" }) }],
     ["/api/flows/ask", 28, { init: ASK({ question: "what about NVDA", subject: "NVDA" }) }],

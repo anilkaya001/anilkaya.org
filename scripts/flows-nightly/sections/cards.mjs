@@ -8,9 +8,10 @@ import { attachVol, coneThinOf } from "../../flows-legs/vol.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { foldCardOutcomes, poolWidth, runPooled, stats, uw } from "../vendor.mjs";
-import { ARCHIVE_DATE_RE, publish } from "../store.mjs";
+import { ARCHIVE_DATE_RE, publish, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
-import { archiveIdeas, congressRows, ideasPayload, readPxOf, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
+import { ideaRecord, archiveRow, archivePayload, runCalibration } from "../../flows-legs/calibration.mjs";
+import { archiveIdeas, archivePermanent, barsInHand, candleDate, candlesAscending, congressRows, ideasPayload, readPxOf, repairCandles, sessionCandles, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
 import {
   fakeEarnings, fakeIvRank, fakeMaxPain, fakeStockDarkpool, fakeStockOiChange, fakeSurface, fakeTermStructure,
 } from "../fixtures.mjs";
@@ -65,11 +66,25 @@ export function shedCardToCap(card, cap = CARD_SELF_CHECK_BYTES) {
   return { body, dropped };
 }
 
+export async function fetchCloseBars(ticker, sessionDate, dating) {
+  const raw = await uw(`/api/stock/${ticker}/ohlc/1d`, {
+    timeframe: "1Y",
+    ...(sessionDate && dating && dating.endDate ? { end_date: sessionDate } : {}),
+  });
+  const cut = sessionCandles(raw, sessionDate);
+  return {
+    bars: candlesAscending(cut)
+      .map((c) => ({ d: candleDate(c), h: num(c.high, null), l: num(c.low, null), c: num(c.close, null) }))
+      .filter((b) => b.d),
+    breaks: repairCandles(cut).breaks.map((b) => b.date).filter(Boolean),
+  };
+}
+
 export async function runCards(ctx) {
   const {
     stages, sessionDate, onBoard, byTicker, congressState, quantPass, scoredByTicker, chainByTicker, chainMiss,
     scoreTrack, scoreTrackPremium, first, generatedAt, marketCross, variationRun, screenerReadAt, deepSet, volLeg,
-    quantRate, crossSectionTickers,
+    quantRate, crossSectionTickers, dating,
   } = ctx;
   stages.step("cards");
   let surfaceReported = false;
@@ -81,6 +96,7 @@ export async function runCards(ctx) {
   const neuronTiers = new Map();
   const cardLane = poolWidth(2);
   const ideaByTicker = new Map();
+  const ideaRecordByTicker = new Map();
   console.log(`  cards: ${cardTickers.length} name(s), ${cardLane.width} in flight — ${cardLane.why}`);
   const cardsRun = await runPooled(cardTickers, async (ticker, index) => {
     const e = byTicker.get(ticker);
@@ -220,6 +236,8 @@ export async function runCards(ctx) {
           engineBlock = block;
           const idea = QP.leadIdea(block);
           if (idea) ideaByTicker.set(ticker, idea);
+          const record = idea ? ideaRecord(block, ticker) : null;
+          if (record) ideaRecordByTicker.set(ticker, record);
           quantStats.built++;
           if (block && block.ideas.length) quantStats.withIdeas++;
           if (engineOut.split) quantStats.split++;
@@ -267,13 +285,31 @@ export async function runCards(ctx) {
       const ideasBody = ideasPayload(ideaByTicker, { sessionDate, generatedAt, built: quantStats.built });
       await publish("ideas", ideasBody);
       console.log(`  ideas: the engine's lead structure for ${ideaByTicker.size} of ${quantStats.built} engine card(s)`);
-      const recorded = await archiveIdeas(ideasBody, sessionDate, publish);
+      const trials = archivePayload(
+        ideasBody.rows.map((row) => archiveRow(row, ideaRecordByTicker.get(row.t) || null)),
+        { sessionDate, generatedAt, built: quantStats.built },
+      );
+      const recorded = await archiveIdeas(trials, sessionDate, publish);
       (recorded.state === "written" || recorded.state === "revision" ? console.log : console.warn)(recorded.line);
     }, (error) => {
       console.warn(`  ideas: ${error.message} — the boards draw no idea column this session`);
     });
   } else {
     stages.skip("ideas", "no card carries an engine block");
+  }
+  if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    try {
+      const calibrated = await runCalibration({
+        sessionDate, generatedAt, publish,
+        readKey: readStored,
+        record: (prefix, payload) => archivePermanent(prefix, payload, sessionDate, publish),
+        barsFor: async (ticker) => barsInHand(byTicker.get(ticker)),
+        fetchBars: async (ticker) => (DRY_RUN || Date.now() > deadline ? null : fetchCloseBars(ticker, sessionDate, dating)),
+      });
+      (calibrated.state === "published" || calibrated.state === "unchanged" ? console.log : console.warn)(calibrated.line);
+    } catch (error) {
+      console.warn(`  calibration: ${error.message} — no outcome was written tonight`);
+    }
   }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +

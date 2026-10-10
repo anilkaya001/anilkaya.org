@@ -718,6 +718,13 @@ try {
 
       const anonStApi = await get("/api/flows/scoretrack");
       eq(anonStApi.status, 401, "and refuses an anonymous reader");
+
+      const calApi = await get("/api/flows/calib", { headers: { Cookie: "flows_session=" + token } });
+      eq(calApi.status, 200, "an authenticated calib request succeeds");
+      const calBody = await calApi.json();
+      ok(calBody.status === "pending" || (calBody.measured === false && !("state" in calBody)),
+         "and answers pending or the calibration view without the accumulator state the pipeline carries between nights");
+      eq((await get("/api/flows/calib")).status, 401, "an anonymous reader is refused");
     }
 
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
@@ -809,6 +816,9 @@ try {
         INGEST_TOKEN)).status, 200, "a dated scores pool is an accepted key");
     eq((await post("scoretrack", JSON.stringify({ names: [], sessions: [] }),
         INGEST_TOKEN)).status, 200, "and so is the live trace");
+    eq((await post("calib", JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-08-24", measured: false, nEff: 3, state: { pending: [{ t: "AAA" }] } }), INGEST_TOKEN)).status, 200,
+       "the calibration row is an accepted key");
+    eq((await post("calib:2026-08-24", "{}", INGEST_TOKEN)).status, 400, "and it has no dated form");
     eq((await post("flowalerts", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
        "the vendor-alerts feed is an accepted key");
     eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,
