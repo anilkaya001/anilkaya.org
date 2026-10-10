@@ -27,6 +27,7 @@ export const SCREEN_INPUTS = Object.freeze([
   ["tilt", "Option flow tilt"], ["dDelta", "Directional delta flow"], ["si", "Short interest"],
 ]);
 
+const IVP_LABEL = "Vendor 1-year IV percentile (tenor not documented)";
 const MINUS = "−";
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const has = (u, k) => Object.prototype.hasOwnProperty.call(u, k);
@@ -161,12 +162,12 @@ export function screenReading(input) {
   }
 
   const ivp = v("ivp");
-  if (ivp === null) withhold("ivp", "Implied volatility percentile", absent("ivp"));
+  if (ivp === null) withhold("ivp", IVP_LABEL, absent("ivp"));
   else {
     push({
-      key: "ivp", group: "premium", label: "Implied volatility percentile", value: r4(ivp),
-      text: ordinal(ivp), unit: "percentile of its own past year of 30-day implied volatility", grade: 1,
-      note: "The share of the past year's sessions with lower 30-day implied volatility, a percentile and not the range-based IV rank.",
+      key: "ivp", group: "premium", label: IVP_LABEL, value: r4(ivp),
+      text: ordinal(ivp), unit: "percentile, as the vendor reports it, of a one-year window whose implied-volatility tenor the vendor does not document", grade: 1,
+      note: "The vendor's own percentile, a percentile and not the range-based IV rank. Its documentation names the one-year window and not which expiry's implied volatility it ranks, so it is not read as the 30-day figure.",
     });
   }
   const ts = v("ts");
