@@ -1,7 +1,7 @@
 import { KINDS, PRIORITY, renderDossierForModel, dossierFacts, tokensOf } from "./flows-dossier.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 
-export const READING_VERSION = 1;
+export const READING_VERSION = 2;
 export const READING_BUDGET_TOKENS = 4200;
 export const READING_MAX_TOKENS = 1300;
 export const READING_TEMPERATURE = 0.15;
@@ -60,6 +60,7 @@ const ENGINE_LABELS = Object.freeze({
   "iv.cm.90": "90-day implied volatility",
   "iv.rank.1y": "Implied volatility rank over one year",
   "iv.pct.30": "30-day implied volatility rank over one year",
+  "iv.pctile.30.1y": "30-day implied volatility percentile over one year",
   "term.slope.30_90": "Implied volatility term slope, 30 to 90 days",
   "term.front.7_30": "Implied volatility front slope, 7 to 30 days",
   "term.slope.30_90.exEvent": "Term slope, 30 to 90 days, earnings removed",
@@ -276,12 +277,12 @@ function rulesFor(v) {
     },
     "vol-rich": () => {
       const vrp = v.num("options.engine.vrp.rel.21");
-      const ivp = v.num("options.engine.iv.pct.30");
+      const ivp = v.num("options.engine.iv.pctile.30.1y");
       if (vrp !== null && ivp !== null) {
         if (vrp < L.VRP_RICH || ivp < L.IV_HIGH) return null;
         return {
-          evidence: ["options.engine.iv.pct.30", "options.engine.vrp.rel.21", "options.engine.iv.cm.30"],
-          sentence: "Implied volatility ranks at " + v.show("options.engine.iv.pct.30") + " of its one-year range and carries a premium of " + v.show("options.engine.vrp.rel.21") + " over modelled realised volatility.",
+          evidence: ["options.engine.iv.pctile.30.1y", "options.engine.vrp.rel.21", "options.engine.iv.cm.30"],
+          sentence: "Implied volatility's percentile within its own past year is " + v.show("options.engine.iv.pctile.30.1y") + ", and it carries a premium of " + v.show("options.engine.vrp.rel.21") + " over modelled realised volatility.",
         };
       }
       const pv = v.num("peers.pct.vrp");
@@ -294,12 +295,12 @@ function rulesFor(v) {
     },
     "vol-cheap": () => {
       const vrp = v.num("options.engine.vrp.rel.21");
-      const ivp = v.num("options.engine.iv.pct.30");
+      const ivp = v.num("options.engine.iv.pctile.30.1y");
       if (vrp !== null && ivp !== null) {
         if (vrp > L.VRP_CHEAP || ivp > L.IV_LOW) return null;
         return {
-          evidence: ["options.engine.iv.pct.30", "options.engine.vrp.rel.21", "options.engine.iv.cm.30"],
-          sentence: "Implied volatility ranks at " + v.show("options.engine.iv.pct.30") + " of its one-year range and sits " + v.show("options.engine.vrp.rel.21") + " against modelled realised volatility.",
+          evidence: ["options.engine.iv.pctile.30.1y", "options.engine.vrp.rel.21", "options.engine.iv.cm.30"],
+          sentence: "Implied volatility's percentile within its own past year is " + v.show("options.engine.iv.pctile.30.1y") + ", and it sits " + v.show("options.engine.vrp.rel.21") + " against modelled realised volatility.",
         };
       }
       const pv = v.num("peers.pct.vrp");

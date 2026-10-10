@@ -125,12 +125,17 @@ const held = (dossier) => codes(R.heldTags(dossier));
     ["flow-balanced", BASES.quiet, [], true, "lean 0.03 with both legs read"],
     ["flow-balanced", BASES.quiet, [["flow.strip.lean", { v: 0.1 }]], true, "0.10 is the line"],
     ["flow-balanced", BASES.quiet, [["flow.strip.lean", { v: 0.1001 }]], false, "above it"],
-    ["vol-rich", m, [], true, "rank 82.0% and premium 18.0%"],
-    ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.1 }], ["options.engine.iv.pct.30", { v: 0.75 }]], true, "the engine's own rich lines"],
+    ["vol-rich", m, [], true, "percentile 82.0% and premium 18.0%"],
+    ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.75 }]], true, "the engine's own rich lines on the percentile"],
     ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.0999 }]], false, "premium below the line"],
-    ["vol-rich", m, [["options.engine.iv.pct.30", { v: 0.7499 }]], false, "rank below the line"],
-    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pct.30", { v: 0.25 }]], true, "the cheap lines"],
-    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.0999 }], ["options.engine.iv.pct.30", { v: 0.25 }]], false, "premium above the line"],
+    ["vol-rich", m, [["options.engine.iv.pctile.30.1y", { v: 0.7499 }]], false, "percentile below the line"],
+    ["vol-rich", m, [["options.engine.iv.pctile.30.1y", { v: 0.7499 }], ["options.engine.iv.pct.30", { v: 0.95 }]], false, "a high rank under the old id does not stand in for a low percentile"],
+    ["vol-rich", m, [["options.engine.iv.pctile.30.1y", { v: 0.8 }], ["options.engine.iv.pct.30", { v: 0.05 }]], true, "and a low rank does not hold back a high percentile"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.25 }]], true, "the cheap lines on the percentile"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.0999 }], ["options.engine.iv.pctile.30.1y", { v: 0.25 }]], false, "premium above the line"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2501 }]], false, "percentile above the line"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2501 }], ["options.engine.iv.pct.30", { v: 0.05 }]], false, "a low rank under the old id does not stand in for a percentile above the line"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2 }], ["options.engine.iv.pct.30", { v: 0.95 }]], true, "and a high rank does not hold back a low percentile"],
     ["news-driven", m, [["news.count24h", { v: 5 }], ["news.major24h", { v: 0 }]], true, "five headlines a day"],
     ["news-driven", m, [["news.count24h", { v: 4 }], ["news.major24h", { v: 0 }]], false, "four with none major"],
     ["news-driven", m, [["news.count24h", { v: 2 }], ["news.major24h", { v: 1 }]], true, "two with one marked major"],
@@ -164,6 +169,19 @@ const held = (dossier) => codes(R.heldTags(dossier));
     const d = patches.length ? withFacts(base, patches) : base;
     const got = R.heldTags(d).some((t) => t.code === code);
     eq(got, want, code + ": " + why + (patches.length ? " (" + patches.map(([id, p]) => id + "=" + (p.v ?? "grade " + p.grade)).join(", ") + ")" : ""));
+  }
+  {
+    const rich = R.heldTags(BASES.momentum).find((t) => t.code === "vol-rich");
+    ok(rich && rich.evidence.includes("options.engine.iv.pctile.30.1y") && !rich.evidence.includes("options.engine.iv.pct.30"), "vol-rich cites the percentile id and not the rank");
+    ok(/percentile within its own past year is 82\.0%/.test(rich.sentence) && !/rank/i.test(rich.sentence), "and calls it a percentile: " + rich.sentence);
+    const cheap = R.heldTags(withFacts(BASES.momentum, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { v: 0.1 }]])).find((t) => t.code === "vol-cheap");
+    ok(cheap && cheap.evidence.includes("options.engine.iv.pctile.30.1y") && /percentile within its own past year is 10\.0%/.test(cheap.sentence) && !/rank/i.test(cheap.sentence), "vol-cheap says the same of a low percentile: " + (cheap && cheap.sentence));
+  }
+  {
+    const labelled = R.forReading(BASES.momentum).packets.options.facts;
+    eq(labelled.find((f) => f.k === "engine.iv.pctile.30.1y")?.label, "30-day implied volatility percentile over one year", "the percentile fact is labelled a percentile in the prompt and the chips");
+    eq(labelled.find((f) => f.k === "engine.iv.pct.30")?.label, "30-day implied volatility rank over one year", "and the rank beside it stays labelled a rank");
+    eq(R.READING_VERSION, 2, "the reading version moved with the wording, so stored readings regenerate on their next read");
   }
   const dead = clone(BASES.momentum);
   dead.packets.events.status = "withheld";
