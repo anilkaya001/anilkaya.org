@@ -174,4 +174,12 @@ for (const e of FX.effectiveN) near(S.effectiveN(e), e.want, 1e-12, "effectiveN"
   }
 }
 
+{
+  for (const [file, decl, from] of [["shared/flows-market.js", /^\s*const median = /m, "./flows-stats.js"], ["scripts/flows-quant-pipeline.mjs", /^const median = /m, "../shared/flows-stats.js"]]) {
+    const src = moduleSource(file);
+    expect(src, new RegExp("import \\{ median \\} from \"" + from.replace(/[.\/]/g, "\\$&") + "\";"), { min: 1, max: 1, why: file + " takes its median from the leaf" });
+    absent(src, decl, { anchor: "from \"" + from + "\"", why: file + " keeps no copy of the median" });
+  }
+}
+
 console.log(`✓ flows-stats: ${checks} assertions — the statistics leaf against scipy, numpy and statsmodels references (median and quantiles, average ranks, Pearson and Spearman, Wilson, the t quantile and mean interval, Newey-West, a seeded stationary bootstrap reproduced in Python, Brier, log score and the Murphy decomposition, Benjamini-Hochberg), its edge cases, and the consumers that take their statistics from it`);

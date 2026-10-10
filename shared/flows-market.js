@@ -1,3 +1,5 @@
+import { median } from "./flows-stats.js";
+
 const onWire = (v) => v !== undefined && v !== null && v !== "";
 
 function numOrNull(v) {
@@ -65,9 +67,6 @@ export function marketAggregate(eligibleRows, tiltsByTicker = new Map(), { scree
       return t && Number.isFinite(t.ivRank) ? t.ivRank : null;
     })
     .filter((v) => v !== null).sort((a, b) => a - b);
-  const median = (a) => (a.length ? (a.length % 2
-    ? a[(a.length - 1) / 2]
-    : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : null);
 
   return {
     n,
