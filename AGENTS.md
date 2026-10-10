@@ -736,7 +736,16 @@ its `webSocket` through `new Response(response.body, response)`):
 - `GET /api/rt/status`: owner only. Mode, audience, upstream, sockets by user,
   per-topic sequence, last-frame age, last upstream error, vendor lag p50/p95
   (hub receive time minus vendor timestamp), calls in the last minute and hour
-  by topic, the degraded episode and the kill switches.
+  by topic, the degraded episode and the kill switches. Per topic it also holds `rttMs` (a
+  poll's start to its read), `emptyFrames`, `itemLagMs` (fl and nw only: the read minus the
+  newest new item's own timestamp; the first poll of an epoch is a backlog and is not
+  sampled) and `time { demandedMs, liveMs, vendorLagMs, oursMs }`, accrued at each tick while the
+  market is in session: a demanded topic that is not `live` for a vendor reason (`vendor-lag`,
+  `vendor-skew`, `vendor-unstamped`) counts as vendor lag, for any other reason as ours. A gap
+  of more than three alarm ceilings between ticks is `unobservedMs` and is charged to no class.
+  All of it is memory, resets with the epoch (`ep`, `startedAt`), and nothing writes it to D1.
+  The client's `FlowsUI.rt.measure()` adds `transitMs` (p50 and p95 of receive time minus the
+  frame's `at`, against the offset the hello taught; an estimate, labelled as one).
 
 Kill switches fail closed. `FLOWS_RT_MODE` is `on` or anything else is off
 (routes answer JSON 404 `rt_off`, even to an anonymous caller; an absent

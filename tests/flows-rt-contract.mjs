@@ -1866,4 +1866,116 @@ const seqOk = (ws) => {
   eq(read("wrangler.toml").includes("FLOWS_LIVE_MODE = \"actions\""), true, "and so is the live mode");
 }
 
+{
+  const sums = (t) => Math.abs(t.liveMs + t.vendorLagMs + t.oursMs - t.demandedMs);
+
+  let delayed = null;
+  delayed = rig({
+    start: at(10, 0),
+    vendorOver: (v) => {
+      const inner = v.handle;
+      v.handle = async (path, params) => { delayed.state.t += 120; return inner(path, params); };
+    },
+  });
+  delayed.join("anilkaya", { topics: ["px"] });
+  await delayed.run(40);
+  const rtt = delayed.hub.status().topics.px.rttMs;
+  ok(rtt.n >= 6, `slo: px records one round trip per poll (${rtt.n})`);
+  deep([rtt.p50, rtt.p95, rtt.max], [120, 120, 120], "slo: rttMs is the time from the poll's start to its read, 120 ms from a vendor that costs 120 ms");
+  deep(delayed.hub.status().topics.fl.rttMs, { n: 0, p50: null, p95: null, max: null }, "slo: an undemanded topic has no round trips");
+  deep([delayed.hub.status().topics.px.itemLagMs, delayed.hub.status().topics.gx.itemLagMs, delayed.hub.status().topics.mk.itemLagMs], [null, null, null], "slo: item lag is reported for fl and nw only");
+
+  const healthy = rig({ start: at(10, 0) });
+  const spy = { empty: 0, full: 0 };
+  const emit = healthy.hub.emit.bind(healthy.hub);
+  healthy.hub.emit = (k, rows) => { if (k === "px") (rows.length ? spy.full++ : spy.empty++); return emit(k, rows); };
+  const a = healthy.join("anilkaya", { topics: TOPICS, f: "NVDA" });
+  await healthy.run(60);
+  const st = healthy.hub.status();
+  eq(st.topics.px.emptyFrames, spy.empty, "slo: emptyFrames counts the px frames sent with no rows");
+  ok(spy.full > 0, "slo: and the frames that moved rows are not counted as empty");
+  for (const k of TOPICS) {
+    const t = st.topics[k];
+    ok(t.time.demandedMs >= 50000 && t.time.demandedMs <= 60000, `slo: ${k} was demanded for ${t.time.demandedMs} ms of a 60 s run`);
+    ok(sums(t.time) < 1e-6, `slo: ${k} live + vendor-lag + ours equals demanded exactly`);
+    ok(t.time.liveMs >= 0 && t.time.vendorLagMs >= 0 && t.time.oursMs >= 0, `slo: ${k} counters are never negative`);
+  }
+  for (const k of ["px", "fl", "gx", "nw"]) ok(st.topics[k].time.liveMs / st.topics[k].time.demandedMs >= 0.85, `slo: ${k} on a healthy vendor is live for ${(100 * st.topics[k].time.liveMs / st.topics[k].time.demandedMs).toFixed(0)}% of its demanded time`);
+  eq(st.topics.px.time.vendorLagMs, 0, "slo: and none of it is charged to the vendor");
+  eq(st.topics.mk.time.oursMs, 0, "slo: mk is never charged to us on a healthy run, though the fake tide's bar stamp runs behind the read part of the time");
+  ok(st.topics.mk.time.vendorLagMs > 0, "slo: it is charged to the vendor's stamp instead");
+  ok(st.topics.fl.itemLagMs.n >= 8 && st.topics.fl.itemLagMs.p50 >= 0 && st.topics.fl.itemLagMs.p95 <= 1600, `slo: fl alert lag against the alert's own created_at: ${JSON.stringify(st.topics.fl.itemLagMs)}`);
+  ok(st.topics.nw.itemLagMs.n >= 1 && st.topics.nw.itemLagMs.max <= 30000, `slo: nw headline lag against its created_at: ${JSON.stringify(st.topics.nw.itemLagMs)}`);
+  eq(st.unobservedMs, 0, "slo: nothing went unobserved");
+  eq(st.startedAt, healthy.hub.startedAt, "slo: status names the epoch's start");
+
+  const behind = rig({ start: at(10, 0), vendorOver: (v) => { v.lagMs = 40000; } });
+  behind.join("anilkaya", { topics: ["px"] });
+  await behind.run(60);
+  const bt = behind.hub.status().topics.px.time;
+  ok(bt.vendorLagMs >= 0.8 * bt.demandedMs, `slo: a vendor 40 s behind is charged to the vendor (${bt.vendorLagMs} of ${bt.demandedMs} ms)`);
+  ok(bt.liveMs === 0 && bt.oursMs <= 0.1 * bt.demandedMs, `slo: and not to us (live ${bt.liveMs}, ours ${bt.oursMs})`);
+  ok(sums(bt) < 1e-6, "slo: the three still sum to demanded");
+
+  const down = rig({ start: at(10, 0) });
+  down.join("anilkaya", { topics: ["px"] });
+  await down.run(20);
+  const before = down.hub.status().topics.px.time;
+  down.vendor.fault = "500";
+  await down.run(40);
+  const after = down.hub.status().topics.px.time;
+  ok(after.oursMs - before.oursMs >= 20000, `slo: a dead vendor connection costs us ${after.oursMs - before.oursMs} ms of not-live time (the vendor sent no stale stamp, the poll failed)`);
+  eq(after.vendorLagMs, 0, "slo: and none of it is vendor lag");
+  ok(sums(after) < 1e-6, "slo: sum holds under failure");
+
+  const ep0 = healthy.hub.ep;
+  healthy.hub.onClose(a.ws);
+  healthy.sockets.length = 0;
+  await healthy.run(75);
+  eq(healthy.hub.running, false, "slo: with no viewer the hub stops");
+  deep(healthy.hub.status().topics.px.time, { demandedMs: 0, liveMs: 0, vendorLagMs: 0, oursMs: 0 }, "slo: and its counters are gone with the epoch");
+  eq(healthy.hub.status().topics.px.emptyFrames, 0, "slo: emptyFrames too");
+  healthy.join("anilkaya", { topics: ["px"] });
+  await healthy.run(10);
+  ok(healthy.hub.ep > ep0, "slo: a new viewer starts a new epoch");
+  const again = healthy.hub.status().topics.px.time;
+  ok(again.demandedMs > 0 && again.demandedMs <= 10000, `slo: whose counters start from zero (${again.demandedMs} ms)`);
+
+  const gap = rig({ start: at(10, 0) });
+  gap.join("anilkaya", { topics: ["px"] });
+  await gap.run(10);
+  const d0 = gap.hub.status().topics.px.time.demandedMs;
+  gap.state.t += 120000;
+  await gap.run(1);
+  const g1 = gap.hub.status();
+  ok(g1.unobservedMs >= 120000, `slo: a two-minute silence is reported as unobserved (${g1.unobservedMs} ms)`);
+  eq(g1.topics.px.time.demandedMs, d0, "slo: and is not charged to any class");
+
+  const sat = rig({ start: easternInstant("2026-10-03", 11 * 60) });
+  sat.join();
+  await sat.run(30);
+  ok(TOPICS.every((k) => sat.hub.status().topics[k].time.demandedMs === 0), "slo: a closed market accrues no demanded time");
+}
+
+{
+  const hub = new RtHub({
+    env: { FLOWS_RT_MODE: "on", UW_API_KEY: "k" }, now: () => 1000000, log: () => {},
+    host: { sockets: () => [], wake() {} },
+    upstreamFactory: () => ({ kind: "stub", start() {}, stop() {}, tick() {}, paused: () => false, state: () => ({ topics: {} }) }),
+  });
+  hub.start(1000000);
+  const frame = (k, readAt, items, extra = {}) => hub.onUpstream({ k, readAt, ms: 40, items, meta: {}, full: {}, answered: true, vendorAt: null, ...extra });
+  frame("fl", 1000000, [{ id: "a", ts: 900000 }, { id: "b", ts: 950000 }]);
+  eq(hub.topics.fl.itemLag.summary().n, 0, "lag: the first poll of an epoch is a backlog and is not sampled");
+  frame("fl", 1005000, [{ id: "c", ts: 1004500 }, { id: "d", ts: 1003000 }]);
+  deep(hub.topics.fl.itemLag.summary(), { n: 1, p50: 500, p95: 500, max: 500 }, "lag: the newest new alert is 500 ms old at the read");
+  frame("fl", 1010000, [{ id: "c", ts: 1004500 }]);
+  eq(hub.topics.fl.itemLag.summary().n, 1, "lag: a poll that brings nothing new samples nothing");
+  frame("nw", 1000000, [{ id: "x", ts: 1, createdAtMs: 1 }]);
+  frame("nw", 1030000, [{ id: "y", ts: 1020000, createdAtMs: 1020000 }, { id: "z", ts: 1030000, createdAtMs: null }]);
+  deep(hub.topics.nw.itemLag.summary(), { n: 1, p50: 10000, p95: 10000, max: 10000 }, "lag: a headline is aged by its own created_at, and one with none is not sampled");
+  deep(hub.topics.fl.rttMs ?? hub.status().topics.fl.rttMs, { n: 3, p50: 40, p95: 40, max: 40 }, "lag: every answered poll records its round trip");
+  hub.stop();
+}
+
 console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches`);

@@ -35,6 +35,27 @@
   var listening = 0;
   var stats = { msgs: 0, bytes: 0, frames: 0, snaps: 0, gaps: 0, dups: 0, orphans: 0, bad: 0, sent: 0, sentBytes: 0, refused: 0, flushes: 0, polls: 0, pollBytes: 0, opens: 0, applied: 0, reg: 0, ms: 0, maxMs: 0, kinds: {} };
 
+  var TRANSIT_N = 64;
+  var transit = { buf: [], head: 0, off: null };
+
+  function transitReset() { transit.off = null; transit.buf = []; transit.head = 0; }
+  function transitNote(rx, at) {
+    if (typeof at !== "number" || !isFinite(at)) return;
+    var d = rx - at;
+    if (transit.off === null) { transit.off = d; return; }
+    if (d < transit.off) transit.off = d;
+    var v = d - transit.off;
+    if (transit.buf.length < TRANSIT_N) transit.buf.push(v);
+    else { transit.buf[transit.head] = v; transit.head = (transit.head + 1) % TRANSIT_N; }
+  }
+  function transitSummary() {
+    var n = transit.buf.length;
+    if (!n) return { n: 0, p50: null, p95: null, estimate: true };
+    var xs = transit.buf.slice().sort(function (a, b) { return a - b; });
+    var at = function (q) { return xs[Math.min(n - 1, Math.max(0, Math.ceil(q * n) - 1))]; };
+    return { n: n, p50: at(0.5), p95: at(0.95), estimate: true };
+  }
+
   function arm(name, ms, fn) {
     disarm(name);
     timers[name] = setTimeout(function () { delete timers[name]; fn(); }, ms);
@@ -516,6 +537,7 @@
   }
 
   function receive(data) {
+    var rx = Date.now();
     stats.msgs++;
     stats.bytes += data && data.length ? data.length : 0;
     if (typeof data !== "string") return "binary";
@@ -525,6 +547,8 @@
     var kind = f.k === "ctl" ? "ctl:" + f.t : String(f.k);
     if (f.k === "ctl" && f.t === "bye") { onBye(f); return kind; }
     if (f.k === "ctl" && f.t === "hello") {
+      transitReset();
+      transitNote(rx, f.at);
       S.helloed = true;
       S.fails = 0;
       disarm("hello");
@@ -538,7 +562,10 @@
       (Array.isArray(f.rows) ? f.rows : []).forEach(frame);
       arm("pulse", PULSE_MS, pulse);
       syncSub();
-    } else if (S.helloed) frame(f);
+    } else if (S.helloed) {
+      transitNote(rx, f.at);
+      frame(f);
+    }
     if (S.helloed) watch();
     return kind;
   }
@@ -901,7 +928,7 @@
   }
 
   function measure() {
-    return Object.assign({ timers: Object.keys(timers).length, listeners: listening, socket: S.ws ? 1 : 0, handles: S.handles.length, polling: S.polling ? 1 : 0, raf: raf ? 1 : 0 }, stats);
+    return Object.assign({ timers: Object.keys(timers).length, listeners: listening, socket: S.ws ? 1 : 0, handles: S.handles.length, polling: S.polling ? 1 : 0, raf: raf ? 1 : 0, transitMs: transitSummary() }, stats);
   }
 
   var api = {

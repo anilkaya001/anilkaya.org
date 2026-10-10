@@ -619,6 +619,38 @@ try {
     await ctx.close();
   }
 
+  if (want("transit")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    await connect(page, { topics: ["px"] });
+    const c1 = await R.nextConn();
+    R.send(c1, R.hello(["px"], { px: [quote("NVDA", 200, 190, R.now - 1000)] }));
+    await R.pump(80);
+    deep((await measure(page)).transitMs, { n: 0, p50: null, p95: null, estimate: true }, "transit: the hello teaches the clock offset and is not itself a sample");
+    for (const wait of [0, 300, 700, 1200]) {
+      const f = R.delta("px", [quote("NVDA", 201, 190, R.now)]);
+      R.now += wait;
+      await page.clock.runFor(wait);
+      R.send(c1, f);
+      await page.waitForTimeout(20);
+    }
+    const t = (await measure(page)).transitMs;
+    deep([t.n, t.estimate, t.p95 - t.p50], [4, true, 900], "transit: receive time minus the frame's own stamp, against the offset the hello taught, as p50 and p95 and labelled an estimate");
+    const base = t.p50 - 300;
+    ok(base >= 0 && base <= 200, `transit: and the frame that waited 1200 ms reads ${t.p95} ms over a base of ${base} ms (the page's own pump after the hello)`);
+    R.now += 5000;
+    await page.clock.runFor(5000);
+    R.send(c1, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: {} }));
+    await page.waitForTimeout(20);
+    eq((await measure(page)).transitMs.n, 5, "transit: a control frame is a sample too");
+    const early = R.delta("px", [quote("NVDA", 202, 190, R.now)]);
+    R.now -= 0;
+    R.send(c1, early);
+    await page.waitForTimeout(20);
+    ok((await measure(page)).transitMs.p50 >= 0, "transit: no sample is negative");
+    deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
   if (want("notlive")) {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     await connect(page, { topics: ["px"] });
@@ -1141,6 +1173,7 @@ try {
     console.log("MEASURE px frames in 60 s:", px[0], "mean bytes", Math.round(px[1] / px[0]), "mean receive path ms (parse, merge, queue, register)", (px[2] / px[0]).toFixed(2));
     console.log("MEASURE per kind [frames, mean bytes, mean ms]:", JSON.stringify(Object.fromEntries(kinds.map((k) => { const d = diff(k); return [k, [d[0], Math.round(d[1] / Math.max(1, d[0])), +(d[2] / Math.max(1, d[0])).toFixed(3)]]; }))));
     console.log("MEASURE animation-frame flushes:", m.raf.length, "mean ms", avg(m.raf).toFixed(2), "max", Math.max(0, ...m.raf).toFixed(2), "| DOM mutation records:", m.mut, "per px frame", (m.mut / Math.max(1, px[0])).toFixed(1));
+    console.log("MEASURE transitMs (an estimate, relative to the hello):", JSON.stringify((await measure(page)).transitMs));
     console.log("MEASURE bytes per minute received on the socket (every topic, a vendor that moves every row each poll):", bytes, "in", msgs, "messages");
     console.log("MEASURE one snapshot response: px", one, "all five topics", all, "=> poll rung per minute: px only", one * 12, "all five", all * 12, "| stored strips body, 157 names:", rest);
     const pxs = { length: px[0] };

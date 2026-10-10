@@ -249,8 +249,12 @@ function newTopic(k) {
     k, state: createTopicState(k), hasData: false, readAt: null, vendorAt: null, meta: {}, full: {},
     frames: 0, bytes: 0, lastFrameAt: null, lastOkAt: null, lastError: null, fails: 0, polls: 0, demandAt: null,
     lag: createLagStats(), rowLag: createLagStats(), rowsHeld: 0,
+    rtt: createLagStats(), itemLag: createLagStats(), emptyFrames: 0,
+    time: { demandedMs: 0, liveMs: 0, vendorLagMs: 0, oursMs: 0 },
   };
 }
+
+const VENDOR_REASONS = new Set(["vendor-lag", "vendor-skew", "vendor-unstamped"]);
 
 const heldCount = (k, s) => (k === "fl" || k === "nw" ? s.ring.length : s.rows.size);
 
@@ -308,6 +312,8 @@ export class RtHub {
     this.focus = [];
     this.socketCount = 0;
     this.phase = null;
+    this.acctAt = null;
+    this.unobservedMs = 0;
   }
 
   logOnce(key, entry) {
@@ -431,6 +437,15 @@ export class RtHub {
     t.fails = 0;
     t.rowsHeld = heldCount(up.k, t.state);
     if (out.vendorAt !== null && RT_TOPICS[up.k].stamp === "rows") t.lag.add(at - out.vendorAt);
+    if (Number.isFinite(up.ms)) t.rtt.add(up.ms);
+    if ((up.k === "fl" || up.k === "nw") && t.polls > 1) {
+      let newest = NaN;
+      for (const r of out.rows) {
+        const stamp = up.k === "nw" ? r.createdAtMs : r.ts;
+        if (Number.isFinite(stamp) && !(stamp <= newest)) newest = stamp;
+      }
+      if (Number.isFinite(newest)) t.itemLag.add(at - newest);
+    }
     if (up.k === "px") for (const r of out.rows) if (r[1] !== null) t.rowLag.add(at - r[1]);
     this.emit(up.k, out.rows);
     if (this.waiters.length) for (const w of this.waiters.slice()) w.check();
@@ -455,6 +470,7 @@ export class RtHub {
     const t = this.topics[k];
     const now = this.now();
     const sq = this.counter.next(k);
+    if (rows.length === 0) t.emptyFrames++;
     const delta = JSON.stringify(frame(k, { ep: this.ep, sq, at: now, fresh: this.freshOf(k, now), meta: t.meta, rows }));
     let snap = null;
     let sent = 0;
@@ -760,6 +776,7 @@ export class RtHub {
     const phase = phaseAt(now, this.clock);
     this.phase = phase;
     if (!inSession(phase)) {
+      this.acctAt = null;
       const info = closedInfo(phase);
       const key = closedKeyOf(info);
       if (this.closedKey !== key) {
@@ -780,8 +797,28 @@ export class RtHub {
     const end = this.now();
     if (!this.demand(end)) { this.stop(); return null; }
     this.evaluate(end);
+    this.account(end);
     this.beat(end, false);
     return this.untilNext(end);
+  }
+
+  account(now) {
+    const last = this.acctAt;
+    this.acctAt = now;
+    if (last === null) return;
+    const dt = now - last;
+    if (dt <= 0) return;
+    if (dt > 3 * RT_LIMITS.alarmMaxMs * this.cfg.scale) { this.unobservedMs += dt; return; }
+    for (const k of this.demanded) {
+      const t = this.topics[k];
+      const span = Math.min(dt, now - Math.max(last, t.demandAt ?? last));
+      if (!(span > 0)) continue;
+      const e = t.hasData ? this.freshOf(k, now) : pendingStream(k);
+      t.time.demandedMs += span;
+      if (e.state === "live") t.time.liveMs += span;
+      else if (VENDOR_REASONS.has(e.reason)) t.time.vendorLagMs += span;
+      else t.time.oursMs += span;
+    }
   }
 
   untilNext(now) {
@@ -864,13 +901,16 @@ export class RtHub {
         polls: t.polls, lastFrameAt: t.lastFrameAt, lastFrameAgeMs: t.lastFrameAt === null ? null : now - t.lastFrameAt,
         lastOkAt: t.lastOkAt, fails: t.fails, lastError: t.lastError,
         lagMs: t.lag.summary(), rowLagMs: k === "px" ? t.rowLag.summary() : null,
+        rttMs: t.rtt.summary(), itemLagMs: k === "fl" || k === "nw" ? t.itemLag.summary() : null,
+        emptyFrames: t.emptyFrames, time: { ...t.time },
         calls: { minute: minute[k], hour: hour[k] },
         fresh: t.hasData ? this.freshOf(k, now) : pendingStream(k),
       };
     }
     const phase = phaseAt(now, this.clock);
     return {
-      running: this.running, ep: this.ep || null, session: this.session, now,
+      running: this.running, ep: this.ep || null, startedAt: this.running ? this.startedAt : null, session: this.session, now,
+      unobservedMs: this.unobservedMs,
       phase: phase ? { phase: phase.phase, trading: phase.trading, day: phase.day } : null,
       upstream: { kind: this.upstream.kind, ...up },
       sockets: { n: this.liveSockets().length, byUser: this.userCounts(), userCap: this.cfg.userCap, max: RT_LIMITS.sockets },
