@@ -23,6 +23,7 @@ export const MIN_IV_CHANGES = 20;
 export const HALF_LIFE_BANDS = Object.freeze({ meanReverting: 10, persistent: 40 });
 export const VRP_WINDOW = 252;
 export const VRP_REALIZED_SESSIONS = 21;
+export const VRP_INTERVAL_Z = 1.2815515655446004;
 export const IV_BOUNDS = Object.freeze([0.005, 5]);
 export const SERIES_KEEP = 60;
 export const VRP_SERIES_KEEP = 252;
@@ -994,6 +995,14 @@ export function halfLifeClass(h, bands = HALF_LIFE_BANDS) {
   return h < bands.meanReverting ? "mean-reverting" : h > bands.persistent ? "persistent" : "moderate";
 }
 
+export function wilsonInterval(p, n, z) {
+  if (!Number.isFinite(p) || !(n > 0) || !(z > 0)) return null;
+  const z2 = z * z, d = 1 + z2 / n;
+  const c = (p + z2 / (2 * n)) / d;
+  const m = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / d;
+  return [Math.max(0, c - m), Math.min(1, c + m)];
+}
+
 export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = null, garch = null } = {}) {
   const silentBody = bodyPanel(body);
   if (silentBody) return silentBody;
@@ -1026,7 +1035,9 @@ export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = nu
   const silent = {};
   const enough = win.length >= MIN_HISTORY;
   const hit = enough ? win.filter((r) => r.rp > 0).length / win.length : null;
-  if (!enough) { silent.hitRate = "short-history"; silent.meanRp = "short-history"; }
+  const nEff = enough ? Math.floor(win.length / VRP_REALIZED_SESSIONS) : null;
+  const hitCi = hit !== null && nEff >= 1 ? wilsonInterval(hit, nEff, VRP_INTERVAL_Z) : null;
+  if (!enough) { silent.hitRate = "short-history"; silent.meanRp = "short-history"; silent.nEff = "short-history"; silent.hitCi = "short-history"; }
   if (!latest) silent.latest = "input-absent";
   const b = Array.isArray(bars) ? bars.filter((x) => !sessionDate || x.d <= sessionDate) : [];
   const rvByDay = new Map();
@@ -1073,6 +1084,8 @@ export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = nu
     } : null,
     n: win.length,
     hitRate: round(hit, 4),
+    nEff,
+    hitCi: hitCi ? [round(hitCi[0], 3), round(hitCi[1], 3)] : null,
     meanRp: enough ? round(mean(win.map((r) => r.rp)), 5) : null,
     medianRp: enough ? round(median(win.map((r) => r.rp)), 5) : null,
     rankOwn: latest && enough ? round(shareAtOrBelow(latest.rp, win.map((r) => r.rp)), 4) : null,
@@ -1097,7 +1110,9 @@ export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = nu
     ...(mismatch ? { rpMismatch: mismatch } : {}),
     ...(outOfRange ? { rankOutOfRange: outOfRange } : {}),
     units: { rp: "iv minus the realized vol that followed, annualised decimal", variance: "iv^2 - rv^2",
-      hitRate: "fraction of completed windows with rp > 0", exAnte: "iv30 today minus trailing rv21, annualised decimal",
+      hitRate: "fraction of completed windows with rp > 0",
+      nEff: "completed windows divided by the 21 sessions each one overlaps, rounded down",
+      hitCi: "80% Wilson interval for hitRate on nEff independent windows", exAnte: "iv30 today minus trailing rv21, annualised decimal",
       z: "sd against the reconstructed ex-ante history" },
     silent,
   };

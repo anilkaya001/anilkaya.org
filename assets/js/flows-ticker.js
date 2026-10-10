@@ -2094,7 +2094,7 @@
       info: () => ({
         title: "Volatility", state: st.state === "ok" ? null : st.state, asOf: pm.asOf || null, lead: leadOf(vc) || leadOf(P.pricedMove),
         facts: [["IV 30d", F.pct(pm.iv30)], ["RV 30d", F.pct(pm.rv30)], ["Premium (ex-ante)", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrp) + " pts, z " + F.signed(vrp.exAnte.z, 2) : num(pm.vrp) !== null ? pts1(pm.vrp) + " pts" : null],
-          ["Premium ex-event", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrpExEvent) + " pts" : null], ["Seller won", vrp ? F.pct(vrp.hitRate, 0) + " of " + vrp.n + " completed windows" : null],
+          ["Premium ex-event", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrpExEvent) + " pts" : null], ["Seller won", vrp ? F.pct(vrp.hitRate, 0) + " of " + vrp.n + " overlapping windows" + (num(vrp.nEff) !== null && Array.isArray(vrp.hitCi) && num(vrp.hitCi[0]) !== null && num(vrp.hitCi[1]) !== null ? ", about " + vrp.nEff + " independent (80% range " + F.pct(vrp.hitCi[0], 0) + " to " + F.pct(vrp.hitCi[1], 0) + ")" : "") : null],
           ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100: where today sits between its 1-year low and high"],
           ["RR25", skew ? pts1(skew.rr25) + " pts, z " + F.signed(skew.z, 2) + " (" + (skew.zBasis || "raw") + "), 5-day change " + pts1(skew.mom5) : null], ["RR10", skew && num(skew.rr10) !== null ? pts1(skew.rr10) + " pts" : null],
           ["Crash ratio", skew && num(skew.crash) !== null ? skew.crash.toFixed(2) + " (median " + (num(skew.crashMedian) === null ? DASH : skew.crashMedian.toFixed(2)) + ")" : null],
