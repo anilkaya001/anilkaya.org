@@ -521,7 +521,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
     const url = new URL(input instanceof URL ? input.href : typeof input === "string" ? input : input.url);
     if (url.hostname === "uw.test" && /\/financials$/.test(url.pathname)) {
       const signal = init && init.signal;
-      const entry = { aborted: false, at: Date.now() };
+      const entry = { aborted: false, at: Date.now(), signal: !!signal };
       slowCalls.push(entry);
       await new Promise((resolve, reject) => {
         const timer = setTimeout(resolve, SLOW_MS);
@@ -541,6 +541,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
     const until = Date.now() + SLOW_MS + 4000;
     while (!partsOf("fundamentals").includes("financials") && Date.now() < until) await wait(100);
     eq(slowCalls.length, 1, "the slow route is called once by the first read");
+    ok(slowCalls[0].signal, "the dossier's background call carries an abort signal, so it is bounded");
     ok(!slowCalls[0].aborted, "and the dossier's background call is not aborted at uwFetch's 4 s default");
     ok(partsOf("fundamentals").includes("financials"), "so the slow source is stored in flows_dossier_cache after the first read (" + partsOf("fundamentals").join(",") + ")");
     const second = await get("/api/flows/summary?t=" + T);

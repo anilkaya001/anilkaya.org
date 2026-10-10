@@ -335,8 +335,12 @@ Errors use:
   Tier 1 tick, the focus tick and the tape, and `UW_DOSSIER_DEADLINE_MS`
   (20 s) for the dossier's sources, whose foreground wait is its own 2.5 s
   per source and 3 s in all and whose remainder runs in `ctx.waitUntil`. The
-  nightly pipeline's `uw()` client (20 s) and the Actions `--live` leg call
-  the vendor outside the Worker and do not use `uwFetch`. An aborted call is
+  pipeline's `uw()` client calls the vendor outside the Worker and does not
+  use `uwFetch`. Under `--live` (the Actions live leg) each call is bounded at
+  `LIVE_VENDOR.timeoutMs` (20 s; `FLOWS_UW_TIMEOUT_MS` overrides it, from 100
+  to 60,000 ms); the nightly run sets no per-call deadline.
+  `UW_DOSSIER_DEADLINE_MS` matches the `--live` leg's bound, not the
+  nightly's. An aborted call is
   JSON `504 chain_timeout` for a route whose caller throws, `null` for a
   caller that catches, and the quote card's `200` `unavailable` body with
   `why` `chain_timeout`. Before the deadline, a network failure or a body
@@ -497,7 +501,14 @@ vendor 5xx), stores nothing, and the next read calls the vendor again. The
 dossier does not take `uwFetch`'s 4 s default: a healthy source answering
 in 5 s would then never be stored, every read would wait 2.5 s for it, the
 reading's 1.5 s box would always fire first, and the reading would stay
-`generating` (`flows-dossier-reads` holds this). Slow kinds
+`generating` (`flows-dossier-reads` holds this). A source unanswered at 20 s
+keeps the reading at `generating` for that name, because each read re-awaits
+it for 2.5 s, longer than the 1.5 s box; a source that answers in 20 to 30 s
+is therefore not stored here, where an unbounded call would eventually have
+been. The cure is a short negative marker that stops `planFetches` from
+re-awaiting a source that just failed transiently, and serving the stored
+reading when the box fires; both are assigned to P0-29 (the reading's
+held-previous path), not to this row. Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
