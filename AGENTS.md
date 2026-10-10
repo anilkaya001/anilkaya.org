@@ -89,7 +89,13 @@ Browser ──► Cloudflare edge
   `FLOWS_AI_DAILY_CAP_NEURONS` (30,000, about $0.22 a day) or
   `FLOWS_AI_DAILY_CAP_CALLS` (2,500), or when the spend cannot be read. The
   refusal is the failure reason `budget`; the deterministic reading stands and
-  the reader is told the site's own budget is spent. A model with no configured
+  the reader is told the site's own budget is spent. A reply that carries no
+  `usage` is recorded from an estimate (`estimateUsage` in `shared/flows-ai.js`:
+  characters over 3.7, `maxTokens` for a length stop or a reasoning reply,
+  flagged `estimated`, never printed as a reading's reported cost), so the meter
+  is not under-counted; a recording is one D1 batch with no read back, and a
+  recorder that cannot write logs `ai spend not recorded` once per isolate. A
+  model with no configured
   rate is priced at the dearest model on the plan. `tests/lib/ai-guard.mjs`
   holds this in two halves. Statically (`checkModelCalls`, run by
   `flows-neuron` and `flows-reading-worker`), it reads `worker.js`'s whole

@@ -51,7 +51,7 @@ const heldBack = (result) => {
 
 export function neuronCost(env, model, usage) {
   const rates = modelRates(env, model);
-  if (!rates || !isObj(usage)) return null;
+  if (!rates || !isObj(usage) || usage.estimated === true) return null;
   const tin = Math.max(0, Math.round(Number(usage.prompt_tokens) || 0));
   const tout = Math.max(0, Math.round(Number(usage.completion_tokens) || 0));
   return { neurons: Math.ceil((tin * rates.inPerM + tout * rates.outPerM) / 1e6), tokensIn: tin, tokensOut: tout };

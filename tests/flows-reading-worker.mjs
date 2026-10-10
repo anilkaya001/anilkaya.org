@@ -574,6 +574,31 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
 {
   const f = world();
+  F.seed(f, { live: false });
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const calls = [];
+  const ai = { run: async (model, input) => { calls.push(input); return { response: "The market has no measured facts to report." }; } };
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/meta");
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const before = f.trips.length;
+  const a = await get("/api/flows/ask", ASK({ question: "what is the market doing" }));
+  await a.settle();
+  eq(calls.length, 1, "ASK METER: one model call, whose reply carries no usage");
+  const row = f.db.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage").get();
+  ok(row && row.calls === 1 && row.tokens_in > 0 && row.tokens_out > 0, "raises the day's meter by an estimate rather than by nothing (" + JSON.stringify(row) + ")");
+  ok(a.body.spend && a.body.spend.calls === 1 && a.body.spend.tokensIn === row.tokens_in && a.body.spend.tokensOut === row.tokens_out,
+    "and the meter the answer carries is read after the recording, so the page shows the call it just made");
+  const touching = f.trips.slice(before).filter((t) => t.sqls.some((q) => /^(SELECT|INSERT).*flows_ai_usage/.test(q)));
+  eq(touching.filter((t) => t.sqls.some((q) => /^INSERT INTO flows_ai_usage /.test(q))).length, 1, "the recording is one trip");
+  eq(touching.length, 5, "beside the page's meter read before the call (two trips), the cap's read, and the one batch that reads the meter back for the answer (two sequential trips before, six in all)");
+  eq(RW.neuronCost({ FLOWS_ASK_MODEL: MODEL, FLOWS_ASK_NEURONS: RATES }, MODEL, { prompt_tokens: 5400, completion_tokens: 700, estimated: true }), null,
+    "an estimated usage is never printed as a reading's reported cost");
+  ok(RW.neuronCost({ FLOWS_ASK_MODEL: MODEL, FLOWS_ASK_NEURONS: RATES }, MODEL, USAGE) !== null, "while a reported one still is");
+}
+
+{
+  const f = world();
   const ai = rig();
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const r = await summary(get);

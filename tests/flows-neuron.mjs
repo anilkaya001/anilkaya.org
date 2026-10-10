@@ -18,7 +18,7 @@ import fs from "node:fs";
 import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard, repliedGuard, modelRates,
          spendShape, fallbackNote, emptyNote, thrownThenEmptyNote, intradayFloorMs, AI_LENGTH_RETRY_MS, AI_INTRADAY_REFRESH_MS,
          askFailure, budgetVerdict, cappedAi, neuronsSpent, aiCapNeurons, aiCapCalls, AI_BUDGET_MARK, AI_CAP_DEFAULT_NEURONS,
-         AI_CAP_DEFAULT_CALLS, AI_WORST_RATES } from "../shared/flows-ai.js";
+         AI_CAP_DEFAULT_CALLS, AI_WORST_RATES, estimateUsage, AI_CHARS_PER_TOKEN } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 import { workerSource, closure, slice, where, count, expect, absent, parseImports } from "./lib/source-scan.mjs";
 import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, spendReaderArg, AI_HOME } from "./lib/ai-guard.mjs";
@@ -677,6 +677,36 @@ const CARD = {
   same(billed, [[glm, 1024], [llama, 40]], "and BOTH calls are billed to the model that consumed them");
   same(rescued.calls.map((c) => c.model), [glm, llama], "in that order, the fallback exactly once");
   same(fallbackNote(r1), { from: glm, stop: "length", reasoned: true }, "the answer can say which model came back empty and why");
+
+  {
+    const prompt = [{ role: "system", content: "s".repeat(370) }, { role: "user", content: "u".repeat(370) }];
+    const seen = [];
+    const record = async (model, usage) => { seen.push([model, usage]); };
+    const bare = await askModels(fake([{ response: "w".repeat(74) }]), [glm], prompt, { maxTokens: 500 }, record);
+    eq(bare.text.length, 74, "METER: a reply that carries no usage still answers");
+    same(seen, [[glm, { prompt_tokens: 200, completion_tokens: 20, estimated: true }]],
+      "and the recorder is handed an estimate, flagged estimated: 740 prompt characters over 3.7 is 200 tokens, 74 written characters 20 (a call that reported nothing used to be recorded as nothing)");
+    eq(AI_CHARS_PER_TOKEN, 3.7, "the estimate uses 3.7 characters a token");
+    seen.length = 0;
+    await askModels(fake([{ response: "w".repeat(74), usage: { prompt_tokens: 11, completion_tokens: 5 } }]), [glm], prompt, { maxTokens: 500 }, record);
+    same(seen, [[glm, { prompt_tokens: 11, completion_tokens: 5 }]], "a reported usage is passed through untouched, never replaced by the estimate");
+    seen.length = 0;
+    await askModels(fake([{ response: "w".repeat(74), usage: {} }]), [glm], prompt, { maxTokens: 500 }, record);
+    eq(seen[0][1].estimated, true, "and a usage object with no token count is as good as none");
+    seen.length = 0;
+    await askModels(fake([{ response: "w".repeat(7400) }]), [glm], prompt, { maxTokens: 500 }, record);
+    eq(seen[0][1].completion_tokens, 500, "an estimate of the output never passes maxTokens, the most the binding could write");
+    seen.length = 0;
+    await askModels(fake([{ choices: [{ finish_reason: "length", message: { content: null, reasoning_content: "thinking" } }] }, { response: "x" }]), [glm, llama], prompt, { maxTokens: 1024 }, record);
+    same(seen.map(([m, u]) => [m, u.completion_tokens, u.estimated]), [[glm, 1024, true], [llama, 1, true]],
+      "a reply that stopped at the cap, or that reasoned without writing, is recorded at the whole output bound, since the hidden tokens were spent");
+    same(estimateUsage(prompt, { response: "" }, undefined), { prompt_tokens: 200, completion_tokens: 0, estimated: true },
+      "with no maxTokens given the output is what was written");
+    same(estimateUsage(null, null, {}), { prompt_tokens: 0, completion_tokens: 0, estimated: true }, "and nothing at all estimates to zero rather than throwing");
+    seen.length = 0;
+    const thrown = await askModels(fake([new Error("AiError: 3040: capacity")]), [glm], prompt, { maxTokens: 500 }, record, { error() {} });
+    ok(thrown.failure && seen.length === 0, "a call that threw is not recorded: the binding refused it");
+  }
 
   const bothEmpty = fake([reasoningOnly, { response: "   " }]);
   eq((await askModels(bothEmpty, aiChain(env), msgs, {})).guard, "unreachable:length",

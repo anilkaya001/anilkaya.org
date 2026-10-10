@@ -47,6 +47,7 @@ function createState() {
     lastGoodStamped: new Map(),
     flowsSchemaReady: false,
     flowsSchemaFlight: null,
+    spendRecorderFailed: false,
   };
 }
 const state = createState();
@@ -1392,8 +1393,15 @@ async function askRecordSpend(env, usage, model) {
         "tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out"
       ).bind(day, billed, inTok, outTok),
     ]);
-    return await askSpend(env);
-  } catch { return null;   }
+    return { day, model: billed, tokensIn: inTok, tokensOut: outTok, estimated: usage.estimated === true };
+  } catch (error) {
+    if (!state.spendRecorderFailed) {
+      state.spendRecorderFailed = true;
+      console.warn(JSON.stringify({ message: "ai spend not recorded", model: billed,
+        error: error instanceof Error ? error.message : String(error) }));
+    }
+    return null;
+  }
 }
 
 async function briefWithLive(env, index) {
@@ -2013,10 +2021,12 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx, session)
   const system = dossier.facts.length ? built.system + "\n\n" + dossier.rule : built.system;
   const user = dossier.about ? built.user + "\n\n" + dossier.about : built.user;
   let afterCall = null;
+  let recorded = false;
   const said = await askModels(meteredAi(env), chain,
     [{ role: "system", content: system }, { role: "user", content: user }],
     { maxTokens: 1024, temperature: 0.2 },
-    async (billed, usage) => { afterCall = (await askRecordSpend(env, usage, billed)) || afterCall; });
+    async (billed, usage) => { recorded = (await askRecordSpend(env, usage, billed)) !== null || recorded; });
+  if (recorded) afterCall = await askSpendStrict(env).catch(() => null);
   const model = said.model;
   const fallback = fallbackNote(said);
 

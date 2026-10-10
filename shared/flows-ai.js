@@ -217,6 +217,20 @@ export function repliedGuard(guard) {
 const stopGuard = (replied) =>
   (replied.some((a) => a.finish === "length") ? "unreachable:length" : "unreachable:empty");
 
+export const AI_CHARS_PER_TOKEN = 3.7;
+
+const reportedUsage = (usage) => Boolean(usage) && typeof usage === "object" &&
+  (Number.isFinite(usage.prompt_tokens) || Number.isFinite(usage.completion_tokens));
+
+export function estimateUsage(messages, out, opts) {
+  const prompt = (Array.isArray(messages) ? messages : []).reduce((n, m) => n + (m && typeof m.content === "string" ? m.content.length : 0), 0);
+  const read = aiText(out);
+  const bound = opts && Number.isFinite(opts.maxTokens) && opts.maxTokens > 0 ? Math.floor(opts.maxTokens) : null;
+  const written = Math.ceil((read.text ? read.text.length : 0) / AI_CHARS_PER_TOKEN);
+  const completion = bound === null ? written : (read.finish === "length" || read.reasoned ? bound : Math.min(bound, written));
+  return { prompt_tokens: Math.ceil(prompt / AI_CHARS_PER_TOKEN), completion_tokens: completion, estimated: true };
+}
+
 export async function askModels(ai, chain, messages, opts, onUsage, log = console) {
   const models = [];
   for (const m of Array.isArray(chain) ? chain : []) {
@@ -242,7 +256,7 @@ export async function askModels(ai, chain, messages, opts, onUsage, log = consol
       continue;
     }
     if (typeof onUsage === "function") {
-      try { await onUsage(model, out && out.usage); } catch {  }
+      try { await onUsage(model, out && reportedUsage(out.usage) ? out.usage : estimateUsage(messages, out, opts)); } catch {  }
     }
     const read = aiText(out);
     attempts.push({ model, text: read.text, finish: read.finish, reasoned: read.reasoned, failed: null });

@@ -1682,5 +1682,59 @@ class FakeCache {
   }
 }
 
+{
+  const unshift = shiftClock(FIXTURE_NOW);
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const answer = JSON.stringify({ summary: "NVDA scored 61 this session with conviction 70 of 100.", ideas: [] });
+  const usageRow = (f) => f.db.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage").get();
+  const modelRow = (f) => f.db.prepare("SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model").get();
+  const spendTrips = (f) => f.trips.filter((t) => t.sqls.some((q) => /^(SELECT|INSERT).*flows_ai_usage/.test(q)));
+  const stored = (f) => f.db.prepare("SELECT summary, guard FROM flows_neuron WHERE scope = 'ticker:NVDA'").get();
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const get = await client(f.D1, { ...AI_ENV, AI: { run: async () => ({ response: answer }) } });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    ok(stored(f).summary.startsWith("NVDA scored 61"), "METER: a reply with no usage still writes the reading");
+    const row = usageRow(f);
+    ok(row && row.calls === 1 && row.tokens_in > 300 && row.tokens_out > 0,
+      "and the day's meter rises by one call with estimated tokens, not by nothing (" + JSON.stringify(row) + ")");
+    const split = modelRow(f);
+    ok(split && split.model === AI_ENV.FLOWS_ASK_MODEL && split.calls === 1 && split.tokens_in === row.tokens_in && split.tokens_out === row.tokens_out,
+      "under the model that answered, in the same amounts");
+    const trips = spendTrips(f);
+    eq(trips.length, 2, "THE METER COSTS ONE TRIP A CALL: the day's spend read before the call and one recording batch after it, with no read back (three trips before)");
+    const recording = trips[trips.length - 1];
+    ok(recording.kind === "batch" && recording.sqls.length === 2 && /^INSERT INTO flows_ai_usage \(/.test(recording.sqls[0]) && /^INSERT INTO flows_ai_usage_model/.test(recording.sqls[1]),
+      "that batch is the two inserts, and it is the last statement to touch the table");
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const calls = [];
+    const get = await client(f.D1, { ...AI_ENV, AI: { run: async () => { calls.push(1); return { response: answer, usage: { prompt_tokens: 100, completion_tokens: 20 } }; } } });
+    await get("/api/flows/meta");
+    f.fail(/^INSERT INTO flows_ai_usage \(/);
+    const warn = captureWarn();
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    f.put("card:NVDA", { ...NIGHTLY, generatedAt: "2026-09-25T00:40:00.000Z", ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
+    const again = await get("/api/flows/summary?t=NVDA");
+    await again.settle();
+    warn.stop();
+    eq(calls.length, 2, "METER FAILURE: two generations ran");
+    ok(stored(f).summary.startsWith("NVDA scored 61"), "and a recorder that cannot write does not cost the reading");
+    const lines = warn.lines.filter((l) => l && typeof l === "object" && l.message === "ai spend not recorded");
+    eq(lines.length, 1, "while the failure is logged once for the isolate, not once a call");
+    ok(lines[0].model === AI_ENV.FLOWS_ASK_MODEL && /refused/.test(lines[0].error), "naming the model and the store's error");
+    eq(usageRow(f), undefined, "and the meter stayed at zero because nothing could be written");
+  }
+  unshift();
+}
+
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);
 console.log(`flows-reads-contract: ${checks} checks passed`);
