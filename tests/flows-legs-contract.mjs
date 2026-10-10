@@ -986,11 +986,19 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "fakeOiLadder", "fakeLadderGreeks", "fakeLadderChain", "fakeEnrichment", "dryPriorRoster", "dryRosterReader",
       "DRY_PROBE_BYTES", "dryRosterProbe", "dryRosterList",
     ],
+    "archive.mjs": [
+      "nameCount", "readBoardMemory", "MEMORY_ARCHIVE_SESSIONS", "MEMORY_FALLS_BACK", "resolveBoardMemory",
+      "sameSessionGate", "fetchStoredPayload", "ARCHIVE_READ_PACE_MS", "ARCHIVE_READ_RETRY_MS",
+      "ARCHIVE_READ_GIVE_UP", "collectDatedBoards", "buildRecordCloses", "recordCalendar", "buildRecordBreaks",
+      "archiveDatedBoards", "republishWithChain", "plainRedispatchSaid", "ensureArchived", "pickPriorRoster",
+      "LEDGER_PROBE_MAX", "LEDGER_PROBE_FAIL_MAX", "LEDGER_PROBE_RETRY_BUDGET_MS", "LEDGER_PROBE_CHUNK", "probeDayOf",
+      "probeFound", "probeLedgerMetadata", "bootstrapLedger", "probeSaid", "retireAndRoster",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
   };
-  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5,"fixtures.mjs":6};
+  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5,"fixtures.mjs":6,"archive.mjs":7};
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
   let homed = 0;
