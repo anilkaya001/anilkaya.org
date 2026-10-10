@@ -48,7 +48,7 @@
     {"name": "flows-reads", "class": "N", "group": "shard", "timing": true, "medianS": 34.3, "files": ["flows-reads-contract.mjs"], "covers": ["schema.sql","scripts/flows-pipeline.mjs","worker.js"]},
     {"name": "flows-readers", "class": "N", "group": "shard", "timing": false, "medianS": 0.5, "files": ["flows-readers-contract.mjs"], "covers": ["schema.sql"]},
     {"name": "flows-readers-render", "class": "C", "group": "shard", "timing": false, "medianS": 9.7, "files": ["flows-readers-render.mjs"], "covers": []},
-    {"name": "flows-export", "class": "N", "group": "shard", "timing": false, "medianS": 5.2, "files": ["flows-export.mjs"], "covers": []},
+    {"name": "flows-export", "class": "C", "group": "shard", "timing": false, "medianS": 5.2, "files": ["flows-export.mjs"], "covers": []},
     {"name": "flows-ledger", "class": "N", "group": "shard", "timing": false, "medianS": 0.5, "files": ["flows-ledger-contract.mjs"], "covers": ["migrations/0015_flows_ledger.sql","schema.sql","scripts/flows-pipeline.mjs","tests/fixtures-live-probe.json"]},
     {"name": "flows-verdict", "class": "N", "group": "shard", "timing": true, "medianS": 12.4, "files": ["flows-verdict-contract.mjs"], "covers": ["schema.sql"]},
     {"name": "flows-stock", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "files": ["flows-stock-contract.mjs"], "covers": []},

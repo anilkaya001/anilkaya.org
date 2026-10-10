@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launch } from "./lib/browser.mjs";
+import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { openDesk, nvdaAfter } from "./desk-fixtures.mjs";
 
@@ -65,7 +65,7 @@ const download = async (page, label) => {
 };
 
 const errors = [];
-const browser = await launch();
+const browser = await chromium.launch();
 try {
   const TICKERS = ["NVDA", "AMD", "MSFT", "AAPL"];
   const board = {
