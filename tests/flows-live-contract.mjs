@@ -25,7 +25,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
-import { workerSource, closure, importEdges, slice, where, absent, expect } from "./lib/source-scan.mjs";
+import { workerSource, closure, slice, where, absent, expect } from "./lib/source-scan.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -571,29 +571,13 @@ const cronMinutes = (cron) => {
     const src = (p) => read(p);
     const importsOf = (text) => [...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*"([^"]+)"|^\s*import\s*"([^"]+)"/gm)]
       .map((m) => m[1] || m[2]);
-    deep(importsOf(src("shared/flows-focus.js")), [],
-      "shared/flows-focus.js IS A LEAF: it imports nothing, so every module may import its constants without a cycle");
     ok(!importsOf(src("shared/flows-live.js")).some((i) => /flows-focus/.test(i)),
-      "and shared/flows-live.js, the builders both writers share, never imports it: the roster enters through the " +
+      "shared/flows-live.js, the builders both writers share, never imports it: the roster enters through the " +
         "two planners, the Actions leg (scripts/flows-legs/live.mjs) and the Worker's focus tick");
     ok(importsOf(src("shared/flows-live-worker.js")).includes("./flows-focus.js") &&
        importsOf(src("scripts/flows-legs/live.mjs")).includes("../../shared/flows-focus.js"),
       "and both planners import the one focusStripNames, so the Worker's live:focus and the Actions strip ask for the " +
         "same names in the same order");
-    const edges = (file) => importEdges(file).map((e) => e.file);
-    const state = new Map();
-    const cycles = [];
-    const visit = (f, stack) => {
-      if (state.get(f) === 2) return;
-      if (state.get(f) === 1) { cycles.push([...stack.slice(stack.indexOf(f)), f]); return; }
-      state.set(f, 1); stack.push(f);
-      for (const g of edges(f)) visit(g, stack);
-      stack.pop(); state.set(f, 2);
-    };
-    for (const entry of ["worker.js", "scripts/flows-pipeline.mjs"]) visit(entry, []);
-    ok(state.size >= closure("worker.js").length && state.size > 60, `the walk follows static and literal dynamic imports (${state.size} modules)`);
-    deep(cycles, [], `NO IMPORT CYCLE from worker.js or the pipeline (${state.size} modules walked): a cycle leaves a ` +
-      "const in its temporal dead zone and the Worker throws at module evaluation, taking every route down");
   }
   const fb = FAKE.fakeBoards({ n: 80 });
   const names = L.stripNames({ long: fb.long.rows.map((r) => r.t), short: fb.short.rows.map((r) => r.t),
@@ -1281,8 +1265,8 @@ const cronMinutes = (cron) => {
       eq(r.asked.length, 4, "that beat answers, the backoff clears, and the 20 s cadence resumes");
       r.hb.stop();
     }
-    ok(!/AbortSignal\.timeout/.test(src), "the deadline is an AbortController and a timer, not AbortSignal.timeout, which Safari lacks before 16 " +
-      "while every Flows page already runs from 13.1 (flows-ui.js uses ??), so no supported browser keeps a stalled beat as its last");
+    ok(!/AbortSignal\.timeout/.test(src), "the deadline is an AbortController and a timer, not AbortSignal.timeout, so a stalled beat is " +
+      "aborted by the same code on every browser the heartbeat runs in");
     {
       clock = 0; timers.clear();
       const r = run((i) => (i === 1 ? null : ok200()));

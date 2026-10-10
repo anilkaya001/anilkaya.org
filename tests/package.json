@@ -7,6 +7,7 @@
   },
   "scripts": {
     "test": "node run.mjs",
+    "test:architecture": "node architecture.mjs",
     "test:contracts": "node contracts.mjs && node --disable-warning=ExperimentalWarning lib-contract.mjs",
     "test:run": "node run-contract.mjs",
     "test:flows-neuron-screen": "node flows-neuron-screen.mjs",

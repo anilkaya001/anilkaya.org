@@ -224,6 +224,7 @@ header readback with this repository after any dashboard rule change.
 | `assets/version.txt` | Canonical cache version of `assets/css`, `assets/js` and `assets/data`: the `?v=` on every CSS and JavaScript reference. |
 | `assets/fonts-version.txt` | Canonical cache version of the woff2 files under `assets/fonts/`: the `?v=` on every `@font-face` URL and font preload, untouched by an asset bump. |
 | `tests/contracts.mjs` | Curriculum/payload/scoring/storage/asset/session contracts. |
+| `tests/architecture.mjs` | The tree's shape, in about a second with no server: no import cycle over static and literal dynamic imports from `worker.js` and every script, the layer table (`shared/` imports `shared/` only, `scripts/` never `server/`, `cloudflare:*` only in `worker.js`, `assets/js` imports nothing), the declared leaves, no comment in any tracked JavaScript, CSS, HTML (inline script and style too), SQL, YAML, TOML, Python or ignore file (`docs/` excluded), and the browser floor table (Flows Safari 17 / Chrome 114 / Firefox 125, Lab and articles Safari 16.4 / Chrome 111 / Firefox 113): a feature above a surface's floor must be guarded in the window around it (`?.(`, `typeof`, `"x" in`, `&&`), and the table lists the Popover API at 17 and lookbehind at 16.4. Every check is proved by recorded mutations built in memory inside the suite. The global allowlist stays in `contracts.mjs`. |
 | `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
@@ -1156,7 +1157,7 @@ entry below was run and timed.
 Confirmed to run with no server:
 
 ```
-contracts              flows-weight            flows-payload-shape
+architecture           contracts              flows-weight            flows-payload-shape
 flows-scores-contract  flows-overlay-contract  flows-ticker-contract
 flows-card-render      flows-card-contract     flows-strip
 flows-features         flows-alerts-contract   flows-brief
