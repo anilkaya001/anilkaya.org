@@ -158,6 +158,7 @@ export function settledWithin(promise, ms, movedOn) {
 }
 
 export const FLIGHT_WAIT_MS = 2000;
+export const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;
 let clockFlight = null;
 
 function startClockFlight(env, now) {

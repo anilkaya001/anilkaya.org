@@ -40,6 +40,17 @@ import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-c
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
+function createState() {
+  return {
+    marketRevalidation: null,
+    refreshedMarketFlights: new WeakSet(),
+    lastGoodStamped: new Map(),
+    flowsSchemaReady: false,
+    flowsSchemaFlight: null,
+  };
+}
+const state = createState();
+
 const COURSE_ASSET_PATH = "/lab/course";
 
 const COURSE_EDGE_TTL_S = 60;
@@ -492,12 +503,10 @@ async function refreshMarketSnapshot(env) {
 }
 
 const MARKET_FLIGHT_WAIT_MS = 2 * MARKET_FETCH_TIMEOUT_MS + 2000;
-let marketRevalidation = null;
-const refreshedMarketFlights = new WeakSet();
 
 function startMarketFlight(env) {
   const flight = refreshMarketSnapshot(env).catch(() => null).then(async (refreshed) => {
-    if (refreshed) { refreshedMarketFlights.add(flight); return refreshed; }
+    if (refreshed) { state.refreshedMarketFlights.add(flight); return refreshed; }
     const now = Date.now();
     const payload = JSON.stringify({ quotes: [], updatedAt: now });
     await marketOp(env, () => env.DB.prepare(
@@ -505,8 +514,8 @@ function startMarketFlight(env) {
       "ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at",
     ).bind(payload, now).run()).catch(() => {});
     return payload;
-  }).finally(() => { if (marketRevalidation === flight) marketRevalidation = null; });
-  marketRevalidation = flight;
+  }).finally(() => { if (state.marketRevalidation === flight) state.marketRevalidation = null; });
+  state.marketRevalidation = flight;
   return flight;
 }
 
@@ -514,14 +523,14 @@ async function revalidateMarketSnapshot(env) {
   const since = Date.now();
   let abandoned = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const flight = marketRevalidation || startMarketFlight(env);
-    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => marketRevalidation !== null && marketRevalidation !== flight);
+    const flight = state.marketRevalidation || startMarketFlight(env);
+    const how = await FLOWS_LIVE.settledWithin(flight, MARKET_FLIGHT_WAIT_MS, () => state.marketRevalidation !== null && state.marketRevalidation !== flight);
     if (how === "settled") {
-      if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, refreshedMarketFlights.has(flight));
+      if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, state.refreshedMarketFlights.has(flight));
       return flight;
     }
     if (how === "moved") continue;
-    if (marketRevalidation === flight) { marketRevalidation = null; abandoned++; }
+    if (state.marketRevalidation === flight) { state.marketRevalidation = null; abandoned++; }
   }
   if (abandoned) FLOWS_LIVE.flightAbandoned("market", since, abandoned, false);
   return JSON.stringify({ quotes: [], updatedAt: Date.now() });
@@ -923,7 +932,7 @@ function flowsLoginResponse(message) {
   });
 }
 
-const FLOWS_MAX_PAYLOAD_BYTES = 128 * 1024;
+const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE.FLOWS_MAX_PAYLOAD_BYTES;
 
 function timingSafeEqualStr(a, b) {
   const x = String(a ?? ""), y = String(b ?? "");
@@ -1044,7 +1053,6 @@ const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
   "hist"].map((name) => "/api/flows/" + name));
-const lastGoodStamped = new Map();
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -1069,17 +1077,17 @@ function rememberLastGood(request, url, response, ctx, now = Date.now()) {
   if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
   const key = lastGoodKey(request, url);
   if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
-  const seen = lastGoodStamped.get(key.url);
+  const seen = state.lastGoodStamped.get(key.url);
   if (seen !== undefined && now - seen < LAST_GOOD_REFRESH_MS) return;
-  if (seen === undefined && lastGoodStamped.size >= LAST_GOOD_MAX_KEYS) lastGoodStamped.delete(lastGoodStamped.keys().next().value);
-  lastGoodStamped.set(key.url, now);
+  if (seen === undefined && state.lastGoodStamped.size >= LAST_GOOD_MAX_KEYS) state.lastGoodStamped.delete(state.lastGoodStamped.keys().next().value);
+  state.lastGoodStamped.set(key.url, now);
   try {
     const kept = new Response(response.clone().body, { status: 200, headers: response.headers });
     kept.headers.set("Cache-Control", "public, max-age=" + LAST_GOOD_TTL_MS / 1000);
     kept.headers.set("X-Last-Good-At", String(now));
-    ctx.waitUntil(cache.put(key, kept).catch(() => lastGoodStamped.delete(key.url)));
+    ctx.waitUntil(cache.put(key, kept).catch(() => state.lastGoodStamped.delete(key.url)));
   } catch {
-    lastGoodStamped.delete(key.url);
+    state.lastGoodStamped.delete(key.url);
   }
 }
 
@@ -2676,32 +2684,30 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
   };
 }
 
-let flowsSchemaReady = false;
-let flowsSchemaFlight = null;
 function startFlowsSchemaFlight(env) {
   const flight = (async () => {
     try {
       const results = await env.DB.batch([...FLOWS_SCHEMA_SQL, FLOWS_LIVE.CLOCK_COLUMNS_SQL].map((sql) => env.DB.prepare(sql)));
       await FLOWS_LIVE.upgradeClockColumns(env.DB, results && results[FLOWS_SCHEMA_SQL.length]);
-      flowsSchemaReady = true;
+      state.flowsSchemaReady = true;
     } catch (error) {
       console.warn(JSON.stringify({ message: "flows schema bootstrap failed",
         error: error instanceof Error ? error.message : String(error) }));
     }
-  })().finally(() => { if (flowsSchemaFlight === flight) flowsSchemaFlight = null; });
-  flowsSchemaFlight = flight;
+  })().finally(() => { if (state.flowsSchemaFlight === flight) state.flowsSchemaFlight = null; });
+  state.flowsSchemaFlight = flight;
   return flight;
 }
 async function ensureFlowsTables(env) {
-  if (flowsSchemaReady || !env.DB) return;
+  if (state.flowsSchemaReady || !env.DB) return;
   const since = Date.now();
   let abandoned = 0;
-  for (let attempt = 0; attempt < 2 && !flowsSchemaReady; attempt++) {
-    const flight = flowsSchemaFlight || startFlowsSchemaFlight(env);
-    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => flowsSchemaReady)) break;
-    if (flowsSchemaFlight === flight) { flowsSchemaFlight = null; abandoned++; }
+  for (let attempt = 0; attempt < 2 && !state.flowsSchemaReady; attempt++) {
+    const flight = state.flowsSchemaFlight || startFlowsSchemaFlight(env);
+    if (await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS, () => state.flowsSchemaReady)) break;
+    if (state.flowsSchemaFlight === flight) { state.flowsSchemaFlight = null; abandoned++; }
   }
-  if (abandoned) FLOWS_LIVE.flightAbandoned("schema", since, abandoned, flowsSchemaReady);
+  if (abandoned) FLOWS_LIVE.flightAbandoned("schema", since, abandoned, state.flowsSchemaReady);
 }
 
 function keepAlive(ctx, promise) {

@@ -1746,7 +1746,7 @@ const cronMinutes = (cron) => {
   let threw = false;
   try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
   ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
-  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*flowsSchemaReady = true;/.test(workerSource()),
+  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*state\.flowsSchemaReady = true;/.test(workerSource()),
     "and ensureFlowsTables marks the schema ready only after the upgrade");
   ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(workerSource()) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
     "whose column list is read by the PRAGMA riding the schema batch as its last statement, after the CREATE that makes the table");

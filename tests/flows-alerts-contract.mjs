@@ -6,6 +6,7 @@ import {
   alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES, alertStamp, nightlyAlerts,
 } from "../shared/flows-alerts.js";
 import { briefAlertsFact } from "../shared/flows-brief.js";
+import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
 import { workerSource, slice, expect, absent } from "./lib/source-scan.mjs";
 
 let checks = 0;
@@ -687,8 +688,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       ...m, readAt: T1, readDay: D28, refreshed: "intraday",
       vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true,
     }).length;
-    const ingestCap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
-    eq(ingestCap, 128 * 1024, "worker.js still holds every ingest to 128KB");
+    const ingestCap = FLOWS_MAX_PAYLOAD_BYTES;
+    eq(ingestCap, 128 * 1024, "the ingest cap is still 128KB");
+    ok(expect(worker, /readBounded\(request, FLOWS_MAX_PAYLOAD_BYTES,/g, { min: 2, why: "both ingest body reads are bounded by the constant" }) >= 2 &&
+       /const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE\.FLOWS_MAX_PAYLOAD_BYTES;/.test(worker),
+      "and worker.js holds every ingest body to that exported constant");
     const liveCap = Number(/"live:alerts": spec\("breadth", "actions", (\d+) \* 1024/.exec(liveSrc)[1]) * 1024;
     const cap = Math.min(ingestCap, liveCap);
     ok(liveCap <= ingestCap,
