@@ -9,6 +9,8 @@ import {
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
   packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
 } from "./run.mjs";
+import { checkQuarantine, readQuarantine, recordedFor, dayMs, MAX_QUARANTINE_DAYS } from "./lib/quarantine.mjs";
+import { retryAllowed } from "./run.mjs";
 import { checkRegistry, syncRegistry, serialize, globMatches, scanSuite, trackedFiles, scriptFiles, ROOT as REPO } from "./lib/suite-registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -745,6 +747,140 @@ const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { fo
   writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: [...fx3Suites.slice(0, -1), { ...fx3Suites.at(-1), group: "slow" }] }, null, 2));
   const g = run(["--shard", "1/2"], { dir: fx3 });
   ok(g.status === 2 && g.stderr.includes("u has group \"slow\", not fast or shard"), "a suite in an unknown group is refused before anything runs");
+}
+
+{
+  const suites = loadManifest();
+  const live = readQuarantine(HERE);
+  deep(live.problems, [], "tests/quarantine.json is a version 1 file with an entries list");
+  deep(checkQuarantine(live.entries, { suites }), [], `the committed quarantine has no malformed, unregistered or expired entry (${live.entries.length} entries, checked against today's UTC date)`);
+  const timing = suites.filter((s) => s.timing === true);
+  ok(timing.length === 8 && timing.every((s) => s.class === "N"), "the eight timing suites are all Node suites");
+  ok(timing.every((s) => retryAllowed(s, { CI: "true" })) && !timing.some((s) => retryAllowed(s, {})) && !timing.some((s) => retryAllowed(s, { CI: "false" })), "a timing suite is retryable in CI and only there");
+  ok(!suites.filter((s) => s.timing !== true).some((s) => retryAllowed(s, { CI: "true" })), "and no other suite is retryable anywhere");
+  ok(!retryAllowed({ name: "x", timing: true, class: "C" }, { CI: "true" }) && !retryAllowed({ name: "x", timing: true, class: "W" }, { CI: "true" }), "a Chromium or workerd suite is never retried, even if it were tagged");
+
+  const base = { suite: "flows-rt", assertion: "rt cpu per poll under 6 ms", firstSeen: "2025-03-10", expires: "2025-03-17", issue: "https://github.com/anilkaya/anilkaya.org/issues/1" };
+  const check = (entries, today = "2025-03-12") => checkQuarantine(entries, { suites, today });
+  deep(check([base]), [], "quarantine: an entry inside its seven days passes");
+  deep(check([{ ...base, expires: "2025-03-12" }]), [], "quarantine: on its last day it still passes");
+  const has = (problems, re, msg) => ok(problems.some((p) => re.test(p)), `${msg}: ${JSON.stringify(problems.slice(0, 2))}`);
+  has(check([base], "2025-03-18"), /expired on 2025-03-17: fix the flake in flows-rt/, "MUTATION: an entry whose expires is yesterday fails");
+  has(check([{ ...base, expires: "2025-03-18" }]), /more than 7 days after 2025-03-10/, "MUTATION: an expiry eight days out fails");
+  has(check([{ ...base, expires: "2025-03-09" }]), /before it was first seen/, "MUTATION: an expiry before the first sighting fails");
+  has(check([{ ...base, suite: "flows-nope" }]), /not registered/, "MUTATION: an unregistered suite fails");
+  has(check([{ ...base, suite: "flows-weight" }]), /not tagged timing/, "MUTATION: a suite that is not tagged timing fails, since it is never retried");
+  has(check([{ ...base, issue: "" }]), /names no issue/, "MUTATION: an entry with no issue fails");
+  has(check([{ ...base, assertion: " " }]), /names no assertion/, "MUTATION: an entry with no assertion fails");
+  has(check([{ ...base, firstSeen: "2025-02-30" }]), /firstSeen "2025-02-30", not a UTC date/, "MUTATION: an impossible date fails");
+  has(check([{ ...base, expires: 20261017 }]), /expires 20261017, not a UTC date/, "MUTATION: a non-string date fails");
+  has(check([{ suite: "flows-rt" }]), /has keys/, "MUTATION: a missing field fails");
+  has(check([{ ...base, extra: 1 }]), /has keys/, "MUTATION: an extra field fails");
+  has(check([base, base]), /repeats flows-rt/, "MUTATION: a duplicate entry fails");
+  has(check(["x"]), /is not an object/, "MUTATION: a non-object entry fails");
+  eq(MAX_QUARANTINE_DAYS, 7, "the window is seven days");
+  eq(dayMs("2025-03-17") - dayMs("2025-03-10"), 7 * 86400000, "and the date arithmetic is whole UTC days");
+  eq(recordedFor([base], "flows-rt", "2025-03-12").expires, "2025-03-17", "a live entry answers a FLAKY outcome of its suite");
+  eq(recordedFor([base], "flows-rt", "2025-03-18"), null, "an expired one does not");
+  eq(recordedFor([base], "flows-live", "2025-03-12"), null, "and an entry for another suite does not");
+
+  const q = path.join(scratch, "fxq");
+  mkdirSync(q);
+  const put = (name, body) => writeFileSync(path.join(q, name), body);
+  put("count.mjs", `import { appendFileSync } from "node:fs";
+const [name, fails] = process.argv.slice(2);
+const f = ${JSON.stringify(path.join(marks, "count-"))} + name;
+appendFileSync(f, "x");
+const n = (await import("node:fs")).readFileSync(f, "utf8").length;
+if (n <= Number(fails)) { console.error("count " + name + ": failed attempt " + n); process.exit(1); }
+console.log("✓ count-" + name + ": 4 assertions");\n`);
+  put("slow.mjs", `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(path.join(marks, "count-"))} + "slow", "x");
+setInterval(() => {}, 1000);\n`);
+  const names = { once: 1, twice: 99, plain: 1, flaky2: 1 };
+  put("package.json", JSON.stringify({
+    name: "fixture", private: true, type: "module",
+    scripts: {
+      "test:once": "node count.mjs once 1", "test:twice": "node count.mjs twice 99", "test:plain": "node count.mjs plain 1",
+      "test:slow": "node slow.mjs", "test:steady": "node count.mjs steady 0",
+    },
+  }));
+  const suitesOf = (over = {}) => ({
+    version: 2,
+    suites: [
+      { name: "once", class: "N", timing: true, medianS: 0.1 },
+      { name: "twice", class: "N", timing: true, medianS: 0.1 },
+      { name: "plain", class: "N", timing: false, medianS: 0.1 },
+      { name: "slow", class: "N", timing: true, medianS: 0.1, timeoutS: 1 },
+      { name: "steady", class: "N", timing: true, medianS: 0.1 },
+    ].map((x) => ({ ...x, ...(over[x.name] || {}) })),
+  });
+  put("suites.json", JSON.stringify(suitesOf()));
+  const countOf = (name) => (existsSync(path.join(marks, "count-" + name)) ? readFileSync(path.join(marks, "count-" + name), "utf8").length : 0);
+  const reset = () => { for (const n of [...Object.keys(names), "slow", "steady"]) rmSync(path.join(marks, "count-" + n), { force: true }); };
+
+  reset();
+  const summary = path.join(scratch, "summary-flaky.md");
+  writeFileSync(summary, "");
+  const ci = run(["--only", "once,steady"], { dir: q, summary, env: { CI: "true", GITHUB_ACTIONS: "true" } });
+  eq(ci.status, 0, `a timing suite that fails once and passes on retry is green in CI (${ci.stderr.slice(-300)})`);
+  deep([countOf("once"), countOf("steady")], [2, 1], "it ran twice, and a suite that passed ran once");
+  ok(/once\s+passed on retry \(FLAKY\)/.test(ci.stdout), "the table says FLAKY in the suite's row");
+  ok(/2 suites: 2 passed \(1 FLAKY\), 0 failed/.test(ci.stdout), "and the tally counts it");
+  ok(ci.stderr.includes("FLAKY test:once: failed once, passed on retry; NOT RECORDED in tests/quarantine.json"), "an unrecorded flake says so on stderr");
+  ok(ci.stdout.includes("::warning title=FLAKY once::"), "and raises an annotation under GitHub Actions");
+  const md = readFileSync(summary, "utf8");
+  ok(md.startsWith("### Regression suites: all 2 passed, 1 of them FLAKY"), "the step summary heading counts it");
+  ok(/\| 1 \| `once` \| ⚠️ passed on retry \(FLAKY\) \|/.test(md), "its row carries the warning mark");
+  ok(md.includes("count once: failed attempt 1") && md.includes("NOT RECORDED: add a tests/quarantine.json entry"), "and the first attempt's tail and the missing record are in a details block");
+
+  reset();
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  put("quarantine.json", JSON.stringify({ version: 1, entries: [{ suite: "once", assertion: "the timing gate", firstSeen: today, expires: soon, issue: "#1" }] }));
+  const rec = run(["--only", "once"], { dir: q, summary: path.join(scratch, "summary-rec.md"), env: { CI: "true" } });
+  eq(rec.status, 0, "a recorded flake is green too");
+  ok(rec.stderr.includes(`recorded in tests/quarantine.json until ${soon}`), "and names its entry's expiry");
+  rmSync(path.join(q, "quarantine.json"));
+
+  reset();
+  const never = run(["--only", "once"], { dir: q, env: { CI: "" } });
+  eq(never.status, 1, "outside CI a timing suite is not retried: the first failure is the result");
+  eq(countOf("once"), 1, "it ran once");
+  reset();
+  const falseCi = run(["--only", "once"], { dir: q, env: { CI: "false" } });
+  eq(falseCi.status, 1, "CI=false is not CI");
+
+  reset();
+  const plain = run(["--only", "plain"], { dir: q, env: { CI: "true" } });
+  eq(plain.status, 1, "a suite not tagged timing is red in CI on its first failure");
+  eq(countOf("plain"), 1, "and ran once");
+
+  reset();
+  const twice = run(["--only", "twice"], { dir: q, summary: path.join(scratch, "summary-twice.md"), env: { CI: "true" } });
+  eq(twice.status, 1, "a timing suite that fails the retry too is red");
+  eq(countOf("twice"), 2, "after exactly one retry, never more");
+  ok(/failed \(exit 1, twice\)/.test(twice.stdout), "and its row says it failed twice");
+
+  reset();
+  const hang = run(["--only", "slow"], { dir: q, env: { CI: "true" } });
+  eq(hang.status, 1, "a timing suite that times out is red");
+  eq(countOf("slow"), 1, "and a timeout is not retried: a hang is not a flake");
+
+  reset();
+  const quiet = run(["--only", "once,steady"], { dir: q, env: { CI: "true", GITHUB_ACTIONS: "" } });
+  eq(quiet.status, 0, "the annotation is for GitHub Actions only");
+  ok(!quiet.stdout.includes("::warning"), "no annotation without it");
+
+  put("suites.json", JSON.stringify(suitesOf({ plain: { timing: true, class: "C" } })));
+  const refused = run(["--only", "once"], { dir: q, env: { CI: "true" } });
+  eq(refused.status, 2, "a manifest that tags a Chromium suite timing is refused before anything runs");
+  ok(/plain is tagged timing but is class "C"/.test(refused.stderr), "naming the suite and the rule");
+  put("suites.json", JSON.stringify(suitesOf()));
+  put("quarantine.json", "{ not json");
+  const broken = run(["--only", "steady"], { dir: q, env: { CI: "true" } });
+  ok(broken.status === 2 && /quarantine\.json is not valid JSON/.test(broken.stderr), "a quarantine file that does not parse stops the run instead of being ignored");
+  rmSync(path.join(q, "quarantine.json"));
 }
 
 console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, the six CI shards equal to the published table and, with the fast job, every suite exactly once for one to eight shards, --shard, --group and --needs-browser on a hand-worked fixture, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);

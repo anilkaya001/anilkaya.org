@@ -1093,6 +1093,24 @@ group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
 still runs one suite by itself, and `npm test` with no flag still runs the
 whole chain.
 
+**Flake policy.** Only a suite tagged `timing` in `tests/suites.json` (an
+in-process CPU or wall-clock gate; the manifest refuses the tag on any suite that
+is not class `N`, so a Chromium or workerd suite is never retried) is run a second
+time, and only when `CI` is `true`: locally the first failure is the result. A
+timeout is not retried, because a hang is not a flake. A pass on the retry is
+green and printed as `FLAKY` in the table, the step summary (with the first
+attempt's last lines) and, under GitHub Actions, as a `::warning`; a second
+failure is a failure. Every FLAKY outcome is to be answered by an entry in
+`tests/quarantine.json`, `{suite, assertion, firstSeen, expires, issue}` with
+`expires` at most seven days after `firstSeen`; the run says whether an
+unexpired entry exists, and `run-contract` (the `run` suite, in the fast job)
+fails the moment any entry is malformed, names a suite that is not tagged
+`timing`, or has expired, so a flake is fixed or renewed in a reviewed pull
+request (a renewal is a new entry with a new `firstSeen` and issue) inside the
+week. The file is empty until a first flake is recorded. A flaky Chromium
+interaction suite is fixed in the test: wait for the settled state, never an
+intermediate one.
+
 In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
 (full history and `ASSET_DIFF_BASE`, the Worker dry run, then
 `node run.mjs --group fast`, no Chromium), six `shard` jobs (a matrix of

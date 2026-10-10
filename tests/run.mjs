@@ -3,6 +3,7 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { constants } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readQuarantine, recordedFor, todayUtc } from "./lib/quarantine.mjs";
 
 export const DEFAULT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const TIMEOUT_FLOOR_S = 120;
@@ -91,6 +92,7 @@ export function loadManifest(dir = DEFAULT_DIR) {
     if (s.medianS !== undefined && s.medianS !== null && !(Number.isFinite(s.medianS) && s.medianS >= 0)) problems.push(`suites.json: ${s.name} has a bad medianS`);
     if (s.timeoutS !== undefined && !(Number.isFinite(s.timeoutS) && s.timeoutS > 0)) problems.push(`suites.json: ${s.name} has a bad timeoutS`);
     if (s.timing !== undefined && typeof s.timing !== "boolean") problems.push(`suites.json: ${s.name} has a timing flag that is not true or false`);
+    if (s.timing === true && s.class !== "N") problems.push(`suites.json: ${s.name} is tagged timing but is class ${JSON.stringify(s.class)}; only Node suites are retried, never one that drives Chromium or workerd`);
     if (s.files !== undefined && !(Array.isArray(s.files) && s.files.length && s.files.every((f) => typeof f === "string" && f))) problems.push(`suites.json: ${s.name} has a bad files list`);
     if (s.covers !== undefined && !(Array.isArray(s.covers) && s.covers.every((c) => typeof c === "string" && c))) problems.push(`suites.json: ${s.name} has a bad covers list`);
   }
@@ -112,6 +114,8 @@ export function selectSuites(suites, only) {
 }
 
 export const groupOf = (suite) => suite.group || "shard";
+
+export const retryAllowed = (suite, env = process.env) => env.CI === "true" && suite.timing === true && suite.class === "N";
 
 export const needsBrowser = (suites) => suites.some((s) => s.class !== "N");
 
@@ -290,17 +294,20 @@ function fmtSeconds(s) {
 }
 
 function resultWord(r) {
+  if (r.status === "pass" && r.flaky) return "passed on retry (FLAKY)";
   if (r.status === "pass") return "passed";
   if (r.status === "timeout") return `timed out at ${r.limitS} s`;
   if (r.status === "skipped") return "not run";
-  if (r.error) return `failed (${r.error})`;
-  return r.signal ? `failed (${r.signal})` : `failed (exit ${r.code})`;
+  const twice = r.retried ? ", twice" : "";
+  if (r.error) return `failed (${r.error}${twice})`;
+  return r.signal ? `failed (${r.signal}${twice})` : `failed (exit ${r.code}${twice})`;
 }
 
 export function tally(results) {
-  const t = { total: results.length, pass: 0, fail: 0, timeout: 0, skipped: 0, assertions: 0 };
+  const t = { total: results.length, pass: 0, fail: 0, timeout: 0, skipped: 0, flaky: 0, assertions: 0 };
   for (const r of results) {
     t[r.status]++;
+    if (r.flaky) t.flaky++;
     if (r.assertions) t.assertions += r.assertions;
   }
   return t;
@@ -317,7 +324,7 @@ export function textTable(results, wallS) {
     line(widths.map((w) => "-".repeat(w))),
     ...rows.map(line),
     "",
-    `${t.total} suites: ${t.pass} passed, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s`,
+    `${t.total} suites: ${t.pass} passed${t.flaky ? ` (${t.flaky} FLAKY)` : ""}, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s`,
   ].join("\n");
 }
 
@@ -344,17 +351,26 @@ function budgetTail(lines, budget) {
 export function markdownSummary(results, wallS, { interrupted = null, label = null } = {}) {
   const t = tally(results);
   const icon = { pass: "✅", fail: "❌", timeout: "⏱️", skipped: "⏭️" };
+  const mark = (r) => (r.status === "pass" && r.flaky ? "⚠️" : icon[r.status]);
   const out = [
-    `### Regression suites${label ? `, ${label}` : ""}: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed`}${interrupted ? ` (run interrupted by ${interrupted})` : ""}`,
+    `### Regression suites${label ? `, ${label}` : ""}: ${t.fail + t.timeout ? `${t.fail + t.timeout} of ${t.total} failed` : `all ${t.pass} passed${t.flaky ? `, ${t.flaky} of them FLAKY` : ""}`}${interrupted ? ` (run interrupted by ${interrupted})` : ""}`,
     "",
-    `${t.pass} passed, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s.`,
+    `${t.pass} passed${t.flaky ? ` (${t.flaky} FLAKY)` : ""}, ${t.fail} failed, ${t.timeout} timed out, ${t.skipped} not run; ${t.assertions} assertions; ${fmtSeconds(wallS)} s.`,
     "",
     "| # | Suite | Result | Seconds | Assertions |",
     "|---:|---|---|---:|---:|",
-    ...results.map((r, i) => `| ${i + 1} | \`${r.name}\` | ${icon[r.status]} ${resultWord(r)} | ${fmtSeconds(r.seconds)} | ${r.assertions == null ? "" : r.assertions} |`),
+    ...results.map((r, i) => `| ${i + 1} | \`${r.name}\` | ${mark(r)} ${resultWord(r)} | ${fmtSeconds(r.seconds)} | ${r.assertions == null ? "" : r.assertions} |`),
   ];
   const failed = results.filter((r) => r.status === "fail" || r.status === "timeout");
-  const share = failed.length ? Math.floor(SUMMARY_TAIL_BUDGET / failed.length) : 0;
+  const flaky = results.filter((r) => r.flaky);
+  const share = failed.length + flaky.length ? Math.floor(SUMMARY_TAIL_BUDGET / (failed.length + flaky.length)) : 0;
+  for (const r of flaky) {
+    const lines = budgetTail(r.flaky.first.tail.map(capLine), share);
+    const status = r.flaky.recorded
+      ? `recorded in tests/quarantine.json until ${r.flaky.recorded}`
+      : "NOT RECORDED: add a tests/quarantine.json entry (suite, assertion, firstSeen, expires within 7 days, issue) or fix the test";
+    out.push("", `<details><summary><code>${r.name}</code>: FLAKY, failed once and passed on retry; ${status}; first attempt, last ${lines.length} lines</summary>`, "", fence(lines), "", "</details>");
+  }
   for (const r of failed) {
     const lines = budgetTail(r.tail.map(capLine), share);
     const cut = lines.length < r.tail.length ? ` (${r.tail.length - lines.length} earlier lines left out to keep the summary small)` : "";
@@ -366,9 +382,14 @@ export function markdownSummary(results, wallS, { interrupted = null, label = nu
 export async function main(argv, io = { stdout: process.stdout, stderr: process.stderr }, env = process.env) {
   let opts;
   let suites;
+  let quarantine = [];
   try {
     opts = parseArgs(argv);
-    suites = chooseSuites(loadManifest(opts.dir), opts);
+    const all = loadManifest(opts.dir);
+    suites = chooseSuites(all, opts);
+    const q = readQuarantine(opts.dir);
+    if (q.problems.length) throw new UsageError(q.problems.join("\n"));
+    quarantine = q.entries;
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     io.stderr.write(`run.mjs: ${err.message}\n`);
@@ -387,7 +408,21 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
       continue;
     }
     io.stdout.write(`\n> ${suite.script}\n> ${suite.command}\n\n`);
-    const r = await runSuite(suite, opts.dir, opts.timeoutScale, io);
+    let r = await runSuite(suite, opts.dir, opts.timeoutScale, io);
+    if (r.status === "fail" && !interruptedBy && retryAllowed(suite, env)) {
+      io.stderr.write(`\n↻ ${suite.script} failed after ${fmtSeconds(r.seconds)} s; it is tagged timing, so it runs once more (a second failure is a failure)\n`);
+      io.stdout.write(`\n> ${suite.script} (retry)\n> ${suite.command}\n\n`);
+      const first = r;
+      r = await runSuite(suite, opts.dir, opts.timeoutScale, io);
+      if (r.status === "pass") {
+        const hit = recordedFor(quarantine, suite.name, todayUtc());
+        r = { ...r, flaky: { first: { seconds: first.seconds, code: first.code, signal: first.signal, tail: first.tail, assertions: first.assertions }, recorded: hit ? hit.expires : null } };
+        io.stderr.write(`\n⚠ FLAKY ${suite.script}: failed once, passed on retry; ${hit ? `recorded in tests/quarantine.json until ${hit.expires}` : "NOT RECORDED in tests/quarantine.json (suite, assertion, firstSeen, expires within 7 days, issue)"}\n`);
+        if (env.GITHUB_ACTIONS) io.stdout.write(`::warning title=FLAKY ${suite.name}::${suite.script} failed once and passed on retry; ${hit ? `recorded until ${hit.expires}` : "add a tests/quarantine.json entry or fix the test"}\n`);
+      } else {
+        r = { ...r, retried: true };
+      }
+    }
     results.push(r);
     if (r.status !== "pass") {
       io.stderr.write(`\n✗ ${suite.script} ${resultWord(r)} after ${fmtSeconds(r.seconds)} s\n`);
