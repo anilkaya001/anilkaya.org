@@ -5,6 +5,7 @@
     {"name": "run", "class": "N", "group": "fast", "medianS": null},
     {"name": "markets", "class": "N", "medianS": 0.1},
     {"name": "market-ticker", "class": "C", "medianS": 2.3},
+    {"name": "landing-motion", "class": "C", "medianS": 29.7},
     {"name": "flows", "class": "N", "medianS": 1.3},
     {"name": "pipeline", "class": "N", "medianS": 192.2},
     {"name": "flows-probe", "class": "N", "medianS": 0.3},
