@@ -310,7 +310,7 @@
     const tip = h("div", { class: "fn-tip", "aria-hidden": "true", hidden: true });
     const empty = h("div", { class: "fn-empty", hidden: true });
     const home = h("button", { class: "fn-btn fn-home", type: "button", "aria-label": "Recentre the view", title: "Recentre the view", hidden: true }, UI.glyph("home"), h("span", { class: "fn-bl" }, "Recentre"));
-    const freeze = h("button", { class: "fn-btn fn-freeze", type: "button", "aria-pressed": "false", hidden: true }, h("span", { class: "fn-bl" }, "Freeze"));
+    const freeze = h("button", { class: "fn-btn fn-freeze", type: "button", hidden: true }, h("span", { class: "fn-bl" }, "Freeze"));
     const bar = h("div", { class: "fn-bar" }, h("span", { class: "fn-bar-sp" }), freeze, home);
     const stage = h("div", { class: "fn-stage" }, cv, hits, tip, empty);
     const lede = h("p", { class: "fn-lede" });
@@ -1435,7 +1435,6 @@
     freeze.addEventListener("click", () => {
       frozen = !frozen;
       still = RM.matches || frozen;
-      freeze.setAttribute("aria-pressed", String(frozen));
       freeze.firstChild.textContent = frozen ? "Resume" : "Freeze";
       FLR.length = 0;
       halt();

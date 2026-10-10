@@ -165,6 +165,10 @@
   .fn-card .ui-mod-h > .fn-fresh { grid-column: 2; grid-row: 1; justify-self: start; margin: 0; }
   .fn-fw { display: none; }
   .fn-lg-g + .fn-lg-g { margin-left: 0; }
+  .fn-scale { gap: 8px 12px; }
+  .fn-lg-g { flex: 0 0 100%; gap: 8px 10px; }
+  .fn-lg-i { gap: 4px; }
+  .fn-lg-t { flex: 0 0 100%; margin-right: 0; }
   .fn-stage { margin: 0 calc(-1 * var(--sp-2)); }
   .fn-tab { font: var(--t-caption); }
   .fn-tab th, .fn-tab td { padding: 6px 5px; }
@@ -177,8 +181,8 @@
   .fn-tsec { display: block; overflow: hidden; color: var(--label-3); font: var(--t-caption); text-overflow: ellipsis; }
 }
 @container mod (max-width: 400px) {
-  .fn-tab th:nth-child(1) { width: 27%; }
-  .fn-tab th:nth-child(3) { width: 37%; }
+  .fn-tab th:nth-child(1) { width: 25%; }
+  .fn-tab th:nth-child(3) { width: 33%; }
   .fn-tab th:nth-child(4) { width: 24%; }
   .fn-lw { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .fn-lean .ui-g { font-size: 12px; }

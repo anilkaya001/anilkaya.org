@@ -534,6 +534,18 @@ try {
       });
       ok(box.sw <= box.iw, `no horizontal overflow at ${width}px in ${mode} (${box.sw} of ${box.iw})`);
       ok(box.stage[0] >= box.card[0] - 0.5 && box.stage[1] <= box.card[1] + 0.5, `the stage stays inside its card at ${width}px`);
+      if (mode === "lean" && width <= 540) {
+        const lg = await page.evaluate(() => {
+          const rows = (sel) => [...document.querySelectorAll("#uaNet .fn-scale .fn-lg-g")].map((g) => [...g.querySelectorAll(sel)].map((el) => Math.round(el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2)));
+          const sc = document.querySelector("#uaNet .fn-scale").getBoundingClientRect();
+          const items = [...document.querySelectorAll("#uaNet .fn-scale .fn-lg-i")].map((el) => el.getBoundingClientRect());
+          return { items: rows(".fn-lg-i"), n: document.querySelectorAll("#uaNet .fn-scale .fn-lg-i").length, inside: items.every((r) => r.left >= sc.left - 0.5 && r.right <= sc.right + 0.5), box: [sc.left, sc.right, items.map((r) => [Math.round(r.left), Math.round(r.right)])] };
+        });
+        ok(lg.n === 6 && lg.items.length === 2 && lg.items.every((g) => g.length === 3 && Math.max(...g) - Math.min(...g) <= 2), `the legend's three reference circles share one row and its three band swatches share one row at ${width}px (${JSON.stringify(lg.items)})`);
+        ok(lg.inside, `and every legend item sits inside the scale row at ${width}px (${JSON.stringify(lg.box)})`);
+        const th = await page.evaluate(() => [...document.querySelectorAll("#uaNet table.fn-tab thead th")].filter((e) => e.offsetParent).map((e) => ({ t: e.textContent, sw: e.scrollWidth, cw: e.clientWidth })));
+        ok(th.length >= 4 && th.every((x) => x.sw <= x.cw), `no table header is truncated at ${width}px (${JSON.stringify(th)})`);
+      }
       const cam = await camera(page), [ly, lp] = cam.limits, grid = [cam.rest];
       for (const y of lin(ly, 9)) for (const p of lin(lp, 5)) grid.push([y, p]);
       grid.push([-ly, cam.rest[1]], [ly, cam.rest[1]], cam.rest);
@@ -1024,9 +1036,9 @@ try {
     ok(new Set(rel0.map((x) => x.toFixed(3))).size > 3, "each in its own phase");
     await page.click("#uaNet .fn-freeze");
     await page.waitForTimeout(200);
-    const fz = await page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-freeze").getAttribute("aria-pressed"), t: document.querySelector("#uaNet .fn-freeze").textContent }));
+    const fz = await page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-freeze").hasAttribute("aria-pressed"), t: document.querySelector("#uaNet .fn-freeze").textContent }));
     const f1 = await stats(page);
-    ok(fz.p === "true" && /Resume/.test(fz.t) && f1.still && !f1.running && f1.pulses === 0, `FREEZE stops the pulses, the breathing and the sway and the loop with them (${JSON.stringify(fz)})`);
+    ok(fz.p === false && /Resume/.test(fz.t) && f1.still && !f1.running && f1.pulses === 0, `FREEZE stops the pulses, the breathing and the sway and the loop with them (${JSON.stringify(fz)})`);
     const fc = await camera(page);
     await page.waitForTimeout(500);
     eq((await camera(page)).yaw, fc.yaw, "and the camera holds");
