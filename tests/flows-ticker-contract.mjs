@@ -2381,10 +2381,14 @@ try {
     ranked.panels.pricedMove.ivRank = 0.52;
     ranked.engine.noTrade = null;
     await mount(page, ranked, { neuron: engineSummary(ranked) });
-    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high, for 30-day implied volatility.",
+    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks.",
       "the IV rank chip names the statistic it shows: a place between the year's low and high, not a percentile of the year");
     ok(/\nIV rank\n52 of 100: where today sits between its 1-year low and high\n/.test(await modInfo(page, "m-vol")), "and so does the volatility module's own line for it");
     ok(!/percentile of its own year/.test(TICKER_SRC), "no line of the ticker calls the rank a percentile any more");
+    ok(!/high, for 30-day|30-day implied volatility (sits|below)/.test(TICKER_SRC),
+      "and no line states the rank's or the percentile's tenor: the screener's iv_rank and iv percentile document none (the rank's schema reference in the vendor spec is a copy of the 30-day IV's), so no chip guesses it");
+    eq((TICKER_SRC.match(/The vendor does not document which tenor (of implied volatility )?it (ranks|reads)\./g) || []).length, 3,
+      "each of the three leads that describe the screener's rank or percentile (the card's IV rank chip and the screen tier's IV rank and IV pct chips) says the tenor is undocumented");
     const ideas = await page.evaluate(() => {
       const k = document.querySelector("#ftVerdict .ft-ideas-k");
       const tag = k && k.querySelector(".ui-calib");
@@ -2412,6 +2416,25 @@ try {
     await mount(page, aside, { neuron: { ...engineSummary(aside), tier: "stand-aside", code: "ev.none-positive", verdict: "stand-aside", verdictWord: "Stand aside" } });
     const close = await page.evaluate(() => { const c = document.querySelector("#ftVerdict .ft-aside .ft-aside-c"); return c ? { text: c.innerText.replace(/\s+/g, " "), tag: !!c.querySelector(".ui-calib") } : null; });
     ok(close && close.tag, `a stand-aside that prints its closest structure's real-world chance and EV carries the note too (${close && close.text})`);
+    const cols = ["report date", "report time", "expected move (fraction)", "1d move", "1w move", "pre 1w move", "long straddle 1d", "long straddle 1w"];
+    const prior = new Date(Date.parse(full.sessionDate + "T00:00:00Z") - 120 * 864e5).toISOString().slice(0, 10);
+    const rows = [[prior, "postmarket", 0.05, 0.08, 0.09, 0.01, 1.4, 0.6], [prior, "postmarket", 0.05, -0.02, -0.03, 0.0, -0.3, -0.5],
+      [prior, "premarket", 0.04, 0.06, 0.04, -0.01, 0.9, null], [prior, "postmarket", 0.06, 0.03, 0.05, 0.02, null, null]];
+    const earnings = { status: "ok", next: null, n: 4, beat: 0.5, ls1dHit: 2 / 3, ls1wHit: 0.5, medianRatio: 1.1, medianAbsMove: 0.045, medianExpected: 0.05,
+      drift: null, runup: 0.005, events: rows, eventCols: cols, masked: 0, minEvents: 4, rules: {} };
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), earnings } });
+    const ev = await page.evaluate(() => {
+      const m = document.getElementById("m-events");
+      if (!m) return null;
+      const subs = Object.fromEntries([...m.querySelectorAll(".ui-metric")].map((x) => [(x.querySelector(".ui-metric-l") || {}).textContent, (x.querySelector(".ui-metric-s") || {}).textContent || null]));
+      return { subs };
+    });
+    ok(ev, "the Events module draws for a card-x that holds an earnings history");
+    eq(ev.subs.Beat, "2 of 4 > priced", "D6: the beat share says how many reports it is a share of, beside the share itself, so 50% of four reports is not read as a rate");
+    eq(ev.subs.Straddle, "2 of 3 hit, 1d", "and the straddle hit rate counts only the reports the vendor published a straddle value for: three of the four here, not the four the beat share reads");
+    const evInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Beat share 50% \(2 of 4 reports\)/.test(evInfo), `the popover's beat share carries the same count (${evInfo.slice(0, 400)})`);
+    ok(/Long straddle 1d \/ 1w 67% \/ 50% profitable \(2 of 3 \/ 1 of 2 reports\)/.test(evInfo), "and the 1d and 1w straddle rates each carry their own count");
     eq(errors.length, 0, `the honesty copy throws nothing (${errors.join("; ")})`);
     await page.close();
   }

@@ -473,7 +473,7 @@
           facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Read from", reg.labelFrom || null], ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)],
             ["1Y z", cx && num(cx.z) !== null ? F.signed(cx.z, 2) : null], ["Same sign for", cx && num(cx.persist) !== null ? SESSIONS(cx.persist) : null], ["Long share of the year", cx ? F.pct(cx.longShare, 0) : null]] }) }),
       UI.gaugeChip({ ring: ivr.v, color: "--s-blue", value: ivr.v === null ? chipDash(ivr.st.state) : String(Math.round(ivr.v * 100)), label: "IV rank",
-        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high, for 30-day implied volatility." : ivr.st.reason,
+        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks." : ivr.st.reason,
           facts: [["IV 30d", F.pct(pm.iv30)], ["Momentum", num(pm.ivMomentum) === null ? null : F.pts(pm.ivMomentum) + " pts"]] }) }),
       UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: im === null ? chipDash(stOf(card.panels.pricedMove, "priced move").state) : "±" + F.pct(im), label: (num(pm.sessions) || 10) + "d move",
         info: () => ({ title: "Priced move", state: stOf(card.panels.pricedMove, "priced move").state === "ok" ? null : stOf(card.panels.pricedMove, "priced move").state,
@@ -2361,23 +2361,26 @@
     const implied = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
     const cols = E && Array.isArray(E.eventCols) ? E.eventCols : [];
     const ev = E && Array.isArray(E.events) ? E.events : [];
+    const nOf = (k) => { const i = cols.indexOf(k); return i < 0 ? null : ev.filter((r) => Array.isArray(r) && num(r[i]) !== null).length; };
+    const of = (share, n) => num(share) !== null && num(n) !== null && n > 0 ? Math.round(share * n) + " of " + n : null;
+    const beatOf = E ? of(E.beat, E.n) : null, ls1dOf = E ? of(E.ls1dHit, nOf("long straddle 1d")) : null, ls1wOf = E ? of(E.ls1wHit, nOf("long straddle 1w")) : null;
     const box = h("div", { class: "ft-cbox" });
     const sec = mod({ id: "m-events", title: "Events", span: [12, 5], st: stE, index: 3, body: [
       mets([
         metric("Next report", next && isoOk(next.d) ? day(next.d) : DASH, { sub: next ? (num(next.sessions) !== null ? SESSIONS(next.sessions) : "") + (next.confirmed ? "" : SEP + "est.") : null, state: next ? null : E ? ST("quiet", "No upcoming report on the calendar.") : stE }),
         metric("Implied", implied === null ? DASH : "±" + F.pct(implied, 1), { key: keyOf("--accent-ink", "ln", ""), state: implied === null ? ST("quiet", "No implied earnings move: the report is not inside the listed expiries or the next five sessions.") : null }),
         metric("Realized", E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH, { sub: E && num(E.medianRatio) !== null ? "×" + E.medianRatio.toFixed(2) + " priced" : null, state: E ? null : stE }),
-        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: "moved > priced", state: E ? null : stE }),
-        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
+        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: beatOf ? beatOf + " > priced" : "moved > priced", state: E ? null : stE }),
+        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: ls1dOf ? ls1dOf + " hit, 1d" : "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
       ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), dashKey("--label-3", "Median")])],
       info: () => ({
         title: "Events", state: stE.state === "ok" ? null : stE.state, asOf: next && next.d ? "Next " + next.d : null,
         lead: E ? "The last " + ev.length + " reports: the bar is the move the day after, the tick the move the options priced beforehand." : stE.reason,
         facts: E ? [["Next", next ? next.d + " (" + (next.when || "time unknown") + ", " + (next.confirmed ? "confirmed" : "estimated from " + (next.source || "the calendar")) + ")" : null],
           ["Implied now", implied === null ? null : "±" + F.pct(implied, 2)], ["Today against history", num(E.ratioToday) !== null ? "×" + E.ratioToday.toFixed(2) + " of the median realized move" : null],
-          ["Median ratio", num(E.medianRatio) !== null ? E.medianRatio.toFixed(2) : null], ["Beat share", F.pct(E.beat, 0)], ["Median move", F.pct(E.medianAbsMove, 1)], ["Median priced", F.pct(E.medianExpected, 1)],
+          ["Median ratio", num(E.medianRatio) !== null ? E.medianRatio.toFixed(2) : null], ["Beat share", F.pct(E.beat, 0) + (beatOf ? " (" + beatOf + " reports)" : "")], ["Median move", F.pct(E.medianAbsMove, 1)], ["Median priced", F.pct(E.medianExpected, 1)],
           ["Day-one drift", num(E.drift) !== null ? F.pct(E.drift, 2, true) + " (" + (E.drift > 0 ? "moves kept going" : "moves faded") + ")" : null], ["Run-up", num(E.runup) !== null ? F.pct(E.runup, 2, true) : null],
-          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
+          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" + (ls1dOf ? " (" + ls1dOf + " / " + (ls1wOf || DASH) + " reports)" : "") : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
         sections: [{ title: "Rules", lines: E && E.rules ? Object.values(E.rules) : [] }, { title: "Term", lines: [term && term.eventExpiry ? "The first expiry after the report is " + term.eventExpiry + "." : null] }],
       }) });
     if (X.off) sec.querySelector(".ui-mod-t").append(tag(day(X.off)));
@@ -2678,7 +2681,7 @@
     const ik = num(u.ivp) === null ? "ivRank" : "ivp", il = ik === "ivp" ? "IV pct" : "IV rank", iv = num(u[ik]), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
     const why = (t, lead) => () => ({ title: t, lead }), gs = g < 0 ? "short" : g > 0 ? "long" : null;
     return [
-      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with 30-day implied volatility below today's." : "Where 30-day implied volatility sits between its one-year low and high.") }),
+      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with implied volatility below today's. The vendor does not document which tenor it reads." : "Where implied volatility sits between its one-year low and high. The vendor does not document which tenor it ranks.") }),
       UI.gaugeChip({ icon: "vega", color: "--s-blue", value: num(u.iv30) === null ? chipDash("unavailable") : F.pct(u.iv30, 0), label: "IV 30d", info: why("IV 30d", "Thirty-day implied volatility.") }),
       g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: gs === "short" ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : gs ? (gs === "short" ? "Short" : "Long") : "Zero", label: "Dealer γ", tone: gs,
         info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the vendor's dealer gamma for " + card.ticker + ".") }),
