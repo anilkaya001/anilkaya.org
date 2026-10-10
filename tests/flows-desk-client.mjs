@@ -528,6 +528,16 @@ try {
         .map((c) => { const n = window.FlowsUI.calibTag(c); return n ? n.textContent : null; }));
       same(cond, ["Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", null, null],
         "the note shows while no calibration record is held, or its effective n is under 100 or not a number, and comes off only at nEff 100 or more");
+      await page.locator("#dkScatter .tl-scrub").focus();
+      const reads = [];
+      for (let k = 0; k < 12; k++) {
+        await page.keyboard.press("ArrowRight");
+        const t = await page.$eval("#dkScatter .ui-readout", (n) => n.classList.contains("is-on") ? n.textContent : null);
+        if (t && !reads.includes(t)) reads.push(t);
+      }
+      const realRows = await page.$$eval("#dkList .dk-row", (rs) => rs.filter((r) => /\d%/.test((r.querySelector(".dk-pp") || {}).textContent || "")).length);
+      ok(reads.length > 1 && realRows > 0, `the frontier is walked point by point over lines that hold a real-world chance (${reads.length} points, ${realRows} rows)`);
+      ok(reads.every((t) => !/Real/.test(t)), `and its readout, in a module with no calibration note, prints no real-world chance; that figure stays in the Lines module under the note (${reads.join(" | ")})`);
     }
     await page.close();
   }

@@ -2361,16 +2361,17 @@
     const implied = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
     const cols = E && Array.isArray(E.eventCols) ? E.eventCols : [];
     const ev = E && Array.isArray(E.events) ? E.events : [];
-    const nOf = (k) => { const i = cols.indexOf(k); return i < 0 ? null : ev.filter((r) => Array.isArray(r) && num(r[i]) !== null).length; };
+    const cut = Array.isArray(X.shed) && X.shed.includes("earnings.events");
+    const nOf = (k, n) => { if (num(n) !== null) return n; const i = cols.indexOf(k); return cut || i < 0 ? null : ev.filter((r) => Array.isArray(r) && num(r[i]) !== null).length; };
     const of = (share, n) => num(share) !== null && num(n) !== null && n > 0 ? Math.round(share * n) + " of " + n : null;
-    const beatOf = E ? of(E.beat, E.n) : null, ls1dOf = E ? of(E.ls1dHit, nOf("long straddle 1d")) : null, ls1wOf = E ? of(E.ls1wHit, nOf("long straddle 1w")) : null;
+    const beatOf = E ? of(E.beat, E.n) : null, ls1dOf = E ? of(E.ls1dHit, nOf("long straddle 1d", E.ls1dN)) : null, ls1wOf = E ? of(E.ls1wHit, nOf("long straddle 1w", E.ls1wN)) : null;
     const box = h("div", { class: "ft-cbox" });
     const sec = mod({ id: "m-events", title: "Events", span: [12, 5], st: stE, index: 3, body: [
       mets([
         metric("Next report", next && isoOk(next.d) ? day(next.d) : DASH, { sub: next ? (num(next.sessions) !== null ? SESSIONS(next.sessions) : "") + (next.confirmed ? "" : SEP + "est.") : null, state: next ? null : E ? ST("quiet", "No upcoming report on the calendar.") : stE }),
         metric("Implied", implied === null ? DASH : "±" + F.pct(implied, 1), { key: keyOf("--accent-ink", "ln", ""), state: implied === null ? ST("quiet", "No implied earnings move: the report is not inside the listed expiries or the next five sessions.") : null }),
         metric("Realized", E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH, { sub: E && num(E.medianRatio) !== null ? "×" + E.medianRatio.toFixed(2) + " priced" : null, state: E ? null : stE }),
-        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: beatOf ? beatOf + " > priced" : "moved > priced", state: E ? null : stE }),
+        metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: (beatOf ? beatOf + " " : "") + "moved > priced", state: E ? null : stE }),
         metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: ls1dOf ? ls1dOf + " hit, 1d" : "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
       ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), dashKey("--label-3", "Median")])],
       info: () => ({

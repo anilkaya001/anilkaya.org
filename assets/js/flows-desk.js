@@ -644,8 +644,7 @@
       if (!p) { readout.classList.remove("is-on"); return; }
       const r = p.r;
       readout.replaceChildren(C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"),
-        popP(r) === null ? null : C.part("Real " + fmtPct(popP(r), 0), "k"));
+        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"));
       readout.classList.add("is-on");
       const rw = readout.offsetWidth;
       readout.style.left = Math.max(0, Math.min(w - rw, x(p.x) - rw / 2)) + "px";

@@ -9,6 +9,8 @@ import * as NEURON from "../shared/flows-neuron.js";
 import { screenReading } from "../shared/flows-neuron-screen.js";
 import { briefAge } from "../shared/flows-ask.js";
 import { DEALER_CLAUSE } from "../shared/flows-reading.js";
+import { earningsHistory } from "../shared/flows-catalysts.js";
+import { cardXPayload } from "../scripts/flows-legs/card-x.mjs";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -2430,11 +2432,40 @@ try {
       return { subs };
     });
     ok(ev, "the Events module draws for a card-x that holds an earnings history");
-    eq(ev.subs.Beat, "2 of 4 > priced", "D6: the beat share says how many reports it is a share of, beside the share itself, so 50% of four reports is not read as a rate");
+    eq(ev.subs.Beat, "2 of 4 moved > priced", "D6: the beat share says how many reports it is a share of, beside the share itself, so 50% of four reports is not read as a rate");
     eq(ev.subs.Straddle, "2 of 3 hit, 1d", "and the straddle hit rate counts only the reports the vendor published a straddle value for: three of the four here, not the four the beat share reads");
     const evInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
     ok(/Beat share 50% \(2 of 4 reports\)/.test(evInfo), `the popover's beat share carries the same count (${evInfo.slice(0, 400)})`);
     ok(/Long straddle 1d \/ 1w 67% \/ 50% profitable \(2 of 3 \/ 1 of 2 reports\)/.test(evInfo), "and the 1d and 1w straddle rates each carry their own count");
+    const s0 = Date.parse(full.sessionDate + "T00:00:00Z");
+    const d1 = [0.6, -0.4, 0.8, 0.3, -0.2, 0.5, -0.1, 0.9, 0.4, -0.3, 0.7, -0.5], w1 = [0.5, -0.4, 0.6, -0.3, 0.2, -0.2, -0.1, 0.4, 0.3, -0.3, 0.6, -0.5];
+    const vendorRows = d1.map((v, i) => ({ report_date: new Date(s0 - (40 + 91 * i) * 864e5).toISOString().slice(0, 10), report_time: "postmarket", expected_move_perc: 0.05,
+      post_earnings_move_1d: i % 2 ? -0.04 : 0.06, post_earnings_move_1w: i % 2 ? -0.05 : 0.07, pre_earnings_move_1w: 0.01, long_straddle_1d: v, long_straddle_1w: w1[i] }));
+    const hist12 = earningsHistory(vendorRows, { sessionDate: full.sessionDate });
+    eq(hist12.status + " " + hist12.events.length + " " + hist12.ls1dN + " " + hist12.ls1wN, "ok 12 12 12", "the nightly publishes the straddle denominators beside the shares: twelve reports, every one with a 1d and a 1w straddle value");
+    eq(Math.round(hist12.ls1dHit * 12) + " " + Math.round(hist12.ls1wHit * 12), "7 6", "seven of the twelve 1d straddles and six of the twelve 1w straddles paid");
+    const whole = cardXPayload(full.ticker, { earnings: hist12 }, { sessionDate: full.sessionDate });
+    const cutX = cardXPayload(full.ticker, { earnings: hist12 }, { sessionDate: full.sessionDate, budgetBytes: whole.bytes - 40 });
+    ok(cutX.shed.includes("earnings.events") && cutX.earnings.events.length === 8, `a card-x over its budget sheds the event rows to the eight newest while the shares stay over twelve (${cutX.shed.join(",")})`);
+    const cutRows = cutX.earnings.events.filter((r) => r[6] !== null);
+    eq(cutRows.filter((r) => r[6] > 0).length + " of " + cutRows.length, "5 of 8", "so a count rebuilt from the rows that are left would read 5 of 8 against a 58% share");
+    const evSubs = () => page.evaluate(() => {
+      const m = document.getElementById("m-events");
+      return m ? Object.fromEntries([...m.querySelectorAll(".ui-metric")].map((x) => [(x.querySelector(".ui-metric-l") || {}).textContent, (x.querySelector(".ui-metric-s") || {}).textContent || null])) : null;
+    });
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), ...cutX } });
+    const cutSubs = await evSubs();
+    eq(cutSubs && cutSubs.Straddle, "7 of 12 hit, 1d", "with the denominators published, the straddle count is the nightly's own: 7 of 12, not 5 of 8");
+    const cutInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Long straddle 1d \/ 1w 58% \/ 50% profitable \(7 of 12 \/ 6 of 12 reports\)/.test(cutInfo) && !/of 8/.test(cutInfo), `and the popover gives the same counts and no count over the shed rows (${cutInfo.slice(0, 600)})`);
+    const oldX = clone(cutX);
+    delete oldX.earnings.ls1dN;
+    delete oldX.earnings.ls1wN;
+    await mount(page, clone(full), { cardX: { ...(cardXOf(full.ticker) || {}), ...oldX } });
+    const oldSubs = await evSubs();
+    eq(oldSubs && oldSubs.Straddle, "1d hit rate", "a card-x written before the denominators were published, whose event rows were shed, prints no count rather than one over the rows that are left");
+    const oldInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
+    ok(/Long straddle 1d \/ 1w 58% \/ 50% profitable/.test(oldInfo) && !/of 8/.test(oldInfo) && !/profitable \(/.test(oldInfo), `and its popover keeps the shares and drops the count (${oldInfo.slice(0, 600)})`);
     eq(errors.length, 0, `the honesty copy throws nothing (${errors.join("; ")})`);
     await page.close();
   }
