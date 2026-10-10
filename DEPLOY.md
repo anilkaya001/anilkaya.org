@@ -1815,12 +1815,12 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   make no GitHub call. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 - **The nightly records its own stages.** `scripts/flows-nightly/stages.mjs` holds
-  the stage table (thirty-five stages, each fatal or isolated, with the stages it
+  the stage table (thirty-six stages, each fatal or isolated, with the stages it
   needs and the keys it declares). An isolated stage is caught, logged with the
   line it always had, and the run goes on; a fatal one ends the run. `meta` is
   now the last key the nightly writes, after the health gate, and carries
   `stages` (one record per stage: `status` ok, failed or skipped, `ms`, `calls`
-  made while it ran, `keys` written, and a one-line `why` for a failure or skip)
+  made while it ran, `keys` written, `cpu` (milliseconds of process CPU time, 0 in the pinned dry run), and a one-line `why` for a failure or skip; the `compute` stage after `card-x` adds `names`, `jobs`, `over` and `failed`, and runs no job until one is registered)
   and `health` (`failures`, `warnings` and the first three lines). A key a stage
   wrote that its row does not declare is named on its record as `undeclared`,
   and one written outside any stage as `stagesOutside`; both are empty on a

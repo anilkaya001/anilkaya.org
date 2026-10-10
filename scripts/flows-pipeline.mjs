@@ -30,6 +30,7 @@ import { runCards } from "./flows-nightly/sections/cards.mjs";
 import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
+import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -191,7 +192,9 @@ async function main() {
 
   if (LIVE_MODE) return runLiveMode();
 
-  const stages = createStageRunner({ clock: () => (stampPinned() ? 0 : Date.now()), calls: () => stats.calls });
+  const stages = createStageRunner({
+    clock: () => (stampPinned() ? 0 : Date.now()), calls: () => stats.calls, cpu: () => (stampPinned() ? 0 : processCpuMs()),
+  });
   bindStages(stages);
   stages.step("session");
 
@@ -266,6 +269,7 @@ async function main() {
   await runContext(ctx);
   await runCards(ctx);
   await runFocus(ctx);
+  await runCompute(ctx);
   await runClose(ctx);
 }
 

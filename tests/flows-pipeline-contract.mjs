@@ -55,7 +55,10 @@ import { unwrapRows as politicalRows } from "../shared/flows-political.js";
 import { rowsOf as legRows } from "../scripts/flows-legs/common.mjs";
 import { rowsOf as volRows } from "../shared/flows-vol.js";
 import { rowsOf as positioningRows } from "../shared/flows-positioning.js";
-import { STAGES, ISOLATION, createStageRunner, declares, healthRecord, WHY_CAP } from "../scripts/flows-nightly/stages.mjs";
+import { STAGES, ISOLATION, createStageRunner, declares, healthRecord, WHY_CAP, DETAIL_KEYS } from "../scripts/flows-nightly/stages.mjs";
+import {
+  COMPUTE_JOBS, COMPUTE_NAME_CPU_MS, computeNames, processCpuMs, runCompute,
+} from "../scripts/flows-nightly/sections/compute.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -4483,6 +4486,13 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   same(meta.stages.filter((r) => r.status === "skipped"), [], "nor skipped, since the fixtures reach every branch");
   ok(meta.stages.every((r) => !("undeclared" in r)) && !("stagesOutside" in meta), "no stage published a key its table row does not declare, and nothing was published outside a stage");
   ok(meta.stages.every((r) => Number.isInteger(r.ms) && r.ms >= 0 && Number.isInteger(r.calls) && Number.isInteger(r.keys)), "every record carries whole-number ms, calls and keys");
+  const compute = meta.stages.find((r) => r.id === "compute");
+  const cardCount = [...log.matchAll(/^  cards: (\d+) name\(s\)/gm)].map((m) => Number(m[1]))[0];
+  ok(compute && compute.status === "ok" && compute.jobs === COMPUTE_JOBS.length && compute.over === 0 && compute.failed === 0,
+     "the compute stage runs after card-x and records its jobs, none over budget and none failed");
+  eq(compute.names, 0, "and with no job registered it spends no name");
+  ok(cardCount > 0 && /compute: 0 of \d+ deep name\(s\), 0 job\(s\)/.test(log), "its log line counts the carded names it was offered");
+  ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
   ok(JSON.stringify(meta.stages).length < 3000, `and the records add under 3 KiB to meta (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
   const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
@@ -5188,6 +5198,159 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1"] }, "the record counts both and keeps the first three lines, failures first");
     ok(healthRecord({ failures: ["y".repeat(500)], warnings: [] }).first[0].length <= 160, "and caps each line");
   }
+}
+
+{
+  const ids = STAGES.map((x) => x.id);
+  const compute = STAGES.find((x) => x.id === "compute");
+  ok(compute && compute.isolation === ISOLATION.isolated && compute.publishes.length === 0, "compute: the stage is isolated and publishes no key");
+  same([...compute.needs], ["card-x"], "compute: it needs card-x, the last stage that reads the vendor or publishes a card");
+  eq(ids.indexOf("compute"), ids.indexOf("card-x") + 1, "compute: and runs directly after it");
+  same([...STAGES.find((x) => x.id === "roster").needs], ["compute"], "compute: the roster waits for it, so a hung stage cannot be skipped past");
+
+  const src = nightlySource();
+  const mod = slice(src, "@@ source scripts/flows-nightly/sections/compute.mjs @@", "@@ source scripts/flows-nightly/sections/context.mjs @@");
+  ok(!/from "\.\.\/(vendor|store|archive)\.mjs"/.test(mod), "compute: the module imports no vendor client, store or archive, so it can neither call the vendor nor publish");
+  eq(count(mod, /\buw\(|\bpublish\(|fetch\(/g), 0, "compute: and makes no request");
+  const exec = nightlyExecution();
+  ok(exec.indexOf('stages.step("card-x")') < exec.indexOf('stages.run("compute"') && exec.indexOf('stages.run("compute"') < exec.indexOf('stages.run("roster"'),
+    "compute: the run reads card-x, compute, roster in that order");
+
+  let used = 0;
+  const cpu = () => used;
+  const noTurn = async () => {};
+  const names = ["A", "B", "C", "D"];
+  const burn = (ms) => ({ id: "burn", run: async (t) => { used += ms[t] || 0; return t.toLowerCase(); } });
+
+  const idle = await computeNames({ names, jobs: [], cpu, turn: noTurn });
+  same([idle.names, idle.jobs, idle.stopped, idle.over, idle.failed], [0, 0, null, [], []], "compute: no job registered spends no name");
+  eq(COMPUTE_JOBS.length, 0, "compute: and the nightly registers none until a model brings one");
+  ok(Object.isFrozen(COMPUTE_JOBS), "compute: the registry is frozen");
+
+  used = 0;
+  const calm = await computeNames({ names, jobs: [burn({ A: 100, B: 200, C: 300, D: 400 })], cpu, turn: noTurn });
+  same([calm.names, calm.over.length, calm.stopped, calm.cpuMs], [4, 0, null, 1000], "compute: four names inside their 1 s each all run, and the stage reports the CPU it spent");
+  same([...calm.results.get("burn")], [["A", "a"], ["B", "b"], ["C", "c"], ["D", "d"]], "compute: each job's value is kept by name for a later stage to publish");
+
+  used = 0;
+  const heavy = await computeNames({ names, jobs: [burn({ A: 1500, B: 100, C: 100, D: 100 })], cpu, turn: noTurn });
+  same(heavy.over, [{ t: "A", ms: 1500 }], "compute: a name that spends more than 1 s of CPU is named with what it spent");
+  same([heavy.names, heavy.stopped], [4, null], "compute: and the others still fit the stage's share of 1 s a name");
+
+  used = 0;
+  const runaway = await computeNames({ names, jobs: [burn({ A: 2500, B: 2000, C: 100, D: 100 })], cpu, turn: noTurn });
+  same([runaway.names, runaway.stopped], [2, "share"], "compute: past the share of 4 s the stage stops before the next name rather than running on");
+  same(runaway.over.map((o) => o.t), ["A", "B"], "compute: and both names that overran are on record");
+  ok(!runaway.results.get("burn").has("C"), "compute: a name that was not reached has no value");
+
+  used = 0;
+  let stopNow = false;
+  const cut = await computeNames({ names, jobs: [{ id: "burn", run: async (t) => { if (t === "B") stopNow = true; } }], cpu, turn: noTurn, stop: () => stopNow });
+  same([cut.names, cut.stopped], [2, "deadline"], "compute: the run's deadline stops it between names");
+
+  used = 0;
+  const flaky = await computeNames({
+    names, cpu, turn: noTurn,
+    jobs: [{ id: "bad", run: async (t) => { if (t === "B") throw new Error("no fit"); return 1; } }, { id: "good", run: async () => 2 }],
+  });
+  same([flaky.names, flaky.failed], [4, [{ t: "B", job: "bad", why: "no fit" }]], "compute: a job that throws for one name costs that name that job only");
+  eq(flaky.results.get("good").size, 4, "compute: the other job still answers every name, the failing one's name included");
+
+  let turns = 0;
+  await computeNames({ names, jobs: [burn({})], cpu, turn: async () => { turns++; } });
+  eq(turns, 4, "compute: the event loop gets a turn after every name");
+
+  const before = processCpuMs();
+  let sink = 0;
+  for (let i = 0; i < 3e7; i++) sink += Math.sqrt(i);
+  const spent = processCpuMs() - before;
+  ok(sink > 0 && spent >= 5 && spent < 5000, `compute: the real clock is the process's own CPU time (${spent.toFixed(0)} ms for a busy loop)`);
+  eq(COMPUTE_NAME_CPU_MS, 1000, "compute: a deep name may spend 1 s of CPU");
+
+  const runner = (extra = {}) => createStageRunner({ clock: () => 0, calls: () => 0, ...extra });
+  const ctxFor = (stages, over = {}) => ({ stages, cardTickers: ["A", "B", "C", "X"], byTicker: new Map([["A", 1], ["B", 1], ["C", 1]]), deadline: Date.now() + 60000, ...over });
+  const prime = async (r) => {
+    for (const x of STAGES) {
+      if (x.id === "compute") return;
+      if (x.isolation === ISOLATION.fatal) r.step(x.id); else await r.run(x.id, async () => {}, () => {});
+    }
+  };
+  {
+    used = 0;
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r);
+    ctx.computeWith = { jobs: [burn({ A: 1200, B: 50 })], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same(rec, { id: "compute", status: "ok", ms: 0, calls: 0, keys: 0, cpu: 1250, names: 3, jobs: 1, over: 1, failed: 0 },
+      "compute: the stage record carries the CPU it measured, the names it ran (the name without enrichment is not offered), and the count over budget");
+    eq(ctx.computed.names, 3, "compute: the run leaves its result on the context for a later stage");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r);
+    ctx.computeWith = { jobs: [{ id: "boom", run: async () => { throw new Error("whole stage"); } }], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.status, rec.failed, rec.names], ["ok", 3, 3], "compute: per-name failures leave the stage ok and counted");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r, { cardTickers: null });
+    ctx.computeWith = { jobs: [], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.status, ctx.computed], ["failed", null], "compute: a stage that breaks is isolated: recorded failed, the run goes on, and nothing is left on the context");
+    ok(/null|Cannot read|not iterable/.test(rec.why), "compute: with its reason");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r, { deadline: Date.now() - 1 });
+    ctx.computeWith = { jobs: [burn({})], cpu };
+    await runCompute(ctx);
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.names, rec.stopped], [0, "deadline"], "compute: a run already past its deadline spends no name and says so");
+  }
+
+  const plain = runner();
+  plain.step("session");
+  plain.step("universe");
+  plain.finish();
+  ok(plain.records().every((y) => !("cpu" in y)), "stages: a runner given no CPU clock records none, so the records keep their old shape");
+
+  let c = 10;
+  const metered = runner({ cpu: () => c });
+  metered.step("session");
+  c = 17.4;
+  metered.step("universe");
+  c = 20;
+  metered.finish();
+  const mrec = metered.records();
+  same([mrec[0].cpu, mrec[1].cpu], [7, 3], "stages: a metered runner records the CPU milliseconds each stage spent, rounded");
+  ok(mrec.filter((y) => y.status === "skipped").every((y) => y.cpu === 0), "and gives a stage it never ran 0");
+
+  const probe = runner({ cpu });
+  probe.step("session");
+  let threw = null;
+  try { probe.detail({ id: "x" }); } catch (error) { threw = error.message; }
+  ok(/is a record field/.test(threw), "stages: a detail may not overwrite a record field");
+  probe.detail({ a: 1, b: "two", c: NaN });
+  probe.detail({ d: 1, e: 1, f: 1, g: 1, h: 1 });
+  probe.step("universe");
+  const prec = probe.records()[0];
+  eq(Object.keys(prec).filter((k) => /^[a-h]$/.test(k)).length, DETAIL_KEYS, "stages: a record keeps at most six detail keys");
+  eq(prec.c, "NaN", "stages: and a number that is not finite is written as text, not as null");
+  probe.finish();
+  threw = null;
+  try { probe.detail({ a: 1 }); } catch (error) { threw = error.message; }
+  ok(/outside a stage/.test(threw), "stages: a detail with no stage open is refused");
 }
 
 {

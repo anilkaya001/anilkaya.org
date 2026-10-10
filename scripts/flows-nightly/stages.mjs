@@ -39,7 +39,8 @@ export const STAGES = Object.freeze([
   stage("dossiers", ISOLATION.fatal, ["vol-flow"], ["card:*"]),
   stage("focus", ISOLATION.isolated, ["dossiers"], ["focus"]),
   stage("card-x", ISOLATION.fatal, ["dossiers"], ["card-x:*"]),
-  stage("roster", ISOLATION.isolated, ["card-x"], ["roster"]),
+  stage("compute", ISOLATION.isolated, ["card-x"]),
+  stage("roster", ISOLATION.isolated, ["compute"], ["roster"]),
   stage("archive-check", ISOLATION.fatal, ["roster"]),
   stage("neuron-ledger", ISOLATION.isolated, ["roster"]),
   stage("brief", ISOLATION.isolated, ["neuron-ledger"], ["brief"]),
@@ -56,19 +57,27 @@ const clip = (text, cap) => {
   return s.length > cap ? s.slice(0, cap - 1) + "…" : s;
 };
 
-export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0 } = {}) {
+export const DETAIL_KEYS = 6;
+
+const RECORD_KEYS = Object.freeze(["id", "status", "ms", "calls", "keys", "cpu", "why", "undeclared"]);
+
+export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0, cpu = null } = {}) {
   const byId = new Map(table.map((s) => [s.id, s]));
   const done = new Map();
   const outside = [];
   let open = null;
 
-  const begin = (spec) => ({ spec, at: clock(), calls: calls(), keys: 0, undeclared: [] });
+  const begin = (spec) => ({
+    spec, at: clock(), calls: calls(), cpu: cpu ? cpu() : 0, keys: 0, undeclared: [], detail: {},
+  });
 
   const close = (frame, status, why) => {
     const record = {
       id: frame.spec.id, status, ms: Math.max(0, Math.round(clock() - frame.at)),
       calls: Math.max(0, calls() - frame.calls), keys: frame.keys,
     };
+    if (cpu) record.cpu = Math.max(0, Math.round(cpu() - frame.cpu));
+    Object.assign(record, frame.detail);
     if (why) record.why = clip(why, WHY_CAP);
     if (frame.undeclared.length) record.undeclared = frame.undeclared.slice(0, 5);
     done.set(frame.spec.id, record);
@@ -122,6 +131,7 @@ export function createStageRunner({ table = STAGES, clock = () => Date.now(), ca
       settle();
       const spec = enter(id);
       const record = { id: spec.id, status: "skipped", ms: 0, calls: 0, keys: 0 };
+      if (cpu) record.cpu = 0;
       if (why) record.why = clip(why, WHY_CAP);
       done.set(spec.id, record);
     },
@@ -135,10 +145,22 @@ export function createStageRunner({ table = STAGES, clock = () => Date.now(), ca
       if (!declares(open.spec, key)) open.undeclared.push(key);
     },
 
+    detail(fields) {
+      if (!open) throw new Error("stage detail written outside a stage");
+      for (const [key, value] of Object.entries(fields)) {
+        if (RECORD_KEYS.includes(key)) throw new Error(`stage detail ${key} is a record field`);
+        if (key in open.detail || Object.keys(open.detail).length < DETAIL_KEYS) {
+          open.detail[key] = typeof value === "number" && Number.isFinite(value) ? value : clip(value, WHY_CAP);
+        }
+      }
+    },
+
     finish() {
       settle();
       for (const spec of table) {
-        if (!done.has(spec.id)) done.set(spec.id, { id: spec.id, status: "skipped", ms: 0, calls: 0, keys: 0 });
+        if (!done.has(spec.id)) {
+          done.set(spec.id, { id: spec.id, status: "skipped", ms: 0, calls: 0, keys: 0, ...(cpu ? { cpu: 0 } : {}) });
+        }
       }
     },
 
