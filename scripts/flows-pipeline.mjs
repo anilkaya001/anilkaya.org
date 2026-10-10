@@ -1405,14 +1405,6 @@ export function variationOptions(run) {
   return { kc: run.kc, unit: run.unit, probe: run.probe, next: run.next, vannaScale: run.vannaScale };
 }
 
-const FAMILIES = {
-  F: "flow",
-  P: "positioning",
-  D: "path",
-  V: "vol",
-  O: "quality",
-};
-
 const SIGNED = ["F", "P", "D"];
 
 const DEAD_BAND = 1;
@@ -4889,13 +4881,6 @@ async function main() {
   const gatedTickers = new Set(withTilt.filter(({ row }) => gateOf(row)).map(({ row }) => row.ticker));
   console.log(`after earnings gate: ${tilted.length}`);
 
-  const composite = tilted.map(({ row, tilt }) => ({
-    row, tilt,
-
-    rough: (tilt.premiumTilt || 0) + (tilt.netTilt || 0) + (tilt.volTilt || 0) +
-           Math.tanh(tilt.surpriseTilt || 0),
-  })).sort((a, b) => b.rough - a.rough);
-
   const tiltByPick = new Map(withTilt.map(({ row, tilt }) => [row.ticker, tilt]));
   const scoredCoverage = selectCoverage(tilted.map(({ row }) => row), {
     count: UNIVERSE.enrichCount,
@@ -4985,7 +4970,6 @@ async function main() {
   const MIN_ROWS = 10;
 
   const scorable = enriched.filter((e) => !e.gate);
-  const gatedEnriched = enriched.filter((e) => e.gate);
   const liquid = scorable.filter((e) => e.features.dollarVolume >= UNIVERSE.minDollarVolume);
   const dropped = scorable.length - liquid.length;
   console.log(
