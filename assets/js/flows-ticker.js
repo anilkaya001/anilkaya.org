@@ -9,6 +9,7 @@
   const C = UI.chart;
   const DASH = UI.DASH, MINUS = UI.MINUS, SEP = " " + UI.MID + " ";
   const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
+  const NOPE_SIGN = { "sign-agrees": "agrees with", "sign-differs": "differs from" };
   const $ = (id) => document.getElementById(id);
   const statusEl = $("ftStatus");
   const gridEl = $("ftGrid");
@@ -2261,7 +2262,7 @@
       ], { min: 96 }), vw.box, vw.leg, tiles],
       info: () => ({
         title: "Flow", state: st.state === "ok" ? null : st.state, asOf: (path && path.asOf) || null, lead: leadOf(P.path) || reasonOf(panelSt(card, "path", "session flow")),
-        facts: pathFacts(card).concat([["NOPE", nope ? F.pct(nope.close, 2, true) + " (fill " + F.pct(nope.fill, 1) + ", divergence " + nope.divergence + ")" : null],
+        facts: pathFacts(card).concat([["NOPE", nope ? F.pct(nope.close, 2, true) + " (fill " + F.pct(nope.fill, 1) + (NOPE_SIGN[nope.divergence] ? ", sign " + NOPE_SIGN[nope.divergence] + " the session return" : "") + (num(nope.pct) !== null ? ", " + "percentile " + Math.round(nope.pct * 100) + " of its own history" : "") + ")" : null],
           ["Tenor", fe ? "conviction " + fx(fe.convictionDte, 1) + " days, bucket " + fe.convictionBucket + ", OTM share " + F.pct(fe.otmShare, 0) : null],
           ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },

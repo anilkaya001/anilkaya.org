@@ -318,10 +318,29 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     "and reproduced as (call delta + put delta) / stock volume: the put delta arrives negative");
   eq(n.checkAgrees, true, "the reproduction agrees to 1e-5");
   eq(n.fill, 0.665683, "NOPE fill is carried beside it");
-  eq(n.divergence, "none", "positive NOPE on a rising session is not a divergence");
+  eq(n.divergence, "sign-agrees", "positive NOPE on a rising session is the same sign as the return");
   eq(nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 341, close: 339.75 } }).section.divergence,
-    "bullish-vs-price", "positive NOPE on a falling session is a bullish divergence");
-  eq(nopeSection(FX.nope, { sessionDate: SESSION }).section.gaps.divergence, "no-price", "no candle, no divergence");
+    "sign-differs", "positive NOPE on a falling session differs in sign from the return");
+  const negFx = { ...FX.nope, data: FX.nope.data.map((r) => ({ ...r, nope: String(-Math.abs(Number(r.nope))) })) };
+  eq(nopeSection(negFx, { sessionDate: SESSION, candle: { open: 341, close: 339.75 } }).section.divergence,
+    "sign-agrees", "negative NOPE on a falling session is the same sign as the return");
+  eq(nopeSection(negFx, { sessionDate: SESSION, candle: { open: 338, close: 339.75 } }).section.divergence,
+    "sign-differs", "negative NOPE on a rising session differs in sign from the return");
+  eq(nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 339.75, close: 339.75 } }).section.divergence,
+    "none", "a flat session has no sign to compare");
+  {
+    const priorN = weekdaysEndingAt("2026-09-21", 25).map((d, i) => ({ d, v: (i % 5) / 10 }));
+    const sections = [];
+    for (const body of [FX.nope, negFx]) {
+      for (const candle of [null, { open: 338, close: 339.75 }, { open: 341, close: 339.75 }, { open: 339.75, close: 339.75 }]) {
+        sections.push(nopeSection(body, { sessionDate: SESSION, candle, prior: priorN }).section);
+      }
+    }
+    ok(sections.every((x) => !/bullish|bearish/i.test(JSON.stringify(x))), "no NOPE section says bullish or bearish");
+    const agreed = nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 338, close: 339.75 }, prior: priorN }).section;
+    ok(agreed.pct !== null && agreed.pct > 0 && agreed.pct <= 1, "the label travels with the closing NOPE's own percentile");
+  }
+  eq(nopeSection(FX.nope, { sessionDate: SESSION }).section.gaps.divergence, "no-price", "no candle, no sign comparison");
   const pre = { ...probe, timestamp: "2026-09-22T13:00:00Z", nope: "9" };
   const post = { ...probe, timestamp: "2026-09-22T20:30:00Z", nope: "9" };
   const early = { ...probe, timestamp: "2026-09-22T13:31:00Z", nope: "-0.2" };
