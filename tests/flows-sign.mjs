@@ -325,7 +325,7 @@ ok(files.length >= 10,
 
 {
   const UNIT_NAMES = ["pct", "usd", "usdS", "signed", "isNum"];
-  const MIGRATED = ["flows-market.js", "flows-overview.js"];
+  const MIGRATED = ["flows-market.js", "flows-overview.js", "flows-strategy.js"];
   const SANCTIONED = /^(?:F\.unit\.of\(|UI\.isNum\b)/;
   const definitions = (src) => {
     const clean = stripComments(src);
@@ -410,6 +410,8 @@ ok(files.length >= 10,
   eq(F.unit("signed", -1.5, { dp: 1 }), MINUS + "1.5", "and a negative one carries the minus glyph");
   const map = ["1", "2"].map(usd);
   eq(map.join(), "$1,$2", "a short money formatter handed to Array.map ignores the index it is given");
+  eq(F.unit.of("money")(1234.5, true), "+$1,235", "a boolean second argument is the sign request, as the Strategy page has always passed it to its dollar formatter");
+  eq(F.unit.of("money")(12.345), "$12.35", "and dollars under a thousand keep their cents");
   eq(F.unit.of("pct", { dp: 2 })(0.5, 0), "50%", "a call-level decimal count overrides the registered one");
   eq(F.unit.of("pct", { dp: 2 })(0.5), "50.00%", "and the registered one stands without it");
 }

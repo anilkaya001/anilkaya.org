@@ -286,6 +286,7 @@
   F.unit.of = (kind, base) => (v, dp, signed) => {
     const o = { ...base };
     if (typeof dp === "number" && o.dp !== "short") o.dp = dp;
+    if (typeof dp === "boolean") o.signed = dp;
     if (typeof signed === "boolean") o.signed = signed;
     return F.unit(kind, v, o);
   };
