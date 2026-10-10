@@ -136,8 +136,17 @@ try {
     const page = await mountBoard(browser, { html: PAGES.sidePage({ username: "t", side: "long" }), url: "/flows/long/?view=map", board, errors });
     await page.waitForSelector("#bdMap svg");
     eq(await menuItems(page), ["CSV", "SVG", "PNG"], "in the map view the menu also offers the chart as SVG and PNG");
+    await page.evaluate(() => {
+      const svgEl = document.querySelector("#bdMap svg");
+      svgEl.classList.add("bd-map-svg", "has-on");
+      const tiles = [...svgEl.querySelectorAll(".tile")];
+      tiles.forEach((t, i) => t.classList.toggle("is-on", i === 0));
+    });
     const svg = await download(page, "SVG");
     eq(svg.name, "flows-long-map.svg", "the chart is named for the board");
+    ok(/letter-spacing:/.test(svg.bytes.toString("utf8")), "letter-spacing is carried onto the file's text");
+    const tileTags = svg.bytes.toString("utf8").match(/<g class="tile[^>]*>/g) || [];
+    ok(tileTags.length > 1 && tileTags.every((t) => /[;"]opacity:1;/.test(t)), "and a tile dimmed by the focused state on the page is exported at full strength");
     const text = svg.bytes.toString("utf8");
     ok(text.startsWith("<svg") && text.includes('xmlns="http://www.w3.org/2000/svg"'), "the SVG is a standalone document");
     ok(!/var\(--/.test(text), "no colour is left as a custom property the file could not resolve");
@@ -174,11 +183,13 @@ try {
     eq(items, ["CSV", "SVG", "PNG"], "the desk offers its lines and its frontier chart");
     const csv = (await download(page, "CSV")).bytes.toString("utf8");
     const grid = parseCsv(csv.slice(1));
-    eq(grid[0], ["Ticker", "Structure", "Expiry", "Days to expiry", "Strike (USD)", "Annualised yield (fraction)", "Collateral (USD)",
+    eq(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Annualised yield (fraction)", "Collateral (USD)",
       "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value, real world (USD)"], "the desk's lines export our own model outputs with their units");
     ok(grid.length >= 1 + 9 + 2, `every priced line is a row (${grid.length - 3})`);
-    ok(grid.slice(1, -2).every((r) => r[0] === "NVDA" && /^(covered call|cash-secured put)$/.test(r[1]) && Number.isFinite(Number(r[4]))), "each row is a named structure at a numeric strike");
+    ok(grid.slice(1, -2).every((r) => r[0] === "NVDA" && /^(covered call|cash-secured put)$/.test(r[1]) && Number.isFinite(Number(r[5]))), "each row is a named structure at a numeric strike");
     ok(!grid[0].some((c) => /premium|bid|ask/i.test(c)), "and the vendor's quoted premium is not among them");
+    ok(grid.slice(1, -2).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[3])), "each line names the session of the chain it was priced from");
+    ok(/as of \d{4}-\d{2}-\d{2}/.test(grid[grid.length - 2][0]), `and the footer carries that session as its as-of day (${grid[grid.length - 2][0]})`);
     await page.close();
   }
 } finally {

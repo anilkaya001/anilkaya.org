@@ -4,7 +4,7 @@
   if (!UI || UI.exportMenu) return;
   const { h } = UI;
   const PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "opacity", "fill-opacity", "stroke-opacity", "stop-color",
-    "font-family", "font-size", "font-weight"];
+    "font-family", "font-size", "font-weight", "letter-spacing"];
 
   function cell(v) {
     if (v == null) return "";
@@ -40,9 +40,10 @@
   function exportChart(node, name, png) {
     const box = node.getBoundingClientRect(), w = Math.round(box.width) || 1, ht = Math.round(box.height) || 1;
     const copy = node.cloneNode(true), bg = getComputedStyle(document.body).backgroundColor;
+    const neutral = node.classList.contains("has-on");
     const walk = (a, b) => {
       const cs = getComputedStyle(a);
-      b.setAttribute("style", PROPS.map((p) => p + ":" + cs.getPropertyValue(p)).join(";"));
+      b.setAttribute("style", PROPS.map((p) => p + ":" + (neutral && p === "opacity" && a.classList.contains("tile") ? "1" : cs.getPropertyValue(p))).join(";"));
       for (let i = 0; i < a.children.length; i++) walk(a.children[i], b.children[i]);
     };
     walk(node, copy);
