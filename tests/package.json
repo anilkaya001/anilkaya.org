@@ -65,6 +65,7 @@
     "test:flows-political-render": "node flows-political-render.mjs",
     "test:flows-watch-render": "node flows-watch-render.mjs",
     "test:flows-board-render": "node flows-board-render.mjs",
+    "test:flows-net-render": "node flows-net-render.mjs",
     "test:flows-weight": "node flows-weight.mjs",
     "test:flows-garch": "node flows-garch.mjs",
     "test:flows-quant": "node flows-quant.mjs",
