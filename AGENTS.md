@@ -1150,7 +1150,19 @@ only when `--needs-browser` answers `true`), and `test`, which needs both,
 runs `if: always()`, and is green only when the fast job and every shard
 succeeded. `test` is the job a ruleset on `main` should require (A-15); as
 of 2026-10-05 `main` has no branch protection and no ruleset, so nothing
-requires it yet and Workers Builds still deploys `main` on merge. **Adding a suite, or refreshing
+requires it yet and Workers Builds still deploys `main` on merge.
+
+On a push to `main` a fourth job, `reuse`, runs first (`scripts/ci-reuse.mjs`, read-only
+token). The pull-request run's `test` job writes a `tested-tree` commit status on the PR
+head, whose description is the git tree of the exact commit `fast` checked out and whose link
+is the run. The push run takes the merged PR from the pushed commit, looks for a successful
+`tested-tree` status by `github-actions[bot]` naming the pushed tree, and then reads the run
+behind it through the Actions API: it must be completed and successful, event
+`pull_request`, workflow `.github/workflows/regression.yml`, on that PR head, in this
+repository. Only then are `fast` and the shards skipped (`test` requires them skipped),
+about 32 runner-minutes saved and push-to-green about two minutes. Any doubt, an API error
+included, runs the full gate; the weekly schedule and manual dispatch never reuse. `statuses:
+write` belongs to the `test` job alone and `pull-requests: read` to `reuse` alone. **Adding a suite, or refreshing
 a `medianS`, means changing `tests/suites.json` AND republishing
 `PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
 packing (unchanged when no suite moves), then running

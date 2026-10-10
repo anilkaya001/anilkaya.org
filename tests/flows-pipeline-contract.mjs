@@ -3604,12 +3604,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     [["10"], ["25"], ["5"]],
     "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 25 (its slowest " +
     "suite's own run.mjs timeout plus setup, which run-contract holds), and the aggregate test 5"); checks++;
-  ok(/^ {4}needs: \[fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
-    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs fast and every shard and runs if: always(), so a failed or " +
+  ok(/^ {4}needs: \[reuse, fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
+    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs the reuse check, fast and every shard and runs if: always(), so a failed or " +
     "cancelled shard turns it red instead of skipping it (a skipped required check would pass)");
   ok(/FAST: \$\{\{ needs\.fast\.result \}\}/.test(regTest) && /SHARDS: \$\{\{ needs\.shard\.result \}\}/.test(regTest) &&
-     /test "\$FAST" = success && test "\$SHARDS" = success/.test(regTest) && !/uses:/.test(regTest),
-    "and it is green only when the fast job and the shard matrix both report success; it checks out nothing");
+     /REUSED: \$\{\{ needs\.reuse\.outputs\.reused \}\}/.test(regTest) &&
+     /else\n\s+test "\$FAST" = success && test "\$SHARDS" = success\n\s+fi/.test(regTest) && !/\buses:/.test(regTest),
+    "and it is green only when the fast job and the shard matrix both report success, or when a verified reuse skipped both; it checks out nothing");
   ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m.test(regShard),
     "the shard matrix is 1 to 6 with fail-fast off, so one red shard never cancels the others' reports");
   ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 --needs-browser\)"/.test(regShard) &&
@@ -3630,7 +3631,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
-    const uses = [...text.matchAll(/uses:\s*(\S+)/g)].map((m) => m[1]);
+    const uses = [...text.matchAll(/\buses:\s*(\S+)/g)].map((m) => m[1]);
     ok(uses.length > 0 && uses.every((u) => /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/.test(u)) &&
        uses.every((u) => ["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
          "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"].includes(u)),
@@ -3654,9 +3655,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     images.push(...jobs.map((j) => `${file}:${j}`));
   }
   const pinned = ["flows-live.yml:live", "flows-pipeline.yml:build", "flows-pipeline.yml:keepalive",
-    "flows-probe.yml:probe", "flows-ws-probe.yml:probe", "regression.yml:test"];
+    "flows-probe.yml:probe", "flows-ws-probe.yml:probe", "regression.yml:test", "regression.yml:reuse"];
   ok(pinned.every((j) => images.includes(j)),
-    `the image pin was read on the six jobs that ran on ubuntu-latest (${pinned.join(", ")}), so a renamed job or a ` +
+    `the image pin was read on the six jobs that ran on ubuntu-latest and the reuse job beside them (${pinned.join(", ")}), so a renamed job or a ` +
     `workflow the loop missed cannot pass it vacuously; every job read: ${images.join(", ")}`);
   ok(/after the close/.test(PIPELINE_CADENCE) && /21:30 UTC/.test(PIPELINE_CADENCE),
      `the cadence the payloads print is the schedule that fires (${PIPELINE_CADENCE})`);
@@ -4744,6 +4745,133 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        dryAnswer.keys["hist:ZZHLD"].present === true && dryAnswer.keys["card:NOPE"].present === false && dryAnswer.bytes > 0,
        "the dry run's fake answers in the Worker's shape, so the dry run exercises the same parser the nightly does");
   }
+}
+
+{
+  const regression = readFileSync(new URL("../.github/workflows/regression.yml", import.meta.url), "utf8");
+  const job = (id) => (new RegExp(`\\n {2}${id}:\\n((?: {4}.*\\n|\\s*\\n)+)`).exec(regression) || [])[1] || "";
+  const [reuse, fast, shard, gate] = ["reuse", "fast", "shard", "test"].map(job);
+  const reuseMod = await import("../scripts/ci-reuse.mjs");
+  const { decide, mergedPull, runProves, runIdOf, TESTED_CONTEXT, WORKFLOW_PATH, STATUS_AUTHOR } = reuseMod;
+
+  ok(/^ {4}if: github\.event_name == 'push'$/m.test(reuse) && /run: node scripts\/ci-reuse\.mjs\n/.test(reuse) &&
+     /persist-credentials: false/.test(reuse) && /GH_TOKEN: \$\{\{ github\.token \}\}/.test(reuse),
+  "REUSE RUNS ON A PUSH ONLY: the weekly schedule, a manual dispatch and every pull-request run take the full gate, and the script reads the API with the job's own token");
+  ok(/pull-requests: read/.test(reuse) && /statuses: read/.test(reuse) && /actions: read/.test(reuse) && !/write/.test(reuse),
+    "the reuse job can read pull requests, statuses and runs and write nothing");
+  ok(/^ {4}permissions:\n {6}statuses: write\n/m.test(gate) && !/statuses: write/.test(reuse + fast + shard) && !/pull-requests:/.test(fast + shard + gate),
+    "statuses: write is held by the test job alone and pull-requests: read by the reuse job alone");
+  const gateAfter = "if: ${{ !cancelled() && needs.reuse.outputs.reused != 'true' }}";
+  ok(fast.includes(`needs: [reuse]\n    ${gateAfter}`) && shard.includes(`needs: [reuse]\n    ${gateAfter}`),
+    "fast and every shard run unless the reuse check said true, and still run when it was skipped, failed or crashed (not cancelled), so an API outage costs time and never coverage");
+  ok(/test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/.test(fast) && /echo "tree=\$\(git rev-parse 'HEAD\^\{tree\}'\)" >> "\$GITHUB_OUTPUT"/.test(fast) && /tree: \$\{\{ steps\.tree\.outputs\.tree \}\}/.test(fast),
+    "the fast job records the tree of the very commit it checked out, after asserting the checkout is the workflow's sha");
+  ok(/if: github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/.test(gate) &&
+     /context=tested-tree/.test(gate) && /description="\$TREE"/.test(gate) && /target_url="\$RUN_URL"/.test(gate) && /test -n "\$TREE"/.test(gate) &&
+     gate.indexOf("Require the fast job") < gate.indexOf("Record the tested tree"),
+  "a pull-request run of this repository records the tree on its head only after the gate step passed, with a link back to the run; a fork, whose token cannot write, records nothing");
+  ok(TESTED_CONTEXT === "tested-tree" && WORKFLOW_PATH === ".github/workflows/regression.yml" && STATUS_AUTHOR === "github-actions[bot]",
+    "the script and the workflow agree on the context, the workflow path and the status author");
+
+  const repo = "o/r", sha = "a".repeat(40), head = "b".repeat(40), tree = "c".repeat(40), other = "d".repeat(40);
+  const pr = (over = {}) => ({ number: 7, merged_at: "2026-10-10T10:00:00Z", merge_commit_sha: sha, base: { ref: "main", repo: { full_name: repo } }, head: { sha: head, repo: { full_name: repo } }, ...over });
+  const status = (over = {}) => ({ context: "tested-tree", state: "success", description: tree, creator: { login: "github-actions[bot]" }, target_url: `https://github.com/${repo}/actions/runs/555`, ...over });
+  const run = (over = {}) => ({ id: 555, status: "completed", conclusion: "success", event: "pull_request", path: ".github/workflows/regression.yml", head_sha: head, repository: { full_name: repo }, head_repository: { full_name: repo }, html_url: `https://github.com/${repo}/actions/runs/555`, ...over });
+  const world = ({ pulls = [pr()], statuses = [status()], runs = { 555: run() } } = {}) => {
+    const calls = [];
+    const api = async (path) => {
+      calls.push(path);
+      if (path.startsWith(`/repos/${repo}/commits/${sha}/pulls`)) return typeof pulls === "function" ? pulls(calls) : pulls;
+      if (path.startsWith(`/repos/${repo}/commits/${head}/statuses`)) return statuses;
+      const m = /\/actions\/runs\/(\d+)$/.exec(path);
+      if (m && m[1] in runs) return runs[m[1]];
+      throw new Error(`${path} answered 404`);
+    };
+    return { api, calls };
+  };
+  const go = async (w, over = {}) => decide({ repo, sha, tree, api: w.api, sleep: async () => {}, ...over });
+
+  const good = await go(world());
+  ok(good.reuse === true && good.pull === 7 && good.head === head && good.run === 555 && /actions\/runs\/555$/.test(good.url),
+    "A GREEN PULL-REQUEST RUN THAT TESTED THE IDENTICAL TREE IS REUSED: the merged pull request is found from the pushed commit, its tested-tree status names the tree, and the run behind the status is a successful pull_request run of this workflow on that head");
+  const counted = world();
+  await go(counted);
+  ok(counted.calls.length === 3, `and it costs three API reads (${counted.calls.join(" | ")})`);
+
+  const refused = async (label, w2, over) => {
+    const v = await go(w2, over);
+    ok(v.reuse === false && typeof v.reason === "string" && v.reason.length > 0, `NOT REUSED: ${label} (${v.reason})`);
+  };
+  await refused("the tree differs, because main moved since the pull-request run", world({ statuses: [status({ description: other })] }));
+  await refused("a status whose tree is the right one but whose author is not the Actions bot", world({ statuses: [status({ creator: { login: "someone" } })] }));
+  await refused("a pending or failed status", world({ statuses: [status({ state: "pending" }), status({ state: "failure" })] }));
+  await refused("another context with the right text", world({ statuses: [status({ context: "ci/other" })] }));
+  await refused("the pushed tree is not a full object name", world(), { tree: "abc" });
+  await refused("a push with no pull request", world({ pulls: [] }));
+  await refused("a pull request that is not merged", world({ pulls: [pr({ merged_at: null })] }));
+  await refused("a pull request merged into another commit", world({ pulls: [pr({ merge_commit_sha: other })] }));
+  await refused("a pull request into another branch", world({ pulls: [pr({ base: { ref: "release", repo: { full_name: repo } } })] }));
+  await refused("a pull request from a fork", world({ pulls: [pr({ head: { sha: head, repo: { full_name: "x/r" } } })] }));
+  await refused("two merged pull requests for the one commit", world({ pulls: [pr(), pr({ number: 8 })] }));
+  await refused("the run is still in progress", world({ runs: { 555: run({ status: "in_progress", conclusion: null }) } }));
+  await refused("the run failed", world({ runs: { 555: run({ conclusion: "failure" }) } }));
+  await refused("the run was cancelled", world({ runs: { 555: run({ conclusion: "cancelled" }) } }));
+  await refused("the run was a push, not a pull request", world({ runs: { 555: run({ event: "push" }) } }));
+  await refused("the run belongs to another workflow", world({ runs: { 555: run({ path: ".github/workflows/flows-pipeline.yml" }) } }));
+  await refused("the run tested another head", world({ runs: { 555: run({ head_sha: other }) } }));
+  await refused("the run belongs to another repository", world({ runs: { 555: run({ repository: { full_name: "x/r" } }) } }));
+  await refused("the run came from a fork", world({ runs: { 555: run({ head_repository: { full_name: "x/r" } }) } }));
+  await refused("the run answers another id", world({ runs: { 555: run({ id: 556 }) } }));
+  await refused("the status points at a run of another repository", world({ statuses: [status({ target_url: "https://github.com/x/r/actions/runs/555" })] }));
+  await refused("the status points at no run", world({ statuses: [status({ target_url: "https://example.org/" })] }));
+  await refused("the run reads as null", world({ runs: { 555: null } }));
+
+  ok(runProves(run(), { repo, head, id: 555 }) && runProves(run({ path: ".github/workflows/regression.yml@refs/pull/7/merge" }), { repo, head, id: 555 }),
+    "a run whose workflow path carries a ref suffix is still this workflow");
+  ok(!runProves(null, { repo, head, id: 555 }) && !runProves({}, { repo, head, id: 555 }), "and no run, or an empty one, proves nothing");
+  ok(runIdOf(`https://github.example/${repo}/actions/runs/12/job/3`, repo) === 12 && runIdOf("https://github.com/o/r/actions/runs/x", repo) === null && runIdOf(undefined, repo) === null,
+    "the run id is read from the status link of this repository and from nothing else");
+  ok(mergedPull([pr()], { repo, sha }).number === 7 && mergedPull("garbage", { repo, sha }) === null && mergedPull([null, 3], { repo, sha }) === null,
+    "malformed pull-request lists select nothing");
+
+  const second = await go(world({ statuses: [status({ target_url: `https://github.com/${repo}/actions/runs/600` }), status()], runs: { 600: run({ id: 600, conclusion: "failure" }), 555: run() } }));
+  ok(second.reuse === true && second.run === 555, "when the newest matching status names a red run, an older matching status with a green run is still found");
+
+  let tries = 0;
+  const slept = [];
+  const late = await go(world({ pulls: () => (++tries < 3 ? [] : [pr()]) }), { sleep: async (ms) => { slept.push(ms); } });
+  ok(late.reuse === true && tries === 3 && slept.length === 2, "a pull-request list that GitHub fills a few seconds after the push is waited for, twice at most");
+  let never = 0;
+  const lost = await go(world({ pulls: () => { never++; return []; } }));
+  ok(lost.reuse === false && never === 3, "and then given up on, three reads in all");
+  let thrown = null;
+  try { await go({ api: async () => { throw new Error("boom"); } }); } catch (error) { thrown = error; }
+  ok(thrown !== null, "decide lets an API failure propagate, and main turns it into a full run");
+
+  const { main } = reuseMod;
+  const { mkdtempSync, readFileSync: readText, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "ci-reuse-"));
+  const out = join(dir, "out"), summary = join(dir, "summary");
+  writeFileSync(out, ""); writeFileSync(summary, "");
+  const quiet = console.log;
+  console.log = () => {};
+  let verdict;
+  try {
+    verdict = await main({ GITHUB_EVENT_NAME: "pull_request", GITHUB_REF: "refs/pull/1/merge", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary });
+  } finally {
+    console.log = quiet;
+  }
+  ok(verdict.reuse === false && readText(out, "utf8") === "reused=false\nsource=\n" && /Running the full gate: only a push to main/.test(readText(summary, "utf8")),
+    "main writes reused=false for anything but a push to main, and says why in the step summary");
+  console.log = () => {};
+  try {
+    verdict = await main({ GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/main", GITHUB_SHA: "0".repeat(40), GITHUB_REPOSITORY: repo, GH_TOKEN: "x", GITHUB_API_URL: "http://127.0.0.1:1", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary });
+  } finally {
+    console.log = quiet;
+  }
+  ok(verdict.reuse === false && /reused=false/.test(readText(out, "utf8")), "and a checkout that is not the pushed commit, or an unreachable API, is a full run, never a failure");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);
