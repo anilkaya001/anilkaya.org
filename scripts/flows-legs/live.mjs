@@ -1,6 +1,6 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
-  indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
+  indexRows, shapeMovers, mergeLiveAlerts, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
@@ -110,7 +110,6 @@ export async function runLive({
     return { skipped: window.why };
   }
   const session = window.phase.session || window.phase.day;
-  const open = easternInstant(session, PHASE_MINUTES.open);
 
   const beat = await readStored("live:heartbeat");
   const lastBeat = beat && beat.payload && beat.payload.run ? timeMs(beat.payload.run.finishedAt) : NaN;
@@ -127,10 +126,8 @@ export async function runLive({
     boards: Object.fromEntries(Object.entries(boards).map(([side, read]) => [side, read && read.payload])),
     focus: focusRead && focusRead.payload,
   }), session, clock);
-  const tick = Math.max(0, Math.floor((startedAt - open) / (15 * 60000)));
-  const rotation = gexRotation({ ranked: plan.ranked, deep: plan.deep, tick });
   log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
-    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
+    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}`);
 
   const ledger = { calls: 0, failed: 0 };
   const read = async (path, params = {}) => {
@@ -182,17 +179,7 @@ export async function runLive({
     if (!olderThan) break;
   }
 
-  const gexRaws = {};
-  await Promise.all(rotation.all.map(async (t) => {
-    gexRaws[t] = await read(`/api/stock/${encodeURIComponent(t)}/spot-exposures`);
-  }));
-
-  const [totals, netImpact, darkpool, newsRaw] = await Promise.all([
-    read("/api/market/total-options-volume", { limit: 2 }),
-    read("/api/market/top-net-impact", { limit: 20 }),
-    read("/api/darkpool/recent", { date: session, order_by: "premium", limit: 200 }),
-    read("/api/news/headlines", { limit: 100 }),
-  ]);
+  const newsRaw = await read("/api/news/headlines", { limit: 100 });
   const at = now();
 
   const out = {};
@@ -274,18 +261,6 @@ export async function runLive({
   if (merged.write) await put("live:alerts", merged.write);
   else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
 
-  const gexReads = {};
-  for (const [t, raw] of Object.entries(gexRaws)) gexReads[t] = shapeGexSeries(raw, { session, now: at });
-  const filled = Object.values(gexReads).filter((g) => g.status === "ok" && g.flowFilled).length;
-  const okGex = Object.values(gexReads).filter((g) => g.status === "ok").length;
-  if (okGex && !filled) note(`spot-exposures: ${okGex} name(s) shaped and none carried non-zero _vol/_dir legs`);
-  const prevGex = await readStored("live:gex");
-  await put("live:gex", mergeGex(prevGex && prevGex.payload, gexReads, { at, session, writer, rotation }),
-    { answered: anyAnswered(Object.values(gexReads)) });
-
-  const tape = shapeLiveTape({ totals, netImpact, darkpool }, { at, session, writer });
-  await put("live:tape", tape, { answered: anyAnswered([tape.totals, tape.netImpact, tape.darkpool]) });
-
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)
       ? { status: "unavailable", reason: "vendor-failed", rows: [] }
@@ -302,7 +277,7 @@ export async function runLive({
     origin: origin || "manual", startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(), durationMs: finishedAt - startedAt,
     calls: ledger.calls, failedCalls: ledger.failed, keys: bytes, errors, notes: notes.slice(0, 20),
-    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
+    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source },
     alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
     quoteLag: strips.lag || null,
     quoteAhead: strips.ahead || null,

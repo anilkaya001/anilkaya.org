@@ -53,9 +53,11 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
   deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
   eq(RT.RT_ROW_FIELDS.px.length, 25, "twenty-five columns");
   deep(RT.RT_ROW_FIELDS.gx, ["t", "at", "px", "gOi", "gVol", "gDir", "flow", "lagS"], "gx rows");
-  for (const k of TOPICS) {
+  for (const k of TOPICS.filter((t) => t !== "gx")) {
     eq(LIVE_KEYS[RT.RT_TOPICS[k].key] !== undefined, true, `${k} names a live key that exists (${RT.RT_TOPICS[k].key}), so every row has a stored twin`);
   }
+  eq(RT.RT_TOPICS.gx.key, null, "gx names no stored twin: live:gex is retired, so intraday gamma comes from the rail alone");
+  ok(!Object.hasOwn(LIVE_KEYS, "live:gex") && !Object.hasOwn(LIVE_KEYS, "live:tape"), "and neither live:gex nor live:tape is registered");
 
   const f = RT.frame("px", { ep: 5, sq: 3, at: 7, fresh: { state: "live" }, rows: [1] });
   deep(Object.keys(f), ["v", "k", "ep", "sq", "at", "fresh", "meta", "rows"], "a data frame carries its keys in the contract order");
@@ -299,7 +301,7 @@ const SESSION_NOW = at(10, 0);
   eq(gOut.rows[0][6], series.flowFilled ? 1 : 0, "gx: flow flag");
   const merged = mergeGex(null, { NVDA: series }, { at: SESSION_NOW, session: DAY, writer: "flows-live", rotation: gexRotation({ ranked: ["NVDA"], deep: [], tick: 0 }) });
   const stored = merged.names.NVDA.last;
-  deep([stored.px, stored.gOi, stored.gVol, stored.gDir], gOut.rows[0].slice(2, 6), "and it is the same last tuple mergeGex stores in live:gex");
+  deep([stored.px, stored.gOi, stored.gVol, stored.gDir], gOut.rows[0].slice(2, 6), "and it is the same last tuple mergeGex keeps for a name");
   eq(merged.names.NVDA.lagS, gOut.rows[0][7], "with the same lag");
   eq(RT.applyGex(g, "NVDA", spot.body, { at: SESSION_NOW + 1000, session: DAY }).rows.length, 0, "gx: the same bar again is not a change");
   const quiet = RT.applyGex(g, "NVDA", { data: [] }, { at: SESSION_NOW, session: DAY });

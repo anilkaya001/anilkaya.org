@@ -2626,6 +2626,19 @@ Out-of-band steps before the first deploy of this layer:
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
 focus read and no dispatch; pages fall back to the nightly rows.
 
+Tier 2 no longer writes `live:gex` or `live:tape`: no page read either, and
+together they were 17 of the 37 to 41 vendor calls of a pass (fourteen
+`spot-exposures` reads and the `total-options-volume`, `top-net-impact` and
+`darkpool/recent` reads). A pass now makes 20 to 24 calls and publishes eight
+keys. Both ids left `LIVE_KEYS`, so `/api/flows/lk?k=gex` answers 400
+`invalid_key` and the ingest door refuses a write to either. Intraday gamma
+comes from the rail's `gx` topic alone. `migrations/0021_retire_live_gex_tape.sql`
+deletes the two rows once (the live token cannot delete); until it is applied
+the Tier 1 tick's age read and `worstStale` skip any `flows_live` id that is
+not registered, so an old row can never be the ledger's worst lapse. A Tier 2
+job that was already running when the Worker was promoted logs two `invalid_key`
+400s a pass until it ends.
+
 ### 10.5j The weekly monitors
 
 - **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
@@ -2817,7 +2830,7 @@ clock, and treats an unreadable answer as no answer. It reads four rows and the
 clock: `live:market` and `live:focus` (Tier 1), `live:breadth` (Tier 2, the key
 the Worker's own watchdog reads) and `meta` (the nightly). It is deliberately
 limited to those. It does not read the other Tier 2 keys, so a pass that lands
-`live:breadth` but not `live:gex` goes unseen here (readers see that key's own
+`live:breadth` but not `live:alerts` goes unseen here (readers see that key's own
 Stale pill); it does not read `board:long`, `board:short`, `focus` or the roster
 against `meta.sessionDate`, so a `meta` that landed beside boards from an earlier
 session goes unseen here; and it does not see the roster's cards or the archive

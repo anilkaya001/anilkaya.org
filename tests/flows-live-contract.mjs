@@ -270,19 +270,6 @@ const cronMinutes = (cron) => {
   ok(pre.status === "quiet" && pre.reason === "pre-open",
     "PROBE ROW: a 06:30 ET spot-exposures minute is pre-open — quiet with its reason, not a regular-session reading");
 
-  const tape = L.shapeLiveTape({ totals: { data: [FX.totalOptionsVolume.row] }, netImpact: { data: [FX.topNetImpact.row] },
-    darkpool: { data: [FX.darkpoolRecent.row] } }, { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
-  deep([tape.totals.today.pcVol, tape.totals.today.pcPrem], [0.6597, 0.4365],
-    "PROBE ROW: put/call = 25,895,745 / 39,255,508 by volume and 15,142,883,165.20 / 34,694,997,463.09 by premium");
-  const halfRow = L.shapeLiveTape({ totals: { data: [{ ...FX.totalOptionsVolume.row, put_volume: null, put_premium: "" }] } },
-    { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" }).totals.today;
-  ok(halfRow.putVol === null && halfRow.pcVol === null && halfRow.putPrem === null && halfRow.pcPrem === null,
-    "AN ABSENT PUT SIDE is an absent put/call ratio, never 0 (null / n coerces to 0 in JavaScript)");
-  eq(tape.netImpact.rows[0].netPrem, 144891918, "top-net-impact's net_premium arrives as a JSON number and is kept");
-  eq(tape.darkpool.dropped.extended, 1,
-    "PROBE ROW: the recent dark-pool feed leads with an after-hours print (23:59:58Z), which the session window drops");
-  eq(tape.darkpool.status, "quiet", "leaving the session's window empty rather than dated by the evening tail");
-
   const news = shapeNews({ data: [FX.news.row] });
   eq(news.rows.length, 1, "PROBE ROW: the news row shapes through the nightly's own shaper");
 }
@@ -631,7 +618,7 @@ const cronMinutes = (cron) => {
   for (const t of ["SPY", "QQQ", ..."ABCDEFGHIJKL"]) reads[t] = L.shapeGexSeries(FAKE.fakeSpotExposures(t, { session, now: end }), { session, now: end });
   const gex = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] } });
   const gBytes = JSON.stringify(gex).length;
-  ok(gBytes <= L.LIVE_KEYS["live:gex"].maxBytes, `fourteen full-session spot-gamma series fit live:gex (${gBytes} bytes, shed ${gex.shed.length})`);
+  ok(gBytes <= 64 * 1024, `fourteen full-session spot-gamma series fit mergeGex's own 64 KiB default (${gBytes} bytes, shed ${gex.shed.length})`);
   const tight = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] },
     maxBytes: 40 * 1024 });
   ok(tight.shed.length >= 2 && tight.shed.slice(0, 2).join("") === "LK" &&
@@ -723,7 +710,8 @@ const cronMinutes = (cron) => {
   const sched = slice(worker, "async scheduled(event, env, ctx)", "async fetch(request, env, ctx)");
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
-  ok(puts.length >= 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  deep([...puts].sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(), "the live leg puts exactly the registry's Actions keys");
+  ok(puts.length === 8 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
   ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
@@ -1047,9 +1035,11 @@ const cronMinutes = (cron) => {
         `${key} carries the fresh envelope of the Actions writer`);
       ok(text.length <= L.LIVE_KEYS[key].maxBytes, `${key} (${text.length} bytes) is inside its cap`);
     }
+    deep(keys.sort(), ["live:alerts", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
+      "and that is eight keys: live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
-    ok(calls.length === 2 && calls.every((c) => c <= L.LIVE_BUDGET.tier2MaxCalls),
-      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the ${L.LIVE_BUDGET.tier2MaxCalls} budget`);
+    ok(calls.length === 2 && calls.every((c) => c <= 24),
+      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
     ok(/sent newer_than=2026-08-24T/.test(out), "and the second tick resumes the alert cursor the first one stored");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1060,13 +1050,9 @@ const cronMinutes = (cron) => {
       "/api/net-flow/expiry": ["date", "moneyness", "tide_type", "expiration"],
       "/api/screener/stocks": ["ticker", "limit", "offset", "date"],
       "/api/option-trades/flow-alerts": ["ticker_symbol", "newer_than", "older_than", "limit"],
-      "/api/stock/spot-exposures": ["date"], "/api/market/total-options-volume": ["limit"],
-      "/api/market/top-net-impact": ["date", "issue_types[]", "limit"],
-      "/api/darkpool/recent": ["limit", "date", "min_premium", "max_premium", "min_size", "max_size", "min_volume",
-        "max_volume", "order", "order_by"],
       "/api/news/headlines": ["sources", "search_term", "ticker", "major_only", "limit", "page"],
     };
-    const LIMIT_MAX = { "/api/darkpool/recent": 200, "/api/market/top-net-impact": 100, "/api/news/headlines": 100,
+    const LIMIT_MAX = { "/api/news/headlines": 100,
       "/api/option-trades/flow-alerts": 200, "/api/screener/stocks": 500 };
     const session = "2026-09-23";
     const at = easternInstant(session, 11 * 60 + 7);
@@ -1078,7 +1064,7 @@ const cronMinutes = (cron) => {
       readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
     const undocumented = [];
     for (const { path, params } of uw.calls) {
-      const route = path.replace(/^\/api\/(market|stock)\/[^/]+\/(sector-tide|etf-tide|spot-exposures)$/, "/api/$1/$2");
+      const route = path.replace(/^\/api\/(market|stock)\/[^/]+\/(sector-tide|etf-tide)$/, "/api/$1/$2");
       const allowed = SPEC_PARAMS[route] || [];
       for (const name of Object.keys(params)) if (!allowed.includes(name)) undocumented.push(`${route}?${name}`);
       if (LIMIT_MAX[route] && Number(params.limit) > LIMIT_MAX[route]) undocumented.push(`${route} limit ${params.limit}`);
@@ -1086,10 +1072,9 @@ const cronMinutes = (cron) => {
     deep(undocumented, [], "EVERY Tier 2 vendor call sends only query parameters the vendor's spec documents for that " +
       "route, inside the route's documented limit — an undocumented one (darkpool/recent has no newer_than) is " +
       "silently ignored and the read is not the window it claims");
-    const dp = uw.calls.find((c) => c.path === "/api/darkpool/recent");
-    ok(dp && dp.params.date === session && dp.params.order_by === "premium",
-      "the dark-pool read asks for the session's own prints, largest premium first, so the top twenty it keeps are " +
-      "the session's largest rather than the last few seconds'");
+    const retired = uw.calls.filter((c) => /spot-exposures|total-options-volume|top-net-impact|darkpool\/recent/.test(c.path));
+    deep(retired, [], "TIER 2 MAKES NO READ FOR A RETIRED KEY: no spot-exposures, total-options-volume, top-net-impact or darkpool/recent call, every call is one a reader sees");
+    ok(uw.calls.length >= 20 && uw.calls.length <= 24, `a pass spends ${uw.calls.length} vendor calls: the 20-24 the live registry's eight keys need, down from 37-41`);
   }
 
   {
@@ -1117,7 +1102,7 @@ const cronMinutes = (cron) => {
       "and the heartbeat's ledger names every key it did not publish");
     const noStrip = await runWith((p) => p === "/api/screener/stocks");
     ok(!noStrip.published["live:strips"] && !noStrip.published["live:strips:series"] && !noStrip.published["live:vol"] &&
-       !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:gex"],
+       !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:alerts"],
     "a failed strip read withholds the strip and the three keys built from it, while every key with its own " +
       "answered read is published");
 

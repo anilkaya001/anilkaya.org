@@ -938,13 +938,8 @@ assert.deepEqual(missingReport, [],
     ok(Object.hasOwn(al, f), `live:alerts carries \`${f}\` so the Worker can serve it in place of the nightly feed`);
   }
   eq(al.refreshed, "intraday", "and says it is the intraday union");
-  const gx = live("live:gex");
-  ok(Object.values(gx.names).every((n) => typeof n.readAt === "string" &&
-     (!n.t || ["px", "gOi", "gVol", "gDir"].every((f) => n[f].length === n.t.length))),
-     "every gamma name carries its own read time, and a series only when it was read this run");
-  const tp = live("live:tape");
-  ok(["totals", "netImpact", "darkpool"].every((f) => SILENCES.has(tp[f].status)),
-     "each tape feed states its own silence");
+  ok(live("live:gex") === null && live("live:tape") === null && !Object.hasOwn(LIVE_KEYS, "live:gex") && !Object.hasOwn(LIVE_KEYS, "live:tape"),
+     "the dry run emits no live:gex or live:tape and the registry no longer holds them: no page read either");
   const vl = live("live:vol");
   ok(vl.vix.status === "unavailable" && typeof vl.vix.reason === "string", "the plan-gated VIX curve is named, not blank");
   const mv = live("live:movers");

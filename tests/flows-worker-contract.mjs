@@ -1994,9 +1994,15 @@ try {
         eq(await lkText("market,board:long"), mkText,
           "an unknown key in a list is dropped, and a list that leaves one key is that key's raw body, byte for byte");
         eq((await fetch(L("/api/flows/lk?k=board:long,meta"), { headers: cookie })).status, 400, "a list with no live key is a 400");
-        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,gex,vol,tape"), { headers: cookie })).json();
-        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "gex", "vol"],
+        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,vol,movers,news"), { headers: cookie })).json();
+        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "vol", "movers"],
           "and a list is capped at eight keys, the ninth dropped");
+        const retiredList = await (await fetch(L("/api/flows/lk?k=market,gex,tape,vol"), { headers: cookie })).json();
+        deep(Object.keys(retiredList.keys), ["market", "vol"], "THE RETIRED KEYS ARE UNKNOWN: gex and tape are dropped from a list like any other name");
+        for (const retired of ["gex", "tape", "live:gex", "live:tape"]) {
+          const gone = await fetch(L("/api/flows/lk?k=" + retired), { headers: cookie });
+          deep([gone.status, (await gone.json()).error.code], [400, "invalid_key"], `lk?k=${retired} answers 400 invalid_key`);
+        }
       }
       await tick(FOCUS, "2026-09-26T10:08:00-04:00");
       eq(screens().length, 3, "a Saturday focus tick reads nothing");
@@ -2111,12 +2117,14 @@ try {
       eq(fa.headers.get("x-live-overlay"), "live:alerts", "the alerts route serves the live union for the later session");
       eq((await fa.json()).key, "live:alerts", "whole and unparsed");
 
-      const now = await fetch(L("/api/flows/now?k=market,breadth,tape&n=pulse,board:long,brief"), { headers: cookie });
+      const now = await fetch(L("/api/flows/now?k=market,breadth,vol&n=pulse,board:long,brief"), { headers: cookie });
       eq(now.status, 200, "the heartbeat answers");
       const nb = await now.json();
       ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
         "with every subscribed live key's updatedAt and read instant from columns alone");
-      eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
+      eq(nb.keys["live:vol"].state, "pending", "an unwritten key is pending");
+      const retiredNow = await (await fetch(L("/api/flows/now?k=tape,gex"), { headers: cookie })).json();
+      deep(Object.keys(retiredNow.keys), [], "and the heartbeat has no entry for the retired live:gex and live:tape");
       deep(nb.tier1, { at: new Date(et("2026-09-24T10:26:00-04:00")).toISOString(),
         okAt: new Date(et("2026-09-24T10:21:00-04:00")).toISOString(), why: "holiday" },
       "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
