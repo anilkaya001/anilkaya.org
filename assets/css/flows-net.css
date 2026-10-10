@@ -10,16 +10,12 @@
 
 .fn-stage {
   position: relative;
-  height: 460px;
+  height: 560px;
   margin: 0 calc(-1 * var(--sp-3));
   overflow: hidden;
   border-radius: var(--r-md);
-  background:
-    radial-gradient(58% 64% at 50% 48%, rgba(10, 132, 255, 0.11), transparent 72%),
-    radial-gradient(40% 50% at 18% 30%, rgba(48, 209, 88, 0.035), transparent 70%),
-    radial-gradient(40% 50% at 82% 72%, rgba(255, 69, 58, 0.035), transparent 70%),
-    linear-gradient(180deg, rgba(4, 6, 11, 0.62), rgba(4, 6, 11, 0.38));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 24px 60px rgba(0, 0, 0, 0.35);
+  background: radial-gradient(62% 70% at 50% 46%, #0b1120 0, #080d19 52%, #05070c 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   isolation: isolate;
   touch-action: pan-y pinch-zoom;
   cursor: grab;
@@ -80,28 +76,28 @@
 .fn-tip-c { color: var(--label-2); }
 .fn-tip-go { margin-top: 3px; color: var(--accent-ink); font-weight: 500; }
 
-.fn-home {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
+.fn-bar { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; margin-bottom: calc(-1 * var(--sp-2)); }
+.fn-bar-sp { flex: 1; }
+.fn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--sp-3);
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--r-sm);
   background: rgba(255, 255, 255, 0.06);
-  color: var(--label-3);
+  color: var(--label-2);
+  font: var(--t-caption);
   cursor: pointer;
   transition: color var(--dur-fade) ease, background var(--dur-fade) ease;
 }
-.fn-home:hover { color: var(--label-1); background: rgba(255, 255, 255, 0.12); }
-.fn-home:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
-.fn-home[hidden] { display: none; }
-.fn-home .ui-g { font-size: 14px; }
-@media (pointer: coarse) { .fn-home { width: 44px; height: 44px; right: 4px; bottom: 4px; } }
+.fn-btn:hover { color: var(--label-1); background: rgba(255, 255, 255, 0.12); }
+.fn-btn[aria-pressed="true"] { color: var(--accent-ink); background: rgba(255, 255, 255, 0.12); }
+.fn-btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+.fn-btn[hidden] { display: none; }
+.fn-btn .ui-g { font-size: 13px; }
+@media (pointer: coarse) { .fn-btn { min-height: 44px; min-width: 44px; justify-content: center; } }
 
 .fn-empty {
   position: absolute;
@@ -123,6 +119,14 @@
 .fn-empty span { max-width: 46ch; }
 .fn-empty[data-state="pending"] .ui-g { animation: ui-spin 6s linear infinite; }
 
+.fn-scale { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--label-2); font: var(--t-caption); font-variant-numeric: tabular-nums; }
+.fn-scale[hidden] { display: none; }
+.fn-lg-t { margin-right: 2px; color: var(--label-2); font: var(--t-caption2); letter-spacing: 0.07em; text-transform: uppercase; }
+.fn-lg-g { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.fn-lg-g + .fn-lg-g { margin-left: 14px; }
+.fn-lg-i { display: inline-flex; align-items: center; gap: 6px; }
+.fn-lg-i canvas { display: block; }
+.fn-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #6f7d99; }
 .fn-legend { gap: 6px 18px; }
 .fn-k .ui-g { font-size: 10px; }
 .fn-k.is-note { color: var(--label-3); white-space: normal; }
@@ -160,6 +164,7 @@
 @container mod (max-width: 540px) {
   .fn-card .ui-mod-h > .fn-fresh { grid-column: 2; grid-row: 1; justify-self: start; margin: 0; }
   .fn-fw { display: none; }
+  .fn-lg-g + .fn-lg-g { margin-left: 0; }
   .fn-stage { margin: 0 calc(-1 * var(--sp-2)); }
   .fn-tab { font: var(--t-caption); }
   .fn-tab th, .fn-tab td { padding: 6px 5px; }
