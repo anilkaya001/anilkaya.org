@@ -746,6 +746,30 @@ const seqOk = (ws) => {
 }
 
 {
+  const r = rig();
+  await r.hub.snap(["px"], "zzzz");
+  await r.run(3);
+  ok(!r.hub.pxNames().some((t) => t.toLowerCase() === "zzzz"), "snap focus: a lowercase name is not a ticker and is ignored");
+  await r.hub.snap(["px"], "ZQXT");
+  await r.hub.snap(["px"], "no way");
+  await r.run(3);
+  ok(r.hub.pxNames().includes("ZQXT"), "snap focus: a snapshot that names a ticker adds it to the names the screener call reads");
+  ok(r.vendor.calls.some((c) => c.path === "/api/screener/stocks" && String(c.params.ticker).split(",").includes("ZQXT")), "snap focus: and the next screener call carries it");
+  ok(!r.hub.pxNames().includes("no way"), "snap focus: a malformed name never enters the list");
+  eq(r.hub.status().roster.focus.includes("ZQXT"), true, "snap focus: status lists it among the focus names");
+  for (let i = 0; i < 4; i++) { await r.hub.snap(["px"], "ZQXT"); await r.run(10); }
+  ok(r.hub.pxNames().includes("ZQXT"), "snap focus: kept while the reader keeps asking");
+  await r.run(70);
+  eq(r.hub.pxNames().includes("ZQXT"), false, "snap focus: and gone once the last request naming it is 60 s old");
+  const calls = r.vendor.calls.length;
+  await r.run(30);
+  eq(r.vendor.calls.length, calls, "snap focus: the hub is idle again");
+  const r2 = rig();
+  for (const t of ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"]) await r2.hub.snap(["px"], t);
+  eq(Object.keys(r2.hub.snapFocus).length, RT.RT_LIMITS.focusMax, "snap focus: at most eight names are held, whoever asks");
+}
+
+{
   const sat = easternInstant("2026-10-03", 11 * 60);
   const r = rig({ start: sat });
   const { ws } = r.join();
@@ -1410,6 +1434,18 @@ const seqOk = (ws) => {
   eq(forwarded[1].url.pathname + forwarded[1].url.search, "/snap?k=px%2Cfl", "snap: forwarded with its topics");
   await call("/api/rt/snap");
   eq(forwarded[2].url.searchParams.get("k"), TOPICS.join(","), "snap: all five by default");
+  forwarded.length = 0;
+  await call("/api/rt/snap?k=px&f=nvda");
+  deep([forwarded[0].url.pathname, forwarded[0].url.searchParams.get("k"), forwarded[0].url.searchParams.get("f")], ["/snap", "px", "NVDA"], "snap: the focus ticker is validated, normalised and forwarded");
+  await call("/api/rt/snap?k=px");
+  eq(forwarded[1].url.searchParams.has("f"), false, "snap: no focus, no f");
+  deep([(await call("/api/rt/snap?f=no%20way")).code, (await call("/api/rt/snap?f=ZZ$")).status], ["invalid_ticker", 400], "snap: a bad focus ticker is 400 before the object is touched");
+  eq(forwarded.length, 2, "snap: and the object saw only the two good requests");
+  const ownerSnap = await call("/api/rt/snap");
+  deep([ownerSnap.headers.get("X-RT-Poll-Ms"), ownerSnap.headers.get("X-RT-Poll-Cap-Ms")], ["5000", "0"], "snap: the owner is told to poll every 5 s with no cap");
+  const memberSnap = await call("/api/rt/snap", { env: { ...on, FLOWS_RT_AUDIENCE: "members" }, session: member });
+  deep([memberSnap.headers.get("X-RT-Poll-Ms"), memberSnap.headers.get("X-RT-Poll-Cap-Ms")], ["15000", "600000"], "snap: a member is told 15 s and ten minutes");
+  eq(memberSnap.headers.get("Content-Type"), "application/json", "snap: the object's own headers survive");
   const st = await call("/api/rt/status");
   deep([st.status, st.body.running, st.body.worker], [200, false, { mode: "on", audience: "owner", users: ["anilkaya"], hint: "enam", binding: true }], "status: the object's view plus the Worker's switches");
   const members = { ...on, FLOWS_RT_AUDIENCE: "members" };
@@ -1550,6 +1586,9 @@ const seqOk = (ws) => {
     const snap = await pulse.fetch(new Request("https://pulse.internal/snap?k=px,fl"));
     const frames = await snap.json();
     deep([snap.status, snap.headers.get("cache-control"), snap.headers.get("x-fresh-source"), frames.map((f) => f.k)], [200, "no-store", "hub", ["px", "fl"]], "pulse: /snap answers the envelopes with X-Fresh headers");
+    await pulse.fetch(new Request("https://pulse.internal/snap?k=px&f=ZQXT"));
+    await pulse.fetch(new Request("https://pulse.internal/snap?k=px&f=bad%20name"));
+    deep(Object.keys(pulse.hub.snapFocus), ["ZQXT"], "pulse: /snap passes a valid focus ticker to the hub and drops an invalid one");
     const st = await (await pulse.fetch(new Request("https://pulse.internal/status"))).json();
     deep([st.running, st.sockets.n, st.topics.px.hasData], [true, 1, true], "pulse: /status is the hub's status");
     eq((await pulse.fetch(new Request("https://pulse.internal/nope"))).status, 404, "pulse: an unknown path is 404");

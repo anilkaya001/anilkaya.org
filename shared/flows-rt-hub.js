@@ -288,6 +288,7 @@ export class RtHub {
     this.ep = 0;
     this.lastSnapAt = -Infinity;
     this.snapAt = Object.create(null);
+    this.snapFocus = Object.create(null);
     this.roster = null;
     this.rosterAt = 0;
     this.rosterDueAt = 0;
@@ -634,6 +635,10 @@ export class RtHub {
     }
     const linger = RT_LIMITS.snapLingerMs * this.cfg.scale;
     for (const k of RT_TOPIC_KEYS) if (now - (this.snapAt[k] ?? -Infinity) < linger) want.add(k);
+    for (const t of Object.keys(this.snapFocus)) {
+      if (now - this.snapFocus[t] < linger) focus.push(t);
+      else delete this.snapFocus[t];
+    }
     this.socketCount = n;
     this.focus = pickFocus(focus);
     this.gxNames = pickFocus(gx).slice(0, GX_NAMES);
@@ -858,10 +863,11 @@ export class RtHub {
     });
   }
 
-  async snap(ks) {
+  async snap(ks, f = null) {
     const now = this.now();
     this.lastSnapAt = now;
     for (const k of ks) this.snapAt[k] = now;
+    if (typeof f === "string" && TICKER_RE.test(f) && (f in this.snapFocus || Object.keys(this.snapFocus).length < RT_LIMITS.focusMax)) this.snapFocus[f] = now;
     if (!this.running) this.start(now);
     const phase = phaseAt(now, this.clock);
     const polled = ks.filter((k) => k !== "gx" || this.gxNames.length > 0);
@@ -996,7 +1002,8 @@ export class Pulse {
     if (url.pathname === "/ws") return this.upgrade(request, url);
     if (url.pathname === "/snap") {
       const ks = (url.searchParams.get("k") || "").split(",").filter((k) => RT_TOPIC_KEYS.includes(k));
-      const out = await this.hub.snap(ks.length ? Array.from(new Set(ks)) : RT_TOPIC_KEYS.slice());
+      const f = (url.searchParams.get("f") || "").trim().toUpperCase();
+      const out = await this.hub.snap(ks.length ? Array.from(new Set(ks)) : RT_TOPIC_KEYS.slice(), TICKER_RE.test(f) ? f : null);
       return jsonResponse(out.frames, 200, out.headers);
     }
     if (url.pathname === "/status") return jsonResponse(this.hub.status());

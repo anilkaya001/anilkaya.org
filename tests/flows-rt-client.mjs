@@ -193,12 +193,12 @@ async function mount(browser, { html, url = "/flows/", answer = null, reduced = 
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname === "/api/rt/snap") {
-      R.snapHits.push({ at: R.now, k: u.searchParams.get("k") });
+      R.snapHits.push({ at: R.now, k: u.searchParams.get("k"), f: u.searchParams.get("f") });
       const s = R.snap;
       if (s.status !== 200) {
         return route.fulfill({ status: s.status, contentType: "application/json", headers: s.headers || {}, body: JSON.stringify({ error: { code: "x", message: "x" } }) });
       }
-      return route.fulfill({ status: 200, contentType: "application/json", headers: { "Cache-Control": "no-store" }, body: JSON.stringify(s.frames()) });
+      return route.fulfill({ status: 200, contentType: "application/json", headers: { "Cache-Control": "no-store", ...(s.headers || {}) }, body: JSON.stringify(s.frames()) });
     }
     if (u.pathname.startsWith("/api/flows/")) {
       const key = u.pathname.slice("/api/flows/".length) + u.search;
@@ -559,6 +559,67 @@ try {
     await R.alive(20000);
     eq(R.snapHits.length, n2, "and the polling stops");
     eq((await strips(page)).rows.NVDA[0], 300, "the socket's state replaced the polled one");
+    await ctx.close();
+  }
+
+  if (want("memberpoll")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.mode = "refuse";
+    let n = 0;
+    R.snap = {
+      status: 200, frames: () => { n++; return [R.snapshot("px", [quote("NVDA", 200 + n, 190, R.now - 1000)])]; },
+      headers: { "X-RT-Poll-Ms": "15000", "X-RT-Poll-Cap-Ms": "600000" },
+    };
+    await connect(page, { topics: ["px"], focus: "nvda" });
+    await R.nextConn();
+    await R.until(() => R.snapHits.length >= 1);
+    await R.pump();
+    eq(R.snapHits[0].f, "NVDA", "A MEMBER ON THE POLL RUNG NAMES THE FOCUS: the first snapshot request carries f=NVDA, normalised");
+    eq(await transport(page), "poll", "the poll rung");
+    eq((await status(page)).label, "Polling 15 s", "named for the interval the server set");
+    eq((await pill(page)).feed, "Polling 15 s", "on the pill too");
+    const h0 = R.snapHits.length;
+    await R.adv(60000, 5000);
+    const polled = R.snapHits.length - h0;
+    ok(polled >= 3 && polled <= 5, `it polls about every 15 s (${polled} requests in 60 s)`);
+    await R.adv(480000, 15000);
+    eq(await transport(page), "poll", "and is still polling eight minutes in");
+    await R.adv(180000, 15000);
+    const total = R.snapHits.length;
+    ok(total <= 42, `an episode costs at most 40 snapshot requests, a few over for the interval's rounding (${total})`);
+    eq(await transport(page), "heartbeat", "AFTER TEN MINUTES THE PAGE FALLS TO ITS OWN HEARTBEATS");
+    eq((await pill(page)).feed, "Heartbeat", "and the pill says so");
+    const conns = R.conns.length;
+    await R.adv(300000, 15000);
+    eq(R.snapHits.length, total, "it asks the snapshot route no more, though the socket probes carry on");
+    ok(R.conns.length > conns, "the socket is still probed while the page waits on heartbeats");
+    await page.evaluate(() => window.__setHidden(true));
+    await R.adv(40000, 10000);
+    await page.evaluate(() => window.__setHidden(false));
+    await R.adv(2000, 500);
+    ok(R.snapHits.length > total, "a returning reader starts a new episode");
+    eq((await measure(page)).polling, 1, "and the poll timer is armed again");
+    deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
+  if (want("ownerpoll")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.mode = "refuse";
+    let n = 0;
+    R.snap = {
+      status: 200, frames: () => { n++; return [R.snapshot("px", [quote("NVDA", 200 + n, 190, R.now - 1000)])]; },
+      headers: { "X-RT-Poll-Ms": "5000", "X-RT-Poll-Cap-Ms": "0" },
+    };
+    await connect(page, { topics: ["px"] });
+    await R.nextConn();
+    await R.until(() => R.snapHits.length >= 1);
+    await R.pump();
+    eq(R.snapHits[0].f, null, "no focus on the page, no f on the request");
+    eq((await status(page)).label, "Polling 5 s", "THE OWNER KEEPS 5 s");
+    await R.adv(900000, 5000);
+    eq(await transport(page), "poll", "and is never cut off: still polling after fifteen minutes");
+    ok(R.snapHits.length >= 100, `at the owner's cadence (${R.snapHits.length} requests in fifteen minutes)`);
     await ctx.close();
   }
 

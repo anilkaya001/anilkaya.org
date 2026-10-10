@@ -1,4 +1,4 @@
-import { RT_OBJECT_NAME, RT_TOPIC_KEYS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
+import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
 
 const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
 
@@ -52,8 +52,19 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
       headers.set("X-RT-Exp", String(session.exp));
       res = await stub.fetch(new Request(target, { method: "GET", headers }));
     } else {
-      if (path === "/api/rt/snap") target.searchParams.set("k", asked.topics.join(","));
+      if (path === "/api/rt/snap") {
+        target.searchParams.set("k", asked.topics.join(","));
+        const f = String(url.searchParams.get("f") || "").trim().toUpperCase();
+        if (f && !TICKER_RE.test(f)) throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+        if (f) target.searchParams.set("f", f);
+      }
       res = await stub.fetch(new Request(target, { method: "GET" }));
+      if (path === "/api/rt/snap" && res.ok) {
+        const owner = rtIsOwner(sw, session.username);
+        res = new Response(res.body, res);
+        res.headers.set("X-RT-Poll-Ms", String(owner ? RT_LIMITS.pollOwnerMs : RT_LIMITS.pollMemberMs));
+        res.headers.set("X-RT-Poll-Cap-Ms", String(owner ? 0 : RT_LIMITS.pollMemberCapMs));
+      }
     }
   } catch (error) {
     if (error instanceof HttpError) throw error;

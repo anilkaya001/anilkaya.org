@@ -756,7 +756,11 @@ its `webSocket` through `new Response(response.body, response)`):
   (3) sockets per user: the next gets a `ctl.bye` with code 4009 and is closed.
 - `GET /api/rt/snap?k=px,fl,mk`: the same envelopes as a JSON array, from the
   object's memory, `no-store`, with `X-Fresh-*` of the worst frame. It wakes
-  the hub and waits up to 3 s for a cold topic.
+  the hub and waits up to 3 s for a cold topic. Query `f` (a focus ticker,
+  validated and uppercased, 400 `invalid_ticker` otherwise) keeps that name in
+  the hub's screener call for 60 s after the last request naming it (at most
+  eight names, no extra vendor call). The response carries `X-RT-Poll-Ms` and
+  `X-RT-Poll-Cap-Ms`: the owner is told 5000 and 0, a member 15000 and 600000.
 - `GET /api/rt/status`: owner only. Mode, audience, upstream, sockets by user,
   per-topic sequence, last-frame age, last upstream error, vendor lag p50/p95
   (hub receive time minus vendor timestamp), calls in the last minute and hour
@@ -850,8 +854,11 @@ The browser half is `assets/js/flows-rt.js`, `FlowsUI.rt`, loaded after
 home page, the market page, the unusual page and the ticker. It codes against the
 envelope above and assumes no cadence. It walks a ladder: the socket; on a
 failure, a no-reconnect bye (4001, 4003, 4009, 4011, 4012) or repeated failures,
-`GET /api/rt/snap` every 5 s with the socket probed again after 1, 2, 4 and 8 s and
-then every minute; the pages' own heartbeats underneath always; and `off` for the
+`GET /api/rt/snap` (naming the page's focus ticker) every `X-RT-Poll-Ms` (5 s until the
+first answer, then the server's word) with the socket probed again after 1, 2, 4 and 8 s and
+then every minute, for at most `X-RT-Poll-Cap-Ms` when that is not 0 (a member's episode is
+ten minutes, at most 40 requests; a hello, a returning tab or the market's reopening
+starts a new one) and then on heartbeats; the pages' own heartbeats underneath always; and `off` for the
 page load when the snapshot answers 401, 403 or 404, in which case the page
 behaves exactly as it did before the rail. A tab hidden for 30 s closes its
 socket and holds no timer. Streamed prices reach a board as the `live:strips`

@@ -26,7 +26,7 @@
   var GRACE = { px: 20000, fl: 20000, gx: 30000, mk: 40000, nw: 120000 };
   var FINAL = { 400: 1, 401: 1, 403: 1, 404: 1 };
   var KEEP_OFF = { 4001: 1, 4003: 1, 4009: 1, 4011: 1, 4012: 1 };
-  var LABEL = { socket: "Socket", poll: "Polling 5 s", heartbeat: "Heartbeat" };
+  var LABEL = { socket: "Socket", heartbeat: "Heartbeat" };
   var MEMO_KEY = "flows:rt:off";
   var MEMO_MS = 10 * 60 * 1000;
   var MEMO_FOR = { 403: 1, 404: 1 };
@@ -85,7 +85,7 @@
 
   var S = {
     refs: {}, topics: {}, handles: [], listeners: {}, focus: null, mode: "off", ws: null, helloed: false, started: false,
-    fails: 0, pollFails: 0, polling: false, abort: null, ep: null, hello: null, closed: null, degraded: null, final: 0,
+    fails: 0, pollFails: 0, polling: false, pollMs: POLL_MS, pollCap: 0, pollSince: 0, abort: null, ep: null, hello: null, closed: null, degraded: null, final: 0,
     subbed: null, offs: [], hidden: false,
   };
   TOPICS.forEach(function (k) { S.refs[k] = 0; S.topics[k] = newTopic(); S.listeners[k] = []; });
@@ -119,8 +119,12 @@
     TOPICS.forEach(function (k) { UI.freshness.drop("rt:" + k); S.topics[k].regAt = 0; });
   }
 
+  function labelOf() {
+    return S.mode === "poll" ? "Polling " + Math.round(S.pollMs / 1000) + " s" : LABEL[S.mode] || null;
+  }
+
   function paintFeed() {
-    if (UI.freshness && typeof UI.freshness.transport === "function") UI.freshness.transport(LABEL[S.mode] || null);
+    if (UI.freshness && typeof UI.freshness.transport === "function") UI.freshness.transport(labelOf());
   }
 
   function setMode(m) {
@@ -413,7 +417,7 @@
     var c = S.closed;
     var at = c && c.nextOpenAt ? Date.parse(c.nextOpenAt) : NaN;
     var wait = isFinite(at) ? at - Date.now() + jitter(4000) : 600000;
-    arm("closed", Math.min(3600000, Math.max(30000, wait)), function () { if (!S.final && !S.hidden) startPoll(0); });
+    arm("closed", Math.min(3600000, Math.max(30000, wait)), function () { S.pollSince = 0; if (!S.final && !S.hidden) startPoll(0); });
   }
 
   function ctl(f) {
@@ -555,6 +559,7 @@
       disarm("retry");
       stopPoll();
       S.pollFails = 0;
+      S.pollSince = 0;
       setMode("socket");
       noteEpoch(f.ep);
       S.hello = f.meta || {};
@@ -622,15 +627,30 @@
   function startPoll(ms) {
     if (S.final || S.polling || S.hidden || !wanted().length) return;
     if (S.mode === "socket" && S.helloed) return;
+    if (S.pollCap && S.pollSince && Date.now() - S.pollSince >= S.pollCap) return;
+    if (!S.pollSince) S.pollSince = Date.now();
     S.polling = true;
     if (S.mode === "off") setMode("heartbeat");
     arm("poll", ms, pollOnce);
   }
 
+  function pace(h) {
+    var ms = Number(h.get("X-RT-Poll-Ms"));
+    var cap = Number(h.get("X-RT-Poll-Cap-Ms"));
+    S.pollMs = isFinite(ms) && ms >= 2000 && ms <= 60000 ? ms : POLL_MS;
+    S.pollCap = isFinite(cap) && cap > 0 && cap <= 3600000 ? cap : 0;
+  }
+
+  function settle() {
+    stopPoll();
+    if (S.mode !== "socket") setMode("heartbeat");
+  }
+
   function pollFailed(wait) {
     S.pollFails++;
     if (S.pollFails >= 3 && S.mode !== "socket") setMode("heartbeat");
-    if (S.polling) arm("poll", wait || Math.min(60000, POLL_MS * Math.pow(2, S.pollFails)), pollOnce);
+    if (S.polling && S.pollCap && Date.now() - S.pollSince >= S.pollCap) { settle(); return; }
+    if (S.polling) arm("poll", wait || Math.min(60000, S.pollMs * Math.pow(2, S.pollFails)), pollOnce);
   }
 
   function pollOnce() {
@@ -641,7 +661,7 @@
     var done = function () { disarm("deadline"); };
     arm("deadline", DEADLINE_MS, function () { if (ctrl) ctrl.abort(); });
     stats.polls++;
-    fetch("/api/rt/snap?k=" + encodeURIComponent(wanted().join(",")), {
+    fetch("/api/rt/snap?k=" + encodeURIComponent(wanted().join(",")) + (S.focus ? "&f=" + encodeURIComponent(S.focus) : ""), {
       credentials: "same-origin", headers: { Accept: "application/json" }, cache: "no-store", signal: ctrl ? ctrl.signal : undefined,
     }).then(function (r) {
       if (!live()) return null;
@@ -660,6 +680,7 @@
         if (!Array.isArray(frames)) { pollFailed(0); return; }
         stats.pollBytes += text.length;
         S.pollFails = 0;
+        pace(r.headers);
         setMode("poll");
         var closed = false;
         frames.forEach(function (x) {
@@ -669,7 +690,9 @@
         if (!closed) S.closed = null;
         paintFeed();
         if (!S.polling) return;
-        if (closed) { S.polling = false; closedWake(); } else arm("poll", POLL_MS, pollOnce);
+        if (closed) { S.polling = false; closedWake(); return; }
+        if (S.pollCap && Date.now() - S.pollSince >= S.pollCap) { settle(); return; }
+        arm("poll", S.pollMs, pollOnce);
       });
     }).catch(function () {
       done();
@@ -689,6 +712,7 @@
     if (S.ws && S.helloed) { watch(); if (!timers.pulse) arm("pulse", PULSE_MS, pulse); return; }
     S.fails = 0;
     S.pollFails = 0;
+    S.pollSince = 0;
     disarm("retry");
     if (S.mode === "off") setMode("heartbeat");
     openSocket();
@@ -919,7 +943,7 @@
   function fresh(k) { return S.topics[k] ? S.topics[k].fresh : null; }
 
   function status() {
-    var out = { transport: S.mode, label: LABEL[S.mode] || null, closed: S.closed, degraded: S.degraded, final: S.final, hidden: S.hidden, topics: {} };
+    var out = { transport: S.mode, label: labelOf(), closed: S.closed, degraded: S.degraded, final: S.final, hidden: S.hidden, topics: {} };
     TOPICS.forEach(function (k) {
       var T = S.topics[k];
       out.topics[k] = { sq: T.sq, ep: T.ep, synced: T.synced, resync: T.resync, cold: T.cold, rows: T.rows.size || T.ring.length, state: T.fresh ? T.fresh.state : null };
