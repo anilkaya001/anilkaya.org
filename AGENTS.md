@@ -793,6 +793,24 @@ against exactly this:
 - The hub polls only 04:00 to 20:00 ET on trading days (the repository's
   calendar plus the `flows_clock` verdict); outside it sends `ctl.closed`
   once and makes no vendor call.
+- The alarm is set to the next thing due, not once a second: `RtHub.tick()`
+  returns the least of the next demanded topic's due time (a pause pushes it to
+  its end), the next heartbeat and the sweep, held to
+  `RT_LIMITS.alarmMinMs` (250 ms) to `alarmMaxMs` (5 s), and the adapter polls
+  every topic due within `coalesceMs` (1 s) together, so a viewer of px, fl, mk
+  and nw costs about 12 alarms a minute (about 11,500 Durable Object requests
+  and rows written a 16-hour day, not 57,600). `Pulse` remembers its own alarm
+  (`armed`), reads `getAlarm` once after a wake, never moves an alarm later, and
+  retries a failed `setAlarm` once inside the handler, throwing so the platform
+  retries the handler if both fail. Out of session the gap is `closedTickMs`
+  (9 s): measured in workerd on 2026-10-10, a socket held on a Saturday with a
+  30 s gap saw the object hibernate between alarms, a new hub and a new `ep`
+  on every wake (three epochs in 75 s, two `ctl.resync` frames and no
+  heartbeat), because a pending alarm does not keep an object resident and the
+  epoch and the per-topic sequences live in memory. The gap while any socket or
+  snapshot reader is demanded therefore stays under 10 s; persisting only the
+  epoch would break "+1 per frame within an epoch" and persisting every
+  sequence costs a row per frame.
 
 The browser half is `assets/js/flows-rt.js`, `FlowsUI.rt`, loaded after
 `flows-ui.js` (and `flows-fresh.js` where the page has it) on the boards, the
@@ -1294,8 +1312,9 @@ under `--disable-warning=ExperimentalWarning`), and prints the CPU per poll and
 the bytes per frame it measured: on a 157-name roster with every row changing,
 px costs about 3 ms of CPU a poll and 31.7 KB a frame, fl 0.3 ms, gx 0.7 ms,
 mk 0.3 ms, nw 0.5 ms; a px snapshot is 32 KB, an fl snapshot 81 KB.
-`flows-rt-server` boots workerd four times (the rail, a Saturday, the switch off,
-production cadence) with persisted Durable Object storage, because raw workerd
+`flows-rt-server` boots workerd five times (the rail, a Saturday, the same Saturday
+at production cadence for 75 s with a silent socket to prove the object keeps one
+`ep` and sends no `ctl.resync`, the switch off, production cadence) with persisted Durable Object storage, because raw workerd
 with in-memory Durable Object storage crashes when an alarm fires; the first
 three run at `FLOWS_RT_SCALE=0.2`, the last at real cadence and takes a minute
 of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was

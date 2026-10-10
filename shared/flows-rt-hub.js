@@ -190,11 +190,12 @@ export function createRestUpstream({
     },
     async tick(at) {
       if (!running || at < pausedUntil) return;
+      const slack = RT_LIMITS.coalesceMs * cfg.scale;
       const jobs = [];
       for (const k of ORDER) {
         const t = topics[k];
         if (!plan.topics.has(k)) { t.fails = 0; continue; }
-        if (t.inflight || at < t.due) continue;
+        if (t.inflight || at + slack < t.due) continue;
         jobs.push(poll(k, at).catch((error) => {
           t.inflight = false;
           handlers.onError({ k, at, code: "internal", status: null, message: String(error && error.message ? error.message : error).slice(0, 120) });
@@ -780,7 +781,27 @@ export class RtHub {
     if (!this.demand(end)) { this.stop(); return null; }
     this.evaluate(end);
     this.beat(end, false);
-    return Math.max(50, RT_LIMITS.tickMs * scale - (end - t0));
+    return this.untilNext(end);
+  }
+
+  untilNext(now) {
+    const scale = this.cfg.scale;
+    const floor = RT_LIMITS.alarmMinMs * scale;
+    const ceiling = RT_LIMITS.alarmMaxMs * scale;
+    let wait = ceiling;
+    const beatIn = this.lastBroadcastAt + RT_LIMITS.hbMs * scale - now;
+    if (beatIn < wait) wait = beatIn;
+    const up = this.upstream.state();
+    if (up && up.topics) {
+      const barrier = up.pausedUntil && up.pausedUntil > now ? up.pausedUntil : 0;
+      for (const k of this.demanded) {
+        const t = up.topics[k];
+        if (!t || t.inflight || !Number.isFinite(t.due)) continue;
+        const dueIn = Math.max(t.due, barrier) - now;
+        if (dueIn < wait) wait = dueIn;
+      }
+    } else if (RT_LIMITS.tickMs * scale < wait) wait = RT_LIMITS.tickMs * scale;
+    return Math.min(ceiling, Math.max(floor, wait));
   }
 
   waitData(ks, ms) {
@@ -809,7 +830,7 @@ export class RtHub {
     if (inSession(phase) && polled.some((k) => !this.topics[k].hasData)) {
       this.host.wake(10);
       await this.waitData(polled, RT_LIMITS.snapWaitMs);
-    } else this.host.wake(this.cfg.scale * RT_LIMITS.tickMs);
+    } else this.host.wake(this.cfg.scale * RT_LIMITS.alarmMaxMs);
     const at = this.now();
     const frames = ks.map((k) => this.snapshotFrame(k, at));
     const current = phaseAt(at, this.clock);
@@ -878,6 +899,7 @@ export class Pulse {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
+    this.armed = undefined;
     if (typeof WebSocketRequestResponsePair === "function") ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     this.hub = createHub({
       env,
@@ -886,17 +908,36 @@ export class Pulse {
     if (this.hub.liveSockets().length) this.arm(50);
   }
 
-  async arm(ms) {
-    const at = Date.now() + Math.max(1, Math.round(ms));
-    try {
-      const cur = await this.ctx.storage.getAlarm();
-      if (cur === null || cur > at) await this.ctx.storage.setAlarm(at);
-    } catch (error) {
-      this.hub.logOnce("alarm", { message: "rt alarm failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+  async setAt(at) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.ctx.storage.setAlarm(at);
+        this.armed = at;
+        return true;
+      } catch (error) {
+        this.armed = undefined;
+        this.hub.logOnce("alarm", { message: "rt alarm failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+        if (attempt) return false;
+      }
     }
   }
 
+  async arm(ms) {
+    const at = Date.now() + Math.max(1, Math.round(ms));
+    if (this.armed === undefined) {
+      try {
+        this.armed = await this.ctx.storage.getAlarm();
+      } catch (error) {
+        this.hub.logOnce("alarm", { message: "rt alarm failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+        return this.setAt(at);
+      }
+    }
+    if (this.armed === null || this.armed > at) return this.setAt(at);
+    return true;
+  }
+
   async alarm() {
+    this.armed = null;
     let delay = null;
     try {
       delay = await this.hub.tick();
@@ -904,7 +945,8 @@ export class Pulse {
       this.hub.logOnce("tick", { message: "rt tick failed", error: String(error && error.message ? error.message : error).slice(0, 160) });
       delay = this.hub.demand(this.hub.now()) ? 2000 : null;
     }
-    if (delay !== null) await this.ctx.storage.setAlarm(Date.now() + Math.max(25, Math.round(delay)));
+    if (delay === null) return;
+    if (!(await this.arm(Math.max(25, delay)))) throw new Error("rt alarm not re-armed");
   }
 
   async fetch(request) {
@@ -964,6 +1006,7 @@ export class Pulse {
   release() {
     if (this.hub.demand(this.hub.now())) return;
     this.hub.stop();
-    this.ctx.storage.deleteAlarm().catch(() => {});
+    this.armed = undefined;
+    this.ctx.storage.deleteAlarm().then(() => { this.armed = null; }, () => {});
   }
 }

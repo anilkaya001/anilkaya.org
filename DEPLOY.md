@@ -2974,7 +2974,8 @@ adds no `live:*` key and writes nothing to D1.
 placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
 polls only while a socket is connected or a `/api/rt/snap` request is less than
 60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
-own alarm every second. No viewer, no vendor call, and only the topics a viewer
+own alarm, set to the next poll, heartbeat or sweep that is due and never more
+than 5 s ahead (9 s outside the session, so the object stays resident). No viewer, no vendor call, and only the topics a viewer
 names are polled: a socket's `k`, or a `/api/rt/snap` topic for 60 s after the
 request. Per minute, for each topic someone is watching: px 12 calls, fl 12, mk
 12 (two calls every 10 s), nw 2, and gx 4 per focus ticker (one name every 15
@@ -3044,8 +3045,10 @@ in the last minute and hour, and the `fresh` entry the next frame would carry.
    `rt message failed`, `rt roster read failed`, once a minute at most).
 6. Cost: with a viewer connected the object is awake for the session, 16 h x
    0.128 GB is about 7,400 GB-s a day, under the 400,000 GB-s a month included;
-   alarms and polls are about 60,000 requests a day, and outgoing WebSocket
-   messages are free. With nobody connected it costs nothing.
+   alarms are about 12 a minute while the topics are in session, about 11,500
+   requests and as many rows written a day against 57,600 at one a second (the
+   Free caps are 100,000 of each), and outgoing WebSocket messages are free.
+   With nobody connected it costs nothing.
 
 **The wire.** The envelope, the five topics, the control frames, the close codes
 and the 256-byte client messages are frozen in `shared/flows-rt.js` and

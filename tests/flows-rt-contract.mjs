@@ -451,11 +451,11 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   const u = upstreamOf(vendor, { clock: () => t });
   u.up.start(plainPlan(["SPY", "QQQ", "IWM"]), u.handlers);
   await u.up.tick(t);
-  eq(u.calls.length, 1, "adapter: at the first instant only px is due");
+  eq(u.calls.length, 6, "adapter: every topic whose start falls inside the one-second coalescing window goes at the first instant: one call each for px, gx, fl, news and two for the market (6 calls)");
   t += 500; await u.up.tick(t);
   t += 250; await u.up.tick(t);
   t += 250; await u.up.tick(t);
-  eq(u.calls.length, 6, "adapter: staggered starts, then one call each for gx, fl, news and two for the market (6 calls)");
+  eq(u.calls.length, 6, "adapter: and nothing is polled twice while the window's next dues are still ahead");
   const by = (re) => u.calls.filter((c) => re.test(c.url.pathname));
   const pxc = by(/screener/)[0];
   eq(pxc.url.origin, "http://uw.test", "adapter: the vendor base is UW_BASE");
@@ -1594,6 +1594,180 @@ const seqOk = (ws) => {
     const gone = await off.fetch(new Request("https://pulse.internal/status"));
     deep([gone.status, (await gone.json()).error.code], [404, "rt_off"], "pulse: with the switch off the object answers 404 rt_off");
   } finally {
+    globalThis.fetch = realFetch;
+    delete globalThis.WebSocketRequestResponsePair;
+  }
+}
+
+{
+  const drive = async (r, seconds) => {
+    const end = r.state.t + seconds * 1000;
+    const gaps = [];
+    while (r.state.t < end) {
+      const d = await r.hub.tick();
+      if (d === null) break;
+      gaps.push(d);
+      r.state.t += d;
+    }
+    return gaps;
+  };
+  const demands = {
+    "px, mk and nw": { topics: ["px", "mk", "nw"], f: null },
+    "all five topics and a focus ticker": { topics: TOPICS, f: "NVDA" },
+  };
+  for (const [label, opts] of Object.entries(demands)) {
+    const r = rig();
+    r.join("anilkaya", opts);
+    await drive(r, 12);
+    const calls0 = r.vendor.calls.length;
+    const gaps = await drive(r, 60);
+    const polls = (re) => r.vendor.calls.slice(calls0).filter((c) => re.test(c.path)).length;
+    console.log(`rt alarms with ${label}: ${gaps.length} in 60 fake seconds, gaps ${Math.min(...gaps)}-${Math.max(...gaps)} ms, vendor calls px ${polls(/screener/)} mk ${polls(/market-tide/)} nw ${polls(/news/)} fl ${polls(/flow-alerts/)} gx ${polls(/spot-exposures/)}`);
+    ok(gaps.length <= 20, `alarms: ${label} costs at most 20 alarms in a fake minute (${gaps.length})`);
+    ok(Math.max(...gaps) <= RT.RT_LIMITS.alarmMaxMs, `alarms: ${label}: no gap above ${RT.RT_LIMITS.alarmMaxMs} ms (${Math.max(...gaps)})`);
+    ok(Math.min(...gaps) >= RT.RT_LIMITS.alarmMinMs, `alarms: ${label}: no gap below ${RT.RT_LIMITS.alarmMinMs} ms (${Math.min(...gaps)})`);
+    ok(polls(/screener/) >= 11 && polls(/screener/) <= 13, `alarms: ${label}: px is still polled every 5 s (${polls(/screener/)} in a minute)`);
+    if (opts.topics.includes("mk")) ok(polls(/market-tide/) >= 5 && polls(/market-tide/) <= 7, `alarms: ${label}: mk every 10 s (${polls(/market-tide/)})`);
+    if (opts.topics.includes("nw")) ok(polls(/news/) >= 1 && polls(/news/) <= 3, `alarms: ${label}: nw every 30 s (${polls(/news/)})`);
+    if (opts.topics.includes("fl")) ok(polls(/flow-alerts/) >= 11 && polls(/flow-alerts/) <= 13, `alarms: ${label}: fl every 5 s (${polls(/flow-alerts/)})`);
+    if (opts.topics.includes("gx")) ok(polls(/spot-exposures/) >= 3 && polls(/spot-exposures/) <= 5, `alarms: ${label}: gx for one focus name every 15 s (${polls(/spot-exposures/)})`);
+  }
+
+  const idle = rig();
+  idle.join("anilkaya", { topics: ["mk"], f: null });
+  const quiet = await drive(idle, 60);
+  ok(Math.max(...quiet) <= RT.RT_LIMITS.alarmMaxMs && quiet.length <= 14, `alarms: mk alone needs no more than the 5 s ceiling (${quiet.length} alarms, longest ${Math.max(...quiet)} ms)`);
+
+  const slow = rig({ scale: 0.2 });
+  slow.join("anilkaya", { topics: ["px"], f: null });
+  const scaled = await drive(slow, 12);
+  ok(Math.max(...scaled) <= RT.RT_LIMITS.alarmMaxMs * 0.2 + 1 && Math.min(...scaled) >= RT.RT_LIMITS.alarmMinMs * 0.2 - 1, `alarms: the bounds scale with FLOWS_RT_SCALE (${Math.min(...scaled)}-${Math.max(...scaled)} ms at 0.2)`);
+
+  const limited = rig({ vendorOver: (v) => { v.fault = "429"; v.retryAfterS = 40; } });
+  limited.join("anilkaya", { topics: ["px", "mk"], f: null });
+  await drive(limited, 6);
+  const sheltered = limited.vendor.calls.length;
+  const waits = await drive(limited, 30);
+  ok(Math.max(...waits) <= RT.RT_LIMITS.alarmMaxMs, `alarms: a vendor pause never stretches the alarm past the ceiling (${Math.max(...waits)} ms)`);
+  ok(waits.length <= 8, `alarms: and a paused hub wakes only for its heartbeat and sweep (${waits.length} alarms in 30 s)`);
+  ok(limited.vendor.calls.length - sheltered <= 2, `alarms: with no call made while the pause stands (${limited.vendor.calls.length - sheltered})`);
+
+  const sat = easternInstant("2026-10-03", 11 * 60);
+  const closed = rig({ start: sat });
+  closed.join();
+  const shut = await drive(closed, 120);
+  ok(Math.max(...shut) < 10000, `alarms: a closed hub with a socket still wakes inside the 10 s the object needs to stay resident (${Math.max(...shut)} ms)`);
+  eq(closed.vendor.calls.length, 0, "alarms: and makes no vendor call");
+}
+
+{
+  const { Pulse } = await import("../shared/flows-rt-hub.js");
+  const env = { FLOWS_RT_MODE: "on", UW_API_KEY: "k", UW_BASE: "http://uw.test" };
+  const realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  const virtual = { t: SESSION_NOW };
+  Date.now = () => virtual.t;
+  globalThis.WebSocketRequestResponsePair = class { constructor(a, b) { this.request = a; this.response = b; } };
+  const vendor = createFakeVendor({ session: DAY, clock: () => virtual.t });
+  globalThis.fetch = fetchFor(vendor);
+  const mk = (over = {}, sockets = []) => {
+    const store = { alarm: null, sets: [], gets: 0, deletes: 0, setFail: 0, getFail: 0 };
+    const ctx = {
+      getWebSockets: () => sockets.filter((x) => x.readyState === 1),
+      setWebSocketAutoResponse() {},
+      storage: {
+        getAlarm: async () => { store.gets++; if (store.getFail > 0) { store.getFail--; throw new Error("storage get"); } return store.alarm; },
+        setAlarm: async (t) => { if (store.setFail > 0) { store.setFail--; throw new Error("storage set"); } store.sets.push({ at: virtual.t, due: t }); store.alarm = t; },
+        deleteAlarm: async () => { store.deletes++; store.alarm = null; },
+      },
+    };
+    const logs = [];
+    const pulse = new Pulse(ctx, { ...env, ...over });
+    pulse.hub.log = (e) => logs.push(e);
+    return { pulse, sockets, store, logs };
+  };
+  const fire = async (m) => {
+    virtual.t = Math.max(virtual.t, m.store.alarm);
+    m.store.alarm = null;
+    await m.pulse.alarm();
+  };
+  try {
+    {
+      const m = mk();
+      eq(m.store.sets.length, 0, "alarm: an idle object sets no alarm");
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      ws.att = { u: "anilkaya", exp: virtual.t + 3600e3, k: ["px", "mk", "nw"], f: null };
+      ok(m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: ["px", "mk", "nw"], f: null }), "alarm: a socket is admitted");
+      await m.pulse.arm(10);
+      eq(m.store.gets, 1, "alarm: the first wish reads the pending alarm once");
+      await m.pulse.arm(5000);
+      await m.pulse.arm(5);
+      eq(m.store.sets.length, 2, "alarm: a later wish is dropped without a storage call, an earlier one replaces the alarm");
+      eq(m.store.gets, 1, "alarm: and the object never asks storage again while it knows its own alarm");
+      const start = virtual.t;
+      const dues = [];
+      while (virtual.t < start + 70000) {
+        await fire(m);
+        dues.push(m.store.alarm - virtual.t);
+      }
+      const inMinute = m.store.sets.filter((x) => x.at >= start + 10000 && x.at < start + 70000).length;
+      console.log(`rt Pulse alarms: ${inMinute} setAlarm in 60 fake seconds with px, mk and nw demanded, ${m.store.gets} getAlarm in all`);
+      ok(inMinute <= 20, `alarm: at most 20 setAlarm in a fake minute with px, mk and nw demanded (${inMinute})`);
+      ok(Math.max(...dues) < 10000 && Math.max(...dues) <= RT.RT_LIMITS.alarmMaxMs + 5, `alarm: no gap near the 10 s hibernation line while demanded (${Math.max(...dues)} ms)`);
+      eq(m.store.gets, 1, "alarm: a minute of alarms made no further getAlarm");
+      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 5, "alarm: and the frames still flow at the vendor's cadence");
+      ws.readyState = 3;
+      m.pulse.hub.lastSnapAt = -Infinity;
+      m.pulse.release();
+      await Promise.resolve();
+      deep([m.store.deletes, m.store.alarm], [1, null], "alarm: the last viewer leaving deletes the alarm");
+      await m.pulse.arm(10);
+      eq(m.store.gets, 1, "alarm: and the object knows it has none");
+    }
+
+    {
+      const m = mk();
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: TOPICS, f: null });
+      await m.pulse.arm(10);
+      await fire(m);
+      m.store.setFail = 1;
+      await fire(m);
+      ok(m.store.alarm !== null, "alarm: a storage failure while re-arming is retried inside the handler, so the hub does not go quiet");
+      eq(m.logs.filter((e) => e.message === "rt alarm failed").length, 1, "alarm: and logged once");
+      m.store.setFail = 5;
+      await assert.rejects(() => fire(m), /not re-armed/);
+      checks++;
+      ok(m.logs.filter((e) => e.message === "rt alarm failed").length <= 1, "alarm: a second failure inside the minute is not logged again");
+      m.store.setFail = 0;
+      m.store.alarm = null;
+      await fire(m).catch(() => {});
+      ok(m.store.alarm !== null, "alarm: when the platform retries the handler after a failed re-arm, the alarm is set again");
+    }
+
+    {
+      const m = mk();
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: TOPICS, f: null });
+      m.store.getFail = 1;
+      await m.pulse.arm(10);
+      ok(m.store.alarm !== null, "alarm: a failing getAlarm does not stop the first alarm being set");
+      await m.pulse.arm(20);
+      ok(m.store.gets >= 1, "alarm: and the unknown state is read again afterwards");
+    }
+
+    {
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      ws.att = { u: "anilkaya", exp: virtual.t + 3600e3, k: ["px"], f: null };
+      const woken = mk({}, [ws]);
+      await new Promise((r) => setTimeout(r, 5));
+      deep([woken.store.gets, woken.store.sets.length], [1, 1], "alarm: an object waking with a surviving socket reads its alarm once and sets one");
+    }
+  } finally {
+    Date.now = realNow;
     globalThis.fetch = realFetch;
     delete globalThis.WebSocketRequestResponsePair;
   }

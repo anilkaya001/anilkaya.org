@@ -553,6 +553,32 @@ async function runClosed() {
   }
 }
 
+async function runClosedEpoch() {
+  const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
+  const uw = await startVendor(vendor);
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`] });
+  try {
+    const c = connect(server.baseURL, OWNER);
+    const hello = await until(() => c.ctl("hello")[0], 15000, "a hello");
+    await until(() => c.ctl("closed")[0], 15000, "a closed frame");
+    const startedAt = Date.now();
+    const eps = new Set([hello.ep]);
+    await sleep(75000);
+    eps.add((await statusOf(server.baseURL, OWNER)).body.ep);
+    for (const f of c.frames) eps.add(f.ep);
+    const beats = c.ctl("hb");
+    console.log(`rt closed epoch: ${beats.length} heartbeats and ${c.ctl("resync").length} resyncs in ${((Date.now() - startedAt) / 1000).toFixed(0)} s, epochs seen: ${Array.from(eps).join(",")}`);
+    ok(beats.length >= 2, `epoch: a Saturday socket sees at least two closed heartbeats in 75 s (${beats.length})`);
+    eq(eps.size, 1, `epoch: every frame and the status read after 75 s of silence carry the hello's epoch (${eps.size} seen)`);
+    eq(c.ctl("resync").length, 0, "epoch: and no resync is ever sent, because the object never restarted");
+    eq(vendor.calls.length, 0, "epoch: still no vendor call");
+    c.close();
+  } finally {
+    await server.stop();
+    await uw.close();
+  }
+}
+
 async function runOff() {
   const server = await startWorker({ extraVars: ["FLOWS_RT_MODE:off"] });
   try {
@@ -617,6 +643,7 @@ async function runCadence() {
 await runMain();
 await runOwnerAudience();
 await runClosed();
+await runClosedEpoch();
 await runOff();
 await runCadence();
 
