@@ -275,6 +275,75 @@ try {
     eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
     await page.close();
   }
+  {
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: ["NVDA", "AMD"].map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
+    const html = PAGES.sidePage({ username: "test", side: "long" });
+    const noPopover = () => {
+      for (const k of ["popover", "showPopover", "hidePopover", "togglePopover"]) delete HTMLElement.prototype[k];
+      const m = Element.prototype.matches;
+      Element.prototype.matches = function (sel) {
+        if (/:popover-open/.test(sel)) throw new DOMException("'" + sel + "' is not a valid selector.", "SyntaxError");
+        return m.call(this, sel);
+      };
+    };
+    const tapAll = async (page) => {
+      await page.click("#fxFresh");
+      const infos = await page.$$("#flowsMain [data-info]");
+      for (const b of infos.slice(0, 6)) { await b.scrollIntoViewIfNeeded(); await b.click(); }
+      await page.mouse.click(5, 400);
+      await page.keyboard.press("Escape");
+      return infos.length;
+    };
+    const look = (page) => page.evaluate(() => {
+      const o = document.getElementById("fxOld"), r = o && o.getBoundingClientRect();
+      return {
+        old: o ? { text: o.textContent, title: o.title, w: r.width, right: r.right, tag: o.tagName } : null,
+        pop: !!document.getElementById("fxPop"),
+        expanded: [...document.querySelectorAll('[aria-expanded="true"][data-info], #fxFresh[aria-expanded="true"]')].length,
+        over: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth,
+        vw: innerWidth,
+      };
+    });
+
+    for (const width of [1280, 320]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.addInitScript(noPopover);
+      await mount(page, { html, url: "/flows/long/", answer });
+      ok(await page.evaluate(() => !("popover" in HTMLElement.prototype) && typeof HTMLElement.prototype.showPopover === "undefined"), "the emulated browser has no Popover API");
+      const n = await tapAll(page);
+      ok(n > 0, `the board offers disclosures to tap (${n})`);
+      const seen = await look(page);
+      eq(errors.length, 0, `A BROWSER WITHOUT THE POPOVER API: tapping the freshness pill and ${Math.min(n, 6)} disclosures, a tap outside and Escape throw nothing at ${width} px (${errors.join("; ")})`);
+      ok(seen.old && seen.old.w > 0 && /Old browser/.test(seen.old.text), `THE BAR SAYS SO: the old-browser banner is shown at ${width} px (${JSON.stringify(seen.old)})`);
+      ok(/older than Flows supports/.test(seen.old.title) && /older than Flows supports/.test(seen.old.text), "and carries the sentence, visible to a pointer as its title and to a screen reader as text");
+      eq(seen.old.tag, "SPAN", "the banner is not a control: there is nothing behind it to open");
+      ok(seen.old.right <= seen.vw, `the banner sits inside the viewport at ${width} px (right edge ${seen.old.right})`);
+      eq(seen.over, 0, `and the page does not scroll sideways at ${width} px`);
+      eq(seen.pop, false, "no popover element is made where it cannot be shown");
+      eq(seen.expanded, 0, "and no trigger is left claiming it is expanded");
+      await page.close();
+    }
+
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    await mount(page, { html, url: "/flows/long/", answer });
+    eq(await page.evaluate(() => !!document.getElementById("fxOld")), false, "A BROWSER WITH THE POPOVER API shows no old-browser banner");
+    const b = await page.$("#flowsMain [data-info]");
+    await b.click();
+    ok(await page.evaluate(() => document.getElementById("fxPop").matches(":popover-open")), "and a tapped disclosure still opens its popover");
+    await page.keyboard.press("Escape");
+    eq(await page.evaluate(() => document.getElementById("fxPop").matches(":popover-open")), false, "which Escape still closes");
+    eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+    await page.close();
+  }
 } finally {
   await browser.close();
 }

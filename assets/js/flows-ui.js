@@ -360,7 +360,8 @@
     });
     return pop;
   }
-  const popOpen = () => { const p = $("fxPop"); return !!(p && p.matches(":popover-open")); };
+  const POPS = !window.HTMLElement || "popover" in HTMLElement.prototype;
+  const popOpen = () => { const p = POPS && $("fxPop"); return !!(p && p.matches(":popover-open")); };
   function fillPop(d) {
     const body = $("fxPopB");
     $("fxPopT").textContent = d.title || "";
@@ -381,7 +382,7 @@
   }
   function openInfo(trigger, content) {
     const build = content !== undefined ? () => content : trigger && INFO.get(trigger.dataset.info);
-    if (!build) return;
+    if (!build || !POPS) return;
     const d = build() || {};
     const pop = ensurePop();
     if (anchor && anchor !== trigger) { anchor.style.removeProperty("anchor-name"); anchor.setAttribute("aria-expanded", "false"); }
@@ -1830,6 +1831,10 @@
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && String(e.key).toLowerCase() === "k") { e.preventDefault(); closeDrawer(false); openPalette(); }
     });
 
+    if (!POPS) {
+      const why = "This browser is older than Flows supports, so explanations cannot open. Update it to read them.";
+      bar.append(h("span", { class: "ui-fresh", id: "fxOld", "data-state": "old", title: why }, glyph("unavailable"), h("span", { class: "fx-fresh-l" }, "Old browser"), h("span", { class: "visually-hidden" }, why)));
+    }
     const fresh = $("fxFresh");
     if (fresh) {
       fresh.setAttribute("aria-controls", "fxPop");
