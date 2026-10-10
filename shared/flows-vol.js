@@ -1,4 +1,7 @@
 import { rowsOrNull as rowsOf } from "./flows-rows.js";
+import { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson } from "./flows-stats.js";
+
+export { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson };
 
 export const VOL_SCHEMA_VERSION = 1;
 
@@ -106,47 +109,6 @@ export function addDays(day, n) {
 
 const finite = (xs) => xs.filter((x) => typeof x === "number" && Number.isFinite(x));
 
-export function mean(xs) {
-  const v = finite(xs);
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
-}
-
-export function sampleVar(xs) {
-  const v = finite(xs);
-  if (v.length < 2) return null;
-  const m = v.reduce((a, b) => a + b, 0) / v.length;
-  return v.reduce((a, b) => a + (b - m) * (b - m), 0) / (v.length - 1);
-}
-
-export function sampleSd(xs) {
-  const v = sampleVar(xs);
-  return v === null ? null : Math.sqrt(Math.max(v, 0));
-}
-
-export function median(xs) {
-  const v = finite(xs).sort((a, b) => a - b);
-  if (!v.length) return null;
-  const mid = v.length >> 1;
-  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
-}
-
-export function quantileSorted(sorted, p) {
-  if (!sorted.length) return null;
-  if (sorted.length === 1) return sorted[0];
-  const h = (sorted.length - 1) * Math.min(Math.max(p, 0), 1);
-  const lo = Math.floor(h);
-  const hi = Math.ceil(h);
-  return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
-}
-
-export function shareAtOrBelow(x, xs) {
-  const v = finite(xs);
-  if (!v.length || x === null || !Number.isFinite(x)) return null;
-  let k = 0;
-  for (const y of v) if (y <= x) k++;
-  return k / v.length;
-}
-
 export function zAgainst(x, xs, { min = MIN_HISTORY } = {}) {
   const v = finite(xs);
   if (x === null || !Number.isFinite(x)) return { z: null, n: v.length, code: "input-absent" };
@@ -175,21 +137,6 @@ export function ols(xs, ys) {
   let sse = 0;
   for (const [x, y] of pts) { const e = y - intercept - slope * x; sse += e * e; }
   return { slope, intercept, n, se: Math.sqrt(sse / (n - 2)) };
-}
-
-export function pearson(xs, ys) {
-  const pts = [];
-  for (let i = 0; i < Math.min(xs.length, ys.length); i++) {
-    if (Number.isFinite(xs[i]) && Number.isFinite(ys[i])) pts.push([xs[i], ys[i]]);
-  }
-  const n = pts.length;
-  if (n < 3) return null;
-  let mx = 0, my = 0;
-  for (const [x, y] of pts) { mx += x; my += y; }
-  mx /= n; my /= n;
-  let sxx = 0, syy = 0, sxy = 0;
-  for (const [x, y] of pts) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
-  return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
 }
 
 export function rvEstimators({ closes = [], highLow = [] } = {}) {
