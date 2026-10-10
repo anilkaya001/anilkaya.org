@@ -7,7 +7,7 @@ import {
 import { phaseAt } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
 import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
-import { MEMBER_NAME } from "./flows-auth.js";
+import { MEMBER_NAME, readMembers, memberOf, memberActive } from "./flows-auth.js";
 import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs } from "./flows-vendor-core.js";
 
 const T0 = Date.now();
@@ -349,7 +349,8 @@ export class RtHub {
       st = {
         u: typeof a.u === "string" ? a.u : "", exp: Number(a.exp) || 0,
         topics: new Set(Array.isArray(a.k) ? a.k.filter((k) => RT_TOPIC_KEYS.includes(k)) : RT_TOPIC_KEYS),
-        f: typeof a.f === "string" ? a.f : null, have: new Set(), lastRs: Object.create(null), burst: [],
+        f: typeof a.f === "string" ? a.f : null, uep: Number.isSafeInteger(a.uep) ? a.uep : null,
+        have: new Set(), lastRs: Object.create(null), burst: [],
       };
       this.socks.set(ws, st);
     }
@@ -549,7 +550,7 @@ export class RtHub {
     });
   }
 
-  admit(ws, { u, exp, topics = RT_TOPIC_KEYS, f = null }) {
+  admit(ws, { u, exp, uep = null, topics = RT_TOPIC_KEYS, f = null }) {
     const now = this.now();
     if (this.cfg.mode !== "on") { this.bye(ws, RT_CLOSE.off, "rt-off"); return false; }
     const others = this.liveSockets().filter((x) => x !== ws);
@@ -557,7 +558,8 @@ export class RtHub {
     if (mine >= this.cfg.userCap) { this.bye(ws, RT_CLOSE.cap, "connection-cap"); return false; }
     if (others.length >= RT_LIMITS.sockets) { this.bye(ws, RT_CLOSE.full, "hub-full"); return false; }
     const st = {
-      u, exp, topics: new Set(topics.filter((k) => RT_TOPIC_KEYS.includes(k))), f: f && TICKER_RE.test(f) ? f : null,
+      u, exp, uep: Number.isSafeInteger(uep) ? uep : null,
+      topics: new Set(topics.filter((k) => RT_TOPIC_KEYS.includes(k))), f: f && TICKER_RE.test(f) ? f : null,
       have: new Set(), lastRs: Object.create(null), burst: [],
     };
     this.socks.set(ws, st);
@@ -577,7 +579,7 @@ export class RtHub {
   }
 
   persist(ws, st) {
-    try { ws.serializeAttachment({ u: st.u, exp: st.exp, k: Array.from(st.topics), f: st.f }); } catch { return; }
+    try { ws.serializeAttachment({ u: st.u, exp: st.exp, uep: st.uep, k: Array.from(st.topics), f: st.f }); } catch { return; }
   }
 
   onMessage(ws, data) {
@@ -670,9 +672,30 @@ export class RtHub {
     }
   }
 
+  memberEpochOf(u) {
+    const member = memberOf(readMembers(this.env && this.env.FLOWS_CREDENTIALS), u);
+    return member ? member.epoch : 0;
+  }
+
+  revalidateMembers() {
+    const members = readMembers(this.env && this.env.FLOWS_CREDENTIALS);
+    const real = Date.now();
+    let closed = 0;
+    for (const ws of this.liveSockets()) {
+      const st = this.sockState(ws);
+      if (st.uep === null) continue;
+      const member = memberOf(members, st.u);
+      if (member && memberActive(member, real) && member.epoch === st.uep) continue;
+      this.bye(ws, RT_CLOSE.expired, "member-revoked");
+      closed++;
+    }
+    return closed;
+  }
+
   async ensureRoster(now) {
     if (this.roster && now < this.rosterDueAt) return;
     this.rosterAt = now;
+    try { this.revalidateMembers(); } catch { this.logOnce("members", { message: "rt member check failed" }); }
     let timer = null;
     try {
       const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("roster timeout")), 3000); });
@@ -1023,6 +1046,8 @@ export class Pulse {
     }
     const u = request.headers.get("X-RT-User") || "";
     const exp = Number(request.headers.get("X-RT-Exp"));
+    const sentUep = request.headers.get("X-RT-Uep");
+    const uep = sentUep !== null && /^\d{1,9}$/.test(sentUep) ? Number(sentUep) : this.hub.memberEpochOf(u);
     if (!MEMBER_NAME.test(u) || !Number.isFinite(exp)) {
       return jsonResponse({ error: { code: "unauthorized", message: "Authentication required" } }, 401);
     }
@@ -1032,7 +1057,7 @@ export class Pulse {
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, ["u:" + u]);
     const ok = this.hub.admit(server, {
-      u, exp, topics: asked.length ? Array.from(new Set(asked)) : RT_TOPIC_KEYS.slice(), f: TICKER_RE.test(f) ? f : null,
+      u, exp, uep, topics: asked.length ? Array.from(new Set(asked)) : RT_TOPIC_KEYS.slice(), f: TICKER_RE.test(f) ? f : null,
     });
     if (ok) this.arm(10);
     return new Response(null, { status: 101, webSocket: client });

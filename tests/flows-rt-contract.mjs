@@ -630,7 +630,7 @@ function rig({ start = SESSION_NOW, env = {}, roster = async () => null, vendorO
   const join = (user = "anilkaya", opts = {}) => {
     const ws = mkSocket(user, opts.exp);
     sockets.push(ws);
-    const admitted = hub.admit(ws, { u: user, exp: ws.exp, topics: opts.topics || TOPICS, f: opts.f || null });
+    const admitted = hub.admit(ws, { u: user, exp: ws.exp, uep: opts.uep === undefined ? null : opts.uep, topics: opts.topics || TOPICS, f: opts.f || null });
     return { ws, admitted };
   };
   const run = async (seconds, step = 1000) => {
@@ -1056,6 +1056,71 @@ const seqOk = (ws) => {
   await new Promise((res) => setTimeout(res, 1600));
   await r2.run(2);
   deep(e.ws.closed, [RT.RT_CLOSE.expired, "session-expired"], "expiry: a socket outliving its session is closed with 4001 at the next tick");
+}
+
+{
+  const creds = (over = {}) => JSON.stringify({
+    alice: { hash: "h", epoch: 3 }, bob: { hash: "h" }, dave: { hash: "h", epoch: 0 },
+    old: { hash: "h", until: "2020-01-01" }, ...over,
+  });
+  const r = rig({ env: { FLOWS_CREDENTIALS: creds() } });
+  const alice = r.join("alice", { uep: 3 });
+  const bob = r.join("bob", { uep: 0 });
+  const dave = r.join("dave", { uep: 0 });
+  const stale = r.join("old", { uep: 0 });
+  const ghost = r.join("ghost", { uep: 0 });
+  const anon = r.join("alice", { uep: undefined });
+  eq(alice.ws.att.uep, 3, "revocation: the member epoch the session was verified at is stored in the attachment");
+  await r.run(10);
+  deep([alice.ws.closed, bob.ws.closed, dave.ws.closed, anon.ws.closed], [null, null, null, null],
+    "revocation: members whose record still matches stay connected, and a socket with no recorded epoch is left alone");
+  deep([stale.ws.closed, ghost.ws.closed], [[RT.RT_CLOSE.expired, "member-revoked"], [RT.RT_CLOSE.expired, "member-revoked"]],
+    "revocation: a member past their until day and a name that is not a member are closed at the first roster read with 4001");
+  deep(ctlOf(ghost.ws, "bye")[0].meta, { reason: "member-revoked", code: 4001 }, "revocation: after a bye frame that says why");
+  r.hub.env.FLOWS_CREDENTIALS = creds({ alice: { hash: "h", epoch: 4 }, bob: undefined });
+  await r.run(200);
+  deep([alice.ws.closed, bob.ws.closed], [null, null], "revocation: an epoch bump and a removed member are not noticed before the next roster refresh");
+  await r.run(110);
+  deep([alice.ws.closed, bob.ws.closed, dave.ws.closed], [[RT.RT_CLOSE.expired, "member-revoked"], [RT.RT_CLOSE.expired, "member-revoked"], null],
+    "revocation: within one roster refresh (five minutes) the bumped epoch and the removed member are closed with 4001, an unchanged member stays");
+  eq(r.hub.socketCount, 2, "revocation: and the demand count follows: dave and the socket with no recorded epoch remain");
+  r.hub.env.FLOWS_CREDENTIALS = undefined;
+  await r.run(310);
+  ok(dave.ws.closed && dave.ws.closed[1] === "member-revoked", "revocation: a Worker with no credentials secret fails closed, as its session check does");
+  eq(r.hub.memberEpochOf("alice"), 0, "revocation: the epoch lookup of a name the secret does not hold is 0");
+}
+
+{
+  const creds = (epoch) => JSON.stringify({ alice: { hash: "h", epoch } });
+  const down = async () => { throw new Error("D1 unavailable"); };
+  const r = rig({ env: { FLOWS_CREDENTIALS: creds(1) }, roster: down });
+  const alice = r.join("alice", { uep: 1 });
+  await r.run(5);
+  eq(alice.ws.closed, null, "revocation with the store down: a matching member stays");
+  r.hub.env.FLOWS_CREDENTIALS = creds(2);
+  await r.run(40);
+  deep(alice.ws.closed, [RT.RT_CLOSE.expired, "member-revoked"],
+    "revocation with the store down: the check does not wait for D1; it runs at the next attempt, thirty seconds on");
+  const lines = r.logs.filter((l) => /member check failed/.test(JSON.stringify(l)));
+  eq(lines.length, 0, "and logs nothing when it works");
+}
+
+{
+  const sessions = { creds: JSON.stringify({ firatgok: { hash: "h", epoch: 7 }, anilkaya: { hash: "h" } }) };
+  const forwarded = [];
+  const stub = { fetch: async (req) => { forwarded.push(Object.fromEntries(req.headers.entries())); return new Response("{}", { status: 200 }); } };
+  const { serveRt } = await import("../shared/flows-rt-routes.js");
+  class HttpError extends Error { constructor(status, code, message, headers) { super(message); Object.assign(this, { status, code, headers }); } }
+  const env = { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_USERS: "anilkaya", FLOWS_CREDENTIALS: sessions.creds,
+    PULSE: { idFromName: (n) => ({ n }), get: () => stub } };
+  const ws = async (username, over = {}) => {
+    const request = new Request("https://anilkaya.org/api/rt/ws", { headers: { Upgrade: "websocket", "X-RT-Uep": "99" } });
+    await serveRt(request, { ...env, ...over }, new URL(request.url),
+      { json: (b) => b, HttpError, getSession: async () => ({ username, exp: 1790780000000 }), requireSameOrigin() {} });
+    return forwarded[forwarded.length - 1];
+  };
+  eq((await ws("firatgok"))["x-rt-uep"], "7", "revocation route: the object is told the member epoch the Worker verified, and a client's own X-RT-Uep is replaced");
+  eq((await ws("anilkaya"))["x-rt-uep"], "0", "revocation route: a member with no epoch is 0");
 }
 
 {

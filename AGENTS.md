@@ -853,6 +853,14 @@ against exactly this:
   4011 or 4012. In the local workerd a close of a socket that has never sent a
   client message is acknowledged but never raises `close` in the client; a close
   of a socket that has sent one does.
+- Revocation: the Worker forwards the member epoch it verified the session at
+  in `X-RT-Uep` (the object falls back to its own lookup when the header is
+  absent) and the hub keeps it in the socket's attachment. At every roster
+  refresh, before the D1 read and whether or not that read succeeds, it checks
+  each such socket against `FLOWS_CREDENTIALS`: a member who is gone, past their
+  `until` day or on a different epoch gets `ctl.bye {reason:"member-revoked",
+  code:4001}`, so revocation reaches the rail within `rosterMs` (5 minutes). A
+  socket with no recorded epoch (an older attachment) is not checked.
 - Freshness: classes `rt` (5/15/60), `rtSlow` (10/30/120), `rtNews` (30/75/300)
   apply their live and stale windows in the pre-market and post-market too. A
   frame of a stamped topic (`px`, `gx`, `mk`) is `live` only when the newest

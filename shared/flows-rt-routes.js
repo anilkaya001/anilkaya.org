@@ -1,3 +1,4 @@
+import { readMembers, memberOf } from "./flows-auth.js";
 import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
 
 const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
@@ -50,6 +51,8 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
       headers.delete("Cookie");
       headers.set("X-RT-User", session.username);
       headers.set("X-RT-Exp", String(session.exp));
+      const member = memberOf(readMembers(env.FLOWS_CREDENTIALS), session.username);
+      headers.set("X-RT-Uep", String(member ? member.epoch : 0));
       res = await stub.fetch(new Request(target, { method: "GET", headers }));
     } else {
       if (path === "/api/rt/snap") {
