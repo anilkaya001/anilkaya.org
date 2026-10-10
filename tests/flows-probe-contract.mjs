@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import * as probe from "../scripts/flows-probe.mjs";
+import { nightlySource, slice } from "./lib/source-scan.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -248,14 +249,13 @@ const list = probe.loadList();
   deep(probe.vendorHeaders("K"), { Authorization: "Bearer K", Accept: "application/json" },
        "the probe sends exactly the pipeline's two vendor headers");
 
-  const src = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
+  const src = nightlySource();
   const baseLine = /const BASE = process\.env\.(\w+) \|\| "([^"]+)"/.exec(src);
   ok(baseLine, "the pipeline still names its vendor base URL in one line");
   eq(baseLine[1], probe.BASE_ENV, "the probe honours the pipeline's base-URL override");
   eq(baseLine[2], probe.DEFAULT_BASE, "and defaults to the same vendor host");
-  const start = src.indexOf("async function uw(");
-  ok(start > 0, "the pipeline's vendor helper is still uw()");
-  const uwBody = src.slice(start, src.indexOf("\n}\n", start));
+  const uwBody = slice(src, "async function uw(", "\n}\n");
+  ok(uwBody.length > 0, "the pipeline's vendor helper is still uw()");
   ok(/Authorization:\s*"Bearer "\s*\+\s*process\.env\.UW_API_KEY/.test(uwBody),
      "the pipeline authenticates with the same Bearer header the probe sends");
   ok(/Accept:\s*"application\/json"/.test(uwBody), "and asks for the same content type");

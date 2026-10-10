@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import { DatabaseSync } from "node:sqlite";
 import * as L from "../shared/flows-ledger.js";
 import * as W from "../shared/flows-live-worker.js";
@@ -581,7 +582,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
     "and a dry run whose roster is a name short is red, so a wiring fault in the plan is found before a night pays for it");
   const dryBare = await runHealthGate({ dry: true, log: (l) => dryLines.push("bare " + l), warn: () => {} });
   ok(dryBare.failures.length === 0 && !dryLines.some((l) => /^bare .*run facts/.test(l)), "with no run facts a dry run says only that it skipped");
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   ok(/night: \{\s*cardsFailed: cardsFailed \+ extraFailed, deadlineSkipped: deadlineSkipped \+ extraSkipped,\s*planned: byCard\.size \+ dossierBuilt\.size, rostered: rosterSummary \? rosterSummary\.rostered : null,/.test(pipeline) &&
      /rosterThrew = true;/.test(pipeline) && /rostered: Object\.keys\(built\.payload\.depth\)\.length/.test(pipeline),
     "and the nightly hands it the card counts, the plan and the roster it published");
@@ -682,7 +683,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(capped(M + 45000 + lag.lagStep - QUOTA_WAIT.maxMs - 1), null, "and one a millisecond past it is not");
   eq(storeQuotaWait(res(503, 86355), "<html>x</html>", { now: M + 45000, firstAt: M - 50000 }), null, "a day-away answer that is not the Worker's store_quota is never a lag");
   eq(storeQuotaWait(res(503), quotaBody, { now: M + 45000, firstAt: M - 50000 }), null, "nor one with no Retry-After");
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   ok(/const quotaWait = !response\.ok && heard \? storeQuotaWait\(response, heard\.text, \{ firstAt: quotaFirstAt \}\) : null;\s*if \(quotaWait !== null\) \{[\s\S]*?ingestWrites\.defer\(quotaWait\);\s*(?:wireProgress\.quiet\(quotaWait\);\s*)?await sleep\(quotaWait\);\s*attempt--;\s*continue;/.test(pipeline),
     "and the write loop takes that wait before the generic retry, defers every other writer with it, and does not spend a retry on it");
 }

@@ -11,6 +11,7 @@ import { fakeD1 } from "./lib/d1-fake.mjs";
 import zlib from "node:zlib";
 import { createWireReader, summariseWire } from "./lib/ws-wire.mjs";
 import { nightlyEmit, emitFiles, emitRead, sourceFingerprint, EMIT_MARK, DRY_NOW } from "./lib/nightly-emit.mjs";
+import { nightlyFiles, nightlySource, nightlySlice, treeFiles, NIGHTLY_ENTRY, NIGHTLY_DIR } from "./lib/source-scan.mjs";
 import { utimesSync, readdirSync as listDir } from "node:fs";
 import { plan as bumpPlan, referenceFiles } from "../scripts/bump-assets.mjs";
 
@@ -380,6 +381,20 @@ writeFileSync(dir + "-meta.json", JSON.stringify({ generatedAt: process.env.FLOW
   const own = nightlyEmit({ root, dir: null });
   ok(own.startsWith(tmpdir()) && existsSync(path.join(own, EMIT_MARK)), "nightly-emit: with no directory given the emit goes to a temporary one");
   ok(listDir(own).includes("-meta.json"), "nightly-emit: and holds the payload");
+}
+
+{
+  const files = nightlyFiles();
+  eq(files[0], NIGHTLY_ENTRY, "nightly-source: the entry comes first");
+  ok(files.length > 1 && files.slice(1).every((f) => f.startsWith(NIGHTLY_DIR + "/") && f.endsWith(".mjs")), "nightly-source: then every module under the nightly directory, at any depth");
+  deep(files.slice(1), [...files.slice(1)].sort(), "nightly-source: in a fixed order");
+  deep(files.slice(1), treeFiles(NIGHTLY_DIR), "nightly-source: and exactly the tree the comment scan walks");
+  const src = nightlySource();
+  ok(src.indexOf("@@ source " + NIGHTLY_ENTRY + " @@") < src.indexOf("@@ source " + files[1] + " @@"), "nightly-source: the concatenation marks each module's boundary");
+  ok(nightlySlice("export const ISOLATION", "export const WHY_CAP").includes("fatal"), "nightly-source: a slice inside one module is returned");
+  throwsLike(() => nightlySlice("this marker is nowhere in the nightly"), /marker not found/, "nightly-source: a slice whose start marker is missing throws instead of passing on nothing");
+  throwsLike(() => nightlySlice("export const ISOLATION", "this end marker is nowhere"), /marker not found/, "nightly-source: and so does one whose end marker is missing");
+  throwsLike(() => nightlySlice("const ARGS", "export const ISOLATION"), /crosses a module boundary/, "nightly-source: a slice across two modules throws, so a moved scan must name the module that now holds its code");
 }
 
 for (const n of notes) console.log("  note: " + n);

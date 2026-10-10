@@ -46,7 +46,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
-import { workerSource, expect, pipelineSource, count } from "./lib/source-scan.mjs";
+import { workerSource, expect, pipelineSource, nightlySource, slice, count } from "./lib/source-scan.mjs";
 import { newsFields, newsRow } from "../shared/flows-news.js";
 import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
 import { rowsOf as liveRows } from "../shared/flows-live.js";
@@ -1675,7 +1675,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
        "the per-name data it joined it onto — the log line that makes the timing trap " +
        "visible in a job log rather than only on a card");
 
-    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+    const src = nightlySource();
     for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
       ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
          `${route} is fetched at the same constant the cards publish as \`requested\` — two ` +
@@ -2244,7 +2244,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
 
   const uaLiterals = src.match(/anilkaya-flows-pipeline\/1/g) || [];
   eq(uaLiterals.length, 1,
@@ -2453,7 +2453,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "and a run object carrying no arrays at all reports the name as NOT ATTEMPTED rather " +
      "than throwing or claiming it was built");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(/foldCardOutcomes\(cardTickers, cardsRun\)/.test(src),
      "the cards leg folds its pooled run through foldCardOutcomes");
   ok(/runPooled\(cardTickers,/.test(src) && /stopEarly: \(\) => Date\.now\(\) > deadline/.test(src),
@@ -2741,10 +2741,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "and the sentence names which side of the comparison was missing");
 
   {
-    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-    const start = src.indexOf("export function readBoardMemory");
-    ok(start !== -1, "readBoardMemory is where this scan expects it — a rename must update this check");
-    const body = src.slice(start, src.indexOf("\n}\n", start));
+    const src = nightlySource();
+    const body = slice(src, "export function readBoardMemory", "\n}\n");
+    ok(body.length > 0, "readBoardMemory is where this scan expects it — a rename must update this check");
     ok(!/Date\.now\(|new Date\(|easternNow\(/.test(body),
        "the guard reads no clock: two published session dates, compared as strings, so the " +
        "answer cannot depend on the hour the run happens to start");
@@ -3599,7 +3598,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(SESSION_OPEN_MINUTES, 570, "09:30 in minutes");
   eq(SESSION_CLOSE_MINUTES, 960, "16:00 in minutes");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   const main = src.slice(src.indexOf("async function main()"));
   const resolved = main.indexOf("await resolveSessionDate()");
   const guard = main.indexOf("intradayRefusal(sessionDate");
@@ -3815,7 +3814,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(calendar[calendar.length - 1], "2026-09-21",
      "the record's calendar ends at the session, so k=5 and k=10 are never scored to an intraday bar");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(!/put\(row\.ticker, sessionDate, row\.close\)/.test(src),
      "and the universe row.close — a screener price read at run time — is no longer written as a close");
 }
@@ -3871,7 +3870,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!/partly archived/.test(noneKept) && /ranks it again/.test(noneKept),
      "BUT NOT WHEN NOTHING WAS KEPT: with all three keys lost the gate reads the session as fresh and " +
      `a plain re-dispatch ranks it again, so "finds the session partly archived" was false (${noneKept})`);
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(/"together; " \+ plainRedispatchSaid\(archive\)/.test(src),
      "and the ARCHIVE LOST line takes its clause from that function");
   ok(/reads as archived, or as partly archived, and a later plain run skips it/.test(src),
@@ -4264,7 +4263,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "so the cross-section card says the panel was not fetched rather than quiet");
   eq(card([]), "quiet", "where the old [] published quiet");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 3,
      "all three card lanes, board, cross-section and index, take the panel's input from the one rule");
   ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
@@ -4370,7 +4369,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   eq(IV_RANK_PARAMS.timespan, "1y",
      "the implied-volatility history is asked for by timespan, the parameter the vendor documents, and for a " +
      "year of it: the vol-of-vol and the AR(1) half-life read that year at no extra call");
@@ -5209,7 +5208,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!sessionBarOverdue("2026-09-04", wall("2026-09-08", 15 * 60)) && !sessionBarOverdue("2026-09-08", wall("2026-09-08", 17 * 60)) &&
      !sessionBarOverdue(null, wall("2026-09-08", 17 * 60)) && !sessionBarOverdue("2026-09-04", wall("2026-09-12", 17 * 60)),
      "and not before the close, on the session's own day, with no session, or on a Saturday");
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(/gate\.skip && sessionBarOverdue\(sessionDate, wall\)/.test(src), "main asks that function");
   ok(!/Intl\.DateTimeFormat|isWeekday\(|function nextWeekday|function priorWeekdays/.test(src),
      "and the pipeline keeps no clock or weekday calendar of its own");

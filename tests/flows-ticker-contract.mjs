@@ -12,6 +12,7 @@ import { earningsHistory } from "../shared/flows-catalysts.js";
 import { cardXPayload } from "../scripts/flows-legs/card-x.mjs";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { nightlySource, slice } from "./lib/source-scan.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -200,10 +201,8 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
     ok(p.question && p.question.trim().length > 8, `panel "${p.key}" states a real question`);
     ok(p.title && p.title.trim().length > 2, `panel "${p.key}" has a title`);
   }
-  const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
-  const shedFrom = pipe.indexOf("export const CARD_SHED = Object.freeze([");
-  ok(shedFrom > 0, "the pipeline still declares its shed ladder as `export const CARD_SHED = Object.freeze([`");
-  const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n]);", shedFrom));
+  const shedBlock = slice(nightlySource(), "export const CARD_SHED = Object.freeze([", "\n]);");
+  ok(shedBlock.length > 0, "the pipeline still declares its shed ladder as `export const CARD_SHED = Object.freeze([`");
   let shedNamed = 0;
   const regKeys = new Set(TICKER_PANELS.map((p) => p.key));
   for (const m of shedBlock.matchAll(/\[\s*"([A-Za-z_][A-Za-z0-9_]*)",\s*"dropped to fit/g)) {

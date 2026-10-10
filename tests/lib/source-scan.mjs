@@ -88,6 +88,16 @@ export const closureSource = (entry) => joinSources(closure(entry));
 export const workerSource = () => closureSource("worker.js");
 export const pipelineSource = () => closureSource("scripts/flows-pipeline.mjs");
 
+export const NIGHTLY_ENTRY = "scripts/flows-pipeline.mjs";
+export const NIGHTLY_DIR = "scripts/flows-nightly";
+export const nightlyFiles = () => [NIGHTLY_ENTRY, ...treeFiles(NIGHTLY_DIR)];
+export const nightlySource = () => joinSources(nightlyFiles());
+export const nightlySlice = (startMarker, endMarker) => {
+  const cut = slice(nightlySource(), startMarker, endMarker);
+  if (!cut.trim()) throw new Error(`source-scan: the slice from ${JSON.stringify(startMarker)} is empty`);
+  return cut;
+};
+
 const globalOf = (pattern) => {
   if (typeof pattern === "string") return new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
   if (!(pattern instanceof RegExp)) throw new TypeError("source-scan: a pattern is a string or a RegExp");

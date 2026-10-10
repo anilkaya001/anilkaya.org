@@ -11,6 +11,7 @@ import {
 } from "../shared/flows-card.js";
 import { STATE_LINES } from "../shared/flows-neuron.js";
 import { readFileSync, readdirSync } from "node:fs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import { horizonMove } from "../shared/flows-features.js";
 import { blackScholesGreeks } from "../shared/flows-variation.js";
 import { buildAggressor } from "../shared/flows-chain.js";
@@ -1578,7 +1579,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE), { spot: 200 }).truncated === true,
      "UW-F12: a ladder that fills the vendor's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE - 1), { spot: 200 }).truncated === false, "and one row short of a full page is not");
-  const pipe = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const pipe = nightlySource();
   ok(/spot-exposures\/strike`, \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),
      "and the nightly asks for exactly that page through the same constant");
 

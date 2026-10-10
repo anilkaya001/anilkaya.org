@@ -37,7 +37,7 @@ import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-l
 import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
-import { workerSource } from "./lib/source-scan.mjs";
+import { workerSource, nightlySource, treeFiles, moduleSource } from "./lib/source-scan.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { createRouter } from "../server/router.js";
 
@@ -919,10 +919,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(table.includes("/api/flows/card-x"), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));
   for (const src of legs) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "leg modules carry no comments");
-  const nightly = fs.readdirSync(path.join(ROOT, "scripts/flows-nightly")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-nightly", f), "utf8"));
-  ok(nightly.length > 0, "the nightly's own modules are found");
+  const nightly = treeFiles("scripts/flows-nightly").map((f) => moduleSource(f));
+  ok(nightly.length > 0, "the nightly's own modules are found, in every directory under scripts/flows-nightly");
   for (const src of nightly) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "nightly modules carry no comments");
-  const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
+  const pipe = nightlySource();
   ok(pipe.includes("harvest: harvest || universeSource"),
     "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
   ok(/await stages\.run\("market-universe", \(\) => publish\("universe", marketLegs\.universe\), \(error\) => \{/.test(pipe) &&

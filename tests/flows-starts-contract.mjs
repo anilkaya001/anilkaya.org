@@ -24,6 +24,7 @@ import {
 import { fakeWorld, fakeGithub, liveGroup } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
 import { LIVE_VENDOR, RATE } from "../scripts/flows-pipeline.mjs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
 
 const ROOT = new URL("../", import.meta.url);
@@ -774,7 +775,7 @@ const MIN = 60 * 1000;
     "while three ticks on which every read fails, each tried twice, still open the probe issue, and it closes when reads return");
   ok(by("one pending answer").issues.length === 1 && by("one pending answer").closed === 1 && !by("after midnight").problems.length &&
      by("after midnight").closed === 1, "a pending answer from meta is a lapse only when it repeats, and a nightly that lands after midnight closes its issue");
-  const src = read("scripts/flows-pipeline.mjs");
+  const src = nightlySource();
   ok(/if \(DRY_RUN\) \{\s*const ticks = await dryLiveTicks\(\{ publish, store: publishedStore, shapeNews \}\);\s*const day = await dryLiveDay\(\{\}\);/.test(src) &&
      /if \(day\.problems\.length\) \{[\s\S]*?process\.exitCode = 1;/.test(src),
   "--live --dry-run runs the days and exits non-zero when one breaks its expectation");
@@ -1123,7 +1124,7 @@ const MIN = 60 * 1000;
      tickRefused.told[0].chained.why === "refused" && tickRefused.loop.exit === "hung" && tickRefused.wallMs < 5000 &&
      tickRefused.notes.some((l) => /the witness could not report the hung watch tick 2 within 0\.15 s/.test(l)),
   "a hung watch tick whose successor was dispatched raises nothing (the successor's watch is the report), one whose dispatch was refused is reported, and a report that itself hangs is held to a tick's deadline");
-  const pipelineSrc = read("scripts/flows-pipeline.mjs");
+  const pipelineSrc = nightlySource();
   ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
     "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
   ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} vendor request\(s\) timed out/.test(pipelineSrc) &&
@@ -1522,7 +1523,7 @@ const MIN = 60 * 1000;
   `], { encoding: "utf8", env: { ...process.env, UW_API_KEY: "k" } });
   seen.push(child.stdout.trim());
   eq(seen[0], '{"signal":false}', "THE NIGHTLY'S CLIENT is untouched: no deadline outside --live");
-  const src = read("scripts/flows-pipeline.mjs");
+  const src = nightlySource();
   ok(/const keep = process\.env\.FLOWS_LIVE_KEEP === "1";/.test(src) && /chainWithRetry\(\(\) => chainDispatch\(\{ env: process\.env, at \}\)\)/.test(src) &&
      /createWatch\(\{ readOnce: readStoredOnce, latestClock: \(\) => clockBody, env: process\.env \}\)/.test(src),
   "AND THE WATCH is built only when the workflow asks to keep the loop alive, from the same single-try read the clock uses");
@@ -1581,7 +1582,7 @@ const MIN = 60 * 1000;
   const bad = await runCli(`http://127.0.0.1:${relay.address().port}`);
   ok(bad.status === 1 && /witness drill: FAILED/.test(bad.out), "and it exits red when the channel is broken, which is what a drill is for");
   relay.close();
-  const src = read("scripts/flows-pipeline.mjs");
+  const src = nightlySource();
   ok(/if \(process\.env\.FLOWS_LIVE_DRILL === "1" && !DRY_RUN\) return runWitnessDrill\(\);\n  console\.log\(DRY_RUN/.test(src),
     "the drill is decided before the vendor key and the live credential are demanded, and never in a dry run");
 }

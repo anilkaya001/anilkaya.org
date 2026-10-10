@@ -7,7 +7,7 @@ import {
 } from "../shared/flows-alerts.js";
 import { briefAlertsFact } from "../shared/flows-brief.js";
 import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
-import { workerSource, slice, expect, absent, closure, moduleSource } from "./lib/source-scan.mjs";
+import { workerSource, nightlySource, slice, expect, absent, closure, moduleSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -806,7 +806,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(nightlyAlerts(read, { payload: null, absent: true }, { sessionDate: DAY }).mode, "snapshot",
     "and so is an empty store");
 
-  const pipeline = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const pipeline = nightlySource();
   ok(/nightlyAlerts\(alerts, await readHeldAlerts\(readStored, sessionDate\)/.test(pipeline),
     "the pipeline reads the held record before it writes the key — the day's live:alerts union " +
     "when it covers this session, the stored nightly feed otherwise");

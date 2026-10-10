@@ -26,7 +26,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
-import { workerSource, closure, importEdges, slice, where, absent, expect, moduleSource } from "./lib/source-scan.mjs";
+import { workerSource, nightlySource, closure, importEdges, slice, where, absent, expect, moduleSource } from "./lib/source-scan.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -716,7 +716,7 @@ const cronMinutes = (cron) => {
   const worker = workerSource();
   const liveWorker = read("shared/flows-live-worker.js");
   const leg = read("scripts/flows-legs/live.mjs");
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   const writes = /(INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM)\s+flows_payload/;
   ok(!writes.test(liveWorker),
     "LAYER 1 (code): the Worker's live module never writes flows_payload — only SELECTs the nightly rows it overlays");
@@ -1527,8 +1527,7 @@ const cronMinutes = (cron) => {
   const otherRunner = { ...env, ACTIONS_ID_TOKEN_REQUEST_URL: "https://pipelines.actions.githubusercontent.com/y/idtoken?api-version=2.0" };
   await liveCredential({ env: otherRunner, now: later, fetchImpl: idFetch });
   eq(requests.length, 2, "and a token is bound to the runner that minted it: another request URL mints its own");
-  const pipelineSrc = read("scripts/flows-pipeline.mjs");
-  const liveModeBody = pipelineSrc.slice(pipelineSrc.indexOf("async function runLiveMode"), pipelineSrc.indexOf("async function main"));
+  const liveModeBody = slice(nightlySource(), "async function runLiveMode", "async function main");
   ok(liveModeBody.length > 0 && !/liveCredential\(/.test(liveModeBody),
     "LAZY: --live mints nothing before runLive decides to run, so an out-of-window or recently-beaten run never " +
     "depends on GitHub's token service");
@@ -2275,7 +2274,7 @@ const cronMinutes = (cron) => {
     eq((await chainDispatch({ env: { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "a/b" },
       fetchImpl: async () => ({ status: 403 }) })).why, "refused", "a refused dispatch is reported, not thrown");
   }
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   ok(/pass: async \(\{ first, clock \}\) => \{\s*resetPublishRetryBudget\(\);/.test(pipeline),
     "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
       "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
@@ -2880,8 +2879,8 @@ const cronMinutes = (cron) => {
   ok(gate.failures.length === 0 && lines[0] === "health gate: checked; 0 failure(s)" &&
      gateReads.join() === "clock,live:market,live:focus,live:heartbeat,live:strips:series",
     "runHealthGate reads the clock, live:market, live:focus, live:heartbeat and the strips series (for its quote-lag note) through the ingest route and prints one line");
-  const pipeline = read("scripts/flows-pipeline.mjs");
-  const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
+  const pipeline = nightlySource();
+  const tail = slice(pipeline, "async function main()", "\nexport {\n");
   ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*stages\.finish\(\);\s*activeStages = null;\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*if \(metaBody\) \{\s*const outside = stages\.outside\(\);\s*try \{\s*await publish\("meta", \{\s*\.\.\.metaBody,\s*stages: stages\.records\(\),[\s\S]*?health: healthRecord\(health\),\s*\}\);\s*\} catch \(error\) \{\s*console\.warn(`  meta: \$\{error\.message\}`);\s*\}\s*\}\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*$/
     .test(tail), "THE NIGHTLY ENDS WITH META: the gate runs after every other key is published, turns the run red on any failure " +
     "before the last write, and meta is that write, carrying the stage records and the gate's verdict, with the edge 403s counted " +
