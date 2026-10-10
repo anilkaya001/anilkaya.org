@@ -12,7 +12,12 @@ import {
 } from "../shared/flows-unusual.js";
 import { buildChainPanels, buildTopContracts, buildAggressor } from "../shared/flows-chain.js";
 import { daysToExpiry, SHARES_PER_CONTRACT } from "../shared/flows-premium.js";
-import { fakeChain, screenerTilt } from "../scripts/flows-pipeline.mjs";
+import {
+  ACTIVITY_CLASSES, ACTIVITY_FIELDS, ACTIVITY_LIMIT, ACTIVITY_ROWS, ACTIVITY_PER_NAME, ACTIVITY_NOTES,
+  activityKey, activityBasis, buildActivityRows, rankActivity, mergeActivity, activityBlock,
+} from "../shared/flows-activity.js";
+import { readActivity, activityRequest, activityEnabled, errorCodeOf, ACTIVITY_PATH } from "../scripts/flows-legs/activity.mjs";
+import { fakeChain, screenerTilt, unusualContractId, callModel, CALL_COST, NOMINAL_SHAPE } from "../scripts/flows-pipeline.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -607,6 +612,7 @@ const rebuild = (em) => {
     { path: "basis.unit", word: "trade", near: /counter, not a trade/i },
     { path: "basis.unit", word: "sweep", near: /no sweep flag/i },
     { path: "basis.refusals", word: "smart money", near: /No\s+[“"']?smart money/i },
+    { path: "basis.activity", word: "sweep", near: /Sweep-coded volume, floor-coded volume/i },
 
   ];
   const used = new Set();
@@ -862,6 +868,143 @@ const rebuild = (em) => {
 }
 
 {
+  const SESSION = "2026-08-24";
+  const sym = (t, yymmdd, cp, strike) => `${t}${yymmdd}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`;
+  const vendor = (over = {}) => ({
+    option_symbol: sym("AAA", "260918", "C", 100), volume: 1000, open_interest: 500, premium: "1250000.00",
+    ask_side_volume: 600, bid_side_volume: 200, mid_volume: 150, no_side_volume: 50,
+    sweep_volume: 400, floor_volume: 50, multileg_volume: 100, stock_multi_leg_volume: 10, cross_volume: 0,
+    last_fill: "2026-08-24T19:59:00Z", ...over,
+  });
+  const built = (rows) => buildActivityRows(rows, { sessionDate: SESSION });
+
+  const one = built([vendor()]);
+  deep(one.rows[0], { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 500, vor: 2, pm: 1250000, lift: 0.75, cls: [400, 50, 100, 10, 0] },
+    "a vendor row becomes one compact row: strike from the symbol, vor from volume over open interest, the executed premium in whole dollars, " +
+    "the offer share of the classified legs, and the five class volumes in the published order");
+  deep(ACTIVITY_CLASSES, ["sweep", "floor", "multileg", "stockMultileg", "cross"], "the class order is a published contract");
+  deep(ACTIVITY_FIELDS, ["sweep_volume", "floor_volume", "multileg_volume", "stock_multi_leg_volume", "cross_volume"],
+    "and reads the vendor's five volume fields in that order");
+
+  const refuse = built([
+    vendor({ option_symbol: "not a symbol" }), vendor({ volume: 0 }), vendor({ volume: null }), null,
+    vendor({ sweep_volume: 5000 }), vendor({ floor_volume: -3 }), vendor({ cross_volume: "x" }),
+  ]);
+  eq(refuse.refused.symbol, 2, "a row without a parseable option symbol, or no row at all, is refused and counted");
+  eq(refuse.refused.volume, 2, "so is a row with no positive volume");
+  eq(refuse.refused.cls, 2, "a class volume above the contract's volume, or negative, is refused and counted");
+  deep(refuse.rows.map((r) => r.cls), [[null, 50, 100, 10, 0], [400, null, 100, 10, 0], [400, 50, 100, 10, null]],
+    "and only that class is withheld as null: the row and its other classes stand");
+  eq(refuse.seen, 7, "the count of rows read includes every refusal");
+
+  const days = built([
+    vendor({ last_fill: "2026-08-25T00:30:00Z" }), vendor({ last_fill: "2026-08-24T04:30:00Z" }),
+    vendor({ last_fill: "2026-08-23T23:00:00Z" }), vendor({ last_fill: "2026-08-25T04:00:00Z" }), vendor({ last_fill: null }),
+  ]);
+  eq(days.rows.length, 3, "a last fill is judged on its Eastern day: 00:30Z on the 25th is 20:30 on the 24th (kept), 04:30Z on the 24th is 00:30 (kept), " +
+    "23:00Z on the 23rd and 04:00Z on the 25th are other days (dropped)");
+  eq(days.offDate, 2, "the dropped rows are counted");
+  eq(days.undated, 1, "a row with no last fill is kept and counted as undated, never given a date");
+  eq(built([vendor({ ask_side_volume: null })]).rows[0].lift, null, "a missing leg withholds the offer share rather than printing it balanced");
+  eq(built([vendor({ open_interest: 0 })]).rows[0].vor, null, "and zero open interest withholds the ratio");
+  eq(built([vendor({ premium: "abc" })]).rows[0].pm, null, "an unreadable premium is null, never zero");
+  deep(buildActivityRows([vendor()], {}).rows.length, 1, "with no session date nothing is judged off-day");
+
+  const many = [];
+  for (const [t, prem] of [["AAA", 900], ["AAA", 800], ["AAA", 700], ["AAA", 600], ["BBB", 500], ["CCC", null], ["DDD", 400]]) {
+    many.push(vendor({ option_symbol: sym(t, "260918", "C", 100 + many.length), premium: prem === null ? null : String(prem * 1000), volume: 1000 + many.length }));
+  }
+  const ranked = rankActivity(built(many).rows);
+  deep(ranked.rows.map((r) => r.t + ":" + r.pm), ["AAA:900000", "AAA:800000", "AAA:700000", "BBB:500000", "DDD:400000", "CCC:null"],
+    "ranked by executed premium, largest first; a row with no premium sorts last; the per-name allowance drops the fourth AAA line");
+  eq(ranked.capBound, "perName", "and the list says the per-name allowance bound it");
+  eq(ranked.perName, ACTIVITY_PER_NAME, "at the published allowance");
+  eq(rankActivity(built(many).rows, { cap: 2 }).capBound, "rows", "a row cap that bites is reported as the row cap");
+  eq(rankActivity(built(many.slice(4)).rows).capBound, "eligible", "neither cap biting is reported as neither");
+  ok(ACTIVITY_ROWS <= 30 && ACTIVITY_LIMIT === 200, "the screen is read at the vendor's maximum page and 30 rows are published");
+
+  const contractsRows = [
+    { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 500 },
+    { t: "AAA", k: 100, expiry: "2026-09-18", cp: "P", vol: 1000, oi: 500 },
+    { t: "BBB", k: 50, expiry: "2026-10-16", cp: "P", vol: 400, oi: 100 },
+  ];
+  const mm = mergeActivity(contractsRows, one.rows);
+  deep([mm.matched, mm.contracts], [1, 3], "one of three ranked contracts is in the dated screen");
+  deep(contractsRows[0].cls, [400, 50, 100, 10, 0], "the matched row carries its classes");
+  eq(contractsRows[0].pm, 1250000, "and its executed premium");
+  ok(!("cls" in contractsRows[1]) && !("cls" in contractsRows[2]), "an unmatched row gets no class key: absence is not zero");
+  eq(activityKey(contractsRows[0]), unusualContractId(contractsRows[0]), "the join key is the pipeline's own contract id, so the two feeds cannot drift apart");
+  eq(activityKey({ t: "AAA", k: "x", expiry: "2026-09-18", cp: "C" }), null, "a row without a numeric strike has no key");
+  eq(activityKey({ t: "AAA", k: 1, expiry: "2026-09-18", cp: "X" }), null, "nor one without a side");
+
+  const okBlock = activityBlock({ status: "ok", sessionDate: SESSION, readAt: "r", built: one, ranked: rankActivity(one.rows), matched: mm });
+  deep([okBlock.status, okBlock.asOf, okBlock.returned, okBlock.kept, okBlock.matched, okBlock.of, okBlock.capBound], ["ok", SESSION, 1, 1, 1, 3, false],
+    "the published block carries its as-of day, what was read and kept, and how many ranked rows it matched");
+  eq(activityBlock({ status: "ok", sessionDate: SESSION, built: { ...one, seen: ACTIVITY_LIMIT }, ranked: rankActivity(one.rows), matched: mm }).capBound, true,
+    "a full page from the vendor is reported as possibly cut short");
+  deep(activityBlock({ status: "unavailable", code: "refused", sessionDate: SESSION }).rows, [], "an unavailable block carries no rows");
+  eq(activityBlock({ status: "off", code: "off", sessionDate: SESSION }).code, "off", "and an off block says it is off");
+  eq(activityBasis(), [ACTIVITY_NOTES.unit, ACTIVITY_NOTES.date, ACTIVITY_NOTES.classes, ACTIVITY_NOTES.population].join(" "),
+    "the basis text is the four notes in order");
+  ok(!/\b(today|this session|the day['’`]s)\b/i.test(activityBasis()), "and says no 'today' or 'this session'");
+
+  const calls = [];
+  const uw = (path, params) => { calls.push({ path, params }); return Promise.resolve([vendor()]); };
+  const read = await readActivity({ uw, sessionDate: SESSION, contractRows: [], enabled: true, now: () => "t0" });
+  eq(read.calls, 1, "the dated read is exactly one vendor call");
+  deep(calls[0], { path: "/api/option-activity/unusual", params: { date: SESSION, limit: 200, order: "premium", order_direction: "desc" } },
+    "to the dated screen, for the session, at the vendor's page maximum, largest premium first");
+  deep(activityRequest(SESSION), { path: ACTIVITY_PATH, params: calls[0].params }, "and activityRequest is that request");
+  eq(read.block.status, "ok", "with an ok block");
+  eq(read.block.readAt, "t0", "stamped with when it was read");
+  for (const [message, want] of [["vendor HTTP 403 forbidden", "refused"], ["HTTP 422", "refused"], ["HTTP 429", "read-failed"], ["HTTP 500", "read-failed"], ["socket hang up", "read-failed"]]) {
+    const r = await readActivity({ uw: () => Promise.reject(new Error(message)), sessionDate: SESSION, contractRows: [], enabled: true });
+    deep([r.block.status, r.block.code, r.calls], ["unavailable", want, 1], `a failed read (${message}) is unavailable as ${want}, one call spent, nothing thrown`);
+  }
+  eq(errorCodeOf(new Error("HTTP 403")).http, 403, "the status of a refusal is kept");
+  const nonArray = await readActivity({ uw: () => Promise.resolve({ data: [] }), sessionDate: SESSION, contractRows: [], enabled: true });
+  eq(nonArray.block.code, "unreadable-body", "a body that is not rows is unreadable");
+  const empty = await readActivity({ uw: () => Promise.resolve([]), sessionDate: SESSION, contractRows: [], enabled: true });
+  deep([empty.block.status, empty.block.code], ["quiet", "no-rows"], "an empty screen is quiet, and says no rows");
+  const wrongDay = await readActivity({ uw: () => Promise.resolve([vendor({ last_fill: "2026-08-20T19:00:00Z" })]), sessionDate: SESSION, contractRows: [], enabled: true });
+  deep([wrongDay.block.status, wrongDay.block.code, wrongDay.block.offDate], ["quiet", "off-session", 1], "a screen whose every row is from another day is quiet as off-session, with the drop counted");
+  calls.length = 0;
+  const off = await readActivity({ uw, sessionDate: SESSION, contractRows: [], enabled: false });
+  deep([off.block.status, off.calls, calls.length], ["off", 0, 0], "switched off, the read makes no call at all");
+  eq(activityEnabled({}), true, "the dated read is on unless switched off");
+  eq(activityEnabled({ FLOWS_UNUSUAL_V2: "off" }), false, "FLOWS_UNUSUAL_V2=off switches it off");
+  eq(activityEnabled({ FLOWS_UNUSUAL_V2: " OFF " }), false, "whatever the case or spacing");
+  eq(activityEnabled({ FLOWS_UNUSUAL_V2: "on" }), true, "and anything else leaves it on");
+
+  eq(CALL_COST.activity, 1, "the call model counts the dated read");
+  eq(callModel(NOMINAL_SHAPE).legs.activity, 1, "as one call in the nightly's budget");
+}
+
+{
+  const A = PAYLOAD.activity;
+  eq(A.status, "ok", "the emitted feed carries a dated activity block");
+  eq(A.asOf, PAYLOAD.sessionDate, "dated to the feed's own session");
+  eq(A.v, 1, "at schema version 1");
+  deep(A.order, ACTIVITY_CLASSES, "naming its class order");
+  ok(A.offDate >= 1, `a row from another day in the screen was dropped and counted (${A.offDate})`);
+  ok(A.rows.length > 0 && A.rows.length <= ACTIVITY_ROWS, `and at most ${ACTIVITY_ROWS} rows are published (${A.rows.length})`);
+  ok(A.rows.every((r) => Array.isArray(r.cls) && r.cls.length === ACTIVITY_CLASSES.length), "each with all five class slots");
+  ok(A.rows.every((r) => r.cls.every((c) => c === null || (c >= 0 && c <= r.vol))), "none above the contract's own volume");
+  ok(A.rows.some((r) => !PAYLOAD.contracts.rows.some((c) => activityKey(c) === activityKey(r))),
+    "the screen reaches a contract the volume-over-open-interest list does not: the two selections are independent");
+  const carrying = PAYLOAD.contracts.rows.filter((r) => Array.isArray(r.cls));
+  eq(carrying.length, A.matched, "the ranked rows carrying classes are exactly the matched count");
+  ok(carrying.length > 0 && carrying.length < PAYLOAD.contracts.rows.length, "some ranked rows are matched and some are not");
+  ok(carrying.every((r) => typeof r.pm === "number" || r.pm === null), "a matched row carries its executed premium or null");
+  eq(PAYLOAD.contracts.rows.filter((r) => !Array.isArray(r.cls)).every((r) => !("pm" in r)), true, "an unmatched row carries neither");
+  eq(PAYLOAD.basis.activity, activityBasis(), "the basis names the dated unit and its limits");
+  ok(JSON.stringify(A).length < 8192, `the block fits an 8 KiB ceiling (${JSON.stringify(A).length} bytes)`);
+  ok(/no date parameter/i.test(PAYLOAD.volumeAsOfReason) && /^the chain endpoint/.test(PAYLOAD.volumeAsOfReason),
+    "and the chain counter's own missing date is still said, now naming the chain endpoint it belongs to");
+  eq(PAYLOAD.volumeAsOf, null, "volumeAsOf stays null: the chain counter is still undated, and the dated unit has its own asOf");
+}
+
+{
   const { chromium } = await import("playwright");
   const { signSession } = await import("../shared/session.js");
   const { startWorker, SESSION_SECRET, FLOWS_TEST_USER } =
@@ -890,15 +1033,24 @@ const rebuild = (em) => {
   await put("unusual", {
     v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", status: "ok",
     contracts: {
-      rows: [contract("AAA", "C", 100, "2026-09-18", 900, "long"),
+      rows: [{ ...contract("AAA", "C", 100, "2026-09-18", 900, "long"), cls: [360, 45, 90, 0, 0], pm: 1250000 },
              contract("BBB", "P", 50, "2026-10-16", 400)],
       shown: 2, eligible: 2, cap: 60, perName: 30, capBound: null,
+    },
+    activity: {
+      v: 1, status: "ok", code: null, asOf: "2026-08-31", readAt: "2026-09-01T06:00:00Z", order: ACTIVITY_CLASSES, limit: 200,
+      returned: 3, kept: 2, offDate: 1, undated: 0, refused: { symbol: 0, volume: 0, cls: 0 }, capBound: false, matched: 1, of: 2, shown: 2, perName: 3,
+      rows: [
+        { t: "ZZZ", k: 50, expiry: "2026-09-25", cp: "C", vol: 900, oi: 400, vor: 2.25, pm: 512000, lift: 0.875, cls: [300, 0, 100, 0, 0] },
+        { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 900, oi: 100, vor: 9, pm: 1250000, lift: 0.75, cls: [360, 45, 90, 0, 0] },
+      ],
     },
     coverage: [{ t: "AAA", rows: 400 }, { t: "BBB", rows: 300 }],
     namesSeen: 2, dteAnchor: "sessionDate",
     names: { rows: [], universe: 2, ranked: 2, unranked: 0, shown: 0, earningsGated: 0 },
     basis: { unit: "A contract counter, and not a trade.",
-             date: "no date parameter, the span is unobserved, readAt is when it was read" },
+             date: "no date parameter, the span is unobserved, readAt is when it was read",
+             activity: activityBasis() },
   });
   await put("flowalerts", {
     v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly",
@@ -975,7 +1127,32 @@ const rebuild = (em) => {
         bubbles: document.querySelectorAll("#uaTimeline .fu-b").length,
       };
     });
-    eq(first.overflow, 0, "nothing overflows at 320px with the filter group on the page");
+    eq(first.overflow, 0, "nothing overflows at 320px with the filter group on the page, the dated list included");
+    const dated = await page.evaluate(() => {
+      const rowOf = (t) => [...document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)")].find((r) => r.dataset.t === t);
+      return {
+        aaa: rowOf("AAA").getAttribute("title"), bbb: rowOf("BBB").getAttribute("title"),
+        head: (document.querySelector("#uaFeed .fu-arow.fu-head") || { textContent: "" }).textContent,
+        list: [...document.querySelectorAll("#uaFeed .fu-arow:not(.fu-head)")].map((r) => ({ title: r.getAttribute("title"), text: r.textContent.replace(/\s+/g, " ").trim() })),
+        feedRows: document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)").length,
+      };
+    });
+    ok(/by exchange code, as of .*40% sweep-coded, 5% floor-coded, 10% multi-leg; premium \$1\.\d+M/.test(dated.aaa),
+      `a ranked row that is also in the dated screen names its exchange-code shares, the day they are as of and its premium in its description (${dated.aaa})`);
+    ok(!/exchange code/.test(dated.bbb), `a ranked row that is not in it says nothing of classes (${dated.bbb})`);
+    eq(dated.feedRows, 2, "and the dated list's rows are not counted among the ranked contracts");
+    ok(/Largest by premium/.test(dated.head), `the dated screen's own largest contracts have a heading that says so (${dated.head})`);
+    eq(dated.list.length, 2, "with a row each");
+    ok(/ZZZ/.test(dated.list[0].text) && /33% sweep-coded/.test(dated.list[0].text), `the first is the largest premium and shows its main code share (${dated.list[0].text})`);
+    ok(/\$512K/.test(dated.list[0].text) || /\$0\.5/.test(dated.list[0].text), `with its premium (${dated.list[0].text})`);
+    ok(/multi-leg/.test(dated.list[0].title) && /sweep-coded/.test(dated.list[0].title), "and every code it carried in its description");
+    await page.evaluate(() => document.querySelector("#uaFeedCard .ui-mod-h > .ui-info").click());
+    await page.waitForSelector("#fxPop:popover-open");
+    const popText = await page.evaluate(() => document.getElementById("fxPop").textContent.replace(/\s+/g, " "));
+    ok(/Exchange-code unit.*as of 2026-08-31; 1 of 2 ranked contracts matched, 2 of 3 screen rows kept, 1 from another day dropped/.test(popText),
+      `the feed's disclosure states the dated unit, its as-of day and what matched and what was dropped (${popText.slice(0, 400)})`);
+    ok(/The dated exchange-code unit/.test(popText) && /second, independent selection/.test(popText), "and carries the unit's own method paragraph from the payload's basis");
+    await page.evaluate(() => window.FlowsUI.closeInfo());
     eq(thrown.length, 0, `the page threw nothing: ${thrown.join("; ")}`);
 
     eq(first.bubbles, 2, "the timeline draws one bubble per flagged window that states a time");
@@ -1114,6 +1291,7 @@ const rebuild = (em) => {
         nameMark: document.getElementById("uaSurpriseCard").dataset.state,
         alertMark: document.getElementById("uaTimelineCard").dataset.state,
         filterNote: document.getElementById("uaFilterNote").textContent,
+        datedRows: document.querySelectorAll("#uaFeed .fu-arow").length,
       }));
       out.feedWhy = await why(p, "uaFeedCard");
       out.nameWhy = await why(p, "uaSurpriseCard");
@@ -1142,6 +1320,7 @@ const rebuild = (em) => {
     ok(!/\d/.test(noContracts.status),
        `AND IT CARRIES NO DIGIT. "0 contracts from 0 names" is three counts taken off a block that is not on the wire — got: ${noContracts.status}`);
     eq(noContracts.feedMark, "unavailable", "and the feed module wears the unavailable glyph rather than the quiet one");
+    eq(noContracts.datedRows, 0, "and a payload with no dated block draws no dated list");
     ok(!/floors/.test(String(noContracts.feedPop)),
        `with no disclosure counting a population that was never published — got: ${noContracts.feedPop}`);
     ok(!/Both tables show every row published/.test(noContracts.filterNote),

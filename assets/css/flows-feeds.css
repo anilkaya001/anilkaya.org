@@ -121,6 +121,9 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fu-urow { grid-template-columns: minmax(128px, 1fr) minmax(60px, 1.5fr) 56px; }
 .fu-crow { grid-template-columns: 22px minmax(92px, 1.4fr) minmax(50px, 1.6fr) 48px 52px; }
 .fu-srow { grid-template-columns: minmax(70px, 1fr) minmax(90px, 2.4fr) 44px; }
+.fu-arow { display: grid; grid-template-columns: 22px minmax(0, 1.4fr) minmax(48px, auto) minmax(0, 1.2fr); align-items: center; gap: 10px; min-height: 40px; border-bottom: 1px solid var(--sep); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+.fu-arow.fu-head { min-height: 24px; }
+.fu-arow .fu-wide { overflow: hidden; text-overflow: ellipsis; }
 .fu-v { text-align: right; white-space: nowrap; color: var(--label-2); }
 .fu-v[data-tone] { color: var(--tone); }
 .fu-strong { color: var(--label-1); font-weight: 600; }
@@ -197,6 +200,8 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
   .fu-crow { grid-template-columns: 22px minmax(0, 1.7fr) minmax(36px, 0.8fr) 46px; }
   .fu-crow .fu-wide { display: none; }
   .fu-crow.fu-head > :nth-child(3) { visibility: hidden; }
+  .fu-arow { grid-template-columns: 22px minmax(0, 1.6fr) minmax(48px, auto); }
+  .fu-arow .fu-wide { display: none; }
 }
 
 .fe-week {

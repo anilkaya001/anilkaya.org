@@ -30,6 +30,8 @@ import {
   rankUnusual, rankUnusualNames, describeOiBasis, poolOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
+import { activityBasis } from "../shared/flows-activity.js";
+import { readActivity, activityEnabled } from "./flows-legs/activity.mjs";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
 import { buildFlowAlerts, ALERT_ROWS, alertBand, nightlyAlerts } from "../shared/flows-alerts.js";
@@ -170,6 +172,7 @@ export const CALL_COST = Object.freeze({
   flowAlertPages: 12,
   dossier: 13,
   focus: 1,
+  activity: 1,
   misc: 67,
 });
 
@@ -189,6 +192,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     flow: Math.ceil(cost.flowPerDeep * deep) + cost.flowPerCross * cross + cost.flowAlertPages,
     dossiers: cost.dossier * dossiers,
     focus: cost.focus,
+    activity: cost.activity,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
@@ -5908,13 +5912,18 @@ async function main() {
 
     const priorMark = markNewContracts(contracts.rows, priorUnusual, sessionDate);
 
+    const dated = await readActivity({
+      uw, sessionDate, contractRows: contracts.rows, enabled: activityEnabled(), dryRun: DRY_RUN,
+    });
+    const activity = dated.block;
+
     await publish("unusual", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
 
       readAt: generatedAt,
       volumeAsOf: null,
-      volumeAsOfReason: "the endpoint accepts no date parameter and carries no as-of stamp",
+      volumeAsOfReason: "the chain endpoint accepts no date parameter and carries no as-of stamp",
       dteAnchor: "sessionDate",
       status: contracts.shown ? "ok" : (namesSeen ? "quiet" : "pending"),
 
@@ -5935,6 +5944,7 @@ async function main() {
       },
       coverage,
       contracts,
+      activity,
       names: { ...names, earningsGated: withTilt.length - tilted.length },
       basis: {
         unit: UNUSUAL_NOTES.unit,
@@ -5971,6 +5981,7 @@ async function main() {
           "strike: a contract can be absent from the earlier feed because it was quiet, or " +
           "because it sat below the per-name cap on that run.",
         lift: UNUSUAL_NOTES.lift,
+        activity: activityBasis(),
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
         oi: UNUSUAL_NOTES.oi,
@@ -5979,6 +5990,10 @@ async function main() {
         refusals: UNUSUAL_NOTES.refusals,
       },
     });
+    console.log(`  unusual dated classes: ${activity.status}` + (activity.code ? ` (${activity.code})` : "") +
+      (activity.status === "ok" || activity.status === "quiet"
+        ? `; ${activity.returned} row(s) read for ${activity.asOf}, ${activity.kept} kept, ${activity.offDate} off-session dropped, ` +
+          `${activity.matched} of ${activity.of} ranked contract(s) carry classes, ${dated.calls} call(s)` : ""));
     console.log(
       `  unusual: ${contracts.shown} of ${contracts.eligible} contracts over ` +
       `${namesSeen} chain(s) (cap bound by ${contracts.capBound}, ${contracts.perName} per name); ` +
