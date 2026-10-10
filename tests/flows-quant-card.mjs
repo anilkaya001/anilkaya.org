@@ -167,8 +167,20 @@ const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, r
   const pass = (subset, gammaUnit, vendor) => QP.preparePass({ rowsByTicker: new Map([["SYN", subset]]), sessionDate: SESSION, rate: RATE, spotOf: () => SPOT,
     atrOf: () => 2, expiriesOf: () => vendor, ...(gammaUnit ? { gammaUnit } : {}) }).preps.get("SYN").zero;
   const whole = pass(rows, null, expiryRows);
-  ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 3,
-     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%`);
+  ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 2 && whole.why === "flip.convention",
+     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%, and its flip is capped at grade 2 with flip.convention because the sign rests on the vendor's convention`);
+  {
+    const grades = [];
+    const gross = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: 1e12 }).coverage * 1e12;
+    for (const target of [0.2, 0.4, 0.6, 0.8, 0.9, 1, 1.1, 1.5, 3]) {
+      const z = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: gross / target });
+      grades.push([z.coverage, z.g, z.why]);
+    }
+    ok(grades.every(([, g]) => g <= 2), `no flip is graded 3 at any coverage (${grades.map((x) => x.join("/")).join(" ")})`);
+    ok(grades.some(([c, g, w]) => c >= 0.85 && g === 2 && w === "flip.convention") && grades.some(([c, g, w]) => c >= 0.5 && c < 0.85 && g === 2 && w === "flip.coverage") &&
+       grades.some(([c, g, w]) => c < 0.5 && g === 1 && w === "flip.coverage"),
+       "the coverage stays a second cap: good coverage is held at 2 by the convention, fair coverage keeps flip.coverage at 2 and weak coverage keeps grade 1");
+  }
   const quarter = pass(rows.filter((_, i) => i % 4 === 0), null, expiryRows);
   ok(quarter.coverage > 0.15 && quarter.coverage < 0.4 && quarter.g === 1 && quarter.why === "flip.coverage",
      `and a quarter of the contracts measures ${quarter.coverage} and grades the zero-gamma level weak, where dollars divided by shares published ` +
@@ -309,6 +321,13 @@ const FACT_INPUT = () => ({
     const agree = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: Math.sign(at) * 2e6 } } }).find((f) => f.id === "level.flip");
     const clash = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: -Math.sign(at) * 2e6 } } });
     const cf = clash.find((f) => f.id === "level.flip");
+    {
+      const capped = FACT_INPUT();
+      capped.zero = { ...capped.zero, coverage: 0.95, g: 2, why: "flip.convention" };
+      const facts = QC.engineFacts(capped);
+      const flip = facts.find((f) => f.id === "level.flip"), count = facts.find((f) => f.id === "level.flip.count");
+      ok(flip.g === 2 && flip.why === "flip.convention" && count.g === 2, `engineFacts carries the capped grade to level.flip (g ${flip.g}, ${flip.why}) and level.flip.count (g ${count.g})`);
+    }
     ok(agree.g === input.zero.g && agree.why === (input.zero.why || undefined), "a book whose sign agrees with the profile at spot leaves the flip's grade as the coverage set it");
     ok(cf.g === 1 && cf.why === "flip.sign-at-spot" && clash.find((f) => f.id === "level.flip.count").g <= 1,
        `UW-F9: a book the opposite sign of our own profile at spot caps the flip at grade 1 and says flip.sign-at-spot (g ${cf.g}, ${cf.why})`);

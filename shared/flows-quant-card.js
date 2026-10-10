@@ -11,7 +11,7 @@ import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
   MAX_EXPIRIES: 10, MAX_DTE: 200, MIN_ROWS: 3, SIG: 5,
-  COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
+  COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_CONVENTION_CAP: 2, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
   PUBLISH_STRUCTURES: 5, RATE_MIN_DAYS: 20, RATE_MAX_DAYS: 200, RATE_LO: -0.01, RATE_HI: 0.15,
   XS_MIN_NAMES: 10, IV_PERCENT_LINE: 5, EVENT_MIN_MOVES: 3, EVENT_MIN_JUMP: 1e-4,
   PARITY_SYMBOLS: Object.freeze(["SPX", "SPXW", "SPY"]),
@@ -314,8 +314,8 @@ export function zeroGammaOf(built, { spot, atr = null, vendorGross = null } = {}
   const coverage = fin(vendorGross) && vendorGross > 0 ? gross / vendorGross : null;
   const L = QUANT_CARD_LINES;
   const nearby = prof.flips.filter((x) => !(fin(atr) && atr > 0) || Math.abs(x - spot) <= L.FLIP_NEAR_ATR * atr);
-  const g = coverage === null ? 2 : coverage >= L.COVER_GOOD ? 3 : coverage >= L.COVER_FAIR ? 2 : 1;
-  const why = coverage === null ? "flip.coverage-unmeasured" : coverage < L.COVER_GOOD ? "flip.coverage" : null;
+  const g = coverage === null ? 2 : coverage >= L.COVER_GOOD ? L.FLIP_CONVENTION_CAP : coverage >= L.COVER_FAIR ? 2 : 1;
+  const why = coverage === null ? "flip.coverage-unmeasured" : coverage < L.COVER_GOOD ? "flip.coverage" : "flip.convention";
   const stride = L.PROFILE_STRIDE;
   const px = [], gx = [];
   for (let i = 0; i < prof.grid.length; i += stride) { px.push(dp(prof.grid[i], 4)); gx.push(sig(prof.gex[i])); }
