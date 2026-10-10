@@ -57,9 +57,15 @@ Browser ──► Cloudflare edge
   `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET`.
 - Invocation observability is enabled in `wrangler.toml`; application code
   emits structured logs only for unexpected failures and OAuth callback errors.
-- D1 on Workers Free has two daily caps, both reset at 00:00 UTC and both
-  shared by everything on the account, the audit's own queries included:
-  **100,000 rows written and 5,000,000 rows read**. The write cap is priced
+- The account is on Workers Paid (the owner confirmed it on 2026-10-10 from
+  the Cloudflare invoice dated 2026-09-30, period to 2026-10-29). Until that
+  upgrade D1 on Workers Free had two daily caps, both reset at 00:00 UTC and
+  both shared by everything on the account, the audit's own queries included:
+  **100,000 rows written and 5,000,000 rows read**. Paid bills D1 rows against
+  monthly allowances instead of refusing at a daily cap, so read the current
+  figures in the dashboard; the Worker's `503 store_quota` handling and the
+  rows-read ceilings stay as the fuse, and every row budget below is still
+  written in rows. The write cap is priced
   in DEPLOY.md section 10.4b; the read cap was found exceeded on 2026-09-29
   (an audit `SELECT` at about 21:36 UTC failed with error 7500). Who spent it,
   and whether the Worker's own reads and writes were refused, are unverified
@@ -146,6 +152,18 @@ Browser ──► Cloudflare edge
   ticks consult neither; `tests/flows-reads-contract.mjs` and
   `tests/flows-dossier-reads.mjs` hold both sides.
 
+### Vendor key and the project's MCP server
+
+`.mcp.json` registers the vendor's hosted MCP server
+(`https://unusualwhales.com/public-api/mcp`) with
+`Authorization: Bearer ${UW_API_KEY}` expanded from the environment of an agent
+session. Nothing in the site, the tests or the workflows reads the file. A
+session with `UW_API_KEY` set can spend the vendor quota through those tools,
+outside the Worker's limiter and the `x-uw-*` accounting that the plan budgets
+against. Builders and reviewers must not call the vendor's tools or endpoints
+unless a row says to, and an agent environment that does not need the vendor
+should not carry the key.
+
 ### External deployment state
 
 Repository files cannot prove Workers Builds branch mapping, dashboard secrets,
@@ -183,13 +201,15 @@ header readback with this repository after any dashboard rule change.
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |
 | `shared/mastery.js` | Server-compatible mastery transition and review-selection contract used by tests. |
 | `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables; the Flows tables, including `flows_live` (only `live:*` ids), `flows_tape`, `flows_clock` and the trigger that makes dated archive rows immutable; the model spend (`flows_ai_usage`, `flows_ai_usage_model`), board summary and Neuron (`flows_ai_summary`, `flows_neuron`) tables. `tests/academy-contract.mjs` builds three `node:sqlite` databases (this file, every `migrations/*.sql` in number order, the Worker's first-use DDL) and holds their tables, columns by name, CHECK clauses (literals compared verbatim), indexes, triggers and views equal; only `users`, `progress` and `stats` have no first-use DDL. Every `CREATE` and `DROP` of a table, index, trigger or view in `worker.js` and `shared/`, whatever its case or spacing, must sit inside a top-level DDL constant the suite evaluates, so inline DDL cannot escape the comparison. Every `ALTER TABLE` in `worker.js` and `shared/` must be one of the sites the suite lists, and each column it adds must be declared with the same type in this file and the migrations. |
-| `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
+| `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, and learning paths (`TOPIC_META`, `TOPIC_BY_ID`, `LEARNING_PATHS`). The browser scoring manifest is the generated `assets/js/stage-catalog.js` (`COURSE_STAGE_POINTS`, `COURSE_STAGE_IDS`). |
 | `assets/js/curriculum.js` | Canonical OLS authoring source. |
 | `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
 | `assets/js/curriculum-questions.js` | Additional authored question stages applied before payload generation. |
-| `assets/data/courses/<topic>.json` | Committed, generated `schemaVersion: 1` payload loaded only for the selected course. |
+| `assets/data/courses/<topic>/manifest.json`, `<topic>/<module>.json`, `<topic>.json` | Committed, generated `schemaVersion: 2` payloads. The course page fetches the manifest and then one file per module, only for the selected course; the whole-course `<topic>.json` is the fallback it requests when the manifest is missing. |
 | `assets/data/review-bank.json` | Generated full assessment bank, loaded only by the Daily Mastery Review page. |
 | `assets/data/placement-bank.json` | Authored 15-item diagnostic bank balanced across five question formats and three difficulty bands. |
+| `scripts/flows-pipeline.mjs`, `scripts/flows-legs/` | The nightly Flows pipeline and its legs (also the `--live` Tier 2 entry), run by GitHub Actions; the Worker only stores what they ingest. |
+| `lab/challenge/`, `lab/projects/<project>/` | The skill-challenge page and the three project pages (`factor-pricing-lab`, `fx-volatility-risk`, `macro-forecasting-desk`); each carries a `data-asset-version` like the other Lab shells. |
 | `scripts/generate-course-payloads.mjs` | Deterministically regenerates course payloads, stable stage IDs, the review bank, browser catalogue, and Worker manifest. |
 | `assets/js/storage.js` | Validated owner-scoped v2 progress/mastery/placement persistence, retry outbox, legacy migration, reset, and in-memory fallback. |
 | `assets/js/lab-core.js` | Pyodide loader, Python editor, execution, output, and figures. |
@@ -253,13 +273,17 @@ header readback with this repository after any dashboard rule change.
 
 ## Curriculum and stage contracts
 
-`window.TOPIC_META` in the lightweight `course-catalog.js` contains exactly:
+`window.TOPIC_META` in the lightweight `course-catalog.js` holds twelve courses
+(365 stages in all, which `tests/contracts.mjs` and `tests/academy-contract.mjs`
+pin):
 
 ```text
 ols 20 · iv2sls 31 · did 29 · var 30 · panel 30 · logit 32 · gmm 33
+foundations 32 · mle 32 · forecast 32 · coint 32 · financial 32
 ```
 
-Every curriculum has four modules. Each module owns ordered stages. The
+The first seven have four modules each and the five newer ones have five. Each
+module owns ordered stages. The
 canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
 `curriculum-questions.js`; neither the catalogue nor the course page downloads
 those heavyweight combined sources. Run this after any authored course change:
@@ -270,7 +294,7 @@ node scripts/generate-course-payloads.mjs
 
 Commit all changed generated course payloads plus `assets/data/review-bank.json`,
 `assets/js/review-catalog.js`, and `shared/review-manifest.js`. The generator
-adds `schemaVersion: 1` and stable per-module stage IDs. Review IDs are globally
+adds `schemaVersion: 2` and stable per-module stage IDs. Review IDs are globally
 namespaced as `<course-id>:<stage-id>`. Current course progress is still stored
 by flattened stage index, so inserting or reordering stages changes the meaning
 of existing progress; append stages or ship an explicit progress migration.
@@ -291,8 +315,8 @@ Default rewards are read 5, code 10, interactive 10, and quiz 15. Authored
 question rewards override defaults: true/false 10, fill-blank 15, numeric 20,
 and multi-select 20. `tests/contracts.mjs` proves that authored curricula,
 generated payloads, the browser manifest, and `shared/course-points.js` remain
-identical. It also requires unique generated stage IDs and caps every course
-payload at 14 KiB gzip.
+identical. It also requires unique generated stage IDs and caps every module
+file at 6,144 bytes gzip.
 
 Both client and server derive points from unique completed stages. This repairs
 legacy local under-counts and stale/tampered totals. Client-submitted point
@@ -363,6 +387,14 @@ Errors use:
 - `GET /api/placement` → `{ placement: { band, score, total, completedDay, recommendedTopic } | null, generation }`
 - `PUT /api/placement` with `X-IEWT-Generation` and the five-field placement summary → `{ ok: true, placement, generation }`
 - `DELETE /api/placement` with `X-IEWT-Generation` → `{ ok: true, placement: null, generation }`
+- `GET /api/v2/bootstrap` → signed-out `200 { user: null }`; signed-in the
+  `/api/bootstrap` fields plus `stableProgress`, `skillMastery`, `preferences`
+  and `projects`, with `generation`
+- `PUT /api/v2/progress` with `X-IEWT-Generation`, body `{ courseId, stageId, complete: true }` → `{ ok: true, courseId, done, generation }`
+- `PUT /api/v2/attempt` with `X-IEWT-Generation`, body `{ skillId, itemId, attemptId, correct, hinted, day }` → `{ ok: true, record, duplicate, generation }`; the attempt ID makes a retry idempotent and a reused ID with different data is `409 attempt_conflict`
+- `PUT /api/v2/preferences` with `X-IEWT-Generation`, body `{ activePathId, sessionMinutes, weeklyGoalMinutes }` → `{ ok: true, preferences, generation }`
+- `PUT /api/v2/project` with `X-IEWT-Generation`, body `{ projectId, mode, completedTaskIds }` → `{ ok: true, project, generation }`
+- The v2 routes follow the same session, owner-header, same-origin and generation rules as the granular routes above.
 - `GET /api/rt/ws`, `/api/rt/snap` and `/api/rt/status` are the Flows real-time
   rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
@@ -811,8 +843,9 @@ not overwrite a streamed one while frames are arriving.
    `tests/worker-regression.mjs` asserts the header is absent. Do not bring it
    back: it empties every returning reader's cache of the immutable assets.
 6. Every `/lab/<valid-course-slug>/` receives an apex-domain canonical, exact
-   title/description, Open Graph/Twitter fields, visible H1 and four-module
-   outline, related course links, and one parseable Course + Breadcrumb JSON-LD
+   title/description, Open Graph/Twitter fields, visible H1 and module
+   outline (four modules for the seven original courses, five for the five
+   newer ones, which share the generic Open Graph image), related course links, and one parseable Course + Breadcrumb JSON-LD
    graph. Generic and invalid legacy routes never return an indexable shell.
 7. Malformed, oversized, wrongly signed, or expired sessions fail closed as an
    anonymous user and never throw a request-level 500.
@@ -911,18 +944,18 @@ npx playwright install chromium
 npm test
 
 # From the repository root: bundle/config validation without deployment
-./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-dry-run
+./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-worker-dry-run
 ```
 
 The suites prove:
 
-- all seven curricula, four modules each, every stage schema, exact generated
-  per-course payloads and IDs, deterministic 96-item review artefacts, the
+- all twelve curricula (four or five modules each), every stage schema, exact generated
+  per-course payloads and IDs, deterministic 106-item review artefacts, the
   balanced 15-item placement bank and sanitized result contract,
   browser/server mastery-scheduler parity, payload-size budgets, scoring
   manifests, owner-scoped v2 migration/reset behavior, local asset
   existence/versioning, and hardened sessions;
-- real Worker-first routing, canonical redirects, all seven crawlable metadata
+- real Worker-first routing, canonical redirects, all twelve crawlable metadata
   and syllabus variants,
   response-cloned asset byte integrity, conditional caching, security headers,
   JSON API errors, OAuth and POST-only logout behavior, D1 user isolation,
@@ -930,7 +963,7 @@ The suites prove:
   idempotency, generation-fenced transactional reset, stale-write rejection,
   and exact derived points;
 - academy cockpit fold visibility, placement routing, command-center metrics,
-  four learning paths, search/level/status filters, all five placement and
+  five learning paths, search/level/status filters, all five placement and
   Daily Mastery Review formats, single-course payload
   isolation, anonymous and signed-in reset safety, no
   horizontal overflow or browser errors across 320/390/768/1440 widths,
@@ -969,8 +1002,9 @@ over a window's runs); and `tests/lib/d1-fake.mjs` (the counting D1 fake over
 plan, rows written, and the fail, throw, hang and slow switches). New CPU
 ceilings and new in-process D1 suites use these rather than another copy.
 
-GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
-manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
+GitHub Actions runs these gates on pushes to `main`, on pull requests, by
+manual dispatch, and on a weekly schedule (`17 6 * * 1`, Monday 06:17 UTC). It
+uses pinned dependencies from `tests/package-lock.json`.
 
 `npm test` is `node run.mjs`, the fail-late runner. It runs every suite
 registered in `tests/suites.json`, in that file's order and with `tests/` as
@@ -1106,6 +1140,10 @@ flows-rt-client          flows-net-render
 run-contract
 ```
 
+`placement-contract` needs Playwright's Chromium but no workerd: it serves the repository's
+static files from its own `http.createServer` on loopback. Run it with
+`PLAYWRIGHT_BROWSERS_PATH` set like the other browser suites.
+
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
 landing script and a snapshot from `page.route` on a fake origin and fixes
 `Date.now` in the page. Run it with `PLAYWRIGHT_BROWSERS_PATH` set like the
@@ -1225,7 +1263,8 @@ on the same counting D1 fake and `node:sqlite` as `flows-reads-contract`, so it
 takes the same Node floor. `flows-readers-render` about 10 s: Chromium against
 stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
-`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
+`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server (192 s
+as the CI median in `tests/suites.json`). It
 was on neither list, so a source scan in it (every ingest call site must
 `await ingestHeaders(`) went unrun until CI caught it.
 
@@ -1310,8 +1349,9 @@ Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-boar
 `flows-watch-render`, `flows-political-render`, `flows-ask-render`,
 `flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
 `flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`placement-contract`, `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
-2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd for the
+`browser` (`npm run test:browser`, `regression.mjs`: Chromium against
+`startWorker()`), `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
+2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`, CI median 22 s; it boots workerd for the
 strategy page and its `engine=1` route), `flows-unusual-contract` (measured on
 2026-09-24: 80–92 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd through
 `startWorker`).
@@ -1328,8 +1368,8 @@ Anything not named in either list has not been measured — run it and find
 out rather than assuming.
 
 **Why this section exists.** `flows-card-render` was filed as needing a
-server. It does not — it renders through `page.setContent` and finishes in
-nine seconds. Because it was skipped locally it went unrun for a whole
+server. It does not — it renders through `page.setContent` and finished in
+nine seconds when measured locally (`tests/suites.json` holds the CI median). Because it was skipped locally it went unrun for a whole
 branch, and it then found three real defects at once: a drawer count left
 behind by a new panel, a chart shipping `preserveAspectRatio="none"` so its
 bar heights meant nothing, and an SVG label clipped off its own canvas by
@@ -1457,7 +1497,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   so a smile or a probability can never be computed one way on the server
   and another in the page.
   `CURRICULUM` is an authoring/generator input, not a production course-page
-  payload.
+  payload. `globalThis.__FlowsDeskTest` and `globalThis.__IEWTPlacementTest` are
+  test hooks that exist only so a `vm` context or Chromium can reach pure
+  functions. `lesson-redirect.js` is an IIFE and declares no global.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin
   Modern. Re-subset from upstream for new glyph coverage rather than editing
   WOFF2 files.

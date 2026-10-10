@@ -39,16 +39,17 @@ articles/                       articles index and reusable template
 lab/index.html                  academy dashboard, paths, search, and catalogue
 lab/course.html                 backing template for clean course-slug pages
 assets/css/                     design system and section styles
-assets/js/course-catalog.js     lightweight catalogue, paths, and scoring metadata
+assets/js/course-catalog.js     lightweight catalogue and learning paths
+assets/js/stage-catalog.js      generated browser scoring manifest
 assets/js/curriculum*.js        canonical course authoring sources and questions
-assets/data/courses/            generated, committed per-course JSON payloads
+assets/data/courses/            generated, committed per-course manifests and module JSON
 scripts/generate-course-payloads.mjs  deterministic payload generator
 assets/js/lab-core.js           Pyodide runtime and Python editor
 assets/js/lab-course.js         course player, grading, progress, splitter
 assets/js/storage.js            owner-scoped v2 persistence, migration, and sync generation
 assets/js/auth.js               generation-fenced sync, reset, and POST sign-out coordination
 shared/session.js               signed-session helpers
-shared/course-points.js         server scoring manifest
+shared/course-points.js         generated server scoring manifest (edit the generator)
 shared/course-seo.js            canonical slugs and crawlable course metadata
 worker.js · wrangler.toml       Worker implementation and configuration
 schema.sql                      D1 schema
@@ -57,33 +58,56 @@ AGENTS.md                       complete engineering handbook
 DEPLOY.md                       deployment and rollback runbook
 ```
 
+## Flows
+
+`/flows/` is the members' market-data section: boards, tickers, events, an
+options strategy desk and a real-time rail, backed by a nightly pipeline
+(`scripts/flows-pipeline.mjs`, run by GitHub Actions) and a live layer. It reads
+Unusual Whales data through `UW_API_KEY`, a Worker secret. The Flows tables are
+in `schema.sql`, the vendor base is allow-listed in `shared/flows-vendor-core.js`,
+and AGENTS.md ("Architecture", the file map and the Flows sections) and DEPLOY.md
+section 10 hold the contracts and the runbook.
+
+`.mcp.json` registers the vendor's hosted MCP server and sends
+`Authorization: Bearer ${UW_API_KEY}` from the agent's environment. Calls made
+through it spend the same vendor quota as the Worker and the pipeline but are
+invisible to the Worker's limiter and to the `x-uw-*` accounting; do not set
+`UW_API_KEY` in an agent session that has no need to call the vendor.
+
 ## Econometrics Lab data model
 
-This release is the complete core curriculum: seven courses and 205 assessed
-learning stages spanning regression foundations, causal methods, panels, time
-series, limited outcomes, and GMM. The catalogue and payload contracts are
+This release holds twelve courses and 365 assessed learning stages spanning
+statistical foundations, regression, maximum likelihood, causal methods,
+panels, time series, cointegration, limited outcomes, GMM, and financial
+econometrics. The catalogue and payload contracts are
 designed for further method families without making unshipped-course claims.
 
 `assets/js/course-catalog.js` is the small runtime catalogue: course metadata,
-prerequisites, outcomes, four guided learning paths, and the browser scoring
-manifest. `assets/js/curriculum.js` authors OLS; `curriculum-data.js` adds
-IV/2SLS, DiD, VAR, panel, logit, and GMM; and
-`curriculum-questions.js` appends the authored assessments. Each topic has four
-modules made from `read`, `code`, `interactive`, and question stages.
+prerequisites, outcomes, and five guided learning paths; the browser scoring
+manifest is the generated `assets/js/stage-catalog.js`. `assets/js/curriculum.js`
+authors OLS; `curriculum-data.js` adds IV/2SLS, DiD, VAR, panel, logit, and GMM;
+`curriculum-academy.js` carries the academy layer (skills, challenge variants);
+and `curriculum-questions.js` appends the authored assessments. Each topic has
+four or five modules made from `read`, `code`, `interactive`, and question
+stages.
 
-The course shell fetches exactly one
-`assets/data/courses/<topic>.json` payload. It does not download all seven
-curricula. Generated payloads are committed, carry `schemaVersion: 1` and
-stable stage IDs, and are capped by tests at 14 KiB gzip each.
+The course shell fetches the selected course's
+`assets/data/courses/<topic>/manifest.json` and then one module file at a time;
+the whole-course `<topic>.json` is only its fallback. It does not download the
+other eleven curricula. Generated payloads are committed, carry
+`schemaVersion: 2` and stable stage IDs, and are capped by tests at 6,144 bytes
+gzip per module file.
 
 To change or add course content:
 
 1. update `course-catalog.js` and the appropriate curriculum authoring source;
 2. preserve existing stage ordering or provide a progress-index migration;
-3. update both scoring manifests in `course-catalog.js` and
-   `shared/course-points.js` if stage rewards/order changed;
-4. run `node scripts/generate-course-payloads.mjs` and commit the resulting
-   JSON payload changes;
+3. do not edit the scoring manifests (`assets/js/stage-catalog.js`,
+   `shared/course-points.js`) by hand: they are generated, so a change to stage
+   rewards or order reaches them through the generator;
+4. run `node scripts/generate-course-payloads.mjs` and commit every file it
+   changes (payloads, the review bank, the catalogues and the Worker
+   manifests);
 5. increment the integer in `assets/version.txt` and update every local CSS
    and JavaScript `?v=` reference for browser-asset changes (a font change
    moves `assets/fonts-version.txt` and the woff2 `?v=` references instead,
@@ -99,8 +123,8 @@ do not maintain a second hardcoded version in scripts or documentation.
 ## Academy experience and learning state
 
 The Lab home provides a learner dashboard, resume target, curriculum-wide
-metrics, four ordered learning paths, and course discovery by free-text search,
-level, and completion status. Initial HTML still contains the real seven course
+metrics, five ordered learning paths, and course discovery by free-text search,
+level, and completion status. Initial HTML still contains the real twelve course
 links and summaries, so the catalogue remains useful and crawlable without
 JavaScript.
 
@@ -165,15 +189,15 @@ npx playwright install chromium
 npm test
 
 cd ..
-./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-dry-run
+./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-worker-dry-run
 ```
 
 The suite executes curriculum/payload/storage/session contracts, a real local
-Wrangler Worker with D1 and static assets, and Playwright across all 205 course
+Wrangler Worker with D1 and static assets, and Playwright across all 365 course
 stages. It covers the academy dashboard and filters, one-course payload loading,
 owner isolation, reset success/failure and stale-write rejection, same-origin
 enforcement, POST-only logout, and responsive/accessibility regressions. GitHub Actions runs it on
-pushes to `main`, pull requests, and manual dispatch.
+pushes to `main`, pull requests, manual dispatch, and a weekly schedule.
 
 ## Deployment
 
