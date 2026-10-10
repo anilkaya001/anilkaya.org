@@ -239,8 +239,9 @@
   };
 
   let MEAS = null;
+  const meas = () => MEAS || (MEAS = document.createElement("canvas").getContext("2d"));
   function chip(rows, o) {
-    const m = MEAS || (MEAS = document.createElement("canvas").getContext("2d"));
+    const m = meas();
     const dpr = o.dpr, padX = o.padX, padY = o.padY == null ? 3 : o.padY;
     let w = 0, hh = padY * 2;
     for (const row of rows) {
@@ -551,7 +552,7 @@
       const vm = G.vMax, ghost = !M;
       const sizes = (k) => { G.k = k; for (const n of NL) n.r = ghost ? 7 * k : nodeR(n.d.v, vm, k); };
       const rMax = (L) => L.reduce((m, n) => Math.max(m, n.r), 0), cMax = (L) => L.reduce((m, n) => Math.max(m, n.chip ? n.chip.w : 0), 0);
-      const tops = 70, tail = 48, margin = W > 900 ? 36 : 22;
+      const tops = 88, tail = 48, margin = W > 900 ? 36 : 22;
       let base = W >= 1100 ? 1 : W >= 760 ? 0.85 : 0.72;
       const cols = [];
       if (!VERT) {
@@ -580,7 +581,7 @@
           const ys = stack(L.map((n) => n.r), L.map((n) => !!n.d.resid), G.bottom - G.top, gaps[li], 88);
           L.forEach((n, j) => { n.sx = cols[li].x; n.sy = G.midY + ys[j]; n.tier = 0; });
         });
-        G.hd = cols.map((c) => [c.x, 34]);
+        G.hd = cols.map((c) => [c.x, 52]);
       } else {
         sizes(0.62);
         G.form = "vert";
@@ -589,18 +590,19 @@
           if (!ghost) for (const n of L) n.chip = nodeChip(n, "vert");
           const xs = stack(L.map((n) => n.r), L.map((n) => !!n.d.resid), use, 4, 64).map((x) => W / 2 + x);
           const w = L.map((n) => (n.chip ? n.chip.w : 0));
+          const xc = xs.map((x, j) => clamp(x, 2 + w[j] / 2, Math.max(2 + w[j] / 2, W - 2 - w[j] / 2)));
           let tiers = 3;
-          for (const t of [1, 2]) if (L.every((n, j) => j + t >= L.length || (w[j] + w[j + t]) / 2 + 3 <= xs[j + t] - xs[j])) { tiers = t; break; }
+          for (const t of [1, 2]) if (L.every((n, j) => j + t >= L.length || (w[j] + w[j + t]) / 2 + 3 <= xc[j + t] - xc[j])) { tiers = t; break; }
           L.forEach((n, j) => { n.sx = xs[j]; n.tier = j % tiers; });
           const rm = rMax(L);
-          rows.push({ rm, up: rm + 16, down: rm + 4 + (ghost ? 0 : tiers * (ch + 2) - 2), tiers });
+          rows.push({ rm, up: rm + 28, down: rm + 4 + (ghost ? 0 : tiers * (ch + 2) - 2), tiers });
         });
         const pitch = Math.max(...rows.slice(0, 3).map((r, i) => r.down + rows[i + 1].up + 4), 60), y0 = 8 + rows[0].up;
         LN.forEach((L, li) => L.forEach((n) => { n.sy = y0 + li * pitch; }));
         H = Math.ceil(y0 + 3 * pitch + rows[3].down + 34);
         G.top = y0; G.bottom = y0 + 3 * pitch; G.midY = (G.top + G.bottom) / 2; G.ox = W / 2; G.oy = G.midY; G.s0 = pitch / 2;
         rows.forEach((r, i) => cols.push({ x: y0 + i * pitch, wx: (i - 1.5) * 2, side: "start", rMax: r.rm, up: r.up, down: r.down }));
-        G.hd = cols.map((c) => [side, c.x - c.rMax - 10]);
+        G.hd = cols.map((c) => [side, c.x - c.rMax - 17]);
       }
       G.F = 1.9 * Math.max(W, 120);
       G.D = G.F / G.s0;
@@ -627,11 +629,16 @@
       setCam(keep[0], keep[1]);
       HD = [];
       if (!ghost) {
-        const total = money(M.total);
-        CAPTIONS[mode].forEach((t, i) => {
-          const c = chip([{ lh: 12, runs: [{ t: t.toUpperCase() + " " + MID + " " + total, f: "650 " + (VERT ? 10 : 11) + "px", c: "rgba(235,235,245,0.66)", ls: "0.14em" }] }], { dpr, ff: FF, padX: 0, padY: 0, h: 12 });
-          HD.push({ c, w: c.w, h: 12, ax: G.hd[i][0], ay: G.hd[i][1], text: t.toUpperCase() + " " + MID + " " + total, x: 0, y: 0 });
+        const total = money(M.total), hh = VERT ? 16 : 12;
+        const heads = (px, ls) => CAPTIONS[mode].map((t, i) => {
+          const text = t.toUpperCase() + " " + MID + " " + total, c = chip([{ lh: 12, runs: [{ t: text, f: "650 " + px + "px", c: "rgba(235,235,245,0.66)", ls }] }], VERT ? { dpr, ff: FF, bg: true, padX: 5, h: hh } : { dpr, ff: FF, padX: 0, padY: 0, h: hh });
+          return { c, w: c.w, h: hh, ax: G.hd[i][0], ay: G.hd[i][1], text, x: 0, y: 0 };
         });
+        const spaced = (hs) => hs.every((hd, i) => !i || (hs[i - 1].w + hd.w) / 2 + 6 <= cols[i].x - cols[i - 1].x);
+        for (const [px, ls] of VERT ? [[10, "0.14em"]] : [[11, "0.14em"], [10, "0.08em"], [9.5, "0.02em"]]) {
+          HD = heads(px, ls);
+          if (VERT || spaced(HD)) break;
+        }
       }
     }
 
@@ -1174,6 +1181,8 @@
         for (const hd of HD) {
           HB[0] = hd.x; HB[1] = hd.y; HB[2] = hd.w; HB[3] = hd.h;
           if (over(lb, HB)) return true;
+          SB[0] = a.px - a.R; SB[1] = a.py - a.R; SB[2] = SB[3] = a.R * 2;
+          if (over(HB, SB)) return true;
         }
       }
       for (const hd of HD) if (hd.x < 0 || hd.x + hd.w > W || hd.y < 0 || hd.y + hd.h > H) return true;
@@ -1458,6 +1467,7 @@
       dead = true;
       halt();
       cancelAnimationFrame(rz);
+      cancelAnimationFrame(fz);
       if (abort) abort.abort();
       for (const f of undo.splice(0)) f();
       pill.remove(); seg.remove(); about.remove();
@@ -1465,9 +1475,26 @@
       NETS.delete(host);
     }
 
+    let fz = 0, fw = -1;
+    const fontW = () => { const m = meas(); m.font = "600 12.5px " + FF; m.letterSpacing = "0px"; return m.measureText("Wqg 0123456789 $M").width; };
+    const relayout = () => {
+      if (dead) return;
+      cancelAnimationFrame(fz);
+      fz = requestAnimationFrame(() => {
+        if (dead) return;
+        const w = fontW();
+        if (w !== fw && S.rows.length) rebuild();
+        fw = w;
+      });
+    };
     paintLegend();
     size();
     rebuild();
+    fw = fontW();
+    if (document.fonts) {
+      if (document.fonts.ready) document.fonts.ready.then(relayout);
+      on(document.fonts, "loadingdone", relayout);
+    }
     if (opts.universe !== false) loadUniverse(); else { U.map = new Map(); U.state = "fail"; }
 
     const snapshot = (o) => {
@@ -1480,6 +1507,7 @@
         nodes: NL.map((n) => ({ key: n.id, col: n.layer, v: n.d.v, out: n.layer < 3, residual: !!n.d.resid })),
         spheres: NL.map((n) => ({ key: n.id, col: n.layer, cx: n.px, cy: n.py, r: n.R, residual: !!n.d.resid })),
         labels: NL.map((n) => ({ key: n.id, col: n.layer, x: n.lb[0], y: n.lb[1], w: n.lb[2], h: n.lb[3] })),
+        readout: READ ? { x: W - 14 - READ.w, y: 4, w: READ.w, h: READ.h } : null,
         heads: HD.map((hd) => ({ text: hd.text, x: hd.x, y: hd.y, w: hd.w, h: hd.h })),
         bands: E.map((e) => ({ from: e.a.id, to: e.b.id, v: e.v, w0: e.w0, ws: e.ws, slice: e.a1 - e.a0, drawn: 2 * e.ha, into: e.b1 - e.b0, f: e.a.f })),
       };
