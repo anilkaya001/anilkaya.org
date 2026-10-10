@@ -150,6 +150,8 @@ CREATE TABLE IF NOT EXISTS flows_login_failures (
   first_at INTEGER NOT NULL CHECK (first_at > 0)
 );
 
+CREATE INDEX IF NOT EXISTS flows_login_failures_by_first ON flows_login_failures (first_at);
+
 CREATE TABLE IF NOT EXISTS flows_ai_usage (
   day        TEXT PRIMARY KEY,
   calls      INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0),

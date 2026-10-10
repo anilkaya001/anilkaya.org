@@ -130,6 +130,20 @@ export function throttleAddress(ip) {
   return groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":") + "::/64";
 }
 
+export function throttleNetwork(ip) {
+  const address = throttleAddress(ip);
+  if (address === "unknown") return address;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/.exec(address);
+  if (v4) return v4[1] + "." + v4[2] + "." + v4[3] + ".0/24";
+  if (address.endsWith("::/64")) return address.split(":").slice(0, 3).join(":") + "::/48";
+  return address;
+}
+
+export function loginNameKey(username, ip) {
+  const name = typeof username === "string" && MEMBER_NAME.test(username) ? username : THROTTLE_SHARED_BUCKET;
+  return name + "|" + throttleNetwork(ip);
+}
+
 export function throttleBucket(username) {
   return typeof username === "string" && FLOWS_USERNAMES.includes(username) ? username : THROTTLE_SHARED_BUCKET;
 }

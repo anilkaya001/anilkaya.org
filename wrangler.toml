@@ -48,6 +48,16 @@ name = "LAB_WRITE"
 namespace_id = "1104"
 simple = { limit = 30, period = 60 }
 
+[[ratelimits]]
+name = "LOGIN_IP"
+namespace_id = "1105"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "LOGIN_NAME"
+namespace_id = "1106"
+simple = { limit = 20, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"

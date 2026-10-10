@@ -667,9 +667,24 @@ string the mint prints, or an object:
   get the same 401 page. The throttle keeps a bucket per address for every
   name outside the legacy roster, so a lockout cannot reveal whether a name is
   a member. Guessed names never key a row: every name outside the legacy
-  roster shares one counter per address (an IPv6 address counts as its /64),
-  and each failure also deletes the counters older than the 15-minute window,
-  so `flows_login_failures` holds at most one window of failing addresses.
+  roster shares one counter per address (an IPv6 address counts as its /64).
+  Two rate-limit bindings stand in front of the D1 lockout and the PBKDF2
+  derivation: `LOGIN_IP` (10 attempts a minute per address) and `LOGIN_NAME`
+  (20 a minute per name within one client network, the /24 of an IPv4 address or
+  the /48 of an IPv6 one, so a stranger elsewhere cannot keep a member locked
+  out). The attempt past either answers `429` with `Retry-After: 60` and the
+  sign-in page, with no D1 statement and no PBKDF2. A shared NAT that sends more
+  than ten sign-ins a minute is limited; a missing binding admits everyone and
+  leaves the D1 lockout as the backstop. A failure deletes only its own key's
+  stale row, and the 03:00 ET firing deletes every row older than the 15-minute
+  window through the index on `first_at`
+  (`migrations/0019_flows_login_failures_first_at.sql`, which the firing also
+  creates if it is missing, so `flows_login_failures` holds at most one window
+  of failing addresses plus one day of stale ones):
+
+  ```bash
+  ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0019_flows_login_failures_first_at.sql
+  ```
 
 Cloudflare never shows a secret's value again, so keep the current JSON as a
 private `members.json` (outside this public repository, and apart from the

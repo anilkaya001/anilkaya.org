@@ -1195,6 +1195,30 @@ try {
   }
 
   {
+    const FLOODER = "192.0.2.201";
+    const send = (username, password, ip) => fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+        "CF-Connecting-IP": ip,
+      },
+      body: new URLSearchParams({ username, password }).toString(),
+    });
+    const statuses = [];
+    for (let i = 0; i < 10; i++) statuses.push((await send("flood " + i, "wrong", FLOODER)).status);
+    ok(statuses.every((code) => code === 401), "ten failed sign-ins from one address are answered 401 by the real binding");
+    const limited = await send(FLOWS_TEST_USER, FLOWS_PASSWORD, FLOODER);
+    eq(limited.status, 429, "THE 11TH ATTEMPT IN THE MINUTE from one address is a 429, even with the right password");
+    eq(limited.headers.get("retry-after"), "60", "naming the window as Retry-After");
+    ok(!(limited.headers.get("set-cookie") || "").includes("flows_session="), "and no session");
+    const other = await send(FLOWS_TEST_USER, FLOWS_PASSWORD, "198.51.100.77");
+    eq(other.status, 303, "another address is not charged for the flood");
+  }
+
+  {
 
     const res = await get("/shared/flows-pages.js");
     ok(res.status === 404 || !(await res.text()).includes("boardPage"),
@@ -1637,13 +1661,17 @@ try {
          "for every non-legacy name alike, members included");
 
       await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|192.0.2.200', 3, 1000)");
+      await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|2001:db8:7:7::/64', 7, 1000)");
       await (await signIn(w, "ghost-v6", "x", "2001:db8:7:7::1")).text();
       await (await signIn(w, "ghost-v6", "x", "2001:DB8:7:7:0:0:0:2")).text();
       const dump = await w.d1("SELECT username, failures FROM flows_login_failures");
       ok(!/spray|ghost/.test(dump) && /\*\|203\.0\.113\.50/.test(dump),
          "the throttle rows are keyed by address, never by a guessed name");
-      ok(!/192\.0\.2\.200/.test(dump),
-         "A FAILURE PRUNES THE TABLE: a counter older than the window is deleted, so the rows stay bounded");
+      ok(/192\.0\.2\.200/.test(dump),
+         "A FAILURE NO LONGER SCANS THE TABLE: another key's stale counter is left for the nightly prune");
+      const kv = await w.d1("SELECT username || '=' || failures AS kv FROM flows_login_failures");
+      ok(/\*\|2001:db8:7:7::\/64=2\b/.test(kv),
+         "and a failure replaces its own key's stale counter: seven stale failures restart at one, then count two");
       ok(/\*\|2001:db8:7:7::\/64/.test(dump) && !/2001:db8:7:7::1|0:0:0:2/.test(dump),
          "and two hosts in one IPv6 /64 share one counter");
     });

@@ -1,7 +1,7 @@
 import { signSession, verifySession, getCookie, cookie } from "./shared/session.js";
 import {
   FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, THROTTLE_SHARED_BUCKET,
-  parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, staleFailureCutoff, verifyCredential,
+  parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, loginNameKey, staleFailureCutoff, verifyCredential,
   signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
@@ -159,11 +159,27 @@ const SECURITY_HEADERS = {
 
 const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
 const LAB_WRITE_PERIOD_S = 60;
+const LOGIN_PERIOD_S = 60;
 
 async function requireLabWrite(env, user) {
   if (await memberAllowed(env.LAB_WRITE, { username: user.id })) return;
   throw new HttpError(429, "rate_limited", "Too many saves in the last minute; they will retry shortly.",
     { "Retry-After": String(LAB_WRITE_PERIOD_S) });
+}
+
+async function pruneLoginFailures(env, now) {
+  if (!env || !env.DB) return 0;
+  try {
+    const results = await env.DB.batch([
+      env.DB.prepare(LOGIN_FAILURES_FIRST_INDEX_SQL),
+      env.DB.prepare("DELETE FROM flows_login_failures WHERE first_at < ?").bind(staleFailureCutoff(now)),
+    ]);
+    return Number(results[1] && results[1].meta && results[1].meta.changes) || 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/no such table/i.test(message)) console.error(JSON.stringify({ message: "login failure prune failed", error: message }));
+    return 0;
+  }
 }
 
 async function pruneAttemptLedgers(env, now) {
@@ -187,6 +203,9 @@ async function pruneAttemptLedgers(env, now) {
 
 const MARKET_SNAPSHOT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
+
+const LOGIN_FAILURES_FIRST_INDEX_SQL =
+  "CREATE INDEX IF NOT EXISTS flows_login_failures_by_first ON flows_login_failures (first_at)";
 
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 const YAHOO_ORIGINS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
@@ -849,12 +868,16 @@ async function readFlowsForm(request) {
   return new URLSearchParams(new TextDecoder().decode(bytes));
 }
 
-function flowsLoginResponse(message) {
+function flowsLoginResponse(message, status = 401, headers) {
+  const out = new Headers(headers);
+  out.set("Content-Type", "text/html; charset=utf-8");
+  return new Response(FLOWS_PAGES.loginPage({ error: message }), { status, headers: out });
+}
 
-  return new Response(FLOWS_PAGES.loginPage({ error: message }), {
-    status: 401,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-  });
+const FLOWS_LOGIN_LIMITED = "Too many attempts. Try again shortly.";
+
+function flowsLoginLimited() {
+  return flowsLoginResponse(FLOWS_LOGIN_LIMITED, 429, { "Retry-After": String(LOGIN_PERIOD_S) });
 }
 
 const FLOWS_STORE = createFlowsStore({ ensureFlowsTables: (env) => ensureFlowsTables(env) });
@@ -2619,7 +2642,7 @@ async function recordFlowsFailure(env, username, previous) {
   const next = nextFailureState(previous, now);
   try {
     await env.DB.batch([
-      env.DB.prepare("DELETE FROM flows_login_failures WHERE first_at < ?").bind(staleFailureCutoff(now)),
+      env.DB.prepare("DELETE FROM flows_login_failures WHERE username = ? AND first_at < ?").bind(username, staleFailureCutoff(now)),
       env.DB.prepare(
         "INSERT INTO flows_login_failures (username, failures, first_at) VALUES (?, ?, ?) " +
         "ON CONFLICT(username) DO UPDATE SET failures = excluded.failures, first_at = excluded.first_at"
@@ -3359,6 +3382,8 @@ async function route(request, env, url, ctx) {
   if (path === "/flows/login") {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
+    const clientIp = request.headers.get("CF-Connecting-IP");
+    if (!(await memberAllowed(env.LOGIN_IP, { username: throttleAddress(clientIp) }))) return flowsLoginLimited();
     if (!env.SESSION_SECRET) throw new HttpError(503, "unavailable", "Sign-in is not configured");
 
     const credentials = parseCredentials(env.FLOWS_CREDENTIALS);
@@ -3370,10 +3395,12 @@ async function route(request, env, url, ctx) {
     const username = String(form.get("username") || "").trim().toLowerCase();
     const password = String(form.get("password") || "");
 
+    if (!(await memberAllowed(env.LOGIN_NAME, { username: loginNameKey(username, clientIp) }))) return flowsLoginLimited();
+
     const throttleKey = flowsThrottleKey(request, username);
     const locked = await flowsLockRecord(env, throttleKey);
     if (isLocked(locked)) {
-      return flowsLoginResponse("Too many attempts. Try again shortly.");
+      return flowsLoginResponse(FLOWS_LOGIN_LIMITED);
     }
 
     const verified = await verifyCredential(username, password, credentials, env.FLOWS_PEPPER);
@@ -3590,6 +3617,7 @@ export default {
         await FLOWS_LIVE.pruneLedger(env, at);
         await pruneAiOutcomes(env, at);
         await pruneAttemptLedgers(env, at);
+        await pruneLoginFailures(env, at);
       }
     })());
   },

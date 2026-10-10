@@ -1013,6 +1013,16 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
   assert(labSimple[1] === "30" && labSimple[2] === "60" && labPeriod === labSimple[2],
     `LAB_WRITE must be 30 Lab mutations per 60 s and LAB_WRITE_PERIOD_S (the Retry-After) must equal its period; ` +
     `found limit ${labSimple[1]}, period ${labSimple[2]}, LAB_WRITE_PERIOD_S ${labPeriod}`);
+  const loginPeriod = (/^const LOGIN_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
+  for (const [name, limit] of [["LOGIN_IP", "10"], ["LOGIN_NAME", "20"]]) {
+    const block = blocks.find((b) => new RegExp(`^name\\s*=\\s*"${name}"\\s*$`, "m").test(b));
+    assert(block, `wrangler.toml must declare the [[ratelimits]] binding ${name}: memberAllowed fails open ` +
+      "when it is absent, so a renamed or dropped binding would turn the sign-in brake off silently");
+    const simple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(block) || [];
+    assert(simple[1] === limit && simple[2] === "60" && loginPeriod === simple[2],
+      `${name} must be ${limit} sign-in attempts per 60 s and LOGIN_PERIOD_S (the Retry-After) must equal its period; ` +
+      `found limit ${simple[1]}, period ${simple[2]}, LOGIN_PERIOD_S ${loginPeriod}`);
+  }
   const ids = blocks.map((b) => (/^namespace_id\s*=\s*"(\d+)"\s*$/m.exec(b) || [])[1]);
   assert(ids.every(Boolean) && new Set(ids).size === ids.length,
     "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");
