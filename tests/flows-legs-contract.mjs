@@ -998,6 +998,15 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "judgeEndDate", "SCREENER_READ_KEYS", "judgeScreenerDate", "sweepScreenerBand", "SCREENER_PROBE",
       "verifyDating",
     ],
+    "sections/record.mjs": [
+      "RECORD_HORIZONS", "RECORD_IC_MIN_N", "RECORD_MAX_SESSIONS",
+    ],
+    "sections/chains.mjs": [
+      "nearestProbeExpiry", "describeChainProbe", "vannaProbeSample",
+    ],
+    "sections/alerts.mjs": [
+      "PULSE_TOTALS_HISTORY", "publishPulse", "publishSectorPremium", "publishNews",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
