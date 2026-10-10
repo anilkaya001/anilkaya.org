@@ -25,7 +25,7 @@ import {
   harvestScreener, readShortInterest, readInsiders, readIndexRows, harvestBlock, readHoldings, withPrefetched,
   fetchMissingMembers, readFocusRows, HOLDINGS_PATH,
 } from "../scripts/flows-legs/universe.mjs";
-import { volNames, VOL_DEPTH_READS, runVolLeg } from "../scripts/flows-legs/vol.mjs";
+import { volNames, VOL_DEPTH_READS, runVolLeg, coneThinOf, attachVol } from "../scripts/flows-legs/vol.mjs";
 import { fakeVolVendor } from "../scripts/flows-legs/vol-fake.mjs";
 import { readRegime, assembleRegime, REGIME_CALLS } from "../scripts/flows-legs/regime.mjs";
 import { ownershipParts } from "../scripts/flows-legs/ownership.mjs";
@@ -852,6 +852,20 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(gld && gld.panels.term.status === "ok" && gld.panels.skew.status !== undefined && gld.panels.cone.status === "ok",
      "a fund gets cone, term and skew, so its card-x carries the vol module a stock dossier does");
   ok(!leg.radar || !leg.radar.carded.includes("GLD"), "and a fund never joins the stock cross-section's radar or percentiles");
+}
+
+{
+  const names = Array.from({ length: 60 }, (_, i) => ({ ticker: "Q" + String(i).padStart(2, "0"), depth: "deep" }));
+  const leg = await runVolLeg({ uw: fakeVolVendor({ sessionDate: S, names }), names, sessionDate: S, radar: false });
+  const thinFlags = names.map((n) => coneThinOf(leg, n.ticker));
+  ok(thinFlags.every((c) => c === true || c === false), "P0-34: the engine is told whether the 30-day cone is thin, from the flag the leg already sets against its sample floor");
+  ok(thinFlags.includes(true) && thinFlags.includes(false), "and the roster reaches both the full cone (251 samples) and the thin one (150)");
+  const thin = names.find((n, i) => thinFlags[i] === true).ticker, full = names.find((n, i) => thinFlags[i] === false).ticker;
+  const card = (t) => attachVol({ ticker: t }, leg, t);
+  const pct = (t) => card(t).x.vol.iv30Pct;
+  ok(Number.isFinite(pct(thin)) && pct(thin) > 0 && pct(thin) <= 1, "and the thin cone still publishes its percentile on x.vol, which is what the grade then qualifies");
+  deep([coneThinOf(null, full), coneThinOf(leg, "NOPE"), coneThinOf({ byTicker: new Map([["Z", { panels: { cone: { status: "quiet" } } }]]) }, "Z")], [null, null, null],
+     "no leg, an unread name and a cone that is not ok all give null, which the engine reads as unknown and does not grade down");
 }
 
 {

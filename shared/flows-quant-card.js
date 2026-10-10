@@ -348,7 +348,7 @@ function factRow(id, v, u, g, extra = {}) {
 }
 
 export function engineFacts(input) {
-  const { built = [], spot, atr = null, card = null, garch = null, zero = null, book = null, event = null, jump = null } = input;
+  const { built = [], spot, atr = null, card = null, garch = null, zero = null, book = null, event = null, jump = null, coneThin = null } = input;
   const xs = input.crossSection || {};
   const facts = [];
   const add = (...a) => { facts.push(factRow(...a)); };
@@ -365,6 +365,10 @@ export function engineFacts(input) {
   const rank = pm && fin(pm.ivRank) && pm.ivRank >= 0 && pm.ivRank <= 1 ? pm.ivRank : null;
   add("iv.rank.1y", rank === null ? null : dp(rank, 4), "frac", 2, rank === null ? { why: "iv.rank-absent" } : {});
   add("iv.pct.30", rank === null ? null : dp(rank, 4), "frac", 2, { why: rank === null ? "iv.rank-absent" : "iv.rank-as-pct" });
+  const volX = card && card.x && typeof card.x === "object" && card.x.vol && typeof card.x.vol === "object" ? card.x.vol : null;
+  const pctile = volX && fin(volX.iv30Pct) && volX.iv30Pct >= 0 && volX.iv30Pct <= 1 ? volX.iv30Pct : null;
+  add("iv.pctile.30.1y", pctile === null ? null : dp(pctile, 4), "frac", coneThin === true ? 1 : 2,
+    pctile === null ? { why: "iv.pctile-absent" } : {});
   const iv30 = cm[30] ? cm[30].vol : null, iv7 = cm[7] ? cm[7].vol : null, iv90 = cm[90] ? cm[90].vol : null;
   const gOf = (id) => { const f = facts.find((x) => x.id === id); return f ? f.g : 0; };
   const slope = iv30 !== null && iv90 !== null && iv90 > 0 ? iv30 / iv90 - 1 : null;

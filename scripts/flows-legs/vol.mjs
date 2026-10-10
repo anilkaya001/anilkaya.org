@@ -296,6 +296,13 @@ export async function runVolLeg({
   return { byTicker, radar: radarSection, radarReadAt, stats, notes, sessionDate };
 }
 
+export function coneThinOf(leg, ticker) {
+  const entry = leg && leg.byTicker ? leg.byTicker.get(ticker) : null;
+  const cone = entry && entry.panels ? entry.panels.cone : null;
+  const tenor = cone && cone.status === "ok" && Array.isArray(cone.tenors) ? cone.tenors.find((t) => t.days === 30) : null;
+  return tenor && typeof tenor.lowSample === "boolean" ? tenor.lowSample : null;
+}
+
 export function attachVol(card, leg, ticker, { ivRank = undefined } = {}) {
   if (!card) return card;
   if (!leg) {

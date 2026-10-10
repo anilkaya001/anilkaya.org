@@ -188,6 +188,19 @@ assert.deepEqual(missingReport, [],
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
     .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
+  {
+    const wrong = [];
+    let present = 0, absent = 0;
+    for (const c of cards) {
+      const f = c.engine.facts.find((x) => x.id === "iv.pctile.30.1y");
+      const want = c.x && c.x.vol && Number.isFinite(c.x.vol.iv30Pct) ? c.x.vol.iv30Pct : null;
+      if (!f) { wrong.push(`${c.ticker}: no iv.pctile.30.1y fact`); continue; }
+      if (want === null) { absent++; if (f.v !== null || f.g !== 0 || f.why !== "iv.pctile-absent") wrong.push(`${c.ticker}: an absent percentile is not withheld`); }
+      else { present++; if (Math.abs(f.v - want) > 5e-5 || f.u !== "frac" || ![1, 2].includes(f.g)) wrong.push(`${c.ticker}: the fact ${f.v} is not x.vol.iv30Pct ${want}`); }
+    }
+    assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
+    ok(present > 0, `the dry run reaches the percentile fact with a value (${present}) and without one (${absent})`);
+  }
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
   const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];
   const scope = IDEA_FNS.map((name) => {

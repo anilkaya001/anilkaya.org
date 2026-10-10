@@ -56,7 +56,7 @@ import {
   focusCloses, FOCUS_BUDGET_BYTES,
 } from "../shared/flows-focus.js";
 import { buildFocusPayload } from "./flows-legs/focus.mjs";
-import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles } from "./flows-legs/vol.mjs";
+import { runVolLeg, volNames, attachVol, publishVol, yearOfCandles, coneThinOf } from "./flows-legs/vol.mjs";
 import { fakeVolVendor } from "./flows-legs/vol-fake.mjs";
 import {
   harvestScreener, INDEX_TICKERS, readFocusRows, fetchMissingMembers, readHoldings, withPrefetched,
@@ -6585,7 +6585,7 @@ async function main() {
           const block = QP.engineBlock({
             ticker, sessionDate, spot: spotPx, atr: e.features.atr, card, prep: quantPrep, rate: quantRate,
             garch, law, event: earnings ? earnings.next : null, state, strikes: e.raw.strikes,
-            crossSection: quantPass.crossSection.get(ticker) || null,
+            crossSection: quantPass.crossSection.get(ticker) || null, coneThin: coneThinOf(volLeg, ticker),
           });
           engineOut = QP.attachEngine(card, block);
           engineBlock = block;

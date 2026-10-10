@@ -324,6 +324,42 @@ const FACT_INPUT = () => ({
 }
 
 {
+  const withVol = (vol, extra = {}) => {
+    const input = FACT_INPUT();
+    input.card = { ...input.card, x: { vol } };
+    return QC.engineFacts({ ...input, ...extra });
+  };
+  const get = (facts, id) => facts.find((f) => f.id === id);
+  const FLOORED = { v: 1, iv30Pct: 0.698, iv30: 0.3 };
+
+  const real = withVol(FLOORED, { coneThin: false });
+  const pf = get(real, "iv.pctile.30.1y");
+  eq([pf.v, pf.u, pf.g, "why" in pf], [0.698, "frac", 2, false], "W06-P1(a): the cone's one-year percentile is published as iv.pctile.30.1y, a fraction graded 2 on a full cone");
+  eq(get(real, "iv.rank.1y").v, 0.62, "and the rank rides under its own id at the pricedMove value");
+  eq([get(real, "iv.pct.30").v, get(real, "iv.pct.30").why], [0.62, "iv.rank-as-pct"], "and iv.pct.30 is unchanged for one release: still the rank, still coded as such");
+  ok(pf.v !== get(real, "iv.pct.30").v, "so a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
+  const low = withVol(FLOORED, { coneThin: true });
+  eq([get(low, "iv.pctile.30.1y").v, get(low, "iv.pctile.30.1y").g], [0.698, 1], "a cone the leg flagged thin (under its 200-sample floor) is graded 1, the same value");
+  eq(get(withVol(FLOORED), "iv.pctile.30.1y").g, 2, "and an unknown sample count is not guessed thin");
+  eq(get(withVol(FLOORED, { coneThin: null }), "iv.pctile.30.1y").g, 2, "nor is an explicit null");
+  for (const [label, facts] of [
+    ["a card with no x block", QC.engineFacts(FACT_INPUT())],
+    ["a vol summary the leg marked unavailable", withVol({ v: 1, status: "unavailable", code: "read-failed" })],
+    ["a cone that carried no percentile", withVol({ v: 1, iv30Pct: null })],
+    ["a percentile above one", withVol({ v: 1, iv30Pct: 70 })],
+    ["a negative percentile", withVol({ v: 1, iv30Pct: -0.1 })],
+    ["a non-numeric percentile", withVol({ v: 1, iv30Pct: "0.7" })],
+  ]) {
+    const f = get(facts, "iv.pctile.30.1y");
+    eq([f.v, f.g, f.why, f.u], [null, 0, "iv.pctile-absent", "frac"], `${label}: the percentile is withheld as iv.pctile-absent, and the rank is never put in its place`);
+  }
+  eq(get(withVol(FLOORED), "iv.pctile.30.1y").v, 0.698, "a percentile of exactly the cone's value is kept to four places");
+  eq([get(withVol({ v: 1, iv30Pct: 0 }), "iv.pctile.30.1y").v, get(withVol({ v: 1, iv30Pct: 1 }), "iv.pctile.30.1y").v], [0, 1], "and both ends of the unit interval are values, not absences");
+  const sizeWith = JSON.stringify(real).length, sizeWithout = JSON.stringify(real.filter((f) => f.id !== "iv.pctile.30.1y")).length;
+  ok(sizeWith - sizeWithout > 30 && sizeWith - sizeWithout < 90, `the fact costs about sixty bytes a card (${sizeWith - sizeWithout})`);
+}
+
+{
   const SD = 0.3, J = 0.06, AVG = GARCH.avg21Vol / 100;
   const dayAt = (d) => new Date(Date.parse(SESSION + "T00:00:00Z") + d * 86400000).toISOString().slice(0, 10);
   const slice = (d, ev) => {
