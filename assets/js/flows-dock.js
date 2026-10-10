@@ -49,14 +49,37 @@
   }
 
   var scrim = dock.querySelector(".ak-dock-scrim");
+  var narrow = window.matchMedia("(max-width: 1199.98px)");
+  var behind = [];
+  var opener = null;
+
+  function setModal() {
+    var m = narrow.matches;
+    panel.setAttribute("role", m ? "dialog" : "complementary");
+    if (m) panel.setAttribute("aria-modal", "true");
+    else panel.removeAttribute("aria-modal");
+    if (!m || !dock.classList.contains("is-open")) {
+      while (behind.length) behind.pop().inert = false;
+      return;
+    }
+    if (behind.length) return;
+    document.querySelectorAll("body > .flows-skip, #fxSide, #fxScrim, #fxBar, #flowsMain, #fxTabs").forEach(function (n) {
+      if (!n.inert) { n.inert = true; behind.push(n); }
+    });
+  }
 
   function setOpen(open, focus) {
+    if (open && !dock.classList.contains("is-open")) {
+      var a = document.activeElement;
+      opener = a && a !== document.body && !dock.contains(a) ? a : null;
+    }
     document.body.classList.toggle("has-dock-open", open);
     tab.setAttribute("aria-expanded", open ? "true" : "false");
     panel.hidden = !open;
     if (scrim) scrim.hidden = !open;
     if (open) void panel.offsetWidth;
     dock.classList.toggle("is-open", open);
+    setModal();
     if (!open) return;
     ensureRenderer();
     if (focus) focusField();
@@ -64,8 +87,19 @@
 
   function dismiss() {
     setOpen(false, false);
-    try { tab.focus(); } catch (e) {   }
+    var back = [opener, tab];
+    opener = null;
+    back.some(function (n) {
+      if (!n || !n.isConnected || !n.getClientRects().length) return false;
+      try { n.focus(); } catch (e) {   }
+      return document.activeElement === n;
+    });
   }
+
+  narrow.addEventListener("change", function () {
+    setModal();
+    if (behind.length && !dock.contains(document.activeElement)) focusField();
+  });
 
   tab.addEventListener("click", function () {
     setOpen(!dock.classList.contains("is-open"), true);
@@ -82,14 +116,20 @@
 
   document.addEventListener("keydown", function (e) {
     if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (dock.classList.contains("is-open") || typingIn(document.activeElement)) return;
+    if (dock.inert || dock.classList.contains("is-open") || typingIn(document.activeElement)) return;
     e.preventDefault();
     setOpen(true, true);
   });
 
+  function popUp() {
+    try { if (document.querySelector(":popover-open")) return true; } catch (e) {   }
+    return !!document.querySelector("dialog[open]");
+  }
+
   document.addEventListener("keydown", function (e) {
-    if (e.key !== "Escape" || !dock.classList.contains("is-open")) return;
-    if (!dock.contains(document.activeElement)) return;
+    if (e.key !== "Escape" || e.defaultPrevented || !dock.classList.contains("is-open")) return;
+    if (!narrow.matches && !dock.contains(document.activeElement)) return;
+    if (popUp()) return;
     dismiss();
   });
 

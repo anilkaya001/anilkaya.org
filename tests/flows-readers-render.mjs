@@ -385,6 +385,168 @@ try {
     eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
     await page.close();
   }
+  {
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: ["NVDA", "AMD", "MSFT"].map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
+    const html = PAGES.sidePage({ username: "test", side: "long" });
+    const lostFrom = (before, after) => before.all.filter((k) => !after.all.includes(k));
+    const state = (page) => page.evaluate(() => {
+      const dock = document.getElementById("askDock");
+      const panel = document.getElementById("askDockPanel");
+      const sel = 'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]';
+      const behind = [...document.querySelectorAll(sel)].filter((el) => {
+        if (dock.contains(el) || el.closest("[inert]") || el.disabled || el.tabIndex < 0) return false;
+        if (!el.getClientRects().length || getComputedStyle(el).visibility === "hidden") return false;
+        return true;
+      });
+      const a = document.activeElement;
+      return {
+        open: dock.classList.contains("is-open"), hidden: panel.hidden,
+        role: panel.getAttribute("role"), modal: panel.getAttribute("aria-modal"),
+        behind: behind.length, sample: behind.slice(0, 4).map((el) => el.id || el.tagName + "." + el.className),
+        all: behind.map((el) => el.id || el.getAttribute("href") || el.tagName + "." + el.className + "." + (el.textContent || "").trim().slice(0, 20)),
+        inert: ["fxSide", "fxBar", "flowsMain", "fxTabs"].filter((id) => { const n = document.getElementById(id); return n && n.inert; }),
+        skipInert: document.querySelector(".flows-skip").inert,
+        anyInert: document.querySelectorAll("[inert]").length,
+        focusIn: !!a && dock.contains(a), focus: a ? (a.id || a.tagName) : null,
+        pop: (() => { const p = document.getElementById("fxPop"); return !!(p && p.matches(":popover-open")); })(),
+        pal: (() => { const d = document.getElementById("fxPal"); return !!(d && d.open); })(),
+      };
+    });
+
+    {
+      const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      ok(before.behind >= 10 && !before.open, `THE ASK DOCK AT 390 PX: closed, the page offers ${before.behind} tabbable elements, so the count below is measuring something`);
+      eq(before.role, "dialog", "the panel is announced as a dialog below 1200 px, before it is ever opened");
+      const opener = await page.evaluate(() => {
+        const a = [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length);
+        a.focus();
+        return a === document.activeElement ? a.getAttribute("href") : null;
+      });
+      ok(opener, "a link in the page holds the focus before the dock opens");
+      await page.keyboard.press("?");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      ok(open.open && !open.hidden, "\"?\" opens the dock at 390 px, where its tab is not drawn");
+      eq(open.role, "dialog", "and the open panel is a dialog");
+      eq(open.modal, "true", "a modal one: aria-modal is true");
+      eq(open.behind, 0, `ZERO TABBABLE ELEMENTS BEHIND THE OPEN DOCK at 390 px, where the complementary panel left every one of them reachable: ${JSON.stringify(open.sample)}`);
+      eq(open.inert.join(","), "fxSide,fxBar,flowsMain,fxTabs", "because the rail, the bar, the page and the tab bar are inert");
+      eq(open.skipInert, true, "and the skip link with them");
+      const walk = [];
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press("Tab");
+        walk.push(await page.evaluate(() => {
+          const a = document.activeElement;
+          const dock = document.getElementById("askDock");
+          return !a || a === document.body || a === document.documentElement ? "page" : dock.contains(a) ? "dock" : (a.id || a.tagName);
+        }));
+      }
+      ok(walk.every((w) => w === "dock" || w === "page") && walk.filter((w) => w === "dock").length >= 20,
+         `thirty presses of Tab never leave the dock for the page behind it (${walk.join(" ")})`);
+
+      await page.focus("#askQ");
+      await page.evaluate(() => window.FlowsUI.openInfo(document.querySelector(".ak-dock-close"), { title: "A note", lead: "Opened from inside the dock." }));
+      ok((await state(page)).pop, "an explanation popover opened from inside the dock is open");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(700);
+      const afterPop = await state(page);
+      ok(!afterPop.pop && afterPop.open, `ESCAPE CLOSES THE POPOVER FIRST and leaves the dock open (${JSON.stringify(afterPop)})`);
+      eq(afterPop.behind, 0, `with the page behind it still inert (${JSON.stringify(afterPop.sample)})`);
+
+      await page.focus("#askQ");
+      await page.keyboard.press("Control+k");
+      await page.waitForFunction(() => { const d = document.getElementById("fxPal"); return !!(d && d.open); }, null, { timeout: 5000 });
+      await page.keyboard.press("Escape");
+      const afterPal = await state(page);
+      ok(!afterPal.pal && afterPal.open, `Escape in the search palette closes the palette and not the dock under it (${JSON.stringify(afterPal)})`);
+
+      await page.focus("#askQ");
+      await page.keyboard.press("Escape");
+      const shut = await state(page);
+      ok(!shut.open && shut.hidden, "a second Escape closes the dock");
+      eq(shut.anyInert, 0, "and gives the page back: nothing is left inert");
+      const lost = lostFrom(before, shut);
+      eq(lost.length, 0, `every element that was tabbable before the dock opened is tabbable again (${shut.behind} now, ${before.behind} before; lost ${JSON.stringify(lost)}; new ${JSON.stringify(shut.all.filter((k) => !before.all.includes(k)))})`);
+      eq(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("href")), opener,
+         "and the focus returns to the link that held it, not to a tab that is not drawn at this width");
+
+      await page.evaluate(() => [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length).focus());
+      await page.keyboard.press("?");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 5000 });
+      await page.click(".ak-dock-close");
+      const closed = await state(page);
+      ok(!closed.open && lostFrom(before, closed).length === 0 && closed.focus !== "BODY", `the close button gives the page and the focus back the same way (${JSON.stringify(closed)})`);
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      await page.click("#askDockTab");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      ok(open.role === "dialog" && open.modal === "true" && open.behind === 0, `AT 1100 PX the side sheet over its scrim is a modal dialog too (${JSON.stringify(open)})`);
+      await page.setViewportSize({ width: 1000, height: 900 });
+      await page.waitForTimeout(100);
+      eq((await state(page)).behind, 0, "and stays one when the window crosses the drawer's 1025 px line, which used to clear the inert flag on the page");
+      await page.keyboard.press("Escape");
+      const shut = await state(page);
+      ok(!shut.open && lostFrom(before, shut).length === 0, "Escape closes it and gives the page back");
+      eq(shut.focus, "askDockTab", "with the focus on the tab that opened it");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, { html, url: "/flows/long/", answer });
+      const before = await state(page);
+      await page.click("#askDockTab");
+      await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
+      const open = await state(page);
+      eq(open.role, "complementary", "AT 1280 PX the open dock stays a side panel beside a usable page");
+      eq(open.modal, null, "with no aria-modal");
+      eq(open.anyInert, 0, "and nothing on the page is inert");
+      ok(open.behind >= 20, `the page beside it stays reachable by Tab (${open.behind} elements)`);
+      ok(await page.evaluate(() => {
+        const a = [...document.querySelectorAll("#flowsMain a[href]")].find((n) => n.getClientRects().length);
+        a.focus();
+        return document.activeElement === a;
+      }), "a link in the page beside the open panel takes the focus");
+      await page.keyboard.press("Escape");
+      ok((await state(page)).open, "Escape pressed in the page does not close the side panel");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(100);
+      const narrowed = await state(page);
+      ok(narrowed.role === "dialog" && narrowed.modal === "true" && narrowed.behind === 0 && narrowed.focusIn,
+         `narrowed to 390 px while open, it becomes the modal dialog and takes the focus (${JSON.stringify(narrowed)})`);
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.waitForTimeout(100);
+      const widened = await state(page);
+      ok(widened.open && widened.role === "complementary" && widened.modal === null && widened.anyInert === 0 && widened.behind >= 20,
+         `widened back to 1280 px, it is a side panel again and the page is live (${JSON.stringify(widened)})`);
+      await page.focus("#askQ");
+      await page.keyboard.press("Escape");
+      ok(!(await state(page)).open, "and Escape inside it still closes it");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+  }
 } finally {
   await browser.close();
 }

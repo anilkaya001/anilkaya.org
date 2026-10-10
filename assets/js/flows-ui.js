@@ -1793,7 +1793,7 @@
       });
       if (scrim) scrim.addEventListener("click", () => closeDrawer(true));
       onDoc("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
-      WIDE.addEventListener("change", () => setDrawer(false));
+      WIDE.addEventListener("change", () => { closeDrawer(false); syncBtn(); });
       syncBtn();
     }
 
