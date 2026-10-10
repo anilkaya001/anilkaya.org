@@ -1813,6 +1813,20 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   return before the gate. A dry run, and a run that never reaches the gate,
   make no GitHub call. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
+- **The nightly records its own stages.** `scripts/flows-nightly/stages.mjs` holds
+  the stage table (thirty-five stages, each fatal or isolated, with the stages it
+  needs and the keys it declares). An isolated stage is caught, logged with the
+  line it always had, and the run goes on; a fatal one ends the run. `meta` is
+  now the last key the nightly writes, after the health gate, and carries
+  `stages` (one record per stage: `status` ok, failed or skipped, `ms`, `calls`
+  made while it ran, `keys` written, and a one-line `why` for a failure or skip)
+  and `health` (`failures`, `warnings` and the first three lines). A key a stage
+  wrote that its row does not declare is named on its record as `undeclared`,
+  and one written outside any stage as `stagesOutside`; both are empty on a
+  clean night. The brief and the warnings still read the run summary from the
+  run's own store before `meta` is written, and the Worker's nightly-landed
+  stamp, which the ledger takes from the `meta` write, now lands a few seconds
+  after the gate instead of before it. `meta` grows by about 2.7 KiB.
 - **The gate judges the whole day, from the session ledger.** Until the
   ledger the gate saw four single cells (the clock, `live:market`,
   `live:focus`, `live:heartbeat`) and tested only that each was written

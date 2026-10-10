@@ -2882,9 +2882,14 @@ const cronMinutes = (cron) => {
     "runHealthGate reads the clock, live:market, live:focus, live:heartbeat and the strips series (for its quote-lag note) through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*$/
-    .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statements run it, turn the run red on any failure and hand the verdict to the " +
-    "issue reporter (dry runs make no call), after every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*stages\.finish\(\);\s*activeStages = null;\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*if \(metaBody\) \{\s*const outside = stages\.outside\(\);\s*try \{\s*await publish\("meta", \{\s*\.\.\.metaBody,\s*stages: stages\.records\(\),[\s\S]*?health: healthRecord\(health\),\s*\}\);\s*\} catch \(error\) \{\s*console\.warn(`  meta: \$\{error\.message\}`);\s*\}\s*\}\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*$/
+    .test(tail), "THE NIGHTLY ENDS WITH META: the gate runs after every other key is published, turns the run red on any failure " +
+    "before the last write, and meta is that write, carrying the stage records and the gate's verdict, with the edge 403s counted " +
+    "by kind and the Worker's own 403s kept apart, and the verdict then goes to the issue reporter (dry runs make no call)");
+  eq((tail.slice(tail.indexOf("runHealthGate(")).match(/\bpublish\(/g) || []).length, 1,
+    "and nothing is published between the gate and meta except meta itself");
+  ok(/publishedStore\.meta = metaBody;/.test(tail) && tail.indexOf("publishedStore.meta = metaBody;") < tail.indexOf('import("../shared/flows-brief.js")'),
+    "the brief and the warnings still read the run summary from the store before meta is written");
   ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
     .test(pipeline), "and it hands the gate a function, so the count, the kinds, the other statuses and the retry budget " +
     "are copied together, after the gate's own reads");

@@ -46,12 +46,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
-import { workerSource, expect } from "./lib/source-scan.mjs";
+import { workerSource, expect, pipelineSource, count } from "./lib/source-scan.mjs";
+import { STAGES, ISOLATION, createStageRunner, declares, healthRecord, WHY_CAP } from "../scripts/flows-nightly/stages.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
 
@@ -4428,6 +4430,20 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const meta = read("meta");
   ok(meta.variation && meta.variation.kc.status === "ok" && meta.variation.unit.family === "share" && meta.variation.votes === false,
      "meta publishes the run's probes, with the hedge vote off");
+  same(meta.stages.map((r) => r.id), STAGES.map((x) => x.id), "meta carries one stage record for every stage in the table, in the table's order");
+  ok(meta.stages.every((r) => r.status === "ok" || r.status === "skipped"), "and a clean dry run leaves none failed");
+  same(meta.stages.filter((r) => r.status === "skipped"), [], "nor skipped, since the fixtures reach every branch");
+  ok(meta.stages.every((r) => !("undeclared" in r)) && !("stagesOutside" in meta), "no stage published a key its table row does not declare, and nothing was published outside a stage");
+  ok(meta.stages.every((r) => Number.isInteger(r.ms) && r.ms >= 0 && Number.isInteger(r.calls) && Number.isInteger(r.keys)), "every record carries whole-number ms, calls and keys");
+  ok(JSON.stringify(meta.stages).length < 3000, `and the records add under 3 KiB to meta (${JSON.stringify(meta.stages).length} bytes)`);
+  same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
+  const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
+  ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
+  eq(wrote[wrote.length - 1], "meta", "META IS THE LAST KEY THE NIGHTLY WRITES");
+  eq(wrote.filter((k) => k === "meta").length, 1, "and it is written once");
+  const stray = wrote.filter((k) => k !== "meta" && !STAGES.some((x) => declares(x, k)));
+  same(stray, [], "every other key written belongs to a stage's declared keys");
+  eq(meta.stages.reduce((n, r) => n + r.keys, 0), wrote.length - 1, "and the stages' key counts add up to every write but meta's own");
   const long = read("board-long");
   const sv = long.scoreVariance;
   ok(sv && /residual/.test(sv.basis) && /blended/.test(sv.blended.basis),
@@ -4973,6 +4989,157 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     console.log = quiet;
   }
   ok(verdict.reuse === false && /reused=false/.test(readText(out, "utf8")), "and a checkout that is not the pushed commit, or an unreachable API, is a full run, never a failure");
+}
+
+{
+  const ids = STAGES.map((x) => x.id);
+  eq(new Set(ids).size, ids.length, "stages: every id in the table is unique");
+  ok(STAGES.every((x) => x.isolation === ISOLATION.fatal || x.isolation === ISOLATION.isolated), "and each is fatal or isolated");
+  ok(STAGES.every((x, i) => x.needs.every((n) => ids.indexOf(n) >= 0 && ids.indexOf(n) < i)), "and needs only stages earlier in the table");
+  ok(STAGES.every((x) => x.publishes.every((k) => /^[a-z][a-z0-9:-]*\*?$/.test(k))), "and declares its keys as names or prefixes ending in *");
+  ok(Object.isFrozen(STAGES) && STAGES.every((x) => Object.isFrozen(x) && Object.isFrozen(x.needs) && Object.isFrozen(x.publishes)), "the table is frozen");
+
+  const src = pipelineSource();
+  const called = [...src.matchAll(/stages\.(step|run|skip)\("([a-z-]+)"/g)].map((m) => ({ how: m[1], id: m[2], at: m.index }));
+  ok(called.length >= ids.length, `the pipeline names its stages (${called.length} calls)`);
+  same([...new Set(called.map((c) => c.id))].filter((c) => !ids.includes(c)), [], "every stage the pipeline names is in the table");
+  for (const x of STAGES) {
+    const mine = called.filter((c) => c.id === x.id);
+    if (x.isolation === ISOLATION.fatal) {
+      eq(mine.filter((c) => c.how === "step").length, 1, `${x.id}: a fatal stage is entered by exactly one step`);
+      eq(mine.filter((c) => c.how === "run").length, 0, `${x.id}: and never run inside a catch`);
+    } else {
+      eq(mine.filter((c) => c.how === "run").length, 1, `${x.id}: an isolated stage is run exactly once`);
+      eq(mine.filter((c) => c.how === "step").length, 0, `${x.id}: and never stepped, which would leave its failure uncaught`);
+    }
+    ok(mine.filter((c) => c.how === "skip").length <= 1, `${x.id}: at most one skip branch`);
+  }
+  const first = ids.map((id) => called.find((c) => c.id === id).at);
+  ok(first.every((at, i) => i === 0 || at > first[i - 1]), "the stages first appear in the source in the table's order");
+  eq(count(src, /await stages\.run\(/g), STAGES.filter((x) => x.isolation === ISOLATION.isolated).length, "and every await stages.run is an isolated stage");
+
+  let tick = 0;
+  let spent = 0;
+  const fresh = () => createStageRunner({ clock: () => (tick += 5), calls: () => spent });
+  const play = async (r, upto) => {
+    for (const x of STAGES) {
+      if (x.id === upto) return;
+      if (x.isolation === ISOLATION.fatal) r.step(x.id);
+      else await r.run(x.id, async () => { spent += 2; }, () => {});
+    }
+  };
+
+  for (const x of STAGES) {
+    const r = fresh();
+    await play(r, x.id);
+    const seen = [];
+    let outcome = "returned";
+    try {
+      const out = await r.run(x.id, async () => { throw new Error(`${x.id} broke`); }, (error) => seen.push(error.message));
+      eq(out, undefined, `${x.id}: a failed run yields nothing`);
+    } catch (error) {
+      outcome = error.message;
+    }
+    if (x.isolation === ISOLATION.isolated) {
+      eq(outcome, "returned", `${x.id}: an isolated stage swallows its failure`);
+      same(seen, [`${x.id} broke`], `${x.id}: and hands it to its own handler once`);
+    } else {
+      eq(outcome, `${x.id} broke`, `${x.id}: a fatal stage lets its failure out`);
+      same(seen, [], `${x.id}: without calling a handler`);
+    }
+    const next = STAGES[STAGES.indexOf(x) + 1];
+    if (next && x.isolation === ISOLATION.isolated) {
+      if (next.isolation === ISOLATION.fatal) r.step(next.id); else await r.run(next.id, async () => {}, () => {});
+    }
+    r.finish();
+    const rec = r.records();
+    eq(rec.length, STAGES.length, `${x.id}: finish leaves a record for every stage`);
+    const mine = rec.find((y) => y.id === x.id);
+    if (next && x.isolation === ISOLATION.isolated) eq(rec.find((y) => y.id === next.id).status, "ok", `${x.id}: the next stage still runs after an isolated failure`);
+    eq(mine.status, "failed", `${x.id}: the failed stage is recorded failed`);
+    eq(mine.why, `${x.id} broke`, `${x.id}: with its reason`);
+    ok(rec.filter((y) => y.status === "failed").length === 1, `${x.id}: and nothing else is marked failed`);
+  }
+
+  {
+    const r = fresh();
+    let threw = null;
+    try { r.step("universe"); } catch (error) { threw = error.message; }
+    ok(/needs session, which has not run/.test(threw), "a stage whose needs have not run is refused");
+    r.step("session");
+    r.step("universe");
+    threw = null;
+    try { r.step("universe"); } catch (error) { threw = error.message; }
+    ok(/ran twice/.test(threw), "a stage cannot run twice");
+    threw = null;
+    try { r.step("nonsense"); } catch (error) { threw = error.message; }
+    ok(/not in the stage table/.test(threw), "an id outside the table is refused");
+    threw = null;
+    try { r.step("watch"); } catch (error) { threw = error.message; }
+    ok(/is isolated, not fatal/.test(threw), "an isolated stage cannot be entered as a step, which would leave its failure uncaught");
+  }
+
+  {
+    tick = 0;
+    spent = 100;
+    const r = fresh();
+    r.step("session");
+    spent += 3;
+    r.step("universe");
+    r.note("anything");
+    r.step("enrich");
+    r.step("score");
+    r.step("boards");
+    r.note("board:long");
+    r.note("board:short");
+    r.note("card:AAPL");
+    await r.run("watch", async () => { r.note("board:watch"); spent += 4; });
+    r.skip("scores", "no session date");
+    r.finish();
+    r.note("late");
+    const rec = Object.fromEntries(r.records().map((y) => [y.id, y]));
+    same(rec.session, { id: "session", status: "ok", ms: 5, calls: 3, keys: 0 }, "a step records the clock and the calls spent while it was open");
+    same(rec.universe.undeclared, ["anything"], "a key a stage does not declare is named on its record");
+    eq(rec.universe.keys, 1, "and still counted");
+    same(rec.boards.undeclared, ["card:AAPL"], "only the undeclared one of three");
+    eq(rec.boards.keys, 3, "while all three are counted");
+    same(rec.watch, { id: "watch", status: "ok", ms: 5, calls: 4, keys: 1 }, "an isolated run is timed the same way");
+    same(rec.scores, { id: "scores", status: "skipped", ms: 0, calls: 0, keys: 0, why: "no session date" }, "a skipped stage says why");
+    eq(rec.chains.status, "skipped", "a stage that never started is skipped by finish");
+    same(r.outside(), ["late"], "a key written after the last stage is kept apart");
+    eq(r.records().length, STAGES.length, "and the records are one per stage");
+    eq(r.open(), null, "with no stage left open");
+  }
+
+  {
+    const r = createStageRunner({ clock: () => 0, calls: () => 0 });
+    const long = "x".repeat(400);
+    for (const x of STAGES) {
+      if (x.isolation === ISOLATION.fatal) r.step(x.id);
+      else await r.run(x.id, async () => { throw new Error(long + "\n  with   gaps"); }, () => {});
+    }
+    r.finish();
+    ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
+    ok(JSON.stringify(r.records()).length < 5000, `even with every isolated stage failed the records stay under 5 KB (${JSON.stringify(r.records()).length})`);
+    let n = 0;
+    const bigClock = () => (n += 98765);
+    const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
+    for (const x of STAGES) {
+      if (x.isolation === ISOLATION.fatal) wide.step(x.id);
+      else await wide.run(x.id, async () => {});
+      for (let i = 0; i < 400 && x.publishes.length; i++) wide.note(x.publishes[0].replace("*", "X"));
+    }
+    wide.finish();
+    ok(JSON.stringify(wide.records()).length < 4096, `production-sized numbers keep the records inside 4 KiB (${JSON.stringify(wide.records()).length} bytes)`);
+  }
+
+  {
+    same(healthRecord(null), { failures: 0, warnings: 0, first: [] }, "no gate verdict is an empty record");
+    same(healthRecord({ failures: [], warnings: [] }), { failures: 0, warnings: 0, first: [] }, "a clean verdict is an empty record");
+    const h = healthRecord({ failures: ["F1", "F2"], warnings: ["W1", "W2", "W3"] });
+    same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1"] }, "the record counts both and keeps the first three lines, failures first");
+    ok(healthRecord({ failures: ["y".repeat(500)], warnings: [] }).first[0].length <= 160, "and caps each line");
+  }
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

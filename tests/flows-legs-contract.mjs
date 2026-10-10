@@ -919,11 +919,16 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(table.includes("/api/flows/card-x"), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));
   for (const src of legs) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "leg modules carry no comments");
+  const nightly = fs.readdirSync(path.join(ROOT, "scripts/flows-nightly")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-nightly", f), "utf8"));
+  ok(nightly.length > 0, "the nightly's own modules are found");
+  for (const src of nightly) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "nightly modules carry no comments");
   const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
   ok(pipe.includes("harvest: harvest || universeSource"),
     "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
-  ok(/try \{\s*await publish\(key, marketLegs\[key\]\);/.test(pipe) && !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
-    "universe and regime publish one at a time, so a refused universe cannot take the regime and every card-x down with it");
+  ok(/await stages\.run\("market-universe", \(\) => publish\("universe", marketLegs\.universe\), \(error\) => \{/.test(pipe) &&
+     /await stages\.run\("market-regime", \(\) => publish\("regime", marketLegs\.regime\), \(error\) => \{/.test(pipe) &&
+     !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
+    "universe and regime publish one at a time, each as its own isolated stage, so a refused universe cannot take the regime and every card-x down with it");
   const own = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/ownership.mjs"), "utf8");
   ok(/volume-and-ratio`, \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
 }

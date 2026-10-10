@@ -77,7 +77,8 @@ import {
 } from "./flows-legs/health.mjs";
 import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
-import { pinStamp, stampNow } from "./flows-legs/stamp.mjs";
+import { pinStamp, stampNow, stampPinned } from "./flows-legs/stamp.mjs";
+import { createStageRunner, healthRecord } from "./flows-nightly/stages.mjs";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -3056,6 +3057,8 @@ export function publishRetryDelay(attempt, {
 
 const publishedStore = Object.create(null);
 
+let activeStages = null;
+
 const landedKeys = new Set();
 
 async function publish(key, payload) {
@@ -3064,6 +3067,7 @@ async function publish(key, payload) {
       "written by the live layer");
   }
   publishedStore[key] = payload;
+  if (activeStages) activeStages.note(key);
   const body = JSON.stringify(payload);
   if (EMIT || DRY_RUN) {
     if (EMIT) {
@@ -4745,6 +4749,10 @@ async function main() {
 
   if (LIVE_MODE) return runLiveMode();
 
+  const stages = createStageRunner({ clock: () => (stampPinned() ? 0 : Date.now()), calls: () => stats.calls });
+  activeStages = stages;
+  stages.step("session");
+
   const today = easternNow().date;
   console.log(DRY_RUN ? "Flows pipeline — DRY RUN (synthetic, no network)" : "Flows pipeline — live");
 
@@ -4808,6 +4816,7 @@ async function main() {
     return;
   }
 
+  stages.step("universe");
   const dating = await verifyDating(sessionDate);
   console.log(`dating: date=${dating.date} end_date=${dating.endDate ? "sent" : "dropped"}` +
     (dating.endDateHonoured === null ? ""
@@ -4968,6 +4977,7 @@ async function main() {
     `${focusDeep.size - focusMissing.length} of ${focusDeep.size} focus name(s) among them` +
     (focusMissing.length ? ` (not screened or not eligible: ${focusMissing.join(", ")})` : ""));
 
+  stages.step("enrich");
   const enriched = [];
   let failed = 0;
   let pastNames = 0, pastBars = 0, pastLatest = null;
@@ -5025,6 +5035,7 @@ async function main() {
     );
   }
 
+  stages.step("score");
   const MIN_ROWS = 10;
 
   const scorable = enriched.filter((e) => !e.gate);
@@ -5086,6 +5097,7 @@ async function main() {
     );
   }
 
+  stages.step("boards");
   const previous = {};
   const boardMemory = {};
   for (const side of ["long", "short"]) {
@@ -5224,7 +5236,7 @@ async function main() {
   const earlyRoster = DRY_RUN ? Promise.resolve(null)
     : readStored("roster", { budget: { spentMs: 0, budgetMs: 5_000 } }).catch(() => null);
 
-  try {
+  await stages.run("watch", async () => {
     const watchRows = toWatchRows(sides.neutralRows, sessionRowByTicker, tiltByTicker);
     await publish("board:watch", {
       v: BOARD_SCHEMA_VERSION,
@@ -5241,13 +5253,13 @@ async function main() {
       weights: first.weights || null,
       status: watchRows.length ? "ok" : "thin",
     });
-  } catch (error) {
+  }, (error) => {
     console.warn(`  watch: ${error.message}`);
-  }
+  });
 
   let scoresPayload = null;
   if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
-    try {
+    await stages.run("scores", async () => {
       const scoreRows = scoresRows(sides);
       scoresPayload = {
         v: BOARD_SCHEMA_VERSION, generatedAt, sessionDate,
@@ -5258,15 +5270,16 @@ async function main() {
       };
       await publish(`scores:${sessionDate}`, scoresPayload);
       console.log(`  scores: ${scoreRows.length} name(s) archived for ${sessionDate}`);
-    } catch (error) {
+    }, (error) => {
       console.warn(`  scores: ${error.message}`);
-    }
+    });
   } else {
     console.warn(
       "  scores: no session date, so the pool cannot be archived under a dated key this run");
+    stages.skip("scores", "no session date");
   }
 
-  try {
+  await stages.run("market", async () => {
     await publish("market", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
@@ -5278,12 +5291,12 @@ async function main() {
       notes: MARKET_NOTES,
       status: "ok",
     });
-  } catch (error) {
+  }, (error) => {
     console.warn(`  market: ${error.message}`);
-  }
+  });
 
   let moversPayload = null;
-  try {
+  await stages.run("movers", async () => {
     const movers = buildMovers(withTilt);
     moversPayload = {
       v: BOARD_SCHEMA_VERSION,
@@ -5307,13 +5320,13 @@ async function main() {
       (movers.unrankedChange ? `, ${movers.unrankedChange} with no prior close` : "") +
       `; premium ${movers.premium.bullish.length}/${movers.premium.bearish.length} of ${movers.priced}` +
       (movers.unrankedPremium ? `, ${movers.unrankedPremium} unquoted` : ""));
-  } catch (error) {
+  }, (error) => {
     console.warn(`  movers: ${error.message}`);
-  }
+  });
 
   const cardX = makeCardXStore();
   let marketLegs = null;
-  try {
+  await stages.run("market-legs", async () => {
     marketLegs = await runMarketLegs({
       uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
@@ -5329,18 +5342,22 @@ async function main() {
     }
     for (const [t, e] of marketLegs.earnings) cardX.add(t, "earnings", e);
     console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
-  } catch (error) {
+  }, (error) => {
     console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);
-  }
-  for (const key of marketLegs ? ["universe", "regime"] : []) {
-    try {
-      await publish(key, marketLegs[key]);
-    } catch (error) {
-      console.warn(`  ${key}: ${error.message} — the other market keys are published regardless`);
-    }
+  });
+  if (marketLegs) {
+    await stages.run("market-universe", () => publish("universe", marketLegs.universe), (error) => {
+      console.warn(`  universe: ${error.message} — the other market keys are published regardless`);
+    });
+    await stages.run("market-regime", () => publish("regime", marketLegs.regime), (error) => {
+      console.warn(`  regime: ${error.message} — the other market keys are published regardless`);
+    });
+  } else {
+    stages.skip("market-universe", "the market legs did not run");
+    stages.skip("market-regime", "the market legs did not run");
   }
 
-  try {
+  await stages.run("events", async () => {
 
     const stageByTicker = new Map();
     for (const { row } of withTilt) if (row && row.ticker) stageByTicker.set(row.ticker, "screened");
@@ -5401,12 +5418,12 @@ async function main() {
       (events.undated ? ` (${events.undated} carry no earnings date)` : "") +
       `; ${gatedShown} of them the board was gated out of, ` +
       `${events.evMeasured} with a priced move, ${events.rvMeasured} with realized vol`);
-  } catch (error) {
+  }, (error) => {
     console.warn(`  events: ${error.message}`);
-  }
+  });
 
   let archiveWalk = null;
-  try {
+  await stages.run("record", async () => {
     archiveWalk = await archiveWalkPromise;
     if (!archiveWalk) throw new Error("the dated-archive walk returned nothing to score");
     const { boards: datedBoards, probed: archiveProbed, failed: archiveFailed = 0,
@@ -5515,15 +5532,15 @@ async function main() {
           .filter(Boolean).join(", ");
       }).join("; "));
     }
-  } catch (error) {
+  }, (error) => {
     console.warn(`  record: ${error.message}`);
-  }
+  });
 
   let scoreTrack = null;
 
   let scoreTrackPremium = null;
 
-  try {
+  await stages.run("scoretrack", async () => {
     const walked = archiveWalk || { boards: [], scoreDays: [] };
     const dayMap = new Map();
     for (const sd of walked.scoreDays || []) {
@@ -5563,16 +5580,17 @@ async function main() {
 
     scoreTrack = track;
     scoreTrackPremium = premiumByName;
-  } catch (error) {
+  }, (error) => {
     console.warn(`  scoretrack: ${error.message}`);
-  }
+  });
 
   if (Date.now() > stats.startedAt + DEADLINE_MS) {
     console.warn(
       `  sector:trix: past the ${DEADLINE_MS / 60000}min deadline — not spending ` +
       `${SECTOR_ETFS.length} calls on a surface that would land after the cards were abandoned`);
+    stages.skip("sector-trix", "past the deadline");
   } else {
-    try {
+    await stages.run("sector-trix", async () => {
 
       const candlesByEtf = new Map();
       for (const { etf } of SECTOR_ETFS) {
@@ -5617,9 +5635,9 @@ async function main() {
       for (const s of sectors) {
         if (s.reason) console.warn(`    ${s.sector} (${s.etf}): not measured — ${s.reason}`);
       }
-    } catch (error) {
+    }, (error) => {
       console.warn(`  sector:trix: ${error.message}`);
-    }
+    });
   }
 
   const chainByTicker = new Map();
@@ -5628,7 +5646,7 @@ async function main() {
   let quantRate = null;
   const vannaSamples = [];
   const chainMiss = new Map();
-  try {
+  await stages.run("chains", async () => {
 
   const boardTickers = deepTickers.slice();
   const spotByTicker = new Map();
@@ -6202,11 +6220,12 @@ async function main() {
     console.warn(`  unusual: ${error.message}`);
   }
 
-  } catch (error) {
+  }, (error) => {
     console.warn(`  chains: ${error.message} — the boards published before this leg ran ` +
       "and are unaffected");
-  }
+  });
 
+  stages.step("pulse");
   const crossRaws = await publishPulse({
     sessionDate, generatedAt, tickers: (payloads.long.rows || []).map((r) => r.t),
   });
@@ -6215,7 +6234,7 @@ async function main() {
 
   const POLITICAL_WINDOW_DAYS = 90;
 
-  try {
+  await stages.run("political", async () => {
     const POLITICAL_PAGE_LIMIT = 200;
     const POLITICAL_MAX_PAGES = 8;
     const POLITICAL_HOLDER_NAMES = 6;
@@ -6359,16 +6378,18 @@ async function main() {
       `page(s) from ${from}, ` +
       POLITICAL_FEEDS.map((f) => `${f}:${political[f].status}` +
         `${political[f].rows ? ":" + political[f].rows.length : ""}`).join(" "));
-  } catch (error) {
+  }, (error) => {
     console.warn(`  political: ${error.message} — every key above published before this leg ran`);
-  }
+  });
 
+  stages.step("sector-news");
   await publishSectorPremium({ sessionDate, generatedAt });
 
   await publishNews({
     sessionDate, generatedAt, tickers: (payloads.long.rows || []).map((r) => r.t),
   });
 
+  stages.step("congress");
   const onBoard = new Map();
   for (const t of deepTickers) onBoard.set(t, sideOfRow.get(t) || null);
   const byTicker = byCard;
@@ -6483,7 +6504,7 @@ async function main() {
   }
 
   let volLeg = null;
-  try {
+  await stages.run("vol-leg", async () => {
     const volRoster = volNames({ deep: [...onBoard.entries()], crossSection: crossSectionTickers, byTicker,
       funds: FOCUS_FUNDS.filter((t) => !INDEX_TICKERS.includes(t)) });
     volLeg = await runVolLeg({
@@ -6492,10 +6513,11 @@ async function main() {
       pool: (items, work) => runPooled(items, work, {
         width: poolWidth(4).width, stopEarly: () => Date.now() > stats.startedAt + DEADLINE_MS }),
     });
-  } catch (error) {
+  }, (error) => {
     console.warn(`  vol: the leg failed (${error.message}); every card carries x.vol as unavailable and no card-x is written`);
-  }
+  });
 
+  stages.step("cards");
   let surfaceReported = false;
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
@@ -6686,12 +6708,14 @@ async function main() {
       (quantStats.failed ? `, ${quantStats.failed} failed` : "") + `; largest card ${(big / 1024).toFixed(1)}KB`);
   }
   if (quantStats.built) {
-    try {
+    await stages.run("ideas", async () => {
       await publish("ideas", ideasPayload(ideaByTicker, { sessionDate, generatedAt, built: quantStats.built }));
       console.log(`  ideas: the engine's lead structure for ${ideaByTicker.size} of ${quantStats.built} engine card(s)`);
-    } catch (error) {
+    }, (error) => {
       console.warn(`  ideas: ${error.message} — the boards draw no idea column this session`);
-    }
+    });
+  } else {
+    stages.skip("ideas", "no card carries an engine block");
   }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +
@@ -6740,6 +6764,7 @@ async function main() {
       : ""),
   );
 
+  stages.step("cross-cards");
   let extraBuilt = 0, extraFailed = 0, extraSkipped = 0;
   {
 
@@ -6817,6 +6842,7 @@ async function main() {
     }
   }
 
+  stages.step("vol-flow");
   await publishVol(volLeg, {
     publish, stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
   await runFlowLeg({
@@ -6831,6 +6857,7 @@ async function main() {
     cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
     width: poolWidth(3).width, log: (line) => console.log(line),
   });
+  stages.step("dossiers");
   const focusAsk = focusTickers({ groups: focusGroups(ndx) });
   const focusRead = await readFocusRows(vendor, [...new Set([...focusAsk, ...FOCUS_FUNDS])], { date: screenerDate });
   console.log(`  focus read: ${focusRead.rows.size} of ${focusAsk.length + FOCUS_FUNDS.filter((t) => !focusAsk.includes(t)).length} ` +
@@ -6882,7 +6909,7 @@ async function main() {
   {
     const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
     for (const [t, f] of dossierFeatures) featuresFor.set(t, f);
-    try {
+    await stages.run("focus", async () => {
       const askSet = new Set(focusAsk);
       const held = new Map(fundRows);
       for (const r of screener) if (r && askSet.has(r.ticker) && !held.has(r.ticker)) held.set(r.ticker, r);
@@ -6897,11 +6924,12 @@ async function main() {
         (focusPayload.missing.length ? `, missing ${focusPayload.missing.join(", ")}` : "") +
         (focusPayload.backfill ? `, ${focusPayload.backfill.tickers.length} filled from the run's own harvest (${focusPayload.backfill.why})` : "") +
         `, ${focusPayload.bytes || JSON.stringify(focusPayload).length} bytes of ${FOCUS_BUDGET_BYTES}`);
-    } catch (error) {
+    }, (error) => {
       console.warn(`  focus: ${error.message}`);
-    }
+    });
   }
   {
+    stages.step("card-x");
     const cx = await publishCardX(cardX, publish, {
       generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null,
       stored: (key) => publishedStore[key] || null, log: (line) => console.warn(line),
@@ -6913,7 +6941,7 @@ async function main() {
   let rosterSummary = null;
   let rosterThrew = false;
   const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
-  try {
+  await stages.run("roster", async () => {
     rosterSummary = await retireAndRoster({
       sessionDate, generatedAt,
       depth: new Map([
@@ -6935,11 +6963,11 @@ async function main() {
           { log: (line) => console.warn(line) }),
       deadline,
     });
-  } catch (error) {
+  }, (error) => {
     rosterThrew = true;
     console.warn(`  roster: ${error.message} — the retire step stopped before the roster was written; the stored ` +
       "roster stays at its older session, so the next run finds the gap and probes the store");
-  }
+  });
 
   console.log("  " + (DRY_RUN ? "[dry-run] " : "") + describeGammaRange(gammaProfiles).line +
     (DRY_RUN
@@ -6948,6 +6976,7 @@ async function main() {
         " to solve. Only a live run answers this."
       : ""));
 
+  stages.step("archive-check");
   const pruned = await prunePromise;
   if (pruned === null) console.warn("  prune: the sweep did not complete this run");
 
@@ -6983,19 +7012,20 @@ async function main() {
   }
 
   let neuronLedger = null;
-  try {
+  await stages.run("neuron-ledger", async () => {
     neuronLedger = neuronCoverage({ universe: marketLegs ? marketLegs.universe : null, eligible: universe.length, cards: neuronTiers,
       held: rosterSummary ? rosterSummary.heldKeys : {}, sessionDate });
     const L = neuronLedger;
     console.log(`  neuron coverage: ${L.universe} universe name(s) — priced ${L.priced}, stand-aside ${L.standAside}, family ${L.family}, screen ${L.screen}` +
       `, unpriceable ${L.unpriceable}, expired ${L.expired}, stale ${L.stale}, missing ${L.missing}; screen ideas: ${L.screenIdeas.family} family, ${L.screenIdeas.none} No position` +
       `; engine ${L.engine.built} of ${L.engine.expected} deep card(s)` + (L.absentInputs.length ? `; inputs absent from the payload: ${L.absentInputs.join(", ")}` : ""));
-  } catch (error) {
+  }, (error) => {
     console.warn(`  neuron coverage: ${error.message} — the ledger is not published this run`);
-  }
+  });
 
+  let metaBody = null;
   try {
-    await publish("meta", {
+    metaBody = {
       generatedAt, sessionDate,
       universe: universe.length,
       enriched: enriched.length,
@@ -7035,12 +7065,13 @@ async function main() {
         next: variationRun.next,
         votes: false,
       },
-    });
+    };
+    publishedStore.meta = metaBody;
   } catch (error) {
     console.warn(`  meta: ${error.message}`);
   }
 
-  try {
+  await stages.run("brief", async () => {
     const { buildBrief, briefStoreFrom } = await import("../shared/flows-brief.js");
     const { buildFactIndex } = await import("../shared/flows-ask.js");
     const { assess, assessStoreFrom } = await import("../shared/flows-warnings.js");
@@ -7080,11 +7111,12 @@ async function main() {
         `the weakest board name(s) ${briefOrder.slice(briefOrder.length - shed.namesIndexed.shed).join(", ")}; ` +
         "focus names are kept first)" : ""));
     await publish("brief", { ...base, facts: shed.facts, namesIndexed: shed.namesIndexed });
-  } catch (error) {
+  }, (error) => {
     console.warn(`  brief: ${error.message}`);
-  }
+  });
 
   if (DRY_RUN) {
+    stages.step("live-dry");
     console.log("live layer (dry run of the --live mode: two synthetic Tier 2 ticks; a real nightly never writes live:*)");
     await dryLiveTicks({ publish, store: publishedStore, shapeNews });
   }
@@ -7152,6 +7184,7 @@ async function main() {
   const verdict = describeFloorVerdict(stats);
   if (verdict) console.log("  " + verdict);
 
+  stages.step("gate");
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
     annotate: process.env.GITHUB_ACTIONS === "true",
     night: {
@@ -7160,7 +7193,23 @@ async function main() {
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
       neuron: neuronLedger,
     } });
+  stages.finish();
+  activeStages = null;
   if (health.failures.length) process.exitCode = 1;
+
+  if (metaBody) {
+    const outside = stages.outside();
+    try {
+      await publish("meta", {
+        ...metaBody,
+        stages: stages.records(),
+        ...(outside.length ? { stagesOutside: outside.slice(0, 5) } : {}),
+        health: healthRecord(health),
+      });
+    } catch (error) {
+      console.warn(`  meta: ${error.message}`);
+    }
+  }
   await reportHealth({ failures: health.failures, applies: health.applies, dry: DRY_RUN, env: process.env });
 }
 
