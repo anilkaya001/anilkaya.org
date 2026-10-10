@@ -49,6 +49,7 @@ export const VOL_WHY = Object.freeze({
   "short-history": "fewer observations than this statistic needs",
   "input-absent": "an input this value is computed from is absent",
   degenerate: "the inputs have no spread, so the ratio is undefined",
+  "non-positive-forecast": "the fitted regression forecasts a variance that is not positive, so no volatility is published",
   "few-samples": "the vendor's own sample count is under the trust floor",
   "no-event": "no upcoming earnings date falls inside the listed expiries",
   "no-premium": "the event expiry is not elevated over the one after it, so there is no event variance",
@@ -447,7 +448,7 @@ export function harFit(bars, { sessionDate = null, lag = HAR_NW_LAG } = {}) {
   if (!fit) return { vol: null, code: "degenerate", n: y.length };
   const x = [1, xd, xw, xm];
   const yhat = x.reduce((acc, v, i) => acc + v * fit.beta[i], 0);
-  if (!(yhat > 0)) return { vol: null, code: "degenerate", n: y.length };
+  if (!(yhat > 0)) return { vol: null, code: "non-positive-forecast", n: y.length };
   let q = 0;
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) q += x[i] * fit.cov[i][j] * x[j];
   const sd = Math.sqrt(Math.max(fit.s2 + q, 0));

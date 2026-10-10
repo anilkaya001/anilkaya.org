@@ -828,6 +828,26 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(fz.vol, null, "bars with no range and no moves have no forecast");
   ok(fz.code === "degenerate" || fz.code === "input-absent", "and say why: " + fz.code);
 
+  {
+    let seed = 1;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+    const sigmaAt = (i) => (i === 399 ? 0.6 : i % 22 === 0 ? 0.1 : 0.002);
+    const spiky = [];
+    let px = 100;
+    for (let i = 0; i < 400; i++) {
+      const s = sigmaAt(i), o = px, c = o * (1 + s * (rnd() - 0.5) * 1.7);
+      const h = Math.max(o, c) * (1 + s * rnd() * 0.5), l = Math.min(o, c) * (1 - s * rnd() * 0.5);
+      spiky.push({ d: new Date(Date.UTC(2024, 0, 2) + i * 86400000).toISOString().slice(0, 10), o, h, l, c });
+      px = c;
+    }
+    const neg = harFit(spiky);
+    eq(neg.vol, null, "a fit whose forecast variance is not positive publishes no volatility, never the root of a negative");
+    eq(neg.code, "non-positive-forecast", "and names it");
+    ok(neg.n > HAR_MIN_ROWS, `after a fit on ${neg.n} rows, so it is the forecast that is refused and not a short history`);
+    ok(typeof VOL_WHY["non-positive-forecast"] === "string" && !/no spread/.test(VOL_WHY["non-positive-forecast"]), "with its own wording, not the no-spread one");
+    eq(harPanel(spiky, { iv: 0.3 }).panel, null, "and no panel is drawn from it");
+  }
+
   const ref20 = HF.fits.find((f) => f.lag === 20);
   const hp = harPanel(HF.bars, { iv: 0.3 });
   eq(hp.panel.estimator, HAR_LABEL, "the panel labels the estimator");
