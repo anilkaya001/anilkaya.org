@@ -3,7 +3,8 @@ import { fitGarch, skewtDensity, skewtConstants, lnGamma, GARCH_MIN_RETURNS, SKE
          GARCH_WINSOR_K, GARCH_PERSIST_CAP, GARCH_EWMA_LAMBDA, GARCH_AVG_SESSIONS, garchAverageVariance,
          GARCH_ALPHA_DEGENERATE, ljungBoxSquared }
   from "../shared/flows-garch.js";
-import { repairCandles, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME } from "../scripts/flows-pipeline.mjs";
+import { repairCandles, computeFeatures, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME } from "../scripts/flows-pipeline.mjs";
+import { refitGarch } from "../scripts/flows-quant-pipeline.mjs";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -182,7 +183,8 @@ ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reas
   const last = fit.ewma[fit.ewma.length - 1];
   ok(last > fit.lastVol / 2 && last < fit.lastVol * 2,
      `the reference and the fitted path close the window within a factor of two of each other (${last} vs ${fit.lastVol})`);
-  near(fit.cap, GARCH_WINSOR_K * fit.robustSd, 0.002, "the cap is six robust standard deviations");
+  ok(GARCH_WINSOR_K === 10, "the clip is ten robust standard deviations: at six it read the tail shape 0.4 to 0.6 too high at three thousand returns");
+  near(fit.cap, GARCH_WINSOR_K * fit.robustSd, 0.002, "the cap is ten robust standard deviations");
   ok(fit.persistence <= GARCH_PERSIST_CAP, "persistence never exceeds the cap the parameterisation imposes");
   ok(GARCH_EWMA_LAMBDA === 0.94, "the reference decay is RiskMetrics' 0.94, the one every desk recognises");
 }
@@ -283,6 +285,124 @@ ok(uniform.status === "ok" && uniform.converged === false && typeof uniform.reas
   ok(maskedFit.logLik > plain.logLik, "and the likelihood no longer pays for an event the diffusion never produced");
   const byDate = fitGarch(spiked, d2, { mask: new Set([d2[100], "1999-01-01"]) });
   ok(byDate.masked === 1, "a Set works as a mask and a date outside the window masks nothing");
+}
+
+{
+  const median = (xs) => { const v = xs.slice().sort((a, b) => a - b); return v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2; };
+  const simulate = (N, nu, lambda, seedKey) => {
+    let state = (seedKey * 7919 + 17) | 0;
+    const u = () => {
+      state = (state + 0x6D2B79F5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const normal = () => Math.sqrt(-2 * Math.log(u() || 1e-12)) * Math.cos(2 * Math.PI * u());
+    const gam = (a) => {
+      if (a < 1) return gam(a + 1) * Math.pow(u(), 1 / a);
+      const d = a - 1 / 3, c = 1 / Math.sqrt(9 * d);
+      for (;;) {
+        let x, v;
+        do { x = normal(); v = 1 + c * x; } while (v <= 0);
+        v = v * v * v;
+        const w = u();
+        if (w < 1 - 0.0331 * x ** 4 || Math.log(w) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+      }
+    };
+    const { a, b } = skewtConstants(nu, lambda);
+    const draw = () => {
+      const y = Math.abs(normal() / Math.sqrt(2 * gam(nu / 2) / nu)) * Math.sqrt((nu - 2) / nu);
+      return u() < (1 - lambda) / 2 ? (-(1 - lambda) * y - a) / b : ((1 + lambda) * y - a) / b;
+    };
+    let s2 = 0.05 / (1 - 0.97);
+    const px = [100], at = [new Date(Date.UTC(2000, 0, 1)).toISOString().slice(0, 10)];
+    for (let t = 0; t < N; t++) {
+      const e = Math.sqrt(s2) * draw();
+      px.push(px[px.length - 1] * Math.exp(e / 100));
+      s2 = 0.05 + 0.08 * e * e + 0.89 * s2;
+      at.push(new Date(Date.UTC(2000, 0, 2 + t)).toISOString().slice(0, 10));
+    }
+    return { px, dates: at };
+  };
+
+  const SEEDS = 50;
+  const table = {};
+  for (const nu of [4, 5, 8]) {
+    for (const N of [750, 3000]) {
+      const read = (winsorK, seeds) => median(Array.from({ length: seeds }, (_, s) => {
+        const { px, dates: d } = simulate(N, nu, -0.05, s + 1);
+        return fitGarch(px, d, { winsorK }).nu;
+      }));
+      const clipped = read(GARCH_WINSOR_K, SEEDS);
+      table[`${nu}/${N}`] = clipped;
+      if (N === 3000) {
+        near(clipped, nu, 0.25, `median nu over ${SEEDS} seeds at 3,000 returns, true nu ${nu}`);
+      } else {
+        near(clipped, read(Infinity, SEEDS), 0.15, `median nu over ${SEEDS} seeds at 750 returns sits within 0.15 of the unclipped estimator, true nu ${nu}`);
+      }
+    }
+  }
+  const sixAt5 = median(Array.from({ length: 20 }, (_, s) => {
+    const { px, dates: d } = simulate(3000, 5, -0.05, s + 1);
+    return fitGarch(px, d, { winsorK: 6 }).nu;
+  }));
+  ok(sixAt5 - 5 > 0.25, `the old six-deviation clip reads nu ${sixAt5.toFixed(2)} where the truth is 5, outside the 0.25 the table now holds`);
+  console.log("  median nu by true nu/returns:", JSON.stringify(Object.fromEntries(Object.entries(table).map(([k, v]) => [k, Number(v.toFixed(3))]))));
+
+  const SPLITS = 20;
+  for (const ratio of [0.5, 4]) {
+    const cut = 400;
+    const shifts = { masked: [], unmasked: [], unclipped: [] };
+    const last = { masked: [], unmasked: [] };
+    for (let s = 0; s < SPLITS; s++) {
+      const { px, dates: d } = simulate(750, 5, -0.05, s + 1);
+      const split = px.map((v, i) => (i >= cut ? v * ratio : v));
+      const clean = fitGarch(px, d);
+      const unmasked = fitGarch(split, d);
+      const masked = fitGarch(split, d, { mask: [d[cut]] });
+      shifts.masked.push(Math.abs(masked.nu - clean.nu));
+      shifts.unmasked.push(Math.abs(unmasked.nu - clean.nu));
+      shifts.unclipped.push(Math.abs(fitGarch(split, d, { winsorK: Infinity }).nu - clean.nu));
+      last.masked.push(Math.abs(masked.lastVol / clean.lastVol - 1));
+      last.unmasked.push(Math.abs(unmasked.lastVol / clean.lastVol - 1));
+      ok(masked.masked === 1, "the break's own return is the one the likelihood skips");
+    }
+    ok(Math.max(...shifts.masked) < 0.5, `a ${ratio === 0.5 ? "2:1 split" : "1:4 reverse split"} masked moves nu by under 0.5 in every one of ${SPLITS} series (worst ${Math.max(...shifts.masked).toFixed(2)})`);
+    ok(Math.max(...last.masked) < 0.1, `and the last conditional volatility by under 10% (worst ${(Math.max(...last.masked) * 100).toFixed(1)}%)`);
+    ok(median(shifts.unmasked) > 3 * median(shifts.masked) + 0.1,
+      `left in, the same break moves nu by a median ${median(shifts.unmasked).toFixed(2)} against ${median(shifts.masked).toFixed(3)} masked: the clip alone does not remove it`);
+    ok(median(shifts.unclipped) > 1.5, `and with no clip at all by a median ${median(shifts.unclipped).toFixed(2)}, which is why the clip stays at ten`);
+  }
+}
+{
+  const startUtc = Date.UTC(2025, 0, 1);
+  const series = (() => {
+    let state = 99;
+    const u = () => { state = (state * 1103515245 + 12345) % 2147483648; return state / 2147483648; };
+    const out = [100];
+    for (let i = 1; i < 400; i++) out.push(out[i - 1] * Math.exp((u() - 0.5) * 0.03));
+    return out;
+  })();
+  const at = (i) => new Date(startUtc + i * 86400000).toISOString();
+  const rows = series.map((c, i) => ({
+    start_time: at(i), open: c, high: c, low: c, close: i >= 250 ? c / 2 : c, volume: i >= 250 ? 2e6 : 1e6,
+  }));
+  const sessionDate = at(399).slice(0, 10);
+  const f = computeFeatures({ ticker: "SPL", spot: 50, greekFlow: [], ticks: [], strikes: [], expiries: [], ohlc: rows, sessionDate, tilt: null });
+  ok(f.priceBreaks.length === 1 && f.priceBreaks[0].shape === "split" && f.priceBreaks[0].date === at(250).slice(0, 10),
+    "the 2:1 split is found by the candle repair and dated by the first session after it");
+  ok(f.candles.length === 150, "the price features still start after the break");
+  ok(f.garch.status === "ok" && f.garch.masked === 1 && f.garch.n === 399,
+    `while the fit keeps every return and skips only the break's (n ${f.garch.n}, masked ${f.garch.masked}), not the 149 that survive the cut`);
+  ok(f.garchSeries && f.garchSeries.mask.length === 1 && f.garchSeries.closes.length === 400 && f.garchSeries.dates[399] === sessionDate,
+    "the features carry the uncut series and the mask for the refit");
+  const refit = refitGarch(f, [at(100).slice(0, 10)]);
+  ok(refit.status === "ok" && refit.n === 399 && refit.masked === 2,
+    `an earnings refit masks the event and the break together on the same long series (n ${refit.n}, masked ${refit.masked})`);
+  const calm = computeFeatures({ ticker: "SPL", spot: 50, greekFlow: [], ticks: [], strikes: [], expiries: [],
+    ohlc: rows.map((r, i) => ({ ...r, close: series[i], volume: 1e6 })), sessionDate, tilt: null });
+  ok(!("garchSeries" in calm) && calm.priceBreaks.length === 0 && calm.garch.masked === 0 && calm.garch.n === 399,
+    "a series with no break carries no second copy of itself and masks nothing");
 }
 
 console.log(`✓ flows-garch: ${n} assertions — Hansen's skewed t is a zero-mean unit-variance density that ` +

@@ -1654,7 +1654,7 @@ try {
     for (const c of cells) { const at = t.indexOf("\n" + c + "\n"); ok(at > last, `the fit's cell "${c}" is stated, in the fixed order: levels, then shape, then the recursion's own`); last = at; }
     ok(t.includes("\nTail shape ν\n" + g0.nu.toFixed(1) + "\n"), "the tail shape prints to one decimal");
     ok(t.includes("\nSkew λ\n" + (g0.lambda > 0 ? "+" : g0.lambda < 0 ? "−" : "") + Math.abs(g0.lambda).toFixed(2) + "\n"), "the skew prints to two decimals with a real minus sign");
-    ok(/penalised maximum likelihood with variance targeting/.test(t) && /winsorised at six robust standard deviations/.test(t), "the disclosure names the method and the winsorising");
+    ok(/penalised maximum likelihood with variance targeting/.test(t) && /winsorised at 10 robust standard deviations/.test(t), "the disclosure names the method and the winsorising");
     ok(/next-session cell is the recursion's own state/.test(t) && /RiskMetrics EWMA at 0\.94/.test(t) && /long-run cell is a measurement/.test(t), "and explains the next-session cell and the reference path");
     await pickView(page, "m-vol", "History");
     const hist = await page.evaluate(() => ({ dashed: document.querySelectorAll("#m-vol .ft-cbox path[stroke-dasharray]").length, legend: document.querySelector("#m-vol .ft-leg-row").innerText }));

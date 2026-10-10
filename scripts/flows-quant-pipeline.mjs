@@ -89,11 +89,12 @@ export function earningsFromVendor(raw, { sessionDate } = {}) {
 
 export function refitGarch(features, mask) {
   const f = features || {};
+  const series = f.garchSeries && Array.isArray(f.garchSeries.closes) ? f.garchSeries : null;
   const candles = Array.isArray(f.candles) ? f.candles : [];
-  if (!mask || !mask.length || candles.length < 61) return f.garch || null;
-  const closes = candles.map((c) => num(c && c[4]));
-  const dates = candles.map((c) => (c && typeof c[0] === "string" ? c[0].slice(0, 10) : null));
-  const fit = fitGarch(closes, dates, { mask });
+  const closes = series ? series.closes : candles.map((c) => num(c && c[4]));
+  if (!mask || !mask.length || closes.length < 61) return f.garch || null;
+  const dates = series ? series.dates : candles.map((c) => (c && typeof c[0] === "string" ? c[0].slice(0, 10) : null));
+  const fit = fitGarch(closes, dates, { mask: series && series.mask ? [...mask, ...series.mask] : mask });
   return fit && fit.status === "ok" ? fit : f.garch || fit;
 }
 

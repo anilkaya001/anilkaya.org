@@ -1124,7 +1124,7 @@ function repairCandles(candles) {
     }
     prev = b;
   }
-  return { candles: cut ? rows.slice(cut) : rows, breaks };
+  return { candles: cut ? rows.slice(cut) : rows, breaks, full: rows };
 }
 
 export function sessionReference(candles, sessionDate, readSpot) {
@@ -1169,7 +1169,10 @@ export function readPxOf(e, readAt) {
 }
 
 function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, expiries, ohlc: rawOhlc, sessionDate, tilt }) {
-  const { candles: ohlc, breaks } = repairCandles(sessionCandles(rawOhlc, sessionDate));
+  const { candles: ohlc, breaks, full } = repairCandles(sessionCandles(rawOhlc, sessionDate));
+  const garchSeries = breaks.length ? {
+    closes: full.map((c) => num(c.close)), dates: full.map(candleDate), mask: breaks.map((b) => b.date),
+  } : null;
   const reference = sessionReference(ohlc, sessionDate, readSpot);
   const spot = reference.spot;
   const purity = flowPurity(greekFlow);
@@ -1277,7 +1280,10 @@ function computeFeatures({ ticker, spot: readSpot, greekFlow, ticks, strikes, ex
       num(c.close, null), num(c.volume, null),
     ]),
 
-    garch: fitGarch(closes, candlesAscending(ohlc).map(candleDate)),
+    garch: garchSeries
+      ? fitGarch(garchSeries.closes, garchSeries.dates, { mask: garchSeries.mask })
+      : fitGarch(closes, candlesAscending(ohlc).map(candleDate)),
+    ...(garchSeries ? { garchSeries } : {}),
     priceBreaks: breaks,
 
     r5: ret(closes, 5),
