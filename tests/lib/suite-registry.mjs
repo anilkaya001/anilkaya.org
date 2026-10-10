@@ -74,7 +74,12 @@ const globRx = (glob) => {
   return new RegExp("^" + rx + "$");
 };
 
-export const globMatches = (glob, file) => globRx(glob).test(file);
+const globCache = new Map();
+export const globMatches = (glob, file) => {
+  let rx = globCache.get(glob);
+  if (!rx) { rx = globRx(glob); globCache.set(glob, rx); }
+  return rx.test(file);
+};
 
 export function literalReads(root, scan, tracked) {
   const set = new Set(tracked);

@@ -183,6 +183,15 @@ header readback with this repository after any dashboard rule change.
 
 ## File map
 
+The File map, the course counts, the production globals and the suite lists in
+this file sit between `gen:` markers and are written by `node scripts/gen-docs.mjs`
+from `docs/modules.json`, `docs/globals.json`, `tests/suites.json` and the
+catalogue; edit those inputs and regenerate, never the text between markers.
+A new tracked file needs a row in `docs/modules.json`. `docs/index.md` is the
+full generated index, and `docs/map-2026-10-05.md` is the frozen system map
+(a dated snapshot, never edited).
+
+<!-- gen:filemap -->
 | Path | Role |
 |---|---|
 | `index.html` | Landing page and particle-field hero. |
@@ -271,10 +280,14 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 | `tests/flows-quant-audit.mjs`, `tests/fixtures-quant-audit.json` | The options engine against independent references: the horizon of a real-world law priced intraday, its 2,000,000-path scipy simulation at nine horizons, the Student t and Hansen skew-t quantiles and the Sobol net the pipeline draws through, dividends on the stock leg, the desk's carry, smile shape and in-the-money quotes, the earnings gate and the grades. The fixture's provenance string names the scipy version, the path count and the seed. |
 | `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
+| `scripts/gen-docs.mjs`, `docs/modules.json`, `docs/globals.json`, `docs/index.md`, `tests/docs-contract.mjs` | Generated documentation. `gen-docs.mjs` writes the File map, the course counts, the production globals and the suite lists in this file between their `gen:` markers, and `docs/index.md` (every tracked file with its role, its exports as `file#symbol`, and the suites that reach it), from `docs/modules.json` (one row per module: paths or globs, role, domain; a row with a `show` cell is also a File map line), `docs/globals.json`, `tests/suites.json` and the sources. `--check` exits 1 on drift. `docs-contract.mjs` fails on any difference, on a tracked file no row names and on a row that matches no file. |
+| `scripts/map/audit.mjs` | The reference audit: the share of `path:line` references in the listed documents (default `AGENTS.md`, `DEPLOY.md`, `README.md` and the frozen `docs/map-2026-10-05.md`) whose file is missing or whose line is past the end, printed, or written to the step summary when `GITHUB_STEP_SUMMARY` is set. A report, not a gate. |
+<!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
 
-`window.TOPIC_META` in the lightweight `course-catalog.js` holds twelve courses
+<!-- gen:courses -->
+`window.TOPIC_META` in the lightweight `course-catalog.js` holds 12 courses
 (365 stages in all, which `tests/contracts.mjs` and `tests/academy-contract.mjs`
 pin):
 
@@ -283,9 +296,13 @@ ols 20 · iv2sls 31 · did 29 · var 30 · panel 30 · logit 32 · gmm 33
 foundations 32 · mle 32 · forecast 32 · coint 32 · financial 32
 ```
 
-The first seven have four modules each and the five newer ones have five. Each
-module owns ordered stages. The
-canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
+Courses by module count, each module owning ordered stages: 4 modules: `ols`,
+`iv2sls`, `did`, `var`, `panel`, `logit`, `gmm`; 5 modules: `foundations`,
+`mle`, `forecast`, `coint`, `financial`.
+The generated review bank holds 106 items, the skill graph 84 skills,
+the challenge bank 252 variants, and `LEARNING_PATHS` 5 guided paths.
+<!-- /gen:courses -->
+The canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
 `curriculum-questions.js`; neither the catalogue nor the course page downloads
 those heavyweight combined sources. Run this after any authored course change:
 
@@ -978,7 +995,7 @@ npm test
 The suites prove:
 
 - all twelve curricula (four or five modules each), every stage schema, exact generated
-  per-course payloads and IDs, deterministic 106-item review artefacts, the
+  per-course payloads and IDs, deterministic review artefacts, the
   balanced 15-item placement bank and sanitized result contract,
   browser/server mastery-scheduler parity, payload-size budgets, scoring
   manifests, owner-scoped v2 migration/reset behavior, local asset
@@ -991,7 +1008,7 @@ The suites prove:
   idempotency, generation-fenced transactional reset, stale-write rejection,
   and exact derived points;
 - academy cockpit fold visibility, placement routing, command-center metrics,
-  five learning paths, search/level/status filters, all five placement and
+  the guided learning paths, search/level/status filters, all five placement and
   Daily Mastery Review formats, single-course payload
   isolation, anonymous and signed-in reset safety, no
   horizontal overflow or browser errors across 320/390/768/1440 widths,
@@ -1172,41 +1189,40 @@ in both directions: `contracts.mjs` and `flows-weight.mjs` merely mention the
 string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
-Confirmed to run with no server:
+<!-- gen:suites-local -->
+`tests/suites.json` registers 82 suites: 50 that need only Node (N), 15 that also
+need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
+each suite's import closure, so this list cannot drift from it. A name is the
+`test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
+`node run.mjs --only <name>` from `tests/`.
+
+Confirmed to run with no server and no browser (N):
 
 ```
-architecture           contracts              flows-weight            flows-payload-shape
-flows-scores-contract  flows-overlay-contract  flows-ticker-contract
-flows-card-render      flows-card-contract     flows-strip
-flows-features         flows-alerts-contract   flows-brief
-flows-warnings         flows-sign              flows-ask
-flows-stock-contract   flows-premium-contract  flows-pulse-contract
-flows-events-contract  flows-mint-contract     flows-permits-contract
-flows-political-contract  flows-record-contract  flows-universe-contract
-flows-garch            flows-neuron            flows-quant
-flows-chain-panels     flows-auth-contract     mastery-contract
-academy-contract       flows-variation         flows-probe-contract
-flows-ws-probe-contract
-flows-vol-contract
-flows-positioning-contract
-flows-legs-contract
-flows-live-contract    flows-freshness-contract
-flows-starts-contract  flows-rt-contract
-flows-quant-card       flows-track-render
-flows-quant-audit
-flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
-flows-verdict-contract
-flows-readers-contract   flows-readers-render
-markets-contract         flows-desk-client
-landing-motion
-flows-basis-contract     flows-desk-wiring
-flows-neuron-screen
-lib-contract
-flows-dossier-contract   flows-dossier-reads
-flows-reading   flows-reading-worker   flows-reading-render
-flows-rt-client          flows-net-render
-run-contract
+contracts                 run                       markets                   flows
+pipeline                  flows-probe               flows-ws-probe            flows-universe
+flows-legs                flows-record              flows-chain-panels        mastery
+academy                   flows-basis               flows-payload-shape       flows-scores
+flows-alerts              flows-mint                flows-pulse               flows-freshness
+flows-live                flows-rt                  flows-starts              flows-reads
+flows-readers             flows-ledger              flows-verdict             flows-stock
+flows-permits             flows-overlay             flows-political           flows-weight
+flows-brief               flows-warnings            flows-sign                flows-garch
+flows-quant               flows-quant-card          flows-neuron              flows-variation
+flows-vol                 flows-positioning         flows-quant-audit         flows-neuron-screen
+flows-dossier             flows-dossier-reads       flows-reading             flows-reading-worker
+architecture              docs
 ```
+
+Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
+
+```
+market-ticker             landing-motion            placement                 flows-rt-client
+flows-desk-client         flows-desk-wiring         flows-ticker              flows-render
+flows-events              flows-readers-render      flows-net-render          flows-strip
+flows-ask                 flows-track-render        flows-reading-render
+```
+<!-- /gen:suites-local -->
 
 `placement-contract` needs Playwright's Chromium but no workerd: it serves the repository's
 static files from its own `http.createServer` on loopback. Run it with
@@ -1415,16 +1431,23 @@ SIGTERM, SIGINT, SIGHUP, two SIGINTs 5 ms apart and a second SIGINT 800 ms
 later mid-suite. Its process checks read `/proc` where it exists and `ps`
 elsewhere, so it runs on macOS too.
 
-Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
-`flows-watch-render`, `flows-political-render`, `flows-ask-render`,
-`flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
-`flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`browser` (`npm run test:browser`, `regression.mjs`: Chromium against
-`startWorker()`), `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
-2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`, CI median 22 s; it boots workerd for the
-strategy page and its `engine=1` route), `flows-unusual-contract` (measured on
-2026-09-24: 80–92 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd through
-`startWorker`).
+<!-- gen:suites-server -->
+Confirmed to need one (W; set `FLOWS_TEST_SANDBOX=1` in the agent sandbox):
+
+```
+worker                    flows-worker              flows-rt-server           flows-chain
+flows-desk                flows-overview            flows-sections            flows-market
+flows-legacy              flows-motion              browser                   flows-unusual
+flows-political-render    flows-watch-render        flows-board-render        flows-strategy
+flows-ask-render
+```
+<!-- /gen:suites-server -->
+
+`flows-strategy` was measured on 2026-09-23 at 13 s with `FLOWS_TEST_SANDBOX=1`
+(CI median 22 s); it boots workerd for the strategy page and its `engine=1`
+route. `flows-unusual-contract` was measured on 2026-09-24 at 80 to 92 s with
+`FLOWS_TEST_SANDBOX=1`; it boots workerd through `startWorker`. `browser` is
+`npm run test:browser` (`regression.mjs`: Chromium against `startWorker()`).
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
 boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox
@@ -1481,7 +1504,8 @@ write the argument in the commit message. Generated files
 `shared/stage-manifest.js`, `shared/skill-manifest.js`,
 `shared/course-points.js`, `shared/course-seo.js`) are written by
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
-not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
+not its output. `docs/index.md` and the marked sections of this file are
+written by `scripts/gen-docs.mjs` the same way. `assets/js/flows-quant.bundle.js` is generated the same way by
 `scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
 `tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`), and so
 is `assets/js/flows-quant-read.bundle.js`, tree-shaken from
@@ -1495,11 +1519,13 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 ## Design and accessibility invariants
 
 - JavaScript remains IIFE-based and framework-free; production globals are
-  deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
+  deliberate:<!-- gen:globals -->
+  `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
   `LEARNING_PATHS`, `toast`, `COURSE_STAGE_IDS`, `COURSE_SKILLS`,
   `SKILL_CATALOG`, `SKILL_BY_ID`, `SkillMasteryScheduler`, `PROJECT_CATALOG`,
-  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`. The rail's browser
+  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`.
+  <!-- /gen:globals --> The rail's browser
   half is `FlowsUI.rt` (`connect`, `on`, `transport` and the adapters), added to
   the existing global rather than a new one, and the flow network is
   `FlowsUI.net` (`model`, `mount`, `of`), added the same way by the one page

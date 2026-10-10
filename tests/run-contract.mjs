@@ -607,18 +607,20 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 }
 
 const PUBLISHED_SHARDS = [
-  ["market-ticker", "mastery", "flows-worker", "flows-ledger", "flows-permits", "flows-ask", "flows-garch", "flows-neuron-screen",
+  ["market-ticker", "flows-universe", "academy", "flows-worker", "flows-basis", "flows-pulse", "flows-ask", "flows-warnings",
     "flows-reading-worker"],
-  ["worker", "flows-chain", "flows-ticker", "flows-freshness", "flows-readers", "flows-verdict", "flows-overlay",
-    "flows-board-render", "flows-strategy", "flows-brief", "flows-track-render", "flows-sign", "flows-quant-card", "flows-variation"],
-  ["markets", "pipeline", "flows-probe", "flows-desk-client", "flows-desk-wiring", "flows-basis", "flows-motion", "flows-unusual",
-    "flows-payload-shape", "flows-pulse", "flows-reads", "flows-warnings", "flows-neuron", "flows-reading", "flows-reading-render"],
-  ["flows", "flows-chain-panels", "flows-rt-client", "flows-sections", "flows-market", "flows-events", "flows-alerts", "flows-mint",
-    "flows-watch-render", "flows-net-render", "flows-weight", "flows-ask-render", "flows-dossier-reads", "architecture"],
-  ["flows-ws-probe", "flows-universe", "flows-legs", "placement", "flows-rt-server", "flows-desk", "flows-legacy", "flows-scores",
-    "flows-starts", "flows-political", "flows-political-render", "flows-strip", "flows-vol", "flows-dossier"],
-  ["landing-motion", "flows-record", "academy", "flows-overview", "flows-render", "browser", "flows-live", "flows-rt",
-    "flows-readers-render", "flows-stock", "flows-quant", "flows-positioning", "flows-quant-audit"],
+  ["flows-probe", "worker", "flows-chain", "flows-ticker", "flows-scores", "flows-freshness", "flows-readers", "flows-verdict",
+    "flows-stock", "flows-overlay", "flows-board-render", "flows-strategy", "flows-track-render", "architecture"],
+  ["pipeline", "flows-record", "flows-chain-panels", "flows-desk-client", "flows-desk-wiring", "flows-motion", "flows-unusual",
+    "flows-payload-shape", "flows-reads", "flows-permits", "flows-garch", "flows-neuron-screen", "flows-reading",
+    "flows-reading-render"],
+  ["markets", "flows", "mastery", "flows-rt-client", "flows-sections", "flows-market", "flows-events", "flows-ledger",
+    "flows-watch-render", "flows-net-render", "flows-brief", "flows-ask-render", "flows-neuron", "flows-dossier-reads", "docs"],
+  ["flows-ws-probe", "flows-legs", "placement", "flows-rt-server", "flows-desk", "flows-legacy", "flows-starts",
+    "flows-political-render", "flows-weight", "flows-strip", "flows-sign", "flows-quant-card", "flows-variation", "flows-vol",
+    "flows-dossier"],
+  ["landing-motion", "flows-overview", "flows-render", "browser", "flows-alerts", "flows-mint", "flows-live", "flows-rt",
+    "flows-readers-render", "flows-political", "flows-quant", "flows-positioning", "flows-quant-audit"],
 ];
 const CI_SHARDS = 6;
 

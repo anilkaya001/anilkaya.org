@@ -24,3 +24,4 @@ CNAME
 schema.sql
 migrations/
 *.md
+docs/*.json

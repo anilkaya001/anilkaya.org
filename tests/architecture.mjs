@@ -91,7 +91,7 @@ const LAYERS = [
     to: [/^scripts\/flows-nightly\/(?:store|vendor|rank|archive|fixtures)\.mjs$/, /^shared\//], bare: [/^node:/],
   },
   { name: "shared", from: /^shared\//, to: [/^shared\//], bare: [] },
-  { name: "a script", from: /^scripts\//, to: [/^scripts\//, /^shared\//], bare: [/^node:/, /^[a-z@]/] },
+  { name: "a script", from: /^scripts\//, to: [/^scripts\//, /^shared\//, /^tests\/lib\/suite-registry\.mjs$/], bare: [/^node:/, /^[a-z@]/] },
 ];
 
 function layers(g) {
@@ -450,6 +450,13 @@ mutate("scripts/ importing server/", {
   "scripts/zz.mjs": 'import { x } from "../server/zz.js";\nexport const a = x;\n',
   "server/zz.js": "export const x = 1;\n",
 }, (r) => r.layer);
+mutate("scripts/ importing a test helper other than the suite registry", {
+  "scripts/zz.mjs": 'import { x } from "../tests/lib/zz.mjs";\nexport const a = x;\n',
+  "tests/lib/zz.mjs": "export const x = 1;\n",
+}, (r) => r.layer);
+mutate("scripts/ importing the suite registry is allowed", {
+  "scripts/zz.mjs": 'import { ROOT } from "../tests/lib/suite-registry.mjs";\nexport const a = ROOT;\n',
+}, (r) => r.layer, false);
 mutate("shared/ importing a node builtin", { "shared/zz.js": 'import fs from "node:fs";\nexport const a = fs;\n' }, (r) => r.layer);
 mutate("cloudflare:* in shared/", { "shared/zz.js": 'import { DurableObject } from "cloudflare:workers";\nexport const a = DurableObject;\n' }, (r) => r.layer);
 mutate("cloudflare:* in server/", { "server/zz.js": 'import { DurableObject } from "cloudflare:workers";\nexport const a = DurableObject;\n' }, (r) => r.layer);
