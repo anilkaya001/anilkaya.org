@@ -977,11 +977,20 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "holdersRefusal", "unusualContractId", "markNewContracts", "priorNote", "ideasPayload", "congressRows",
       "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich",
     ],
+    "fixtures.mjs": [
+      "mulberry", "SECTORS", "DRY_FOCUS_ROWS", "fakeFocusRows", "fakeScreener", "fakeSectorCandles", "fakeSectorEtfs",
+      "fakeNewsHeadlines", "fakeChain", "fakeTreasury", "fakeEarnings", "fakeSurface", "fakeMaxPain",
+      "fakeStockDarkpool", "fakeStockOiChange", "fakeTermStructure", "IV_RANK_VENDOR_DEFAULT_ROWS", "fakeIvRank",
+      "fakeCongress", "fakePriorUnusual", "fakePriorBoard", "fakeFlowAlerts", "fakePoliticalRaws", "fakePulseRaws",
+      "DRY_SESSION_DATE", "tradingDaysEndingAt", "FAKE_CHARM_SCALE", "FAKE_RATE", "fakeLadders", "tickerSeed",
+      "fakeOiLadder", "fakeLadderGreeks", "fakeLadderChain", "fakeEnrichment", "dryPriorRoster", "dryRosterReader",
+      "DRY_PROBE_BYTES", "dryRosterProbe", "dryRosterList",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
   };
-  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5};
+  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5,"fixtures.mjs":6};
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
   let homed = 0;
