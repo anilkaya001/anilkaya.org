@@ -663,10 +663,15 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const vendor = makeFakeVendor({ sessionDate: S, screenerRows: screener });
   const raw = await readRegime(vendor, { sessionDate: S });
   eq(raw.calls, REGIME_CALLS, `the regime leg makes exactly its modelled ${REGIME_CALLS} calls`);
+  eq(REGIME_CALLS, 33, "the modelled regime leg is 33 calls: the refused VIX term-structure read is not one of them");
+  ok(!vendor.calls.some((p) => /vix-term-structure/.test(p)), "and no request is made to the volatility add-on's VIX route, which answers 403 every night");
+  ok(!("vix" in raw), "the raw regime read carries no VIX arm");
   const index = await readIndexRows(vendor, { date: S });
   const { regime, catalysts } = assembleRegime(raw, { sessionDate: S, generatedAt: "t", indexRows: index.rows, harvestRows: vendor.augmented, universeRows: vendor.augmented });
   eq(regime.volCurve.vendor.reason, SILENCE.gated, "the VIX curve's 403 is published as a plan gate");
   eq(regime.volCurve.vendor.code, "volatility_scope_required", "with the probe's refusal code");
+  eq(regime.volCurve.vendor.status, "unavailable", "and the vendor arm is unavailable without a call");
+  eq(regime.volCurve.vendor.http, null, "with no HTTP status, since nothing was asked");
   eq(regime.volCurve.status, "ok", "and the screener fallback carries the curve");
   eq(regime.zeroDte.status, "ok", "the 0DTE leg reads its four net-flow envelopes");
   ok(regime.zeroDte.share > 0 && regime.zeroDte.share < 1, "and publishes a share in (0,1)");
@@ -762,8 +767,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const lateRaw = await readRegime(vendor, { sessionDate: S, deadline: Date.now() - 1 });
   eq(lateRaw.calls, 0, "past the deadline the regime leg spends no call");
   const lateRegime = assembleRegime(lateRaw, { sessionDate: S, generatedAt: "t" }).regime;
-  deep([lateRegime.zeroDte.reason, lateRegime.sectors.rows[0].reason, lateRegime.volCurve.vendor.reason, lateRegime.optionsPulse.reason],
-    [SILENCE.unread, SILENCE.unread, SILENCE.unread, SILENCE.unread],
+  deep([lateRegime.zeroDte.reason, lateRegime.sectors.rows[0].reason, lateRegime.optionsPulse.reason],
+    [SILENCE.unread, SILENCE.unread, SILENCE.unread],
     "and every arm it skipped says not_read (pending), never unreadable: nothing failed, nothing was asked");
   const lateCat = assembleCatalysts(await readCatalysts(vendor, { sessionDate: S, earningsTickers: ["T00"], deadline: Date.now() - 1 }),
     { sessionDate: S });

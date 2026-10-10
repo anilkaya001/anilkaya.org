@@ -233,9 +233,6 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
       }
       return { data, has_more: false };
     }],
-    [/^\/api\/volatility\/vix-term-structure$/, () => {
-      throw new Error("/api/volatility/vix-term-structure -> HTTP 403");
-    }],
     [/^\/api\/net-flow\/expiry$/, (p) => {
       const rnd = prng(hash("nf:" + p.expiration + p.tide_type + p.moneyness));
       const scale = p.expiration === "zero_dte" ? 3e5 : 9e5;

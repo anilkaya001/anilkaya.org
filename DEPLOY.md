@@ -2564,7 +2564,8 @@ focus read and no dispatch; pages fall back to the nightly rows.
   fails when an operation answers anything but 2xx, except the refusals listed
   under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
   403 without the volatility add-on, and politician holders' enterprise-only
-  422) and a 4xx other than 429 from an operation listed under `entitlement`,
+  422; the nightly itself no longer makes the VIX call, so this probe is the one
+  place that watches for the add-on arriving) and a 4xx other than 429 from an operation listed under `entitlement`,
   and when a field listed under `reads` (the fields the code reads) did not
   arrive. A 429 still refused after three retries fails on every route: it
   answers no question. An expected
