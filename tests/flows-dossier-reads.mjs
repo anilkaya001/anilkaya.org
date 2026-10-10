@@ -23,7 +23,7 @@ const stub = vendorStub();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const modelRuns = [];
 const scriptedAi = { run: async (model) => { modelRuns.push(model); throw new Error("dossier assembly must never call a model"); } };
-const client = (D1, extra = {}) => harnessClient(D1, { AI: scriptedAi, ...extra });
+const client = (D1, extra = {}, who) => harnessClient(D1, { AI: scriptedAi, ...extra }, who);
 const SCHEMA = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const SLOW = ["analysts", "earnings", "fundamentals", "identity", "positioning"];
 
