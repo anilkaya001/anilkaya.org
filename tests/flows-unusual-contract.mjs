@@ -933,6 +933,13 @@ const rebuild = (em) => {
   deep(contractsRows[0].cls, [400, 50, 100, 10, 0], "the matched row carries its classes");
   eq(contractsRows[0].pm, 1250000, "and its executed premium");
   ok(!("cls" in contractsRows[1]) && !("cls" in contractsRows[2]), "an unmatched row gets no class key: absence is not zero");
+  eq(contractsRows[0].av, 1000, "the row carries the screen's own volume, the base its class shares divide by");
+  const unequal = [{ t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 700, oi: 500 }];
+  mergeActivity(unequal, built([vendor({ sweep_volume: 800 })]).rows);
+  deep([unequal[0].av, unequal[0].cls[0], unequal[0].vol], [1000, 800, 700], "a ranked row whose chain volume (700) differs from the screen's (1000) keeps both, so 800 sweep-coded is 80% of 1000 and never 114% of 700");
+  const blank = [{ t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 500 }];
+  const mb = mergeActivity(blank, built([vendor({ sweep_volume: undefined, floor_volume: undefined, multileg_volume: undefined, stock_multi_leg_volume: undefined, cross_volume: undefined })]).rows);
+  ok(!("cls" in blank[0]) && !("av" in blank[0]) && mb.matched === 0, "a screen row whose five classes are all withheld is not attached: absence is not zero");
   eq(activityKey(contractsRows[0]), unusualContractId(contractsRows[0]), "the join key is the pipeline's own contract id, so the two feeds cannot drift apart");
   eq(activityKey({ t: "AAA", k: "x", expiry: "2026-09-18", cp: "C" }), null, "a row without a numeric strike has no key");
   eq(activityKey({ t: "AAA", k: 1, expiry: "2026-09-18", cp: "X" }), null, "nor one without a side");
@@ -1033,16 +1040,17 @@ const rebuild = (em) => {
   await put("unusual", {
     v: 2, generatedAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", status: "ok",
     contracts: {
-      rows: [{ ...contract("AAA", "C", 100, "2026-09-18", 900, "long"), cls: [360, 45, 90, 0, 0], pm: 1250000 },
-             contract("BBB", "P", 50, "2026-10-16", 400)],
+      rows: [{ ...contract("AAA", "C", 100, "2026-09-18", 900, "long"), cls: [400, 50, 100, 0, 0], av: 1000, pm: 1250000 },
+             { ...contract("BBB", "P", 50, "2026-10-16", 400), cls: [null, null, null, null, null], av: 400, pm: 90000 }],
       shown: 2, eligible: 2, cap: 60, perName: 30, capBound: null,
     },
     activity: {
       v: 1, status: "ok", code: null, asOf: "2026-08-31", readAt: "2026-09-01T06:00:00Z", order: ACTIVITY_CLASSES, limit: 200,
-      returned: 3, kept: 2, offDate: 1, undated: 0, refused: { symbol: 0, volume: 0, cls: 0 }, capBound: false, matched: 1, of: 2, shown: 2, perName: 3,
+      returned: 4, kept: 3, offDate: 1, undated: 0, refused: { symbol: 0, volume: 0, cls: 0 }, capBound: false, matched: 1, of: 2, shown: 3, perName: 3,
       rows: [
         { t: "ZZZ", k: 50, expiry: "2026-09-25", cp: "C", vol: 900, oi: 400, vor: 2.25, pm: 512000, lift: 0.875, cls: [300, 0, 100, 0, 0] },
-        { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 900, oi: 100, vor: 9, pm: 1250000, lift: 0.75, cls: [360, 45, 90, 0, 0] },
+        { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 100, vor: 10, pm: 1250000, lift: 0.75, cls: [400, 50, 100, 0, 0] },
+        { t: "YYY", k: 10, expiry: "2026-09-25", cp: "P", vol: 300, oi: 100, vor: 3, pm: 40000, lift: 0.5, cls: [null, null, null, null, null] },
       ],
     },
     coverage: [{ t: "AAA", rows: 400 }, { t: "BBB", rows: 300 }],
@@ -1137,19 +1145,22 @@ const rebuild = (em) => {
         feedRows: document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)").length,
       };
     });
-    ok(/by exchange code, as of .*40% sweep-coded, 5% floor-coded, 10% multi-leg; premium \$1\.\d+M/.test(dated.aaa),
+    ok(/by exchange code, as of .*40% sweep-coded, 5% floor-coded, 10% multi-leg of the screen's 1,000 contracts; premium \$1\.\d+M/.test(dated.aaa),
       `a ranked row that is also in the dated screen names its exchange-code shares, the day they are as of and its premium in its description (${dated.aaa})`);
-    ok(!/exchange code/.test(dated.bbb), `a ranked row that is not in it says nothing of classes (${dated.bbb})`);
+    ok(/exchange-code shares not reported/.test(dated.bbb) && !/none of the volume carried/.test(dated.bbb),
+      `a ranked row whose five classes are all withheld says they were not reported, never that none carried a code (${dated.bbb})`);
     eq(dated.feedRows, 2, "and the dated list's rows are not counted among the ranked contracts");
     ok(/Largest by premium/.test(dated.head), `the dated screen's own largest contracts have a heading that says so (${dated.head})`);
-    eq(dated.list.length, 2, "with a row each");
+    eq(dated.list.length, 3, "with a row each");
+    ok(/YYY/.test(dated.list[2].text) && /not reported/.test(dated.list[2].text) && !/no code/.test(dated.list[2].text) && /not reported/.test(dated.list[2].title),
+      `a dated row with every class withheld prints not reported, not no code (${dated.list[2].text})`);
     ok(/ZZZ/.test(dated.list[0].text) && /33% sweep-coded/.test(dated.list[0].text), `the first is the largest premium and shows its main code share (${dated.list[0].text})`);
     ok(/\$512K/.test(dated.list[0].text) || /\$0\.5/.test(dated.list[0].text), `with its premium (${dated.list[0].text})`);
     ok(/multi-leg/.test(dated.list[0].title) && /sweep-coded/.test(dated.list[0].title), "and every code it carried in its description");
     await page.evaluate(() => document.querySelector("#uaFeedCard .ui-mod-h > .ui-info").click());
     await page.waitForSelector("#fxPop:popover-open");
     const popText = await page.evaluate(() => document.getElementById("fxPop").textContent.replace(/\s+/g, " "));
-    ok(/Exchange-code unit.*as of 2026-08-31; 1 of 2 ranked contracts matched, 2 of 3 screen rows kept, 1 from another day dropped/.test(popText),
+    ok(/Exchange-code unit.*as of 2026-08-31; 1 of 2 ranked contracts matched, 3 of 4 screen rows kept, 1 from another day dropped/.test(popText),
       `the feed's disclosure states the dated unit, its as-of day and what matched and what was dropped (${popText.slice(0, 400)})`);
     ok(/The dated exchange-code unit/.test(popText) && /second, independent selection/.test(popText), "and carries the unit's own method paragraph from the payload's basis");
     await page.evaluate(() => window.FlowsUI.closeInfo());

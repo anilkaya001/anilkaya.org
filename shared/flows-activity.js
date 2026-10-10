@@ -90,8 +90,9 @@ export function mergeActivity(contractRows, activityRows) {
   const list = Array.isArray(contractRows) ? contractRows : [];
   for (const row of list) {
     const a = byKey.get(activityKey(row));
-    if (!a) continue;
+    if (!a || !Array.isArray(a.cls) || a.cls.every((c) => c === null)) continue;
     row.cls = a.cls.slice();
+    row.av = a.vol;
     row.pm = a.pm;
     matched++;
   }

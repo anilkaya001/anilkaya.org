@@ -586,14 +586,23 @@
     const a = S.payload && S.payload.activity;
     return a && typeof a === "object" ? a : null;
   };
+  const codeBase = (r) => {
+    const own = n(r.av);
+    return own !== null && own > 0 ? own : n(r.vol);
+  };
+  const codeKnown = (r) => (Array.isArray(r.cls) ? r.cls.filter((c) => n(c) !== null).length : 0);
   const codeShares = (r) => {
-    const v = n(r.vol);
+    const v = codeBase(r);
     if (!Array.isArray(r.cls) || v === null || !(v > 0)) return [];
-    return r.cls.map((c, i) => (n(c) === null || n(c) <= 0 ? null : [CODES[i], n(c) / v])).filter(Boolean);
+    return r.cls.map((c, i) => (n(c) === null || n(c) <= 0 ? null : [CODES[i], Math.min(1, n(c) / v)])).filter(Boolean);
   };
   const codeText = (r) => {
     const parts = codeShares(r);
-    return parts.length ? parts.map(([w, f]) => pct0(f) + " " + w).join(", ") : "none of the volume carried a sweep, floor, multi-leg, stock multi-leg or cross code";
+    if (parts.length) return parts.map(([w, f]) => pct0(f) + " " + w).join(", ") + (n(r.av) !== null && n(r.av) !== n(r.vol) ? " of the screen's " + count(n(r.av)) + " contracts" : "");
+    const known = codeKnown(r);
+    if (known === 0) return "exchange-code shares not reported";
+    if (known < CODES.length) return "none of the " + known + " reported code classes carried volume; " + (CODES.length - known) + " not reported";
+    return "none of the volume carried a sweep, floor, multi-leg, stock multi-leg or cross code";
   };
 
   function activityRows() {
@@ -608,7 +617,7 @@
           h("span", { class: "ui-badge", "data-tone": r.cp === "P" ? "down" : "up", "aria-label": r.cp === "P" ? "Put" : "Call" }, r.cp === "P" ? "P" : "C"),
           h("span", { class: "fu-tk" }, h("b", null, n(r.k) === null ? DASH : String(n(r.k))), h("small", null, String(r.t || DASH) + " " + MID + " " + F.day(String(r.expiry || "")))),
           h("span", { class: "fu-v fu-strong" }, n(r.pm) === null ? DASH : F.money(n(r.pm))),
-          h("span", { class: "fu-v fu-wide" }, top ? pct0(top[1]) + " " + top[0] : "no code"));
+          h("span", { class: "fu-v fu-wide" }, top ? pct0(top[1]) + " " + top[0] : (codeKnown(r) ? "no code" : "not reported")));
       }), 8, "Largest dated contracts by premium"),
     ];
   }

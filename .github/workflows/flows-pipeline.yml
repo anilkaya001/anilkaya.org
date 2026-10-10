@@ -88,6 +88,7 @@ jobs:
           FLOWS_INGEST_URL: ${{ secrets.FLOWS_INGEST_URL }}
           FLOWS_ALLOW_INTRADAY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_intraday && '1' || '' }}
           FLOWS_REPUBLISH_SESSION: ${{ github.event_name == 'workflow_dispatch' && inputs.republish_session && '1' || '' }}
+          FLOWS_UNUSUAL_V2: ${{ vars.FLOWS_UNUSUAL_V2 }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/flows-pipeline.mjs
 
