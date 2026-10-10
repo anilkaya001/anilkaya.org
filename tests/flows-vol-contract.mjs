@@ -7,11 +7,13 @@ import {
   characterVote, buildVolRadar, pickMonthlyExpiry, isStandardMonthly, regularSessionRows, toBars, exEventSlope, exEventVol,
   crossSectionPercentiles, volSummary, volVote, viewOfRichCheap, halfLifeClass, eventDayOf, VOL_WHY, RICH_CHEAP_WEIGHTS,
   RV_WINDOWS, MIN_HISTORY, TERM_MIN_SAMPLES, SKEW_ROLL_DTE, addDays, dayDiff,
+  dailyYangZhangVariance, olsHac, harFit, harVrp, harPanel, HAR_LABEL, HAR_MIN_ROWS, HAR_SPAN,
 } from "../shared/flows-vol.js";
 import {
   runVolLeg, volNames, attachVol, cardXPayload, regimePayload, publishVol, volRequest, radarRequest, yearOfCandles,
   errorCode, VOL_DEPTH_READS, VOL_INDEX_NAMES, VOL_PANELS, CARD_X_CAP,
 } from "../scripts/flows-legs/vol.mjs";
+import { compare as cpuCompare, assertBudget } from "./lib/cpu-budget.mjs";
 import { fakeVolVendor, fakeListedExpiries, weekdaysEnding } from "../scripts/flows-legs/vol-fake.mjs";
 
 let n = 0;
@@ -648,6 +650,12 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
     "an earnings date inside thirty days is stripped from iv30 before the ex-ante VRP is read ex-event");
   near(e("AAA").panels.vrp.exAnte.vrpExEvent, e("AAA").panels.vrp.exAnte.iv30ExEvent - e("AAA").panels.vrp.exAnte.rv21, 1e-4,
     "and the ex-event VRP is that iv less the same trailing RV21");
+  const aaaHar = e("AAA").panels.vrp.har;
+  ok(aaaHar && aaaHar.vol > 0, "the deep name's VRP panel carries a HAR forecast from its candles");
+  eq(aaaHar.vrpEx.iv, e("AAA").panels.vrp.exAnte.iv30ExEvent, "its ex-event forecast VRP is struck against the same event-stripped iv30");
+  near(aaaHar.vrpEx.volPoints, aaaHar.vrpEx.iv - aaaHar.vol, 6e-5, "as that iv less the forecast vol");
+  eq(e("AAA").panels.vrp.exAnte.iv30ExEvent < e("AAA").panels.vrp.exAnte.iv30, true, "which sits under the raw iv30");
+  ok(aaaHar.vrpEx.volPoints < aaaHar.vrp.volPoints, "so the ex-event premium is under the raw one");
   eq(e("LLL").panels.vrp.exAnte.vrpExEvent, e("LLL").panels.vrp.exAnte.vrp,
     "a carded name with no earnings inside thirty days needs no term read: its ex-event VRP is its VRP");
   eq(e("LLL").panels.cone.slope30_90ExEvent, e("LLL").panels.cone.slope30_90,
@@ -776,6 +784,154 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(vnum(""), null, "an empty string is absent");
   eq(vnum("0.000000000042138"), 4.2138e-11, "long decimal strings parse");
   eq(round(-0.00001, 3), 0, "rounding never publishes a negative zero");
+}
+
+{
+  const HF = JSON.parse(readFileSync(new URL("./fixtures-har.json", import.meta.url), "utf8"));
+  ok(/statsmodels/.test(JSON.stringify(HF.provenance)) && HF.provenance.generator === "tests/gen-har-fixtures.py",
+    "the HAR fixture names its generator and the statsmodels version that wrote it");
+  const dv = dailyYangZhangVariance(HF.bars).map((x) => x.v);
+  HF.dailyVarHead.forEach((x, i) => near(dv[i] / x, 1, 1e-12, `daily Yang-Zhang variance, session ${i + 1}, against the generator's`));
+  HF.dailyVarTail.forEach((x, i) => near(dv[dv.length - 5 + i] / x, 1, 1e-12, `and at the tail, session ${i + 1}`));
+  for (const ref of HF.fits) {
+    const f = harFit(HF.bars, { lag: ref.lag });
+    eq(f.n, ref.n, `HAR rows at Newey-West lag ${ref.lag}`);
+    ref.beta.forEach((b, i) => near(f.beta[i] / b, 1, 1e-6, `HAR coefficient ${i} matches statsmodels at lag ${ref.lag}`));
+    ref.se.forEach((b, i) => near(f.se[i] / b, 1, 1e-6, `Newey-West standard error ${i} matches statsmodels HAC at lag ${ref.lag}`));
+    near(f.forecast / ref.forecast, 1, 1e-6, `the forecast daily variance at lag ${ref.lag}`);
+    near(f.sd / ref.sd, 1, 1e-6, `and the sd of its prediction at lag ${ref.lag}`);
+    near((f.lo * f.lo / 252) / ref.lo, 1, 1e-6, `the 80% lower variance bound at lag ${ref.lag}`);
+    near((f.hi * f.hi / 252) / ref.hi, 1, 1e-6, `and the upper at lag ${ref.lag}`);
+  }
+  const hacX = [], hacY = [];
+  for (let i = 0; i < 40; i++) { const x = Math.sin(i * 0.7); hacX.push([1, x]); hacY.push(2 + 3 * x + 0.1 * Math.cos(i * 1.9)); }
+  const exact = olsHac(hacX, hacY, 4);
+  near(exact.beta[0], 2, 0.1, "olsHac recovers the intercept of a near-exact line");
+  near(exact.beta[1], 3, 0.1, "and its slope");
+  eq(olsHac(hacX.slice(0, 2), hacY.slice(0, 2), 4), null, "no fit with as many rows as coefficients");
+  eq(olsHac(hacX.map(() => [1, 1]), hacY, 4), null, "and none for a singular design");
+
+  const short = harFit(HF.short.bars);
+  eq(short.vol, null, "150 sessions are too few for a HAR fit");
+  eq(short.code, "short-history", "and the silence is named");
+  ok(HAR_MIN_ROWS > 0 && HAR_SPAN === 504, "the fit reads at most two years of sessions");
+
+  const cut = HF.bars[HF.bars.length - 40].d;
+  const asOfCut = harFit(HF.bars, { sessionDate: cut });
+  const trunc = harFit(HF.bars.slice(0, HF.bars.length - 39));
+  near(asOfCut.vol, trunc.vol, 1e-12, "bars after the session date never enter the fit");
+  const poisoned = HF.bars.map((b, i) => (i === 100 ? { ...b, h: b.l * 0.5 } : b));
+  const pf = harFit(poisoned);
+  ok(pf.vol !== null && pf.n < harFit(HF.bars).n, `a corrupt bar drops the rows that contain it and the fit stands (${pf.n} rows)`);
+  const flat = HF.bars.map((b) => ({ ...b, o: 100, h: 100, l: 100, c: 100 }));
+  const fz = harFit(flat);
+  eq(fz.vol, null, "bars with no range and no moves have no forecast");
+  ok(fz.code === "degenerate" || fz.code === "input-absent", "and say why: " + fz.code);
+
+  const ref20 = HF.fits.find((f) => f.lag === 20);
+  const hp = harPanel(HF.bars, { iv: 0.3 });
+  eq(hp.panel.estimator, HAR_LABEL, "the panel labels the estimator");
+  eq(HAR_LABEL, "daily-range HAR", "as daily-range HAR");
+  eq(hp.panel.n, ref20.n, "and prints the rows it fitted on");
+  near(hp.panel.vol, Math.sqrt(ref20.forecast * 252), 5e-5, "the forecast volatility is the annualised root of the forecast variance");
+  ok(hp.panel.lo < hp.panel.vol && hp.panel.vol < hp.panel.hi, "inside its 80% interval");
+  near(hp.panel.vrp.variance, 0.09 - ref20.forecast * 252, 2e-6, "the forecast VRP is iv^2 less the forecast variance");
+  near(hp.panel.vrp.volPoints, 0.3 - Math.sqrt(ref20.forecast * 252), 2e-5, "and in vol points iv less the forecast vol");
+  near(hp.panel.vrp.lo, 0.09 - ref20.hi * 252, 2e-6, "its lower bound pairs iv with the forecast's upper bound");
+  near(hp.panel.vrp.hi, 0.09 - ref20.lo * 252, 2e-6, "and its upper with the forecast's lower");
+  eq(harPanel(HF.bars, { iv: null }).panel.vrp, null, "without an iv there is no forecast VRP, never zero");
+  eq(harVrp(null, 0.3), null, "nor without a forecast");
+  eq(harVrp(hp.panel, -0.2), null, "nor with an iv that is not positive");
+  eq(harPanel(HF.short.bars, { iv: 0.3 }).panel, null, "a short history has no panel");
+}
+
+{
+  function prng(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function gaussian(u) {
+    return () => { let a = 0; while (a === 0) a = u(); return Math.sqrt(-2 * Math.log(a)) * Math.cos(2 * Math.PI * u()); };
+  }
+  function garchPath(seed, n, { omega, alpha, beta }) {
+    const z = gaussian(prng(seed));
+    let v = omega / (1 - alpha - beta), close = 100;
+    const bars = [], vars = [];
+    for (let i = 0; i < n; i++) {
+      const sig = Math.sqrt(v);
+      vars.push(v);
+      const o = close * Math.exp(z() * sig * Math.sqrt(0.2));
+      let p = o, h = o, l = o;
+      for (let k = 0; k < 48; k++) { p *= Math.exp(z() * sig * Math.sqrt(0.8 / 48)); h = Math.max(h, p); l = Math.min(l, p); }
+      bars.push({ d: String(i).padStart(5, "0"), o, h, l, c: p });
+      const r = Math.log(p / close);
+      v = omega + alpha * r * r + beta * v;
+      close = p;
+    }
+    return { bars, vars };
+  }
+  const ratios = [];
+  for (const par of [{ omega: 2e-6, alpha: 0.08, beta: 0.90 }, { omega: 1e-6, alpha: 0.06, beta: 0.92 }, { omega: 3e-6, alpha: 0.10, beta: 0.85 }]) {
+    const pers = par.alpha + par.beta, uncond = par.omega / (1 - pers);
+    let seHar = 0, seTrue = 0, m = 0;
+    for (let path = 1; path <= 30; path++) {
+      const P = garchPath(path * 7919 + 3, 505 + 6 * 21 + 22, par);
+      const yz = dailyYangZhangVariance(P.bars).map((x) => x.v);
+      for (let o = 0; o < 6; o++) {
+        const T = 505 + o * 21;
+        const f = harFit(P.bars.slice(T - 505, T));
+        if (f.vol === null) continue;
+        let truth = 0, real = 0;
+        for (let j = 0; j < 21; j++) { truth += (uncond + Math.pow(pers, j) * (P.vars[T] - uncond)) / 21; real += yz[T - 1 + j] / 21; }
+        seHar += (f.forecast - real) ** 2; seTrue += (truth - real) ** 2; m++;
+      }
+    }
+    ok(m >= 170, `${m} forecast origins evaluated`);
+    ratios.push(Math.sqrt(seHar / seTrue));
+  }
+  ratios.forEach((r, i) => ok(r <= 1.15, `on simulated GARCH paths (set ${i + 1}) the HAR forecast's RMSE against the realised daily-range variance is ${r.toFixed(3)}x the true model's, no worse than 1.15x`));
+
+  const bars = [];
+  let c = 100;
+  for (let i = 0; i < 505; i++) {
+    const o = c * (1 + 0.003 * Math.sin(i)), cl = o * (1 + 0.01 * Math.cos(i * 1.3));
+    bars.push({ d: String(i).padStart(5, "0"), o, h: Math.max(o, cl) * 1.004, l: Math.min(o, cl) * 0.996, c: cl });
+    c = cl;
+  }
+  const result = cpuCompare(() => harFit(bars), { windows: 16, perWindow: 5 });
+  assertBudget(result, { median: 2.5, worst: 4 }, "the HAR fit over two years");
+  console.log(`  har fit: ${result.subject.median.toFixed(2)} ms a name on the ${result.clock} clock, ${result.ratio.median.toFixed(2)}x the reference`);
+  n++;
+}
+
+{
+  const days = weekdaysEnding("2026-09-22", 520);
+  const mk = (amp) => days.map((d, i) => {
+    const o = 100 * (1 + 0.002 * Math.sin(i * 0.31)), c2 = o * (1 + amp * Math.cos(i * 1.1) * (1 + 0.5 * Math.sin(i / 17)));
+    return { d, o, h: Math.max(o, c2) * (1 + amp / 2), l: Math.min(o, c2) * (1 - amp / 2), c: c2 };
+  });
+  const bars = mk(0.012);
+  const rows = bars.slice(0, -20).map((b, i) => ({ date: b.d, ticker: "T", rank: "0.5", implied_volatility: "0.25", realized_volatility: "0.2",
+    realized_date: bars[i + 20].d, risk_premium: "0.05" }));
+  const v = buildVrpPanel({ data: rows }, { sessionDate: "2026-09-22", iv30: 0.3, bars });
+  ok(v.har && v.har.vol > 0, "the VRP panel carries the HAR forecast");
+  eq(v.har.estimator, "daily-range HAR", "labelled");
+  near(v.har.vrp.volPoints, 0.3 - v.har.vol, 6e-5, "and the forecast VRP against today's iv30");
+  eq(v.silent.har, undefined, "with no silence");
+  const noIv = buildVrpPanel({ data: rows }, { sessionDate: "2026-09-22", iv30: null, bars });
+  eq(noIv.har.vrp, null, "without iv30 the forecast stands and its VRP is absent");
+  eq(noIv.silent.harVrp, "input-absent", "and says so");
+  const noBars = buildVrpPanel({ data: rows }, { sessionDate: "2026-09-22", iv30: 0.3 });
+  eq(noBars.har, null, "without bars there is no forecast");
+  eq(noBars.silent.har, "input-absent", "and the silence is named");
+  const few = buildVrpPanel({ data: rows }, { sessionDate: "2026-09-22", iv30: 0.3, bars: bars.slice(-100) });
+  eq(few.har, null, "with too few bars there is none");
+  eq(few.silent.har, "short-history", "for that reason");
+  const sum = volSummary({ vrp: { ...v, status: "ok" } }, {});
+  eq(sum.vrp.harVol, v.har.vol, "the card summary carries the forecast volatility");
+  eq(sum.vrp.harExEvent, null, "and no ex-event forecast VRP until the leg has stripped the event");
+  const stripped = { ...v, status: "ok", har: { ...v.har, vrpEx: harVrp(v.har, 0.27) } };
+  eq(volSummary({ vrp: stripped }, {}).vrp.harExEvent, stripped.har.vrpEx.volPoints, "after it, the summary carries the ex-event forecast VRP in vol points");
 }
 
 console.log(`✓ flows-vol: ${n} assertions — every quant-spec known answer for the volatility family, Yang-Zhang, ` +

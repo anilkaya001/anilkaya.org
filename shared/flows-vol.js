@@ -29,6 +29,14 @@ export const VRP_SERIES_KEEP = 252;
 export const SENTIMENT_SERIES_KEEP = 60;
 export const RADAR_KEEP = 20;
 export const XSECTION_MIN = 10;
+export const HAR_HORIZON = 21;
+export const HAR_WEEK = 5;
+export const HAR_NW_LAG = 20;
+export const HAR_MIN_ROWS = 126;
+export const HAR_SPAN = 504;
+export const HAR_YZ_K = 0.34 / (1.34 + (HAR_HORIZON + 1) / (HAR_HORIZON - 1));
+export const HAR_Z80 = 1.2815515655446004;
+export const HAR_LABEL = "daily-range HAR";
 
 export const VOL_WHY = Object.freeze({
   "read-failed": "the vendor call failed after its retries",
@@ -336,6 +344,145 @@ export function gapShare(bars, n) {
   const vc = sampleVar(cc);
   if (!(vc > 0)) return { share: null, code: "degenerate" };
   return { share: vo / vc, code: null };
+}
+
+export function dailyYangZhangVariance(bars) {
+  const out = [];
+  if (!Array.isArray(bars)) return out;
+  for (let i = 1; i < bars.length; i++) {
+    const b = bars[i], p = bars[i - 1];
+    if (!ohlcOk(b) || !p || !(p.c > 0)) { out.push({ d: b ? b.d : null, v: null }); continue; }
+    const o = Math.log(b.o / p.c);
+    const c = Math.log(b.c / b.o);
+    const rs = Math.log(b.h / b.c) * Math.log(b.h / b.o) + Math.log(b.l / b.c) * Math.log(b.l / b.o);
+    out.push({ d: b.d, v: o * o + HAR_YZ_K * c * c + (1 - HAR_YZ_K) * rs });
+  }
+  return out;
+}
+
+function invertSmall(a) {
+  const k = a.length;
+  const m = a.map((row, i) => [...row, ...Array.from({ length: k }, (_, j) => (i === j ? 1 : 0))]);
+  for (let c = 0; c < k; c++) {
+    let piv = c;
+    for (let r = c + 1; r < k; r++) if (Math.abs(m[r][c]) > Math.abs(m[piv][c])) piv = r;
+    if (!(Math.abs(m[piv][c]) > 1e-300)) return null;
+    [m[c], m[piv]] = [m[piv], m[c]];
+    const d = m[c][c];
+    for (let j = 0; j < 2 * k; j++) m[c][j] /= d;
+    for (let r = 0; r < k; r++) {
+      if (r === c) continue;
+      const f = m[r][c];
+      if (f !== 0) for (let j = 0; j < 2 * k; j++) m[r][j] -= f * m[c][j];
+    }
+  }
+  return m.map((row) => row.slice(k));
+}
+
+export function olsHac(X, y, lag) {
+  const n = y.length;
+  const k = n ? X[0].length : 0;
+  if (!(n > k) || !(lag >= 0)) return null;
+  const xtx = Array.from({ length: k }, () => new Array(k).fill(0));
+  const xty = new Array(k).fill(0);
+  for (let t = 0; t < n; t++) {
+    for (let a = 0; a < k; a++) {
+      xty[a] += X[t][a] * y[t];
+      for (let b = a; b < k; b++) xtx[a][b] += X[t][a] * X[t][b];
+    }
+  }
+  for (let a = 0; a < k; a++) for (let b = 0; b < a; b++) xtx[a][b] = xtx[b][a];
+  const inv = invertSmall(xtx);
+  if (!inv) return null;
+  const beta = inv.map((row) => row.reduce((acc, v, j) => acc + v * xty[j], 0));
+  const resid = new Array(n);
+  let sse = 0;
+  for (let t = 0; t < n; t++) {
+    let f = 0;
+    for (let a = 0; a < k; a++) f += X[t][a] * beta[a];
+    resid[t] = y[t] - f;
+    sse += resid[t] * resid[t];
+  }
+  const g = X.map((row, t) => row.map((v) => v * resid[t]));
+  const S = Array.from({ length: k }, () => new Array(k).fill(0));
+  const L = Math.min(lag, n - 1);
+  for (let j = 0; j <= L; j++) {
+    const w = 1 - j / (lag + 1);
+    for (let t = j; t < n; t++) {
+      for (let a = 0; a < k; a++) {
+        for (let b = 0; b < k; b++) {
+          const add = w * g[t][a] * g[t - j][b];
+          S[a][b] += add;
+          if (j > 0) S[b][a] += add;
+        }
+      }
+    }
+  }
+  const tmp = inv.map((row) => S[0].map((_, c2) => row.reduce((acc, v, j) => acc + v * S[j][c2], 0)));
+  const cov = tmp.map((row) => inv[0].map((_, c2) => row.reduce((acc, v, j) => acc + v * inv[j][c2], 0)));
+  return { beta, cov, se: cov.map((row, i) => Math.sqrt(Math.max(row[i], 0))), resid, n, s2: sse / (n - k) };
+}
+
+export function harFit(bars, { sessionDate = null, lag = HAR_NW_LAG } = {}) {
+  const b = (Array.isArray(bars) ? bars : []).filter((x) => x && (!sessionDate || x.d <= sessionDate)).slice(-(HAR_SPAN + 1));
+  const series = dailyYangZhangVariance(b).map((x) => x.v);
+  const n = series.length;
+  const winMean = (a, z) => {
+    let s = 0;
+    for (let i = a; i <= z; i++) { if (series[i] === null) return null; s += series[i]; }
+    return s / (z - a + 1);
+  };
+  const X = [], y = [];
+  for (let t = HAR_HORIZON - 1; t + HAR_HORIZON < n; t++) {
+    const d = series[t], w = winMean(t - HAR_WEEK + 1, t), m = winMean(t - HAR_HORIZON + 1, t), f = winMean(t + 1, t + HAR_HORIZON);
+    if (d === null || w === null || m === null || f === null) continue;
+    X.push([1, d, w, m]);
+    y.push(f);
+  }
+  if (y.length < HAR_MIN_ROWS) return { vol: null, code: "short-history", n: y.length };
+  const last = n - 1;
+  const xd = series[last], xw = winMean(last - HAR_WEEK + 1, last), xm = winMean(last - HAR_HORIZON + 1, last);
+  if (xd === null || xw === null || xm === null) return { vol: null, code: "input-absent", n: y.length };
+  const fit = olsHac(X, y, lag);
+  if (!fit) return { vol: null, code: "degenerate", n: y.length };
+  const x = [1, xd, xw, xm];
+  const yhat = x.reduce((acc, v, i) => acc + v * fit.beta[i], 0);
+  if (!(yhat > 0)) return { vol: null, code: "degenerate", n: y.length };
+  let q = 0;
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) q += x[i] * fit.cov[i][j] * x[j];
+  const sd = Math.sqrt(Math.max(fit.s2 + q, 0));
+  return {
+    vol: Math.sqrt(yhat * TRADING_YEAR), code: null, n: y.length, asOf: b[b.length - 1].d,
+    beta: fit.beta, se: fit.se, forecast: yhat, sd,
+    lo: Math.sqrt(Math.max(yhat - HAR_Z80 * sd, 0) * TRADING_YEAR),
+    hi: Math.sqrt((yhat + HAR_Z80 * sd) * TRADING_YEAR),
+  };
+}
+
+export function harVrp(har, iv) {
+  const a = vnum(iv);
+  if (!har || !(har.vol > 0) || a === null || !(a > 0)) return null;
+  return {
+    iv: round(a, 4),
+    volPoints: round(a - har.vol, 5),
+    variance: round(a * a - har.vol * har.vol, 6),
+    lo: round(a * a - har.hi * har.hi, 6),
+    hi: round(a * a - har.lo * har.lo, 6),
+  };
+}
+
+export function harPanel(bars, { sessionDate = null, iv = null } = {}) {
+  const f = harFit(bars, { sessionDate });
+  if (f.vol === null) return { panel: null, code: f.code };
+  return {
+    panel: {
+      estimator: HAR_LABEL, n: f.n, asOf: f.asOf,
+      vol: round(f.vol, 4), lo: round(f.lo, 4), hi: round(f.hi, 4),
+      vrp: harVrp(f, iv),
+    },
+    code: null,
+    fit: f,
+  };
 }
 
 export function buildRvPanel(bars, { sessionDate = null, breaks = null } = {}) {
@@ -910,6 +1057,9 @@ export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = nu
       weak: !garch.converged || !(vnum(garch.alpha) >= 0.01),
     };
   } else silent.garch = ivNow === null ? "input-absent" : "garch-unfit";
+  const hp = b.length ? harPanel(b, { sessionDate, iv: ivNow }) : { panel: null, code: "input-absent" };
+  if (!hp.panel) silent.har = hp.code;
+  else if (!hp.panel.vrp) silent.harVrp = "input-absent";
   const xByDay = new Map(histX.map((h) => [h.d, h.x]));
   const keep = rows.slice(-VRP_SERIES_KEEP);
   return {
@@ -934,6 +1084,7 @@ export function buildVrpPanel(body, { sessionDate = null, iv30 = null, bars = nu
       rvSource: "close-to-close sample sd of the trailing 21 session returns x sqrt(252)",
     },
     garch: g,
+    har: hp.panel,
     series: {
       d: keep.map((r) => r.d),
       rp: keep.map((r) => round(r.rp, 5)),
@@ -1242,6 +1393,8 @@ export function volSummary(panels, { asOf = null } = {}) {
       hitRate: pick(p.vrp, (v) => v.hitRate),
       rank: pick(p.vrp, (v) => (v.latest ? v.latest.rank : null)),
       lastExPost: pick(p.vrp, (v) => (v.latest ? v.latest.rp : null)),
+      harVol: pick(p.vrp, (v) => (v.har ? v.har.vol : null)),
+      harExEvent: pick(p.vrp, (v) => (v.har && v.har.vrpEx ? v.har.vrpEx.volPoints : null)),
     },
     skew: {
       rr25: pick(p.skew, (s) => s.rr25),

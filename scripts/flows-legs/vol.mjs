@@ -1,5 +1,5 @@
 import {
-  VOL_SCHEMA_VERSION, VOL_WHY, buildConePanel, buildRvPanel, buildVrpPanel, buildTermPanel, buildSkewPanel,
+  VOL_SCHEMA_VERSION, VOL_WHY, buildConePanel, buildRvPanel, buildVrpPanel, harVrp, buildTermPanel, buildSkewPanel,
   buildIvDynamics, buildAnomalyPanel, buildSentimentPanel, buildCharacterPanel, characterVote, buildVolRadar,
   pickMonthlyExpiry, regularSessionRows, toBars, exEventSlope, exEventVol, crossSectionPercentiles, volSummary,
   silentPanel, isoDay, candleDay, rowsOf, round, eventDayOf, dayDiff, closeToCloseVol,
@@ -199,6 +199,10 @@ async function readName(name, { call, sessionDate, repair, notes }) {
     vrp.exAnte.iv30ExEvent = round(ex.value, 4);
     vrp.exAnte.vrpExEvent = ex.value !== null && rv21 !== null && vrp.exAnte.rv21 !== null ? round(ex.value - rv21, 5) : null;
     if (vrp.exAnte.vrpExEvent === null) vrp.silent.vrpExEvent = ex.code || "input-absent";
+    if (vrp.har) {
+      vrp.har.vrpEx = harVrp(vrp.har, ex.value);
+      if (!vrp.har.vrpEx) vrp.silent.harVrpExEvent = ex.code || "input-absent";
+    }
   }
 
   const stamps = Object.values(reads).map((r) => r && r.at).filter(Boolean).sort();
