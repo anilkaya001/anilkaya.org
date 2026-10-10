@@ -135,6 +135,53 @@ export const rtIsOwner = (sw, username) => sw.users.includes(username);
 
 export const rtAdmits = (sw, username) => sw.audience === "members" || rtIsOwner(sw, username);
 
+export const RT_REDACTED = "[redacted]";
+
+export const RT_SECRET_MIN_CHARS = 8;
+
+export const RT_SECRET_ENV = Object.freeze([
+  "UW_API_KEY", "SESSION_SECRET", "GOOGLE_CLIENT_SECRET", "FLOWS_INGEST_TOKEN", "FLOWS_LIVE_TOKEN", "GITHUB_DISPATCH_TOKEN",
+]);
+
+const CREDENTIAL_QUERY = /([?&;](?:token|access_token|api_key|apikey|auth|authorization|secret|signature|sig)=)[^&#\s"'<>)]+/gi;
+const CREDENTIAL_BEARER = /\bBearer\s+[A-Za-z0-9._~+\/=-]{8,}/g;
+
+function secretForms(secret) {
+  const forms = new Set([secret, encodeURIComponent(secret), encodeURI(secret)]);
+  try { forms.add(btoa(secret)); } catch { forms.delete(""); }
+  return Array.from(forms).filter((f) => f.length >= RT_SECRET_MIN_CHARS);
+}
+
+export function rtSecretsOf(env) {
+  const e = env || {};
+  return RT_SECRET_ENV.map((name) => e[name]).filter((v) => typeof v === "string" && v.length >= RT_SECRET_MIN_CHARS);
+}
+
+export function createRedactor(secrets = []) {
+  const forms = [];
+  for (const secret of Array.isArray(secrets) ? secrets : []) {
+    if (typeof secret === "string" && secret.length >= RT_SECRET_MIN_CHARS) forms.push(...secretForms(secret));
+  }
+  forms.sort((a, b) => b.length - a.length);
+  const text = (value) => {
+    let out = typeof value === "string" ? value : String(value);
+    for (const form of forms) if (out.includes(form)) out = out.split(form).join(RT_REDACTED);
+    return out.replace(CREDENTIAL_QUERY, "$1" + RT_REDACTED).replace(CREDENTIAL_BEARER, "Bearer " + RT_REDACTED);
+  };
+  const walk = (value, depth = 0) => {
+    if (typeof value === "string") return text(value);
+    if (value === null || typeof value !== "object") return value;
+    if (depth > 12) return RT_REDACTED;
+    if (Array.isArray(value)) return value.map((v) => walk(v, depth + 1));
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[text(k)] = walk(v, depth + 1);
+    return out;
+  };
+  text.deep = walk;
+  text.armed = forms.length > 0;
+  return text;
+}
+
 const iso = (v) => (Number.isFinite(v) ? new Date(v).toISOString() : null);
 
 const nearestRank = (sorted, p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))] : null);

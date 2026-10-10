@@ -768,6 +768,17 @@ REST request and to the vendor socket channels (px: `price:<T>`, later
 `stock_screener`; fl: `flow-alerts`; gx: `gex:<T>`; mk: `market_tide`,
 `net_flow:<T>`; nw: `news`). The WebSocket upstream is not implemented.
 
+Credentials never leave the object in text. `createRedactor` (`shared/flows-rt.js`)
+removes the Worker's secrets the object can see (`RT_SECRET_ENV`, eight characters
+or more) in their raw, URL-encoded and base64 spellings, and any `token=`, `api_key=`
+or `Bearer` value by its name; `RtHub` redacts every log entry through its one
+`log` call, the whole `status()` body, the roster error and the REST adapter's
+internal-error message, and the callers redact before they truncate, so a cut
+cannot leave a prefix of a key. `status` names the upstream by host only. A socket
+upstream must build its URL in one function, pass every error through the same
+redactor before it truncates it, and keep `[observability.traces]` off: a span
+records `url.full` with the query.
+
 Routes, all inside `route()` so the finalizer sees every response (a 101 keeps
 its `webSocket` through `new Response(response.body, response)`):
 

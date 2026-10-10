@@ -1914,6 +1914,183 @@ const seqOk = (ws) => {
 }
 
 {
+  const KEY = "uwk_Zq9+/3xT=a b&c7Lm2VpR8sYd";
+  const SESSION = "sess-4f9d2c71b0e8a3-SECRET";
+  const FORMS = (secret) => [secret, encodeURIComponent(secret), btoa(secret)];
+  const leaks = (text, secrets = [KEY, SESSION]) => {
+    const body = String(text);
+    for (const secret of secrets) for (const form of FORMS(secret)) {
+      for (let i = 0; i + 8 <= form.length; i++) if (body.includes(form.slice(i, i + 8))) return form.slice(i, i + 8);
+    }
+    return null;
+  };
+  eq(leaks("nothing here"), null, "redaction: the leak finder finds nothing in clean text");
+  ok(leaks("x " + KEY.slice(0, 8) + " y") !== null && leaks(encodeURIComponent(KEY).slice(3, 20)) !== null && leaks("a" + btoa(KEY).slice(5, 30)) !== null,
+     "redaction: and finds eight characters of the key in any of its three spellings, so a truncated key cannot pass");
+
+  const R = RT.createRedactor([KEY, SESSION, "short", "", null, 7]);
+  eq(R.armed, true, "redaction: a redactor with a usable secret is armed");
+  eq(RT.createRedactor(["short", "1234567", "", null]).armed, false, "redaction: a secret under eight characters is ignored: it would redact the language, not the credential");
+  eq(RT.createRedactor().armed, false, "redaction: and with none it is a pass-through");
+  for (const form of FORMS(KEY)) {
+    eq(R("fetch failed: " + form + " (twice " + form + ")").includes(form), false, `redaction: ${form.slice(0, 12)}... is removed in every occurrence`);
+  }
+  eq(R("wss://api.unusualwhales.com/socket?token=abc123XYZ&x=1"), "wss://api.unusualwhales.com/socket?token=" + RT.RT_REDACTED + "&x=1",
+     "redaction: a token in a URL query is removed by its parameter name even when the secret is not known");
+  eq(R("GET /s?a=1;api_key=ZZZZZZZZ"), "GET /s?a=1;api_key=" + RT.RT_REDACTED, "redaction: whichever credential parameter it uses");
+  eq(R("401 Authorization: Bearer abcDEF123456.-_~+/="), "401 Authorization: Bearer " + RT.RT_REDACTED, "redaction: a bearer credential in a header line is removed");
+  eq(R(R("token=zzzzzzzzzz " + KEY)), R("token=zzzzzzzzzz " + KEY), "redaction: and redacting twice changes nothing");
+  eq(R("tickers=AAPL,NVDA&limit=500"), "tickers=AAPL,NVDA&limit=500", "redaction: ordinary parameters are untouched");
+  deep(R.deep({ a: [KEY, { b: "x?token=qqqqqqqq", n: 3, z: null }], [KEY]: true }), { a: [RT.RT_REDACTED, { b: "x?token=" + RT.RT_REDACTED, n: 3, z: null }], [RT.RT_REDACTED]: true },
+       "redaction: deep covers arrays, objects, keys and leaves numbers and nulls alone");
+  eq(leaks(JSON.stringify(R.deep({ message: "x".repeat(40) + KEY + FORMS(SESSION)[2] }))), null, "redaction: and a second secret in a base64 spelling goes with the first");
+  const secrets = RT.rtSecretsOf({ UW_API_KEY: KEY, SESSION_SECRET: SESSION, GOOGLE_CLIENT_SECRET: "short", FLOWS_INGEST_TOKEN: 5, OTHER: "x".repeat(20) });
+  deep(secrets, [KEY, SESSION], "redaction: the Worker secrets the object can see are collected by name, and only usable strings");
+  deep(hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION }).secrets, [KEY, SESSION], "redaction: and the hub's configuration carries them without the vendor key's name");
+
+  const grab = () => {
+    const lines = [];
+    const real = console.error;
+    console.error = (...a) => { lines.push(a.map(String).join(" ")); };
+    return { lines, restore: () => { console.error = real; } };
+  };
+  const longMessage = (head) => "x".repeat(head) + " wss://api.unusualwhales.com/socket?token=" + encodeURIComponent(KEY) + " raw " + KEY + " tail ".repeat(8);
+  const straddle = (cut) => "x".repeat(cut - 10) + KEY + " tail";
+  eq(leaks(straddle(120).slice(0, 120)), "uwk_Zq9+", "redaction: a message cut at its truncation limit with ten characters of the key before the cut still shows the key to the leak finder");
+
+  {
+    const cap = grab();
+    try {
+      const pushed = { handlers: null };
+      const stub = () => ({
+        kind: "push", start(plan, h) { pushed.handlers = h; }, stop() {}, async tick() {}, paused: () => false,
+        state: () => ({ running: true, url: "wss://api.unusualwhales.com/socket?token=" + KEY, note: "Bearer " + KEY }),
+      });
+      const state = { t: SESSION_NOW };
+      const sockets = [];
+      const hub = new RtHub({
+        env: { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION }, now: () => state.t,
+        upstreamFactory: stub, host: { sockets: () => sockets, wake() {} },
+        loadRoster: async () => { throw new Error(straddle(120)); },
+      });
+      const ws = mkSocket();
+      sockets.push(ws);
+      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
+      await hub.tick();
+      pushed.handlers.onError({ k: "px", at: state.t, code: "internal", status: null, message: longMessage(0) });
+      pushed.handlers.onError({ k: "fl", at: state.t, code: "network", status: null, message: longMessage(0) });
+      const st = hub.status();
+      const everything = [JSON.stringify(st), cap.lines.join("\n"), JSON.stringify(ws.sent)].join("\n");
+      eq(leaks(everything), null, "redaction: a failing roster read and a pushed internal error leave no part of the key in the log, the status or a frame");
+      ok(cap.lines.length >= 2, "redaction: and they were logged (the default log is console.error), so the absence above is of the key and not of the line");
+      ok(st.roster.error && st.roster.error.message.includes(RT.RT_REDACTED), "redaction: the roster error survives in status with the key replaced");
+      ok(cap.lines.some((l) => l.includes("rt poll failed")) && cap.lines.some((l) => l.includes("rt roster read failed")), "redaction: both log lines are the ones the hub always wrote");
+      eq(leaks(JSON.stringify(st.upstream)), null, "redaction: an upstream whose own state carries a socket URL with the token is redacted in status as well");
+      deep(Object.keys(st.topics.px.lastError).sort(), ["at", "code", "status", "throttled"], "redaction: a topic's last error is a code and a status, never the message");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const cap = grab();
+    try {
+      const outcomes = [
+        () => { throw new TypeError("fetch failed for https://api.unusualwhales.com/api/screener/stocks?token=" + KEY); },
+        () => new Response(JSON.stringify({ error: "bad key " + KEY, message: longMessage(0) }), { status: 401 }),
+        () => new Response("upstream said " + KEY, { status: 500 }),
+        () => new Response("<html>" + KEY + "</html>", { status: 200 }),
+        () => { const e = new Error(longMessage(80)); e.name = "NetworkError"; throw e; },
+      ];
+      let n = 0;
+      const state = { t: SESSION_NOW };
+      const sockets = [];
+      const wakes = [];
+      const hub = createHub({
+        env: { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test" },
+        now: () => state.t, random: () => 0.5,
+        fetchImpl: async () => outcomes[n++ % outcomes.length](),
+        host: { sockets: () => sockets, wake: (ms) => wakes.push(ms) },
+        loadRoster: async () => null,
+      });
+      const ws = mkSocket();
+      sockets.push(ws);
+      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, topics: TOPICS, f: "NVDA" });
+      for (let i = 0; i < 60; i++) { await hub.tick(); state.t += 1000; }
+      ok(n >= 10, `redaction: the REST adapter made ${n} calls against a vendor that refused, errored, returned HTML and threw the key in its messages`);
+      const st = hub.status();
+      eq(leaks([JSON.stringify(st), cap.lines.join("\n"), JSON.stringify(ws.sent)].join("\n")), null,
+         "redaction: no status body, log line or frame to a socket carries any part of the key");
+      ok(TOPICS.some((k) => st.topics[k].fails > 0), "redaction: and the failures really were counted");
+      eq(st.upstream.host, "uw.test", "redaction: status names the upstream by host only");
+      eq(st.upstream.key, true, "redaction: and says a key is configured, nothing more");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const cap = grab();
+    const alarmEnv = { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test" };
+    const { Pulse } = await import("../shared/flows-rt-hub.js");
+    const boom = (cut) => { throw new Error(straddle(cut)); };
+    const ctx = {
+      getWebSockets: () => [],
+      storage: { getAlarm: async () => boom(120), setAlarm: async () => boom(120), deleteAlarm: async () => {} },
+    };
+    try {
+      const pulse = new Pulse(ctx, alarmEnv);
+      await pulse.arm(10);
+      pulse.hub.tick = async () => boom(160);
+      await pulse.alarm();
+      const ws = mkSocket();
+      pulse.hub.onMessage = () => boom(120);
+      pulse.webSocketMessage(ws, "{}");
+      eq(leaks(cap.lines.join("\n")), null, "redaction: the object's alarm, tick and message failures log without the key even when the key sits across the cut the messages are truncated at");
+      ok(cap.lines.length >= 2 && cap.lines.every((l) => /"message":"rt (alarm|tick|message) failed"/.test(l)), "redaction: and they were logged: " + cap.lines.length + " lines");
+      const body = await (await pulse.fetch(new Request("https://pulse.internal/status"))).text();
+      eq(leaks(body), null, "redaction: the object's /status answers without the key");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const state = { t: SESSION_NOW };
+    const errors = [];
+    const cfg = hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test", FLOWS_RT_MODE: "on" });
+    const up = createRestUpstream({ cfg, fetchImpl: async () => { throw new Error("unreachable"); }, now: () => state.t, random: () => 0.5, budget: RT.createBudget() });
+    up.start({ ...plainPlan(), topics: new Set(["px"]), names: () => { throw new Error(straddle(120)); } }, { onFrame() {}, onError: (e) => errors.push(e) });
+    await up.tick(state.t);
+    eq(errors.length, 1, "redaction: the adapter reports a failure of its own as one internal error");
+    eq(errors[0].code, "internal", "redaction: coded internal");
+    eq(leaks(JSON.stringify(errors)), null, "redaction: and redacts the message before it truncates it, so the cut cannot leave a prefix of the key");
+    ok(errors[0].message.includes(RT.RT_REDACTED), "redaction: the message keeps its shape with the key replaced");
+    up.stop();
+  }
+
+  {
+    const hubSrc = read("shared/flows-rt-hub.js");
+    const routesSrc = read("shared/flows-rt-routes.js");
+    const railSrc = read("shared/flows-rt.js");
+    eq((hubSrc.match(/console\.error\(/g) || []).length, 1, "redaction: the hub writes to the console in exactly one place, the default log, which only logOnce reaches");
+    eq((routesSrc.match(/console\./g) || []).length + (railSrc.match(/console\./g) || []).length, 0, "redaction: and the routes and the pure half never write to it");
+    eq((hubSrc.match(/this\.log\(/g) || []).length, 1, "redaction: the log function is called from one line");
+    ok(/this\.log\(this\.redact\.deep\(entry\)\)/.test(hubSrc), "redaction: and that line redacts the whole entry first");
+    ok(/return this\.redact\.deep\(\{\n\s+running: this\.running/.test(hubSrc), "redaction: status is redacted whole before it leaves the object");
+    const logOnceCalls = hubSrc.match(/logOnce\("[a-z:]+"[^\n]*/g) || [];
+    ok(logOnceCalls.length >= 5, `redaction: ${logOnceCalls.length} logOnce calls found`);
+    for (const call of logOnceCalls.filter((c) => /slice\(/.test(c))) {
+      ok(/redact\(String\(/.test(call) && call.indexOf("redact(") < call.indexOf(".slice("), `redaction: ${call.slice(0, 60)}... redacts before it truncates`);
+    }
+    const toml = read("wrangler.toml");
+    const socketTopics = Object.entries(RT.RT_UPSTREAM).filter(([, v]) => v.channels.length > 0).map(([k]) => k);
+    ok(socketTopics.length === 5, "redaction: every topic names vendor socket channels, so the credential rules apply to the object that will open them");
+    ok(/\[observability\.traces\]\nenabled = false\n/.test(toml), "redaction: and traces are switched off in wrangler.toml, where a span would record the socket URL's query");
+  }
+}
+
+{
   const PROD = "https://api.unusualwhales.com";
   const allowed = [
     ["https://api.unusualwhales.com", PROD, "default"],

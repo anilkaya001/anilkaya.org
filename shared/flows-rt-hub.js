@@ -2,7 +2,7 @@ import {
   RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
   frame, ctlFrame, pendingStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
-  rosterPlan, pickFocus, rtSwitches, rtCadenceMs,
+  rosterPlan, pickFocus, rtSwitches, rtCadenceMs, createRedactor, rtSecretsOf,
 } from "./flows-rt.js";
 import { phaseAt } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
@@ -31,6 +31,7 @@ export function hubConfig(env) {
     audience: sw.audience,
     base: vendor.base,
     key: typeof e.UW_API_KEY === "string" ? e.UW_API_KEY : "",
+    secrets: rtSecretsOf(e),
     pinned: Number.isFinite(pinned) ? pinned : NaN,
     scale,
     callsPerMinute: clampInt(e.FLOWS_RT_CALLS_PER_MIN, 10, 1200, RT_LIMITS.callsPerMinute),
@@ -47,6 +48,10 @@ export function rtClock(env) {
 
 const closedKeyOf = (info) => info.reason + ":" + info.day;
 
+const hostOf = (base) => {
+  try { return new URL(base).host; } catch { return null; }
+};
+
 const jitter = (ms, random) => Math.round(ms * (0.8 + 0.4 * random()));
 
 export function createRestUpstream({
@@ -54,6 +59,7 @@ export function createRestUpstream({
   budget, timeoutMs = RT_LIMITS.callTimeoutMs,
 }) {
   const ORDER = ["px", "mk", "gx", "fl", "nw"];
+  const redact = createRedactor(cfg.secrets);
   const gxNames = () => (plan ? plan.gex().names.slice(0, GX_NAMES) : []);
   const cadence = (k) => (k === "gx" ? RT_TOPICS.gx.cadenceMs / Math.max(1, gxNames().length) : rtCadenceMs(k, plan && typeof plan.phase === "function" ? plan.phase() : null)) * cfg.scale;
   const topics = {};
@@ -198,7 +204,7 @@ export function createRestUpstream({
         if (t.inflight || at + slack < t.due) continue;
         jobs.push(poll(k, at).catch((error) => {
           t.inflight = false;
-          handlers.onError({ k, at, code: "internal", status: null, message: String(error && error.message ? error.message : error).slice(0, 120) });
+          handlers.onError({ k, at, code: "internal", status: null, message: redact(String(error && error.message ? error.message : error)).slice(0, 120) });
           t.due = at + Math.max(1000, cadence(k));
         }));
       }
@@ -206,7 +212,7 @@ export function createRestUpstream({
     },
     paused: (at) => at < pausedUntil,
     state: () => ({
-      running, pausedUntil: pausedUntil || null, n429, key: !!cfg.key, base: cfg.redirected ? "redirected" : cfg.baseStatus === "invalid" ? "invalid" : "production",
+      running, pausedUntil: pausedUntil || null, n429, key: !!cfg.key, base: cfg.redirected ? "redirected" : cfg.baseStatus === "invalid" ? "invalid" : "production", host: hostOf(cfg.base),
       topics: Object.fromEntries(ORDER.map((k) => [k, { due: topics[k].due, inflight: topics[k].inflight, fails: topics[k].fails }])),
     }),
   };
@@ -266,6 +272,7 @@ export class RtHub {
     this.now = typeof now === "function" ? now : rtClock(this.env);
     this.host = host;
     this.loadRoster = loadRoster;
+    this.redact = createRedactor(this.cfg.secrets);
     this.log = typeof log === "function" ? log : (entry) => console.error(JSON.stringify(entry));
     this.budget = createBudget({ perMinute: Math.max(1, Math.round(this.cfg.callsPerMinute / this.cfg.scale)) });
     this.upstream = upstreamFactory({ cfg: this.cfg, now: this.now, random, budget: this.budget });
@@ -323,7 +330,7 @@ export class RtHub {
     if (t - (this.logged.get(key) || 0) < 60000) return;
     this.logged.set(key, t);
     if (this.logged.size > 32) this.logged.delete(this.logged.keys().next().value);
-    this.log(entry);
+    this.log(this.redact.deep(entry));
   }
 
   attachment(ws) {
@@ -674,7 +681,7 @@ export class RtHub {
       this.rosterError = null;
       this.rosterDueAt = now + RT_LIMITS.rosterMs;
     } catch (error) {
-      this.rosterError = { at: now, message: String(error && error.message ? error.message : error).slice(0, 120) };
+      this.rosterError = { at: now, message: this.redact(String(error && error.message ? error.message : error)).slice(0, 120) };
       if (!this.roster) this.applyRoster({ clock: null, boards: {}, focus: null });
       this.rosterDueAt = this.now() + RT_LIMITS.rosterRetryMs * this.cfg.scale;
       this.logOnce("roster", { message: "rt roster read failed", error: this.rosterError.message });
@@ -915,7 +922,7 @@ export class RtHub {
       };
     }
     const phase = phaseAt(now, this.clock);
-    return {
+    return this.redact.deep({
       running: this.running, ep: this.ep || null, startedAt: this.running ? this.startedAt : null, session: this.session, now,
       unobservedMs: this.unobservedMs,
       phase: phase ? { phase: phase.phase, trading: phase.trading, day: phase.day } : null,
@@ -930,7 +937,7 @@ export class RtHub {
       degraded: this.degraded,
       killSwitches: { FLOWS_RT_MODE: this.cfg.mode, FLOWS_RT_AUDIENCE: this.cfg.audience },
       topics,
-    };
+    });
   }
 }
 
@@ -963,7 +970,7 @@ export class Pulse {
         return true;
       } catch (error) {
         this.armed = undefined;
-        this.hub.logOnce("alarm", { message: "rt alarm failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+        this.hub.logOnce("alarm", { message: "rt alarm failed", error: this.hub.redact(String(error && error.message ? error.message : error)).slice(0, 120) });
         if (attempt) return false;
       }
     }
@@ -975,7 +982,7 @@ export class Pulse {
       try {
         this.armed = await this.ctx.storage.getAlarm();
       } catch (error) {
-        this.hub.logOnce("alarm", { message: "rt alarm failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+        this.hub.logOnce("alarm", { message: "rt alarm failed", error: this.hub.redact(String(error && error.message ? error.message : error)).slice(0, 120) });
         return this.setAt(at);
       }
     }
@@ -989,7 +996,7 @@ export class Pulse {
     try {
       delay = await this.hub.tick();
     } catch (error) {
-      this.hub.logOnce("tick", { message: "rt tick failed", error: String(error && error.message ? error.message : error).slice(0, 160) });
+      this.hub.logOnce("tick", { message: "rt tick failed", error: this.hub.redact(String(error && error.message ? error.message : error)).slice(0, 160) });
       delay = this.hub.demand(this.hub.now()) ? 2000 : null;
     }
     if (delay === null) return;
@@ -1035,7 +1042,7 @@ export class Pulse {
     try {
       this.hub.onMessage(ws, message);
     } catch (error) {
-      this.hub.logOnce("message", { message: "rt message failed", error: String(error && error.message ? error.message : error).slice(0, 120) });
+      this.hub.logOnce("message", { message: "rt message failed", error: this.hub.redact(String(error && error.message ? error.message : error)).slice(0, 120) });
       try { ws.close(RT_CLOSE.policy, "error"); } catch { return; }
     }
   }
