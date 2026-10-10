@@ -45,6 +45,7 @@ export const RT_LIMITS = Object.freeze({
   focusMax: 8,
   gexFocusEvery: 4,
   rosterMs: 5 * 60 * 1000,
+  rosterRetryMs: 30 * 1000,
   callsPerMinute: 240,
   callTimeoutMs: 4000,
   degradeAfterMs: 15 * 1000,

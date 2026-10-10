@@ -133,6 +133,15 @@ async function runMain() {
   const base = server.baseURL;
   const opened = [];
   try {
+    for (const side of ["long", "short", "watch"]) {
+      const boards = fakeBoards({ n: 20, sessionDate: "2026-09-29", session: "2026-09-29" });
+      const res = await fetch(base + "/api/flows/ingest?key=board:" + side, {
+        method: "POST", headers: { Authorization: "Bearer " + INGEST, "Content-Type": "application/json" },
+        body: JSON.stringify({ side, status: "ok", generatedAt: new Date().toISOString(), sessionDate: "2026-09-29", rows: boards[side].rows }),
+      });
+      eq(res.status, 200, `seed: board:${side} stored`);
+    }
+
     {
       const s0 = await statusOf(base, OWNER);
       eq(s0.res.status, 200, "status: the owner reads it");
@@ -183,15 +192,6 @@ async function runMain() {
       await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the abandoned raw socket to be released");
     }
 
-    for (const side of ["long", "short", "watch"]) {
-      const boards = fakeBoards({ n: 20, sessionDate: "2026-09-29", session: "2026-09-29" });
-      const res = await fetch(base + "/api/flows/ingest?key=board:" + side, {
-        method: "POST", headers: { Authorization: "Bearer " + INGEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ side, status: "ok", generatedAt: new Date().toISOString(), sessionDate: "2026-09-29", rows: boards[side].rows }),
-      });
-      eq(res.status, 200, `seed: board:${side} stored`);
-    }
-
     const c1 = connect(base, OWNER, { query: "?f=nvda" });
     opened.push(c1);
     await until(() => c1.frames.length > 0, 8000, "the hello");
@@ -200,6 +200,24 @@ async function runMain() {
     deep(hello.rows.map((f) => f.k), RT_TOPIC_KEYS, "hello: a snapshot frame for each of the five topics");
     eq(hello.meta.f, "NVDA", "hello: the focus ticker from the query, upper-cased");
     ok(hello.rows.every((f) => f.snap === true && f.ep === hello.ep), "hello: snapshots in the hello's epoch");
+
+    {
+      const helloAt = Date.now();
+      let failedFirst = null;
+      let last = null;
+      const held = await until(async () => {
+        const { body } = await statusOf(base, OWNER);
+        last = body.roster;
+        if (body.roster.error && !failedFirst) failedFirst = body.roster.error.message;
+        return body.roster.n >= 60 && body.roster.error === null ? body.roster : null;
+      }, 60000, "the roster read from D1 to be applied").catch((e) => {
+        const logged = String(server.output()).split("\n").filter((l) => /roster/.test(l)).slice(-3).join(" // ");
+        throw new Error(`${e.message}; last status roster ${JSON.stringify(last)}; ${logged || "no roster line in the worker log"}`);
+      });
+      ok(held.n >= 60, `roster: the hub holds the boards seeded in D1 (${held.n} names, ${Date.now() - helloAt} ms after the hello${failedFirst ? `, after a failed first read: ${failedFirst}` : ""})`);
+      if (failedFirst) console.log(`rt roster: the first D1 read failed (${failedFirst}); the boards were applied ${Date.now() - helloAt} ms after the hello, by the retry`);
+      await until(() => c1.data("px").some((f) => f.rows.some((r) => r[0] === "SYL001")), 15000, "a px row for a board name on the socket");
+    }
 
     await until(() => RT_TOPIC_KEYS.every((k) => c1.data(k).some((f) => f.rows.length)), 15000, "rows on all five topics");
     await until(() => c1.data("px").filter((f) => !f.snap).length >= 3 && c1.data("fl").filter((f) => !f.snap).length >= 3 &&
@@ -220,9 +238,13 @@ async function runMain() {
     deep(px.meta.cols, RT_ROW_FIELDS.px, "px: the snapshot names its columns");
     const pxNames = new Set(c1.data("px").flatMap((f) => f.rows.map((r) => r[0])));
     ok(pxNames.has("SYL001") && pxNames.has("NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
-    const pxCall = vendor.paramsOf(/screener/)[0].ticker.split(",");
+    const pxCalls = vendor.paramsOf(/screener/).map((p) => p.ticker.split(","));
+    const fullAt = pxCalls.findIndex((c) => c.includes("SYL001"));
+    ok(fullAt >= 0, "px: the vendor was asked for a board name");
+    const pxCall = pxCalls[fullAt];
     ok(pxCall.includes("SYL001") && pxCall.includes("NVDA") && pxCall.length >= 60, `px: the vendor was asked for the roster in one call (${pxCall.length} names)`);
-    ok(new Set(vendor.calls.filter((c) => /screener/.test(c.path)).map((c) => c.params.ticker)).size === 1, "px: the same call every time");
+    ok(pxCalls.slice(fullAt).every((c) => c.join(",") === pxCall.join(",")), `px: the same call every time once the roster is applied (${pxCalls.length - fullAt} calls)`);
+    ok(pxCalls.slice(0, fullAt).every((c) => c.length < pxCall.length && c.every((t) => pxCall.includes(t))), `px: and any call before it asked only base names, a subset of the roster (${fullAt} calls)`);
     eq(px.fresh.klass, "rt", "px: freshness class rt");
     ok(["live", "fresh"].includes(px.fresh.state), `px: a stamped vendor read is ${px.fresh.state}`);
     eq(uw.seen.unauthorised, 0, "the vendor key travelled as a bearer token on every call");

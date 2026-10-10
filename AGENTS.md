@@ -580,9 +580,11 @@ each every 15 s), and `/api/rt/snap?k=gx` with none answers cold at once. A
 topic that leaves demand forgets its failures and leaves `degraded`; `status`
 lists all five with `demanded`. Tier 1, Tier 2 and the nightly are
 unchanged and remain the fallback. The hub reads D1 (the roster and the clock
-row, one batch at start and every five minutes) and never writes it; it adds no
-`live:*` key, never touches the `UW_ONDEMAND` limiter (its own budget is
-`FLOWS_RT_CALLS_PER_MIN`, default 240), and never calls `env.AI`. The upstream
+row, one batch at start and every five minutes, and again after 30 seconds
+when a read failed or timed out, keeping the roster it holds or the base names
+meanwhile) and never writes it; it adds no `live:*` key, never touches the
+`UW_ONDEMAND` limiter (its own budget is `FLOWS_RT_CALLS_PER_MIN`, default 240),
+and never calls `env.AI`. The upstream
 sits behind `createRestUpstream` so a WebSocket upstream can replace it
 without touching the hub or the client: the hub calls only `start(plan,
 handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`, and receives
