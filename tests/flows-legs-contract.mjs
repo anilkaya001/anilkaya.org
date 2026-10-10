@@ -1007,6 +1007,15 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "sections/alerts.mjs": [
       "PULSE_TOTALS_HISTORY", "publishPulse", "publishSectorPremium", "publishNews",
     ],
+    "sections/cards.mjs": [
+      "markGate", "card0Unusable",
+    ],
+    "sections/focus.mjs": [
+      "indexDossierDeps",
+    ],
+    "sections/close.mjs": [
+      "describeGammaRange",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
