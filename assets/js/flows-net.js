@@ -227,7 +227,7 @@
     const hits = h("div", { class: "fn-hits", role: "group", "aria-label": "Network nodes; arrow keys move between them, R recentres the view" });
     const tip = h("div", { class: "fn-tip", "aria-hidden": "true", hidden: true });
     const empty = h("div", { class: "fn-empty", hidden: true });
-    const home = h("button", { class: "fn-home", type: "button", "aria-label": "Recentre the view", title: "Recentre the view (R)", hidden: true }, UI.glyph("home"));
+    const home = h("button", { class: "fn-home", type: "button", "aria-label": "Recentre the view", title: "Recentre the view", hidden: true }, UI.glyph("home"));
     const stage = h("div", { class: "fn-stage" }, cv, hits, tip, empty, home);
     const lede = h("p", { class: "fn-lede" });
     const legend = h("div", { class: "ui-legend fn-legend" });
@@ -853,8 +853,9 @@
     function stepCam(dt, now) {
       if (DRAG.on) { cam.idle = now; return; }
       if (cam.vy || cam.vp) {
-        turn(cam.yaw + cam.vy * dt, cam.pitch + cam.vp * dt);
-        const k = Math.exp(-dt * 3.4);
+        const ey = clamp((YAWMAX() - Math.sign(cam.vy) * cam.yaw - 6 * DEG) / (12 * DEG), 0, 1), ep = clamp((PMAX - Math.sign(cam.vp) * cam.pitch - 2 * DEG) / (6 * DEG), 0, 1);
+        turn(cam.yaw + cam.vy * ey * dt, cam.pitch + cam.vp * ep * dt);
+        const k = Math.exp(-dt * 6);
         cam.vy *= k;
         cam.vp *= k;
         if (Math.abs(cam.vy) < 0.5 * DEG && Math.abs(cam.vp) < 0.5 * DEG) cam.vy = cam.vp = 0;
@@ -1450,7 +1451,7 @@
         DRAG.eat = e.timeStamp;
         stage.classList.remove("is-drag");
         const k = Math.exp(-Math.max(0, e.timeStamp - DRAG.t) / 150);
-        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -4, 4); cam.vp = clamp(DRAG.vy * k, -2, 2); }
+        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -1.4, 1.4); cam.vp = clamp(DRAG.vy * k, -0.6, 0.6); }
         cam.idle = performance.now();
         kick();
       } else if (e.type === "pointerup" && e.pointerType === "touch") {

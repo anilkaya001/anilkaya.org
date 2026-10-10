@@ -21,7 +21,7 @@
     linear-gradient(180deg, rgba(4, 6, 11, 0.62), rgba(4, 6, 11, 0.38));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 24px 60px rgba(0, 0, 0, 0.35);
   isolation: isolate;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;

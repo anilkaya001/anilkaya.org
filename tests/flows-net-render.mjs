@@ -395,6 +395,14 @@ try {
     await page.route("**/api/flows/flowalerts", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(big) }));
     const y1 = await net(page, `net.take(arg, { state: "ok" }); return [net.node("n:MSFT").y, net.model().layers[2][0].id];`, big);
     eq(y1[1], "n:MSFT", "new data reorders the name layer in the model at once");
+    const onScreen = async () => {
+      await page.evaluate(() => document.querySelector("#uaNet .fn-stage").scrollIntoView({ block: "start", behavior: "instant" }));
+      return page.waitForFunction(() => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running; }, null, { timeout: 10000 }).then(() => true, () => false);
+    };
+    if (!(await onScreen()) && !(await onScreen())) {
+      const why = await page.evaluate(() => { const r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return `stage ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerHeight}, running ${window.FlowsUI.net.of(document.getElementById("uaNet")).stats().running}`; });
+      throw new Error(`GLIDE PRECONDITION: the stage is not on screen with its loop running after two scrolls (${why})`);
+    }
     await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), a = n.node("n:MSFT"), b = n.node("n:NVDA"), c = n.node("n:SPY"); return a.y < b.y - 20 && b.y < c.y - 20; }, null, { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(600);
     const y2 = await net(page, `const s = net.stats(), r = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(); return [net.node("n:MSFT").y, net.node("n:NVDA").y, s.frames, s.running, Math.round(r.top) + ".." + Math.round(r.bottom) + " of " + innerHeight + (document.activeElement ? " focus " + document.activeElement.tagName : "")];`);
@@ -559,6 +567,17 @@ try {
     await page.waitForTimeout(300);
     const fl3 = await camera(page);
     ok(fl2.spin === 0 && fl3.yaw === fl2.yaw && !fl3.auto, `and the inertia decays to a stop (${fl2.yaw.toFixed(2)} then ${fl3.yaw.toFixed(2)})`);
+    await net(page, "net.recentre(); return null;");
+    await settle(page);
+    await page.mouse.move(b.x + b.w * 0.5, b.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.w * 0.5 + 40, b.y + 20);
+    await page.mouse.move(b.x + b.w * 0.5 + 160, b.y + 20, { steps: 2 });
+    await page.mouse.up();
+    const fr0 = await camera(page);
+    await page.waitForTimeout(2500);
+    const fr1 = await camera(page);
+    ok(fr1.spin === 0 && fr1.yaw - fr0.yaw <= 20 && fr1.yaw <= fr1.limits[0] - 5, `A FLICK FROM REST COASTS A LITTLE: released at yaw ${fr0.yaw.toFixed(1)}, settled at ${fr1.yaw.toFixed(1)} with spin ${fr1.spin}, limit ${fr1.limits[0]}`);
     await page.click("#uaNet .fn-home");
     await settle(page);
     c = await camera(page);
@@ -586,6 +605,15 @@ try {
     const lit = await net(page, `return [net.node("n:AAPL").lit, net.node("n:NVDA").lit];`);
     const tipText = await page.evaluate(() => document.querySelector("#uaNet .fn-tip").textContent);
     ok(lit[0] === 1 && lit[1] === 0 && /AAPL/.test(tipText), `HIT TARGETS FOLLOW THE CAMERA: after a rotation the pointer over AAPL's sphere lights AAPL (${tipText.slice(0, 40)})`);
+    const backUrl = page.url(), sy = await page.evaluate(() => scrollY);
+    await net(page, "net.orbit(48, 16); return null;");
+    await page.mouse.move(5, 5);
+    const aapl2 = await net(page, `return net.node("n:AAPL");`);
+    await Promise.all([page.waitForURL(/\/flows\/ticker\/\?t=AAPL$/, { timeout: 10000 }), page.mouse.click(b.x + aapl2.x, b.y + aapl2.y)]);
+    ok(true, `and a click there after the rotation opens AAPL's ticker page (${page.url()})`);
+    await page.goto(backUrl);
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), sy);
 
     await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
@@ -617,7 +645,7 @@ try {
       await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
       await page.waitForTimeout(300);
     };
-    eq(await page.evaluate(() => getComputedStyle(document.querySelector("#uaNet .fn-stage")).touchAction), "pan-y", "the stage leaves vertical panning to the page");
+    eq(await page.evaluate(() => getComputedStyle(document.querySelector("#uaNet .fn-stage")).touchAction), "pan-y pinch-zoom", "the stage leaves vertical panning and pinch-zoom to the page");
     const c0 = await camera(page);
     deep(c0.limits, [30, 22], "on a phone the yaw is held to 30 degrees so the rows stay legible");
     await touch(150, 10);
@@ -843,4 +871,4 @@ console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn i
   `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
   `hit targets that follow the camera, back-to-front depth order, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
   `the expiry output, a flare on a new window, pause when hidden or off screen, pending, empty, failed and unread states, ` +
-  `no overflow, no label or caption collision and every label within half a pitch of its own sphere at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, along the sway path and where a long drag stops, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host 20 or 40 px wide and the 640 px fallback of a 0 px one, and CPU per frame`);
+  `no overflow, no label or caption collision and every label within half a pitch of its own sphere at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, along the sway path and where a long drag stops, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host 0, 20 or 40 px wide laid out at its stage's own 16, 36 or 56 px, and CPU per frame`);
