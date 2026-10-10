@@ -17,6 +17,11 @@ const AI_SUMMARY_SQL =
 const NEURON_SQL =
   "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)";
 
+const AI_OUTCOME_SQL =
+  "CREATE TABLE IF NOT EXISTS flows_ai_outcome (day TEXT NOT NULL, surface TEXT NOT NULL, model TEXT NOT NULL, outcome TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', n INTEGER NOT NULL DEFAULT 0 CHECK (n >= 0), ms_sum INTEGER NOT NULL DEFAULT 0 CHECK (ms_sum >= 0), ms_max INTEGER NOT NULL DEFAULT 0 CHECK (ms_max >= 0), PRIMARY KEY (day, surface, model, outcome, reason)) WITHOUT ROWID";
+const AI_REJECT_SQL =
+  "CREATE TABLE IF NOT EXISTS flows_ai_reject (surface TEXT NOT NULL, slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 49), at INTEGER NOT NULL CHECK (at > 0), model TEXT NOT NULL, reason TEXT NOT NULL, culprit TEXT NOT NULL CHECK (length(culprit) <= 40), PRIMARY KEY (surface, slot)) WITHOUT ROWID";
+
 const NONE = Object.freeze([]);
 const COLUMN_RE = /^[a-z][a-z0-9_]*$/;
 const TYPE_RE = /^(?:INTEGER|TEXT|REAL)(?: NOT NULL DEFAULT (?:-?\d+(?:\.\d+)?|'[^'\\]*'))?$/;
@@ -35,6 +40,8 @@ const META = Object.freeze({
   flows_ledger: { table: "flows_ledger", migration: "0015_flows_ledger.sql", owner: "live", added: LEDGER_ADDED_COLUMNS },
   flows_archive_immutable: { table: "flows_payload", migration: "0010_flows_live.sql", owner: "ingest" },
   flows_dossier_cache: { table: "flows_dossier_cache", migration: "0016_flows_dossier_cache.sql", owner: "dossier" },
+  flows_ai_outcome: { table: "flows_ai_outcome", migration: "0017_flows_ai_outcome.sql", owner: "ai" },
+  flows_ai_reject: { table: "flows_ai_reject", migration: "0017_flows_ai_outcome.sql", owner: "ai" },
 });
 
 export function checkAdded(table, added) {
@@ -76,6 +83,7 @@ export const FLOWS_REGISTRY = registryOf([
   PAYLOAD_SQL, LOGIN_FAILURES_SQL, AI_USAGE_SQL, AI_USAGE_MODEL_SQL, AI_SUMMARY_SQL, NEURON_SQL,
   ...LIVE_SCHEMA_SQL,
   DOSSIER_SCHEMA_SQL,
+  AI_OUTCOME_SQL, AI_REJECT_SQL,
 ]);
 
 export function withAddedColumns(registry, name, added, ddl = null) {

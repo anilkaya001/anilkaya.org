@@ -21,7 +21,7 @@ import { aiText, modelInput, askModels, aiChain, aiCallSignature, retryableGuard
          AI_CAP_DEFAULT_CALLS, AI_WORST_RATES, estimateUsage, AI_CHARS_PER_TOKEN } from "../shared/flows-ai.js";
 import { readFileSync } from "node:fs";
 import { workerSource, closure, slice, where, count, expect, absent, parseImports } from "./lib/source-scan.mjs";
-import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, spendReaderArg, AI_HOME } from "./lib/ai-guard.mjs";
+import { checkModelCalls, modelCallReport, modelCallFiles, guardAi, aiGuardStats, spendReaderArg, AI_HOME, AI_BROKER } from "./lib/ai-guard.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -836,7 +836,8 @@ const CARD = {
   const worker = workerSource();
   same(checkModelCalls(), [],
     "no call site reaches the binding directly: every one goes through askModels, so none can drop the thinking switch or the fallback");
-  eq(expect(worker, /askModels\(meteredAi\(env\)/, { min: 4, max: 4 }), 4, "and all four call sites (summary, Neuron, Neuron over the engine, Ask) use it, each through the metered binding");
+  eq(expect(worker, /await aiCall\(env, aiDeps\(env\)/, { min: 4, max: 4 }), 4, "and all four Worker call sites (summary, Neuron, Neuron over the engine, Ask) go through the broker, each over the metered binding");
+  eq(expect(worker, /askModels\(deps\.ai\(\)/, { min: 1, max: 1 }), 1, "whose one askModels call is server/ai.js's, handed the capped binding");
   same(where(closure("worker.js"), /max_tokens/), [AI_HOME], "the only max_tokens literal the Worker runs is modelInput's, so no call site carries one of its own");
   ok(/if \(attempt > 0\) \{\s*if \(said\.failure\) refused = "unreachable:reparse:" \+ said\.failure\.why;\s*break;/.test(worker) &&
      /verdict\.ok \? "ideas:unparsable" : refused \|\| "ideas:unparsable"/.test(worker) &&
@@ -1144,11 +1145,11 @@ const CARD = {
   eq(report.reads.length, 1, "one read of the binding, cappedAi's");
   ok(report.tests.length >= 1 && report.tests.every((t) => /^(?:!|Boolean\()/.test(t.text)), `every other mention of it is a truthiness test (${report.tests.length})`);
   ok(report.files >= closure("worker.js").length && report.files > 40, `the guard reads ${report.files} modules, the closure of worker.js among them`);
-  const sites = report.askSites.length;
-  const metered = report.askSites.filter((a) => a.arg === "meteredAi(env)").length;
-  ok(sites >= 5 && metered >= 4 && report.askSites.every((a) => a.arg === "meteredAi(env)" || a.arg === "deps.ai()") && report.cappedDeps.length === 1 &&
+  const outside = report.brokerSites.filter((c) => c.file !== AI_BROKER);
+  ok(report.askSites.length === 1 && report.askSites[0].file === AI_BROKER && report.askSites[0].arg === "deps.ai()" && outside.length >= 5 &&
+    report.brokerDeps.length === 1 && report.cappedDeps.length === 1 &&
     report.metered.length === 1 && report.metered[0].args.length === 2 && report.cappedDeps[0].args.length === 2,
-    `and all ${sites} askModels call sites are handed the metered binding (${metered}) or the reading's capped dep, each built once by cappedAi with env and a second argument that is not a null, undefined or void literal (that it reads the day's spend is proved by driving worker.js past the cap in flows-reading-worker)`);
+    `and the one askModels call site is the broker's, handed deps.ai(), which the Worker's one aiDeps builds over the metered binding or the reading's capped dep, each built once by cappedAi with env and a second argument that is not a null, undefined or void literal, with ${outside.length} aiCall sites over it (that it reads the day's spend is proved by driving worker.js past the cap in flows-reading-worker)`);
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   ok(/FLOWS_AI_DAILY_CAP_NEURONS\s*=\s*"\d+"/.test(toml) && /FLOWS_AI_DAILY_CAP_CALLS\s*=\s*"\d+"/.test(toml),
     "and the cap is written down in wrangler.toml, where a deploy shows it");
@@ -1215,8 +1216,17 @@ const CARD = {
     "MUTATION: a value read of env.AI in worker.js fails it");
   ok(mutate("server/flows-mutant.js", 'import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env), c, m, {});\n').some((p) => /unmetered binding: cappedAi\(env\)$/.test(p)),
     "MUTATION: askModels handed cappedAi(env), which never reads the day's spend, fails it");
-  same(mutate("server/flows-mutant.js", 'import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env, () => spendOf(env, { day: today(), fresh: true })), c, m, {});\n'), [],
-    "and cappedAi with env and a spend reader passes, its arguments read with balanced brackets");
+  const inline = mutate("server/flows-mutant.js", 'import { askModels, cappedAi } from "../shared/flows-ai.js";\nexport const g = (env, c, m) => askModels(cappedAi(env, () => spendOf(env, { day: today(), fresh: true })), c, m, {});\n');
+  ok(inline.length === 1 && /asks a model with askModels\( outside server\/ai\.js/.test(inline[0]) && !inline.some((p) => /unmetered binding/.test(p)),
+    "and cappedAi with env and a spend reader is read as metered, its arguments with balanced brackets, though an askModels( outside server/ai.js is refused all the same");
+  ok(mutate("server/flows-mutant.js", 'import { aiCall } from "./ai.js";\nexport const g = (env, c) => aiCall(env, { ai: () => env.AI }, c);\n').some((p) => /flows-mutant\.js:2 calls aiCall\( with env, \{ ai: \(\) => env\.AI \}, not env and the broker's aiDeps\(env\)/.test(p)),
+    "MUTATION: aiCall handed dependencies of its own instead of aiDeps(env) fails it");
+  ok(mutate("worker.js", workerText.replace("ai: ai || (() => meteredAi(env)),", "ai: ai || (() => cappedAi(env, null)),")).some((p) => /const aiDeps = .* must appear exactly once \(found 0\)/.test(p)),
+    "MUTATION: the broker's default binding rebuilt as cappedAi(env, null), which never reads the day's spend, fails it");
+  ok(mutate("worker.js", workerText + "\nconst direct = (env) => askModels(meteredAi(env), [], [], {});\n").some((p) => /^worker\.js:\d+ asks a model with askModels\( outside server\/ai\.js/.test(p)),
+    "MUTATION: an askModels( call back in worker.js fails it");
+  ok(mutate("server/ai.js", readFileSync(new URL("../server/ai.js", import.meta.url), "utf8").replace("askModels(deps.ai()", "askModels(env.AI")).some((p) => /^server\/ai\.js:\d+ hands askModels env\.AI, not the capped binding deps\.ai\(\)/.test(p)),
+    "MUTATION: the broker asking the raw binding fails it");
   ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, 'const meteredAi = (env) => env["\\x41I"];')).some((p) => /const meteredAi = \(env\) => cappedAi\( must appear exactly once \(found 0\)/.test(p)),
     "MUTATION: meteredAi rebuilt as env[\"\\x41I\"], which no text scan reads as the binding, fails it on the missing cappedAi anchor");
   ok(mutate("worker.js", workerText.replace(/const meteredAi = \(env\) => cappedAi\([^\n]*;/, "const meteredAi = (env) => cappedAi(env);")).some((p) => /builds meteredAi with cappedAi\(env\), not with env and a spend reader/.test(p)),

@@ -109,11 +109,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const answers = await Promise.all(HOME.map(get));
   ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all thirteen home-page reads at once");
   eq(f.count(SCHEMA_RE), 1,
-     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the twelve-statement schema batch once, " +
+     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the fourteen-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of the schema bootstrap once");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 13 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 15 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");
@@ -1239,8 +1239,10 @@ class FakeCache {
       prob: { popQ: 0.7, popP: 0.78 }, ev: { q: -3, p: 21, edge: 24 }, maxProfit: 140, maxLoss: -360 }],
     ideas, noTrade,
   });
+  let engineWorld = null;
   const reading = async (engine, reply) => {
     const f = fakeD1();
+    engineWorld = f;
     seed(f);
     f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70, engine });
     const ai = reply === null ? {} : { AI: { run: async () => ({ response: JSON.stringify(reply), usage: { prompt_tokens: 100, completion_tokens: 20 } }) } };
@@ -1252,6 +1254,11 @@ class FakeCache {
   };
 
   const ranked = await reading(block(["S1"], null), { verdict: "stand-aside", ideas: [] });
+  deep(engineWorld.db.prepare("SELECT surface, outcome, reason, n FROM flows_ai_outcome").all().map((r) => [r.surface, r.outcome, r.reason, r.n]), [["neuron", "refused", "engine:refused", 1]],
+    "THE ENGINE NEURON'S REFUSAL IS COUNTED: a model that contradicts the engine's ranking is one call counted refused with the engine's reason");
+  const culprit = engineWorld.db.prepare("SELECT surface, reason, culprit FROM flows_ai_reject").all().map((r) => [r.surface, r.reason, r.culprit]);
+  ok(culprit.length === 1 && culprit[0][0] === "neuron" && culprit[0][1] === "refused:engine:refused" && culprit[0][2].length > 0 && culprit[0][2].length <= 40 && !/\s/.test(culprit[0][2]),
+    "and the ring holds the engine's refusal code alone (" + JSON.stringify(culprit) + ")");
   ok(ranked.status === "ok" && ranked.engine === true && ranked.ideas.length === 1 && ranked.ideas[0].structure === "S1" && ranked.ideas[0].from === "engine" &&
      ranked.verdict !== "stand-aside" && ranked.guard === "engine:refused" && ranked.llm === false,
      `N-F2, end to end: a model that answers stand-aside while the engine ranks S1 is refused, and the reader gets the engine's idea and no Stand aside tag (${ranked.verdict}, ${ranked.guard})`);
@@ -1281,6 +1288,44 @@ class FakeCache {
 
 {
   const unshift = shiftClock(FIXTURE_NOW);
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const legacy = async (replies) => {
+    const f = fakeD1();
+    seed(f);
+    f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
+    let n = 0;
+    const ai = { run: async () => {
+      const r = replies[Math.min(n++, replies.length - 1)];
+      if (r instanceof Error) throw r;
+      return { response: typeof r === "string" ? r : JSON.stringify(r), usage: { prompt_tokens: 100, completion_tokens: 20 } };
+    } };
+    const get = await client(f.D1, { ...AI_ENV, FLOWS_READ_MODE: "off", AI: ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    return {
+      calls: n,
+      counted: f.db.prepare("SELECT surface, outcome, reason, n FROM flows_ai_outcome ORDER BY outcome, reason").all().map((r) => [r.surface, r.outcome, r.reason, r.n]),
+      ring: f.db.prepare("SELECT surface, reason, culprit FROM flows_ai_reject").all().map((r) => [r.surface, r.reason, r.culprit]),
+      guard: f.db.prepare("SELECT guard, llm FROM flows_neuron WHERE scope = 'ticker:NVDA'").get(),
+    };
+  };
+  const invented = await legacy(["no json here, only prose", { summary: "The last price is up 99.9% on the day.", ideas: [] }]);
+  deep([invented.calls, invented.counted, invented.ring], [2, [["neuron", "refused", "invented", 1], ["neuron", "unparsable", "", 1]], [["neuron", "refused:invented", "99.9"]]],
+    "THE LEGACY NEURON'S REPARSE IS TWO CALLS, COUNTED TWICE: prose first (unparsable, settled when the second request is made), then an invented figure (refused), whose figure alone reaches the ring");
+  const empty = await legacy([{ ideas: [] }]);
+  deep([empty.calls, empty.counted, empty.guard.guard], [2, [["neuron", "empty", "summary", 1], ["neuron", "unparsable", "", 1]], "summary:empty"],
+    "ideas without a summary twice are unparsable, then empty (summary)");
+  const blip = await legacy([{ ideas: [] }, new Error("AiError: 3040: capacity")]);
+  deep([blip.counted, blip.guard.guard], [[["neuron", "capacity", "", 1], ["neuron", "unparsable", "", 1]], "unreachable:reparse:capacity"],
+    "and a capacity blip on the second request is counted capacity beside the first request's unparsable");
+  const clean = await legacy([{ summary: "The last price is 170.", ideas: [] }]);
+  deep([clean.calls, clean.counted.length, clean.counted[0] && clean.counted[0][1]], [1, 1, clean.counted[0] && clean.counted[0][1]], "a reply the guard takes is one call and one counter");
+  unshift();
+}
+
+{
+  const unshift = shiftClock(FIXTURE_NOW);
   const RW = await import("../shared/flows-reading-worker.js");
   const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_READ_MODE: "on" };
   const calls = [];
@@ -1303,6 +1348,10 @@ class FakeCache {
   ok(miss.rows <= 22, `rows read before the response by a summary call that finds no reading and starts one: ${miss.rows} (ceiling 22: the card and prior reading, the reading row, the dossier's primary-key batch)`);
   ok(miss.total <= 34, `and ${miss.total} with the background generation's own reads of the day's spend (ceiling 34)`);
   ok(calls.filter((c) => /stock reader/.test(c)).length === 1, "and one model call for the reading, in the background");
+  const counted = f.db.prepare("SELECT surface, outcome, n FROM flows_ai_outcome ORDER BY surface, outcome").all().map((r) => ({ ...r }));
+  eq(counted.reduce((n, r) => n + r.n, 0), calls.length, `EVERY MODEL CALL IS COUNTED ONCE (${calls.length}): ${counted.map((r) => r.surface + " " + r.outcome).join(", ")}`);
+  ok(counted.some((r) => r.surface === "read" && r.outcome === "refused"), "the reading's scripted reply of {} is counted as refused under the reading's surface (" + JSON.stringify(counted) + ")");
+  eq(f.trips.filter((t) => t.sqls.some((q) => /^INSERT INTO flows_ai_outcome/.test(q))).length, calls.length, "each in one trip of its own, so a model call costs one more trip and one more row written and no row read");
   const row = f.db.prepare("SELECT fingerprint FROM flows_neuron WHERE scope = 'read:NVDA'").get();
   ok(row && row.fingerprint.endsWith("|" + RW.readSignature({ ...AI_ENV })), "its row is keyed by the model signature");
   const hit = (guard, llm, shape, at) => f.db.prepare(

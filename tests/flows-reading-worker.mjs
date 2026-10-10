@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import * as R from "../shared/flows-reading.js";
 import * as RW from "../shared/flows-reading-worker.js";
 import { AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
-import { fakeD1, shiftClock, cacheFake, vendorStub, client } from "./dossier-harness.mjs";
+import { fakeD1, shiftClock, cacheFake, vendorStub, client, SESSION_SECRET } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
-import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
-import { checkModelCalls, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
+import { moduleSource, workerSource, expect, absent } from "./lib/source-scan.mjs";
+import { checkModelCalls, assertAiGuarded, aiGuardStats, guardAi } from "./lib/ai-guard.mjs";
 import { FLOWS_USERNAMES } from "../shared/flows-auth.js";
 
 let checks = 0;
@@ -87,6 +87,8 @@ const summary = async (get, t = T) => {
   await r.settle();
   return r;
 };
+const counted = (f) => f.db.prepare("SELECT surface, model, outcome, reason, n, ms_max FROM flows_ai_outcome ORDER BY surface, outcome, reason").all().map((r) => ({ ...r }));
+const rejects = (f) => f.db.prepare("SELECT surface, slot, model, reason, culprit FROM flows_ai_reject ORDER BY surface, slot").all().map((r) => ({ ...r }));
 const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?/.test(s)) && t.args.some((a) => (Array.isArray(a) ? a : [a]).some((x) => typeof x === "string" && x.startsWith("read:")));
 
 {
@@ -136,6 +138,14 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   same(body.shape.tokens, { in: 5400, out: 700 }, "and its tokens");
   const usage = f.db.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage").get();
   ok(usage.calls >= 1 && usage.tokens_in >= 5400, "and the spend is recorded where the daily cap reads it (" + JSON.stringify(usage) + ")");
+  const first1 = counted(f);
+  same(first1.filter((r) => r.surface === "read").map((r) => [r.model, r.outcome, r.reason, r.n]), [[MODEL, "clean", "", 1]],
+    "THE COUNTERS: the reading's one model call is counted once under its surface, its model and the outcome clean");
+  eq(first1.reduce((n, r) => n + r.n, 0), ai.log.reads.length + ai.log.other.length, "and every model call of the request, the Neuron's among them, is counted once (" + first1.map((r) => r.surface + "/" + r.outcome).join(", ") + ")");
+  ok(first1.every((r) => r.model === MODEL && r.ms_max >= 0), "each under the model asked");
+  same(first1.filter((r) => r.surface === "neuron").map((r) => [r.outcome, r.reason, r.n]), [["refused", "engine:refused", 1]],
+    "and the Neuron's own call over the engine, answered {}, is one call counted refused with the engine's reason");
+  same(rejects(f), [], "while a clean reply puts nothing in the refusal ring");
 
   const n1 = f.trips.length;
   const second = await get("/api/flows/summary?t=" + T);
@@ -227,6 +237,12 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const row = readRow(f);
   ok(row.guard === "read:refused" && row.llm === 0, "the refused reply is recorded as a refusal: " + row.guard);
   ok(JSON.parse(row.ideas).refused.some((x) => x.why === "invented"), "with the reason");
+  const refusedRows = counted(f).filter((r) => r.surface === "read");
+  same(refusedRows.map((r) => [r.outcome, r.reason, r.n]), [["refused", "read:refused", 1]], "THE COUNTERS: the refusal is counted as refused with its reason, once");
+  const ring = rejects(f).filter((r) => r.surface === "read");
+  ok(ring.length === 1 && ring[0].slot === 0 && ring[0].model === MODEL && ring[0].reason === "refused:read:refused" && ring[0].culprit.length > 0 && ring[0].culprit.length <= 40,
+    "and the ring holds the offending token alone (" + JSON.stringify(ring[0]) + ")");
+  ok(!JSON.stringify(ring).includes("in a week") && !JSON.stringify(ring).includes("Example Technologies"), "never the sentence it came from");
   const next = await summary(get);
   eq(next.body.read.status, "fallback", "THE NEXT CALL serves the deterministic reading as a fallback");
   eq(next.body.read.why, "cooldown", "because the name is cooling down");
@@ -254,6 +270,8 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   ok(r.refused.some((x) => x.section === "identity" && x.why === "quote"), "the refusal is recorded: " + JSON.stringify(r.refused));
   ok(r.sections.identity && r.sections.identity.template === true && r.sections.identity.cites.some((c) => c.id === "identity.description"), "and the identity line is the profile's own first sentence, quoted, marked as a template and not model wording");
   ok(r.sections.identity.text.includes(String.fromCharCode(0x201c)), "inside quotation marks");
+  same(counted(f).filter((x) => x.surface === "read").map((x) => [x.outcome, x.reason, x.n]), [["trimmed", "read:trimmed:N", 1]], "THE COUNTERS: a reading that stands with a part refused is counted trimmed, not clean");
+  same(rejects(f).filter((x) => x.surface === "read"), [], "and a reading that stands puts nothing in the refusal ring");
 }
 
 {
@@ -262,6 +280,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);
   eq(readRow(f).guard, "read:unparsable", "PROSE INSTEAD OF JSON is recorded as unparsable");
+  same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["unparsable", 1]], "and counted as unparsable");
   const next = await summary(get);
   ok(next.body.read.status === "fallback" && /could not be read/.test(next.body.read.provenance), "and cooled down with the reason: " + next.body.read.provenance);
 }
@@ -272,6 +291,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);
   eq(readRow(f).guard, "read:overlong", "OVERSIZE OUTPUT is recorded before it is read");
+  same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["overlong", 1]], "and counted as overlong");
   const next = await summary(get);
   ok(next.body.read.status === "fallback" && /longer than the limit/.test(next.body.read.provenance), "and cools down with the reason: " + next.body.read.provenance);
 }
@@ -283,6 +303,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   await summary(get);
   const r = (await summary(get)).body.read;
   ok(r.status === "ready" && r.generated, "a reply wrapped in a code fence is accepted");
+  same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["clean", 1]], "and counted clean");
 }
 
 {
@@ -331,6 +352,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const r = await summary(get);
   eq(ai.log.reads.length, 0, "the reading's model call is refused by the meter");
   eq(readRow(f).guard, "unreachable:budget", "and recorded as a budget refusal");
+  same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["budget", 1]], "and counted as budget under the reading, though the model was never asked");
   eq(RW.READ_BUDGET_SHARE, 0.75, "the reading may spend three quarters of the cap, leaving a quarter for the Neuron and the Ask box");
   ok(r.body.read.status === "generating", "the page is told generating on the first call, then fallback");
   eq(ai.log.other.length >= 1, true, "while the Neuron's own call, past the reading's line, is allowed (" + ai.log.other.length + ")");
@@ -340,8 +362,9 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const source = moduleSource("shared/flows-reading-worker.js");
   const worker = workerSource();
   same(checkModelCalls(), [], "EVERY MODEL CALL OF THE READING GOES THROUGH THE METER: no module the Worker runs, the reading's included, runs the binding outside the AI module");
-  eq(expect(source, /askModels\(/, { min: 1, max: 1 }), 1, "it has one call site");
-  eq(expect(source, /askModels\(deps\.ai\(\),/, { min: 1, max: 1 }), 1, "handed the dep");
+  absent(source, /\baskModels\b/, { anchor: /await deps\.call\(/, why: "the reading asks no model itself" });
+  eq(expect(source, /await deps\.call\(\{ surface: "read", chain,/, { min: 1, max: 1 }), 1, "it has one call site, through the broker the Worker hands it");
+  eq(expect(worker, /deps\.call = \(request\) => aiCall\(env, aiDeps\(env, deps\.ai\), request\);/, { min: 1, max: 1 }), 1, "which the Worker binds to aiCall over the reading's own capped dep");
   eq(expect(worker, /ai: \(\) => cappedAi\(/, { min: 1, max: 1 }), 1, "which the Worker makes with cappedAi, at the reading's share of the cap");
   eq(expect(source, /maxTokens: READING_MAX_TOKENS/, { min: 1, max: 1 }), 1, "within the output cap");
   ok(!/retry|attempt\s*[<>]/.test(source.replace(/retryAfterS/g, "")), "and with no retry loop: one logical call per attempt");
@@ -494,6 +517,36 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 {
   const f = world();
   F.seed(f, { live: false });
+  const fact = (say, n) => ({ id: "note.premium", topic: ["note"], say, n, source: "nightly:pulse", at: F.GENERATED, grade: 2 });
+  const brief = (say, at) => f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [fact(say, at)], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } }, at);
+  const reply = { text: "Net option premium today is +$4.40M." };
+  const seen = [];
+  const ai = { run: async (model, input) => { seen.push(input.messages[0].content.slice(0, 40)); return { response: reply.text, usage: { prompt_tokens: 300, completion_tokens: 30 } }; } };
+  const env = { DB: f.D1, SESSION_SECRET, ...AI_ENV, AI: guardAi(ai) };
+  const worker = (await import("../worker.js?board=1")).default;
+  const fire = async (at) => {
+    const background = [];
+    await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.parse(at) }, env, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
+    await Promise.all(background);
+  };
+  const board = () => counted(f).filter((r) => r.surface === "board").map((r) => [r.model, r.outcome, r.reason, r.n]);
+  brief("Net option premium today is +$4.40M.", 1790380000000);
+  await fire("2026-10-02T14:45:00.000Z");
+  eq(seen.length, 1, "BOARD: the quarter-past firing asks the model once");
+  same(board(), [[MODEL, "clean", "", 1]], "THE COUNTERS: a clean board summary is counted clean under the board surface");
+  reply.text = "Net option premium today is up 99.9% on the open.";
+  brief("Net option premium today is +$5.10M.", 1790380900000);
+  setNow("2026-10-02T15:20:00.000Z");
+  await fire("2026-10-02T15:15:00.000Z");
+  eq(seen.length, 2, "a changed briefing is asked again");
+  same(board(), [[MODEL, "clean", "", 1], [MODEL, "refused", "invented", 1]], "and an invented numeral is counted as refused, reason invented");
+  same(rejects(f).filter((r) => r.surface === "board").map((r) => r.culprit), ["99.9"], "with the figure alone in the ring");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  F.seed(f, { live: false });
   f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const asks = [];
   const reply = { text: "EXMP sells subscription software and cloud infrastructure, and the last price is $127.40." };
@@ -522,12 +575,16 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(a.body.llm, true, "the clean answer is kept");
   ok(a.body.answer.includes("$127.40"), "the answer carries a figure that is in a picked fact");
   ok((prompt[0].content.length + prompt[1].content.length) / 3.7 < 4500, "the Ask prompt stays small (" + Math.round((prompt[0].content.length + prompt[1].content.length) / 3.7) + " estimated tokens)");
+  const askRows = () => counted(f).filter((r) => r.surface === "ask").map((r) => [r.model, r.outcome, r.reason, r.n]);
+  same(askRows(), [[MODEL, "clean", "", 1]], "THE COUNTERS: the clean answer is one call counted clean under the ask surface");
 
   reply.text = "EXMP is up 14.5% today on the guidance news.";
   const b = await get("/api/flows/ask", ASK({ question: "why is EXMP moving", subject: T }));
   await b.settle();
   eq(b.body.llm, false, "AN INVENTED NUMERAL IS STILL REFUSED: the guard validates against the dossier facts too");
   ok(b.body.guard && b.body.guard.invented === true && b.body.guard.rejected.includes("14.5"), "naming 14.5");
+  same(askRows(), [[MODEL, "clean", "", 1], [MODEL, "refused", "invented", 1]], "THE COUNTERS: the invented numeral is counted as refused, reason invented");
+  same(rejects(f).filter((r) => r.surface === "ask").map((r) => [r.reason, r.culprit]), [["refused:invented", "14.5"]], "and the ring holds the figure alone: 14.5");
   ok(b.body.answer.includes("EXMP \u2014"), "and the pipeline's own wording, built from the picked facts, stands in its place");
 
   reply.text = "EXMP will report on 2026-10-22 and the shares will rally.";
@@ -535,6 +592,8 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   await c.settle();
   eq(c.body.llm, false, "a forecast is still refused");
   ok(c.body.guard && c.body.guard.forecast === true, "as a forecast");
+  same(askRows(), [[MODEL, "clean", "", 1], [MODEL, "refused", "forecast", 1], [MODEL, "refused", "invented", 1]], "THE COUNTERS: and counted as refused, reason forecast");
+  ok(rejects(f).filter((r) => r.surface === "ask").every((r) => r.culprit.length > 0 && r.culprit.length <= 40 && r.culprit.split(" ").length <= 4), "its culprit is the forbidden verb and not the sentence");
 
   const d = await get("/api/flows/ask", ASK({ question: "what is the market doing" }));
   await d.settle();

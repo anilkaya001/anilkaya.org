@@ -255,7 +255,7 @@ CASES.push({ path: "/api/flows/ask", q: "", method: "POST", init: ASK_INIT.plain
   const src = moduleSource("server/routes/flows-ai.js");
   ok(!/\benv\.AI\b|\bcappedAi\b|\bmeteredAi\b|\baskModels\b|\bai\.run\b/.test(src), "the family never touches the model binding: every model call stays behind the injected helpers and cappedAi");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:/.test(src), "and imports neither the Worker nor the platform");
-  expect(w, /askModels\(meteredAi\(env\)/, { min: 4, max: 4, why: "all four metered call sites are still found in the Worker's closure after the move" });
+  expect(w, /await aiCall\(env, aiDeps\(env\)/, { min: 4, max: 4, why: "all four Worker call sites go through the broker and are still found in the Worker's closure after the move" });
   expect(w, /async function summaryResponse\(/, { min: 1, max: 1, why: "the helpers the rows call stay one copy each in the Worker" });
 }
 

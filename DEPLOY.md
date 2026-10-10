@@ -2948,6 +2948,28 @@ background generation's own reads of the day's spend), checked by
 on the momentum dossier: tags 0.1 ms, fallback and shape 0.2 ms, prompt 0.5 ms, vet 1.7
 ms; the dossier's assembly (10.5l) is the larger part of a miss.
 
+**Every model call is counted (P1-08).** All five model sites (the board summary, the Neuron
+over the engine and its legacy form, Ask, and the reading) call `aiCall` in `server/ai.js`,
+which is the only place `askModels(` appears; `shared/flows-ai.js` stays the only place that
+reads the binding and runs it. The call is timed, the surface judges the reply with the checks
+it always had, and `call.settle({ llm, guard }, culprit)` classifies the result with
+`shared/flows-ai-broker.js` (`guardOutcome`) into one of fourteen outcomes: `clean`, `trimmed`,
+`refused`, `unparsable`, `overlong`, `empty`, `length`, `budget`, `class`, `user`, `allowance`,
+`capacity`, `plan`, `unreachable` (`class` and `user` are reserved for the per-class and
+per-member budgets of P1-44). A reply with no text is settled by the broker itself. One counter
+row is upserted per call in `flows_ai_outcome (day, surface, model, outcome, reason)` with `n`,
+`ms_sum` and `ms_max`: one trip and one row written, about 260 rows written a day at today's
+volume and at most one row per call. A wording failure that has an offending token (the
+invented numeral, the forbidden verb, the first refused cite) also writes the token alone, forty
+characters at most and never a reply or a sentence, to the per-surface ring
+`flows_ai_reject (surface, slot 0..49)`, in the same batch. A store that refuses the write
+never fails the surface: `settle` answers false and the Worker logs `ai outcome not recorded`
+once per isolate. Counters older than eight days are pruned in the 03:00 ET housekeeping
+window. `readAiBlock(env, deps, { days })` reads the owner's `ai` block in one trip (today's
+counters and the fifty latest refusals; seven days behind `days: 7`); it is mounted by the
+health and owner-view row (P1-27), which does not exist yet, so nothing serves it today. To look
+in the meantime: `wrangler d1 execute iewt --remote --command "SELECT surface, model, outcome, reason, n, ms_sum / n AS ms FROM flows_ai_outcome WHERE day = date('now') ORDER BY surface, outcome"`.
+
 **What 'fallback' means.** The reader is looking at the deterministic reading and no model
 wording is coming for this dossier. `read.why` says which: `off` (the kill switch),
 `no-model` (no `AI` binding or no `FLOWS_ASK_MODEL`), `store` (the claim could not be

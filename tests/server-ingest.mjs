@@ -399,8 +399,8 @@ try {
 
 {
   const names = ["flows_payload", "flows_login_failures", "flows_ai_usage", "flows_ai_usage_model", "flows_ai_summary", "flows_neuron",
-    "flows_live", "flows_tape", "flows_clock", "flows_ledger", "flows_archive_immutable", "flows_dossier_cache"];
-  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them");
+    "flows_live", "flows_tape", "flows_clock", "flows_ledger", "flows_archive_immutable", "flows_dossier_cache", "flows_ai_outcome", "flows_ai_reject"];
+  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them, and the two counter tables after them");
   eq([...FLOWS_SCHEMA_SQL], FLOWS_REGISTRY.map((e) => e.ddl), "and FLOWS_SCHEMA_SQL is derived from it");
   eq([...FLOWS_SCHEMA_SQL.slice(6, 11)], [...LIVE_SCHEMA_SQL], "with the live layer's statements as that module exports them");
   eq(FLOWS_SCHEMA_SQL[11], DOSSIER_SCHEMA_SQL, "and the dossier cache as its module exports it");
@@ -489,9 +489,9 @@ try {
   const fresh = fakeD1({ schema: "", latencyMs: 0 });
   const done = await applySchema(fresh.D1);
   eq(done, {}, "a database with nothing in it takes the registry's DDL and adds no column");
-  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 13]], "in one batch of the twelve CREATEs and the one probe");
-  eq(fresh.trips[0].sqls.slice(0, 12), [...FLOWS_SCHEMA_SQL], "in registry order");
-  eq(fresh.trips[0].sqls[12], "PRAGMA table_info(flows_clock)", "with the probe last");
+  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 15]], "in one batch of the fourteen CREATEs and the one probe");
+  eq(fresh.trips[0].sqls.slice(0, 14), [...FLOWS_SCHEMA_SQL], "in registry order");
+  eq(fresh.trips[0].sqls[14], "PRAGMA table_info(flows_clock)", "with the probe last");
   eq((await applySchema(fresh.D1), fresh.trips.length), 2, "and a second bootstrap is one more batch");
 
   const old = fakeD1({ schema: "", latencyMs: 0 });
@@ -590,4 +590,4 @@ try {
   eq(writers, ["server/store.js"], "among the server modules only the store holds flows_payload SQL");
 }
 
-console.log(`✓ server-ingest: ${checks} assertions — the ingest family as one table row compared with the branch it replaced over ${AUTHS.length} credentials, ${METHODS.length} methods, ${QUERIES.length} queries and five bodies (statements, call order, errors, bodies and the rows left behind), the store's reads and writes, the registry of twelve Flows statements with its migrations and schema.sql, upgradeColumns against hostile names, races and refused batches, and the Worker scans`);
+console.log(`✓ server-ingest: ${checks} assertions — the ingest family as one table row compared with the branch it replaced over ${AUTHS.length} credentials, ${METHODS.length} methods, ${QUERIES.length} queries and five bodies (statements, call order, errors, bodies and the rows left behind), the store's reads and writes, the registry of fourteen Flows statements with its migrations and schema.sql, upgradeColumns against hostile names, races and refused batches, and the Worker scans`);

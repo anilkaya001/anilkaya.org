@@ -10,7 +10,7 @@ import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
 import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiCapNeurons, aiChain, aiCallSignature, askModels, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
+import { aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -39,7 +39,9 @@ import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
+import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
+import { chainFor } from "./shared/flows-ai-broker.js";
 import { createFlowsStore, storedFrom } from "./server/store.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
@@ -60,6 +62,7 @@ function createState() {
     flowsSchemaReady: false,
     flowsSchemaFlight: null,
     spendRecorderFailed: false,
+    aiRecorderFailed: false,
   };
 }
 const state = createState();
@@ -1184,6 +1187,17 @@ async function askSpendStrict(env) {
 
 const meteredAi = (env) => cappedAi(env, env.DB ? () => askSpendStrict(env) : null);
 
+const aiDeps = (env, ai) => ({
+  ai: ai || (() => meteredAi(env)),
+  now: () => Date.now(),
+  ensureFlowsTables,
+  failed: (error, at) => {
+    if (state.aiRecorderFailed) return;
+    state.aiRecorderFailed = true;
+    logFailure("warn", "ai outcome not recorded", at, error);
+  },
+});
+
 async function askRecordSpend(env, usage, model) {
   if (!env.DB || !usage) return null;
   const day = aiDay();
@@ -1288,7 +1302,7 @@ async function refreshFlowsSummary(env, at = Date.now()) {
     await markStamp();
   };
 
-  const chain = aiChain(env);
+  const chain = chainFor(env, "board");
 
   if (!env.AI || !chain.length) {
     await write(plain, false, null, null).catch(() => {});
@@ -1296,10 +1310,10 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   }
 
   const { system, user } = FLOWS_ASK.promptForSummary(facts, age);
-  const said = await askModels(meteredAi(env), chain,
-    [{ role: "system", content: system }, { role: "user", content: user }],
-    { maxTokens: 1024, temperature: 0.2 },
-    (billed, usage) => askRecordSpend(env, usage, billed));
+  const said = await aiCall(env, aiDeps(env), { surface: "board", chain,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    opts: { maxTokens: 1024, temperature: 0.2 },
+    onUsage: (billed, usage) => askRecordSpend(env, usage, billed) });
 
   if (!said.text) {
     await write(plain, false, said.model, said.guard).catch(() => {});
@@ -1308,9 +1322,12 @@ async function refreshFlowsSummary(env, at = Date.now()) {
 
   const verdict = FLOWS_ASK.guardAnswer(said.text, facts, { smallIntegers: false });
   if (!verdict.ok) {
-    await write(plain, false, said.model, verdict.invented ? "invented" : "forecast").catch(() => {});
+    const guard = verdict.invented ? "invented" : "forecast";
+    await said.call.settle({ llm: false, guard }, verdict.rejected[0]);
+    await write(plain, false, said.model, guard).catch(() => {});
     return;
   }
+  await said.call.settle({ llm: true, guard: null });
   await write(said.text, true, said.model, null).catch(() => {});
 }
 
@@ -1471,19 +1488,30 @@ async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain, 
     { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard, startedAt).catch(() => {});
   if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
   const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
-  const said = await askModels(meteredAi(env), chain, [{ role: "system", content: system }, { role: "user", content: user }],
-    { maxTokens: 500, temperature: 0.1 }, (billed, usage) => askRecordSpend(env, usage, billed));
+  const said = await aiCall(env, aiDeps(env), { surface: "neuron", chain,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    opts: { maxTokens: 500, temperature: 0.1 }, onUsage: (billed, usage) => askRecordSpend(env, usage, billed) });
   if (!said.text) { await store(fallback, false, said.model, said.guard); return; }
   const parsed = FLOWS_NEURON.parseEngineOutput(said.text);
-  if (parsed === null) { await store(fallback, false, said.model, "ideas:unparsable"); return; }
+  if (parsed === null) {
+    await said.call.settle({ llm: false, guard: "ideas:unparsable" });
+    await store(fallback, false, said.model, "ideas:unparsable");
+    return;
+  }
   const vet = FLOWS_NEURON.vetEngineReply(parsed, ctx);
-  if (!vet.ok) { await store({ ...fallback, refused: vet.refused }, false, said.model, "engine:refused"); return; }
-  await store(vet, true, said.model, vet.refused.length ? "ideas:" + vet.refused.length + " refused" : null);
+  if (!vet.ok) {
+    await said.call.settle({ llm: false, guard: "engine:refused" }, vet.refused[0] && vet.refused[0].code);
+    await store({ ...fallback, refused: vet.refused }, false, said.model, "engine:refused");
+    return;
+  }
+  const trimmed = vet.refused.length ? "ideas:" + vet.refused.length + " refused" : null;
+  await said.call.settle({ llm: true, guard: trimmed });
+  await store(vet, true, said.model, trimmed);
 }
 
 async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
   const scope = "ticker:" + ticker;
-  const chain = aiChain(env);
+  const chain = chainFor(env, "neuron");
   const plain = FLOWS_NEURON.deterministicSummary(ctx);
   if (ctx.engine) return generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain, startedAt);
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
@@ -1501,10 +1529,11 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
   let lastText = null;
   let model = chain[0];
   let refused = null;
+  let lastCall = null;
   for (let attempt = 0; attempt < 2 && (parsed === null || parsed.summary === null); attempt++) {
-    const said = await askModels(meteredAi(env), attempt === 0 ? chain : [model], messages,
-      { maxTokens: 1400, temperature: attempt === 0 ? 0.2 : 0.05 },
-      (billed, usage) => askRecordSpend(env, usage, billed));
+    const said = await aiCall(env, aiDeps(env), { surface: "neuron", chain: attempt === 0 ? chain : chainFor(env, "neuron", model), messages,
+      opts: { maxTokens: 1400, temperature: attempt === 0 ? 0.2 : 0.05 },
+      onUsage: (billed, usage) => askRecordSpend(env, usage, billed) });
     if (!said.text) {
       if (attempt > 0) {
         if (said.failure) refused = "unreachable:reparse:" + said.failure.why;
@@ -1515,28 +1544,36 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
     }
     model = said.model;
     lastText = said.text;
+    lastCall = said.call;
     parsed = FLOWS_NEURON.parseNeuronOutput(said.text);
+    if (attempt === 0 && (parsed === null || parsed.summary === null)) await said.call.settle({ llm: false, guard: "ideas:unparsable" });
   }
   if (parsed === null) {
     const prose = typeof lastText === "string" && !/[{}[\]]|"summary"|"ideas"/.test(lastText);
     const verdict = prose && FLOWS_NEURON.proseIssue(lastText, "summary") === null ? FLOWS_ASK.guardAnswer(lastText, facts, guardOpts) : { ok: false };
-    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model,
-      verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable", startedAt).catch(() => {});
+    const guard = verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable";
+    await lastCall.settle({ llm: verdict.ok, guard });
+    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model, guard, startedAt).catch(() => {});
     return;
   }
   let summary = plain;
   let llm = false;
   let guard = null;
+  let offending = "";
   if (parsed.summary) {
     const unsafe = FLOWS_NEURON.proseIssue(parsed.summary, "summary") !== null;
     const verdict = unsafe ? { ok: false } : FLOWS_ASK.guardAnswer(parsed.summary, facts, guardOpts);
     if (verdict.ok) { summary = parsed.summary; llm = true; }
-    else guard = unsafe ? "unsafe" : verdict.invented ? "invented" : verdict.mislabeled ? "mislabeled" : "forecast";
+    else {
+      guard = unsafe ? "unsafe" : verdict.invented ? "invented" : verdict.mislabeled ? "mislabeled" : "forecast";
+      offending = verdict.rejected ? verdict.rejected[0] : "";
+    }
   } else {
     guard = refused || "summary:empty";
   }
   const vetted = FLOWS_NEURON.vetIdeas((stateIdea ? [stateIdea] : []).concat(parsed.ideas), ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
+  await lastCall.settle({ llm, guard }, offending);
   await writeNeuron(env, scope, fingerprint, summary, abstain(vetted.ideas), llm, model, guard, startedAt).catch(() => {});
 }
 
@@ -1598,7 +1635,7 @@ function dossierDeps(env, ctx, session) {
 }
 
 function readingDeps(env, ctx, ticker, session) {
-  return {
+  const deps = {
     assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx, session), opts),
     readRow: (scope) => env.DB.prepare(NEURON_ROW_SQL).bind(scope).first(),
     mark: (scope, fingerprint, model) => markNeuronGenerating(env, scope, fingerprint, model),
@@ -1608,6 +1645,8 @@ function readingDeps(env, ctx, ticker, session) {
     modelLabel: modelName,
     describeGuard: (guard) => neuronProvenance({ llm: false, guard }),
   };
+  deps.call = (request) => aiCall(env, aiDeps(env, deps.ai), request);
+  return deps;
 }
 
 async function summaryResponse(env, ctx, ticker, session) {
@@ -1820,7 +1859,7 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx, session)
     session: age,
   };
 
-  const chain = aiChain(env);
+  const chain = chainFor(env, "ask");
   if (!env.AI || !chain.length) {
     return json({ ...base,
       note: "No model is configured for this site, so this reading is the " +
@@ -1832,10 +1871,10 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx, session)
   const user = dossier.about ? built.user + "\n\n" + dossier.about : built.user;
   let afterCall = null;
   let recorded = false;
-  const said = await askModels(meteredAi(env), chain,
-    [{ role: "system", content: system }, { role: "user", content: user }],
-    { maxTokens: 1024, temperature: 0.2 },
-    async (billed, usage) => { recorded = (await askRecordSpend(env, usage, billed)) !== null || recorded; });
+  const said = await aiCall(env, aiDeps(env), { surface: "ask", chain,
+    messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    opts: { maxTokens: 1024, temperature: 0.2 },
+    onUsage: async (billed, usage) => { recorded = (await askRecordSpend(env, usage, billed)) !== null || recorded; } });
   if (recorded) afterCall = await askSpendStrict(env).catch(() => null);
   const model = said.model;
   const fallback = fallbackNote(said);
@@ -1875,6 +1914,7 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx, session)
   }
 
   const guard = FLOWS_ASK.guardAnswer(generated, picked);
+  await said.call.settle(guard.ok ? { llm: true, guard: null } : { llm: false, guard: guard.forecast ? "forecast" : "invented" }, guard.ok ? "" : guard.rejected[0]);
   if (!guard.ok) {
 
     return json({ ...base, spend: afterCall || base.spend, model, fallback, guard,
@@ -3515,6 +3555,7 @@ export default {
       if (FLOWS_LIVE.pruneDue(at)) {
         await FLOWS_LIVE.pruneTape(env, at);
         await FLOWS_LIVE.pruneLedger(env, at);
+        await pruneAiOutcomes(env, at);
       }
     })());
   },

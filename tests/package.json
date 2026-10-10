@@ -62,6 +62,7 @@
     "test:server-desk": "node --disable-warning=ExperimentalWarning server-desk.mjs",
     "test:server-ai": "node --disable-warning=ExperimentalWarning server-ai.mjs",
     "test:server-ingest": "node --disable-warning=ExperimentalWarning server-ingest.mjs",
+    "test:flows-ai-broker": "node --disable-warning=ExperimentalWarning flows-ai-broker.mjs",
     "test:flows-reads": "node --disable-warning=ExperimentalWarning flows-reads-contract.mjs",
     "test:flows-ledger": "node --disable-warning=ExperimentalWarning flows-ledger-contract.mjs",
     "test:flows-verdict": "node --disable-warning=ExperimentalWarning flows-verdict-contract.mjs",

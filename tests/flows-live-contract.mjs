@@ -1754,7 +1754,7 @@ const cronMinutes = (cron) => {
     /const statements = \[\.\.\.registry\.map\(\(entry\) => entry\.ddl\), \.\.\.tables\.map\(columnProbe\)\];/.test(moduleSource("server/schema.js")) &&
     columnProbe("flows_clock") === "PRAGMA table_info(flows_clock)",
     "whose column list is read by the PRAGMA riding the schema batch after every CREATE, so the table exists when it is read");
-  eq(REGISTRY_SQL.length, 12, "the registry's batch is the twelve CREATE statements the Worker has always sent");
+  eq(REGISTRY_SQL.length, 14, "the registry's batch is the twelve CREATE statements the Worker has always sent and the two AI counter tables after them");
   let pragmas = 0;
   upgrades.length = 0;
   const counted = (have) => ({ prepare(sql) { return { all: async () => { pragmas++; return { results: have.map((name) => ({ name })) }; },
