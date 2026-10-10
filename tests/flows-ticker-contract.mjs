@@ -282,6 +282,13 @@ try {
     ok(/[?&]t=/.test(nows[0]), `${width}px: and it carries the ticker, so the first beat brings the quote (${nows[0]})`);
     const got = await page.evaluate(sweep);
     eq(got.mods.map((m) => m.id).join(" "), MODULES.join(" "), `${width}px: every module is mounted, in reading order`);
+    const index = await page.evaluate(() => {
+      const nav = document.getElementById("fxIndex");
+      return { hidden: nav.hidden, chips: Array.from(nav.querySelectorAll("a"), (a) => [a.getAttribute("href"), a.textContent]) };
+    });
+    eq(index.hidden, false, `${width}px: the section index appears once the dossier has drawn its modules`);
+    eq(index.chips.map((c) => c[0]).join(" "), MODULES.map((id) => "#" + id).join(" "), `${width}px: it lists every module, in the order they are drawn`);
+    ok(index.chips.every((c, i) => got.mods[i].heading.startsWith(c[1]) && c[1].length > 1), `${width}px: each chip is its module's own title`);
     for (const m of got.mods) {
       ok(!m.empty, `${width}px ${m.id}: renders content or an explicit designed silence`);
       ok(m.heading.length > 1 && m.heading.split(/\s+/).length <= 3, `${width}px ${m.id}: its title is one to three words ("${m.heading}")`);

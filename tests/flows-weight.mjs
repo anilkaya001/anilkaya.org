@@ -26,6 +26,8 @@ const CEILING_KIB = {
   politicalPage: 104,
   historyPage: 157,
   loginPage: 5,
+  aboutPage: 5,
+  glossaryPage: 5,
 };
 
 const GZIP_KIB = {
@@ -43,6 +45,8 @@ const GZIP_KIB = {
   politicalPage: 31,
   historyPage: 48,
   loginPage: 3,
+  aboutPage: 3,
+  glossaryPage: 3,
 };
 
 const CSS_KIB = {
@@ -60,6 +64,8 @@ const CSS_KIB = {
   politicalPage: 97,
   historyPage: 84,
   loginPage: 72,
+  aboutPage: 73,
+  glossaryPage: 73,
 };
 
 const CSS_GZIP_KIB = {
@@ -77,6 +83,8 @@ const CSS_GZIP_KIB = {
   politicalPage: 23,
   historyPage: 21,
   loginPage: 18,
+  aboutPage: 18,
+  glossaryPage: 18,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -306,7 +314,7 @@ for (const name of Object.keys(CEILING_KIB)) {
   {
     const CHART_ROUTES = ["deskPage", "historyPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage", "trackPage",
       "unusualPage", "watchPage"];
-    const FREE_ROUTES = ["askPage", "eventsPage", "loginPage", "politicalPage"];
+    const FREE_ROUTES = ["aboutPage", "askPage", "eventsPage", "glossaryPage", "loginPage", "politicalPage"];
     const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
     eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
        "the chart library ships on exactly the ten routes that draw a chart, and the routes that draw none never download it");

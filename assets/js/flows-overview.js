@@ -1057,17 +1057,6 @@
       UI.metric("Dispersion", disp === null ? DASH : F.pts(disp), { unit: disp === null ? null : "pts", sub: disp === null ? null : "SPY members", state: disp === null ? pend("Dispersion") : null }),
       UI.metric("0DTE share", share0 === null ? DASH : F.pct(share0, 0), { state: share0 === null ? pend("The 0DTE share") : null }),
     ], { min: 96 }));
-    const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
-    const plot = h("div", { class: "hm-term" });
-    into.append(plot);
-    C.line(plot, {
-      x: TEN, xType: "number", xScale: "sqrt", height: [150, 170, 240],
-      xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
-      series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
-      yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",
-      readout: (i) => [C.part(TEN[i] + "d", "k")].concat(names.map((k) => C.part(k + " " + F.pct(idx[k].iv[i], 1), null))),
-    });
-    into.append(UI.legend(names.map((k) => [COL[k], "ln", k])));
     const radar = ans(reg && reg.volRadar);
     const side = (s) => (radar && radar[s] && Array.isArray(radar[s].rows) ? radar[s].rows.slice(0, 4) : []);
     const tagRow = (word, rows, tone) => h("div", { class: "hm-radar-r" }, h("span", { class: "hm-radar-k" }, word),

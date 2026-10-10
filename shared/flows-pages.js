@@ -1,5 +1,7 @@
 export const ASSET_VERSION = "252";
 
+import { GLOSSARY } from "./flows-glossary.js";
+
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
 const head = (title, description, styles = []) => `<!doctype html>
@@ -147,6 +149,9 @@ const sidebar = (active, username) => {
   <div class="fx-side-f">
     <nav class="fx-site" aria-label="Site">
       <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
+    </nav>
+    <nav class="fx-site" aria-label="About Flows">
+      <a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
     </nav>
     <div class="fx-who">
       <span class="fx-avatar" aria-hidden="true">${initials(username)}</span>
@@ -340,6 +345,7 @@ ${sitePill()}
     <span class="fx-mark" aria-hidden="true">&#949;</span>
     <h1>Flows</h1>
     <p class="flows-auth__lede">Options-flow intelligence. Access is by assigned credential.</p>
+    <p class="flows-auth__lede"><a href="/flows/about/">What Flows is</a> &middot; <a href="/flows/glossary/">Glossary</a></p>
     ${message}
     <form method="POST" action="/flows/login" class="flows-form">
       <label for="u">Username</label>
@@ -354,6 +360,72 @@ ${sitePill()}
 <script src="${v("/assets/js/nav.js")}" defer></script>
 </body>
 </html>`;
+}
+
+const doc = (title, description, body) => `${head(title, description, ["/assets/css/flows-public.css"])}
+<body class="flows-body">
+${sitePill()}
+<main class="fx-doc" id="docMain">
+${body}
+</main>
+<script src="${v("/assets/js/nav.js")}" defer></script>
+</body>
+</html>`;
+
+export function aboutPage() {
+  return doc("Flows — About", "What Flows is: options-flow research for US equities, what it promises about its figures, and what it is not.", `
+  <header class="fx-doc-h">
+    <span class="fx-mark" aria-hidden="true">&#949;</span>
+    <h1>Flows</h1>
+    <p class="fx-doc-lede">Options-flow research for US equities. Flows reads what the options market did, writes down what it found, and shows how old each figure is and how it was measured.</p>
+  </header>
+  <section aria-labelledby="aWhat">
+    <h2 id="aWhat">What it does</h2>
+    <ul>
+      <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified.</li>
+      <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
+      <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
+      <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
+    </ul>
+  </section>
+  <section aria-labelledby="aKeep">
+    <h2 id="aKeep">What it promises</h2>
+    <ul>
+      <li>Every figure carries its source and its age. A figure that was not measured is shown as withheld, never as zero.</li>
+      <li>Written readings are labelled as model wording or as a deterministic template. The model is asked to explain figures it was given; a sentence that adds a figure, a forecast or advice is refused.</li>
+      <li>Priced structures are the output of a model, shown with the assumptions behind them. They are not recommendations.</li>
+      <li>The track record on the History page is the only statement of how the readings have done, misses included.</li>
+    </ul>
+  </section>
+  <section aria-labelledby="aNot">
+    <h2 id="aNot">What it is not</h2>
+    <ul>
+      <li>Not investment advice, a recommendation or an offer, and not a broker. It does not know your circumstances.</li>
+      <li>Not a forecast. Options can lose their whole value, and a reading of past flow does not say what happens next.</li>
+      <li>Not real time unless a page says so. Vendor data can be late, revised or wrong.</li>
+    </ul>
+  </section>
+  <section aria-labelledby="aAccess">
+    <h2 id="aAccess">Access</h2>
+    <p>Access is by assigned credential. To ask for one, use the contact links on the <a href="/">home page</a>.</p>
+    <p class="fx-doc-actions"><a class="flows-submit" href="/flows/login/">Sign in</a><a href="/flows/glossary/">Glossary</a></p>
+  </section>`);
+}
+
+export function glossaryPage() {
+  const rows = [...GLOSSARY].sort((a, b) => a.term.localeCompare(b.term)).map((g) => `
+    <div class="fx-doc-term" id="${g.key}">
+      <dt>${escapeHTML(g.term)}</dt>
+      <dd>${g.lines.map((l) => `<p>${escapeHTML(l)}</p>`).join("")}<p class="fx-doc-where">Shown on <a href="${g.href}">${g.page}</a></p></dd>
+    </div>`).join("");
+  return doc("Flows — Glossary", "The terms Flows uses, in the words its own pages use.", `
+  <header class="fx-doc-h">
+    <h1>Glossary</h1>
+    <p class="fx-doc-lede">The same definitions the information buttons on each page open, collected in one place.</p>
+  </header>
+  <dl class="fx-doc-list">${rows}
+  </dl>
+  <p class="fx-doc-actions"><a href="/flows/about/">About Flows</a></p>`);
 }
 
 const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "" } = {}) => `
@@ -390,7 +462,7 @@ ${homeModule("hmBull", "Bullish", "ccBull", { span: 6, sub: `<a class="hm-count 
 ${homeModule("hmBear", "Bearish", "ccBear", { span: 6, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
 ${homeModule("hmChg", "What changed", "ccChg", { span: 7, sub: `<span class="hm-count" id="ccChgSub"></span>`,
     body: `<div class="hm-body" id="ccChg"><div id="ccChgStats"></div><div class="hm-spine" id="spinePlot"></div><div id="ccChgNote"></div><div id="ccChgList"></div></div>` })}
-${homeModule("hmVol", "Volatility", "ccVol", { span: 5 })}
+${homeModule("hmVol", "Volatility", "ccVol", { span: 5, sub: `<a class="hm-count" href="/flows/market/#mkVolCard">Curve on Market</a>` })}
 ${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}
 ${homeModule("hmAlerts", "Flagged", "ccAlerts", { span: 4, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
 ${homeModule("hmEvents", "Reporting", "ccEvents", { span: 4, sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
@@ -640,8 +712,10 @@ const marketModule = (id, title, bodyId, { span = "", sub = "", seg = "", body =
 
 const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossier</a>`;
 
+const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
+
 export function marketPage({ username = "" } = {}) {
-  return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css"])}
+  return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css", "/assets/css/flows-index.css"])}
 ${shell("Market", "market", username, `
   <header class="flows-head mk-head" data-fx-hero>
     <h1 id="fxTitle">Market</h1>
@@ -650,7 +724,7 @@ ${shell("Market", "market", username, `
   <p class="visually-hidden" id="mktStatus" role="status">Loading the session\u2026</p>
   <p class="visually-hidden" id="mktStale" role="status" hidden></p>
   <p class="visually-hidden" id="mkPulseStamp"></p>
-
+  ${INDEX_NAV}
   <div class="ui-grid mk-grid">
 ${marketModule("mkTideCard", "Tide", "mkTide", { seg: `<div class="mk-segc" id="mkTideSeg"></div>`,
     body: `<div class="mk-body"><div id="mkTideLegs"></div><div id="mkTide"></div></div>` })}
@@ -680,6 +754,7 @@ ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
+<script src="${v("/assets/js/flows-index.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -794,8 +869,8 @@ export function tickerPage({ username = "" } = {}) {
     active: "ticker", chart: true,
     username,
     chrome: false,
-    styles: ["/assets/css/flows-ticker.css"],
-    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"],
+    styles: ["/assets/css/flows-ticker.css", "/assets/css/flows-index.css"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
     body: `
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
@@ -808,6 +883,7 @@ export function tickerPage({ username = "" } = {}) {
     <div class="ft-hc" id="ftHc"></div>
   </div></section>
   <section class="ui-card ft-verdict" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
+  ${INDEX_NAV}
   <div class="ft-grid" id="ftGrid" hidden></div>
   <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
   <div id="ftCopy" hidden>
@@ -1049,7 +1125,7 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 }
 
 export const FLOWS_PAGES = {
-  loginPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
+  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
   tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };

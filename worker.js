@@ -3446,6 +3446,18 @@ async function route(request, env, url, ctx) {
     }
   }
 
+  const FLOWS_PUBLIC = {
+    "/flows/about/": () => FLOWS_PAGES.aboutPage(),
+    "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
+  };
+  if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return new Response(FLOWS_PUBLIC[path](), {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   const FLOWS_ROUTES = {
     "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
@@ -3486,7 +3498,8 @@ async function route(request, env, url, ctx) {
       || path === "/flows/market" || path === "/flows/ticker"
       || path === "/flows/unusual" || path === "/flows/events"
       || path === "/flows/track" || path === "/flows/political"
-      || path === "/flows/strategy" || path === "/flows/ask") {
+      || path === "/flows/strategy" || path === "/flows/ask"
+      || path === "/flows/about" || path === "/flows/glossary") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
   }
