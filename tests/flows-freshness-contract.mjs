@@ -435,7 +435,9 @@ const NYSE_PUBLISHED = Object.freeze({
       { serverNow: vmNow(), phase: rth });
     UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
     UI.freshness({ readAt: new Date(vmNow() - 60000).toISOString(), live: true, source: "live:market" });
-    eq(UI.freshness.state(), "live", "the home page as it stood: boards current and a price read a minute ago is Live");
+    eq(UI.freshness.state(), "fresh", "boards current and a price read a minute ago, with no streamed price registered, is Fresh and not Live");
+    UI.freshness({ ff: { stateAt: () => "live" }, source: "rt:px", role: "primary" });
+    eq(UI.freshness.state(), "live", "the home page as it stands: a streamed price registered as the primary entry and inside its window is Live");
     UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "regime" });
     UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "market" });
     eq(UI.freshness.state(), "live", "with every other payload current the pill stays Live");
@@ -449,7 +451,7 @@ const NYSE_PUBLISHED = Object.freeze({
     ok(/Past the server.s stale line: Events, Scoretrack\./.test(d.lead) && !/Everything else is the last completed session/.test(d.lead),
       "the popover's lead names the lagging payloads and no longer claims the rest is the last completed session");
     const payloads = d.facts.find((f) => f[0] === "Payloads");
-    eq(payloads && payloads[1], "3 of 5 current", "counts them against every payload the page registered (boards, regime, market, events, scoretrack)");
+    eq(payloads && payloads[1], "4 of 6 current", "counts them against every payload the page registered (boards, the streamed price, regime, market, events, scoretrack)");
 
     UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "events" });
     UI.freshness({ ff: entry("fresh", "2026-09-28"), source: "scoretrack" });
@@ -461,6 +463,14 @@ const NYSE_PUBLISHED = Object.freeze({
     eq(UI.freshness.state(), "stale", "and the pill turns stale on its own when the window ends, with no new data and no call from the page");
     ok(/Past the server.s stale line: Live prices\./.test(UI.freshness.details().lead), "naming it");
     eq(UI.freshAggregate(["live", "fresh"], "rth"), "live", "page aggregate: live if any module is live");
+    const P = (state) => ({ state, role: "primary" }), Q = (state) => ({ state, role: "secondary" });
+    eq(UI.freshAll([P("live"), Q("fresh")]), "live", "freshAll: every primary entry live and none stale is live, a merely fresh secondary entry notwithstanding");
+    eq(UI.freshAll([P("live"), P("fresh")]), "fresh", "a primary entry that is not live keeps the page from Live");
+    eq(UI.freshAll(["live", "live", Q("live")]), "fresh", "and without a primary entry nothing is Live, however many entries are");
+    eq(UI.freshAll([P("live"), "stale"]), "stale", "an entry with no role that is stale is stale");
+    eq(UI.freshAll([P("stale")]), "stale", "and so is a primary one");
+    eq(UI.freshAll([P("live"), Q("stale")]), "fresh", "a stale secondary entry takes the page off Live but is only Fresh: a thin topic does not turn the pill into a Stale it would be ignored for");
+    eq(UI.freshAll([]), "fresh", "an empty list claims nothing");
     eq(UI.freshAggregate(["live", "stale"], "rth"), "stale", "stale if any is stale");
     eq(UI.freshAggregate(["fresh", "closed"], "post"), "closed", "closed outside the session when nothing is live");
     eq(UI.freshAggregate([], "rth"), "pending", "and pending before any payload");
@@ -477,16 +487,18 @@ const NYSE_PUBLISHED = Object.freeze({
     p.UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
     p.UI.freshness({ readAt: new Date(Date.parse(at) - 60000).toISOString(), live: true, source: "live:market" });
     p.UI.freshness({ sessionDate: "2026-09-28", source: "regime" });
-    eq(p.UI.freshness.state(), "live", "the home page as it stood, every dated source on the expected session");
+    eq(p.UI.freshness.state(), "fresh", "every dated source on the expected session and a price read a minute ago, with no streamed price, is Fresh");
+    p.UI.freshness({ ff: { stateAt: () => "live" }, source: "rt:px", role: "primary" });
+    eq(p.UI.freshness.state(), "live", "with the streamed price inside its window, every dated source on the expected session is Live");
     ok(/Everything else is the last completed session/.test(p.UI.freshness.details().lead), "says the rest is the last completed session");
     p.UI.freshness({ sessionDate: "2026-09-22", source: "regime" });
     p.UI.freshness({ sessionDate: "2026-09-15", source: "events" });
     const d = p.UI.freshness.details();
     eq(p.UI.freshness.state(), "live",
       "SESSION-DATED SOURCES ARE JUDGED BY THEIR NEWEST DATE: the pill stays Live under a price read a minute ago (only a source that carries the server's verdict can turn it stale)");
-    ok(!/Everything else is the last completed session/.test(d.lead) && /2 of 3 payloads are older: Regime Sep 22, Events Sep 15\./.test(d.lead),
+    ok(!/Everything else is the last completed session/.test(d.lead) && /2 of 4 payloads are older: Regime Sep 22, Events Sep 15\./.test(d.lead),
       `BUT THE LEAD NO LONGER CONTRADICTS ITS FACTS: it named 'Everything else is the last completed session' above Regime Sep 22 and Events Sep 15 (${d.lead})`);
-    eq(d.facts.find((f) => f[0] === "Payloads")[1], "1 of 3 current", "and the count agrees with the lead");
+    eq(d.facts.find((f) => f[0] === "Payloads")[1], "2 of 4 current", "and the count agrees with the lead");
   }
   {
     const p = pill("2026-09-29T13:45:00-04:00", null);
@@ -535,6 +547,7 @@ const NYSE_PUBLISHED = Object.freeze({
     const UI = p.ctx.window.FlowsUI;
     UI.freshness({ sessionDate: "2026-09-28", source: "boards" });
     UI.freshness({ readAt: new Date(at - 60000).toISOString(), live: true, source: "live:market" });
+    UI.freshness({ ff: { stateAt: () => "live" }, source: "rt:px", role: "primary" });
     eq(UI.freshness.state(), "live", "before the first beat the page reads Live");
     const hb = UI.heartbeat({ keys: ["market", "strips"], page: "overview" });
     await p.release();
@@ -543,7 +556,7 @@ const NYSE_PUBLISHED = Object.freeze({
       "EVERY KEY THE HEARTBEAT READS IS A SOURCE: a strips key three hours old turns the pill stale on the first beat, with no call from the page " +
       "(the page needed a line per region, and the home page made two of them)");
     ok(/Past the server.s stale line: Live prices\./.test(UI.freshness.details().lead), "and the popover names it");
-    ok(UI.freshness.details().facts.find((f) => f[0] === "Payloads")[1] === "2 of 3 current", "against the sources registered (boards, market, strips)");
+    ok(UI.freshness.details().facts.find((f) => f[0] === "Payloads")[1] === "3 of 4 current", "against the sources registered (boards, the streamed price, market, strips)");
   }
   {
     const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");

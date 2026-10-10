@@ -2138,7 +2138,7 @@ try {
     }, { t1, t2 });
     const before = await snap();
     eq(before.px, "123.45", `the first beat's quote is the headline price (${before.px})`);
-    ok(before.last.includes(before.F.t1) && before.pill === "Live", `read at its own time, with the pill Live (${before.last} / ${before.pill})`);
+    ok(before.last.includes(before.F.t1) && before.pill === "Fresh \u00b7 2 min", `read at its own time, with the pill Fresh at the age of that read: a quote 150 s old is outside its 20 s window and nothing on the page is streaming (${before.last} / ${before.pill})`);
     await beat();
     await beat();
     const quiet = await snap();
