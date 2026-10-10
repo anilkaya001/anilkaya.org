@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
+import { FIXTURE_MEMBER_2 } from "./lib/fixture-roster.mjs";
 import { workerSource } from "./lib/source-scan.mjs";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
@@ -1140,7 +1141,7 @@ try {
   {
     const ATTACKER = "203.0.113.10";
     const VICTIM = "198.51.100.20";
-    const TARGET = "berkkocak";
+    const TARGET = FIXTURE_MEMBER_2;
 
     const attempt = (username, password, ip) => fetch(url("/flows/login"), {
       method: "POST",
@@ -1190,7 +1191,7 @@ try {
     );
     ok(!/floodrow/.test(dump) && /\*\|192\.0\.2\.77/.test(dump),
        "THE FIX: guessed names never key a row; the five off-roster attempts share one counter for their address");
-    ok(/berkkocak\|203\.0\.113\.10/.test(dump),
+    ok(dump.includes(FIXTURE_MEMBER_2 + "|203.0.113.10"),
        "a genuine failure is still counted, and the key is scoped to the caller");
   }
 
@@ -1656,9 +1657,14 @@ try {
       eq((await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).status, 303,
          "a member signs in from an address that is spraying but not yet locked");
       for (let i = 5; i < 8; i++) await (await signIn(w, "spray" + i, "x", "203.0.113.50")).text();
-      ok(/Too many attempts/.test(await (await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).text()),
-         "THAT SUCCESS NEVER RESETS THE SHARED COUNTER: eight failures in the window lock the address, " +
-         "for every non-legacy name alike, members included");
+      eq((await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).status, 303,
+         "A MEMBER LISTED IN THE SECRET HAS A COUNTER OF THEIR OWN: eight sprayed failures from their address " +
+         "lock the shared counter and do not lock them out");
+      ok(/\*\|203\.0\.113\.50=8\b/.test(await w.d1("SELECT username || '=' || failures AS kv FROM flows_login_failures")),
+         "THAT SUCCESS NEVER RESETS THE SHARED COUNTER: it stands at eight, the lock, for every name the secret does not list");
+      await (await signIn(w, "newbie", "not-the-password", "203.0.113.60")).text();
+      ok(/newbie\|203\.0\.113\.60/.test(await w.d1("SELECT username, failures FROM flows_login_failures")),
+         "and their own failure is counted under their name and address, whether or not any built-in list ever knew them");
 
       await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|192.0.2.200', 3, 1000)");
       await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|2001:db8:7:7::/64', 7, 1000)");

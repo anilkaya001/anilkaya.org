@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, LEARN_AUDIENCE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, LEARN_AUDIENCE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { signSession } from "../shared/session.js";
 import { memoClock } from "../shared/flows-live-worker.js";
 import { COURSE_BY_SLUG } from "../shared/course-seo.js";
@@ -39,7 +40,7 @@ let outbound = 0;
 const realConsole = { error: console.error, warn: console.warn, log: console.log };
 
 const OWNER = "anilkaya";
-const MEMBER = FLOWS_USERNAMES.find((n) => n !== OWNER);
+const MEMBER = FIXTURE_MEMBER;
 const LAB_ID = "g_route_matrix_user";
 const SECURITY = {
   "Strict-Transport-Security": "max-age=31536000",

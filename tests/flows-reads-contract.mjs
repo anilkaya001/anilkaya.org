@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
 import { easternInstant } from "../shared/flows-freshness.js";
@@ -40,9 +41,9 @@ function shiftClock(baseIso) {
 
 let instance = 0;
 async function client(D1, extra = {}) {
-  const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }), ...extra };
   if (env.AI) env.AI = guardAi(env.AI);
-  const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
+  const token = await signFlowsSession(FIXTURE_ROSTER[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route, init = {}) => {
     const background = [];
@@ -60,7 +61,7 @@ async function client(D1, extra = {}) {
 const INGEST_TOKEN = "reads-ingest-token-abcdefghijklmnopqrstuvwxyz";
 async function ingestClient(D1) {
   const env = { DB: D1, SESSION_SECRET, FLOWS_INGEST_TOKEN: INGEST_TOKEN,
-    FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route) => {
     const req = new Request("https://anilkaya.org" + route, { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
@@ -874,7 +875,7 @@ class FakeCache {
     const brief = await get("/api/flows/brief");
     ok(brief.res.status === 503 && !brief.res.headers.has("X-Fresh-Last-Good"), "so with the store gone it is the 503 it was, not a copy");
 
-    const env = { DB: f.D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
     const worker = (await import("../worker.js?reads=" + (++instance))).default;
     const anon = await worker.fetch(new Request("https://anilkaya.org/api/flows/board?side=long"), env, { waitUntil() {} });
     eq(anon.status, 401, "THE COPY NEVER BYPASSES THE SESSION: a request without one is refused before the store is read");
@@ -1084,7 +1085,7 @@ class FakeCache {
   const liveWorker = (await import("../worker.js?reads=" + (++instance))).default;
   const liveAt = async (origin, path, extra = {}) => {
     const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: LIVE_STATIC, ...extra,
-      FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+      FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
     const res = await liveWorker.fetch(new Request(origin + path, { headers: { Authorization: "Bearer " + LIVE_STATIC } }), env, { waitUntil() {} });
     let body = null;
     try { body = JSON.parse(await res.text()); } catch { body = null; }
@@ -1372,7 +1373,7 @@ class FakeCache {
 {
   const f = fakeD1();
   seed(f);
-  const [A, B] = FLOWS_USERNAMES;
+  const [A, B] = FIXTURE_ROSTER;
   const seen = [];
   const counts = new Map();
   const limiter = { limit: async ({ key }) => {
@@ -1466,7 +1467,7 @@ class FakeCache {
 {
   const f = fakeD1();
   seed(f);
-  const [A, B] = FLOWS_USERNAMES;
+  const [A, B] = FIXTURE_ROSTER;
   const counts = new Map();
   const memberKeys = [];
   let ondemand = 0;

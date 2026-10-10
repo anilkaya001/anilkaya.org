@@ -565,13 +565,15 @@ that section 10.2a starts from.
 # 1. Mint the whole set: per-user passwords, a fresh pepper, and the
 #    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
 #    secrets are pasted below, because none of it can be recovered afterwards.
-#    FIRST TIME ONLY: without --from it mints the legacy roster and creates
-#    members.json. It refuses to run once members.json exists, because that
-#    file is the only copy of the member list.
-node scripts/generate-flows-credentials.mjs --mint --out members.json
-
-#    EVERY LATER RE-MINT (rotating every password): --from mints each member
-#    the file lists, keeping end dates and epochs, and writes it back.
+#    No member name lives in the source: --mint always needs --from, a file
+#    that lists the names to mint for. FIRST TIME ONLY, write that file by hand
+#    outside the repository as a JSON object of name to any placeholder, for
+#    example {"first.member":"x","second.member":"x"}; the placeholders are
+#    replaced by real hashes. EVERY LATER RE-MINT (rotating every password)
+#    names the real members file, keeping end dates and epochs, and writes it
+#    back. Without --from the script refuses, and when --out already exists it
+#    prints the exact re-mint command instead of replacing the only copy of the
+#    member list.
 node scripts/generate-flows-credentials.mjs --mint --from members.json --out members.json
 
 # 2. The ingest token is separate (it authenticates the pipeline, not people).
@@ -592,10 +594,9 @@ ticket, or an email thread. **A credential that has touched any of those is
 burned**, whether or not it still works: re-mint the entire set, and bump
 `FLOWS_SESSION_EPOCH` (below) so cookies minted under the burned set die too.
 
-Legacy shared-password mode still exists (`printf '%s\n%s\n' "$PASSWORD"
-"$PEPPER" | node scripts/generate-flows-credentials.mjs`), but per-user
-passwords are the default for a reason: with a shared password, one person's
-leak rotates everybody.
+The old shared-password mode (the script with no flag) is gone with the
+built-in roster: a shared password means one person's leak rotates everybody,
+and it needed a list of names in the source.
 
 **`wrangler secret put` deploys; the dashboard does not.** The CLI creates a
 new Worker version carrying the secret and deploys it at once (Cloudflare's
@@ -657,17 +658,16 @@ string the mint prints, or an object:
   refused** until the secret is fixed. It never falls back to a built-in list,
   because a fallback would quietly re-admit members whose access had ended or
   been revoked. The script only ever writes JSON the Worker reads, so install
-  its output rather than editing the secret by hand. `FLOWS_USERNAMES` in
-  `shared/flows-auth.js` no longer grants anything: it only chooses which names
-  keep a throttle counter of their own, and can be emptied once every member is
-  in the secret.
+  its output rather than editing the secret by hand. No member name lives in
+  the source: the secret is the only roster, and the throttle gives a name its
+  own counter exactly when the secret lists it.
 - Removing a key is revocation: that member's live session ends at its next
   request.
 - Failures stay uniform: an ended, revoked, unknown or mistyped sign-in all
   get the same 401 page. The throttle keeps a bucket per address for every
-  name outside the legacy roster, so a lockout cannot reveal whether a name is
-  a member. Guessed names never key a row: every name outside the legacy
-  roster shares one counter per address (an IPv6 address counts as its /64).
+  name the secret does not list, so a lockout cannot reveal whether a name is
+  a member. Guessed names never key a row: every name outside the secret
+  shares one counter per address (an IPv6 address counts as its /64).
   Two rate-limit bindings stand in front of the D1 lockout and the PBKDF2
   derivation: `LOGIN_IP` (10 attempts a minute per address) and `LOGIN_NAME`
   (20 a minute per name within one client network, the /24 of an IPv4 address or

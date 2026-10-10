@@ -7,12 +7,6 @@ export const FLOWS_COOKIE = "flows_session";
 export const PBKDF2_ITERATIONS = 10000;
 export const FLOWS_SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
 
-export const FLOWS_USERNAMES = Object.freeze([
-  "firatgok", "dincersen", "mehmetsen", "ferhatyukselturk", "berkkocak",
-  "anilkaya", "isaatceken", "bektastorun", "yigiteyi", "ahmetcan", "canaci",
-  "ozgurhatipoglu",
-]);
-
 export const MEMBER_NAME = /^[a-z0-9_.-]{3,32}$/;
 export const MEMBER_HASH_MAX = 256;
 export const MEMBER_EPOCH_MAX = 1000000;
@@ -144,8 +138,8 @@ export function loginNameKey(username, ip) {
   return name + "|" + throttleNetwork(ip);
 }
 
-export function throttleBucket(username) {
-  return typeof username === "string" && FLOWS_USERNAMES.includes(username) ? username : THROTTLE_SHARED_BUCKET;
+export function throttleBucket(username, members) {
+  return memberOf(members, username) ? username : THROTTLE_SHARED_BUCKET;
 }
 
 export async function verifyCredential(username, password, credentials, pepper, now = Date.now()) {
@@ -179,14 +173,11 @@ export async function verifyFlowsSession(token, secret, epoch = DEFAULT_SESSION_
   if (!payload || payload.aud !== FLOWS_AUDIENCE) return null;
   if (payload.epoch !== epoch) return null;
 
-  if (members) {
-    const member = memberOf(members, payload.sub);
-    if (!member || !memberActive(member, now)) return null;
-    const claimed = Object.hasOwn(payload, "uep") ? payload.uep : 0;
-    if (claimed !== member.epoch) return null;
-  } else if (!FLOWS_USERNAMES.includes(payload.sub)) {
-    return null;
-  }
+  if (!members) return null;
+  const member = memberOf(members, payload.sub);
+  if (!member || !memberActive(member, now)) return null;
+  const claimed = Object.hasOwn(payload, "uep") ? payload.uep : 0;
+  if (claimed !== member.epoch) return null;
   return { username: payload.sub, exp: payload.exp, epoch: payload.epoch };
 }
 

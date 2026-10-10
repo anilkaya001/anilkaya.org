@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { DatabaseSync } from "node:sqlite";
 import * as RT from "../shared/flows-rt.js";
+import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import {
   RtHub, createHub, createRestUpstream, hubConfig, loadRosterFromD1, RT_BOARDS_SQL, rtClock,
 } from "../shared/flows-rt-hub.js";
@@ -1126,7 +1127,7 @@ const seqOk = (ws) => {
 }
 
 {
-  const sessions = { creds: JSON.stringify({ firatgok: { hash: "h", epoch: 7 }, anilkaya: { hash: "h" } }) };
+  const sessions = { creds: JSON.stringify({ [FIXTURE_MEMBER]: { hash: "h", epoch: 7 }, anilkaya: { hash: "h" } }) };
   const forwarded = [];
   const stub = { fetch: async (req) => { forwarded.push(Object.fromEntries(req.headers.entries())); return new Response("{}", { status: 200 }); } };
   const { serveRt } = await import("../shared/flows-rt-routes.js");
@@ -1139,7 +1140,7 @@ const seqOk = (ws) => {
       { json: (b) => b, HttpError, getSession: async () => ({ username, exp: 1790780000000 }), requireSameOrigin() {} });
     return forwarded[forwarded.length - 1];
   };
-  eq((await ws("firatgok"))["x-rt-uep"], "7", "revocation route: the object is told the member epoch the Worker verified, and a client's own X-RT-Uep is replaced");
+  eq((await ws(FIXTURE_MEMBER))["x-rt-uep"], "7", "revocation route: the object is told the member epoch the Worker verified, and a client's own X-RT-Uep is replaced");
   eq((await ws("anilkaya"))["x-rt-uep"], "0", "revocation route: a member with no epoch is 0");
 }
 
@@ -1161,9 +1162,9 @@ const seqOk = (ws) => {
   deep(RT.rtSwitches({ FLOWS_RT_USERS: "" }).users, [], "switches: an explicit empty list admits nobody");
   eq(RT.rtSwitches({ FLOWS_RT_HINT: "enam" }).hint, "enam", "switches: a valid location hint");
   eq(RT.rtSwitches({ FLOWS_RT_HINT: "mars" }).hint, null, "switches: an invalid one is dropped");
-  ok(RT.rtAdmits(RT.rtSwitches({}), "anilkaya") && !RT.rtAdmits(RT.rtSwitches({}), "firatgok"), "owner audience admits the owner and refuses a member");
-  ok(RT.rtAdmits(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "members audience admits a member");
-  ok(!RT.rtIsOwner(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "but never makes a member the owner");
+  ok(RT.rtAdmits(RT.rtSwitches({}), "anilkaya") && !RT.rtAdmits(RT.rtSwitches({}), FIXTURE_MEMBER), "owner audience admits the owner and refuses a member");
+  ok(RT.rtAdmits(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), FIXTURE_MEMBER), "members audience admits a member");
+  ok(!RT.rtIsOwner(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), FIXTURE_MEMBER), "but never makes a member the owner");
   eq(hubConfig({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
   eq(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 1, "and ignored in production");
   ok(Number.isNaN(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z" }).pinned), "a pinned clock is ignored in production too");
@@ -1473,7 +1474,7 @@ const seqOk = (ws) => {
   const ns = { idFromName: (n) => ({ n }), get: (id, opts) => { gets.push({ id, opts }); return stub; } };
   const on = { FLOWS_RT_MODE: "on", PULSE: ns, FLOWS_RT_USERS: "anilkaya", FLOWS_RT_HINT: "enam" };
   const owner = { username: "anilkaya", exp: 1790780000000 };
-  const member = { username: "firatgok", exp: 1790780000000 };
+  const member = { username: FIXTURE_MEMBER, exp: 1790780000000 };
   const call = async (path, { env = on, session = owner, headers = {}, method = "GET" } = {}) => {
     const request = new Request("https://anilkaya.org" + path, { method, headers });
     try {
@@ -2259,9 +2260,9 @@ const seqOk = (ws) => {
   const shippedEnv = Object.fromEntries(["FLOWS_RT_MODE", "FLOWS_RT_AUDIENCE", "FLOWS_RT_USERS", "FLOWS_RT_HINT"].map((k) => [k, new RegExp("^" + k + ' = "([^"]*)"$', "m").exec(toml)?.[1]]));
   const shipped = RT.rtSwitches(shippedEnv);
   deep([shipped.mode, shipped.audience, shipped.users, shipped.hint], ["on", "members", ["anilkaya"], "enam"], "wrangler.toml: the Worker reads mode on, audience members, owner anilkaya, hint enam");
-  ok(RT.rtAdmits(shipped, "firatgok") && !RT.rtIsOwner(shipped, "firatgok"), "wrangler.toml: the shipped audience admits a signed-in member who is not an owner, and never makes them one");
+  ok(RT.rtAdmits(shipped, FIXTURE_MEMBER) && !RT.rtIsOwner(shipped, FIXTURE_MEMBER), "wrangler.toml: the shipped audience admits a signed-in member who is not an owner, and never makes them one");
   ok(RT.rtAdmits(shipped, "anilkaya") && RT.rtIsOwner(shipped, "anilkaya"), "wrangler.toml: and still admits the owner, who alone reads status");
-  ok(!RT.rtAdmits(RT.rtSwitches({ ...shippedEnv, FLOWS_RT_AUDIENCE: "owner" }), "firatgok"), "wrangler.toml: setting the audience back to owner refuses that member again");
+  ok(!RT.rtAdmits(RT.rtSwitches({ ...shippedEnv, FLOWS_RT_AUDIENCE: "owner" }), FIXTURE_MEMBER), "wrangler.toml: setting the audience back to owner refuses that member again");
   ok(!/\bhead_sampling_rate\s*=\s*0\b/.test(toml), "observability is unchanged");
   const cron = /crons\s*=\s*\[([^\]]*)\]/.exec(toml)[1];
   ok(cron.includes("1-59/5 13-21") && cron.includes("3-58/5 13-21") && cron.includes("*/30 * * * *") && cron.includes("15,45 * * * *"), "the four crons are untouched: Tier 1 stays the fallback");

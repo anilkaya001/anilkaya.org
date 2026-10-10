@@ -2624,8 +2624,8 @@ async function ensureFlowsTables(env) {
   if (abandoned) FLOWS_LIVE.flightAbandoned("schema", since, abandoned, state.flowsSchemaReady);
 }
 
-function flowsThrottleKey(request, username) {
-  return throttleBucket(username) + "|" + throttleAddress(request.headers.get("CF-Connecting-IP"));
+function flowsThrottleKey(request, username, members) {
+  return throttleBucket(username, members) + "|" + throttleAddress(request.headers.get("CF-Connecting-IP"));
 }
 
 async function flowsLockRecord(env, username) {
@@ -3402,7 +3402,7 @@ async function route(request, env, url, ctx) {
 
     if (!(await memberAllowed(env.LOGIN_NAME, { username: loginNameKey(username, clientIp) }))) return flowsLoginLimited();
 
-    const throttleKey = flowsThrottleKey(request, username);
+    const throttleKey = flowsThrottleKey(request, username, credentials);
     const locked = await flowsLockRecord(env, throttleKey);
     if (isLocked(locked)) {
       return flowsLoginResponse(FLOWS_LOGIN_LIMITED);

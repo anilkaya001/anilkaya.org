@@ -9,7 +9,8 @@ import { black76 } from "../shared/flows-quant-bs.js";
 import { etDayOf, closeUtcMs, yearFraction } from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
 import * as ENG from "../shared/flows-quant-engine.js";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -393,10 +394,10 @@ const emptyD1 = {
   batch: async (list) => list.map(() => ({ results: [] })),
 };
 const worker = (await import("../worker.js?basis=1")).default;
-const token = await signFlowsSession(FLOWS_USERNAMES[0], SESSION_SECRET, 3600, sessionEpoch({ SESSION_SECRET }));
+const token = await signFlowsSession(FIXTURE_ROSTER[0], SESSION_SECRET, 3600, sessionEpoch({ SESSION_SECRET }));
 const envFor = (extra = {}) => ({
   DB: emptyD1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "http://uw.test",
-  FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra,
+  FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }), ...extra,
 });
 
 const realFetch = globalThis.fetch;
