@@ -1130,11 +1130,11 @@
     });
     const label = "Flagged option windows, largest premium first";
     into.append(UI.list(list, { visible: SHOW, label }),
-      UI.legend([["--label-2", "", "Share at the ask"]]));
+      UI.legend([["--label-2", "", "Ask-side share"]]));
     const detail = table(label, [
       ["Time · ET", false, "When the vendor's flagged window opened, in Eastern time."],
       ["Name", false], ["Contract", false], ["Premium", true],
-      ["Side", true, "The share of premium the vendor attributed to the ask or the bid: a side of the quote, never proof of a buyer."],
+      ["Side", true, "The share of premium the vendor attributed to the ask side or the bid side. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
       ["Rule", false, "The vendor's name for the screen that flagged the window."],
     ], drawn.map((row) => {
       const at = etTime(row.spanStart);
@@ -1159,7 +1159,7 @@
       title: "Flagged windows", lead: lede,
       facts: [["Seen", seen === null ? DASH : (payload.vendorTruncated === true || payload.readTruncated === true ? "≥" : "") + seen],
         ["Read", read]],
-      notes: ["The meter is the share of each window's premium the vendor attributed to the ask."],
+      notes: ["The meter is the share of each window's premium the vendor attributed to the ask side."],
       node: detail,
     }));
   }

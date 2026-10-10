@@ -584,7 +584,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="t-ann">Time-value yield, annualised: the bid less any intrinsic value, over the collateral, scaled by 365 over the days to expiry.</p>
       <p data-k="t-pq">Chance the position ends in profit under the risk-neutral density of the card&#39;s smile shape levelled to this contract&#39;s implied volatility, or flat at it where the card lists no smile near the expiry. Not a forecast.</p>
       <p data-k="t-pp">Chance the position ends in profit under the real-world law this name&#39;s card publishes.</p>
-      <p data-k="t-ev">Expected profit per contract at the bid, under the real-world law.</p>
+      <p data-k="t-ev">Expected profit per contract sold into the bid, under the real-world law.</p>
       <p data-k="why-q">The engine bundle did not load.</p>
       <p data-k="why-fit">No implied volatility inverts from this contract&#39;s mid.</p>
       <p data-k="why-eng">The engine could not price this line.</p>
@@ -606,7 +606,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="c-liq.spread">The spread is wider than the engine allows for this price (10% of the mid from $1, 15% from 30 cents, 5 cents below), so liquidity does not grade.</p>
       <p data-k="c-liq.oi">Open interest on the short leg is under 250, so liquidity does not grade.</p>
       <p data-k="c-liq.one-sided">The short leg has no two-sided quote, so liquidity does not grade.</p>
-      <p data-k="c-liq.slippage">Selling at the bid gives up more than a fifth of the most this position can make.</p>
+      <p data-k="c-liq.slippage">Selling into the bid gives up more than a fifth of the most this position can make.</p>
       <p data-k="c-edge.small">The real-world expected value is under twice the cost of trading, so the edge is small against friction.</p>
       <p data-k="c-edge.none">No edge can be computed without a real-world figure.</p>
       <p data-k="c-edge.sign-flips">The edge changes sign between the real-world laws tried.</p>

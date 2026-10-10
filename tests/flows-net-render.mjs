@@ -300,8 +300,8 @@ try {
     for (const k of ["ca", "cb", "pa", "pb", "nx"]) near(node("i:" + k).v, want.kinds[k], `the ${k} input carries exactly that side's premium`);
     near(node("n:NVDA").v, want.byName.get("NVDA"), "a name node carries its own windows' premium");
     near(node("s:tech").v, want.bySector.get("Tech"), "a sector node carries its names' premium");
-    near(m.lean.bull, want.bull, "bullish lean is calls at ask plus puts at bid");
-    near(m.lean.bear, want.bear, "bearish lean is calls at bid plus puts at ask");
+    near(m.lean.bull, want.bull, "bullish lean is ask-side calls plus bid-side puts");
+    near(m.lean.bear, want.bear, "bearish lean is bid-side calls plus ask-side puts");
     eq(node("s:none").label, "No sector", "index funds the universe does not carry are drawn under No sector, not guessed");
     deep(m.layers[1].map((d) => d.label), ["Tech", "Cyclical", "Comms", "Energy", "Other", "No sector"],
       "the sector layer is ranked by premium with Other and then No sector last, although No sector carries the second largest premium");
@@ -320,7 +320,7 @@ try {
 
     const aria = await page.evaluate(() => { const c = document.querySelector("#uaNet canvas"); return { role: c.getAttribute("role"), label: c.getAttribute("aria-label") }; });
     eq(aria.role, "img", "the canvas is an image to assistive technology");
-    ok(/^Flow network of 140 flagged windows carrying \$\d/.test(aria.label) && /Largest paths: NVDA, calls at ask/.test(aria.label) && /leans bullish/.test(aria.label),
+    ok(/^Flow network of 140 flagged windows carrying \$\d/.test(aria.label) && /Largest paths: NVDA, calls \u00b7 ask side/.test(aria.label) && /leans bullish/.test(aria.label),
       `and its label states the top flows in words (${aria.label.slice(0, 160)}...)`);
 
     const table = await page.evaluate(() => {
@@ -338,7 +338,7 @@ try {
     eq(table.shown, 5, "five of them visible until the reader asks for all");
     eq(table.first.t, "NVDA", "led by the largest");
     eq(table.first.href, "/flows/ticker/?t=NVDA", "which links to its ticker page");
-    ok(/^(Bullish|Bearish|Unattributed)$/.test(table.first.cells[3]), `the lean is a word, never a colour alone (${table.first.cells[3]})`);
+    ok(/^(Bullish|Bearish|Unsided)$/.test(table.first.cells[3]), `the lean is a word, never a colour alone (${table.first.cells[3]})`);
     await page.click("#uaNet .fn-paths .ui-disclose");
     eq(await page.evaluate(() => [...document.querySelectorAll("#uaNet tbody tr")].filter((r) => !r.hidden).length), 24, "the disclosure shows all of them");
 
@@ -413,7 +413,7 @@ try {
     await page.waitForFunction(() => document.querySelector("#uaNet tbody tr:first-child").classList.contains("is-lit"), null, { timeout: 8000 });
     await litVector(page, ["n:NVDA", "i:ca", "i:cb", "n:SPY"], [1, 1, 0, 0], "hovering the first table row");
     const rowLit = await net(page, `return ["n:NVDA", "i:ca", "i:cb", "n:SPY"].map((id) => net.node(id).lit);`);
-    deep(rowLit, [1, 1, 0, 0], "hovering a row of the table lights that one path: NVDA through calls at ask, not its calls at bid");
+    deep(rowLit, [1, 1, 0, 0], "hovering a row of the table lights that one path: NVDA through ask-side calls, not its bid-side calls");
     await page.mouse.move(5, 5);
 
     await page.focus("#uaNet .fn-home");
@@ -874,8 +874,8 @@ try {
     deep(u.sums, [190, 190, 190, 190], "every layer conserves the premium on hand-made rows too");
     near(u.ca + u.cb, 100, "an ask and bid that overstate the premium are scaled back to it, not trusted past it");
     near(u.ca, 60, "in proportion (90 and 60 of 150 become 60 and 40)");
-    eq(u.nx, 50 + 10, "a window with no contract side, and premium left between the quotes, go to Unattributed");
-    eq(u.pb, 30, "an unstated ask is read as unattributed, not as zero bid");
+    eq(u.nx, 50 + 10, "a window with no contract side, and premium left between the quotes, go to Unsided");
+    eq(u.pb, 30, "an unstated ask is read as unsided, not as zero bid");
     eq(u.xyz, 40, "tickers are upper-cased before they are joined");
     eq(u.none, "No sector", "a name the universe does not carry is No sector");
     deep(u.empty, { windows: 0, layers: [0, 0, 0, 0], top: 0 }, "an empty record is an empty model, not an error");

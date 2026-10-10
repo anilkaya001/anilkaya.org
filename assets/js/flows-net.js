@@ -34,13 +34,13 @@
   }
 
   const KINDS = {
-    ca: { label: "Calls at ask", lean: "bull" },
-    pb: { label: "Puts at bid", lean: "bull" },
-    nx: { label: "Unattributed", lean: "nx" },
-    pa: { label: "Puts at ask", lean: "bear" },
-    cb: { label: "Calls at bid", lean: "bear" },
+    ca: { label: "Calls \u00b7 ask side", lean: "bull" },
+    pb: { label: "Puts \u00b7 bid side", lean: "bull" },
+    nx: { label: "Unsided", lean: "nx" },
+    pa: { label: "Puts \u00b7 ask side", lean: "bear" },
+    cb: { label: "Calls \u00b7 bid side", lean: "bear" },
   };
-  const LEANS = { bull: "Bullish", nx: "Unattributed", bear: "Bearish" };
+  const LEANS = { bull: "Bullish", nx: "Unsided", bear: "Bearish" };
   const LEAN_GLYPH = { bull: "up", bear: "down", nx: "flat" };
   const DTE = { d0: "0DTE", w1: "1–7 days", m1: "8–31 days", far: "32+ days", nx: "No expiry" };
   const CAPTIONS = { lean: ["Side", "Sector", "Name", "Lean"], dte: ["Side", "Sector", "Name", "Expiry"] };
@@ -373,8 +373,8 @@
         facts: m ? [["Windows", count(m.windows)], ["Premium", money(m.total)], ["Names", count(m.names)], ["Sectors", U.state === "ok" ? "Nightly universe" : U.state === "fail" ? "Not readable" : "Pending"], ["Read", S.readAt ? F.time(S.readAt) : null]] : [],
         notes: [
           "These are the vendor's flagged alerts, not every execution: the selection is the vendor's rules, so a name missing here is not a quiet name.",
-          "Calls at ask and puts at bid are drawn bullish, calls at bid and puts at ask bearish. That is the usual convention on the side of the quote, never proof of who initiated.",
-          "Unattributed is premium the vendor left between the quotes, or a window it never split by side.",
+          "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish, bid-side calls and ask-side puts bearish, and none of it is proof of who initiated.",
+          "Unsided is premium the vendor left between the quotes, or a window it never split by side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
           "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Light runs along each band from the side of the quote to its lean, faster the larger the band: a picture of the record, not a feed of executions. A flare marks a window that reached this page while it was open.",
           "Sectors come from the nightly universe; a name it does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own Eastern date.",
@@ -407,7 +407,7 @@
       const t = M.total;
       return "Flow network of " + count(M.windows) + " flagged " + plural(M.windows, "window", "windows") + " carrying " + money(t) +
         " of premium. Largest paths: " + top + ". By the usual convention " + pct(M.lean.bull / t) + " of it leans bullish, " +
-        pct(M.lean.bear / t) + " bearish, and " + pct(M.lean.nx / t) + " is unattributed.";
+        pct(M.lean.bear / t) + " bearish, and " + pct(M.lean.nx / t) + " is unsided.";
     }
 
     function paintLede() {
@@ -476,9 +476,9 @@
     function paintLegend() {
       const k = (g, cls, text) => h("span", { class: "ui-key fn-k " + cls }, UI.glyph(g), text);
       legend.replaceChildren(
-        k("up", "is-up", "Bullish lean: calls at ask, puts at bid"),
-        k("down", "is-down", "Bearish lean: calls at bid, puts at ask"),
-        k("flat", "is-nx", "Unattributed"),
+        k("up", "is-up", "Bullish lean: ask-side calls, bid-side puts"),
+        k("down", "is-down", "Bearish lean: bid-side calls, ask-side puts"),
+        k("flat", "is-nx", "Unsided"),
         h("span", { class: "ui-key fn-k is-slate" }, h("i", { class: "fn-dot" }), "Other, No sector"),
         h("span", { class: "ui-key fn-k is-note" }, "Sphere area and band width are premium in USD, one scale throughout; every layer carries the same total" + (still ? "" : "; light runs from side to lean and a flare marks a window that arrived while you watched") + ". Drag to turn; " + (matchMedia("(pointer: coarse)").matches ? "double tap" : "double click") + " to recentre"));
     }
@@ -998,7 +998,7 @@
     }
     const contracts = (d) => (d.contracts ? count(d.contracts) + " " + plural(d.contracts, "contract", "contracts") : null);
     function hitLabel(d) {
-      const lean = d.v ? " Lean by convention: " + pct(d.bull / d.v) + " bullish, " + pct(d.bear / d.v) + " bearish, " + pct(d.nx / d.v) + " unattributed." : "";
+      const lean = d.v ? " Lean by convention: " + pct(d.bull / d.v) + " bullish, " + pct(d.bear / d.v) + " bearish, " + pct(d.nx / d.v) + " unsided." : "";
       const what = d.layer === 2 && d.ticker ? "Rank " + d.pos + ", " + d.ticker + (d.sec ? ", " + d.sec : "") : d.label + (d.members && d.members.length ? " (" + d.members.slice(0, 8).join(", ") + (d.members.length > 8 ? ", and more" : "") + ")" : "");
       const ct = contracts(d);
       return what + ": " + money(d.v) + ", " + pct(d.share) + " of flagged premium, " + count(d.windows) + " " + plural(d.windows, "window", "windows") + (ct ? ", " + ct : "") + "." + lean + (d.ticker ? " Opens the " + d.ticker + " page." : "");

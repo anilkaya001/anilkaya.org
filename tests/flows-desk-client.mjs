@@ -198,7 +198,7 @@ try {
     ok(head.includes("Win % (implied)") && head.includes("Win % (real-world)"), `the column headers say what the two chances are (${head})`);
     ok(!/Implied[^ ]/.test(head.replace("Win % (implied)", "")) && !/Real world/.test(head), "and no bare 'Implied' or 'Real world' is left to be read as a volatility");
     const first = page.locator("#dkList .dk-row").first();
-    eq(await first.locator(".dk-ev").getAttribute("title"), "Expected profit per contract at the bid, under the real-world law.", "the EV cell says what it is: expected profit per contract, at the bid, under the real-world law");
+    eq(await first.locator(".dk-ev").getAttribute("title"), "Expected profit per contract sold into the bid, under the real-world law.", "the EV cell says what it is: expected profit per contract, sold into the bid, under the real-world law");
     ok(/risk-neutral density/.test(await first.locator(".dk-pq").getAttribute("title")), "the implied win chance says which density it reads");
     ok(/real-world law/.test(await first.locator(".dk-pp").getAttribute("title")), "and the real-world one which law");
     ok(/Time-value yield, annualised/.test(await first.locator(".dk-ann").getAttribute("title")), "the Ann. cell says it is a time-value yield");

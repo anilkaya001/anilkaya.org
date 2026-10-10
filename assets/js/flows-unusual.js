@@ -345,7 +345,7 @@
       title: "Flagged windows",
       state: S.alertsState.state === "ok" ? null : S.alertsState.state,
       asOf: typeof a.sessionDate === "string" ? a.sessionDate : null,
-      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and a solid fill means the vendor put most of the window's dollars at the ask.",
+      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and a solid fill means the vendor put most of the window's dollars on the ask side.",
       facts: [
         ["Read", instant(a.readAt)],
         ["Windows", rows.length ? count(rows.length) + (seen === null ? " windows" : " of " + (floor ? "at least " : "") + count(seen) + " flagged windows") : null],
@@ -380,8 +380,8 @@
     const chartHost = h("div", { class: "fu-chart" });
     const legend = UI.legend([
       ["--up-mark", "dot", "Call"], ["--down-mark", "dot", "Put"],
-      UI.key("--label-1", "dot", "At ask"), UI.key("--label-1", "ring", "Not at ask"),
-      rows.some((r) => n(r.askPrem) === null) ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Ask not stated") : null,
+      UI.key("--label-1", "dot", "Ask side"), UI.key("--label-1", "ring", "Not ask side"),
+      rows.some((r) => n(r.askPrem) === null) ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Ask side not stated") : null,
       h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
     ].filter(Boolean));
     host.timeline.replaceChildren(chartHost, legend);
@@ -761,7 +761,7 @@
     const a = S.alerts;
     if (S.alertsKind !== "ok") {
       const st = S.alertsState;
-      host.chips.replaceChildren(UI.chips(["Premium", "Windows", "Calls", "At ask", "Sweeps"].map((label) =>
+      host.chips.replaceChildren(UI.chips(["Premium", "Windows", "Calls", "Ask side", "Sweeps"].map((label) =>
         UI.gaugeChip({ g: UI.iconChip(def(st).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Flagged windows"));
       return;
     }
@@ -786,8 +786,8 @@
         info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows the record has held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
-      UI.gaugeChip({ ring: share(ask, askW), color: "--label-1", value: pct0(share(ask, askW)), label: "At ask",
-        info: { title: "Ask-side share", lead: "The vendor's ask-side attribution as a share of premium. It adds no inference about who initiated." } }),
+      UI.gaugeChip({ ring: share(ask, askW), color: "--label-1", value: pct0(share(ask, askW)), label: "Ask side",
+        info: { title: "Ask-side share", lead: "The vendor's ask-side attribution as a share of premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and nothing here says who initiated." } }),
       UI.gaugeChip({ ring: share(sw, swW), color: "--s-orange", value: pct0(share(sw, swW)), label: "Sweeps",
         info: { title: "Sweep share", lead: "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all." } }),
     ], "Flagged windows"));

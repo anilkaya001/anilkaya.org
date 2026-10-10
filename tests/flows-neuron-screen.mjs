@@ -240,6 +240,9 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   }
   samples.push(read({}, { sessionDate: "2026-09-10" }), read({}, { sessionDate: "2026-09-14" }), read({ ivp: 10, vrp: 0.1, iv30: 0.4, rv20: 0.3 }));
   ok(samples.length > 140, `${samples.length} readings swept for wording`);
+  const delta = factOf(read({ dDelta: 0.012 }), "delta");
+  ok(/ask side/.test(delta.unit) && /bid side/.test(delta.unit) && !/\bat (the )?(ask|bid)\b/i.test(delta.unit + " " + delta.note), "the delta flow's unit is named in the vendor's terms, ask side and bid side");
+  ok(guardAnswer(delta.label + " " + delta.text + " " + delta.unit + ". " + delta.note, [{ say: delta.label + " " + delta.text + " " + delta.unit + " " + delta.note }], { smallIntegers: false, modals: true }).forecast === false, "and passes the ask guard's forecast and modal lexicon");
   const banned = /\b(will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds|would|could|might|may)\b/i;
   let sentences = 0, families = 0;
   for (const r of samples) {
