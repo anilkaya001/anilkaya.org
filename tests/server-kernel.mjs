@@ -154,7 +154,7 @@ absent(src, "console.error(JSON.stringify", { anchor: 'logFailure("error"', why:
 absent(src, "console.warn(JSON.stringify", { anchor: 'logFailure("warn"', why: "failure logs go through server/log.js" });
 expect(src, /from "\.\/server\/http\.js"/, { min: 1, max: 1, why: "worker.js imports the kernel once" });
 const kernelFiles = treeFiles("server");
-eq(kernelFiles, ["server/errors.js", "server/http.js", "server/log.js", "server/router.js", "server/routes/flows-read.js"], "server/ holds the kernel, the table, the log, the router and the flows-read family");
+eq(kernelFiles, ["server/errors.js", "server/http.js", "server/log.js", "server/router.js", "server/routes/flows-desk.js", "server/routes/flows-read.js"], "server/ holds the kernel, the table, the log, the router and the flows-read and flows-desk families");
 for (const f of kernelFiles) {
   ok(!/^(?:let|var)\s/m.test(moduleSource(f)), `${f} declares no top-level mutable binding`);
   ok(!/\/\/|\/\*/.test(moduleSource(f).replace(/https?:\/\/[^\s"'`]+/g, "")), `${f} carries no comments`);

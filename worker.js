@@ -20,7 +20,7 @@ import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
 
 import {
-  rankChain, RANK_KEYS, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface, deskSmiles,
+  rankChain, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface, deskSmiles,
   hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES, deskCarry,
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
@@ -36,6 +36,7 @@ import {
 import { logFailure } from "./server/log.js";
 import { createRouter } from "./server/router.js";
 import { flowsReadRows } from "./server/routes/flows-read.js";
+import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
@@ -2342,7 +2343,6 @@ function deskEngine(card, nowMs) {
 
 const STRATEGY_INDEX = "SPY";
 
-const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STRATEGY_PAGES_PER_TYPE = 2;
 
@@ -2772,7 +2772,8 @@ async function renderCourse(request, env, url, meta, ctx) {
 }
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
-  absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }));
+  absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
+flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
@@ -3672,11 +3673,6 @@ async function route(request, env, url, ctx) {
       return dossierResponse(env, ctx, ticker, url, session);
     }
 
-    if (path === "/api/flows/live") {
-      const ticker = requireTicker(url);
-      return quoteResponse(env, ctx, ticker, vendorGate(env, session));
-    }
-
     if (path === "/api/flows/ask") {
 
       requireSameOrigin(request);
@@ -3709,47 +3705,6 @@ async function route(request, env, url, ctx) {
           "That is a fault on this site rather than a fact about the session.");
       }
       return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx, session);
-    }
-
-    if (path === "/api/flows/chain") {
-      const ticker = requireTicker(url);
-
-      const rawStrategy = url.searchParams.get("strategy");
-      const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
-      const rawRank = url.searchParams.get("rank");
-      const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
-
-      return serveCachedVendorRead({
-        env,
-        ctx,
-        cacheKey: internalKey("chain", `${ticker}?strategy=${strategy}&rank=${rankBy}`),
-        wantsRefresh: url.searchParams.get("refresh") === "1",
-        gate: vendorGate(env, session),
-        build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120 }),
-      });
-    }
-
-    if (path === "/api/flows/strategy") {
-
-      const ticker = requireTicker(url);
-      const rawExpiry = url.searchParams.get("expiry");
-
-      if (rawExpiry !== null && !EXPIRY_RE.test(rawExpiry)) {
-        throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
-      }
-      const expiry = rawExpiry === null ? null : rawExpiry;
-      const engine = expiry !== null && url.searchParams.get("engine") === "1";
-
-      return serveCachedVendorRead({
-        env,
-        ctx,
-        cacheKey: internalKey("strategy", `${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`),
-        wantsRefresh: url.searchParams.get("refresh") === "1",
-        gate: vendorGate(env, session),
-        build: (vf) => (expiry
-          ? buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine })
-          : buildStrategyContext(env, ctx, vf, ticker)),
-      });
     }
 
     throw new HttpError(404, "not_found", "API route not found");

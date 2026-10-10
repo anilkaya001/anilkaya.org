@@ -8,6 +8,7 @@ import { workerSource, expect } from "./lib/source-scan.mjs";
 import { guardAi, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
+import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -790,9 +791,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   globalThis.fetch = realFetch;
   const routed = new Set(CEILING.map(([path]) => path.split("?")[0]));
   const source = workerSource();
-  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 10, why: "the Flows routes not yet in the table are declared in the Worker chain" });
-  const routerPaths = createRouter(flowsReadRows(new Proxy({}, { get: () => () => null }))).rows.map((r) => r.path);
-  ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read family: " + routerPaths.length + " rows");
+  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 4, why: "the Flows routes not yet in the table are declared in the Worker chain" });
+  const stub = new Proxy({}, { get: () => () => null });
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub)).rows.map((r) => r.path);
+  ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read and flows-desk families: " + routerPaths.length + " rows");
   expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
   const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);
   const declared = [...new Set([...routerPaths, ...chain])]
