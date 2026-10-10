@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { nextTradingDay } from "../shared/flows-freshness.js";
+import { nextTradingDay, easternDay, easternClock, isTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
 import {
   num, quantile, winsorize, robustZ, neutralize,
   flowPurity, aggressorGamma, bookDisplacement, pathSignature,
@@ -79,6 +79,7 @@ import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 import { pinStamp, stampNow, stampPinned } from "./flows-legs/stamp.mjs";
 import { createStageRunner, healthRecord } from "./flows-nightly/stages.mjs";
+import { newsFields } from "../shared/flows-news.js";
 
 const ARGS = new Set(process.argv.slice(2));
 const DRY_RUN = ARGS.has("--dry-run");
@@ -965,30 +966,22 @@ async function resolveSessionDate() {
 }
 
 function easternNow(at = new Date()) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/New_York",
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", hour12: false,
-    }).formatToParts(at).map((x) => [x.type, x.value]));
-  return {
-    date: `${parts.year}-${parts.month}-${parts.day}`,
-
-    minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
-  };
+  const date = easternDay(at);
+  const clock = easternClock(at);
+  if (!date || !clock) throw new RangeError(`easternNow: ${String(at)} is not an instant`);
+  return { date, minutes: clock.minutes };
 }
 
-const isWeekday = (day) => {
-  const dow = new Date(day + "T12:00:00Z").getUTCDay();
-  return dow !== 0 && dow !== 6;
-};
+export function sessionBarOverdue(sessionDate, wall) {
+  return !!sessionDate && wall.date > sessionDate && isTradingDay(wall.date) && wall.minutes >= SESSION_CLOSE_MINUTES;
+}
 
 const clockSaid = (minutes) =>
   `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
 export function intradayRefusal(sessionDate, { at = new Date(), allow = false } = {}) {
   const clock = easternNow(at);
-  const inside = isWeekday(clock.date) &&
+  const inside = isTradingDay(clock.date) &&
     clock.minutes >= SESSION_OPEN_MINUTES && clock.minutes < SESSION_CLOSE_MINUTES;
   const said = `the Eastern clock reads ${clockSaid(clock.minutes)} on ${clock.date}, inside ` +
     `the ${clockSaid(SESSION_OPEN_MINUTES)}–${clockSaid(SESSION_CLOSE_MINUTES)} session`;
@@ -1011,33 +1004,12 @@ export function intradayRefusal(sessionDate, { at = new Date(), allow = false } 
   };
 }
 
-export function nextWeekday(day) {
-  const t = Date.parse(String(day || "") + "T12:00:00Z");
-  if (!Number.isFinite(t)) return null;
-  for (let step = 1; step <= 7; step++) {
-    const d = new Date(t + step * 86400000).toISOString().slice(0, 10);
-    if (isWeekday(d)) return d;
-  }
-  return null;
-}
-
-export function priorWeekdays(day, count) {
-  const t = Date.parse(String(day || "") + "T12:00:00Z");
-  const out = [];
-  if (!Number.isFinite(t)) return out;
-  for (let step = 1; out.length < count && step <= count * 2 + 7; step++) {
-    const d = new Date(t - step * 86400000).toISOString().slice(0, 10);
-    if (isWeekday(d)) out.push(d);
-  }
-  return out;
-}
-
 export function closedPriceWindow(generatedAt, day) {
   if (!ARCHIVE_DATE_RE.test(String(day || ""))) return false;
   const at = typeof generatedAt === "string" ? new Date(generatedAt) : null;
   if (!at || Number.isNaN(at.getTime())) return false;
   const clock = easternNow(at);
-  const next = nextWeekday(day);
+  const next = nextTradingDay(day, null);
   if (clock.date === day) return clock.minutes >= SESSION_CLOSE_MINUTES;
   if (clock.date < day || next === null) return false;
   if (clock.date < next) return true;
@@ -1745,7 +1717,7 @@ export async function resolveBoardMemory(side, sessionDate, {
         : `the live board:${side} could not be read` +
           (read && read.status ? ` (the store answered ${read.status})` : "");
   let failures = 0;
-  for (const day of priorWeekdays(sessionDate, sessions)) {
+  for (const day of priorTradingDays(sessionDate, sessions, null)) {
     const key = `board:${side}:${day}`;
     const stored = await reader(key);
     if (stored && stored.failed) { failures++; continue; }
@@ -1759,7 +1731,7 @@ export async function resolveBoardMemory(side, sessionDate, {
   }
   return {
     ...memory, source: "live", key: "board:" + side,
-    note: `${memory.note} The dated archive was searched back ${sessions} weekdays for an ` +
+    note: `${memory.note} The dated archive was searched back ${sessions} sessions for an ` +
       `earlier board:${side} as well, and ` +
       (failures
         ? `${failures} of those reads failed, so an earlier board may exist that this run could not see.`
@@ -2826,37 +2798,10 @@ export function shapeNews(raw, { cap = NEWS_ROWS, requested = NEWS_VENDOR_LIMIT 
   let unusable = 0, undatedSeen = 0;
   const shaped = [];
   for (const row of wire) {
-    if (!row || typeof row !== "object") { unusable++; continue; }
-    const headline = typeof row.headline === "string" && row.headline.trim()
-      ? row.headline.trim() : null;
-
-    if (headline === null) { unusable++; continue; }
-
-    const createdAt = typeof row.created_at === "string" && row.created_at.trim()
-      ? row.created_at.trim() : null;
-    const parsed = createdAt === null ? NaN : Date.parse(createdAt);
-    const createdAtMs = Number.isFinite(parsed) ? parsed : null;
-    if (createdAtMs === null) undatedSeen++;
-
-    shaped.push({
-      headline,
-      source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : null,
-      createdAt, createdAtMs,
-
-      major: row.is_major === null || row.is_major === undefined ? null : Boolean(row.is_major),
-
-      sentiment: typeof row.sentiment === "string" && row.sentiment.trim()
-        ? row.sentiment.trim() : null,
-
-      tickers: Array.isArray(row.tickers)
-        ? [...new Set(row.tickers.filter((t) => typeof t === "string" && t.trim())
-          .map((t) => t.trim().toUpperCase()))]
-        : [],
-      tags: Array.isArray(row.tags)
-        ? [...new Set(row.tags.filter((t) => typeof t === "string" && t.trim())
-          .map((t) => t.trim()))]
-        : [],
-    });
+    const fields = newsFields(row);
+    if (fields === null) { unusable++; continue; }
+    if (fields.createdAtMs === null) undatedSeen++;
+    shaped.push(fields);
   }
 
   shaped.sort((a, b) => {
@@ -4789,13 +4734,11 @@ async function main() {
   });
   console.log(`session gate: ${gate.mode} — ${gate.note}`);
   const wall = easternNow();
-  if (gate.skip && sessionDate && wall.date > sessionDate && isWeekday(wall.date) &&
-      wall.minutes >= SESSION_CLOSE_MINUTES) {
+  if (gate.skip && sessionBarOverdue(sessionDate, wall)) {
     console.warn(
-      `NOTE: the vendor's SPY series carries no bar for ${wall.date}, so the newest closed ` +
-      `session is ${sessionDate}, which is already archived. On a market holiday that is ` +
-      `correct; if ${wall.date} traded, the vendor has not published its bar yet and the ` +
-      "workflow should be dispatched again once it has.");
+      `NOTE: the vendor's SPY series carries no bar for ${wall.date}, a trading day, so the newest ` +
+      `closed session is ${sessionDate}, which is already archived. The vendor has not published ` +
+      "its bar yet and the workflow should be dispatched again once it has.");
   }
   if (gate.skip) {
     const refreshedAt = stampNow();

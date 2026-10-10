@@ -1,5 +1,6 @@
 import { parseOptionSymbol } from "./flows-premium.js";
 import { REFRESH_CADENCE_MINUTES } from "./flows-freshness.js";
+import { rowsOf as unwrapRows } from "./flows-rows.js";
 
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
@@ -11,11 +12,7 @@ const str = (v) => (typeof v === "string" && v ? v : null);
 
 const flag = (v) => (v === null || v === undefined ? null : Boolean(v));
 
-export const unwrapRows = (raw) => {
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return [];
-};
+export { unwrapRows };
 
 export const PULSE_CAPS = Object.freeze({
   tide: 480,

@@ -3,6 +3,7 @@ import {
   prevTradingDay,
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
+import { rowsOf } from "./flows-rows.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
 
@@ -150,11 +151,7 @@ export function failed(raw) {
   return !!(raw && typeof raw === "object" && !Array.isArray(raw) && typeof raw.__failed === "string");
 }
 
-export function rowsOf(raw) {
-  if (Array.isArray(raw)) return raw;
-  if (raw && typeof raw === "object" && Array.isArray(raw.data)) return raw.data;
-  return [];
-}
+export { rowsOf };
 
 export function envelopeDate(raw) {
   return raw && typeof raw === "object" && !Array.isArray(raw) && typeof raw.date === "string" &&

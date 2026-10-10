@@ -1,5 +1,6 @@
 import { stampNow } from "./stamp.mjs";
 import { vendorGate } from "../../shared/flows-regime.js";
+import { rowsOf } from "../../shared/flows-rows.js";
 
 export const LEG_WRITER = "flows-pipeline";
 
@@ -16,11 +17,7 @@ export async function read(uw, path, params = {}, { envelope = false } = {}) {
   }
 }
 
-export function rowsOf(body, key = "data") {
-  if (Array.isArray(body)) return body;
-  if (body && typeof body === "object" && Array.isArray(body[key])) return body[key];
-  return [];
-}
+export { rowsOf };
 
 export function silenceOf(result, { what = "read" } = {}) {
   if (result.ok) return null;

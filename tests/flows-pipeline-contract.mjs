@@ -21,7 +21,7 @@ import {
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
   vendorNum, sectorLean, shapeNews, NEWS_ROWS, NEWS_VENDOR_LIMIT,
   ensureArchived, sessionCandles, candleCut, judgeEndDate, verifyDating, computeFeatures,
-  sessionReference, sessionRow, readPxOf, intradayRefusal, nextWeekday, priorWeekdays,
+  sessionReference, sessionRow, readPxOf, intradayRefusal, sessionBarOverdue,
   closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
@@ -45,8 +45,16 @@ import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
+import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
 import { workerSource, expect, pipelineSource, count } from "./lib/source-scan.mjs";
+import { newsFields, newsRow } from "../shared/flows-news.js";
+import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
+import { rowsOf as liveRows } from "../shared/flows-live.js";
+import { unwrapRows as pulseRows } from "../shared/flows-pulse.js";
+import { unwrapRows as politicalRows } from "../shared/flows-political.js";
+import { rowsOf as legRows } from "../scripts/flows-legs/common.mjs";
+import { rowsOf as volRows } from "../shared/flows-vol.js";
+import { rowsOf as positioningRows } from "../shared/flows-positioning.js";
 import { STAGES, ISOLATION, createStageRunner, declares, healthRecord, WHY_CAP } from "../scripts/flows-nightly/stages.mjs";
 
 let checks = 0;
@@ -3770,12 +3778,12 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  eq(nextWeekday("2026-09-18"), "2026-09-21", "the gate origin after a Friday is Monday");
-  eq(nextWeekday("2026-09-21"), "2026-09-22", "and after a Monday, Tuesday");
-  eq(nextWeekday("garbage"), null, "an unparseable session has no next session");
-  assert.deepEqual(priorWeekdays("2026-09-22", 3), ["2026-09-21", "2026-09-18", "2026-09-17"],
+  eq(nextTradingDay("2026-09-18", null), "2026-09-21", "the gate origin after a Friday is Monday");
+  eq(nextTradingDay("2026-09-21", null), "2026-09-22", "and after a Monday, Tuesday");
+  eq(nextTradingDay("garbage", null), null, "an unparseable session has no next session");
+  assert.deepEqual(priorTradingDays("2026-09-22", 3, null), ["2026-09-21", "2026-09-18", "2026-09-17"],
     "the archive walk back skips the weekend"); checks++;
-  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextWeekday("2026-09-21")) === 11,
+  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextTradingDay("2026-09-21", null)) === 11,
      "UW-21: a report on 10-03 is 11 days from the NEXT session after 09-21 — the anchor a " +
      "post-close run must use, where its own wall-clock date would say 12");
 
@@ -3946,9 +3954,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     reader: async (key) => (key === "board:short" ? { payload: { sessionDate: "2026-09-21", rows: [{ t: "X" }] } }
       : { payload: null, absent: true }),
   });
-  ok(cold.status === "same-session" && /searched back 10 weekdays/.test(cold.note) && /held none/.test(cold.note),
+  ok(cold.status === "same-session" && /searched back 10 sessions/.test(cold.note) && /held none/.test(cold.note),
      "with no archive either, the refusal stands and says the archive was searched");
-  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten weekdays back — two weeks of archive");
+  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten sessions back — two weeks of archive");
 
   const ok0 = await resolveBoardMemory("long", "2026-09-21", {
     reader: async (key) => (key === "board:long" ? { payload: { sessionDate: "2026-09-18", rows: [{ t: "Z" }] } }
@@ -4265,7 +4273,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 {
   const http = await import("node:http");
   const today = easternNow().date;
-  const days = priorWeekdays(today, 8).reverse();
+  const days = priorTradingDays(today, 8, null).reverse();
   const SESSION = days[days.length - 1];
   const vendorCalls = [];
   const uwServer = http.createServer((req, res) => {
@@ -5140,6 +5148,130 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1"] }, "the record counts both and keeps the first three lines, failures first");
     ok(healthRecord({ failures: ["y".repeat(500)], warnings: [] }).first[0].length <= 160, "and caps each line");
   }
+}
+
+{
+  const intl = (at) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(at).map((x) => [x.type, x.value]));
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute) };
+  };
+  let swept = 0;
+  let off = null;
+  for (let t = Date.UTC(2025, 0, 1); t < Date.UTC(2028, 0, 1); t += 37 * 60000) {
+    const a = easternNow(new Date(t));
+    const b = intl(new Date(t));
+    if (a.date !== b.date || a.minutes !== b.minutes) { off = `${new Date(t).toISOString()}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`; break; }
+    swept++;
+  }
+  ok(off === null && swept > 40000, `HOLIDAYS 0: the Eastern clock the pipeline reads is the IANA zone's, at ${swept} instants across 2025-2027 and every daylight-saving edge (${off})`);
+  let threw = null;
+  try { easternNow(new Date("nonsense")); } catch (error) { threw = error; }
+  ok(threw instanceof RangeError, "and an invalid instant is refused rather than answered with a date");
+
+  const at = (iso, session = "2026-09-04") => intradayRefusal(session, { at: new Date(iso) });
+  ok(!at("2026-09-07T15:00:00Z").inside && !at("2026-09-07T15:00:00Z").refuse,
+     "HOLIDAYS 1: a manual run at 11:00 ET on Labor Day is not inside a session, because none is in progress");
+  ok(!at("2026-04-03T14:00:00Z", "2026-04-02").refuse && !at("2026-11-26T15:00:00Z", "2026-11-25").refuse,
+     "and so on Good Friday and Thanksgiving");
+  ok(at("2026-09-08T15:00:00Z").inside && at("2026-09-08T15:00:00Z").refuse,
+     "while the next morning, a trading day, still refuses");
+  ok(at("2026-11-27T15:00:00Z", "2026-11-25").inside, "and so does the day after Thanksgiving, a short session but a session");
+
+  same(priorTradingDays("2026-09-08", 3, null), ["2026-09-04", "2026-09-03", "2026-09-02"],
+    "HOLIDAYS 2: the archive walk back from the day after Labor Day counts sessions, not weekdays");
+  const asked = [];
+  const mem = await resolveBoardMemory("long", "2026-09-08", {
+    sessions: 3,
+    reader: async (key) => {
+      asked.push(key);
+      return key === "board:long" ? { payload: { sessionDate: "2026-09-08", rows: [{ t: "X" }] } } : { payload: null, absent: true };
+    },
+  });
+  same(asked, ["board:long", "board:long:2026-09-04", "board:long:2026-09-03", "board:long:2026-09-02"],
+    "and reads three dated boards that can exist, never the holiday's key");
+  ok(/searched back 3 sessions/.test(mem.note), "the note says sessions");
+
+  ok(closedPriceWindow("2026-09-07T15:00:00Z", "2026-09-04"),
+     "HOLIDAYS 3: a board for Friday 09-04 written at 11:00 ET on Labor Day still holds Friday's close, because no session opened");
+  ok(closedPriceWindow("2026-04-03T15:00:00Z", "2026-04-02"),
+     "and a Thursday board written on Good Friday holds Thursday's close");
+  ok(closedPriceWindow("2026-09-08T13:29:00Z", "2026-09-04") && !closedPriceWindow("2026-09-08T13:31:00Z", "2026-09-04"),
+     "until the open of the next session that does trade, to the minute");
+  ok(!closedPriceWindow("2026-09-08T15:00:00Z", "2026-09-04"), "and not after it");
+
+  const wall = (date, minutes) => ({ date, minutes });
+  ok(!sessionBarOverdue("2026-09-04", wall("2026-09-07", 17 * 60)),
+     "HOLIDAYS 4: no bar is overdue at 17:00 ET on Labor Day, so the same-session note does not fire");
+  ok(sessionBarOverdue("2026-09-04", wall("2026-09-08", 17 * 60)), "on the next trading day after the close it does");
+  ok(!sessionBarOverdue("2026-09-04", wall("2026-09-08", 15 * 60)) && !sessionBarOverdue("2026-09-08", wall("2026-09-08", 17 * 60)) &&
+     !sessionBarOverdue(null, wall("2026-09-08", 17 * 60)) && !sessionBarOverdue("2026-09-04", wall("2026-09-12", 17 * 60)),
+     "and not before the close, on the session's own day, with no session, or on a Saturday");
+  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  ok(/gate\.skip && sessionBarOverdue\(sessionDate, wall\)/.test(src), "main asks that function");
+  ok(!/Intl\.DateTimeFormat|isWeekday\(|function nextWeekday|function priorWeekdays/.test(src),
+     "and the pipeline keeps no clock or weekday calendar of its own");
+}
+
+{
+  const raw = { data: [
+    { headline: "  Gold hits a record  ", source: " Wire ", created_at: "2026-09-21T14:00:00Z", is_major: 1, sentiment: " positive ",
+      tickers: ["gld", " GLD ", "nem", 7, ""], tags: ["metals", "metals", " macro ", null] },
+    { headline: "Undated item", created_at: "not a date", is_major: null, tickers: "NVDA", tags: {} },
+    { headline: "   ", created_at: "2026-09-21T15:00:00Z" },
+    null, "text", 42,
+    { headline: "Later", created_at: "2026-09-21T16:30:00Z", is_major: false, source: "", sentiment: "" },
+    { created_at: "2026-09-21T17:00:00Z" },
+  ] };
+  const shaped = shapeNews(raw, { cap: 10 });
+  const fields = raw.data.map(newsFields).filter(Boolean);
+  eq(fields.length, 3, "news: three of the eight rows carry a headline");
+  eq(shaped.unusable, 5, "and the nightly counts the other five unusable");
+  eq(shaped.undatedSeen, 1, "and the one with a date it cannot read undated");
+  same(shaped.rows, [fields[2], fields[0], fields[1]], "THE NIGHTLY'S ROWS ARE THE SHARED FIELDS, newest first with the undated last");
+  same(fields[0], {
+    headline: "Gold hits a record", source: "Wire", createdAt: "2026-09-21T14:00:00Z", createdAtMs: Date.parse("2026-09-21T14:00:00Z"),
+    major: true, sentiment: "positive", tickers: ["GLD", "NEM"], tags: ["metals", "macro"],
+  }, "trimmed, upper-cased tickers de-duplicated, tags de-duplicated, major read as a boolean");
+  same(fields[1], {
+    headline: "Undated item", source: null, createdAt: "not a date", createdAtMs: null, major: null, sentiment: null, tickers: [], tags: [],
+  }, "an unparseable date keeps its text and has no instant, a string for tickers is none");
+  same(Object.keys(fields[0]), ["headline", "source", "createdAt", "createdAtMs", "major", "sentiment", "tickers", "tags"], "in the order the payload has always printed them");
+  const withId = newsRow(raw.data[0], 123);
+  same(Object.keys(withId), ["id", "ts", ...Object.keys(fields[0])], "the rail's row is the same fields behind an id and a timestamp");
+  const { id, ts, ...rest } = withId;
+  same(rest, fields[0], "and nothing else");
+  eq(id, `${Date.parse("2026-09-21T14:00:00Z")}|Gold hits a record`, "the id is the instant and the headline");
+  eq(ts, Date.parse("2026-09-21T14:00:00Z"), "a dated row is timestamped by its own instant");
+  const undated = newsRow(raw.data[1], 777);
+  eq(undated.ts, 777, "an undated row takes the time it was read");
+  eq(undated.id, "u|Undated item", "and an id with no instant");
+  eq(newsRow(raw.data[2], 1), null, "a blank headline is no row");
+  eq(newsRow(null, 1), null, "nor is null");
+  eq(newsRow("text", 1), null, "nor a string");
+  eq(newsRow({ headline: "h".repeat(200), created_at: "2026-09-21T14:00:00Z" }, 1).id.length, String(Date.parse("2026-09-21T14:00:00Z")).length + 1 + 80, "the id keeps 80 characters of the headline");
+}
+
+{
+  eq(liveRows, sharedRows, "ROWS: the live layer's reader is the shared one");
+  eq(pulseRows, sharedRows, "and the pulse's");
+  eq(politicalRows, sharedRows, "and the political feed's");
+  eq(legRows, sharedRows, "and the legs'");
+  eq(volRows, rowsOrNull, "and the vol shaper's null-on-miss reader is the shared one that says so");
+  const bodies = [[1, 2], { data: [3] }, { data: [] }, { data: "x" }, { data: { rows: [] } }, { rows: [4] }, null, undefined, "text", 7, {}, [], true];
+  for (const b of bodies) {
+    const want = Array.isArray(b) ? b : (b && typeof b === "object" && Array.isArray(b.data) ? b.data : null);
+    same(rowsOrNull(b), want, `rowsOrNull(${JSON.stringify(b)}) is the array or null`);
+    same(sharedRows(b), want || [], `rowsOf(${JSON.stringify(b)}) is the array or empty`);
+    same(positioningRows(b), want, `positioning reads ${JSON.stringify(b)} the same way`);
+  }
+  same(sharedRows({ items: [5] }, "items"), [5], "a named key is read when asked");
+  same(sharedRows({ data: [5] }, "items"), [], "and only that key");
+  same(positioningRows({ chains: [1] }, "chains"), [1], "positioning's chains rule is its own and unchanged");
+  same(positioningRows([1], "chains"), null, "an array is not a chains body");
+  same(positioningRows({ data: { a: 1 } }, "object"), { a: 1 }, "nor is its object rule");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

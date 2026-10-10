@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, lastCompletedSession,
-  isTradingDay, isHoliday, isEarlyCloseDay, prevTradingDay, nextTradingDay, phaseAt, expectedNightlySession,
+  isTradingDay, isHoliday, isEarlyCloseDay, prevTradingDay, nextTradingDay, priorTradingDays, phaseAt, expectedNightlySession,
   freshnessState, sessionOpen, easternInstant, closeMinutes, PHASE_MINUTES, FRESH_CLASSES, classOf }
   from "../shared/flows-freshness.js";
 import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/flows-quant-time.js";
@@ -229,6 +229,16 @@ const NYSE_PUBLISHED = Object.freeze({
   eq(expectedNightlySession(easternInstant("2026-10-15", 12 * 60), clock), "2026-10-13",
     "so the morning after it the nightly expected is the session before the closure");
   eq(prevTradingDay("2026-10-15", clock), "2026-10-13", "and the previous session skips it");
+  same(priorTradingDays("2026-10-15", 3, clock), ["2026-10-13", "2026-10-12", "2026-10-09"], "priorTradingDays walks back over a tape-proven closure and the weekend");
+  same(priorTradingDays("2026-09-08", 3), ["2026-09-04", "2026-09-03", "2026-09-02"], "and over Labor Day");
+  same(priorTradingDays("2026-04-06", 3), ["2026-04-02", "2026-04-01", "2026-03-31"], "and over Good Friday");
+  same(priorTradingDays("2026-11-30", 2), ["2026-11-27", "2026-11-25"], "and over Thanksgiving, keeping the short Friday");
+  same(priorTradingDays("2026-09-22", 0), [], "a count of zero is empty");
+  same(priorTradingDays("2026-09-22", -2), [], "so is a negative one");
+  same(priorTradingDays("garbage", 3), [], "an unparseable day has no prior sessions");
+  same(priorTradingDays("2026-09-22", Number.NaN), [], "and a count that is not a number asks for none");
+  eq(priorTradingDays("2026-09-22", 252).length, 252, "a year of sessions is answered whole");
+  ok(priorTradingDays("2026-09-22", 252).every((d, i, list) => isTradingDay(d) && (i === 0 || d < list[i - 1])), "every one a trading day, newest first");
   ok(isTradingDay(day, { closedDays: "2026-10-14" }), "a closed_days value that is not an array is ignored, not trusted");
   ok(!isTradingDay("2026-10-15", { day: "2026-10-15", trading: 0 }) && isTradingDay("2026-10-15", { day: "2026-10-14", trading: 0 }),
     "today's tape verdict closes today and never another day");

@@ -1,3 +1,5 @@
+import { rowsOrNull as rowsOf } from "./flows-rows.js";
+
 export const VOL_SCHEMA_VERSION = 1;
 
 export const TRADING_YEAR = 252;
@@ -553,11 +555,7 @@ const parsePct = (v) => {
 
 const plausibleIv = (v) => v !== null && v >= IV_BOUNDS[0] && v <= IV_BOUNDS[1];
 
-export function rowsOf(body) {
-  if (Array.isArray(body)) return body;
-  if (body && typeof body === "object" && Array.isArray(body.data)) return body.data;
-  return null;
-}
+export { rowsOf };
 
 export function compositeOf(body) {
   const data = body && typeof body === "object" && !Array.isArray(body) ? body.data : null;

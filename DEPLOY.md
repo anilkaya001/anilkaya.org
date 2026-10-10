@@ -1570,11 +1570,11 @@ them draws a window that is silently one to three days early.
 | Quantity | Origin | Why |
 |---|---|---|
 | every **price** (`px`) | `sessionDate` | the last COMPLETED session |
-| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `nextWeekday(sessionDate)` — the first session after the one priced, which is what the earnings gate counts from |
+| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `nextTradingDay(sessionDate)` — the first session after the one priced, which is what the earnings gate counts from |
 
 `resolveSessionDate()` returns the last session that has closed; after the
-close that is the same day, and `gateOrigin` is the next weekday — **Monday on
-a Friday**. The gate used to count from the run's wall-clock date, which was
+close that is the same day, and `gateOrigin` is the next trading day — **Monday on
+a Friday, Tuesday after a Monday holiday**. The gate used to count from the run's wall-clock date, which was
 the next session only because the run fired the next morning; once the run
 moved after the close that anchor would have been a session early. In the
 dry-run payload the two are `2026-08-24` and `2026-08-25`.
@@ -1738,7 +1738,8 @@ changes which tape is read.
 Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
 
 - **The intraday refusal.** After `resolveSessionDate()`, a run whose Eastern
-  clock is inside 09:30–16:00 on a weekday throws before any read. The
+  clock is inside 09:30–16:00 on a trading day throws before any read; a
+  weekday holiday is not one, so a manual run on it is allowed. The
   `allow_intraday` dispatch input (`FLOWS_ALLOW_INTRADAY=1`) overrides it and
   the log says what that publishes.
 - **The same-session gate.** The gate reads all three of the session's archive

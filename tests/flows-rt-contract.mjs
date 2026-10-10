@@ -19,7 +19,8 @@ import { liveEntry } from "../shared/flows-live-worker.js";
 import { buildFlowAlerts } from "../shared/flows-alerts.js";
 import { FOCUS_STRIP_FALLBACK } from "../shared/flows-focus.js";
 import { boardPlan } from "../scripts/flows-legs/live.mjs";
-import { shapeNews } from "../scripts/flows-pipeline.mjs";
+import { newsFields } from "../shared/flows-news.js";
+import { rowsOf as vendorRows } from "../shared/flows-rows.js";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { createFakeVendor, fetchFor, ALERT_EVERY_MS } from "./rt-fixtures.mjs";
 import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
@@ -378,19 +379,19 @@ const SESSION_NOW = at(10, 0);
   const news = vendor.news();
   const ns = RT.createNewsState();
   const nOut = RT.applyNews(ns, news, { at: SESSION_NOW });
-  const piped = shapeNews(news, { cap: 100 }).rows;
+  const piped = vendorRows(news).map(newsFields).filter(Boolean);
   const norm = (r) => `${r.createdAtMs}|${r.headline}`;
   const nMap = new Map(piped.map((r) => [norm(r), r]));
-  eq(nOut.rows.length, Math.min(piped.length, RT.RT_TOPICS.nw.rowMax), "nw: the ring holds as many rows as the nightly shaper's cap");
+  eq(nOut.rows.length, Math.min(piped.length, RT.RT_TOPICS.nw.rowMax), "nw: the ring holds as many rows as the shared shaper reads, up to its cap");
   for (const r of nOut.rows) {
     const { id, ts, ...rest } = r;
-    deep(rest, nMap.get(norm(r)), `nw ${r.createdAtMs}: the row is the pipeline's news row`);
+    deep(rest, nMap.get(norm(r)), `nw ${r.createdAtMs}: the row is the shared news row the nightly also shapes`);
   }
   eq(RT.applyNews(ns, news, { at: SESSION_NOW + 30000 }).rows.length, 0, "nw: the same headlines again add nothing");
   const fresher = createFakeVendor({ session: DAY, clock: () => SESSION_NOW + 45000 }).news();
   ok(RT.applyNews(ns, fresher, { at: SESSION_NOW + 45000 }).rows.length >= 2, "nw: new headlines arrive as rows");
   ok(ns.ring.length <= RT.RT_TOPICS.nw.rowMax, "nw: the ring is bounded");
-  eq(RT.newsRow({ headline: "  " }, 1), null, "nw: a headline-less row is unusable, as in the pipeline");
+  eq(RT.newsRow({ headline: "  " }, 1), null, "nw: a headline-less row is unusable, as in the nightly");
 }
 
 {

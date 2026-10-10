@@ -1,3 +1,5 @@
+import { rowsOf as unwrapRows } from "./flows-rows.js";
+
 const num = (v, d = null) => {
   if (v === null || v === undefined || v === "") return d;
   const n = Number(v);
@@ -5,11 +7,7 @@ const num = (v, d = null) => {
 };
 const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-export const unwrapRows = (raw) => {
-  if (Array.isArray(raw)) return raw;
-  if (raw && Array.isArray(raw.data)) return raw.data;
-  return [];
-};
+export { unwrapRows };
 
 export const POLITICAL_CAPS = Object.freeze({
   buyers: 25,

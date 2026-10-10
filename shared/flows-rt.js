@@ -5,6 +5,7 @@ import {
 } from "./flows-live.js";
 import { alertRow, alertKey } from "./flows-alerts.js";
 import { focusStripNames } from "./flows-focus.js";
+import { newsRow } from "./flows-news.js";
 
 export { TICKER_RE };
 
@@ -571,27 +572,7 @@ export function shapeMk(raws, { at, session }) {
   };
 }
 
-export function newsRow(row, at) {
-  if (!row || typeof row !== "object") return null;
-  const headline = typeof row.headline === "string" && row.headline.trim() ? row.headline.trim() : null;
-  if (headline === null) return null;
-  const createdAt = typeof row.created_at === "string" && row.created_at.trim() ? row.created_at.trim() : null;
-  const parsed = createdAt === null ? NaN : Date.parse(createdAt);
-  const createdAtMs = Number.isFinite(parsed) ? parsed : null;
-  const uniq = (list, f) => (Array.isArray(list) ? [...new Set(list.filter((t) => typeof t === "string" && t.trim()).map(f))] : []);
-  const ts = createdAtMs === null ? at : createdAtMs;
-  return {
-    id: `${createdAtMs === null ? "u" : createdAtMs}|${headline.slice(0, 80)}`,
-    ts,
-    headline,
-    source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : null,
-    createdAt, createdAtMs,
-    major: row.is_major === null || row.is_major === undefined ? null : Boolean(row.is_major),
-    sentiment: typeof row.sentiment === "string" && row.sentiment.trim() ? row.sentiment.trim() : null,
-    tickers: uniq(row.tickers, (t) => t.trim().toUpperCase()),
-    tags: uniq(row.tags, (t) => t.trim()),
-  };
-}
+export { newsRow };
 
 export function shapeNw(raw, { at }) {
   const list = rowsOf(raw);
