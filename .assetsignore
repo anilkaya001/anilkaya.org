@@ -17,6 +17,7 @@ assets/js/curriculum-academy.js
 assets/data/stage-id-map-v2.json
 worker.js
 wrangler.toml
+wrangler.*.toml
 .assetsignore
 .gitignore
 .dev.vars*

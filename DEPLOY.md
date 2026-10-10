@@ -3341,3 +3341,102 @@ frames uncompressed), then compare the panel's received bytes on that socket wit
 is not needed on bytes' account. If the bytes still matter, the lever is on the
 server: fewer px names, or a slower px cadence for the names no module on the
 page shows.
+
+### 10.6 The staging Worker, the external prober and the load test
+
+Three tools stand outside production so that a change to a Durable Object, a
+migration, a limiter or the rail meets a copy first, an outage is noticed from
+outside Cloudflare, and the capacity claims have a measurement. Nothing here
+runs unless the owner creates the pieces named below; the repository holds only
+the tools and their configuration.
+
+**Staging Worker.** `wrangler.staging.toml` is a complete, separate
+configuration (not an `[env]` of `wrangler.toml`, so the production file and its
+resolved bindings are untouched): the Worker `anilkaya-staging`, the same
+entrypoint, static bundle and compatibility date, a D1 database `iewt-staging`,
+its own `PULSE` Durable Object, the same six rate-limit bindings under their own
+namespaces (2101 to 2106) with production's limits, no Cron Trigger (the limit
+is five per account and production registers four), no route or custom domain
+(it serves at `workers.dev`), and no Workers AI binding, so staging cannot spend
+neurons. `FLOWS_LIVE_MODE` is `off` and no repository or workflow is named, so it
+can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;
+the rail is on for `members`. `.assetsignore` keeps the file out of the static
+bundle. It carries no secret; set staging's own.
+
+The owner's steps (the first three cannot be done from the repository):
+
+```bash
+./tests/node_modules/.bin/wrangler d1 create iewt-staging
+```
+
+1. Put the printed `database_id` in `wrangler.staging.toml` (the committed value
+   is an all-zero placeholder, which names no database).
+2. Apply the schema and every migration to it:
+   `./tests/node_modules/.bin/wrangler d1 execute iewt-staging --remote --file=./schema.sql`.
+3. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
+   `SESSION_SECRET`, `FLOWS_PEPPER`, `FLOWS_CREDENTIALS` (test members only, never
+   production's hashes) and, only if the vendor path is to be exercised,
+   `UW_API_KEY`. Without `UW_API_KEY` no vendor read is made; with it, staging
+   spends the same one vendor key production uses, so set it only for a run that
+   is meant to exercise the vendor path.
+4. Deploy: `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
+   A Workers Builds project for staging uses that deploy command.
+
+The plan also had production built only from a `production` branch that a
+promote step advances after staging's smoke checks pass. That depends on the
+release-branch and promote design, which the owner dropped (the permission
+safeguard cannot be changed), so production still deploys `main` on merge and
+staging is deployed by hand or by its own Workers Builds project. Run the smoke
+checks against it before merging a change to a Durable Object, a migration or a
+limiter:
+
+```bash
+node scripts/ops-probe.mjs smoke --base https://anilkaya-staging.<account>.workers.dev
+```
+
+It checks ten things from outside: the landing page's seven security headers,
+CSP and `no-cache`, the 308 from a legacy course URL, a rewritten course page,
+an anonymous `/api/me` of `{ user: null }`, the JSON 404 envelope, GET logout
+refused, the Flows API and the rail gated for an anonymous caller, the version
+token's one-hour cache and a versioned stylesheet's immutable one. It prints one
+JSON line and exits 1 on any failure.
+
+**External prober.** `node scripts/ops-probe.mjs probe --base https://anilkaya.org`
+fetches `/api/health` and one page (`/flows/login/`) and exits 0 or 1, printing
+one JSON line. `--health` and `--page` change the paths; until `/api/health`
+exists in the deployed Worker, run it with `--health /api/me`, which answers
+`200 { "user": null }` anonymously. It keeps a small state file
+(`--state`, mode 0600) so that `--fail-after 2` (the default) alerts once when
+two probes in a row fail and once when the next succeeds, and never for a single
+blip; the alert is a JSON `POST` of `{ text, content }` to the address in the
+environment variable `PROBE_WEBHOOK_URL` (or the one `--webhook-env` names),
+which no output ever prints. It is built to run from a scheduler that is not
+Cloudflare and not this repository's Actions (GitHub does not run a schedule
+every minute and delays the ones it runs): a cron line on any always-on host, or
+a third-party monitor that can run a command or call the same two URLs. A
+GitHub Issue as the alert channel needs a workflow with `issues: write`, which
+was not added; wiring the channel is the owner's step.
+
+**Load test.** `scripts/staging-load.mjs` signs in 20 simulated members
+(`LOAD_USERS=name:password,...` in the environment, staging's test members only),
+then holds the poll rung (each member reads `/api/rt/snap?k=px,fl,mk` every 5 s
+and `/api/flows/board` every 60 s) and the socket rung (one `/api/rt/ws` socket
+per member on `px,fl,mk,nw` with a focus ticker), half the window each, 30
+minutes by default. It writes a report: requests, 429s, errors and p50, p95 and
+max latency per route; sockets opened, frames by topic, snapshots, sequence gaps
+and `bye` codes; and a block of dashboard readings (Worker requests, Durable
+Object requests, D1 rows read and written, CPU) to fill in by hand from the
+dashboard for the same window. Sign-ins are paced under the 10 a minute per
+address login limit. It refuses any production host outright, any host that is
+not a staging name or loopback unless `--allow-host` names it, and any run
+without `--plan paid|free`. On `free` it prints the projected requests and
+refuses without `--priced`, and refuses even then past 25% of the 100,000
+requests a day the account shares with production; a 20-member, 30-minute run
+projects 3,940 Worker requests. `--dry-run` prints the plan and makes no call.
+
+```bash
+LOAD_USERS=... node scripts/staging-load.mjs --base https://anilkaya-staging.<account>.workers.dev --plan paid --out report.json
+```
+
+`tests/staging-contract.mjs` holds the staging configuration, the prober, the
+smoke checks and the load tool's guards against fakes, with no server.
