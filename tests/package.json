@@ -96,6 +96,7 @@
     "test:flows-ask": "node flows-ask.mjs",
     "test:flows-ask-render": "node flows-ask-render.mjs",
     "test:flows-track-render": "node flows-track-render.mjs",
+    "test:flows-pages-render": "node flows-pages-render.mjs",
     "test:flows-warnings": "node flows-warnings.mjs",
     "test:flows-sign": "node flows-sign.mjs",
     "test:flows-reading": "node flows-reading.mjs",
@@ -103,6 +104,7 @@
     "test:flows-reading-render": "node flows-reading-render.mjs"
   },
   "devDependencies": {
+    "axe-core": "4.13.0",
     "playwright": "1.61.1",
     "wrangler": "4.110.0"
   }
