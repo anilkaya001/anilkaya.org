@@ -1,0 +1,1 @@
+{"name": "worker", "class": "W", "group": "shard", "timing": false, "medianS": 225, "shard": 3, "files": ["worker-regression.mjs"], "covers": ["assets/css/base.css", "assets/fonts-version.txt", "assets/fonts/Inter-latin.woff2", "assets/version.txt", "schema.sql"]}

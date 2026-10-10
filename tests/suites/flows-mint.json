@@ -1,0 +1,1 @@
+{"name": "flows-mint", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "shard": 2, "files": ["flows-mint-contract.mjs"], "covers": ["scripts/generate-flows-credentials.mjs"]}

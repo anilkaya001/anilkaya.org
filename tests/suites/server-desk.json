@@ -1,0 +1,1 @@
+{"name": "server-desk", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 2, "files": ["server-desk.mjs"], "covers": ["scripts/flows-pipeline.mjs", "worker.js"]}

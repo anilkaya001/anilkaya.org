@@ -198,7 +198,7 @@ header readback with this repository after any dashboard rule change.
 
 The File map, the course counts, the production globals and the suite lists in
 this file sit between `gen:` markers and are written by `node scripts/gen-docs.mjs`
-from `docs/modules.json`, `docs/globals.json`, `tests/suites.json` and the
+from `docs/modules.json`, `docs/globals.json`, `tests/suites/*.json` and the
 catalogue; edit those inputs and regenerate, never the text between markers.
 A new tracked file needs a row in `docs/modules.json`. `docs/index.md` is the
 full generated index, and `docs/map-2026-10-05.md` is the frozen system map
@@ -328,7 +328,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `shared/flows-glossary.js`, `assets/css/flows-public.css`, `tests/flows-public-contract.mjs` | The public front door: `aboutPage` and `glossaryPage` in `shared/flows-pages.js`, served signed out at `/flows/about/` and `/flows/glossary/` (noindex, no data, no vendor call, `nav.js` the only script). Every glossary line is the exact string an information button on its page opens, and the contract fails when a line stops appearing in the source file it cites. |
 | `tests/flows-index-render.mjs` | The index in Chromium with no server: the real market and ticker HTML with every script but `flows-index.js` stubbed, modules drawn into the ticker grid by hand, sticky position, scroll-spy, jumps by click and by address, keyboard, 320/390/768/1440 with no sideways scroll and thumb-sized chips. |
 | `assets/js/flows-chart.js` | The Flows chart library and kernel (`FlowsUI.chart`: `mount`, `line`, `bars`, `diverging`, `heatmap`, `sparkline`, `gauge`, `payoff` and the primitives under them, plus the kernel: `kind(name, impl)` and `plot(host, spec)` over a closure `Map` registry (a duplicate name throws and the frozen object is never mutated), `scale` (linear, log, sqrt, band, session with closed hours compressed), `ticks` (labels through `F.unit` by kind name; a log domain with no positive part has none and one under a decade falls back to nice ticks), a two-dimensional `scrub` for bubble and scatter charts, a hidden description written from a kind's `data()` (the last value with its unit and time, then the low and the high), an optional table view and a provenance footer). The v1 calls are adapters over the same registry and render the same marks, held by node and attribute snapshots in `tests/fixtures-chart-kernel.json`. `dateTicks`, `fx1`, `tw` and `heightFor` are exported so that a controller keeps no copy of them (the ticker kept five), and `scrub` takes `ys`, `rs`, `yw` and `reach` for a chart whose marks are found in two dimensions, `first` to start the keyboard at the first mark, `xh` for the crosshair's opacity, `ariaHint` for the sentence after the label and, from a readout, `say` for the words announced. Split out of `flows-ui.js`. It re-publishes a new frozen `FlowsUI` with `chart` added, the way `flows-fresh.js` and `flows-rt.js` do, and `shared/flows-pages.js` emits it directly after `flows-ui.js` on the ten chart pages only (overview, the long and short boards, watch, desk, market, track, unusual, ticker, history, strategy); events, political, Ask and login never download it, so `FlowsUI.chart` is absent there. It duplicates the eight helpers `flows-ui.js` does not export (`paint`, `isoDay`, `AH`, `nextId`, `RAF`, `MON`, `spoken`, `moving`) rather than widening the frozen surface. Script order is load-bearing: a script that captured `window.FlowsUI` between the two would lose `chart`; `tests/flows-weight.mjs` and the worker and ticker contracts hold the order. |
-| `scripts/gen-docs.mjs`, `docs/modules.json`, `docs/globals.json`, `docs/index.md`, `tests/docs-contract.mjs` | Generated documentation. `gen-docs.mjs` writes the File map, the course counts, the production globals and the suite lists in this file between their `gen:` markers, and `docs/index.md` (every tracked file with its role, its exports as `file#symbol`, and the suites that reach it), from `docs/modules.json` (one row per module: paths or globs, role, domain; a row with a `show` cell is also a File map line), `docs/globals.json`, `tests/suites.json` and the sources. `--check` exits 1 on drift. `docs-contract.mjs` fails on any difference, on a tracked file no row names and on a row that matches no file. |
+| `scripts/gen-docs.mjs`, `docs/modules.json`, `docs/globals.json`, `docs/index.md`, `tests/docs-contract.mjs` | Generated documentation. `gen-docs.mjs` writes the File map, the course counts, the production globals and the suite lists in this file between their `gen:` markers, and `docs/index.md` (every tracked file with its role, its exports as `file#symbol`, and the suites that reach it), from `docs/modules.json` (one row per module: paths or globs, role, domain; a row with a `show` cell is also a File map line), `docs/globals.json`, `tests/suites/*.json` and the sources. `--check` exits 1 on drift. `docs-contract.mjs` fails on any difference, on a tracked file no row names and on a row that matches no file. |
 | `scripts/map/audit.mjs` | The reference audit: the share of `path:line` references in the listed documents (default `AGENTS.md`, `DEPLOY.md`, `README.md` and the frozen `docs/map-2026-10-05.md`) whose file is missing or whose line is past the end, printed, or written to the step summary when `GITHUB_STEP_SUMMARY` is set. A report, not a gate. |
 <!-- /gen:filemap -->
 
@@ -1165,8 +1165,8 @@ manual dispatch, and on a weekly schedule (`17 6 * * 1`, Monday 06:17 UTC). It
 uses pinned dependencies from `tests/package-lock.json`.
 
 `npm test` is `node run.mjs`, the fail-late runner. It runs every suite
-registered in `tests/suites.json`, in that file's order and with `tests/` as
-the working directory, whatever an earlier suite did; kills a suite at its
+registered in `tests/suites/` (one file per suite), the `fast` suites first and
+each group in name order, with `tests/` as the working directory, whatever an earlier suite did; kills a suite at its
 `timeoutS`, else at the larger of 120 s and three times its `medianS`; and
 exits 1 when any suite failed or timed out, 0 only when all passed, 2 on a
 usage or manifest error before anything runs, and 128 plus the signal's
@@ -1179,40 +1179,55 @@ signal after that window kills the suite at once. When a suite exits,
 whatever is left in its process group is killed. It prints a table
 of every suite's result, seconds and assertions, and appends it as Markdown,
 with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
-is set. **Every `test:*` script in `tests/package.json` needs an entry in
-`tests/suites.json`** (name, class `N`, `C` or `W`, `group` `fast` or `shard`
-(only `contracts` and `run` are `fast`), `timing`, `medianS`, an optional
-`timeoutS`, `files` and `covers`), or the runner refuses to start and exits 2.
+is set. **Every suite needs a file `tests/suites/<name>.json`**, one line:
+`{"name": "x", "class": "N", "group": "shard", "timing": false, "medianS": 1.2, "shard": 3, "files": ["x.mjs"], "covers": []}`
+(name, class `N`, `C` or `W`, `group` `fast` or `shard` (only `contracts` and
+`run` are `fast`), `timing`, `medianS`, an optional `timeoutS`, a `shard` pin,
+an optional `command`, `files` and `covers`). The runner refuses to start and
+exits 2 on a `test:*` script with no file, a file whose `name` is not its own
+file name, a suite with a script and a `command`, an empty `command`, and a pin
+outside 1 to 6. A suite takes its command from its `test:<name>` script in
+`tests/package.json`; a new suite should carry a `command` of its own instead,
+so that adding it touches no line of `package.json` either, and a suite without
+a script runs alone with `node run.mjs --only x`. A new suite is a new file and
+nothing else, so two branches that each add one merge without a textual
+conflict (the test builds such a repository and merges it, with the old
+single-array `suites.json` as the control that does conflict).
+
 The registry is the single list of what the suites are and what they read:
 `files` are the files the suite's script runs (flags skipped), `timing` marks the
 eight suites with an in-process CPU or wall-clock gate (the tag the flake policy
-will key on), and `covers` are globs of the repository files the suite reads
-that its import closure does not reach (pages, assets, schema, fixtures), which
-the planned affected-suite selection joins to the closure. The top-level
-`support` lists every other `tests/*.mjs` and `tests/lib/*.mjs`. Adding a suite
-is a `package.json` script, a name in `suites.json` and `node
-tests/lib/suite-registry.mjs --write`, which fills `class`, `group`, `timing`
-(false), `files`, `covers` and `support` from the tree and never drops a `covers`
-entry that still matches a file; without `--write` the same command checks the
-registry and exits 1 on a problem. `run-contract` holds it: a test file in no
-suite's `files` and not in `support`, a `class` that is not what the import
-closure makes it (`W` if it reaches `tests/worker-server.mjs`, else `C` if it
-imports `playwright` outside the optional launcher `tests/lib/browser.mjs`, else
-`N`), a `files` list that differs from the script, an unknown `group`, a
-non-boolean `timing`, a literal path the suite reads that no `covers` glob
-names, a glob that matches nothing, and a support file nothing reaches each fail,
-proved on a miniature repository in a temporary directory.
+keys on), and `covers` are globs of the repository files the suite reads that
+its import closure does not reach (pages, assets, schema, fixtures), which the
+planned affected-suite selection joins to the closure. A helper is any other
+`tests/*.mjs` or `tests/lib/*.mjs` that a suite's import closure reaches; there
+is no list of them to edit. After writing the new file, `node
+tests/lib/suite-registry.mjs --write` fills `class`, `group`, `timing` (false),
+`files` and `covers` from the tree and never drops a `covers` entry that still
+matches a file; without `--write` the same command checks the registry and exits
+1 on a problem. `run-contract` holds it: a test file in no suite's `files` that no
+suite's import closure reaches, a `class` that is not what the import closure
+makes it (`W` if it reaches `tests/worker-server.mjs`, else `C` if it imports
+`playwright` outside the optional launcher `tests/lib/browser.mjs`, else `N`), a
+`files` list that differs from the script, an unknown `group`, a non-boolean
+`timing`, a literal path the suite reads that no `covers` glob names, and a glob
+that matches nothing each fail, proved on a miniature repository in a temporary
+directory.
 `node run.mjs --only a,b` (from `tests/`, names without the `test:` prefix)
 runs those suites alone, `--bail` stops at the first failure as the old
 chain did, and `--timeout-scale=x` multiplies every timeout on a slow
 machine (a timeout past `setTimeout`'s 2^31-1 ms is held there, so a very
 large scale switches timeouts off rather than firing them at once).
 `--group fast|shard` runs one group, in manifest order. `--shard i/n` runs
-the i-th of n shards of the `shard` group: longest `medianS` first into the
-cheapest shard, a shard charged 24 s of Chromium install when it takes its
-first `C` or `W` suite, equal medians taken in manifest order and an equal
-cost given to the lower shard, the fast suites weighed and then left out;
-each shard runs in manifest order.
+the i-th of n shards of the `shard` group. At the CI count (6, `CI_SHARDS` in
+`run.mjs`) a suite goes to the shard its own file pins; a suite with no valid
+pin is placed after the pinned ones, longest `medianS` first into the cheapest
+shard. At any other count nothing is pinned and every suite is placed that way,
+a shard charged 24 s of Chromium install when it takes its first `C` or `W`
+suite, equal medians taken in manifest order and an equal cost given to the
+lower shard, the fast suites left out; each shard runs in manifest order.
+`node run.mjs --repin` rewrites every pin to that packing, one line per file,
+and strips the pin from a suite in the `fast` group.
 `--needs-browser` with either prints `true` or `false` (whether the
 selection holds a `C` or `W` suite) and runs nothing. An empty shard or
 group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
@@ -1220,7 +1235,7 @@ group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
 still runs one suite by itself, and `npm test` with no flag still runs the
 whole chain.
 
-**Flake policy.** Only a suite tagged `timing` in `tests/suites.json` (an
+**Flake policy.** Only a suite tagged `timing` in its `tests/suites/<name>.json` (an
 in-process CPU or wall-clock gate; the manifest refuses the tag on any suite that
 is not class `N`, so a Chromium or workerd suite is never retried) is run a second
 time, and only when `CI` is `true`: locally the first failure is the result. A
@@ -1247,7 +1262,6 @@ runs `if: always()`, and is green only when the fast job and every shard
 succeeded. `test` is the job a ruleset on `main` should require (A-15); as
 of 2026-10-05 `main` has no branch protection and no ruleset, so nothing
 requires it yet and Workers Builds still deploys `main` on merge.
-
 On a push to `main` a fourth job, `reuse`, runs first (`scripts/ci-reuse.mjs`, read-only
 token). The pull-request run's `test` job writes a `tested-tree` commit status on the PR
 head, whose description is the git tree of the exact commit `fast` checked out and whose link
@@ -1258,15 +1272,28 @@ behind it through the Actions API: it must be completed and successful, event
 repository. Only then are `fast` and the shards skipped (`test` requires them skipped),
 about 32 runner-minutes saved and push-to-green about two minutes. Any doubt, an API error
 included, runs the full gate; the weekly schedule and manual dispatch never reuse. `statuses:
-write` belongs to the `test` job alone and `pull-requests: read` to `reuse` alone. **Adding a suite, or refreshing
-a `medianS`, means changing `tests/suites.json` AND republishing
-`PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
-packing (unchanged when no suite moves), then running
-`node run-contract.mjs` from `tests/`.** The contract
-holds the packing equal to that table, so a suites.json entry alone turns
-`run` red in the fast job (`THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED
-TABLE`), and its message prints the packing computed now in the table's shape,
-ready to paste.
+write` belongs to the `test` job alone and `pull-requests: read` to `reuse` alone.
+
+**Adding a suite
+means adding `tests/suites/<name>.json` with a `command` and a `shard` pin from 1 to 6 and
+running `node run-contract.mjs` from `tests/`; refreshing a `medianS` means
+editing that one line.** There is no published table to republish
+(`PUBLISHED_SHARDS` is gone). The contract holds each `shard`-group suite to a
+pin (`EVERY SUITE OF THE SHARD GROUP PINS ITS SHARD`) and the six shards to a
+balance: the heaviest, counted as medians plus the Chromium install, within
+1.3 times the lightest (`A SHARD FAR OUTSIDE THE TOLERANCE FAILS`, whose
+message prints the loads). Pin a new suite to the lightest shard; when a
+refresh or a run of additions pushes the balance past the tolerance, run
+`node run.mjs --repin` and commit the changed pins in their own pull request.
+Moving CI to another shard count changes `CI_SHARDS` in `run.mjs`, the
+workflow's three counts and the pins together, and `--repin` writes the pins.
+Client pull requests that bump the asset token are merged in a train: the
+integrator merges a batch, resolves any `?v=` and `assets/version.txt`
+conflict by taking the base's values, and runs `node scripts/bump-assets.mjs`
+and then `--check` once for the batch, not once per rebase. The same train ends
+with `node run.mjs --repin` from `tests/` after each merge batch: pins chosen by
+branches that were each balanced alone drift apart once their suites meet, and
+the contract's balance line is where that shows.
 
 ### Which suites need the dev server, and which do not
 
@@ -1312,7 +1339,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites.json` registers 104 suites: 65 that need only Node (N), 22 that also
+`tests/suites/` registers 104 suites: 65 that need only Node (N), 22 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1321,34 +1348,34 @@ each suite's import closure, so this list cannot drift from it. A name is the
 Confirmed to run with no server and no browser (N):
 
 ```
-contracts                 run                       markets                   flows
-pipeline                  flows-probe               flows-ws-probe            flows-universe
-flows-legs                flows-record              flows-chain-panels        mastery
-academy                   flows-basis               flows-payload-shape       flows-scores
-flows-alerts              flows-mint                flows-pulse               flows-freshness
-flows-live                flows-rt                  flows-starts              flows-reads
-flows-readers             flows-ledger              flows-verdict             flows-stock
-flows-permits             flows-overlay             flows-political           flows-weight
-flows-brief               flows-warnings            flows-sign                flows-garch
-flows-quant               flows-quant-card          flows-neuron              flows-variation
-flows-vol                 flows-positioning         flows-quant-audit         flows-neuron-screen
-flows-dossier             flows-dossier-reads       flows-reading             flows-reading-worker
-architecture              docs                      route-matrix              server-kernel
-server-router             server-desk               server-ai                 server-ingest
-flows-ai-broker           flows-conviction          flows-stats               flows-public
-lab-write                 staging                   launch-readiness          flows-calibration
-flows-dispersion
+contracts                 run                       academy                   architecture
+docs                      flows                     flows-ai-broker           flows-alerts
+flows-basis               flows-brief               flows-calibration         flows-chain-panels
+flows-conviction          flows-dispersion          flows-dossier             flows-dossier-reads
+flows-freshness           flows-garch               flows-ledger              flows-legs
+flows-live                flows-mint                flows-neuron              flows-neuron-screen
+flows-overlay             flows-payload-shape       flows-permits             flows-political
+flows-positioning         flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-readers
+flows-reading             flows-reading-worker      flows-reads               flows-record
+flows-rt                  flows-scores              flows-sign                flows-starts
+flows-stats               flows-stock               flows-universe            flows-variation
+flows-verdict             flows-vol                 flows-warnings            flows-weight
+flows-ws-probe            lab-write                 launch-readiness          markets
+mastery                   pipeline                  route-matrix              server-ai
+server-desk               server-ingest             server-kernel             server-router
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
 
 ```
-market-ticker             landing-motion            placement                 flows-rt-client
-flows-desk-client         flows-desk-wiring         flows-ticker              flows-render
-flows-events              flows-readers-render      flows-export              flows-net-render
-flows-strip               flows-ask                 flows-track-render        flows-reading-render
-flows-conviction-render   flows-kit                 flows-chart-kernel        flows-index
-flows-pages-render        flows-deadline-render
+flows-ask                 flows-chart-kernel        flows-conviction-render   flows-deadline-render
+flows-desk-client         flows-desk-wiring         flows-events              flows-export
+flows-index               flows-kit                 flows-net-render          flows-pages-render
+flows-readers-render      flows-reading-render      flows-render              flows-rt-client
+flows-strip               flows-ticker              flows-track-render        landing-motion
+market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 
@@ -1486,7 +1513,7 @@ takes the same Node floor. `flows-readers-render` about 10 s: Chromium against
 stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
 `flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server (192 s
-as the CI median in `tests/suites.json`). It
+as the CI median in `tests/suites/`). It
 was on neither list, so a source scan in it (every ingest call site must
 `await ingestHeaders(`) went unrun until CI caught it.
 
@@ -1542,7 +1569,7 @@ test early). Set `RT_ONLY` to a regular expression of section names (`merge`,
 `ticker`, ...) to run part of it; `RT_ONLY=measure` runs the measurement block
 alone on the real clock and prints the numbers DEPLOY.md 10.5n quotes.
 `flows-net-render` needs Chromium and no server (set `PLAYWRIGHT_BROWSERS_PATH`);
-it is registered in `tests/suites.json` as class `C`. It serves `unusualPage` itself, the assets from disk and the alerts, the universe
+it is registered in `tests/suites/flows-net-render.json` as class `C`. It serves `unusualPage` itself, the assets from disk and the alerts, the universe
 and every other `/api/flows/*` route from `page.route`, and closes the rail's
 socket with 4011. It was measured on 2026-10-05 at about 75 s with 164 checks (load average 7.5);
 the 3D version on 2026-10-10 at 115 s with 13,483 checks (load average 2), most of it
@@ -1559,10 +1586,12 @@ its median under 4 ms, a guard rather than the 2 ms target the module was built 
 `flows-quant-card` was measured the same day: under 2 s with no server. It
 rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
-`run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s with no
-server and 379 assertions, almost all of it waiting out the fixtures' timeouts
-and kill graces. It checks `tests/suites.json` against `package.json` and against the tree (the
-registry rules above, with a mutation for each), then
+`run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s (about 45 s on a loaded 4-core machine, with the scratch merge) with no
+server and 379 assertions (about 550 since the suite registry became a directory),
+almost all of it waiting out the fixtures' timeouts
+and kill graces. It checks `tests/suites/` against `package.json`, the pins and
+the shard balance, merges two branches that each add a suite in a scratch
+repository, then
 spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
 hang that ignores SIGTERM, a flaky suite, a detached process that holds a
 suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide
@@ -1577,11 +1606,11 @@ elsewhere, so it runs on macOS too.
 Confirmed to need one (W; set `FLOWS_TEST_SANDBOX=1` in the agent sandbox):
 
 ```
-worker                    flows-worker              flows-rt-server           flows-chain
-flows-desk                flows-overview            flows-sections            flows-market
-flows-legacy              flows-motion              browser                   flows-unusual
-flows-political-render    flows-watch-render        flows-board-render        flows-strategy
-flows-ask-render
+browser                   flows-ask-render          flows-board-render        flows-chain
+flows-desk                flows-legacy              flows-market              flows-motion
+flows-overview            flows-political-render    flows-rt-server           flows-sections
+flows-strategy            flows-unusual             flows-watch-render        flows-worker
+worker
 ```
 <!-- /gen:suites-server -->
 
@@ -1604,7 +1633,7 @@ out rather than assuming.
 
 **Why this section exists.** `flows-card-render` was filed as needing a
 server. It does not — it renders through `page.setContent` and finished in
-nine seconds when measured locally (`tests/suites.json` holds the CI median). Because it was skipped locally it went unrun for a whole
+nine seconds when measured locally (`tests/suites/` holds the CI median). Because it was skipped locally it went unrun for a whole
 branch, and it then found three real defects at once: a drawer count left
 behind by a new panel, a chart shipping `preserveAspectRatio="none"` so its
 bar heights meant nothing, and an SVG label clipped off its own canvas by

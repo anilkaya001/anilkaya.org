@@ -1,0 +1,1 @@
+{"name": "flows-reads", "class": "N", "group": "shard", "timing": true, "medianS": 34.3, "shard": 4, "files": ["flows-reads-contract.mjs"], "covers": ["schema.sql", "scripts/flows-pipeline.mjs", "server/ai.js", "worker.js"]}

@@ -1,0 +1,1 @@
+{"name": "flows-dossier-reads", "class": "N", "group": "shard", "timing": true, "medianS": 5.6, "shard": 4, "files": ["flows-dossier-reads.mjs"], "covers": ["schema.sql", "scripts/flows-pipeline.mjs", "tests/fixtures-dossier-vendor.json"]}

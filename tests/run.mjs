@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import { readFileSync, appendFileSync, rmSync } from "node:fs";
+import { readFileSync, appendFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readQuarantine, recordedFor, todayUtc } from "./lib/quarantine.mjs";
+import { SUITES_DIR, FIELD_ORDER, formatSuite } from "./lib/suite-registry.mjs";
+export { SUITES_DIR, formatSuite };
 
 export const DEFAULT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const TIMEOUT_FLOOR_S = 120;
@@ -17,13 +19,15 @@ export const TAIL_LINE_CHARS = 400;
 export const SUMMARY_TAIL_BUDGET = 512 * 1024;
 export const CHROMIUM_SETUP_S = 24;
 export const MAX_SHARDS = 32;
+export const CI_SHARDS = 6;
+export const SHARD_BALANCE = 1.3;
 const CLASSES = new Set(["N", "C", "W"]);
 const GROUPS = new Set(["fast", "shard"]);
 
 export class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1, shard: null, group: null, needsBrowser: false };
+  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1, shard: null, group: null, needsBrowser: false, repin: false };
   for (let i = 0; i < argv.length; i++) {
     const raw = argv[i];
     const eqAt = raw.indexOf("=");
@@ -50,8 +54,10 @@ export function parseArgs(argv) {
       if (!GROUPS.has(v)) throw new UsageError(`--group is fast or shard, not ${JSON.stringify(v)}`);
       opts.group = v;
     } else if (flag === "--needs-browser") opts.needsBrowser = true;
+    else if (flag === "--repin") opts.repin = true;
     else throw new UsageError(`unknown argument ${raw}`);
   }
+  if (opts.repin && (opts.only || opts.shard || opts.group || opts.needsBrowser)) throw new UsageError("--repin rewrites the pins and takes no other selection");
   if (opts.only && (opts.shard || opts.group)) throw new UsageError("--only names its suites itself, so it takes no --shard or --group");
   if (opts.shard && opts.group === "fast") throw new UsageError("--shard splits the shard group, so it cannot run with --group fast");
   return opts;
@@ -73,34 +79,55 @@ export function exitCodeFor(signal) {
   return Number.isInteger(n) ? 128 + n : 1;
 }
 
+export function readSuiteFiles(dir = DEFAULT_DIR) {
+  const root = path.join(dir, SUITES_DIR);
+  let names;
+  try { names = readdirSync(root).filter((n) => n.endsWith(".json")).sort(); } catch { names = []; }
+  const entries = [];
+  const problems = [];
+  for (const file of names) {
+    let entry;
+    try { entry = JSON.parse(readFileSync(path.join(root, file), "utf8")); } catch (err) { problems.push(`${SUITES_DIR}/${file}: not valid JSON (${err.message})`); continue; }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) { problems.push(`${SUITES_DIR}/${file}: not a suite object`); continue; }
+    if (entry.name !== file.slice(0, -5)) { problems.push(`${SUITES_DIR}/${file}: holds suite ${JSON.stringify(entry.name)}, and a file is named for the one suite it registers`); continue; }
+    entries.push({ file, entry });
+  }
+  return { entries, problems };
+}
+
 export function loadManifest(dir = DEFAULT_DIR) {
   const pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
-  const manifest = JSON.parse(readFileSync(path.join(dir, "suites.json"), "utf8"));
   const scripts = pkg.scripts || {};
-  const problems = [];
-  if (!Array.isArray(manifest.suites) || !manifest.suites.length) problems.push("suites.json has no suites");
-  const suites = Array.isArray(manifest.suites) ? manifest.suites : [];
-  if (manifest.support !== undefined && !(Array.isArray(manifest.support) && manifest.support.every((f) => typeof f === "string" && f))) problems.push("suites.json: support is not a list of file names");
+  const { entries, problems } = readSuiteFiles(dir);
+  if (!entries.length && !problems.length) problems.push(`${SUITES_DIR}/ has no suites`);
+  const suites = [];
   const seen = new Set();
-  for (const s of suites) {
-    if (!s || typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) { problems.push(`suites.json: bad suite name ${JSON.stringify(s && s.name)}`); continue; }
-    if (seen.has(s.name)) problems.push(`suites.json: ${s.name} is listed twice`);
+  const rank = (s) => (s.group === "fast" ? 0 : 1);
+  entries.sort((a, b) => rank(a.entry) - rank(b.entry) || (a.entry.name < b.entry.name ? -1 : a.entry.name > b.entry.name ? 1 : 0));
+  for (const { entry: s } of entries) {
+    if (typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) { problems.push(`${SUITES_DIR}: bad suite name ${JSON.stringify(s.name)}`); continue; }
     seen.add(s.name);
-    if (typeof scripts[`test:${s.name}`] !== "string") problems.push(`suites.json: ${s.name} has no test:${s.name} script in package.json`);
-    if (s.group !== undefined && !GROUPS.has(s.group)) problems.push(`suites.json: ${s.name} has group ${JSON.stringify(s.group)}, not fast or shard`);
-    if (s.class !== undefined && !CLASSES.has(s.class)) problems.push(`suites.json: ${s.name} has class ${JSON.stringify(s.class)}, not N, C or W`);
-    if (s.medianS !== undefined && s.medianS !== null && !(Number.isFinite(s.medianS) && s.medianS >= 0)) problems.push(`suites.json: ${s.name} has a bad medianS`);
-    if (s.timeoutS !== undefined && !(Number.isFinite(s.timeoutS) && s.timeoutS > 0)) problems.push(`suites.json: ${s.name} has a bad timeoutS`);
-    if (s.timing !== undefined && typeof s.timing !== "boolean") problems.push(`suites.json: ${s.name} has a timing flag that is not true or false`);
-    if (s.timing === true && s.class !== "N") problems.push(`suites.json: ${s.name} is tagged timing but is class ${JSON.stringify(s.class)}; only Node suites are retried, never one that drives Chromium or workerd`);
-    if (s.files !== undefined && !(Array.isArray(s.files) && s.files.length && s.files.every((f) => typeof f === "string" && f))) problems.push(`suites.json: ${s.name} has a bad files list`);
-    if (s.covers !== undefined && !(Array.isArray(s.covers) && s.covers.every((c) => typeof c === "string" && c))) problems.push(`suites.json: ${s.name} has a bad covers list`);
+    const hasScript = typeof scripts[`test:${s.name}`] === "string";
+    const hasCommand = typeof s.command === "string" && s.command.trim() !== "";
+    if (s.command !== undefined && !hasCommand) problems.push(`${SUITES_DIR}: ${s.name} has an empty command`);
+    if (hasScript && s.command !== undefined) problems.push(`${SUITES_DIR}: ${s.name} has both a command and a test:${s.name} script in package.json, so it has two commands`);
+    if (!hasScript && !hasCommand) problems.push(`${SUITES_DIR}: ${s.name} has neither a command nor a test:${s.name} script in package.json`);
+    if (s.group !== undefined && !GROUPS.has(s.group)) problems.push(`${SUITES_DIR}: ${s.name} has group ${JSON.stringify(s.group)}, not fast or shard`);
+    if (s.class !== undefined && !CLASSES.has(s.class)) problems.push(`${SUITES_DIR}: ${s.name} has class ${JSON.stringify(s.class)}, not N, C or W`);
+    if (s.medianS !== undefined && s.medianS !== null && !(Number.isFinite(s.medianS) && s.medianS >= 0)) problems.push(`${SUITES_DIR}: ${s.name} has a bad medianS`);
+    if (s.timeoutS !== undefined && !(Number.isFinite(s.timeoutS) && s.timeoutS > 0)) problems.push(`${SUITES_DIR}: ${s.name} has a bad timeoutS`);
+    if (s.shard !== undefined && !(Number.isInteger(s.shard) && s.shard >= 1 && s.shard <= CI_SHARDS)) problems.push(`${SUITES_DIR}: ${s.name} pins shard ${JSON.stringify(s.shard)}, not an integer from 1 to ${CI_SHARDS}`);
+    if (s.timing !== undefined && typeof s.timing !== "boolean") problems.push(`${SUITES_DIR}: ${s.name} has a timing flag that is not true or false`);
+    if (s.timing === true && s.class !== "N") problems.push(`${SUITES_DIR}: ${s.name} is tagged timing but is class ${JSON.stringify(s.class)}; only Node suites are retried, never one that drives Chromium or workerd`);
+    if (s.files !== undefined && !(Array.isArray(s.files) && s.files.length && s.files.every((f) => typeof f === "string" && f))) problems.push(`${SUITES_DIR}: ${s.name} has a bad files list`);
+    if (s.covers !== undefined && !(Array.isArray(s.covers) && s.covers.every((c) => typeof c === "string" && c))) problems.push(`${SUITES_DIR}: ${s.name} has a bad covers list`);
+    suites.push({ ...s, script: `test:${s.name}`, command: hasScript ? scripts[`test:${s.name}`] : s.command });
   }
   for (const key of Object.keys(scripts)) {
-    if (key.startsWith("test:") && !seen.has(key.slice(5))) problems.push(`package.json: ${key} is not in suites.json, so the runner would never run it`);
+    if (key.startsWith("test:") && !seen.has(key.slice(5))) problems.push(`package.json: ${key} is not in ${SUITES_DIR}/, so the runner would never run it`);
   }
   if (problems.length) throw new UsageError(problems.join("\n"));
-  return suites.map((s) => ({ ...s, script: `test:${s.name}`, command: scripts[`test:${s.name}`] }));
+  return suites;
 }
 
 export function selectSuites(suites, only) {
@@ -119,19 +146,63 @@ export const retryAllowed = (suite, env = process.env) => env.CI === "true" && s
 
 export const needsBrowser = (suites) => suites.some((s) => s.class !== "N");
 
-export function packShards(suites, count) {
+const suiteCost = (s) => s.medianS || 0;
+
+export function packShards(suites, count, honourPins = count === CI_SHARDS) {
   const bins = Array.from({ length: count }, () => ({ load: 0, browser: false, names: new Set() }));
-  const order = suites.map((s, i) => ({ s, i, w: s.medianS || 0 })).sort((a, b) => b.w - a.w || a.i - b.i);
-  for (const { s, w } of order) {
+  const place = (s, b) => {
+    b.load += suiteCost(s) + (!b.browser && s.class !== "N" ? CHROMIUM_SETUP_S : 0);
+    b.browser = b.browser || s.class !== "N";
+    b.names.add(s.name);
+  };
+  const isPinned = (s) => honourPins && groupOf(s) === "shard" && Number.isInteger(s.shard) && s.shard >= 1 && s.shard <= count;
+  const free = [];
+  suites.forEach((s, i) => {
+    if (!isPinned(s)) free.push({ s, i, w: suiteCost(s) });
+  });
+  for (const s of suites.filter(isPinned)) place(s, bins[s.shard - 1]);
+  free.sort((a, b) => b.w - a.w || a.i - b.i);
+  for (const { s, w } of free) {
     const cost = (b) => b.load + w + (!b.browser && s.class !== "N" ? CHROMIUM_SETUP_S : 0);
     let best = 0;
     for (let k = 1; k < count; k++) if (cost(bins[k]) < cost(bins[best])) best = k;
-    const b = bins[best];
-    b.load = cost(b);
-    b.browser = b.browser || s.class !== "N";
-    b.names.add(s.name);
+    place(s, bins[best]);
   }
   return bins.map((b) => suites.filter((s) => b.names.has(s.name) && groupOf(s) === "shard"));
+}
+
+export function shardLoad(shard) {
+  return shard.reduce((t, s) => t + suiteCost(s), 0) + (shard.some((s) => s.class !== "N") ? CHROMIUM_SETUP_S : 0);
+}
+
+export function shardBalance(shards, tolerance = SHARD_BALANCE) {
+  const loads = shards.map(shardLoad);
+  const heaviest = Math.max(...loads);
+  const lightest = Math.min(...loads);
+  return { loads, heaviest, lightest, ratio: lightest > 0 ? heaviest / lightest : Infinity, tolerance, within: heaviest <= lightest * tolerance };
+}
+
+export function repin(dir = DEFAULT_DIR) {
+  const { entries, problems } = readSuiteFiles(dir);
+  if (problems.length) throw new UsageError(problems.join("\n"));
+  const suites = entries.map((e) => e.entry);
+  const bins = packShards(suites, CI_SHARDS, false);
+  const changed = [];
+  bins.forEach((sh, i) => {
+    for (const s of sh) {
+      if (s.shard === i + 1) continue;
+      writeFileSync(path.join(dir, SUITES_DIR, `${s.name}.json`), formatSuite({ ...s, shard: i + 1 }));
+      changed.push(s.name);
+    }
+  });
+  for (const e of entries) {
+    if (groupOf(e.entry) !== "shard" && e.entry.shard !== undefined) {
+      const { shard, ...rest } = e.entry;
+      writeFileSync(path.join(dir, SUITES_DIR, e.file), formatSuite(rest));
+      changed.push(e.entry.name);
+    }
+  }
+  return changed;
 }
 
 export function chooseSuites(suites, opts) {
@@ -385,8 +456,12 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
   let quarantine = [];
   try {
     opts = parseArgs(argv);
-    const all = loadManifest(opts.dir);
-    suites = chooseSuites(all, opts);
+    if (opts.repin) {
+      const changed = repin(opts.dir);
+      io.stdout.write(changed.length ? `repinned ${changed.length} suites to the ${CI_SHARDS}-shard packing: ${changed.join(", ")}\n` : `every pin already equals the ${CI_SHARDS}-shard packing\n`);
+      return 0;
+    }
+    suites = chooseSuites(loadManifest(opts.dir), opts);
     const q = readQuarantine(opts.dir);
     if (q.problems.length) throw new UsageError(q.problems.join("\n"));
     quarantine = q.entries;

@@ -1,0 +1,1 @@
+{"name": "flows-political-render", "class": "W", "group": "shard", "timing": false, "medianS": 20.8, "shard": 4, "files": ["flows-political-render.mjs"], "covers": ["schema.sql"]}
