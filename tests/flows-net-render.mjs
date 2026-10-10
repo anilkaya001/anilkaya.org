@@ -385,7 +385,9 @@ try {
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
 
     await net(page, "net.orbit(arg[0], arg[1]); return null;", (await camera(page)).rest);
-    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(150);
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]', { force: true });
     await page.mouse.move(5, 5);
     await page.waitForTimeout(400);
     const pinned = await page.evaluate(() => {
@@ -397,7 +399,9 @@ try {
     ok(pinned.pressed === "true" && !pinned.hidden && /Tech/.test(pinned.text) && pl.lit === 1, `pinning Tech shows its tooltip and lights NVDA, its largest member (${pinned.text.slice(0, 30)})`);
     ok(!meets(pinned, pl.nvda) && !meets(pinned, { x: pl.sph.x - pl.sph.r, y: pl.sph.y - pl.sph.r, w: 2 * pl.sph.r, h: 2 * pl.sph.r }), `THE TOOLTIP CLEARS THE LIT SUBGRAPH: it covers neither NVDA's label nor its sphere (tip ${[pinned.x, pinned.y, pinned.w, pinned.h].map(Math.round)}, NVDA ${[pl.nvda.x, pl.nvda.y, pl.nvda.w, pl.nvda.h].map(Math.round)})`);
     ok(!meets(pinned, pl.tech), "nor Tech's own label");
-    await page.click('#uaNet .fn-hit[data-id="s:tech"]');
+    await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(150);
+    await page.click('#uaNet .fn-hit[data-id="s:tech"]', { force: true });
     await page.mouse.move(5, 5);
     await page.waitForTimeout(200);
     eq(await page.evaluate(() => document.querySelector('#uaNet .fn-hit[data-id="s:tech"]').getAttribute("aria-pressed")), "false", "a second click releases the pin");

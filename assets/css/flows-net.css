@@ -93,7 +93,6 @@
   transition: color var(--dur-fade) ease, background var(--dur-fade) ease;
 }
 .fn-btn:hover { color: var(--label-1); background: rgba(255, 255, 255, 0.12); }
-.fn-btn[aria-pressed="true"] { color: var(--accent-ink); background: rgba(255, 255, 255, 0.12); }
 .fn-btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .fn-btn[hidden] { display: none; }
 .fn-btn .ui-g { font-size: 13px; }
