@@ -725,6 +725,13 @@ try {
       ok(calBody.status === "pending" || (calBody.measured === false && !("state" in calBody)),
          "and answers pending or the calibration view without the accumulator state the pipeline carries between nights");
       eq((await get("/api/flows/calib")).status, 401, "an anonymous reader is refused");
+
+      const dispApi = await get("/api/flows/dispersion", { headers: { Cookie: "flows_session=" + token } });
+      eq(dispApi.status, 200, "an authenticated dispersion request succeeds");
+      const dispBody = await dispApi.json();
+      ok(dispBody.status === "pending" || (dispBody.status === "ok" && !("state" in dispBody)),
+         "and answers pending or the correlation view without the close cache the pipeline carries between weeks");
+      eq((await get("/api/flows/dispersion")).status, 401, "an anonymous reader is refused");
     }
 
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
@@ -819,6 +826,9 @@ try {
     eq((await post("calib", JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-08-24", measured: false, nEff: 3, state: { pending: [{ t: "AAA" }] } }), INGEST_TOKEN)).status, 200,
        "the calibration row is an accepted key");
     eq((await post("calib:2026-08-24", "{}", INGEST_TOKEN)).status, 400, "and it has no dated form");
+    eq((await post("dispersion", JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-08-24", state: { week: "2026-W35", calls: 3, closes: { dates: [], c: {} } } }), INGEST_TOKEN)).status, 200,
+       "the correlation row is an accepted key");
+    eq((await post("dispersion:2026-08-24", "{}", INGEST_TOKEN)).status, 400, "and it has no dated form");
     eq((await post("flowalerts", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
        "the vendor-alerts feed is an accepted key");
     eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,

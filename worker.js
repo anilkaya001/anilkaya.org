@@ -928,7 +928,7 @@ const storeGone = () => new HttpError(503, "store_unreadable", "The store could 
 const LAST_GOOD_TTL_MS = 24 * 3600 * 1000;
 const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
-const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "meta", "flowalerts", "pulse", "political", "unusual",
+const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
   "hist"].map((name) => "/api/flows/" + name));
 

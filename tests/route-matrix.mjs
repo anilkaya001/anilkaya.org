@@ -54,7 +54,7 @@ const SECURITY = {
 const FRESH_VALUE = ["State", "Reason", "Class", "Source", "Cadence", "Phase"];
 const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-Good"];
 
-const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
+const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
   "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest"];
 const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "unusual", "events", "track", "political"];

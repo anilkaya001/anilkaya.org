@@ -49,8 +49,8 @@ export function flowsReadRows(deps) {
     return passthrough(stored);
   };
 
-  const calib = async ({ env }) => {
-    const stored = await readServed(env, "calib");
+  const servedView = (key) => async ({ env }) => {
+    const stored = await readServed(env, key);
     if (stored === null) return json(PENDING);
     let view;
     try {
@@ -106,7 +106,8 @@ export function flowsReadRows(deps) {
 
   return [
     row("board", board),
-    row("calib", calib),
+    row("calib", servedView("calib")),
+    row("dispersion", servedView("dispersion")),
     ...NIGHTLY.map(([name, key, pending]) => row(name, nightly(key, pending))),
     ...OVERLAID.map((name) => row(name, overlaid(name))),
     ...CARDS.map((kind) => row(kind, card(kind))),

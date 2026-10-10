@@ -3,7 +3,7 @@ import { NIGHTLY_ROW_SQL, nightlyLedger, batchWithLedger } from "../shared/flows
 
 export const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
-export const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^calib$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$|^focus$|^roster$/;
+export const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^calib$|^dispersion$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$|^focus$|^roster$/;
 
 export const INGEST_META_KEYS_MAX = 96;
 export const INGEST_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);

@@ -859,6 +859,7 @@ no outbox holds a variant id.
 | `ideas` | each run | the boards' idea column | overwritten daily |
 | `ideas:<date>`, `ideas:<date>:r<n>` | each run, once per session; a republish with different ideas writes the next `:r<n>`; since P3-01 each row carries its trial (legs, fill, spot, both chances) as well as the thin view | the calibration step, which reads only dates before its own session | PERMANENT: write-once, never updated, never deleted, never pruned |
 | `ideas-out:<date>` | each run that settles, expires or gives up on at least one idea; the date is the run's session | the audit trail of `calib` | PERMANENT, as above |
+| `dispersion` | each run, after the cards | `/api/flows/dispersion` (the Worker drops `state`) | overwritten; carries the weekly close cache (at most 100 candle calls a week) for QQQ members that are not in the run's candles; SPY's holdings are not covered |
 | `calib` | each run | `/api/flows/calib` (Track's idea calibration; the Worker drops `state`) | overwritten; the one mutable row, it carries the accumulators between nights |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every

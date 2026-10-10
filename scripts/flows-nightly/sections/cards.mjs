@@ -1,10 +1,12 @@
 import { num } from "../../../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../../../shared/flows-card.js";
 import { sessionPrints, sessionPrintParams } from "../../../shared/flows-positioning.js";
+import { holdingsStocks } from "../../../shared/flows-focus.js";
 import { regimeState } from "../../../shared/flows-neuron.js";
 import { cardTier } from "../../../shared/flows-neuron-coverage.js";
 import * as QP from "../../flows-quant-pipeline.mjs";
 import { attachVol, coneThinOf } from "../../flows-legs/vol.mjs";
+import { runDispersion } from "../../flows-legs/dispersion.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { foldCardOutcomes, poolWidth, runPooled, stats, uw } from "../vendor.mjs";
@@ -84,7 +86,7 @@ export async function runCards(ctx) {
   const {
     stages, sessionDate, onBoard, byTicker, congressState, quantPass, scoredByTicker, chainByTicker, chainMiss,
     scoreTrack, scoreTrackPremium, first, generatedAt, marketCross, variationRun, screenerReadAt, deepSet, volLeg,
-    quantRate, crossSectionTickers, dating,
+    quantRate, crossSectionTickers, dating, screener, holdings, marketLegs,
   } = ctx;
   stages.step("cards");
   let surfaceReported = false;
@@ -309,6 +311,38 @@ export async function runCards(ctx) {
       (calibrated.state === "published" || calibrated.state === "unchanged" ? console.log : console.warn)(calibrated.line);
     } catch (error) {
       console.warn(`  calibration: ${error.message} — no outcome was written tonight`);
+    }
+  }
+  if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
+    try {
+      const ivs = new Map();
+      const reporting = new Set();
+      for (const r of screener) {
+        if (!r || typeof r.ticker !== "string") continue;
+        const iv = num(r.iv30d, NaN);
+        if (Number.isFinite(iv)) ivs.set(r.ticker, iv);
+        const next = String(r.next_earnings_date || "");
+        if (ARCHIVE_DATE_RE.test(next) && next >= sessionDate && (Date.parse(next) - Date.parse(sessionDate)) / 86400000 <= 30) reporting.add(r.ticker);
+      }
+      const indexRow = (marketLegs && marketLegs.indexRows.get("QQQ")) || screener.find((r) => r && r.ticker === "QQQ") || null;
+      const prior = await readStored("dispersion");
+      if (prior.failed) {
+        console.warn(`  dispersion: the previous row could not be read (HTTP ${prior.status || 0}), so tonight builds nothing rather than spend the week's close fetches twice`);
+      } else {
+        const held = holdingsStocks(holdings.rows);
+        const built = await runDispersion({
+          sessionDate, generatedAt, publish, prior: prior.payload || null,
+          stocks: held.stocks, asOfHoldings: held.asOf,
+          indexIv: indexRow ? num(indexRow.iv30d, NaN) : null,
+          ivOf: (t) => (ivs.has(t) ? ivs.get(t) : null),
+          eventOf: (t) => reporting.has(t),
+          barsFor: async (ticker) => barsInHand(byTicker.get(ticker)),
+          fetchBars: async (ticker) => (DRY_RUN || Date.now() > deadline ? null : fetchCloseBars(ticker, sessionDate, dating)),
+        });
+        (built.state === "published" ? console.log : console.warn)(built.line);
+      }
+    } catch (error) {
+      console.warn(`  dispersion: ${error.message} — no correlation row tonight`);
     }
   }
   if (perNameCut.names) {
