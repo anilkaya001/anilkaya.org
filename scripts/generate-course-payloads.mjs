@@ -212,6 +212,7 @@ function reviewItem(stage, metadata) {
 const courses = [];
 const reviewItems = [];
 const stageCatalogue = {};
+const stageByVariant = {};
 const stagePoints = {};
 for (const [topicId, authored] of Object.entries(context.window.CURRICULUM || {})) {
   const meta = metadataById.get(topicId);
@@ -230,6 +231,10 @@ for (const [topicId, authored] of Object.entries(context.window.CURRICULUM || {}
       if (!Number.isSafeInteger(pointValue)) throw new Error(`No point value for ${topicId}:${stage.id}`);
       points.push(pointValue);
       catalogueEntries.push({ id: stage.id, index: stageIndex, moduleId: module.id, moduleIndex, type: stage.type, title: plainText(stage.title || "Lesson", `${topicId}:${stage.id}.title`), skillIds: stage.skillIds, estimatedMinutes: stage.estimatedMinutes, difficulty: stage.difficulty, points: pointValue });
+      if (typeof stage.variantId === "string") {
+        if (Object.hasOwn(stageByVariant, stage.variantId)) throw new Error(`Variant id ${stage.variantId} is used by ${stageByVariant[stage.variantId]} and ${topicId}:${stage.id}`);
+        stageByVariant[stage.variantId] = `${topicId}:${stage.id}`;
+      }
       if (REVIEW_TYPES.has(stage.type)) reviewItems.push(reviewItem(stage, { courseId: topicId, courseTitle: course.title, courseSlug: meta.slug, moduleId: module.id, moduleTitle: module.title, stageId: stage.id, stageIndex }));
       module.stages.push(stage);
       previousStageId = stage.id;
@@ -296,7 +301,7 @@ const reviewManifestEntries = reviewItems.map((item) => `  ${JSON.stringify(item
 writeFileSync(path.join(ROOT, "shared/review-manifest.js"), `export const REVIEW_ITEM_BY_ID = Object.freeze({\n${reviewManifestEntries}\n});\nexport const REVIEW_ITEMS = Object.freeze(Object.values(REVIEW_ITEM_BY_ID));\nexport const REVIEW_ITEM_IDS = Object.freeze(Object.keys(REVIEW_ITEM_BY_ID));\nexport function hasReviewItem(id) { return typeof id === "string" && Object.hasOwn(REVIEW_ITEM_BY_ID, id); }\n`);
 
 const stageManifestEntries = Object.entries(stageCatalogue).flatMap(([courseId, stages]) => stages.map((stage) => `  ${JSON.stringify(`${courseId}:${stage.id}`)}: Object.freeze(${JSON.stringify({ ...stage, courseId })}),`)).join("\n");
-writeFileSync(path.join(ROOT, "shared/stage-manifest.js"), `export const COURSE_STAGE_BY_ID = Object.freeze({\n${stageManifestEntries}\n});\nexport const COURSE_STAGE_IDS = Object.freeze(Object.keys(COURSE_STAGE_BY_ID));\nexport function stageKey(courseId, stageId) { return typeof courseId === "string" && typeof stageId === "string" ? courseId + ":" + stageId : ""; }\n`);
+writeFileSync(path.join(ROOT, "shared/stage-manifest.js"), `export const COURSE_STAGE_BY_ID = Object.freeze({\n${stageManifestEntries}\n});\nexport const COURSE_STAGE_IDS = Object.freeze(Object.keys(COURSE_STAGE_BY_ID));\nexport const COURSE_STAGE_BY_VARIANT = Object.freeze(${JSON.stringify(stageByVariant)});\nexport function stageKey(courseId, stageId) { return typeof courseId === "string" && typeof stageId === "string" ? courseId + ":" + stageId : ""; }\n`);
 
 const skillManifestEntries = skillCatalogue.map((skill) => `  ${JSON.stringify(skill.id)}: Object.freeze(${JSON.stringify({ id: skill.id, courseId: skill.courseId, order: skill.order })}),`).join("\n");
 writeFileSync(path.join(ROOT, "shared/skill-manifest.js"), `export const SKILL_BY_ID = Object.freeze({\n${skillManifestEntries}\n});\nexport const SKILL_IDS = Object.freeze(Object.keys(SKILL_BY_ID));\n`);

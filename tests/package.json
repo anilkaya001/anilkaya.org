@@ -17,7 +17,7 @@
     "test:markets": "node markets-contract.mjs",
     "test:market-ticker": "node market-ticker-render.mjs",
     "test:landing-motion": "node landing-motion.mjs",
-    "test:mastery": "node mastery-contract.mjs",
+    "test:mastery": "node --disable-warning=ExperimentalWarning mastery-contract.mjs",
     "test:academy": "node --disable-warning=ExperimentalWarning academy-contract.mjs",
     "test:lab-write": "node --disable-warning=ExperimentalWarning lab-write-contract.mjs",
     "test:placement": "node placement-contract.mjs",

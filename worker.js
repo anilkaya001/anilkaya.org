@@ -14,7 +14,7 @@ import { aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNo
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
-import { COURSE_STAGE_BY_ID } from "./shared/stage-manifest.js";
+import { COURSE_STAGE_BY_ID, COURSE_STAGE_BY_VARIANT } from "./shared/stage-manifest.js";
 import { SKILL_BY_ID } from "./shared/skill-manifest.js";
 import { PROJECT_BY_ID } from "./shared/project-manifest.js";
 import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, buildSnapshot } from "./shared/markets.js";
@@ -613,6 +613,10 @@ function projectsFromRows(rows) {
     } catch {   }
   }
   return projects;
+}
+
+function canonicalSkillItem(itemId) {
+  return typeof itemId === "string" && Object.hasOwn(COURSE_STAGE_BY_VARIANT, itemId) ? COURSE_STAGE_BY_VARIANT[itemId] : itemId;
 }
 
 function validSkillItem(skillId, itemId) {
@@ -2954,7 +2958,8 @@ async function route(request, env, url, ctx) {
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const day = normalizeActivityDay(body.day);
-    if (typeof body.skillId !== "string" || !Object.hasOwn(SKILL_BY_ID, body.skillId) || typeof body.itemId !== "string" || !validSkillItem(body.skillId, body.itemId) || typeof body.attemptId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(body.attemptId) || typeof body.correct !== "boolean" || typeof body.hinted !== "boolean" || !day) {
+    const itemId = canonicalSkillItem(body.itemId);
+    if (typeof body.skillId !== "string" || !Object.hasOwn(SKILL_BY_ID, body.skillId) || typeof body.itemId !== "string" || !validSkillItem(body.skillId, itemId) || typeof body.attemptId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(body.attemptId) || typeof body.correct !== "boolean" || typeof body.hinted !== "boolean" || !day) {
       throw new HttpError(400, "invalid_skill_attempt", "Skill, item, and attempt data must be valid");
     }
     const correct = body.correct ? 1 : 0, hinted = body.hinted ? 1 : 0, now = Date.now();
@@ -2963,7 +2968,7 @@ async function route(request, env, url, ctx) {
         "INSERT INTO skill_attempts (user_id, attempt_id, skill_id, item_id, correct, hinted, attempt_day, applied, received_at) " +
         "SELECT ?, ?, ?, ?, ?, ?, ?, 0, ? WHERE EXISTS (SELECT 1 FROM learning_sync WHERE user_id=? AND generation=?) " +
         "ON CONFLICT(user_id, attempt_id) DO NOTHING RETURNING attempt_id"
-      ).bind(user.id, body.attemptId, body.skillId, body.itemId, correct, hinted, day, now, user.id, generation),
+      ).bind(user.id, body.attemptId, body.skillId, itemId, correct, hinted, day, now, user.id, generation),
       env.DB.prepare(
         "INSERT INTO skill_mastery (user_id, skill_id, level, due_day, last_day, attempts, correct, last_result, last_attempt_id, updated_at) " +
         "SELECT ?, ?, CASE WHEN ?=1 AND ?=0 THEN 1 ELSE 0 END, date(?, '+1 day'), ?, 1, ?, ?, ?, ? " +
@@ -2993,7 +2998,7 @@ async function route(request, env, url, ctx) {
     if (currentGeneration !== generation) throwResetRequired(currentGeneration);
     const attempt = results[6].results[0];
     if (!attempt) throw new Error("Skill attempt was not recorded");
-    if (attempt.skill_id !== body.skillId || attempt.item_id !== body.itemId || Number(attempt.correct) !== correct || Number(attempt.hinted) !== hinted || attempt.attempt_day !== day) throw new HttpError(409, "attempt_conflict", "Attempt id was already used for different data");
+    if (attempt.skill_id !== body.skillId || attempt.item_id !== itemId || Number(attempt.correct) !== correct || Number(attempt.hinted) !== hinted || attempt.attempt_day !== day) throw new HttpError(409, "attempt_conflict", "Attempt id was already used for different data");
     const record = skillMasteryRecord(results[4].results[0]);
     if (!record) throw new Error("Stored skill mastery is invalid");
     return json({ ok: true, record, duplicate: !results[1].results[0], generation }, 200, generationHeaders(generation));

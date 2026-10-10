@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { startWorker } from "./worker-server.mjs";
+import { startWorker, SESSION_SECRET } from "./worker-server.mjs";
+import { signSession } from "../shared/session.js";
+import { readFileSync } from "node:fs";
 
 const server = await startWorker();
 const BASE = server.baseURL;
@@ -1463,6 +1465,63 @@ try {
     assert.equal(await page.locator('.course-nav__mod[aria-current="step"]').count(), 1);
     assert(await page.locator('.course-nav__mod[aria-current="step"]').evaluate((node) => node === document.querySelectorAll(".course-nav__mod")[1]));
     await page.close();
+  }
+
+  {
+    const course = JSON.parse(readFileSync(new URL("../assets/data/courses/ols.json", import.meta.url), "utf8"));
+    const stage = course.modules.flatMap((module) => module.stages)[3];
+    const skillId = stage.skillIds[0];
+    assert.equal(stage.id, "ols-line-04");
+    assert.equal(stage.variantId, "ols-line-04-core");
+    const signedIn = async (id) => {
+      const context = await browser.newContext();
+      await context.addCookies([{ name: "session", value: await signSession({ sub: id, email: id + "@example.com", name: id, exp: Date.now() + 3600 * 1000 }, SESSION_SECRET), url: BASE }]);
+      return context;
+    };
+    const skillState = (page) => page.evaluate((id) => ({ record: window.IEWTStorage.skillMastery()[id] || null, outbox: window.IEWTStorage.skillOutbox().length }), skillId);
+
+    const context = await signedIn("g_skill_e2e");
+    const page = await context.newPage();
+    const clean = watch(page);
+    await page.goto(BASE + stageRoute("ols", 3), { waitUntil: "load" });
+    await waitForCourse(page, "4 / 20");
+    await page.waitForFunction(() => window.Auth.status() === "ready" && !!window.Auth.user());
+    await page.check('input[value="2"]');
+    await page.click(".quiz__check");
+    await page.waitForSelector(".quiz__feedback.ok");
+    await page.waitForFunction(() => window.IEWTStorage.skillOutbox().length === 0);
+    const dump = await server.d1("SELECT item_id, skill_id FROM skill_attempts WHERE user_id = 'g_skill_e2e'");
+    assert(dump.includes("ols:ols-line-04") && !dump.includes("ols-line-04-core"), "a graded course answer reached D1 under its course:stage id");
+    await page.reload({ waitUntil: "load" });
+    await waitForCourse(page, "4 / 20");
+    await page.waitForFunction(() => window.Auth.status() === "ready" && !!window.Auth.user());
+    const stored = await server.d1("SELECT skill_id || '=' || attempts || '/' || correct AS kv FROM skill_mastery WHERE user_id = 'g_skill_e2e'");
+    assert(stored.includes(skillId + "=1/1"), "the server holds the skill record the answer made");
+    await page.waitForFunction((id) => !!window.IEWTStorage.skillMastery()[id], skillId);
+    const after = await skillState(page);
+    assert(after.record && after.record.correct >= 1 && after.record.lastResult === true, `the skill record survives the reload: ${JSON.stringify(after)}`);
+    assert.equal(after.outbox, 0, "and the outbox is empty");
+    clean();
+    await context.close();
+
+    const seeded = await signedIn("g_skill_seed");
+    const owner = encodeURIComponent("user:g_skill_seed");
+    await seeded.addInitScript(({ owner, skillId }) => {
+      if (localStorage.getItem("seeded")) return;
+      localStorage.setItem("seeded", "1");
+      localStorage.setItem("iewt:skill-outbox:v3:" + owner, JSON.stringify({ version: 3, owner: "user:g_skill_seed", value: [
+        { attemptId: "queued-variant-1", skillId, itemId: "ols-line-04-core", correct: true, hinted: false, day: "2026-10-09" },
+      ] }));
+    }, { owner, skillId });
+    const seedPage = await seeded.newPage();
+    const seedClean = watch(seedPage);
+    await seedPage.goto(BASE + "/lab/", { waitUntil: "load" });
+    await seedPage.waitForFunction(() => window.Auth.status() === "ready" && !!window.Auth.user());
+    await seedPage.waitForFunction(() => window.IEWTStorage.skillOutbox().length === 0, null, { timeout: 15000 });
+    const seededDump = await server.d1("SELECT item_id FROM skill_attempts WHERE attempt_id = 'queued-variant-1'");
+    assert(seededDump.includes("ols:ols-line-04"), "a queued event that carries a variant id is flushed and accepted, stored as its course:stage id");
+    seedClean();
+    await seeded.close();
   }
 
   {
