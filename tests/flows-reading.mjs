@@ -44,7 +44,7 @@ const held = (dossier) => codes(R.heldTags(dossier));
 {
   const lines = R.TAG_LINES;
   eq(lines.IV_HIGH, BUCKET_LINES.IV_HIGH, "THE VOLATILITY LINES ARE THE ENGINE'S: IV rank high is the bucket line (" + lines.IV_HIGH + ")");
-  eq(lines.IV_LOW, BUCKET_LINES.IV_LOW, "IV rank low");
+  eq(lines.IV_LOW, BUCKET_LINES.IV_LOW, "IV percentile low");
   eq(lines.VRP_RICH, BUCKET_LINES.VRP_RICH, "premium rich");
   eq(lines.VRP_CHEAP, BUCKET_LINES.VRP_CHEAP, "premium cheap");
   eq(lines.CURVE_BACK, BUCKET_LINES.TERM_BACK, "term backwardation");
@@ -136,6 +136,12 @@ const held = (dossier) => codes(R.heldTags(dossier));
     ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2501 }]], false, "percentile above the line"],
     ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2501 }], ["options.engine.iv.pct.30", { v: 0.05 }]], false, "a low rank under the old id does not stand in for a percentile above the line"],
     ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.1 }], ["options.engine.iv.pctile.30.1y", { v: 0.2 }], ["options.engine.iv.pct.30", { v: 0.95 }]], true, "and a high rank does not hold back a low percentile"],
+    ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.2 }], ["options.engine.iv.pctile.30.1y", { grade: 1 }], ["options.engine.iv.pct.30", { v: 0.95 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "a thin-cone percentile does not fall back to a high rank"],
+    ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.2 }], ["options.engine.iv.pctile.30.1y", { grade: 0 }], ["options.engine.iv.pct.30", { v: 0.95 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "an ungraded percentile does not fall back to a high rank"],
+    ["vol-rich", m, [["options.engine.vrp.rel.21", { v: 0.2 }], ["options.engine.iv.pctile.30.1y", { v: null }], ["options.engine.iv.pct.30", { v: 0.95 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "an absent percentile does not fall back to a high rank"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { grade: 1 }], ["options.engine.iv.pct.30", { v: 0.05 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "a thin-cone percentile does not fall back to a low rank"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { grade: 0 }], ["options.engine.iv.pct.30", { v: 0.05 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "an ungraded percentile does not fall back to a low rank"],
+    ["vol-cheap", m, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { v: null }], ["options.engine.iv.pct.30", { v: 0.05 }], ["peers.pct.iv30", { v: 50, unit: "pct" }], ["peers.pct.vrp", { v: 50, unit: "pct" }]], false, "an absent percentile does not fall back to a low rank"],
     ["news-driven", m, [["news.count24h", { v: 5 }], ["news.major24h", { v: 0 }]], true, "five headlines a day"],
     ["news-driven", m, [["news.count24h", { v: 4 }], ["news.major24h", { v: 0 }]], false, "four with none major"],
     ["news-driven", m, [["news.count24h", { v: 2 }], ["news.major24h", { v: 1 }]], true, "two with one marked major"],
@@ -176,6 +182,10 @@ const held = (dossier) => codes(R.heldTags(dossier));
     ok(/percentile within its own past year is 82\.0%/.test(rich.sentence) && !/rank/i.test(rich.sentence), "and calls it a percentile: " + rich.sentence);
     const cheap = R.heldTags(withFacts(BASES.momentum, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { v: 0.1 }]])).find((t) => t.code === "vol-cheap");
     ok(cheap && cheap.evidence.includes("options.engine.iv.pctile.30.1y") && /percentile within its own past year is 10\.0%/.test(cheap.sentence) && !/rank/i.test(cheap.sentence), "vol-cheap says the same of a low percentile: " + (cheap && cheap.sentence));
+    const peerRich = R.heldTags(withFacts(BASES.momentum, [["options.engine.vrp.rel.21", { v: 0.2 }], ["options.engine.iv.pctile.30.1y", { v: null }], ["options.engine.iv.pct.30", { v: 0.95 }], ["peers.pct.iv30", { v: 90, unit: "pct" }], ["peers.pct.vrp", { v: 90, unit: "pct" }]])).find((t) => t.code === "vol-rich");
+    ok(peerRich && peerRich.evidence.includes("peers.pct.iv30") && !peerRich.evidence.includes("options.engine.iv.pct.30") && !/rank/i.test(peerRich.sentence), "with no percentile and high peers the tag cites the peer percentiles and not the rank: " + (peerRich && peerRich.evidence.join(",")));
+    const peerCheap = R.heldTags(withFacts(BASES.momentum, [["options.engine.vrp.rel.21", { v: -0.2 }], ["options.engine.iv.pctile.30.1y", { v: null }], ["options.engine.iv.pct.30", { v: 0.05 }], ["peers.pct.iv30", { v: 10, unit: "pct" }], ["peers.pct.vrp", { v: 10, unit: "pct" }]])).find((t) => t.code === "vol-cheap");
+    ok(peerCheap && peerCheap.evidence.includes("peers.pct.iv30") && !peerCheap.evidence.includes("options.engine.iv.pct.30"), "and the mirror for vol-cheap");
   }
   {
     const labelled = R.forReading(BASES.momentum).packets.options.facts;
