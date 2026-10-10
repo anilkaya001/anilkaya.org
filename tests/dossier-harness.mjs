@@ -171,10 +171,10 @@ export function vendorStub(o = {}) {
 }
 
 let instance = 0;
-export async function client(D1, extra = {}) {
-  const env = { DB: D1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "https://uw.test", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+export async function client(D1, extra = {}, who = FLOWS_USERNAMES[0]) {
+  const env = { DB: D1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "https://uw.test", FLOWS_CREDENTIALS: JSON.stringify({ [who]: "x".repeat(43) }), ...extra };
   if (env.AI) env.AI = guardAi(env.AI);
-  const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
+  const token = await signFlowsSession(who, env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?dossier=" + (++instance))).default;
   return async (route, init = {}) => {
     const background = [];

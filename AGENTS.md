@@ -105,6 +105,47 @@ Browser ──► Cloudflare edge
   a binding whose `run` throws unless it is called from inside `cappedAi`'s
   own lines.
 
+- Every member-facing vendor read passes a per-request `vendorGate(env,
+  session)` where a vendor call would follow: the `MEMBER_VENDOR` rate-limit
+  binding (60 a minute, keyed by `memberId(session)`, consulted at most once
+  per request), then the shared `UW_ONDEMAND` budget. The shared budget is
+  charged per vendor call in the chain and strategy builds: `serveCachedVendorRead`
+  checks the member once before building and hands the builder `chargedFetch`,
+  which takes one `UW_ONDEMAND` token before each `uwFetch` (the chain's
+  option-contracts pages, ohlc, stock-state and the info read; the strategy
+  context's breakdown, its dated retry, the exposure fallback, ohlc,
+  stock-state, info and the SPY index read; an expiry's call and put pages and
+  its engine stock-state). A cached info or index copy costs no token. A
+  refusal in the middle of a build (`VendorRefused`, which the builders' own
+  `.catch` handlers rethrow through `keepRefusal`) stops the remaining calls and
+  is answered like a member refusal. The dossier, the stock-state quote and
+  the screener classify are charged per call as well. The tape is charged once
+  per refresh, and a premium refresh makes two vendor calls for that token. It
+  covers
+  `/api/flows/chain` (which the desk reads), `/api/flows/strategy`, the
+  stock-state quote behind
+  `/api/flows/live` and `/api/flows/now?t=`, the tape miss, the screener
+  classify behind an unknown name's card, and the dossier fan-out of
+  `/api/flows/dossier`, the summary route's reading and the Ask box (one member
+  token per assembly). A refusal makes no further vendor call. Chain and strategy keep
+  their copy six hours (`VENDOR_COPY_KEEP_SECONDS`) and serve it as a hit only
+  inside its 120 s TTL; past the TTL a refused member gets the kept copy
+  stamped `X-Fresh-State: stale`, `X-Fresh-Reason: throttled` with its true
+  `X-Chain-Age`, or, with none kept, JSON `429 rate_limited` with
+  `Retry-After: 60`. The quote keeps its `unavailable`/`throttled` body. The
+  tape asks the member half of the gate before its `flows_tape` insert and lease
+  claim: a refused member's read of a stale row is served `stale-throttled` (or
+  `pending`/`throttled` with no usable row) and writes nothing, and an unknown
+  name left unclassified by the refused gate is `pending` (`throttled`) before
+  any insert. An unknown name's card read by a refused member answers
+  `{status: "unavailable", why: "throttled"}` with `X-Fresh-Reason: throttled`
+  and `Retry-After`, not a coverage verdict; the ticker page prints its
+  `wh-throttled` copy. The dossier's vendor packets go `pending`, and the
+  reading built from such a dossier is neither generated nor stored (see "Flows
+  reading"). Both bindings are flood brakes and fail open. The Tier 1 and focus
+  ticks consult neither; `tests/flows-reads-contract.mjs` and
+  `tests/flows-dossier-reads.mjs` hold both sides.
+
 ### External deployment state
 
 Repository files cannot prove Workers Builds branch mapping, dashboard secrets,
@@ -141,7 +182,7 @@ header readback with this repository after any dashboard rule change.
 | `shared/course-seo.js` | Canonical course slugs, metadata, and crawlable module outlines. |
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |
 | `shared/mastery.js` | Server-compatible mastery transition and review-selection contract used by tests. |
-| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables; the Flows tables, including `flows_live` (only `live:*` ids), `flows_tape`, `flows_clock` and the trigger that makes dated archive rows immutable. |
+| `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables; the Flows tables, including `flows_live` (only `live:*` ids), `flows_tape`, `flows_clock` and the trigger that makes dated archive rows immutable; the model spend (`flows_ai_usage`, `flows_ai_usage_model`), board summary and Neuron (`flows_ai_summary`, `flows_neuron`) tables. `tests/academy-contract.mjs` builds three `node:sqlite` databases (this file, every `migrations/*.sql` in number order, the Worker's first-use DDL) and holds their tables, columns by name, CHECK clauses (literals compared verbatim), indexes, triggers and views equal; only `users`, `progress` and `stats` have no first-use DDL. Every `CREATE` and `DROP` of a table, index, trigger or view in `worker.js` and `shared/`, whatever its case or spacing, must sit inside a top-level DDL constant the suite evaluates, so inline DDL cannot escape the comparison. Every `ALTER TABLE` in `worker.js` and `shared/` must be one of the sites the suite lists, and each column it adds must be declared with the same type in this file and the migrations. |
 | `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
 | `assets/js/curriculum.js` | Canonical OLS authoring source. |
 | `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
@@ -325,6 +366,30 @@ Errors use:
   rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
   `Allow`. JSON bodies are streamed with a 16 KiB limit and validated.
+- Every vendor call the Worker makes outside the real-time rail (whose hub
+  keeps its own adapter and `callTimeoutMs`) goes through `uwFetch`, whose
+  fetch carries `AbortSignal.timeout`, so the deadline covers the body read
+  too: 4 s by default (`RT_LIMITS.callTimeoutMs`, the rail's own per-call
+  bound), 6 s for OHLC, the strategy desk's expiry breakdown, its dated retry
+  and the greek-exposure fallback, 8 s for chain pages (the chain route and
+  the strategy expiry pages), `LIVE_BUDGET.tier1TimeoutMs` (6 s) for the
+  Tier 1 tick, the focus tick and the tape, and `UW_DOSSIER_DEADLINE_MS`
+  (20 s) for the dossier's sources, whose foreground wait is its own 2.5 s
+  per source and 3 s in all and whose remainder runs in `ctx.waitUntil`. The
+  pipeline's `uw()` client calls the vendor outside the Worker and does not
+  use `uwFetch`. Under `--live` (the Actions live leg) each call is bounded at
+  `LIVE_VENDOR.timeoutMs` (20 s; `FLOWS_UW_TIMEOUT_MS` overrides it, from 100
+  to 60,000 ms); the nightly run sets no per-call deadline.
+  `UW_DOSSIER_DEADLINE_MS` matches the `--live` leg's bound, not the
+  nightly's. An aborted call is
+  JSON `504 chain_timeout` for a route whose caller throws, `null` for a
+  caller that catches, and the quote card's `200` `unavailable` body with
+  `why` `chain_timeout`. Before the deadline, a network failure or a body
+  that cannot be read or parsed is `502 chain_upstream`, and the other codes
+  are unchanged: a missing key `503 chain_unconfigured`, a vendor 429
+  `429 chain_rate_limited`, any other vendor error status
+  `502 chain_upstream`, and a body over the parse ceiling
+  `502 chain_too_large`.
 
 Authenticated PUT/DELETE requests require an exact `X-IEWT-Owner` match with
 the verified session user. Conflicting `Origin` or `Sec-Fetch-Site` metadata is
@@ -469,7 +534,22 @@ never a scan: the universe column of a name is found by counting separators in
 the name list, an events row by its leading key. The vendor fan-out is capped at
 nine calls a read, queued by priority, parallel, 2.5 s per source and 3 s in
 all; an unfinished or rate-limited source marks its packet `pending` and
-finishes in `ctx.waitUntil`, and the next read picks the result up. Slow kinds
+finishes in `ctx.waitUntil` within the dossier's own vendor deadline
+(`UW_DOSSIER_DEADLINE_MS`, 20 s, under the 30 s `waitUntil` allowance), and
+the next read picks the result up. A source still unanswered at 20 s is
+aborted, recorded as a transient failure (reason `failed`, the same as a
+vendor 5xx), stores nothing, and the next read calls the vendor again. The
+dossier does not take `uwFetch`'s 4 s default: a healthy source answering
+in 5 s would then never be stored, every read would wait 2.5 s for it, the
+reading's 1.5 s box would always fire first, and the reading would stay
+`generating` (`flows-dossier-reads` holds this). A source unanswered at 20 s
+keeps the reading at `generating` for that name, because each read re-awaits
+it for 2.5 s, longer than the 1.5 s box; a source that answers in 20 to 30 s
+is therefore not stored here, where an unbounded call would eventually have
+been. The cure is a short negative marker that stops `planFetches` from
+re-awaiting a source that just failed transiently, and serving the stored
+reading when the box fires; both are assigned to P0-29 (the reading's
+held-previous path), not to this row. Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
@@ -507,7 +587,7 @@ read: {
     unknown: [{ text, missing: [packet kind] }],
   },                                    // a cite is { id, label, display, asOf, kind, grade, ageS?, untrusted? }
   refused: [{ section, why, detail? }], // what the vet dropped from a model reply
-  held?: "floor" | "fingerprint", retryAfterS?
+  held?: "floor" | "fingerprint" | "limited", retryAfterS?
 }
 ```
 
@@ -517,9 +597,15 @@ read: {
   `readingFallback` (templates over the same facts, every sentence cited, passing the
   same checks a model's wording must). `generating` means a model call is in flight or
   was just started and the page should poll the summary. `fallback` means none is
-  coming: `why` is `off` (`FLOWS_READ_MODE=off`), `no-model`, `store`, or `cooldown`
+  coming: `why` is `off` (`FLOWS_READ_MODE=off`), `no-model`, `store`, `cooldown`
   (a refused, unparsable or failed attempt; `retryAfterS` says how long, and the
-  provenance names the reason, the daily budget being spent among them). `absent` is a
+  provenance names the reason, the daily budget being spent among them), or `limited`
+  (the assembly had a vendor packet held back by a rate limit, read from the result's
+  `trace.limited` or a `limited:` withheld reason, so it also covers a reader who joined
+  another member's flight; no claim, no model call and no row write, `retryAfterS` 60,
+  and a stored model reading of the same signature is served instead as `ready` with
+  `held: "limited"`). One member's refusal therefore never writes the shared
+  `read:<T>` row every member is served for the intraday floor. `absent` is a
   name for which no packet holds anything about the name (the market backdrop does not
   count): every packet is named unknown and no model is asked. A dossier that is still
   assembling after 1.5 s answers `generating` with no sections and finishes in `waitUntil`.
@@ -559,7 +645,16 @@ read: {
   chosen by what the question is about (`askPick`) to the picked facts, with the
   description and headlines inside UNTRUSTED quotes, a line saying what is not known, and
   the rule that quoted text is data. `guardAnswer` is unchanged and validates against the
-  added facts. The answer carries `dossierFacts`.
+  added facts. The answer carries `dossierFacts`. `POST /api/flows/ask` is same-origin
+  only (403), takes `application/json` only (415), reads at most 4,096 bytes
+  (`ASK_BODY_MAX_BYTES`, 413; a pasted question past that is refused, not cut to 400
+  characters) and allows 10 valid questions a minute per member through the `AI_ASK`
+  rate-limit binding, keyed by `memberId(session)` (`shared/flows-access.js`), with
+  `429 rate_limited` and `Retry-After: 60` past it and no D1 trip or model call. The
+  binding is a flood brake and fails open when absent or throwing; money stays on
+  `cappedAi`. `tests/flows-worker-contract.mjs` spends exactly this budget from one
+  session and asserts the eleventh is refused, and `tests/contracts.mjs` holds the
+  binding's name, limit and period to `ASK_FLOOD_PERIOD_S`.
 - `FLOWS_READ_MODE` (`wrangler.toml` [vars], default `on`): `off` makes `read` the
   deterministic reading with no row read and no model call. Anything but `off` means on.
 - Not proven offline: that a real model keeps to these rules. Every test uses scripted
@@ -1037,6 +1132,13 @@ fixtures built to the chain payload contract rather than against workerd. Its No
 the desk's pure functions as `__FlowsDeskTest`. `flows-desk-wiring` is the same shape (Chromium, `page.route`,
 no server); measured on 2026-09-30 at about 12 s, against 31 s for `flows-desk-client`.
 
+`academy-contract` builds its three schema databases over `node:sqlite`, so it
+needs Node 22.13 or newer and runs under `--disable-warning=ExperimentalWarning`
+like the reads suite; measured on 2026-10-05 at under 1 s with no server. Its
+DDL scan matches `CREATE` and `DROP` of a table, index, trigger or view in any
+case and with any whitespace between the words, and a `CREATE` that is not
+inside an evaluated top-level constant, or any `DROP` at all, fails it.
+
 `flows-neuron-screen` was measured on 2026-09-30: 0.3 s with no server and 18,474 assertions. It runs
 `screenReading` alone: the sign and size of book gamma worked by hand against the implied daily move, each
 threshold from both sides, every input null or unpublished, 27 synthetic states compared with `regimeState`,
@@ -1059,7 +1161,7 @@ every packet from the nightly payload fixtures and from `tests/fixtures-dossier-
 recording `Proxy` that each reducer reads only the fields `DOSSIER_READS` names and the probe list holds,
 fuzzes the sanitiser with instruction, markup, URL, bidi, role-marker and obfuscated text, runs the renderer to
 every budget from 400 to 12,000 tokens, and checks the fingerprint over 120 random price levels.
-`flows-dossier-reads` was measured the same day: 4.4 s and 232 checks. It imports `worker.js` into Node with the
+`flows-dossier-reads` was measured the same day: 4.4 s and 232 checks; on 2026-10-05, with the 5 s source held through the summary route, about 12 s and 241 checks. It imports `worker.js` into Node with the
 counting D1 fake over `node:sqlite` (Node 22.13 or newer, run under `--disable-warning=ExperimentalWarning`) and
 a stubbed vendor at `https://uw.test`, and asserts round trips, rows read cold and warm, vendor calls (eight cold
 for a carded name, nine for a universe-only name with four queued), parallelism, the deadline and `pending`, the

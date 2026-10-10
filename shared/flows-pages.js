@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "244";
+export const ASSET_VERSION = "245";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -830,6 +830,7 @@ export function tickerPage({ username = "" } = {}) {
     <p data-k="wh-retired" data-w="Retired">Its card aged out of coverage.</p>
     <p data-k="wh-not-covered" data-w="Not covered">Outside this session&#39;s coverage, and not in the nightly screen.</p>
     <p data-k="wh-store" data-w="Unavailable">The store could not be read. Reload to try again.</p>
+    <p data-k="wh-throttled" data-w="Throttled">Too many market data reads in the last minute. Try again shortly.</p>
     <p data-k="wh-pending" data-w="Pending">Publishes with tonight&#39;s run.</p>
     <p data-k="legacy-vo">This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.</p>
   </div>

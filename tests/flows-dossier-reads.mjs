@@ -9,6 +9,7 @@ import { eventRow } from "../shared/flows-events.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client as harnessClient } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
 import { assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
+import { FLOWS_USERNAMES } from "../shared/flows-auth.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -22,7 +23,7 @@ const stub = vendorStub();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const modelRuns = [];
 const scriptedAi = { run: async (model) => { modelRuns.push(model); throw new Error("dossier assembly must never call a model"); } };
-const client = (D1, extra = {}) => harnessClient(D1, { AI: scriptedAi, ...extra });
+const client = (D1, extra = {}, who) => harnessClient(D1, { AI: scriptedAi, ...extra }, who);
 const SCHEMA = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
 const SLOW = ["analysts", "earnings", "fundamentals", "identity", "positioning"];
 
@@ -513,6 +514,53 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 
 {
   const f = world();
+  const get = await client(f.D1, { FLOWS_READ_MODE: "off" });
+  const SLOW_MS = 5000;
+  const below = globalThis.fetch;
+  const slowCalls = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(input instanceof URL ? input.href : typeof input === "string" ? input : input.url);
+    if (url.hostname === "uw.test" && /\/financials$/.test(url.pathname)) {
+      const signal = init && init.signal;
+      const entry = { aborted: false, at: Date.now(), signal: !!signal };
+      slowCalls.push(entry);
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, SLOW_MS);
+        if (signal) signal.addEventListener("abort", () => { entry.aborted = true; clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+    }
+    return below(input, init);
+  };
+  const partsOf = (kind) => {
+    const row = f.db.prepare("SELECT payload FROM flows_dossier_cache WHERE ticker = ? AND kind = ?").get(T, kind);
+    return row ? Object.keys(JSON.parse(row.payload).parts || {}).sort() : [];
+  };
+  try {
+    const first = await get("/api/flows/summary?t=" + T);
+    eq(first.body.read.status, "generating", "A SOURCE SLOWER THAN THE DEFAULT VENDOR DEADLINE: the first summary read answers generating while financials takes " + SLOW_MS + " ms");
+    await first.settle();
+    const until = Date.now() + SLOW_MS + 4000;
+    while (!partsOf("fundamentals").includes("financials") && Date.now() < until) await wait(100);
+    eq(slowCalls.length, 1, "the slow route is called once by the first read");
+    ok(slowCalls[0].signal, "the dossier's background call carries an abort signal, so it is bounded");
+    ok(!slowCalls[0].aborted, "and the dossier's background call is not aborted at uwFetch's 4 s default");
+    ok(partsOf("fundamentals").includes("financials"), "so the slow source is stored in flows_dossier_cache after the first read (" + partsOf("fundamentals").join(",") + ")");
+    const second = await get("/api/flows/summary?t=" + T);
+    await second.settle();
+    const third = await get("/api/flows/summary?t=" + T);
+    await third.settle();
+    for (const [n, r] of [["second", second], ["third", third]]) {
+      const read = r.body.read;
+      ok(read.status === "fallback" && read.why === "off", "the " + n + " summary read is the finished reading, not still assembling (" + read.status + "/" + read.why + ")");
+      ok(read.sections && read.sections.identity && read.sections.now, "and carries its identity and now sections");
+    }
+    eq(slowCalls.length, 1, "and no later read calls the slow route again");
+  } finally {
+    globalThis.fetch = below;
+  }
+}
+{
+  const f = world();
   const get = await client(f.D1);
   const a = await get("/api/flows/dossier?t=EXMP");
   await a.settle();
@@ -565,6 +613,51 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   ok(w < Math.max(4 * s + 2, 8), "CPU, WARM (slow kinds in D1, no assembled copy): " + w.toFixed(2) + " ms against the summary route's " + s.toFixed(2) + " ms (" + (cpu ? "thread CPU" : "wall") + ", median of 40)");
   ok(h < Math.max(2.5 * s + 1, 6), "CPU, HOT (the thirty-second assembled copy): " + h.toFixed(2) + " ms, within two and a half summary reads (it parses and prints a 41 KB dossier)");
   console.log("  dossier CPU per request: warm " + w.toFixed(2) + " ms, hot " + h.toFixed(2) + " ms, summary " + s.toFixed(2) + " ms");
+}
+
+{
+  const [A, B] = FLOWS_USERNAMES;
+  const consulted = [];
+  const ondemand = { n: 0 };
+  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: key !== A }; } };
+  const UW_ONDEMAND = { limit: async () => { ondemand.n++; return { success: true }; } };
+  const f = world();
+  const getA = await client(f.D1, { MEMBER_VENDOR, UW_ONDEMAND }, A);
+  const getB = await client(f.D1, { MEMBER_VENDOR, UW_ONDEMAND }, B);
+  stub.reset();
+  dropHot();
+  const a = await getA("/api/flows/dossier?t=EXMP");
+  await a.settle();
+  eq(a.res.status, 200, "MEMBER VENDOR: a cold dossier read by member A past A's window still answers 200");
+  eq(vendorCallsMade(), 0, "A REFUSED MEMBER'S DOSSIER MAKES 0 VENDOR CALLS (" + vendorCallsMade() + ")");
+  eq(a.res.headers.get("X-Dossier-Vendor-Calls"), "0", "and says so on its header");
+  ok(a.body.dossier.coverage.pending > 0, "the vendor packets are pending (" + a.body.dossier.coverage.pending + " pending), not failed and not shown as empty");
+  same(consulted, [A], "the member limiter is consulted ONCE for the whole assembly, before the fan-out, keyed by the member");
+  eq(ondemand.n, 0, "and a refused member never spends a token of the shared UW_ONDEMAND budget");
+  eq(storedKinds(f).length, 0, "nothing is written to flows_dossier_cache from a refused assembly");
+  ok(!cache.store.has("https://flows-dossier.internal/assembled/EXMP"), "and no 30-second assembled copy is kept, so the next member is not handed A's pending packets");
+
+  consulted.length = 0;
+  stub.reset();
+  dropHot();
+  const b = await getB("/api/flows/dossier?t=EXMP");
+  await b.settle();
+  ok(b.res.status === 200 && vendorCallsMade() === 8 && b.body.dossier.coverage.pending === 0,
+    "MEMBER B IS SERVED while A is refused: B's cold read makes its 8 vendor calls with 0 pending (" + vendorCallsMade() + ", " + b.body.dossier.coverage.pending + ")");
+  same(consulted, [B], "one member token for B's whole assembly, however many vendor calls it makes");
+  eq(ondemand.n, 8, "and one shared UW_ONDEMAND token per vendor call, as before");
+
+  const g = world();
+  const sumA = await client(g.D1, { MEMBER_VENDOR, UW_ONDEMAND, FLOWS_READ_MODE: "on" }, A);
+  consulted.length = 0;
+  stub.reset();
+  dropHot();
+  const s = await sumA("/api/flows/summary?t=EXMP");
+  await s.settle();
+  ok(s.res.status === 200 && s.body && s.body.read && typeof s.body.read.status === "string",
+    "THE SUMMARY ROUTE'S READING for a refused member still answers, with a read field (" + (s.body && s.body.read && s.body.read.status) + ")");
+  eq(vendorCallsMade(), 0, "and its dossier makes 0 vendor calls for a refused member");
+  ok(consulted.length >= 1 && consulted.every((k) => k === A), "the reading's assembly is metered under A's key (" + consulted.join(",") + ")");
 }
 
 restoreClock();

@@ -446,6 +446,93 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 {
   const f = fakeD1();
   seed(f);
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const quick = (u) => {
+    if (/\/ohlc\//.test(u.pathname)) return { data: [] };
+    return { data: {} };
+  };
+  globalThis.fetch = async (input, init = {}) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    const name = /^\/api\/stock\/([^/]+)\//.exec(u.pathname);
+    const call = { path: u.pathname, name: name ? name[1] : u.searchParams.get("ticker_symbol"), at: Date.now(),
+      signalled: !!(init && init.signal), abortedAt: null };
+    calls.push(call);
+    const signal = init && init.signal;
+    const onAbort = (fn) => { if (signal) signal.addEventListener("abort", () => { call.abortedAt = Date.now(); fn(signal.reason); }, { once: true }); };
+    if (call.name === "AMD" && !/option-contracts/.test(u.pathname)) {
+      return new Response(JSON.stringify(quick(u)), { headers: { "Content-Type": "application/json" } });
+    }
+    if (call.name === "MSFT") {
+      const body = new ReadableStream({ start(controller) { onAbort((reason) => controller.error(reason)); } });
+      return new Response(body, { headers: { "Content-Type": "application/json" } });
+    }
+    return new Promise((_, reject) => onAbort(reject));
+  };
+  const CAP_MS = 8000 + 1500;
+  const timed = async (get, route) => {
+    const t0 = Date.now();
+    const got = await Promise.race([get(route), new Promise((r) => setTimeout(() => r(null), CAP_MS))]);
+    return { got, at: Date.now(), t0 };
+  };
+  const firstCall = (name) => Math.min(...calls.filter((c) => c.name === name).map((c) => c.at));
+  const within = (ms, deadline) => ms >= deadline - TIMER_SLACK_MS && ms <= deadline + TIMER_SLACK_MS;
+  try {
+    const get = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+    const [live, stalled, chain, pages, tape] = await Promise.all([
+      timed(get, "/api/flows/live?t=GOOG"),
+      timed(get, "/api/flows/live?t=MSFT"),
+      timed(get, "/api/flows/chain?t=NVDA"),
+      timed(get, "/api/flows/chain?t=AMD"),
+      timed(get, "/api/flows/tape?t=NVDA"),
+    ]);
+    await new Promise((r) => setTimeout(r, 200));
+
+    ok(live.got !== null, `A VENDOR THAT NEVER ANSWERS NO LONGER HOLDS THE QUOTE ROUTE OPEN: it answered before the ${CAP_MS} ms cap`);
+    const liveMs = live.at - firstCall("GOOG");
+    ok(live.got.res.status === 200 && live.got.body.status === "unavailable" && live.got.body.why === "chain_timeout",
+      `the quote card says why: unavailable, chain_timeout (${live.got.res.status} ${JSON.stringify(live.got.body).slice(0, 80)})`);
+    ok(within(liveMs, 4000), `by the default 4,000 ms deadline plus at most ${TIMER_SLACK_MS} ms (${liveMs} ms after the vendor call)`);
+
+    ok(stalled.got !== null, "a vendor that sends its headers and then stalls the body is bounded by the same deadline");
+    const stalledMs = stalled.at - firstCall("MSFT");
+    ok(stalled.got.body.status === "unavailable" && stalled.got.body.why === "chain_timeout" && within(stalledMs, 4000),
+      `the body read ends at 4,000 ms as chain_timeout, not as malformed data (${stalledMs} ms, ${JSON.stringify(stalled.got.body).slice(0, 80)})`);
+
+    ok(chain.got !== null, "the chain route ends too");
+    const chainMs = chain.at - firstCall("NVDA");
+    ok(chain.got.res.status === 504 && chain.got.body.error && chain.got.body.error.code === "chain_timeout",
+      `a chain read whose vendor never answers is JSON 504 chain_timeout (${chain.got.res.status} ${chain.got.text.slice(0, 80)})`);
+    eq(chain.got.res.headers.get("Cache-Control"), "no-store", "as a no-store API error");
+    ok(within(chainMs, 6000), `at the OHLC deadline of 6,000 ms, the first deadline among the calls it cannot do without (${chainMs} ms)`);
+
+    const aborted = (name, re) => calls.filter((c) => c.name === name && re.test(c.path));
+    const abortsAt = (list, deadline) => list.length > 0 && list.every((c) => c.signalled && c.abortedAt !== null && within(c.abortedAt - c.at, deadline));
+    ok(abortsAt(aborted("NVDA", /\/ohlc\/1d$/), 6000), "EACH SUBREQUEST IS ABORTED AT ITS OWN DEADLINE: OHLC at 6,000 ms");
+    ok(abortsAt(aborted("NVDA", /\/stock-state$/), 4000), "the stock state at the default 4,000 ms");
+    ok(abortsAt(aborted("NVDA", /\/option-contracts$/), 8000),
+      `the chain page at 8,000 ms (${aborted("NVDA", /\/option-contracts$/).map((c) => c.abortedAt === null ? "never" : c.abortedAt - c.at).join(",")} ms)`);
+
+    ok(pages.got !== null, "a chain whose page alone hangs ends too");
+    const pagesMs = pages.at - firstCall("AMD");
+    ok(pages.got.res.status === 504 && pages.got.body?.error?.code === "chain_timeout" && within(pagesMs, 8000),
+      `with every other call answered, the chain page's own 8,000 ms deadline ends the route as 504 chain_timeout (${pages.got.res.status}, ${pagesMs} ms)`);
+
+    ok(tape.got !== null && tape.got.res.status === 200, `the tape route answers (${tape.got && tape.got.res.status})`);
+    const legs = calls.filter((c) => /net-prem-ticks$|flow-alerts$/.test(c.path));
+    ok(legs.length === 2 && abortsAt(legs, 6000),
+      `THE TAPE'S RACE NOW CANCELS THE SUBREQUEST: both legs are aborted at tier1TimeoutMs, 6,000 ms, not left running behind the race (${legs.map((c) => c.abortedAt === null ? "never" : c.abortedAt - c.at).join(",")} ms)`);
+
+    ok(calls.every((c) => c.signalled), `every vendor call carries an abort signal (${calls.filter((c) => !c.signalled).map((c) => c.path).join(", ")})`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
@@ -983,13 +1070,32 @@ class FakeCache {
   deep(Object.keys(one.body.keys), ["hist:CB"], "one kind may be asked alone");
   eq((await get("/api/flows/ingest?list=board")).res.status, 400, "a kind that is not a ticker key is refused");
   eq((await get("/api/flows/ingest?list=")).res.status, 400, "and an empty list");
-  const live = await (async () => {
-    const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: "reads-live-token-abcdefghijklmnopqrstuvwxyz",
+  const LIVE_STATIC = "reads-live-token-abcdefghijklmnopqrstuvwxyz";
+  const liveWorker = (await import("../worker.js?reads=" + (++instance))).default;
+  const liveAt = async (origin, path, extra = {}) => {
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: LIVE_STATIC, ...extra,
       FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
-    const worker = (await import("../worker.js?reads=" + (++instance))).default;
-    return worker.fetch(new Request("https://anilkaya.org/api/flows/ingest?list=card", { headers: { Authorization: "Bearer " + env.FLOWS_LIVE_TOKEN } }), env, { waitUntil() {} });
-  })();
-  eq(live.status, 403, "the live credential may not list the nightly's keys");
+    const res = await liveWorker.fetch(new Request(origin + path, { headers: { Authorization: "Bearer " + LIVE_STATIC } }), env, { waitUntil() {} });
+    let body = null;
+    try { body = JSON.parse(await res.text()); } catch { body = null; }
+    return { status: res.status, code: body && body.error ? body.error.code : null, body };
+  };
+  const live = await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?list=card");
+  ok(live.status === 403 && live.code === "live_token_scope", "the live credential may not list the nightly's keys");
+  const nightlyToo = { FLOWS_INGEST_TOKEN: INGEST_TOKEN };
+  const prod = [await liveAt("https://anilkaya.org", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("https://anilkaya.org", "/api/flows/ingest?list=card", nightlyToo),
+    await liveAt("https://anilkaya.org", "/api/flows/ingest?key=live:breadth", nightlyToo)];
+  deep(prod.map((r) => [r.status, r.code]), [[401, "unauthorized"], [401, "unauthorized"], [401, "unauthorized"]],
+    "THE STATIC LIVE TOKEN IS A STRANGER OVER https://anilkaya.org: the clock, the listing and a live key all answer 401, so only OIDC is a live credential in production");
+  const loop = [await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("http://localhost:8787", "/api/flows/ingest?key=clock", nightlyToo),
+    await liveAt("http://127.0.0.1:8787", "/api/flows/ingest?key=clock")];
+  ok(loop.every((r) => r.status === 200 && r.body && !Object.hasOwn(r.body, "labActiveAt")),
+    "and the same token over http://127.0.0.1:8787 or localhost is accepted as the live role, with or without the nightly token beside it");
+  const alone = await liveAt("https://anilkaya.org", "/api/flows/ingest?key=clock");
+  ok(alone.status === 503 && alone.code === "unavailable",
+    "a production Worker whose only ingest secret is the static live token has no ingest configured at all");
   f.fail(/FROM flows_payload WHERE \(id >=/);
   const gone = await get("/api/flows/ingest?list=card");
   ok(gone.res.status === 503 && gone.body.error.code === "store_unreadable", "an unreadable store is the 503 the metadata form gives");
@@ -1202,6 +1308,378 @@ class FakeCache {
   eq(stored.trips.length, 2, "in two trips, concurrent: the Neuron's batch and the reading's lookup");
   console.log(`  reading rows read: miss ${miss.rows} before the response and ${miss.total} with the background generation, hit ${stored.rows}`);
   unshift();
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const [A, B] = FLOWS_USERNAMES;
+  const seen = [];
+  const counts = new Map();
+  const limiter = { limit: async ({ key }) => {
+    seen.push(key);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return { success: counts.get(key) <= 10 };
+  } };
+  const env = { DB: f.D1, SESSION_SECRET, FLOWS_READ_MODE: "off", AI_ASK: limiter,
+    FLOWS_CREDENTIALS: JSON.stringify({ [A]: "x".repeat(43), [B]: "y".repeat(43) }) };
+  const tokens = { [A]: await signFlowsSession(A, SESSION_SECRET, 3600, sessionEpoch(env)),
+    [B]: await signFlowsSession(B, SESSION_SECRET, 3600, sessionEpoch(env)) };
+  const worker = (await import("../worker.js?reads=" + (++instance))).default;
+  const ask = async ({ as = A, body = JSON.stringify({ question: "what is the market doing" }), headers = {}, stream = false, env: over = {} } = {}) => {
+    const n = f.trips.length;
+    const init = { method: "POST", headers: { cookie: FLOWS_COOKIE + "=" + tokens[as], "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", ...headers } };
+    if (stream) {
+      const bytes = new TextEncoder().encode(body);
+      init.body = new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += 512) c.enqueue(bytes.slice(i, i + 512)); c.close(); } });
+      init.duplex = "half";
+    } else {
+      init.body = body;
+    }
+    const res = await worker.fetch(new Request("https://anilkaya.org/api/flows/ask", init), { ...env, ...over }, { waitUntil() {} });
+    const text = await res.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+    return { res, body: parsed, trips: f.trips.length - n };
+  };
+  await worker.fetch(new Request("https://anilkaya.org/api/flows/meta", { headers: { cookie: FLOWS_COOKIE + "=" + tokens[A] } }), env, { waitUntil() {} });
+
+  const padded = (bytes) => {
+    const shell = JSON.stringify({ question: "what is the market doing", pad: "" });
+    return JSON.stringify({ question: "what is the market doing", pad: "p".repeat(bytes - shell.length) });
+  };
+  const big = padded(5 * 1024);
+  eq(new TextEncoder().encode(big).length, 5120, "the oversized body is exactly 5 KiB");
+  const declared = await ask({ body: big, headers: { "Content-Length": "5120" }, env: { AI_ASK: undefined } });
+  eq(declared.res.status, 413, `ASK BODY BOUND: a 5 KiB body with its length declared answers 413 (${declared.res.status})`);
+  eq(declared.body && declared.body.error && declared.body.error.code, "payload_too_large", "with the payload_too_large code");
+  eq(declared.trips, 0, "and costs no D1 trip");
+  const streamed = await ask({ body: big, stream: true, env: { AI_ASK: undefined } });
+  eq(streamed.res.status, 413, `a 5 KiB body streamed with no declared length is cut off at 4,096 bytes and answers 413 (${streamed.res.status})`);
+  eq(streamed.trips, 0, "with no D1 trip");
+  const edge = padded(4096);
+  eq(new TextEncoder().encode(edge).length, 4096, "the boundary body is exactly 4,096 bytes");
+  const fits = await ask({ body: edge, stream: true, env: { AI_ASK: undefined } });
+  eq(fits.res.status, 200, `a body of exactly 4,096 bytes is still read and answered (${fits.res.status})`);
+
+  const typed = await ask({ headers: { "Content-Type": "text/plain" }, env: { AI_ASK: undefined } });
+  eq(typed.res.status, 415, `a body sent without the JSON media type answers 415 (${typed.res.status})`);
+  eq(typed.trips, 0, "with no D1 trip");
+  const charset = await ask({ headers: { "Content-Type": "application/json; charset=utf-8" }, env: { AI_ASK: undefined } });
+  eq(charset.res.status, 200, "and the JSON media type with a charset parameter is accepted");
+  const junk = await ask({ body: "{not json", env: { AI_ASK: undefined } });
+  ok(junk.res.status === 400 && junk.body.error.code === "bad_json" && junk.trips === 0, "malformed JSON keeps its bad_json 400 and costs no trip");
+  const empty = await ask({ body: JSON.stringify({ question: "  " }), env: { AI_ASK: undefined } });
+  ok(empty.res.status === 400 && empty.body.error.code === "no_question" && empty.trips === 0, "an empty question keeps its no_question 400");
+
+  const crossSite = await ask({ headers: { "Sec-Fetch-Site": "cross-site" }, env: { AI_ASK: undefined } });
+  eq(crossSite.res.status, 403, `ASK ORIGIN: a cross-site Sec-Fetch-Site answers 403 (${crossSite.res.status})`);
+  eq(crossSite.trips, 0, "with no D1 trip");
+  const foreign = await ask({ headers: { Origin: "https://evil.example" }, env: { AI_ASK: undefined } });
+  eq(foreign.res.status, 403, `a foreign Origin answers 403 (${foreign.res.status})`);
+  eq(foreign.trips, 0, "with no D1 trip");
+  const same = await ask({ headers: { Origin: "https://anilkaya.org" }, env: { AI_ASK: undefined } });
+  eq(same.res.status, 200, "the site's own Origin is served");
+
+  seen.length = 0;
+  for (let i = 1; i <= 10; i++) {
+    const r = await ask({ as: A });
+    eq(r.res.status, 200, `ASK FLOOD: member A's question ${i} of 10 in the window is served (${r.res.status})`);
+  }
+  const refused = await ask({ as: A });
+  eq(refused.res.status, 429, `member A's eleventh question in the window answers 429 (${refused.res.status})`);
+  eq(refused.body && refused.body.error && refused.body.error.code, "rate_limited", "with the rate_limited code");
+  eq(refused.res.headers.get("Retry-After"), "60", "and Retry-After of the binding's 60-second period");
+  eq(refused.res.headers.get("Cache-Control"), "no-store", "as a no-store API error");
+  eq(refused.trips, 0, "THE REFUSAL COSTS 0 D1 TRIPS: the flood never reaches the store or the model");
+  const other = await ask({ as: B });
+  eq(other.res.status, 200, `member B is served while member A is refused (${other.res.status})`);
+  deep([...new Set(seen)], [A, B], "the limiter is keyed by the member's name, one key per member");
+  const before = seen.length;
+  await ask({ headers: { "Sec-Fetch-Site": "cross-site" } });
+  await ask({ body: big, headers: { "Content-Length": "5120" } });
+  eq(seen.length, before, "a refused origin or an oversized body never consumes the member's allowance");
+
+  const down = await ask({ as: A, env: { AI_ASK: { limit: async () => { throw new Error("limiter down"); } } } });
+  eq(down.res.status, 200, "a limiter that throws fails open, like UW_ONDEMAND: it is a flood brake, not the spend cap");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const [A, B] = FLOWS_USERNAMES;
+  const counts = new Map();
+  const memberKeys = [];
+  let ondemand = 0;
+  const MEMBER_VENDOR = { limit: async ({ key }) => {
+    memberKeys.push(key);
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return { success: counts.get(key) <= 60 };
+  } };
+  const UW_ONDEMAND = { limit: async () => { ondemand++; return { success: true }; } };
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  const tape = new Date(Date.now() - 30000).toISOString();
+  let world = null;
+  globalThis.fetch = async (input, init) => {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    if (u.origin !== "http://vendor.test") return realFetch(input, init);
+    calls.push(u.pathname);
+    const shaped = world ? world(u) : undefined;
+    if (shaped !== undefined) return new Response(JSON.stringify(shaped), { headers: { "Content-Type": "application/json" } });
+    const data = /\/stock-state$/.test(u.pathname)
+      ? { close: "101.5", prev_close: "100", open: "100.5", high: "102", low: "100.1", volume: 1000, market_time: "r", tape_time: tape }
+      : [];
+    return new Response(JSON.stringify({ data }), { headers: { "Content-Type": "application/json" } });
+  };
+  const env = { DB: f.D1, SESSION_SECRET, FLOWS_READ_MODE: "off", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test",
+    MEMBER_VENDOR, UW_ONDEMAND, FLOWS_CREDENTIALS: JSON.stringify({ [A]: "x".repeat(43), [B]: "y".repeat(43) }) };
+  const tokens = { [A]: await signFlowsSession(A, SESSION_SECRET, 3600, sessionEpoch(env)),
+    [B]: await signFlowsSession(B, SESSION_SECRET, 3600, sessionEpoch(env)) };
+  const worker = (await import("../worker.js?reads=" + (++instance))).default;
+  const get = async (as, route, over = {}) => {
+    const n = calls.length;
+    const background = [];
+    const res = await worker.fetch(new Request("https://anilkaya.org" + route,
+      { headers: { cookie: FLOWS_COOKIE + "=" + tokens[as], "Sec-Fetch-Site": "same-origin" } }),
+    { ...env, ...over }, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
+    await Promise.all(background);
+    const text = await res.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch { body = null; }
+    return { res, body, vendor: calls.length - n };
+  };
+  const refusedJson = (r, what) => {
+    eq(r.res.status, 429, `${what}: answers 429 (${r.res.status})`);
+    eq(r.body && r.body.error && r.body.error.code, "rate_limited", `${what}: with the rate_limited code`);
+    eq(r.res.headers.get("Retry-After"), "60", `${what}: and Retry-After of the binding's 60-second period`);
+    eq(r.res.headers.get("Cache-Control"), "no-store", `${what}: as a no-store API error`);
+    eq(r.vendor, 0, `${what}: THE REFUSAL MAKES 0 VENDOR CALLS`);
+  };
+  try {
+    await get(A, "/api/flows/meta");
+    memberKeys.length = 0;
+    const vendorBefore = calls.length;
+    for (let i = 1; i <= 60; i++) {
+      const r = await get(A, "/api/flows/chain?t=NVDA&refresh=1");
+      ok(r.res.status !== 429 && r.vendor > 0, `MEMBER VENDOR: member A's chain read ${i} of 60 in the window reaches the vendor (${r.res.status}, ${r.vendor} calls)`);
+    }
+    eq(counts.get(A), 60, "one limiter call per vendor-spending request, however many vendor calls the request makes");
+    const spentCalls = calls.length - vendorBefore;
+    ok(spentCalls >= 120, `the 60 chain reads made several vendor calls each (${spentCalls})`);
+    eq(ondemand, spentCalls, "THE SHARED UW_ONDEMAND BUDGET IS CHARGED PER VENDOR CALL: one token for each call the 60 chain reads made");
+    const before = ondemand;
+    refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "member A's 61st chain read in the window, with no copy held");
+    refusedJson(await get(A, "/api/flows/strategy?t=NVDA"), "a strategy context read by member A past the window");
+    refusedJson(await get(A, "/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1"), "a strategy expiry read by member A past the window");
+    eq(ondemand, before, "A REFUSED MEMBER NEVER SPENDS THE SHARED UW_ONDEMAND BUDGET: the member check runs first");
+    const live = await get(A, "/api/flows/live?t=NVDA");
+    ok(live.res.status === 200 && live.body.status === "unavailable" && live.body.why === "throttled" && live.vendor === 0,
+      `the stock-state quote read by member A is refused with no vendor call, as the existing throttled body (${live.res.status} ${JSON.stringify(live.body).slice(0, 80)})`);
+    ok(live.res.headers.get("X-Fresh-State") === "stale" && live.res.headers.get("X-Fresh-Reason") === "throttled",
+      "stamped X-Fresh-State: stale, X-Fresh-Reason: throttled");
+    const now = await get(A, "/api/flows/now?t=NVDA");
+    ok(now.res.status === 200 && now.body.quote && now.body.quote.why === "throttled" && now.vendor === 0,
+      `the heartbeat's quote leg is refused the same way, and the heartbeat itself still answers (${now.res.status})`);
+
+    const chainB = await get(B, "/api/flows/chain?t=NVDA");
+    ok(chainB.res.status !== 429 && chainB.vendor > 0, `MEMBER B IS SERVED while member A is refused: B's chain read reaches the vendor (${chainB.res.status}, ${chainB.vendor} calls)`);
+    const liveB = await get(B, "/api/flows/live?t=NVDA");
+    ok(liveB.res.status === 200 && liveB.body.status === "ok" && liveB.body.price === 101.5 && liveB.vendor === 1,
+      `and B's quote is read from the vendor (${JSON.stringify(liveB.body).slice(0, 80)})`);
+    deep([...new Set(memberKeys)], [A, B], "the limiter is keyed by memberId(session), one key per member");
+
+    const meter = (allow = Infinity) => {
+      const m = { granted: 0, refused: 0 };
+      m.binding = { limit: async () => {
+        if (m.granted >= allow) { m.refused++; return { success: false }; }
+        m.granted++;
+        return { success: true };
+      } };
+      return m;
+    };
+    const pricedWorld = (u) => {
+      if (u.pathname.endsWith("/option-contracts")) return { data: [] };
+      if (u.pathname.includes("/ohlc/")) return { data: [{ date: "2026-08-25", market_time: "r", close: "183.40" }, { date: "2026-08-24", market_time: "r", close: "180.00" }] };
+      if (u.pathname.endsWith("/stock-state")) return { data: { close: "183.40", prev_close: "179.10", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+      if (u.pathname.endsWith("/info")) return { data: { next_earnings_date: "2026-12-30", announce_time: "premarket", issue_type: "Common Stock" } };
+      return { data: [] };
+    };
+    const priced = { UW_NOW: "2026-08-25T18:10:00Z" };
+    const perCall = async (route, what, expected) => {
+      const m = meter();
+      world = pricedWorld;
+      try {
+        const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
+        eq(m.granted, r.vendor, `${what}: ONE SHARED TOKEN PER VENDOR CALL (${m.granted} tokens, ${r.vendor} calls)`);
+        eq(r.vendor, expected, `${what}: makes ${expected} vendor calls`);
+        return r;
+      } finally {
+        world = null;
+      }
+    };
+    await perCall("/api/flows/chain?t=NVDA&refresh=1", "a chain miss (option-contracts, ohlc, stock-state, info)", 4);
+    await perCall("/api/flows/strategy?t=NVDA&refresh=1", "a strategy context miss (breakdown, ohlc, stock-state, info, the dated breakdown, the exposure fallback and the SPY index)", 7);
+    await perCall("/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1&refresh=1", "a strategy expiry with the engine (calls, puts, stock-state)", 3);
+    await perCall("/api/flows/strategy?t=NVDA&expiry=2026-10-16&refresh=1", "a strategy expiry without the engine (calls, puts)", 2);
+
+    for (const [route, what] of [["/api/flows/chain?t=NVDA&refresh=1", "a chain miss"],
+      ["/api/flows/strategy?t=NVDA&refresh=1", "a strategy context miss"],
+      ["/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1&refresh=1", "a strategy expiry miss"]]) {
+      const m = meter(2);
+      world = pricedWorld;
+      try {
+        const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
+        refusedJson({ ...r, vendor: 0 }, `${what} when the shared budget runs dry after two calls (no copy held)`);
+        eq(r.vendor, 2, `${what}: A REFUSAL IN THE MIDDLE OF A BUILD STOPS THE REST: only the two admitted calls reach the vendor`);
+        eq(m.granted, 2, `${what}: and exactly two tokens were spent`);
+      } finally {
+        world = null;
+      }
+    }
+
+    const cache = new FakeCache();
+    globalThis.caches = { default: cache };
+    try {
+      const storedAt = Math.floor(Date.now() / 1000) - 60;
+      const held = (url, body) => cache.put(new Request(url), new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json; charset=utf-8", "X-Chain-Stored": String(storedAt) } }));
+      await held("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", spot: 99, held: "chain" });
+      await held("https://flows-strategy.internal/NVDA", { mode: "context", ticker: "NVDA", spot: 98, held: "strategy" });
+      await cache.put(new Request("https://flows-live.internal/NVDA"), new Response(JSON.stringify({ ticker: "NVDA", status: "ok",
+        readAt: new Date(Date.now() - 2 * 86400000).toISOString(), price: 97, prevClose: 96, changePct: 0.01, open: null, high: null,
+        low: null, volume: null, marketTime: null, tapeTime: null }), { headers: { "X-Quote-Stored": String(Date.now() - 2 * 86400000) } }));
+      for (const [route, field, value] of [["/api/flows/chain?t=NVDA&refresh=1", "held", "chain"], ["/api/flows/strategy?t=NVDA&refresh=1", "held", "strategy"]]) {
+        const r = await get(A, route);
+        ok(r.res.status === 200 && r.body && r.body[field] === value && r.vendor === 0,
+          `THE CACHED COPY IS THE THROTTLED ANSWER: ${route} past A's window serves the held copy with no vendor call (${r.res.status})`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Fresh-Throttled") === "1" && r.res.headers.get("X-Chain-Cache") === "throttled" &&
+          r.res.headers.get("X-Chain-Age") !== null && r.res.headers.get("Cache-Control") === "no-store",
+          `stamped X-Fresh-State: stale, X-Fresh-Reason: throttled, with its age and no-store (${route})`);
+      }
+      const quote = await get(A, "/api/flows/live?t=NVDA");
+      ok(quote.res.status === 200 && quote.body.price === 97 && quote.vendor === 0 && quote.res.headers.get("X-Fresh-State") === "stale" &&
+        quote.res.headers.get("X-Fresh-Reason") === "throttled",
+        `the quote's held copy is its throttled answer, stamped stale (${JSON.stringify(quote.body).slice(0, 60)})`);
+      const spentB = counts.get(B);
+      const fresh = await get(B, "/api/flows/chain?t=NVDA");
+      ok(fresh.res.status === 200 && fresh.body.held === "chain" && fresh.res.headers.get("X-Chain-Cache") === "hit" && fresh.vendor === 0 &&
+        counts.get(B) === spentB,
+        "a read inside the copy's TTL is a hit and never consults the limiter");
+
+      const aged = (url, body, ageS) => cache.put(new Request(url), new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=21600",
+          "X-Chain-Stored": String(Math.floor(Date.now() / 1000) - ageS) } }));
+      for (const [route, url, mark] of [
+        ["/api/flows/chain?t=NVDA", "https://flows-chain.internal/NVDA?strategy=both&rank=annualized", "chain"],
+        ["/api/flows/strategy?t=NVDA", "https://flows-strategy.internal/NVDA", "strategy"],
+        ["/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1", "https://flows-strategy.internal/NVDA/2026-10-16?engine=1", "expiry"],
+      ]) {
+        await aged(url, { ticker: "NVDA", held: mark }, 300);
+        const spentA = counts.get(A);
+        const r = await get(A, route);
+        ok(r.res.status === 200 && r.body && r.body.held === mark && r.vendor === 0,
+          `A PLAIN READ PAST THE TTL BY A REFUSED MEMBER SERVES THE KEPT COPY: ${route} with a 300 s old copy, no refresh, 0 vendor calls (${r.res.status}, ${r.vendor})`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Chain-Cache") === "throttled" && Math.abs(Number(r.res.headers.get("X-Chain-Age")) - 300) <= 1 &&
+          r.res.headers.get("Cache-Control") === "no-store",
+          `stamped stale and throttled with its true age of 300 s (${route}: ${r.res.headers.get("X-Chain-Age")})`);
+        eq(counts.get(A), spentA + 1, `and the copy past its TTL asks the limiter once (${route})`);
+      }
+      await aged("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", held: "chain" }, 300);
+      {
+        const m = meter(1);
+        world = pricedWorld;
+        const r = await get(B, "/api/flows/chain?t=NVDA", { UW_ONDEMAND: m.binding, ...priced });
+        world = null;
+        ok(r.res.status === 200 && r.body && r.body.held === "chain" && r.vendor === 1 && m.granted === 1,
+          `A REFUSAL MID-BUILD SERVES THE KEPT COPY: the shared budget allows one call, the chain read makes 1 and answers the held copy (${r.res.status}, ${r.vendor} calls)`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Chain-Cache") === "throttled" && r.res.headers.get("Cache-Control") === "no-store",
+          "stamped stale and throttled, as a member refusal is");
+      }
+      world = (u) => {
+        if (u.pathname.endsWith("/option-contracts")) return { data: [
+          { option_symbol: "NVDA260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60", implied_volatility: "0.28", open_interest: "1200", volume: "340" },
+          { option_symbol: "NVDA260918C00190000", nbbo_bid: "3.20", nbbo_ask: "3.35", implied_volatility: "0.26", open_interest: "950", volume: "400" }] };
+        if (u.pathname.includes("/ohlc/")) return { data: [{ date: "2026-08-25", market_time: "r", close: "183.40" }, { date: "2026-08-24", market_time: "r", close: "180.00" }] };
+        if (u.pathname.endsWith("/stock-state")) return { data: { close: "183.40", prev_close: "179.10", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+        if (u.pathname.endsWith("/info")) return { data: { next_earnings_date: "2026-12-30", announce_time: "premarket", issue_type: "Common Stock" } };
+        return undefined;
+      };
+      const rebuilt = await get(B, "/api/flows/chain?t=NVDA", { UW_NOW: "2026-08-25T18:10:00Z" });
+      world = null;
+      ok(rebuilt.res.status === 200 && rebuilt.res.headers.get("X-Chain-Cache") === "miss" && rebuilt.vendor > 0 && rebuilt.body.held === undefined,
+        `an admitted member's plain read past the TTL is a miss that rebuilds from the vendor (${rebuilt.res.status} ${JSON.stringify(rebuilt.body).slice(0, 120)}, ${rebuilt.res.headers.get("X-Chain-Cache")}, ${rebuilt.vendor} calls)`);
+      const kept = cache.entries.get("https://flows-chain.internal/NVDA?strategy=both&rank=annualized");
+      const keptHeaders = new Headers(kept.headers);
+      eq(keptHeaders.get("Cache-Control"), "max-age=21600", "THE REBUILT COPY IS KEPT SIX HOURS, past its 120 s TTL, so a later refusal has it to serve");
+      ok(Math.abs(Number(keptHeaders.get("X-Chain-Stored")) - Date.now() / 1000) < 5, "stamped with the time it was stored, from which its TTL is measured");
+      const again = await get(B, "/api/flows/chain?t=NVDA");
+      ok(again.res.headers.get("X-Chain-Cache") === "hit" && again.vendor === 0, "and a read inside the 120 s TTL is served from it as an ordinary hit");
+      await aged("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", held: "chain" }, 7 * 3600);
+      refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "a refused member's read when the only copy is past the six-hour keep");
+
+      const tapeA = await get(A, "/api/flows/tape?t=NVDA");
+      ok(tapeA.res.status === 200 && tapeA.vendor === 0 && tapeA.body && tapeA.body.status === "pending",
+        `A TAPE MISS BY A REFUSED MEMBER makes 0 vendor calls and answers pending (${tapeA.res.status} ${JSON.stringify(tapeA.body).slice(0, 80)})`);
+      const tapeB = await get(B, "/api/flows/tape?t=NVDA");
+      ok(tapeB.vendor > 0, `while member B's tape miss reaches the vendor (${tapeB.vendor} calls)`);
+      const tapeRows = () => f.db.prepare("SELECT count(*) AS n FROM flows_tape").get().n;
+      const rowsBefore = tapeRows();
+      for (const t of ["QQZA", "QQZB", "QQZC"]) {
+        const junk = await get(A, "/api/flows/tape?t=" + t);
+        ok(junk.res.status === 200 && junk.vendor === 0 && junk.body && junk.body.status === "pending" && junk.body.why === "throttled" &&
+          junk.res.headers.get("X-Tape") === "throttled",
+          `A REFUSED MEMBER'S TAPE READ OF AN UNKNOWN NAME answers pending, throttled, with 0 vendor calls (${t}: ${JSON.stringify(junk.body).slice(0, 80)})`);
+      }
+      eq(tapeRows(), rowsBefore, `AND WRITES NO flows_tape ROW: the refused admit never reaches the insert or the lease claim (${rowsBefore} -> ${tapeRows()})`);
+      const changes = () => f.db.prepare("SELECT total_changes() AS n").get().n;
+      f.db.prepare("DELETE FROM flows_tape WHERE ticker = 'NVDA'").run();
+      f.db.prepare("INSERT INTO flows_tape (ticker, payload, read_at, session, legs, last_served) VALUES ('NVDA', ?, ?, '2026-08-25', 1, ?)")
+        .run(JSON.stringify({ ticker: "NVDA", held: "tape" }), Date.now() - 7 * 86400000, Date.now());
+      const staleBefore = changes();
+      for (let i = 0; i < 10; i++) {
+        const r = await get(A, "/api/flows/tape?t=NVDA");
+        ok(r.res.status === 200 && r.vendor === 0 && /^stale-throttled$|^throttled$/.test(r.res.headers.get("X-Tape") || ""),
+          `A REFUSED MEMBER'S READ OF A KNOWN NAME'S STALE TAPE ${i + 1} of 10 makes 0 vendor calls and is throttled (${r.res.headers.get("X-Tape")})`);
+      }
+      eq(changes() - staleBefore, 0, "AND WRITES NOTHING: no lease claim, no release, no insert (total_changes unchanged over ten reads)");
+      const staleB = await get(B, "/api/flows/tape?t=NVDA");
+      ok(staleB.vendor > 0, `while member B's read of the same stale tape reaches the vendor (${staleB.vendor} calls)`);
+      const cardA = await get(A, "/api/flows/card?t=ZZQQ");
+      ok(cardA.res.status === 200 && cardA.vendor === 0, `an unknown name's card read by a refused member makes no screener call (${cardA.vendor})`);
+      ok(cardA.body && cardA.body.status === "unavailable" && cardA.body.why === "throttled" &&
+        cardA.res.headers.get("X-Fresh-Reason") === "throttled" && cardA.res.headers.get("Cache-Control") === "no-store",
+        `AND IT IS TOLD THE LOOKUP WAS THROTTLED, not that the name is not covered (${JSON.stringify(cardA.body)})`);
+      const cardB = await get(B, "/api/flows/card?t=ZZQQ");
+      ok(cardB.vendor === 1, `while member B's classifies the name with one screener call (${cardB.vendor})`);
+    } finally {
+      delete globalThis.caches;
+    }
+
+    const down = await get(A, "/api/flows/chain?t=NVDA", { MEMBER_VENDOR: { limit: async () => { throw new Error("limiter down"); } } });
+    ok(down.res.status !== 429 && down.vendor > 0, "a member limiter that throws fails open, like UW_ONDEMAND: it is a flood brake");
+    const absent = await get(A, "/api/flows/chain?t=NVDA", { MEMBER_VENDOR: undefined });
+    ok(absent.res.status !== 429 && absent.vendor > 0, "and an absent binding admits the read");
+    const shared = await get(B, "/api/flows/chain?t=NVDA", { UW_ONDEMAND: { limit: async () => ({ success: false }) } });
+    refusedJson(shared, "member B under the window but with the shared UW_ONDEMAND budget spent");
+
+    const consulted = { member: 0, ondemand: 0 };
+    const counting = { MEMBER_VENDOR: { limit: async () => { consulted.member++; return { success: false }; } },
+      UW_ONDEMAND: { limit: async () => { consulted.ondemand++; return { success: false }; } } };
+    for (const [cron, at] of [[W.RTH_CRON, easternInstant("2026-09-23", 10 * 60 + 6)], [W.FOCUS_CRON, easternInstant("2026-09-23", 10 * 60 + 8)]]) {
+      const n = calls.length;
+      const background = [];
+      await worker.scheduled({ cron, scheduledTime: at }, { ...env, ...counting }, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(background);
+      ok(calls.length > n, `the ${W.cronJob(cron, at)} tick reached the vendor (${calls.length - n} calls)`);
+    }
+    deep(consulted, { member: 0, ondemand: 0 }, "THE TIER 1 AND FOCUS TICKS NEVER CONSULT A LIMITER: both refuse everything and the engines read the vendor anyway");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);

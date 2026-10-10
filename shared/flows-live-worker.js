@@ -598,10 +598,20 @@ export async function pruneTape(env, now) {
   return res && res.meta ? Number(res.meta.changes) || 0 : 0;
 }
 
-export function tokenKind(offered, env, equal) {
+export const STATIC_LIVE_HOSTS = Object.freeze(["127.0.0.1", "localhost"]);
+
+export function staticLiveToken(env, url) {
+  if (!env || !env.FLOWS_LIVE_TOKEN) return null;
+  let host;
+  try { host = new URL(url).hostname; } catch { return null; }
+  return STATIC_LIVE_HOSTS.includes(host) ? env.FLOWS_LIVE_TOKEN : null;
+}
+
+export function tokenKind(offered, env, equal, url) {
   if (!offered) return null;
   if (env.FLOWS_INGEST_TOKEN && equal(offered, env.FLOWS_INGEST_TOKEN)) return "nightly";
-  if (env.FLOWS_LIVE_TOKEN && equal(offered, env.FLOWS_LIVE_TOKEN)) return "live";
+  const live = staticLiveToken(env, url);
+  if (live && equal(offered, live)) return "live";
   return null;
 }
 
@@ -943,7 +953,7 @@ export async function ondemandAllowed(env) {
   }
 }
 
-export async function serveQuote(env, ctx, ticker, now, { build, json }) {
+export async function serveQuote(env, ctx, ticker, now, { build, json, allowed = () => ondemandAllowed(env) }) {
   const clock = await cachedClock(env, now);
   const ttl = quoteTtlS(now, clock);
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
@@ -961,7 +971,7 @@ export async function serveQuote(env, ctx, ticker, now, { build, json }) {
     const body = await hit.json().catch(() => null);
     if (body) return respond(body, { "X-Chain-Cache": "hit", "X-Chain-Age": String(Math.round(age / 1000)) });
   }
-  if (!(await ondemandAllowed(env))) {
+  if (!(await allowed())) {
     const body = hit ? await hit.json().catch(() => null) : null;
     if (body) {
       const r = await respond(body, { "X-Chain-Cache": "throttled", "X-Fresh-Throttled": "1" });
@@ -1065,7 +1075,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
 const TAPE_ROW_SQL = "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?";
 const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
 
-export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null }) {
+export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null, member = null, allowed = () => ondemandAllowed(env) }) {
   const db = env.DB;
   const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
   const keyed = [db.prepare(TAPE_ROW_SQL).bind(ticker)];
@@ -1095,11 +1105,16 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const age = hasPayload ? now - Number(row.read_at) : Infinity;
   if (hasPayload && age <= tapeTtlMs(phase, row, clock)) return respond(row, "fresh");
   const usable = hasPayload && (phase && phase.phase === "rth" ? age <= LIVE_BUDGET.tapeUsableMs : true);
-  if (!hasPayload && admit && !known && !(await admit.vendor(ticker))) {
-    return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
+  if (!hasPayload && admit && !known) {
+    const verdict = await admit.vendor(ticker);
+    if (verdict === "refused") return pending("throttled");
+    if (!verdict || verdict === "unknown") {
+      return json({ ticker, status: "absent", why: "unknown" }, 200, { "Cache-Control": "no-store", "X-Tape": "unknown" });
+    }
   }
 
   if (!env.UW_API_KEY) return usable ? respond(row, "stale-unconfigured") : pending("unconfigured");
+  if (member && !(await member())) return usable ? respond(row, "stale-throttled") : pending("throttled");
 
   await db.prepare("INSERT OR IGNORE INTO flows_tape (ticker) VALUES (?)").bind(ticker).run().catch(() => {});
   const claim = await db.prepare(
@@ -1110,7 +1125,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   const release = () => db.prepare("UPDATE flows_tape SET refreshing_until = NULL WHERE ticker = ?").bind(ticker).run();
   const refresh = async () => {
     try {
-      if (!(await ondemandAllowed(env))) { await release(); return { throttled: true }; }
+      if (!(await allowed())) { await release(); return { throttled: true }; }
       const fresh = await refreshTape(env, ticker, now, { fetchVendor,
         heldText: hasPayload ? row.payload : null, heldLegs: row ? row.legs : 0 });
       if (!fresh) { await release(); return null; }

@@ -129,6 +129,7 @@
     if (code === "chain_unconfigured") return "live lookup is not configured on this deployment";
     if (code === "invalid_ticker") return "that is not a symbol this route accepts";
     if (code === "invalid_expiry") return "that is not a date this route accepts";
+    if (code === "rate_limited") return "too many market data reads in the last minute; try again shortly";
     if (code === "chain_rate_limited" || status === 429) return "the data provider is rate limiting";
     if (code === "chain_no_spot") return "the provider returned no usable price for that symbol";
     if (code === "chain_empty") return "the provider lists no options for that symbol";

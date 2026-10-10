@@ -30,10 +30,12 @@ import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
-import { nightlyFreshMeta, STRIP_FIELDS, stripValues } from "./shared/flows-live.js";
+import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
+import { RT_LIMITS } from "./shared/flows-rt.js";
+import { memberAllowed } from "./shared/flows-access.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -1168,7 +1170,7 @@ function rowCurrent(verdict, now, clock) {
   return freshHeaders(rowMeta(at), now, clock).fresh.state !== "stale";
 }
 
-async function classifyTicker(env, ctx, ticker) {
+async function classifyTicker(env, ctx, ticker, allowed) {
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   const key = new Request(`https://flows-class.internal/${ticker}`, { method: "GET" });
   const hit = cache ? await cache.match(key).catch(() => null) : null;
@@ -1181,7 +1183,7 @@ async function classifyTicker(env, ctx, ticker) {
       held = body.row && Number(body.readAt) > 0 ? body : null;
     }
   }
-  if (!env.UW_API_KEY || !(await FLOWS_LIVE.ondemandAllowed(env))) return held;
+  if (!env.UW_API_KEY || !(await allowed())) return held;
   const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
   const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
   if (!rows) return held;
@@ -1206,7 +1208,7 @@ function quoteCard(ticker, row, now) {
     nm: text(row.full_name, 40), type: text(row.issue_type, 24), sector: text(row.sector, 40), u, why: "not-covered" };
 }
 
-async function absentKey(env, ctx, kind, ticker) {
+async function absentKey(env, ctx, kind, ticker, session) {
   const keyed = [env.DB.prepare(ROSTER_SQL).bind(ticker)];
   if (kind === "card") keyed.push(env.DB.prepare(LITE_SQL).bind(ticker), env.DB.prepare(GATE_SQL).bind(ticker));
   const now = Date.now();
@@ -1217,19 +1219,40 @@ async function absentKey(env, ctx, kind, ticker) {
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
   const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
-  const verdict = await classifyTicker(env, ctx, ticker);
+  const { verdict, refused } = await classifyWatched(env, ctx, ticker, vendorGate(env, session));
   if (verdict && verdict.known) {
     return json(quoteCard(ticker, verdict.row, verdict.readAt), 200, freshHeaders(rowMeta(verdict.readAt), now, clock).headers);
+  }
+  if (!verdict && refused) {
+    return json({ ticker, status: "unavailable", why: "throttled" }, 200,
+      { ...pendingHeaders("nightly", now, clock), "X-Fresh-Reason": "throttled", "Cache-Control": "no-store",
+        "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
   }
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
-async function vendorAdmits(env, ctx, ticker) {
-  const verdict = await classifyTicker(env, ctx, ticker);
-  return !verdict || verdict.known;
+async function classifyWatched(env, ctx, ticker, allowed) {
+  let refused = false;
+  const watched = async () => {
+    const yes = await allowed();
+    if (!yes) refused = true;
+    return yes;
+  };
+  const verdict = await classifyTicker(env, ctx, ticker, watched);
+  return { verdict, refused };
 }
 
-async function tapeAdmission(env, ctx, ticker) {
+async function vendorAdmission(env, ctx, ticker, allowed) {
+  const { verdict, refused } = await classifyWatched(env, ctx, ticker, allowed);
+  if (verdict) return verdict.known ? "known" : "unknown";
+  return refused ? "refused" : "open";
+}
+
+async function vendorAdmits(env, ctx, ticker, allowed) {
+  return (await vendorAdmission(env, ctx, ticker, allowed)) !== "unknown";
+}
+
+async function tapeAdmission(env, ctx, ticker, allowed) {
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   const key = new Request(`https://flows-tape-admit.internal/${ticker}`, { method: "GET" });
   const hit = cache ? await cache.match(key).catch(() => null) : null;
@@ -1239,7 +1262,7 @@ async function tapeAdmission(env, ctx, ticker) {
     const put = cache.put(key, new Response("1", { headers: { "Cache-Control": `max-age=${CLASS_TTL_S}` } })).catch(() => {});
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
   };
-  return { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmits(env, ctx, t), remember };
+  return { known: env.DB.prepare(KNOWN_SQL).bind("card:" + ticker, ticker), vendor: (t) => vendorAdmission(env, ctx, t, allowed), remember };
 }
 
 function passthrough(stored) {
@@ -1256,6 +1279,36 @@ function passthrough(stored) {
 const askModel = (env) => aiChain(env)[0] || null;
 
 const ASK_QUESTION_MAX = 400;
+const ASK_BODY_MAX_BYTES = 4096;
+const ASK_FLOOD_PERIOD_S = 60;
+
+const MEMBER_VENDOR_PERIOD_S = 60;
+
+class VendorRefused extends Error {}
+
+const keepRefusal = (fallback) => (error) => {
+  if (error instanceof VendorRefused) throw error;
+  return fallback;
+};
+
+function vendorGate(env, session) {
+  let member = null;
+  const check = () => (member ||= memberAllowed(env.MEMBER_VENDOR, session));
+  const gate = async () => {
+    if (!(await check())) return false;
+    return FLOWS_LIVE.ondemandAllowed(env);
+  };
+  gate.member = check;
+  gate.call = () => FLOWS_LIVE.ondemandAllowed(env);
+  return gate;
+}
+
+function chargedFetch(env, gate) {
+  return async (path, params, opts) => {
+    if (!(await gate.call())) throw new VendorRefused();
+    return uwFetch(env, path, params, opts);
+  };
+}
 
 const FALLBACK_FAILED = Object.freeze({
   allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
@@ -1706,18 +1759,19 @@ async function absentNeuron(env, ctx, ticker) {
   return json(body);
 }
 
-function dossierDeps(env, ctx) {
+function dossierDeps(env, ctx, session) {
+  const gate = vendorGate(env, session);
   return {
-    fetchVendor: (p, params, opts) => uwFetch(env, p, params, opts),
-    allowed: (e) => FLOWS_LIVE.ondemandAllowed(e),
-    quote: async (t) => (await quoteResponse(env, ctx, t)).json(),
-    admit: (t) => vendorAdmits(env, ctx, t),
+    fetchVendor: (p, params, opts) => uwFetch(env, p, params, { ...opts, deadlineMs: UW_DOSSIER_DEADLINE_MS }),
+    allowed: () => gate(),
+    quote: async (t) => (await quoteResponse(env, ctx, t, gate)).json(),
+    admit: (t) => vendorAdmits(env, ctx, t, gate),
   };
 }
 
-function readingDeps(env, ctx, ticker) {
+function readingDeps(env, ctx, ticker, session) {
   return {
-    assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), opts),
+    assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx, session), opts),
     readRow: (scope) => env.DB.prepare(NEURON_ROW_SQL).bind(scope).first(),
     mark: (scope, fingerprint, model) => markNeuronGenerating(env, scope, fingerprint, model),
     write: (scope, fingerprint, summary, ideas, llm, model, guard, startedAt) => writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard, startedAt),
@@ -1728,11 +1782,11 @@ function readingDeps(env, ctx, ticker) {
   };
 }
 
-async function summaryResponse(env, ctx, ticker) {
+async function summaryResponse(env, ctx, ticker, session) {
   if (env.DB) await ensureFlowsTables(env);
   const [res, read] = await Promise.all([
     tickerNeuron(env, ctx, ticker),
-    FLOWS_READING.readingSafe(env, ctx, ticker, readingDeps(env, ctx, ticker), { boxMs: FLOWS_READING.READ_BOX_MS }),
+    FLOWS_READING.readingSafe(env, ctx, ticker, readingDeps(env, ctx, ticker, session), { boxMs: FLOWS_READING.READ_BOX_MS }),
   ]);
   let body = null;
   try { body = await res.clone().json(); } catch { body = null; }
@@ -1740,11 +1794,11 @@ async function summaryResponse(env, ctx, ticker) {
   return json({ ...body, read }, res.status);
 }
 
-async function dossierResponse(env, ctx, ticker, url) {
+async function dossierResponse(env, ctx, ticker, url, session) {
   const now = Date.now();
   const asked = Number(url.searchParams.get("budget"));
   const budgetTokens = Number.isFinite(asked) && asked >= 400 && asked <= 12000 ? Math.round(asked) : FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS;
-  const result = await FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), { own: true, now });
+  const result = await FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx, session), { own: true, now });
   const { dossier, trace, neuron } = result;
   const prompt = result.prompt && budgetTokens === FLOWS_DOSSIER.DEFAULT_BUDGET_TOKENS ? result.prompt : FLOWS_DOSSIER.renderDossierForModel(dossier, { budgetTokens });
   const fresh = FLOWS_DOSSIER.dossierFresh(result, now) || pendingHeaders("nightly", now, result.clock);
@@ -1854,14 +1908,14 @@ function askTicker(question, subject) {
   return subject;
 }
 
-async function askDossier(env, ctx, subject, question) {
+async function askDossier(env, ctx, subject, question, session) {
   const none = { facts: [], promptFacts: [], about: null, rule: "" };
   const ticker = askTicker(question, subject);
   if (ticker === null || !env.DB) return none;
   try {
     await ensureFlowsTables(env);
     const got = await FLOWS_READING.askDossierFor(ticker, question, {
-      assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx), opts),
+      assemble: (opts) => FLOWS_DOSSIER.assembleDossier(env, ctx, ticker, dossierDeps(env, ctx, session), opts),
     });
     return got.facts.length ? got : none;
   } catch {
@@ -1875,9 +1929,14 @@ function askSubject(body) {
 }
 
 async function askQuestion(request) {
+  const mediaType = (request.headers.get("Content-Type") || "").split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") {
+    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
+  }
+  const bytes = await readBounded(request, ASK_BODY_MAX_BYTES, "The question is too large to read.");
   let body;
   try {
-    body = await request.json();
+    body = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(400, "bad_json", "Send a JSON object with a `question` field.");
   }
@@ -1888,7 +1947,7 @@ async function askQuestion(request) {
   return { question: raw.slice(0, ASK_QUESTION_MAX), subject: askSubject(body) };
 }
 
-async function askAnswer(question, env, index, updatedAt, subject, ctx) {
+async function askAnswer(question, env, index, updatedAt, subject, ctx, session) {
 
   let pool = index;
   let neuronFacts = 0;
@@ -1908,7 +1967,7 @@ async function askAnswer(question, env, index, updatedAt, subject, ctx) {
   }
   const sel = FLOWS_ASK.selectFacts(pool, question,
     subject === null ? undefined : { subject: { tickers: [subject] } });
-  const dossier = await askDossier(env, ctx, subject, question);
+  const dossier = await askDossier(env, ctx, subject, question, session);
   const { picked: selected, withheld, capped } = sel;
   const picked = dossier.facts.length ? selected.concat(dossier.facts) : selected;
   const why = dossier.facts.length ? sel.why + " Plus " + dossier.facts.length + (dossier.facts.length === 1 ? " fact" : " facts") + " from the company dossier." : sel.why;
@@ -2012,6 +2071,15 @@ const CHAIN_PAGE_SIZE = 500;
 const INFO_TTL_SECONDS = 6 * 3600;
 
 const CHAIN_REFRESH_FLOOR_SECONDS = 15;
+const VENDOR_COPY_KEEP_SECONDS = 6 * 3600;
+
+const UW_DEADLINE_MS = RT_LIMITS.callTimeoutMs;
+
+const UW_OHLC_DEADLINE_MS = 6000;
+
+const UW_CHAIN_DEADLINE_MS = 8000;
+
+const UW_DOSSIER_DEADLINE_MS = 20000;
 
 async function uwFetch(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
@@ -2019,13 +2087,19 @@ async function uwFetch(env, path, params, opts) {
   for (const [k, v] of Object.entries(params || {})) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
+  const signal = AbortSignal.timeout(deadlineMs);
+  const failed = (message) => signal.aborted
+    ? new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms")
+    : new HttpError(502, "chain_upstream", message);
   let response;
   try {
     response = await fetch(url, {
       headers: { Authorization: "Bearer " + env.UW_API_KEY, Accept: "application/json" },
+      signal,
     });
   } catch {
-    throw new HttpError(502, "chain_upstream", "Market data provider unreachable");
+    throw failed("Market data provider unreachable");
   }
   if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
   if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
@@ -2042,7 +2116,7 @@ async function uwFetch(env, path, params, opts) {
     try {
       text = await response.text();
     } catch {
-      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+      throw failed("Market data provider returned malformed data");
     }
     if (text.length > maxBytes) throw tooLarge();
     try {
@@ -2054,19 +2128,19 @@ async function uwFetch(env, path, params, opts) {
   try {
     return await response.json();
   } catch {
-    throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+    throw failed("Market data provider returned malformed data");
   }
 }
 
-async function cachedTickerInfo(env, ctx, ticker) {
+async function cachedTickerInfo(env, ctx, ticker, vf) {
   const key = new Request(`https://flows-info.internal/${ticker}`, { method: "GET" });
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   if (cache) {
     const hit = await cache.match(key).catch(() => null);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/info`, {})
-    .catch(() => null);
+  const raw = await vf(`/api/stock/${encodeURIComponent(ticker)}/info`, {})
+    .catch(keepRefusal(null));
   if (raw === null) return null;
 
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
@@ -2086,16 +2160,16 @@ async function cachedTickerInfo(env, ctx, ticker) {
         "Cache-Control": `max-age=${INFO_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
     else await cache.put(key, store).catch(() => {});
   }
   return out;
 }
 
-async function quoteResponse(env, ctx, ticker) {
+async function quoteResponse(env, ctx, ticker, allowed) {
   try {
     return await FLOWS_LIVE.serveQuote(env, ctx, ticker, Date.now(), {
-      json, build: () => buildLivePayload(env, ticker) });
+      json, build: () => buildLivePayload(env, ticker), allowed });
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
     return json({ ticker, status: "unavailable", why: error.code,
@@ -2157,15 +2231,17 @@ async function buildLivePayload(env, ticker) {
   };
 }
 
-async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSeconds }) {
+async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
+  const keep = Math.max(ttl, VENDOR_COPY_KEEP_SECONDS);
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
 
-  const hit = cache ? await cache.match(cacheKey) : null;
-  const storedAt = hit ? Number(hit.headers.get("X-Chain-Stored")) : NaN;
+  const match = cache ? await cache.match(cacheKey) : null;
+  const storedAt = match ? Number(match.headers.get("X-Chain-Stored")) : NaN;
   const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
+  const hit = match && ageSeconds < keep ? match : null;
 
-  const serveCached = hit && (wantsRefresh ? ageSeconds < CHAIN_REFRESH_FLOOR_SECONDS : true);
+  const serveCached = hit && ageSeconds < (wantsRefresh ? CHAIN_REFRESH_FLOOR_SECONDS : ttl);
   if (serveCached) {
     const out = new Response(hit.body, hit);
     out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
@@ -2175,20 +2251,43 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
     return out;
   }
 
-  const payload = await build();
+  const refuse = () => {
+    if (!hit) {
+      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
+        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
+    }
+    const out = new Response(hit.body, hit);
+    out.headers.set("X-Chain-Cache", "throttled");
+    out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
+    out.headers.set("Cache-Control", "no-store");
+    out.headers.set("X-Fresh-State", "stale");
+    out.headers.set("X-Fresh-Reason", "throttled");
+    out.headers.set("X-Fresh-Throttled", "1");
+    return out;
+  };
+
+  if (gate && !(await gate.member())) return refuse();
+
+  let payload;
+  try {
+    payload = await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts));
+  } catch (error) {
+    if (error instanceof VendorRefused) return refuse();
+    throw error;
+  }
   const body = JSON.stringify(payload);
 
   if (cache) {
     const store = new Response(body, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": `max-age=${ttl}`,
+        "Cache-Control": `max-age=${keep}`,
         "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
       },
     });
 
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store));
-    else await cache.put(cacheKey, store);
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store).catch(() => {}));
+    else await cache.put(cacheKey, store).catch(() => {});
   }
 
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
@@ -2221,24 +2320,24 @@ function offMarketChain(list, ivBasis, rankBy) {
   };
 }
 
-async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
+async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
-  const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+  const chainPage = (page) => vf(`/api/stock/${t}/option-contracts`, {
 
     maybe_otm_only: "true",
     exclude_zero_oi_chains: "true",
     limit: CHAIN_PAGE_SIZE,
     ...(page > 1 ? { page } : {}),
-  });
+  }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
+    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
 
-    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
+    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
 
-    cachedTickerInfo(env, ctx, ticker),
+    cachedTickerInfo(env, ctx, ticker, vf),
     cardPending,
   ]);
   const readMs = chainReadMs(env);
@@ -2250,7 +2349,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
 
   let truncated = false;
   if (rows.length >= CHAIN_PAGE_SIZE) {
-    const second = unwrap(await chainPage(2).catch(() => []));
+    const second = unwrap(await chainPage(2).catch(keepRefusal([])));
     for (const r of second) rows.push(r);
 
     truncated = second.length >= CHAIN_PAGE_SIZE;
@@ -2339,14 +2438,14 @@ const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STRATEGY_PAGES_PER_TYPE = 2;
 
-async function cachedIndexSpot(env, ctx) {
+async function cachedIndexSpot(env, ctx, vf) {
   const key = new Request(`https://flows-index.internal/${STRATEGY_INDEX}`, { method: "GET" });
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   if (cache) {
     const hit = await cache.match(key).catch(() => null);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await uwFetch(env, `/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(() => null);
+  const raw = await vf(`/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(keepRefusal(null));
   if (raw === null) return null;
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const close = numOrNull(d && d.close);
@@ -2363,7 +2462,7 @@ async function cachedIndexSpot(env, ctx) {
         "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store));
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
     else await cache.put(key, store).catch(() => {});
   }
   return out;
@@ -2371,13 +2470,13 @@ async function cachedIndexSpot(env, ctx) {
 
 const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
 
-async function buildStrategyContext(env, ctx, ticker) {
+async function buildStrategyContext(env, ctx, vf, ticker) {
   const t = encodeURIComponent(ticker);
   const [breakdown, candles, state, info] = await Promise.all([
-    uwFetch(env, `/api/stock/${t}/expiry-breakdown`, {}).catch(() => null),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }),
-    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
-    cachedTickerInfo(env, ctx, ticker),
+    vf(`/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
+    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    cachedTickerInfo(env, ctx, ticker, vf),
   ]);
   const readMs = chainReadMs(env);
 
@@ -2394,8 +2493,8 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expiryDate = null;
   if (breakdown !== null && !expiries.length && asOf) {
-    const retry = await uwFetch(env, `/api/stock/${t}/expiry-breakdown`, { date: asOf })
-      .catch(() => null);
+    const retry = await vf(`/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
+      .catch(keepRefusal(null));
     if (retry !== null) {
       const dated = readExpiries(retry);
       if (dated.length) { expiries = dated; expiryDate = asOf; }
@@ -2404,8 +2503,8 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expirySource = "breakdown";
   if (breakdown !== null && !expiries.length && asOf) {
-    const exposure = await uwFetch(env, `/api/stock/${t}/greek-exposure/expiry`, {})
-      .catch(() => null);
+    const exposure = await vf(`/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
+      .catch(keepRefusal(null));
     if (exposure !== null) {
       const listed = readExpiries(exposure)
         .filter((e) => e.expiry >= asOf)
@@ -2414,7 +2513,7 @@ async function buildStrategyContext(env, ctx, ticker) {
     }
   }
 
-  const index = await cachedIndexSpot(env, ctx);
+  const index = await cachedIndexSpot(env, ctx, vf);
 
   return {
     mode: "context",
@@ -2470,20 +2569,20 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   };
 }
 
-async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } = {}) {
+async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
-  const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+  const page = (optionType, n) => vf(`/api/stock/${t}/option-contracts`, {
 
     expiry,
     option_type: optionType,
     limit: CHAIN_PAGE_SIZE,
     ...(n > 1 ? { page: n } : {}),
-  });
+  }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
   const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
-    engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
+    engine ? vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)) : Promise.resolve(null),
     cardPending,
   ]);
 
@@ -2492,7 +2591,7 @@ async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } 
     let truncated = false;
     if (rows.length >= CHAIN_PAGE_SIZE) {
       for (let n = 2; n <= STRATEGY_PAGES_PER_TYPE; n++) {
-        const next = unwrapRows(await page(optionType, n).catch(() => []));
+        const next = unwrapRows(await page(optionType, n).catch(keepRefusal([])));
         for (const r of next) rows.push(r);
 
         truncated = next.length >= CHAIN_PAGE_SIZE;
@@ -3469,11 +3568,11 @@ async function route(request, env, url, ctx) {
     requireMethod(request, ["GET", "POST", "DELETE"]);
     const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
     const oidc = FLOWS_LIVE.looksLikeJwt(offered);
-    if (!env.FLOWS_INGEST_TOKEN && !env.FLOWS_LIVE_TOKEN && !oidc) {
+    if (!env.FLOWS_INGEST_TOKEN && !FLOWS_LIVE.staticLiveToken(env, url) && !oidc) {
       throw new HttpError(503, "unavailable", "Ingest is not configured");
     }
 
-    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr);
+    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr, url);
     if (!tokenKind && oidc) {
       const check = await FLOWS_LIVE.oidcKind(offered, env);
       if (check.unavailable) {
@@ -3679,7 +3778,7 @@ async function route(request, env, url, ctx) {
     if (path === "/api/flows/now") {
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveNow(env, url, Date.now(), { json, HttpError,
-        quote: async (t) => (await quoteResponse(env, ctx, t)).json() });
+        quote: async (t) => (await quoteResponse(env, ctx, t, vendorGate(env, session))).json() });
     }
 
     if (path === "/api/flows/tape") {
@@ -3688,9 +3787,10 @@ async function route(request, env, url, ctx) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
       await ensureFlowsTables(env);
+      const gate = vendorGate(env, session);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, fetchVendor: (p, params) => uwFetch(env, p, params),
-        admit: await tapeAdmission(env, ctx, ticker) });
+        json, allowed: gate, member: gate.member, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
+        admit: await tapeAdmission(env, ctx, ticker, gate) });
     }
 
     if (path === "/api/flows/political") {
@@ -3741,7 +3841,7 @@ async function route(request, env, url, ctx) {
         if (!FLOWS_TICKER_RE.test(subject)) {
           throw new HttpError(400, "invalid_ticker", "Unknown ticker");
         }
-        return summaryResponse(env, ctx, subject);
+        return summaryResponse(env, ctx, subject, session);
       }
 
       const summary = await readFlowsSummary(env, "board");
@@ -3763,7 +3863,7 @@ async function route(request, env, url, ctx) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
       await ensureFlowsTables(env);
-      return dossierResponse(env, ctx, ticker, url);
+      return dossierResponse(env, ctx, ticker, url, session);
     }
 
     if (path === "/api/flows/live") {
@@ -3771,7 +3871,7 @@ async function route(request, env, url, ctx) {
       if (!FLOWS_TICKER_RE.test(ticker)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
-      return quoteResponse(env, ctx, ticker);
+      return quoteResponse(env, ctx, ticker, vendorGate(env, session));
     }
 
     if (path === "/api/flows/brief") {
@@ -3792,7 +3892,12 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/ask") {
 
+      requireSameOrigin(request);
       const { question: asked, subject: onPage } = await askQuestion(request);
+      if (!(await memberAllowed(env.AI_ASK, session))) {
+        throw new HttpError(429, "rate_limited", "Too many questions in the last minute; ask again shortly.",
+          { "Retry-After": String(ASK_FLOOD_PERIOD_S) });
+      }
 
       const trace = {};
       const stored = await readFlowsPayload(env, "brief", trace);
@@ -3816,7 +3921,7 @@ async function route(request, env, url, ctx) {
           "The briefing was published and could not be read, so no answer is offered. " +
           "That is a fault on this site rather than a fact about the session.");
       }
-      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx);
+      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx, session);
     }
 
     if (path === "/api/flows/record") {
@@ -3836,7 +3941,7 @@ async function route(request, env, url, ctx) {
       }
       const kind = path.slice("/api/flows/".length);
       const stored = await readServed(env, kind + ":" + ticker);
-      if (stored === null) return absentKey(env, ctx, kind, ticker);
+      if (stored === null) return absentKey(env, ctx, kind, ticker, session);
       if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
       const trace = {};
       const merged = await cardWithEngine(env, ticker, stored, trace);
@@ -3857,12 +3962,14 @@ async function route(request, env, url, ctx) {
       const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
 
       return serveCachedVendorRead({
+        env,
         ctx,
         cacheKey: new Request(
           `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
-        build: () => buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 }),
+        gate: vendorGate(env, session),
+        build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120 }),
       });
     }
 
@@ -3881,14 +3988,16 @@ async function route(request, env, url, ctx) {
       const engine = expiry !== null && url.searchParams.get("engine") === "1";
 
       return serveCachedVendorRead({
+        env,
         ctx,
         cacheKey: new Request(
           `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
-        build: () => (expiry
-          ? buildStrategyExpiry(env, ctx, ticker, expiry, { engine })
-          : buildStrategyContext(env, ctx, ticker)),
+        gate: vendorGate(env, session),
+        build: (vf) => (expiry
+          ? buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine })
+          : buildStrategyContext(env, ctx, vf, ticker)),
       });
     }
 
@@ -3972,14 +4081,14 @@ export default {
     if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
       })());
       return;
     }
     if (job === "focus") {
       guard("flows focus tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params) });
+        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
       })());
       return;
     }
