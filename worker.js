@@ -28,6 +28,12 @@ import { etDayOf } from "./shared/flows-quant-time.js";
 import { isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
+import { TICKER_RE } from "./shared/flows-live.js";
+import {
+  HttpError, json, apiError, redirect, requireMethod, requireSameOrigin, requireMutationOwner, requireReadOwnerIfPresent,
+  readBounded, readJSON, requireTicker, tickerParam, keepAlive, errorText, internalKey, edgeCache,
+} from "./server/http.js";
+import { logFailure } from "./server/log.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
@@ -59,7 +65,6 @@ const LEGACY_COURSE_PATHS = new Set([
   "/lab/course", "/lab/course.html", "/lab/course/",
   "/lab/lesson", "/lab/lesson.html", "/lab/lesson/",
 ]);
-const MAX_JSON_BYTES = 16 * 1024;
 const GENERATION_HEADER = "X-IEWT-Generation";
 const MAX_SYNC_GENERATION = Number.MAX_SAFE_INTEGER;
 const LEARNING_SYNC_SCHEMA_SQL =
@@ -162,70 +167,7 @@ const YAHOO_ORIGINS = ["https://query1.finance.yahoo.com", "https://query2.finan
 
 const setAttr = (name, value) => ({ element: (el) => el.setAttribute(name, value) });
 
-class HttpError extends Error {
-  constructor(status, code, message, headers, details) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.headers = headers;
-    this.details = details;
-  }
-}
-
-const json = (value, status = 200, headers) => {
-  const out = new Headers(headers);
-  out.set("Content-Type", "application/json; charset=utf-8");
-  return new Response(JSON.stringify(value), { status, headers: out });
-};
-
 const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-const apiError = (status, code, message, headers, details) =>
-  json({ error: { code, message }, ...(details || {}) }, status, headers);
-
-const redirect = (location, status = 302, cookies = []) => {
-  const headers = new Headers({ Location: location, "Cache-Control": "no-store" });
-  for (const value of cookies) headers.append("Set-Cookie", value);
-  return new Response(null, { status, headers });
-};
-
-function requireMethod(request, allowed) {
-  if (!allowed.includes(request.method)) {
-    throw new HttpError(405, "method_not_allowed", "Method not allowed", { Allow: allowed.join(", ") });
-  }
-}
-
-function requireSameOrigin(request) {
-  const expectedOrigin = new URL(request.url).origin;
-  const suppliedOrigin = request.headers.get("Origin");
-  const fetchSite = request.headers.get("Sec-Fetch-Site");
-
-  let originMatches = true;
-  if (suppliedOrigin !== null) {
-    try {
-      originMatches = new URL(suppliedOrigin).origin === expectedOrigin;
-    } catch {
-      originMatches = false;
-    }
-  }
-
-  if (!originMatches || (fetchSite !== null && fetchSite.trim().toLowerCase() !== "same-origin")) {
-    throw new HttpError(403, "forbidden", "Same-origin request required");
-  }
-}
-
-function requireMutationOwner(request, userId) {
-  if (request.headers.get("X-IEWT-Owner") !== userId) {
-    throw new HttpError(409, "account_changed", "Signed-in account changed; refresh and try again");
-  }
-}
-
-function requireReadOwnerIfPresent(request, userId) {
-  const owner = request.headers.get("X-IEWT-Owner");
-  if (owner !== null && owner !== userId) {
-    throw new HttpError(409, "account_changed", "Signed-in account changed; refresh and try again");
-  }
-}
 
 function requireSessionSecret(env) {
   if (typeof env.SESSION_SECRET !== "string" || !env.SESSION_SECRET) {
@@ -238,51 +180,6 @@ function requireGoogleConfig(env) {
   if (typeof env.GOOGLE_CLIENT_ID !== "string" || !env.GOOGLE_CLIENT_ID ||
       typeof env.GOOGLE_CLIENT_SECRET !== "string" || !env.GOOGLE_CLIENT_SECRET) {
     throw new HttpError(503, "service_unavailable", "Google sign-in is temporarily unavailable");
-  }
-}
-
-async function readBounded(request, maxBytes, message) {
-  const declared = Number(request.headers.get("Content-Length"));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new HttpError(413, "payload_too_large", message);
-  }
-  if (!request.body) return new Uint8Array(0);
-
-  const reader = request.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-
-      throw new HttpError(413, "payload_too_large", message);
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  return bytes;
-}
-
-async function readJSON(request) {
-  const contentType = request.headers.get("Content-Type") || "";
-  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
-  if (mediaType !== "application/json") {
-    throw new HttpError(415, "unsupported_media_type", "Content-Type must be application/json");
-  }
-
-  if (!request.body) throw new HttpError(400, "invalid_json", "A JSON body is required");
-
-  const bytes = await readBounded(request, MAX_JSON_BYTES, "JSON body is too large");
-  try {
-    const value = JSON.parse(new TextDecoder().decode(bytes));
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("object required");
-    return value;
-  } catch {
-    throw new HttpError(400, "invalid_json", "Body must be a valid JSON object");
   }
 }
 
@@ -379,7 +276,7 @@ async function learningBatch(env, userId, buildStatements) {
     return await execute();
   } catch (error) {
 
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (!/no such table:\s*(?:main\.)?learning_sync\b/i.test(message)) throw error;
     await env.DB.prepare(LEARNING_SYNC_SCHEMA_SQL).run();
     return execute();
@@ -398,7 +295,7 @@ async function addDayColumn(env, table) {
   try {
     await env.DB.prepare("ALTER TABLE " + table + " ADD COLUMN last_day TEXT").run();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (!/duplicate column name|no such table/i.test(message)) throw error;
   }
 }
@@ -411,7 +308,7 @@ async function masteryBatch(env, userId, buildStatements) {
   try {
     return await learningBatch(env, userId, buildStatements);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
 
     if (/(?:no such column|has no column named)[^\n]*\blast_day\b/i.test(message)) {
       await ensureDayColumns(env);
@@ -427,7 +324,7 @@ async function placementBatch(env, userId, buildStatements) {
   try {
     return await masteryBatch(env, userId, buildStatements);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (!/no such table:\s*(?:main\.)?placement\b/i.test(message)) throw error;
     await env.DB.prepare(PLACEMENT_SCHEMA_SQL).run();
     return masteryBatch(env, userId, buildStatements);
@@ -442,7 +339,7 @@ async function academyBatch(env, userId, buildStatements) {
   try {
     return await placementBatch(env, userId, buildStatements);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (!/no such table:\s*(?:main\.)?(?:progress_v3|skill_mastery|skill_attempts|learning_preferences|project_progress)\b/i.test(message)) throw error;
     await ensureAcademySchema(env);
     return placementBatch(env, userId, buildStatements);
@@ -453,7 +350,7 @@ async function marketOp(env, op) {
   try {
     return await op();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorText(error);
     if (!/no such table:\s*(?:main\.)?market_snapshot\b/i.test(message)) throw error;
     await env.DB.prepare(MARKET_SNAPSHOT_SCHEMA_SQL).run();
     return op();
@@ -943,8 +840,6 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
-const FLOWS_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
-
 const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
 const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/;
@@ -952,7 +847,7 @@ const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}
 function ingestKeyParts(key) {
   const tickerKey = /^(card|card-x|hist):/.exec(key);
   const card = tickerKey ? key.slice(tickerKey[0].length) : null;
-  return { tickerKey, valid: card !== null ? FLOWS_TICKER_RE.test(card) : INGEST_VIEW_KEY_RE.test(key) };
+  return { tickerKey, valid: card !== null ? TICKER_RE.test(card) : INGEST_VIEW_KEY_RE.test(key) };
 }
 
 const INGEST_META_KEYS_MAX = 96;
@@ -1041,7 +936,7 @@ async function cardWithEngine(env, ticker, stored, trace = {}) {
 }
 
 const STORE_QUOTA_RE = /exceeded D1's|free tier daily row|D1_ERROR[\s\S]*\b7500\b/i;
-const isStoreQuota = (error) => STORE_QUOTA_RE.test(error instanceof Error ? error.message : String(error));
+const isStoreQuota = (error) => STORE_QUOTA_RE.test(errorText(error));
 const secondsToUtcMidnight = (now) => Math.max(60, Math.ceil((Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(),
   new Date(now).getUTCDate() + 1) - now) / 1000));
 
@@ -1062,19 +957,15 @@ function lastGoodKey(request, url) {
     const side = url.searchParams.get("side");
     tail = "?side=" + (side === "short" || side === "watch" ? side : "long");
   } else if (url.pathname === "/api/flows/card" || url.pathname === "/api/flows/card-x" || url.pathname === "/api/flows/hist") {
-    const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-    if (!FLOWS_TICKER_RE.test(ticker)) return null;
+    const ticker = tickerParam(url);
+    if (!TICKER_RE.test(ticker)) return null;
     tail = "?t=" + ticker;
   }
-  return new Request("https://flows-lastgood.internal" + url.pathname + tail, { method: "GET" });
-}
-
-function lastGoodCache() {
-  return typeof caches !== "undefined" && caches.default ? caches.default : null;
+  return internalKey("lastgood", url.pathname.slice(1) + tail);
 }
 
 function rememberLastGood(request, url, response, ctx, now = Date.now()) {
-  const cache = lastGoodCache();
+  const cache = edgeCache.handle();
   if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
   const key = lastGoodKey(request, url);
   if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
@@ -1093,10 +984,10 @@ function rememberLastGood(request, url, response, ctx, now = Date.now()) {
 }
 
 async function recallLastGood(request, url, now = Date.now()) {
-  const cache = lastGoodCache();
+  const cache = edgeCache.handle();
   const key = cache ? lastGoodKey(request, url) : null;
   if (!key) return null;
-  const hit = await cache.match(key).catch(() => null);
+  const hit = await edgeCache.get(key);
   const storedAt = hit ? Number(hit.headers.get("X-Last-Good-At")) : NaN;
   if (!hit || !Number.isFinite(storedAt) || now - storedAt > LAST_GOOD_TTL_MS) return null;
   const out = new Response(hit.body, { status: 200, headers: hit.headers });
@@ -1181,9 +1072,9 @@ function rowCurrent(verdict, now, clock) {
 }
 
 async function classifyTicker(env, ctx, ticker, allowed) {
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
-  const key = new Request(`https://flows-class.internal/${ticker}`, { method: "GET" });
-  const hit = cache ? await cache.match(key).catch(() => null) : null;
+  const cache = edgeCache.handle();
+  const key = internalKey("class", ticker);
+  const hit = await edgeCache.get(key);
   const now = Date.now();
   let held = null;
   if (hit) {
@@ -1202,8 +1093,8 @@ async function classifyTicker(env, ctx, ticker, allowed) {
   if (cache) {
     const store = new Response(JSON.stringify(verdict), { headers: {
       "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${CLASS_TTL_S}` } });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
-    else await cache.put(key, store).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(key, store));
+    else await edgeCache.put(key, store);
   }
   return verdict;
 }
@@ -1263,9 +1154,9 @@ async function vendorAdmits(env, ctx, ticker, allowed) {
 }
 
 async function tapeAdmission(env, ctx, ticker, allowed) {
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
-  const key = new Request(`https://flows-tape-admit.internal/${ticker}`, { method: "GET" });
-  const hit = cache ? await cache.match(key).catch(() => null) : null;
+  const cache = edgeCache.handle();
+  const key = internalKey("tape-admit", ticker);
+  const hit = await edgeCache.get(key);
   if (hit && (await hit.text().catch(() => "")) === "1") return null;
   const remember = () => {
     if (!cache) return;
@@ -1397,8 +1288,7 @@ async function askRecordSpend(env, usage, model) {
   } catch (error) {
     if (!state.spendRecorderFailed) {
       state.spendRecorderFailed = true;
-      console.warn(JSON.stringify({ message: "ai spend not recorded", model: billed,
-        error: error instanceof Error ? error.message : String(error) }));
+      logFailure("warn", "ai spend not recorded", { model: billed }, error);
     }
     return null;
   }
@@ -1750,9 +1640,9 @@ function screenShape(ticker, lite, clock) {
 }
 
 async function absentNeuron(env, ctx, ticker) {
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
-  const key = new Request("https://flows-screen.internal/" + ticker, { method: "GET" });
-  const hit = cache ? await cache.match(key).catch(() => null) : null;
+  const cache = edgeCache.handle();
+  const key = internalKey("screen", ticker);
+  const hit = await edgeCache.get(key);
   if (hit) {
     const kept = await hit.json().catch(() => null);
     if (kept && kept.scope === ticker && typeof kept.tier === "string") return json(kept);
@@ -1908,8 +1798,7 @@ async function tickerNeuron(env, ctx, ticker) {
     return json(shape("pending", null, { note: "Neuron is reading this card now." }));
   }
   const work = generateNeuron(env, ticker, context, fingerprint, startedAt).catch((error) => {
-    console.error(JSON.stringify({ message: "neuron failed", ticker,
-      error: error instanceof Error ? error.message : String(error) }));
+    logFailure("error", "neuron failed", { ticker }, error);
   });
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work); else await work;
   return json(shape("pending", null, { note: "Neuron is reading this card now." }));
@@ -2147,10 +2036,10 @@ async function uwFetch(env, path, params, opts) {
 }
 
 async function cachedTickerInfo(env, ctx, ticker, vf) {
-  const key = new Request(`https://flows-info.internal/${ticker}`, { method: "GET" });
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const key = internalKey("info", ticker);
+  const cache = edgeCache.handle();
   if (cache) {
-    const hit = await cache.match(key).catch(() => null);
+    const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
   const raw = await vf(`/api/stock/${encodeURIComponent(ticker)}/info`, {})
@@ -2174,8 +2063,8 @@ async function cachedTickerInfo(env, ctx, ticker, vf) {
         "Cache-Control": `max-age=${INFO_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
-    else await cache.put(key, store).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(key, store));
+    else await edgeCache.put(key, store);
   }
   return out;
 }
@@ -2248,7 +2137,7 @@ async function buildLivePayload(env, ticker) {
 async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const keep = Math.max(ttl, VENDOR_COPY_KEEP_SECONDS);
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const cache = edgeCache.handle();
 
   const match = cache ? await cache.match(cacheKey) : null;
   const storedAt = match ? Number(match.headers.get("X-Chain-Stored")) : NaN;
@@ -2300,8 +2189,8 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
       },
     });
 
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(cacheKey, store).catch(() => {}));
-    else await cache.put(cacheKey, store).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(cacheKey, store));
+    else await edgeCache.put(cacheKey, store);
   }
 
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
@@ -2384,8 +2273,7 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
       rows, spot: print.spot, asOf, printSource: print.source, readMs, rate: engineRate, ticker,
     });
   } catch (error) {
-    console.warn(JSON.stringify({ message: "chain coherence check failed", ticker,
-      error: error instanceof Error ? error.message : String(error) }));
+    logFailure("warn", "chain coherence check failed", { ticker }, error);
     found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
   }
   const spot = found.spot;
@@ -2457,10 +2345,10 @@ const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const STRATEGY_PAGES_PER_TYPE = 2;
 
 async function cachedIndexSpot(env, ctx, vf) {
-  const key = new Request(`https://flows-index.internal/${STRATEGY_INDEX}`, { method: "GET" });
-  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const key = internalKey("index", STRATEGY_INDEX);
+  const cache = edgeCache.handle();
   if (cache) {
-    const hit = await cache.match(key).catch(() => null);
+    const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
   const raw = await vf(`/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(keepRefusal(null));
@@ -2480,8 +2368,8 @@ async function cachedIndexSpot(env, ctx, vf) {
         "Cache-Control": `max-age=${CHAIN_TTL_SECONDS}`,
       },
     });
-    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(cache.put(key, store).catch(() => {}));
-    else await cache.put(key, store).catch(() => {});
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(key, store));
+    else await edgeCache.put(key, store);
   }
   return out;
 }
@@ -2671,7 +2559,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
       engineBlock = strategyEngine({ ticker, expiry, calls: callRows, puts: putRows, spot, card, nowMs: Date.now() });
       engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
     } catch (error) {
-      engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (error instanceof Error ? error.message : String(error)) };
+      engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (errorText(error)) };
     }
   }
 
@@ -2701,8 +2589,7 @@ function startFlowsSchemaFlight(env) {
       await FLOWS_LIVE.upgradeClockColumns(env.DB, results && results[FLOWS_SCHEMA_SQL.length]);
       state.flowsSchemaReady = true;
     } catch (error) {
-      console.warn(JSON.stringify({ message: "flows schema bootstrap failed",
-        error: error instanceof Error ? error.message : String(error) }));
+      logFailure("warn", "flows schema bootstrap failed", {}, error);
     }
   })().finally(() => { if (state.flowsSchemaFlight === flight) state.flowsSchemaFlight = null; });
   state.flowsSchemaFlight = flight;
@@ -2718,11 +2605,6 @@ async function ensureFlowsTables(env) {
     if (state.flowsSchemaFlight === flight) { state.flowsSchemaFlight = null; abandoned++; }
   }
   if (abandoned) FLOWS_LIVE.flightAbandoned("schema", since, abandoned, state.flowsSchemaReady);
-}
-
-function keepAlive(ctx, promise) {
-  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(promise);
-  return promise;
 }
 
 function flowsThrottleKey(request, username) {
@@ -2829,10 +2711,10 @@ function courseOverview(meta) {
 
 async function renderCourse(request, env, url, meta, ctx) {
 
-  const cache = request.method === "GET" && typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const cache = request.method === "GET" ? edgeCache.handle() : null;
   const cacheKey = cache ? new Request(url.origin + meta.path) : null;
   if (cacheKey) {
-    const hit = await cache.match(cacheKey).catch(() => null);
+    const hit = await edgeCache.get(cacheKey);
     if (hit) return hit;
   }
 
@@ -2953,10 +2835,7 @@ async function route(request, env, url, ctx) {
         cookie("oauth_state", "", { maxAge: 0 }),
       ]);
     } catch (error) {
-      console.error(JSON.stringify({
-        message: "oauth callback failed",
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      logFailure("error", "oauth callback failed", {}, error);
       return redirect(origin + "/lab/?auth=error", 302, [cookie("oauth_state", "", { maxAge: 0 })]);
     }
   }
@@ -3798,10 +3677,7 @@ async function route(request, env, url, ctx) {
     }
 
     if (path === "/api/flows/tape") {
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
       await ensureFlowsTables(env);
       const gate = vendorGate(env, session);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
@@ -3852,9 +3728,9 @@ async function route(request, env, url, ctx) {
     }
 
     if (path === "/api/flows/summary") {
-      const subject = String(url.searchParams.get("t") || "").trim().toUpperCase();
+      const subject = tickerParam(url);
       if (subject !== "") {
-        if (!FLOWS_TICKER_RE.test(subject)) {
+        if (!TICKER_RE.test(subject)) {
           throw new HttpError(400, "invalid_ticker", "Unknown ticker");
         }
         return summaryResponse(env, ctx, subject, session);
@@ -3874,19 +3750,13 @@ async function route(request, env, url, ctx) {
     }
 
     if (path === "/api/flows/dossier") {
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
       await ensureFlowsTables(env);
       return dossierResponse(env, ctx, ticker, url, session);
     }
 
     if (path === "/api/flows/live") {
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
       return quoteResponse(env, ctx, ticker, vendorGate(env, session));
     }
 
@@ -3951,10 +3821,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/card" || path === "/api/flows/card-x" || path === "/api/flows/hist") {
 
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
       const kind = path.slice("/api/flows/".length);
       const stored = await readServed(env, kind + ":" + ticker);
       if (stored === null) return absentKey(env, ctx, kind, ticker, session);
@@ -3967,10 +3834,7 @@ async function route(request, env, url, ctx) {
     }
 
     if (path === "/api/flows/chain") {
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
 
       const rawStrategy = url.searchParams.get("strategy");
       const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
@@ -3980,9 +3844,7 @@ async function route(request, env, url, ctx) {
       return serveCachedVendorRead({
         env,
         ctx,
-        cacheKey: new Request(
-          `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
-          { method: "GET" }),
+        cacheKey: internalKey("chain", `${ticker}?strategy=${strategy}&rank=${rankBy}`),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         gate: vendorGate(env, session),
         build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120 }),
@@ -3991,10 +3853,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/strategy") {
 
-      const ticker = String(url.searchParams.get("t") || "").trim().toUpperCase();
-      if (!FLOWS_TICKER_RE.test(ticker)) {
-        throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-      }
+      const ticker = requireTicker(url);
       const rawExpiry = url.searchParams.get("expiry");
 
       if (rawExpiry !== null && !EXPIRY_RE.test(rawExpiry)) {
@@ -4006,9 +3865,7 @@ async function route(request, env, url, ctx) {
       return serveCachedVendorRead({
         env,
         ctx,
-        cacheKey: new Request(
-          `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
-          { method: "GET" }),
+        cacheKey: internalKey("strategy", `${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`),
         wantsRefresh: url.searchParams.get("refresh") === "1",
         gate: vendorGate(env, session),
         build: (vf) => (expiry
@@ -4088,9 +3945,7 @@ export default {
   async scheduled(event, env, ctx) {
     const at = event && Number.isFinite(event.scheduledTime) ? event.scheduledTime : Date.now();
     const guard = (message, promise) => ctx.waitUntil(Promise.resolve(promise).catch((error) => {
-      console.error(JSON.stringify({
-        message, error: error instanceof Error ? error.message : String(error),
-      }));
+      logFailure("error", message, {}, error);
     }));
 
     const job = FLOWS_LIVE.cronJob(event && event.cron, at);
@@ -4137,12 +3992,7 @@ export default {
         if (kept) return finalize(kept, request, url);
         return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);
       }
-      console.error(JSON.stringify({
-        message: "request failed",
-        method: request.method,
-        path: url.pathname,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      logFailure("error", "request failed", { method: request.method, path: url.pathname }, error);
       if (isStoreQuota(error)) {
         return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at 00:00 UTC",
           { "Retry-After": String(secondsToUtcMidnight(Date.now())) }), request, url);

@@ -57,6 +57,7 @@
     "test:flows-rt-client": "node flows-rt-client.mjs",
     "test:flows-starts": "node flows-starts-contract.mjs",
     "test:route-matrix": "node --disable-warning=ExperimentalWarning route-matrix.mjs",
+    "test:server-kernel": "node --disable-warning=ExperimentalWarning server-kernel.mjs",
     "test:flows-reads": "node --disable-warning=ExperimentalWarning flows-reads-contract.mjs",
     "test:flows-ledger": "node --disable-warning=ExperimentalWarning flows-ledger-contract.mjs",
     "test:flows-verdict": "node --disable-warning=ExperimentalWarning flows-verdict-contract.mjs",
