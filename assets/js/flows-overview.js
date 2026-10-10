@@ -2019,7 +2019,7 @@
   }
 
   let gated = false;
-  const OPTS = () => ({ credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
+  const OPTS = () => ({ credentials: "same-origin", deadlineMs: 15000, headers: { Accept: "application/json" } });
   const LK = "/api/flows/lk?k=";
 
   const read = (r) => r.json().then((body) => stampUpdated(r, body));

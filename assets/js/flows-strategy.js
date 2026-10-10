@@ -140,7 +140,7 @@
   async function read(params) {
     let res;
     try {
-      res = await fetch("/api/flows/strategy?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } });
+      res = await fetch("/api/flows/strategy?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
     } catch { return { error: "the request did not reach the server" }; }
     if (res.status === 401) { location.replace("/flows/"); return { gone: true }; }
     const age = num(res.headers.get("X-Chain-Age"));

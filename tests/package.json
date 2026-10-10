@@ -74,6 +74,7 @@
     "test:flows-readers": "node --disable-warning=ExperimentalWarning flows-readers-contract.mjs",
     "test:flows-readers-render": "node flows-readers-render.mjs",
     "test:flows-export": "node flows-export.mjs",
+    "test:flows-deadline-render": "node flows-deadline-render.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
     "test:flows-permits": "node flows-permits-contract.mjs",
     "test:flows-overlay": "node flows-overlay-contract.mjs",

@@ -223,7 +223,7 @@
     const params = new URLSearchParams({ t: sym, strategy: side, rank: serverRank(rank) });
     if (refresh) params.set("refresh", "1");
     try {
-      const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } });
+      const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
       if (res.status === 401) { location.replace("/flows/"); return; }
       const age = isNum(res.headers.get("X-Chain-Age"));
       const body = await res.json().catch(() => null);

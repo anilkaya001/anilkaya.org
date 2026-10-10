@@ -1665,16 +1665,38 @@
     } else if (r.ok && GATE.on === "off") showGate(null);
   }
   const HANG = new Promise(() => {});
+  const DEADLINE_MS = 20000;
+  const BODY = ["json", "text", "blob", "arrayBuffer"];
+  function bounded(input, init) {
+    const o = init || {};
+    const own = typeof input === "string" || (typeof URL === "function" && input instanceof URL);
+    const method = String(o.method || (input && input.method) || "GET").toUpperCase();
+    if (!own || method !== "GET" || o.signal || typeof AbortController !== "function") return { p: nativeFetch(input, o), stop() {} };
+    const ms = Number(o.deadlineMs) > 0 ? Number(o.deadlineMs) : DEADLINE_MS;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), ms);
+    const stop = () => clearTimeout(timer);
+    const rest = { ...o, signal: ctl.signal };
+    delete rest.deadlineMs;
+    const p = nativeFetch(input, rest).then((r) => {
+      for (const k of BODY) {
+        const f = r[k];
+        if (typeof f === "function") r[k] = function () { return f.apply(r, arguments).finally(stop); };
+      }
+      return r;
+    }, (e) => { stop(); throw e; });
+    return { p, stop };
+  }
   if (nativeFetch) {
     window.fetch = function (input, init) {
       const url = String((input && input.url) || input || "");
       if (url.indexOf("/api/flows/") < 0) return nativeFetch(input, init);
       if (GATE.on === "out") return HANG;
-      const p = nativeFetch(input, init);
+      const { p, stop } = bounded(input, init);
       if (url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
       if (url.indexOf("/api/flows/now") >= 0) watchNow(p, url.indexOf("?") > 0);
       p.then((r) => observe(url, r), () => {});
-      return p.then((r) => { try { gate(r); } catch {} return r.status === 401 ? HANG : r; });
+      return p.then((r) => { try { gate(r); } catch {} if (r.status === 401) { stop(); return HANG; } return r; });
     };
   }
 

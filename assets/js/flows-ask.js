@@ -464,7 +464,7 @@
 
   let gated = false;
   function get(path) {
-    return fetch(path, { credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } }).then((r) => {
+    return fetch(path, { credentials: "same-origin", deadlineMs: 15000, headers: { Accept: "application/json" } }).then((r) => {
       if (r.status === 401) { gated = true; location.replace("/flows/"); return null; }
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
