@@ -1928,6 +1928,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   .ui-mod-h > .ui-mod-sp { grid-column: 2; grid-row: 1; }
   .ui-mod-h > .ui-info { grid-column: 3; grid-row: 1; }
   .ui-mod-h > .ui-seg { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+  .ui-mod-h > :is(.ui-calib, .dk-rank) { grid-column: 1 / -1; justify-self: start; }
 }
 .ui-grid {
   display: grid;
@@ -2099,6 +2100,9 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
 .ui-tag.is-accent { background: var(--accent-fill); color: var(--accent-soft); }
 .ui-tag[data-tone] { color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent); }
 .ui-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.ui-calib { position: relative; flex: none; border: 0; cursor: pointer; }
+.ui-calib::after { content: ""; position: absolute; inset: -11px 0; }
+.ui-calib:hover, .ui-calib[aria-expanded="true"] { color: var(--label-1); background: var(--fill-4); }
 .ui-capsule {
   display: inline-flex;
   align-items: center;

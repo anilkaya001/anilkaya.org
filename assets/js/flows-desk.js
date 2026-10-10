@@ -358,7 +358,7 @@
     mods.list = h("div", { class: "dk-list", id: "dkList", role: "list", "aria-label": "Sellable lines" });
     mods.more = h("button", { type: "button", class: "ui-disclose", "aria-expanded": "false", hidden: true, onclick: () => { mods.open = !mods.open; renderList(); } }, h("span"), glyph("chev"));
     const lines = UI.moduleCard({ id: "dkLinesM", title: "Lines", span: 12, index: 2, info: linesInfo, body: [mods.list, mods.more] });
-    lines.querySelector(".ui-mod-h").insertBefore(mods.rankSel, lines.querySelector(".ui-mod-h .ui-info"));
+    lines.querySelector(".ui-mod-h").insertBefore(h("span", { class: "dk-rank" }, UI.calibTag(), mods.rankSel), lines.querySelector(".ui-mod-h .ui-info"));
     mods.smileSel = h("select", { id: "deskSurfaceSymbol", class: "dk-select", "aria-label": "Smile for symbol" });
     mods.smileSel.addEventListener("change", () => { surfaceSymbol = mods.smileSel.value || null; writeURL(); if (mods.smileChart) mods.smileChart.redraw(true); });
     mods.smile = h("div", { class: "dk-smile", id: "dkSmile" });

@@ -746,6 +746,7 @@
     m.grade = h("span", { class: "tl-grade" });
     const odds = UI.moduleCard({ id: "sgOddsM", title: "Odds", index: 1, info: oddsInfo, body: [m.pop, UI.metrics([m.evQ, m.evP, m.edge], { min: 88 })] });
     odds.querySelector(".ui-mod-t").append(m.grade);
+    odds.querySelector(".ui-mod-sp").after(UI.calibTag() || "");
     m.dl = slot("Delta"); m.gm = slot("Gamma"); m.vg = slot("Vega"); m.th = slot("Theta"); m.cap = slot("Capital"); m.ror = slot("Return");
     const greeks = UI.moduleCard({ id: "sgGreeksM", title: "Greeks", index: 3, info: greeksInfo, body: [UI.metrics([m.dl, m.gm, m.vg, m.th, m.cap, m.ror], { min: 112 })] });
     m.scn = h("div", { class: "tl-scn" });

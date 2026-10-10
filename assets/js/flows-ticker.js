@@ -8,6 +8,7 @@
   const { h, s, F, glyph, num, clamp, tone, cap, cssVar } = UI;
   const C = UI.chart;
   const DASH = UI.DASH, MINUS = UI.MINUS, SEP = " " + UI.MID + " ";
+  const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
   const $ = (id) => document.getElementById(id);
   const statusEl = $("ftStatus");
   const gridEl = $("ftGrid");
@@ -468,11 +469,11 @@
       isIndex(card) && num(card.conviction) === null ? null : UI.gaugeChip({ ring: num(card.conviction) === null ? null : card.conviction / 100, color: "--label-1", value: num(card.conviction) === null ? chipDash("unavailable") : String(card.conviction), label: "Conviction",
         info: () => ({ title: "Conviction", lead: "How far the families agree, how much of the card was measured, and how long the flow persisted.", facts: convFacts(card), notes: [convMath(card)] }) }),
       UI.gaugeChip({ icon: "gamma", color: gl === "short" ? "--g-short-ink" : "--g-long-ink", value: gl ? (gl === "short" ? "Short" : "Long") : chipDash("unavailable"), label: "Dealer γ", tone: gl,
-        info: () => ({ title: "Dealer gamma", lead: gl === "short" ? "Dealers are short gamma: their hedging buys rallies and sells dips, which amplifies moves." : gl === "long" ? "Dealers are long gamma: their hedging sells rallies and buys dips, which dampens moves." : "No regime reading on this card.",
+        info: () => ({ title: "Dealer gamma", lead: gl ? "Dealers are " + gl + " gamma " + DEALER_CLAUSE + ": their hedging " + (gl === "short" ? "buys rallies and sells dips, which amplifies moves." : "sells rallies and buys dips, which dampens moves.") : "No regime reading on this card.",
           facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Read from", reg.labelFrom || null], ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)],
             ["1Y z", cx && num(cx.z) !== null ? F.signed(cx.z, 2) : null], ["Same sign for", cx && num(cx.persist) !== null ? SESSIONS(cx.persist) : null], ["Long share of the year", cx ? F.pct(cx.longShare, 0) : null]] }) }),
       UI.gaugeChip({ ring: ivr.v, color: "--s-blue", value: ivr.v === null ? chipDash(ivr.st.state) : String(Math.round(ivr.v * 100)), label: "IV rank",
-        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "Where 30-day implied volatility sits inside its own one-year range, as a percentile of its own year: " + Math.round(ivr.v * 100) + " of 100." : ivr.st.reason,
+        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high, for 30-day implied volatility." : ivr.st.reason,
           facts: [["IV 30d", F.pct(pm.iv30)], ["Momentum", num(pm.ivMomentum) === null ? null : F.pts(pm.ivMomentum) + " pts"]] }) }),
       UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: im === null ? chipDash(stOf(card.panels.pricedMove, "priced move").state) : "±" + F.pct(im), label: (num(pm.sessions) || 10) + "d move",
         info: () => ({ title: "Priced move", state: stOf(card.panels.pricedMove, "priced move").state === "ok" ? null : stOf(card.panels.pricedMove, "priced move").state,
@@ -872,7 +873,7 @@
       st ? h("div", { class: "ft-aside-c", "aria-label": "Closest structure" },
         h("span", { class: "ft-aside-l" }, "Closest"), h("b", null, famWord(st.family)),
         h("span", { class: "ft-slot-v", "data-tone": evC === null ? "silent" : tone(evC) }, h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evC === null ? DASH : (evC > 0 ? "+" : "") + usd0(evC)),
-        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP))) : null,
+        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP)), UI.calibTag()) : null,
       info("standing aside", () => ({ title: "Stand aside", state: "quiet", asOf: eng.asOf || null, lead, facts: st ? ideaFacts(st, null, eng) : [],
         sections: [{ title: "Families", lines: (eng.families || []).map((fm) => famWord(fm.family) + SEP + "score " + fx(fm.score, 2) + (fm.veto && fm.veto.length ? ", vetoed: " + fm.veto.join(", ") : "")) }] })));
   }
@@ -1140,7 +1141,7 @@
     row.classList.toggle("is-single", row.childElementCount === 1 && row.firstElementChild.classList.contains("is-wide"));
     verdictEl.append(row);
     if (entries.some((e) => e.kind === "engine" && e.st)) {
-      verdictEl.append(h("div", { class: "ft-ideas-k" }, legend([keyOf("--label-1", "ln", "At expiry"), dashKey("--accent", "Today"), keyOf("--accent", "dot", "Implied"), keyOf("--label-2", "dot", "Real world")])));
+      verdictEl.append(h("div", { class: "ft-ideas-k" }, legend([keyOf("--label-1", "ln", "At expiry"), dashKey("--accent", "Today"), keyOf("--accent", "dot", "Implied"), keyOf("--label-2", "dot", "Real world"), UI.calibTag()])));
     }
     const cut = () => {
       const max = row.scrollWidth - row.clientWidth;
@@ -1369,7 +1370,7 @@
         },
       });
     });
-    return { handle, legend: [keyOf("--accent", "", "Implied"), d.pCdf ? keyOf("--label-2", "ln", "Real world") : null, keyOf("--label-1", "ln", "Spot"),
+    return { handle, legend: [keyOf("--accent", "", "Implied"), d.pCdf ? keyOf("--label-2", "ln", "Real world") : null, d.pCdf ? UI.calibTag() : null, keyOf("--label-1", "ln", "Spot"),
       leadHere ? keyOf("--label-1", "ring", "Breakeven") : null, leadHere ? keyOf("--up-mark", "", "Profit") : null,
       ...Object.values(levelsOf(card)).filter((l) => LVL_KEY[l.kind] && l.px >= d.lo && l.px <= d.hi).map((l) => keyOf(...LVL_KEY[l.kind]))] };
   }
@@ -2094,7 +2095,7 @@
         title: "Volatility", state: st.state === "ok" ? null : st.state, asOf: pm.asOf || null, lead: leadOf(vc) || leadOf(P.pricedMove),
         facts: [["IV 30d", F.pct(pm.iv30)], ["RV 30d", F.pct(pm.rv30)], ["Premium (ex-ante)", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrp) + " pts, z " + F.signed(vrp.exAnte.z, 2) : num(pm.vrp) !== null ? pts1(pm.vrp) + " pts" : null],
           ["Premium ex-event", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrpExEvent) + " pts" : null], ["Seller won", vrp ? F.pct(vrp.hitRate, 0) + " of " + vrp.n + " completed windows" : null],
-          ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100, a percentile of its own year"],
+          ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100: where today sits between its 1-year low and high"],
           ["RR25", skew ? pts1(skew.rr25) + " pts, z " + F.signed(skew.z, 2) + " (" + (skew.zBasis || "raw") + "), 5-day change " + pts1(skew.mom5) : null], ["RR10", skew && num(skew.rr10) !== null ? pts1(skew.rr10) + " pts" : null],
           ["Crash ratio", skew && num(skew.crash) !== null ? skew.crash.toFixed(2) + " (median " + (num(skew.crashMedian) === null ? DASH : skew.crashMedian.toFixed(2)) + ")" : null],
           ["Skew (put − call)", sk && num(sk.skew) !== null ? F.pts(sk.skew) + " pts" + SEP + (sk.skewBasis ? sk.skewBasis.days + "d" : "") : null], ["Term (far − near)", sk && num(sk.term) !== null ? F.pts(sk.term) + " pts" : null],

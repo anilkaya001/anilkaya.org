@@ -685,6 +685,7 @@
 .dk-alt b { color: var(--up); font-weight: 600; }
 .dk-hint:empty { display: none; }
 
+.dk-rank { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); min-width: 0; }
 .tl .dk-select {
   height: 30px;
   max-width: 100%;

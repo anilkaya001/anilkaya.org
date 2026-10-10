@@ -8,6 +8,7 @@ import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import * as NEURON from "../shared/flows-neuron.js";
 import { screenReading } from "../shared/flows-neuron-screen.js";
 import { briefAge } from "../shared/flows-ask.js";
+import { DEALER_CLAUSE } from "../shared/flows-reading.js";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1238,7 +1239,7 @@ try {
     const ivr = (v) => { const c = clone(card); c.panels.pricedMove.ivRank = v; return c; };
     await mount(page, ivr(0.52));
     ok(/IV rank\n52\b/.test(await page.evaluate(() => document.querySelector("#m-vol .ui-metrics").innerText)), "a 0–1 rank reads as 52 of 100");
-    ok(/percentile of its own year/.test(await modInfo(page, "m-vol")), "and says whose year it is a percentile of");
+    ok(/where today sits between its 1-year low and high/.test(await modInfo(page, "m-vol")), "and says what the rank measures: today's place between the year's low and high");
     await mount(page, ivr(52.15));
     const w1 = await page.evaluate(() => { const m = [...document.querySelectorAll("#m-vol .ui-metric")].find((n) => /IV rank/.test(n.innerText)); const b = m && m.querySelector(".ui-state"); return b ? [b.dataset.state, (window.FlowsUI.openInfo(b), document.getElementById("fxPop").innerText)] : null; });
     ok(w1 && w1[0] === "withheld" && /52\.15/.test(w1[1]) && /fraction of one/.test(w1[1]), "a rank in the wrong unit is withheld under its own mark, never multiplied into a percentage");
@@ -1866,7 +1867,7 @@ try {
     ok(a && /Stand aside/.test(a.text) && /priced · No positive edge/.test(a.text), `a card the engine stands aside on says so as a verdict with its count and reason (${a && a.text})`);
     ok(a && !a.silent, "and draws no silence box inside a card: standing aside is a finding");
     ok(a && a.text.includes(close.family.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())), "the closest structure is named");
-    const t = await infoText(page, "#ftVerdict .ft-aside");
+    const t = await infoText(page, "#ftVerdict .ft-aside > .ui-info");
     ok(/no structure it priced has a positive expected P&L/.test(t) && t.includes(close.id), "and the disclosure states the rule it failed and the closest structure's figures");
     const idx = clone(full);
     idx.depth = "index"; idx.score = null; idx.conviction = null; idx.fam = {};
@@ -2347,6 +2348,72 @@ try {
       eq(errors.length, 0, "without throwing");
       await page.close();
     }
+  }
+
+  {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const held = TICKER_SRC.match(/const DEALER_CLAUSE = "([^"]*)";/);
+    eq(held && held[1], DEALER_CLAUSE, "the ticker's dealer clause is the reading's DEALER_CLAUSE, word for word, so the page and the model's vet hold one convention");
+    const chipLead = (label) => page.evaluate((label) => {
+      const b = [...document.querySelectorAll("#ftChips .ui-gchip")].find((n) => n.querySelector(".ui-chip-l").textContent === label);
+      if (!b) return null;
+      window.FlowsUI.openInfo(b);
+      const t = document.querySelector("#fxPop .ui-lead").textContent;
+      window.FlowsUI.closeInfo();
+      return t;
+    }, label);
+    const engineSummary = (card) => ({ status: "ok", scope: card.ticker, llm: false, model: null, generatedAt: card.generatedAt, engine: true, verdict: null, verdictWord: null, claims: [], refused: [], ideas: [],
+      summary: "The engine priced this name. A second sentence.", provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.", context: null });
+    for (const [label, hedge] of [["short", "buys rallies and sells dips, which amplifies moves."], ["long", "sells rallies and buys dips, which dampens moves."]]) {
+      const c = clone(full);
+      c.regime = { ...(c.regime || {}), label };
+      await mount(page, c);
+      eq(await chipLead("Dealer γ"), "Dealers are " + label + " gamma " + DEALER_CLAUSE + ": their hedging " + hedge,
+        `the ${label}-gamma chip asserts a hedging direction only on the vendor's convention, and says so in DEALER_CLAUSE's words`);
+    }
+    const flat = clone(full);
+    flat.regime = { ...(flat.regime || {}), label: null };
+    await mount(page, flat);
+    eq(await chipLead("Dealer γ"), "No regime reading on this card.", "and a card with no regime asserts no direction, so it carries no convention clause either");
+    const ranked = clone(full);
+    ranked.panels.pricedMove.ivRank = 0.52;
+    ranked.engine.noTrade = null;
+    await mount(page, ranked, { neuron: engineSummary(ranked) });
+    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high, for 30-day implied volatility.",
+      "the IV rank chip names the statistic it shows: a place between the year's low and high, not a percentile of the year");
+    ok(/\nIV rank\n52 of 100: where today sits between its 1-year low and high\n/.test(await modInfo(page, "m-vol")), "and so does the volatility module's own line for it");
+    ok(!/percentile of its own year/.test(TICKER_SRC), "no line of the ticker calls the rank a percentile any more");
+    const ideas = await page.evaluate(() => {
+      const k = document.querySelector("#ftVerdict .ft-ideas-k");
+      const tag = k && k.querySelector(".ui-calib");
+      if (!tag) return { ideas: document.querySelectorAll("#ftVerdict .ft-idea[data-structure]").length, tag: null };
+      window.FlowsUI.openInfo(tag);
+      const out = { ideas: document.querySelectorAll("#ftVerdict .ft-idea[data-structure]").length, tag: tag.textContent, title: document.getElementById("fxPopT").textContent,
+        lead: document.querySelector("#fxPop .ui-lead").textContent, after: tag.previousElementSibling ? tag.previousElementSibling.textContent : null };
+      window.FlowsUI.closeInfo();
+      return out;
+    });
+    ok(ideas.ideas > 0, `the engine's ideas are drawn (${ideas.ideas})`);
+    eq(ideas.tag, "Not yet calibrated", "and their key, where the real-world chance and EV are named, says the probability is not yet calibrated");
+    eq(ideas.after, "Real world", "beside the real-world key itself");
+    eq(ideas.title + " | " + ideas.lead, "Not yet calibrated | Model probability, not yet checked against outcomes.", "its popover is the plan's sentence");
+    const worlds = await page.evaluate(() => {
+      const m = document.getElementById("m-worlds");
+      const keys = m ? [...m.querySelectorAll(".ui-legend .ui-key")].map((n) => n.textContent) : [];
+      return { real: keys.includes("Real world"), tags: m ? m.querySelectorAll(".ui-legend .ui-calib").length : 0 };
+    });
+    ok(worlds.real, "the two-worlds module draws a real-world law for this card");
+    eq(worlds.tags, 1, "and its legend, above the lead idea's real-world chance, carries the same note once");
+    const aside = clone(full);
+    aside.engine.ideas = [];
+    aside.engine.noTrade = { code: "ev.none-positive", closest: aside.engine.structures[0].id };
+    await mount(page, aside, { neuron: { ...engineSummary(aside), tier: "stand-aside", code: "ev.none-positive", verdict: "stand-aside", verdictWord: "Stand aside" } });
+    const close = await page.evaluate(() => { const c = document.querySelector("#ftVerdict .ft-aside .ft-aside-c"); return c ? { text: c.innerText.replace(/\s+/g, " "), tag: !!c.querySelector(".ui-calib") } : null; });
+    ok(close && close.tag, `a stand-aside that prints its closest structure's real-world chance and EV carries the note too (${close && close.text})`);
+    eq(errors.length, 0, `the honesty copy throws nothing (${errors.join("; ")})`);
+    await page.close();
   }
 
 } finally {

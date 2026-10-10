@@ -584,6 +584,11 @@
   function tag(text, o = {}) {
     return h("span", { class: "ui-tag" + (o.accent ? " is-accent" : ""), "data-tone": o.tone || null }, o.glyph ? glyph(o.glyph) : null, text);
   }
+  function calibTag(c) {
+    const t = "Not yet calibrated";
+    return c && num(c.nEff) >= 100 ? null : h("button", { class: "ui-tag ui-calib", type: "button", ...POP, "aria-expanded": "false",
+      "data-info": info({ title: t, lead: "Model probability, not yet checked against outcomes.", notes: ["It stays until 100 effectively independent outcomes are scored."] }) }, t);
+  }
   function capsule(text, o = {}) {
     const t = o.tone || "flat";
     return h("span", { class: "ui-capsule", "data-tone": t, "aria-label": o.label || null }, o.glyph === false ? null : glyph(o.glyph || dirGlyph(t)), text);
@@ -1877,7 +1882,7 @@
     info, infoButton, stateButton, openInfo, closeInfo, announce,
     roll, metric, updateMetric, metrics,
     ring, divRing, iconChip, gaugeChip, chips,
-    segmented, tag, capsule, key, legend, robustness,
+    segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
     freshness, freshAggregate, shell, chart, depths: PAL_G,
   });

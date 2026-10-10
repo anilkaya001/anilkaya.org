@@ -1290,11 +1290,21 @@ import { chromium } from "playwright";
        "was there was a 335-character guarantee, which answered 'what can I ask this?' in " +
        "prose where three buttons answer it in three lines — first said was " + first);
     const app = await read(page, "#askApp");
-    ok(!/It reads nothing live/.test(app.open),
+    ok(!/live readings it keeps through the session/.test(app.open),
        "the guarantee is folded, because it is reassurance about what the box will NOT do " +
        "and nothing in it changes what a visible number means");
-    ok(/It reads nothing live/.test(app.info),
+    ok(/live readings it keeps through the session/.test(app.info),
        "and it is folded rather than deleted: every word of it is one tap below the field it constrains");
+    const said = app.info.replace(/\s+/g, " ");
+    ok(/the nightly payloads, with the live readings it keeps through the session laid over them/.test(said) &&
+       /can call the market-data vendor for what the site does not hold yet/.test(said) &&
+       /It performs no arithmetic/.test(said),
+       "THE GUARANTEE SAYS WHAT THE BOX DOES: the answer route lays the live keys over the brief " +
+       "(briefWithLive) and a question that names a stock assembles its dossier, whose vendor " +
+       "fan-out can place calls; both are now in the sentence, beside the arithmetic rule that holds");
+    ok(!/reads nothing live/i.test(said) && !/places no vendor call/i.test(said),
+       "and it no longer promises the two things the Worker does: it read live keys and could " +
+       "call the vendor while the page said it did neither");
     ok(/8,412 of 10,000 credits · this site.s calls/.test(app.visible.replace(/\s+/g, " ")),
        "while the meter stays OPEN, with its condition beside it, because its numbers are a " +
        "withholding about capacity rather than a reassurance — a budget you can only see " +
