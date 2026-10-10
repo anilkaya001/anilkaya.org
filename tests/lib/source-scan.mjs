@@ -92,6 +92,16 @@ export const NIGHTLY_ENTRY = "scripts/flows-pipeline.mjs";
 export const NIGHTLY_DIR = "scripts/flows-nightly";
 export const nightlyFiles = () => [NIGHTLY_ENTRY, ...treeFiles(NIGHTLY_DIR)];
 export const nightlySource = () => joinSources(nightlyFiles());
+export function nightlyExecution() {
+  const files = treeFiles(NIGHTLY_DIR);
+  return moduleSource(NIGHTLY_ENTRY).replace(/await (run[A-Z]\w*)\(ctx\);/g, (_, fn) => {
+    const start = `export async function ${fn}(ctx)`;
+    const holders = files.filter((f) => moduleSource(f).includes(start));
+    if (holders.length !== 1) throw new Error(`source-scan: ${fn} is declared by ${holders.length} nightly modules, not one`);
+    return slice(moduleSource(holders[0]), start, "\n}\n");
+  });
+}
+
 export const nightlySlice = (startMarker, endMarker) => {
   const cut = slice(nightlySource(), startMarker, endMarker);
   if (!cut.trim()) throw new Error(`source-scan: the slice from ${JSON.stringify(startMarker)} is empty`);

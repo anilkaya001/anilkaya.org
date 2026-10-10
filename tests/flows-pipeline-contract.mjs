@@ -46,7 +46,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
-import { workerSource, expect, pipelineSource, nightlySource, slice, count } from "./lib/source-scan.mjs";
+import { workerSource, expect, nightlySource, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
 import { newsFields, newsRow } from "../shared/flows-news.js";
 import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
 import { rowsOf as liveRows } from "../shared/flows-live.js";
@@ -3599,14 +3599,18 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(SESSION_CLOSE_MINUTES, 960, "16:00 in minutes");
 
   const src = nightlySource();
-  const main = src.slice(src.indexOf("async function main()"));
+  const main = slice(src, "async function main()", "\n}\n");
   const resolved = main.indexOf("await resolveSessionDate()");
   const guard = main.indexOf("intradayRefusal(sessionDate");
   const thrown = main.indexOf("if (intraday && intraday.refuse) throw new Error(intraday.message)");
-  const firstRead = main.indexOf("verifyDating(sessionDate");
-  ok(resolved !== -1 && guard > resolved && thrown > guard && firstRead > thrown,
-     "main() resolves the session, then consults the guard and THROWS on a refusal, before a " +
-     "single vendor read beyond the session probe");
+  const firstSection = main.indexOf("await runUniverse(ctx)");
+  const universe = slice(src, "export async function runUniverse(ctx)", "\n}\n");
+  const firstRead = universe.indexOf("verifyDating(sessionDate");
+  ok(resolved !== -1 && guard > resolved && thrown > guard && firstSection > thrown,
+     "main() resolves the session, then consults the guard and THROWS on a refusal, before the " +
+     "first section runs");
+  ok(firstRead !== -1 && firstRead < universe.indexOf("harvestScreener(") && firstRead < universe.indexOf("uw("),
+     "and the first section's first vendor read is the dating probe, before the harvest and the sweep");
   ok(/allow: process\.env\.FLOWS_ALLOW_INTRADAY === "1"/.test(main),
      "and the override is the FLOWS_ALLOW_INTRADAY=1 the workflow plumbs from allow_intraday");
 
@@ -5006,7 +5010,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(STAGES.every((x) => x.publishes.every((k) => /^[a-z][a-z0-9:-]*\*?$/.test(k))), "and declares its keys as names or prefixes ending in *");
   ok(Object.isFrozen(STAGES) && STAGES.every((x) => Object.isFrozen(x) && Object.isFrozen(x.needs) && Object.isFrozen(x.publishes)), "the table is frozen");
 
-  const src = pipelineSource();
+  const src = nightlyExecution();
   const called = [...src.matchAll(/stages\.(step|run|skip)\("([a-z-]+)"/g)].map((m) => ({ how: m[1], id: m[2], at: m.index }));
   ok(called.length >= ids.length, `the pipeline names its stages (${called.length} calls)`);
   same([...new Set(called.map((c) => c.id))].filter((c) => !ids.includes(c)), [], "every stage the pipeline names is in the table");

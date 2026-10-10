@@ -994,11 +994,20 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "LEDGER_PROBE_MAX", "LEDGER_PROBE_FAIL_MAX", "LEDGER_PROBE_RETRY_BUDGET_MS", "LEDGER_PROBE_CHUNK", "probeDayOf",
       "probeFound", "probeLedgerMetadata", "bootstrapLedger", "probeSaid", "retireAndRoster",
     ],
+    "sections/universe.mjs": [
+      "judgeEndDate", "SCREENER_READ_KEYS", "judgeScreenerDate", "sweepScreenerBand", "SCREENER_PROBE",
+      "verifyDating",
+    ],
     "flags.mjs": [
       "DRY_RUN", "LIVE_MODE", "EMIT",
     ],
   };
-  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2,"store.mjs":3,"clock.mjs":4,"rank.mjs":5,"fixtures.mjs":6,"archive.mjs":7};
+  const LAYER = {
+    "flags.mjs": 0, "vendor-params.mjs": 1, "vendor.mjs": 2, "store.mjs": 3, "clock.mjs": 4, "rank.mjs": 5,
+    "fixtures.mjs": 6, "archive.mjs": 7, "stages.mjs": 0, "sections/universe.mjs": 8, "sections/boards.mjs": 8,
+    "sections/market.mjs": 8, "sections/record.mjs": 8, "sections/chains.mjs": 8, "sections/alerts.mjs": 8,
+    "sections/context.mjs": 8, "sections/cards.mjs": 8, "sections/focus.mjs": 8, "sections/close.mjs": 8,
+  };
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
   let homed = 0;

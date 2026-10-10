@@ -11,7 +11,7 @@ import { fakeD1 } from "./lib/d1-fake.mjs";
 import zlib from "node:zlib";
 import { createWireReader, summariseWire } from "./lib/ws-wire.mjs";
 import { nightlyEmit, emitFiles, emitRead, sourceFingerprint, EMIT_MARK, DRY_NOW } from "./lib/nightly-emit.mjs";
-import { nightlyFiles, nightlySource, nightlySlice, treeFiles, NIGHTLY_ENTRY, NIGHTLY_DIR } from "./lib/source-scan.mjs";
+import { nightlyFiles, nightlySource, nightlySlice, nightlyExecution, treeFiles, NIGHTLY_ENTRY, NIGHTLY_DIR } from "./lib/source-scan.mjs";
 import { utimesSync, readdirSync as listDir } from "node:fs";
 import { plan as bumpPlan, referenceFiles } from "../scripts/bump-assets.mjs";
 
@@ -395,6 +395,9 @@ writeFileSync(dir + "-meta.json", JSON.stringify({ generatedAt: process.env.FLOW
   throwsLike(() => nightlySlice("this marker is nowhere in the nightly"), /marker not found/, "nightly-source: a slice whose start marker is missing throws instead of passing on nothing");
   throwsLike(() => nightlySlice("export const ISOLATION", "this end marker is nowhere"), /marker not found/, "nightly-source: and so does one whose end marker is missing");
   throwsLike(() => nightlySlice("const ARGS", "export const ISOLATION"), /crosses a module boundary/, "nightly-source: a slice across two modules throws, so a moved scan must name the module that now holds its code");
+  const exec = nightlyExecution();
+  ok(!/await run[A-Z]\w*\(ctx\);/.test(exec), "nightly-source: the execution text has every section call replaced by that section's body");
+  ok(exec.indexOf('stages.step("session")') >= 0 && exec.indexOf('stages.step("session")') < exec.indexOf('stages.step("universe")'), "nightly-source: and reads in the order the run executes");
 }
 
 for (const n of notes) console.log("  note: " + n);
