@@ -102,6 +102,8 @@ const MASTERY_ATTEMPTS_SCHEMA_SQL =
   ")";
 const MASTERY_INDEX_SQL =
   "CREATE INDEX IF NOT EXISTS mastery_due_by_user ON mastery (user_id, due_day, item_id)";
+const MASTERY_ATTEMPTS_RECEIVED_INDEX_SQL =
+  "CREATE INDEX IF NOT EXISTS mastery_attempts_by_received ON mastery_attempts (received_at)";
 const PLACEMENT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS placement (" +
     "user_id TEXT PRIMARY KEY, " +
@@ -121,9 +123,11 @@ const ACADEMY_SCHEMA_SQL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS skill_mastery (user_id TEXT NOT NULL, skill_id TEXT NOT NULL, level INTEGER NOT NULL DEFAULT 0 CHECK (level BETWEEN 0 AND 5), due_day TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 1000000), correct INTEGER NOT NULL DEFAULT 0 CHECK (correct BETWEEN 0 AND 1000000), last_result INTEGER CHECK (last_result IN (0,1)), last_attempt_id TEXT, last_day TEXT, updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, skill_id))",
   "CREATE INDEX IF NOT EXISTS skill_mastery_due_by_user ON skill_mastery (user_id, due_day, skill_id)",
   "CREATE TABLE IF NOT EXISTS skill_attempts (user_id TEXT NOT NULL, attempt_id TEXT NOT NULL, skill_id TEXT NOT NULL, item_id TEXT NOT NULL, correct INTEGER NOT NULL CHECK (correct IN (0,1)), hinted INTEGER NOT NULL CHECK (hinted IN (0,1)), attempt_day TEXT NOT NULL, applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0,1)), received_at INTEGER NOT NULL, PRIMARY KEY (user_id, attempt_id))",
+  "CREATE INDEX IF NOT EXISTS skill_attempts_by_received ON skill_attempts (received_at)",
   "CREATE TABLE IF NOT EXISTS learning_preferences (user_id TEXT PRIMARY KEY, active_path_id TEXT NOT NULL DEFAULT 'complete-core', session_minutes INTEGER NOT NULL DEFAULT 20 CHECK (session_minutes IN (10,20,45)), weekly_goal_minutes INTEGER NOT NULL DEFAULT 120 CHECK (weekly_goal_minutes BETWEEN 30 AND 1200), updated_at INTEGER NOT NULL)",
   "CREATE TABLE IF NOT EXISTS project_progress (user_id TEXT NOT NULL, project_id TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('guided','unguided')), done_json TEXT NOT NULL DEFAULT '[]', updated_at INTEGER NOT NULL, PRIMARY KEY (user_id, project_id))",
 ]);
+const SKILL_ATTEMPTS_RECEIVED_INDEX_SQL = ACADEMY_SCHEMA_SQL.find((sql) => sql.includes("skill_attempts_by_received"));
 const PATH_IDS = new Set(["complete-core", "causal", "applied-micro", "time-series", "markets-risk"]);
 const SESSION_MINUTES = new Set([10, 20, 45]);
 const STAGE_KEY_BY_COURSE = Object.freeze(Object.fromEntries(Object.entries(COURSE_STAGE_BY_ID).map(([key, stage]) => [key, stage])));
@@ -154,6 +158,32 @@ const SECURITY_HEADERS = {
 };
 
 const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
+const LAB_WRITE_PERIOD_S = 60;
+
+async function requireLabWrite(env, user) {
+  if (await memberAllowed(env.LAB_WRITE, { username: user.id })) return;
+  throw new HttpError(429, "rate_limited", "Too many saves in the last minute; they will retry shortly.",
+    { "Retry-After": String(LAB_WRITE_PERIOD_S) });
+}
+
+async function pruneAttemptLedgers(env, now) {
+  if (!env || !env.DB) return 0;
+  const cutoff = now - ATTEMPT_LEDGER_TTL_MS;
+  let removed = 0;
+  for (const [index, table] of [[MASTERY_ATTEMPTS_RECEIVED_INDEX_SQL, "mastery_attempts"], [SKILL_ATTEMPTS_RECEIVED_INDEX_SQL, "skill_attempts"]]) {
+    try {
+      const results = await env.DB.batch([
+        env.DB.prepare(index),
+        env.DB.prepare("DELETE FROM " + table + " WHERE received_at < ?").bind(cutoff),
+      ]);
+      removed += Number(results[1] && results[1].meta && results[1].meta.changes) || 0;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/no such table/i.test(message)) console.error(JSON.stringify({ message: "attempt ledger prune failed", table, error: message }));
+    }
+  }
+  return removed;
+}
 
 const MARKET_SNAPSHOT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
@@ -284,6 +314,7 @@ async function ensureMasterySchema(env) {
     env.DB.prepare(MASTERY_SCHEMA_SQL),
     env.DB.prepare(MASTERY_ATTEMPTS_SCHEMA_SQL),
     env.DB.prepare(MASTERY_INDEX_SQL),
+    env.DB.prepare(MASTERY_ATTEMPTS_RECEIVED_INDEX_SQL),
   ]);
 }
 
@@ -2857,6 +2888,7 @@ async function route(request, env, url, ctx) {
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const key = `${body.courseId}:${body.stageId}`;
@@ -2895,6 +2927,7 @@ async function route(request, env, url, ctx) {
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const day = normalizeActivityDay(body.day);
@@ -2932,8 +2965,6 @@ async function route(request, env, url, ctx) {
       env.DB.prepare("SELECT skill_id, level, due_day, attempts, correct, last_result, last_attempt_id, updated_at FROM skill_mastery WHERE user_id=? AND skill_id=?").bind(user.id, body.skillId),
       env.DB.prepare("SELECT generation FROM learning_sync WHERE user_id=?").bind(user.id),
       env.DB.prepare("SELECT skill_id, item_id, correct, hinted, attempt_day FROM skill_attempts WHERE user_id=? AND attempt_id=?").bind(user.id, body.attemptId),
-
-      env.DB.prepare("DELETE FROM skill_attempts WHERE user_id=? AND received_at < ?").bind(user.id, now - ATTEMPT_LEDGER_TTL_MS),
     ]);
     const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
     if (currentGeneration !== generation) throwResetRequired(currentGeneration);
@@ -2952,6 +2983,7 @@ async function route(request, env, url, ctx) {
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     if (!PATH_IDS.has(body.activePathId) || !SESSION_MINUTES.has(body.sessionMinutes) || !Number.isSafeInteger(body.weeklyGoalMinutes) || body.weeklyGoalMinutes < 30 || body.weeklyGoalMinutes > 1200) throw new HttpError(400, "invalid_preferences", "Learning preferences must be valid");
@@ -2976,6 +3008,7 @@ async function route(request, env, url, ctx) {
     if (!user) throw new HttpError(401, "unauthorized", "Authentication required");
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const project = typeof body.projectId === "string" ? PROJECT_BY_ID[body.projectId] : null;
@@ -3021,6 +3054,7 @@ async function route(request, env, url, ctx) {
 
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
 
     if (request.method === "DELETE") {
       const now = Date.now();
@@ -3102,6 +3136,7 @@ async function route(request, env, url, ctx) {
     if (request.method === "PUT") {
       requireSameOrigin(request);
       requireMutationOwner(request, user.id);
+      await requireLabWrite(env, user);
       const generation = await mutationGeneration(request, env, user.id);
       const body = await readJSON(request);
       const streak = body.streak;
@@ -3169,6 +3204,7 @@ async function route(request, env, url, ctx) {
 
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
 
     if (request.method === "DELETE") {
@@ -3232,6 +3268,7 @@ async function route(request, env, url, ctx) {
 
     requireSameOrigin(request);
     requireMutationOwner(request, user.id);
+    await requireLabWrite(env, user);
     const generation = await mutationGeneration(request, env, user.id);
     const body = await readJSON(request);
     const itemId = body.itemId;
@@ -3291,10 +3328,6 @@ async function route(request, env, url, ctx) {
       env.DB.prepare(
         "SELECT item_id, correct, hinted, attempt_day FROM mastery_attempts WHERE user_id=? AND attempt_id=?"
       ).bind(user.id, attemptId),
-
-      env.DB.prepare(
-        "DELETE FROM mastery_attempts WHERE user_id=? AND received_at < ?"
-      ).bind(user.id, now - ATTEMPT_LEDGER_TTL_MS),
     ]);
 
     const currentGeneration = normalizeGeneration(results[5].results[0]?.generation);
@@ -3556,6 +3589,7 @@ export default {
         await FLOWS_LIVE.pruneTape(env, at);
         await FLOWS_LIVE.pruneLedger(env, at);
         await pruneAiOutcomes(env, at);
+        await pruneAttemptLedgers(env, at);
       }
     })());
   },

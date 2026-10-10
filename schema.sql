@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS mastery_attempts (
   PRIMARY KEY (user_id, attempt_id)
 );
 
+CREATE INDEX IF NOT EXISTS mastery_attempts_by_received ON mastery_attempts (received_at);
+
 CREATE TABLE IF NOT EXISTS placement (
   user_id           TEXT PRIMARY KEY,
   band              TEXT NOT NULL CHECK (band IN ('foundation', 'applied', 'advanced')),
@@ -116,6 +118,8 @@ CREATE TABLE IF NOT EXISTS skill_attempts (
   received_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, attempt_id)
 );
+
+CREATE INDEX IF NOT EXISTS skill_attempts_by_received ON skill_attempts (received_at);
 
 CREATE TABLE IF NOT EXISTS learning_preferences (
   user_id TEXT PRIMARY KEY,

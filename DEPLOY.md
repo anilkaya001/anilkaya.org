@@ -792,6 +792,28 @@ curl -s -H "Cookie: session=<existing token>" "$BASE/api/me"   # expect the user
 If this returns `null` for a session that worked before the deploy, stop and
 roll back — the legacy allowance in `isLearnAudience()` has regressed.
 
+### 10.4a The Lab write limiter and the attempt ledgers
+
+Every signed-in Lab mutation (`PUT` and `DELETE` on `/api/progress`,
+`/api/stats`, `/api/placement`, `/api/mastery`, and `PUT` on `/api/v2/progress`,
+`/api/v2/attempt`, `/api/v2/preferences`, `/api/v2/project`) is counted against
+the `LAB_WRITE` rate-limit binding, 30 a minute per user id, after the session,
+origin and owner checks and before any D1 statement. The 31st in a minute answers
+JSON `429 rate_limited` with `Retry-After: 60`. The browser keeps a 429 attempt in
+its outbox and sends it again on the next sync; a missing binding admits everyone.
+A `429` is not a poison answer, so `auth.js` never drops an outbox attempt for it.
+
+`mastery_attempts` and `skill_attempts` each gain an index on `received_at`
+(`migrations/0018_lab_attempt_received_at.sql`), and the 48-hour prune that used
+to ride on every attempt now runs once a night in the 03:00 ET housekeeping
+firing as one indexed `DELETE ... WHERE received_at < ?` per table. The firing
+also issues `CREATE INDEX IF NOT EXISTS` first, so a database that never had the
+migration applied builds the index on that night. Apply it by hand like the others:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0018_lab_attempt_received_at.sql
+```
+
 ### 10.4b What the store holds, and what prunes it
 
 `flows_payload` is a keyed blob store. Every key it accepts:
