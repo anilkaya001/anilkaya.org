@@ -1638,6 +1638,7 @@
     const bar = $("fxBar"), fresh = $("fxFresh"), old = $("fxGate");
     if (old) old.remove();
     if (fresh) fresh.hidden = !!kind;
+    if (bar) bar.classList.toggle("is-gated", !!kind);
     if (!bar || !kind) return;
     const out = kind === "out", name = out ? "Signed out, sign in" : "Unavailable";
     const A = { class: "ui-fresh", id: "fxGate", "data-state": kind, "aria-label": name, title: name };
@@ -1832,7 +1833,7 @@
     });
 
     if (!POPS) {
-      const why = "This browser is older than Flows supports, so explanations cannot open. Update it to read them.";
+      const why = "This browser is older than Flows supports, so explanations cannot open in it. A newer browser or device shows them.";
       bar.append(h("span", { class: "ui-fresh", id: "fxOld", "data-state": "old", title: why }, glyph("unavailable"), h("span", { class: "fx-fresh-l" }, "Old browser"), h("span", { class: "visually-hidden" }, why)));
     }
     const fresh = $("fxFresh");

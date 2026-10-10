@@ -301,8 +301,9 @@ try {
     };
     const look = (page) => page.evaluate(() => {
       const o = document.getElementById("fxOld"), r = o && o.getBoundingClientRect();
+      const l = o && o.querySelector(".fx-fresh-l"), lr = l && l.getBoundingClientRect();
       return {
-        old: o ? { text: o.textContent, title: o.title, w: r.width, right: r.right, tag: o.tagName } : null,
+        old: o ? { text: o.textContent, shown: o.innerText, title: o.title, w: r.width, right: r.right, tag: o.tagName, labelW: lr.width, labelRight: lr.right } : null,
         pop: !!document.getElementById("fxPop"),
         expanded: [...document.querySelectorAll('[aria-expanded="true"][data-info], #fxFresh[aria-expanded="true"]')].length,
         over: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth,
@@ -321,14 +322,54 @@ try {
       ok(n > 0, `the board offers disclosures to tap (${n})`);
       const seen = await look(page);
       eq(errors.length, 0, `A BROWSER WITHOUT THE POPOVER API: tapping the freshness pill and ${Math.min(n, 6)} disclosures, a tap outside and Escape throw nothing at ${width} px (${errors.join("; ")})`);
-      ok(seen.old && seen.old.w > 0 && /Old browser/.test(seen.old.text), `THE BAR SAYS SO: the old-browser banner is shown at ${width} px (${JSON.stringify(seen.old)})`);
+      ok(seen.old && seen.old.w > 0 && seen.old.labelW > 0 && /Old browser/.test(seen.old.shown), `THE BAR SAYS SO: the old-browser banner is shown with its label at ${width} px (${JSON.stringify(seen.old)})`);
+      ok(seen.old.labelRight <= seen.vw, `and the label sits inside the viewport at ${width} px (right edge ${seen.old.labelRight})`);
       ok(/older than Flows supports/.test(seen.old.title) && /older than Flows supports/.test(seen.old.text), "and carries the sentence, visible to a pointer as its title and to a screen reader as text");
       eq(seen.old.tag, "SPAN", "the banner is not a control: there is nothing behind it to open");
+      if (width === 1280) {
+        const paint = () => page.evaluate(() => { const s = getComputedStyle(document.getElementById("fxOld")); return [s.color, s.backgroundColor, s.cursor].join(" "); });
+        const rest = await paint();
+        await page.hover("#fxOld");
+        eq(await paint(), rest, "and a pointer over it changes neither its colour, its background nor its cursor");
+      }
       ok(seen.old.right <= seen.vw, `the banner sits inside the viewport at ${width} px (right edge ${seen.old.right})`);
       eq(seen.over, 0, `and the page does not scroll sideways at ${width} px`);
       eq(seen.pop, false, "no popover element is made where it cannot be shown");
       eq(seen.expanded, 0, "and no trigger is left claiming it is expanded");
       await page.close();
+    }
+
+    const gated = (key) => (key.startsWith("board?side=long") ? { status: 401, body: { error: { code: "unauthorized", message: "Authentication required" } } } : null);
+    const edges = (page) => page.evaluate(() => {
+      const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, w: r.width }; };
+      const g = document.getElementById("fxGate"), o = document.getElementById("fxOld");
+      return {
+        vw: innerWidth, gate: box(g), gateLabel: box(g && g.querySelector(".fx-fresh-l")), gateText: g ? g.innerText : null,
+        old: box(o), oldLabel: box(o && o.querySelector(".fx-fresh-l")), gated: document.getElementById("fxBar").classList.contains("is-gated"),
+      };
+    });
+    for (const popover of [false, true]) {
+      for (const width of [320, 375, 390]) {
+        const page = await browser.newPage({ viewport: { width, height: 800 } });
+        const errors = [];
+        page.on("pageerror", (e) => errors.push(String(e)));
+        if (!popover) await page.addInitScript(noPopover);
+        await page.addInitScript((t) => { try { sessionStorage.setItem("flows:gate", String(t)); } catch {} }, TUE_1330);
+        await mount(page, { html, url: "/flows/long/", answer: gated });
+        const e = await edges(page);
+        const who = popover ? "WITH the Popover API" : "WITHOUT the Popover API";
+        ok(e.gate && e.gate.w > 0, `SIGNED OUT ${who} at ${width} px: the sign-in gate is shown (${JSON.stringify(e)})`);
+        ok(/sign in/.test(e.gateText) && e.gateLabel.w > 0, `and it reads "sign in" at ${width} px (${JSON.stringify(e.gateText)})`);
+        ok(e.gate.right <= e.vw && e.gateLabel.right <= e.vw, `and the whole gate, its link included, sits inside the viewport at ${width} px (right edge ${e.gate.right} of ${e.vw})`);
+        eq(e.gated, true, "the bar knows a gate is shown");
+        if (popover) eq(e.old, null, "and no old-browser banner competes with it");
+        else {
+          ok(e.old.w > 0 && e.old.right <= e.gate.left, `the old-browser glyph stays beside the gate, not under it (${JSON.stringify(e.old)})`);
+          eq(e.oldLabel.w, 0, `and gives the gate its label's room at ${width} px`);
+        }
+        eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+        await page.close();
+      }
     }
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
