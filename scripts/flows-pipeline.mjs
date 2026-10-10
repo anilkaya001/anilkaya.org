@@ -68,7 +68,7 @@ import { makeCardXStore, publishCardX } from "./flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "./flows-legs/index-dossier.mjs";
 import {
   runLive, runLiveLoop, chainDispatch, chainWithRetry, dryLiveTicks, readHeldAlerts, readLiveClock, LIVE_READ_PACE_MS,
-  passOutcome, liveRunVerdict, createProgress,
+  passOutcome, liveRunVerdict,
 } from "./flows-legs/live.mjs";
 import { createWatch, witnessDrill } from "./flows-legs/watch.mjs";
 import { dryLiveDay } from "./flows-legs/live-day.mjs";
@@ -77,19 +77,19 @@ import {
 } from "./flows-legs/health.mjs";
 import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
-import { pinStamp, stampNow, stampPinned } from "./flows-legs/stamp.mjs";
+import { stampNow, stampPinned } from "./flows-legs/stamp.mjs";
+import { DRY_RUN, LIVE_MODE, EMIT } from "./flows-nightly/flags.mjs";
 import { createStageRunner, healthRecord } from "./flows-nightly/stages.mjs";
 import { newsFields } from "../shared/flows-news.js";
-
-const ARGS = new Set(process.argv.slice(2));
-const DRY_RUN = ARGS.has("--dry-run");
-pinStamp(process.env.FLOWS_DRY_NOW, { dryRun: DRY_RUN });
-const LIVE_MODE = ARGS.has("--live");
-const EMIT = process.argv.includes("--emit")
-  ? process.argv[process.argv.indexOf("--emit") + 1]
-  : null;
-
-const BASE = process.env.FLOWS_UW_BASE_URL || "https://api.unusualwhales.com";
+import {
+  ALERT_VENDOR_LIMIT, CALL_BUDGET, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_RULE, EARNINGS_GATE_DAYS,
+  IV_RANK_PARAMS, MARKET_CROSS_LIMIT, NEWS_VENDOR_LIMIT, RATE, SCREENER_PAGE_ROWS, SCREENER_SPLIT_DEPTH, UNIVERSE,
+  callModel, deepNames,
+} from "./flows-nightly/vendor-params.mjs";
+import {
+  delayFloorMs, delayMs, describeFloorVerdict, foldCardOutcomes, permits, poolWidth, raiseReadPace, runPooled, sleep,
+  stats, uw, vendorTimeoutMs, wireProgress,
+} from "./flows-nightly/vendor.mjs";
 
 function ingestURL() {
   return process.env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest";
@@ -135,135 +135,12 @@ async function ingestHeaders({ json = false } = {}) {
   return headers;
 }
 
-const UNIVERSE = {
-  minPrice: 5,
-  minMarketCap: 1e9,
-
-  minDollarVolume: 5e7,
-  minOptionVolume: 1000,
-  minOpenInterest: 5000,
-  excludeIssueTypes: ["ETF", "Index", "ADR"],
-
-  boardSize: 50,
-
-  enrichCount: 100,
-};
-
-export const RATE = {
-  startDelayMs: 120, minDelayMs: 60, maxDelayMs: 5000, maxRetries: 4,
-  maxRetryAfterMs: 30_000,
-
-  floorCeilingMs: 400,
-};
-
-export const CALL_COST = Object.freeze({
-  setup: 8,
-  coverage: 2,
-  enrich: 5,
-  marketFixed: 1 + 33 + 15,
-  shortBatch: 50,
-  insiderBatch: 25,
-  ownershipPerDeep: 2,
-  earningsPerName: 1,
-  sectorTrix: 11,
-  chainPerDeep: 1.4,
-  readsPerDeep: 7,
-  volPerDeep: 8,
-  volPerCross: 2,
-  volPerDossier: 10,
-  volRadar: 4,
-  flowPerDeep: 12.2,
-  flowPerCross: 3,
-  flowAlertPages: 12,
-  dossier: 13,
-  focus: 1,
-  activity: 1,
-  misc: 67,
-});
-
-export const NOMINAL_SHAPE = Object.freeze({ enriched: 180, deep: 72, cross: 110, dossiers: 12, earnings: 95 });
-
-export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, earnings = 0 } = {}, cost = CALL_COST) {
-  const carded = deep + cross;
-  const legs = {
-    setup: cost.setup + cost.coverage,
-    enrich: cost.enrich * enriched,
-    market: cost.marketFixed + Math.ceil(carded / cost.shortBatch) + Math.ceil(carded / cost.insiderBatch) +
-      cost.ownershipPerDeep * deep + cost.earningsPerName * earnings,
-    sectorTrix: cost.sectorTrix,
-    chains: Math.ceil(cost.chainPerDeep * deep),
-    cards: cost.readsPerDeep * deep,
-    vol: cost.volPerDeep * deep + cost.volPerCross * cross + cost.volPerDossier * dossiers + cost.volRadar,
-    flow: Math.ceil(cost.flowPerDeep * deep) + cost.flowPerCross * cross + cost.flowAlertPages,
-    dossiers: cost.dossier * dossiers,
-    focus: cost.focus,
-    activity: cost.activity,
-    misc: cost.misc,
-  };
-  return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
-}
-
-export const CALL_BUDGET = callModel(NOMINAL_SHAPE).total;
-
-export const CALL_OVERRUN_MARGIN = 0.10;
-
-export const EARNINGS_GATE_DAYS = 12;
-
-export const SCREENER_PAGE_ROWS = 50;
-
-export const SCREENER_SPLIT_DEPTH = 2;
-
 export const SESSION_OPEN_MINUTES = 9 * 60 + 30;
 export const SESSION_CLOSE_MINUTES = 16 * 60;
 
 export const PIPELINE_CADENCE =
   "once per weekday after the close, at 21:30 UTC in summer and 22:30 UTC in winter — " +
   "17:30 America/New_York either way";
-
-export const DEEP_NAMES = 50;
-
-export const MARKET_CROSS_LIMIT = 100;
-
-export const DEEP_RULE =
-  "The " + 50 + " names furthest from neutral across both boards carry a chain " +
-  "and a detail card. Every other row is scored and ranked from the same five " +
-  "sources, and has no card: the card costs vendor calls the run cannot spend " +
-  "on a hundred names.";
-
-export function deepNames(published, limit = DEEP_NAMES) {
-  const rows = [];
-  for (const side of ["long", "short"]) {
-    for (const row of (published && published[side]) || []) {
-      const s = Number(row && row.s);
-      if (row && row.t) rows.push({ t: row.t, side, mag: Number.isFinite(s) ? Math.abs(s) : -1 });
-    }
-  }
-  rows.sort((a, b) => b.mag - a.mag || a.t.localeCompare(b.t));
-  return rows.slice(0, Math.max(0, limit));
-}
-
-export function rateFloorSurvivesBudget(
-  { floorCeilingMs, callBudget, deadlineMs, reserveMs } = {},
-) {
-  return floorCeilingMs * callBudget < deadlineMs - reserveMs;
-}
-
-export function raiseRateFloor(floor, { minStepMs = 150, ceilingMs = RATE.floorCeilingMs } = {}) {
-  return Math.min(Math.max(floor * 1.5, minStepMs), ceilingMs);
-}
-
-export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs = RATE.maxDelayMs } = {}) {
-  if (outcome === "limited") {
-    const raised = raiseRateFloor(floorMs);
-    return { floorMs: raised, delayMs: Math.min(Math.max(delayMs * 2, raised), maxDelayMs) };
-  }
-  if (outcome === "error") {
-    return { floorMs, delayMs: Math.min(delayMs * 2, maxDelayMs) };
-  }
-  return { floorMs, delayMs: Math.max(floorMs, delayMs * 0.9) };
-}
-
-export const DEADLINE_MS = 36 * 60 * 1000;
 
 let tickFieldsReported = false;
 let greekFieldsReported = false;
@@ -360,29 +237,7 @@ export function describeChainProbe(ticker, expiry, rows, { pageSize = CHAIN_PAGE
     " single-expiry request, so narrowing must use `page` instead."];
 }
 
-const CHAIN_RESERVE_MS = 6 * 60 * 1000;
-
 const PUBLISH_SPACING_MS = 400;
-
-const stats = {
-  calls: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
-
-  permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
-};
-let delayMs = RATE.startDelayMs;
-
-export const wireProgress = createProgress();
-
-let delayFloorMs = RATE.minDelayMs;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-const permits = makePermitQueue({
-  delayMs: () => delayMs,
-  now: () => Date.now(),
-  sleep,
-  maxInFlight: 6,
-});
 
 const ingestWrites = makePermitQueue({
   delayMs: () => PUBLISH_SPACING_MS,
@@ -391,251 +246,6 @@ const ingestWrites = makePermitQueue({
 
   maxInFlight: 2,
 });
-
-const POOL_MAX_WIDTH = 4;
-
-const POOL_EVIDENCE_MIN = 24;
-
-const POOL_REFUSAL_HALT = 0.10;
-const POOL_REFUSAL_EASE = 0.05;
-
-const meterRead = (meter, key) => {
-  if (!meter) return null;
-  const v = meter[key];
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-
-function poolWidth(max = POOL_MAX_WIDTH, meter = stats) {
-  const seen = meterRead(meter, "calls");
-  const refused = meterRead(meter, "rateLimited");
-
-  if (seen === null) {
-    return { width: 1, rate: null, seen: null,
-      why: "no call counter to read, so this run has measured no refusal rate" };
-  }
-  if (seen < POOL_EVIDENCE_MIN) {
-    return { width: 1, rate: null, seen, why: `only ${seen} call(s) so far, which is not evidence` };
-  }
-
-  if (refused === null) {
-    return { width: 1, rate: null, seen,
-      why: `${seen} call(s) counted and no refusal counter beside them` };
-  }
-  const rate = refused / seen;
-  if (rate > POOL_REFUSAL_HALT) {
-    return { width: 1, rate, seen, why: `${(rate * 100).toFixed(1)}% of calls refused so far` };
-  }
-  if (rate > POOL_REFUSAL_EASE) {
-    return { width: Math.min(2, max), rate, seen, why: `${(rate * 100).toFixed(1)}% refused` };
-  }
-  return { width: max, rate, seen, why: `${(rate * 100).toFixed(1)}% refused` };
-}
-
-async function runPooled(items, work, { width = 1, stopEarly = null } = {}) {
-  const list = Array.isArray(items) ? items : [];
-  const results = new Array(list.length).fill(undefined);
-
-  const attempted = new Array(list.length).fill(false);
-  let next = 0;
-  let stopped = false;
-
-  const worker = async () => {
-    for (;;) {
-      if (stopped) return;
-      if (stopEarly && stopEarly()) { stopped = true; return; }
-      const i = next++;
-      if (i >= list.length) return;
-      attempted[i] = true;
-      results[i] = await work(list[i], i);
-    }
-  };
-
-  const lanes = Math.max(1, Math.min(Math.floor(width) || 1, list.length || 1));
-  await Promise.all(Array.from({ length: lanes }, worker));
-  return { results, attempted, stopped, done: attempted.filter(Boolean).length };
-}
-
-export function foldCardOutcomes(tickers, run) {
-  const list = Array.isArray(tickers) ? tickers : [];
-  const attempted = (run && run.attempted) || [];
-  const results = (run && run.results) || [];
-  const out = {
-    built: 0, failed: 0, unenriched: 0, deadlineSkipped: 0, skipped: 0, gammaProfiles: [],
-
-    garchConverged: 0, garchUnconverged: 0, garchUnavailable: 0,
-    garchNu: [], garchLambda: [], garchPersistence: [],
-  };
-  list.forEach((ticker, i) => {
-    if (!attempted[i]) { out.deadlineSkipped++; out.skipped++; return; }
-    const outcome = results[i];
-
-    if (!outcome || outcome.status === "failed") { out.failed++; return; }
-    if (outcome.status === "unenriched") { out.unenriched++; out.skipped++; return; }
-    out.built++;
-
-    if (outcome.gamma) out.gammaProfiles.push(outcome.gamma);
-
-    const g = outcome.garch;
-    if (g && typeof g === "object") {
-      if (g.status !== "ok") out.garchUnavailable++;
-      else if (g.converged === false) out.garchUnconverged++;
-      else {
-        out.garchConverged++;
-        if (Number.isFinite(g.nu)) out.garchNu.push(g.nu);
-        if (Number.isFinite(g.lambda)) out.garchLambda.push(g.lambda);
-        if (Number.isFinite(g.persistence)) out.garchPersistence.push(g.persistence);
-      }
-    }
-  });
-  return out;
-}
-
-function describeFloorVerdict(meter) {
-  const calls = meterRead(meter, "calls");
-
-  if (!calls) return null;
-  const refused = meterRead(meter, "rateLimited");
-
-  if (refused === null) return null;
-  const queuedMs = meterRead(meter, "permitWaitMs");
-  const backoffMs = meterRead(meter, "rateLimitWaitMs");
-  const rate = refused / calls;
-
-  const timed = queuedMs !== null && backoffMs !== null;
-  const share = timed && queuedMs > 0 ? backoffMs / queuedMs : null;
-
-  const head =
-    `floor verdict: ${refused} of ${calls} calls refused (${(rate * 100).toFixed(1)}%), ` +
-    (!timed
-      ? "and this run carries no wait meters, so what the floor charged and what the " +
-        "refusals cost were not measured — read the rate alone. "
-      : `backoff ${(backoffMs / 1000).toFixed(1)}s against ${(queuedMs / 1000).toFixed(1)}s of queueing` +
-        (share === null
-          ? " — nothing queued, so the floor was never the binding cost this run. "
-          : ` (${(share * 100).toFixed(0)}% as large). `));
-  if (rate > POOL_REFUSAL_HALT) {
-    return head +
-      "THE CEILING IS DOING ITS JOB and must not move up: the controller asked to go slower " +
-      `than RATE.floorCeilingMs=${RATE.floorCeilingMs}ms and was refused anyway. Cut calls ` +
-      "before touching the rate, and expect every pooled leg to have run one wide.";
-  }
-  if (rate > POOL_REFUSAL_EASE) {
-    return head +
-      "The floor is roughly where the vendor wants it. Neither raising nor lowering the " +
-      "ceiling is supported by this run.";
-  }
-  return head +
-    `The floor is CONSERVATIVE — refusals are under ${(POOL_REFUSAL_EASE * 100).toFixed(0)}% ` +
-    "and the queueing above is what this run actually paid. RATE.floorCeilingMs can come " +
-    "down one step at a time, re-reading this line each morning.";
-}
-
-export const LIVE_VENDOR = Object.freeze({ timeoutMs: 20_000, timeoutRetries: 1 });
-
-function vendorTimeoutMs() {
-  if (!LIVE_MODE) return 0;
-  const set = Number(process.env.FLOWS_UW_TIMEOUT_MS);
-  return Number.isFinite(set) && set >= 100 && set <= 60_000 ? set : LIVE_VENDOR.timeoutMs;
-}
-
-const isTimeout = (error) => !!error && (error.name === "TimeoutError" || error.name === "AbortError");
-
-export async function uw(path, params = {}, { envelope = false } = {}) {
-  const url = new URL(BASE + path);
-  for (const [k, v] of Object.entries(params)) {
-    if (v === undefined || v === null || v === "") continue;
-
-    if (Array.isArray(v)) {
-      for (const item of v) {
-        if (item !== undefined && item !== null && item !== "") url.searchParams.append(k, String(item));
-      }
-      continue;
-    }
-    url.searchParams.set(k, String(v));
-  }
-
-  const limitMs = vendorTimeoutMs();
-  let timeouts = 0;
-  for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
-
-    stats.permitWaitMs += await permits.acquire();
-    stats.calls++;
-    let response;
-    const wireStarted = Date.now();
-    const landed = permits.enter();
-    try {
-      response = await fetch(url, {
-        headers: {
-          Authorization: "Bearer " + process.env.UW_API_KEY,
-          Accept: "application/json",
-        },
-        ...(limitMs ? { signal: AbortSignal.timeout(limitMs) } : {}),
-      });
-    } catch (error) {
-      stats.networkMs += Date.now() - wireStarted;
-      landed();
-      wireProgress.settled();
-      stats.retries++;
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "error"));
-      const timedOut = !!limitMs && isTimeout(error);
-      if (timedOut) {
-        stats.timedOut++;
-        timeouts++;
-      }
-      if (attempt === RATE.maxRetries || (timedOut && timeouts > LIVE_VENDOR.timeoutRetries)) throw error;
-      continue;
-    }
-    stats.networkMs += Date.now() - wireStarted;
-    landed();
-    wireProgress.settled();
-
-    if (response.status === 429) {
-      stats.rateLimited++;
-      const retryAfter = Number(response.headers.get("Retry-After"));
-
-      const wait = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(retryAfter * 1000, RATE.maxRetryAfterMs)
-        : Math.min(delayMs * 4, RATE.maxDelayMs);
-
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "limited"));
-
-      stats.rateLimitQueueMs += permits.defer(wait);
-      stats.rateLimitWaitMs += wait;
-      wireProgress.quiet(wait);
-      await sleep(wait);
-      continue;
-    }
-
-    if (response.status >= 500) {
-      stats.retries++;
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "error"));
-      if (attempt === RATE.maxRetries) throw new Error(`${path} -> HTTP ${response.status}`);
-      continue;
-    }
-
-    if (!response.ok) throw new Error(`${path} -> HTTP ${response.status}`);
-
-    ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-      { delayMs, floorMs: delayFloorMs }, "ok"));
-    let body;
-    try {
-      body = await response.json();
-    } catch (error) {
-      if (limitMs && isTimeout(error)) stats.timedOut++;
-      throw error;
-    } finally {
-      wireProgress.settled();
-    }
-    if (envelope) return body;
-    return Array.isArray(body) ? body : (body && body.data) || [];
-  }
-  throw new Error(`${path} -> exhausted retries`);
-}
 
 function eligible(row, { skipCap = false } = {}) {
   const price = num(row.close);
@@ -2788,8 +2398,6 @@ export function holdersRefusal(prior, sessionDate, { days = HOLDERS_RETRY_DAYS }
   };
 }
 
-export const NEWS_VENDOR_LIMIT = 100;
-
 export const NEWS_ROWS = 60;
 
 export function shapeNews(raw, { cap = NEWS_ROWS, requested = NEWS_VENDOR_LIMIT } = {}) {
@@ -3554,7 +3162,6 @@ function fakeTermStructure(ticker, spot, params = {}) {
   });
 }
 
-export const IV_RANK_PARAMS = Object.freeze({ timespan: "1y" });
 const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
 
 export function fakeIvRank(ticker, spot, params = {}) {
@@ -3712,8 +3319,6 @@ function fakeFlowAlerts(tickers) {
   rows.push({ ticker: "", total_premium: 5 });
   return rows;
 }
-
-const ALERT_VENDOR_LIMIT = 200;
 
 function fakePoliticalRaws(tickers) {
   const rnd = mulberry(4471);
@@ -4621,8 +4226,7 @@ async function runLiveMode() {
     }
     console.log(`publishing to ${ingestURL()} as ${source}`);
   }
-  delayFloorMs = Math.max(delayFloorMs, LIVE_READ_PACE_MS);
-  delayMs = Math.max(delayMs, LIVE_READ_PACE_MS);
+  raiseReadPace(LIVE_READ_PACE_MS);
   if (DRY_RUN) {
     const ticks = await dryLiveTicks({ publish, store: publishedStore, shapeNews });
     const day = await dryLiveDay({});
@@ -7168,15 +6772,23 @@ export {
 
   fakeSectorEtfs, fakeNewsHeadlines,
   MOVER_ROWS, moverRow, buildMovers,
-  describeTickFields, TICK_FIELDS_READ, CHAIN_RESERVE_MS, republishWithChain,
+  describeTickFields, TICK_FIELDS_READ, republishWithChain,
   archiveDatedBoards,
 
   PUBLISH_RETRYABLE,
-  runPooled, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
-  POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote, fakePriorUnusual,
   PUBLISH_SPACING_MS, readStored, noteRefusal,
 };
+
+export {
+  CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
+  EARNINGS_GATE_DAYS, IV_RANK_PARAMS, LIVE_VENDOR, MARKET_CROSS_LIMIT, NEWS_VENDOR_LIMIT, NOMINAL_SHAPE, RATE,
+  SCREENER_PAGE_ROWS, SCREENER_SPLIT_DEPTH, callModel, deepNames,
+} from "./flows-nightly/vendor-params.mjs";
+export {
+  POOL_EVIDENCE_MIN, POOL_MAX_WIDTH, POOL_REFUSAL_EASE, POOL_REFUSAL_HALT, describeFloorVerdict, foldCardOutcomes,
+  poolWidth, raiseRateFloor, rateFloorSurvivesBudget, runPooled, stepRateController, uw, wireProgress,
+} from "./flows-nightly/vendor.mjs";
 
 const invokedDirectly = process.argv[1]
   && (await import("node:url")).fileURLToPath(import.meta.url) === process.argv[1];

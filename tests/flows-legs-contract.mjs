@@ -37,7 +37,7 @@ import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-l
 import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
-import { workerSource, nightlySource, treeFiles, moduleSource } from "./lib/source-scan.mjs";
+import { workerSource, nightlySource, treeFiles, moduleSource, expect, importEdges } from "./lib/source-scan.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { createRouter } from "../server/router.js";
 
@@ -931,6 +931,51 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "universe and regime publish one at a time, each as its own isolated stage, so a refused universe cannot take the regime and every card-x down with it");
   const own = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/ownership.mjs"), "utf8");
   ok(/volume-and-ratio`, \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
+}
+
+{
+  const NIGHTLY = "scripts/flows-nightly/";
+  const HOME = {
+    "vendor-params.mjs": [
+      "UNIVERSE", "RATE", "CALL_COST", "NOMINAL_SHAPE", "callModel", "CALL_BUDGET", "CALL_OVERRUN_MARGIN",
+      "EARNINGS_GATE_DAYS", "SCREENER_PAGE_ROWS", "SCREENER_SPLIT_DEPTH", "DEEP_NAMES", "MARKET_CROSS_LIMIT",
+      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NEWS_VENDOR_LIMIT", "ALERT_VENDOR_LIMIT",
+      "IV_RANK_PARAMS", "CHAIN_RESERVE_MS",
+    ],
+    "vendor.mjs": [
+      "BASE", "vendorTimeoutMs", "isTimeout", "stats", "delayMs", "delayFloorMs", "raiseReadPace", "wireProgress",
+      "sleep", "permits", "rateFloorSurvivesBudget", "raiseRateFloor", "stepRateController", "POOL_MAX_WIDTH",
+      "POOL_EVIDENCE_MIN", "POOL_REFUSAL_HALT", "POOL_REFUSAL_EASE", "meterRead", "poolWidth", "runPooled",
+      "foldCardOutcomes", "describeFloorVerdict", "uw",
+    ],
+    "flags.mjs": [
+      "DRY_RUN", "LIVE_MODE", "EMIT",
+    ],
+  };
+  const LAYER = {"flags.mjs":0,"vendor-params.mjs":1,"vendor.mjs":2};
+  const whole = nightlySource();
+  const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
+  let homed = 0;
+  for (const [file, names] of Object.entries(HOME)) {
+    const src = moduleSource(NIGHTLY + file);
+    for (const name of names) {
+      expect(whole, decl(name), { min: 1, max: 1, why: name + " is declared once across the nightly" });
+      expect(src, decl(name), { min: 1, max: 1, why: name + " lives in " + file });
+      homed++;
+      checks += 2;
+    }
+  }
+  ok(homed > 0, "the layout table names the declarations it holds (" + homed + ")");
+  for (const file of treeFiles("scripts/flows-nightly")) {
+    const rel = file.slice(NIGHTLY.length);
+    for (const edge of importEdges(file)) {
+      ok(edge.file !== "scripts/flows-pipeline.mjs", rel + " does not import the entry");
+      if (!edge.file.startsWith(NIGHTLY)) continue;
+      const to = edge.file.slice(NIGHTLY.length);
+      if (!(rel in LAYER) || !(to in LAYER)) continue;
+      ok(LAYER[to] < LAYER[rel], rel + " imports only a layer below its own, not " + to);
+    }
+  }
 }
 
 console.log(`✓ flows-legs: ${checks} assertions — every universe, regime, ownership and catalyst formula checked ` +
