@@ -1079,6 +1079,46 @@ const cronMinutes = (cron) => {
 
   {
     const session = "2026-09-23";
+    let clock = easternInstant(session, 11 * 60 + 7);
+    const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+    const boards = FAKE.fakeBoards();
+    const spans = [];
+    const uw = async (path, params, opts) => {
+      const start = clock;
+      try { return await fake(path, params, opts); } finally { spans.push({ path, start, end: clock }); }
+    };
+    const published = {};
+    await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
+      publish: async (k, p) => { published[k] = p; },
+      readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+    const readAt = (k) => Date.parse(published[k].fresh.readAt);
+    const group = (re) => spans.filter((c) => re.test(c.path));
+    const first = (list) => Math.min(...list.map((c) => c.start));
+    const last = (list) => Math.max(...list.map((c) => c.end));
+    const tides = group(/sector-tide|etf-tide|net-flow\/expiry/);
+    const screener = group(/screener\/stocks/);
+    const flows = group(/flow-alerts/);
+    const news = group(/news\/headlines/);
+    ok(tides.length > 10 && screener.length === 1 && flows.length >= 1 && news.length === 1, "the pass made the reads of every group");
+    ok(readAt("live:breadth") >= last(tides) && readAt("live:breadth") <= first(screener),
+      "PER-KEY READ TIME: live:breadth is stamped when its own last read returned, before the screener was asked");
+    for (const k of ["live:strips", "live:strips:series", "live:vol", "live:movers"]) {
+      ok(readAt(k) === readAt("live:strips") && readAt(k) >= last(screener) && readAt(k) <= first(flows),
+        `${k} carries the screener's completion time, ahead of the alert pages it did not wait for`);
+    }
+    ok(readAt("live:alerts") >= last(flows) && readAt("live:alerts") <= first(news),
+      "live:alerts is stamped after its last page and before the news read");
+    ok(readAt("live:news") >= last(news) && readAt("live:news") < readAt("live:heartbeat"),
+      "live:news is stamped when the news read returned");
+    ok(readAt("live:heartbeat") > last(news) && readAt("live:heartbeat") > readAt("live:news"),
+      "and the heartbeat keeps the pass's own stamp taken after every read, which the ledger counts");
+    ok(readAt("live:breadth") < readAt("live:strips") && readAt("live:strips") < readAt("live:alerts") &&
+       readAt("live:alerts") < readAt("live:news"),
+    "so the keys are stamped in the order they were read, not one instant for all");
+  }
+
+  {
+    const session = "2026-09-23";
     const at = easternInstant(session, 11 * 60 + 7);
     const boards = FAKE.fakeBoards();
     const runWith = async (fails) => {
