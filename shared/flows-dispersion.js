@@ -7,6 +7,7 @@ export const TRADING_DAYS = 252;
 export const MIN_MEMBERS = 20;
 export const MIN_WEIGHT_COVERED = 0.6;
 export const PARTIAL_WEIGHT_COVERED = 0.85;
+export const IMPLIED_OK_WEIGHT_COVERED = 0.9;
 export const IV_MIN = 0.02;
 export const IV_MAX = 3;
 export const CALENDAR_WEIGHT = 0.8;
@@ -30,23 +31,31 @@ export function impliedCorrelation({ indexIv, members, days = IV_DAYS }) {
   const list = Array.isArray(members) ? members : [];
   const base = { days, indexIv: ivUsable(indexIv) ? round(indexIv, 4) : null, members: list.length };
   const excluded = { event: 0, noIv: 0 };
-  let covered = 0, wCovered = 0, wExcluded = 0, s1 = 0, s2 = 0;
+  let covered = 0, wCovered = 0, wExcluded = 0, s1 = 0, s2 = 0, a1 = 0;
   for (const m of list) {
     if (m.event) { excluded.event += 1; wExcluded += m.w; continue; }
     if (!ivUsable(m.iv)) { excluded.noIv += 1; wExcluded += m.w; continue; }
     covered += 1; wCovered += m.w;
-    s1 += m.w * m.iv;
-    s2 += m.w * m.w * m.iv * m.iv;
+    a1 += m.w * m.iv;
   }
+  const avgIv = wCovered > 0 ? a1 / wCovered : null;
   const cover = { covered, weightCovered: round(wCovered, 4), weightExcluded: round(wExcluded, 4), excluded };
-  const out = { ...base, ...cover, rho: null, raw: null, clamped: false, avgIv: wCovered > 0 ? round(s1 / wCovered, 4) : null, ratio: null, why: null };
+  const out = { ...base, ...cover, rho: null, raw: null, clamped: false, avgIv: round(avgIv, 4), ratio: null, why: null, imputed: 0 };
   if (!ivUsable(indexIv)) return { ...out, why: "index-iv" };
   if (covered < MIN_MEMBERS || wCovered < MIN_WEIGHT_COVERED) return { ...out, why: "coverage" };
+  let imputed = 0;
+  for (const m of list) {
+    const skip = m.event || !ivUsable(m.iv);
+    const iv = skip ? avgIv : m.iv;
+    if (skip) imputed += 1;
+    s1 += m.w * iv;
+    s2 += m.w * m.w * iv * iv;
+  }
   const den = s1 * s1 - s2;
-  if (!(den > 0)) return { ...out, why: "degenerate" };
+  if (!(den > 0)) return { ...out, imputed, why: "degenerate" };
   const raw = (indexIv * indexIv - s2) / den;
   const rho = Math.min(1, Math.max(-1, raw));
-  return { ...out, rho: round(rho, 4), raw: round(raw, 4), clamped: rho !== raw, ratio: out.avgIv ? round(indexIv / out.avgIv, 4) : null };
+  return { ...out, imputed, rho: round(rho, 4), raw: round(raw, 4), clamped: rho !== raw, ratio: avgIv ? round(indexIv / avgIv, 4) : null };
 }
 
 export function logReturns(closes) {
@@ -60,10 +69,11 @@ export function logReturns(closes) {
 
 export function realisedCorrelation({ members, window }) {
   const list = Array.isArray(members) ? members : [];
-  const excluded = { noBars: 0, flat: 0 };
+  const excluded = { noBars: 0, flat: 0, break: 0 };
   const used = [];
   let wExcluded = 0;
   for (const m of list) {
+    if (m.broken) { excluded.break += 1; wExcluded += m.w; continue; }
     const r = Array.isArray(m.r) ? m.r.slice(-window) : [];
     if (r.length < window || r.some((x) => !fin(x))) { excluded.noBars += 1; wExcluded += m.w; continue; }
     const v = sampleVar(r);
@@ -112,7 +122,12 @@ export function alignReturns(seriesByTicker, calendar) {
   return out;
 }
 
-export function buildDispersion({ sessionDate, generatedAt, source, indexIv, members, series }) {
+const breakIn = (breaks, t, after, through) => {
+  const list = breaks && typeof breaks.get === "function" ? breaks.get(t) : null;
+  return Array.isArray(list) && list.some((d) => typeof d === "string" && d > after && d <= through);
+};
+
+export function buildDispersion({ sessionDate, generatedAt, source, indexIv, members, series, breaks = null }) {
   const need = Math.max(...WINDOWS) + 1;
   const weights = new Map(members.map((m) => [m.t, m.w]));
   const calendar = commonCalendar(series, weights, need);
@@ -122,12 +137,14 @@ export function buildDispersion({ sessionDate, generatedAt, source, indexIv, mem
   const realised = {};
   const crp = {};
   for (const window of WINDOWS) {
-    realised[window] = realisedCorrelation({ members: withReturns, window });
+    const start = calendar.length > window ? calendar[calendar.length - window - 1] : null;
+    const flagged = withReturns.map((m) => ({ ...m, broken: Boolean(start && breakIn(breaks, m.t, start, calendar[calendar.length - 1])) }));
+    realised[window] = realisedCorrelation({ members: flagged, window });
     crp[window] = fin(implied.rho) && fin(realised[window].rho) ? round(implied.rho - realised[window].rho, 4) : null;
   }
   const impliedOk = fin(implied.rho);
   const realisedOk = WINDOWS.some((w) => fin(realised[w].rho));
-  const partial = (impliedOk && implied.weightCovered < PARTIAL_WEIGHT_COVERED) || WINDOWS.some((w) => fin(realised[w].rho) && realised[w].weightCovered < PARTIAL_WEIGHT_COVERED);
+  const partial = (impliedOk && implied.weightCovered < IMPLIED_OK_WEIGHT_COVERED) || WINDOWS.some((w) => fin(realised[w].rho) && realised[w].weightCovered < PARTIAL_WEIGHT_COVERED);
   return {
     v: DISPERSION_VERSION,
     status: impliedOk && realisedOk ? (partial ? "partial" : "ok") : impliedOk || realisedOk ? "partial" : "withheld",
@@ -137,8 +154,8 @@ export function buildDispersion({ sessionDate, generatedAt, source, indexIv, mem
     implied, realised, crp,
     units: { rho: "weighted average pairwise correlation, -1 to 1", iv: "annualised fraction", vol: "annualised fraction", crp: "implied minus realised, correlation points as a fraction" },
     notes: {
-      implied: "Implied correlation is the weighted average pairwise correlation that reproduces the index's 30-day implied variance from the members' own 30-day implied variances. A member reporting inside the 30 days carries an earnings jump in its implied variance, so it is excluded from the members' side and listed in coverage; its weight stays in the index, so the figure is approximate and moves toward the truth as the excluded weight falls.",
-      realised: "Realised correlation is the weighted average pairwise correlation of the members' daily log returns over the window, the same quantity on realised variances. A member with a missing or flat day in the window is left out and counted.",
+      implied: "Implied correlation is the weighted average pairwise correlation that reproduces the index's 30-day implied variance from the members' own 30-day implied variances. A member reporting inside the 30 days carries an earnings jump in its implied variance, and a member with no usable implied volatility has none to give, so each is counted in coverage and stands in the members' side at the covered members' weighted average implied volatility, which keeps the members' side on the index's full weight. What remains is the excluded member's own earnings variance, which stays in the index, and the gap between its volatility and that average: a few correlation points when the excluded weight is a few percent to a third (about four points at most in the planted worlds tested), and the status is partial once more than a tenth of the weight is excluded.",
+      realised: "Realised correlation is the weighted average pairwise correlation of the members' daily log returns over the window, the same quantity on realised variances. A member with a missing or flat day in the window, or a price break (a split or a change of share class) dated inside it, is left out and counted.",
       crp: "The correlation risk premium here is implied minus realised on matching or longer windows. It is a description of the options market's price of correlation, not a forecast or a recommendation.",
     },
   };

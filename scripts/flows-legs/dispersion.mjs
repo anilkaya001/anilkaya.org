@@ -20,11 +20,16 @@ export async function runDispersion({
   let calls = kept && kept.week === week && fin(kept.calls) ? kept.calls : 0;
   const series = new Map();
   const held = new Set();
+  const breaks = new Map();
+  const noteBreaks = (t, got) => {
+    const list = got && Array.isArray(got.breaks) ? got.breaks.filter((d) => typeof d === "string") : [];
+    if (list.length) breaks.set(t, list);
+  };
   const cut = (bars) => bars.filter((b) => b && typeof b.d === "string" && b.d <= sessionDate && fin(b.c)).slice(-KEEP_SESSIONS).map((b) => [b.d, b.c]);
   for (const m of members) {
     const got = await barsFor(m.t);
     const s = got && Array.isArray(got.bars) ? cut(got.bars) : [];
-    if (s.length) { series.set(m.t, s); held.add(m.t); }
+    if (s.length) { series.set(m.t, s); held.add(m.t); noteBreaks(m.t, got); }
   }
   const cachedOf = (t) => {
     const c = kept && kept.closes.c ? kept.closes.c[t] : null;
@@ -34,15 +39,16 @@ export async function runDispersion({
     return out.length ? out : null;
   };
   const stored = new Map();
+  const keptBreaks = kept && kept.closes.k && typeof kept.closes.k === "object" ? kept.closes.k : {};
   let fetched = 0, failed = 0, deferred = 0;
   for (const m of members) {
     if (held.has(m.t)) continue;
     const old = cachedOf(m.t);
     const fresh = old && daysBetween(old[old.length - 1][0], sessionDate) <= STALE_DAYS;
-    if (fresh) { series.set(m.t, old); stored.set(m.t, old); continue; }
+    if (fresh) { series.set(m.t, old); stored.set(m.t, old); if (Array.isArray(keptBreaks[m.t])) breaks.set(m.t, keptBreaks[m.t]); continue; }
     if (calls >= weeklyCap) {
       deferred += 1;
-      if (old) { series.set(m.t, old); stored.set(m.t, old); }
+      if (old) { series.set(m.t, old); stored.set(m.t, old); if (Array.isArray(keptBreaks[m.t])) breaks.set(m.t, keptBreaks[m.t]); }
       continue;
     }
     calls += 1;
@@ -50,9 +56,9 @@ export async function runDispersion({
     let got = null;
     try { got = await fetchBars(m.t); } catch { got = null; }
     const s = got && Array.isArray(got.bars) ? cut(got.bars) : [];
-    if (s.length) { series.set(m.t, s); stored.set(m.t, s); } else {
+    if (s.length) { series.set(m.t, s); stored.set(m.t, s); noteBreaks(m.t, got); } else {
       failed += 1;
-      if (old) { series.set(m.t, old); stored.set(m.t, old); }
+      if (old) { series.set(m.t, old); stored.set(m.t, old); if (Array.isArray(keptBreaks[m.t])) breaks.set(m.t, keptBreaks[m.t]); }
     }
   }
   const dates = [...new Set([...stored.values()].flatMap((s) => s.map((p) => p[0])))].sort().slice(-KEEP_SESSIONS);
@@ -61,15 +67,20 @@ export async function runDispersion({
     const at = new Map(s);
     c[t] = dates.map((d) => (at.has(d) ? round(at.get(d)) : null));
   }
+  const k = {};
+  for (const t of stored.keys()) {
+    const live = (breaks.get(t) || []).filter((d) => dates.length && d >= dates[0]);
+    if (live.length) k[t] = live;
+  }
   const row = buildDispersion({
     sessionDate, generatedAt, source: "qqq-holdings:" + (asOfHoldings || "undated"),
     indexIv: fin(indexIv) ? indexIv : null,
     members: members.map((m) => ({ t: m.t, w: m.w, iv: ivOf(m.t), event: Boolean(eventOf(m.t)) })),
-    series,
+    series, breaks,
   });
   row.holdings = { listed: members.length, asOf: asOfHoldings };
   row.calls = { fetched, failed, deferred, week, weekly: calls, cap: weeklyCap };
-  row.state = { week, calls, closes: { dates, c } };
+  row.state = { week, calls, closes: { dates, c, k } };
   try {
     await publish(DISPERSION_KEY, row);
   } catch (error) {
