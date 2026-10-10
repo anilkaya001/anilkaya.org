@@ -1198,7 +1198,7 @@
       cursor: (...a) => (a.length ? run(() => impl.cursor(...a), null) : impl ? impl.cursor() : null),
       describe: () => run(() => impl.describe(), { scene: null, mode: null, tau: null, clock: null, selection: {} }),
     };
-    for (const m of ["emit", "context"]) api[m] = (...a) => run(() => impl[m](...a), false);
+    for (const m of ["emit", "context", "popout"]) api[m] = (...a) => run(() => impl[m](...a), false);
     return api;
   })();
 

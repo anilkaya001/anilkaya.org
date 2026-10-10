@@ -56,7 +56,7 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(URL0);
 
-  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["attach", "context", "cursor", "describe", "emit", "join"],
+  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["attach", "context", "cursor", "describe", "emit", "join", "popout"],
     "FlowsUI.link exists from the first byte of flows-ui.js as a queue stub, with the body not yet loaded");
   eq(await page.evaluate(() => performance.getEntriesByType("resource").some((r) => /flows-link\.js/.test(r.name))), false,
     "and the body is not fetched by a page that never joins");
@@ -69,7 +69,7 @@ try {
   });
   await attached(page);
   ok(await page.evaluate(() => performance.getEntriesByType("resource").some((r) => /flows-link\.js\?v=\d+/.test(r.name))), "the first join loads the body from beside flows-ui.js with the same ?v=");
-  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["context", "cursor", "describe", "emit", "join"], "and attach removes itself once the body is in");
+  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["context", "cursor", "describe", "emit", "join", "popout"], "and attach removes itself once the body is in");
   eq(await lit(page, ["table", "chart", "b1", "solo"]), { table: null, chart: null, b1: null, solo: null }, "a join with nothing selected lights nothing");
 
   const storage = () => page.evaluate(() => JSON.stringify({ l: Object.keys(localStorage), s: Object.keys(sessionStorage), c: document.cookie }));
@@ -243,6 +243,103 @@ try {
   }
 
   await context.close();
+
+  {
+    const win = await browser.newContext({ viewport: { width: 1000, height: 700 } });
+    await serve(win);
+    const A = await win.newPage();
+    const errs = [];
+    A.on("pageerror", (e) => errs.push(String(e)));
+    await A.goto(URL0);
+    await A.evaluate(() => { window.__mk("table", { channel: "A" }); window.__mk("chart", { channel: "A" }); });
+    await attached(A);
+    eq(await A.evaluate(() => [window.FlowsUI.link.popout("https://evil.example/x"), window.FlowsUI.link.popout("//evil.example/x"), window.FlowsUI.link.popout("javascript:alert(1)"), window.FlowsUI.link.popout("x".repeat(300)), window.__opened.length]), [null, null, null, null, 0],
+      "popout opens only a path on this origin: an absolute URL, a protocol-relative one, a script URL or an enormous one open nothing");
+    await A.evaluate(async () => { window.FlowsUI.link.emit("table", { kind: "ticker", value: "NVDA", source: "table" }); await window.__frame(); });
+    const token = await A.evaluate(() => window.FlowsUI.link.popout("/flows/fixture/"));
+    ok(/^[0-9a-f]{16}$/.test(token), `popout makes a 16 hex digit window-group token (${token})`);
+    const opened = await A.evaluate(() => window.__opened.slice());
+    eq(opened, ["/flows/fixture/#l=A:t=NVDA;w=" + token], "and opens the path on the current selection and that token, so the new window starts where this one is");
+    eq(await A.evaluate(() => location.hash), "#l=A:t=NVDA;w=" + token, "this window carries the token too, so a reload keeps the group");
+
+    const B = await win.newPage();
+    B.on("pageerror", (e) => errs.push(String(e)));
+    await B.addInitScript((tok) => {
+      window.__frames = 0;
+      (function loop() { window.__frames++; requestAnimationFrame(loop); })();
+      window.__msgAt = [];
+      window.__litAt = [];
+      window.addEventListener("DOMContentLoaded", () => {
+        const ch = new BroadcastChannel("flows-link:" + tok);
+        ch.onmessage = () => window.__msgAt.push(window.__frames);
+        new MutationObserver(() => window.__litAt.push(window.__frames)).observe(document.getElementById("chart"), { attributes: true, attributeFilter: ["data-lit"] });
+      });
+    }, token);
+    await B.goto("https://example.test" + opened[0]);
+    await B.evaluate(() => { window.__mk("table", { channel: "A" }); window.__mk("chart", { channel: "A" }); });
+    await attached(B);
+    await B.evaluate(() => window.__frame());
+    eq(await lit(B, ["table", "chart"]), { table: "NVDA", chart: "NVDA" }, "THE POPPED-OUT WINDOW STARTS ON THE SELECTION it was opened with");
+
+    const keys = (p) => p.evaluate(() => JSON.stringify({ l: Object.keys(localStorage), s: Object.keys(sessionStorage), c: document.cookie }));
+    const keysA = await keys(A), keysB = await keys(B);
+    await B.evaluate(() => { window.__msgAt.length = 0; window.__litAt.length = 0; });
+    await A.evaluate(() => { window.FlowsUI.link.emit("table", { kind: "ticker", value: "AMD", source: "table" }); });
+    await B.waitForFunction(() => document.getElementById("chart").dataset.lit === "AMD", null, { timeout: 5000 });
+    const lat = await B.evaluate(() => ({ msg: window.__msgAt.slice(), lit: window.__litAt.slice(), table: document.getElementById("table").dataset.lit }));
+    eq(lat.msg.length, 1, "A SELECTION IN ONE WINDOW reaches the other as one message");
+    ok(lat.lit.length >= 1 && lat.lit[0] - lat.msg[0] <= 1, `and sets data-lit there within one frame of arriving (message in frame ${lat.msg[0]}, lit in frame ${lat.lit[0]})`);
+    eq(lat.table, "AMD", "in every view of the other window, including the one that shares the emitter's name");
+    eq(await A.evaluate(() => document.getElementById("chart").dataset.lit), "AMD", "and the emitting window lit its own other view as before");
+
+    await A.evaluate(() => { window.__msgCount = 0; new BroadcastChannel("flows-link:" + location.hash.match(/w=([0-9a-f]+)/)[1]).onmessage = () => { window.__msgCount++; }; });
+    await B.evaluate(() => { window.FlowsUI.link.emit("chart", { kind: "sector", value: "XLK", source: "chart" }); window.FlowsUI.link.cursor({ tau: "2026-10-05T14:41:00Z", clock: "event" }); });
+    await A.waitForFunction(() => document.getElementById("table").dataset.lit === "XLK", null, { timeout: 5000 });
+    await A.waitForTimeout(150);
+    const back = await A.evaluate(() => ({ count: window.__msgCount, cur: window.FlowsUI.link.cursor(), hash: location.hash }));
+    eq(back.count, 1, "the reply travels once and is not echoed back and forth between the windows");
+    eq(back.cur, { tau: "2026-10-05T14:41:00.000Z", clock: "event" }, "the time cursor crosses with its clock");
+    eq(back.hash, "#l=A:s=XLK;tc=event@2026-10-05T14:41:00Z;w=" + token, "and the first window's own URL follows");
+    await B.evaluate(() => { window.FlowsUI.link.cursor(null); });
+    await A.waitForFunction(() => window.FlowsUI.link.cursor() === null, null, { timeout: 5000 });
+    ok(true, "and cursor(null) travels as well");
+
+    eq([await keys(A), await keys(B)], [keysA, keysB], "NO STORAGE KEY OR COOKIE IS WRITTEN in either window by any of it");
+
+    const C = await win.newPage();
+    C.on("pageerror", (e) => errs.push(String(e)));
+    await C.goto(URL0 + "#l=w=0123456789abcdef");
+    await C.evaluate(() => { window.__mk("table", { channel: "A" }); });
+    await attached(C);
+    await A.evaluate(() => { window.FlowsUI.link.emit("table", { kind: "ticker", value: "TSLA", source: "table" }); });
+    await C.waitForTimeout(250);
+    eq(await lit(C, ["table"]), { table: null }, "a window in another group hears nothing");
+
+    const before = await lit(A, ["table", "chart"]);
+    await C.evaluate((tok) => {
+      const ch = new BroadcastChannel("flows-link:" + tok);
+      const send = (m) => ch.postMessage(m);
+      send({ v: 1, id: "x", s: { A: { kind: "ticker", value: "<b>x</b>", source: "x" } } });
+      send({ v: 2, id: "x", s: { A: { kind: "ticker", value: "FAKE", source: "x" } } });
+      send({ v: 1, id: "x", s: { A: { kind: "constructor", value: "FAKE" } } });
+      send({ v: 1, id: "x", s: { A: { kind: "ticker", value: "FAKE", source: "y".repeat(900) } } });
+      send({ v: 1, id: "x", s: "FAKE" });
+      send({ v: 1, id: "x", s: {}, c: { tau: "nope", clock: "known" } });
+      send({ v: 1, id: "x", s: {}, c: { tau: "2026-10-05T14:41:00Z", clock: "wall" } });
+      send(null);
+      send("FAKE");
+    }, token);
+    await A.waitForTimeout(300);
+    eq(await lit(A, ["table", "chart"]), before, "MESSAGES THAT ARE NOT A VALID SELECTION (bad kind, bad value, wrong version, oversize, a cursor with a bad time or clock, junk) change nothing");
+    await C.evaluate((tok) => {
+      new BroadcastChannel("flows-link:" + tok).postMessage({ v: 1, id: "x", s: { A: { kind: "ticker", value: "ok1", source: "peer" } } });
+    }, token);
+    await A.waitForFunction(() => document.getElementById("table").dataset.lit === "OK1", null, { timeout: 5000 });
+    ok(true, "while a valid one from the same group is taken, value normalised");
+    eq(errs.length, 0, `nothing threw (${errs.join("; ")})`);
+    await win.close();
+  }
+
 } finally {
   await browser.close();
 }

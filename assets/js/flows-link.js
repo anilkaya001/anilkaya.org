@@ -11,6 +11,7 @@
   var CHANNELS = ["A", "B", "C"];
   var CLOCKS = ["known", "event"];
   var SAY_MS = 5000;
+  var MAX_MSG = 600;
 
   function iso(v) {
     var t = typeof v === "number" ? v : typeof v === "string" ? Date.parse(v) : NaN;
@@ -38,9 +39,14 @@
   var cur = null;
   var curBy = null;
   var ctx = { scene: null, mode: null };
+  var group = null;
+  var bc = null;
+  var outbox = {};
   var dirty = false;
   var raf = 0;
   var HASH = {};
+  var REMOTE = {};
+  var WIN = Math.random().toString(36).slice(2, 10);
   var said = { at: 0, text: null, note: null, timer: 0 };
 
   function listens(m, c) { return m.channel === null || m.channel === c; }
@@ -51,7 +57,7 @@
   }
 
   function schedule() {
-    if (raf || !members.length && !dirty) return;
+    if (raf || (!members.length && !dirty && !bc)) return;
     raf = requestAnimationFrame(flush);
   }
 
@@ -108,6 +114,9 @@
     });
     if (lit) say("Linked views follow " + lit + ".");
     if (dirty) { dirty = false; writeHash(); }
+    var sent = Object.keys(outbox);
+    if (sent.length && bc) post(outbox);
+    outbox = {};
   }
 
   function hashOf() {
@@ -117,6 +126,7 @@
       if (s) out.push(c + ":" + KEY[s.kind] + "=" + encodeURIComponent(String(s.value)));
     });
     if (cur) out.push("tc=" + cur.clock + "@" + cur.tau.replace(/\.000Z$/, "Z"));
+    if (group) out.push("w=" + group);
     return out.length ? "l=" + out.join(";") : "";
   }
 
@@ -128,12 +138,13 @@
   }
 
   function parse(h) {
-    var out = { sel: {}, cur: null };
+    var out = { sel: {}, cur: null, w: null };
     var m = /^#l=(.*)$/.exec(h || "");
     if (!m) return out;
     m[1].split(";").forEach(function (p) {
       var a = /^([ABC]):([a-z])=(.+)$/.exec(p);
       var b = /^tc=(known|event)@(.+)$/.exec(p);
+      var w = /^w=([0-9a-f]{8,32})$/.exec(p);
       if (a && own(KIND, a[2])) {
         var v = null;
         try { v = pick(KIND[a[2]], decodeURIComponent(a[3]), "hash"); } catch (e) { v = null; }
@@ -141,7 +152,7 @@
       } else if (b) {
         var t = iso(b[2]);
         if (t) out.cur = { tau: t, clock: b[1] };
-      }
+      } else if (w) out.w = w[1];
     });
     return out;
   }
@@ -160,6 +171,47 @@
       curBy = HASH;
       markCursor();
     }
+    if (p.w && p.w !== group) { group = p.w; open(); }
+    schedule();
+  }
+
+  function open() {
+    if (bc || !group || typeof BroadcastChannel !== "function") return;
+    try { bc = new BroadcastChannel("flows-link:" + group); } catch (e) { bc = null; return; }
+    bc.onmessage = function (ev) { heard(ev && ev.data); };
+  }
+
+  function post(box) {
+    var msg = { v: 1, id: WIN, s: {}, c: undefined };
+    CHANNELS.forEach(function (c) {
+      if (c in box) msg.s[c] = box[c] ? { kind: box[c].kind, value: box[c].value, source: box[c].source } : null;
+    });
+    if ("tc" in box) msg.c = box.tc ? { tau: box.tc.tau, clock: box.tc.clock } : null;
+    try { bc.postMessage(msg); } catch (e) { return; }
+  }
+
+  function heard(msg) {
+    if (!msg || typeof msg !== "object" || msg.v !== 1 || msg.id === WIN || !msg.s || typeof msg.s !== "object") return;
+    var size = 0;
+    try { size = JSON.stringify(msg).length; } catch (e) { return; }
+    if (size > MAX_MSG) return;
+    CHANNELS.forEach(function (c) {
+      if (!(c in msg.s)) return;
+      var s = msg.s[c];
+      var v = s && typeof s === "object" ? pick(s.kind, s.value, s.source) : null;
+      if (s !== null && !v) return;
+      sel[c] = v ? { kind: v.kind, value: v.value, source: v.source, owner: REMOTE } : null;
+      mark(c);
+    });
+    if (msg.c !== undefined) {
+      var t = msg.c && typeof msg.c === "object" && CLOCKS.indexOf(msg.c.clock) >= 0 ? iso(msg.c.tau) : null;
+      if (msg.c === null || t) {
+        cur = t ? { tau: t, clock: msg.c.clock } : null;
+        curBy = REMOTE;
+        markCursor();
+      }
+    }
+    dirty = true;
     schedule();
   }
 
@@ -192,6 +244,7 @@
     if (!v) return false;
     var c = chanOf(owner);
     sel[c] = { kind: v.kind, value: v.value, source: v.source, owner: owner };
+    outbox[c] = sel[c];
     dirty = true;
     mark(c);
     schedule();
@@ -204,6 +257,7 @@
     if (next !== null && !t) return cur ? { tau: cur.tau, clock: cur.clock } : null;
     cur = t ? { tau: t, clock: next.clock } : null;
     curBy = by === undefined ? null : by;
+    outbox.tc = cur;
     dirty = true;
     markCursor();
     schedule();
@@ -227,9 +281,22 @@
     return o;
   }
 
+  function popout(path) {
+    if (typeof path !== "string" || path.charAt(0) !== "/" || path.charAt(1) === "/" || path.length > 200) return null;
+    if (!group) {
+      var b = new Uint8Array(8);
+      crypto.getRandomValues(b);
+      group = Array.prototype.map.call(b, function (x) { return ("0" + x.toString(16)).slice(-2); }).join("");
+    }
+    open();
+    writeHash();
+    window.open(path + "#" + hashOf(), "_blank", "noopener");
+    return group;
+  }
+
   window.addEventListener("hashchange", function () { take(parse(location.hash)); });
   take(parse(location.hash));
 
-  var api = { join: join, emit: emit, cursor: cursor, context: context, describe: describe };
+  var api = { join: join, emit: emit, cursor: cursor, context: context, describe: describe, popout: popout };
   L.attach(api);
 })();
