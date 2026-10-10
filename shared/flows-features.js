@@ -1,3 +1,5 @@
+import { median as statsMedian, quantile as statsQuantile, pearson as statsPearson, percentileRank } from "./flows-stats.js";
+
 export function num(value, fallback = 0) {
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
   if (typeof value !== "string" || value.trim() === "") return fallback;
@@ -7,21 +9,21 @@ export function num(value, fallback = 0) {
 
 const finite = (xs) => xs.filter((x) => Number.isFinite(x));
 
+export { percentileRank };
+
 export function median(values) {
-  const xs = finite(values).slice().sort((a, b) => a - b);
-  if (!xs.length) return NaN;
-  const mid = xs.length >> 1;
-  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+  const m = statsMedian(values);
+  return m === null ? NaN : m;
 }
 
 export function quantile(values, p) {
-  const xs = finite(values).slice().sort((a, b) => a - b);
-  if (!xs.length) return NaN;
-  if (xs.length === 1) return xs[0];
-  const h = (xs.length - 1) * Math.min(Math.max(p, 0), 1);
-  const lo = Math.floor(h);
-  const hi = Math.ceil(h);
-  return xs[lo] + (h - lo) * (xs[hi] - xs[lo]);
+  const q = statsQuantile(values, p);
+  return q === null ? NaN : q;
+}
+
+export function pearson(a, b) {
+  const r = statsPearson(a, b, { min: 2 });
+  return r === null ? NaN : r;
 }
 
 export function mad(values, center) {
@@ -738,26 +740,6 @@ export function crossFamilyRedundancy(familyColumns) {
   return out;
 }
 
-export function pearson(a, b) {
-  const n = Math.min(a.length, b.length);
-  if (n < 2) return NaN;
-  let sa = 0, sb = 0, m = 0;
-  for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(a[i]) || !Number.isFinite(b[i])) continue;
-    sa += a[i]; sb += b[i]; m++;
-  }
-  if (m < 2) return NaN;
-  const ma = sa / m, mb = sb / m;
-  let num_ = 0, da = 0, db = 0;
-  for (let i = 0; i < n; i++) {
-    if (!Number.isFinite(a[i]) || !Number.isFinite(b[i])) continue;
-    const x = a[i] - ma, y = b[i] - mb;
-    num_ += x * y; da += x * x; db += y * y;
-  }
-  if (da <= 0 || db <= 0) return NaN;
-  return num_ / Math.sqrt(da * db);
-}
-
 export function calibrateScoreScale(zs, { refQuantile = 0.95, refScore = 80 } = {}) {
   const ref = quantile(zs.map(Math.abs), refQuantile);
   const target = Math.min(Math.max(refScore, 1), 99) / 100;
@@ -766,27 +748,6 @@ export function calibrateScoreScale(zs, { refQuantile = 0.95, refScore = 80 } = 
 }
 
 export const SCORE_SCALE = Math.atanh(0.80) / 2.0;
-
-export function percentileRank(values) {
-  const xs = values || [];
-  const idx = [];
-  for (let i = 0; i < xs.length; i++) if (Number.isFinite(xs[i])) idx.push(i);
-  const m = idx.length;
-  const out = xs.map(() => null);
-  if (!m) return out;
-  if (m === 1) { out[idx[0]] = 0.5; return out; }
-
-  idx.sort((a, b) => xs[a] - xs[b]);
-  let i = 0;
-  while (i < m) {
-    let j = i;
-    while (j + 1 < m && xs[idx[j + 1]] === xs[idx[i]]) j++;
-    const avgRank = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k++) out[idx[k]] = avgRank / (m + 1);
-    i = j + 1;
-  }
-  return out;
-}
 
 export function qualityGate(axes, { floor = 0.2 } = {}) {
   const cols = axes || [];

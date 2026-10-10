@@ -131,4 +131,24 @@ for (const e of FX.effectiveN) near(S.effectiveN(e), e.want, 1e-12, "effectiveN"
   }
 }
 
+{
+  const FEATURES = await import("../shared/flows-features.js");
+  eq(FEATURES.percentileRank, S.percentileRank, "flows-features serves percentileRank from the leaf");
+  const feat = moduleSource("shared/flows-features.js");
+  expect(feat, /from "\.\/flows-stats\.js"/, { min: 1, max: 1, why: "flows-features takes its statistics from the leaf" });
+  for (const name of ["median", "quantile", "pearson", "percentileRank"]) {
+    absent(feat, new RegExp("^function " + name + "\\b|^export function " + name + "\\(.*\\) \\{\\n  (?:const xs|const n|const idx)", "m"), { anchor: "from \"./flows-stats.js\"", why: "flows-features keeps no copy of " + name });
+  }
+  ok(Number.isNaN(FEATURES.median([])) && Number.isNaN(FEATURES.median([NaN, null])), "flows-features keeps its NaN contract for an empty median");
+  ok(Number.isNaN(FEATURES.quantile([], 0.5)) && FEATURES.quantile([4], 0.2) === 4, "and for an empty quantile");
+  ok(Number.isNaN(FEATURES.pearson([1], [2])) && Number.isNaN(FEATURES.pearson([1, 1], [1, 2])), "and for a correlation of fewer than two pairs or of a constant");
+  near(FEATURES.pearson([1, 2], [2, 4]), 1, 1e-15, "a two-pair correlation is still computed there (the floor is two)");
+  for (const r of FX.location) {
+    near(FEATURES.median(r.x), r.median, 1e-12, "flows-features median");
+    for (const [p, want] of Object.entries(r.q)) near(FEATURES.quantile(r.x, Number(p)), want, 1e-12, `flows-features quantile ${p}`);
+  }
+  for (const r of FX.correlation) near(FEATURES.pearson(r.x, r.y), r.pearson, 1e-10, "flows-features pearson");
+  for (const r of FX.rank) FEATURES.percentileRank(r.x).forEach((v, i) => near(v, r.pct[i], 1e-12, "flows-features percentileRank"));
+}
+
 console.log(`✓ flows-stats: ${checks} assertions — the statistics leaf against scipy, numpy and statsmodels references (median and quantiles, average ranks, Pearson and Spearman, Wilson, the t quantile and mean interval, Newey-West, a seeded stationary bootstrap reproduced in Python, Brier, log score and the Murphy decomposition, Benjamini-Hochberg), its edge cases, and the consumers that take their statistics from it`);
