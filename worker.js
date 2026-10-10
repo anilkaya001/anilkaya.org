@@ -38,10 +38,12 @@ import { createRouter } from "./server/router.js";
 import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
+import { flowsIngestRows } from "./server/routes/flows-ingest.js";
+import { applySchema } from "./server/schema.js";
+import { createFlowsStore, storedFrom } from "./server/store.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
-import { archiveWriteAction, ARCHIVE_REFUSALS } from "./shared/flows-archive.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS } from "./shared/flows-rt.js";
@@ -152,19 +154,6 @@ const ATTEMPT_LEDGER_TTL_MS = 48 * 60 * 60 * 1000;
 
 const MARKET_SNAPSHOT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
-
-const FLOWS_SCHEMA_SQL = [
-  "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0))",
-  "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))",
-
-  "CREATE TABLE IF NOT EXISTS flows_ai_usage (day TEXT PRIMARY KEY, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0))",
-  "CREATE TABLE IF NOT EXISTS flows_ai_usage_model (day TEXT NOT NULL, model TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0 CHECK (calls >= 0), tokens_in INTEGER NOT NULL DEFAULT 0 CHECK (tokens_in >= 0), tokens_out INTEGER NOT NULL DEFAULT 0 CHECK (tokens_out >= 0), PRIMARY KEY (day, model))",
-
-  "CREATE TABLE IF NOT EXISTS flows_ai_summary (scope TEXT PRIMARY KEY, text TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, fingerprint TEXT NOT NULL, guard TEXT, generated_at TEXT NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS flows_neuron (scope TEXT PRIMARY KEY, version INTEGER NOT NULL, fingerprint TEXT NOT NULL, summary TEXT NOT NULL, ideas TEXT NOT NULL, llm INTEGER NOT NULL DEFAULT 0 CHECK (llm IN (0, 1)), model TEXT, guard TEXT, generated_at TEXT NOT NULL)",
-  ...FLOWS_LIVE.LIVE_SCHEMA_SQL,
-  FLOWS_DOSSIER.DOSSIER_SCHEMA_SQL,
-];
 
 const MARKET_FETCH_TIMEOUT_MS = 5000;
 const YAHOO_ORIGINS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"];
@@ -834,80 +823,8 @@ function flowsLoginResponse(message) {
   });
 }
 
-const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE.FLOWS_MAX_PAYLOAD_BYTES;
-
-function timingSafeEqualStr(a, b) {
-  const x = String(a ?? ""), y = String(b ?? "");
-  const n = Math.max(x.length, y.length);
-  let diff = x.length ^ y.length;
-  for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
-  return diff === 0;
-}
-
-const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
-
-const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^focus$|^roster$/;
-
-function ingestKeyParts(key) {
-  const tickerKey = /^(card|card-x|hist):/.exec(key);
-  const card = tickerKey ? key.slice(tickerKey[0].length) : null;
-  return { tickerKey, valid: card !== null ? TICKER_RE.test(card) : INGEST_VIEW_KEY_RE.test(key) };
-}
-
-const INGEST_META_KEYS_MAX = 96;
-
-const INGEST_META_SQL =
-  "SELECT id, updated_at, length(payload) AS bytes, json_extract(payload, '$.sessionDate') AS session, " +
-  "json_extract(payload, '$.generatedAt') AS generated, json_extract(payload, '$.status') AS status " +
-  "FROM flows_payload WHERE id IN (";
-
-const INGEST_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);
-const INGEST_LIST_MAX = 2000;
-
-function ingestListSql(kinds) {
-  return "SELECT id, updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
-    "json_extract(payload, '$.status') AS status FROM flows_payload WHERE " +
-    kinds.map((k) => `(id >= '${k}:' AND id < '${k};')`).join(" OR ") + ` LIMIT ${INGEST_LIST_MAX + 1}`;
-}
-
-function ingestListing(rows) {
-  const keys = {};
-  let n = 0;
-  for (const r of rows.slice(0, INGEST_LIST_MAX)) {
-    if (!ingestKeyParts(r.id).valid || r.status === "pending") continue;
-    keys[r.id] = { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
-      generatedAt: typeof r.generated === "string" ? r.generated : null, updatedAt: Number(r.updated_at) || 0 };
-    n++;
-  }
-  return { keys, listed: n, truncated: rows.length > INGEST_LIST_MAX };
-}
-
-function ingestMetadata(asked, rows) {
-  const byId = new Map((rows || []).map((r) => [r.id, r]));
-  const keys = {};
-  for (const key of asked) {
-    const r = byId.get(key);
-    keys[key] = r && r.status !== "pending"
-      ? { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
-          generatedAt: typeof r.generated === "string" ? r.generated : null,
-          updatedAt: Number(r.updated_at) || 0, bytes: Number(r.bytes) || 0 }
-      : { present: false };
-  }
-  return keys;
-}
-
-const storedFrom = (row) => (row && row.payload
-  ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
-  : null);
-
-async function readFlowsPayload(env, key, trace) {
-
-  if (!env.DB) { if (trace) trace.failed = true; return null; }
-  await ensureFlowsTables(env);
-  const row = await env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind(key).first()
-    .catch(() => { if (trace) trace.failed = true; return null; });
-  return storedFrom(row);
-}
+const FLOWS_STORE = createFlowsStore({ ensureFlowsTables: (env) => ensureFlowsTables(env) });
+const readFlowsPayload = (env, key, trace) => FLOWS_STORE.read(env, key, trace);
 
 function nightlyFreshHeaders(stored) {
   if (!stored || !stored.fresh) return {};
@@ -2588,8 +2505,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
 function startFlowsSchemaFlight(env) {
   const flight = (async () => {
     try {
-      const results = await env.DB.batch([...FLOWS_SCHEMA_SQL, FLOWS_LIVE.CLOCK_COLUMNS_SQL].map((sql) => env.DB.prepare(sql)));
-      await FLOWS_LIVE.upgradeClockColumns(env.DB, results && results[FLOWS_SCHEMA_SQL.length]);
+      await applySchema(env.DB);
       state.flowsSchemaReady = true;
     } catch (error) {
       logFailure("warn", "flows schema bootstrap failed", {}, error);
@@ -2776,7 +2692,8 @@ const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWi
   absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
-  readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }));
+  readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
+flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
@@ -3468,153 +3385,6 @@ async function route(request, env, url, ctx) {
       || path === "/flows/strategy" || path === "/flows/ask") {
     requireMethod(request, ["GET", "HEAD"]);
     return redirect(new URL(path + "/", url).toString(), 308);
-  }
-
-  if (path === "/api/flows/ingest") {
-
-    requireMethod(request, ["GET", "POST", "DELETE"]);
-    const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-    const oidc = FLOWS_LIVE.looksLikeJwt(offered);
-    if (!env.FLOWS_INGEST_TOKEN && !FLOWS_LIVE.staticLiveToken(env, url) && !oidc) {
-      throw new HttpError(503, "unavailable", "Ingest is not configured");
-    }
-
-    let tokenKind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqualStr, url);
-    if (!tokenKind && oidc) {
-      const check = await FLOWS_LIVE.oidcKind(offered, env);
-      if (check.unavailable) {
-        throw new HttpError(503, "unavailable", "The live credential's signing keys could not be read; retry shortly");
-      }
-      tokenKind = check.kind;
-    }
-    if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
-
-    if (url.searchParams.has("list")) {
-      requireMethod(request, ["GET"]);
-      if (tokenKind !== "nightly") {
-        throw new HttpError(403, "live_token_scope", "The live token reads one key at a time");
-      }
-      const kinds = [...new Set(url.searchParams.get("list").split(",").map((k) => k.trim()).filter(Boolean))];
-      if (!kinds.length || kinds.some((k) => !INGEST_LIST_KINDS.includes(k))) throw new HttpError(400, "invalid_key", "Unknown payload key");
-      if (!env.DB) throw storeGone();
-      await ensureFlowsTables(env);
-      const rows = await env.DB.prepare(ingestListSql(kinds)).all().catch(() => null);
-      if (!rows) throw storeGone();
-      return json(ingestListing(rows.results || []));
-    }
-
-    if (url.searchParams.has("keys")) {
-      requireMethod(request, ["GET"]);
-      if (tokenKind !== "nightly") {
-        throw new HttpError(403, "live_token_scope", "The live token reads one key at a time");
-      }
-      const asked = [...new Set(url.searchParams.get("keys").split(",").map((k) => k.trim()).filter(Boolean))];
-      if (!asked.length) throw new HttpError(400, "invalid_key", "Unknown payload key");
-      if (asked.length > INGEST_META_KEYS_MAX) {
-        throw new HttpError(400, "too_many_keys", `At most ${INGEST_META_KEYS_MAX} keys per request`);
-      }
-      if (asked.some((k) => !ingestKeyParts(k).valid)) throw new HttpError(400, "invalid_key", "Unknown payload key");
-      if (!env.DB) throw storeGone();
-      await ensureFlowsTables(env);
-      const rows = await env.DB.prepare(INGEST_META_SQL + asked.map(() => "?").join(", ") + ")").bind(...asked).all()
-        .catch(() => null);
-      if (!rows) throw storeGone();
-      return json({ keys: ingestMetadata(asked, rows.results) });
-    }
-
-    const key = url.searchParams.get("key") || "";
-
-    if (key === "clock") {
-      requireMethod(request, ["GET"]);
-      await ensureFlowsTables(env);
-      return FLOWS_LIVE.serveIngestClock(env, { json, lab: tokenKind === "nightly" });
-    }
-
-    if (key.startsWith("live:")) {
-      const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
-      if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);
-      await ensureFlowsTables(env);
-      const text = request.method === "POST"
-        ? new TextDecoder().decode(await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"))
-        : "";
-      return FLOWS_LIVE.ingestLive(env, key, request.method, text, Date.now(), { json });
-    }
-
-    const { tickerKey, valid: validKey } = ingestKeyParts(key);
-    if (!validKey) {
-      throw new HttpError(400, "invalid_key", "Unknown payload key");
-    }
-
-    const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
-    if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);
-
-    if (request.method === "GET") {
-      const stored = await readFlowsPayload(env, key);
-      if (!stored) return json({ key, status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (request.method === "DELETE") {
-      if (!DATED_ARCHIVE_KEY_RE.test(key) && !(tickerKey && tokenKind === "nightly")) {
-        throw new HttpError(400, "undeletable_key", "Only dated archive keys and, for the nightly token, card, card-x and hist keys can be removed");
-      }
-      await ensureFlowsTables(env);
-      const result = await env.DB.prepare(
-        "DELETE FROM flows_payload WHERE id = ?"
-      ).bind(key).run();
-      const removed = result && result.meta ? Number(result.meta.changes) || 0 : 0;
-      if (!removed) return json({ key, removed: 0, status: "absent" }, 404);
-      return json({ ok: true, key, removed });
-    }
-
-    const payload = new TextDecoder().decode(
-      await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"),
-    );
-
-    try { JSON.parse(payload); }
-    catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
-
-    await ensureFlowsTables(env);
-
-    if (DATED_ARCHIVE_KEY_RE.test(key)) {
-      const trace = {};
-      const existing = await readFlowsPayload(env, key, trace);
-      const action = archiveWriteAction({
-        readable: !trace.failed,
-        exists: !!existing,
-        same: !!existing && existing.payload === payload,
-      });
-      if (action === "unchanged") {
-
-        return json({ ok: true, key, bytes: payload.length, stored: "unchanged" });
-      }
-      if (action !== "write") {
-        const refusal = ARCHIVE_REFUSALS[action];
-        throw new HttpError(refusal.status, refusal.code, refusal.message);
-      }
-
-      const written = await env.DB.prepare(
-        "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
-        "ON CONFLICT(id) DO NOTHING"
-      ).bind(key, payload, Date.now()).run();
-      const rows = written && written.meta ? Number(written.meta.changes) || 0 : 0;
-      if (!rows) {
-        const refusal = ARCHIVE_REFUSALS.refuse_raced;
-        throw new HttpError(refusal.status, refusal.code, refusal.message);
-      }
-      return json({ ok: true, key, bytes: payload.length, stored: "created" });
-    }
-
-    const wroteAt = Date.now();
-    const upsert = env.DB.prepare(
-      "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
-      "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
-    ).bind(key, payload, wroteAt);
-    const landing = key === "meta" ? FLOWS_LIVE.nightlyLedger(env.DB, JSON.parse(payload), wroteAt) : null;
-    if (landing) await FLOWS_LIVE.batchWithLedger(env.DB, [upsert], landing);
-    else await upsert.run();
-
-    return json({ ok: true, key, bytes: payload.length });
   }
 
   if (path.startsWith("/api/flows/")) {

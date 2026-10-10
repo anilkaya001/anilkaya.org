@@ -7,7 +7,7 @@ import {
 } from "../shared/flows-alerts.js";
 import { briefAlertsFact } from "../shared/flows-brief.js";
 import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
-import { workerSource, slice, expect, absent } from "./lib/source-scan.mjs";
+import { workerSource, slice, expect, absent, closure, moduleSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -508,10 +508,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "ONE WRITER PER KEY: the Worker's cron no longer rewrites the nightly flowalerts, pulse or brief " +
     "rows. Two writers on one key is how the 2026-09-22 morning union was lost");
   const inserts = expect(worker, "INSERT INTO flows_payload", { min: 1, why: "the nightly's rows are written somewhere in the Worker" });
-  const ingest = slice(worker, 'if (path === "/api/flows/ingest")', 'if (path.startsWith("/api/flows/"))');
-  eq(ingest.split("INSERT INTO flows_payload").length - 1, inserts,
-    "and every write to flows_payload in worker.js is inside the ingest route, whose only caller is the " +
-    "nightly token — the live layer writes flows_live and nothing else");
+  eq(moduleSource("server/store.js").split("INSERT INTO flows_payload").length - 1, inserts,
+    "and every write to flows_payload in the Worker's closure is in server/store.js, the one module that holds the store's SQL");
+  const writers = closure("worker.js").filter((file) => /\bstore\.(createArchive|write|remove)\(/.test(moduleSource(file)));
+  deep(writers, ["server/routes/flows-ingest.js"],
+    "and the only caller of those writes is the ingest route, whose only caller is the nightly token — the live layer writes flows_live and nothing else");
 }
 
 {

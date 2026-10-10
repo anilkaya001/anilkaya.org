@@ -42,31 +42,6 @@ export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["summary_at", "INTEGER"]),
 ]);
 
-export const CLOCK_COLUMNS_SQL = "PRAGMA table_info(flows_clock)";
-
-export async function upgradeClockColumns(db, known = null) {
-  if (!db) return [];
-  let have = new Set();
-  try {
-    const info = known && Array.isArray(known.results) ? known : await db.prepare(CLOCK_COLUMNS_SQL).all();
-    have = new Set(((info && info.results) || []).map((r) => r && r.name));
-  } catch {
-    have = new Set();
-  }
-  const added = [];
-  for (const [column, type] of CLOCK_ADDED_COLUMNS) {
-    if (have.has(column)) continue;
-    try {
-      await db.prepare(`ALTER TABLE flows_clock ADD COLUMN ${column} ${type}`).run();
-      added.push(column);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/duplicate column/i.test(message)) throw error;
-    }
-  }
-  return added;
-}
-
 export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
 export const FOCUS_CRON = "3-58/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";

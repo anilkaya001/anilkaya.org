@@ -22,6 +22,8 @@ export const LEDGER_SCHEMA_SQL =
   "stale_ticks INTEGER NOT NULL DEFAULT 0, stale_over_s INTEGER, stale_key TEXT, " +
   "nightly_at INTEGER, nightly_runs INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)";
 
+export const LEDGER_ADDED_COLUMNS = Object.freeze([]);
+
 const int = (v) => Math.round(Number(v));
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 const count = (v, max = 100000) => (Number.isFinite(Number(v)) ? clamp(Math.trunc(Number(v)), 0, max) : 0);

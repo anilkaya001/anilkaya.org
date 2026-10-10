@@ -11,6 +11,7 @@ import {
 } from "../shared/flows-freshness.js";
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
+import { upgradeColumns, applySchema, FLOWS_REGISTRY, FLOWS_SCHEMA_SQL as REGISTRY_SQL, columnProbe } from "../server/schema.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
@@ -25,7 +26,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import * as O from "../shared/flows-oidc.js";
 import { oidcIssuer, tickDb, tier1Bodies, focusDb, focusGroupsSample, productionScreenerBody } from "./live-stubs.mjs";
-import { workerSource, closure, slice, where, absent, expect } from "./lib/source-scan.mjs";
+import { workerSource, closure, importEdges, slice, where, absent, expect, moduleSource } from "./lib/source-scan.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, ROOT), "utf8");
@@ -1456,8 +1457,8 @@ const cronMinutes = (cron) => {
   deep([hostile.kind, hostile.unavailable, hits], [null, true, 0], "and any other override fetches nothing and grants nothing");
   eq(logs.pop().jwks, "bad-override", "saying why");
 
-  const ingestRoute = slice(workerSource(), 'if (path === "/api/flows/ingest")');
-  ok(/if \(check\.unavailable\) \{\s*throw new HttpError\(503,/.test(ingestRoute.slice(0, 1500)),
+  const ingestRoute = moduleSource("server/routes/flows-ingest.js");
+  ok(/if \(check\.unavailable\) \{\s*throw new HttpError\(503,/.test(ingestRoute.slice(0, 2500)),
     "the ingest route answers a key-set outage with 503, which the pipeline retries, rather than a 401 it gives up on");
   const spy = { imports: 0, importKey: (...a) => { spy.imports++; return crypto.subtle.importKey(...a); },
     verify: (...a) => crypto.subtle.verify(...a) };
@@ -1733,35 +1734,39 @@ const cronMinutes = (cron) => {
       };
     },
   });
+  const CLOCK = (db, known) => upgradeColumns(db, "flows_clock", W.CLOCK_ADDED_COLUMNS, known);
   const later = ["closed_probe_at", "closed_days", "dispatch_why", "summary_at"];
-  deep(await W.upgradeClockColumns(fakeDb(["id", "day", "tier1_at", "closed_days"])),
+  deep(await CLOCK(fakeDb(["id", "day", "tier1_at", "closed_days"])),
     ["tier1_ok_at", "tier1_why", "closed_probe_at", "dispatch_why", "summary_at"],
     "THE PRODUCTION TABLE UPGRADES ITSELF: the first-use path adds only the columns flows_clock lacks");
   deep(upgrades, ["ALTER TABLE flows_clock ADD COLUMN tier1_ok_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN tier1_why TEXT",
     "ALTER TABLE flows_clock ADD COLUMN closed_probe_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN dispatch_why TEXT",
     "ALTER TABLE flows_clock ADD COLUMN summary_at INTEGER"],
   "with one ALTER TABLE ADD COLUMN each");
-  deep(await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "duplicate column name: tier1_at"])),
+  deep(await CLOCK(fakeDb(["id"], ["tier1_at", "duplicate column name: tier1_at"])),
     ["tier1_ok_at", "tier1_why", ...later], "a racing isolate that added a column first is tolerated (duplicate column)");
   let threw = false;
-  try { await W.upgradeClockColumns(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
+  try { await CLOCK(fakeDb(["id"], ["tier1_at", "database is locked"])); } catch { threw = true; }
   ok(threw, "while any other failure surfaces, so the schema is not marked ready and the next request retries");
-  ok(/await FLOWS_LIVE\.upgradeClockColumns\(env\.DB, results && results\[FLOWS_SCHEMA_SQL\.length\]\);\s*state\.flowsSchemaReady = true;/.test(workerSource()),
+  ok(/await applySchema\(env\.DB\);\s*state\.flowsSchemaReady = true;/.test(workerSource()),
     "and ensureFlowsTables marks the schema ready only after the upgrade");
-  ok(/env\.DB\.batch\(\[\.\.\.FLOWS_SCHEMA_SQL, FLOWS_LIVE\.CLOCK_COLUMNS_SQL\]/.test(workerSource()) && W.CLOCK_COLUMNS_SQL === "PRAGMA table_info(flows_clock)",
-    "whose column list is read by the PRAGMA riding the schema batch as its last statement, after the CREATE that makes the table");
+  ok(/const results = await db\.batch\(statements\.map/.test(moduleSource("server/schema.js")) &&
+    /const statements = \[\.\.\.registry\.map\(\(entry\) => entry\.ddl\), \.\.\.tables\.map\(columnProbe\)\];/.test(moduleSource("server/schema.js")) &&
+    columnProbe("flows_clock") === "PRAGMA table_info(flows_clock)",
+    "whose column list is read by the PRAGMA riding the schema batch after every CREATE, so the table exists when it is read");
+  eq(REGISTRY_SQL.length, 12, "the registry's batch is the twelve CREATE statements the Worker has always sent");
   let pragmas = 0;
   upgrades.length = 0;
   const counted = (have) => ({ prepare(sql) { return { all: async () => { pragmas++; return { results: have.map((name) => ({ name })) }; },
     run: async () => { upgrades.push(sql); return {}; } }; } });
   const full = ["id", "day", ...W.CLOCK_ADDED_COLUMNS.map(([c]) => c)];
-  deep(await W.upgradeClockColumns(counted(full), { results: full.map((name) => ({ name })) }), [],
+  deep(await CLOCK(counted(full), { results: full.map((name) => ({ name })) }), [],
     "A COLUMN LIST HANDED IN FROM THE SCHEMA BATCH IS TRUSTED: a complete table adds nothing");
   ok(pragmas === 0 && upgrades.length === 0, "and costs no PRAGMA trip of its own and no ALTER");
-  deep(await W.upgradeClockColumns(counted(full), { results: [{ name: "id" }, { name: "day" }] }), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+  deep(await CLOCK(counted(full), { results: [{ name: "id" }, { name: "day" }] }), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
     "an old table named by the handed-in list still gets every missing column");
   eq(pragmas, 0, "from the list it was handed");
-  deep(await W.upgradeClockColumns(counted(["id"]), undefined), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
+  deep(await CLOCK(counted(["id"]), undefined), W.CLOCK_ADDED_COLUMNS.map(([c]) => c),
     "and with no list handed in the function reads the PRAGMA itself, as before");
   eq(pragmas, 1, "in one trip");
 }
@@ -2241,7 +2246,7 @@ const cronMinutes = (cron) => {
     const liveSrc = read("shared/flows-live-worker.js");
     ok(/const body = \{ key: "clock", clock: ingestClockView\(clock\) \};/.test(liveSrc) && /\n    clock: clockView\(clock\),\n/.test(liveSrc),
       "serveIngestClock serves the operations view and serveNow the public one");
-    const ingestSrc = slice(workerSource(), 'if (path === "/api/flows/ingest")', 'if (path.startsWith("/api/flows/"))');
+    const ingestSrc = moduleSource("server/routes/flows-ingest.js");
     expect(ingestSrc, 'if (!tokenKind) throw new HttpError(401', { min: 1, max: 1, why: "the ingest route's credential check" });
     expect(ingestSrc, 'if (key === "clock")', { min: 1, max: 1, why: "the ingest route's clock key" });
     ok(/if \(key === "clock"\) \{\s*requireMethod\(request, \["GET"\]\);\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.serveIngestClock\(env, \{ json, lab: tokenKind === "nightly" \}\);/
