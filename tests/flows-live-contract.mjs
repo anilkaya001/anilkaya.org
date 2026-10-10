@@ -443,6 +443,55 @@ const cronMinutes = (cron) => {
 }
 
 {
+  const S = "2026-09-22";
+  const spec = L.LIVE_KEYS["live:alerts:head"];
+  deep([spec.klass, spec.writer, spec.maxBytes, spec.cadenceS, spec.reads], ["breadth", "actions", 8 * 1024, 900, 0],
+    "live:alerts:head is a breadth-class key with the Actions run as its single writer, capped at 8 KiB, and it costs no vendor read");
+  ok(L.LIVE_KEY_RE.test("live:alerts:head") && L.liveKeyFromParam("alerts:head") === "live:alerts:head" &&
+     L.liveKeyFromParam("alerts") === "live:alerts" && L.liveKeyFromParam("alerts:tail") === null,
+  "it is addressable as k=alerts:head on the live read route beside live:alerts, and a sibling name that is not registered is not a key");
+  const page = (rows) => ({ body: { data: rows, newer_than: S, older_than: "x" }, full: false });
+  const a1 = FAKE.fakeFlowAlerts({ session: S, now: T("2026-09-22T15:00:00Z"), count: 60, seed: "head" });
+  const merged = L.mergeLiveAlerts(null, [page(a1.data)], { at: T("2026-09-22T15:00:00Z"), session: S, writer: "run-1" });
+  const alerts = merged.write;
+  const head = L.shapeAlertsHead(alerts, { writer: "run-1" });
+  eq(head.key, "live:alerts:head", "the head is built from the merged live:alerts record");
+  ok(head.rows.length === L.LIVE_BUDGET.alertsHeadRows && head.cap === 20,
+    `it holds the top ${L.LIVE_BUDGET.alertsHeadRows} windows`);
+  const byPrem = alerts.rows.filter((r) => typeof r.prem === "number").sort((x, y) => y.prem - x.prem);
+  deep(head.rows.map((r) => r.prem), byPrem.slice(0, 20).map((r) => r.prem), "ranked by premium, largest first, the same windows the record ranks first");
+  ok(head.rows.every((r, i) => i === 0 || head.rows[i - 1].prem >= r.prem), "in non-increasing order");
+  deep([head.seen, head.shed], [byPrem.length, byPrem.length - 20], "and it says how many windows the record held and how many it left out");
+  eq(head.premium, byPrem.reduce((a, r) => a + r.prem, 0), "with the premium of every window the record held");
+  deep(Object.keys(head.rows[0]).sort(), ["askPrem", "bidPrem", "cp", "exp", "firstAt", "k", "oc", "opening", "prem", "px", "size", "sweep", "t", "trades"],
+    "each window carries facts only: contract, premium, the ask and bid premium inside it, size, trades, two vendor flags, spot and when it was first read");
+  deep(head.fresh, { ...alerts.fresh, source: "actions", cadenceS: 900, writer: "run-1" },
+    "THE HEAD IS STAMPED WITH THE ALERTS' OWN READ: same readAt, vendor cursor and session, so it describes the read it was built from and no later one");
+  ok(JSON.stringify(head).length <= spec.maxBytes, `the head is ${JSON.stringify(head).length} bytes inside its ${spec.maxBytes}-byte cap`);
+  ok(L.checkLiveWrite("live:alerts:head", head, { source: "actions" }).ok, "the ingest accepts it from the Actions run");
+  eq(L.checkLiveWrite("live:alerts:head", head, { source: "worker" }).code, "wrong_writer", "and refuses it from any other writer");
+  eq(L.checkLiveWrite("live:alerts:head", { ...head, fresh: { ...head.fresh, cadenceS: 300 } }, { source: "actions" }).code, "invalid_fresh",
+    "or with another class's cadence");
+
+  const fat = { ...alerts, rows: alerts.rows.map((r, i) => ({ ...r, oc: "X".repeat(900) + i, t: "T" + i })) };
+  const big = L.shapeAlertsHead(fat, { writer: "run-1" });
+  ok(JSON.stringify(big).length <= spec.maxBytes && big.rows.length > 0 && big.rows.length < 20,
+    `THE BYTE CEILING HOLDS: windows with 900-character contract names trim the head to ${big.rows.length} rows rather than exceed ${spec.maxBytes} bytes`);
+  eq(big.shed, big.seen - big.rows.length, "and the trim is counted in shed");
+  ok(big.rows.every((r, i) => i === 0 || big.rows[i - 1].prem >= r.prem), "from the smallest premium up, never the largest");
+
+  const mixed = L.shapeAlertsHead({ ...alerts, rows: [{ t: "AAA", prem: null }, { t: "BBB", prem: 5 }, null, { prem: 9 }, { t: "CCC", prem: 5 }] });
+  deep(mixed.rows.map((r) => r.t), ["BBB", "CCC"], "a window with no premium, a null and a row with no ticker are not ranked, and equal premiums fall back to ticker order");
+  const quiet = L.shapeAlertsHead({ ...alerts, rows: [] });
+  deep([quiet.status, quiet.rows.length, quiet.seen, quiet.shed], ["quiet", 0, 0, 0], "an empty record is a quiet head, not a missing one");
+  eq(L.shapeAlertsHead(null), null, "no record builds nothing");
+  eq(L.shapeAlertsHead({ rows: [] }), null, "nor does one with no fresh envelope");
+  eq(L.shapeAlertsHead({ fresh: alerts.fresh }), null, "nor one with no rows list");
+  eq(L.shapeAlertsHead({ ...alerts, vendorTruncated: true }).truncated, true, "the vendor's truncation flag travels with the head");
+  eq(head.truncated, false, "and is false when the read was whole");
+}
+
+{
   const pulse = { v: 2, sessionDate: "2026-09-22", readAt: "2026-09-22T21:40:00Z", refreshed: "nightly",
     cadenceMinutes: 15, tide: { status: "ok", points: [] }, totals: { status: "ok", rows: [1] } };
   const market = L.shapeMarketLive({ tide: FAKE.fakeMarketTide({ session: "2026-09-23", now: T("2026-09-23T15:00:00Z") }) },
@@ -711,7 +760,7 @@ const cronMinutes = (cron) => {
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
   deep([...puts].sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(), "the live leg puts exactly the registry's Actions keys");
-  ok(puts.length === 8 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  ok(puts.length === 9 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
   ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
@@ -1035,8 +1084,8 @@ const cronMinutes = (cron) => {
         `${key} carries the fresh envelope of the Actions writer`);
       ok(text.length <= L.LIVE_KEYS[key].maxBytes, `${key} (${text.length} bytes) is inside its cap`);
     }
-    deep(keys.sort(), ["live:alerts", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
-      "and that is eight keys: live:gex and live:tape are no longer written");
+    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
+      "and that is nine keys: live:alerts:head is the ninth, and live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
     ok(calls.length === 2 && calls.every((c) => c <= 24),
       `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
@@ -1074,7 +1123,7 @@ const cronMinutes = (cron) => {
       "silently ignored and the read is not the window it claims");
     const retired = uw.calls.filter((c) => /spot-exposures|total-options-volume|top-net-impact|darkpool\/recent/.test(c.path));
     deep(retired, [], "TIER 2 MAKES NO READ FOR A RETIRED KEY: no spot-exposures, total-options-volume, top-net-impact or darkpool/recent call, every call is one a reader sees");
-    ok(uw.calls.length >= 20 && uw.calls.length <= 24, `a pass spends ${uw.calls.length} vendor calls: the 20-24 the live registry's eight keys need, down from 37-41`);
+    ok(uw.calls.length >= 20 && uw.calls.length <= 24, `a pass spends ${uw.calls.length} vendor calls: the 20-24 the live registry's nine keys need, down from 37-41`);
   }
 
   {
@@ -1108,6 +1157,13 @@ const cronMinutes = (cron) => {
     }
     ok(readAt("live:alerts") >= last(flows) && readAt("live:alerts") <= first(news),
       "live:alerts is stamped after its last page and before the news read");
+    eq(readAt("live:alerts:head"), readAt("live:alerts"),
+      "and live:alerts:head carries the alerts' own read time: it is the same read, not a second one");
+    ok(published["live:alerts:head"].rows.length > 0 &&
+       published["live:alerts:head"].rows.every((r) => published["live:alerts"].rows.some((a) => a.t === r.t && a.oc === r.oc && a.prem === r.prem)),
+    "every window in the head is a window of the record published beside it");
+    ok(flows.length >= 1 && group(/flow-alerts/).length === flows.length,
+      "and the head cost no read of its own: every vendor call in the pass is one the pass already made");
     ok(readAt("live:news") >= last(news) && readAt("live:news") < readAt("live:heartbeat"),
       "live:news is stamped when the news read returned");
     ok(readAt("live:heartbeat") > last(news) && readAt("live:heartbeat") > readAt("live:news"),
@@ -1140,6 +1196,11 @@ const cronMinutes = (cron) => {
       "instant with nothing read behind it, so each goes stale on its own clock and the watchdog can see it");
     ok(Object.entries(down.result.run.keys).every(([k, b]) => k === "live:heartbeat" || b === null),
       "and the heartbeat's ledger names every key it did not publish");
+    ok(down.published["live:alerts:head"] === undefined && !Object.hasOwn(down.result.run.keys, "live:alerts:head"),
+      "THE HEAD FOLLOWS THE RECORD: with no alert page answered neither live:alerts nor its head is written, and the held head keeps its own read time");
+    const noAlerts = await runWith((p) => p === "/api/option-trades/flow-alerts");
+    ok(!noAlerts.published["live:alerts"] && !noAlerts.published["live:alerts:head"] && noAlerts.published["live:strips"],
+      "and a failed alert read withholds both while the keys with their own answered reads are published");
     const noStrip = await runWith((p) => p === "/api/screener/stocks");
     ok(!noStrip.published["live:strips"] && !noStrip.published["live:strips:series"] && !noStrip.published["live:vol"] &&
        !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:alerts"],

@@ -1,6 +1,6 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
-  indexRows, shapeMovers, mergeLiveAlerts, alertsPagePlan,
+  indexRows, shapeMovers, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
@@ -263,8 +263,11 @@ export async function runLive({
   const merged = mergeLiveAlerts(prevAlerts && prevAlerts.payload, pages, {
     at: alertsAt, session, writer, stageOf: (t) => plan.stage.get(t) || null,
   });
-  if (merged.write) await put("live:alerts", merged.write);
-  else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
+  if (merged.write) {
+    await put("live:alerts", merged.write);
+    const head = typeof bytes["live:alerts"] === "number" ? shapeAlertsHead(merged.write, { writer }) : null;
+    if (head) await put("live:alerts:head", head);
+  } else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
 
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)

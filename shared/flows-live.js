@@ -18,6 +18,7 @@ export const LIVE_KEYS = Object.freeze({
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
   "live:strips:series": spec("breadth", "actions", 112 * 1024, 0),
   "live:alerts": spec("breadth", "actions", 120 * 1024, 5),
+  "live:alerts:head": spec("breadth", "actions", 8 * 1024, 0),
   "live:vol": spec("breadth", "actions", 8 * 1024, 0),
   "live:movers": spec("breadth", "actions", 8 * 1024, 0),
   "live:news": spec("breadth", "actions", 32 * 1024, 1),
@@ -41,6 +42,7 @@ export const LIVE_BUDGET = Object.freeze({
   alertLimit: 200,
   alertPages: 5,
   alertsPerTape: 20,
+  alertsHeadRows: 20,
   seriesPoints: 30,
   tapeLeaseMs: 20 * 1000,
   tapeUsableMs: 30 * 60 * 1000,
@@ -1115,6 +1117,42 @@ export function mergeLiveAlerts(prev, pages, { at, session, stageOf = null, writ
       cursor, pages: list.length,
     },
   };
+}
+
+export function shapeAlertsHead(alerts, { writer, cap = LIVE_BUDGET.alertsHeadRows } = {}) {
+  const a = alerts && typeof alerts === "object" ? alerts : null;
+  const f = a && a.fresh && typeof a.fresh === "object" ? a.fresh : null;
+  if (!a || !f || !Array.isArray(a.rows)) return null;
+  const spec_ = LIVE_KEYS["live:alerts:head"];
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const text = (v) => (typeof v === "string" && v ? v : null);
+  const usable = a.rows
+    .filter((r) => r && typeof r === "object" && typeof r.t === "string" && r.t && n(r.prem) !== null)
+    .sort((x, y) => (y.prem - x.prem) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0) || ((x.oc || "") < (y.oc || "") ? -1 : 1));
+  const pick = (r) => ({
+    t: r.t, oc: text(r.oc), cp: text(r.cp), k: n(r.k), exp: text(r.exp),
+    prem: r.prem, askPrem: n(r.askPrem), bidPrem: n(r.bidPrem), size: n(r.size), trades: n(r.trades),
+    sweep: r.sweep === true, opening: r.opening === true, px: n(r.px), firstAt: text(r.firstAt),
+  });
+  const build = (rows) => ({
+    v: 1, key: "live:alerts:head", session: f.session,
+    fresh: freshEnvelope({ readAt: f.readAt, vendorAt: f.vendorAt, source: spec_.writer, cadenceS: spec_.cadenceS,
+      session: f.session, writer }),
+    basis: "vendor-flagged windows, largest premium first",
+    status: rows.length ? "ok" : "quiet",
+    cap, seen: usable.length, shed: usable.length - rows.length,
+    premium: usable.reduce((sum, r) => sum + r.prem, 0),
+    truncated: a.vendorTruncated === true || a.readTruncated === true,
+    cursor: text(a.cursor),
+    rows,
+  });
+  let rows = usable.slice(0, Math.max(0, cap)).map(pick);
+  let out = build(rows);
+  while (rows.length && JSON.stringify(out).length > spec_.maxBytes) {
+    rows = rows.slice(0, -1);
+    out = build(rows);
+  }
+  return out;
 }
 
 export const TAPE_LEGS = Object.freeze(["prem", "gex"]);
