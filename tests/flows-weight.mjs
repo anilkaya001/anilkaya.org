@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync, statSync, existsSync } from "node:fs";
+import { readFileSync, statSync, existsSync, appendFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import * as PAGES from "../shared/flows-pages.js";
 
 const REPO = new URL("../", import.meta.url);
 const sizeOf = (src) => statSync(new URL("." + src, REPO)).size;
+const gzipOf = (src) => gzipSync(readFileSync(new URL("." + src, REPO)), { level: 9 }).length;
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -15,15 +17,95 @@ const CEILING_KIB = {
   sidePage: 220,
   watchPage: 220,
   deskPage: 234,
-  askPage: 173,
+  askPage: 133,
   strategyPage: 251,
   trackPage: 164,
   marketPage: 242,
   unusualPage: 204 + (57017 + 13882 + 4176 + 830 + 189 + 95 + 843) / 1024,
   eventsPage: 155,
-  politicalPage: 144,
+  politicalPage: 104,
   historyPage: 157,
   loginPage: 5,
+};
+
+const GZIP_KIB = {
+  tickerPage: 122,
+  overviewPage: 80,
+  sidePage: 65,
+  watchPage: 65,
+  deskPage: 77,
+  askPage: 39,
+  strategyPage: 81,
+  trackPage: 51,
+  marketPage: 72,
+  unusualPage: 85,
+  eventsPage: 34,
+  politicalPage: 31,
+  historyPage: 48,
+  loginPage: 3,
+};
+
+const CSS_KIB = {
+  tickerPage: 113,
+  overviewPage: 115,
+  sidePage: 113,
+  watchPage: 113,
+  deskPage: 123,
+  askPage: 105,
+  strategyPage: 123,
+  trackPage: 104,
+  marketPage: 105,
+  unusualPage: 123,
+  eventsPage: 116,
+  politicalPage: 116,
+  historyPage: 104,
+  loginPage: 91,
+};
+
+const CSS_GZIP_KIB = {
+  tickerPage: 25,
+  overviewPage: 26,
+  sidePage: 25,
+  watchPage: 25,
+  deskPage: 27,
+  askPage: 24,
+  strategyPage: 27,
+  trackPage: 24,
+  marketPage: 24,
+  unusualPage: 28,
+  eventsPage: 26,
+  politicalPage: 26,
+  historyPage: 24,
+  loginPage: 21,
+};
+
+const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
+const HELD_RAW_KIB = { eventsPage: 50 };
+
+const BASES = [
+  { key: "raw", label: "JS raw", ceilings: CEILING_KIB },
+  { key: "gzip", label: "JS gzip", ceilings: GZIP_KIB },
+  { key: "css", label: "CSS raw", ceilings: CSS_KIB },
+  { key: "cssGzip", label: "CSS gzip", ceilings: CSS_GZIP_KIB },
+];
+
+const judge = (row, bases = BASES) => {
+  const faults = [];
+  for (const base of bases) {
+    const ceiling = base.ceilings[row.name];
+    if (ceiling === undefined) { faults.push(`${row.name} has no ${base.label} ceiling`); continue; }
+    const used = row[base.key];
+    if (used > ceiling * 1024) {
+      faults.push(`${row.name} ${base.label} ${used} B is over its ${ceiling} KiB ceiling`);
+    }
+    const slackLimit = base.key === "raw" && HELD_RAW_KIB[row.name] !== undefined
+      ? HELD_RAW_KIB[row.name] : RATCHET_KIB[base.key];
+    if (ceiling * 1024 - used > slackLimit * 1024) {
+      faults.push(`${row.name} ${base.label} ceiling ${ceiling} KiB sits ${Math.round((ceiling * 1024 - used) / 1024)} KiB ` +
+        `above ${used} B, past the ${slackLimit} KiB the ratchet allows`);
+    }
+  }
+  return faults;
 };
 
 const pageNames = Object.keys(PAGES)
@@ -51,6 +133,7 @@ for (const name of pageNames) {
   ok(srcs.length > 0, `${name} emits at least one script, so the measurement has a subject`);
 
   let bytes = 0;
+  let gzip = 0;
   const parts = [];
   for (const src of srcs) {
 
@@ -63,10 +146,25 @@ for (const name of pageNames) {
     if (size === null) continue;
     ok(size > 0, `${src} is not empty`);
     bytes += size;
+    gzip += gzipOf(src);
     parts.push(src.split("/").pop() + " " + Math.round(size / 1024) + "k");
   }
 
-  measured.push({ name, kib: bytes / 1024, parts });
+  const hrefs = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]*href="([^"]+)"/g)]
+    .map((m) => m[1].split("?")[0]);
+  ok(hrefs.length > 0, `${name} emits at least one stylesheet, so the CSS measurement has a subject`);
+  let css = 0;
+  let cssGzip = 0;
+  for (const href of hrefs) {
+    let size = null;
+    try { size = sizeOf(href); } catch { size = null; }
+    ok(size !== null, `${name} links ${href} and that file exists`);
+    if (size === null) continue;
+    css += size;
+    cssGzip += gzipOf(href);
+  }
+
+  measured.push({ name, kib: bytes / 1024, raw: bytes, gzip, css, cssGzip, parts });
 }
 
 measured.sort((a, b) => b.kib - a.kib);
@@ -77,6 +175,62 @@ for (const m of measured) {
     "    " + String(Math.round(m.kib)).padStart(4) + "k" +
     (ceiling ? " / " + String(ceiling) + "k" : "  (no ceiling)") +
     "  " + m.name.replace(/Page$/, "").padEnd(10) + m.parts.join("  "));
+}
+
+{
+  const kib = (n) => (n / 1024).toFixed(1);
+  const rows = [...measured].sort((a, b) => a.name.localeCompare(b.name));
+  const head = ["route", "JS raw", "JS gzip", "CSS raw", "CSS gzip"];
+  const line = (cells) => "  " + cells.map((c, i) => (i === 0 ? String(c).padEnd(10) : String(c).padStart(22))).join("");
+  console.log("  weight ledger, KiB used / ceiling (headroom):");
+  console.log(line(head));
+  const table = [];
+  for (const m of rows) {
+    const cells = BASES.map((b) => `${kib(m[b.key])} / ${b.ceilings[m.name]} (${kib(b.ceilings[m.name] * 1024 - m[b.key])})`);
+    console.log(line([m.name.replace(/Page$/, ""), ...cells]));
+    table.push("| " + [m.name.replace(/Page$/, ""), ...cells].join(" | ") + " |");
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+        "\n### Flows weight ledger, KiB used / ceiling (headroom)\n\n| route | JS raw | JS gzip | CSS raw | CSS gzip |\n|---|---|---|---|---|\n" +
+        table.join("\n") + "\n");
+    } catch {}
+  }
+}
+
+for (const m of measured) {
+  const faults = judge(m);
+  eq(faults.join("; "), "",
+     `${m.name} is inside all four ceilings and no ceiling hangs loose of it. Raw JavaScript stays the binding ` +
+     `basis (parse and compile cost follows raw bytes); gzip and CSS ceilings sit 2-3 KiB above the measurement. ` +
+     `A change that saves bytes lowers the ceiling in the same diff, so the saving cannot be spent by the next ` +
+     `change unseen; one that adds them raises it in the diff where it can be argued`);
+}
+
+{
+  const base = { name: "marketPage", raw: 241587, gzip: 71322, css: 104614, cssGzip: 21713 };
+  eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
+  ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
+     "the judge fails a route inflated by 8 KiB of gzip");
+  ok(judge({ ...base, raw: base.raw + 8 * 1024 }).length > 0, "the judge fails a route inflated by 8 KiB raw");
+  ok(judge({ ...base, css: base.css + 8 * 1024 }).length > 0, "the judge fails a stylesheet inflated by 8 KiB");
+  ok(judge({ ...base, cssGzip: base.cssGzip + 8 * 1024 }).length > 0, "the judge fails a stylesheet inflated by 8 KiB of gzip");
+  ok(judge({ ...base, gzip: base.gzip - 8 * 1024 }).length > 0,
+     "the ratchet fails a route that saved 8 KiB of gzip and left its ceiling where it was");
+  ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
+     "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
+  ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
+  const events = { name: "eventsPage", raw: 108054, gzip: 32662, css: 116236, cssGzip: 23788 };
+  eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
+  eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
+}
+
+for (const name of Object.keys(CEILING_KIB)) {
+  for (const t of [GZIP_KIB, CSS_KIB, CSS_GZIP_KIB]) {
+    ok(Object.prototype.hasOwnProperty.call(t, name) && Object.keys(t).length === Object.keys(CEILING_KIB).length,
+       `${name} has an entry in every ceiling table and no table has a stray one`);
+  }
 }
 
 for (const m of measured) {
