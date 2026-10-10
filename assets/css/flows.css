@@ -2274,6 +2274,16 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-disclose[aria-expanded="true"] .ui-g { transform: rotate(180deg); }
 .ui-disclose:hover { background: var(--fill-4); }
 
+.ui-exp { position: relative; display: inline-block; }
+.ui-exp-b { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 10px; background: var(--fill-3); color: var(--label-1); font: var(--t-footnote); font-weight: 500; cursor: pointer; list-style: none; }
+.ui-exp-b::-webkit-details-marker { display: none; }
+.ui-exp-b:focus-visible, .ui-exp-i:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ui-exp-m { position: absolute; right: 0; z-index: 30; display: flex; flex-direction: column; min-width: 112px; margin-top: 4px; padding: 4px; border-radius: 10px; background: var(--mat-thick); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); }
+.ui-exp-i { min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--label-1); font: var(--t-footnote); text-align: left; cursor: pointer; }
+.ui-exp-i:hover { background: var(--fill-4); }
+.ui-exp-n { padding: 8px 12px; color: var(--label-2); font: var(--t-caption); }
+@media (pointer: coarse) { .ui-exp-i { min-height: 44px; } }
+
 .ui-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
 .ui-tile { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border-radius: var(--r-md); background: var(--fill-4); }
 .ui-tile-h { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--label-2); font: var(--t-footnote); }
