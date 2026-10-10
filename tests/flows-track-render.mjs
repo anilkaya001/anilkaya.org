@@ -558,6 +558,135 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.close();
 }
 
+{
+  const page = await open();
+  await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const C = window.FlowsUI.chart;
+    const days = ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-07", "2026-09-08", "2026-09-09", "2026-09-10"];
+    const vals = [3, 5, 4, 6, 2, 7, 1, 9];
+    window.__opts = (n, extra) => Object.assign({ x: days.slice(0, n), series: [{ values: vals.slice(0, n) }], yFormat: (v) => "v" + v, label: "Live line",
+      readout: (i, d) => [C.part(d, "k"), C.part("v" + vals[i], "k")] }, extra || null);
+    const host = document.createElement("div");
+    host.style.cssText = "width:640px;margin:40px 0 0 40px";
+    document.body.prepend(host);
+    window.__host = host;
+    window.__starts = 0;
+    host.addEventListener("animationstart", () => { window.__starts++; });
+    host.addEventListener("transitionrun", () => { window.__starts++; });
+    window.__chart = C.line(host, window.__opts(5));
+    await frame();
+    await frame();
+  });
+  const first = await page.evaluate(() => {
+    const svg = window.__host.querySelector(":scope > svg");
+    const out = { noAnim: svg.classList.contains("no-anim"), anims: window.__host.getAnimations({ subtree: true }).length };
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    window.__svg = svg;
+    const b = svg.getBoundingClientRect();
+    const w = svg.viewBox.baseVal.width, x2 = 2 + (w - 62 - 2) * 2 / 4;
+    return { ...out, x: b.left + x2 * (b.width / w), y: b.top + b.height / 2 };
+  });
+  ok(!first.noAnim && first.anims > 0, `IN PLACE: a live line's first paint still animates (${first.anims} animations, no no-anim flag)`);
+  await page.mouse.move(first.x, first.y);
+  await page.waitForFunction(() => window.__host.querySelector(".ui-readout.is-on"));
+  const hovered = await page.evaluate(() => ({ at: window.__host._scrubAt, text: window.__host.querySelector(".ui-readout").textContent }));
+  ok(hovered.text.includes("2026-09-03") && hovered.text.includes("v4"), `the reader's pointer rests on the third reading and its readout shows it (${hovered.text})`);
+  await page.evaluate(() => window.__host.focus());
+  const updates = [];
+  for (const n of [6, 7, 8]) {
+    updates.push(await page.evaluate(async (n) => {
+      const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+      const host = window.__host;
+      window.__starts = 0;
+      let threw = null;
+      try { window.__chart.set(window.__opts(n)); } catch (e) { threw = String(e && e.message || e); }
+      const sync = host.getAnimations({ subtree: true }).length;
+      await frame();
+      await frame();
+      const svg = host.querySelector(":scope > svg") || document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      const xh = svg.querySelector("line.xh");
+      const ro = host.querySelector(".ui-readout");
+      const tags = [...svg.querySelectorAll("text.tx-1.tx-b")].map((t) => t.textContent);
+      const ring = [...svg.querySelectorAll(":scope > circle.ring")].pop();
+      return {
+        same: svg === window.__svg, svgs: host.querySelectorAll("svg").length, noAnim: svg.classList.contains("no-anim"),
+        sync, anims: host.getAnimations({ subtree: true }).length, mine: host.getAnimations({ subtree: true }).map((a) => (a.animationName || a.transitionProperty) + "@" + (a.effect.target.getAttribute("class") || a.effect.target.tagName)).join(","), other: document.getAnimations().filter((a) => !host.contains(a.effect && a.effect.target)).map((a) => a.animationName || a.transitionProperty).slice(0, 4).join(","), starts: window.__starts, at: host._scrubAt,
+        readout: ro && ro.classList.contains("is-on") ? ro.textContent : null, line: xh ? +xh.getAttribute("opacity") : null,
+        xhX: xh ? +xh.getAttribute("x1") : null, endTag: tags.join(" "), endX: ring ? +ring.getAttribute("cx") : null,
+        w: svg.viewBox.baseVal.width || 0, focused: document.activeElement === host, threw,
+      };
+    }, n));
+  }
+  updates.forEach((u, k) => {
+    const n = 6 + k;
+    eq(u.threw, null, `IN PLACE: update ${k + 2} is one set(options) call on the handle the first paint returned (${u.threw})`);
+    ok(u.same, `IN PLACE: update ${k + 2} keeps the same svg node instead of tearing the chart down and building another`);
+    eq(u.svgs, 1, `update ${k + 2}: one svg in the host`);
+    ok(u.noAnim, `update ${k + 2}: set() draws with no-anim, so no line redraws and no label fades in again`);
+    eq(u.sync + u.anims, 0, `update ${k + 2}: no animation runs in the chart after the update (its getAnimations is empty: ${u.mine}; elsewhere: ${u.other || "none"})`);
+    eq(u.starts, 0, `update ${k + 2}: and no animationstart or transitionrun fired in the chart`);
+    eq(u.endTag, "v" + [3, 5, 4, 6, 2, 7, 1, 9][n - 1], `update ${k + 2}: the newest point is drawn and labelled (${u.endTag})`);
+    ok(Math.abs(u.endX - (u.w - 62)) < 0.5, `update ${k + 2}: at the right edge of the plot (${u.endX})`);
+    ok(u.readout && u.readout.includes("2026-09-03") && u.readout.includes("v4"), `update ${k + 2}: the hover readout survives, still on the reading the reader was on (${u.readout})`);
+    eq(u.at, 2, `update ${k + 2}: the crosshair keeps the reader's index`);
+    ok(u.line > 0 && Math.abs(u.xhX - (2 + (u.w - 62 - 2) * 2 / (n - 1))) < 0.5, `update ${k + 2}: the crosshair is drawn at that reading's new x (${u.xhX})`);
+    ok(u.focused, `update ${k + 2}: keyboard focus stays on the chart`);
+  });
+  const later = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    const host = window.__host;
+    host.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    const end = host._scrubAt;
+    host.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    window.__chart.set(window.__opts(8));
+    await frame();
+    const hidden = { at: host._scrubAt, on: !!host.querySelector(".ui-readout.is-on") };
+    window.__chart.set(window.__opts(8), true);
+    await frame();
+    const asked = host.querySelector(":scope > svg").classList.contains("no-anim");
+    window.__chart.destroy();
+    const again = window.FlowsUI.chart.line(host, window.__opts(8));
+    await frame();
+    await frame();
+    const remount = host.querySelector(":scope > svg").classList.contains("no-anim");
+    again.destroy();
+    const live = document.createElement("div");
+    live.style.width = "640px";
+    document.body.append(live);
+    const lc = window.FlowsUI.chart.line(live, window.__opts(5, { live: true }));
+    await frame();
+    await frame();
+    for (const a of document.getAnimations()) { const t = a.effect && a.effect.getComputedTiming(); if (t && Number.isFinite(t.endTime)) a.finish(); }
+    const phase = () => {
+      const a = live.getAnimations({ subtree: true }).find((x) => x.animationName === "ui-pulse");
+      if (!a) return null;
+      const t = a.effect.getComputedTiming();
+      return (((t.localTime - t.delay) - document.timeline.currentTime) % 2400 + 2400) % 2400;
+    };
+    const p0 = phase();
+    await new Promise((r) => setTimeout(r, 1000));
+    lc.set(window.__opts(6, { live: true }));
+    await frame();
+    await frame();
+    const p = p0 === null ? null : { p0, p1: phase() };
+    const others = live.getAnimations({ subtree: true }).filter((x) => x.animationName !== "ui-pulse").length;
+    const pulses = live.querySelectorAll("circle.pulse").length;
+    lc.destroy();
+    live.remove();
+    return { end, hidden, asked, remount, p, others, pulses };
+  });
+  eq(later.end, 7, "the End key still moves the crosshair to the newest reading");
+  ok(later.hidden.at === -1 && !later.hidden.on, "a readout the reader dismissed with Escape is not brought back by an update");
+  ok(!later.asked, "set(next, true) still animates when a caller asks for it");
+  ok(later.remount, "and a host that has been drawn once does not replay its entrance when a chart is mounted on it again");
+  eq(later.pulses, 1, "a live line keeps one pulse on its newest point");
+  eq(later.others, 0, "and nothing but that pulse is animating after an update");
+  const drift = later.p && later.p.p1 !== null ? Math.min(Math.abs(later.p.p1 - later.p.p0), 2400 - Math.abs(later.p.p1 - later.p.p0)) : Infinity;
+  ok(drift < 150, `the pulse continues on the document clock's phase instead of restarting at zero on every update (${Math.round(drift)} ms off)`);
+  await page.close();
+}
+
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));
 await browser.close();
 
@@ -570,4 +699,5 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `that draw at the width the observer reports, after layout and before paint, with no forced layout ` +
   `at mount and no observer loop error, one throwing draw starving no other chart, a host that leaves and ` +
   `returns before its first frame still drawn, the width re-read where no observer keeps it, and root tokens ` +
-  `read from one computed style`);
+  `read from one computed style; a live line updated in place, its svg, crosshair, readout and focus kept, ` +
+  `the newest point drawn and nothing re-animated`);

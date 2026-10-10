@@ -1158,18 +1158,23 @@
       info, infoLabel: o.infoLabel || String(o.title).toLowerCase(), body: o.body, index: o.index || 0, enter: STATE.first });
     sec.classList.add("ft-m", "ft-lg" + o.span[1], "ft-md" + o.span[0]);
     const old = $(o.id);
+    const had = !!(old && document.activeElement && old.contains(document.activeElement));
     if (old && old.parentNode === gridEl) old.replaceWith(sec); else gridEl.append(sec);
+    if (had) { const b = sec.querySelector(".ui-seg-i[aria-selected=true]"); if (b) b.focus({ preventScroll: true }); }
     return sec;
   }
 
+  const PICKED = new Map();
   function viewer(label, all, first) {
     const list = all.filter((v) => !v.never);
     const box = h("div", { class: "ft-cbox" });
     const leg = h("div", { class: "ft-leg-row" });
-    let cur = first !== undefined && list[first] && list[first].st.state === "ok" ? first : list.findIndex((v) => v.st.state === "ok");
+    const kept = PICKED.has(label) ? list.findIndex((v) => v.label === PICKED.get(label) && v.st.state === "ok") : -1;
+    let cur = kept >= 0 ? kept : first !== undefined && list[first] && list[first].st.state === "ok" ? first : list.findIndex((v) => v.st.state === "ok");
     if (cur < 0) cur = 0;
     let handle = null;
-    const show = (i) => {
+    const still = !STATE.first;
+    const show = (i, user) => {
       cur = i;
       if (handle && handle.destroy) handle.destroy();
       handle = null;
@@ -1177,13 +1182,13 @@
       leg.replaceChildren();
       const v = list[i];
       if (v.st.state !== "ok") { box.append(UI.silent(v.st, v.name || v.label, v.h || 220)); return; }
-      const host = h("div", { class: "ft-view", "data-view": v.label });
+      const host = h("div", { class: "ft-view" + (still && !user ? " is-still" : ""), "data-view": v.label });
       box.append(host);
       const r = v.draw(host) || {};
       handle = r.handle || null;
       if (r.legend && r.legend.length) leg.append(legend(r.legend));
     };
-    const seg = list.length > 1 ? UI.segmented(label, list.map((v) => ({ label: v.label })), show, cur) : null;
+    const seg = list.length > 1 ? UI.segmented(label, list.map((v) => ({ label: v.label })), (i) => { PICKED.set(label, list[i].label); show(i, true); }, cur) : null;
     return { seg, box, leg, start: () => show(cur), views: list };
   }
 

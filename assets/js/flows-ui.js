@@ -681,10 +681,8 @@
     for (const e of entries) {
       const rec = e.target._fxChart;
       if (!rec.host.isConnected) { if (rec.drawn) drop(rec); continue; }
-      const first = !rec.seen;
-      rec.seen = true;
       rec.w = Math.round(e.contentRect.width);
-      if (rec.w && rec.w !== rec.drawn) try { repaint(rec, first, false); } catch (err) { setTimeout(() => { throw err; }); }
+      if (rec.w && rec.w !== rec.drawn) try { repaint(rec, undefined, false); } catch (err) { setTimeout(() => { throw err; }); }
     }
   }) : null;
   function repaint(rec, animate, force) {
@@ -694,8 +692,13 @@
     if (!w) { if (force) rec.drawn = 0; return; }
     if (w === rec.drawn && !force) return;
     rec.w = rec.drawn = w;
+    rec.keep = rec.svg && rec.svg.parentNode === host ? rec.svg : null;
+    rec.svg = null;
+    releaseHost(host);
     if (rec.probe) host.replaceChildren(rec.probe); else host.replaceChildren();
-    rec.draw(host, w, animate && moving());
+    const go = animate === undefined ? !host._fxPainted : animate;
+    host._fxPainted = true;
+    try { rec.draw(host, w, go && moving()); } finally { rec.keep = null; }
   }
   const fade = (d) => ({ class: "fade", style: { "--delay": d } });
   const TA = { "text-anchor": "middle" };
@@ -703,8 +706,9 @@
   function mount(host, draw) {
     if (host._fxChart) drop(host._fxChart);
     releaseHost(host);
+    host._scrubAt = -1;
     host.classList.add("ui-chart");
-    const rec = { host, draw, w: 0, drawn: 0, seen: false, probe: null };
+    const rec = { host, draw, w: 0, drawn: 0, probe: null, svg: null, keep: null };
     host._fxChart = rec;
     CHARTS.add(rec);
     if (RO) {
@@ -712,18 +716,27 @@
       probe._fxChart = rec;
       host.append(probe);
       RO.observe(probe);
-    } else repaint(rec, true, true);
+    } else repaint(rec, undefined, true);
     return {
       el: host,
       redraw: (animate) => repaint(rec, !!animate, true),
-      set: (next, animate) => { rec.draw = next; repaint(rec, animate !== false, true); },
-      destroy: () => { drop(rec); host._fxChart = null; releaseHost(host); host.replaceChildren(); },
+      set: (next, animate) => { rec.draw = next; repaint(rec, animate === undefined ? undefined : !!animate, true); },
+      destroy: () => { drop(rec); host._fxChart = null; host._scrubAt = -1; releaseHost(host); host.replaceChildren(); },
     };
   }
   function svgRoot(host, w, H, animate, label) {
-    const svg = s("svg", { width: w, height: H, viewBox: `0 0 ${w} ${H}`, role: "img", "aria-label": label || "" });
+    const rec = host._fxChart;
+    const at = { width: w, height: H, viewBox: `0 0 ${w} ${H}`, role: "img", "aria-label": label || "" };
+    let svg = rec && rec.keep;
+    if (svg) {
+      rec.keep = null;
+      for (const a of [...svg.attributes]) svg.removeAttribute(a.name);
+      svg.replaceChildren();
+      for (const k in at) svg.setAttribute(k, at[k]);
+    } else svg = s("svg", at);
     if (!animate) svg.classList.add("no-anim");
     host.append(svg);
+    if (rec) rec.svg = svg;
     return svg;
   }
   const lin = (d0, d1, r0, r1) => {
@@ -818,7 +831,8 @@
   function scrub(host, svg, o) {
     const xs = o.xs;
     const on = hostSignal(host, "_scrubOff");
-    const readout = h("div", { class: "ui-readout", ...AH });
+    const keep = host._scrubAt >= 0 && xs.length ? Math.min(host._scrubAt, xs.length - 1) : -1;
+    const readout = h("div", { class: "ui-readout" + (keep >= 0 ? " is-on" : ""), ...AH });
     host.append(readout);
     const xh = s("line", { class: "xh", y1: o.top, y2: o.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
     const dots = s("g", null, svg);
@@ -833,8 +847,8 @@
       return Math.abs(xs[lo] - x) <= Math.abs(xs[hi] - x) ? lo : hi;
     };
     const show = (i, speak) => {
-      if (i < 0 || i >= xs.length) return;
-      idx = i;
+      if (i < 0 || i >= xs.length || on.signal.aborted) return;
+      idx = host._scrubAt = i;
       const r = o.onMove(i) || {};
       const x = r.x ?? xs[i];
       xh.setAttribute("x1", x); xh.setAttribute("x2", x); xh.setAttribute("opacity", r.noLine ? 0 : 0.7);
@@ -848,7 +862,7 @@
       if (speak) announce(spoken(readout));
     };
     let raf = 0, px = 0;
-    const hide = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
+    const hide = () => { host._scrubAt = -1; if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };
     const at = (cx) => { const b = svg.getBoundingClientRect(); return (cx - b.left) * (svg.viewBox.baseVal.width / b.width); };
     host.addEventListener("pointermove", (e) => {
       px = e.clientX;
@@ -865,6 +879,7 @@
       else if (k === "End") { e.preventDefault(); show(xs.length - 1, true); }
       else if (k === "Escape") hide();
     }, on);
+    if (keep >= 0) show(keep);
     return { show, hide };
   }
 
@@ -887,7 +902,10 @@
   }
 
   function line(host, o) {
-    return mount(host, (el, w, animate) => drawLine(el, w, animate, o));
+    const m = mount(host, (el, w, animate) => drawLine(el, w, animate, o));
+    const set = m.set;
+    m.set = (next, animate) => set(typeof next === "function" ? next : (el, w, a) => drawLine(el, w, a, next), animate);
+    return m;
   }
   function drawLine(host, w, animate, o) {
     const series = (o.series || []).filter((sr) => Array.isArray(sr.values));
@@ -961,7 +979,7 @@
       if (li >= 0 && o.endDots !== false) {
         const cx = xAt(li), cy = y(sr.values[li]);
         const dotC = o.twoTone && si === 0 ? paint(sr.values[li] < 0 ? "--down" : "--up") : color;
-        if (o.live && si === 0) s("circle", { cx, cy, r: 4, fill: dotC, class: "pulse" }, svg);
+        if (o.live && si === 0) s("circle", { cx, cy, r: 4, fill: dotC, class: "pulse", style: { "animation-delay": -Math.round(((document.timeline && document.timeline.currentTime) || performance.now()) % 2400) + "ms" } }, svg);
         s("circle", { cx, cy, r: 3.5, fill: dotC, class: "ring" }, svg);
         if (o.endLabels !== false) tags.push({ y: cy, y0: cy, text: (sr.format || yf)(sr.values[li]), color: dotC, x0: cx, pri: 1 });
       }

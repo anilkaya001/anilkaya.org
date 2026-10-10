@@ -940,8 +940,11 @@
     const v = $("hmTideV"), cap = $("hmTideCap"), legs = $("hmTideLegs"), plot = $("hmTide");
     if (!v || !plot) return;
     const state = paintPill(tide);
-    if (tideChart) { tideChart.destroy(); tideChart = null; }
-    plot.replaceChildren();
+    const kept = tide && tide.t.length >= 2 && tideChart && tideChart.el.isConnected && tideChart.el.parentNode === plot ? tideChart : null;
+    if (!kept) {
+      if (tideChart) { tideChart.destroy(); tideChart = null; }
+      plot.replaceChildren();
+    }
     if (!tide) {
       v.replaceChildren(DASH);
       v.dataset.tone = "silent";
@@ -994,12 +997,19 @@
         h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
         tide.zero ? C.part("0DTE " + (tide.zero[i] === null ? DASH : usdS(tide.zero[i])), "k") : null],
     };
-    const chartHost = h("div", { class: "hm-river" });
-    plot.append(chartHost, UI.legend([
+    const legend = UI.legend([
       h("span", { class: "ui-key" }, h("i", { class: "is-split", "aria-hidden": "true" }), "Net premium"),
       series.length > 1 ? ["--s-gray", "ln", "0DTE net"] : null,
-    ].filter(Boolean)));
-    tideChart = C.line(chartHost, opts);
+    ].filter(Boolean));
+    if (kept) {
+      for (const n of [...plot.children]) if (n !== kept.el) n.remove();
+      plot.append(legend);
+      kept.set(opts);
+    } else {
+      const chartHost = h("div", { class: "hm-river" });
+      plot.append(chartHost, legend);
+      tideChart = C.line(chartHost, opts);
+    }
     if (state === "live" && tide.readAt) UI.freshness({ readAt: tide.readAt, live: true, source: "live:market" });
   }
 

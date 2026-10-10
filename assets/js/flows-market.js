@@ -653,14 +653,15 @@
   let tideLabel = null;
 
   function paintTide(pulse, live, breadth) {
-    const host = clear("mkTide");
+    const host = $("mkTide");
     const legs = clear("mkTideLegs");
     const seg = clear("mkTideSeg");
     if (!host) return;
-    if (tideChart) { tideChart.destroy(); tideChart = null; }
+    const drop = () => { if (tideChart) { tideChart.destroy(); tideChart = null; } host.replaceChildren(); };
     const { views, today } = tideViews(pulse, live, breadth);
     headMark("mkTideCard", null);
     if (!views.length) {
+      drop();
       if (unreadable(pulse)) host.append(unreadableLine(pulse, "the market pulse (/api/flows/pulse)"));
       else if (pendingOf(pulse)) host.append(pendingLine("the market tide", "The live market layer and the pulse both fill during market hours."));
       else host.append(feedSilence(pulse.tide, "market tide"));
@@ -678,8 +679,8 @@
           UI.metric("Puts", usdS(last(v.put)), { tone: toneOf(-(last(v.put) || 0)) }),
         ], { min: 110 }));
       }
-      host.replaceChildren();
-      if (tideChart) { tideChart.destroy(); tideChart = null; }
+      const kept = v.t.length >= 2 && tideChart && tideChart.el.isConnected && tideChart.el.parentNode === host ? tideChart : null;
+      if (!kept) drop();
       const dated = v.day && today && v.day < today;
       headMark("mkTideCard", dated ? chip("dated", F.day(v.day), "tide", "Today's live tide holds too few readings for a path, so this is the " + F.day(v.day) + " session in full.") : null);
       if (v.t.length < 2) {
@@ -687,9 +688,7 @@
         host.append(emptyLine(fresh ? "opening" : "stale", fresh ? openingSaid(v.t[0]) : staleSaid(v.t[0]), v.label.toLowerCase() + " tide", 180, fresh ? null : clock(v.t[0])));
         return;
       }
-      const plot = h("div", { class: "mk-river" });
-      host.append(plot, UI.legend([["--up", "ln", "Net calls"], ["--down", "ln", "Net puts"]]));
-      tideChart = C.line(plot, {
+      const opts = {
           x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: (x) => clock(x), zero: true, height: [220, 260, 300],
           series: [
             { values: v.call, color: "--up", label: "Net calls", format: usdS },
@@ -699,7 +698,11 @@
           readout: (i) => [C.part(clock(v.t[i]), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, usdS(v.call[i])),
             C.part("Puts", "k"), h("b", { "data-tone": "down" }, usdS(v.put[i])),
             C.part("Net " + (usdS(v.net[i])), "k")],
-      });
+      };
+      if (kept) { kept.set(opts); return; }
+      const plot = h("div", { class: "mk-river" });
+      host.append(plot, UI.legend([["--up", "ln", "Net calls"], ["--down", "ln", "Net puts"]]));
+      tideChart = C.line(plot, opts);
     };
     if (seg && views.length > 1) seg.append(UI.segmented("Tide", views.map((v) => ({ label: v.label })), (i) => { active = i; tideLabel = views[i].label; draw(); }, active));
     draw();

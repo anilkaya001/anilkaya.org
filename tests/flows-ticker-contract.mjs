@@ -2227,6 +2227,44 @@ try {
     }
     {
       const card = clone(full);
+      const calls = [];
+      const tape = (n) => {
+        calls.push(n);
+        const body = tapeOf(session, n === 1 ? "18:00" : "20:00", at + (n - 1) * 5000);
+        body.ticker = card.ticker;
+        return { body, headers: verdict(n === 1 ? "stale" : "closed", n === 1 ? "missed-close" : "session-final") };
+      };
+      const { page, errors } = await open(tape, undefined, { card });
+      await page.waitForSelector("#m-flow .ui-seg-i", { timeout: 10000 });
+      const labels = await page.evaluate(() => [...document.querySelectorAll("#m-flow .ui-seg-i")].map((b) => ({ t: b.textContent.trim(), on: b.getAttribute("aria-selected") === "true" })));
+      const start = (labels.find((l) => l.on) || {}).t;
+      let picked = null;
+      for (const l of labels.filter((x) => !x.on).reverse()) {
+        if (!(await pickView(page, "m-flow", l.t))) continue;
+        if (await page.evaluate((t) => !!document.querySelector(`#m-flow .ft-view[data-view="${t}"]`), l.t)) { picked = l.t; break; }
+      }
+      ok(picked && picked !== start, `VIEW KEPT: the reader moves the Flow module off its default view (${start} → ${picked})`);
+      await page.evaluate(() => { const b = document.querySelector("#m-flow .ui-seg-i[aria-selected=true]"); b.focus(); document.getElementById("m-flow").dataset.old = "1"; });
+      await page.waitForFunction(() => { const m = document.getElementById("m-flow"); return m && !m.dataset.old; }, null, { timeout: 15000 });
+      const got = await page.evaluate(() => {
+        const m = document.getElementById("m-flow");
+        const view = m.querySelector(".ft-view");
+        const sel = m.querySelector(".ui-seg-i[aria-selected=true]");
+        const running = view ? view.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
+        return { view: view && view.dataset.view, still: !!(view && view.classList.contains("is-still")), sel: sel && sel.textContent.trim(),
+          focus: document.activeElement === sel, running };
+      });
+      ok(calls.length >= 2, `the stale tape was read again and the module rebuilt from the new read (${calls.length} reads)`);
+      eq(got.view, picked, `a tape refresh keeps the view the reader chose (data-view ${got.view}), where it used to fall back to ${start}`);
+      eq(got.sel, picked, "and the segmented control still marks that view");
+      ok(got.focus, "focus returns to the segmented control the reader was on, instead of falling to the page body");
+      ok(got.still, "the rebuilt view is marked still");
+      eq(got.running, 0, "so no chart in it replays its entrance on the refresh");
+      eq(errors.length, 0, `and the refresh throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
+    {
+      const card = clone(full);
       const rthAt = Date.parse(card.sessionDate + "T15:30:00Z");
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
       const errors = [];
