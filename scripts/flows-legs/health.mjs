@@ -712,3 +712,62 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   for (const line of verdict.failures) warn(line);
   return verdict;
 }
+
+export const HEALTH_CODES = Object.freeze([
+  ["edge-challenge", /Cloudflare challenge/, "the edge challenged the runner's ingest requests"],
+  ["edge-block", /Cloudflare blocks?\b/, "the edge blocked the runner's ingest requests"],
+  ["edge-403-unmarked", /neither a Cloudflare mitigation marker/, "ingest requests were refused with a 403 that carries no Cloudflare marker"],
+  ["edge-403-no-ray", /403s? with no cf-ray/, "ingest requests were refused with a 403 that never passed through Cloudflare"],
+  ["edge-403-unknown", /403s? of an unknown kind/, "ingest requests were refused with a 403 of an unknown kind"],
+  ["edge-403", /with HTTP 403 and retries spent/, "the edge refused ingest requests with HTTP 403"],
+  ["edge-1027", /error 1027/, "the edge answered with its daily request limit"],
+  ["edge-429", /HTTP 429/, "the edge answered ingest requests with HTTP 429"],
+  ["edge-408", /HTTP 408/, "the edge answered ingest requests with HTTP 408"],
+  ["store-quota", /store_quota/, "the Worker's store refused ingest answers on its daily quota"],
+  ["ingest-5xx", /HTTP 5xx/, "the ingest route answered with HTTP 5xx"],
+  ["ingest-silent", /no usable answer/, "ingest requests got no usable answer"],
+  ["ingest-unrayed", /carried no cf-ray/, "ingest answers never passed through Cloudflare"],
+  ["ingest-retries", /ingest retries spent/, "ingest retries used most of their budget"],
+  ["lab-sign-in", /Google sign-in to the Lab/, "the Lab's Google OAuth client has been idle past the failure line"],
+  ["cards-failed", /card\(s\) failed to build/, "cards failed to build or publish"],
+  ["cards-skipped", /skipped past the run's deadline/, "cards were skipped past the run's deadline"],
+  ["roster-unwritten", /roster was not written/, "the roster was not written"],
+  ["roster-short", /the roster lists/, "the roster lists fewer names than were planned"],
+  ["neuron-ledger", /coverage ledger does not add up/, "the Neuron coverage ledger does not add up"],
+  ["neuron-missing", /have no Neuron reading tonight/, "universe names have no Neuron reading"],
+  ["ledger-empty", /session ledger holds/, "the session ledger has no row for the session"],
+  ["ledger-rth", /rth cron did not tick/, "the Worker's rth cron missed ticks inside the session"],
+  ["ledger-tier1", /without writing live:market/, "Tier 1 went too long without writing live:market"],
+  ["ledger-focus", /focus cron went/, "the focus cron went too long without writing live:focus"],
+  ["ledger-tier2-none", /no Tier 2 pass was recorded/, "no Tier 2 pass was recorded for the session"],
+  ["ledger-tier2-gap", /Tier 2 went/, "Tier 2 went too long without a pass"],
+  ["nightly-missing", /no nightly landed/, "the previous session's nightly never landed"],
+  ["clock-unreadable", /clock could not be read/, "the Worker's clock could not be read"],
+  ["summary-cron", /summary cron/, "the summary cron has not completed a recent firing"],
+  ["tier1-session", /Tier 1 (?:ticked through|never ticked)/, "Tier 1 never read the session"],
+  ["tier1-holiday", /as a holiday/, "Tier 1 closed the session as a holiday that the vendor printed"],
+  ["tier1-failed", /Tier 1's last tick failed/, "Tier 1's last tick failed"],
+  ["tier1-early", /Tier 1 last ticked at/, "Tier 1 stopped before the close"],
+  ["dispatch-refused", /refused the Worker's dispatch/, "GitHub refused the Worker's dispatch"],
+  ["market-unread", /live:market (?:could not be read|has never been written)/, "live:market could not be read or was never written"],
+  ["market-late", /last wrote live:market/, "live:market was not written near the close"],
+  ["focus-unread", /live:focus (?:could not be read|has never been written)/, "live:focus could not be read or was never written"],
+  ["focus-late", /focus cron last wrote/, "live:focus was not written near the close"],
+  ["heartbeat-unread", /live:heartbeat could not be read/, "live:heartbeat could not be read"],
+  ["pass-missing", /no live pass for/, "no Tier 2 pass was recorded for the session"],
+  ["pass-failed", /answered no vendor call/, "the last Tier 2 pass answered no vendor call"],
+  ["pass-early", /pass for [^ ]+ finished at/, "Tier 2 stopped before the close"],
+]);
+
+export function healthCodes(failures) {
+  const counts = new Map();
+  for (const line of Array.isArray(failures) ? failures : []) {
+    const text = String(line);
+    const hit = HEALTH_CODES.find(([, re]) => re.test(text));
+    const code = hit ? hit[0] : "other";
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  const said = new Map(HEALTH_CODES.map(([code, , text]) => [code, text]));
+  said.set("other", "a gate failure that has no code of its own");
+  return [...counts.entries()].map(([code, n]) => ({ code, n, text: said.get(code) }));
+}

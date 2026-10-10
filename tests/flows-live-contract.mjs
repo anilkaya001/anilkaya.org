@@ -2785,9 +2785,9 @@ const cronMinutes = (cron) => {
     "runHealthGate reads the clock, live:market, live:focus, live:heartbeat and the strips series (for its quote-lag note) through the ingest route and prints one line");
   const pipeline = read("scripts/flows-pipeline.mjs");
   const tail = pipeline.slice(pipeline.indexOf("async function main()"), pipeline.indexOf("\nexport {\n"));
-  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*\}\s*$/
-    .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statement runs it and turns the run red on any failure, after " +
-    "every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
+  ok(/const health = await runHealthGate\(\{ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,\s*annotate: process\.env\.GITHUB_ACTIONS === "true",\s*night: \{[^}]*\} \}\);\s*if \(health\.failures\.length\) process\.exitCode = 1;\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*$/
+    .test(tail), "THE NIGHTLY ENDS WITH THE GATE: its last statements run it, turn the run red on any failure and hand the verdict to the " +
+    "issue reporter (dry runs make no call), after every key is published, with the edge 403s counted by kind and the Worker's own 403s kept apart");
   ok(/export function edgeSnapshot\(\) \{\s*return \{ \.\.\.structuredClone\(edgeRefusals\), retrySpentMs: publishRetrySpentMs \};\s*\}/
     .test(pipeline), "and it hands the gate a function, so the count, the kinds, the other statuses and the retry budget " +
     "are copied together, after the gate's own reads");

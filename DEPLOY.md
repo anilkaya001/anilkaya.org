@@ -473,8 +473,9 @@ it unlocks and what tells you it has lapsed.
    logs, and `labActiveAt` is the newest activity of any Lab learner. From
    120 days it prints a `WARNING:` line with the day and the age, which
    GitHub also shows as an annotation on the run, names the day the gate
-   turns red, and leaves the run green. From 150 days it turns the run red,
-   which emails the owner:
+   turns red, and leaves the run green. From 150 days it turns the run red
+   and opens the `[flows-witness:health]` issue (the issue names only the
+   failure code and count; this line stays in the run's log):
    `HEALTH: the latest Google sign-in to the Lab on record is …, 150 days ago. Sign in to the Lab at https://anilkaya.org/lab/ — Google deletes an OAuth client unused for about six months; keep the callback https://anilkaya.org/auth/callback registered. Google deletes it about ….`
    One sign-in clears it the next night. From 180 days the line also says how
    to replace a deleted client: create a Web application OAuth client (Google
@@ -505,8 +506,8 @@ it unlocks and what tells you it has lapsed.
 Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns
 red on vendor drift, a weekly regression run catches a fixture the calendar
-overtakes, and the nightly ends with a health gate that turns the run red,
-which emails the owner, whenever the live layer failed that session, the edge
+overtakes, and the nightly ends with a health gate that turns the run red
+and opens one `[flows-witness:health]` issue that mentions the owner, whenever the live layer failed that session, the edge
 refused or throttled the ingest route past its threshold (item 3), or the
 Lab's Google sign-in has been idle for 150 days (item 4).
 
@@ -1798,8 +1799,14 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   never counted; section 10.0 item 3) and a Lab Google sign-in 150 or more
   days old (section 10.0 item 4). From 120 days that age is a `WARNING:`
   line and a GitHub annotation, which leaves the run green. Any failure makes
-  the run exit non-zero after everything is published, and a red scheduled
-  run emails the owner. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
+  the run exit non-zero after everything is published and, on a real run
+  with `GITHUB_TOKEN` (the workflow grants the `build` job `issues: write`),
+  opens or updates one `[flows-witness:health]` issue that mentions the owner,
+  with the failure codes and counts only; the next gate that passes closes it.
+  Email is not the channel: the nightly is dispatched by `github-actions[bot]`
+  or by a schedule, so GitHub mails the actor, and the owner-actor backup runs
+  return before the gate. A dry run, and a run that never reaches the gate,
+  make no GitHub call. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 - **The gate judges the whole day, from the session ledger.** Until the
   ledger the gate saw four single cells (the clock, `live:market`,

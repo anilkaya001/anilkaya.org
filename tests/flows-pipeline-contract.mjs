@@ -1380,9 +1380,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   const run = spawnSync(process.execPath,
                ["../scripts/flows-pipeline.mjs", "--dry-run", "--emit", prefix],
-               { cwd: import.meta.dirname, encoding: "utf8" });
+               { cwd: import.meta.dirname, encoding: "utf8",
+                 env: { ...process.env, GITHUB_TOKEN: "ghs_dry", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org", GITHUB_API_URL: "http://127.0.0.1:9" } });
   eq(run.status, 0, "the dry run exits clean");
   const runLog = run.stdout + run.stderr;
+  ok(!/witness|health issue|Health issue|could not (?:list|open|report)/i.test(runLog),
+    "and, handed a job token and a GitHub API address that refuses every connection, makes no GitHub call: the health gate's issue reporter is silent in a dry run");
 
   {
     const facts = /run facts: (\d+) planned, (\d+) rostered, (\d+) failed, (\d+) skipped; (\d+) failure\(s\)/.exec(runLog);

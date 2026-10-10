@@ -72,6 +72,7 @@ import { dryLiveDay } from "./flows-legs/live-day.mjs";
 import {
   runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief, storeQuotaWait, QUOTA_WAIT,
 } from "./flows-legs/health.mjs";
+import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -7109,6 +7110,7 @@ async function main() {
       neuron: neuronLedger,
     } });
   if (health.failures.length) process.exitCode = 1;
+  await reportHealth({ failures: health.failures, applies: health.applies, dry: DRY_RUN, env: process.env });
 }
 
 export {
