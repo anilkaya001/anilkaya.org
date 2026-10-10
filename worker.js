@@ -34,6 +34,8 @@ import {
   readBounded, readJSON, requireTicker, tickerParam, keepAlive, errorText, internalKey, edgeCache,
 } from "./server/http.js";
 import { logFailure } from "./server/log.js";
+import { createRouter } from "./server/router.js";
+import { flowsReadRows } from "./server/routes/flows-read.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
@@ -2769,9 +2771,15 @@ async function renderCourse(request, env, url, meta, ctx) {
   return rewritten;
 }
 
+const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
+  absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }));
+
 async function route(request, env, url, ctx) {
   const path = url.pathname;
   const origin = url.origin;
+
+  const routed = await ROUTER.handle({ request, env, url, ctx }, { flows: currentFlowsUser });
+  if (routed !== null) return routed;
 
   if (path === "/auth/google") {
     requireMethod(request, ["GET"]);
@@ -3611,60 +3619,6 @@ async function route(request, env, url, ctx) {
     const session = await currentFlowsUser(request, env);
     if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
 
-    if (path === "/api/flows/board") {
-
-      const raw = url.searchParams.get("side");
-      const side = raw === "short" || raw === "watch" ? raw : "long";
-
-      const trace = {};
-      const stored = await readFlowsPayload(env, "board:" + side, trace);
-      if (stored === null) {
-        const kept = trace.failed ? await recallLastGood(request, url) : null;
-        if (kept) return kept;
-        return json(trace.failed
-          ? { side, rows: [], generatedAt: null, status: "pending", reason: "read-failed" }
-          : { side, rows: [], generatedAt: null, status: "pending" });
-      }
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/market") {
-
-      const stored = await readServed(env, "market");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/events") {
-
-      const stored = await readServed(env, "events");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/scoretrack") {
-
-      const stored = await readServed(env, "scoretrack");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/meta") {
-
-      const stored = await readServed(env, "meta");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/flowalerts" || path === "/api/flows/pulse" || path === "/api/flows/news") {
-
-      const { stored, overlaid, failed } = await readWithOverlay(env, path.slice("/api/flows/".length));
-      if (overlaid) return overlaid;
-      if (failed) throw storeGone();
-      if (stored === null) return json(path.endsWith("/news") ? { status: "pending", rows: [] } : { status: "pending" });
-      return passthrough(stored);
-    }
-
     if (path === "/api/flows/lk") {
       await ensureFlowsTables(env);
       return FLOWS_LIVE.serveLiveKey(env, url, Date.now(), { json, HttpError });
@@ -3683,43 +3637,6 @@ async function route(request, env, url, ctx) {
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
         json, allowed: gate, member: gate.member, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
         admit: await tapeAdmission(env, ctx, ticker, gate) });
-    }
-
-    if (path === "/api/flows/political") {
-
-      const stored = await readServed(env, "political");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/unusual") {
-
-      const stored = await readServed(env, "unusual");
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/movers" || path === "/api/flows/sectors") {
-
-      const key = path.endsWith("/movers") ? "movers" : "sector:trix";
-      const stored = await readServed(env, key);
-      if (stored === null) return json({ status: "pending", rows: [] });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/sector-premium") {
-
-      const stored = await readServed(env, "sector:premium");
-      if (stored === null) return json({ status: "pending", sectors: [] });
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/universe" || path === "/api/flows/regime" || path === "/api/flows/ideas" || path === "/api/flows/focus" || path === "/api/flows/roster") {
-
-      const key = path.slice("/api/flows/".length);
-      const stored = await readServed(env, key);
-      if (stored === null) return json({ status: "pending" });
-      return passthrough(stored);
     }
 
     if (path === "/api/flows/ai-usage") {
@@ -3760,22 +3677,6 @@ async function route(request, env, url, ctx) {
       return quoteResponse(env, ctx, ticker, vendorGate(env, session));
     }
 
-    if (path === "/api/flows/brief") {
-
-      const stored = await readServed(env, "brief");
-      if (stored === null) {
-        return json({ status: "pending", today: null, yesterday: null, next: null,
-          facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
-      }
-      let index = null;
-      try { index = JSON.parse(stored.payload); } catch { index = null; }
-      if (!index || typeof index !== "object" || Array.isArray(index)) return passthrough(stored);
-      const live = await briefWithLive(env, index);
-      return json({ ...live.index, session: FLOWS_ASK.briefAge(live.index, new Date(), FLOWS_LIVE.memoizedClock()) }, 200,
-        { "X-Payload-Updated": String(stored.updatedAt || 0), ...nightlyFreshHeaders(stored),
-          ...(live.overlay ? { "X-Live-Overlay": live.overlay } : {}) });
-    }
-
     if (path === "/api/flows/ask") {
 
       requireSameOrigin(request);
@@ -3808,29 +3709,6 @@ async function route(request, env, url, ctx) {
           "That is a fault on this site rather than a fact about the session.");
       }
       return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx, session);
-    }
-
-    if (path === "/api/flows/record") {
-
-      const stored = await readServed(env, "record");
-      if (stored === null) {
-        return json({ status: "pending", horizons: [], sessions: 0 });
-      }
-      return passthrough(stored);
-    }
-
-    if (path === "/api/flows/card" || path === "/api/flows/card-x" || path === "/api/flows/hist") {
-
-      const ticker = requireTicker(url);
-      const kind = path.slice("/api/flows/".length);
-      const stored = await readServed(env, kind + ":" + ticker);
-      if (stored === null) return absentKey(env, ctx, kind, ticker, session);
-      if (!stored.payload.includes(SPLIT_ENGINE_MARK)) return passthrough(stored);
-      const trace = {};
-      const merged = await cardWithEngine(env, ticker, stored, trace);
-      if (trace.failed) throw storeGone();
-      if (!merged.card) return passthrough(stored);
-      return json(merged.card, 200, { "X-Payload-Updated": String(stored.updatedAt || 0) });
     }
 
     if (path === "/api/flows/chain") {

@@ -7,6 +7,8 @@ import * as NEURON from "../shared/flows-neuron.js";
 import { workerSource, expect } from "./lib/source-scan.mjs";
 import { guardAi, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
+import { flowsReadRows } from "../server/routes/flows-read.js";
+import { createRouter } from "../server/router.js";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
@@ -788,9 +790,14 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   globalThis.fetch = realFetch;
   const routed = new Set(CEILING.map(([path]) => path.split("?")[0]));
   const source = workerSource();
-  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 20, why: "the Flows read routes are declared somewhere in the Worker's closure" });
-  const declared = [...new Set([...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]))]
+  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 10, why: "the Flows routes not yet in the table are declared in the Worker chain" });
+  const routerPaths = createRouter(flowsReadRows(new Proxy({}, { get: () => () => null }))).rows.map((r) => r.path);
+  ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read family: " + routerPaths.length + " rows");
+  expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
+  const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);
+  const declared = [...new Set([...routerPaths, ...chain])]
     .filter((path) => !["/api/flows/ingest", "/api/flows/tape"].includes(path));
+  ok(declared.length >= 30, "the table and the remaining chain declare at least thirty Flows read routes: " + declared.length);
   const unpriced = declared.filter((path) => !routed.has(path) && !HOME.some((h) => h.startsWith(path)));
   deep(unpriced, [], "EVERY FLOWS READ ROUTE THE WORKER DECLARES HAS A ROWS-READ CEILING: a new route that is not priced here fails, so the read cap can never be spent by a route nobody counted");
 

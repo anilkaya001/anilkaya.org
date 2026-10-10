@@ -38,6 +38,8 @@ import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-v
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
 import { workerSource } from "./lib/source-scan.mjs";
+import { flowsReadRows } from "../server/routes/flows-read.js";
+import { createRouter } from "../server/router.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-legs-probe.json"), "utf8"));
@@ -912,8 +914,9 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const worker = workerSource();
   ok(/\^universe\$\|\^regime\$/.test(worker), "the ingest allowlist accepts universe and regime");
   ok(/\/\^\(card\|card-x\|hist\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
-  ok(worker.includes('path === "/api/flows/universe" || path === "/api/flows/regime"'), "both read routes exist");
-  ok(worker.includes('path === "/api/flows/card-x"'), "and the per-name card-x route");
+  const table = createRouter(flowsReadRows(new Proxy({}, { get: () => () => null }))).rows.map((r) => r.path);
+  ok(table.includes("/api/flows/universe") && table.includes("/api/flows/regime"), "both read routes exist");
+  ok(table.includes("/api/flows/card-x"), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));
   for (const src of legs) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "leg modules carry no comments");
   const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
