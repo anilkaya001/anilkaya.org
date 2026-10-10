@@ -345,7 +345,23 @@ const SESSION_NOW = at(10, 0);
   eq(out.meta.cursor, alertsCursor(raw.data), "and alertsCursor's");
   eq(RT.applyFlow(st, raw, { session: DAY, stageOf: stage }).rows.length, 0, "fl: the same page again adds nothing: dedupe by alert id");
   eq(RT.flowQuery(st, DAY), new Date(timeMs(out.meta.cursor) - RT.RT_LIMITS.flowOverlapMs).toISOString(), "the next question reaches back 30 s behind the cursor to catch a late alert");
-  eq(RT.flowQuery(RT.createFlowState(), DAY), DAY, "and the first question of a session is the session day, as Tier 2 asks it");
+  eq(RT.flowQuery(RT.createFlowState(), DAY), DAY, "and with no clock to hand, the first question of a session is the session day, as Tier 2 asks it");
+  eq(RT.RT_LIMITS.flowFirstWindowMs, 15 * 60 * 1000, "fl: a hub with no cursor reaches back 15 minutes");
+  const WINDOW_MS = RT.RT_LIMITS.flowFirstWindowMs;
+  const fresh = RT.flowQuery(RT.createFlowState(), DAY, SESSION_NOW);
+  eq(fresh, new Date(SESSION_NOW - WINDOW_MS).toISOString(), "fl: with the hub's clock the first question of a new hub is the last 15 minutes, not the session start");
+  ok(Date.parse(fresh) >= SESSION_NOW - WINDOW_MS && Date.parse(fresh) > Date.parse(DAY), "and it is never earlier than now minus 15 minutes");
+  eq(RT.flowQuery(st, DAY, SESSION_NOW + 3600e3), RT.flowQuery(st, DAY), "fl: once a cursor exists the cursor decides, whatever the clock says");
+  {
+    const restart = SESSION_NOW + 3 * 3600e3;
+    const wide = createFakeVendor({ session: DAY, clock: () => restart });
+    wide.alertEveryMs = 60 * 1000;
+    const whole = wide.alerts({ limit: 200, newer_than: DAY });
+    const asked = wide.alerts({ limit: 200, newer_than: RT.flowQuery(RT.createFlowState(), DAY, restart) });
+    const rebuilt = RT.applyFlow(RT.createFlowState(), asked, { session: DAY, stageOf: stage });
+    ok(whole.data.length > asked.data.length && asked.data.length > 0, `fl: after a restart three hours in, the first page holds ${asked.data.length} alerts of the last 15 minutes, not the ${whole.data.length} of the session`);
+    ok(rebuilt.rows.length > 0 && rebuilt.rows.every((r) => r.ts >= restart - WINDOW_MS), "and every row the new hub sends a client is from that window");
+  }
   const later = createFakeVendor({ session: DAY, clock: () => SESSION_NOW + 9000 });
   const next = later.alerts({ limit: 200, newer_than: RT.flowQuery(st, DAY) });
   const nextOut = RT.applyFlow(st, next, { session: DAY, stageOf: stage });
@@ -467,7 +483,10 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   eq(pxc.init.headers.Accept, "application/json", "adapter: JSON");
   eq(by(/spot-exposures/)[0].url.pathname, "/api/stock/NVDA/spot-exposures", "adapter: gx asks one name per call");
   const flc = by(/flow-alerts/)[0];
-  deep([flc.url.searchParams.get("limit"), flc.url.searchParams.get("newer_than")], ["200", DAY], "adapter: fl asks the newest page of 200 since the cursor");
+  eq(flc.url.searchParams.get("limit"), "200", "adapter: fl asks the newest page of 200");
+  const firstSince = Date.parse(flc.url.searchParams.get("newer_than"));
+  ok(firstSince >= SESSION_NOW - RT.RT_LIMITS.flowFirstWindowMs && firstSince <= SESSION_NOW + 1000 - RT.RT_LIMITS.flowFirstWindowMs,
+    "adapter: a new hub's first fl question reaches back 15 minutes from its own clock, not to the session day");
   eq(by(/news/)[0].url.searchParams.get("limit"), "100", "adapter: news asks 100 headlines");
   deep(by(/market-tide|sector-etfs/).map((c) => c.url.pathname + c.url.search), TIER1_CALLS.map((c) => c.path + (c.path.includes("tide") ? "?interval_5m=true" : "")), "adapter: the market is Tier 1's two calls with Tier 1's params");
   eq(u.frames.length, 6 - 1, "adapter: every answered poll delivers one frame (the market's two calls are one)");

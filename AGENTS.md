@@ -843,7 +843,10 @@ against exactly this:
   latest wins by vendor quote time, changed rows only (`qa` is not a change).
   `fl`: the `live:alerts` row plus `id` and `ts`, ascending, appended and
   deduped by alert id, at most 200 a frame, `meta.cursor`, `meta.dropped`,
-  `meta.truncated`. `gx`: `[ticker, atMs, px, gOi, gVol, gDir, flow, lagS]`,
+  `meta.truncated`. A hub with no cursor (a restart, a deploy) asks first for
+  the last 15 minutes (`RT_LIMITS.flowFirstWindowMs`), not for the session
+  start, so the tape does not rebuild from the newest 200 alerts of the day.
+  `gx`: `[ticker, atMs, px, gOi, gVol, gDir, flow, lagS]`,
   one name per frame. `mk`: objects with an `id`, `tide` plus one per sector
   ETF (the `live:market` sector rows). `nw`: the nightly news row plus `id` and
   `ts`, at most 60.

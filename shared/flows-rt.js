@@ -60,6 +60,7 @@ export const RT_LIMITS = Object.freeze({
   pause429MaxMs: 120 * 1000,
   pause429BaseMs: 5 * 1000,
   flowOverlapMs: 30 * 1000,
+  flowFirstWindowMs: 15 * 60 * 1000,
   flowLimit: 200,
   seenMax: 1000,
   newsLimit: 100,
@@ -606,9 +607,10 @@ export function createFlowState() {
   return { ring: [], seen: new Map(), cursor: null, dropped: 0, truncations: 0, primed: false };
 }
 
-export function flowQuery(state, session) {
+export function flowQuery(state, session, nowMs = null) {
   const c = state.cursor ? timeMs(state.cursor) : NaN;
-  return Number.isFinite(c) ? new Date(c - RT_LIMITS.flowOverlapMs).toISOString() : session;
+  if (Number.isFinite(c)) return new Date(c - RT_LIMITS.flowOverlapMs).toISOString();
+  return Number.isFinite(nowMs) ? new Date(nowMs - RT_LIMITS.flowFirstWindowMs).toISOString() : session;
 }
 
 export function createGexState() {

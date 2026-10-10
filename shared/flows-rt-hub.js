@@ -121,7 +121,7 @@ export function createRestUpstream({
       const names = plan.names();
       return { args: { names }, shape: { session, names, base: plan.base() } };
     }
-    if (k === "fl") return { args: { newerThan: flowQuery(own.fl, session) }, shape: { session, stageOf: plan.stage, cursor: own.fl.cursor } };
+    if (k === "fl") return { args: { newerThan: flowQuery(own.fl, session, now()) }, shape: { session, stageOf: plan.stage, cursor: own.fl.cursor } };
     if (k === "gx") {
       const names = gxNames();
       if (!names.length) return null;
