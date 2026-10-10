@@ -1253,6 +1253,22 @@ try {
     eq(await band({ richness: "rich", richnessFrom: "forward", iv30: 0.419, rv30: 0.356, rvForward: 0.46, vrpTrailing: 0.063, vrpForward: -0.041 }), "fair", "a schema-3 card derives the band from the forward premium against the GARCH forecast");
     eq(await band({ richness: "event-pinned", vrp: 0.1, rv30: 0.5 }), "event-pinned", "a withheld verdict the builder published is never overwritten by the arithmetic it withheld");
     eq(await band({ richness: null, vrp: null, rv30: null }), "—", "and no band at all is an em dash");
+    const sq = clone(card);
+    sq.panels.ivSurface.iv[0][0] = null;
+    await mount(page, sq);
+    ok(await pickView(page, "m-vol", "Surface"), "the volatility module offers the Surface view");
+    const nq = await page.evaluate(() => {
+      const mod = document.getElementById("m-vol");
+      const key = [...mod.querySelectorAll(".ui-key")].find((k) => /Not quoted/.test(k.textContent));
+      const cell = mod.querySelector("svg rect.void");
+      if (!key || !cell) return { key: !!key, cell: !!cell };
+      const ki = getComputedStyle(key.querySelector("i")), cs = getComputedStyle(cell);
+      return { key: true, cell: true, bg: ki.backgroundColor, style: ki.borderTopStyle, color: ki.borderTopColor, cellFill: cs.fill, cellStroke: cs.stroke, cellDash: cell.getAttribute("stroke-dasharray") };
+    });
+    ok(nq.key && nq.cell, `SURFACE: an unquoted cell is drawn as a void and the legend keys it (key ${nq.key}, void ${nq.cell})`);
+    ok(nq.bg === "rgba(0, 0, 0, 0)" && nq.cellFill === "none", `SURFACE: the "Not quoted" key has no fill, as the void cell has none (${nq.bg})`);
+    ok(nq.style === "dashed" && !!nq.cellDash, "SURFACE: and a dashed outline, as the void cell has");
+    eq(nq.color, nq.cellStroke, "SURFACE: in the void's own colour, so the key shows the mark the chart draws");
     eq(errors.length, 0, `the volatility readings throw nothing (${errors.join("; ")})`);
     await page.close();
   }
@@ -1386,6 +1402,29 @@ try {
     dead.panels.variation = { status: "unavailable", reason: "neither the open-interest gamma book nor the day's flow ladder is on this card" };
     await mount(page, dead);
     ok(/neither the open-interest gamma book/i.test(await modInfo(page, "m-hedge")), "a silent model draws its reason and no number");
+    const zg = clone(card);
+    const live = [];
+    zg.panels.variation.grid.cells.forEach((row, r) => (row || []).forEach((c, j) => { if (c && typeof c.flow === "number") live.push([r, j]); }));
+    ok(live.length >= 2, "the hedge grid fixture has two measured cells to set to zero and to an unmeasured flow");
+    const [zr, zj] = live[0], [nr, nj] = live[1];
+    zg.panels.variation.grid.cells[zr][zj].flow = 0;
+    zg.panels.variation.grid.cells[nr][nj].flow = null;
+    const absentBefore = zg.panels.variation.grid.cells.flat().filter((c) => !c).length;
+    await mount(page, zg);
+    await pickView(page, "m-hedge", "Grid");
+    const g = await page.evaluate(() => {
+      const svg = [...document.querySelectorAll("#m-hedge svg")].find((x) => x.querySelector("rect.is-absent, rect.is-zero"));
+      if (!svg) return null;
+      const rect = (r) => ({ fill: r.getAttribute("fill"), stroke: r.getAttribute("stroke"), op: r.getAttribute("fill-opacity") });
+      return { zero: [...svg.querySelectorAll("rect.is-zero")].map(rect), absent: [...svg.querySelectorAll("rect.is-absent")].map(rect),
+        fill4: window.FlowsUI.cssVar("--fill-4"), label3: window.FlowsUI.cssVar("--label-3") };
+    });
+    ok(g, "the hedge grid is drawn with its zero and absent cells marked");
+    eq(g.zero.length, 1, "HEDGE GRID: a flow of exactly zero is its own cell");
+    eq(g.zero[0].fill, g.fill4, "HEDGE GRID: a fixed neutral --fill-4, not a magnitude-scaled tint of --label-3");
+    ok(g.zero[0].stroke === g.label3 && g.zero[0].op === null, `HEDGE GRID: outlined in --label-3 at full opacity (${g.zero[0].stroke})`);
+    eq(g.absent.length, absentBefore + 1, "HEDGE GRID: a present cell whose flow is null is drawn as absent, beside the cells that were never sent, not as zero");
+    ok(g.absent.every((c) => c.stroke === null && c.fill === g.fill4), "HEDGE GRID: and an absent cell carries no outline, so zero and absence differ without the text");
     await page.close();
   }
 

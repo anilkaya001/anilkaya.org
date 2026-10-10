@@ -149,7 +149,7 @@
       if (v === null) { s("circle", { cx: x, cy: mid, r: 1, class: "st-gap" }, svg); return; }
       const hh = Math.max(1, (Math.abs(v) / max) * (mid - 1));
       const inside = band !== null && Math.abs(v) <= band;
-      s("rect", { x: x - bw / 2, y: v >= 0 ? mid - hh : mid, width: bw, height: hh, rx: 0.8, class: inside ? "st-in" : v >= 0 ? "st-pos" : "st-neg" }, svg);
+      s("rect", { x: x - bw / 2, y: v > 0 ? mid - hh : v < 0 ? mid : mid - hh / 2, width: bw, height: hh, rx: 0.8, class: inside || v === 0 ? "st-in" : v > 0 ? "st-pos" : "st-neg" }, svg);
     });
     return svg;
   }
@@ -321,7 +321,7 @@
         if (v === null) { s("circle", { cx: x, cy: mid, r: 1.6, class: "st-gap" }, svg); return; }
         const hh = Math.max(1.5, Math.abs(sy(v) - mid));
         const inside = ctx.deadBand !== null && Math.abs(v) <= ctx.deadBand;
-        s("rect", { x: x - bw / 2, y: v >= 0 ? mid - hh : mid, width: bw, height: hh, rx: Math.min(3, bw / 2), class: "grow " + (inside ? "st-in" : v >= 0 ? "st-pos" : "st-neg"), style: { "--i": String(i * 2), "--origin": v >= 0 ? "bottom" : "top" } }, svg);
+        s("rect", { x: x - bw / 2, y: v > 0 ? mid - hh : v < 0 ? mid : mid - hh / 2, width: bw, height: hh, rx: Math.min(3, bw / 2), class: "grow " + (inside || v === 0 ? "st-in" : v > 0 ? "st-pos" : "st-neg"), style: { "--i": String(i * 2), "--origin": v > 0 ? "bottom" : v < 0 ? "top" : "center" } }, svg);
       });
       const li = r.s.map((v, i) => (v === null ? -1 : i)).filter((i) => i >= 0).pop();
       const tags = [];

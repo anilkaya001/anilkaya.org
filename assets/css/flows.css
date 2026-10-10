@@ -2197,6 +2197,7 @@ a.ui-fresh { text-decoration: none; }
 .ui-key > i.is-dot { width: 8px; height: 8px; border-radius: 50%; }
 .ui-key > i.is-dia { width: 8px; height: 8px; border-radius: 1.5px; transform: rotate(45deg); }
 .ui-key > i.is-ring { width: 9px; height: 9px; border-radius: 50%; background: none; border: 1.5px solid var(--c); }
+.ui-key > i.is-void { box-sizing: border-box; background: none; border: 1px dashed var(--c); }
 .ui-key > i.is-split { background: linear-gradient(90deg, var(--down-mark) 50%, var(--up-mark) 50%); }
 .ui-key b { color: var(--label-1); font-weight: 600; }
 

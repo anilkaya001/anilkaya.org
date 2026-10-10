@@ -277,7 +277,7 @@
     host.dataset.note = how;
     const agree = b !== null && p !== null && b !== 0 && p !== 0 && (b > 0) === (p > 0);
     host.prepend(h("div", { class: "mk-verdict", "data-tone": b === null || p === null ? "silent" : agree ? toneOf(p) : "warn" },
-      glyph(b === null || p === null ? "unavailable" : agree ? (p > 0 ? "up" : "down") : "flat"),
+      glyph(b === null || p === null ? "unavailable" : agree ? (p > 0 ? "up" : p < 0 ? "down" : "flat") : "flat"),
       h("span", null, b === null || p === null ? "Not comparable" : agree ? (p > 0 ? "Bought, both ways" : "Sold, both ways") : b === 0 || p === 0 ? "Level on one side" : "Weightings disagree")));
   }
 

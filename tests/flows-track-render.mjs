@@ -723,8 +723,16 @@ const popOf = (page, sel) => page.evaluate((sel) => {
     heat.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     const hr = heat.querySelector(".ui-readout");
     const heatReadout = { on: hr.classList.contains("is-on"), text: hr.textContent, value: hr.lastElementChild && hr.lastElementChild.textContent, toned: hr.querySelectorAll("[data-tone]").length };
+    heat.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    const nullReadout = { on: hr.classList.contains("is-on"), text: hr.textContent, value: hr.lastElementChild && hr.lastElementChild.textContent };
+    const voidRect = heat.querySelector(":scope > svg rect.void");
+    const legend = window.FlowsUI.legend([window.FlowsUI.key("--label-4", "void", "Not quoted")]);
+    document.body.append(legend);
+    const ki = getComputedStyle(legend.querySelector(".ui-key > i"));
+    const vs = getComputedStyle(voidRect);
+    const notQuoted = { bg: ki.backgroundColor, image: ki.backgroundImage, style: ki.borderTopStyle, width: ki.borderTopWidth, color: ki.borderTopColor, voidStroke: vs.stroke, voidFill: vs.fill };
     window.__dir = dir;
-    return { tokens, dir: d, gam: read(gam), cells, heatReadout, at: { x: b.left + (d.zero ? d.zero.x + d.zero.w / 2 : 0) * (b.width / vw), y: b.top + d.mid * (b.height / vh) }, plus: { x: b.left + (8 + ((vw - 16) / 5) * 0.5) * (b.width / vw) } };
+    return { tokens, dir: d, gam: read(gam), cells, heatReadout, nullReadout, notQuoted, at: { x: b.left + (d.zero ? d.zero.x + d.zero.w / 2 : 0) * (b.width / vw), y: b.top + d.mid * (b.height / vh) }, plus: { x: b.left + (8 + ((vw - 16) / 5) * 0.5) * (b.width / vw) } };
   });
   const T = zero.tokens;
   ok(T.up && T.down && T.long && T.short && T.neutral && T.fill4 && T.up !== T.neutral && T.down !== T.neutral && T.fill4 !== T.neutral, "the palette and neutral tokens resolve to distinct colours");
@@ -767,8 +775,46 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   eq(nc.fill, "none", "HEAT: with no fill");
   ok(nc.dash && nc.stroke === T.absent, `HEAT: and a dashed outline in --label-4 (${nc.dash})`);
   ok(zc.fill !== nc.fill, "HEAT: so the zero cell and the null cell no longer draw the same");
-  ok(zero.heatReadout.on && zero.heatReadout.value === "0", `HEAT: the keyboard readout of the zero cell is the reading 0, not "no reading" (${zero.heatReadout.text})`);
+  ok(zero.heatReadout.on && zero.heatReadout.value === "0", `HEAT: the keyboard readout of the zero cell prints the reading 0 (${zero.heatReadout.text})`);
   eq(zero.heatReadout.toned, 0, "HEAT: with no long or short tone");
+  ok(zero.nullReadout.on && zero.nullReadout.value === "no reading", `HEAT: while the null cell beside it reads "no reading", so the readout keeps the zero and the absence apart as the cells do (${zero.nullReadout.text})`);
+  const K = zero.notQuoted;
+  ok(K.bg === "rgba(0, 0, 0, 0)" && K.image === "none", `HEAT legend: the "Not quoted" key is unfilled, like the void cell it names (${K.bg}, cell fill ${K.voidFill})`);
+  ok(K.style === "dashed" && K.width === "1px", `HEAT legend: with a 1px dashed outline, like the void cell's dashed stroke (${K.style} ${K.width})`);
+  eq(K.color, K.voidStroke, "HEAT legend: in the void's own colour, --label-4");
+  await page.close();
+}
+
+{
+  trackBody = { ...TRACK, deadBand: null };
+  const page = await open();
+  await page.waitForFunction(() => document.querySelector("#stChart svg line.base") && document.querySelector('.st-row[data-t="AAA"] .st-strip'), null, { timeout: 15000 });
+  const z = await page.evaluate(() => {
+    const svg = document.querySelector("#stChart svg");
+    const mid = +svg.querySelector("line.base").getAttribute("y1");
+    const bars = [...svg.querySelectorAll("rect.grow")].map((r) => ({ cls: r.getAttribute("class"), y: +r.getAttribute("y"), h: +r.getAttribute("height"), fill: getComputedStyle(r).fill }));
+    const strip = document.querySelector('.st-row[data-t="AAA"] .st-strip');
+    const smid = +strip.querySelector("line.st-zero").getAttribute("y1");
+    const srects = [...strip.querySelectorAll("rect")].map((r) => ({ cls: r.getAttribute("class"), y: +r.getAttribute("y"), h: +r.getAttribute("height"), fill: getComputedStyle(r).fill }));
+    const probe = document.createElement("i");
+    probe.style.color = "var(--label-3)";
+    document.body.append(probe);
+    const neutral = getComputedStyle(probe).color;
+    probe.style.color = "var(--up-mark)";
+    const up = getComputedStyle(probe).color;
+    probe.remove();
+    return { mid, bars, smid, srects, neutral, up };
+  });
+  trackBody = TRACK;
+  eq(z.bars.length, 4, "NO BAND: AAA's chart still draws its four measurements when the payload carries no dead band");
+  const zc = z.bars[2], sz = z.srects[2];
+  ok(/\bst-in\b/.test(zc.cls) && !/st-pos|st-neg/.test(zc.cls), `NO BAND: the measured zero is the neutral mark, not a positive bar (${zc.cls})`);
+  eq(zc.fill, z.neutral, "NO BAND: drawn in --label-3, like the score dot above it");
+  ok(zc.fill !== z.up, "NO BAND: and not in the up colour");
+  ok(Math.abs(zc.y + zc.h / 2 - z.mid) < 1e-9, `NO BAND: centred on the axis rather than standing above it (y ${zc.y}, h ${zc.h}, axis ${z.mid})`);
+  ok(/\bst-pos\b/.test(z.bars[3].cls) && /\bst-neg\b/.test(z.bars[1].cls), "NO BAND: while the signed readings keep their sides");
+  ok(sz && sz.cls === "st-in" && sz.fill === z.neutral, `NO BAND: the row's strip draws the same zero neutral (${sz && sz.cls})`);
+  ok(sz && Math.abs(sz.y + sz.h / 2 - z.smid) < 1e-9, "NO BAND: centred on the strip's rule");
   await page.close();
 }
 
@@ -786,4 +832,5 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `returns before its first frame still drawn, the width re-read where no observer keeps it, and root tokens ` +
   `read from one computed style; a live line updated in place, its svg, crosshair, readout and focus kept, ` +
   `the newest point drawn and nothing re-animated; an exact zero drawn neutral by diverging and heatmap, ` +
-  `its dot and readout without a side, and apart from an absence`);
+  `its dot and readout without a side, and apart from an absence in the cell, the readout and the legend key; ` +
+  `and a score track with no published dead band still draws its zero neutral on the axis`);

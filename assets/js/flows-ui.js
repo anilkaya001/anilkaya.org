@@ -513,7 +513,7 @@
     if (num(v) !== null && v !== 0) {
       const a = clamp(Math.abs(v) / max, 0, 1) * 100;
       s("circle", {
-        ...RING, class: "ui-ring-v", stroke: paint(v < 0 ? "--down-mark" : "--up-mark"), "stroke-width": 3,
+        ...RING, class: "ui-ring-v", stroke: paint(v > 0 ? "--up-mark" : v < 0 ? "--down-mark" : "--label-3"), "stroke-width": 3,
         "stroke-linecap": "round", pathLength: 100, "stroke-dasharray": `${a} 100`,
         transform: v < 0 ? "rotate(-90 13 13) scale(1 -1) translate(0 -26)" : "rotate(-90 13 13)",
       }, n);
@@ -978,7 +978,7 @@
       for (let i = N - 1; i >= 0; i--) if (num(sr.values[i]) !== null) { li = i; break; }
       if (li >= 0 && o.endDots !== false) {
         const cx = xAt(li), cy = y(sr.values[li]);
-        const dotC = o.twoTone && si === 0 ? paint(sr.values[li] < 0 ? "--down" : "--up") : color;
+        const dotC = o.twoTone && si === 0 ? paint(sr.values[li] > 0 ? "--up" : sr.values[li] < 0 ? "--down" : "--label-3") : color;
         if (o.live && si === 0) s("circle", { cx, cy, r: 4, fill: dotC, class: "pulse", style: { "animation-delay": -Math.round(((document.timeline && document.timeline.currentTime) || performance.now()) % 2400) + "ms" } }, svg);
         s("circle", { cx, cy, r: 3.5, fill: dotC, class: "ring" }, svg);
         if (o.endLabels !== false) tags.push({ y: cy, y0: cy, text: (sr.format || yf)(sr.values[li]), color: dotC, x0: cx, pri: 1 });
@@ -1035,7 +1035,7 @@
           const v = sr.values[i];
           if (series.length > 1 && sr.label) parts.push(part(sr.label, "k"));
           parts.push(num(v) === null ? part("no reading", "k") : h("b", { "data-tone": o.twoTone ? tone(v) : null }, (sr.format || yf)(v)));
-          if (num(v) !== null) dots.push({ x: xAt(i), y: y(v), color: o.twoTone ? (v < 0 ? "--down" : "--up") : sr.color || (si ? "--s-gray" : "--accent") });
+          if (num(v) !== null) dots.push({ x: xAt(i), y: y(v), color: o.twoTone ? (v > 0 ? "--up" : v < 0 ? "--down" : "--label-3") : sr.color || (si ? "--s-gray" : "--accent") });
         });
         return { parts, dots };
       },
@@ -1256,7 +1256,7 @@
           if (v === null) { s("rect", { ...cell, fill: "none", stroke: paint("--label-4"), "stroke-width": 1, "stroke-dasharray": "2 2", class: "void" }, svg); continue; }
           if (v === 0) { s("rect", { ...cell, fill: paint("--fill-4"), class: "zero" }, svg); continue; }
           const a = clamp(Math.sqrt(Math.abs(v) / cap), 0.08, 1);
-          s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : pal.neg), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
+          s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : v < 0 ? pal.neg : "--fill-4"), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
         }
         if (r % every === 0 || r === o.highlightRow) s("text", { x: left - 8, y: yy + ch / 2 + 3.5, text: rf(rows[r]), "text-anchor": "end", class: r === o.highlightRow ? "tx-1 tx-b" : null }, svg);
       }
@@ -1338,7 +1338,7 @@
       const f = clamp((v - min) / ((max - min) || 1), 0, 1);
       if (o.diverging) {
         const fz = clamp((0 - min) / ((max - min) || 1), 0, 1);
-        if (Math.abs(f - fz) > 0.002) s("path", { d: f < fz ? arcPath(f, fz) : arcPath(fz, f), ...ARC, stroke: paint(o.color || (v < 0 ? "--down-mark" : "--up-mark")) }, svg);
+        if (Math.abs(f - fz) > 0.002) s("path", { d: f < fz ? arcPath(f, fz) : arcPath(fz, f), ...ARC, stroke: paint(o.color || (v > 0 ? "--up-mark" : v < 0 ? "--down-mark" : "--label-3")) }, svg);
         const [tx0, ty0] = pt(fz);
         const dx = tx0 - cx, dy = ty0 - cy, dl = Math.hypot(dx, dy) || 1;
         s("line", { x1: cx + dx / dl * (R - stroke), y1: cy + dy / dl * (R - stroke), x2: cx + dx / dl * (R + stroke), y2: cy + dy / dl * (R + stroke), stroke: paint("--label-3"), "stroke-width": 1.5 }, svg);

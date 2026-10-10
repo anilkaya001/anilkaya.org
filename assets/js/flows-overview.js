@@ -1716,7 +1716,7 @@
             : m.on ? "last scored " + m.on : "no earlier session", "k"));
         }
         if (at.length > 4) parts.push(C.part("+" + (at.length - 4) + " more", "k"));
-        return { parts, top: Math.max(0, axisY - half - 34), dots: at.slice(0, 4).map((m) => ({ x: m.x, y: axisY + m.dy, color: scores[i] < 0 ? "--down" : "--up" })) };
+        return { parts, top: Math.max(0, axisY - half - 34), dots: at.slice(0, 4).map((m) => ({ x: m.x, y: axisY + m.dy, color: scores[i] > 0 ? "--up" : scores[i] < 0 ? "--down" : "--label-3" })) };
       },
     });
   }

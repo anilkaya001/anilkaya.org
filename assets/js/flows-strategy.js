@@ -938,7 +938,7 @@
       row._guide.style.setProperty("--a", String(both ? popQ : 0));
     }
     m.popP._gap.hidden = !both;
-    m.popP._gap.dataset.tone = d >= 0 ? "up" : "down";
+    m.popP._gap.dataset.tone = d > 0 ? "up" : d < 0 ? "down" : "flat";
     m.popP._gap.style.setProperty("--a", String(both ? Math.min(popQ, popP) : 0));
     m.popP._gap.style.setProperty("--b", String(both ? Math.max(popQ, popP) : 0));
     fillLoupe(m.popD, popQ, popP, lawState || es);

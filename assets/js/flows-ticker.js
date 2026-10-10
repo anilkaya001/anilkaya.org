@@ -1320,7 +1320,7 @@
           const sy = base + 8;
           const g = fadeG(700, svg);
           let runStart = d.lo, runSign = Math.sign(at(d.lo));
-          const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : "--down-mark"), "fill-opacity": 0.85 }, g); };
+          const flush = (a, b, sg) => { if (b <= a) return; s("rect", { x: x(a), y: sy, width: Math.max(1, x(b) - x(a)), height: 4, rx: 2, fill: cssVar(sg > 0 ? "--up-mark" : sg < 0 ? "--down-mark" : "--label-3"), "fill-opacity": 0.85 }, g); };
           for (let i = 1; i <= 120; i++) {
             const xv = d.lo + (d.hi - d.lo) * i / 120;
             const sg = Math.sign(at(xv));
@@ -1845,9 +1845,10 @@
         G.cols.forEach((c, j) => {
           const cell = G.cells[r.i] && G.cells[r.i][j];
           const xx = left + j * (cw + gap);
-          if (!cell) { s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar("--fill-4") }, svg); s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4, text: DASH, "text-anchor": "middle", class: "tx-3" }, svg); return; }
+          if (!cell || num(cell.flow) === null) { s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar("--fill-4"), class: "is-absent" }, svg); s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4, text: DASH, "text-anchor": "middle", class: "tx-3" }, svg); return; }
           const a = clamp(Math.abs(num(cell.pctAdv) || 0) / maxA, 0, 1);
-          s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow > 0 ? "--up-mark" : cell.flow < 0 ? "--down-mark" : "--label-3"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
+          if (cell.flow === 0) s("rect", { x: xx + 0.5, y: yy + 0.5, width: cw - 1, height: ch - 1, rx: 8.5, fill: cssVar("--fill-4"), stroke: cssVar("--label-3"), "stroke-width": 1, class: "is-zero fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
+          else s("rect", { x: xx, y: yy, width: cw, height: ch, rx: 9, fill: cssVar(cell.flow > 0 ? "--up-mark" : cell.flow < 0 ? "--down-mark" : "--label-3"), "fill-opacity": (0.12 + 0.6 * a).toFixed(3), class: "fade", style: { "--delay": (ri + j) * 45 + "ms" } }, svg);
           if (r.kS === 0 && c.kV === 0) s("rect", { x: xx + 0.75, y: yy + 0.75, width: cw - 1.5, height: ch - 1.5, rx: 8.5, fill: "none", stroke: cssVar("--label-1"), "stroke-width": 1.5 }, svg);
           s("text", { x: xx + cw / 2, y: yy + ch / 2 + 4.5, text: F.money(cell.flow, true), "text-anchor": "middle", class: "tx-1 tx-b", style: { "font-size": phone ? "12px" : "13px" } }, svg);
         });
@@ -2059,7 +2060,7 @@
           label: card.ticker + " implied volatility by moneyness and expiry, shaded from " + F.pct(lo) + " to " + F.pct(hi) }),
           legend: [h("span", { class: "ui-key ft-ramp", role: "img", "aria-label": "Shade from " + F.pct(lo) + " to " + F.pct(hi) + " implied volatility" },
             h("span", { class: "ft-ramp-s", "aria-hidden": "true" }, RAMP_OPACITY.map((a) => h("i", { style: { "--c": cssVar("--g-long"), opacity: String(a) } }))), F.pct(lo, 0) + " – " + F.pct(hi, 0) + " IV"),
-            keyOf("--fill-4", "", "Not quoted")] };
+            keyOf("--label-4", "void", "Not quoted")] };
       } },
       { label: "History", st: ivRows.length > 4 ? OK : vc && vc.ivRank ? stOf(vc.ivRank, "implied volatility history") : panelSt(card, "volContext", "implied volatility history"), name: "Volatility history", draw: (host) => {
         const gm = new Map(), em = new Map();
@@ -2559,7 +2560,7 @@
         chg.status === "ok" && chg.d1
           ? metric("Change", F.signed(chg.d1.v), { tone: tone(chg.d1.v), sub: SESSIONS(chg.d1.gap) + (chg.stale ? SEP + chg.stale + " old" : ""), id: "ftD1" })
           : metric("Change", DASH, { state: chg.status === "ok" ? ST("quiet", "Only one session in this window carries a score for this name, so there is no move to state — which is not a move of zero.") : ST(chg.status === "quiet" ? "quiet" : "unavailable", cap(chg.reason)), id: "ftD1" })));
-    const ev = chg.status !== "ok" ? null : chg.cross ? { cleared: ["Cleared", "up"], faded: ["Faded", "down"], flipped: ["Flipped", chg.d1 && chg.d1.v < 0 ? "down" : "up"] }[chg.cross]
+    const ev = chg.status !== "ok" ? null : chg.cross ? { cleared: ["Cleared", "up"], faded: ["Faded", "down"], flipped: ["Flipped", chg.d1 && chg.d1.v > 0 ? "up" : chg.d1 && chg.d1.v < 0 ? "down" : null] }[chg.cross]
       : chg.crossKnown ? ["No crossing", null] : null;
     const evTag = h("div", { class: "ft-sig-ev", id: "ftCross", "data-cross": chg.status === "ok" ? chg.cross || (chg.crossKnown ? "none" : "unknown") : chg.status },
       ev ? tag(ev[0], { tone: ev[1] || undefined, glyph: ev[1] === "up" ? "up" : ev[1] === "down" ? "down" : null }) : UI.dash(ST(chg.status === "ok" ? (chg.band === null ? "unavailable" : "quiet") : chg.status === "quiet" ? "quiet" : "unavailable", said.lines[0] || said.lead), "Dead band"),
@@ -2571,7 +2572,7 @@
       const tr = h("div", { class: "ft-fam-t" + (signed ? "" : " is-meter") });
       if (val !== null) {
         const pct = clamp(Math.abs(val), 0, 100) / 100;
-        tr.append(signed ? h("span", { class: "ft-fam-f", style: { "--c": val < 0 ? "var(--down-mark)" : "var(--up-mark)", left: val < 0 ? 50 - pct * 50 + "%" : "50%", width: pct * 50 + "%", "transform-origin": val < 0 ? "right" : "left", "--i": String(i) } })
+        tr.append(signed ? h("span", { class: "ft-fam-f", style: { "--c": val > 0 ? "var(--up-mark)" : val < 0 ? "var(--down-mark)" : "var(--label-3)", left: val < 0 ? 50 - pct * 50 + "%" : "50%", width: pct * 50 + "%", "transform-origin": val < 0 ? "right" : "left", "--i": String(i) } })
           : h("span", { class: "ft-fam-f", style: { "--c": "var(--label-2)", left: "0", width: pct * 100 + "%", "--i": String(i) } }));
       }
       row.append(tr, val === null ? h("span", { class: "ft-fam-v", "data-tone": "silent" }, UI.dash(legacyFam(card, k) ? ST("withheld", T("legacy-vo")) : ST("quiet", "No " + lab.toLowerCase() + " reading entered this session's score."), lab))
