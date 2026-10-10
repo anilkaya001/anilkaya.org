@@ -263,6 +263,32 @@
     time: (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? ET_TIME.format(new Date(t)) + " ET" : DASH; },
     compact,
   };
+  const SHORT = [[1e9, 2, "B"], [1e6, 1, "M"], [1e3, 0, "K"]];
+  const shortUsd = (n, signed) => {
+    const a = Math.abs(n), t = SHORT.find((u) => a >= u[0]);
+    return (n < 0 ? MINUS : signed && n > 0 ? "+" : "") + "$" + (t ? (a / t[0]).toFixed(t[1]) + t[2] : a.toFixed(0));
+  };
+  const exactUsd = (n, signed) => {
+    const a = Math.abs(n), dp = a < 1000 ? 2 : 0, r = +(a + 1e-9).toFixed(dp);
+    return (n < 0 && r ? MINUS : signed && n > 0 && r ? "+" : "") + "$" +
+      r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  };
+  const UNITS = {
+    moneyCompact: (n, o) => (o.dp === "short" ? shortUsd(n, o.signed) : F.money(n, o.signed, o.dp)),
+    money: (n, o) => exactUsd(n, o.signed),
+    pct: (n, o) => F.pct(n, o.dp === undefined ? 1 : o.dp, o.signed),
+    signed: (n, o) => F.signed(n, o.dp),
+  };
+  F.unit = (kind, v, o) => {
+    const n = isNum(v);
+    return n === null || !Object.prototype.hasOwnProperty.call(UNITS, kind) ? DASH : UNITS[kind](n, o || {});
+  };
+  F.unit.of = (kind, base) => (v, dp, signed) => {
+    const o = { ...base };
+    if (typeof dp === "number" && o.dp !== "short") o.dp = dp;
+    if (typeof signed === "boolean") o.signed = signed;
+    return F.unit(kind, v, o);
+  };
   const tone = (v, dead = 0) => (num(v) === null ? "flat" : v > dead ? "up" : v < -dead ? "down" : "flat");
   const dirGlyph = (t) => (t === "down" ? "down" : t === "up" ? "up" : "flat");
   const cap = (t) => (typeof t === "string" && t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".") : t);

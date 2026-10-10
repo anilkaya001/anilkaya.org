@@ -12,22 +12,10 @@
   const $ = (id) => document.getElementById(id);
 
   const signGlyph = (n) => (n < 0 ? MINUS : n > 0 ? "+" : "");
-  const signed = (v, dp) => {
-    const n = isNum(v);
-    return n === null ? DASH : signGlyph(n) + Math.abs(n).toFixed(dp === undefined ? 2 : dp);
-  };
-  const pct = (v, dp) => F.pct(isNum(v), dp);
-  const usd = (v) => {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    const sign = n < 0 ? MINUS : "";
-    const a = Math.abs(n);
-    if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
-    if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
-    return sign + "$" + a.toFixed(0);
-  };
-  const usdS = (v) => { const n = isNum(v); return n !== null && n > 0 ? "+" + usd(n) : usd(n); };
+  const signed = F.unit.of("signed", { dp: 2 });
+  const pct = F.unit.of("pct");
+  const usd = F.unit.of("moneyCompact", { dp: "short" });
+  const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
   const tb = (v) => h("b", { "data-tone": toneOf(v) }, usdS(v));
   const toneOf = (v) => { const n = isNum(v); return n === null ? null : n > 0 ? "up" : n < 0 ? "down" : "flat"; };
   const barClass = (n) => (n < 0 ? "is-neg" : n > 0 ? "is-pos" : "is-flat");

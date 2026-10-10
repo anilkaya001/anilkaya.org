@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import vm from "node:vm";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -315,15 +316,102 @@ ok(files.length >= 10,
      "heatmap draws a null cell as a dashed void with no fill");
   ok(/if \(v === 0\) \{ s\("rect", \{ \.\.\.cell, fill: paint\("--fill-4"\), class: "zero" \}/.test(heat),
      "and an exact zero as a drawn neutral cell: zero is a reading, absence is not");
-  const market = stripComments(readFileSync(new URL("flows-market.js", JS_DIR), "utf8"));
-  ok(/const pct = \(v, dp\) => F\.pct\(isNum\(v\), dp\);/.test(market),
-     "the Market page's percent goes through F.pct, after the reader that admits the vendor's quoted numerics: a fraction " +
-     "that rounds to zero prints 0.0%, not -0.0% with a hyphen, and a quoted 0.3412 still prints 34.1%");
   const tk = stripComments(readFileSync(new URL("flows-ticker.js", JS_DIR), "utf8"));
   ok(/keyOf\("--label-4", "void", "Not quoted"\)/.test(tk) && !/keyOf\("--fill-4", "", "Not quoted"\)/.test(tk),
      "the Surface legend keys an unquoted cell as the void the kernel draws for it, not as a filled --fill-4 square, which is now an exact zero");
   ok(/\.ui-key > i\.is-void \{[^}]*background: none;[^}]*border: 1px dashed var\(--c\);/.test(CSS),
      "and the shared stylesheet draws that key unfilled, with a dashed outline in its own colour");
+}
+
+{
+  const UNIT_NAMES = ["pct", "usd", "usdS", "signed", "isNum"];
+  const MIGRATED = ["flows-market.js"];
+  const SANCTIONED = /^(?:F\.unit\.of\(|UI\.isNum\b)/;
+  const definitions = (src) => {
+    const clean = stripComments(src);
+    const names = UNIT_NAMES.join("|");
+    const found = [];
+    for (const m of clean.matchAll(new RegExp("(?:function\\s+(" + names + ")\\s*\\(|(?:const|let|var)\\s+(" + names + ")\\s*=\\s*([^;\\n]*))", "g"))) {
+      const name = m[1] || m[2];
+      if (m[1]) { found.push(name); continue; }
+      if (!SANCTIONED.test(m[3].trim())) found.push(name);
+    }
+    return found;
+  };
+
+  eq(definitions("const usd = (v) => v;").join(), "usd", "the scan sees an arrow function named usd");
+  eq(definitions("const pct = (v, dp) => F.pct(isNum(v), dp);").join(), "pct", "and a local pct that wraps F.pct, which is still a local definition");
+  eq(definitions("function signed(v) { return v; }").join(), "signed", "and a function declaration");
+  eq(definitions("let isNum = function (v) { return v; };").join(), "isNum", "and a function expression");
+  eq(definitions('const usd = F.unit.of("moneyCompact", { dp: "short" });').join(), "", "but not a binding made by the registry");
+  eq(definitions("const { h, F, isNum, DASH } = UI;").join(), "", "nor an import of the shared reader");
+  eq(definitions("// const usd = (v) => v;\nconst x = 1;").join(), "", "nor a definition quoted in a comment");
+
+  for (const file of MIGRATED) {
+    const src = readFileSync(new URL(file, JS_DIR), "utf8");
+    eq(definitions(src).join(), "",
+       `${file} defines none of ${UNIT_NAMES.join(", ")} itself: each is a binding made by F.unit.of, so the page ` +
+       "cannot grow a private copy of a formatter that the registry already owns");
+  }
+
+  const win = { matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }), addEventListener() {}, location: { pathname: "/flows/" } };
+  const ctx = { window: win, document: { getElementById: () => null, documentElement: {}, addEventListener() {}, styleSheets: [], createElement: () => ({}) },
+    Intl, console, setTimeout, clearTimeout, requestAnimationFrame: (f) => f(), navigator: {}, performance: { now: () => 0 },
+    getComputedStyle: () => ({ getPropertyValue: () => "" }) };
+  win.window = win;
+  Object.assign(win, ctx);
+  vm.createContext(ctx);
+  vm.runInContext('"use strict";\n' + readFileSync(new URL("flows-ui.js", JS_DIR), "utf8"), ctx);
+  const UI = ctx.window.FlowsUI;
+  const F = UI.F;
+  const MINUS = UI.MINUS, DASH = UI.DASH;
+
+  const oldUsd = (n) => {
+    const sign = n < 0 ? MINUS : "";
+    const a = Math.abs(n);
+    if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
+    if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
+    if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
+    return sign + "$" + a.toFixed(0);
+  };
+  const oldUsdS = (n) => (n > 0 ? "+" + oldUsd(n) : oldUsd(n));
+  const oldExact = (v, signed) => {
+    const a = Math.abs(v), dp = a < 1000 ? 2 : 0;
+    const r = +(a + 1e-9).toFixed(dp);
+    return (v < 0 && r ? MINUS : signed && v > 0 && r ? "+" : "") + "$" + r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  };
+  const GRID = [0, 0.4, 0.5, 1, 9.99, 10, 99.5, 100, 999, 999.5, 1000, 1499, 1500, 12345, 999999, 1e6, 1.04e6, 1.5e6, 9.99e8, 1e9, 2.345e9, 1.2e12]
+    .flatMap((x) => [x, -x]);
+  const usd = F.unit.of("moneyCompact", { dp: "short" });
+  const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
+  const exact = F.unit.of("money");
+  const exactS = F.unit.of("money", { signed: true });
+  for (const v of GRID) {
+    eq(usd(v), oldUsd(v), `moneyCompact short reproduces the retired K/M/B style at ${v}`);
+    eq(usdS(v), oldUsdS(v), `and its signed form at ${v}`);
+    eq(usd(String(v)), oldUsd(v), `and a quoted numeric reads as the number at ${v}`);
+    eq(exact(v), oldExact(v, false), `money reproduces the retired dollars-and-cents style at ${v}`);
+    eq(exactS(v), oldExact(v, true), `and its signed form at ${v}`);
+  }
+  for (const bad of [null, undefined, "", "  ", "x", NaN, Infinity, {}, [], true]) {
+    eq(usd(bad), DASH, `moneyCompact prints the absent-value dash for ${JSON.stringify(bad) || String(bad)}, never a zero`);
+    eq(F.unit("pct", bad), DASH, "pct does too");
+    eq(F.unit("signed", bad), DASH, "signed does too");
+  }
+  eq(usd(0), "$0", "an exact zero is a reading and prints");
+  eq(usdS(0), "$0", "and carries no sign");
+  eq(F.unit("nowhere", 1), DASH, "an unregistered kind prints the dash rather than throwing");
+  eq(F.unit("constructor", 1), DASH, "and a name inherited from Object is not a kind");
+  eq(F.unit("pct", "0.3412"), "34.1%", "a quoted fraction reads as the number");
+  eq(F.unit("pct", -0.000001, { dp: 1 }), "0.0%", "a fraction that rounds to zero prints 0.0%, not a signed zero");
+  eq(F.unit("pct", -0.0123, { dp: 1 }), MINUS + "1.2%", "a negative percent carries the minus glyph, never a hyphen");
+  eq(F.unit("pct", 0.0123, { dp: 1, signed: true }), "+1.2%", "and a signed positive carries a plus");
+  eq(F.unit("signed", -0.004, { dp: 2 }), "0.00", "a number that rounds to zero is not signed");
+  eq(F.unit("signed", -1.5, { dp: 1 }), MINUS + "1.5", "and a negative one carries the minus glyph");
+  const map = ["1", "2"].map(usd);
+  eq(map.join(), "$1,$2", "a short money formatter handed to Array.map ignores the index it is given");
+  eq(F.unit.of("pct", { dp: 2 })(0.5, 0), "50%", "a call-level decimal count overrides the registered one");
+  eq(F.unit.of("pct", { dp: 2 })(0.5), "50.00%", "and the registered one stands without it");
 }
 
 console.log(`✓ flows-sign: ${checks} assertions — a rule that lived in one file's comment and ` +
