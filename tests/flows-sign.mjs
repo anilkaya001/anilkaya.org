@@ -325,7 +325,7 @@ ok(files.length >= 10,
 
 {
   const UNIT_NAMES = ["pct", "usd", "usdS", "signed", "isNum"];
-  const MIGRATED = ["flows-market.js"];
+  const MIGRATED = ["flows-market.js", "flows-overview.js"];
   const SANCTIONED = /^(?:F\.unit\.of\(|UI\.isNum\b)/;
   const definitions = (src) => {
     const clean = stripComments(src);
