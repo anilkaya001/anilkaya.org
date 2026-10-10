@@ -8,6 +8,7 @@ import { workerSource, slice, expect, count, treeFiles, moduleSource } from "./l
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
+import { flowsAiRows } from "../server/routes/flows-ai.js";
 import { createRouter } from "../server/router.js";
 
 const FIXTURE_PATH = new URL("./fixtures-route-matrix.json", import.meta.url);
@@ -259,8 +260,8 @@ const src = workerSource();
   for (const m of slice(src, "const LEGACY_COURSE_PATHS = new Set([", "]);").matchAll(/"(\/lab\/[^"]+)"/g)) literals.add(m[1]);
   expect(src, /\bpath === "\//, { min: 30, why: "the route chain is scanned, not an empty match" });
   const stub = new Proxy({}, { get: () => () => null });
-  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub)).rows;
-  ok(table.length >= 20, "the router table holds the flows-read and flows-desk families: " + table.length + " rows");
+  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub)).rows;
+  ok(table.length >= 20, "the router table holds the flows-read, flows-desk and flows-ai families: " + table.length + " rows");
   for (const r of table) literals.add(r.path);
   ok(literals.size >= 70, "the chain and the table together declare every route literal: " + literals.size);
   const covered = new Set(rows.map((r) => r.path.split("?")[0]));

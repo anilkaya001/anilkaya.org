@@ -37,6 +37,7 @@ import { logFailure } from "./server/log.js";
 import { createRouter } from "./server/router.js";
 import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
+import { flowsAiRows } from "./server/routes/flows-ai.js";
 import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
@@ -2773,7 +2774,9 @@ async function renderCourse(request, env, url, meta, ctx) {
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
-flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }));
+flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
+flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
+  readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
@@ -3616,7 +3619,7 @@ async function route(request, env, url, ctx) {
 
   if (path.startsWith("/api/flows/")) {
 
-    requireMethod(request, path === "/api/flows/ask" ? ["POST"] : ["GET"]);
+    requireMethod(request, ["GET"]);
     const session = await currentFlowsUser(request, env);
     if (!session) throw new HttpError(401, "unauthorized", "Authentication required");
 
@@ -3638,73 +3641,6 @@ async function route(request, env, url, ctx) {
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
         json, allowed: gate, member: gate.member, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
         admit: await tapeAdmission(env, ctx, ticker, gate) });
-    }
-
-    if (path === "/api/flows/ai-usage") {
-
-      return json({ spend: await askSpend(env) });
-    }
-
-    if (path === "/api/flows/summary") {
-      const subject = tickerParam(url);
-      if (subject !== "") {
-        if (!TICKER_RE.test(subject)) {
-          throw new HttpError(400, "invalid_ticker", "Unknown ticker");
-        }
-        return summaryResponse(env, ctx, subject, session);
-      }
-
-      const summary = await readFlowsSummary(env, "board");
-      if (summary === null) {
-        return json({ status: "pending", scope: "board", summary: null, llm: false, model: null,
-          guard: null, generatedAt: null, provenance: null,
-          note: "No summary has been generated for this session yet. Nothing is claimed " +
-            "about the market by that — it says the briefing has not been published, " +
-            "not that the session was quiet." });
-      }
-      return json({ status: "ok", scope: "board", summary: summary.text, llm: summary.llm,
-        model: summary.model, guard: summary.guard, generatedAt: summary.generatedAt,
-        provenance: neuronProvenance(summary) });
-    }
-
-    if (path === "/api/flows/dossier") {
-      const ticker = requireTicker(url);
-      await ensureFlowsTables(env);
-      return dossierResponse(env, ctx, ticker, url, session);
-    }
-
-    if (path === "/api/flows/ask") {
-
-      requireSameOrigin(request);
-      const { question: asked, subject: onPage } = await askQuestion(request);
-      if (!(await memberAllowed(env.AI_ASK, session))) {
-        throw new HttpError(429, "rate_limited", "Too many questions in the last minute; ask again shortly.",
-          { "Retry-After": String(ASK_FLOOD_PERIOD_S) });
-      }
-
-      const trace = {};
-      const stored = await readFlowsPayload(env, "brief", trace);
-
-      if (stored === null) {
-        return json({ status: trace.failed ? "unreadable" : "pending", question: asked,
-          answer: null, llm: false, facts: [], guard: null, model: null,
-          spend: await askSpend(env),
-          note: trace.failed
-            ? "The briefing could not be read from the store, so no answer is offered. " +
-              "That is a fault on this site rather than a fact about the session."
-            : "The briefing has not been published for this session yet, so there is " +
-              "nothing measured to answer from. Nothing is claimed about the market by that." });
-      }
-      let index;
-      try {
-        index = JSON.parse(stored.payload);
-      } catch {
-
-        throw new HttpError(500, "brief_unreadable",
-          "The briefing was published and could not be read, so no answer is offered. " +
-          "That is a fault on this site rather than a fact about the session.");
-      }
-      return askAnswer(asked, env, (await briefWithLive(env, index)).index, stored.updatedAt, onPage, ctx, session);
     }
 
     throw new HttpError(404, "not_found", "API route not found");

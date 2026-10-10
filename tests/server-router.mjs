@@ -355,7 +355,7 @@ for (const r of table.rows) {
     absent(text, new RegExp('path === "' + r.path.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/api\/flows\/lk"/, why: r.path + " is a table row and no longer a branch of the chain" });
   }
   ok(/if \(path\.startsWith\("\/api\/flows\/"\)\) \{/.test(text), "the Flows prefix block stays for the routes not yet moved");
-  ok(/requireMethod\(request, path === "\/api\/flows\/ask" \? \["POST"\] : \["GET"\]\);\s*const session = await currentFlowsUser\(request, env\);/.test(text),
+  ok(/requireMethod\(request, \["GET"\]\);\s*const session = await currentFlowsUser\(request, env\);/.test(text),
     "with its method gate and then its session gate, in that order");
 }
 
