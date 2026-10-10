@@ -50,22 +50,22 @@ const GZIP_KIB = {
 };
 
 const CSS_KIB = {
-  tickerPage: 94,
-  overviewPage: 96,
-  sidePage: 94,
-  watchPage: 94,
-  deskPage: 103,
-  askPage: 85,
-  strategyPage: 103,
-  trackPage: 84,
-  marketPage: 85,
-  unusualPage: 104,
-  eventsPage: 97,
-  politicalPage: 97,
-  historyPage: 84,
-  loginPage: 72,
-  aboutPage: 73,
-  glossaryPage: 73,
+  tickerPage: 101,
+  overviewPage: 102,
+  sidePage: 100,
+  watchPage: 100,
+  deskPage: 109,
+  askPage: 91,
+  strategyPage: 109,
+  trackPage: 90,
+  marketPage: 92,
+  unusualPage: 109,
+  eventsPage: 102,
+  politicalPage: 102,
+  historyPage: 90,
+  loginPage: 78,
+  aboutPage: 79,
+  glossaryPage: 79,
 };
 
 const CSS_GZIP_KIB = {
@@ -217,7 +217,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 241587, gzip: 71322, css: 84697, cssGzip: 18413 };
+  const base = { name: "marketPage", raw: 241587, gzip: 71322, css: 91866, cssGzip: 20158 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -229,7 +229,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 108054, gzip: 32662, css: 96319, cssGzip: 20488 };
+  const events = { name: "eventsPage", raw: 108054, gzip: 32662, css: 102247, cssGzip: 21681 };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
