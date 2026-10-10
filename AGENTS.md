@@ -1019,6 +1019,9 @@ over a window's runs); and `tests/lib/d1-fake.mjs` (the counting D1 fake over
 `node:sqlite` that `flows-reads-contract` uses: trips, rows read by query
 plan, rows written, and the fail, throw, hang and slow switches). New CPU
 ceilings and new in-process D1 suites use these rather than another copy.
+`tests/lib/suite-registry.mjs` is the registry's scanner and checker (the import
+closure walk, the class rule, the literal-read scan, the glob matcher, `--write`),
+held by `run-contract`.
 
 GitHub Actions runs these gates on pushes to `main`, on pull requests, by
 manual dispatch, and on a weekly schedule (`17 6 * * 1`, Monday 06:17 UTC). It
@@ -1040,9 +1043,28 @@ whatever is left in its process group is killed. It prints a table
 of every suite's result, seconds and assertions, and appends it as Markdown,
 with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
 is set. **Every `test:*` script in `tests/package.json` needs an entry in
-`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`, and an
-optional `group`, `fast` or `shard`, default `shard`; only `contracts` and
-`run` are `fast`), or the runner refuses to start and exits 2.
+`tests/suites.json`** (name, class `N`, `C` or `W`, `group` `fast` or `shard`
+(only `contracts` and `run` are `fast`), `timing`, `medianS`, an optional
+`timeoutS`, `files` and `covers`), or the runner refuses to start and exits 2.
+The registry is the single list of what the suites are and what they read:
+`files` are the files the suite's script runs (flags skipped), `timing` marks the
+eight suites with an in-process CPU or wall-clock gate (the tag the flake policy
+will key on), and `covers` are globs of the repository files the suite reads
+that its import closure does not reach (pages, assets, schema, fixtures), which
+the planned affected-suite selection joins to the closure. The top-level
+`support` lists every other `tests/*.mjs` and `tests/lib/*.mjs`. Adding a suite
+is a `package.json` script, a name in `suites.json` and `node
+tests/lib/suite-registry.mjs --write`, which fills `class`, `group`, `timing`
+(false), `files`, `covers` and `support` from the tree and never drops a `covers`
+entry that still matches a file; without `--write` the same command checks the
+registry and exits 1 on a problem. `run-contract` holds it: a test file in no
+suite's `files` and not in `support`, a `class` that is not what the import
+closure makes it (`W` if it reaches `tests/worker-server.mjs`, else `C` if it
+imports `playwright` outside the optional launcher `tests/lib/browser.mjs`, else
+`N`), a `files` list that differs from the script, an unknown `group`, a
+non-boolean `timing`, a literal path the suite reads that no `covers` glob
+names, a glob that matches nothing, and a support file nothing reaches each fail,
+proved on a miniature repository in a temporary directory.
 `node run.mjs --only a,b` (from `tests/`, names without the `test:` prefix)
 runs those suites alone, `--bail` stops at the first failure as the old
 chain did, and `--timeout-scale=x` multiplies every timeout on a slow
@@ -1353,7 +1375,8 @@ rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
 `run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s with no
 server and 379 assertions, almost all of it waiting out the fixtures' timeouts
-and kill graces. It checks `tests/suites.json` against `package.json`, then
+and kill graces. It checks `tests/suites.json` against `package.json` and against the tree (the
+registry rules above, with a mutation for each), then
 spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
 hang that ignores SIGTERM, a flaky suite, a detached process that holds a
 suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide

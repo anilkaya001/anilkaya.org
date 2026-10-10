@@ -9,6 +9,7 @@ import {
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
   packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
 } from "./run.mjs";
+import { checkRegistry, syncRegistry, serialize, globMatches, scanSuite, trackedFiles, scriptFiles, ROOT as REPO } from "./lib/suite-registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUN = path.join(HERE, "run.mjs");
@@ -46,6 +47,98 @@ process.on("exit", () => {
     const t = timeoutFor(s);
     ok(t >= TIMEOUT_FLOOR_S && t >= 3 * (s.medianS || 0), `${s.name}: its timeout (${t} s) is at least the floor and three medians`);
   }
+}
+
+{
+  const manifestText = readFileSync(path.join(HERE, "suites.json"), "utf8");
+  const manifest = JSON.parse(manifestText);
+  const pkg = JSON.parse(readFileSync(path.join(HERE, "package.json"), "utf8"));
+  const tracked = trackedFiles(REPO);
+  deep(checkRegistry({ root: REPO, manifest, pkg, tracked }), [], "the committed suites.json agrees with the tree: every suite's files, class, group, timing flag and covers, and every helper registered and reached");
+  eq(serialize(syncRegistry({ root: REPO, manifest, pkg, tracked })), manifestText, "syncing the committed registry changes nothing, so adding a suite is one entry with a name and a sync");
+  eq(manifest.version, 2, "the registry is version 2");
+  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name), ["flows-ws-probe", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant"].sort((a, b) => manifest.suites.findIndex((x) => x.name === a) - manifest.suites.findIndex((x) => x.name === b)), "the eight suites with in-process CPU or wall-clock gates carry the timing flag");
+  ok(manifest.suites.every((s) => ["fast", "shard"].includes(s.group)), "every suite names its group");
+  deep(manifest.suites.filter((s) => s.group === "fast").map((s) => s.name), ["contracts", "run"], "only contracts and run are fast");
+  const classes = manifest.suites.reduce((n, s) => ({ ...n, [s.class]: (n[s.class] || 0) + 1 }), {});
+  ok(classes.N > 40 && classes.C > 10 && classes.W > 10, `the scan finds all three classes (${JSON.stringify(classes)})`);
+  const flowsRt = manifest.suites.find((s) => s.name === "flows-rt");
+  deep(scriptFiles(pkg.scripts["test:flows-rt"]), flowsRt.files, "the files of a suite are the files its script runs, flags skipped");
+  deep(scriptFiles("node ../scripts/flows-pipeline.mjs --dry-run && node flows-pipeline-contract.mjs"), ["../scripts/flows-pipeline.mjs", "flows-pipeline-contract.mjs"], "and a chain of commands lists each");
+  ok(globMatches("a/*.js", "a/b.js") && !globMatches("a/*.js", "a/c/b.js") && globMatches("a/**/*.js", "a/c/d/b.js") && globMatches("a/**/*.js", "a/b.js") && !globMatches("a/*.js", "a/b.mjs"), "covers globs: * stays in a directory, ** crosses them");
+}
+
+{
+  const root = path.join(scratch, "reg");
+  const put = (rel, body) => { mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); writeFileSync(path.join(root, rel), body); };
+  put("tests/package.json", "{}");
+  put("tests/alpha.mjs", `import { x } from "./helper.mjs";\nimport { readFileSync } from "node:fs";\nreadFileSync("../data/base.json");\nconsole.log(x);\n`);
+  put("tests/helper.mjs", `export const x = 1;\nconst later = async (n) => import(n);\n`);
+  put("tests/beta.mjs", `import { startWorker } from "./worker-server.mjs";\nawait startWorker();\n`);
+  put("tests/worker-server.mjs", `import http from "node:http";\nexport const startWorker = () => http;\n`);
+  put("tests/gamma.mjs", `import { chromium } from "playwright";\nimport { readFileSync } from "node:fs";\nreadFileSync("../assets/page.html");\nvoid chromium;\n`);
+  put("tests/delta.mjs", `import { launch } from "./lib/browser.mjs";\nvoid launch;\n`);
+  put("tests/lib/browser.mjs", `import { chromium } from "playwright";\nexport const launch = () => chromium;\n`);
+  put("data/base.json", "{}");
+  put("assets/page.html", "<p></p>");
+  const pkg = { scripts: { "test:alpha": "node alpha.mjs", "test:beta": "node --disable-warning=ExperimentalWarning beta.mjs", "test:gamma": "node gamma.mjs", "test:delta": "node delta.mjs" } };
+  const tracked = ["data/base.json", "assets/page.html", "tests/alpha.mjs", "tests/helper.mjs", "tests/beta.mjs", "tests/worker-server.mjs", "tests/gamma.mjs", "tests/delta.mjs", "tests/lib/browser.mjs"];
+  const seed = { version: 1, suites: ["alpha", "beta", "gamma", "delta"].map((name) => ({ name, medianS: 1 })) };
+  const good = syncRegistry({ root, manifest: seed, pkg, tracked });
+  deep(good.suites.map((x) => [x.name, x.class]), [["alpha", "N"], ["beta", "W"], ["gamma", "C"], ["delta", "N"]], "scan: a worker-server import is W, a playwright import is C, neither is N, and the shared launcher is not counted as a playwright import");
+  deep(good.suites.find((x) => x.name === "alpha").covers, ["data/base.json"], "scan: a literal path read outside the import closure becomes a covers entry");
+  deep(good.suites.find((x) => x.name === "gamma").covers, ["assets/page.html"], "scan: and so does an HTML page read relative to tests/");
+  deep(good.support, ["helper.mjs", "worker-server.mjs", "lib/browser.mjs"], "scan: every file no suite runs is support");
+  deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "a registry made by sync passes the check");
+  const mutate = (fn, extra = {}) => {
+    const m = JSON.parse(JSON.stringify(good));
+    fn(m);
+    return checkRegistry({ root, manifest: m, pkg: extra.pkg || pkg, tracked: extra.tracked || tracked });
+  };
+  const has = (problems, re, msg) => ok(problems.some((p) => re.test(p)), `${msg}: ${JSON.stringify(problems.slice(0, 3))}`);
+
+  put("tests/zz-dummy.mjs", `console.log("a suite nobody registered");\n`);
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/zz-dummy\.mjs is in no suite's files and not in the support list/, "mutation: an unregistered test file fails the check");
+  rmSync(path.join(root, "tests/zz-dummy.mjs"));
+  put("tests/lib/zz-helper.mjs", `export const z = 1;\n`);
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/lib\/zz-helper\.mjs is in no suite's files/, "mutation: an unregistered helper under lib fails too");
+  rmSync(path.join(root, "tests/lib/zz-helper.mjs"));
+  deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "and removing them restores a clean check");
+
+  has(mutate((m) => { m.suites[0].class = "W"; }), /alpha is class W, but its import closure makes it N/, "mutation: a pure-Node suite classed W fails");
+  has(mutate((m) => { m.suites[1].class = "N"; }), /beta is class N, but its import closure makes it W \(it imports tests\/worker-server\.mjs\)/, "mutation: a server suite classed N fails");
+  has(mutate((m) => { m.suites[2].class = "N"; }), /gamma is class N, but its import closure makes it C/, "mutation: a browser suite classed N fails");
+  has(mutate((m) => { m.suites[3].class = "C"; }), /delta is class C, but its import closure makes it N/, "mutation: the optional launcher does not make a suite C");
+  has(mutate((m) => { m.suites[0].class = "X"; }), /class "X", not N, C or W/, "mutation: an unknown class fails");
+  has(mutate((m) => { m.suites[0].files = ["other.mjs"]; }), /alpha lists files \["other\.mjs"\], but its script runs \["alpha\.mjs"\]/, "mutation: a files list that differs from the script fails");
+  has(mutate((m) => { delete m.suites[0].files; }), /alpha lists files/, "mutation: a missing files list fails");
+  has(mutate(() => {}, { pkg: { scripts: { ...pkg.scripts, "test:alpha": "node alpha.mjs && node helper.mjs" } } }), /alpha lists files/, "mutation: a script that grew a command fails until the registry follows");
+  has(mutate(() => {}, { pkg: { scripts: { ...pkg.scripts, "test:alpha": "node missing.mjs" } } }), /alpha runs missing\.mjs, which does not exist/, "mutation: a script naming a file that is not there fails");
+  has(mutate((m) => { m.suites[0].group = "slow"; }), /alpha has group "slow"/, "mutation: an unknown group fails");
+  has(mutate((m) => { delete m.suites[1].group; }), /beta has group undefined/, "mutation: a missing group fails");
+  has(mutate((m) => { m.suites[0].timing = "yes"; }), /alpha has no boolean timing flag/, "mutation: a timing flag that is not boolean fails");
+  has(mutate((m) => { m.suites[0].covers = []; }), /alpha reads data\/base\.json outside its import closure, and no covers entry names it/, "mutation: a read the covers do not name fails");
+  has(mutate((m) => { m.suites[0].covers.push("gone/*.json"); }), /alpha covers gone\/\*\.json, which matches no file/, "mutation: a covers glob that matches nothing fails");
+  deep(mutate((m) => { m.suites[0].covers = ["data/*.json"]; }), [], "a covers glob that matches the read is enough");
+  has(mutate((m) => { m.support.push("lonely.mjs"); }), /support lists lonely\.mjs, which does not exist/, "mutation: a support file that is not there fails");
+  put("tests/lonely.mjs", `console.log("nothing imports me");\n`);
+  has(mutate((m) => { m.support.push("lonely.mjs"); }, { tracked: [...tracked, "tests/lonely.mjs"] }), /support lists tests\/lonely\.mjs, which no suite's import closure reaches/, "mutation: a support file nothing reaches is an orphan and fails");
+  rmSync(path.join(root, "tests/lonely.mjs"));
+  has(mutate((m) => { m.support = m.support.filter((f) => f !== "helper.mjs"); }), /tests\/helper\.mjs is in no suite's files and not in the support list/, "mutation: a helper dropped from support fails");
+  has(mutate((m) => { m.support.push("alpha.mjs"); }), /alpha\.mjs is both a suite file and in support/, "mutation: a file both run and listed as support fails");
+  has(mutate((m) => { delete m.support; }), /no support array/, "mutation: a manifest without support fails");
+
+  const lm = path.join(scratch, "reg-lm");
+  mkdirSync(lm);
+  writeFileSync(path.join(lm, "package.json"), JSON.stringify({ scripts: { "test:alpha": "node a.mjs" } }));
+  const load = (suite, extra = {}) => { writeFileSync(path.join(lm, "suites.json"), JSON.stringify({ suites: [suite], ...extra })); return () => loadManifest(lm); };
+  deep(load({ name: "alpha", class: "N", group: "shard", timing: true, files: ["a.mjs"], covers: ["x/*.js"] })().map((x) => x.timing), [true], "the runner reads the new fields without changing what it runs");
+  throwsLike(load({ name: "alpha", timing: "yes" }), /timing flag/, "the runner refuses a timing flag that is not boolean");
+  throwsLike(load({ name: "alpha", files: [] }), /bad files list/, "the runner refuses an empty files list");
+  throwsLike(load({ name: "alpha", covers: [3] }), /bad covers list/, "the runner refuses a covers list of non-strings");
+  throwsLike(load({ name: "alpha" }, { support: "x" }), /support is not a list/, "the runner refuses a support that is not a list");
+  deep(load({ name: "alpha", class: "N" })().map((x) => x.name), ["alpha"], "and a bare entry, as the fixtures use, still loads");
+  void scanSuite;
 }
 
 {

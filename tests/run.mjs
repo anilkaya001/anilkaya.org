@@ -79,6 +79,7 @@ export function loadManifest(dir = DEFAULT_DIR) {
   const problems = [];
   if (!Array.isArray(manifest.suites) || !manifest.suites.length) problems.push("suites.json has no suites");
   const suites = Array.isArray(manifest.suites) ? manifest.suites : [];
+  if (manifest.support !== undefined && !(Array.isArray(manifest.support) && manifest.support.every((f) => typeof f === "string" && f))) problems.push("suites.json: support is not a list of file names");
   const seen = new Set();
   for (const s of suites) {
     if (!s || typeof s.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(s.name)) { problems.push(`suites.json: bad suite name ${JSON.stringify(s && s.name)}`); continue; }
@@ -89,6 +90,9 @@ export function loadManifest(dir = DEFAULT_DIR) {
     if (s.class !== undefined && !CLASSES.has(s.class)) problems.push(`suites.json: ${s.name} has class ${JSON.stringify(s.class)}, not N, C or W`);
     if (s.medianS !== undefined && s.medianS !== null && !(Number.isFinite(s.medianS) && s.medianS >= 0)) problems.push(`suites.json: ${s.name} has a bad medianS`);
     if (s.timeoutS !== undefined && !(Number.isFinite(s.timeoutS) && s.timeoutS > 0)) problems.push(`suites.json: ${s.name} has a bad timeoutS`);
+    if (s.timing !== undefined && typeof s.timing !== "boolean") problems.push(`suites.json: ${s.name} has a timing flag that is not true or false`);
+    if (s.files !== undefined && !(Array.isArray(s.files) && s.files.length && s.files.every((f) => typeof f === "string" && f))) problems.push(`suites.json: ${s.name} has a bad files list`);
+    if (s.covers !== undefined && !(Array.isArray(s.covers) && s.covers.every((c) => typeof c === "string" && c))) problems.push(`suites.json: ${s.name} has a bad covers list`);
   }
   for (const key of Object.keys(scripts)) {
     if (key.startsWith("test:") && !seen.has(key.slice(5))) problems.push(`package.json: ${key} is not in suites.json, so the runner would never run it`);
