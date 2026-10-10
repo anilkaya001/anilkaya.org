@@ -1394,7 +1394,11 @@ measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
 calls a minute at real cadence for one socket on all five topics with one focus
 ticker (px 12, fl 12, gx 4, mk 6, nw 2 on 2026-10-10; mk was 12 at a 10 s
 cadence and gx 59 before it read focus tickers only) and the alert-to-client
-latency it saw (p50 2.3 s, p95 4.8 s over 40 alerts).
+latency it saw (p50 2.1 s, p95 4.6 s over 40 alerts). Its first boot also opens
+the upgrade by hand, with and without an offer of `permessage-deflate`, reads the
+101's `Sec-WebSocket-Extensions` and parses each frame off the socket with
+`tests/lib/ws-wire.mjs`: on local workerd the offer is accepted and the payload
+travels at 0.15 of its JSON size (215 assertions on 2026-10-10).
 `flows-rt-client` needs Chromium and no server: `page.routeWebSocket` plays the
 hub for the stub tests, and for the integration block it bridges the page's
 socket to a real `RtHub` driven by `rt-fixtures.mjs` on a virtual clock. It was

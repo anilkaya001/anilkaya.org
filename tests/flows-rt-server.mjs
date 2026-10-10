@@ -7,6 +7,7 @@ import { checkFrame, createSeq, RT_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from ".
 import { createFakeVendor, vendorHandler } from "./rt-fixtures.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { easternDay, easternInstant, nextTradingDay } from "../shared/flows-freshness.js";
+import { wireSession, summariseWire } from "./lib/ws-wire.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -190,6 +191,38 @@ async function runMain() {
       ok(up.headers["strict-transport-security"] && up.headers["x-frame-options"] === "DENY", "101: all seven headers");
       eq(up.headers["content-security-policy"], undefined, "101: no CSP on a non-document");
       await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the abandoned raw socket to be released");
+    }
+
+    {
+      const OFFER = "permessage-deflate; client_max_window_bits";
+      const probe = (offer) => wireSession(base, "/api/rt/ws?f=nvda", { Cookie: OWNER, ...(offer ? { "Sec-WebSocket-Extensions": offer } : {}) }, { ms: 4000, minMessages: 8 });
+      const bare = await probe(null);
+      await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the unoffered probe to be released");
+      const asked = await probe(OFFER);
+      await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the offered probe to be released");
+      eq(bare.status, 101, "wire: a socket that offers no extension is upgraded");
+      eq(asked.status, 101, "wire: and so is one that offers permessage-deflate");
+      eq(bare.extensions, undefined, "wire: with no offer the 101 names no extension, so nothing is compressed unasked");
+      const p = summariseWire(bare.messages);
+      const a = summariseWire(asked.messages);
+      ok(p.messages >= 6 && a.messages >= 6, `wire: each probe read at least six data messages (${p.messages} and ${a.messages})`);
+      for (const m of [...bare.messages, ...asked.messages].filter((x) => !x.control)) {
+        const f = JSON.parse(m.body.toString("utf8"));
+        ok(checkFrame(f).length === 0 || f.k === "ctl", "wire: every message inflates to a clean envelope");
+        if (m.compressed) break;
+      }
+      eq(p.deflated, 0, "wire: no frame of the unoffered probe is compressed");
+      ok(p.wire >= p.plain && p.wire - p.plain <= 10 * p.messages, `wire: uncompressed, a message costs its payload plus a 2 to 10 byte frame header (${p.wire - p.plain} B over ${p.messages} messages)`);
+      const negotiated = typeof asked.extensions === "string" && /permessage-deflate/i.test(asked.extensions);
+      if (negotiated) {
+        ok(a.deflated > 0, `wire: the 101 answered ${JSON.stringify(asked.extensions)} and ${a.deflated} of ${a.messages} messages carry RSV1`);
+        ok(a.wire < a.plain, `wire: and compression moved fewer bytes than the payload (${a.wire} against ${a.plain})`);
+      } else {
+        eq(a.deflated, 0, "wire: the 101 named no extension, so no message is compressed");
+        ok(a.wire >= a.plain, "wire: and the wire carries at least the payload");
+      }
+      const per = Object.entries(a.kinds).map(([k, e]) => `${k} ${e.n}x ${Math.round(e.plain / e.n)} -> ${Math.round(e.wire / e.n)} B`).join(", ");
+      console.log(`rt wire: offered ${JSON.stringify(OFFER)}, the 101 answered Sec-WebSocket-Extensions ${JSON.stringify(asked.extensions ?? null)}; ${a.messages} messages, ${a.plain} B of payload in ${a.wire} B on the wire (${(a.wire / a.plain).toFixed(2)}), ${asked.socketBytes} B read from the socket; per message ${per}; unoffered: ${p.messages} messages, ${p.plain} B in ${p.wire} B (${(p.wire / p.plain).toFixed(2)})`);
     }
 
     const c1 = connect(base, OWNER, { query: "?f=nvda" });

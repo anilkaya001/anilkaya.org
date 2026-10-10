@@ -3186,7 +3186,23 @@ that moves every row on every poll, so the worst case for deltas; sandbox CPU):
 
 The socket therefore moves roughly forty times the bytes of today's heartbeats
 when every quote changes on every poll. These are uncompressed JSON string
-lengths; whether Cloudflare compresses the WebSocket frames (permessage-deflate)
-or the snapshot answers is not measured here, and a quiet name changes no row.
-If the bytes matter, the lever is on the server: fewer px names, or a slower px
-cadence for the names no module on the page shows.
+lengths, and a quiet name changes no row. Whether the snapshot answers are
+compressed is not measured here. The socket frames are measured by
+`flows-rt-server`, which opens the upgrade by hand, reads the 101's
+`Sec-WebSocket-Extensions` and parses every frame off the socket (RSV1, wire
+length, and the payload inflated with the connection's own context). On local
+workerd, a client that offers `permessage-deflate; client_max_window_bits` is
+answered `permessage-deflate; client_max_window_bits=15`, and 16 messages of the
+first four seconds (20-name roster, so 15.7 KB px frames rather than 32 KB)
+carried 184,638 B of JSON in 28,224 B on the wire, a ratio of 0.15: px 15,729 B to
+3,517 B, fl 16,795 to 1,449, nw 15,907 to 1,594, mk 2,055 to 670, gx 440 to 87, the
+hello 1,121 to 287. A client that offers nothing is answered no extension and gets
+the JSON uncompressed plus a 2 to 10 byte frame header. That is the local runtime,
+not Cloudflare's edge: to read the production number, open the browser's network
+panel on a signed-in Flows page, select the `/api/rt/ws` request and read
+`Sec-WebSocket-Extensions` in its response headers (empty means the edge sends
+frames uncompressed), then compare the panel's received bytes on that socket with
+`FlowsUI.rt.measure().bytes`, the JSON after inflation. If the edge compresses, a wire v2 for px
+is not needed on bytes' account. If the bytes still matter, the lever is on the
+server: fewer px names, or a slower px cadence for the names no module on the
+page shows.

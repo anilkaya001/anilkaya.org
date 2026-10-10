@@ -8,6 +8,8 @@ import { launchOptions, launch, CHROMIUM_PATH_VAR } from "./lib/browser.mjs";
 import { servedFiles, assetsIgnorePatterns, WRANGLER_DEFAULT_IGNORES } from "./lib/served-tree.mjs";
 import * as CPU from "./lib/cpu-budget.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
+import zlib from "node:zlib";
+import { createWireReader, summariseWire } from "./lib/ws-wire.mjs";
 import { plan as bumpPlan, referenceFiles } from "../scripts/bump-assets.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -285,5 +287,56 @@ const notes = [];
   ok(back.status === 0 && /font reference\(s\) set back/.test(back.stdout) && run("--check").status === 0, "bump-assets: with the fonts token restored the next bump sets the fonts back to it and the tree is consistent: " + said(back));
 }
 
+{
+  const frame = (payload, { opcode = 1, fin = true, rsv1 = false } = {}) => {
+    const n = payload.length;
+    const head = n < 126 ? Buffer.from([0, n]) : n < 65536 ? Buffer.from([0, 126, n >> 8, n & 255]) : (() => { const h = Buffer.alloc(10); h[1] = 127; h.writeBigUInt64BE(BigInt(n), 2); return h; })();
+    head[0] = (fin ? 0x80 : 0) | (rsv1 ? 0x40 : 0) | opcode;
+    return Buffer.concat([head, payload]);
+  };
+  const small = frame(Buffer.from(JSON.stringify({ k: "mk", rows: [] })));
+  const medium = frame(Buffer.from(JSON.stringify({ k: "px", rows: "x".repeat(300) })));
+  const large = frame(Buffer.from(JSON.stringify({ k: "fl", rows: "y".repeat(70000) })));
+  const reader = createWireReader();
+  await reader.push(Buffer.concat([small, medium.subarray(0, 5)]));
+  eq(reader.messages.length, 1, "ws-wire: a frame split across reads waits for its remainder");
+  await reader.push(Buffer.concat([medium.subarray(5), large]));
+  deep(reader.messages.map((m) => [m.wire, m.plain]), [[small.length, small.length - 2], [medium.length, medium.length - 4], [large.length, large.length - 10]], "ws-wire: 7-bit, 16-bit and 64-bit lengths are read, wire counting the header and plain the payload");
+  const ping = frame(Buffer.from("hi"), { opcode: 9 });
+  const first = frame(Buffer.from('{"k":"nw",'), { fin: false });
+  const rest = frame(Buffer.from('"rows":[]}'), { opcode: 0 });
+  const folded = createWireReader();
+  await folded.push(Buffer.concat([ping, first, ping, rest]));
+  eq(folded.messages.filter((m) => m.control).length, 2, "ws-wire: control frames are reported apart from data");
+  const joined = folded.messages.filter((m) => !m.control);
+  deep([joined.length, joined[0].wire, JSON.parse(joined[0].body.toString()).k], [1, first.length + rest.length, "nw"], "ws-wire: a fragmented message is one message whose wire bytes are the sum of its frames");
+  await assert.rejects(createWireReader().push(Buffer.from([0x81, 0x82, 0, 0, 0, 0, 1, 2])), /must not be masked/, "ws-wire: a masked server frame is refused");
+  checks++;
+
+  const deflater = zlib.createDeflateRaw();
+  const deflated = (text) => new Promise((resolve) => {
+    const chunks = [];
+    const take = (d) => chunks.push(d);
+    deflater.on("data", take);
+    deflater.write(text);
+    deflater.flush(zlib.constants.Z_SYNC_FLUSH, () => {
+      deflater.off("data", take);
+      const out = Buffer.concat(chunks);
+      resolve(out.subarray(0, out.length - 4));
+    });
+  });
+  const rows = JSON.stringify({ k: "px", rows: Array.from({ length: 40 }, (_, i) => ["NVDA", 100 + i, "0.5", "1.25"]) });
+  const again = rows.replace("100", "101");
+  const a = frame(await deflated(rows), { rsv1: true });
+  const b = frame(await deflated(again), { rsv1: true });
+  const packed = createWireReader({ compressed: true });
+  await packed.push(Buffer.concat([a, b]));
+  deep(packed.messages.map((m) => m.body.toString()), [rows, again], "ws-wire: permessage-deflate messages are inflated with the context the connection keeps from one message to the next");
+  const sum = summariseWire(packed.messages);
+  deep([sum.messages, sum.deflated, sum.plain, sum.wire === a.length + b.length, sum.wire < sum.plain, sum.kinds.px.n], [2, 2, rows.length + again.length, true, true, 2], "ws-wire: the summary counts wire against plain bytes per message kind");
+  const mixed = summariseWire([...reader.messages, ...packed.messages]);
+  deep(Object.keys(mixed.kinds).sort(), ["fl", "mk", "px"], "ws-wire: kinds are read from the envelope's k");
+}
+
 for (const n of notes) console.log("  note: " + n);
-console.log(`✓ lib-contract: ${checks} checks — the browser launcher's PW_CHROMIUM_PATH, the served tree under gitignore semantics, the CPU budget's ratio, floor and interleaving, the counting D1 fake, and the asset-bump tool (fonts held, every page and sheet moved, unversioned references caught)`);
+console.log(`✓ lib-contract: ${checks} checks — the browser launcher's PW_CHROMIUM_PATH, the served tree under gitignore semantics, the CPU budget's ratio, floor and interleaving, the counting D1 fake, the WebSocket wire reader (lengths, fragments, permessage-deflate with context takeover), and the asset-bump tool (fonts held, every page and sheet moved, unversioned references caught)`);
