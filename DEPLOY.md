@@ -3133,6 +3133,34 @@ anything. The dossier route and the reading share the 3 s vendor deadline, so a 
 for the first time answers `generating` with no sections when its dossier takes longer
 than 1.5 seconds to assemble, and fills in on the next poll.
 
+### 10.5m2 Ranking v2: the flag, what it changes, how to look
+
+The engine ranks priced structures by `score`, expected value per dollar of capital
+(`evP / capital`). With the flag on it ranks by `(evP - spread / 2) / (capital x sessions)`,
+where `spread` is the span of `evP` across the real-world laws the engine already prices
+(`ev.pBand` maximum less minimum) and `sessions` is the sessions to expiry, at least one.
+The first term is a deduction for the disagreement between the laws, the second puts a
+five-session structure and a one-session structure on the same footing. A structure whose
+deducted EV is not above zero is not an idea, so a name whose only positive structures are
+the laws' disagreement stands aside as `ev.none-positive`.
+
+With the flag on each published structure carries `scoreRaw` (the old score), `rankV2`
+(`evShrunk`, `shrink`, `sessions`) and its `score` is the v2 score; the engine block carries
+`rank: "v2"`. With it off nothing is added and the output is byte for byte what it was.
+Nothing reads `score` as "EV over capital" outside the strategy page, which prices its own
+structures through `priceStructure` and never ranks.
+
+Two surfaces read the flag and each must be set where it runs. The nightly (GitHub Actions)
+reads `FLOWS_RANK` from its environment; the Worker's strategy route reads `FLOWS_RANK` from
+`wrangler.toml` [vars]. Only the exact value `v2` (case and padding ignored) turns it on;
+anything else, unset included, is v1. The shipped Worker value is `"v1"`. The nightly's
+environment is a workflow edit the owner makes; this repository does not set it.
+
+It ships dark: there is no evidence yet that it ranks better. The plan evaluates it on the
+`ideas-out:<date>` archive and the `calib` row after sixty sessions, comparing the realised
+return of the v2 lead against the v1 lead on the same nights; flip the switch only on that
+comparison, and only together with counsel's answer on ranked outputs (OD-06).
+
 ### 10.5n The real-time rail: one Durable Object, demand-driven REST polling, hibernating WebSockets
 
 **Why.** The stored live keys are minutes behind the vendor (Tier 1 every

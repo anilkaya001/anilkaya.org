@@ -9,7 +9,7 @@ import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
-import { bookRows, runCardEngine, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
+import { bookRows, runCardEngine, rankModeOf, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
 import { aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -2468,7 +2468,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
   };
 }
 
-function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
+function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs, rank }) {
   const block = card && card.engine && typeof card.engine === "object" && Array.isArray(card.engine.facts) ? card.engine : null;
   const book = bookRows(calls, puts, optionRoot(ticker));
   const rows = book.length ? [{ expiry, rows: book }] : [];
@@ -2481,7 +2481,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
     rate: block && block.rate ? block.rate : null,
     facts: block ? block.facts : [], state, pLaw: block ? block.pLaw : null,
     levels: block ? block.levels : null, event: block ? block.event : null,
-    atr: block ? block.atr : null, fits: true,
+    atr: block ? block.atr : null, fits: true, rank,
     stale: engineStale({
       cardSession: card ? card.sessionDate : null, blockAsOf: block ? block.asOf : null,
       expectedSession: card && card.sessionDate ? FLOWS_ASK.briefAge({ sessionDate: card.sessionDate }, new Date(nowMs), FLOWS_LIVE.memoizedClock(nowMs)).expected : null,
@@ -2573,7 +2573,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
     const card = cardRead && cardRead.card ? cardRead.card : null;
     const spot = spotLive !== null && spotLive > 0 ? spotLive : card && card.engine && numOrNull(card.engine.spot);
     try {
-      engineBlock = strategyEngine({ ticker, expiry, calls: callRows, puts: putRows, spot, card, nowMs: Date.now() });
+      engineBlock = strategyEngine({ ticker, expiry, calls: callRows, puts: putRows, spot, card, nowMs: Date.now(), rank: rankModeOf(env && env.FLOWS_RANK) });
       engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
     } catch (error) {
       engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (errorText(error)) };

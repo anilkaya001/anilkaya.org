@@ -659,6 +659,17 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(r.res.status, 200, "the strategy lab reads a dotted ticker's expiry");
   eq(r.body.calls.length, 7, "with its seven calls");
   eq(r.body.engine.status, "ok", "AND ITS ENGINE PRICES THEM: the book was filtered on the raw ticker BRK.B against the option root BRKB, and answered that no contract parsed as the ticker's own");
+  ok(!("rank" in r.body.engine), "with FLOWS_RANK unset the strategy engine ranks as it always did and publishes no rank field");
+  const vendor = (url, t) => {
+    if (url.pathname.endsWith("/stock-state")) return { data: { close: "500.00", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+    if (url.pathname.endsWith("/option-contracts")) return { data: url.searchParams.get("option_type") === "call" ? side("C") : side("P") };
+    return undefined;
+  };
+  const ranked = await route("/api/flows/strategy?t=BRK.B&expiry=2026-09-18&engine=1", vendor, { UW_NOW: NOW, FLOWS_RANK: "v2" });
+  eq(ranked.body.engine.rank, "v2", "FLOWS_RANK=v2 ranks the strategy engine's structures on the v2 score and says so");
+  ok(ranked.body.engine.structures.every((x) => x.scoreRaw !== undefined), "each published structure then carries its v1 score as scoreRaw");
+  const stray = await route("/api/flows/strategy?t=BRK.B&expiry=2026-09-18&engine=1&refresh=1", vendor, { UW_NOW: NOW, FLOWS_RANK: "yes" });
+  ok(!("rank" in stray.body.engine), "and any other value leaves it on v1");
 }
 
 {
