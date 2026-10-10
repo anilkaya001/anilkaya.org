@@ -1065,7 +1065,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
 const TAPE_ROW_SQL = "SELECT payload, read_at, session, legs, refreshing_until, last_served FROM flows_tape WHERE ticker = ?";
 const firstOf = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
 
-export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null, allowed = () => ondemandAllowed(env) }) {
+export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admit = null, member = null, allowed = () => ondemandAllowed(env) }) {
   const db = env.DB;
   const read = () => db.prepare(TAPE_ROW_SQL).bind(ticker).first().catch(() => null);
   const keyed = [db.prepare(TAPE_ROW_SQL).bind(ticker)];
@@ -1104,6 +1104,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
   }
 
   if (!env.UW_API_KEY) return usable ? respond(row, "stale-unconfigured") : pending("unconfigured");
+  if (member && !(await member())) return usable ? respond(row, "stale-throttled") : pending("throttled");
 
   await db.prepare("INSERT OR IGNORE INTO flows_tape (ticker) VALUES (?)").bind(ticker).run().catch(() => {});
   const claim = await db.prepare(

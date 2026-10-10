@@ -1440,12 +1440,15 @@ class FakeCache {
   try {
     await get(A, "/api/flows/meta");
     memberKeys.length = 0;
+    const vendorBefore = calls.length;
     for (let i = 1; i <= 60; i++) {
       const r = await get(A, "/api/flows/chain?t=NVDA&refresh=1");
       ok(r.res.status !== 429 && r.vendor > 0, `MEMBER VENDOR: member A's chain read ${i} of 60 in the window reaches the vendor (${r.res.status}, ${r.vendor} calls)`);
     }
     eq(counts.get(A), 60, "one limiter call per vendor-spending request, however many vendor calls the request makes");
-    eq(ondemand, 60, "and each admitted request also takes one token from the shared UW_ONDEMAND budget");
+    const spentCalls = calls.length - vendorBefore;
+    ok(spentCalls >= 120, `the 60 chain reads made several vendor calls each (${spentCalls})`);
+    eq(ondemand, spentCalls, "THE SHARED UW_ONDEMAND BUDGET IS CHARGED PER VENDOR CALL: one token for each call the 60 chain reads made");
     const before = ondemand;
     refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "member A's 61st chain read in the window, with no copy held");
     refusedJson(await get(A, "/api/flows/strategy?t=NVDA"), "a strategy context read by member A past the window");
@@ -1466,6 +1469,55 @@ class FakeCache {
     ok(liveB.res.status === 200 && liveB.body.status === "ok" && liveB.body.price === 101.5 && liveB.vendor === 1,
       `and B's quote is read from the vendor (${JSON.stringify(liveB.body).slice(0, 80)})`);
     deep([...new Set(memberKeys)], [A, B], "the limiter is keyed by memberId(session), one key per member");
+
+    const meter = (allow = Infinity) => {
+      const m = { granted: 0, refused: 0 };
+      m.binding = { limit: async () => {
+        if (m.granted >= allow) { m.refused++; return { success: false }; }
+        m.granted++;
+        return { success: true };
+      } };
+      return m;
+    };
+    const pricedWorld = (u) => {
+      if (u.pathname.endsWith("/option-contracts")) return { data: [] };
+      if (u.pathname.includes("/ohlc/")) return { data: [{ date: "2026-08-25", market_time: "r", close: "183.40" }, { date: "2026-08-24", market_time: "r", close: "180.00" }] };
+      if (u.pathname.endsWith("/stock-state")) return { data: { close: "183.40", prev_close: "179.10", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+      if (u.pathname.endsWith("/info")) return { data: { next_earnings_date: "2026-12-30", announce_time: "premarket", issue_type: "Common Stock" } };
+      return { data: [] };
+    };
+    const priced = { UW_NOW: "2026-08-25T18:10:00Z" };
+    const perCall = async (route, what, expected) => {
+      const m = meter();
+      world = pricedWorld;
+      try {
+        const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
+        eq(m.granted, r.vendor, `${what}: ONE SHARED TOKEN PER VENDOR CALL (${m.granted} tokens, ${r.vendor} calls)`);
+        eq(r.vendor, expected, `${what}: makes ${expected} vendor calls`);
+        return r;
+      } finally {
+        world = null;
+      }
+    };
+    await perCall("/api/flows/chain?t=NVDA&refresh=1", "a chain miss (option-contracts, ohlc, stock-state, info)", 4);
+    await perCall("/api/flows/strategy?t=NVDA&refresh=1", "a strategy context miss (breakdown, ohlc, stock-state, info, the dated breakdown, the exposure fallback and the SPY index)", 7);
+    await perCall("/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1&refresh=1", "a strategy expiry with the engine (calls, puts, stock-state)", 3);
+    await perCall("/api/flows/strategy?t=NVDA&expiry=2026-10-16&refresh=1", "a strategy expiry without the engine (calls, puts)", 2);
+
+    for (const [route, what] of [["/api/flows/chain?t=NVDA&refresh=1", "a chain miss"],
+      ["/api/flows/strategy?t=NVDA&refresh=1", "a strategy context miss"],
+      ["/api/flows/strategy?t=NVDA&expiry=2026-10-16&engine=1&refresh=1", "a strategy expiry miss"]]) {
+      const m = meter(2);
+      world = pricedWorld;
+      try {
+        const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
+        refusedJson({ ...r, vendor: 0 }, `${what} when the shared budget runs dry after two calls (no copy held)`);
+        eq(r.vendor, 2, `${what}: A REFUSAL IN THE MIDDLE OF A BUILD STOPS THE REST: only the two admitted calls reach the vendor`);
+        eq(m.granted, 2, `${what}: and exactly two tokens were spent`);
+      } finally {
+        world = null;
+      }
+    }
 
     const cache = new FakeCache();
     globalThis.caches = { default: cache };
@@ -1517,6 +1569,17 @@ class FakeCache {
         eq(counts.get(A), spentA + 1, `and the copy past its TTL asks the limiter once (${route})`);
       }
       await aged("https://flows-chain.internal/NVDA?strategy=both&rank=annualized", { ticker: "NVDA", held: "chain" }, 300);
+      {
+        const m = meter(1);
+        world = pricedWorld;
+        const r = await get(B, "/api/flows/chain?t=NVDA", { UW_ONDEMAND: m.binding, ...priced });
+        world = null;
+        ok(r.res.status === 200 && r.body && r.body.held === "chain" && r.vendor === 1 && m.granted === 1,
+          `A REFUSAL MID-BUILD SERVES THE KEPT COPY: the shared budget allows one call, the chain read makes 1 and answers the held copy (${r.res.status}, ${r.vendor} calls)`);
+        ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
+          r.res.headers.get("X-Chain-Cache") === "throttled" && r.res.headers.get("Cache-Control") === "no-store",
+          "stamped stale and throttled, as a member refusal is");
+      }
       world = (u) => {
         if (u.pathname.endsWith("/option-contracts")) return { data: [
           { option_symbol: "NVDA260918P00170000", nbbo_bid: "2.50", nbbo_ask: "2.60", implied_volatility: "0.28", open_interest: "1200", volume: "340" },
@@ -1553,8 +1616,24 @@ class FakeCache {
           `A REFUSED MEMBER'S TAPE READ OF AN UNKNOWN NAME answers pending, throttled, with 0 vendor calls (${t}: ${JSON.stringify(junk.body).slice(0, 80)})`);
       }
       eq(tapeRows(), rowsBefore, `AND WRITES NO flows_tape ROW: the refused admit never reaches the insert or the lease claim (${rowsBefore} -> ${tapeRows()})`);
+      const changes = () => f.db.prepare("SELECT total_changes() AS n").get().n;
+      f.db.prepare("DELETE FROM flows_tape WHERE ticker = 'NVDA'").run();
+      f.db.prepare("INSERT INTO flows_tape (ticker, payload, read_at, session, legs, last_served) VALUES ('NVDA', ?, ?, '2026-08-25', 1, ?)")
+        .run(JSON.stringify({ ticker: "NVDA", held: "tape" }), Date.now() - 7 * 86400000, Date.now());
+      const staleBefore = changes();
+      for (let i = 0; i < 10; i++) {
+        const r = await get(A, "/api/flows/tape?t=NVDA");
+        ok(r.res.status === 200 && r.vendor === 0 && /^stale-throttled$|^throttled$/.test(r.res.headers.get("X-Tape") || ""),
+          `A REFUSED MEMBER'S READ OF A KNOWN NAME'S STALE TAPE ${i + 1} of 10 makes 0 vendor calls and is throttled (${r.res.headers.get("X-Tape")})`);
+      }
+      eq(changes() - staleBefore, 0, "AND WRITES NOTHING: no lease claim, no release, no insert (total_changes unchanged over ten reads)");
+      const staleB = await get(B, "/api/flows/tape?t=NVDA");
+      ok(staleB.vendor > 0, `while member B's read of the same stale tape reaches the vendor (${staleB.vendor} calls)`);
       const cardA = await get(A, "/api/flows/card?t=ZZQQ");
       ok(cardA.res.status === 200 && cardA.vendor === 0, `an unknown name's card read by a refused member makes no screener call (${cardA.vendor})`);
+      ok(cardA.body && cardA.body.status === "unavailable" && cardA.body.why === "throttled" &&
+        cardA.res.headers.get("X-Fresh-Reason") === "throttled" && cardA.res.headers.get("Cache-Control") === "no-store",
+        `AND IT IS TOLD THE LOOKUP WAS THROTTLED, not that the name is not covered (${JSON.stringify(cardA.body)})`);
       const cardB = await get(B, "/api/flows/card?t=ZZQQ");
       ok(cardB.vendor === 1, `while member B's classifies the name with one screener call (${cardB.vendor})`);
     } finally {

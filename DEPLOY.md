@@ -2352,8 +2352,12 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   the per-member `MEMBER_VENDOR` rate-limit binding (60 vendor-spending requests a
   minute for each member, checked first, failing open) and then the shared
   `UW_ONDEMAND` binding, which several members together can still spend. A refused
-  member's tape read of a name that is neither held nor classified answers
-  `pending` (`throttled`) before any `flows_tape` row is inserted or leased. A tape is final only when its read
+  member's tape read answers `pending` (`throttled`), or the stale row as
+  `stale-throttled`, before any `flows_tape` row is inserted or leased; the tape
+  spends one shared token per refresh. The chain and strategy reads (and so the desk)
+  spend one shared token per vendor call, so the 120 a minute allocation counts
+  vendor calls, and a build the shared budget stops part-way serves the kept
+  copy or a 429. A tape is final only when its read
   covers the last close (the classifier's own test: read at or after the close
   less one cadence); outside the session a row that does not is refreshed, the
   older leg on each view, so a complete row is final after at most two views

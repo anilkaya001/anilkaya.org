@@ -1219,14 +1219,19 @@ async function absentKey(env, ctx, kind, ticker, session) {
   if (kind !== "card") return json({ ticker, status: "absent", why: "not-covered" });
   const lite = liteCard(ticker, firstRow(uni), firstRow(gate));
   if (lite) return lite;
-  const verdict = await classifyTicker(env, ctx, ticker, vendorGate(env, session));
+  const { verdict, refused } = await classifyWatched(env, ctx, ticker, vendorGate(env, session));
   if (verdict && verdict.known) {
     return json(quoteCard(ticker, verdict.row, verdict.readAt), 200, freshHeaders(rowMeta(verdict.readAt), now, clock).headers);
+  }
+  if (!verdict && refused) {
+    return json({ ticker, status: "unavailable", why: "throttled" }, 200,
+      { ...pendingHeaders("nightly", now, clock), "X-Fresh-Reason": "throttled", "Cache-Control": "no-store",
+        "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
   }
   return json({ ticker, status: "absent", why: verdict ? "unknown" : "not-covered" });
 }
 
-async function vendorAdmission(env, ctx, ticker, allowed) {
+async function classifyWatched(env, ctx, ticker, allowed) {
   let refused = false;
   const watched = async () => {
     const yes = await allowed();
@@ -1234,6 +1239,11 @@ async function vendorAdmission(env, ctx, ticker, allowed) {
     return yes;
   };
   const verdict = await classifyTicker(env, ctx, ticker, watched);
+  return { verdict, refused };
+}
+
+async function vendorAdmission(env, ctx, ticker, allowed) {
+  const { verdict, refused } = await classifyWatched(env, ctx, ticker, allowed);
   if (verdict) return verdict.known ? "known" : "unknown";
   return refused ? "refused" : "open";
 }
@@ -1274,12 +1284,29 @@ const ASK_FLOOD_PERIOD_S = 60;
 
 const MEMBER_VENDOR_PERIOD_S = 60;
 
+class VendorRefused extends Error {}
+
+const keepRefusal = (fallback) => (error) => {
+  if (error instanceof VendorRefused) throw error;
+  return fallback;
+};
+
 function vendorGate(env, session) {
   let member = null;
-  return async () => {
-    member ||= memberAllowed(env.MEMBER_VENDOR, session);
-    if (!(await member)) return false;
+  const check = () => (member ||= memberAllowed(env.MEMBER_VENDOR, session));
+  const gate = async () => {
+    if (!(await check())) return false;
     return FLOWS_LIVE.ondemandAllowed(env);
+  };
+  gate.member = check;
+  gate.call = () => FLOWS_LIVE.ondemandAllowed(env);
+  return gate;
+}
+
+function chargedFetch(env, gate) {
+  return async (path, params, opts) => {
+    if (!(await gate.call())) throw new VendorRefused();
+    return uwFetch(env, path, params, opts);
   };
 }
 
@@ -2105,15 +2132,15 @@ async function uwFetch(env, path, params, opts) {
   }
 }
 
-async function cachedTickerInfo(env, ctx, ticker) {
+async function cachedTickerInfo(env, ctx, ticker, vf) {
   const key = new Request(`https://flows-info.internal/${ticker}`, { method: "GET" });
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   if (cache) {
     const hit = await cache.match(key).catch(() => null);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await uwFetch(env, `/api/stock/${encodeURIComponent(ticker)}/info`, {})
-    .catch(() => null);
+  const raw = await vf(`/api/stock/${encodeURIComponent(ticker)}/info`, {})
+    .catch(keepRefusal(null));
   if (raw === null) return null;
 
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
@@ -2204,7 +2231,7 @@ async function buildLivePayload(env, ticker) {
   };
 }
 
-async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSeconds, allowed }) {
+async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const keep = Math.max(ttl, VENDOR_COPY_KEEP_SECONDS);
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
@@ -2224,7 +2251,7 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
     return out;
   }
 
-  if (allowed && !(await allowed())) {
+  const refuse = () => {
     if (!hit) {
       throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
         { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
@@ -2237,9 +2264,17 @@ async function serveCachedVendorRead({ ctx, cacheKey, wantsRefresh, build, ttlSe
     out.headers.set("X-Fresh-Reason", "throttled");
     out.headers.set("X-Fresh-Throttled", "1");
     return out;
-  }
+  };
 
-  const payload = await build();
+  if (gate && !(await gate.member())) return refuse();
+
+  let payload;
+  try {
+    payload = await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts));
+  } catch (error) {
+    if (error instanceof VendorRefused) return refuse();
+    throw error;
+  }
   const body = JSON.stringify(payload);
 
   if (cache) {
@@ -2285,9 +2320,9 @@ function offMarketChain(list, ivBasis, rankBy) {
   };
 }
 
-async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) {
+async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit }) {
   const t = encodeURIComponent(ticker);
-  const chainPage = (page) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+  const chainPage = (page) => vf(`/api/stock/${t}/option-contracts`, {
 
     maybe_otm_only: "true",
     exclude_zero_oi_chains: "true",
@@ -2298,11 +2333,11 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
 
-    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
+    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
 
-    cachedTickerInfo(env, ctx, ticker),
+    cachedTickerInfo(env, ctx, ticker, vf),
     cardPending,
   ]);
   const readMs = chainReadMs(env);
@@ -2314,7 +2349,7 @@ async function buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit }) 
 
   let truncated = false;
   if (rows.length >= CHAIN_PAGE_SIZE) {
-    const second = unwrap(await chainPage(2).catch(() => []));
+    const second = unwrap(await chainPage(2).catch(keepRefusal([])));
     for (const r of second) rows.push(r);
 
     truncated = second.length >= CHAIN_PAGE_SIZE;
@@ -2403,14 +2438,14 @@ const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const STRATEGY_PAGES_PER_TYPE = 2;
 
-async function cachedIndexSpot(env, ctx) {
+async function cachedIndexSpot(env, ctx, vf) {
   const key = new Request(`https://flows-index.internal/${STRATEGY_INDEX}`, { method: "GET" });
   const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
   if (cache) {
     const hit = await cache.match(key).catch(() => null);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await uwFetch(env, `/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(() => null);
+  const raw = await vf(`/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(keepRefusal(null));
   if (raw === null) return null;
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const close = numOrNull(d && d.close);
@@ -2435,13 +2470,13 @@ async function cachedIndexSpot(env, ctx) {
 
 const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
 
-async function buildStrategyContext(env, ctx, ticker) {
+async function buildStrategyContext(env, ctx, vf, ticker) {
   const t = encodeURIComponent(ticker);
   const [breakdown, candles, state, info] = await Promise.all([
-    uwFetch(env, `/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(() => null),
-    uwFetch(env, `/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
-    uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null),
-    cachedTickerInfo(env, ctx, ticker),
+    vf(`/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
+    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    cachedTickerInfo(env, ctx, ticker, vf),
   ]);
   const readMs = chainReadMs(env);
 
@@ -2458,8 +2493,8 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expiryDate = null;
   if (breakdown !== null && !expiries.length && asOf) {
-    const retry = await uwFetch(env, `/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
-      .catch(() => null);
+    const retry = await vf(`/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
+      .catch(keepRefusal(null));
     if (retry !== null) {
       const dated = readExpiries(retry);
       if (dated.length) { expiries = dated; expiryDate = asOf; }
@@ -2468,8 +2503,8 @@ async function buildStrategyContext(env, ctx, ticker) {
 
   let expirySource = "breakdown";
   if (breakdown !== null && !expiries.length && asOf) {
-    const exposure = await uwFetch(env, `/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
-      .catch(() => null);
+    const exposure = await vf(`/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
+      .catch(keepRefusal(null));
     if (exposure !== null) {
       const listed = readExpiries(exposure)
         .filter((e) => e.expiry >= asOf)
@@ -2478,7 +2513,7 @@ async function buildStrategyContext(env, ctx, ticker) {
     }
   }
 
-  const index = await cachedIndexSpot(env, ctx);
+  const index = await cachedIndexSpot(env, ctx, vf);
 
   return {
     mode: "context",
@@ -2534,9 +2569,9 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs }) {
   };
 }
 
-async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } = {}) {
+async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = false } = {}) {
   const t = encodeURIComponent(ticker);
-  const page = (optionType, n) => uwFetch(env, `/api/stock/${t}/option-contracts`, {
+  const page = (optionType, n) => vf(`/api/stock/${t}/option-contracts`, {
 
     expiry,
     option_type: optionType,
@@ -2547,7 +2582,7 @@ async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } 
   const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
-    engine ? uwFetch(env, `/api/stock/${t}/stock-state`, {}).catch(() => null) : Promise.resolve(null),
+    engine ? vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)) : Promise.resolve(null),
     cardPending,
   ]);
 
@@ -2556,7 +2591,7 @@ async function buildStrategyExpiry(env, ctx, ticker, expiry, { engine = false } 
     let truncated = false;
     if (rows.length >= CHAIN_PAGE_SIZE) {
       for (let n = 2; n <= STRATEGY_PAGES_PER_TYPE; n++) {
-        const next = unwrapRows(await page(optionType, n).catch(() => []));
+        const next = unwrapRows(await page(optionType, n).catch(keepRefusal([])));
         for (const r of next) rows.push(r);
 
         truncated = next.length >= CHAIN_PAGE_SIZE;
@@ -3754,7 +3789,7 @@ async function route(request, env, url, ctx) {
       await ensureFlowsTables(env);
       const gate = vendorGate(env, session);
       return FLOWS_LIVE.serveTape(env, ctx, ticker, Date.now(), {
-        json, allowed: gate, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
+        json, allowed: gate, member: gate.member, fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
         admit: await tapeAdmission(env, ctx, ticker, gate) });
     }
 
@@ -3927,13 +3962,14 @@ async function route(request, env, url, ctx) {
       const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
 
       return serveCachedVendorRead({
+        env,
         ctx,
         cacheKey: new Request(
           `https://flows-chain.internal/${ticker}?strategy=${strategy}&rank=${rankBy}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
-        allowed: vendorGate(env, session),
-        build: () => buildChainPayload(env, ctx, { ticker, strategy, rankBy, limit: 120 }),
+        gate: vendorGate(env, session),
+        build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120 }),
       });
     }
 
@@ -3952,15 +3988,16 @@ async function route(request, env, url, ctx) {
       const engine = expiry !== null && url.searchParams.get("engine") === "1";
 
       return serveCachedVendorRead({
+        env,
         ctx,
         cacheKey: new Request(
           `https://flows-strategy.internal/${ticker}${expiry ? "/" + expiry : ""}${engine ? "?engine=1" : ""}`,
           { method: "GET" }),
         wantsRefresh: url.searchParams.get("refresh") === "1",
-        allowed: vendorGate(env, session),
-        build: () => (expiry
-          ? buildStrategyExpiry(env, ctx, ticker, expiry, { engine })
-          : buildStrategyContext(env, ctx, ticker)),
+        gate: vendorGate(env, session),
+        build: (vf) => (expiry
+          ? buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine })
+          : buildStrategyContext(env, ctx, vf, ticker)),
       });
     }
 

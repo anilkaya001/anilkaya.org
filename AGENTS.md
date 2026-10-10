@@ -108,25 +108,43 @@ Browser ──► Cloudflare edge
 - Every member-facing vendor read passes a per-request `vendorGate(env,
   session)` where a vendor call would follow: the `MEMBER_VENDOR` rate-limit
   binding (60 a minute, keyed by `memberId(session)`, consulted at most once
-  per request), then the shared `UW_ONDEMAND` budget per call. It covers
-  `/api/flows/chain` (which the desk reads), `/api/flows/strategy` (the info
-  and index reads run inside both), the stock-state quote behind
+  per request), then the shared `UW_ONDEMAND` budget. The shared budget is
+  charged per vendor call in the chain and strategy builds: `serveCachedVendorRead`
+  checks the member once before building and hands the builder `chargedFetch`,
+  which takes one `UW_ONDEMAND` token before each `uwFetch` (the chain's
+  option-contracts pages, ohlc, stock-state and the info read; the strategy
+  context's breakdown, its dated retry, the exposure fallback, ohlc,
+  stock-state, info and the SPY index read; an expiry's call and put pages and
+  its engine stock-state). A cached info or index copy costs no token. A
+  refusal in the middle of a build (`VendorRefused`, which the builders' own
+  `.catch` handlers rethrow through `keepRefusal`) stops the remaining calls and
+  is answered like a member refusal. The dossier, the stock-state quote and
+  the screener classify are charged per call as well. The tape is charged once
+  per refresh, and a premium refresh makes two vendor calls for that token. It
+  covers
+  `/api/flows/chain` (which the desk reads), `/api/flows/strategy`, the
+  stock-state quote behind
   `/api/flows/live` and `/api/flows/now?t=`, the tape miss, the screener
   classify behind an unknown name's card, and the dossier fan-out of
   `/api/flows/dossier`, the summary route's reading and the Ask box (one member
-  token per assembly). A refusal makes no vendor call. Chain and strategy keep
+  token per assembly). A refusal makes no further vendor call. Chain and strategy keep
   their copy six hours (`VENDOR_COPY_KEEP_SECONDS`) and serve it as a hit only
   inside its 120 s TTL; past the TTL a refused member gets the kept copy
   stamped `X-Fresh-State: stale`, `X-Fresh-Reason: throttled` with its true
   `X-Chain-Age`, or, with none kept, JSON `429 rate_limited` with
-  `Retry-After: 60`. The quote keeps its `unavailable`/`throttled` body, the
-  tape answers `pending` (`throttled`, before any `flows_tape` insert or lease
-  claim when the refused gate leaves an unknown name unclassified), the
-  dossier's vendor packets go `pending`, and the reading built from such a
-  dossier is neither generated nor stored (see "Flows reading"). Both
-  bindings are flood brakes and fail open. The Tier 1 and focus ticks consult
-  neither; `tests/flows-reads-contract.mjs` and `tests/flows-dossier-reads.mjs`
-  hold both sides.
+  `Retry-After: 60`. The quote keeps its `unavailable`/`throttled` body. The
+  tape asks the member half of the gate before its `flows_tape` insert and lease
+  claim: a refused member's read of a stale row is served `stale-throttled` (or
+  `pending`/`throttled` with no usable row) and writes nothing, and an unknown
+  name left unclassified by the refused gate is `pending` (`throttled`) before
+  any insert. An unknown name's card read by a refused member answers
+  `{status: "unavailable", why: "throttled"}` with `X-Fresh-Reason: throttled`
+  and `Retry-After`, not a coverage verdict; the ticker page prints its
+  `wh-throttled` copy. The dossier's vendor packets go `pending`, and the
+  reading built from such a dossier is neither generated nor stored (see "Flows
+  reading"). Both bindings are flood brakes and fail open. The Tier 1 and focus
+  ticks consult neither; `tests/flows-reads-contract.mjs` and
+  `tests/flows-dossier-reads.mjs` hold both sides.
 
 ### External deployment state
 
