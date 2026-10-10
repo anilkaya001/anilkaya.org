@@ -1180,6 +1180,28 @@
     closeSidebar: () => { if (drawerClose) drawerClose(false); },
   });
 
+  const link = (() => {
+    const q = [], me = document.currentScript && document.currentScript.src;
+    let impl, asked;
+    const run = (f, d) => {
+      if (impl) return f();
+      if (!asked && me) { asked = 1; document.head.append(h("script", { src: me.replace("flows-ui.js", "flows-link.js"), async: true })); }
+      if (q.length < 64) q.push(f);
+      return d;
+    };
+    const api = {
+      attach(i) { impl = i; delete api.attach; q.splice(0).forEach((f) => f()); },
+      join(o, c) {
+        let r, g;
+        return run(() => { r = impl.join(o, c); if (g) r.leave(); return r; }, 0) || { leave() { g = 1; if (r) r.leave(); } };
+      },
+      cursor: (...a) => (a.length ? run(() => impl.cursor(...a), null) : impl ? impl.cursor() : null),
+      describe: () => run(() => impl.describe(), { scene: null, mode: null, tau: null, clock: null, selection: {} }),
+    };
+    for (const m of ["emit", "context"]) api[m] = (...a) => run(() => impl[m](...a), false);
+    return api;
+  })();
+
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
     isNum,
@@ -1194,7 +1216,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, freshAggregate, freshAll, shell, depths: PAL_G,
+    freshness, freshAggregate, freshAll, link, shell, depths: PAL_G,
   });
 
   if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });
