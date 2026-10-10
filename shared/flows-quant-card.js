@@ -314,7 +314,8 @@ export function zeroGammaOf(built, { spot, atr = null, vendorGross = null } = {}
   const coverage = fin(vendorGross) && vendorGross > 0 ? gross / vendorGross : null;
   const L = QUANT_CARD_LINES;
   const nearby = prof.flips.filter((x) => !(fin(atr) && atr > 0) || Math.abs(x - spot) <= L.FLIP_NEAR_ATR * atr);
-  const g = coverage === null ? 2 : coverage >= L.COVER_GOOD ? L.FLIP_CONVENTION_CAP : coverage >= L.COVER_FAIR ? 2 : 1;
+  const coverageG = coverage === null ? 2 : coverage >= L.COVER_GOOD ? 3 : coverage >= L.COVER_FAIR ? 2 : 1;
+  const g = Math.min(L.FLIP_CONVENTION_CAP, coverageG);
   const why = coverage === null ? "flip.coverage-unmeasured" : coverage < L.COVER_GOOD ? "flip.coverage" : "flip.convention";
   const stride = L.PROFILE_STRIDE;
   const px = [], gx = [];
@@ -425,7 +426,7 @@ export function engineFacts(input) {
   const regime = card && card.regime && typeof card.regime === "object" ? card.regime : {};
   const clash = zero && fin(zero.atSpot) && zero.atSpot !== 0 && fin(regime.bookGamma) && regime.bookGamma !== 0 &&
     Math.sign(zero.atSpot) !== Math.sign(regime.bookGamma);
-  const flipG = zero ? (clash ? Math.min(zero.g, 1) : zero.g) : 0;
+  const flipG = zero ? (clash ? Math.min(zero.g, 1) : Math.min(zero.g, QUANT_CARD_LINES.FLIP_CONVENTION_CAP)) : 0;
   lvl("level.flip", zero ? zero.px : null, flipG, zero ? (clash ? "flip.sign-at-spot" : zero.why) : "flip.no-chain");
   add("level.flip.count", zero ? zero.count : null, "count", flipG, zero ? {} : { why: "flip.no-chain" });
   const cross = card && fin(card.strikeSumCrossing) ? card.strikeSumCrossing : null;
