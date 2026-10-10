@@ -2,7 +2,7 @@ import {
   RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
   frame, ctlFrame, pendingStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
-  rosterPlan, pickFocus, rtSwitches,
+  rosterPlan, pickFocus, rtSwitches, rtCadenceMs,
 } from "./flows-rt.js";
 import { phaseAt } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
@@ -55,7 +55,7 @@ export function createRestUpstream({
 }) {
   const ORDER = ["px", "mk", "gx", "fl", "nw"];
   const gxNames = () => (plan ? plan.gex().names.slice(0, GX_NAMES) : []);
-  const cadence = (k) => (k === "gx" ? RT_TOPICS.gx.cadenceMs / Math.max(1, gxNames().length) : RT_TOPICS[k].cadenceMs) * cfg.scale;
+  const cadence = (k) => (k === "gx" ? RT_TOPICS.gx.cadenceMs / Math.max(1, gxNames().length) : rtCadenceMs(k, plan && typeof plan.phase === "function" ? plan.phase() : null)) * cfg.scale;
   const topics = {};
   for (const k of ORDER) topics[k] = { due: 0, inflight: false, fails: 0 };
   const aborters = new Set();
@@ -274,6 +274,7 @@ export class RtHub {
       get topics() { return hub.demanded; },
       ready: () => !!this.roster && !!this.session,
       session: () => this.session,
+      phase: () => (this.phase ? this.phase.phase : null),
       names: () => this.pxNames(),
       gex: () => ({ names: this.gxNames.slice() }),
       base: () => this.base,
@@ -712,7 +713,7 @@ export class RtHub {
     let reason = null;
     for (const k of this.demanded) {
       const t = this.topics[k];
-      const limit = Math.max(3 * RT_TOPICS[k].cadenceMs, RT_LIMITS.degradeAfterMs) * this.cfg.scale;
+      const limit = Math.max(3 * rtCadenceMs(k, this.phase ? this.phase.phase : null), RT_LIMITS.degradeAfterMs) * this.cfg.scale;
       const since = Math.max(t.lastOkAt ?? this.startedAt, t.demandAt ?? -Infinity);
       const held = now - since > limit || this.degraded !== null;
       const bad = this.forceThrottle || (t.fails > 0 && held) || (this.upstream.paused(now) && held);

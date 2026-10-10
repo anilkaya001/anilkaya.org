@@ -724,8 +724,14 @@ socket subscribes to it or a `/api/rt/snap` named it in the last 60 s; `gx` is
 polled only for the focus tickers of sockets that ask for it (at most three,
 each every 15 s), and `/api/rt/snap?k=gx` with none answers cold at once. A
 topic that leaves demand forgets its failures and leaves `degraded`; `status`
-lists all five with `demanded`. Tier 1, Tier 2 and the nightly are
-unchanged and remain the fallback. The hub reads D1 (the roster and the clock
+lists all five with `demanded`. Cadences (`rtCadenceMs` in `shared/flows-rt.js`):
+px and fl every 5 s in the regular session and every 9 s in the pre-market and
+post-market, mk every 20 s, gx every 15 s a name, nw every 30 s and every 60 s
+outside the regular session. A cadence plus the one-second tick, the 4 s call
+deadline and a second of margin must fit inside its class's live window, which a
+table test in `flows-rt-contract` holds (9 s is the longest px and fl value it
+admits against `rt`'s 15 s), and the freshness classes are unchanged. Tier 1,
+Tier 2 and the nightly are unchanged and remain the fallback. The hub reads D1 (the roster and the clock
 row, one batch at start and every five minutes, and again after 30 seconds
 when a read failed or timed out, keeping the roster it holds or the base names
 meanwhile) and never writes it; it adds no `live:*` key, never touches the
@@ -1386,9 +1392,9 @@ three run at `FLOWS_RT_SCALE=0.2`, the last at real cadence and takes a minute
 of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was
 measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
 calls a minute at real cadence for one socket on all five topics with one focus
-ticker (px 12, fl 12, gx 4, mk 12, nw 2 on 2026-10-05; gx was 59 before it
-read focus tickers only) and the alert-to-client latency it saw (p50 2.1 s,
-p95 4.5 s over 40 alerts).
+ticker (px 12, fl 12, gx 4, mk 6, nw 2 on 2026-10-10; mk was 12 at a 10 s
+cadence and gx 59 before it read focus tickers only) and the alert-to-client
+latency it saw (p50 2.3 s, p95 4.8 s over 40 alerts).
 `flows-rt-client` needs Chromium and no server: `page.routeWebSocket` plays the
 hub for the stub tests, and for the integration block it bridges the page's
 socket to a real `RtHub` driven by `rt-fixtures.mjs` on a virtual clock. It was

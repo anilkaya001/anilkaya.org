@@ -64,12 +64,17 @@ export const RT_LIMITS = Object.freeze({
 });
 
 export const RT_TOPICS = Object.freeze({
-  px: Object.freeze({ k: "px", klass: "rt", cadenceMs: 5000, merge: "latest", key: "live:strips", stamp: "rows", barS: 0, rowMax: 200 }),
-  fl: Object.freeze({ k: "fl", klass: "rt", cadenceMs: 5000, merge: "append", key: "live:alerts", stamp: "event", barS: 0, rowMax: 200 }),
+  px: Object.freeze({ k: "px", klass: "rt", cadenceMs: 5000, extendedMs: 9000, merge: "latest", key: "live:strips", stamp: "rows", barS: 0, rowMax: 200 }),
+  fl: Object.freeze({ k: "fl", klass: "rt", cadenceMs: 5000, extendedMs: 9000, merge: "append", key: "live:alerts", stamp: "event", barS: 0, rowMax: 200 }),
   gx: Object.freeze({ k: "gx", klass: "rtSlow", cadenceMs: 15000, merge: "latest", key: "live:gex", stamp: "rows", barS: 60, rowMax: 64 }),
-  mk: Object.freeze({ k: "mk", klass: "rtSlow", cadenceMs: 10000, merge: "latest", key: "live:market", stamp: "rows", barS: 300, rowMax: 16 }),
-  nw: Object.freeze({ k: "nw", klass: "rtNews", cadenceMs: 30000, merge: "append", key: "live:news", stamp: "event", barS: 0, rowMax: 60 }),
+  mk: Object.freeze({ k: "mk", klass: "rtSlow", cadenceMs: 20000, merge: "latest", key: "live:market", stamp: "rows", barS: 300, rowMax: 16 }),
+  nw: Object.freeze({ k: "nw", klass: "rtNews", cadenceMs: 30000, extendedMs: 60000, merge: "append", key: "live:news", stamp: "event", barS: 0, rowMax: 60 }),
 });
+
+export const rtCadenceMs = (k, phaseName) => {
+  const spec = RT_TOPICS[k];
+  return phaseName === "pre" || phaseName === "post" ? spec.extendedMs ?? spec.cadenceMs : spec.cadenceMs;
+};
 
 export const RT_ROW_FIELDS = Object.freeze({
   px: Object.freeze(["t", "qt", ...STRIP_FIELDS.map(([name]) => name)]),
@@ -101,7 +106,7 @@ export const RT_UPSTREAM = Object.freeze({
 
 export const RT_UPSTREAM_API = Object.freeze({
   methods: Object.freeze(["start(plan, handlers)", "stop()", "tick(now)", "paused(now)", "state()"]),
-  plan: Object.freeze(["topics", "ready()", "session()", "names()", "gex()", "base()", "stage(ticker)"]),
+  plan: Object.freeze(["topics", "ready()", "session()", "phase()", "names()", "gex()", "base()", "stage(ticker)"]),
   frame: Object.freeze(["k", "readAt", "items", "vendorAt", "meta", "full", "answered"]),
   error: Object.freeze(["k", "at", "code", "status", "throttled", "retryAt"]),
 });

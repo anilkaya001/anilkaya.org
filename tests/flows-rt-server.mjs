@@ -619,7 +619,7 @@ async function runCadence() {
     ok(rates.fl >= 11 && rates.fl <= 13, `cadence: fl about every 5 s (${rates.fl})`);
     ok(rates.gx >= 3 && rates.gx <= 5, `cadence: gx reads the one focus name about every 15 s (${rates.gx})`);
     ok(window.filter((x) => /spot-exposures/.test(x.path)).every((x) => x.path === "/api/stock/NVDA/spot-exposures"), "cadence: and no other name");
-    ok(rates.mk >= 10 && rates.mk <= 14, `cadence: mk every 10 s, two calls a poll (${rates.mk})`);
+    ok(rates.mk >= 4 && rates.mk <= 8, `cadence: mk every 20 s, two calls a poll (${rates.mk})`);
     ok(rates.nw >= 1 && rates.nw <= 3, `cadence: news every 30 s (${rates.nw})`);
     ok(window.length <= 240, `cadence: under the 240-call budget (${window.length})`);
     const lat = [];

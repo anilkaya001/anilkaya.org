@@ -46,7 +46,7 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
     ok(Object.isFrozen(v), `${name} is frozen`);
   }
   for (const k of TOPICS) ok(Object.isFrozen(RT.RT_TOPICS[k]) && FRESH_CLASSES[RT.RT_TOPICS[k].klass], `${k} is a frozen topic with a freshness class`);
-  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 10000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 10 s, nw 30 s");
+  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 20000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 20 s, nw 30 s in the regular session");
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].klass), ["rt", "rt", "rtSlow", "rtSlow", "rtNews"], "classes follow the cadence");
   deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
   eq(RT.RT_ROW_FIELDS.px.length, 25, "twenty-five columns");
@@ -427,6 +427,7 @@ const plainPlan = (names = ["SPY", "QQQ"], extra = {}) => ({
   topics: new Set(TOPICS),
   ready: () => true,
   session: () => DAY,
+  phase: () => "rth",
   names: () => names,
   gex: () => ({ names: ["NVDA"], focus: [] }),
   base: () => null,
@@ -950,7 +951,7 @@ const seqOk = (ws) => {
   ok(mkSnap.frames[0].rows.length > 0 && mkSnap.frames[0].meta.cold !== true && mkSnap.frames[0].fresh.state !== "pending", "demand: a /snap?k=mk adds mk and answers from its first poll");
   const mk0 = r.vendor.count(/market-tide/);
   await r.run(50);
-  ok(r.vendor.count(/market-tide/) - mk0 >= 4, `demand: mk stays polled inside the snapshot's linger (${r.vendor.count(/market-tide/) - mk0} polls in 50 s)`);
+  ok(r.vendor.count(/market-tide/) - mk0 >= 2, `demand: mk stays polled inside the snapshot's linger (${r.vendor.count(/market-tide/) - mk0} polls in 50 s)`);
   await r.run(15);
   const mk1 = r.vendor.count(/market-tide/);
   const px1 = r.vendor.count(/screener/);
@@ -1276,7 +1277,7 @@ const seqOk = (ws) => {
   const names = RT.rosterPlan({ long: roster.long.rows, short: roster.short.rows, watch: roster.watch.rows }).names;
   const bodies = new Map();
   const served = new Map();
-  const stepOf = (path) => (path.includes("spot-exposures") ? 14000 : path.includes("news") ? 30000 : path.includes("market") ? 10000 : 5000);
+  const stepOf = (path) => (path.includes("spot-exposures") ? 14000 : path.includes("news") ? 30000 : path.includes("market") ? 20000 : 5000);
   const cached = async (url) => {
     const u = new URL(String(url));
     const key = u.pathname + (u.pathname.includes("flow-alerts") ? "" : u.search);
@@ -1466,7 +1467,7 @@ const seqOk = (ws) => {
   hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
   await hub.tick();
   eq(pushed.started, 1, "seam: a push upstream is started once with the plan");
-  deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
+  deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "phase", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
   ok(pushed.plan.ready() && pushed.plan.session() === DAY && pushed.plan.names().length >= 25, "seam: the plan answers without any REST state");
   deep([Array.from(pushed.plan.topics), pushed.plan.gex().names], [TOPICS.slice(), ["NVDA"]], "seam: the plan's topics are the demanded ones and gx names only the focus ticker");
   const names = pushed.plan.names();
@@ -1600,6 +1601,106 @@ const seqOk = (ws) => {
 }
 
 {
+  const PHASES = ["rth", "pre", "post"];
+  const want = {
+    px: { rth: 5000, pre: 9000, post: 9000 }, fl: { rth: 5000, pre: 9000, post: 9000 },
+    gx: { rth: 15000, pre: 15000, post: 15000 }, mk: { rth: 20000, pre: 20000, post: 20000 },
+    nw: { rth: 30000, pre: 60000, post: 60000 },
+  };
+  for (const k of TOPICS) {
+    for (const phase of PHASES) {
+      const c = RT.rtCadenceMs(k, phase);
+      eq(c, want[k][phase], `cadence: ${k} in ${phase} is ${want[k][phase]} ms`);
+      const liveMs = FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS * 1000;
+      const worst = c + RT.RT_LIMITS.tickMs + RT.RT_LIMITS.callTimeoutMs + 1000;
+      ok(worst <= liveMs, `cadence: ${k} in ${phase}: cadence ${c} + tick ${RT.RT_LIMITS.tickMs} + call ${RT.RT_LIMITS.callTimeoutMs} + 1000 = ${worst} fits the class's live window of ${liveMs} ms`);
+    }
+    eq(RT.rtCadenceMs(k, null), RT.RT_TOPICS[k].cadenceMs, `cadence: ${k} with no known phase takes the regular-session value`);
+  }
+  for (const k of ["px", "fl"]) {
+    const liveMs = FRESH_CLASSES.rt.liveS * 1000;
+    ok(RT.rtCadenceMs(k, "pre") + 1 + RT.RT_LIMITS.tickMs + RT.RT_LIMITS.callTimeoutMs + 1000 > liveMs, `cadence: ${k} outside the regular session is the largest value the table admits: one millisecond more breaks the live window`);
+  }
+  const cls = (k) => FRESH_CLASSES[RT.RT_TOPICS[k].klass];
+  deep(["px", "fl"].map((k) => cls(k).liveS), [15, 15], "cadence: the classes themselves are unchanged (rt live 15 s)");
+  const edge = SESSION_NOW;
+  eq(RT.streamEntry({ k: "px", readAt: edge - 15000, vendorAt: edge - 15000, session: DAY, now: edge }).state, "live", "cadence: a frame exactly the live window old is still live");
+  eq(RT.streamEntry({ k: "px", readAt: edge - 15001, vendorAt: edge - 15001, session: DAY, now: edge }).state, "fresh", "cadence: and a millisecond older is fresh, which is what a cadence past the table would show between polls");
+}
+
+{
+  const stepFor = async (phase, k) => {
+    let t = SESSION_NOW;
+    const vendor = createFakeVendor({ session: DAY, clock: () => t });
+    const u = upstreamOf(vendor, { clock: () => t });
+    u.up.start(plainPlan(["SPY", "QQQ"], { phase: () => phase }), u.handlers);
+    for (let i = 0; i < 4; i++) { await u.up.tick(t); t += 250; }
+    const before = u.up.state().topics[k].due;
+    return { before, started: SESSION_NOW };
+  };
+  for (const [phase, px, mk, nw] of [["rth", 5000, 20000, 30000], ["pre", 9000, 20000, 60000], ["post", 9000, 20000, 60000]]) {
+    const a = await stepFor(phase, "px");
+    const b = await stepFor(phase, "mk");
+    const c = await stepFor(phase, "nw");
+    eq(a.before - a.started, px, `adapter cadence: px is next due ${px} ms after its first poll in ${phase}`);
+    eq(b.before - b.started - 500, mk, `adapter cadence: mk is next due ${mk} ms after its first poll in ${phase}`);
+    eq(c.before - c.started - 1000, nw, `adapter cadence: nw is next due ${nw} ms after its first poll in ${phase}`);
+  }
+}
+
+{
+  const perMinute = async (hour, minute, topics) => {
+    const r = rig({ start: at(hour, minute) });
+    r.join("anilkaya", { topics, f: null });
+    await r.run(40);
+    const c0 = r.vendor.calls.length;
+    const count0 = { px: r.vendor.count(/screener/), fl: r.vendor.count(/flow-alerts/), mk: r.vendor.count(/market-tide/), nw: r.vendor.count(/news/) };
+    const states = [];
+    for (let i = 0; i < 300; i++) {
+      await r.hub.tick();
+      r.state.t += 1000;
+      const entry = {};
+      for (const k of topics) entry[k] = r.hub.freshOf(k, r.state.t);
+      states.push(entry);
+    }
+    const rate = (re, key) => (r.vendor.count(re) - count0[key]) / 5;
+    return {
+      px: rate(/screener/, "px"), fl: rate(/flow-alerts/, "fl"), mk: rate(/market-tide/, "mk"), nw: rate(/news/, "nw"),
+      total: (r.vendor.calls.length - c0) / 5, phase: r.hub.phase.phase, states,
+    };
+  };
+  const home = ["px", "mk", "nw"];
+  const blamedOnCadence = (k, e) => e[k].state !== "live" && (k !== "mk" || e[k].reason === "cadence");
+  const all = ["px", "fl", "mk", "nw"];
+  const within = (v, lo, hi, msg) => ok(v >= lo && v <= hi, `${msg} (${v})`);
+  const rth = await perMinute(10, 0, home);
+  eq(rth.phase, "rth", "calls: 10:00 ET is the regular session");
+  within(rth.px, 11.5, 12.5, "calls: Home in the regular session polls px every 5 s, 12 a minute");
+  within(rth.mk, 2.5, 3.5, "calls: and mk every 20 s, 3 polls a minute");
+  within(rth.nw, 1.8, 2.2, "calls: and news every 30 s, 2 a minute");
+  within(rth.total, 19, 21, "calls: Home in the regular session costs 20 vendor calls a minute, down from 26");
+  for (const [h, m, label] of [[8, 0, "pre"], [17, 0, "post"]]) {
+    const ext = await perMinute(h, m, home);
+    eq(ext.phase, label, `calls: ${h}:00 ET is the ${label}-market phase`);
+    within(ext.px, 6.2, 7.2, `calls: Home in the ${label}-market polls px every 9 s, 6.7 a minute`);
+    within(ext.mk, 2.5, 3.5, `calls: and mk every 20 s in the ${label}-market`);
+    within(ext.nw, 0.8, 1.2, `calls: and news every 60 s in the ${label}-market`);
+    within(ext.total, 13, 14.5, `calls: Home in the ${label}-market costs 13.7 vendor calls a minute`);
+    for (const k of home) {
+      const lapses = ext.states.filter((e) => blamedOnCadence(k, e)).length;
+      eq(lapses, 0, `flicker: ${k} is live on every second of five minutes in the ${label}-market, so the slower cadence never shows between polls`);
+    }
+  }
+  for (const k of home) eq(rth.states.filter((e) => blamedOnCadence(k, e)).length, 0, `flicker: ${k} is live on every second of five minutes in the regular session${k === "mk" ? " (only a lapse blamed on cadence counts: the fake tide's stamps lag its bars)" : ""}`);
+  const pages = await perMinute(8, 0, all);
+  within(pages.fl, 6.2, 7.2, "calls: fl is polled every 9 s outside the regular session too");
+  const pagesRth = await perMinute(10, 0, all);
+  within(pagesRth.total, 31, 33, "calls: every page open in the regular session costs 32 calls a minute");
+  eq(pagesRth.states.filter((e) => blamedOnCadence("fl", e)).length, 0, "flicker: fl is live on every second in the regular session");
+  eq(pages.states.filter((e) => blamedOnCadence("fl", e)).length, 0, "flicker: and in the pre-market");
+}
+
+{
   const drive = async (r, seconds) => {
     const end = r.state.t + seconds * 1000;
     const gaps = [];
@@ -1627,7 +1728,7 @@ const seqOk = (ws) => {
     ok(Math.max(...gaps) <= RT.RT_LIMITS.alarmMaxMs, `alarms: ${label}: no gap above ${RT.RT_LIMITS.alarmMaxMs} ms (${Math.max(...gaps)})`);
     ok(Math.min(...gaps) >= RT.RT_LIMITS.alarmMinMs, `alarms: ${label}: no gap below ${RT.RT_LIMITS.alarmMinMs} ms (${Math.min(...gaps)})`);
     ok(polls(/screener/) >= 11 && polls(/screener/) <= 13, `alarms: ${label}: px is still polled every 5 s (${polls(/screener/)} in a minute)`);
-    if (opts.topics.includes("mk")) ok(polls(/market-tide/) >= 5 && polls(/market-tide/) <= 7, `alarms: ${label}: mk every 10 s (${polls(/market-tide/)})`);
+    if (opts.topics.includes("mk")) ok(polls(/market-tide/) >= 2 && polls(/market-tide/) <= 4, `alarms: ${label}: mk every 20 s (${polls(/market-tide/)})`);
     if (opts.topics.includes("nw")) ok(polls(/news/) >= 1 && polls(/news/) <= 3, `alarms: ${label}: nw every 30 s (${polls(/news/)})`);
     if (opts.topics.includes("fl")) ok(polls(/flow-alerts/) >= 11 && polls(/flow-alerts/) <= 13, `alarms: ${label}: fl every 5 s (${polls(/flow-alerts/)})`);
     if (opts.topics.includes("gx")) ok(polls(/spot-exposures/) >= 3 && polls(/spot-exposures/) <= 5, `alarms: ${label}: gx for one focus name every 15 s (${polls(/spot-exposures/)})`);
@@ -1716,7 +1817,7 @@ const seqOk = (ws) => {
       ok(inMinute <= 20, `alarm: at most 20 setAlarm in a fake minute with px, mk and nw demanded (${inMinute})`);
       ok(Math.max(...dues) < 10000 && Math.max(...dues) <= RT.RT_LIMITS.alarmMaxMs + 5, `alarm: no gap near the 10 s hibernation line while demanded (${Math.max(...dues)} ms)`);
       eq(m.store.gets, 1, "alarm: a minute of alarms made no further getAlarm");
-      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 5, "alarm: and the frames still flow at the vendor's cadence");
+      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 3, "alarm: and the frames still flow at the vendor's cadence");
       ws.readyState = 3;
       m.pulse.hub.lastSnapAt = -Infinity;
       m.pulse.release();

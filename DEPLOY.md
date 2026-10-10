@@ -2964,8 +2964,9 @@ pass every five-minute slot, with the `breadth` freshness class promising a
 15-minute cadence), the quote card is 5 s and the tape 60 s on
 demand, and every reader pays for its own poll. `Pulse` holds one polling loop
 for everyone: a connected viewer sees prices and flow alerts about 5 s behind
-the vendor, the market tide and sector ETFs about 10 s, dealer gamma about
-10 to 15 s a name, and news about 30 s, each frame carrying its honest age.
+the vendor (9 s in the pre-market and post-market), the market tide and sector
+ETFs about 20 s, dealer gamma about 10 to 15 s a name, and news about 30 s (60 s
+outside the regular session), each frame carrying its honest age.
 Tier 1, Tier 2 and the nightly are unchanged and are the fallback; the rail
 adds no `live:*` key and writes nothing to D1.
 
@@ -2977,12 +2978,16 @@ polls only while a socket is connected or a `/api/rt/snap` request is less than
 own alarm, set to the next poll, heartbeat or sweep that is due and never more
 than 5 s ahead (9 s outside the session, so the object stays resident). No viewer, no vendor call, and only the topics a viewer
 names are polled: a socket's `k`, or a `/api/rt/snap` topic for 60 s after the
-request. Per minute, for each topic someone is watching: px 12 calls, fl 12, mk
-12 (two calls every 10 s), nw 2, and gx 4 per focus ticker (one name every 15
+request. Per minute, for each topic someone is watching: px 12 calls in the
+regular session and 6.7 outside it, fl the same, mk 6 (two calls every 20 s), nw
+2 (1 outside the regular session), and gx 4 per focus ticker (one name every 15
 s, at most three names, only for sockets that ask gx with a focus ticker; no
-page does today). The home page (px, mk, nw) costs about 26 calls a minute, a
-board, the ticker, the market or the unusual page about 12, against the rail's
-own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+page does today). The home page (px, mk, nw) costs about 20 calls a minute in the
+regular session and 13.7 outside it, a board, the ticker, the market or the
+unusual page about 12 and 6.7, against the rail's own budget of 240
+(`FLOWS_RT_CALLS_PER_MIN`). `rtCadenceMs` holds the cadences, and a table test
+requires each plus the tick, the call deadline and a second to fit its class's
+live window, so no topic shows `fresh` between polls. The budget is
 separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 
 **Kill switches (vars in `wrangler.toml`, no secret).**
