@@ -203,9 +203,9 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
     ok(p.title && p.title.trim().length > 2, `panel "${p.key}" has a title`);
   }
   const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
-  const shedFrom = pipe.indexOf("const shed = [");
-  ok(shedFrom > 0, "the pipeline still declares its shed ladder as `const shed = [`");
-  const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n      ];", shedFrom));
+  const shedFrom = pipe.indexOf("export const CARD_SHED = Object.freeze([");
+  ok(shedFrom > 0, "the pipeline still declares its shed ladder as `export const CARD_SHED = Object.freeze([`");
+  const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n]);", shedFrom));
   let shedNamed = 0;
   const regKeys = new Set(TICKER_PANELS.map((p) => p.key));
   for (const m of shedBlock.matchAll(/\[\s*"([A-Za-z_][A-Za-z0-9_]*)",\s*"dropped to fit/g)) {

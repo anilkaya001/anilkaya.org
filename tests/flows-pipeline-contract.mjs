@@ -34,6 +34,7 @@ import {
   plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
   probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
+  shedCardToCap, CARD_SHED, CARD_SELF_CHECK_BYTES,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
@@ -3003,6 +3004,79 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(bytes <= 100 * 1024,
        `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts ` +
        "(and inside the 100KB the card shedder targets)");
+  }
+  {
+    const KIB = 1024;
+    const table = new Map();
+    const bump = (depth) => {
+      if (!table.has(depth)) table.set(depth, { n: 0, whole: 0, bare: 0, oi: 0, oiSum: 0, withOi: 0, split: 0, cardX: 0, cardXMax: 0 });
+      return table.get(depth);
+    };
+    for (const name of emitted) {
+      const full = path.join(dir, name);
+      if (/^w-card-x-/.test(name)) {
+        const row = bump("card-x");
+        const bytes = fs.statSync(full).size;
+        row.n++; row.cardXMax = Math.max(row.cardXMax, bytes);
+        ok(bytes < 60 * KIB, `${name} is ${(bytes / KIB).toFixed(1)}KB, under the 60KiB a card-x holds so the card beside it keeps room`);
+        continue;
+      }
+      if (!/^w-card-/.test(name)) continue;
+      const stored = JSON.parse(fs.readFileSync(full, "utf8"));
+      const row = bump(stored.depth || "board");
+      const whole = fs.statSync(full).size;
+      const { engine, ...bare } = stored;
+      const bareBytes = Buffer.byteLength(JSON.stringify(bare));
+      row.n++;
+      row.whole = Math.max(row.whole, whole);
+      row.bare = Math.max(row.bare, bareBytes);
+      if (stored.engine && stored.engine.status === "split") row.split++;
+      ok(bareBytes <= CARD_SELF_CHECK_BYTES, `${name} is ${(bareBytes / KIB).toFixed(1)}KB before its engine block, inside the ${CARD_SELF_CHECK_BYTES / KIB}KiB self-check`);
+      ok(whole <= 128 * KIB, `${name} is ${(whole / KIB).toFixed(1)}KB, inside the 128KiB ingest cap the Worker refuses above`);
+      const surface = stored.panels && stored.panels.surface;
+      if (surface && surface.status === "ok" && surface.oi) {
+        const oiBytes = Buffer.byteLength(JSON.stringify(surface.oi));
+        row.withOi++; row.oi = Math.max(row.oi, oiBytes); row.oiSum += oiBytes;
+        ok(oiBytes <= 12 * KIB, `${name} stores its open-interest grids in ${(oiBytes / KIB).toFixed(1)}KB, at most 12KiB for 504 values and their envelope`);
+        for (const g of ["gamma", "charm", "vanna"]) {
+          ok(Array.isArray(surface.oi[g]) && surface.oi[g].length === surface.strikes.length, `${name}: the ${g} grid has a row per strike of the flow grid`);
+        }
+      }
+    }
+    const lines = ["card byte ledger (KiB): depth, cards, max whole, max without engine, split to card-x, cards with oi, mean oi, max oi, max card-x"];
+    for (const [depth, r] of [...table.entries()].sort()) {
+      lines.push(`  ${depth.padEnd(14)} ${String(r.n).padStart(4)} ${(r.whole / KIB).toFixed(1).padStart(7)} ${(r.bare / KIB).toFixed(1).padStart(7)} ` +
+        `${String(r.split).padStart(4)} ${String(r.withOi).padStart(4)} ${(r.withOi ? r.oiSum / r.withOi / KIB : 0).toFixed(1).padStart(6)} ${(r.oi / KIB).toFixed(1).padStart(6)} ${(r.cardXMax / KIB).toFixed(1).padStart(7)}`);
+    }
+    console.log(lines.join("\n"));
+    const deep = [...table.entries()].filter(([depth]) => depth !== "card-x" && table.get(depth).withOi > 0);
+    ok(deep.length > 0, "the dry run reaches the open-interest grids on at least one card depth, so the ledger above measured them rather than their absence");
+  }
+
+  {
+    const mk = (extra) => ({
+      ticker: "LEDG", panels: {
+        surface: { status: "ok", oi: { source: "vendor", gamma: [[1]], charm: [[2]], vanna: [[3]] } },
+        topContracts: { status: "ok", rows: "x".repeat(3000) },
+        aggressor: { status: "ok", rows: "y".repeat(3000) },
+        ...extra,
+      },
+    });
+    const small = shedCardToCap(mk(), 1e6);
+    assert.deepEqual(small.dropped, []); checks++;
+    ok(small.body.includes('"oi":{"source"'), "a card inside the cap keeps its open-interest grids");
+    const oiOnly = JSON.stringify(mk()).length - JSON.stringify({ ...mk(), panels: { ...mk().panels, surface: { status: "ok", oi: null } } }).length;
+    const tight = JSON.stringify(mk()).length - Math.min(oiOnly, 10);
+    const first = shedCardToCap(mk(), tight);
+    assert.deepEqual(first.dropped, ["surface.oi"]); checks++;
+    ok(first.body.length <= tight && !first.body.includes('"oi":{"source"'),
+       "a card a few bytes over the cap loses the stored grids first and keeps every panel a reader sees");
+    const deeper = shedCardToCap(mk(), 3500);
+    assert.deepEqual(deeper.dropped.slice(0, 2), ["surface.oi", "topContracts"]); checks++;
+    ok(CARD_SHED[0][0] === "topContracts", "the existing shed order is unchanged behind the new first step");
+    const impossible = shedCardToCap(mk(), 10);
+    ok(impossible.body.length > 10 && impossible.dropped[0] === "surface.oi",
+       "a card that cannot fit is returned over the cap for the caller to refuse, never trimmed to a fiction");
   }
   {
     const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names([^\n]*)/.exec(runLog);

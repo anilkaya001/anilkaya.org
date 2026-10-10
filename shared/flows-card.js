@@ -18,6 +18,7 @@ import { easternDay } from "./flows-freshness.js";
 
 import { parseOptionSymbol } from "./flows-premium.js";
 import { bookLevels } from "./flows-quant-card.js";
+import { compactNumbers } from "./flows-cross.js";
 export { HORIZON_SESSIONS };
 
 export function numOrNull(value) {
@@ -1871,6 +1872,15 @@ export function pickMaxPain(rows, options) {
 const SURFACE_STRIKES = 21;
 export const SURFACE_EXPIRIES = 8;
 
+export const SURFACE_OI_LEGS = Object.freeze({
+  gamma: Object.freeze(["call_gamma_oi", "put_gamma_oi"]),
+  charm: Object.freeze(["call_charm_oi", "put_charm_oi"]),
+  vanna: Object.freeze(["call_vanna_oi", "put_vanna_oi"]),
+});
+
+export const SURFACE_OI_BASIS = "The vendor's open-interest exposures from the same strike-by-expiry read as the gamma grid: " +
+  "call plus put as the vendor signs them. Gamma is dollars per 1% move; the vendor states no unit for charm or vanna.";
+
 export function buildSurface(rows, {
   spot, maxStrikes = SURFACE_STRIKES, maxExpiries = SURFACE_EXPIRIES, asOf = null,
 } = {}) {
@@ -1882,6 +1892,7 @@ export function buildSurface(rows, {
   const cells = new Map();
   const strikeTotals = new Map();
   const expirySeen = new Map();
+  const oiCells = { gamma: new Map(), charm: new Map(), vanna: new Map() };
 
   for (const r of list) {
     const strike = numOrNull(r.strike);
@@ -1896,6 +1907,16 @@ export function buildSurface(rows, {
     col.set(strike, (col.get(strike) ?? 0) + g);
     strikeTotals.set(strike, (strikeTotals.get(strike) ?? 0) + g);
     expirySeen.set(expiry, (expirySeen.get(expiry) ?? 0) + Math.abs(g));
+
+    for (const name of Object.keys(SURFACE_OI_LEGS)) {
+      const oiLegs = SURFACE_OI_LEGS[name].map((field) => r[field]);
+      if (!oiLegs.some((v) => numOrNull(v) !== null)) continue;
+      const total = oiLegs.reduce((a, v) => a + (numOrNull(v) ?? 0), 0);
+      const byExpiry = oiCells[name];
+      if (!byExpiry.has(expiry)) byExpiry.set(expiry, new Map());
+      const oiCol = byExpiry.get(expiry);
+      oiCol.set(strike, (oiCol.get(strike) ?? 0) + total);
+    }
   }
   if (!cells.size) return unavailable("no measured gamma legs");
 
@@ -1918,6 +1939,22 @@ export function buildSurface(rows, {
     const v = col ? col.get(k) : undefined;
     return v === undefined ? null : v;
   }));
+
+  const oiGrid = (byExpiry) => {
+    let measured = false;
+    const g = strikes.map((k) => expiries.map((e) => {
+      const col = byExpiry.get(e);
+      const v = col ? col.get(k) : undefined;
+      if (v === undefined) return null;
+      measured = true;
+      return v;
+    }));
+    return measured ? compactNumbers(g) : null;
+  };
+  const oiGrids = { gamma: oiGrid(oiCells.gamma), charm: oiGrid(oiCells.charm), vanna: oiGrid(oiCells.vanna) };
+  const oi = oiGrids.gamma || oiGrids.charm || oiGrids.vanna
+    ? { source: "vendor", basis: SURFACE_OI_BASIS, ...oiGrids }
+    : null;
 
   const mags = [];
   for (const row of grid) for (const v of row) if (v !== null && v !== 0) mags.push(Math.abs(v));
@@ -1994,6 +2031,7 @@ export function buildSurface(rows, {
     expiries,
     strikes,
     grid,
+    oi,
     rowTotals: strikes.map((k) => strikeTotals.get(k) ?? 0),
     atSpot: allStrikes[nearest],
     flowPeakLong,

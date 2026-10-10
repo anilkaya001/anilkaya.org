@@ -3491,13 +3491,23 @@ function fakeSurface(ticker, spot, expiries) {
       const scale = bell * weight * 3.2e6 * (0.7 + rnd() * 0.6);
       const callLeg = scale * Math.max(0, lean) * 9;
       const putLeg = -scale * Math.max(0, -lean) * 9;
+      const callAsk = callLeg * (0.4 + rnd() * 0.3);
+      const callBid = callLeg * (0.3 + rnd() * 0.3);
+      const putAsk = putLeg * (0.4 + rnd() * 0.3);
+      const putBid = putLeg * (0.3 + rnd() * 0.3);
       rows.push({
         strike: k.toFixed(2),
         expiry,
-        call_gamma_ask: String(callLeg * (0.4 + rnd() * 0.3)),
-        call_gamma_bid: String(callLeg * (0.3 + rnd() * 0.3)),
-        put_gamma_ask: String(putLeg * (0.4 + rnd() * 0.3)),
-        put_gamma_bid: String(putLeg * (0.3 + rnd() * 0.3)),
+        call_gamma_ask: String(callAsk),
+        call_gamma_bid: String(callBid),
+        put_gamma_ask: String(putAsk),
+        put_gamma_bid: String(putBid),
+        call_gamma_oi: String(callLeg * 1.7),
+        put_gamma_oi: String(putLeg * 1.7),
+        call_charm_oi: String(callLeg * 0.21),
+        put_charm_oi: String(putLeg * -0.18),
+        call_vanna_oi: String(callLeg * -0.33),
+        put_vanna_oi: String(putLeg * 0.27),
       });
     }
   });
@@ -4266,6 +4276,42 @@ async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
   } catch (error) {
     console.warn(`  news: ${error.message} — every key above published before this leg ran`);
   }
+}
+
+export const CARD_SELF_CHECK_BYTES = 100 * 1024;
+
+export const CARD_SHED = Object.freeze([
+  ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
+    "are on the premium desk for this symbol"],
+  ["aggressor", "dropped to fit the payload cap"],
+  ["ivSurface", "dropped to fit the payload cap"],
+  ["skewTerm", "dropped to fit the payload cap"],
+
+  ["darkpool", "dropped to fit the payload cap"],
+  ["oiDeltas", "dropped to fit the payload cap"],
+  ["volContext", "dropped to fit the payload cap"],
+
+  ["marketRank", "dropped to fit the payload cap — the market-wide feeds it joins are " +
+    "published whole on the market pulse page"],
+]);
+
+export function shedCardToCap(card, cap = CARD_SELF_CHECK_BYTES) {
+  let body = JSON.stringify(card);
+  const dropped = [];
+  const surface = card.panels && card.panels.surface;
+  if (body.length > cap && surface && surface.status === "ok" && surface.oi) {
+    surface.oi = null;
+    dropped.push("surface.oi");
+    body = JSON.stringify(card);
+  }
+  for (const [key, reason] of CARD_SHED) {
+    if (body.length <= cap) break;
+    if (!card.panels[key] || card.panels[key].status !== "ok") continue;
+    card.panels[key] = { status: "unavailable", reason };
+    dropped.push(key);
+    body = JSON.stringify(card);
+  }
+  return { body, dropped };
 }
 
 function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg = null }) {
@@ -6544,34 +6590,12 @@ async function main() {
       attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
       if (card.panels.darkpool && darkpoolRth && darkpoolRth.session) card.panels.darkpool.session = darkpoolRth.session;
 
-      const shed = [
-        ["topContracts", "dropped to fit the payload cap — the day's most-traded contracts " +
-          "are on the premium desk for this symbol"],
-        ["aggressor", "dropped to fit the payload cap"],
-        ["ivSurface", "dropped to fit the payload cap"],
-        ["skewTerm", "dropped to fit the payload cap"],
-
-        ["darkpool", "dropped to fit the payload cap"],
-        ["oiDeltas", "dropped to fit the payload cap"],
-        ["volContext", "dropped to fit the payload cap"],
-
-        ["marketRank", "dropped to fit the payload cap — the market-wide feeds it joins are " +
-          "published whole on the market pulse page"],
-      ];
-      let body = JSON.stringify(card);
-      const dropped = [];
-      for (const [key, reason] of shed) {
-        if (body.length <= 100 * 1024) break;
-        if (!card.panels[key] || card.panels[key].status !== "ok") continue;
-        card.panels[key] = { status: "unavailable", reason };
-        dropped.push(key);
-        body = JSON.stringify(card);
-      }
+      const { body, dropped } = shedCardToCap(card);
       if (dropped.length) {
         console.warn(`  card ${ticker}: shed ${dropped.join(", ")} to fit the cap`);
       }
 
-      if (body.length > 100 * 1024) {
+      if (body.length > CARD_SELF_CHECK_BYTES) {
         throw new Error(`card is ${(body.length / 1024).toFixed(0)}KB after shedding ` +
           `${dropped.length} panel(s), still over the ingest cap`);
       }
