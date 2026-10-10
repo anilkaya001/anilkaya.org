@@ -473,8 +473,9 @@ it unlocks and what tells you it has lapsed.
    logs, and `labActiveAt` is the newest activity of any Lab learner. From
    120 days it prints a `WARNING:` line with the day and the age, which
    GitHub also shows as an annotation on the run, names the day the gate
-   turns red, and leaves the run green. From 150 days it turns the run red,
-   which emails the owner:
+   turns red, and leaves the run green. From 150 days it turns the run red
+   and opens the `[flows-witness:health]` issue (the issue names only the
+   failure code and count; this line stays in the run's log):
    `HEALTH: the latest Google sign-in to the Lab on record is …, 150 days ago. Sign in to the Lab at https://anilkaya.org/lab/ — Google deletes an OAuth client unused for about six months; keep the callback https://anilkaya.org/auth/callback registered. Google deletes it about ….`
    One sign-in clears it the next night. From 180 days the line also says how
    to replace a deleted client: create a Web application OAuth client (Google
@@ -489,20 +490,24 @@ it unlocks and what tells you it has lapsed.
    changes nothing. Check with
    `wrangler d1 execute iewt --remote --command "PRAGMA table_info(users)"`
    before applying it.
-5. **Optional: Workers Paid ($5/month).** It removes the 100,000
+5. **Workers Paid ($5/month) is active** (the owner confirmed it on 2026-10-10
+   from the invoice dated 2026-09-30, period to 2026-10-29, renewing
+   2026-10-30). It removes the 100,000
    requests-a-day cliff (HTML, the APIs and the heartbeat still pass through
    the Worker; `/assets/*` is served asset-first and no longer counts, so the
    cliff would still take the Lab and the landing page down with Flows, only
    later) and the 10 ms CPU cap, which is what forces Tier 2 onto GitHub
    Actions and is why the board summary refresh has a Worker cron of its own
    (`15,45 * * * *`, section 10.5i): four of the five crons the Free plan
-   allows an account are registered. No code change is needed to switch.
+   allows an account are registered. Tier 2 stays on GitHub Actions until a
+   later change moves it; the code still treats the Free-plan limits as design
+   budgets.
 
 Nothing routine is left: a weekly keepalive keeps GitHub from disabling the
 scheduled workflows after 60 days without a commit, a weekly strict probe turns
 red on vendor drift, a weekly regression run catches a fixture the calendar
-overtakes, and the nightly ends with a health gate that turns the run red,
-which emails the owner, whenever the live layer failed that session, the edge
+overtakes, and the nightly ends with a health gate that turns the run red
+and opens one `[flows-witness:health]` issue that mentions the owner, whenever the live layer failed that session, the edge
 refused or throttled the ingest route past its threshold (item 3), or the
 Lab's Google sign-in has been idle for 150 days (item 4).
 
@@ -513,7 +518,9 @@ Lab's Google sign-in has been idle for 150 days (item 4).
 ```
 
 `d1 execute --file` is used deliberately rather than `d1 migrations apply`,
-even though `migrations_dir` is configured. `migrations apply` runs everything
+even though `migrations_dir` is configured, and every later file under
+`migrations/` (0006 onward) is applied the same way, by name, once, after the
+check the section that introduces it describes. `migrations apply` runs everything
 the bookkeeping table does not already record as applied, and the earlier
 migrations on this database were applied out of band — so it would attempt to
 re-run them. Every statement in `0005_flows.sql` is `CREATE TABLE IF NOT
@@ -942,7 +949,10 @@ is `DELETE FROM flows_payload WHERE id IN ('card:PRU', ...)` through
 
 ### 10.4c The D1 free-tier budget: rows written and rows read
 
-The Workers Free plan gives one D1 database two daily row caps, both reset at
+The Workers Free plan gave one D1 database two daily row caps (the account moved
+to Workers Paid with the invoice dated 2026-09-30; Paid bills D1 rows against
+monthly allowances, whose current figures are on the dashboard, and the budget
+below stays the Worker's design ceiling). The Free caps were both reset at
 00:00 UTC and both shared by everything on the account: **100,000 rows
 written** and **5,000,000 rows read**. Only the write cap was ever modelled
 (section 10.4b prices the archive, the cards and the scorer against it). The
@@ -1013,8 +1023,9 @@ production, so the first real quota or D1 outage is the check (read
 
 ### 10.5 The data pipeline
 
-Compute runs in GitHub Actions, never on Cloudflare: the Workers free plan
-allows 10 ms of CPU per invocation including cron, and the daily job makes
+Compute runs in GitHub Actions, never on Cloudflare: the Workers Free plan
+allowed 10 ms of CPU per invocation including cron (the account is on Paid
+now, with a larger CPU allowance, and the design has not changed), and the daily job makes
 hundreds of Unusual Whales calls. The Worker only verifies a cookie and hands
 back a stored string.
 
@@ -1286,9 +1297,20 @@ Worker writes (2 sides x dated + live). The truncation probe adds at most 1.
 
 ### 10.5b The rate limiter, and the number to watch
 
-Unusual Whales documents no rate limit anywhere — not in the OpenAPI spec, not
-in the docs — so the limiter discovers it. The last line of every run is the
-measurement:
+The committed OpenAPI spec (`docs/uw-openapi.yaml`) states no requests-per-minute
+or daily figure; it names plan tiers (the socket pages say websocket access for
+personal use is on the Advanced plan, the futures routes say the Advanced tier
+or the `futures` add-on). The vendor does send four headers, measured on 156 of
+156 responses in the probe run of 2026-10-04: `x-uw-token-req-limit` (100000000),
+`x-uw-req-per-minute-remaining` (1000000, never decremented),
+`x-uw-req-per-minute-reset` (60000) and `x-uw-daily-req-count` (a running count
+that rose from 21 to 173 over the run). No production client reads them yet.
+Refusals are rare: the nightly of 2026-10-02 made 3,742 calls in 675.6 s (5.54
+requests a second) and was refused with a 429 once. The key's plan is inferred
+from what answers (Advanced routes 200, `vix-term-structure` 403
+`volatility_scope_required`), not read from an account page. The limiter
+therefore stays adaptive and discovers the working rate. The last line of every
+run is the measurement:
 
 ```
 done in 178.2s — 408 API calls, 0 retries, 43 rate-limited,
@@ -1357,8 +1379,9 @@ said "2 per board name" for weeks after it became 3 — an understatement of up
 to 50 calls in the one number the rate-limit sizing depends on. The last live
 run made 367 calls in 122s with 36 rate-limited.
 
-THE BINDING CONSTRAINT IS NOT A QUOTA. The vendor documents no rate limit
-anywhere, so the limiter is adaptive: 120 ms between calls, doubling on any 429
+THE BINDING CONSTRAINT IS NOT A DOCUMENTED QUOTA. The spec states no request
+rate (section 10.5b lists the four `x-uw-*` headers the vendor does send), so
+the limiter is adaptive: 120 ms between calls, doubling on any 429
 and decaying back by 10% on clean responses, with a floor that a 429
 permanently raises. That is what makes the call count matter — at the 5 s
 ceiling the 30-minute card deadline allows only ~360 calls, fewer than a
@@ -1398,9 +1421,12 @@ Two failure modes to watch:
   firings it calls `PUT /repos/<repo>/actions/workflows/<file>/enable` for every
   scheduled workflow with the job's own `GITHUB_TOKEN` (`actions: write` on
   that job alone), logs each HTTP status, and turns red if one is not 204.
-- **Unusual Whales publishes no rate limits.** The pipeline discovers the real
-  limit empirically with adaptive backoff and logs the achieved rate. Read that
-  number after the first few runs and size the universe against it.
+- **The spec publishes no request rate.** The vendor's `x-uw-*` response headers
+  (section 10.5b) report a very high per-minute allowance and a running daily
+  count, and one 429 was seen in 3,742 nightly calls on 2026-10-02. The pipeline
+  still discovers its working rate empirically with adaptive backoff and logs the
+  achieved rate. Read that number after the first few runs and size the universe
+  against it.
 
 A run that cannot complete its enrichment publishes **nothing** and exits
 non-zero, by design: a partially ingested day must never quietly produce a
@@ -1773,8 +1799,14 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   never counted; section 10.0 item 3) and a Lab Google sign-in 150 or more
   days old (section 10.0 item 4). From 120 days that age is a `WARNING:`
   line and a GitHub annotation, which leaves the run green. Any failure makes
-  the run exit non-zero after everything is published, and a red scheduled
-  run emails the owner. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
+  the run exit non-zero after everything is published and, on a real run
+  with `GITHUB_TOKEN` (the workflow grants the `build` job `issues: write`),
+  opens or updates one `[flows-witness:health]` issue that mentions the owner,
+  with the failure codes and counts only; the next gate that passes closes it.
+  Email is not the channel: the nightly is dispatched by `github-actions[bot]`
+  or by a schedule, so GitHub mails the actor, and the owner-actor backup runs
+  return before the gate. A dry run, and a run that never reaches the gate,
+  make no GitHub call. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
 - **The gate judges the whole day, from the session ledger.** Until the
   ledger the gate saw four single cells (the clock, `live:market`,
@@ -2933,12 +2965,15 @@ than 1.5 seconds to assemble, and fills in on the next poll.
 
 ### 10.5n The real-time rail: one Durable Object, demand-driven REST polling, hibernating WebSockets
 
-**Why.** The stored live keys are minutes behind the vendor (Tier 1 every five
-minutes, Tier 2 every fifteen), the quote card is 5 s and the tape 60 s on
+**Why.** The stored live keys are minutes behind the vendor (Tier 1 every
+`REFRESH_CADENCE_MINUTES` of `shared/flows-freshness.js`, five minutes; a Tier 2
+pass every five-minute slot, with the `breadth` freshness class promising a
+15-minute cadence), the quote card is 5 s and the tape 60 s on
 demand, and every reader pays for its own poll. `Pulse` holds one polling loop
 for everyone: a connected viewer sees prices and flow alerts about 5 s behind
-the vendor, the market tide and sector ETFs about 10 s, dealer gamma about
-10 to 15 s a name, and news about 30 s, each frame carrying its honest age.
+the vendor (9 s in the pre-market and post-market), the market tide and sector
+ETFs about 20 s, dealer gamma about 10 to 15 s a name, and news about 30 s (60 s
+outside the regular session), each frame carrying its honest age.
 Tier 1, Tier 2 and the nightly are unchanged and are the fallback; the rail
 adds no `live:*` key and writes nothing to D1.
 
@@ -2947,14 +2982,19 @@ adds no `live:*` key and writes nothing to D1.
 placed with `FLOWS_RT_HINT` (`enam`; honoured once, on the first `get()`). It
 polls only while a socket is connected or a `/api/rt/snap` request is less than
 60 s old, and only between 04:00 and 20:00 ET on a trading day, driven by its
-own alarm every second. No viewer, no vendor call, and only the topics a viewer
+own alarm, set to the next poll, heartbeat or sweep that is due and never more
+than 5 s ahead (9 s outside the session, so the object stays resident). No viewer, no vendor call, and only the topics a viewer
 names are polled: a socket's `k`, or a `/api/rt/snap` topic for 60 s after the
-request. Per minute, for each topic someone is watching: px 12 calls, fl 12, mk
-12 (two calls every 10 s), nw 2, and gx 4 per focus ticker (one name every 15
+request. Per minute, for each topic someone is watching: px 12 calls in the
+regular session and 6.7 outside it, fl the same, mk 6 (two calls every 20 s), nw
+2 (1 outside the regular session), and gx 4 per focus ticker (one name every 15
 s, at most three names, only for sockets that ask gx with a focus ticker; no
-page does today). The home page (px, mk, nw) costs about 26 calls a minute, a
-board, the ticker, the market or the unusual page about 12, against the rail's
-own budget of 240 (`FLOWS_RT_CALLS_PER_MIN`). The budget is
+page does today). The home page (px, mk, nw) costs about 20 calls a minute in the
+regular session and 13.7 outside it, a board, the ticker, the market or the
+unusual page about 12 and 6.7, against the rail's own budget of 240
+(`FLOWS_RT_CALLS_PER_MIN`). `rtCadenceMs` holds the cadences, and a table test
+requires each plus the tick, the call deadline and a second to fit its class's
+live window, so no topic shows `fresh` between polls. The budget is
 separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 
 **Kill switches (vars in `wrangler.toml`, no secret).**
@@ -3017,8 +3057,10 @@ in the last minute and hour, and the `fresh` entry the next frame would carry.
    `rt message failed`, `rt roster read failed`, once a minute at most).
 6. Cost: with a viewer connected the object is awake for the session, 16 h x
    0.128 GB is about 7,400 GB-s a day, under the 400,000 GB-s a month included;
-   alarms and polls are about 60,000 requests a day, and outgoing WebSocket
-   messages are free. With nobody connected it costs nothing.
+   alarms are about 12 a minute while the topics are in session, about 11,500
+   requests and as many rows written a day against 57,600 at one a second (the
+   Free caps are 100,000 of each), and outgoing WebSocket messages are free.
+   With nobody connected it costs nothing.
 
 **The wire.** The envelope, the five topics, the control frames, the close codes
 and the 256-byte client messages are frozen in `shared/flows-rt.js` and
@@ -3151,7 +3193,23 @@ that moves every row on every poll, so the worst case for deltas; sandbox CPU):
 
 The socket therefore moves roughly forty times the bytes of today's heartbeats
 when every quote changes on every poll. These are uncompressed JSON string
-lengths; whether Cloudflare compresses the WebSocket frames (permessage-deflate)
-or the snapshot answers is not measured here, and a quiet name changes no row.
-If the bytes matter, the lever is on the server: fewer px names, or a slower px
-cadence for the names no module on the page shows.
+lengths, and a quiet name changes no row. Whether the snapshot answers are
+compressed is not measured here. The socket frames are measured by
+`flows-rt-server`, which opens the upgrade by hand, reads the 101's
+`Sec-WebSocket-Extensions` and parses every frame off the socket (RSV1, wire
+length, and the payload inflated with the connection's own context). On local
+workerd, a client that offers `permessage-deflate; client_max_window_bits` is
+answered `permessage-deflate; client_max_window_bits=15`, and 16 messages of the
+first four seconds (20-name roster, so 15.7 KB px frames rather than 32 KB)
+carried 184,638 B of JSON in 28,224 B on the wire, a ratio of 0.15: px 15,729 B to
+3,517 B, fl 16,795 to 1,449, nw 15,907 to 1,594, mk 2,055 to 670, gx 440 to 87, the
+hello 1,121 to 287. A client that offers nothing is answered no extension and gets
+the JSON uncompressed plus a 2 to 10 byte frame header. That is the local runtime,
+not Cloudflare's edge: to read the production number, open the browser's network
+panel on a signed-in Flows page, select the `/api/rt/ws` request and read
+`Sec-WebSocket-Extensions` in its response headers (empty means the edge sends
+frames uncompressed), then compare the panel's received bytes on that socket with
+`FlowsUI.rt.measure().bytes`, the JSON after inflation. If the edge compresses, a wire v2 for px
+is not needed on bytes' account. If the bytes still matter, the lever is on the
+server: fewer px names, or a slower px cadence for the names no module on the
+page shows.

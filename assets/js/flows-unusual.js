@@ -581,6 +581,47 @@
     return S.feedKind === "ok" ? S.payload.contracts.rows : [];
   }
 
+  const CODES = ["sweep-coded", "floor-coded", "multi-leg", "stock multi-leg", "cross"];
+  const activityOf = () => {
+    const a = S.payload && S.payload.activity;
+    return a && typeof a === "object" ? a : null;
+  };
+  const codeBase = (r) => {
+    const own = n(r.av);
+    return own !== null && own > 0 ? own : n(r.vol);
+  };
+  const codeKnown = (r) => (Array.isArray(r.cls) ? r.cls.filter((c) => n(c) !== null).length : 0);
+  const codeShares = (r) => {
+    const v = codeBase(r);
+    if (!Array.isArray(r.cls) || v === null || !(v > 0)) return [];
+    return r.cls.map((c, i) => (n(c) === null || n(c) <= 0 ? null : [CODES[i], Math.min(1, n(c) / v)])).filter(Boolean);
+  };
+  const codeText = (r) => {
+    const parts = codeShares(r);
+    if (parts.length) return parts.map(([w, f]) => pct0(f) + " " + w).join(", ") + (n(r.av) !== null && n(r.av) !== n(r.vol) ? " of the screen's " + count(n(r.av)) + " contracts" : "");
+    const known = codeKnown(r);
+    if (known === 0) return "exchange-code shares not reported";
+    if (known < CODES.length) return "none of the " + known + " reported code classes carried volume; " + (CODES.length - known) + " not reported";
+    return "none of the volume carried a sweep, floor, multi-leg, stock multi-leg or cross code";
+  };
+
+  function activityRows() {
+    const a = activityOf();
+    if (!a || a.status !== "ok" || !Array.isArray(a.rows) || !a.rows.length) return [];
+    return [
+      h("div", { class: "fu-arow fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Largest by premium, " + F.day(String(a.asOf || ""))),
+        h("span", { class: "fu-v" }, "Premium"), h("span", { class: "fu-v fu-wide" }, "Main code")),
+      listOf(a.rows.slice(0, 8).map((r) => {
+        const top = codeShares(r).sort((x, y) => y[1] - x[1])[0];
+        return h("div", { class: "fu-arow", role: "listitem", title: String(r.t) + " " + contractText(r).trim() + " " + MID + " volume " + count(r.vol) + " " + MID + " " + codeText(r) },
+          h("span", { class: "ui-badge", "data-tone": r.cp === "P" ? "down" : "up", "aria-label": r.cp === "P" ? "Put" : "Call" }, r.cp === "P" ? "P" : "C"),
+          h("span", { class: "fu-tk" }, h("b", null, n(r.k) === null ? DASH : String(n(r.k))), h("small", null, String(r.t || DASH) + " " + MID + " " + F.day(String(r.expiry || "")))),
+          h("span", { class: "fu-v fu-strong" }, n(r.pm) === null ? DASH : F.money(n(r.pm))),
+          h("span", { class: "fu-v fu-wide" }, top ? pct0(top[1]) + " " + top[0] : (codeKnown(r) ? "no code" : "not reported")));
+      }), 8, "Largest dated contracts by premium"),
+    ];
+  }
+
   function paintFeed() {
     if (S.feedKind !== "ok") return;
     const all = feedRows();
@@ -607,6 +648,7 @@
         lift === null ? "offer share not reported" : pct0(lift) + " of classified volume met the offer",
         lo === null || hi === null ? "no notional bracket" : "notional " + F.money(lo) + " to " + F.money(hi),
       ];
+      if (Array.isArray(r.cls)) title.push("by exchange code, as of " + F.day(String((activityOf() || {}).asOf || "")) + ": " + codeText(r) + (n(r.pm) === null ? "" : "; premium " + F.money(n(r.pm))));
       if (flagged) title.push("also flagged by the vendor's rule " + (flagged.rule || "") + (n(flagged.prem) === null ? "" : ", carrying " + F.money(n(flagged.prem)) + " of premium"));
       const covered = S.payload && Array.isArray(S.payload.coverage) && S.payload.coverage.some((c) => c && c.t === r.t);
       return h(covered ? "a" : "div", {
@@ -623,13 +665,13 @@
     });
     keep(host.feed, () => host.feed.replaceChildren(
       h("div", { class: "fu-crow fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Contract"), h("span", null, "Volume ÷ OI"), h("span", { class: "fu-v" }, "Ratio"), h("span", { class: "fu-v fu-wide" }, "ΔOI")),
-      listOf(items, 6, "Contracts ranked by volume over open interest")));
+      listOf(items, 6, "Contracts ranked by volume over open interest"), ...activityRows()));
   }
 
   const BASIS_TITLES = {
     unit: "The unit", date: "The date", rank: "The ranking key", floors: "The floors",
     aggr: "The classified legs", lift: "The offer-side share", notional: "The bracket", iv: "Implied volatility",
-    oi: "Open interest", zeroOi: "Strikes that never arrive", names: "Two populations", refusals: "Refused",
+    oi: "Open interest", zeroOi: "Strikes that never arrive", names: "Two populations", refusals: "Refused", activity: "The dated exchange-code unit",
   };
   const basisLines = (v) => {
     if (v === null || v === undefined) return [];
@@ -662,6 +704,9 @@
         ["Chains read", n(payload.namesSeen) === null ? null : count(payload.namesSeen) + (n(payload.namesTruncated) ? ", " + count(payload.namesTruncated) + " cut short by the vendor" : "")],
         ["Cap", S.feedKind === "ok" ? bound : null],
         ["Days to expiry from", payload.dteAnchor === "sessionDate" ? String(payload.sessionDate || "") : null],
+        ["Exchange-code unit", activityOf() ? (activityOf().status === "ok"
+          ? "as of " + String(activityOf().asOf || "") + "; " + count(activityOf().matched) + " of " + count(activityOf().of) + " ranked contracts matched, " + count(activityOf().kept) + " of " + count(activityOf().returned) + " screen rows kept" + (n(activityOf().offDate) ? ", " + count(activityOf().offDate) + " from another day dropped" : "")
+          : String(activityOf().status) + (activityOf().code ? " (" + activityOf().code + ")" : "")) : null],
       ],
       sections: basis
         ? Object.keys(basis).map((k) => ({ title: BASIS_TITLES[k] || k, lines: basisLines(basis[k]) }))
@@ -670,6 +715,7 @@
       notes: [
         "volumeAsOf is null: " + (payload.volumeAsOfReason ? String(payload.volumeAsOfReason) : "the endpoint publishes no as-of stamp") + ", so the span the counter covers is unobserved and this page stamps only when it was read.",
         "The accent mark beside a contract means the vendor's rules also flagged it, matched on name, side, strike and expiry: two independent selections agreeing.",
+        ...(activityOf() && activityOf().status === "ok" ? ["The exchange-code shares come from a second, dated screen with its own floors. A contract in both lists carries them on its row; the list under the ranking is that screen's own largest by premium. The classes overlap and are not summed."] : []),
       ],
     };
   }

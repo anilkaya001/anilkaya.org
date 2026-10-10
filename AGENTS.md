@@ -57,9 +57,15 @@ Browser ──► Cloudflare edge
   `GOOGLE_CLIENT_SECRET`, and `SESSION_SECRET`.
 - Invocation observability is enabled in `wrangler.toml`; application code
   emits structured logs only for unexpected failures and OAuth callback errors.
-- D1 on Workers Free has two daily caps, both reset at 00:00 UTC and both
-  shared by everything on the account, the audit's own queries included:
-  **100,000 rows written and 5,000,000 rows read**. The write cap is priced
+- The account is on Workers Paid (the owner confirmed it on 2026-10-10 from
+  the Cloudflare invoice dated 2026-09-30, period to 2026-10-29). Until that
+  upgrade D1 on Workers Free had two daily caps, both reset at 00:00 UTC and
+  both shared by everything on the account, the audit's own queries included:
+  **100,000 rows written and 5,000,000 rows read**. Paid bills D1 rows against
+  monthly allowances instead of refusing at a daily cap, so read the current
+  figures in the dashboard; the Worker's `503 store_quota` handling and the
+  rows-read ceilings stay as the fuse, and every row budget below is still
+  written in rows. The write cap is priced
   in DEPLOY.md section 10.4b; the read cap was found exceeded on 2026-09-29
   (an audit `SELECT` at about 21:36 UTC failed with error 7500). Who spent it,
   and whether the Worker's own reads and writes were refused, are unverified
@@ -146,6 +152,18 @@ Browser ──► Cloudflare edge
   ticks consult neither; `tests/flows-reads-contract.mjs` and
   `tests/flows-dossier-reads.mjs` hold both sides.
 
+### Vendor key and the project's MCP server
+
+`.mcp.json` registers the vendor's hosted MCP server
+(`https://unusualwhales.com/public-api/mcp`) with
+`Authorization: Bearer ${UW_API_KEY}` expanded from the environment of an agent
+session. Nothing in the site, the tests or the workflows reads the file. A
+session with `UW_API_KEY` set can spend the vendor quota through those tools,
+outside the Worker's limiter and the `x-uw-*` accounting that the plan budgets
+against. Builders and reviewers must not call the vendor's tools or endpoints
+unless a row says to, and an agent environment that does not need the vendor
+should not carry the key.
+
 ### External deployment state
 
 Repository files cannot prove Workers Builds branch mapping, dashboard secrets,
@@ -165,6 +183,15 @@ header readback with this repository after any dashboard rule change.
 
 ## File map
 
+The File map, the course counts, the production globals and the suite lists in
+this file sit between `gen:` markers and are written by `node scripts/gen-docs.mjs`
+from `docs/modules.json`, `docs/globals.json`, `tests/suites.json` and the
+catalogue; edit those inputs and regenerate, never the text between markers.
+A new tracked file needs a row in `docs/modules.json`. `docs/index.md` is the
+full generated index, and `docs/map-2026-10-05.md` is the frozen system map
+(a dated snapshot, never edited).
+
+<!-- gen:filemap -->
 | Path | Role |
 |---|---|
 | `index.html` | Landing page and particle-field hero. |
@@ -183,13 +210,15 @@ header readback with this repository after any dashboard rule change.
 | `shared/review-manifest.js` | Generated, answer-free Worker allowlist for stable review-item IDs. |
 | `shared/mastery.js` | Server-compatible mastery transition and review-selection contract used by tests. |
 | `schema.sql` | D1 `users`, `progress`, `stats`, `mastery`, idempotent `mastery_attempts`, minimal `placement`, and per-owner `learning_sync` generation tables; the Flows tables, including `flows_live` (only `live:*` ids), `flows_tape`, `flows_clock` and the trigger that makes dated archive rows immutable; the model spend (`flows_ai_usage`, `flows_ai_usage_model`), board summary and Neuron (`flows_ai_summary`, `flows_neuron`) tables. `tests/academy-contract.mjs` builds three `node:sqlite` databases (this file, every `migrations/*.sql` in number order, the Worker's first-use DDL) and holds their tables, columns by name, CHECK clauses (literals compared verbatim), indexes, triggers and views equal; only `users`, `progress` and `stats` have no first-use DDL. Every `CREATE` and `DROP` of a table, index, trigger or view in `worker.js` and `shared/`, whatever its case or spacing, must sit inside a top-level DDL constant the suite evaluates, so inline DDL cannot escape the comparison. Every `ALTER TABLE` in `worker.js` and `shared/` must be one of the sites the suite lists, and each column it adds must be declared with the same type in this file and the migrations. |
-| `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, learning paths, and browser scoring manifest. |
+| `assets/js/course-catalog.js` | Lightweight course metadata, prerequisites/outcomes, and learning paths (`TOPIC_META`, `TOPIC_BY_ID`, `LEARNING_PATHS`). The browser scoring manifest is the generated `assets/js/stage-catalog.js` (`COURSE_STAGE_POINTS`, `COURSE_STAGE_IDS`). |
 | `assets/js/curriculum.js` | Canonical OLS authoring source. |
 | `assets/js/curriculum-data.js` | Canonical IV, DiD, VAR, panel, logit, and GMM authoring sources. |
 | `assets/js/curriculum-questions.js` | Additional authored question stages applied before payload generation. |
-| `assets/data/courses/<topic>.json` | Committed, generated `schemaVersion: 1` payload loaded only for the selected course. |
+| `assets/data/courses/<topic>/manifest.json`, `<topic>/<module>.json`, `<topic>.json` | Committed, generated `schemaVersion: 2` payloads. The course page fetches the manifest and then one file per module, only for the selected course; the whole-course `<topic>.json` is the fallback it requests when the manifest is missing. |
 | `assets/data/review-bank.json` | Generated full assessment bank, loaded only by the Daily Mastery Review page. |
 | `assets/data/placement-bank.json` | Authored 15-item diagnostic bank balanced across five question formats and three difficulty bands. |
+| `scripts/flows-pipeline.mjs`, `scripts/flows-legs/` | The nightly Flows pipeline and its legs (also the `--live` Tier 2 entry), run by GitHub Actions; the Worker only stores what they ingest. |
+| `lab/challenge/`, `lab/projects/<project>/` | The skill-challenge page and the three project pages (`factor-pricing-lab`, `fx-volatility-risk`, `macro-forecasting-desk`); each carries a `data-asset-version` like the other Lab shells. |
 | `scripts/generate-course-payloads.mjs` | Deterministically regenerates course payloads, stable stage IDs, the review bank, browser catalogue, and Worker manifest. |
 | `assets/js/storage.js` | Validated owner-scoped v2 progress/mastery/placement persistence, retry outbox, legacy migration, reset, and in-memory fallback. |
 | `assets/js/lab-core.js` | Pyodide loader, Python editor, execution, output, and figures. |
@@ -204,6 +233,7 @@ header readback with this repository after any dashboard rule change.
 | `assets/version.txt` | Canonical cache version of `assets/css`, `assets/js` and `assets/data`: the `?v=` on every CSS and JavaScript reference. |
 | `assets/fonts-version.txt` | Canonical cache version of the woff2 files under `assets/fonts/`: the `?v=` on every `@font-face` URL and font preload, untouched by an asset bump. |
 | `tests/contracts.mjs` | Curriculum/payload/scoring/storage/asset/session contracts. |
+| `tests/architecture.mjs` | The tree's shape, in about a second with no server: no import cycle over static and literal dynamic imports from `worker.js` and every script, the layer table (`shared/` imports `shared/` only, `scripts/` never `server/`, `cloudflare:*` only in `worker.js`, `assets/js` imports nothing), the declared leaves, no comment in any tracked JavaScript, CSS, HTML (inline script and style too), SQL, YAML, TOML, Python or ignore file (`docs/` excluded), and the browser floor table (Flows Safari 17 / Chrome 114 / Firefox 125, Lab and articles Safari 16.4 / Chrome 111 / Firefox 113): a feature above a surface's floor must be guarded in the window around it (`?.(`, `typeof`, `"x" in`, `&&`), and the table lists the Popover API at 17 and lookbehind at 16.4. Every check is proved by recorded mutations built in memory inside the suite. The global allowlist stays in `contracts.mjs`. |
 | `tests/placement-contract.mjs` | Placement bank, scoring boundaries, route, privacy, no-JS, keyboard, and responsive runtime contracts. |
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
@@ -220,9 +250,11 @@ header readback with this repository after any dashboard rule change.
 | `scripts/flows-legs/witness.mjs`, `starts.mjs`, `watch.mjs` | The loop's mutual witness (Tier 1 older than 25 minutes, `live:breadth` older than 45, the nightly not landed by 21:00 ET, a broken chain, a blind ingest door; one deduplicated GitHub Issue per check, written and adopted only as `github-actions[bot]`, closed after three healthy ticks and reopened on a flap), the 17:30 ET nightly dispatch with the job's own token (a permanent refusal capped at four calls, a transient one retried every half hour to 20:30 ET), and the per-tick composition of the two over the OIDC ingest door. |
 | `scripts/flows-legs/live-world-fake.mjs`, `live-day.mjs` | A fake GitHub API and a fake Worker world on a virtual clock, and the eight dry days `--live --dry-run` runs through them. |
 | `shared/flows-basis.js`, `tests/flows-basis-contract.mjs` | The premium desk's basis: the vendor's `{data:{...}}` stock-state envelope, a spot that is only a regular-session price (`printOf`: the live print in the regular session, else the newest regular close), and the coherence gate between that spot and the chain (`coherence`: impossible asks, the strike bracket the `maybe_otm_only` request guarantees, one underlying fitted to the nearest expiries, a rebase past 0.25% or a refusal when the fit is too thin). The contract runs the Worker route in Node against a stubbed vendor. The desk's `asOf` is the New York date of the READ and `days` count from it; `UW_NOW` (an ISO instant, honoured only while `UW_BASE` redirects the vendor away from production) pins that read clock so the workerd suites' dated fixtures stay valid. |
+| `shared/flows-vendor-core.js`, `tests/flows-rt-contract.mjs` | The pure leaf every vendor client reads: `vendorBaseInfo` and `vendorBase` accept `UW_BASE` only as the production origin, `http(s)` loopback (`127.0.0.1`, `localhost`) or an `http(s)` `*.test` host with no credentials, path, query or fragment, and otherwise answer the production origin with status `invalid`; `vendorRedirected` is true only for a loopback or `.test` base and is what unlocks the test-only `UW_NOW` and `FLOWS_RT_SCALE`; `vendorUrl`, `unwrap` (the vendor's `{data}` envelope), `classifyStatus` (`http_429`, `http_5xx`, `http_4xx`) and `retryAfterMs`. `uwFetch` in `worker.js` and the rail's REST adapter use it; the pipeline and the legs still read `FLOWS_UW_BASE_URL` directly. The allowed and refused base table is in `flows-rt-contract`, the Worker half in `flows-basis-contract`. |
 | `shared/flows-focus.js` | The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle. |
 | `scripts/flows-legs/focus.mjs`, `health.mjs` | The nightly `focus` and `roster` payload builders; the nightly health gate and its repair messages. |
 | `scripts/flows-ws-probe.mjs`, `.github/workflows/flows-ws-probe.yml`, `tests/flows-ws-probe-contract.mjs` | The vendor socket probe, dispatch only: handshake three ways, one connection per channel, concurrent connections, joins per connection, lag against each frame's own stamp. It prints key names and statistics, never payload values or the token. The contract runs it against a fake vendor that speaks the WebSocket protocol by hand. |
+| `shared/flows-quant-dealer.js` | The dealer gamma profile (`gammaProfile`): a leaf with no imports. Per contract it precomputes `1/(sigma sqrt(T))`, the affine part of d1 in ln x and the signed weight, so each grid point is one logarithm and one exponential per contract instead of a full set of Black-Scholes greeks; output equals the greeks-based profile to 1e-12 of the profile's peak and the flip to 1e-9, at about a tenth of the CPU (`tests/flows-quant.mjs` holds the equality against a reference copy and the CPU ratio through `tests/lib/cpu-budget.mjs`). |
 | `shared/flows-neuron-screen.js`, `tests/flows-neuron-screen.mjs` | `screenReading`: a Neuron reading from a universe row alone, for a name with no card. A leaf that imports the consolidated state table (`STATE_LINES`, `structuresForState` in `flows-neuron.js`), `BUCKET_LINES` and `sessionsBetween`, and is imported by no module that imports it back. Facts are graded 0 or 1 and each prints its unit; a null input is withheld under its own key with its reason; dealer delta and vanna are the vendor's numbers with no direction claimed, charm a sign only at grade 0. The test compares 27 synthetic states with `regimeState` and runs every emitted sentence through the ask guard. |
 | `shared/flows-neuron-coverage.js` | The nightly's Neuron coverage ledger `{universe, priced, standAside, family, screen, unpriceable, expired, stale, missing}` (published in `meta.neuron`, checked by `neuronChecks` in `health.mjs`), built from each card's tier as the Worker would name it and the screen reading of every universe name that has no card. |
 | `shared/flows-dossier.js`, `tests/flows-dossier-contract.mjs` | The per-name dossier, a leaf that imports only `flows-cross.js`: the packet model, one pure builder per kind (twelve), the sanitiser every third-party string passes, `renderDossierForModel`, `dossierFacts`, `dossierSilences`, `dossierFingerprint`. The contract runs it on the nightly payloads and the spec-conformant vendor fixtures, fuzzes the sanitiser, proves each reducer touches only the fields the weekly probe lists (a recording `Proxy`), and holds the fingerprint stable under price and age noise. |
@@ -248,18 +280,33 @@ header readback with this repository after any dashboard rule change.
 | `tests/flows-verdict-contract.mjs` | The two reversible verdicts, swept over a real SQLite clock and the real Tier 1 tick: a vendor that lags and recovers at every five-minute mark, a real closure's cost, a calendar holiday, a stalled tide with and without recovery, and the Tier 2 loop's waits. |
 | `tests/flows-reads-contract.mjs` | The Worker's D1 round trips and rows read per read route, counted on a fake binding (the rows-read ceilings, the last good copy served while the store is unreadable): the single-flight schema bootstrap, the absent-card decision, the live overlays and the ticker reading. |
 | `tests/flows-quant-audit.mjs`, `tests/fixtures-quant-audit.json` | The options engine against independent references: the horizon of a real-world law priced intraday, its 2,000,000-path scipy simulation at nine horizons, the Student t and Hansen skew-t quantiles and the Sobol net the pipeline draws through, dividends on the stock leg, the desk's carry, smile shape and in-the-money quotes, the earnings gate and the grades. The fixture's provenance string names the scipy version, the path count and the seed. |
+| `tests/gen-har-fixtures.py`, `tests/fixtures-har.json` | The daily-range HAR forecast's reference: `gen-har-fixtures.py` (statsmodels `OLS(...).fit(cov_type='HAC', cov_kwds={'maxlags': L})` on a seeded GARCH path with intraday-simulated bars) writes the bars, the daily Yang-Zhang variances, and the coefficients, Newey-West standard errors, forecast and 80% bounds at lags 5 and 20; `flows-vol-contract` holds `harFit` to them at 1e-6 and runs the forecast against the true GARCH forecast on simulated paths. |
+| `assets/js/flows-export.js`, `tests/flows-export.mjs` | The export menu, attached to `FlowsUI` the way `flows-fresh.js` does (a re-frozen copy), loaded only on the boards (`/flows/long/`, `/flows/short/`, `/flows/watch/`) and the desk, before their controllers. `FlowsUI.csv` writes RFC 4180 with CRLF, a byte order mark, the unit in each header and two padded footer rows (source and as-of, then the export instant); a string cell that starts with `=`, `+`, `-`, `@`, tab or CR gets a leading apostrophe, a finite number is written bare, and null, undefined, NaN and Infinity are empty. The menu offers CSV for the view as the reader sees it (sort and filter applied) and SVG and PNG of the board map and the desk frontier, serialised with computed colours so no custom property is left unresolved. Exports are limited to the site's own scores, model outputs and aggregates (OD-30): the board's last price and day change, and the desk's quoted premium, are not columns. The suite is Chromium with `page.route` stubs, no server, and reads each download back through an independent CSV parser. |
+| `shared/flows-activity.js`, `scripts/flows-legs/activity.mjs` | The Unusual page's dated exchange-code unit. After the chain pass the nightly makes one call, `/api/option-activity/unusual` with `date` the session, `limit` 200 (the vendor's page maximum) and the largest premium first; `CALL_COST.activity` counts it, and `FLOWS_UNUSUAL_V2=off` makes no call and publishes `activity.status: "off"`. `buildActivityRows` keeps a row whose option symbol parses, whose volume is positive and whose last fill falls on the session's Eastern day (another day is counted in `offDate`; no fill time is kept and counted in `undated`); a sweep, floor, multi-leg, stock multi-leg or cross volume (`ACTIVITY_CLASSES` order) that is negative or above the row's volume is withheld as null for that class only. The classes overlap and are never summed. `mergeActivity` puts `cls` and `pm` (executed premium) on the ranked contract rows that are also in the screen, joined by the pipeline's own contract id; an unmatched row carries neither key. The payload gains `activity` (status, `asOf`, counts, at most 30 rows and 3 a name) and `basis.activity`; `volumeAsOf` stays null because the chain counter is still undated. The page adds the row description and a list of the screen's largest by premium. The lexicon test names "sweep" as an exception for `basis.activity` alone. |
 | `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
+| `scripts/gen-docs.mjs`, `docs/modules.json`, `docs/globals.json`, `docs/index.md`, `tests/docs-contract.mjs` | Generated documentation. `gen-docs.mjs` writes the File map, the course counts, the production globals and the suite lists in this file between their `gen:` markers, and `docs/index.md` (every tracked file with its role, its exports as `file#symbol`, and the suites that reach it), from `docs/modules.json` (one row per module: paths or globs, role, domain; a row with a `show` cell is also a File map line), `docs/globals.json`, `tests/suites.json` and the sources. `--check` exits 1 on drift. `docs-contract.mjs` fails on any difference, on a tracked file no row names and on a row that matches no file. |
+| `scripts/map/audit.mjs` | The reference audit: the share of `path:line` references in the listed documents (default `AGENTS.md`, `DEPLOY.md`, `README.md` and the frozen `docs/map-2026-10-05.md`) whose file is missing or whose line is past the end, printed, or written to the step summary when `GITHUB_STEP_SUMMARY` is set. A report, not a gate. |
+<!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
 
-`window.TOPIC_META` in the lightweight `course-catalog.js` contains exactly:
+<!-- gen:courses -->
+`window.TOPIC_META` in the lightweight `course-catalog.js` holds 12 courses
+(365 stages in all, which `tests/contracts.mjs` and `tests/academy-contract.mjs`
+pin):
 
 ```text
 ols 20 · iv2sls 31 · did 29 · var 30 · panel 30 · logit 32 · gmm 33
+foundations 32 · mle 32 · forecast 32 · coint 32 · financial 32
 ```
 
-Every curriculum has four modules. Each module owns ordered stages. The
-canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
+Courses by module count, each module owning ordered stages: 4 modules: `ols`,
+`iv2sls`, `did`, `var`, `panel`, `logit`, `gmm`; 5 modules: `foundations`,
+`mle`, `forecast`, `coint`, `financial`.
+The generated review bank holds 106 items, the skill graph 84 skills,
+the challenge bank 252 variants, and `LEARNING_PATHS` 5 guided paths.
+<!-- /gen:courses -->
+The canonical authoring inputs remain `curriculum.js`, `curriculum-data.js`, and
 `curriculum-questions.js`; neither the catalogue nor the course page downloads
 those heavyweight combined sources. Run this after any authored course change:
 
@@ -269,7 +316,7 @@ node scripts/generate-course-payloads.mjs
 
 Commit all changed generated course payloads plus `assets/data/review-bank.json`,
 `assets/js/review-catalog.js`, and `shared/review-manifest.js`. The generator
-adds `schemaVersion: 1` and stable per-module stage IDs. Review IDs are globally
+adds `schemaVersion: 2` and stable per-module stage IDs. Review IDs are globally
 namespaced as `<course-id>:<stage-id>`. Current course progress is still stored
 by flattened stage index, so inserting or reordering stages changes the meaning
 of existing progress; append stages or ship an explicit progress migration.
@@ -290,8 +337,8 @@ Default rewards are read 5, code 10, interactive 10, and quiz 15. Authored
 question rewards override defaults: true/false 10, fill-blank 15, numeric 20,
 and multi-select 20. `tests/contracts.mjs` proves that authored curricula,
 generated payloads, the browser manifest, and `shared/course-points.js` remain
-identical. It also requires unique generated stage IDs and caps every course
-payload at 14 KiB gzip.
+identical. It also requires unique generated stage IDs and caps every module
+file at 6,144 bytes gzip.
 
 Both client and server derive points from unique completed stages. This repairs
 legacy local under-counts and stale/tampered totals. Client-submitted point
@@ -362,6 +409,14 @@ Errors use:
 - `GET /api/placement` → `{ placement: { band, score, total, completedDay, recommendedTopic } | null, generation }`
 - `PUT /api/placement` with `X-IEWT-Generation` and the five-field placement summary → `{ ok: true, placement, generation }`
 - `DELETE /api/placement` with `X-IEWT-Generation` → `{ ok: true, placement: null, generation }`
+- `GET /api/v2/bootstrap` → signed-out `200 { user: null }`; signed-in the
+  `/api/bootstrap` fields plus `stableProgress`, `skillMastery`, `preferences`
+  and `projects`, with `generation`
+- `PUT /api/v2/progress` with `X-IEWT-Generation`, body `{ courseId, stageId, complete: true }` → `{ ok: true, courseId, done, generation }`
+- `PUT /api/v2/attempt` with `X-IEWT-Generation`, body `{ skillId, itemId, attemptId, correct, hinted, day }` → `{ ok: true, record, duplicate, generation }`; the attempt ID makes a retry idempotent and a reused ID with different data is `409 attempt_conflict`
+- `PUT /api/v2/preferences` with `X-IEWT-Generation`, body `{ activePathId, sessionMinutes, weeklyGoalMinutes }` → `{ ok: true, preferences, generation }`
+- `PUT /api/v2/project` with `X-IEWT-Generation`, body `{ projectId, mode, completedTaskIds }` → `{ ok: true, project, generation }`
+- The v2 routes follow the same session, owner-header, same-origin and generation rules as the granular routes above.
 - `GET /api/rt/ws`, `/api/rt/snap` and `/api/rt/status` are the Flows real-time
   rail (see "Real-time rail"); they use the Flows session, not the learning one.
 - Unknown API routes are JSON 404. Unsupported methods are JSON 405 with
@@ -673,8 +728,14 @@ socket subscribes to it or a `/api/rt/snap` named it in the last 60 s; `gx` is
 polled only for the focus tickers of sockets that ask for it (at most three,
 each every 15 s), and `/api/rt/snap?k=gx` with none answers cold at once. A
 topic that leaves demand forgets its failures and leaves `degraded`; `status`
-lists all five with `demanded`. Tier 1, Tier 2 and the nightly are
-unchanged and remain the fallback. The hub reads D1 (the roster and the clock
+lists all five with `demanded`. Cadences (`rtCadenceMs` in `shared/flows-rt.js`):
+px and fl every 5 s in the regular session and every 9 s in the pre-market and
+post-market, mk every 20 s, gx every 15 s a name, nw every 30 s and every 60 s
+outside the regular session. A cadence plus the one-second tick, the 4 s call
+deadline and a second of margin must fit inside its class's live window, which a
+table test in `flows-rt-contract` holds (9 s is the longest px and fl value it
+admits against `rt`'s 15 s), and the freshness classes are unchanged. Tier 1,
+Tier 2 and the nightly are unchanged and remain the fallback. The hub reads D1 (the roster and the clock
 row, one batch at start and every five minutes, and again after 30 seconds
 when a read failed or timed out, keeping the roster it holds or the base names
 meanwhile) and never writes it; it adds no `live:*` key, never touches the
@@ -699,11 +760,24 @@ its `webSocket` through `new Response(response.body, response)`):
   (3) sockets per user: the next gets a `ctl.bye` with code 4009 and is closed.
 - `GET /api/rt/snap?k=px,fl,mk`: the same envelopes as a JSON array, from the
   object's memory, `no-store`, with `X-Fresh-*` of the worst frame. It wakes
-  the hub and waits up to 3 s for a cold topic.
+  the hub and waits up to 3 s for a cold topic. Query `f` (a focus ticker,
+  validated and uppercased, 400 `invalid_ticker` otherwise) keeps that name in
+  the hub's screener call for 60 s after the last request naming it (at most
+  eight names, no extra vendor call). The response carries `X-RT-Poll-Ms` and
+  `X-RT-Poll-Cap-Ms`: the owner is told 5000 and 0, a member 15000 and 600000.
 - `GET /api/rt/status`: owner only. Mode, audience, upstream, sockets by user,
   per-topic sequence, last-frame age, last upstream error, vendor lag p50/p95
   (hub receive time minus vendor timestamp), calls in the last minute and hour
-  by topic, the degraded episode and the kill switches.
+  by topic, the degraded episode and the kill switches. Per topic it also holds `rttMs` (a
+  poll's start to its read), `emptyFrames`, `itemLagMs` (fl and nw only: the read minus the
+  newest new item's own timestamp; the first poll of an epoch is a backlog and is not
+  sampled) and `time { demandedMs, liveMs, vendorLagMs, oursMs }`, accrued at each tick while the
+  market is in session: a demanded topic that is not `live` for a vendor reason (`vendor-lag`,
+  `vendor-skew`, `vendor-unstamped`) counts as vendor lag, for any other reason as ours. A gap
+  of more than three alarm ceilings between ticks is `unobservedMs` and is charged to no class.
+  All of it is memory, resets with the epoch (`ep`, `startedAt`), and nothing writes it to D1.
+  The client's `FlowsUI.rt.measure()` adds `transitMs` (p50 and p95 of receive time minus the
+  frame's `at`, against the offset the hello taught; an estimate, labelled as one).
 
 Kill switches fail closed. `FLOWS_RT_MODE` is `on` or anything else is off
 (routes answer JSON 404 `rt_off`, even to an anonymous caller; an absent
@@ -760,14 +834,35 @@ against exactly this:
 - The hub polls only 04:00 to 20:00 ET on trading days (the repository's
   calendar plus the `flows_clock` verdict); outside it sends `ctl.closed`
   once and makes no vendor call.
+- The alarm is set to the next thing due, not once a second: `RtHub.tick()`
+  returns the least of the next demanded topic's due time (a pause pushes it to
+  its end), the next heartbeat and the sweep, held to
+  `RT_LIMITS.alarmMinMs` (250 ms) to `alarmMaxMs` (5 s), and the adapter polls
+  every topic due within `coalesceMs` (1 s) together, so a viewer of px, fl, mk
+  and nw costs about 12 alarms a minute (about 11,500 Durable Object requests
+  and rows written a 16-hour day, not 57,600). `Pulse` remembers its own alarm
+  (`armed`), reads `getAlarm` once after a wake, never moves an alarm later, and
+  retries a failed `setAlarm` once inside the handler, throwing so the platform
+  retries the handler if both fail. Out of session the gap is `closedTickMs`
+  (9 s): measured in workerd on 2026-10-10, a socket held on a Saturday with a
+  30 s gap saw the object hibernate between alarms, a new hub and a new `ep`
+  on every wake (three epochs in 75 s, two `ctl.resync` frames and no
+  heartbeat), because a pending alarm does not keep an object resident and the
+  epoch and the per-topic sequences live in memory. The gap while any socket or
+  snapshot reader is demanded therefore stays under 10 s; persisting only the
+  epoch would break "+1 per frame within an epoch" and persisting every
+  sequence costs a row per frame.
 
 The browser half is `assets/js/flows-rt.js`, `FlowsUI.rt`, loaded after
 `flows-ui.js` (and `flows-fresh.js` where the page has it) on the boards, the
 home page, the market page, the unusual page and the ticker. It codes against the
 envelope above and assumes no cadence. It walks a ladder: the socket; on a
 failure, a no-reconnect bye (4001, 4003, 4009, 4011, 4012) or repeated failures,
-`GET /api/rt/snap` every 5 s with the socket probed again after 1, 2, 4 and 8 s and
-then every minute; the pages' own heartbeats underneath always; and `off` for the
+`GET /api/rt/snap` (naming the page's focus ticker) every `X-RT-Poll-Ms` (5 s until the
+first answer, then the server's word) with the socket probed again after 1, 2, 4 and 8 s and
+then every minute, for at most `X-RT-Poll-Cap-Ms` when that is not 0 (a member's episode is
+ten minutes, at most 40 requests; a hello, a returning tab or the market's reopening
+starts a new one) and then on heartbeats; the pages' own heartbeats underneath always; and `off` for the
 page load when the snapshot answers 401, 403 or 404, in which case the page
 behaves exactly as it did before the rail. A tab hidden for 30 s closes its
 socket and holds no timer. Streamed prices reach a board as the `live:strips`
@@ -810,8 +905,9 @@ not overwrite a streamed one while frames are arriving.
    `tests/worker-regression.mjs` asserts the header is absent. Do not bring it
    back: it empties every returning reader's cache of the immutable assets.
 6. Every `/lab/<valid-course-slug>/` receives an apex-domain canonical, exact
-   title/description, Open Graph/Twitter fields, visible H1 and four-module
-   outline, related course links, and one parseable Course + Breadcrumb JSON-LD
+   title/description, Open Graph/Twitter fields, visible H1 and module
+   outline (four modules for the seven original courses, five for the five
+   newer ones, which share the generic Open Graph image), related course links, and one parseable Course + Breadcrumb JSON-LD
    graph. Generic and invalid legacy routes never return an indexable shell.
 7. Malformed, oversized, wrongly signed, or expired sessions fail closed as an
    anonymous user and never throw a request-level 500.
@@ -910,18 +1006,18 @@ npx playwright install chromium
 npm test
 
 # From the repository root: bundle/config validation without deployment
-./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-dry-run
+./tests/node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/anilkaya-worker-dry-run
 ```
 
 The suites prove:
 
-- all seven curricula, four modules each, every stage schema, exact generated
-  per-course payloads and IDs, deterministic 96-item review artefacts, the
+- all twelve curricula (four or five modules each), every stage schema, exact generated
+  per-course payloads and IDs, deterministic review artefacts, the
   balanced 15-item placement bank and sanitized result contract,
   browser/server mastery-scheduler parity, payload-size budgets, scoring
   manifests, owner-scoped v2 migration/reset behavior, local asset
   existence/versioning, and hardened sessions;
-- real Worker-first routing, canonical redirects, all seven crawlable metadata
+- real Worker-first routing, canonical redirects, all twelve crawlable metadata
   and syllabus variants,
   response-cloned asset byte integrity, conditional caching, security headers,
   JSON API errors, OAuth and POST-only logout behavior, D1 user isolation,
@@ -929,7 +1025,7 @@ The suites prove:
   idempotency, generation-fenced transactional reset, stale-write rejection,
   and exact derived points;
 - academy cockpit fold visibility, placement routing, command-center metrics,
-  four learning paths, search/level/status filters, all five placement and
+  the guided learning paths, search/level/status filters, all five placement and
   Daily Mastery Review formats, single-course payload
   isolation, anonymous and signed-in reset safety, no
   horizontal overflow or browser errors across 320/390/768/1440 widths,
@@ -967,9 +1063,13 @@ over a window's runs); and `tests/lib/d1-fake.mjs` (the counting D1 fake over
 `node:sqlite` that `flows-reads-contract` uses: trips, rows read by query
 plan, rows written, and the fail, throw, hang and slow switches). New CPU
 ceilings and new in-process D1 suites use these rather than another copy.
+`tests/lib/suite-registry.mjs` is the registry's scanner and checker (the import
+closure walk, the class rule, the literal-read scan, the glob matcher, `--write`),
+held by `run-contract`.
 
-GitHub Actions runs these gates on pushes to `main`, on pull requests, and by
-manual dispatch. It uses pinned dependencies from `tests/package-lock.json`.
+GitHub Actions runs these gates on pushes to `main`, on pull requests, by
+manual dispatch, and on a weekly schedule (`17 6 * * 1`, Monday 06:17 UTC). It
+uses pinned dependencies from `tests/package-lock.json`.
 
 `npm test` is `node run.mjs`, the fail-late runner. It runs every suite
 registered in `tests/suites.json`, in that file's order and with `tests/` as
@@ -987,9 +1087,28 @@ whatever is left in its process group is killed. It prints a table
 of every suite's result, seconds and assertions, and appends it as Markdown,
 with the last 40 lines of each failure, to `$GITHUB_STEP_SUMMARY` when that
 is set. **Every `test:*` script in `tests/package.json` needs an entry in
-`tests/suites.json`** (name, class `N`, `C` or `W`, `medianS`, and an
-optional `group`, `fast` or `shard`, default `shard`; only `contracts` and
-`run` are `fast`), or the runner refuses to start and exits 2.
+`tests/suites.json`** (name, class `N`, `C` or `W`, `group` `fast` or `shard`
+(only `contracts` and `run` are `fast`), `timing`, `medianS`, an optional
+`timeoutS`, `files` and `covers`), or the runner refuses to start and exits 2.
+The registry is the single list of what the suites are and what they read:
+`files` are the files the suite's script runs (flags skipped), `timing` marks the
+eight suites with an in-process CPU or wall-clock gate (the tag the flake policy
+will key on), and `covers` are globs of the repository files the suite reads
+that its import closure does not reach (pages, assets, schema, fixtures), which
+the planned affected-suite selection joins to the closure. The top-level
+`support` lists every other `tests/*.mjs` and `tests/lib/*.mjs`. Adding a suite
+is a `package.json` script, a name in `suites.json` and `node
+tests/lib/suite-registry.mjs --write`, which fills `class`, `group`, `timing`
+(false), `files`, `covers` and `support` from the tree and never drops a `covers`
+entry that still matches a file; without `--write` the same command checks the
+registry and exits 1 on a problem. `run-contract` holds it: a test file in no
+suite's `files` and not in `support`, a `class` that is not what the import
+closure makes it (`W` if it reaches `tests/worker-server.mjs`, else `C` if it
+imports `playwright` outside the optional launcher `tests/lib/browser.mjs`, else
+`N`), a `files` list that differs from the script, an unknown `group`, a
+non-boolean `timing`, a literal path the suite reads that no `covers` glob
+names, a glob that matches nothing, and a support file nothing reaches each fail,
+proved on a miniature repository in a temporary directory.
 `node run.mjs --only a,b` (from `tests/`, names without the `test:` prefix)
 runs those suites alone, `--bail` stops at the first failure as the old
 chain did, and `--timeout-scale=x` multiplies every timeout on a slow
@@ -1008,6 +1127,24 @@ group, a bad `i/n`, an unknown group, and `--only` with `--shard` or
 still runs one suite by itself, and `npm test` with no flag still runs the
 whole chain.
 
+**Flake policy.** Only a suite tagged `timing` in `tests/suites.json` (an
+in-process CPU or wall-clock gate; the manifest refuses the tag on any suite that
+is not class `N`, so a Chromium or workerd suite is never retried) is run a second
+time, and only when `CI` is `true`: locally the first failure is the result. A
+timeout is not retried, because a hang is not a flake. A pass on the retry is
+green and printed as `FLAKY` in the table, the step summary (with the first
+attempt's last lines) and, under GitHub Actions, as a `::warning`; a second
+failure is a failure. Every FLAKY outcome is to be answered by an entry in
+`tests/quarantine.json`, `{suite, assertion, firstSeen, expires, issue}` with
+`expires` at most seven days after `firstSeen`; the run says whether an
+unexpired entry exists, and `run-contract` (the `run` suite, in the fast job)
+fails the moment any entry is malformed, names a suite that is not tagged
+`timing`, or has expired, so a flake is fixed or renewed in a reviewed pull
+request (a renewal is a new entry with a new `firstSeen` and issue) inside the
+week. The file is empty until a first flake is recorded. A flaky Chromium
+interaction suite is fixed in the test: wait for the settled state, never an
+intermediate one.
+
 In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
 (full history and `ASSET_DIFF_BASE`, the Worker dry run, then
 `node run.mjs --group fast`, no Chromium), six `shard` jobs (a matrix of
@@ -1016,7 +1153,19 @@ only when `--needs-browser` answers `true`), and `test`, which needs both,
 runs `if: always()`, and is green only when the fast job and every shard
 succeeded. `test` is the job a ruleset on `main` should require (A-15); as
 of 2026-10-05 `main` has no branch protection and no ruleset, so nothing
-requires it yet and Workers Builds still deploys `main` on merge. **Adding a suite, or refreshing
+requires it yet and Workers Builds still deploys `main` on merge.
+
+On a push to `main` a fourth job, `reuse`, runs first (`scripts/ci-reuse.mjs`, read-only
+token). The pull-request run's `test` job writes a `tested-tree` commit status on the PR
+head, whose description is the git tree of the exact commit `fast` checked out and whose link
+is the run. The push run takes the merged PR from the pushed commit, looks for a successful
+`tested-tree` status by `github-actions[bot]` naming the pushed tree, and then reads the run
+behind it through the Actions API: it must be completed and successful, event
+`pull_request`, workflow `.github/workflows/regression.yml`, on that PR head, in this
+repository. Only then are `fast` and the shards skipped (`test` requires them skipped),
+about 32 runner-minutes saved and push-to-green about two minutes. Any doubt, an API error
+included, runs the full gate; the weekly schedule and manual dispatch never reuse. `statuses:
+write` belongs to the `test` job alone and `pull-requests: read` to `reuse` alone. **Adding a suite, or refreshing
 a `medianS`, means changing `tests/suites.json` AND republishing
 `PUBLISHED_SHARDS` in `tests/run-contract.mjs` with the new six-shard
 packing (unchanged when no suite moves), then running
@@ -1069,41 +1218,44 @@ in both directions: `contracts.mjs` and `flows-weight.mjs` merely mention the
 string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
-Confirmed to run with no server:
+<!-- gen:suites-local -->
+`tests/suites.json` registers 83 suites: 50 that need only Node (N), 16 that also
+need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
+each suite's import closure, so this list cannot drift from it. A name is the
+`test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
+`node run.mjs --only <name>` from `tests/`.
+
+Confirmed to run with no server and no browser (N):
 
 ```
-contracts              flows-weight            flows-payload-shape
-flows-scores-contract  flows-overlay-contract  flows-ticker-contract
-flows-card-render      flows-card-contract     flows-strip
-flows-features         flows-alerts-contract   flows-brief
-flows-warnings         flows-sign              flows-ask
-flows-stock-contract   flows-premium-contract  flows-pulse-contract
-flows-events-contract  flows-mint-contract     flows-permits-contract
-flows-political-contract  flows-record-contract  flows-universe-contract
-flows-garch            flows-neuron            flows-quant
-flows-chain-panels     flows-auth-contract     mastery-contract
-academy-contract       flows-variation         flows-probe-contract
-flows-ws-probe-contract
-flows-vol-contract
-flows-positioning-contract
-flows-legs-contract
-flows-live-contract    flows-freshness-contract
-flows-starts-contract  flows-rt-contract
-flows-quant-card       flows-track-render
-flows-quant-audit
-flows-pipeline-contract  flows-reads-contract  flows-ledger-contract
-flows-verdict-contract
-flows-readers-contract   flows-readers-render
-markets-contract         flows-desk-client
-landing-motion
-flows-basis-contract     flows-desk-wiring
-flows-neuron-screen
-lib-contract
-flows-dossier-contract   flows-dossier-reads
-flows-reading   flows-reading-worker   flows-reading-render
-flows-rt-client          flows-net-render
-run-contract
+contracts                 run                       markets                   flows
+pipeline                  flows-probe               flows-ws-probe            flows-universe
+flows-legs                flows-record              flows-chain-panels        mastery
+academy                   flows-basis               flows-payload-shape       flows-scores
+flows-alerts              flows-mint                flows-pulse               flows-freshness
+flows-live                flows-rt                  flows-starts              flows-reads
+flows-readers             flows-ledger              flows-verdict             flows-stock
+flows-permits             flows-overlay             flows-political           flows-weight
+flows-brief               flows-warnings            flows-sign                flows-garch
+flows-quant               flows-quant-card          flows-neuron              flows-variation
+flows-vol                 flows-positioning         flows-quant-audit         flows-neuron-screen
+flows-dossier             flows-dossier-reads       flows-reading             flows-reading-worker
+architecture              docs
 ```
+
+Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
+
+```
+market-ticker             landing-motion            placement                 flows-rt-client
+flows-desk-client         flows-desk-wiring         flows-ticker              flows-render
+flows-events              flows-readers-render      flows-export              flows-net-render
+flows-strip               flows-ask                 flows-track-render        flows-reading-render
+```
+<!-- /gen:suites-local -->
+
+`placement-contract` needs Playwright's Chromium but no workerd: it serves the repository's
+static files from its own `http.createServer` on loopback. Run it with
+`PLAYWRIGHT_BROWSERS_PATH` set like the other browser suites.
 
 `market-ticker-render` needs Playwright's Chromium but no server: it serves the
 landing script and a snapshot from `page.route` on a fake origin and fixes
@@ -1224,7 +1376,8 @@ on the same counting D1 fake and `node:sqlite` as `flows-reads-contract`, so it
 takes the same Node floor. `flows-readers-render` about 10 s: Chromium against
 stubbed `/api/flows/*` routes, a fake clock and `page.clock.runFor`, no workerd.
 
-`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server. It
+`flows-pipeline-contract` was measured on 2026-09-24: 123 s with no server (192 s
+as the CI median in `tests/suites.json`). It
 was on neither list, so a source scan in it (every ingest call site must
 `await ingestHeaders(`) went unrun until CI caught it.
 
@@ -1254,16 +1407,21 @@ under `--disable-warning=ExperimentalWarning`), and prints the CPU per poll and
 the bytes per frame it measured: on a 157-name roster with every row changing,
 px costs about 3 ms of CPU a poll and 31.7 KB a frame, fl 0.3 ms, gx 0.7 ms,
 mk 0.3 ms, nw 0.5 ms; a px snapshot is 32 KB, an fl snapshot 81 KB.
-`flows-rt-server` boots workerd four times (the rail, a Saturday, the switch off,
-production cadence) with persisted Durable Object storage, because raw workerd
+`flows-rt-server` boots workerd five times (the rail, a Saturday, the same Saturday
+at production cadence for 75 s with a silent socket to prove the object keeps one
+`ep` and sends no `ctl.resync`, the switch off, production cadence) with persisted Durable Object storage, because raw workerd
 with in-memory Durable Object storage crashes when an alarm fires; the first
 three run at `FLOWS_RT_SCALE=0.2`, the last at real cadence and takes a minute
 of wall time by itself. It needs `FLOWS_TEST_SANDBOX=1` in the sandbox and was
 measured on 2026-10-03 at 151 s with 158 assertions. It also prints the vendor
 calls a minute at real cadence for one socket on all five topics with one focus
-ticker (px 12, fl 12, gx 4, mk 12, nw 2 on 2026-10-05; gx was 59 before it
-read focus tickers only) and the alert-to-client latency it saw (p50 2.1 s,
-p95 4.5 s over 40 alerts).
+ticker (px 12, fl 12, gx 4, mk 6, nw 2 on 2026-10-10; mk was 12 at a 10 s
+cadence and gx 59 before it read focus tickers only) and the alert-to-client
+latency it saw (p50 2.1 s, p95 4.6 s over 40 alerts). Its first boot also opens
+the upgrade by hand, with and without an offer of `permessage-deflate`, reads the
+101's `Sec-WebSocket-Extensions` and parses each frame off the socket with
+`tests/lib/ws-wire.mjs`: on local workerd the offer is accepted and the payload
+travels at 0.15 of its JSON size (215 assertions on 2026-10-10).
 `flows-rt-client` needs Chromium and no server: `page.routeWebSocket` plays the
 hub for the stub tests, and for the integration block it bridges the page's
 socket to a real `RtHub` driven by `rt-fixtures.mjs` on a virtual clock. It was
@@ -1294,7 +1452,8 @@ rebuilds the `FlowsQuant` bundle in memory and fails when the committed file
 differs, then runs the bundle in a bare `vm` context against the modules.
 `run-contract` (the `run` suite) was measured on 2026-10-05: 15 to 21 s with no
 server and 379 assertions, almost all of it waiting out the fixtures' timeouts
-and kill graces. It checks `tests/suites.json` against `package.json`, then
+and kill graces. It checks `tests/suites.json` against `package.json` and against the tree (the
+registry rules above, with a mutation for each), then
 spawns `run.mjs` against fixture suites in a temporary directory: a failure, a
 hang that ignores SIGTERM, a flaky suite, a detached process that holds a
 suite's output open past its timeout, 3 MiB on one unterminated line, 80 wide
@@ -1305,15 +1464,23 @@ SIGTERM, SIGINT, SIGHUP, two SIGINTs 5 ms apart and a second SIGINT 800 ms
 later mid-suite. Its process checks read `/proc` where it exists and `ps`
 elsewhere, so it runs on macOS too.
 
-Confirmed to need one: `flows-rt-server`, `flows-overview-contract`, `flows-board-render`,
-`flows-watch-render`, `flows-political-render`, `flows-ask-render`,
-`flows-legacy-payload`, `flows-worker-contract`, `flows-desk-contract`,
-`flows-chain-contract`, `flows-sections-contract`, `worker-regression`,
-`placement-contract`, `flows-motion`, `flows-market-contract`, `flows-strategy` (measured on
-2026-09-23: 13 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd for the
-strategy page and its `engine=1` route), `flows-unusual-contract` (measured on
-2026-09-24: 80–92 s with `FLOWS_TEST_SANDBOX=1`; it boots workerd through
-`startWorker`).
+<!-- gen:suites-server -->
+Confirmed to need one (W; set `FLOWS_TEST_SANDBOX=1` in the agent sandbox):
+
+```
+worker                    flows-worker              flows-rt-server           flows-chain
+flows-desk                flows-overview            flows-sections            flows-market
+flows-legacy              flows-motion              browser                   flows-unusual
+flows-political-render    flows-watch-render        flows-board-render        flows-strategy
+flows-ask-render
+```
+<!-- /gen:suites-server -->
+
+`flows-strategy` was measured on 2026-09-23 at 13 s with `FLOWS_TEST_SANDBOX=1`
+(CI median 22 s); it boots workerd for the strategy page and its `engine=1`
+route. `flows-unusual-contract` was measured on 2026-09-24 at 80 to 92 s with
+`FLOWS_TEST_SANDBOX=1`; it boots workerd through `startWorker`. `browser` is
+`npm run test:browser` (`regression.mjs`: Chromium against `startWorker()`).
 
 `flows-motion` was in NEITHER list until 2026-09-13 and was measured then: it
 boots workerd, so without `FLOWS_TEST_SANDBOX=1` it hangs in this sandbox
@@ -1327,8 +1494,8 @@ Anything not named in either list has not been measured — run it and find
 out rather than assuming.
 
 **Why this section exists.** `flows-card-render` was filed as needing a
-server. It does not — it renders through `page.setContent` and finishes in
-nine seconds. Because it was skipped locally it went unrun for a whole
+server. It does not — it renders through `page.setContent` and finished in
+nine seconds when measured locally (`tests/suites.json` holds the CI median). Because it was skipped locally it went unrun for a whole
 branch, and it then found three real defects at once: a drawer count left
 behind by a new panel, a chart shipping `preserveAspectRatio="none"` so its
 bar heights meant nothing, and an SVG label clipped off its own canvas by
@@ -1370,7 +1537,8 @@ write the argument in the commit message. Generated files
 `shared/stage-manifest.js`, `shared/skill-manifest.js`,
 `shared/course-points.js`, `shared/course-seo.js`) are written by
 `scripts/generate-course-payloads.mjs` without banners; edit the generator,
-not its output. `assets/js/flows-quant.bundle.js` is generated the same way by
+not its output. `docs/index.md` and the marked sections of this file are
+written by `scripts/gen-docs.mjs` the same way. `assets/js/flows-quant.bundle.js` is generated the same way by
 `scripts/build-flows-quant-bundle.mjs` (esbuild from the pinned
 `tests/node_modules`, tree-shaken from `shared/flows-quant-browser.js`), and so
 is `assets/js/flows-quant-read.bundle.js`, tree-shaken from
@@ -1384,11 +1552,13 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
 ## Design and accessibility invariants
 
 - JavaScript remains IIFE-based and framework-free; production globals are
-  deliberate: `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
+  deliberate:<!-- gen:globals -->
+  `Lab`, `Auth`, `Gamify`, `FX`, `IEWTStorage`, `MasteryScheduler`,
   `REVIEW_ITEMS`, `TOPIC_META`, `TOPIC_BY_ID`, `COURSE_STAGE_POINTS`,
   `LEARNING_PATHS`, `toast`, `COURSE_STAGE_IDS`, `COURSE_SKILLS`,
   `SKILL_CATALOG`, `SKILL_BY_ID`, `SkillMasteryScheduler`, `PROJECT_CATALOG`,
-  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`. The rail's browser
+  `PROJECT_BY_ID`, `FlowsUI`, and `FlowsQuant`.
+  <!-- /gen:globals --> The rail's browser
   half is `FlowsUI.rt` (`connect`, `on`, `transport` and the adapters), added to
   the existing global rather than a new one, and the flow network is
   `FlowsUI.net` (`model`, `mount`, `of`), added the same way by the one page
@@ -1456,7 +1626,9 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   so a smile or a probability can never be computed one way on the server
   and another in the page.
   `CURRICULUM` is an authoring/generator input, not a production course-page
-  payload.
+  payload. `globalThis.__FlowsDeskTest` and `globalThis.__IEWTPlacementTest` are
+  test hooks that exist only so a `vm` context or Chromium can reach pure
+  functions. `lesson-redirect.js` is an IIFE and declares no global.
 - Design tokens live in `base.css`; typography is self-hosted subset Latin
   Modern. Re-subset from upstream for new glyph coverage rather than editing
   WOFF2 files.

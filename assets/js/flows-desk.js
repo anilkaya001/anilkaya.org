@@ -260,7 +260,9 @@
     const rate = eng && eng.rate ? eng.rate : null;
     const spot = spotOf(p), laws = new Map();
     const asOfMs = Q ? quoteMs(p) : null;
+    const chainDay = /^\d{4}-\d{2}-\d{2}$/.test(String(p.sessionDate || p.asOf || "")) ? String(p.sessionDate || p.asOf) : null;
     for (const r of p.rows || []) {
+      r.__day = chainDay;
       r.__eng = r.__fit = r.__code = null;
       if (!Q) { r.__why = T("why-q"); continue; }
       const type = r.type === "P" ? "P" : "C";
@@ -359,6 +361,7 @@
     mods.more = h("button", { type: "button", class: "ui-disclose", "aria-expanded": "false", hidden: true, onclick: () => { mods.open = !mods.open; renderList(); } }, h("span"), glyph("chev"));
     const lines = UI.moduleCard({ id: "dkLinesM", title: "Lines", span: 12, index: 2, info: linesInfo, body: [mods.list, mods.more] });
     lines.querySelector(".ui-mod-h").insertBefore(h("span", { class: "dk-rank" }, UI.calibTag(), mods.rankSel), lines.querySelector(".ui-mod-h .ui-info"));
+    if (UI.exportMenu) lines.querySelector(".ui-mod-h").insertBefore(UI.exportMenu({ name: "flows-desk-frontier", csv: exportSpec, svg: () => mods.scatter.querySelector("svg") }), lines.querySelector(".ui-mod-h .ui-info"));
     mods.smileSel = h("select", { id: "deskSurfaceSymbol", class: "dk-select", "aria-label": "Smile for symbol" });
     mods.smileSel.addEventListener("change", () => { surfaceSymbol = mods.smileSel.value || null; writeURL(); if (mods.smileChart) mods.smileChart.redraw(true); });
     mods.smile = h("div", { class: "dk-smile", id: "dkSmile" });
@@ -372,6 +375,25 @@
     wireBP();
     mods.rankSel.addEventListener("change", onRank);
   }
+
+  const EXPORT_COLS = [
+    { label: "Ticker", get: (r) => r.ticker },
+    { label: "Structure", get: (r) => (r.strategy === "cc" ? "covered call" : "cash-secured put") },
+    { label: "Expiry", get: (r) => r.expiry },
+    { label: "Chain session", get: (r) => r.__day },
+    { label: "Days to expiry", get: (r) => isNum(r.days) },
+    { label: "Strike", unit: "USD", get: (r) => isNum(r.strike) },
+    { label: "Annualised yield", unit: "fraction", get: (r) => isNum(r.annualized) },
+    { label: "Collateral", unit: "USD", get: (r) => isNum(r.collateral) },
+    { label: "Win probability (implied)", unit: "fraction", get: popQ },
+    { label: "Win probability (real-world)", unit: "fraction", get: popP },
+    { label: "Expected value, real world", unit: "USD", get: evP },
+  ];
+  const exportSpec = () => {
+    const rows = view.shown || [];
+    const days = [...new Set(rows.map((r) => r.__day).filter(Boolean))];
+    return { name: "flows-desk-lines", source: "anilkaya.org Flows desk, own model outputs", asOf: days.length === 1 ? days[0] : null, rows, cols: EXPORT_COLS };
+  };
 
   let view = { rows: [], shown: [] };
   function render() {

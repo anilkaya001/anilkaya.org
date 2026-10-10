@@ -193,12 +193,12 @@ async function mount(browser, { html, url = "/flows/", answer = null, reduced = 
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname === "/api/rt/snap") {
-      R.snapHits.push({ at: R.now, k: u.searchParams.get("k") });
+      R.snapHits.push({ at: R.now, k: u.searchParams.get("k"), f: u.searchParams.get("f") });
       const s = R.snap;
       if (s.status !== 200) {
         return route.fulfill({ status: s.status, contentType: "application/json", headers: s.headers || {}, body: JSON.stringify({ error: { code: "x", message: "x" } }) });
       }
-      return route.fulfill({ status: 200, contentType: "application/json", headers: { "Cache-Control": "no-store" }, body: JSON.stringify(s.frames()) });
+      return route.fulfill({ status: 200, contentType: "application/json", headers: { "Cache-Control": "no-store", ...(s.headers || {}) }, body: JSON.stringify(s.frames()) });
     }
     if (u.pathname.startsWith("/api/flows/")) {
       const key = u.pathname.slice("/api/flows/".length) + u.search;
@@ -562,6 +562,67 @@ try {
     await ctx.close();
   }
 
+  if (want("memberpoll")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.mode = "refuse";
+    let n = 0;
+    R.snap = {
+      status: 200, frames: () => { n++; return [R.snapshot("px", [quote("NVDA", 200 + n, 190, R.now - 1000)])]; },
+      headers: { "X-RT-Poll-Ms": "15000", "X-RT-Poll-Cap-Ms": "600000" },
+    };
+    await connect(page, { topics: ["px"], focus: "nvda" });
+    await R.nextConn();
+    await R.until(() => R.snapHits.length >= 1);
+    await R.pump();
+    eq(R.snapHits[0].f, "NVDA", "A MEMBER ON THE POLL RUNG NAMES THE FOCUS: the first snapshot request carries f=NVDA, normalised");
+    eq(await transport(page), "poll", "the poll rung");
+    eq((await status(page)).label, "Polling 15 s", "named for the interval the server set");
+    eq((await pill(page)).feed, "Polling 15 s", "on the pill too");
+    const h0 = R.snapHits.length;
+    await R.adv(60000, 5000);
+    const polled = R.snapHits.length - h0;
+    ok(polled >= 3 && polled <= 5, `it polls about every 15 s (${polled} requests in 60 s)`);
+    await R.adv(480000, 15000);
+    eq(await transport(page), "poll", "and is still polling eight minutes in");
+    await R.adv(180000, 15000);
+    const total = R.snapHits.length;
+    ok(total <= 42, `an episode costs at most 40 snapshot requests, a few over for the interval's rounding (${total})`);
+    eq(await transport(page), "heartbeat", "AFTER TEN MINUTES THE PAGE FALLS TO ITS OWN HEARTBEATS");
+    eq((await pill(page)).feed, "Heartbeat", "and the pill says so");
+    const conns = R.conns.length;
+    await R.adv(300000, 15000);
+    eq(R.snapHits.length, total, "it asks the snapshot route no more, though the socket probes carry on");
+    ok(R.conns.length > conns, "the socket is still probed while the page waits on heartbeats");
+    await page.evaluate(() => window.__setHidden(true));
+    await R.adv(40000, 10000);
+    await page.evaluate(() => window.__setHidden(false));
+    await R.adv(2000, 500);
+    ok(R.snapHits.length > total, "a returning reader starts a new episode");
+    eq((await measure(page)).polling, 1, "and the poll timer is armed again");
+    deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
+  if (want("ownerpoll")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.mode = "refuse";
+    let n = 0;
+    R.snap = {
+      status: 200, frames: () => { n++; return [R.snapshot("px", [quote("NVDA", 200 + n, 190, R.now - 1000)])]; },
+      headers: { "X-RT-Poll-Ms": "5000", "X-RT-Poll-Cap-Ms": "0" },
+    };
+    await connect(page, { topics: ["px"] });
+    await R.nextConn();
+    await R.until(() => R.snapHits.length >= 1);
+    await R.pump();
+    eq(R.snapHits[0].f, null, "no focus on the page, no f on the request");
+    eq((await status(page)).label, "Polling 5 s", "THE OWNER KEEPS 5 s");
+    await R.adv(900000, 5000);
+    eq(await transport(page), "poll", "and is never cut off: still polling after fifteen minutes");
+    ok(R.snapHits.length >= 100, `at the owner's cadence (${R.snapHits.length} requests in fifteen minutes)`);
+    await ctx.close();
+  }
+
   if (want("off")) {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     R.snap = { status: 403, frames: () => [], headers: {} };
@@ -616,6 +677,38 @@ try {
     deep([...new Set(drops.filter((s) => /^rt:/.test(s)))].sort(), ["rt:fl", "rt:gx", "rt:mk", "rt:nw", "rt:px"], "WHEN THE SOCKET FALLS every rt:* freshness entry is dropped, so a dead socket cannot leave the pill stale");
     const f2 = await facts(page);
     ok(!f2["Price read"] && !f2.Payloads, `and the price-read claim and the payload count go with them (${JSON.stringify(f2)})`);
+    await ctx.close();
+  }
+
+  if (want("transit")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    await connect(page, { topics: ["px"] });
+    const c1 = await R.nextConn();
+    R.send(c1, R.hello(["px"], { px: [quote("NVDA", 200, 190, R.now - 1000)] }));
+    await R.pump(80);
+    deep((await measure(page)).transitMs, { n: 0, p50: null, p95: null, estimate: true }, "transit: the hello teaches the clock offset and is not itself a sample");
+    for (const wait of [0, 300, 700, 1200]) {
+      const f = R.delta("px", [quote("NVDA", 201, 190, R.now)]);
+      R.now += wait;
+      await page.clock.runFor(wait);
+      R.send(c1, f);
+      await page.waitForTimeout(20);
+    }
+    const t = (await measure(page)).transitMs;
+    deep([t.n, t.estimate, t.p95 - t.p50], [4, true, 900], "transit: receive time minus the frame's own stamp, against the offset the hello taught, as p50 and p95 and labelled an estimate");
+    const base = t.p50 - 300;
+    ok(base >= 0 && base <= 200, `transit: and the frame that waited 1200 ms reads ${t.p95} ms over a base of ${base} ms (the page's own pump after the hello)`);
+    R.now += 5000;
+    await page.clock.runFor(5000);
+    R.send(c1, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: {} }));
+    await page.waitForTimeout(20);
+    eq((await measure(page)).transitMs.n, 5, "transit: a control frame is a sample too");
+    const early = R.delta("px", [quote("NVDA", 202, 190, R.now)]);
+    R.now -= 0;
+    R.send(c1, early);
+    await page.waitForTimeout(20);
+    ok((await measure(page)).transitMs.p50 >= 0, "transit: no sample is negative");
+    deep(page.errors, [], "nothing threw");
     await ctx.close();
   }
 
@@ -1141,6 +1234,7 @@ try {
     console.log("MEASURE px frames in 60 s:", px[0], "mean bytes", Math.round(px[1] / px[0]), "mean receive path ms (parse, merge, queue, register)", (px[2] / px[0]).toFixed(2));
     console.log("MEASURE per kind [frames, mean bytes, mean ms]:", JSON.stringify(Object.fromEntries(kinds.map((k) => { const d = diff(k); return [k, [d[0], Math.round(d[1] / Math.max(1, d[0])), +(d[2] / Math.max(1, d[0])).toFixed(3)]]; }))));
     console.log("MEASURE animation-frame flushes:", m.raf.length, "mean ms", avg(m.raf).toFixed(2), "max", Math.max(0, ...m.raf).toFixed(2), "| DOM mutation records:", m.mut, "per px frame", (m.mut / Math.max(1, px[0])).toFixed(1));
+    console.log("MEASURE transitMs (an estimate, relative to the hello):", JSON.stringify((await measure(page)).transitMs));
     console.log("MEASURE bytes per minute received on the socket (every topic, a vendor that moves every row each poll):", bytes, "in", msgs, "messages");
     console.log("MEASURE one snapshot response: px", one, "all five topics", all, "=> poll rung per minute: px only", one * 12, "all five", all * 12, "| stored strips body, 157 names:", rest);
     const pxs = { length: px[0] };

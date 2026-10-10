@@ -39,12 +39,6 @@ export function makeCallMeter(stats) {
   return () => (stats && Number.isFinite(stats.calls) ? stats.calls - start : null);
 }
 
-export async function sequential(items, work) {
-  const out = [];
-  for (let i = 0; i < items.length; i++) out.push(await work(items[i], i));
-  return out;
-}
-
 export function chunks(list, size) {
   const out = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));

@@ -3,13 +3,13 @@ import {
 } from "../../shared/flows-freshness.js";
 import { timeMs } from "../../shared/flows-live.js";
 import { githubTarget, githubHeaders, githubSignal, transientRefusal } from "./live.mjs";
-import { etTime } from "./health.mjs";
+import { etTime, healthCodes } from "./health.mjs";
 
 export const WITNESS = Object.freeze({
   tier1StaleMs: FRESH_CLASSES.market.staleS * 1000,
   tier2StaleMs: FRESH_CLASSES.breadth.staleS * 1000,
-  confirm: Object.freeze({ tier1: 2, tier2: 2, nightly: 1, nightlyPending: 2, chain: 1, probe: 3 }),
-  recover: Object.freeze({ tier1: 3, tier2: 3, nightly: 1, chain: 1, probe: 3 }),
+  confirm: Object.freeze({ tier1: 2, tier2: 2, nightly: 1, nightlyPending: 2, chain: 1, probe: 3, health: 1 }),
+  recover: Object.freeze({ tier1: 3, tier2: 3, nightly: 1, chain: 1, probe: 3, health: 1 }),
   renotifyMs: 6 * 60 * 60 * 1000,
   reopenWithinMs: 6 * 60 * 60 * 1000,
   retryOpenMs: 15 * 60 * 1000,
@@ -66,6 +66,14 @@ export const WITNESS_CHECKS = Object.freeze({
       "Nothing is wrong. The live workflow was dispatched with drill ticked, opened this issue with its own token and closed it again.",
       "If you were mentioned and were notified, the channel that carries every other witness issue works.",
       "An HTTP 410 from the API means Issues are switched off for the repository (Settings, General, Features); an HTTP 403 means the job's token lacks issues: write.",
+    ],
+  }),
+  health: Object.freeze({
+    title: "The nightly's health gate failed",
+    remedy: [
+      "The run linked below turned red on this gate; its log holds every failure line, and the codes above say which family each belongs to.",
+      "Fix what the lines name, then dispatch the nightly again (gh workflow run flows-pipeline.yml); a gate that passes closes this issue by itself.",
+      "A run that never reaches the gate, or that is dry, neither opens nor closes it. DEPLOY.md section 10.",
     ],
   }),
   probe: Object.freeze({
@@ -290,11 +298,13 @@ export function issueBody(id, result, { at, since, env = {}, dispatches = null }
     }
     lines.push("");
   }
-  lines.push(`Raised by the live loop's witness${url ? " in " + url : ""}. It closes this issue by itself when the check passes again.`);
+  if (id === "health") lines.push(`Raised by the nightly pipeline's health gate${url ? " in " + url : ""}. It closes this issue by itself when a later gate passes.`);
+  else lines.push(`Raised by the live loop's witness${url ? " in " + url : ""}. It closes this issue by itself when the check passes again.`);
   return lines.join("\n");
 }
 
-export function createWitness({ reporter = null, env = {}, log = console.log, warn = console.warn } = {}) {
+export function createWitness({ reporter = null, env = {}, log = console.log, warn = console.warn, ids = null } = {}) {
+  const owns = (id) => !!WITNESS_CHECKS[id] && (ids ? ids.includes(id) : id !== "health");
   const states = new Map();
   const breached = new Set();
   let seeded = false;
@@ -312,7 +322,7 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
   const adopt = (issues, only = null) => {
     const byId = new Map();
     for (const it of issues) {
-      if (!WITNESS_CHECKS[it.id] || (only && it.id !== only)) continue;
+      if (!owns(it.id) || (only && it.id !== only)) continue;
       if (!byId.has(it.id)) byId.set(it.id, []);
       byId.get(it.id).push(it);
     }
@@ -443,7 +453,7 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
     const number = s.issue.number;
     if (!s.recoveryNoted) {
       s.recoveryNoted = true;
-      await reporter.comment(number, `Recovered at ${etTime(ctx.at)}: the check passes again, so the loop is closing this issue.`);
+      await reporter.comment(number, `Recovered at ${etTime(ctx.at)}: the check passes again, so ${id === "health" ? "this run is" : "the loop is"} closing this issue.`);
     }
     await closeExtras(id, s);
     const shut = await reporter.close(number);
@@ -507,4 +517,36 @@ export function createWitness({ reporter = null, env = {}, log = console.log, wa
       };
     },
   };
+}
+
+export function healthDetail(failures) {
+  const codes = healthCodes(failures);
+  const total = codes.reduce((sum, c) => sum + c.n, 0);
+  return `The nightly's health gate reported ${total} failure${total === 1 ? "" : "s"}:\n\n` +
+    codes.map((c) => `- ${c.code} (${c.n}): ${c.text}`).join("\n");
+}
+
+export async function reportHealth({ failures = [], applies = false, dry = false, env = process.env, fetchImpl = fetch,
+  reporter = null, at = Date.now(), log = console.log, warn = console.warn } = {}) {
+  if (dry) return { action: "dry" };
+  const red = Array.isArray(failures) && failures.length > 0;
+  if (!red && !applies) return { action: "none" };
+  try {
+    const rep = reporter || createIssueReporter({ env, fetchImpl });
+    if (!rep.enabled) {
+      log(`health issue: not reported (${rep.why || "no reporter"})`);
+      return { action: "disabled", why: rep.why || null };
+    }
+    const witness = createWitness({ reporter: rep, env, log, warn, ids: ["health"] });
+    await witness.start();
+    if (red) {
+      await witness.raiseNow("health", { id: "health", status: "breach", detail: healthDetail(failures) }, { at });
+      return { action: "raised", codes: healthCodes(failures).map((c) => c.code), issue: witness.summary().issues.health || null };
+    }
+    await witness.clear("health", { at });
+    return { action: "cleared" };
+  } catch (error) {
+    warn(annotation("warning", "Health issue", `could not report the gate (${error instanceof Error ? error.message : String(error)})`));
+    return { action: "failed" };
+  }
 }

@@ -7,6 +7,8 @@
   },
   "scripts": {
     "test": "node run.mjs",
+    "test:architecture": "node architecture.mjs",
+    "test:docs": "node docs-contract.mjs",
     "test:contracts": "node contracts.mjs && node --disable-warning=ExperimentalWarning lib-contract.mjs",
     "test:run": "node run-contract.mjs",
     "test:flows-neuron-screen": "node flows-neuron-screen.mjs",
@@ -59,6 +61,7 @@
     "test:flows-verdict": "node --disable-warning=ExperimentalWarning flows-verdict-contract.mjs",
     "test:flows-readers": "node --disable-warning=ExperimentalWarning flows-readers-contract.mjs",
     "test:flows-readers-render": "node flows-readers-render.mjs",
+    "test:flows-export": "node flows-export.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
     "test:flows-permits": "node flows-permits-contract.mjs",
     "test:flows-overlay": "node flows-overlay-contract.mjs",

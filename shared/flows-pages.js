@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "249";
+export const ASSET_VERSION = "250";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -460,6 +460,7 @@ ${shell(bear ? "Bearish" : "Bullish", bear ? "short" : "long", username,
     boardBody(bear ? "short" : "long", { status: "flowsStatus", body: "flowsBody", label: "Ranked candidates" }))}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
+<script src="${v("/assets/js/flows-export.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;
@@ -471,7 +472,7 @@ export function deskPage({ username = "" } = {}) {
     description: "Option sales across your names, priced by the engine and ranked on a frontier.",
     active: "desk", username,
     styles: ["/assets/css/flows-tools.css"],
-    scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-desk.js"],
+    scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-export.js", "/assets/js/flows-desk.js"],
     body: `
   <div class="tl dk" id="dkMain">
     <section class="ui-card dk-bar" aria-label="Desk controls">
@@ -623,6 +624,7 @@ ${shell("Watchlist", "watch", username,
     boardBody("watch", { status: "watchStatus", body: "watchBody", label: "Names inside the dead band" }))}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
+<script src="${v("/assets/js/flows-export.js")}" defer></script>
 <script src="${v("/assets/js/flows-board.js")}" defer></script>
 </body>
 </html>`;

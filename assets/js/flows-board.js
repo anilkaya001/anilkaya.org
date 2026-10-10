@@ -586,6 +586,22 @@
     countEl.textContent = shown + " of " + st.rows.length + " names match " + typedEcho();
   }
 
+  const EXPORT_COLS = [
+    WATCH ? { label: "Edge order", get: (p) => num(p.row.__edge) } : { label: "Rank", get: (p) => RANK(p.row, p.index) },
+    { label: "Ticker", get: (p) => p.row.t },
+    { label: "Sector", get: (p) => sectorOf(p.row) },
+    ...[["Score", "points", "s"], ["Conviction", "points", "cnv"], ["Net premium", "USD", "netPrem"], ["Priced move", "fraction", "hm"],
+      ["Volume surprise tilt", "ln ratio", "surpriseTilt"], ["Relative volume", "x", "relVolume"], ["Put/call volume", "ratio", "putCallRatio"],
+      ["52-week position", "fraction", "w52"], ["IV rank", "fraction", "ivr"]].map(([label, unit, k]) => ({ label, unit, get: (p) => num(p.row[k]) })),
+    { label: "Dealer gamma regime", get: (p) => p.row.gRegime },
+    WATCH ? { label: "To band", unit: "score points", get: (p) => { const d = distanceToBand(p.row, bandOf()); return d === null ? null : d.value; } } : null,
+  ].filter(Boolean);
+
+  const exportSpec = () => ({
+    name: "flows-" + side + "-board", source: "anilkaya.org Flows " + side + " board, derived scores and aggregates",
+    asOf: st.payload ? st.payload.sessionDate : null, rows: orderedRows(), cols: EXPORT_COLS,
+  });
+
   function buildTools() {
     if (sortSel) return;
     searchEl = h("input", {
@@ -608,7 +624,11 @@
       h("label", { class: "bd-search" }, UI.glyph("search"), searchEl),
       countEl,
       h("span", { class: "bd-tools-sp" }),
-      h("label", { class: "bd-sort" }, sortSel, UI.glyph("chev")));
+      h("label", { class: "bd-sort" }, sortSel, UI.glyph("chev")),
+      UI.exportMenu ? UI.exportMenu({
+        name: "flows-" + side + "-map", csv: exportSpec,
+        svg: () => (st.view === "map" && !mapHost.hidden ? mapHost.querySelector("svg") : null),
+      }) : null);
   }
 
   function paintHead() {

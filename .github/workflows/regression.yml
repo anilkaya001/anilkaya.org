@@ -16,9 +16,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  reuse:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+      actions: read
+    outputs:
+      reused: ${{ steps.reuse.outputs.reused }}
+      source: ${{ steps.reuse.outputs.source }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 22
+      - name: Look for a green pull-request run of this exact tree
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-reuse.mjs
+
   fast:
+    needs: [reuse]
+    if: ${{ !cancelled() && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      tree: ${{ steps.tree.outputs.tree }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -29,6 +58,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: tests/package-lock.json
+      - name: Record the tree under test
+        id: tree
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - name: Install pinned test dependencies
         working-directory: tests
         run: npm ci
@@ -41,6 +75,8 @@ jobs:
         run: node run.mjs --group fast
 
   shard:
+    needs: [reuse]
+    if: ${{ !cancelled() && needs.reuse.outputs.reused != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
@@ -75,15 +111,34 @@ jobs:
         run: node run.mjs --shard ${{ matrix.shard }}/6
 
   test:
-    needs: [fast, shard]
+    needs: [reuse, fast, shard]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      statuses: write
     steps:
-      - name: Require the fast job and every shard to pass
+      - name: Require the fast job and every shard to pass, or a reused run
         env:
+          REUSED: ${{ needs.reuse.outputs.reused }}
+          SOURCE: ${{ needs.reuse.outputs.source }}
           FAST: ${{ needs.fast.result }}
           SHARDS: ${{ needs.shard.result }}
         run: |
-          echo "fast: $FAST; shards: $SHARDS"
-          test "$FAST" = success && test "$SHARDS" = success
+          echo "reused: $REUSED; fast: $FAST; shards: $SHARDS"
+          if [ "$REUSED" = true ]; then
+            test "$FAST" = skipped && test "$SHARDS" = skipped
+            echo "reused $SOURCE"
+          else
+            test "$FAST" = success && test "$SHARDS" = success
+          fi
+      - name: Record the tested tree on the pull request head
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TREE: ${{ needs.fast.outputs.tree }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          test -n "$TREE"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=success -f context=tested-tree -f description="$TREE" -f target_url="$RUN_URL"

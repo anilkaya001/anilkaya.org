@@ -9,6 +9,9 @@ import {
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
   packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
 } from "./run.mjs";
+import { checkQuarantine, readQuarantine, recordedFor, dayMs, MAX_QUARANTINE_DAYS } from "./lib/quarantine.mjs";
+import { retryAllowed } from "./run.mjs";
+import { checkRegistry, syncRegistry, serialize, globMatches, scanSuite, trackedFiles, scriptFiles, ROOT as REPO } from "./lib/suite-registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUN = path.join(HERE, "run.mjs");
@@ -46,6 +49,98 @@ process.on("exit", () => {
     const t = timeoutFor(s);
     ok(t >= TIMEOUT_FLOOR_S && t >= 3 * (s.medianS || 0), `${s.name}: its timeout (${t} s) is at least the floor and three medians`);
   }
+}
+
+{
+  const manifestText = readFileSync(path.join(HERE, "suites.json"), "utf8");
+  const manifest = JSON.parse(manifestText);
+  const pkg = JSON.parse(readFileSync(path.join(HERE, "package.json"), "utf8"));
+  const tracked = trackedFiles(REPO);
+  deep(checkRegistry({ root: REPO, manifest, pkg, tracked }), [], "the committed suites.json agrees with the tree: every suite's files, class, group, timing flag and covers, and every helper registered and reached");
+  eq(serialize(syncRegistry({ root: REPO, manifest, pkg, tracked })), manifestText, "syncing the committed registry changes nothing, so adding a suite is one entry with a name and a sync");
+  eq(manifest.version, 2, "the registry is version 2");
+  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name), ["flows-ws-probe", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant"].sort((a, b) => manifest.suites.findIndex((x) => x.name === a) - manifest.suites.findIndex((x) => x.name === b)), "the eight suites with in-process CPU or wall-clock gates carry the timing flag");
+  ok(manifest.suites.every((s) => ["fast", "shard"].includes(s.group)), "every suite names its group");
+  deep(manifest.suites.filter((s) => s.group === "fast").map((s) => s.name), ["contracts", "run"], "only contracts and run are fast");
+  const classes = manifest.suites.reduce((n, s) => ({ ...n, [s.class]: (n[s.class] || 0) + 1 }), {});
+  ok(classes.N > 40 && classes.C > 10 && classes.W > 10, `the scan finds all three classes (${JSON.stringify(classes)})`);
+  const flowsRt = manifest.suites.find((s) => s.name === "flows-rt");
+  deep(scriptFiles(pkg.scripts["test:flows-rt"]), flowsRt.files, "the files of a suite are the files its script runs, flags skipped");
+  deep(scriptFiles("node ../scripts/flows-pipeline.mjs --dry-run && node flows-pipeline-contract.mjs"), ["../scripts/flows-pipeline.mjs", "flows-pipeline-contract.mjs"], "and a chain of commands lists each");
+  ok(globMatches("a/*.js", "a/b.js") && !globMatches("a/*.js", "a/c/b.js") && globMatches("a/**/*.js", "a/c/d/b.js") && globMatches("a/**/*.js", "a/b.js") && !globMatches("a/*.js", "a/b.mjs"), "covers globs: * stays in a directory, ** crosses them");
+}
+
+{
+  const root = path.join(scratch, "reg");
+  const put = (rel, body) => { mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); writeFileSync(path.join(root, rel), body); };
+  put("tests/package.json", "{}");
+  put("tests/alpha.mjs", `import { x } from "./helper.mjs";\nimport { readFileSync } from "node:fs";\nreadFileSync("../data/base.json");\nconsole.log(x);\n`);
+  put("tests/helper.mjs", `export const x = 1;\nconst later = async (n) => import(n);\n`);
+  put("tests/beta.mjs", `import { startWorker } from "./worker-server.mjs";\nawait startWorker();\n`);
+  put("tests/worker-server.mjs", `import http from "node:http";\nexport const startWorker = () => http;\n`);
+  put("tests/gamma.mjs", `import { chromium } from "playwright";\nimport { readFileSync } from "node:fs";\nreadFileSync("../assets/page.html");\nvoid chromium;\n`);
+  put("tests/delta.mjs", `import { launch } from "./lib/browser.mjs";\nvoid launch;\n`);
+  put("tests/lib/browser.mjs", `import { chromium } from "playwright";\nexport const launch = () => chromium;\n`);
+  put("data/base.json", "{}");
+  put("assets/page.html", "<p></p>");
+  const pkg = { scripts: { "test:alpha": "node alpha.mjs", "test:beta": "node --disable-warning=ExperimentalWarning beta.mjs", "test:gamma": "node gamma.mjs", "test:delta": "node delta.mjs" } };
+  const tracked = ["data/base.json", "assets/page.html", "tests/alpha.mjs", "tests/helper.mjs", "tests/beta.mjs", "tests/worker-server.mjs", "tests/gamma.mjs", "tests/delta.mjs", "tests/lib/browser.mjs"];
+  const seed = { version: 1, suites: ["alpha", "beta", "gamma", "delta"].map((name) => ({ name, medianS: 1 })) };
+  const good = syncRegistry({ root, manifest: seed, pkg, tracked });
+  deep(good.suites.map((x) => [x.name, x.class]), [["alpha", "N"], ["beta", "W"], ["gamma", "C"], ["delta", "N"]], "scan: a worker-server import is W, a playwright import is C, neither is N, and the shared launcher is not counted as a playwright import");
+  deep(good.suites.find((x) => x.name === "alpha").covers, ["data/base.json"], "scan: a literal path read outside the import closure becomes a covers entry");
+  deep(good.suites.find((x) => x.name === "gamma").covers, ["assets/page.html"], "scan: and so does an HTML page read relative to tests/");
+  deep(good.support, ["helper.mjs", "worker-server.mjs", "lib/browser.mjs"], "scan: every file no suite runs is support");
+  deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "a registry made by sync passes the check");
+  const mutate = (fn, extra = {}) => {
+    const m = JSON.parse(JSON.stringify(good));
+    fn(m);
+    return checkRegistry({ root, manifest: m, pkg: extra.pkg || pkg, tracked: extra.tracked || tracked });
+  };
+  const has = (problems, re, msg) => ok(problems.some((p) => re.test(p)), `${msg}: ${JSON.stringify(problems.slice(0, 3))}`);
+
+  put("tests/zz-dummy.mjs", `console.log("a suite nobody registered");\n`);
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/zz-dummy\.mjs is in no suite's files and not in the support list/, "mutation: an unregistered test file fails the check");
+  rmSync(path.join(root, "tests/zz-dummy.mjs"));
+  put("tests/lib/zz-helper.mjs", `export const z = 1;\n`);
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/lib\/zz-helper\.mjs is in no suite's files/, "mutation: an unregistered helper under lib fails too");
+  rmSync(path.join(root, "tests/lib/zz-helper.mjs"));
+  deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "and removing them restores a clean check");
+
+  has(mutate((m) => { m.suites[0].class = "W"; }), /alpha is class W, but its import closure makes it N/, "mutation: a pure-Node suite classed W fails");
+  has(mutate((m) => { m.suites[1].class = "N"; }), /beta is class N, but its import closure makes it W \(it imports tests\/worker-server\.mjs\)/, "mutation: a server suite classed N fails");
+  has(mutate((m) => { m.suites[2].class = "N"; }), /gamma is class N, but its import closure makes it C/, "mutation: a browser suite classed N fails");
+  has(mutate((m) => { m.suites[3].class = "C"; }), /delta is class C, but its import closure makes it N/, "mutation: the optional launcher does not make a suite C");
+  has(mutate((m) => { m.suites[0].class = "X"; }), /class "X", not N, C or W/, "mutation: an unknown class fails");
+  has(mutate((m) => { m.suites[0].files = ["other.mjs"]; }), /alpha lists files \["other\.mjs"\], but its script runs \["alpha\.mjs"\]/, "mutation: a files list that differs from the script fails");
+  has(mutate((m) => { delete m.suites[0].files; }), /alpha lists files/, "mutation: a missing files list fails");
+  has(mutate(() => {}, { pkg: { scripts: { ...pkg.scripts, "test:alpha": "node alpha.mjs && node helper.mjs" } } }), /alpha lists files/, "mutation: a script that grew a command fails until the registry follows");
+  has(mutate(() => {}, { pkg: { scripts: { ...pkg.scripts, "test:alpha": "node missing.mjs" } } }), /alpha runs missing\.mjs, which does not exist/, "mutation: a script naming a file that is not there fails");
+  has(mutate((m) => { m.suites[0].group = "slow"; }), /alpha has group "slow"/, "mutation: an unknown group fails");
+  has(mutate((m) => { delete m.suites[1].group; }), /beta has group undefined/, "mutation: a missing group fails");
+  has(mutate((m) => { m.suites[0].timing = "yes"; }), /alpha has no boolean timing flag/, "mutation: a timing flag that is not boolean fails");
+  has(mutate((m) => { m.suites[0].covers = []; }), /alpha reads data\/base\.json outside its import closure, and no covers entry names it/, "mutation: a read the covers do not name fails");
+  has(mutate((m) => { m.suites[0].covers.push("gone/*.json"); }), /alpha covers gone\/\*\.json, which matches no file/, "mutation: a covers glob that matches nothing fails");
+  deep(mutate((m) => { m.suites[0].covers = ["data/*.json"]; }), [], "a covers glob that matches the read is enough");
+  has(mutate((m) => { m.support.push("lonely.mjs"); }), /support lists lonely\.mjs, which does not exist/, "mutation: a support file that is not there fails");
+  put("tests/lonely.mjs", `console.log("nothing imports me");\n`);
+  has(mutate((m) => { m.support.push("lonely.mjs"); }, { tracked: [...tracked, "tests/lonely.mjs"] }), /support lists tests\/lonely\.mjs, which no suite's import closure reaches/, "mutation: a support file nothing reaches is an orphan and fails");
+  rmSync(path.join(root, "tests/lonely.mjs"));
+  has(mutate((m) => { m.support = m.support.filter((f) => f !== "helper.mjs"); }), /tests\/helper\.mjs is in no suite's files and not in the support list/, "mutation: a helper dropped from support fails");
+  has(mutate((m) => { m.support.push("alpha.mjs"); }), /alpha\.mjs is both a suite file and in support/, "mutation: a file both run and listed as support fails");
+  has(mutate((m) => { delete m.support; }), /no support array/, "mutation: a manifest without support fails");
+
+  const lm = path.join(scratch, "reg-lm");
+  mkdirSync(lm);
+  writeFileSync(path.join(lm, "package.json"), JSON.stringify({ scripts: { "test:alpha": "node a.mjs" } }));
+  const load = (suite, extra = {}) => { writeFileSync(path.join(lm, "suites.json"), JSON.stringify({ suites: [suite], ...extra })); return () => loadManifest(lm); };
+  deep(load({ name: "alpha", class: "N", group: "shard", timing: true, files: ["a.mjs"], covers: ["x/*.js"] })().map((x) => x.timing), [true], "the runner reads the new fields without changing what it runs");
+  throwsLike(load({ name: "alpha", timing: "yes" }), /timing flag/, "the runner refuses a timing flag that is not boolean");
+  throwsLike(load({ name: "alpha", files: [] }), /bad files list/, "the runner refuses an empty files list");
+  throwsLike(load({ name: "alpha", covers: [3] }), /bad covers list/, "the runner refuses a covers list of non-strings");
+  throwsLike(load({ name: "alpha" }, { support: "x" }), /support is not a list/, "the runner refuses a support that is not a list");
+  deep(load({ name: "alpha", class: "N" })().map((x) => x.name), ["alpha"], "and a bare entry, as the fixtures use, still loads");
+  void scanSuite;
 }
 
 {
@@ -512,18 +607,18 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 }
 
 const PUBLISHED_SHARDS = [
-  ["market-ticker", "mastery", "flows-worker", "flows-basis", "flows-readers", "flows-brief", "flows-ask", "flows-neuron-screen",
-    "flows-reading-worker"],
-  ["flows-universe", "worker", "flows-chain", "flows-ticker", "flows-alerts", "flows-freshness", "flows-ledger", "flows-verdict", "flows-overlay",
-    "flows-political", "flows-board-render", "flows-strategy", "flows-track-render"],
-  ["pipeline", "academy", "flows-desk-client", "flows-desk-wiring", "flows-motion", "flows-unusual", "flows-payload-shape", "flows-mint",
-    "flows-reads", "flows-weight", "flows-variation", "flows-vol", "flows-reading", "flows-reading-render"],
-  ["flows", "flows-probe", "flows-rt-client", "flows-sections", "flows-market", "flows-events", "flows-scores", "flows-permits",
-    "flows-watch-render", "flows-net-render", "flows-ask-render", "flows-sign", "flows-quant-card", "flows-dossier-reads"],
-  ["flows-ws-probe", "flows-legs", "flows-record", "flows-chain-panels", "placement", "flows-rt-server", "flows-desk", "flows-legacy",
-    "flows-starts", "flows-stock", "flows-political-render", "flows-strip", "flows-garch", "flows-neuron", "flows-dossier"],
-  ["markets", "landing-motion", "flows-overview", "flows-render", "browser", "flows-pulse", "flows-live", "flows-rt", "flows-readers-render",
-    "flows-warnings", "flows-quant", "flows-positioning", "flows-quant-audit"],
+  ["market-ticker", "flows-probe", "flows-universe", "flows-record", "flows-worker", "flows-basis", "flows-export",
+    "flows-political", "flows-ask", "architecture"],
+  ["markets", "worker", "flows-chain", "flows-ticker", "flows-ledger", "flows-verdict", "flows-permits", "flows-overlay",
+    "flows-board-render", "flows-strategy", "flows-track-render", "flows-quant-card", "flows-neuron-screen", "flows-reading"],
+  ["pipeline", "flows-desk-client", "flows-desk-wiring", "flows-motion", "flows-unusual", "flows-payload-shape", "flows-reads",
+    "flows-weight", "flows-neuron", "flows-variation", "flows-vol", "flows-quant-audit", "flows-reading-render"],
+  ["flows-rt-client", "flows-sections", "flows-market", "flows-events", "flows-alerts", "flows-freshness", "flows-stock",
+    "flows-watch-render", "flows-net-render", "flows-ask-render", "flows-sign", "flows-garch", "flows-dossier-reads", "docs"],
+  ["flows", "flows-ws-probe", "flows-legs", "flows-chain-panels", "mastery", "academy", "placement", "flows-rt-server",
+    "flows-desk", "flows-legacy", "flows-political-render", "flows-strip", "flows-brief", "flows-dossier", "flows-reading-worker"],
+  ["landing-motion", "flows-overview", "flows-render", "browser", "flows-scores", "flows-mint", "flows-pulse", "flows-live",
+    "flows-rt", "flows-starts", "flows-readers", "flows-readers-render", "flows-warnings", "flows-quant", "flows-positioning"],
 ];
 const CI_SHARDS = 6;
 
@@ -550,7 +645,9 @@ const CI_SHARDS = 6;
   }
   deep(names(chooseSuites(suites, { group: "shard" })).length + fast.length, suites.length, "--group shard is everything but the fast job");
   const unfasted = suites.map((s) => (s.name === "contracts" ? { ...s, group: undefined } : s));
-  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === 1 && s.name === "contracts")))),
+  const home = packShards(unfasted, CI_SHARDS).findIndex((sh) => sh.some((s) => s.name === "contracts"));
+  ok(home >= 0, "contracts, weighed as a shard suite, lands in exactly one shard");
+  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === home && s.name === "contracts")))),
     "the packing weighs the whole chain, fast suites included, so moving contracts into or out of the fast job changes no other suite's shard");
   ok(shards.every(needsBrowser), "every one of the six shards holds a browser or workerd suite, so each installs Chromium");
   ok(!needsBrowser(fast), "the fast job holds none and installs no Chromium");
@@ -650,6 +747,140 @@ const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { fo
   writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: [...fx3Suites.slice(0, -1), { ...fx3Suites.at(-1), group: "slow" }] }, null, 2));
   const g = run(["--shard", "1/2"], { dir: fx3 });
   ok(g.status === 2 && g.stderr.includes("u has group \"slow\", not fast or shard"), "a suite in an unknown group is refused before anything runs");
+}
+
+{
+  const suites = loadManifest();
+  const live = readQuarantine(HERE);
+  deep(live.problems, [], "tests/quarantine.json is a version 1 file with an entries list");
+  deep(checkQuarantine(live.entries, { suites }), [], `the committed quarantine has no malformed, unregistered or expired entry (${live.entries.length} entries, checked against today's UTC date)`);
+  const timing = suites.filter((s) => s.timing === true);
+  ok(timing.length === 8 && timing.every((s) => s.class === "N"), "the eight timing suites are all Node suites");
+  ok(timing.every((s) => retryAllowed(s, { CI: "true" })) && !timing.some((s) => retryAllowed(s, {})) && !timing.some((s) => retryAllowed(s, { CI: "false" })), "a timing suite is retryable in CI and only there");
+  ok(!suites.filter((s) => s.timing !== true).some((s) => retryAllowed(s, { CI: "true" })), "and no other suite is retryable anywhere");
+  ok(!retryAllowed({ name: "x", timing: true, class: "C" }, { CI: "true" }) && !retryAllowed({ name: "x", timing: true, class: "W" }, { CI: "true" }), "a Chromium or workerd suite is never retried, even if it were tagged");
+
+  const base = { suite: "flows-rt", assertion: "rt cpu per poll under 6 ms", firstSeen: "2025-03-10", expires: "2025-03-17", issue: "https://github.com/anilkaya/anilkaya.org/issues/1" };
+  const check = (entries, today = "2025-03-12") => checkQuarantine(entries, { suites, today });
+  deep(check([base]), [], "quarantine: an entry inside its seven days passes");
+  deep(check([{ ...base, expires: "2025-03-12" }]), [], "quarantine: on its last day it still passes");
+  const has = (problems, re, msg) => ok(problems.some((p) => re.test(p)), `${msg}: ${JSON.stringify(problems.slice(0, 2))}`);
+  has(check([base], "2025-03-18"), /expired on 2025-03-17: fix the flake in flows-rt/, "MUTATION: an entry whose expires is yesterday fails");
+  has(check([{ ...base, expires: "2025-03-18" }]), /more than 7 days after 2025-03-10/, "MUTATION: an expiry eight days out fails");
+  has(check([{ ...base, expires: "2025-03-09" }]), /before it was first seen/, "MUTATION: an expiry before the first sighting fails");
+  has(check([{ ...base, suite: "flows-nope" }]), /not registered/, "MUTATION: an unregistered suite fails");
+  has(check([{ ...base, suite: "flows-weight" }]), /not tagged timing/, "MUTATION: a suite that is not tagged timing fails, since it is never retried");
+  has(check([{ ...base, issue: "" }]), /names no issue/, "MUTATION: an entry with no issue fails");
+  has(check([{ ...base, assertion: " " }]), /names no assertion/, "MUTATION: an entry with no assertion fails");
+  has(check([{ ...base, firstSeen: "2025-02-30" }]), /firstSeen "2025-02-30", not a UTC date/, "MUTATION: an impossible date fails");
+  has(check([{ ...base, expires: 20261017 }]), /expires 20261017, not a UTC date/, "MUTATION: a non-string date fails");
+  has(check([{ suite: "flows-rt" }]), /has keys/, "MUTATION: a missing field fails");
+  has(check([{ ...base, extra: 1 }]), /has keys/, "MUTATION: an extra field fails");
+  has(check([base, base]), /repeats flows-rt/, "MUTATION: a duplicate entry fails");
+  has(check(["x"]), /is not an object/, "MUTATION: a non-object entry fails");
+  eq(MAX_QUARANTINE_DAYS, 7, "the window is seven days");
+  eq(dayMs("2025-03-17") - dayMs("2025-03-10"), 7 * 86400000, "and the date arithmetic is whole UTC days");
+  eq(recordedFor([base], "flows-rt", "2025-03-12").expires, "2025-03-17", "a live entry answers a FLAKY outcome of its suite");
+  eq(recordedFor([base], "flows-rt", "2025-03-18"), null, "an expired one does not");
+  eq(recordedFor([base], "flows-live", "2025-03-12"), null, "and an entry for another suite does not");
+
+  const q = path.join(scratch, "fxq");
+  mkdirSync(q);
+  const put = (name, body) => writeFileSync(path.join(q, name), body);
+  put("count.mjs", `import { appendFileSync } from "node:fs";
+const [name, fails] = process.argv.slice(2);
+const f = ${JSON.stringify(path.join(marks, "count-"))} + name;
+appendFileSync(f, "x");
+const n = (await import("node:fs")).readFileSync(f, "utf8").length;
+if (n <= Number(fails)) { console.error("count " + name + ": failed attempt " + n); process.exit(1); }
+console.log("✓ count-" + name + ": 4 assertions");\n`);
+  put("slow.mjs", `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(path.join(marks, "count-"))} + "slow", "x");
+setInterval(() => {}, 1000);\n`);
+  const names = { once: 1, twice: 99, plain: 1, flaky2: 1 };
+  put("package.json", JSON.stringify({
+    name: "fixture", private: true, type: "module",
+    scripts: {
+      "test:once": "node count.mjs once 1", "test:twice": "node count.mjs twice 99", "test:plain": "node count.mjs plain 1",
+      "test:slow": "node slow.mjs", "test:steady": "node count.mjs steady 0",
+    },
+  }));
+  const suitesOf = (over = {}) => ({
+    version: 2,
+    suites: [
+      { name: "once", class: "N", timing: true, medianS: 0.1 },
+      { name: "twice", class: "N", timing: true, medianS: 0.1 },
+      { name: "plain", class: "N", timing: false, medianS: 0.1 },
+      { name: "slow", class: "N", timing: true, medianS: 0.1, timeoutS: 1 },
+      { name: "steady", class: "N", timing: true, medianS: 0.1 },
+    ].map((x) => ({ ...x, ...(over[x.name] || {}) })),
+  });
+  put("suites.json", JSON.stringify(suitesOf()));
+  const countOf = (name) => (existsSync(path.join(marks, "count-" + name)) ? readFileSync(path.join(marks, "count-" + name), "utf8").length : 0);
+  const reset = () => { for (const n of [...Object.keys(names), "slow", "steady"]) rmSync(path.join(marks, "count-" + n), { force: true }); };
+
+  reset();
+  const summary = path.join(scratch, "summary-flaky.md");
+  writeFileSync(summary, "");
+  const ci = run(["--only", "once,steady"], { dir: q, summary, env: { CI: "true", GITHUB_ACTIONS: "true" } });
+  eq(ci.status, 0, `a timing suite that fails once and passes on retry is green in CI (${ci.stderr.slice(-300)})`);
+  deep([countOf("once"), countOf("steady")], [2, 1], "it ran twice, and a suite that passed ran once");
+  ok(/once\s+passed on retry \(FLAKY\)/.test(ci.stdout), "the table says FLAKY in the suite's row");
+  ok(/2 suites: 2 passed \(1 FLAKY\), 0 failed/.test(ci.stdout), "and the tally counts it");
+  ok(ci.stderr.includes("FLAKY test:once: failed once, passed on retry; NOT RECORDED in tests/quarantine.json"), "an unrecorded flake says so on stderr");
+  ok(ci.stdout.includes("::warning title=FLAKY once::"), "and raises an annotation under GitHub Actions");
+  const md = readFileSync(summary, "utf8");
+  ok(md.startsWith("### Regression suites: all 2 passed, 1 of them FLAKY"), "the step summary heading counts it");
+  ok(/\| 1 \| `once` \| ⚠️ passed on retry \(FLAKY\) \|/.test(md), "its row carries the warning mark");
+  ok(md.includes("count once: failed attempt 1") && md.includes("NOT RECORDED: add a tests/quarantine.json entry"), "and the first attempt's tail and the missing record are in a details block");
+
+  reset();
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+  put("quarantine.json", JSON.stringify({ version: 1, entries: [{ suite: "once", assertion: "the timing gate", firstSeen: today, expires: soon, issue: "#1" }] }));
+  const rec = run(["--only", "once"], { dir: q, summary: path.join(scratch, "summary-rec.md"), env: { CI: "true" } });
+  eq(rec.status, 0, "a recorded flake is green too");
+  ok(rec.stderr.includes(`recorded in tests/quarantine.json until ${soon}`), "and names its entry's expiry");
+  rmSync(path.join(q, "quarantine.json"));
+
+  reset();
+  const never = run(["--only", "once"], { dir: q, env: { CI: "" } });
+  eq(never.status, 1, "outside CI a timing suite is not retried: the first failure is the result");
+  eq(countOf("once"), 1, "it ran once");
+  reset();
+  const falseCi = run(["--only", "once"], { dir: q, env: { CI: "false" } });
+  eq(falseCi.status, 1, "CI=false is not CI");
+
+  reset();
+  const plain = run(["--only", "plain"], { dir: q, env: { CI: "true" } });
+  eq(plain.status, 1, "a suite not tagged timing is red in CI on its first failure");
+  eq(countOf("plain"), 1, "and ran once");
+
+  reset();
+  const twice = run(["--only", "twice"], { dir: q, summary: path.join(scratch, "summary-twice.md"), env: { CI: "true" } });
+  eq(twice.status, 1, "a timing suite that fails the retry too is red");
+  eq(countOf("twice"), 2, "after exactly one retry, never more");
+  ok(/failed \(exit 1, twice\)/.test(twice.stdout), "and its row says it failed twice");
+
+  reset();
+  const hang = run(["--only", "slow"], { dir: q, env: { CI: "true" } });
+  eq(hang.status, 1, "a timing suite that times out is red");
+  eq(countOf("slow"), 1, "and a timeout is not retried: a hang is not a flake");
+
+  reset();
+  const quiet = run(["--only", "once,steady"], { dir: q, env: { CI: "true", GITHUB_ACTIONS: "" } });
+  eq(quiet.status, 0, "the annotation is for GitHub Actions only");
+  ok(!quiet.stdout.includes("::warning"), "no annotation without it");
+
+  put("suites.json", JSON.stringify(suitesOf({ plain: { timing: true, class: "C" } })));
+  const refused = run(["--only", "once"], { dir: q, env: { CI: "true" } });
+  eq(refused.status, 2, "a manifest that tags a Chromium suite timing is refused before anything runs");
+  ok(/plain is tagged timing but is class "C"/.test(refused.stderr), "naming the suite and the rule");
+  put("suites.json", JSON.stringify(suitesOf()));
+  put("quarantine.json", "{ not json");
+  const broken = run(["--only", "steady"], { dir: q, env: { CI: "true" } });
+  ok(broken.status === 2 && /quarantine\.json is not valid JSON/.test(broken.stderr), "a quarantine file that does not parse stops the run instead of being ignored");
+  rmSync(path.join(q, "quarantine.json"));
 }
 
 console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, the six CI shards equal to the published table and, with the fast job, every suite exactly once for one to eight shards, --shard, --group and --needs-browser on a hand-worked fixture, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);

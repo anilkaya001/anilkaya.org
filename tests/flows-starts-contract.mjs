@@ -12,8 +12,9 @@ import {
 import { etTime } from "../scripts/flows-legs/health.mjs";
 import {
   WITNESS, WITNESS_CHECKS, annotation, witnessView, evaluateTier1, evaluateTier2, evaluateNightly, createWitness, createIssueReporter,
-  issueTitle, issueBody, ownerHandle, runUrl,
+  issueTitle, issueBody, ownerHandle, runUrl, reportHealth, healthDetail,
 } from "../scripts/flows-legs/witness.mjs";
+import { healthCodes, HEALTH_CODES, healthChecks, labCheck, tallyAnswer, refusalTally } from "../scripts/flows-legs/health.mjs";
 import {
   NIGHTLY, nightlyStartDue, createNightlyStart, STANDBY, standbyTick, readStandbyTick, crashRestart, standbyDue, createStandby,
 } from "../scripts/flows-legs/starts.mjs";
@@ -55,8 +56,15 @@ const MIN = 60 * 1000;
   ok(uses.length === 2 && uses.every((u) => /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/.test(u)),
     "and no new action joined the job, every one still pinned to a commit");
   const pipeline = read(".github/workflows/flows-pipeline.yml");
-  ok(!/issues:/.test(pipeline) && (pipeline.match(/actions: write/g) || []).length === 1,
-    "while the nightly workflow gained no permission at all");
+  ok(/\npermissions:\n {2}contents: read\n\nconcurrency:/.test(pipeline) &&
+     /\n {2}build:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n {4}permissions:\n {6}contents: read\n {6}issues: write\n {4}steps:/.test(pipeline) &&
+     (pipeline.match(/issues:/g) || []).length === 1 && (pipeline.match(/actions: write/g) || []).length === 1 &&
+     !/id-token|contents: write|pull-requests|checks:/.test(pipeline),
+    "while the nightly workflow gained exactly one permission: issues: write on the build job alone (the workflow stays read-only, " +
+    "the keepalive keeps its actions: write), for the health gate's issue");
+  ok(/- name: Build and publish the board[\s\S]*?GITHUB_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node scripts\/flows-pipeline\.mjs\n/.test(pipeline) &&
+     (pipeline.match(/GITHUB_TOKEN/g) || []).length === 1,
+  "and the job's own token reaches the run step that ends in the gate, and no other step");
   ok(/origin:\n {8}description: "[^"]*live-loop[^"]*"\n {8}type: string/.test(pipeline),
     "and its origin input names the live loop as a dispatcher");
   const gate = /- name: Resolve whether this firing is the intended one[\s\S]*?run: \|\n([\s\S]*?)\n\n/.exec(pipeline)[1]
@@ -547,7 +555,7 @@ const MIN = 60 * 1000;
     "ANNOTATIONS are escaped as the runner reads them (a colon or comma in a title and a newline in a message would otherwise end the command early)");
   ok(lines.filter((l) => l.startsWith("::error")).every((l) => /^::error title=[^:,]*::/.test(l)),
     "so every annotation the witness wrote parses");
-  deep(Object.keys(WITNESS_CHECKS).sort(), ["chain", "drill", "nightly", "probe", "tier1", "tier2"], "five checks and the drill in all");
+  deep(Object.keys(WITNESS_CHECKS).sort(), ["chain", "drill", "health", "nightly", "probe", "tier1", "tier2"], "five checks, the drill and the nightly's health gate in all");
   eq(ownerHandle({ GITHUB_REPOSITORY_OWNER: "not valid!" , GITHUB_REPOSITORY: "anilkaya001/x" }), "anilkaya001", "the owner handle is validated before it is mentioned");
   eq(runUrl({ GITHUB_REPOSITORY: "a/b", GITHUB_RUN_ID: "9x" }), null, "and a run URL needs a numeric run id");
   ok(!/\/\/(?!github\.com)/.test(issueBody("tier1", { detail: "x" }, { at: t, env: {} }).replace(/https:\/\/\S+/g, "")), "and an issue body carries no secret");
@@ -598,6 +606,125 @@ const MIN = 60 * 1000;
   ok(!failed.ok && failed.why === "unreachable", "and an unreachable API is a result, not an exception");
   const denied = createIssueReporter({ env, fetchImpl: async () => reply(403, { message: "Resource not accessible by integration" }) });
   deep(await denied.open({ title: "t", body: "b" }), { ok: false, why: "HTTP 403" }, "a refusal names its status");
+}
+
+{
+  const OWNER_ENV = { GITHUB_TOKEN: "ghs_job", GITHUB_REPOSITORY: "anilkaya001/anilkaya.org", GITHUB_REPOSITORY_OWNER: "anilkaya001",
+    GITHUB_RUN_ID: "424242", GITHUB_SERVER_URL: "https://github.com" };
+  const T0 = easternInstant("2026-09-29", 17 * 60 + 45);
+  const quiet = { log() {}, warn() {} };
+  const redLines = [
+    "HEALTH: 1 card(s) failed to build or publish tonight; the run's \"cards:\" and \"card failures\" lines name them",
+    "HEALTH: the latest Google sign-in to the Lab on record is 2026-04-01, 181 days ago. Sign in to the Lab at https://anilkaya.org/lab/ - Google deletes it about 2026-09-28.",
+    "HEALTH: Tier 1 last wrote live:market at 15:52 ET, not by 15:50 ET",
+  ];
+
+  const bot = fakeGithub({ now: () => T0 });
+  const first = await reportHealth({ failures: redLines, applies: true, env: OWNER_ENV, fetchImpl: bot.fetchImpl, at: T0, ...quiet });
+  ok(first.action === "raised" && bot.record.created.length === 1 && bot.record.comments.length === 0 && bot.record.closed.length === 0,
+    "A RED GATE ON A BOT-DISPATCHED RUN opens exactly one issue (one list call, one create) and nothing else");
+  deep(bot.record.calls.map((c) => c.method), ["GET", "POST"], "which is two GitHub calls");
+  const made = bot.record.created[0];
+  ok(/^\[flows-witness:health\] The nightly's health gate failed$/.test(made.title) && made.body.startsWith("@anilkaya001\n"),
+    "titled by the check and mentioning the owner, which is what makes GitHub notify a person");
+  ok(/- cards-failed \(1\)/.test(made.body) && /- lab-sign-in \(1\)/.test(made.body) && /- market-late \(1\)/.test(made.body) &&
+     /actions\/runs\/424242/.test(made.body) && /health gate/.test(made.body) && !/the live loop's witness/.test(made.body),
+  "and the body names the codes and counts, the run and the gate that raised it");
+  ok(!/HEALTH:|2026-04-01|181|15:52|15:50|Google deletes|sign-in to the Lab at/.test(made.body) &&
+     !/\d{4}-\d{2}-\d{2}/.test(made.body.replace(/First seen [^;]+; this note is from [^.]+\./, "")),
+  "WITHOUT A FAILURE LINE: no date, age, time or advice from the lines (the repository is public, and the Lab sign-in line carries the newest activity of any learner); counts and codes only");
+
+  const again = await reportHealth({ failures: redLines, applies: true, env: OWNER_ENV, fetchImpl: bot.fetchImpl, at: T0 + 4 * MIN, ...quiet });
+  ok(again.action === "raised" && bot.record.created.length === 1 && bot.record.comments.length === 0,
+    "a second red gate within the renotify window adopts the open issue: still one issue, no new comment");
+  const later = await reportHealth({ failures: redLines, applies: true, env: OWNER_ENV, fetchImpl: bot.fetchImpl, at: T0 + 7 * HOUR, ...quiet });
+  ok(later.action === "raised" && bot.record.created.length === 1 && bot.record.comments.length === 1 && /cards-failed/.test(bot.record.comments[0].body),
+    "and one past six hours is a comment on that same issue");
+
+  const calls = bot.record.calls.length;
+  const green = await reportHealth({ failures: [], applies: true, env: OWNER_ENV, fetchImpl: bot.fetchImpl, at: T0 + 24 * HOUR, ...quiet });
+  ok(green.action === "cleared" && bot.record.closed.length === 1 && bot.record.closed[0].number === made.number && bot.issues[0].state === "closed",
+    "THE NEXT GREEN GATE closes it");
+  ok(bot.record.calls.length - calls === 3 && bot.record.comments.length === 2 && /Recovered at/.test(bot.record.comments[1].body) &&
+     /this run is closing/.test(bot.record.comments[1].body),
+  "with a list, a recovery comment and a close: at most three GitHub calls a night");
+
+  const idle = fakeGithub({ now: () => T0 });
+  const clean = await reportHealth({ failures: [], applies: true, env: OWNER_ENV, fetchImpl: idle.fetchImpl, at: T0, ...quiet });
+  ok(clean.action === "cleared" && idle.record.calls.length === 1 && idle.record.calls[0].method === "GET",
+    "a green gate with nothing open costs one list call and writes nothing");
+  const skipped = fakeGithub({ now: () => T0 });
+  const unjudged = await reportHealth({ failures: [], applies: false, env: OWNER_ENV, fetchImpl: skipped.fetchImpl, at: T0, ...quiet });
+  ok(unjudged.action === "none" && skipped.record.calls.length === 0,
+    "a gate that skipped its live checks and found nothing wrong judges nothing and calls nothing, so it cannot close what a full gate opened");
+
+  const trap = async () => { throw new Error("a dry run must make no GitHub call"); };
+  const dryRed = await reportHealth({ failures: redLines, applies: true, dry: true, env: OWNER_ENV, fetchImpl: trap, at: T0, ...quiet });
+  const dryGreen = await reportHealth({ failures: [], applies: true, dry: true, env: OWNER_ENV, fetchImpl: trap, at: T0, ...quiet });
+  ok(dryRed.action === "dry" && dryGreen.action === "dry", "A DRY RUN makes 0 GitHub calls, red or green");
+
+  const said = [];
+  const noToken = await reportHealth({ failures: redLines, applies: true, env: {}, fetchImpl: trap, at: T0, log: (l) => said.push(l), warn() {} });
+  ok(noToken.action === "disabled" && noToken.why === "no-token" && said.some((l) => /not reported \(no-token\)/.test(l)),
+    "with no token the gate says so in the log and calls nothing");
+
+  const refused = fakeGithub({ now: () => T0, writeStatus: 403 });
+  const denied = await reportHealth({ failures: redLines, applies: true, env: OWNER_ENV, fetchImpl: refused.fetchImpl, at: T0, ...quiet });
+  ok(denied.action === "raised" && refused.record.created.length === 0, "a refused write is a warning and never an exception");
+  const offline = await reportHealth({ failures: redLines, applies: true, env: OWNER_ENV, fetchImpl: trap, at: T0, ...quiet });
+  ok(offline.action === "raised" || offline.action === "failed", "and an unreachable API never reaches the caller as a throw");
+
+  const mixed = fakeGithub({ now: () => T0, seed: [
+    { number: 31, title: "[flows-witness:chain] The live loop stopped", updatedAt: T0 - HOUR },
+    { number: 32, title: "[flows-witness:health] The nightly's health gate failed", updatedAt: T0 - HOUR },
+    { number: 33, title: "[flows-witness:health] The nightly's health gate failed", updatedAt: T0 - 2 * HOUR, author: "someone-else" },
+  ] });
+  await reportHealth({ failures: [], applies: true, env: OWNER_ENV, fetchImpl: mixed.fetchImpl, at: T0, ...quiet });
+  deep(mixed.record.closed.map((c) => c.number), [32],
+    "THE GATE CLOSES ONLY ITS OWN ISSUE: the live loop's chain issue stays open, and a stranger's look-alike title is not touched");
+  const loop = createWitness({ reporter: createIssueReporter({ env: OWNER_ENV, fetchImpl: fakeGithub({ now: () => T0, seed: [
+    { number: 41, title: "[flows-witness:health] The nightly's health gate failed", updatedAt: T0 },
+    { number: 42, title: "[flows-witness:nightly] The nightly has not landed", updatedAt: T0 },
+  ] }).fetchImpl }), env: OWNER_ENV, ...quiet });
+  await loop.start();
+  deep(loop.summary().issues, { nightly: 42 }, "and the live loop's witness never adopts the gate's issue, so it can neither close nor comment on it");
+
+  const codes = healthCodes(redLines.concat(redLines[0]));
+  deep(codes.map((c) => [c.code, c.n]), [["cards-failed", 2], ["lab-sign-in", 1], ["market-late", 1]], "the codes count lines by family");
+  deep(healthCodes(["HEALTH: something new"]).map((c) => c.code), ["other"], "and a line with no family is still reported, as other");
+  eq(healthDetail(["HEALTH: something new"]).includes("something new"), false, "without its words");
+
+  const health = read("scripts/flows-legs/health.mjs");
+  const heads = [...health.matchAll(/(?:HEALTH: |"HEALTH: )([^\n]*)/g)].map((m) => m[0].replace(/^"/, "").replace(/\$\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, "1"))
+    .filter((t) => !/^HEALTH: (?:1 |1\.|\/|\$\{)/.test(t) && !t.includes("HEALTH_CODES"));
+  const unmatched = heads.filter((t) => !HEALTH_CODES.some(([, re]) => re.test(t)));
+  ok(heads.length >= 30 && unmatched.length === 0,
+    `EVERY FAILURE LINE the gate can write belongs to a family (${heads.length} sources scanned); unmatched: ${unmatched.map((t) => t.slice(0, 70)).join(" | ") || "none"}`);
+  const tally = refusalTally();
+  const answer = (status, headers, text = "") => tallyAnswer(tally, { status, headers: new Headers(headers) }, text);
+  answer(429, { "cf-ray": "8a1-IAD" });
+  answer(408, { "cf-ray": "8a2-IAD" });
+  answer(503, { "cf-ray": "8a3-IAD" });
+  answer(503, { "cf-ray": "8a4-IAD" }, "error code: 1027");
+  answer(502, {}, JSON.stringify({ error: { code: "store_quota", message: "quota" } }));
+  tallyAnswer(tally, null, "");
+  const kinds = { challenge: { kind: "challenge", code: null, n: 3, rays: ["8b1-IAD"], mitigated: "challenge", server: "cloudflare" },
+    "block 1020": { kind: "block", code: "1020", n: 2, rays: [], mitigated: "", server: "cloudflare" },
+    unmarked: { kind: "unmarked", code: null, n: 1, rays: ["8b2-IAD"], mitigated: "", server: "nginx" },
+    unmarkedNoRay: { kind: "unmarked", code: null, n: 1, rays: [], mitigated: "", server: "nginx" },
+    odd: { kind: "odd", code: null, n: 1, rays: [], mitigated: "", server: "" } };
+  const edge = healthChecks({ sessionDate: null, now: T0, edge403: 8, edgeKinds: kinds, edgeStatuses: tally.statuses, retrySpentMs: 80_000 });
+  const lab = labCheck({ payload: { labActiveAt: new Date(T0 - 181 * 24 * HOUR).toISOString() } }, T0);
+  const edgeCodes = healthCodes([...edge.failures, lab.failure]).map((c) => c.code);
+  ok(edge.failures.length >= 9 && !edgeCodes.includes("other"),
+    `and so does every edge line (${edge.failures.length} of them, from a challenge to a store_quota) and the Lab sign-in line: ${edgeCodes.join(", ")}`);
+  for (const code of ["edge-403", "edge-challenge", "edge-block", "edge-403-unmarked", "edge-403-no-ray", "edge-403-unknown", "edge-1027",
+    "edge-429", "edge-408", "store-quota", "ingest-5xx", "ingest-silent", "lab-sign-in"]) {
+    ok(edgeCodes.includes(code), `the edge fixture reaches the ${code} family`);
+  }
+  const tail = read("scripts/flows-pipeline.mjs");
+  ok(/if \(health\.failures\.length\) process\.exitCode = 1;\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*\nexport \{/.test(tail),
+    "and the nightly sets its exit code first, then reports the gate as the last thing it does, with the dry flag");
 }
 
 {

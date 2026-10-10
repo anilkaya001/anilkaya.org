@@ -5,7 +5,7 @@ import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
   expiryFromFit, setupEngine, cardCarry,
 } from "./flows-quant-engine.js";
-import { gammaProfile } from "./flows-quant-structures.js";
+import { gammaProfile } from "./flows-quant-dealer.js";
 import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
 
 export const QUANT_CARD_VERSION = 1;

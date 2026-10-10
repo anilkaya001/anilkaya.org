@@ -30,6 +30,8 @@ import {
   rankUnusual, rankUnusualNames, describeOiBasis, poolOiBasis,
   UA_MIN_VOLUME, UA_MIN_OI, UNUSUAL_NOTES,
 } from "../shared/flows-unusual.js";
+import { activityBasis } from "../shared/flows-activity.js";
+import { readActivity, activityEnabled } from "./flows-legs/activity.mjs";
 import { buildEvents, EVENTS_NOTES } from "../shared/flows-events.js";
 import { scoresRows, buildScoreTrack, boardsToScoreRows } from "../shared/flows-scores.js";
 import { buildFlowAlerts, ALERT_ROWS, alertBand, nightlyAlerts } from "../shared/flows-alerts.js";
@@ -72,6 +74,7 @@ import { dryLiveDay } from "./flows-legs/live-day.mjs";
 import {
   runHealthGate, republishRepair, refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief, storeQuotaWait, QUOTA_WAIT,
 } from "./flows-legs/health.mjs";
+import { reportHealth } from "./flows-legs/witness.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../shared/flows-oidc.js";
 
 const ARGS = new Set(process.argv.slice(2));
@@ -169,6 +172,7 @@ export const CALL_COST = Object.freeze({
   flowAlertPages: 12,
   dossier: 13,
   focus: 1,
+  activity: 1,
   misc: 67,
 });
 
@@ -188,6 +192,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     flow: Math.ceil(cost.flowPerDeep * deep) + cost.flowPerCross * cross + cost.flowAlertPages,
     dossiers: cost.dossier * dossiers,
     focus: cost.focus,
+    activity: cost.activity,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
@@ -1403,14 +1408,6 @@ export function variationOptions(run) {
   if (!run) return null;
   return { kc: run.kc, unit: run.unit, probe: run.probe, next: run.next, vannaScale: run.vannaScale };
 }
-
-const FAMILIES = {
-  F: "flow",
-  P: "positioning",
-  D: "path",
-  V: "vol",
-  O: "quality",
-};
 
 const SIGNED = ["F", "P", "D"];
 
@@ -4888,13 +4885,6 @@ async function main() {
   const gatedTickers = new Set(withTilt.filter(({ row }) => gateOf(row)).map(({ row }) => row.ticker));
   console.log(`after earnings gate: ${tilted.length}`);
 
-  const composite = tilted.map(({ row, tilt }) => ({
-    row, tilt,
-
-    rough: (tilt.premiumTilt || 0) + (tilt.netTilt || 0) + (tilt.volTilt || 0) +
-           Math.tanh(tilt.surpriseTilt || 0),
-  })).sort((a, b) => b.rough - a.rough);
-
   const tiltByPick = new Map(withTilt.map(({ row, tilt }) => [row.ticker, tilt]));
   const scoredCoverage = selectCoverage(tilted.map(({ row }) => row), {
     count: UNIVERSE.enrichCount,
@@ -4984,7 +4974,6 @@ async function main() {
   const MIN_ROWS = 10;
 
   const scorable = enriched.filter((e) => !e.gate);
-  const gatedEnriched = enriched.filter((e) => e.gate);
   const liquid = scorable.filter((e) => e.features.dollarVolume >= UNIVERSE.minDollarVolume);
   const dropped = scorable.length - liquid.length;
   console.log(
@@ -5923,13 +5912,18 @@ async function main() {
 
     const priorMark = markNewContracts(contracts.rows, priorUnusual, sessionDate);
 
+    const dated = await readActivity({
+      uw, sessionDate, contractRows: contracts.rows, enabled: activityEnabled(), dryRun: DRY_RUN,
+    });
+    const activity = dated.block;
+
     await publish("unusual", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
 
       readAt: generatedAt,
       volumeAsOf: null,
-      volumeAsOfReason: "the endpoint accepts no date parameter and carries no as-of stamp",
+      volumeAsOfReason: "the chain endpoint accepts no date parameter and carries no as-of stamp",
       dteAnchor: "sessionDate",
       status: contracts.shown ? "ok" : (namesSeen ? "quiet" : "pending"),
 
@@ -5950,6 +5944,7 @@ async function main() {
       },
       coverage,
       contracts,
+      activity,
       names: { ...names, earningsGated: withTilt.length - tilted.length },
       basis: {
         unit: UNUSUAL_NOTES.unit,
@@ -5986,6 +5981,7 @@ async function main() {
           "strike: a contract can be absent from the earlier feed because it was quiet, or " +
           "because it sat below the per-name cap on that run.",
         lift: UNUSUAL_NOTES.lift,
+        activity: activityBasis(),
         notional: UNUSUAL_NOTES.notional,
         iv: UNUSUAL_NOTES.iv,
         oi: UNUSUAL_NOTES.oi,
@@ -5994,6 +5990,10 @@ async function main() {
         refusals: UNUSUAL_NOTES.refusals,
       },
     });
+    console.log(`  unusual dated classes: ${activity.status}` + (activity.code ? ` (${activity.code})` : "") +
+      (activity.status === "ok" || activity.status === "quiet"
+        ? `; ${activity.returned} row(s) read for ${activity.asOf}, ${activity.kept} kept, ${activity.offDate} off-session dropped, ` +
+          `${activity.matched} of ${activity.of} ranked contract(s) carry classes, ${dated.calls} call(s)` : ""));
     console.log(
       `  unusual: ${contracts.shown} of ${contracts.eligible} contracts over ` +
       `${namesSeen} chain(s) (cap bound by ${contracts.capBound}, ${contracts.perName} per name); ` +
@@ -7109,6 +7109,7 @@ async function main() {
       neuron: neuronLedger,
     } });
   if (health.failures.length) process.exitCode = 1;
+  await reportHealth({ failures: health.failures, applies: health.applies, dry: DRY_RUN, env: process.env });
 }
 
 export {

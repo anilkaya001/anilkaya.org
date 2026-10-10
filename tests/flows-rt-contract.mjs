@@ -7,6 +7,7 @@ import {
   RtHub, createHub, createRestUpstream, hubConfig, loadRosterFromD1, RT_BOARDS_SQL, rtClock,
 } from "../shared/flows-rt-hub.js";
 import { rtTopics } from "../shared/flows-rt-routes.js";
+import { vendorBase, vendorBaseInfo, vendorRedirected, vendorUrl, unwrap as vendorUnwrap, classifyStatus, retryAfterMs as vendorRetryAfterMs, VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 import {
   FRESH_CLASSES, freshnessState, classOf, easternInstant, sessionOpen, phaseAt,
 } from "../shared/flows-freshness.js";
@@ -45,7 +46,7 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
     ok(Object.isFrozen(v), `${name} is frozen`);
   }
   for (const k of TOPICS) ok(Object.isFrozen(RT.RT_TOPICS[k]) && FRESH_CLASSES[RT.RT_TOPICS[k].klass], `${k} is a frozen topic with a freshness class`);
-  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 10000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 10 s, nw 30 s");
+  deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 20000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 20 s, nw 30 s in the regular session");
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].klass), ["rt", "rt", "rtSlow", "rtSlow", "rtNews"], "classes follow the cadence");
   deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
   eq(RT.RT_ROW_FIELDS.px.length, 25, "twenty-five columns");
@@ -426,6 +427,7 @@ const plainPlan = (names = ["SPY", "QQQ"], extra = {}) => ({
   topics: new Set(TOPICS),
   ready: () => true,
   session: () => DAY,
+  phase: () => "rth",
   names: () => names,
   gex: () => ({ names: ["NVDA"], focus: [] }),
   base: () => null,
@@ -450,11 +452,11 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   const u = upstreamOf(vendor, { clock: () => t });
   u.up.start(plainPlan(["SPY", "QQQ", "IWM"]), u.handlers);
   await u.up.tick(t);
-  eq(u.calls.length, 1, "adapter: at the first instant only px is due");
+  eq(u.calls.length, 6, "adapter: every topic whose start falls inside the one-second coalescing window goes at the first instant: one call each for px, gx, fl, news and two for the market (6 calls)");
   t += 500; await u.up.tick(t);
   t += 250; await u.up.tick(t);
   t += 250; await u.up.tick(t);
-  eq(u.calls.length, 6, "adapter: staggered starts, then one call each for gx, fl, news and two for the market (6 calls)");
+  eq(u.calls.length, 6, "adapter: and nothing is polled twice while the window's next dues are still ahead");
   const by = (re) => u.calls.filter((c) => re.test(c.url.pathname));
   const pxc = by(/screener/)[0];
   eq(pxc.url.origin, "http://uw.test", "adapter: the vendor base is UW_BASE");
@@ -744,6 +746,30 @@ const seqOk = (ws) => {
 }
 
 {
+  const r = rig();
+  await r.hub.snap(["px"], "zzzz");
+  await r.run(3);
+  ok(!r.hub.pxNames().some((t) => t.toLowerCase() === "zzzz"), "snap focus: a lowercase name is not a ticker and is ignored");
+  await r.hub.snap(["px"], "ZQXT");
+  await r.hub.snap(["px"], "no way");
+  await r.run(3);
+  ok(r.hub.pxNames().includes("ZQXT"), "snap focus: a snapshot that names a ticker adds it to the names the screener call reads");
+  ok(r.vendor.calls.some((c) => c.path === "/api/screener/stocks" && String(c.params.ticker).split(",").includes("ZQXT")), "snap focus: and the next screener call carries it");
+  ok(!r.hub.pxNames().includes("no way"), "snap focus: a malformed name never enters the list");
+  eq(r.hub.status().roster.focus.includes("ZQXT"), true, "snap focus: status lists it among the focus names");
+  for (let i = 0; i < 4; i++) { await r.hub.snap(["px"], "ZQXT"); await r.run(10); }
+  ok(r.hub.pxNames().includes("ZQXT"), "snap focus: kept while the reader keeps asking");
+  await r.run(70);
+  eq(r.hub.pxNames().includes("ZQXT"), false, "snap focus: and gone once the last request naming it is 60 s old");
+  const calls = r.vendor.calls.length;
+  await r.run(30);
+  eq(r.vendor.calls.length, calls, "snap focus: the hub is idle again");
+  const r2 = rig();
+  for (const t of ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF", "GGG", "HHH", "III", "JJJ"]) await r2.hub.snap(["px"], t);
+  eq(Object.keys(r2.hub.snapFocus).length, RT.RT_LIMITS.focusMax, "snap focus: at most eight names are held, whoever asks");
+}
+
+{
   const sat = easternInstant("2026-10-03", 11 * 60);
   const r = rig({ start: sat });
   const { ws } = r.join();
@@ -949,7 +975,7 @@ const seqOk = (ws) => {
   ok(mkSnap.frames[0].rows.length > 0 && mkSnap.frames[0].meta.cold !== true && mkSnap.frames[0].fresh.state !== "pending", "demand: a /snap?k=mk adds mk and answers from its first poll");
   const mk0 = r.vendor.count(/market-tide/);
   await r.run(50);
-  ok(r.vendor.count(/market-tide/) - mk0 >= 4, `demand: mk stays polled inside the snapshot's linger (${r.vendor.count(/market-tide/) - mk0} polls in 50 s)`);
+  ok(r.vendor.count(/market-tide/) - mk0 >= 2, `demand: mk stays polled inside the snapshot's linger (${r.vendor.count(/market-tide/) - mk0} polls in 50 s)`);
   await r.run(15);
   const mk1 = r.vendor.count(/market-tide/);
   const px1 = r.vendor.count(/screener/);
@@ -1053,14 +1079,14 @@ const seqOk = (ws) => {
   ok(RT.rtAdmits(RT.rtSwitches({}), "anilkaya") && !RT.rtAdmits(RT.rtSwitches({}), "firatgok"), "owner audience admits the owner and refuses a member");
   ok(RT.rtAdmits(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "members audience admits a member");
   ok(!RT.rtIsOwner(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), "firatgok"), "but never makes a member the owner");
-  eq(hubConfig({ UW_BASE: "http://x", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
   eq(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 1, "and ignored in production");
   ok(Number.isNaN(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z" }).pinned), "a pinned clock is ignored in production too");
-  const pinned = rtClock({ UW_BASE: "http://x", UW_NOW: "2026-09-30T14:00:00Z" });
+  const pinned = rtClock({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z" });
   const p0 = pinned();
   await new Promise((res) => setTimeout(res, 30));
   ok(pinned() - p0 >= 20 && pinned() - p0 < 400, "a pinned clock advances with real time");
-  eq(hubConfig({ UW_BASE: "http://x" }).base, "http://x", "UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test" }).base, "http://x.test", "UW_BASE redirects the vendor");
   eq(hubConfig({}).base, "https://api.unusualwhales.com", "and the default is production");
   eq(hubConfig({ FLOWS_RT_CALLS_PER_MIN: "5000" }).callsPerMinute, 1200, "the call budget is clamped");
   eq(hubConfig({}).callsPerMinute, 240, "240 calls a minute by default");
@@ -1275,7 +1301,7 @@ const seqOk = (ws) => {
   const names = RT.rosterPlan({ long: roster.long.rows, short: roster.short.rows, watch: roster.watch.rows }).names;
   const bodies = new Map();
   const served = new Map();
-  const stepOf = (path) => (path.includes("spot-exposures") ? 14000 : path.includes("news") ? 30000 : path.includes("market") ? 10000 : 5000);
+  const stepOf = (path) => (path.includes("spot-exposures") ? 14000 : path.includes("news") ? 30000 : path.includes("market") ? 20000 : 5000);
   const cached = async (url) => {
     const u = new URL(String(url));
     const key = u.pathname + (u.pathname.includes("flow-alerts") ? "" : u.search);
@@ -1408,6 +1434,18 @@ const seqOk = (ws) => {
   eq(forwarded[1].url.pathname + forwarded[1].url.search, "/snap?k=px%2Cfl", "snap: forwarded with its topics");
   await call("/api/rt/snap");
   eq(forwarded[2].url.searchParams.get("k"), TOPICS.join(","), "snap: all five by default");
+  forwarded.length = 0;
+  await call("/api/rt/snap?k=px&f=nvda");
+  deep([forwarded[0].url.pathname, forwarded[0].url.searchParams.get("k"), forwarded[0].url.searchParams.get("f")], ["/snap", "px", "NVDA"], "snap: the focus ticker is validated, normalised and forwarded");
+  await call("/api/rt/snap?k=px");
+  eq(forwarded[1].url.searchParams.has("f"), false, "snap: no focus, no f");
+  deep([(await call("/api/rt/snap?f=no%20way")).code, (await call("/api/rt/snap?f=ZZ$")).status], ["invalid_ticker", 400], "snap: a bad focus ticker is 400 before the object is touched");
+  eq(forwarded.length, 2, "snap: and the object saw only the two good requests");
+  const ownerSnap = await call("/api/rt/snap");
+  deep([ownerSnap.headers.get("X-RT-Poll-Ms"), ownerSnap.headers.get("X-RT-Poll-Cap-Ms")], ["5000", "0"], "snap: the owner is told to poll every 5 s with no cap");
+  const memberSnap = await call("/api/rt/snap", { env: { ...on, FLOWS_RT_AUDIENCE: "members" }, session: member });
+  deep([memberSnap.headers.get("X-RT-Poll-Ms"), memberSnap.headers.get("X-RT-Poll-Cap-Ms")], ["15000", "600000"], "snap: a member is told 15 s and ten minutes");
+  eq(memberSnap.headers.get("Content-Type"), "application/json", "snap: the object's own headers survive");
   const st = await call("/api/rt/status");
   deep([st.status, st.body.running, st.body.worker], [200, false, { mode: "on", audience: "owner", users: ["anilkaya"], hint: "enam", binding: true }], "status: the object's view plus the Worker's switches");
   const members = { ...on, FLOWS_RT_AUDIENCE: "members" };
@@ -1431,7 +1469,7 @@ const seqOk = (ws) => {
   deep(RT.RT_UPSTREAM_API.methods, ["start(plan, handlers)", "stop()", "tick(now)", "paused(now)", "state()"], "seam: the adapter's method list is part of the contract");
   deep(RT.RT_UPSTREAM_API.frame, ["k", "readAt", "items", "vendorAt", "meta", "full", "answered"], "seam: and so is the neutral frame");
 
-  const rest = createRestUpstream({ cfg: hubConfig({ UW_BASE: "http://x", UW_API_KEY: "k" }), budget: RT.createBudget() });
+  const rest = createRestUpstream({ cfg: hubConfig({ UW_BASE: "http://x.test", UW_API_KEY: "k" }), budget: RT.createBudget() });
   deep(["kind", "start", "stop", "tick", "paused", "state"].filter((m) => !(m in rest)), [], "seam: the REST adapter implements every method of the interface");
 
   const live = Object.keys(RT.RT_REST_SHAPE);
@@ -1465,7 +1503,7 @@ const seqOk = (ws) => {
   hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
   await hub.tick();
   eq(pushed.started, 1, "seam: a push upstream is started once with the plan");
-  deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
+  deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "phase", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
   ok(pushed.plan.ready() && pushed.plan.session() === DAY && pushed.plan.names().length >= 25, "seam: the plan answers without any REST state");
   deep([Array.from(pushed.plan.topics), pushed.plan.gex().names], [TOPICS.slice(), ["NVDA"]], "seam: the plan's topics are the demanded ones and gx names only the focus ticker");
   const names = pushed.plan.names();
@@ -1548,6 +1586,9 @@ const seqOk = (ws) => {
     const snap = await pulse.fetch(new Request("https://pulse.internal/snap?k=px,fl"));
     const frames = await snap.json();
     deep([snap.status, snap.headers.get("cache-control"), snap.headers.get("x-fresh-source"), frames.map((f) => f.k)], [200, "no-store", "hub", ["px", "fl"]], "pulse: /snap answers the envelopes with X-Fresh headers");
+    await pulse.fetch(new Request("https://pulse.internal/snap?k=px&f=ZQXT"));
+    await pulse.fetch(new Request("https://pulse.internal/snap?k=px&f=bad%20name"));
+    deep(Object.keys(pulse.hub.snapFocus), ["ZQXT"], "pulse: /snap passes a valid focus ticker to the hub and drops an invalid one");
     const st = await (await pulse.fetch(new Request("https://pulse.internal/status"))).json();
     deep([st.running, st.sockets.n, st.topics.px.hasData], [true, 1, true], "pulse: /status is the hub's status");
     eq((await pulse.fetch(new Request("https://pulse.internal/nope"))).status, 404, "pulse: an unknown path is 404");
@@ -1599,6 +1640,339 @@ const seqOk = (ws) => {
 }
 
 {
+  const PHASES = ["rth", "pre", "post"];
+  const want = {
+    px: { rth: 5000, pre: 9000, post: 9000 }, fl: { rth: 5000, pre: 9000, post: 9000 },
+    gx: { rth: 15000, pre: 15000, post: 15000 }, mk: { rth: 20000, pre: 20000, post: 20000 },
+    nw: { rth: 30000, pre: 60000, post: 60000 },
+  };
+  for (const k of TOPICS) {
+    for (const phase of PHASES) {
+      const c = RT.rtCadenceMs(k, phase);
+      eq(c, want[k][phase], `cadence: ${k} in ${phase} is ${want[k][phase]} ms`);
+      const liveMs = FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS * 1000;
+      const worst = c + RT.RT_LIMITS.tickMs + RT.RT_LIMITS.callTimeoutMs + 1000;
+      ok(worst <= liveMs, `cadence: ${k} in ${phase}: cadence ${c} + tick ${RT.RT_LIMITS.tickMs} + call ${RT.RT_LIMITS.callTimeoutMs} + 1000 = ${worst} fits the class's live window of ${liveMs} ms`);
+    }
+    eq(RT.rtCadenceMs(k, null), RT.RT_TOPICS[k].cadenceMs, `cadence: ${k} with no known phase takes the regular-session value`);
+  }
+  for (const k of ["px", "fl"]) {
+    const liveMs = FRESH_CLASSES.rt.liveS * 1000;
+    ok(RT.rtCadenceMs(k, "pre") + 1 + RT.RT_LIMITS.tickMs + RT.RT_LIMITS.callTimeoutMs + 1000 > liveMs, `cadence: ${k} outside the regular session is the largest value the table admits: one millisecond more breaks the live window`);
+  }
+  const cls = (k) => FRESH_CLASSES[RT.RT_TOPICS[k].klass];
+  deep(["px", "fl"].map((k) => cls(k).liveS), [15, 15], "cadence: the classes themselves are unchanged (rt live 15 s)");
+  const edge = SESSION_NOW;
+  eq(RT.streamEntry({ k: "px", readAt: edge - 15000, vendorAt: edge - 15000, session: DAY, now: edge }).state, "live", "cadence: a frame exactly the live window old is still live");
+  eq(RT.streamEntry({ k: "px", readAt: edge - 15001, vendorAt: edge - 15001, session: DAY, now: edge }).state, "fresh", "cadence: and a millisecond older is fresh, which is what a cadence past the table would show between polls");
+}
+
+{
+  const stepFor = async (phase, k) => {
+    let t = SESSION_NOW;
+    const vendor = createFakeVendor({ session: DAY, clock: () => t });
+    const u = upstreamOf(vendor, { clock: () => t });
+    u.up.start(plainPlan(["SPY", "QQQ"], { phase: () => phase }), u.handlers);
+    for (let i = 0; i < 4; i++) { await u.up.tick(t); t += 250; }
+    const before = u.up.state().topics[k].due;
+    return { before, started: SESSION_NOW };
+  };
+  for (const [phase, px, mk, nw] of [["rth", 5000, 20000, 30000], ["pre", 9000, 20000, 60000], ["post", 9000, 20000, 60000]]) {
+    const a = await stepFor(phase, "px");
+    const b = await stepFor(phase, "mk");
+    const c = await stepFor(phase, "nw");
+    eq(a.before - a.started, px, `adapter cadence: px is next due ${px} ms after its first poll in ${phase}`);
+    eq(b.before - b.started - 500, mk, `adapter cadence: mk is next due ${mk} ms after its first poll in ${phase}`);
+    eq(c.before - c.started - 1000, nw, `adapter cadence: nw is next due ${nw} ms after its first poll in ${phase}`);
+  }
+}
+
+{
+  const perMinute = async (hour, minute, topics) => {
+    const r = rig({ start: at(hour, minute) });
+    r.join("anilkaya", { topics, f: null });
+    await r.run(40);
+    const c0 = r.vendor.calls.length;
+    const count0 = { px: r.vendor.count(/screener/), fl: r.vendor.count(/flow-alerts/), mk: r.vendor.count(/market-tide/), nw: r.vendor.count(/news/) };
+    const states = [];
+    for (let i = 0; i < 300; i++) {
+      await r.hub.tick();
+      r.state.t += 1000;
+      const entry = {};
+      for (const k of topics) entry[k] = r.hub.freshOf(k, r.state.t);
+      states.push(entry);
+    }
+    const rate = (re, key) => (r.vendor.count(re) - count0[key]) / 5;
+    return {
+      px: rate(/screener/, "px"), fl: rate(/flow-alerts/, "fl"), mk: rate(/market-tide/, "mk"), nw: rate(/news/, "nw"),
+      total: (r.vendor.calls.length - c0) / 5, phase: r.hub.phase.phase, states,
+    };
+  };
+  const home = ["px", "mk", "nw"];
+  const blamedOnCadence = (k, e) => e[k].state !== "live" && (k !== "mk" || e[k].reason === "cadence");
+  const all = ["px", "fl", "mk", "nw"];
+  const within = (v, lo, hi, msg) => ok(v >= lo && v <= hi, `${msg} (${v})`);
+  const rth = await perMinute(10, 0, home);
+  eq(rth.phase, "rth", "calls: 10:00 ET is the regular session");
+  within(rth.px, 11.5, 12.5, "calls: Home in the regular session polls px every 5 s, 12 a minute");
+  within(rth.mk, 2.5, 3.5, "calls: and mk every 20 s, 3 polls a minute");
+  within(rth.nw, 1.8, 2.2, "calls: and news every 30 s, 2 a minute");
+  within(rth.total, 19, 21, "calls: Home in the regular session costs 20 vendor calls a minute, down from 26");
+  for (const [h, m, label] of [[8, 0, "pre"], [17, 0, "post"]]) {
+    const ext = await perMinute(h, m, home);
+    eq(ext.phase, label, `calls: ${h}:00 ET is the ${label}-market phase`);
+    within(ext.px, 6.2, 7.2, `calls: Home in the ${label}-market polls px every 9 s, 6.7 a minute`);
+    within(ext.mk, 2.5, 3.5, `calls: and mk every 20 s in the ${label}-market`);
+    within(ext.nw, 0.8, 1.2, `calls: and news every 60 s in the ${label}-market`);
+    within(ext.total, 13, 14.5, `calls: Home in the ${label}-market costs 13.7 vendor calls a minute`);
+    for (const k of home) {
+      const lapses = ext.states.filter((e) => blamedOnCadence(k, e)).length;
+      eq(lapses, 0, `flicker: ${k} is live on every second of five minutes in the ${label}-market, so the slower cadence never shows between polls`);
+    }
+  }
+  for (const k of home) eq(rth.states.filter((e) => blamedOnCadence(k, e)).length, 0, `flicker: ${k} is live on every second of five minutes in the regular session${k === "mk" ? " (only a lapse blamed on cadence counts: the fake tide's stamps lag its bars)" : ""}`);
+  const pages = await perMinute(8, 0, all);
+  within(pages.fl, 6.2, 7.2, "calls: fl is polled every 9 s outside the regular session too");
+  const pagesRth = await perMinute(10, 0, all);
+  within(pagesRth.total, 31, 33, "calls: every page open in the regular session costs 32 calls a minute");
+  eq(pagesRth.states.filter((e) => blamedOnCadence("fl", e)).length, 0, "flicker: fl is live on every second in the regular session");
+  eq(pages.states.filter((e) => blamedOnCadence("fl", e)).length, 0, "flicker: and in the pre-market");
+}
+
+{
+  const drive = async (r, seconds) => {
+    const end = r.state.t + seconds * 1000;
+    const gaps = [];
+    while (r.state.t < end) {
+      const d = await r.hub.tick();
+      if (d === null) break;
+      gaps.push(d);
+      r.state.t += d;
+    }
+    return gaps;
+  };
+  const demands = {
+    "px, mk and nw": { topics: ["px", "mk", "nw"], f: null },
+    "all five topics and a focus ticker": { topics: TOPICS, f: "NVDA" },
+  };
+  for (const [label, opts] of Object.entries(demands)) {
+    const r = rig();
+    r.join("anilkaya", opts);
+    await drive(r, 12);
+    const calls0 = r.vendor.calls.length;
+    const gaps = await drive(r, 60);
+    const polls = (re) => r.vendor.calls.slice(calls0).filter((c) => re.test(c.path)).length;
+    console.log(`rt alarms with ${label}: ${gaps.length} in 60 fake seconds, gaps ${Math.min(...gaps)}-${Math.max(...gaps)} ms, vendor calls px ${polls(/screener/)} mk ${polls(/market-tide/)} nw ${polls(/news/)} fl ${polls(/flow-alerts/)} gx ${polls(/spot-exposures/)}`);
+    ok(gaps.length <= 20, `alarms: ${label} costs at most 20 alarms in a fake minute (${gaps.length})`);
+    ok(Math.max(...gaps) <= RT.RT_LIMITS.alarmMaxMs, `alarms: ${label}: no gap above ${RT.RT_LIMITS.alarmMaxMs} ms (${Math.max(...gaps)})`);
+    ok(Math.min(...gaps) >= RT.RT_LIMITS.alarmMinMs, `alarms: ${label}: no gap below ${RT.RT_LIMITS.alarmMinMs} ms (${Math.min(...gaps)})`);
+    ok(polls(/screener/) >= 11 && polls(/screener/) <= 13, `alarms: ${label}: px is still polled every 5 s (${polls(/screener/)} in a minute)`);
+    if (opts.topics.includes("mk")) ok(polls(/market-tide/) >= 2 && polls(/market-tide/) <= 4, `alarms: ${label}: mk every 20 s (${polls(/market-tide/)})`);
+    if (opts.topics.includes("nw")) ok(polls(/news/) >= 1 && polls(/news/) <= 3, `alarms: ${label}: nw every 30 s (${polls(/news/)})`);
+    if (opts.topics.includes("fl")) ok(polls(/flow-alerts/) >= 11 && polls(/flow-alerts/) <= 13, `alarms: ${label}: fl every 5 s (${polls(/flow-alerts/)})`);
+    if (opts.topics.includes("gx")) ok(polls(/spot-exposures/) >= 3 && polls(/spot-exposures/) <= 5, `alarms: ${label}: gx for one focus name every 15 s (${polls(/spot-exposures/)})`);
+  }
+
+  const idle = rig();
+  idle.join("anilkaya", { topics: ["mk"], f: null });
+  const quiet = await drive(idle, 60);
+  ok(Math.max(...quiet) <= RT.RT_LIMITS.alarmMaxMs && quiet.length <= 14, `alarms: mk alone needs no more than the 5 s ceiling (${quiet.length} alarms, longest ${Math.max(...quiet)} ms)`);
+
+  const slow = rig({ scale: 0.2 });
+  slow.join("anilkaya", { topics: ["px"], f: null });
+  const scaled = await drive(slow, 12);
+  ok(Math.max(...scaled) <= RT.RT_LIMITS.alarmMaxMs * 0.2 + 1 && Math.min(...scaled) >= RT.RT_LIMITS.alarmMinMs * 0.2 - 1, `alarms: the bounds scale with FLOWS_RT_SCALE (${Math.min(...scaled)}-${Math.max(...scaled)} ms at 0.2)`);
+
+  const limited = rig({ vendorOver: (v) => { v.fault = "429"; v.retryAfterS = 40; } });
+  limited.join("anilkaya", { topics: ["px", "mk"], f: null });
+  await drive(limited, 6);
+  const sheltered = limited.vendor.calls.length;
+  const waits = await drive(limited, 30);
+  ok(Math.max(...waits) <= RT.RT_LIMITS.alarmMaxMs, `alarms: a vendor pause never stretches the alarm past the ceiling (${Math.max(...waits)} ms)`);
+  ok(waits.length <= 8, `alarms: and a paused hub wakes only for its heartbeat and sweep (${waits.length} alarms in 30 s)`);
+  ok(limited.vendor.calls.length - sheltered <= 2, `alarms: with no call made while the pause stands (${limited.vendor.calls.length - sheltered})`);
+
+  const sat = easternInstant("2026-10-03", 11 * 60);
+  const closed = rig({ start: sat });
+  closed.join();
+  const shut = await drive(closed, 120);
+  ok(Math.max(...shut) < 10000, `alarms: a closed hub with a socket still wakes inside the 10 s the object needs to stay resident (${Math.max(...shut)} ms)`);
+  eq(closed.vendor.calls.length, 0, "alarms: and makes no vendor call");
+}
+
+{
+  const { Pulse } = await import("../shared/flows-rt-hub.js");
+  const env = { FLOWS_RT_MODE: "on", UW_API_KEY: "k", UW_BASE: "http://uw.test" };
+  const realNow = Date.now;
+  const realFetch = globalThis.fetch;
+  const virtual = { t: SESSION_NOW };
+  Date.now = () => virtual.t;
+  globalThis.WebSocketRequestResponsePair = class { constructor(a, b) { this.request = a; this.response = b; } };
+  const vendor = createFakeVendor({ session: DAY, clock: () => virtual.t });
+  globalThis.fetch = fetchFor(vendor);
+  const mk = (over = {}, sockets = []) => {
+    const store = { alarm: null, sets: [], gets: 0, deletes: 0, setFail: 0, getFail: 0 };
+    const ctx = {
+      getWebSockets: () => sockets.filter((x) => x.readyState === 1),
+      setWebSocketAutoResponse() {},
+      storage: {
+        getAlarm: async () => { store.gets++; if (store.getFail > 0) { store.getFail--; throw new Error("storage get"); } return store.alarm; },
+        setAlarm: async (t) => { if (store.setFail > 0) { store.setFail--; throw new Error("storage set"); } store.sets.push({ at: virtual.t, due: t }); store.alarm = t; },
+        deleteAlarm: async () => { store.deletes++; store.alarm = null; },
+      },
+    };
+    const logs = [];
+    const pulse = new Pulse(ctx, { ...env, ...over });
+    pulse.hub.log = (e) => logs.push(e);
+    return { pulse, sockets, store, logs };
+  };
+  const fire = async (m) => {
+    virtual.t = Math.max(virtual.t, m.store.alarm);
+    m.store.alarm = null;
+    await m.pulse.alarm();
+  };
+  try {
+    {
+      const m = mk();
+      eq(m.store.sets.length, 0, "alarm: an idle object sets no alarm");
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      ws.att = { u: "anilkaya", exp: virtual.t + 3600e3, k: ["px", "mk", "nw"], f: null };
+      ok(m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: ["px", "mk", "nw"], f: null }), "alarm: a socket is admitted");
+      await m.pulse.arm(10);
+      eq(m.store.gets, 1, "alarm: the first wish reads the pending alarm once");
+      await m.pulse.arm(5000);
+      await m.pulse.arm(5);
+      eq(m.store.sets.length, 2, "alarm: a later wish is dropped without a storage call, an earlier one replaces the alarm");
+      eq(m.store.gets, 1, "alarm: and the object never asks storage again while it knows its own alarm");
+      const start = virtual.t;
+      const dues = [];
+      while (virtual.t < start + 70000) {
+        await fire(m);
+        dues.push(m.store.alarm - virtual.t);
+      }
+      const inMinute = m.store.sets.filter((x) => x.at >= start + 10000 && x.at < start + 70000).length;
+      console.log(`rt Pulse alarms: ${inMinute} setAlarm in 60 fake seconds with px, mk and nw demanded, ${m.store.gets} getAlarm in all`);
+      ok(inMinute <= 20, `alarm: at most 20 setAlarm in a fake minute with px, mk and nw demanded (${inMinute})`);
+      ok(Math.max(...dues) < 10000 && Math.max(...dues) <= RT.RT_LIMITS.alarmMaxMs + 5, `alarm: no gap near the 10 s hibernation line while demanded (${Math.max(...dues)} ms)`);
+      eq(m.store.gets, 1, "alarm: a minute of alarms made no further getAlarm");
+      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 3, "alarm: and the frames still flow at the vendor's cadence");
+      ws.readyState = 3;
+      m.pulse.hub.lastSnapAt = -Infinity;
+      m.pulse.release();
+      await Promise.resolve();
+      deep([m.store.deletes, m.store.alarm], [1, null], "alarm: the last viewer leaving deletes the alarm");
+      await m.pulse.arm(10);
+      eq(m.store.gets, 1, "alarm: and the object knows it has none");
+    }
+
+    {
+      const m = mk();
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: TOPICS, f: null });
+      await m.pulse.arm(10);
+      await fire(m);
+      m.store.setFail = 1;
+      await fire(m);
+      ok(m.store.alarm !== null, "alarm: a storage failure while re-arming is retried inside the handler, so the hub does not go quiet");
+      eq(m.logs.filter((e) => e.message === "rt alarm failed").length, 1, "alarm: and logged once");
+      m.store.setFail = 5;
+      await assert.rejects(() => fire(m), /not re-armed/);
+      checks++;
+      ok(m.logs.filter((e) => e.message === "rt alarm failed").length <= 1, "alarm: a second failure inside the minute is not logged again");
+      m.store.setFail = 0;
+      m.store.alarm = null;
+      await fire(m).catch(() => {});
+      ok(m.store.alarm !== null, "alarm: when the platform retries the handler after a failed re-arm, the alarm is set again");
+    }
+
+    {
+      const m = mk();
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      m.sockets.push(ws);
+      m.pulse.hub.admit(ws, { u: "anilkaya", exp: ws.exp, topics: TOPICS, f: null });
+      m.store.getFail = 1;
+      await m.pulse.arm(10);
+      ok(m.store.alarm !== null, "alarm: a failing getAlarm does not stop the first alarm being set");
+      await m.pulse.arm(20);
+      ok(m.store.gets >= 1, "alarm: and the unknown state is read again afterwards");
+    }
+
+    {
+      const ws = mkSocket("anilkaya", virtual.t + 3600e3);
+      ws.att = { u: "anilkaya", exp: virtual.t + 3600e3, k: ["px"], f: null };
+      const woken = mk({}, [ws]);
+      await new Promise((r) => setTimeout(r, 5));
+      deep([woken.store.gets, woken.store.sets.length], [1, 1], "alarm: an object waking with a surviving socket reads its alarm once and sets one");
+    }
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = realFetch;
+    delete globalThis.WebSocketRequestResponsePair;
+  }
+}
+
+{
+  const PROD = "https://api.unusualwhales.com";
+  const allowed = [
+    ["https://api.unusualwhales.com", PROD, "default"],
+    ["https://api.unusualwhales.com/", PROD, "default"],
+    ["https://api.unusualwhales.com:443", PROD, "default"],
+    ["http://127.0.0.1:8787", "http://127.0.0.1:8787", "redirect"],
+    ["https://127.0.0.1:8787", "https://127.0.0.1:8787", "redirect"],
+    ["http://127.0.0.1", "http://127.0.0.1", "redirect"],
+    ["http://localhost:3000", "http://localhost:3000", "redirect"],
+    ["http://uw.test", "http://uw.test", "redirect"],
+    ["https://uw.test", "https://uw.test", "redirect"],
+    ["http://vendor.test/", "http://vendor.test", "redirect"],
+    ["http://a.b.test:9000", "http://a.b.test:9000", "redirect"],
+  ];
+  for (const [raw, base, status] of allowed) {
+    deep(vendorBaseInfo(raw), { base, status }, `vendor base: ${raw} is ${status}`);
+  }
+  const refused = [
+    "https://evil.example", "http://evil.example", "https://api.unusualwhales.com.evil.example", "http://api.unusualwhales.com",
+    "https://evil.example/api.unusualwhales.com", "https://api.unusualwhales.com@evil.example", "https://user:pw@api.unusualwhales.com",
+    "http://127.0.0.1@evil.example", "http://127.0.0.1.evil.example", "http://localhost.evil.example", "http://test", "http://uw.test.evil.example",
+    "http://evil.example/uw.test", "http://uw.test/x", "http://uw.test?x=1", "http://uw.test#x", "ftp://uw.test", "file:///etc/passwd", "javascript:alert(1)",
+    "//uw.test", "uw.test", " http://uw.test", "http://uw.test ", "http://[::1]:8787", "http://0.0.0.0:8787", "http://169.254.169.254", "http://10.0.0.1",
+    "http://uw.TEST.evil.example", "http://xn--uw.test.evil", "https://api.unusualwhales.com/api", "http://" + "a".repeat(250) + ".test", 12, {}, [], true,
+  ];
+  for (const raw of refused) {
+    deep(vendorBaseInfo(raw), { base: PROD, status: "invalid" }, `vendor base: ${JSON.stringify(raw).slice(0, 60)} is ignored and reported invalid`);
+  }
+  for (const raw of [undefined, null, ""]) deep(vendorBaseInfo(raw), { base: PROD, status: "unset" }, `vendor base: ${JSON.stringify(raw)} is unset`);
+  eq(vendorBase({ UW_BASE: "https://evil.example" }), PROD, "vendorBase: a refused base is the default");
+  eq(vendorBase({}), VENDOR_BASE_DEFAULT, "vendorBase: no env var is the default");
+  eq(vendorBase(undefined), VENDOR_BASE_DEFAULT, "vendorBase: no env is the default");
+  ok(vendorRedirected({ UW_BASE: "http://uw.test" }) && !vendorRedirected({ UW_BASE: PROD }) && !vendorRedirected({ UW_BASE: "https://evil.example" }) && !vendorRedirected({}),
+    "vendorRedirected: only a loopback or .test base redirects");
+  const evil = hubConfig({ UW_BASE: "https://evil.example", UW_API_KEY: "k", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" });
+  eq(evil.base, PROD, "hub: a hostile UW_BASE leaves the vendor at production");
+  eq(evil.redirected, false, "hub: and does not count as a redirect");
+  eq(evil.scale, 1, "hub: so it does not unlock the test scale");
+  ok(Number.isNaN(evil.pinned), "hub: nor the pinned clock");
+  eq(evil.baseStatus, "invalid", "hub: and is reported invalid");
+  eq(hubConfig({ UW_BASE: PROD, FLOWS_RT_SCALE: "0.2" }).scale, 1, "hub: the production URL spelled out does not unlock the test scale either");
+  const upstreamBase = (e) => createRestUpstream({ cfg: hubConfig({ UW_API_KEY: "k", ...e }), budget: RT.createBudget() }).state().base;
+  eq(upstreamBase({ UW_BASE: "https://evil.example" }), "invalid", "upstream: the rail reports the refused base");
+  eq(upstreamBase({}), "production", "upstream: production when none is set");
+  eq(upstreamBase({ UW_BASE: "http://uw.test" }), "redirected", "upstream: redirected for a test base");
+  eq(vendorUrl("http://uw.test", "/api/x", { a: 1, b: "", c: null, d: undefined, e: "z y" }).href, "http://uw.test/api/x?a=1&e=z+y", "vendorUrl: drops empty parameters and encodes the rest");
+  eq(vendorUrl(PROD, "/api/x").href, PROD + "/api/x", "vendorUrl: no parameters");
+  deep(vendorUnwrap({ data: [1] }), [1], "unwrap: the data envelope around an array");
+  deep(vendorUnwrap({ data: { a: 1 } }), { a: 1 }, "unwrap: the data envelope around an object");
+  deep(vendorUnwrap({ data: "x" }), { data: "x" }, "unwrap: a scalar payload is left whole");
+  deep(vendorUnwrap([1]), [1], "unwrap: a bare array is left whole");
+  eq(vendorUnwrap(null), null, "unwrap: null");
+  deep([200, 204, 301, 400, 404, 429, 500, 503].map(classifyStatus), [null, null, "http_4xx", "http_4xx", "http_4xx", "http_429", "http_5xx", "http_5xx"], "classify: status to the rail's codes");
+  deep(["7", "0", "", "  ", "abc", undefined].map((v) => vendorRetryAfterMs(v, 0)), [7000, 0, null, null, null, null], "retryAfterMs: seconds");
+  eq(vendorRetryAfterMs("Thu, 01 Jan 1970 00:00:09 GMT", 4000), 5000, "retryAfterMs: an HTTP date is a delay from now");
+  eq(vendorRetryAfterMs("Thu, 01 Jan 1970 00:00:01 GMT", 4000), 0, "retryAfterMs: a date in the past is zero");
+}
+
+{
   const files = ["shared/flows-rt.js", "shared/flows-rt-hub.js", "shared/flows-rt-routes.js", "tests/rt-fixtures.mjs", "tests/flows-rt-contract.mjs", "tests/flows-rt-server.mjs"];
   for (const f of files) {
     let src = "";
@@ -1630,6 +2004,118 @@ const seqOk = (ws) => {
   const cron = /crons\s*=\s*\[([^\]]*)\]/.exec(toml)[1];
   ok(cron.includes("1-59/5 13-21") && cron.includes("3-58/5 13-21") && cron.includes("*/30 * * * *") && cron.includes("15,45 * * * *"), "the four crons are untouched: Tier 1 stays the fallback");
   eq(read("wrangler.toml").includes("FLOWS_LIVE_MODE = \"actions\""), true, "and so is the live mode");
+}
+
+{
+  const sums = (t) => Math.abs(t.liveMs + t.vendorLagMs + t.oursMs - t.demandedMs);
+
+  let delayed = null;
+  delayed = rig({
+    start: at(10, 0),
+    vendorOver: (v) => {
+      const inner = v.handle;
+      v.handle = async (path, params) => { delayed.state.t += 120; return inner(path, params); };
+    },
+  });
+  delayed.join("anilkaya", { topics: ["px"] });
+  await delayed.run(40);
+  const rtt = delayed.hub.status().topics.px.rttMs;
+  ok(rtt.n >= 6, `slo: px records one round trip per poll (${rtt.n})`);
+  deep([rtt.p50, rtt.p95, rtt.max], [120, 120, 120], "slo: rttMs is the time from the poll's start to its read, 120 ms from a vendor that costs 120 ms");
+  deep(delayed.hub.status().topics.fl.rttMs, { n: 0, p50: null, p95: null, max: null }, "slo: an undemanded topic has no round trips");
+  deep([delayed.hub.status().topics.px.itemLagMs, delayed.hub.status().topics.gx.itemLagMs, delayed.hub.status().topics.mk.itemLagMs], [null, null, null], "slo: item lag is reported for fl and nw only");
+
+  const healthy = rig({ start: at(10, 0) });
+  const spy = { empty: 0, full: 0 };
+  const emit = healthy.hub.emit.bind(healthy.hub);
+  healthy.hub.emit = (k, rows) => { if (k === "px") (rows.length ? spy.full++ : spy.empty++); return emit(k, rows); };
+  const a = healthy.join("anilkaya", { topics: TOPICS, f: "NVDA" });
+  await healthy.run(60);
+  const st = healthy.hub.status();
+  eq(st.topics.px.emptyFrames, spy.empty, "slo: emptyFrames counts the px frames sent with no rows");
+  ok(spy.full > 0, "slo: and the frames that moved rows are not counted as empty");
+  for (const k of TOPICS) {
+    const t = st.topics[k];
+    ok(t.time.demandedMs >= 50000 && t.time.demandedMs <= 60000, `slo: ${k} was demanded for ${t.time.demandedMs} ms of a 60 s run`);
+    ok(sums(t.time) < 1e-6, `slo: ${k} live + vendor-lag + ours equals demanded exactly`);
+    ok(t.time.liveMs >= 0 && t.time.vendorLagMs >= 0 && t.time.oursMs >= 0, `slo: ${k} counters are never negative`);
+  }
+  for (const k of ["px", "fl", "gx", "nw"]) ok(st.topics[k].time.liveMs / st.topics[k].time.demandedMs >= 0.85, `slo: ${k} on a healthy vendor is live for ${(100 * st.topics[k].time.liveMs / st.topics[k].time.demandedMs).toFixed(0)}% of its demanded time`);
+  eq(st.topics.px.time.vendorLagMs, 0, "slo: and none of it is charged to the vendor");
+  eq(st.topics.mk.time.oursMs, 0, "slo: mk is never charged to us on a healthy run, though the fake tide's bar stamp runs behind the read part of the time");
+  ok(st.topics.mk.time.vendorLagMs > 0, "slo: it is charged to the vendor's stamp instead");
+  ok(st.topics.fl.itemLagMs.n >= 8 && st.topics.fl.itemLagMs.p50 >= 0 && st.topics.fl.itemLagMs.p95 <= 1600, `slo: fl alert lag against the alert's own created_at: ${JSON.stringify(st.topics.fl.itemLagMs)}`);
+  ok(st.topics.nw.itemLagMs.n >= 1 && st.topics.nw.itemLagMs.max <= 30000, `slo: nw headline lag against its created_at: ${JSON.stringify(st.topics.nw.itemLagMs)}`);
+  eq(st.unobservedMs, 0, "slo: nothing went unobserved");
+  eq(st.startedAt, healthy.hub.startedAt, "slo: status names the epoch's start");
+
+  const behind = rig({ start: at(10, 0), vendorOver: (v) => { v.lagMs = 40000; } });
+  behind.join("anilkaya", { topics: ["px"] });
+  await behind.run(60);
+  const bt = behind.hub.status().topics.px.time;
+  ok(bt.vendorLagMs >= 0.8 * bt.demandedMs, `slo: a vendor 40 s behind is charged to the vendor (${bt.vendorLagMs} of ${bt.demandedMs} ms)`);
+  ok(bt.liveMs === 0 && bt.oursMs <= 0.1 * bt.demandedMs, `slo: and not to us (live ${bt.liveMs}, ours ${bt.oursMs})`);
+  ok(sums(bt) < 1e-6, "slo: the three still sum to demanded");
+
+  const down = rig({ start: at(10, 0) });
+  down.join("anilkaya", { topics: ["px"] });
+  await down.run(20);
+  const before = down.hub.status().topics.px.time;
+  down.vendor.fault = "500";
+  await down.run(40);
+  const after = down.hub.status().topics.px.time;
+  ok(after.oursMs - before.oursMs >= 20000, `slo: a dead vendor connection costs us ${after.oursMs - before.oursMs} ms of not-live time (the vendor sent no stale stamp, the poll failed)`);
+  eq(after.vendorLagMs, 0, "slo: and none of it is vendor lag");
+  ok(sums(after) < 1e-6, "slo: sum holds under failure");
+
+  const ep0 = healthy.hub.ep;
+  healthy.hub.onClose(a.ws);
+  healthy.sockets.length = 0;
+  await healthy.run(75);
+  eq(healthy.hub.running, false, "slo: with no viewer the hub stops");
+  deep(healthy.hub.status().topics.px.time, { demandedMs: 0, liveMs: 0, vendorLagMs: 0, oursMs: 0 }, "slo: and its counters are gone with the epoch");
+  eq(healthy.hub.status().topics.px.emptyFrames, 0, "slo: emptyFrames too");
+  healthy.join("anilkaya", { topics: ["px"] });
+  await healthy.run(10);
+  ok(healthy.hub.ep > ep0, "slo: a new viewer starts a new epoch");
+  const again = healthy.hub.status().topics.px.time;
+  ok(again.demandedMs > 0 && again.demandedMs <= 10000, `slo: whose counters start from zero (${again.demandedMs} ms)`);
+
+  const gap = rig({ start: at(10, 0) });
+  gap.join("anilkaya", { topics: ["px"] });
+  await gap.run(10);
+  const d0 = gap.hub.status().topics.px.time.demandedMs;
+  gap.state.t += 120000;
+  await gap.run(1);
+  const g1 = gap.hub.status();
+  ok(g1.unobservedMs >= 120000, `slo: a two-minute silence is reported as unobserved (${g1.unobservedMs} ms)`);
+  eq(g1.topics.px.time.demandedMs, d0, "slo: and is not charged to any class");
+
+  const sat = rig({ start: easternInstant("2026-10-03", 11 * 60) });
+  sat.join();
+  await sat.run(30);
+  ok(TOPICS.every((k) => sat.hub.status().topics[k].time.demandedMs === 0), "slo: a closed market accrues no demanded time");
+}
+
+{
+  const hub = new RtHub({
+    env: { FLOWS_RT_MODE: "on", UW_API_KEY: "k" }, now: () => 1000000, log: () => {},
+    host: { sockets: () => [], wake() {} },
+    upstreamFactory: () => ({ kind: "stub", start() {}, stop() {}, tick() {}, paused: () => false, state: () => ({ topics: {} }) }),
+  });
+  hub.start(1000000);
+  const frame = (k, readAt, items, extra = {}) => hub.onUpstream({ k, readAt, ms: 40, items, meta: {}, full: {}, answered: true, vendorAt: null, ...extra });
+  frame("fl", 1000000, [{ id: "a", ts: 900000 }, { id: "b", ts: 950000 }]);
+  eq(hub.topics.fl.itemLag.summary().n, 0, "lag: the first poll of an epoch is a backlog and is not sampled");
+  frame("fl", 1005000, [{ id: "c", ts: 1004500 }, { id: "d", ts: 1003000 }]);
+  deep(hub.topics.fl.itemLag.summary(), { n: 1, p50: 500, p95: 500, max: 500 }, "lag: the newest new alert is 500 ms old at the read");
+  frame("fl", 1010000, [{ id: "c", ts: 1004500 }]);
+  eq(hub.topics.fl.itemLag.summary().n, 1, "lag: a poll that brings nothing new samples nothing");
+  frame("nw", 1000000, [{ id: "x", ts: 1, createdAtMs: 1 }]);
+  frame("nw", 1030000, [{ id: "y", ts: 1020000, createdAtMs: 1020000 }, { id: "z", ts: 1030000, createdAtMs: null }]);
+  deep(hub.topics.nw.itemLag.summary(), { n: 1, p50: 10000, p95: 10000, max: 10000 }, "lag: a headline is aged by its own created_at, and one with none is not sampled");
+  deep(hub.topics.fl.rttMs ?? hub.status().topics.fl.rttMs, { n: 3, p50: 40, p95: 40, max: 40 }, "lag: every answered poll records its round trip");
+  hub.stop();
 }
 
 console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches`);

@@ -7,6 +7,7 @@ import { checkFrame, createSeq, RT_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from ".
 import { createFakeVendor, vendorHandler } from "./rt-fixtures.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { easternDay, easternInstant, nextTradingDay } from "../shared/flows-freshness.js";
+import { wireSession, summariseWire } from "./lib/ws-wire.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -190,6 +191,38 @@ async function runMain() {
       ok(up.headers["strict-transport-security"] && up.headers["x-frame-options"] === "DENY", "101: all seven headers");
       eq(up.headers["content-security-policy"], undefined, "101: no CSP on a non-document");
       await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the abandoned raw socket to be released");
+    }
+
+    {
+      const OFFER = "permessage-deflate; client_max_window_bits";
+      const probe = (offer) => wireSession(base, "/api/rt/ws?f=nvda", { Cookie: OWNER, ...(offer ? { "Sec-WebSocket-Extensions": offer } : {}) }, { ms: 4000, minMessages: 8 });
+      const bare = await probe(null);
+      await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the unoffered probe to be released");
+      const asked = await probe(OFFER);
+      await until(async () => (await statusOf(base, OWNER)).body.running === false, 8000, "the offered probe to be released");
+      eq(bare.status, 101, "wire: a socket that offers no extension is upgraded");
+      eq(asked.status, 101, "wire: and so is one that offers permessage-deflate");
+      eq(bare.extensions, undefined, "wire: with no offer the 101 names no extension, so nothing is compressed unasked");
+      const p = summariseWire(bare.messages);
+      const a = summariseWire(asked.messages);
+      ok(p.messages >= 6 && a.messages >= 6, `wire: each probe read at least six data messages (${p.messages} and ${a.messages})`);
+      for (const m of [...bare.messages, ...asked.messages].filter((x) => !x.control)) {
+        const f = JSON.parse(m.body.toString("utf8"));
+        ok(checkFrame(f).length === 0 || f.k === "ctl", "wire: every message inflates to a clean envelope");
+        if (m.compressed) break;
+      }
+      eq(p.deflated, 0, "wire: no frame of the unoffered probe is compressed");
+      ok(p.wire >= p.plain && p.wire - p.plain <= 10 * p.messages, `wire: uncompressed, a message costs its payload plus a 2 to 10 byte frame header (${p.wire - p.plain} B over ${p.messages} messages)`);
+      const negotiated = typeof asked.extensions === "string" && /permessage-deflate/i.test(asked.extensions);
+      if (negotiated) {
+        ok(a.deflated > 0, `wire: the 101 answered ${JSON.stringify(asked.extensions)} and ${a.deflated} of ${a.messages} messages carry RSV1`);
+        ok(a.wire < a.plain, `wire: and compression moved fewer bytes than the payload (${a.wire} against ${a.plain})`);
+      } else {
+        eq(a.deflated, 0, "wire: the 101 named no extension, so no message is compressed");
+        ok(a.wire >= a.plain, "wire: and the wire carries at least the payload");
+      }
+      const per = Object.entries(a.kinds).map(([k, e]) => `${k} ${e.n}x ${Math.round(e.plain / e.n)} -> ${Math.round(e.wire / e.n)} B`).join(", ");
+      console.log(`rt wire: offered ${JSON.stringify(OFFER)}, the 101 answered Sec-WebSocket-Extensions ${JSON.stringify(asked.extensions ?? null)}; ${a.messages} messages, ${a.plain} B of payload in ${a.wire} B on the wire (${(a.wire / a.plain).toFixed(2)}), ${asked.socketBytes} B read from the socket; per message ${per}; unoffered: ${p.messages} messages, ${p.plain} B in ${p.wire} B (${(p.wire / p.plain).toFixed(2)})`);
     }
 
     const c1 = connect(base, OWNER, { query: "?f=nvda" });
@@ -553,6 +586,32 @@ async function runClosed() {
   }
 }
 
+async function runClosedEpoch() {
+  const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
+  const uw = await startVendor(vendor);
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`] });
+  try {
+    const c = connect(server.baseURL, OWNER);
+    const hello = await until(() => c.ctl("hello")[0], 15000, "a hello");
+    await until(() => c.ctl("closed")[0], 15000, "a closed frame");
+    const startedAt = Date.now();
+    const eps = new Set([hello.ep]);
+    await sleep(75000);
+    eps.add((await statusOf(server.baseURL, OWNER)).body.ep);
+    for (const f of c.frames) eps.add(f.ep);
+    const beats = c.ctl("hb");
+    console.log(`rt closed epoch: ${beats.length} heartbeats and ${c.ctl("resync").length} resyncs in ${((Date.now() - startedAt) / 1000).toFixed(0)} s, epochs seen: ${Array.from(eps).join(",")}`);
+    ok(beats.length >= 2, `epoch: a Saturday socket sees at least two closed heartbeats in 75 s (${beats.length})`);
+    eq(eps.size, 1, `epoch: every frame and the status read after 75 s of silence carry the hello's epoch (${eps.size} seen)`);
+    eq(c.ctl("resync").length, 0, "epoch: and no resync is ever sent, because the object never restarted");
+    eq(vendor.calls.length, 0, "epoch: still no vendor call");
+    c.close();
+  } finally {
+    await server.stop();
+    await uw.close();
+  }
+}
+
 async function runOff() {
   const server = await startWorker({ extraVars: ["FLOWS_RT_MODE:off"] });
   try {
@@ -593,7 +652,7 @@ async function runCadence() {
     ok(rates.fl >= 11 && rates.fl <= 13, `cadence: fl about every 5 s (${rates.fl})`);
     ok(rates.gx >= 3 && rates.gx <= 5, `cadence: gx reads the one focus name about every 15 s (${rates.gx})`);
     ok(window.filter((x) => /spot-exposures/.test(x.path)).every((x) => x.path === "/api/stock/NVDA/spot-exposures"), "cadence: and no other name");
-    ok(rates.mk >= 10 && rates.mk <= 14, `cadence: mk every 10 s, two calls a poll (${rates.mk})`);
+    ok(rates.mk >= 4 && rates.mk <= 8, `cadence: mk every 20 s, two calls a poll (${rates.mk})`);
     ok(rates.nw >= 1 && rates.nw <= 3, `cadence: news every 30 s (${rates.nw})`);
     ok(window.length <= 240, `cadence: under the 240-call budget (${window.length})`);
     const lat = [];
@@ -617,6 +676,7 @@ async function runCadence() {
 await runMain();
 await runOwnerAudience();
 await runClosed();
+await runClosedEpoch();
 await runOff();
 await runCadence();
 
