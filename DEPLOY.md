@@ -2683,18 +2683,31 @@ job that was already running when the Worker was promoted logs two `invalid_key`
   it prints counts every caller of the key, including any agent session that
   has `UW_API_KEY` set and reaches the vendor's MCP server through `.mcp.json`.
 - **The socket probe** (`.github/workflows/flows-ws-probe.yml`, dispatch only)
-  answers the question the real-time rail turns on: whether the vendor key may
-  open `wss://api.unusualwhales.com/socket` and join which channels. It makes a
-  handshake with the token in the query, as a bearer header and with an Origin,
-  joins each channel the rail would use on its own connection, holds up to four
-  connections at once and joins up to 60 `price:<T>` channels on one. Each
-  record prints status, acknowledgements, message counts, the time to the first
-  frame and the median and 95th-percentile lag against the frame's own stamp,
-  and only the key names of a payload, never its values (the repository's logs
-  are public), and the token is redacted from every line. Run it off hours to
-  learn the entitlement and in the regular session to learn lag and rates
-  (`seconds` and `only` are inputs). `tests/flows-ws-probe-contract.mjs` proves
-  it against a fake vendor that speaks the protocol by hand.
+  answers the questions the real-time rail and the live-flow work turn on:
+  whether the vendor key may open `wss://api.unusualwhales.com/socket`, which
+  channels it may join, at what rate they stream and how late their frames are.
+  It makes a handshake with the token in the query, as a bearer header and with
+  an Origin, then joins one list of channels each on its own connection, led by
+  a negative control (`w03_nonexistent_channel_zz`, which cannot be a channel:
+  its verdict says whether the vendor refuses, ignores or acknowledges a join
+  it should not, and so whether an acknowledgement proves any entitlement). The
+  five global firehoses (`price`, `option_trades`, `lit_trades`,
+  `off_lit_trades`, `stock_screener`) are listened to for 5 s each. It then
+  holds up to four connections at once and joins up to 60 `price:<T>` channels
+  on one. Each record prints status, acknowledgements, a verdict (`data`,
+  `acked-silent`, `refused` or `no-ack`), messages and bytes a second, the
+  median and 95th-percentile gap between frames, the median and
+  95th-percentile lag against the frame's own stamp (and the name of the stamp
+  field), `created_at - executed_at` for option prints, and only the key names
+  of a payload, never its values (the repository's logs are public); the token
+  is redacted from every line. The list at 60 s a channel takes about sixteen
+  minutes, which is why the job's timeout is 30 minutes and the start record
+  prints the computed duration. Dispatch it twice on one weekday, at 10:30 and
+  15:00 ET, to learn lag and rates in the regular session (`seconds` and `only`
+  are inputs; `only` takes `handshake`, `channels`, `firehoses`, `connections`
+  and `joins`). `tests/flows-ws-probe-contract.mjs` proves it against a fake
+  vendor that speaks the protocol by hand, and holds the workflow's timeout to
+  the computed duration.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.
