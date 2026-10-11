@@ -87,6 +87,7 @@
     "test:flows-home-composition": "node flows-home-composition.mjs",
     "test:flows-home-below-render": "node flows-home-below-render.mjs",
     "test:flows-flow-below-render": "node flows-flow-below-render.mjs",
+    "test:flows-market-below-render": "node flows-market-below-render.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
     "test:flows-permits": "node flows-permits-contract.mjs",
     "test:flows-overlay": "node flows-overlay-contract.mjs",

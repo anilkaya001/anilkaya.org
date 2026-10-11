@@ -749,6 +749,7 @@ ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
 ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
+  <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}

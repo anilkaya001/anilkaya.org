@@ -22,8 +22,8 @@ const emitted = (key) => {
 };
 
 const SURFACES = [
-  { key: "sector:trix", file: "assets/js/flows-market.js", fn: "paintSectors", vars: ["sectors"] },
-  { key: "movers", file: "assets/js/flows-market.js", fn: "paintMovers", vars: ["movers"] },
+  { key: "sector:trix", file: "assets/js/flows-market-below.js", fn: "paintSectors", vars: ["sectors"] },
+  { key: "movers", file: "assets/js/flows-market-below.js", fn: "paintMovers", vars: ["movers"] },
   { key: "market", file: "assets/js/flows-market.js", fn: "paintTape", vars: ["m"] },
   { key: "market", file: "assets/js/flows-market.js", fn: "paintTilt", vars: ["m"] },
   { key: "market", file: "assets/js/flows-market.js", fn: "paintBreadth", vars: ["m"] },
@@ -37,7 +37,8 @@ const SURFACES = [
   { key: "flowalerts", file: "assets/js/flows-unusual-below.js", fn: null, vars: ["alerts"] },
   { key: "flowalerts", file: "assets/js/flows-net.js", fn: "take", vars: ["alerts"] },
   { key: "universe", file: "assets/js/flows-net.js", fn: "loadUniverse", vars: ["u"] },
-  { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },
+  { key: "pulse", file: "assets/js/flows-market-below.js", fn: "paintPulse", vars: ["pulse"] },
+  { key: "pulse", file: "assets/js/flows-market.js", fn: "pulseStampOf", vars: ["pulse"] },
 
   { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },
 
@@ -77,7 +78,7 @@ const SURFACES = [
   { key: "scoretrack", file: "assets/js/flows-board.js", fn: "takeTrack", vars: ["track"] },
 ];
 
-const COMPANION = { "assets/js/flows-overview-below.js": "assets/js/flows-overview.js" };
+const COMPANION = { "assets/js/flows-overview-below.js": "assets/js/flows-overview.js", "assets/js/flows-market-below.js": "assets/js/flows-market.js" };
 
 const OPTIONAL = {
 
@@ -268,7 +269,7 @@ assert.deepEqual(missingReport, [],
      "run that measured eleven of eleven. If this assertion ever fails because `rows` was " +
      "ADDED to placate a renderer, that is the bug returning wearing the fix's clothes");
 
-  const market = readFileSync(join(ROOT, "assets/js/flows-market.js"), "utf8");
+  const market = readFileSync(join(ROOT, "assets/js/flows-market-below.js"), "utf8");
   const paint = market.slice(market.indexOf("function paintSectors("));
 
   const body = paint.slice(0, paint.indexOf("\n  function "))

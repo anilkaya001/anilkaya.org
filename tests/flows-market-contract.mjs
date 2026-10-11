@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { lkMock } from "./lk-mock.mjs";
 import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { revealBelow } from "./lib/below-fold.mjs";
 import { signSession } from "../shared/session.js";
 import { startWorker, SESSION_SECRET, FLOWS_TEST_USER } from "./worker-server.mjs";
 import { marketAggregate, MARKET_NOTES } from "../shared/flows-market.js";
@@ -180,7 +181,7 @@ const MODULES = ["mkTideCard", "mkBreadthCard", "mkTapeCard", "mkEtfSPYCard", "m
   "mkSeasonCard"];
 const FEEDS = ["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason"];
 
-const browser = await chromium.launch();
+const browser = revealBelow(await chromium.launch());
 
 async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
   const page = await browser.newPage(viewport ? { viewport } : undefined);

@@ -1,4 +1,5 @@
 const NOW = () => {
+  const TRIGGERS = ["hmChg", "uaTimelineCard", "mkSectorsCard"];
   const Native = window.IntersectionObserver;
   if (Native && !Native.__belowFold) {
     class Seen extends Native {
@@ -8,7 +9,7 @@ const NOW = () => {
       }
       observe(el) {
         super.observe(el);
-        if (el && (el.id === "hmChg" || el.id === "uaTimelineCard")) Promise.resolve().then(() => this.__callback([{ isIntersecting: true, target: el }], this));
+        if (el && TRIGGERS.includes(el.id)) Promise.resolve().then(() => this.__callback([{ isIntersecting: true, target: el }], this));
       }
     }
     Seen.__belowFold = true;
@@ -23,9 +24,9 @@ const NOW = () => {
 export const BELOW_NOW = NOW;
 
 const attached = () => {
-  if (!document.getElementById("hmChg") && !document.getElementById("uaTimelineCard")) return true;
+  if (!["hmChg", "uaTimelineCard", "mkSectorsCard"].some((id) => document.getElementById(id))) return true;
   const ui = window.FlowsUI || {};
-  const kit = ui.homeKit || ui.flowKit;
+  const kit = ui.homeKit || ui.flowKit || ui.marketKit;
   return Boolean(kit && kit.attached);
 };
 

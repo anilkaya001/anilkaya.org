@@ -20,7 +20,7 @@ const CEILING_KIB = {
   askPage: 133,
   strategyPage: 261,
   trackPage: 180,
-  marketPage: 254,
+  marketPage: 254 - 34,
   unusualPage: 287 + (1613 - 74730) / 1024 - 17,
   eventsPage: 155,
   politicalPage: 103,
@@ -119,6 +119,7 @@ const judge = (row, bases = BASES) => {
 const DEFERRED = {
   tickerPage: { groups: {} },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
+  marketPage: { groups: { "market-below": "/assets/js/flows-market-below.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
@@ -127,7 +128,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
+  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 132,
   unusualPage: 190, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
@@ -142,7 +143,6 @@ const EAGER_KERNEL = [
 ];
 const NO_RELIEF_ROW = "no relief row yet (plan 5.7)";
 const BELOW_FLOOR = {
-  marketPage: "F-08 part c",
   tickerPage: "OD-08",
   sidePage: NO_RELIEF_ROW,
   watchPage: NO_RELIEF_ROW,
