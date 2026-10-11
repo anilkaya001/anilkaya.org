@@ -108,6 +108,7 @@
     "test:flows-variation": "node flows-variation.mjs",
     "test:flows-vol": "node flows-vol-contract.mjs",
     "test:flows-stats": "node flows-stats-contract.mjs",
+    "test:flows-tape-stats": "node flows-tape-stats.mjs",
     "test:flows-positioning": "node flows-positioning-contract.mjs",
     "test:flows-strip": "node flows-strip.mjs",
     "test:flows-strategy": "node flows-strategy.mjs",
