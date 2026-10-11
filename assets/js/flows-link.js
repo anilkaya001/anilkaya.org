@@ -29,7 +29,7 @@
     time: iso,
   };
   function pick(kind, value, source) {
-    var v = own(KEY, kind) ? CHECK[kind](value) : null;
+    var v = typeof kind === "string" && own(KEY, kind) ? CHECK[kind](value) : null;
     if (v === null) return null;
     return { kind: kind, value: v, source: typeof source === "string" ? source.replace(/[^\w .\-]/g, "").slice(0, 24) : null };
   }
@@ -133,7 +133,8 @@
   function writeHash() {
     var next = hashOf();
     var now = location.hash.replace(/^#/, "");
-    if (next === (/^l=/.test(now) ? now : "")) return;
+    if (now && !/^l=/.test(now)) return;
+    if (next === now) return;
     try { history.replaceState(history.state, "", location.pathname + location.search + (next ? "#" + next : "")); } catch (e) { return; }
   }
 
@@ -282,7 +283,10 @@
   }
 
   function popout(path) {
-    if (typeof path !== "string" || path.charAt(0) !== "/" || path.charAt(1) === "/" || path.length > 200) return null;
+    if (typeof path !== "string" || path.length > 200 || /[\\\u0000-\u001f\u007f-\u009f]/.test(path) || path.charAt(0) !== "/" || path.charAt(1) === "/") return null;
+    var url;
+    try { url = new URL(path, location.origin); } catch (e) { return null; }
+    if (url.origin !== location.origin) return null;
     if (!group) {
       var b = new Uint8Array(8);
       crypto.getRandomValues(b);
@@ -290,11 +294,11 @@
     }
     open();
     writeHash();
-    window.open(path + "#" + hashOf(), "_blank", "noopener");
+    window.open(url.pathname + url.search + "#" + hashOf(), "_blank", "noopener");
     return group;
   }
 
-  window.addEventListener("hashchange", function () { take(parse(location.hash)); });
+  window.addEventListener("hashchange", function () { if (/^#l=/.test(location.hash)) take(parse(location.hash)); });
   take(parse(location.hash));
 
   var api = { join: join, emit: emit, cursor: cursor, context: context, describe: describe, popout: popout };

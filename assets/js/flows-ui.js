@@ -1211,15 +1211,20 @@
 
   const link = (() => {
     const q = [], me = document.currentScript && document.currentScript.src;
-    let impl, asked;
+    let impl, asked, ready;
+    const body = new Promise((r) => { ready = r; });
+    const kick = () => {
+      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
+    };
     const run = (f, d) => {
       if (impl) return f();
-      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
+      kick();
       if (q.length < 64) q.push(f);
       return d;
     };
     const api = {
-      attach(i) { impl = i; delete api.attach; q.splice(0).forEach((f) => f()); },
+      attach(i) { impl = i; delete api.attach; ready(); q.splice(0).forEach((f) => f()); },
+      ready() { if (!impl) kick(); return body; },
       join(o, c) {
         let r, g;
         return run(() => { r = impl.join(o, c); if (g) r.leave(); return r; }, 0) || { leave() { g = 1; if (r) r.leave(); } };

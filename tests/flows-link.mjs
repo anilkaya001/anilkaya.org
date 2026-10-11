@@ -56,7 +56,7 @@ try {
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(URL0);
 
-  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["attach", "context", "cursor", "describe", "emit", "join", "popout"],
+  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["attach", "context", "cursor", "describe", "emit", "join", "popout", "ready"],
     "FlowsUI.link exists from the first byte of flows-ui.js as a queue stub, with the body not yet loaded");
   eq(await page.evaluate(() => performance.getEntriesByType("resource").some((r) => /flows-link\.js/.test(r.name))), false,
     "and the body is not fetched by a page that never joins");
@@ -69,7 +69,7 @@ try {
   });
   await attached(page);
   ok(await page.evaluate(() => performance.getEntriesByType("resource").some((r) => /flows-link\.js\?v=\d+/.test(r.name))), "the first join loads the body from beside flows-ui.js with the same ?v=");
-  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["context", "cursor", "describe", "emit", "join", "popout"], "and attach removes itself once the body is in");
+  eq(await page.evaluate(() => Object.keys(window.FlowsUI.link).sort()), ["context", "cursor", "describe", "emit", "join", "popout", "ready"], "and attach removes itself once the body is in");
   eq(await lit(page, ["table", "chart", "b1", "solo"]), { table: null, chart: null, b1: null, solo: null }, "a join with nothing selected lights nothing");
 
   const storage = () => page.evaluate(() => JSON.stringify({ l: Object.keys(localStorage), s: Object.keys(sessionStorage), c: document.cookie }));
@@ -204,7 +204,7 @@ try {
       const f = window.__mk("b2", { channel: "B" });
       await new Promise((r) => { const t = setInterval(() => { if (typeof window.FlowsUI.link.attach === "undefined") { clearInterval(t); r(); } }, 5); });
       const link = window.FlowsUI.link;
-      const refused = [["constructor", "x"], ["__proto__", "x"], ["ticker", "<img src=x>"], ["ticker", "toolongticker1"], ["ticker", 5], ["strike", -1], ["strike", "1e9"], ["expiry", "2026-13-99x"], ["time", "not a time"], ["side", "Call"], ["sector", "a;b"]]
+      const refused = [["constructor", "x"], ["__proto__", "x"], ["ticker", "<img src=x>"], ["ticker", "toolongticker1"], ["ticker", 5], ["strike", -1], ["strike", "1e9"], ["expiry", "2026-13-99x"], ["time", "not a time"], ["side", "Call"], ["sector", "a;b"], [["ticker"], "NVDA"]]
         .map(([k, v]) => link.emit("solo", { kind: k, value: v, source: "x" }));
       await window.__frame();
       const afterBad = [a, b, c].map((r) => r.calls.length);
@@ -227,7 +227,7 @@ try {
       await window.__frame();
       return { refused, afterBad, kinds, afterKnown, afterEvent, live, bogus, left: b.calls.length };
     });
-    eq(out.refused, new Array(11).fill(false), "AN EMISSION THAT IS NOT A KIND WITH A VALID VALUE IS REFUSED, prototype names, markup, separators and bad numbers included");
+    eq(out.refused, new Array(12).fill(false), "AN EMISSION THAT IS NOT A KIND WITH A VALID VALUE IS REFUSED, prototype names, a kind that is an array, markup, separators and bad numbers included");
     eq(out.afterBad, [0, 0, 0], "and reaches no one");
     eq(out.kinds, [1, 0, 1, 0], "a member that lists its kinds hears only those, and a member of another channel nothing");
     eq(out.afterKnown.c, ["ticker", "time"], "the time cursor reaches every member that takes time, but not the one that set it");
@@ -239,6 +239,49 @@ try {
     eq([out.live.cur, out.live.hash], [null, "#l=A:t=AAPL"], "and the hash drops its tc");
     eq(out.bogus, [null, null], "a cursor with a bad time or an unknown clock changes nothing");
     eq(out.left, 0, "a member that has left is not called again");
+    await p.close();
+  }
+
+  {
+    const p = await context.newPage();
+    const errs = [];
+    p.on("pageerror", (e) => errs.push(String(e)));
+    await p.goto(URL0 + "#l=A:t=NVDA");
+    await p.evaluate(() => { window.__mk("table", { channel: "A" }); window.__mk("chart", { channel: "A" }); });
+    await attached(p);
+    const nav = (h) => p.evaluate((h) => new Promise((r) => { addEventListener("hashchange", () => setTimeout(r, 30), { once: true }); location.hash = h; }), h);
+    const sel = () => p.evaluate(() => window.FlowsUI.link.describe().selection);
+    for (const h of ["#panel-gamma", "#flowsMain", "#ftg-x", "#m-1"]) {
+      await nav(h);
+      eq(await sel(), { A: "t=NVDA" }, `THE SELECTION SURVIVES A JUMP TO ${h}: a hash that is not the link's is not a clear`);
+      await p.evaluate(async () => { window.FlowsUI.link.emit("chart", { kind: "ticker", value: "AMD", source: "chart" }); await window.__frame(); window.FlowsUI.link.emit("chart", { kind: "ticker", value: "NVDA", source: "chart" }); await window.__frame(); });
+      eq(await p.evaluate(() => location.hash), h, `and an emission does not overwrite the page's own ${h}`);
+    }
+    const calls = await p.evaluate(() => window.__v.table.calls.length);
+    await nav("#l=A:t=TSLA");
+    eq(await p.evaluate(() => [location.hash, window.__v.table.calls.length > 0, document.getElementById("table").dataset.lit]), ["#l=A:t=TSLA", true, "TSLA"], "while a link hash arriving later is taken as before");
+    await nav("#l=");
+    eq(await sel(), {}, "and a link hash that carries no selection still clears it");
+    ok(calls >= 0 && errs.length === 0, `nothing threw (${errs.join("; ")})`);
+    await p.close();
+  }
+
+  {
+    const p = await context.newPage();
+    await p.goto(URL0);
+    const r = await p.evaluate(async () => {
+      const L = window.FlowsUI.link;
+      const early = typeof L.popout("/flows/fixture/");
+      const pr = L.ready();
+      const same = pr === L.ready();
+      await Promise.race([pr, new Promise((x) => setTimeout(x, 6000))]);
+      const attachedNow = typeof L.attach === "undefined";
+      window.__opened.length = 0;
+      const tok = L.popout("/flows/fixture/?a=1");
+      return { early, same, attachedNow, tok: typeof tok, opened: window.__opened.slice() };
+    });
+    eq([r.early, r.same, r.attachedNow, r.tok], ["boolean", true, true, "string"], "READY LOADS THE BODY WITHOUT A JOIN and settles once it is attached, so a pop-out control can be armed before it can be clicked");
+    ok(r.opened.length === 1 && /^\/flows\/fixture\/\?a=1#l=w=[0-9a-f]{16}$/.test(r.opened[0]), `and a pop-out after it opens synchronously, path and query kept (${r.opened[0]})`);
     await p.close();
   }
 
@@ -255,6 +298,10 @@ try {
     await attached(A);
     eq(await A.evaluate(() => [window.FlowsUI.link.popout("https://evil.example/x"), window.FlowsUI.link.popout("//evil.example/x"), window.FlowsUI.link.popout("javascript:alert(1)"), window.FlowsUI.link.popout("x".repeat(300)), window.__opened.length]), [null, null, null, null, 0],
       "popout opens only a path on this origin: an absolute URL, a protocol-relative one, a script URL or an enormous one open nothing");
+    const sneaky = ["/\\evil.example/x", "/\t/evil.example/x", "/\n/evil.example", "/\r/evil.example", "/\u0000/evil.example", "/\u0085/x", "/ok\\..\\x", "\\\\evil.example/x", "", 5, null, ["/a"]];
+    const verdicts = await A.evaluate((list) => ({ got: list.map((p) => window.FlowsUI.link.popout(p)), opened: window.__opened.length }), sneaky);
+    eq(verdicts, { got: new Array(12).fill(null), opened: 0 },
+      "AND A BACKSLASH, TAB, NEWLINE, RETURN, NUL OR C1 CONTROL IN THE PATH, which the URL parser turns into another host, opens nothing");
     await A.evaluate(async () => { window.FlowsUI.link.emit("table", { kind: "ticker", value: "NVDA", source: "table" }); await window.__frame(); });
     const token = await A.evaluate(() => window.FlowsUI.link.popout("/flows/fixture/"));
     ok(/^[0-9a-f]{16}$/.test(token), `popout makes a 16 hex digit window-group token (${token})`);
@@ -322,6 +369,7 @@ try {
       send({ v: 1, id: "x", s: { A: { kind: "ticker", value: "<b>x</b>", source: "x" } } });
       send({ v: 2, id: "x", s: { A: { kind: "ticker", value: "FAKE", source: "x" } } });
       send({ v: 1, id: "x", s: { A: { kind: "constructor", value: "FAKE" } } });
+      send({ v: 1, id: "x", s: { A: { kind: ["ticker"], value: "FAKE", source: "x" } } });
       send({ v: 1, id: "x", s: { A: { kind: "ticker", value: "FAKE", source: "y".repeat(900) } } });
       send({ v: 1, id: "x", s: "FAKE" });
       send({ v: 1, id: "x", s: {}, c: { tau: "nope", clock: "known" } });
@@ -330,7 +378,7 @@ try {
       send("FAKE");
     }, token);
     await A.waitForTimeout(300);
-    eq(await lit(A, ["table", "chart"]), before, "MESSAGES THAT ARE NOT A VALID SELECTION (bad kind, bad value, wrong version, oversize, a cursor with a bad time or clock, junk) change nothing");
+    eq(await lit(A, ["table", "chart"]), before, "MESSAGES THAT ARE NOT A VALID SELECTION (bad kind, an array kind, bad value, wrong version, oversize, a cursor with a bad time or clock, junk) change nothing");
     await C.evaluate((tok) => {
       new BroadcastChannel("flows-link:" + tok).postMessage({ v: 1, id: "x", s: { A: { kind: "ticker", value: "ok1", source: "peer" } } });
     }, token);
