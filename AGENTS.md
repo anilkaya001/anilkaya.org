@@ -352,6 +352,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `scripts/map/audit.mjs` | The reference audit: the share of `path:line` references in the listed documents (default `AGENTS.md`, `DEPLOY.md`, `README.md` and the frozen `docs/map-2026-10-05.md`) whose file is missing or whose line is past the end, printed, or written to the step summary when `GITHUB_STEP_SUMMARY` is set. A report, not a gate. |
 | `assets/js/flows-skyline.js`, `tests/flows-skyline-render.mjs` | The move skyline (F-95, placement 3), owner-only on the Market page. `FLOWS_SCENES` (`wrangler.toml` [vars]) is `owner` or off: the Worker passes `scenes` to `marketPage` only when the switch is `owner` and the member is an owner (`FLOWS_RT_USERS`), and the page then emits the `mkSkylineCard` module and the `skyline` defer group, so a member's HTML carries neither. `flows-market.js` hands the universe it already reads to `FlowsUI.skyline.mount` when the module is within 200 px of the viewport; no new request or payload. `model(u)` is pure: `IV-days = chg / (iv30p / sqrt(252))` per priced name (the IV-days lens of `shared/flows-moves0.js`), prisms for the names at or beyond 2 IV-days, at most 40, a name with earnings inside 21 sessions marked as an event. Height is the move in IV-days, not a probability: no tail p is computed, so the audited-p axis, the selection plane and the callout list of the plan row are not built, and the module says no error rate is measured. Direction is on the colour channel (the `--up-mark` and `--down-mark` faces) and in a triangle and sign in the table; an event prism is paler with a dashed top. Canvas 2D, a 2:1 dimetric projection, no label on any prism; a 360 px canvas from 640 px of module width, the table of the names stands in below that. `tests/flows-skyline-render.mjs` (Chromium, `page.route`, no server) holds heights to the absolute IV-days, the drawn height to height x unit, direction in the pixel colour and the table, the 40 cap, the empty and unpublished states, no overflow at 320, 390 and 1440, and six planted wrong builds. |
 | `assets/js/flows-relations.js`, `tests/flows-relations-render.mjs` | The Relations view (F-98, placement 6), owner-only beside the move skyline on the Market page under the same `FLOWS_SCENES` switch. Names sit on a ring by sector (the nightly universe's `sec`, largest by market cap first, at most 60), with a table of the names by sector as the alternative. `mount(host, universe, graph)` draws an edge only if it passed its test: a layer is `T` (moved together beyond the market) or `C` (residual partial correlation), an edge needs `passed === true`, a finite bootstrap stability of 0.5 or more and two names on the ring, and is drawn at one of three opacity steps (0.9 and up, 0.7 to 0.9, 0.5 to 0.7) with its stability in a table row; one layer is shown at a time and the draw lists are never merged; any other layer id, the flow layer included, is ignored. No relations payload exists on main (the statistics of F-80 are not built), so `flows-market.js` passes `null` and the module shows the ring and the text `No tested links yet`; a graph whose edges all fail says `No stable links this week`. Communities and the live co-occurrence light are not built. `tests/flows-relations-render.mjs` (Chromium, `page.route`, no server) holds the draw lists and opacity steps to a hand-worked graph, the pixel at each curve's midpoint, the layers apart, the empty states as text, no overflow at 320, 390 and 1440, and six planted wrong builds. |
+| `assets/js/flows-moves.js`, `assets/css/flows-moves.css`, `tests/flows-moves-render.mjs` | The Moves page (`/flows/moves/`, F-57 slice): the nightly universe read `universe?cols=t,sec,chg,iv30p,ed` ranked in IV-days (`chg / (iv30p / sqrt(252))`, the one page-side division, with the lens of `shared/flows-moves0.js` as its oracle), Risers and Fallers top 15 each, names with earnings inside 21 sessions ranked apart, a name with no usable prior-close IV absent, and beside each row a COUNT of today's names as far out (`k of N names this far out today`), never a probability or a `1 in N`, because `shared/flows-targets.js` `rarityText` needs a per-name reference scale and a frequency the universe payload does not carry. The live roster (`FlowsUI.rt` `px` strips, fields `chg` and `iv30p`) replaces the population only when its session is newer than the nightly's; the order is held while the pointer or focus is in a list. No model, no vendor call, no new payload, no new global. Gated by `FLOWS_MOVES` in `wrangler.toml` (`owner` default, `on`, `off`; anything else fails closed for a member, and a refused request is the unknown-page 404); the rail lists it only on its own page while it is owner-only. The suite is Chromium with `page.route` stubs and no server: the four gate modes, the static text against the forbidden words, order and counts against an independent computation at 1440, 390 and 320 px, the live replacement, the held order and the failed and pending reads. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1398,7 +1399,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 127 suites: 86 that need only Node (N), 24 that also
+`tests/suites/` registers 128 suites: 87 that need only Node (N), 24 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1415,20 +1416,20 @@ flows-copy-lint           flows-d1-budget           flows-defer-render        fl
 flows-dossier             flows-dossier-reads       flows-engine-budget       flows-fact-ids
 flows-flow-below-render   flows-freshness           flows-garch               flows-home-below-render
 flows-home-composition    flows-ledger              flows-legs                flows-live
-flows-market-below-render flows-mint                flows-neuron              flows-neuron-screen
-flows-overlay             flows-payload-shape       flows-permits             flows-plan-facts
-flows-political           flows-positioning         flows-probe               flows-public
-flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
-flows-readers             flows-reading             flows-reading-worker      flows-reads
-flows-record              flows-relations-render    flows-rt                  flows-scores
-flows-sign                flows-skyline-render      flows-starts              flows-stats
-flows-stock               flows-tape-stats          flows-targets             flows-truth
-flows-universe            flows-variation           flows-vendor-budget       flows-verdict
-flows-vol                 flows-warnings            flows-weight              flows-ws-probe
-lab-write                 launch-readiness          markets                   mastery
-pipeline                  route-matrix              server-ai                 server-desk
-server-ingest             server-kernel             server-log                server-pages
-server-router             staging
+flows-market-below-render flows-mint                flows-moves-render        flows-neuron
+flows-neuron-screen       flows-overlay             flows-payload-shape       flows-permits
+flows-plan-facts          flows-political           flows-positioning         flows-probe
+flows-public              flows-pulse               flows-quant               flows-quant-audit
+flows-quant-card          flows-readers             flows-reading             flows-reading-worker
+flows-reads               flows-record              flows-relations-render    flows-rt
+flows-scores              flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-truth               flows-universe            flows-variation           flows-vendor-budget
+flows-verdict             flows-vol                 flows-warnings            flows-weight
+flows-ws-probe            lab-write                 launch-readiness          markets
+mastery                   pipeline                  route-matrix              server-ai
+server-desk               server-ingest             server-kernel             server-log
+server-pages              server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
