@@ -101,6 +101,7 @@
     "test:flows-quant": "node flows-quant.mjs",
     "test:flows-quant-card": "node flows-quant-card.mjs",
     "test:flows-quant-audit": "node flows-quant-audit.mjs",
+    "test:flows-truth": "node flows-truth.mjs",
     "test:flows-neuron": "node flows-neuron.mjs",
     "test:flows-variation": "node flows-variation.mjs",
     "test:flows-vol": "node flows-vol-contract.mjs",
