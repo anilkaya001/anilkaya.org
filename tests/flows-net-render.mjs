@@ -356,7 +356,7 @@ try {
 
     const pill = await page.evaluate(() => { const b = document.querySelector("#uaNetCard .fn-fresh"); return { cls: b.className, state: b.dataset.state, text: b.textContent, pop: b.getAttribute("aria-haspopup") }; });
     ok(/ui-fresh/.test(pill.cls) && ["live", "fresh", "closed", "stale", "pending"].includes(pill.state), `the freshness pill is the platform's own (${JSON.stringify(pill)})`);
-    ok(/2:41 PM ET/.test(pill.text), "and it states when the record was read, in Eastern time");
+    ok(/21:41 TRT/.test(pill.text), "and it states when the record was read, in Türkiye time");
     await page.click("#uaNetCard .fn-fresh");
     eq(await page.evaluate(() => document.getElementById("fxPopT").textContent), "Freshness", "and opens the page's freshness details");
     await page.keyboard.press("Escape");

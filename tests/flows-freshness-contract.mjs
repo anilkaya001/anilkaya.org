@@ -5,6 +5,7 @@ import { easternClock, isRefreshWindow, REFRESH_CADENCE_MINUTES, easternDay, las
   isTradingDay, isHoliday, isEarlyCloseDay, prevTradingDay, nextTradingDay, priorTradingDays, phaseAt, expectedNightlySession,
   freshnessState, sessionOpen, easternInstant, closeMinutes, PHASE_MINUTES, FRESH_CLASSES, classOf }
   from "../shared/flows-freshness.js";
+import * as TRT from "../shared/flows-time.js";
 import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/flows-quant-time.js";
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
@@ -369,6 +370,73 @@ const NYSE_PUBLISHED = Object.freeze({
     return { ctx, UI: ctx.window.FlowsUI, asked, release: async () => { if (release) release(); for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); } };
   };
 
+  {
+    const F = pill("2026-10-12T12:00:00Z", null).UI.F;
+    const inst = [Date.UTC(2026, 9, 11, 22, 30), Date.UTC(2026, 0, 1, 20, 59, 59), "2026-03-08T07:30:00Z", "2026-11-01T05:59:59Z",
+      "2026-10-11T22:30:00+02:00", "2026-10-11 22:30:00.123456Z", "2026-10-11T22:30Z", new Date("2027-03-14T07:00:00Z"), 1767225600000,
+      "2026-10-11", "2026-10-11T10:00:00", "2026-02-30T10:00:00Z", "2026-10-11T25:00:00Z", "0050-10-11T10:00:00Z", "junk", "", null, undefined,
+      NaN, Infinity, -1, 0, 1, 8.64e15, 1e20, new Date(NaN), {}, [], true, "2026-10-11T10:00:00+25:00", "2026-10-11T10:00:00-0530"];
+    const days = ["2026-10-12", "2026-11-02", "2026-02-30", "2026-10", "junk", null, "2026-10-12T00:00:00Z", "0050-10-12"];
+    for (let h = 0; h < 24 * 800; h += 5) inst.push(Date.UTC(2026, 0, 1) + h * 3600000 + 1234567);
+    for (const v of inst) {
+      const c = TRT.clock(v);
+      eq(F.time(v), c === null ? F.time(NaN) : c, "F.time equals the oracle clock for " + String(v));
+      eq(F.time(v, false), TRT.clock(v, false) === null ? F.time(NaN) : TRT.clock(v, false), "and without the zone");
+      eq(F.stamp(v), TRT.stamp(v), "F.stamp equals the oracle for " + String(v));
+      eq(F.trtDay(v), TRT.day(v), "F.trtDay equals the oracle for " + String(v));
+      for (const n of [Date.UTC(2026, 9, 11, 23, 0), "2026-10-11T10:00:00Z", "junk", null])
+        eq(F.when(v, n), TRT.when(v, n), "F.when equals the oracle for " + String(v) + " against " + String(n));
+      for (const d of days) eq(F.axis(v, d), TRT.axisMinutes(v, d), "F.axis equals the oracle for " + String(v) + " on " + String(d));
+    }
+    for (const m of [0, 1, 59, 60, 90, 1439, 1440, 1500, 2879, -1, -60, 12.7, NaN, Infinity, "5", null, undefined])
+      eq(F.tick(m), TRT.tick(m), "F.tick equals the oracle for " + String(m));
+    let n = 0;
+    for (let d = "2026-01-01"; d < "2028-01-01"; d = new Date(Date.parse(d + "T12:00:00Z") + 864e5).toISOString().slice(0, 10)) {
+      const dow = new Date(d + "T12:00:00Z").getUTCDay();
+      if (dow === 0 || dow === 6) continue;
+      const o = TRT.axisMinutes(sessionOpen(d), d);
+      eq(F.open(d), o, "F.open equals the oracle axis of the exchange open on " + d);
+      n++;
+    }
+    ok(n > 480, "the open was swept over every weekday of two years");
+    eq(F.open("2026-10-12"), 990, "the summer open is minute 990");
+    eq(F.open("2026-11-02"), 1050, "the winter open is minute 1050");
+    eq(F.open("2026-02-30"), null, "an impossible day has no open");
+    eq(F.time("2026-10-11"), F.time(NaN), "a date-only instant prints the dash");
+    eq(F.time("2026-10-11T10:00:00"), F.time(NaN), "and so does a zone-less one");
+    eq(F.time("2026-10-12T13:31:00Z"), "16:31 TRT", "13:31Z is 16:31 TRT");
+    eq(F.axis("2026-11-03T05:00:00Z", "2026-11-02") > F.axis("2026-11-02T22:00:00Z", "2026-11-02"), true,
+      "the winter after-hours axis keeps increasing across TRT midnight");
+    ok(!/ ET\b/.test(F.time(Date.now())), "no ET label is printed");
+  }
+  {
+    const live = { expected: "2026-10-12", phase: { phase: "rth", endsAt: "2026-10-12T20:00:00.000Z" } };
+    const p = pill("2026-10-12T14:00:00Z", live);
+    p.ctx.fetch("/api/flows/now?k=market");
+    await p.release();
+    p.UI.freshness({ sessionDate: "2026-10-12", source: "board", generatedAt: "2026-10-12T12:30:00Z", readAt: "2026-10-11T18:00:00Z" });
+    const d = p.UI.freshness.details();
+    const f = Object.fromEntries(d.facts);
+    eq(f.Market, "Open \u00b7 closes 23:00 TRT", "the Market fact says when the regular session closes in TRT");
+    eq(f.Built, "15:30 TRT", "a Built time on the viewer's TRT day drops the date");
+    eq(f["Price read"], "2026-10-11 21:00 TRT", "and another day keeps it");
+    ok(d.notes.some((x) => /T\u00fcrkiye time \(TRT, UTC\+3, no daylight saving\)\. Session dates are US exchange dates\./.test(x)), "the popover carries the TRT note");
+    ok(/today\u2019s session/.test(d.lead), "a session of the viewer's TRT day is today's");
+    const pre = pill("2026-10-12T10:00:00Z", { expected: "2026-10-09", phase: { phase: "pre", endsAt: "2026-10-12T13:30:00.000Z" } });
+    pre.ctx.fetch("/api/flows/now?k=market");
+    await pre.release();
+    eq(Object.fromEntries(pre.UI.freshness.details().facts).Market, "Pre-market \u00b7 opens 16:30 TRT", "the pre-market fact");
+    const post = pill("2026-11-02T22:00:00Z", { expected: "2026-11-02", phase: { phase: "post", endsAt: "2026-11-03T01:00:00.000Z" } });
+    post.ctx.fetch("/api/flows/now?k=market");
+    await post.release();
+    eq(Object.fromEntries(post.UI.freshness.details().facts).Market, "After hours \u00b7 ends 04:00 TRT", "the after-hours fact, in winter");
+    const late = pill("2026-10-12T22:30:00Z", { expected: "2026-10-12", phase: { phase: "post", endsAt: "2026-10-13T01:00:00.000Z" } });
+    late.ctx.fetch("/api/flows/now?k=market");
+    await late.release();
+    late.UI.freshness({ sessionDate: "2026-10-12", source: "board" });
+    ok(!/today\u2019s session/.test(late.UI.freshness.details().lead), "at 01:30 TRT on the 13th the 12th's session is not today's");
+    ok(/Oct 12/.test(late.UI.freshness.details().lead), "it is named by its US date");
+  }
   {
     const p = pill("2026-09-23T20:30:00-04:00", null);
     const m = p.UI.freshness.market();

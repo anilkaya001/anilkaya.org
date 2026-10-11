@@ -1156,8 +1156,8 @@ try {
     await tzPage.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
     const tzSaid = await readOf(tzPage);
 
-    ok(/read (\d{4}-\d{2}-\d{2} )?10:28 UTC/.test(tzSaid),
-       `a reader in another zone sees the same instant under the same label, UTC, the one clock ` +
+    ok(/read (\d{4}-\d{2}-\d{2} )?13:28 TRT/.test(tzSaid),
+       `a reader in another zone sees the same instant under the same label, TRT, the one clock ` +
        `every stamp on the site now keeps (${tzSaid})`);
     ok(!/06:28/.test(tzSaid), `never silently converted to the reader's own zone (${tzSaid})`);
     await tzCtx.close();

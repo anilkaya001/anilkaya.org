@@ -1131,7 +1131,7 @@ try {
     };
     const prints = await rowsOf("Prints");
     eq(prints.length, dp.rows.filter((r) => typeof r.prem === "number").length, "the tape draws one row per published priced print");
-    ok(prints.every((r) => /^\d{1,2}:\d{2} [AP]M$/.test(r.time) || r.time === "—"), `every print carries its time off the tape's own timestamp (${prints[0] && prints[0].time})`);
+    ok(prints.every((r) => /^\d{2}:\d{2}$/.test(r.time) || r.time === "—"), `every print carries its time off the tape's own timestamp (${prints[0] && prints[0].time})`);
     eq(prints.filter((r) => r.tags.includes("cancelled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the cancelled prints carry the tag, and the tag says what the flag says");
     const iBoth = dp.rows.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
     if (iBoth >= 0) ok(/^\d+\.\d{2} \/ \d+\.\d{2}$/.test(prints[iBoth].quote), `a quoted print carries bid and ask side by side (${prints[iBoth].quote})`);
@@ -2243,9 +2243,9 @@ try {
     {
       const { page } = await open(tapeOf(session, "20:00"), verdict("closed", "session-final"));
       const got = await flow(page);
-      ok(got && /to 4:00 PM/.test(got.text) && !/\blive\b/.test(got.text),
+      ok(got && /to 23:00 TRT/.test(got.text) && !/\blive\b/.test(got.text),
         `A TAPE THAT HAS CLOSED IS NOT 'LIVE': it says how far it runs (${got && got.text.slice(0, 120)})`);
-      ok(got && /Drawn from this session's tape, read to 4:00 PM/.test(got.info) && !/live tape/.test(got.info),
+      ok(got && /Drawn from this session's tape, read to 23:00 TRT/.test(got.info) && !/live tape/.test(got.info),
         `and the disclosure still says the drawn path is the tape's, with how far it was read, instead of going silent once the tape is final (${got && got.info.slice(0, 200)})`);
       await page.close();
     }
@@ -2273,14 +2273,14 @@ try {
       const tape = (n) => { calls.push(n); return n === 1 ? { body: tapeOf(session, "14:58"), headers: verdict("stale", "missed-close") } : { body: tapeOf(session, "20:00", at + 5000), headers: verdict("closed", "session-final") }; };
       const { page, errors } = await open(tape, undefined);
       const first = await flow(page);
-      ok(first && /to 10:58 AM/.test(first.text) && !/\blive\b/.test(first.text),
-        `A TAPE THE SERVER CALLS STALE IS NEVER LABELLED LIVE: a complete row read at 10:58 ET and shown at 19:00 ET said 'live tape' (${first && first.text.slice(0, 120)})`);
+      ok(first && /to 17:58 TRT/.test(first.text) && !/\blive\b/.test(first.text),
+        `A TAPE THE SERVER CALLS STALE IS NEVER LABELLED LIVE: a complete row read at 17:58 TRT and shown at 02:00 TRT said 'live tape' (${first && first.text.slice(0, 120)})`);
       ok(first && !/live tape/.test(first.info), "and its disclosure does not claim to be the live tape");
       eq(page._requested.filter((u) => /^tape/.test(u)).length, 1, "it is asked for once on load");
-      await page.waitForFunction(() => /to 4:00 PM/.test((document.getElementById("m-flow") || {}).innerText || ""), null, { timeout: 12000 }).catch(() => {});
+      await page.waitForFunction(() => /to 23:00 TRT/.test((document.getElementById("m-flow") || {}).innerText || ""), null, { timeout: 12000 }).catch(() => {});
       const healed = await flow(page);
       eq(page._requested.filter((u) => /^tape/.test(u)).length, 2, "A STALE ANSWER IS ASKED AGAIN ONCE THE SERVER HAS HAD TIME TO REFRESH (about 5 s), with no reload and outside the session too, where no beat re-reads the tape");
-      ok(healed && /to 4:00 PM/.test(healed.text), `and the module redraws from the refreshed tape (${healed && healed.text.slice(0, 100)})`);
+      ok(healed && /to 23:00 TRT/.test(healed.text), `and the module redraws from the refreshed tape (${healed && healed.text.slice(0, 100)})`);
       eq(page._requested.filter((u) => /^tape/.test(u)).length, 2, "which is final, so it is not asked for a third time");
       eq(errors.length, 0, `the retry throws nothing (${errors.join("; ")})`);
       await page.close();
@@ -2363,7 +2363,7 @@ try {
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, card, { tape, headers: { tape: verdict("stale", "behind", back) }, now: { ...now, expected: card.sessionDate }, at });
       const got = await flow(page);
-      ok(got && !/live tape/.test(got.text) && !/live tape/.test(got.info) && !/to 4:00 PM/.test(got.text),
+      ok(got && !/live tape/.test(got.text) && !/live tape/.test(got.info) && !/to 23:00 TRT/.test(got.text),
         `a full card falls back to its own session path rather than the old tape (${got && got.text.slice(0, 140)})`);
       eq(errors.length, 0, "without throwing");
       await page.close();

@@ -147,7 +147,7 @@ try {
   ok(b.chips.every((c) => c.tag === "BUTTON" && c.type === "button"), "each a button that submits nothing");
   const price = b.chips.find((c) => c.id === "price.last");
   ok(price.text.includes("Last price") && price.text.includes("$127.40"), "a chip shows the label and the value with its unit: " + price.text);
-  ok(/as of .* ET, \d+ minutes before the dossier was read/.test(price.aria) && price.aria.includes("Last price: $127.40"), "its accessible name carries the age: " + price.aria);
+  ok(/as of .* TRT, \d+ minutes before the dossier was read/.test(price.aria) && price.aria.includes("Last price: $127.40"), "its accessible name carries the age: " + price.aria);
   ok(/before the dossier was read/.test(price.title), "and its title does too");
   const desc = b.chips.find((c) => c.id === "identity.description");
   ok(desc.quoted && desc.aria.includes("quoted third-party text") && desc.text.includes(String.fromCharCode(0x201c)), "a quotation is marked as third-party text and drawn in quotes");
@@ -169,7 +169,7 @@ try {
   const shown = await page.locator("#ftVerdict .ft-read .ft-read-age").first().textContent();
   ok(/no source time/.test(shown), "the age text of a vendor profile that carries no time: " + shown);
   await page.locator("#ftVerdict .ft-read button.ft-read-chip[data-id='price.last']").focus();
-  ok(/as of .* ET/.test(await page.locator("#ftVerdict .ft-read .ft-read-age").first().textContent()), "and of a priced fact, its source time");
+  ok(/as of .* TRT/.test(await page.locator("#ftVerdict .ft-read .ft-read-age").first().textContent()), "and of a priced fact, its source time");
   await page.keyboard.press("Escape");
   eq(await page.locator("#ftVerdict .ft-read .ft-read-age").count(), 0, "Escape hides it");
   await page.keyboard.press("Tab");
