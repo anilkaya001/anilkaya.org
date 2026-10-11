@@ -101,7 +101,12 @@ try {
     eq(grid[1][7], "-0.4", "a negative number keeps its ASCII minus: it is a number, not a string a spreadsheet could read as a formula");
     eq(grid[1][0], "1", "rank is numeric");
     ok(/^Source: .*; as of 2026-09-28$/.test(grid[5][0]) && grid[5].slice(1).every((c) => c === ""), `the freshness stamp is the first footer row (${grid[5][0]})`);
-    ok(/^Exported \d{4}-\d{2}-\d{2}T.* from anilkaya\.org$/.test(grid[6][0]), "and the export instant the second");
+    ok(/^Exported \d{4}-\d{2}-\d{2} \d{2}:\d{2} TRT \(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\) from anilkaya\.org$/.test(grid[6][0]), `and the export instant the second, in Turkiye time with the UTC instant in brackets (${grid[6][0]})`);
+    await page.clock.setFixedTime(new Date("2026-10-11T22:30:00Z"));
+    const [late] = await Promise.all([page.waitForEvent("download"), page.evaluate(() => window.FlowsUI.exportCsv({ name: "x", source: "s", asOf: null, rows: [[1]], cols: [{ label: "v", get: (r) => r[0] }] }))]);
+    eq(late.suggestedFilename(), "x-2026-10-12.csv", "an export with no as-of day is named for the Turkiye date, which at 01:30 TRT is already the next day");
+    const lateGrid = parseCsv(fs.readFileSync(await late.path(), "utf8").slice(1));
+    eq(lateGrid[lateGrid.length - 1][0], "Exported 2026-10-12 01:30 TRT (2026-10-11T22:30:00Z) from anilkaya.org", "and its footer prints the Turkiye instant with the UTC one in brackets");
     ok(!/\b(px|chg|Price)\b/.test(grid[0].join(",")), "the vendor quote (last price, day change) is not among the exported columns");
 
     const cells = ["=1+1", "+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd", "\u22123.2%", "plain", "a,b", 'say "hi"', "two\nlines", "", null, undefined, NaN, Infinity, -0.5, 0, 1e21, true];

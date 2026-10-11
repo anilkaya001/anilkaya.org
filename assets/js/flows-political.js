@@ -447,7 +447,7 @@
       freshCount !== null && p.latestFiled ? freshCount + " of them on " + p.latestFiled + ", the newest filing date here" : "",
       how,
       isNum(p.unusable) ? isNum(p.unusable) + " carried no filer or name and were dropped" : "",
-      Number.isFinite(read) ? "read " + new Date(read).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "",
+      F.stamp(read) ? "read " + F.stamp(read) : "",
     ].filter(Boolean).join(" · ");
   }
 

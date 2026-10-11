@@ -1030,9 +1030,9 @@ import { chromium } from "playwright";
     };
     const spent = await ask(page, { ...noModel, llmFailure: "allowance",
       note: "The free daily allowance for the model is spent for today. It resets at " +
-        "00:00 UTC. The readings below were measured by the pipeline and are unaffected.",
+        "03:00 TRT (00:00 UTC). The readings below were measured by the pipeline and are unaffected.",
     }, "what cleared?");
-    ok(/resets at 00:00 UTC/.test(spent.all),
+    ok(/resets at 03:00 TRT \(00:00 UTC\)/.test(spent.all),
        "a spent allowance is reported as a spent allowance, with the reset the reader " +
        "needs in order to know when to come back");
     ok(!/did not state why/.test(spent.all),
@@ -1050,6 +1050,12 @@ import { chromium } from "playwright";
     ok(!/did not state why/.test(unconfigured.all),
        "so the most permanent no-model state this route has is never reported as an " +
        "unexplained one");
+
+    for (const cause of ["allowance", "budget"]) {
+      const bare = await ask(page, { ...noModel, llmFailure: cause }, "what cleared?");
+      ok(/resets at 03:00 TRT \(00:00 UTC\)\./.test(bare.all) && !/resets at 00:00 UTC/.test(bare.all),
+         "the page's own sentence for a spent " + cause + " gives the reset in Turkiye time with the UTC source in brackets");
+    }
 
     const noCapacity = await ask(page, { ...noModel, llmFailure: "capacity" }, "what cleared?");
     ok(/no capacity for this question just now/.test(noCapacity.all),
@@ -1880,9 +1886,9 @@ import { chromium } from "playwright";
      "with nothing to read from, no refresh stamp is invented");
 
   const briefAlerts = (x) => x.facts.find((f) => f.id === "brief:today/alerts");
-  ok(/^2 flagged windows on the tape, read 2026-09-04 08:33 UTC\.$/.test(briefAlerts(index).say),
+  ok(/^2 flagged windows on the tape, read 2026-09-04 11:33 TRT\.$/.test(briefAlerts(index).say),
      "the nightly index carries the brief's own count of the alert feed");
-  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 18:00 UTC.",
+  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 21:00 TRT.",
      "AND THE REFRESH REBUILDS IT from the feed it just wrote. Production served '60 flagged windows " +
      "on the tape, read 17:20' beside 'holds 180 of the 226 alerts read' at 20:15, because only facts " +
      "whose source is the feed were replaced and this one's source is the brief");

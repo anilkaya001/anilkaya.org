@@ -10,7 +10,7 @@ import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
 import { bookRows, runCardEngine, rankModeOf, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
-import { aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
+import { RESET_SAID, aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
 import { REVIEW_ITEM_BY_ID } from "./shared/review-manifest.js";
@@ -1194,8 +1194,8 @@ function chargedFetch(env, gate) {
 }
 
 const FALLBACK_FAILED = Object.freeze({
-  allowance: "found the day's free model allowance spent, which resets at 00:00 UTC",
-  budget: "found the day's model budget for this site spent, which resets at 00:00 UTC",
+  allowance: "found the day's free model allowance spent, which resets at " + RESET_SAID,
+  budget: "found the day's model budget for this site spent, which resets at " + RESET_SAID,
   capacity: "had no capacity just now, and asking again shortly may work",
   plan: "is not available on this site's plan, which is a configuration fault here",
   unreachable: "could not be reached and did not say why",
@@ -3610,7 +3610,7 @@ export default {
       }
       logFailure("error", "request failed", { method: request.method, path: url.pathname }, error);
       if (isStoreQuota(error)) {
-        return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at 00:00 UTC",
+        return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at " + RESET_SAID,
           { "Retry-After": String(secondsToUtcMidnight(Date.now())) }), request, url);
       }
       return finalize(apiError(500, "internal_error", "Internal server error"), request, url);

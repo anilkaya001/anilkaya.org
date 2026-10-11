@@ -37,8 +37,7 @@
   const dayMs = (d) => Date.parse(String(d) + "T00:00:00Z");
   const addDays = (d, k) => new Date(dayMs(d) + k * 864e5).toISOString().slice(0, 10);
   const weekday = (d) => WD[new Date(dayMs(d)).getUTCDay()];
-  const ET_T = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
-  const etTime = (iso) => { const t = Date.parse(String(iso || "")); return Number.isFinite(t) ? ET_T.format(new Date(t)).replace(/:00(?= )/, "") : null; };
+  const trtTime = (iso, zone) => { const t = F.time(iso, zone); return t === DASH ? null : t; };
   const cardKey = (t) => String(t || "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
   const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
   const originClash = (r) => { const d = n(r && r.dte), sd = n(r && r.sdte); return d !== null && sd !== null && sd > d; };
@@ -257,9 +256,9 @@
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({
         title: String(m.event || "Economic print"), asOf: m.day || null,
-        facts: [["Time", etTime(m.at) ? etTime(m.at) + " ET" : null], ["Forecast", m.forecastRaw ? raw(m.forecastRaw) : null], ["Prior", m.prevRaw ? raw(m.prevRaw) : null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
+        facts: [["Time", trtTime(m.at)], ["Forecast", m.forecastRaw ? raw(m.forecastRaw) : null], ["Prior", m.prevRaw ? raw(m.prevRaw) : null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
       })),
-    }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-3") } }), h("span", { class: "fe-time" }, etTime(m.at) || ""), h("b", null, name));
+    }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-3") } }), h("span", { class: "fe-time" }, trtTime(m.at, false) || ""), h("b", null, name));
   }
 
   const FDA_CAT = (c) => (/pdufa/i.test(c) ? "PDUFA" : /advisory/i.test(c) ? "AdCom" : /data|top-?line/i.test(c) ? "Data" : String(c || "Date").split(" ")[0]);
@@ -404,7 +403,7 @@
     const items = rows.map((m) => {
       const tag = TAGS[m.tag] || null;
       return h("div", { class: "fe-mrow", role: "listitem", title: String(m.event || "") + (m.period ? " " + MID + " " + m.period : "") },
-        h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, etTime(m.at) || F.day(m.day))),
+        h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, trtTime(m.at, false) || F.day(m.day))),
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
         h("span", { class: "fu-v fu-strong" }, raw(m.forecastRaw)),
@@ -419,7 +418,7 @@
     const m = (S.payload || {}).macro || {};
     return {
       title: "Macro",
-      lead: "Economic prints scheduled after the session's close, with the consensus forecast and the prior reading. Times are Eastern.",
+      lead: "Economic prints scheduled after the session's close, with the consensus forecast and the prior reading. Times are T\u00fcrkiye time (TRT).",
       facts: [["Seen", n(m.seen) === null ? null : count(m.seen)], ["Already past", n(m.past) === null ? null : count(m.past)]],
       notes: [m.rule ? String(m.rule) : null],
     };
@@ -567,8 +566,7 @@
   }
 
   function builtAt(payload) {
-    const t = Date.parse(String(payload.generatedAt || ""));
-    return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC" : payload.generatedAt ? String(payload.generatedAt) : null;
+    return F.stamp(payload.generatedAt) || (payload.generatedAt ? String(payload.generatedAt) : null);
   }
 
   function paintMeta(payload) {

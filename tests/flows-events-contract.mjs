@@ -1010,8 +1010,8 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
          `[${t}] and the slot shows the em dash with the pending glyph rather than a zero or a blank`);
     }
 
-    ok(/Built/.test(wide.about || "") && /2026-09-05 01:28 UTC/.test(wide.about || ""),
-       `the built instant is ISO and names its zone, in the page's own disclosure: ` +
+    ok(/Built/.test(wide.about || "") && /2026-09-05 04:28 TRT/.test(wide.about || ""),
+       `the built instant is a Turkiye time stamp and names its zone, in the page's own disclosure: ` +
        `"${String(wide.about).slice(0, 120)}"`);
     ok(!/\d+\/\d+\/\d{4}/.test(wide.about || ""),
        "and no slashed locale date survives anywhere in it");
@@ -1207,8 +1207,14 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
         macroRows: document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head)").length,
         weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > *").length,
         forecast: (document.querySelector("#evMacro .fe-mrow:not(.fu-head) .fu-strong") || {}).textContent,
+        listTimes: [...document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head) .fe-edate small")].map((n) => n.textContent.trim()),
+        weekTimes: [...document.querySelectorAll("#evWeek .fe-c-macro .fe-time")].map((n) => n.textContent.trim()),
+        text: document.getElementById("evMacro").textContent + document.getElementById("evWeek").textContent,
         over: document.documentElement.scrollWidth - window.innerWidth,
       }));
+      deep(r.listTimes, ["15:30", "17:00"], `[${width}] a print given as 12:30 and 14:00 UTC reads 15:30 and 17:00 in the list, the zone named once in the lead`);
+      deep(r.weekTimes, ["15:30", "17:00"], `[${width}] and the same in the week`);
+      ok(!/\b(AM|PM|ET)\b/.test(r.text), `[${width}] with no Eastern clock on the page`);
       deep(errors, [], `[${width}] the week renders with no ex-dividend producer and without throwing`);
       deep(r.lanes, ["Macro", "Earnings", "FDA"],
         `[${width}] a week with no ex-dividend rows draws no ex-dividend lane: no run reads the vendor's dividends ` +

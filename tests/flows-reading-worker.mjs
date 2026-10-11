@@ -802,6 +802,15 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   await h.settle();
   eq(h.body.dossierFacts, 0, "and an unknown ticker adds no fact and no error");
   eq(h.res.status, 200, "200");
+
+  const z = await get("/api/flows/ask", ASK({ question: "what happened after 17:00 TRT" }));
+  await z.settle();
+  eq(z.body.dossierFacts, 0, "TRT is a real ticker and the zone label of every time the site prints, so a question that says 17:00 TRT selects no dossier");
+
+  const zs = await get("/api/flows/ask", ASK({ question: "what happened after 17:00 TRT", subject: T }));
+  await zs.settle();
+  ok(zs.body.dossierFacts > 0 && zs.body.facts.some((x) => /^dossier:EXMP\//.test(x.id)), "while the page's own subject still supplies the dossier");
+  ok(!zs.body.facts.some((x) => /^dossier:TRT\//.test(x.id)), "and never the TRT one");
 }
 
 {
@@ -820,6 +829,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(ai.log.reads.length + ai.log.other.length, 0, "and the Ask box's call, through meteredAi in worker.js, is refused by the day's cap before the model is reached");
   eq(a.body.llm, false, "the pipeline's own wording stands");
   ok(/model budget this site allows itself for one day is spent/.test(a.body.note || ""), "and the reader is told the site's own budget is spent: " + a.body.note);
+  ok(/resets at 03:00 TRT \(00:00 UTC\)/.test(a.body.note || ""), "with the reset in Turkiye time and the UTC source in brackets: " + a.body.note);
 }
 
 {

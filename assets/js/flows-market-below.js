@@ -700,9 +700,9 @@
     if (P && P.t.length >= 2) {
       const plot = h("div", { class: "mk-expiry-p" });
       host.append(plot);
-      const ax = timeAxis(P.t);
-      C.line(plot, { x: ax.x, xType: ax.xType, xTicks: ax.ticks(0), xFormat: (x) => String(x), series: [{ values: P.net, format: usdS }],
-        twoTone: true, zero: true, height: [120, 130, 140], yFormat: usdS, label: "0DTE net premium through the session",
+      const ax = timeAxis(P.t, useLive ? breadth.session : reg && reg.sessionDate);
+      C.line(plot, { x: ax.x, xType: ax.xType, xTicks: ax.ticks(0), xFormat: ax.fmt, series: [{ values: P.net, format: usdS }],
+        twoTone: true, zero: true, height: [120, 130, 140], yFormat: usdS, label: "0DTE net premium through the session, times in TRT",
         readout: (i) => [C.part(clock(P.t[i]), "k"), tb(P.net[i]),
           P.px ? C.part("SPY " + (P.px[i] === null ? DASH : P.px[i].toFixed(2)), "k") : null].filter(Boolean) });
     }

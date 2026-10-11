@@ -1214,13 +1214,13 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
 
     await page.evaluate(() => { const c = document.querySelector("#uaTimeline .ui-chart"); c.focus(); c.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true })); });
     const readout = await page.evaluate(() => document.querySelector("#uaTimeline .ui-readout").textContent);
-    ok(/AAA/.test(readout) && /9:31 AM/.test(readout),
-       `the keyboard reaches the first window in time order and the readout names it and its Eastern time — got: ${readout}`);
+    ok(/AAA/.test(readout) && /16:31 TRT/.test(readout),
+       `the keyboard reaches the first window in time order and the readout names it and its Türkiye time — got: ${readout}`);
     const said = await page.evaluate(() => {
       const c = document.querySelector("#uaTimeline .ui-chart"), d = c.querySelector(".visually-hidden");
       return { text: d ? d.textContent : null, linked: !!d && c.getAttribute("aria-describedby") === d.id };
     });
-    ok(said.linked && /^Flagged windows, 9:31 AM to 10:00 AM\. Premium: last \$90\.0K at 10:00 AM; low \$90\.0K at 10:00 AM; high \$250K at 9:31 AM\.$/.test(said.text || ""),
+    ok(said.linked && /^Flagged windows, 16:31 TRT to 17:00 TRT\. Premium: last \$90\.0K at 17:00 TRT; low \$90\.0K at 17:00 TRT; high \$250K at 16:31 TRT\.$/.test(said.text || ""),
        `the timeline carries a hidden description that names its window and the last, lowest and highest premium with their times — got: ${said.text}`);
 
     ok(await press(page, "Puts"), "the Puts tab is there to press");
@@ -1263,7 +1263,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
        `ONE KEY PRESS IS ONE ANNOUNCEMENT, however many times the filters redrew the timeline (${spoken.records} ` +
        "writes to the live region). A scrub wired again on every repaint keeps every earlier drawing's handler " +
        "alive, and each of them reads its own detached readout aloud");
-    ok(/AAA/.test(spoken.text) && /9:31 AM/.test(spoken.text),
+    ok(/AAA/.test(spoken.text) && /16:31 TRT/.test(spoken.text),
        `and the one it makes reads the current drawing, which a redraw started again from its first window — got: ${spoken.text}`);
     eq(thrown.length, 0, `and nothing threw across the whole interaction: ${thrown.join("; ")}`);
     await page.close();
@@ -1485,8 +1485,8 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
        `while the filter note counts neither — got: ${broke.filterNote}`);
 
     const NY = await read(null, LIVE_ALERTS, { timezoneId: "America/New_York" });
-    ok(/Read2026-09-01 06:00 UTC/.test(String(NY.alertsPop)),
-       `THE STAMP IS THE READ INSTANT IN UTC, the same for a New York reader — got: ${String(NY.alertsPop).slice(0, 120)}`);
+    ok(/Read2026-09-01 09:00 TRT/.test(String(NY.alertsPop)),
+       `THE STAMP IS THE READ INSTANT IN TRT, the same for a New York reader — got: ${String(NY.alertsPop).slice(0, 120)}`);
     ok(!/\b02:00\b/.test(String(NY.alertsPop)), "and specifically not the local wall clock");
     eq((String(NY.alertsPop).match(/Read\d/g) || []).length, 1,
        "and it is stated ONCE: two Read lines on one panel invite the reading that they are two reads");
@@ -1778,4 +1778,4 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `prose with four named exceptions and no weakened regex, one parse of every contract ` +
   `symbol per chain counted through a getter rather than asserted from memory, the board's ` +
   `own stage threaded to the feed and OMITTED rather than nulled when absent, and — in a ` +
-  `browser at 320px — two payloads joined on the four-tuple they share with a mark that fires on exactly the one contract both selections chose and a timeline that lights exactly its one window when the join is pressed, a filter group both feeds honour whose note keeps a narrowed list from reading as a thin market, a timeline drawn one viewBox unit to one CSS pixel whose keyboard reads the first window in time order, a filter note that says which feed could not be read rather than counting it as zero, and the silences kept apart: a payload with no contracts block marked unavailable and carrying no digit, rows that could not be read marked withheld and unreadable, a missing name panel that is not a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's pending, withheld and quiet states each with its own glyph, one read instant stated once in UTC, an uncounted row-cap shed that says so instead of printing a zero, a denominator that prints as a floor when the read hit the vendor's own ceiling, a reassurance that does not outlive the feed it reassures about, filters that never erase a module's silence, and a fetch that never answered marking every module unavailable rather than any of them going quiet`);
+  `browser at 320px — two payloads joined on the four-tuple they share with a mark that fires on exactly the one contract both selections chose and a timeline that lights exactly its one window when the join is pressed, a filter group both feeds honour whose note keeps a narrowed list from reading as a thin market, a timeline drawn one viewBox unit to one CSS pixel whose keyboard reads the first window in time order, a filter note that says which feed could not be read rather than counting it as zero, and the silences kept apart: a payload with no contracts block marked unavailable and carrying no digit, rows that could not be read marked withheld and unreadable, a missing name panel that is not a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's pending, withheld and quiet states each with its own glyph, one read instant stated once in TRT, an uncounted row-cap shed that says so instead of printing a zero, a denominator that prints as a floor when the read hit the vendor's own ceiling, a reassurance that does not outlive the feed it reassures about, filters that never erase a module's silence, and a fetch that never answered marking every module unavailable rather than any of them going quiet`);

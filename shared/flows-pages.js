@@ -1,6 +1,7 @@
-export const ASSET_VERSION = "261";
+export const ASSET_VERSION = "262";
 
 import { GLOSSARY } from "./flows-glossary.js";
+import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
@@ -252,8 +253,8 @@ export function neuronProvenance(summary) {
   if (guard.startsWith("unreachable:reparse:")) {
     const why = guard.slice("unreachable:reparse:".length);
     return "Deterministic reading: the model\u2019s reply carried no usable summary, and asking it again " +
-      (why === "allowance" ? "found the day\u2019s free model allowance spent, resetting 00:00 UTC"
-        : why === "budget" ? "found the day\u2019s model budget for this site spent, resetting 00:00 UTC"
+      (why === "allowance" ? "found the day\u2019s free model allowance spent, resetting " + RESET_SAID
+        : why === "budget" ? "found the day\u2019s model budget for this site spent, resetting " + RESET_SAID
         : why === "capacity" ? "found no capacity"
           : why === "plan" ? "found the configured model not available on this plan"
             : "failed") + ".";
@@ -261,8 +262,8 @@ export function neuronProvenance(summary) {
   if (guard.startsWith("unreachable:")) {
     const why = guard.slice("unreachable:".length);
     const said = why === "allowance" || why === "3036"
-      ? "the day\u2019s free model allowance is spent, resetting 00:00 UTC"
-      : why === "budget" ? "the day\u2019s model budget for this site is spent, resetting 00:00 UTC"
+      ? "the day\u2019s free model allowance is spent, resetting " + RESET_SAID
+      : why === "budget" ? "the day\u2019s model budget for this site is spent, resetting " + RESET_SAID
       : why === "capacity" || why === "3040" ? "the model had no capacity, and nothing was spent"
         : why === "plan" || why === "5035" ? "the configured model is not available on this plan"
           : why === "empty" ? "the model answered with nothing"

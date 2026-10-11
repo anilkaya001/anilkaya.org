@@ -1995,7 +1995,7 @@ try {
     await openB.close();
 
     const at0930 = D + "T13:30:00Z";
-    const clockOf = (pg, iso) => pg.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(x)), iso);
+    const clockOf = async (pg, iso) => { const d = new Date(Date.parse(iso) + 108e5); return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") + " TRT"; };
     const LIVE_LATE = { status: "ok", session: D, fresh: { readAt: D + "T13:31:44Z" },
       tide: { status: "ok", t: [at0930], ncp: [1.0125e7], npp: [1.409e6], net: [8.716e6] },
       zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: {} };
@@ -2019,6 +2019,8 @@ try {
        `whose Why says the layer has gone quiet rather than that a refresh is due (${lateWhy.lead})`);
     deep(lr.secChip, { state: "stale", word: await clockOf(late, D + "T13:31:00Z") },
       "the sector tides' single reading is dated by its clock too, rather than an Opening chip that never ages");
+    ok(new RegExp("at " + word930 + "[ ,]").test(lateWhy.lead) && !/\bET\b/.test(lateWhy.lead),
+       `and names the reading's time in Turkiye time, with no Eastern clock (${lateWhy.lead})`);
     const lateSec = await why(late, "#mkSecTidesCard .ui-mod-t .mk-chip");
     ok(!/next refresh/.test(lateSec.lead), `and its Why promises no refresh (${lateSec.lead})`);
     const overLate = await late.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -2041,8 +2043,26 @@ try {
        "a pulse whose live overlay holds one point but carries the last session as prior draws that session's full path");
     deep(wp.tideChip, { state: "dated", word: wp.dayWord }, "under one dated chip naming whose session it is");
     eq(wp.tideNet, "+$5.0M", "and its metrics read that path's last point, not the lone live reading");
-    eq(wp.openings, 0, "nothing on the page says Opening at 15:00 ET");
+    eq(wp.openings, 0, "nothing on the page says Opening at 22:00 TRT");
     await withPrior.close();
+
+    const WD = "2026-01-12";
+    const winterT = Array.from({ length: 14 }, (_, i) => new Date(Date.parse(WD + "T14:30:00Z") + i * 30 * 60000).toISOString());
+    const LIVE_WINTER = { status: "ok", session: WD, fresh: { readAt: WD + "T20:59:00Z" },
+      tide: { status: "ok", t: winterT, ncp: winterT.map((_, i) => 1e6 * (i + 2)), npp: winterT.map((_, i) => 5e5 * (i + 1)), net: winterT.map((_, i) => 5e5 * (i + 1)) },
+      zeroDte: { status: "unreadable", reason: "rows-unshaped", t: [], net: [] }, etf: {} };
+    const winter = await openMarket({ at: WD + "T21:00:00Z", viewport: { width: 1440, height: 1000 }, routes: [
+      ["**/api/flows/pulse", json({ status: "pending" })],
+      ["**/api/flows/regime", json(REGIME)],
+      ["**/api/flows/lk?k=market", json(LIVE_WINTER)],
+    ] });
+    await winter.waitForSelector("#mkTide svg[role=img]");
+    const ticks = await winter.evaluate(() => [...document.querySelectorAll("#mkTide svg text")].map((t) => t.textContent.trim()));
+    ok(ticks.includes("18:00") && ticks.includes("00:00"), `a winter session whose TRT range crosses midnight keeps one rising axis labelled 18:00 to 00:00 (${ticks.join(" ")})`);
+    ok(!ticks.some((t) => /AM|PM|ET$/.test(t)), `and prints no AM, PM or ET on the axis (${ticks.join(" ")})`);
+    const winterText = await winter.evaluate(() => document.getElementById("mkTideCard").textContent);
+    ok(!/\bET\b/.test(winterText), "and no Eastern clock in the card");
+    await winter.close();
 
     const oneSer = (a, b) => ({ status: "ok", t: [liveT[0]], ncp: [a], npp: [b], net: [a - b] });
     const BREADTH_THIN = { v: 1, key: "live:breadth", session: EXPECTED, fresh: { readAt: liveT[0] },

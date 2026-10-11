@@ -21,9 +21,9 @@
 
   function timeOf(r, session) {
     const span = etOf(r.spanStart);
-    if (span && (!session || span.day === session)) return { m: span.m, exact: true };
+    if (span && (!session || span.day === session)) return { m: F.axis(r.spanStart, span.day), exact: true };
     const first = etOf(r.firstAt);
-    if (first && (!session || first.day === session) && first.m >= 240 && first.m <= 1200) return { m: first.m, exact: false };
+    if (first && (!session || first.day === session) && first.m >= 240 && first.m <= 1200) return { m: F.axis(r.firstAt, first.day), exact: false };
     return null;
   }
 
@@ -35,7 +35,7 @@
     a.rows.forEach((r, i) => {
       const p = n(r.prem);
       const at = timeOf(r, session);
-      if (p === null || p <= 0 || !at) { undated++; return; }
+      if (p === null || p <= 0 || !at || at.m === null) { undated++; return; }
       out.push({ r, i, p, m: at.m, exact: at.exact, cp: r.cp === "P" ? "P" : r.cp === "C" ? "C" : null, ask: F.askShare(r) });
     });
     return { pts: out, undated, session };
@@ -43,7 +43,7 @@
 
   function drawTimeline(el, w, animate) {
     const a = S.alerts;
-    const { pts } = points();
+    const { pts, session } = points();
     const phone = w < 600;
     const H = phone ? 250 : w < 900 ? 290 : 330;
     const left = 4, right = phone ? 46 : 54, top = 18, bot = 24;
@@ -52,10 +52,10 @@
       return;
     }
     const rec = a.record && typeof a.record === "object" ? a.record : null;
-    const recStart = rec ? etOf(rec.firstReadAt) : null;
-    const lo = Math.min(...pts.map((p) => p.m), recStart ? recStart.m : Infinity);
+    const rm = rec ? F.axis(rec.firstReadAt, session || (etOf(rec.firstReadAt) || {}).day) : null;
+    const lo = Math.min(...pts.map((p) => p.m), rm === null ? Infinity : rm);
     const hi = Math.max(...pts.map((p) => p.m));
-    const x0 = Math.max(540, Math.floor(lo / 30) * 30 - 30);
+    const x0 = Math.max((F.open(session) || 960) - 30, Math.floor(lo / 30) * 30 - 30);
     const x1 = Math.max(x0 + 180, Math.ceil((hi + 10) / 30) * 30);
     const xs = C.lin(x0, x1, left + 14, w - right - 14);
     const mid = top + (H - top - bot) / 2;
@@ -71,8 +71,8 @@
     const defs = s("defs", null, svg);
     const pat = s("pattern", { id: "fuHatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
     s("line", { x1: 0, y1: 0, x2: 0, y2: 6, class: "fu-hatch" }, pat);
-    if (recStart && recStart.m > x0 + 10 && (!pts.length || recStart.m <= x1)) {
-      const rx = Math.min(xs(recStart.m), w - right);
+    if (rm !== null && rm > x0 + 10 && (!pts.length || rm <= x1)) {
+      const rx = Math.min(xs(rm), w - right);
       s("rect", { x: left, y: top, width: Math.max(0, rx - left), height: H - top - bot, fill: "url(#fuHatch)", class: "fu-unrec" }, svg);
     }
     const step = xs(x0 + 60) - xs(x0) >= 44 ? 60 : 120;
@@ -164,7 +164,7 @@
       ],
       sections: [
         { title: "What a window is", lines: [notes.unit, notes.selection] },
-        { title: "Sides and flags", lines: [notes.sides, notes.flags, "Each row carries the vendor's own stated span, in UTC."] },
+        { title: "Sides and flags", lines: [notes.sides, notes.flags, "Each row carries the vendor's own stated span, shown in TRT."] },
         { title: "The record", lines: [notes.record] },
         { title: "The ceiling", lines: [vendorCeilingSaid().trim()] },
         { title: "Refused", lines: [notes.refusals] },
