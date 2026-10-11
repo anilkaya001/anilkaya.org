@@ -16,7 +16,7 @@ const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 
 
 const CEILING_KIB = {
   tickerPage: 411 + 6504 / 1024,
-  overviewPage: 246,
+  overviewPage: 246 + 1483 / 1024,
   sidePage: 230 + 7778 / 1024,
   watchPage: 230 + 7778 / 1024,
   deskPage: 243 + 7093 / 1024,
@@ -56,7 +56,7 @@ const GZIP_KIB = {
 
 const CSS_KIB = {
   tickerPage: 103 + 565 / 1024,
-  overviewPage: 104 + 779 / 1024,
+  overviewPage: 104 + (779 + 11690) / 1024,
   sidePage: 102 + 565 / 1024,
   watchPage: 102 + 565 / 1024,
   deskPage: 111 + 565 / 1024,
@@ -76,7 +76,7 @@ const CSS_KIB = {
 
 const CSS_GZIP_KIB = {
   tickerPage: 23 + 64 / 1024,
-  overviewPage: 23 + 100 / 1024,
+  overviewPage: 23 + (100 + 2592) / 1024,
   sidePage: 22 + 64 / 1024,
   watchPage: 22 + 64 / 1024,
   deskPage: 24 + 64 / 1024,
@@ -127,7 +127,7 @@ const DEFERRED = {
   tickerPage: { groups: {} },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { "market-below": "/assets/js/flows-market-below.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
-  overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
+  overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
   dock: { file: "/assets/js/flows-ask.js", declared: /<aside[^>]*\bid="askDock"[^>]*\bdata-src="([^"?]+)/ },
@@ -135,7 +135,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
+  tickerPage: 80, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
   unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
@@ -204,7 +204,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -396,7 +396,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",

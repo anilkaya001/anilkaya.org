@@ -1,8 +1,10 @@
 import { HttpError, redirect } from "../http.js";
 import { FLOWS_PAGES } from "../../shared/flows-pages.js";
 
+const homeNet = (env, owner) => owner === true && String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase() === "owner";
+
 const PAGES = Object.freeze([
-  { slug: "", from: "overview", summary: true, render: (username, summary) => FLOWS_PAGES.overviewPage({ username, summary }) },
+  { slug: "", from: "overview", summary: true, render: (username, summary, owner, scenes, env) => FLOWS_PAGES.overviewPage({ username, summary, net: homeNet(env, owner) }) },
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
   { slug: "short", from: "short", render: (username) => FLOWS_PAGES.sidePage({ username, side: "short" }) },
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
@@ -76,7 +78,7 @@ export function flowsPageRows(deps) {
           if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
         }
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
-        return html(session ? page.render(session.username, summary, isOwner(env, session.username), scenesOn(env, session.username)) : FLOWS_PAGES.loginPage());
+        return html(session ? page.render(session.username, summary, isOwner(env, session.username), scenesOn(env, session.username), env) : FLOWS_PAGES.loginPage());
       },
     });
     if (page.slug !== "") {
