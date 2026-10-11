@@ -135,7 +135,7 @@ async function runMain() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
   const server = await startWorker({
-    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", `FLOWS_INGEST_TOKEN:${INGEST}`],
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", `FLOWS_INGEST_TOKEN:${INGEST}`],
   });
   const base = server.baseURL;
   const opened = [];
@@ -528,7 +528,7 @@ async function runOwnerAudience() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
   const server = await startWorker({
-    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner"],
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner"],
   });
   const base = server.baseURL;
   const opened = [];
@@ -572,7 +572,7 @@ async function runOwnerAudience() {
 async function runClosed() {
   const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`, "FLOWS_RT_SCALE:0.2"] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", `UW_NOW:${SATURDAY}`, "FLOWS_RT_SCALE:0.2"] });
   try {
     const c = connect(server.baseURL, OWNER);
     await until(() => c.ctl("closed")[0], 8000, "a closed frame");
@@ -597,7 +597,7 @@ async function runClosed() {
 async function runClosedEpoch() {
   const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", `UW_NOW:${SATURDAY}`] });
   try {
     const c = connect(server.baseURL, OWNER);
     const hello = await until(() => c.ctl("hello")[0], 15000, "a hello");
@@ -641,7 +641,7 @@ async function runOff() {
 async function runCadence() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z"] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z"] });
   const base = server.baseURL;
   try {
     hubClock.offset = (await statusOf(base, OWNER)).body.now - Date.now();

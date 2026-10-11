@@ -3271,8 +3271,8 @@ separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 | `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner`. Shipped: `members` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
 | `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
 | `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
-| `FLOWS_RT_UPSTREAM` | `socket`; anything else, or unset, is `rest`. Not set in `wrangler.toml` | Off. `socket` opens one outbound vendor WebSocket for the focus names, `flow-alerts` and `news`, with REST covering any silent channel, whatever `FLOWS_RT_AUDIENCE` is: the connection is one for the whole object, so every member shares it. The status shows the ask (`upstream.asked`) beside the effective value (`killSwitches.FLOWS_RT_UPSTREAM`). The entitlement is proven on this key (the bullet "A WebSocket upstream" below); for members the written licence is open (OD-03a). |
-| `FLOWS_RT_SOCKET_HOURS` | `session`; anything else is `rth` | The window the outbound socket may be open: the regular session by default (09:30 to 16:00 ET, 16:30 to 23:00 TRT until 2026-10-31), the pre-market, regular session and post-market with `session` (04:00 to 20:00 ET, 11:00 to 03:00 TRT until 2026-10-31 and 12:00 to 04:00 TRT after 2026-11-01). An open outbound socket keeps the object resident and billed, so Free should stay on `rth`. |
+| `FLOWS_RT_UPSTREAM` | `socket`; anything else, or unset, is `rest`. `socket` in `wrangler.toml` | On. `socket` opens one outbound vendor WebSocket for the focus names, `flow-alerts` and `news`, with REST covering any silent channel, whatever `FLOWS_RT_AUDIENCE` is: the connection is one for the whole object, so every member shares it. The status shows the ask (`upstream.asked`) beside the effective value (`killSwitches.FLOWS_RT_UPSTREAM`). The entitlement is proven on this key (the bullet "A WebSocket upstream" below); for members the written licence is open (OD-03a). |
+| `FLOWS_RT_SOCKET_HOURS` | `session`; anything else is `rth`. `session` in `wrangler.toml` | The window the outbound socket may be open: the regular session by default (09:30 to 16:00 ET, 16:30 to 23:00 TRT until 2026-10-31), the pre-market, regular session and post-market with `session` (04:00 to 20:00 ET, 11:00 to 03:00 TRT until 2026-10-31 and 12:00 to 04:00 TRT after 2026-11-01). An open outbound socket keeps the object resident and billed, so Free should stay on `rth`. |
 | `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
 
 Turning the rail off is a one-line deploy (`FLOWS_RT_MODE = "off"`), or a dashboard
@@ -3365,12 +3365,12 @@ client.
   an undocumented firehose, is no longer listed and must never be joined), fl to `flow-alerts`, gx to
   `gex:<T>`, mk to `market_tide` and `net_flow:<T>`, nw to `news`.
 
-  The socket upstream is built and off. `createCompositeUpstream({ rest, socket,
+  The socket upstream is built and on. `createCompositeUpstream({ rest, socket,
   held })` in `shared/flows-rt-hub.js`, over `shared/flows-rt-socket.js`, is what
   `createHub` returns when `FLOWS_RT_UPSTREAM` is `socket`, under either
   audience: members share the one vendor connection, because the object opens it
   once however many sockets watch. In every other case it returns the unchanged
-  REST adapter, and no file sets the variable. The topic table lists `price:<T>`
+  REST adapter, and `wrangler.toml` sets it to `socket`. The topic table lists `price:<T>`
   alone for px, and `flows-rt-contract` fuzzes the channel plan to prove nothing
   but `price:<T>`, `gex:<T>`, `flow-alerts` and `news` can be joined. It opens one connection to
   `wss://<vendor host>/socket?token=...` (the vendor refuses the bearer header
@@ -3385,6 +3385,21 @@ client.
   silent for 8 s (`fl`), 20 s (`gx`) or 60 s (`nw`); an alert is deduplicated by
   vendor id across the two. `FLOWS_RT_UPSTREAM` unset, or `rest`, is the way
   back.
+
+  Switched on 2026-10-11 with `FLOWS_RT_SOCKET_HOURS = "session"`, so the
+  connection can be checked from 04:00 ET (11:00 TRT) on the first session day,
+  5.5 hours before the open, instead of at it. After one clean week `rth` is the
+  value to set if post-market socket time is not wanted. A deploy restarts the
+  object and drops its sockets, so deploy while nobody is connected. The outbound
+  `new WebSocket("wss://api.unusualwhales.com/socket?token=...")` has run only
+  against a loopback in workerd; the first dial of the vendor from a Durable
+  Object is the first live evidence. Read `/api/rt/status` as the owner: a
+  healthy `upstream.socket` block has `kind` `socket`, `connected` true, `joined`
+  equal to `acked`, `refused` empty, no `lastError` and a recent `lastMsgAt`, and
+  `topics.fl` shows frames from the socket. A `lastError` naming connect,
+  refused or a close code means set `FLOWS_RT_UPSTREAM = "rest"` and deploy: every
+  topic is then read by REST again, which is also what the hub does on its own for
+  any channel that is unacknowledged, refused or silent.
 
   What the vendor was measured to do, from two Actions runs of the socket probe
   (`.github/workflows/flows-ws-probe.yml`; the runner's clock against each frame's
