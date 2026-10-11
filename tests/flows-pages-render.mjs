@@ -112,6 +112,8 @@ function answer(route, u) {
 
 const SPECS = [
   { id: "login", fn: "loginPage", url: "/flows/login/", dock: false },
+  { id: "about", fn: "aboutPage", url: "/flows/about/", dock: false },
+  { id: "glossary", fn: "glossaryPage", url: "/flows/glossary/", dock: false },
   { id: "overview", fn: "overviewPage", url: "/flows/" },
   { id: "long", fn: "sidePage", args: { side: "long" }, url: "/flows/long/" },
   { id: "short", fn: "sidePage", args: { side: "short" }, url: "/flows/short/" },
