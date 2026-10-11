@@ -164,7 +164,7 @@ export const FACTS = [
     day(5_000_000, "cf.do.pricing"),
     month(25_000_000_000, "cf.do.pricing", money(0.001, 1_000_000))),
   metered("do.sqlite.bytes", "bytes", "quota", "cloudflare",
-    cell(1_000_000_000, "static", "cf.do.limits"),
+    cell(5_000_000_000, "static", "cf.workers.pricing"),
     cell(10_000_000_000, "static", "cf.do.sqlite-ga")),
   metered("ai.rpm.paidonly", "requests", "guard", "cloudflare",
     cell(null, "minute", "cf.ai.limits"),
@@ -358,12 +358,14 @@ export function renewalState(nowMs, env) {
   const parsed = isoDay.test(trimmed) ? Date.parse(trimmed + "T00:00:00Z") : NaN;
   const recorded = Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === trimmed ? trimmed : null;
   const through = recorded || WORKERS_PAID_PERIOD.through;
+  const clock = Number.isFinite(nowMs) ? nowMs : null;
   const endMs = Date.parse(through + "T00:00:00Z") + DAY_MS - 1;
   const renews = new Date(Date.parse(through + "T00:00:00Z") + DAY_MS).toISOString().slice(0, 10);
-  const daysLeft = Math.max(0, Math.ceil((endMs - nowMs) / DAY_MS));
+  const daysLeft = clock === null ? null : Math.max(0, Math.ceil((endMs - clock) / DAY_MS));
   let state = "current";
   if (plans.workers === "free") state = "free";
-  else if (nowMs > endMs) state = "unconfirmed";
+  else if (clock === null) state = "unconfirmed";
+  else if (clock > endMs) state = "unconfirmed";
   else if (daysLeft <= 3) state = "due";
   return { workers: plans.workers, through, renews, daysLeft, state, recorded: recorded !== null };
 }

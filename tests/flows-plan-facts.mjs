@@ -68,12 +68,13 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
 {
   same(P.snippetFigures().sort(), [
     "d1.bytes:free", "d1.bytes:paid", "d1.q:free", "d1.q:paid", "wae.pts:free", "wae.pts:paid", "wae.q:free", "wae.q:paid",
-    "d1.databases:free", "d1.databases:paid", "d1.account.bytes:free", "d1.account.bytes:paid", "do.sqlite.bytes:free", "gh.api:free", "gh.api:paid",
+    "d1.databases:free", "d1.databases:paid", "d1.account.bytes:free", "d1.account.bytes:paid", "gh.api:free", "gh.api:paid",
     "gh.min:free", "gh.min:paid", "gh.concurrent:free", "gh.concurrent:paid",
-  ].sort(), "THE FIGURES NOT YET READ FROM THE OFFICIAL PAGE ARE MARKED snippet: D1 size and queries per invocation, the Analytics Engine allowances, Durable Object SQLite storage (and the GitHub limits from a search)");
+  ].sort(), "THE FIGURES NOT YET READ FROM THE OFFICIAL PAGE ARE MARKED snippet: D1 size and queries per invocation, the Analytics Engine allowances, the Durable Object SQLite storage figure having been read from the Workers pricing page as 5 GB total on Free (and the GitHub limits from a search)");
   const recalled = P.figures().filter((f) => f.via === "recall").map((f) => `${f.id}:${f.plan}`).sort();
   same(recalled, ["do.mem:free", "do.mem:paid", "queue.ops.day:paid", "workflows.steps:paid"].sort(), "and the four recalled figures are named");
-  for (const id of ["d1.bytes", "d1.q", "wae.pts", "wae.q", "do.sqlite.bytes"]) {
+  eq(P.figures().find((f) => f.id === "do.sqlite.bytes" && f.plan === "free").cell.v, 5_000_000_000, "Durable Object SQLite storage on Free is 5 GB in total, from the Workers pricing page");
+  for (const id of ["d1.bytes", "d1.q", "wae.pts", "wae.q"]) {
     ok(P.figures().some((f) => f.id === id && f.via === "snippet"), `${id} carries the snippet mark`);
   }
 }
@@ -229,6 +230,9 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   eq(r("2026-10-30T12:00:00Z", { FLOWS_PLAN_PAID_THROUGH: "soon" }).through, "2026-10-29", "an unparsable record is ignored");
   eq(r("2026-10-30T12:00:00Z", { FLOWS_PLAN_PAID_THROUGH: "2026-02-31" }).through, "2026-10-29", "so is an impossible date");
   eq(r("2026-10-30T12:00:00Z", { FLOWS_PLAN_WORKERS: "free" }).state, "free", "on Free there is nothing to renew");
+  eq(P.renewalState(NaN, {}).state, "unconfirmed", "a clock that is not a number is never reported current");
+  eq(P.renewalState(undefined, {}).daysLeft, null, "and it has no days left to count");
+  eq(P.renewalState(NaN, { FLOWS_PLAN_WORKERS: "free" }).state, "free", "while on Free there is still nothing to renew");
   eq(r("2026-10-11T12:00:00Z").daysLeft, 19, "the days left are counted up to whole days to the end of the period");
 }
 
