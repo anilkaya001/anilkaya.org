@@ -1,6 +1,7 @@
 export const ASSET_VERSION = "260";
 
 import { GLOSSARY } from "./flows-glossary.js";
+import { stamp as trtStamp } from "./flows-time.js";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -293,7 +294,7 @@ function neuronVerdict(summary) {
   const rest = cut ? text.slice(cut[1].length).trim() : "";
   const at = typeof summary.generatedAt === "string" && summary.generatedAt ? summary.generatedAt : null;
   const when = at
-    ? `<time datetime="${escapeHTML(at)}">${escapeHTML(at.slice(0, 10))} ${escapeHTML(at.slice(11, 16))} UTC</time>`
+    ? `<time datetime="${escapeHTML(at)}">${escapeHTML(trtStamp(at) || "")}</time>`
     : "";
   return `
   <section class="ui-card hm-verdict${summary.llm ? " is-llm" : ""}" id="hmVerdict" aria-labelledby="hmVerdictT">

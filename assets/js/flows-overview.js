@@ -34,38 +34,10 @@
   const usd = F.unit.of("moneyCompact", { dp: "short" });
   const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
 
-  const NY = "America/New_York";
-  const etTime = (at) => {
-    if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(at.trim())) {
-      return null;
-    }
-    const d = new Date(at);
-    if (Number.isNaN(d.getTime())) return null;
-    try {
-      return new Intl.DateTimeFormat("en-GB", {
-        timeZone: NY, hour: "2-digit", minute: "2-digit", hour12: false,
-      }).format(d);
-    } catch { return null; }
-  };
-  const NY_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "numeric", minute: "2-digit" });
-  const NY_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: NY, hour: "numeric", minute: "numeric", hourCycle: "h23" });
-  const clock = (at) => {
-    const t = Date.parse(at);
-    return Number.isFinite(t) ? NY_CLOCK.format(new Date(t)) : DASH;
-  };
-  const nyMinutes = (at) => {
-    const t = Date.parse(at);
-    if (!Number.isFinite(t)) return null;
-    const p = Object.fromEntries(NY_PARTS.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-    return (+p.hour % 24) * 60 + +p.minute;
-  };
   const hourTicks = (lo, hi, step) => {
     const out = [];
     const every = step || 60;
-    for (let m = Math.ceil(lo / every) * every; m <= hi; m += every) {
-      const hr = m / 60;
-      out.push({ v: m, label: (hr % 12 || 12) + (hr < 12 ? " AM" : " PM") });
-    }
+    for (let m = Math.ceil(lo / every) * every; m <= hi; m += every) out.push({ v: m, label: F.tick(m) });
     return out;
   };
 
@@ -605,7 +577,7 @@
     const broken = s === "closed" && tide.ff && tide.ff.phase === "closed" && m.open && !past;
     if (!s || broken) s = m.open && !past ? (age <= 600000 ? "live" : "stale") : "closed";
     const other = boardsDay && tide.session && tide.session !== boardsDay;
-    const at = tide.readAt ? (other ? day + " " : "") + clock(tide.readAt) : day;
+    const at = tide.readAt ? (other ? day + " " : "") + F.time(tide.readAt) : day;
     if (s === "live") return ["live", "Live", at];
     if (s === "fresh") return ["fresh", "Updated", at];
     if (s === "stale") return ["stale", "Stale", past ? day : at];
@@ -686,15 +658,15 @@
     if (tide.zero) {
       series.push({ values: tide.zero, label: "0DTE", color: "--s-gray", dash: true, width: 1.25, format: (x) => (x > 0 ? "+" : "") + usd(x) });
     }
-    const mins = tide.t.map(nyMinutes);
+    const mins = tide.t.map((t) => F.axis(t, tide.session));
     const timed = mins.every((m) => m !== null) && mins.every((m, i) => i === 0 || m > mins[i - 1]);
     const opts = {
-      x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (iso) => clock(iso),
+      x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (m) => F.tick(m),
       xTicks: timed ? hourTicks(mins[0], mins[mins.length - 1], plot.clientWidth < 480 ? 120 : 60) : undefined, series, twoTone: true, zero: true,
       height: [190, 220, 236], live: state === "live",
       yFormat: (x) => ((x > 0 ? "+" : "") + usd(x)).replace(/\.0(?=[KMB])/, ""),
-      label: "Market tide, net premium across the session",
-      readout: (i) => [C.part(clock(tide.t[i]), "k"), C.part("Net", "k"),
+      label: "Market tide, net premium across the session, times in TRT",
+      readout: (i) => [C.part(F.time(tide.t[i]), "k"), C.part("Net", "k"),
         h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
         tide.zero ? C.part("0DTE " + (tide.zero[i] === null ? DASH : usdS(tide.zero[i])), "k") : null],
     };
@@ -750,18 +722,18 @@
     into.append(UI.list(list, { visible: SHOW, label }),
       UI.legend([["--label-1", "", "Mostly ask side"], ["--side-bid", "", "Mostly bid side"], ["--label-3", "", "Mixed or thinly sided"]]));
     const detail = table(label, [
-      ["Time · ET", false, "When the vendor's flagged window opened, in Eastern time."],
+      ["Time · TRT", false, "When the vendor's flagged window opened, in T\u00fcrkiye time."],
       ["Name", false], ["Contract", false], ["Premium", true],
       ["Side", true, F.askLabel + ", and the share of premium sided at all. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
       ["Rule", false, "The vendor's name for the screen that flagged the window."],
     ], drawn.map((row) => {
-      const at = etTime(row.spanStart);
-      const to = etTime(row.spanEnd);
+      const at = F.time(row.spanStart, false) === DASH ? null : F.time(row.spanStart, false);
+      const to = F.time(row.spanEnd, false) === DASH ? null : F.time(row.spanEnd, false);
       return {
         cells: [
           [at === null ? DASH : at, "c-num cc-dim", at === null ? null
-            : row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
-              : to === null ? "Window opened " + at + " ET; the vendor stated no end for it." : "Window ran " + at + " to " + to + " ET."],
+            : row.spanFrom === "created_at" ? "Alert created " + at + " TRT; no window stated."
+              : to === null ? "Window opened " + at + " TRT; the vendor stated no end for it." : "Window ran " + at + " to " + to + " TRT."],
           [row.t || DASH, "cc-t"], [contract(row), "cc-date"], [usd(row.prem), "c-num"],
           [F.askSaid(F.askShare(row)), "c-num"],
           [row.rule || DASH, "cc-dim", row.rule ? "Flagged by the vendor's " + String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() + " rule, under the vendor's own name for it." : null],
@@ -1165,7 +1137,7 @@
     const readAt = s && s.fresh ? s.fresh.readAt : null;
     const ff = s && s.__ff ? s.__ff.stateAt() : null;
     const state = ff === "live" ? "live" : ff === "stale" || (day && day < m.expected) ? "stale" : "fresh";
-    const at = readAt && (state === "live" || ff === "stale") ? clock(readAt) : null;
+    const at = readAt && (state === "live" || ff === "stale") ? F.time(readAt) : null;
     const word = state === "live" ? "Live" : day ? F.day(day) : DASH;
     let b = slot.firstElementChild;
     if (!b) slot.append(b = h("button", { class: "hm-pill", type: "button", ...POP, "data-info": UI.info(() => b.$) }));
@@ -1376,7 +1348,7 @@
       });
     }
     const wrote = document.querySelector(".hm-verdict time");
-    if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = clock(wrote.dateTime) + " ET";
+    if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = F.stamp(wrote.dateTime) || wrote.textContent;
     const built = Date.parse((lng && lng.generatedAt) || (sht && sht.generatedAt) || "");
     if (wrote && Number.isFinite(built) && Date.parse(wrote.dateTime) < built) {
       const box = wrote.closest(".hm-verdict");
