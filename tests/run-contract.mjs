@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  DEFAULT_DIR, TIMEOUT_FLOOR_S, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS, REPEAT_WINDOW_MS, MAX_TIMER_MS,
+  DEFAULT_DIR, TIMEOUT_FLOOR_S, SLOW_FACTOR, SLOW_MARGIN_S, overMedian, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS, REPEAT_WINDOW_MS, MAX_TIMER_MS,
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
   packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
   CI_SHARDS, SHARD_BALANCE, SUITES_DIR, shardBalance, shardLoad, formatSuite,
@@ -159,7 +159,13 @@ process.on("exit", () => {
   eq(timeoutFor({ medianS: 100 }, 2), 600, "--timeout-scale multiplies the timeout");
   eq(timerDelayMs(1125), 1125000, "a timeout is armed in milliseconds");
   eq(timerDelayMs(1125 * 100000), MAX_TIMER_MS, "a timeout past setTimeout's 2^31-1 ms is capped there, never wrapped to 1 ms by Node");
-  eq(timerDelayMs(120 * 17900), MAX_TIMER_MS, "the cap holds for a floor suite at a scale of 17,900 too");
+  eq(timerDelayMs(TIMEOUT_FLOOR_S * 17900), MAX_TIMER_MS, "the cap holds for a floor suite at a scale of 17,900 too");
+  eq(TIMEOUT_FLOOR_S, 300, "THE FLOOR IS 300 S: a suite whose median has grown past its registry line is not killed at 120 s as red (runs 38118172148 and 38119794299)");
+  eq(timeoutFor({ medianS: 28.9 }), 300, "a 29 s median gets the floor, so the worker suite at 211 s is not killed");
+  eq(timeoutFor({ medianS: 101 }), 303, "and three medians take over just above 100 s");
+  deep([overMedian({ medianS: 28.9 }, 211), overMedian({ medianS: 28.9 }, 57), overMedian({ medianS: 28.9 }, 59), overMedian({ medianS: 100 }, 201), overMedian({ medianS: 100 }, 200), overMedian({ medianS: 0.1 }, 5), overMedian({ medianS: null }, 500), overMedian({ medianS: 28.9 }, null)],
+    [true, false, true, true, false, false, false, false],
+    `a pass over ${SLOW_FACTOR} medians and more than ${SLOW_MARGIN_S} s past the median is flagged SLOW; a sub-second fixture, an unmeasured suite and an unknown duration never are`);
   deep(["SIGINT", "SIGTERM", "SIGHUP"].map(exitCodeFor), [130, 143, 129], "an interrupted run exits 128 plus the signal's number");
   deep([interrupt("SIGINT", 1000), interrupt("SIGINT", 1005), interrupt("SIGTERM", 1000 + REPEAT_WINDOW_MS - 1), interrupt("SIGINT", 1000 + REPEAT_WINDOW_MS + 100)], ["forward", "repeat", "repeat", "kill"],
     "the first signal is forwarded, a repeat inside the window (one Ctrl-C delivered by the terminal and by npm) is not an escalation, a later one is");

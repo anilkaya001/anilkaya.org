@@ -1224,7 +1224,10 @@ uses pinned dependencies from `tests/package-lock.json`.
 `npm test` is `node run.mjs`, the fail-late runner. It runs every suite
 registered in `tests/suites/` (one file per suite), the `fast` suites first and
 each group in name order, with `tests/` as the working directory, whatever an earlier suite did; kills a suite at its
-`timeoutS`, else at the larger of 120 s and three times its `medianS`; and
+`timeoutS`, else at the larger of 300 s and three times its `medianS` (a
+passing suite that ran over twice its `medianS` and more than 30 s past it is
+printed as SLOW, a `::warning` under GitHub Actions, so the registry line is
+refreshed before the timeout catches it); and
 exits 1 when any suite failed or timed out, 0 only when all passed, 2 on a
 usage or manifest error before anything runs, and 128 plus the signal's
 number (130, 143 or 129) when interrupted by SIGINT, SIGTERM or SIGHUP. The
