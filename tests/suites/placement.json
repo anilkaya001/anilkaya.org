@@ -1,1 +1,1 @@
-{"name": "placement", "class": "C", "group": "shard", "timing": false, "medianS": 26.3, "shard": 2, "files": ["placement-contract.mjs"], "covers": ["assets/data/placement-bank.json", "assets/js/placement.js", "index.html", "lab/placement/index.html"]}
+{"name": "placement", "class": "C", "group": "shard", "timing": false, "medianS": 26.3, "shard": 2, "files": ["placement-contract.mjs"], "covers": ["assets/data/placement-bank.json","assets/js/placement.js","index.html","lab/placement/index.html"]}

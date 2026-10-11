@@ -1,1 +1,1 @@
-{"name": "pipeline", "class": "N", "group": "shard", "timing": false, "medianS": 192.2, "shard": 4, "files": ["flows-pipeline-golden.mjs", "flows-pipeline-contract.mjs"], "covers": ["tests/fixtures-pipeline-golden.json", "tests/package-lock.json", "tests/package.json", "worker.js"]}
+{"name": "pipeline", "class": "N", "group": "shard", "timing": false, "medianS": 192.2, "shard": 4, "files": ["flows-pipeline-golden.mjs","flows-pipeline-contract.mjs"], "covers": ["tests/fixtures-pipeline-golden.json","tests/package-lock.json","tests/package.json","worker.js"]}
