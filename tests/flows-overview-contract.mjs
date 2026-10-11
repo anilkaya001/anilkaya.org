@@ -1002,6 +1002,7 @@ try {
        "the flagged windows still draw");
     eq(await page.locator("#ccWatch .ui-row").count(), 2,
        "the dead band's residents still draw");
+    await page.waitForFunction(() => document.querySelectorAll("#ccVerdict [data-chip]").length > 0, null, { timeout: 15000 });
     eq(await page.locator("#ccVerdict [data-chip]").count(), 5,
        "and the hero still states five readings, every count of them an em dash");
     const both = await page.evaluate(() => ({
