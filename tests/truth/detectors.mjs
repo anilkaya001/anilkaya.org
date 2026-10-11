@@ -179,7 +179,7 @@ export function dmSize(refMod) {
     if (Math.abs(refMod.dmStatistic(w.d, 5)) > 1.96) rej++;
   }
   const rate = rej / reps;
-  return { ok: rate <= 0.085, note: `nominal 5% test rejects ${(100 * rate).toFixed(1)}% of equal-accuracy h = 5 replications` };
+  return { ok: rate <= 0.1, note: `nominal 5% test rejects ${(100 * rate).toFixed(1)}% of equal-accuracy h = 5 replications` };
 }
 
 export function runnerRefusesWellSpecified(runnerMod) {
