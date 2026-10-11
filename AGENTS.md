@@ -1557,8 +1557,12 @@ and the registered rule's choice with its margin. The exact world's 0.02 bar is 
 rule fails it on about one seed in three); FLOWS_TRUTH_DEEP=1 runs 670 names on fresh seeds in roughly an hour and tests
 it as q over H_N plus three standard errors. The detectors share one null-cell bank with the suite, so a wrong build that
 touches only the table builder would not be seen by them.
-`flows-rt-contract` was measured on 2026-10-03: about 20 s with no server, 1,118
-assertions, on a machine shared with other suites. It drives the real hub on a
+`flows-rt-contract` was measured on 2026-10-11: about 32 s with no server, 1,288
+assertions, on a machine shared with other suites. Its roster-read block drives
+the hub on the fake clock through a D1 that hangs once and recovers within 35 s,
+that hangs twice with no stacked 3 s timers and reads at least 30 s apart, that
+never answers (the 25 base names are kept), and a hung five-minute refresh that
+keeps the full roster. It drives the real hub on a
 fake clock and fake sockets against a stub vendor, loads `Pulse` with a fake
 `ctx`, runs the roster SQL over `node:sqlite` (so it needs Node 22.13 and runs
 under `--disable-warning=ExperimentalWarning`), and prints the CPU per poll and
