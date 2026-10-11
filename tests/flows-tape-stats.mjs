@@ -282,47 +282,59 @@ const print = (o = {}) => ({
     [{ askPrem: 65, bidPrem: 35, prem: 100 }, 0.65, 1, "ask"],
     [{ askPrem: 35, bidPrem: 65, prem: 100 }, 0.35, 1, "bid"],
     [{ askPrem: 34, bidPrem: 66, prem: 100 }, 0.34, 1, "bid"],
-    [{ askPrem: 64, bidPrem: 36, prem: 100 }, 0.64, 1, null],
-    [{ askPrem: 50, bidPrem: 50, prem: 100 }, 0.5, 1, null],
-    [{ askPrem: 30, bidPrem: 10, prem: 100 }, 0.75, 0.4, null],
-    [{ askPrem: 25, bidPrem: 25, prem: 100 }, 0.5, 0.5, null],
+    [{ askPrem: 64, bidPrem: 36, prem: 100 }, 0.64, 1, "mixed"],
+    [{ askPrem: 36, bidPrem: 64, prem: 100 }, 0.36, 1, "mixed"],
+    [{ askPrem: 50, bidPrem: 50, prem: 100 }, 0.5, 1, "mixed"],
+    [{ askPrem: 30, bidPrem: 10, prem: 100 }, 0.75, 0.4, "thin"],
+    [{ askPrem: 25, bidPrem: 25, prem: 100 }, 0.5, 0.5, "mixed"],
     [{ askPrem: 26, bidPrem: 14, prem: 80 }, 0.65, 0.5, "ask"],
     [{ askPrem: 14, bidPrem: 26, prem: 80 }, 0.35, 0.5, "bid"],
-    [{ askPrem: 0, bidPrem: 0, prem: 100 }, null, 0, null],
-    [{ askPrem: 10, bidPrem: 0, prem: 0 }, 1, null, null],
+    [{ askPrem: 39, bidPrem: 10, prem: 100 }, 39 / 49, 0.49, "thin"],
+    [{ askPrem: 3996, bidPrem: 1000, prem: 10000 }, 3996 / 4996, 0.4996, "ask"],
+    [{ askPrem: 3504, bidPrem: 6496, prem: 10000 }, 0.3504, 1, "bid"],
+    [{ askPrem: 6496, bidPrem: 3504, prem: 10000 }, 0.6496, 1, "ask"],
+    [{ askPrem: 6449, bidPrem: 3551, prem: 10000 }, 0.6449, 1, "mixed"],
+    [{ askPrem: 0, bidPrem: 0, prem: 100 }, null, 0, "thin"],
+    [{ askPrem: 900, bidPrem: 700, prem: 1000 }, 0.5625, 1, "mixed"],
+    [{ askPrem: 1500, bidPrem: 100, prem: 1000 }, 0.9375, 1, "ask"],
+    [{ askPrem: 10, bidPrem: 0, prem: 0 }, null, null, null],
+    [{ askPrem: 10, bidPrem: 10 }, null, null, null],
+    [{ askPrem: 5, bidPrem: 5, prem: null }, null, null, null],
+    [{ askPrem: 250000, prem: 250000 }, null, null, null],
+    [{ askPrem: null, bidPrem: 5, prem: 10 }, null, null, null],
     [{ askPrem: 10, bidPrem: 0, prem: 10 }, 1, 1, "ask"],
     [{ askPrem: 0, bidPrem: 10, prem: 10 }, 0, 1, "bid"],
     [{ askPrem: -1, bidPrem: 10, prem: 10 }, null, null, null],
     [{ askPrem: "x", bidPrem: 10, prem: 10 }, null, null, null],
+    [{ askPrem: "", bidPrem: 10, prem: 10 }, null, null, null],
     [{ askPrem: "60", bidPrem: "20", prem: "100" }, 0.75, 0.8, "ask"],
-    [{ askPrem: 10, bidPrem: 10 }, 0.5, null, null],
     [{}, null, null, null],
+    [null, null, null, null],
+    [[{ askPrem: 200000, bidPrem: 50000, prem: 250000 }, { askPrem: 10000, bidPrem: 80000, prem: 90000 }], 210000 / 340000, 1, "mixed"],
+    [[{ askPrem: 100, bidPrem: 0, prem: 100 }, { prem: 1000 }], 1, 100 / 1100, "thin"],
+    [[{ askPrem: 600, bidPrem: 200, prem: 800 }, { askPrem: 200, prem: 200 }], 0.75, 0.8, "ask"],
+    [[{ askPrem: 1500, bidPrem: 500, prem: 1000 }, { prem: 1000 }], 0.75, 0.5, "ask"],
+    [[{ askPrem: 30, bidPrem: 0, prem: 100 }, { askPrem: 0, bidPrem: 10, prem: 100 }], 0.75, 0.2, "thin"],
+    [[{ prem: 100 }, { askPrem: 5, prem: 10 }], null, null, null],
   ];
-  for (const [row, share, classified, lean] of rows) {
+  const check = (row, share, classified, side, label) => {
     const r = askShareRead(row);
-    const label = JSON.stringify(row);
     if (share === null) eq(r.share, null, `${label}: share null`); else near(r.share, share, `${label}: share`, 1e-12);
     if (classified === null) eq(r.classified, null, `${label}: classified null`); else near(r.classified, classified, `${label}: classified`, 1e-12);
-    eq(r.lean, lean, `${label}: lean ${lean}`);
+    eq(r.side, side, `${label}: side ${side}`);
+    eq(r.lean, side === "ask" || side === "bid" ? side : null, `${label}: lean is the coloured sides only`);
     deep(askShare(row), { share: r.share, classified: r.classified }, `${label}: askShare is the same pair`);
-  }
-  deep({ ...ASK_SHARE_RULE }, { askAt: 0.65, bidAt: 0.35, classifiedMin: 0.5 }, "the colour rule: 0.65 and 0.35 of the sided premium, at least half the premium sided");
+  };
+  for (const [row, share, classified, side] of rows) check(row, share, classified, side, JSON.stringify(row));
+  deep({ ...ASK_SHARE_RULE }, { askAt: 0.65, bidAt: 0.35, classifiedMin: 0.5 }, "the colour rule: 0.65 and 0.35 of the sided premium, at least half the premium sided, read as the whole percents printed");
   eq(askShare(undefined).share, null, "no row");
   const path = new URL("./fixtures-ask-share.json", import.meta.url);
   if (existsSync(path)) {
     const table = JSON.parse(readFileSync(path, "utf8"));
-    const list = Array.isArray(table) ? table : table.rows || [];
-    ok(list.length > 0, "the client's known-answer table has rows");
-    for (const row of list) {
-      const got = askShare(row);
-      if (row.share !== undefined) {
-        if (row.share === null) eq(got.share, null, "table: " + JSON.stringify(row)); else near(got.share, row.share, "table share " + JSON.stringify(row), 1e-12);
-      }
-      if (row.classified !== undefined) {
-        if (row.classified === null) eq(got.classified, null, "table: " + JSON.stringify(row)); else near(got.classified, row.classified, "table classified " + JSON.stringify(row), 1e-12);
-      }
-    }
-    console.log(`  ask-share: ${list.length} row(s) of tests/fixtures-ask-share.json hold on the server helper`);
+    const list = Array.isArray(table) ? table : table.cases || [];
+    ok(list.length > 0, "the client's known-answer table has cases");
+    for (const c of list) check(c.rows, c.share, c.classified, c.side, "table " + c.name);
+    console.log(`  ask-share: ${list.length} case(s) of tests/fixtures-ask-share.json hold on the server helper`);
   } else {
     console.log("  ask-share: tests/fixtures-ask-share.json is not in this tree yet; the inline table above stands alone");
   }

@@ -213,23 +213,51 @@ export function reconciles(window) {
   return Math.abs(window.askPrem + window.bidPrem + window.otherPrem - window.gross) <= EPS * Math.max(1, Math.abs(window.gross));
 }
 
-export function askShare({ askPrem, bidPrem, prem } = {}) {
-  const a = num(askPrem);
-  const b = num(bidPrem);
-  const total = num(prem);
-  if (a === null || b === null || a < 0 || b < 0) return { share: null, classified: null };
-  const sided = a + b;
-  const share = sided > 0 ? a / sided : null;
-  const classified = total !== null && total > 0 ? sided / total : null;
-  return { share, classified };
+const sideDollars = (v) => {
+  const n = num(v);
+  return n !== null && n >= 0 ? n : null;
+};
+
+export function askSplit(row) {
+  const prem = num(row && row.prem);
+  if (prem === null || prem <= 0) return null;
+  const x = sideDollars(row.askPrem);
+  const y = sideDollars(row.bidPrem);
+  const a = x || 0;
+  const b = y || 0;
+  const k = a + b > prem ? prem / (a + b) : 1;
+  return { ask: a * k, bid: b * k, none: Math.max(0, prem - (a + b) * k), askStated: x !== null, bidStated: y !== null };
 }
 
-export function askShareRead(row) {
-  const { share, classified } = askShare(row);
-  let lean = null;
-  if (share !== null && classified !== null && classified >= ASK_SHARE_RULE.classifiedMin) {
-    if (share >= ASK_SHARE_RULE.askAt) lean = "ask";
-    else if (share <= ASK_SHARE_RULE.bidAt) lean = "bid";
+const whole = (v) => +(v * 100).toFixed(0);
+
+export function askShare(rows) {
+  let ask = 0;
+  let bid = 0;
+  let prem = 0;
+  let any = false;
+  for (const row of [].concat(rows || [])) {
+    const part = askSplit(row);
+    if (!part) continue;
+    prem += part.ask + part.bid + part.none;
+    if (part.askStated && part.bidStated) {
+      ask += part.ask;
+      bid += part.bid;
+      any = true;
+    }
   }
-  return { share, classified, lean };
+  if (!any) return { share: null, classified: null };
+  return { share: ask + bid > 0 ? ask / (ask + bid) : null, classified: (ask + bid) / prem };
+}
+
+export function askShareRead(rows) {
+  const { share, classified } = askShare(rows);
+  if (classified === null) return { share, classified, side: null, lean: null };
+  let side = "thin";
+  if (share !== null && whole(classified) >= whole(ASK_SHARE_RULE.classifiedMin)) {
+    if (whole(share) >= whole(ASK_SHARE_RULE.askAt)) side = "ask";
+    else if (whole(share) <= whole(ASK_SHARE_RULE.bidAt)) side = "bid";
+    else side = "mixed";
+  }
+  return { share, classified, side, lean: side === "ask" || side === "bid" ? side : null };
 }
