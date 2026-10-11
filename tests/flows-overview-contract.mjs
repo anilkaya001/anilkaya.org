@@ -1068,10 +1068,10 @@ try {
     eq((await page.locator("#ccWatchSub").textContent()).trim(), "0", "with its count beside the title");
     await page.unroute("**/api/flows/board?side=watch");
 
-    const todayTRT = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(new Date());
+    const todayET = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
     for (const [side, rows] of [["long", bullRows], ["short", bearRows]]) {
       await page.route("**/api/flows/board?side=" + side, (route) => route.fulfill({ status: 200, contentType: "application/json",
-        body: JSON.stringify(board(side, rows, todayTRT, { deep: 4 })) }));
+        body: JSON.stringify(board(side, rows, todayET, { deep: 4 })) }));
     }
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccMetaDate[datetime]", { timeout: 15000 });
