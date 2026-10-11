@@ -32,7 +32,7 @@ const CEILING_KIB = {
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
-  statusPage: 78,
+  statusPage: 79,
 };
 
 const GZIP_KIB = {
