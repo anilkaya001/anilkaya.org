@@ -116,3 +116,126 @@ export function vendorHandler(vendor) {
     res.end(out.raw ? out.body : JSON.stringify(out.body));
   };
 }
+
+export function createVirtualTimers(clock) {
+  let seq = 0;
+  const list = new Map();
+  return {
+    set(fn, ms) {
+      const id = ++seq;
+      list.set(id, { at: clock() + ms, fn });
+      return id;
+    },
+    clear(id) { list.delete(id); },
+    fire(now = clock()) {
+      let n = 0;
+      for (const [id, t] of Array.from(list)) {
+        if (t.at > now) continue;
+        list.delete(id);
+        t.fn();
+        n++;
+      }
+      return n;
+    },
+    pending: () => list.size,
+  };
+}
+
+export function createFakeVendorSocket({ clock, refuse = new Set(), autoOpen = true } = {}) {
+  const fake = {
+    clock, refuse, autoOpen, urls: [], times: [], conns: [], joins: [], connectCalls: 0, failNext: 0, ackSilent: false,
+    connect(url) {
+      fake.connectCalls++;
+      fake.urls.push(url);
+      fake.times.push(clock());
+      if (fake.failNext > 0) {
+        fake.failNext--;
+        const c = makeConn(fake, url, false);
+        queueMicrotask(() => { c.dispatch("error", { message: "connect failed " + url }); c.shut(1006); });
+        return c.api;
+      }
+      const c = makeConn(fake, url, true);
+      fake.conns.push(c);
+      if (fake.autoOpen) queueMicrotask(() => c.open());
+      return c.api;
+    },
+    current: () => fake.conns.filter((c) => c.state === "open" || c.state === "connecting").at(-1) || null,
+    openCount: () => fake.conns.filter((c) => c.state === "open").length,
+    push(channel, payload) {
+      let n = 0;
+      for (const c of fake.conns) if (c.state === "open" && c.joined.has(channel)) { c.deliver(JSON.stringify([channel, payload])); n++; }
+      return n;
+    },
+    pushRaw(text) {
+      for (const c of fake.conns) if (c.state === "open") c.deliver(text);
+    },
+    dropAll(code = 1006) { for (const c of fake.conns) if (c.state === "open") c.shut(code); },
+    joined: () => Array.from(new Set(fake.conns.filter((c) => c.state === "open").flatMap((c) => Array.from(c.joined)))).sort(),
+  };
+  return fake;
+}
+
+function makeConn(fake, url, accept) {
+  const listeners = { open: [], message: [], close: [], error: [] };
+  const conn = { state: "connecting", joined: new Set(), sent: [], closedBy: null, url };
+  const dispatch = (type, ev) => { for (const fn of listeners[type].slice()) fn(ev); };
+  conn.dispatch = dispatch;
+  conn.open = () => {
+    if (conn.state !== "connecting") return;
+    conn.state = "open";
+    dispatch("open", {});
+  };
+  conn.deliver = (text) => { if (conn.state === "open") dispatch("message", { data: text }); };
+  conn.shut = (code = 1000) => {
+    if (conn.state === "closed") return;
+    conn.state = "closed";
+    dispatch("close", { code, reason: "" });
+  };
+  conn.api = {
+    get readyState() { return conn.state === "open" ? 1 : conn.state === "connecting" ? 0 : 3; },
+    addEventListener(type, fn) { if (listeners[type]) listeners[type].push(fn); },
+    removeEventListener(type, fn) { if (listeners[type]) listeners[type] = listeners[type].filter((x) => x !== fn); },
+    send(text) {
+      if (conn.state !== "open") throw new Error("socket is not open");
+      let msg;
+      try { msg = JSON.parse(text); } catch { return; }
+      conn.sent.push(msg);
+      if (!msg || msg.msg_type !== "join" || typeof msg.channel !== "string") return;
+      fake.joins.push(msg.channel);
+      const base = msg.channel.split(":")[0];
+      if (fake.ackSilent) return;
+      if (fake.refuse.has(base) || fake.refuse.has(msg.channel)) {
+        conn.deliver(JSON.stringify([msg.channel, { response: { error: "not permitted" }, status: "error" }]));
+        return;
+      }
+      conn.joined.add(msg.channel);
+      conn.deliver(JSON.stringify([msg.channel, { response: {}, status: "ok" }]));
+    },
+    close(code = 1000) {
+      conn.closedBy = "client";
+      conn.shut(code);
+    },
+  };
+  void accept;
+  return conn;
+}
+
+export const socketPrice = (ticker, close, time, vol = 1000000) => ({ ticker, close: String(close), time, vol });
+
+export const socketGex = (ticker, timestamp, price = "100.5", oi = "-262444980.31", vol = "-934307209.58", dir = "-9372185.61") => ({
+  ticker, timestamp, price, gamma_per_one_percent_move_oi: oi, gamma_per_one_percent_move_vol: vol, gamma_per_one_percent_move_dir: dir,
+  delta_per_one_percent_move_oi: "", charm_per_one_percent_move_oi: "-1677926539943.05", vanna_per_one_percent_move_oi: "2842602508.57",
+});
+
+export function socketAlert(vendor, n) {
+  const row = vendor.alertAt(n);
+  const { created_at: createdAt, ...rest } = row;
+  void createdAt;
+  return {
+    ...rest, total_premium: Number(row.total_premium), total_ask_side_prem: Number(row.total_ask_side_prem),
+    total_bid_side_prem: Number(row.total_bid_side_prem), underlying_price: Number(row.underlying_price),
+    executed_at: row.end_time,
+  };
+}
+
+export const socketNews = (headline, timestamp, tickers = []) => ({ headline, timestamp, source: "aggregator", tickers, is_trump_ts: false });

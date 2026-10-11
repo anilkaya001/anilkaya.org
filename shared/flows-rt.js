@@ -112,7 +112,8 @@ export const RT_UPSTREAM = Object.freeze({
 
 export const RT_UPSTREAM_API = Object.freeze({
   methods: Object.freeze(["start(plan, handlers)", "stop()", "tick(now)", "paused(now)", "state()"]),
-  plan: Object.freeze(["topics", "ready()", "session()", "phase()", "names()", "gex()", "base()", "stage(ticker)"]),
+  optional: Object.freeze(["park()"]),
+  plan: Object.freeze(["topics", "ready()", "session()", "phase()", "names()", "focus()", "gex()", "base()", "stage(ticker)"]),
   frame: Object.freeze(["k", "readAt", "items", "vendorAt", "meta", "full", "answered"]),
   error: Object.freeze(["k", "at", "code", "status", "throttled", "retryAt"]),
 });
@@ -131,6 +132,8 @@ export function rtSwitches(env) {
     audience: word(e.FLOWS_RT_AUDIENCE) === "members" ? "members" : "owner",
     users: listed.split(",").map(word).filter((x) => /^[a-z0-9_.-]{3,32}$/.test(x)),
     hint: RT_HINTS.includes(hint) ? hint : null,
+    upstream: word(e.FLOWS_RT_UPSTREAM) === "socket" ? "socket" : "rest",
+    socketHours: word(e.FLOWS_RT_SOCKET_HOURS) === "session" ? "session" : "rth",
   };
 }
 
