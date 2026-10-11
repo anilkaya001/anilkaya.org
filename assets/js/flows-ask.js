@@ -22,10 +22,7 @@
 
   function stampSaid(at) {
     if (typeof at !== "string" || at.trim() === "") return null;
-    const ms = Date.parse(at);
-    if (!isFinite(ms)) return at;
-    const iso = new Date(ms).toISOString();
-    return iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC";
+    return F.stamp(at) || at;
   }
 
   const status = document.getElementById("askStatus") || app.appendChild(h("p", { class: "visually-hidden", id: "askStatus", role: "status" }));
@@ -209,8 +206,8 @@
     }));
   }
 
-  const R_SPENT = "The free daily allowance for the model is spent, and it resets at 00:00 UTC.";
-  const R_BUDGET = "The model budget this site allows itself for one day is spent, and it resets at 00:00 UTC.";
+  const R_SPENT = "The free daily allowance for the model is spent, and it resets at 03:00 TRT (00:00 UTC).";
+  const R_BUDGET = "The model budget this site allows itself for one day is spent, and it resets at 03:00 TRT (00:00 UTC).";
   const R_BUSY = "The model had no capacity for this question just now, and nothing of today's allowance went on it.";
   const R_PLAN = "The model this site asks for is not available on the plan it runs on, which is a configuration fault here rather than a limit anyone hit.";
   const LLM_REASONS = {
@@ -357,7 +354,7 @@
     }
     const allowance = isNum(spend.allowanceNeurons), left = isNum(spend.remaining), spent = isNum(spend.neurons);
     const calls = isNum(spend.calls), tokIn = isNum(spend.tokensIn), tokOut = isNum(spend.tokensOut);
-    if (text(spend.day)) how.push("The day is " + spend.day + ", counted in UTC because that is the calendar the allowance resets on — at 00:00 UTC, not at midnight where you are.");
+    if (text(spend.day)) how.push("The day is " + spend.day + ", counted in UTC because that is the calendar the allowance resets on — at 03:00 TRT (00:00 UTC), not at midnight where you are.");
     if (calls !== null) how.push("This site has asked the model " + figure(calls) + " time" + (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null ? ", for " + figure(tokIn) + " tokens in and " + figure(tokOut) + " tokens out. Tokens are what the model itself reported; the credit figure is arithmetic over them at the published rate for the model that answered each call, done when this page was drawn rather than stored, so a corrected rate repairs the whole history rather than leaving it stamped at yesterday's." : "."));
     how.push("Cloudflare is the authority on the allowance and this meter is not. It can only see calls this site made; anything else on the same account draws from the same pool and is invisible here. If a question comes back saying the allowance is spent while this still shows credits left, that difference is the answer — something else spent them — and the answer will say so.");
     if (left === null || allowance === null) {

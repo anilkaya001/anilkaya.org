@@ -692,7 +692,7 @@
         title: "Score track",
         asOf: payload && payload.sessionDate ? "Session " + F.day(payload.sessionDate) : null,
         lead: "The same score the board prints after each close, traced name by name across sessions. The boards show a ranking's two tails; this page keeps the whole distribution, so a name drifting toward a board is visible before the session it arrives. A gap means the name was not scored that session — never zero.",
-        facts: [["Built", Number.isFinite(built) ? new Date(built).toISOString().slice(0, 16).replace("T", " ") + " UTC" : null], ["Payload", isNum(payload && payload.v) === null ? null : "v" + payload.v]],
+        facts: [["Built", F.stamp(built)], ["Payload", isNum(payload && payload.v) === null ? null : "v" + payload.v]],
         sections: [{ title: "Window", lines: [status] }, ctx ? { title: "This session", lines: [changeSaid(), staleSaid()] } : null].filter(Boolean).concat(sections.length ? sections : [{ title: "Basis", lines: ["This payload carried no notes block, so the page cannot say in the pipeline's own words how the score was built or what a gap means. Treat everything here as unexplained."] }]),
         notes: ["Zero vendor calls: the track is a view of the score archive the pipeline already holds, rebuilt from it on every run."],
       };
