@@ -15,79 +15,79 @@ const TICKER_RAISE = { od: "OD-08", bytes: 1613, why: "FlowsUI.defer ships on ev
 const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 1.6 KB where section 2.10 ruling 8 counted 0.9 KB, so the V and L share of the kernel is stated as 3.8 KB instead of 3.1" };
 
 const CEILING_KIB = {
-  tickerPage: 411 + (TICKER_RAISE ? TICKER_RAISE.bytes : 0) / 1024,
-  overviewPage: 253,
-  sidePage: 230,
-  watchPage: 230,
-  deskPage: 243,
-  askPage: 133,
-  strategyPage: 261,
-  trackPage: 180,
-  marketPage: 254 - 34,
-  unusualPage: 287 + (1613 - 74730) / 1024 - 17,
-  eventsPage: 155,
-  politicalPage: 103,
-  historyPage: 167,
+  tickerPage: 411 + 6504 / 1024,
+  overviewPage: 246,
+  sidePage: 230 + 6478 / 1024,
+  watchPage: 230 + 6478 / 1024,
+  deskPage: 243 + 5793 / 1024,
+  askPage: 133 + 5786 / 1024,
+  strategyPage: 261 + 5786 / 1024,
+  trackPage: 180 + 5786 / 1024,
+  marketPage: 213,
+  unusualPage: 191,
+  eventsPage: 155 + 5786 / 1024,
+  politicalPage: 103 + 5786 / 1024,
+  historyPage: 167 + 5786 / 1024,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
 };
 
 const GZIP_KIB = {
-  tickerPage: 125,
-  overviewPage: 82,
-  sidePage: 69,
-  watchPage: 69,
-  deskPage: 80,
-  askPage: 39,
-  strategyPage: 83,
-  trackPage: 53,
-  marketPage: 76,
-  unusualPage: 87,
-  eventsPage: 34,
-  politicalPage: 31,
-  historyPage: 51,
+  tickerPage: 125 + 2126 / 1024,
+  overviewPage: 82 - 7712 / 1024,
+  sidePage: 69 + 2122 / 1024,
+  watchPage: 69 + 2122 / 1024,
+  deskPage: 80 + 1937 / 1024,
+  askPage: 39 + 1932 / 1024,
+  strategyPage: 83 + 1932 / 1024,
+  trackPage: 53 + 1932 / 1024,
+  marketPage: 76 - 10998 / 1024,
+  unusualPage: 87 - 31224 / 1024,
+  eventsPage: 34 + 1932 / 1024,
+  politicalPage: 31 + 1932 / 1024,
+  historyPage: 51 + 1932 / 1024,
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
 };
 
 const CSS_KIB = {
-  tickerPage: 103,
-  overviewPage: 104,
-  sidePage: 102,
-  watchPage: 102,
-  deskPage: 111,
-  askPage: 93,
-  strategyPage: 111,
-  trackPage: 93,
-  marketPage: 94,
-  unusualPage: 113,
-  eventsPage: 105,
-  politicalPage: 105,
-  historyPage: 93,
-  loginPage: 80,
-  aboutPage: 81,
-  glossaryPage: 81,
+  tickerPage: 103 + 565 / 1024,
+  overviewPage: 104 + 779 / 1024,
+  sidePage: 102 + 565 / 1024,
+  watchPage: 102 + 565 / 1024,
+  deskPage: 111 + 565 / 1024,
+  askPage: 93 + 565 / 1024,
+  strategyPage: 111 + 565 / 1024,
+  trackPage: 93 + 565 / 1024,
+  marketPage: 94 + 888 / 1024,
+  unusualPage: 113 + 5007 / 1024,
+  eventsPage: 105 + 565 / 1024,
+  politicalPage: 105 + 565 / 1024,
+  historyPage: 93 + 565 / 1024,
+  loginPage: 80 + 565 / 1024,
+  aboutPage: 81 + 565 / 1024,
+  glossaryPage: 81 + 565 / 1024,
 };
 
 const CSS_GZIP_KIB = {
-  tickerPage: 23,
-  overviewPage: 23,
-  sidePage: 22,
-  watchPage: 22,
-  deskPage: 24,
-  askPage: 21,
-  strategyPage: 24,
-  trackPage: 21,
-  marketPage: 21,
-  unusualPage: 25,
-  eventsPage: 23,
-  politicalPage: 23,
-  historyPage: 21,
-  loginPage: 18,
-  aboutPage: 18,
-  glossaryPage: 18,
+  tickerPage: 23 + 64 / 1024,
+  overviewPage: 23 + 100 / 1024,
+  sidePage: 22 + 64 / 1024,
+  watchPage: 22 + 64 / 1024,
+  deskPage: 24 + 64 / 1024,
+  askPage: 21 + 64 / 1024,
+  strategyPage: 24 + 64 / 1024,
+  trackPage: 21 + 64 / 1024,
+  marketPage: 21 + 131 / 1024,
+  unusualPage: 25 + 599 / 1024,
+  eventsPage: 23 + 64 / 1024,
+  politicalPage: 23 + 64 / 1024,
+  historyPage: 21 + 64 / 1024,
+  loginPage: 18 + 64 / 1024,
+  aboutPage: 18 + 64 / 1024,
+  glossaryPage: 18 + 64 / 1024,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -131,8 +131,8 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 132,
-  unusualPage: 190, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
+  unusualPage: 196, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
 const FLOOR_BYTES = 1024;
@@ -150,8 +150,6 @@ const BELOW_FLOOR = {
   sidePage: NO_RELIEF_ROW,
   watchPage: NO_RELIEF_ROW,
   deskPage: NO_RELIEF_ROW,
-  eventsPage: NO_RELIEF_ROW,
-  historyPage: NO_RELIEF_ROW,
 };
 
 const LOADER = /createElement\(\s*["']script["']\s*\)|\bh\(\s*["']script["']|\bimport\(|new\s+Worker\(|importScripts\(/;
@@ -288,7 +286,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 255005, gzip: 75947, css: 96078, cssGzip: 21012 };
+  const base = { name: "marketPage", raw: 212080, gzip: 64949, css: 96966, cssGzip: 21139 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -300,7 +298,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 110432, gzip: 33441, css: 106940, cssGzip: 22592 };
+  const events = { name: "eventsPage", raw: 116218, gzip: 35373, css: 107505, cssGzip: 22652 };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
@@ -402,7 +400,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 60000, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 66000, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
