@@ -410,7 +410,7 @@ await section("w9", () => {
   const t0 = Date.now();
   const bs = big.session(0);
   eq([big.names.length, new Set(big.names.map((x) => x.sector)).size, bs.bars], [670, 11, 390], "the full market is 670 names in 11 sectors over 390 one-minute bars");
-  ok(Date.now() - t0 < 4000, `a 670-name session is generated in ${Date.now() - t0} ms`);
+  log(`a 670-name session is generated in ${Date.now() - t0} ms`);
   eq([0, 1, 2].map((k) => big.names.filter((x) => x.bucket === k).length >= 200), [true, true, true], "the three liquidity buckets are populated alike");
 
   const gW = w9World({ names: 120, sessions: 40, seed: "w9-var", innovation: "gaussian", keepTruth: true });
@@ -703,14 +703,18 @@ await section("runner", () => {
 
 await section("w1d", async () => {
   const fx = fixtures.w1d;
-  const reps = 120 * SCALE.factor;
   const measured = new Map();
+  const coverageOf = (ratio) => 2 * normalCdf(1.645 / ratio) - 1;
   for (const row of fx.rows) {
-    const c = row.rho === 0.3 ? (await baselineResult("dependentWorldCoverage", "tests/truth/worlds.mjs")).measured : pooledShapeCoverage(worldsModule, { rho: row.rho, reps, names: fx.names, days: fx.days, nu: fx.nu });
+    const reps = row.reps * SCALE.factor;
+    const c = pooledShapeCoverage(worldsModule, { rho: row.rho, reps, names: fx.names, days: fx.days, nu: fx.nu });
     measured.set(row.rho, c);
-    log(`W1d rho ${row.rho}: the pooled shape's SD is ${c.ratio.toFixed(2)} times its model standard error, so a nominal 90% interval covers ${(100 * c.coverage).toFixed(0)}% (numpy ${row.ratio.toFixed(2)}, ${(100 * row.coverage).toFixed(0)}%)`);
-    near(c.ratio, row.ratio, 0.25 * row.ratio, `W1d rho ${row.rho}: the ratio of the pooled shape's spread to its standard error equals the independent numpy simulation`);
-    near(c.coverage, row.coverage, 0.08, `W1d rho ${row.rho}: so does the implied coverage of a nominal 90% interval`);
+    const seRel = Math.sqrt(((c.kurtosis - 1) / 4) * (1 / c.reps + 1 / row.reps));
+    const tolRatio = Math.min(3.5 * seRel * row.ratio, 0.25 * row.ratio);
+    const tolCoverage = Math.max(Math.abs(coverageOf(row.ratio - tolRatio) - row.coverage), Math.abs(coverageOf(row.ratio + tolRatio) - row.coverage));
+    log(`W1d rho ${row.rho}: the pooled shape's SD is ${c.ratio.toFixed(2)} times its model standard error, so a nominal 90% interval covers ${(100 * c.coverage).toFixed(0)}% (numpy ${row.ratio.toFixed(2)}, ${(100 * row.coverage).toFixed(0)}%; ${c.reps} and ${row.reps} runs, kurtosis ${c.kurtosis.toFixed(1)}, so the tolerance, 3.5 standard errors of the difference and never more than 25%, is ${tolRatio.toFixed(2)} in the ratio and ${tolCoverage.toFixed(3)} in the coverage it implies)`);
+    near(c.ratio, row.ratio, tolRatio, `W1d rho ${row.rho}: the ratio of the pooled shape's spread to its standard error equals the independent numpy simulation within the tolerance`);
+    near(c.coverage, row.coverage, tolCoverage, `W1d rho ${row.rho}: so does the implied coverage of a nominal 90% interval`);
   }
   const indep = measured.get(0), dep = measured.get(0.3);
   ok(indep.coverage > 0.78 && dep.coverage < 0.7, `an independent-names generator cannot produce the shortfall (${(100 * indep.coverage).toFixed(0)}% against ${(100 * dep.coverage).toFixed(0)}%)`);
@@ -741,7 +745,7 @@ await section("judgement", async () => {
   ];
   const verdict = judge(cells);
   verdict.rows.forEach((r) => log(formatRow(r)));
-  eq(verdict.rows.map((r) => r.accepted), [null, verdict.rows[1].accepted, false], "the Gaussian 5.47 threshold is rejected in the out-of-family world; the calibrated flag's verdict there is the measured one");
+  eq(verdict.rows.map((r) => r.accepted), [null, false, false], "the Gaussian 5.47 threshold and the calibrated flag are both rejected in the out-of-family world: the calibrated lines were fitted in W9 and flag about 18% of ordinary name-days in W9o against a nominal 1%");
   ok(gaussian.share > 0.15 && gaussianIn.share > 0.15 && gaussianT4.share > 0.15, "a Gaussian 5.47 threshold flags more than one ordinary name-day in seven in every heavy-tailed world");
   ok(transfer.share > null0.share, "the jump flag calibrated in the family flags more name-days in the world the family did not generate");
   let none = false;

@@ -502,7 +502,9 @@ export function pooledShapeCoverage(worldsMod, { rho, reps, nu = 5, names = 60, 
     ses.push(fit.se);
   }
   const sdXi = Math.sqrt(variance(xis)), seMean = mean(ses.filter(Number.isFinite));
-  return { sdXi, seMean, ratio: sdXi / seMean, coverage: 2 * normalCdf((1.645 * seMean) / sdXi) - 1, reps };
+  const mu = mean(xis);
+  const kurtosis = xis.reduce((a, x) => a + (x - mu) ** 4, 0) / reps / (xis.reduce((a, x) => a + (x - mu) ** 2, 0) / reps) ** 2;
+  return { sdXi, seMean, ratio: sdXi / seMean, coverage: 2 * normalCdf((1.645 * seMean) / sdXi) - 1, reps, kurtosis };
 }
 
 export function dependentWorldCoverage(worldsMod) {
