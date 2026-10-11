@@ -143,8 +143,8 @@ inputMoves("a file moved to another domain", "docs/modules.json", (t) => t.repla
   const rows = idx.split("\n").filter((l) => l.startsWith("| `"));
   eq(rows.length, all.length, "the index lists every file once");
   ok(idx.includes("`shared/flows-rt-hub.js#RtHub`"), "an export is an anchor of the form file#symbol");
-  const hubLine = idx.split("\n").find((l) => l.startsWith("| `shared/flows-rt.js` |"));
-  ok(/\| [^|]*\brt\b[^|]*\|$/.test(hubLine), "the suites column names the suite that reaches shared/flows-rt.js");
+  const hubLine = idx.split("\n").find((l) => l.startsWith("| `shared/flows-rt-routes.js` |"));
+  ok(/\| [^|]*\brt\b[^|]*\|$/.test(hubLine), "the suites column names the suite that reaches shared/flows-rt-routes.js");
   const archLine = idx.split("\n").find((l) => l.startsWith("| `tests/architecture.mjs` |"));
   ok(archLine && archLine.includes("architecture"), "a suite file lists its own suite");
   ok(!/\*\*/.test(idx.split("\n").filter((l) => l.startsWith("| `")).join("\n")), "no ** cover leaks into a suites column");
