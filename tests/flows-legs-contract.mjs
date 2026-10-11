@@ -962,7 +962,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
     "universe and regime publish one at a time, each as its own isolated stage, so a refused universe cannot take the regime and every card-x down with it");
   const own = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/ownership.mjs"), "utf8");
-  ok(/volume-and-ratio`, \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
+  ok(/pathFor\("shorts-volume", \{ ticker: t \}\), \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
 }
 
 {

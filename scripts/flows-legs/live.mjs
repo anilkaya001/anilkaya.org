@@ -7,6 +7,7 @@ import {
 import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../shared/flows-focus.js";
 import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
 
@@ -150,16 +151,16 @@ export async function runLive({
   const etfRaws = {};
   await Promise.all([
     ...SECTOR_TIDES.map(async ({ sector }) => {
-      sectorRaws[sector] = await read(`/api/market/${encodeURIComponent(sector)}/sector-tide`);
+      sectorRaws[sector] = await read(pathFor("sector-tide", { sector }));
     }),
-    ...BREADTH_ETFS.map(async (t) => { etfRaws[t] = await read(`/api/market/${t}/etf-tide`); }),
+    ...BREADTH_ETFS.map(async (t) => { etfRaws[t] = await read(pathFor("etf-tide", { ticker: t })); }),
   ]);
   const [zeroDte, weekly] = await Promise.all([
-    read("/api/net-flow/expiry", { expiration: "zero_dte", moneyness: "all", tide_type: "all" }),
-    read("/api/net-flow/expiry", { expiration: "weekly", moneyness: "all", tide_type: "all" }),
+    read(pathFor("net-flow-expiry"), { expiration: "zero_dte", moneyness: "all", tide_type: "all" }),
+    read(pathFor("net-flow-expiry"), { expiration: "weekly", moneyness: "all", tide_type: "all" }),
   ]);
   const breadthAt = now();
-  const strip = await read("/api/screener/stocks", { ticker: plan.names.join(","), limit: 500 });
+  const strip = await read(pathFor("screener-stocks"), { ticker: plan.names.join(","), limit: 500 });
   const stripAt = now();
 
   const prevAlerts = await readStored("live:alerts");
@@ -169,7 +170,7 @@ export async function runLive({
   for (let i = 0; i < LIVE_BUDGET.alertPages; i++) {
     const params = { limit: LIVE_BUDGET.alertLimit, newer_than: alertPlan.newerThan };
     if (olderThan) params.older_than = olderThan;
-    const body = await read("/api/option-trades/flow-alerts", params);
+    const body = await read(pathFor("flow-alerts"), params);
     const rows = rowsOf(body);
     pages.push({ body, full: rows.length >= LIVE_BUDGET.alertLimit });
     if (i === 0 && body && !failed(body)) {
@@ -183,7 +184,7 @@ export async function runLive({
 
   const alertsAt = now();
 
-  const newsRaw = await read("/api/news/headlines", { limit: 100 });
+  const newsRaw = await read(pathFor("news"), { limit: 100 });
   const newsAt = now();
   const at = now();
 

@@ -2,6 +2,7 @@ import { TICKER_PANELS, SENTINEL_KEYS } from "./flows-panels.js";
 import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structures.js";
+import { CLAIM_LINES } from "./flows-fact-ids.js";
 
 export const NEURON_CONTEXT_VERSION = 6;
 export const NEURON_MAX_IDEAS = 3;
@@ -1151,14 +1152,7 @@ export const ENGINE_LINES = Object.freeze({
   MAX_IDEAS: 3, MAX_STRUCTURES: 5,
 });
 export const RULE_FACT = Object.freeze({ iv: "iv.pctile.30.1y", vrp: "vrp.rel.21", term: "term.slope.30_90.exEvent", skew: "skew.rr25.30.pct", event: "move.event.ratio" });
-const IV_CLAIM = Object.freeze({ hi: ENGINE_LINES.IV_HIGH, lo: ENGINE_LINES.IV_LOW, strict: true });
-const SKEW_CLAIM = Object.freeze({ hi: ENGINE_LINES.SKEW_STEEP, lo: ENGINE_LINES.SKEW_FLAT, strict: false });
-export const CLAIM_LINES = Object.freeze({
-  "iv.pctile.30.1y": IV_CLAIM,
-  "iv.pct.30": IV_CLAIM,
-  "iv.rank.1y": IV_CLAIM,
-  "skew.rr25.30.pct": SKEW_CLAIM,
-});
+export { CLAIM_LINES };
 const STATE_FACT = Object.freeze({ pinned: "level.magnet", other: "level.flip", book: "gex.book" });
 
 function structureBrief(st) {

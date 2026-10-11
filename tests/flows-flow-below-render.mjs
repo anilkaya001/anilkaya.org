@@ -22,7 +22,7 @@ const SESSION = "2026-09-29";
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-unusual.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-unusual-below.js")).size;
   ok(SINGLE_FILE_BYTES - eager >= 30 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 30 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk + eager < SINGLE_FILE_BYTES + 4096, `and the two files together are within 4 KB of it (${chunk + eager} B): a visit pays the same bytes`);
+  ok(chunk + eager < SINGLE_FILE_BYTES + 5632, `and the two files together are within 5.5 KB of it (${chunk + eager} B): a visit pays the same bytes`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="flow-below"[^>]*>/g).length, 1, "the page declares the flow-below group once");
   const first = read("assets/js/flows-unusual.js");

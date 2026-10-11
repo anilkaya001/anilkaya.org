@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
 import { GLOSSARY } from "../shared/flows-glossary.js";
+import { workerSource } from "./lib/source-scan.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -114,7 +115,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 }
 
 {
-  const src = readRepo("worker.js");
+  const src = workerSource();
   ok(/FLOWS_FRONT_DOOR/.test(src), "the Worker reads the front-door switch");
   const toml = readRepo("wrangler.toml");
   ok(/^FLOWS_FRONT_DOOR\s*=\s*"on"/m.test(toml), "and wrangler.toml states it on");

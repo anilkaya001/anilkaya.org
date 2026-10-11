@@ -1580,7 +1580,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "UW-F12: a ladder that fills the vendor's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE - 1), { spot: 200 }).truncated === false, "and one row short of a full page is not");
   const pipe = nightlySource();
-  ok(/spot-exposures\/strike`, \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),
+  ok(/pathFor\("spot-exposures-strike", \{ ticker \}\), \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),
      "and the nightly asks for exactly that page through the same constant");
 
   const priceOnly = [{ price: "100", call_gamma_ask: "1e8", call_gamma_bid: "1e8", put_gamma_ask: "-1e8", put_gamma_bid: "-1e8", call_gamma_oi: "1e9", put_gamma_oi: "-1e9" }];

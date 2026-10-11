@@ -1,11 +1,15 @@
 import { aiChain, aiCallSignature, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS } from "./flows-ai.js";
 import {
   READING_VERSION, READING_MAX_TOKENS, READING_TEMPERATURE, heldTags, readingFallback, readingShape, absentShape, hasSubstance, renderForReading, promptForReading,
-  parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS,
+  parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS, readIndex,
 } from "./flows-reading.js";
 import { KINDS } from "./flows-dossier.js";
+import { emitFailure } from "./flows-log.js";
+import { sessionsBetween } from "./flows-cross.js";
+import { SCREEN_LINES } from "./flows-neuron-screen.js";
 
 export const READ_SCOPE = "read:";
+export const READ_GEN_SCOPE = "gen:read:";
 export const READ_GENERATING_MS = 90 * 1000;
 export const READ_LIMITED_RETRY_S = 60;
 export const READ_BOX_MS = 1500;
@@ -112,8 +116,8 @@ const BOXED = Symbol("boxed");
 const flights = new Map();
 
 async function generate({ env, deps, ticker, dossier, tags, fingerprint, startedAt, chain }) {
-  const scope = READ_SCOPE + ticker;
-  const store = (summary, shape, llm, model, guard, refused) => deps.write(scope, fingerprint, summary, { v: 1, kind: "reading", shape, refused: refused || [] }, llm, model, guard, startedAt).catch(() => {});
+  const store = (summary, shape, llm, model, guard, refused) => deps.write((llm ? READ_SCOPE : READ_GEN_SCOPE) + ticker, fingerprint, summary,
+    { v: 1, kind: "reading", shape, refused: refused || [] }, llm, model, guard, startedAt).catch(() => {});
   const rendered = renderForReading(dossier);
   const prompt = promptForReading(dossier, tags, rendered);
   let used = null;
@@ -167,6 +171,52 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
   return { stored: "ready", shape };
 }
 
+function heldNote(ticker, sameDossier) {
+  if (sameDossier) return "This reading of " + ticker + " was written by another model configuration and is kept until a reading by the current one is written and passes the checks.";
+  return "This reading was written for an earlier dossier of " + ticker + " and is kept until a reading of the current one is written and passes the checks.";
+}
+
+function sessionsBehind(then, now) {
+  if (then === now) return 0;
+  if (!then || !now) return null;
+  if (then > now) return 0;
+  return sessionsBetween(then, now);
+}
+
+export function heldReading(kept, dossier, tier, ticker, tags) {
+  if (!kept || !isObj(dossier) || tier === "expired") return null;
+  const behind = sessionsBehind(kept.shape.session || null, dossier.expectedSession || null);
+  if (behind === null || behind >= SCREEN_LINES.EXPIRED_SESSIONS) return null;
+  const index = readIndex(dossier);
+  const packets = isObj(dossier.packets) ? dossier.packets : {};
+  const cap = (c) => {
+    if (!isObj(c) || !isNum(c.grade)) return c;
+    const f = index.get(c.id);
+    const p = packets[c.kind];
+    const readable = f && !f.withheld && isNum(f.grade) && (f.status === "ok" || f.status === "partial");
+    const current = readable ? f.grade : Math.min(1, p && isNum(p.grade) ? p.grade : 1);
+    const top = behind > 0 ? Math.min(1, current) : current;
+    return c.grade > top ? { ...c, grade: top } : c;
+  };
+  const current = new Map((Array.isArray(tags) ? tags : []).map((t) => [t.code, t]));
+  const item = (it) => {
+    if (!isObj(it) || !Array.isArray(it.cites)) return it;
+    const out = { ...it, cites: it.cites.map(cap) };
+    if (typeof out.tag === "string" && !current.has(out.tag)) delete out.tag;
+    return out;
+  };
+  const list = (v) => (Array.isArray(v) ? v.map(item) : []);
+  const s = isObj(kept.shape.sections) ? kept.shape.sections : {};
+  const sections = { ...s, identity: item(s.identity || null), now: item(s.now || null), drivers: list(s.drivers), tensions: list(s.tensions), watch: list(s.watch) };
+  const cut = kept.fingerprint.indexOf("|");
+  const sameDossier = cut > 0 && kept.fingerprint.slice(0, cut) === dossier.fingerprint;
+  const keptTags = (Array.isArray(kept.shape.tags) ? kept.shape.tags : []).filter((t) => isObj(t) && current.has(t.code)).map((t) => {
+    const now = current.get(t.code);
+    return { code: now.code, label: now.label, sentence: now.sentence, evidence: now.evidence.slice() };
+  });
+  return { ...kept, shape: { ...kept.shape, sections, tags: keptTags }, note: heldNote(ticker, sameDossier) };
+}
+
 function fallbackShape({ dossier, tags, env, status, why, describe, guard, note, retryAfterS }) {
   const sections = readingFallback(dossier, tags);
   const shape = readingShape({ dossier, tags, sections, chosen: sections.tags, status, generated: false, provenance: fallbackProvenance(why, describe, guard), note: note || null, why });
@@ -204,6 +254,15 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
     return readyFrom(stored, { held: "floor" });
   }
 
+  const genScope = READ_GEN_SCOPE + ticker;
+  let attemptRead = null;
+  if (canModel && !storeDown) {
+    try {
+      attemptRead = Promise.resolve(deps.readRow(genScope)).then((row) => ({ row: storedFrom(row) }), () => ({ failed: true }));
+    } catch {
+      attemptRead = Promise.resolve({ failed: true });
+    }
+  }
   const assembling = Promise.resolve(deps.assemble({ own: true, now }));
   let result;
   if (isNum(opts.boxMs) && opts.boxMs > 0) {
@@ -231,11 +290,19 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
 
   if (good(stored) && stored.fingerprint === fingerprint) return readyFrom(stored, { held: "fingerprint" });
 
-  if (stored && stored.guard === "generating" && ageMs < READ_GENERATING_MS) return fb("generating", "generating");
+  const kept = good(stored) && stored.fingerprint.endsWith("|r" + READING_VERSION)
+    ? heldReading(stored, dossier, result.neuron ? result.neuron.tier : null, ticker, tags) : null;
+  const previous = (refreshing, otherwise) => (kept ? readyFrom(kept, { held: "previous", refreshing, note: kept.note }) : otherwise());
+  const read = await attemptRead;
+  if (read.failed) return previous(false, () => fb("fallback", "store"));
+  const attempt = read.row || (stored && !good(stored) ? stored : null);
+  const attemptAge = attempt && attempt.at !== null ? now - attempt.at : Infinity;
 
-  if (stored && !good(stored) && stored.guard !== "generating" && stored.guard) {
-    const wait = cooldownMs(stored.guard);
-    if (ageMs < wait) return fb("fallback", "cooldown", { guard: stored.guard, retryAfterS: Math.ceil((wait - ageMs) / 1000) });
+  if (attempt && attempt.guard === "generating" && attemptAge < READ_GENERATING_MS) return previous(true, () => fb("generating", "generating"));
+
+  if (attempt && attempt.guard !== "generating" && attempt.guard) {
+    const wait = cooldownMs(attempt.guard);
+    if (attemptAge < wait) return previous(false, () => fb("fallback", "cooldown", { guard: attempt.guard, retryAfterS: Math.ceil((wait - attemptAge) / 1000) }));
   }
 
   if (heldBack(result)) {
@@ -243,28 +310,28 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
     return fb("fallback", "limited", { retryAfterS: READ_LIMITED_RETRY_S });
   }
 
-  if (flights.has(ticker)) return fb("generating", "generating");
+  if (flights.has(ticker)) return previous(true, () => fb("generating", "generating"));
 
-  const marked = await deps.mark(scope, fingerprint, chain[0]);
-  if (marked.failed) return fb("fallback", "store");
-  if (!marked.startedAt) return fb("generating", "generating");
+  const marked = await deps.mark(genScope, fingerprint, chain[0]);
+  if (marked.failed) return previous(false, () => fb("fallback", "store"));
+  if (!marked.startedAt) return previous(true, () => fb("generating", "generating"));
 
   const work = generate({ env, deps, ticker, dossier, tags, fingerprint, startedAt: marked.startedAt, chain })
     .catch((error) => {
-      console.error(JSON.stringify({ message: "reading failed", ticker, error: error instanceof Error ? error.message : String(error) }));
-      return deps.write(scope, fingerprint, "", { v: 1, kind: "reading", shape: null, refused: [] }, false, chain[0], "unreachable:unreachable", marked.startedAt).catch(() => {});
+      emitFailure(console, "error", "reading failed", { ticker }, error);
+      return deps.write(genScope, fingerprint, "", { v: 1, kind: "reading", shape: null, refused: [] }, false, chain[0], "unreachable:unreachable", marked.startedAt).catch(() => {});
     })
     .finally(() => { if (flights.get(ticker) === work) flights.delete(ticker); });
   flights.set(ticker, work);
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work); else await work;
-  return fb("generating", "generating");
+  return previous(true, () => fb("generating", "generating"));
 }
 
 export async function readingSafe(env, ctx, ticker, deps, opts) {
   try {
     return await readingFor(env, ctx, ticker, deps, opts);
   } catch (error) {
-    console.error(JSON.stringify({ message: "reading unavailable", ticker, error: error instanceof Error ? error.message : String(error) }));
+    emitFailure(console, "error", "reading unavailable", { ticker }, error);
     return absentShape(ticker, { status: "unavailable", why: "error", note: "The reading for " + ticker + " could not be built.",
       provenance: "Deterministic reading: it could not be built, which is a fault on this side and not a fact about the name." });
   }

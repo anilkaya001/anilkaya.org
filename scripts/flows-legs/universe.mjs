@@ -1,6 +1,7 @@
 import { stampNow } from "./stamp.mjs";
 import { read, rowsOf, chunks, pastDeadline, freshStamp } from "./common.mjs";
 import { buildUniverse, addDays, vstr } from "../../shared/flows-cross.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const HARVEST_LIMIT = 500;
 
@@ -30,7 +31,7 @@ export async function harvestScreener(uw, {
   const readAt = stampNow();
   let pages = 0, calls = 0, truncated = false, repeated = false;
   for (let page = 0; page < maxPages; page++) {
-    const res = await read(uw, "/api/screener/stocks", {
+    const res = await read(uw, pathFor("screener-stocks"), {
       ...filters,
       order: "marketcap",
       order_direction: "desc",
@@ -59,7 +60,7 @@ export async function harvestScreener(uw, {
   };
 }
 
-export const HOLDINGS_PATH = "/api/etfs/QQQ/holdings";
+export const HOLDINGS_PATH = pathFor("etf-holdings", { ticker: "QQQ" });
 
 export async function readHoldings(uw, { path = HOLDINGS_PATH } = {}) {
   const res = await read(uw, path, {}, { envelope: true });
@@ -82,7 +83,7 @@ export function withPrefetched(uw, prefetched = new Map()) {
 export async function screenerByTicker(uw, tickers, { date = null } = {}) {
   const want = [...new Set((tickers || []).filter((t) => typeof t === "string" && t))];
   if (!want.length) return { rows: new Map(), missing: [], calls: 0, ok: true, error: null };
-  const res = await read(uw, "/api/screener/stocks", {
+  const res = await read(uw, pathFor("screener-stocks"), {
     ticker: want.join(","), limit: HARVEST_LIMIT, ...(date ? { date } : {}),
   });
   const rows = new Map();
@@ -107,7 +108,7 @@ export async function readFocusRows(uw, tickers, { date = null, readAt = stampNo
 }
 
 export async function readIndexRows(uw, { date = null, tickers = INDEX_TICKERS } = {}) {
-  const res = await read(uw, "/api/screener/stocks", {
+  const res = await read(uw, pathFor("screener-stocks"), {
     ticker: tickers.join(","), limit: HARVEST_LIMIT, ...(date ? { date } : {}),
   });
   const rows = new Map();
@@ -144,7 +145,7 @@ export async function readShortInterest(uw, tickers, {
       for (const t of group) unread.set(t, batchSilence("deadline"));
       continue;
     }
-    const res = await read(uw, "/api/short_screener", {
+    const res = await read(uw, pathFor("short-screener"), {
       tickers: group.join(","),
       limit: SHORT_LIMIT,
       ...(min ? { min_market_date: min } : {}),
@@ -193,7 +194,7 @@ export async function readInsiders(uw, tickers, {
         }
         break;
       }
-      const res = await read(uw, "/api/insider/transactions", {
+      const res = await read(uw, pathFor("insider-transactions"), {
         ticker_symbol: group.join(","),
         "form_types[]": ["4"],
         "transaction_codes[]": ["P", "S"],

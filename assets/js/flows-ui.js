@@ -262,6 +262,26 @@
     day: (d) => (isoDay(d) ? MON[+d.slice(5, 7) - 1] + " " + +d.slice(8, 10) : DASH),
     time: (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? ET_TIME.format(new Date(t)) + " ET" : DASH; },
     compact,
+    askSplit: (r) => {
+      const p = isNum(r && r.prem), side = (v) => { v = isNum(r && r[v]); return v !== null && v >= 0 ? v : null; }, x = side("askPrem"), y = side("bidPrem");
+      if (p === null || p <= 0) return null;
+      const a = x || 0, b = y || 0, k = a + b > p ? p / (a + b) : 1;
+      return { ask: a * k, bid: b * k, none: Math.max(0, p - (a + b) * k), askStated: x !== null, bidStated: y !== null };
+    },
+    askShare: (rows) => {
+      let a = 0, b = 0, p = 0, any = false;
+      for (const r of [].concat(rows || [])) {
+        const x = F.askSplit(r);
+        if (!x) continue;
+        p += x.ask + x.bid + x.none;
+        if (x.askStated && x.bidStated) { a += x.ask; b += x.bid; any = true; }
+      }
+      if (!any) return { share: null, classified: null, side: null };
+      const share = a + b ? a / (a + b) : null, classified = (a + b) / p, w = (v) => +(v * 100).toFixed(0);
+      return { share, classified, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
+    },
+    askSaid: (x) => (!x || x.classified === null ? DASH : x.share === null ? "none sided" : F.pct(x.share, 0) + " ask side " + MID + " " + F.pct(x.classified, 0) + " sided"),
+    askLabel: "Ask-side share of the premium the vendor sided",
   };
   const SHORT = [[1e9, 2, "B"], [1e6, 1, "M"], [1e3, 0, "K"]];
   const shortUsd = (n, signed) => {

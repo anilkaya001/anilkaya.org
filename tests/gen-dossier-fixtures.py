@@ -16,6 +16,11 @@ with open(SPEC_PATH, "rb") as handle:
 SPEC = yaml.safe_load(SPEC_BYTES)
 COMPONENTS = SPEC["components"]["schemas"]
 
+SHAPES_PATH = os.path.join(ROOT, "scripts", "flows-probe-shapes.json")
+with open(SHAPES_PATH, "rb") as handle:
+    SHAPES_BYTES = handle.read()
+SHAPES = json.loads(SHAPES_BYTES)
+
 TICKER = "EXMP"
 NOW_DAY = "2026-10-02"
 
@@ -74,6 +79,65 @@ def documented(schema, into=None, depth=0):
     return into
 
 
+def observed(op):
+    entry = SHAPES["ops"].get(op)
+    if entry is None:
+        raise SystemExit("DRIFT: the shape manifest has no entry for %s; run the probe with --shapes" % op)
+    return entry
+
+
+def renames(op):
+    return dict(observed(op).get("renames", {}))
+
+
+def wire_names(op):
+    entry = observed(op)
+    spec = documented(root_schema(op))
+    return (spec - set(entry.get("unseen", []))) | set(entry.get("undocumented", []))
+
+
+def manifest_problems():
+    problems = []
+    for op in OPS.values():
+        entry = SHAPES["ops"].get(op)
+        if entry is None:
+            problems.append("%s: no observed shape in %s" % (op, os.path.relpath(SHAPES_PATH, ROOT)))
+            continue
+        spec = documented(root_schema(op))
+        unseen = set(entry.get("unseen", []))
+        undocumented = set(entry.get("undocumented", []))
+        for name in sorted(unseen - spec):
+            problems.append("%s: the manifest lists %s as unseen but the spec does not document it; refresh the manifest" % (op, name))
+        for name in sorted(undocumented & spec):
+            problems.append("%s: the manifest lists %s as undocumented but the spec now documents it; refresh the manifest" % (op, name))
+        for old, new in sorted(renames(op).items()):
+            if old not in spec:
+                problems.append("%s: rename %s -> %s names a field the spec no longer documents; delete the rename" % (op, old, new))
+            elif new in spec:
+                problems.append("%s: the spec now documents %s, so the rename %s -> %s is retired; delete it" % (op, new, old, new))
+            elif old not in unseen or new not in undocumented:
+                problems.append("%s: rename %s -> %s is not what the wire shows (%s unseen, %s undocumented)" % (op, old, new, old in unseen, new in undocumented))
+    return problems
+
+
+def wire_problems(op, body):
+    allowed = wire_names(op) | {"data"}
+    problems = []
+
+    def walk(value, path):
+        if isinstance(value, dict):
+            for key, sub in value.items():
+                if key not in allowed:
+                    problems.append("%s.%s: not a name the wire carried in the observed shape" % (path, key))
+                walk(sub, "%s.%s" % (path, key))
+        elif isinstance(value, list):
+            for i, item in enumerate(value):
+                walk(item, "%s[%d]" % (path, i))
+
+    walk(body, op)
+    return problems
+
+
 TYPES = {"string": str, "boolean": bool, "array": list, "object": dict}
 
 
@@ -104,13 +168,19 @@ def check_value(schema, value, path, problems):
         props = properties(schema)
         if props and isinstance(value, dict):
             for key, sub in value.items():
-                if key not in props:
+                spec_key = INVERSE.get(key, key)
+                if spec_key not in props:
                     problems.append("%s.%s: not a documented property" % (path, key))
                 else:
-                    check_value(props[key], sub, "%s.%s" % (path, key), problems)
+                    check_value(props[spec_key], sub, "%s.%s" % (path, key), problems)
+
+
+INVERSE = {}
 
 
 def validate(op, body):
+    INVERSE.clear()
+    INVERSE.update({wire: spec for spec, wire in renames(op).items()})
     problems = []
     schema = root_schema(op)
     props = properties(schema)
@@ -303,7 +373,7 @@ def build_ownership():
             "avg_price": "112.40", "filing_date": "2026-08-14", "first_buy": "2019-03-31", "historical_units": [units - change, units],
             "inst_share_value": "%d" % (units * 150), "inst_value": "%d" % (units * 900), "name": name, "people": [],
             "report_date": "2026-06-30", "shares_outstanding": "512000000", "short_name": short, "tags": ["index"],
-            "units": units, "units_change": change, "value": units * 150,
+            "units": units, "units_changed": change, "value": units * 150,
         })
     return {"data": rows}
 
@@ -367,10 +437,10 @@ BUILD = {
 def main():
     bodies = {}
     docs = {}
-    problems = []
+    problems = manifest_problems()
     for key, op in OPS.items():
         body = BUILD[key]()
-        found = validate(op, body)
+        found = validate(op, body) + wire_problems(op, body)
         problems.extend(found)
         bodies[key] = body
         docs[op] = sorted(documented(root_schema(op)))
@@ -384,13 +454,19 @@ def main():
             "generator": "tests/gen-dossier-fixtures.py",
             "spec": "docs/uw-openapi.yaml",
             "specSha256": hashlib.sha256(SPEC_BYTES).hexdigest(),
+            "shapes": "scripts/flows-probe-shapes.json",
+            "shapesSha256": hashlib.sha256(SHAPES_BYTES).hexdigest(),
+            "shapesObserved": SHAPES.get("observed"),
+            "shapesRun": SHAPES.get("run"),
             "nature": "synthetic bodies for the fictional ticker " + TICKER + ", built to the 200-response schema of each operation "
-                      "(names, JSON types and nullability checked against the spec by the generator); not vendor data",
+                      "(JSON types and nullability checked against the spec, key names against the probe's observed wire shape; "
+                      "the generator fails where the two disagree); not vendor data",
             "nowDay": NOW_DAY,
         },
         "ticker": TICKER,
         "ops": OPS,
         "documented": docs,
+        "renames": {op: renames(op) for op in OPS.values() if renames(op)},
         "bodies": bodies,
     }
     with open(OUT_PATH, "w") as handle:

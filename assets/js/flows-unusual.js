@@ -229,19 +229,18 @@
       return;
     }
     const rows = a.rows;
-    let prem = 0, call = 0, cpW = 0, ask = 0, askW = 0, sw = 0, swW = 0;
+    let prem = 0, call = 0, cpW = 0, sw = 0, swW = 0;
     for (const r of rows) {
       const p = n(r.prem);
       if (p === null || p <= 0) continue;
       prem += p;
       if (r.cp === "C" || r.cp === "P") { cpW += p; if (r.cp === "C") call += p; }
-      const aP = n(r.askPrem);
-      if (aP !== null) { ask += aP; askW += p; }
       if (typeof r.sweep === "boolean") { swW += p; if (r.sweep) sw += p; }
     }
     const floor = a.vendorTruncated === true || a.readTruncated === true;
     const seen = n(a.seen);
     const share = (x, w) => (w ? x / w : null);
+    const ask = F.askShare(rows);
     host.chips.replaceChildren(UI.chips([
       UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
         info: { title: "Flagged premium", lead: "The vendor's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
@@ -249,8 +248,8 @@
         info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows the record has held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
-      UI.gaugeChip({ ring: share(ask, askW), color: "--label-1", value: pct0(share(ask, askW)), label: "Ask side",
-        info: { title: "Ask-side share", lead: "The vendor's ask-side attribution as a share of premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and nothing here says who initiated." } }),
+      UI.gaugeChip({ ring: ask.share, color: "--label-1", value: pct0(ask.share), label: "Ask side",
+        info: { title: F.askLabel, lead: "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and nothing here says who initiated.", facts: [["Sided", ask.classified === null ? null : pct0(ask.classified) + " of premium"]] } }),
       UI.gaugeChip({ ring: share(sw, swW), color: "--s-orange", value: pct0(share(sw, swW)), label: "Sweeps",
         info: { title: "Sweep share", lead: "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all." } }),
     ], "Flagged windows"));
@@ -309,9 +308,7 @@
     for (const r of S.alertsKind === "ok" && S.alerts ? S.alerts.rows : []) {
       const prem = n(r.prem), t = r.t && String(r.t).trim().toUpperCase();
       if (!t || prem === null || prem <= 0) continue;
-      const sided = r.cp === "C" || r.cp === "P";
-      let a = sided ? Math.max(0, n(r.askPrem) || 0) : 0, b = sided ? Math.max(0, n(r.bidPrem) || 0) : 0;
-      if (a + b > prem) { const k = prem / (a + b); a *= k; b *= k; }
+      const sp = r.cp === "C" || r.cp === "P" ? F.askSplit(r) : null, a = sp ? sp.ask : 0, b = sp ? sp.bid : 0;
       const e = by.get(t) || { t, v: 0, up: 0, down: 0 };
       e.v += prem;
       e.up += r.cp === "C" ? a : b;

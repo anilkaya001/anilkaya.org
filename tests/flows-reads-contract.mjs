@@ -679,8 +679,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   ok(card.trips.length === 1 && card.body.ticker === "NVDA" && card.body.score === 61, "a published card is one read");
   const first = await route("/api/flows/summary?t=NVDA");
   eq(first.body.status, "pending", "THE TICKER READING: its first call finds no prior and starts Neuron");
-  ok(first.trips[0].kind === "batch" && first.trips[0].sqls.length === 2 && /id = \?$/.test(first.trips[0].sqls[0]) && /FROM flows_neuron/.test(first.trips[0].sqls[1]),
-     "reading the card row and the prior reading in one batch (two sequential trips before)");
+  ok(first.trips[0].kind === "batch" && first.trips[0].sqls.length === 3 && /id = \?$/.test(first.trips[0].sqls[0]) && /FROM flows_neuron/.test(first.trips[0].sqls[1]) &&
+     /FROM flows_neuron/.test(first.trips[0].sqls[2]) && first.trips[0].args[1][0] === "ticker:NVDA" && first.trips[0].args[2][0] === "gen:ticker:NVDA",
+     "reading the card row, the prior reading and its sibling claim row (gen:ticker:NVDA) in one batch (two sequential trips before)");
   ok(first.trips.length === 2 && first.trips[1].kind === "run" && /INSERT INTO flows_neuron/.test(first.trips[1].sqls[0]),
      "with the generating claim the only other foreground trip, so the route costs 2 trips where it cost 3");
   await first.settle();
@@ -1255,10 +1256,11 @@ class FakeCache {
     const calls = [];
     return { calls, run: async () => { calls.push(1); return script ? script() : { response: answer, usage: { prompt_tokens: 100, completion_tokens: 40 } }; } };
   };
-  const neuronRow = (f) => f.db.prepare("SELECT scope, fingerprint, guard, generated_at, summary FROM flows_neuron WHERE scope = 'ticker:NVDA'").get();
-  const plant = (f, fingerprint, guard, generatedAt, summary = "") => f.db.prepare(
-    "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('ticker:NVDA', 4, ?, ?, '[]', 0, NULL, ?, ?)",
-  ).run(fingerprint, summary, guard, generatedAt);
+  const neuronRow = (f, scope = "ticker:NVDA") => f.db.prepare("SELECT scope, fingerprint, guard, generated_at, summary FROM flows_neuron WHERE scope = ?").get(scope);
+  const claimRow = (f) => neuronRow(f, "gen:ticker:NVDA");
+  const plant = (f, fingerprint, guard, generatedAt, summary = "", scope = "gen:ticker:NVDA", llm = 0) => f.db.prepare(
+    "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES (?, 4, ?, ?, '[]', ?, NULL, ?, ?)",
+  ).run(scope, fingerprint, summary, llm, guard, generatedAt);
 
   {
     const f = fakeD1();
@@ -1284,13 +1286,13 @@ class FakeCache {
     plant(f, "n4.other|ai", "generating", new Date(Date.now() - 20 * 1000).toISOString());
     const live = await get("/api/flows/summary?t=NVDA");
     await live.settle();
-    ok(live.body.status === "pending" && ai.calls.length === 0 && neuronRow(f).fingerprint === "n4.other|ai" && neuronRow(f).guard === "generating",
-       "N-F9: a live generating marker of ANOTHER fingerprint is not taken over: the reader waits, the model is not called, the row is untouched");
+    ok(live.body.status === "pending" && ai.calls.length === 0 && claimRow(f).fingerprint === "n4.other|ai" && claimRow(f).guard === "generating",
+       "N-F9: a live generating marker of ANOTHER fingerprint is not taken over: the reader waits, the model is not called, the claim row is untouched");
     plant(f, "n4.other|ai", "generating", new Date(Date.now() - 200 * 1000).toISOString());
     const dead = await get("/api/flows/summary?t=NVDA");
     await dead.settle();
-    ok(ai.calls.length === 1 && neuronRow(f).guard !== "generating" && neuronRow(f).fingerprint !== "n4.other|ai",
-       "while a marker past its 90 seconds is a dead generator's and is taken over");
+    ok(ai.calls.length === 1 && claimRow(f).fingerprint !== "n4.other|ai" && neuronRow(f).fingerprint === claimRow(f).fingerprint && neuronRow(f).guard !== "generating",
+       "while a marker past its 90 seconds is a dead generator's and is taken over, and the vetted result lands on ticker:NVDA");
   }
 
   {
@@ -1302,22 +1304,54 @@ class FakeCache {
     const get = await client(f.D1, { ...AI_ENV, AI: ai });
     await get("/api/flows/meta");
     const first = await get("/api/flows/summary?t=NVDA");
-    ok(first.body.status === "pending" && neuronRow(f).guard === "generating", "N-F9: a generation is in flight, its marker on the row");
-    const mine = neuronRow(f).fingerprint;
+    ok(first.body.status === "pending" && claimRow(f).guard === "generating" && neuronRow(f) === undefined,
+       "N-F9: a generation is in flight, its marker on the sibling claim row gen:ticker:NVDA and nothing on ticker:NVDA");
+    const mine = claimRow(f).fingerprint;
     const later = new Date(Date.now() + 5000).toISOString();
-    plant(f, "n4.fresher|ai", "generating", later);
+    plant(f, "n4.fresher|ai", null, later, "fresher", "ticker:NVDA", 1);
+    const claimed = new Date(Date.now() + 7000).toISOString();
+    plant(f, "n4.fresher|ai", "generating", claimed);
     release();
     await first.settle();
     const row = neuronRow(f);
-    ok(row.fingerprint === "n4.fresher|ai" && row.guard === "generating" && row.generated_at === later && row.fingerprint !== mine,
-       "and when it finishes after a FRESHER generation has claimed the row its result is dropped, the fresher marker left standing: compare-and-set, not last writer wins");
-    plant(f, "n4.older|ai", "unreachable:capacity", new Date(Date.now() - 3600 * 1000).toISOString(), "old");
+    ok(row.fingerprint === "n4.fresher|ai" && row.summary === "fresher" && row.generated_at === later && row.fingerprint !== mine,
+       "and when it finishes after a FRESHER reading has landed its result is dropped, the fresher row left standing: compare-and-set, not last writer wins");
+    const claim = claimRow(f);
+    ok(claim.guard === "generating" && claim.generated_at === claimed && claim.fingerprint === "n4.fresher|ai",
+       "and its release of the claim leaves a FRESHER generation's claim on gen:ticker:NVDA standing, with its own generated_at: the release is guarded by generated_at <= its own start (" + claim.guard + ", " + claim.generated_at + ")");
+    plant(f, "n4.older|ai", "unreachable:capacity", new Date(Date.now() - 3600 * 1000).toISOString(), "old", "ticker:NVDA");
+    f.db.prepare("DELETE FROM flows_neuron WHERE scope = 'gen:ticker:NVDA'").run();
     const ai2 = rig();
     const get2 = await client(f.D1, { ...AI_ENV, AI: ai2 });
     const third = await get2("/api/flows/summary?t=NVDA");
     await third.settle();
     ok(neuronRow(f).summary.startsWith("NVDA scored 61") && neuronRow(f).fingerprint !== "n4.older|ai",
        "while a finished row older than the generation is replaced by it");
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const ai = rig();
+    const get = await client(f.D1, { ...AI_ENV, AI: ai });
+    await get("/api/flows/meta");
+    const probe = await get("/api/flows/summary?t=NVDA");
+    await probe.settle();
+    const fp = neuronRow(f).fingerprint;
+    f.db.prepare("DELETE FROM flows_neuron WHERE scope IN ('ticker:NVDA', 'gen:ticker:NVDA')").run();
+    const legacy = (guard, ageS, summary) => f.db.prepare(
+      "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('ticker:NVDA', ?, ?, ?, '[]', 0, NULL, ?, ?)",
+    ).run(NEURON.NEURON_CONTEXT_VERSION, fp, summary, guard, new Date(Date.now() - ageS * 1000).toISOString());
+    legacy("generating", 20, "");
+    const marked = await get("/api/flows/summary?t=NVDA");
+    await marked.settle();
+    ok(marked.body.status === "pending" && ai.calls.length === 1 && claimRow(f) === undefined,
+       "DEPLOY TRANSITION: a generating marker the previous code left on ticker:NVDA is still respected while it is younger than 90 seconds: no second call, no claim row");
+    legacy("invented", 60, "plain text");
+    const refused = await get("/api/flows/summary?t=NVDA");
+    await refused.settle();
+    ok(refused.body.status === "ok" && refused.body.guard === "invented" && refused.body.summary === "plain text" && ai.calls.length === 1,
+       "and a refusal it left there is still served and not retried, as the previous code would have done");
   }
 
   {
@@ -1419,7 +1453,7 @@ class FakeCache {
       calls: n,
       counted: f.db.prepare("SELECT surface, outcome, reason, n FROM flows_ai_outcome ORDER BY outcome, reason").all().map((r) => [r.surface, r.outcome, r.reason, r.n]),
       ring: f.db.prepare("SELECT surface, reason, culprit FROM flows_ai_reject").all().map((r) => [r.surface, r.reason, r.culprit]),
-      guard: f.db.prepare("SELECT guard, llm FROM flows_neuron WHERE scope = 'ticker:NVDA'").get(),
+      guard: f.db.prepare("SELECT guard, llm FROM flows_neuron WHERE scope IN ('ticker:NVDA', 'gen:ticker:NVDA') ORDER BY llm DESC LIMIT 1").get(),
     };
   };
   const invented = await legacy(["no json here, only prose", { summary: "The last price is up 99.9% on the day.", ideas: [] }]);
@@ -1457,15 +1491,20 @@ class FakeCache {
   const miss = await cost("/api/flows/summary?t=NVDA");
   ok(miss.body.read.status === "generating" && miss.body.read.generated === false, "READING, MISS: the deterministic reading at once, generating");
   ok(miss.dossier.length === 1 && miss.dossier[0].kind === "batch", "the dossier is ONE batch");
-  ok(miss.rows <= 22, `rows read before the response by a summary call that finds no reading and starts one: ${miss.rows} (ceiling 22: the card and prior reading, the reading row, the dossier's primary-key batch)`);
-  ok(miss.total <= 34, `and ${miss.total} with the background generation's own reads of the day's spend (ceiling 34)`);
+  const claimAt = miss.trips.findIndex((t) => t.args.some((a) => (Array.isArray(a) ? a : [a]).includes("gen:read:NVDA")) && t.sqls.some((q) => /^SELECT/.test(q)));
+  ok(claimAt >= 0 && claimAt < miss.trips.indexOf(miss.dossier[0]),
+    "the reading's claim row gen:read:NVDA is read concurrently with the dossier, its trip issued before the dossier's batch returned, so it adds a row and no sequential trip (" + claimAt + " < " + miss.trips.indexOf(miss.dossier[0]) + ")");
+  ok(miss.rows <= 24, `rows read before the response by a summary call that finds no reading and starts one: ${miss.rows} (ceiling 24: the card, the Neuron's prior row and its claim row, the reading row, the dossier's primary-key batch and the reading's claim row)`);
+  ok(miss.total <= 36, `and ${miss.total} with the background generation's own reads of the day's spend (ceiling 36)`);
   ok(calls.filter((c) => /stock reader/.test(c)).length === 1, "and one model call for the reading, in the background");
   const counted = f.db.prepare("SELECT surface, outcome, n FROM flows_ai_outcome ORDER BY surface, outcome").all().map((r) => ({ ...r }));
   eq(counted.reduce((n, r) => n + r.n, 0), calls.length, `EVERY MODEL CALL IS COUNTED ONCE (${calls.length}): ${counted.map((r) => r.surface + " " + r.outcome).join(", ")}`);
   ok(counted.some((r) => r.surface === "read" && r.outcome === "refused"), "the reading's scripted reply of {} is counted as refused under the reading's surface (" + JSON.stringify(counted) + ")");
   eq(f.trips.filter((t) => t.sqls.some((q) => /^INSERT INTO flows_ai_outcome/.test(q))).length, calls.length, "each in one trip of its own, so a model call costs one more trip and one more row written and no row read");
-  const row = f.db.prepare("SELECT fingerprint FROM flows_neuron WHERE scope = 'read:NVDA'").get();
-  ok(row && row.fingerprint.endsWith("|" + RW.readSignature({ ...AI_ENV })), "its row is keyed by the model signature");
+  const row = f.db.prepare("SELECT fingerprint, guard FROM flows_neuron WHERE scope = 'gen:read:NVDA'").get();
+  ok(row && row.fingerprint.endsWith("|" + RW.readSignature({ ...AI_ENV })) && row.guard === "read:refused",
+    "its attempt is keyed by the model signature, and the empty reply, refused by the checks, is recorded on the sibling row gen:read:NVDA (" + (row && row.guard) + ")");
+  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope = 'read:NVDA'").get().n, 0, "while read:NVDA, which only a vetted reading writes, is untouched");
   const hit = (guard, llm, shape, at) => f.db.prepare(
     "INSERT OR REPLACE INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('read:NVDA', 6, ?, 'x', ?, ?, ?, ?, ?)",
   ).run("d1.any|" + RW.readSignature({ ...AI_ENV }), JSON.stringify({ v: 1, kind: "reading", shape, refused: [] }), llm, AI_ENV.FLOWS_ASK_MODEL, guard, at);
@@ -1474,8 +1513,9 @@ class FakeCache {
   ok(stored.body.read.status === "ready" && stored.body.read.held === "floor", "READING, HIT: a stored reading inside the floor is served as ready");
   eq(stored.dossier.length, 0, "with no dossier assembled");
   eq(stored.reading.length, 1, "and ONE read of the reading row");
-  ok(stored.rows <= 4, `rows read: ${stored.rows} (ceiling 4: the card, the Neuron's prior row and the reading row)`);
-  ok(stored.rows <= 3 + 1, "which is one row more than the summary route's own ceiling of 3 before the reading existed");
+  ok(stored.rows <= 5, `rows read: ${stored.rows} (ceiling 5: the card, the Neuron's prior row, its claim row gen:ticker:NVDA and the reading row)`);
+  ok(stored.rows <= 3 + 1 + 1, "which is one row more than the summary route's own ceiling of 3 before the reading existed, and one more for the Neuron's claim row, which keeps the last good model output while a new one is written");
+  eq(stored.trips.filter((t) => t.args.some((a) => (Array.isArray(a) ? a : [a]).includes("gen:read:NVDA"))).length, 0, "the reading's own claim row is not read on a hit");
   eq(stored.trips.length, 2, "in two trips, concurrent: the Neuron's batch and the reading's lookup");
   console.log(`  reading rows read: miss ${miss.rows} before the response and ${miss.total} with the background generation, hit ${stored.rows}`);
   unshift();

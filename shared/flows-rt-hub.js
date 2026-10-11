@@ -9,6 +9,7 @@ import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
 import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
 import { MEMBER_NAME, readMembers, memberOf, memberActive } from "./flows-auth.js";
 import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs } from "./flows-vendor-core.js";
+import { failureEntry } from "./flows-log.js";
 
 const T0 = Date.now();
 
@@ -325,11 +326,13 @@ export class RtHub {
     this.unobservedMs = 0;
   }
 
-  logOnce(key, entry) {
+  logOnce(key, raw) {
     const t = Date.now();
     if (t - (this.logged.get(key) || 0) < 60000) return;
     this.logged.set(key, t);
     if (this.logged.size > 32) this.logged.delete(this.logged.keys().next().value);
+    const { message, error, ...fields } = raw;
+    const entry = failureEntry("error", message, fields, error);
     this.log(this.redact.deep(entry));
   }
 

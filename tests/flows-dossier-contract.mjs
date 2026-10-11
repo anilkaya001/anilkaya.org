@@ -12,6 +12,7 @@ import { universeValue } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
 import * as F from "./dossier-fixtures.mjs";
 import { workerSource, moduleSource } from "./lib/source-scan.mjs";
+import { loadList } from "../scripts/flows-probe.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -21,7 +22,7 @@ const root = (p) => new URL("../" + p, import.meta.url);
 const read = (p) => readFileSync(root(p), "utf8");
 
 const { VENDOR, NOW, T, SESSION } = F;
-const probeList = JSON.parse(read("scripts/flows-probe-list.json"));
+const probeList = loadList();
 const OPEN = "UNTRUSTED«";
 const CLOSE = "»";
 
@@ -169,8 +170,8 @@ function checkDossier(d, label, ticker = T) {
     same(stray, [], op + ": every property the reducer touches is one the spec documents for this operation");
     const declared = V.DOSSIER_READS[op];
     ok(Array.isArray(declared) && declared.length > 0, op + ": DOSSIER_READS names the fields the code reads");
-    const unread = declared.filter((k) => !sink.has(k));
-    same(unread, [], op + ": and the reducer really reads every one it declares (" + declared.length + " fields)");
+    const unread = declared.filter((k) => !sink.has(k) && !superseded.has(k));
+    same(unread, [], op + ": and the reducer really reads every one it declares (" + declared.length + " fields), bar a spec name the wire renamed, which it reads only when the wire name is absent");
     const undeclared = [...sink].filter((k) => documented.has(k) && k !== "data" && !declared.includes(k));
     same(undeclared, [], op + ": and declares every documented field it reads, so the weekly probe checks them all");
     const probeReads = probeList.reads[op];
@@ -230,11 +231,13 @@ function checkDossier(d, label, ticker = T) {
   eq(own.n, 8, "ownership: eight holders");
   ok(own.top[0].u >= own.top[1].u, "ownership: largest first");
   eq(own.so, 512000000, "ownership: shares outstanding");
-  eq(own.changeKnown, 8, "ownership: the fixture's spec name units_change is still read when the wire name is absent");
+  eq(own.changeKnown, 8, "ownership: the fixture carries the wire name units_changed, and every holder's change is known");
   const holder = (o) => ({ name: "HOLDER CAPITAL LLC", short_name: "Holder", report_date: "2026-06-30", shares_outstanding: "512000000", ...o });
   const wire = V.reduceOwnership({ data: [holder({ units: "1162996939", units_changed: "18301514" }), holder({ short_name: "Other", units: 4103, units_changed: -320, units_change: 999 })] });
   eq(wire.top[0].dU, 18301514, "ownership: the wire's units_changed is read, as a string of shares");
   eq(wire.top[1].dU, -320, "ownership: and wins over the spec's units_change when both arrive");
+  const specName = V.reduceOwnership({ data: [holder({ units: "1162996939", units_change: "18301514" })] });
+  eq(specName.top[0].dU, 18301514, "ownership: the spec's units_change is still read when the wire name is absent");
   same([wire.change, wire.changeKnown, wire.up, wire.down], [18301194, 2, 1, 1], "ownership: the net change, the holders known, added and trimmed");
   const derived = V.reduceOwnership({ data: [holder({ units: "1162996939", historical_units: ["1162996939", "1144695425", "1154665731", "1146332274", "1148838990", "1140202870", "1123417607", "1097495138"] }), holder({ short_name: "Other", units: 4103, historical_units: [4103, 4423] })] });
   same(derived.top.map((t) => t.dU), [18301514, -320], "ownership: with neither name, the change is units less historical_units[1], the prior report, not the oldest (newest first, as the spec's own example and the AAPL sample of eight reports read)");

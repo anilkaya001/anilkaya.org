@@ -154,7 +154,7 @@ absent(src, "console.error(JSON.stringify", { anchor: 'logFailure("error"', why:
 absent(src, "console.warn(JSON.stringify", { anchor: 'logFailure("warn"', why: "failure logs go through server/log.js" });
 expect(src, /from "\.\/server\/http\.js"/, { min: 1, max: 1, why: "worker.js imports the kernel once" });
 const kernelFiles = treeFiles("server");
-eq(kernelFiles, ["server/ai.js", "server/errors.js", "server/http.js", "server/log.js", "server/router.js", "server/routes/flows-ai.js", "server/routes/flows-desk.js", "server/routes/flows-ingest.js", "server/routes/flows-read.js", "server/schema.js", "server/store.js"], "server/ holds the kernel, the table, the log, the router and the flows-read, flows-desk and flows-ai families");
+eq(kernelFiles, ["server/ai.js", "server/errors.js", "server/http.js", "server/log.js", "server/router.js", "server/routes/flows-ai.js", "server/routes/flows-desk.js", "server/routes/flows-ingest.js", "server/routes/flows-pages.js", "server/routes/flows-read.js", "server/schema.js", "server/store.js"], "server/ holds the kernel, the table, the log, the router and the flows-read, flows-desk, flows-ai, flows-ingest and flows-pages families");
 for (const f of kernelFiles) {
   ok(!/^(?:let|var)\s/m.test(moduleSource(f)), `${f} declares no top-level mutable binding`);
   ok(!/\/\/|\/\*/.test(moduleSource(f).replace(/https?:\/\/[^\s"'`]+/g, "")), `${f} carries no comments`);
@@ -290,12 +290,13 @@ try {
   console.error = real.error;
   console.warn = real.warn;
 }
+const head = (event, level, route, extra, error) => JSON.stringify({ event, message: event, level, route, code: null, ...extra, error });
 eq(logged, [
-  ["error", JSON.stringify({ message: "neuron failed", ticker: "NVDA", error: "boom" })],
-  ["warn", JSON.stringify({ message: "flows schema bootstrap failed", error: "boom" })],
-  ["error", JSON.stringify({ message: "request failed", method: "GET", path: "/api/x", error: "plain" })],
-  ["warn", JSON.stringify({ message: "ai spend not recorded", model: "m", error: "undefined" })],
-], "each failure log keeps its legacy key order and text");
+  ["error", head("neuron failed", "error", null, { ticker: "NVDA" }, "boom")],
+  ["warn", head("flows schema bootstrap failed", "warn", null, {}, "boom")],
+  ["error", head("request failed", "error", "/api/x", { method: "GET", path: "/api/x" }, "plain")],
+  ["warn", head("ai spend not recorded", "warn", null, { model: "m" }, null)],
+], "each failure log is one line in the one shape: event, its message alias, level, route, code, the fields, error");
 expect(src, /logFailure\("(?:error|warn)", /, { min: 7, why: "the seven failure sites use the log module" });
 
 console.log(`server-kernel: ${checks} checks`);

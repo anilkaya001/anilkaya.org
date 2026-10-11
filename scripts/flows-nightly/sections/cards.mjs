@@ -10,6 +10,7 @@ import { runDispersion } from "../../flows-legs/dispersion.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { foldCardOutcomes, poolWidth, runPooled, stats, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE, publish, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
 import { ideaRecord, archiveRow, archivePayload, runCalibration } from "../../flows-legs/calibration.mjs";
@@ -69,7 +70,7 @@ export function shedCardToCap(card, cap = CARD_SELF_CHECK_BYTES) {
 }
 
 export async function fetchCloseBars(ticker, sessionDate, dating) {
-  const raw = await uw(`/api/stock/${ticker}/ohlc/1d`, {
+  const raw = await uw(pathFor("ohlc-1d", { ticker }), {
     timeframe: "1Y",
     ...(sessionDate && dating && dating.endDate ? { end_date: sessionDate } : {}),
   });
@@ -123,10 +124,10 @@ export async function runCards(ctx) {
            fakeIvRank(ticker, spotPx, IV_RANK_PARAMS), quantPrep ? fakeEarnings(ticker, sessionDate) : null]
         : await Promise.all([
 
-          uw(`/api/stock/${ticker}/max-pain`, sessionDate ? { date: sessionDate } : {}).catch(() => []),
+          uw(pathFor("max-pain", { ticker }), sessionDate ? { date: sessionDate } : {}).catch(() => []),
 
           surfaceExpiries.length
-            ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
+            ? uw(pathFor("spot-exposures-expiry-strike", { ticker }), {
               "expirations[]": surfaceExpiries,
               ...(sessionDate ? { date: sessionDate } : {}),
 
@@ -137,13 +138,13 @@ export async function runCards(ctx) {
             }).catch(() => [])
             : Promise.resolve([]),
 
-          uw(`/api/darkpool/${ticker}`, { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
+          uw(pathFor("darkpool", { ticker }), { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
             .catch(() => null),
-          uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+          uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(() => null),
+          uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(() => null),
+          uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
 
-          quantPrep ? uw(`/api/earnings/${ticker}`, {}).catch(() => null) : Promise.resolve(null),
+          quantPrep ? uw(pathFor("earnings", { ticker }), {}).catch(() => null) : Promise.resolve(null),
         ]);
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
       const darkpoolRth = sessionPrints(dpRaw, sessionDate, { limit: 500 });

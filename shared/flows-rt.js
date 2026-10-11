@@ -6,6 +6,7 @@ import {
 import { alertRow, alertKey } from "./flows-alerts.js";
 import { focusStripNames } from "./flows-focus.js";
 import { newsRow } from "./flows-news.js";
+import { pathFor } from "./flows-vendor-ops.js";
 
 export { TICKER_RE };
 
@@ -89,15 +90,15 @@ export const RT_ROW_FIELDS = Object.freeze({
 export const RT_UPSTREAM = Object.freeze({
   px: Object.freeze({
     scope: "ticker", channels: Object.freeze(["price:<T>", "stock_screener"]),
-    rest: (a) => [{ feed: "px", path: "/api/screener/stocks", params: { ticker: a.names.join(","), limit: 500 } }],
+    rest: (a) => [{ feed: "px", path: pathFor("screener-stocks"), params: { ticker: a.names.join(","), limit: 500 } }],
   }),
   fl: Object.freeze({
     scope: "global", channels: Object.freeze(["flow-alerts"]),
-    rest: (a) => [{ feed: "fl", path: "/api/option-trades/flow-alerts", params: { limit: RT_LIMITS.flowLimit, newer_than: a.newerThan } }],
+    rest: (a) => [{ feed: "fl", path: pathFor("flow-alerts"), params: { limit: RT_LIMITS.flowLimit, newer_than: a.newerThan } }],
   }),
   gx: Object.freeze({
     scope: "ticker", channels: Object.freeze(["gex:<T>"]),
-    rest: (a) => [{ feed: "gx", path: `/api/stock/${encodeURIComponent(a.name)}/spot-exposures`, params: {} }],
+    rest: (a) => [{ feed: "gx", path: pathFor("spot-exposures", { ticker: a.name }), params: {} }],
   }),
   mk: Object.freeze({
     scope: "global", channels: Object.freeze(["market_tide", "net_flow:<T>"]),
@@ -105,7 +106,7 @@ export const RT_UPSTREAM = Object.freeze({
   }),
   nw: Object.freeze({
     scope: "global", channels: Object.freeze(["news"]),
-    rest: () => [{ feed: "nw", path: "/api/news/headlines", params: { limit: RT_LIMITS.newsLimit } }],
+    rest: () => [{ feed: "nw", path: pathFor("news"), params: { limit: RT_LIMITS.newsLimit } }],
   }),
 });
 

@@ -12,6 +12,7 @@ import { PIPELINE_CADENCE, readDayOf } from "../clock.mjs";
 import { BOARD_SCHEMA_VERSION, NEWS_ROWS, SECTOR_ETFS, holdersRefusal, sectorLean, shapeNews } from "../rank.mjs";
 import { fakeNewsHeadlines, fakePoliticalRaws, fakePulseRaws, fakeSectorEtfs } from "../fixtures.mjs";
 import { fetchStoredPayload } from "../archive.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 
 export const PULSE_TOTALS_HISTORY = 252;
 
@@ -20,14 +21,14 @@ export async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
 
   try {
     const PULSE_FETCHES = {
-      tide: ["/api/market/market-tide", { interval_5m: "true" }],
-      totals: ["/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY }],
-      oiChange: ["/api/market/oi-change", { limit: MARKET_CROSS_LIMIT }],
-      netImpact: ["/api/market/top-net-impact", { limit: PULSE_CAPS.netImpact }],
-      insiders: ["/api/market/insider-buy-sells", { limit: PULSE_CAPS.insiders }],
-      darkpool: ["/api/darkpool/recent", { limit: MARKET_CROSS_LIMIT,
+      tide: [pathFor("market-tide"), { interval_5m: "true" }],
+      totals: [pathFor("total-options-volume"), { limit: PULSE_TOTALS_HISTORY }],
+      oiChange: [pathFor("market-oi-change"), { limit: MARKET_CROSS_LIMIT }],
+      netImpact: [pathFor("top-net-impact"), { limit: PULSE_CAPS.netImpact }],
+      insiders: [pathFor("insider-buy-sells"), { limit: PULSE_CAPS.insiders }],
+      darkpool: [pathFor("darkpool-recent"), { limit: MARKET_CROSS_LIMIT,
         ...sessionPrintParams(sessionDate, { windowed: false }) }],
-      seasonality: ["/api/seasonality/market", {}],
+      seasonality: [pathFor("seasonality-market"), {}],
     };
     const raws = {};
     if (DRY_RUN) {
@@ -48,7 +49,7 @@ export async function publishPulse({ sessionDate, generatedAt, tickers = [] }) {
     const pulse = buildPulse(raws);
     if (pulse.darkpool && raws.darkpool && raws.darkpool.session) pulse.darkpool.session = raws.darkpool.session;
     pulse.totalsHistory = totalsHistory(unwrapVendorRows(DRY_RUN
-      ? await makeFakeVendor({ sessionDate })("/api/market/total-options-volume", { limit: PULSE_TOTALS_HISTORY })
+      ? await makeFakeVendor({ sessionDate })(pathFor("total-options-volume"), { limit: PULSE_TOTALS_HISTORY })
       : raws.totals), { sessionDate });
     for (const feed of PULSE_FEEDS) {
       const f = pulse[feed];
@@ -82,7 +83,7 @@ export async function publishSectorPremium({ sessionDate, generatedAt }) {
   try {
     const raw = DRY_RUN
       ? fakeSectorEtfs()
-      : await uw("/api/market/sector-etfs", {});
+      : await uw(pathFor("sector-etfs"), {});
     const readAt = stampNow();
     const wire = unwrapVendorRows(raw);
     const sectors = sectorLean(raw);
@@ -152,7 +153,7 @@ export async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
   try {
     const raw = DRY_RUN
       ? fakeNewsHeadlines(tickers)
-      : await uw("/api/news/headlines", { limit: NEWS_VENDOR_LIMIT });
+      : await uw(pathFor("news"), { limit: NEWS_VENDOR_LIMIT });
     const readAt = stampNow();
     const wire = unwrapVendorRows(raw);
 
@@ -233,7 +234,7 @@ export async function runAlerts(ctx) {
 
         let cursor = sessionDate || null;
         for (let rung = 1; rung <= POLITICAL_MAX_PAGES; rung++) {
-          const rows = unwrapVendorRows(await uw("/api/congress/recent-trades", {
+          const rows = unwrapVendorRows(await uw(pathFor("congress-recent"), {
             limit: POLITICAL_PAGE_LIMIT, date: cursor || undefined,
           }));
           if (!rows.length) break;
@@ -279,7 +280,7 @@ export async function runAlerts(ctx) {
           console.warn(`  political: the recent-trades ladder refused on its first ` +
             `rung (${error.message}) — falling back to one unwindowed page`);
           try {
-            filings.push(...unwrapVendorRows(await uw("/api/congress/recent-trades",
+            filings.push(...unwrapVendorRows(await uw(pathFor("congress-recent"),
               { limit: POLITICAL_PAGE_LIMIT })));
             pagesRead = 1;
           } catch (inner) {
@@ -303,7 +304,7 @@ export async function runAlerts(ctx) {
       }
       for (const ticker of refusal ? [] : holderNames) {
         try {
-          holders.push({ ticker, raw: await uw(`/api/politician-portfolios/holders/${ticker}`, {}) });
+          holders.push({ ticker, raw: await uw(pathFor("politician-holders", { ticker }), {}) });
         } catch (error) {
           const message = error && error.message ? error.message : String(error);
           if (!holders.length) {

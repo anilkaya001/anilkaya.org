@@ -4,6 +4,7 @@ import {
   squeezePressure,
 } from "../../shared/flows-ownership.js";
 import { addDays, shortIntOf, SILENCE } from "../../shared/flows-cross.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const BORROW_LOOKBACK_DAYS = 12;
 
@@ -16,10 +17,10 @@ export async function readDeepOwnership(uw, tickers, {
   let calls = 0;
   const work = async (t) => {
     if (pastDeadline(deadline)) return;
-    const borrow = await read(uw, `/api/shorts/${t}/data`, {
+    const borrow = await read(uw, pathFor("shorts-data", { ticker: t }), {
       ...(sessionDate ? { newer_than: addDays(sessionDate, -BORROW_LOOKBACK_DAYS) } : {}),
     });
-    const volume = await read(uw, `/api/shorts/${t}/volume-and-ratio`, {}, { envelope: true });
+    const volume = await read(uw, pathFor("shorts-volume", { ticker: t }), {}, { envelope: true });
     calls += 2;
     out.set(t, { borrow, volume });
   };

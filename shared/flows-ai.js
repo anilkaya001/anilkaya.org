@@ -1,3 +1,5 @@
+import { emitFailure } from "./flows-log.js";
+
 export const AI_CALL_EPOCH = 2;
 
 export const AI_LENGTH_RETRY_MS = 60 * 60 * 1000;
@@ -250,8 +252,8 @@ export async function askModels(ai, chain, messages, opts, onUsage, log = consol
       if (failure.why === "allowance" || failure.why === "budget") break;
       const next = models[models.indexOf(model) + 1];
       if (next && log && typeof log.error === "function") {
-        log.error(JSON.stringify({ message: "ai failover", from: model, to: next, why: failure.why,
-          error: error && error.message ? String(error.message).slice(0, 200) : null }));
+        emitFailure(log, "error", "ai failover", { from: model, to: next, why: failure.why },
+          error && error.message ? String(error.message).slice(0, 200) : null);
       }
       continue;
     }

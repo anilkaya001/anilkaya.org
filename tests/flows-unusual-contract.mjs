@@ -856,6 +856,37 @@ const rebuild = (em) => {
      "adjusted series' pre-split strike would look like against a live spot");
 }
 
+const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-ask-share.json"), "utf8"));
+{
+  const JS = path.join(ROOT, "assets", "js");
+  const pages = fs.readdirSync(JS).filter((f) => f.endsWith(".js") && f !== "flows-ui.js");
+  ok(pages.length >= 20 && pages.includes("flows-unusual.js") && pages.includes("flows-overview.js"),
+     `the scan reads every page script beside the core (${pages.length})`);
+  const readers = pages.filter((f) => /\b(?:askPrem|bidPrem)\b/.test(fs.readFileSync(path.join(JS, f), "utf8")));
+  deep(readers, [],
+       "NO PAGE COMPUTES THE ALERT ASK SHARE ITSELF: no page script reads a window's askPrem or bidPrem, so the " +
+       "share, its sided coverage and its colour class come only from FlowsUI.F.askShare. Unusual divided by the " +
+       "premium and Home by the two sides, so one window printed two different shares on two pages");
+  const ui = fs.readFileSync(path.join(JS, "flows-ui.js"), "utf8");
+  ok(/\baskShare: \(rows\) =>/.test(ui) && /\baskSaid: /.test(ui) && ui.includes('askLabel: "' + ASK_SHARE.label + '"'),
+     "the core carries the one definition, its printed form and the label the known-answer table names");
+  ok(/\baskSplit: \(r\) =>/.test(ui),
+     "and the dollar split a page that draws ask, bid and neither premium needs, under the same rule, so such a page " +
+     "reads the core instead of the two vendor fields");
+  for (const files of [["flows-unusual.js", "flows-unusual-below.js"], ["flows-overview.js"]]) {
+    const src = files.map((f) => fs.readFileSync(path.join(JS, f), "utf8")).join("\n");
+    ok((src.match(/F\.askShare\(/g) || []).length >= 2 && /F\.askSaid\(/.test(src) && /F\.askLabel/.test(src),
+       `${files.join(" with ")} reads the share, prints it and labels it through the core`);
+  }
+  for (const f of ["flows-net.js", "flows-unusual.js"]) {
+    ok(/F\.askSplit\(/.test(fs.readFileSync(path.join(JS, f), "utf8")), `${f} draws its ask, bid and neither dollars from the core's askSplit`);
+  }
+  ok(ASK_SHARE.cases.length >= 20 && ASK_SHARE.cases.some((c) => c.side === "thin") && ASK_SHARE.cases.some((c) => c.classified === 0) &&
+     ASK_SHARE.cases.some((c) => /past the premium/.test(c.name)) && ASK_SHARE.cases.some((c) => Array.isArray(c.rows)),
+     "and the known-answer table carries a thinly sided window, an unsided one, an over-sum one and pooled windows, " +
+     "which neither fake vendor produces");
+}
+
 {
   const SESSION = "2026-08-24";
   const sym = (t, yymmdd, cp, strike) => `${t}${yymmdd}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`;
@@ -1475,8 +1506,9 @@ const rebuild = (em) => {
     ok(!/of at least/.test(String(shedNone.alertsPop)), "while a read that did not hit the ceiling keeps its exact denominator");
 
     await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [
-      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", prem: 250000, askPrem: 250000, spanStart: "2026-09-01T13:31:00Z" },
+      { t: "AAA", cp: "C", k: 100, exp: "2026-09-18", prem: 250000, askPrem: 250000, bidPrem: 0, spanStart: "2026-09-01T13:31:00Z" },
       { t: "BBB", cp: "P", k: 50, exp: "2026-09-18", prem: 180000, spanStart: "2026-09-01T14:10:00Z" },
+      { t: "CCC", cp: "C", k: 40, exp: "2026-09-18", prem: 120000, askPrem: 120000, spanStart: "2026-09-01T14:40:00Z" },
     ] });
     const askless = await newPage();
     await load(askless);
@@ -1485,16 +1517,136 @@ const rebuild = (em) => {
       keys: [...document.querySelectorAll("#uaTimeline .ui-legend .ui-key")].map((k) => k.textContent),
     }));
     await askless.close();
-    const solid = marks.bubbles.find((b) => !b.dash), open = marks.bubbles.find((b) => b.dash);
-    ok(solid && Number(solid.fill) > 0.8, `a window the vendor put wholly on the ask side is drawn solid (${JSON.stringify(marks.bubbles)})`);
-    ok(open && Number(open.fill) === 0,
-       "AND A WINDOW WITH NO ASK-SIDE PREMIUM ON IT IS NOT DRAWN AS A LOW ASK SHARE. The fill used to stand a null in " +
-       "for a fifth of the premium, which is the ring the legend reads as dollars that were not on the ask side — a reading " +
-       "the vendor never sent — so it is an open dashed outline instead");
-    ok(marks.keys.includes("Ask side not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
-    ok(!marks.keys.some((k) => /bid/i.test(k)),
-       "and no key names the bid: a thin fill means the premium was not attributed to the ask, which is not a claim " +
-       "that it was attributed to the bid");
+    const solid = marks.bubbles.filter((b) => !b.dash), open = marks.bubbles.filter((b) => b.dash);
+    ok(solid.length === 1 && Number(solid[0].fill) > 0.8, `a window the vendor put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
+    ok(open.length === 2 && open.every((b) => Number(b.fill) === 0),
+       "AND A WINDOW WITH NO SIDE STATED IS NOT DRAWN AS A LOW ASK SHARE: an open dashed outline, both for the window " +
+       "with neither side and for the one that states the ask but not the bid, because the share is the ask over the " +
+       "premium sided at ask or bid and a missing bid leaves that denominator unknown");
+    ok(marks.keys.includes("Side not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
+    deep(marks.keys.slice(2, 5), ["Mostly ask side", "Mostly bid side", "Mixed or thinly sided"],
+       "and the keys name both sides now: the share is conditional on the premium sided at ask or bid, so a ring is " +
+       "premium the vendor put at the bid, which the old ask-over-premium fill could not say");
+
+    const rowsOf = (cases) => cases.map((c, i) => ({ ...c.rows, t: "K" + String.fromCharCode(65 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)),
+      cp: "C", k: 100, exp: "2026-09-18", spanStart: "2026-09-01T" + String(14 + Math.floor(i / 6)).padStart(2, "0") + ":" + String((i % 6) * 10).padStart(2, "0") + ":00Z" }));
+    const single = ASK_SHARE.cases.filter((c) => c.rows && !Array.isArray(c.rows));
+    await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: rowsOf(single) });
+    const known = await newPage();
+    await load(known);
+    const got = await known.evaluate((fx) => ({
+      table: fx.cases.map((c) => { const a = window.FlowsUI.F.askShare(c.rows); return { ...a, said: window.FlowsUI.F.askSaid(a) }; }),
+      split: fx.cases.map((c) => (Array.isArray(c.rows) ? undefined : window.FlowsUI.F.askSplit(c.rows))),
+      net: window.FlowsUI.F.askSplit({ cp: "P", prem: 40, askPrem: null, bidPrem: 30 }),
+      label: window.FlowsUI.F.askLabel,
+      names: Object.fromEntries([...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head)")].map((r) => {
+        const cell = r.querySelector(".fu-share");
+        return [r.querySelector(".fu-tk b").textContent, { side: cell.dataset.side || null,
+          text: [...cell.querySelectorAll('[aria-hidden="true"]')].map((x) => x.textContent).join(" "),
+          spoken: (cell.querySelector(".visually-hidden") || {}).textContent || null,
+          title: cell.getAttribute("title"), color: getComputedStyle(cell).color }];
+      })),
+      bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].map((b) => b.dataset.side || null).sort(),
+    }), ASK_SHARE);
+    await known.focus('#uaTimeline [aria-roledescription="chart"]');
+    await known.keyboard.press("Home");
+    const scrubText = await known.$eval("#uaTimeline .ui-readout", (r) => r.textContent);
+    await known.close();
+    ok(scrubText.includes(single[0].said),
+       `the timeline's readout prints the first window's ask share and its sided coverage as the table does (${scrubText})`);
+    const near = (x, y) => (x === null || y === null ? x === y : Math.abs(x - y) <= ASK_SHARE.tolerance);
+    ASK_SHARE.cases.forEach((c, i) => {
+      const o = got.table[i];
+      ok(near(o.share, c.share) && near(o.classified, c.classified) && o.side === c.side && o.said === c.said,
+         `KNOWN ANSWER, read in the page through FlowsUI.F.askShare: ${c.name} gives share ${c.share}, classified ` +
+         `${c.classified}, side ${c.side}, printed "${c.said}" (got ${JSON.stringify(o)})`);
+    });
+    eq(got.label, ASK_SHARE.label, "and the page's label is the table's");
+    ASK_SHARE.cases.forEach((c, i) => {
+      if (Array.isArray(c.rows)) return;
+      const sp = got.split[i], a = got.table[i], prem = c.rows ? Number(c.rows.prem) : NaN;
+      if (!(c.rows && c.rows.prem !== null && c.rows.prem !== "" && prem > 0)) {
+        eq(sp, null, `SPLIT: ${c.name} has no positive premium, so there is nothing to split`);
+        return;
+      }
+      const side = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) || Number(v) < 0 ? null : Number(v));
+      const x = side(c.rows.askPrem), y = side(c.rows.bidPrem), raw = (x ?? 0) + (y ?? 0), k = raw > prem ? prem / raw : 1;
+      const sum = sp.ask + sp.bid, close = (u, v) => Math.abs(u - v) <= 1e-9 * prem;
+      ok(sp.askStated === (x !== null) && sp.bidStated === (y !== null) && close(sp.ask, (x ?? 0) * k) && close(sp.bid, (y ?? 0) * k) &&
+         close(sum + sp.none, prem) && sp.none >= 0,
+         `SPLIT, through FlowsUI.F.askSplit: ${c.name} keeps each stated, non-negative side's dollars, scaled back to the premium ` +
+         `when the two overstate it, puts an unstated side's share in neither, and flags which sides were stated (${JSON.stringify(sp)})`);
+      if (sp.askStated && sp.bidStated) {
+        ok(Math.abs(sum / prem - a.classified) <= ASK_SHARE.tolerance && (a.share === null ? sum === 0 : Math.abs(sp.ask / sum - a.share) <= ASK_SHARE.tolerance),
+           `SPLIT: ${c.name} states both sides, so its dollars give askShare's share and sided coverage`);
+      } else {
+        eq(a.classified, null, `SPLIT: ${c.name} states one side or none, so askShare gives it no share while the split keeps the stated dollars`);
+      }
+    });
+    deep(got.net, { ask: 0, bid: 30, none: 10, askStated: false, bidStated: true },
+         "an unstated ask is read as unattributed, not as zero bid: the bid's 30 stays the bid's and the other 10 is neither, " +
+         "which is what the flow network on main asserts for the same window, so it can read the core without changing what it draws");
+    const drawnRows = rowsOf(single).map((r, i) => [r, single[i]]).filter(([r]) => Number(r.prem) > 0);
+    eq(Object.keys(got.names).length, drawnRows.length, "every known-answer window with a premium is drawn as a name");
+    for (const [r, c] of drawnRows) {
+      const cell = got.names[r.t];
+      eq(cell.side, c.side === "ask" || c.side === "bid" ? c.side : null,
+         `${c.name}: the Ask cell is coloured only for an ask or bid class, never for mixed, thin or no share (${JSON.stringify(cell)})`);
+      const fig = c.share === null ? null : +(c.share * 100).toFixed(0) + "%";
+      eq(cell.text, c.classified === null ? "\u2014" : c.share === null ? "none sided" : c.side === "thin" ? fig + " thin" : fig,
+         `${c.name}: and prints the share, with thin or none sided on the cell itself where the coverage is under half`);
+      const said = c.classified === null ? "no window states both sides" : c.said;
+      eq(cell.title, ASK_SHARE.label + ": " + said, `${c.name}: with the label and the sided coverage in its title`);
+      eq(cell.spoken, ", " + ASK_SHARE.label + ": " + said,
+         `${c.name}: and in text inside the row, so a touch, keyboard or screen reader gets the coverage the title gives a mouse`);
+    }
+    const tones = Object.values(got.names);
+    const askTone = tones.find((t) => t.side === "ask"), bidTone = tones.find((t) => t.side === "bid"), plain = tones.find((t) => t.side === null);
+    ok(askTone && bidTone && plain && new Set([askTone.color, bidTone.color, plain.color]).size === 3,
+       `the two coloured classes and the plain cell draw three different colours (${[askTone, bidTone, plain].map((t) => t && t.color).join(" / ")})`);
+    deep(got.bubbles, drawnRows.map(([, c]) => c.side).sort(),
+       "and the timeline draws each window's class from the same helper: one bubble per window, its class the table's");
+
+    const zeroCase = ASK_SHARE.cases.find((c) => c.classified === 0);
+    await put("flowalerts", { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [
+      { t: "ZZZ", cp: "C", k: 100, exp: "2026-09-18", ...zeroCase.rows, spanStart: "2026-09-01T14:00:00Z" },
+      { t: "YYY", cp: "C", k: 10, exp: "2026-09-18", prem: 0, spanStart: "2026-09-01T14:20:00Z" },
+      { t: "XXX", cp: "P", k: 10, exp: "2026-09-18", prem: null, spanStart: "2026-09-01T14:30:00Z" },
+      { t: "VVV", cp: "C", k: 10, exp: "2026-09-18", prem: 400000 },
+      { t: "NVDA", cp: "C", k: 1250, exp: "2026-09-18", prem: 3000000, askPrem: 2400000, bidPrem: 300000, sweep: true, opening: true, spanStart: "2026-09-01T13:35:00Z" },
+      { t: "WWW", cp: "P", k: 50, exp: "2026-09-18", prem: 2000000, askPrem: 100000, bidPrem: 1700000, sweep: true, opening: true, spanStart: "2026-09-01T19:50:00Z" },
+    ] });
+    const zero = await newPage({ viewport: { width: 320, height: 900 } });
+    await load(zero);
+    const zs = await zero.evaluate(() => ({
+      bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].map((b) => ({ side: b.dataset.side || null, fill: b.getAttribute("fill-opacity"), dash: b.getAttribute("stroke-dasharray") })),
+      keys: [...document.querySelectorAll("#uaTimeline .ui-legend .ui-key")].map((k) => k.textContent),
+      cell: [...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head)")].filter((r) => r.querySelector(".fu-tk b").textContent === "ZZZ")
+        .map((r) => [...r.querySelectorAll('.fu-share [aria-hidden="true"]')].map((x) => x.textContent).join(" "))[0],
+    }));
+    ok(!zs.keys.includes("Side not stated") && zs.bubbles.every((b) => b.dash === null),
+       `A WINDOW THE VENDOR SIDED AS ZERO IS NOT A WINDOW WHOSE SIDE IT NEVER STATED: with both fields carried as 0 the ` +
+       `timeline draws no dashed ring and adds no Side not stated key; nor do windows the timeline never draws (a zero or ` +
+       `null premium, no time), though none of them states a side, because the key names a mark on the chart (${JSON.stringify(zs)})`);
+    ok(zs.bubbles.some((b) => b.side === "thin" && Number(b.fill) === 0.4) && zs.cell === "none sided",
+       `it is drawn with the faint mixed or thinly sided fill, and its Names cell prints none sided, not the dash the note reserves for a missing field (${JSON.stringify(zs)})`);
+    await zero.focus('#uaTimeline [aria-roledescription="chart"]');
+    const widths = [];
+    for (const key of ["Home", "ArrowRight", "ArrowRight", "End"]) {
+      await zero.keyboard.press(key);
+      widths.push(await zero.evaluate(() => {
+        const r = document.querySelector("#uaTimeline .ui-readout"), host = document.querySelector("#uaTimeline .fu-chart");
+        const rb = r.getBoundingClientRect(), hb = host.getBoundingClientRect();
+        return { on: r.classList.contains("is-on"), text: r.textContent, over: document.documentElement.scrollWidth - window.innerWidth,
+          left: Math.round(rb.left - hb.left), right: Math.round(hb.right - rb.right) };
+      }));
+    }
+    await zero.close();
+    ok(widths.some((w) => /none sided/.test(w.text)) && widths.every((w) => !/null|undefined/.test(w.text)),
+       `and a window with no flags reads to its coverage and stops there: no part of the readout prints null (${JSON.stringify(widths.map((w) => w.text))})`);
+    ok(widths.every((w) => w.on && w.over <= 0 && w.left >= 0 && w.right >= 0) && widths.some((w) => /Sweep/.test(w.text) && /sided/.test(w.text)),
+       `AT 320 PX A READ BUBBLE KEEPS THE PAGE AT THE VIEWPORT'S WIDTH: the readout, with the ask share, its coverage and ` +
+       `the flags, wraps inside the chart instead of running past it (${JSON.stringify(widths)})`);
 
     const urgent = { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", sessionDate: "2026-08-31", rows: [
       { t: "CCC", cp: "C", k: 40, exp: "2026-09-18", prem: 900000, askPrem: 900000, spanStart: "2026-09-01T13:40:00Z", st: "board:short" },

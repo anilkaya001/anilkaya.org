@@ -1710,6 +1710,336 @@ const CARD = {
   ok(!/\b(dex|exposure|deltaDollars|dealerExposure)\b/.test(fs.readFileSync(new URL("../shared/flows-quant-structures.js", import.meta.url), "utf8")), "no affinity row or veto in the engine names an exposure");
 }
 
+{
+  const H = await import("./dossier-harness.mjs");
+  const F = await import("./dossier-fixtures.mjs");
+  let restoreClock = H.shiftClock();
+  const setNow = (iso) => { restoreClock(); restoreClock = H.shiftClock(iso); };
+  const cache = H.cacheFake();
+  const stub = H.vendorStub();
+  const MODEL = "@cf/zai-org/glm-4.7-flash";
+  const ENV = { FLOWS_ASK_MODEL: MODEL, FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_READ_MODE: "off" };
+  const USAGE = { prompt_tokens: 100, completion_tokens: 20 };
+  const agree = { verdict: "harvest-rich-premium", ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "level.putWall"] }] };
+  const deny = { verdict: "stand-aside", ideas: [] };
+  const world = (reply) => {
+    const f = H.fakeD1();
+    F.seed(f);
+    cache.clear();
+    const calls = [];
+    const ai = { reply, run: async (model) => { calls.push(model); return { response: JSON.stringify(ai.reply), usage: USAGE }; } };
+    return { f, ai, calls, row: (scope) => f.db.prepare("SELECT fingerprint, summary, ideas, llm, guard, generated_at FROM flows_neuron WHERE scope = ?").get(scope) };
+  };
+  const republish = (f, engine) => {
+    f.put("card:" + F.T, { ...F.card(F.T), generatedAt: "2026-10-02T01:10:00.000Z" }, 1790900000000 + 3600000);
+    if (engine) f.put("card-x:" + F.T, { ...F.cardX(F.T), engine: { ...F.ENGINE, asOf: "2026-10-02T01:05:00.000Z", ...engine } }, 1790900000000 + 3600000);
+  };
+  const withoutS1 = F.ENGINE.structures.map((x) => (x.id === "S1" ? { ...x, grade: 0 } : x));
+
+  {
+    const { f, ai, calls, row } = world(agree);
+    const get = await H.client(f.D1, { ...ENV, AI: ai });
+    const ask = async () => { const r = await get("/api/flows/summary?t=" + F.T); await r.settle(); return r.body; };
+    eq((await ask()).status, "pending", "KEEP THE LAST GOOD NEURON OUTPUT: the first call starts a reading");
+    const good = await ask();
+    ok(good.status === "ok" && good.llm === true && good.ideas.length > 0 && good.ideas[0].from === "model" && !("held" in good),
+      "and the model's vetted answer is served (" + good.guard + ")");
+    const kept = row("ticker:" + F.T);
+    ok(kept && kept.llm === 1, "stored under ticker:EXMP");
+    ok(row("gen:ticker:" + F.T).guard === null, "and the claim beside it, gen:ticker:EXMP, is released when the vetted result lands");
+    republish(f);
+    ai.reply = deny;
+    const during = await get("/api/flows/summary?t=" + F.T);
+    ok(during.body.status === "ok" && during.body.held === "previous" && during.body.llm === true && during.body.generatedAt === kept.generated_at,
+      "A NEW CARD: while it is read, the reader sees the last vetted output with held previous and its own generatedAt, not a blank pending (" + during.body.status + ")");
+    eq(during.body.refreshing, true, "and refreshing: true, because this call started the new reading, so the page keeps polling for it");
+    await during.settle();
+    eq(calls.length, 2, "the new card was put to the model once");
+    const attempt = row("gen:ticker:" + F.T);
+    ok(attempt.guard === "engine:refused" && attempt.llm === 0 && attempt.fingerprint !== kept.fingerprint && /scored|EXMP/.test(attempt.summary),
+      "the refused answer and its deterministic fallback are recorded on the claim row: " + attempt.guard);
+    same(row("ticker:" + F.T), kept, "THE REFUSAL DOES NOT ERASE THE GOOD OUTPUT: ticker:EXMP is the row it was");
+    const after = await ask();
+    eq(after.status, "ok", "AFTER A REFUSED REGENERATION the summary is ok");
+    eq(after.held, "previous", "held previous");
+    eq(after.llm, true, "the model's output");
+    eq(after.generatedAt, kept.generated_at, "with its own generatedAt");
+    eq(after.refreshing, false, "and refreshing: false, because the refusal cools down and no reading is coming");
+    eq(after.summary, attempt.summary, "its summary is the CURRENT card's deterministic text, not the earlier card's");
+    same(after.ideas.map((i) => [i.structure, i.from]), good.ideas.map((i) => [i.structure, i.from]), "and its ideas, re-vetted against the current engine");
+    ok(good.ideas[0].grade > 1 && after.ideas.every((i) => i.grade <= 1),
+      "written for an earlier card, its grades are capped at 1 although the current card is not stale (" + good.ideas.map((i) => i.grade) + " -> " + after.ideas.map((i) => i.grade) + ")");
+    ok(!after.summary.startsWith(STALE_NOTE), "without the stale-card note, which would be false of the current card");
+    ok(/earlier version of this card/.test(after.note), "and a note that says it was written for an earlier card: " + after.note);
+    eq(after.context.ticker, F.T, "beside the current card's context");
+    for (let i = 0; i < 3; i++) await ask();
+    eq(calls.length, 2, "a refusal is not retried on every read");
+  }
+
+  {
+    const { f, ai, calls } = world(agree);
+    const get = await H.client(f.D1, { ...ENV, AI: ai });
+    const ask = async (g) => { const r = await g("/api/flows/summary?t=" + F.T); await r.settle(); return r.body; };
+    await ask(get);
+    const good = await ask(get);
+    ok(good.llm === true && !("held" in good), "A NEW MODEL CONFIGURATION ON THE SAME CARD: (setup) a vetted output is stored");
+    ai.reply = deny;
+    const get2 = await H.client(f.D1, { ...ENV, FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast", AI: ai });
+    const after = (await ask(get2), await ask(get2));
+    eq(calls.length, 2, "the changed call signature puts the same card to the model once more");
+    ok(after.held === "previous" && after.llm === true, "and after its refusal the earlier output is held (" + after.held + ")");
+    ok(/another model configuration/.test(after.note) && !/earlier version of this card/.test(after.note),
+      "with a note that says another model configuration wrote it, not that the card has changed: " + after.note);
+    same(after.ideas.map((i) => i.grade), good.ideas.map((i) => i.grade), "and the grades of the current card, uncapped, because the card is the one it was written for");
+  }
+
+  for (const [label, engine, tier, ideas] of [
+    ["AN ENGINE THAT NOW STANDS ASIDE", { structures: withoutS1, ideas: [], noTrade: { code: "candidates.none", closest: null } }, "stand-aside", []],
+    ["AN ENGINE THAT NOW WITHHOLDS THE HELD STRUCTURE", { structures: withoutS1, ideas: ["S2"], noTrade: null }, "priced", ["S2"]],
+  ]) {
+    const { f, ai, calls, row } = world(agree);
+    const get = await H.client(f.D1, { ...ENV, AI: ai });
+    const ask = async () => { const r = await get("/api/flows/summary?t=" + F.T); await r.settle(); return r.body; };
+    await ask();
+    const good = await ask();
+    ok(good.llm === true && good.ideas[0].structure === "S1" && good.verdict === "harvest-rich-premium", label + ": the vetted output picks S1 on the first card");
+    republish(f, engine);
+    const during = await ask();
+    ok(during.status === "pending" && !("held" in during),
+      label + ": while the new card is read, the earlier pick is NOT held, because it does not re-vet against the current engine (" + during.status + ", " + during.held + ")");
+    eq(calls.length, 2, "the new card was put to the model");
+    eq(row("gen:ticker:" + F.T).guard, "engine:refused", "and the model's S1 was refused on it");
+    const r = await ask();
+    ok(r.status === "ok" && !("held" in r) && r.llm === false && r.guard === "engine:refused",
+      label + ": after the refusal the reader gets the current engine's own answer, not the held S1 (" + r.held + ", " + r.guard + ")");
+    eq(r.tier, tier, "with the current tier");
+    same(r.ideas.map((i) => [i.structure, i.from]), ideas.map((id) => [id, "engine"]), "and the current engine's ideas");
+    ok(!r.ideas.some((i) => i.structure === "S1"), "and never S1, which the current engine withholds");
+    if (tier === "stand-aside") ok(r.verdict === "stand-aside" && r.code === "candidates.none", "the verdict is the engine's stand-aside");
+    else ok(r.verdict !== "harvest-rich-premium" || r.ideas[0].structure !== "S1", "the verdict is not the held one on S1");
+  }
+
+  {
+    const { f, ai, calls, row } = world(deny);
+    const get = await H.client(f.D1, { ...ENV, AI: ai });
+    const ask = async () => { const r = await get("/api/flows/summary?t=" + F.T); await r.settle(); return r.body; };
+    await ask();
+    const r = await ask();
+    ok(r.status === "ok" && r.llm === false && r.guard === "engine:refused" && !("held" in r) && r.ideas.length > 0 && r.ideas[0].from === "engine",
+      "WITH NO GOOD OUTPUT TO KEEP, a refused first answer is served as the engine's own ranking from the claim row, as before (" + r.guard + ")");
+    eq(row("ticker:" + F.T), undefined, "and ticker:EXMP, which only a vetted output writes, holds nothing");
+    eq(calls.length, 1, "one call");
+  }
+
+  {
+    const { f, row } = world(agree);
+    const get = await H.client(f.D1, { ...ENV });
+    const ask = async () => { const r = await get("/api/flows/summary?t=" + F.T); await r.settle(); return r.body; };
+    await ask();
+    const r = await ask();
+    ok(r.status === "ok" && r.llm === false && r.guard === null && r.ideas.length > 0, "WITH NO MODEL the engine's own ranking is served from the claim row");
+    eq(row("ticker:" + F.T), undefined, "and nothing is written as if a model had answered");
+  }
+
+  {
+    const f = H.fakeD1();
+    F.seed(f, { live: false });
+    const fact = { id: "t/tilt", topic: ["today", "lean"], source: "brief", at: "2026-10-02T00:10:00.000Z",
+      say: "44 names lean bullish and 53 lean bearish out of 100 scored.", n: { bullish: 44, bearish: 53, scored: 100 } };
+    const brief = { v: 1, generatedAt: "2026-10-02T00:10:00.000Z", sessionDate: F.SESSION, facts: [fact], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } };
+    f.put("brief", brief, Date.parse("2026-10-02T00:10:00.000Z"));
+    const ai = { text: "44 names lean bullish and 53 lean bearish out of 100 scored.", calls: 0, run: async () => { ai.calls++; return { response: ai.text, usage: USAGE }; } };
+    const worker = (await import("../worker.js?board=" + Date.now())).default;
+    const fire = async (iso, extra = {}) => {
+      setNow(iso);
+      const bg = [];
+      await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() }, { DB: f.D1, AI: ai, ...ENV, ...extra }, { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(bg);
+    };
+    const board = (scope = "board") => f.db.prepare("SELECT text, llm, model, fingerprint, guard, generated_at FROM flows_ai_summary WHERE scope = ?").get(scope);
+    await fire("2026-10-02T14:45:00.000Z");
+    const b1 = board();
+    ok(b1 && b1.llm === 1 && b1.text === ai.text, "THE BOARD SUMMARY: a vetted model summary is written for the session");
+    ai.text = "44 names lean bullish today and 87 names will rally tomorrow.";
+    const OTHER = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    await fire("2026-10-02T15:15:00.000Z", { FLOWS_ASK_MODEL: OTHER });
+    const b2 = board();
+    ok(b2.llm === 1 && b2.text === b1.text && b2.generated_at === b1.generated_at && b2.fingerprint === b1.fingerprint,
+      "a refused regeneration in the same session does not write the plain text over it: the model summary stands");
+    const g2 = board("gen:board");
+    ok(g2 && g2.llm === 0 && g2.guard === "invented" && g2.fingerprint !== b1.fingerprint && Date.parse(g2.generated_at) >= Date.parse("2026-10-02T15:15:00.000Z"),
+      "and the refused attempt is recorded beside it under gen:board, with its guard (" + (g2 && g2.guard) + ")");
+    eq((await (await H.client(f.D1, { ...ENV }))("/api/flows/summary")).body.summary, b1.text, "the board route serves the model summary");
+    const asked = ai.calls;
+    await fire("2026-10-02T15:45:00.000Z", { FLOWS_ASK_MODEL: OTHER });
+    eq(ai.calls, asked, "and the next firing over the same facts does not ask the model again: the refusal on gen:board is the attempt the retry rules read");
+    const next = { ...fact, at: "2026-10-02T15:50:00.000Z", say: "45 names lean bullish and 52 lean bearish out of 100 scored.", n: { bullish: 45, bearish: 52, scored: 100 } };
+    f.put("brief", { ...brief, generatedAt: "2026-10-02T15:50:00.000Z", facts: [next] }, Date.parse("2026-10-02T15:50:00.000Z"));
+    await fire("2026-10-02T16:15:00.000Z", { FLOWS_ASK_MODEL: OTHER });
+    const b3 = board();
+    ok(b3.llm === 0 && b3.text !== b1.text && typeof b3.guard === "string" && b3.guard !== "",
+      "while a brief published after it, with no model summary of its own, gets the plain text with the refusal's guard (" + b3.guard + ")");
+  }
+
+  {
+    const f = H.fakeD1();
+    F.seed(f, { live: false });
+    const fact = { id: "t/tilt", topic: ["today", "lean"], source: "brief", at: "2026-10-02T00:10:00.000Z",
+      say: "44 names lean bullish and 53 lean bearish out of 100 scored.", n: { bullish: 44, bearish: 53, scored: 100 } };
+    f.put("brief", { v: 1, generatedAt: "2026-10-02T00:10:00.000Z", sessionDate: F.SESSION, facts: [fact], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } },
+      Date.parse("2026-10-02T00:10:00.000Z"));
+    const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const ai = { down: true, models: [], run: async (model) => {
+      ai.models.push(model);
+      if (model === MODEL && ai.down) throw new Error("3040: Capacity temporarily exceeded, please try again.");
+      return { response: fact.say, usage: USAGE };
+    } };
+    const worker = (await import("../worker.js?boardChain=" + Date.now())).default;
+    const fire = async (iso) => {
+      setNow(iso);
+      const bg = [];
+      await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+        { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+        { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(bg);
+    };
+    const board = () => f.db.prepare("SELECT text, llm, model, guard FROM flows_ai_summary WHERE scope = 'board'").get();
+    await fire("2026-10-02T14:45:00.000Z");
+    same(ai.models, [MODEL],
+      "THE SCHEDULED BOARD SUMMARY ASKS THE PRIMARY ONLY: with a fallback configured and the primary out of capacity, no second model is asked");
+    const b1 = board();
+    ok(b1 && b1.llm === 0 && b1.guard === "unreachable:capacity" && b1.model === MODEL && b1.text !== fact.say,
+      "and the firing writes the plain text with the primary's failure (" + (b1 && b1.guard) + "), not the fallback's answer");
+    ai.down = false;
+    await fire("2026-10-02T15:15:00.000Z");
+    same(ai.models, [MODEL, MODEL], "the next firing asks the primary again, and only the primary");
+    const b2 = board();
+    ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+      "and its answer becomes the board summary: a failed summary is late by one firing");
+  }
+
+  for (const finish of ["stop", "length"]) {
+    const f = H.fakeD1();
+    F.seed(f, { live: false });
+    const tilt = (bull, bear, at) => ({ id: "t/tilt", topic: ["today", "lean"], source: "brief", at,
+      say: bull + " names lean bullish and " + bear + " lean bearish out of 100 scored.", n: { bullish: bull, bearish: bear, scored: 100 } });
+    const putBrief = (fact) => f.put("brief", { v: 1, generatedAt: fact.at, sessionDate: F.SESSION, facts: [fact],
+      silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } }, Date.parse(fact.at));
+    let fact = tilt(44, 53, "2026-10-02T00:10:00.000Z");
+    putBrief(fact);
+    const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const ai = { bad: true, models: [], run: async (model) => {
+      ai.models.push(model);
+      if (model === MODEL && ai.bad) return { choices: [{ message: { content: "" }, finish_reason: finish }], usage: USAGE };
+      return { response: fact.say, usage: USAGE };
+    } };
+    const worker = (await import("../worker.js?boardBilled=" + finish + Date.now())).default;
+    const fire = async (iso) => {
+      setNow(iso);
+      const bg = [];
+      await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+        { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+        { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(bg);
+    };
+    const board = () => f.db.prepare("SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = 'board'").get();
+    const guard = finish === "length" ? "unreachable:length" : "unreachable:empty";
+    await fire("2026-10-02T14:45:00.000Z");
+    same(ai.models, [MODEL],
+      "A PRIMARY THAT ANSWERS WITH NO TEXT (finish " + finish + ") IS NOT FAILED OVER EITHER: with a fallback configured, the models asked are the primary alone");
+    const b1 = board();
+    ok(b1 && b1.llm === 0 && b1.guard === guard && b1.model === MODEL && b1.text !== fact.say,
+      "and the board is the plain text under the primary's name with guard " + guard + " (" + (b1 && b1.guard) + ")");
+    ai.bad = false;
+    await fire("2026-10-02T15:15:00.000Z");
+    same(ai.models, [MODEL],
+      "the billed no-text reply is not asked again at the next firing on the same facts (" + finish + "), though the primary is back");
+    await fire("2026-10-02T15:45:00.000Z");
+    ok(Date.now() - Date.parse(b1.generated_at) < AI_LENGTH_RETRY_MS && ai.models.length === 1,
+      "nor at the firing before AI_LENGTH_RETRY_MS has passed since it (" + finish + ")");
+    await fire("2026-10-02T16:15:00.000Z");
+    if (finish === "length") {
+      ok(Date.now() - Date.parse(b1.generated_at) >= AI_LENGTH_RETRY_MS, "the 16:15 firing is AI_LENGTH_RETRY_MS after the cut reply");
+      same(ai.models, [MODEL, MODEL], "a reply cut at its length is asked again, of the primary alone, once AI_LENGTH_RETRY_MS has passed");
+      const b2 = board();
+      ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+        "and that answer becomes the board summary: a cut reply waits an hour, not one firing");
+    } else {
+      same(ai.models, [MODEL], "an empty reply is not asked again by time alone: AI_LENGTH_RETRY_MS has passed and the facts are the same");
+      ok(board().guard === "unreachable:empty" && board().llm === 0, "and the board stays the plain text");
+      fact = tilt(45, 52, "2026-10-02T16:20:00.000Z");
+      putBrief(fact);
+      await fire("2026-10-02T16:45:00.000Z");
+      same(ai.models, [MODEL, MODEL], "an empty reply is asked again, of the primary alone, at the first firing after the brief's facts change");
+      const b2 = board();
+      ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+        "and that answer becomes the board summary of the new brief");
+    }
+  }
+
+  for (const live of [false, true]) {
+    for (const finish of ["stop", "length"]) {
+      const f = H.fakeD1();
+      F.seed(f, { live });
+      const tilt = (bull, bear, at) => ({ id: "t/tilt", topic: ["today", "lean"], source: "brief", at,
+        say: bull + " names lean bullish and " + bear + " lean bearish out of 100 scored.", n: { bullish: bull, bearish: bear, scored: 100 } });
+      const putBrief = (fact) => f.put("brief", { v: 1, generatedAt: fact.at, sessionDate: F.SESSION, facts: [fact],
+        silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } }, Date.parse(fact.at));
+      let fact = tilt(44, 53, "2026-10-02T00:10:00.000Z");
+      putBrief(fact);
+      const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+      const ai = { bad: true, models: [], run: async (model) => {
+        ai.models.push(model);
+        if (model === MODEL && ai.bad) return { choices: [{ message: { content: "" }, finish_reason: finish }], usage: USAGE };
+        return { response: fact.say, usage: USAGE };
+      } };
+      const worker = (await import("../worker.js?boardMoved=" + live + finish + Date.now())).default;
+      const fire = async (iso) => {
+        setNow(iso);
+        const bg = [];
+        await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+          { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+          { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+        await Promise.all(bg);
+      };
+      const board = () => f.db.prepare("SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = 'board'").get();
+      const tag = (live ? "overlay on" : "no overlay") + ", finish " + finish;
+      await fire("2026-10-02T14:45:00.000Z");
+      same(ai.models, [MODEL], "a billed no-text reply on the board asks the primary alone (" + tag + ")");
+      const b1 = board();
+      ok(b1 && b1.llm === 0 && b1.guard === (finish === "length" ? "unreachable:length" : "unreachable:empty"),
+        "and leaves the plain text with its replied guard (" + tag + ", " + (b1 && b1.guard) + ")");
+      ai.bad = false;
+      fact = tilt(45, 52, "2026-10-02T15:00:00.000Z");
+      putBrief(fact);
+      await fire("2026-10-02T15:15:00.000Z");
+      if (!live) {
+        same(ai.models, [MODEL, MODEL],
+          "with no live overlay, a new brief's facts ask the primary alone again at the next firing, an hour not yet passed (" + tag + ")");
+        const b2 = board();
+        ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+          "and that answer becomes the board summary of the new brief (" + tag + ")");
+        continue;
+      }
+      same(ai.models, [MODEL],
+        "with the live overlay on, the billed reply is not asked again at the next firing though the brief's facts moved (" + tag + ")");
+      await fire("2026-10-02T15:45:00.000Z");
+      ok(Date.now() - Date.parse(b1.generated_at) < AI_LENGTH_RETRY_MS && ai.models.length === 1,
+        "nor at the second firing, inside AI_LENGTH_RETRY_MS of the reply (" + tag + ")");
+      await fire("2026-10-02T16:15:00.000Z");
+      same(ai.models, [MODEL, MODEL],
+        "the third firing, past AI_LENGTH_RETRY_MS, asks the primary alone again on the moved facts (" + tag + ")");
+      const b3 = board();
+      ok(b3.llm === 1 && b3.model === MODEL && b3.guard === null,
+        "and that answer becomes the board summary (" + tag + ")");
+    }
+  }
+
+  restoreClock();
+  cache.restore();
+  stub.restore();
+}
+
 console.log(`✓ flows-neuron: ${checks} assertions — a context that carries every registry panel plus the ` +
   "standing and the volatility model, each graded 0 to 3 from the card's own coverage and quality fields " +
   "and capped at weak when the card is behind the last closed session; one line per feature so the model " +

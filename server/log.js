@@ -1,5 +1,7 @@
-import { errorText } from "./http.js";
+import { emitFailure, failureEntry, failureLine } from "../shared/flows-log.js";
 
-export function logFailure(level, message, fields, error) {
-  console[level](JSON.stringify({ message, ...fields, error: errorText(error) }));
+export { failureEntry, failureLine };
+
+export function logFailure(level, event, fields, error) {
+  emitFailure(console, level, event, fields, error);
 }

@@ -4,6 +4,7 @@ import {
   reactionGauge, shapeEconomicCalendar, shapeFdaCalendar,
 } from "../../shared/flows-catalysts.js";
 import { addDays, weekdaysAhead, priorWeekdayIso, vnum, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const FDA_LIMIT = 200;
 
@@ -65,19 +66,19 @@ export async function readCatalysts(uw, {
     raw.calls++;
     return read(uw, path, params, opts);
   };
-  raw.econ = await get("/api/market/economic-calendar", {});
-  raw.fda = await get("/api/market/fda-calendar", {
+  raw.econ = await get(pathFor("economic-calendar"), {});
+  raw.fda = await get(pathFor("fda-calendar"), {
     ...(sessionDate ? { target_date_min: sessionDate, target_date_max: addDays(sessionDate, FDA_HORIZON_DAYS) } : {}),
     limit: FDA_LIMIT,
   });
   for (const step of calendarPlan(sessionDate)) {
-    const res = await get(`/api/earnings/${step.route}`, { date: step.date, limit: 100 });
+    const res = await get(pathFor(step.route === "premarket" ? "earnings-premarket" : "earnings-afterhours"), { date: step.date, limit: 100 });
     raw.calendar.push({ ...step, res });
   }
   const work = async (t) => {
     if (pastDeadline(deadline)) return;
     raw.calls++;
-    raw.earnings.set(t, await read(uw, `/api/earnings/${t}`, {}));
+    raw.earnings.set(t, await read(uw, pathFor("earnings", { ticker: t }), {}));
   };
   const list = [...new Set(earningsTickers)];
   if (pool) await pool(list, work, { width, stopEarly: () => pastDeadline(deadline) });

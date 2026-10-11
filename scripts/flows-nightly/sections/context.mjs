@@ -6,6 +6,7 @@ import { INDEX_TICKERS } from "../../flows-legs/universe.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, MARKET_CROSS_LIMIT } from "../vendor-params.mjs";
 import { poolWidth, runPooled, stats, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { readDayOf } from "../clock.mjs";
 import { repairCandles } from "../rank.mjs";
 import { fakeCongress } from "../fixtures.mjs";
@@ -37,7 +38,7 @@ export async function runContext(ctx) {
       const recent = DRY_RUN
         ? [...onBoard.keys(), ...crossSectionTickers.filter((_, i) => i % 2 === 0)]
           .flatMap((t) => fakeCongress(t))
-        : await uw("/api/congress/recent-trades", { limit: 100 });
+        : await uw(pathFor("congress-recent"), { limit: 100 });
 
       const identity = (r) => `${(r && r.politician_id) || (r && r.name) || ""}|` +
         `${(r && r.ticker) || ""}|${(r && r.transaction_date) || ""}|` +
@@ -82,7 +83,7 @@ export async function runContext(ctx) {
       let recovered = 0;
       for (const ticker of onBoard.keys()) {
         if (Date.now() > stats.startedAt + DEADLINE_MS) break;
-        const rows = await uw("/api/congress/recent-trades", { ticker, limit: 50 })
+        const rows = await uw(pathFor("congress-recent"), { ticker, limit: 50 })
           .then((read) => { congressNamesRead.add(ticker); return read; })
           .catch(() => []);
         if (rows.length) { congressByTicker.set(ticker, rows); recovered++; }

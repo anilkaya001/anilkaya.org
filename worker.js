@@ -39,6 +39,7 @@ import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
+import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
 import { chainFor } from "./shared/flows-ai-broker.js";
@@ -51,6 +52,7 @@ import { serveRt } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
+import { pathFor } from "./shared/flows-vendor-ops.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -1065,7 +1067,7 @@ async function classifyTicker(env, ctx, ticker, allowed) {
     }
   }
   if (!env.UW_API_KEY || !(await allowed())) return held;
-  const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
+  const raw = await uwFetch(env, pathFor("screener-stocks"), { ticker }).catch(() => null);
   const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
   if (!rows) return held;
   const row = rows.find((x) => x && typeof x.ticker === "string" && x.ticker.trim().toUpperCase() === ticker) || null;
@@ -1305,7 +1307,7 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   const [briefRes, liveRes, priorRes, clockRes] = await env.DB.batch([
     env.DB.prepare("SELECT updated_at FROM flows_payload WHERE id = 'brief'"),
     env.DB.prepare(FLOWS_LIVE.LIVE_BRIEF_STAMP_SQL),
-    env.DB.prepare("SELECT fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope = ?").bind("board"),
+    env.DB.prepare("SELECT scope, fingerprint, llm, guard, generated_at FROM flows_ai_summary WHERE scope IN (?, ?)").bind("board", "gen:board"),
     env.DB.prepare("SELECT * FROM flows_clock WHERE id = 1"),
   ]).catch(() => []);
   const rowOf = (res) => (res && Array.isArray(res.results) && res.results.length ? res.results[0] : null);
@@ -1315,7 +1317,9 @@ async function refreshFlowsSummary(env, at = Date.now()) {
 
   const signature = aiCallSignature(env);
   const stamp = String(brief.updated_at || 0) + "|" + FLOWS_LIVE.liveBriefStampOf(liveRes && liveRes.results) + "|" + signature;
-  const prior = rowOf(priorRes);
+  const summaryRows = priorRes && Array.isArray(priorRes.results) ? priorRes.results : [];
+  const served = summaryRows.find((r) => r.scope === "board") || null;
+  const prior = summaryRows.reduce((a, r) => (a === null || String(r.generated_at) > String(a.generated_at) ? r : a), null);
   const clock = FLOWS_LIVE.normalizeClock(rowOf(clockRes));
   if (prior && clock && clock.summaryStamp === stamp) {
     const priorAge = typeof prior.generated_at === "string" ? at - Date.parse(prior.generated_at) : Infinity;
@@ -1348,17 +1352,19 @@ async function refreshFlowsSummary(env, at = Date.now()) {
   const age = FLOWS_ASK.briefAge(index, new Date(), FLOWS_LIVE.memoizedClock());
 
   const plain = FLOWS_ASK.renderSummaryPlain(facts);
+  const sessionModel = served !== null && Number(served.llm) === 1 && typeof served.generated_at === "string" &&
+    Date.parse(served.generated_at) >= Number(brief.updated_at);
   const write = async (text, llm, model, guard) => {
     await env.DB.prepare(
       "INSERT INTO flows_ai_summary (scope, text, llm, model, fingerprint, guard, generated_at) " +
       "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
       "text=excluded.text, llm=excluded.llm, model=excluded.model, " +
       "fingerprint=excluded.fingerprint, guard=excluded.guard, generated_at=excluded.generated_at",
-    ).bind("board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
+    ).bind(!llm && sessionModel ? "gen:board" : "board", text, llm ? 1 : 0, model, fingerprint, guard, new Date().toISOString()).run();
     await markStamp();
   };
 
-  const chain = chainFor(env, "board");
+  const chain = chainFor(env, "board").slice(0, 1);
 
   if (!env.AI || !chain.length) {
     await write(plain, false, null, null).catch(() => {});
@@ -1413,6 +1419,9 @@ async function readFlowsSummary(env, scope) {
 
 const NEURON_GENERATING_MS = 90 * 1000;
 const NEURON_RETRY_MS = 5 * 60 * 1000;
+const NEURON_GEN = "gen:";
+const NEURON_HELD_NOTE = "This reading was written for an earlier version of this card and is kept until a reading of the current card is written and passes the checks.";
+const NEURON_HELD_MODEL_NOTE = "This reading of the current card was written by another model configuration and is kept until a reading by the current one is written and passes the checks.";
 
 const NEURON_ROW_SQL = "SELECT version, fingerprint, summary, ideas, llm, model, guard, generated_at FROM flows_neuron WHERE scope = ?";
 
@@ -1457,7 +1466,8 @@ async function markNeuronGenerating(env, scope, fingerprint, model) {
 }
 
 async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, guard, startedAt) {
-  return env.DB.prepare(
+  const at = startedAt || new Date().toISOString();
+  const upsert = env.DB.prepare(
     "INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) " +
     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope) DO UPDATE SET " +
     "version=excluded.version, fingerprint=excluded.fingerprint, summary=excluded.summary, " +
@@ -1465,7 +1475,11 @@ async function writeNeuron(env, scope, fingerprint, summary, ideas, llm, model, 
     "generated_at=excluded.generated_at " +
     "WHERE flows_neuron.fingerprint = excluded.fingerprint OR flows_neuron.generated_at < excluded.generated_at",
   ).bind(scope, FLOWS_NEURON.NEURON_CONTEXT_VERSION, fingerprint, summary, JSON.stringify(ideas || []),
-    llm ? 1 : 0, model, guard, startedAt || new Date().toISOString()).run();
+    llm ? 1 : 0, model, guard, at);
+  if (scope.startsWith(NEURON_GEN)) return upsert.run();
+  return env.DB.batch([upsert, env.DB.prepare(
+    "UPDATE flows_neuron SET guard = NULL WHERE scope = ? AND guard = 'generating' AND generated_at <= ?",
+  ).bind(NEURON_GEN + scope, at)]);
 }
 
 function ideaProvenance(r) {
@@ -1538,9 +1552,31 @@ function neuronContextFor(card) {
   return FLOWS_NEURON.buildContext(card, { expectedSession: age.expected });
 }
 
+function heldNeuron(kept, context, tag) {
+  let row;
+  if (kept.engine) {
+    if (!context.engine) return null;
+    const ideas = kept.ideas.map((i) => (i && typeof i === "object" ? { structure: i.structure, verdict: i.verdict, because: i.because } : i));
+    const vet = FLOWS_NEURON.vetEngineReply({ verdict: kept.verdict, claims: kept.claims, ideas }, context);
+    if (!vet.ok || vet.refused.length || (vet.verdict === "stand-aside") !== (tag.tier === "stand-aside")) return null;
+    row = { ...kept, summary: FLOWS_NEURON.deterministicSummary(context), verdict: vet.verdict, claims: vet.claims, ideas: vet.ideas };
+  } else {
+    if (context.engine) return null;
+    if (FLOWS_NEURON.proseIssue(kept.summary, "summary") !== null) return null;
+    if (!FLOWS_ASK.guardAnswer(kept.summary, FLOWS_NEURON.guardFacts(context), FLOWS_NEURON.guardOptions(context)).ok) return null;
+    const vet = FLOWS_NEURON.vetIdeas(kept.ideas.map((i) => (i && typeof i === "object" ? { ...i, rests_on: i.restsOn } : i)), context);
+    if (vet.refused.length || vet.ideas.length !== kept.ideas.length) return null;
+    row = { ...kept, ideas: vet.ideas };
+  }
+  const earlier = typeof kept.fingerprint !== "string" || !kept.fingerprint.startsWith(FLOWS_NEURON.contextFingerprint(context) + "|");
+  const note = earlier ? NEURON_HELD_NOTE : NEURON_HELD_MODEL_NOTE;
+  if (!earlier || context.stale === true) return { row: FLOWS_NEURON.applyStaleCap(row, context), note };
+  return { row: { ...FLOWS_NEURON.applyStaleCap(row, { ...context, stale: true }), summary: row.summary }, note };
+}
+
 async function generateEngineNeuron(env, scope, ctx, fingerprint, plain, chain, startedAt) {
   const fallback = FLOWS_NEURON.engineFallback(ctx);
-  const store = (res, llm, model, guard) => writeNeuron(env, scope, fingerprint, plain,
+  const store = (res, llm, model, guard) => writeNeuron(env, llm ? scope : NEURON_GEN + scope, fingerprint, plain,
     { v: 3, verdict: res.verdict, claims: res.claims, ideas: res.ideas, refused: res.refused }, llm, model, guard, startedAt).catch(() => {});
   if (!env.AI || !chain.length) { await store(fallback, false, null, null); return; }
   const { system, user } = FLOWS_NEURON.promptForEngine(ctx);
@@ -1573,8 +1609,10 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
   const stateIdea = FLOWS_NEURON.stateIdea(ctx);
   const abstain = (ideas) => (ideas.length ? ideas : FLOWS_NEURON.vetIdeas([FLOWS_NEURON.abstentionIdea(ctx)].filter(Boolean), ctx).ideas);
   const own = abstain(FLOWS_NEURON.vetIdeas(stateIdea ? [stateIdea] : [], ctx).ideas);
+  const put = (summary, ideas, llm, model, guard) =>
+    writeNeuron(env, llm ? scope : NEURON_GEN + scope, fingerprint, summary, ideas, llm, model, guard, startedAt).catch(() => {});
   if (!env.AI || !chain.length) {
-    await writeNeuron(env, scope, fingerprint, plain, own, false, null, null, startedAt).catch(() => {});
+    await put(plain, own, false, null, null);
     return;
   }
   const { system, user } = FLOWS_NEURON.promptForNeuron(ctx);
@@ -1595,7 +1633,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
         if (said.failure) refused = "unreachable:reparse:" + said.failure.why;
         break;
       }
-      await writeNeuron(env, scope, fingerprint, plain, own, false, said.model, said.guard, startedAt).catch(() => {});
+      await put(plain, own, false, said.model, said.guard);
       return;
     }
     model = said.model;
@@ -1609,7 +1647,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
     const verdict = prose && FLOWS_NEURON.proseIssue(lastText, "summary") === null ? FLOWS_ASK.guardAnswer(lastText, facts, guardOpts) : { ok: false };
     const guard = verdict.ok ? "ideas:unparsable" : refused || "ideas:unparsable";
     await lastCall.settle({ llm: verdict.ok, guard });
-    await writeNeuron(env, scope, fingerprint, verdict.ok ? lastText : plain, own, verdict.ok, model, guard, startedAt).catch(() => {});
+    await put(verdict.ok ? lastText : plain, own, verdict.ok, model, guard);
     return;
   }
   let summary = plain;
@@ -1630,7 +1668,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
   const vetted = FLOWS_NEURON.vetIdeas((stateIdea ? [stateIdea] : []).concat(parsed.ideas), ctx);
   if (guard === null && vetted.refused.length) guard = "ideas:" + vetted.refused.length + " refused";
   await lastCall.settle({ llm, guard }, offending);
-  await writeNeuron(env, scope, fingerprint, summary, abstain(vetted.ideas), llm, model, guard, startedAt).catch(() => {});
+  await put(summary, abstain(vetted.ideas), llm, model, guard);
 }
 
 const SCREEN_TTL_S = 300;
@@ -1755,10 +1793,11 @@ async function tickerNeuron(env, ctx, ticker) {
   }
   await ensureFlowsTables(env);
   const trace = {};
-  const [c, n] = await env.DB.batch([
+  const [c, n, g] = await env.DB.batch([
     env.DB.prepare(FLOWS_LIVE.NIGHTLY_ROW_SQL).bind("card:" + ticker),
     env.DB.prepare(NEURON_ROW_SQL).bind(scope),
-  ]).catch(() => { trace.failed = true; return [null, null]; });
+    env.DB.prepare(NEURON_ROW_SQL).bind(NEURON_GEN + scope),
+  ]).catch(() => { trace.failed = true; return [null, null, null]; });
   const read = await cardWithEngine(env, ticker, storedFrom(firstRow(c)), trace);
   if (trace.failed) return json(neuronShape("unavailable", ticker, null, null, { ...STORE_GONE, note: "The store could not be read." }));
   if (read.stored === null) return absentNeuron(env, ctx, ticker);
@@ -1791,33 +1830,42 @@ async function tickerNeuron(env, ctx, ticker) {
   }
   const fingerprint = FLOWS_NEURON.contextFingerprint(context) + "|" + aiCallSignature(env);
   const prior = neuronFrom(firstRow(n));
+  const attempt = neuronFrom(firstRow(g));
   const now = Date.now();
-  const priorAge = prior && prior.generatedAt ? now - Date.parse(prior.generatedAt) : Infinity;
+  const ageOf = (r) => (r && r.generatedAt ? now - Date.parse(r.generatedAt) : Infinity);
+  const current = (r) => r !== null && r.fingerprint === fingerprint && r.version === FLOWS_NEURON.NEURON_CONTEXT_VERSION;
+  const kept = prior !== null && prior.llm && prior.summary && prior.guard !== "generating" &&
+    prior.version === FLOWS_NEURON.NEURON_CONTEXT_VERSION ? prior : null;
+  let holdable;
+  const stillHolds = () => {
+    if (holdable === undefined) holdable = kept ? heldNeuron(kept, context, tag) : null;
+    return holdable;
+  };
+  const held = (refreshing) => json(shape("ok", stillHolds().row, { held: "previous", refreshing, note: stillHolds().note }));
+  const reading = () => (stillHolds() ? held(true) : json(shape("pending", null, { note: "Neuron is reading this card now." })));
 
-  if (prior && prior.fingerprint === fingerprint && prior.version === FLOWS_NEURON.NEURON_CONTEXT_VERSION) {
-    if (prior.guard === "generating") {
-      if (priorAge < NEURON_GENERATING_MS) {
-        return json(shape("pending", null, { note: "Neuron is reading this card now." }));
-      }
-    } else if (prior.summary) {
-      const retryable = retryableGuard(prior.guard, priorAge) && priorAge > NEURON_RETRY_MS;
-      if (!retryable) return json(shape("ok", FLOWS_NEURON.applyStaleCap(prior, context)));
+  for (const row of [prior, attempt]) {
+    if (!current(row)) continue;
+    const age = ageOf(row);
+    if (row.guard === "generating") {
+      if (age < NEURON_GENERATING_MS) return reading();
+    } else if (row.summary) {
+      const retryable = retryableGuard(row.guard, age) && age > NEURON_RETRY_MS;
+      if (!retryable) return row !== prior && row.guard !== null && stillHolds() ? held(false) : json(shape("ok", FLOWS_NEURON.applyStaleCap(row, context)));
     }
   }
 
-  const { startedAt, failed } = await markNeuronGenerating(env, scope, fingerprint, askModel(env));
+  const { startedAt, failed } = await markNeuronGenerating(env, NEURON_GEN + scope, fingerprint, askModel(env));
   if (failed) {
-    return json(shape("unavailable", null,
+    return stillHolds() ? held(false) : json(shape("unavailable", null,
       { ...STORE_GONE, note: "The store could not record that a reading was started, so none was started." }));
   }
-  if (!startedAt) {
-    return json(shape("pending", null, { note: "Neuron is reading this card now." }));
-  }
+  if (!startedAt) return reading();
   const work = generateNeuron(env, ticker, context, fingerprint, startedAt).catch((error) => {
     logFailure("error", "neuron failed", { ticker }, error);
   });
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(work); else await work;
-  return json(shape("pending", null, { note: "Neuron is reading this card now." }));
+  return reading();
 }
 
 const ASK_NOT_TICKERS = new Set(["IV", "OI", "ETF", "ETFS", "RSI", "ATR", "ADX", "GEX", "VRP", "DTE", "ITM", "OTM", "ATM", "CPI", "GDP", "FOMC", "EPS", "PE", "YTD", "IPO", "AI", "USD", "US", "VS", "PM", "AM", "ET", "UTC", "CEO", "CFO", "SEC", "FED", "FAQ", "OK", "TA", "IV30"]);
@@ -2059,7 +2107,7 @@ async function cachedTickerInfo(env, ctx, ticker, vf) {
     const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await vf(`/api/stock/${encodeURIComponent(ticker)}/info`, {})
+  const raw = await vf(pathFor("info", { ticker }), {})
     .catch(keepRefusal(null));
   if (raw === null) return null;
 
@@ -2125,8 +2173,7 @@ async function readWithOverlay(env, key) {
 }
 
 async function buildLivePayload(env, ticker) {
-  const t = encodeURIComponent(ticker);
-  const raw = await uwFetch(env, `/api/stock/${t}/stock-state`, {});
+  const raw = await uwFetch(env, pathFor("stock-state", { ticker }), {});
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const live = d && typeof d === "object" && !Array.isArray(d) ? d : null;
   const readAt = new Date().toISOString();
@@ -2242,8 +2289,7 @@ function offMarketChain(list, ivBasis, rankBy) {
 }
 
 async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit }) {
-  const t = encodeURIComponent(ticker);
-  const chainPage = (page) => vf(`/api/stock/${t}/option-contracts`, {
+  const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
 
     maybe_otm_only: "true",
     exclude_zero_oi_chains: "true",
@@ -2254,9 +2300,9 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
-    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
 
-    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
 
     cachedTickerInfo(env, ctx, ticker, vf),
     cardPending,
@@ -2367,7 +2413,7 @@ async function cachedIndexSpot(env, ctx, vf) {
     const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await vf(`/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(keepRefusal(null));
+  const raw = await vf(pathFor("stock-state", { ticker: STRATEGY_INDEX }), {}).catch(keepRefusal(null));
   if (raw === null) return null;
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const close = numOrNull(d && d.close);
@@ -2393,11 +2439,10 @@ async function cachedIndexSpot(env, ctx, vf) {
 const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
 
 async function buildStrategyContext(env, ctx, vf, ticker) {
-  const t = encodeURIComponent(ticker);
   const [breakdown, candles, state, info] = await Promise.all([
-    vf(`/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
-    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
-    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    vf(pathFor("expiry-breakdown", { ticker }), {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
+    vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
     cachedTickerInfo(env, ctx, ticker, vf),
   ]);
   const readMs = chainReadMs(env);
@@ -2415,7 +2460,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
 
   let expiryDate = null;
   if (breakdown !== null && !expiries.length && asOf) {
-    const retry = await vf(`/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
+    const retry = await vf(pathFor("expiry-breakdown", { ticker }), { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(keepRefusal(null));
     if (retry !== null) {
       const dated = readExpiries(retry);
@@ -2425,7 +2470,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
 
   let expirySource = "breakdown";
   if (breakdown !== null && !expiries.length && asOf) {
-    const exposure = await vf(`/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
+    const exposure = await vf(pathFor("greek-exposure-expiry", { ticker }), {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(keepRefusal(null));
     if (exposure !== null) {
       const listed = readExpiries(exposure)
@@ -2492,8 +2537,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs, rank }
 }
 
 async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = false } = {}) {
-  const t = encodeURIComponent(ticker);
-  const page = (optionType, n) => vf(`/api/stock/${t}/option-contracts`, {
+  const page = (optionType, n) => vf(pathFor("option-contracts", { ticker }), {
 
     expiry,
     option_type: optionType,
@@ -2504,7 +2548,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
   const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
-    engine ? vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)) : Promise.resolve(null),
+    engine ? vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)) : Promise.resolve(null),
     cardPending,
   ]);
 
@@ -2788,7 +2832,8 @@ const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWi
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
-flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }));
+flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
+flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
@@ -3368,19 +3413,6 @@ async function route(request, env, url, ctx) {
     return json({ ok: true, record, duplicate, generation }, 200, generationHeaders(generation));
   }
 
-  if (path === "/flows") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return redirect(new URL("/flows/", url).toString(), 308);
-  }
-
-  if (path === "/flows/login/") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return new Response(FLOWS_PAGES.loginPage(), {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
   if (path === "/flows/login") {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
@@ -3426,80 +3458,6 @@ async function route(request, env, url, ctx) {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
     return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
-  }
-
-  const FLOWS_READER_FROM = {
-    "/flows/": "overview",
-    "/flows/long/": "long",
-    "/flows/short/": "short",
-    "/flows/watch/": "watch",
-  };
-  if (Object.hasOwn(FLOWS_READER_FROM, path) && url.searchParams.has("t")) {
-    const wanted = (url.searchParams.get("t") || "").trim();
-    if (wanted) {
-      requireMethod(request, ["GET", "HEAD"]);
-      return redirect(new URL(
-        "/flows/ticker/?t=" + encodeURIComponent(wanted) +
-        "&s=signal&from=" + FLOWS_READER_FROM[path], url).toString(), 302);
-    }
-  }
-
-  const FLOWS_PUBLIC = {
-    "/flows/about/": () => FLOWS_PAGES.aboutPage(),
-    "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
-  };
-  if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return new Response(FLOWS_PUBLIC[path](), {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  const FLOWS_ROUTES = {
-    "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
-    "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
-    "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
-    "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
-    "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
-    "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
-    "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
-
-    "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
-    "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
-
-    "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
-    "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
-    "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
-    "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
-
-    "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
-  };
-  if (Object.hasOwn(FLOWS_ROUTES, path)) {
-    requireMethod(request, ["GET", "HEAD"]);
-    const session = await currentFlowsUser(request, env);
-
-    const summary = session && path === "/flows/"
-      ? await readFlowsSummary(env, "board")
-      : null;
-    const body = session
-      ? FLOWS_ROUTES[path](session.username, summary, rtIsOwner(rtSwitches(env), session.username))
-      : FLOWS_PAGES.loginPage();
-    return new Response(body, {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
-      || path === "/flows/watch" || path === "/flows/history"
-      || path === "/flows/market" || path === "/flows/ticker"
-      || path === "/flows/unusual" || path === "/flows/events"
-      || path === "/flows/track" || path === "/flows/political"
-      || path === "/flows/strategy" || path === "/flows/ask"
-      || path === "/flows/about" || path === "/flows/glossary") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return redirect(new URL(path + "/", url).toString(), 308);
   }
 
   if (path.startsWith("/api/flows/")) {

@@ -10,7 +10,9 @@ import {
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
+import { pathFor } from "./flows-vendor-ops.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
+import { emitFailure } from "./flows-log.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
   ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
@@ -154,7 +156,7 @@ function startClockFlight(env, now) {
 }
 
 export function flightAbandoned(flight, since, abandoned, recovered) {
-  console.warn(JSON.stringify({ message: "flight abandoned", flight, waitMs: Date.now() - since, abandoned, recovered }));
+  emitFailure(console, "warn", "flight abandoned", { flight, waitMs: Date.now() - since, abandoned, recovered });
 }
 
 async function joinClock(env, now, trace) {
@@ -203,7 +205,7 @@ export async function batchWithLedger(db, core, extra) {
   try {
     return await db.batch([...core, extra]);
   } catch (error) {
-    console.warn(JSON.stringify({ message: "ledger statement refused", error: error instanceof Error ? error.message : String(error) }));
+    emitFailure(console, "warn", "ledger statement refused", {}, error);
     return core.length === 1 ? core[0].run() : db.batch(core);
   }
 }
@@ -437,11 +439,11 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
         } else if (!anyAnswered(marketFeeds(payload))) {
           why = "no-feed-answered";
           out.tier1 = { written: false, why, bytes: text.length, statuses };
-          log.error(JSON.stringify({ message: "live:market not written: no vendor feed answered", statuses }));
+          emitFailure(log, "error", "live:market not written: no vendor feed answered", { statuses });
         } else if (text.length > spec.maxBytes) {
           why = "over-cap";
           out.tier1 = { written: false, why, bytes: text.length, statuses };
-          log.error(JSON.stringify({ message: "live:market over its byte cap", bytes: text.length, cap: spec.maxBytes }));
+          emitFailure(log, "error", "live:market over its byte cap", { bytes: text.length, cap: spec.maxBytes });
         } else {
           statements.push(writeLiveStatement(env.DB, "live:market", text, {
             readAt: at, session: today, cadenceS: spec.cadenceS, source: "worker", writer: "worker@tier1",
@@ -453,7 +455,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
       } catch (error) {
         why = tier1Why("error:" + (error instanceof Error ? error.message : String(error)));
         out.tier1 = { written: false, why };
-        log.error(JSON.stringify({ message: "tier 1 read failed", why }));
+        emitFailure(log, "error", "tier 1 read failed", { why }, error);
       }
     }
   }
@@ -481,14 +483,14 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     out.dispatch = sent;
     if (dispatchOutcome(sent)) patch.dispatchWhy = dispatchOutcome(sent);
     if (sent.sent) patch.liveDispatchedAt = at;
-    else if (sent.why !== "no-token") log.error(JSON.stringify({ message: "live dispatch failed", ...sent }));
+    else if (sent.why !== "no-token") emitFailure(log, "error", "live dispatch failed", sent);
   } else out.dispatch = { sent: false, why: due.why };
 
   if (stalled) {
     const ageMin = Number.isFinite(breadthReadAt) && breadthReadAt > 0 ? Math.round((at - breadthReadAt) / 60000) : null;
-    log.error(JSON.stringify({ message: "live layer stalled", ageMin, canDispatch,
+    emitFailure(log, "error", "live layer stalled", { ageMin, canDispatch,
       dispatchedAt: merged.liveDispatchedAt || null, doneAt: merged.liveDoneAt || null,
-      cancel: cancel ? (cancel.cancelled ? "cancelled:" + cancel.runId : cancel.why) : null }));
+      cancel: cancel ? (cancel.cancelled ? "cancelled:" + cancel.runId : cancel.why) : null });
     if (canDispatch && !episode && !(out.dispatch && out.dispatch.sent)) {
       const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
         { tick: new Date(at).toISOString(), origin: "watchdog" }, fetchImpl);
@@ -508,7 +510,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
 
 export const FOCUS_WRITER = "worker@focus";
 
-export const FOCUS_READ = Object.freeze({ path: "/api/screener/stocks", limit: 500 });
+export const FOCUS_READ = Object.freeze({ path: pathFor("screener-stocks"), limit: 500 });
 
 export function focusDue(at, clock = null) {
   const p = phaseAt(at, clock);
@@ -569,8 +571,8 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
     : text === null ? "partial" : text.length > spec.maxBytes ? "over-cap" : "written";
   const tally = (ok, partial, failed) => ledgerFocusStatement(env.DB, { day: session, at, ...tickWindow(session, clock), ok, partial, failed });
   if (why !== "written") {
-    log.error(JSON.stringify({ message: "live:focus not written", why, status: payload.status, asked, hit,
-      lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null }));
+    emitFailure(log, "error", "live:focus not written", { why, status: payload.status, asked, hit,
+      lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null });
     await tally(false, why === "partial", why !== "partial").run().catch(() => {});
     return { ...out, written: false, why };
   }
@@ -594,7 +596,7 @@ export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } 
   const wall = phaseAt(at, clock);
   if (wall && due.why !== "landed" && due.why !== "not-trading" &&
       wall.minutes >= PHASE_MINUTES.close + NIGHTLY_MISSING_AFTER_MIN) {
-    log.error(JSON.stringify({ message: "nightly missing", today, metaSession }));
+    emitFailure(log, "error", "nightly missing", { today, metaSession });
   }
   if (!due.due) return { due: false, why: due.why, metaSession };
   const sent = await dispatchWorkflow(env, env.FLOWS_NIGHTLY_WORKFLOW || "flows-pipeline.yml",
@@ -605,7 +607,7 @@ export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } 
       : { nightlyDay: today, nightlyDispatchedAt: at, nightlyRedispatchedAt: null };
     await clockPatchStatement(env.DB, { ...patch, dispatchWhy: "sent" }, at).run();
   } else {
-    if (sent.why !== "no-token") log.error(JSON.stringify({ message: "nightly dispatch failed", ...sent }));
+    if (sent.why !== "no-token") emitFailure(log, "error", "nightly dispatch failed", sent);
     const outcome = dispatchOutcome(sent);
     if (!clock || clock.dispatchWhy !== outcome) {
       await clockPatchStatement(env.DB, { dispatchWhy: outcome }, at).run().catch(() => {});
@@ -706,10 +708,8 @@ export async function oidcKind(offered, env, { fetchImpl = fetch, now = Date.now
   if (out.ok) return { kind: "live", why: null, unavailable: false };
   const unavailable = out.why === "keys-unavailable";
   if (out.why !== "malformed") {
-    log.error(JSON.stringify({
-      message: unavailable ? "live OIDC key set unavailable" : "live OIDC token refused",
-      why: out.why, jwks: jwksUrl(env) ? "ok" : "bad-override", claims: claimsBrief(out.claims),
-    }));
+    emitFailure(log, "error", unavailable ? "live OIDC key set unavailable" : "live OIDC token refused",
+      { why: out.why, jwks: jwksUrl(env) ? "ok" : "bad-override", claims: claimsBrief(out.claims) });
   }
   return { kind: null, why: out.why, unavailable };
 }
@@ -1069,7 +1069,6 @@ export function tapeLegFor(heldText, heldLegs, { session = null, rth = false } =
 }
 
 export async function refreshTape(env, ticker, now, { fetchVendor, heldText = null, heldLegs = 0 }) {
-  const t = encodeURIComponent(ticker);
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
   const day = phase && phase.phase !== "rth" && phase.lastClosed ? phase.lastClosed
@@ -1079,8 +1078,8 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
   let session;
   if (plan.leg === "prem") {
     const [ticks, alerts] = await Promise.all([
-      withTimeout(fetchVendor(`/api/stock/${t}/net-prem-ticks`, {}), LIVE_BUDGET.tier1TimeoutMs),
-      withTimeout(fetchVendor("/api/option-trades/flow-alerts",
+      withTimeout(fetchVendor(pathFor("net-prem-ticks", { ticker }), {}), LIVE_BUDGET.tier1TimeoutMs),
+      withTimeout(fetchVendor(pathFor("flow-alerts"),
         { ticker_symbol: ticker, newer_than: day, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
     ]);
     session = tapeSession({ ticks }, day);
@@ -1088,7 +1087,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
     if (legs.prem.status === "unavailable" && legs.alerts.status === "unavailable") return null;
   } else {
     session = plan.held.session;
-    const spot = await withTimeout(fetchVendor(`/api/stock/${t}/spot-exposures`, { date: session }),
+    const spot = await withTimeout(fetchVendor(pathFor("spot-exposures", { ticker }), { date: session }),
       LIVE_BUDGET.tier1TimeoutMs);
     legs = shapeTapeGex({ spot }, { at: now, session, now });
     if (legs.gex.status === "unavailable") return null;
@@ -1165,8 +1164,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
       return fresh;
     } catch (error) {
       await release().catch(() => {});
-      console.error(JSON.stringify({ message: "tape refresh failed", ticker,
-        error: error instanceof Error ? error.message : String(error) }));
+      emitFailure(console, "error", "tape refresh failed", { ticker }, error);
       return null;
     }
   };

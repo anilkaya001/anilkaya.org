@@ -1,0 +1,322 @@
+{
+ "carry.implied": {
+  "meaning": "Continuous carry rate the option chain implies through put-call parity, annualised: the dividend-yield-like term of the forward",
+  "unit": "frac",
+  "tenor": "expiry nearest 75 days between 45 and 120, else the one nearest 30",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "event.confirmed": {
+  "meaning": "1 when the next earnings date is confirmed, 0 when it is estimated",
+  "unit": "count",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "event.days": {
+  "meaning": "Calendar days from the card's session to the next listed earnings date",
+  "unit": "days",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "garch.avg.21": {
+  "meaning": "Average annualised volatility the fitted GARCH model forecasts over the next 21 sessions",
+  "unit": "vol",
+  "tenor": "next 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "garch.grade": {
+  "meaning": "The GARCH fit's own robustness grade, 0 to 3, carried as a count",
+  "unit": "count",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "garch.halfLife": {
+  "meaning": "Sessions for a volatility shock to decay by half under the fitted GARCH persistence",
+  "unit": "sessions",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "gex.book": {
+  "meaning": "Dealers' book gamma in dollars per 1% move of the underlying, on the vendor's convention (dealers long calls, short puts)",
+  "unit": "usdPer1pct",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "gex.flow": {
+  "meaning": "Net gamma of today's option flow in dollars per 1% move of the underlying, on the vendor's convention",
+  "unit": "usdPer1pct",
+  "tenor": "today's flow",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "iv.cm.30": {
+  "meaning": "At-the-money implied volatility interpolated in total variance to a constant 30-day maturity from the fitted expiry slices",
+  "unit": "vol",
+  "tenor": "30 days, constant maturity",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "iv.cm.7": {
+  "meaning": "At-the-money implied volatility interpolated in total variance to a constant 7-day maturity from the fitted expiry slices",
+  "unit": "vol",
+  "tenor": "7 days, constant maturity",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "iv.cm.90": {
+  "meaning": "At-the-money implied volatility interpolated in total variance to a constant 90-day maturity from the fitted expiry slices",
+  "unit": "vol",
+  "tenor": "90 days, constant maturity",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "iv.pct.30": {
+  "meaning": "The same min-max rank as iv.rank.1y, stored under a percentile-looking id before iv.pctile.30.1y existed: a rank and not a percentile, kept for stored cards until it is retired",
+  "unit": "frac",
+  "tenor": "30-day implied volatility, 1 year lookback",
+  "since": "2026-09-23",
+  "claimLines": {
+   "hi": 0.75,
+   "lo": 0.25,
+   "strict": true
+  },
+  "retired": false
+ },
+ "iv.pctile.30.1y": {
+  "meaning": "Percentile of today's 30-day implied volatility within its own past year of readings, as the volatility cone reports it from its 251-sample history",
+  "unit": "frac",
+  "tenor": "30-day implied volatility, 1 year lookback",
+  "since": "2026-10-11",
+  "claimLines": {
+   "hi": 0.75,
+   "lo": 0.25,
+   "strict": true
+  },
+  "retired": false
+ },
+ "iv.rank.1y": {
+  "meaning": "Min-max rank of the 30-day implied volatility within its own past year, from the priced-move panel: 0 at the one-year low, 1 at the one-year high",
+  "unit": "frac",
+  "tenor": "30-day implied volatility, 1 year lookback",
+  "since": "2026-09-23",
+  "claimLines": {
+   "hi": 0.75,
+   "lo": 0.25,
+   "strict": true
+  },
+  "retired": false
+ },
+ "level.callWall": {
+  "meaning": "Strike at or above spot with the largest call gamma open interest in the vendor's strike book",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.flip": {
+  "meaning": "Price at which the dealer gamma profile recomputed from the chain crosses zero, on the vendor's convention (dealers long calls, short puts)",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.flip.count": {
+  "meaning": "How many times the recomputed dealer gamma profile changes sign across the price grid",
+  "unit": "count",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.flowPeakLong": {
+  "meaning": "Strike with the largest net long gamma from today's option flow, from the card's gamma panel",
+  "unit": "px",
+  "tenor": "today's flow",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.flowPeakShort": {
+  "meaning": "Strike with the largest net short gamma from today's option flow, from the card's gamma panel",
+  "unit": "px",
+  "tenor": "today's flow",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.magnet": {
+  "meaning": "Strike with the largest absolute dealer-book gamma, calls plus signed puts, on the vendor's convention (dealers long calls, short puts)",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.maxPain": {
+  "meaning": "Max-pain strike of the expiry the card's levels panel names",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.putWall": {
+  "meaning": "Strike at or below spot with the largest absolute put gamma open interest in the vendor's strike book",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "level.strikeSumCrossing": {
+  "meaning": "Price at which gamma summed strike by strike changes sign, from the card",
+  "unit": "px",
+  "tenor": null,
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "move.event": {
+  "meaning": "Option-implied mean absolute earnings move: the jump the two expiries around the event price beyond diffusion",
+  "unit": "frac",
+  "tenor": "the event",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "move.event.hist.medianAbs": {
+  "meaning": "Median absolute one-day move over the name's past earnings reactions, from at least three of them",
+  "unit": "frac",
+  "tenor": "past earnings reactions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "move.event.ratio": {
+  "meaning": "move.event over move.event.hist.medianAbs: the earnings move the options price against the name's own history",
+  "unit": "ratio",
+  "tenor": "the event",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "move.mad.": {
+  "meaning": "Mean-absolute-deviation implied move to the expiry named by the suffix, as a fraction of spot, on the expiry nearest 30 days",
+  "unit": "frac",
+  "tenor": "to the expiry in the suffix",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "rv.cc.21": {
+  "meaning": "Close-to-close realised volatility over the last 21 sessions, from the priced-move panel's rv30 field",
+  "unit": "vol",
+  "tenor": "trailing 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "skew.bf25.30": {
+  "meaning": "25-delta butterfly: the mean of the 25-delta put and call implied volatilities less the at-the-money one, on the expiry nearest 30 days",
+  "unit": "vol",
+  "tenor": "expiry nearest 30 days",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "skew.rr25.30": {
+  "meaning": "25-delta risk reversal: the 25-delta put's implied volatility less the 25-delta call's, on the expiry nearest 30 days",
+  "unit": "vol",
+  "tenor": "expiry nearest 30 days",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "skew.rr25.30.pct": {
+  "meaning": "Share of the names screened that night whose 25-delta risk reversal sits at or below this name's: a rank among screened names, not a history of the name's own",
+  "unit": "frac",
+  "tenor": "expiry nearest 30 days",
+  "since": "2026-09-23",
+  "claimLines": {
+   "hi": 0.8,
+   "lo": 0.2,
+   "strict": false
+  },
+  "retired": false
+ },
+ "term.front.7_30": {
+  "meaning": "The 7-day constant-maturity implied volatility over the 30-day one, less 1: positive when the very front is bid",
+  "unit": "frac",
+  "tenor": "7 to 30 days",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "term.slope.30_90": {
+  "meaning": "The 30-day constant-maturity implied volatility over the 90-day one, less 1: positive when the front is the richer end",
+  "unit": "frac",
+  "tenor": "30 to 90 days",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "term.slope.30_90.exEvent": {
+  "meaning": "term.slope.30_90 with the variance of the earnings jump removed from every maturity that spans the event date",
+  "unit": "frac",
+  "tenor": "30 to 90 days",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "vrp.rel.21": {
+  "meaning": "vrp.vol.21 as a share of the GARCH average volatility: how much richer implied volatility is than the model's forecast, relative",
+  "unit": "frac",
+  "tenor": "30-day implied against the next 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "vrp.trailing.21": {
+  "meaning": "30-day constant-maturity implied volatility less the trailing 21-session realised volatility, a backward-looking premium",
+  "unit": "vol",
+  "tenor": "30-day implied against the trailing 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "vrp.var.21": {
+  "meaning": "Implied variance at 30 days, earnings removed when known, less the GARCH average variance of the next 21 sessions, annualised",
+  "unit": "var",
+  "tenor": "30-day implied against the next 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ },
+ "vrp.vol.21": {
+  "meaning": "Implied volatility at 30 days, earnings removed when known, less the GARCH average volatility of the next 21 sessions",
+  "unit": "vol",
+  "tenor": "30-day implied against the next 21 sessions",
+  "since": "2026-09-23",
+  "claimLines": null,
+  "retired": false
+ }
+}

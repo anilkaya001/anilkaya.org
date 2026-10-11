@@ -17,6 +17,7 @@ import { stampNow } from "../../flows-legs/stamp.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { ALERT_VENDOR_LIMIT, CHAIN_RESERVE_MS, DEADLINE_MS } from "../vendor-params.mjs";
 import { poolWidth, runPooled, stats, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { publish, publishedStore, readStored } from "../store.mjs";
 import { readDayOf } from "../clock.mjs";
 import { BOARD_SCHEMA_VERSION, boardVariationMeta, markNewContracts, priorNote } from "../rank.mjs";
@@ -139,7 +140,7 @@ export async function runChains(ctx) {
 
           ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 7000 + index,
             { wide: index < 4, page: index === 0 ? page : index === 2 ? Math.max(0, page - 1) : 0 })
-          : await uw(`/api/stock/${ticker}/option-contracts`, {
+          : await uw(pathFor("option-contracts", { ticker }), {
 
             exclude_zero_oi_chains: "true",
             limit: CHAIN_PAGE_SIZE,
@@ -210,7 +211,7 @@ export async function runChains(ctx) {
 
                 ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 8000 + index,
                   { wide: true, expiry: near })
-                : await uw(`/api/stock/${ticker}/option-contracts`, {
+                : await uw(pathFor("option-contracts", { ticker }), {
                   expiry: near,
                   exclude_zero_oi_chains: "true",
                   limit: CHAIN_PAGE_SIZE,
@@ -254,7 +255,7 @@ export async function runChains(ctx) {
               const probeRows = DRY_RUN
 
                 ? fakeChain(ticker, spotByTicker.get(ticker) || 100, 9000).slice(0, 40)
-                : await uw(`/api/stock/${ticker}/option-contracts`, {
+                : await uw(pathFor("option-contracts", { ticker }), {
                   expiry: probeExpiry,
                   exclude_zero_oi_chains: "true",
                   limit: CHAIN_PAGE_SIZE,
@@ -383,7 +384,7 @@ export async function runChains(ctx) {
     const spotOfQuant = (t) => spotOfLiquid.get(t) || spotByTicker.get(t) || null;
     const needTreasury = !QP.PARITY_SYMBOLS.some((sym) => quantRows.has(sym) && spotOfQuant(sym) > 0);
     const treasuryRaw = !needTreasury ? null : DRY_RUN ? fakeTreasury(sessionDate)
-      : await uw("/api/economy/treasury-yield", { interval: "daily", maturity: "3month" }).catch(() => null);
+      : await uw(pathFor("treasury-yield"), { interval: "daily", maturity: "3month" }).catch(() => null);
     quantRate = QP.rateFromRuns({ rowsByTicker: quantRows, spotOf: spotOfQuant, sessionDate, treasuryRaw });
     const t0 = Date.now();
     quantPass = QP.preparePass({
@@ -577,7 +578,7 @@ export async function runChains(ctx) {
     try {
       const raw = DRY_RUN
         ? fakeFlowAlerts((payloads.long.rows || []).map((r) => r.t))
-        : await uw("/api/option-trades/flow-alerts", { limit: ALERT_VENDOR_LIMIT });
+        : await uw(pathFor("flow-alerts"), { limit: ALERT_VENDOR_LIMIT });
       const alertsReadAt = stampNow();
 
       const vendorRows = unwrapVendorRows(raw);

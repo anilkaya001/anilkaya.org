@@ -745,9 +745,20 @@ try {
     eq(al.rows.length, 3, "and its disclosure tabulates the same three");
 
     deep(al.rows[0],
-      ["13:47", "ORCL", "C 250 09-18", "$3.0M", "ask 75%", "RepeatedHits"],
-      "each flagged window names when it opened, the contract, the premium, which side " +
-      "of the quote the vendor attributed it to, and the rule that fired");
+      ["13:47", "ORCL", "C 250 09-18", "$3.0M", "75% ask side \u00b7 100% sided", "RepeatedHits"],
+      "each flagged window names when it opened, the contract, the premium, its ask share of the premium " +
+      "sided with the sided coverage printed beside it, and the rule that fired");
+    eq(al.rows[1][4], "24% ask side \u00b7 100% sided",
+       "and a window mostly at the bid prints its ask share, the same figure the Unusual page prints for it, " +
+       "rather than flipping to a bid share the other page never shows");
+    const sides = await page.evaluate(() => [...document.querySelectorAll("#ccAlerts .hm-arow")].map((row) => {
+      const m = row.querySelector(".ui-meter.hm-side");
+      return m ? [m.dataset.side, m.getAttribute("title"), m.firstChild.style.getPropertyValue("--c").trim()] : null;
+    }));
+    deep(sides.map((x) => x && x[0]), ["ask", "bid", null],
+         "the meters take their class from FlowsUI.F.askShare: ORCL at 75% is coloured as the ask, PFE at 24% as the bid");
+    ok(sides[0][1] === "Ask-side share of the premium the vendor sided: 75% ask side \u00b7 100% sided" && sides[0][2] !== sides[1][2],
+       `with the label and the coverage in the meter's title and the two classes in two colours (${JSON.stringify(sides)})`);
 
     deep([al.rows[2][0], al.rows[2][4]], ["\u2014", "\u2014"],
       "a window the vendor timed and split for neither prints the em dash in both, " +
@@ -1208,6 +1219,27 @@ try {
     ok(!/intraday/.test(said), `nor as an intraday one (${said})`);
     ok(/not published/.test(said),
        `and names the field that is missing instead (${said})`);
+    await post("flowalerts", alerts);
+    await post("flowalerts", { ...alerts, rows: [...alerts.rows,
+      { t: "ZRO", cp: "C", k: 30, exp: "2026-09-18", prem: 400000, rule: "RepeatedHits", askPrem: 0, bidPrem: 0 }] });
+    await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
+    const zeroSided = await page.evaluate(() => [...document.querySelectorAll("#ccAlerts .hm-arow")].map((row) => {
+      const m = row.querySelector(".ui-meter.hm-side");
+      return { t: row.querySelector("b").textContent, label: row.getAttribute("aria-label"), dash: Boolean(row.querySelector(".ui-dash.hm-side")),
+        meter: m ? { side: m.dataset.side, title: m.getAttribute("title"), w: m.firstChild.style.getPropertyValue("--w").trim() } : null };
+    }));
+    const zr = zeroSided.find((r) => r.t === "ZRO"), kla = zeroSided.find((r) => r.t === "KLA");
+    ok(zr && !zr.dash && zr.meter && zr.meter.w === "0.0%" && zr.meter.side === "thin" &&
+       zr.meter.title === "Ask-side share of the premium the vendor sided: none sided" && /none sided$/.test(zr.label),
+       `A WINDOW THE VENDOR SIDED AS ZERO IS NOT DRAWN AS ONE WITH NO SIDE STATED: it gets an empty meter titled none sided, ` +
+       `matching its disclosure row and its spoken label (${JSON.stringify(zr)})`);
+    ok(kla && kla.dash && !kla.meter, `while a window that states neither side keeps the dash (${JSON.stringify(kla)})`);
+    await moduleWhy(page, "hmAlerts");
+    const zeroNote = await page.evaluate(() => document.getElementById("fxPopB").textContent);
+    await shut(page);
+    ok(/A dash is a window that does not state both sides/.test(zeroNote) && /none sided/.test(zeroNote),
+       "and the note says what the dash and none sided each mean");
     await post("flowalerts", alerts);
 
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });

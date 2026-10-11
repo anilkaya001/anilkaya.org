@@ -10,6 +10,7 @@ import { stampNow } from "../../flows-legs/stamp.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { EARNINGS_GATE_DAYS, SCREENER_PAGE_ROWS, SCREENER_SPLIT_DEPTH, UNIVERSE } from "../vendor-params.mjs";
 import { poolWidth, runPooled, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE } from "../store.mjs";
 import {
   GATED_LIQUIDITY_MARGIN, candleCut, candleDate, collapseShareClasses, computeFeatures, daysToEarnings, eligible,
@@ -97,11 +98,11 @@ export async function verifyDating(sessionDate, { read = uw } = {}) {
   const PROBE = "AAPL";
 
   const [dated, undated, capped, screenDated, screenUndated] = await Promise.all([
-    read(`/api/stock/${PROBE}/greek-exposure/expiry`, { date: sessionDate }).catch(() => []),
-    read(`/api/stock/${PROBE}/greek-exposure/expiry`).catch(() => []),
-    read(`/api/stock/${PROBE}/ohlc/1d`, { timeframe: "1M", end_date: sessionDate }).catch(() => []),
-    read("/api/screener/stocks", { ...SCREENER_PROBE, date: sessionDate }).catch(() => []),
-    read("/api/screener/stocks", SCREENER_PROBE).catch(() => []),
+    read(pathFor("greek-exposure-expiry", { ticker: PROBE }), { date: sessionDate }).catch(() => []),
+    read(pathFor("greek-exposure-expiry", { ticker: PROBE })).catch(() => []),
+    read(pathFor("ohlc-1d", { ticker: PROBE }), { timeframe: "1M", end_date: sessionDate }).catch(() => []),
+    read(pathFor("screener-stocks"), { ...SCREENER_PROBE, date: sessionDate }).catch(() => []),
+    read(pathFor("screener-stocks"), SCREENER_PROBE).catch(() => []),
   ]);
 
   const date = usable(dated) || !usable(undated);
@@ -199,7 +200,7 @@ export async function runUniverse(ctx) {
     const byTicker = new Map();
     const sweepStartedAt = stampNow();
     let saturated = 0, split = 0, sweepReads = 0;
-    const readBand = (min, max) => uw("/api/screener/stocks", {
+    const readBand = (min, max) => uw(pathFor("screener-stocks"), {
       min_underlying_price: UNIVERSE.minPrice,
       min_volume: UNIVERSE.minOptionVolume,
       min_oi: UNIVERSE.minOpenInterest,

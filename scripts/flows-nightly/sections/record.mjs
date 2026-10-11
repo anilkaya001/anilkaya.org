@@ -6,6 +6,7 @@ import { SELECTION_EPOCH } from "../../../shared/flows-universe.js";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS } from "../vendor-params.mjs";
 import { stats, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE, publish } from "../store.mjs";
 import {
   BOARD_SCHEMA_VERSION, SECTOR_ETFS, TRIX_FULL_SCALE_BP, TRIX_SERIES, TRIX_SPAN, TRIX_WARMUP, sectorTrix,
@@ -196,7 +197,7 @@ export async function runRecord(ctx) {
       for (const { etf } of SECTOR_ETFS) {
         const candles = DRY_RUN
           ? fakeSectorCandles(etf)
-          : await uw(`/api/stock/${etf}/ohlc/1d`, {
+          : await uw(pathFor("ohlc-1d", { ticker: etf }), {
 
             timeframe: "1Y",
             ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),

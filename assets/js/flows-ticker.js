@@ -934,7 +934,9 @@
 
   const READ_LISTS = [["drivers", "What is driving it"], ["tensions", "Where the evidence disagrees"], ["watch", "What to watch"]];
   const readIs = (r, ...states) => !!r && typeof r === "object" && states.includes(r.status);
-  const readPending = (neuron) => !!neuron && readIs(neuron.read, "generating");
+  const refreshing = (x) => !!x && typeof x === "object" && x.held === "previous" && x.refreshing === true;
+  const readPending = (neuron) => !!neuron && (readIs(neuron.read, "generating") || (readIs(neuron.read, "ready") && refreshing(neuron.read)));
+  const neuronPending = (neuron) => !!neuron && (neuron.status === "pending" || (neuron.status === "ok" && refreshing(neuron)));
 
   function readAge(c, read) {
     const at = Date.parse(c.asOf || "");
@@ -2837,11 +2839,11 @@
   function awaitNeuron(t, card, i = 0) {
     const settle = (s) => renderVerdict(card, { ...STATE.neuron, status: s || "unavailable" });
     if (STATE.card !== card) return;
-    if (i > 6) return settle();
+    if (i > 6) return STATE.neuron && STATE.neuron.status === "ok" ? undefined : settle();
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const s = nr && nr.status;
-      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (readPending(nr)) awaitReading(t, card); }
+      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1); else if (readPending(nr)) awaitReading(t, card); }
       else if (s !== "pending") settle(typeof s === "string" && s);
       else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1); }
     }), 5000 + i * 3500);
@@ -2855,7 +2857,7 @@
       if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return;
       STATE.neuron = { ...STATE.neuron, read };
       paintReading(read);
-      if (read.status === "generating") awaitReading(t, card, i + 1);
+      if (read.status === "generating" || refreshing(read)) awaitReading(t, card, i + 1);
     }), 4000 + i * 2500);
   }
 
@@ -2908,7 +2910,7 @@
             if (!card || !card.panels) return;
             STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
             paintAll();
-            if (STATE.neuron && STATE.neuron.status === "pending") awaitNeuron(t, card);
+            if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
             else if (readPending(STATE.neuron)) awaitReading(t, card);
           });
       },
@@ -2943,7 +2945,7 @@
     sayStatus("");
     jumpToHash();
     if (!card.lite) {
-      if (STATE.neuron.status === "pending") awaitNeuron(ticker, card);
+      if (neuronPending(STATE.neuron)) awaitNeuron(ticker, card);
       else if (readPending(STATE.neuron)) awaitReading(ticker, card);
       const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
       idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
