@@ -5,13 +5,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as garch from "../shared/flows-garch.js";
 import { makeRng, seedWords, normalQuantile, normalSurvival, normalCdf } from "./truth/rng.mjs";
-import { hansen, w1Garch, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, nextBusinessDay, probitMean, WORLDS } from "./truth/worlds.mjs";
+import { hansen, w1Garch, w1dWorld, w1Independent, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, nextBusinessDay, probitMean, WORLDS } from "./truth/worlds.mjs";
 import { mean, variance, sd, autocorrelation, ksUniform } from "./truth/stats.mjs";
 import { MODES, NotJudged, NoJudgementList, cell, accept, judge, formatRow } from "./truth/runner.mjs";
-import { MUTANTS, runKillMatrix, loadMutated } from "./truth/mutants.mjs";
+import { MUTANTS, LAUNCH_MUTANTS, PLANTED_WRONG_DETECTORS, runKillMatrix, loadMutated, baselineResult } from "./truth/mutants.mjs";
 import * as reference from "./truth/reference.mjs";
 import { w9World, w9OutOfFamily, W9_WORLDS, W9_OUT_OF_FAMILY, FOMC_MINUTE, clockShape } from "./truth/intraday.mjs";
-import { SCALE, W1_BANDS, HAWKES, measureW1Bands, tailLawCell, logScore, leakBound, oiLag, trialCount, hawkesCompensator, flowNullDayEffect } from "./truth/detectors.mjs";
+import { SCALE, W1_BANDS, HAWKES, measureW1Bands, tailLawCell, logScore, leakBound, oiLag, trialCount, hawkesCompensator, flowNullDayEffect, JUMP_NULL_WORLD, jumpFlagNull, jumpFlagTransfer, pooledShapeCoverage, bhCompleteNull, byCompleteNull, sessionFdr, eProcessRepair, eProcessInflation } from "./truth/detectors.mjs";
+import * as worldsModule from "./truth/worlds.mjs";
+import { createMarketSim } from "./rt-market-sim.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(path.join(HERE, "fixtures-truth.json"), "utf8"));
@@ -110,7 +112,7 @@ await section("hansen", () => {
 
 let baseBands = null;
 await section("w1-bands", async () => {
-  baseBands = measureW1Bands(garch, { reps: 120 * SCALE.factor });
+  baseBands = (await baselineResult("garchRecovery", "shared/flows-garch.js")).measured;
   log(`W1 at N 750, nu 5: median nu-hat ${baseBands.nu.toFixed(2)}, persistence ${baseBands.persistence.toFixed(3)}, fitted over true 3-SD tail probability ${baseBands.tailRatio.toFixed(3)} (${baseBands.n} fits, ${baseBands.failed} failed)`);
   ok(baseBands.failed === 0, "every W1 path fits");
   ok(baseBands.nu >= W1_BANDS.nu[0] && baseBands.nu <= W1_BANDS.nu[1], `median nu-hat ${baseBands.nu} lies in [${W1_BANDS.nu}]`);
@@ -247,7 +249,7 @@ await section("w8", () => {
   log(`h = 5 overlap: the naive 5% test rejects ${(100 * rej / reps).toFixed(1)}% (predicted ${(100 * fx.naiveRejection).toFixed(1)}%)`);
 });
 
-await section("w5", () => {
+await section("w5", async () => {
   eq(nextBusinessDay("2026-03-06"), "2026-03-09", "open interest published on a Friday is next published on the Monday");
   eq(nextBusinessDay("2026-03-03"), "2026-03-04", "and on a Tuesday the next morning");
   eq(reference.oiPublishedAt("2026-03-06"), "2026-03-09T10:30:00Z", "the publication stamp is the next business morning");
@@ -288,12 +290,12 @@ await section("w5", () => {
   }
   const b2 = leakBound(diffsLeak);
   ok(b2.fires, `the oracle bound fires on a forecaster that reads open interest early (${b2.z.toFixed(1)} SE)`);
-  const verdict = oiLag(reference);
+  const verdict = await baselineResult("oiLag", "tests/truth/reference.mjs");
   ok(verdict.ok, "the as-of reader passes the open-interest bait: " + verdict.note);
   log("W5: " + verdict.note);
 });
 
-await section("w6", () => {
+await section("w6", async () => {
   const T = 250;
   const w = w6Null({ seed: "w6-main", trials: 400, periods: T });
   const srs = w.returns.map(reference.sharpe);
@@ -307,7 +309,7 @@ await section("w6", () => {
   eq(reg.count(), 1, "an empty registry counts one trial");
   reg.register(100); reg.register(5);
   eq(reg.count(), 105, "the registry counts every trial registered");
-  const verdict = trialCount(reference);
+  const verdict = await baselineResult("trialCount", "tests/truth/reference.mjs");
   ok(verdict.ok, "the best of 100 null strategies is not declared significant: " + verdict.note);
   log("W6: " + verdict.note);
   const reps = 60 * SCALE.factor;
@@ -330,7 +332,7 @@ await section("w6", () => {
   log(`PBO on noise ${(pboNull / pboReps).toFixed(2)}, with a planted edge ${(pboEdge / pboReps).toFixed(2)}`);
 });
 
-await section("w3", () => {
+await section("w3", async () => {
   const sessions = 80;
   const counts = [], marks = [];
   for (let s = 0; s < sessions; s++) {
@@ -344,7 +346,7 @@ await section("w3", () => {
   near(mean(counts), expected, 4 * Math.sqrt((expected / (1 - HAWKES.branching) ** 2) / sessions), "the mean event count is the stationary rate times the session");
   near(fano, 1 / (1 - HAWKES.branching) ** 2, 2.2, "the count dispersion is the Hawkes value 1 over (1 - n) squared");
   near(mean(marks), 1, 0.05, "marks have unit mean");
-  const detector = hawkesCompensator(reference);
+  const detector = await baselineResult("hawkesCompensator", "tests/truth/reference.mjs");
   ok(detector.ok, "the compensator makes the residuals unit exponential: " + detector.note);
   log("W3: " + detector.note);
   const w = w3Hawkes({ seed: "w3-marks", ...HAWKES });
@@ -353,7 +355,7 @@ await section("w3", () => {
   ok(Math.abs(variance(blind) - 1) > Math.abs(variance(aware) - 1) || Math.abs(mean(blind) - 1) > Math.abs(mean(aware) - 1), "a compensator that ignores the marks fits worse than one that uses them");
 });
 
-await section("w3b", () => {
+await section("w3b", async () => {
   const fx = fixtures.f1Fixed;
   const line = reference.alertLine();
   rel(line, fx.line, 1e-9, "the Alert line m' H(m') over alpha equals the reference");
@@ -372,7 +374,7 @@ await section("w3b", () => {
     near(o20 / sessions, row.maxAtLeast20, tol(row.maxAtLeast20), `and the share reaching E = 20`);
     log(`fixed-level null, day effect ${row.sdDay}: ${(100 * cross / sessions).toFixed(1)}% cross the line (numpy ${(100 * row.crossLine).toFixed(1)}%), ${(100 * o20 / sessions).toFixed(1)}% reach 20 (numpy ${(100 * row.maxAtLeast20).toFixed(1)}%)`);
   }
-  const detector = flowNullDayEffect(reference);
+  const detector = await baselineResult("flowNullDayEffect", "tests/truth/reference.mjs");
   ok(detector.ok, "a flow null that contains the day effect keeps ordinary names under the line: " + detector.note);
   log("W3b: " + detector.note);
   const day = w3bSession({ seed: "w3b-day", names: 3000, sdDay: 0.25 });
@@ -694,9 +696,258 @@ await section("runner", () => {
   const v = judge([inFamily, well, outFamily]);
   eq(v.rows.map((r) => r.accepted), [true, null, true], "a well-specified cell is reported as a reference and never accepted");
   eq(v.judged, 2, "two cells judged");
-  eq(Object.keys({ ...WORLDS, ...W9_WORLDS }).sort(), ["W1", "W3", "W3b", "W4", "W5", "W6", "W7", "W8", "W9", "W9o"], "the worlds registered so far");
+  eq(Object.keys({ ...WORLDS, ...W9_WORLDS }).sort(), ["W1", "W1d", "W3", "W3b", "W4", "W5", "W6", "W7", "W8", "W9", "W9o"], "the worlds registered");
   const a = w1Garch({ seed: "det", n: 100 }), b = w1Garch({ seed: "det", n: 100 });
   eq(Array.from(a.r), Array.from(b.r), "a world is a pure function of its seed");
+});
+
+await section("w1d", async () => {
+  const fx = fixtures.w1d;
+  const reps = 120 * SCALE.factor;
+  const measured = new Map();
+  for (const row of fx.rows) {
+    const c = row.rho === 0.3 ? (await baselineResult("dependentWorldCoverage", "tests/truth/worlds.mjs")).measured : pooledShapeCoverage(worldsModule, { rho: row.rho, reps, names: fx.names, days: fx.days, nu: fx.nu });
+    measured.set(row.rho, c);
+    log(`W1d rho ${row.rho}: the pooled shape's SD is ${c.ratio.toFixed(2)} times its model standard error, so a nominal 90% interval covers ${(100 * c.coverage).toFixed(0)}% (numpy ${row.ratio.toFixed(2)}, ${(100 * row.coverage).toFixed(0)}%)`);
+    near(c.ratio, row.ratio, 0.25 * row.ratio, `W1d rho ${row.rho}: the ratio of the pooled shape's spread to its standard error equals the independent numpy simulation`);
+    near(c.coverage, row.coverage, 0.08, `W1d rho ${row.rho}: so does the implied coverage of a nominal 90% interval`);
+  }
+  const indep = measured.get(0), dep = measured.get(0.3);
+  ok(indep.coverage > 0.78 && dep.coverage < 0.7, `an independent-names generator cannot produce the shortfall (${(100 * indep.coverage).toFixed(0)}% against ${(100 * dep.coverage).toFixed(0)}%)`);
+  const viaHelper = pooledShapeCoverage({ w1dWorld: (o) => w1Independent(o) }, { rho: 0.3, reps: 40, names: 60, days: 500 });
+  ok(viaHelper.coverage > 0.78, "the independent generator holds nominal coverage whatever correlation is asked of it");
+  const w = w1dWorld({ seed: "w1d-corr", names: 60, days: 4000, rho: 0.3, nu: 5 });
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let t = 0; t < w.days; t++) { const x = w.r[t], y = w.r[w.days + t]; sxy += x * y; sxx += x * x; syy += y * y; }
+  near(sxy / Math.sqrt(sxx * syy), 0.3, 0.04, "two names of the dependent world correlate at the configured weight");
+});
+
+await section("judgement", async () => {
+  const f = SCALE.factor;
+  const calOpts = { ...JUMP_NULL_WORLD, sessions: 40 * f, seed: `${JUMP_NULL_WORLD.seed}|${SCALE.salt}` };
+  const null0 = await baselineResult("jumpFlagNull", "tests/truth/reference.mjs");
+  ok(null0.ok, "the calibrated jump flag holds its rate in the family it was calibrated on: " + null0.note);
+  log("W9: " + null0.note);
+  const ooFamily = { names: 150, seed: "w9o-judge", sessions: 20, ...W9_OUT_OF_FAMILY, badTickRate: 0, staleByBucket: [0, 0, 0], hotRate: 0.03 };
+  const transfer = jumpFlagTransfer(reference, { lines: null0.lines, world: ooFamily });
+  const gaussian = jumpFlagTransfer(reference, { lines: [5.47, 5.47, 5.47], world: ooFamily });
+  const gaussianIn = jumpFlagTransfer(reference, { lines: [5.47, 5.47, 5.47], world: { ...calOpts, sessions: 20 } });
+  const gaussianT4 = jumpFlagTransfer(reference, { lines: [5.47, 5.47, 5.47], world: { ...calOpts, sessions: 20, nuRange: [4, 4], scaleError: 0, seed: "w9-g4" } });
+  log(`jump flag calibrated in W9: ${(100 * transfer.share).toFixed(1)}% of ordinary name-days flagged in W9o (3% of them run 2.2 times hot); a Gaussian 5.47 threshold flags ${(100 * gaussianIn.share).toFixed(0)}% in W9, ${(100 * gaussian.share).toFixed(0)}% in W9o and ${(100 * gaussianT4.share).toFixed(0)}% at nu 4`);
+  const cells = [
+    cell({ id: "w9-jump-flag-in-family", world: "W9", mode: MODES.WELL, run: () => ({ pass: null0.ok, note: null0.note }) }),
+    cell({ id: "w9o-jump-flag-transfer", world: "W9o", mode: MODES.MIS, outOfFamily: true, run: () => ({ pass: transfer.share <= 0.03, note: `${(100 * transfer.share).toFixed(1)}% flagged against a nominal 1%` }) }),
+    cell({ id: "w9o-gaussian-threshold", world: "W9o", mode: MODES.MIS, outOfFamily: true, run: () => ({ pass: gaussian.share <= 0.03, note: `${(100 * gaussian.share).toFixed(0)}% flagged` }) }),
+  ];
+  const verdict = judge(cells);
+  verdict.rows.forEach((r) => log(formatRow(r)));
+  eq(verdict.rows.map((r) => r.accepted), [null, verdict.rows[1].accepted, false], "the Gaussian 5.47 threshold is rejected in the out-of-family world; the calibrated flag's verdict there is the measured one");
+  ok(gaussian.share > 0.15 && gaussianIn.share > 0.15 && gaussianT4.share > 0.15, "a Gaussian 5.47 threshold flags more than one ordinary name-day in seven in every heavy-tailed world");
+  ok(transfer.share > null0.share, "the jump flag calibrated in the family flags more name-days in the world the family did not generate");
+  let none = false;
+  try { judge([cells[0], cell({ id: "in", world: "W9", mode: MODES.MIS, run: () => ({ pass: true }) })]); } catch (e) { none = e instanceof NoJudgementList; }
+  ok(none, "a harness run whose judgement worlds include none marked out-of-family fails");
+  const bh = await baselineResult("bhCompleteNull", "tests/truth/reference.mjs"), by = await baselineResult("byCompleteNull", "tests/truth/reference.mjs");
+  ok(bh.ok && by.ok, "the multiplicity code reproduces the exact complete-null rejection probabilities: " + bh.note + "; " + by.note);
+  log(bh.note);
+  log(by.note);
+  const fdr = await baselineResult("sessionFdr", "tests/truth/reference.mjs");
+  ok(fdr.ok, "the session alert set keeps the error rate: " + fdr.note);
+  log("W9: " + fdr.note);
+  const e1 = await baselineResult("eProcessRepair", "tests/truth/reference.mjs"), e2 = await baselineResult("eProcessInflation", "tests/truth/reference.mjs");
+  ok(e1.ok && e2.ok, "the e-process with the per-increment transform and the inflated scale holds its line: " + e1.note + "; " + e2.note);
+  log(e1.note);
+  log(e2.note);
+});
+
+await section("rt-sim", async () => {
+  const a = createMarketSim({ seed: "sim-a", names: 24 }), b = createMarketSim({ seed: "sim-a", names: 24 }), c = createMarketSim({ seed: "sim-b", names: 24 });
+  eq(a.digest(), b.digest(), "one seed gives one event log");
+  ok(a.digest() !== c.digest(), "another seed gives another");
+  ok(a.log.every((e, i) => i === 0 || e.at >= a.log[i - 1].at), "the log is in time order");
+  eq(a.log.filter((e) => e.ch === "px").length, 24 * 390, "every name prints every minute");
+  eq(a.log.filter((e) => e.ch === "periscope").length, 390 * 3, "the index book arrives as three frames a minute");
+  eq(a.news.length, a.world.labels.headlines.length, "the headlines are the world's labelled headlines");
+  ok(a.alerts.length > 200 && a.alerts.every((e, i) => i === 0 || e.at >= a.alerts[i - 1].at), "flow alerts are a Hawkes stream per active name, in time order");
+  ok(a.pxBy[3].every((e) => e.at > e.quoteTime), "every price reaches the vendor after its own quote time");
+
+  a.advanceTo(a.open + 30 * 60000);
+  const scr = await a.rest("/api/screener/stocks", { ticker: "SPY,NVDA,UNKNOWN" });
+  eq(scr.status, 200, "the screener answers");
+  const spy = scr.body.data.find((r) => r.ticker === "SPY");
+  const lastSpy = a.pxBy[0].filter((e) => e.at + 0 <= a.clock.now()).pop();
+  eq(spy.close, lastSpy.price.toFixed(4), "the screener close is the last price the log has delivered");
+  eq(spy.quote_time, lastSpy.quoteTime, "with its own quote time");
+  ok(spy.quote_time <= a.clock.now(), "which is never in the future");
+  const first = await a.rest("/api/option-trades/flow-alerts", { limit: "200" });
+  const newest = first.body.data[0].created_at;
+  a.advance(5 * 60000);
+  const second = await a.rest("/api/option-trades/flow-alerts", { limit: "200", newer_than: newest });
+  ok(second.body.data.length > 0 && second.body.data.every((r) => Date.parse(r.created_at) > Date.parse(newest)), "a cursor returns only newer alerts");
+  ok(first.body.data.length <= 200 && first.body.data.every((r, i) => i === 0 || Date.parse(r.created_at) <= Date.parse(first.body.data[i - 1].created_at)), "newest first, at most 200");
+  const nw = await a.rest("/api/news/headlines", { limit: "100" });
+  ok(nw.body.data.length > 0 && nw.body.data.every((h) => /^Synthetic /.test(h.headline)), "headlines are served");
+
+  const t0 = a.clock.now();
+  a.chaos.rest429 = [{ from: t0 + 1000, to: t0 + 40000, retryAfterS: 12 }];
+  a.advance(2000);
+  const limited = await a.rest("/api/news/headlines", {});
+  eq([limited.status, limited.headers["Retry-After"]], [429, "12"], "a rate-limit window answers 429 with Retry-After");
+  a.advance(60000);
+  eq((await a.rest("/api/news/headlines", {})).status, 200, "and ends");
+  a.chaos.restFault = "garbage";
+  const bad = await a.fetch("http://sim.test/api/news/headlines");
+  let parsed = true;
+  try { await bad.json(); } catch { parsed = false; }
+  ok(!parsed, "a malformed REST body does not parse");
+  a.chaos.restFault = null;
+  a.advance(61000);
+  a.chaos.restPerMinute = 3;
+  const st = [];
+  for (let k = 0; k < 5; k++) st.push((await a.rest("/api/news/headlines", {})).status);
+  ok(st.slice(0, 3).every((x) => x === 200) && st.slice(3).every((x) => x === 429), "a per-minute call budget turns the calls over it into 429s");
+  a.chaos.restPerMinute = Infinity;
+  const rest500 = createMarketSim({ seed: "sim-a", names: 24, chaos: { restFault: "500" } });
+  eq((await rest500.rest("/api/news/headlines", {})).status, 500, "a vendor outage answers 500");
+
+  const s1 = createMarketSim({ seed: "sock", names: 12 });
+  const c1 = s1.connect({});
+  const got = [];
+  c1.onMessage((t) => got.push(t));
+  c1.send(JSON.stringify({ channel: "price:SPY", msg_type: "join" }));
+  c1.send(JSON.stringify({ channel: "stock_screener", msg_type: "join" }));
+  c1.send(JSON.stringify({ channel: "flow-alerts", msg_type: "join" }));
+  c1.send(JSON.stringify({ channel: "periscope:SPX", msg_type: "join" }));
+  c1.send(JSON.stringify({ channel: "news", msg_type: "join" }));
+  c1.send(JSON.stringify({ channel: "market_tide", msg_type: "join" }));
+  eq(got.slice(0, 6).map((t) => JSON.parse(t)[1].status), ["ok", "error", "ok", "ok", "ok", "ok"], "joins are acknowledged and a refused channel is an error ack");
+  s1.advance(10 * 60000);
+  const msgs = got.slice(6).map((t) => JSON.parse(t));
+  const px = msgs.filter(([ch]) => ch === "price:SPY").map(([, p]) => p);
+  ok(px.length === 10 && px.every((p, i) => i === 0 || p.time > px[i - 1].time), "ten minutes of SPY prices arrive in quote-time order");
+  ok(msgs.some(([ch]) => ch === "flow-alerts") && msgs.some(([ch]) => ch === "market_tide"), "alerts and the tide arrive on their channels");
+  const snaps = new Map();
+  for (const [ch, p] of msgs) if (ch === "periscope:SPX") snaps.set(p.snapshot, (snaps.get(p.snapshot) || 0) + 1);
+  ok([...snaps.values()].every((n) => n === 3) && snaps.size >= 9, "every index-book snapshot is complete");
+  const price = JSON.parse(got.find((t) => t.startsWith('["price:SPY"') && !t.includes("status")))[1];
+  eq(price.ticker, "SPY", "payloads carry the ticker");
+
+  const caps = createMarketSim({ seed: "caps", names: 12, chaos: { maxJoinsPerConnection: 2, maxConnections: 2 } });
+  const k1 = caps.connect({}), k2 = caps.connect({});
+  const acks = [];
+  k1.onMessage((t) => acks.push(JSON.parse(t)[1].status));
+  for (const ch of ["price:SPY", "price:QQQ", "price:IWM"]) k1.send(JSON.stringify({ channel: ch, msg_type: "join" }));
+  eq(acks, ["ok", "ok", "error"], "joins past the per-connection cap are refused");
+  eq(caps.connect({}).error.status, 429, "connections past the cap are refused");
+  k2.close();
+  ok(!caps.connect({}).error, "and a closed one frees its place");
+
+  const silent = createMarketSim({ seed: "silent", names: 12, chaos: { silentChannels: ["news"] } });
+  const sc = silent.connect({});
+  const sgot = [];
+  sc.onMessage((t) => sgot.push(JSON.parse(t)));
+  sc.send(JSON.stringify({ channel: "news", msg_type: "join" }));
+  sc.send(JSON.stringify({ channel: "market_tide", msg_type: "join" }));
+  silent.advance(30 * 60000);
+  eq([sgot[0][1].status, sgot.filter(([ch]) => ch === "news" && !("status" in sgot[0][1] && sgot[0][0] === ch && false)).length], ["ok", 1], "a channel that acks and never delivers sends only its ack");
+  ok(sgot.filter(([ch]) => ch === "market_tide").length > 20, "while another channel on the same connection flows");
+
+  const missing = createMarketSim({ seed: "missing", names: 12, chaos: { dropPeriscopeFrame: { snapshot: 4, frame: 1 } } });
+  const mc = missing.connect({});
+  const mgot = [];
+  mc.onMessage((t) => mgot.push(JSON.parse(t)));
+  mc.send(JSON.stringify({ channel: "periscope:SPX", msg_type: "join" }));
+  missing.advance(10 * 60000);
+  const per = new Map();
+  for (const [ch, p] of mgot) if (ch === "periscope:SPX") per.set(p.snapshot, (per.get(p.snapshot) || 0) + 1);
+  eq([per.get(4), per.get(3), per.get(5)], [2, 3, 3], "a dropped periscope frame leaves exactly one snapshot incomplete");
+
+  const SIM_OPEN = createMarketSim({ seed: "open", names: 2 }).open;
+  const messy = createMarketSim({ seed: "messy", names: 12, chaos: { duplicateRate: 0.2, reorderWithinMs: 500, malformedRate: 0.05, lagSpikes: [{ from: SIM_OPEN + 5 * 60000, to: SIM_OPEN + 6 * 60000, extraMs: 30000 }] } });
+  const xc = messy.connect({});
+  const xgot = [];
+  xc.onMessage((t) => xgot.push({ t, at: messy.clock.now() }));
+  xc.send(JSON.stringify({ channel: "price", msg_type: "join" }));
+  messy.advance(20 * 60000);
+  let unparsable = 0, dup = 0, inversions = 0, maxLate = 0;
+  const seen = new Set();
+  let prev = -Infinity;
+  for (const m of xgot.slice(1)) {
+    let parsed;
+    try { parsed = JSON.parse(m.t); } catch { unparsable++; continue; }
+    const key = parsed[0] + parsed[1].ticker + parsed[1].time;
+    if (seen.has(key)) dup++; else seen.add(key);
+    if (parsed[1].time < prev) inversions++;
+    prev = Math.max(prev, parsed[1].time);
+  }
+  ok(unparsable > 5 && dup > 20 && inversions > 20, `malformed frames (${unparsable}), duplicates (${dup}) and reorders (${inversions}) are injected`);
+  void maxLate;
+  const clean = createMarketSim({ seed: "messy", names: 12 });
+  const cc = clean.connect({});
+  const cgot = [];
+  cc.onMessage((t) => cgot.push(JSON.parse(t)));
+  cc.send(JSON.stringify({ channel: "price", msg_type: "join" }));
+  clean.advance(10 * 60000);
+  const times = cgot.slice(1).map(([, p]) => p.time);
+  ok(times.every((t, i) => i === 0 || t >= times[i - 1] - 5000), "without chaos the stream is ordered to within the vendor's own jitter");
+
+  const lagged = createMarketSim({ seed: "lag", names: 12 });
+  lagged.chaos.lagSpikes = [{ from: lagged.open + 2 * 60000, to: lagged.open + 3 * 60000, extraMs: 20000 }];
+  const lc = lagged.connect({});
+  const lgot = [];
+  lc.onMessage((t) => lgot.push({ at: lagged.clock.now(), msg: JSON.parse(t) }));
+  lc.send(JSON.stringify({ channel: "price:SPY", msg_type: "join" }));
+  for (let k = 0; k < 20 * 12; k++) lagged.advance(5000);
+  const delays = lgot.slice(1).map((m) => m.at - m.msg[1].time);
+  ok(Math.max(...delays) > 20000 && Math.min(...delays) < 6000, "a lag spike delays the frames it covers by its extra and the rest are on time");
+
+  const skewed = createMarketSim({ seed: "skew", names: 12, chaos: { clockSkewMs: 7000 } });
+  const plain = createMarketSim({ seed: "skew", names: 12 });
+  skewed.advance(5 * 60000); plain.advance(5 * 60000);
+  const sa = (await skewed.rest("/api/screener/stocks", { ticker: "SPY" })).body.data[0], pa = (await plain.rest("/api/screener/stocks", { ticker: "SPY" })).body.data[0];
+  eq(sa.quote_time - pa.quote_time, 7000, "clock skew shifts the vendor's stamps and nothing else");
+  eq(sa.close, pa.close, "and not the price");
+
+  const dropper = createMarketSim({ seed: "drop", names: 12, chaos: { drops: [{ conn: 0, at: 0 }], stalls: [{ conn: 1, from: 0, to: 0 }] } });
+  const d0 = dropper.connect({});
+  let closed = null, dgot = 0;
+  d0.onClose((e) => { closed = e; });
+  d0.onMessage(() => { dgot++; });
+  d0.send(JSON.stringify({ channel: "price:SPY", msg_type: "join" }));
+  dropper.chaos.drops = [{ conn: 0, at: dropper.open + 3 * 60000 }];
+  dropper.advance(10 * 60000);
+  ok(closed && closed.code === 1006 && dgot >= 3 && dgot <= 6, `a dropped connection closes with 1006 and no close frame after ${dgot} messages`);
+  const staller = createMarketSim({ seed: "stall", names: 12 });
+  const s0 = staller.connect({});
+  const stalled = [];
+  s0.onMessage((t) => stalled.push({ at: staller.clock.now(), t }));
+  s0.send(JSON.stringify({ channel: "price:SPY", msg_type: "join" }));
+  staller.chaos.stalls = [{ conn: 0, from: staller.open, to: staller.open + 4 * 60000 }];
+  for (let k = 0; k < 6; k++) staller.advance(60000);
+  const burst = stalled.slice(1);
+  ok(burst.length >= 5 && burst.slice(0, 4).every((m) => m.at >= staller.open + 4 * 60000), "a stalled connection delivers nothing until the stall ends, then a burst");
+
+  const a2 = createMarketSim({ seed: "det", names: 12, chaos: { duplicateRate: 0.2, reorderWithinMs: 400 } }), b2 = createMarketSim({ seed: "det", names: 12, chaos: { duplicateRate: 0.2, reorderWithinMs: 400 } });
+  const run = (s) => { const out = []; const k = s.connect({}); k.onMessage((t) => out.push(t)); k.send(JSON.stringify({ channel: "price", msg_type: "join" })); s.advance(5 * 60000); return out; };
+  eq(run(a2), run(b2), "the same seed and the same chaos deliver the same bytes");
+
+  const live = createMarketSim({ seed: "live", names: 12 });
+  const server = await live.listen();
+  try {
+    const ws = new WebSocket(server.url + "?token=x");
+    const frames = [];
+    await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
+    ws.onmessage = (e) => frames.push(JSON.parse(e.data));
+    ws.send(JSON.stringify({ channel: "price:SPY", msg_type: "join" }));
+    await new Promise((r) => setTimeout(r, 50));
+    live.advance(3 * 60000);
+    await new Promise((r) => setTimeout(r, 80));
+    ws.close();
+    eq(frames[0][1].status, "ok", "a real WebSocket joins the simulated vendor");
+    ok(frames.filter(([ch, p]) => ch === "price:SPY" && p.ticker === "SPY").length === 3, "and receives its prices over the wire");
+    const res = await fetch(server.httpUrl + "/api/news/headlines");
+    eq(res.status, 200, "the same server answers the REST routes");
+  } finally { server.close(); }
 });
 
 await section("kill-matrix", async () => {
@@ -711,7 +962,16 @@ await section("kill-matrix", async () => {
     ok(r.baselineOk, `${r.id}: the detector passes the correct build (${r.baselineNote})`);
     ok(r.killed, `${r.id}: a planted wrong build is killed (${r.mutatedNote})`);
   }
-  ok(rows.filter((r) => r.armed).length >= 14, "fourteen mutants are armed by the third pull request");
+  const armed = rows.filter((r) => r.armed);
+  ok(armed.length >= 22, `${armed.length} mutants are armed`);
+  ok(rows.length >= 24, `${rows.length} mutants are registered, ${rows.length - armed.length} waiting for their targets`);
+  for (const id of LAUNCH_MUTANTS) ok(rows.some((r) => r.id === id), `the launch mutant ${id} is registered`);
+  eq(LAUNCH_MUTANTS.length, 18, "eighteen mutants at launch");
+  for (const id of PLANTED_WRONG_DETECTORS) {
+    const r = rows.find((x) => x.id === id);
+    ok(r && r.armed && r.killed, `the planted wrong detector ${id} is killed`);
+  }
+  for (const r of rows.filter((x) => !x.armed)) log(`${r.id}: ${r.why}`);
   eq(new Set(MUTANTS.map((m) => m.id)).size, MUTANTS.length, "every mutant has its own id");
   let notApplied = false;
   try { await loadMutated("tests/truth/reference.mjs", [["this text is nowhere in the module", "x"]]); } catch (e) { notApplied = /did not apply/.test(e.message); }

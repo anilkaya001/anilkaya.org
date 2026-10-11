@@ -1,6 +1,6 @@
 import { mean, variance } from "./stats.mjs";
 import { normalCdf, normalQuantile } from "./rng.mjs";
-import { nextBusinessDay } from "./worlds.mjs";
+import { nextBusinessDay, studentCdf } from "./worlds.mjs";
 
 export class LookAheadError extends Error {}
 
@@ -291,4 +291,80 @@ export function hierEProcess(counts, { lambda, r, sdDay, grid = 25, thetas = [2,
 export function alertTier(counts, { lambda, r, sdDay }) {
   const withDayEffect = true;
   return withDayEffect ? hierEProcess(counts, { lambda, r, sdDay }) : fixedEProcess(counts, { lambda, r });
+}
+
+export const JUMP_QUANTILE = 0.99;
+
+const scaleOf = (session, i) => session.sigmaForecast[i];
+
+export function standardisedMax(session, i) {
+  let mx = 0;
+  const sig = scaleOf(session, i);
+  for (let b = 0; b < session.bars; b++) {
+    const z = Math.abs(session.inc[i * session.bars + b]) / (sig * Math.sqrt(session.clockForecast[b]));
+    if (z > mx) mx = z;
+  }
+  return mx;
+}
+
+export function gumbelLine(maxima, q = JUMP_QUANTILE) {
+  const beta = (Math.sqrt(variance(maxima)) * Math.sqrt(6)) / Math.PI;
+  const mu = mean(maxima) - EULER * beta;
+  return mu - beta * Math.log(-Math.log(q));
+}
+
+export function jumpLines(placebo) {
+  const buckets = [0, 1, 2];
+  return buckets.map((b) => gumbelLine(placebo[b]));
+}
+
+export function flagJumps(session, lines, bucketOf) {
+  const flags = new Uint8Array(session.names);
+  for (let i = 0; i < session.names; i++) if (standardisedMax(session, i) > lines[bucketOf(i)]) flags[i] = 1;
+  return flags;
+}
+
+export function harmonic(m) {
+  let h = 0;
+  for (let k = 1; k <= m; k++) h += 1 / k;
+  return h;
+}
+
+export function stepUp(p, line) {
+  const order = Array.from(p, (_, i) => i).sort((a, b) => p[a] - p[b]);
+  let cut = 0;
+  for (let k = 1; k <= order.length; k++) if (p[order[k - 1]] <= line(k)) cut = k;
+  return order.slice(0, cut);
+}
+
+export function bhReject(p, alpha) {
+  const m = p.length;
+  return stepUp(p, (k) => (k * alpha) / m);
+}
+
+export function byReject(p, alpha) {
+  const m = p.length;
+  return stepUp(p, (k) => (k * alpha) / (m * harmonic(m)));
+}
+
+export function sessionAlerts(frames, alpha) {
+  const last = frames[frames.length - 1].running;
+  return byReject(last, alpha);
+}
+
+export function eProcessMax(session, i, { nuHat, sHat, c = 2, a = 8 }) {
+  const useTransform = true;
+  const kappa = Math.exp(c * sHat);
+  const sig = scaleOf(session, i);
+  const unit = Math.sqrt(nuHat / (nuHat - 2));
+  let s = 0, best = 1;
+  for (let b = 0; b < session.bars; b++) {
+    const x = session.inc[i * session.bars + b] / (sig * Math.sqrt(session.clockForecast[b]) * kappa);
+    const u = Math.min(1 - 1e-12, Math.max(1e-12, studentCdf(x * unit, nuHat)));
+    s += useTransform ? normalQuantile(u) : x;
+    const v = b + 1;
+    const e = Math.exp((a * s * s) / (2 * (1 + a * v))) / Math.sqrt(1 + a * v);
+    if (e > best) best = e;
+  }
+  return best;
 }

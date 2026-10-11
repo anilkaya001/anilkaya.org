@@ -183,17 +183,83 @@ register({
   detector: "flowNullDayEffect",
 });
 
+const refEdit = (id, title, transforms, detector, extra = {}) => register({ id, title, target: "tests/truth/reference.mjs", row: "F-13", transforms, detector, ...extra });
+
+refEdit("gaussian-jump-threshold", "the jump flag uses one Gaussian threshold of 5.47 for every name", [["return buckets.map((b) => gumbelLine(placebo[b]));", "return buckets.map(() => 5.47);"]], "jumpFlagNull");
+
+refEdit("scale-blind-pooled-threshold", "the jump statistic divides every name's move by the pooled scale", [["const scaleOf = (session, i) => session.sigmaForecast[i];", "const scaleOf = (session) => session.sigmaForecast.reduce((a, b) => a + b, 0) / session.names;"]], "jumpFlagNull");
+
+refEdit("bh-with-m-equal-rejections", "the Benjamini-Hochberg line divides by the number of rejections instead of the number of tests", [["return stepUp(p, (k) => (k * alpha) / m);", "return stepUp(p, (k) => (k * alpha) / k);"]], "bhCompleteNull");
+
+refEdit("by-line-without-harmonic", "the Benjamini-Yekutieli line uses m where it must use m times the harmonic number", [["return stepUp(p, (k) => (k * alpha) / (m * harmonic(m)));", "return stepUp(p, (k) => (k * alpha) / m);"]], "byCompleteNull");
+
+refEdit("per-frame-bh-union-as-session-fdr", "the session's alert set is the union of per-minute snapshot BH sets, captioned as the session FDR", [["const last = frames[frames.length - 1].running;\n  return byReject(last, alpha);", "const out = new Set();\n  for (const f of frames) for (const i of bhReject(f.snapshot, alpha)) out.add(i);\n  return [...out];"]], "sessionFdr");
+
+refEdit("e-process-without-the-per-increment-transform", "the e-process takes heavy-tailed increments raw instead of through their own predictive law", [["const useTransform = true;", "const useTransform = false;"]], "eProcessRepair");
+
+refEdit("scale-not-inflated", "the e-process does not inflate the scale by the measured scale error", [["const kappa = Math.exp(c * sHat);", "const kappa = 1;"]], "eProcessInflation");
+
+register({
+  id: "w1d-drops-the-factor",
+  title: "the dependent daily world draws its names independently",
+  target: "tests/truth/worlds.mjs",
+  row: "F-13",
+  transforms: [["const shared = a * factor;", "const shared = 0;"]],
+  detector: "dependentWorldCoverage",
+});
+
+register({
+  id: "sigma-ref-includes-earnings",
+  title: "the reference scale includes earnings sessions",
+  target: "shared/flows-evt.js",
+  row: "F-13",
+  transforms: [],
+  detector: null,
+  pending: "arms with F-21, which adds scheduled events (W2) and the reference-scale leaf",
+});
+
+register({
+  id: "bootstrap-holds-the-variance-target-fixed",
+  title: "the parametric bootstrap holds the variance target fixed in the refit",
+  target: "shared/flows-garch-interval.js",
+  row: "F-13",
+  transforms: [],
+  detector: null,
+  pending: "arms with F-22, which adds the GARCH interval",
+});
+
+export const LAUNCH_MUTANTS = Object.freeze([
+  "garch-recursion-on-r-t", "winsorising-on-the-simulator", "sigma-ref-includes-earnings", "missing-hac", "bh-with-m-equal-rejections",
+  "pav-ties-not-pooled", "e-process-product-over-names", "fixed-half-bet-clip", "crps-without-the-fair-correction", "hawkes-compensator-sign",
+  "firewall-as-a-filter", "open-interest-known-at-the-session-it-describes", "trial-count-of-one", "issue-view-at-close-plus-2h",
+  "by-line-without-harmonic", "per-frame-bh-union-as-session-fdr", "scale-not-inflated", "bootstrap-holds-the-variance-target-fixed",
+]);
+
+export const PLANTED_WRONG_DETECTORS = Object.freeze([
+  "gaussian-jump-threshold", "per-frame-bh-union-as-session-fdr", "e-process-without-the-per-increment-transform",
+  "scale-blind-pooled-threshold", "flow-null-omits-the-day-effect",
+]);
+
+const baselines = new Map();
+
+export async function baselineResult(detector, target) {
+  const key = target + "|" + detector;
+  if (!baselines.has(key)) {
+    const detect = detectors[detector];
+    if (typeof detect !== "function") throw new Error(`no detector named ${detector}`);
+    baselines.set(key, detect(await loadMutated(target)));
+  }
+  return baselines.get(key);
+}
+
 export async function runKillMatrix(selected = MUTANTS) {
   const rows = [];
-  const baselines = new Map();
   for (const m of selected) {
     const state = mutantState(m);
     if (!state.armed) { rows.push({ id: m.id, row: m.row, armed: false, why: state.why }); continue; }
     const detect = detectors[m.detector];
     if (typeof detect !== "function") throw new Error(`mutant ${m.id} names a detector that does not exist: ${m.detector}`);
-    const key = m.target + "|" + m.detector;
-    if (!baselines.has(key)) baselines.set(key, detect(await loadMutated(m.target)));
-    const baseline = baselines.get(key);
+    const baseline = await baselineResult(m.detector, m.target);
     const mutated = detect(await loadMutated(m.target, m.transforms));
     rows.push({ id: m.id, row: m.row, armed: true, baselineOk: baseline.ok, baselineNote: baseline.note, killed: baseline.ok && !mutated.ok, mutatedNote: mutated.note });
   }

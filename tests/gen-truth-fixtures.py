@@ -264,6 +264,58 @@ def multiplicity_block():
     }
 
 
+def tstd(rng, nu, size):
+    return rng.standard_t(nu, size=size) * np.sqrt((nu - 2) / nu)
+
+
+def pooled_nll(xi, ys, ybars):
+    if xi <= 1e-4 or xi >= 0.99:
+        return 1e12
+    total = 0.0
+    for y, yb in zip(ys, ybars):
+        be = yb * (1 - xi)
+        total += len(y) * np.log(be) + (1 + 1 / xi) * np.sum(np.log1p(xi * y / be))
+    return total
+
+
+def pooled_fit(ys):
+    from scipy.optimize import minimize_scalar
+    ybars = [y.mean() for y in ys]
+    res = minimize_scalar(lambda x: pooled_nll(x, ys, ybars), bounds=(0.01, 0.95), method="bounded", options={"xatol": 1e-9})
+    xi = res.x
+    h = 1e-3
+    d2 = (pooled_nll(xi + h, ys, ybars) - 2 * res.fun + pooled_nll(xi - h, ys, ybars)) / h ** 2
+    return xi, (1 / math.sqrt(d2) if d2 > 0 else float("nan"))
+
+
+def w1d_block():
+    rng = np.random.default_rng(20261012)
+    names, days, nu, q = 60, 500, 5, 0.925
+    reps = 300
+    rows = []
+    for rho in (0.0, 0.3, 0.5):
+        xis, ses = [], []
+        for _ in range(reps):
+            f = tstd(rng, nu, days)
+            e = tstd(rng, nu, (names, days))
+            r = np.sqrt(rho) * f[None, :] + np.sqrt(1 - rho) * e
+            ys = []
+            for i in range(names):
+                a = np.abs(r[i])
+                u = np.quantile(a, q)
+                ys.append(a[a > u] - u)
+            xi, se = pooled_fit(ys)
+            xis.append(xi)
+            ses.append(se)
+        sd = float(np.std(xis, ddof=1))
+        se_mean = float(np.nanmean(ses))
+        rows.append({
+            "rho": rho, "reps": reps, "sdXi": sd, "seMean": se_mean, "ratio": sd / se_mean,
+            "coverage": float(2 * stats.norm.cdf(1.645 * se_mean / sd) - 1),
+        })
+    return {"names": names, "days": days, "nu": nu, "quantile": q, "rows": rows}
+
+
 def main():
     out = {
         "provenance": {
@@ -289,6 +341,7 @@ def main():
         "f1Fixed": f1_fixed_block(),
         "jumpGaussian": jump_gaussian_block(),
         "multiplicity": multiplicity_block(),
+        "w1d": w1d_block(),
     }
     with open(OUT_PATH, "w") as handle:
         json.dump(out, handle, indent=1, sort_keys=True)

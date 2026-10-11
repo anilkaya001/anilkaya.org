@@ -452,7 +452,7 @@
  },
  "provenance": {
   "generator": "tests/gen-truth-fixtures.py",
-  "generatorSha256": "bfb4307a41735e97476b1ae7aedf9d9f7220929377f196667213578ce51ad005",
+  "generatorSha256": "2a0fbb379f9b2d1a653387f1fc6dab18987010587296540ec1f1028c12db0789",
   "nature": "independent references for tests/truth/*: the generator's own sfc32 streams, the Hansen skew-t constants and two-sided tail probabilities by closed form and by quadrature, the look-ahead bait's exact mean score differences, the fair CRPS expectation, the overlap variance factor and the indicator correlation of the calibration world; scipy for every distribution function, no draws",
   "numpy": "2.4.6",
   "python": "3.11.15",
@@ -513,6 +513,38 @@
     3212125422
    ]
   }
+ },
+ "w1d": {
+  "days": 500,
+  "names": 60,
+  "nu": 5,
+  "quantile": 0.925,
+  "rows": [
+   {
+    "coverage": 0.8691676579375833,
+    "ratio": 1.088807111088214,
+    "reps": 300,
+    "rho": 0.0,
+    "sdXi": 0.025359822349644685,
+    "seMean": 0.023291382000893323
+   },
+   {
+    "coverage": 0.5916272013398045,
+    "ratio": 1.9896934071088983,
+    "reps": 300,
+    "rho": 0.3,
+    "sdXi": 0.04465078770198097,
+    "seMean": 0.02244103917842312
+   },
+   {
+    "coverage": 0.3434732540921748,
+    "ratio": 3.699009950607065,
+    "reps": 300,
+    "rho": 0.5,
+    "sdXi": 0.08235699406557977,
+    "seMean": 0.022264604628074523
+   }
+  ]
  },
  "w7": [
   {

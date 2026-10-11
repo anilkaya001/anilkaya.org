@@ -1,6 +1,12 @@
 import { makeRng } from "./rng.mjs";
-import { hansen, w1Closes, w1Garch, closesFromReturns, businessDays, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
+import { hansen, w1dWorld, w1Closes, w1Garch, closesFromReturns, businessDays, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
 import { mean, median, quantile, variance, ksUniform } from "./stats.mjs";
+import { w9World } from "./intraday.mjs";
+import { normalCdf } from "./rng.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const FIXTURES = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures-truth.json", import.meta.url)), "utf8"));
 
 export const W1_BANDS = Object.freeze({
   nu: [5.2, 5.8],
@@ -327,4 +333,190 @@ export function flowNullDayEffect(refMod) {
   }
   const rate = cross / sessions, r20 = over20 / sessions;
   return { ok: rate <= 0.02 && r20 <= 0.07, note: `at a day effect of 0.25, ${(100 * rate).toFixed(1)}% of ordinary names cross the Alert line and ${(100 * r20).toFixed(1)}% reach E = 20 (${sessions} names)`, rate, r20 };
+}
+
+const sessionCache = new Map();
+
+export function w9Sessions(opts, from, to) {
+  const key = JSON.stringify(opts);
+  if (!sessionCache.has(key)) sessionCache.set(key, { world: w9World(opts), sessions: new Map() });
+  const entry = sessionCache.get(key);
+  const out = [];
+  for (let d = from; d < to; d++) {
+    if (!entry.sessions.has(d)) entry.sessions.set(d, entry.world.session(d));
+    out.push(entry.sessions.get(d));
+  }
+  return { world: entry.world, sessions: out };
+}
+
+export const JUMP_NULL_WORLD = Object.freeze({ names: 150, sessions: 40, seed: "w9-jump-null", innovation: "t", scaleError: 0.2 });
+
+export function jumpFlagNull(refMod) {
+  const f = SCALE.factor;
+  const opts = { ...JUMP_NULL_WORLD, sessions: 40 * f, seed: `${JUMP_NULL_WORLD.seed}|${SCALE.salt}` };
+  const cal = w9Sessions(opts, 0, 20 * f);
+  const placebo = [[], [], []];
+  for (const s of cal.sessions) for (let i = 0; i < s.names; i++) placebo[cal.world.names[i].bucket].push(refMod.standardisedMax(s, i));
+  const lines = refMod.jumpLines(placebo);
+  const test = w9Sessions(opts, 20 * f, 40 * f);
+  let flagged = 0, total = 0;
+  const bySigma = [[0, 0], [0, 0], [0, 0]];
+  for (const s of test.sessions) {
+    const flags = refMod.flagJumps(s, lines, (i) => cal.world.names[i].bucket);
+    const order = Array.from(s.sigmaForecast, (v, i) => i).sort((a, b) => s.sigmaForecast[a] - s.sigmaForecast[b]);
+    order.forEach((i, rank) => {
+      const tercile = Math.min(2, Math.floor((3 * rank) / order.length));
+      bySigma[tercile][0] += flags[i];
+      bySigma[tercile][1] += 1;
+      flagged += flags[i];
+      total += 1;
+    });
+  }
+  const rates = bySigma.map(([k, n]) => k / n);
+  const spread = Math.max(...rates) / Math.max(1 / (3 * total), Math.min(...rates));
+  const share = flagged / total;
+  return { ok: share <= 0.03 && spread <= 3, note: `${(100 * share).toFixed(1)}% of ordinary name-days flagged (nominal 1%), highest to lowest volatility tercile ${spread.toFixed(1)}x (${rates.map((r) => (100 * r).toFixed(1) + "%").join(", ")})`, share, spread, lines };
+}
+
+export function bhCompleteNull(refMod, fixture = FIXTURES.multiplicity) {
+  const reps = 600 * SCALE.factor;
+  const rng = makeRng(`bh-null|${SCALE.salt}`);
+  let any = 0;
+  for (let r = 0; r < reps; r++) {
+    const p = new Float64Array(fixture.m);
+    for (let i = 0; i < p.length; i++) p[i] = rng.uniform();
+    if (refMod.bhReject(p, fixture.alpha).length > 0) any++;
+  }
+  const rate = any / reps;
+  const se = Math.sqrt((fixture.bhCompleteNull * (1 - fixture.bhCompleteNull)) / reps);
+  return { ok: Math.abs(rate - fixture.bhCompleteNull) <= 4 * se, note: `BH at ${fixture.alpha} on ${fixture.m} true nulls rejects something in ${(100 * rate).toFixed(1)}% of ${reps} runs (exact ${(100 * fixture.bhCompleteNull).toFixed(2)}%)` };
+}
+
+export function byCompleteNull(refMod, fixture = FIXTURES.multiplicity) {
+  const reps = 600 * SCALE.factor;
+  const rng = makeRng(`by-null|${SCALE.salt}`);
+  let any = 0;
+  for (let r = 0; r < reps; r++) {
+    const p = new Float64Array(fixture.m);
+    for (let i = 0; i < p.length; i++) p[i] = rng.uniform();
+    if (refMod.byReject(p, fixture.alpha).length > 0) any++;
+  }
+  const rate = any / reps;
+  const se = Math.sqrt((fixture.byCompleteNull * (1 - fixture.byCompleteNull)) / reps);
+  return { ok: Math.abs(rate - fixture.byCompleteNull) <= 4 * se + 0.003, note: `BY at ${fixture.alpha} on ${fixture.m} true nulls rejects something in ${(100 * rate).toFixed(1)}% of ${reps} runs (exact ${(100 * fixture.byCompleteNull).toFixed(2)}%)` };
+}
+
+export const SESSION_FDR_WORLD = Object.freeze({ names: 200, sessions: 100, seed: "w9-session-fdr", innovation: "gaussian", marketRho: 0, sectorRho: 0, seasonalError: 0, scaleError: 0 });
+
+export function runningPFrames(s, frameEvery = 5, minutesFixed = 390) {
+  const frames = [];
+  const best = new Float64Array(s.names), walk = new Float64Array(s.names);
+  for (let b = 0; b < s.bars; b++) {
+    for (let i = 0; i < s.names; i++) {
+      const z = s.inc[i * s.bars + b] / (s.sigmaForecast[i] * Math.sqrt(s.clockForecast[b]));
+      walk[i] += z;
+      if (Math.abs(z) > best[i]) best[i] = Math.abs(z);
+    }
+    if ((b + 1) % frameEvery === 0) {
+      frames.push({
+        running: Float64Array.from(best, (l) => 1 - Math.pow(2 * normalCdf(l) - 1, minutesFixed)),
+        snapshot: Float64Array.from(walk, (w) => 2 * normalCdf(-Math.abs(w) / Math.sqrt(b + 1))),
+      });
+    }
+  }
+  return frames;
+}
+
+export function sessionFdr(refMod) {
+  const sessions = 100 * SCALE.factor;
+  const alpha = 0.1;
+  const { sessions: list } = w9Sessions({ ...SESSION_FDR_WORLD, sessions, seed: `${SESSION_FDR_WORLD.seed}|${SCALE.salt}` }, 0, sessions);
+  let any = 0;
+  for (const s of list) if (refMod.sessionAlerts(runningPFrames(s), alpha).length > 0) any++;
+  const share = any / sessions;
+  return { ok: share <= alpha, note: `on sessions with nothing to find, ${(100 * share).toFixed(0)}% raise at least one alert (stated 10%)`, share };
+}
+
+const E_LINE = 200;
+
+function eProcessCell(refMod, worldOpts, params) {
+  const f = SCALE.factor;
+  const sessions = 6 * f;
+  const { sessions: list } = w9Sessions({ names: 300, sessions, innovation: "t", marketRho: 0, sectorRho: 0, seasonalError: 0, ...worldOpts }, 0, sessions);
+  let cross = 0, total = 0;
+  for (const s of list) for (let i = 0; i < s.names; i++) { if (refMod.eProcessMax(s, i, params) >= E_LINE) cross++; total++; }
+  return { cross, total, rate: cross / total };
+}
+
+export function eProcessRepair(refMod) {
+  const r = eProcessCell(refMod, { nuRange: [4, 4], scaleError: 0, seed: `w9-eproc-t|${SCALE.salt}` }, { nuHat: 4, sHat: 0, c: 0 });
+  return { ok: r.rate <= 0.005, note: `on Student t increments with 4 degrees of freedom, ${(100 * r.rate).toFixed(2)}% of ordinary name-days reach E = ${E_LINE} (Ville allows 0.5%; ${r.cross} of ${r.total})`, rate: r.rate };
+}
+
+export function eProcessInflation(refMod) {
+  const r = eProcessCell(refMod, { nuRange: [5, 5], scaleError: 0.3, seed: `w9-eproc-s|${SCALE.salt}` }, { nuHat: 5, sHat: 0.3, c: 2 });
+  return { ok: r.rate <= 0.005, note: `with a scale error of 0.3, ${(100 * r.rate).toFixed(2)}% of ordinary name-days reach E = ${E_LINE} (Ville allows 0.5%; ${r.cross} of ${r.total})`, rate: r.rate };
+}
+
+function goldenMin(f, lo, hi, iters = 60) {
+  const g = (Math.sqrt(5) - 1) / 2;
+  let a = lo, b = hi, c = b - g * (b - a), d = a + g * (b - a), fc = f(c), fd = f(d);
+  for (let i = 0; i < iters; i++) {
+    if (fc < fd) { b = d; d = c; fd = fc; c = b - g * (b - a); fc = f(c); } else { a = c; c = d; fc = fd; d = a + g * (b - a); fd = f(d); }
+  }
+  return (a + b) / 2;
+}
+
+export function pooledShape(world, q = 0.925) {
+  const ys = [];
+  for (let i = 0; i < world.names; i++) {
+    const abs = Float64Array.from(world.r.subarray(i * world.days, (i + 1) * world.days), Math.abs).sort();
+    const u = abs[Math.floor(q * (abs.length - 1))];
+    ys.push(Float64Array.from(abs.filter((v) => v > u), (v) => v - u));
+  }
+  const means = ys.map((y) => mean(y));
+  const nll = (xi) => {
+    if (xi <= 1e-4 || xi >= 0.99) return 1e12;
+    let s = 0;
+    ys.forEach((y, i) => {
+      const be = means[i] * (1 - xi);
+      s += y.length * Math.log(be);
+      let acc = 0;
+      for (let k = 0; k < y.length; k++) acc += Math.log1p((xi * y[k]) / be);
+      s += (1 + 1 / xi) * acc;
+    });
+    return s;
+  };
+  const xi = goldenMin(nll, 0.01, 0.95);
+  const h = 1e-3;
+  const d2 = (nll(xi + h) - 2 * nll(xi) + nll(xi - h)) / (h * h);
+  return { xi, se: d2 > 0 ? 1 / Math.sqrt(d2) : NaN, n: ys.reduce((a, y) => a + y.length, 0) };
+}
+
+export function pooledShapeCoverage(worldsMod, { rho, reps, nu = 5, names = 60, days = 500, salt = SCALE.salt }) {
+  const xis = [], ses = [];
+  for (let r = 0; r < reps; r++) {
+    const w = worldsMod.w1dWorld({ seed: `w1d|${salt}|${rho}|${r}`, names, days, nu, rho });
+    const fit = pooledShape(w);
+    xis.push(fit.xi);
+    ses.push(fit.se);
+  }
+  const sdXi = Math.sqrt(variance(xis)), seMean = mean(ses.filter(Number.isFinite));
+  return { sdXi, seMean, ratio: sdXi / seMean, coverage: 2 * normalCdf((1.645 * seMean) / sdXi) - 1, reps };
+}
+
+export function dependentWorldCoverage(worldsMod) {
+  const c = pooledShapeCoverage(worldsMod, { rho: 0.3, reps: 120 * SCALE.factor });
+  return { ok: c.coverage <= 0.7, note: `a nominal 90% interval for the pooled shape covers ${(100 * c.coverage).toFixed(0)}% of runs on the dependent daily world (SD over model SE ${c.ratio.toFixed(2)})`, measured: c };
+}
+
+export function jumpFlagTransfer(refMod, { lines, world }) {
+  const f = SCALE.factor;
+  const test = w9Sessions({ ...world, sessions: 20 * f, seed: `${world.seed}|${SCALE.salt}` }, 0, 20 * f);
+  let flagged = 0, total = 0;
+  for (const s of test.sessions) {
+    const flags = refMod.flagJumps(s, lines, (i) => test.world.names[i].bucket);
+    for (let i = 0; i < s.names; i++) { flagged += flags[i]; total += 1; }
+  }
+  return { share: flagged / total, total };
 }

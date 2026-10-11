@@ -333,8 +333,28 @@ export function w3bSession(opts = {}) {
   return { names: out, params: p };
 }
 
+export const W1D_DEFAULTS = Object.freeze({ names: 60, days: 500, nu: 5, rho: 0.3 });
+
+export function w1dWorld(opts = {}) {
+  const p = { ...W1D_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w1d");
+  const r = new Float64Array(p.names * p.days);
+  const a = Math.sqrt(p.rho), b = Math.sqrt(1 - p.rho);
+  for (let t = 0; t < p.days; t++) {
+    const factor = rng.studentUnit(p.nu);
+    const shared = a * factor;
+    for (let i = 0; i < p.names; i++) r[i * p.days + t] = shared + b * rng.studentUnit(p.nu);
+  }
+  return { r, names: p.names, days: p.days, params: p };
+}
+
+export function w1Independent(opts = {}) {
+  return w1dWorld({ ...opts, rho: 0 });
+}
+
 export const WORLDS = Object.freeze({
   W1: Object.freeze({ id: "W1", title: "GARCH(1,1)-skew-t, the production class", family: "calibration" }),
+  W1d: Object.freeze({ id: "W1d", title: "the dependent daily world", family: "calibration" }),
   W3: Object.freeze({ id: "W3", title: "marked Hawkes flow", family: "calibration" }),
   W3b: Object.freeze({ id: "W3b", title: "flow counts with day effects and weather", family: "calibration" }),
   W4: Object.freeze({ id: "W4", title: "look-ahead bait", family: "calibration" }),
