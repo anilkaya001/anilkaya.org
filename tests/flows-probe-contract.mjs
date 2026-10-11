@@ -111,11 +111,15 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
         const tok = m[1].split("?")[0].replace(/\/+$/, "");
         if (!OWN.test(tok)) literals.push(`${f}:${i + 1} ${tok}`);
       }
-      if (/\b(?:pathFor|opById|sourceOf)\(/.test(line)) {
-        for (const m of line.matchAll(/"([a-z0-9-]+)"/g)) refs.set(m[1], [...(refs.get(m[1]) || []), f]);
-      }
     });
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(\s*"([^"]*)"/g)) bad.push([f, m[1]]);
+    for (const m of text.matchAll(/\b(?:pathFor|opById)\(([^,)]*)/g)) {
+      for (const q of m[1].matchAll(/"([a-z0-9-]+)"/g)) refs.set(q[1], [...(refs.get(q[1]) || []), f]);
+    }
+    for (const m of text.matchAll(/\bsourceOf\(\s*"[^"]*"\s*,\s*"([^"]*)"/g)) {
+      bad.push([f, m[1]]);
+      refs.set(m[1], [...(refs.get(m[1]) || []), f]);
+    }
   }
   deep(literals, [], "NO VENDOR PATH IS SPELLED OUTSIDE THE REGISTRY: no /api/ literal that names a vendor operation remains in worker.js, shared/ or scripts/");
   const ids = new Set(OPS.map((e) => e.id));
