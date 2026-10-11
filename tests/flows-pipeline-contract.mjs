@@ -3802,8 +3802,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const regJob = (id) => (new RegExp(`\\n {2}${id}:\\n((?: {4}.*\\n|\\s*\\n)+)`).exec(regression) || [])[1] || "";
   const [regFast, regShard, regTest] = ["fast", "shard", "test"].map(regJob);
   assert.deepEqual([regFast, regShard, regTest].map((job) => [...job.matchAll(/^ {4}timeout-minutes: (\S+)$/gm)].map((m) => m[1])),
-    [["10"], ["25"], ["5"]],
-    "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 25 (its slowest " +
+    [["10"], ["30"], ["5"]],
+    "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 30 (its slowest " +
     "suite's own run.mjs timeout plus setup, which run-contract holds), and the aggregate test 5"); checks++;
   ok(/^ {4}needs: \[reuse, fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
     "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs the reuse check, fast and every shard and runs if: always(), so a failed or " +
