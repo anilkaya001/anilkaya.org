@@ -2046,7 +2046,7 @@ try {
     eq(wp.openings, 0, "nothing on the page says Opening at 22:00 TRT");
     await withPrior.close();
 
-    const WD = "2027-01-12";
+    const WD = "2026-01-12";
     const winterT = Array.from({ length: 14 }, (_, i) => new Date(Date.parse(WD + "T14:30:00Z") + i * 30 * 60000).toISOString());
     const LIVE_WINTER = { status: "ok", session: WD, fresh: { readAt: WD + "T20:59:00Z" },
       tide: { status: "ok", t: winterT, ncp: winterT.map((_, i) => 1e6 * (i + 2)), npp: winterT.map((_, i) => 5e5 * (i + 1)), net: winterT.map((_, i) => 5e5 * (i + 1)) },
