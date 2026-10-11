@@ -2222,6 +2222,15 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   read for two passes running counts the read as unanswered, through the same
   `answered: false` path a failed vendor call already takes, and the Worker's focus
   tick skips its write.
+  The production REST quote lag is now measured on one session: live run
+  36882159649 (2026-10-01, 18:15 to 22:55 TRT), 57 in-session passes over 122
+  stamped rows each, the per-pass median `qa` was 9 s at its median (8 to 16 s
+  across passes), the 90th percentile 12 s at its median (10 to 17), and the
+  per-pass maximum 25 s at its median (worst 57 s). After the close it is
+  minutes (a median of 53 s at 20:00 UTC [16:00 ET], 130 s at 20:25 UTC with a
+  90th percentile of 816 s). The REST path cannot beat the vendor's own
+  quote age of about 9 s, whatever the poll cadence; the socket `price:<T>`
+  stream is about 0.09 s.
 - **The landing ticker measures against the previous session.** `parseIndexQuote`
   (`shared/markets.js`) pairs each bar's timestamp with its close before it drops
   nulls, dates a bar by the exchange's own calendar (`meta.gmtoffset`), and takes as the
@@ -2718,6 +2727,29 @@ job that was already running when the Worker was promoted logs two `invalid_key`
   and `joins`). `tests/flows-ws-probe-contract.mjs` proves it against a fake
   vendor that speaks the protocol by hand, and holds the workflow's timeout to
   the computed duration.
+  **Results.** Run 37110295101 (Sat 2026-10-03, 11:36 to 11:39 TRT [08:36 to
+  08:39 UTC], sha e58f09e, 10 s a channel, all parts, market closed): the
+  handshake with `?token=` upgraded (101 in 114 ms); the bearer header was
+  refused 401 with the vendor's message `Token is missing` and the URL format
+  to use; an `Origin` header upgraded (101); two, three and four concurrent
+  connections opened and survived; 1, 10, 30 and 60 `price:<T>` joins on one
+  connection were all acknowledged; every channel acknowledged and delivered
+  0 messages, so an acknowledgement is not data. Run 37323676761 (Mon
+  2026-10-05, 17:18 to 17:25 TRT [10:18 ET], sha 6070e59, `only=channels,joins`,
+  30 s a channel, regular session; the runner's clock against each frame's own
+  stamp, so every lag carries clock skew): messages, bytes and lag p50/p95 in ms
+  were `price:SPY` 19, 1,610 B, 91/128; `option_trades:SPY` 2,360, 2.2 MB,
+  72/88; `net_flow:SPY` 30, 5,021 B, 91/115; `gex:SPY` 21, 13,724 B, 143/615;
+  `market_tide` 15, 3,315 B, 2,275/2,292; `interval_flow` 6,496, 5.9 MB,
+  1,327/1,919; `flow-alerts` 127, 192,919 B, 5,927/7,056; `news` 1 message,
+  7,902; `quotes:SPY` 52 messages with no stamp; `trading_halts` 0. Sixty
+  `price:<T>` joins on one connection delivered 303 messages and 27,693 B in 15 s
+  (91 B a message), lag 102/131 ms; 10 and 30 joins were 101/127 and 98/131.
+  `stock_screener` is not in the vendor's channel table and is a firehose: 51,125
+  messages and 301,153,494 B in 30 s (about 10 MB/s), which a Durable Object
+  cannot take, so it must never be joined. Still unrun in session: the negative
+  control, the `price`, `option_trades`, `lit_trades` and `off_lit_trades`
+  firehoses, and join counts above 60.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.
@@ -3494,8 +3526,9 @@ configuration (not an `[env]` of `wrangler.toml`, so the production file and its
 resolved bindings are untouched): the Worker `anilkaya-staging`, the same
 entrypoint, static bundle and compatibility date, a D1 database `iewt-staging`,
 its own `PULSE` Durable Object, the same six rate-limit bindings under their own
-namespaces (2101 to 2106) with production's limits, no Cron Trigger (the limit
-is five per account and production registers four), no route or custom domain
+namespaces (2101 to 2106) with production's limits, no Cron Trigger (a Free
+account may hold five and Workers Paid 250; production registers four and
+staging needs none), no route or custom domain
 (it serves at `workers.dev`), and no Workers AI binding, so staging cannot spend
 neurons. `FLOWS_LIVE_MODE` is `off` and no repository or workflow is named, so it
 can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;
