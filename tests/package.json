@@ -84,6 +84,7 @@
     "test:flows-link": "node flows-link.mjs",
     "test:flows-defer-render": "node flows-defer-render.mjs",
     "test:approval-frames": "node approval-frames.mjs",
+    "test:flows-home-composition": "node flows-home-composition.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
     "test:flows-permits": "node flows-permits-contract.mjs",
     "test:flows-overlay": "node flows-overlay-contract.mjs",
