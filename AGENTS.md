@@ -710,12 +710,27 @@ read: {
     unknown: [{ text, missing: [packet kind] }],
   },                                    // a cite is { id, label, display, asOf, kind, grade, ageS?, untrusted? }
   refused: [{ section, why, detail? }], // what the vet dropped from a model reply
-  held?: "floor" | "fingerprint" | "limited", retryAfterS?
+  held?: "floor" | "fingerprint" | "limited" | "previous", refreshing?, retryAfterS?
 }
 ```
 
 - `ready` is a stored model reading served as it was written: every cite resolved at
-  write time, so the prose and the chips describe the same figures. `generating` and
+  write time, so the prose and the chips describe the same figures. `held: "previous"`
+  is a `ready` reading written for an earlier dossier of the current `READING_VERSION`
+  (a version bump still retires every stored reading), served with its own
+  `generatedAt`, `fingerprint` and a `note` while a new one is written, cooling down
+  or refused: a failed regeneration never replaces a vetted reading. It is held only
+  while its dossier is less than two sessions behind the last close and the name's tier
+  is not `expired` (otherwise the deterministic reading of the current dossier is
+  served), and each cite is served at no better grade than the same fact now has (its
+  packet's grade, at most 1, when the fact is gone), at most 1 once a session has
+  closed since it was written. Its `note` says an earlier dossier, or, when the dossier
+  is the same and only the model signature moved, another model configuration; the
+  Neuron's held note makes the same distinction. `refreshing: true`
+  says a newer reading is being written (a claim younger than 90 seconds, a flight, or
+  this call started one), and the ticker page keeps polling, inside its bounded
+  schedule, while it is true; `refreshing: false` is a refusal cooling down or a store
+  fault, and nothing is coming. `generating` and
   `fallback` carry the deterministic reading built from the current dossier by
   `readingFallback` (templates over the same facts, every sentence cited, passing the
   same checks a model's wording must). `generating` means a model call is in flight or
@@ -753,7 +768,23 @@ read: {
   grounded in the cited profile text; an unknown entry names packets that really are not
   ok and carries no figure.
 - Storage and cost. One row per name in `flows_neuron`, scope `read:<T>` (no new table),
-  fingerprint = dossier fingerprint + the model signature + reading version. A reading
+  written only with a vetted reading; the claim, the cooldown guard and a refused or
+  failed attempt live on the sibling row `gen:read:<T>`, read concurrently with the
+  dossier assembly once the intraday floor has missed (one more row, no sequential trip;
+  never on a floor hit), and a vetted write releases the claim in the same batch. Until
+  `gen:read:<T>` exists, a non-vetted guard the previous code left on `read:<T>` is the
+  attempt. The Neuron's own row works the same way (`ticker:<T>` beside
+  `gen:ticker:<T>`, both read in the summary's one batch, an answer `held: "previous"`
+  with `refreshing` when a vetted output is kept). A kept Neuron output is held only
+  while it still holds on the current card: an engine row is re-vetted with
+  `vetEngineReply` and held only when nothing is refused and its verdict agrees with the
+  current tier, a legacy row with `vetIdeas` and `guardAnswer` over `guardFacts`; it then
+  carries the current card's deterministic summary (engine rows), the current engine's
+  grades, and grades capped at 1 when its fingerprint names an earlier card. Otherwise
+  the attempt row, the current engine's own answer, is served. The board summary writes its plain text over `board`
+  only when no model summary was written after the current brief, recording a refused or
+  failed attempt on `gen:board` otherwise. Fingerprint = dossier fingerprint +
+  the model signature + reading version. A reading
   younger than `AI_INTRADAY_REFRESH_MS` (45 minutes) is served without assembling the
   dossier (one row read); older, it is served if the fingerprint still matches and
   regenerated if not. The claim is `markNeuronGenerating` (90-second dead-generator
@@ -1461,6 +1492,11 @@ history, so no diff against a base can turn it red, but it does constrain the tr
 pages and sheets do not pass `bump-assets --check` (see "Asset versioning"), and when an unignored symlink to
 nothing would fail the asset upload. It needs Node 22.13 or newer for `node:sqlite`.
 
+`flows-neuron` was measured on 2026-10-05: about 3 s with no server and about 620 assertions. Its last block drives
+`worker.js` through the dossier harness's counting D1 over `node:sqlite` (the kept Neuron output, its re-vet
+against a new card, and the board summary's `gen:board` row), so it needs Node 22.13 or newer and runs under
+`--disable-warning=ExperimentalWarning` like the reads suite.
+
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds
 every packet from the nightly payload fixtures and from `tests/fixtures-dossier-vendor.json`, proves with a
 recording `Proxy` that each reducer reads only the fields `DOSSIER_READS` names and the probe list holds
@@ -1496,8 +1532,7 @@ scan of a reply cut at 3,000 characters costs 0.02 ms of CPU (a salvage with the
 Node floor beyond the suite's own. A reply whose text is malformed rather than cut (a token that is not JSON) keeps nothing, as
 `parseReading` finds it, and the scan records the offset where the grammar broke (`malformedAt`).
 `flows-reads-contract` runs the Neuron's own assertions with `FLOWS_READ_MODE=off` and filters the dossier's trips
-out of them; a final block prices the reading: a summary hit reads 3 rows (the Neuron's two and the reading's one),
-a miss 18 before the response and 30 with the background generation.
+out of them; a final block prices the reading: a summary hit reads 4 rows (the Neuron's card, its row and its claim row, and the reading's one), a miss 20 before the response and 32 with the background generation (the fake counts some of the background spend reads before the response; structurally a miss reads two rows more than before the claim rows, `gen:ticker:<T>` and `gen:read:<T>`, and no extra sequential trip).
 
 `flows-starts-contract` was measured on 2026-09-29: about 4 s with no server. It
 spawns the pipeline a handful of times as a child process, against loopback HTTP

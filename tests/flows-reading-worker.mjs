@@ -82,6 +82,7 @@ const later = async (f, ai, iso, extra = {}) => {
 };
 const dropHot = () => { for (const k of [...cache.store.keys()]) if (k.includes("/assembled/")) cache.store.delete(k); };
 const readRow = (f, t = T) => f.db.prepare("SELECT scope, fingerprint, guard, llm, model, generated_at, ideas, summary FROM flows_neuron WHERE scope = ?").get("read:" + t);
+const genRow = (f, t = T) => f.db.prepare("SELECT scope, fingerprint, guard, llm, model, generated_at, ideas, summary FROM flows_neuron WHERE scope = ?").get("gen:read:" + t);
 const summary = async (get, t = T) => {
   const r = await get("/api/flows/summary?t=" + t);
   await r.settle();
@@ -131,6 +132,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const row = readRow(f);
   ok(row && row.llm === 1 && row.guard === null && row.model === MODEL, "stored in flows_neuron under scope read:EXMP, llm 1, no guard");
   eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope LIKE 'read:%'").get().n, 1, "one row for the name: no new table");
+  ok(genRow(f) && genRow(f).guard === null && genRow(f).llm === 0 && genRow(f).generated_at === row.generated_at, "the claim sits beside it under scope gen:read:EXMP, in the same table, released when the vetted reading landed");
   eq(row.fingerprint, dossier.fingerprint + "|" + RW.readSignature({ ...AI_ENV }), "its fingerprint is the dossier's with the model signature");
   const body = JSON.parse(row.ideas);
   eq(body.kind, "reading", "the row holds the shaped reading");
@@ -198,8 +200,10 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
   const get2 = await later(f, ai, "2026-10-02T15:20:00.000Z");
   const behind = await get2("/api/flows/summary?t=" + T);
-  eq(behind.body.read.status, "generating", "past the floor, with the dossier moved: the deterministic reading at once, status generating");
-  eq(behind.body.read.generated, false, "not generated");
+  eq(behind.body.read.status, "ready", "past the floor, with the dossier moved: the previous model reading is kept while the new one is written");
+  eq(behind.body.read.held, "previous", "held previous");
+  eq(behind.body.read.generatedAt, first.generated_at, "with its own generatedAt");
+  eq(behind.body.read.fingerprint === stale.body.read.fingerprint, true, "and its own dossier fingerprint");
   await behind.settle();
   eq(ai.log.reads.length, 2, "and one more model call");
   const row = readRow(f);
@@ -207,6 +211,192 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const after = await summary(get2);
   eq(after.body.read.status, "ready", "and is served");
   setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  const bad = { ...GOOD, now: { text: "The last price is $127.40, up 14.5% in a week.", cites: ["price.last"] } };
+  let reply = GOOD;
+  const ai = rig(() => reply);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  ok(kept && kept.llm === 1 && kept.guard === null, "KEEP THE LAST GOOD READING: a vetted reading is stored");
+  f.live("live:news", {
+    v: 2, status: "ok", sessionDate: F.TODAY, rows: [
+      { headline: T + " is added to a major index", source: "Reuters", createdAt: "2026-10-02T14:20:00.000Z", createdAtMs: Date.parse("2026-10-02T14:20:00.000Z"), major: true, sentiment: "positive", tickers: [T], tags: [] },
+      ...F.liveNewsPayload().rows,
+    ],
+  }, Date.parse("2026-10-02T14:25:00.000Z"), F.TODAY);
+  reply = bad;
+  const get2 = await later(f, ai, "2026-10-02T15:20:00.000Z");
+  const during = await get2("/api/flows/summary?t=" + T);
+  eq(during.body.read.status, "ready", "while the dossier has moved and a new reading is being written, the reader is served the last good one");
+  eq(during.body.read.held, "previous", "held previous");
+  eq(during.body.read.generated, true, "model wording");
+  eq(during.body.read.refreshing, true, "and refreshing: true, because this call started the new reading, so the page keeps polling for it");
+  await during.settle();
+  eq(ai.log.reads.length, 2, "the new dossier was put to the model once");
+  const attempt = genRow(f);
+  ok(attempt && attempt.guard === "read:refused" && attempt.llm === 0 && attempt.fingerprint !== kept.fingerprint, "and its refused reply is recorded beside the reading, under gen:read:EXMP: " + (attempt && attempt.guard));
+  const still = readRow(f);
+  ok(still.fingerprint === kept.fingerprint && still.generated_at === kept.generated_at && still.ideas === kept.ideas && still.llm === 1,
+    "THE REFUSAL DOES NOT ERASE THE GOOD READING: read:EXMP is the row it was before the attempt");
+  const after = await summary(get2);
+  const r = after.body.read;
+  eq(r.status, "ready", "AFTER A REFUSED REGENERATION the summary serves the previous model reading");
+  eq(r.held, "previous", "with held previous");
+  eq(r.refreshing, false, "and refreshing: false, because the refusal cools down and no reading is coming");
+  eq(r.generatedAt, kept.generated_at, "and its own generatedAt");
+  eq(r.label, "Model wording", "labelled as model wording");
+  eq(r.sections.now.text, GOOD.now.text, "the text the checks passed, unchanged");
+  eq(r.fingerprint, JSON.parse(kept.ideas).shape.fingerprint, "carrying the fingerprint of the dossier it was written from");
+  ok(/earlier dossier of EXMP/.test(r.note), "and a note says it was written for an earlier dossier: " + r.note);
+  for (let i = 0; i < 3; i++) eq((await summary(get2)).body.read.held, "previous", "a later call inside the cooldown is the previous reading too (" + i + ")");
+  eq(ai.log.reads.length, 2, "and asks no model inside the cooldown");
+  reply = GOOD;
+  const get3 = await later(f, ai, "2026-10-02T15:41:00.000Z");
+  const retry = await get3("/api/flows/summary?t=" + T);
+  eq(retry.body.read.held, "previous", "past the cooldown the model is asked again, the previous reading still served meanwhile");
+  eq(retry.body.read.refreshing, true, "refreshing again");
+  await retry.settle();
+  eq(ai.log.reads.length, 3, "one more call");
+  const fresh = (await summary(get3)).body.read;
+  ok(fresh.status === "ready" && fresh.held !== "previous" && fresh.generatedAt !== kept.generated_at, "and the new vetted reading replaces the old one (" + fresh.held + ", " + fresh.generatedAt + ")");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  let reply = GOOD;
+  const ai = rig(() => reply);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  const shape = JSON.parse(kept.ideas).shape;
+  const cites = (r) => [r.sections.identity, r.sections.now, ...r.sections.drivers, ...r.sections.tensions, ...r.sections.watch].filter(Boolean).flatMap((x) => x.cites);
+  ok(shape.session === F.SESSION && cites(shape).some((c) => c.kind === "options" && c.grade >= 2),
+    "A HELD READING AND THE SESSIONS: (setup) a vetted reading of the " + F.SESSION + " card cites options facts at grade 2 or better");
+  reply = "I cannot write that.";
+
+  const get2 = await later(f, ai, "2026-10-05T15:20:00.000Z");
+  const probe = (await get2("/api/flows/dossier?t=" + T)).body.dossier;
+  eq(probe.packets.options.grade, 1, "one session behind, the current dossier grades the options packet 1");
+  await summary(get2);
+  const one = (await summary(get2)).body.read;
+  ok(one.status === "ready" && one.held === "previous", "ONE SESSION BEHIND the earlier reading is still held after the refusal (" + one.status + ", " + one.held + ")");
+  ok(cites(one).length > 0 && cites(one).every((c) => c.grade <= 1),
+    "but every cite is served at grade 1 or less, as the dossier caps a source one session behind (" + cites(one).map((c) => c.id + ":" + c.grade).join(", ") + ")");
+  eq(one.sections.now.text, GOOD.now.text, "with the text the checks passed, unchanged");
+  ok(/earlier dossier of EXMP/.test(one.note), "and the earlier-dossier note: " + one.note);
+  const nowHeld = R.heldTags(probe).map((t) => t.code);
+  const wrote = shape.tags.map((t) => t.code);
+  ok(wrote.some((c) => !nowHeld.includes(c)), "THE TAGS OF A HELD READING: (setup) the stored reading shows a tag the current dossier no longer holds (stored " + wrote.join(", ") + "; held now " + nowHeld.join(", ") + ")");
+  ok(one.tags.every((t) => nowHeld.includes(t.code)), "the held reading shows only tags the current dossier holds (" + one.tags.map((t) => t.code).join(", ") + ")");
+  const heldNow = new Map(R.heldTags(probe).map((t) => [t.code, t]));
+  ok(one.tags.every((t) => t.sentence === heldNow.get(t.code).sentence && t.evidence.join() === heldNow.get(t.code).evidence.join()), "and each carries today's sentence and evidence");
+  ok(one.sections.drivers.every((d) => d.tag === undefined || nowHeld.includes(d.tag)), "and no driver is marked with a tag that no longer holds");
+
+  const get3 = await later(f, ai, "2026-10-07T15:20:00.000Z");
+  const first = await summary(get3);
+  eq(first.body.tier, "expired", "THREE SESSIONS BEHIND the Neuron's tier is expired");
+  const three = (await summary(get3)).body.read;
+  ok(three.held !== "previous" && three.generated === false, "and the earlier reading is NOT held: the deterministic reading of the current dossier is served (" + three.status + ", " + three.held + ")");
+  ok(!cites(three).some((c) => c.kind === "options"), "which cites no options fact, because the expired card's packet is withheld");
+  ok(cites(first.body.read).every((c) => c.kind !== "options") && first.body.read.held !== "previous", "nor does the call that started the new attempt");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  let reply = GOOD;
+  const ai = rig(() => reply);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  const wrote = JSON.parse(kept.ideas).shape;
+  const cites = (r) => [r.sections.identity, r.sections.now, ...r.sections.drivers, ...r.sections.tensions, ...r.sections.watch].filter(Boolean).flatMap((x) => x.cites);
+  const byId = (r) => new Map(cites(r).map((c) => [c.id, c]));
+  const before = byId(wrote);
+  ok(["price.last", "news.count24h", "news.h1", "options.state"].every((id) => before.has(id) && before.get(id).grade >= 3),
+    "A HELD READING AND ITS OWN CITES: (setup) the stored reading cites price, news and options facts at grade 3");
+  reply = "I cannot write that.";
+  stub.state.status.set("quote", 500);
+  stub.state.bodies.set("news", { data: [] });
+  const get2 = await later(f, ai, "2026-10-02T15:20:00.000Z");
+  const probe = (await get2("/api/flows/dossier?t=" + T)).body.dossier;
+  await summary(get2);
+  const one = (await summary(get2)).body.read;
+  eq(one.held, "previous", "the same session, a refused regeneration: the previous reading is held");
+  const after = byId(one);
+  const now = (id) => { const f = probe.packets[id.split(".")[0]].facts.find((x) => id === id.split(".")[0] + "." + x.k); return f ? f.grade : null; };
+  eq(now("news.count24h"), 2, "(setup) the news count is now graded 2 in the current dossier, 3 when the reading was written (" + before.get("news.count24h").grade + ")");
+  eq(after.get("news.count24h").grade, 2, "THE PER-FACT CAP: a cite is served at the grade the same fact has now, not the grade it had when written");
+  const idx = R.readIndex(probe);
+  ok(cites(one).length > 0 && cites(one).every((c) => { const f = idx.get(c.id); return c.grade <= (f && !f.withheld && f.usable ? f.grade : 1); }),
+    "and no cite of the held reading is better than the same fact in the current dossier, or 1 when it is gone");
+  eq(after.get("price.last").grade, before.get("price.last").grade, "while a cite into an unchanged packet keeps its write-time grade (" + after.get("price.last").grade + ")");
+  eq(after.get("options.state").grade, before.get("options.state").grade, "and so does the options state (" + after.get("options.state").grade + ")");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  let reply = GOOD;
+  const ai = rig(() => reply);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  reply = "I cannot write that.";
+  dropHot();
+  const get2 = await client(f.D1, { ...AI_ENV, FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.1-8b-instruct-fast", AI: ai });
+  await summary(get2);
+  const r = (await summary(get2)).body.read;
+  eq(ai.log.reads.length, 2, "A NEW MODEL CONFIGURATION ON THE SAME DOSSIER is asked once");
+  ok(r.held === "previous" && r.generatedAt === kept.generated_at, "and after its refusal the earlier reading is held (" + r.held + ")");
+  eq(r.fingerprint, JSON.parse(kept.ideas).shape.fingerprint, "(the dossier is the one it was written for)");
+  ok(/another model configuration/.test(r.note) && !/earlier dossier/.test(r.note), "with a note that says another model configuration wrote it, not that the dossier changed: " + r.note);
+}
+
+{
+  const f = world();
+  const bad = { ...GOOD, now: { text: "The last price is $127.40, up 14.5% in a week.", cites: ["price.last"] } };
+  let reply = GOOD;
+  const ai = rig(() => reply);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  const suffix = "|r" + R.READING_VERSION;
+  ok(kept && kept.llm === 1 && kept.fingerprint.endsWith(suffix), "A READING OF ANOTHER VERSION: (setup) a vetted reading is stored, its fingerprint ending in " + suffix);
+  f.db.prepare("UPDATE flows_neuron SET fingerprint = ? WHERE scope = 'read:' || ?").run(kept.fingerprint.slice(0, -suffix.length) + "|r" + (R.READING_VERSION - 1), T);
+  reply = bad;
+  const get2 = await later(f, ai, "2026-10-02T15:20:00.000Z");
+  const during = await get2("/api/flows/summary?t=" + T);
+  ok(during.body.read.status === "generating" && during.body.read.held !== "previous" && during.body.read.generated === false,
+    "a stored reading written under an earlier READING_VERSION is not held while the current version is written: the deterministic reading is served (" + during.body.read.status + ")");
+  await during.settle();
+  eq(ai.log.reads.length, 2, "the model is asked under the current version");
+  const after = (await summary(get2)).body.read;
+  ok(after.status === "fallback" && after.why === "cooldown" && after.held !== "previous",
+    "and after a refusal the version bump still retires the old reading: fallback, cooldown, nothing held (" + after.status + ", " + after.why + ")");
+  setNow(F.NOW_ISO);
+}
+
+{
+  const f = world();
+  const ai = rig(() => GOOD);
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/dossier?t=" + T);
+  dropHot();
+  f.db.prepare("INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES (?, 6, 'legacy|x', '', ?, 0, ?, 'read:refused', ?)")
+    .run("read:" + T, JSON.stringify({ v: 1, kind: "reading", shape: null, refused: [] }), MODEL, new Date(Date.now() - 60 * 1000).toISOString());
+  const r = (await summary(get)).body.read;
+  ok(r.status === "fallback" && r.why === "cooldown" && r.retryAfterS > 0,
+    "A LEGACY REFUSAL ON read:EXMP, written before the claim row existed and with no gen:read:EXMP, is still the attempt the cooldown reads (" + r.status + ", " + r.why + ")");
+  eq(ai.log.reads.length, 0, "so the deploy does not buy an extra model call for a name refused just before it");
+  f.db.prepare("UPDATE flows_neuron SET guard = 'generating', generated_at = ? WHERE scope = 'read:' || ?").run(new Date(Date.now() - 20 * 1000).toISOString(), T);
+  const g = (await summary(get)).body.read;
+  ok(g.status === "generating" && ai.log.reads.length === 0, "and a legacy generating marker on read:EXMP younger than 90 seconds is respected: generating, no second call (" + g.status + ")");
 }
 
 {
@@ -234,8 +424,9 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const first = await summary(get);
   eq(first.body.read.status, "generating", "REFUSAL: the first call is generating");
-  const row = readRow(f);
+  const row = genRow(f);
   ok(row.guard === "read:refused" && row.llm === 0, "the refused reply is recorded as a refusal: " + row.guard);
+  eq(readRow(f), undefined, "beside the reading row, which only a vetted reading writes");
   ok(JSON.parse(row.ideas).refused.some((x) => x.why === "invented"), "with the reason");
   const refusedRows = counted(f).filter((r) => r.surface === "read");
   same(refusedRows.map((r) => [r.outcome, r.reason, r.n]), [["refused", "read:refused", 1]], "THE COUNTERS: the refusal is counted as refused with its reason, once");
@@ -279,7 +470,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const ai = rig(() => "I am sorry, but I cannot produce JSON today.");
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);
-  eq(readRow(f).guard, "read:unparsable", "PROSE INSTEAD OF JSON is recorded as unparsable");
+  eq(genRow(f).guard, "read:unparsable", "PROSE INSTEAD OF JSON is recorded as unparsable");
   same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["unparsable", 1]], "and counted as unparsable");
   const next = await summary(get);
   ok(next.body.read.status === "fallback" && /could not be read/.test(next.body.read.provenance), "and cooled down with the reason: " + next.body.read.provenance);
@@ -290,7 +481,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const ai = rig(() => JSON.stringify({ ...GOOD, now: { text: "x ".repeat(5000), cites: ["price.last"] } }));
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await summary(get);
-  eq(readRow(f).guard, "read:overlong", "OVERSIZE OUTPUT is recorded before it is read");
+  eq(genRow(f).guard, "read:overlong", "OVERSIZE OUTPUT is recorded before it is read");
   same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["overlong", 1]], "and counted as overlong");
   const next = await summary(get);
   ok(next.body.read.status === "fallback" && /longer than the limit/.test(next.body.read.provenance), "and cools down with the reason: " + next.body.read.provenance);
@@ -330,7 +521,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(first.body.read.status, "generating", "BUDGET: the first call is generating");
   eq(ai.log.reads.length, 0, "the cap refuses the call before the model is reached");
   eq(ai.log.other.length, 0, "and the Neuron's own call, through meteredAi in worker.js, is refused by the same cap");
-  const row = readRow(f);
+  const row = genRow(f);
   eq(row.guard, "unreachable:budget", "and the row records the budget refusal: " + row.guard);
   const next = await summary(get);
   eq(next.body.read.status, "fallback", "the deterministic reading stands");
@@ -351,7 +542,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   ok(Math.ceil(spent * 36400 / 1e6) > 22500 && Math.ceil(spent * 36400 / 1e6) < 30000, "SHARE OF THE DAY'S CAP: the day has spent " + Math.ceil(spent * 36400 / 1e6) + " of 30,000 neurons, past the reading's 75% and short of the cap");
   const r = await summary(get);
   eq(ai.log.reads.length, 0, "the reading's model call is refused by the meter");
-  eq(readRow(f).guard, "unreachable:budget", "and recorded as a budget refusal");
+  eq(genRow(f).guard, "unreachable:budget", "and recorded as a budget refusal");
   same(counted(f).filter((r) => r.surface === "read").map((r) => [r.outcome, r.n]), [["budget", 1]], "and counted as budget under the reading, though the model was never asked");
   eq(RW.READ_BUDGET_SHARE, 0.75, "the reading may spend three quarters of the cap, leaving a quarter for the Neuron and the Ask box");
   ok(r.body.read.status === "generating", "the page is told generating on the first call, then fallback");
@@ -381,7 +572,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   ok(calls.every((c) => c.body.read.status === "generating"), "SINGLE-FLIGHT: three concurrent calls all see generating");
   await new Promise((resolve) => setTimeout(resolve, 30));
   eq(ai.log.reads.length, 1, "and one model call is in flight");
-  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope = 'read:EXMP' AND guard = 'generating'").get().n, 1, "one generating marker");
+  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope = 'gen:read:EXMP' AND guard = 'generating'").get().n, 1, "one generating marker");
   const during = await get("/api/flows/summary?t=" + T);
   eq(during.body.read.status, "generating", "a fourth call during the flight is generating too");
   eq(ai.log.reads.length, 1, "with no second call");
@@ -397,12 +588,12 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const ai = rig();
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   await get("/api/flows/meta");
-  f.db.prepare("INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('read:EXMP', 6, 'other|x', '', '[]', 0, NULL, 'generating', ?)")
+  f.db.prepare("INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) VALUES ('gen:read:EXMP', 6, 'other|x', '', '[]', 0, NULL, 'generating', ?)")
     .run(new Date(Date.now() - 20000).toISOString());
   const live = await summary(get);
   eq(live.body.read.status, "generating", "ANOTHER ISOLATE'S MARKER younger than ninety seconds: generating, not taken over");
   eq(ai.log.reads.length, 0, "no call");
-  f.db.prepare("UPDATE flows_neuron SET generated_at = ? WHERE scope = 'read:EXMP'").run(new Date(Date.now() - 200000).toISOString());
+  f.db.prepare("UPDATE flows_neuron SET generated_at = ? WHERE scope = 'gen:read:EXMP'").run(new Date(Date.now() - 200000).toISOString());
   await summary(get);
   eq(ai.log.reads.length, 1, "a marker older than ninety seconds is a dead generator's and is taken over");
 }
@@ -437,7 +628,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(r.body.read.status, "fallback", "NO MODEL CONFIGURED: the deterministic reading");
   eq(r.body.read.why, "no-model", "why no-model");
   ok(/No model is configured/.test(r.body.read.provenance), "and says so");
-  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope LIKE 'read:%'").get().n, 0, "nothing is written");
+  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope LIKE 'read:%' OR scope LIKE 'gen:read:%'").get().n, 0, "nothing is written");
 }
 
 {
@@ -477,7 +668,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(r.body.read.generated, false, "not generated");
   ok(/Nothing is held for QQQZ/.test(r.body.read.note), "with the reason: " + r.body.read.note);
   eq(ai.log.reads.length, 0, "and no model is asked about nothing");
-  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope = 'read:QQQZ'").get().n, 0, "and nothing is written");
+  eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope IN ('read:QQQZ', 'gen:read:QQQZ')").get().n, 0, "and nothing is written");
 }
 
 {
@@ -696,7 +887,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   };
   const hit = await per("/api/flows/summary?t=" + T);
   const hot = await per("/api/flows/dossier?t=" + T);
-  const miss = await per("/api/flows/summary?t=" + T, 10, () => { f.db.prepare("DELETE FROM flows_neuron WHERE scope = 'read:EXMP'").run(); });
+  const miss = await per("/api/flows/summary?t=" + T, 10, () => { f.db.prepare("DELETE FROM flows_neuron WHERE scope IN ('read:EXMP', 'gen:read:EXMP')").run(); });
   ok(hit < 25 && miss < 60, "CPU of a summary call on the fake: stored reading " + hit.toFixed(2) + " ms, no stored reading " + miss.toFixed(2) + " ms (the dossier route from its 30-second copy: " + hot.toFixed(2) + " ms)");
   console.log("  reading CPU per summary request: hit " + hit.toFixed(2) + " ms, miss " + miss.toFixed(2) + " ms, dossier route from its copy " + hot.toFixed(2) + " ms");
 }

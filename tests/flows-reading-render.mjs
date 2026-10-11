@@ -62,6 +62,7 @@ async function mount(page, read_, o = {}) {
   const neuron = { status: "quiet", scope: T, summary: null, ideas: [], tier: "family", code: null, why: "x", ...(o.neuron || {}), read: read_ };
   stubs.calls = [];
   stubs.queue = (o.queue || []).slice();
+  stubs.neurons = (o.neurons || []).slice();
   const api = {
     card, summary: neuron, "card-x": companion(), hist: companion(),
     tape: { status: "pending" }, meta: { status: "pending" }, events: { status: "pending", rows: [] },
@@ -80,7 +81,9 @@ async function mount(page, read_, o = {}) {
       if (key === "summary") {
         stubs.calls.push(Date.now());
         const next = stubs.queue.length ? stubs.queue.shift() : null;
-        return route.fulfill({ contentType: "application/json", body: JSON.stringify(next ? { ...neuron, read: next } : neuron) });
+        const nextNeuron = stubs.neurons.length ? stubs.neurons.shift() : null;
+        const base = nextNeuron ? { ...neuron, ...nextNeuron } : neuron;
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify(next ? { ...base, read: next } : base) });
       }
       const body = key === "board" ? { status: "pending", rows: [] } : api[key] === undefined ? { status: "pending" } : api[key];
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
@@ -224,6 +227,27 @@ try {
   b = await block(page);
   ok(b.text.includes("Model wording") && b.text.includes("56 neurons") && b.generated === "1", "the swapped block is the model's, with its cost");
   eq(await page.locator("#ftVerdict .ft-read").count(), 1, "and there is still exactly one reading block");
+
+  const LATER = clone(READ);
+  LATER.sections.now = { ...LATER.sections.now, text: "The last price is $128.10, +1.82% from the previous close." };
+  LATER.generatedAt = "2026-10-02T15:31:00.000Z";
+  const HELD = { ...clone(READ), held: "previous", refreshing: true, note: "This reading was written for an earlier dossier of " + T + " and is kept until a reading of the current one is written and passes the checks." };
+  await mount(page, HELD, { queue: [HELD, LATER] });
+  b = await block(page);
+  ok(b.status === "ready" && b.text.includes("The last price is $127.40"), "A HELD PREVIOUS READING that is refreshing is drawn as it was written");
+  const swapped = await page.waitForFunction(() => (document.querySelector("#ftVerdict .ft-read")?.innerText || "").includes("$128.10"), null, { timeout: 20000 }).then(() => true, () => false);
+  ok(swapped, "THE PAGE KEEPS POLLING while held is previous and refreshing is true, and swaps in the new reading when it lands (" + stubs.calls.length + " summary requests)");
+  eq(await page.locator("#ftVerdict .ft-read").count(), 1, "still exactly one reading block");
+
+  await mount(page, { ...HELD, refreshing: false });
+  await page.waitForTimeout(5000);
+  eq(stubs.calls.length, 1, "while a held reading that is NOT refreshing (a refusal cooling down) is not polled: one summary request in five seconds");
+
+  const neuronOld = { status: "ok", tier: "priced", summary: "The earlier card's reading of " + T + ".", llm: true, model: "@cf/zai-org/glm-4.7-flash", generatedAt: "2026-10-01T15:00:00.000Z" };
+  await mount(page, READ, { neuron: { ...neuronOld, held: "previous", refreshing: true }, neurons: [{ ...neuronOld, held: "previous", refreshing: true }, { ...neuronOld, summary: "The current card's reading of " + T + ".", generatedAt: "2026-10-02T15:00:00.000Z", held: undefined, refreshing: undefined }] });
+  ok((await page.locator("#ftVerdictT").textContent()).includes("earlier card"), "A HELD PREVIOUS NEURON OUTPUT that is refreshing is drawn");
+  const neuronSwapped = await page.waitForFunction(() => (document.getElementById("ftVerdictT")?.textContent || "").includes("current card"), null, { timeout: 25000 }).then(() => true, () => false);
+  ok(neuronSwapped, "THE PAGE POLLS THE NEURON while it is held and refreshing, and swaps in the new output when it lands (" + stubs.calls.length + " summary requests)");
 
   await mount(page, BOXED);
   b = await block(page);
