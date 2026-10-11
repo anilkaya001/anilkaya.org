@@ -1,1 +1,1 @@
-{"name": "flows-home-below-render", "class": "C", "group": "shard", "medianS": 16}
+{"name": "flows-home-below-render", "class": "N", "group": "shard", "timing": false, "medianS": 16, "shard": 2, "files": ["flows-home-below-render.mjs"], "covers": ["assets/js/flows-overview-below.js","assets/js/flows-overview.js","scripts/render-preview.fixtures.json"]}

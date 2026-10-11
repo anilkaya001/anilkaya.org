@@ -1,1 +1,1 @@
-{"name": "approval-frames", "class": "C", "group": "shard", "medianS": 10}
+{"name": "approval-frames", "class": "N", "group": "shard", "timing": false, "medianS": 10, "shard": 5, "files": ["approval-frames.mjs"], "covers": ["index.html","scripts/render-preview.mjs"]}

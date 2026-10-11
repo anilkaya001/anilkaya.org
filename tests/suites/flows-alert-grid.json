@@ -1,1 +1,1 @@
-{"name": "flows-alert-grid", "class": "N", "group": "shard", "medianS": 120}
+{"name": "flows-alert-grid", "class": "N", "group": "shard", "timing": false, "medianS": 120, "shard": 3, "files": ["flows-alert-grid.mjs"], "covers": ["shared/flows-garch.js","tests/fixtures-truth.json"]}
