@@ -176,8 +176,7 @@ async function pruneLoginFailures(env, now) {
     ]);
     return Number(results[1] && results[1].meta && results[1].meta.changes) || 0;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/no such table/i.test(message)) console.error(JSON.stringify({ message: "login failure prune failed", error: message }));
+    if (!/no such table/i.test(errorText(error))) logFailure("error", "login failure prune failed", {}, error);
     return 0;
   }
 }
@@ -194,8 +193,7 @@ async function pruneAttemptLedgers(env, now) {
       ]);
       removed += Number(results[1] && results[1].meta && results[1].meta.changes) || 0;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/no such table/i.test(message)) console.error(JSON.stringify({ message: "attempt ledger prune failed", table, error: message }));
+      if (!/no such table/i.test(errorText(error))) logFailure("error", "attempt ledger prune failed", { table }, error);
     }
   }
   return removed;
