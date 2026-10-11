@@ -1,5 +1,8 @@
 import { TICKER_RE } from "../shared/flows-live.js";
 import { errorEntry } from "./errors.js";
+import { errorText } from "../shared/flows-log.js";
+
+export { errorText };
 
 export const MAX_JSON_BYTES = 16 * 1024;
 
@@ -18,8 +21,6 @@ export class HttpError extends Error {
     return new HttpError(known[0], code, message === undefined ? known[1] : message, headers, details);
   }
 }
-
-export const errorText = (error) => (error instanceof Error ? error.message : String(error));
 
 export const json = (value, status = 200, headers) => {
   const out = new Headers(headers);

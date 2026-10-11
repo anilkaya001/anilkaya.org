@@ -290,12 +290,13 @@ try {
   console.error = real.error;
   console.warn = real.warn;
 }
+const head = (event, level, route, extra, error) => JSON.stringify({ event, message: event, level, route, code: null, ...extra, error });
 eq(logged, [
-  ["error", JSON.stringify({ message: "neuron failed", ticker: "NVDA", error: "boom" })],
-  ["warn", JSON.stringify({ message: "flows schema bootstrap failed", error: "boom" })],
-  ["error", JSON.stringify({ message: "request failed", method: "GET", path: "/api/x", error: "plain" })],
-  ["warn", JSON.stringify({ message: "ai spend not recorded", model: "m", error: "undefined" })],
-], "each failure log keeps its legacy key order and text");
+  ["error", head("neuron failed", "error", null, { ticker: "NVDA" }, "boom")],
+  ["warn", head("flows schema bootstrap failed", "warn", null, {}, "boom")],
+  ["error", head("request failed", "error", "/api/x", { method: "GET", path: "/api/x" }, "plain")],
+  ["warn", head("ai spend not recorded", "warn", null, { model: "m" }, null)],
+], "each failure log is one line in the one shape: event, its message alias, level, route, code, the fields, error");
 expect(src, /logFailure\("(?:error|warn)", /, { min: 7, why: "the seven failure sites use the log module" });
 
 console.log(`server-kernel: ${checks} checks`);

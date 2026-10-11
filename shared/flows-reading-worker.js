@@ -4,6 +4,7 @@ import {
   parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS,
 } from "./flows-reading.js";
 import { KINDS } from "./flows-dossier.js";
+import { emitFailure } from "./flows-log.js";
 
 export const READ_SCOPE = "read:";
 export const READ_GENERATING_MS = 90 * 1000;
@@ -251,7 +252,7 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
 
   const work = generate({ env, deps, ticker, dossier, tags, fingerprint, startedAt: marked.startedAt, chain })
     .catch((error) => {
-      console.error(JSON.stringify({ message: "reading failed", ticker, error: error instanceof Error ? error.message : String(error) }));
+      emitFailure(console, "error", "reading failed", { ticker }, error);
       return deps.write(scope, fingerprint, "", { v: 1, kind: "reading", shape: null, refused: [] }, false, chain[0], "unreachable:unreachable", marked.startedAt).catch(() => {});
     })
     .finally(() => { if (flights.get(ticker) === work) flights.delete(ticker); });
@@ -264,7 +265,7 @@ export async function readingSafe(env, ctx, ticker, deps, opts) {
   try {
     return await readingFor(env, ctx, ticker, deps, opts);
   } catch (error) {
-    console.error(JSON.stringify({ message: "reading unavailable", ticker, error: error instanceof Error ? error.message : String(error) }));
+    emitFailure(console, "error", "reading unavailable", { ticker }, error);
     return absentShape(ticker, { status: "unavailable", why: "error", note: "The reading for " + ticker + " could not be built.",
       provenance: "Deterministic reading: it could not be built, which is a fault on this side and not a fact about the name." });
   }
