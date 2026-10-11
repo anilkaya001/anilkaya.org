@@ -4,42 +4,32 @@
 .fn-fresh { min-height: 32px; padding: 0 var(--sp-3); font: var(--t-caption); }
 .fn-fresh .fx-fresh-l { min-width: 0; }
 .fn-host { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
-.fn-host.is-slot { min-height: 1197px; }
-@container mod (max-width: 1518px) { .fn-host.is-slot { min-height: 1193px; } }
-@container mod (max-width: 1477px) { .fn-host.is-slot { min-height: 1200px; } }
-@container mod (max-width: 1441px) { .fn-host.is-slot { min-height: 1118px; } }
-@container mod (max-width: 1237px) { .fn-host.is-slot { min-height: 1099px; } }
-@container mod (max-width: 1003px) { .fn-host.is-slot { min-height: 1132px; } }
-@container mod (max-width: 896px) { .fn-host.is-slot { min-height: 1171px; } }
-@container mod (max-width: 743px) { .fn-host.is-slot { min-height: 1153px; } }
-@container mod (max-width: 670px) { .fn-host.is-slot { min-height: 1134px; } }
-@container mod (max-width: 665px) { .fn-host.is-slot { min-height: 1156px; } }
-@container mod (max-width: 623px) { .fn-host.is-slot { min-height: 1037px; } }
-@container mod (max-width: 539px) { .fn-host.is-slot { min-height: 1149px; } }
-@container mod (max-width: 491px) { .fn-host.is-slot { min-height: 1166px; } }
-@container mod (max-width: 437px) { .fn-host.is-slot { min-height: 1188px; } }
-@container mod (max-width: 395px) { .fn-host.is-slot { min-height: 1224px; } }
-@container mod (max-width: 389px) { .fn-host.is-slot { min-height: 1241px; } }
-@container mod (max-width: 329px) { .fn-host.is-slot { min-height: 1258px; } }
-@container mod (max-width: 287px) { .fn-host.is-slot { min-height: 1291px; } }
-@container mod (max-width: 263px) { .fn-host.is-slot { min-height: 1332px; } }
-@container mod (max-width: 251px) { .fn-host.is-slot { min-height: 1362px; } }
-.fn-host.is-quiet { min-height: 788px; }
-@container mod (max-width: 1280px) { .fn-host.is-quiet { min-height: 705px; } }
-@container mod (max-width: 1223px) { .fn-host.is-quiet { min-height: 681px; } }
-@container mod (max-width: 793px) { .fn-host.is-quiet { min-height: 697px; } }
-@container mod (max-width: 669px) { .fn-host.is-quiet { min-height: 719px; } }
-@container mod (max-width: 623px) { .fn-host.is-quiet { min-height: 462px; } }
-@container mod (max-width: 472px) { .fn-host.is-quiet { min-height: 479px; } }
-@container mod (max-width: 441px) { .fn-host.is-quiet { min-height: 501px; } }
-@container mod (max-width: 397px) { .fn-host.is-quiet { min-height: 516px; } }
-@container mod (max-width: 368px) { .fn-host.is-quiet { min-height: 534px; } }
-@container mod (max-width: 298px) { .fn-host.is-quiet { min-height: 551px; } }
-@container mod (max-width: 275px) { .fn-host.is-quiet { min-height: 567px; } }
-@container mod (max-width: 260px) { .fn-host.is-quiet { min-height: 584px; } }
-@container mod (max-width: 217px) { .fn-host.is-quiet { min-height: 617px; } }
-@container mod (max-width: 212px) { .fn-host.is-quiet { min-height: 639px; } }
-@container mod (max-width: 194px) { .fn-host.is-quiet { min-height: 656px; } }
+.fn-host.is-slot { min-height: 1219px; }
+@container mod (max-width: 1453px) { .fn-host.is-slot { min-height: 1190px; } }
+@container mod (max-width: 1283px) { .fn-host.is-slot { min-height: 1118px; } }
+@container mod (max-width: 1085px) { .fn-host.is-slot { min-height: 1084px; } }
+@container mod (max-width: 997px) { .fn-host.is-slot { min-height: 1156px; } }
+@container mod (max-width: 793px) { .fn-host.is-slot { min-height: 1175px; } }
+@container mod (max-width: 661px) { .fn-host.is-slot { min-height: 1146px; } }
+@container mod (max-width: 625px) { .fn-host.is-slot { min-height: 1037px; } }
+@container mod (max-width: 541px) { .fn-host.is-slot { min-height: 1166px; } }
+@container mod (max-width: 453px) { .fn-host.is-slot { min-height: 1208px; } }
+@container mod (max-width: 397px) { .fn-host.is-slot { min-height: 1241px; } }
+@container mod (max-width: 329px) { .fn-host.is-slot { min-height: 1276px; } }
+@container mod (max-width: 273px) { .fn-host.is-slot { min-height: 1291px; } }
+@container mod (max-width: 261px) { .fn-host.is-slot { min-height: 1332px; } }
+@container mod (max-width: 249px) { .fn-host.is-slot { min-height: 1440px; } }
+@container mod (max-width: 217px) { .fn-host.is-slot { min-height: 1509px; } }
+@container mod (max-width: 201px) { .fn-host.is-slot { min-height: 1556px; } }
+.fn-host.is-quiet { min-height: 808px; }
+@container mod (max-width: 1453px) { .fn-host.is-quiet { min-height: 779px; } }
+@container mod (max-width: 1283px) { .fn-host.is-quiet { min-height: 707px; } }
+@container mod (max-width: 713px) { .fn-host.is-quiet { min-height: 721px; } }
+@container mod (max-width: 625px) { .fn-host.is-quiet { min-height: 481px; } }
+@container mod (max-width: 453px) { .fn-host.is-quiet { min-height: 518px; } }
+@container mod (max-width: 369px) { .fn-host.is-quiet { min-height: 553px; } }
+@container mod (max-width: 273px) { .fn-host.is-quiet { min-height: 586px; } }
+@container mod (max-width: 217px) { .fn-host.is-quiet { min-height: 636px; } }
 @container mod (max-width: 540px) { .fn-card .ui-mod-h { min-height: 68px; } }
 .fn-slot { box-sizing: border-box; display: flex; flex: 1; flex-direction: column; gap: var(--sp-3); min-height: 100%; padding: var(--sp-5); border-radius: var(--r-md); background: radial-gradient(62% 70% at 50% 46%, #0b1120 0, #080d19 52%, #05070c 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
 .fn-slot-t { margin: 0; color: var(--label-1); font: var(--t-title3); letter-spacing: var(--t-title3-track); }

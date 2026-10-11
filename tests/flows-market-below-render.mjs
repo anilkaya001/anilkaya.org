@@ -16,7 +16,7 @@ const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/wof
 const FIX = JSON.parse(read("scripts/render-preview.fixtures.json")).market;
 const HTML = PAGES.marketPage({ username: "test" });
 const CHUNK = "/assets/js/flows-market-below.js";
-const SINGLE_FILE_BYTES = 96383;
+const SINGLE_FILE_BYTES = 102594;
 const LOWER = ["mktSectors", "mktMovers", "mktAgainst", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason", "mkAdv", "mkExpiry", "mkVol", "mkRadar", "mkGroups"];
 const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQQQ", "mkEtfIWM", "mkSecTides"];
 

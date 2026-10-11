@@ -1,33 +1,34 @@
 const MARKET = { file: "assets/js/flows-market.js", page: "Market", href: "/flows/market/" };
+const MARKET_BELOW = { ...MARKET, file: "assets/js/flows-market-below.js" };
 const TICKER = { file: "assets/js/flows-ticker.js", page: "Ticker", href: "/flows/ticker/" };
 
 export const GLOSSARY = Object.freeze([
-  { key: "advancers", term: "Advancers", ...MARKET, lines: [
+  { key: "advancers", term: "Advancers", ...MARKET_BELOW, lines: [
     "The session's price change for every eligible name in the screened universe, in half-point bins.",
   ] },
   { key: "conviction", term: "Conviction", ...TICKER, lines: [
     "How far the families agree, how much of the card was measured, and how long the flow persisted.",
   ] },
-  { key: "dark-pool", term: "Dark pool", ...MARKET, lines: [
+  { key: "dark-pool", term: "Dark pool", ...MARKET_BELOW, lines: [
     "The largest off-exchange prints by dollar size.",
   ] },
-  { key: "expiry", term: "Expiry", ...MARKET, lines: [
+  { key: "expiry", term: "Expiry", ...MARKET_BELOW, lines: [
     "How much of the session's net option premium sat in contracts expiring the same day, against the weekly expiries.",
     "The share is |0DTE net| over |0DTE net| plus |weekly net|, on the last cumulative values.",
   ] },
-  { key: "groups", term: "Groups", ...MARKET, lines: [
+  { key: "groups", term: "Groups", ...MARKET_BELOW, lines: [
     "Customer-signed delta flow for the session by industry group: positive is delta bought.",
   ] },
   { key: "index-etfs", term: "Index ETFs", ...MARKET, lines: [
     "The ETF's own options tide, its creation and redemption flow, and its fixed-tenor implied volatility.",
   ] },
-  { key: "insiders", term: "Insiders", ...MARKET, lines: [
+  { key: "insiders", term: "Insiders", ...MARKET_BELOW, lines: [
     "Form 4 buys against sells, in dollars, per filing day.",
   ] },
-  { key: "net-impact", term: "Net impact", ...MARKET, lines: [
+  { key: "net-impact", term: "Net impact", ...MARKET_BELOW, lines: [
     "The names the vendor ranks by net premium impact, split by sign.",
   ] },
-  { key: "open-interest", term: "Open interest", ...MARKET, lines: [
+  { key: "open-interest", term: "Open interest", ...MARKET_BELOW, lines: [
     "Contracts whose open interest grew most between the two clearing snapshots.",
   ] },
   { key: "q-and-p", term: "Risk-neutral and real-world chance", ...TICKER, lines: [
@@ -42,12 +43,12 @@ export const GLOSSARY = Object.freeze([
   { key: "tide", term: "Tide", ...MARKET, lines: [
     "Net call premium minus net put premium is the net; a put line below zero is puts sold.",
   ] },
-  { key: "volatility", term: "Volatility", ...MARKET, lines: [
+  { key: "volatility", term: "Volatility", ...MARKET_BELOW, lines: [
     "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",
     "Contango (a rising curve) is the calm shape; an inverted front is stress.",
     "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add; dispersion is the members' weighted 30-day IV less the index's, in volatility points.",
   ] },
-  { key: "volatility-radar", term: "Volatility radar", ...MARKET, lines: [
+  { key: "volatility-radar", term: "Volatility radar", ...MARKET_BELOW, lines: [
     "The vendor's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
   ] },
 ]);
