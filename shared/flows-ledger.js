@@ -135,12 +135,13 @@ export function ledgerView(rows) {
   return { retainDays: LEDGER_RETAIN_DAYS, days };
 }
 
-export function worstStale(rows, at, clock = null) {
+export function worstStale(rows, at, clock = null, known = null) {
   const phase = phaseAt(at, clock);
   if (!phase || phase.phase !== "rth") return null;
   let worst = null;
   for (const r of rows || []) {
     if (!r || typeof r.id !== "string") continue;
+    if (known && !known.has(r.id)) continue;
     const readAt = Number(r.read_at);
     if (readAt >= phase.open && at - readAt <= LEDGER_LIMITS.tier1Ms) continue;
     const meta = { readAt, session: r.session, cadenceS: Number(r.cadence_s), source: r.source };

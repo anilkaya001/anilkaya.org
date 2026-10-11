@@ -1,0 +1,71 @@
+name = "anilkaya-staging"
+main = "worker.js"
+compatibility_date = "2026-07-08"
+workers_dev = true
+
+[assets]
+directory = "."
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
+run_worker_first = ["/*", "!/assets/*"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.traces]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iewt-staging"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[ratelimits]]
+name = "UW_ONDEMAND"
+namespace_id = "2101"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "AI_ASK"
+namespace_id = "2102"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "MEMBER_VENDOR"
+namespace_id = "2103"
+simple = { limit = 60, period = 60 }
+
+[[ratelimits]]
+name = "LAB_WRITE"
+namespace_id = "2104"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "LOGIN_IP"
+namespace_id = "2105"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "LOGIN_NAME"
+namespace_id = "2106"
+simple = { limit = 20, period = 60 }
+
+[[durable_objects.bindings]]
+name = "PULSE"
+class_name = "Pulse"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Pulse"]
+
+[vars]
+FLOWS_SESSION_EPOCH = "1"
+FLOWS_READ_MODE = "off"
+FLOWS_LIVE_MODE = "off"
+FLOWS_RT_MODE = "on"
+FLOWS_RT_AUDIENCE = "members"
+FLOWS_RT_USERS = "anilkaya"
+FLOWS_RT_HINT = "enam"

@@ -9,7 +9,8 @@ import { black76 } from "../shared/flows-quant-bs.js";
 import { etDayOf, closeUtcMs, yearFraction } from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
 import * as ENG from "../shared/flows-quant-engine.js";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -393,10 +394,10 @@ const emptyD1 = {
   batch: async (list) => list.map(() => ({ results: [] })),
 };
 const worker = (await import("../worker.js?basis=1")).default;
-const token = await signFlowsSession(FLOWS_USERNAMES[0], SESSION_SECRET, 3600, sessionEpoch({ SESSION_SECRET }));
+const token = await signFlowsSession(FIXTURE_ROSTER[0], SESSION_SECRET, 3600, sessionEpoch({ SESSION_SECRET }));
 const envFor = (extra = {}) => ({
   DB: emptyD1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "http://uw.test",
-  FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra,
+  FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }), ...extra,
 });
 
 const realFetch = globalThis.fetch;
@@ -658,6 +659,17 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(r.res.status, 200, "the strategy lab reads a dotted ticker's expiry");
   eq(r.body.calls.length, 7, "with its seven calls");
   eq(r.body.engine.status, "ok", "AND ITS ENGINE PRICES THEM: the book was filtered on the raw ticker BRK.B against the option root BRKB, and answered that no contract parsed as the ticker's own");
+  ok(!("rank" in r.body.engine), "with FLOWS_RANK unset the strategy engine ranks as it always did and publishes no rank field");
+  const vendor = (url, t) => {
+    if (url.pathname.endsWith("/stock-state")) return { data: { close: "500.00", market_time: "regular", tape_time: "2026-08-25T18:06:00Z" } };
+    if (url.pathname.endsWith("/option-contracts")) return { data: url.searchParams.get("option_type") === "call" ? side("C") : side("P") };
+    return undefined;
+  };
+  const ranked = await route("/api/flows/strategy?t=BRK.B&expiry=2026-09-18&engine=1", vendor, { UW_NOW: NOW, FLOWS_RANK: "v2" });
+  eq(ranked.body.engine.rank, "v2", "FLOWS_RANK=v2 ranks the strategy engine's structures on the v2 score and says so");
+  ok(ranked.body.engine.structures.every((x) => x.scoreRaw !== undefined), "each published structure then carries its v1 score as scoreRaw");
+  const stray = await route("/api/flows/strategy?t=BRK.B&expiry=2026-09-18&engine=1&refresh=1", vendor, { UW_NOW: NOW, FLOWS_RANK: "yes" });
+  ok(!("rank" in stray.body.engine), "and any other value leaves it on v1");
 }
 
 {

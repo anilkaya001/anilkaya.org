@@ -9,13 +9,24 @@ export const KEY_ENV = "UW_API_KEY";
 export const URL_ENV = "FLOWS_WS_PROBE_URL";
 export const SECONDS_ENV = "FLOWS_WS_PROBE_SECONDS";
 export const ONLY_ENV = "FLOWS_WS_PROBE_ONLY";
+export const FIREHOSE_ENV = "FLOWS_WS_PROBE_FIREHOSE_SECONDS";
 export const DEFAULT_URL = "wss://api.unusualwhales.com/socket";
 export const DEFAULT_SECONDS = 12;
 export const MAX_SECONDS = 60;
+export const CONTROL_CHANNEL = "w03_nonexistent_channel_zz";
 export const CHANNELS = Object.freeze([
-  "market_tide", "price:SPY", "gex:SPY", "flow-alerts", "quotes:SPY", "net_flow:SPY", "news",
-  "trading_halts", "option_trades:SPY", "interval_flow", "stock_screener",
+  CONTROL_CHANNEL, "option_trades:SPY", "option_trades:NVDA", "price:SPY", "price:NVDA", "quotes:SPY", "gex:SPY",
+  "gex_strike:SPY", "net_flow:SPY", "flow-alerts", "news", "market_tide", "contract_screener",
 ]);
+export const FIREHOSES = Object.freeze(["price", "option_trades", "lit_trades", "off_lit_trades", "stock_screener"]);
+export const FIREHOSE_SECONDS = 5;
+export const CONTROL_SECONDS = 8;
+export const SAMPLE_CAP = 50000;
+export const HANDSHAKE_TIMEOUT_S = 10;
+export const HOLD_TIMEOUT_S = 8;
+export const HOLD_SETTLE_S = 3;
+export const SESSION_SLACK_S = 1;
+export const PARTS = Object.freeze(["handshake", "channels", "firehoses", "connections", "joins"]);
 export const TICKERS = Object.freeze([
   "SPY", "QQQ", "IWM", "DIA", "NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX", "COST",
   "JPM", "XOM", "GLD", "SLV", "COPX", "GDX", "XLE", "XLF", "XLK", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE",
@@ -37,17 +48,74 @@ export function redactor(token) {
   return (text) => (token ? String(text).split(token).join("[token]").split(encodeURIComponent(token)).join("[token]") : String(text));
 }
 
-export function stampMs(payload) {
-  if (!payload || typeof payload !== "object") return null;
-  for (const key of ["time", "timestamp", "executed_at", "end_time", "quote_time", "tape_time", "last_time", "ts"]) {
-    const v = payload[key];
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v > 1e12 ? v : v * 1000;
-    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      const t = Date.parse(v);
-      if (Number.isFinite(t)) return t;
-    }
+export const STAMP_KEYS = Object.freeze(["time", "timestamp", "executed_at", "end_time", "quote_time", "tape_time", "last_time", "ts", "created_at"]);
+
+function valueMs(v) {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return v > 1e12 ? v : v * 1000;
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T/.test(v)) {
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return t;
   }
   return null;
+}
+
+export function stampOf(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  for (const key of STAMP_KEYS) {
+    const ms = valueMs(payload[key]);
+    if (ms !== null) return { key, ms };
+  }
+  return null;
+}
+
+export function stampMs(payload) {
+  const found = stampOf(payload);
+  return found ? found.ms : null;
+}
+
+export function createdMinusExecuted(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const created = valueMs(payload.created_at);
+  const executed = valueMs(payload.executed_at);
+  return created !== null && executed !== null ? created - executed : null;
+}
+
+const rate = (n, spanMs) => (spanMs > 0 ? Math.round((n / (spanMs / 1000)) * 100) / 100 : null);
+
+export function streamStats({ arrivals = [], dataBytes = 0, lags = [], cx = [], spanMs = 0 } = {}) {
+  const sorted = [...arrivals].sort((a, b) => a - b);
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i++) gaps.push(sorted[i] - sorted[i - 1]);
+  return {
+    activeS: spanMs > 0 ? Math.round(spanMs / 10) / 100 : 0,
+    msgPerS: rate(arrivals.length, spanMs), bytesPerS: rate(dataBytes, spanMs),
+    gapP50Ms: pct(gaps, 0.5), gapP95Ms: pct(gaps, 0.95), gapSamples: gaps.length,
+    lagP50: pct(lags, 0.5), lagP95: pct(lags, 0.95), lagSamples: lags.length,
+    cxP50: pct(cx, 0.5), cxP95: pct(cx, 0.95), cxSamples: cx.length,
+  };
+}
+
+export function verdictOf(channel, { acks = {}, messages = 0 } = {}) {
+  const ack = acks[channel];
+  if (messages > 0) return "data";
+  if (ack === undefined) return "no-ack";
+  return ack === "ok" ? "acked-silent" : "refused";
+}
+
+export function controlTrust(verdict) {
+  return verdict === "refused" || verdict === "no-ack";
+}
+
+export function plannedSeconds({ seconds = DEFAULT_SECONDS, only = [], firehoseSeconds = FIREHOSE_SECONDS } = {}) {
+  const s = Math.min(MAX_SECONDS, Math.max(2, Number(seconds) || DEFAULT_SECONDS));
+  const wants = (name) => only.length === 0 || only.includes(name);
+  let total = 0;
+  if (wants("handshake")) total += 3 * HANDSHAKE_TIMEOUT_S;
+  if (wants("channels")) total += CHANNELS.reduce((sum, c) => sum + (c === CONTROL_CHANNEL ? Math.min(s, CONTROL_SECONDS) : s) + SESSION_SLACK_S, 0);
+  if (wants("firehoses")) total += FIREHOSES.length * (firehoseSeconds + SESSION_SLACK_S);
+  if (wants("connections")) total += (CONNECTION_STEPS - 1) * (HOLD_TIMEOUT_S + HOLD_SETTLE_S);
+  if (wants("joins")) total += JOIN_STEPS.length * (Math.max(6, Math.floor(s / 2)) + SESSION_SLACK_S);
+  return total;
 }
 
 export function classify(text) {
@@ -61,7 +129,7 @@ export function classify(text) {
   return { kind: "data", channel, payload };
 }
 
-export function handshake(url, token, { origin = null, bearer = false, timeoutMs = 10000, redact = redactor(token) } = {}) {
+export function handshake(url, token, { origin = null, bearer = false, timeoutMs = HANDSHAKE_TIMEOUT_S * 1000, redact = redactor(token) } = {}) {
   return new Promise((resolve) => {
     const target = new URL(url);
     if (!bearer && token) target.searchParams.set("token", token);
@@ -103,9 +171,12 @@ export function session(url, token, channels, { seconds = DEFAULT_SECONDS, redac
     const t0 = Date.now();
     const out = {
       channels: channels.length > 3 ? { count: channels.length } : channels, acks: {}, ackDetail: {}, messages: 0, bytes: 0,
-      firstMsgMs: null, openMs: null, keys: {}, closed: null, error: null,
+      dataBytes: 0, firstMsgMs: null, openMs: null, keys: {}, stampKeys: {}, closed: null, error: null,
     };
-    const lag = [];
+    const arrivals = [];
+    const lags = [];
+    const cx = [];
+    let openedAt = null;
     let ws;
     let finished = false;
     const finish = () => {
@@ -113,18 +184,22 @@ export function session(url, token, channels, { seconds = DEFAULT_SECONDS, redac
       finished = true;
       clearTimeout(timer);
       try { ws.close(); } catch {}
-      resolve({ ...out, lagP50: pct(lag, 0.5), lagP95: pct(lag, 0.95), lagSamples: lag.length });
+      const spanMs = openedAt === null ? 0 : Date.now() - openedAt;
+      const { dataBytes, ...rest } = out;
+      resolve({ ...rest, ...streamStats({ arrivals, dataBytes, lags, cx, spanMs }) });
     };
     const timer = setTimeout(finish, seconds * 1000);
     try { ws = new Socket(socketUrl(url, token)); } catch (e) { out.error = redact(e.message); clearTimeout(timer); resolve(out); return; }
     ws.addEventListener("open", () => {
-      out.openMs = Date.now() - t0;
+      openedAt = Date.now();
+      out.openMs = openedAt - t0;
       for (const channel of channels) ws.send(JSON.stringify({ channel, msg_type: "join" }));
     });
     ws.addEventListener("message", (event) => {
       const now = Date.now();
       const text = typeof event.data === "string" ? event.data : String(event.data);
-      out.bytes += text.length;
+      const size = Buffer.byteLength(text);
+      out.bytes += size;
       const m = classify(text);
       if (m.kind === "ack") {
         out.acks[m.channel] = m.status;
@@ -133,19 +208,27 @@ export function session(url, token, channels, { seconds = DEFAULT_SECONDS, redac
       }
       if (m.kind !== "data") return;
       out.messages += 1;
+      out.dataBytes += size;
       if (out.firstMsgMs === null) out.firstMsgMs = now - t0;
       const base = String(m.channel).split(":")[0];
       const sample = Array.isArray(m.payload) ? m.payload[0] : m.payload;
       if (!out.keys[base] && sample && typeof sample === "object") out.keys[base] = Object.keys(sample).slice(0, 30);
-      const ts = stampMs(sample);
-      if (ts !== null) lag.push(now - ts);
+      if (arrivals.length >= SAMPLE_CAP) return;
+      arrivals.push(now);
+      const stamp = stampOf(sample);
+      if (stamp !== null) {
+        lags.push(now - stamp.ms);
+        if (!out.stampKeys[base]) out.stampKeys[base] = stamp.key;
+      }
+      const gap = createdMinusExecuted(sample);
+      if (gap !== null) cx.push(gap);
     });
     ws.addEventListener("error", (e) => { out.error = redact((e && (e.message || e.type)) || "error"); });
     ws.addEventListener("close", (e) => { out.closed = { code: e.code, reason: redact(e.reason || "") }; finish(); });
   });
 }
 
-export function holdConnections(url, token, count, { redact = redactor(token), Socket = globalThis.WebSocket, settleMs = 3000 } = {}) {
+export function holdConnections(url, token, count, { redact = redactor(token), Socket = globalThis.WebSocket, settleMs = HOLD_SETTLE_S * 1000 } = {}) {
   return new Promise((resolve) => {
     const held = [];
     let refused = null;
@@ -162,7 +245,7 @@ export function holdConnections(url, token, count, { redact = redactor(token), S
     for (let i = 0; i < count; i++) {
       let ws;
       try { ws = new Socket(socketUrl(url, token)); } catch (e) { refused = refused || { connection: i + 1, why: redact(e.message) }; settle(); continue; }
-      const timer = setTimeout(() => { refused = refused || { connection: i + 1, why: "timeout" }; settle(); }, 8000);
+      const timer = setTimeout(() => { refused = refused || { connection: i + 1, why: "timeout" }; settle(); }, HOLD_TIMEOUT_S * 1000);
       ws.addEventListener("open", () => {
         ws.send(JSON.stringify({ channel: "market_tide", msg_type: "join" }));
       });
@@ -188,18 +271,35 @@ export async function run(env = process.env, out = (line) => console.log(line)) 
   }
   const url = env[URL_ENV] || DEFAULT_URL;
   const seconds = Math.min(MAX_SECONDS, Math.max(2, Number(env[SECONDS_ENV]) || DEFAULT_SECONDS));
+  const firehoseSeconds = Math.min(FIREHOSE_SECONDS, Math.max(1, Number(env[FIREHOSE_ENV]) || FIREHOSE_SECONDS));
   const only = String(env[ONLY_ENV] || "").split(",").map((s) => s.trim()).filter(Boolean);
   const redact = redactor(token);
   const say = (record) => out(redact(JSON.stringify(record)));
   const wants = (name) => only.length === 0 || only.includes(name);
-  say({ probe: "start", endpoint: url.replace(/\?.*$/, ""), seconds, node: process.version, at: new Date().toISOString() });
+  say({ probe: "start", endpoint: url.replace(/\?.*$/, ""), seconds, plannedS: plannedSeconds({ seconds, only, firehoseSeconds }), node: process.version,
+    at: new Date().toISOString() });
   if (wants("handshake")) {
     say({ probe: "handshake-query-token", ...(await handshake(url, token, { redact })) });
     say({ probe: "handshake-bearer-header", ...(await handshake(url, token, { bearer: true, redact })) });
     say({ probe: "handshake-origin-site", ...(await handshake(url, token, { origin: "https://anilkaya.org", redact })) });
   }
   if (wants("channels")) {
-    for (const channel of CHANNELS) say({ probe: "channel", ...(await session(url, token, [channel], { seconds, redact })) });
+    const verdicts = {};
+    for (const channel of CHANNELS) {
+      const control = channel === CONTROL_CHANNEL;
+      const result = await session(url, token, [channel], { seconds: control ? Math.min(seconds, CONTROL_SECONDS) : seconds, redact });
+      const verdict = verdictOf(channel, result);
+      verdicts[channel] = verdict;
+      say({ probe: "channel", role: control ? "control" : "channel", verdict, ...result });
+    }
+    const control = verdicts[CONTROL_CHANNEL];
+    say({ probe: "channel-verdicts", control, acksTrustworthy: controlTrust(control), verdicts });
+  }
+  if (wants("firehoses")) {
+    for (const channel of FIREHOSES) {
+      const result = await session(url, token, [channel], { seconds: firehoseSeconds, redact });
+      say({ probe: "firehose", role: "firehose", verdict: verdictOf(channel, result), ...result });
+    }
   }
   if (wants("connections")) {
     for (let n = 2; n <= CONNECTION_STEPS; n++) say({ probe: "concurrent-connections", ...(await holdConnections(url, token, n, { redact })) });

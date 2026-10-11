@@ -223,7 +223,7 @@
     const params = new URLSearchParams({ t: sym, strategy: side, rank: serverRank(rank) });
     if (refresh) params.set("refresh", "1");
     try {
-      const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } });
+      const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
       if (res.status === 401) { location.replace("/flows/"); return; }
       const age = isNum(res.headers.get("X-Chain-Age"));
       const body = await res.json().catch(() => null);
@@ -656,39 +656,21 @@
       n.setAttribute("fill-opacity", frSet.has(p) || on ? "1" : "0.55");
       if (frSet.has(p)) C.marker(g, "ring", cx, cy, UI.cssVar("--label-1"), 7);
     }
-    const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
-    box.append(readout);
-    box.tabIndex = 0;
-    box.setAttribute("role", "group");
-    box.setAttribute("aria-roledescription", "chart");
+    const order = pts.slice().sort((a, b) => a.x - b.x);
+    const at = focused ? order.findIndex((q) => q.r === focused) : -1;
+    if (at >= 0) box._scrubAt = at;
+    C.scrub(box, svg, {
+      xs: order.map((p) => x(p.x)), ys: order.map((p) => y(Math.min(p.y, cap))), reach: 30, first: true, xh: 0, top, bottom: H - bottom, label: T("fr-key"),
+      onMove: (i) => {
+        const p = order[i], r = p.r;
+        return {
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtPct(r.annualized, 0) + " annualised",
+          parts: [C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
+            h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k")],
+        };
+      },
+    });
     box.setAttribute("aria-label", T("fr-key"));
-    const show = (p, speak) => {
-      if (!p) { readout.classList.remove("is-on"); return; }
-      const r = p.r;
-      readout.replaceChildren(C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-        h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k"));
-      readout.classList.add("is-on");
-      const rw = readout.offsetWidth;
-      readout.style.left = Math.max(0, Math.min(w - rw, x(p.x) - rw / 2)) + "px";
-      readout.style.top = Math.max(0, y(Math.min(p.y, cap)) - 40) + "px";
-      if (speak) UI.announce(r.ticker + " " + kf(r.strike) + ", " + fmtPct(r.annualized, 0) + " annualised");
-    };
-    let idx = -1;
-    box.addEventListener("pointermove", (ev) => {
-      const b = svg.getBoundingClientRect();
-      const mx = ev.clientX - b.left, my = ev.clientY - b.top;
-      let best = null, bd = 900;
-      for (const p of pts) { const d = (x(p.x) - mx) ** 2 + (y(Math.min(p.y, cap)) - my) ** 2; if (d < bd) { bd = d; best = p; } }
-      show(best);
-    });
-    box.addEventListener("pointerleave", () => show(null));
-    box.addEventListener("keydown", (ev) => {
-      if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
-      ev.preventDefault();
-      idx = Math.max(0, Math.min(fr.length - 1, idx + (ev.key === "ArrowRight" ? 1 : -1)));
-      show(fr[idx], true);
-    });
-    if (focused) { const p = pts.find((q) => q.r === focused); if (p) show(p); }
     mods.legend.replaceChildren(UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ["--label-2", "dot", "Put"], ["--label-2", "dia", "Call"], ["--label-1", "ln", "Frontier"]]), ...(view.shown.length > pts.length ? [h("p", { class: "dk-hint" }, T("unplotted", { n: view.shown.length - pts.length }))] : []));
     mods.quick = false;
   }

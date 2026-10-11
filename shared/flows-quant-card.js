@@ -3,10 +3,12 @@ import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance, svi
 import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
-  expiryFromFit, setupEngine, cardCarry, settleExpiries,
+  expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
 import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
+
+export { rankModeOf };
 
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
@@ -521,6 +523,7 @@ export function compactEngine(out, extra = {}) {
     structures, ideas: out.ideas.slice(), noTrade: out.noTrade,
     priced: out.structures.length,
     families: out.families.filter((f) => f.score > 0 || f.veto.length).slice(0, 8).map((f) => ({ family: f.family, score: f.score, veto: f.veto })),
+    ...(out.rank === "v2" ? { rank: "v2" } : {}),
   };
 }
 
@@ -538,7 +541,7 @@ export function runCardEngine(input) {
     rateMethod: input.rate && typeof input.rate.method === "string" ? input.rate.method : "fallback",
     expiries: input.expiries, facts: factMap(input.facts), state: engineState(input.state), pLaw: input.pLaw || null,
     levels: input.levels || null, event: input.event || null, stale: !!input.stale, curves: false,
-    topFamilies: input.topFamilies, fits: !!input.fits,
+    topFamilies: input.topFamilies, fits: !!input.fits, rank: input.rank,
   });
   const block = compactEngine(out, {
     atr: input.atr, rate: input.rate, facts: input.facts, state: engineState(input.state), levels: input.levels,

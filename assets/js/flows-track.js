@@ -731,6 +731,75 @@
     app.replaceChildren(h("div", { class: "st-chips" }, chipsFor()), detail.name, detail.outcomes, detail.calib, namesModule());
   }
 
+  function ideasBody(c) {
+    const n = isNum(c.n) === null ? 0 : c.n;
+    const nEff = isNum(c.nEff);
+    const needed = isNum(c.needed) === null ? 100 : c.needed;
+    const counts = c.counts && typeof c.counts === "object" ? c.counts : {};
+    const share = isNum(counts.unresolvedShare);
+    const excluded = counts.excluded && typeof counts.excluded === "object" ? Object.keys(counts.excluded).reduce((a, k) => a + (isNum(counts.excluded[k]) || 0), 0) : 0;
+    const head = UI.metrics([
+      UI.metric("Resolved", String(n), { id: "ideasN", sub: "ideas with an expiry close" }),
+      UI.metric("Effective n", nEff === null ? DASH : nEff.toFixed(1), { id: "ideasEff", hero: true, sub: "of " + needed + " needed" }),
+      UI.metric("No close yet", share === null ? DASH : F.pct(share, 0), { id: "ideasGap", sub: (isNum(counts.pending) || 0) + " waiting, " + (isNum(counts.lost) || 0) + " lost" }),
+    ], { min: 96 });
+    if (!c.measured || !c.popP) {
+      return [head, h("p", { class: "st-note", role: "note" }, "Not yet measured. The model\u2019s real-world chance of profit has no outcome record that can be read yet: " + n + " resolved " + plural(n, "idea", "ideas") + ", effective n " + (nEff === null ? DASH : nEff.toFixed(1)) + " of " + needed + " needed, after ideas that expire in one week are counted as one. Until then each chance is shown with the note \u201cNot yet calibrated\u201d.")];
+    }
+    const view = c.popP;
+    const rows = view.bins.filter((b) => b && b.n > 0).map((b) => h("tr", null,
+      h("th", { scope: "row" }, F.pct(b.lo, 0) + MID + F.pct(b.hi, 0)),
+      h("td", null, String(b.n)),
+      h("td", null, F.pct(b.p, 0)),
+      h("td", null, F.pct(b.y, 0)),
+      h("td", null, b.ci ? F.pct(b.ci[0], 0) + MID + F.pct(b.ci[1], 0) : DASH)));
+    const q = c.popQ;
+    const fix = (v, d = 3) => (isNum(v) === null ? DASH : v.toFixed(d));
+    return [head,
+      h("div", { class: "flows-tablewrap" }, h("table", { class: "flows-table is-dense st-rel" },
+        h("caption", { class: "flows-caption" }, "Stated chance of profit against what happened, ideas grouped by the chance the model gave them"),
+        h("thead", null, h("tr", null, h("th", { scope: "col" }, "Stated"), h("th", { scope: "col" }, "Ideas"), h("th", { scope: "col" }, "Mean stated"), h("th", { scope: "col" }, "Profited"), h("th", { scope: "col" }, "95% interval"))),
+        h("tbody", null, ...rows))),
+      UI.metrics([
+        UI.metric("Brier", fix(view.brier), { id: "ideasBrier", sub: "lower is better; " + fix(view.uncertainty) + " if every chance were the base rate" }),
+        UI.metric("Reliability", fix(view.reliability), { id: "ideasRel", sub: "gap between stated and observed" }),
+        UI.metric("Resolution", fix(view.resolution), { id: "ideasRes", sub: "how far the chances separated outcomes" }),
+        UI.metric("Log score", fix(view.logScore), { id: "ideasLog", sub: "lower is better" }),
+      ], { min: 120 }),
+      q ? h("p", { class: "st-note" }, "The risk-neutral chance (popQ) is not meant to match frequencies; its Brier score here is " + fix(q.brier) + " against " + fix(view.brier) + " for the real-world chance, and its gap measures the risk premium.") : null,
+    ];
+  }
+
+  function ideasModule(c) {
+    const body = h("div", { class: "st-ide-b" }, ...ideasBody(c));
+    return UI.moduleCard({
+      id: "stIdeas", title: "Idea calibration", index: 4,
+      info: () => ({
+        title: "Idea calibration",
+        lead: "Each night the engine ranks one lead structure for every name it prices. This freezes that idea, its fill and its stated chances the first night it appears, and settles it on the close of its expiry. A re-recommendation of the same strikes and expiry is not a new trial.",
+        facts: [["Resolved", String(isNum(c.n) === null ? 0 : c.n)], ["Effective n", isNum(c.nEff) === null ? null : c.nEff.toFixed(1)], ["Clusters (expiry weeks)", isNum(c.clusters) === null ? null : String(c.clusters)], ["Intra-cluster correlation", isNum(c.rho) === null ? null : c.rho.toFixed(2) + (c.rhoFloored ? " (floored)" : "")], ["Since", c.firstArchive || null]],
+        sections: [
+          { title: "Method", lines: [c.note || "European payoff at expiry from the daily close, early assignment ignored.", "Ideas that expire in the same ISO week share one market path, so they count as one cluster and the effective n is smaller than the number of ideas.", "Until the effective n reaches " + (isNum(c.needed) === null ? 100 : c.needed) + " no reliability figure is shown."] },
+          { title: "What is left out", lines: ["Calendars and diagonals cannot be settled from one close and are excluded, as are ideas across a split. Ideas on names that left the deep set are settled from a separate close fetch; those with no close yet are counted in No close yet, never dropped."] },
+        ],
+      }),
+      body,
+    });
+  }
+
+  function loadIdeas() {
+    get("/api/flows/calib").then((c) => {
+      if (!c || typeof c !== "object") return;
+      const at = app.lastElementChild;
+      const mod = c.status === "pending"
+        ? UI.moduleCard({ id: "stIdeas", title: "Idea calibration", index: 4, body: h("p", { class: "st-note", role: "note" }, "Not yet measured. No idea has been settled yet: the first one expires after the archive that records it, and the record starts with the first nightly run that wrote it.") })
+        : ideasModule(c);
+      app.insertBefore(mod, at);
+    }).catch(() => {
+      app.insertBefore(UI.moduleCard({ id: "stIdeas", title: "Idea calibration", index: 4, body: UI.silent({ state: "unavailable", reason: "The calibration record could not be loaded. The score track above is unaffected." }, "Idea calibration", 120) }), app.lastElementChild);
+    });
+  }
+
   function fail(kind, msg) {
     statusEl.textContent = msg;
     app.replaceChildren(UI.moduleCard({ id: "stEmpty", title: "Track", body: UI.silent({ state: kind, reason: msg }, "Score track", 240) }));
@@ -767,6 +836,7 @@
     if (head && stale && stale.message) head.replaceChildren(UI.stateButton({ state: "stale", reason: stale.message + " The right-hand edge of every strip is that run's session and not today's." }, "Track"));
     build();
     renderList(false);
+    loadIdeas();
     let want = null;
     try { want = (new URL(location.href).searchParams.get("t") || "").trim().toUpperCase(); } catch (e) { want = null; }
     const first = filtered()[0];

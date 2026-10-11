@@ -1002,6 +1002,7 @@ try {
        "the flagged windows still draw");
     eq(await page.locator("#ccWatch .ui-row").count(), 2,
        "the dead band's residents still draw");
+    await page.waitForFunction(() => document.querySelectorAll("#ccVerdict [data-chip]").length > 0, null, { timeout: 15000 });
     eq(await page.locator("#ccVerdict [data-chip]").count(), 5,
        "and the hero still states five readings, every count of them an em dash");
     const both = await page.evaluate(() => ({
@@ -2911,7 +2912,8 @@ try {
       m: Object.fromEntries(Array.from(document.querySelectorAll("#ccVol .ui-metric"), (m) => [
         m.querySelector(".ui-metric-l").textContent.trim(),
         m.querySelector(".ui-metric-v").textContent.trim()])),
-      term: document.querySelectorAll("#ccVol .hm-term svg[role=img]").length,
+      term: document.querySelectorAll("#ccVol svg").length,
+      full: (document.querySelector("#hmVol .hm-count") || {}).getAttribute ? document.querySelector("#hmVol .hm-count").getAttribute("href") : null,
       rich: Array.from(document.querySelectorAll("#ccVol .hm-radar-r:first-child .hm-chiplink"),
         (a) => [a.tagName, a.textContent.trim(), a.getAttribute("href")]),
       stale: Boolean(document.querySelector("#hmVol .ui-mod-t .hm-mark[data-state=stale]")),
@@ -2922,7 +2924,8 @@ try {
     eq(vol.m.Term, "Contango", "and names its term shape in a word");
     eq(vol.m.Correlation, "0.31", "with the implied correlation beside it");
     eq(vol.m["0DTE share"], "41%", "and the zero-day share of the session's premium");
-    eq(vol.term, 1, "the term structure is drawn on one chart");
+    eq(vol.term, 0, "Home keeps the volatility readings and leaves the term structure to the Market page, which draws it in full");
+    eq(vol.full, "/flows/market/#mkVolCard", "and the module links straight to that chart");
     deep(vol.rich[0], ["A", "ORCL", "/flows/ticker/?t=ORCL&s=signal&from=overview"],
       "a rich name with a card links to its reader");
     ok(vol.stale, "an August regime read in September wears the stale mark on the module title");

@@ -469,6 +469,29 @@ const FACT_INPUT = () => ({
   eq(JSON.stringify(QC.runCardEngine(input)), JSON.stringify(block), "the block is byte-identical on a rerun");
   ok(block.pLaw && block.pLaw.knots.length === 9 && QC.runCardEngine({ ...input, publishLaw: false }).pLaw === null,
      "the law rides the card and is left off when the caller already holds it");
+  for (const rank of [undefined, "v1", "nope"]) eq(JSON.stringify(QC.runCardEngine({ ...input, rank })), JSON.stringify(block), `the card block under rank ${JSON.stringify(rank)} is the block it always was`);
+  const ranked = QC.runCardEngine({ ...input, rank: "v2" });
+  eq(ranked.rank, "v2", "rank v2 is carried onto the card block");
+  ok(!("rank" in block), "and the v1 block has no rank field");
+  ok(ranked.structures.length > 0 && ranked.structures.every((s) => s.scoreRaw !== undefined && s.rankV2 && s.rankV2.sessions >= 1), "whose published structures carry scoreRaw and the basis of their v2 score");
+  ok(ranked.structures.every((s) => block.structures.every((o) => o.id !== s.id || o.score === s.scoreRaw)), "scoreRaw is the score the v1 block publishes for the same structure");
+  {
+    const prep = { built: slices.built, input: slices.input, asOfMs: AS_OF_MS, zero: QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2 }) };
+    const nightly = () => QP.engineBlock({ ticker: "SYN", sessionDate: SESSION, spot: SPOT, atr: 2, card: {}, prep, rate: RATE, garch: GARCH, law, event: null, state, strikes: [] });
+    const was = process.env.FLOWS_RANK;
+    try {
+      delete process.env.FLOWS_RANK;
+      const off = nightly();
+      process.env.FLOWS_RANK = "v2";
+      const on = nightly();
+      process.env.FLOWS_RANK = "true";
+      const stray = nightly();
+      ok(!("rank" in off) && !("rank" in stray) && JSON.stringify(off) === JSON.stringify(stray), "the nightly's engine block is v1 unless FLOWS_RANK is exactly v2");
+      eq(on.rank, "v2", "and with FLOWS_RANK=v2 it publishes the v2 ranking and says so");
+    } finally {
+      if (was === undefined) delete process.env.FLOWS_RANK; else process.env.FLOWS_RANK = was;
+    }
+  }
 
   const idea = block.structures.find((s) => new Set(s.legs.map((l) => l.expiry)).size === 1);
   ok(idea, "the published set holds a single-expiry structure for the re-pricer to reproduce");

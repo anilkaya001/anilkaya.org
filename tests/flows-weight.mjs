@@ -1,29 +1,119 @@
 import assert from "node:assert/strict";
-import { readFileSync, statSync, existsSync } from "node:fs";
+import { readFileSync, statSync, existsSync, appendFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import * as PAGES from "../shared/flows-pages.js";
 
 const REPO = new URL("../", import.meta.url);
 const sizeOf = (src) => statSync(new URL("." + src, REPO)).size;
+const gzipOf = (src) => gzipSync(readFileSync(new URL("." + src, REPO)), { level: 9 }).length;
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 400,
-  overviewPage: 265,
-  sidePage: 220,
-  watchPage: 220,
-  deskPage: 234,
-  askPage: 173,
-  strategyPage: 251,
-  trackPage: 164,
-  marketPage: 242,
-  unusualPage: 204 + (57017 + 13882 + 4176 + 830 + 189 + 95 + 843) / 1024,
+  tickerPage: 411,
+  overviewPage: 274,
+  sidePage: 230,
+  watchPage: 230,
+  deskPage: 243,
+  askPage: 133,
+  strategyPage: 261,
+  trackPage: 180,
+  marketPage: 254,
+  unusualPage: 287,
   eventsPage: 155,
-  politicalPage: 144,
-  historyPage: 157,
+  politicalPage: 103,
+  historyPage: 167,
   loginPage: 5,
+  aboutPage: 5,
+  glossaryPage: 5,
+};
+
+const GZIP_KIB = {
+  tickerPage: 125,
+  overviewPage: 82,
+  sidePage: 69,
+  watchPage: 69,
+  deskPage: 80,
+  askPage: 39,
+  strategyPage: 83,
+  trackPage: 53,
+  marketPage: 76,
+  unusualPage: 87,
+  eventsPage: 34,
+  politicalPage: 31,
+  historyPage: 51,
+  loginPage: 3,
+  aboutPage: 3,
+  glossaryPage: 3,
+};
+
+const CSS_KIB = {
+  tickerPage: 103,
+  overviewPage: 104,
+  sidePage: 102,
+  watchPage: 102,
+  deskPage: 111,
+  askPage: 93,
+  strategyPage: 111,
+  trackPage: 93,
+  marketPage: 94,
+  unusualPage: 113,
+  eventsPage: 105,
+  politicalPage: 105,
+  historyPage: 93,
+  loginPage: 80,
+  aboutPage: 81,
+  glossaryPage: 81,
+};
+
+const CSS_GZIP_KIB = {
+  tickerPage: 23,
+  overviewPage: 23,
+  sidePage: 22,
+  watchPage: 22,
+  deskPage: 24,
+  askPage: 21,
+  strategyPage: 24,
+  trackPage: 21,
+  marketPage: 21,
+  unusualPage: 25,
+  eventsPage: 23,
+  politicalPage: 23,
+  historyPage: 21,
+  loginPage: 18,
+  aboutPage: 18,
+  glossaryPage: 18,
+};
+
+const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
+const HELD_RAW_KIB = { eventsPage: 50 };
+
+const BASES = [
+  { key: "raw", label: "JS raw", ceilings: CEILING_KIB },
+  { key: "gzip", label: "JS gzip", ceilings: GZIP_KIB },
+  { key: "css", label: "CSS raw", ceilings: CSS_KIB },
+  { key: "cssGzip", label: "CSS gzip", ceilings: CSS_GZIP_KIB },
+];
+
+const judge = (row, bases = BASES) => {
+  const faults = [];
+  for (const base of bases) {
+    const ceiling = base.ceilings[row.name];
+    if (ceiling === undefined) { faults.push(`${row.name} has no ${base.label} ceiling`); continue; }
+    const used = row[base.key];
+    if (used > ceiling * 1024) {
+      faults.push(`${row.name} ${base.label} ${used} B is over its ${ceiling} KiB ceiling`);
+    }
+    const slackLimit = base.key === "raw" && HELD_RAW_KIB[row.name] !== undefined
+      ? HELD_RAW_KIB[row.name] : RATCHET_KIB[base.key];
+    if (ceiling * 1024 - used > slackLimit * 1024) {
+      faults.push(`${row.name} ${base.label} ceiling ${ceiling} KiB sits ${Math.round((ceiling * 1024 - used) / 1024)} KiB ` +
+        `above ${used} B, past the ${slackLimit} KiB the ratchet allows`);
+    }
+  }
+  return faults;
 };
 
 const pageNames = Object.keys(PAGES)
@@ -51,6 +141,7 @@ for (const name of pageNames) {
   ok(srcs.length > 0, `${name} emits at least one script, so the measurement has a subject`);
 
   let bytes = 0;
+  let gzip = 0;
   const parts = [];
   for (const src of srcs) {
 
@@ -63,10 +154,25 @@ for (const name of pageNames) {
     if (size === null) continue;
     ok(size > 0, `${src} is not empty`);
     bytes += size;
+    gzip += gzipOf(src);
     parts.push(src.split("/").pop() + " " + Math.round(size / 1024) + "k");
   }
 
-  measured.push({ name, kib: bytes / 1024, parts });
+  const hrefs = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]*href="([^"]+)"/g)]
+    .map((m) => m[1].split("?")[0]);
+  ok(hrefs.length > 0, `${name} emits at least one stylesheet, so the CSS measurement has a subject`);
+  let css = 0;
+  let cssGzip = 0;
+  for (const href of hrefs) {
+    let size = null;
+    try { size = sizeOf(href); } catch { size = null; }
+    ok(size !== null, `${name} links ${href} and that file exists`);
+    if (size === null) continue;
+    css += size;
+    cssGzip += gzipOf(href);
+  }
+
+  measured.push({ name, kib: bytes / 1024, raw: bytes, gzip, css, cssGzip, parts });
 }
 
 measured.sort((a, b) => b.kib - a.kib);
@@ -77,6 +183,62 @@ for (const m of measured) {
     "    " + String(Math.round(m.kib)).padStart(4) + "k" +
     (ceiling ? " / " + String(ceiling) + "k" : "  (no ceiling)") +
     "  " + m.name.replace(/Page$/, "").padEnd(10) + m.parts.join("  "));
+}
+
+{
+  const kib = (n) => (n / 1024).toFixed(1);
+  const rows = [...measured].sort((a, b) => a.name.localeCompare(b.name));
+  const head = ["route", "JS raw", "JS gzip", "CSS raw", "CSS gzip"];
+  const line = (cells) => "  " + cells.map((c, i) => (i === 0 ? String(c).padEnd(10) : String(c).padStart(22))).join("");
+  console.log("  weight ledger, KiB used / ceiling (headroom):");
+  console.log(line(head));
+  const table = [];
+  for (const m of rows) {
+    const cells = BASES.map((b) => `${kib(m[b.key])} / ${b.ceilings[m.name]} (${kib(b.ceilings[m.name] * 1024 - m[b.key])})`);
+    console.log(line([m.name.replace(/Page$/, ""), ...cells]));
+    table.push("| " + [m.name.replace(/Page$/, ""), ...cells].join(" | ") + " |");
+  }
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+        "\n### Flows weight ledger, KiB used / ceiling (headroom)\n\n| route | JS raw | JS gzip | CSS raw | CSS gzip |\n|---|---|---|---|---|\n" +
+        table.join("\n") + "\n");
+    } catch {}
+  }
+}
+
+for (const m of measured) {
+  const faults = judge(m);
+  eq(faults.join("; "), "",
+     `${m.name} is inside all four ceilings and no ceiling hangs loose of it. Raw JavaScript stays the binding ` +
+     `basis (parse and compile cost follows raw bytes); gzip and CSS ceilings sit 2-3 KiB above the measurement. ` +
+     `A change that saves bytes lowers the ceiling in the same diff, so the saving cannot be spent by the next ` +
+     `change unseen; one that adds them raises it in the diff where it can be argued`);
+}
+
+{
+  const base = { name: "marketPage", raw: 255005, gzip: 75947, css: 96078, cssGzip: 21012 };
+  eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
+  ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
+     "the judge fails a route inflated by 8 KiB of gzip");
+  ok(judge({ ...base, raw: base.raw + 8 * 1024 }).length > 0, "the judge fails a route inflated by 8 KiB raw");
+  ok(judge({ ...base, css: base.css + 8 * 1024 }).length > 0, "the judge fails a stylesheet inflated by 8 KiB");
+  ok(judge({ ...base, cssGzip: base.cssGzip + 8 * 1024 }).length > 0, "the judge fails a stylesheet inflated by 8 KiB of gzip");
+  ok(judge({ ...base, gzip: base.gzip - 8 * 1024 }).length > 0,
+     "the ratchet fails a route that saved 8 KiB of gzip and left its ceiling where it was");
+  ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
+     "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
+  ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
+  const events = { name: "eventsPage", raw: 110432, gzip: 33441, css: 106940, cssGzip: 22592 };
+  eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
+  eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
+}
+
+for (const name of Object.keys(CEILING_KIB)) {
+  for (const t of [GZIP_KIB, CSS_KIB, CSS_GZIP_KIB]) {
+    ok(Object.prototype.hasOwnProperty.call(t, name) && Object.keys(t).length === Object.keys(CEILING_KIB).length,
+       `${name} has an entry in every ceiling table and no table has a stray one`);
+  }
 }
 
 for (const m of measured) {
@@ -135,7 +297,7 @@ for (const name of Object.keys(CEILING_KIB)) {
   }
 
   {
-    const ui = readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8");
+    const ui = readFileSync(new URL("assets/js/flows-chart.js", REPO), "utf8");
     const exported = ui.match(/const chart = Object\.freeze\(\{([\s\S]*?)\}\);/);
     ok(exported && /\bline\b/.test(exported[1]) && /\bLEVELS\b/.test(exported[1]),
        "the chart export list is found, so the next line reads it rather than nothing");
@@ -147,6 +309,31 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(!route.parts.some((part) => /^flows-cursor\.js/.test(part)), `no route links flows-cursor.js (${route.name})`);
     }
     ok(!existsSync(new URL("assets/js/flows-cursor.js", REPO)), "and flows-cursor.js is deleted rather than orphaned");
+  }
+
+  {
+    const CHART_ROUTES = ["deskPage", "historyPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage", "trackPage",
+      "unusualPage", "watchPage"];
+    const FREE_ROUTES = ["aboutPage", "askPage", "eventsPage", "glossaryPage", "loginPage", "politicalPage"];
+    const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
+    eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
+       "the chart library ships on exactly the ten routes that draw a chart, and the routes that draw none never download it");
+    for (const name of FREE_ROUTES) {
+      ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
+    }
+    for (const name of CHART_ROUTES) {
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL" }));
+      const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
+      const at = order.indexOf("/assets/js/flows-ui.js");
+      ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
+         `${name} links flows-chart.js directly after flows-ui.js, so no script between them captures a FlowsUI without chart`);
+      ok(/<script src="[^"]*flows-chart\.js\?v=\d+" defer><\/script>/.test(html), `${name} loads it deferred at the asset version`);
+    }
+    const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
+    console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
+    ok(core < 60000, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
+       "and none of the chart drawing functions is left behind in the core");
   }
 
   const askBytes = sizeOf("/assets/js/flows-ask.js");

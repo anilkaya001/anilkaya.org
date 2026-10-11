@@ -267,7 +267,10 @@
 .st-more { margin-top: var(--sp-2); }
 .st-empty { margin: var(--sp-4) 0; color: var(--label-2); }
 
-.st-out-b, .st-cal-b { display: flex; flex-direction: column; gap: var(--sp-4); }
+.st-out-b, .st-cal-b, .st-ide-b { display: flex; flex-direction: column; gap: var(--sp-4); }
+.st-note { margin: 0; color: var(--label-3); font: var(--t-caption); }
+.st-rel { min-width: 28rem; }
+.st-rel td, .st-rel th[scope=row] { font-variant-numeric: tabular-nums; }
 .st-loading { min-height: 200px; border-radius: var(--r-md); background: var(--fill-4); }
 .st-meter-w { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); color: var(--label-3); font: var(--t-caption2); }
 .st-meter { position: relative; height: 18px; }
@@ -301,6 +304,7 @@
   .st-grid > #stNames .st-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .st-grid > #stOutcomes { grid-column: 1 / span 4; grid-row: 3; }
   .st-grid > #stCalib { grid-column: 5 / span 4; grid-row: 3; }
+  .st-grid > #stIdeas { grid-column: 1 / -1; grid-row: 4; }
 }
 
 .rec-conv-lead { margin: 0 0 var(--sp-4); color: var(--label-1); font: var(--t-callout); }

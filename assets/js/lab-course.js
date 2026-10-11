@@ -210,7 +210,7 @@
 
   function recordSkills(st, correct, hinted) {
     if (!window.Auth || typeof window.Auth.recordSkillAttempt !== "function") return;
-    for (const skillId of st.skillIds || []) void window.Auth.recordSkillAttempt(skillId, st.variantId || st.id, { correct, hinted });
+    for (const skillId of st.skillIds || []) void window.Auth.recordSkillAttempt(skillId, topic.id + ":" + st.id, { correct, hinted });
   }
 
   function buildCodeChallenge(st, i, figsEl) {

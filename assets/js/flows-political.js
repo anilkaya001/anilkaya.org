@@ -4,7 +4,7 @@
   const UI = window.FlowsUI;
   const status = document.getElementById("plStatus");
   if (!UI || !status) return;
-  const { h, F } = UI;
+  const { h, F, isNum } = UI;
   const DASH = UI.DASH, MID = UI.MID;
   const FRESH = "•";
   const STATUTE = 45;
@@ -20,23 +20,9 @@
     holders: document.getElementById("plHolders"),
   };
 
-  const num = (v) => {
-    if (typeof v === "number") return Number.isFinite(v) ? v : null;
-    if (typeof v !== "string" || !v.trim()) return null;
-    const x = Number(v);
-    return Number.isFinite(x) ? x : null;
-  };
-  const usd = (v) => {
-    const x = num(v);
-    if (x === null) return DASH;
-    const a = Math.abs(x), sign = x < 0 ? UI.MINUS : "";
-    if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
-    if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
-    return sign + "$" + a.toFixed(0);
-  };
-  const qty = (v) => (num(v) === null ? DASH : num(v).toLocaleString("en-US"));
-  const lagText = (v) => (num(v) === null ? DASH : Math.round(num(v)) + "d");
+  const usd = F.unit.of("moneyCompact", { dp: "short" });
+  const qty = (v) => (isNum(v) === null ? DASH : isNum(v).toLocaleString("en-US"));
+  const lagText = (v) => (isNum(v) === null ? DASH : Math.round(isNum(v)) + "d");
   const cardKey = (t) => String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
   const MEMBER = { house: "House", senate: "Senate", executive: "Executive" };
 
@@ -83,7 +69,7 @@
     let n = 0, comparable = 0;
     for (let i = 1; i < rows.length; i++) {
       const a = rows[i - 1], b = rows[i];
-      const aLo = num(a.boughtLo), aHi = num(a.boughtHi), bLo = num(b.boughtLo), bHi = num(b.boughtHi);
+      const aLo = isNum(a.boughtLo), aHi = isNum(a.boughtHi), bLo = isNum(b.boughtLo), bHi = isNum(b.boughtHi);
       if (aLo === null || aHi === null || bLo === null || bHi === null) continue;
       comparable++;
       if (aLo <= bHi && bLo <= aHi) n++;
@@ -99,7 +85,7 @@
   }
   function openNote(rows, subject) {
     let bands = 0, floor = 0;
-    for (const r of rows) { bands += num(r.openBands) || 0; floor += num(r.openFloor) || 0; }
+    for (const r of rows) { bands += isNum(r.openBands) || 0; floor += isNum(r.openFloor) || 0; }
     if (!bands) return "";
     return bands + " disclosure" + (bands === 1 ? "" : "s") + " here state" + (bands === 1 ? "s" : "") +
       " a floor and no ceiling (“Over $50,000,000” and its kind). Those have no midpoint to sum, so they are excluded from every total in this panel; the floors they do state add to " +
@@ -108,11 +94,11 @@
   function ownerNote(rows, unit) {
     let known = 0, self = 0, carried = false;
     for (const r of rows) {
-      const k = num(r.ownerKnown);
+      const k = isNum(r.ownerKnown);
       if (k === null) continue;
       carried = true;
       known += k;
-      const sf = num(r.selfFiled);
+      const sf = isNum(r.selfFiled);
       if (sf !== null) self += sf;
     }
     if (!carried) return "This payload does not carry the executing account behind these " + unit + ", so the share disclosed in a filer’s own name cannot be stated here. That is a gap in what was published, not a reading about the filings.";
@@ -133,7 +119,7 @@
   function listedNote(rows) {
     let other = 0, filings = 0;
     for (const r of rows) {
-      const o = num(r.boughtOther), c = num(r.buysOther);
+      const o = isNum(r.boughtOther), c = isNum(r.buysOther);
       if (o !== null) other += o;
       if (c !== null) filings += c;
     }
@@ -141,7 +127,7 @@
     return filings + " of the disclosures behind these totals named no listed security (Treasury bills, funds and partnership interests carry no ticker), adding " + usd(other) + " that the ranking by name cannot show.";
   }
   function countedNote(feed, unit, cut) {
-    const seen = num(feed.seen), shed = num(feed.shed);
+    const seen = isNum(feed.seen), shed = isNum(feed.shed);
     if (seen === null) return "";
     if (!shed) return seen + " " + unit + (seen === 1 ? "" : "s") + " in the window.";
     return "Top " + feed.rows.length + " of " + seen + " " + unit + "s in the window; " + shed + " " + (cut || "ranked below the cut") + " and are not drawn.";
@@ -159,7 +145,7 @@
 
   function rangeBar(scale, mid, lo, hi, i) {
     const wrap = h("span", { class: "pl-bar", ...HIDE });
-    const m = num(mid), l = num(lo), hh = num(hi);
+    const m = isNum(mid), l = isNum(lo), hh = isNum(hi);
     if (l !== null && hh !== null && hh > l && scale > 0) {
       wrap.append(h("i", { class: "pl-bar-band", style: { left: Math.min(100, (l / scale) * 100) + "%", width: Math.max(0.4, Math.min(100, ((hh - l) / scale) * 100)) + "%" } }));
     }
@@ -168,9 +154,9 @@
     }
     return wrap;
   }
-  const scaleOf = (rows) => rows.reduce((s, r) => Math.max(s, num(r.boughtHi) || 0, num(r.bought) || 0), 0);
+  const scaleOf = (rows) => rows.reduce((s, r) => Math.max(s, isNum(r.boughtHi) || 0, isNum(r.bought) || 0), 0);
   const lagCell = (v) => {
-    const x = num(v);
+    const x = isNum(v);
     return h("span", { class: "fu-v pl-lagv", "data-tone": x !== null && x > STATUTE ? "warn" : null, title: x !== null && x > STATUTE ? "Past the 45 days the STOCK Act allows." : null }, lagText(v));
   };
 
@@ -182,25 +168,25 @@
     const rows = feed.rows;
     const scale = scaleOf(rows);
     const items = rows.map((r, j) => {
-      const otherBuys = num(r.buysOther), nNames = num(r.names);
+      const otherBuys = isNum(r.buysOther), nNames = isNum(r.names);
       const other = otherBuys
-        ? { text: usd(r.boughtOther), title: otherBuys + " of this filer’s " + num(r.buys) + " disclosed purchases named no listed security — Treasury bills, funds and partnership interests carry no ticker — so that size is in the total and in no row of the ranking by name." }
+        ? { text: usd(r.boughtOther), title: otherBuys + " of this filer’s " + isNum(r.buys) + " disclosed purchases named no listed security — Treasury bills, funds and partnership interests carry no ticker — so that size is in the total and in no row of the ranking by name." }
         : { text: DASH, title: otherBuys === null ? "This payload does not split the total by whether a listed security was named." : "Every disclosed purchase behind this total named a listed security." };
       const names = nNames === null
         ? { text: DASH, title: "None of this filer’s disclosed purchases named a listed security, so there is no name count here. That is not a count of zero." }
         : { text: String(nNames), title: nNames + " listed names" };
       const row = h("div", { class: "pl-row pl-buyer", role: "listitem", "data-names": names.text, "data-other": other.text,
-        title: [(r.who || DASH), "low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi), (num(r.buys) ?? DASH) + " filings",
+        title: [(r.who || DASH), "low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi), (isNum(r.buys) ?? DASH) + " filings",
           "names " + names.text + ": " + names.title, "not listed " + other.text + ": " + other.title].join(" " + MID + " ") },
       h("span", { class: "pl-rank" }, String(j + 1)),
       h("span", { class: "pl-who" },
-        h("span", { class: "pl-who-l" }, num(r.freshBuys) ? h("span", { class: "pl-fresh", title: num(r.freshBuys) + " of these purchases were disclosed on the window’s newest filing date." }, FRESH) : null,
+        h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh", title: isNum(r.freshBuys) + " of these purchases were disclosed on the window’s newest filing date." }, FRESH) : null,
           h("b", { class: "pl-name" }, r.who || DASH)),
         h("small", { class: "pl-chamber" }, MEMBER[r.memberType] || (r.memberType ? String(r.memberType) : ""))),
       rangeBar(scale, r.bought, r.boughtLo, r.boughtHi, j),
       h("span", { class: "fu-v fu-strong pl-mid" }, usd(r.bought)),
       lagCell(r.medianLagDays),
-      h("span", { class: "fu-v fu-wide pl-sold", title: "Disclosed sales, shown beside the purchases and never folded into them." }, num(r.sells) ? usd(r.sold) : DASH));
+      h("span", { class: "fu-v fu-wide pl-sold", title: "Disclosed sales, shown beside the purchases and never folded into them." }, isNum(r.sells) ? usd(r.sold) : DASH));
       return row;
     });
     host.buyers.replaceChildren(
@@ -215,7 +201,7 @@
     if (!feed || !Array.isArray(feed.rows) || !feed.rows.length) return "";
     const rows = feed.rows;
     return [countedNote(feed, "filer"), overlapNote(rows), openNote(rows, "purchases"), listedNote(rows), ownerNote(rows, "totals"),
-      freshNote(p, rows.filter((r) => num(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ");
+      freshNote(p, rows.filter((r) => isNum(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ");
   }
 
   function paintAssets(p, mode) {
@@ -234,13 +220,13 @@
         const items = size.rows.map((r, j) => h(carded && r.t && carded.has(cardKey(r.t)) ? "a" : "div", {
           class: "pl-row pl-asset-row", role: carded && r.t && carded.has(cardKey(r.t)) ? null : "listitem",
           href: carded && r.t && carded.has(cardKey(r.t)) ? "/flows/ticker/?t=" + encodeURIComponent(cardKey(r.t)) : null,
-          title: String(r.t || r.asset || DASH) + " " + MID + " low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi) + " " + MID + " " + (num(r.buys) ?? DASH) + " filings" + (num(r.sells) ? " " + MID + " sold " + usd(r.sold) : ""),
+          title: String(r.t || r.asset || DASH) + " " + MID + " low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi) + " " + MID + " " + (isNum(r.buys) ?? DASH) + " filings" + (isNum(r.sells) ? " " + MID + " sold " + usd(r.sold) : ""),
         },
-        h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, num(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
+        h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
           r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
         rangeBar(scale, r.bought, r.boughtLo, r.boughtHi, j),
         h("span", { class: "fu-v fu-strong pl-mid" }, usd(r.bought)),
-        h("span", V, num(r.filers) === null ? DASH : String(num(r.filers)))));
+        h("span", V, isNum(r.filers) === null ? DASH : String(isNum(r.filers)))));
         body.append(
           h("div", { class: "pl-row pl-asset-row fu-head", ...HIDE }, h("span", null, "Name"), h("span", null, "Disclosed purchases"), h("span", V, "Mid"), h("span", V, "Filers")),
           listed(UI.list(items, { visible: 8, label: "Names ranked by disclosed purchase size" })));
@@ -262,20 +248,20 @@
     }
     const rows = Array.isArray(feed.rows) ? feed.rows : [];
     if (!rows.length) {
-      const floor = num(feed.minFilers);
+      const floor = isNum(feed.minFilers);
       const box = UI.silent({ state: "quiet", reason: floor === null
         ? "No name in this window drew disclosed purchases from enough separate filers to clear the floor. This payload does not state what that floor was, so the emptiness cannot be read against it here."
-        : "No name in this window drew disclosed purchases from " + floor + " or more separate filers" + (num(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any" : "") + ". The floor is not relaxed to fill the panel." }, "Names by breadth", 200);
+        : "No name in this window drew disclosed purchases from " + floor + " or more separate filers" + (isNum(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any" : "") + ". The floor is not relaxed to fill the panel." }, "Names by breadth", 200);
       box.dataset.empty = "quiet";
       return h("div", { class: "pl-clusters" }, box);
     }
-    const maxF = Math.max(1, ...rows.map((r) => num(r.filers) || 0));
+    const maxF = Math.max(1, ...rows.map((r) => isNum(r.filers) || 0));
     const items = rows.map((r) => {
-      const f = num(r.filers) || 0;
+      const f = isNum(r.filers) || 0;
       const linked = carded && r.t && carded.has(cardKey(r.t));
       return h(linked ? "a" : "div", { class: "pl-row pl-cluster", role: linked ? null : "listitem", href: linked ? "/flows/ticker/?t=" + encodeURIComponent(cardKey(r.t)) : null,
         title: String(r.t || DASH) + " " + MID + " " + f + " distinct filers " + MID + " median lag " + lagText(r.medianLagDays) + " " + MID + " midpoint " + usd(r.bought) },
-      h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, num(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
+      h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
         r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
       h("span", { class: "pl-dots", ...HIDE }, Array.from({ length: Math.min(f, 12) }, () => h("i")), f > 12 ? h("b", null, "+") : null, h("span", { class: "pl-dots-rest", style: { "--n": String(Math.max(0, maxF - f)) } })),
       h("span", { class: "fu-v fu-strong pl-filers" }, String(f)),
@@ -288,8 +274,8 @@
 
   function clustersNote(feed) {
     if (!feed || feed.status !== "ok" || !Array.isArray(feed.rows) || !feed.rows.length) return "";
-    const floor = num(feed.minFilers), cleared = num(feed.seen), pool = num(feed.namesSeen);
-    return (num(feed.shed) || pool === null || cleared === null ? countedNote(feed, "name", "drew fewer filers") : cleared + " of the " + pool + " names in the window clear" + (cleared === 1 ? "s" : "") + " the floor.") + " " +
+    const floor = isNum(feed.minFilers), cleared = isNum(feed.seen), pool = isNum(feed.namesSeen);
+    return (isNum(feed.shed) || pool === null || cleared === null ? countedNote(feed, "name", "drew fewer filers") : cleared + " of the " + pool + " names in the window clear" + (cleared === 1 ? "s" : "") + " the floor.") + " " +
       (floor === null ? "This payload does not state the floor these rows cleared, so the ordering is drawn without it. "
         : "The floor is " + floor + " separate filers, stated rather than tuned" + (floor === 2 ? ": two is the smallest number that could be called convergence at all. " : ", above the two that coincidence alone supplies on a market-wide window. ")) +
       "Nothing here blends breadth with size into a single figure — each key breaks ties in the one before it, so the order can be checked by eye against the columns.";
@@ -322,10 +308,10 @@
     setModuleState(host.recent, { state: "ok" }, "Newest");
     const carded = cardedSet(p);
     const rows = feed.rows;
-    const maxLag = Math.max(90, Math.ceil(Math.max(...rows.map((r) => num(r.lagDays) || 0)) / 15) * 15);
+    const maxLag = Math.max(90, Math.ceil(Math.max(...rows.map((r) => isNum(r.lagDays) || 0)) / 15) * 15);
     const mark = (STATUTE / maxLag) * 100;
     const items = rows.map((r, i) => {
-      const lag = num(r.lagDays);
+      const lag = isNum(r.lagDays);
       const late = lag !== null && lag > STATUTE;
       const fresh = p.latestFiled && r.filedDate === p.latestFiled;
       const side = r.side === "buy" ? "is-buy" : r.side === "sell" ? "is-sell" : "is-neither";
@@ -352,10 +338,10 @@
   }
 
   function bandText(r) {
-    const lo = num(r.lo), hi = num(r.hi);
+    const lo = isNum(r.lo), hi = isNum(r.hi);
     if (lo !== null && hi !== null) return usd(lo) + "–" + usd(hi);
     if (lo !== null) return "over " + usd(lo);
-    if (num(r.mid) !== null) return usd(r.mid);
+    if (isNum(r.mid) !== null) return usd(r.mid);
     return DASH;
   }
 
@@ -364,7 +350,7 @@
     if (!feed || !Array.isArray(feed.rows) || !feed.rows.length) return "";
     let late = 0, dated = 0, fresh = 0;
     for (const r of feed.rows) {
-      if (num(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
+      if (isNum(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
       if (p.latestFiled && r.filedDate === p.latestFiled) fresh++;
     }
     return [countedNote(feed, "disclosure", "were filed earlier"),
@@ -383,9 +369,9 @@
     holdersShown(!(st && st.kind === "unavailable" && /HTTP 4(?!08|29)\d\d/.test(String(feed.reason))));
     if (st) { silence(host.holders, st, "Holdings", 120); return; }
     setModuleState(host.holders, { state: "ok" }, "Holdings");
-    const maxQ = Math.max(1, ...feed.rows.map((r) => num(r.maxQty) || 0));
+    const maxQ = Math.max(1, ...feed.rows.map((r) => isNum(r.maxQty) || 0));
     const items = feed.rows.map((r) => {
-      const lo = num(r.minQty), hi = num(r.maxQty);
+      const lo = isNum(r.minQty), hi = isNum(r.maxQty);
       return h("div", { class: "pl-row pl-holder", role: "listitem" },
         h("span", { class: "pl-who" }, h("b", { class: "pl-name" }, r.who || DASH), h("small", { class: "pl-owner" + (r.owner === null || r.owner === undefined ? " is-unknown" : "") }, r.owner === null || r.owner === undefined ? "not stated" : String(r.owner))),
         h("b", { class: "pl-tick" }, String(r.t || DASH)),
@@ -401,7 +387,7 @@
   function holdersNote(p) {
     const feed = p.holders;
     if (!feed || feed.status !== "ok") return { lead: null, notes: [] };
-    const known = num(feed.ownerKnown), self = num(feed.selfFiled);
+    const known = isNum(feed.ownerKnown), self = isNum(feed.selfFiled);
     return {
       lead: "Holdings by politician in the names the board went deep on. The figures are a " + String(feed.qtyUnit || "quantity the vendor does not define").replace(/\.?$/, ".") + " They are not summed with, or ranked against, the dollar bands above.",
       notes: [countedNote(feed, "holding", "hold less by the vendor's own midpoint"),
@@ -420,16 +406,16 @@
   function paintChips(p) {
     const recent = p.recent && Array.isArray(p.recent.rows) ? p.recent.rows : [];
     let late = 0, dated = 0;
-    for (const r of recent) if (num(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
-    const filings = num(p.filings);
+    for (const r of recent) if (isNum(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
+    const filings = isNum(p.filings);
     host.chips.replaceChildren(UI.chips([
       UI.gaugeChip({ icon: "hall", color: "--accent-ink", value: filings === null ? DASH : filings.toLocaleString("en-US"), label: "Disclosures",
         info: { title: "Disclosures", lead: "Statutory filings in the window.", facts: [["Window", p.window && p.window.from ? p.window.from + " to " + (p.window.to || "") : null]] } }),
-      UI.gaugeChip({ icon: "live", color: "--up", value: num(p.freshFilings) === null ? DASH : String(num(p.freshFilings)), label: p.latestFiled ? "Filed " + F.day(p.latestFiled) : "Newest",
+      UI.gaugeChip({ icon: "live", color: "--up", value: isNum(p.freshFilings) === null ? DASH : String(isNum(p.freshFilings)), label: p.latestFiled ? "Filed " + F.day(p.latestFiled) : "Newest",
         info: { title: "Newest filings", lead: p.latestFiled ? "Disclosures filed on " + p.latestFiled + ", the newest filing date in the window." : "The payload carries no newest filing date." } }),
-      UI.gaugeChip({ icon: "long", color: "--up", value: p.buyers && num(p.buyers.seen) !== null ? String(num(p.buyers.seen)) : DASH, label: "Buyers",
+      UI.gaugeChip({ icon: "long", color: "--up", value: p.buyers && isNum(p.buyers.seen) !== null ? String(isNum(p.buyers.seen)) : DASH, label: "Buyers",
         info: { title: "Buyers", lead: "Filers who disclosed at least one purchase in the window." } }),
-      UI.gaugeChip({ icon: "list", color: "--label-2", value: p.assets && num(p.assets.seen) !== null ? String(num(p.assets.seen)) : DASH, label: "Names",
+      UI.gaugeChip({ icon: "list", color: "--label-2", value: p.assets && isNum(p.assets.seen) !== null ? String(isNum(p.assets.seen)) : DASH, label: "Names",
         info: { title: "Names", lead: "Listed names that drew at least one disclosed purchase." } }),
       UI.gaugeChip({ ring: dated ? late / dated : null, color: "--warn", value: dated ? Math.round((late / dated) * 100) + "%" : DASH, label: "Late",
         info: { title: "Late filings", lead: "Share of the newest disclosures filed past the 45 days the STOCK Act allows." } }),
@@ -440,7 +426,7 @@
     const w = p.window || {}, src = p.source || {};
     const bits = [];
     if (w.from && w.to) bits.push(F.day(w.from) + " – " + F.day(w.to));
-    if (num(w.days) !== null) bits.push(num(w.days) + " days");
+    if (isNum(w.days) !== null) bits.push(isNum(w.days) + " days");
     let warnText = null;
     if (src.paginated === false) warnText = "The vendor returned the same page twice, so only the first was kept: this window is one page deep rather than the " + (src.pages || 1) + " it asked for. The ranking is over that narrower population.";
     if (src.windowed === false) warnText = "The windowed route refused, so this page is the most recent disclosures the vendor will return in one call, with no date range. The ranking is over that selection rather than over the window named above.";
@@ -451,16 +437,16 @@
 
   function paintStatus(p) {
     const w = p.window || {}, src = p.source || {};
-    const pages = num(src.pages);
+    const pages = isNum(src.pages);
     const how = src.route ? "via " + src.route + (pages !== null ? ", " + pages + " page" + (pages === 1 ? "" : "s") + " deep" : "") : "";
-    const freshCount = num(p.freshFilings), filings = num(p.filings);
+    const freshCount = isNum(p.freshFilings), filings = isNum(p.filings);
     const filedWhen = w.from ? " filed between " + w.from + " and " + (w.to || "today") : "";
     const read = Date.parse(String(p.readAt || ""));
     status.textContent = [
       filings === null ? (filedWhen ? "Disclosures" + filedWhen : "") : filings + " disclosure" + (filings === 1 ? "" : "s") + filedWhen,
       freshCount !== null && p.latestFiled ? freshCount + " of them on " + p.latestFiled + ", the newest filing date here" : "",
       how,
-      num(p.unusable) ? num(p.unusable) + " carried no filer or name and were dropped" : "",
+      isNum(p.unusable) ? isNum(p.unusable) + " carried no filer or name and were dropped" : "",
       Number.isFinite(read) ? "read " + new Date(read).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "",
     ].filter(Boolean).join(" · ");
   }
@@ -491,7 +477,7 @@
       title: "Names",
       lead: "Size ranks names by the summed midpoint of disclosed purchases across every filer. Breadth orders them by how many distinct filers disclosed a purchase, then by median lag, then by size.",
       sections: [
-        { title: "Size", lines: [P && P.assets && Array.isArray(P.assets.rows) ? [countedNote(P.assets, "name"), overlapNote(P.assets.rows), openNote(P.assets.rows, "purchases"), ownerNote(P.assets.rows, "names"), freshNote(P, P.assets.rows.filter((r) => num(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ") : null] },
+        { title: "Size", lines: [P && P.assets && Array.isArray(P.assets.rows) ? [countedNote(P.assets, "name"), overlapNote(P.assets.rows), openNote(P.assets.rows, "purchases"), ownerNote(P.assets.rows, "names"), freshNote(P, P.assets.rows.filter((r) => isNum(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ") : null] },
         { title: "Breadth", lines: [P && P.clusters ? clustersNote(P.clusters) : null, P && P.clusters && P.clusters.basis ? String(P.clusters.basis) : null, "Size is the weakest thing this data knows: one account’s large purchase of a single name outranks several separate filers converging on another wherever dollars decide the order."] },
         { title: "Links", lines: [P && Array.isArray(P.carded) ? "A name is a link where the board published a detail card for it and plain text where it did not; the list of carded names comes from the payload." : "Names are plain text: this payload carries no list of the names a detail card exists for."] },
       ],

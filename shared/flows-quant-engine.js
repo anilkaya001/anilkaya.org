@@ -24,6 +24,12 @@ export const ENGINE_LINES = Object.freeze({
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const EPS = 1e-12;
 
+const RANK_KAPPA = 1, RANK_MIN_SESSIONS = 1;
+
+export function rankModeOf(value) {
+  return typeof value === "string" && value.trim().toLowerCase() === "v2" ? "v2" : "v1";
+}
+
 export function normaliseLeg(l) {
   const side = l.side === "short" || l.side === -1 ? -1 : 1;
   return { ...l, type: l.type === "S" ? "S" : l.type === "P" ? "P" : "C", side, qty: fin(l.qty) && l.qty > 0 ? l.qty : 1 };
@@ -833,7 +839,21 @@ function chooseExpiry(fam, list, ctx) {
   return { front: inWin[0] };
 }
 
-const holdsUnderEveryLaw = (s) => !Array.isArray(s.ev.pBand) || (fin(s.ev.pBand[0]) && s.ev.pBand[0] > 0);
+const holdsUnderEveryLaw = (s) => (!Array.isArray(s.ev.pBand) || (fin(s.ev.pBand[0]) && s.ev.pBand[0] > 0)) && (!s.rankV2 || s.rankV2.evShrunk > 0);
+
+export function applyRankV2(structs) {
+  for (const s of structs) {
+    const band = Array.isArray(s.ev.pBand) && fin(s.ev.pBand[0]) && fin(s.ev.pBand[2]) ? s.ev.pBand : null;
+    const shrink = band ? RANK_KAPPA * (band[2] - band[0]) / 2 : 0;
+    const sessions = Math.max(RANK_MIN_SESSIONS, fin(s.sessions) ? s.sessions : 0);
+    s.scoreRaw = s.score;
+    if (!fin(s.ev.p) || !(s.capital.value > 0)) { s.score = null; continue; }
+    const evShrunk = s.ev.p - shrink;
+    s.rankV2 = { evShrunk: r$(evShrunk), shrink: r$(shrink), sessions };
+    s.score = roundTo(evShrunk / (s.capital.value * sessions), 6);
+  }
+  return structs;
+}
 
 export function rankStructures(structs, state) {
   const eligible = structs.filter((s) => s.grade >= 1 && fin(s.ev.p) && s.ev.p > 0 && holdsUnderEveryLaw(s) && fin(s.score));
@@ -1010,6 +1030,8 @@ export function runEngine(input) {
     structures.push({ id: "S" + (i + 1), ...p.out });
     raws.push(p.raw);
   });
+  const v2 = rankModeOf(input.rank) === "v2";
+  if (v2) applyRankV2(structures);
   const ranking = rankStructures(structures, state);
   const detailed = new Set(input.grids === "all" ? structures.map((x) => x.id) : [...ranking.ideas, ranking.noTrade && ranking.noTrade.closest].filter(Boolean));
   structures.forEach((st, i) => {
@@ -1028,6 +1050,7 @@ export function runEngine(input) {
     families: families.map((f) => ({ family: f.family, score: roundTo(f.score, 4), rules: f.rules, veto: f.veto, expiry: f.choice ? f.choice.front.expiry : null })),
     structures, ideas: ranking.ideas, noTrade: ranking.noTrade,
   };
+  if (v2) out.rank = "v2";
   if (input.fits) out.fits = list.map(expiryFit);
   return out;
 }

@@ -1,6 +1,6 @@
 import { HttpError, json, readBounded, requireMethod } from "../http.js";
 import * as FLOWS_LIVE from "../../shared/flows-live-worker.js";
-import { archiveWriteAction, ARCHIVE_REFUSALS } from "../../shared/flows-archive.js";
+import { archiveWriteAction, ARCHIVE_REFUSALS, PERMANENT_ARCHIVE_KEY_RE } from "../../shared/flows-archive.js";
 import {
   DATED_ARCHIVE_KEY_RE, INGEST_LIST_KINDS, INGEST_META_KEYS_MAX, ingestKeyParts,
 } from "../store.js";
@@ -101,6 +101,9 @@ export function flowsIngestRows(deps) {
     }
 
     if (request.method === "DELETE") {
+      if (PERMANENT_ARCHIVE_KEY_RE.test(key)) {
+        throw new HttpError(400, "undeletable_key", "Permanent archive keys are never removed; write the correction under the next revision key");
+      }
       if (!DATED_ARCHIVE_KEY_RE.test(key) && !(tickerKey && tokenKind === "nightly")) {
         throw new HttpError(400, "undeletable_key", "Only dated archive keys and, for the nightly token, card, card-x and hist keys can be removed");
       }
@@ -119,13 +122,15 @@ export function flowsIngestRows(deps) {
 
     await ensureFlowsTables(env);
 
-    if (DATED_ARCHIVE_KEY_RE.test(key)) {
+    const permanentKey = PERMANENT_ARCHIVE_KEY_RE.test(key);
+    if (permanentKey || DATED_ARCHIVE_KEY_RE.test(key)) {
       const trace = {};
       const existing = await store.read(env, key, trace);
       const action = archiveWriteAction({
         readable: !trace.failed,
         exists: !!existing,
         same: !!existing && existing.payload === payload,
+        permanent: permanentKey,
       });
       if (action === "unchanged") {
         return json({ ok: true, key, bytes: payload.length, stored: "unchanged" });

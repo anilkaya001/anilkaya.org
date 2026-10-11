@@ -1,0 +1,19 @@
+.fx-doc {
+  width: min(44rem, 100%);
+  margin: 0 auto;
+  padding: 6rem max(var(--gutter), var(--safe-l)) 4rem;
+}
+.fx-doc h1 { margin: var(--sp-4) 0 var(--sp-3); font: var(--t-large); letter-spacing: var(--t-large-track); }
+.fx-doc h2 { margin: var(--sp-8) 0 var(--sp-3); font: var(--t-title3); letter-spacing: var(--t-title3-track); }
+.fx-doc-lede { margin: 0; color: var(--label-2); font: var(--t-body); }
+.fx-doc p, .fx-doc li, .fx-doc dd { font: var(--t-body); color: var(--label-1); }
+.fx-doc ul { margin: 0; padding-left: var(--sp-6); display: grid; gap: var(--sp-3); }
+.fx-doc a { color: var(--accent-soft); }
+.fx-doc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); margin-top: var(--sp-6); }
+.fx-doc-actions .flows-submit { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--sp-6); text-decoration: none; }
+.fx-doc-list { margin: var(--sp-6) 0 0; display: grid; gap: var(--sp-6); }
+.fx-doc-term { scroll-margin-top: 6rem; }
+.fx-doc-term dt { font: var(--t-headline); letter-spacing: var(--t-headline-track); }
+.fx-doc-term dd { margin: var(--sp-2) 0 0; display: grid; gap: var(--sp-3); }
+.fx-doc-term dd p { margin: 0; }
+.fx-doc-where { color: var(--label-2); font: var(--t-footnote); }

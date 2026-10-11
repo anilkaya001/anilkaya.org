@@ -34,6 +34,26 @@ const quotes = await (async () => {
 const server = await startWorker({ extraVars: [`MARKET_QUOTE_ORIGIN:${quotes.base}`] });
 const base = server.baseURL;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const rawFetch = globalThis.fetch;
+const LAB_MUTATION = /^\/api\/(?:progress|stats|placement|mastery|v2\/(?:progress|attempt|preferences|project))$/;
+const LAB_WINDOW_MS = 61_000;
+const LAB_PACED = 28;
+const labSent = new Map();
+globalThis.fetch = async (input, init = {}) => {
+  const target = new URL(typeof input === "string" ? input : input.url);
+  const method = String(init.method || "GET").toUpperCase();
+  const key = new Headers(init.headers).get("cookie");
+  if ((method === "PUT" || method === "DELETE") && key && target.origin === new URL(base).origin && LAB_MUTATION.test(target.pathname)) {
+    for (;;) {
+      const now = Date.now();
+      const sent = (labSent.get(key) || []).filter((t) => now - t < LAB_WINDOW_MS);
+      if (sent.length < LAB_PACED) { sent.push(now); labSent.set(key, sent); break; }
+      labSent.set(key, sent);
+      await sleep(sent[0] + LAB_WINDOW_MS - now + 25);
+    }
+  }
+  return rawFetch(input, init);
+};
 async function pollUntil(probe, timeoutMs) {
   const until = Date.now() + timeoutMs;
   for (;;) {
@@ -1029,6 +1049,34 @@ try {
   assert.equal(pendingLive.status, 200, "an unpublished live key is a 200 pending, not an error");
   assert.equal(pendingLive.headers.get("x-fresh-state"), "pending", "and says pending in its freshness header");
   assert.equal((await pendingLive.json()).status, "pending");
+
+  const flood = await signSession({ sub: "g_flood", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
+  const floodHeaders = {
+    Cookie: `session=${flood}`, "Content-Type": "application/json", Accept: "application/json",
+    Origin: base, "Sec-Fetch-Site": "same-origin", "X-IEWT-Owner": "g_flood", "X-IEWT-Generation": "0",
+  };
+  const floodBody = JSON.stringify({ activePathId: "complete-core", sessionMinutes: 20, weeklyGoalMinutes: 120 });
+  let accepted = 0;
+  let limited = null;
+  for (let i = 0; i < 60 && !limited; i++) {
+    const r = await rawFetch(base + "/api/v2/preferences", { method: "PUT", headers: floodHeaders, body: floodBody });
+    if (r.status === 200) accepted++;
+    else limited = r;
+  }
+  assert(limited, "the real LAB_WRITE binding refuses a Lab mutation within 60 in a minute");
+  assert(accepted >= 30 && accepted < 60, `at least the first 30 Lab mutations in a minute are accepted (a window boundary can admit more): ${accepted}`);
+  const limitedBody = await json(limited, 429);
+  assert.equal(limitedBody.error.code, "rate_limited", "the first refused Lab mutation is a JSON 429");
+  assert.equal(limited.headers.get("retry-after"), "60", "and says when to try again");
+  assertSecurity(limited, false);
+  const floodRead = await rawFetch(base + "/api/progress", { headers: { Cookie: `session=${flood}`, Accept: "application/json" } });
+  assert.equal(floodRead.status, 200, "a limited account can still read");
+  const bystander = await signSession({ sub: "g_bystander", exp: Date.now() + TEST_SESSION_TTL_MS }, SESSION_SECRET);
+  const bystanderPut = await rawFetch(base + "/api/v2/preferences", {
+    method: "PUT", body: floodBody,
+    headers: { ...floodHeaders, Cookie: `session=${bystander}`, "X-IEWT-Owner": "g_bystander" },
+  });
+  assert.equal(bystanderPut.status, 200, "another account is not limited by this account's flood");
 
   console.log("✓ worker: routing, metadata, headers, API validation, D1 union, mastery and placement isolation, generation-fenced reset, derived points, the market snapshot served stale-while-revalidate, and the Flows clock headers kept off the Lab APIs");
 } finally {

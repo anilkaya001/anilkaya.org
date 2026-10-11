@@ -500,8 +500,13 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   const leg = readFileSync(new URL("../scripts/flows-legs/live.mjs", import.meta.url), "utf8");
   eq((leg.match(/put\("live:alerts"/g) || []).length, 1,
     "the live leg writes the key exactly once, so the guard cannot be routed around");
-  ok(/if \(merged\.write\) await put\("live:alerts", merged\.write\);/.test(leg),
+  ok(/if \(merged\.write\) \{\s*await put\("live:alerts", merged\.write\);/.test(leg),
     "and that single write sits behind the merge's own verdict, so a declined read never publishes");
+  eq((leg.match(/put\("live:alerts:head"/g) || []).length, 1,
+    "the compact head is written from exactly one place");
+  ok(/if \(merged\.write\) \{\s*await put\("live:alerts", merged\.write\);\s*const head = typeof bytes\["live:alerts"\] === "number" \? shapeAlertsHead\(merged\.write, \{ writer \}\) : null;\s*if \(head\) await put\("live:alerts:head", head\);/.test(leg),
+    "and it sits behind the same verdict and behind the record's own write: it is built from the merged payload " +
+    "just published, only when that publish landed, so a head can never describe a record the store does not hold");
 
   const worker = workerSource();
   ok(absent(worker, /async function refreshFlowsIntraday/, { anchor: /async scheduled\(event, env, ctx\)/ }),

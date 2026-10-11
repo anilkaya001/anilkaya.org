@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 import * as W from "../shared/flows-live-worker.js";
 import { MARKET_INDICES } from "../shared/markets.js";
 import { easternInstant } from "../shared/flows-freshness.js";
@@ -40,9 +41,9 @@ function shiftClock(baseIso) {
 
 let instance = 0;
 async function client(D1, extra = {}) {
-  const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }), ...extra };
+  const env = { DB: D1, SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }), ...extra };
   if (env.AI) env.AI = guardAi(env.AI);
-  const token = await signFlowsSession(FLOWS_USERNAMES[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
+  const token = await signFlowsSession(FIXTURE_ROSTER[0], env.SESSION_SECRET, 3600, sessionEpoch(env));
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route, init = {}) => {
     const background = [];
@@ -60,7 +61,7 @@ async function client(D1, extra = {}) {
 const INGEST_TOKEN = "reads-ingest-token-abcdefghijklmnopqrstuvwxyz";
 async function ingestClient(D1) {
   const env = { DB: D1, SESSION_SECRET, FLOWS_INGEST_TOKEN: INGEST_TOKEN,
-    FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
   const worker = (await import("../worker.js?reads=" + (++instance))).default;
   return async (route) => {
     const req = new Request("https://anilkaya.org" + route, { headers: { Authorization: "Bearer " + INGEST_TOKEN } });
@@ -109,11 +110,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const answers = await Promise.all(HOME.map(get));
   ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all thirteen home-page reads at once");
   eq(f.count(SCHEMA_RE), 1,
-     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the fourteen-statement schema batch once, " +
+     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the sixteen-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
   eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of the schema bootstrap once");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 15 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 17 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");
@@ -537,6 +538,59 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
 {
   const f = fakeD1();
   seed(f);
+  const realFetch = globalThis.fetch;
+  const full = (type) => Array.from({ length: 500 }, (_, i) => ({ option_symbol: "NVDA261016" + type + String((i + 1) * 1000).padStart(8, "0") }));
+  const few = (type) => [{ option_symbol: "NVDA261016" + type + "00999000" }];
+  const run = async (secondPage) => {
+    const pages = [];
+    globalThis.fetch = async (input, init = {}) => {
+      const u = new URL(input instanceof Request ? input.url : String(input));
+      if (u.origin !== "http://vendor.test") return realFetch(input, init);
+      const type = u.searchParams.get("option_type") === "put" ? "P" : "C";
+      const page = Number(u.searchParams.get("page") || 1);
+      const call = { type, page, at: Date.now(), doneAt: null, abortedAt: null };
+      if (/option-contracts$/.test(u.pathname)) pages.push(call);
+      const reply = (rows) => new Response(JSON.stringify({ data: rows }), { headers: { "Content-Type": "application/json" } });
+      if (!/option-contracts$/.test(u.pathname)) return reply([]);
+      if (page === 1) return reply(full(type));
+      if (secondPage.hang) {
+        return new Promise((_, reject) => init.signal.addEventListener("abort", () => { call.abortedAt = Date.now(); reject(init.signal.reason); }, { once: true }));
+      }
+      await new Promise((r) => setTimeout(r, secondPage.delayMs));
+      call.doneAt = Date.now();
+      return reply(few(type));
+    };
+    const get = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+    const t0 = Date.now();
+    const keepAlive = setInterval(() => {}, 100);
+    const got = await get("/api/flows/strategy?t=NVDA&expiry=2026-10-16&refresh=1").finally(() => clearInterval(keepAlive));
+    return { got, pages, ms: Date.now() - t0 };
+  };
+  try {
+    const slow = await run({ delayMs: 600 });
+    const second = (type) => slow.pages.find((c) => c.type === type && c.page === 2);
+    ok(slow.got.res.status === 200 && slow.got.body.calls.length === 501 && slow.got.body.puts.length === 501,
+      `a strategy expiry with a second page of each type answers with both (${slow.got.res.status}, ${slow.got.body && slow.got.body.calls && slow.got.body.calls.length}, ${slow.got.body && slow.got.body.puts && slow.got.body.puts.length} rows)`);
+    ok(second("C") && second("P") && Math.abs(second("C").at - second("P").at) < 300,
+      `THE CALL AND PUT SECOND PAGES ARE ASKED TOGETHER, not one after the other (${second("C") && second("P") ? Math.abs(second("C").at - second("P").at) : "missing"} ms apart; 600 ms or more when sequential)`);
+    ok(slow.ms < 1100, `so the two 600 ms pages cost one wait, not two (${slow.ms} ms)`);
+
+    const hung = await run({ hang: true });
+    const hc = hung.pages.find((c) => c.type === "C" && c.page === 2);
+    const hp = hung.pages.find((c) => c.type === "P" && c.page === 2);
+    ok(hung.got.res.status === 200 && hung.got.body.calls.length === 500 && hung.got.body.puts.length === 500 && hung.got.body.callsTruncated === false,
+      `a second page that never answers is dropped and the expiry answers with the first pages (${hung.got.res.status})`);
+    ok(hc && hp && hc.abortedAt !== null && hp.abortedAt !== null && Math.abs(hc.abortedAt - hp.abortedAt) < 300,
+      `BOTH HUNG SECOND PAGES ARE ABORTED AT THE SAME 8,000 MS DEADLINE (${hc && hc.abortedAt !== null ? hc.abortedAt - hc.at : "never"}, ${hp && hp.abortedAt !== null ? hp.abortedAt - hp.at : "never"} ms)`);
+    ok(hung.ms >= 8000 - TIMER_SLACK_MS && hung.ms < 8000 + 1500, `so the worst case is 8 s after the first pages, not 16 s (${hung.ms} ms)`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
@@ -733,7 +787,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const get = await client(f.D1);
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
-  for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix"]) f.put(key, { ...NIGHTLY, rows: [] });
+  for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix", "calib", "dispersion"]) f.put(key, { ...NIGHTLY, rows: [], state: { pending: [] } });
   f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 } });
   f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const realFetch = globalThis.fetch;
@@ -756,7 +810,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
-    ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1],
+    ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1], ["/api/flows/calib", 1], ["/api/flows/dispersion", 1],
     ["/api/flows/card-x?t=NVDA", 2], ["/api/flows/card-x?t=ZZZZ", 3], ["/api/flows/brief", 7], ["/api/flows/ai-usage", 3],
     ["/api/flows/ask", 9, { init: ASK({ question: "what is the market doing" }) }],
     ["/api/flows/ask", 28, { init: ASK({ question: "what about NVDA", subject: "NVDA" }) }],
@@ -874,7 +928,7 @@ class FakeCache {
     const brief = await get("/api/flows/brief");
     ok(brief.res.status === 503 && !brief.res.headers.has("X-Fresh-Last-Good"), "so with the store gone it is the 503 it was, not a copy");
 
-    const env = { DB: f.D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+    const env = { DB: f.D1, SESSION_SECRET, FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
     const worker = (await import("../worker.js?reads=" + (++instance))).default;
     const anon = await worker.fetch(new Request("https://anilkaya.org/api/flows/board?side=long"), env, { waitUntil() {} });
     eq(anon.status, 401, "THE COPY NEVER BYPASSES THE SESSION: a request without one is refused before the store is read");
@@ -1084,7 +1138,7 @@ class FakeCache {
   const liveWorker = (await import("../worker.js?reads=" + (++instance))).default;
   const liveAt = async (origin, path, extra = {}) => {
     const env = { DB: f.D1, SESSION_SECRET, FLOWS_LIVE_TOKEN: LIVE_STATIC, ...extra,
-      FLOWS_CREDENTIALS: JSON.stringify({ [FLOWS_USERNAMES[0]]: "x".repeat(43) }) };
+      FLOWS_CREDENTIALS: JSON.stringify({ [FIXTURE_ROSTER[0]]: "x".repeat(43) }) };
     const res = await liveWorker.fetch(new Request(origin + path, { headers: { Authorization: "Bearer " + LIVE_STATIC } }), env, { waitUntil() {} });
     let body = null;
     try { body = JSON.parse(await res.text()); } catch { body = null; }
@@ -1372,7 +1426,7 @@ class FakeCache {
 {
   const f = fakeD1();
   seed(f);
-  const [A, B] = FLOWS_USERNAMES;
+  const [A, B] = FIXTURE_ROSTER;
   const seen = [];
   const counts = new Map();
   const limiter = { limit: async ({ key }) => {
@@ -1466,7 +1520,7 @@ class FakeCache {
 {
   const f = fakeD1();
   seed(f);
-  const [A, B] = FLOWS_USERNAMES;
+  const [A, B] = FIXTURE_ROSTER;
   const counts = new Map();
   const memberKeys = [];
   let ondemand = 0;

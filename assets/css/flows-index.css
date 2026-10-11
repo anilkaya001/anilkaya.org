@@ -1,0 +1,44 @@
+.fx-index {
+  position: sticky;
+  top: calc(var(--bar-h) + var(--safe-t));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  background: var(--mat-chrome);
+  -webkit-backdrop-filter: var(--mat-blur);
+  backdrop-filter: var(--mat-blur);
+  box-shadow: 0 1px 0 var(--sep);
+}
+.fx-index::-webkit-scrollbar { display: none; }
+.fx-index[hidden] { display: none; }
+.fx-index a {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--sp-4);
+  border-radius: 999px;
+  background: var(--fill-4);
+  color: var(--label-2);
+  font: var(--t-callout);
+  white-space: nowrap;
+  text-decoration: none;
+}
+.fx-index a:hover { background: var(--fill-3); color: var(--label-1); }
+.fx-index a[aria-current="location"] {
+  background: var(--accent-fill);
+  box-shadow: inset 0 0 0 1px var(--accent-soft);
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+@media (pointer: coarse) { .fx-index a { min-height: 44px; } }
+[data-flows-page="market"] .ui-mod[id],
+[data-flows-page="ticker"] .ft-m {
+  scroll-margin-top: calc(var(--bar-h) + var(--safe-t) + 72px);
+}

@@ -1184,6 +1184,12 @@ const rebuild = (em) => {
     const readout = await page.evaluate(() => document.querySelector("#uaTimeline .ui-readout").textContent);
     ok(/AAA/.test(readout) && /9:31 AM/.test(readout),
        `the keyboard reaches the first window in time order and the readout names it and its Eastern time — got: ${readout}`);
+    const said = await page.evaluate(() => {
+      const c = document.querySelector("#uaTimeline .ui-chart"), d = c.querySelector(".visually-hidden");
+      return { text: d ? d.textContent : null, linked: !!d && c.getAttribute("aria-describedby") === d.id };
+    });
+    ok(said.linked && /^Flagged windows, 9:31 AM to 10:00 AM\. Premium: last \$90\.0K at 10:00 AM; low \$90\.0K at 10:00 AM; high \$250K at 9:31 AM\.$/.test(said.text || ""),
+       `the timeline carries a hidden description that names its window and the last, lowest and highest premium with their times — got: ${said.text}`);
 
     ok(await press(page, "Puts"), "the Puts tab is there to press");
     const puts = await lists(page);

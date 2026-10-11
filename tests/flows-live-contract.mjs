@@ -270,19 +270,6 @@ const cronMinutes = (cron) => {
   ok(pre.status === "quiet" && pre.reason === "pre-open",
     "PROBE ROW: a 06:30 ET spot-exposures minute is pre-open — quiet with its reason, not a regular-session reading");
 
-  const tape = L.shapeLiveTape({ totals: { data: [FX.totalOptionsVolume.row] }, netImpact: { data: [FX.topNetImpact.row] },
-    darkpool: { data: [FX.darkpoolRecent.row] } }, { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
-  deep([tape.totals.today.pcVol, tape.totals.today.pcPrem], [0.6597, 0.4365],
-    "PROBE ROW: put/call = 25,895,745 / 39,255,508 by volume and 15,142,883,165.20 / 34,694,997,463.09 by premium");
-  const halfRow = L.shapeLiveTape({ totals: { data: [{ ...FX.totalOptionsVolume.row, put_volume: null, put_premium: "" }] } },
-    { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" }).totals.today;
-  ok(halfRow.putVol === null && halfRow.pcVol === null && halfRow.putPrem === null && halfRow.pcPrem === null,
-    "AN ABSENT PUT SIDE is an absent put/call ratio, never 0 (null / n coerces to 0 in JavaScript)");
-  eq(tape.netImpact.rows[0].netPrem, 144891918, "top-net-impact's net_premium arrives as a JSON number and is kept");
-  eq(tape.darkpool.dropped.extended, 1,
-    "PROBE ROW: the recent dark-pool feed leads with an after-hours print (23:59:58Z), which the session window drops");
-  eq(tape.darkpool.status, "quiet", "leaving the session's window empty rather than dated by the evening tail");
-
   const news = shapeNews({ data: [FX.news.row] });
   eq(news.rows.length, 1, "PROBE ROW: the news row shapes through the nightly's own shaper");
 }
@@ -453,6 +440,55 @@ const cronMinutes = (cron) => {
   eq(held.heldFrom, "live:alerts", "the nightly merges its own read into this session's live union");
   const other = await readHeldAlerts(async (k) => (k === "live:alerts" ? { payload: m4.write } : { payload: { nightly: 1 } }), "2026-09-23");
   deep(other.payload, { nightly: 1 }, "and falls back to the stored nightly feed when the union is another session's");
+}
+
+{
+  const S = "2026-09-22";
+  const spec = L.LIVE_KEYS["live:alerts:head"];
+  deep([spec.klass, spec.writer, spec.maxBytes, spec.cadenceS, spec.reads], ["breadth", "actions", 8 * 1024, 900, 0],
+    "live:alerts:head is a breadth-class key with the Actions run as its single writer, capped at 8 KiB, and it costs no vendor read");
+  ok(L.LIVE_KEY_RE.test("live:alerts:head") && L.liveKeyFromParam("alerts:head") === "live:alerts:head" &&
+     L.liveKeyFromParam("alerts") === "live:alerts" && L.liveKeyFromParam("alerts:tail") === null,
+  "it is addressable as k=alerts:head on the live read route beside live:alerts, and a sibling name that is not registered is not a key");
+  const page = (rows) => ({ body: { data: rows, newer_than: S, older_than: "x" }, full: false });
+  const a1 = FAKE.fakeFlowAlerts({ session: S, now: T("2026-09-22T15:00:00Z"), count: 60, seed: "head" });
+  const merged = L.mergeLiveAlerts(null, [page(a1.data)], { at: T("2026-09-22T15:00:00Z"), session: S, writer: "run-1" });
+  const alerts = merged.write;
+  const head = L.shapeAlertsHead(alerts, { writer: "run-1" });
+  eq(head.key, "live:alerts:head", "the head is built from the merged live:alerts record");
+  ok(head.rows.length === L.LIVE_BUDGET.alertsHeadRows && head.cap === 20,
+    `it holds the top ${L.LIVE_BUDGET.alertsHeadRows} windows`);
+  const byPrem = alerts.rows.filter((r) => typeof r.prem === "number").sort((x, y) => y.prem - x.prem);
+  deep(head.rows.map((r) => r.prem), byPrem.slice(0, 20).map((r) => r.prem), "ranked by premium, largest first, the same windows the record ranks first");
+  ok(head.rows.every((r, i) => i === 0 || head.rows[i - 1].prem >= r.prem), "in non-increasing order");
+  deep([head.seen, head.shed], [byPrem.length, byPrem.length - 20], "and it says how many windows the record held and how many it left out");
+  eq(head.premium, byPrem.reduce((a, r) => a + r.prem, 0), "with the premium of every window the record held");
+  deep(Object.keys(head.rows[0]).sort(), ["askPrem", "bidPrem", "cp", "exp", "firstAt", "k", "oc", "opening", "prem", "px", "size", "sweep", "t", "trades"],
+    "each window carries facts only: contract, premium, the ask and bid premium inside it, size, trades, two vendor flags, spot and when it was first read");
+  deep(head.fresh, { ...alerts.fresh, source: "actions", cadenceS: 900, writer: "run-1" },
+    "THE HEAD IS STAMPED WITH THE ALERTS' OWN READ: same readAt, vendor cursor and session, so it describes the read it was built from and no later one");
+  ok(JSON.stringify(head).length <= spec.maxBytes, `the head is ${JSON.stringify(head).length} bytes inside its ${spec.maxBytes}-byte cap`);
+  ok(L.checkLiveWrite("live:alerts:head", head, { source: "actions" }).ok, "the ingest accepts it from the Actions run");
+  eq(L.checkLiveWrite("live:alerts:head", head, { source: "worker" }).code, "wrong_writer", "and refuses it from any other writer");
+  eq(L.checkLiveWrite("live:alerts:head", { ...head, fresh: { ...head.fresh, cadenceS: 300 } }, { source: "actions" }).code, "invalid_fresh",
+    "or with another class's cadence");
+
+  const fat = { ...alerts, rows: alerts.rows.map((r, i) => ({ ...r, oc: "X".repeat(900) + i, t: "T" + i })) };
+  const big = L.shapeAlertsHead(fat, { writer: "run-1" });
+  ok(JSON.stringify(big).length <= spec.maxBytes && big.rows.length > 0 && big.rows.length < 20,
+    `THE BYTE CEILING HOLDS: windows with 900-character contract names trim the head to ${big.rows.length} rows rather than exceed ${spec.maxBytes} bytes`);
+  eq(big.shed, big.seen - big.rows.length, "and the trim is counted in shed");
+  ok(big.rows.every((r, i) => i === 0 || big.rows[i - 1].prem >= r.prem), "from the smallest premium up, never the largest");
+
+  const mixed = L.shapeAlertsHead({ ...alerts, rows: [{ t: "AAA", prem: null }, { t: "BBB", prem: 5 }, null, { prem: 9 }, { t: "CCC", prem: 5 }] });
+  deep(mixed.rows.map((r) => r.t), ["BBB", "CCC"], "a window with no premium, a null and a row with no ticker are not ranked, and equal premiums fall back to ticker order");
+  const quiet = L.shapeAlertsHead({ ...alerts, rows: [] });
+  deep([quiet.status, quiet.rows.length, quiet.seen, quiet.shed], ["quiet", 0, 0, 0], "an empty record is a quiet head, not a missing one");
+  eq(L.shapeAlertsHead(null), null, "no record builds nothing");
+  eq(L.shapeAlertsHead({ rows: [] }), null, "nor does one with no fresh envelope");
+  eq(L.shapeAlertsHead({ fresh: alerts.fresh }), null, "nor one with no rows list");
+  eq(L.shapeAlertsHead({ ...alerts, vendorTruncated: true }).truncated, true, "the vendor's truncation flag travels with the head");
+  eq(head.truncated, false, "and is false when the read was whole");
 }
 
 {
@@ -631,7 +667,7 @@ const cronMinutes = (cron) => {
   for (const t of ["SPY", "QQQ", ..."ABCDEFGHIJKL"]) reads[t] = L.shapeGexSeries(FAKE.fakeSpotExposures(t, { session, now: end }), { session, now: end });
   const gex = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] } });
   const gBytes = JSON.stringify(gex).length;
-  ok(gBytes <= L.LIVE_KEYS["live:gex"].maxBytes, `fourteen full-session spot-gamma series fit live:gex (${gBytes} bytes, shed ${gex.shed.length})`);
+  ok(gBytes <= 64 * 1024, `fourteen full-session spot-gamma series fit mergeGex's own 64 KiB default (${gBytes} bytes, shed ${gex.shed.length})`);
   const tight = L.mergeGex(null, reads, { at: end, session, rotation: { fixed: [..."ABCDEF"], rotating: [..."GHIJKL"] },
     maxBytes: 40 * 1024 });
   ok(tight.shed.length >= 2 && tight.shed.slice(0, 2).join("") === "LK" &&
@@ -723,7 +759,8 @@ const cronMinutes = (cron) => {
   const sched = slice(worker, "async scheduled(event, env, ctx)", "async fetch(request, env, ctx)");
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
-  ok(puts.length >= 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  deep([...puts].sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(), "the live leg puts exactly the registry's Actions keys");
+  ok(puts.length === 9 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
   ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
@@ -903,6 +940,55 @@ const cronMinutes = (cron) => {
   deep(cols(workerDdl, "flows_clock"), clockCols,
     "and flows_clock with 0010's columns plus 0011's, 0012's and 0014's, in the order an upgraded production table has them");
   deep(cols(schema, "flows_clock"), clockCols, "as schema.sql declares it");
+
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const payloadTable = read("migrations/0005_flows.sql");
+    const builds = {
+      "the Worker's first-use DDL": () => { const db = new DatabaseSync(":memory:"); db.exec(payloadTable); for (const sql of W.LIVE_SCHEMA_SQL) db.exec(sql); return db; },
+      "schema.sql": () => { const db = new DatabaseSync(":memory:"); db.exec(schema); return db; },
+      "migrations 0005, 0010 and 0020": () => { const db = new DatabaseSync(":memory:"); db.exec(payloadTable); db.exec(migration); db.exec(read("migrations/0020_flows_permanent_archive.sql")); return db; },
+    };
+    const permanent = ["ideas:2026-09-29", "ideas-out:2026-09-29", "ideas:2026-09-29:r1", "ideas-out:2026-09-29:r12"];
+    const ordinary = ["ideas", "ideas:latest", "ideas-in:2026-09-29", "card:AAA", "universe", "scores:2026-09-29x"];
+    for (const [where, build] of Object.entries(builds)) {
+      const db = build();
+      const put = (id) => db.prepare("INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, 1)").run(id, "{}");
+      for (const id of [...permanent, ...ordinary, "board:long:2026-09-29"]) put(id);
+      const throws = (fn, re) => { try { fn(); return false; } catch (error) { return re.test(String(error.message)); } };
+      for (const id of permanent) {
+        ok(throws(() => db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = ?").run(id), /cannot be changed/),
+          `A PERMANENT ARCHIVE ROW CANNOT BE UPDATED (${id}) under ${where}`);
+        ok(throws(() => db.prepare("DELETE FROM flows_payload WHERE id = ?").run(id), /cannot be removed/),
+          `nor deleted (${id}) under ${where}`);
+        eq(db.prepare("INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, '{\"x\":2}', 2) ON CONFLICT(id) DO NOTHING").run(id).changes, 0,
+          `and the write-once insert changes nothing (${id})`);
+        eq(db.prepare("SELECT payload FROM flows_payload WHERE id = ?").get(id).payload, "{}", `the row still holds what was first written (${id})`);
+      }
+      for (const id of ordinary) {
+        eq(db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = ?").run(id).changes, 1, `${id} stays updatable under ${where}`);
+        eq(db.prepare("DELETE FROM flows_payload WHERE id = ?").run(id).changes, 1, `and deletable (${id})`);
+      }
+      ok(throws(() => db.prepare("UPDATE flows_payload SET payload = '{\"x\":1}' WHERE id = 'board:long:2026-09-29'").run(), /immutable/),
+        `the dated boards keep their own trigger and its message under ${where}`);
+      eq(db.prepare("DELETE FROM flows_payload WHERE id = 'board:long:2026-09-29'").run().changes, 1,
+        `and a dated board stays deletable, which is how the 126-day prune works (${where})`);
+      ok(throws(() => db.prepare("DELETE FROM flows_payload WHERE id LIKE 'ideas%'").run(), /cannot be removed/),
+        `a sweep that names a permanent row among others aborts whole (${where})`);
+      const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name").all().map((r) => r.name);
+      ok(names.includes("flows_permanent_no_update") && names.includes("flows_permanent_no_delete") && names.includes("flows_archive_immutable"),
+        `all three triggers exist side by side under ${where} (${names.join(", ")})`);
+      db.close();
+    }
+    for (const [where, text] of [["the Worker's first-use DDL", W.LIVE_SCHEMA_SQL.join("\n")], ["schema.sql", schema], ["0020", read("migrations/0020_flows_permanent_archive.sql")]]) {
+      const patterns = [...text.matchAll(/GLOB '([^']*)'/g)].map((m) => m[1]);
+      ok(patterns.length >= 4 && patterns.every((g) => Buffer.byteLength(g) <= 50),
+        `D1 REFUSES A GLOB PATTERN OVER 50 BYTES ("LIKE or GLOB pattern too complex") at the first UPDATE or DELETE it guards, and node:sqlite does not, so every pattern in ${where} is at most 50 bytes (longest ${Math.max(...patterns.map((g) => Buffer.byteLength(g)))})`);
+    }
+    ok(!/flows_archive_immutable/.test(read("migrations/0020_flows_permanent_archive.sql")),
+      "the new triggers carry new names, because CREATE TRIGGER IF NOT EXISTS under the old name would silently do nothing on production");
+    ok(!/ALTER TABLE|DROP /.test(read("migrations/0020_flows_permanent_archive.sql")), "and the migration only creates, so applying it twice is safe");
+  }
   const toml = read("wrangler.toml");
   eq(W.cronJob(W.RTH_CRON, T("2026-09-23T15:16:00Z")), "rth", "the market-hours cron runs the Tier 1 tick");
   eq(W.cronJob(W.FOCUS_CRON, T("2026-09-23T15:18:00Z")), "focus", "the focus cron runs the focus tick");
@@ -998,9 +1084,11 @@ const cronMinutes = (cron) => {
         `${key} carries the fresh envelope of the Actions writer`);
       ok(text.length <= L.LIVE_KEYS[key].maxBytes, `${key} (${text.length} bytes) is inside its cap`);
     }
+    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
+      "and that is nine keys: live:alerts:head is the ninth, and live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
-    ok(calls.length === 2 && calls.every((c) => c <= L.LIVE_BUDGET.tier2MaxCalls),
-      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the ${L.LIVE_BUDGET.tier2MaxCalls} budget`);
+    ok(calls.length === 2 && calls.every((c) => c <= 24),
+      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
     ok(/sent newer_than=2026-08-24T/.test(out), "and the second tick resumes the alert cursor the first one stored");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1011,13 +1099,9 @@ const cronMinutes = (cron) => {
       "/api/net-flow/expiry": ["date", "moneyness", "tide_type", "expiration"],
       "/api/screener/stocks": ["ticker", "limit", "offset", "date"],
       "/api/option-trades/flow-alerts": ["ticker_symbol", "newer_than", "older_than", "limit"],
-      "/api/stock/spot-exposures": ["date"], "/api/market/total-options-volume": ["limit"],
-      "/api/market/top-net-impact": ["date", "issue_types[]", "limit"],
-      "/api/darkpool/recent": ["limit", "date", "min_premium", "max_premium", "min_size", "max_size", "min_volume",
-        "max_volume", "order", "order_by"],
       "/api/news/headlines": ["sources", "search_term", "ticker", "major_only", "limit", "page"],
     };
-    const LIMIT_MAX = { "/api/darkpool/recent": 200, "/api/market/top-net-impact": 100, "/api/news/headlines": 100,
+    const LIMIT_MAX = { "/api/news/headlines": 100,
       "/api/option-trades/flow-alerts": 200, "/api/screener/stocks": 500 };
     const session = "2026-09-23";
     const at = easternInstant(session, 11 * 60 + 7);
@@ -1029,7 +1113,7 @@ const cronMinutes = (cron) => {
       readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
     const undocumented = [];
     for (const { path, params } of uw.calls) {
-      const route = path.replace(/^\/api\/(market|stock)\/[^/]+\/(sector-tide|etf-tide|spot-exposures)$/, "/api/$1/$2");
+      const route = path.replace(/^\/api\/(market|stock)\/[^/]+\/(sector-tide|etf-tide)$/, "/api/$1/$2");
       const allowed = SPEC_PARAMS[route] || [];
       for (const name of Object.keys(params)) if (!allowed.includes(name)) undocumented.push(`${route}?${name}`);
       if (LIMIT_MAX[route] && Number(params.limit) > LIMIT_MAX[route]) undocumented.push(`${route} limit ${params.limit}`);
@@ -1037,10 +1121,56 @@ const cronMinutes = (cron) => {
     deep(undocumented, [], "EVERY Tier 2 vendor call sends only query parameters the vendor's spec documents for that " +
       "route, inside the route's documented limit — an undocumented one (darkpool/recent has no newer_than) is " +
       "silently ignored and the read is not the window it claims");
-    const dp = uw.calls.find((c) => c.path === "/api/darkpool/recent");
-    ok(dp && dp.params.date === session && dp.params.order_by === "premium",
-      "the dark-pool read asks for the session's own prints, largest premium first, so the top twenty it keeps are " +
-      "the session's largest rather than the last few seconds'");
+    const retired = uw.calls.filter((c) => /spot-exposures|total-options-volume|top-net-impact|darkpool\/recent/.test(c.path));
+    deep(retired, [], "TIER 2 MAKES NO READ FOR A RETIRED KEY: no spot-exposures, total-options-volume, top-net-impact or darkpool/recent call, every call is one a reader sees");
+    ok(uw.calls.length >= 20 && uw.calls.length <= 24, `a pass spends ${uw.calls.length} vendor calls: the 20-24 the live registry's nine keys need, down from 37-41`);
+  }
+
+  {
+    const session = "2026-09-23";
+    let clock = easternInstant(session, 11 * 60 + 7);
+    const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+    const boards = FAKE.fakeBoards();
+    const spans = [];
+    const uw = async (path, params, opts) => {
+      const start = clock;
+      try { return await fake(path, params, opts); } finally { spans.push({ path, start, end: clock }); }
+    };
+    const published = {};
+    await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
+      publish: async (k, p) => { published[k] = p; },
+      readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+    const readAt = (k) => Date.parse(published[k].fresh.readAt);
+    const group = (re) => spans.filter((c) => re.test(c.path));
+    const first = (list) => Math.min(...list.map((c) => c.start));
+    const last = (list) => Math.max(...list.map((c) => c.end));
+    const tides = group(/sector-tide|etf-tide|net-flow\/expiry/);
+    const screener = group(/screener\/stocks/);
+    const flows = group(/flow-alerts/);
+    const news = group(/news\/headlines/);
+    ok(tides.length > 10 && screener.length === 1 && flows.length >= 1 && news.length === 1, "the pass made the reads of every group");
+    ok(readAt("live:breadth") >= last(tides) && readAt("live:breadth") <= first(screener),
+      "PER-KEY READ TIME: live:breadth is stamped when its own last read returned, before the screener was asked");
+    for (const k of ["live:strips", "live:strips:series", "live:vol", "live:movers"]) {
+      ok(readAt(k) === readAt("live:strips") && readAt(k) >= last(screener) && readAt(k) <= first(flows),
+        `${k} carries the screener's completion time, ahead of the alert pages it did not wait for`);
+    }
+    ok(readAt("live:alerts") >= last(flows) && readAt("live:alerts") <= first(news),
+      "live:alerts is stamped after its last page and before the news read");
+    eq(readAt("live:alerts:head"), readAt("live:alerts"),
+      "and live:alerts:head carries the alerts' own read time: it is the same read, not a second one");
+    ok(published["live:alerts:head"].rows.length > 0 &&
+       published["live:alerts:head"].rows.every((r) => published["live:alerts"].rows.some((a) => a.t === r.t && a.oc === r.oc && a.prem === r.prem)),
+    "every window in the head is a window of the record published beside it");
+    ok(flows.length >= 1 && group(/flow-alerts/).length === flows.length,
+      "and the head cost no read of its own: every vendor call in the pass is one the pass already made");
+    ok(readAt("live:news") >= last(news) && readAt("live:news") < readAt("live:heartbeat"),
+      "live:news is stamped when the news read returned");
+    ok(readAt("live:heartbeat") > last(news) && readAt("live:heartbeat") > readAt("live:news"),
+      "and the heartbeat keeps the pass's own stamp taken after every read, which the ledger counts");
+    ok(readAt("live:breadth") < readAt("live:strips") && readAt("live:strips") < readAt("live:alerts") &&
+       readAt("live:alerts") < readAt("live:news"),
+    "so the keys are stamped in the order they were read, not one instant for all");
   }
 
   {
@@ -1066,9 +1196,14 @@ const cronMinutes = (cron) => {
       "instant with nothing read behind it, so each goes stale on its own clock and the watchdog can see it");
     ok(Object.entries(down.result.run.keys).every(([k, b]) => k === "live:heartbeat" || b === null),
       "and the heartbeat's ledger names every key it did not publish");
+    ok(down.published["live:alerts:head"] === undefined && !Object.hasOwn(down.result.run.keys, "live:alerts:head"),
+      "THE HEAD FOLLOWS THE RECORD: with no alert page answered neither live:alerts nor its head is written, and the held head keeps its own read time");
+    const noAlerts = await runWith((p) => p === "/api/option-trades/flow-alerts");
+    ok(!noAlerts.published["live:alerts"] && !noAlerts.published["live:alerts:head"] && noAlerts.published["live:strips"],
+      "and a failed alert read withholds both while the keys with their own answered reads are published");
     const noStrip = await runWith((p) => p === "/api/screener/stocks");
     ok(!noStrip.published["live:strips"] && !noStrip.published["live:strips:series"] && !noStrip.published["live:vol"] &&
-       !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:gex"],
+       !noStrip.published["live:movers"] && noStrip.published["live:breadth"] && noStrip.published["live:alerts"],
     "a failed strip read withholds the strip and the three keys built from it, while every key with its own " +
       "answered read is published");
 
@@ -1124,6 +1259,52 @@ const cronMinutes = (cron) => {
     publish: async () => {}, readStored: async () => { throw new Error("no store read on a holiday"); },
     now: () => thanksgiving, log: () => {}, clock: { day: "2026-11-26", trading: 0, earlyClose: null } });
   deep(skipped, { skipped: "not-trading" }, "and a single live pass on a closed day spends nothing");
+}
+
+{
+  const chartSrc = read("assets/js/flows-chart.js");
+  const uiSrc = read("assets/js/flows-ui.js");
+  const wanted = [...chartSrc.match(/const \{([^}]*)\} = UI;/)[1].split(",").map((n) => n.trim())];
+  const published = uiSrc.slice(uiSrc.indexOf("window.FlowsUI = Object.freeze({"), uiSrc.lastIndexOf("});"));
+  const missing = wanted.filter((n) => !new RegExp("(^|[\\s,{])" + n + "(?=[,\\s}])").test(published));
+  deep(missing, [], `the chart library destructures only members flows-ui.js publishes (${wanted.join(", ")})`);
+  ok(!/\bchart\b/.test(published) && !/Object\.freeze\(\{\s*mount,/.test(uiSrc),
+    "and flows-ui.js no longer publishes chart: a page that never loads flows-chart.js has no FlowsUI.chart");
+  const members = Object.fromEntries(wanted.map((n) => [n, n === "F" ? Object.freeze({ px: 1 }) : n === "DASH" ? "-" : () => null]));
+  const plant = (ui) => {
+    const ctx = { window: ui === undefined ? {} : { FlowsUI: ui, ResizeObserver: undefined }, document: {}, requestAnimationFrame: (f) => f() };
+    vm.createContext(ctx);
+    return ctx;
+  };
+  const frozenUi = Object.freeze({ ...members, reduced: () => false, heartbeat: () => 1, rt: Object.freeze({}) });
+  const ctx = plant(frozenUi);
+  vm.runInContext('"use strict";\n' + chartSrc, ctx);
+  const after = ctx.window.FlowsUI;
+  ok(after !== frozenUi && Object.isFrozen(after) && Object.isFrozen(after.chart),
+    "flows-chart.js re-publishes a new frozen FlowsUI with a frozen chart: assigning into the frozen original would throw");
+  ok(after.heartbeat === frozenUi.heartbeat && after.rt === frozenUi.rt && wanted.every((n) => after[n] === frozenUi[n]),
+    "and keeps every member the page already had, the freshness layer's and the rail's among them");
+  deep(Object.keys(after.chart).sort(), ["LEVELS", "bars", "clipRect", "dateTicks", "diverging", "fx1", "gauge", "heatmap", "heightFor", "kind", "line", "lin", "marker", "monoPath", "mount",
+    "niceTicks", "part", "pathOf", "payoff", "plot", "scale", "scrub", "shapeOf", "sparkline", "spread", "svgRoot", "ticks", "tw", "vGrad"].sort(),
+  "FlowsUI.chart carries the twenty-one members the library exported inside flows-ui.js, the kernel's six (kind, plot, scale, ticks, layout, axes) and the four helpers a controller used to copy (dateTicks, fx1, tw, heightFor)");
+  const again = ctx.window.FlowsUI;
+  vm.runInContext('"use strict";\n' + chartSrc, ctx);
+  ok(ctx.window.FlowsUI === again, "a second run changes nothing: the first chart wins");
+  const bare = plant(undefined);
+  vm.runInContext('"use strict";\n' + chartSrc, bare);
+  ok(bare.window.FlowsUI === undefined, "and without flows-ui.js the library installs nothing and throws nothing");
+  const shared = { document: { hidden: false, addEventListener() {}, removeEventListener() {} }, Date, isFinite, Number, String, Math, setTimeout, clearTimeout };
+  const freshSrc = read("assets/js/flows-fresh.js");
+  const chartFirst = Object.assign(plant(Object.freeze({ ...members, reduced: () => false })), shared);
+  vm.runInContext('"use strict";\n' + chartSrc, chartFirst);
+  vm.runInContext('"use strict";\n' + freshSrc, chartFirst);
+  ok(typeof chartFirst.window.FlowsUI.chart.line === "function" && typeof chartFirst.window.FlowsUI.heartbeat === "function",
+    "loaded before the freshness layer, the layer's re-publish keeps chart");
+  const freshFirst = Object.assign(plant(Object.freeze({ ...members, reduced: () => false })), shared);
+  vm.runInContext('"use strict";\n' + freshSrc, freshFirst);
+  vm.runInContext('"use strict";\n' + chartSrc, freshFirst);
+  ok(typeof freshFirst.window.FlowsUI.chart.line === "function" && typeof freshFirst.window.FlowsUI.heartbeat === "function",
+    "and loaded after it, chart keeps heartbeat: either order leaves both");
 }
 
 {
@@ -1753,7 +1934,7 @@ const cronMinutes = (cron) => {
     /const statements = \[\.\.\.registry\.map\(\(entry\) => entry\.ddl\), \.\.\.tables\.map\(columnProbe\)\];/.test(moduleSource("server/schema.js")) &&
     columnProbe("flows_clock") === "PRAGMA table_info(flows_clock)",
     "whose column list is read by the PRAGMA riding the schema batch after every CREATE, so the table exists when it is read");
-  eq(REGISTRY_SQL.length, 14, "the registry's batch is the twelve CREATE statements the Worker has always sent and the two AI counter tables after them");
+  eq(REGISTRY_SQL.length, 16, "the registry's batch is the fourteen CREATE statements it held before the permanent archive and the two triggers that keep the ideas rows (P0-42) after them");
   let pragmas = 0;
   upgrades.length = 0;
   const counted = (have) => ({ prepare(sql) { return { all: async () => { pragmas++; return { results: have.map((name) => ({ name })) }; },

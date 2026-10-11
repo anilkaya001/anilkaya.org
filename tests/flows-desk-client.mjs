@@ -538,6 +538,16 @@ try {
       const realRows = await page.$$eval("#dkList .dk-row", (rs) => rs.filter((r) => /\d%/.test((r.querySelector(".dk-pp") || {}).textContent || "")).length);
       ok(reads.length > 1 && realRows > 0, `the frontier is walked point by point over lines that hold a real-world chance (${reads.length} points, ${realRows} rows)`);
       ok(reads.every((t) => !/Real/.test(t)), `and its readout, in a module with no calibration note, prints no real-world chance; that figure stays in the Lines module under the note (${reads.join(" | ")})`);
+      await page.keyboard.press("Escape");
+      const spot = await page.$eval("#dkScatter svg g > [fill-opacity]", (n) => { const b = n.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; });
+      await page.mouse.move(spot[0], spot[1]);
+      await page.waitForFunction(() => document.querySelector("#dkScatter .ui-readout").classList.contains("is-on"), null, { timeout: 5000 }).catch(() => {});
+      const hover = await page.$eval("#dkScatter .ui-readout", (n) => n.classList.contains("is-on") ? n.textContent : null);
+      ok(hover && /NVDA/.test(hover), `pointing at a mark reads that line (${hover})`);
+      const far = await page.$eval("#dkScatter svg", (n) => { const b = n.getBoundingClientRect(); return [b.right - 3, b.top + 3]; });
+      await page.mouse.move(far[0], far[1]);
+      await page.waitForFunction(() => !document.querySelector("#dkScatter .ui-readout").classList.contains("is-on"), null, { timeout: 5000 }).catch(() => {});
+      eq(await page.$eval("#dkScatter .ui-readout", (n) => n.classList.contains("is-on")), false, "and pointing at empty plot, farther than 30px from every mark, reads nothing");
     }
     await page.close();
   }

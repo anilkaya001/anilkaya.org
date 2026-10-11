@@ -34,6 +34,14 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
     "BEGIN SELECT RAISE(ABORT, 'flows archive rows are immutable'); END",
+  "CREATE TRIGGER IF NOT EXISTS flows_permanent_no_update BEFORE UPDATE ON flows_payload " +
+    "WHEN OLD.id GLOB 'ideas:[0-9]*' " +
+    "OR OLD.id GLOB 'ideas-out:[0-9]*' " +
+    "BEGIN SELECT RAISE(ABORT, 'flows permanent archive rows cannot be changed'); END",
+  "CREATE TRIGGER IF NOT EXISTS flows_permanent_no_delete BEFORE DELETE ON flows_payload " +
+    "WHEN OLD.id GLOB 'ideas:[0-9]*' " +
+    "OR OLD.id GLOB 'ideas-out:[0-9]*' " +
+    "BEGIN SELECT RAISE(ABORT, 'flows permanent archive rows cannot be removed'); END",
 ]);
 
 export const CLOCK_ADDED_COLUMNS = Object.freeze([
@@ -261,7 +269,9 @@ export async function tier1Reads(fetchVendor, { timeoutMs = LIVE_BUDGET.tier1Tim
   return raws;
 }
 
-const LIVE_AGES_SQL = "SELECT id, read_at, session, cadence_s, source FROM flows_live";
+const LIVE_KEY_IDS = new Set(Object.keys(LIVE_KEYS));
+const LIVE_AGES_SQL = "SELECT id, read_at, session, cadence_s, source FROM flows_live WHERE id IN (" +
+  Object.keys(LIVE_KEYS).map((k) => `'${k}'`).join(", ") + ")";
 const TIER1_FAILURES = /^(error:|no-feed-answered$|over-cap$)/;
 
 const clockFlag = (v) => (v === null || v === undefined || v === "" ? null : Number(v) === 1 ? 1 : Number(v) === 0 ? 0 : null);
@@ -453,7 +463,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const merged = { ...(clock || {}), ...patch };
   const ledgerStatement = telemetry && today && why !== "not-due"
     ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
-      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged) })
+      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged, LIVE_KEY_IDS) })
     : null;
   const stalled = liveStalled(at, breadthReadAt, merged);
   const again = Number(merged.liveRedispatchedAt);

@@ -1566,7 +1566,7 @@
   }
 
   function isPoison(error) {
-    if (!error || typeof error.status !== "number" || error.status < 400 || error.status >= 500) return false;
+    if (!error || typeof error.status !== "number" || error.status < 400 || error.status >= 500 || error.status === 429) return false;
     return error.code !== "reset_required" && error.code !== "invalid_generation" && error.code !== "stale_generation";
   }
 

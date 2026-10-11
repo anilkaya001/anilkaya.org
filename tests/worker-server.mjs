@@ -128,9 +128,10 @@ async function stopProcess(child) {
 }
 
 async function flowsCredentialsJSON() {
-  const { FLOWS_USERNAMES, deriveHash } = await import("../shared/flows-auth.js");
+  const { deriveHash } = await import("../shared/flows-auth.js");
+  const { FIXTURE_ROSTER } = await import("./lib/fixture-roster.mjs");
   const map = {};
-  for (const username of FLOWS_USERNAMES) {
+  for (const username of FIXTURE_ROSTER) {
     map[username] = await deriveHash(username, FLOWS_PASSWORD, FLOWS_PEPPER);
   }
   return JSON.stringify(map);

@@ -3,6 +3,7 @@ import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { startWorker, SESSION_SECRET } from "./worker-server.mjs";
 import { signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { checkFrame, createSeq, RT_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from "../shared/flows-rt.js";
 import { createFakeVendor, vendorHandler } from "./rt-fixtures.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
@@ -120,7 +121,7 @@ const seqVerdicts = (c) => {
 };
 
 const OWNER = await cookieFor("anilkaya");
-const MEMBER = await cookieFor("firatgok");
+const MEMBER = await cookieFor(FIXTURE_MEMBER);
 
 const hubClock = { offset: 0 };
 const wallOf = (hubMs) => hubMs - hubClock.offset;
@@ -433,7 +434,7 @@ async function runMain() {
       const mv = seqVerdicts(m);
       ok(!mv.gap && !mv.dup && !mv.orphan, `member: sequences are clean: ${JSON.stringify(mv)}`);
       ok(m.state.opened && !m.state.bye && !m.state.closed, "member: the socket stays open");
-      await until(async () => (await statusOf(base, OWNER)).body.sockets.byUser.firatgok === 1, 8000, "the abandoned raw member socket to be released");
+      await until(async () => (await statusOf(base, OWNER)).body.sockets.byUser[FIXTURE_MEMBER] === 1, 8000, "the abandoned raw member socket to be released");
       ok(true, "member: status counts one socket under the member's own name");
       eq((await fetch(base + "/api/rt/status", { headers: { Cookie: MEMBER } })).status, 403, "member: and still cannot read status");
       m.close();

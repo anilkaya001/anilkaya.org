@@ -72,7 +72,7 @@
     {"id": "daily-report", "tier": "used", "op": "/api/market/daily-report", "path": "/api/market/daily-report", "query": {"date": "{date}", "limit": "25"}},
     {"id": "net-flow-expiry", "tier": "used", "op": "/api/net-flow/expiry", "path": "/api/net-flow/expiry", "query": {"date": "{date}", "moneyness": ["all", "otm"], "tide_type": ["all", "equity_only", "index_only"], "expiration": ["zero_dte", "weekly"]}},
     {"id": "economic-calendar", "tier": "used", "op": "/api/market/economic-calendar", "path": "/api/market/economic-calendar"},
-    {"id": "vix-term-structure", "tier": "used", "op": "/api/volatility/vix-term-structure", "path": "/api/volatility/vix-term-structure", "query": {"history_days": "90"}},
+    {"id": "vix-term-structure", "tier": "1", "op": "/api/volatility/vix-term-structure", "path": "/api/volatility/vix-term-structure", "query": {"history_days": "90"}},
     {"id": "earnings-afterhours", "tier": "used", "op": "/api/earnings/afterhours", "path": "/api/earnings/afterhours", "query": {"date": "{date}", "limit": "100"}},
     {"id": "earnings-premarket", "tier": "used", "op": "/api/earnings/premarket", "path": "/api/earnings/premarket", "query": {"date": "{next-session}", "limit": "100"}},
     {"id": "treasury-3m", "tier": "used", "op": "/api/economy/{indicator}", "path": "/api/economy/treasury-yield", "query": {"interval": "daily", "maturity": "3month"}},

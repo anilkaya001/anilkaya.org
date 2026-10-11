@@ -229,10 +229,11 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const at = (s) => served.indexOf(s);
   ok(at(`/assets/css/flows-ticker.css?v=${VERSION}`) > at(`/assets/css/flows.css?v=${VERSION}`),
      "the route stylesheet is linked after the shared one, at the canonical asset version, through the per-route stylesheet hook");
-  const ui = at(`/assets/js/flows-ui.js?v=${VERSION}`), fresh = at(`/assets/js/flows-fresh.js?v=${VERSION}`);
+  const ui = at(`/assets/js/flows-ui.js?v=${VERSION}`), chart = at(`/assets/js/flows-chart.js?v=${VERSION}`);
+  const fresh = at(`/assets/js/flows-fresh.js?v=${VERSION}`);
   const quant = at(`/assets/js/flows-quant-read.bundle.js?v=${VERSION}`), tick = at(`/assets/js/flows-ticker.js?v=${VERSION}`);
-  ok(ui > 0 && ui < fresh && fresh < quant && quant < tick,
-     "the scripts load in dependency order: the Depth primitives, the freshness layer, the pricing bundle, then the controller");
+  ok(ui > 0 && ui < chart && chart < fresh && fresh < quant && quant < tick,
+     "the scripts load in dependency order: the Depth primitives, the chart library, the freshness layer, the pricing bundle, then the controller");
   for (const gone of ["flows-panels.js", "flows-drawers.js", "flows-cursor.js"]) ok(!served.includes(gone), `the page no longer links ${gone}`);
   ok(!/<style[\s>]/.test(served), "the page serves no inline stylesheet");
   ok(!/document\.createElement\("style"\)|adoptedStyleSheets|insertRule\(/.test(TICKER_SRC),
@@ -281,6 +282,13 @@ try {
     ok(/[?&]t=/.test(nows[0]), `${width}px: and it carries the ticker, so the first beat brings the quote (${nows[0]})`);
     const got = await page.evaluate(sweep);
     eq(got.mods.map((m) => m.id).join(" "), MODULES.join(" "), `${width}px: every module is mounted, in reading order`);
+    const index = await page.evaluate(() => {
+      const nav = document.getElementById("fxIndex");
+      return { hidden: nav.hidden, chips: Array.from(nav.querySelectorAll("a"), (a) => [a.getAttribute("href"), a.textContent]) };
+    });
+    eq(index.hidden, false, `${width}px: the section index appears once the dossier has drawn its modules`);
+    eq(index.chips.map((c) => c[0]).join(" "), MODULES.map((id) => "#" + id).join(" "), `${width}px: it lists every module, in the order they are drawn`);
+    ok(index.chips.every((c, i) => got.mods[i].heading.startsWith(c[1]) && c[1].length > 1), `${width}px: each chip is its module's own title`);
     for (const m of got.mods) {
       ok(!m.empty, `${width}px ${m.id}: renders content or an explicit designed silence`);
       ok(m.heading.length > 1 && m.heading.split(/\s+/).length <= 3, `${width}px ${m.id}: its title is one to three words ("${m.heading}")`);

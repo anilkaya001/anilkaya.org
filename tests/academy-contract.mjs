@@ -179,7 +179,7 @@ assert.deepEqual(schemaDdl.filter((sql) => !FLOWS_SCHEMA_SQL.includes(sql)), [],
   "every table server/schema.js declares is in the registry the Worker's first-use batch is derived from");
 assert.deepEqual(FLOWS_REGISTRY.map((entry) => entry.ddl), [...FLOWS_SCHEMA_SQL],
   "and the first-use batch is the registry's DDL in registry order");
-workerDdl.push(...FLOWS_SCHEMA_SQL);
+workerDdl.unshift(...FLOWS_SCHEMA_SQL);
 const runtimeStatements = new Set(workerDdl);
 for (const file of readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort()) {
   const src = read(`shared/${file}`);

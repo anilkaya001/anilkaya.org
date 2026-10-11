@@ -4,7 +4,7 @@ import { binnedFromLognormal, garchAggregatedSd } from "../shared/flows-quant-de
 import { openInterestGammaBook } from "../shared/flows-features.js";
 import {
   chainRowsByExpiry, buildSlices, zeroGammaOf, parityRate, treasuryRate, chooseRate, bookLevels,
-  engineFacts, engineLevels, engineEvent, eventJump, runCardEngine, QUANT_CARD_LINES,
+  engineFacts, engineLevels, engineEvent, eventJump, runCardEngine, rankModeOf, QUANT_CARD_LINES,
 } from "../shared/flows-quant-card.js";
 import { median } from "../shared/flows-stats.js";
 import { skewMetrics } from "../shared/flows-quant-smile.js";
@@ -204,7 +204,7 @@ export function engineBlock({ ticker, sessionDate, spot, atr, card, prep, rate, 
   return runCardEngine({
     ticker, asOfMs: prep.asOfMs, spot, rate, expiries: prep.input, facts, state, pLaw: law, levels,
     event: engineEvent(event, jump, facts), zeroGamma: prep.zero ? { px: prep.zero.px, count: prep.zero.count, coverage: prep.zero.coverage, g: prep.zero.g } : null,
-    atr, stale: false,
+    atr, stale: false, rank: rankModeOf(process.env.FLOWS_RANK),
   });
 }
 

@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS mastery_attempts (
   PRIMARY KEY (user_id, attempt_id)
 );
 
+CREATE INDEX IF NOT EXISTS mastery_attempts_by_received ON mastery_attempts (received_at);
+
 CREATE TABLE IF NOT EXISTS placement (
   user_id           TEXT PRIMARY KEY,
   band              TEXT NOT NULL CHECK (band IN ('foundation', 'applied', 'advanced')),
@@ -117,6 +119,8 @@ CREATE TABLE IF NOT EXISTS skill_attempts (
   PRIMARY KEY (user_id, attempt_id)
 );
 
+CREATE INDEX IF NOT EXISTS skill_attempts_by_received ON skill_attempts (received_at);
+
 CREATE TABLE IF NOT EXISTS learning_preferences (
   user_id TEXT PRIMARY KEY,
   active_path_id TEXT NOT NULL DEFAULT 'complete-core',
@@ -145,6 +149,8 @@ CREATE TABLE IF NOT EXISTS flows_login_failures (
   failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000),
   first_at INTEGER NOT NULL CHECK (first_at > 0)
 );
+
+CREATE INDEX IF NOT EXISTS flows_login_failures_by_first ON flows_login_failures (first_at);
 
 CREATE TABLE IF NOT EXISTS flows_ai_usage (
   day        TEXT PRIMARY KEY,
@@ -267,6 +273,22 @@ WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
   OR OLD.id GLOB 'scores:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
 BEGIN
   SELECT RAISE(ABORT, 'flows archive rows are immutable');
+END;
+
+CREATE TRIGGER IF NOT EXISTS flows_permanent_no_update
+BEFORE UPDATE ON flows_payload
+WHEN OLD.id GLOB 'ideas:[0-9]*'
+  OR OLD.id GLOB 'ideas-out:[0-9]*'
+BEGIN
+  SELECT RAISE(ABORT, 'flows permanent archive rows cannot be changed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS flows_permanent_no_delete
+BEFORE DELETE ON flows_payload
+WHEN OLD.id GLOB 'ideas:[0-9]*'
+  OR OLD.id GLOB 'ideas-out:[0-9]*'
+BEGIN
+  SELECT RAISE(ABORT, 'flows permanent archive rows cannot be removed');
 END;
 
 CREATE TABLE IF NOT EXISTS flows_dossier_cache (

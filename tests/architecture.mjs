@@ -35,7 +35,7 @@ function withEdits(base, edits) {
 const posix = (p) => p.split(path.sep).join("/");
 const isModule = (f) => /\.(?:m?js)$/.test(f);
 const GRAPH_ROOTS = /^(?:worker\.js|shared\/|server\/|scripts\/)/;
-const UNFOLLOWABLE = ["scripts/render-preview.mjs"];
+const UNFOLLOWABLE = ["scripts/launch-readiness.mjs", "scripts/render-preview.mjs"];
 
 function graph(tree) {
   const set = new Set(tree.files);
@@ -395,7 +395,7 @@ const real = run(realTree);
 
 {
   deep(real.resolve, [], "every relative import in worker.js, shared/ and scripts/ resolves to a tracked file");
-  deep(real.g.unfollowable, UNFOLLOWABLE, "the one module with a non-literal import() is the preview tool, which no entry point reaches");
+  deep(real.g.unfollowable, UNFOLLOWABLE, "the two modules with a non-literal import() are the preview tool and the launch-readiness tool, which no entry point reaches");
   ok(real.g.nodes.length > 100, `the walk covers ${real.g.nodes.length} modules`);
   const edgeCount = [...real.g.edges.values()].reduce((n, e) => n + e.length, 0);
   ok(edgeCount > 200, `and ${edgeCount} import edges, so a cycle test cannot pass on an empty graph`);

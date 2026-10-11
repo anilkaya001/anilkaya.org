@@ -91,12 +91,12 @@ const STUB = new Proxy({}, { get: () => () => null });
 const table = createRouter(flowsReadRows(STUB));
 
 {
-  eq(table.rows.length, 23, "the flows-read family is 23 rows");
+  eq(table.rows.length, 25, "the flows-read family is 25 rows");
   ok(table.rows.every((r) => r.auth === "flows" && r.methods.length === 1 && r.methods[0] === "GET" && /^\/api\/flows\/[a-z-]+$/.test(r.path) && r.id === "flows." + r.path.slice("/api/flows/".length)),
     "every row is a GET behind the Flows session on /api/flows/<name> with the id flows.<name>");
-  eq(new Set(table.rows.map((r) => r.path)).size, 23, "and no path is twice");
+  eq(new Set(table.rows.map((r) => r.path)).size, 25, "and no path is twice");
   eq(table.rows.map((r) => r.path.slice("/api/flows/".length)).sort(), [
-    "board", "brief", "card", "card-x", "events", "flowalerts", "focus", "hist", "ideas", "market", "meta", "movers", "news", "political",
+    "board", "brief", "calib", "card", "card-x", "dispersion", "events", "flowalerts", "focus", "hist", "ideas", "market", "meta", "movers", "news", "political",
     "pulse", "record", "regime", "roster", "scoretrack", "sector-premium", "sectors", "universe", "unusual"], "the names are the ones the chain served");
 }
 
@@ -172,6 +172,18 @@ async function reference(path, rc, d, s) {
     const stored = await readServed(env, "scoretrack");
     if (stored === null) return json({ status: "pending" });
     return passthrough(stored);
+  }
+  if (path === "/api/flows/calib" || path === "/api/flows/dispersion") {
+    const stored = await readServed(env, path.slice("/api/flows/".length));
+    if (stored === null) return json({ status: "pending" });
+    let view;
+    try {
+      view = JSON.parse(stored.payload);
+      delete view.state;
+    } catch {
+      throw storeGone();
+    }
+    return passthrough({ ...stored, payload: JSON.stringify(view) });
   }
   if (path === "/api/flows/meta") {
     const stored = await readServed(env, "meta");
@@ -314,7 +326,7 @@ for (const r of table.rows) {
       }
     }
   }
-  ok(compared >= 23 * 8 * 7, "every row was compared with the code it replaced across 8 worlds and 7 deps behaviours: " + compared);
+  ok(compared >= 25 * 8 * 7, "every row was compared with the code it replaced across 8 worlds and 7 deps behaviours: " + compared);
 }
 
 {

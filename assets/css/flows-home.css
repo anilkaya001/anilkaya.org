@@ -441,7 +441,6 @@ a.hm-count:hover { color: var(--label-1); background: var(--fill-4); }
 .hm-cell-n { color: var(--label-3); font: var(--t-caption2); }
 @keyframes ui-fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-.hm-term { min-width: 0; }
 #ccVol .ui-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .hm-radar { display: grid; gap: var(--sp-3); }
 .hm-radar-r { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

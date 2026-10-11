@@ -37,7 +37,7 @@ export const WITNESS_CHECKS = Object.freeze({
   tier2: Object.freeze({
     title: "Tier 2 is stale: live:breadth stopped advancing while the loop runs",
     remedy: [
-      "Readers see the Stale pill on breadth, strips, gex, vol, movers, tape and news once they are 45 minutes old.",
+      "Readers see the Stale pill on breadth, strips, alerts, vol, movers and news once they are 45 minutes old.",
       "Look at this run's log for `live: N key(s) not published` and `vendor request(s) timed out`: a vendor outage or a rate limit stops a pass from writing.",
       "Tier 1 (live:market, live:focus) is written by the Worker and can be healthy while this is open. DEPLOY.md section 10.5i.",
     ],

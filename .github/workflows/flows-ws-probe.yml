@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       seconds:
-        description: "Seconds to listen on each channel (2 to 60)"
+        description: "Seconds to listen on each channel (2 to 60); the five firehoses always get 5"
         type: string
-        default: "12"
+        default: "60"
       only:
-        description: "Run only these parts, comma-separated: handshake, channels, connections, joins (empty runs all)"
+        description: "Run only these parts, comma-separated: handshake, channels, firehoses, connections, joins (empty runs all)"
         type: string
         required: false
         default: ""
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:

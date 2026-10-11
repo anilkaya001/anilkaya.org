@@ -9,7 +9,7 @@ import { eventRow } from "../shared/flows-events.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client as harnessClient } from "./dossier-harness.mjs";
 import * as F from "./dossier-fixtures.mjs";
 import { assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
-import { FLOWS_USERNAMES } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -665,7 +665,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 }
 
 {
-  const [A, B] = FLOWS_USERNAMES;
+  const [A, B] = FIXTURE_ROSTER;
   const consulted = [];
   const ondemand = { n: 0 };
   const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: key !== A }; } };

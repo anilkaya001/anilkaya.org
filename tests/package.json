@@ -17,8 +17,11 @@
     "test:markets": "node markets-contract.mjs",
     "test:market-ticker": "node market-ticker-render.mjs",
     "test:landing-motion": "node landing-motion.mjs",
-    "test:mastery": "node mastery-contract.mjs",
+    "test:mastery": "node --disable-warning=ExperimentalWarning mastery-contract.mjs",
     "test:academy": "node --disable-warning=ExperimentalWarning academy-contract.mjs",
+    "test:lab-write": "node --disable-warning=ExperimentalWarning lab-write-contract.mjs",
+    "test:staging": "node staging-contract.mjs",
+    "test:launch-readiness": "node launch-readiness.mjs",
     "test:placement": "node placement-contract.mjs",
     "test:worker": "node worker-regression.mjs",
     "test:browser": "node regression.mjs",
@@ -71,6 +74,13 @@
     "test:flows-readers": "node --disable-warning=ExperimentalWarning flows-readers-contract.mjs",
     "test:flows-readers-render": "node flows-readers-render.mjs",
     "test:flows-export": "node flows-export.mjs",
+    "test:flows-deadline-render": "node flows-deadline-render.mjs",
+    "test:flows-calibration": "node flows-calibration.mjs",
+    "test:flows-dispersion": "node flows-dispersion.mjs",
+    "test:flows-kit": "node flows-kit-render.mjs",
+    "test:flows-chart-kernel": "node flows-chart-kernel.mjs",
+    "test:flows-public": "node --disable-warning=ExperimentalWarning flows-public-contract.mjs",
+    "test:flows-index": "node flows-index-render.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
     "test:flows-permits": "node flows-permits-contract.mjs",
     "test:flows-overlay": "node flows-overlay-contract.mjs",
@@ -95,6 +105,7 @@
     "test:flows-ask": "node flows-ask.mjs",
     "test:flows-ask-render": "node flows-ask-render.mjs",
     "test:flows-track-render": "node flows-track-render.mjs",
+    "test:flows-pages-render": "node flows-pages-render.mjs",
     "test:flows-warnings": "node flows-warnings.mjs",
     "test:flows-sign": "node flows-sign.mjs",
     "test:flows-reading": "node flows-reading.mjs",
@@ -102,6 +113,7 @@
     "test:flows-reading-render": "node flows-reading-render.mjs"
   },
   "devDependencies": {
+    "axe-core": "4.13.0",
     "playwright": "1.61.1",
     "wrangler": "4.110.0"
   }

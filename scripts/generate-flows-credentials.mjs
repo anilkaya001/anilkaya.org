@@ -4,22 +4,22 @@ import { createInterface } from "node:readline";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { webcrypto } from "node:crypto";
 import {
-  FLOWS_USERNAMES, deriveHash, PBKDF2_ITERATIONS, MEMBER_NAME, MEMBER_EPOCH_MAX,
+  deriveHash, PBKDF2_ITERATIONS, MEMBER_NAME, MEMBER_EPOCH_MAX,
   MEMBER_SECRET_MAX_BYTES, memberRecord, memberActive, isMemberDay,
 } from "../shared/flows-auth.js";
 
 const USAGE =
   "usage — secrets are read from stdin or minted in-process, never taken from argv:\n\n" +
-  "  node scripts/generate-flows-credentials.mjs --mint [--from members.json] [--out members.json]\n" +
-  "      mint a fresh pepper and a password for every member (the legacy roster without --from)\n" +
+  "  node scripts/generate-flows-credentials.mjs --mint --from members.json [--out members.json]\n" +
+  "      mint a fresh pepper and a password for every member the file lists; a first roster is a JSON\n" +
+  "      object of name to any placeholder, such as {\"first.member\":\"x\"}, whose values are replaced\n" +
   "  node scripts/generate-flows-credentials.mjs --add NAME [--until YYYY-MM-DD] [--epoch N] [--from members.json] [--out members.json]\n" +
   "      add a member, or give an existing one a new password; stdin: the pepper, then the current JSON unless --from\n" +
   "  node scripts/generate-flows-credentials.mjs --set NAME [--until YYYY-MM-DD|never] [--epoch N|next] [--from members.json] [--out members.json]\n" +
   "      renew, end or revoke a member without touching the password; stdin: the current JSON unless --from\n" +
   "  node scripts/generate-flows-credentials.mjs --remove NAME [--from members.json] [--out members.json]\n" +
   "      drop a member; stdin: the current JSON unless --from\n" +
-  "  node scripts/generate-flows-credentials.mjs\n" +
-  "      legacy shared password for the legacy roster; stdin: the password, then the pepper\n\n" +
+  "\n" +
   "--add, --set and --remove print the new FLOWS_CREDENTIALS JSON, and only that, on stdout,\n" +
   "or write it to the --out file instead (--from and --out may name the same file).\n";
 
@@ -60,6 +60,8 @@ function parseArgs(argv) {
 
 const opts = parseArgs(process.argv.slice(2));
 
+if (opts.mode === "legacy") die("give one of --mint, --add, --set or --remove");
+
 if (opts.name !== null && !MEMBER_NAME.test(opts.name)) {
   die(`${JSON.stringify(opts.name)} is not a member name: use 3 to 32 of a-z, 0-9, dot, dash or underscore`);
 }
@@ -77,9 +79,6 @@ if (opts.epoch !== undefined) {
       !(/^\d+$/.test(opts.epoch) && Number.isSafeInteger(n) && n <= MEMBER_EPOCH_MAX)) {
     die(`--epoch takes a whole number from 0 to ${MEMBER_EPOCH_MAX}` + (opts.mode === "set" ? ", or next" : ""));
   }
-}
-if ((opts.from !== null || opts.out !== null) && opts.mode === "legacy") {
-  die("--from and --out apply to --mint, --add, --set and --remove");
 }
 if (opts.mode === "set" && opts.until === undefined && opts.epoch === undefined) {
   die("--set changes --until, --epoch or both; give at least one");
@@ -279,18 +278,17 @@ if (opts.mode === "add") {
   );
   emit(json);
 } else if (opts.mode === "mint") {
-  if (opts.out && !opts.from && existsSync(opts.out)) {
-    die(`${opts.out} already exists, and without --from --mint would replace it with the legacy roster, ` +
-      "dropping every member added since along with their end dates and epochs. To re-mint the members " +
-      `it lists, run: --mint --from ${shellWord(opts.out)} --out ${shellWord(opts.out)}`);
+  if (!opts.from) {
+    die(opts.out && existsSync(opts.out)
+      ? `${opts.out} already exists, and --mint needs --from to know whom to mint for. To re-mint the members ` +
+        `it lists, run: --mint --from ${shellWord(opts.out)} --out ${shellWord(opts.out)}`
+      : "--mint needs --from: the members file whose names it mints passwords for (a JSON object of name to any " +
+        "placeholder value for a first roster); no member name lives in the source");
   }
-  let roster = FLOWS_USERNAMES.map((name) => [name, { until: null, epoch: 0 }]);
-  if (opts.from) {
-    let text;
-    try { text = readFileSync(opts.from, "utf8"); } catch { die(`cannot read ${opts.from}`); }
-    roster = [...loadMembers(text, opts.from)].map(([name, m]) => [name, { until: m.until, epoch: m.epoch }]);
-    if (!roster.length) die(`${opts.from} lists no members to mint for`);
-  }
+  let text;
+  try { text = readFileSync(opts.from, "utf8"); } catch { die(`cannot read ${opts.from}`); }
+  const roster = [...loadMembers(text, opts.from)].map(([name, m]) => [name, { until: m.until, epoch: m.epoch }]);
+  if (!roster.length) die(`${opts.from} lists no members to mint for`);
   const lines = await readStdinLines(1, { skipTTY: true });
   const supplied = (lines[0] || "").trim();
   if (supplied && supplied.length < 24) {
@@ -335,34 +333,4 @@ if (opts.mode === "add") {
   out += "\n# FLOWS_CREDENTIALS — paste as the value of: wrangler secret put FLOWS_CREDENTIALS\n";
   out += json + "\n";
   process.stdout.write(out);
-} else {
-  const lines = await readStdinLines(2);
-  const [password, pepper] = lines;
-
-  if (process.stdin.isTTY && lines.length < 2) die("expected two lines: the password, then the pepper");
-  if (!password || !password.trim()) die("a shared password is required (first line of stdin)");
-  if (!pepper || !pepper.trim()) die("a pepper is required (second line) — generate one with: openssl rand -base64 48");
-  if (pepper.trim().length < 24) die("that pepper is too short to be worth having; use at least 24 characters");
-
-  const map = {};
-  for (const username of FLOWS_USERNAMES) {
-    map[username] = await deriveHash(username, password, pepper);
-  }
-
-  process.stderr.write(
-    `\nDerived ${FLOWS_USERNAMES.length} credentials at ${PBKDF2_ITERATIONS} PBKDF2 iterations.\n\n` +
-    "Set these on the Worker. SESSION_SECRET is already configured and is shared\n" +
-    "with the learning session — the audience claim, not the secret, separates them.\n\n" +
-    "  wrangler secret put FLOWS_PEPPER          # the pepper you just supplied\n" +
-    "  wrangler secret put FLOWS_CREDENTIALS     # the JSON line printed below\n" +
-    "  wrangler secret put FLOWS_INGEST_TOKEN    # bearer token for the pipeline\n\n" +
-    "To revoke every live session, bump FLOWS_SESSION_EPOCH (a plain var, not a\n" +
-    "secret). Rotating FLOWS_PEPPER does NOT sign anyone out — the pepper is used\n" +
-    "for credential derivation only and never touches session verification.\n\n" +
-    "The repository is PUBLIC. Do not commit either value and do not paste them\n" +
-    "into an issue. Nothing has been written to disk by this script, and reading\n" +
-    "from stdin keeps them out of shell history and ps.\n\n",
-  );
-
-  process.stdout.write(JSON.stringify(map) + "\n");
 }

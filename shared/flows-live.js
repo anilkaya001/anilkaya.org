@@ -18,9 +18,8 @@ export const LIVE_KEYS = Object.freeze({
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
   "live:strips:series": spec("breadth", "actions", 112 * 1024, 0),
   "live:alerts": spec("breadth", "actions", 120 * 1024, 5),
-  "live:gex": spec("breadth", "actions", 64 * 1024, 14),
+  "live:alerts:head": spec("breadth", "actions", 8 * 1024, 0),
   "live:vol": spec("breadth", "actions", 8 * 1024, 0),
-  "live:tape": spec("breadth", "actions", 24 * 1024, 3),
   "live:movers": spec("breadth", "actions", 8 * 1024, 0),
   "live:news": spec("breadth", "actions", 32 * 1024, 1),
   "live:heartbeat": spec("breadth", "actions", 8 * 1024, 0),
@@ -43,6 +42,7 @@ export const LIVE_BUDGET = Object.freeze({
   alertLimit: 200,
   alertPages: 5,
   alertsPerTape: 20,
+  alertsHeadRows: 20,
   seriesPoints: 30,
   tapeLeaseMs: 20 * 1000,
   tapeUsableMs: 30 * 60 * 1000,
@@ -948,62 +948,6 @@ export function shapeMovers(strips, { at, session, writer, n = 8 } = {}) {
   };
 }
 
-export function shapeLiveTape(raws, { at, session, writer, keep = 20 } = {}) {
-  const r = raws || {};
-  const out = {
-    v: 1, key: "live:tape", session,
-    fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:tape"].cadenceS, session, writer }),
-    units: { vol: "contracts", prem: "USD", pcVol: "ratio, put / call volume", pcPrem: "ratio, put / call premium",
-      netPrem: "USD, vendor net premium", size: "shares", px: "USD" },
-  };
-  const tot = feedSilence(r.totals);
-  if (tot) out.totals = { ...tot, today: null, prior: null };
-  else {
-    const rows = rowsOf(r.totals).map((x) => ({
-      date: typeof x.date === "string" ? x.date : null,
-      callVol: vnum(x.call_volume), putVol: vnum(x.put_volume),
-      callPrem: round(vnum(x.call_premium), 0), putPrem: round(vnum(x.put_premium), 0),
-    })).filter((x) => x.date && DAY_RE.test(x.date)).sort((a, b) => (a.date < b.date ? 1 : -1));
-    const over = (a, b) => (a !== null && b !== null && b !== 0 ? round(a / b, 4) : null);
-    const ratios = (x) => (x ? { ...x, pcVol: over(x.putVol, x.callVol), pcPrem: over(x.putPrem, x.callPrem) } : null);
-    const today = rows.find((x) => x.date === session) || null;
-    const prior = rows.find((x) => typeof session === "string" && x.date < session) || null;
-    out.totals = { status: today ? "ok" : rows.length ? "prior" : "unreadable",
-      reason: today ? null : rows.length ? SILENCE.prior : SILENCE.unshaped,
-      today: ratios(today), prior: ratios(prior) };
-  }
-  const imp = feedSilence(r.netImpact);
-  if (imp) out.netImpact = { ...imp, rows: [] };
-  else {
-    const rows = rowsOf(r.netImpact).map((x) => ({
-      t: typeof x.ticker === "string" ? x.ticker.trim().toUpperCase() : null, netPrem: round(vnum(x.net_premium), 0),
-    })).filter((x) => x.t && x.netPrem !== null);
-    out.netImpact = { status: rows.length ? "ok" : "unreadable", reason: rows.length ? null : SILENCE.unshaped,
-      rows: rows.slice(0, keep) };
-  }
-  const dp = feedSilence(r.darkpool);
-  if (dp) out.darkpool = { ...dp, rows: [] };
-  else {
-    const { from, to } = rthWindow(session);
-    let extended = 0, outside = 0, canceled = 0;
-    const rows = [];
-    for (const x of rowsOf(r.darkpool)) {
-      const ts = timeMs(x && x.executed_at);
-      if (!Number.isFinite(ts)) continue;
-      if (x.canceled === true) { canceled++; continue; }
-      if (typeof x.ext_hour_sold_codes === "string" && /extended/i.test(x.ext_hour_sold_codes)) { extended++; continue; }
-      if (from !== null && (ts < from || ts > to)) { outside++; continue; }
-      rows.push({ t: typeof x.ticker === "string" ? x.ticker : null, at: isoSec(ts),
-        px: round(vnum(x.price), 4), size: vnum(x.size), prem: round(vnum(x.premium), 0) });
-    }
-    rows.sort((a, b) => (b.prem ?? -1) - (a.prem ?? -1));
-    out.darkpool = { status: rows.length ? "ok" : "quiet", reason: rows.length ? null : SILENCE.empty,
-      window: { from: isoSec(from), to: isoSec(to) }, dropped: { extended, outside, canceled },
-      rows: rows.slice(0, keep) };
-  }
-  return out;
-}
-
 export function gexRotation({ ranked = [], deep = [], tick = 0 } = {}, {
   fixed = LIVE_BUDGET.gexFixed, rotating = LIVE_BUDGET.gexRotating, index = LIVE_BUDGET.gexIndex,
 } = {}) {
@@ -1047,7 +991,7 @@ export function shapeGexSeries(raw, { session, now = null } = {}) {
 }
 
 export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = LIVE_BUDGET.gexKeepMs,
-  maxBytes = LIVE_KEYS["live:gex"].maxBytes } = {}) {
+  maxBytes = 64 * 1024 } = {}) {
   const now = typeof at === "number" ? at : timeMs(at);
   const same = prev && typeof prev === "object" && prev.session === session && prev.names;
   const names = {};
@@ -1075,7 +1019,7 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
   const out = {
     v: 1, key: "live:gex", session,
     fresh: freshEnvelope({ readAt: now, vendorAt: Number.isFinite(newest) ? Math.min(newest, now) : null, source: "actions",
-      cadenceS: LIVE_KEYS["live:gex"].cadenceS, session, writer }),
+      cadenceS: FRESH_CLASSES.breadth.cadenceS, session, writer }),
     units: {
       gOi: "USD of dealer gamma per 1% move, open-interest book (put legs arrive negative; net = call + put)",
       gVol: "USD per 1% move, today's volume book", gDir: "USD per 1% move, directionalised book",
@@ -1173,6 +1117,42 @@ export function mergeLiveAlerts(prev, pages, { at, session, stageOf = null, writ
       cursor, pages: list.length,
     },
   };
+}
+
+export function shapeAlertsHead(alerts, { writer, cap = LIVE_BUDGET.alertsHeadRows } = {}) {
+  const a = alerts && typeof alerts === "object" ? alerts : null;
+  const f = a && a.fresh && typeof a.fresh === "object" ? a.fresh : null;
+  if (!a || !f || !Array.isArray(a.rows)) return null;
+  const spec_ = LIVE_KEYS["live:alerts:head"];
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const text = (v) => (typeof v === "string" && v ? v : null);
+  const usable = a.rows
+    .filter((r) => r && typeof r === "object" && typeof r.t === "string" && r.t && n(r.prem) !== null)
+    .sort((x, y) => (y.prem - x.prem) || (x.t < y.t ? -1 : x.t > y.t ? 1 : 0) || ((x.oc || "") < (y.oc || "") ? -1 : 1));
+  const pick = (r) => ({
+    t: r.t, oc: text(r.oc), cp: text(r.cp), k: n(r.k), exp: text(r.exp),
+    prem: r.prem, askPrem: n(r.askPrem), bidPrem: n(r.bidPrem), size: n(r.size), trades: n(r.trades),
+    sweep: r.sweep === true, opening: r.opening === true, px: n(r.px), firstAt: text(r.firstAt),
+  });
+  const build = (rows) => ({
+    v: 1, key: "live:alerts:head", session: f.session,
+    fresh: freshEnvelope({ readAt: f.readAt, vendorAt: f.vendorAt, source: spec_.writer, cadenceS: spec_.cadenceS,
+      session: f.session, writer }),
+    basis: "vendor-flagged windows, largest premium first",
+    status: rows.length ? "ok" : "quiet",
+    cap, seen: usable.length, shed: usable.length - rows.length,
+    premium: usable.reduce((sum, r) => sum + r.prem, 0),
+    truncated: a.vendorTruncated === true || a.readTruncated === true,
+    cursor: text(a.cursor),
+    rows,
+  });
+  let rows = usable.slice(0, Math.max(0, cap)).map(pick);
+  let out = build(rows);
+  while (rows.length && JSON.stringify(out).length > spec_.maxBytes) {
+    rows = rows.slice(0, -1);
+    out = build(rows);
+  }
+  return out;
 }
 
 export const TAPE_LEGS = Object.freeze(["prem", "gex"]);
