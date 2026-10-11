@@ -31,7 +31,6 @@ export const FLOWS_PAGE_SLUGS = Object.freeze(PAGES.map((page) => page.slug));
 
 export const FLOWS_PUBLIC_SLUGS = Object.freeze(PUBLIC_PAGES.map((page) => page.slug));
 
-const scenesOn = (env) => String(env.FLOWS_SCENES || "off").trim().toLowerCase() === "owner";
 
 const GET_HEAD = ["GET", "HEAD"];
 
