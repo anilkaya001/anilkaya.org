@@ -1079,6 +1079,14 @@ try {
     ok(u0.svg && u1.svg && u1.was && u1.svgs === 1, `IN PLACE: a streamed alert keeps the same timeline svg node (${JSON.stringify(u1)})`);
     ok(u1.still && u1.run === 0, `and no bubble replays its entrance (${JSON.stringify(u1)})`);
     ok(/5 held back by the stream/.test(meta2.meta) && /stream missed a page/.test(meta2.meta), `and the counters move (${meta2.meta})`);
+    const keys = () => page.evaluate(() => [...document.querySelectorAll("#uaTimeline .ui-legend .ui-key")].map((k) => k.textContent));
+    ok(!(await keys()).includes("Side not stated"), "every streamed window so far states both sides, so the legend has no Side not stated key");
+    R.send(c1, R.delta("fl", [wire({ ...alert("MSFT", 500000, T0 - 500), askPrem: null, bidPrem: null }, "a5", T0 - 500)], { meta: { cursor: iso(R.now), read: 1, unusable: 0, dropped: 5, truncated: false } }));
+    await R.pump(80);
+    const u2 = await page.evaluate(look, "#uaTimeline .fu-chart > svg");
+    const k2 = await keys();
+    ok(u2.was && u2.svgs === 1 && u2.run === 0 && k2.includes("Side not stated") && await page.evaluate(() => document.querySelectorAll('#uaTimeline .fu-b[stroke-dasharray]').length === 1),
+       `a streamed window with no side stated draws its dashed ring on the same timeline and adds the key beside it (${JSON.stringify({ u2, k2 })})`);
     deep(page.errors, [], "nothing threw");
     await ctx.close();
   }

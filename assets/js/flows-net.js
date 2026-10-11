@@ -72,8 +72,8 @@
       windows++;
       total += prem;
       const cp = r.cp === "C" || r.cp === "P" ? r.cp : null;
-      let a = cp ? Math.max(0, num(r.askPrem) || 0) : 0, b = cp ? Math.max(0, num(r.bidPrem) || 0) : 0;
-      if (a + b > prem) { const k = prem / (a + b); a *= k; b *= k; }
+      const sp = cp ? F.askSplit(r) : null;
+      let a = sp ? sp.ask : 0, b = sp ? sp.bid : 0;
       const g = sectorGroup(secOf(t), o.unread), x = dteBucket(r, o.session), sz = num(r.size);
       const push = (k, v) => { if (v > prem * 1e-9) parts.push({ r: ri, t, g, k, v, lean: KINDS[k].lean, x, sz: sz !== null && sz >= 0 ? sz : null }); };
       push(cp === "C" ? "ca" : "pa", a);

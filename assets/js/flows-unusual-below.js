@@ -36,8 +36,7 @@
       const p = n(r.prem);
       const at = timeOf(r, session);
       if (p === null || p <= 0 || !at) { undated++; return; }
-      const ask = n(r.askPrem);
-      out.push({ r, i, p, m: at.m, exact: at.exact, cp: r.cp === "P" ? "P" : r.cp === "C" ? "C" : null, ask: ask === null ? null : Math.max(0, Math.min(1, ask / p)) });
+      out.push({ r, i, p, m: at.m, exact: at.exact, cp: r.cp === "P" ? "P" : r.cp === "C" ? "C" : null, ask: F.askShare(r) });
     });
     return { pts: out, undated, session };
   }
@@ -102,9 +101,10 @@
       const cx = xs(pt.m), cy = yOf(pt), r = rOf(pt.p);
       const on = passes(pt.r, "exp");
       const color = UI.cssVar(pt.cp === "P" ? "--down-mark" : pt.cp === "C" ? "--up-mark" : "--s-gray");
+      const side = pt.ask.side, unstated = pt.ask.classified === null;
       s("circle", {
-        cx, cy, r, fill: color, "fill-opacity": pt.ask === null ? 0 : (0.14 + 0.72 * pt.ask).toFixed(3),
-        stroke: color, "stroke-width": 1.25, "stroke-dasharray": pt.ask === null ? "2 2" : null,
+        cx, cy, r, fill: color, "fill-opacity": unstated || side === "bid" ? 0 : side === "ask" ? 0.86 : 0.4,
+        stroke: color, "stroke-width": 1.25, "stroke-dasharray": unstated ? "2 2" : null, "data-side": side,
         class: "fu-b" + (on ? "" : " is-off"), style: { "--i": String(Math.min(k, 60)) },
       }, g);
       return { pt, cx, cy, r };
@@ -117,13 +117,13 @@
         const b = list[i], r = b.pt.r;
         const flags = [r.sweep === true ? "Sweep" : null, r.opening === true ? "Opening" : null, r.floor === true ? "Floor" : null].filter(Boolean);
         return {
-          x: b.cx, top: Math.max(0, b.cy - b.r - 40), dots: [{ x: b.cx, y: b.cy, r: b.r + 3, cls: "fu-ring", fill: "none" }],
+          x: b.cx, top: Math.max(0, b.cy - b.r - (w < 520 ? 58 : 40)), dots: [{ x: b.cx, y: b.cy, r: b.r + 3, cls: "fu-ring", fill: "none" }],
           parts: [
             C.part(clock(b.pt.m) + (b.pt.exact ? "" : " first held"), "k"),
             h("b", null, String(r.t || DASH)),
             C.part(contractText(r).trim(), "k"),
             h("b", { "data-tone": b.pt.cp === "P" ? "down" : "up" }, F.money(b.pt.p)),
-            C.part(b.pt.ask === null ? "ask —" : "ask " + pct0(b.pt.ask), "k"),
+            C.part(b.pt.ask.classified === null ? "side not stated" : F.askSaid(b.pt.ask), "k"),
             flags.length ? C.part(flags.join(" " + MID + " "), "k") : null,
           ],
         };
@@ -152,7 +152,7 @@
       title: "Flagged windows",
       state: S.alertsState.state === "ok" ? null : S.alertsState.state,
       asOf: typeof a.sessionDate === "string" ? a.sessionDate : null,
-      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and a solid fill means the vendor put most of the window's dollars on the ask side.",
+      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and the fill reads the vendor's side of the quote: solid where at least 65% of the premium it sided was on the ask side, a ring where at most 35% was, a faint fill where it was mixed or under half the premium was sided, and a dashed ring where it stated no side.",
       facts: [
         ["Read", instant(a.readAt)],
         ["Windows", rows.length ? count(rows.length) + (seen === null ? " windows" : " of " + (floor ? "at least " : "") + count(seen) + " flagged windows") : null],
@@ -179,19 +179,22 @@
       silence(host.timeline, S.alertsState, "Timeline", 250);
       return;
     }
+    const open = points().pts.some((pt) => pt.ask.classified === null);
+    const legend = () => UI.legend([
+      ["--up-mark", "dot", "Call"], ["--down-mark", "dot", "Put"],
+      UI.key("--label-1", "dot", "Mostly ask side"), UI.key("--label-1", "ring", "Mostly bid side"),
+      h("span", { class: "ui-key" }, h("i", { class: "fu-key-half", "aria-hidden": "true" }), "Mixed or thinly sided"),
+      open ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Side not stated") : null,
+      h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
+    ].filter(Boolean));
     if (charts.timeline && charts.timeline.el === host.timeline.querySelector(".fu-chart")) {
+      if (open !== !!host.timeline.querySelector(".fu-key-open")) host.timeline.lastChild.replaceWith(legend());
       charts.timeline.el._scrubAt = -1;
       charts.timeline.redraw(animate);
       return;
     }
     const chartHost = h("div", { class: "fu-chart" });
-    const legend = UI.legend([
-      ["--up-mark", "dot", "Call"], ["--down-mark", "dot", "Put"],
-      UI.key("--label-1", "dot", "Ask side"), UI.key("--label-1", "ring", "Not ask side"),
-      rows.some((r) => n(r.askPrem) === null) ? h("span", { class: "ui-key" }, h("i", { class: "fu-key-open", "aria-hidden": "true" }), "Ask side not stated") : null,
-      h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
-    ].filter(Boolean));
-    host.timeline.replaceChildren(chartHost, legend);
+    host.timeline.replaceChildren(chartHost, legend());
     charts.timeline = C.plot(chartHost, { kind: "flagged" });
   }
 
@@ -201,25 +204,29 @@
       const t = String(r.t || "");
       const p = n(r.prem);
       if (!t || p === null || p <= 0) continue;
-      if (!by.has(t)) by.set(t, { t, n: 0, prem: 0, call: 0, put: 0, askP: 0, askW: 0, swP: 0, swW: 0, opP: 0, opW: 0, st: r.st || null });
+      if (!by.has(t)) by.set(t, { t, n: 0, prem: 0, call: 0, put: 0, rows: [], swP: 0, swW: 0, opP: 0, opW: 0, st: r.st || null });
       const g = by.get(t);
-      g.n++; g.prem += p;
+      g.n++; g.prem += p; g.rows.push(r);
       if (r.cp === "C") g.call += p; else if (r.cp === "P") g.put += p;
-      const ask = n(r.askPrem);
-      if (ask !== null) { g.askP += ask; g.askW += p; }
       if (typeof r.sweep === "boolean") { g.swW += p; if (r.sweep) g.swP += p; }
       if (typeof r.opening === "boolean") { g.opW += p; if (r.opening) g.opP += p; }
       if (!g.st && r.st) g.st = r.st;
     }
     return [...by.values()].map((g) => ({
       ...g,
-      ask: g.askW ? g.askP / g.askW : null,
+      ask: F.askShare(g.rows),
       sweep: g.swW ? g.swP / g.swW : null,
       open: g.opW ? g.opP / g.opW : null,
     })).sort((a, b) => b.prem - a.prem);
   }
 
-  const shareCell = (v, hot) => h("span", { class: "fu-v fu-share", "data-tone": v !== null && v >= hot ? "flat" : null, "data-hot": v !== null && v >= hot ? "1" : null }, pct0(v));
+  const shareCell = (a) => {
+    const said = a.classified === null ? "no window states both sides" : F.askSaid(a);
+    return h("span", { class: "fu-v fu-share", "data-side": a.side === "ask" || a.side === "bid" ? a.side : null, title: F.askLabel + ": " + said },
+      h("span", { "aria-hidden": "true" }, a.classified === null ? DASH : a.share === null ? "none" : F.pct(a.share, 0)),
+      a.side === "thin" ? h("small", { "aria-hidden": "true" }, a.share === null ? "sided" : "thin") : null,
+      h("span", { class: "visually-hidden" }, ", " + F.askLabel + ": " + said));
+  };
   const sideGlyph = (st) => (st === "board:long" || st === "long" ? UI.glyph("up", "fu-side is-up") : st === "board:short" || st === "short" ? UI.glyph("down", "fu-side is-down") : null);
   const linkable = (st) => !!st && st !== "foreign";
 
@@ -252,7 +259,7 @@
         cw > 0 ? h("i", { class: "is-c", style: { width: cw.toFixed(2) + "%", "--i": String(i) } }) : null,
         pw > 0 ? h("i", { class: "is-p", style: { width: pw.toFixed(2) + "%", "--i": String(i) } }) : null),
       h("span", { class: "fu-v fu-strong" }, F.money(g.prem)),
-      shareCell(g.ask, 0.6),
+      shareCell(g.ask),
       h("span", { class: "fu-v fu-wide" }, pct0(g.sweep)),
       h("span", { class: "fu-v fu-wide" }, pct0(g.open)));
       return row;
@@ -269,9 +276,10 @@
   function namesInfo() {
     return {
       title: "Names",
-      lead: "The flagged windows, summed by name and ranked by premium. The bar is the name's premium against the largest, split into calls and puts; Ask, Sweep and Open are premium-weighted shares of the windows that carry each vendor field.",
+      lead: "The flagged windows, summed by name and ranked by premium. The bar is the name's premium against the largest, split into calls and puts; Sweep and Open are premium-weighted shares of the windows that carry each vendor field; Ask is the ask-side share of the premium the vendor sided, coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less.",
       notes: [
         "A share is taken only over windows where the vendor carried that field. A dash is a name with no window carrying it, not a zero.",
+        "In Ask, a dash is a name with no window that states both sides; none sided is a name whose windows put none of the premium on either side; thin marks a share taken over less than half of the premium.",
         "These are shares of what the vendor's rules flagged, not of the name's whole session.",
       ],
     };

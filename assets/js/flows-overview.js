@@ -734,32 +734,25 @@
           "feed's own tie-break."
         : ", and the biggest is " + (share * 100).toFixed(1) + "% of the premium across them.");
 
-    const sideOf = (row) => {
-      const ask = isNum(row.askPrem), bid = isNum(row.bidPrem);
-      const two = ask === null || bid === null ? null : Math.abs(ask) + Math.abs(bid);
-      return two === null || two === 0 ? null : Math.abs(ask) / two;
-    };
-    const sideSaid = (s) => (s === null ? DASH : s === 0.5 ? "even"
-      : (s > 0.5 ? "ask " : "bid ") + ((s > 0.5 ? s : 1 - s) * 100).toFixed(0) + "%");
     const contract = (row) => (row.cp || DASH) + " " + (isNum(row.k) === null ? DASH : row.k) +
       (row.exp ? " " + String(row.exp).slice(5) : "");
 
     const list = drawn.map((row, i) => {
-      const s = sideOf(row);
-      return h("div", { class: "ui-row hm-arow", role: "listitem", "aria-label": (row.t || DASH) + " " + contract(row) + ", " + usd(row.prem) + ", " + sideSaid(s) },
+      const a = F.askShare(row), s = a.share;
+      return h("div", { class: "ui-row hm-arow", role: "listitem", "aria-label": (row.t || DASH) + " " + contract(row) + ", " + usd(row.prem) + ", " + F.askSaid(a) },
         h("span", { class: "ui-badge", "data-tone": row.cp === "C" ? "up" : row.cp === "P" ? "down" : null, "aria-label": row.cp === "C" ? "Call" : row.cp === "P" ? "Put" : null }, row.cp === "C" || row.cp === "P" ? row.cp : "·"),
         h("span", { class: "ui-row-m" }, h("b", null, row.t || DASH), h("span", null, (isNum(row.k) === null ? DASH : row.k) + (row.exp ? " · " + F.day(String(row.exp)) : ""))),
-        s === null ? h("span", { class: "ui-dash hm-side" }, DASH)
-          : h("span", { class: "ui-meter hm-side", title: sideSaid(s) }, h("i", { style: { "--w": (s * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(s >= 0.5 ? "--label-2" : "--label-3") } })),
+        a.classified === null ? h("span", { class: "ui-dash hm-side" }, DASH)
+          : h("span", { class: "ui-meter hm-side", title: F.askLabel + ": " + F.askSaid(a), "data-side": a.side }, h("i", { style: { "--w": ((s || 0) * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(a.side === "ask" ? "--label-1" : a.side === "bid" ? "--side-bid" : "--label-3") } })),
         h("span", { class: "ui-row-v" }, usd(row.prem)));
     });
     const label = "Flagged option windows, largest premium first";
     into.append(UI.list(list, { visible: SHOW, label }),
-      UI.legend([["--label-2", "", "Ask-side share"]]));
+      UI.legend([["--label-1", "", "Mostly ask side"], ["--side-bid", "", "Mostly bid side"], ["--label-3", "", "Mixed or thinly sided"]]));
     const detail = table(label, [
       ["Time · ET", false, "When the vendor's flagged window opened, in Eastern time."],
       ["Name", false], ["Contract", false], ["Premium", true],
-      ["Side", true, "The share of premium the vendor attributed to the ask side or the bid side. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
+      ["Side", true, F.askLabel + ", and the share of premium sided at all. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
       ["Rule", false, "The vendor's name for the screen that flagged the window."],
     ], drawn.map((row) => {
       const at = etTime(row.spanStart);
@@ -770,7 +763,7 @@
             : row.spanFrom === "created_at" ? "Alert created " + at + " ET; no window stated."
               : to === null ? "Window opened " + at + " ET; the vendor stated no end for it." : "Window ran " + at + " to " + to + " ET."],
           [row.t || DASH, "cc-t"], [contract(row), "cc-date"], [usd(row.prem), "c-num"],
-          [sideSaid(sideOf(row)), "c-num"],
+          [F.askSaid(F.askShare(row)), "c-num"],
           [row.rule || DASH, "cc-dim", row.rule ? "Flagged by the vendor's " + String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() + " rule, under the vendor's own name for it." : null],
         ],
       };
@@ -784,7 +777,7 @@
       title: "Flagged windows", lead: lede,
       facts: [["Seen", seen === null ? DASH : (payload.vendorTruncated === true || payload.readTruncated === true ? "≥" : "") + seen],
         ["Read", read]],
-      notes: ["The meter is the share of each window's premium the vendor attributed to the ask side."],
+      notes: ["The meter is the " + F.askLabel.toLowerCase() + ". It is coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less. A dash is a window that does not state both sides; an empty meter, none sided, is one that put none of its premium on either side."],
       node: detail,
     }));
   }

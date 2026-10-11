@@ -1,0 +1,461 @@
+{
+  "label": "Ask-side share of the premium the vendor sided",
+  "definition": "share = sum(ask) / (sum(ask) + sum(bid)) over the windows that state askPrem, bidPrem and a positive prem, with neither side negative, where a window whose two sides sum past its premium is scaled by prem / (askPrem + bidPrem) before it is pooled; classified = sum over those windows of those scaled dollars (at most the window premium) / sum(prem) over every window with a positive prem, so premium on a window that states no side counts against the coverage and never as sided",
+  "sides": {
+    "ask": "classified >= 0.5 and share >= 0.65, both read as the whole percents printed",
+    "bid": "classified >= 0.5 and share <= 0.35, both read as the whole percents printed",
+    "mixed": "classified >= 0.5 and 0.35 < share < 0.65, read as the whole percents printed",
+    "thin": "classified < 0.5 read as a whole percent (under 50% sided), including classified 0, where nothing was sided and there is no share",
+    "null": "no usable window: classified is null, so the side was never stated"
+  },
+  "rounding": "the thresholds compare the whole percents the said form prints (+(v * 100).toFixed(0), half up), at 65, 35 and 50, so a figure is never printed once coloured and once plain; this departs from the literal thresholds of C-02 (share >= 0.65 or <= 0.35, classified >= 0.5) on three known answers (share 0.6496 is ask, share 0.3504 is bid, classified 0.4996 is coloured), and a server helper reproducing this table must round the same way",
+  "said": "the share and classified as whole percents: \"<share>% ask side · <classified>% sided\"; \"none sided\" when classified is 0; an em dash when no window is usable",
+  "split": "askSplit(row) for one window with a positive premium: { ask, bid, none, askStated, bidStated }; a side is stated when it is a number and not negative, and an unstated side is 0 dollars, so its share of the premium goes to none while the stated side keeps its dollars; sides summing past the premium are scaled by prem / (ask + bid); when both are stated, ask / (ask + bid) is share and (ask + bid) / prem is classified",
+  "tolerance": 1e-12,
+  "cases": [
+    {
+      "name": "three quarters at the ask, fully sided",
+      "rows": {
+        "askPrem": 75,
+        "bidPrem": 25,
+        "prem": 100
+      },
+      "share": 0.75,
+      "classified": 1,
+      "side": "ask",
+      "said": "75% ask side · 100% sided"
+    },
+    {
+      "name": "ask boundary: exactly 65% is coloured",
+      "rows": {
+        "askPrem": 65,
+        "bidPrem": 35,
+        "prem": 100
+      },
+      "share": 0.65,
+      "classified": 1,
+      "side": "ask",
+      "said": "65% ask side · 100% sided"
+    },
+    {
+      "name": "just under the ask boundary is mixed",
+      "rows": {
+        "askPrem": 64,
+        "bidPrem": 36,
+        "prem": 100
+      },
+      "share": 0.64,
+      "classified": 1,
+      "side": "mixed",
+      "said": "64% ask side · 100% sided"
+    },
+    {
+      "name": "bid boundary: exactly 35% is coloured",
+      "rows": {
+        "askPrem": 35,
+        "bidPrem": 65,
+        "prem": 100
+      },
+      "share": 0.35,
+      "classified": 1,
+      "side": "bid",
+      "said": "35% ask side · 100% sided"
+    },
+    {
+      "name": "just over the bid boundary is mixed",
+      "rows": {
+        "askPrem": 36,
+        "bidPrem": 64,
+        "prem": 100
+      },
+      "share": 0.36,
+      "classified": 1,
+      "side": "mixed",
+      "said": "36% ask side · 100% sided"
+    },
+    {
+      "name": "wholly at the bid is a share of zero, not an absence",
+      "rows": {
+        "askPrem": 0,
+        "bidPrem": 100,
+        "prem": 100
+      },
+      "share": 0,
+      "classified": 1,
+      "side": "bid",
+      "said": "0% ask side · 100% sided"
+    },
+    {
+      "name": "even split is mixed",
+      "rows": {
+        "askPrem": 50,
+        "bidPrem": 50,
+        "prem": 100
+      },
+      "share": 0.5,
+      "classified": 1,
+      "side": "mixed",
+      "said": "50% ask side · 100% sided"
+    },
+    {
+      "name": "mostly at the bid",
+      "rows": {
+        "askPrem": 10000,
+        "bidPrem": 80000,
+        "prem": 90000
+      },
+      "share": 0.1111111111111111,
+      "classified": 1,
+      "side": "bid",
+      "said": "11% ask side · 100% sided"
+    },
+    {
+      "name": "partly sided at exactly half is still coloured",
+      "rows": {
+        "askPrem": 40,
+        "bidPrem": 10,
+        "prem": 100
+      },
+      "share": 0.8,
+      "classified": 0.5,
+      "side": "ask",
+      "said": "80% ask side · 50% sided"
+    },
+    {
+      "name": "partly sided under half is thin, not coloured",
+      "rows": {
+        "askPrem": 39,
+        "bidPrem": 10,
+        "prem": 100
+      },
+      "share": 0.7959183673469388,
+      "classified": 0.49,
+      "side": "thin",
+      "said": "80% ask side · 49% sided"
+    },
+    {
+      "name": "partly sided bid under half is thin",
+      "rows": {
+        "askPrem": 5,
+        "bidPrem": 40,
+        "prem": 100
+      },
+      "share": 0.1111111111111111,
+      "classified": 0.45,
+      "side": "thin",
+      "said": "11% ask side · 45% sided"
+    },
+    {
+      "name": "printed 49% sided is thin",
+      "rows": {
+        "askPrem": 3949,
+        "bidPrem": 1000,
+        "prem": 10000
+      },
+      "share": 0.7979389775712266,
+      "classified": 0.4949,
+      "side": "thin",
+      "said": "80% ask side · 49% sided"
+    },
+    {
+      "name": "printed 50% sided is not thin even under 0.5",
+      "rows": {
+        "askPrem": 3996,
+        "bidPrem": 1000,
+        "prem": 10000
+      },
+      "share": 0.799839871897518,
+      "classified": 0.4996,
+      "side": "ask",
+      "said": "80% ask side · 50% sided"
+    },
+    {
+      "name": "printed 35% is coloured as the bid even over 0.35",
+      "rows": {
+        "askPrem": 3504,
+        "bidPrem": 6496,
+        "prem": 10000
+      },
+      "share": 0.3504,
+      "classified": 1,
+      "side": "bid",
+      "said": "35% ask side · 100% sided"
+    },
+    {
+      "name": "printed 64% stays mixed",
+      "rows": {
+        "askPrem": 6449,
+        "bidPrem": 3551,
+        "prem": 10000
+      },
+      "share": 0.6449,
+      "classified": 1,
+      "side": "mixed",
+      "said": "64% ask side · 100% sided"
+    },
+    {
+      "name": "printed 65% is coloured as the ask even under 0.65",
+      "rows": {
+        "askPrem": 6496,
+        "bidPrem": 3504,
+        "prem": 10000
+      },
+      "share": 0.6496,
+      "classified": 1,
+      "side": "ask",
+      "said": "65% ask side · 100% sided"
+    },
+    {
+      "name": "premium with neither side is sided as zero: thin, not unstated",
+      "rows": {
+        "askPrem": 0,
+        "bidPrem": 0,
+        "prem": 100
+      },
+      "share": null,
+      "classified": 0,
+      "side": "thin",
+      "said": "none sided"
+    },
+    {
+      "name": "sides summing past the premium are capped at fully sided",
+      "rows": {
+        "askPrem": 900,
+        "bidPrem": 700,
+        "prem": 1000
+      },
+      "share": 0.5625,
+      "classified": 1,
+      "side": "mixed",
+      "said": "56% ask side · 100% sided"
+    },
+    {
+      "name": "over-sum and lopsided",
+      "rows": {
+        "askPrem": 1500,
+        "bidPrem": 100,
+        "prem": 1000
+      },
+      "share": 0.9375,
+      "classified": 1,
+      "side": "ask",
+      "said": "94% ask side · 100% sided"
+    },
+    {
+      "name": "ask stated with no bid stated has no share",
+      "rows": {
+        "askPrem": 250000,
+        "prem": 250000
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "bid stated with no ask stated has no share",
+      "rows": {
+        "askPrem": null,
+        "bidPrem": 5,
+        "prem": 10
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "no premium stated has no share",
+      "rows": {
+        "askPrem": 5,
+        "bidPrem": 5,
+        "prem": null
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "zero premium has no share",
+      "rows": {
+        "askPrem": 0,
+        "bidPrem": 0,
+        "prem": 0
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "a negative side is not a premium",
+      "rows": {
+        "askPrem": -5,
+        "bidPrem": 10,
+        "prem": 10
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "vendor numerics as strings are read",
+      "rows": {
+        "askPrem": "3000",
+        "bidPrem": "1000",
+        "prem": "4000"
+      },
+      "share": 0.75,
+      "classified": 1,
+      "side": "ask",
+      "said": "75% ask side · 100% sided"
+    },
+    {
+      "name": "an empty string is not a number",
+      "rows": {
+        "askPrem": "",
+        "bidPrem": 10,
+        "prem": 10
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "no row at all",
+      "rows": null,
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    },
+    {
+      "name": "pooled: two windows summed before dividing",
+      "rows": [
+        {
+          "askPrem": 200000,
+          "bidPrem": 50000,
+          "prem": 250000
+        },
+        {
+          "askPrem": 10000,
+          "bidPrem": 80000,
+          "prem": 90000
+        }
+      ],
+      "share": 0.6176470588235294,
+      "classified": 1,
+      "side": "mixed",
+      "said": "62% ask side · 100% sided"
+    },
+    {
+      "name": "pooled: a window without sides is not sided, so it thins the coverage but not the share",
+      "rows": [
+        {
+          "askPrem": 100,
+          "bidPrem": 0,
+          "prem": 100
+        },
+        {
+          "prem": 1000
+        }
+      ],
+      "share": 1,
+      "classified": 0.09090909090909091,
+      "side": "thin",
+      "said": "100% ask side · 9% sided"
+    },
+    {
+      "name": "pooled: a small window wholly at the ask beside a large one with no side stated is thin, not fully sided",
+      "rows": [
+        {
+          "askPrem": 100,
+          "bidPrem": 0,
+          "prem": 100
+        },
+        {
+          "askPrem": null,
+          "bidPrem": null,
+          "prem": 10000
+        }
+      ],
+      "share": 1,
+      "classified": 0.009900990099009901,
+      "side": "thin",
+      "said": "100% ask side · 1% sided"
+    },
+    {
+      "name": "pooled: a window stating one side counts its premium as unsided",
+      "rows": [
+        {
+          "askPrem": 600,
+          "bidPrem": 200,
+          "prem": 800
+        },
+        {
+          "askPrem": 200,
+          "prem": 200
+        }
+      ],
+      "share": 0.75,
+      "classified": 0.8,
+      "side": "ask",
+      "said": "75% ask side · 80% sided"
+    },
+    {
+      "name": "pooled: an over-sum window is sided at most its own premium",
+      "rows": [
+        {
+          "askPrem": 1500,
+          "bidPrem": 500,
+          "prem": 1000
+        },
+        {
+          "prem": 1000
+        }
+      ],
+      "share": 0.75,
+      "classified": 0.5,
+      "side": "ask",
+      "said": "75% ask side · 50% sided"
+    },
+    {
+      "name": "pooled: partly sided across windows",
+      "rows": [
+        {
+          "askPrem": 30,
+          "bidPrem": 0,
+          "prem": 100
+        },
+        {
+          "askPrem": 0,
+          "bidPrem": 10,
+          "prem": 100
+        }
+      ],
+      "share": 0.75,
+      "classified": 0.2,
+      "side": "thin",
+      "said": "75% ask side · 20% sided"
+    },
+    {
+      "name": "pooled: nothing usable",
+      "rows": [
+        {
+          "prem": 100
+        },
+        {
+          "askPrem": 5,
+          "prem": 10
+        }
+      ],
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—"
+    }
+  ]
+}
