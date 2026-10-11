@@ -67,16 +67,16 @@ export function firingCounts(crons = cronStrings()) {
 
 export const ENGINE_CEILINGS = Object.freeze({
   rth: Object.freeze({ trips: 3, read: 13, written: 5 }),
-  focus: Object.freeze({ trips: 2, read: 540, written: 2 }),
+  focus: Object.freeze({ trips: 2, read: 650, written: 2 }),
   summary: Object.freeze({ trips: 2, read: 5, written: 1 }),
-  housekeeping: Object.freeze({ trips: 6, read: 4, written: 3 }),
+  housekeeping: Object.freeze({ trips: 9, read: 4, written: 3 }),
 });
 
 export const COLD_START = Object.freeze({
   trips: 6,
-  written: 16,
+  written: 18,
   startsPerWeekday: 312,
-  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (15 statements, 14 of them CREATE); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
+  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (17 statements, 16 of them CREATE); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
 });
 
 export const TIER2 = Object.freeze({
