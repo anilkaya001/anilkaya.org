@@ -12,6 +12,7 @@
     "test:contracts": "node contracts.mjs && node --disable-warning=ExperimentalWarning lib-contract.mjs",
     "test:run": "node run-contract.mjs",
     "test:flows-neuron-screen": "node flows-neuron-screen.mjs",
+    "test:flows-fact-ids": "node --disable-warning=ExperimentalWarning flows-fact-ids.mjs",
     "test:flows-dossier": "node flows-dossier-contract.mjs",
     "test:flows-dossier-reads": "node --disable-warning=ExperimentalWarning flows-dossier-reads.mjs",
     "test:markets": "node markets-contract.mjs",

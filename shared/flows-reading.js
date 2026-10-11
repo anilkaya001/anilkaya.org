@@ -54,7 +54,7 @@ const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const arr = (v) => (Array.isArray(v) ? v : []);
 const lower = (s) => String(s || "").toLowerCase();
 
-const ENGINE_LABELS = Object.freeze({
+export const ENGINE_LABELS = Object.freeze({
   "iv.cm.7": "7-day implied volatility",
   "iv.cm.30": "30-day implied volatility",
   "iv.cm.90": "90-day implied volatility",
