@@ -3831,18 +3831,23 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!/fetch-depth/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test");
   ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
     "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
+  const allUses = [];
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
     const uses = [...text.matchAll(/\buses:\s*(\S+)/g)].map((m) => m[1]);
-    ok(uses.length > 0 && uses.every((u) => /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/.test(u)) &&
-       uses.every((u) => ["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-         "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444"].includes(u)),
-    `${file} pins checkout and setup-node to the commits of their v5 tags (${uses.join(", ")}): a moved tag can swap ` +
-      "no code into a job");
+    allUses.push(...uses);
+    ok(uses.length > 0 && uses.every((u) => /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/.test(u)),
+    `${file} pins checkout and setup-node to a full commit SHA (${uses.join(", ")}): a moved tag can swap no code ` +
+      "into a job");
     ok([...text.matchAll(/uses: actions\/checkout@\S+\n(?:\s+if: .*\n)?\s+with:\n((?:\s{10}.*\n)+)/g)]
       .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
     `${file} keeps no credential in .git/config after checkout`);
   }
+  const pinsOf = (action) => [...new Set(allUses.filter((u) => u.startsWith(`${action}@`)))];
+  assert.deepEqual([pinsOf("actions/checkout").length, pinsOf("actions/setup-node").length, new Set(allUses).size], [1, 1, 2],
+    `ONE FULL-SHA PIN PER ACTION, THE SAME IN EVERY WORKFLOW: checkout is pinned at ${pinsOf("actions/checkout").join(" and ")}, ` +
+    `setup-node at ${pinsOf("actions/setup-node").join(" and ")}, so a bump moves all five files together and the ` +
+    "contract holds no SHA of its own"); checks++;
   const dependabot = readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
   ok(/^version: 2\n/.test(dependabot) && !/^\s*#/m.test(dependabot) && !/\s#\s/.test(dependabot),
     "DEPENDABOT IS CONFIGURED in version 2 and, like every other YAML file here, carries no comments");
