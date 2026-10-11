@@ -855,6 +855,7 @@ ${feedModule("uaUrgencyCard", "Urgency", `<div class="fd-body" id="uaUrgency"></
 ${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"></div>`, { span: 6 })}
 ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { span: 6 })}
   </div>
+  <i hidden data-defer="flow-below" data-src="${v("/assets/js/flows-unusual-below.js")}"></i>
 `, { chrome: false })}
 ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>

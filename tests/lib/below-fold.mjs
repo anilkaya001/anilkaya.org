@@ -1,6 +1,6 @@
 const NOW = () => {
   const Native = window.IntersectionObserver;
-  if (Native && !Native.__homeBelow) {
+  if (Native && !Native.__belowFold) {
     class Seen extends Native {
       constructor(callback, options) {
         super(callback, options);
@@ -8,10 +8,10 @@ const NOW = () => {
       }
       observe(el) {
         super.observe(el);
-        if (el && el.id === "hmChg") Promise.resolve().then(() => this.__callback([{ isIntersecting: true, target: el }], this));
+        if (el && (el.id === "hmChg" || el.id === "uaTimelineCard")) Promise.resolve().then(() => this.__callback([{ isIntersecting: true, target: el }], this));
       }
     }
-    Seen.__homeBelow = true;
+    Seen.__belowFold = true;
     window.IntersectionObserver = Seen;
   }
   window.requestIdleCallback = (fn) => {
@@ -20,9 +20,14 @@ const NOW = () => {
   };
 };
 
-export const HOME_BELOW_NOW = NOW;
+export const BELOW_NOW = NOW;
 
-const attached = () => !document.getElementById("hmChg") || Boolean(window.FlowsUI && window.FlowsUI.homeKit && window.FlowsUI.homeKit.attached);
+const attached = () => {
+  if (!document.getElementById("hmChg") && !document.getElementById("uaTimelineCard")) return true;
+  const ui = window.FlowsUI || {};
+  const kit = ui.homeKit || ui.flowKit;
+  return Boolean(kit && kit.attached);
+};
 
 function patch(page) {
   const goto = page.goto.bind(page);
@@ -36,7 +41,7 @@ function patch(page) {
   return page;
 }
 
-export function revealHomeBelow(browser) {
+export function revealBelow(browser) {
   const newPage = browser.newPage.bind(browser);
   const newContext = browser.newContext.bind(browser);
   browser.newPage = async (...args) => {

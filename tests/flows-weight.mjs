@@ -21,7 +21,7 @@ const CEILING_KIB = {
   strategyPage: 261,
   trackPage: 180,
   marketPage: 254,
-  unusualPage: 287 + (1613 - 74730) / 1024,
+  unusualPage: 287 + (1613 - 74730) / 1024 - 17,
   eventsPage: 155,
   politicalPage: 103,
   historyPage: 167,
@@ -118,7 +118,7 @@ const judge = (row, bases = BASES) => {
 
 const DEFERRED = {
   tickerPage: { groups: {} },
-  unusualPage: { groups: { net: "/assets/js/flows-net.js" } },
+  unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
@@ -128,7 +128,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
-  unusualPage: 155, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+  unusualPage: 190, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
 const FLOOR_BYTES = 1024;
@@ -142,7 +142,6 @@ const EAGER_KERNEL = [
 ];
 const NO_RELIEF_ROW = "no relief row yet (plan 5.7)";
 const BELOW_FLOOR = {
-  unusualPage: "F-08 part b",
   marketPage: "F-08 part c",
   tickerPage: "OD-08",
   sidePage: NO_RELIEF_ROW,
@@ -451,6 +450,27 @@ for (const name of Object.keys(CEILING_KIB)) {
     ok(m.bytes + total <= (CEILING_KIB[m.name] + allowance) * 1024,
        `${m.name}: eager plus deferred plus GPU-only is ${Math.round((m.bytes + total) / 1024)}k, inside ceiling ${CEILING_KIB[m.name]}k plus allowance ${allowance}k`);
     console.log("    " + m.name.replace(/Page$/, "").padEnd(10) + String(Math.round(total / 1024)).padStart(4) + "k / " + String(allowance).padStart(2) + "k  " + files.map((x) => x.f.split("/").pop() + " (" + x.how + ")").join("  "));
+  }
+  for (const m of measured) {
+    const table = DEFERRED[m.name];
+    if (!table || !table.modules) continue;
+    for (const id of table.modules) ok(new RegExp(`<section[^>]*\\bid="${id}"`).test(m.html), `${m.name}: the module ${id} that DEFERRED lists is a section of the page`);
+    for (const [group, list] of Object.entries(table.groups)) {
+      for (const f of Array.isArray(list) ? list : [list]) {
+        const chunk = read(f);
+        const attached = /\.attach\(\{([^}]*)\}\)/.exec(chunk);
+        if (!attached) continue;
+        const names = attached[1].split(",").map((x) => x.trim()).filter(Boolean);
+        ok(names.length >= 4, `${m.name}: the ${group} chunk hands ${names.length} painters back`);
+        for (const nme of names) {
+          ok(new RegExp(`\\bfunction ${nme}\\(`).test(chunk), `${m.name}: ${nme} is defined in ${f.split("/").pop()}`);
+          for (const src of m.srcs) {
+            if (/flows-(ui|fresh|rt|dock)\.js$/.test(src)) continue;
+            ok(!new RegExp(`\\bfunction ${nme}\\(`).test(read(src)), `${m.name}: and ${nme} is not also defined in the first-paint file ${src.split("/").pop()}`);
+          }
+        }
+      }
+    }
   }
   for (const name of Object.keys(DEFERRED)) ok(pageNames.includes(name), `DEFERRED names ${name}, a route that still exists`);
   for (const name of Object.keys(DEFERRED_KIB)) ok(pageNames.includes(name), `the allowance for ${name} guards a route that still exists`);

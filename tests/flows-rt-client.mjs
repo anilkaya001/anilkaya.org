@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { revealHomeBelow } from "./lib/home-below.mjs";
+import { revealBelow } from "./lib/below-fold.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 import * as RT from "../shared/flows-rt.js";
 import { STRIP_FIELDS } from "../shared/flows-live.js";
@@ -315,7 +315,7 @@ function rigHub(page, R, { roster = async () => null } = {}) {
 }
 
 const want = (name) => !process.env.RT_ONLY || new RegExp(process.env.RT_ONLY).test(name);
-const browser = revealHomeBelow(await chromium.launch());
+const browser = revealBelow(await chromium.launch());
 try {
   if (want("merge")) {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });

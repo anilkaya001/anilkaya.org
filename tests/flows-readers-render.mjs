@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { revealHomeBelow } from "./lib/home-below.mjs";
+import { revealBelow } from "./lib/below-fold.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,7 +69,7 @@ const tick = async (page, ms) => {
 };
 const pill = (page) => page.evaluate(() => { const b = document.getElementById("fxFresh"); return b ? { state: b.dataset.state, label: b.dataset.label } : null; });
 
-const browser = revealHomeBelow(await chromium.launch());
+const browser = revealBelow(await chromium.launch());
 try {
   {
     const TICKERS = ["NVDA", "AMD", "MSFT", "AAPL"];

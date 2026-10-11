@@ -1066,7 +1066,8 @@ const rebuild = (em) => {
     ],
   });
 
-  const browser = await chromium.launch();
+  const { revealBelow } = await import("./lib/below-fold.mjs");
+  const browser = revealBelow(await chromium.launch());
   const newPage = async (options) => {
     const p = await browser.newPage(Object.assign({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" }, options || {}));
     await p.context().addCookies([{ name: "flows_session", value: session, url: server.baseURL }]);

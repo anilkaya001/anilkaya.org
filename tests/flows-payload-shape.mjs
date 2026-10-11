@@ -28,11 +28,13 @@ const SURFACES = [
   { key: "market", file: "assets/js/flows-market.js", fn: "paintTilt", vars: ["m"] },
   { key: "market", file: "assets/js/flows-market.js", fn: "paintBreadth", vars: ["m"] },
   { key: "unusual", file: "assets/js/flows-unusual.js", fn: null, vars: ["payload"] },
+  { key: "unusual", file: "assets/js/flows-unusual-below.js", fn: null, vars: ["payload"] },
   { key: "events", file: "assets/js/flows-events.js", fn: null, vars: ["payload"] },
   { key: "record", file: "assets/js/flows-history.js", fn: null, vars: ["payload"] },
   { key: "scoretrack", file: "assets/js/flows-track.js", fn: null, vars: ["payload"] },
 
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
+  { key: "flowalerts", file: "assets/js/flows-unusual-below.js", fn: null, vars: ["alerts"] },
   { key: "flowalerts", file: "assets/js/flows-net.js", fn: "take", vars: ["alerts"] },
   { key: "universe", file: "assets/js/flows-net.js", fn: "loadUniverse", vars: ["u"] },
   { key: "pulse", file: "assets/js/flows-market.js", fn: "paintPulse", vars: ["pulse"] },

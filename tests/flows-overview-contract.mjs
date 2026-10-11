@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { lkMock } from "./lk-mock.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { chromium } from "playwright";
-import { revealHomeBelow } from "./lib/home-below.mjs";
+import { revealBelow } from "./lib/below-fold.mjs";
 import { startWorker, FLOWS_PASSWORD, FLOWS_TEST_USER } from "./worker-server.mjs";
 import { buildScoreTrack } from "../shared/flows-scores.js";
 
@@ -293,7 +293,7 @@ const signIn = async (pg) => {
   ]);
 };
 
-const browser = revealHomeBelow(await chromium.launch());
+const browser = revealBelow(await chromium.launch());
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const errors = [];
