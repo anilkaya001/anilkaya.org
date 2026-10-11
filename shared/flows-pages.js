@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "257";
+export const ASSET_VERSION = "258";
 
 import { GLOSSARY } from "./flows-glossary.js";
 
@@ -436,8 +436,15 @@ const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "
       ${body || `<div class="hm-body" id="${bodyId}"></div>`}
     </section>`;
 
-export function overviewPage({ username = "", summary = null } = {}) {
-  return `${head("Flows — Home", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", ["/assets/css/flows-home.css"])}
+const homeNetModule = (net) => net ? `
+    <section class="ui-card ui-mod hm-mod fn-card" id="hmNet" aria-labelledby="hmNetT">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="hmNetT">Flow network</h2><span class="ui-mod-sp"></span></header>
+      <div class="fn-host is-slot" id="hmNetHost" data-ambient="1"></div>
+      <i hidden data-defer="home-net" data-src="${v("/assets/js/flows-net.js")}"></i>
+    </section>` : "";
+
+export function overviewPage({ username = "", summary = null, net = false } = {}) {
+  return `${head("Flows — Home", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-net.css"] : ["/assets/css/flows-home.css"])}
 ${shell("Session", "overview", username, `
   <header class="flows-head hm-head" data-fx-hero>
     <h1 id="fxTitle">Session</h1>
@@ -456,7 +463,7 @@ ${shell("Session", "overview", username, `
       </div>
       <div class="hm-hero-chart" id="hmTide"></div>
       <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
-    </div></section>
+    </div></section>${homeNetModule(net)}
 ${homeModule("hmMetals", "Metals", "ccMetals", { sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}
 ${homeModule("hmLeaders", "Leaders", "ccLeaders", { sub: `<span class="hm-when" id="ccLeadersWhen"></span>`, seg: `<div class="hm-seg" id="ccLeadSeg"></div>` })}
 ${neuronVerdict(summary)}

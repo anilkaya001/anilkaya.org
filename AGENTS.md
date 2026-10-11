@@ -1412,7 +1412,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 128 suites: 87 that need only Node (N), 24 that also
+`tests/suites/` registers 129 suites: 88 that need only Node (N), 24 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1428,21 +1428,21 @@ flows-brief               flows-calibration         flows-chain-panels        fl
 flows-copy-lint           flows-d1-budget           flows-defer-render        flows-dispersion
 flows-dossier             flows-dossier-reads       flows-engine-budget       flows-fact-ids
 flows-flow-below-render   flows-freshness           flows-garch               flows-home-below-render
-flows-home-composition    flows-ledger              flows-legs                flows-live
-flows-market-below-render flows-mint                flows-moves-render        flows-neuron
-flows-neuron-screen       flows-overlay             flows-payload-shape       flows-permits
-flows-plan-facts          flows-political           flows-positioning         flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-readers             flows-reading             flows-reading-worker
-flows-reads               flows-record              flows-relations-render    flows-rt
-flows-scores              flows-sign                flows-skyline-render      flows-starts
-flows-stats               flows-stock               flows-tape-stats          flows-targets
-flows-truth               flows-universe            flows-variation           flows-vendor-budget
-flows-verdict             flows-vol                 flows-warnings            flows-weight
-flows-ws-probe            lab-write                 launch-readiness          markets
-mastery                   pipeline                  route-matrix              server-ai
-server-desk               server-ingest             server-kernel             server-log
-server-pages              server-router             staging
+flows-home-composition    flows-home-net-render     flows-ledger              flows-legs
+flows-live                flows-market-below-render flows-mint                flows-moves-render
+flows-neuron              flows-neuron-screen       flows-overlay             flows-payload-shape
+flows-permits             flows-plan-facts          flows-political           flows-positioning
+flows-probe               flows-public              flows-pulse               flows-quant
+flows-quant-audit         flows-quant-card          flows-readers             flows-reading
+flows-reading-worker      flows-reads               flows-record              flows-relations-render
+flows-rt                  flows-scores              flows-sign                flows-skyline-render
+flows-starts              flows-stats               flows-stock               flows-tape-stats
+flows-targets             flows-truth               flows-universe            flows-variation
+flows-vendor-budget       flows-verdict             flows-vol                 flows-warnings
+flows-weight              flows-ws-probe            lab-write                 launch-readiness
+markets                   mastery                   pipeline                  route-matrix
+server-ai                 server-desk               server-ingest             server-kernel
+server-log                server-pages              server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

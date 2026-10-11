@@ -1462,6 +1462,26 @@
     },
   });
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { homeKit }));
+  const netHost = $("hmNetHost");
+  let netNow = null, netIn;
+  const netSend = () => {
+    if (!netNow || netIn === undefined) return;
+    const rows = netIn && Array.isArray(netIn.rows) ? netIn.rows : null;
+    netNow.take(rows ? netIn : null, rows ? { state: rows.length ? "ok" : "quiet", reason: "Nothing flagged in this read." }
+      : { state: netIn ? "pending" : "unavailable", reason: netIn ? "The flagged windows are not published yet." : "The flagged windows could not be read." });
+    netHost.classList.toggle("is-slot", !!rows && rows.length > 0);
+    netHost.classList.toggle("is-quiet", !rows || !rows.length);
+  };
+  if (netHost && UI.defer) {
+    UI.defer("home-net", { when: "visible", el: netHost, label: "The flow network" }).then(() => {
+      const loaded = window.FlowsUI;
+      if (!loaded || !loaded.net) return;
+      netNow = loaded.net.mount(netHost, netHost.dataset.ambient === "1" ? { ambient: true } : {});
+      netSend();
+    });
+  }
+  when(["alerts"], ({ alerts }) => { netIn = alerts; netSend(); });
+
   if (UI.defer) UI.defer("home-below", { when: "visible", el: $("hmChg"), label: "The lower modules" });
 
   const fill = (id, paint, ...args) => {
