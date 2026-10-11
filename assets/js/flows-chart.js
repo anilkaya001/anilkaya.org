@@ -228,7 +228,7 @@
       const w = host.clientWidth, rw = readout.offsetWidth;
       readout.style.left = clamp(x - rw / 2, 0, Math.max(0, w - rw)) + "px";
       readout.style.top = (r.top ?? 0) + "px";
-      if (speak) announce(spoken(readout));
+      if (speak) announce(r.say || spoken(readout));
     };
     let raf = 0, pt = [0, 0];
     const hide = () => { host._scrubAt = -1; if (raf) { cancelAnimationFrame(raf); raf = 0; } readout.classList.remove("is-on"); xh.setAttribute("opacity", 0); dots.replaceChildren(); };

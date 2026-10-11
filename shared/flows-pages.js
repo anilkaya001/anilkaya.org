@@ -624,7 +624,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-atm">At the money, on the vendor&#39;s last-transaction volatility: {l}.</p>
       <p data-k="sm-units">Volatility units resolved once for the whole chain: {b}.</p>
       <p data-k="fr-aria">Annualised yield, square-root scale, against {x} for {n} lines</p>
-      <p data-k="fr-key">Frontier. Use the arrow keys to step along the frontier.</p>
+      <p data-k="fr-key">Frontier. Use the arrow keys to step through the lines.</p>
       <p data-k="fr-none">No line carries both a risk reading and a yield.</p>
       <p data-k="rank-bp">Enter a buying power to rank by premium collectible.</p>
       <p data-k="sym-bad">That is not a symbol this desk can price.</p>

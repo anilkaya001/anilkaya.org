@@ -324,7 +324,7 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
         for (const p of PTS) s("circle", { cx: p.x, cy: p.y, r: p.r, class: "b" }, svg);
         C.scrub(el, svg, {
           xs: PTS.map((p) => p.x), ys: PTS.map((p) => p.y), rs: PTS.map((p) => p.r), yw: 0.6, first, xh: 0.5, reach: 40, top: 0, bottom: 200, label: "Bubbles",
-          onMove: (i) => ({ x: PTS[i].x, top: 0, parts: [C.part("p" + i, "k")], dots: [{ x: PTS[i].x, y: PTS[i].y, r: PTS[i].r + 3, cls: "b-ring", fill: "none" }] }),
+          onMove: (i) => ({ x: PTS[i].x, top: 0, say: "bubble " + i, parts: [C.part("p" + i, "k")], dots: [{ x: PTS[i].x, y: PTS[i].y, r: PTS[i].r + 3, cls: "b-ring", fill: "none" }] }),
         });
       });
       await window.settle(hd);
@@ -334,6 +334,7 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   await page.focus("#bub-first");
   await page.keyboard.press("ArrowRight");
   eq(await read("bub-first"), "p0", "scrub with first: the first ArrowRight from nothing lands on the first mark, not the last");
+  eq(await page.evaluate(() => document.getElementById("fxLive").textContent), "bubble 0", "and a chart that supplies what to say is announced in its own words, not by reading its readout");
   eq(await page.evaluate(() => document.querySelector("#bub-first line.xh").getAttribute("opacity")), "0.5", "and the crosshair takes the opacity the chart asked for");
   eq(await page.evaluate(() => { const c = document.querySelector("#bub-first circle.b-ring"); return [c.getAttribute("r"), c.getAttribute("fill"), c.getAttribute("cx"), c.getAttribute("cy")]; }), ["9", "none", "50", "150"], "and the dot is the ring the chart described, sized past the bubble");
   await page.focus("#bub-left");
