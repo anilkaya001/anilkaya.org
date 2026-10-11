@@ -208,7 +208,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, scenes: true }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, scenes: name === "tickerPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -400,7 +400,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, scenes: true }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, scenes: name === "tickerPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
