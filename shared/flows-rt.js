@@ -89,7 +89,7 @@ export const RT_ROW_FIELDS = Object.freeze({
 
 export const RT_UPSTREAM = Object.freeze({
   px: Object.freeze({
-    scope: "ticker", channels: Object.freeze(["price:<T>", "stock_screener"]),
+    scope: "ticker", channels: Object.freeze(["price:<T>"]),
     rest: (a) => [{ feed: "px", path: pathFor("screener-stocks"), params: { ticker: a.names.join(","), limit: 500 } }],
   }),
   fl: Object.freeze({

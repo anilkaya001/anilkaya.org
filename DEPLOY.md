@@ -3271,7 +3271,7 @@ separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 | `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner`. Shipped: `members` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
 | `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
 | `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
-| `FLOWS_RT_UPSTREAM` | `socket`; anything else, or unset, is `rest`. Not set in `wrangler.toml` | Off. `socket` opens one outbound vendor WebSocket for the focus names, `flow-alerts` and `news`, with REST covering any silent channel, but only while `FLOWS_RT_AUDIENCE` is `owner`; under `members` it is ignored and the status shows the ask (`upstream.asked`) beside the effective value (`killSwitches.FLOWS_RT_UPSTREAM`). The entitlement is proven on this key (the bullet "A WebSocket upstream" below); for members the written licence is open (OD-03a). |
+| `FLOWS_RT_UPSTREAM` | `socket`; anything else, or unset, is `rest`. Not set in `wrangler.toml` | Off. `socket` opens one outbound vendor WebSocket for the focus names, `flow-alerts` and `news`, with REST covering any silent channel, whatever `FLOWS_RT_AUDIENCE` is: the connection is one for the whole object, so every member shares it. The status shows the ask (`upstream.asked`) beside the effective value (`killSwitches.FLOWS_RT_UPSTREAM`). The entitlement is proven on this key (the bullet "A WebSocket upstream" below); for members the written licence is open (OD-03a). |
 | `FLOWS_RT_SOCKET_HOURS` | `session`; anything else is `rth` | The window the outbound socket may be open: the regular session by default (09:30 to 16:00 ET, 16:30 to 23:00 TRT until 2026-10-31), the pre-market, regular session and post-market with `session` (04:00 to 20:00 ET, 11:00 to 03:00 TRT until 2026-10-31 and 12:00 to 04:00 TRT after 2026-11-01). An open outbound socket keeps the object resident and billed, so Free should stay on `rth`. |
 | `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
 
@@ -3361,15 +3361,18 @@ client.
   cursor, the gamma rotation, the 4 s deadline, the 429 pause) lives in
   `createRestUpstream`. `RT_UPSTREAM` in `shared/flows-rt.js` is the one table
   that maps a topic to its REST request and to the vendor socket channels it
-  would join: px to `price:<T>` (and `stock_screener`, which the probe found to be
-  an undocumented firehose that must never be joined), fl to `flow-alerts`, gx to
+  would join: px to `price:<T>` (`stock_screener`, which the probe found to be
+  an undocumented firehose, is no longer listed and must never be joined), fl to `flow-alerts`, gx to
   `gex:<T>`, mk to `market_tide` and `net_flow:<T>`, nw to `news`.
 
   The socket upstream is built and off. `createCompositeUpstream({ rest, socket,
   held })` in `shared/flows-rt-hub.js`, over `shared/flows-rt-socket.js`, is what
-  `createHub` returns when `FLOWS_RT_UPSTREAM` is `socket` and `FLOWS_RT_AUDIENCE`
-  is `owner`; in every other case it returns the unchanged REST adapter, and no
-  file sets the variable. It opens one connection to
+  `createHub` returns when `FLOWS_RT_UPSTREAM` is `socket`, under either
+  audience: members share the one vendor connection, because the object opens it
+  once however many sockets watch. In every other case it returns the unchanged
+  REST adapter, and no file sets the variable. The topic table lists `price:<T>`
+  alone for px, and `flows-rt-contract` fuzzes the channel plan to prove nothing
+  but `price:<T>`, `gex:<T>`, `flow-alerts` and `news` can be joined. It opens one connection to
   `wss://<vendor host>/socket?token=...` (the vendor refuses the bearer header
   with 401, so the token travels in the URL, built in `socketUrl` alone and kept
   out of the status and every stored message by the redactor) and joins

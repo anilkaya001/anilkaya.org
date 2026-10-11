@@ -686,7 +686,7 @@ async function runSocket() {
   const uw = await startVendor(vendor, { socket: true });
   const loop = uw.socket;
   const server = await startWorker({
-    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner", "FLOWS_RT_UPSTREAM:socket"],
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_UPSTREAM:socket"],
   });
   const base = server.baseURL;
   const opened = [];
@@ -694,13 +694,13 @@ async function runSocket() {
   try {
     const s0 = await statusOf(base, OWNER);
     hubClock.offset = s0.body.now - Date.now();
-    deep(s0.body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner", FLOWS_RT_UPSTREAM: "socket" }, "socket: status reports the upstream switch");
+    deep(s0.body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "socket" }, "socket: under the shipped members audience the status reports the socket as effective");
     eq(loop.open(), 0, "socket: with nobody connected the Worker holds no outbound socket");
 
     const c1 = connect(base, OWNER, { query: "?f=nvda" });
     opened.push(c1);
     await until(() => c1.frames.length > 0, 8000, "the hello");
-    deep([c1.frames[0].meta.upstream, c1.frames[0].meta.audience], ["socket", "owner"], "socket: the hello names the socket upstream under the owner audience");
+    deep([c1.frames[0].meta.upstream, c1.frames[0].meta.audience], ["socket", "members"], "socket: the hello names the socket upstream under the members audience");
     await until(() => ["flow-alerts", "news", "price:NVDA", "gex:NVDA"].every((c) => loop.joined().includes(c)), 20000, "the outbound socket to join its four channels");
     deep(loop.joined().slice().sort(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "socket: real workerd opened one outbound WebSocket to the vendor and joined the global event channels and the focus name's two, nothing else");
     eq(loop.state.connections, 1, "socket: one connection");

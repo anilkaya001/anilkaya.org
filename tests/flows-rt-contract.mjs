@@ -1653,7 +1653,7 @@ const seqOk = (ws) => {
 
 {
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].channels])), {
-    px: ["price:<T>", "stock_screener"], fl: ["flow-alerts"], gx: ["gex:<T>"], mk: ["market_tide", "net_flow:<T>"], nw: ["news"],
+    px: ["price:<T>"], fl: ["flow-alerts"], gx: ["gex:<T>"], mk: ["market_tide", "net_flow:<T>"], nw: ["news"],
   }, "seam: one table maps each topic to the vendor channels a socket upstream would join");
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].scope])), { px: "ticker", fl: "global", gx: "ticker", mk: "global", nw: "global" }, "seam: and says which are per-ticker");
   ok(Object.isFrozen(RT.RT_UPSTREAM) && TOPICS.every((k) => Object.isFrozen(RT.RT_UPSTREAM[k]) && typeof RT.RT_UPSTREAM[k].rest === "function"), "seam: frozen, each with its REST request builder beside its channels");
@@ -2505,6 +2505,24 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
   deep(chans.filter((c) => c.startsWith("gex:")), names.slice(0, 3).map((t) => "gex:" + t), "socket: gex:<T> for the first three");
   ok(chans.includes("flow-alerts") && chans.includes("news"), "socket: flow-alerts and news");
   ok(chans.every((c) => /^(flow-alerts|news|price:[A-Z.]+|gex:[A-Z.]+)$/.test(c)), "socket: never a global firehose: no bare price, gex, stock_screener, market_tide or net_flow");
+  {
+    const JOINABLE = /^(price:[A-Z][A-Z0-9.]{0,9}|gex:[A-Z][A-Z0-9.]{0,9}|flow-alerts|news)$/;
+    let seed = 20261011;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pool = ["NVDA", "SPY", "BRK.B", "stock_screener", "price", "gex", "market_tide", "net_flow:SPY", "option_trades", "interval_flow", "lit_trades", "", " ", "*", "x y", "price:", "A".repeat(40), "AAPL\n", "a", "QQQ"];
+    const kinds = ["px", "fl", "gx", "mk", "nw", "zz"];
+    let joined = 0;
+    for (let i = 0; i < 400; i++) {
+      const pick = (n) => Array.from({ length: Math.floor(rnd() * n) }, () => pool[Math.floor(rnd() * pool.length)]);
+      const topics = new Set(kinds.filter(() => rnd() < 0.6));
+      for (const w of SOCK.wantChannels({ topics, focus: pick(14), gex: pick(8) })) {
+        joined++;
+        if (!JOINABLE.test(w.channel)) ok(false, `socket: a fuzzed plan joined ${JSON.stringify(w.channel)}, which is not price:<T>, gex:<T>, flow-alerts or news`);
+      }
+    }
+    ok(joined > 500, `socket: 400 fuzzed plans joined ${joined} channels and every one was price:<T>, gex:<T>, flow-alerts or news`);
+    ok(RT.RT_UPSTREAM.px.channels.every((c) => c === "price:<T>"), "socket: the topic table lists price:<T> alone for px, so no vendor firehose can be read off it");
+  }
   deep(SOCK.wantChannels({ topics: new Set(["px"]), focus: ["NVDA", "bad ticker", "x"], gex: ["NVDA"] }).map((w) => w.channel), ["price:NVDA"], "socket: only the topics demanded, only valid tickers");
   deep(SOCK.wantChannels({ topics: new Set(), focus: names, gex: names }), [], "socket: nothing demanded, nothing joined");
   for (const k of ["px", "gx", "fl", "nw"]) ok(RT.RT_UPSTREAM[k].channels.includes(SOCK.SOCKET_CHANNELS[k].template), `socket: ${k} joins a channel the topic table already lists (${SOCK.SOCKET_CHANNELS[k].template})`);
@@ -2590,9 +2608,18 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
   deep([RT.rtSwitches({ FLOWS_RT_UPSTREAM: "socket" }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: " SOCKET " }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: "composite" }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: "" }).upstream], ["socket", "socket", "rest", "rest"], "switches: socket is the one word that turns it on");
   deep([RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "session" }).socketHours, RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "always" }).socketHours], ["session", "rth"], "switches: session widens the window, anything else is the regular session");
   const on = { FLOWS_RT_MODE: "on", FLOWS_RT_UPSTREAM: "socket", UW_API_KEY: SKEY };
-  deep([hubConfig(on).upstream, hubConfig(on).upstreamAsked], ["socket", "socket"], "config: owner audience and the switch on is the socket upstream");
-  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstreamAsked], ["rest", "socket"], "config: under the members audience the socket is refused and REST stands, and the ask is kept for the status");
-  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "public" }).upstream, hubConfig({ FLOWS_RT_MODE: "on" }).upstream], ["socket", "rest"], "config: an unknown audience word is the owner audience; no switch is REST");
+  deep([hubConfig(on).upstream, hubConfig(on).upstreamAsked], ["socket", "socket"], "config: the switch on is the socket upstream under the shipped owner default");
+  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstreamAsked], ["socket", "socket"], "config: under the members audience the switch still selects the socket, one vendor connection whoever watches");
+  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "public" }).upstream, hubConfig({ FLOWS_RT_MODE: "on" }).upstream, hubConfig({ FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "rest" }).upstream], ["socket", "rest", "rest"], "config: no switch, or rest, is REST under either audience");
+  const hubUrl = new URL("../shared/flows-rt-hub.js", import.meta.url);
+  const clause = 'upstream: sw.upstream === "socket" ? "socket" : "rest",';
+  const hubSource = readFileSync(hubUrl, "utf8");
+  eq(hubSource.split(clause).length - 1, 1, "mutant: the hub states the upstream choice exactly once, so the planted build below applies");
+  const planted = hubSource.replace(clause, 'upstream: sw.upstream === "socket" && sw.audience === "owner" ? "socket" : "rest",')
+    .replace(/(\bfrom\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g, (m, head, quote, spec) => head + quote + new URL(spec, hubUrl).href + quote);
+  const restored = await import("data:text/javascript;base64," + Buffer.from(planted).toString("base64"));
+  eq(restored.hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, "rest", "mutant: restoring the audience clause makes the members case REST, the very thing the case above refuses");
+  ok(restored.hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream !== hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, "mutant: and the contract tells the two builds apart");
 }
 
 function srig({ start = SESSION_NOW, env = {}, roster = async () => null, refuse, connect = null } = {}) {
@@ -2642,10 +2669,10 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   const members = srig({ env: { FLOWS_RT_AUDIENCE: "members" } });
   members.join("anilkaya", { f: "NVDA" });
   await members.run(20);
-  deep([members.hub.upstream.kind, members.fake.connectCalls], ["rest", 0], "audience: the socket switch under the members audience changes nothing: REST, no outbound socket");
+  deep([members.hub.upstream.kind, members.fake.connectCalls], ["socket", 1], "audience: the socket switch under the members audience is the composite upstream with one outbound socket");
   const ms = members.hub.status();
-  deep([ms.upstream.asked, ms.killSwitches.FLOWS_RT_UPSTREAM, ms.killSwitches.FLOWS_RT_AUDIENCE], ["socket", "rest", "members"], "audience: the status shows the ask and the refusal");
-  ok(members.vendor.calls.length > 0, "audience: and REST carries on");
+  deep([ms.upstream.asked, ms.killSwitches.FLOWS_RT_UPSTREAM, ms.killSwitches.FLOWS_RT_AUDIENCE], ["socket", "socket", "members"], "audience: the status shows the ask and the effective value alike");
+  deep(members.fake.joined(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "audience: and the joins are the same under members");
 }
 
 {
@@ -2983,4 +3010,4 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   expect(hub, /createCompositeUpstream\(\{ rest: restUp, socket, held,/, { min: 1, max: 1, why: "createHub builds the composite only for the socket upstream" });
 }
 
-console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the vendor socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the owner-audience gate, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);
+console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the vendor socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the socket under either audience and no joinable firehose over 400 fuzzed plans, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);

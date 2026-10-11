@@ -40,7 +40,7 @@ export function hubConfig(env) {
     scale,
     callsPerMinute: clampInt(e.FLOWS_RT_CALLS_PER_MIN, 10, 1200, RT_LIMITS.callsPerMinute),
     userCap: clampInt(e.FLOWS_RT_USER_CAP, 1, 10, RT_LIMITS.userSockets),
-    upstream: sw.upstream === "socket" && sw.audience === "owner" ? "socket" : "rest",
+    upstream: sw.upstream === "socket" ? "socket" : "rest",
     upstreamAsked: sw.upstream,
     socketHours: sw.socketHours,
     redirected,
