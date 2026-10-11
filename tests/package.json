@@ -109,6 +109,7 @@
     "test:flows-warnings": "node flows-warnings.mjs",
     "test:flows-copy-lint": "node flows-copy-lint.mjs",
     "test:flows-targets": "node flows-targets.mjs",
+    "test:flows-moves0": "node flows-moves0.mjs",
     "test:flows-sign": "node flows-sign.mjs",
     "test:flows-reading": "node flows-reading.mjs",
     "test:flows-reading-worker": "node --disable-warning=ExperimentalWarning flows-reading-worker.mjs",

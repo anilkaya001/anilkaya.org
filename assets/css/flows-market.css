@@ -192,6 +192,12 @@
   .mk-mod .ui-mod-h > .mk-seg-phone:not(:empty) { display: block; }
   .mk-movers-grid[data-show] > .mk-movers-col:not(.is-on) { display: none; }
 }
+.mk-lens { margin: 0 0 var(--sp-4); }
+.mk-lens .ui-seg { max-width: 260px; }
+.mk-lens-note { margin-top: var(--sp-4); color: var(--label-2); font: var(--t-footnote); }
+.mk-lens-note p { margin: 0; }
+.mk-apart { margin: var(--sp-3) 0 0; color: var(--label-3); font: var(--t-caption); }
+.mk-movers.is-apart { opacity: 0.8; }
 .mk-movers-col { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
 .mk-movers-h { margin: 0; color: var(--label-2); font: var(--t-footnote); font-weight: 600; }
 .mk-movers-n { color: var(--label-3); font-weight: 400; }

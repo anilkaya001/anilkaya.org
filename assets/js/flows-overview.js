@@ -1701,12 +1701,23 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const FOCUS = { focus: null, strips: null, series: null, live: null, streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, live: null, lk: false, ed: new Map(), nightly: new Map(), streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
   const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
   leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
   const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
-  const FK = ["px", "prev", "chg", "net", "lean", "iv30"];
+  const FK = ["px", "prev", "chg", "net", "lean", "iv30", "iv30p"];
+  const IV_YEAR = Math.sqrt(252);
+  const IV_EVENT = 21;
+  const IV_APART = "Earnings within 30 days: event not separated.";
+  const ivDays = (chg, iv) => { const c = isNum(chg), v = isNum(iv); return c === null || v === null || !(v > 0) ? null : c / (v / IV_YEAR); };
+  function ivdIndex(u) {
+    const ok = u && u.status === "ok" && Array.isArray(u.t) && u.cols && u.units;
+    const col = (k) => (ok && Array.isArray(u.cols[k]) && u.units[k] && isNum(u.units[k][1]) ? u.cols[k].map((x) => (isNum(x) === null ? null : x / u.units[k][1])) : null);
+    const ed = col("ed"), iv = col("iv30p");
+    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, ed[i]]) : []);
+    FOCUS.nightly = new Map(iv ? u.t.map((t, i) => [t, iv[i]]) : []);
+  }
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);
   const pick = (row, fields, k) => {
     if (Array.isArray(row)) { const i = Array.isArray(fields) ? fields.indexOf(k) : -1; return i < 0 ? null : isNum(row[i]); }
@@ -1729,6 +1740,8 @@
       const v = { t, src, day, today: 0, s };
       for (const k of FK) v[k] = pick(row, fields, k);
       if (v.chg === null && v.px !== null && v.prev) v.chg = v.px / v.prev - 1;
+      if (v.iv30p === null && src === "nightly") v.iv30p = FOCUS.nightly.has(t) ? FOCUS.nightly.get(t) : null;
+      v.ed = FOCUS.ed.has(t) ? FOCUS.ed.get(t) : null;
       const b = se && se.base ? isNum(se.base[t]) : null;
       const col = se && se.cols && se.cols.px ? se.cols.px[t] : null;
       const d = s && Array.isArray(se && se.t) ? readOf(s) - Date.parse(se.t.at(-1)) : 0;
@@ -1754,6 +1767,12 @@
   };
   const tick = (v) => h("b", { class: "hm-t" }, v.t);
   const chgOf = (v) => h("span", { class: "hm-chg", "data-tone": toneOf(v.chg) }, pct(v.chg));
+  const ivdOf = (v) => {
+    const m = ivDays(v.chg, v.iv30p);
+    const event = isNum(v.ed) !== null && v.ed <= IV_EVENT;
+    return h("span", { class: "hm-qd", "data-tone": toneOf(m), title: m === null ? "No prior-close implied volatility" : "Day move over the IV struck at the previous close" },
+      m === null ? DASH : fmtSigned(m, 1), event ? h("sup", { class: "hm-qd-e", title: IV_APART, "aria-label": IV_APART }, "E") : null);
+  };
   const premOf = (v) => h("span", { class: "hm-prem", "data-tone": toneOf(v.net) }, usdS(v.net));
   const said = (v, label) => [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
     (flowWord(v) || [0, "no flow read"])[1], "IV " + F.pct(v.iv30, 1)].filter(Boolean).join(", ") + ". Open the dossier.";
@@ -1902,13 +1921,13 @@
     const body = h("div", { class: "hm-qlist", role: "group" });
     into.append(body);
     const head = (two) => h("div", { class: "ui-row hm-qrow hm-qhead" + (two ? " is-2" : ""), "aria-hidden": "true" },
-      ["", "", "Price", "Day", "Net premium", "IV 30d"].map((x) => h("span", null, x)));
+      ["", "", "Price", "Day", "Net premium", "IV 30d", "IV-days"].map((x) => h("span", null, x)));
     const draw = () => {
       const g = groups[at];
       const rows = focusRows(g.tickers);
       const n = Math.ceil(rows.length / 2);
       const row = (v) => link(v, "ui-row hm-qrow", null, tick(v), h("span", { class: "hm-qsp" }), h("span", { class: "hm-qpx" }, F.px(v.px)),
-        chgOf(v), netCell(v, "hm-qnet"), h("span", { class: "hm-qiv" }, F.pct(v.iv30, 1)));
+        chgOf(v), netCell(v, "hm-qnet"), h("span", { class: "hm-qiv" }, F.pct(v.iv30, 1)), ivdOf(v));
       body.setAttribute("aria-label", g.label || g.id);
       body.style.setProperty("--rows", String(n + 1));
       body.replaceChildren(head(), ...rows.slice(0, n).map(row), head(true), ...rows.slice(n).map(row));
@@ -2109,6 +2128,7 @@
   const R = {};
   const P = { lng: loadBoard("long"), sht: loadBoard("short"), lk: loadLive(["market", "vol", "breadth", "strips", "strips:series", "focus"]) };
   for (const [k, path, soon] of [["watch", "board?side=watch"], ["market", "market"], ["alerts", "flowalerts"], ["events", "events"], ["track", "scoretrack"],
+    ["ivd", "universe?cols=t,sec,chg,iv30p,ed", true],
     ["lean", "sector-premium"], ["news", "news"], ["pulse", "pulse"], ["regime", "regime", true], ["focus", "focus"]]) P[k] = loadRegion("/api/flows/" + path, soon);
   for (const k in P) P[k] = P[k].then((v) => (R[k] = v));
 
@@ -2226,8 +2246,12 @@
     setStale(notes);
   });
 
+  when(["ivd"], ({ ivd }) => {
+    ivdIndex(ivd);
+    if (FOCUS.focus && FOCUS.lk) paintFocus();
+  });
   when(["focus", "lk"], ({ focus, lk }) => {
-    Object.assign(FOCUS, { focus, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
+    Object.assign(FOCUS, { focus, lk: true, strips: lk.strips, series: lk["strips:series"], live: lk.focus });
     requestAnimationFrame(() => setTimeout(paintFocus));
   });
 

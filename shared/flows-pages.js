@@ -714,7 +714,7 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
-export function marketPage({ username = "" } = {}) {
+export function marketPage({ username = "", owner = false } = {}) {
   return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css", "/assets/css/flows-index.css"])}
 ${shell("Market", "market", username, `
   <header class="flows-head mk-head" data-fx-hero>
@@ -740,7 +740,8 @@ ${marketModule("mkRadarCard", "Radar", "mkRadar", { span: 6, seg: `<div class="m
 ${marketModule("mkAdvCard", "Advancers", "mkAdv", { span: 6 })}
 ${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6, seg: `<div class="mk-segc" id="mkVolumeSeg"></div>` })}
 ${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
-${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>` })}
+${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
+    body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
 ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}

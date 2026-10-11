@@ -249,14 +249,16 @@ a.hm-count:hover { color: var(--label-1); background: var(--fill-4); }
 .hm-mnet .cc-ln-bar, .hm-qnet .cc-ln-bar { flex: none; width: 44px; height: 6px; }
 .hm-mrow { --cols: minmax(0, 1fr) 64px 76px; min-height: 36px; }
 .hm-mrow .hm-t, .hm-qrow .hm-t { font: var(--t-callout); font-weight: 600; }
-.hm-mrow .hm-prem, .hm-qpx, .hm-qiv, .hm-qhead > span { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hm-mrow .hm-prem, .hm-qpx, .hm-qiv, .hm-qd, .hm-qhead > span { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .hm-mrow .hm-prem { font-weight: 500; }
 
 .hm-qlist { display: flex; flex-direction: column; }
-.hm-qrow { --cols: minmax(52px, 1fr) minmax(40px, 96px) 72px 64px minmax(112px, 132px) 56px; min-height: 44px; }
+.hm-qrow { --cols: minmax(52px, 1fr) minmax(40px, 96px) 72px 64px minmax(112px, 132px) 56px 64px; min-height: 44px; }
 .hm-qhead { min-height: 24px; border-bottom-color: var(--sep-strong); color: var(--label-3); font: var(--t-caption); }
 .hm-qhead.is-2 { display: none; }
 .hm-qiv { color: var(--label-2); }
+.hm-qd { color: var(--tone, var(--label-2)); font: var(--t-footnote); font-weight: 500; }
+.hm-qd-e { margin-left: 2px; color: var(--label-3); font-size: 9px; font-weight: 600; }
 @container mod (min-width: 960px) {
   .hm-qlist {
     display: grid;
@@ -269,7 +271,7 @@ a.hm-count:hover { color: var(--label-1); background: var(--fill-4); }
 }
 @container mod (max-width: 520px) {
   .hm-qrow { --cols: minmax(44px, 1fr) 62px 56px 104px; gap: 8px; }
-  .hm-qrow > :is(.hm-qsp, .hm-qiv), .hm-qhead > :is(:nth-child(2), :nth-child(6)) { display: none; }
+  .hm-qrow > :is(.hm-qsp, .hm-qiv, .hm-qd), .hm-qhead > :is(:nth-child(2), :nth-child(6), :nth-child(7)) { display: none; }
   .hm-qnet .cc-ln-bar { width: 28px; }
 }
 @container mod (max-width: 340px) {

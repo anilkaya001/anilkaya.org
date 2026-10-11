@@ -466,6 +466,74 @@
     return box;
   }
 
+  const LENS = { on: false, strips: null, ed: new Map(), movers: null, hold: false, dirty: false, shown: false, asked: false, px: null };
+  const IV_EVENT = 21;
+  const IV_APART = "Earnings within 30 days: event not separated.";
+  const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
+
+  function edMap(u) {
+    const col = okFeed(u) && u.status === "ok" && u.cols && u.units && u.units.ed && Array.isArray(u.t) ? u.cols.ed : null;
+    return new Map(Array.isArray(col) ? u.t.map((t, i) => [t, isNum(col[i])]) : []);
+  }
+
+  function lensMoves() {
+    const s = LENS.strips, f = s && s.status === "ok" && Array.isArray(s.fields) && s.rows ? s.fields : [];
+    const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), out = [];
+    if (ci < 0 || ii < 0) return null;
+    for (const t of Object.keys(s.rows)) {
+      const chg = isNum(s.rows[t][ci]), iv = isNum(s.rows[t][ii]), m = ivDays(chg, iv), ed = LENS.ed.get(t);
+      if (m !== null) out.push({ t, chg, iv, m, event: isNum(ed) !== null && ed <= IV_EVENT });
+    }
+    return out.length ? out : null;
+  }
+
+  const lensRank = (moves, sign) => {
+    const picked = moves.filter((x) => x.m * sign > 0).sort((a, b) => (b.m - a.m) * sign || (a.t < b.t ? -1 : 1));
+    return [picked.filter((x) => !x.event), picked.filter((x) => x.event)];
+  };
+
+  function lensContext(moves) {
+    const abs = moves.filter((x) => !x.event).map((x) => Math.abs(x.m)).sort((a, b) => a - b), k = abs.length >> 1;
+    return abs.length ? "Median |m| " + ((abs[k] + abs[abs.length % 2 ? k : k - 1]) / 2).toFixed(1) + " IV-days; " + abs.filter((v) => v > 3).length + " of " + abs.length + " beyond 3." : null;
+  }
+
+  function ivList(title, said, ranked, waiting) {
+    const box = h("div", { class: "mk-movers-col", "aria-label": cap1(said) + " in IV-days" }, h("h3", { class: "mk-movers-h" }, title));
+    if (!ranked) {
+      box.append(emptyLine(waiting ? "pending" : "unavailable", waiting ? "The live rows are being read." : "The live rows carried no prior-close implied volatility, so nothing is ranked in IV-days.", said, 64));
+      return box;
+    }
+    const rows = (list, cls) => {
+      const top = Math.max(...list.map((x) => Math.abs(x.m)), 1e-12);
+      return h("ul", { class: "mk-movers" + cls }, list.map((x) => h("li", { "data-t": x.t, title: x.t + ": " + signed(x.chg * 100, 2) + "% on a prior-close IV of " + (x.iv * 100).toFixed(1) + "%" },
+        h("span", { class: "mk-mv-t" }, x.t),
+        h("span", { class: "mk-mv-m", "aria-hidden": "true" }, h("i", { "data-tone": toneOf(x.m), style: { width: Math.abs(x.m) / top * 100 + "%" } })),
+        h("span", { class: "mk-mv-v", "data-tone": toneOf(x.m) }, signed(x.m, 1)))));
+    };
+    box.querySelector("h3").append(h("span", { class: "mk-movers-n" }, " · " + Math.min(8, ranked[0].length) + " of " + ranked[0].length));
+    if (ranked[0].length) box.append(rows(ranked[0].slice(0, 8), ""));
+    else if (!ranked[1].length) box.append(emptyLine("quiet", "No name with a prior-close implied volatility closed on this side.", said, 64));
+    if (ranked[1].length) box.append(h("p", { class: "mk-apart" }, IV_APART), rows(ranked[1].slice(0, 3), " is-apart"));
+    return box;
+  }
+
+  function lensRepaint(force) {
+    if (!LENS.on || !LENS.movers) return;
+    if (LENS.hold && LENS.shown && !force) LENS.dirty = true;
+    else paintMovers(LENS.movers);
+  }
+
+  function lensAsk() {
+    if (LENS.asked) return;
+    LENS.asked = true;
+    getLive(["strips"]).then((lk) => { if (okFeed(lk.strips)) LENS.strips = lk.strips; }).catch(() => {}).then(() => { LENS.asked = false; lensRepaint(true); });
+    LENS.px = LENS.px || (UI.rt && UI.rt.connect({ topics: ["px"] }));
+    if (LENS.px && !LENS.px.bound) {
+      LENS.px.bound = true;
+      LENS.px.on("px", () => { LENS.strips = UI.rt.strips() || LENS.strips; lensRepaint(false); });
+    }
+  }
+
   function paintMovers(movers) {
     const host = clear("mktMovers");
     const seg = clear("mkMoversSeg");
@@ -485,12 +553,27 @@
       host.append(emptyLine("quiet", "The screener answered and ranked no name on any of the four extremes.", "extremes"));
       return;
     }
-    const cols = lists.map((spec) => moverList(spec[0], spec[1], spec[2], { said: spec[3] }));
+    LENS.movers = movers;
+    if (!host.__held) {
+      host.__held = true;
+      host.addEventListener("pointerenter", (e) => { LENS.hold = e.pointerType !== "touch"; });
+      host.addEventListener("pointerleave", () => { LENS.hold = false; if (LENS.dirty) { LENS.dirty = false; paintMovers(LENS.movers); } });
+    }
+    const moves = LENS.on ? lensMoves() : null;
+    LENS.shown = Boolean(moves);
+    if (LENS.on && !LENS.strips) lensAsk();
+    const cols = lists.map((spec, i) => (LENS.on && i < 2
+      ? ivList(spec[0], spec[3], moves && lensRank(moves, i ? -1 : 1), !LENS.strips)
+      : moverList(spec[0], spec[1], spec[2], { said: spec[3] })));
     const grid = h("div", { class: "mk-movers-grid", "data-show": "0" }, cols);
     const show = (i) => { grid.dataset.show = String(i); cols.forEach((c, j) => c.classList.toggle("is-on", i === j)); };
     show(0);
-    host.append(grid);
-    if (seg) seg.append(UI.segmented("Extreme", lists.map((spec) => ({ label: spec[0] })), show, 0));
+    host.append(h("div", { class: "mk-lens" }, UI.segmented("Rank risers and fallers by", [{ label: "Raw change" }, { label: "In IV-days" }], (i) => {
+      LENS.on = i === 1;
+      LENS.dirty = false;
+      paintMovers(LENS.movers);
+    }, LENS.on ? 1 : 0)), grid);
+    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured.")));
     const universe = isNum(movers.universe), ranked = isNum(movers.ranked), priced = isNum(movers.priced);
     const noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
     if (universe === null || ranked === null || priced === null || noChange === null || noPrem === null) {
@@ -1437,6 +1520,12 @@
     }
   }
 
+  function lensDefault() {
+    const host = $("mktMovers");
+    LENS.on = Boolean(host && host.dataset.lens === "ivdays");
+    return LENS.on;
+  }
+
   Promise.all([
     optional("/api/flows/market"),
     optional("/api/flows/sectors"),
@@ -1446,7 +1535,7 @@
     optional("/api/flows/board?side=short"),
     optional("/api/flows/regime", true),
     optional("/api/flows/universe", true),
-    getLive(["market", "breadth", "vol"]),
+    getLive(lensDefault() ? ["market", "breadth", "vol", "strips"] : ["market", "breadth", "vol"]),
   ]).then((all) => {
     const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, lk] = all;
     let live = lk.market, breadth = lk.breadth;
@@ -1501,6 +1590,8 @@
     });
     paintSectors(sectors);
     textInfo("mkSectorsCard", "momentum", $("mktSectors"), "Momentum");
+    LENS.ed = edMap(universe);
+    if (lk.strips && okFeed(lk.strips)) LENS.strips = lk.strips;
     paintMovers(movers);
     textInfo("mkMoversCard", "extremes", $("mktMovers"), "Extremes", () => ({ notes: [($("mktMovers") || {}).dataset && $("mktMovers").dataset.pop,
       "Ranked over the whole screened universe, not over the board. Only names the board went deep on have a card."] }));
@@ -1517,9 +1608,17 @@
     paintRadar(regime);
     paintGroups(regime);
     if (typeof UI.heartbeat === "function") {
-      UI.heartbeat({ keys: ["market", "breadth"], nightly: ["pulse"], page: "market",
+      UI.heartbeat({ keys: ["market", "breadth", "strips"], nightly: ["pulse"], page: "market",
         onChange(changed) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
+          if (LENS.on && !(UI.rt && UI.rt.feeds("px")) && keys.some((c) => /live:strips(?!:)/.test(c))) {
+            getLive(["strips"]).then((lk) => {
+              const s = okFeed(lk.strips);
+              if (!s) return;
+              LENS.strips = s;
+              lensRepaint(false);
+            }).catch(() => {});
+          }
           const ask = ["market", "breadth"].filter((k) => keys.some((c) => c.includes("live:" + k)));
           if (!ask.length) return;
           getLive(ask).then((lk) => {
