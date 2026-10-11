@@ -39,6 +39,7 @@ import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
+import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
 import { chainFor } from "./shared/flows-ai-broker.js";
@@ -2785,7 +2786,8 @@ const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWi
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
-flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }));
+flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
+flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
@@ -3365,19 +3367,6 @@ async function route(request, env, url, ctx) {
     return json({ ok: true, record, duplicate, generation }, 200, generationHeaders(generation));
   }
 
-  if (path === "/flows") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return redirect(new URL("/flows/", url).toString(), 308);
-  }
-
-  if (path === "/flows/login/") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return new Response(FLOWS_PAGES.loginPage(), {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
   if (path === "/flows/login") {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
@@ -3423,80 +3412,6 @@ async function route(request, env, url, ctx) {
     requireMethod(request, ["POST"]);
     requireSameOrigin(request);
     return redirect(origin + "/flows/", 303, [cookie(FLOWS_COOKIE, "", { maxAge: 0 })]);
-  }
-
-  const FLOWS_READER_FROM = {
-    "/flows/": "overview",
-    "/flows/long/": "long",
-    "/flows/short/": "short",
-    "/flows/watch/": "watch",
-  };
-  if (Object.hasOwn(FLOWS_READER_FROM, path) && url.searchParams.has("t")) {
-    const wanted = (url.searchParams.get("t") || "").trim();
-    if (wanted) {
-      requireMethod(request, ["GET", "HEAD"]);
-      return redirect(new URL(
-        "/flows/ticker/?t=" + encodeURIComponent(wanted) +
-        "&s=signal&from=" + FLOWS_READER_FROM[path], url).toString(), 302);
-    }
-  }
-
-  const FLOWS_PUBLIC = {
-    "/flows/about/": () => FLOWS_PAGES.aboutPage(),
-    "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
-  };
-  if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return new Response(FLOWS_PUBLIC[path](), {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  const FLOWS_ROUTES = {
-    "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
-    "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
-    "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
-    "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
-    "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
-    "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
-    "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
-
-    "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
-    "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
-
-    "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
-    "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
-    "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
-    "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
-
-    "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
-  };
-  if (Object.hasOwn(FLOWS_ROUTES, path)) {
-    requireMethod(request, ["GET", "HEAD"]);
-    const session = await currentFlowsUser(request, env);
-
-    const summary = session && path === "/flows/"
-      ? await readFlowsSummary(env, "board")
-      : null;
-    const body = session
-      ? FLOWS_ROUTES[path](session.username, summary, rtIsOwner(rtSwitches(env), session.username))
-      : FLOWS_PAGES.loginPage();
-    return new Response(body, {
-      status: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
-      || path === "/flows/watch" || path === "/flows/history"
-      || path === "/flows/market" || path === "/flows/ticker"
-      || path === "/flows/unusual" || path === "/flows/events"
-      || path === "/flows/track" || path === "/flows/political"
-      || path === "/flows/strategy" || path === "/flows/ask"
-      || path === "/flows/about" || path === "/flows/glossary") {
-    requireMethod(request, ["GET", "HEAD"]);
-    return redirect(new URL(path + "/", url).toString(), 308);
   }
 
   if (path.startsWith("/api/flows/")) {

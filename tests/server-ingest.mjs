@@ -573,7 +573,7 @@ try {
   absent(w, /ARCHIVE_REFUSALS|archiveWriteAction/, { ...anchor, why: "and so did the archive policy" });
   absent(w, /\bFLOWS_SCHEMA_SQL\b|CLOCK_COLUMNS_SQL|upgradeClockColumns|CREATE TABLE IF NOT EXISTS flows_/, { ...anchor, why: "the Flows DDL is the registry's and no longer the Worker's" });
   absent(w, /INSERT INTO flows_payload|DELETE FROM flows_payload/, { ...anchor, why: "and the Worker writes flows_payload only through the store" });
-  expect(w, /createRouter\(flowsReadRows\([\s\S]*?\),\s*flowsDeskRows\(\{[\s\S]*?\),\s*flowsAiRows\(\{[\s\S]*?\),\s*flowsIngestRows\(\{ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough \}\)\)/, { min: 1, max: 1, why: "the Worker's one table takes the ingest family after the ai family" });
+  expect(w, /createRouter\(flowsReadRows\([\s\S]*?\),\s*flowsDeskRows\(\{[\s\S]*?\),\s*flowsAiRows\(\{[\s\S]*?\),\s*flowsIngestRows\(\{ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough \}\)[,)]/, { min: 1, max: 1, why: "the Worker's one table takes the ingest family after the ai family" });
   expect(w, /await applySchema\(env\.DB\);\s*state\.flowsSchemaReady = true;/, { min: 1, max: 1, why: "the schema is marked ready only after the registry's batch and its column upgrades" });
   expect(w, /const FLOWS_STORE = createFlowsStore\(/, { min: 1, max: 1, why: "one store" });
   expect(w, /const readFlowsPayload = \(env, key, trace\) => FLOWS_STORE\.read\(env, key, trace\);/, { min: 1, max: 1, why: "and the Worker's own reads go through it" });

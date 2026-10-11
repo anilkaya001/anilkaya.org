@@ -1,0 +1,201 @@
+import assert from "node:assert/strict";
+import * as K from "../server/http.js";
+import { createRouter } from "../server/router.js";
+import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS } from "../server/routes/flows-pages.js";
+import { FLOWS_PAGES } from "../shared/flows-pages.js";
+import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
+
+let checks = 0;
+const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
+const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+
+const { HttpError, redirect, requireMethod } = K;
+const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
+const table = createRouter(flowsPageRows(STUB));
+
+const SLUGS = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "unusual", "events", "track", "political"];
+eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the fourteen gated pages in their old order");
+eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
+const expectedPaths = ["/flows", "/flows/login/"];
+for (const slug of SLUGS) {
+  expectedPaths.push("/flows/" + (slug ? slug + "/" : ""));
+  if (slug) expectedPaths.push("/flows/" + slug);
+}
+for (const slug of FLOWS_PUBLIC_SLUGS) expectedPaths.push("/flows/" + slug + "/", "/flows/" + slug);
+eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, then the two public pages and their bare forms");
+ok(table.rows.every((r) => r.auth === "none" && r.methods.join() === "GET,HEAD"), "every row is GET and HEAD with no gate: an anonymous visitor gets the login page, not a 401");
+ok(new Set(table.rows.map((r) => r.id)).size === table.rows.length && table.rows.every((r) => r.id.startsWith("flows.pages.")), "ids are unique and namespaced");
+eq(table.rows.filter((r) => r.path.length > "/flows/".length && !r.path.endsWith("/")).map((r) => r.path.slice("/flows/".length)),
+  [...SLUGS.filter(Boolean), ...FLOWS_PUBLIC_SLUGS], "the bare redirects are generated from the page lists, one per page but the overview");
+
+const FLOWS_READER_FROM = { "/flows/": "overview", "/flows/long/": "long", "/flows/short/": "short", "/flows/watch/": "watch" };
+
+function oldChain(path, rc, d) {
+  const { request, env, url } = rc;
+  if (path === "/flows") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return redirect(new URL("/flows/", url).toString(), 308);
+  }
+  if (path === "/flows/login/") {
+    requireMethod(request, ["GET", "HEAD"]);
+    return new Response(FLOWS_PAGES.loginPage(), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  }
+  return (async () => {
+    if (Object.hasOwn(FLOWS_READER_FROM, path) && url.searchParams.has("t")) {
+      const wanted = (url.searchParams.get("t") || "").trim();
+      if (wanted) {
+        requireMethod(request, ["GET", "HEAD"]);
+        return redirect(new URL("/flows/ticker/?t=" + encodeURIComponent(wanted) + "&s=signal&from=" + FLOWS_READER_FROM[path], url).toString(), 302);
+      }
+    }
+    const FLOWS_PUBLIC = {
+      "/flows/about/": () => FLOWS_PAGES.aboutPage(),
+      "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
+    };
+    if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
+      requireMethod(request, ["GET", "HEAD"]);
+      return new Response(FLOWS_PUBLIC[path](), { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    const FLOWS_ROUTES = {
+      "/flows/": (u, summary) => FLOWS_PAGES.overviewPage({ username: u, summary }),
+      "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
+      "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
+      "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
+      "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
+      "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
+      "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
+      "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
+      "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
+      "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
+      "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
+      "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
+      "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
+      "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
+    };
+    if (Object.hasOwn(FLOWS_ROUTES, path)) {
+      requireMethod(request, ["GET", "HEAD"]);
+      const session = await d.currentFlowsUser(request, env);
+      const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
+      const body = session ? FLOWS_ROUTES[path](session.username, summary, d.isOwner(env, session.username)) : FLOWS_PAGES.loginPage();
+      return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
+        || path === "/flows/watch" || path === "/flows/history"
+        || path === "/flows/market" || path === "/flows/ticker"
+        || path === "/flows/unusual" || path === "/flows/events"
+        || path === "/flows/track" || path === "/flows/political"
+        || path === "/flows/strategy" || path === "/flows/ask"
+        || path === "/flows/about" || path === "/flows/glossary") {
+      requireMethod(request, ["GET", "HEAD"]);
+      return redirect(new URL(path + "/", url).toString(), 308);
+    }
+    if (Object.hasOwn(FLOWS_PUBLIC, path)) throw new HttpError(404, "not_found", "Not found");
+    return "fell-through";
+  })();
+}
+
+const view = (e) => (e ? { status: e.status, code: e.code, message: e.message, headers: e.headers } : null);
+async function outcome(run) {
+  try {
+    const res = await run();
+    if (res === "fell-through" || res === null) return { fell: true };
+    return { status: res.status, headers: [...res.headers].sort(), body: await res.text() };
+  } catch (e) {
+    return { threw: view(e) };
+  }
+}
+
+function scenario(user) {
+  const log = [];
+  return {
+    log,
+    deps: {
+      currentFlowsUser: async (request) => { log.push(["user", request.method]); return user; },
+      readFlowsSummary: async (env, scope) => { log.push(["summary", scope]); return { scope, n: 3 }; },
+      isOwner: (env, username) => { log.push(["owner", username]); return username === "anilkaya"; },
+    },
+  };
+}
+
+const PATHS = [...new Set([...expectedPaths, "/flows/zz/", "/flows/zz", "/flows/login", "/flows/logout", "/flows/long//", "/flows/LONG/", "/flows/", "/flows//"])];
+const QUERIES = ["", "?t=NVDA", "?t=", "?t=%20", "?t=%20nvda%20", "?t=a%26b", "?x=1", "?t=NVDA&t=AAPL", "?t=BRK.B&refresh=1", "?T=NVDA"];
+const METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
+const USERS = [null, { username: "anilkaya" }, { username: "member<x>" }];
+const ENVS = [{ tag: "env" }, { tag: "env", FLOWS_FRONT_DOOR: "off" }, { tag: "env", FLOWS_FRONT_DOOR: " OFF " }, { tag: "env", FLOWS_FRONT_DOOR: "maybe" }, { tag: "env", FLOWS_FRONT_DOOR: "" }];
+const isOff = (env) => String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() === "off";
+
+let compared = 0;
+let offOther = 0;
+for (const path of PATHS) {
+  for (const q of QUERIES) {
+    for (const method of METHODS) {
+      for (const user of USERS) {
+        for (const env of ENVS) {
+          const mk = () => {
+            const sc = scenario(user);
+            const url = new URL("https://anilkaya.org" + path + q);
+            const request = new Request(url, { method });
+            return { sc, rc: { request, env, url, ctx: {} } };
+          };
+          const a = mk();
+          const b = mk();
+          const router = createRouter(flowsPageRows(a.sc.deps));
+          const got = await outcome(() => router.handle(a.rc, { flows: async () => assert.fail("the page rows never consult the Flows gate") }));
+          const want = await outcome(() => oldChain(path, b.rc, b.sc.deps));
+          const key = `${method} ${path}${q} ${user && user.username} ${JSON.stringify(env)}`;
+          const publicOff = isOff(env) && (path === "/flows/about/" || path === "/flows/glossary/");
+          if (publicOff && method !== "GET" && method !== "HEAD") {
+            eq(want.threw && want.threw.status, 404, key + ": the chain answered a switched-off front door with the Flows 404 whatever the method");
+            eq(got.threw && [got.threw.status, got.threw.code, got.threw.headers.Allow], [405, "method_not_allowed", "GET, HEAD"], key + ": the table answers a method the row does not take with its 405 first");
+            offOther++;
+          } else if (want.fell) {
+            eq(got, { fell: true }, key + ": a path that is not a page falls through to the chain");
+            eq(a.sc.log, [], key + ": and reads no session");
+          } else {
+            eq(got, want, key);
+            eq(a.sc.log, b.sc.log, key + ": the same reads in the same order");
+          }
+          compared++;
+        }
+      }
+    }
+  }
+}
+ok(offOther > 0, "the switched-off front door was compared under methods other than GET and HEAD: " + offOther);
+ok(compared >= 5000, "every path, query, method and member was compared with the code it replaced: " + compared);
+
+{
+  const sc = scenario({ username: "anilkaya" });
+  const router = createRouter(flowsPageRows(sc.deps));
+  const rc = (path) => ({ request: new Request("https://anilkaya.org" + path), env: {}, url: new URL("https://anilkaya.org" + path), ctx: {} });
+  const home = await router.find("/flows/").handler(rc("/flows/"));
+  eq(sc.log, [["user", "GET"], ["summary", "board"], ["owner", "anilkaya"]], "Home reads the session, then the board summary, then asks whether the member is an owner, once each");
+  eq([home.status, home.headers.get("Content-Type")], [200, "text/html; charset=utf-8"], "and answers 200 HTML");
+  sc.log.length = 0;
+  await router.find("/flows/long/").handler(rc("/flows/long/"));
+  eq(sc.log, [["user", "GET"], ["owner", "anilkaya"]], "every other page reads the session, then asks whether the member is an owner");
+  sc.log.length = 0;
+  const anonymous = createRouter(flowsPageRows(scenario(null).deps));
+  const login = await anonymous.find("/flows/market/").handler(rc("/flows/market/"));
+  eq([login.status, await login.text()], [200, FLOWS_PAGES.loginPage()], "an anonymous visitor gets the login page with HTTP 200");
+  const hop = await router.find("/flows/watch/").handler(rc("/flows/watch/?t=%20msft%20"));
+  eq([hop.status, hop.headers.get("Location"), sc.log.length], [302, "https://anilkaya.org/flows/ticker/?t=msft&s=signal&from=watch", 0], "the reader redirect precedes the session read");
+  const bare = await router.find("/flows/political").handler(rc("/flows/political"));
+  eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
+}
+
+{
+  const w = workerSource();
+  const text = moduleSource("worker.js");
+  expect(w, /createRouter\(flowsReadRows\([\s\S]*?flowsIngestRows\([\s\S]*?\),\s*flowsPageRows\(\{/, { min: 1, max: 1, why: "the Worker's one table takes the flows-pages family" });
+  for (const p of table.rows.map((r) => r.path)) {
+    absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
+  }
+  absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|historyPage|deskPage|strategyPage|askPage|tickerPage|unusualPage|eventsPage|trackPage|politicalPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  const src = moduleSource("server/routes/flows-pages.js");
+  ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
+  ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");
+}
+
+console.log("server-pages: " + checks + " checks");
