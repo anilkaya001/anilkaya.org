@@ -4,6 +4,38 @@
 .fn-fresh { min-height: 32px; padding: 0 var(--sp-3); font: var(--t-caption); }
 .fn-fresh .fx-fresh-l { min-width: 0; }
 .fn-host { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.fn-host.is-slot { min-height: 1197px; }
+@container mod (max-width: 1518px) { .fn-host.is-slot { min-height: 1193px; } }
+@container mod (max-width: 1477px) { .fn-host.is-slot { min-height: 1200px; } }
+@container mod (max-width: 1441px) { .fn-host.is-slot { min-height: 1118px; } }
+@container mod (max-width: 1237px) { .fn-host.is-slot { min-height: 1099px; } }
+@container mod (max-width: 1003px) { .fn-host.is-slot { min-height: 1132px; } }
+@container mod (max-width: 896px) { .fn-host.is-slot { min-height: 1171px; } }
+@container mod (max-width: 743px) { .fn-host.is-slot { min-height: 1153px; } }
+@container mod (max-width: 670px) { .fn-host.is-slot { min-height: 1134px; } }
+@container mod (max-width: 665px) { .fn-host.is-slot { min-height: 1156px; } }
+@container mod (max-width: 623px) { .fn-host.is-slot { min-height: 1037px; } }
+@container mod (max-width: 539px) { .fn-host.is-slot { min-height: 1149px; } }
+@container mod (max-width: 491px) { .fn-host.is-slot { min-height: 1166px; } }
+@container mod (max-width: 437px) { .fn-host.is-slot { min-height: 1188px; } }
+@container mod (max-width: 395px) { .fn-host.is-slot { min-height: 1224px; } }
+@container mod (max-width: 389px) { .fn-host.is-slot { min-height: 1241px; } }
+@container mod (max-width: 329px) { .fn-host.is-slot { min-height: 1258px; } }
+@container mod (max-width: 287px) { .fn-host.is-slot { min-height: 1291px; } }
+@container mod (max-width: 263px) { .fn-host.is-slot { min-height: 1332px; } }
+@container mod (max-width: 251px) { .fn-host.is-slot { min-height: 1362px; } }
+@container mod (max-width: 540px) { .fn-card .ui-mod-h { min-height: 68px; } }
+.fn-slot { box-sizing: border-box; display: flex; flex: 1; flex-direction: column; gap: var(--sp-3); min-height: 100%; padding: var(--sp-5); border-radius: var(--r-md); background: radial-gradient(62% 70% at 50% 46%, #0b1120 0, #080d19 52%, #05070c 100%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05); }
+.fn-slot-t { margin: 0; color: var(--label-1); font: var(--t-title3); letter-spacing: var(--t-title3-track); }
+.fn-slot-tab { width: 100%; max-width: 560px; border-collapse: collapse; color: var(--label-1); font: var(--t-callout); letter-spacing: var(--t-callout-track); font-variant-numeric: tabular-nums; }
+.fn-slot-tab th, .fn-slot-tab td { padding: 8px 10px; border-top: 1px solid var(--sep); font-weight: 400; text-align: start; }
+.fn-slot-tab thead th { border-top: 0; color: var(--label-3); font: var(--t-caption); }
+.fn-slot-tab tbody th { font-weight: 600; }
+.fn-slot-tab a { color: var(--label-1); text-decoration: none; }
+.fn-slot-tab a:hover { color: var(--accent-ink); }
+.fn-slot-tab a:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; border-radius: 4px; }
+.fn-slot-tab .c-num { text-align: end; }
+.fn-slot-n { margin: 0; color: var(--label-3); font: var(--t-caption); }
 .fn-lede { margin: 0; max-width: 78ch; color: var(--label-2); font: var(--t-footnote); letter-spacing: var(--t-footnote-track); }
 .fn-lede b { color: var(--label-1); font-weight: 600; font-variant-numeric: tabular-nums; }
 .fn-lede-x { color: var(--label-3); }

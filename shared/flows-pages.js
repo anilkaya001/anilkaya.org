@@ -841,7 +841,8 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   </div>
   <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
-    <div class="fn-host" id="uaNet"${owner ? ' data-ambient="1"' : ""}></div>
+    <div class="fn-host is-slot" id="uaNet"${owner ? ' data-ambient="1"' : ""}></div>
+    <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
   </section>
   <div class="fd-chips" id="uaChips"></div>
   <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
@@ -857,7 +858,6 @@ ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"
 ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
-<script src="${v("/assets/js/flows-net.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;

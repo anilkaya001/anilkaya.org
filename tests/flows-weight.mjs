@@ -21,7 +21,7 @@ const CEILING_KIB = {
   strategyPage: 261,
   trackPage: 180,
   marketPage: 254,
-  unusualPage: 287 + 1613 / 1024,
+  unusualPage: 287 + (1613 - 74730) / 1024,
   eventsPage: 155,
   politicalPage: 103,
   historyPage: 167,
@@ -118,7 +118,7 @@ const judge = (row, bases = BASES) => {
 
 const DEFERRED = {
   tickerPage: { groups: {} },
-  unusualPage: { groups: {} },
+  unusualPage: { groups: { net: "/assets/js/flows-net.js" } },
 };
 const SHARED_DEFERRED = {
   dock: { file: "/assets/js/flows-ask.js", declared: /<aside[^>]*\bid="askDock"[^>]*\bdata-src="([^"?]+)/ },
@@ -127,7 +127,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80, overviewPage: 80, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
-  unusualPage: 80, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+  unusualPage: 155, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
 const FLOOR_BYTES = 1024;

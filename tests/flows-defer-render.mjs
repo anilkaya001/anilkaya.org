@@ -172,6 +172,190 @@ try {
     await context.close();
   }
 
+  {
+    const SESSION = "2026-09-29";
+    const NAMES = [["NVDA", 1.0, 0.7], ["SPY", 0.8, 0.4], ["TSLA", 0.6, 0.5], ["AAPL", 0.5, 0.6], ["AMZN", 0.45, 0.65], ["META", 0.4, 0.7], ["MSFT", 0.35, 0.55],
+      ["AMD", 0.3, 0.6], ["MU", 0.22, 0.66], ["NFLX", 0.2, 0.5], ["COIN", 0.15, 0.6], ["XOM", 0.1, 0.4]];
+    const lcg = (seed) => { let x = seed >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+    const flow = () => {
+      const r = lcg(31), rows = [];
+      for (let i = 0; i < 70; i++) {
+        let pick = r() * NAMES.reduce((a, x) => a + x[1], 0), j = 0;
+        while (pick > NAMES[j][1] && j < NAMES.length - 1) { pick -= NAMES[j][1]; j++; }
+        const cp = r() < NAMES[j][2] ? "C" : "P", prem = Math.round(150000 * Math.exp(r() * 3) * (0.6 + NAMES[j][1]));
+        const share = Math.min(0.95, Math.max(0.05, 0.55 + (r() - 0.5) * 0.9));
+        const ask = Math.round(prem * 0.9 * share), bid = Math.round(prem * 0.9 * (1 - share));
+        const at = new Date(Date.parse(SESSION + "T13:35:00Z") + Math.floor(r() * 300) * 60000).toISOString();
+        rows.push({ t: NAMES[j][0], oc: NAMES[j][0] + "261016" + cp + String(100000 + i), cp, k: 100 + i, exp: "2026-10-16", prem, size: Math.round(prem / 300), trades: 3, askPrem: ask, bidPrem: bid, sweep: false, floor: false, single: true, opening: false, spanStart: at, spanEnd: at, rule: "RepeatedHits", st: null, firstAt: at, lastAt: "2026-09-29T18:41:00.000Z", reads: 2 });
+      }
+      rows.sort((a, b) => b.prem - a.prem);
+      return { v: 1, status: "ok", generatedAt: "2026-09-29T18:41:05.000Z", sessionDate: SESSION, readAt: "2026-09-29T18:41:00.000Z", refreshed: "intraday", rows, seen: rows.length, unusable: 0, shed: 0, cap: 180, coverage: {}, notes: {} };
+    };
+    const expectTop = (payload) => {
+      const by = new Map();
+      for (const r of payload.rows) {
+        const e = by.get(r.t) || { t: r.t, v: 0, up: 0, down: 0 };
+        e.v += r.prem; e.up += r.cp === "C" ? r.askPrem : r.bidPrem; e.down += r.cp === "C" ? r.bidPrem : r.askPrem;
+        by.set(r.t, e);
+      }
+      return [...by.values()].sort((a, b) => b.v - a.v).slice(0, 8).map((e) => [e.t, e.up > e.down ? "Bullish" : e.down > e.up ? "Bearish" : "Unsided"]);
+    };
+    const HTML_U = PAGES.unusualPage({ username: "test" });
+    const universe = { v: 1, status: "ok", sessionDate: "2026-09-28", t: NAMES.map((x) => x[0]), sectors: ["Technology"], sec: NAMES.map(() => 0) };
+
+    async function openUnusual({ width = 1440, height = 900, saveData = false, netStatus = 200, flowStatus = 200, flowDelay = 0, netDelay = 0 } = {}) {
+      const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" });
+      const log = [], state = { net: netStatus };
+      await context.addInitScript((sd) => {
+        window.__cls = 0;
+        window.__lcp = null;
+        try {
+          window.__ls = [];
+          new PerformanceObserver((l) => {
+            for (const e of l.getEntries()) {
+              if (e.hadRecentInput) continue;
+              window.__cls += e.value;
+              const card = document.getElementById("uaNetCard");
+              window.__ls.push({ at: Math.round(e.startTime), value: e.value, outside: (e.sources || []).filter((x) => x.node && card && (card.compareDocumentPosition(x.node) & Node.DOCUMENT_POSITION_FOLLOWING) && !card.contains(x.node)).map((x) => x.node.id || x.node.className || x.node.nodeName) });
+            }
+          }).observe({ type: "layout-shift", buffered: true });
+          new PerformanceObserver((l) => { const e = l.getEntries().pop(); window.__lcp = { tag: e.element ? e.element.tagName : null, at: e.startTime }; }).observe({ type: "largest-contentful-paint", buffered: true });
+        } catch (e) { void e; }
+        if (sd) Object.defineProperty(navigator, "connection", { value: { saveData: true }, configurable: true });
+      }, saveData);
+      const payload = flow();
+      await context.route("**/*", async (route) => {
+        const u = new URL(route.request().url());
+        if (u.pathname.startsWith("/assets/")) {
+          if (u.pathname === "/assets/js/flows-net.js") {
+            log.push("net.js");
+            if (netDelay) await sleep(netDelay);
+            if (state.net !== 200) return route.fulfill({ status: state.net, body: "" });
+          }
+          const f = path.join(ROOT, u.pathname);
+          if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
+          return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
+        }
+        if (u.pathname === "/api/flows/flowalerts") {
+          log.push("alerts");
+          if (flowDelay) await sleep(flowDelay);
+          return route.fulfill({ status: flowStatus, contentType: "application/json", body: JSON.stringify(payload) });
+        }
+        if (u.pathname === "/api/flows/universe") return route.fulfill({ contentType: "application/json", body: JSON.stringify(universe) });
+        if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "rt_off", message: "off" } }) });
+        if (u.pathname.startsWith("/api/")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "pending" }) });
+        if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: HTML_U });
+        return route.fulfill({ status: 404, body: "" });
+      });
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
+      return { context, page, log, state, errors, payload };
+    }
+    const mounted = (page) => page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
+    const below = (page) => page.evaluate(() => { const c = document.getElementById("uaChips"); return Math.round((c.getBoundingClientRect().top + scrollY) * 10) / 10; });
+
+    for (const width of [1440, 390]) {
+      const { context, page, log, errors, payload } = await openUnusual({ width, height: width === 1440 ? 900 : 844, flowDelay: 150, netDelay: 2500 });
+      await page.goto("https://example.test/flows/unusual/");
+      await page.waitForSelector("#uaNet .fn-slot-tab tbody tr");
+      const slot = await page.evaluate(() => ({
+        rows: [...document.querySelectorAll("#uaNet .fn-slot-tab tbody tr")].map((r) => [r.querySelector("th").textContent, r.lastElementChild.textContent.replace(/^\S+\s/, "")]),
+        title: document.querySelector("#uaNet .fn-slot-t").textContent,
+        note: document.querySelector("#uaNet .fn-slot-n:last-child").textContent,
+        heights: document.getElementById("uaNet").getBoundingClientRect().height,
+        netNode: !!document.querySelector("#uaNet canvas"),
+      }));
+      eq(slot.rows, expectTop(payload), `BEFORE THE MODULE MOUNTS THE SLOT SHOWS ITS TABLE (${width} px): the eight largest names by flagged premium, each with its lean by the convention`);
+      ok(/Lean is a convention/.test(slot.note), "with the convention said under it");
+      eq(slot.netNode, false, "and there is no canvas yet");
+      const before = await below(page);
+      await mounted(page);
+      const loadAt = await page.evaluate(() => performance.getEntriesByType("navigation")[0].loadEventStart);
+      const netAt = await page.evaluate(() => performance.getEntriesByType("resource").filter((r) => /flows-net\.js/.test(r.name)).map((r) => r.startTime));
+      eq(netAt.length, 1, "the network script is fetched once");
+      ok(netAt[0] >= loadAt, `and not before the load event (${Math.round(netAt[0])} ms against ${Math.round(loadAt)} ms)`);
+      eq(log.filter((x) => x === "net.js").length, 1, "one request for it in all");
+      await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage"));
+      const after = await below(page);
+      const hostH = await page.evaluate(() => Math.round(document.getElementById("uaNet").getBoundingClientRect().height));
+      console.log(`  unusual ${width}px: card ${await page.evaluate(() => Math.round(document.getElementById('uaNet').getBoundingClientRect().width))} px, slot ${Math.round(slot.heights)} px, mounted ${hostH} px, chips ${before} to ${after}, layout shift ${await page.evaluate(() => window.__cls.toFixed(4))}`);
+      ok(Math.abs(after - before) <= 8, `THE SLOT RESERVES ITS SPACE (${width} px): what sits below the card moved ${Math.abs(after - before)} px when the network mounted, of ${hostH}`);
+      await sleep(700);
+      const moved = await page.evaluate(() => window.__ls.filter((e) => e.outside.length).map((e) => e.at + " ms: " + e.outside.join(", ")));
+      eq(moved, [], `NOTHING BELOW THE NETWORK'S CARD MOVES (${width} px): no layout shift, from first paint to the mounted network, has a source that comes after #uaNetCard in the page`);
+      const lcp = await page.evaluate(() => window.__lcp);
+      ok(lcp && lcp.tag !== "CANVAS", `the largest contentful paint is not a canvas (${lcp && lcp.tag})`);
+      eq(await page.evaluate(() => document.querySelector("#uaNet .fn-slot")), null, "the slot's table is gone once the module has mounted");
+      eq(errors, [], "and nothing throws");
+      await context.close();
+    }
+
+    {
+      const off = [];
+      for (const w of [320, 360, 480, 600, 768, 900, 1100, 1280, 1366, 1680, 1920]) {
+        const { context, page } = await openUnusual({ width: w, height: 900 });
+        await page.goto("https://example.test/flows/unusual/");
+        await mounted(page);
+        await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage"));
+        await sleep(300);
+        const m = await page.evaluate(() => {
+          const h = document.getElementById("uaNet");
+          const content = [...h.children].reduce((a, c) => a + c.getBoundingClientRect().height, 0) + (h.children.length - 1) * parseFloat(getComputedStyle(h).rowGap || 0);
+          return { w: Math.round(h.getBoundingClientRect().width), content: Math.round(content), reserved: parseFloat(getComputedStyle(h).minHeight) };
+        });
+        off.push({ ...m, d: m.content - m.reserved });
+        await context.close();
+      }
+      const worst = off.reduce((a, b) => (b.d > a.d ? b : a));
+      console.log("  slot reservation against the mounted height at 11 widths, worst shortfall " + worst.d + " px at a card of " + worst.w + " px, widest surplus " + Math.min(...off.map((x) => x.d)) + " px");
+      ok(off.every((x) => x.d <= 6), `THE RESERVATION NEVER FALLS SHORT: on a fresh load at every width the mounted network fits inside the height reserved for it to within 6 px (${off.filter((x) => x.d > 6).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+      ok(off.every((x) => x.d >= -50), `and never reserves more than 50 px of empty space under it (${off.filter((x) => x.d < -50).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+    }
+
+    {
+      const { context, page, log, errors } = await openUnusual({ saveData: true });
+      await page.goto("https://example.test/flows/unusual/");
+      await page.waitForSelector("#uaNet .ui-defer button");
+      await sleep(900);
+      eq(log.filter((x) => x === "net.js").length, 0, "SAVE-DATA MAKES NO DEFERRED REQUEST ON UNUSUAL: nothing for the network in a second after load");
+      ok(await page.evaluate(() => !!document.querySelector("#uaNet .fn-slot-tab tbody tr")), "the table is still there with the button above it");
+      ok(/Load The flow network/.test(await page.evaluate(() => document.querySelector("#uaNet .ui-defer").textContent)), "and the button names what it loads");
+      await page.click("#uaNet .ui-defer button");
+      await mounted(page);
+      eq(log.filter((x) => x === "net.js").length, 1, "pressing it loads the network once");
+      eq(errors, [], "and nothing throws");
+      await context.close();
+    }
+
+    {
+      const { context, page, log, state, errors } = await openUnusual({ netStatus: 404 });
+      await page.goto("https://example.test/flows/unusual/");
+      await page.waitForSelector("#uaNet .ui-defer button");
+      const said = await page.evaluate(() => ({ text: document.querySelector("#uaNet .ui-defer").textContent, table: !!document.querySelector("#uaNet .fn-slot-tab tbody tr") }));
+      ok(/The flow network is unavailable/.test(said.text), `A 404 ON THE NETWORK SHOWS UNAVAILABLE, NOT A BLANK SLOT (${said.text})`);
+      ok(said.table, "with the table still under it");
+      state.net = 200;
+      await page.click("#uaNet .ui-defer button");
+      await mounted(page);
+      eq(log.filter((x) => x === "net.js").length, 2, "Retry asks again and the network mounts");
+      eq(errors.filter((e) => !/flows-net/.test(e)), [], "and nothing else throws");
+      await context.close();
+    }
+
+    {
+      const { context, page, errors } = await openUnusual({ flowStatus: 500 });
+      await page.goto("https://example.test/flows/unusual/");
+      await page.waitForSelector("#uaNet .fn-slot-n");
+      await mounted(page);
+      const fn = await page.evaluate(() => document.querySelector("#uaNet .fn-empty") && document.querySelector("#uaNet .fn-empty").textContent);
+      ok(/Unavailable|could not be loaded/.test(fn || ""), `a failed read still reaches the network once it mounts (${fn})`);
+      eq(errors, [], "and nothing throws");
+      await context.close();
+    }
+  }
+
   console.log(`✓ flows-defer-render: ${checks} assertions — FlowsUI.defer asks for nothing before the load event, a visible group waits for its slot to come within 200 px, files of a group run in declared order, save-data shows a button and fetches nothing until it is clicked, and a 404 leaves the slot's table with an unavailable note and a Retry that works`);
 } finally {
   await browser.close();

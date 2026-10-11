@@ -69,7 +69,9 @@
     alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: new Set(),
   };
   const charts = { timeline: null };
-  const net = UI.net && host.net ? UI.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true } : {}) : null;
+  let net = null;
+  const slotEl = host.net ? h("div", { class: "fn-slot", role: "group", "aria-label": "Largest names by flagged premium, shown until the network loads" }) : null;
+  if (slotEl) host.net.append(slotEl);
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");
@@ -838,6 +840,46 @@
     setModuleInfo(host.surprise, "volume surprise", surpriseInfo);
   }
 
+  function paintNetSlot() {
+    if (!slotEl || net) return;
+    const by = new Map();
+    for (const r of S.alertsKind === "ok" && S.alerts ? S.alerts.rows : []) {
+      const prem = n(r.prem), t = r.t && String(r.t).trim().toUpperCase();
+      if (!t || prem === null || prem <= 0) continue;
+      const sided = r.cp === "C" || r.cp === "P";
+      let a = sided ? Math.max(0, n(r.askPrem) || 0) : 0, b = sided ? Math.max(0, n(r.bidPrem) || 0) : 0;
+      if (a + b > prem) { const k = prem / (a + b); a *= k; b *= k; }
+      const e = by.get(t) || { t, v: 0, up: 0, down: 0 };
+      e.v += prem;
+      e.up += r.cp === "C" ? a : b;
+      e.down += r.cp === "C" ? b : a;
+      by.set(t, e);
+    }
+    const top = [...by.values()].sort((x, y) => y.v - x.v || (x.t < y.t ? -1 : 1)).slice(0, 8);
+    const lean = (e) => (e.up > e.down ? ["\u25B2", "Bullish"] : e.down > e.up ? ["\u25BC", "Bearish"] : ["\u2013", "Unsided"]);
+    slotEl.replaceChildren(
+      h("p", { class: "fn-slot-t" }, "Largest names by flagged premium"),
+      top.length
+        ? h("table", { class: "fn-slot-tab" },
+          h("thead", null, h("tr", null, h("th", { scope: "col" }, "Name"), h("th", { scope: "col", class: "c-num" }, "Premium"), h("th", { scope: "col" }, "Lean"))),
+          h("tbody", null, top.map((e) => h("tr", null,
+            h("th", { scope: "row" }, h("a", { href: tickerHref(e.t) }, e.t)),
+            h("td", { class: "c-num" }, F.money(e.v)),
+            h("td", null, lean(e).join(" "))))))
+        : h("p", { class: "fn-slot-n" }, S.alertsKind === "ok" ? "Nothing flagged in this read." : (S.alertsState && S.alertsState.reason) || "Reading the flagged windows."),
+      h("p", { class: "fn-slot-n" }, "Lean is a convention: ask-side calls and bid-side puts count bullish."));
+  }
+
+  paintNetSlot();
+  if (host.net && UI.defer) {
+    UI.defer("net", { when: "visible", el: host.net, label: "The flow network" }).then(() => {
+      const loaded = window.FlowsUI;
+      if (!loaded || !loaded.net) return;
+      net = loaded.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true } : {});
+      if (net) net.take(S.alertsKind === "ok" ? S.alerts : null, S.alertsState);
+    });
+  }
+
   function takeAlerts(alerts, kind, reason, animate) {
     S.alerts = alerts;
     S.alertsKind = kind;
@@ -853,6 +895,7 @@
         reason,
       };
     }
+    paintNetSlot();
     if (net) net.take(kind === "ok" ? alerts : null, S.alertsState);
     if (kind !== "ok" || !alerts.rows.length) {
       for (const el of [host.timeline, host.names, host.urgency]) silence(el, S.alertsState, el === host.timeline ? "Timeline" : el === host.names ? "Names" : "Urgency", el === host.timeline ? 250 : 200);

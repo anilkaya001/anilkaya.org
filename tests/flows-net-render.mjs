@@ -99,7 +99,7 @@ function expected(flow, { names = 10 } = {}) {
   };
 }
 
-async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false, patch = null, delayFonts = 0, owner = true, init = null, clock = null } = {}) {
+async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false, patch = null, delayFonts = 0, owner = true, init = null, clock = null, eager = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch });
   const page = await ctx.newPage();
   const errors = [];
@@ -111,7 +111,10 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   let release = null;
   const gate = deferAlerts ? new Promise((r) => { release = r; }) : null;
   page.release = () => release && release();
-  const html = PAGES.unusualPage({ username: "test", owner }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>");
+  const version = fs.readFileSync(path.join(ROOT, "assets/version.txt"), "utf8").trim();
+  const html = PAGES.unusualPage({ username: "test", owner }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>")
+    .replace(eager ? /<i hidden data-defer="net"[^>]*><\/i>/ : /$^/, "")
+    .replace(eager ? /(<script src="[^"]*flows-unusual\.js[^"]*" defer><\/script>)/ : /$^/, `<script src="/assets/js/flows-net.js?v=${version}" defer></script>\n$1`);
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
@@ -119,6 +122,12 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
       if (delayFonts && u.pathname.endsWith(".woff2")) await new Promise((r) => setTimeout(r, delayFonts));
+      if (eager && u.pathname === "/assets/js/flows-unusual.js") {
+        const from = 'UI.defer("net", { when: "visible", el: host.net, label: "The flow network" })';
+        const src = fs.readFileSync(f, "utf8");
+        if (!src.includes(from)) throw new Error("the lazy load call is not where the eager variant expects it");
+        return route.fulfill({ body: src.replace(from, "Promise.resolve()"), contentType: "text/javascript" });
+      }
       if (patch && u.pathname === "/assets/js/flows-net.js") {
         let src = fs.readFileSync(f, "utf8");
         for (const [from, to] of patch) { if (!src.includes(from)) throw new Error("mutant anchor missing: " + from); src = src.replaceAll(from, to); }
@@ -137,6 +146,7 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto("https://example.test/flows/unusual/", delayFonts ? { waitUntil: "commit" } : undefined);
+  if (!wait) await page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
   if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
   return { ctx, page };
 }
@@ -605,7 +615,7 @@ try {
   }
 
   for (const width of [320, 700]) {
-    const { ctx, page } = await mount(browser, { width, height: 1400, delayFonts: 3000 });
+    const { ctx, page } = await mount(browser, { width, height: 1400, delayFonts: 3000, eager: true });
     const atRest = async () => {
       await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")), c = n.camera(); n.orbit(c.rest[0], c.rest[1]); return n.model().layers.flat().every((d) => { const k = n.node(d.id); return Math.abs(k.x - k.sx) < 0.6 && Math.abs(k.y - k.sy) < 0.6; }); }, null, { timeout: 15000, polling: 100 });
       const [r] = await sweep(page, [(await camera(page)).rest]);
@@ -627,6 +637,18 @@ try {
     deep(adrift(r1.labels, r1.layout, width < 560), [], `and every label stays by its sphere once the font has arrived, ${width}px`);
     deep(await page.evaluate(`(${auditFn})(window.FlowsUI.net.of(document.getElementById("uaNet")).scene(), false)`), [], `and nothing touches a header or leaves the canvas (${width}px)`);
     deep(page.errors, [], `nothing threw while the font loaded at ${width}px`);
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 700, height: 1400, delayFonts: 1500 });
+    const widths = async () => (await net(page, "return net.labels();")).filter((l) => !l.id.startsWith("cap:")).reduce((a, l) => a + l.w, 0);
+    ok(await page.evaluate(() => [...document.fonts].some((f) => /Inter/.test(f.family) && f.status === "loaded")), "THE LAZY NETWORK IS FIRST DRAWN AFTER THE FONT: the load event waits for the face the page uses, so the network is measured in the loaded face");
+    const w0 = await widths();
+    await page.waitForTimeout(900);
+    const w1 = await widths();
+    ok(Math.abs(w1 - w0) <= 1, `and its chips are not measured a second time (${w0.toFixed(0)} px, then ${w1.toFixed(0)} px)`);
+    deep(page.errors, [], "and nothing threw");
     await ctx.close();
   }
 
