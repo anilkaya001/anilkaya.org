@@ -17,6 +17,8 @@ The file is stale. The programme's comparison against the vendor's live document
 
 ## Refreshing it
 
+Open item: the refresh below has not been done. The builder of P1-38 had no vendor access (the documentation host answers 403 from the sandbox), so `docs/uw-openapi.yaml` is still the 2026-08-30 copy and the row is not fully closed until steps 1 to 6 are run by someone who can reach the document; the one `specSha256` move in step 5 is its closing commit.
+
 1. Obtain the vendor's current OpenAPI document. Its address is owner decision OD-20 and has not been supplied; until it is, take it from the vendor's documentation tool.
 2. Copy the old file aside, write the new one over `docs/uw-openapi.yaml`, and record the address, the date and the new `info.version` in the table above.
 3. Run `node scripts/uw-spec-diff.mjs <old file> docs/uw-openapi.yaml`. The report lists added and removed operations, parameters added, removed or flipped between required and optional, new deprecations, changed plan sentences and new changelog entries. Read it before anything else. `--check` exits 1 when the two differ, which is the form a weekly drift step runs once the address exists.
