@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launch } from "./lib/browser.mjs";
+import { chromium } from "playwright";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://kit.test";
@@ -187,7 +187,7 @@ const PAIRS = [
   { a: "--s-blue", b: "--s-orange", cue: "label" },
 ];
 
-const browser = await launch();
+const browser = await chromium.launch();
 
 const inPage = {
   contrastReport: () => {

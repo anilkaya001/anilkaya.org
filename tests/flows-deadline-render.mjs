@@ -3,7 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launch } from "./lib/browser.mjs";
+import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -115,7 +115,7 @@ const SUITE = [
   { id: "ask", fn: "askPage", url: "/flows/ask/", ms: 15000 },
 ];
 
-const browser = await launch();
+const browser = await chromium.launch();
 try {
   for (const spec of SUITE) {
     server.html = String(PAGES[spec.fn]({ username: "anilkaya", ...(spec.args || {}) }));

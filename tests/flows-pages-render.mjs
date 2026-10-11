@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launch } from "./lib/browser.mjs";
+import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
@@ -285,7 +285,7 @@ const measured = {};
 const failures = [];
 const notes = [];
 
-const browser = await launch();
+const browser = await chromium.launch();
 const started = Date.now();
 try {
   for (const spec of SPECS) {

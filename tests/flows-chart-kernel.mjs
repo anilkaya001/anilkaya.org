@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { launch } from "./lib/browser.mjs";
+import { chromium } from "playwright";
 import { ORIGIN, pageHtml, serve } from "./lib/chart-page.mjs";
 import { CASES_SRC } from "./fixtures-chart-kernel.mjs";
 
@@ -15,7 +15,7 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-const browser = await launch();
+const browser = await chromium.launch();
 const errors = [];
 
 const SERIALIZE = String.raw`
