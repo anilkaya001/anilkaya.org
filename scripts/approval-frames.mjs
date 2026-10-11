@@ -373,6 +373,7 @@ export async function renderApproval({ out, chromium, capture = false, log = () 
       const video = page.video();
       await ctx.close();
       await video.saveAs(path.join(out, "capture-live-ambient.webm"));
+      await video.delete();
       log("capture-live-ambient.webm");
     }
     writeFileSync(path.join(out, "index.html"), indexHtml(fx, frames));

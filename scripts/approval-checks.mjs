@@ -1,4 +1,4 @@
-import { rectHitsPoly } from "./approval-worlds.mjs";
+import { rectHitsPoly, pathsCross, pathHitsPoly } from "./approval-worlds.mjs";
 
 const words = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
@@ -111,8 +111,13 @@ export function scaleProblems(scene) {
   return out.concat(hits.length ? [] : ["no nodes"]);
 }
 
-export function labelProblems(labels, solids, bounds) {
+export function labelProblems(labels, solids, bounds, leaders) {
   const out = [];
+  const L = leaders || [];
+  for (let i = 0; i < L.length; i++) {
+    for (let j = i + 1; j < L.length; j++) if (pathsCross(L[i].path, L[j].path)) out.push(`leader ${L[i].id} crosses leader ${L[j].id}`);
+    for (const s of solids) if (s.poly && s.id !== L[i].id && pathHitsPoly(L[i].path, s.poly)) out.push(`leader ${L[i].id} crosses ${s.id}`);
+  }
   for (let i = 0; i < labels.length; i++) {
     const a = labels[i];
     if (bounds && (a.x < 0 || a.y < 0 || a.x + a.w > bounds.w || a.y + a.h > bounds.h)) out.push(`${a.id} leaves the frame`);

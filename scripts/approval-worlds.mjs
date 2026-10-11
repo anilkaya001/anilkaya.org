@@ -12,6 +12,32 @@ function project(poly, axis) {
   return [lo, hi];
 }
 
+function orient(a, b, c) {
+  const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  return v > 1e-9 ? 1 : v < -1e-9 ? -1 : 0;
+}
+
+export function segmentsCross(a, b, c, d) {
+  return orient(a, b, c) * orient(a, b, d) < 0 && orient(c, d, a) * orient(c, d, b) < 0;
+}
+
+export function pathsCross(p, q) {
+  for (let i = 0; i + 1 < p.length; i++) for (let j = 0; j + 1 < q.length; j++) if (segmentsCross(p[i], p[i + 1], q[j], q[j + 1])) return true;
+  return false;
+}
+
+export function pathHitsPoly(path, poly) {
+  for (let i = 0; i + 1 < path.length; i++) {
+    for (let j = 0; j < poly.length; j++) if (segmentsCross(path[i], path[i + 1], poly[j], poly[(j + 1) % poly.length])) return true;
+  }
+  return false;
+}
+
+function permutations(a) {
+  if (a.length <= 1) return [a];
+  return a.flatMap((x, i) => permutations([...a.slice(0, i), ...a.slice(i + 1)]).map((r) => [x, ...r]));
+}
+
 export function rectHitsPoly(rect, poly) {
   const box = [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x + rect.w, rect.y + rect.h], [rect.x, rect.y + rect.h]];
   const axes = [[1, 0], [0, 1]];
@@ -95,8 +121,24 @@ export function skylineScene(world, opts = {}) {
   const floorPoly = [[-span, -depth], [span, -depth], [span, depth], [-span, depth]].map(([x, z]) => cam.p(x, 0, z)).map((q) => [r2(q.x), r2(q.y)]);
   const callers = prisms.filter((p) => p.above).sort((a, b) => b.h - a.h);
   const marginX = W - 300;
-  const callouts = callers.map((p, i) => ({ id: p.t, text: `${p.t} ${p.dir > 0 ? "▲ +" : "▼ −"}${Math.abs(p.chg).toFixed(1)}%  ${p.p}`, x: marginX, y: 150 + i * 44, w: 268, h: 34, from: [p.top.x, p.top.y] }));
-  return { W, H, tiles, prisms, plane, planeY, decades, floorPoly, callouts, hStar: sk.hStar, wall, unit, solids: prisms.map((p) => ({ id: p.t, poly: p.hull })), labels: callouts.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })), cam };
+  const leaderOf = (p, i) => {
+    const y = 150 + i * 44 + 17;
+    return [[p.top.x, p.top.y], [marginX - 18, y], [marginX, y]];
+  };
+  const cost = (order) => {
+    const paths = order.map(leaderOf);
+    let crossings = 0, hits = 0, length = 0;
+    for (let i = 0; i < paths.length; i++) {
+      for (let j = i + 1; j < paths.length; j++) if (pathsCross(paths[i], paths[j])) crossings++;
+      for (const q of prisms) if (q.t !== order[i].t && pathHitsPoly(paths[i], q.hull)) hits++;
+      length += Math.hypot(paths[i][1][0] - paths[i][0][0], paths[i][1][1] - paths[i][0][1]);
+    }
+    return crossings * 1e6 + hits * 1e3 + length;
+  };
+  const byAnchor = [...callers].sort((a, b) => a.top.y - b.top.y);
+  const order = callers.length <= 7 ? permutations(byAnchor).map((o) => [cost(o), o]).sort((a, b) => a[0] - b[0])[0][1] : byAnchor;
+  const callouts = order.map((p, i) => ({ id: p.t, text: `${p.t} ${p.dir > 0 ? "▲ +" : "▼ −"}${Math.abs(p.chg).toFixed(1)}%  ${p.p}`, x: marginX, y: 150 + i * 44, w: 268, h: 34, from: [p.top.x, p.top.y], path: leaderOf(p, i) }));
+  return { W, H, tiles, prisms, plane, planeY, decades, floorPoly, callouts, hStar: sk.hStar, wall, unit, solids: prisms.map((p) => ({ id: p.t, poly: p.hull })), labels: callouts.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })), leaders: callouts.map((c) => ({ id: c.id, path: c.path })), cam };
 }
 
 export function skylineSvg(sc, o = {}) {
@@ -137,8 +179,7 @@ export function skylineSvg(sc, o = {}) {
   const pf = [(sc.plane[2][0] + sc.plane[3][0]) / 2, (sc.plane[2][1] + sc.plane[3][1]) / 2];
   out.push(`<g class="plane-label"><rect x="${r1(pf[0] - 118)}" y="${r1(pf[1] - 2)}" width="236" height="22" rx="11" fill="rgba(11,17,32,0.86)" stroke="${COLOR.gold}" stroke-opacity="0.5"/><text x="${r1(pf[0])}" y="${r1(pf[1] + 13)}" text-anchor="middle" font-size="11.5" fill="${COLOR.gold}">no measured rate yet (design 10%)</text></g>`);
   for (const c of sc.callouts) {
-    const mid = [c.x - 18, c.y + c.h / 2];
-    out.push(`<polyline class="leader" points="${c.from[0]},${c.from[1]} ${mid[0]},${mid[1]} ${c.x},${mid[1]}" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>`);
+    out.push(`<polyline class="leader" points="${c.path.map((q) => q.join(",")).join(" ")}" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>`);
     out.push(`<g class="callout" data-t="${esc(c.id)}"><rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" rx="8" fill="rgba(11,17,32,0.86)" stroke="rgba(255,255,255,0.14)"/><text x="${c.x + 12}" y="${c.y + c.h / 2 + 4.5}" font-size="12.5" fill="#f5f5f7">${esc(c.text)}</text></g>`);
   }
   out.push(`</svg>`);

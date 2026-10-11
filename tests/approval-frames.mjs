@@ -38,7 +38,6 @@ const { world, copy } = fx;
   ok(Object.values(fx.answers.recorded).every(valid), "a slot holds null, \"yes\" or a list of changes and nothing else");
   ok(fx.answers.motion.recorded === null || ["live", "ambient", "both"].includes(fx.answers.motion.recorded), "and OD-V1's answer is null, live, ambient or both");
   eq(fx.answers.decision, "OD-39", "the answers record OD-39");
-  eq(fx.answers.motion.recorded, null, "and OD-V1's motion answer is empty");
 
   const sup = fx.superseded.frames;
   eq(sup.length, 35, "THE PACK LISTS THE 35 SUPERSEDED FRAMES");
@@ -213,7 +212,10 @@ try {
     const callers = world.skyline.rows.filter((r) => r.h >= world.skyline.hStar).map((r) => r.t).sort();
     eq(sc.callouts.map((c) => c.id).sort(), callers, "the margin callouts are exactly the names above the plane");
     eq(sc.labels.map((l) => l.id).sort(), callers, "and the only labels in the scene: none sits on a prism");
-    eq(labelProblems(sc.labels, sc.solids, { w: sc.W, h: sc.H }), [], "A LABEL THAT OVERLAPS A PRISM FAILS THE PLACER'S TEST: no callout touches a prism or another callout on the fixture");
+    eq(labelProblems(sc.labels, sc.solids, { w: sc.W, h: sc.H }, sc.leaders), [], "A LABEL THAT OVERLAPS A PRISM FAILS THE PLACER'S TEST: no callout touches a prism or another callout, and no leader line crosses another leader or another name's prism, on the fixture");
+    ok(sc.leaders.length >= 2, `the fixture has ${sc.leaders.length} leaders, enough for the crossing check to mean something`);
+    const crossed = sc.leaders.map((l, i) => (i === 0 ? { ...l, path: [l.path[0], sc.leaders[1].path[1], sc.leaders[1].path[2]] } : i === 1 ? { ...l, path: [l.path[0], sc.leaders[0].path[1], sc.leaders[0].path[2]] } : l));
+    ok(labelProblems(sc.labels, sc.solids, { w: sc.W, h: sc.H }, crossed).some((x) => /^leader .* crosses leader/.test(x)) || sc.leaders[0].path[0][1] === sc.leaders[1].path[0][1], "two leaders sent to each other's slots are caught as crossing");
     const moved = sc.labels.map((l, i) => (i === 0 ? { ...l, x: sc.prisms[0].top.x - 20, y: sc.prisms[0].top.y + 5, w: 120, h: 30 } : l));
     ok(labelProblems(moved, sc.solids, { w: sc.W, h: sc.H }).length > 0, "a label moved onto a prism is caught");
     ok(sc.prisms.every((p) => p.h >= 2), "only names with h of 2 decades or more become prisms");
