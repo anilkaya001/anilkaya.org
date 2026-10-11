@@ -980,7 +980,7 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
     unanchored.join(", "));
 }
 {
-  const { supportedCompatibilityDate } = await import("miniflare");
+  const { compatibilityDate: supportedCompatibilityDate } = await import("workerd");
   const compat = (/^compatibility_date\s*=\s*"(\d{4}-\d{2}-\d{2})"/m.exec(read("wrangler.toml")) || [])[1];
   assert(compat && /^\d{4}-\d{2}-\d{2}$/.test(supportedCompatibilityDate) && compat <= supportedCompatibilityDate,
     `wrangler.toml compatibility_date ${compat} must not be later than ${supportedCompatibilityDate}, the newest date ` +
