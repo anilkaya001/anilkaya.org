@@ -18,13 +18,13 @@ const near = (a, b, tol, msg) => { assert.ok(Math.abs(a - b) <= tol, `${msg}: ${
 const SCENES_SRC = fs.readFileSync(path.join(ROOT, "assets/js/flows-ticker-scenes.js"), "utf8");
 const TOML = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
 
-ok(/^FLOWS_SCENES\s*=\s*"off"/m.test(TOML), "wrangler.toml ships the scenes switch off");
+ok(/^FLOWS_SCENES\s*=\s*"owner"/m.test(TOML), "wrangler.toml ships the scenes switch owner-only");
 ok(!/id="ftScenes"/.test(FLOWS_PAGES.tickerPage({ username: "m" })), "the ticker page carries no scenes group by default");
 ok(/id="ftScenes"/.test(FLOWS_PAGES.tickerPage({ username: "m", scenes: true })), "and carries it when asked");
 ok(/data-defer="scenes" data-src="\/assets\/js\/flows-ticker-scenes\.js\?v=\d+"/.test(FLOWS_PAGES.tickerPage({ username: "m", scenes: true })), "as one versioned deferred file");
 
 async function pageFor(env, owner) {
-  const rows = flowsPageRows({ currentFlowsUser: async () => ({ username: "u" }), readFlowsSummary: async () => null, isOwner: () => owner });
+  const rows = flowsPageRows({ currentFlowsUser: async () => ({ username: "u" }), readFlowsSummary: async () => null, isOwner: () => owner, scenesOn: (e) => String((e && e.FLOWS_SCENES) || "").trim().toLowerCase() === "owner" && owner });
   const row = rows.find((r) => r.path === "/flows/ticker/");
   const res = await row.handler({ request: new Request("https://x.test/flows/ticker/"), env, url: new URL("https://x.test/flows/ticker/"), ctx: {} });
   return res.text();
