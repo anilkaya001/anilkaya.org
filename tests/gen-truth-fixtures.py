@@ -199,6 +199,46 @@ def probit_block():
     return {"slope": slope, "noise": noise, "rho": rho, "base": base, "c": c, "rows": rows}
 
 
+def nb_logpmf_ratio_terms(x, mu, r):
+    return r * np.log(r / (r + mu)) + x * np.log(mu / (r + mu))
+
+
+def f1_fixed_block():
+    from scipy.special import gammaln
+    rng = np.random.default_rng(20261011)
+    minutes = 390
+    lam = 20000 / 390 / 3.0
+    r = 2.0
+    thetas = np.array([1.5, 2.0, 3.0, 5.0, 8.0])
+    m2 = 1200
+    harmonic = sum(1.0 / k for k in range(1, m2 + 1))
+    line = m2 * harmonic / 0.10
+    sessions = 12000
+    chunk = 1000
+    rows = []
+    for sd_day in (0.0, 0.15, 0.25, 0.40):
+        crossed = 0
+        over20 = 0
+        for _ in range(sessions // chunk):
+            u = np.exp(rng.normal(-sd_day ** 2 / 2, sd_day, chunk)) if sd_day > 0 else np.ones(chunk)
+            mu = lam * u[:, None] * np.ones((chunk, minutes))
+            counts = rng.negative_binomial(r, r / (r + mu))
+            l0 = nb_logpmf_ratio_terms(counts, lam, r)
+            k = 0.0
+            for th in thetas:
+                k = k + np.exp(np.minimum(np.cumsum(nb_logpmf_ratio_terms(counts, th * lam, r) - l0, axis=1), 700))
+            k = k / len(thetas)
+            crossed += int(np.sum(np.any(k >= line, axis=1)))
+            over20 += int(np.sum(np.max(k, axis=1) >= 20))
+        rows.append({
+            "sdDay": sd_day,
+            "sessions": sessions,
+            "crossLine": crossed / sessions,
+            "maxAtLeast20": over20 / sessions,
+        })
+    return {"lambda": lam, "r": r, "thetas": thetas.tolist(), "line": line, "mPrime": m2, "alpha": 0.10, "minutes": minutes, "rows": rows}
+
+
 def main():
     out = {
         "provenance": {
@@ -221,6 +261,7 @@ def main():
         "w7": w7_block(),
         "maxNormal": maxnormal_block(),
         "probit": probit_block(),
+        "f1Fixed": f1_fixed_block(),
     }
     with open(OUT_PATH, "w") as handle:
         json.dump(out, handle, indent=1, sort_keys=True)

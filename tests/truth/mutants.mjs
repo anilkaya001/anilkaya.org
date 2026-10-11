@@ -165,6 +165,24 @@ register({
   detector: "trialCount",
 });
 
+register({
+  id: "hawkes-compensator-sign",
+  title: "the Hawkes compensator adds the excitation with the wrong sign",
+  target: "tests/truth/reference.mjs",
+  row: "F-13",
+  transforms: [["out[i] = mu * dt + s * (1 - decay);", "out[i] = mu * dt + s * (decay - 1);"]],
+  detector: "hawkesCompensator",
+});
+
+register({
+  id: "flow-null-omits-the-day-effect",
+  title: "the Alert tier's flow null has a fixed level for the name and no day effect",
+  target: "tests/truth/reference.mjs",
+  row: "F-13",
+  transforms: [["const withDayEffect = true;", "const withDayEffect = false;"]],
+  detector: "flowNullDayEffect",
+});
+
 export async function runKillMatrix(selected = MUTANTS) {
   const rows = [];
   const baselines = new Map();

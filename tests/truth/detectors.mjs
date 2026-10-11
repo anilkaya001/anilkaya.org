@@ -1,6 +1,6 @@
 import { makeRng } from "./rng.mjs";
-import { hansen, w1Closes, w1Garch, closesFromReturns, businessDays, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
-import { mean, median, quantile } from "./stats.mjs";
+import { hansen, w1Closes, w1Garch, closesFromReturns, businessDays, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
+import { mean, median, quantile, variance, ksUniform } from "./stats.mjs";
 
 export const W1_BANDS = Object.freeze({
   nu: [5.2, 5.8],
@@ -293,4 +293,38 @@ export function trialCount(refMod) {
   }
   const rate = passed / reps;
   return { ok: rate <= 0.08, note: `the best of 100 null strategies clears a deflated Sharpe of 0.95 in ${(100 * rate).toFixed(1)}% of ${reps} runs`, rate };
+}
+
+export const HAWKES = Object.freeze({ mu: 0.5, beta: 1, branching: 0.6 });
+
+export function hawkesCompensator(refMod) {
+  const sessions = 30 * SCALE.factor;
+  const res = [];
+  for (let s = 0; s < sessions; s++) {
+    const w = w3Hawkes({ seed: `w3|${SCALE.salt}|${s}`, ...HAWKES });
+    for (const v of refMod.hawkesResiduals(w.times, w.marks, HAWKES)) res.push(v);
+  }
+  const m = mean(res), v = variance(res);
+  const u = res.map((x) => 1 - Math.exp(-x));
+  const ks = ksUniform(u);
+  const bound = 2.2 / Math.sqrt(res.length);
+  const ok = Math.abs(m - 1) < 0.05 && Math.abs(v - 1) < 0.1 && ks < bound;
+  return { ok, note: `compensator increments: mean ${m.toFixed(3)}, variance ${v.toFixed(3)}, KS ${ks.toFixed(4)} against ${bound.toFixed(4)} (${res.length} events)` };
+}
+
+export function flowNullDayEffect(refMod) {
+  const sessions = 200 * SCALE.factor;
+  const p = { lambda: 20000 / 390 / 3, r: 2, sdDay: 0.25 };
+  const line = refMod.alertLine();
+  const w = w3bSession({ seed: `w3b|${SCALE.salt}`, names: sessions, sdDay: p.sdDay, lambda: p.lambda, dispersion: p.r });
+  let cross = 0, over20 = 0;
+  for (const nm of w.names) {
+    const k = refMod.alertTier(nm.counts, p);
+    let mx = 0;
+    for (const v of k) if (v > mx) mx = v;
+    if (mx >= line) cross++;
+    if (mx >= 20) over20++;
+  }
+  const rate = cross / sessions, r20 = over20 / sessions;
+  return { ok: rate <= 0.02 && r20 <= 0.07, note: `at a day effect of 0.25, ${(100 * rate).toFixed(1)}% of ordinary names cross the Alert line and ${(100 * r20).toFixed(1)}% reach E = 20 (${sessions} names)`, rate, r20 };
 }

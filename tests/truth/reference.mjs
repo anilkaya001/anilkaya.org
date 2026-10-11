@@ -198,3 +198,97 @@ export function pbo(matrix, partitions = 8) {
   }
   return below / combos.length;
 }
+
+export function hawkesResiduals(times, marks, { mu, beta, branching }) {
+  const out = new Float64Array(times.length);
+  let s = 0, prev = 0;
+  for (let i = 0; i < times.length; i++) {
+    const dt = times[i] - prev;
+    const decay = Math.exp(-beta * dt);
+    out[i] = mu * dt + s * (1 - decay);
+    s = s * decay + branching * marks[i];
+    prev = times[i];
+  }
+  return out;
+}
+
+export const ALERT = Object.freeze({ mPrime: 1200, alpha: 0.1, thetas: Object.freeze([1.5, 2, 3, 5, 8]) });
+
+let harmonicCache = null;
+export function alertLine() {
+  if (harmonicCache === null) {
+    let h = 0;
+    for (let k = 1; k <= ALERT.mPrime; k++) h += 1 / k;
+    harmonicCache = (ALERT.mPrime * h) / ALERT.alpha;
+  }
+  return harmonicCache;
+}
+
+const nbTerm = (x, mu, r) => r * Math.log(r / (r + mu)) + x * Math.log(mu / (r + mu));
+
+export function fixedEProcess(counts, { lambda, r }) {
+  const thetas = ALERT.thetas;
+  const acc = new Float64Array(thetas.length);
+  const k = new Float64Array(counts.length);
+  for (let j = 0; j < counts.length; j++) {
+    const l0 = nbTerm(counts[j], lambda, r);
+    let sum = 0;
+    for (let t = 0; t < thetas.length; t++) {
+      acc[t] = Math.min(acc[t] + nbTerm(counts[j], thetas[t] * lambda, r) - l0, 700);
+      sum += Math.exp(acc[t]);
+    }
+    k[j] = sum / thetas.length;
+  }
+  return k;
+}
+
+const logSumExp = (a, off) => {
+  let m = -Infinity;
+  for (let i = 0; i < a.length; i++) { const v = a[i] + off[i]; if (v > m) m = v; }
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.exp(a[i] + off[i] - m);
+  return m + Math.log(s);
+};
+
+export function hierEProcess(counts, { lambda, r, sdDay, grid = 25, thetas = [2, 3, 5], spacing = 30 }) {
+  const G = Array.from({ length: grid }, (_, i) => -1.6 + (3.2 * i) / (grid - 1));
+  const prior = G.map((g) => -0.5 * ((g + (sdDay * sdDay) / 2) / sdDay) ** 2);
+  const norm = logSumExp(prior, new Float64Array(grid));
+  let post = Float64Array.from(prior, (v) => v - norm);
+  const mu0 = G.map((g) => lambda * Math.exp(g));
+  const a0 = mu0.map((m) => r * Math.log(r / (r + m))), b0 = mu0.map((m) => Math.log(m / (r + m)));
+  const alt = thetas.map((th) => {
+    const mu = mu0.map((m) => th * m);
+    return { a: mu.map((m) => r * Math.log(r / (r + m))), b: mu.map((m) => Math.log(m / (r + m))) };
+  });
+  const taus = [];
+  for (let t = 0; t < counts.length; t += spacing) taus.push(t);
+  const frozen = taus.map(() => null);
+  const logK = thetas.map(() => new Float64Array(taus.length));
+  const out = new Float64Array(counts.length);
+  const ll = new Float64Array(grid), llt = new Float64Array(grid);
+  for (let j = 0; j < counts.length; j++) {
+    const x = counts[j];
+    for (let ti = 0; ti < taus.length; ti++) if (taus[ti] === j) frozen[ti] = Float64Array.from(post);
+    for (let g = 0; g < grid; g++) ll[g] = a0[g] + x * b0[g];
+    const lpNull = logSumExp(post, ll);
+    for (let k = 0; k < thetas.length; k++) {
+      for (let g = 0; g < grid; g++) llt[g] = alt[k].a[g] + x * alt[k].b[g];
+      for (let ti = 0; ti < taus.length; ti++) if (frozen[ti] !== null) logK[k][ti] += logSumExp(frozen[ti], llt) - lpNull;
+    }
+    for (let g = 0; g < grid; g++) post[g] += ll[g];
+    const z = logSumExp(post, new Float64Array(grid));
+    for (let g = 0; g < grid; g++) post[g] -= z;
+    let m = 0;
+    for (let k = 0; k < thetas.length; k++) for (let ti = 0; ti < taus.length; ti++) if (logK[k][ti] > m) m = logK[k][ti];
+    let s = 0;
+    for (let k = 0; k < thetas.length; k++) for (let ti = 0; ti < taus.length; ti++) s += Math.exp(logK[k][ti] - m);
+    out[j] = Math.exp(m + Math.log(s / (thetas.length * taus.length)));
+  }
+  return out;
+}
+
+export function alertTier(counts, { lambda, r, sdDay }) {
+  const withDayEffect = true;
+  return withDayEffect ? hierEProcess(counts, { lambda, r, sdDay }) : fixedEProcess(counts, { lambda, r });
+}

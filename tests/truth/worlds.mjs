@@ -258,8 +258,85 @@ export function w6Null(opts = {}) {
   return { returns, trials: p.trials, periods: p.periods, edge: p.edge, planted: p.edge > 0 ? 0 : null };
 }
 
+export const W3_DEFAULTS = Object.freeze({ horizon: 390, warmup: 120, mu: 0.5, beta: 1, branching: 0.6, markSigma: 0.8 });
+
+export function w3Hawkes(opts = {}) {
+  const p = { ...W3_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w3");
+  const meanMark = Math.exp((p.markSigma * p.markSigma) / 2);
+  const draw = () => Math.exp(p.markSigma * rng.normal()) / meanMark;
+  const events = [];
+  const total = p.horizon + p.warmup;
+  const queue = [];
+  const immigrants = rng.poisson(p.mu * total);
+  for (let i = 0; i < immigrants; i++) queue.push({ t: rng.uniform() * total, m: draw() });
+  while (queue.length) {
+    const e = queue.pop();
+    events.push(e);
+    const kids = rng.poisson(p.branching * e.m);
+    for (let k = 0; k < kids; k++) {
+      const t = e.t - Math.log(rng.uniform()) / p.beta;
+      if (t < total) queue.push({ t, m: draw() });
+    }
+  }
+  events.sort((a, b) => a.t - b.t);
+  const kept = events.filter((e) => e.t >= p.warmup);
+  return {
+    times: Float64Array.from(kept, (e) => e.t - p.warmup),
+    marks: Float64Array.from(kept, (e) => e.m),
+    params: p,
+    meanRate: p.mu / (1 - p.branching),
+  };
+}
+
+export const W3B_DEFAULTS = Object.freeze({
+  minutes: 390, lambda: 20000 / 390 / 3, dispersion: 2, sdDay: 0.25, sdWeather: 0, memory: 20, marketSd: 0, marketWeatherSd: 0,
+  surgeMultiplier: 1, surgeStart: 60, withLots: false, lots: 1.6, lotsSigma: 0.9,
+});
+
+export function w3bSession(opts = {}) {
+  const p = { ...W3B_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w3b");
+  const names = p.names ?? 1;
+  const a = Math.exp(-1 / p.memory);
+  const market = new Float64Array(p.minutes);
+  const marketDay = p.marketSd > 0 ? p.marketSd * rng.normal() - (p.marketSd * p.marketSd) / 2 : 0;
+  if (p.marketWeatherSd > 0) {
+    let s = p.marketWeatherSd * rng.normal();
+    for (let j = 0; j < p.minutes; j++) {
+      s = j === 0 ? s : a * s + p.marketWeatherSd * Math.sqrt(1 - a * a) * rng.normal();
+      market[j] = s - (p.marketWeatherSd * p.marketWeatherSd) / 2;
+    }
+  }
+  const out = [];
+  const lotsMean = p.lots;
+  for (let i = 0; i < names; i++) {
+    const day = p.sdDay > 0 ? Math.exp(p.sdDay * rng.normal() - (p.sdDay * p.sdDay) / 2) : 1;
+    const counts = new Int32Array(p.minutes), lots = p.withLots ? new Int32Array(p.minutes) : null;
+    let s = p.sdWeather > 0 ? p.sdWeather * rng.normal() : 0;
+    for (let j = 0; j < p.minutes; j++) {
+      let weather = 0;
+      if (p.sdWeather > 0) {
+        if (j > 0) s = a * s + p.sdWeather * Math.sqrt(1 - a * a) * rng.normal();
+        weather = s - (p.sdWeather * p.sdWeather) / 2;
+      }
+      const mult = j >= p.surgeStart ? p.surgeMultiplier : 1;
+      const mean = p.lambda * day * mult * Math.exp(weather + market[j] + marketDay);
+      const n = rng.negBin(mean, p.dispersion);
+      counts[j] = n;
+      let l = 0;
+      if (p.withLots) for (let k = 0; k < n; k++) l += 1 + Math.floor(Math.exp(Math.log(lotsMean) + p.lotsSigma * rng.normal() - (p.lotsSigma * p.lotsSigma) / 2));
+      if (p.withLots) lots[j] = l;
+    }
+    out.push({ counts, lots, day });
+  }
+  return { names: out, params: p };
+}
+
 export const WORLDS = Object.freeze({
   W1: Object.freeze({ id: "W1", title: "GARCH(1,1)-skew-t, the production class", family: "calibration" }),
+  W3: Object.freeze({ id: "W3", title: "marked Hawkes flow", family: "calibration" }),
+  W3b: Object.freeze({ id: "W3b", title: "flow counts with day effects and weather", family: "calibration" }),
   W4: Object.freeze({ id: "W4", title: "look-ahead bait", family: "calibration" }),
   W7: Object.freeze({ id: "W7", title: "calibration worlds", family: "calibration" }),
   W5: Object.freeze({ id: "W5", title: "open-interest publication lag", family: "calibration" }),

@@ -5,12 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as garch from "../shared/flows-garch.js";
 import { makeRng, seedWords, normalQuantile, normalSurvival, normalCdf } from "./truth/rng.mjs";
-import { hansen, w1Garch, w4Bait, w5OiLag, w6Null, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, nextBusinessDay, probitMean, WORLDS } from "./truth/worlds.mjs";
+import { hansen, w1Garch, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, nextBusinessDay, probitMean, WORLDS } from "./truth/worlds.mjs";
 import { mean, variance, sd, autocorrelation, ksUniform } from "./truth/stats.mjs";
 import { MODES, NotJudged, NoJudgementList, cell, accept, judge, formatRow } from "./truth/runner.mjs";
 import { MUTANTS, runKillMatrix, loadMutated } from "./truth/mutants.mjs";
 import * as reference from "./truth/reference.mjs";
-import { SCALE, W1_BANDS, measureW1Bands, tailLawCell, logScore, leakBound, oiLag, trialCount } from "./truth/detectors.mjs";
+import { SCALE, W1_BANDS, HAWKES, measureW1Bands, tailLawCell, logScore, leakBound, oiLag, trialCount, hawkesCompensator, flowNullDayEffect } from "./truth/detectors.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(path.join(HERE, "fixtures-truth.json"), "utf8"));
@@ -23,10 +23,14 @@ const near = (a, b, tol, m) => { assert.ok(Math.abs(a - b) <= tol, `${m}: ${a} v
 const rel = (a, b, tol, m) => { assert.ok(Math.abs(a - b) <= tol * Math.abs(b), `${m}: ${a} vs ${b} (relative tol ${tol})`); n++; };
 const log = (line) => console.log("  " + line);
 
+const TIMING = process.env.FLOWS_TRUTH_TIMING === "1";
+
 async function section(name, fn) {
   const before = n;
+  const t0 = Date.now();
   try {
     await fn();
+    if (TIMING) console.log(`  [${name}: ${Date.now() - t0} ms]`);
   } catch (e) {
     if (!SCALE.deep) throw e;
     flags.push(`${name}: ${e.message.split("\n")[0]}`);
@@ -325,6 +329,75 @@ await section("w6", () => {
   log(`PBO on noise ${(pboNull / pboReps).toFixed(2)}, with a planted edge ${(pboEdge / pboReps).toFixed(2)}`);
 });
 
+await section("w3", () => {
+  const sessions = 80;
+  const counts = [], marks = [];
+  for (let s = 0; s < sessions; s++) {
+    const w = w3Hawkes({ seed: `w3-main|${s}`, ...HAWKES });
+    counts.push(w.times.length);
+    for (const m of w.marks) marks.push(m);
+    ok(w.times.every((t, i) => i === 0 || t >= w.times[i - 1]) && w.times.every((t) => t >= 0 && t < 390), "event times are sorted inside the session");
+  }
+  const expected = (HAWKES.mu / (1 - HAWKES.branching)) * 390;
+  const fano = variance(counts) / mean(counts);
+  near(mean(counts), expected, 4 * Math.sqrt((expected / (1 - HAWKES.branching) ** 2) / sessions), "the mean event count is the stationary rate times the session");
+  near(fano, 1 / (1 - HAWKES.branching) ** 2, 2.2, "the count dispersion is the Hawkes value 1 over (1 - n) squared");
+  near(mean(marks), 1, 0.05, "marks have unit mean");
+  const detector = hawkesCompensator(reference);
+  ok(detector.ok, "the compensator makes the residuals unit exponential: " + detector.note);
+  log("W3: " + detector.note);
+  const w = w3Hawkes({ seed: "w3-marks", ...HAWKES });
+  const blind = reference.hawkesResiduals(w.times, new Float64Array(w.marks.length).fill(1), HAWKES);
+  const aware = reference.hawkesResiduals(w.times, w.marks, HAWKES);
+  ok(Math.abs(variance(blind) - 1) > Math.abs(variance(aware) - 1) || Math.abs(mean(blind) - 1) > Math.abs(mean(aware) - 1), "a compensator that ignores the marks fits worse than one that uses them");
+});
+
+await section("w3b", () => {
+  const fx = fixtures.f1Fixed;
+  const line = reference.alertLine();
+  rel(line, fx.line, 1e-9, "the Alert line m' H(m') over alpha equals the reference");
+  for (const row of fx.rows) {
+    const sessions = 1000;
+    const w = w3bSession({ seed: `w3b-fixed|${row.sdDay}`, names: sessions, sdDay: row.sdDay, lambda: fx.lambda, dispersion: fx.r });
+    let cross = 0, o20 = 0;
+    for (const nm of w.names) {
+      let mx = 0;
+      for (const v of reference.fixedEProcess(nm.counts, { lambda: fx.lambda, r: fx.r })) if (v > mx) mx = v;
+      if (mx >= line) cross++;
+      if (mx >= 20) o20++;
+    }
+    const tol = (p) => 4 * Math.sqrt((p * (1 - p)) / sessions + (p * (1 - p)) / row.sessions) + 0.003;
+    near(cross / sessions, row.crossLine, tol(row.crossLine), `F1 as designed, day effect ${row.sdDay}: the share of names crossing the Alert line equals the independent numpy simulation`);
+    near(o20 / sessions, row.maxAtLeast20, tol(row.maxAtLeast20), `and the share reaching E = 20`);
+    log(`fixed-level null, day effect ${row.sdDay}: ${(100 * cross / sessions).toFixed(1)}% cross the line (numpy ${(100 * row.crossLine).toFixed(1)}%), ${(100 * o20 / sessions).toFixed(1)}% reach 20 (numpy ${(100 * row.maxAtLeast20).toFixed(1)}%)`);
+  }
+  const detector = flowNullDayEffect(reference);
+  ok(detector.ok, "a flow null that contains the day effect keeps ordinary names under the line: " + detector.note);
+  log("W3b: " + detector.note);
+  const day = w3bSession({ seed: "w3b-day", names: 3000, sdDay: 0.25 });
+  const totals = day.names.map((nm) => nm.counts.reduce((a, b) => a + b, 0));
+  const m = day.params.lambda * 390;
+  const theory = m * m * (Math.exp(0.0625) - 1) + m + (390 * day.params.lambda ** 2 * Math.exp(0.0625)) / day.params.dispersion;
+  near(mean(totals) / m, 1, 0.02, "session totals average the base level");
+  near(variance(totals) / theory, 1, 0.12, "and carry the day effect's variance plus the negative-binomial noise");
+  const surge = w3bSession({ seed: "w3b-surge", names: 300, sdDay: 0, surgeMultiplier: 3, surgeStart: 60 });
+  let before = 0, after = 0;
+  for (const nm of surge.names) { for (let j = 0; j < 60; j++) before += nm.counts[j]; for (let j = 60; j < 390; j++) after += nm.counts[j]; }
+  near((after / 330) / (before / 60), 3, 0.2, "a 3x surge from minute 60 triples the rate");
+  const wx = w3bSession({ seed: "w3b-weather", names: 400, sdDay: 0, sdWeather: 0.3, memory: 20 });
+  const base = w3bSession({ seed: "w3b-noweather", names: 400, sdDay: 0 });
+  const lag1 = (nms) => { let a = 0, b = 0, n = 0; for (const nm of nms) { const mu = nm.counts.reduce((x, y) => x + y, 0) / 390; for (let j = 1; j < 390; j++) { a += (nm.counts[j] - mu) * (nm.counts[j - 1] - mu); } for (let j = 0; j < 390; j++) b += (nm.counts[j] - mu) ** 2; n++; } return a / b; };
+  ok(lag1(wx.names) > lag1(base.names) + 0.05, "intraday weather puts memory into the counts that independent noise lacks");
+  const mean390 = (sess) => Float64Array.from({ length: 390 }, (_, j) => mean(sess.names.map((nm) => nm.counts[j])));
+  const mk = w3bSession({ seed: "w3b-market", names: 200, sdDay: 0, marketWeatherSd: 0.4, memory: 20 });
+  const flat = w3bSession({ seed: "w3b-flat", names: 200, sdDay: 0 });
+  const withFactor = autocorrelation(mean390(mk), 1), without = autocorrelation(mean390(flat), 1);
+  ok(withFactor > 0.5 && Math.abs(without) < 0.15, `a market factor makes the cross-sectional mean persist from minute to minute (${withFactor.toFixed(2)} against ${without.toFixed(2)})`);
+  const lotted = w3bSession({ seed: "w3b-lots", names: 20, sdDay: 0.25, withLots: true });
+  ok(lotted.names.every((nm) => nm.lots.every((l, j) => l >= nm.counts[j])), "every trade carries at least one lot");
+  ok(lotted.names.every((nm) => nm.lots.some((l, j) => l > nm.counts[j])), "and many carry more");
+});
+
 await section("runner", () => {
   let refused = false;
   try { accept({ id: "x", mode: MODES.WELL, pass: true }); } catch (e) { refused = e instanceof NotJudged; }
@@ -341,7 +414,7 @@ await section("runner", () => {
   const v = judge([inFamily, well, outFamily]);
   eq(v.rows.map((r) => r.accepted), [true, null, true], "a well-specified cell is reported as a reference and never accepted");
   eq(v.judged, 2, "two cells judged");
-  eq(Object.keys(WORLDS).sort(), ["W1", "W4", "W5", "W6", "W7", "W8"], "the worlds registered so far");
+  eq(Object.keys(WORLDS).sort(), ["W1", "W3", "W3b", "W4", "W5", "W6", "W7", "W8"], "the worlds registered so far");
   const a = w1Garch({ seed: "det", n: 100 }), b = w1Garch({ seed: "det", n: 100 });
   eq(Array.from(a.r), Array.from(b.r), "a world is a pure function of its seed");
 });
@@ -358,7 +431,7 @@ await section("kill-matrix", async () => {
     ok(r.baselineOk, `${r.id}: the detector passes the correct build (${r.baselineNote})`);
     ok(r.killed, `${r.id}: a planted wrong build is killed (${r.mutatedNote})`);
   }
-  ok(rows.filter((r) => r.armed).length >= 12, "twelve mutants are armed by the second pull request");
+  ok(rows.filter((r) => r.armed).length >= 14, "fourteen mutants are armed by the third pull request");
   eq(new Set(MUTANTS.map((m) => m.id)).size, MUTANTS.length, "every mutant has its own id");
   let notApplied = false;
   try { await loadMutated("tests/truth/reference.mjs", [["this text is nowhere in the module", "x"]]); } catch (e) { notApplied = /did not apply/.test(e.message); }
@@ -368,5 +441,5 @@ await section("kill-matrix", async () => {
 if (flags.length) console.log(`deep lane flagged ${flags.length} section(s): ${flags.join(" | ")}`);
 console.log(`✓ flows-truth: ${n} assertions — one seeded generator whose streams, tail laws and exact scores equal independent scipy references, ` +
   "W1 characterised against the measured bias table of today's GARCH (and today's clip in the filter judged outside the oracle band in an out-of-family world), " +
-  "W4 look-ahead bait power, W5 open-interest lag, W6 overfitting null, W7 calibration and W8 overlap worlds, a runner that cannot accept a well-specified result or run without an out-of-family judgement world, " +
+  "W4 look-ahead bait power, W3 marked Hawkes flow and W3b flow counts (whose fixed-level null reproduces the independent numpy crossing rates), W5 open-interest lag, W6 overfitting null, W7 calibration and W8 overlap worlds, a runner that cannot accept a well-specified result or run without an out-of-family judgement world, " +
   "and a kill matrix in which every planted wrong build is caught while the correct build passes");

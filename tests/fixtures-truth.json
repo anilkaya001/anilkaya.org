@@ -67,6 +67,47 @@
    "rawFactor": 5.375
   }
  ],
+ "f1Fixed": {
+  "alpha": 0.1,
+  "lambda": 17.094017094017094,
+  "line": 92012.50931368706,
+  "mPrime": 1200,
+  "minutes": 390,
+  "r": 2.0,
+  "rows": [
+   {
+    "crossLine": 0.0,
+    "maxAtLeast20": 0.015,
+    "sdDay": 0.0,
+    "sessions": 12000
+   },
+   {
+    "crossLine": 0.06266666666666666,
+    "maxAtLeast20": 0.12758333333333333,
+    "sdDay": 0.15,
+    "sessions": 12000
+   },
+   {
+    "crossLine": 0.1495,
+    "maxAtLeast20": 0.21333333333333335,
+    "sdDay": 0.25,
+    "sessions": 12000
+   },
+   {
+    "crossLine": 0.22166666666666668,
+    "maxAtLeast20": 0.27016666666666667,
+    "sdDay": 0.4,
+    "sessions": 12000
+   }
+  ],
+  "thetas": [
+   1.5,
+   2.0,
+   3.0,
+   5.0,
+   8.0
+  ]
+ },
  "hansen": [
   {
    "a": -0.0707106781186548,
@@ -367,7 +408,7 @@
  },
  "provenance": {
   "generator": "tests/gen-truth-fixtures.py",
-  "generatorSha256": "1e2d8329f0bb769166d78df3924bb648adffa6ffa788d467634006b20e127d24",
+  "generatorSha256": "4c9c9a6726a9b730096dc46fe7a458603991544b18fd4ff5acd1a0516ae840ab",
   "nature": "independent references for tests/truth/*: the generator's own sfc32 streams, the Hansen skew-t constants and two-sided tail probabilities by closed form and by quadrature, the look-ahead bait's exact mean score differences, the fair CRPS expectation, the overlap variance factor and the indicator correlation of the calibration world; scipy for every distribution function, no draws",
   "numpy": "2.4.6",
   "python": "3.11.15",
