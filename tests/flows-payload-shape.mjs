@@ -3,6 +3,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { moduleSource, slice } from "./lib/source-scan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -704,8 +705,8 @@ assert.deepEqual(missingReport, [],
        "board carrying a column its dated archive never will");
     eq(ideas.sessionDate, longB && longB.sessionDate,
        "stamped with the board's own session, which is what lets the board page refuse yesterday's ideas");
-    const shapeSrc = readFileSync(join(ROOT, "assets/js/flows-ui.js"), "utf8");
-    const shapes = new Set([...shapeSrc.slice(shapeSrc.indexOf("const SHAPES")).matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
+    const shapeSrc = slice(moduleSource("assets/js/flows-chart.js"), "const SHAPES", "const shapeOf");
+    const shapes = new Set([...shapeSrc.matchAll(/^\s*"([a-z ]+)":/gm)].map((m) => m[1]));
     ok(shapes.size > 10, `the board glyph's shape names are read from the primitive (${shapes.size})`);
     for (const r of ideas.rows) {
       for (const k of ["t", "id", "structure", "dir", "grade"]) {
@@ -938,13 +939,8 @@ assert.deepEqual(missingReport, [],
     ok(Object.hasOwn(al, f), `live:alerts carries \`${f}\` so the Worker can serve it in place of the nightly feed`);
   }
   eq(al.refreshed, "intraday", "and says it is the intraday union");
-  const gx = live("live:gex");
-  ok(Object.values(gx.names).every((n) => typeof n.readAt === "string" &&
-     (!n.t || ["px", "gOi", "gVol", "gDir"].every((f) => n[f].length === n.t.length))),
-     "every gamma name carries its own read time, and a series only when it was read this run");
-  const tp = live("live:tape");
-  ok(["totals", "netImpact", "darkpool"].every((f) => SILENCES.has(tp[f].status)),
-     "each tape feed states its own silence");
+  ok(live("live:gex") === null && live("live:tape") === null && !Object.hasOwn(LIVE_KEYS, "live:gex") && !Object.hasOwn(LIVE_KEYS, "live:tape"),
+     "the dry run emits no live:gex or live:tape and the registry no longer holds them: no page read either");
   const vl = live("live:vol");
   ok(vl.vix.status === "unavailable" && typeof vl.vix.reason === "string", "the plan-gated VIX curve is named, not blank");
   const mv = live("live:movers");

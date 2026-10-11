@@ -31,25 +31,9 @@
     "only on the names furthest from neutral. This row is scored and ranked " +
     "from the same five sources as every other.";
 
-  const pct = (v, dp) => {
-    const n = isNum(v);
-    return n === null ? DASH : fmtSigned(n * 100, dp === undefined ? 2 : dp) + "%";
-  };
-
-  const usd = (v) => {
-    const n = isNum(v);
-    if (n === null) return DASH;
-    const sign = n < 0 ? MINUS : "";
-    const a = Math.abs(n);
-    if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(2) + "B";
-    if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return sign + "$" + (a / 1e3).toFixed(0) + "K";
-    return sign + "$" + a.toFixed(0);
-  };
-  const usdS = (v) => {
-    const n = isNum(v);
-    return n !== null && n > 0 ? "+" + usd(n) : usd(n);
-  };
+  const pct = F.unit.of("pct", { dp: 2, signed: true });
+  const usd = F.unit.of("moneyCompact", { dp: "short" });
+  const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
 
   const NY = "America/New_York";
   const etTime = (at) => {
@@ -1073,17 +1057,6 @@
       UI.metric("Dispersion", disp === null ? DASH : F.pts(disp), { unit: disp === null ? null : "pts", sub: disp === null ? null : "SPY members", state: disp === null ? pend("Dispersion") : null }),
       UI.metric("0DTE share", share0 === null ? DASH : F.pct(share0, 0), { state: share0 === null ? pend("The 0DTE share") : null }),
     ], { min: 96 }));
-    const COL = { SPY: "--s-blue", QQQ: "--s-purple", IWM: "--s-teal" };
-    const plot = h("div", { class: "hm-term" });
-    into.append(plot);
-    C.line(plot, {
-      x: TEN, xType: "number", xScale: "sqrt", height: [150, 170, 240],
-      xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
-      series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
-      yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",
-      readout: (i) => [C.part(TEN[i] + "d", "k")].concat(names.map((k) => C.part(k + " " + F.pct(idx[k].iv[i], 1), null))),
-    });
-    into.append(UI.legend(names.map((k) => [COL[k], "ln", k])));
     const radar = ans(reg && reg.volRadar);
     const side = (s) => (radar && radar[s] && Array.isArray(radar[s].rows) ? radar[s].rows.slice(0, 4) : []);
     const tagRow = (word, rows, tone) => h("div", { class: "hm-radar-r" }, h("span", { class: "hm-radar-k" }, word),
@@ -2019,7 +1992,7 @@
   }
 
   let gated = false;
-  const OPTS = () => ({ credentials: "same-origin", signal: AbortSignal.timeout(15000), headers: { Accept: "application/json" } });
+  const OPTS = () => ({ credentials: "same-origin", deadlineMs: 15000, headers: { Accept: "application/json" } });
   const LK = "/api/flows/lk?k=";
 
   const read = (r) => r.json().then((body) => stampUpdated(r, body));

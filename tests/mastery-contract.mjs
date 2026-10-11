@@ -3,6 +3,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { DatabaseSync } from "node:sqlite";
+import { signSession } from "../shared/session.js";
+import { COURSE_STAGE_BY_ID, COURSE_STAGE_BY_VARIANT } from "../shared/stage-manifest.js";
+import { SKILL_BY_ID } from "../shared/skill-manifest.js";
 import {
   INTERVAL_DAYS,
   applyMastery,
@@ -169,5 +173,96 @@ assert.deepEqual(
 
 assert.throws(() => applyMastery(null, { correct: true, today: "2026-02-30" }), /today/);
 assert.throws(() => applyMastery(null, { correct: true, today: "2026-07-15", attemptId: "bad id" }), /attemptId/);
+
+{
+  const SCHEMA = read("schema.sql");
+  const SESSION_SECRET = "mastery-contract-session-secret-abcdefghijklmnopqrstuvwxyz";
+  globalThis.HTMLRewriter ??= class { on() { return this; } transform(r) { return r; } };
+  const db = new DatabaseSync(":memory:");
+  db.exec(SCHEMA);
+  const returns = /^\s*(SELECT|PRAGMA|WITH)|\bRETURNING\b/i;
+  const exec = (sql, args) => {
+    const st = db.prepare(sql);
+    if (returns.test(sql)) return { results: st.all(...args), meta: { changes: 0 } };
+    return { results: [], meta: { changes: Number(st.run(...args).changes) } };
+  };
+  const later = (fn) => new Promise((resolve, reject) => setTimeout(() => { try { resolve(fn()); } catch (error) { reject(error); } }, 0));
+  const D1 = {
+    prepare(sql) {
+      const st = { sql, args: [], bind(...a) { st.args = a; return st; },
+        first: () => later(() => exec(sql, st.args).results[0] ?? null),
+        all: () => later(() => exec(sql, st.args)),
+        run: () => later(() => exec(sql, st.args)) };
+      return st;
+    },
+    batch: (list) => later(() => list.map((st) => exec(st.sql, st.args))),
+  };
+  const worker = (await import("../worker.js?masterycontract")).default;
+  const ORIGIN = "https://anilkaya.org";
+  const env = { DB: D1, SESSION_SECRET };
+  const user = "g_sweep";
+  const cookie = "session=" + await signSession({ sub: user, email: "s@example.com", name: "S", exp: Date.now() + 3600 * 1000 }, SESSION_SECRET);
+  let n = 0;
+  const put = async (skillId, itemId, attemptId = "sweep-" + (++n)) => {
+    const res = await worker.fetch(new Request(ORIGIN + "/api/v2/attempt", {
+      method: "PUT",
+      headers: { Origin: ORIGIN, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json", cookie, "X-IEWT-Owner": user, "X-IEWT-Generation": "0" },
+      body: JSON.stringify({ skillId, itemId, attemptId, correct: true, hinted: false, day: "2026-10-09" }),
+    }), env, { waitUntil() {} });
+    return { status: res.status, body: await res.json().catch(() => null), attemptId };
+  };
+  const stored = (attemptId) => db.prepare("SELECT item_id FROM skill_attempts WHERE user_id=? AND attempt_id=?").get(user, attemptId);
+
+  const graded = new Map();
+  for (const file of ["ols", "iv2sls", "did", "var", "panel", "logit", "gmm", "foundations", "mle", "forecast", "coint", "financial"]) {
+    const course = JSON.parse(read(`assets/data/courses/${file}.json`));
+    for (const module of course.modules) for (const stage of module.stages) {
+      if (typeof stage.variantId === "string") graded.set(`${course.id}:${stage.id}`, { variantId: stage.variantId, skillIds: stage.skillIds });
+    }
+  }
+  const pairs = [...graded.entries()].flatMap(([key, stage]) => stage.skillIds.map((skillId) => ({ key, skillId, variantId: stage.variantId })));
+  assert.equal(graded.size, 181, "the authored curricula carry 181 graded variants");
+  assert.equal(pairs.length, 191, "and 191 graded (skill, stage) pairs");
+  assert.equal(Object.keys(COURSE_STAGE_BY_VARIANT).length, 181, "the generated variant map has an entry for each variant");
+  assert.ok(Object.isFrozen(COURSE_STAGE_BY_VARIANT), "and is frozen");
+  for (const [key, stage] of graded) {
+    assert.equal(COURSE_STAGE_BY_VARIANT[stage.variantId], key, `${stage.variantId} maps to ${key}`);
+    assert.ok(Object.hasOwn(COURSE_STAGE_BY_ID, key), `${key} is a stage of the manifest`);
+  }
+
+  let accepted = 0;
+  for (const { key, skillId } of pairs) {
+    assert.ok(Object.hasOwn(SKILL_BY_ID, skillId));
+    const r = await put(skillId, key);
+    if (r.status === 200) accepted++;
+    else assert.fail(`the id the course player sends (${key}) for ${skillId} was refused: ${r.status} ${JSON.stringify(r.body)}`);
+    assert.equal(stored(r.attemptId).item_id, key, "and is stored as sent");
+  }
+  assert.equal(accepted, 191, "191 of 191 pairs the course player sends are accepted");
+
+  let aliased = 0;
+  for (const { key, skillId, variantId } of pairs) {
+    const r = await put(skillId, variantId);
+    if (r.status === 200) aliased++;
+    else assert.fail(`the variant id ${variantId} for ${skillId} was refused: ${r.status} ${JSON.stringify(r.body)}`);
+    assert.equal(stored(r.attemptId).item_id, key, "a variant id is stored as its course:stage id");
+  }
+  assert.equal(aliased, 191, "every queued variant event is accepted too: 181 variants over their 191 skill pairs");
+
+  const first = pairs[0];
+  const base = await put(first.skillId, first.variantId, "same-attempt");
+  const again = await put(first.skillId, first.key, "same-attempt");
+  assert.equal(base.status, 200);
+  assert.equal(again.status, 200, "a retry that names the stage by its course:stage id is the same attempt as the variant it replaced");
+  assert.equal(again.body.duplicate, true, "and is recognised as a duplicate");
+
+  const foreign = pairs.find((pair) => pair.skillId !== first.skillId && !graded.get(first.key).skillIds.includes(pair.skillId));
+  assert.equal((await put(foreign.skillId, first.variantId)).status, 400, "a variant id still cannot be used for a skill its stage does not carry");
+  assert.equal((await put(first.skillId, first.variantId + "-x")).status, 400, "an unknown variant id is refused");
+  assert.equal((await put(first.skillId, "__proto__")).status, 400, "a prototype key is not a variant");
+  assert.equal((await put(first.skillId, "constructor")).status, 400, "nor is an inherited property name");
+  assert.equal((await put(first.skillId, first.skillId + ":v1")).status, 200, "the challenge ids still validate as before");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM skill_attempts WHERE item_id NOT LIKE '%:%'").get().n, 0, "no stored item id is a bare variant");
+}
 
 console.log(`Mastery contract OK: ${bank.items.length} review items; browser/server scheduler parity verified.`);

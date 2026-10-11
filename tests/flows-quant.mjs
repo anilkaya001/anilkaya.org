@@ -643,6 +643,67 @@ const OUT = ENGINE.runEngine(BASE);
 }
 
 {
+  eq(["v2", " V2 ", "V2"].map(ENGINE.rankModeOf), ["v2", "v2", "v2"], "the ranking flag reads v2 case-blind and trimmed");
+  eq([undefined, null, "", "v1", "v3", "on", 2, {}].map(ENGINE.rankModeOf), Array(8).fill("v1"), "and anything else is v1, so a mistyped switch leaves the ranking as it was");
+  const v1 = JSON.stringify(ENGINE.runEngine(BASE));
+  for (const rank of [undefined, "v1", "banana", null]) eq(JSON.stringify(ENGINE.runEngine({ ...BASE, rank })), v1, `rank ${JSON.stringify(rank)} leaves the engine's output byte for byte what it was`);
+  ok(!/scoreRaw|rankV2|"rank"/.test(v1), "and v1 publishes no v2 field");
+
+  const raw = ENGINE.runEngine(BASE);
+  const two = ENGINE.runEngine({ ...BASE, rank: "v2" });
+  eq(two.rank, "v2", "the v2 run says so");
+  eq(two.structures.map((x) => x.id), raw.structures.map((x) => x.id), "it prices the same candidates under the same ids");
+  const strip = (x) => { const { score, scoreRaw, rankV2, grid, tail, curves, ...rest } = x; return rest; };
+  eq(two.structures.map(strip), raw.structures.map(strip), "and changes nothing about any structure but its score, the old score, the basis of the new one and which structures carry the scenario detail the ideas get");
+  let shrunkSome = 0, wider = 0;
+  for (const x of two.structures) {
+    const old = raw.structures.find((y) => y.id === x.id);
+    eq(x.scoreRaw, old.score, `${x.id}: scoreRaw is the v1 score, EV per dollar of capital`);
+    if (x.ev.p === null || !(x.capital.value > 0)) { eq([x.score, x.rankV2], [null, undefined], `${x.id}: with no EV or no capital there is no v2 score`); continue; }
+    const band = Array.isArray(x.ev.pBand) ? x.ev.pBand : null;
+    const shrink = band ? (band[2] - band[0]) / 2 : 0;
+    near(x.rankV2.shrink, shrink, 0.011, `${x.id}: the selection-noise deduction is half the spread of EV across the laws`);
+    near(x.rankV2.evShrunk, x.ev.p - shrink, 0.011, `${x.id}: EV less that deduction`);
+    eq(x.rankV2.sessions, Math.max(1, x.sessions), `${x.id}: the holding period is the sessions to expiry, at least one`);
+    near(x.score, x.rankV2.evShrunk / (x.capital.value * x.rankV2.sessions), 2e-6, `${x.id}: score = shrunk EV / (capital x sessions)`);
+    if (shrink > 0) shrunkSome++;
+    if (x.rankV2.sessions > 1) wider++;
+  }
+  ok(shrunkSome > 0 && wider > 0, `the chain exercises both the shrinkage (${shrunkSome} structures) and the holding period (${wider} held over one session)`);
+  for (const id of two.ideas) {
+    const x = two.structures.find((y) => y.id === id);
+    ok(x.rankV2.evShrunk > 0 && x.score > 0, `${id}: a ranked idea keeps a positive EV after the deduction`);
+  }
+  const ordered = two.ideas.slice(1).map((id) => two.structures.find((y) => y.id === id).score);
+  ok(ordered.every((v, i) => i === 0 || ordered[i - 1] >= v), "and ideas after the first run in v2 score order");
+  eq(JSON.stringify(ENGINE.runEngine({ ...BASE, rank: "v2" })), JSON.stringify(two), "v2 is deterministic");
+
+  const mk = (id, family, evP, band, capital, sessions, score) => ({ id, family, risk: "defined", grade: 2, sessions, capital: { value: capital }, ev: { p: evP, pBand: band }, score, prob: { popP: 0.6 } });
+  const mkSet = () => [
+    mk("A", "iron-condor", 10, [8, 10, 12], 100, 5, 0.1),
+    mk("B", "put-credit-spread", 6, [5.5, 6, 6.5], 100, 1, 0.06),
+    mk("C", "call-credit-spread", 4, [1, 4, 9], 100, 0, 0.04),
+  ];
+  const first = ENGINE.rankStructures(mkSet(), { preferred: [] });
+  eq(first.ideas, ["A", "B", "C"], "v1 puts the structure with the highest EV per dollar first whatever the days it ties up and however far the laws disagree");
+  const set = ENGINE.applyRankV2(mkSet());
+  eq(set.map((x) => x.scoreRaw), [0.1, 0.06, 0.04], "applyRankV2 keeps the old score in scoreRaw");
+  eq(set.map((x) => x.score), [0.016, 0.055, 0], "and ranks on EV less the law spread, per session held (a five-session condor falls behind, and a spread whose laws disagree by its whole EV scores nothing)");
+  eq(set.map((x) => x.rankV2.sessions), [5, 1, 1], "a zero-session expiry is held for one session");
+  const rankedTwo = ENGINE.rankStructures(set, { preferred: [] });
+  eq(rankedTwo.ideas, ["B", "A"], "v2 orders B before A and drops C, whose edge is the laws' disagreement and nothing more");
+  const noisy = ENGINE.rankStructures(ENGINE.applyRankV2([mk("C", "call-credit-spread", 4, [1, 4, 9], 100, 1, 0.04)]), { preferred: [] });
+  eq([noisy.ideas, noisy.noTrade.code, noisy.noTrade.closest], [[], "ev.none-positive", "C"], "and when every candidate is such a case the engine stands aside, naming the closest");
+  const one = ENGINE.applyRankV2([mk("D", "iron-condor", 3, null, 50, 2, 0.06)])[0];
+  eq([one.score, one.rankV2.shrink], [0.03, 0], "with one law there is nothing to disagree and nothing is deducted");
+  const none = ENGINE.applyRankV2([mk("E", "iron-condor", null, null, 50, 2, null), mk("F", "iron-condor", 3, null, 0, 2, null)]);
+  eq(none.map((x) => [x.score, x.rankV2]), [[null, undefined], [null, undefined]], "no EV and no capital give no score");
+  const block = QC.compactEngine(ENGINE.runEngine({ ...BASE, rank: "v2" }));
+  eq(block.rank, "v2", "the published card block carries the rank it was made under");
+  ok(!("rank" in QC.compactEngine(raw)), "and a v1 block has no such field");
+}
+
+{
   const cal = synthInput({
     expiryList: ["2026-10-16", "2026-11-20"],
     facts: { ...BASE.facts, "term.slope.30_90.exEvent": { v: 0.09, g: 3 }, "iv.pctile.30.1y": { v: 0.3, g: 3 }, "vrp.rel.21": { v: 0, g: 3 } },

@@ -4,7 +4,7 @@
   const UI = window.FlowsUI;
   if (!UI) return;
   const Q = window.FlowsQuant || null;
-  const { h, s, F, glyph, DASH, MINUS } = UI;
+  const { h, s, F, isNum, glyph, DASH, MINUS } = UI;
   const C = UI.chart;
 
   const $ = (id) => document.getElementById(id);
@@ -14,18 +14,12 @@
   if (!entry || !input || !grid || !pickHost) return;
 
   const LOT = 100;
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : v === null || v === undefined || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
   const sg = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
-  const usd = (v, signed) => {
-    if (num(v) === null) return DASH;
-    const a = Math.abs(v), dp = a < 1000 ? 2 : 0;
-    const r = +(a + 1e-9).toFixed(dp);
-    return (v < 0 && r ? MINUS : signed && v > 0 && r ? "+" : "") + "$" + r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
-  };
-  const gusd = (v) => (num(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
-  const whole = (v) => (num(v) === null ? DASH : Math.abs(v) >= 1e5 ? F.money(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
-  const kf = (K) => (num(K) === null ? DASH : String(+(+K).toFixed(2)));
-  const pct = (v, dp = 1) => (num(v) === null ? DASH : (Math.round(v * Math.pow(10, dp + 2)) / Math.pow(10, dp)).toFixed(dp) + "%");
+  const usd = F.unit.of("money");
+  const gusd = (v) => (isNum(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
+  const whole = (v) => (isNum(v) === null ? DASH : Math.abs(v) >= 1e5 ? F.money(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
+  const kf = (K) => (isNum(K) === null ? DASH : String(+(+K).toFixed(2)));
+  const pct = F.unit.of("pct");
   const days = (a, b) => {
     const x = Date.parse(String(a).slice(0, 10) + "T00:00:00Z"), y = Date.parse(String(b).slice(0, 10) + "T00:00:00Z");
     return Number.isFinite(x) && Number.isFinite(y) ? Math.round((y - x) / 864e5) : null;
@@ -140,10 +134,10 @@
   async function read(params) {
     let res;
     try {
-      res = await fetch("/api/flows/strategy?" + params.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } });
+      res = await fetch("/api/flows/strategy?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
     } catch { return { error: "the request did not reach the server" }; }
     if (res.status === 401) { location.replace("/flows/"); return { gone: true }; }
-    const age = num(res.headers.get("X-Chain-Age"));
+    const age = isNum(res.headers.get("X-Chain-Age"));
     const body = await res.json().catch(() => null);
     if (!res.ok) return { error: messageFor(res.status, body && body.error && body.error.code) };
     if (!body || typeof body !== "object") return { error: "the response could not be read" };
@@ -301,7 +295,7 @@
 
   const spot = () => {
     const e = engineOf(st.books.get(st.expiry));
-    return e ? e.spot : st.ctx ? num(st.ctx.spot) : null;
+    return e ? e.spot : st.ctx ? isNum(st.ctx.spot) : null;
   };
 
   function riskOf(legs) {
@@ -324,7 +318,7 @@
       if (l.type === "S") { if (S === null) bad.push({ l, why: "spot" }); else cost += l.side * l.qty * S; continue; }
       const r = rowOf(l);
       if (!r) { bad.push({ l, why: st.bookErr.has(l.expiry) ? "unreadable" : st.books.has(l.expiry) ? "gone" : "pending" }); continue; }
-      const bid = num(r.bid), ask = num(r.ask);
+      const bid = isNum(r.bid), ask = isNum(r.ask);
       const nat = l.side > 0 ? ask : bid;
       const mid = bid !== null && ask !== null ? (bid + ask) / 2 : null;
       const px = st.basis === "natural" ? nat : st.basis === "mid" ? mid : mid !== null && nat !== null ? mid + 0.25 * (nat - mid) : null;
@@ -388,7 +382,7 @@
       }
       return;
     }
-    const S = num(c.spot), prev = num(c.prevClose);
+    const S = isNum(c.spot), prev = isNum(c.prevClose);
     const live = c.spotSource === "stock-state";
     pxEl.append(h("span", { class: "tl-spot ui-num" }, F.px(S)));
     if (S !== null && prev !== null && prev > 0) {
@@ -420,7 +414,7 @@
 
   function contextInfo() {
     const c = st.ctx || {};
-    const S = num(c.spot), beta = num(c.beta), idx = c.index && num(c.index.spot);
+    const S = isNum(c.spot), beta = isNum(c.beta), idx = c.index && isNum(c.index.spot);
     const earn = c.earnings;
     return {
       title: st.t + " spot", asOf: c.asOf ? "Session " + F.day(c.asOf) : null,
@@ -590,20 +584,20 @@
     const lines = [];
     if (book) {
       const rows = (book.calls || []).length + (book.puts || []).length;
-      const quotable = (book.calls || []).concat(book.puts || []).filter((r) => num(r.bid) > 0 && num(r.ask) >= num(r.bid)).length;
+      const quotable = (book.calls || []).concat(book.puts || []).filter((r) => isNum(r.bid) > 0 && isNum(r.ask) >= isNum(r.bid)).length;
       lines.push(T("exp-q", { n: quotable, m: rows, d: F.day(st.expiry) }));
       if (book.callsTruncated || book.putsTruncated) {
         const which = book.callsTruncated && book.putsTruncated ? "Both sides" : book.callsTruncated ? "The call side" : "The put side";
         lines.push(T("exp-cut", { w: which, n: book.pageSize, p: book.pagesPerType }));
       }
-      const off = num(book.offExpiry);
+      const off = isNum(book.offExpiry);
       if (off) lines.push(off + " row" + (off === 1 ? "" : "s") + " " + T("exp-off"));
       if (book.ivBasis) lines.push("Implied volatility units, resolved once for the whole expiry: " + book.ivBasis + ".");
     }
     return {
       title: "Expiries", asOf: c.asOf ? "Session " + F.day(c.asOf) : null,
       lead: T("exp"),
-      facts: [["Selected", sel ? F.day(sel.expiry) + " " + UI.MID + " " + sel.dte + "d" + (num(sel.chains) !== null ? " " + UI.MID + " " + sel.chains + " listed" : "") : DASH],
+      facts: [["Selected", sel ? F.day(sel.expiry) + " " + UI.MID + " " + sel.dte + "d" + (isNum(sel.chains) !== null ? " " + UI.MID + " " + sel.chains + " listed" : "") : DASH],
         ["Listed", list.length + (list.length === 1 ? " expiry" : " expiries")]],
       sections: [{ title: "This book", lines }],
       notes: [c.expirySource === "exposure" ? T("exp-oi") : null],
@@ -616,12 +610,12 @@
     if (!list.length) { el.exp.replaceChildren(); return; }
     const fam = !st.custom && st.family ? FAM[st.family] : null;
     const w = fam && fam.window;
-    const maxN = Math.max(1, ...list.map((e) => num(e.chains) || 0));
+    const maxN = Math.max(1, ...list.map((e) => isNum(e.chains) || 0));
     const keep = el.exp.scrollLeft;
     el.exp.replaceChildren(...list.map((e) => {
       const on = e.expiry === st.expiry, back = e.expiry === st.back && fam && MULTI.has(fam.id);
       const inWin = w && e.dte !== null && e.dte >= w.min && e.dte <= w.max;
-      const n = num(e.chains);
+      const n = isNum(e.chains);
       const b = h("button", {
         type: "button", class: "tl-chip" + (on ? " is-on" : "") + (back ? " is-back" : "") + (inWin ? " is-win" : ""),
         role: "radio", "aria-checked": String(on), tabindex: on ? "0" : "-1", "data-expiry": e.expiry,
@@ -836,8 +830,8 @@
     fillScenario();
     fillLegs(r);
     const pr = r ? r.price : null;
-    const pv = (k) => (pr && num(pr[k]) !== null ? usd(Math.abs(pr[k]) * LOT) : DASH);
-    const cr = pr && num(pr.mid) !== null && pr.mid < 0;
+    const pv = (k) => (pr && isNum(pr[k]) !== null ? usd(Math.abs(pr[k]) * LOT) : DASH);
+    const cr = pr && isNum(pr.mid) !== null && pr.mid < 0;
     m.px4.replaceChildren(...[["Mid", "mid"], ["Fill", "fill"], ["Natural", "natural"], ["Model", "model"]].map(([l, k]) =>
       h("div", { "data-on": st.basis === k ? "" : null }, h("span", null, l), h("b", null, pv(k)))));
     m.px4.setAttribute("aria-label", "Position " + (cr ? "credit" : "debit") + " per lot at mid, fill, natural and on the smile");
@@ -846,7 +840,7 @@
   const costOf = (r) => {
     const p = r.price;
     const per = st.basis === "mid" ? p.mid : st.basis === "natural" ? p.natural : p.fill;
-    return num(per) === null ? null : per * LOT;
+    return isNum(per) === null ? null : per * LOT;
   };
 
   function fillLegend() {
@@ -946,7 +940,7 @@
     fillLoupe(m.popD, popQ, popP, lawState || es);
     m.bars.setAttribute("aria-label", "Chance of profit at expiry: implied " + (popQ === null ? "not available" : pop1(popQ)) + ", real world " + (popP === null ? "not available" : pop1(popP)));
     const evP = r ? r.ev.p : null, evQ = r ? r.ev.q : null, edge = r ? r.ev.edge : null;
-    const tone = (v) => (num(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
+    const tone = (v) => (isNum(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
     put(m.evP, usd(evP, true), { state: r ? (evP === null ? lawState : null) : es, tone: tone(evP), animate });
     put(m.evQ, usd(evQ, true), { state: r ? null : es, tone: tone(evQ), animate });
     put(m.edge, usd(edge, true), { state: r ? (edge === null ? lawState : null) : es, tone: tone(edge), animate });
@@ -963,7 +957,7 @@
     const g = r ? r.greeks : null;
     const S = spot();
     const stt = r ? null : es;
-    const t = (v) => (num(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
+    const t = (v) => (isNum(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
     const sh = g && S ? g.delta$ / S : null;
     put(m.dl, sh === null ? DASH : sg(sh) + Math.abs(sh).toFixed(Math.abs(sh) < 10 ? 1 : 0), { state: stt, unit: "sh", sub: g ? F.money(g.delta$, true) + " delta" : null, tone: t(sh), animate });
     put(m.gm, gusd(g && g.gamma$1pct), { state: stt, unit: "/1%", tone: t(g && g.gamma$1pct), animate });
@@ -971,7 +965,7 @@
     put(m.th, gusd(g && g.thetaDay), { state: stt, unit: "/day", tone: t(g && g.thetaDay), animate });
     const capv = r ? r.capital : null;
     put(m.cap, usd(capv && capv.value), { state: stt, sub: capv ? (capv.kind === "reg-t" ? "Reg-T proxy" : capv.kind === "stock" ? "With stock" : "Max loss") : null, animate });
-    put(m.ror, r && num(r.score) !== null ? F.pct(r.score, 1, true) : DASH, { state: stt || (r && num(r.score) === null ? { state: "unavailable", reason: "Return on capital needs the real-world expected value: " + lawWhy() + "." } : null), sub: "EV ÷ capital", tone: t(r && r.score), animate });
+    put(m.ror, r && isNum(r.score) !== null ? F.pct(r.score, 1, true) : DASH, { state: stt || (r && isNum(r.score) === null ? { state: "unavailable", reason: "Return on capital needs the real-world expected value: " + lawWhy() + "." } : null), sub: "EV ÷ capital", tone: t(r && r.score), animate });
   }
 
   function fillScenario() {
@@ -992,7 +986,7 @@
     const tagOf = (i) => {
       if (i < 7) return [Z[i], null];
       const x = g.spot[i];
-      const near = (v) => num(v) !== null && Math.abs(v - x) < 1e-3;
+      const near = (v) => isNum(v) !== null && Math.abs(v - x) < 1e-3;
       return near(lv.callWall) ? ["Call wall", "call"] : near(lv.putWall) ? ["Put wall", "put"] : near(lv.flip) ? ["Flip", "flip"] : ["Level", null];
     };
     const head = h("tr", null, h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, "Spot")),
@@ -1017,9 +1011,9 @@
     const rows = st.legs.map((l, i) => {
       const rl = r ? r.legs[i] : null;
       const row = rowOf(l);
-      const bid = rl ? rl.bid : row ? num(row.bid) : null, ask = rl ? rl.ask : row ? num(row.ask) : null;
+      const bid = rl ? rl.bid : row ? isNum(row.bid) : null, ask = rl ? rl.ask : row ? isNum(row.ask) : null;
       const badge = l.type === "S" ? "S" : l.type;
-      const del = rl && num(rl.delta) !== null ? rl.delta * l.side : null;
+      const del = rl && isNum(rl.delta) !== null ? rl.delta * l.side : null;
       const q = h("span", { class: "tl-qty" },
         h("button", { type: "button", class: "tl-ib", "aria-label": "One fewer of " + legName(l), onclick: () => bump(i, -1) }, MINUS),
         h("b", { class: "ui-num" }, String(l.qty)),
@@ -1030,9 +1024,9 @@
         h("span", { class: "tl-leg-m" }, h("b", { class: "ui-num" }, l.type === "S" ? String(l.qty * LOT) : kf(l.K)), h("span", null, l.type === "S" ? "shares at " + F.px(S) : (l.type === "C" ? "call" : "put") + " " + UI.MID + " " + F.day(l.expiry))),
         h("span", { class: "tl-leg-x" },
           h("span", { class: "tl-leg-c ui-num", title: "Delta per share, signed by side" }, h("small", null, "Δ"), del === null ? DASH : sg(del) + Math.abs(del).toFixed(2)),
-          h("span", { class: "tl-leg-c ui-num", title: "Implied volatility on the fitted smile" }, h("small", null, "IV"), rl && num(rl.iv) !== null ? pct(rl.iv, 1) : DASH),
+          h("span", { class: "tl-leg-c ui-num", title: "Implied volatility on the fitted smile" }, h("small", null, "IV"), rl && isNum(rl.iv) !== null ? pct(rl.iv, 1) : DASH),
           h("span", { class: "tl-leg-c tl-leg-q ui-num", title: "Bid and ask" }, l.type === "S" ? DASH : F.px(bid) + " × " + F.px(ask)),
-          h("span", { class: "tl-leg-c ui-num", title: "Model value on the smile" }, h("small", null, "Model"), rl && num(rl.model) !== null ? F.px(rl.model) : DASH)),
+          h("span", { class: "tl-leg-c ui-num", title: "Model value on the smile" }, h("small", null, "Model"), rl && isNum(rl.model) !== null ? F.px(rl.model) : DASH)),
         q,
         h("button", { type: "button", class: "tl-ib tl-rm", "aria-label": "Remove " + legName(l), onclick: () => removeLeg(i) }, glyph("x")));
     });
@@ -1069,7 +1063,7 @@
     const e = st.setup && st.setup.expiries.get(l.expiry);
     if (e) return l.type === "C" ? e.callStrikes : e.putStrikes;
     const b = st.books.get(l.expiry);
-    return b ? (l.type === "C" ? b.calls : b.puts).filter((r) => num(r.bid) > 0 && num(r.ask) >= num(r.bid)).map((r) => r.k) : [];
+    return b ? (l.type === "C" ? b.calls : b.puts).filter((r) => isNum(r.bid) > 0 && isNum(r.ask) >= isNum(r.bid)).map((r) => r.k) : [];
   }
 
   function domainOf() {
@@ -1229,7 +1223,7 @@
     if (!g || S === null) return null;
     const i = g.spot.findIndex((x) => Math.abs(x - S) < 1e-6);
     const flat = g.vol.findIndex((v) => v === 0);
-    return i < 0 || flat < 0 || num(g.pnl[i][flat][0]) === null ? null : g.pnl[i][flat][0];
+    return i < 0 || flat < 0 || isNum(g.pnl[i][flat][0]) === null ? null : g.pnl[i][flat][0];
   }
 
   function smooth(pts) {
@@ -1443,7 +1437,7 @@
     const r = st.res;
     const g = r ? r.greeks : null;
     const c = st.ctx || {};
-    const S = spot(), beta = num(c.beta), idx = c.index ? num(c.index.spot) : null;
+    const S = spot(), beta = isNum(c.beta), idx = c.index ? isNum(c.index.spot) : null;
     const sh = g && S ? g.delta$ / S : null;
     const bw = sh !== null && beta !== null && idx !== null && idx > 0 ? sh * beta * (S / idx) : null;
     const idxName = (c.index && c.index.symbol) || "the index";

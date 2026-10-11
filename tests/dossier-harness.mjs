@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_ROSTER } from "./lib/fixture-roster.mjs";
 import { VENDOR, NOW_ISO, vendorBody } from "./dossier-fixtures.mjs";
 import { guardAi } from "./lib/ai-guard.mjs";
 
@@ -171,7 +172,7 @@ export function vendorStub(o = {}) {
 }
 
 let instance = 0;
-export async function client(D1, extra = {}, who = FLOWS_USERNAMES[0]) {
+export async function client(D1, extra = {}, who = FIXTURE_ROSTER[0]) {
   const env = { DB: D1, SESSION_SECRET, UW_API_KEY: "test-key", UW_BASE: "https://uw.test", FLOWS_CREDENTIALS: JSON.stringify({ [who]: "x".repeat(43) }), ...extra };
   if (env.AI) env.AI = guardAi(env.AI);
   const token = await signFlowsSession(who, env.SESSION_SECRET, 3600, sessionEpoch(env));

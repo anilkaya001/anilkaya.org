@@ -246,6 +246,16 @@ curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSIO
 curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
 
+`docs/` and `server/` are not part of the static bundle (`.assetsignore`;
+`tests/contracts.mjs` holds the served file list). After a promotion, the
+1 MB vendor specification must answer 404 on the apex, and the same request
+on `www` settles whether `www` still serves the GitHub Pages copy:
+
+```bash
+curl -sSI https://anilkaya.org/docs/uw-openapi.yaml | head -1
+curl -sSI https://www.anilkaya.org/docs/uw-openapi.yaml | head -1
+```
+
 The woff2 URLs carry `assets/fonts-version.txt`, not `assets/version.txt`
 ("Asset versioning" in AGENTS.md): an asset bump must leave the font URLs
 unchanged, or every returning visitor downloads the fonts again for nothing.
@@ -565,13 +575,15 @@ that section 10.2a starts from.
 # 1. Mint the whole set: per-user passwords, a fresh pepper, and the
 #    FLOWS_CREDENTIALS JSON. Printed ONCE; keep the terminal open until both
 #    secrets are pasted below, because none of it can be recovered afterwards.
-#    FIRST TIME ONLY: without --from it mints the legacy roster and creates
-#    members.json. It refuses to run once members.json exists, because that
-#    file is the only copy of the member list.
-node scripts/generate-flows-credentials.mjs --mint --out members.json
-
-#    EVERY LATER RE-MINT (rotating every password): --from mints each member
-#    the file lists, keeping end dates and epochs, and writes it back.
+#    No member name lives in the source: --mint always needs --from, a file
+#    that lists the names to mint for. FIRST TIME ONLY, write that file by hand
+#    outside the repository as a JSON object of name to any placeholder, for
+#    example {"first.member":"x","second.member":"x"}; the placeholders are
+#    replaced by real hashes. EVERY LATER RE-MINT (rotating every password)
+#    names the real members file, keeping end dates and epochs, and writes it
+#    back. Without --from the script refuses, and when --out already exists it
+#    prints the exact re-mint command instead of replacing the only copy of the
+#    member list.
 node scripts/generate-flows-credentials.mjs --mint --from members.json --out members.json
 
 # 2. The ingest token is separate (it authenticates the pipeline, not people).
@@ -592,10 +604,9 @@ ticket, or an email thread. **A credential that has touched any of those is
 burned**, whether or not it still works: re-mint the entire set, and bump
 `FLOWS_SESSION_EPOCH` (below) so cookies minted under the burned set die too.
 
-Legacy shared-password mode still exists (`printf '%s\n%s\n' "$PASSWORD"
-"$PEPPER" | node scripts/generate-flows-credentials.mjs`), but per-user
-passwords are the default for a reason: with a shared password, one person's
-leak rotates everybody.
+The old shared-password mode (the script with no flag) is gone with the
+built-in roster: a shared password means one person's leak rotates everybody,
+and it needed a list of names in the source.
 
 **`wrangler secret put` deploys; the dashboard does not.** The CLI creates a
 new Worker version carrying the secret and deploys it at once (Cloudflare's
@@ -657,19 +668,33 @@ string the mint prints, or an object:
   refused** until the secret is fixed. It never falls back to a built-in list,
   because a fallback would quietly re-admit members whose access had ended or
   been revoked. The script only ever writes JSON the Worker reads, so install
-  its output rather than editing the secret by hand. `FLOWS_USERNAMES` in
-  `shared/flows-auth.js` no longer grants anything: it only chooses which names
-  keep a throttle counter of their own, and can be emptied once every member is
-  in the secret.
+  its output rather than editing the secret by hand. No member name lives in
+  the source: the secret is the only roster, and the throttle gives a name its
+  own counter exactly when the secret lists it.
 - Removing a key is revocation: that member's live session ends at its next
   request.
 - Failures stay uniform: an ended, revoked, unknown or mistyped sign-in all
   get the same 401 page. The throttle keeps a bucket per address for every
-  name outside the legacy roster, so a lockout cannot reveal whether a name is
-  a member. Guessed names never key a row: every name outside the legacy
-  roster shares one counter per address (an IPv6 address counts as its /64),
-  and each failure also deletes the counters older than the 15-minute window,
-  so `flows_login_failures` holds at most one window of failing addresses.
+  name the secret does not list, so a lockout cannot reveal whether a name is
+  a member. Guessed names never key a row: every name outside the secret
+  shares one counter per address (an IPv6 address counts as its /64).
+  Two rate-limit bindings stand in front of the D1 lockout and the PBKDF2
+  derivation: `LOGIN_IP` (10 attempts a minute per address) and `LOGIN_NAME`
+  (20 a minute per name within one client network, the /24 of an IPv4 address or
+  the /48 of an IPv6 one, so a stranger elsewhere cannot keep a member locked
+  out). The attempt past either answers `429` with `Retry-After: 60` and the
+  sign-in page, with no D1 statement and no PBKDF2. A shared NAT that sends more
+  than ten sign-ins a minute is limited; a missing binding admits everyone and
+  leaves the D1 lockout as the backstop. A failure deletes only its own key's
+  stale row, and the 03:00 ET firing deletes every row older than the 15-minute
+  window through the index on `first_at`
+  (`migrations/0019_flows_login_failures_first_at.sql`, which the firing also
+  creates if it is missing, so `flows_login_failures` holds at most one window
+  of failing addresses plus one day of stale ones):
+
+  ```bash
+  ./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0019_flows_login_failures_first_at.sql
+  ```
 
 Cloudflare never shows a secret's value again, so keep the current JSON as a
 private `members.json` (outside this public repository, and apart from the
@@ -792,6 +817,40 @@ curl -s -H "Cookie: session=<existing token>" "$BASE/api/me"   # expect the user
 If this returns `null` for a session that worked before the deploy, stop and
 roll back — the legacy allowance in `isLearnAudience()` has regressed.
 
+### 10.4a The Lab write limiter and the attempt ledgers
+
+Every signed-in Lab mutation (`PUT` and `DELETE` on `/api/progress`,
+`/api/stats`, `/api/placement`, `/api/mastery`, and `PUT` on `/api/v2/progress`,
+`/api/v2/attempt`, `/api/v2/preferences`, `/api/v2/project`) is counted against
+the `LAB_WRITE` rate-limit binding, 30 a minute per user id, after the session,
+origin and owner checks and before any D1 statement. The 31st in a minute answers
+JSON `429 rate_limited` with `Retry-After: 60`. The browser keeps a 429 attempt in
+its outbox and sends it again on the next sync; a missing binding admits everyone.
+A `429` is not a poison answer, so `auth.js` never drops an outbox attempt for it.
+
+`mastery_attempts` and `skill_attempts` each gain an index on `received_at`
+(`migrations/0018_lab_attempt_received_at.sql`), and the 48-hour prune that used
+to ride on every attempt now runs once a night in the 03:00 ET housekeeping
+firing as one indexed `DELETE ... WHERE received_at < ?` per table. The firing
+also issues `CREATE INDEX IF NOT EXISTS` first, so a database that never had the
+migration applied builds the index on that night. Apply it by hand like the others:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0018_lab_attempt_received_at.sql
+```
+
+Skill attempts name their item by `course:stage`, as review attempts do. The
+course player used to send the stage's `variantId` (`ols-line-04-core`), which
+`/api/v2/attempt` did not accept for a graded stage, so every graded skill
+attempt it made was answered 400, dropped from the outbox as poison and lost at
+the next signed-in load. The player now sends `course:stage`, and
+`shared/stage-manifest.js` also carries `COURSE_STAGE_BY_VARIANT` (generated by
+`scripts/generate-course-payloads.mjs`: 181 variant ids, each mapped to its
+`course:stage`). The route maps a variant id through it before validating and
+stores the canonical id, so an event queued by an earlier page load flushes and a
+retry under either spelling is the same attempt. The alias may be retired once
+no outbox holds a variant id.
+
 ### 10.4b What the store holds, and what prunes it
 
 `flows_payload` is a keyed blob store. Every key it accepts:
@@ -807,6 +866,11 @@ roll back — the legacy allowance in `isLearnAudience()` has regressed.
 | `focus` | each run | `/api/flows/focus` (the home page's metals, Mag 7 and NDX 10) | overwritten daily |
 | `roster` | each run, after every per-ticker key | `/api/flows/roster` (search, "Open instead", absent-card classification) | overwritten daily; also the retire ledger |
 | `meta` | each run | diagnostics | overwritten |
+| `ideas` | each run | the boards' idea column | overwritten daily |
+| `ideas:<date>`, `ideas:<date>:r<n>` | each run, once per session; a republish with different ideas writes the next `:r<n>`; since P3-01 each row carries its trial (legs, fill, spot, both chances) as well as the thin view | the calibration step, which reads only dates before its own session | PERMANENT: write-once, never updated, never deleted, never pruned |
+| `ideas-out:<date>` | each run that settles, expires or gives up on at least one idea; the date is the run's session | the audit trail of `calib` | PERMANENT, as above |
+| `dispersion` | each run, after the cards | `/api/flows/dispersion` (the Worker drops `state`) | overwritten; carries the weekly close cache (at most 100 candle calls a week) for QQQ members that are not in the run's candles; SPY's holdings are not covered |
+| `calib` | each run | `/api/flows/calib` (Track's idea calibration; the Worker drops `state`) | overwritten; the one mutable row, it carries the accumulators between nights |
 
 THE DATED BOARDS ARE WHY A TRACK RECORD EXISTS AT ALL. Until they did, every
 morning's `board:long` overwrote the previous one, so by the time any forward
@@ -819,6 +883,43 @@ forecast horizon). Steady state is about 270 rows and +3 row writes per run
 (`scores:<date>` alongside the two dated boards; it said 180 and +2 until the
 `scores:` key joined the archive and the multiplication was not re-run),
 against a 100,000/day budget **shared with the live learning app**.
+
+**PERMANENT KEYS.** `ideas:<date>` is the ranked ideas the engine published for a
+session, kept so that probabilities can later be scored against what was actually
+said. Three layers hold it: the ingest route treats the key as write-once (an
+identical repeat answers `stored: "unchanged"`, a different payload answers 409
+`archive_permanent`, and the nightly then writes `ideas:<date>:r1`, `:r2` and so on),
+the DELETE branch refuses it with `undeletable_key`, and two triggers,
+`flows_permanent_no_update` and `flows_permanent_no_delete`, abort an UPDATE or a
+DELETE of any `ideas:` or `ideas-out:` row at the storage layer. `pruneKeys` never
+names them, so the 126-day sweep leaves them alone; the cost is one row of about
+20 to 40 KB a night. Nothing in the repository can correct such a row, by design.
+
+**CALIBRATION.** After the engine loop and the ideas archive, `scripts/flows-legs/calibration.mjs`
+reads `calib` and the `ideas:<date>` rows of the previous 100 days (a weekday each, never the
+run's own date or later, and never before the first archive it has seen), takes each identity
+(ticker, family, legs, expiry) once at the night it first appeared, and settles every identity
+whose expiry has passed since `calib.through` from the daily close on its expiry: in-hand
+candles for a name still in the deep set, otherwise a one-year candle fetch, at most 15 a night.
+An unreadable archive row stops the night rather than let an idea expire in the gap. Ideas with
+no close yet stay in `calib.state.pending` for 14 days and are then recorded as lost; the share
+of due ideas without an outcome is published as `counts.unresolvedShare`. The outcomes of the
+night go to `ideas-out:<date>`, and only after that is written is `calib` published, so a failed
+night repeats whole the next night and folds each idea once. Reads are about 75 rows and writes
+one or two. Until the effective n (ideas that expire in one ISO week count as one cluster)
+reaches 100, `calib` publishes counts only and Track says "Not yet measured".
+The triggers are in the Worker's first-use DDL, so a deploy creates them on first
+use; apply the migration as well so a fresh database built from `migrations/`
+matches:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0020_flows_permanent_archive.sql
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote \
+  --command="SELECT name FROM sqlite_master WHERE type='trigger' ORDER BY name;"
+```
+
+The read-back lists `flows_archive_immutable`, `flows_permanent_no_delete` and
+`flows_permanent_no_update`.
 
 The prune is a `DELETE` on the ingest route, and that route accepts DELETE for
 **dated boards, and — for the nightly token only — `card:`, `card-x:` and
@@ -2269,8 +2370,8 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 - **Tier 2** is `node scripts/flows-pipeline.mjs --live`, run by
   `.github/workflows/flows-live.yml`: sector tides, the SPY, QQQ, IWM and DIA ETF
   tides, both net-flow expiry series, one screener call for every board name, the
-  incremental alert union, spot gamma by rotation, the tape, movers and news —
-  37 to 41 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
+  incremental alert union, movers and news —
+  20 to 24 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
   The one screener call reads the three index ETFs, then every focus ticker
   (the groups of the nightly `focus` payload, which the live role may read;
   before that key exists, the `shared/flows-focus.js` roster: the three metal
@@ -2535,6 +2636,19 @@ Out-of-band steps before the first deploy of this layer:
 `FLOWS_LIVE_MODE = "off"` in `[vars]` is the instant rollback: no Tier 1 read, no
 focus read and no dispatch; pages fall back to the nightly rows.
 
+Tier 2 no longer writes `live:gex` or `live:tape`: no page read either, and
+together they were 17 of the 37 to 41 vendor calls of a pass (fourteen
+`spot-exposures` reads and the `total-options-volume`, `top-net-impact` and
+`darkpool/recent` reads). A pass now makes 20 to 24 calls and publishes eight
+keys. Both ids left `LIVE_KEYS`, so `/api/flows/lk?k=gex` answers 400
+`invalid_key` and the ingest door refuses a write to either. Intraday gamma
+comes from the rail's `gx` topic alone. `migrations/0021_retire_live_gex_tape.sql`
+deletes the two rows once (the live token cannot delete); until it is applied
+the Tier 1 tick's age read and `worstStale` skip any `flows_live` id that is
+not registered, so an old row can never be the ledger's worst lapse. A Tier 2
+job that was already running when the Worker was promoted logs two `invalid_key`
+400s a pass until it ends.
+
 ### 10.5j The weekly monitors
 
 - **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
@@ -2542,7 +2656,8 @@ focus read and no dispatch; pages fall back to the nightly rows.
   fails when an operation answers anything but 2xx, except the refusals listed
   under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
   403 without the volatility add-on, and politician holders' enterprise-only
-  422) and a 4xx other than 429 from an operation listed under `entitlement`,
+  422; the nightly itself no longer makes the VIX call, so this probe is the one
+  place that watches for the add-on arriving) and a 4xx other than 429 from an operation listed under `entitlement`,
   and when a field listed under `reads` (the fields the code reads) did not
   arrive. A 429 still refused after three retries fails on every route: it
   answers no question. An expected
@@ -2578,18 +2693,31 @@ focus read and no dispatch; pages fall back to the nightly rows.
   it prints counts every caller of the key, including any agent session that
   has `UW_API_KEY` set and reaches the vendor's MCP server through `.mcp.json`.
 - **The socket probe** (`.github/workflows/flows-ws-probe.yml`, dispatch only)
-  answers the question the real-time rail turns on: whether the vendor key may
-  open `wss://api.unusualwhales.com/socket` and join which channels. It makes a
-  handshake with the token in the query, as a bearer header and with an Origin,
-  joins each channel the rail would use on its own connection, holds up to four
-  connections at once and joins up to 60 `price:<T>` channels on one. Each
-  record prints status, acknowledgements, message counts, the time to the first
-  frame and the median and 95th-percentile lag against the frame's own stamp,
-  and only the key names of a payload, never its values (the repository's logs
-  are public), and the token is redacted from every line. Run it off hours to
-  learn the entitlement and in the regular session to learn lag and rates
-  (`seconds` and `only` are inputs). `tests/flows-ws-probe-contract.mjs` proves
-  it against a fake vendor that speaks the protocol by hand.
+  answers the questions the real-time rail and the live-flow work turn on:
+  whether the vendor key may open `wss://api.unusualwhales.com/socket`, which
+  channels it may join, at what rate they stream and how late their frames are.
+  It makes a handshake with the token in the query, as a bearer header and with
+  an Origin, then joins one list of channels each on its own connection, led by
+  a negative control (`w03_nonexistent_channel_zz`, which cannot be a channel:
+  its verdict says whether the vendor refuses, ignores or acknowledges a join
+  it should not, and so whether an acknowledgement proves any entitlement). The
+  five global firehoses (`price`, `option_trades`, `lit_trades`,
+  `off_lit_trades`, `stock_screener`) are listened to for 5 s each. It then
+  holds up to four connections at once and joins up to 60 `price:<T>` channels
+  on one. Each record prints status, acknowledgements, a verdict (`data`,
+  `acked-silent`, `refused` or `no-ack`), messages and bytes a second, the
+  median and 95th-percentile gap between frames, the median and
+  95th-percentile lag against the frame's own stamp (and the name of the stamp
+  field), `created_at - executed_at` for option prints, and only the key names
+  of a payload, never its values (the repository's logs are public); the token
+  is redacted from every line. The list at 60 s a channel takes about sixteen
+  minutes, which is why the job's timeout is 30 minutes and the start record
+  prints the computed duration. Dispatch it twice on one weekday, at 10:30 and
+  15:00 ET, to learn lag and rates in the regular session (`seconds` and `only`
+  are inputs; `only` takes `handshake`, `channels`, `firehoses`, `connections`
+  and `joins`). `tests/flows-ws-probe-contract.mjs` proves it against a fake
+  vendor that speaks the protocol by hand, and holds the workflow's timeout to
+  the computed duration.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.
@@ -2725,7 +2853,7 @@ clock, and treats an unreadable answer as no answer. It reads four rows and the
 clock: `live:market` and `live:focus` (Tier 1), `live:breadth` (Tier 2, the key
 the Worker's own watchdog reads) and `meta` (the nightly). It is deliberately
 limited to those. It does not read the other Tier 2 keys, so a pass that lands
-`live:breadth` but not `live:gex` goes unseen here (readers see that key's own
+`live:breadth` but not `live:alerts` goes unseen here (readers see that key's own
 Stale pill); it does not read `board:long`, `board:short`, `focus` or the roster
 against `meta.sessionDate`, so a `meta` that landed beside boards from an earlier
 session goes unseen here; and it does not see the roster's cards or the archive
@@ -3041,6 +3169,34 @@ anything. The dossier route and the reading share the 3 s vendor deadline, so a 
 for the first time answers `generating` with no sections when its dossier takes longer
 than 1.5 seconds to assemble, and fills in on the next poll.
 
+### 10.5m2 Ranking v2: the flag, what it changes, how to look
+
+The engine ranks priced structures by `score`, expected value per dollar of capital
+(`evP / capital`). With the flag on it ranks by `(evP - spread / 2) / (capital x sessions)`,
+where `spread` is the span of `evP` across the real-world laws the engine already prices
+(`ev.pBand` maximum less minimum) and `sessions` is the sessions to expiry, at least one.
+The first term is a deduction for the disagreement between the laws, the second puts a
+five-session structure and a one-session structure on the same footing. A structure whose
+deducted EV is not above zero is not an idea, so a name whose only positive structures are
+the laws' disagreement stands aside as `ev.none-positive`.
+
+With the flag on each published structure carries `scoreRaw` (the old score), `rankV2`
+(`evShrunk`, `shrink`, `sessions`) and its `score` is the v2 score; the engine block carries
+`rank: "v2"`. With it off nothing is added and the output is byte for byte what it was.
+Nothing reads `score` as "EV over capital" outside the strategy page, which prices its own
+structures through `priceStructure` and never ranks.
+
+Two surfaces read the flag and each must be set where it runs. The nightly (GitHub Actions)
+reads `FLOWS_RANK` from its environment; the Worker's strategy route reads `FLOWS_RANK` from
+`wrangler.toml` [vars]. Only the exact value `v2` (case and padding ignored) turns it on;
+anything else, unset included, is v1. The shipped Worker value is `"v1"`. The nightly's
+environment is a workflow edit the owner makes; this repository does not set it.
+
+It ships dark: there is no evidence yet that it ranks better. The plan evaluates it on the
+`ideas-out:<date>` archive and the `calib` row after sixty sessions, comparing the realised
+return of the v2 lead against the v1 lead on the same nights; flip the switch only on that
+comparison, and only together with counsel's answer on ranked outputs (OD-06).
+
 ### 10.5n The real-time rail: one Durable Object, demand-driven REST polling, hibernating WebSockets
 
 **Why.** The stored live keys are minutes behind the vendor (Tier 1 every
@@ -3291,3 +3447,102 @@ frames uncompressed), then compare the panel's received bytes on that socket wit
 is not needed on bytes' account. If the bytes still matter, the lever is on the
 server: fewer px names, or a slower px cadence for the names no module on the
 page shows.
+
+### 10.6 The staging Worker, the external prober and the load test
+
+Three tools stand outside production so that a change to a Durable Object, a
+migration, a limiter or the rail meets a copy first, an outage is noticed from
+outside Cloudflare, and the capacity claims have a measurement. Nothing here
+runs unless the owner creates the pieces named below; the repository holds only
+the tools and their configuration.
+
+**Staging Worker.** `wrangler.staging.toml` is a complete, separate
+configuration (not an `[env]` of `wrangler.toml`, so the production file and its
+resolved bindings are untouched): the Worker `anilkaya-staging`, the same
+entrypoint, static bundle and compatibility date, a D1 database `iewt-staging`,
+its own `PULSE` Durable Object, the same six rate-limit bindings under their own
+namespaces (2101 to 2106) with production's limits, no Cron Trigger (the limit
+is five per account and production registers four), no route or custom domain
+(it serves at `workers.dev`), and no Workers AI binding, so staging cannot spend
+neurons. `FLOWS_LIVE_MODE` is `off` and no repository or workflow is named, so it
+can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;
+the rail is on for `members`. `.assetsignore` keeps the file out of the static
+bundle. It carries no secret; set staging's own.
+
+The owner's steps (the first three cannot be done from the repository):
+
+```bash
+./tests/node_modules/.bin/wrangler d1 create iewt-staging
+```
+
+1. Put the printed `database_id` in `wrangler.staging.toml` (the committed value
+   is an all-zero placeholder, which names no database).
+2. Apply the schema and every migration to it:
+   `./tests/node_modules/.bin/wrangler d1 execute iewt-staging --remote --file=./schema.sql`.
+3. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
+   `SESSION_SECRET`, `FLOWS_PEPPER`, `FLOWS_CREDENTIALS` (test members only, never
+   production's hashes) and, only if the vendor path is to be exercised,
+   `UW_API_KEY`. Without `UW_API_KEY` no vendor read is made; with it, staging
+   spends the same one vendor key production uses, so set it only for a run that
+   is meant to exercise the vendor path.
+4. Deploy: `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
+   A Workers Builds project for staging uses that deploy command.
+
+The plan also had production built only from a `production` branch that a
+promote step advances after staging's smoke checks pass. That depends on the
+release-branch and promote design, which the owner dropped (the permission
+safeguard cannot be changed), so production still deploys `main` on merge and
+staging is deployed by hand or by its own Workers Builds project. Run the smoke
+checks against it before merging a change to a Durable Object, a migration or a
+limiter:
+
+```bash
+node scripts/ops-probe.mjs smoke --base https://anilkaya-staging.<account>.workers.dev
+```
+
+It checks ten things from outside: the landing page's seven security headers,
+CSP and `no-cache`, the 308 from a legacy course URL, a rewritten course page,
+an anonymous `/api/me` of `{ user: null }`, the JSON 404 envelope, GET logout
+refused, the Flows API and the rail gated for an anonymous caller, the version
+token's one-hour cache and a versioned stylesheet's immutable one. It prints one
+JSON line and exits 1 on any failure.
+
+**External prober.** `node scripts/ops-probe.mjs probe --base https://anilkaya.org`
+fetches `/api/health` and one page (`/flows/login/`) and exits 0 or 1, printing
+one JSON line. `--health` and `--page` change the paths; until `/api/health`
+exists in the deployed Worker, run it with `--health /api/me`, which answers
+`200 { "user": null }` anonymously. It keeps a small state file
+(`--state`, mode 0600) so that `--fail-after 2` (the default) alerts once when
+two probes in a row fail and once when the next succeeds, and never for a single
+blip; the alert is a JSON `POST` of `{ text, content }` to the address in the
+environment variable `PROBE_WEBHOOK_URL` (or the one `--webhook-env` names),
+which no output ever prints. It is built to run from a scheduler that is not
+Cloudflare and not this repository's Actions (GitHub does not run a schedule
+every minute and delays the ones it runs): a cron line on any always-on host, or
+a third-party monitor that can run a command or call the same two URLs. A
+GitHub Issue as the alert channel needs a workflow with `issues: write`, which
+was not added; wiring the channel is the owner's step.
+
+**Load test.** `scripts/staging-load.mjs` signs in 20 simulated members
+(`LOAD_USERS=name:password,...` in the environment, staging's test members only),
+then holds the poll rung (each member reads `/api/rt/snap?k=px,fl,mk` every 5 s
+and `/api/flows/board` every 60 s) and the socket rung (one `/api/rt/ws` socket
+per member on `px,fl,mk,nw` with a focus ticker), half the window each, 30
+minutes by default. It writes a report: requests, 429s, errors and p50, p95 and
+max latency per route; sockets opened, frames by topic, snapshots, sequence gaps
+and `bye` codes; and a block of dashboard readings (Worker requests, Durable
+Object requests, D1 rows read and written, CPU) to fill in by hand from the
+dashboard for the same window. Sign-ins are paced under the 10 a minute per
+address login limit. It refuses any production host outright, any host that is
+not a staging name or loopback unless `--allow-host` names it, and any run
+without `--plan paid|free`. On `free` it prints the projected requests and
+refuses without `--priced`, and refuses even then past 25% of the 100,000
+requests a day the account shares with production; a 20-member, 30-minute run
+projects 3,940 Worker requests. `--dry-run` prints the plan and makes no call.
+
+```bash
+LOAD_USERS=... node scripts/staging-load.mjs --base https://anilkaya-staging.<account>.workers.dev --plan paid --out report.json
+```
+
+`tests/staging-contract.mjs` holds the staging configuration, the prober, the
+smoke checks and the load tool's guards against fakes, with no server.

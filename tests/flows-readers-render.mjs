@@ -58,7 +58,14 @@ const settle = async (page) => {
   for (let i = 0; i < 200 && page._inflight > 0; i++) await page.waitForTimeout(50);
   await page.waitForTimeout(150);
 };
-const tick = async (page, ms) => { NOW += ms; await page.clock.runFor(ms); await settle(page); };
+const tick = async (page, ms) => {
+  NOW += ms;
+  for (let left = ms; left > 0; left -= 10000) {
+    await page.clock.runFor(Math.min(left, 10000));
+    for (let i = 0; i < 400 && page._inflight > 0; i++) await page.waitForTimeout(10);
+  }
+  await settle(page);
+};
 const pill = (page) => page.evaluate(() => { const b = document.getElementById("fxFresh"); return b ? { state: b.dataset.state, label: b.dataset.label } : null; });
 
 const browser = await chromium.launch();

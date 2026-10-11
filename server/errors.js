@@ -3,6 +3,7 @@ const entry = (status, message) => Object.freeze([status, message]);
 export const ERRORS = Object.freeze({
   account_changed: entry(409, "Signed-in account changed; refresh and try again"),
   archive_immutable: entry(409, "A dated archive key already holds a different payload"),
+  archive_permanent: entry(409, "A permanent archive key already holds a different payload"),
   archive_raced: entry(409, "The dated archive key was written by another run in between"),
   archive_unreadable: entry(503, "The dated archive key could not be read"),
   attempt_conflict: entry(409, "Attempt id was already used for different data"),

@@ -14,9 +14,7 @@ export const NET_FLOW_READS = Object.freeze([
   ["zeroIndex", { expiration: "zero_dte", tide_type: "index_only", moneyness: "all" }],
 ]);
 
-export const VIX_PATH = "/api/volatility/vix-term-structure";
-
-export const REGIME_CALLS = 1 + NET_FLOW_READS.length + 1 + SECTOR_TIDES.length + ETF_TIDES.length +
+export const REGIME_CALLS = NET_FLOW_READS.length + 1 + SECTOR_TIDES.length + ETF_TIDES.length +
   FUND_FLOW_ETFS.length + CORRELATION_ETFS.length + FLOW_GROUPS.length + 1;
 
 export async function readRegime(uw, { sessionDate = null, deadline = null } = {}) {
@@ -28,7 +26,6 @@ export async function readRegime(uw, { sessionDate = null, deadline = null } = {
     return read(uw, path, params, opts);
   };
 
-  raw.vix = await get(VIX_PATH, { history_days: 90 }, { envelope: true });
   raw.netFlow = {};
   for (const [k, params] of NET_FLOW_READS) {
     raw.netFlow[k] = await get("/api/net-flow/expiry", { ...dated, ...params }, { envelope: true });
@@ -71,12 +68,7 @@ export function assembleRegime(raw, {
     calls: r.calls ?? null,
   };
 
-  const vix = r.vix || { ok: false, error: "not read" };
-  const vendorCurve = vix.ok
-    ? { status: "unshaped", reason: "the vendor answered but its Volatility Result shape is undocumented and unprobed",
-        keys: vix.body && typeof vix.body === "object" ? Object.keys(vix.body).slice(0, 12) : [] }
-    : { status: "unavailable", reason: vix.skipped ? SILENCE.unread : vix.gated ? SILENCE.gated : SILENCE.unreadable, http: vix.status ?? null,
-        code: vix.gated && vix.status === 403 ? "volatility_scope_required" : null };
+  const vendorCurve = { status: "unavailable", reason: SILENCE.gated, http: null, code: "volatility_scope_required" };
   const curves = {};
   for (const t of ETF_TIDES) curves[t] = volCurveFromScreener(indexRows.get(t));
   out.volCurve = {

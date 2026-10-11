@@ -1,6 +1,6 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
-  indexRows, shapeMovers, shapeLiveTape, gexRotation, shapeGexSeries, mergeGex, mergeLiveAlerts, alertsPagePlan,
+  indexRows, shapeMovers, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
@@ -110,7 +110,6 @@ export async function runLive({
     return { skipped: window.why };
   }
   const session = window.phase.session || window.phase.day;
-  const open = easternInstant(session, PHASE_MINUTES.open);
 
   const beat = await readStored("live:heartbeat");
   const lastBeat = beat && beat.payload && beat.payload.run ? timeMs(beat.payload.run.finishedAt) : NaN;
@@ -127,10 +126,8 @@ export async function runLive({
     boards: Object.fromEntries(Object.entries(boards).map(([side, read]) => [side, read && read.payload])),
     focus: focusRead && focusRead.payload,
   }), session, clock);
-  const tick = Math.max(0, Math.floor((startedAt - open) / (15 * 60000)));
-  const rotation = gexRotation({ ranked: plan.ranked, deep: plan.deep, tick });
   log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
-    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}, gex ${rotation.all.length} name(s) (tick ${tick})`);
+    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}`);
 
   const ledger = { calls: 0, failed: 0 };
   const read = async (path, params = {}) => {
@@ -161,7 +158,9 @@ export async function runLive({
     read("/api/net-flow/expiry", { expiration: "zero_dte", moneyness: "all", tide_type: "all" }),
     read("/api/net-flow/expiry", { expiration: "weekly", moneyness: "all", tide_type: "all" }),
   ]);
+  const breadthAt = now();
   const strip = await read("/api/screener/stocks", { ticker: plan.names.join(","), limit: 500 });
+  const stripAt = now();
 
   const prevAlerts = await readStored("live:alerts");
   const alertPlan = alertsPagePlan(prevAlerts && prevAlerts.payload, session);
@@ -182,17 +181,10 @@ export async function runLive({
     if (!olderThan) break;
   }
 
-  const gexRaws = {};
-  await Promise.all(rotation.all.map(async (t) => {
-    gexRaws[t] = await read(`/api/stock/${encodeURIComponent(t)}/spot-exposures`);
-  }));
+  const alertsAt = now();
 
-  const [totals, netImpact, darkpool, newsRaw] = await Promise.all([
-    read("/api/market/total-options-volume", { limit: 2 }),
-    read("/api/market/top-net-impact", { limit: 20 }),
-    read("/api/darkpool/recent", { date: session, order_by: "premium", limit: 200 }),
-    read("/api/news/headlines", { limit: 100 }),
-  ]);
+  const newsRaw = await read("/api/news/headlines", { limit: 100 });
+  const newsAt = now();
   const at = now();
 
   const out = {};
@@ -223,7 +215,7 @@ export async function runLive({
     }
   };
 
-  const breadth = shapeBreadth({ sectors: sectorRaws, etf: etfRaws, zeroDte, weekly }, { at, session, writer });
+  const breadth = shapeBreadth({ sectors: sectorRaws, etf: etfRaws, zeroDte, weekly }, { at: breadthAt, session, writer });
   for (const [sector, s] of Object.entries(breadth.sectors.rows)) unshaped(`sector-tide ${sector}`, sectorRaws[sector], s.status);
   for (const [name, s] of Object.entries({ "net-flow zero_dte": breadth.dte.zero, "net-flow weekly": breadth.dte.weekly,
     ...Object.fromEntries(BREADTH_ETFS.map((t) => ["etf-tide " + t, breadth.etf[t]])) })) {
@@ -234,7 +226,7 @@ export async function runLive({
   await put("live:breadth", breadth, { answered: anyAnswered([...Object.values(breadth.sectors.rows),
     ...BREADTH_ETFS.map((t) => breadth.etf[t]), breadth.dte.zero, breadth.dte.weekly]) });
 
-  const strips = shapeStrips(strip, { at, session, names: plan.names, writer, base: priorBase, lag: true });
+  const strips = shapeStrips(strip, { at: stripAt, session, names: plan.names, writer, base: priorBase, lag: true });
   unshaped("screener strip", strip, strips.status);
   if (strips.status !== "unavailable") {
     const withQuote = rowsOf(strip).filter((r) => r && r.quote_time !== null && r.quote_time !== undefined).length;
@@ -262,29 +254,20 @@ export async function runLive({
   await put("live:strips", strips, { answered: stripAnswered });
 
   const prevSeries = await readStored("live:strips:series");
-  const series = appendStripSeries(prevSeries && prevSeries.payload, strips, { at, session, writer });
+  const series = appendStripSeries(prevSeries && prevSeries.payload, strips, { at: stripAt, session, writer });
   if (series.trimmed) note(`live:strips:series: ${series.trimmed} oldest column(s) shed to fit its byte cap`);
   await put("live:strips:series", series, { answered: series.appended === true || series.replaced === true });
-  await put("live:vol", shapeVol(indexRows(strip), { at, session, writer }), { answered: stripAnswered });
-  await put("live:movers", shapeMovers(strips, { at, session, writer }), { answered: stripAnswered });
+  await put("live:vol", shapeVol(indexRows(strip), { at: stripAt, session, writer }), { answered: stripAnswered });
+  await put("live:movers", shapeMovers(strips, { at: stripAt, session, writer }), { answered: stripAnswered });
 
   const merged = mergeLiveAlerts(prevAlerts && prevAlerts.payload, pages, {
-    at, session, writer, stageOf: (t) => plan.stage.get(t) || null,
+    at: alertsAt, session, writer, stageOf: (t) => plan.stage.get(t) || null,
   });
-  if (merged.write) await put("live:alerts", merged.write);
-  else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
-
-  const gexReads = {};
-  for (const [t, raw] of Object.entries(gexRaws)) gexReads[t] = shapeGexSeries(raw, { session, now: at });
-  const filled = Object.values(gexReads).filter((g) => g.status === "ok" && g.flowFilled).length;
-  const okGex = Object.values(gexReads).filter((g) => g.status === "ok").length;
-  if (okGex && !filled) note(`spot-exposures: ${okGex} name(s) shaped and none carried non-zero _vol/_dir legs`);
-  const prevGex = await readStored("live:gex");
-  await put("live:gex", mergeGex(prevGex && prevGex.payload, gexReads, { at, session, writer, rotation }),
-    { answered: anyAnswered(Object.values(gexReads)) });
-
-  const tape = shapeLiveTape({ totals, netImpact, darkpool }, { at, session, writer });
-  await put("live:tape", tape, { answered: anyAnswered([tape.totals, tape.netImpact, tape.darkpool]) });
+  if (merged.write) {
+    await put("live:alerts", merged.write);
+    const head = typeof bytes["live:alerts"] === "number" ? shapeAlertsHead(merged.write, { writer }) : null;
+    if (head) await put("live:alerts:head", head);
+  } else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
 
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)
@@ -292,7 +275,7 @@ export async function runLive({
       : shapeNews(newsRaw, { requested: 100 });
     await put("live:news", {
       v: 1, key: "live:news", session,
-      fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:news"].cadenceS, session, writer }),
+      fresh: freshEnvelope({ readAt: newsAt, source: "actions", cadenceS: LIVE_KEYS["live:news"].cadenceS, session, writer }),
       ...news,
     }, { answered: !failed(newsRaw) });
   }
@@ -302,7 +285,7 @@ export async function runLive({
     origin: origin || "manual", startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(), durationMs: finishedAt - startedAt,
     calls: ledger.calls, failedCalls: ledger.failed, keys: bytes, errors, notes: notes.slice(0, 20),
-    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source }, gex: rotation,
+    names: plan.names.length, focus: { n: plan.counts.focus, source: plan.focus.source },
     alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
     quoteLag: strips.lag || null,
     quoteAhead: strips.ahead || null,

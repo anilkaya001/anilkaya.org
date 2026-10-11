@@ -89,7 +89,8 @@ try {
 
     for (const key of ["board:long", "board:short", "board:watch", "meta", "record",
                        "movers", "sector:trix",
-                       "board:long:2026-08-26", "board:short:2026-08-26", "card:AAPL"]) {
+                       "board:long:2026-08-26", "board:short:2026-08-26", "card:AAPL",
+                       "ideas:2026-08-26", "ideas-out:2026-08-26", "ideas:2026-08-26:r1", "ideas-out:2026-08-26:r2"]) {
       const res = await put(key, { ok: true });
       eq(res.status, 200, `the store accepts ${key}`);
     }
@@ -107,6 +108,11 @@ try {
       ["sector:momentum", "a sector reading nothing publishes"],
       ["sector:trix:2026-08-26", "a dated sector reading, which nothing publishes"],
       ["movers:long", "a sided movers list, which nothing publishes"],
+      ["ideas:2026-8-26", "an unpadded ideas date"],
+      ["ideas:bad-date", "an ideas key whose date is not a date"],
+      ["ideas:2026-08-26:r", "a revision with no number"],
+      ["ideas:2026-08-26:r1:r2", "a revision of a revision"],
+      ["ideas-out:2026-08-26x", "an outcomes key with a suffix"],
     ];
     for (const [key, why] of bad) {
       const res = await put(key, { ok: true });
@@ -151,9 +157,14 @@ try {
     eq((await sHit.json()).removed, 1, "and reports what it removed");
 
     for (const key of ["board:long", "board:short", "board:watch", "record", "meta",
-                       "scoretrack", "flowalerts", "pulse", "universe", "focus", "roster"]) {
+                       "scoretrack", "flowalerts", "pulse", "universe", "focus", "roster",
+                       "ideas:2026-08-26", "ideas-out:2026-08-26", "ideas:2026-08-26:r1", "ideas-out:2026-08-26:r2"]) {
       const res = await del(key);
       eq(res.status, 400, `the sweep cannot delete ${key}`);
+    }
+    for (const key of ["ideas:2026-08-26", "ideas:2026-08-26:r1", "ideas-out:2026-08-26"]) {
+      const kept = await (await fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)), { headers: { Authorization: "Bearer " + TOKEN } })).json();
+      ok(kept.status !== "pending", `and ${key} is still stored after the refused delete`);
     }
     const retired = await del("card:AAPL");
     eq(retired.status, 200, "a per-ticker card is the one other thing the nightly token may delete: the run retires " +

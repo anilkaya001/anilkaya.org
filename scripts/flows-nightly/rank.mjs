@@ -799,6 +799,14 @@ export const candleDate = (c) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 };
 
+export function barsInHand(entry) {
+  const list = entry && entry.features && Array.isArray(entry.features.candles) ? entry.features.candles : null;
+  if (!list) return null;
+  const bars = [];
+  for (const c of list) if (Array.isArray(c) && c[0]) bars.push({ d: String(c[0]), h: num(c[2], null), l: num(c[3], null), c: num(c[4], null) });
+  return { bars, breaks: (entry.features.priceBreaks || []).map((b) => b && b.date).filter(Boolean) };
+}
+
 export function sessionCandles(candles, sessionDate) {
   const list = Array.isArray(candles) ? candles : [];
   if (!ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return list;
@@ -889,6 +897,45 @@ export function boardRow(r, s, rank, memory = null, origin = null) {
 export function ideasPayload(ideaByTicker, { sessionDate, generatedAt, built = 0 }) {
   const rows = [...ideaByTicker.keys()].sort().map((t) => ({ t, ...ideaByTicker.get(t) }));
   return { v: 1, status: rows.length ? "ok" : "quiet", sessionDate, generatedAt, built, n: rows.length, rows };
+}
+
+const IDEAS_REVISION_CAP = 9;
+const PERMANENT_PREFIXES = Object.freeze(["ideas", "ideas-out"]);
+
+export function permanentArchiveKey(prefix, sessionDate, revision = 0) {
+  if (!PERMANENT_PREFIXES.includes(prefix) || !ARCHIVE_DATE_RE.test(String(sessionDate || ""))) return null;
+  return revision > 0 ? `${prefix}:${sessionDate}:r${revision}` : `${prefix}:${sessionDate}`;
+}
+
+export function ideasArchiveKey(sessionDate, revision = 0) {
+  return permanentArchiveKey("ideas", sessionDate, revision);
+}
+
+export async function archivePermanent(prefix, payload, sessionDate, publishFn) {
+  if (!permanentArchiveKey(prefix, sessionDate)) {
+    return { state: "skipped", key: null, line: `  ${prefix} archive: session date ${JSON.stringify(sessionDate)} is not an archive date — nothing recorded` };
+  }
+  for (let revision = 0; revision <= IDEAS_REVISION_CAP; revision++) {
+    const key = permanentArchiveKey(prefix, sessionDate, revision);
+    try {
+      await publishFn(key, payload);
+      return { state: revision ? "revision" : "written", key, revision,
+        line: revision
+          ? `  ${prefix} archive: ${prefix}:${sessionDate} already holds a different payload, so this run's ${prefix} are recorded as ${key}`
+          : `  ${prefix} archive: ${key} recorded (permanent)` };
+    } catch (error) {
+      const refused = error && error.status === 409 && /archive_permanent/.test(String(error.message));
+      if (!refused) {
+        return { state: "lost", key, revision, line: `  ${prefix} archive ${key}: NOT RECORDED — ${error && error.message ? error.message : error}` };
+      }
+    }
+  }
+  return { state: "capped", key: permanentArchiveKey(prefix, sessionDate, IDEAS_REVISION_CAP), revision: IDEAS_REVISION_CAP,
+    line: `  ${prefix} archive: ${prefix}:${sessionDate} and its ${IDEAS_REVISION_CAP} revisions all hold other payloads — this run's ${prefix} are not recorded` };
+}
+
+export function archiveIdeas(payload, sessionDate, publishFn) {
+  return archivePermanent("ideas", payload, sessionDate, publishFn);
 }
 
 export function congressRows(ticker, { byTicker = null, read = null, tapeRows = 0, namesRead = null } = {}) {

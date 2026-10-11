@@ -1,7 +1,10 @@
-export function archiveWriteAction({ readable, exists, same } = {}) {
+export const PERMANENT_ARCHIVE_KEY_RE = /^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$/;
+
+export function archiveWriteAction({ readable, exists, same, permanent = false } = {}) {
   if (!readable) return "refuse_unreadable";
   if (!exists) return "write";
-  return same ? "unchanged" : "refuse_immutable";
+  if (same) return "unchanged";
+  return permanent ? "refuse_permanent" : "refuse_immutable";
 }
 
 export const ARCHIVE_REFUSALS = Object.freeze({
@@ -13,6 +16,15 @@ export const ARCHIVE_REFUSALS = Object.freeze({
       "record this product's accuracy claims are computed from, so a write that would " +
       "change what a past session said is refused. Delete the key first if it genuinely " +
       "must be corrected.",
+  }),
+  refuse_permanent: Object.freeze({
+    status: 409,
+    code: "archive_permanent",
+    message:
+      "A permanent archive key already holds a different payload. It can be neither " +
+      "rewritten nor deleted, because the outcomes of a past session's ideas are scored " +
+      "against exactly what was recorded. Write the new payload under the next revision " +
+      "key, the same key with :r1, :r2 and so on appended.",
   }),
   refuse_unreadable: Object.freeze({
     status: 503,

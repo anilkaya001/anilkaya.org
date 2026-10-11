@@ -11,27 +11,16 @@
     return;
   }
 
-  const { h, s, F, chart: C } = UI;
+  const { h, s, F, isNum, chart: C } = UI;
   const DASH = UI.DASH, MINUS = UI.MINUS;
   const MIN_SESSIONS = 5;
   const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
   const T975 = [0, 12.71, 4.3, 3.18, 2.78, 2.57, 2.45, 2.36, 2.31, 2.26, 2.23];
 
-  const isNum = (v) => {
-    if (v === null || v === undefined || v === "") return null;
-    const n = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
   const kSaid = (k) => k + (k === 1 ? " session" : " sessions");
-  const pct = (v, d = 2) => {
-    const n = isNum(v);
-    return n === null ? DASH : (n < 0 ? MINUS : n > 0 ? "+" : "") + (Math.abs(n) * 100).toFixed(d) + "%";
-  };
+  const pct = F.unit.of("pct", { dp: 2, signed: true });
   const hitPct = (v, d = 0) => (isNum(v) === null ? DASH : (v * 100).toFixed(d) + "%");
-  const signed = (v, d) => {
-    const n = isNum(v);
-    return n === null ? DASH : (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(d);
-  };
+  const signed = F.unit.of("signed");
   const tcrit = (df) => (df >= 30 ? 1.96 : df > 10 ? 2.1 : T975[Math.max(1, Math.floor(df))]);
 
   function wilson(p, n) {

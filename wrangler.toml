@@ -43,6 +43,21 @@ name = "MEMBER_VENDOR"
 namespace_id = "1103"
 simple = { limit = 60, period = 60 }
 
+[[ratelimits]]
+name = "LAB_WRITE"
+namespace_id = "1104"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "LOGIN_IP"
+namespace_id = "1105"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "LOGIN_NAME"
+namespace_id = "1106"
+simple = { limit = 20, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"
@@ -60,6 +75,8 @@ FLOWS_ASK_FALLBACK_NEURONS = "26668,204805"
 FLOWS_AI_DAILY_CAP_NEURONS = "30000"
 FLOWS_AI_DAILY_CAP_CALLS = "2500"
 FLOWS_READ_MODE = "on"
+FLOWS_RANK = "v1"
+FLOWS_FRONT_DOOR = "on"
 FLOWS_LIVE_MODE = "actions"
 FLOWS_LIVE_REPO = "anilkaya001/anilkaya.org"
 FLOWS_LIVE_REF = "main"

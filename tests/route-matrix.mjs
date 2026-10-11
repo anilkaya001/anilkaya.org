@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { FLOWS_COOKIE, FLOWS_USERNAMES, LEARN_AUDIENCE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FLOWS_COOKIE, LEARN_AUDIENCE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
+import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { signSession } from "../shared/session.js";
 import { memoClock } from "../shared/flows-live-worker.js";
 import { COURSE_BY_SLUG } from "../shared/course-seo.js";
@@ -39,7 +40,7 @@ let outbound = 0;
 const realConsole = { error: console.error, warn: console.warn, log: console.log };
 
 const OWNER = "anilkaya";
-const MEMBER = FLOWS_USERNAMES.find((n) => n !== OWNER);
+const MEMBER = FIXTURE_MEMBER;
 const LAB_ID = "g_route_matrix_user";
 const SECURITY = {
   "Strict-Transport-Security": "max-age=31536000",
@@ -53,11 +54,11 @@ const SECURITY = {
 const FRESH_VALUE = ["State", "Reason", "Class", "Source", "Cadence", "Phase"];
 const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-Good"];
 
-const FLOWS_API = ["board", "market", "events", "scoretrack", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
+const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
   "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest"];
-const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "unusual", "events", "track", "political"];
-const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "ticker", "unusual", "events", "track", "political", "strategy", "ask"];
+const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "unusual", "events", "track", "political", "about", "glossary"];
+const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "ticker", "unusual", "events", "track", "political", "strategy", "ask", "about", "glossary"];
 const LEGACY = ["/lab/course", "/lab/course.html", "/lab/course/", "/lab/lesson", "/lab/lesson.html", "/lab/lesson/"];
 const SLUGS = Object.keys(COURSE_BY_SLUG);
 

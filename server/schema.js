@@ -39,6 +39,8 @@ const META = Object.freeze({
   flows_clock: { table: "flows_clock", migration: "0010_flows_live.sql", owner: "live", added: CLOCK_ADDED_COLUMNS },
   flows_ledger: { table: "flows_ledger", migration: "0015_flows_ledger.sql", owner: "live", added: LEDGER_ADDED_COLUMNS },
   flows_archive_immutable: { table: "flows_payload", migration: "0010_flows_live.sql", owner: "ingest" },
+  flows_permanent_no_update: { table: "flows_payload", migration: "0020_flows_permanent_archive.sql", owner: "ingest" },
+  flows_permanent_no_delete: { table: "flows_payload", migration: "0020_flows_permanent_archive.sql", owner: "ingest" },
   flows_dossier_cache: { table: "flows_dossier_cache", migration: "0016_flows_dossier_cache.sql", owner: "dossier" },
   flows_ai_outcome: { table: "flows_ai_outcome", migration: "0017_flows_ai_outcome.sql", owner: "ai" },
   flows_ai_reject: { table: "flows_ai_reject", migration: "0017_flows_ai_outcome.sql", owner: "ai" },

@@ -302,74 +302,35 @@
       }, g);
       return { pt, cx, cy, r };
     });
-    const ring = s("circle", { r: 0, class: "fu-ring", fill: "none", opacity: 0 }, svg);
-    wireBubbleScrub(el, svg, placed, ring, { top, bottom: H - bot });
+    const list = placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p);
+    C.scrub(el, svg, {
+      xs: list.map((b) => b.cx), ys: list.map((b) => b.cy), rs: list.map((b) => b.r), yw: 0.6, first: true, xh: 0.5,
+      top, bottom: H - bot, label: "Flagged windows over the session", ariaHint: "Use the arrow keys to read each window.",
+      onMove: (i) => {
+        const b = list[i], r = b.pt.r;
+        const flags = [r.sweep === true ? "Sweep" : null, r.opening === true ? "Opening" : null, r.floor === true ? "Floor" : null].filter(Boolean);
+        return {
+          x: b.cx, top: Math.max(0, b.cy - b.r - 40), dots: [{ x: b.cx, y: b.cy, r: b.r + 3, cls: "fu-ring", fill: "none" }],
+          parts: [
+            C.part(clock(b.pt.m) + (b.pt.exact ? "" : " first held"), "k"),
+            h("b", null, String(r.t || DASH)),
+            C.part(contractText(r).trim(), "k"),
+            h("b", { "data-tone": b.pt.cp === "P" ? "down" : "up" }, F.money(b.pt.p)),
+            C.part(b.pt.ask === null ? "ask —" : "ask " + pct0(b.pt.ask), "k"),
+            flags.length ? C.part(flags.join(" " + MID + " "), "k") : null,
+          ],
+        };
+      },
+    });
   }
 
-  function wireBubbleScrub(el, svg, placed, ring, box) {
-    const readout = h("div", { class: "ui-readout", "aria-hidden": "true" });
-    el.append(readout);
-    const xh = s("line", { class: "xh", y1: box.top, y2: box.bottom, x1: -10, x2: -10, opacity: 0 }, svg);
-    const wired = !!el._fu;
-    el._fu = { list: placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p), svg, ring, xh, readout, idx: -1 };
-    if (wired) return;
-    el.tabIndex = 0;
-    el.setAttribute("role", "group");
-    el.setAttribute("aria-roledescription", "chart");
-    el.setAttribute("aria-label", "Flagged windows over the session. Use the arrow keys to read each window.");
-    const show = (i, speak) => {
-      const { list, ring, xh, readout } = el._fu;
-      if (i < 0 || i >= list.length) return;
-      el._fu.idx = i;
-      const b = list[i], r = b.pt.r;
-      ring.setAttribute("cx", b.cx); ring.setAttribute("cy", b.cy); ring.setAttribute("r", b.r + 3); ring.setAttribute("opacity", 1);
-      xh.setAttribute("x1", b.cx); xh.setAttribute("x2", b.cx); xh.setAttribute("opacity", 0.5);
-      const flags = [r.sweep === true ? "Sweep" : null, r.opening === true ? "Opening" : null, r.floor === true ? "Floor" : null].filter(Boolean);
-      readout.replaceChildren(
-        C.part(clock(b.pt.m) + (b.pt.exact ? "" : " first held"), "k"),
-        h("b", null, String(r.t || DASH)),
-        C.part(contractText(r).trim(), "k"),
-        h("b", { "data-tone": b.pt.cp === "P" ? "down" : "up" }, F.money(b.pt.p)),
-        C.part(b.pt.ask === null ? "ask —" : "ask " + pct0(b.pt.ask), "k"),
-        flags.length ? C.part(flags.join(" " + MID + " "), "k") : null);
-      readout.classList.add("is-on");
-      const w = el.clientWidth, rw = readout.offsetWidth;
-      readout.style.left = UI.clamp(b.cx - rw / 2, 0, Math.max(0, w - rw)) + "px";
-      readout.style.top = Math.max(0, b.cy - b.r - 40) + "px";
-      if (speak) UI.announce(readout.textContent);
-    };
-    const hide = () => { const f = el._fu; f.readout.classList.remove("is-on"); f.ring.setAttribute("opacity", 0); f.xh.setAttribute("opacity", 0); };
-    const at = (e) => {
-      const bb = el._fu.svg.getBoundingClientRect();
-      const k = el._fu.svg.viewBox.baseVal.width / bb.width;
-      return [(e.clientX - bb.left) * k, (e.clientY - bb.top) * k];
-    };
-    const nearest = (x, y) => {
-      let best = -1, bd = Infinity;
-      el._fu.list.forEach((b, i) => {
-        const d = Math.hypot(b.cx - x, (b.cy - y) * 0.6) - b.r * 0.5;
-        if (d < bd) { bd = d; best = i; }
-      });
-      return best;
-    };
-    let raf = 0, last = null;
-    el.addEventListener("pointermove", (e) => {
-      last = at(e);
-      if (!raf) raf = requestAnimationFrame(() => { raf = 0; show(nearest(last[0], last[1])); });
-    });
-    el.addEventListener("pointerdown", (e) => { const p = at(e); show(nearest(p[0], p[1])); });
-    el.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") hide(); });
-    el.addEventListener("blur", hide);
-    el.addEventListener("keydown", (e) => {
-      const k = e.key, { list, idx } = el._fu;
-      if (k === "ArrowRight" || k === "ArrowLeft") {
-        e.preventDefault();
-        show(UI.clamp((idx < 0 ? (k === "ArrowRight" ? -1 : list.length) : idx) + (k === "ArrowRight" ? 1 : -1), 0, list.length - 1), true);
-      } else if (k === "Home") { e.preventDefault(); show(0, true); }
-      else if (k === "End") { e.preventDefault(); show(list.length - 1, true); }
-      else if (k === "Escape") hide();
-    });
-  }
+  C.kind("flagged", {
+    draw: drawTimeline,
+    data: () => {
+      const by = points().pts.sort((p, q) => p.m - q.m);
+      return { title: "Flagged windows", x: by.map((p) => clock(p.m)), cols: [{ label: "Premium", values: by.map((p) => p.p), fmt: (v) => F.money(v) }] };
+    },
+  });
 
   function timelineInfo() {
     const a = S.alerts || {};
@@ -412,7 +373,8 @@
       return;
     }
     if (charts.timeline && charts.timeline.el === host.timeline.querySelector(".fu-chart")) {
-      charts.timeline.set(drawTimeline, animate);
+      charts.timeline.el._scrubAt = -1;
+      charts.timeline.redraw(animate);
       return;
     }
     const chartHost = h("div", { class: "fu-chart" });
@@ -423,7 +385,7 @@
       h("span", { class: "ui-key" }, h("i", { class: "fu-key-hatch", "aria-hidden": "true" }), "Not recorded"),
     ].filter(Boolean));
     host.timeline.replaceChildren(chartHost, legend);
-    charts.timeline = C.mount(chartHost, drawTimeline);
+    charts.timeline = C.plot(chartHost, { kind: "flagged" });
   }
 
   function aggregate(rows) {

@@ -9,6 +9,7 @@ import { COURSE_STAGE_POINTS } from "../shared/course-points.js";
 import { COURSE_TOPICS, SITE_ORIGIN } from "../shared/course-seo.js";
 import { cookie, getCookie, signSession, verifySession } from "../shared/session.js";
 import { workerSource, expect } from "./lib/source-scan.mjs";
+import { servedFiles } from "./lib/served-tree.mjs";
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(TEST_DIR, "..");
@@ -625,6 +626,77 @@ async function waitFor(predicate, message) {
 }
 
 {
+  const owner = "user:g_limited";
+  const encoded = encodeURIComponent(owner);
+  const itemId = "ols:ols-line-04";
+  const skillId = "ols.least-squares-geometry";
+  const queuedMastery = { itemId, attemptId: "m-429", correct: true, hinted: false, day: "2026-07-14" };
+  const queuedSkill = { attemptId: "s-429", skillId, itemId: `${skillId}:v1`, correct: true, hinted: false, day: "2026-07-14" };
+  const seed = {
+    [`iewt:mastery-outbox:v2:${encoded}`]: JSON.stringify({ version: 2, owner, value: [queuedMastery] }),
+    [`iewt:skill-outbox:v3:${encoded}`]: JSON.stringify({ version: 3, owner, value: [queuedSkill] }),
+    [`iewt:sync:v2:${encoded}`]: JSON.stringify({ version: 2, owner, generation: 0 }),
+  };
+  const answer = { status: 429, code: "rate_limited" };
+  const puts = [];
+  const response = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+  const fetchImpl = (input, options = {}) => {
+    const url = new URL(typeof input === "string" ? input : input.url, "https://example.test");
+    const method = options.method || "GET";
+    if (method === "PUT") {
+      puts.push({ path: url.pathname, status: answer.status });
+      if (answer.status !== 200) return Promise.resolve(response({ error: { code: answer.code, message: "x" } }, answer.status));
+      const event = JSON.parse(options.body);
+      if (url.pathname === "/api/mastery") return Promise.resolve(response({ ok: true, record: { level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1, lastResult: true, lastAttemptId: event.attemptId, updatedAt: 10 }, duplicate: false, generation: 0 }));
+      if (url.pathname === "/api/v2/attempt") return Promise.resolve(response({ ok: true, record: { level: 1, dueDay: "2026-07-15", attempts: 1, correct: 1, lastResult: true, lastAttemptId: event.attemptId, updatedAt: 10 }, duplicate: false, generation: 0 }));
+      if (url.pathname === "/api/v2/progress") return Promise.resolve(response({ ok: true, courseId: event.courseId, done: [event.stageId], generation: 0 }));
+      return Promise.resolve(response({ ok: true, generation: 0 }));
+    }
+    if (url.pathname === "/api/v2/bootstrap") return Promise.resolve(response({
+      user: { id: "g_limited", name: "Limited Learner", email: "" },
+      progress: {}, stats: { points: 0, streak: 0, last: null }, mastery: {}, placement: null, generation: 0,
+      stableProgress: {}, skillMastery: {}, preferences: { activePathId: "complete-core", sessionMinutes: 20, weeklyGoalMinutes: 120 }, projects: {},
+    }));
+    return Promise.resolve(response({ error: { code: "not_found" } }, 404));
+  };
+  const boot = async (values) => {
+    const harness = clientHarness(values, fetchImpl);
+    for (const file of ["stage-catalog", "mastery", "skill-mastery", "storage", "gamify", "auth"]) runClient(harness, `assets/js/${file}.js`);
+    await harness.window.Auth.whenReady();
+    return harness;
+  };
+  const outboxes = (harness) => ({
+    mastery: plain(harness.window.IEWTStorage.masteryOutbox()).map((event) => event.attemptId),
+    skill: plain(harness.window.IEWTStorage.skillOutbox()).map((event) => event.attemptId),
+  });
+
+  const limited = await boot(seed);
+  assert.deepEqual(outboxes(limited), { mastery: ["m-429"], skill: ["s-429"] }, "a 429 must leave the queued review and skill attempts in their outboxes");
+  assert(puts.some((put) => put.path === "/api/mastery") && puts.some((put) => put.path === "/api/v2/attempt"), "the 429 case must actually have sent both attempts");
+
+  const live = await limited.window.Auth.recordMasteryAttempt(itemId, { correct: true, hinted: false, attemptId: "m-live-429", day: "2026-07-15" });
+  assert.equal(live.synced, false, "a 429 live review attempt must resolve unsynced, which the page words as saved on the device");
+  assert(outboxes(limited).mastery.includes("m-live-429"), "a 429 live review attempt must stay queued for the next sync");
+  const reviewSource = read("assets/js/lab-review.js");
+  assert(reviewSource.includes("Saved on this device. Account sync will retry when the connection is available."),
+    "the Daily Review words an unsynced attempt as saved on the device");
+
+  assert.equal(await limited.window.Auth.pushStableProgress("ols", "ols-line-01"), false, "a 429 stage upload reports not synced");
+  assert.deepEqual(plain(limited.window.IEWTStorage.stableProgress()), { ols: { done: ["ols-line-01"] } }, "a 429 stage upload must keep the stage on the device");
+
+  answer.status = 400;
+  answer.code = "invalid_mastery_attempt";
+  const poisoned = await boot({ ...seed });
+  assert.deepEqual(outboxes(poisoned), { mastery: [], skill: [] }, "a 400 answer still drops the attempt the Worker will never accept");
+
+  answer.status = 200;
+  answer.code = "";
+  const relaxed = await boot(Object.fromEntries(limited.values));
+  assert.deepEqual(outboxes(relaxed), { mastery: [], skill: [] }, "after the limiter relaxes the next sync flushes every attempt the 429 kept");
+  assert(puts.some((put) => put.path === "/api/v2/progress" && put.status === 200), "after the limiter relaxes the next sync uploads the stage the 429 refused");
+}
+
+{
   const response = (value) => new Response(JSON.stringify(value), {
     status: 200, headers: { "Content-Type": "application/json" },
   });
@@ -934,6 +1006,24 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
   assert(vendorSimple[1] === "60" && vendorSimple[2] === "60" && vendorPeriod === vendorSimple[2],
     `MEMBER_VENDOR must be 60 vendor-spending reads per 60 s and MEMBER_VENDOR_PERIOD_S (the Retry-After) must equal its period; ` +
     `found limit ${vendorSimple[1]}, period ${vendorSimple[2]}, MEMBER_VENDOR_PERIOD_S ${vendorPeriod}`);
+  const labBlock = blocks.find((b) => /^name\s*=\s*"LAB_WRITE"\s*$/m.test(b));
+  assert(labBlock, "wrangler.toml must declare the [[ratelimits]] binding LAB_WRITE: memberAllowed fails open " +
+    "when env.LAB_WRITE is absent, so a renamed or dropped binding would turn the Lab write limiter off silently");
+  const labSimple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(labBlock) || [];
+  const labPeriod = (/^const LAB_WRITE_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
+  assert(labSimple[1] === "30" && labSimple[2] === "60" && labPeriod === labSimple[2],
+    `LAB_WRITE must be 30 Lab mutations per 60 s and LAB_WRITE_PERIOD_S (the Retry-After) must equal its period; ` +
+    `found limit ${labSimple[1]}, period ${labSimple[2]}, LAB_WRITE_PERIOD_S ${labPeriod}`);
+  const loginPeriod = (/^const LOGIN_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
+  for (const [name, limit] of [["LOGIN_IP", "10"], ["LOGIN_NAME", "20"]]) {
+    const block = blocks.find((b) => new RegExp(`^name\\s*=\\s*"${name}"\\s*$`, "m").test(b));
+    assert(block, `wrangler.toml must declare the [[ratelimits]] binding ${name}: memberAllowed fails open ` +
+      "when it is absent, so a renamed or dropped binding would turn the sign-in brake off silently");
+    const simple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(block) || [];
+    assert(simple[1] === limit && simple[2] === "60" && loginPeriod === simple[2],
+      `${name} must be ${limit} sign-in attempts per 60 s and LOGIN_PERIOD_S (the Retry-After) must equal its period; ` +
+      `found limit ${simple[1]}, period ${simple[2]}, LOGIN_PERIOD_S ${loginPeriod}`);
+  }
   const ids = blocks.map((b) => (/^namespace_id\s*=\s*"(\d+)"\s*$/m.exec(b) || [])[1]);
   assert(ids.every(Boolean) && new Set(ids).size === ids.length,
     "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");
@@ -1128,10 +1218,35 @@ if (diffBase) {
 
 const assetIgnore = read(".assetsignore");
 for (const entry of [
-  ".*", ".wrangler/", "articles/_template/", ".dev.vars*", ".env*", "CNAME", "scripts/",
+  ".*", ".wrangler/", "articles/_template/", ".dev.vars*", ".env*", "CNAME", "scripts/", "docs/", "server/",
   "assets/js/curriculum.js", "assets/js/curriculum-data.js", "assets/js/curriculum-questions.js",
 ]) {
   assert(assetIgnore.split(/\r?\n/).includes(entry), `.assetsignore must exclude ${entry}`);
+}
+
+const SERVED_PAGES = [
+  "404.html", "LICENSE", "index.html", "robots.txt", "site.webmanifest", "sitemap.xml",
+  "articles/index.html",
+  "lab/challenge/index.html", "lab/course.html", "lab/index.html", "lab/lesson.html",
+  "lab/placement/index.html", "lab/review/index.html",
+  "lab/projects/factor-pricing-lab/index.html", "lab/projects/fx-volatility-risk/index.html",
+  "lab/projects/macro-forecasting-desk/index.html",
+];
+const SERVED_ASSET_TOKENS = ["assets/version.txt", "assets/fonts-version.txt"];
+const SERVED_ASSET_DIRS = ["assets/css/", "assets/js/", "assets/data/", "assets/fonts/", "assets/img/"];
+{
+  const served = servedFiles({ root: ROOT });
+  const isAsset = (file) => file.startsWith("assets/");
+  assert.deepEqual(served.filter((file) => !isAsset(file)), [...SERVED_PAGES].sort(),
+    "the pages and root files in the static bundle must equal the declared list: a new top-level file, directory or page is either declared here or excluded in .assetsignore");
+  const stray = served.filter(isAsset).filter((file) => !SERVED_ASSET_TOKENS.includes(file) && !SERVED_ASSET_DIRS.some((dir) => file.startsWith(dir)));
+  assert.deepEqual(stray, [], "every served asset sits under css, js, data, fonts or img, or is one of the two version tokens");
+  for (const dir of ["docs/", "server/", "shared/", "scripts/", "tests/", "migrations/"]) {
+    assert(!served.some((file) => file.startsWith(dir)), `${dir} must not be in the static bundle`);
+  }
+  assert(!served.includes("docs/uw-openapi.yaml"), "the 1 MB vendor specification must not be uploaded or served");
+  for (const token of SERVED_ASSET_TOKENS) assert(served.includes(token), `${token} must be served`);
+  assert(served.some((file) => file.startsWith("assets/data/projects/")), "assets/data/projects is served by design");
 }
 
 const secret = "contract-test-secret-abcdefghijklmnopqrstuvwxyz";

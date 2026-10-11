@@ -152,8 +152,8 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   out(9, 31, { ok: true });
   out(9, 36, { failed: true });
   out(9, 41, { failed: true });
-  out(10, 11, { ok: true, stale: { over: 120, key: "live:gex" } });
-  out(10, 16, { ok: true, stale: { over: 60, key: "live:tape" } });
+  out(10, 11, { ok: true, stale: { over: 120, key: "live:strips" } });
+  out(10, 16, { ok: true, stale: { over: 60, key: "live:movers" } });
   out(10, 21, { ok: true, stale: { over: 300, key: "live:alerts" } });
   const r = s.row(DAY);
   deep([r.t1_ok, r.t1_fail], [4, 2], "TICKS OK AND FAILED are counted apart");
@@ -163,9 +163,9 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   deep([r.stale_ticks, r.stale_over_s, r.stale_key], [3, 300, "live:alerts"], "the worst lapse seen keeps the largest overrun and the key that had it, and counts the ticks that saw any");
   const ordered = sqliteD1();
   const goOrdered = (st) => apply(ordered, st);
-  goOrdered(L.ledgerOutcomeStatement(ordered.D1, { day: DAY, at: at(11, 0), ...win, ok: true, failed: false, stale: { over: 900, key: "live:gex" } }));
+  goOrdered(L.ledgerOutcomeStatement(ordered.D1, { day: DAY, at: at(11, 0), ...win, ok: true, failed: false, stale: { over: 900, key: "live:strips" } }));
   goOrdered(L.ledgerOutcomeStatement(ordered.D1, { day: DAY, at: at(11, 5), ...win, ok: true, failed: false, stale: { over: 30, key: "live:vol" } }));
-  deep([ordered.row(DAY).stale_over_s, ordered.row(DAY).stale_key], [900, "live:gex"], "a smaller later lapse never replaces the worst one");
+  deep([ordered.row(DAY).stale_over_s, ordered.row(DAY).stale_key], [900, "live:strips"], "a smaller later lapse never replaces the worst one");
 }
 
 {
@@ -264,20 +264,25 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const T = at(10, 30);
   const liveRow = (id, ageMin, over = {}) => ({ id, read_at: T - ageMin * MIN, session: DAY, cadence_s: 900, source: "actions", ...over });
   const workerRow = (id, ageMin, over = {}) => liveRow(id, ageMin, { cadence_s: 300, source: "worker", ...over });
-  eq(L.worstStale([liveRow("live:gex", 3), workerRow("live:market", 2)], T), null, "WORST KEY LAPSE: rows read inside their stale lines are no lapse");
-  eq(L.worstStale([liveRow("live:gex", 44), workerRow("live:market", 24)], T), null, "and a row a minute inside the line (44 of 45 min for an Actions key, 24 of 25 for a Worker key) is still no lapse");
+  eq(L.worstStale([liveRow("live:strips", 3), workerRow("live:market", 2)], T), null, "WORST KEY LAPSE: rows read inside their stale lines are no lapse");
+  eq(L.worstStale([liveRow("live:strips", 44), workerRow("live:market", 24)], T), null, "and a row a minute inside the line (44 of 45 min for an Actions key, 24 of 25 for a Worker key) is still no lapse");
   deep(L.worstStale([liveRow("live:alerts", 50)], T), { key: "live:alerts", over: 300 }, "an Actions key read 50 min ago is five minutes (300 s) past its 45 min line");
   deep(L.worstStale([workerRow("live:market", 30)], T), { key: "live:market", over: 300 }, "a Worker key read 30 min ago is five minutes past its 25 min line: the class decides the line");
-  deep(L.worstStale([liveRow("live:gex", 60), liveRow("live:alerts", 50), liveRow("live:tape", 46)], T), { key: "live:gex", over: 900 }, "THE LARGEST OVERRUN WINS, whichever row comes first");
-  deep(L.worstStale([liveRow("live:tape", 46), liveRow("live:alerts", 50), liveRow("live:gex", 60)], T), { key: "live:gex", over: 900 }, "in either order");
+  deep(L.worstStale([liveRow("live:strips", 60), liveRow("live:alerts", 50), liveRow("live:vol", 46)], T), { key: "live:strips", over: 900 }, "THE LARGEST OVERRUN WINS, whichever row comes first");
+  deep(L.worstStale([liveRow("live:vol", 46), liveRow("live:alerts", 50), liveRow("live:strips", 60)], T), { key: "live:strips", over: 900 }, "in either order");
   const yesterday = (id) => liveRow(id, 0, { read_at: at(15, 55, "2026-09-28"), session: "2026-09-28" });
-  eq(L.worstStale([yesterday("live:gex")], at(9, 40)), null, "a row from before the open is awaiting its first read until the open plus its live window (09:50 ET for an Actions key): no lapse at 09:40");
-  deep(L.worstStale([yesterday("live:gex")], at(10, 30)), { key: "live:gex", over: 40 * 60 }, "and a row still from yesterday at 10:30 ET missed the open: forty minutes past 09:50");
-  eq(L.worstStale([liveRow("live:gex", 90)], at(17, 0)), null, "outside the session (post-market) nothing is judged");
-  eq(L.worstStale([liveRow("live:gex", 90)], at(8, 0)), null, "nor before it");
-  eq(L.worstStale([liveRow("live:gex", 90)], easternInstant("2026-09-26", 11 * 60)), null, "nor on a Saturday");
+  eq(L.worstStale([yesterday("live:strips")], at(9, 40)), null, "a row from before the open is awaiting its first read until the open plus its live window (09:50 ET for an Actions key): no lapse at 09:40");
+  deep(L.worstStale([yesterday("live:strips")], at(10, 30)), { key: "live:strips", over: 40 * 60 }, "and a row still from yesterday at 10:30 ET missed the open: forty minutes past 09:50");
+  eq(L.worstStale([liveRow("live:strips", 90)], at(17, 0)), null, "outside the session (post-market) nothing is judged");
+  eq(L.worstStale([liveRow("live:strips", 90)], at(8, 0)), null, "nor before it");
+  eq(L.worstStale([liveRow("live:strips", 90)], easternInstant("2026-09-26", 11 * 60)), null, "nor on a Saturday");
   deep(L.worstStale([null, { id: 7 }, {}, liveRow("live:alerts", 50)], T), { key: "live:alerts", over: 300 }, "rows that are not rows are skipped");
   eq(L.worstStale(null, T), null, "and no rows are no lapse");
+  const KNOWN = new Set(Object.keys(LIVE_KEYS));
+  ok(!KNOWN.has("live:gex") && !KNOWN.has("live:tape"), "live:gex and live:tape are retired from the registry");
+  eq(L.worstStale([liveRow("live:gex", 55), liveRow("live:tape", 55)], T, null, KNOWN), null, "A RETIRED ROW IS NO LAPSE: a live:gex row 55 minutes old in the session is skipped when the registry is handed in");
+  deep(L.worstStale([liveRow("live:gex", 55), liveRow("live:alerts", 50)], T, null, KNOWN), { key: "live:alerts", over: 300 }, "and it never hides a registered key's lapse");
+  deep(L.worstStale([liveRow("live:gex", 55)], T), { key: "live:gex", over: 600 }, "while with no registry the function judges every row it is given, as before");
   eq(L.worstStale([liveRow("live:alerts", 50)], NaN), null, "an unusable instant is no lapse");
 }
 
@@ -290,7 +295,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
     }
   };
   const lapse = sqliteD1();
-  seed(lapse, [{ id: "live:alerts", readAt: T - 50 * MIN, cadenceS: 900, source: "actions" }, { id: "live:gex", readAt: T - 20 * MIN, cadenceS: 900, source: "actions" }]);
+  seed(lapse, [{ id: "live:alerts", readAt: T - 50 * MIN, cadenceS: 900, source: "actions" }, { id: "live:vol", readAt: T - 20 * MIN, cadenceS: 900, source: "actions" }]);
   const env = rthEnv(lapse);
   const first = await W.rthTick(env, T, { fetchVendor: tier1Vendor(T), log: quiet });
   ok(first.tier1.written, "the tick under test writes");
@@ -301,6 +306,14 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   await W.rthTick(env, t2, { fetchVendor: tier1Vendor(t2), log: quiet });
   r = lapse.row(DAY);
   deep([r.stale_ticks, r.stale_over_s, r.stale_key], [2, 600, "live:alerts"], "and the next tick, five minutes later with the row still unwritten, counts a second lapse and the larger overrun");
+  const retired = sqliteD1();
+  seed(retired, [{ id: "live:gex", readAt: T - 3 * 60 * MIN, cadenceS: 900, source: "actions" }, { id: "live:tape", readAt: T - 3 * 60 * MIN, cadenceS: 900, source: "actions" }]);
+  await W.rthTick(rthEnv(retired), T, { fetchVendor: tier1Vendor(T), log: quiet });
+  r = retired.row(DAY);
+  deep([r.stale_ticks, r.stale_over_s, r.stale_key], [0, null, null], "A RETIRED ROW STILL IN THE TABLE IS NO LAPSE: live:gex and live:tape, three hours old in the session, record stale_key null through the real tick");
+  const ages = retired.trips.flatMap((t) => t.sqls).find((q) => /^SELECT id, read_at, session, cadence_s, source FROM flows_live/.test(q));
+  ok(ages && /WHERE id IN \(/.test(ages) && !/live:gex|live:tape/.test(ages) && Object.keys(LIVE_KEYS).every((k) => ages.includes("'" + k + "'")),
+    "and the ages read asks for exactly the registered keys, so a retired row costs the tick no row read");
   const clean = sqliteD1();
   seed(clean, [{ id: "live:alerts", readAt: T - 20 * MIN, cadenceS: 900, source: "actions" }]);
   await W.rthTick(rthEnv(clean), T, { fetchVendor: tier1Vendor(T), log: quiet });
@@ -331,8 +344,8 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(dueTrips.length, 3, "NO EXTRA ROUND TRIP: a due tick costs three trips, as it did before the ledger: the tick stamp, the clock and live-row read, and the write batch");
   ok(dueTrips[0].kind === "batch" && /INSERT INTO flows_clock/.test(dueTrips[0].sqls[0]) && /INSERT INTO flows_ledger/.test(dueTrips[0].sqls[1]),
     "the stamp is a batch of the clock upsert and the ledger's tick row");
-  ok(dueTrips[1].kind === "batch" && dueTrips[1].sqls.length === 2 && /FROM flows_live$/.test(dueTrips[1].sqls[1]),
-    "the read batch carries every live row's age in the statement that read only live:breadth");
+  ok(dueTrips[1].kind === "batch" && dueTrips[1].sqls.length === 2 && /FROM flows_live WHERE id IN \(.*\)$/.test(dueTrips[1].sqls[1]),
+    "the read batch carries every registered live row's age in the statement that read only live:breadth");
   ok(dueTrips[2].kind === "batch" && dueTrips[2].sqls.some((q) => /INSERT INTO flows_live/.test(q)) &&
      dueTrips[2].sqls.some((q) => /INSERT INTO flows_ledger/.test(q)) && dueTrips[2].sqls.some((q) => /INSERT INTO flows_clock/.test(q)),
     "and the write batch carries the ledger's outcome beside the live row and the clock patch");

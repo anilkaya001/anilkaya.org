@@ -399,11 +399,12 @@ try {
 
 {
   const names = ["flows_payload", "flows_login_failures", "flows_ai_usage", "flows_ai_usage_model", "flows_ai_summary", "flows_neuron",
-    "flows_live", "flows_tape", "flows_clock", "flows_ledger", "flows_archive_immutable", "flows_dossier_cache", "flows_ai_outcome", "flows_ai_reject"];
-  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them, and the two counter tables after them");
+    "flows_live", "flows_tape", "flows_clock", "flows_ledger", "flows_archive_immutable", "flows_permanent_no_update", "flows_permanent_no_delete",
+    "flows_dossier_cache", "flows_ai_outcome", "flows_ai_reject"];
+  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them, the two triggers that keep the permanent ideas rows (P0-42) and the counter tables after them");
   eq([...FLOWS_SCHEMA_SQL], FLOWS_REGISTRY.map((e) => e.ddl), "and FLOWS_SCHEMA_SQL is derived from it");
-  eq([...FLOWS_SCHEMA_SQL.slice(6, 11)], [...LIVE_SCHEMA_SQL], "with the live layer's statements as that module exports them");
-  eq(FLOWS_SCHEMA_SQL[11], DOSSIER_SCHEMA_SQL, "and the dossier cache as its module exports it");
+  eq([...FLOWS_SCHEMA_SQL.slice(6, 13)], [...LIVE_SCHEMA_SQL], "with the live layer's statements as that module exports them");
+  eq(FLOWS_SCHEMA_SQL[13], DOSSIER_SCHEMA_SQL, "and the dossier cache as its module exports it");
   ok(Object.isFrozen(FLOWS_REGISTRY) && Object.isFrozen(FLOWS_SCHEMA_SQL) && FLOWS_REGISTRY.every((e) => Object.isFrozen(e) && Object.isFrozen(e.addedColumns)), "all of it frozen");
   ok(FLOWS_REGISTRY.every((e) => /^CREATE (TABLE|TRIGGER) IF NOT EXISTS \w+/.test(e.ddl) && e.owner && e.migration && e.table), "every statement is idempotent and names its owner, table and migration");
   const migrations = Object.fromEntries(readdirSync(new URL("../migrations/", import.meta.url)).map((f) => [f, readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8")]));
@@ -489,9 +490,9 @@ try {
   const fresh = fakeD1({ schema: "", latencyMs: 0 });
   const done = await applySchema(fresh.D1);
   eq(done, {}, "a database with nothing in it takes the registry's DDL and adds no column");
-  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 15]], "in one batch of the fourteen CREATEs and the one probe");
-  eq(fresh.trips[0].sqls.slice(0, 14), [...FLOWS_SCHEMA_SQL], "in registry order");
-  eq(fresh.trips[0].sqls[14], "PRAGMA table_info(flows_clock)", "with the probe last");
+  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 17]], "in one batch of the sixteen CREATEs and the one probe");
+  eq(fresh.trips[0].sqls.slice(0, 16), [...FLOWS_SCHEMA_SQL], "in registry order");
+  eq(fresh.trips[0].sqls[16], "PRAGMA table_info(flows_clock)", "with the probe last");
   eq((await applySchema(fresh.D1), fresh.trips.length), 2, "and a second bootstrap is one more batch");
 
   const old = fakeD1({ schema: "", latencyMs: 0 });
@@ -500,7 +501,7 @@ try {
   ok(!cols(old).includes("tier1_at") && !cols(old).includes("summary_at"), "the production table before its upgrades lacks the later columns");
   eq(await applySchema(old.D1), { flows_clock: FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([c]) => c) }, "and the first use adds every one of them");
   const migrated = fakeD1({ schema: "", latencyMs: 0 });
-  for (const f of readdirSync(new URL("../migrations/", import.meta.url)).sort().filter((n) => !/^000[1-4]|0013/.test(n))) migrated.db.exec(MIG(f));
+  for (const f of readdirSync(new URL("../migrations/", import.meta.url)).sort().filter((n) => !/^000[1-4]|0013|0018/.test(n))) migrated.db.exec(MIG(f));
   eq(cols(old), cols(migrated), "leaving the columns, in order, a database built from the migrations has");
   eq(await applySchema(old.D1), {}, "a second pass adds nothing");
 

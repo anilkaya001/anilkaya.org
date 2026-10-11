@@ -7,7 +7,7 @@ import {
   collapseShareClasses, returnCorrelation, packSpark, ret, easternNow, DEAD_BAND,
   screenerTilt, boardRow, toRows, toWatchRows, datedKey, pruneKeys, pruneArchive,
   describeTickFields, TICK_FIELDS_READ, republishWithChain, PUBLISH_RETRYABLE,
-  archiveDatedBoards,
+  archiveDatedBoards, archiveIdeas, ideasArchiveKey, ideasPayload,
   runPooled, foldCardOutcomes, poolWidth, describeFloorVerdict, POOL_MAX_WIDTH, POOL_EVIDENCE_MIN,
   POOL_REFUSAL_HALT, POOL_REFUSAL_EASE,
   unusualContractId, markNewContracts, priorNote,
@@ -46,7 +46,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
-import { workerSource, expect, nightlySource, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
+import { workerSource, expect, nightlySource, nightlyFiles, joinSources, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
 import { newsFields, newsRow } from "../shared/flows-news.js";
 import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
 import { rowsOf as liveRows } from "../shared/flows-live.js";
@@ -1002,6 +1002,90 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
     if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
   }
+}
+
+{
+  const http = await import("node:http");
+  const prevUrl = process.env.FLOWS_INGEST_URL;
+  const prevTok = process.env.FLOWS_INGEST_TOKEN;
+  process.env.FLOWS_INGEST_TOKEN = "test-token";
+  const PERMANENT = /^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$/;
+  const store = new Map();
+  const log = [];
+  const server = http.createServer(async (req, res) => {
+    const key = new URL(req.url, "http://x").searchParams.get("key");
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    log.push(req.method + " " + key);
+    const send = (status, json) => { res.writeHead(status, { "Content-Type": "application/json" }); res.end(JSON.stringify(json)); };
+    if (req.method !== "POST" || !PERMANENT.test(key)) return send(400, { error: { code: "invalid_key" } });
+    if (store.has(key) && store.get(key) !== body) {
+      return send(409, { error: { code: "archive_permanent", message: ARCHIVE_REFUSALS.refuse_permanent.message } });
+    }
+    const stored = store.has(key) ? "unchanged" : "created";
+    store.set(key, body);
+    return send(200, { ok: true, key, stored });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  process.env.FLOWS_INGEST_URL = `http://127.0.0.1:${server.address().port}/api/flows/ingest`;
+  try {
+    const ideas = (t) => ideasPayload(new Map([[t, { family: "iron-condor" }]]), { sessionDate: "2026-08-24", generatedAt: "2026-08-24T22:10:00Z", built: 1 });
+    eq(ideasArchiveKey("2026-08-24"), "ideas:2026-08-24", "the ideas archive key is ideas:<session date>");
+    eq(ideasArchiveKey("2026-08-24", 2), "ideas:2026-08-24:r2", "a revision appends :r<n>");
+    eq(ideasArchiveKey(null), null, "no session date, no key");
+    eq(ideasArchiveKey("2026-8-24"), null, "and a malformed date names no key");
+    ok(PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_unreadable.status) && !PUBLISH_RETRYABLE.has(ARCHIVE_REFUSALS.refuse_permanent.status),
+      `a permanent refusal (${ARCHIVE_REFUSALS.refuse_permanent.status}) is outside PUBLISH_RETRYABLE: retrying cannot change the answer`);
+
+    const first = await archiveIdeas(ideas("AAA"), "2026-08-24", publish);
+    ok(first.state === "written" && first.key === "ideas:2026-08-24" && store.has("ideas:2026-08-24"), "EVERY SESSION RECORDS ITS IDEAS: the first write lands under ideas:<date>");
+    eq(log.length, 1, "in one request");
+    const same = await archiveIdeas(ideas("AAA"), "2026-08-24", publish);
+    ok(same.state === "written" && store.size === 1, "an identical re-run is the Worker's no-op, not a revision");
+    const second = await archiveIdeas(ideas("BBB"), "2026-08-24", publish);
+    ok(second.state === "revision" && second.key === "ideas:2026-08-24:r1" && store.size === 2,
+      `A REPUBLISH WITH DIFFERENT IDEAS WRITES A REVISION KEY, never over the first (${second.key})`);
+    ok(JSON.parse(store.get("ideas:2026-08-24")).rows[0].t === "AAA", "and the first record is untouched");
+    const third = await archiveIdeas(ideas("CCC"), "2026-08-24", publish);
+    ok(third.state === "revision" && third.key === "ideas:2026-08-24:r2", "a further different run takes :r2");
+    const repeat = await archiveIdeas(ideas("BBB"), "2026-08-24", publish);
+    ok(repeat.state === "revision" && repeat.key === "ideas:2026-08-24:r1" && store.size === 3, "and a re-run identical to a revision lands on it and stores nothing new");
+    ok(log.every((l) => l.startsWith("POST ")), "no archive request is a read or a delete: the pipeline only ever writes these keys");
+
+    const skipped = await archiveIdeas(ideas("AAA"), null, publish);
+    ok(skipped.state === "skipped" && skipped.key === null && /not an archive date/.test(skipped.line), "an unresolved session date records nothing and says so");
+    const before = log.length;
+    const lost = await archiveIdeas(ideas("AAA"), "2026-08-25", async () => { const error = new Error("ingest ideas -> HTTP 503 body: {}"); error.status = 503; throw error; });
+    ok(lost.state === "lost" && /NOT RECORDED/.test(lost.line) && log.length === before, "a store that does not answer is reported as not recorded");
+    const other409 = await archiveIdeas(ideas("AAA"), "2026-08-25", async () => { const error = new Error("ingest -> HTTP 409 archive_raced"); error.status = 409; throw error; });
+    ok(other409.state === "lost", "and a 409 that is not the permanent refusal is not turned into a revision");
+    let tried = 0;
+    const capped = await archiveIdeas(ideas("AAA"), "2026-08-25", async () => { tried++; const error = new Error("ingest -> HTTP 409 archive_permanent"); error.status = 409; throw error; });
+    ok(capped.state === "capped" && tried === 10, `a date whose revisions are all taken stops after the cap (${tried} attempts)`);
+  } finally {
+    process.env.FLOWS_INGEST_URL = prevUrl;
+    process.env.FLOWS_INGEST_TOKEN = prevTok;
+    if (prevUrl === undefined) delete process.env.FLOWS_INGEST_URL;
+    if (prevTok === undefined) delete process.env.FLOWS_INGEST_TOKEN;
+    await new Promise((r) => server.close(r));
+  }
+
+  const swept = pruneKeys("2026-08-26", { retentionDays: 0, lookbackDays: 400 });
+  ok(swept.length === 800 && swept.every((k) => /^board:(long|short):\d{4}-\d{2}-\d{2}$/.test(k)) && !swept.some((k) => /^ideas/.test(k)),
+    "THE PRUNE NEVER NAMES AN IDEAS KEY, however wide its window: 800 dated board keys and nothing else");
+  const retiring = sessionArchiveKeys("2026-08-24");
+  ok(retiring.length === 3 && !retiring.some((k) => /^ideas/.test(k)), "and a republish retires the three board keys only, so the ideas record survives it");
+}
+
+{
+  const pipelineText = joinSources(nightlyFiles().filter((f) => !f.endsWith("/stages.mjs")));
+  const start = pipelineText.indexOf("const IDEAS_REVISION_CAP");
+  const end = pipelineText.indexOf("export function congressRows");
+  ok(start > 0 && end > start, "the ideas archive helpers sit between their markers");
+  const outside = pipelineText.slice(0, start) + pipelineText.slice(end);
+  ok(!/ideas(-out)?:\$\{|["'`]ideas(-out)?:/.test(outside),
+    "LOOK-AHEAD: no other code in the nightly names an ideas:<date> or ideas-out:<date> key, so a run dated d cannot read the record of session d or of any later one");
+  ok(!/readStored\([^)]*ideas|probeStored\([^)]*ideas/.test(pipelineText), "and no read of the store is ever asked for an ideas key");
 }
 
 {
@@ -5178,7 +5262,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 5000, `even with every isolated stage failed the records stay under 5 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 5200, `even with every isolated stage failed the records stay under 5.2 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });

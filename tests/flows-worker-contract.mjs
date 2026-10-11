@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { signSession } from "../shared/session.js";
+import { FIXTURE_MEMBER_2 } from "./lib/fixture-roster.mjs";
 import { workerSource } from "./lib/source-scan.mjs";
 import { archiveWriteAction, ARCHIVE_REFUSALS } from "../shared/flows-archive.js";
 import { UA_BANNED_CLAIMS } from "../shared/flows-unusual.js";
@@ -210,9 +211,9 @@ try {
       eq(tick.status, 200, "/flows/ticker/ renders for an authenticated session");
       const tickHtml = await tick.text();
       ok(tickHtml.includes("/assets/js/flows-ticker.js"), "the ticker page loads its own controller");
-      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
+      const order = ["/assets/js/flows-ui.js", "/assets/js/flows-chart.js", "/assets/js/flows-fresh.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js"].map((src) => tickHtml.indexOf(src));
       ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])),
-         "with the Depth primitives, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
+         "with the Depth primitives, the chart library, the freshness layer and the pricing bundle FIRST — the controller builds every module out of FlowsUI and fails closed without it");
       ok(!tickHtml.includes("/assets/js/flows-panels.js") && !tickHtml.includes("/assets/js/flows-drawers.js"),
          "and no longer the retired panel library or its deferred drawers");
       ok(tickHtml.includes("/assets/css/flows-ticker.css"), "with the route stylesheet linked through the per-route hook");
@@ -693,8 +694,9 @@ try {
       const stHtml = await st.text();
       ok(stHtml.includes("/assets/js/flows-track.js"), "the track page loads its own controller");
       ok(stHtml.includes("/assets/js/flows-ui.js"), "and the shared UI module");
-      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-track.js"),
-         "with the module BEFORE the controller — the load order is the dependency order");
+      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-chart.js") &&
+         stHtml.indexOf("/assets/js/flows-chart.js") < stHtml.indexOf("/assets/js/flows-track.js"),
+         "with the module and the chart library BEFORE the controller — the load order is the dependency order");
       ok(stHtml.includes('id="stTrack"'), "and carries the trace host");
       ok(stHtml.includes('id="stBasis"'), "and the basis panel, which is the page's honesty");
       ok(/never zero/i.test(stHtml),
@@ -717,6 +719,20 @@ try {
 
       const anonStApi = await get("/api/flows/scoretrack");
       eq(anonStApi.status, 401, "and refuses an anonymous reader");
+
+      const calApi = await get("/api/flows/calib", { headers: { Cookie: "flows_session=" + token } });
+      eq(calApi.status, 200, "an authenticated calib request succeeds");
+      const calBody = await calApi.json();
+      ok(calBody.status === "pending" || (calBody.measured === false && !("state" in calBody)),
+         "and answers pending or the calibration view without the accumulator state the pipeline carries between nights");
+      eq((await get("/api/flows/calib")).status, 401, "an anonymous reader is refused");
+
+      const dispApi = await get("/api/flows/dispersion", { headers: { Cookie: "flows_session=" + token } });
+      eq(dispApi.status, 200, "an authenticated dispersion request succeeds");
+      const dispBody = await dispApi.json();
+      ok(dispBody.status === "pending" || (dispBody.status === "ok" && !("state" in dispBody)),
+         "and answers pending or the correlation view without the close cache the pipeline carries between weeks");
+      eq((await get("/api/flows/dispersion")).status, 401, "an anonymous reader is refused");
     }
 
     for (const dest of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
@@ -808,6 +824,12 @@ try {
         INGEST_TOKEN)).status, 200, "a dated scores pool is an accepted key");
     eq((await post("scoretrack", JSON.stringify({ names: [], sessions: [] }),
         INGEST_TOKEN)).status, 200, "and so is the live trace");
+    eq((await post("calib", JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-08-24", measured: false, nEff: 3, state: { pending: [{ t: "AAA" }] } }), INGEST_TOKEN)).status, 200,
+       "the calibration row is an accepted key");
+    eq((await post("calib:2026-08-24", "{}", INGEST_TOKEN)).status, 400, "and it has no dated form");
+    eq((await post("dispersion", JSON.stringify({ v: 1, status: "ok", sessionDate: "2026-08-24", state: { week: "2026-W35", calls: 3, closes: { dates: [], c: {} } } }), INGEST_TOKEN)).status, 200,
+       "the correlation row is an accepted key");
+    eq((await post("dispersion:2026-08-24", "{}", INGEST_TOKEN)).status, 400, "and it has no dated form");
     eq((await post("flowalerts", JSON.stringify({ rows: [] }), INGEST_TOKEN)).status, 200,
        "the vendor-alerts feed is an accepted key");
     eq((await post("pulse", JSON.stringify({ tide: { points: [] } }), INGEST_TOKEN)).status, 200,
@@ -982,6 +1004,45 @@ try {
     eq((await post(POOL, boardZ, INGEST_TOKEN)).status, 409,
        "and is immutable too: the write guard and the delete branch share one pattern");
 
+    {
+      const IDEAS = "ideas:2026-08-24";
+      const ideasA = JSON.stringify({ v: 1, rows: [{ t: "AAA", legs: 2 }] });
+      const ideasZ = JSON.stringify({ v: 1, rows: [{ t: "ZZZ", legs: 1 }] });
+      const readIdeas = async (key) => JSON.parse(await (await fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)),
+        { headers: { Authorization: "Bearer " + INGEST_TOKEN } })).text());
+      const del = (key) => fetch(url("/api/flows/ingest?key=" + encodeURIComponent(key)),
+        { method: "DELETE", headers: { Authorization: "Bearer " + INGEST_TOKEN } });
+
+      eq(ARCHIVE_REFUSALS.refuse_permanent.status, 409, "a permanent key holding another payload is a 409, a 4xx the pipeline does not retry");
+      eq(ARCHIVE_REFUSALS.refuse_permanent.code, "archive_permanent", "with a code of its own");
+      ok(!/delete the key first/i.test(ARCHIVE_REFUSALS.refuse_permanent.message) && /:r1/.test(ARCHIVE_REFUSALS.refuse_permanent.message),
+        "whose message never tells the operator to delete the key, because it cannot be deleted, and names the revision key instead");
+      eq(archiveWriteAction({ readable: true, exists: true, same: false, permanent: true }), "refuse_permanent", "a permanent key with a different payload is refused as permanent");
+      eq(archiveWriteAction({ readable: true, exists: true, same: false }), "refuse_immutable", "and a dated one as immutable, as before");
+      eq(archiveWriteAction({ readable: true, exists: true, same: true, permanent: true }), "unchanged", "an identical repeat of a permanent key is a no-op");
+
+      eq((await post(IDEAS, ideasA, INGEST_TOKEN)).status, 200, "ideas:<date> is accepted by the ingest door and written once");
+      const again = await post(IDEAS, ideasA, INGEST_TOKEN);
+      eq((await again.json()).stored, "unchanged", "an identical repeat stores nothing");
+      const clash = await post(IDEAS, ideasZ, INGEST_TOKEN);
+      eq(clash.status, 409, "A DIFFERENT PAYLOAD FOR THE SAME DATE IS REFUSED, not turned into a trigger error");
+      eq((await clash.json()).error.code, "archive_permanent", "with the permanent code");
+      deep(await readIdeas(IDEAS), JSON.parse(ideasA), "and the key still holds the first payload");
+      const gone = await del(IDEAS);
+      eq(gone.status, 400, "A PERMANENT KEY CANNOT BE DELETED through the ingest route");
+      eq((await gone.json()).error.code, "undeletable_key", "with the undeletable code");
+      deep(await readIdeas(IDEAS), JSON.parse(ideasA), "and it is still there afterwards");
+      eq((await post(IDEAS + ":r1", ideasZ, INGEST_TOKEN)).status, 200, "the revision key takes the new payload");
+      eq((await post(IDEAS + ":r1", ideasA, INGEST_TOKEN)).status, 409, "and is permanent itself");
+      eq((await del(IDEAS + ":r1")).status, 400, "and cannot be deleted either");
+      eq((await post("ideas-out:2026-08-24", ideasA, INGEST_TOKEN)).status, 200, "ideas-out:<date> is admitted the same way");
+      eq((await post("ideas-out:2026-08-24", ideasZ, INGEST_TOKEN)).status, 409, "and is write-once");
+      for (const bad of ["ideas:2026-8-24", "ideas:2026-08-24x", "ideas:2026-08-24:r", "ideas:2026-08-24:rx", "ideas-out:2026-08-24:r1x", "ideas:latest", "ideas-in:2026-08-24"]) {
+        eq((await post(bad, ideasA, INGEST_TOKEN)).status, 400, `${bad} is refused as an unknown key`);
+      }
+      eq((await del("ideas")).status, 400, "the bare ideas view is not deletable, as before");
+    }
+
     for (const method of ["PUT", "PATCH"]) {
       eq((await fetch(url("/api/flows/ingest?key=board:long"), {
         method, headers: { Authorization: "Bearer " + INGEST_TOKEN },
@@ -1140,7 +1201,7 @@ try {
   {
     const ATTACKER = "203.0.113.10";
     const VICTIM = "198.51.100.20";
-    const TARGET = "berkkocak";
+    const TARGET = FIXTURE_MEMBER_2;
 
     const attempt = (username, password, ip) => fetch(url("/flows/login"), {
       method: "POST",
@@ -1190,8 +1251,32 @@ try {
     );
     ok(!/floodrow/.test(dump) && /\*\|192\.0\.2\.77/.test(dump),
        "THE FIX: guessed names never key a row; the five off-roster attempts share one counter for their address");
-    ok(/berkkocak\|203\.0\.113\.10/.test(dump),
+    ok(dump.includes(FIXTURE_MEMBER_2 + "|203.0.113.10"),
        "a genuine failure is still counted, and the key is scoped to the caller");
+  }
+
+  {
+    const FLOODER = "192.0.2.201";
+    const send = (username, password, ip) => fetch(url("/flows/login"), {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: server.baseURL,
+        "Sec-Fetch-Site": "same-origin",
+        "CF-Connecting-IP": ip,
+      },
+      body: new URLSearchParams({ username, password }).toString(),
+    });
+    const statuses = [];
+    for (let i = 0; i < 10; i++) statuses.push((await send("flood " + i, "wrong", FLOODER)).status);
+    ok(statuses.every((code) => code === 401), "ten failed sign-ins from one address are answered 401 by the real binding");
+    const limited = await send(FLOWS_TEST_USER, FLOWS_PASSWORD, FLOODER);
+    eq(limited.status, 429, "THE 11TH ATTEMPT IN THE MINUTE from one address is a 429, even with the right password");
+    eq(limited.headers.get("retry-after"), "60", "naming the window as Retry-After");
+    ok(!(limited.headers.get("set-cookie") || "").includes("flows_session="), "and no session");
+    const other = await send(FLOWS_TEST_USER, FLOWS_PASSWORD, "198.51.100.77");
+    eq(other.status, 303, "another address is not charged for the flood");
   }
 
   {
@@ -1632,18 +1717,27 @@ try {
       eq((await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).status, 303,
          "a member signs in from an address that is spraying but not yet locked");
       for (let i = 5; i < 8; i++) await (await signIn(w, "spray" + i, "x", "203.0.113.50")).text();
-      ok(/Too many attempts/.test(await (await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).text()),
-         "THAT SUCCESS NEVER RESETS THE SHARED COUNTER: eight failures in the window lock the address, " +
-         "for every non-legacy name alike, members included");
+      eq((await signIn(w, "newbie", FLOWS_PASSWORD, "203.0.113.50")).status, 303,
+         "A MEMBER LISTED IN THE SECRET HAS A COUNTER OF THEIR OWN: eight sprayed failures from their address " +
+         "lock the shared counter and do not lock them out");
+      ok(/\*\|203\.0\.113\.50=8\b/.test(await w.d1("SELECT username || '=' || failures AS kv FROM flows_login_failures")),
+         "THAT SUCCESS NEVER RESETS THE SHARED COUNTER: it stands at eight, the lock, for every name the secret does not list");
+      await (await signIn(w, "newbie", "not-the-password", "203.0.113.60")).text();
+      ok(/newbie\|203\.0\.113\.60/.test(await w.d1("SELECT username, failures FROM flows_login_failures")),
+         "and their own failure is counted under their name and address, whether or not any built-in list ever knew them");
 
       await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|192.0.2.200', 3, 1000)");
+      await w.d1("INSERT INTO flows_login_failures (username, failures, first_at) VALUES ('*|2001:db8:7:7::/64', 7, 1000)");
       await (await signIn(w, "ghost-v6", "x", "2001:db8:7:7::1")).text();
       await (await signIn(w, "ghost-v6", "x", "2001:DB8:7:7:0:0:0:2")).text();
       const dump = await w.d1("SELECT username, failures FROM flows_login_failures");
       ok(!/spray|ghost/.test(dump) && /\*\|203\.0\.113\.50/.test(dump),
          "the throttle rows are keyed by address, never by a guessed name");
-      ok(!/192\.0\.2\.200/.test(dump),
-         "A FAILURE PRUNES THE TABLE: a counter older than the window is deleted, so the rows stay bounded");
+      ok(/192\.0\.2\.200/.test(dump),
+         "A FAILURE NO LONGER SCANS THE TABLE: another key's stale counter is left for the nightly prune");
+      const kv = await w.d1("SELECT username || '=' || failures AS kv FROM flows_login_failures");
+      ok(/\*\|2001:db8:7:7::\/64=2\b/.test(kv),
+         "and a failure replaces its own key's stale counter: seven stale failures restart at one, then count two");
       ok(/\*\|2001:db8:7:7::\/64/.test(dump) && !/2001:db8:7:7::1|0:0:0:2/.test(dump),
          "and two hosts in one IPv6 /64 share one counter");
     });
@@ -1901,9 +1995,15 @@ try {
         eq(await lkText("market,board:long"), mkText,
           "an unknown key in a list is dropped, and a list that leaves one key is that key's raw body, byte for byte");
         eq((await fetch(L("/api/flows/lk?k=board:long,meta"), { headers: cookie })).status, 400, "a list with no live key is a 400");
-        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,gex,vol,tape"), { headers: cookie })).json();
-        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "gex", "vol"],
+        const nine = await (await fetch(L("/api/flows/lk?k=market,focus,breadth,strips,strips:series,alerts,vol,movers,news"), { headers: cookie })).json();
+        deep(Object.keys(nine.keys), ["market", "focus", "breadth", "strips", "strips:series", "alerts", "vol", "movers"],
           "and a list is capped at eight keys, the ninth dropped");
+        const retiredList = await (await fetch(L("/api/flows/lk?k=market,gex,tape,vol"), { headers: cookie })).json();
+        deep(Object.keys(retiredList.keys), ["market", "vol"], "THE RETIRED KEYS ARE UNKNOWN: gex and tape are dropped from a list like any other name");
+        for (const retired of ["gex", "tape", "live:gex", "live:tape"]) {
+          const gone = await fetch(L("/api/flows/lk?k=" + retired), { headers: cookie });
+          deep([gone.status, (await gone.json()).error.code], [400, "invalid_key"], `lk?k=${retired} answers 400 invalid_key`);
+        }
       }
       await tick(FOCUS, "2026-09-26T10:08:00-04:00");
       eq(screens().length, 3, "a Saturday focus tick reads nothing");
@@ -2018,12 +2118,14 @@ try {
       eq(fa.headers.get("x-live-overlay"), "live:alerts", "the alerts route serves the live union for the later session");
       eq((await fa.json()).key, "live:alerts", "whole and unparsed");
 
-      const now = await fetch(L("/api/flows/now?k=market,breadth,tape&n=pulse,board:long,brief"), { headers: cookie });
+      const now = await fetch(L("/api/flows/now?k=market,breadth,vol&n=pulse,board:long,brief"), { headers: cookie });
       eq(now.status, 200, "the heartbeat answers");
       const nb = await now.json();
       ok(nb.keys["live:market"].updatedAt > 0 && nb.keys["live:breadth"].readAt === "2026-09-23T14:10:00.000Z",
         "with every subscribed live key's updatedAt and read instant from columns alone");
-      eq(nb.keys["live:tape"].state, "pending", "an unwritten key is pending");
+      eq(nb.keys["live:vol"].state, "pending", "an unwritten key is pending");
+      const retiredNow = await (await fetch(L("/api/flows/now?k=tape,gex"), { headers: cookie })).json();
+      deep(Object.keys(retiredNow.keys), [], "and the heartbeat has no entry for the retired live:gex and live:tape");
       deep(nb.tier1, { at: new Date(et("2026-09-24T10:26:00-04:00")).toISOString(),
         okAt: new Date(et("2026-09-24T10:21:00-04:00")).toISOString(), why: "holiday" },
       "TIER 1 TELEMETRY FROM D1: /now carries when the last tick began, when one last wrote live:market and how the " +
