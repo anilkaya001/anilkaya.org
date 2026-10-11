@@ -6,6 +6,7 @@ import {
   shapeOptionsPulse, holdingsMembers,
 } from "../../shared/flows-regime.js";
 import { impliedCorrelation, netTilt, vnum, firstPositive, addDays, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const NET_FLOW_READS = Object.freeze([
   ["zero", { expiration: "zero_dte", tide_type: "all", moneyness: "all" }],
@@ -28,28 +29,28 @@ export async function readRegime(uw, { sessionDate = null, deadline = null } = {
 
   raw.netFlow = {};
   for (const [k, params] of NET_FLOW_READS) {
-    raw.netFlow[k] = await get("/api/net-flow/expiry", { ...dated, ...params }, { envelope: true });
+    raw.netFlow[k] = await get(pathFor("net-flow-expiry"), { ...dated, ...params }, { envelope: true });
   }
-  raw.daily = await get("/api/market/daily-report", { ...dated, limit: 25 }, { envelope: true });
+  raw.daily = await get(pathFor("daily-report"), { ...dated, limit: 25 }, { envelope: true });
   raw.sectors = {};
   for (const s of SECTOR_TIDES) {
-    raw.sectors[s] = await get(`/api/market/${encodeURIComponent(s)}/sector-tide`, dated, { envelope: true });
+    raw.sectors[s] = await get(pathFor("sector-tide", { sector: s }), dated, { envelope: true });
   }
   raw.etfTide = {};
-  for (const t of ETF_TIDES) raw.etfTide[t] = await get(`/api/market/${t}/etf-tide`, dated, { envelope: true });
+  for (const t of ETF_TIDES) raw.etfTide[t] = await get(pathFor("etf-tide", { ticker: t }), dated, { envelope: true });
   raw.flows = {};
   for (const t of FUND_FLOW_ETFS) {
-    raw.flows[t] = await get(`/api/etfs/${t}/in-outflow`, {
+    raw.flows[t] = await get(pathFor("etf-in-outflow", { ticker: t }), {
       ...(sessionDate ? { start_date: addDays(sessionDate, -400), end_date: sessionDate } : {}),
     }, { envelope: true });
   }
   raw.holdings = {};
-  for (const t of CORRELATION_ETFS) raw.holdings[t] = await get(`/api/etfs/${t}/holdings`, {}, { envelope: true });
+  for (const t of CORRELATION_ETFS) raw.holdings[t] = await get(pathFor("etf-holdings", { ticker: t }), {}, { envelope: true });
   raw.groups = {};
   for (const g of FLOW_GROUPS) {
-    raw.groups[g] = await get(`/api/group-flow/${encodeURIComponent(g)}/greek-flow`, dated, { envelope: true });
+    raw.groups[g] = await get(pathFor("group-flow-greek", { flow_group: g }), dated, { envelope: true });
   }
-  raw.pulse = await get("/api/options-pulse/total", dated, { envelope: true });
+  raw.pulse = await get(pathFor("options-pulse-total"), dated, { envelope: true });
   return raw;
 }
 

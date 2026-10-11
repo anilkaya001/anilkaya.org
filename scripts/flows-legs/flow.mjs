@@ -6,6 +6,7 @@ import {
   POSITIONING_VERSION,
 } from "../../shared/flows-positioning.js";
 import { putMultipliers } from "../../shared/flows-variation.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const FLOW_LEG = Object.freeze({
   ALERT_BATCH: 10,
@@ -48,7 +49,7 @@ export async function readAlertBatch(read, names, win, { limit = FLOW_LEG.ALERT_
   let pages = 0, complete = false, failed = null, coverFrom = null;
   let olderThan = new Date(win.close + FLOW_LEG.ALERT_CLOSE_SLACK_MS).toISOString();
   while (pages < maxPages) {
-    const body = await read("/api/option-trades/flow-alerts", {
+    const body = await read(pathFor("flow-alerts"), {
       ticker_symbol: names.join(","), limit, newer_than: win.openIso, older_than: olderThan,
     });
     pages++;
@@ -82,7 +83,7 @@ export async function readMultiLeg(read, ticker, win, { limit = FLOW_LEG.MULTI_L
   const rows = [];
   let truncated = false, calls = 0;
   for (let offset = 0; offset <= maxOffset; offset += limit) {
-    const body = await read("/api/option-trades/multi-leg", {
+    const body = await read(pathFor("multi-leg"), {
       ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: win.closeIso,
       ...(offset ? { offset } : {}),
     });
@@ -293,14 +294,14 @@ async function flowLeg(ctx) {
     const f = featuresOf(ticker) || {};
     const readAt = now().toISOString();
     const [gexRaw, volRaw, levelsRaw, expRaw, strikeRaw, nopeRaw, pathRaw, dpRaw, ml, prior] = await Promise.all([
-      read(`/api/stock/${ticker}/greek-exposure`, { timeframe: "1Y", ...dated }),
-      read(`/api/stock/${ticker}/options-volume`, { limit: 252 }),
-      read(`/api/stock/${ticker}/gex-levels`, { source: "oi", ...dated }),
-      read(`/api/stock/${ticker}/flow-per-expiry`, {}),
-      read(`/api/stock/${ticker}/flow-per-strike`, dated),
-      read(`/api/stock/${ticker}/nope`, dated),
-      read(`/api/stock/${ticker}/spot-exposures`, dated),
-      read(`/api/darkpool/${ticker}/price-levels`, dated),
+      read(pathFor("greek-exposure", { ticker }), { timeframe: "1Y", ...dated }),
+      read(pathFor("options-volume", { ticker }), { limit: 252 }),
+      read(pathFor("gex-levels", { ticker }), { source: "oi", ...dated }),
+      read(pathFor("flow-per-expiry", { ticker }), {}),
+      read(pathFor("flow-per-strike", { ticker }), dated),
+      read(pathFor("nope", { ticker }), dated),
+      read(pathFor("spot-exposures", { ticker }), dated),
+      read(pathFor("darkpool-levels", { ticker }), dated),
       win ? readMultiLeg(read, ticker, win) : Promise.resolve({ rows: undefined, truncated: false }),
       readPrior(ticker),
     ]);
@@ -311,7 +312,7 @@ async function flowLeg(ctx) {
     const picks = oiPanel && oiPanel.status === "ok"
       ? pickLifelineContracts(oiPanel.rows, { count: FLOW_LEG.LIFELINES }) : null;
     const lives = picks && picks.length
-      ? await Promise.all(picks.map((p) => read(`/api/option-contract/${p.oc}/historic`, { limit: FLOW_LEG.LIFE_LIMIT })))
+      ? await Promise.all(picks.map((p) => read(pathFor("contract-historic", { id: p.oc }), { limit: FLOW_LEG.LIFE_LIMIT })))
       : [];
 
     const gex = gexHistory(gexRaw, { sessionDate, spot: f.spot, adv: f.dollarVolume, unit, multipliers });
@@ -356,9 +357,9 @@ async function flowLeg(ctx) {
     const f = featuresOf(ticker) || {};
     const readAt = now().toISOString();
     const [gexRaw, volRaw, oiRaw, prior] = await Promise.all([
-      read(`/api/stock/${ticker}/greek-exposure`, { timeframe: "1Y", ...dated }),
-      read(`/api/stock/${ticker}/options-volume`, { limit: 252 }),
-      read(`/api/stock/${ticker}/oi-per-strike`, dated),
+      read(pathFor("greek-exposure", { ticker }), { timeframe: "1Y", ...dated }),
+      read(pathFor("options-volume", { ticker }), { limit: 252 }),
+      read(pathFor("oi-per-strike", { ticker }), dated),
       readPrior(ticker),
     ]);
     const priorFailed = prior.failed === true;

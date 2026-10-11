@@ -51,6 +51,7 @@ import { serveRt } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
+import { pathFor } from "./shared/flows-vendor-ops.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -1065,7 +1066,7 @@ async function classifyTicker(env, ctx, ticker, allowed) {
     }
   }
   if (!env.UW_API_KEY || !(await allowed())) return held;
-  const raw = await uwFetch(env, "/api/screener/stocks", { ticker }).catch(() => null);
+  const raw = await uwFetch(env, pathFor("screener-stocks"), { ticker }).catch(() => null);
   const rows = raw && Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : null;
   if (!rows) return held;
   const row = rows.find((x) => x && typeof x.ticker === "string" && x.ticker.trim().toUpperCase() === ticker) || null;
@@ -2059,7 +2060,7 @@ async function cachedTickerInfo(env, ctx, ticker, vf) {
     const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await vf(`/api/stock/${encodeURIComponent(ticker)}/info`, {})
+  const raw = await vf(pathFor("info", { ticker }), {})
     .catch(keepRefusal(null));
   if (raw === null) return null;
 
@@ -2125,8 +2126,7 @@ async function readWithOverlay(env, key) {
 }
 
 async function buildLivePayload(env, ticker) {
-  const t = encodeURIComponent(ticker);
-  const raw = await uwFetch(env, `/api/stock/${t}/stock-state`, {});
+  const raw = await uwFetch(env, pathFor("stock-state", { ticker }), {});
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const live = d && typeof d === "object" && !Array.isArray(d) ? d : null;
   const readAt = new Date().toISOString();
@@ -2242,8 +2242,7 @@ function offMarketChain(list, ivBasis, rankBy) {
 }
 
 async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit }) {
-  const t = encodeURIComponent(ticker);
-  const chainPage = (page) => vf(`/api/stock/${t}/option-contracts`, {
+  const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
 
     maybe_otm_only: "true",
     exclude_zero_oi_chains: "true",
@@ -2254,9 +2253,9 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
   const [firstPage, candles, state, info, cardRead] = await Promise.all([
     chainPage(1),
-    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
 
-    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
 
     cachedTickerInfo(env, ctx, ticker, vf),
     cardPending,
@@ -2367,7 +2366,7 @@ async function cachedIndexSpot(env, ctx, vf) {
     const hit = await edgeCache.get(key);
     if (hit) return hit.json().catch(() => null);
   }
-  const raw = await vf(`/api/stock/${STRATEGY_INDEX}/stock-state`, {}).catch(keepRefusal(null));
+  const raw = await vf(pathFor("stock-state", { ticker: STRATEGY_INDEX }), {}).catch(keepRefusal(null));
   if (raw === null) return null;
   const d = raw && !Array.isArray(raw) && raw.data ? raw.data : raw;
   const close = numOrNull(d && d.close);
@@ -2393,11 +2392,10 @@ async function cachedIndexSpot(env, ctx, vf) {
 const unwrapRows = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
 
 async function buildStrategyContext(env, ctx, vf, ticker) {
-  const t = encodeURIComponent(ticker);
   const [breakdown, candles, state, info] = await Promise.all([
-    vf(`/api/stock/${t}/expiry-breakdown`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
-    vf(`/api/stock/${t}/ohlc/1d`, { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
-    vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)),
+    vf(pathFor("expiry-breakdown", { ticker }), {}, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null)),
+    vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
     cachedTickerInfo(env, ctx, ticker, vf),
   ]);
   const readMs = chainReadMs(env);
@@ -2415,7 +2413,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
 
   let expiryDate = null;
   if (breakdown !== null && !expiries.length && asOf) {
-    const retry = await vf(`/api/stock/${t}/expiry-breakdown`, { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
+    const retry = await vf(pathFor("expiry-breakdown", { ticker }), { date: asOf }, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(keepRefusal(null));
     if (retry !== null) {
       const dated = readExpiries(retry);
@@ -2425,7 +2423,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
 
   let expirySource = "breakdown";
   if (breakdown !== null && !expiries.length && asOf) {
-    const exposure = await vf(`/api/stock/${t}/greek-exposure/expiry`, {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
+    const exposure = await vf(pathFor("greek-exposure-expiry", { ticker }), {}, { deadlineMs: UW_OHLC_DEADLINE_MS })
       .catch(keepRefusal(null));
     if (exposure !== null) {
       const listed = readExpiries(exposure)
@@ -2492,8 +2490,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs, rank }
 }
 
 async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = false } = {}) {
-  const t = encodeURIComponent(ticker);
-  const page = (optionType, n) => vf(`/api/stock/${t}/option-contracts`, {
+  const page = (optionType, n) => vf(pathFor("option-contracts", { ticker }), {
 
     expiry,
     option_type: optionType,
@@ -2504,7 +2501,7 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
   const cardPending = engine ? keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null)) : Promise.resolve(null);
   const [callsFirst, putsFirst, liveState, cardRead] = await Promise.all([
     page("call", 1), page("put", 1),
-    engine ? vf(`/api/stock/${t}/stock-state`, {}).catch(keepRefusal(null)) : Promise.resolve(null),
+    engine ? vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)) : Promise.resolve(null),
     cardPending,
   ]);
 

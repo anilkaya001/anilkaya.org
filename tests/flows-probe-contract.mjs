@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import * as probe from "../scripts/flows-probe.mjs";
 import { nightlySource, slice } from "./lib/source-scan.mjs";
+import { OPS, opById, opsFor, pathFor, BUDGETS, PLAN, LICENCES, PLANS, LIMITERS } from "../shared/flows-vendor-ops.js";
+import { PACKET_CLASSES, DOSSIER_OPS } from "../shared/flows-dossier.js";
+import { SOURCES } from "../shared/flows-dossier-worker.js";
+import { LIVE_BUDGET } from "../shared/flows-live.js";
+import { RT_LIMITS } from "../shared/flows-rt.js";
+import { RATE as NIGHTLY_RATE } from "../scripts/flows-nightly/vendor-params.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -83,50 +89,151 @@ const list = probe.loadList();
     "/api/stock/{ticker}/volatility/term-structure/distribution", "/api/volatility/option-sentiment/top"],
     "the five live-only operations the nightly reads, and the volatility context the reading wants");
 
-  const files = spawnSync("git", ["ls-files", "worker.js", "shared", "scripts"], { cwd: ROOT, encoding: "utf8" }).stdout
+  const files = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "worker.js", "shared", "scripts"], { cwd: ROOT, encoding: "utf8" }).stdout
     .split("\n").filter((f) => /\.m?js$/.test(f))
-    .filter((f) => !/fake|live-day\.mjs$|flows-probe\.mjs$|flows-ws-probe\.mjs$|ops-probe\.mjs$|launch-readiness\.mjs$/.test(f));
-  ok(files.length > 40 && files.includes("worker.js") && files.includes("scripts/flows-pipeline.mjs"),
-    `the production sources are scanned: worker.js, shared/ and scripts/ less the fakes, the probes and the two tools that read this site's own origin (${files.length} files)`);
+    .filter((f) => !/fake|live-day\.mjs$|flows-ws-probe\.mjs$|ops-probe\.mjs$|launch-readiness\.mjs$/.test(f));
+  ok(files.length > 40 && files.includes("worker.js") && files.includes("scripts/flows-pipeline.mjs") && files.includes("scripts/flows-probe.mjs"),
+    `the production sources are scanned: worker.js, shared/ and scripts/ less the fakes, the socket probe and the two tools that read this site's own origin (${files.length} files)`);
   const OWN = /^\/api\/(flows|rt|me|bootstrap|progress|stats|mastery|placement|v2|markets|auth)(\/|$)|^\/api\/?$/;
-  const sites = new Map();
-  const note = (tok, at) => { if (!OWN.test(tok)) sites.set(tok, [...(sites.get(tok) || []), at]); };
+  const REGISTRY = "shared/flows-vendor-ops.js";
+  const literals = [];
+  const refs = new Map();
+  const bad = [];
   for (const f of files) {
+    if (f === REGISTRY) continue;
     const text = fs.readFileSync(path.join(ROOT, f), "utf8");
-    const routes = [...text.matchAll(/route: "([a-z-]+)"/g)].map((m) => m[1]);
     text.split("\n").forEach((line, i) => {
-      if (!line.includes("/api/")) return;
-      const s = line.replace(/\$\{[^}]*\}/g, "{X}").replace(/"\s*\+\s*[A-Za-z_][\w.()]*\s*\+\s*"/g, "{X}")
-        .replace(/"\s*\+\s*[A-Za-z_][\w.()]*\s*(?=[,)])/g, '{X}"');
-      for (const m of s.matchAll(/["'`](\/api\/[A-Za-z0-9_{}./:-]*)/g)) {
+      for (const m of line.matchAll(/["'`](\/api\/[A-Za-z0-9_{}./:-]*)/g)) {
         const tok = m[1].split("?")[0].replace(/\/+$/, "");
-        if (line.includes("${step.route}")) for (const r of new Set(routes)) note(tok.replace("{X}", r), `${f}:${i + 1}`);
-        else note(tok, `${f}:${i + 1}`);
+        if (!OWN.test(tok)) literals.push(`${f}:${i + 1} ${tok}`);
+      }
+      if (/\b(?:pathFor|opById|sourceOf)\(/.test(line)) {
+        for (const m of line.matchAll(/"([a-z0-9-]+)"/g)) refs.set(m[1], [...(refs.get(m[1]) || []), f]);
       }
     });
+    for (const m of text.matchAll(/\b(?:pathFor|opById)\(\s*"([^"]*)"/g)) bad.push([f, m[1]]);
   }
-  const segs = (p) => p.split("/");
-  const fits = (op, tok) => {
-    const a = segs(op);
-    const b = segs(tok);
-    return a.length === b.length && a.every((x, i) => (/^\{[^}]+\}$/.test(x) ? b[i] !== "" : x === b[i]));
-  };
-  const opOf = (tok) => listOps.filter((op) => fits(op, tok))
-    .sort((x, y) => (x.match(/\{/g) || []).length - (y.match(/\{/g) || []).length)[0] || null;
+  deep(literals, [], "NO VENDOR PATH IS SPELLED OUTSIDE THE REGISTRY: no /api/ literal that names a vendor operation remains in worker.js, shared/ or scripts/");
+  const ids = new Set(OPS.map((e) => e.id));
+  eq(ids.size, OPS.length, "every registry id is unique");
+  deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
+  const registered = new Set(OPS.map((e) => e.op));
   const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
-  const read = new Set();
-  const unprobed = [];
-  for (const [tok, at] of sites) {
-    const op = opOf(tok);
-    if (!op || tierOf.get(op) !== "used") unprobed.push(`${tok} (${at[0]}${op ? ", tier " + tierOf.get(op) : ""})`);
-    else read.add(op);
+  deep([...registered].filter((op) => tierOf.get(op) !== "used"), [], "USED IS TRUE: every registered operation has a probe labelled used");
+  deep(listOps.filter((op) => tierOf.get(op) === "used" && !registered.has(op)), [],
+    "and no operation is labelled used that the registry does not carry");
+  eq(registered.size, 75, "75 operations are registered and read in production");
+  eq(OPS.length, 75, "one entry for each");
+  const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
+  const read = new Set([...refs.keys(), ...dossierIds]);
+  deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
+  ok(refs.has("earnings-premarket") && refs.has("earnings-afterhours"),
+    "including the two earnings calendars the events leg names");
+
+  const specText = fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8");
+  const blocks = new Map();
+  {
+    const heads = [...specText.matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)];
+    heads.forEach((m, i) => blocks.set(m[1], specText.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : specText.length)));
   }
-  deep(unprobed, [], "USED IS TRUE: every vendor path a production call site names has a probe labelled used");
-  ok(sites.has("/api/earnings/premarket") && sites.has("/api/earnings/afterhours"),
-    "including the two earnings calendars the events leg names through ${step.route}");
-  deep(listOps.filter((op) => tierOf.get(op) === "used" && !read.has(op)), [],
-    "and no operation is labelled used that no production call site reads");
-  eq(read.size, 75, "75 operations are read in production");
+  for (const e of OPS) {
+    ok(e.path.startsWith("/api/") && e.method === "GET" && e.envelope === "data", `${e.id}: a GET under /api/ with the data envelope`);
+    ok(LICENCES.includes(e.licence) && PLANS.includes(e.plan) && Object.hasOwn(PACKET_CLASSES, e.klass), `${e.id}: licence, plan and freshness class come from the declared sets`);
+    ok(e.limiter === null || LIMITERS.includes(e.limiter), `${e.id}: exactly one limiter class (${e.limiter})`);
+    ok(e.maxBytes === null || (Number.isInteger(e.maxBytes) && e.maxBytes > 0), `${e.id}: a byte cap is a positive integer or absent`);
+    ok(e.reads === null || (Array.isArray(e.reads) && e.reads.length > 0 && new Set(e.reads).size === e.reads.length), `${e.id}: reads are absent or distinct names`);
+    const inSpec = blocks.has(e.op);
+    eq(e.liveOnly, !inSpec, `${e.id}: ${e.op} is liveOnly exactly when the committed spec lacks it`);
+    if (inSpec) ok(!/^\s+deprecated: true/m.test(blocks.get(e.op)), `${e.id}: ${e.op} is not deprecated in the committed spec`);
+    const tokens = (e.path.match(/\{[a-z_]+\}/g) || []);
+    const opTokens = (e.op.match(/\{[a-z_]+\}/g) || []);
+    ok(e.path === e.op || e.path.split("/").every((seg, i) => seg === e.op.split("/")[i] || /^\{[a-z_]+\}$/.test(e.op.split("/")[i])),
+      `${e.id}: the call path only fixes template segments of its operation`);
+    ok(tokens.every((t) => opTokens.includes(t)), `${e.id}: its path parameters are the operation's`);
+  }
+  deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly).map((e) => e.op).sort(),
+    "the probe list's liveOnly and the registry's agree on every registered operation; the volatility context is probed and not yet read");
+
+  const onDemandFiles = new Set(["worker.js", "shared/flows-live-worker.js"]);
+  const onDemand = new Set(dossierIds);
+  for (const [id, where] of refs) if (where.some((f) => onDemandFiles.has(f))) onDemand.add(id);
+  deep(OPS.filter((e) => e.limiter === "ondemand").map((e) => e.id).sort(), [...onDemand].sort(),
+    "LIMITER OWNERSHIP: an operation the Worker serves on demand (its routes, the tape legs, the dossier) carries the on-demand limiter, and every operation only an engine reads carries none");
+  deep(opsFor("feature"), [], "and no operation is yet gated by the feature limiter, which has no consumer");
+  eq(opsFor("ondemand").length + opsFor(null).length, OPS.length, "opsFor partitions the registry by limiter");
+  const engineOnly = OPS.filter((e) => e.limiter === null).map((e) => e.id);
+  ok(engineOnly.length > 40 && engineOnly.includes("market-tide") && engineOnly.includes("sector-etfs") && !engineOnly.includes("screener-stocks"),
+    "ENGINE OPERATIONS CARRY NO LIMITER: the Tier 1 pair is among them and the shared screener is not");
+
+  for (const [id, params, old] of [
+    ["stock-state", { ticker: "AAPL" }, "/api/stock/AAPL/stock-state"],
+    ["info", { ticker: "BRK.B" }, "/api/stock/BRK.B/info"],
+    ["ohlc-1d", { ticker: "SPY" }, "/api/stock/SPY/ohlc/1d"],
+    ["option-contracts", { ticker: "NVDA" }, "/api/stock/NVDA/option-contracts"],
+    ["greek-exposure-expiry", { ticker: "NVDA" }, "/api/stock/NVDA/greek-exposure/expiry"],
+    ["spot-exposures", { ticker: "NVDA" }, "/api/stock/NVDA/spot-exposures"],
+    ["spot-exposures-expiry-strike", { ticker: "NVDA" }, "/api/stock/NVDA/spot-exposures/expiry-strike"],
+    ["rr-skew", { ticker: "NVDA" }, "/api/stock/NVDA/historical-risk-reversal-skew"],
+    ["iv-dist", { ticker: "NVDA" }, "/api/stock/NVDA/interpolated-iv/distribution"],
+    ["term-structure-dist", { ticker: "NVDA" }, "/api/stock/NVDA/volatility/term-structure/distribution"],
+    ["vrp", { ticker: "NVDA" }, "/api/stock/NVDA/volatility/variance-risk-premium"],
+    ["darkpool", { ticker: "NVDA" }, "/api/darkpool/NVDA"],
+    ["darkpool-levels", { ticker: "NVDA" }, "/api/darkpool/NVDA/price-levels"],
+    ["darkpool-recent", {}, "/api/darkpool/recent"],
+    ["earnings", { ticker: "NVDA" }, "/api/earnings/NVDA"],
+    ["earnings-premarket", {}, "/api/earnings/premarket"],
+    ["earnings-afterhours", {}, "/api/earnings/afterhours"],
+    ["shorts-volume", { ticker: "NVDA" }, "/api/shorts/NVDA/volume-and-ratio"],
+    ["short-interest", { ticker: "NVDA" }, "/api/shorts/NVDA/interest-float/v2"],
+    ["insider-flow", { ticker: "NVDA" }, "/api/insider/NVDA/ticker-flow"],
+    ["ownership", { ticker: "NVDA" }, "/api/institution/NVDA/ownership"],
+    ["profile", { ticker: "NVDA" }, "/api/companies/NVDA/profile"],
+    ["earnings-estimates", { ticker: "NVDA" }, "/api/companies/NVDA/earnings-estimates"],
+    ["contract-historic", { id: "NVDA261218C00200000" }, "/api/option-contract/NVDA261218C00200000/historic"],
+    ["sector-tide", { sector: "Consumer Cyclical" }, "/api/market/Consumer%20Cyclical/sector-tide"],
+    ["etf-tide", { ticker: "SPY" }, "/api/market/SPY/etf-tide"],
+    ["etf-holdings", { ticker: "QQQ" }, "/api/etfs/QQQ/holdings"],
+    ["etf-in-outflow", { ticker: "SPY" }, "/api/etfs/SPY/in-outflow"],
+    ["group-flow-greek", { flow_group: "mag7" }, "/api/group-flow/mag7/greek-flow"],
+    ["politician-holders", { ticker: "NVDA" }, "/api/politician-portfolios/holders/NVDA"],
+    ["treasury-yield", {}, "/api/economy/treasury-yield"],
+    ["screener-stocks", {}, "/api/screener/stocks"],
+    ["short-screener", {}, "/api/short_screener"],
+    ["flow-alerts", {}, "/api/option-trades/flow-alerts"],
+    ["news", {}, "/api/news/headlines"],
+    ["market-tide", {}, "/api/market/market-tide"],
+  ]) eq(pathFor(id, params), old, `${id} builds the path the call sites spelled by hand`);
+  throwsLike(() => pathFor("stock-state"), /ticker is missing/, "a path parameter that is not given is refused, not left as a template");
+  throwsLike(() => pathFor("stock-state", { ticker: "" }), /ticker is missing/, "and so is an empty one");
+  throwsLike(() => pathFor("no-such-op"), /not in the registry/, "an unknown id is refused");
+  throwsLike(() => opById(undefined), /not in the registry/, "and so is no id at all");
+  eq(pathFor("stock-state", { ticker: "A/B" }), "/api/stock/A%2FB/stock-state", "a value is encoded as one path segment");
+  ok(Object.isFrozen(OPS) && OPS.every((e) => Object.isFrozen(e) && (e.reads === null || Object.isFrozen(e.reads))), "the registry is frozen");
+
+  eq(Object.hasOwn(JSON.parse(fs.readFileSync(probe.LIST_PATH, "utf8")), "reads"), false, "the probe list file carries no reads of its own");
+  const derived = {};
+  for (const e of OPS) if (e.reads) derived[e.op] = [...e.reads];
+  deep(list.reads, derived, "THE PROBE DERIVES ITS STRICT READ LIST FROM THE REGISTRY: loadList returns exactly the registry's reads");
+  eq(Object.keys(list.reads).length, 27, "for the 27 operations whose fields the code reads");
+  deep(probe.SESSION_PROBE.path, pathFor("ohlc-1d", { ticker: "SPY" }), "and the session probe is the registry's daily candle for SPY");
+  eq(probe.SESSION_PROBE.op, opById("ohlc-1d").op, "under the spec's operation");
+
+  const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
+  const limiterBlock = /\[\[ratelimits\]\]\s*name = "UW_ONDEMAND"\s*namespace_id = "\d+"\s*simple = \{ limit = (\d+), period = (\d+) \}/.exec(wrangler);
+  ok(limiterBlock, "wrangler.toml declares UW_ONDEMAND");
+  eq(BUDGETS.ondemand.binding, "UW_ONDEMAND", "BUDGETS names the on-demand binding");
+  eq(BUDGETS.ondemand.limit, Number(limiterBlock[1]), "BUDGETS: the on-demand limit is wrangler.toml's");
+  eq(BUDGETS.ondemand.periodS, Number(limiterBlock[2]), "and its period");
+  eq(BUDGETS.nightly.minDelayMs, NIGHTLY_RATE.minDelayMs, "BUDGETS: the nightly's floor delay is the pipeline's");
+  eq(BUDGETS.tier1.callsPerTick, LIVE_BUDGET.tier1Calls, "BUDGETS: Tier 1's calls a tick are the live registry's");
+  eq(BUDGETS.tier2.paceMs, LIVE_BUDGET.tier2PaceMs, "BUDGETS: Tier 2's pace is the live registry's");
+  eq(BUDGETS.tier2.perMinute, Math.floor(60000 / LIVE_BUDGET.tier2PaceMs), "and its calls a minute follow from the pace");
+  eq(BUDGETS.tier2.maxCallsPerPass, LIVE_BUDGET.tier2MaxCalls, "BUDGETS: Tier 2's calls a pass are the live registry's");
+  eq(BUDGETS.rail.perMinute, RT_LIMITS.callsPerMinute, "BUDGETS: the rail's calls a minute are the hub's");
+  ok(Object.hasOwn(PLAN, PLAN.selected) && PLAN.selected === "observed", "PLAN selects the observed key, whose per-minute line is the vendor's header value");
+  eq(PLAN.observed.perMinute, 1000000, "x-uw-req-per-minute-remaining as measured on 2026-10-04");
+  eq(PLAN.startup.perMinute, 500, "the Startup plan's documented minute line");
+  eq(PLAN.startup.perDay, 80000, "and its day line");
 
   const entitled = list.entitlement;
   deep(entitled.slice().sort(), ["/api/congress/unusual-trades", "/api/futures/{contract}/stats", "/api/lit-flow/{ticker}",

@@ -14,6 +14,7 @@ import { buildIndexDossiers, dossierRoster } from "../../flows-legs/index-dossie
 import { DRY_RUN } from "../flags.mjs";
 import { IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { poolWidth, runPooled, uw } from "../vendor.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE, publish, publishedStore, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
 import {
@@ -43,17 +44,17 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
         ? [fakeMaxPain(ticker, spot), fakeSurface(ticker, spot, expiries), fakeStockDarkpool(ticker, spot),
           fakeStockOiChange(ticker, spot), fakeTermStructure(ticker, spot, onSession), fakeIvRank(ticker, spot, IV_RANK_PARAMS)]
         : await Promise.all([
-          uw(`/api/stock/${ticker}/max-pain`, onSession).catch(() => []),
+          uw(pathFor("max-pain", { ticker }), onSession).catch(() => []),
           expiries.length
-            ? uw(`/api/stock/${ticker}/spot-exposures/expiry-strike`, {
+            ? uw(pathFor("spot-exposures-expiry-strike", { ticker }), {
               "expirations[]": expiries, ...onSession,
               min_strike: Math.floor(spot * 0.9), max_strike: Math.ceil(spot * 1.1), limit: 500,
             }).catch(() => [])
             : Promise.resolve([]),
-          uw(`/api/darkpool/${ticker}`, { limit: 60, ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/oi-change`, { limit: 30, ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/volatility/term-structure`, { ...onSession }).catch(() => null),
-          uw(`/api/stock/${ticker}/iv-rank`, { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+          uw(pathFor("darkpool", { ticker }), { limit: 60, ...onSession }).catch(() => null),
+          uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(() => null),
+          uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(() => null),
+          uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
         ]);
       return {
         maxPain, surface,
@@ -65,7 +66,7 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
     chain: async (ticker, spot) => {
       const rows = DRY_RUN
         ? fakeChain(ticker, spot, 9500 + tickerSeed(ticker))
-        : await uw(`/api/stock/${ticker}/option-contracts`, {
+        : await uw(pathFor("option-contracts", { ticker }), {
           exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE,
         }).catch(() => []);
       if (!Array.isArray(rows) || !rows.length) return null;

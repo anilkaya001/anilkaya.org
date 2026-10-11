@@ -7,6 +7,7 @@ import { UNIVERSE_COLUMNS, UNIVERSE_PERCENTILES, sessionsBetween } from "./flows
 import { SECTOR_TIDES } from "./flows-live.js";
 import { batchWithClock, ondemandAllowed, memoizedClock } from "./flows-live-worker.js";
 import { expectedNightlySession, freshHeaders } from "./flows-freshness.js";
+import { opById, pathFor } from "./flows-vendor-ops.js";
 
 export const DOSSIER_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS flows_dossier_cache (ticker TEXT NOT NULL CHECK (length(ticker) BETWEEN 1 AND 10), " +
@@ -27,21 +28,25 @@ export const BUDGET = Object.freeze({ maxCalls: 9, sourceMs: 2500, deadlineMs: 3
 
 export const NONE_WHY = "This name is not in the nightly universe, so no dealer positioning or option chain is held for it; the ticker page can read a quote for it on demand and nothing more.";
 
+const sourceOf = (id, op, rest) => {
+  const entry = opById(op);
+  return { id, op, ...rest, maxBytes: entry.maxBytes, path: entry.path.includes("{ticker}") ? (t) => pathFor(op, { ticker: t }) : () => pathFor(op) };
+};
+
 export const SOURCES = Object.freeze([
-  { id: "info", kind: "identity", prio: 1, maxBytes: 32768, path: (t) => "/api/stock/" + t + "/info", params: () => ({}) },
-  { id: "quote", kind: null, fast: true, prio: 2 },
-  { id: "news", kind: null, fast: true, prio: 3, maxBytes: 98304, path: () => "/api/news/headlines", params: (t) => ({ ticker: t, limit: 12 }) },
-  { id: "analysts", kind: "analysts", prio: 4, maxBytes: 98304, path: () => "/api/screener/analysts", params: (t) => ({ ticker: t, limit: 30 }) },
-  { id: "financials", kind: "fundamentals", prio: 5, maxBytes: 262144, path: (t) => "/api/stock/" + t + "/financials", params: () => ({}) },
-  { id: "ownership", kind: "positioning", prio: 6, maxBytes: 131072, path: (t) => "/api/institution/" + t + "/ownership",
-    params: () => ({ limit: 25, order: "value", order_direction: "desc" }) },
-  { id: "earnings", kind: "earnings", prio: 7, maxBytes: 131072, path: (t) => "/api/earnings/" + t, params: () => ({}) },
-  { id: "profile", kind: "identity", prio: 8, maxBytes: 32768, path: (t) => "/api/companies/" + t + "/profile", params: () => ({}) },
-  { id: "estimates", kind: "earnings", prio: 9, maxBytes: 65536, path: (t) => "/api/companies/" + t + "/earnings-estimates", params: () => ({}) },
-  { id: "breakdown", kind: "fundamentals", prio: 10, maxBytes: 262144, path: (t) => "/api/stock/" + t + "/fundamental-breakdown", params: () => ({}) },
-  { id: "levels", kind: null, fast: true, prio: 11, maxBytes: 131072, path: (t) => "/api/darkpool/" + t + "/price-levels", params: () => ({}) },
-  { id: "short", kind: "positioning", prio: 12, maxBytes: 32768, path: (t) => "/api/shorts/" + t + "/interest-float/v2", params: () => ({}) },
-  { id: "insiders", kind: "positioning", prio: 13, maxBytes: 65536, path: (t) => "/api/insider/" + t + "/ticker-flow", params: () => ({ limit: 60 }) },
+  sourceOf("info", "info", { kind: "identity", prio: 1, params: () => ({}) }),
+  { id: "quote", op: "stock-state", kind: null, fast: true, prio: 2 },
+  sourceOf("news", "news", { kind: null, fast: true, prio: 3, params: (t) => ({ ticker: t, limit: 12 }) }),
+  sourceOf("analysts", "analysts", { kind: "analysts", prio: 4, params: (t) => ({ ticker: t, limit: 30 }) }),
+  sourceOf("financials", "financials", { kind: "fundamentals", prio: 5, params: () => ({}) }),
+  sourceOf("ownership", "ownership", { kind: "positioning", prio: 6, params: () => ({ limit: 25, order: "value", order_direction: "desc" }) }),
+  sourceOf("earnings", "earnings", { kind: "earnings", prio: 7, params: () => ({}) }),
+  sourceOf("profile", "profile", { kind: "identity", prio: 8, params: () => ({}) }),
+  sourceOf("estimates", "earnings-estimates", { kind: "earnings", prio: 9, params: () => ({}) }),
+  sourceOf("breakdown", "fundamental-breakdown", { kind: "fundamentals", prio: 10, params: () => ({}) }),
+  sourceOf("levels", "darkpool-levels", { kind: null, fast: true, prio: 11, params: () => ({}) }),
+  sourceOf("short", "short-interest", { kind: "positioning", prio: 12, params: () => ({}) }),
+  sourceOf("insiders", "insider-flow", { kind: "positioning", prio: 13, params: () => ({ limit: 60 }) }),
 ]);
 
 const SOURCE_BY_ID = Object.freeze(Object.fromEntries(SOURCES.map((s) => [s.id, s])));

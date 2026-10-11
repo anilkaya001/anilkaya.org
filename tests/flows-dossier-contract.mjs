@@ -12,6 +12,7 @@ import { universeValue } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
 import * as F from "./dossier-fixtures.mjs";
 import { workerSource, moduleSource } from "./lib/source-scan.mjs";
+import { loadList } from "../scripts/flows-probe.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -21,7 +22,7 @@ const root = (p) => new URL("../" + p, import.meta.url);
 const read = (p) => readFileSync(root(p), "utf8");
 
 const { VENDOR, NOW, T, SESSION } = F;
-const probeList = JSON.parse(read("scripts/flows-probe-list.json"));
+const probeList = loadList();
 const OPEN = "UNTRUSTED«";
 const CLOSE = "»";
 

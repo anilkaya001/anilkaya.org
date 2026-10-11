@@ -10,6 +10,7 @@ import {
 } from "./flows-freshness.js";
 import { LIVE_OIDC, looksLikeJwt, rsaKeys, verifyLiveOidc, claimsBrief } from "./flows-oidc.js";
 import { focusStripNames } from "./flows-focus.js";
+import { pathFor } from "./flows-vendor-ops.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
@@ -508,7 +509,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
 
 export const FOCUS_WRITER = "worker@focus";
 
-export const FOCUS_READ = Object.freeze({ path: "/api/screener/stocks", limit: 500 });
+export const FOCUS_READ = Object.freeze({ path: pathFor("screener-stocks"), limit: 500 });
 
 export function focusDue(at, clock = null) {
   const p = phaseAt(at, clock);
@@ -1069,7 +1070,6 @@ export function tapeLegFor(heldText, heldLegs, { session = null, rth = false } =
 }
 
 export async function refreshTape(env, ticker, now, { fetchVendor, heldText = null, heldLegs = 0 }) {
-  const t = encodeURIComponent(ticker);
   const clock = await cachedClock(env, now);
   const phase = phaseAt(now, clock);
   const day = phase && phase.phase !== "rth" && phase.lastClosed ? phase.lastClosed
@@ -1079,8 +1079,8 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
   let session;
   if (plan.leg === "prem") {
     const [ticks, alerts] = await Promise.all([
-      withTimeout(fetchVendor(`/api/stock/${t}/net-prem-ticks`, {}), LIVE_BUDGET.tier1TimeoutMs),
-      withTimeout(fetchVendor("/api/option-trades/flow-alerts",
+      withTimeout(fetchVendor(pathFor("net-prem-ticks", { ticker }), {}), LIVE_BUDGET.tier1TimeoutMs),
+      withTimeout(fetchVendor(pathFor("flow-alerts"),
         { ticker_symbol: ticker, newer_than: day, limit: LIVE_BUDGET.alertsPerTape * 2 }), LIVE_BUDGET.tier1TimeoutMs),
     ]);
     session = tapeSession({ ticks }, day);
@@ -1088,7 +1088,7 @@ export async function refreshTape(env, ticker, now, { fetchVendor, heldText = nu
     if (legs.prem.status === "unavailable" && legs.alerts.status === "unavailable") return null;
   } else {
     session = plan.held.session;
-    const spot = await withTimeout(fetchVendor(`/api/stock/${t}/spot-exposures`, { date: session }),
+    const spot = await withTimeout(fetchVendor(pathFor("spot-exposures", { ticker }), { date: session }),
       LIVE_BUDGET.tier1TimeoutMs);
     legs = shapeTapeGex({ spot }, { at: now, session, now });
     if (legs.gex.status === "unavailable") return null;

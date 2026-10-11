@@ -9,6 +9,7 @@ import {
 } from "../../shared/flows-variation.js";
 import { SPOT_EXPOSURE_PAGE } from "../../shared/flows-card.js";
 import { fitGarch } from "../../shared/flows-garch.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { unwrapRows as unwrapVendorRows } from "../../shared/flows-political.js";
 import { yearOfCandles } from "../flows-legs/vol.mjs";
 import { newsFields } from "../../shared/flows-news.js";
@@ -160,12 +161,12 @@ export async function enrich(ticker, spot, sessionDate, dating = { date: true, e
   const dated = sessionDate && dating.date ? { date: sessionDate } : {};
 
   const [greekFlow, ticks, strikes, expiries, ohlc] = await Promise.all([
-    uw(`/api/stock/${ticker}/greek-flow`, dated).catch(() => []),
-    uw(`/api/stock/${ticker}/net-prem-ticks`, dated).catch(() => []),
-    uw(`/api/stock/${ticker}/spot-exposures/strike`, { ...band, ...dated, limit: SPOT_EXPOSURE_PAGE }).catch(() => []),
-    uw(`/api/stock/${ticker}/greek-exposure/expiry`, dated).catch(() => []),
+    uw(pathFor("greek-flow", { ticker }), dated).catch(() => []),
+    uw(pathFor("net-prem-ticks", { ticker }), dated).catch(() => []),
+    uw(pathFor("spot-exposures-strike", { ticker }), { ...band, ...dated, limit: SPOT_EXPOSURE_PAGE }).catch(() => []),
+    uw(pathFor("greek-exposure-expiry", { ticker }), dated).catch(() => []),
 
-    uw(`/api/stock/${ticker}/ohlc/1d`, {
+    uw(pathFor("ohlc-1d", { ticker }), {
       timeframe: "2Y",
       ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
     }).catch(() => []),

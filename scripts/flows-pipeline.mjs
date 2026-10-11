@@ -30,6 +30,7 @@ import { runCards } from "./flows-nightly/sections/cards.mjs";
 import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
+import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 
 export {
@@ -83,7 +84,7 @@ export {
 } from "./flows-nightly/sections/universe.mjs";
 
 async function resolveSessionDate() {
-  const candles = await uw("/api/stock/SPY/ohlc/1d", { timeframe: "1M" }).catch(() => []);
+  const candles = await uw(pathFor("ohlc-1d", { ticker: "SPY" }), { timeframe: "1M" }).catch(() => []);
   const dates = candlesAscending(candles)
     .map((c) => String(c.start_time || c.end_time || c.date || "").slice(0, 10))
     .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));

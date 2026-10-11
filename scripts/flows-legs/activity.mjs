@@ -2,8 +2,9 @@ import {
   ACTIVITY_LIMIT, buildActivityRows, rankActivity, mergeActivity, activityBlock,
 } from "../../shared/flows-activity.js";
 import { stampNow } from "./stamp.mjs";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
-export const ACTIVITY_PATH = "/api/option-activity/unusual";
+export const ACTIVITY_PATH = pathFor("option-activity-unusual");
 
 export function activityRequest(sessionDate) {
   return { path: ACTIVITY_PATH, params: { date: sessionDate, limit: ACTIVITY_LIMIT, order: "premium", order_direction: "desc" } };

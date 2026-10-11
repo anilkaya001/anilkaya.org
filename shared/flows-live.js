@@ -4,6 +4,7 @@ import {
 } from "./flows-freshness.js";
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 import { rowsOf } from "./flows-rows.js";
+import { pathFor } from "./flows-vendor-ops.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
 
@@ -80,8 +81,8 @@ export const INDEX_NAMES = Object.freeze(["SPY", "QQQ", "IWM"]);
 export const BREADTH_ETFS = Object.freeze(["SPY", "QQQ", "IWM", "DIA"]);
 
 export const TIER1_CALLS = Object.freeze([
-  Object.freeze({ feed: "tide", path: "/api/market/market-tide", params: Object.freeze({ interval_5m: "true" }) }),
-  Object.freeze({ feed: "sectors", path: "/api/market/sector-etfs", params: Object.freeze({}) }),
+  Object.freeze({ feed: "tide", path: pathFor("market-tide"), params: Object.freeze({ interval_5m: "true" }) }),
+  Object.freeze({ feed: "sectors", path: pathFor("sector-etfs"), params: Object.freeze({}) }),
 ]);
 
 export const SILENCE = Object.freeze({

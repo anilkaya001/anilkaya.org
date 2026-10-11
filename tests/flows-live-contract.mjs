@@ -11,6 +11,7 @@ import {
 } from "../shared/flows-freshness.js";
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
+import { pathFor } from "../shared/flows-vendor-ops.js";
 import { upgradeColumns, applySchema, FLOWS_REGISTRY, FLOWS_SCHEMA_SQL as REGISTRY_SQL, columnProbe } from "../server/schema.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import {
@@ -3579,8 +3580,9 @@ const cronMinutes = (cron) => {
   deep(calls[0], { path: "/api/screener/stocks", params: { ticker: names.join(","), limit: 500 } },
     "the screener read the Actions strip makes, for the focus names only");
   ok(read("scripts/flows-legs/live.mjs").includes(
-    `read("${W.FOCUS_READ.path}", { ticker: plan.names.join(","), limit: ${W.FOCUS_READ.limit} })`),
-  "the same path and parameters as the live leg's strip read, character for character");
+    `read(pathFor("screener-stocks"), { ticker: plan.names.join(","), limit: ${W.FOCUS_READ.limit} })`),
+  "the same operation and parameters as the live leg's strip read, character for character");
+  eq(W.FOCUS_READ.path, pathFor("screener-stocks"), "and the same registry path");
   const w = writes(db);
   eq(w.length, 1, "one write");
   const [key, text, readAt, session, cadence, source, writer] = w[0].args;

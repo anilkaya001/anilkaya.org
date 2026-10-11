@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { OPS, opById, pathFor } from "../shared/flows-vendor-ops.js";
 
 export const DEFAULT_BASE = "https://api.unusualwhales.com";
 export const BASE_ENV = "FLOWS_UW_BASE_URL";
@@ -28,8 +29,8 @@ export const CLASSES = Object.freeze(["ok", "empty", "4xx", "5xx", "network", "o
 export const SESSION_PROBE = Object.freeze({
   id: "session:SPY",
   tier: "used",
-  op: "/api/stock/{ticker}/ohlc/{candle_size}",
-  path: "/api/stock/SPY/ohlc/1d",
+  op: opById("ohlc-1d").op,
+  path: pathFor("ohlc-1d", { ticker: "SPY" }),
   query: Object.freeze({ timeframe: "1M" }),
 });
 
@@ -285,8 +286,19 @@ export function validateList(list) {
   return list;
 }
 
+export function registryReads(ops) {
+  const out = {};
+  for (const entry of OPS) if (entry.reads && ops.has(entry.op)) out[entry.op] = [...entry.reads];
+  return out;
+}
+
 export function loadList(file = LIST_PATH) {
-  return validateList(JSON.parse(readFileSync(file, "utf8")));
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  if (isObj(parsed) && Array.isArray(parsed.probes) && parsed.reads === undefined) {
+    const reads = registryReads(new Set(parsed.probes.map((p) => p && p.op)));
+    if (Object.keys(reads).length) parsed.reads = reads;
+  }
+  return validateList(parsed);
 }
 
 export function expandProbes(list, tickers) {

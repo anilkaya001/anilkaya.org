@@ -5,6 +5,7 @@ import {
   pickMonthlyExpiry, regularSessionRows, toBars, exEventSlope, exEventVol, crossSectionPercentiles, volSummary,
   silentPanel, isoDay, candleDay, rowsOf, round, eventDayOf, dayDiff, closeToCloseVol,
 } from "../../shared/flows-vol.js";
+import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const VOL_INDEX_NAMES = Object.freeze(["SPY", "QQQ", "IWM"]);
 
@@ -33,20 +34,19 @@ const SHED_ORDER = Object.freeze([
 const dated = (s) => (s ? { date: s } : {});
 
 export function volRequest(kind, ticker, sessionDate, { expiry = null } = {}) {
-  const t = encodeURIComponent(ticker);
   switch (kind) {
-    case "cone": return { path: `/api/stock/${t}/interpolated-iv/distribution`, params: dated(sessionDate) };
-    case "vrp": return { path: `/api/stock/${t}/volatility/variance-risk-premium`, params: { days: 21, ...dated(sessionDate) } };
-    case "term": return { path: `/api/stock/${t}/volatility/term-structure/distribution`, params: dated(sessionDate) };
-    case "rr25": return { path: `/api/stock/${t}/historical-risk-reversal-skew`,
+    case "cone": return { path: pathFor("iv-dist", { ticker }), params: dated(sessionDate) };
+    case "vrp": return { path: pathFor("vrp", { ticker }), params: { days: 21, ...dated(sessionDate) } };
+    case "term": return { path: pathFor("term-structure-dist", { ticker }), params: dated(sessionDate) };
+    case "rr25": return { path: pathFor("rr-skew", { ticker }),
       params: { expiry, delta: 25, timeframe: "1Y", ...dated(sessionDate) } };
-    case "rr10": return { path: `/api/stock/${t}/historical-risk-reversal-skew`,
+    case "rr10": return { path: pathFor("rr-skew", { ticker }),
       params: { expiry, delta: 10, timeframe: "1Y", ...dated(sessionDate) } };
-    case "anomaly": return { path: `/api/stock/${t}/volatility/anomaly`, params: dated(sessionDate) };
-    case "sentiment": return { path: `/api/stock/${t}/volatility/option-sentiment`, params: dated(sessionDate) };
-    case "character": return { path: `/api/stock/${t}/volatility/character`, params: dated(sessionDate) };
-    case "ivRank": return { path: `/api/stock/${t}/iv-rank`, params: { timespan: "1y", ...dated(sessionDate) } };
-    case "candles": return { path: `/api/stock/${t}/ohlc/1d`,
+    case "anomaly": return { path: pathFor("vol-anomaly", { ticker }), params: dated(sessionDate) };
+    case "sentiment": return { path: pathFor("vol-sentiment", { ticker }), params: dated(sessionDate) };
+    case "character": return { path: pathFor("vol-character", { ticker }), params: dated(sessionDate) };
+    case "ivRank": return { path: pathFor("iv-rank", { ticker }), params: { timespan: "1y", ...dated(sessionDate) } };
+    case "candles": return { path: pathFor("ohlc-1d", { ticker }),
       params: { timeframe: "2Y", ...(sessionDate ? { end_date: sessionDate } : {}) } };
     default: throw new Error(`unknown vol read ${kind}`);
   }
@@ -54,10 +54,10 @@ export function volRequest(kind, ticker, sessionDate, { expiry = null } = {}) {
 
 export function radarRequest(kind, sessionDate) {
   switch (kind) {
-    case "rich": return { path: "/api/volatility/anomaly/top", params: { direction: "short_vol", limit: 50, ...dated(sessionDate) } };
-    case "cheap": return { path: "/api/volatility/anomaly/top", params: { direction: "long_vol", limit: 50, ...dated(sessionDate) } };
-    case "bullish": return { path: "/api/volatility/option-sentiment/top", params: { direction: "bullish", limit: 50, ...dated(sessionDate) } };
-    case "bearish": return { path: "/api/volatility/option-sentiment/top", params: { direction: "bearish", limit: 50, ...dated(sessionDate) } };
+    case "rich": return { path: pathFor("vol-anomaly-top"), params: { direction: "short_vol", limit: 50, ...dated(sessionDate) } };
+    case "cheap": return { path: pathFor("vol-anomaly-top"), params: { direction: "long_vol", limit: 50, ...dated(sessionDate) } };
+    case "bullish": return { path: pathFor("vol-sentiment-top"), params: { direction: "bullish", limit: 50, ...dated(sessionDate) } };
+    case "bearish": return { path: pathFor("vol-sentiment-top"), params: { direction: "bearish", limit: 50, ...dated(sessionDate) } };
     default: throw new Error(`unknown radar read ${kind}`);
   }
 }

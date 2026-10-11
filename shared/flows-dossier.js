@@ -1,5 +1,6 @@
 import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
+import { opById } from "./flows-vendor-ops.js";
 
 export const DOSSIER_VERSION = 1;
 
@@ -378,21 +379,23 @@ export function emptyPacket(kind, title, source, { status = "withheld", reason =
 }
 
 
-export const VENDOR_ROUTES = Object.freeze({
-  info: "/api/stock/{ticker}/info",
-  profile: "/api/companies/{ticker}/profile",
-  financials: "/api/stock/{ticker}/financials",
-  breakdown: "/api/stock/{ticker}/fundamental-breakdown",
-  estimates: "/api/companies/{ticker}/earnings-estimates",
-  analysts: "/api/screener/analysts",
-  earnings: "/api/earnings/{ticker}",
-  ownership: "/api/institution/{ticker}/ownership",
-  short: "/api/shorts/{ticker}/interest-float/v2",
-  insiders: "/api/insider/{ticker}/ticker-flow",
-  news: "/api/news/headlines",
-  levels: "/api/darkpool/{ticker}/price-levels",
-  quote: "/api/stock/{ticker}/stock-state",
+export const DOSSIER_OPS = Object.freeze({
+  info: "info",
+  profile: "profile",
+  financials: "financials",
+  breakdown: "fundamental-breakdown",
+  estimates: "earnings-estimates",
+  analysts: "analysts",
+  earnings: "earnings",
+  ownership: "ownership",
+  short: "short-interest",
+  insiders: "insider-flow",
+  news: "news",
+  levels: "darkpool-levels",
+  quote: "stock-state",
 });
+
+export const VENDOR_ROUTES = Object.freeze(Object.fromEntries(Object.entries(DOSSIER_OPS).map(([key, id]) => [key, opById(id).op])));
 
 export const EXTRACT_VERSIONS = Object.freeze({ ownership: 2 });
 

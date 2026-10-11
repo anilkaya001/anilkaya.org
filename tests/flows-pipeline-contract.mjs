@@ -52,6 +52,7 @@ import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
 import { rowsOf as liveRows } from "../shared/flows-live.js";
 import { unwrapRows as pulseRows } from "../shared/flows-pulse.js";
 import { unwrapRows as politicalRows } from "../shared/flows-political.js";
+import { pathFor } from "../shared/flows-vendor-ops.js";
 import { rowsOf as legRows } from "../scripts/flows-legs/common.mjs";
 import { rowsOf as volRows } from "../shared/flows-vol.js";
 import { rowsOf as positioningRows } from "../shared/flows-positioning.js";
@@ -1763,8 +1764,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
        "visible in a job log rather than only on a card");
 
     const src = nightlySource();
-    for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
-      ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
+    for (const [id, route] of [["market-oi-change", "/api/market/oi-change"], ["darkpool-recent", "/api/darkpool/recent"]]) {
+      ok(new RegExp('pathFor\\("' + id + '"\\), \\{ limit: MARKET_CROSS_LIMIT').test(src) && pathFor(id) === route,
          `${route} is fetched at the same constant the cards publish as \`requested\` — two ` +
          "numbers for one limit is a denominator that will one day be wrong");
     }
@@ -4501,13 +4502,13 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(IV_RANK_PARAMS.timespan, "1y",
      "the implied-volatility history is asked for by timespan, the parameter the vendor documents, and for a " +
      "year of it: the vol-of-vol and the AR(1) half-life read that year at no extra call");
-  ok(!/iv-rank`,\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
-  ok(/iv-rank`, \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
+  ok(!/pathFor\("iv-rank", \{ ticker \}\),\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
+  ok(/pathFor\("iv-rank", \{ ticker \}\), \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
      "the live call reads the fixture's parameter object, with the session date added so no row past the session is asked for");
   eq(fakeIvRank("ABC", 50).length, 5,
      "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
   ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 250, "and a one-year timespan with a year's sessions, as the live probe returned 251");
-  ok(/volatility\/term-structure`, \{ \.\.\.onSession \}\)/.test(src) &&
+  ok(/pathFor\("term-structure", \{ ticker \}\), \{ \.\.\.onSession \}\)/.test(src) &&
      /const onSession = ARCHIVE_DATE_RE\.test\(String\(sessionDate \|\| ""\)\) \? \{ date: sessionDate \} : \{\}/.test(src),
      "the term structure is dated at the session, so its days to expiry agree with the greeks on the same card");
   ok(/d > sessionDate/.test(src) && !/d >= sessionDate/.test(src),
