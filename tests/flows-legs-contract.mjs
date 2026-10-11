@@ -166,7 +166,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     eq(universeValue(shock, "MOVE", "iv30p"), 0.4, "A NAME WHOSE IV ROSE 40% AFTER THE MOVE carries the prior-close 0.40 in iv30p");
     eq(universeValue(shock, "MOVE", "iv30"), 0.56, "and today's 0.56 stays in iv30, so the two columns are never the same number");
     deep([shock.cols.iv30p[1], shock.cols.iv30p[2]], [null, null], "a zero or negative prior volatility is null: no denominator, so no IV-days");
-    ok(UNIVERSE_COLUMNS.find((c) => c.key === "iv30p").prio === 2, "iv30p is shed after the priority 4 and 5 columns, never before");
+    ok(UNIVERSE_COLUMNS.find((c) => c.key === "iv30p").prio === 1, "iv30p is priority 1 and never shed: the IV-days denominator and the universe projection depend on it");
   }
   {
     const full = buildUniverse([{ ticker: "AAA", marketcap: "2e9", close: "10", prev_close: "9.5", sector: "Technology", iv30d: "0.4", iv30d_1d: "0.38", next_earnings_date: "2026-09-25" },
@@ -304,6 +304,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(fit.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE 100 KiB BUDGET: ${fit.bytes} bytes for 670 names (${whole.bytes} unbudgeted, ${whole.bytes - fit.bytes} shed)`);
   ok(fit.shed.length > 0, `the dealer-delta, vanna, charm and implied-move columns do not all fit beside the thirty already there: the payload sheds ${fit.shed.join(", ")}`);
   ok(fit.shed.every((k) => prio.get(k) >= 4), "and what it sheds is priority 4 or 5 only, from the lowest priority up");
+  ok(fit.cols.iv30p && fit.cols.charm && !fit.shed.includes("iv30p") && !fit.shed.includes("charm"), `iv30p and charm both survive the 670-name budget (shed: ${fit.shed.join(", ")})`);
+  ok(fit.counts.iv30p > 300 && fit.counts.charm > 300, "and each carries a value for most names");
   const inputs = ["iv30", "ivp", "ts", "vrp", "gexAdv", "dDelta", "tilt", "ed", "si", "dex", "im30"];
   ok(inputs.every((k) => fit.cols[k] && fit.counts[k] > 300), "every input the screen reading is built on survives with a value for most names");
   ok(whole.cols.dex && whole.cols.vanna && whole.cols.charm && whole.cols.im5 && whole.cols.im30, "and the unbudgeted payload carries all five new columns");
