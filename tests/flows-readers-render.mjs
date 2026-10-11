@@ -60,8 +60,8 @@ const settle = async (page) => {
 };
 const tick = async (page, ms) => {
   NOW += ms;
-  for (let left = ms; left > 0; left -= 10000) {
-    await page.clock.runFor(Math.min(left, 10000));
+  for (let left = ms; left > 0; left -= 5000) {
+    await page.clock.runFor(Math.min(left, 5000));
     for (let i = 0; i < 400 && page._inflight > 0; i++) await page.waitForTimeout(10);
   }
   await settle(page);
