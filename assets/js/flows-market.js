@@ -466,7 +466,7 @@
     return box;
   }
 
-  const LENS = { on: false, strips: null, ed: new Map(), movers: null, hold: false, dirty: false, shown: false, asked: false, px: null };
+  const LENS = { on: false, strips: null, ed: new Map(), movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null };
   const IV_EVENT = 21;
   const IV_APART = "Earnings within 30 days: event not separated.";
   const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
@@ -524,9 +524,9 @@
   }
 
   function lensAsk() {
-    if (LENS.asked) return;
-    LENS.asked = true;
-    getLive(["strips"]).then((lk) => { if (okFeed(lk.strips)) LENS.strips = lk.strips; }).catch(() => {}).then(() => { LENS.asked = false; lensRepaint(true); });
+    if (LENS.ask) return;
+    LENS.ask = 1;
+    getLive(["strips"]).then((lk) => { if (okFeed(lk.strips)) LENS.strips = lk.strips; }).catch(() => {}).then(() => { LENS.ask = 2; lensRepaint(true); });
     LENS.px = LENS.px || (UI.rt && UI.rt.connect({ topics: ["px"] }));
     if (LENS.px && !LENS.px.bound) {
       LENS.px.bound = true;
@@ -561,9 +561,9 @@
     }
     const moves = LENS.on ? lensMoves() : null;
     LENS.shown = Boolean(moves);
-    if (LENS.on && !LENS.strips) lensAsk();
+    if (LENS.on && !LENS.strips && !LENS.ask) lensAsk();
     const cols = lists.map((spec, i) => (LENS.on && i < 2
-      ? ivList(spec[0], spec[3], moves && lensRank(moves, i ? -1 : 1), !LENS.strips)
+      ? ivList(spec[0], spec[3], moves && lensRank(moves, i ? -1 : 1), LENS.ask === 1)
       : moverList(spec[0], spec[1], spec[2], { said: spec[3] })));
     const grid = h("div", { class: "mk-movers-grid", "data-show": "0" }, cols);
     const show = (i) => { grid.dataset.show = String(i); cols.forEach((c, j) => c.classList.toggle("is-on", i === j)); };
@@ -571,6 +571,7 @@
     host.append(h("div", { class: "mk-lens" }, UI.segmented("Rank risers and fallers by", [{ label: "Raw change" }, { label: "In IV-days" }], (i) => {
       LENS.on = i === 1;
       LENS.dirty = false;
+      if (LENS.ask === 2 && !LENS.strips) LENS.ask = 0;
       paintMovers(LENS.movers);
     }, LENS.on ? 1 : 0)), grid);
     if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured.")));

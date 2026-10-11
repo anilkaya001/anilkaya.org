@@ -319,6 +319,18 @@ try {
   }
 
   {
+    const state = { strips: null, upd: 1 };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    await tick(page, 5000);
+    const got = await readLists(page);
+    eq(page._asked.filter((k) => /^lk\?k=.*strips/.test(k) && !k.includes("market")).length, 1, "WITH THE LIVE ROWS PENDING the lens asks for them once and does not loop on the answer");
+    ok(got.cols[0].clean.length === 0 && got.cols[1].clean.length === 0, "and ranks nothing");
+    eq(await page.evaluate(() => document.querySelectorAll("#mktMovers .mk-movers-col")[0].querySelectorAll(".ui-silent").length), 1, "saying so in place of the list, not a zero");
+    await page.close();
+  }
+
+  {
     const NIGHT = "2026-09-28";
     const focus = {
       status: "ok", sessionDate: NIGHT, generatedAt: iso(TUE_1330 - 20 * 3600000), readAt: iso(TUE_1330 - 20 * 3600000),
