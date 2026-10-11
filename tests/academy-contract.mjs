@@ -9,6 +9,7 @@ import { SKILL_IDS } from "../shared/skill-manifest.js";
 import { COURSE_STAGE_BY_ID } from "../shared/stage-manifest.js";
 import { PROJECT_BY_ID } from "../shared/project-manifest.js";
 import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
+import { FLOWS_REGISTRY, FLOWS_SCHEMA_SQL, upgradeColumns, upgradeTables, addedOf } from "../server/schema.js";
 import * as FLOWS_DOSSIER from "../shared/flows-dossier-worker.js";
 import { SIGNED_IN_COLUMN_SQL } from "../shared/lab-sign-in.js";
 
@@ -164,6 +165,21 @@ for (const m of workerSource.matchAll(/^const \w+ =(?=\s*(?:Object\.freeze\(\s*)
 }
 assert.deepEqual(outsideSpans(workerSource, workerDdlSpans), [],
   "worker.js declares DDL only in the top-level constants this check evaluates");
+const schemaSource = read("server/schema.js");
+const schemaDdl = [];
+const schemaDdlSpans = [];
+for (const m of schemaSource.matchAll(/^const \w+ =(?=\s*"CREATE )/gm)) {
+  const init = ddlInitializer(schemaSource, m.index + m[0].length);
+  schemaDdlSpans.push([m.index, m.index + m[0].length + init.length]);
+  schemaDdl.push(new Function(`return (${init});`)());
+}
+assert.deepEqual(outsideSpans(schemaSource, schemaDdlSpans), [],
+  "server/schema.js declares DDL only in the top-level constants this check evaluates");
+assert.deepEqual(schemaDdl.filter((sql) => !FLOWS_SCHEMA_SQL.includes(sql)), [],
+  "every table server/schema.js declares is in the registry the Worker's first-use batch is derived from");
+assert.deepEqual(FLOWS_REGISTRY.map((entry) => entry.ddl), [...FLOWS_SCHEMA_SQL],
+  "and the first-use batch is the registry's DDL in registry order");
+workerDdl.push(...FLOWS_SCHEMA_SQL);
 const runtimeStatements = new Set(workerDdl);
 for (const file of readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort()) {
   const src = read(`shared/${file}`);
@@ -259,9 +275,9 @@ assert.deepEqual(fromMigrations, fromSchema,
   "the same columns by name (type, NOT NULL, default, key position), the same unique constraints, WITHOUT ROWID and STRICT flags, " +
   "and the same indexes, triggers and views");
 const runtimeDb = sqliteOf(workerDdl);
-await FLOWS_LIVE.upgradeClockColumns(d1Of(runtimeDb));
+for (const table of upgradeTables(FLOWS_REGISTRY)) await upgradeColumns(d1Of(runtimeDb), table, addedOf(FLOWS_REGISTRY, table));
 const fromRuntime = describeDb(runtimeDb);
-const runtimeSources = [workerSource, ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).map((f) => read(`shared/${f}`))];
+const runtimeSources = [workerSource, schemaSource, ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).map((f) => read(`shared/${f}`))];
 const declaredAtRuntime = new Set(runtimeSources.flatMap((src) => [...src.matchAll(new RegExp(`${ddlKinds}\\s+IF\\s+NOT\\s+EXISTS\\s+(\\w+)`, "gi"))].map((m) => m[1])));
 const builtAtRuntime = new Set([...Object.keys(fromRuntime.tables), ...Object.keys(fromRuntime.indexes), ...Object.keys(fromRuntime.triggers), ...Object.keys(fromRuntime.views)]);
 assert.deepEqual([...declaredAtRuntime].filter((name) => !builtAtRuntime.has(name)), [],
@@ -283,16 +299,16 @@ assert.equal(workerSource.match(/\baddDayColumn\(/g).length, workerDayTables.len
 const alterSites = [
   { file: "worker.js", site: /"ALTER TABLE " \+ table \+ " ADD COLUMN (\w+) (\w+)"/g,
     columns: (m) => workerDayTables.map((table) => [table, m[1], m[2]]) },
-  { file: "shared/flows-live-worker.js", site: /`ALTER TABLE flows_clock ADD COLUMN \$\{column\} \$\{type\}`/g,
-    columns: () => FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([column, type]) => ["flows_clock", column, type]) },
+  { file: "server/schema.js", site: /`ALTER TABLE \$\{table\} ADD COLUMN \$\{column\} \$\{type\}`/g,
+    columns: () => FLOWS_REGISTRY.flatMap((entry) => entry.addedColumns.map(([column, type]) => [entry.table, column, type.split(" ")[0]])) },
   { file: "shared/lab-sign-in.js", site: /^export const SIGNED_IN_COLUMN_SQL = "ALTER TABLE \w+ ADD COLUMN \w+ \w+";$/gm,
     columns: () => [SIGNED_IN_COLUMN_SQL.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+) (\w+)$/).slice(1)] },
 ];
-const alterFiles = ["worker.js", ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort().map((f) => `shared/${f}`)];
+const alterFiles = ["worker.js", "server/schema.js", ...readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort().map((f) => `shared/${f}`)];
 const unlistedAlters = [];
 const alteredColumns = [];
 for (const file of alterFiles) {
-  const src = file === "worker.js" ? workerSource : read(file);
+  const src = file === "worker.js" ? workerSource : file === "server/schema.js" ? schemaSource : read(file);
   const listed = alterSites.filter((entry) => entry.file === file).flatMap((entry) => {
     const hits = [...src.matchAll(entry.site)];
     assert.equal(hits.length, 1, `${file}: the listed ALTER TABLE site ${entry.site} appears exactly once`);

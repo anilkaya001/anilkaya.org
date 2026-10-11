@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -19,6 +17,7 @@ import {
   DEEP_SECTIONS, CROSS_SECTIONS,
 } from "../scripts/flows-legs/flow.mjs";
 import { makeFlowFakeVendor, makeFlowFakeStore, weekdaysEndingAt } from "../scripts/flows-legs/flow-fake.mjs";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -867,15 +866,13 @@ const checkSection = (name, s, where) => {
   }
 };
 
-const dir = mkdtempSync(join(tmpdir(), "flows-positioning-"));
-try {
-  execFileSync("node", [join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", join(dir, "p.json")],
-    { stdio: "pipe" });
+const dir = nightlyEmit();
+{
   const files = readdirSync(dir);
   const read = (f) => JSON.parse(readFileSync(join(dir, f), "utf8"));
-  const allX = files.filter((f) => /^p-card-x-/.test(f)).map(read);
-  const hists = files.filter((f) => /^p-hist-/.test(f)).map(read);
-  const cards = files.filter((f) => /^p-card-(?!x-)/.test(f)).map(read).filter((c) => c.depth !== "index" && c.depth !== "fund");
+  const allX = files.filter((f) => /^-card-x-/.test(f)).map(read);
+  const hists = files.filter((f) => /^-hist-/.test(f)).map(read);
+  const cards = files.filter((f) => /^-card-(?!x-)/.test(f)).map(read).filter((c) => c.depth !== "index" && c.depth !== "fund");
   const carded = new Set(cards.map((c) => c.ticker));
   const cardX = allX.filter((c) => carded.has(c.ticker));
   const others = allX.filter((c) => !carded.has(c.ticker));
@@ -915,7 +912,7 @@ try {
     ok(dp.rows.every((r, i) => i === 0 || dp.rows[i - 1].prem >= r.prem), `${c.ticker}'s prints are ranked by premium`);
     ok(dp.session && dp.session.outside >= 4, `${c.ticker}'s panel says how many out-of-session prints it cut`);
   }
-  const pulse = read("p-pulse.json");
+  const pulse = read("-pulse.json");
   const pwin = sessionWindow(pulse.sessionDate);
   ok(pulse.darkpool.rows.every((r) => Date.parse(r.at) >= pwin.open && Date.parse(r.at) < pwin.close),
     "the pulse's market-wide prints are all inside the regular session");
@@ -923,8 +920,6 @@ try {
     "and ranked by premium");
   ok(pulse.darkpool.session && pulse.darkpool.session.extendedCode === 8,
     "and the eight after-hours prints at the head of the vendor's answer were cut and counted");
-} finally {
-  rmSync(dir, { recursive: true, force: true });
 }
 
 for (const file of ["shared/flows-positioning.js", "scripts/flows-legs/flow.mjs", "scripts/flows-legs/flow-fake.mjs"]) {

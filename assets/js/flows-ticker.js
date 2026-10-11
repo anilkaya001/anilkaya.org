@@ -2137,7 +2137,7 @@
     const skewt = g.dist === "skewt";
     return { title: skewt ? "GARCH(1,1), Hansen skewed t" : "GARCH(1,1), fitted before the skewed t", lines: [
       skewt ? "The model fits this name's own daily returns with Hansen's skewed t density: ν is the tail shape and λ the skew, which a year of returns pins to about one decimal." : "This fit predates the skewed-t density, so no tail shape, skew or next-session figure is read from it.",
-      "Fitted by " + (g.method || "maximum likelihood") + " on " + g.n + " daily returns, winsorised at six robust standard deviations (" + (g.capped || 0) + " capped).",
+      "Fitted by " + (g.method || "maximum likelihood") + " on " + g.n + " daily returns, winsorised at " + (num(g.cap) !== null && num(g.robustSd) > 0 ? Math.round(g.cap / g.robustSd) : 6) + " robust standard deviations (" + (g.capped || 0) + " capped" + (g.masked ? ", " + g.masked + " masked" : "") + ").",
       skewt ? "The next-session cell is the recursion's own state one step ahead: the model's variance for tomorrow, not a price forecast." : null,
       "The dashed reference is the RiskMetrics EWMA at 0.94 on the same returns; where the two paths agree, the long-run cell is a measurement rather than an artefact of the fit.",
     ].concat(breaksOf(ctx)) };

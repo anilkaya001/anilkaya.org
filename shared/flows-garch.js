@@ -44,7 +44,7 @@ export const GARCH_PERSIST_CAP = 0.999;
 export const GARCH_PRIOR = Object.freeze({
   persistence: 0.95, persistenceSd: 1.0, share: 0.1, shareSd: 0.7,
 });
-export const GARCH_WINSOR_K = 6;
+export const GARCH_WINSOR_K = 10;
 export const GARCH_EWMA_LAMBDA = 0.94;
 
 const logit = (q) => Math.log(q / (1 - q));
@@ -167,7 +167,7 @@ export function garchAverageVariance(nextS2, longRunS2, persistence, sessions = 
   return longRunS2 + (nextS2 - longRunS2) * (1 - Math.pow(phi, sessions)) / (sessions * (1 - phi));
 }
 
-export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS, mask = null } = {}) {
+export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS, mask = null, winsorK = GARCH_WINSOR_K } = {}) {
   const px = [], when = [];
   for (let i = 0; i < (closes || []).length; i++) {
     const c = Number(closes[i]);
@@ -193,7 +193,7 @@ export function fitGarch(closes, dates = [], { minReturns = GARCH_MIN_RETURNS, m
   if (!(robustSd > 0)) {
     return { status: "unavailable", reason: "every return in the window is identical, so there is no variance to model" };
   }
-  const cap = GARCH_WINSOR_K * robustSd;
+  const cap = winsorK * robustSd;
   let capped = 0;
   const clipped = dev.map((v) => { if (Math.abs(v) > cap) { capped++; return Math.sign(v) * cap; } return v; });
   const shift = clipped.reduce((a, b) => a + b, 0) / clipped.length;

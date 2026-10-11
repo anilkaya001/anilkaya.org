@@ -1,4 +1,4 @@
-import { aiChain, aiCallSignature, askModels, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS } from "./flows-ai.js";
+import { aiChain, aiCallSignature, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS } from "./flows-ai.js";
 import {
   READING_VERSION, READING_MAX_TOKENS, READING_TEMPERATURE, heldTags, readingFallback, readingShape, absentShape, hasSubstance, renderForReading, promptForReading,
   parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS,
@@ -51,7 +51,7 @@ const heldBack = (result) => {
 
 export function neuronCost(env, model, usage) {
   const rates = modelRates(env, model);
-  if (!rates || !isObj(usage)) return null;
+  if (!rates || !isObj(usage) || usage.estimated === true) return null;
   const tin = Math.max(0, Math.round(Number(usage.prompt_tokens) || 0));
   const tout = Math.max(0, Math.round(Number(usage.completion_tokens) || 0));
   return { neurons: Math.ceil((tin * rates.inPerM + tout * rates.outPerM) / 1e6), tokensIn: tin, tokensOut: tout };
@@ -118,28 +118,33 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
   const prompt = promptForReading(dossier, tags, rendered);
   let used = null;
   let billed = null;
-  const said = await askModels(deps.ai(), chain, [{ role: "system", content: prompt.system }, { role: "user", content: prompt.user }],
-    { maxTokens: READING_MAX_TOKENS, temperature: READING_TEMPERATURE },
-    async (model, usage) => {
+  const said = await deps.call({ surface: "read", chain,
+    messages: [{ role: "system", content: prompt.system }, { role: "user", content: prompt.user }],
+    opts: { maxTokens: READING_MAX_TOKENS, temperature: READING_TEMPERATURE },
+    onUsage: async (model, usage) => {
       billed = model;
       used = usage;
       if (typeof deps.recordSpend === "function") await deps.recordSpend(model, usage);
-    });
+    } });
   if (!said.text) {
     await store("", null, false, said.model, said.guard || "unreachable:empty", []);
     return { stored: "failed", guard: said.guard || "unreachable:empty" };
   }
   if (said.text.length > SECTION_CAPS.reply) {
+    await said.call.settle({ llm: false, guard: "read:overlong" });
     await store("", null, false, said.model, "read:overlong", []);
     return { stored: "failed", guard: "read:overlong" };
   }
   const parsed = parseReading(said.text);
   if (parsed === null) {
+    await said.call.settle({ llm: false, guard: "read:unparsable" });
     await store("", null, false, said.model, "read:unparsable", []);
     return { stored: "failed", guard: "read:unparsable" };
   }
   const vet = vetReading(parsed, dossier, tags, { shown: prompt.shown, rendered: prompt.user });
   if (!vet.ok) {
+    const first = vet.refused[0];
+    await said.call.settle({ llm: false, guard: "read:refused" }, first ? first.detail || first.why : "");
     await store("", null, false, said.model, "read:refused", vet.refused.slice(0, 16));
     return { stored: "failed", guard: "read:refused", refused: vet.refused };
   }
@@ -156,7 +161,9 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
     neurons: cost ? cost.neurons : null, tokens: cost ? { in: cost.tokensIn, out: cost.tokensOut } : null,
     provenance: readyProvenance(label, cost, refusedCount), generatedAt: startedAt, refused: vet.refused,
   });
-  await store(vet.sections.identity ? vet.sections.identity.text : vet.sections.now.text, shape, true, billed || said.model, refusedCount ? "read:trimmed:" + refusedCount : null, vet.refused.slice(0, 16));
+  const guard = refusedCount ? "read:trimmed:" + refusedCount : null;
+  await said.call.settle({ llm: true, guard });
+  await store(vet.sections.identity ? vet.sections.identity.text : vet.sections.now.text, shape, true, billed || said.model, guard, vet.refused.slice(0, 16));
   return { stored: "ready", shape };
 }
 

@@ -1,6 +1,7 @@
 import { closure, treeFiles, moduleSource, count, parseImports } from "./source-scan.mjs";
 
 export const AI_HOME = "shared/flows-ai.js";
+export const AI_BROKER = "server/ai.js";
 
 export function modelCallFiles() {
   return [...new Set([...closure("worker.js"), ...treeFiles("shared"), ...treeFiles("server")])].sort();
@@ -73,6 +74,8 @@ export function modelCallReport(files = modelCallFiles(), read = moduleSource) {
   const askSites = [];
   const metered = [];
   const cappedDeps = [];
+  const brokerSites = [];
+  const brokerDeps = [];
   const importErrors = [];
   for (const file of files) {
     const text = read(file);
@@ -83,8 +86,10 @@ export function modelCallReport(files = modelCallFiles(), read = moduleSource) {
     }
     for (const c of callsOf(file, text, /\bconst meteredAi = \(env\) => cappedAi\(/g)) metered.push(c);
     for (const c of callsOf(file, text, /\bai: \(\) => cappedAi\(/g)) cappedDeps.push(c);
+    for (const c of callsOf(file, text, /(?<!function\s+)\baiCall\(/g)) brokerSites.push(c);
+    for (const m of text.matchAll(/\bconst aiDeps = \(env, ai\) => \(\{\s*ai: ai \|\| \(\(\) => meteredAi\(env\)\),/g)) brokerDeps.push({ file, line: lineOf(text, m.index) });
   }
-  return { files: files.length, reads, tests, runs, askSites, metered, cappedDeps, importErrors };
+  return { files: files.length, reads, tests, runs, askSites, metered, cappedDeps, brokerSites, brokerDeps, importErrors };
 }
 
 const NO_READER = /^\(*\s*(?:null|undefined|void\b[\s\S]*|false|true|0|NaN|""|''|``|\(\s*\))\s*\)*$/;
@@ -119,6 +124,19 @@ export function checkModelCalls(report = modelCallReport()) {
     if (!ok) problems.push(`${s.file}:${s.line} hands askModels an unmetered binding: ${arg || "(nothing)"}`);
   }
   if (report.askSites.some((s) => s.arg === "deps.ai()") && report.cappedDeps.length < 1) problems.push("a deps.ai() binding exists but no ai: () => cappedAi( builds it");
+  for (const s of report.askSites) {
+    if (s.file !== AI_BROKER) problems.push(`${s.file}:${s.line} asks a model with askModels( outside ${AI_BROKER}; every model call is aiCall(`);
+    else if (s.arg !== "deps.ai()") problems.push(`${s.file}:${s.line} hands askModels ${s.arg || "(nothing)"}, not the capped binding deps.ai()`);
+  }
+  const outside = report.brokerSites.filter((c) => c.file !== AI_BROKER);
+  if (outside.length < 1) problems.push("no aiCall( call site was found outside " + AI_BROKER + ", so the scan reads the wrong tree");
+  if (report.brokerDeps.length !== 1) problems.push(`const aiDeps = (env, ai) => ({ ai: ai || (() => meteredAi(env)), must appear exactly once (found ${report.brokerDeps.length})`);
+  for (const c of outside) {
+    const given = c.args && c.args.length > 1 ? c.args[1] : "";
+    if (c.args === null || c.args[0] !== "env" || !/^aiDeps\(env(?:, deps\.ai)?\)$/.test(given)) {
+      problems.push(`${c.file}:${c.line} calls aiCall( with ${(c.args || []).slice(0, 2).join(", ") || "nothing"}, not env and the broker's aiDeps(env)`);
+    }
+  }
   return problems;
 }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +25,22 @@ const near = (a, b, tol, m) => {
   assert.ok(Math.abs(a - b) <= tol, `${m}: ${a} vs ${b} (|diff| ${Math.abs(a - b)} > ${tol})`);
   n++;
 };
+
+{
+  const source = fs.readFileSync(path.join(ROOT, "tests/gen-quant-audit.py"), "utf8");
+  const sha = crypto.createHash("sha256").update(source).digest("hex");
+  eq(REF.generator.path, "tests/gen-quant-audit.py", "THE REFERENCE FIXTURE NAMES ITS GENERATOR");
+  eq(REF.generator.sha256, sha, "and the generator on disk is the one that wrote it: if this fails, run python3 tests/gen-quant-audit.py (scipy and numpy of the versions the fixture records) and read the diff, or python3 tests/gen-quant-audit.py --check to see which numbers moved");
+  const seed = /^SEED = (\d+)$/m.exec(source), paths = /^PATHS = ([\d_]+)$/m.exec(source);
+  ok(seed && paths, "the generator states its seed and path count as plain constants");
+  const drawn = Number(paths[1].replace(/_/g, ""));
+  for (const text of [REF.lawRef.provenance, REF.intraday.provenance]) {
+    ok(text.includes(`scipy ${REF.generator.scipy} numpy ${REF.generator.numpy}`), "each provenance string names the library versions the generator recorded");
+    ok(text.includes(`seed ${seed[1]}`) || text.includes("seed " + seed[1]), "and the seed the generator uses");
+    ok(text.includes(drawn.toLocaleString("en-US") + "-path"), "and its path count");
+  }
+  ok(!/^\s*#/m.test(source), "the generator carries no comments, like every other source file");
+}
 
 const G = REF.garch;
 const GARCH = Object.freeze({ status: "ok", omega: G.omega, alpha: G.alpha, beta: G.beta, nu: G.nu, lambda: G.lambda, sigma2Next: G.sigma2Next,

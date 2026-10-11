@@ -1933,7 +1933,14 @@ try {
       await tick(RTH, "2026-09-23T10:21:00-04:00");
       eq(github.dispatches.length, 1, "at 10:21 the breadth read of 10:10 is eleven minutes old, so the watchdog stays quiet");
       marketNow.value = et("2026-09-23T10:56:00-04:00");
+      github.runs.list = [
+        { id: 7001, status: "in_progress", run_started_at: new Date(et("2026-09-23T09:31:00-04:00")).toISOString() },
+        { id: 7002, status: "in_progress", run_started_at: new Date(et("2026-09-23T10:50:00-04:00")).toISOString() },
+      ];
       await tick(RTH, "2026-09-23T10:56:00-04:00");
+      deep(github.runCalls.map((c) => c.method + " " + c.path.replace("/repos/anilkaya001/anilkaya.org/actions/", "")),
+        ["GET workflows/flows-live.yml/runs?status=in_progress&per_page=10", "POST runs/7001/cancel"],
+        "AT 10:56 THE STALLED LOOP'S RUN IS CANCELLED FIRST: the in-progress list is read with the dispatch token and only the 09:31 run is cancelled, never the 10:50 one");
       eq(github.dispatches.length, 2, "at 10:56, with breadth 46 minutes old, the watchdog re-dispatches off the 15-minute grid");
       eq(github.dispatches[1].body.inputs.origin, "watchdog", "and says so");
       marketNow.value = et("2026-09-23T11:01:00-04:00");
@@ -1942,6 +1949,7 @@ try {
       marketNow.value = et("2026-09-23T11:06:00-04:00");
       await tick(RTH, "2026-09-23T11:06:00-04:00");
       eq(github.dispatches.length, 2, "and the watchdog fires only once per stall");
+      eq(github.runCalls.length, 2, "with its two GitHub calls once per stall");
 
       const beforeHoliday = vendor.count(/^\/api\/(market|net-flow)\//);
       await tick(RTH, "2026-09-24T10:06:00-04:00");

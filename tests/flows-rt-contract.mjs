@@ -19,7 +19,8 @@ import { liveEntry } from "../shared/flows-live-worker.js";
 import { buildFlowAlerts } from "../shared/flows-alerts.js";
 import { FOCUS_STRIP_FALLBACK } from "../shared/flows-focus.js";
 import { boardPlan } from "../scripts/flows-legs/live.mjs";
-import { shapeNews } from "../scripts/flows-pipeline.mjs";
+import { newsFields } from "../shared/flows-news.js";
+import { rowsOf as vendorRows } from "../shared/flows-rows.js";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { createFakeVendor, fetchFor, ALERT_EVERY_MS } from "./rt-fixtures.mjs";
 import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
@@ -344,7 +345,23 @@ const SESSION_NOW = at(10, 0);
   eq(out.meta.cursor, alertsCursor(raw.data), "and alertsCursor's");
   eq(RT.applyFlow(st, raw, { session: DAY, stageOf: stage }).rows.length, 0, "fl: the same page again adds nothing: dedupe by alert id");
   eq(RT.flowQuery(st, DAY), new Date(timeMs(out.meta.cursor) - RT.RT_LIMITS.flowOverlapMs).toISOString(), "the next question reaches back 30 s behind the cursor to catch a late alert");
-  eq(RT.flowQuery(RT.createFlowState(), DAY), DAY, "and the first question of a session is the session day, as Tier 2 asks it");
+  eq(RT.flowQuery(RT.createFlowState(), DAY), DAY, "and with no clock to hand, the first question of a session is the session day, as Tier 2 asks it");
+  eq(RT.RT_LIMITS.flowFirstWindowMs, 15 * 60 * 1000, "fl: a hub with no cursor reaches back 15 minutes");
+  const WINDOW_MS = RT.RT_LIMITS.flowFirstWindowMs;
+  const fresh = RT.flowQuery(RT.createFlowState(), DAY, SESSION_NOW);
+  eq(fresh, new Date(SESSION_NOW - WINDOW_MS).toISOString(), "fl: with the hub's clock the first question of a new hub is the last 15 minutes, not the session start");
+  ok(Date.parse(fresh) >= SESSION_NOW - WINDOW_MS && Date.parse(fresh) > Date.parse(DAY), "and it is never earlier than now minus 15 minutes");
+  eq(RT.flowQuery(st, DAY, SESSION_NOW + 3600e3), RT.flowQuery(st, DAY), "fl: once a cursor exists the cursor decides, whatever the clock says");
+  {
+    const restart = SESSION_NOW + 3 * 3600e3;
+    const wide = createFakeVendor({ session: DAY, clock: () => restart });
+    wide.alertEveryMs = 60 * 1000;
+    const whole = wide.alerts({ limit: 200, newer_than: DAY });
+    const asked = wide.alerts({ limit: 200, newer_than: RT.flowQuery(RT.createFlowState(), DAY, restart) });
+    const rebuilt = RT.applyFlow(RT.createFlowState(), asked, { session: DAY, stageOf: stage });
+    ok(whole.data.length > asked.data.length && asked.data.length > 0, `fl: after a restart three hours in, the first page holds ${asked.data.length} alerts of the last 15 minutes, not the ${whole.data.length} of the session`);
+    ok(rebuilt.rows.length > 0 && rebuilt.rows.every((r) => r.ts >= restart - WINDOW_MS), "and every row the new hub sends a client is from that window");
+  }
   const later = createFakeVendor({ session: DAY, clock: () => SESSION_NOW + 9000 });
   const next = later.alerts({ limit: 200, newer_than: RT.flowQuery(st, DAY) });
   const nextOut = RT.applyFlow(st, next, { session: DAY, stageOf: stage });
@@ -378,19 +395,19 @@ const SESSION_NOW = at(10, 0);
   const news = vendor.news();
   const ns = RT.createNewsState();
   const nOut = RT.applyNews(ns, news, { at: SESSION_NOW });
-  const piped = shapeNews(news, { cap: 100 }).rows;
+  const piped = vendorRows(news).map(newsFields).filter(Boolean);
   const norm = (r) => `${r.createdAtMs}|${r.headline}`;
   const nMap = new Map(piped.map((r) => [norm(r), r]));
-  eq(nOut.rows.length, Math.min(piped.length, RT.RT_TOPICS.nw.rowMax), "nw: the ring holds as many rows as the nightly shaper's cap");
+  eq(nOut.rows.length, Math.min(piped.length, RT.RT_TOPICS.nw.rowMax), "nw: the ring holds as many rows as the shared shaper reads, up to its cap");
   for (const r of nOut.rows) {
     const { id, ts, ...rest } = r;
-    deep(rest, nMap.get(norm(r)), `nw ${r.createdAtMs}: the row is the pipeline's news row`);
+    deep(rest, nMap.get(norm(r)), `nw ${r.createdAtMs}: the row is the shared news row the nightly also shapes`);
   }
   eq(RT.applyNews(ns, news, { at: SESSION_NOW + 30000 }).rows.length, 0, "nw: the same headlines again add nothing");
   const fresher = createFakeVendor({ session: DAY, clock: () => SESSION_NOW + 45000 }).news();
   ok(RT.applyNews(ns, fresher, { at: SESSION_NOW + 45000 }).rows.length >= 2, "nw: new headlines arrive as rows");
   ok(ns.ring.length <= RT.RT_TOPICS.nw.rowMax, "nw: the ring is bounded");
-  eq(RT.newsRow({ headline: "  " }, 1), null, "nw: a headline-less row is unusable, as in the pipeline");
+  eq(RT.newsRow({ headline: "  " }, 1), null, "nw: a headline-less row is unusable, as in the nightly");
 }
 
 {
@@ -466,7 +483,10 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   eq(pxc.init.headers.Accept, "application/json", "adapter: JSON");
   eq(by(/spot-exposures/)[0].url.pathname, "/api/stock/NVDA/spot-exposures", "adapter: gx asks one name per call");
   const flc = by(/flow-alerts/)[0];
-  deep([flc.url.searchParams.get("limit"), flc.url.searchParams.get("newer_than")], ["200", DAY], "adapter: fl asks the newest page of 200 since the cursor");
+  eq(flc.url.searchParams.get("limit"), "200", "adapter: fl asks the newest page of 200");
+  const firstSince = Date.parse(flc.url.searchParams.get("newer_than"));
+  ok(firstSince >= SESSION_NOW - RT.RT_LIMITS.flowFirstWindowMs && firstSince <= SESSION_NOW + 1000 - RT.RT_LIMITS.flowFirstWindowMs,
+    "adapter: a new hub's first fl question reaches back 15 minutes from its own clock, not to the session day");
   eq(by(/news/)[0].url.searchParams.get("limit"), "100", "adapter: news asks 100 headlines");
   deep(by(/market-tide|sector-etfs/).map((c) => c.url.pathname + c.url.search), TIER1_CALLS.map((c) => c.path + (c.path.includes("tide") ? "?interval_5m=true" : "")), "adapter: the market is Tier 1's two calls with Tier 1's params");
   eq(u.frames.length, 6 - 1, "adapter: every answered poll delivers one frame (the market's two calls are one)");
@@ -630,7 +650,7 @@ function rig({ start = SESSION_NOW, env = {}, roster = async () => null, vendorO
   const join = (user = "anilkaya", opts = {}) => {
     const ws = mkSocket(user, opts.exp);
     sockets.push(ws);
-    const admitted = hub.admit(ws, { u: user, exp: ws.exp, topics: opts.topics || TOPICS, f: opts.f || null });
+    const admitted = hub.admit(ws, { u: user, exp: ws.exp, uep: opts.uep === undefined ? null : opts.uep, topics: opts.topics || TOPICS, f: opts.f || null });
     return { ws, admitted };
   };
   const run = async (seconds, step = 1000) => {
@@ -1056,6 +1076,71 @@ const seqOk = (ws) => {
   await new Promise((res) => setTimeout(res, 1600));
   await r2.run(2);
   deep(e.ws.closed, [RT.RT_CLOSE.expired, "session-expired"], "expiry: a socket outliving its session is closed with 4001 at the next tick");
+}
+
+{
+  const creds = (over = {}) => JSON.stringify({
+    alice: { hash: "h", epoch: 3 }, bob: { hash: "h" }, dave: { hash: "h", epoch: 0 },
+    old: { hash: "h", until: "2020-01-01" }, ...over,
+  });
+  const r = rig({ env: { FLOWS_CREDENTIALS: creds() } });
+  const alice = r.join("alice", { uep: 3 });
+  const bob = r.join("bob", { uep: 0 });
+  const dave = r.join("dave", { uep: 0 });
+  const stale = r.join("old", { uep: 0 });
+  const ghost = r.join("ghost", { uep: 0 });
+  const anon = r.join("alice", { uep: undefined });
+  eq(alice.ws.att.uep, 3, "revocation: the member epoch the session was verified at is stored in the attachment");
+  await r.run(10);
+  deep([alice.ws.closed, bob.ws.closed, dave.ws.closed, anon.ws.closed], [null, null, null, null],
+    "revocation: members whose record still matches stay connected, and a socket with no recorded epoch is left alone");
+  deep([stale.ws.closed, ghost.ws.closed], [[RT.RT_CLOSE.expired, "member-revoked"], [RT.RT_CLOSE.expired, "member-revoked"]],
+    "revocation: a member past their until day and a name that is not a member are closed at the first roster read with 4001");
+  deep(ctlOf(ghost.ws, "bye")[0].meta, { reason: "member-revoked", code: 4001 }, "revocation: after a bye frame that says why");
+  r.hub.env.FLOWS_CREDENTIALS = creds({ alice: { hash: "h", epoch: 4 }, bob: undefined });
+  await r.run(200);
+  deep([alice.ws.closed, bob.ws.closed], [null, null], "revocation: an epoch bump and a removed member are not noticed before the next roster refresh");
+  await r.run(110);
+  deep([alice.ws.closed, bob.ws.closed, dave.ws.closed], [[RT.RT_CLOSE.expired, "member-revoked"], [RT.RT_CLOSE.expired, "member-revoked"], null],
+    "revocation: within one roster refresh (five minutes) the bumped epoch and the removed member are closed with 4001, an unchanged member stays");
+  eq(r.hub.socketCount, 2, "revocation: and the demand count follows: dave and the socket with no recorded epoch remain");
+  r.hub.env.FLOWS_CREDENTIALS = undefined;
+  await r.run(310);
+  ok(dave.ws.closed && dave.ws.closed[1] === "member-revoked", "revocation: a Worker with no credentials secret fails closed, as its session check does");
+  eq(r.hub.memberEpochOf("alice"), 0, "revocation: the epoch lookup of a name the secret does not hold is 0");
+}
+
+{
+  const creds = (epoch) => JSON.stringify({ alice: { hash: "h", epoch } });
+  const down = async () => { throw new Error("D1 unavailable"); };
+  const r = rig({ env: { FLOWS_CREDENTIALS: creds(1) }, roster: down });
+  const alice = r.join("alice", { uep: 1 });
+  await r.run(5);
+  eq(alice.ws.closed, null, "revocation with the store down: a matching member stays");
+  r.hub.env.FLOWS_CREDENTIALS = creds(2);
+  await r.run(40);
+  deep(alice.ws.closed, [RT.RT_CLOSE.expired, "member-revoked"],
+    "revocation with the store down: the check does not wait for D1; it runs at the next attempt, thirty seconds on");
+  const lines = r.logs.filter((l) => /member check failed/.test(JSON.stringify(l)));
+  eq(lines.length, 0, "and logs nothing when it works");
+}
+
+{
+  const sessions = { creds: JSON.stringify({ firatgok: { hash: "h", epoch: 7 }, anilkaya: { hash: "h" } }) };
+  const forwarded = [];
+  const stub = { fetch: async (req) => { forwarded.push(Object.fromEntries(req.headers.entries())); return new Response("{}", { status: 200 }); } };
+  const { serveRt } = await import("../shared/flows-rt-routes.js");
+  class HttpError extends Error { constructor(status, code, message, headers) { super(message); Object.assign(this, { status, code, headers }); } }
+  const env = { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_USERS: "anilkaya", FLOWS_CREDENTIALS: sessions.creds,
+    PULSE: { idFromName: (n) => ({ n }), get: () => stub } };
+  const ws = async (username, over = {}) => {
+    const request = new Request("https://anilkaya.org/api/rt/ws", { headers: { Upgrade: "websocket", "X-RT-Uep": "99" } });
+    await serveRt(request, { ...env, ...over }, new URL(request.url),
+      { json: (b) => b, HttpError, getSession: async () => ({ username, exp: 1790780000000 }), requireSameOrigin() {} });
+    return forwarded[forwarded.length - 1];
+  };
+  eq((await ws("firatgok"))["x-rt-uep"], "7", "revocation route: the object is told the member epoch the Worker verified, and a client's own X-RT-Uep is replaced");
+  eq((await ws("anilkaya"))["x-rt-uep"], "0", "revocation route: a member with no epoch is 0");
 }
 
 {
@@ -1910,6 +1995,183 @@ const seqOk = (ws) => {
     Date.now = realNow;
     globalThis.fetch = realFetch;
     delete globalThis.WebSocketRequestResponsePair;
+  }
+}
+
+{
+  const KEY = "uwk_Zq9+/3xT=a b&c7Lm2VpR8sYd";
+  const SESSION = "sess-4f9d2c71b0e8a3-SECRET";
+  const FORMS = (secret) => [secret, encodeURIComponent(secret), btoa(secret)];
+  const leaks = (text, secrets = [KEY, SESSION]) => {
+    const body = String(text);
+    for (const secret of secrets) for (const form of FORMS(secret)) {
+      for (let i = 0; i + 8 <= form.length; i++) if (body.includes(form.slice(i, i + 8))) return form.slice(i, i + 8);
+    }
+    return null;
+  };
+  eq(leaks("nothing here"), null, "redaction: the leak finder finds nothing in clean text");
+  ok(leaks("x " + KEY.slice(0, 8) + " y") !== null && leaks(encodeURIComponent(KEY).slice(3, 20)) !== null && leaks("a" + btoa(KEY).slice(5, 30)) !== null,
+     "redaction: and finds eight characters of the key in any of its three spellings, so a truncated key cannot pass");
+
+  const R = RT.createRedactor([KEY, SESSION, "short", "", null, 7]);
+  eq(R.armed, true, "redaction: a redactor with a usable secret is armed");
+  eq(RT.createRedactor(["short", "1234567", "", null]).armed, false, "redaction: a secret under eight characters is ignored: it would redact the language, not the credential");
+  eq(RT.createRedactor().armed, false, "redaction: and with none it is a pass-through");
+  for (const form of FORMS(KEY)) {
+    eq(R("fetch failed: " + form + " (twice " + form + ")").includes(form), false, `redaction: ${form.slice(0, 12)}... is removed in every occurrence`);
+  }
+  eq(R("wss://api.unusualwhales.com/socket?token=abc123XYZ&x=1"), "wss://api.unusualwhales.com/socket?token=" + RT.RT_REDACTED + "&x=1",
+     "redaction: a token in a URL query is removed by its parameter name even when the secret is not known");
+  eq(R("GET /s?a=1;api_key=ZZZZZZZZ"), "GET /s?a=1;api_key=" + RT.RT_REDACTED, "redaction: whichever credential parameter it uses");
+  eq(R("401 Authorization: Bearer abcDEF123456.-_~+/="), "401 Authorization: Bearer " + RT.RT_REDACTED, "redaction: a bearer credential in a header line is removed");
+  eq(R(R("token=zzzzzzzzzz " + KEY)), R("token=zzzzzzzzzz " + KEY), "redaction: and redacting twice changes nothing");
+  eq(R("tickers=AAPL,NVDA&limit=500"), "tickers=AAPL,NVDA&limit=500", "redaction: ordinary parameters are untouched");
+  deep(R.deep({ a: [KEY, { b: "x?token=qqqqqqqq", n: 3, z: null }], [KEY]: true }), { a: [RT.RT_REDACTED, { b: "x?token=" + RT.RT_REDACTED, n: 3, z: null }], [RT.RT_REDACTED]: true },
+       "redaction: deep covers arrays, objects, keys and leaves numbers and nulls alone");
+  eq(leaks(JSON.stringify(R.deep({ message: "x".repeat(40) + KEY + FORMS(SESSION)[2] }))), null, "redaction: and a second secret in a base64 spelling goes with the first");
+  const secrets = RT.rtSecretsOf({ UW_API_KEY: KEY, SESSION_SECRET: SESSION, GOOGLE_CLIENT_SECRET: "short", FLOWS_INGEST_TOKEN: 5, OTHER: "x".repeat(20) });
+  deep(secrets, [KEY, SESSION], "redaction: the Worker secrets the object can see are collected by name, and only usable strings");
+  deep(hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION }).secrets, [KEY, SESSION], "redaction: and the hub's configuration carries them without the vendor key's name");
+
+  const grab = () => {
+    const lines = [];
+    const real = console.error;
+    console.error = (...a) => { lines.push(a.map(String).join(" ")); };
+    return { lines, restore: () => { console.error = real; } };
+  };
+  const longMessage = (head) => "x".repeat(head) + " wss://api.unusualwhales.com/socket?token=" + encodeURIComponent(KEY) + " raw " + KEY + " tail ".repeat(8);
+  const straddle = (cut) => "x".repeat(cut - 10) + KEY + " tail";
+  eq(leaks(straddle(120).slice(0, 120)), "uwk_Zq9+", "redaction: a message cut at its truncation limit with ten characters of the key before the cut still shows the key to the leak finder");
+
+  {
+    const cap = grab();
+    try {
+      const pushed = { handlers: null };
+      const stub = () => ({
+        kind: "push", start(plan, h) { pushed.handlers = h; }, stop() {}, async tick() {}, paused: () => false,
+        state: () => ({ running: true, url: "wss://api.unusualwhales.com/socket?token=" + KEY, note: "Bearer " + KEY }),
+      });
+      const state = { t: SESSION_NOW };
+      const sockets = [];
+      const hub = new RtHub({
+        env: { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION }, now: () => state.t,
+        upstreamFactory: stub, host: { sockets: () => sockets, wake() {} },
+        loadRoster: async () => { throw new Error(straddle(120)); },
+      });
+      const ws = mkSocket();
+      sockets.push(ws);
+      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
+      await hub.tick();
+      pushed.handlers.onError({ k: "px", at: state.t, code: "internal", status: null, message: longMessage(0) });
+      pushed.handlers.onError({ k: "fl", at: state.t, code: "network", status: null, message: longMessage(0) });
+      const st = hub.status();
+      const everything = [JSON.stringify(st), cap.lines.join("\n"), JSON.stringify(ws.sent)].join("\n");
+      eq(leaks(everything), null, "redaction: a failing roster read and a pushed internal error leave no part of the key in the log, the status or a frame");
+      ok(cap.lines.length >= 2, "redaction: and they were logged (the default log is console.error), so the absence above is of the key and not of the line");
+      ok(st.roster.error && st.roster.error.message.includes(RT.RT_REDACTED), "redaction: the roster error survives in status with the key replaced");
+      ok(cap.lines.some((l) => l.includes("rt poll failed")) && cap.lines.some((l) => l.includes("rt roster read failed")), "redaction: both log lines are the ones the hub always wrote");
+      eq(leaks(JSON.stringify(st.upstream)), null, "redaction: an upstream whose own state carries a socket URL with the token is redacted in status as well");
+      deep(Object.keys(st.topics.px.lastError).sort(), ["at", "code", "status", "throttled"], "redaction: a topic's last error is a code and a status, never the message");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const cap = grab();
+    try {
+      const outcomes = [
+        () => { throw new TypeError("fetch failed for https://api.unusualwhales.com/api/screener/stocks?token=" + KEY); },
+        () => new Response(JSON.stringify({ error: "bad key " + KEY, message: longMessage(0) }), { status: 401 }),
+        () => new Response("upstream said " + KEY, { status: 500 }),
+        () => new Response("<html>" + KEY + "</html>", { status: 200 }),
+        () => { const e = new Error(longMessage(80)); e.name = "NetworkError"; throw e; },
+      ];
+      let n = 0;
+      const state = { t: SESSION_NOW };
+      const sockets = [];
+      const wakes = [];
+      const hub = createHub({
+        env: { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test" },
+        now: () => state.t, random: () => 0.5,
+        fetchImpl: async () => outcomes[n++ % outcomes.length](),
+        host: { sockets: () => sockets, wake: (ms) => wakes.push(ms) },
+        loadRoster: async () => null,
+      });
+      const ws = mkSocket();
+      sockets.push(ws);
+      hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, topics: TOPICS, f: "NVDA" });
+      for (let i = 0; i < 60; i++) { await hub.tick(); state.t += 1000; }
+      ok(n >= 10, `redaction: the REST adapter made ${n} calls against a vendor that refused, errored, returned HTML and threw the key in its messages`);
+      const st = hub.status();
+      eq(leaks([JSON.stringify(st), cap.lines.join("\n"), JSON.stringify(ws.sent)].join("\n")), null,
+         "redaction: no status body, log line or frame to a socket carries any part of the key");
+      ok(TOPICS.some((k) => st.topics[k].fails > 0), "redaction: and the failures really were counted");
+      eq(st.upstream.host, "uw.test", "redaction: status names the upstream by host only");
+      eq(st.upstream.key, true, "redaction: and says a key is configured, nothing more");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const cap = grab();
+    const alarmEnv = { FLOWS_RT_MODE: "on", UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test" };
+    const { Pulse } = await import("../shared/flows-rt-hub.js");
+    const boom = (cut) => { throw new Error(straddle(cut)); };
+    const ctx = {
+      getWebSockets: () => [],
+      storage: { getAlarm: async () => boom(120), setAlarm: async () => boom(120), deleteAlarm: async () => {} },
+    };
+    try {
+      const pulse = new Pulse(ctx, alarmEnv);
+      await pulse.arm(10);
+      pulse.hub.tick = async () => boom(160);
+      await pulse.alarm();
+      const ws = mkSocket();
+      pulse.hub.onMessage = () => boom(120);
+      pulse.webSocketMessage(ws, "{}");
+      eq(leaks(cap.lines.join("\n")), null, "redaction: the object's alarm, tick and message failures log without the key even when the key sits across the cut the messages are truncated at");
+      ok(cap.lines.length >= 2 && cap.lines.every((l) => /"message":"rt (alarm|tick|message) failed"/.test(l)), "redaction: and they were logged: " + cap.lines.length + " lines");
+      const body = await (await pulse.fetch(new Request("https://pulse.internal/status"))).text();
+      eq(leaks(body), null, "redaction: the object's /status answers without the key");
+    } finally {
+      cap.restore();
+    }
+  }
+
+  {
+    const state = { t: SESSION_NOW };
+    const errors = [];
+    const cfg = hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION, UW_BASE: "http://uw.test", FLOWS_RT_MODE: "on" });
+    const up = createRestUpstream({ cfg, fetchImpl: async () => { throw new Error("unreachable"); }, now: () => state.t, random: () => 0.5, budget: RT.createBudget() });
+    up.start({ ...plainPlan(), topics: new Set(["px"]), names: () => { throw new Error(straddle(120)); } }, { onFrame() {}, onError: (e) => errors.push(e) });
+    await up.tick(state.t);
+    eq(errors.length, 1, "redaction: the adapter reports a failure of its own as one internal error");
+    eq(errors[0].code, "internal", "redaction: coded internal");
+    eq(leaks(JSON.stringify(errors)), null, "redaction: and redacts the message before it truncates it, so the cut cannot leave a prefix of the key");
+    ok(errors[0].message.includes(RT.RT_REDACTED), "redaction: the message keeps its shape with the key replaced");
+    up.stop();
+  }
+
+  {
+    const hubSrc = read("shared/flows-rt-hub.js");
+    const routesSrc = read("shared/flows-rt-routes.js");
+    const railSrc = read("shared/flows-rt.js");
+    eq((hubSrc.match(/console\.error\(/g) || []).length, 1, "redaction: the hub writes to the console in exactly one place, the default log, which only logOnce reaches");
+    eq((routesSrc.match(/console\./g) || []).length + (railSrc.match(/console\./g) || []).length, 0, "redaction: and the routes and the pure half never write to it");
+    eq((hubSrc.match(/this\.log\(/g) || []).length, 1, "redaction: the log function is called from one line");
+    ok(/this\.log\(this\.redact\.deep\(entry\)\)/.test(hubSrc), "redaction: and that line redacts the whole entry first");
+    ok(/return this\.redact\.deep\(\{\n\s+running: this\.running/.test(hubSrc), "redaction: status is redacted whole before it leaves the object");
+    const logOnceCalls = hubSrc.match(/logOnce\("[a-z:]+"[^\n]*/g) || [];
+    ok(logOnceCalls.length >= 5, `redaction: ${logOnceCalls.length} logOnce calls found`);
+    for (const call of logOnceCalls.filter((c) => /slice\(/.test(c))) {
+      ok(/redact\(String\(/.test(call) && call.indexOf("redact(") < call.indexOf(".slice("), `redaction: ${call.slice(0, 60)}... redacts before it truncates`);
+    }
+    const toml = read("wrangler.toml");
+    const socketTopics = Object.entries(RT.RT_UPSTREAM).filter(([, v]) => v.channels.length > 0).map(([k]) => k);
+    ok(socketTopics.length === 5, "redaction: every topic names vendor socket channels, so the credential rules apply to the object that will open them");
+    ok(/\[observability\.traces\]\nenabled = false\n/.test(toml), "redaction: and traces are switched off in wrangler.toml, where a span would record the socket URL's query");
   }
 }
 

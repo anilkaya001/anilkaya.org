@@ -1,6 +1,7 @@
 import { gammaFlip } from "./flows-features.js";
 import { PUT_TO_DEALER } from "./flows-variation.js";
 import { parseOptionSymbol } from "./flows-premium.js";
+import { rowsOrNull } from "./flows-rows.js";
 
 export const POSITIONING_VERSION = 1;
 
@@ -183,9 +184,7 @@ export function rowsOf(body, rule) {
     return o && typeof o === "object" && !Array.isArray(o) ? o : null;
   }
   if (rule === "chains") return body && typeof body === "object" && Array.isArray(body.chains) ? body.chains : null;
-  if (Array.isArray(body)) return body;
-  if (body && typeof body === "object" && Array.isArray(body.data)) return body.data;
-  return null;
+  return rowsOrNull(body);
 }
 
 export function failedRead(code) {

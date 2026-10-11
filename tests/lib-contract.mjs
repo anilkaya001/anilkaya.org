@@ -10,6 +10,9 @@ import * as CPU from "./lib/cpu-budget.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import zlib from "node:zlib";
 import { createWireReader, summariseWire } from "./lib/ws-wire.mjs";
+import { nightlyEmit, emitFiles, emitRead, sourceFingerprint, EMIT_MARK, DRY_NOW } from "./lib/nightly-emit.mjs";
+import { nightlyFiles, nightlySource, nightlySlice, nightlyExecution, treeFiles, NIGHTLY_ENTRY, NIGHTLY_DIR } from "./lib/source-scan.mjs";
+import { utimesSync, readdirSync as listDir } from "node:fs";
 import { plan as bumpPlan, referenceFiles } from "../scripts/bump-assets.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -336,6 +339,65 @@ const notes = [];
   deep([sum.messages, sum.deflated, sum.plain, sum.wire === a.length + b.length, sum.wire < sum.plain, sum.kinds.px.n], [2, 2, rows.length + again.length, true, true, 2], "ws-wire: the summary counts wire against plain bytes per message kind");
   const mixed = summariseWire([...reader.messages, ...packed.messages]);
   deep(Object.keys(mixed.kinds).sort(), ["fl", "mk", "px"], "ws-wire: kinds are read from the envelope's k");
+}
+
+{
+  const root = path.join(scratch, "emit-root");
+  mkdirSync(path.join(root, "scripts"), { recursive: true });
+  mkdirSync(path.join(root, "shared"), { recursive: true });
+  const stub = path.join(root, "scripts/flows-pipeline.mjs");
+  const runs = path.join(scratch, "emit-runs.txt");
+  writeFileSync(path.join(root, "shared/leaf.js"), "export const x = 1;\n");
+  writeFileSync(stub, `import { appendFileSync, writeFileSync } from "node:fs";
+const dir = process.argv[process.argv.indexOf("--emit") + 1];
+appendFileSync(${JSON.stringify(runs)}, (process.env.FLOWS_DRY_NOW || "unset") + " " + process.argv.includes("--dry-run") + "\\n");
+writeFileSync(dir + "-meta.json", JSON.stringify({ generatedAt: process.env.FLOWS_DRY_NOW }));
+`);
+  const emitDir = path.join(scratch, "emit-out");
+  const first = nightlyEmit({ root, dir: emitDir });
+  eq(first, emitDir, "nightly-emit: an explicit directory is the one returned");
+  deep(emitFiles(first), ["-meta.json"], "nightly-emit: the emit's files are listed without the completeness mark");
+  ok(existsSync(path.join(first, EMIT_MARK)), "nightly-emit: the mark is written after the build");
+  deep(emitRead(first, "meta"), { generatedAt: DRY_NOW }, "nightly-emit: the child is handed FLOWS_DRY_NOW and reads back by key");
+  eq(emitRead(first, "absent"), null, "nightly-emit: a key that was not emitted reads null, not a throw");
+  eq(readFileSync(runs, "utf8"), `${DRY_NOW} true\n`, "nightly-emit: the child ran once, with --dry-run and the pinned clock");
+  eq(nightlyEmit({ root, dir: emitDir }), emitDir, "nightly-emit: a second call returns the same directory");
+  eq(readFileSync(runs, "utf8"), `${DRY_NOW} true\n`, "nightly-emit: and builds nothing, within a process");
+  const probe = spawnSync(process.execPath, ["--input-type=module", "-e",
+    `import { nightlyEmit } from ${JSON.stringify(new URL("./lib/nightly-emit.mjs", import.meta.url).href)}; console.log(nightlyEmit({ root: ${JSON.stringify(root)}, dir: ${JSON.stringify(emitDir)} }));`], { encoding: "utf8" });
+  ok(probe.status === 0 && probe.stdout.trim() === emitDir, "nightly-emit: another process reuses the finished directory: " + said(probe));
+  eq(readFileSync(runs, "utf8"), `${DRY_NOW} true\n`, "nightly-emit: and builds nothing there either");
+  const before = sourceFingerprint(root);
+  eq(sourceFingerprint(root), before, "nightly-emit: the source fingerprint is stable while the tree is");
+  const later = new Date(Date.now() + 120000);
+  utimesSync(path.join(root, "shared/leaf.js"), later, later);
+  ok(sourceFingerprint(root) !== before, "nightly-emit: touching a source file moves the fingerprint");
+  const probe2 = spawnSync(process.execPath, ["--input-type=module", "-e",
+    `import { nightlyEmit } from ${JSON.stringify(new URL("./lib/nightly-emit.mjs", import.meta.url).href)}; console.log(nightlyEmit({ root: ${JSON.stringify(root)}, dir: ${JSON.stringify(emitDir)} }));`], { encoding: "utf8" });
+  ok(probe2.status === 0, "nightly-emit: a changed tree rebuilds: " + said(probe2));
+  eq(readFileSync(runs, "utf8").split("\n").filter(Boolean).length, 2, "nightly-emit: the stale directory was rebuilt once");
+  const other = nightlyEmit({ root, dir: path.join(scratch, "emit-out-2"), now: "2026-08-25T09:00:00Z" });
+  deep(emitRead(other, "meta"), { generatedAt: "2026-08-25T09:00:00Z" }, "nightly-emit: another clock is another build");
+  const own = nightlyEmit({ root, dir: null });
+  ok(own.startsWith(tmpdir()) && existsSync(path.join(own, EMIT_MARK)), "nightly-emit: with no directory given the emit goes to a temporary one");
+  ok(listDir(own).includes("-meta.json"), "nightly-emit: and holds the payload");
+}
+
+{
+  const files = nightlyFiles();
+  eq(files[0], NIGHTLY_ENTRY, "nightly-source: the entry comes first");
+  ok(files.length > 1 && files.slice(1).every((f) => f.startsWith(NIGHTLY_DIR + "/") && f.endsWith(".mjs")), "nightly-source: then every module under the nightly directory, at any depth");
+  deep(files.slice(1), [...files.slice(1)].sort(), "nightly-source: in a fixed order");
+  deep(files.slice(1), treeFiles(NIGHTLY_DIR), "nightly-source: and exactly the tree the comment scan walks");
+  const src = nightlySource();
+  ok(src.indexOf("@@ source " + NIGHTLY_ENTRY + " @@") < src.indexOf("@@ source " + files[1] + " @@"), "nightly-source: the concatenation marks each module's boundary");
+  ok(nightlySlice("export const ISOLATION", "export const WHY_CAP").includes("fatal"), "nightly-source: a slice inside one module is returned");
+  throwsLike(() => nightlySlice("this marker is nowhere in the nightly"), /marker not found/, "nightly-source: a slice whose start marker is missing throws instead of passing on nothing");
+  throwsLike(() => nightlySlice("export const ISOLATION", "this end marker is nowhere"), /marker not found/, "nightly-source: and so does one whose end marker is missing");
+  throwsLike(() => nightlySlice("const ARGS", "export const ISOLATION"), /crosses a module boundary/, "nightly-source: a slice across two modules throws, so a moved scan must name the module that now holds its code");
+  const exec = nightlyExecution();
+  ok(!/await run[A-Z]\w*\(ctx\);/.test(exec), "nightly-source: the execution text has every section call replaced by that section's body");
+  ok(exec.indexOf('stages.step("session")') >= 0 && exec.indexOf('stages.step("session")') < exec.indexOf('stages.step("universe")'), "nightly-source: and reads in the order the run executes");
 }
 
 for (const n of notes) console.log("  note: " + n);

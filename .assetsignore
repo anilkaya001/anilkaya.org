@@ -5,6 +5,7 @@
 tests/
 node_modules/
 shared/
+server/
 functions/
 scripts/
 articles/_template/

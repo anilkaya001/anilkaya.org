@@ -1,9 +1,8 @@
 import assert from "node:assert";
-import { execFileSync } from "node:child_process";
-import { readFileSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -13,19 +12,10 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.strictEqual(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
 
-const dir = mkdtempSync(join(tmpdir(), "flows-shape-"));
-try {
-  execFileSync("node", [join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run",
-    "--emit", join(dir, "p.json")], { stdio: "pipe" });
-} catch (error) {
-  console.error("the pipeline itself failed to run, so nothing below is measurable");
-  console.error(String(error.stdout || "") + String(error.stderr || ""));
-  rmSync(dir, { recursive: true, force: true });
-  process.exit(1);
-}
+const dir = nightlyEmit();
 
 const emitted = (key) => {
-  const file = join(dir, "p-" + key.replace(":", "-") + ".json");
+  const file = join(dir, "-" + key.replace(":", "-") + ".json");
   if (!existsSync(file)) return null;
   return JSON.parse(readFileSync(file, "utf8"));
 };
@@ -184,7 +174,7 @@ assert.deepEqual(missingReport, [],
   missingReport.join("\n  ")); checks++;
 
 {
-  const cards = readdirSync(dir).filter((f) => /^p-card-[A-Z0-9.]+\.json$/.test(f))
+  const cards = readdirSync(dir).filter((f) => /^-card-[A-Z0-9.]+\.json$/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
     .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
@@ -195,7 +185,7 @@ assert.deepEqual(missingReport, [],
       const f = c.engine.facts.find((x) => x.id === "iv.pctile.30.1y");
       const want = c.x && c.x.vol && Number.isFinite(c.x.vol.iv30Pct) ? c.x.vol.iv30Pct : null;
       if (!f) { wrong.push(`${c.ticker}: no iv.pctile.30.1y fact`); continue; }
-      const xf = join(dir, "p-card-x-" + c.ticker + ".json");
+      const xf = join(dir, "-card-x-" + c.ticker + ".json");
       const cone = existsSync(xf) ? JSON.parse(readFileSync(xf, "utf8")).cone : null;
       const tenor = cone && Array.isArray(cone.tenors) ? cone.tenors.find((t) => t.days === 30) : null;
       if (want === null) { absent++; if (f.v !== null || f.g !== 0 || f.why !== "iv.pctile-absent") wrong.push(`${c.ticker}: an absent percentile is not withheld`); }
@@ -295,7 +285,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^-card-(?!x-)/.test(f));
   ok(cardFiles.length > 0, "the pipeline emitted cards for the panel scan to read");
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
 
@@ -545,7 +535,7 @@ assert.deepEqual(missingReport, [],
 }
 
 {
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^-card-(?!x-)/.test(f));
   const cards = cardFiles.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cards.every((c) => c.panels && c.panels.variation),
      "every emitted card carries the hedging panel, deep and cross-section alike");
@@ -620,13 +610,13 @@ assert.deepEqual(missingReport, [],
     "term.expiries": ["expiry", "dte", "iv", "min", "q1", "median", "q3", "max", "pct", "pctRaw", "samples", "firstDate",
       "zShape", "fwd", "premium", "kink", "event", "eventFirst"],
   };
-  const files = readdirSync(dir).filter((f) => /^p-card-x-/.test(f));
+  const files = readdirSync(dir).filter((f) => /^-card-x-/.test(f));
   const everyX = files.map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   const dossiers = everyX.filter((d) => Object.hasOwn(d, "scope"));
   ok(everyX.filter((d) => !Object.hasOwn(d, "scope")).every((d) => !Object.hasOwn(d, "cone") &&
     ["short", "insiders", "earnings"].some((k) => Object.hasOwn(d, k)) && !Object.hasOwn(d, "gex")),
      "a card-x the vol leg did not write is an ownership-only dossier from the universe leg, not a vol dossier missing its envelope");
-  const carded = readdirSync(dir).filter((f) => /^p-card-[A-Z]/.test(f)).map((f) => f.slice("p-card-".length, -".json".length));
+  const carded = readdirSync(dir).filter((f) => /^-card-[A-Z]/.test(f)).map((f) => f.slice("-card-".length, -".json".length));
   ok(carded.every((t) => dossiers.some((d) => d.ticker === t)), "every carded name has its vol dossier");
   ok(dossiers.length >= 100, `the dry run emits a card-x dossier per carded and index name (${dossiers.length})`);
   const byScope = (s) => dossiers.filter((d) => d.scope === s);
@@ -680,7 +670,7 @@ assert.deepEqual(missingReport, [],
   const dyn = byScope("deep").filter((d) => d.ivDyn.status === "ok").length;
   ok(dyn > byScope("deep").length / 2, `the deep dossiers carry IV dynamics from the card leg's 1y read (${dyn})`);
 
-  const cardFiles = readdirSync(dir).filter((f) => /^p-card-(?!x-)/.test(f));
+  const cardFiles = readdirSync(dir).filter((f) => /^-card-(?!x-)/.test(f));
   const SUMMARY = ["v", "asOf", "iv30", "iv30Pct", "richCheap", "view", "coneShape", "slope30_90", "rv21", "rv21Pct", "yz21",
     "gap63", "vrp", "skew", "term", "ivDyn", "votes", "status"];
   for (const f of cardFiles) {
@@ -734,10 +724,10 @@ assert.deepEqual(missingReport, [],
     "every field the vol contract publishes is on every emitted arm:\n  " +
     missingReport.filter((m) => /^card-x|^card x\.vol|^regime/.test(m)).slice(0, 20).join("\n  ")); checks++;
   const { FLOW_CODES, UNITS } = await import("../shared/flows-positioning.js");
-  const cardX = readdirSync(dir).filter((f) => /^p-card-x-[A-Z]/.test(f))
+  const cardX = readdirSync(dir).filter((f) => /^-card-x-[A-Z]/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
     .filter((c) => Object.hasOwn(c, "depth"));
-  const hists = readdirSync(dir).filter((f) => /^p-hist-[A-Z]/.test(f))
+  const hists = readdirSync(dir).filter((f) => /^-hist-[A-Z]/.test(f))
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cardX.length > 0 && hists.length === cardX.length,
      `the pipeline emits card-x and hist for the same names (${cardX.length} and ${hists.length})`);
@@ -851,7 +841,7 @@ assert.deepEqual(missingReport, [],
   ok(p.totals && Array.isArray(p.totals.rows) && p.totals.rows.length <= 20,
     "while pulse.totals keeps the twenty sessions its renderers rank");
 
-  const cx = readdirSync(dir).filter((f) => /^p-card-x-/.test(f)).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
+  const cx = readdirSync(dir).filter((f) => /^-card-x-/.test(f)).map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")));
   ok(cx.length > 0, `the pipeline emits card-x payloads (${cx.length})`);
   for (const c of cx) {
     ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
@@ -915,7 +905,7 @@ assert.deepEqual(missingReport, [],
 
   const { LIVE_KEYS } = await import("../shared/flows-live.js");
   const live = (key) => {
-    const file = join(dir, "p-" + key.replace(":", "-") + ".json");
+    const file = join(dir, "-" + key.replace(":", "-") + ".json");
     return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
   };
   const SILENCES = new Set(["ok", "quiet", "unavailable", "unreadable", "prior", "pending"]);
@@ -963,8 +953,6 @@ assert.deepEqual(missingReport, [],
   ok(hb.run && Number.isInteger(hb.run.calls) && hb.run.keys && typeof hb.run.finishedAt === "string",
      "the heartbeat is the run's ledger: calls, bytes per key, and when it finished");
 }
-
-rmSync(dir, { recursive: true, force: true });
 
 console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and the renderers ` +
   `checked against each other rather than against a fixture that agrees with both, every root ` +

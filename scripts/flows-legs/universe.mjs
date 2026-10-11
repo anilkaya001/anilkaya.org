@@ -1,3 +1,4 @@
+import { stampNow } from "./stamp.mjs";
 import { read, rowsOf, chunks, pastDeadline, freshStamp } from "./common.mjs";
 import { buildUniverse, addDays, vstr } from "../../shared/flows-cross.js";
 
@@ -26,7 +27,7 @@ export async function harvestScreener(uw, {
 } = {}) {
   const byTicker = new Map();
   const errors = [];
-  const readAt = new Date().toISOString();
+  const readAt = stampNow();
   let pages = 0, calls = 0, truncated = false, repeated = false;
   for (let page = 0; page < maxPages; page++) {
     const res = await read(uw, "/api/screener/stocks", {
@@ -100,7 +101,7 @@ export async function fetchMissingMembers(uw, wanted, heldTickers, { date = null
   return { asked: absent, rows: [...got.rows.values()], missing: got.missing, calls: got.calls, ok: got.ok, error: got.error };
 }
 
-export async function readFocusRows(uw, tickers, { date = null, readAt = () => new Date().toISOString() } = {}) {
+export async function readFocusRows(uw, tickers, { date = null, readAt = stampNow } = {}) {
   const got = await screenerByTicker(uw, tickers, { date });
   return { ...got, readAt: readAt() };
 }

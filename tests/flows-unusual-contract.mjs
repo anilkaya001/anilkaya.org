@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 
 import {
   UA_MIN_VOLUME, UA_MIN_OI, UA_ROWS, UA_NAMES, UA_PER_NAME_MIN, UA_PER_NAME_MAX,
@@ -18,6 +17,7 @@ import {
 } from "../shared/flows-activity.js";
 import { readActivity, activityRequest, activityEnabled, errorCodeOf, ACTIVITY_PATH } from "../scripts/flows-legs/activity.mjs";
 import { fakeChain, screenerTilt, unusualContractId, callModel, CALL_COST, NOMINAL_SHAPE } from "../scripts/flows-pipeline.mjs";
+import { nightlyEmit, emitRead } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -25,19 +25,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
-const EMIT_DIR = path.join(ROOT, "tests", ".unusual-emit");
-fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-fs.mkdirSync(EMIT_DIR, { recursive: true });
-
-let PAYLOAD;
-try {
-  execFileSync(process.execPath,
-    [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", EMIT_DIR + "/"],
-    { stdio: "ignore" });
-  PAYLOAD = JSON.parse(fs.readFileSync(path.join(EMIT_DIR, "-unusual.json"), "utf8"));
-} finally {
-  fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-}
+const PAYLOAD = emitRead(nightlyEmit(), "unusual");
 
 const SPOT = 100;
 const CHAIN = fakeChain("SYN001", SPOT, 4242);
@@ -597,9 +585,10 @@ const rebuild = (em) => {
      "and every published dte is measured from that date — the label is VERIFIED against " +
      "the arithmetic rather than trusted, which is the difference between an anchor and a " +
      "caption");
-  ok(c.rows.some((r) => r.dte !== daysToExpiry(r.expiry, PAYLOAD.readAt.slice(0, 10))),
-     "and the horizons are demonstrably NOT measured from readAt, so the anchor claim has " +
-     "teeth: the two dates differ and the rows follow sessionDate");
+  const NEXT_DAY = new Date(Date.parse(PAYLOAD.sessionDate + "T00:00:00Z") + 864e5).toISOString().slice(0, 10);
+  ok(c.rows.some((r) => r.dte !== daysToExpiry(r.expiry, NEXT_DAY)),
+     "and the horizons are demonstrably NOT measured from a read made the next day, so the anchor " +
+     "claim has teeth: the two dates differ and the rows follow sessionDate");
   ok(c.rows.every((r) => r.dte !== null), "no row publishes an unmeasurable horizon");
 }
 

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import { DatabaseSync } from "node:sqlite";
 import * as L from "../shared/flows-ledger.js";
 import * as W from "../shared/flows-live-worker.js";
+import { FLOWS_REGISTRY, applySchema, withAddedColumns, LEDGER_ADDED_COLUMNS } from "../server/schema.js";
 import { LIVE_KEYS, freshEnvelope } from "../shared/flows-live.js";
 import { FRESH_CLASSES, easternInstant } from "../shared/flows-freshness.js";
 import { fakeLiveVendor } from "../scripts/flows-legs/live-fake.mjs";
@@ -73,6 +75,47 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   eq(L.LEDGER_RETAIN_DAYS, 30, "the ledger keeps thirty days");
   eq(L.LEDGER_LIMITS.tier1Ms, FRESH_CLASSES.market.staleS * 1000, "the Tier 1 and focus gap limit IS the Worker class's stale line, read from the table that draws the reader's stale mark");
   eq(L.LEDGER_LIMITS.tier2Ms, FRESH_CLASSES.breadth.staleS * 1000, "and the Tier 2 limit is the Actions class's");
+}
+
+{
+  const OVER = Object.freeze([Object.freeze(["t1_over_ms", "INTEGER NOT NULL DEFAULT 0"])]);
+  const newDdl = L.LEDGER_SCHEMA_SQL.replace("nightly_runs INTEGER NOT NULL DEFAULT 0, updated_at", "nightly_runs INTEGER NOT NULL DEFAULT 0, t1_over_ms INTEGER NOT NULL DEFAULT 0, updated_at");
+  ok(newDdl !== L.LEDGER_SCHEMA_SQL, "the grown ledger DDL differs from the shipped one by the one column");
+  const grown = withAddedColumns(FLOWS_REGISTRY, "flows_ledger", OVER, newDdl);
+  deep([LEDGER_ADDED_COLUMNS.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [0, 0],
+    "no column has been added to the ledger since its migration, so the shipped registry probes only flows_clock");
+  const win = L.tickWindow(DAY, null);
+  const extra = (store, at0) => store.D1.prepare(
+    "INSERT INTO flows_ledger (day, ticks, t1_over_ms, updated_at) VALUES (?1, 0, 3, ?2) ON CONFLICT(day) DO UPDATE SET t1_over_ms = t1_over_ms + 3, updated_at = ?2",
+  ).bind(DAY, at0);
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (line) => { warnings.push(String(line)); };
+  try {
+    const old = sqliteD1();
+    deep(sqlColumns(old.db, "flows_ledger").filter((c) => c.startsWith("t1_over_ms")), [], "THE PRODUCTION LEDGER BEFORE THE COLUMN: a database provisioned from the shipped DDL lacks it");
+    await W.batchWithLedger(old.D1, [L.ledgerTickStatement(old.D1, { day: DAY, at: at(9, 31), ...win })], extra(old, at(9, 31)));
+    eq(warnings.length, 1, "a statement that names the missing column is refused by the database, which is the silent fallback the registry replaces");
+    ok(/ledger statement refused/.test(warnings[0]) && /t1_over_ms/.test(warnings[0]), "with the refusal warning the Worker logs");
+    eq(old.row(DAY).ticks, 1, "while the core write still lands");
+    warnings.length = 0;
+    old.trips.length = 0;
+    const done = await applySchema(old.D1, grown);
+    deep(done, { flows_ledger: ["t1_over_ms"] }, "THE FIRST USE ADDS THE COLUMN: the schema bootstrap reports exactly the column the registry names");
+    deep(old.trips.map((t) => [t.kind, t.sqls.length]).slice(0, 1), [["batch", FLOWS_REGISTRY.length + 2]],
+      "in one batch of the twelve CREATEs and the two column probes, flows_clock's and the ledger's");
+    eq(old.trips.filter((t) => t.sqls.some((q) => /ALTER TABLE/.test(q))).length, 1, "with one ALTER and no other trip");
+    await W.batchWithLedger(old.D1, [L.ledgerTickStatement(old.D1, { day: DAY, at: at(9, 36), ...win })], extra(old, at(9, 36)));
+    deep([warnings.length, old.row(DAY).ticks, old.row(DAY).t1_over_ms], [0, 2, 3], "and the next tick writes the new column with no refusal warning");
+    old.trips.length = 0;
+    deep(await applySchema(old.D1, grown), {}, "a second bootstrap adds nothing");
+    eq(old.trips.length, 1, "and costs the one batch");
+    const fresh = sqliteD1({ schema: "" });
+    deep(await applySchema(fresh.D1, grown), {}, "a database created from the grown DDL has the column already and adds nothing");
+    ok(sqlColumns(fresh.db, "flows_ledger").some((c) => c.startsWith("t1_over_ms:INTEGER:1:0")), "with the declared type, NOT NULL and default");
+  } finally {
+    console.warn = warn;
+  }
 }
 
 {
@@ -539,7 +582,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
     "and a dry run whose roster is a name short is red, so a wiring fault in the plan is found before a night pays for it");
   const dryBare = await runHealthGate({ dry: true, log: (l) => dryLines.push("bare " + l), warn: () => {} });
   ok(dryBare.failures.length === 0 && !dryLines.some((l) => /^bare .*run facts/.test(l)), "with no run facts a dry run says only that it skipped");
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   ok(/night: \{\s*cardsFailed: cardsFailed \+ extraFailed, deadlineSkipped: deadlineSkipped \+ extraSkipped,\s*planned: byCard\.size \+ dossierBuilt\.size, rostered: rosterSummary \? rosterSummary\.rostered : null,/.test(pipeline) &&
      /rosterThrew = true;/.test(pipeline) && /rostered: Object\.keys\(built\.payload\.depth\)\.length/.test(pipeline),
     "and the nightly hands it the card counts, the plan and the roster it published");
@@ -640,7 +683,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(capped(M + 45000 + lag.lagStep - QUOTA_WAIT.maxMs - 1), null, "and one a millisecond past it is not");
   eq(storeQuotaWait(res(503, 86355), "<html>x</html>", { now: M + 45000, firstAt: M - 50000 }), null, "a day-away answer that is not the Worker's store_quota is never a lag");
   eq(storeQuotaWait(res(503), quotaBody, { now: M + 45000, firstAt: M - 50000 }), null, "nor one with no Retry-After");
-  const pipeline = read("scripts/flows-pipeline.mjs");
+  const pipeline = nightlySource();
   ok(/const quotaWait = !response\.ok && heard \? storeQuotaWait\(response, heard\.text, \{ firstAt: quotaFirstAt \}\) : null;\s*if \(quotaWait !== null\) \{[\s\S]*?ingestWrites\.defer\(quotaWait\);\s*(?:wireProgress\.quiet\(quotaWait\);\s*)?await sleep\(quotaWait\);\s*attempt--;\s*continue;/.test(pipeline),
     "and the write loop takes that wait before the generic retry, defers every other writer with it, and does not spend a retry on it");
 }

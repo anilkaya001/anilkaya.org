@@ -7,6 +7,10 @@ import * as NEURON from "../shared/flows-neuron.js";
 import { workerSource, expect } from "./lib/source-scan.mjs";
 import { guardAi, assertAiGuarded, aiGuardStats } from "./lib/ai-guard.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
+import { flowsReadRows } from "../server/routes/flows-read.js";
+import { flowsDeskRows } from "../server/routes/flows-desk.js";
+import { flowsAiRows } from "../server/routes/flows-ai.js";
+import { createRouter } from "../server/router.js";
 
 let checks = 0;
 const TIMER_SLACK_MS = 50;
@@ -105,11 +109,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const answers = await Promise.all(HOME.map(get));
   ok(answers.every((a) => a.res.status === 200), "a cold isolate answers all thirteen home-page reads at once");
   eq(f.count(SCHEMA_RE), 1,
-     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the twelve-statement schema batch once, " +
+     "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the fourteen-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
-  eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of upgradeClockColumns once");
+  eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of the schema bootstrap once");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 13 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 15 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");
@@ -788,9 +792,15 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   globalThis.fetch = realFetch;
   const routed = new Set(CEILING.map(([path]) => path.split("?")[0]));
   const source = workerSource();
-  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 20, why: "the Flows read routes are declared somewhere in the Worker's closure" });
-  const declared = [...new Set([...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]))]
+  expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
+  const stub = new Proxy({}, { get: () => () => null });
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub)).rows.map((r) => r.path);
+  ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk and flows-ai families: " + routerPaths.length + " rows");
+  expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
+  const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);
+  const declared = [...new Set([...routerPaths, ...chain])]
     .filter((path) => !["/api/flows/ingest", "/api/flows/tape"].includes(path));
+  ok(declared.length >= 30, "the table and the remaining chain declare at least thirty Flows read routes: " + declared.length);
   const unpriced = declared.filter((path) => !routed.has(path) && !HOME.some((h) => h.startsWith(path)));
   deep(unpriced, [], "EVERY FLOWS READ ROUTE THE WORKER DECLARES HAS A ROWS-READ CEILING: a new route that is not priced here fails, so the read cap can never be spent by a route nobody counted");
 
@@ -1229,8 +1239,10 @@ class FakeCache {
       prob: { popQ: 0.7, popP: 0.78 }, ev: { q: -3, p: 21, edge: 24 }, maxProfit: 140, maxLoss: -360 }],
     ideas, noTrade,
   });
+  let engineWorld = null;
   const reading = async (engine, reply) => {
     const f = fakeD1();
+    engineWorld = f;
     seed(f);
     f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70, engine });
     const ai = reply === null ? {} : { AI: { run: async () => ({ response: JSON.stringify(reply), usage: { prompt_tokens: 100, completion_tokens: 20 } }) } };
@@ -1242,6 +1254,11 @@ class FakeCache {
   };
 
   const ranked = await reading(block(["S1"], null), { verdict: "stand-aside", ideas: [] });
+  deep(engineWorld.db.prepare("SELECT surface, outcome, reason, n FROM flows_ai_outcome").all().map((r) => [r.surface, r.outcome, r.reason, r.n]), [["neuron", "refused", "engine:refused", 1]],
+    "THE ENGINE NEURON'S REFUSAL IS COUNTED: a model that contradicts the engine's ranking is one call counted refused with the engine's reason");
+  const culprit = engineWorld.db.prepare("SELECT surface, reason, culprit FROM flows_ai_reject").all().map((r) => [r.surface, r.reason, r.culprit]);
+  ok(culprit.length === 1 && culprit[0][0] === "neuron" && culprit[0][1] === "refused:engine:refused" && culprit[0][2].length > 0 && culprit[0][2].length <= 40 && !/\s/.test(culprit[0][2]),
+    "and the ring holds the engine's refusal code alone (" + JSON.stringify(culprit) + ")");
   ok(ranked.status === "ok" && ranked.engine === true && ranked.ideas.length === 1 && ranked.ideas[0].structure === "S1" && ranked.ideas[0].from === "engine" &&
      ranked.verdict !== "stand-aside" && ranked.guard === "engine:refused" && ranked.llm === false,
      `N-F2, end to end: a model that answers stand-aside while the engine ranks S1 is refused, and the reader gets the engine's idea and no Stand aside tag (${ranked.verdict}, ${ranked.guard})`);
@@ -1271,6 +1288,44 @@ class FakeCache {
 
 {
   const unshift = shiftClock(FIXTURE_NOW);
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const legacy = async (replies) => {
+    const f = fakeD1();
+    seed(f);
+    f.put("card:NVDA", { ...NIGHTLY, ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
+    let n = 0;
+    const ai = { run: async () => {
+      const r = replies[Math.min(n++, replies.length - 1)];
+      if (r instanceof Error) throw r;
+      return { response: typeof r === "string" ? r : JSON.stringify(r), usage: { prompt_tokens: 100, completion_tokens: 20 } };
+    } };
+    const get = await client(f.D1, { ...AI_ENV, FLOWS_READ_MODE: "off", AI: ai });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    return {
+      calls: n,
+      counted: f.db.prepare("SELECT surface, outcome, reason, n FROM flows_ai_outcome ORDER BY outcome, reason").all().map((r) => [r.surface, r.outcome, r.reason, r.n]),
+      ring: f.db.prepare("SELECT surface, reason, culprit FROM flows_ai_reject").all().map((r) => [r.surface, r.reason, r.culprit]),
+      guard: f.db.prepare("SELECT guard, llm FROM flows_neuron WHERE scope = 'ticker:NVDA'").get(),
+    };
+  };
+  const invented = await legacy(["no json here, only prose", { summary: "The last price is up 99.9% on the day.", ideas: [] }]);
+  deep([invented.calls, invented.counted, invented.ring], [2, [["neuron", "refused", "invented", 1], ["neuron", "unparsable", "", 1]], [["neuron", "refused:invented", "99.9"]]],
+    "THE LEGACY NEURON'S REPARSE IS TWO CALLS, COUNTED TWICE: prose first (unparsable, settled when the second request is made), then an invented figure (refused), whose figure alone reaches the ring");
+  const empty = await legacy([{ ideas: [] }]);
+  deep([empty.calls, empty.counted, empty.guard.guard], [2, [["neuron", "empty", "summary", 1], ["neuron", "unparsable", "", 1]], "summary:empty"],
+    "ideas without a summary twice are unparsable, then empty (summary)");
+  const blip = await legacy([{ ideas: [] }, new Error("AiError: 3040: capacity")]);
+  deep([blip.counted, blip.guard.guard], [[["neuron", "capacity", "", 1], ["neuron", "unparsable", "", 1]], "unreachable:reparse:capacity"],
+    "and a capacity blip on the second request is counted capacity beside the first request's unparsable");
+  const clean = await legacy([{ summary: "The last price is 170.", ideas: [] }]);
+  deep([clean.calls, clean.counted.length, clean.counted[0] && clean.counted[0][1]], [1, 1, clean.counted[0] && clean.counted[0][1]], "a reply the guard takes is one call and one counter");
+  unshift();
+}
+
+{
+  const unshift = shiftClock(FIXTURE_NOW);
   const RW = await import("../shared/flows-reading-worker.js");
   const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_READ_MODE: "on" };
   const calls = [];
@@ -1293,6 +1348,10 @@ class FakeCache {
   ok(miss.rows <= 22, `rows read before the response by a summary call that finds no reading and starts one: ${miss.rows} (ceiling 22: the card and prior reading, the reading row, the dossier's primary-key batch)`);
   ok(miss.total <= 34, `and ${miss.total} with the background generation's own reads of the day's spend (ceiling 34)`);
   ok(calls.filter((c) => /stock reader/.test(c)).length === 1, "and one model call for the reading, in the background");
+  const counted = f.db.prepare("SELECT surface, outcome, n FROM flows_ai_outcome ORDER BY surface, outcome").all().map((r) => ({ ...r }));
+  eq(counted.reduce((n, r) => n + r.n, 0), calls.length, `EVERY MODEL CALL IS COUNTED ONCE (${calls.length}): ${counted.map((r) => r.surface + " " + r.outcome).join(", ")}`);
+  ok(counted.some((r) => r.surface === "read" && r.outcome === "refused"), "the reading's scripted reply of {} is counted as refused under the reading's surface (" + JSON.stringify(counted) + ")");
+  eq(f.trips.filter((t) => t.sqls.some((q) => /^INSERT INTO flows_ai_outcome/.test(q))).length, calls.length, "each in one trip of its own, so a model call costs one more trip and one more row written and no row read");
   const row = f.db.prepare("SELECT fingerprint FROM flows_neuron WHERE scope = 'read:NVDA'").get();
   ok(row && row.fingerprint.endsWith("|" + RW.readSignature({ ...AI_ENV })), "its row is keyed by the model signature");
   const hit = (guard, llm, shape, at) => f.db.prepare(
@@ -1680,6 +1739,60 @@ class FakeCache {
   } finally {
     globalThis.fetch = realFetch;
   }
+}
+
+{
+  const unshift = shiftClock(FIXTURE_NOW);
+  const AI_ENV = { FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_FALLBACK_MODEL: "", FLOWS_ASK_NEURONS: "5500,36400" };
+  const answer = JSON.stringify({ summary: "NVDA scored 61 this session with conviction 70 of 100.", ideas: [] });
+  const usageRow = (f) => f.db.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage").get();
+  const modelRow = (f) => f.db.prepare("SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model").get();
+  const spendTrips = (f) => f.trips.filter((t) => t.sqls.some((q) => /^(SELECT|INSERT).*flows_ai_usage/.test(q)));
+  const stored = (f) => f.db.prepare("SELECT summary, guard FROM flows_neuron WHERE scope = 'ticker:NVDA'").get();
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const get = await client(f.D1, { ...AI_ENV, AI: { run: async () => ({ response: answer }) } });
+    await get("/api/flows/meta");
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    ok(stored(f).summary.startsWith("NVDA scored 61"), "METER: a reply with no usage still writes the reading");
+    const row = usageRow(f);
+    ok(row && row.calls === 1 && row.tokens_in > 300 && row.tokens_out > 0,
+      "and the day's meter rises by one call with estimated tokens, not by nothing (" + JSON.stringify(row) + ")");
+    const split = modelRow(f);
+    ok(split && split.model === AI_ENV.FLOWS_ASK_MODEL && split.calls === 1 && split.tokens_in === row.tokens_in && split.tokens_out === row.tokens_out,
+      "under the model that answered, in the same amounts");
+    const trips = spendTrips(f);
+    eq(trips.length, 2, "THE METER COSTS ONE TRIP A CALL: the day's spend read before the call and one recording batch after it, with no read back (three trips before)");
+    const recording = trips[trips.length - 1];
+    ok(recording.kind === "batch" && recording.sqls.length === 2 && /^INSERT INTO flows_ai_usage \(/.test(recording.sqls[0]) && /^INSERT INTO flows_ai_usage_model/.test(recording.sqls[1]),
+      "that batch is the two inserts, and it is the last statement to touch the table");
+  }
+
+  {
+    const f = fakeD1();
+    seed(f);
+    const calls = [];
+    const get = await client(f.D1, { ...AI_ENV, AI: { run: async () => { calls.push(1); return { response: answer, usage: { prompt_tokens: 100, completion_tokens: 20 } }; } } });
+    await get("/api/flows/meta");
+    f.fail(/^INSERT INTO flows_ai_usage \(/);
+    const warn = captureWarn();
+    const first = await get("/api/flows/summary?t=NVDA");
+    await first.settle();
+    f.put("card:NVDA", { ...NIGHTLY, generatedAt: "2026-09-25T00:40:00.000Z", ticker: "NVDA", panels: PANELS, score: 61, conviction: 70 });
+    const again = await get("/api/flows/summary?t=NVDA");
+    await again.settle();
+    warn.stop();
+    eq(calls.length, 2, "METER FAILURE: two generations ran");
+    ok(stored(f).summary.startsWith("NVDA scored 61"), "and a recorder that cannot write does not cost the reading");
+    const lines = warn.lines.filter((l) => l && typeof l === "object" && l.message === "ai spend not recorded");
+    eq(lines.length, 1, "while the failure is logged once for the isolate, not once a call");
+    ok(lines[0].model === AI_ENV.FLOWS_ASK_MODEL && /refused/.test(lines[0].error), "naming the model and the store's error");
+    eq(usageRow(f), undefined, "and the meter stayed at zero because nothing could be written");
+  }
+  unshift();
 }
 
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);

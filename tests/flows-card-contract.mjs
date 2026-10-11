@@ -7,9 +7,11 @@ import {
   measureOrder, measureOiBasis, CROSS_NOTES,
   numOrNull, polarityOf, POLARITY, pickMaxPain, pickMaxPainRow, CARD_SCHEMA_VERSION,
   HORIZON_SESSIONS, RICHNESS_LINE, lastRangeOf, expiryGammaShare, MAX_PAIN_MIN_SHARE, SPOT_EXPOSURE_PAGE,
+  SURFACE_OI_LEGS, SURFACE_OI_BASIS,
 } from "../shared/flows-card.js";
 import { STATE_LINES } from "../shared/flows-neuron.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import { horizonMove } from "../shared/flows-features.js";
 import { blackScholesGreeks } from "../shared/flows-variation.js";
 import { buildAggressor } from "../shared/flows-chain.js";
@@ -889,6 +891,99 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 }
 
 {
+  const flow = { call_gamma_ask: "6e6", call_gamma_bid: "4e6", put_gamma_ask: "-3e6", put_gamma_bid: "-1e6" };
+  const withOi = (strike, expiry, oi) => ({ strike: String(strike), expiry, ...flow, ...oi });
+  const full = (k) => ({
+    call_gamma_oi: String(k * 1e6), put_gamma_oi: String(-k * 4e5),
+    call_charm_oi: String(k * 2.5e5), put_charm_oi: String(k * 1.5e5),
+    call_vanna_oi: String(-k * 3e5), put_vanna_oi: String(k * 1e5),
+  });
+
+  const rows = [
+    withOi(90, "2026-08-28", full(1)), withOi(90, "2026-09-18", full(2)),
+    withOi(100, "2026-08-28", full(3)),
+    withOi(110, "2026-08-28", full(4)), withOi(110, "2026-09-18", full(5)),
+  ];
+  const surf = buildSurface(rows, { spot: 100, asOf: "2026-08-25" });
+  eq(surf.status, "ok");
+  ok(surf.oi && surf.oi.source === "vendor", "the surface keeps the vendor's open-interest legs and says whose they are");
+  eq(surf.oi.basis, SURFACE_OI_BASIS, "with the sentence that names their basis and the unit the vendor does not state for charm and vanna");
+  assert.deepEqual(Object.keys(SURFACE_OI_LEGS), ["gamma", "charm", "vanna"]); checks++;
+  for (const name of ["gamma", "charm", "vanna"]) {
+    ok(Array.isArray(surf.oi[name]) && surf.oi[name].length === surf.strikes.length &&
+       surf.oi[name].every((row) => row.length === surf.expiries.length),
+       `the ${name} grid has the strike-by-expiry shape of the flow grid, so one index reads both`);
+  }
+  eq(surf.oi.gamma[0][0], 1e6 - 4e5, "a cell is the call leg plus the put leg as the vendor signs them (gamma, 90 strike, first expiry)");
+  eq(surf.oi.charm[2][1], 5 * 2.5e5 + 5 * 1.5e5, "charm of the 110 strike in the second expiry");
+  eq(surf.oi.vanna[1][0], -3 * 3e5 + 3 * 1e5, "vanna of the 100 strike in the first expiry");
+  eq(surf.oi.gamma[1][1], null, "a pair the vendor did not return is null in the new grids as in the flow grid");
+  eq(surf.grid[1][1], null, "and in the same cell");
+
+  const stripped = buildSurface(rows.map((r) => {
+    const out = { ...r };
+    for (const legs of Object.values(SURFACE_OI_LEGS)) for (const f of legs) delete out[f];
+    return out;
+  }), { spot: 100, asOf: "2026-08-25" });
+  eq(stripped.oi, null, "a response without the open-interest fields carries oi: null, not grids of nulls");
+  assert.deepEqual({ ...surf, oi: null }, stripped); checks++;
+
+  const onlyCharm = buildSurface([
+    withOi(100, "2026-08-28", { call_charm_oi: "7e5", put_charm_oi: "1e5" }),
+    withOi(105, "2026-08-28", { call_charm_oi: "0", put_charm_oi: "0" }),
+  ], { spot: 100 });
+  eq(onlyCharm.oi.gamma, null, "a quantity the vendor did not return at all is a null grid");
+  eq(onlyCharm.oi.vanna, null, "for each quantity on its own");
+  eq(onlyCharm.oi.charm[onlyCharm.strikes.indexOf(100)][0], 8e5, "while the one it returned is kept");
+  eq(onlyCharm.oi.charm[onlyCharm.strikes.indexOf(105)][0], 0, "a measured zero stays a zero");
+
+  const oneLeg = buildSurface([withOi(100, "2026-08-28", { call_vanna_oi: "-2e5" })], { spot: 100 });
+  eq(oneLeg.oi.vanna[0][0], -2e5, "one leg alone is the cell's value, the missing leg is not read as a zero that was measured");
+
+  const noFlow = buildSurface([
+    withOi(100, "2026-08-28", full(1)),
+    { strike: "105", expiry: "2026-08-28", ...full(9) },
+  ], { spot: 100 });
+  ok(!noFlow.strikes.includes(105), "a row that carries open-interest legs but no flow leg still opens no cell");
+  eq(noFlow.oi.gamma.length, noFlow.strikes.length, "so the new grids never outrun the flow grid");
+
+  const noisy = buildSurface([withOi(100, "2026-08-28", {
+    call_gamma_oi: "123456789.123456789", put_gamma_oi: "0.000123456789", call_charm_oi: "x", put_charm_oi: null,
+  })], { spot: 100 });
+  eq(noisy.oi.gamma[0][0], 123456789, "values from 1,000 up are stored as whole numbers, which is what keeps 504 of them small");
+  eq(noisy.oi.charm, null, "and an unparseable leg is no leg");
+  const tiny = buildSurface([withOi(100, "2026-08-28", { call_gamma_oi: "0.000123456789", put_gamma_oi: "0" })], { spot: 100 });
+  eq(tiny.oi.gamma[0][0], 0.000123457, "small values keep six significant digits");
+
+  const card = buildCard({
+    ticker: "TEST", row: { close: "100" }, features: null, strikes: [], ticks: [], expiries: [], maxPain: [], congress: [],
+    surface: rows, chain: null, generatedAt: null, sessionDate: "2026-08-28", weights: null,
+  });
+  eq(card.panels.surface.status, "ok");
+  assert.deepEqual(card.panels.surface.oi, surf.oi); checks++;
+  eq(buildCard({
+    ticker: "TEST", row: { close: "100" }, features: null, strikes: [], ticks: [], expiries: [], maxPain: [], congress: [],
+    surface: [], chain: null, generatedAt: null, sessionDate: "2026-08-28", weights: null,
+  }).panels.surface.oi, undefined, "an unavailable surface carries no oi field at all");
+}
+
+{
+  const root = new URL("../", import.meta.url);
+  const readers = [];
+  for (const [dir, ext] of [["shared/", /\.js$/], ["assets/js/", /\.js$/], ["scripts/", /\.mjs$/], ["scripts/flows-legs/", /\.mjs$/]]) {
+    for (const f of readdirSync(new URL(dir, root))) {
+      if (!ext.test(f) || /\.bundle\.js$/.test(f) || f === "flows-card.js" || (dir === "scripts/" && f === "flows-pipeline.mjs")) continue;
+      const src = readFileSync(new URL(dir + f, root), "utf8");
+      if (/surface\??\.oi\b|\.oi\??\.(gamma|charm|vanna)\b|SURFACE_OI_LEGS/.test(src)) readers.push(dir + f);
+    }
+  }
+  ok(readers.length === 0,
+     "no AI fact, chart, brief or card consumer reads the stored open-interest grids until the registry ids of P3-19 exist " +
+     "(or a reader labels them the vendor's with the dealer clause); the nightly's shedder is their one writer besides the card builder, " +
+     `and these read them: ${readers.join(", ")}`);
+}
+
+{
   const base = {
     ticker: "TEST", row: { close: "100" }, features: null,
     strikes: [], ticks: [], expiries: [], maxPain: [], congress: [],
@@ -1484,7 +1579,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE), { spot: 200 }).truncated === true,
      "UW-F12: a ladder that fills the vendor's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE - 1), { spot: 200 }).truncated === false, "and one row short of a full page is not");
-  const pipe = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const pipe = nightlySource();
   ok(/spot-exposures\/strike`, \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),
      "and the nightly asks for exactly that page through the same constant");
 

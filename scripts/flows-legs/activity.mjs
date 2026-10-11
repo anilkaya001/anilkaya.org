@@ -1,6 +1,7 @@
 import {
   ACTIVITY_LIMIT, buildActivityRows, rankActivity, mergeActivity, activityBlock,
 } from "../../shared/flows-activity.js";
+import { stampNow } from "./stamp.mjs";
 
 export const ACTIVITY_PATH = "/api/option-activity/unusual";
 
@@ -48,7 +49,7 @@ export function fakeActivityRows(contractRows, sessionDate) {
   return rows;
 }
 
-export async function readActivity({ uw, sessionDate, contractRows, enabled = true, dryRun = false, now = () => new Date().toISOString() }) {
+export async function readActivity({ uw, sessionDate, contractRows, enabled = true, dryRun = false, now = stampNow }) {
   if (!enabled) return { block: activityBlock({ status: "off", code: "off", sessionDate, readAt: null }), calls: 0 };
   const readAt = now();
   let raw;

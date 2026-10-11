@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { nightlySource } from "./lib/source-scan.mjs";
 import * as BS from "../shared/flows-quant-bs.js";
 import * as SMILE from "../shared/flows-quant-smile.js";
 import * as DENSITY from "../shared/flows-quant-density.js";
@@ -200,7 +201,7 @@ function grossOfBuilt() {
   ok(QP.vendorGrossPer1pct(1000, 100, "share") === 1e5 && QP.vendorGrossPer1pct(1000, 100, "pct$") === 1000 &&
      QP.vendorGrossPer1pct(1000, null, "share") === null && QP.vendorGrossPer1pct(null, 100, "share") === null && QP.vendorGrossPer1pct(0, 100, "share") === null,
      "and a book with no spot or no gross measures no coverage rather than a wrong one");
-  const worker = fs.readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const worker = nightlySource();
   ok(/gammaUnit: variationRun\.unit\.used/.test(worker), "the nightly hands the pass the unit the variation probe resolved");
 }
 

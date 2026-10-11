@@ -1,3 +1,4 @@
+import { stampNow } from "./stamp.mjs";
 import { makeCallMeter } from "./common.mjs";
 import {
   harvestScreener, readIndexRows, readShortInterest, readInsiders, universePayload, INDEX_TICKERS,
@@ -33,7 +34,7 @@ export async function runMarketLegs({
   const say = (line) => { lines.push(line); log(line); };
 
   const h = harvest || await harvestScreener(uw, { filters, date: screenerDate });
-  const readAt = h.readAt || new Date().toISOString();
+  const readAt = h.readAt || stampNow();
   const harvested = h.rows || [];
   const eligibleRows = harvested.filter((r) => { try { return eligible(r); } catch { return false; } });
   const screenerByTicker = new Map(harvested.map((r) => [r.ticker, r]));

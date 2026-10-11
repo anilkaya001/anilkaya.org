@@ -3,7 +3,7 @@ import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance, svi
 import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
-  expiryFromFit, setupEngine, cardCarry,
+  expiryFromFit, setupEngine, cardCarry, settleExpiries,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
 import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
@@ -215,7 +215,8 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
     built.push(ex);
     prev = ex.slice;
   }
-  return { built, input: eligible };
+  const settled = settleExpiries(built);
+  return { built: settled.list, input: eligible, surface: settled.surface };
 }
 
 const atmVolOf = (ex) => sliceVolK(ex.slice, 0);
@@ -514,7 +515,7 @@ export function compactEngine(out, extra = {}) {
     atr: fin(extra.atr) ? dp(extra.atr, 4) : null,
     rate: extra.rate ? { r: extra.rate.r, method: extra.rate.method, n: extra.rate.n || 0 } : null,
     assumptions: { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0, intraday: "time-uniform" },
-    liquidity: out.liquidity, expiries: out.expiries,
+    liquidity: out.liquidity, ...(out.surface ? { surface: out.surface } : {}), expiries: out.expiries,
     facts: extra.facts || [], state: extra.state || null, levels: extra.levels || null, event: extra.event || null,
     zeroGamma: extra.zeroGamma || null, pLaw: extra.pLaw || null,
     structures, ideas: out.ideas.slice(), noTrade: out.noTrade,

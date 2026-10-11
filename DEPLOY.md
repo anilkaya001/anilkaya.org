@@ -1570,11 +1570,11 @@ them draws a window that is silently one to three days early.
 | Quantity | Origin | Why |
 |---|---|---|
 | every **price** (`px`) | `sessionDate` | the last COMPLETED session |
-| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `nextWeekday(sessionDate)` — the first session after the one priced, which is what the earnings gate counts from |
+| every **day count** (`sdte`, day 0, the gate band) | `gateOrigin` | `nextTradingDay(sessionDate)` — the first session after the one priced, which is what the earnings gate counts from |
 
 `resolveSessionDate()` returns the last session that has closed; after the
-close that is the same day, and `gateOrigin` is the next weekday — **Monday on
-a Friday**. The gate used to count from the run's wall-clock date, which was
+close that is the same day, and `gateOrigin` is the next trading day — **Monday on
+a Friday, Tuesday after a Monday holiday**. The gate used to count from the run's wall-clock date, which was
 the next session only because the run fired the next morning; once the run
 moved after the close that anchor would have been a session early. In the
 dry-run payload the two are `2026-08-24` and `2026-08-25`.
@@ -1638,9 +1638,14 @@ Two keys, both zero vendor calls.
 beside the dated boards. The boards archive a ranking's two tails; this key
 keeps the distribution, `{t, s}` per name and nothing else. Written under the
 same immutability contract as the dated boards (a re-run writes identical
-bytes — the rows are sorted by ticker for exactly that), swept by the same
-prune (which now names three keys a day, so the bound is 90 named deletes a
-run), and deletable through the same narrowed DELETE gate.
+bytes — the rows are sorted by ticker for exactly that) and deletable through
+the same narrowed DELETE gate, but EXEMPT from the 126-day prune (OD-31): the
+prune names only the two board sides, so its bound is 60 named deletes a run.
+A scores key is about 45 bytes a name in the dry-run corpus (4.7 KiB for its 106
+names, so roughly 30 KB for 670), which keeps every session at 7 to 8 MiB a
+year of D1 storage and adds no row writes beyond the one a session; the walk
+still reads only the retention window, so nothing about the nightly's reads
+changes. `tests/flows-pipeline-contract.mjs` prints the ledger.
 
 **`scoretrack`** — the pooled trace, REBUILT from the archive every run
 rather than incrementally updated, so it can never drift from the keys it is
@@ -1733,7 +1738,8 @@ changes which tape is read.
 Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
 
 - **The intraday refusal.** After `resolveSessionDate()`, a run whose Eastern
-  clock is inside 09:30–16:00 on a weekday throws before any read. The
+  clock is inside 09:30–16:00 on a trading day throws before any read; a
+  weekday holiday is not one, so a manual run on it is allowed. The
   `allow_intraday` dispatch input (`FLOWS_ALLOW_INTRADAY=1`) overrides it and
   the log says what that publishes.
 - **The same-session gate.** The gate reads all three of the session's archive
@@ -1808,6 +1814,20 @@ Four guards sit behind the schedule, all in `scripts/flows-pipeline.mjs`:
   return before the gate. A dry run, and a run that never reaches the gate,
   make no GitHub call. A missing `GITHUB_DISPATCH_TOKEN` is a note, never a
   failure. `FLOWS_LIVE_MODE = "off"` is a deliberate rollback, not a failure.
+- **The nightly records its own stages.** `scripts/flows-nightly/stages.mjs` holds
+  the stage table (thirty-six stages, each fatal or isolated, with the stages it
+  needs and the keys it declares). An isolated stage is caught, logged with the
+  line it always had, and the run goes on; a fatal one ends the run. `meta` is
+  now the last key the nightly writes, after the health gate, and carries
+  `stages` (one record per stage: `status` ok, failed or skipped, `ms`, `calls`
+  made while it ran, `keys` written, `cpu` (milliseconds of process CPU time, 0 in the pinned dry run), and a one-line `why` for a failure or skip; the `compute` stage after `card-x` adds `names`, `jobs`, `over` and `failed`, and runs no job until one is registered)
+  and `health` (`failures`, `warnings` and the first three lines). A key a stage
+  wrote that its row does not declare is named on its record as `undeclared`,
+  and one written outside any stage as `stagesOutside`; both are empty on a
+  clean night. The brief and the warnings still read the run summary from the
+  run's own store before `meta` is written, and the Worker's nightly-landed
+  stamp, which the ledger takes from the `meta` write, now lands a few seconds
+  after the gate instead of before it. `meta` grows by about 2.7 KiB.
 - **The gate judges the whole day, from the session ledger.** Until the
   ledger the gate saw four single cells (the clock, `live:market`,
   `live:focus`, `live:heartbeat`) and tested only that each was written
@@ -1900,7 +1920,11 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   vendor calls into `live:market`: the five-minute market tide and the sector-ETF
   snapshot) from the open to ten minutes past the close,
   dispatches the Actions run at :01/:16/:31/:46, and re-dispatches once when
-  `live:breadth` is 45 minutes old. Every dispatch needs `GITHUB_DISPATCH_TOKEN`
+  `live:breadth` is 45 minutes old, after cancelling the in-progress `flows-live`
+  run that started before that stall (one list call and one cancel call, so the
+  new run is not queued behind a hung job; a token that cannot list or cancel
+  only skips the cancel, and a run that started inside the stall is left
+  alone). Every dispatch needs `GITHUB_DISPATCH_TOKEN`
   (section 10.0); without it Tier 1 still runs and the dispatches are no-ops.
   The stall is logged (`live layer stalled`, with `canDispatch`) whether or not
   the token is set. Every dispatch outcome is kept in
@@ -2947,6 +2971,28 @@ background generation's own reads of the day's spend), checked by
 `tests/flows-reads-contract.mjs`. Measured Worker CPU in Node for the reading's own code
 on the momentum dossier: tags 0.1 ms, fallback and shape 0.2 ms, prompt 0.5 ms, vet 1.7
 ms; the dossier's assembly (10.5l) is the larger part of a miss.
+
+**Every model call is counted (P1-08).** All five model sites (the board summary, the Neuron
+over the engine and its legacy form, Ask, and the reading) call `aiCall` in `server/ai.js`,
+which is the only place `askModels(` appears; `shared/flows-ai.js` stays the only place that
+reads the binding and runs it. The call is timed, the surface judges the reply with the checks
+it always had, and `call.settle({ llm, guard }, culprit)` classifies the result with
+`shared/flows-ai-broker.js` (`guardOutcome`) into one of fourteen outcomes: `clean`, `trimmed`,
+`refused`, `unparsable`, `overlong`, `empty`, `length`, `budget`, `class`, `user`, `allowance`,
+`capacity`, `plan`, `unreachable` (`class` and `user` are reserved for the per-class and
+per-member budgets of P1-44). A reply with no text is settled by the broker itself. One counter
+row is upserted per call in `flows_ai_outcome (day, surface, model, outcome, reason)` with `n`,
+`ms_sum` and `ms_max`: one trip and one row written, about 260 rows written a day at today's
+volume and at most one row per call. A wording failure that has an offending token (the
+invented numeral, the forbidden verb, the first refused cite) also writes the token alone, forty
+characters at most and never a reply or a sentence, to the per-surface ring
+`flows_ai_reject (surface, slot 0..49)`, in the same batch. A store that refuses the write
+never fails the surface: `settle` answers false and the Worker logs `ai outcome not recorded`
+once per isolate. Counters older than eight days are pruned in the 03:00 ET housekeeping
+window. `readAiBlock(env, deps, { days })` reads the owner's `ai` block in one trip (today's
+counters and the fifty latest refusals; seven days behind `days: 7`); it is mounted by the
+health and owner-view row (P1-27), which does not exist yet, so nothing serves it today. To look
+in the meantime: `wrangler d1 execute iewt --remote --command "SELECT surface, model, outcome, reason, n, ms_sum / n AS ms FROM flows_ai_outcome WHERE day = date('now') ORDER BY surface, outcome"`.
 
 **What 'fallback' means.** The reader is looking at the deterministic reading and no model
 wording is coming for this dossier. `read.why` says which: `off` (the kill switch),

@@ -37,7 +37,9 @@ import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-l
 import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
-import { workerSource } from "./lib/source-scan.mjs";
+import { workerSource, nightlySource, treeFiles, moduleSource, expect, importEdges } from "./lib/source-scan.mjs";
+import { flowsReadRows } from "../server/routes/flows-read.js";
+import { createRouter } from "../server/router.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-flows-legs-probe.json"), "utf8"));
@@ -912,17 +914,141 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const worker = workerSource();
   ok(/\^universe\$\|\^regime\$/.test(worker), "the ingest allowlist accepts universe and regime");
   ok(/\/\^\(card\|card-x\|hist\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
-  ok(worker.includes('path === "/api/flows/universe" || path === "/api/flows/regime"'), "both read routes exist");
-  ok(worker.includes('path === "/api/flows/card-x"'), "and the per-name card-x route");
+  const table = createRouter(flowsReadRows(new Proxy({}, { get: () => () => null }))).rows.map((r) => r.path);
+  ok(table.includes("/api/flows/universe") && table.includes("/api/flows/regime"), "both read routes exist");
+  ok(table.includes("/api/flows/card-x"), "and the per-name card-x route");
   const legs = fs.readdirSync(path.join(ROOT, "scripts/flows-legs")).map((f) => fs.readFileSync(path.join(ROOT, "scripts/flows-legs", f), "utf8"));
   for (const src of legs) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "leg modules carry no comments");
-  const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
+  const nightly = treeFiles("scripts/flows-nightly").map((f) => moduleSource(f));
+  ok(nightly.length > 0, "the nightly's own modules are found, in every directory under scripts/flows-nightly");
+  for (const src of nightly) ok(!/\/\/|\/\*/.test(src.replace(/https?:\/\/\S+/g, "")), "nightly modules carry no comments");
+  const pipe = nightlySource();
   ok(pipe.includes("harvest: harvest || universeSource"),
     "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
-  ok(/try \{\s*await publish\(key, marketLegs\[key\]\);/.test(pipe) && !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
-    "universe and regime publish one at a time, so a refused universe cannot take the regime and every card-x down with it");
+  ok(/await stages\.run\("market-universe", \(\) => publish\("universe", marketLegs\.universe\), \(error\) => \{/.test(pipe) &&
+     /await stages\.run\("market-regime", \(\) => publish\("regime", marketLegs\.regime\), \(error\) => \{/.test(pipe) &&
+     !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
+    "universe and regime publish one at a time, each as its own isolated stage, so a refused universe cannot take the regime and every card-x down with it");
   const own = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/ownership.mjs"), "utf8");
   ok(/volume-and-ratio`, \{\}, \{ envelope: true \}/.test(own), "volume-and-ratio is read with the envelope, never the data unwrap");
+}
+
+{
+  const NIGHTLY = "scripts/flows-nightly/";
+  const HOME = {
+    "vendor-params.mjs": [
+      "UNIVERSE", "RATE", "CALL_COST", "NOMINAL_SHAPE", "callModel", "CALL_BUDGET", "CALL_OVERRUN_MARGIN",
+      "EARNINGS_GATE_DAYS", "SCREENER_PAGE_ROWS", "SCREENER_SPLIT_DEPTH", "DEEP_NAMES", "MARKET_CROSS_LIMIT",
+      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NEWS_VENDOR_LIMIT", "ALERT_VENDOR_LIMIT",
+      "IV_RANK_PARAMS", "CHAIN_RESERVE_MS",
+    ],
+    "vendor.mjs": [
+      "BASE", "vendorTimeoutMs", "isTimeout", "stats", "delayMs", "delayFloorMs", "raiseReadPace", "wireProgress",
+      "sleep", "permits", "rateFloorSurvivesBudget", "raiseRateFloor", "stepRateController", "POOL_MAX_WIDTH",
+      "POOL_EVIDENCE_MIN", "POOL_REFUSAL_HALT", "POOL_REFUSAL_EASE", "meterRead", "poolWidth", "runPooled",
+      "foldCardOutcomes", "describeFloorVerdict", "uw",
+    ],
+    "store.mjs": [
+      "ingestURL", "INGEST_UA", "LIVE_BEARER_MARGIN_MS", "liveBearer", "liveMinting", "liveCredentialSource",
+      "liveCredential", "ingestHeaders", "PUBLISH_SPACING_MS", "ingestWrites", "READ_RETRIES", "READ_RETRYABLE",
+      "edgeRefusals", "resetEdgeRefusals", "edgeSnapshot", "noteAnswer", "noteRefusal", "readSaid", "readStoredOnce",
+      "keysAnswer", "probeStoredOnce", "listStoredOnce", "readWithRetries", "readStored", "probeStored",
+      "LEDGER_LIST_KINDS", "listStored", "ARCHIVE_RETENTION_DAYS", "ARCHIVE_PRUNE_LOOKBACK_DAYS", "ARCHIVE_DATE_RE",
+      "datedKey", "pruneKeys", "retire", "pruneArchive", "sessionArchiveKeys", "retireSession", "PUBLISH_RETRIES",
+      "PUBLISH_RETRY_BUDGET_MS", "publishRetrySpentMs", "quotaFirstAt", "resetPublishRetryBudget",
+      "PUBLISH_RETRYABLE", "publishRetryDelay", "publishedStore", "activeStages", "bindStages", "landedKeys",
+      "summarize", "publish",
+    ],
+    "clock.mjs": [
+      "SESSION_OPEN_MINUTES", "SESSION_CLOSE_MINUTES", "PIPELINE_CADENCE", "easternNow", "sessionBarOverdue",
+      "clockSaid", "intradayRefusal", "closedPriceWindow", "easternDayOf", "readDayOf",
+    ],
+    "rank.mjs": [
+      "eligible", "GATED_LIQUIDITY_MARGIN", "screenerDollarVolume", "gatedWorthEnriching", "screenerTilt",
+      "ivRankFraction", "daysToEarnings", "vendorNum", "onWire", "fixed", "candlesAscending", "medianDollarVolume",
+      "atr14", "CANDLE_BREAK_LOG", "CANDLE_BREAK_VOLUME", "medianVolume", "repairCandles", "sessionReference",
+      "sessionRow", "readPxOf", "computeFeatures", "candleDate", "sessionCandles", "candleCut", "sessionRows",
+      "week52Position", "ret", "returnCorrelation", "collapseShareClasses", "measureVariationProbes",
+      "boardVariationMeta", "featuresVariationInput", "variationOptions", "SIGNED", "DEAD_BAND",
+      "BOARD_SCHEMA_VERSION", "scoreBoard", "partitionSides", "B64", "packSpark", "boardRow", "hz", "toRows",
+      "WATCH_ROWS", "toWatchRows", "selectExtremes", "MOVER_ROWS", "netPremiumOf", "moverRow", "buildMovers",
+      "SECTOR_ETFS", "TRIX_SPAN", "TRIX_SERIES", "TRIX_WARMUP", "TRIX_MIN_CANDLES", "ema", "trixSeriesBp",
+      "TRIX_FULL_SCALE_BP", "scaleTrix", "sectorTrix", "sectorLean", "NEWS_ROWS", "shapeNews", "HOLDERS_RETRY_DAYS",
+      "holdersRefusal", "unusualContractId", "markNewContracts", "priorNote", "ideasPayload", "congressRows",
+      "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich",
+    ],
+    "fixtures.mjs": [
+      "mulberry", "SECTORS", "DRY_FOCUS_ROWS", "fakeFocusRows", "fakeScreener", "fakeSectorCandles", "fakeSectorEtfs",
+      "fakeNewsHeadlines", "fakeChain", "fakeTreasury", "fakeEarnings", "fakeSurface", "fakeMaxPain",
+      "fakeStockDarkpool", "fakeStockOiChange", "fakeTermStructure", "IV_RANK_VENDOR_DEFAULT_ROWS", "fakeIvRank",
+      "fakeCongress", "fakePriorUnusual", "fakePriorBoard", "fakeFlowAlerts", "fakePoliticalRaws", "fakePulseRaws",
+      "DRY_SESSION_DATE", "tradingDaysEndingAt", "FAKE_CHARM_SCALE", "FAKE_RATE", "fakeLadders", "tickerSeed",
+      "fakeOiLadder", "fakeLadderGreeks", "fakeLadderChain", "fakeEnrichment", "dryPriorRoster", "dryRosterReader",
+      "DRY_PROBE_BYTES", "dryRosterProbe", "dryRosterList",
+    ],
+    "archive.mjs": [
+      "nameCount", "readBoardMemory", "MEMORY_ARCHIVE_SESSIONS", "MEMORY_FALLS_BACK", "resolveBoardMemory",
+      "sameSessionGate", "fetchStoredPayload", "ARCHIVE_READ_PACE_MS", "ARCHIVE_READ_RETRY_MS",
+      "ARCHIVE_READ_GIVE_UP", "collectDatedBoards", "buildRecordCloses", "recordCalendar", "buildRecordBreaks",
+      "archiveDatedBoards", "republishWithChain", "plainRedispatchSaid", "ensureArchived", "pickPriorRoster",
+      "LEDGER_PROBE_MAX", "LEDGER_PROBE_FAIL_MAX", "LEDGER_PROBE_RETRY_BUDGET_MS", "LEDGER_PROBE_CHUNK", "probeDayOf",
+      "probeFound", "probeLedgerMetadata", "bootstrapLedger", "probeSaid", "retireAndRoster",
+    ],
+    "sections/universe.mjs": [
+      "judgeEndDate", "SCREENER_READ_KEYS", "judgeScreenerDate", "sweepScreenerBand", "SCREENER_PROBE",
+      "verifyDating",
+    ],
+    "sections/record.mjs": [
+      "RECORD_HORIZONS", "RECORD_IC_MIN_N", "RECORD_MAX_SESSIONS",
+    ],
+    "sections/chains.mjs": [
+      "nearestProbeExpiry", "describeChainProbe", "vannaProbeSample",
+    ],
+    "sections/alerts.mjs": [
+      "PULSE_TOTALS_HISTORY", "publishPulse", "publishSectorPremium", "publishNews",
+    ],
+    "sections/cards.mjs": [
+      "markGate", "card0Unusable",
+    ],
+    "sections/focus.mjs": [
+      "indexDossierDeps",
+    ],
+    "sections/close.mjs": [
+      "describeGammaRange",
+    ],
+    "flags.mjs": [
+      "DRY_RUN", "LIVE_MODE", "EMIT",
+    ],
+  };
+  const LAYER = {
+    "flags.mjs": 0, "vendor-params.mjs": 1, "vendor.mjs": 2, "store.mjs": 3, "clock.mjs": 4, "rank.mjs": 5,
+    "fixtures.mjs": 6, "archive.mjs": 7, "stages.mjs": 0, "sections/universe.mjs": 8, "sections/boards.mjs": 8,
+    "sections/market.mjs": 8, "sections/record.mjs": 8, "sections/chains.mjs": 8, "sections/alerts.mjs": 8,
+    "sections/context.mjs": 8, "sections/cards.mjs": 8, "sections/focus.mjs": 8, "sections/compute.mjs": 8, "sections/close.mjs": 8,
+  };
+  const whole = nightlySource();
+  const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
+  let homed = 0;
+  for (const [file, names] of Object.entries(HOME)) {
+    const src = moduleSource(NIGHTLY + file);
+    for (const name of names) {
+      expect(whole, decl(name), { min: 1, max: 1, why: name + " is declared once across the nightly" });
+      expect(src, decl(name), { min: 1, max: 1, why: name + " lives in " + file });
+      homed++;
+      checks += 2;
+    }
+  }
+  ok(homed > 0, "the layout table names the declarations it holds (" + homed + ")");
+  for (const file of treeFiles("scripts/flows-nightly")) {
+    const rel = file.slice(NIGHTLY.length);
+    for (const edge of importEdges(file)) {
+      ok(edge.file !== "scripts/flows-pipeline.mjs", rel + " does not import the entry");
+      if (!edge.file.startsWith(NIGHTLY)) continue;
+      const to = edge.file.slice(NIGHTLY.length);
+      if (!(rel in LAYER) || !(to in LAYER)) continue;
+      ok(LAYER[to] < LAYER[rel], rel + " imports only a layer below its own, not " + to);
+    }
+  }
 }
 
 console.log(`✓ flows-legs: ${checks} assertions — every universe, regime, ownership and catalyst formula checked ` +

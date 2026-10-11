@@ -9,6 +9,7 @@ import {
   buildLegs, legGate, liquidityTier, forwardDeltaOnSlice, statePreference,
 } from "./flows-quant-structures.js";
 import { yearFraction, sessionsBetween, remainingSessions, calendarDays, isMonthly, etDayOf } from "./flows-quant-time.js";
+import { settleSurface, surfaceSummary } from "./flows-quant-surface.js";
 
 export const ENGINE_VERSION = "q1";
 export const LOT = 100;
@@ -746,6 +747,14 @@ export function buildExpiry(input) {
   });
 }
 
+export function settleExpiries(list) {
+  if (!Array.isArray(list) || list.length < 2) return { list, surface: null };
+  const result = settleSurface(list.map((e) => ({ T: e.T, slice: e.slice, points: e.points })));
+  const surface = surfaceSummary(result, list.map((e) => e.expiry));
+  if (!result.changed) return { list, surface };
+  return { list: list.map((e, i) => (result.slices[i] === e.slice ? e : expiryFromFit({ ...e, slice: result.slices[i] }))), surface };
+}
+
 export function expiryFit(e) {
   return {
     expiry: e.expiry, T: e.T, dte: e.dte, sessions: e.sessions, hSessions: e.hSessions, monthly: e.monthly, forward: e.forward, slice: e.slice,
@@ -936,7 +945,7 @@ export function runEngine(input) {
   const asOfMs = typeof input.asOf === "number" ? input.asOf : Date.parse(input.asOf);
   const S = input.spot;
   const evIn = input.event && input.event.date ? input.event : null;
-  const list = [];
+  let list = [];
   let prev = null;
   const raw = (input.expiries || []).filter((e) => e && typeof e.expiry === "string").slice().sort((a, b) => (a.expiry < b.expiry ? -1 : a.expiry > b.expiry ? 1 : 0));
   let firstAfter = null;
@@ -950,6 +959,8 @@ export function runEngine(input) {
     list.push(ex);
     prev = ex.slice;
   }
+  const settled = settleExpiries(list);
+  list = settled.list;
   const setup = setupEngine({ ...input, asOf: asOfMs }, list);
   const { asOfDay, expiries, facts, state, ctx, putSkewPct } = setup;
   const near30 = list.slice().sort((a, b) => Math.abs(a.dte - 30) - Math.abs(b.dte - 30) || a.T - b.T)[0] || null;
@@ -1008,6 +1019,7 @@ export function runEngine(input) {
   const out = {
     engine: ENGINE_VERSION, ticker: input.ticker || null, asOf: asOfDay, spot: S,
     liquidity: { tier: tier.tier, medianRelSpread: rpr(tier.median) },
+    surface: settled.surface,
     expiries: list.map((e) => ({
       expiry: e.expiry, dte: e.dte, sessions: e.sessions, hSessions: rp(e.hSessions), T: rv(e.T),
       forward: { F: rp(e.F), D: roundTo(e.D, 8), r: rv(e.r), qImpl: rv(e.qImpl), pairs: e.forward.pairs, method: e.forward.method },

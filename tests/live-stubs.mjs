@@ -82,6 +82,8 @@ export async function oidcIssuer({ kid = "stub-oidc-key" } = {}) {
 
 export async function startStubGithub({ jwks = null } = {}) {
   const dispatches = [];
+  const runCalls = [];
+  const runs = { list: [] };
   let jwksHits = 0;
   const server = http.createServer((req, res) => {
     if (jwks && req.method === "GET" && req.url === "/.well-known/jwks") {
@@ -95,15 +97,28 @@ export async function startStubGithub({ jwks = null } = {}) {
     req.on("end", () => {
       let parsed = null;
       try { parsed = JSON.parse(body); } catch { parsed = null; }
-      dispatches.push({ method: req.method, path: req.url, auth: req.headers.authorization || null,
-        agent: req.headers["user-agent"] || null, body: parsed });
+      const seen = { method: req.method, path: req.url, auth: req.headers.authorization || null,
+        agent: req.headers["user-agent"] || null, body: parsed };
+      if (req.method === "GET" && /\/actions\/workflows\/[^/]+\/runs\?/.test(req.url)) {
+        runCalls.push(seen);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ workflow_runs: runs.list }));
+        return;
+      }
+      if (req.method === "POST" && /\/actions\/runs\/\d+\/cancel$/.test(req.url)) {
+        runCalls.push(seen);
+        res.writeHead(202);
+        res.end();
+        return;
+      }
+      dispatches.push(seen);
       res.writeHead(204);
       res.end();
     });
   });
   const port = await listen(server);
   return {
-    base: `http://127.0.0.1:${port}`, dispatches, jwksHits: () => jwksHits,
+    base: `http://127.0.0.1:${port}`, dispatches, runCalls, runs, jwksHits: () => jwksHits,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

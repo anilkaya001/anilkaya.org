@@ -6,7 +6,8 @@ import {
   alertKey, mergeAlerts, MERGED_ALERT_ROWS, MERGED_ALERT_BYTES, alertStamp, nightlyAlerts,
 } from "../shared/flows-alerts.js";
 import { briefAlertsFact } from "../shared/flows-brief.js";
-import { workerSource, slice, expect, absent } from "./lib/source-scan.mjs";
+import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
+import { workerSource, nightlySource, slice, expect, absent, closure, moduleSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -507,10 +508,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "ONE WRITER PER KEY: the Worker's cron no longer rewrites the nightly flowalerts, pulse or brief " +
     "rows. Two writers on one key is how the 2026-09-22 morning union was lost");
   const inserts = expect(worker, "INSERT INTO flows_payload", { min: 1, why: "the nightly's rows are written somewhere in the Worker" });
-  const ingest = slice(worker, 'if (path === "/api/flows/ingest")', 'if (path.startsWith("/api/flows/"))');
-  eq(ingest.split("INSERT INTO flows_payload").length - 1, inserts,
-    "and every write to flows_payload in worker.js is inside the ingest route, whose only caller is the " +
-    "nightly token — the live layer writes flows_live and nothing else");
+  eq(moduleSource("server/store.js").split("INSERT INTO flows_payload").length - 1, inserts,
+    "and every write to flows_payload in the Worker's closure is in server/store.js, the one module that holds the store's SQL");
+  const writers = closure("worker.js").filter((file) => /\bstore\.(createArchive|write|remove)\(/.test(moduleSource(file)));
+  deep(writers, ["server/routes/flows-ingest.js"],
+    "and the only caller of those writes is the ingest route, whose only caller is the nightly token — the live layer writes flows_live and nothing else");
 }
 
 {
@@ -687,8 +689,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
       ...m, readAt: T1, readDay: D28, refreshed: "intraday",
       vendorLimit: null, vendorTruncated: null, readLimit: 60, readTruncated: true,
     }).length;
-    const ingestCap = Number(/FLOWS_MAX_PAYLOAD_BYTES = (\d+) \* 1024/.exec(worker)[1]) * 1024;
-    eq(ingestCap, 128 * 1024, "worker.js still holds every ingest to 128KB");
+    const ingestCap = FLOWS_MAX_PAYLOAD_BYTES;
+    eq(ingestCap, 128 * 1024, "the ingest cap is still 128KB");
+    ok(expect(worker, /readBounded\(request, FLOWS_MAX_PAYLOAD_BYTES,/g, { min: 2, why: "both ingest body reads are bounded by the constant" }) >= 2 &&
+       /const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE\.FLOWS_MAX_PAYLOAD_BYTES;/.test(worker),
+      "and worker.js holds every ingest body to that exported constant");
     const liveCap = Number(/"live:alerts": spec\("breadth", "actions", (\d+) \* 1024/.exec(liveSrc)[1]) * 1024;
     const cap = Math.min(ingestCap, liveCap);
     ok(liveCap <= ingestCap,
@@ -801,7 +806,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   eq(nightlyAlerts(read, { payload: null, absent: true }, { sessionDate: DAY }).mode, "snapshot",
     "and so is an empty store");
 
-  const pipeline = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const pipeline = nightlySource();
   ok(/nightlyAlerts\(alerts, await readHeldAlerts\(readStored, sessionDate\)/.test(pipeline),
     "the pipeline reads the held record before it writes the key — the day's live:alerts union " +
     "when it covers this session, the stored nightly feed otherwise");

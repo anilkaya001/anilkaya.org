@@ -6,6 +6,7 @@ import {
   chainRowsByExpiry, buildSlices, zeroGammaOf, parityRate, treasuryRate, chooseRate, bookLevels,
   engineFacts, engineLevels, engineEvent, eventJump, runCardEngine, QUANT_CARD_LINES,
 } from "../shared/flows-quant-card.js";
+import { median } from "../shared/flows-stats.js";
 import { skewMetrics } from "../shared/flows-quant-smile.js";
 import { closeUtcMs, isSession, parseDay, isoDay } from "../shared/flows-quant-time.js";
 
@@ -24,12 +25,6 @@ const num = (v) => {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
-};
-const median = (xs) => {
-  const s = xs.filter(fin).slice().sort((a, b) => a - b);
-  if (!s.length) return null;
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
 
 export function nextSession(day) {
@@ -89,11 +84,12 @@ export function earningsFromVendor(raw, { sessionDate } = {}) {
 
 export function refitGarch(features, mask) {
   const f = features || {};
+  const series = f.garchSeries && Array.isArray(f.garchSeries.closes) ? f.garchSeries : null;
   const candles = Array.isArray(f.candles) ? f.candles : [];
-  if (!mask || !mask.length || candles.length < 61) return f.garch || null;
-  const closes = candles.map((c) => num(c && c[4]));
-  const dates = candles.map((c) => (c && typeof c[0] === "string" ? c[0].slice(0, 10) : null));
-  const fit = fitGarch(closes, dates, { mask });
+  const closes = series ? series.closes : candles.map((c) => num(c && c[4]));
+  if (!mask || !mask.length || closes.length < 61) return f.garch || null;
+  const dates = series ? series.dates : candles.map((c) => (c && typeof c[0] === "string" ? c[0].slice(0, 10) : null));
+  const fit = fitGarch(closes, dates, { mask: series && series.mask ? [...mask, ...series.mask] : mask });
   return fit && fit.status === "ok" ? fit : f.garch || fit;
 }
 

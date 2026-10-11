@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import * as NEURON from "../shared/flows-neuron.js";
@@ -12,6 +11,8 @@ import { DEALER_CLAUSE } from "../shared/flows-reading.js";
 import { earningsHistory } from "../shared/flows-catalysts.js";
 import { cardXPayload } from "../scripts/flows-legs/card-x.mjs";
 import { TICKER_PANELS, TICKER_PANEL_KEYS, SENTINEL_KEYS } from "../shared/flows-panels.js";
+import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { nightlySource, slice } from "./lib/source-scan.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -19,10 +20,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-const EMIT_DIR = path.join(ROOT, "tests", ".ticker-emit");
-fs.rmSync(EMIT_DIR, { recursive: true, force: true });
-fs.mkdirSync(EMIT_DIR, { recursive: true });
-execFileSync(process.execPath, [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", EMIT_DIR + "/"], { stdio: "ignore" });
+const EMIT_DIR = nightlyEmit();
 const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; };
 const cards = fs.readdirSync(EMIT_DIR).filter((f) => /^-card-[A-Z][A-Z0-9.\-]*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT_DIR, f), "utf8")));
 ok(cards.length >= 5, `the emitter produced ${cards.length} cards to test against`);
@@ -55,6 +53,7 @@ function neuronFor(card) {
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json", ".txt": "text/plain" };
 const PAGE_HTML = FLOWS_PAGES.tickerPage({ username: "test" });
+const WEEKS_LATER = 47 * 864e5;
 
 async function mount(page, card, o = {}) {
   const ticker = o.ticker === undefined ? card && card.ticker : o.ticker;
@@ -202,10 +201,8 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
     ok(p.question && p.question.trim().length > 8, `panel "${p.key}" states a real question`);
     ok(p.title && p.title.trim().length > 2, `panel "${p.key}" has a title`);
   }
-  const pipe = fs.readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
-  const shedFrom = pipe.indexOf("const shed = [");
-  ok(shedFrom > 0, "the pipeline still declares its shed ladder as `const shed = [`");
-  const shedBlock = pipe.slice(shedFrom, pipe.indexOf("\n      ];", shedFrom));
+  const shedBlock = slice(nightlySource(), "export const CARD_SHED = Object.freeze([", "\n]);");
+  ok(shedBlock.length > 0, "the pipeline still declares its shed ladder as `export const CARD_SHED = Object.freeze([`");
   let shedNamed = 0;
   const regKeys = new Set(TICKER_PANELS.map((p) => p.key));
   for (const m of shedBlock.matchAll(/\[\s*"([A-Za-z_][A-Za-z0-9_]*)",\s*"dropped to fit/g)) {
@@ -936,7 +933,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { cardX: cx, hist: { ...(histOf(card.ticker) || {}), sessionDate: next } });
+    await mount(page, card, { cardX: cx, hist: { ...(histOf(card.ticker) || {}), sessionDate: next }, at: Date.parse(card.generatedAt) + WEEKS_LATER });
     const got = await page.evaluate((s) => ({ pill: document.getElementById("fxFresh").innerText, mine: window.FlowsUI.F.day(s[0]), other: window.FlowsUI.F.day(s[1]),
       chip: (document.querySelector("#m-events .ui-mod-t .ui-tag") || {}).textContent }), [card.sessionDate, next]);
     ok(got.pill.includes(got.mine) && !got.pill.includes(got.other), `T8: companions from another session never lift the page pill off the card's own (${got.pill})`);
@@ -951,7 +948,7 @@ try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev } });
+    await mount(page, card, { cardX: { ...(cardXOf(card.ticker) || {}), sessionDate: prev }, hist: { ...(histOf(card.ticker) || {}), sessionDate: prev }, at: Date.parse(card.generatedAt) + WEEKS_LATER });
     const got = await page.evaluate(async (s) => {
       const tags = (id) => [...document.querySelectorAll("#" + id + " .ui-mod-t .ui-tag")].map((n) => n.textContent);
       const b = [...document.querySelectorAll("#m-gamma .ui-seg-i")].find((n) => n.textContent === "1Y");
@@ -1654,7 +1651,7 @@ try {
     for (const c of cells) { const at = t.indexOf("\n" + c + "\n"); ok(at > last, `the fit's cell "${c}" is stated, in the fixed order: levels, then shape, then the recursion's own`); last = at; }
     ok(t.includes("\nTail shape ν\n" + g0.nu.toFixed(1) + "\n"), "the tail shape prints to one decimal");
     ok(t.includes("\nSkew λ\n" + (g0.lambda > 0 ? "+" : g0.lambda < 0 ? "−" : "") + Math.abs(g0.lambda).toFixed(2) + "\n"), "the skew prints to two decimals with a real minus sign");
-    ok(/penalised maximum likelihood with variance targeting/.test(t) && /winsorised at six robust standard deviations/.test(t), "the disclosure names the method and the winsorising");
+    ok(/penalised maximum likelihood with variance targeting/.test(t) && /winsorised at 10 robust standard deviations/.test(t), "the disclosure names the method and the winsorising");
     ok(/next-session cell is the recursion's own state/.test(t) && /RiskMetrics EWMA at 0\.94/.test(t) && /long-run cell is a measurement/.test(t), "and explains the next-session cell and the reference path");
     await pickView(page, "m-vol", "History");
     const hist = await page.evaluate(() => ({ dashed: document.querySelectorAll("#m-vol .ft-cbox path[stroke-dasharray]").length, legend: document.querySelector("#m-vol .ft-leg-row").innerText }));
@@ -2485,6 +2482,5 @@ try {
 
 } finally {
   await browser.close();
-  fs.rmSync(EMIT_DIR, { recursive: true, force: true });
 }
 console.log(`flows-ticker-contract: ${checks} checks passed`);

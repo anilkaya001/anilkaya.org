@@ -5,6 +5,7 @@ import {
 } from "./flows-live.js";
 import { alertRow, alertKey } from "./flows-alerts.js";
 import { focusStripNames } from "./flows-focus.js";
+import { newsRow } from "./flows-news.js";
 
 export { TICKER_RE };
 
@@ -59,6 +60,7 @@ export const RT_LIMITS = Object.freeze({
   pause429MaxMs: 120 * 1000,
   pause429BaseMs: 5 * 1000,
   flowOverlapMs: 30 * 1000,
+  flowFirstWindowMs: 15 * 60 * 1000,
   flowLimit: 200,
   seenMax: 1000,
   newsLimit: 100,
@@ -134,6 +136,53 @@ export function rtSwitches(env) {
 export const rtIsOwner = (sw, username) => sw.users.includes(username);
 
 export const rtAdmits = (sw, username) => sw.audience === "members" || rtIsOwner(sw, username);
+
+export const RT_REDACTED = "[redacted]";
+
+export const RT_SECRET_MIN_CHARS = 8;
+
+export const RT_SECRET_ENV = Object.freeze([
+  "UW_API_KEY", "SESSION_SECRET", "GOOGLE_CLIENT_SECRET", "FLOWS_INGEST_TOKEN", "FLOWS_LIVE_TOKEN", "GITHUB_DISPATCH_TOKEN",
+]);
+
+const CREDENTIAL_QUERY = /([?&;](?:token|access_token|api_key|apikey|auth|authorization|secret|signature|sig)=)[^&#\s"'<>)]+/gi;
+const CREDENTIAL_BEARER = /\bBearer\s+[A-Za-z0-9._~+\/=-]{8,}/g;
+
+function secretForms(secret) {
+  const forms = new Set([secret, encodeURIComponent(secret), encodeURI(secret)]);
+  try { forms.add(btoa(secret)); } catch { forms.delete(""); }
+  return Array.from(forms).filter((f) => f.length >= RT_SECRET_MIN_CHARS);
+}
+
+export function rtSecretsOf(env) {
+  const e = env || {};
+  return RT_SECRET_ENV.map((name) => e[name]).filter((v) => typeof v === "string" && v.length >= RT_SECRET_MIN_CHARS);
+}
+
+export function createRedactor(secrets = []) {
+  const forms = [];
+  for (const secret of Array.isArray(secrets) ? secrets : []) {
+    if (typeof secret === "string" && secret.length >= RT_SECRET_MIN_CHARS) forms.push(...secretForms(secret));
+  }
+  forms.sort((a, b) => b.length - a.length);
+  const text = (value) => {
+    let out = typeof value === "string" ? value : String(value);
+    for (const form of forms) if (out.includes(form)) out = out.split(form).join(RT_REDACTED);
+    return out.replace(CREDENTIAL_QUERY, "$1" + RT_REDACTED).replace(CREDENTIAL_BEARER, "Bearer " + RT_REDACTED);
+  };
+  const walk = (value, depth = 0) => {
+    if (typeof value === "string") return text(value);
+    if (value === null || typeof value !== "object") return value;
+    if (depth > 12) return RT_REDACTED;
+    if (Array.isArray(value)) return value.map((v) => walk(v, depth + 1));
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[text(k)] = walk(v, depth + 1);
+    return out;
+  };
+  text.deep = walk;
+  text.armed = forms.length > 0;
+  return text;
+}
 
 const iso = (v) => (Number.isFinite(v) ? new Date(v).toISOString() : null);
 
@@ -524,27 +573,7 @@ export function shapeMk(raws, { at, session }) {
   };
 }
 
-export function newsRow(row, at) {
-  if (!row || typeof row !== "object") return null;
-  const headline = typeof row.headline === "string" && row.headline.trim() ? row.headline.trim() : null;
-  if (headline === null) return null;
-  const createdAt = typeof row.created_at === "string" && row.created_at.trim() ? row.created_at.trim() : null;
-  const parsed = createdAt === null ? NaN : Date.parse(createdAt);
-  const createdAtMs = Number.isFinite(parsed) ? parsed : null;
-  const uniq = (list, f) => (Array.isArray(list) ? [...new Set(list.filter((t) => typeof t === "string" && t.trim()).map(f))] : []);
-  const ts = createdAtMs === null ? at : createdAtMs;
-  return {
-    id: `${createdAtMs === null ? "u" : createdAtMs}|${headline.slice(0, 80)}`,
-    ts,
-    headline,
-    source: typeof row.source === "string" && row.source.trim() ? row.source.trim() : null,
-    createdAt, createdAtMs,
-    major: row.is_major === null || row.is_major === undefined ? null : Boolean(row.is_major),
-    sentiment: typeof row.sentiment === "string" && row.sentiment.trim() ? row.sentiment.trim() : null,
-    tickers: uniq(row.tickers, (t) => t.trim().toUpperCase()),
-    tags: uniq(row.tags, (t) => t.trim()),
-  };
-}
+export { newsRow };
 
 export function shapeNw(raw, { at }) {
   const list = rowsOf(raw);
@@ -578,9 +607,10 @@ export function createFlowState() {
   return { ring: [], seen: new Map(), cursor: null, dropped: 0, truncations: 0, primed: false };
 }
 
-export function flowQuery(state, session) {
+export function flowQuery(state, session, nowMs = null) {
   const c = state.cursor ? timeMs(state.cursor) : NaN;
-  return Number.isFinite(c) ? new Date(c - RT_LIMITS.flowOverlapMs).toISOString() : session;
+  if (Number.isFinite(c)) return new Date(c - RT_LIMITS.flowOverlapMs).toISOString();
+  return Number.isFinite(nowMs) ? new Date(nowMs - RT_LIMITS.flowFirstWindowMs).toISOString() : session;
 }
 
 export function createGexState() {

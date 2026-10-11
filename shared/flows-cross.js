@@ -1,4 +1,7 @@
 import { isTradingDay } from "./flows-freshness.js";
+import { mean, sampleSd, median as medianOf } from "./flows-stats.js";
+
+export { mean, sampleSd, medianOf };
 
 export const CROSS_SCHEMA_VERSION = 1;
 
@@ -108,26 +111,6 @@ export function easternDayOfInstant(v) {
   }).formatToParts(new Date(ms));
   const get = (t) => (parts.find((p) => p.type === t) || {}).value;
   return `${get("year")}-${get("month")}-${get("day")}`;
-}
-
-export function mean(xs) {
-  const v = xs.filter((x) => Number.isFinite(x));
-  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
-}
-
-export function sampleSd(xs) {
-  const v = xs.filter((x) => Number.isFinite(x));
-  if (v.length < 2) return null;
-  const m = v.reduce((a, b) => a + b, 0) / v.length;
-  const s = v.reduce((a, b) => a + (b - m) * (b - m), 0) / (v.length - 1);
-  return Math.sqrt(s);
-}
-
-export function medianOf(xs) {
-  const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
-  if (!v.length) return null;
-  const h = v.length >> 1;
-  return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
 }
 
 export function pctRanks(values) {

@@ -21,7 +21,7 @@ import {
   trixSeriesBp, scaleTrix, sectorTrix, MOVER_ROWS, moverRow, buildMovers,
   vendorNum, sectorLean, shapeNews, NEWS_ROWS, NEWS_VENDOR_LIMIT,
   ensureArchived, sessionCandles, candleCut, judgeEndDate, verifyDating, computeFeatures,
-  sessionReference, sessionRow, readPxOf, intradayRefusal, nextWeekday, priorWeekdays,
+  sessionReference, sessionRow, readPxOf, intradayRefusal, sessionBarOverdue,
   closedPriceWindow, buildRecordCloses, recordCalendar, resolveBoardMemory, sameSessionGate,
   retireSession, sessionArchiveKeys, sweepScreenerBand, SCREENER_SPLIT_DEPTH, SCREENER_PAGE_ROWS,
   judgeScreenerDate, sessionRows, readDayOf, PIPELINE_CADENCE, SESSION_OPEN_MINUTES,
@@ -34,6 +34,7 @@ import {
   plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
   probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
+  shedCardToCap, CARD_SHED, CARD_SELF_CHECK_BYTES,
 } from "../scripts/flows-pipeline.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
@@ -44,13 +45,26 @@ import { execFileSync, spawnSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay } from "../shared/flows-freshness.js";
-import { workerSource, expect } from "./lib/source-scan.mjs";
+import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
+import { workerSource, expect, nightlySource, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
+import { newsFields, newsRow } from "../shared/flows-news.js";
+import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
+import { rowsOf as liveRows } from "../shared/flows-live.js";
+import { unwrapRows as pulseRows } from "../shared/flows-pulse.js";
+import { unwrapRows as politicalRows } from "../shared/flows-political.js";
+import { rowsOf as legRows } from "../scripts/flows-legs/common.mjs";
+import { rowsOf as volRows } from "../shared/flows-vol.js";
+import { rowsOf as positioningRows } from "../shared/flows-positioning.js";
+import { STAGES, ISOLATION, createStageRunner, declares, healthRecord, WHY_CAP, DETAIL_KEYS } from "../scripts/flows-nightly/stages.mjs";
+import {
+  COMPUTE_JOBS, COMPUTE_NAME_CPU_MS, computeNames, processCpuMs, runCompute,
+} from "../scripts/flows-nightly/sections/compute.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
+const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
 
@@ -914,18 +928,18 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
   for (const k of keys) {
 
-    const m = /^(?:board:(?:long|short)|scores):(\d{4}-\d{2}-\d{2})$/.exec(k);
+    const m = /^board:(?:long|short):(\d{4}-\d{2}-\d{2})$/.exec(k);
     ok(m, `every swept key is a dated archive key and nothing else (${k})`);
     ok(Date.parse(m[1] + "T00:00:00Z") < Date.parse(session + "T00:00:00Z") - ARCHIVE_RETENTION_DAYS * 86400000,
        `${k} is strictly older than the retention window`);
   }
-  ok(keys.some((k) => k.startsWith("scores:")),
-     "and the dated scores pool IS in the sweep — an archive key the prune " +
-     "does not name grows forever");
+  ok(!keys.some((k) => k.startsWith("scores:")),
+     "the dated scores pool is EXEMPT from the sweep: it is a few kilobytes a session and the conviction " +
+     "evaluation and the score track read as far back as the archive reaches, so it is kept");
 
-  eq(keys.length, 3 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
-     "THE BOUND: one run deletes at most three archive keys x the lookback " +
-     "(two board sides and the scores pool), and that number is knowable before it runs");
+  eq(keys.length, 2 * ARCHIVE_PRUNE_LOOKBACK_DAYS,
+     "THE BOUND: one run deletes at most two archive keys x the lookback " +
+     "(the two board sides), and that number is knowable before it runs");
   eq(new Set(keys).size, keys.length, "and never names the same row twice");
 
   ok(!keys.some((k) => k.startsWith("card:") || k === "meta" || k === "board:watch" ||
@@ -974,13 +988,13 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     eq(refused.seen[0].method, "DELETE", "the sweep deletes rather than overwriting with a tombstone");
 
     const missing = await run(404);
-    eq(missing.seen.length, 3 * LOOKBACK,
+    eq(missing.seen.length, 2 * LOOKBACK,
        "a 404 is an ordinary empty day, so the sweep runs the whole skirt rather than stopping at the first gap");
     ok(!missing.result.abandoned, "and reports no abandonment");
     eq(missing.result.removed, 0, "with nothing removed, honestly");
 
     const done = await run(200);
-    eq(done.result.removed, 3 * LOOKBACK,
+    eq(done.result.removed, 2 * LOOKBACK,
        "and every key that really was there is counted as removed");
   } finally {
     process.env.FLOWS_INGEST_URL = prevUrl;
@@ -1664,7 +1678,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
        "the per-name data it joined it onto — the log line that makes the timing trap " +
        "visible in a job log rather than only on a card");
 
-    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+    const src = nightlySource();
     for (const route of ["/api/market/oi-change", "/api/darkpool/recent"]) {
       ok(new RegExp(route.replace(/\//g, "\\/") + '", \\{ limit: MARKET_CROSS_LIMIT').test(src),
          `${route} is fetched at the same constant the cards publish as \`requested\` — two ` +
@@ -2233,7 +2247,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 }
 
 {
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
 
   const uaLiterals = src.match(/anilkaya-flows-pipeline\/1/g) || [];
   eq(uaLiterals.length, 1,
@@ -2442,7 +2456,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and a run object carrying no arrays at all reports the name as NOT ATTEMPTED rather " +
      "than throwing or claiming it was built");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(/foldCardOutcomes\(cardTickers, cardsRun\)/.test(src),
      "the cards leg folds its pooled run through foldCardOutcomes");
   ok(/runPooled\(cardTickers,/.test(src) && /stopEarly: \(\) => Date\.now\(\) > deadline/.test(src),
@@ -2730,10 +2744,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and the sentence names which side of the comparison was missing");
 
   {
-    const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-    const start = src.indexOf("export function readBoardMemory");
-    ok(start !== -1, "readBoardMemory is where this scan expects it — a rename must update this check");
-    const body = src.slice(start, src.indexOf("\n}\n", start));
+    const src = nightlySource();
+    const body = slice(src, "export function readBoardMemory", "\n}\n");
+    ok(body.length > 0, "readBoardMemory is where this scan expects it — a rename must update this check");
     ok(!/Date\.now\(|new Date\(|easternNow\(/.test(body),
        "the guard reads no clock: two published session dates, compared as strings, so the " +
        "answer cannot depend on the hour the run happens to start");
@@ -3003,6 +3016,106 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     ok(bytes <= 100 * 1024,
        `${name} is ${(bytes / 1024).toFixed(1)}KB, inside the 128KB the ingest route accepts ` +
        "(and inside the 100KB the card shedder targets)");
+  }
+  {
+    const KIB = 1024;
+    const table = new Map();
+    const bump = (depth) => {
+      if (!table.has(depth)) table.set(depth, { n: 0, whole: 0, bare: 0, oi: 0, oiSum: 0, withOi: 0, split: 0, cardX: 0, cardXMax: 0 });
+      return table.get(depth);
+    };
+    for (const name of emitted) {
+      const full = path.join(dir, name);
+      if (/^w-card-x-/.test(name)) {
+        const row = bump("card-x");
+        const bytes = fs.statSync(full).size;
+        row.n++; row.cardXMax = Math.max(row.cardXMax, bytes);
+        ok(bytes < 60 * KIB, `${name} is ${(bytes / KIB).toFixed(1)}KB, under the 60KiB a card-x holds so the card beside it keeps room`);
+        continue;
+      }
+      if (!/^w-card-/.test(name)) continue;
+      const stored = JSON.parse(fs.readFileSync(full, "utf8"));
+      const row = bump(stored.depth || "board");
+      const whole = fs.statSync(full).size;
+      const { engine, ...bare } = stored;
+      const bareBytes = Buffer.byteLength(JSON.stringify(bare));
+      row.n++;
+      row.whole = Math.max(row.whole, whole);
+      row.bare = Math.max(row.bare, bareBytes);
+      if (stored.engine && stored.engine.status === "split") row.split++;
+      ok(bareBytes <= CARD_SELF_CHECK_BYTES, `${name} is ${(bareBytes / KIB).toFixed(1)}KB before its engine block, inside the ${CARD_SELF_CHECK_BYTES / KIB}KiB self-check`);
+      ok(whole <= 128 * KIB, `${name} is ${(whole / KIB).toFixed(1)}KB, inside the 128KiB ingest cap the Worker refuses above`);
+      const surface = stored.panels && stored.panels.surface;
+      if (surface && surface.status === "ok" && surface.oi) {
+        const oiBytes = Buffer.byteLength(JSON.stringify(surface.oi));
+        row.withOi++; row.oi = Math.max(row.oi, oiBytes); row.oiSum += oiBytes;
+        ok(oiBytes <= 12 * KIB, `${name} stores its open-interest grids in ${(oiBytes / KIB).toFixed(1)}KB, at most 12KiB for 504 values and their envelope`);
+        for (const g of ["gamma", "charm", "vanna"]) {
+          ok(Array.isArray(surface.oi[g]) && surface.oi[g].length === surface.strikes.length, `${name}: the ${g} grid has a row per strike of the flow grid`);
+        }
+      }
+    }
+    const lines = ["card byte ledger (KiB): depth, cards, max whole, max without engine, split to card-x, cards with oi, mean oi, max oi, max card-x"];
+    for (const [depth, r] of [...table.entries()].sort()) {
+      lines.push(`  ${depth.padEnd(14)} ${String(r.n).padStart(4)} ${(r.whole / KIB).toFixed(1).padStart(7)} ${(r.bare / KIB).toFixed(1).padStart(7)} ` +
+        `${String(r.split).padStart(4)} ${String(r.withOi).padStart(4)} ${(r.withOi ? r.oiSum / r.withOi / KIB : 0).toFixed(1).padStart(6)} ${(r.oi / KIB).toFixed(1).padStart(6)} ${(r.cardXMax / KIB).toFixed(1).padStart(7)}`);
+    }
+    console.log(lines.join("\n"));
+    const scoresFiles = emitted.filter((name) => /^w-scores-\d{4}-\d{2}-\d{2}\.json$/.test(name));
+    eq(scoresFiles.length, 1, "the dry run archives one dated scores pool");
+    const scoresBytes = fs.statSync(path.join(dir, scoresFiles[0])).size;
+    const scoreNames = JSON.parse(fs.readFileSync(path.join(dir, scoresFiles[0]), "utf8")).rows.length;
+    const perName = scoresBytes / scoreNames;
+    const yearMiB = perName * 670 * 252 / KIB / KIB;
+    console.log(`scores ledger: ${scoresFiles[0]} is ${(scoresBytes / KIB).toFixed(1)} KiB for ${scoreNames} names, ${perName.toFixed(0)} bytes a name; ` +
+      `at 670 names kept past the 126-day prune it adds ${yearMiB.toFixed(1)} MiB a year`);
+    ok(perName < 64 && yearMiB < 12, `a dated scores pool costs ${perName.toFixed(0)} bytes a name, which keeps every session of 670 names under 12 MiB a year (${yearMiB.toFixed(1)})`);
+    const deep = [...table.entries()].filter(([depth]) => depth !== "card-x" && table.get(depth).withOi > 0);
+    ok(deep.length > 0, "the dry run reaches the open-interest grids on at least one card depth, so the ledger above measured them rather than their absence");
+  }
+
+  {
+    const KIB = 1024;
+    const rec = JSON.parse(fs.readFileSync(path.join(dir, base + "-record.json"), "utf8"));
+    const c = rec.conviction;
+    ok(c && typeof c === "object", "the record carries the conviction evaluation");
+    ok(["ok", "pending", "unavailable"].includes(c.status) && ["keep", "relabel", "pending"].includes(c.verdict),
+       `with a status (${c.status}) and a verdict (${c.verdict}) from the closed sets`);
+    eq(c.label, c.verdict === "relabel" ? "Agreement index" : "Conviction", "whose label follows the verdict");
+    ok(Array.isArray(c.horizons) && c.horizons.length === 2 && c.horizons.every((h) => Number.isInteger(h.k) && Array.isArray(h.terciles) && h.terciles.length === 3),
+       "reads the two horizons with three terciles each");
+    eq(c.horizon, 10, "and states the ten-session horizon");
+    ok(c.status === "ok" || (typeof c.reason === "string" && c.reason.length > 20), "a pending evaluation says why");
+    ok(c.notes && c.notes.rule && c.notes.market && c.notes.cluster && c.notes.overlap && c.notes.floor, "and carries the rule, the market, the clustering and the overlap in words");
+    const recBytes = fs.statSync(path.join(dir, base + "-record.json")).size;
+    ok(recBytes < 64 * 1024, `the record is ${(recBytes / KIB).toFixed(1)}KiB with it, inside the 128KiB the ingest route accepts and the 64KiB this payload keeps to`);
+    ok(/conviction: (keep|relabel|pending) \((Conviction|Agreement index)\)/.test(runLog), "and the run log states the verdict");
+  }
+
+  {
+    const mk = (extra) => ({
+      ticker: "LEDG", panels: {
+        surface: { status: "ok", oi: { source: "vendor", gamma: [[1]], charm: [[2]], vanna: [[3]] } },
+        topContracts: { status: "ok", rows: "x".repeat(3000) },
+        aggressor: { status: "ok", rows: "y".repeat(3000) },
+        ...extra,
+      },
+    });
+    const small = shedCardToCap(mk(), 1e6);
+    assert.deepEqual(small.dropped, []); checks++;
+    ok(small.body.includes('"oi":{"source"'), "a card inside the cap keeps its open-interest grids");
+    const oiOnly = JSON.stringify(mk()).length - JSON.stringify({ ...mk(), panels: { ...mk().panels, surface: { status: "ok", oi: null } } }).length;
+    const tight = JSON.stringify(mk()).length - Math.min(oiOnly, 10);
+    const first = shedCardToCap(mk(), tight);
+    assert.deepEqual(first.dropped, ["surface.oi"]); checks++;
+    ok(first.body.length <= tight && !first.body.includes('"oi":{"source"'),
+       "a card a few bytes over the cap loses the stored grids first and keeps every panel a reader sees");
+    const deeper = shedCardToCap(mk(), 3500);
+    assert.deepEqual(deeper.dropped.slice(0, 2), ["surface.oi", "topContracts"]); checks++;
+    ok(CARD_SHED[0][0] === "topContracts", "the existing shed order is unchanged behind the new first step");
+    const impossible = shedCardToCap(mk(), 10);
+    ok(impossible.body.length > 10 && impossible.dropped[0] === "surface.oi",
+       "a card that cannot fit is returned over the cap for the caller to refuse, never trimmed to a fiction");
   }
   {
     const m = /brief: (\d+) facts, (\d+) of them per-name over (\d+) of (\d+) carded names([^\n]*)/.exec(runLog);
@@ -3488,15 +3601,19 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(SESSION_OPEN_MINUTES, 570, "09:30 in minutes");
   eq(SESSION_CLOSE_MINUTES, 960, "16:00 in minutes");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
-  const main = src.slice(src.indexOf("async function main()"));
+  const src = nightlySource();
+  const main = slice(src, "async function main()", "\n}\n");
   const resolved = main.indexOf("await resolveSessionDate()");
   const guard = main.indexOf("intradayRefusal(sessionDate");
   const thrown = main.indexOf("if (intraday && intraday.refuse) throw new Error(intraday.message)");
-  const firstRead = main.indexOf("verifyDating(sessionDate");
-  ok(resolved !== -1 && guard > resolved && thrown > guard && firstRead > thrown,
-     "main() resolves the session, then consults the guard and THROWS on a refusal, before a " +
-     "single vendor read beyond the session probe");
+  const firstSection = main.indexOf("await runUniverse(ctx)");
+  const universe = slice(src, "export async function runUniverse(ctx)", "\n}\n");
+  const firstRead = universe.indexOf("verifyDating(sessionDate");
+  ok(resolved !== -1 && guard > resolved && thrown > guard && firstSection > thrown,
+     "main() resolves the session, then consults the guard and THROWS on a refusal, before the " +
+     "first section runs");
+  ok(firstRead !== -1 && firstRead < universe.indexOf("harvestScreener(") && firstRead < universe.indexOf("uw("),
+     "and the first section's first vendor read is the dating probe, before the harvest and the sweep");
   ok(/allow: process\.env\.FLOWS_ALLOW_INTRADAY === "1"/.test(main),
      "and the override is the FLOWS_ALLOW_INTRADAY=1 the workflow plumbs from allow_intraday");
 
@@ -3641,6 +3758,43 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
       .every((m) => /persist-credentials: false/.test(m[1])) && /persist-credentials: false/.test(text),
     `${file} keeps no credential in .git/config after checkout`);
   }
+  const dependabot = readFileSync(new URL("../.github/dependabot.yml", import.meta.url), "utf8");
+  ok(/^version: 2\n/.test(dependabot) && !/^\s*#/m.test(dependabot) && !/\s#\s/.test(dependabot),
+    "DEPENDABOT IS CONFIGURED in version 2 and, like every other YAML file here, carries no comments");
+  const updates = dependabot.split(/\n {2}- package-ecosystem: /).slice(1).map((chunk) => {
+    const [ecosystem, ...rest] = chunk.split("\n");
+    return { ecosystem, body: rest.join("\n") + "\n" };
+  });
+  assert.deepEqual(updates.map((u) => u.ecosystem), ["npm", "github-actions"],
+    "and it watches exactly the two ecosystems the repository uses: npm under tests/ and the workflows' actions");
+  checks++;
+  assert.deepEqual(updates.map((u) => /^ {4}directory: (\S+)$/m.exec(u.body)?.[1]), ["/tests", "/"],
+    "the npm manifest is tests/package.json, the only one, and the actions are read from .github/workflows at the root");
+  checks++;
+  ok(fs.existsSync(new URL("../tests/package.json", import.meta.url)) && fs.existsSync(new URL("../tests/package-lock.json", import.meta.url)) &&
+     !fs.existsSync(new URL("../package.json", import.meta.url)), "(and there is no other package.json for it to miss)");
+  for (const u of updates) {
+    ok(/^ {6}interval: monthly$/m.test(u.body) && !/interval: (daily|weekly)/.test(u.body),
+      `${u.ecosystem} refreshes MONTHLY: one dependency pull request a month, not one per release`);
+    const limit = Number(/^ {4}open-pull-requests-limit: (\d+)$/m.exec(u.body)?.[1]);
+    ok(limit >= 1 && limit <= 3, `${u.ecosystem} holds at most ${limit} open pull requests at a time`);
+    ok(/^ {4}groups:\n {6}[a-z-]+:\n {8}patterns:\n/m.test(u.body), `${u.ecosystem} updates arrive GROUPED, so one month is one pull request per group`);
+    ok(!/^ {4}(ignore|allow|target-branch|reviewers|assignees|registries|vendor|rebase-strategy|insecure-external-code-execution):/m.test(u.body),
+      `${u.ecosystem} narrows nothing and redirects nothing: every update is proposed, to the default branch`);
+  }
+  const npmGroups = [...updates[0].body.matchAll(/^ {6}([a-z-]+):\n {8}patterns:\n((?: {10}- "[^"]+"\n)+)(?: {8}exclude-patterns:\n((?: {10}- "[^"]+"\n)+))?/gm)]
+    .map((m) => ({ name: m[1], patterns: [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]), exclude: m[3] ? [...m[3].matchAll(/"([^"]+)"/g)].map((x) => x[1]) : [] }));
+  assert.deepEqual(npmGroups.map((g) => g.name), ["toolchain", "development"],
+    "the npm updates split into the toolchain (wrangler and playwright, the two that move the Worker bundle and the " +
+    "Chromium every browser suite launches) and everything else"); checks++;
+  const devDeps = Object.keys(JSON.parse(readFileSync(new URL("../tests/package.json", import.meta.url), "utf8")).devDependencies);
+  const grouped = (name) => npmGroups.filter((g) => (g.patterns.includes("*") || g.patterns.includes(name)) && !g.exclude.includes(name));
+  ok(devDeps.length > 0 && devDeps.every((d) => grouped(d).length === 1),
+    `every development dependency (${devDeps.join(", ")}) falls in exactly one npm group, so none is skipped and none is proposed twice`);
+  ok(npmGroups[0].patterns.join() === "wrangler,playwright" && grouped("wrangler")[0].name === "toolchain" && grouped("playwright")[0].name === "toolchain",
+    "wrangler and playwright move together in the toolchain group");
+  ok(/^ {6}actions:\n {8}patterns:\n {10}- "\*"\n$/m.test(updates[1].body), "and the two SHA-pinned actions move together in one group");
+
   const images = [];
   for (const file of fs.readdirSync(new URL("../.github/workflows/", import.meta.url)).sort()) {
     const text = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
@@ -3667,12 +3821,12 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 }
 
 {
-  eq(nextWeekday("2026-09-18"), "2026-09-21", "the gate origin after a Friday is Monday");
-  eq(nextWeekday("2026-09-21"), "2026-09-22", "and after a Monday, Tuesday");
-  eq(nextWeekday("garbage"), null, "an unparseable session has no next session");
-  assert.deepEqual(priorWeekdays("2026-09-22", 3), ["2026-09-21", "2026-09-18", "2026-09-17"],
+  eq(nextTradingDay("2026-09-18", null), "2026-09-21", "the gate origin after a Friday is Monday");
+  eq(nextTradingDay("2026-09-21", null), "2026-09-22", "and after a Monday, Tuesday");
+  eq(nextTradingDay("garbage", null), null, "an unparseable session has no next session");
+  assert.deepEqual(priorTradingDays("2026-09-22", 3, null), ["2026-09-21", "2026-09-18", "2026-09-17"],
     "the archive walk back skips the weekend"); checks++;
-  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextWeekday("2026-09-21")) === 11,
+  ok(daysToEarnings({ next_earnings_date: "2026-10-03" }, nextTradingDay("2026-09-21", null)) === 11,
      "UW-21: a report on 10-03 is 11 days from the NEXT session after 09-21 — the anchor a " +
      "post-close run must use, where its own wall-clock date would say 12");
 
@@ -3704,7 +3858,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   eq(calendar[calendar.length - 1], "2026-09-21",
      "the record's calendar ends at the session, so k=5 and k=10 are never scored to an intraday bar");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(!/put\(row\.ticker, sessionDate, row\.close\)/.test(src),
      "and the universe row.close — a screener price read at run time — is no longer written as a close");
 }
@@ -3760,7 +3914,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(!/partly archived/.test(noneKept) && /ranks it again/.test(noneKept),
      "BUT NOT WHEN NOTHING WAS KEPT: with all three keys lost the gate reads the session as fresh and " +
      `a plain re-dispatch ranks it again, so "finds the session partly archived" was false (${noneKept})`);
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   ok(/"together; " \+ plainRedispatchSaid\(archive\)/.test(src),
      "and the ARCHIVE LOST line takes its clause from that function");
   ok(/reads as archived, or as partly archived, and a later plain run skips it/.test(src),
@@ -3843,9 +3997,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     reader: async (key) => (key === "board:short" ? { payload: { sessionDate: "2026-09-21", rows: [{ t: "X" }] } }
       : { payload: null, absent: true }),
   });
-  ok(cold.status === "same-session" && /searched back 10 weekdays/.test(cold.note) && /held none/.test(cold.note),
+  ok(cold.status === "same-session" && /searched back 10 sessions/.test(cold.note) && /held none/.test(cold.note),
      "with no archive either, the refusal stands and says the archive was searched");
-  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten weekdays back — two weeks of archive");
+  eq(MEMORY_ARCHIVE_SESSIONS, 10, "ten sessions back — two weeks of archive");
 
   const ok0 = await resolveBoardMemory("long", "2026-09-21", {
     reader: async (key) => (key === "board:long" ? { payload: { sessionDate: "2026-09-18", rows: [{ t: "Z" }] } }
@@ -4153,7 +4307,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "so the cross-section card says the panel was not fetched rather than quiet");
   eq(card([]), "quiet", "where the old [] published quiet");
 
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   eq((src.match(/congress: congressRows\(ticker, congressState\)|const congress = congressRows\(ticker, congressState\)/g) || []).length, 3,
      "all three card lanes, board, cross-section and index, take the panel's input from the one rule");
   ok(!/congressRead === "ok" \? \[\] : null/.test(src), "and the old expression is gone from both");
@@ -4162,7 +4316,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 {
   const http = await import("node:http");
   const today = easternNow().date;
-  const days = priorWeekdays(today, 8).reverse();
+  const days = priorTradingDays(today, 8, null).reverse();
   const SESSION = days[days.length - 1];
   const vendorCalls = [];
   const uwServer = http.createServer((req, res) => {
@@ -4259,7 +4413,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 }
 
 {
-  const src = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const src = nightlySource();
   eq(IV_RANK_PARAMS.timespan, "1y",
      "the implied-volatility history is asked for by timespan, the parameter the vendor documents, and for a " +
      "year of it: the vol-of-vol and the AR(1) half-life read that year at no extra call");
@@ -4327,6 +4481,27 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const meta = read("meta");
   ok(meta.variation && meta.variation.kc.status === "ok" && meta.variation.unit.family === "share" && meta.variation.votes === false,
      "meta publishes the run's probes, with the hedge vote off");
+  same(meta.stages.map((r) => r.id), STAGES.map((x) => x.id), "meta carries one stage record for every stage in the table, in the table's order");
+  ok(meta.stages.every((r) => r.status === "ok" || r.status === "skipped"), "and a clean dry run leaves none failed");
+  same(meta.stages.filter((r) => r.status === "skipped"), [], "nor skipped, since the fixtures reach every branch");
+  ok(meta.stages.every((r) => !("undeclared" in r)) && !("stagesOutside" in meta), "no stage published a key its table row does not declare, and nothing was published outside a stage");
+  ok(meta.stages.every((r) => Number.isInteger(r.ms) && r.ms >= 0 && Number.isInteger(r.calls) && Number.isInteger(r.keys)), "every record carries whole-number ms, calls and keys");
+  const compute = meta.stages.find((r) => r.id === "compute");
+  const cardCount = [...log.matchAll(/^  cards: (\d+) name\(s\)/gm)].map((m) => Number(m[1]))[0];
+  ok(compute && compute.status === "ok" && compute.jobs === COMPUTE_JOBS.length && compute.over === 0 && compute.failed === 0,
+     "the compute stage runs after card-x and records its jobs, none over budget and none failed");
+  eq(compute.names, 0, "and with no job registered it spends no name");
+  ok(cardCount > 0 && /compute: 0 of \d+ deep name\(s\), 0 job\(s\)/.test(log), "its log line counts the carded names it was offered");
+  ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
+  ok(JSON.stringify(meta.stages).length < 3000, `and the records add under 3 KiB to meta (${JSON.stringify(meta.stages).length} bytes)`);
+  same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
+  const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
+  ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
+  eq(wrote[wrote.length - 1], "meta", "META IS THE LAST KEY THE NIGHTLY WRITES");
+  eq(wrote.filter((k) => k === "meta").length, 1, "and it is written once");
+  const stray = wrote.filter((k) => k !== "meta" && !STAGES.some((x) => declares(x, k)));
+  same(stray, [], "every other key written belongs to a stage's declared keys");
+  eq(meta.stages.reduce((n, r) => n + r.keys, 0), wrote.length - 1, "and the stages' key counts add up to every write but meta's own");
   const long = read("board-long");
   const sv = long.scoreVariance;
   ok(sv && /residual/.test(sv.basis) && /blended/.test(sv.blended.basis),
@@ -4872,6 +5047,434 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     console.log = quiet;
   }
   ok(verdict.reuse === false && /reused=false/.test(readText(out, "utf8")), "and a checkout that is not the pushed commit, or an unreachable API, is a full run, never a failure");
+}
+
+{
+  const ids = STAGES.map((x) => x.id);
+  eq(new Set(ids).size, ids.length, "stages: every id in the table is unique");
+  ok(STAGES.every((x) => x.isolation === ISOLATION.fatal || x.isolation === ISOLATION.isolated), "and each is fatal or isolated");
+  ok(STAGES.every((x, i) => x.needs.every((n) => ids.indexOf(n) >= 0 && ids.indexOf(n) < i)), "and needs only stages earlier in the table");
+  ok(STAGES.every((x) => x.publishes.every((k) => /^[a-z][a-z0-9:-]*\*?$/.test(k))), "and declares its keys as names or prefixes ending in *");
+  ok(Object.isFrozen(STAGES) && STAGES.every((x) => Object.isFrozen(x) && Object.isFrozen(x.needs) && Object.isFrozen(x.publishes)), "the table is frozen");
+
+  const src = nightlyExecution();
+  const called = [...src.matchAll(/stages\.(step|run|skip)\("([a-z-]+)"/g)].map((m) => ({ how: m[1], id: m[2], at: m.index }));
+  ok(called.length >= ids.length, `the pipeline names its stages (${called.length} calls)`);
+  same([...new Set(called.map((c) => c.id))].filter((c) => !ids.includes(c)), [], "every stage the pipeline names is in the table");
+  for (const x of STAGES) {
+    const mine = called.filter((c) => c.id === x.id);
+    if (x.isolation === ISOLATION.fatal) {
+      eq(mine.filter((c) => c.how === "step").length, 1, `${x.id}: a fatal stage is entered by exactly one step`);
+      eq(mine.filter((c) => c.how === "run").length, 0, `${x.id}: and never run inside a catch`);
+    } else {
+      eq(mine.filter((c) => c.how === "run").length, 1, `${x.id}: an isolated stage is run exactly once`);
+      eq(mine.filter((c) => c.how === "step").length, 0, `${x.id}: and never stepped, which would leave its failure uncaught`);
+    }
+    ok(mine.filter((c) => c.how === "skip").length <= 1, `${x.id}: at most one skip branch`);
+  }
+  const first = ids.map((id) => called.find((c) => c.id === id).at);
+  ok(first.every((at, i) => i === 0 || at > first[i - 1]), "the stages first appear in the source in the table's order");
+  eq(count(src, /await stages\.run\(/g), STAGES.filter((x) => x.isolation === ISOLATION.isolated).length, "and every await stages.run is an isolated stage");
+
+  let tick = 0;
+  let spent = 0;
+  const fresh = () => createStageRunner({ clock: () => (tick += 5), calls: () => spent });
+  const play = async (r, upto) => {
+    for (const x of STAGES) {
+      if (x.id === upto) return;
+      if (x.isolation === ISOLATION.fatal) r.step(x.id);
+      else await r.run(x.id, async () => { spent += 2; }, () => {});
+    }
+  };
+
+  for (const x of STAGES) {
+    const r = fresh();
+    await play(r, x.id);
+    const seen = [];
+    let outcome = "returned";
+    try {
+      const out = await r.run(x.id, async () => { throw new Error(`${x.id} broke`); }, (error) => seen.push(error.message));
+      eq(out, undefined, `${x.id}: a failed run yields nothing`);
+    } catch (error) {
+      outcome = error.message;
+    }
+    if (x.isolation === ISOLATION.isolated) {
+      eq(outcome, "returned", `${x.id}: an isolated stage swallows its failure`);
+      same(seen, [`${x.id} broke`], `${x.id}: and hands it to its own handler once`);
+    } else {
+      eq(outcome, `${x.id} broke`, `${x.id}: a fatal stage lets its failure out`);
+      same(seen, [], `${x.id}: without calling a handler`);
+    }
+    const next = STAGES[STAGES.indexOf(x) + 1];
+    if (next && x.isolation === ISOLATION.isolated) {
+      if (next.isolation === ISOLATION.fatal) r.step(next.id); else await r.run(next.id, async () => {}, () => {});
+    }
+    r.finish();
+    const rec = r.records();
+    eq(rec.length, STAGES.length, `${x.id}: finish leaves a record for every stage`);
+    const mine = rec.find((y) => y.id === x.id);
+    if (next && x.isolation === ISOLATION.isolated) eq(rec.find((y) => y.id === next.id).status, "ok", `${x.id}: the next stage still runs after an isolated failure`);
+    eq(mine.status, "failed", `${x.id}: the failed stage is recorded failed`);
+    eq(mine.why, `${x.id} broke`, `${x.id}: with its reason`);
+    ok(rec.filter((y) => y.status === "failed").length === 1, `${x.id}: and nothing else is marked failed`);
+  }
+
+  {
+    const r = fresh();
+    let threw = null;
+    try { r.step("universe"); } catch (error) { threw = error.message; }
+    ok(/needs session, which has not run/.test(threw), "a stage whose needs have not run is refused");
+    r.step("session");
+    r.step("universe");
+    threw = null;
+    try { r.step("universe"); } catch (error) { threw = error.message; }
+    ok(/ran twice/.test(threw), "a stage cannot run twice");
+    threw = null;
+    try { r.step("nonsense"); } catch (error) { threw = error.message; }
+    ok(/not in the stage table/.test(threw), "an id outside the table is refused");
+    threw = null;
+    try { r.step("watch"); } catch (error) { threw = error.message; }
+    ok(/is isolated, not fatal/.test(threw), "an isolated stage cannot be entered as a step, which would leave its failure uncaught");
+  }
+
+  {
+    tick = 0;
+    spent = 100;
+    const r = fresh();
+    r.step("session");
+    spent += 3;
+    r.step("universe");
+    r.note("anything");
+    r.step("enrich");
+    r.step("score");
+    r.step("boards");
+    r.note("board:long");
+    r.note("board:short");
+    r.note("card:AAPL");
+    await r.run("watch", async () => { r.note("board:watch"); spent += 4; });
+    r.skip("scores", "no session date");
+    r.finish();
+    r.note("late");
+    const rec = Object.fromEntries(r.records().map((y) => [y.id, y]));
+    same(rec.session, { id: "session", status: "ok", ms: 5, calls: 3, keys: 0 }, "a step records the clock and the calls spent while it was open");
+    same(rec.universe.undeclared, ["anything"], "a key a stage does not declare is named on its record");
+    eq(rec.universe.keys, 1, "and still counted");
+    same(rec.boards.undeclared, ["card:AAPL"], "only the undeclared one of three");
+    eq(rec.boards.keys, 3, "while all three are counted");
+    same(rec.watch, { id: "watch", status: "ok", ms: 5, calls: 4, keys: 1 }, "an isolated run is timed the same way");
+    same(rec.scores, { id: "scores", status: "skipped", ms: 0, calls: 0, keys: 0, why: "no session date" }, "a skipped stage says why");
+    eq(rec.chains.status, "skipped", "a stage that never started is skipped by finish");
+    same(r.outside(), ["late"], "a key written after the last stage is kept apart");
+    eq(r.records().length, STAGES.length, "and the records are one per stage");
+    eq(r.open(), null, "with no stage left open");
+  }
+
+  {
+    const r = createStageRunner({ clock: () => 0, calls: () => 0 });
+    const long = "x".repeat(400);
+    for (const x of STAGES) {
+      if (x.isolation === ISOLATION.fatal) r.step(x.id);
+      else await r.run(x.id, async () => { throw new Error(long + "\n  with   gaps"); }, () => {});
+    }
+    r.finish();
+    ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
+    ok(JSON.stringify(r.records()).length < 5000, `even with every isolated stage failed the records stay under 5 KB (${JSON.stringify(r.records()).length})`);
+    let n = 0;
+    const bigClock = () => (n += 98765);
+    const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
+    for (const x of STAGES) {
+      if (x.isolation === ISOLATION.fatal) wide.step(x.id);
+      else await wide.run(x.id, async () => {});
+      for (let i = 0; i < 400 && x.publishes.length; i++) wide.note(x.publishes[0].replace("*", "X"));
+    }
+    wide.finish();
+    ok(JSON.stringify(wide.records()).length < 4096, `production-sized numbers keep the records inside 4 KiB (${JSON.stringify(wide.records()).length} bytes)`);
+  }
+
+  {
+    same(healthRecord(null), { failures: 0, warnings: 0, first: [] }, "no gate verdict is an empty record");
+    same(healthRecord({ failures: [], warnings: [] }), { failures: 0, warnings: 0, first: [] }, "a clean verdict is an empty record");
+    const h = healthRecord({ failures: ["F1", "F2"], warnings: ["W1", "W2", "W3"] });
+    same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1"] }, "the record counts both and keeps the first three lines, failures first");
+    ok(healthRecord({ failures: ["y".repeat(500)], warnings: [] }).first[0].length <= 160, "and caps each line");
+  }
+}
+
+{
+  const ids = STAGES.map((x) => x.id);
+  const compute = STAGES.find((x) => x.id === "compute");
+  ok(compute && compute.isolation === ISOLATION.isolated && compute.publishes.length === 0, "compute: the stage is isolated and publishes no key");
+  same([...compute.needs], ["card-x"], "compute: it needs card-x, the last stage that reads the vendor or publishes a card");
+  eq(ids.indexOf("compute"), ids.indexOf("card-x") + 1, "compute: and runs directly after it");
+  same([...STAGES.find((x) => x.id === "roster").needs], ["compute"], "compute: the roster waits for it, so a hung stage cannot be skipped past");
+
+  const src = nightlySource();
+  const mod = slice(src, "@@ source scripts/flows-nightly/sections/compute.mjs @@", "@@ source scripts/flows-nightly/sections/context.mjs @@");
+  ok(!/from "\.\.\/(vendor|store|archive)\.mjs"/.test(mod), "compute: the module imports no vendor client, store or archive, so it can neither call the vendor nor publish");
+  eq(count(mod, /\buw\(|\bpublish\(|fetch\(/g), 0, "compute: and makes no request");
+  const exec = nightlyExecution();
+  ok(exec.indexOf('stages.step("card-x")') < exec.indexOf('stages.run("compute"') && exec.indexOf('stages.run("compute"') < exec.indexOf('stages.run("roster"'),
+    "compute: the run reads card-x, compute, roster in that order");
+
+  let used = 0;
+  const cpu = () => used;
+  const noTurn = async () => {};
+  const names = ["A", "B", "C", "D"];
+  const burn = (ms) => ({ id: "burn", run: async (t) => { used += ms[t] || 0; return t.toLowerCase(); } });
+
+  const idle = await computeNames({ names, jobs: [], cpu, turn: noTurn });
+  same([idle.names, idle.jobs, idle.stopped, idle.over, idle.failed], [0, 0, null, [], []], "compute: no job registered spends no name");
+  eq(COMPUTE_JOBS.length, 0, "compute: and the nightly registers none until a model brings one");
+  ok(Object.isFrozen(COMPUTE_JOBS), "compute: the registry is frozen");
+
+  used = 0;
+  const calm = await computeNames({ names, jobs: [burn({ A: 100, B: 200, C: 300, D: 400 })], cpu, turn: noTurn });
+  same([calm.names, calm.over.length, calm.stopped, calm.cpuMs], [4, 0, null, 1000], "compute: four names inside their 1 s each all run, and the stage reports the CPU it spent");
+  same([...calm.results.get("burn")], [["A", "a"], ["B", "b"], ["C", "c"], ["D", "d"]], "compute: each job's value is kept by name for a later stage to publish");
+
+  used = 0;
+  const heavy = await computeNames({ names, jobs: [burn({ A: 1500, B: 100, C: 100, D: 100 })], cpu, turn: noTurn });
+  same(heavy.over, [{ t: "A", ms: 1500 }], "compute: a name that spends more than 1 s of CPU is named with what it spent");
+  same([heavy.names, heavy.stopped], [4, null], "compute: and the others still fit the stage's share of 1 s a name");
+
+  used = 0;
+  const runaway = await computeNames({ names, jobs: [burn({ A: 2500, B: 2000, C: 100, D: 100 })], cpu, turn: noTurn });
+  same([runaway.names, runaway.stopped], [2, "share"], "compute: past the share of 4 s the stage stops before the next name rather than running on");
+  same(runaway.over.map((o) => o.t), ["A", "B"], "compute: and both names that overran are on record");
+  ok(!runaway.results.get("burn").has("C"), "compute: a name that was not reached has no value");
+
+  used = 0;
+  let stopNow = false;
+  const cut = await computeNames({ names, jobs: [{ id: "burn", run: async (t) => { if (t === "B") stopNow = true; } }], cpu, turn: noTurn, stop: () => stopNow });
+  same([cut.names, cut.stopped], [2, "deadline"], "compute: the run's deadline stops it between names");
+
+  used = 0;
+  const flaky = await computeNames({
+    names, cpu, turn: noTurn,
+    jobs: [{ id: "bad", run: async (t) => { if (t === "B") throw new Error("no fit"); return 1; } }, { id: "good", run: async () => 2 }],
+  });
+  same([flaky.names, flaky.failed], [4, [{ t: "B", job: "bad", why: "no fit" }]], "compute: a job that throws for one name costs that name that job only");
+  eq(flaky.results.get("good").size, 4, "compute: the other job still answers every name, the failing one's name included");
+
+  let turns = 0;
+  await computeNames({ names, jobs: [burn({})], cpu, turn: async () => { turns++; } });
+  eq(turns, 4, "compute: the event loop gets a turn after every name");
+
+  const before = processCpuMs();
+  let sink = 0;
+  for (let i = 0; i < 3e7; i++) sink += Math.sqrt(i);
+  const spent = processCpuMs() - before;
+  ok(sink > 0 && spent >= 5 && spent < 5000, `compute: the real clock is the process's own CPU time (${spent.toFixed(0)} ms for a busy loop)`);
+  eq(COMPUTE_NAME_CPU_MS, 1000, "compute: a deep name may spend 1 s of CPU");
+
+  const runner = (extra = {}) => createStageRunner({ clock: () => 0, calls: () => 0, ...extra });
+  const ctxFor = (stages, over = {}) => ({ stages, cardTickers: ["A", "B", "C", "X"], byTicker: new Map([["A", 1], ["B", 1], ["C", 1]]), deadline: Date.now() + 60000, ...over });
+  const prime = async (r) => {
+    for (const x of STAGES) {
+      if (x.id === "compute") return;
+      if (x.isolation === ISOLATION.fatal) r.step(x.id); else await r.run(x.id, async () => {}, () => {});
+    }
+  };
+  {
+    used = 0;
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r);
+    ctx.computeWith = { jobs: [burn({ A: 1200, B: 50 })], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same(rec, { id: "compute", status: "ok", ms: 0, calls: 0, keys: 0, cpu: 1250, names: 3, jobs: 1, over: 1, failed: 0 },
+      "compute: the stage record carries the CPU it measured, the names it ran (the name without enrichment is not offered), and the count over budget");
+    eq(ctx.computed.names, 3, "compute: the run leaves its result on the context for a later stage");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r);
+    ctx.computeWith = { jobs: [{ id: "boom", run: async () => { throw new Error("whole stage"); } }], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.status, rec.failed, rec.names], ["ok", 3, 3], "compute: per-name failures leave the stage ok and counted");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r, { cardTickers: null });
+    ctx.computeWith = { jobs: [], cpu };
+    await runCompute(ctx);
+    r.finish();
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.status, ctx.computed], ["failed", null], "compute: a stage that breaks is isolated: recorded failed, the run goes on, and nothing is left on the context");
+    ok(/null|Cannot read|not iterable/.test(rec.why), "compute: with its reason");
+  }
+  {
+    const r = runner({ cpu });
+    await prime(r);
+    const ctx = ctxFor(r, { deadline: Date.now() - 1 });
+    ctx.computeWith = { jobs: [burn({})], cpu };
+    await runCompute(ctx);
+    const rec = r.records().find((y) => y.id === "compute");
+    same([rec.names, rec.stopped], [0, "deadline"], "compute: a run already past its deadline spends no name and says so");
+  }
+
+  const plain = runner();
+  plain.step("session");
+  plain.step("universe");
+  plain.finish();
+  ok(plain.records().every((y) => !("cpu" in y)), "stages: a runner given no CPU clock records none, so the records keep their old shape");
+
+  let c = 10;
+  const metered = runner({ cpu: () => c });
+  metered.step("session");
+  c = 17.4;
+  metered.step("universe");
+  c = 20;
+  metered.finish();
+  const mrec = metered.records();
+  same([mrec[0].cpu, mrec[1].cpu], [7, 3], "stages: a metered runner records the CPU milliseconds each stage spent, rounded");
+  ok(mrec.filter((y) => y.status === "skipped").every((y) => y.cpu === 0), "and gives a stage it never ran 0");
+
+  const probe = runner({ cpu });
+  probe.step("session");
+  let threw = null;
+  try { probe.detail({ id: "x" }); } catch (error) { threw = error.message; }
+  ok(/is a record field/.test(threw), "stages: a detail may not overwrite a record field");
+  probe.detail({ a: 1, b: "two", c: NaN });
+  probe.detail({ d: 1, e: 1, f: 1, g: 1, h: 1 });
+  probe.step("universe");
+  const prec = probe.records()[0];
+  eq(Object.keys(prec).filter((k) => /^[a-h]$/.test(k)).length, DETAIL_KEYS, "stages: a record keeps at most six detail keys");
+  eq(prec.c, "NaN", "stages: and a number that is not finite is written as text, not as null");
+  probe.finish();
+  threw = null;
+  try { probe.detail({ a: 1 }); } catch (error) { threw = error.message; }
+  ok(/outside a stage/.test(threw), "stages: a detail with no stage open is refused");
+}
+
+{
+  const intl = (at) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(at).map((x) => [x.type, x.value]));
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute) };
+  };
+  let swept = 0;
+  let off = null;
+  for (let t = Date.UTC(2025, 0, 1); t < Date.UTC(2028, 0, 1); t += 37 * 60000) {
+    const a = easternNow(new Date(t));
+    const b = intl(new Date(t));
+    if (a.date !== b.date || a.minutes !== b.minutes) { off = `${new Date(t).toISOString()}: ${JSON.stringify(a)} vs ${JSON.stringify(b)}`; break; }
+    swept++;
+  }
+  ok(off === null && swept > 40000, `HOLIDAYS 0: the Eastern clock the pipeline reads is the IANA zone's, at ${swept} instants across 2025-2027 and every daylight-saving edge (${off})`);
+  let threw = null;
+  try { easternNow(new Date("nonsense")); } catch (error) { threw = error; }
+  ok(threw instanceof RangeError, "and an invalid instant is refused rather than answered with a date");
+
+  const at = (iso, session = "2026-09-04") => intradayRefusal(session, { at: new Date(iso) });
+  ok(!at("2026-09-07T15:00:00Z").inside && !at("2026-09-07T15:00:00Z").refuse,
+     "HOLIDAYS 1: a manual run at 11:00 ET on Labor Day is not inside a session, because none is in progress");
+  ok(!at("2026-04-03T14:00:00Z", "2026-04-02").refuse && !at("2026-11-26T15:00:00Z", "2026-11-25").refuse,
+     "and so on Good Friday and Thanksgiving");
+  ok(at("2026-09-08T15:00:00Z").inside && at("2026-09-08T15:00:00Z").refuse,
+     "while the next morning, a trading day, still refuses");
+  ok(at("2026-11-27T15:00:00Z", "2026-11-25").inside, "and so does the day after Thanksgiving, a short session but a session");
+
+  same(priorTradingDays("2026-09-08", 3, null), ["2026-09-04", "2026-09-03", "2026-09-02"],
+    "HOLIDAYS 2: the archive walk back from the day after Labor Day counts sessions, not weekdays");
+  const asked = [];
+  const mem = await resolveBoardMemory("long", "2026-09-08", {
+    sessions: 3,
+    reader: async (key) => {
+      asked.push(key);
+      return key === "board:long" ? { payload: { sessionDate: "2026-09-08", rows: [{ t: "X" }] } } : { payload: null, absent: true };
+    },
+  });
+  same(asked, ["board:long", "board:long:2026-09-04", "board:long:2026-09-03", "board:long:2026-09-02"],
+    "and reads three dated boards that can exist, never the holiday's key");
+  ok(/searched back 3 sessions/.test(mem.note), "the note says sessions");
+
+  ok(closedPriceWindow("2026-09-07T15:00:00Z", "2026-09-04"),
+     "HOLIDAYS 3: a board for Friday 09-04 written at 11:00 ET on Labor Day still holds Friday's close, because no session opened");
+  ok(closedPriceWindow("2026-04-03T15:00:00Z", "2026-04-02"),
+     "and a Thursday board written on Good Friday holds Thursday's close");
+  ok(closedPriceWindow("2026-09-08T13:29:00Z", "2026-09-04") && !closedPriceWindow("2026-09-08T13:31:00Z", "2026-09-04"),
+     "until the open of the next session that does trade, to the minute");
+  ok(!closedPriceWindow("2026-09-08T15:00:00Z", "2026-09-04"), "and not after it");
+
+  const wall = (date, minutes) => ({ date, minutes });
+  ok(!sessionBarOverdue("2026-09-04", wall("2026-09-07", 17 * 60)),
+     "HOLIDAYS 4: no bar is overdue at 17:00 ET on Labor Day, so the same-session note does not fire");
+  ok(sessionBarOverdue("2026-09-04", wall("2026-09-08", 17 * 60)), "on the next trading day after the close it does");
+  ok(!sessionBarOverdue("2026-09-04", wall("2026-09-08", 15 * 60)) && !sessionBarOverdue("2026-09-08", wall("2026-09-08", 17 * 60)) &&
+     !sessionBarOverdue(null, wall("2026-09-08", 17 * 60)) && !sessionBarOverdue("2026-09-04", wall("2026-09-12", 17 * 60)),
+     "and not before the close, on the session's own day, with no session, or on a Saturday");
+  const src = nightlySource();
+  ok(/gate\.skip && sessionBarOverdue\(sessionDate, wall\)/.test(src), "main asks that function");
+  ok(!/Intl\.DateTimeFormat|isWeekday\(|function nextWeekday|function priorWeekdays/.test(src),
+     "and the pipeline keeps no clock or weekday calendar of its own");
+}
+
+{
+  const raw = { data: [
+    { headline: "  Gold hits a record  ", source: " Wire ", created_at: "2026-09-21T14:00:00Z", is_major: 1, sentiment: " positive ",
+      tickers: ["gld", " GLD ", "nem", 7, ""], tags: ["metals", "metals", " macro ", null] },
+    { headline: "Undated item", created_at: "not a date", is_major: null, tickers: "NVDA", tags: {} },
+    { headline: "   ", created_at: "2026-09-21T15:00:00Z" },
+    null, "text", 42,
+    { headline: "Later", created_at: "2026-09-21T16:30:00Z", is_major: false, source: "", sentiment: "" },
+    { created_at: "2026-09-21T17:00:00Z" },
+  ] };
+  const shaped = shapeNews(raw, { cap: 10 });
+  const fields = raw.data.map(newsFields).filter(Boolean);
+  eq(fields.length, 3, "news: three of the eight rows carry a headline");
+  eq(shaped.unusable, 5, "and the nightly counts the other five unusable");
+  eq(shaped.undatedSeen, 1, "and the one with a date it cannot read undated");
+  same(shaped.rows, [fields[2], fields[0], fields[1]], "THE NIGHTLY'S ROWS ARE THE SHARED FIELDS, newest first with the undated last");
+  same(fields[0], {
+    headline: "Gold hits a record", source: "Wire", createdAt: "2026-09-21T14:00:00Z", createdAtMs: Date.parse("2026-09-21T14:00:00Z"),
+    major: true, sentiment: "positive", tickers: ["GLD", "NEM"], tags: ["metals", "macro"],
+  }, "trimmed, upper-cased tickers de-duplicated, tags de-duplicated, major read as a boolean");
+  same(fields[1], {
+    headline: "Undated item", source: null, createdAt: "not a date", createdAtMs: null, major: null, sentiment: null, tickers: [], tags: [],
+  }, "an unparseable date keeps its text and has no instant, a string for tickers is none");
+  same(Object.keys(fields[0]), ["headline", "source", "createdAt", "createdAtMs", "major", "sentiment", "tickers", "tags"], "in the order the payload has always printed them");
+  const withId = newsRow(raw.data[0], 123);
+  same(Object.keys(withId), ["id", "ts", ...Object.keys(fields[0])], "the rail's row is the same fields behind an id and a timestamp");
+  const { id, ts, ...rest } = withId;
+  same(rest, fields[0], "and nothing else");
+  eq(id, `${Date.parse("2026-09-21T14:00:00Z")}|Gold hits a record`, "the id is the instant and the headline");
+  eq(ts, Date.parse("2026-09-21T14:00:00Z"), "a dated row is timestamped by its own instant");
+  const undated = newsRow(raw.data[1], 777);
+  eq(undated.ts, 777, "an undated row takes the time it was read");
+  eq(undated.id, "u|Undated item", "and an id with no instant");
+  eq(newsRow(raw.data[2], 1), null, "a blank headline is no row");
+  eq(newsRow(null, 1), null, "nor is null");
+  eq(newsRow("text", 1), null, "nor a string");
+  eq(newsRow({ headline: "h".repeat(200), created_at: "2026-09-21T14:00:00Z" }, 1).id.length, String(Date.parse("2026-09-21T14:00:00Z")).length + 1 + 80, "the id keeps 80 characters of the headline");
+}
+
+{
+  eq(liveRows, sharedRows, "ROWS: the live layer's reader is the shared one");
+  eq(pulseRows, sharedRows, "and the pulse's");
+  eq(politicalRows, sharedRows, "and the political feed's");
+  eq(legRows, sharedRows, "and the legs'");
+  eq(volRows, rowsOrNull, "and the vol shaper's null-on-miss reader is the shared one that says so");
+  const bodies = [[1, 2], { data: [3] }, { data: [] }, { data: "x" }, { data: { rows: [] } }, { rows: [4] }, null, undefined, "text", 7, {}, [], true];
+  for (const b of bodies) {
+    const want = Array.isArray(b) ? b : (b && typeof b === "object" && Array.isArray(b.data) ? b.data : null);
+    same(rowsOrNull(b), want, `rowsOrNull(${JSON.stringify(b)}) is the array or null`);
+    same(sharedRows(b), want || [], `rowsOf(${JSON.stringify(b)}) is the array or empty`);
+    same(positioningRows(b), want, `positioning reads ${JSON.stringify(b)} the same way`);
+  }
+  same(sharedRows({ items: [5] }, "items"), [5], "a named key is read when asked");
+  same(sharedRows({ data: [5] }, "items"), [], "and only that key");
+  same(positioningRows({ chains: [1] }, "chains"), [1], "positioning's chains rule is its own and unchanged");
+  same(positioningRows([1], "chains"), null, "an array is not a chains body");
+  same(positioningRows({ data: { a: 1 } }, "object"), { a: 1 }, "nor is its object rule");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

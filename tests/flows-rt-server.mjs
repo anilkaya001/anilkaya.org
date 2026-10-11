@@ -319,6 +319,8 @@ async function runMain() {
       eq(body.running, true, "status: running while sockets are connected");
       deep(body.sockets.byUser, { anilkaya: 2 }, "status: sockets by user");
       eq(body.upstream.kind, "rest", "status: upstream kind");
+      ok(!JSON.stringify(body).includes(KEY), "status: the vendor key appears nowhere in the status body");
+      ok(typeof body.upstream.host === "string" && body.upstream.host.length > 0 && !body.upstream.host.includes("/"), "status: the upstream is named by host only");
       deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members" }, "status: kill switches");
       for (const k of RT_TOPIC_KEYS) {
         const t = body.topics[k];

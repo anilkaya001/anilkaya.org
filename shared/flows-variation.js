@@ -1,5 +1,8 @@
 import { bsmGreeks, normCdf as codyCdf, normPdf as codyPdf } from "./flows-quant-bs.js";
 import { isTradingDay } from "./flows-freshness.js";
+import { median as medianOf } from "./flows-stats.js";
+
+export { medianOf };
 
 export const PUT_TO_DEALER = Object.freeze({ gamma: 1, delta: -1, vanna: -1, charm: -1 });
 
@@ -74,13 +77,6 @@ const dollars = (v) => (v === null || !Number.isFinite(v) ? null : Math.round(v)
 export function daysBetween(fromDay, toDay) {
   const a = dayMs(fromDay), b = dayMs(toDay);
   return Number.isFinite(a) && Number.isFinite(b) ? Math.round((b - a) / DAY_MS) : null;
-}
-
-export function medianOf(values) {
-  const xs = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
-  if (!xs.length) return null;
-  const m = xs.length >> 1;
-  return xs.length % 2 ? xs[m] : (xs[m - 1] + xs[m]) / 2;
 }
 
 function quantileOf(values, p) {

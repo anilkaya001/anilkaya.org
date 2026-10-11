@@ -215,6 +215,18 @@ export function nextTradingDay(day, clock) {
   return d;
 }
 
+export function priorTradingDays(day, count, clock) {
+  const out = [];
+  const want = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  let d = day;
+  while (out.length < want) {
+    d = prevTradingDay(d, clock);
+    if (!d) break;
+    out.push(d);
+  }
+  return out;
+}
+
 export function phaseAt(at, clock = null) {
   const ms = toMs(at);
   if (!Number.isFinite(ms)) return null;
