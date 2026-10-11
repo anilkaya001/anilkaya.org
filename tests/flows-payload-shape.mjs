@@ -185,7 +185,7 @@ assert.deepEqual(missingReport, [],
       const f = c.engine.facts.find((x) => x.id === "iv.pctile.30.1y");
       const want = c.x && c.x.vol && Number.isFinite(c.x.vol.iv30Pct) ? c.x.vol.iv30Pct : null;
       if (!f) { wrong.push(`${c.ticker}: no iv.pctile.30.1y fact`); continue; }
-      const xf = join(dir, "p-card-x-" + c.ticker + ".json");
+      const xf = join(dir, "-card-x-" + c.ticker + ".json");
       const cone = existsSync(xf) ? JSON.parse(readFileSync(xf, "utf8")).cone : null;
       const tenor = cone && Array.isArray(cone.tenors) ? cone.tenors.find((t) => t.days === 30) : null;
       if (want === null) { absent++; if (f.v !== null || f.g !== 0 || f.why !== "iv.pctile-absent") wrong.push(`${c.ticker}: an absent percentile is not withheld`); }
