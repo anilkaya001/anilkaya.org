@@ -5,7 +5,8 @@ import { startWorker, SESSION_SECRET } from "./worker-server.mjs";
 import { signFlowsSession } from "../shared/flows-auth.js";
 import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { checkFrame, createSeq, RT_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from "../shared/flows-rt.js";
-import { createFakeVendor, vendorHandler } from "./rt-fixtures.mjs";
+import { createFakeVendor, vendorHandler, socketAlert, socketPrice, socketGex, socketNews } from "./rt-fixtures.mjs";
+import { attachLoopbackSocket } from "./lib/ws-loopback.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { easternDay, easternInstant, nextTradingDay } from "../shared/flows-freshness.js";
 import { wireSession, summariseWire } from "./lib/ws-wire.mjs";
@@ -35,7 +36,7 @@ async function until(fn, ms, label) {
   }
 }
 
-async function startVendor(vendor) {
+async function startVendor(vendor, { socket = false } = {}) {
   const handler = vendorHandler(vendor);
   const seen = { unauthorised: 0, authorised: 0 };
   const server = http.createServer((req, res) => {
@@ -48,8 +49,12 @@ async function startVendor(vendor) {
     seen.authorised++;
     handler(req, res).catch(() => { res.writeHead(500); res.end("{}"); });
   });
+  const loop = socket ? attachLoopbackSocket(server, { token: KEY }) : null;
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { base: `http://127.0.0.1:${server.address().port}`, seen, close: () => new Promise((r) => server.close(r)) };
+  return {
+    base: `http://127.0.0.1:${server.address().port}`, seen, socket: loop,
+    close: () => new Promise((r) => { if (loop) loop.closeAll(); server.close(r); server.closeAllConnections?.(); }),
+  };
 }
 
 function connect(baseURL, cookie, { query = "", headers = {} } = {}) {
@@ -130,7 +135,7 @@ async function runMain() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
   const server = await startWorker({
-    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", `FLOWS_INGEST_TOKEN:${INGEST}`],
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", `FLOWS_INGEST_TOKEN:${INGEST}`],
   });
   const base = server.baseURL;
   const opened = [];
@@ -322,7 +327,7 @@ async function runMain() {
       eq(body.upstream.kind, "rest", "status: upstream kind");
       ok(!JSON.stringify(body).includes(KEY), "status: the vendor key appears nowhere in the status body");
       ok(typeof body.upstream.host === "string" && body.upstream.host.length > 0 && !body.upstream.host.includes("/"), "status: the upstream is named by host only");
-      deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members" }, "status: kill switches");
+      deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "rest" }, "status: kill switches");
       for (const k of RT_TOPIC_KEYS) {
         const t = body.topics[k];
         ok(t.hasData && t.sq > 0 && t.frames > 0 && t.lastFrameAgeMs !== null && t.calls.minute > 0, `status ${k}: sq ${t.sq}, ${t.frames} frames, last frame ${t.lastFrameAgeMs} ms ago, ${t.calls.minute} calls in the last minute`);
@@ -523,7 +528,7 @@ async function runOwnerAudience() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
   const server = await startWorker({
-    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner"],
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_AUDIENCE:owner"],
   });
   const base = server.baseURL;
   const opened = [];
@@ -555,7 +560,7 @@ async function runOwnerAudience() {
     const snap = await fetch(base + "/api/rt/snap?k=px", { headers: { Cookie: OWNER } });
     eq(snap.status, 200, "owner audience: the owner reads the snapshot");
     const st = (await statusOf(base, OWNER)).body;
-    deep(st.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner" }, "owner audience: status reports the switch the Worker was given");
+    deep(st.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner", FLOWS_RT_UPSTREAM: "rest" }, "owner audience: status reports the switch the Worker was given");
     deep(st.sockets.byUser, { anilkaya: 1 }, "owner audience: and only the owner holds a socket");
   } finally {
     for (const c of opened) c.close();
@@ -567,7 +572,7 @@ async function runOwnerAudience() {
 async function runClosed() {
   const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`, "FLOWS_RT_SCALE:0.2"] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", `UW_NOW:${SATURDAY}`, "FLOWS_RT_SCALE:0.2"] });
   try {
     const c = connect(server.baseURL, OWNER);
     await until(() => c.ctl("closed")[0], 8000, "a closed frame");
@@ -592,7 +597,7 @@ async function runClosed() {
 async function runClosedEpoch() {
   const vendor = createFakeVendor({ session: "2026-10-02", clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, `UW_NOW:${SATURDAY}`] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", `UW_NOW:${SATURDAY}`] });
   try {
     const c = connect(server.baseURL, OWNER);
     const hello = await until(() => c.ctl("hello")[0], 15000, "a hello");
@@ -636,7 +641,7 @@ async function runOff() {
 async function runCadence() {
   const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
   const uw = await startVendor(vendor);
-  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z"] });
+  const server = await startWorker({ extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "FLOWS_RT_UPSTREAM:rest", "UW_NOW:2026-09-30T14:00:00Z"] });
   const base = server.baseURL;
   try {
     hubClock.offset = (await statusOf(base, OWNER)).body.now - Date.now();
@@ -676,11 +681,97 @@ async function runCadence() {
   }
 }
 
+async function runSocket() {
+  const vendor = createFakeVendor({ session: DAY, clock: () => Date.now() + hubClock.offset });
+  const uw = await startVendor(vendor, { socket: true });
+  const loop = uw.socket;
+  const server = await startWorker({
+    extraVars: [`UW_API_KEY:${KEY}`, `UW_BASE:${uw.base}`, "UW_NOW:2026-09-30T14:00:00Z", "FLOWS_RT_SCALE:0.2", "FLOWS_RT_UPSTREAM:socket"],
+  });
+  const base = server.baseURL;
+  const opened = [];
+  const hubNow = () => Date.now() + hubClock.offset;
+  try {
+    const s0 = await statusOf(base, OWNER);
+    hubClock.offset = s0.body.now - Date.now();
+    deep(s0.body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "socket" }, "socket: under the shipped members audience the status reports the socket as effective");
+    eq(loop.open(), 0, "socket: with nobody connected the Worker holds no outbound socket");
+
+    const c1 = connect(base, OWNER, { query: "?f=nvda" });
+    opened.push(c1);
+    await until(() => c1.frames.length > 0, 8000, "the hello");
+    deep([c1.frames[0].meta.upstream, c1.frames[0].meta.audience], ["socket", "members"], "socket: the hello names the socket upstream under the members audience");
+    await until(() => ["flow-alerts", "news", "price:NVDA", "gex:NVDA"].every((c) => loop.joined().includes(c)), 20000, "the outbound socket to join its four channels");
+    deep(loop.joined().slice().sort(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "socket: real workerd opened one outbound WebSocket to the vendor and joined the global event channels and the focus name's two, nothing else");
+    eq(loop.state.connections, 1, "socket: one connection");
+    eq(loop.state.rejected, 0, "socket: the token travelled as the query parameter the vendor reads");
+    ok(loop.state.urls.every((u) => u === "/socket"), "socket: to the vendor's socket path");
+    await until(() => c1.data("px").some((f) => f.rows.some((r) => r[0] === "NVDA")), 20000, "a REST row for the focus name");
+
+    const flBefore = vendor.calls.filter((x) => /flow-alerts/.test(x.path)).length;
+    const sent = [];
+    const baseAlert = socketAlert(vendor, 10);
+    for (let i = 0; i < 24; i++) {
+      const at = hubNow();
+      sent.push({ id: "S" + String(i).padStart(3, "0"), at });
+      loop.push("flow-alerts", { ...baseAlert, id: "S" + String(i).padStart(3, "0"), start_time: at - 400, end_time: at, executed_at: at });
+      await sleep(400);
+    }
+    await until(() => c1.data("fl").flatMap((f) => f.rows).filter((r) => String(r.id).startsWith("S")).length >= 24, 10000, "every pushed alert on the client");
+    const seen = new Map();
+    for (const f of c1.data("fl")) for (const r of f.rows) if (String(r.id).startsWith("S") && !seen.has(r.id)) seen.set(r.id, f[RX]);
+    const lat = sent.map((x) => seen.get(x.id) - wallOf(x.at));
+    eq(seen.size, 24, "socket: all twenty-four alerts reached the client, once each");
+    console.log(`rt e2e (socket upstream, loopback): alert at the vendor -> client p50 ${pct(lat, 0.5)} ms, p95 ${pct(lat, 0.95)} ms over ${lat.length} alerts (the plan quotes REST at production cadence as p50 2300 ms, p95 4800 ms)`);
+    ok(pct(lat, 0.95) < 1500, `socket: an alert reaches the client within ${pct(lat, 0.95)} ms at p95: one 250 ms flush and the hop`);
+    const flAfter = vendor.calls.filter((x) => /flow-alerts/.test(x.path)).length;
+    ok(flAfter - flBefore <= 1, `socket: while the channel is busy REST reads the alerts at most once (${flAfter - flBefore} calls in ${24 * 0.4} s)`);
+
+    const pxAt = hubNow() + 20000;
+    loop.push("price:NVDA", socketPrice("NVDA", 321.5, pxAt, 12345));
+    loop.push("gex:NVDA", socketGex("NVDA", hubNow() - 500, "999.5", "-555", "444", "-33"));
+    loop.push("news", socketNews("Socket headline over workerd", new Date(hubNow()).toISOString().slice(0, 19) + "Z", ["NVDA"]));
+    await until(() => c1.data("px").some((f) => f.rows.some((r) => r[0] === "NVDA" && r[2] === 321.5)), 8000, "the socket price on the client");
+    const tick = c1.data("px").flatMap((f) => f.rows).find((r) => r[0] === "NVDA" && r[2] === 321.5);
+    eq(tick[1], pxAt, "socket: the price row carries the tick's own quote time");
+    await until(() => c1.data("gx").some((f) => f.rows.some((r) => r[0] === "NVDA" && r[2] === 999.5)), 8000, "the gex tick on the client");
+    await until(() => c1.data("nw").some((f) => f.rows.some((r) => /Socket headline over workerd/.test(r.headline))), 8000, "the headline on the client");
+    cleanFrames(c1, "socket c1");
+    const v = seqVerdicts(c1);
+    ok(!v.gap && !v.dup && !v.orphan, `socket: per-topic sequences are clean with two sources: ${JSON.stringify(v)}`);
+
+    const st = (await statusOf(base, OWNER)).body;
+    deep([st.upstream.kind, st.upstream.asked, st.upstream.socket.connected, st.upstream.socket.joined], ["socket", "socket", true, 4], "socket: status shows the composite, connected, four channels");
+    ok(st.upstream.socket.messages >= 30 && st.upstream.socket.flushes >= 5, `socket: ${st.upstream.socket.messages} messages in ${st.upstream.socket.flushes} flushes`);
+    ok(!JSON.stringify(st).includes(KEY), "socket: the vendor key appears nowhere in the status body");
+    ok(!String(server.output()).includes(KEY), "socket: nor in the Worker's log");
+    deep([st.upstream.topics.fl.via, st.upstream.topics.px.via], ["socket", "rest"], "socket: flow alerts ride the socket and the price board stays on REST");
+
+    loop.dropAll();
+    await until(() => loop.state.connections >= 2 && loop.joined().length === 4, 20000, "the outbound socket to reconnect and join again");
+    ok(true, "socket: a dropped vendor connection is re-opened with every channel joined again");
+    const after = seqVerdicts(c1);
+    ok(!after.gap && !after.dup && !after.orphan, `socket: and the client's sequences stay clean across it: ${JSON.stringify(after)}`);
+
+    c1.close();
+    await until(() => loop.open() === 0, 12000, "the outbound socket to close once the last client left");
+    const n = loop.state.connections;
+    await sleep(3000);
+    eq(loop.state.connections, n, "socket: and it is not reopened with nobody connected");
+    eq((await statusOf(base, OWNER)).body.running, false, "socket: the hub is stopped");
+  } finally {
+    for (const c of opened) c.close();
+    await server.stop();
+    await uw.close();
+  }
+}
+
 await runMain();
 await runOwnerAudience();
+await runSocket();
 await runClosed();
 await runClosedEpoch();
 await runOff();
 await runCadence();
 
-console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake vendor on loopback and real WebSocket clients: 401 without a session, a signed-in member who is not an owner admitted under the shipped members audience (socket, snapshot, own cap) and refused 403 under an explicit owner audience, status owner-only under both, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a vendor outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no vendor call, the kill switch, and the vendor call rate at production cadence`);
+console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake vendor on loopback and real WebSocket clients: 401 without a session, a signed-in member who is not an owner admitted under the shipped members audience (socket, snapshot, own cap) and refused 403 under an explicit owner audience, status owner-only under both, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a vendor outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no vendor call, the kill switch, the vendor call rate at production cadence, and the vendor socket upstream against a loopback WebSocket vendor: one outbound connection with the token in the query, only per-ticker and alert-rate channels joined, alerts, a price tick, a gex tick and a headline reaching the client within one flush of the vendor's send, REST silent while the channel is busy, a dropped vendor connection re-opened with every channel joined again, and the outbound socket closed the moment the last client leaves`);

@@ -5,8 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 import * as RT from "../shared/flows-rt.js";
 import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import {
-  RtHub, createHub, createRestUpstream, hubConfig, loadRosterFromD1, RT_BOARDS_SQL, rtClock,
+  RtHub, createHub, createRestUpstream, createSocketUpstream, createCompositeUpstream, hubConfig, loadRosterFromD1, RT_BOARDS_SQL, rtClock,
 } from "../shared/flows-rt-hub.js";
+import * as SOCK from "../shared/flows-rt-socket.js";
 import { rtTopics } from "../shared/flows-rt-routes.js";
 import { vendorBase, vendorBaseInfo, vendorRedirected, vendorUrl, unwrap as vendorUnwrap, classifyStatus, retryAfterMs as vendorRetryAfterMs, VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 import {
@@ -23,7 +24,9 @@ import { boardPlan } from "../scripts/flows-legs/live.mjs";
 import { newsFields } from "../shared/flows-news.js";
 import { rowsOf as vendorRows } from "../shared/flows-rows.js";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
-import { createFakeVendor, fetchFor, ALERT_EVERY_MS } from "./rt-fixtures.mjs";
+import {
+  createFakeVendor, fetchFor, ALERT_EVERY_MS, createFakeVendorSocket, createVirtualTimers, socketPrice, socketGex, socketAlert, socketNews,
+} from "./rt-fixtures.mjs";
 import { moduleSource, workerSource, expect } from "./lib/source-scan.mjs";
 
 let checks = 0;
@@ -1159,7 +1162,7 @@ const seqOk = (ws) => {
   for (const v of [undefined, "", "owner", "everyone", "public", "MEMBERS "]) {
     eq(hubConfig({ FLOWS_RT_AUDIENCE: v }).audience, v === "MEMBERS " ? "members" : "owner", `audience: ${JSON.stringify(v)} -> ${v === "MEMBERS " ? "members" : "owner"}`);
   }
-  deep(RT.rtSwitches({}), { mode: "off", audience: "owner", users: ["anilkaya"], hint: null }, "switches: an empty environment is off, owner-only, and the owner is anilkaya");
+  deep(RT.rtSwitches({}), { mode: "off", audience: "owner", users: ["anilkaya"], hint: null, upstream: "rest", socketHours: "rth" }, "switches: an empty environment is off, owner-only, on REST, and the owner is anilkaya");
   deep(RT.rtSwitches({ FLOWS_RT_USERS: "A_b, c.d ,x" }).users, ["a_b", "c.d"], "switches: FLOWS_RT_USERS is lower-cased and validated like member names");
   deep(RT.rtSwitches({ FLOWS_RT_USERS: "" }).users, [], "switches: an explicit empty list admits nobody");
   eq(RT.rtSwitches({ FLOWS_RT_HINT: "enam" }).hint, "enam", "switches: a valid location hint");
@@ -1650,7 +1653,7 @@ const seqOk = (ws) => {
 
 {
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].channels])), {
-    px: ["price:<T>", "stock_screener"], fl: ["flow-alerts"], gx: ["gex:<T>"], mk: ["market_tide", "net_flow:<T>"], nw: ["news"],
+    px: ["price:<T>"], fl: ["flow-alerts"], gx: ["gex:<T>"], mk: ["market_tide", "net_flow:<T>"], nw: ["news"],
   }, "seam: one table maps each topic to the vendor channels a socket upstream would join");
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].scope])), { px: "ticker", fl: "global", gx: "ticker", mk: "global", nw: "global" }, "seam: and says which are per-ticker");
   ok(Object.isFrozen(RT.RT_UPSTREAM) && TOPICS.every((k) => Object.isFrozen(RT.RT_UPSTREAM[k]) && typeof RT.RT_UPSTREAM[k].rest === "function"), "seam: frozen, each with its REST request builder beside its channels");
@@ -1693,7 +1696,7 @@ const seqOk = (ws) => {
   hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, f: "NVDA" });
   await hub.tick();
   eq(pushed.started, 1, "seam: a push upstream is started once with the plan");
-  deep(Object.keys(pushed.plan).sort(), ["base", "gex", "names", "phase", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
+  deep(Object.keys(pushed.plan).sort(), ["base", "focus", "gex", "names", "phase", "ready", "session", "stage", "topics"], "seam: the plan is the contract's");
   ok(pushed.plan.ready() && pushed.plan.session() === DAY && pushed.plan.names().length >= 25, "seam: the plan answers without any REST state");
   deep([Array.from(pushed.plan.topics), pushed.plan.gex().names], [TOPICS.slice(), ["NVDA"]], "seam: the plan's topics are the demanded ones and gx names only the focus ticker");
   const names = pushed.plan.names();
@@ -2485,4 +2488,530 @@ const seqOk = (ws) => {
   hub.stop();
 }
 
-console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches`);
+const SKEY = "sock-key-9f8e7d6c5b4a3921";
+
+{
+  eq(SOCK.socketUrl("https://api.unusualwhales.com", "K1"), "wss://api.unusualwhales.com/socket?token=K1", "socket: the production origin becomes wss with the token as the one query parameter");
+  eq(SOCK.socketUrl("http://127.0.0.1:8787/x?y=1#z", "a b"), "ws://127.0.0.1:8787/socket?token=a+b", "socket: a loopback origin becomes ws, any path, query and fragment dropped, the token encoded");
+  eq(SOCK.socketUrl(VENDOR_BASE_DEFAULT, "k"), "wss://api.unusualwhales.com/socket?token=k", "socket: and the default vendor base maps the same way");
+  deep(["", null, undefined, 7].map((k) => SOCK.socketUrl("https://x.test", k)), [null, null, null, null], "socket: no key, no URL");
+  deep(["ftp://x.test", "not a url", null, 5].map((b) => SOCK.socketUrl(b, "k")), [null, null, null, null], "socket: and no URL for a base that is not http or https");
+
+  const names = ["NVDA", "AAPL", "TSLA", "SPY", "QQQ", "AMD", "MSFT", "META", "AMZN", "GOOG", "NFLX"];
+  const want = SOCK.wantChannels({ topics: new Set(TOPICS), focus: names, gex: names });
+  const chans = want.map((w) => w.channel);
+  eq(chans.length, 2 + SOCK.SOCKET_LIMITS.pxMax + SOCK.SOCKET_LIMITS.gxMax, "socket: two global channels, eight price channels and three gex channels at most");
+  deep(chans.filter((c) => c.startsWith("price:")), names.slice(0, 8).map((t) => "price:" + t), "socket: price:<T> for the first eight focus names, in order");
+  deep(chans.filter((c) => c.startsWith("gex:")), names.slice(0, 3).map((t) => "gex:" + t), "socket: gex:<T> for the first three");
+  ok(chans.includes("flow-alerts") && chans.includes("news"), "socket: flow-alerts and news");
+  ok(chans.every((c) => /^(flow-alerts|news|price:[A-Z.]+|gex:[A-Z.]+)$/.test(c)), "socket: never a global firehose: no bare price, gex, stock_screener, market_tide or net_flow");
+  {
+    const JOINABLE = /^(price:[A-Z][A-Z0-9.]{0,9}|gex:[A-Z][A-Z0-9.]{0,9}|flow-alerts|news)$/;
+    let seed = 20261011;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pool = ["NVDA", "SPY", "BRK.B", "stock_screener", "price", "gex", "market_tide", "net_flow:SPY", "option_trades", "interval_flow", "lit_trades", "", " ", "*", "x y", "price:", "A".repeat(40), "AAPL\n", "a", "QQQ"];
+    const kinds = ["px", "fl", "gx", "mk", "nw", "zz"];
+    let joined = 0;
+    for (let i = 0; i < 400; i++) {
+      const pick = (n) => Array.from({ length: Math.floor(rnd() * n) }, () => pool[Math.floor(rnd() * pool.length)]);
+      const topics = new Set(kinds.filter(() => rnd() < 0.6));
+      for (const w of SOCK.wantChannels({ topics, focus: pick(14), gex: pick(8) })) {
+        joined++;
+        if (!JOINABLE.test(w.channel)) ok(false, `socket: a fuzzed plan joined ${JSON.stringify(w.channel)}, which is not price:<T>, gex:<T>, flow-alerts or news`);
+      }
+    }
+    ok(joined > 500, `socket: 400 fuzzed plans joined ${joined} channels and every one was price:<T>, gex:<T>, flow-alerts or news`);
+    ok(RT.RT_UPSTREAM.px.channels.every((c) => c === "price:<T>"), "socket: the topic table lists price:<T> alone for px, so no vendor firehose can be read off it");
+  }
+  deep(SOCK.wantChannels({ topics: new Set(["px"]), focus: ["NVDA", "bad ticker", "x"], gex: ["NVDA"] }).map((w) => w.channel), ["price:NVDA"], "socket: only the topics demanded, only valid tickers");
+  deep(SOCK.wantChannels({ topics: new Set(), focus: names, gex: names }), [], "socket: nothing demanded, nothing joined");
+  for (const k of ["px", "gx", "fl", "nw"]) ok(RT.RT_UPSTREAM[k].channels.includes(SOCK.SOCKET_CHANNELS[k].template), `socket: ${k} joins a channel the topic table already lists (${SOCK.SOCKET_CHANNELS[k].template})`);
+  deep(SOCK.SOCKET_TOPICS, ["px", "fl", "gx", "nw"], "socket: four topics ride the socket; mk stays on REST");
+  deep(SOCK.channelTopic("price:NVDA"), { k: "px", name: "NVDA" }, "socket: a price channel is px");
+  deep([SOCK.channelTopic("gex:BRK.B"), SOCK.channelTopic("flow-alerts"), SOCK.channelTopic("news")], [{ k: "gx", name: "BRK.B" }, { k: "fl", name: null }, { k: "nw", name: null }], "socket: gex, flow-alerts and news");
+  deep(["price", "gex", "market_tide", "net_flow:SPY", "price:bad ticker", null, 4].map(SOCK.channelTopic), [null, null, null, null, null, null, null], "socket: every other channel is nobody's");
+
+  deep(SOCK.parseMessage('["flow-alerts",{"response":{},"status":"ok"}]'), { kind: "ack", channel: "flow-alerts", status: "ok", detail: null }, "parse: an ok ack");
+  deep(SOCK.parseMessage('["gex:NVDA",{"response":{"error":"not permitted"},"status":"error"}]'), { kind: "ack", channel: "gex:NVDA", status: "error", detail: "not permitted" }, "parse: a refusal carries its reason");
+  deep(SOCK.parseMessage('["price:NVDA",{"ticker":"NVDA","close":"1"}]').kind, "data", "parse: a payload is data");
+  deep(["", "nope", "[]", '["x"]', '{"a":1}', '["x",5]', '["x",[1]]', "[1,{}]", 7, null].map((x) => SOCK.parseMessage(x).kind), Array(10).fill("other"), "parse: anything else is other, never a throw");
+  deep([0, 1, 2, 3, 4, 5, 6, 9].map((a) => SOCK.backoffMs(a, () => 0.5)), [1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000], "backoff: 1, 2, 4, 8, 16 then 30 seconds");
+  deep([SOCK.backoffMs(0, () => 0), SOCK.backoffMs(0, () => 1), SOCK.backoffMs(5, () => 1)], [800, 1200, 36000], "backoff: jittered by minus and plus a fifth");
+  deep([SOCK.socketWindowOk("rth", "rth"), SOCK.socketWindowOk("rth", "pre"), SOCK.socketWindowOk("session", "pre"), SOCK.socketWindowOk("session", "post"), SOCK.socketWindowOk("session", null), SOCK.socketWindowOk("nonsense", "rth")], [true, false, true, true, false, true], "hours: rth admits the regular session only, session admits pre and post too, an unknown word is rth");
+
+  for (const k of ["fl", "nw", "gx"]) {
+    const live = FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS * 1000;
+    const worst = SOCK.SOCKET_LIMITS.silentMs[k] + RT.RT_LIMITS.tickMs + RT.RT_LIMITS.callTimeoutMs;
+    ok(worst <= live, `silence: ${k} goes quiet for ${SOCK.SOCKET_LIMITS.silentMs[k]} ms, one tick and one REST deadline later it is read again, ${worst} ms inside its ${live} ms live window`);
+  }
+  ok(SOCK.SOCKET_LIMITS.flushMs === 250 && SOCK.SOCKET_LIMITS.handlerBudgetMs === 0.05 && SOCK.SOCKET_LIMITS.joinMax >= SOCK.SOCKET_LIMITS.pxMax + SOCK.SOCKET_LIMITS.gxMax + 2, "limits: batches every 250 ms, a handler budget of 0.05 ms, room to join every wanted channel");
+  ok(Object.isFrozen(SOCK.SOCKET_LIMITS) && Object.isFrozen(SOCK.SOCKET_CHANNELS) && Object.isFrozen(SOCK.SOCKET_HOURS), "the socket tables are frozen");
+}
+
+{
+  const T0 = 1790000000000;
+  const base = Array.from({ length: 2 + STRIP_FIELDS.length }, (_, i) => (i === 0 ? "NVDA" : i === 1 ? T0 : i === 3 ? 100 : 5));
+  const row = SOCK.patchPxRow(base, { ticker: "NVDA", close: "105.12345", time: T0 + 2000, vol: 4321.4 }, T0 + 3500);
+  deep([row[1], row[2], row[3], row[4]], [T0 + 2000, 105.1235, 100, 0.051235], "px tick: quote time, price to four places and the change from the held prev close to six");
+  eq(row[2 + STRIP_FIELDS.findIndex(([n]) => n === "vol")], 4321, "px tick: session volume in whole shares");
+  eq(row[row.length - 1], 2, "px tick: qa is the read minus the tick time in seconds");
+  deep(row.slice(5, 2 + STRIP_FIELDS.findIndex(([n]) => n === "vol")), base.slice(5, 2 + STRIP_FIELDS.findIndex(([n]) => n === "vol")), "px tick: every field the tick does not carry is the held row's");
+  eq(base[2], 5, "px tick: the held row is not mutated");
+  deep([SOCK.patchPxRow(base, { ticker: "NVDA", close: "x", time: T0 + 2000 }, 1), SOCK.patchPxRow(base, { ticker: "NVDA", close: "0", time: T0 + 2000 }, 1), SOCK.patchPxRow(base, { ticker: "NVDA", close: "5" }, 1), SOCK.patchPxRow(base, { ticker: "NVDA", close: "5", time: T0 }, 1), SOCK.patchPxRow(base, { ticker: "NVDA", close: "5", time: T0 - 500 }, 1), SOCK.patchPxRow(null, { close: "5", time: T0 + 2000 }, 1), SOCK.patchPxRow(base, null, 1)], Array(7).fill(null), "px tick: a bad price, no time, a tick no newer than the held quote, no held row or no tick is no row");
+  const nullPrev = base.slice();
+  nullPrev[3] = null;
+  nullPrev[4] = null;
+  eq(SOCK.patchPxRow(nullPrev, { ticker: "NVDA", close: "5", time: T0 + 3000 }, T0 + 3000)[4], null, "px tick: with no prev close the change stays unknown, never zero");
+
+  const rest = base.slice();
+  rest[1] = T0 + 500;
+  rest[5] = 77;
+  const merged = SOCK.mergePxRow(rest, row);
+  deep([merged[1], merged[2], merged[5]], [T0 + 2000, 105.1235, 77], "px merge: a REST row older than the socket price keeps the socket price and brings every other field");
+  eq(SOCK.mergePxRow(rest, SOCK.patchPxRow(base, { ticker: "NVDA", close: "9", time: T0 + 200 }, 1)), rest, "px merge: a socket price older than the REST quote loses");
+  const bare = rest.slice();
+  bare[1] = null;
+  eq(SOCK.mergePxRow(bare, row), bare, "px merge: a held-out row (no quote time) is never given a price");
+}
+
+{
+  const vendor = createFakeVendor({ session: DAY, clock: () => SESSION_NOW });
+  const alert = socketAlert(vendor, 40);
+  const asRest = vendor.alertAt(40);
+  const viaRest = RT.shapeFl({ data: [asRest] }, { stageOf: null, cursor: null });
+  const viaSocket = SOCK.shapeSocketFrame("fl", [alert], { at: SESSION_NOW, session: DAY });
+  deep(viaSocket.items.map((x) => x.id), viaRest.items.map((x) => x.id), "shape fl: the socket alert carries the id the REST alert does, so the two dedupe");
+  const strip = (r) => { const { ts, spanFrom, ...rest } = r; return rest; };
+  deep(strip(viaSocket.items[0]), strip(viaRest.items[0]), "shape fl: and the same row, value for value (the socket alert has no created_at)");
+  eq(viaSocket.meta.via, "socket", "shape fl: the frame says where it came from");
+  deep(SOCK.shapeSocketFrame("fl", [{ junk: true }], { at: SESSION_NOW, session: DAY }).items, [], "shape fl: an alert with no ticker is dropped");
+
+  const gex = socketGex("NVDA", at(10, 0) - 2000);
+  const viaGexRest = RT.shapeGx({ data: [{ ...gex, start_time: gex.timestamp }] }, { name: "NVDA", at: at(10, 0), session: DAY });
+  const viaGexSocket = SOCK.shapeSocketFrame("gx", new Map([["NVDA", gex]]), { at: at(10, 0), session: DAY });
+  deep(viaGexSocket.items, viaGexRest.items, "shape gx: a gex tick is the row the REST spot-exposures read gives for the same numbers");
+  eq(viaGexSocket.items[0][3], -262444980, "shape gx: the gamma figures are numbers, with the vendor's sign, to the whole dollar as on the REST path");
+  eq(viaGexSocket.vendorAt, gex.timestamp, "shape gx: the vendor stamp is the tick's own timestamp");
+  deep(SOCK.shapeSocketFrame("gx", new Map([["NVDA", socketGex("NVDA", at(7, 0))]]), { at: at(10, 0), session: DAY }).items, [], "shape gx: a tick outside the regular session is no row, as on the REST path");
+
+  const stamp = new Date(SESSION_NOW - 5000).toISOString().slice(0, 19) + "Z";
+  const news = socketNews("Socket headline for NVDA", stamp, ["nvda"]);
+  const viaNewsSocket = SOCK.shapeSocketFrame("nw", [news], { at: SESSION_NOW, session: DAY });
+  const viaNewsRest = RT.shapeNw({ data: [{ headline: news.headline, created_at: stamp, source: "aggregator", tickers: ["nvda"], tags: [], is_major: null, sentiment: null }] }, { at: SESSION_NOW });
+  deep(viaNewsSocket.items, viaNewsRest.items, "shape nw: a headline is the row the REST headlines give, with the same id");
+  deep(SOCK.shapeSocketFrame("nw", [{ junk: 1 }, { headline: "  " }], { at: SESSION_NOW, session: DAY }).items, [], "shape nw: no headline, no row");
+  eq(SOCK.shapeSocketFrame("mk", [], { at: 1, session: DAY }), null, "shape: the market tide has no socket shaper");
+}
+
+{
+  deep(RT.rtSwitches({}), { mode: "off", audience: "owner", users: ["anilkaya"], hint: null, upstream: "rest", socketHours: "rth" }, "switches: the upstream is rest and the socket window the regular session by default");
+  deep([RT.rtSwitches({ FLOWS_RT_UPSTREAM: "socket" }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: " SOCKET " }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: "composite" }).upstream, RT.rtSwitches({ FLOWS_RT_UPSTREAM: "" }).upstream], ["socket", "socket", "rest", "rest"], "switches: socket is the one word that turns it on");
+  deep([RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "session" }).socketHours, RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "always" }).socketHours], ["session", "rth"], "switches: session widens the window, anything else is the regular session");
+  const on = { FLOWS_RT_MODE: "on", FLOWS_RT_UPSTREAM: "socket", UW_API_KEY: SKEY };
+  deep([hubConfig(on).upstream, hubConfig(on).upstreamAsked], ["socket", "socket"], "config: the switch on is the socket upstream under the shipped owner default");
+  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstreamAsked], ["socket", "socket"], "config: under the members audience the switch still selects the socket, one vendor connection whoever watches");
+  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "public" }).upstream, hubConfig({ FLOWS_RT_MODE: "on" }).upstream, hubConfig({ FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "rest" }).upstream], ["socket", "rest", "rest"], "config: no switch, or rest, is REST under either audience");
+  const shipped = Object.fromEntries([...readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").split("[vars]")[1].matchAll(/^(FLOWS_RT_[A-Z_]+) = "([^"]*)"$/gm)].map((m) => [m[1], m[2]]));
+  deep([shipped.FLOWS_RT_UPSTREAM, shipped.FLOWS_RT_SOCKET_HOURS], ["socket", "session"], "shipped: wrangler.toml turns the socket upstream on with the pre-market to post-market window");
+  deep([hubConfig({ ...shipped, UW_API_KEY: SKEY }).upstream, RT.rtSwitches(shipped).socketHours], ["socket", "session"], "shipped: the file's own variables select the socket upstream and the wide window");
+  deep(hubConfig({ ...shipped, FLOWS_RT_UPSTREAM: "rest", UW_API_KEY: SKEY }).upstream, "rest", "shipped: the one-line revert to rest takes effect");
+  const hubUrl = new URL("../shared/flows-rt-hub.js", import.meta.url);
+  const clause = 'upstream: sw.upstream === "socket" ? "socket" : "rest",';
+  const hubSource = readFileSync(hubUrl, "utf8");
+  eq(hubSource.split(clause).length - 1, 1, "mutant: the hub states the upstream choice exactly once, so the planted build below applies");
+  const planted = hubSource.replace(clause, 'upstream: sw.upstream === "socket" && sw.audience === "owner" ? "socket" : "rest",')
+    .replace(/(\bfrom\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g, (m, head, quote, spec) => head + quote + new URL(spec, hubUrl).href + quote);
+  const restored = await import("data:text/javascript;base64," + Buffer.from(planted).toString("base64"));
+  eq(restored.hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, "rest", "mutant: restoring the audience clause makes the members case REST, the very thing the case above refuses");
+  ok(restored.hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream !== hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, "mutant: and the contract tells the two builds apart");
+}
+
+function srig({ start = SESSION_NOW, env = {}, roster = async () => null, refuse, connect = null } = {}) {
+  const state = { t: start };
+  const vendor = createFakeVendor({ session: DAY, clock: () => state.t });
+  const fake = createFakeVendorSocket({ clock: () => state.t, refuse });
+  const timers = createVirtualTimers(() => state.t);
+  const open = [];
+  const logs = [];
+  const hub = createHub({
+    env: { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner", FLOWS_RT_UPSTREAM: "socket", UW_API_KEY: SKEY, UW_BASE: "http://uw.test", ...env },
+    now: () => state.t, fetchImpl: fetchFor(vendor), connect: connect || fake.connect, timers, random: () => 0.5, log: (e) => logs.push(e),
+    host: { sockets: () => open.filter((s) => s.readyState === 1), wake() {} }, loadRoster: roster,
+  });
+  const join = (user = "anilkaya", opts = {}) => {
+    const ws = mkSocket(user, opts.exp);
+    open.push(ws);
+    const admitted = hub.admit(ws, { u: user, exp: ws.exp, uep: null, topics: opts.topics || TOPICS, f: opts.f || null });
+    return { ws, admitted };
+  };
+  const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+  const run = async (seconds, stepMs = 250) => {
+    for (let i = 0; i < seconds * 1000 / stepMs; i++) {
+      const d = await hub.tick();
+      await settle();
+      state.t += stepMs;
+      timers.fire(state.t);
+      await settle();
+      if (d === null) return;
+    }
+  };
+  return { hub, state, vendor, fake, timers, open, logs, join, run, settle };
+}
+
+const wsFrames = (ws, k) => ws.sent.filter((f) => f.k === k);
+const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
+
+{
+  const off = srig({ env: { FLOWS_RT_UPSTREAM: "" } });
+  const { ws } = off.join("anilkaya", { f: "NVDA" });
+  await off.run(20);
+  eq(off.hub.upstream.kind, "rest", "default: with no switch the upstream is the REST adapter");
+  eq(off.fake.connectCalls, 0, "default: and no outbound socket is ever opened");
+  eq(ws.sent[0].meta.upstream, "rest", "default: the hello says rest");
+  eq(off.hub.status().upstream.asked, "rest", "default: the status says what was asked");
+
+  const members = srig({ env: { FLOWS_RT_AUDIENCE: "members" } });
+  members.join("anilkaya", { f: "NVDA" });
+  await members.run(20);
+  deep([members.hub.upstream.kind, members.fake.connectCalls], ["socket", 1], "audience: the socket switch under the members audience is the composite upstream with one outbound socket");
+  const ms = members.hub.status();
+  deep([ms.upstream.asked, ms.killSwitches.FLOWS_RT_UPSTREAM, ms.killSwitches.FLOWS_RT_AUDIENCE], ["socket", "socket", "members"], "audience: the status shows the ask and the effective value alike");
+  deep(members.fake.joined(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "audience: and the joins are the same under members");
+}
+
+{
+  const r = srig();
+  const { ws } = r.join("anilkaya", { f: "NVDA" });
+  eq(r.hub.upstream.kind, "socket", "upstream: owner audience and the switch on is the composite");
+  eq(ws.sent[0].meta.upstream, "socket", "upstream: the hello names it");
+  await r.run(6);
+  eq(r.fake.connectCalls, 1, "connect: one outbound socket for the whole hub");
+  eq(r.fake.urls[0], `ws://uw.test/socket?token=${SKEY}`, "connect: to the vendor's socket path, the token as the query parameter");
+  deep(r.fake.joined(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "join: the two global event channels and the focus name's two channels, nothing else");
+  ok(!r.fake.joins.some((c) => ["price", "gex", "stock_screener", "market_tide", "net_flow:NVDA", "option_trades"].includes(c)), "join: no firehose, no screener, and the market tide stays on REST");
+  const st = r.hub.status().upstream;
+  deep([st.kind, st.socket.connected, st.socket.joined, st.socket.acked, st.host], ["socket", true, 4, 4, "uw.test"], "status: the socket is connected with four channels joined and acknowledged, named by host");
+  ok(!JSON.stringify(r.hub.status()).includes(SKEY) && !JSON.stringify(r.logs).includes(SKEY), "status: the vendor key is in neither the status body nor the log");
+  eq(r.hub.status().calls.minuteTotal === r.hub.budget.used(r.state.t), true, "budget: the REST call counter is the budget's own");
+
+  const restPx = rowsOfK(ws, "px").filter((x) => x[0] === "NVDA").at(-1);
+  ok(restPx && restPx[1] !== null, "px: REST has delivered a full NVDA row");
+  const tickAt = r.state.t + 20000;
+  const sentBefore = wsFrames(ws, "px").length;
+  eq(r.fake.push("price:NVDA", socketPrice("NVDA", 123.45, tickAt, 7777)), 1, "px: a price tick for the focus name reaches the hub");
+  eq(wsFrames(ws, "px").length, sentBefore, "px: and nothing is sent until the flush window closes");
+  await r.run(0.5);
+  const pxFrames = wsFrames(ws, "px").slice(sentBefore);
+  ok(pxFrames.length >= 1, "px: the next flush sends one frame");
+  const tickRow = pxFrames.flatMap((f) => f.rows).find((x) => x[0] === "NVDA" && x[1] === tickAt);
+  ok(tickRow, "px: carrying the NVDA row with the tick's quote time");
+  deep([tickRow[2], tickRow[2 + STRIP_FIELDS.findIndex(([n]) => n === "vol")]], [123.45, 7777], "px: its price and session volume are the tick's");
+  deep(tickRow.slice(5, 2 + 18), restPx.slice(5, 2 + 18), "px: and the option-flow, volatility and gamma fields are the last REST row's");
+  eq(pxFrames[0].meta.via, "socket", "px: the frame says it came from the socket");
+  ok(pxFrames[0].meta.status === "ok" && RT.checkFrame(pxFrames[0]).length === 0, "px: and passes the envelope check");
+  ok(RT.checkFrame(pxFrames[0]).length === 0 && pxFrames[0].fresh.state === "live", "px: live by the tick's own stamp");
+
+  await r.run(7);
+  const later = rowsOfK(ws, "px").filter((x) => x[0] === "NVDA").at(-1);
+  deep([later[1], later[2]], [tickAt, 123.45], "px: the next REST polls do not take a socket price back while its quote is the newer one");
+  ok(r.vendor.count(/screener/) >= 3, "px: REST kept polling the roster throughout");
+  r.fake.push("price:NVDA", socketPrice("NVDA", 99, r.state.t - 3600e3));
+  r.fake.pushRaw(JSON.stringify(["price:ZZZZ", socketPrice("ZZZZ", 5, r.state.t + 100)]));
+  r.fake.push("price:NVDA", socketPrice("AAPL", 5, r.state.t + 100));
+  await r.run(1);
+  const sst = r.hub.status().upstream.socket;
+  ok(sst.unsolicited >= 1 && sst.mismatch >= 1, `px: a tick for a channel nobody asked for (${sst.unsolicited}) and one whose ticker contradicts its channel (${sst.mismatch}) are dropped`);
+  eq(rowsOfK(ws, "px").filter((x) => x[0] === "NVDA").at(-1)[2], 123.45, "px: and a tick older than the held quote changes nothing");
+  const verdicts = seqOk(ws);
+  ok(!verdicts.gap && !verdicts.dup && !verdicts.orphan, `sequences stay clean with two sources: ${JSON.stringify(verdicts)}`);
+
+  const gx0 = wsFrames(ws, "gx").length;
+  r.fake.push("gex:NVDA", socketGex("NVDA", r.state.t - 1000, "321.5", "-111", "222", "-3"));
+  await r.run(0.5);
+  const gxRow = wsFrames(ws, "gx").slice(gx0).flatMap((f) => f.rows).find((x) => x[0] === "NVDA" && x[2] === 321.5);
+  ok(gxRow, "gx: a gex tick reaches the client as a gx row");
+  deep(gxRow.slice(3, 6), [-111, 222, -3], "gx: with the vendor's figures and signs");
+  eq(wsFrames(ws, "gx").slice(gx0).at(-1).meta.via, "socket", "gx: marked as socket");
+}
+
+{
+  const r = srig();
+  const { ws } = r.join("anilkaya", { f: "NVDA" });
+  await r.run(8);
+  const flCalls = () => r.vendor.count(/flow-alerts/);
+  const nwCalls = () => r.vendor.count(/news\/headlines/);
+  const gxCalls = () => r.vendor.count(/spot-exposures/);
+  const total = r.vendor.alertCount(r.state.t);
+  const pushAlert = (n) => r.fake.push("flow-alerts", socketAlert(r.vendor, n));
+  pushAlert(total - 3);
+  await r.run(1);
+  r.fake.push("news", socketNews("Socket one", new Date(r.state.t).toISOString().slice(0, 19) + "Z", ["NVDA"]));
+  r.fake.push("gex:NVDA", socketGex("NVDA", r.state.t - 500));
+  await r.run(1);
+  const c0 = [flCalls(), nwCalls(), gxCalls()];
+  let n = total - 2;
+  for (let s = 0; s < 20; s++) {
+    if (s % 2 === 0) pushAlert(n++);
+    if (s % 5 === 0) r.fake.push("gex:NVDA", socketGex("NVDA", r.state.t - 500 + s));
+    await r.run(1);
+  }
+  deep([flCalls() - c0[0], gxCalls() - c0[2]], [0, 0], "cover: while alerts and gex ticks keep arriving, REST makes no flow-alerts and no spot-exposures call");
+  eq(nwCalls() - c0[1], 0, "cover: and none for the headlines either while the news channel is inside its silence line");
+  const stm = r.hub.status().upstream;
+  deep([stm.topics.fl.via, stm.topics.gx.via, stm.topics.px.via, stm.topics.mk.via], ["socket", "socket", "rest", "rest"], "cover: the status says which source carries each topic: fl and gx the socket, px and mk REST");
+  const ids = rowsOfK(ws, "fl").map((x) => x.id);
+  ok(ids.includes(r.vendor.alertAt(total - 3).id) && ids.includes(r.vendor.alertAt(n - 1).id), "cover: the alerts pushed on the socket reached the client");
+  const fresh = r.hub.status().topics.fl.fresh;
+  eq(fresh.state, "live", "cover: and the topic is live on the socket's frames alone");
+
+  const before = flCalls();
+  await r.run(SOCK.SOCKET_LIMITS.silentMs.fl / 1000 + 2);
+  ok(flCalls() > before, `silence: eight seconds with nothing on the channel and REST reads the alerts again (${flCalls() - before} calls)`);
+  eq(r.hub.status().upstream.topics.fl.via, "rest", "silence: the status says REST carries it");
+  const beforeNw = nwCalls();
+  await r.run(SOCK.SOCKET_LIMITS.silentMs.nw / 1000);
+  ok(nwCalls() > beforeNw, "silence: and a minute with no headline brings REST back for the news");
+
+  const all = rowsOfK(ws, "fl").map((x) => x.id);
+  eq(new Set(all).size, all.length, "dedupe: an alert the socket delivered and REST read afterwards reaches the client once");
+  const verdicts = seqOk(ws);
+  ok(!verdicts.gap && !verdicts.dup && !verdicts.orphan, `dedupe: sequences stay clean through every hand-over: ${JSON.stringify(verdicts)}`);
+  const flState = r.hub.status().topics.fl;
+  ok(flState.fails === 0 && flState.lastError === null, "silence: a quiet channel is not an error");
+  ok(r.hub.status().degraded === null, "and the hub is not degraded");
+}
+
+{
+  const r = srig({ refuse: new Set(["flow-alerts"]) });
+  r.join("anilkaya", { f: "NVDA" });
+  await r.run(20);
+  const st = r.hub.status().upstream;
+  eq(st.socket.refused["flow-alerts"], "not permitted", "refused: a channel the vendor refuses is named in the status with its reason");
+  deep([st.topics.fl.via, st.socket.connected], ["rest", true], "refused: that topic stays on REST while the rest of the socket works");
+  ok(r.vendor.count(/flow-alerts/) >= 3, `refused: REST reads the alerts every cadence (${r.vendor.count(/flow-alerts/)} calls in 20 s)`);
+
+  const none = srig({ refuse: new Set(["flow-alerts", "news", "price", "gex"]) });
+  none.join("anilkaya", { f: "NVDA" });
+  await none.run(6);
+  const ns = none.hub.status().upstream.socket;
+  deep([ns.connected, ns.lastError && ns.lastError.code], [false, "refused"], "refused: when the vendor refuses every channel the connection is closed, with the reason recorded");
+  const calls = none.fake.connectCalls;
+  await none.run(60);
+  eq(none.fake.connectCalls, calls, "refused: and is not retried for five minutes");
+  await none.run(300);
+  ok(none.fake.connectCalls > calls, "refused: then it is tried again");
+  ok(none.vendor.count(/screener/) > 10, "refused: REST carried every topic throughout");
+}
+
+{
+  const r = srig();
+  const { ws } = r.join("anilkaya", { f: "NVDA" });
+  await r.run(6);
+  const t0 = r.state.t;
+  r.fake.failNext = 2;
+  const times0 = r.fake.times.length;
+  r.fake.dropAll(1006);
+  const flBefore = r.vendor.count(/flow-alerts/);
+  await r.run(10);
+  const dials = r.fake.times.slice(times0).map((t) => t - t0);
+  deep(dials.slice(0, 3), [1000, 3000, 7000], "reconnect: the first retry after a second, the next two seconds after the failure, the third four seconds after that");
+  eq(r.hub.status().upstream.socket.failures, 0, "reconnect: a success clears the count");
+  ok(r.hub.status().upstream.socket.connected, "reconnect: and the socket is back");
+  ok(r.vendor.count(/flow-alerts/) > flBefore, "reconnect: REST read the alerts while the socket was away");
+  eq(r.hub.status().upstream.socket.reconnects, 3, "reconnect: the status counts them");
+  deep(r.fake.joined(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "reconnect: every channel is joined again on the new connection");
+  const verdicts = seqOk(ws);
+  ok(!verdicts.gap && !verdicts.dup && !verdicts.orphan, `reconnect: sequences stay clean across the outage: ${JSON.stringify(verdicts)}`);
+  r.fake.pushRaw(JSON.stringify(["flow-alerts", socketAlert(r.vendor, 3)]));
+  await r.run(1);
+  ok(rowsOfK(ws, "fl").some((x) => x.id === r.vendor.alertAt(3).id), "reconnect: the new connection feeds the client");
+
+  const err = srig();
+  err.fake.failNext = 1;
+  err.join("anilkaya", { f: "NVDA" });
+  await err.run(3);
+  const e = err.hub.status().upstream.socket.lastError;
+  ok(e && !JSON.stringify(err.hub.status()).includes(SKEY) && /redacted/.test(JSON.stringify(e)), `token: an error event that quotes the URL reaches the status redacted (${JSON.stringify(e)})`);
+  ok(!JSON.stringify(err.logs).includes(SKEY), "token: and the log");
+
+  const thrower = srig({ connect: (url) => { throw new Error("cannot open " + url); } });
+  thrower.join("anilkaya", { f: "NVDA" });
+  await thrower.run(3);
+  const te = thrower.hub.status().upstream.socket.lastError;
+  deep([te.code, te.message.includes(SKEY), /\[redacted\]/.test(te.message)], ["connect", false, true], "token: a constructor that throws with the URL in its message is redacted before it is stored");
+  ok(!JSON.stringify(thrower.hub.status()).includes(SKEY) && !JSON.stringify(thrower.logs).includes(SKEY), "token: in the status and in the log");
+  ok(thrower.vendor.count(/screener/) > 0, "token: and REST carries on");
+
+  const nokey = srig({ env: { UW_API_KEY: "" } });
+  nokey.join("anilkaya", { f: "NVDA" });
+  await nokey.run(3);
+  deep([nokey.fake.connectCalls, nokey.hub.status().upstream.socket.connected], [0, false], "no key: no outbound connection");
+}
+
+{
+  const r = srig();
+  const { ws } = r.join("anilkaya", { f: "NVDA" });
+  await r.run(6);
+  const live = r.fake.current();
+  ok(live && r.fake.openCount() === 1, "demand: one outbound socket while a client is connected");
+  r.hub.onClose(ws);
+  r.open.length = 0;
+  eq(r.hub.demand(r.state.t), false, "demand: the last client leaves");
+  eq(await r.hub.tick(), null, "demand: the next tick stops the hub");
+  eq(r.fake.openCount(), 0, "demand: and closes the outbound socket on that tick, not fifteen minutes later");
+  eq(live.closedBy, "client", "demand: the close is ours");
+  const calls = r.fake.connectCalls;
+  const vendorCalls = r.vendor.calls.length;
+  await r.run(120);
+  deep([r.fake.connectCalls, r.vendor.calls.length, r.timers.pending()], [calls, vendorCalls, 0], "demand: nothing reconnects, nothing is polled and no timer is left");
+  live.dispatch("message", { data: JSON.stringify(["flow-alerts", socketAlert(r.vendor, 5)]) });
+  live.dispatch("close", { code: 1006 });
+  await r.run(3);
+  deep([r.fake.connectCalls, r.timers.pending()], [calls, 0], "demand: a late event from the closed connection is ignored");
+
+  const again = srig();
+  again.join("anilkaya", { f: "NVDA" });
+  await again.run(4);
+  const snap = srig();
+  await snap.hub.snap(["fl", "nw"]);
+  await snap.run(10);
+  deep(snap.fake.joined(), ["flow-alerts", "news"], "demand: a snapshot request alone joins only the channels of the topics it named");
+  await snap.run(70);
+  eq(snap.fake.openCount(), 0, "demand: and the socket closes once the last snapshot is a minute old");
+}
+
+{
+  const pre = srig({ start: at(8, 0) });
+  pre.join("anilkaya", { f: "NVDA" });
+  await pre.run(10);
+  deep([pre.fake.connectCalls, pre.hub.status().phase.phase], [0, "pre"], "hours: in the pre-market the default window keeps the socket shut and REST carries every topic");
+  ok(pre.vendor.calls.length > 0, "hours: REST polled in the pre-market");
+  pre.state.t = at(9, 29) + 45000;
+  await pre.run(1);
+  eq(pre.fake.connectCalls, 0, "hours: and still shut a quarter minute before the open");
+  await pre.run(25);
+  eq(pre.fake.connectCalls, 1, "hours: it opens at the regular session");
+  pre.state.t = at(16, 1);
+  await pre.run(2);
+  eq(pre.fake.openCount(), 0, "hours: and closes the first tick after 16:00");
+  const calls = pre.fake.connectCalls;
+  await pre.run(30);
+  eq(pre.fake.connectCalls, calls, "hours: and stays shut in the post-market");
+  pre.state.t = at(21, 0);
+  await pre.run(10);
+  eq(pre.fake.openCount(), 0, "hours: and overnight");
+
+  const wide = srig({ start: at(8, 0), env: { FLOWS_RT_SOCKET_HOURS: "session" } });
+  wide.join("anilkaya", { f: "NVDA" });
+  await wide.run(10);
+  eq(wide.fake.connectCalls, 1, "hours: with the session window the socket opens in the pre-market");
+  wide.state.t = at(17, 0);
+  await wide.run(10);
+  eq(wide.fake.openCount(), 1, "hours: and stays open in the post-market");
+  wide.state.t = at(20, 30);
+  await wide.run(10);
+  eq(wide.fake.openCount(), 0, "hours: and closes when the session ends at 20:00");
+}
+
+{
+  const r = srig();
+  const { ws } = r.join("anilkaya", { f: "NVDA" });
+  await r.run(6);
+  const vendorAt = r.state.t;
+  const total = r.vendor.alertCount(vendorAt);
+  const before = wsFrames(ws, "fl").length;
+  for (let i = 0; i < 1000; i++) r.fake.push("flow-alerts", socketAlert(r.vendor, Math.max(0, total - 1 - i)));
+  await r.run(1);
+  const burst = wsFrames(ws, "fl").slice(before).flatMap((f) => f.rows);
+  ok(burst.length <= SOCK.SOCKET_LIMITS.pendingMax.fl, `shed: a thousand alerts inside one window send at most ${SOCK.SOCKET_LIMITS.pendingMax.fl} rows (${burst.length})`);
+  ok(r.hub.status().upstream.socket.shed.fl >= 800, `shed: the rest are counted as shed, never queued (${r.hub.status().upstream.socket.shed.fl})`);
+  const flush = r.hub.status().upstream.socket.flushes;
+  await r.run(2);
+  eq(r.hub.status().upstream.socket.flushes, flush, "shed: and nothing is left pending: no flush without a message");
+  r.fake.pushRaw("x".repeat(SOCK.SOCKET_LIMITS.messageBytesMax + 1));
+  r.fake.pushRaw("not json");
+  r.fake.pushRaw(JSON.stringify(["flow-alerts"]));
+  const st = r.hub.status().upstream.socket;
+  deep([st.oversize, st.malformed >= 2], [1, true], "shed: an oversized message and malformed ones are counted and dropped");
+
+  const t0 = process.threadCpuUsage();
+  void t0;
+  const runs = [];
+  const msg = JSON.stringify(["price:NVDA", socketPrice("NVDA", 101.5, r.state.t + 1000)]);
+  for (let w = 0; w < 7; w++) {
+    const a = process.threadCpuUsage();
+    for (let i = 0; i < 4000; i++) r.fake.pushRaw(msg);
+    const b = process.threadCpuUsage(a);
+    runs.push((b.user + b.system) / 1000 / 4000);
+  }
+  const best = Math.min(...runs);
+  ok(best <= SOCK.SOCKET_LIMITS.handlerBudgetMs, `cpu: a message handler costs ${best.toFixed(4)} ms of CPU at best of seven windows, inside the ${SOCK.SOCKET_LIMITS.handlerBudgetMs} ms budget`);
+  await r.run(1);
+}
+
+{
+  const t = { v: SESSION_NOW };
+  const fake = createFakeVendorSocket({ clock: () => t.v });
+  const timers = createVirtualTimers(() => t.v);
+  const cfg = hubConfig({ FLOWS_RT_MODE: "on", UW_API_KEY: SKEY, UW_BASE: "http://uw.test", FLOWS_RT_UPSTREAM: "socket" });
+  let focus = ["AAA"];
+  const plan = { ...plainPlan(["SPY"]), topics: new Set(["px"]), focus: () => focus, gex: () => ({ names: [] }) };
+  const frames = [];
+  const up = createSocketUpstream({ cfg, connect: fake.connect, now: () => t.v, random: () => 0.5, timers, held: new Map() });
+  up.start(plan, { onFrame: (f) => frames.push(f), onError() {} });
+  const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+  await up.tick(t.v);
+  await settle();
+  const names = Array.from({ length: 30 }, (_, i) => "X" + String.fromCharCode(65 + (i % 26)) + (i > 25 ? "A" : ""));
+  let joinedMax = 0;
+  for (const name of names) {
+    focus = [name];
+    t.v += 250;
+    await up.tick(t.v);
+    await settle();
+    joinedMax = Math.max(joinedMax, up.state().joined);
+  }
+  ok(joinedMax <= SOCK.SOCKET_LIMITS.joinMax, `join cap: a focus that keeps changing never holds more than ${SOCK.SOCKET_LIMITS.joinMax} channels on one connection (${joinedMax})`);
+  ok(fake.connectCalls >= 2, `join cap: the connection is recycled instead (${fake.connectCalls} connections for ${names.length} focus changes)`);
+  eq(fake.openCount(), 1, "join cap: with one open at a time");
+  up.stop();
+  eq(fake.openCount(), 0, "stop: the connection is closed");
+  const calls = fake.connectCalls;
+  await up.tick(t.v + 10000);
+  eq(fake.connectCalls, calls, "stop: and a tick after stop opens nothing");
+}
+
+{
+  const t = { v: SESSION_NOW };
+  const settle = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+  const cfg = hubConfig({ FLOWS_RT_MODE: "on", UW_API_KEY: SKEY, UW_BASE: "http://uw.test", FLOWS_RT_UPSTREAM: "socket" });
+  const plan = { ...plainPlan(["SPY"]), topics: new Set(["px", "fl"]), focus: () => ["NVDA"], gex: () => ({ names: [] }) };
+  const errored = createFakeVendorSocket({ clock: () => t.v });
+  errored.failNext = 1;
+  const a = createSocketUpstream({ cfg, connect: errored.connect, now: () => t.v, random: () => 0.5, timers: createVirtualTimers(() => t.v), held: new Map() });
+  a.start(plan, { onFrame() {}, onError() {} });
+  await a.tick(t.v);
+  await settle();
+  const sa = JSON.stringify(a.state());
+  ok(errored.urls[0].includes(SKEY), "state: the connector was handed the URL with the token, as it must be");
+  ok(!sa.includes(SKEY) && /redacted/.test(sa), "state: the upstream's own state never carries it: an error event that quotes the URL is stored redacted");
+  const thrower = createSocketUpstream({ cfg, connect: (url) => { throw new Error("cannot open " + url); }, now: () => t.v, random: () => 0.5, timers: createVirtualTimers(() => t.v), held: new Map() });
+  thrower.start(plan, { onFrame() {}, onError() {} });
+  await thrower.tick(t.v);
+  ok(!JSON.stringify(thrower.state()).includes(SKEY), "state: nor a constructor that throws with the URL in its message");
+  a.stop();
+  thrower.stop();
+}
+
+{
+  const src = read("shared/flows-rt-hub.js") + read("shared/flows-rt-socket.js");
+  eq((src.match(/searchParams\.set\("token"/g) || []).length, 1, "scan: the token is put in a URL in exactly one place, socketUrl");
+  eq((src.match(/new WebSocket\(/g) || []).length, 1, "scan: the outbound socket is constructed in exactly one place, the default connector");
+  ok(!/console\.(log|error|warn)\([^)]*\b(url|event|ev)\b/.test(src), "scan: no log line is handed a URL or an event");
+  ok(!/\.token\b/.test(read("shared/flows-rt-socket.js")), "scan: the pure half never reads a token field");
+  const hub = moduleSource("shared/flows-rt-hub.js");
+  expect(hub, /upstream: \{ kind: this\.upstream\.kind, asked: this\.cfg\.upstreamAsked, \.\.\.up \}/, { min: 1, max: 1, why: "the status names the upstream by kind and the ask, then its state, never a URL" });
+  expect(hub, /createCompositeUpstream\(\{ rest: restUp, socket, held,/, { min: 1, max: 1, why: "createHub builds the composite only for the socket upstream" });
+}
+
+console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the vendor socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the socket under either audience and no joinable firehose over 400 fuzzed plans, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);

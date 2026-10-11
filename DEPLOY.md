@@ -2222,6 +2222,15 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
   read for two passes running counts the read as unanswered, through the same
   `answered: false` path a failed vendor call already takes, and the Worker's focus
   tick skips its write.
+  The production REST quote lag is now measured on one session: live run
+  36882159649 (2026-10-01, 18:15 to 22:55 TRT), 57 in-session passes over 122
+  stamped rows each, the per-pass median `qa` was 9 s at its median (8 to 16 s
+  across passes), the 90th percentile 12 s at its median (10 to 17), and the
+  per-pass maximum 25 s at its median (worst 57 s). After the close it is
+  minutes (a median of 53 s at 20:00 UTC [16:00 ET], 130 s at 20:25 UTC with a
+  90th percentile of 816 s). The REST path cannot beat the vendor's own
+  quote age of about 9 s, whatever the poll cadence; the socket `price:<T>`
+  stream is about 0.09 s.
 - **The landing ticker measures against the previous session.** `parseIndexQuote`
   (`shared/markets.js`) pairs each bar's timestamp with its close before it drops
   nulls, dates a bar by the exchange's own calendar (`meta.gmtoffset`), and takes as the
@@ -2718,6 +2727,29 @@ job that was already running when the Worker was promoted logs two `invalid_key`
   and `joins`). `tests/flows-ws-probe-contract.mjs` proves it against a fake
   vendor that speaks the protocol by hand, and holds the workflow's timeout to
   the computed duration.
+  **Results.** Run 37110295101 (Sat 2026-10-03, 11:36 to 11:39 TRT [08:36 to
+  08:39 UTC], sha e58f09e, 10 s a channel, all parts, market closed): the
+  handshake with `?token=` upgraded (101 in 114 ms); the bearer header was
+  refused 401 with the vendor's message `Token is missing` and the URL format
+  to use; an `Origin` header upgraded (101); two, three and four concurrent
+  connections opened and survived; 1, 10, 30 and 60 `price:<T>` joins on one
+  connection were all acknowledged; every channel acknowledged and delivered
+  0 messages, so an acknowledgement is not data. Run 37323676761 (Mon
+  2026-10-05, 17:18 to 17:25 TRT [10:18 ET], sha 6070e59, `only=channels,joins`,
+  30 s a channel, regular session; the runner's clock against each frame's own
+  stamp, so every lag carries clock skew): messages, bytes and lag p50/p95 in ms
+  were `price:SPY` 19, 1,610 B, 91/128; `option_trades:SPY` 2,360, 2.2 MB,
+  72/88; `net_flow:SPY` 30, 5,021 B, 91/115; `gex:SPY` 21, 13,724 B, 143/615;
+  `market_tide` 15, 3,315 B, 2,275/2,292; `interval_flow` 6,496, 5.9 MB,
+  1,327/1,919; `flow-alerts` 127, 192,919 B, 5,927/7,056; `news` 1 message,
+  7,902; `quotes:SPY` 52 messages with no stamp; `trading_halts` 0. Sixty
+  `price:<T>` joins on one connection delivered 303 messages and 27,693 B in 15 s
+  (91 B a message), lag 102/131 ms; 10 and 30 joins were 101/127 and 98/131.
+  `stock_screener` is not in the vendor's channel table and is a firehose: 51,125
+  messages and 301,153,494 B in 30 s (about 10 MB/s), which a Durable Object
+  cannot take, so it must never be joined. Still unrun in session: the negative
+  control, the `price`, `option_trades`, `lit_trades` and `off_lit_trades`
+  firehoses, and join counts above 60.
 - **The regression suite** (`regression.yml`) also runs every Monday at 06:17
   UTC, so a fixture date that the real clock overtakes fails within a week,
   not on the next unrelated push.
@@ -3239,6 +3271,8 @@ separate from the `UW_ONDEMAND` limiter, which the rail never touches.
 | `FLOWS_RT_AUDIENCE` | `members`; anything else is `owner`. Shipped: `members` | Owner: only the names in `FLOWS_RT_USERS` may open a socket or read `/api/rt/snap`. Members: any signed-in Flows member. |
 | `FLOWS_RT_USERS` | comma-separated member names, default `anilkaya` | Flows has no owner concept; this is it. Empty admits nobody. `/api/rt/status` is owner-only under either audience. |
 | `FLOWS_RT_HINT` | a Cloudflare location hint | Where the object is first created. |
+| `FLOWS_RT_UPSTREAM` | `socket`; anything else, or unset, is `rest`. `socket` in `wrangler.toml` | On. `socket` opens one outbound vendor WebSocket for the focus names, `flow-alerts` and `news`, with REST covering any silent channel, whatever `FLOWS_RT_AUDIENCE` is: the connection is one for the whole object, so every member shares it. The status shows the ask (`upstream.asked`) beside the effective value (`killSwitches.FLOWS_RT_UPSTREAM`). The entitlement is proven on this key (the bullet "A WebSocket upstream" below); for members the written licence is open (OD-03a). |
+| `FLOWS_RT_SOCKET_HOURS` | `session`; anything else is `rth`. `session` in `wrangler.toml` | The window the outbound socket may be open: the regular session by default (09:30 to 16:00 ET, 16:30 to 23:00 TRT until 2026-10-31), the pre-market, regular session and post-market with `session` (04:00 to 20:00 ET, 11:00 to 03:00 TRT until 2026-10-31 and 12:00 to 04:00 TRT after 2026-11-01). An open outbound socket keeps the object resident and billed, so Free should stay on `rth`. |
 | `FLOWS_RT_CALLS_PER_MIN`, `FLOWS_RT_USER_CAP` | 10 to 1200, 1 to 10 | The vendor-call budget (240) and sockets per user (3). |
 
 Turning the rail off is a one-line deploy (`FLOWS_RT_MODE = "off"`), or a dashboard
@@ -3320,19 +3354,66 @@ client.
   procedure). The point is that a site deploy would no longer restart the object.
   Nothing in `shared/flows-rt*.js` changes.
 - **A WebSocket upstream.** The hub talks to its upstream only through
-  `start(plan, handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`; it
-  receives neutral frames `{ k, readAt, items, vendorAt, meta, full, answered }`
-  in the wire's own row shapes and merges, sequences, ages and broadcasts them.
-  Every REST detail (paths, the `newer_than` cursor, the gamma rotation, the 4 s
-  deadline, the 429 pause) lives in `createRestUpstream`. `RT_UPSTREAM` in
-  `shared/flows-rt.js` is the one table that maps a topic to its REST request and
-  to the vendor socket channels it would join: px to `price:<T>` (and
-  `stock_screener` later), fl to `flow-alerts`, gx to `gex:<T>`, mk to
-  `market_tide` and `net_flow:<T>`, nw to `news`. A socket upstream is a second
-  factory passed to `RtHub`; `tests/flows-rt-contract.mjs` drives the hub with a
-  push-style fake to prove no REST assumption is left in it. It is not
-  implemented, and the shapes of the vendor's frames and their lag are unmeasured
-  until a regular session has been read.
+  `start(plan, handlers)`, `stop()`, `tick(now)`, `paused(now)` and `state()`, and
+  `park()` where an upstream has one; it receives neutral frames `{ k, readAt,
+  items, vendorAt, meta, full, answered }` in the wire's own row shapes and merges,
+  sequences, ages and broadcasts them. Every REST detail (paths, the `newer_than`
+  cursor, the gamma rotation, the 4 s deadline, the 429 pause) lives in
+  `createRestUpstream`. `RT_UPSTREAM` in `shared/flows-rt.js` is the one table
+  that maps a topic to its REST request and to the vendor socket channels it
+  would join: px to `price:<T>` (`stock_screener`, which the probe found to be
+  an undocumented firehose, is no longer listed and must never be joined), fl to `flow-alerts`, gx to
+  `gex:<T>`, mk to `market_tide` and `net_flow:<T>`, nw to `news`.
+
+  The socket upstream is built and on. `createCompositeUpstream({ rest, socket,
+  held })` in `shared/flows-rt-hub.js`, over `shared/flows-rt-socket.js`, is what
+  `createHub` returns when `FLOWS_RT_UPSTREAM` is `socket`, under either
+  audience: members share the one vendor connection, because the object opens it
+  once however many sockets watch. In every other case it returns the unchanged
+  REST adapter, and `wrangler.toml` sets it to `socket`. The topic table lists `price:<T>`
+  alone for px, and `flows-rt-contract` fuzzes the channel plan to prove nothing
+  but `price:<T>`, `gex:<T>`, `flow-alerts` and `news` can be joined. It opens one connection to
+  `wss://<vendor host>/socket?token=...` (the vendor refuses the bearer header
+  with 401, so the token travels in the URL, built in `socketUrl` alone and kept
+  out of the status and every stored message by the redactor) and joins
+  `price:<T>` for at most eight focus names, `gex:<T>` for at most three,
+  `flow-alerts` and `news`; no firehose is joined and `mk` stays on REST. The
+  message handler only parses and buffers; every 250 ms the buffer becomes the
+  ordinary neutral frame through the REST shapers, so a row is the same row from
+  either source, and a price tick patches the last REST row of its name. A topic
+  is read by REST when its channel is not acknowledged, is refused, or has been
+  silent for 8 s (`fl`), 20 s (`gx`) or 60 s (`nw`); an alert is deduplicated by
+  vendor id across the two. `FLOWS_RT_UPSTREAM` unset, or `rest`, is the way
+  back.
+
+  Switched on 2026-10-11 with `FLOWS_RT_SOCKET_HOURS = "session"`, so the
+  connection can be checked from 04:00 ET (11:00 TRT) on the first session day,
+  5.5 hours before the open, instead of at it. After one clean week `rth` is the
+  value to set if post-market socket time is not wanted. A deploy restarts the
+  object and drops its sockets, so deploy while nobody is connected. The outbound
+  `new WebSocket("wss://api.unusualwhales.com/socket?token=...")` has run only
+  against a loopback in workerd; the first dial of the vendor from a Durable
+  Object is the first live evidence. Read `/api/rt/status` as the owner: a
+  healthy `upstream.socket` block has `kind` `socket`, `connected` true, `joined`
+  equal to `acked`, `refused` empty, no `lastError` and a recent `lastMsgAt`, and
+  `topics.fl` shows frames from the socket. A `lastError` naming connect,
+  refused or a close code means set `FLOWS_RT_UPSTREAM = "rest"` and deploy: every
+  topic is then read by REST again, which is also what the hub does on its own for
+  any channel that is unacknowledged, refused or silent.
+
+  What the vendor was measured to do, from two Actions runs of the socket probe
+  (`.github/workflows/flows-ws-probe.yml`; the runner's clock against each frame's
+  own stamp, so both carry the clock skew): on Sat 2026-10-03 at 11:36 TRT (run
+  37110295101, market closed) the handshake with `?token=` upgraded in 114 ms,
+  two, three and four concurrent connections survived, and 1, 10, 30 and 60
+  `price:<T>` joins were all acknowledged, but every channel delivered no message,
+  so an acknowledgement proved nothing; on Mon 2026-10-05 at 17:18 TRT [10:18 ET]
+  (run 37323676761, regular session, 30 s a channel) data arrived: `price:SPY`
+  p50 91 ms and p95 128 ms behind its stamp, `gex:SPY` 143 ms and 615 ms,
+  `flow-alerts` 5.9 s and 7.1 s (the vendor's own alert lag), `news` one message
+  at 7.9 s, `market_tide` 2.3 s, and 60 price joins on one connection delivered
+  303 messages in 15 s at 91 bytes a message, p50 102 ms. `stock_screener` is an
+  undocumented firehose (about 301 MB in 30 s) and must never be joined.
 
 **Verification, and what is unproven.**
 
@@ -3348,8 +3429,10 @@ client.
    security headers and that the dashboard's Transform Rules did not rewrite them.
 4. Not proven anywhere in this repository: the live vendor's response to a 5 s
    screener cadence, the real quote-time lag, the production latency of the
-   edge-to-object hop and the hibernation behaviour under a real idle period.
-   The harness has measured the hub's own overhead only.
+   edge-to-object hop, the hibernation behaviour under a real idle period, and
+   that a Durable Object can dial the vendor's socket (the upstream above has run
+   against in-memory fakes only). The harness has measured the hub's own overhead
+   only.
 
 #### The browser half: what the client does on each rung
 
@@ -3461,8 +3544,9 @@ configuration (not an `[env]` of `wrangler.toml`, so the production file and its
 resolved bindings are untouched): the Worker `anilkaya-staging`, the same
 entrypoint, static bundle and compatibility date, a D1 database `iewt-staging`,
 its own `PULSE` Durable Object, the same six rate-limit bindings under their own
-namespaces (2101 to 2106) with production's limits, no Cron Trigger (the limit
-is five per account and production registers four), no route or custom domain
+namespaces (2101 to 2106) with production's limits, no Cron Trigger (a Free
+account may hold five and Workers Paid 250; production registers four and
+staging needs none), no route or custom domain
 (it serves at `workers.dev`), and no Workers AI binding, so staging cannot spend
 neurons. `FLOWS_LIVE_MODE` is `off` and no repository or workflow is named, so it
 can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;

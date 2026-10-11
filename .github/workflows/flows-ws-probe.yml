@@ -8,10 +8,14 @@ on:
         type: string
         default: "60"
       only:
-        description: "Run only these parts, comma-separated: handshake, channels, firehoses, connections, joins (empty runs all)"
+        description: "Run only these parts, comma-separated: handshake, channels, firehoses, connections, joins, hold (empty runs all)"
         type: string
         required: false
         default: ""
+      hold_seconds:
+        description: "Seconds the three held connections stay joined to 60 price channels (1 to 300)"
+        type: string
+        default: "120"
 
 permissions:
   contents: read
@@ -38,4 +42,5 @@ jobs:
           UW_API_KEY: ${{ secrets.UW_API_KEY }}
           FLOWS_WS_PROBE_SECONDS: ${{ inputs.seconds }}
           FLOWS_WS_PROBE_ONLY: ${{ inputs.only }}
+          FLOWS_WS_PROBE_HOLD_SECONDS: ${{ inputs.hold_seconds }}
         run: node scripts/flows-ws-probe.mjs

@@ -10,6 +10,9 @@ import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
 import { MEMBER_NAME, readMembers, memberOf, memberActive } from "./flows-auth.js";
 import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs } from "./flows-vendor-core.js";
 import { failureEntry } from "./flows-log.js";
+import {
+  SOCKET_LIMITS, socketUrl, socketWindowOk, wantChannels, parseMessage, backoffMs, shapePxTicks, shapeSocketFrame, mergePxRow, tickerOfPayload,
+} from "./flows-rt-socket.js";
 
 const T0 = Date.now();
 
@@ -37,6 +40,9 @@ export function hubConfig(env) {
     scale,
     callsPerMinute: clampInt(e.FLOWS_RT_CALLS_PER_MIN, 10, 1200, RT_LIMITS.callsPerMinute),
     userCap: clampInt(e.FLOWS_RT_USER_CAP, 1, 10, RT_LIMITS.userSockets),
+    upstream: sw.upstream === "socket" ? "socket" : "rest",
+    upstreamAsked: sw.upstream,
+    socketHours: sw.socketHours,
     redirected,
     baseStatus: vendor.status,
   };
@@ -219,6 +225,416 @@ export function createRestUpstream({
   };
 }
 
+const defaultTimers = Object.freeze({ set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id) });
+
+const defaultConnect = (url) => new WebSocket(url);
+
+const SOCKET_REFUSED_RETRY_MS = 5 * 60 * 1000;
+
+export function createSocketUpstream({
+  cfg, connect = defaultConnect, now = () => Date.now(), random = Math.random, timers = defaultTimers, held = new Map(),
+}) {
+  const redact = createRedactor(cfg.secrets);
+  const L = SOCKET_LIMITS;
+  const fresh = () => ({ px: new Map(), fl: [], gx: new Map(), nw: [] });
+  const zero = () => ({
+    messages: 0, bytes: 0, flushes: 0, frames: 0, joins: 0, connects: 0, reconnects: 0, malformed: 0, oversize: 0, unsolicited: 0,
+    mismatch: 0, noBase: 0, shed: { px: 0, fl: 0, gx: 0, nw: 0 },
+  });
+  let plan = null;
+  let handlers = null;
+  let running = false;
+  let ws = null;
+  let gen = 0;
+  let open = false;
+  let openedAt = null;
+  let connectedAt = 0;
+  let attempt = 0;
+  let retryAt = 0;
+  let lastMsgAt = null;
+  let lastError = null;
+  let errorMessage = null;
+  let flushTimer = null;
+  let eligible = false;
+  let wanted = new Map();
+  let joined = new Set();
+  let acked = new Map();
+  let pending = fresh();
+  let lastData = { fl: null, nw: null, px: null };
+  let lastGx = new Map();
+  let counters = zero();
+
+  const fail = (at, code, extra = {}) => {
+    lastError = { at, code, ...extra };
+  };
+
+  function release() {
+    gen++;
+    const sock = ws;
+    ws = null;
+    open = false;
+    openedAt = null;
+    joined = new Set();
+    acked = new Map();
+    wanted = new Map();
+    if (sock) {
+      try { sock.close(L.closeNormal, "closing"); } catch { return; }
+    }
+  }
+
+  function drop(at, code, extra = {}) {
+    release();
+    retryAt = at + backoffMs(attempt, random);
+    attempt++;
+    fail(at, code, extra);
+  }
+
+  function arm() {
+    if (flushTimer !== null) return;
+    flushTimer = timers.set(() => {
+      flushTimer = null;
+      flush(now());
+    }, L.flushMs);
+  }
+
+  function flush(at) {
+    const batch = pending;
+    pending = fresh();
+    if (!running || !handlers || !plan) return;
+    const session = plan.session();
+    if (!session) return;
+    counters.flushes++;
+    const frames = [];
+    if (batch.px.size) {
+      const f = shapePxTicks(batch.px, held, { at });
+      counters.noBase += batch.px.size - f.items.length;
+      if (f.items.length) frames.push(f);
+    }
+    if (batch.gx.size) {
+      const f = shapeSocketFrame("gx", batch.gx, { at, session });
+      if (f.items.length) frames.push(f);
+    }
+    if (batch.fl.length) {
+      const f = shapeSocketFrame("fl", batch.fl, { at, session, stageOf: plan.stage });
+      if (f.items.length) frames.push(f);
+    }
+    if (batch.nw.length) {
+      const f = shapeSocketFrame("nw", batch.nw, { at, session });
+      if (f.items.length) frames.push(f);
+    }
+    for (const f of frames) {
+      if (!plan.topics.has(f.k)) continue;
+      counters.frames++;
+      try {
+        handlers.onFrame(f);
+      } catch (error) {
+        handlers.onError({ k: f.k, at, code: "internal", status: null, message: redact(String(error && error.message ? error.message : error)).slice(0, 120) });
+      }
+    }
+  }
+
+  function ingest(k, name, payload, at) {
+    if (k === "fl" || k === "nw") {
+      lastData[k] = at;
+      if (pending[k].length >= L.pendingMax[k]) { counters.shed[k]++; return; }
+      pending[k].push(payload);
+      arm();
+      return;
+    }
+    if (tickerOfPayload(payload) !== name) { counters.mismatch++; return; }
+    if (k === "gx") lastGx.set(name, at);
+    else lastData.px = at;
+    if (pending[k].size >= L.pendingMax[k] && !pending[k].has(name)) { counters.shed[k]++; return; }
+    pending[k].set(name, payload);
+    arm();
+  }
+
+  function onMessage(g, event) {
+    if (g !== gen) return;
+    const data = event && typeof event.data === "string" ? event.data : null;
+    const at = now();
+    lastMsgAt = at;
+    counters.messages++;
+    if (data === null) { counters.malformed++; return; }
+    counters.bytes += data.length;
+    if (data.length > L.messageBytesMax) { counters.oversize++; return; }
+    const m = parseMessage(data);
+    if (m.kind === "ack") {
+      if (m.status === "ok") {
+        acked.set(m.channel, "ok");
+        attempt = 0;
+      } else acked.set(m.channel, m.detail ? redact(m.detail) : "refused");
+      return;
+    }
+    if (m.kind !== "data") { counters.malformed++; return; }
+    const w = wanted.get(m.channel);
+    if (!w) { counters.unsolicited++; return; }
+    ingest(w.k, w.name, m.payload, at);
+  }
+
+  function onClose(g, event) {
+    if (g !== gen) return;
+    const at = now();
+    const message = errorMessage;
+    errorMessage = null;
+    drop(at, "closed", { closeCode: event && Number.isFinite(event.code) ? event.code : null, ...(message ? { message } : {}) });
+  }
+
+  function onError(g, event) {
+    if (g !== gen) return;
+    const message = event && event.message ? redact(String(event.message)).slice(0, 120) : null;
+    errorMessage = message;
+    fail(now(), "socket-error", { message });
+  }
+
+  function dial(at) {
+    const url = socketUrl(cfg.base, cfg.key);
+    if (!url) { fail(at, "no-key"); retryAt = at + L.backoffMs[L.backoffMs.length - 1]; return; }
+    const g = ++gen;
+    let sock;
+    try {
+      sock = connect(url);
+    } catch (error) {
+      drop(at, "connect", { message: redact(String(error && error.message ? error.message : error)).slice(0, 120) });
+      return;
+    }
+    ws = sock;
+    open = false;
+    errorMessage = null;
+    connectedAt = at;
+    joined = new Set();
+    acked = new Map();
+    wanted = new Map();
+    if (counters.connects > 0) counters.reconnects++;
+    counters.connects++;
+    sock.addEventListener("open", () => {
+      if (g !== gen) return;
+      open = true;
+      openedAt = now();
+    });
+    sock.addEventListener("message", (event) => onMessage(g, event));
+    sock.addEventListener("close", (event) => onClose(g, event));
+    sock.addEventListener("error", (event) => onError(g, event));
+  }
+
+  function reconcile(at) {
+    const want = wantChannels({ topics: plan.topics, focus: plan.focus(), gex: plan.gex().names });
+    wanted = new Map(want.map((w) => [w.channel, w]));
+    for (const w of want) {
+      if (joined.has(w.channel)) continue;
+      if (joined.size >= L.joinMax) { release(); retryAt = at; return false; }
+      try {
+        ws.send(JSON.stringify({ channel: w.channel, msg_type: "join" }));
+      } catch (error) {
+        drop(at, "send", { message: redact(String(error && error.message ? error.message : error)).slice(0, 120) });
+        return false;
+      }
+      joined.add(w.channel);
+      counters.joins++;
+    }
+    return true;
+  }
+
+  function covered(k, at) {
+    if (!running || !open || !plan) return false;
+    if (k === "fl" || k === "nw") {
+      const channel = k === "fl" ? "flow-alerts" : "news";
+      return acked.get(channel) === "ok" && lastData[k] !== null && at - lastData[k] <= L.silentMs[k];
+    }
+    if (k === "gx") {
+      const names = plan.gex().names.slice(0, L.gxMax);
+      return names.length > 0 && names.every((n) => acked.get("gex:" + n) === "ok" && lastGx.has(n) && at - lastGx.get(n) <= L.silentMs.gx);
+    }
+    return false;
+  }
+
+  function silenceAt(k) {
+    if (k === "fl" || k === "nw") return lastData[k] === null ? Infinity : lastData[k] + L.silentMs[k] + 1;
+    if (k === "gx") {
+      const names = plan ? plan.gex().names.slice(0, L.gxMax) : [];
+      let at = Infinity;
+      for (const n of names) if (lastGx.has(n)) at = Math.min(at, lastGx.get(n) + L.silentMs.gx + 1);
+      return at;
+    }
+    return Infinity;
+  }
+
+  function refusedAll() {
+    if (!joined.size) return false;
+    for (const channel of joined) if (!acked.has(channel) || acked.get(channel) === "ok") return false;
+    return true;
+  }
+
+  return {
+    kind: "socket",
+    start(p, h) {
+      release();
+      plan = p;
+      handlers = h;
+      running = true;
+      attempt = 0;
+      retryAt = 0;
+      lastError = null;
+      lastMsgAt = null;
+      eligible = false;
+      pending = fresh();
+      lastData = { fl: null, nw: null, px: null };
+      lastGx = new Map();
+      counters = zero();
+    },
+    stop() {
+      running = false;
+      release();
+      if (flushTimer !== null) { timers.clear(flushTimer); flushTimer = null; }
+      pending = fresh();
+      plan = null;
+      handlers = null;
+    },
+    park() {
+      eligible = false;
+      release();
+      attempt = 0;
+      retryAt = 0;
+      pending = fresh();
+      if (flushTimer !== null) { timers.clear(flushTimer); flushTimer = null; }
+    },
+    async tick(at) {
+      if (!running || !plan) return;
+      if (flushTimer === null && (pending.px.size || pending.fl.length || pending.gx.size || pending.nw.length)) flush(at);
+      const phase = typeof plan.phase === "function" ? plan.phase() : null;
+      eligible = !!cfg.key && plan.ready() && socketWindowOk(cfg.socketHours, phase);
+      if (!eligible) {
+        if (ws) { release(); retryAt = 0; }
+        return;
+      }
+      if (ws && !open && at - connectedAt > L.ackMs) drop(at, "connect-timeout");
+      if (!ws && at >= retryAt) dial(at);
+      if (ws && open && !reconcile(at) && !ws && at >= retryAt) dial(at);
+      if (ws && open && refusedAll()) {
+        release();
+        retryAt = at + SOCKET_REFUSED_RETRY_MS;
+        fail(at, "refused");
+      }
+    },
+    paused: () => false,
+    covered,
+    silenceAt,
+    wakeAt(at) {
+      if (!running || !plan || !eligible) return Infinity;
+      if (ws) return open ? Infinity : connectedAt + L.ackMs + 1;
+      return Math.max(retryAt, at);
+    },
+    state: () => ({
+      running, connected: open, connecting: !!ws && !open, host: hostOf(cfg.base), hours: cfg.socketHours, since: openedAt,
+      channels: wanted.size, joined: joined.size, acked: Array.from(acked.values()).filter((v) => v === "ok").length,
+      refused: Object.fromEntries(Array.from(acked.entries()).filter(([, v]) => v !== "ok").slice(0, 16)),
+      lastMsgAt, retryAt: retryAt || null, failures: attempt, lastError: lastError ? redact.deep(lastError) : null,
+      messages: counters.messages, bytes: counters.bytes, flushes: counters.flushes, frames: counters.frames, joins: counters.joins,
+      connects: counters.connects, reconnects: counters.reconnects, malformed: counters.malformed, oversize: counters.oversize,
+      unsolicited: counters.unsolicited, mismatch: counters.mismatch, noBase: counters.noBase, shed: { ...counters.shed },
+    }),
+  };
+}
+
+export function createCompositeUpstream({ rest, socket, held, now = () => Date.now() }) {
+  const ORDER = ["px", "mk", "gx", "fl", "nw"];
+  let plan = null;
+  let handlers = null;
+  const memo = { pxMeta: null, pxFull: null, cursor: null };
+
+  const restPlan = {
+    get topics() {
+      const at = now();
+      const out = new Set();
+      for (const k of plan.topics) if (!socket.covered(k, at)) out.add(k);
+      return out;
+    },
+    ready: () => plan.ready(),
+    session: () => plan.session(),
+    phase: () => plan.phase(),
+    names: () => plan.names(),
+    focus: () => plan.focus(),
+    gex: () => plan.gex(),
+    base: () => plan.base(),
+    stage: (t) => plan.stage(t),
+  };
+
+  const absorbPx = (f) => {
+    const items = Array.isArray(f.items) ? f.items.map((it) => {
+      if (!Array.isArray(it) || typeof it[0] !== "string") return it;
+      const row = mergePxRow(it, held.get(it[0]));
+      held.set(it[0], row);
+      return row;
+    }) : f.items;
+    memo.pxMeta = f.meta;
+    memo.pxFull = f.full;
+    return { ...f, items };
+  };
+
+  const restHandlers = {
+    onFrame: (f) => {
+      let out = f;
+      if (f.k === "px") out = absorbPx(f);
+      else if (f.k === "fl" && f.meta && typeof f.meta.cursor === "string") memo.cursor = f.meta.cursor;
+      handlers.onFrame(out);
+    },
+    onError: (e) => handlers.onError(e),
+  };
+
+  const socketHandlers = {
+    onFrame: (f) => {
+      let out = f;
+      if (f.k === "px") out = { ...f, meta: { ...(memo.pxMeta || {}), ...f.meta }, full: memo.pxFull || f.full };
+      else if (f.k === "fl" && memo.cursor) out = { ...f, meta: { ...f.meta, cursor: memo.cursor } };
+      handlers.onFrame(out);
+    },
+    onError: (e) => handlers.onError(e),
+  };
+
+  return {
+    kind: "socket",
+    start(p, h) {
+      plan = p;
+      handlers = h;
+      held.clear();
+      memo.pxMeta = null;
+      memo.pxFull = null;
+      memo.cursor = null;
+      rest.start(restPlan, restHandlers);
+      socket.start(p, socketHandlers);
+    },
+    stop() {
+      socket.stop();
+      rest.stop();
+      held.clear();
+      plan = null;
+      handlers = null;
+    },
+    park() {
+      socket.park();
+    },
+    async tick(at) {
+      await socket.tick(at);
+      await rest.tick(at);
+    },
+    paused: (at) => rest.paused(at),
+    state() {
+      const r = rest.state();
+      const s = socket.state();
+      const at = now();
+      const wake = socket.wakeAt(at);
+      const topics = {};
+      for (const k of ORDER) {
+        const t = r.topics[k];
+        const covers = socket.covered(k, at);
+        const due = covers ? socket.silenceAt(k) : t.due;
+        topics[k] = { due: Math.min(due, wake), inflight: t.inflight, fails: t.fails, via: covers ? "socket" : "rest" };
+      }
+      return { ...r, topics, socket: s };
+    },
+  };
+}
+
 const CLOCK_SQL = "SELECT * FROM flows_clock WHERE id = 1";
 
 export const RT_BOARDS_SQL =
@@ -284,6 +700,7 @@ export class RtHub {
       session: () => this.session,
       phase: () => (this.phase ? this.phase.phase : null),
       names: () => this.pxNames(),
+      focus: () => this.focus.slice(0, SOCKET_LIMITS.pxMax),
       gex: () => ({ names: this.gxNames.slice() }),
       base: () => this.base,
       stage: (t) => (this.roster ? this.roster.stage.get(t) || null : null),
@@ -816,6 +1233,7 @@ export class RtHub {
     this.phase = phase;
     if (!inSession(phase)) {
       this.acctAt = null;
+      if (typeof this.upstream.park === "function") this.upstream.park();
       const info = closedInfo(phase);
       const key = closedKeyOf(info);
       if (this.closedKey !== key) {
@@ -952,7 +1370,7 @@ export class RtHub {
       running: this.running, ep: this.ep || null, startedAt: this.running ? this.startedAt : null, session: this.session, now,
       unobservedMs: this.unobservedMs,
       phase: phase ? { phase: phase.phase, trading: phase.trading, day: phase.day } : null,
-      upstream: { kind: this.upstream.kind, ...up },
+      upstream: { kind: this.upstream.kind, asked: this.cfg.upstreamAsked, ...up },
       sockets: { n: this.liveSockets().length, byUser: this.userCounts(), userCap: this.cfg.userCap, max: RT_LIMITS.sockets },
       lastSnapAt: Number.isFinite(this.lastSnapAt) ? this.lastSnapAt : null,
       roster: {
@@ -961,14 +1379,23 @@ export class RtHub {
       },
       calls: { minuteTotal: this.budget.used(now), perMinute: this.budget.perMinute },
       degraded: this.degraded,
-      killSwitches: { FLOWS_RT_MODE: this.cfg.mode, FLOWS_RT_AUDIENCE: this.cfg.audience },
+      killSwitches: { FLOWS_RT_MODE: this.cfg.mode, FLOWS_RT_AUDIENCE: this.cfg.audience, FLOWS_RT_UPSTREAM: this.cfg.upstream },
       topics,
     });
   }
 }
 
-export function createHub({ fetchImpl, ...rest }) {
-  return new RtHub({ ...rest, upstreamFactory: (o) => createRestUpstream({ ...o, fetchImpl }) });
+export function createHub({ fetchImpl, connect, timers, ...rest }) {
+  return new RtHub({
+    ...rest,
+    upstreamFactory: (o) => {
+      const restUp = createRestUpstream({ ...o, fetchImpl });
+      if (o.cfg.upstream !== "socket") return restUp;
+      const held = new Map();
+      const socket = createSocketUpstream({ cfg: o.cfg, connect, now: o.now, random: o.random, timers, held });
+      return createCompositeUpstream({ rest: restUp, socket, held, now: o.now });
+    },
+  });
 }
 
 const jsonResponse = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), {

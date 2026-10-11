@@ -3,8 +3,8 @@ import http from "node:http";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  run, handshake, session, classify, stampMs, stampOf, redactor, CHANNELS, TICKERS, JOIN_STEPS, CONNECTION_STEPS, CONTROL_CHANNEL, FIREHOSES,
-  FIREHOSE_SECONDS, PARTS, streamStats, verdictOf, controlTrust, plannedSeconds, createdMinusExecuted, MAX_SECONDS,
+  run, handshake, session, holdJoined, holdConnections, classify, stampMs, stampOf, redactor, CHANNELS, TICKERS, JOIN_STEPS, CONNECTION_STEPS, CONTROL_CHANNEL, FIREHOSES,
+  FIREHOSE_SECONDS, PARTS, streamStats, verdictOf, controlTrust, plannedSeconds, createdMinusExecuted, MAX_SECONDS, HOLD_SECONDS, HOLD_CONNECTIONS, HOLD_JOINS,
 } from "../scripts/flows-ws-probe.mjs";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -42,7 +42,12 @@ function decode(buf) {
 const KNOWN = new Set(["market_tide", "price", "gex", "gex_strike", "flow-alerts", "quotes", "net_flow", "news", "option_trades",
   "contract_screener", "lit_trades", "off_lit_trades", "stock_screener"]);
 
-function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), control = "refuse" } = {}) {
+function closeFrame(code, reason) {
+  const body = Buffer.concat([Buffer.from([code >> 8, code & 255]), Buffer.from(reason)]);
+  return Buffer.concat([Buffer.from([0x88, body.length]), body]);
+}
+
+function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), control = "refuse", closeOnJoin = 0 } = {}) {
   const server = http.createServer((req, res) => { res.statusCode = 404; res.end("no"); });
   const sockets = new Set();
   server.on("upgrade", (req, socket) => {
@@ -77,6 +82,7 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
           continue;
         }
         joined++;
+        if (closeOnJoin && joined === closeOnJoin) { socket.write(closeFrame(1008, `limit ${TOKEN}`)); socket.end(); return; }
         socket.write(frame(JSON.stringify([msg.channel, { response: {}, status: "ok" }])));
         if (base === "option_trades") {
           for (let n = 0; n < 5; n++) {
@@ -162,7 +168,7 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
   const lines = [];
   try {
     const t0 = Date.now();
-    const code = await run({ UW_API_KEY: TOKEN, FLOWS_WS_PROBE_URL: v.url, FLOWS_WS_PROBE_SECONDS: "2", FLOWS_WS_PROBE_FIREHOSE_SECONDS: "1" }, (l) => lines.push(l));
+    const code = await run({ UW_API_KEY: TOKEN, FLOWS_WS_PROBE_URL: v.url, FLOWS_WS_PROBE_SECONDS: "2", FLOWS_WS_PROBE_FIREHOSE_SECONDS: "1", FLOWS_WS_PROBE_HOLD_SECONDS: "1" }, (l) => lines.push(l));
     const tookS = (Date.now() - t0) / 1000;
     eq(code, 0, "the probe exits clean");
     const records = lines.map((l) => JSON.parse(l));
@@ -171,7 +177,7 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
     ok(!lines.join("\n").includes(TOKEN), "the token never appears in any output line");
     ok(records.filter((r) => r.probe === "channel").length === CHANNELS.length, "one record per channel");
     ok(!lines.join("\n").includes("do-not-print") && !lines.join("\n").includes("98765.43"), "no payload value reaches the output, only key names");
-    eq(records[0].plannedS, plannedSeconds({ seconds: 2, firehoseSeconds: 1 }), "the start record carries the computed duration");
+    eq(records[0].plannedS, plannedSeconds({ seconds: 2, firehoseSeconds: 1, holdSeconds: 1 }), "the start record carries the computed duration");
     ok(tookS <= records[0].plannedS, `and the run took ${tookS.toFixed(1)} s, inside the ${records[0].plannedS} s it computed`);
     const chans = records.filter((r) => r.probe === "channel");
     eq(chans.map((r) => r.channels[0]), [...CHANNELS], "channels are probed in the order of the one list, control first");
@@ -196,12 +202,27 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
     ok(!records.some((r) => r.probe === "channel" && FIREHOSES.includes(r.channels[0])), "no firehose is read as a per-channel record");
     const joins = records.filter((r) => r.probe === "joins-per-connection");
     eq(joins.map((j) => j.requested), [...JOIN_STEPS], "every join step is probed");
-    eq(joins.map((j) => j.acksOk), [1, 10, 30, 30], "acknowledged joins stop at the vendor's cap");
+    eq(joins.map((j) => j.acksOk), [1, 10, 30, 30, 30, 30], "acknowledged joins stop at the vendor's cap");
+    const holds = records.filter((r) => r.probe === "hold-connection");
+    eq(holds.map((h) => h.connection), Array.from({ length: HOLD_CONNECTIONS }, (_, i) => i + 1), "the hold part runs one record per connection");
+    ok(holds.every((h) => h.joined === HOLD_JOINS && h.acksOk === 30 && h.acksRefused === HOLD_JOINS - 30 && h.survived && h.closed === null), "each held connection joins 60 price channels, is capped at 30 and stays up");
+    ok(holds.every((h) => h.messages >= HOLD_JOINS && h.holdS === 1), "and counts the price frames it received");
     const conns = records.filter((r) => r.probe === "concurrent-connections");
     eq(conns.map((c) => c.asked), Array.from({ length: CONNECTION_STEPS - 1 }, (_, i) => i + 2), "connection counts are stepped");
     ok(conns.every((c) => c.opened === c.asked && c.survivors === c.asked), "a permissive vendor holds every connection");
     const hs = records.filter((r) => r.probe.startsWith("handshake"));
     eq(hs.map((h) => h.outcome), ["upgraded", "upgraded", "upgraded"], "all three handshakes are recorded");
+  } finally { v.close(); }
+}
+
+{
+  const v = await fakeVendor({ closeOnJoin: 3 });
+  try {
+    const held = await holdJoined(v.url, TOKEN, { connections: 2, joins: 5, seconds: 5 });
+    ok(held.every((h) => !h.survived && h.closed && h.closed.code === 1008), "a server-side close ends the held connection and its code is printed");
+    ok(held.every((h) => h.closed.reason === "limit [token]" && typeof h.closedAtS === "number" && h.closedAtS < 5), "with its reason, redacted, and the time it happened");
+    const closed = await holdConnections(v.url, TOKEN, 2, { settleMs: 1200 });
+    ok(Array.isArray(closed.closes), "the concurrent-connection step reports the vendor's closes");
   } finally { v.close(); }
 }
 
@@ -222,6 +243,7 @@ await Promise.all([["ignore", "no-ack", true], ["ack", "acked-silent", false]].m
   const defaultSeconds = Number(/seconds:[\s\S]*?default:\s*"(\d+)"/.exec(wf)[1]);
   ok(defaultSeconds <= MAX_SECONDS && defaultSeconds >= 60, `the dispatched run listens ${defaultSeconds} s per channel`);
   const planned = plannedSeconds({ seconds: defaultSeconds });
+  ok(plannedSeconds({ seconds: defaultSeconds, only: ["hold"] }) === HOLD_SECONDS + 4, "the hold part adds its 120 s with the settle and slack");
   ok(planned > 15 * 60, `the one list takes ${planned} s, more than the 15-minute timeout the old workflow gave it`);
   ok(planned * 1.25 <= timeoutMin * 60, `THE TIMEOUT COVERS THE COMPUTED DURATION: ${timeoutMin} min holds the ${planned} s the list needs with a quarter to spare`);
   ok(PARTS.every((part) => new RegExp(part).test(wf.slice(wf.indexOf("only:"), wf.indexOf("permissions:")))), "the workflow's only input names every part");
