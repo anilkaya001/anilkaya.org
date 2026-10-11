@@ -1313,7 +1313,7 @@ The client freshness helper (`FlowsUI.freshFrom`, `heartbeat`); every key a hear
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-fresh.js` |  | flows-freshness, flows-live, flows-rt |
+| `assets/js/flows-fresh.js` |  | docs, flows-freshness, flows-live, flows-rt |
 
 ### `assets/js/flows-net.js`, `assets/css/flows-net.css`
 
@@ -1478,7 +1478,7 @@ The go/no-go list for the first paying member as a readback: ten lines in parts,
 | File | Exports | Suites |
 |---|---|---|
 | `docs/launch-checklist.md` |  |  |
-| `scripts/launch-readiness.mjs` | `scripts/launch-readiness.mjs#ACCOUNT_ROUTES`, `scripts/launch-readiness.mjs#ACCOUNT_TABLES`, `scripts/launch-readiness.mjs#BILLING_SWITCH`, `scripts/launch-readiness.mjs#CHECKLIST`, `scripts/launch-readiness.mjs#FREE_CAP_NEURONS`, `scripts/launch-readiness.mjs#IMPERATIVE_FIRST_WORDS`, `scripts/launch-readiness.mjs#LEGAL_PAGES`, `scripts/launch-readiness.mjs#LIMITERS`, `scripts/launch-readiness.mjs#LINES`, `scripts/launch-readiness.mjs#PAID_CAP_NEURONS`, `scripts/launch-readiness.mjs#PARTS`, `scripts/launch-readiness.mjs#QUARTER_DAYS`, `scripts/launch-readiness.mjs#ROOT`, `scripts/launch-readiness.mjs#SESSION_CLAIMS`, `scripts/launch-readiness.mjs#dayNumber`, `scripts/launch-readiness.mjs#evaluate`, `scripts/launch-readiness.mjs#paidSurfaces`, `scripts/launch-readiness.mjs#parseChecklist`, `scripts/launch-readiness.mjs#parseToml`, `scripts/launch-readiness.mjs#readbackProblems`, `scripts/launch-readiness.mjs#realContext`, `scripts/launch-readiness.mjs#render`, `scripts/launch-readiness.mjs#rowProblem`, `scripts/launch-readiness.mjs#tokensOf` | launch-readiness |
+| `scripts/launch-readiness.mjs` | `scripts/launch-readiness.mjs#ACCOUNT_ROUTES`, `scripts/launch-readiness.mjs#ACCOUNT_TABLES`, `scripts/launch-readiness.mjs#BILLING_SWITCH`, `scripts/launch-readiness.mjs#CHECKLIST`, `scripts/launch-readiness.mjs#FREE_CAP_NEURONS`, `scripts/launch-readiness.mjs#IMPERATIVE_FIRST_WORDS`, `scripts/launch-readiness.mjs#LEGAL_PAGES`, `scripts/launch-readiness.mjs#LIMITERS`, `scripts/launch-readiness.mjs#LINES`, `scripts/launch-readiness.mjs#PAID_CAP_NEURONS`, `scripts/launch-readiness.mjs#PARTS`, `scripts/launch-readiness.mjs#QUARTER_DAYS`, `scripts/launch-readiness.mjs#ROOT`, `scripts/launch-readiness.mjs#SESSION_CLAIMS`, `scripts/launch-readiness.mjs#dayNumber`, `scripts/launch-readiness.mjs#evaluate`, `scripts/launch-readiness.mjs#paidSurfaces`, `scripts/launch-readiness.mjs#parseChecklist`, `scripts/launch-readiness.mjs#parseToml`, `scripts/launch-readiness.mjs#readbackProblems`, `scripts/launch-readiness.mjs#realContext`, `scripts/launch-readiness.mjs#render`, `scripts/launch-readiness.mjs#rowProblem`, `scripts/launch-readiness.mjs#tokensOf` | architecture, launch-readiness |
 | `tests/launch-readiness.mjs` |  | launch-readiness |
 
 ### `scripts/gen-docs.mjs`, `docs/modules.json`, `docs/globals.json`, `docs/index.md`, `tests/docs-contract.mjs`
