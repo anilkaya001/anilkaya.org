@@ -335,3 +335,18 @@ button.ft-idea-t:hover { color: var(--accent-ink); }
 @media print {
   .ft-ideas { grid-auto-flow: row; overflow: visible; -webkit-mask-image: none; mask-image: none; }
 }
+
+.ft-scene canvas { display: block; width: 100%; touch-action: pan-y; border-radius: var(--r-md, 10px); background: var(--fill-1); }
+.ft-scene canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ft-scene-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.ft-scene-chip { padding: 3px 10px; border-radius: 999px; background: var(--fill-2); color: var(--label-2); font-size: 12px; }
+.ft-scene-bar { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+.ft-scene-btn { min-height: 32px; padding: 0 12px; border: 1px solid var(--label-4); border-radius: 8px; background: transparent; color: var(--label-1); font: inherit; font-size: 13px; }
+.ft-scene-hint, .ft-scene-cap { color: var(--label-3); font-size: 12px; line-height: 1.5; margin: 0; }
+.ft-scene-tab { margin-top: 10px; }
+.ft-scene-scroll { overflow-x: auto; }
+.ft-scene-tab table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ft-scene-tab caption { text-align: left; color: var(--label-3); padding: 6px 0; }
+.ft-scene-tab th, .ft-scene-tab td { padding: 3px 8px; text-align: right; white-space: nowrap; }
+.ft-scene-tab th[scope="row"] { text-align: left; }
+@media (hover: none) and (pointer: coarse) { .ft-scene-btn { min-height: 44px; } }

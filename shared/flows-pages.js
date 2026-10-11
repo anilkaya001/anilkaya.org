@@ -902,7 +902,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "" } = {}) {
+export function tickerPage({ username = "", scenes = false } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -953,7 +953,8 @@ export function tickerPage({ username = "" } = {}) {
     <p data-k="wh-throttled" data-w="Throttled">Too many market data reads in the last minute. Try again shortly.</p>
     <p data-k="wh-pending" data-w="Pending">Publishes with tonight&#39;s run.</p>
     <p data-k="legacy-vo">This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.</p>
-  </div>
+  </div>${scenes ? `
+  <i hidden data-defer="scenes" data-src="${v("/assets/js/flows-ticker-scenes.js")}" id="ftScenes"></i>` : ""}
 `,
   });
 }

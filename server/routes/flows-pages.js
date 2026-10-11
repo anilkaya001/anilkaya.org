@@ -13,7 +13,7 @@ const PAGES = Object.freeze([
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ask", render: (username) => FLOWS_PAGES.askPage({ username }) },
-  { slug: "ticker", render: (username) => FLOWS_PAGES.tickerPage({ username }) },
+  { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
@@ -30,6 +30,8 @@ const PUBLIC_PAGES = Object.freeze([
 export const FLOWS_PAGE_SLUGS = Object.freeze(PAGES.map((page) => page.slug));
 
 export const FLOWS_PUBLIC_SLUGS = Object.freeze(PUBLIC_PAGES.map((page) => page.slug));
+
+const scenesOn = (env) => String(env.FLOWS_SCENES || "off").trim().toLowerCase() === "owner";
 
 const GET_HEAD = ["GET", "HEAD"];
 
