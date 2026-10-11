@@ -220,7 +220,7 @@
       idx = host._scrubAt = i;
       const r = o.onMove(i) || {};
       const x = r.x ?? xs[i];
-      xh.setAttribute("x1", x); xh.setAttribute("x2", x); xh.setAttribute("opacity", r.noLine ? 0 : 0.7);
+      xh.setAttribute("x1", x); xh.setAttribute("x2", x); xh.setAttribute("opacity", r.noLine ? 0 : o.xh ?? 0.7);
       dots.replaceChildren();
       for (const d of r.dots || []) s("circle", { cx: d.x, cy: d.y, r: d.r || 4, fill: d.fill || paint(d.color), class: d.cls || "ring" }, dots);
       readout.replaceChildren(...(r.parts || []).filter(Boolean));
@@ -247,7 +247,7 @@
     host.addEventListener("blur", hide, on);
     host.addEventListener("keydown", (e) => {
       const k = e.key;
-      if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); show(clamp((idx < 0 ? xs.length - 1 : idx) + (k === "ArrowRight" ? 1 : -1), 0, xs.length - 1), true); }
+      if (k === "ArrowRight" || k === "ArrowLeft") { e.preventDefault(); show(clamp((idx >= 0 ? idx : o.first ? (k === "ArrowRight" ? -1 : xs.length) : xs.length - 1) + (k === "ArrowRight" ? 1 : -1), 0, xs.length - 1), true); }
       else if (k === "Home") { e.preventDefault(); show(0, true); }
       else if (k === "End") { e.preventDefault(); show(xs.length - 1, true); }
       else if (k === "Escape") hide();

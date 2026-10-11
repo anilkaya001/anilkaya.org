@@ -314,6 +314,48 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
 }
 
 {
+  const page = await open(640, `<script>${PLOT_SRC}</script>`);
+  await page.evaluate(async () => {
+    const C = window.FlowsUI.chart, s = window.FlowsUI.s;
+    const PTS = [{ x: 50, y: 150, r: 6 }, { x: 120, y: 40, r: 10 }, { x: 120, y: 160, r: 4 }, { x: 300, y: 90, r: 8 }];
+    for (const [id, first] of [["bub-first", true], ["bub-left", true], ["bub-last", false]]) {
+      const hd = C.mount(window.mkHost(id), (el, w, animate) => {
+        const svg = C.svgRoot(el, w, 200, false, "Bubbles");
+        for (const p of PTS) s("circle", { cx: p.x, cy: p.y, r: p.r, class: "b" }, svg);
+        C.scrub(el, svg, {
+          xs: PTS.map((p) => p.x), ys: PTS.map((p) => p.y), rs: PTS.map((p) => p.r), yw: 0.6, first, xh: 0.5, reach: 40, top: 0, bottom: 200, label: "Bubbles",
+          onMove: (i) => ({ x: PTS[i].x, top: 0, parts: [C.part("p" + i, "k")], dots: [{ x: PTS[i].x, y: PTS[i].y, r: PTS[i].r + 3, cls: "b-ring", fill: "none" }] }),
+        });
+      });
+      await window.settle(hd);
+    }
+  });
+  const read = (id) => page.evaluate((i) => { const r = document.querySelector("#" + i + " .ui-readout"); return r.classList.contains("is-on") ? r.textContent : null; }, id);
+  await page.focus("#bub-first");
+  await page.keyboard.press("ArrowRight");
+  eq(await read("bub-first"), "p0", "scrub with first: the first ArrowRight from nothing lands on the first mark, not the last");
+  eq(await page.evaluate(() => document.querySelector("#bub-first line.xh").getAttribute("opacity")), "0.5", "and the crosshair takes the opacity the chart asked for");
+  eq(await page.evaluate(() => { const c = document.querySelector("#bub-first circle.b-ring"); return [c.getAttribute("r"), c.getAttribute("fill"), c.getAttribute("cx"), c.getAttribute("cy")]; }), ["9", "none", "50", "150"], "and the dot is the ring the chart described, sized past the bubble");
+  await page.focus("#bub-left");
+  await page.keyboard.press("ArrowLeft");
+  eq(await read("bub-left"), "p3", "and the first ArrowLeft from nothing lands on the last");
+  await page.focus("#bub-last");
+  await page.keyboard.press("ArrowRight");
+  eq(await read("bub-last"), "p3", "without first the standing behaviour holds: the first ArrowRight lands on the newest mark");
+  const box = await page.evaluate(() => { const b = document.querySelector("#bub-last svg").getBoundingClientRect(); return { x: b.left, y: b.top }; });
+  await page.mouse.move(box.x + 120, box.y + 150);
+  await page.waitForTimeout(80);
+  eq(await read("bub-last"), "p2", "pointer: two marks share an x and the nearer in y wins");
+  await page.mouse.move(box.x + 120, box.y + 55);
+  await page.waitForTimeout(80);
+  eq(await read("bub-last"), "p1", "and moving up reaches the other");
+  await page.mouse.move(box.x + 560, box.y + 10);
+  await page.waitForTimeout(80);
+  eq(await read("bub-last"), null, "a pointer farther than reach from every mark reads nothing");
+  await page.close();
+}
+
+{
   const src = fs.readFileSync(path.join(HERE, "..", "assets/js/flows-chart.js"), "utf8");
   const fmtUnit = (kind, v) => kind + ":" + v;
   const members = {
