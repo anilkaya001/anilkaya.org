@@ -6,6 +6,7 @@ import { chromium } from "playwright";
 import * as M from "../shared/flows-moves0.js";
 import * as PAGES from "../shared/flows-pages.js";
 import { targetFor } from "../shared/flows-targets.js";
+import { revealBelow } from "./lib/below-fold.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -245,7 +246,7 @@ const expectedLists = (rows) => {
 };
 const shape = (x) => x.map((m) => [m.t, NUM(M.signedIvDays(m.m))]);
 
-const browser = await chromium.launch();
+const browser = revealBelow(await chromium.launch());
 try {
   {
     const state = { strips: stripsOf(ROSTER), upd: 1 };
