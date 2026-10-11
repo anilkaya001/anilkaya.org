@@ -39,9 +39,9 @@ const SURFACES = [
 
   { key: "political", file: "assets/js/flows-political.js", fn: null, vars: ["p"] },
 
-  { key: "scoretrack", file: "assets/js/flows-overview.js", fn: "paintChanged", vars: ["payload"] },
+  { key: "scoretrack", file: "assets/js/flows-overview-below.js", fn: "paintChanged", vars: ["payload"] },
   { key: "flowalerts", file: "assets/js/flows-overview.js", fn: "paintAlerts", vars: ["payload"] },
-  { key: "events", file: "assets/js/flows-overview.js", fn: "paintEvents", vars: ["payload"] },
+  { key: "events", file: "assets/js/flows-overview-below.js", fn: "paintEvents", vars: ["payload"] },
   { key: "board:watch", file: "assets/js/flows-overview.js", fn: "paintWatch", vars: ["payload"] },
 
   { key: "scoretrack", file: "assets/js/flows-overview.js", fn: "readTrack", vars: ["payload"] },
@@ -55,7 +55,7 @@ const SURFACES = [
   { key: "board:long", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["long"] },
   { key: "board:short", file: "assets/js/flows-overview.js", fn: "boardsRead", vars: ["short"] },
 
-  { key: "board:long", file: "assets/js/flows-overview.js", fn: "renderSpine", vars: ["payload"] },
+  { key: "board:long", file: "assets/js/flows-overview-below.js", fn: "renderSpine", vars: ["payload"] },
 
   { key: "board:long", file: "assets/js/flows-overview.js", at: "const when = (keys, fn)",
     label: "the region assembly", vars: ["lng", "payload", "meta"] },
@@ -74,6 +74,8 @@ const SURFACES = [
   { key: "board:watch", file: "assets/js/flows-board.js", fn: "watchStatus", vars: ["payload"] },
   { key: "scoretrack", file: "assets/js/flows-board.js", fn: "takeTrack", vars: ["track"] },
 ];
+
+const COMPANION = { "assets/js/flows-overview-below.js": "assets/js/flows-overview.js" };
 
 const OPTIONAL = {
 
@@ -147,7 +149,8 @@ for (const surf of SURFACES) {
 
   const annotated = new Set();
   {
-    const whole = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
+    const companion = COMPANION[surf.file] ? readFileSync(join(ROOT, COMPANION[surf.file]), "utf8") : "";
+    const whole = (src + "\n" + companion).replace(/\/\*[\s\S]*?\*\//g, " ").replace(/([^:])\/\/[^\n]*/g, "$1");
     const asg = /\b\w+\.(__[A-Za-z0-9_]+)\s*=(?!=)/g;
     let a;
     while ((a = asg.exec(whole)) !== null) annotated.add(a[1]);

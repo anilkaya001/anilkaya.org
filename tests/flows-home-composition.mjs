@@ -185,16 +185,20 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(has(bad((t) => { t.deferred.push("hmLean"); }), "is not the modules decided defer"), "a deferred list that names a module not decided defer fails");
   ok(has(bad((t) => { t.deferred = t.deferred.slice(1); }), "is not the modules decided defer"), "a deferred list missing a deferred module fails");
 
-  const weightWith = WEIGHT_SRC.replace("unusualPage: { groups: { net: \"/assets/js/flows-net.js\" } },", "unusualPage: { groups: { net: \"/assets/js/flows-net.js\" } },\n  overviewPage: { groups: { \"home-below\": \"/assets/js/flows-overview-below.js\" }, modules: [\"hmChg\", \"hmVol\", \"hmEvents\", \"hmNews\"] },");
-  ok(weightWith !== WEIGHT_SRC, "the injection of a DEFERRED entry for the Home page found its anchor");
-  eq(bad(() => {}, () => facts, weightWith), [], "THE BELOW-THE-FOLD LIST EQUALS THE MODULE SET F-08 DEFERS: an entry that lists the same four passes");
+  const weightWith = WEIGHT_SRC;
+  ok(/overviewPage: \{ groups: \{ "home-below": "\/assets\/js\/flows-overview-below\.js" \}, modules: \["hmChg", "hmVol", "hmEvents", "hmNews"\] \},/.test(weightWith), "the weight test defers the four modules to flows-overview-below.js as the home-below group");
+  eq(bad(() => {}, () => facts, weightWith), [], "THE BELOW-THE-FOLD LIST EQUALS THE MODULE SET F-08 DEFERS: the entry lists the same four and passes");
   const weightWrong = weightWith.replace('modules: ["hmChg", "hmVol", "hmEvents", "hmNews"]', 'modules: ["hmChg", "hmVol", "hmEvents", "hmNews", "hmLean"]');
+  ok(weightWrong !== weightWith, "the injection of a fifth module found its anchor");
   ok(has(bad(() => {}, () => facts, weightWrong), "DEFERRED.overviewPage lists"), "an entry that lists a fifth module fails");
   const weightShort = weightWith.replace('modules: ["hmChg", "hmVol", "hmEvents", "hmNews"]', 'modules: ["hmChg", "hmVol", "hmNews"]');
   ok(has(bad(() => {}, () => facts, weightShort), "DEFERRED.overviewPage lists"), "an entry that lists only three fails");
   const weightBare = weightWith.replace(', modules: ["hmChg", "hmVol", "hmEvents", "hmNews"]', "");
+  ok(weightBare !== weightWith, "the removal of the module list found its anchor");
   ok(has(bad(() => {}, () => facts, weightBare), "lists no modules"), "an entry that names the group and lists no modules fails");
-  ok(has(bad(() => {}, () => facts, WEIGHT_SRC.replace('overviewPage: "F-08 part a"', 'overviewPage: "none"')), "neither defers"), "with no entry and no pointer to F-08 part a it fails");
+  const weightNone = weightWith.replace(/\n  overviewPage: \{ groups: \{ "home-below"[^\n]*\n/, "\n");
+  ok(weightNone !== weightWith, "the removal of the Home entry found its anchor");
+  ok(has(bad(() => {}, () => facts, weightNone), "neither defers"), "with no entry and no pointer to F-08 part a it fails");
 
   ok(has(bad((t) => { t.layouts["1440x900"].fit[1].push("hmChg"); }), "hmChg is deferred and cannot be in the fold"), "a deferred module in the fold fails");
   ok(has(bad((t) => { t.layouts["1440x900"].peek = "hmAlerts"; }), "hmAlerts is retired and cannot be in the fold"), "a retired module in the fold fails");
@@ -253,7 +257,7 @@ async function render(browser, [width, height], pageHtml) {
   });
   await page.goto("https://example.test/flows/");
   await page.evaluate(() => document.fonts.ready);
-  await page.waitForFunction(() => document.querySelector("#ccMetals") && document.querySelector("#ccMetals").children.length > 0 && document.querySelector("#ccNews") && document.querySelector("#ccNews").children.length > 0, null, { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelector("#ccMetals") && document.querySelector("#ccMetals").children.length > 0 && document.querySelector("#ccLean") && document.querySelector("#ccLean").children.length > 0, null, { timeout: 15000 });
   await page.waitForTimeout(600);
   const m = await page.evaluate((heroId) => {
     const rect = (e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top + scrollY), bottom: Math.round(r.bottom + scrollY), height: Math.round(r.height) }; };

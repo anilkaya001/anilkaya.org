@@ -13,7 +13,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
   tickerPage: 411 + 1613 / 1024,
-  overviewPage: 274,
+  overviewPage: 253,
   sidePage: 230,
   watchPage: 230,
   deskPage: 243,
@@ -119,6 +119,7 @@ const judge = (row, bases = BASES) => {
 const DEFERRED = {
   tickerPage: { groups: {} },
   unusualPage: { groups: { net: "/assets/js/flows-net.js" } },
+  overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
   dock: { file: "/assets/js/flows-ask.js", declared: /<aside[^>]*\bid="askDock"[^>]*\bdata-src="([^"?]+)/ },
@@ -126,7 +127,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80, overviewPage: 80, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
+  tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
   unusualPage: 155, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
@@ -142,7 +143,6 @@ const EAGER_KERNEL = [
 const NO_RELIEF_ROW = "no relief row yet (plan 5.7)";
 const BELOW_FLOOR = {
   unusualPage: "F-08 part b",
-  overviewPage: "F-08 part a",
   marketPage: "F-08 part c",
   tickerPage: "OD-08",
   sidePage: NO_RELIEF_ROW,
