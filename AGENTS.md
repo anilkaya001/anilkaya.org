@@ -783,7 +783,13 @@ read: {
   grades, and grades capped at 1 when its fingerprint names an earlier card. Otherwise
   the attempt row, the current engine's own answer, is served. The board summary writes its plain text over `board`
   only when no model summary was written after the current brief, recording a refused or
-  failed attempt on `gen:board` otherwise. Fingerprint = dossier fingerprint +
+  failed attempt on `gen:board` otherwise. It asks the primary model only, never the
+  fallback. A primary that throws is asked again at the next firing. One that answers with
+  no text was billed, so it is not asked again on the same facts: a reply cut at its length
+  waits `AI_LENGTH_RETRY_MS` (an hour), an empty reply until the brief's facts change. A new
+  nightly brief is asked at the next firing either way; while the live overlay is on (trading
+  hours) neither is asked again within that hour even when the facts move, which with
+  half-hourly firings is the third firing after. Fingerprint = dossier fingerprint +
   the model signature + reading version. A reading
   younger than `AI_INTRADAY_REFRESH_MS` (45 minutes) is served without assembling the
   dossier (one row read); older, it is served if the fingerprint still matches and
@@ -1492,9 +1498,11 @@ history, so no diff against a base can turn it red, but it does constrain the tr
 pages and sheets do not pass `bump-assets --check` (see "Asset versioning"), and when an unignored symlink to
 nothing would fail the asset upload. It needs Node 22.13 or newer for `node:sqlite`.
 
-`flows-neuron` was measured on 2026-10-05: about 3 s with no server and about 620 assertions. Its last block drives
+`flows-neuron` was measured on 2026-10-05: about 4 s with no server and about 750 assertions. Its last blocks drive
 `worker.js` through the dossier harness's counting D1 over `node:sqlite` (the kept Neuron output, its re-vet
-against a new card, and the board summary's `gen:board` row), so it needs Node 22.13 or newer and runs under
+against a new card, the board summary's `gen:board` row, and the real `scheduled()` board firing with a fallback
+configured, which asks the primary alone: a thrown primary, a billed empty or cut reply on the same facts, and a
+moved brief with the live overlay off and on), so it needs Node 22.13 or newer and runs under
 `--disable-warning=ExperimentalWarning` like the reads suite.
 
 `flows-dossier-contract` was measured on 2026-10-03: 11 s with no server and 14,249 assertions. It builds

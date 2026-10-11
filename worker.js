@@ -1364,7 +1364,7 @@ async function refreshFlowsSummary(env, at = Date.now()) {
     await markStamp();
   };
 
-  const chain = chainFor(env, "board");
+  const chain = chainFor(env, "board").slice(0, 1);
 
   if (!env.AI || !chain.length) {
     await write(plain, false, null, null).catch(() => {});

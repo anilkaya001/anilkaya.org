@@ -1881,6 +1881,160 @@ const CARD = {
       "while a brief published after it, with no model summary of its own, gets the plain text with the refusal's guard (" + b3.guard + ")");
   }
 
+  {
+    const f = H.fakeD1();
+    F.seed(f, { live: false });
+    const fact = { id: "t/tilt", topic: ["today", "lean"], source: "brief", at: "2026-10-02T00:10:00.000Z",
+      say: "44 names lean bullish and 53 lean bearish out of 100 scored.", n: { bullish: 44, bearish: 53, scored: 100 } };
+    f.put("brief", { v: 1, generatedAt: "2026-10-02T00:10:00.000Z", sessionDate: F.SESSION, facts: [fact], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } },
+      Date.parse("2026-10-02T00:10:00.000Z"));
+    const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const ai = { down: true, models: [], run: async (model) => {
+      ai.models.push(model);
+      if (model === MODEL && ai.down) throw new Error("3040: Capacity temporarily exceeded, please try again.");
+      return { response: fact.say, usage: USAGE };
+    } };
+    const worker = (await import("../worker.js?boardChain=" + Date.now())).default;
+    const fire = async (iso) => {
+      setNow(iso);
+      const bg = [];
+      await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+        { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+        { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(bg);
+    };
+    const board = () => f.db.prepare("SELECT text, llm, model, guard FROM flows_ai_summary WHERE scope = 'board'").get();
+    await fire("2026-10-02T14:45:00.000Z");
+    same(ai.models, [MODEL],
+      "THE SCHEDULED BOARD SUMMARY ASKS THE PRIMARY ONLY: with a fallback configured and the primary out of capacity, no second model is asked");
+    const b1 = board();
+    ok(b1 && b1.llm === 0 && b1.guard === "unreachable:capacity" && b1.model === MODEL && b1.text !== fact.say,
+      "and the firing writes the plain text with the primary's failure (" + (b1 && b1.guard) + "), not the fallback's answer");
+    ai.down = false;
+    await fire("2026-10-02T15:15:00.000Z");
+    same(ai.models, [MODEL, MODEL], "the next firing asks the primary again, and only the primary");
+    const b2 = board();
+    ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+      "and its answer becomes the board summary: a failed summary is late by one firing");
+  }
+
+  for (const finish of ["stop", "length"]) {
+    const f = H.fakeD1();
+    F.seed(f, { live: false });
+    const tilt = (bull, bear, at) => ({ id: "t/tilt", topic: ["today", "lean"], source: "brief", at,
+      say: bull + " names lean bullish and " + bear + " lean bearish out of 100 scored.", n: { bullish: bull, bearish: bear, scored: 100 } });
+    const putBrief = (fact) => f.put("brief", { v: 1, generatedAt: fact.at, sessionDate: F.SESSION, facts: [fact],
+      silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } }, Date.parse(fact.at));
+    let fact = tilt(44, 53, "2026-10-02T00:10:00.000Z");
+    putBrief(fact);
+    const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const ai = { bad: true, models: [], run: async (model) => {
+      ai.models.push(model);
+      if (model === MODEL && ai.bad) return { choices: [{ message: { content: "" }, finish_reason: finish }], usage: USAGE };
+      return { response: fact.say, usage: USAGE };
+    } };
+    const worker = (await import("../worker.js?boardBilled=" + finish + Date.now())).default;
+    const fire = async (iso) => {
+      setNow(iso);
+      const bg = [];
+      await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+        { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+        { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+      await Promise.all(bg);
+    };
+    const board = () => f.db.prepare("SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = 'board'").get();
+    const guard = finish === "length" ? "unreachable:length" : "unreachable:empty";
+    await fire("2026-10-02T14:45:00.000Z");
+    same(ai.models, [MODEL],
+      "A PRIMARY THAT ANSWERS WITH NO TEXT (finish " + finish + ") IS NOT FAILED OVER EITHER: with a fallback configured, the models asked are the primary alone");
+    const b1 = board();
+    ok(b1 && b1.llm === 0 && b1.guard === guard && b1.model === MODEL && b1.text !== fact.say,
+      "and the board is the plain text under the primary's name with guard " + guard + " (" + (b1 && b1.guard) + ")");
+    ai.bad = false;
+    await fire("2026-10-02T15:15:00.000Z");
+    same(ai.models, [MODEL],
+      "the billed no-text reply is not asked again at the next firing on the same facts (" + finish + "), though the primary is back");
+    await fire("2026-10-02T15:45:00.000Z");
+    ok(Date.now() - Date.parse(b1.generated_at) < AI_LENGTH_RETRY_MS && ai.models.length === 1,
+      "nor at the firing before AI_LENGTH_RETRY_MS has passed since it (" + finish + ")");
+    await fire("2026-10-02T16:15:00.000Z");
+    if (finish === "length") {
+      ok(Date.now() - Date.parse(b1.generated_at) >= AI_LENGTH_RETRY_MS, "the 16:15 firing is AI_LENGTH_RETRY_MS after the cut reply");
+      same(ai.models, [MODEL, MODEL], "a reply cut at its length is asked again, of the primary alone, once AI_LENGTH_RETRY_MS has passed");
+      const b2 = board();
+      ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+        "and that answer becomes the board summary: a cut reply waits an hour, not one firing");
+    } else {
+      same(ai.models, [MODEL], "an empty reply is not asked again by time alone: AI_LENGTH_RETRY_MS has passed and the facts are the same");
+      ok(board().guard === "unreachable:empty" && board().llm === 0, "and the board stays the plain text");
+      fact = tilt(45, 52, "2026-10-02T16:20:00.000Z");
+      putBrief(fact);
+      await fire("2026-10-02T16:45:00.000Z");
+      same(ai.models, [MODEL, MODEL], "an empty reply is asked again, of the primary alone, at the first firing after the brief's facts change");
+      const b2 = board();
+      ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+        "and that answer becomes the board summary of the new brief");
+    }
+  }
+
+  for (const live of [false, true]) {
+    for (const finish of ["stop", "length"]) {
+      const f = H.fakeD1();
+      F.seed(f, { live });
+      const tilt = (bull, bear, at) => ({ id: "t/tilt", topic: ["today", "lean"], source: "brief", at,
+        say: bull + " names lean bullish and " + bear + " lean bearish out of 100 scored.", n: { bullish: bull, bearish: bear, scored: 100 } });
+      const putBrief = (fact) => f.put("brief", { v: 1, generatedAt: fact.at, sessionDate: F.SESSION, facts: [fact],
+        silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } }, Date.parse(fact.at));
+      let fact = tilt(44, 53, "2026-10-02T00:10:00.000Z");
+      putBrief(fact);
+      const FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+      const ai = { bad: true, models: [], run: async (model) => {
+        ai.models.push(model);
+        if (model === MODEL && ai.bad) return { choices: [{ message: { content: "" }, finish_reason: finish }], usage: USAGE };
+        return { response: fact.say, usage: USAGE };
+      } };
+      const worker = (await import("../worker.js?boardMoved=" + live + finish + Date.now())).default;
+      const fire = async (iso) => {
+        setNow(iso);
+        const bg = [];
+        await worker.scheduled({ cron: "15,45 * * * *", scheduledTime: Date.now() },
+          { DB: f.D1, AI: ai, ...ENV, FLOWS_ASK_FALLBACK_MODEL: FALLBACK, FLOWS_ASK_FALLBACK_NEURONS: "26668,204805" },
+          { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) });
+        await Promise.all(bg);
+      };
+      const board = () => f.db.prepare("SELECT text, llm, model, guard, generated_at FROM flows_ai_summary WHERE scope = 'board'").get();
+      const tag = (live ? "overlay on" : "no overlay") + ", finish " + finish;
+      await fire("2026-10-02T14:45:00.000Z");
+      same(ai.models, [MODEL], "a billed no-text reply on the board asks the primary alone (" + tag + ")");
+      const b1 = board();
+      ok(b1 && b1.llm === 0 && b1.guard === (finish === "length" ? "unreachable:length" : "unreachable:empty"),
+        "and leaves the plain text with its replied guard (" + tag + ", " + (b1 && b1.guard) + ")");
+      ai.bad = false;
+      fact = tilt(45, 52, "2026-10-02T15:00:00.000Z");
+      putBrief(fact);
+      await fire("2026-10-02T15:15:00.000Z");
+      if (!live) {
+        same(ai.models, [MODEL, MODEL],
+          "with no live overlay, a new brief's facts ask the primary alone again at the next firing, an hour not yet passed (" + tag + ")");
+        const b2 = board();
+        ok(b2.llm === 1 && b2.text === fact.say && b2.model === MODEL && b2.guard === null,
+          "and that answer becomes the board summary of the new brief (" + tag + ")");
+        continue;
+      }
+      same(ai.models, [MODEL],
+        "with the live overlay on, the billed reply is not asked again at the next firing though the brief's facts moved (" + tag + ")");
+      await fire("2026-10-02T15:45:00.000Z");
+      ok(Date.now() - Date.parse(b1.generated_at) < AI_LENGTH_RETRY_MS && ai.models.length === 1,
+        "nor at the second firing, inside AI_LENGTH_RETRY_MS of the reply (" + tag + ")");
+      await fire("2026-10-02T16:15:00.000Z");
+      same(ai.models, [MODEL, MODEL],
+        "the third firing, past AI_LENGTH_RETRY_MS, asks the primary alone again on the moved facts (" + tag + ")");
+      const b3 = board();
+      ok(b3.llm === 1 && b3.model === MODEL && b3.guard === null,
+        "and that answer becomes the board summary (" + tag + ")");
+    }
+  }
+
   restoreClock();
   cache.restore();
   stub.restore();
