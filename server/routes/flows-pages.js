@@ -19,6 +19,7 @@ const PAGES = Object.freeze([
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
   { slug: "track", render: (username) => FLOWS_PAGES.trackPage({ username }) },
   { slug: "political", render: (username) => FLOWS_PAGES.politicalPage({ username }) },
+  { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
 ]);
 
 const PUBLIC_PAGES = Object.freeze([
@@ -78,7 +79,10 @@ export function flowsPageRows(deps) {
           if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
         }
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
-        return html(session ? page.render(session.username, summary, isOwner(env, session.username), scenesOn(env, session.username), env) : FLOWS_PAGES.loginPage());
+        if (!session) return html(FLOWS_PAGES.loginPage());
+        const owner = isOwner(env, session.username);
+        if (page.ownerOnly && !owner) throw HttpError.of("not_found");
+        return html(page.render(session.username, summary, owner, scenesOn(env, session.username), env));
       },
     });
     if (page.slug !== "") {

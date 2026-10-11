@@ -117,6 +117,9 @@ export const FLOWS_NAV = [
     { key: "track", href: "/flows/track/", label: "Track", glyph: "track" },
     { key: "history", href: "/flows/history/", label: "History", glyph: "history" },
   ] },
+  { group: "Operations", id: "railOps", only: "status", items: [
+    { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
+  ] },
 ];
 
 const TABS = [
@@ -142,7 +145,7 @@ const sidebar = (active, username) => {
     <a class="fx-mark" href="/" aria-label="anilkaya.org">&#949;</a>
     <span class="fx-side-t">Flows</span>
   </div>
-  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.map((g) => `
+  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.filter((g) => !g.only || g.only === active).map((g) => `
     <p class="rail-group" id="${g.id}">${g.group}</p>
     <div class="rail-items" role="group" aria-labelledby="${g.id}">
       ${g.items.map(item).filter(Boolean).join("\n      ")}
@@ -1149,6 +1152,34 @@ export function strategyPage({ username = "" } = {}) {
 
 export const FLOWS_SPRITE = SPRITE;
 
+export function statusPage({ username = "" } = {}) {
+  const module = (id, title, body) => `
+    <section class="ui-card ui-mod" id="${id}Card" aria-labelledby="${id}T">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2></header>
+      <div id="${id}">${body}</div>
+    </section>`;
+  return flowsDocument({
+    title: "Status",
+    description: "Owner view of the real-time rail, the nightly run and the model spend, read from routes the site already serves.",
+    active: "status", chrome: false, username,
+    styles: ["/assets/css/flows-status.css"],
+    scripts: ["/assets/js/flows-status.js"],
+    body: `
+  <div id="stMain">
+  <header class="flows-head st-head" data-fx-hero>
+    <h1 id="fxTitle">Status</h1>
+    <p class="st-meta" id="stMeta"></p>
+  </header>
+  <div class="st-bar"><button type="button" class="st-again" id="stAgain">Read again</button><p id="stNote" role="status">Reading the status…</p></div>
+  <div class="st-grid">
+${module("stRail", "Real-time rail", `<p class="st-miss">Reading…</p>`)}
+${module("stNight", "Nightly run", `<p class="st-miss">Reading…</p>`)}
+${module("stAi", "Model spend today", `<p class="st-miss">Reading…</p>`)}
+  </div>
+  </div>`,
+  });
+}
+
 export function flowsDocument({
   title = "Flows", description = "", active = "", username = "", body = "", scripts = [], styles = [], chrome = true, chart = false,
 } = {}) {
@@ -1164,6 +1195,6 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, movesPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, statusPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };
 
