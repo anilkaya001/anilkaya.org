@@ -1284,9 +1284,9 @@ const cronMinutes = (cron) => {
     "flows-chart.js re-publishes a new frozen FlowsUI with a frozen chart: assigning into the frozen original would throw");
   ok(after.heartbeat === frozenUi.heartbeat && after.rt === frozenUi.rt && wanted.every((n) => after[n] === frozenUi[n]),
     "and keeps every member the page already had, the freshness layer's and the rail's among them");
-  deep(Object.keys(after.chart).sort(), ["LEVELS", "bars", "clipRect", "diverging", "gauge", "heatmap", "line", "lin", "marker", "monoPath", "mount",
-    "niceTicks", "part", "pathOf", "payoff", "scrub", "shapeOf", "sparkline", "spread", "svgRoot", "vGrad"].sort(),
-  "FlowsUI.chart carries the same twenty-one members the library exported inside flows-ui.js");
+  deep(Object.keys(after.chart).sort(), ["LEVELS", "axes", "bars", "clipRect", "diverging", "gauge", "heatmap", "kind", "layout", "line", "lin", "marker", "monoPath", "mount",
+    "niceTicks", "part", "pathOf", "payoff", "plot", "scale", "scrub", "shapeOf", "sparkline", "spread", "svgRoot", "ticks", "vGrad"].sort(),
+  "FlowsUI.chart carries the twenty-one members the library exported inside flows-ui.js and the kernel's six: kind, plot, scale, ticks, layout and axes");
   const again = ctx.window.FlowsUI;
   vm.runInContext('"use strict";\n' + chartSrc, ctx);
   ok(ctx.window.FlowsUI === again, "a second run changes nothing: the first chart wins");

@@ -1607,6 +1607,14 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-readout.is-on { opacity: 1; transform: none; }
 .ui-readout b { font-weight: 600; }
 .ui-readout .k { color: var(--label-2); font-weight: 400; }
+.ui-prov { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; color: var(--label-3); font: var(--t-caption); }
+.ui-prov-g { color: var(--label-2); font-weight: 600; }
+.ui-tbl { margin-top: 6px; }
+.ui-tbl-w { max-height: 280px; margin-top: 6px; overflow: auto; border: 1px solid var(--sep); border-radius: var(--r-sm); }
+.ui-tbl-t { width: 100%; border-collapse: collapse; font: var(--t-caption); font-variant-numeric: tabular-nums; }
+.ui-tbl-t :is(th, td) { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--sep); }
+.ui-tbl-t th[scope="row"] { text-align: left; color: var(--label-2); font-weight: 400; }
+.ui-tbl-t thead th { position: sticky; top: 0; background: var(--surface-2); color: var(--label-2); }
 .ui-spark { display: block; width: 100%; overflow: visible; }
 .ui-spark .ln { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
 .ui-gauge { display: block; overflow: visible; }

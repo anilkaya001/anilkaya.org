@@ -24,26 +24,26 @@ const CEILING_KIB = {
   unusualPage: 204 + (57017 + 13882 + 4176 + 830 + 189 + 95 + 843) / 1024,
   eventsPage: 155,
   politicalPage: 104,
-  historyPage: 157,
+  historyPage: 162,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
 };
 
 const GZIP_KIB = {
-  tickerPage: 122,
-  overviewPage: 80,
-  sidePage: 65,
-  watchPage: 65,
-  deskPage: 77,
+  tickerPage: 126,
+  overviewPage: 82,
+  sidePage: 68,
+  watchPage: 68,
+  deskPage: 80,
   askPage: 39,
-  strategyPage: 81,
-  trackPage: 51,
-  marketPage: 72,
-  unusualPage: 85,
+  strategyPage: 84,
+  trackPage: 54,
+  marketPage: 76,
+  unusualPage: 87,
   eventsPage: 34,
   politicalPage: 31,
-  historyPage: 48,
+  historyPage: 51,
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
@@ -217,7 +217,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 241587, gzip: 71322, css: 91866, cssGzip: 20158 };
+  const base = { name: "marketPage", raw: 252442, gzip: 75156, css: 92625, cssGzip: 20315 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");

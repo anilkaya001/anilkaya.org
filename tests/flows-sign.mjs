@@ -307,11 +307,11 @@ ok(files.length >= 10,
      "  The scan has no allow-list, for the same reason the sign scan has none.");
 
   const ui = readFileSync(new URL("flows-chart.js", JS_DIR), "utf8");
-  const div = ui.slice(ui.indexOf("function diverging("), ui.indexOf("function heatmap("));
+  const div = ui.slice(ui.indexOf("function drawDiverging("), ui.indexOf("function drawHeatmap("));
   ok(/if \(v === 0\) \{ s\("rect", \{[^}]*height: 1, fill: paint\("--label-3"\), class: "zero" \}/.test(div),
      "diverging draws an exact zero as a 1 px neutral tick on the axis in --label-3, not as a bar with a side");
   ok(/const pos = v > 0;/.test(div), "and the side of a bar is decided by a strict test, after zero has been drawn");
-  const heat = ui.slice(ui.indexOf("function heatmap("), ui.indexOf("function gauge("));
+  const heat = ui.slice(ui.indexOf("function drawHeatmap("), ui.indexOf("function gauge("));
   ok(/if \(v === null\) \{ s\("rect", \{ \.\.\.cell, fill: "none", stroke: paint\("--label-4"\)[^}]*"stroke-dasharray"/.test(heat),
      "heatmap draws a null cell as a dashed void with no fill");
   ok(/if \(v === 0\) \{ s\("rect", \{ \.\.\.cell, fill: paint\("--fill-4"\), class: "zero" \}/.test(heat),

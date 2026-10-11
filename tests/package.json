@@ -78,6 +78,7 @@
     "test:flows-calibration": "node flows-calibration.mjs",
     "test:flows-dispersion": "node flows-dispersion.mjs",
     "test:flows-kit": "node flows-kit-render.mjs",
+    "test:flows-chart-kernel": "node flows-chart-kernel.mjs",
     "test:flows-public": "node --disable-warning=ExperimentalWarning flows-public-contract.mjs",
     "test:flows-index": "node flows-index-render.mjs",
     "test:flows-stock": "node flows-stock-contract.mjs",
