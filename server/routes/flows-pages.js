@@ -12,6 +12,7 @@ const PAGES = Object.freeze([
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ask", render: (username) => FLOWS_PAGES.askPage({ username }) },
   { slug: "ticker", render: (username) => FLOWS_PAGES.tickerPage({ username }) },
+  { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
   { slug: "track", render: (username) => FLOWS_PAGES.trackPage({ username }) },
@@ -70,6 +71,10 @@ export function flowsPageRows(deps) {
           }
         }
         const session = await currentFlowsUser(request, env);
+        if (session && page.gate) {
+          const mode = String(env[page.gate] || "owner").trim().toLowerCase();
+          if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
+        }
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
         return html(session ? page.render(session.username, summary, isOwner(env, session.username), scenesOn(env, session.username)) : FLOWS_PAGES.loginPage());
       },

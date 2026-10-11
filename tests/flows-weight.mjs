@@ -26,6 +26,7 @@ const CEILING_KIB = {
   marketPage: 213 + 293 / 1024,
   unusualPage: 191,
   eventsPage: 155 + 5786 / 1024,
+  movesPage: 120,
   politicalPage: 103 + 5786 / 1024,
   historyPage: 167 + 5786 / 1024,
   loginPage: 5,
@@ -45,6 +46,7 @@ const GZIP_KIB = {
   marketPage: 76 - 10914 / 1024,
   unusualPage: 87 - 30788 / 1024,
   eventsPage: 34 + 1932 / 1024,
+  movesPage: 38,
   politicalPage: 31 + 1932 / 1024,
   historyPage: 51 + 1932 / 1024,
   loginPage: 3,
@@ -64,6 +66,7 @@ const CSS_KIB = {
   marketPage: 94 + 1263 / 1024,
   unusualPage: 113 + 5007 / 1024,
   eventsPage: 105 + 565 / 1024,
+  movesPage: 108,
   politicalPage: 105 + 565 / 1024,
   historyPage: 93 + 565 / 1024,
   loginPage: 80 + 565 / 1024,
@@ -83,6 +86,7 @@ const CSS_GZIP_KIB = {
   marketPage: 21 + 206 / 1024,
   unusualPage: 25 + 599 / 1024,
   eventsPage: 23 + 64 / 1024,
+  movesPage: 24,
   politicalPage: 23 + 64 / 1024,
   historyPage: 21 + 64 / 1024,
   loginPage: 18 + 64 / 1024,
@@ -132,7 +136,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80, overviewPage: 120, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
-  unusualPage: 196, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
 };
 
 const FLOOR_BYTES = 1024;
@@ -150,6 +154,7 @@ const BELOW_FLOOR = {
   sidePage: NO_RELIEF_ROW,
   watchPage: NO_RELIEF_ROW,
   deskPage: NO_RELIEF_ROW,
+  movesPage: NO_RELIEF_ROW,
 };
 
 const LOADER = /createElement\(\s*["']script["']\s*\)|\bh\(\s*["']script["']|\bimport\(|new\s+Worker\(|importScripts\(/;

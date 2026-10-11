@@ -1,0 +1,13 @@
+.mv-list { margin: 0; padding: 0; list-style: none; }
+.mv-row { display: grid; grid-template-columns: 2ch minmax(0, 6ch) auto minmax(0, 1fr); align-items: baseline; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) 0; min-height: 44px; }
+.mv-rank { color: var(--label-3); font-variant-numeric: tabular-nums; }
+.mv-t { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; font-weight: 600; }
+.mv-m { font-variant-numeric: tabular-nums; }
+.mv-c, .mv-n { color: var(--label-2); font: var(--t-footnote); }
+.mv-c { grid-column: 4; }
+.mv-n { grid-column: 2 / -1; }
+@media (max-width: 540px) {
+  .mv-row { grid-template-columns: 2ch minmax(0, 1fr) auto; }
+  .mv-c { grid-column: 2 / -1; }
+  .mv-n { grid-column: 2 / -1; }
+}
