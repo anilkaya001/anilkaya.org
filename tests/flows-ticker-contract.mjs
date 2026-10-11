@@ -641,6 +641,7 @@ try {
     };
     const earlier = await staleOf(`${session}T14:02:18.489Z`, { sessionDate: session, generatedAt: `${session}T17:18:54.000Z` });
     ok(/built by an earlier run of the \d{4}-\d{2}-\d{2} session/.test(earlier.text), "UW-6: a card left by an earlier run of the board's own session is flagged, with the run times");
+    ok(/\(\d{4}-\d{2}-\d{2} 20:18 TRT\)/.test(earlier.text) && !/UTC/.test(earlier.text), "and the run times are stamped in Türkiye time, 17:18Z being 20:18 TRT");
     eq(earlier.errors.length, 0, "and the flag costs no exception");
     ok(!/earlier run/.test((await staleOf(`${session}T21:40:00.000Z`, { sessionDate: session, generatedAt: `${session}T21:40:00.000Z` })).text), "a card from the run that built the board carries no flag");
     ok(!/earlier run/.test((await staleOf(`${session}T21:40:00.000Z`, { sessionDate: session, generatedAt: `${session}T21:30:00.000Z` })).text), "nor one written after the meta it is compared with");
@@ -1871,6 +1872,30 @@ try {
       if (sch.length && Math.abs(sch[0].share - sch[0].cumShare) < 1e-9) ok(Math.abs(ro.bar - ro.step) <= 1.5, `the roll-off bars share the cumulative line's scale: the first bar tops out at the first step (${ro.bar} against ${ro.step})`);
     }
     eq(errors.length, 0, `the priced payoffs, worlds and tape heads throw nothing (${errors.join("; ")})`);
+    await page.close();
+  }
+
+  {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(String(e)));
+    const off = (d) => { const z = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "longOffset" }).formatToParts(new Date(d + "T12:00:00Z")).find((x) => x.type === "timeZoneName").value; return -Number(z.slice(3, 6)); };
+    const trtAt = (d, mm) => { const t = ((9 * 60 + 30 + off(d) * 60 + 180 + mm) % 1440 + 1440) % 1440; return String(Math.floor(t / 60)).padStart(2, "0") + ":" + String(t % 60).padStart(2, "0"); };
+    for (const day of [full.sessionDate, "2026-12-15"]) {
+      const card = clone(full);
+      card.sessionDate = day;
+      const cx = { ...(cardXOf(card.ticker) || {}), ticker: card.ticker, gexPath: { status: "ok", asOf: day, m: [0, 30, 150, 270, 360, 390], g: [1, 2, 3, 2, 1, 0], f: null }, alerts: { status: "ok", n: 1, prem: 5e6, complete: true, dots: [{ k: 100, e: day, cp: "C", m: 60, p: 5e6, a: 0.7, sw: false, op: false }] } };
+      await mount(page, card, { cardX: cx });
+      ok(await pickView(page, "m-hedge", "Clock"), "the gamma clock view is offered");
+      const ticks = await page.evaluate(() => [...document.querySelectorAll("#m-hedge .ft-cbox svg text")].map((t) => t.textContent.trim()).filter((t) => /^\d{1,2}:\d{2}/.test(t)));
+      const want = [30, 150, 270, 360].map((mm) => trtAt(day, mm));
+      eq(ticks.filter((t) => want.includes(t)).sort().join(" "), want.slice().sort().join(" "), `${day}: the gamma clock ticks are Türkiye clock times, 24-hour, of the minutes after the open (${ticks.join(", ")} against ${want.join(", ")})`);
+      ok(!ticks.some((t) => /AM|PM/.test(t)), `${day}: and none is a 12-hour Eastern clock`);
+      ok(await pickView(page, "m-tape", "Alerts"), "the alerts list is offered");
+      const row = await page.evaluate(() => (document.querySelector("#m-tape .ft-cbox .ui-list .ui-row") || document.querySelector("#m-tape .ft-cbox .ui-list")).innerText.replace(/\s+/g, " "));
+      ok(row.includes(trtAt(day, 60) + " TRT"), `${day}: an alert row names its time in Türkiye time (${row})`);
+    }
+    eq(errors.length, 0, `the clock and alert rows throw nothing (${errors.join("; ")})`);
     await page.close();
   }
 

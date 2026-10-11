@@ -19,6 +19,7 @@
   const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
   const isoOk = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
   const day = (d) => F.day(d);
+  const openTick = (d, mm) => { const o = F.open(d); return o === null ? "+" + mm + "m" : F.tick(o + mm); };
   const str = (v) => (typeof v === "string" && v.trim() ? v.trim() : null);
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const K = (k) => (num(k) === null ? DASH : Number.isInteger(k) ? String(k) : Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? k.toFixed(1) : k.toFixed(2));
@@ -347,7 +348,7 @@
     }
     const meta = STATE.meta;
     if (meta && meta.sessionDate === card.sessionDate && Date.parse(meta.generatedAt) > Date.parse(card.generatedAt)) {
-      out.push(ST("stale", "This card was built by an earlier run of the " + card.sessionDate + " session (" + String(card.generatedAt).slice(11, 16) + " UTC) than the boards it sits under (" + String(meta.generatedAt).slice(11, 16) + " UTC), so it can describe a board this name is no longer on."));
+      out.push(ST("stale", "This card was built by an earlier run of the " + card.sessionDate + " session (" + F.stamp(card.generatedAt) + ") than the boards it sits under (" + F.stamp(meta.generatedAt) + "), so it can describe a board this name is no longer on."));
     }
     return out;
   }
@@ -1841,8 +1842,8 @@
       { label: "Clock", st: stClock, never: offIndex(card, X.gexPath), name: "Session gamma clock", draw: (host) => {
         const m = gp.m || [];
         const series = [{ values: gp.g || [], color: "--s-blue", label: "Book", format: moneyPx }].concat(Array.isArray(gp.f) ? [{ values: gp.f, color: "--s-orange", label: "Flow", format: moneyPx }] : []);
-        const t = (mm) => { const mins = 570 + mm; return (Math.floor(mins / 60) % 12 || 12) + ":" + String(mins % 60).padStart(2, "0"); };
-        return { handle: C.line(host, { x: m, xType: "number", series, zero: true, height: [200, 220, 240], yFormat: moneyPx, xFormat: t, gutter: 72, label: card.ticker + " dealer gamma per 1% through the session",
+        const t = (mm) => openTick(card.sessionDate, mm);
+        return { handle: C.line(host, { x: m, xType: "number", series, zero: true, height: [200, 220, 240], yFormat: moneyPx, xFormat: t, gutter: 72, label: card.ticker + " dealer gamma per 1% through the session, Türkiye time",
           xTicks: [30, 150, 270, 360].map((v) => ({ v, label: t(v) })) }),
           legend: [keyOf("--s-blue", "ln", "Book"), Array.isArray(gp.f) ? keyOf("--s-orange", "ln", "Flow") : null] };
       } },
@@ -2424,9 +2425,9 @@
       const al = X.alerts;
       const R = (al.dots || []).slice().sort((a, b) => b.p - a.p);
       const mx = Math.max(...R.map((r) => r.p), 1);
-      const t = (mm) => { const mins = 570 + mm; return (Math.floor(mins / 60) % 12 || 12) + ":" + String(mins % 60).padStart(2, "0"); };
+      const t = (mm) => openTick(card.sessionDate, mm);
       return R.map((r, i) => UI.listRow({ badge: r.cp, badgeTone: r.cp === "C" ? "up" : "down", badgeLabel: r.cp === "C" ? "Call" : "Put", primary: K(r.k),
-        secondary: day(r.e) + SEP + t(r.m) + (r.sw ? SEP + "sweep" : "") + (r.op ? SEP + "opening" : ""), meter: r.p / mx, index: i, value: F.money(r.p),
+        secondary: day(r.e) + SEP + t(r.m) + " TRT" + (r.sw ? SEP + "sweep" : "") + (r.op ? SEP + "opening" : ""), meter: r.p / mx, index: i, value: F.money(r.p),
         signed: F.pct(r.a, 0), signedValue: num(r.a) === null ? null : r.a - 0.5, cols: TAPE_COLS.alerts }));
     }
     return [];
