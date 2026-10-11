@@ -412,5 +412,28 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 11
+ },
+ "status@320": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "status@390": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "status@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
  }
 }
