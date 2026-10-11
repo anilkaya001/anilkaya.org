@@ -828,18 +828,16 @@
   let paintT = 0;
   function schedulePaint(state, age) {
     clearTimeout(paintT);
-    paintT = 0;
-    let wait = null;
+    let wait = age !== null ? 5000 : null;
     if (state === "live" || state === "fresh") {
       const t = Date.now();
       for (const [k, f] of FRESH.ffs) {
         const n = FRESH.roles.get(k) === "primary" && typeof f.nextAt === "function" ? f.nextAt() : null;
-        if (n !== null && n > t && (wait === null || n - t + 50 < wait)) wait = n - t + 50;
+        if (n > t && (wait === null || n - t + 50 < wait)) wait = n - t + 50;
       }
-      if (state === "live" && wait === null) wait = 5000;
     }
-    if (age !== null && (wait === null || wait > 5000)) wait = 5000;
-    if (wait !== null) paintT = setTimeout(paintFresh, wait);
+    if (state === "live") wait ??= 5000;
+    paintT = wait === null ? 0 : setTimeout(paintFresh, wait);
   }
   function paintFresh() {
     const b = $("fxFresh");
@@ -1213,19 +1211,16 @@
   const link = (() => {
     const q = [], me = document.currentScript && document.currentScript.src;
     let impl, asked, ready;
-    const body = new Promise((r) => { ready = r; });
-    const kick = () => {
-      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
-    };
     const run = (f, d) => {
       if (impl) return f();
-      kick();
+      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
       if (q.length < 64) q.push(f);
       return d;
     };
+    const body = new Promise((r) => (ready = r));
     const api = {
       attach(i) { impl = i; delete api.attach; ready(); q.splice(0).forEach((f) => f()); },
-      ready() { if (!impl) kick(); return body; },
+      ready: () => (run(Object, 0), body),
       join(o, c) {
         let r, g;
         return run(() => { r = impl.join(o, c); if (g) r.leave(); return r; }, 0) || { leave() { g = 1; if (r) r.leave(); } };
