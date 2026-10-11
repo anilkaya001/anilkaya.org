@@ -350,7 +350,7 @@
     let raf = 0, last = 0, T = 0, inView = true, FOC = false, brMax = false, rz = 0;
     let hoverId = null, focusId = null, pinId = null, rowLit = null, rove = null, hitAt = 0, tipId = null, TRACE = null, tableSig = "";
     const REST = [0, 11 * DEG];
-    const cam = { yaw: 0, pitch: REST[1], vy: 0, vp: 0, coast: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, sw: 8 * DEG };
+    const cam = { yaw: 0, pitch: REST[1], vy: 0, vp: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, sw: 8 * DEG };
     const RC = { cp: Math.cos(REST[1]), sp: Math.sin(REST[1]) };
     const G = { k: 1, vMax: 1, bpd: PER_M / 1e6, F: 1000, D: 10, ox: 0, oy: 0, s0: 100, top: 0, bottom: 0, midY: 0, floorW: 0, form: "line", cols: [], planes: [], edgeMax: 0 };
     const DRAG = { id: null, on: false, x: 0, y: 0, t: 0, vx: 0, vy: 0, eat: 0, tap: 0, tx: 0, ty: 0 };
@@ -1244,7 +1244,6 @@
     }
     function stepCam(dt, now) {
       if (DRAG.on) { cam.idle = now; return; }
-      if ((cam.vy || cam.vp) && now - cam.coast > 8000) cam.vy = cam.vp = 0;
       if (cam.vy || cam.vp) {
         const ey = clamp((YAWMAX() - Math.sign(cam.vy) * cam.yaw - 6 * DEG) / (12 * DEG), 0, 1), ep = clamp((PMAX - Math.sign(cam.vp) * cam.pitch - 2 * DEG) / (6 * DEG), 0, 1);
         turn(cam.yaw + cam.vy * ey * dt, cam.pitch + cam.vp * ep * dt);
@@ -1454,7 +1453,7 @@
         DRAG.eat = e.timeStamp;
         stage.classList.remove("is-drag");
         const k = Math.exp(-Math.max(0, e.timeStamp - DRAG.t) / 150);
-        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -1.4, 1.4); cam.vp = clamp(DRAG.vy * k, -0.6, 0.6); cam.coast = performance.now(); }
+        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -1.4, 1.4); cam.vp = clamp(DRAG.vy * k, -0.6, 0.6); }
         cam.idle = performance.now();
         kick();
       } else if (e.type === "pointerup" && e.pointerType === "touch") {
