@@ -138,6 +138,33 @@ register({
   detector: "runnerRefusesWellSpecified",
 });
 
+register({
+  id: "open-interest-known-at-the-session-it-describes",
+  title: "open interest is stamped known at the close of the session it describes, not when it is published",
+  target: "tests/truth/reference.mjs",
+  row: "F-13",
+  transforms: [["export const oiPublishedAt = (day) => `${nextBusinessDay(day)}T10:30:00Z`;", "export const oiPublishedAt = (day) => `${day}T21:00:00Z`;"]],
+  detector: "oiLag",
+});
+
+register({
+  id: "issue-view-at-close-plus-2h",
+  title: "the forecast is issued from the view two hours after the close",
+  target: "tests/truth/reference.mjs",
+  row: "F-13",
+  transforms: [["export const issueInstant = (day) => sessionClose(day);", "export const issueInstant = (day) => `${day}T23:00:00Z`;"]],
+  detector: "afterHours",
+});
+
+register({
+  id: "trial-count-of-one",
+  title: "the deflated Sharpe ratio is told one trial was run",
+  target: "tests/truth/reference.mjs",
+  row: "F-13",
+  transforms: [["trials: registry.count(),", "trials: 1,"]],
+  detector: "trialCount",
+});
+
 export async function runKillMatrix(selected = MUTANTS) {
   const rows = [];
   const baselines = new Map();

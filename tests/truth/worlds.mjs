@@ -206,9 +206,63 @@ export function w8Errors(opts = {}) {
   return { e1, e2, d, h: p.h, n: p.n };
 }
 
+export function nextBusinessDay(day) {
+  const d = new Date(day + "T00:00:00Z");
+  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
+export const W5_DEFAULTS = Object.freeze({ days: 500, names: 200, rho: 0.6, noise: 0.4, slope: 1.5, base: 0.05, start: "2024-01-02" });
+
+export function probitMean(c, slope, mean, v) {
+  return normalCdf((c + slope * mean) / Math.sqrt(1 + slope * slope * v));
+}
+
+export function w5OiLag(opts = {}) {
+  const p = { ...W5_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w5");
+  const dates = businessDays(p.days, p.start);
+  const x = new Float64Array(p.days * p.names), oi = new Float64Array(p.days * p.names), y = new Uint8Array(p.days * p.names);
+  const c = normalQuantile(p.base) * Math.sqrt(1 + p.slope * p.slope);
+  const innov = Math.sqrt(1 - p.rho * p.rho);
+  for (let i = 0; i < p.names; i++) {
+    let prev = rng.normal();
+    for (let d = 0; d < p.days; d++) {
+      const k = d * p.names + i;
+      const xi = d === 0 ? prev : p.rho * prev + innov * rng.normal();
+      x[k] = xi; prev = xi;
+      oi[k] = xi + p.noise * rng.normal();
+    }
+  }
+  for (let k = 0; k < y.length; k++) y[k] = rng.uniform() < normalCdf(c + p.slope * x[k]) ? 1 : 0;
+  const kappa = 1 / (1 + p.noise * p.noise), vpost = (p.noise * p.noise) / (1 + p.noise * p.noise);
+  const forecast = (lag, value) => {
+    const r2 = Math.pow(p.rho, 2 * lag);
+    return probitMean(c, p.slope, Math.pow(p.rho, lag) * kappa * value, r2 * vpost + 1 - r2);
+  };
+  return { ...p, dates, x, oi, y, c, kappa, vpost, forecast, params: p };
+}
+
+export const W6_DEFAULTS = Object.freeze({ trials: 100, periods: 250, edge: 0 });
+
+export function w6Null(opts = {}) {
+  const p = { ...W6_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w6");
+  const returns = [];
+  for (let j = 0; j < p.trials; j++) {
+    const r = new Float64Array(p.periods);
+    const mu = j === 0 ? p.edge : 0;
+    for (let t = 0; t < p.periods; t++) r[t] = mu + rng.normal();
+    returns.push(r);
+  }
+  return { returns, trials: p.trials, periods: p.periods, edge: p.edge, planted: p.edge > 0 ? 0 : null };
+}
+
 export const WORLDS = Object.freeze({
   W1: Object.freeze({ id: "W1", title: "GARCH(1,1)-skew-t, the production class", family: "calibration" }),
   W4: Object.freeze({ id: "W4", title: "look-ahead bait", family: "calibration" }),
   W7: Object.freeze({ id: "W7", title: "calibration worlds", family: "calibration" }),
+  W5: Object.freeze({ id: "W5", title: "open-interest publication lag", family: "calibration" }),
+  W6: Object.freeze({ id: "W6", title: "overfitting null", family: "calibration" }),
   W8: Object.freeze({ id: "W8", title: "overlapping horizons", family: "calibration" }),
 });

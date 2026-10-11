@@ -219,6 +219,20 @@
    "variance": 1.0000000000000004
   }
  ],
+ "maxNormal": [
+  {
+   "expectedMax": 1.538752730835173,
+   "n": 10
+  },
+  {
+   "expectedMax": 2.507593636441685,
+   "n": 100
+  },
+  {
+   "expectedMax": 3.241435769133427,
+   "n": 1000
+  }
+ ],
  "normal": {
   "pStar2": 0.04550026389635839,
   "quantiles": [
@@ -282,9 +296,78 @@
    }
   ]
  },
+ "probit": {
+  "base": 0.05,
+  "c": -2.9653020463032256,
+  "noise": 0.4,
+  "rho": 0.6,
+  "rows": [
+   {
+    "lag": 0,
+    "oi": -2.0,
+    "p": 6.181244188639159e-07
+   },
+   {
+    "lag": 1,
+    "oi": -2.0,
+    "p": 0.002344070828382311
+   },
+   {
+    "lag": 2,
+    "oi": -2.0,
+    "p": 0.012222306258589518
+   },
+   {
+    "lag": 0,
+    "oi": 0.0,
+    "p": 0.0047924504992489635
+   },
+   {
+    "lag": 1,
+    "oi": 0.0,
+    "p": 0.03170421364566962
+   },
+   {
+    "lag": 2,
+    "oi": 0.0,
+    "p": 0.043410417939477634
+   },
+   {
+    "lag": 0,
+    "oi": 1.0,
+    "p": 0.07203318483054207
+   },
+   {
+    "lag": 1,
+    "oi": 1.0,
+    "p": 0.08524715657660471
+   },
+   {
+    "lag": 2,
+    "oi": 1.0,
+    "p": 0.07442810892881471
+   },
+   {
+    "lag": 0,
+    "oi": 3.0,
+    "p": 0.7877004280702234
+   },
+   {
+    "lag": 1,
+    "oi": 3.0,
+    "p": 0.3448662132788293
+   },
+   {
+    "lag": 2,
+    "oi": 3.0,
+    "p": 0.1824873245336371
+   }
+  ],
+  "slope": 1.5
+ },
  "provenance": {
   "generator": "tests/gen-truth-fixtures.py",
-  "generatorSha256": "25c609fb50e760ddac634946c884a3ef4307c4d8f5351f980edf2e787937a957",
+  "generatorSha256": "1e2d8329f0bb769166d78df3924bb648adffa6ffa788d467634006b20e127d24",
   "nature": "independent references for tests/truth/*: the generator's own sfc32 streams, the Hansen skew-t constants and two-sided tail probabilities by closed form and by quadrature, the look-ahead bait's exact mean score differences, the fair CRPS expectation, the overlap variance factor and the indicator correlation of the calibration world; scipy for every distribution function, no draws",
   "numpy": "2.4.6",
   "python": "3.11.15",

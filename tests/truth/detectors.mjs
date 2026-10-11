@@ -1,5 +1,5 @@
 import { makeRng } from "./rng.mjs";
-import { hansen, w1Closes, w1Garch, closesFromReturns, businessDays, w4Bait, w7Calibration, w8Errors } from "./worlds.mjs";
+import { hansen, w1Closes, w1Garch, closesFromReturns, businessDays, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
 import { mean, median, quantile } from "./stats.mjs";
 
 export const W1_BANDS = Object.freeze({
@@ -12,6 +12,16 @@ export const SCALE = (() => {
   const deep = process.env.FLOWS_TRUTH_DEEP === "1";
   return { deep, factor: deep ? 10 : 1, salt: process.env.FLOWS_TRUTH_SALT || (deep ? String(Date.now()) : "fixed") };
 })();
+
+export const logScore = (p, y) => -Math.log(Math.min(1 - 1e-4, Math.max(1e-4, y ? p : 1 - p)));
+
+export function leakBound(diffs) {
+  let sum = 0, sq = 0;
+  for (const d of diffs) { sum += d; sq += d * d; }
+  const n = diffs.length, mu = sum / n;
+  const se = Math.sqrt(Math.max(0, sq / n - mu * mu) / n);
+  return { mu, se, fires: se > 0 ? mu < -4 * se : mu < 0, z: se > 0 ? mu / se : 0 };
+}
 
 const inBand = (v, [lo, hi]) => v >= lo && v <= hi;
 
@@ -237,4 +247,50 @@ export function tailLawCell(garchMod, { seeds = 4, names = 30, jumpRate = 0, jum
   const seedBand = expected.map((e) => band(e / seeds));
   const pool = (rows) => ks.map((_, j) => mean(rows.map((r) => r[j])));
   return { ks, seeds, prod, oracle, pooledProd: pool(prod), pooledOracle: pool(oracle), pooledBand, seedBand, expected };
+}
+
+export function oiLag(refMod) {
+  const w = w5OiLag({ seed: `w5|${SCALE.salt}`, days: 400, names: 150 });
+  const diffs = [];
+  for (let i = 0; i < w.names; i++) {
+    const recs = refMod.oiRecords(w.dates, w.oi, w.names, i);
+    for (let d = 2; d < w.days; d++) {
+      const asOf = refMod.sessionClose(w.dates[d]);
+      const rec = refMod.latestKnown(recs.slice(Math.max(0, d - 2), d + 1), asOf);
+      const y = w.y[d * w.names + i];
+      const pPipe = w.forecast(d - rec.describes, rec.value);
+      const pTrue = w.forecast(1, w.oi[(d - 1) * w.names + i]);
+      diffs.push(logScore(pPipe, y) - logScore(pTrue, y));
+    }
+  }
+  const b = leakBound(diffs);
+  return { ok: !b.fires, note: `forecast from the open interest the as-of reader returns scores ${b.mu.toExponential(2)} against the lag-correct truth (${b.z.toFixed(1)} SE)`, bound: b };
+}
+
+export function afterHours(refMod) {
+  const rows = 60000;
+  const bait = w4Bait({ seed: `w4-after-hours|${SCALE.salt}`, rows, corr: 0.6, leakFrac: 0.5 });
+  const day = "2026-03-02";
+  const diffs = [];
+  for (let i = 0; i < rows; i++) {
+    const row = { knownAt: bait.leaked[i] ? `${day}T22:30:00Z` : `${day}T15:00:00Z`, value: bait.pLeak[i] };
+    const view = refMod.issueView([row], day);
+    const p = view.length ? view[0] : bait.pStar;
+    diffs.push(logScore(p, bait.y[i]) - logScore(bait.pStar, bait.y[i]));
+  }
+  const b = leakBound(diffs);
+  return { ok: !b.fires, note: `a feature known 90 minutes after the close ${b.fires ? "reaches" : "does not reach"} the forecast issued at the close (${b.z.toFixed(1)} SE)`, bound: b };
+}
+
+export function trialCount(refMod) {
+  const reps = 150 * SCALE.factor;
+  let passed = 0;
+  for (let i = 0; i < reps; i++) {
+    const w = w6Null({ seed: `w6|${SCALE.salt}|${i}`, trials: 100, periods: 250 });
+    const registry = new refMod.TrialRegistry();
+    registry.register(w.trials);
+    if (refMod.selectAndTest(w.returns, registry).dsr > 0.95) passed++;
+  }
+  const rate = passed / reps;
+  return { ok: rate <= 0.08, note: `the best of 100 null strategies clears a deflated Sharpe of 0.95 in ${(100 * rate).toFixed(1)}% of ${reps} runs`, rate };
 }

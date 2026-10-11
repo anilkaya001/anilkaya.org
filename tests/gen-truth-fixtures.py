@@ -175,6 +175,30 @@ def w7_block():
     return out
 
 
+def maxnormal_block():
+    out = []
+    for n in (10, 100, 1000):
+        value, _ = integrate.quad(lambda x: x * n * stats.norm.pdf(x) * stats.norm.cdf(x) ** (n - 1), -10, 10, epsabs=1e-13, limit=400)
+        out.append({"n": n, "expectedMax": value})
+    return out
+
+
+def probit_block():
+    slope, noise, rho, base = 1.5, 0.4, 0.6, 0.05
+    c = float(stats.norm.ppf(base)) * math.sqrt(1 + slope * slope)
+    rows = []
+    for oi in (-2.0, 0.0, 1.0, 3.0):
+        for lag in (0, 1, 2):
+            cov = rho ** lag
+            var_oi = 1 + noise * noise
+            mean = cov / var_oi * oi
+            var = 1 - cov * cov / var_oi
+            sd = math.sqrt(var)
+            p, _ = integrate.quad(lambda x: stats.norm.cdf(c + slope * x) * stats.norm.pdf(x, loc=mean, scale=sd), mean - 12 * sd, mean + 12 * sd, epsabs=1e-14, limit=400)
+            rows.append({"oi": oi, "lag": lag, "p": p})
+    return {"slope": slope, "noise": noise, "rho": rho, "base": base, "c": c, "rows": rows}
+
+
 def main():
     out = {
         "provenance": {
@@ -195,6 +219,8 @@ def main():
         "crps": crps_block(),
         "dm": dm_block(),
         "w7": w7_block(),
+        "maxNormal": maxnormal_block(),
+        "probit": probit_block(),
     }
     with open(OUT_PATH, "w") as handle:
         json.dump(out, handle, indent=1, sort_keys=True)

@@ -5,12 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as garch from "../shared/flows-garch.js";
 import { makeRng, seedWords, normalQuantile, normalSurvival, normalCdf } from "./truth/rng.mjs";
-import { hansen, w1Garch, w4Bait, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, WORLDS } from "./truth/worlds.mjs";
-import { mean, variance, autocorrelation, ksUniform } from "./truth/stats.mjs";
+import { hansen, w1Garch, w4Bait, w5OiLag, w6Null, w7Calibration, indicatorCorrelation, w8Overlap, w8Errors, nextBusinessDay, probitMean, WORLDS } from "./truth/worlds.mjs";
+import { mean, variance, sd, autocorrelation, ksUniform } from "./truth/stats.mjs";
 import { MODES, NotJudged, NoJudgementList, cell, accept, judge, formatRow } from "./truth/runner.mjs";
 import { MUTANTS, runKillMatrix, loadMutated } from "./truth/mutants.mjs";
 import * as reference from "./truth/reference.mjs";
-import { SCALE, W1_BANDS, measureW1Bands, tailLawCell } from "./truth/detectors.mjs";
+import { SCALE, W1_BANDS, measureW1Bands, tailLawCell, logScore, leakBound, oiLag, trialCount } from "./truth/detectors.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = JSON.parse(readFileSync(path.join(HERE, "fixtures-truth.json"), "utf8"));
@@ -242,6 +242,89 @@ await section("w8", () => {
   log(`h = 5 overlap: the naive 5% test rejects ${(100 * rej / reps).toFixed(1)}% (predicted ${(100 * fx.naiveRejection).toFixed(1)}%)`);
 });
 
+await section("w5", () => {
+  eq(nextBusinessDay("2026-03-06"), "2026-03-09", "open interest published on a Friday is next published on the Monday");
+  eq(nextBusinessDay("2026-03-03"), "2026-03-04", "and on a Tuesday the next morning");
+  eq(reference.oiPublishedAt("2026-03-06"), "2026-03-09T10:30:00Z", "the publication stamp is the next business morning");
+  const fx = fixtures.probit;
+  const w = w5OiLag({ seed: "w5-main", days: 600, names: 100 });
+  eq([w.slope, w.noise, w.rho, w.base], [fx.slope, fx.noise, fx.rho, fx.base], "the world runs at the parameters of the reference table");
+  near(w.c, fx.c, 1e-12, "the probit intercept");
+  for (const r of fx.rows) rel(w.forecast(r.lag, r.oi), r.p, 1e-7, `the posterior forecast at open interest ${r.oi}, lag ${r.lag} equals the quadrature value`);
+  let a = 0, b = 0, q = 0, base = 0, voi = 0;
+  const m = 100 * 600;
+  for (let i = 0; i < 100; i++) for (let d = 1; d < 600; d++) {
+    const x1 = w.x[(d - 1) * 100 + i], x2 = w.x[d * 100 + i];
+    a += x1 * x2; b += x1 * x1; q += x2 * x2;
+  }
+  near(a / Math.sqrt(b * q), w.rho, 0.03, "the latent state has the lag-1 autocorrelation of the world");
+  for (let k = 0; k < m; k++) { base += w.y[k]; voi += w.oi[k] * w.oi[k]; }
+  near(base / m, w.base, 4 * Math.sqrt((w.base * (1 - w.base)) / m), "the event base rate");
+  near(voi / m, 1 + w.noise * w.noise, 0.04, "open interest is the state plus noise");
+  let d1 = 0, d0 = 0, n1 = 0;
+  const diffsLeak = [];
+  let res1 = 0, res0 = 0;
+  const recs = reference.oiRecords(w.dates, w.oi, w.names, 0);
+  for (let i = 0; i < 100; i++) for (let d = 2; d < 600; d++) {
+    const y = w.y[d * 100 + i];
+    const pLag = w.forecast(1, w.oi[(d - 1) * 100 + i]);
+    const pLeak = w.forecast(0, w.oi[d * 100 + i]);
+    res1 += y - pLag; res0 += y - pLeak; n1++;
+    d1 += logScore(pLag, y); d0 += logScore(pLeak, y);
+    diffsLeak.push(logScore(pLeak, y) - logScore(pLag, y));
+  }
+  near(res1 / n1, 0, 4 * Math.sqrt(w.base / n1), "the lag-correct forecast is calibrated in the mean");
+  near(res0 / n1, 0, 4 * Math.sqrt(w.base / n1), "and so is the forecast from same-day open interest");
+  ok(d0 < d1, "same-day open interest carries information the published one does not");
+  const stamped = recs.slice(5, 20);
+  for (const rec of stamped) {
+    const asOf = reference.sessionClose(w.dates[rec.describes + 1]);
+    ok(reference.latestKnown(recs, asOf).describes === rec.describes, "at the next session's close the newest known open interest describes the previous session");
+  }
+  const b2 = leakBound(diffsLeak);
+  ok(b2.fires, `the oracle bound fires on a forecaster that reads open interest early (${b2.z.toFixed(1)} SE)`);
+  const verdict = oiLag(reference);
+  ok(verdict.ok, "the as-of reader passes the open-interest bait: " + verdict.note);
+  log("W5: " + verdict.note);
+});
+
+await section("w6", () => {
+  const T = 250;
+  const w = w6Null({ seed: "w6-main", trials: 400, periods: T });
+  const srs = w.returns.map(reference.sharpe);
+  near(mean(srs), 0, 4 * (1 / Math.sqrt(T)) / Math.sqrt(w.trials), "the per-period Sharpe ratios of null strategies centre on zero");
+  near(sd(srs), 1 / Math.sqrt(T), 0.1 / Math.sqrt(T), "with standard deviation one over root T");
+  for (const r of fixtures.maxNormal) {
+    rel(reference.expectedMaxSharpe(r.n, 1), r.expectedMax, 0.03, `the expected maximum of ${r.n} null Sharpe ratios is the exact normal maximum within 3%`);
+  }
+  eq(reference.expectedMaxSharpe(1, 1), 0, "one trial deflates nothing");
+  const reg = new reference.TrialRegistry();
+  eq(reg.count(), 1, "an empty registry counts one trial");
+  reg.register(100); reg.register(5);
+  eq(reg.count(), 105, "the registry counts every trial registered");
+  const verdict = trialCount(reference);
+  ok(verdict.ok, "the best of 100 null strategies is not declared significant: " + verdict.note);
+  log("W6: " + verdict.note);
+  const reps = 60 * SCALE.factor;
+  let found = 0, pboNull = 0, pboEdge = 0, pboReps = 0;
+  for (let i = 0; i < reps; i++) {
+    const e = w6Null({ seed: `w6-edge|${SCALE.salt}|${i}`, trials: 100, periods: T, edge: 0.4 });
+    const registry = new reference.TrialRegistry();
+    registry.register(e.trials);
+    const r = reference.selectAndTest(e.returns, registry);
+    if (r.best === 0 && r.dsr > 0.95) found++;
+  }
+  ok(found / reps >= 0.9, `a planted edge of 0.4 a period is found and certified in ${found} of ${reps} runs`);
+  for (let i = 0; i < 12; i++) {
+    pboNull += reference.pbo(w6Null({ seed: `w6-pbo|${SCALE.salt}|${i}`, trials: 30, periods: 240 }).returns, 8);
+    pboEdge += reference.pbo(w6Null({ seed: `w6-pbo-edge|${SCALE.salt}|${i}`, trials: 30, periods: 240, edge: 0.4 }).returns, 8);
+    pboReps++;
+  }
+  near(pboNull / pboReps, 0.5, 0.12, "the probability of backtest overfitting on pure noise is one half");
+  ok(pboEdge / pboReps < 0.15, "and falls to nearly zero when one strategy has a real edge");
+  log(`PBO on noise ${(pboNull / pboReps).toFixed(2)}, with a planted edge ${(pboEdge / pboReps).toFixed(2)}`);
+});
+
 await section("runner", () => {
   let refused = false;
   try { accept({ id: "x", mode: MODES.WELL, pass: true }); } catch (e) { refused = e instanceof NotJudged; }
@@ -258,7 +341,7 @@ await section("runner", () => {
   const v = judge([inFamily, well, outFamily]);
   eq(v.rows.map((r) => r.accepted), [true, null, true], "a well-specified cell is reported as a reference and never accepted");
   eq(v.judged, 2, "two cells judged");
-  eq(Object.keys(WORLDS).sort(), ["W1", "W4", "W7", "W8"], "the worlds registered by this pull request");
+  eq(Object.keys(WORLDS).sort(), ["W1", "W4", "W5", "W6", "W7", "W8"], "the worlds registered so far");
   const a = w1Garch({ seed: "det", n: 100 }), b = w1Garch({ seed: "det", n: 100 });
   eq(Array.from(a.r), Array.from(b.r), "a world is a pure function of its seed");
 });
@@ -275,7 +358,7 @@ await section("kill-matrix", async () => {
     ok(r.baselineOk, `${r.id}: the detector passes the correct build (${r.baselineNote})`);
     ok(r.killed, `${r.id}: a planted wrong build is killed (${r.mutatedNote})`);
   }
-  ok(rows.filter((r) => r.armed).length >= 9, "nine mutants are armed by the first pull request");
+  ok(rows.filter((r) => r.armed).length >= 12, "twelve mutants are armed by the second pull request");
   eq(new Set(MUTANTS.map((m) => m.id)).size, MUTANTS.length, "every mutant has its own id");
   let notApplied = false;
   try { await loadMutated("tests/truth/reference.mjs", [["this text is nowhere in the module", "x"]]); } catch (e) { notApplied = /did not apply/.test(e.message); }
@@ -285,5 +368,5 @@ await section("kill-matrix", async () => {
 if (flags.length) console.log(`deep lane flagged ${flags.length} section(s): ${flags.join(" | ")}`);
 console.log(`✓ flows-truth: ${n} assertions — one seeded generator whose streams, tail laws and exact scores equal independent scipy references, ` +
   "W1 characterised against the measured bias table of today's GARCH (and today's clip in the filter judged outside the oracle band in an out-of-family world), " +
-  "W4 look-ahead bait power, W7 calibration and W8 overlap worlds, a runner that cannot accept a well-specified result or run without an out-of-family judgement world, " +
+  "W4 look-ahead bait power, W5 open-interest lag, W6 overfitting null, W7 calibration and W8 overlap worlds, a runner that cannot accept a well-specified result or run without an out-of-family judgement world, " +
   "and a kill matrix in which every planted wrong build is caught while the correct build passes");
