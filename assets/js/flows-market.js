@@ -132,14 +132,14 @@
       : { state: "unavailable", reason: what + " was not carried this session" + why };
   }
 
-  const openingSaid = (at) => "The session's first reading" + (at ? ", at " + clock(at) + " ET," : "") +
+  const openingSaid = (at) => "The session's first reading" + (at ? ", at " + clock(at) + "," : "") +
     " is in. A line needs two, so the path draws from the next refresh.";
-  const staleSaid = (at) => "The live layer holds one reading of this session" + (at ? ", at " + clock(at) + " ET" : "") +
+  const staleSaid = (at) => "The live layer holds one reading of this session" + (at ? ", at " + clock(at) : "") +
     ", and has not written since. A line needs two, so no path is drawn.";
   const calmOf = (t, what) => (t.opening ? (recent(t.at) ? { state: "opening", word: "Opening", text: openingSaid(t.at) }
     : { state: "stale", word: t.at ? clock(t.at) : "Stale", text: staleSaid(t.at) })
     : t.fellBack && t.session ? { state: "dated", word: F.day(t.session), text: "Today's live " + what + " holds a single reading" +
-      (t.at ? ", at " + clock(t.at) + " ET" : "") + ", too few for a path, so this is the " + F.day(t.session) + " session in full." } : null);
+      (t.at ? ", at " + clock(t.at) : "") + ", too few for a path, so this is the " + F.day(t.session) + " session in full." } : null);
 
   function unreadableLine(feed, what) {
     return emptyLine("unreadable",
@@ -150,28 +150,18 @@
     return emptyLine("pending", "The pipeline has not published " + what + " yet. " + cost, what);
   }
 
-  const NY_CLOCK = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
-  const NY_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "numeric", hourCycle: "h23" });
-  const clock = (at) => { const t = Date.parse(at); return Number.isFinite(t) ? NY_CLOCK.format(new Date(t)) : DASH; };
-  const nyMinutes = (at) => {
-    const t = Date.parse(at);
-    if (!Number.isFinite(t)) return null;
-    const p = Object.fromEntries(NY_PARTS.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
-    return (+p.hour % 24) * 60 + +p.minute;
-  };
+  const clock = (at) => F.time(at);
   const hourTicks = (lo, hi, every) => {
     const out = [];
     const step = hi - lo < 150 ? 30 : 60 * (every || 1);
-    for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) {
-      const hr = Math.floor(m / 60), mm = m % 60;
-      out.push({ v: m, label: mm ? (hr % 12 || 12) + ":" + String(mm).padStart(2, "0") : (hr % 12 || 12) + (hr < 12 ? " AM" : " PM") });
-    }
+    for (let m = Math.ceil(lo / step) * step; m <= hi; m += step) out.push({ v: m, label: F.tick(m) });
     return out;
   };
-  const timeAxis = (ts) => {
-    const mins = ts.map(nyMinutes);
+  const timeAxis = (ts, day) => {
+    const mins = ts.map((t) => F.axis(t, day));
     const ok = mins.length > 1 && mins.every((m, i) => m !== null && (i === 0 || m > mins[i - 1]));
-    return ok ? { x: mins, xType: "number", ticks: (w) => hourTicks(mins[0], mins[mins.length - 1], w < 420 ? 2 : 1) } : { x: ts, xType: "index", ticks: () => undefined };
+    return ok ? { x: mins, xType: "number", fmt: (m) => F.tick(m), ticks: (w) => hourTicks(mins[0], mins[mins.length - 1], w < 420 ? 2 : 1) }
+      : { x: ts, xType: "index", fmt: (x) => String(x), ticks: () => undefined };
   };
 
   function ageWords(minutes) {
@@ -182,18 +172,13 @@
     const d = Math.round(hh / 24);
     return d + (d === 1 ? " day" : " days");
   }
-  function utcStamp(t, withDay) {
-    const iso = t.toISOString();
-    return (withDay ? iso.slice(0, 16).replace("T", " ") : iso.slice(11, 16)) + " UTC";
-  }
-
   function pulseStamp(readAt, refreshed, cadenceMinutes) {
     if (typeof readAt !== "string") return "";
     const t = new Date(readAt);
     if (Number.isNaN(t.getTime())) return "";
     const now = new Date();
-    const sameDay = utcStamp(t, true).slice(0, 10) === utcStamp(now, true).slice(0, 10);
-    const when = utcStamp(t, !sameDay);
+    const when = F.when(readAt, now.getTime());
+    if (when === null) return "";
     const ageMin = (now.getTime() - t.getTime()) / 60000;
     const build = refreshed === "nightly" ? " with the nightly build" : "";
     const minutes = isNum(cadenceMinutes);
@@ -418,7 +403,7 @@
     const last = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] !== null) return arr[i]; return null; };
     const draw = () => {
       const v = views[active];
-      const ax = timeAxis(v.t);
+      const ax = timeAxis(v.t, v.day);
       if (legs) {
         legs.replaceChildren(UI.metrics([
           UI.metric("Net", usdS(last(v.net)), { tone: toneOf(last(v.net)), hero: true }),
@@ -436,12 +421,12 @@
         return;
       }
       const opts = {
-          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: (x) => clock(x), zero: true, height: [220, 260, 300],
+          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: ax.fmt, zero: true, height: [220, 260, 300],
           series: [
             { values: v.call, color: "--up", label: "Net calls", format: usdS },
             { values: v.put, color: "--down", label: "Net puts", dash: true, format: usdS },
           ],
-          yFormat: usdS, label: v.label + " tide: net call and net put premium across the session",
+          yFormat: usdS, label: v.label + " tide: net call and net put premium across the session, times in TRT",
           readout: (i) => [C.part(clock(v.t[i]), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, usdS(v.call[i])),
             C.part("Puts", "k"), h("b", { "data-tone": "down" }, usdS(v.put[i])),
             C.part("Net " + (usdS(v.net[i])), "k")],
@@ -723,7 +708,7 @@
       const screened = isNum(m.screened);
       if (statusEl) {
         statusEl.textContent = n + " screened names" + (screened === null ? "" : " of " + screened + " returned by the ladder") +
-          " · session " + (m.sessionDate || "unknown") + (Number.isFinite(Date.parse(m.generatedAt)) ? " · built " + utcStamp(new Date(m.generatedAt), true) : "");
+          " · session " + (m.sessionDate || "unknown") + (F.stamp(m.generatedAt) ? " · built " + F.stamp(m.generatedAt) : "");
       }
       if (meta) {
         meta.replaceChildren(
