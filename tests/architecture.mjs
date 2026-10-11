@@ -88,7 +88,11 @@ const LAYERS = [
   { name: "a server service", from: /^server\/(?!routes\/)[^/]+\.js$/, to: [/^server\/(?!routes\/)[^/]+\.js$/, /^shared\//], bare: [] },
   {
     name: "a nightly section", from: /^scripts\/flows-nightly\/sections\/[^/]+\.mjs$/,
-    to: [/^scripts\/flows-nightly\/(?:store|vendor|rank|archive|fixtures)\.mjs$/, /^shared\//], bare: [/^node:/],
+    to: [
+      /^scripts\/flows-nightly\/(?:store|vendor|vendor-params|rank|archive|fixtures|flags|clock|stages)\.mjs$/,
+      /^scripts\/flows-legs\/[^/]+\.mjs$/, /^scripts\/flows-quant-pipeline\.mjs$/, /^shared\//,
+    ],
+    bare: [/^node:/],
   },
   { name: "shared", from: /^shared\//, to: [/^shared\//], bare: [] },
   { name: "a script", from: /^scripts\//, to: [/^scripts\//, /^shared\//, /^tests\/lib\/suite-registry\.mjs$/], bare: [/^node:/, /^[a-z@]/] },
@@ -127,7 +131,8 @@ function assets(tree) {
 const LEAVES = {
   "shared/flows-focus.js": [],
   "shared/flows-vendor-core.js": [],
-  "shared/flows-dossier.js": ["shared/flows-cross.js"],
+  "shared/flows-stats.js": [],
+  "shared/flows-dossier.js": ["shared/flows-cross.js", "shared/flows-stats.js"],
   "shared/flows-neuron-screen.js": ["shared/flows-cross.js", "shared/flows-neuron.js", "shared/flows-quant-structures.js"],
   "shared/flows-reading.js": ["shared/flows-ask.js", "shared/flows-dossier.js"],
 };

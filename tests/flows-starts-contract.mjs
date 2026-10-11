@@ -24,7 +24,7 @@ import {
 import { fakeWorld, fakeGithub, liveGroup } from "../scripts/flows-legs/live-world-fake.mjs";
 import { DRY_SCENARIOS, DRY_DAY, DRY_WEEKEND, dryLiveDay } from "../scripts/flows-legs/live-day.mjs";
 import { LIVE_VENDOR, RATE } from "../scripts/flows-pipeline.mjs";
-import { nightlySource } from "./lib/source-scan.mjs";
+import { nightlySource, slice } from "./lib/source-scan.mjs";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
 
 const ROOT = new URL("../", import.meta.url);
@@ -723,8 +723,8 @@ const MIN = 60 * 1000;
     "edge-429", "edge-408", "store-quota", "ingest-5xx", "ingest-silent", "lab-sign-in"]) {
     ok(edgeCodes.includes(code), `the edge fixture reaches the ${code} family`);
   }
-  const tail = read("scripts/flows-pipeline.mjs");
-  ok(/if \(health\.failures\.length\) process\.exitCode = 1;\s*await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*\}\s*\nexport \{/.test(tail),
+  const tail = slice(nightlySource(), "export async function runClose(ctx)", "\n}\n");
+  ok(/if \(health\.failures\.length\) process\.exitCode = 1;[\s\S]*?await reportHealth\(\{ failures: health\.failures, applies: health\.applies, dry: DRY_RUN, env: process\.env \}\);\s*$/.test(tail),
     "and the nightly sets its exit code first, then reports the gate as the last thing it does, with the dry flag");
 }
 
