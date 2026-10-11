@@ -246,6 +246,16 @@ curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSIO
 curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
 
+`docs/` and `server/` are not part of the static bundle (`.assetsignore`;
+`tests/contracts.mjs` holds the served file list). After a promotion, the
+1 MB vendor specification must answer 404 on the apex, and the same request
+on `www` settles whether `www` still serves the GitHub Pages copy:
+
+```bash
+curl -sSI https://anilkaya.org/docs/uw-openapi.yaml | head -1
+curl -sSI https://www.anilkaya.org/docs/uw-openapi.yaml | head -1
+```
+
 The woff2 URLs carry `assets/fonts-version.txt`, not `assets/version.txt`
 ("Asset versioning" in AGENTS.md): an asset bump must leave the font URLs
 unchanged, or every returning visitor downloads the fonts again for nothing.
@@ -2360,8 +2370,8 @@ states, thresholds), `shared/flows-live.js` (builders and the key registry),
 - **Tier 2** is `node scripts/flows-pipeline.mjs --live`, run by
   `.github/workflows/flows-live.yml`: sector tides, the SPY, QQQ, IWM and DIA ETF
   tides, both net-flow expiry series, one screener call for every board name, the
-  incremental alert union, spot gamma by rotation, the tape, movers and news —
-  37 to 41 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
+  incremental alert union, movers and news —
+  20 to 24 calls a pass (the budget is 48) at a 333 ms floor, `live:*` keys only.
   The one screener call reads the three index ETFs, then every focus ticker
   (the groups of the nightly `focus` payload, which the live role may read;
   before that key exists, the `shared/flows-focus.js` roster: the three metal
