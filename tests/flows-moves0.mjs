@@ -199,10 +199,11 @@ const stripsOf = (rows, session = "2026-09-29") => ({
   rows: Object.fromEntries(rows.map((r) => [r.t, [100, 100 / (1 + r.chg), r.chg, r.iv30, r.iv30p, r.im]])),
   fresh: { readAt: iso(NOW - 60000), session, cadenceS: 900, source: "actions", writer: "flows-live" },
 });
-const universeOf = (rows) => ({
-  status: "ok", v: 1, sessionDate: "2026-09-28", generatedAt: iso(TUE_1330 - 20 * 3600000), n: rows.length, screened: rows.length,
-  t: rows.map((r) => r.t), cols: { chg: rows.map((r) => Math.round(r.chg * 1e4)), ed: rows.map((r) => r.ed) },
-  units: { chg: ["fraction", 1e4], ed: ["sessions", 1] },
+const universeOf = (rows, { day = "2026-09-28", iv = false } = {}) => ({
+  status: "ok", v: 1, sessionDate: day, generatedAt: iso(TUE_1330 - 20 * 3600000), n: rows.length, screened: rows.length,
+  t: rows.map((r) => r.t),
+  cols: { chg: rows.map((r) => Math.round(r.chg * 1e4)), ed: rows.map((r) => r.ed), ...(iv ? { iv30p: rows.map((r) => (r.iv30p === null || r.iv30p === undefined ? null : Math.round(r.iv30p * 1e3))) } : {}) },
+  units: { chg: ["fraction", 1e4], ed: ["sessions", 1], ...(iv ? { iv30p: ["vol", 1e3] } : {}) },
 });
 const MOVERS = {
   status: "ok", sessionDate: "2026-09-28", universe: 600, ranked: 590, priced: 500, unrankedChange: 10, unrankedPremium: 100,
@@ -215,7 +216,7 @@ const forbidden = new RegExp("\\b(?:" + M.FORBIDDEN_WORDS.join("|") + ")", "i");
 
 const marketAnswer = (state) => (key) => {
   if (key.startsWith("movers")) return { body: MOVERS };
-  if (key === "universe") return { body: universeOf(state.universe || ROSTER) };
+  if (key === "universe") return { body: universeOf(state.universe || ROSTER, state.uniOpts || {}) };
   if (key.startsWith("lk?k=")) {
     const ks = key.slice(5).split(",");
     if (ks.length === 1) return ks[0] === "strips" && state.strips ? { body: state.strips } : null;
@@ -264,7 +265,8 @@ try {
     ok(!got.cols[1].clean.some((r) => r[0] === "EVT"), "and never beside the clean names");
     eq(got.cols[1].apartCaption, M.APART, "under the caption that says why");
     eq(got.notes[0], want.ctx, "THE MEDIAN LINE is computed on the prior-close IV, by the leaf's arithmetic");
-    eq(got.notes[1], M.CAPTION + " " + M.LINE, "and the caption names the IV and the line says it is a ranking, not a test");
+    eq(got.notes[1], "Live roster, session 2026-09-29: 6 names.", "the source and the population are named");
+    eq(got.notes[2], M.CAPTION + " " + M.LINE, "and the caption names the IV and the line says it is a ranking, not a test");
     for (const n of got.notes) ok(!forbidden.test(n), `"${n}" uses none of the forbidden words`);
     ok(M.wordCount(got.notes[0]) <= M.HEADER_WORDS_MAX, "and the context line is within 14 words");
     ok(!forbidden.test(got.text.replace(/screened/g, "")), "the module's text uses none of unusual, alert, screen or rare");
@@ -319,7 +321,7 @@ try {
   }
 
   {
-    const state = { strips: null, upd: 1 };
+    const state = { strips: null, upd: 1, uniOpts: { iv: false } };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
     await tick(page, 5000);
@@ -327,6 +329,49 @@ try {
     eq(page._asked.filter((k) => /^lk\?k=.*strips/.test(k) && !k.includes("market")).length, 1, "WITH THE LIVE ROWS PENDING the lens asks for them once and does not loop on the answer");
     ok(got.cols[0].clean.length === 0 && got.cols[1].clean.length === 0, "and ranks nothing");
     eq(await page.evaluate(() => document.querySelectorAll("#mktMovers .mk-movers-col")[0].querySelectorAll(".ui-silent").length), 1, "saying so in place of the list, not a zero");
+    await page.close();
+  }
+
+  {
+    const TAIL = [
+      { t: "TA1", chg: -0.15, iv30p: 0.3, ed: 30 }, { t: "TA2", chg: 0.12, iv30p: 0.28, ed: null }, { t: "TA3", chg: -0.02, iv30p: 0.35, ed: 60 },
+      { t: "TA4", chg: 0.3, iv30p: 0.45, ed: 3 }, { t: "TA5", chg: 0.07, iv30p: null, ed: 50 },
+    ];
+    const ALL = ROSTER.concat(TAIL);
+    const state = { strips: stripsOf(ROSTER, "2026-09-29"), upd: 1, universe: ALL, uniOpts: { day: "2026-09-29", iv: true } };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    const got = await readLists(page);
+    const want = expectedLists(ALL);
+    deep(got.cols[1].clean.map((r) => r[0]), want.down.clean.map((m) => m.t).slice(0, 8), "AFTER THE NIGHTLY LANDS the lens ranks the whole universe, names outside the roster included");
+    ok(got.cols[1].clean.some((r) => r[0] === "TA1") && got.cols[0].clean.some((r) => r[0] === "TA2"), "TA1 and TA2 are not roster names and rank");
+    deep(got.cols[0].apart.map((r) => r[0]), ["TA4"], "a tail name with earnings in 3 sessions is ranked apart");
+    ok(![...got.cols[0].clean, ...got.cols[1].clean].some((r) => r[0] === "TA5"), "and one with no prior-close IV is absent");
+    eq(got.notes[0], want.ctx, "the median line is over the whole population, on the prior-close IV");
+    eq(got.notes[1], "Nightly, session 2026-09-29: " + (ALL.length - 3) + " names.", "and names its source and population");
+    await page.close();
+  }
+
+  {
+    const TAIL = [{ t: "TA1", chg: -0.15, iv30p: 0.3, ed: 30 }];
+    const state = { strips: stripsOf(ROSTER, "2026-09-29"), upd: 1, universe: ROSTER.concat(TAIL), uniOpts: { day: "2026-09-28", iv: true } };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    const got = await readLists(page);
+    ok(!got.cols[1].clean.some((r) => r[0] === "TA1"), "DURING THE SESSION yesterday's tail is never ranked beside today's roster");
+    eq(got.notes[1], "Live roster, session 2026-09-29: " + (ROSTER.length - 2) + " names.", "the live rows are ranked alone and the source is named");
+    await page.close();
+  }
+
+  {
+    const state = { strips: null, upd: 1, universe: ROSTER, uniOpts: { day: "2026-09-28", iv: true } };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    await tick(page, 5000);
+    const got = await readLists(page);
+    deep(got.cols[1].clean.map((r) => r[0]), ["AAA", "CCC", "DDD"], "WITH THE LIVE ROWS UNAVAILABLE the nightly's rows are ranked and say so");
+    eq(got.notes[1], "Nightly, session 2026-09-28: " + (ROSTER.length - 2) + " names.", "under the nightly's session");
+    eq(page._asked.filter((k) => k === "lk?k=strips").length, 1, "and the live rows were asked for once");
     await page.close();
   }
 

@@ -466,24 +466,27 @@
     return box;
   }
 
-  const LENS = { on: false, strips: null, ed: new Map(), movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null };
+  const LENS = { on: false, strips: null, uni: null, priced: false, day: null, movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null };
   const IV_EVENT = 21;
   const IV_APART = "Earnings within 30 days: event not separated.";
   const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
 
-  function edMap(u) {
-    const col = okFeed(u) && u.status === "ok" && u.cols && u.units && u.units.ed && Array.isArray(u.t) ? u.cols.ed : null;
-    return new Map(Array.isArray(col) ? u.t.map((t, i) => [t, isNum(col[i])]) : []);
+  function uniRows(u) {
+    const col = (k) => { const c = u.cols && u.cols[k], sc = u.units && u.units[k] && isNum(u.units[k][1]); return Array.isArray(c) && sc ? c.map((x) => (isNum(x) === null ? null : x / sc)) : null; };
+    const chg = col("chg"), iv = col("iv30p"), ed = col("ed");
+    return okFeed(u) && u.status === "ok" && Array.isArray(u.t) && chg ? u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null })) : null;
   }
 
   function lensMoves() {
-    const s = LENS.strips, f = s && s.status === "ok" && Array.isArray(s.fields) && s.rows ? s.fields : [];
-    const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), out = [];
-    if (ci < 0 || ii < 0) return null;
-    for (const t of Object.keys(s.rows)) {
-      const chg = isNum(s.rows[t][ci]), iv = isNum(s.rows[t][ii]), m = ivDays(chg, iv), ed = LENS.ed.get(t);
-      if (m !== null) out.push({ t, chg, iv, m, event: isNum(ed) !== null && ed <= IV_EVENT });
+    const s = LENS.strips, f = s && s.status === "ok" && Array.isArray(s.fields) && s.rows ? s.fields : [], u = LENS.uni;
+    const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), ed = new Map(u ? u.map((r) => [r.t, r.ed]) : []), out = [];
+    const useU = u && LENS.priced && !(ci >= 0 && ii >= 0 && s.session > LENS.day);
+    const rows = useU ? u : ci < 0 || ii < 0 ? [] : Object.keys(s.rows).map((t) => ({ t, chg: isNum(s.rows[t][ci]), iv: isNum(s.rows[t][ii]), ed: ed.get(t) }));
+    for (const r of rows) {
+      const m = ivDays(r.chg, r.iv);
+      if (m !== null) out.push({ t: r.t, chg: r.chg, iv: r.iv, m, event: isNum(r.ed) !== null && r.ed <= IV_EVENT });
     }
+    LENS.src = (useU ? "Nightly, session " + LENS.day : "Live roster, session " + (s && s.session)) + ": " + out.length + " names.";
     return out.length ? out : null;
   }
 
@@ -574,7 +577,7 @@
       if (LENS.ask === 2 && !LENS.strips) LENS.ask = 0;
       paintMovers(LENS.movers);
     }, LENS.on ? 1 : 0)), grid);
-    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured.")));
+    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, moves ? h("p", null, LENS.src) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured.")));
     const universe = isNum(movers.universe), ranked = isNum(movers.ranked), priced = isNum(movers.priced);
     const noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
     if (universe === null || ranked === null || priced === null || noChange === null || noPrem === null) {
@@ -1591,7 +1594,9 @@
     });
     paintSectors(sectors);
     textInfo("mkSectorsCard", "momentum", $("mktSectors"), "Momentum");
-    LENS.ed = edMap(universe);
+    LENS.uni = uniRows(universe);
+    LENS.priced = Boolean(LENS.uni && LENS.uni.some((r) => r.iv !== null));
+    LENS.day = LENS.uni ? universe.sessionDate : null;
     if (lk.strips && okFeed(lk.strips)) LENS.strips = lk.strips;
     paintMovers(movers);
     textInfo("mkMoversCard", "extremes", $("mktMovers"), "Extremes", () => ({ notes: [($("mktMovers") || {}).dataset && $("mktMovers").dataset.pop,
