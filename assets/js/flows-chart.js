@@ -201,7 +201,7 @@
     host.tabIndex = 0;
     host.setAttribute("role", "group");
     host.setAttribute("aria-roledescription", "chart");
-    if (o.label) host.setAttribute("aria-label", o.label + ". Use the arrow keys to read values.");
+    if (o.label) host.setAttribute("aria-label", o.label + ". " + (o.ariaHint || "Use the arrow keys to read values."));
     const nearest = (x, y) => {
       if (o.ys) {
         let best = -1, bd = o.reach ?? Infinity;
@@ -926,31 +926,21 @@
   function ticks(sc, n, fmt) {
     const [a, b] = sc.domain;
     const vs = [];
-    if (sc.type === "log") for (let e = Math.ceil(Math.log10(a)); e <= Math.floor(Math.log10(b)); e++) vs.push(10 ** e);
+    const lo = Math.max(a, 1e-12);
+    const decades = sc.type === "log" && b > lo ? Math.floor(Math.log10(b)) - Math.ceil(Math.log10(lo)) : -1;
+    if (sc.type === "log" && !(b > lo)) return [];
+    if (decades >= 1) for (let e = Math.ceil(Math.log10(lo)); e <= Math.floor(Math.log10(b)); e++) vs.push(10 ** e);
+    else if (sc.type === "log") vs.push(...niceTicks(lo, b, n));
     else if (sc.type === "session") for (let m = Math.ceil(a / 60) * 60; m <= b; m += 60 * Math.max(1, Math.ceil((b - a) / 60 / n))) vs.push(m);
     else vs.push(...niceTicks(a, b, n));
     const f = typeof fmt === "string" ? (v) => F.unit(fmt, v) : fmt || ((v) => F.num(v));
     return vs.map((v) => ({ v, x: sc(v), y: sc(v), text: f(v) }));
   }
 
-  function layout(w, o = {}) {
-    const label = Math.max(0, ...(o.labels || []).map(tw));
-    return { phone: w < 600, H: heightFor(o.height, w, o.fallback || [200, 220, 240]), top: o.top ?? 14, bot: o.bot ?? 24, left: o.left ?? 2, right: o.right ?? (label ? Math.ceil(label) : w < 600 ? 54 : 62) };
-  }
-  function axes(svg, L, w, o = {}) {
-    const by = o.base ?? L.H - L.bot, left = o.side === "left";
-    s("line", { x1: L.left, x2: w - L.right, y1: by, y2: by, class: "base" }, svg);
-    for (const t of o.y || []) {
-      if (o.grid) s("line", { x1: L.left, x2: w - L.right, y1: t.y, y2: t.y, class: "hair" }, svg);
-      s("text", { x: left ? L.left - 8 : w - L.right + 8, y: t.y + 3.8, text: t.text, class: "tx-3", "text-anchor": left ? "end" : null }, svg);
-    }
-    for (const t of o.x || []) s("text", { x: t.x, y: L.H - 6, text: t.text, "text-anchor": t.end ? "end" : "middle" }, svg);
-  }
-
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
     line, sparkline, bars, diverging, heatmap, gauge, payoff,
-    LEVELS, shapeOf, kind, plot, scale, ticks, layout, axes, dateTicks, fx1, tw, heightFor,
+    LEVELS, shapeOf, kind, plot, scale, ticks, dateTicks, fx1, tw, heightFor,
   });
 
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { chart }));

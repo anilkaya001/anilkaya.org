@@ -183,10 +183,6 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
     const f = window.FlowsUI.F;
     const tk = C.ticks(C.scale("linear", -0.06, 0.04, 0, 100), 4, "pct");
     out.ticks = tk.map((x) => x.text);
-    const svg = window.FlowsUI.s("svg", { width: 300, height: 200 });
-    const L = C.layout(300, {});
-    C.axes(svg, L, 300, { x: [{ x: 10, text: "09:30" }, { x: 290, text: "16:00", end: true }], y: [{ y: 50, text: "−5" }, { y: 100, text: "0" }], grid: true });
-    out.axes = { base: svg.querySelectorAll("line.base").length, hair: svg.querySelectorAll("line.hair").length, texts: [...svg.querySelectorAll("text")].map((x) => x.textContent), anchors: [...svg.querySelectorAll("text")].map((x) => x.getAttribute("text-anchor")) };
     return out;
   });
   eq(r.zeroRects, 2, "zero is not positive: each exact zero draws the neutral tick");
@@ -201,10 +197,6 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   eq(r.hmRows, 4, "and tables one row per cell");
   eq(r.hmCells, ["+1", "−2", "0", "—"], "with zero as 0 and the void as an em dash");
   ok(r.ticks.every((x) => !/^-/.test(x)) && r.ticks.some((x) => x.startsWith("−")), `ticks through F.unit('pct') carry U+2212 on negatives (${r.ticks.join(" ")})`);
-  eq(r.axes.base, 1, "axes() draws the baseline once");
-  eq(r.axes.hair, 2, "a hairline per y tick when the grid is asked for");
-  eq(r.axes.texts, ["−5", "0", "09:30", "16:00"], "y labels then x labels, minus as U+2212");
-  eq(r.axes.anchors, [null, null, "middle", "end"], "an end tick anchors to its end");
   await page.close();
 }
 
@@ -323,7 +315,7 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
         const svg = C.svgRoot(el, w, 200, false, "Bubbles");
         for (const p of PTS) s("circle", { cx: p.x, cy: p.y, r: p.r, class: "b" }, svg);
         C.scrub(el, svg, {
-          xs: PTS.map((p) => p.x), ys: PTS.map((p) => p.y), rs: PTS.map((p) => p.r), yw: 0.6, first, xh: 0.5, reach: 40, top: 0, bottom: 200, label: "Bubbles",
+          xs: PTS.map((p) => p.x), ys: PTS.map((p) => p.y), rs: PTS.map((p) => p.r), yw: 0.6, first, xh: 0.5, reach: 40, top: 0, bottom: 200, label: "Bubbles", ariaHint: id === "bub-left" ? "Use the arrow keys to read each bubble." : undefined,
           onMove: (i) => ({ x: PTS[i].x, top: 0, say: "bubble " + i, parts: [C.part("p" + i, "k")], dots: [{ x: PTS[i].x, y: PTS[i].y, r: PTS[i].r + 3, cls: "b-ring", fill: "none" }] }),
         });
       });
@@ -337,6 +329,8 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   eq(await page.evaluate(() => document.getElementById("fxLive").textContent), "bubble 0", "and a chart that supplies what to say is announced in its own words, not by reading its readout");
   eq(await page.evaluate(() => document.querySelector("#bub-first line.xh").getAttribute("opacity")), "0.5", "and the crosshair takes the opacity the chart asked for");
   eq(await page.evaluate(() => { const c = document.querySelector("#bub-first circle.b-ring"); return [c.getAttribute("r"), c.getAttribute("fill"), c.getAttribute("cx"), c.getAttribute("cy")]; }), ["9", "none", "50", "150"], "and the dot is the ring the chart described, sized past the bubble");
+  eq(await page.evaluate(() => document.getElementById("bub-first").getAttribute("aria-label")), "Bubbles. Use the arrow keys to read values.", "the group label ends with the standing sentence");
+  eq(await page.evaluate(() => document.getElementById("bub-left").getAttribute("aria-label")), "Bubbles. Use the arrow keys to read each bubble.", "and a chart may keep its own closing sentence through ariaHint");
   await page.focus("#bub-left");
   await page.keyboard.press("ArrowLeft");
   eq(await read("bub-left"), "p3", "and the first ArrowLeft from nothing lands on the last");
@@ -418,13 +412,11 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   eq([...C.ticks(C.scale("session", 570, 960, 0, 100), 8).map((x) => x.v)], [600, 660, 720, 780, 840, 900, 960], "session ticks fall on the hour");
   eq([...C.ticks(C.scale("session", 570, 960, 0, 100), 3).map((x) => x.v)], [600, 780, 960], "and thin to every few hours when asked for fewer");
   eq([...C.ticks(C.scale("linear", 0, 10, 0, 100), 5, (v) => "<" + v + ">").map((x) => x.text).slice(0, 2)], ["<0>", "<2>"], "a function is used as given");
-  const L = C.layout(390, { labels: ["$1.2M", "−$4.0M"], height: [200, 220, 240] });
-  ok(L.phone && L.H === 200 && L.top === 14 && L.bot === 24 && L.left === 2, "layout: phone, height band and default margins");
-  ok(L.right > 40 && L.right < 120, `layout: the right gutter grows with the longest label (${L.right})`);
-  ok(C.layout(390, { labels: ["$1.2M", "−$4.0M and more"] }).right > L.right, "layout: a longer label widens it");
-  eq(C.layout(1000, {}).right, 62, "layout: no labels gives the standing wide gutter");
-  eq(C.layout(1000, { right: 9 }).right, 9, "layout: an explicit margin wins");
-  eq(C.layout(1000, { height: [200, 220, 240] }).H, 240, "layout: the wide band");
+  const t0 = C.ticks(C.scale("log", 0, 1000, 0, 100), 4, "pct").map((x) => x.v);
+  ok(t0.length > 0 && t0.length < 40 && t0.every((v) => Number.isFinite(v) && v > 0) && t0[t0.length - 1] === 1000, "log ticks on a domain that starts at 0 return decades above the floor instead of looping");
+  eq(C.ticks(C.scale("log", -5, 0, 0, 100), 4).length, 0, "and a log domain with no positive part has no ticks");
+  const t1 = C.ticks(C.scale("log", 2, 8, 0, 100), 4).map((x) => x.v);
+  ok(t1.length >= 2 && t1.every((v) => v >= 2 && v <= 8), `a log domain under one decade falls back to nice ticks (${t1.join(" ")})`);
   const histTicks = (F, ds, xAt, phone, right) => {
     const out = [], N = ds.length;
     if (N <= 32) {
@@ -474,7 +466,7 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   C.kind("dup", { draw() {} });
   try { C.kind("dup", { draw() {} }); ok(false, "a duplicate kind name throws"); } catch (e) { ok(/dup/.test(e.message), "a duplicate kind name throws"); }
   ok(Object.isFrozen(C), "the chart object is frozen: the registry lives in a closure Map and kind() never mutates it");
-  ok(["kind", "plot", "scale", "ticks", "layout", "axes"].every((n) => typeof C[n] === "function"), "kind, plot, scale, ticks, layout and axes are exported");
+  ok(["kind", "plot", "scale", "ticks"].every((n) => typeof C[n] === "function"), "kind, plot, scale and ticks are exported");
 }
 
 await browser.close();

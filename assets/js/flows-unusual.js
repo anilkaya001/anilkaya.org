@@ -305,7 +305,7 @@
     const list = placed.slice().sort((p, q) => p.cx - q.cx || q.pt.p - p.pt.p);
     C.scrub(el, svg, {
       xs: list.map((b) => b.cx), ys: list.map((b) => b.cy), rs: list.map((b) => b.r), yw: 0.6, first: true, xh: 0.5,
-      top, bottom: H - bot, label: "Flagged windows over the session",
+      top, bottom: H - bot, label: "Flagged windows over the session", ariaHint: "Use the arrow keys to read each window.",
       onMove: (i) => {
         const b = list[i], r = b.pt.r;
         const flags = [r.sweep === true ? "Sweep" : null, r.opening === true ? "Opening" : null, r.floor === true ? "Floor" : null].filter(Boolean);
