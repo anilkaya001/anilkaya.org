@@ -103,6 +103,7 @@ export const FLOWS_NAV = [
   ] },
   { group: "Market", id: "railMarket", items: [
     { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
+    { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave", ownerOnly: true },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
@@ -122,12 +123,13 @@ const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
   { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "unusual", "events", "political"] },
+  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "events", "political"] },
   { href: "/flows/ask/", label: "Ask", glyph: "bubble", keys: ["ask"] },
 ];
 
 const sidebar = (active, username) => {
   const item = (it) => {
+    if (it.ownerOnly && it.key !== active) return "";
     const on = it.key === active;
     const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
     return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -143,7 +145,7 @@ const sidebar = (active, username) => {
   <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.map((g) => `
     <p class="rail-group" id="${g.id}">${g.group}</p>
     <div class="rail-items" role="group" aria-labelledby="${g.id}">
-      ${g.items.map(item).join("\n      ")}
+      ${g.items.map(item).filter(Boolean).join("\n      ")}
     </div>`).join("")}
   </nav>
   <div class="fx-side-f">
@@ -766,6 +768,7 @@ ${UI_CHART_SCRIPTS}
 }
 
 const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
+const MOVES_CSS = ["/assets/css/flows-feeds.css", "/assets/css/flows-moves.css"];
 
 const feedModule = (id, title, body, { span = "", seg = "" } = {}) => `
     <section class="ui-card ui-mod ui-enter fd-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
@@ -802,6 +805,26 @@ ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div
 `, { chrome: false })}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
+</body>
+</html>`;
+}
+
+export function movesPage({ username = "" } = {}) {
+  return `${head("Flows \u2014 Moves", "Today's moves in units of each name's own implied one-day move, with earnings names ranked apart and no error rate claimed.", MOVES_CSS)}
+${shell("Moves", "moves", username, `${feedHead("mv", "Moves")}
+  <p class="visually-hidden" id="mvStatus" role="status">Loading the universe\u2026</p>
+  <p class="fd-meta" id="mvLine"></p>
+  <p class="fd-meta" id="mvCtx"></p>
+  <div class="ui-grid fd-grid">
+${feedModule("mvUpCard", "Risers", `<div class="fd-body" id="mvUp"></div>`, { span: 6 })}
+${feedModule("mvDownCard", "Fallers", `<div class="fd-body" id="mvDown"></div>`, { span: 6 })}
+${feedModule("mvApartCard", "Earnings within 30 days", `<div class="fd-body" id="mvApart"></div>`)}
+  </div>
+`, { chrome: false })}
+${UI_SCRIPT}
+<script src="${v("/assets/js/flows-fresh.js")}" defer></script>
+<script src="${v("/assets/js/flows-rt.js")}" defer></script>
+<script src="${v("/assets/js/flows-moves.js")}" defer></script>
 </body>
 </html>`;
 }
@@ -1134,6 +1157,6 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
 };
 
