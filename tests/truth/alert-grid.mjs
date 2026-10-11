@@ -185,6 +185,14 @@ export const CONSTRUCTIONS = Object.freeze({
     params(nuHat, sHat, exact) { return CONSTRUCTIONS_A_PARAMS(nuHat, sHat, exact); },
     evaluate: (mod) => mod.evaluateA,
   }),
+  A0: Object.freeze({
+    id: "A0",
+    title: "calibrated session-maximum law without the multi-scale windows",
+    windows: Object.freeze([]),
+    cfg: Object.freeze({ windows: Object.freeze([]) }),
+    params(nuHat, sHat, exact) { return CONSTRUCTIONS_A_PARAMS(nuHat, sHat, exact); },
+    evaluate: (mod) => mod.evaluateA,
+  }),
   B: Object.freeze({
     id: "B",
     title: "per-increment transformed normal mixture",
@@ -293,7 +301,7 @@ export function checkMonotone(frames) {
 }
 
 export function comboKey(c) {
-  return `${c[0]}:${c[1]}`;
+  return `${c[0]}:${c[1]}${c[2] && c[2] !== "BY" ? ":" + c[2] : ""}`;
 }
 
 export function runNullWorld(spec, L, { bank, mods, combos, onSession = null }) {
@@ -305,26 +313,35 @@ export function runNullWorld(spec, L, { bank, mods, combos, onSession = null }) 
     for (let d = 0; d < cal; d++) calibration.push(world.session(d));
   }
   const measured = measuredPairs(spec, world, calibration);
+  const residualMeasured = spec.measure === "oracle" && spec.opts.innovation === "t"
+    ? { nu: Float64Array.from(world.names, (nm) => nm.nu), s: measured.s }
+    : measured;
   const active = new Uint8Array(world.names.length).fill(1);
   if (measured.buckets) for (let i = 0; i < active.length; i++) active[i] = tierOn(measured.buckets[world.names[i].bucket]) ? 1 : 0;
   const nActive = active.reduce((a, b) => a + b, 0);
   const paused = nActive === 0;
   const hats = new Map();
   for (const c of combos) {
-    hats.set(comboKey(c), hatsFor(CONSTRUCTIONS[c[0]], measured, c[1], spec));
+    const arm = c[2] || "BY";
+    hats.set(comboKey(c), hatsFor(CONSTRUCTIONS[c[0]], arm === "BHres" || arm === "BYres" ? residualMeasured : measured, c[1], spec));
   }
   const out = new Map();
   for (const c of combos) out.set(comboKey(c), { fdps: [], alerts: 0, macro: 0, monotone: true, unionEqualsClose: true, checked: 0 });
+  const mr = world.opts.marketRho, sr = world.opts.sectorRho;
   for (let d = 0; d < spec.sessions; d++) {
     const s = world.session(cal + d);
     const macro = scheduledMacro(s);
+    let residual = null;
     for (const c of combos) {
       const key = comboKey(c);
-      const frames = CONSTRUCTIONS[c[0]].evaluate(mods[c[0]])(s, hats.get(key), bank, CONSTRUCTIONS[c[0]].cfg || {});
+      const arm = c[2] || "BY";
+      const input = arm === "BHres" || arm === "BYres" ? (residual || (residual = residualise(s, world.names, { marketRho: mr, sectorRho: sr }))) : s;
+      const frames = CONSTRUCTIONS[c[0]].evaluate(mods[c[0]])(input, hats.get(key), bank, CONSTRUCTIONS[c[0]].cfg || {});
       maskFrames(frames, active);
       const r = out.get(key);
-      const set = paused ? new Set() : mods[c[0]].sessionAlertSet(frames, Q, nActive);
-      if (d < 20) {
+      const useBh = arm === "BHraw" || arm === "BHres";
+      const set = paused ? new Set() : useBh ? mods[c[0]].bhSessionAlertSet(frames, Q, nActive) : mods[c[0]].sessionAlertSet(frames, Q, nActive);
+      if (d < 20 && !useBh) {
         r.checked++;
         if (!checkMonotone(frames)) r.monotone = false;
         const close = new Set(paused ? [] : mods[c[0]].byAlertSet(frames[frames.length - 1].running, Q, nActive));
@@ -339,6 +356,116 @@ export function runNullWorld(spec, L, { bank, mods, combos, onSession = null }) 
   const results = {};
   for (const [key, r] of out) results[key] = { ...r, bound: fdrBound(r.fdps) };
   return { id: spec.id, results, measured: measured.buckets, world, paused, active: nActive };
+}
+
+function medianOf(a, n) {
+  const c = Array.from({ length: n }, (_, i) => a[i]).sort((x, y) => x - y);
+  return n % 2 ? c[(n - 1) / 2] : 0.5 * (c[n / 2 - 1] + c[n / 2]);
+}
+
+export function residualise(session, names, { marketRho, sectorRho }) {
+  const N = session.names, B = session.bars;
+  const sectors = new Map();
+  names.forEach((nm, i) => { if (!sectors.has(nm.sector)) sectors.set(nm.sector, []); sectors.get(nm.sector).push(i); });
+  const beta = Float64Array.from(names, (nm) => nm.beta0);
+  const keep = Float64Array.from(names, (nm) => {
+    const norm2 = marketRho * nm.beta0 * nm.beta0 + 1 - marketRho;
+    return 1 / Math.sqrt(1 - (marketRho * nm.beta0 * nm.beta0 + (1 - marketRho) * sectorRho) / norm2);
+  });
+  const inc = new Float64Array(N * B);
+  const z = new Float64Array(N), ratio = new Float64Array(N);
+  for (let b = 0; b < B; b++) {
+    const root = Math.sqrt(session.clockForecast[b]);
+    for (let i = 0; i < N; i++) { z[i] = session.inc[i * B + b] / (session.sigmaForecast[i] * root); ratio[i] = z[i] / beta[i]; }
+    const f = medianOf(ratio, N);
+    for (let i = 0; i < N; i++) z[i] -= beta[i] * f;
+    for (const members of sectors.values()) {
+      const g = medianOf(members.map((k) => names[k].sign * z[k]), members.length);
+      for (const k of members) z[k] -= names[k].sign * g;
+    }
+    for (let i = 0; i < N; i++) inc[i * B + b] = z[i] * keep[i] * session.sigmaForecast[i] * root;
+  }
+  return { ...session, inc };
+}
+
+export function powerPlan(L, N, cells, d, seed, minutes = 390) {
+  const rng = makeRng(`${seed}|plan|${d}`);
+  const g = Math.max(1, Math.floor((0.05 * N) / cells.length));
+  const order = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) { const j = rng.int(i + 1); [order[i], order[j]] = [order[j], order[i]]; }
+  const out = [];
+  let at = 0;
+  cells.forEach((c, ci) => {
+    for (let k = 0; k < g; k++) {
+      out.push({ day: d, name: order[at++], start: 10 + rng.int(minutes - c.D - 20), spread: c.D, size: (rng.uniform() < 0.5 ? -1 : 1) * c.J, cell: ci });
+    }
+  });
+  return { plan: out, group: g };
+}
+
+export function powerCells(L) {
+  return L.deep ? ALL_CELLS : [...POWER_CELLS, ...REPORTED_CELLS.slice(0, 2)];
+}
+
+export function runPower(L, { bank, mods, ids = ["A", "B"], arms = false, sessions = L.powerSessions, scaleError = 0.2, seed = `grid|power|${L.salt}` }) {
+  const cells = powerCells(L);
+  const N = L.names;
+  const base = { names: N, innovation: "t", nuSet: [3, 4, 5, 8], sectorSigns: true, seasonalError: 0.1, scaleError, sessions, seed };
+  const plans = [];
+  let group = 1;
+  for (let d = 0; d < sessions; d++) { const p = powerPlan(L, N, cells, d, seed); group = p.group; plans.push(...p.plan); }
+  const world = w9World({ ...base, plantJumps: plans });
+  const spec = { measure: "oracle", truth: { s: scaleError }, exactNull: false };
+  const measured = measuredPairs(spec, world, null);
+  const armNames = arms ? ["BY", "BHraw", "BHres"] : ["BY"];
+  const resMeasured = { nu: Float64Array.from(world.names, (nm) => nm.nu), s: measured.s };
+  const hats = Object.fromEntries(ids.map((id) => [id, hatsFor(CONSTRUCTIONS[id], measured, "covered", spec)]));
+  const resHats = arms ? hatsFor(CONSTRUCTIONS.A, resMeasured, "covered", spec) : null;
+  const out = {};
+  const ensure = (key) => { if (!out[key]) out[key] = { perSession: new Float64Array(sessions), detected: cells.map(() => 0), planted: cells.map(() => 0), falseAlerts: 0, alerts: 0, fdps: [] }; return out[key]; };
+  for (let d = 0; d < sessions; d++) {
+    const s = world.session(d);
+    const mine = plans.filter((p) => p.day === d);
+    const plantedBy = new Map(mine.map((p) => [p.name, p.cell]));
+    const account = (key, set) => {
+      const r = ensure(key);
+      const det = cells.map(() => 0);
+      let falseN = 0;
+      for (const i of set) { if (plantedBy.has(i)) det[plantedBy.get(i)]++; else falseN++; }
+      let w = 0;
+      cells.forEach((c, ci) => { r.detected[ci] += det[ci]; r.planted[ci] += group; w += (c.weight * det[ci]) / group; });
+      r.perSession[d] = w / POWER_WEIGHT_TOTAL;
+      r.falseAlerts += falseN;
+      r.alerts += set.size;
+      r.fdps.push(set.size ? falseN / set.size : 0);
+    };
+    for (const id of ids) {
+      const frames = CONSTRUCTIONS[id].evaluate(mods[id])(s, hats[id], bank, CONSTRUCTIONS[id].cfg || {});
+      account(id, mods[id].sessionAlertSet(frames, Q, N));
+    }
+    if (arms) {
+      const mod = mods.A;
+      const rawFrames = CONSTRUCTIONS.A.evaluate(mod)(s, hats.A, bank, {});
+      account("A:BHraw", mod.bhSessionAlertSet(rawFrames, Q, N));
+      const res = residualise(s, world.names, { marketRho: world.opts.marketRho, sectorRho: world.opts.sectorRho });
+      const resFrames = CONSTRUCTIONS.A.evaluate(mod)(res, resHats, bank, {});
+      account("A:BHres", mod.bhSessionAlertSet(resFrames, Q, N));
+      account("A:BYres", mod.sessionAlertSet(resFrames, Q, N));
+    }
+  }
+  return { cells, group, sessions, N, results: out, world, armNames };
+}
+
+export function cellPower(r, cells) {
+  const out = {};
+  cells.forEach((c, ci) => { out[cellKey(c)] = { weight: c.weight, detected: r.detected[ci], planted: r.planted[ci], power: r.detected[ci] / r.planted[ci] }; });
+  return out;
+}
+
+export function weightedMean(perCell) {
+  let w = 0, t = 0;
+  for (const c of POWER_CELLS) { const p = perCell[cellKey(c)]; w += c.weight * p.power; t += c.weight; }
+  return w / t;
 }
 
 export function pairedDifference(a, b) {
@@ -379,6 +506,34 @@ export function decide(tables, { pairs = {} } = {}) {
   const tie = Math.abs(worstUpper(tables[lo]) - worstUpper(tables[hi])) < 1e-9;
   const choice = tie ? (qualified.includes("A") ? "A" : byUpper[0]) : lo;
   return { choice, rule: tie ? "power and covered-cell bound tie: A" : "power difference within twice the paired standard error: lower covered-cell bound", ...basis, margin: { weightedPower: tables[choice].weightedPower, runnerUp: choice === top ? second : top, difference: diff ? diff.mean : null, se: diff ? diff.se : null, upperChoice: worstUpper(tables[choice]), upperOther: worstUpper(tables[choice === lo ? hi : lo]) } };
+}
+
+export function availability(L, { sessions = 400, window = 20, scaleError = 0.2, seed = `grid|stress|${L.salt}`, threshold = 0.3 } = {}) {
+  const dayTypes = ["normal", "normal", "fomc", "normal", "cpi", "normal", "earlyClose", "normal"];
+  const world = w9World({ names: L.names, sessions: sessions + window, seed, innovation: "t", nuSet: [3, 4, 5, 8], sectorSigns: true, scaleError, regimeScale: true, dayTypes, paths: false });
+  const hist = [];
+  const rows = [];
+  for (let d = 0; d < sessions + window; d++) {
+    const s = world.session(d);
+    if (d >= window) {
+      const sHat = [0, 1, 2].map((b) => {
+        const xs = [];
+        for (const h of hist.slice(-window)) for (let i = 0; i < h.length; i++) if (world.names[i].bucket === b) xs.push(h[i]);
+        const m = mean(xs);
+        return Math.sqrt(xs.reduce((a, x) => a + (x - m) * (x - m), 0) / (xs.length - 1));
+      });
+      rows.push({ type: s.type, stress: s.stress, on: sHat.every((v) => v <= threshold), sHat });
+    }
+    hist.push(s.scaleLogError);
+  }
+  const share = (f) => { const r = rows.filter(f); return r.length ? r.filter((x) => x.on).length / r.length : NaN; };
+  return {
+    sessions, window, threshold,
+    on: share(() => true), onMacro: share((r) => r.type === "fomc" || r.type === "cpi"), onStress: share((r) => r.stress), onCalm: share((r) => !r.stress),
+    macroSessions: rows.filter((r) => r.type === "fomc" || r.type === "cpi").length,
+    stressSessions: rows.filter((r) => r.stress).length,
+    target: 0.9,
+  };
 }
 
 export function fedPair(measured, step) {

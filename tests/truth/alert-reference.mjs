@@ -39,6 +39,12 @@ export function screenSets(frames, q, n) {
   return frames.map((f) => new Set(byAlertSet(f.current, q, n)));
 }
 
+export function bhSessionAlertSet(frames, q, n) {
+  const out = new Set();
+  for (const f of frames) for (const i of bhAlertSet(f.running, q, n)) out.add(i);
+  return out;
+}
+
 const clockCache = new WeakMap();
 
 export function clockOf(session, windows = OPERATING.windows) {

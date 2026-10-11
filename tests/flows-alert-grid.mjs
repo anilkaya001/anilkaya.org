@@ -7,6 +7,7 @@ import { byReject, bhReject, harmonic } from "./truth/reference.mjs";
 import * as stock from "./truth/alert-reference.mjs";
 import * as G from "./truth/alert-grid.mjs";
 import * as E from "./truth/alertsim-evidence.mjs";
+import { runGridKillMatrix, GRID_MUTANTS } from "./truth/alert-mutants.mjs";
 
 let n = 0;
 const flags = [];
@@ -20,7 +21,7 @@ const pct = (x, d = 1) => (100 * x).toFixed(d) + "%";
 const L = G.lane();
 const specs = G.worldSpecs(L);
 const bank = G.sharedBank(L);
-const mods = { A: stock, B: stock };
+const mods = { A: stock, B: stock, A0: stock };
 
 async function section(name, fn) {
   const before = n;
@@ -170,7 +171,7 @@ await section("calibration family cells", () => {
   const ids = L.deep ? ["het01", "het02", "het03", "gap"] : ["het02", "het03", "gap"];
   for (const id of ids) {
     const combos = [["A", "covered"], ["B", "covered"]];
-    if (id === "het02") combos.push(["A", "light"], ["B", "light"]);
+    if (id === "het02") combos.push(["A0", "covered"], ["A", "light"], ["B", "light"], ["A", "covered", "BHraw"], ["A", "covered", "BHres"], ["A", "covered", "BYres"]);
     else if (L.deep) combos.push(["A", "light"], ["B", "light"]);
     const { run, spec } = covered(id, combos);
     eq(spec.sessions >= G.MIN_NULL_SESSIONS, true, `${id}: a complete-null cell runs at least ${G.MIN_NULL_SESSIONS} sessions`);
@@ -178,12 +179,13 @@ await section("calibration family cells", () => {
     ok(G.isCovered(spec, run.world, measured, "covered") === true, `${id}: the fed pair is at least as heavy as the truth: the cell is covered`);
     for (const key of Object.keys(run.results)) {
       const v = run.results[key];
-      const [cid, step] = key.split(":");
+      const [cid, step, arm] = key.split(":");
       const tag = `${id} ${key}`;
       log(`${tag.padEnd(26)} ${fmtCell(v)}`);
+      if (arm === "BHraw" || arm === "BHres" || arm === "BYres") continue;
       if (step === "covered") {
         ok(v.monotone && v.unionEqualsClose, `${tag}: running p only falls and the union is the close set`);
-        required.push({ world: id, construction: cid, id, upper: v.bound.upper, mean: v.bound.mean, n: v.bound.n });
+        if (cid !== "A0") required.push({ world: id, construction: cid, id, upper: v.bound.upper, mean: v.bound.mean, n: v.bound.n });
       } else {
         ok(G.isCovered(spec, run.world, measured, "light") === false, `${tag}: one step lighter is a cell the truth is heavier than`);
         reported.push({ id: tag, upper: v.bound.upper, mean: v.bound.mean });
@@ -220,13 +222,72 @@ await section("out-of-family world", () => {
   ok(required.some((r) => r.outOfFamily), "at least one judgement world the calibration family did not generate has a covered cell");
 });
 
+const power = {};
+await section("power", () => {
+  const t0 = Date.now();
+  const r = G.runPower(L, { bank, mods, ids: ["A", "B", "A0"], arms: true });
+  power.run = r;
+  log(`power: ${r.sessions} sessions, ${r.N} names, ${r.group} planted name${r.group > 1 ? "s" : ""} per J x D cell, ${r.cells.length} cells, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  const keys = ["A", "B", "A0", "A:BHraw", "A:BHres", "A:BYres"];
+  const per = {};
+  for (const k of keys) per[k] = G.cellPower(r.results[k], r.cells);
+  log("J x D".padEnd(14) + "weight".padEnd(9) + keys.map((k) => k.padStart(9)).join(""));
+  for (const c of r.cells) {
+    const key = G.cellKey(c);
+    log(`J=${c.J}  D=${c.D}`.padEnd(14) + (c.weight ? c.weight.toFixed(2) : "report").padEnd(9) + keys.map((k) => pct(per[k][key].power, 0).padStart(9)).join(""));
+  }
+  const wp = {};
+  for (const k of keys) wp[k] = G.weightedMean(per[k]);
+  log("weighted".padEnd(23) + keys.map((k) => pct(wp[k], 1).padStart(9)).join(""));
+  log("false alerts".padEnd(23) + keys.map((k) => String(r.results[k].falseAlerts).padStart(9)).join(""));
+  power.per = per;
+  power.wp = wp;
+  for (const k of keys) {
+    ok(Number.isFinite(wp[k]) && wp[k] >= 0 && wp[k] <= 1, `${k}: the weighted power ${wp[k]} is a probability`);
+    for (const c of r.cells) ok(Number.isFinite(per[k][G.cellKey(c)].power), `${k} ${G.cellKey(c)}: power is measured`);
+  }
+  ok(r.cells.some((c) => c.J === 3 && c.D === 60) && r.cells.some((c) => c.J === 4 && c.D === 60), "the sixty-minute cells J=3 and J=4 are measured and printed for both constructions");
+  const sixty = r.cells.filter((c) => c.D === 60).map((c) => `J=${c.J}: A ${pct(per.A[G.cellKey(c)].power, 0)}, B ${pct(per.B[G.cellKey(c)].power, 0)}`).join("; ");
+  log(`sixty-minute repricings, A against B: ${sixty}`);
+  const ab = G.pairedDifference(r.results.A.perSession, r.results.B.perSession);
+  log(`weighted power A minus B: ${pct(ab.mean, 1)}, paired standard error ${pct(ab.se, 1)} (${(ab.mean / ab.se).toFixed(1)} SE)`);
+  const aw = G.pairedDifference(r.results.A.perSession, r.results.A0.perSession);
+  log(`weighted power A minus the same law without the 5, 15 and 60 minute windows: ${pct(aw.mean, 1)}, paired standard error ${pct(aw.se, 1)}`);
+  ok(aw.mean > 2 * aw.se, "the planted pair with a known ordering is ranked correctly: the windows add power by more than twice the paired standard error");
+  ok(per.A["J5D15"].power > per.A0["J5D15"].power + 0.3, "the mixture-only law is the one that is weak at J=5, D=15");
+  const by = G.pairedDifference(r.results["A:BHres"].perSession, r.results["A:BYres"].perSession);
+  log(`challenger: BH on residualised p detects ${pct(by.mean, 1)} more of the weighted cells than BY on the same p (paired SE ${pct(by.se, 1)}); false alerts ${r.results["A:BHres"].falseAlerts} against ${r.results["A:BYres"].falseAlerts}`);
+  ok(by.mean >= 0, "BH on the same p detects at least as much as BY");
+  for (let d = 0; d < r.sessions; d++) ok(r.results["A:BHres"].perSession[d] >= r.results["A:BYres"].perSession[d] - 1e-12, `session ${d}: BH never rejects fewer than BY on the same p`);
+});
+
+await section("challenger", () => {
+  const { run } = nullRuns.get("het02");
+  for (const key of ["A:covered:BHraw", "A:covered:BHres", "A:covered:BYres"]) {
+    const v = run.results[key];
+    ok(v.bound.upper <= G.FDR_BAR, `${key}: the challenger arm is inside the bar in the random-sign sector cell (upper ${v.bound.upper.toFixed(4)})`);
+  }
+  const r = power.run.results;
+  const challengerFdr = r["A:BHres"].fdps.length ? G.fdrBound(r["A:BHres"].fdps) : null;
+  log(`BH on residualised p in the planted sessions: false share of Alerts ${pct(challengerFdr.mean, 2)}, upper bound ${pct(challengerFdr.upper, 2)}; BY on raw p ${pct(G.fdrBound(r.A.fdps).mean, 2)}`);
+  ok(challengerFdr.upper <= G.FDR_BAR, "BH on residualised p qualifies in the planted cells");
+  log("the challenger is quantified and not switched: BY ships, and its price in power against BH on the same p is printed above");
+});
+
 const tables = {};
 const decision = {};
 await section("decision rule", () => {
-  for (const id of ["A", "B"]) tables[id] = { covered: required.filter((r) => r.construction === id).map((r) => ({ id: r.id, upper: r.upper })), weightedPower: null, perSession: null };
+  for (const id of ["A", "B"]) {
+    tables[id] = {
+      covered: required.filter((r) => r.construction === id).map((r) => ({ id: r.id, upper: r.upper })),
+      weightedPower: power.wp[id],
+      perSession: power.run.results[id].perSession,
+    };
+  }
   const d = G.decide(tables);
   Object.assign(decision, d);
   log(`rule: ${d.rule}; qualified ${d.qualified.join(", ") || "none"}; rejected ${d.rejected.map((r) => `${r.id} (${r.cell})`).join("; ") || "none"}`);
+  if (d.margin) log(`choice ${d.choice}, margin ${JSON.stringify(d.margin)}`);
   ok(d.choice !== null, "the registered rule names a construction");
   ok(tables[d.choice].covered.length >= 5, `the shipped construction ${d.choice} is held to at least five covered cells`);
   for (const c of tables[d.choice].covered) ok(c.upper <= G.FDR_BAR, `${d.choice}: covered cell ${c.id} has an FDR upper bound ${c.upper.toFixed(4)} at most ${G.FDR_BAR}`);
@@ -235,6 +296,9 @@ await section("decision rule", () => {
   ok(d.rejected.some((r) => r.id === "B" && /w9o/.test(r.cell)), "and it is the out-of-family cell that disqualifies it");
   eq(d.choice, "A", "A ships");
   eq(d.rule, "sole qualifier", "as the only construction that qualifies");
+  const hypothetical = G.decide({ A: { ...tables.A }, B: { ...tables.B, covered: tables.B.covered.filter((c) => !/w9o/.test(c.id)) } });
+  log(`if the out-of-family cell were not in the rule, B would qualify and the rule would say: ${hypothetical.choice} (${hypothetical.rule}); B leads by ${hypothetical.margin && hypothetical.margin.difference !== undefined ? pct(hypothetical.margin.difference, 1) : "n/a"}`);
+  eq(hypothetical.choice, "B", "the rule is not a tie-break letter: with B qualifying, its larger weighted power ships it");
   const cells = [];
   for (const r of required.filter((x) => x.construction === d.choice)) {
     const exactCell = r.world === "exact";
@@ -304,5 +368,31 @@ await section("alertsim4 evidence", () => {
   eq(E.ALERTSIM4.power.J3D60, 0, "and the J=3, D=60 figure the rule does not weigh");
 });
 
+await section("stress", () => {
+  const rows = [0.1, 0.15, 0.2].map((s) => ({ s, a: G.availability(L, { scaleError: s }) }));
+  for (const { s, a } of rows) {
+    log(`macro-day stress, scale error ${s}: Alert tier on in ${pct(a.on, 1)} of ${a.sessions} sessions (target ${pct(a.target, 0)}); on FOMC and CPI days ${pct(a.onMacro, 1)} of ${a.macroSessions}; on stress days ${pct(a.onStress, 1)} of ${a.stressSessions}; on calm days ${pct(a.onCalm, 1)}`);
+    ok(a.macroSessions >= 50 && a.stressSessions >= 30, `${s}: the cell has macro and stress sessions to report on`);
+    ok(Number.isFinite(a.on) && Number.isFinite(a.onMacro) && Number.isFinite(a.onStress), `${s}: availability is measured overall, on macro days and on stress days`);
+  }
+  ok(rows[0].a.on >= rows[0].a.target && rows[1].a.on >= rows[1].a.target, "at a scale error of 0.15 or less the nightly switch leaves the Alert on for at least 90% of sessions");
+  const missed = rows[2].a.on < rows[2].a.target;
+  log(missed ? `at 0.2 the target is MISSED (${pct(rows[2].a.on, 1)}): the stress days push the rolling scale error past 0.3; the grid, not the page, is what is fixed` : "at 0.2 the target is met");
+  ok(rows[2].a.onStress < rows[2].a.onCalm, "stress days are the days the tier is paused");
+});
+
+await section("planted wrong builds", async () => {
+  const rows = await runGridKillMatrix();
+  const width = Math.max(...rows.map((r) => r.id.length));
+  for (const r of rows) log(`${r.id.padEnd(width)}  baseline ${r.baselineOk ? "passes" : "FAILS"}  planted wrong build ${r.killed ? "KILLED" : "SURVIVED"}  [${r.mutatedNote}]`);
+  eq(rows.length, GRID_MUTANTS.length, "every grid mutant ran");
+  eq(GRID_MUTANTS.length, 5, "five wrong builds are planted");
+  for (const r of rows) {
+    ok(r.baselineOk, `${r.id}: the correct build passes (${r.baselineNote})`);
+    ok(r.killed, `${r.id}: the planted wrong build is killed (${r.mutatedNote})`);
+  }
+  for (const id of ["grid-running-p-can-rise", "grid-by-line-without-harmonic", "grid-snapshot-bh-union-as-session-fdr", "grid-scale-not-inflated", "grid-transform-on-the-cumulative"]) ok(rows.some((r) => r.id === id), `${id} is registered`);
+});
+
 if (flags.length) console.log(`deep lane flagged ${flags.length} section(s): ${flags.join(" | ")}`);
-console.log(`✓ flows-alert-grid: ${n} assertions — BY with N fixed at the open on running p that only fall, the exact world, the covered cells of the grid (a calibrated session-maximum law and a per-increment transformed mixture, both with the same windows), the out-of-family judgement world, the pre-registered decision rule on synthetic tables and on the alertsim4 outputs`);
+console.log(`✓ flows-alert-grid: ${n} assertions — BY with N fixed at the open on running p that only fall, the exact world, the covered cells of the grid (a calibrated session-maximum law and a per-increment transformed mixture, both with the same windows), the out-of-family judgement world, the power table over J x D, the pre-registered decision rule on synthetic tables and on the alertsim4 outputs, the BH challenger, the macro-day stress cell and five planted wrong builds killed`);
