@@ -121,6 +121,7 @@ const SPECS = [
   { id: "market", fn: "marketPage", url: "/flows/market/" },
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
+  { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA" },
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
