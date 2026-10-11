@@ -9,6 +9,9 @@ export const W9_DEFAULTS = Object.freeze({
   cadence: 1,
   innovation: "t",
   nuRange: Object.freeze([4, 8]),
+  nuSet: null,
+  sectorSigns: false,
+  gapNu: 0,
   garch: Object.freeze({ alpha: 0.05, beta: 0.93 }),
   dayGarch: Object.freeze({ alpha: 0.08, beta: 0.9 }),
   marketRho: 0.15,
@@ -55,6 +58,11 @@ export const W9_WORLDS = Object.freeze({
 });
 export const SCALE_ERROR_LAWS = Object.freeze(["normal", "t3", "contaminated"]);
 
+function pickNu(o, u) {
+  if (o.nuSet) return o.nuSet[Math.min(o.nuSet.length - 1, Math.floor(u * o.nuSet.length))];
+  return Math.min(o.nuRange[1], o.nuRange[0] + Math.floor(u * (o.nuRange[1] - o.nuRange[0] + 1)));
+}
+
 function law(rng, kind) {
   if (kind === "t3") return rng.studentUnit(3);
   if (kind === "contaminated") return (rng.uniform() < 0.9 ? 0.6 * rng.normal() : 2.2 * rng.normal()) / Math.sqrt(0.9 * 0.36 + 0.1 * 4.84);
@@ -87,9 +95,14 @@ export function w9World(opts = {}) {
       bucket,
       sigma0: 0.012 * Math.exp(0.45 * r.normal() + 0.25 * bucket),
       beta0: Math.min(1.8, Math.max(0.4, 1 + 0.3 * r.normal())),
-      nu: Math.min(o.nuRange[1], o.nuRange[0] + Math.floor(r.uniform() * (o.nuRange[1] - o.nuRange[0] + 1))),
+      nu: pickNu(o, r.uniform()),
       bounceName: o.bounce.half > 0 && i % o.bounce.every === 0,
+      sign: 1,
     });
+  }
+  if (o.sectorSigns) {
+    const rs = rng.child("sector-signs");
+    for (let i = 0; i < N; i++) names[i].sign = rs.uniform() < 0.5 ? -1 : 1;
   }
   const marketScale = new Float64Array(o.sessions);
   {
@@ -160,7 +173,7 @@ function w9Session(o, names, marketScale, stressLine, d) {
   const sectorG = new Float64Array(o.sectors);
   const gapDraw = root.child("gap");
   for (let i = 0; i < N; i++) {
-    let g = Math.sqrt(gapShare) * sigmaTrue[i] * gapDraw.normal();
+    let g = Math.sqrt(gapShare) * sigmaTrue[i] * (o.gapNu > 0 ? gapDraw.studentUnit(o.gapNu) : gapDraw.normal());
     if (o.eventRate > 0 && rEvent.uniform() < o.eventRate) {
       const size = o.eventSize * (rEvent.uniform() < 0.5 ? -1 : 1) * (0.7 + 0.6 * rEvent.uniform());
       g += size * sigmaTrue[i];
@@ -184,7 +197,7 @@ function w9Session(o, names, marketScale, stressLine, d) {
       } else eps = rBase.normal();
       bstate[i] = aBeta * bstate[i] + Math.sqrt(1 - aBeta * aBeta) * rBase.normal();
       const b = nm.beta0 * (1 + o.betaDrift * bstate[i]);
-      let z = (lf * b * fact + ls * sectorG[nm.sector] + li * eps) / Math.sqrt(o.marketRho * b * b + 1 - o.marketRho);
+      let z = (lf * b * fact + ls * nm.sign * sectorG[nm.sector] + li * eps) / Math.sqrt(o.marketRho * b * b + 1 - o.marketRho);
       if (o.serial.kappa !== 0) { z += o.serial.kappa * hist[i]; hist[i] = aSerial * hist[i] + (1 - aSerial) * z * 10; }
       let vm = 1;
       if (o.volCluster.sd > 0) {
