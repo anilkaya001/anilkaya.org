@@ -54,7 +54,7 @@
     return { W, H, cols, rows, cw, unit, items: items.sort((a, b) => a.order - b.order || a.gx - b.gx) };
   }
 
-  const sign = (v) => (v < 0 ? MINUS : "+");
+  const sign = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const f1 = (v) => (v === null ? DASH : sign(v) + Math.abs(v).toFixed(1));
   const pc = (v) => (v === null ? DASH : sign(v) + Math.abs(v * 100).toFixed(1) + "%");
 
@@ -127,9 +127,9 @@
   }
 
   function table(md) {
-    const body = md.prisms.slice().sort((a, b) => b.h - a.h || (a.t < b.t ? -1 : 1)).map((p) => el("tr", { "data-t": p.t, "data-dir": p.dir > 0 ? "up" : "down" },
+    const body = md.prisms.slice().sort((a, b) => b.h - a.h || (a.t < b.t ? -1 : 1)).map((p) => el("tr", { "data-t": p.t, "data-dir": p.dir > 0 ? "up" : p.dir < 0 ? "down" : "flat" },
       el("th", { scope: "row" }, p.t), el("td", null, p.sector || DASH), el("td", null, pc(p.chg)),
-      el("td", null, f1(p.m)), el("td", null, p.dir > 0 ? "▲ up" : "▼ down"), el("td", null, p.event ? "Event not separated" : "")));
+      el("td", null, f1(p.m)), el("td", null, p.dir > 0 ? "▲ up" : p.dir < 0 ? "▼ down" : "flat"), el("td", null, p.event ? "Event not separated" : "")));
     return el("div", { class: "mk-tw" }, el("table", { class: "mk-tbl mk-sky-t" },
       el("caption", null, "Names that moved " + MIN + " IV-days or more, largest first"),
       el("thead", null, el("tr", null, ...["Name", "Sector", "Change", "IV-days", "Direction", "Note"].map((x) => el("th", { scope: "col" }, x)))),
@@ -155,7 +155,7 @@
       return { model: md };
     }
     const top = md.prisms.slice().sort((a, b) => b.h - a.h)[0];
-    const aria = md.prisms.length + " names moved " + MIN + " IV-days or more among " + md.n + " priced names. The largest is " + top.t + ", " + (top.dir > 0 ? "up " : "down ") + top.h.toFixed(1) + " IV-days. The table below lists them all.";
+    const aria = md.prisms.length + " names moved " + MIN + " IV-days or more among " + md.n + " priced names. The largest is " + top.t + ", " + (top.dir > 0 ? "up " : top.dir < 0 ? "down " : "flat ") + top.h.toFixed(1) + " IV-days. The table below lists them all.";
     const canvas = el("canvas", { class: "mk-sky-c", role: "img", "aria-label": aria });
     const wide = host.clientWidth >= NARROW;
     const details = el("details", { class: "mk-sky-d" }, el("summary", null, "Table of the " + md.prisms.length + " names"), table(md));
