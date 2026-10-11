@@ -1490,9 +1490,10 @@ call on the fake (stored reading 2.0 ms, none stored 4.6 ms, the dossier route f
 `flows-reading-render` needs Chromium and no server (set `PLAYWRIGHT_BROWSERS_PATH`): about 9 s, 63 checks, against
 a fixture card and `page.route` stubs of the summary. It checks chips, labels, the three states, polling, no markup
 from model text, keyboard focus and no horizontal scroll at 320, 390 and 1280.
-`flows-ai-salvage` was measured on 2026-10-11: about 6 s with no server and 26,985 assertions, 17,369 of them cut offsets. The
+`flows-ai-salvage` was measured on 2026-10-11: about 6 s with no server and 27,196 assertions, most of them cut offsets. The
 scan of a reply cut at 3,000 characters costs 0.02 ms of CPU (a salvage with the vet, 1.3 ms, the vet being the cost); it needs no
-Node floor beyond the suite's own.
+Node floor beyond the suite's own. A reply whose text is malformed rather than cut (a token that is not JSON) keeps nothing, as
+`parseReading` finds it, and the scan records the offset where the grammar broke (`malformedAt`).
 `flows-reads-contract` runs the Neuron's own assertions with `FLOWS_READ_MODE=off` and filters the dossier's trips
 out of them; a final block prices the reading: a summary hit reads 3 rows (the Neuron's two and the reading's one),
 a miss 18 before the response and 30 with the background generation.
