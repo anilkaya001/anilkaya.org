@@ -8,7 +8,7 @@
     {"name": "landing-motion", "class": "C", "group": "shard", "timing": false, "medianS": 29.7, "files": ["landing-motion.mjs"], "covers": ["assets/js/particles.js","index.html"]},
     {"name": "flows", "class": "N", "group": "shard", "timing": false, "medianS": 1.3, "files": ["flows-features.mjs","flows-auth-contract.mjs","flows-card-contract.mjs","flows-premium-contract.mjs"], "covers": ["assets/js/flows-ticker.js","assets/version.txt","scripts/generate-flows-credentials.mjs","tests/fixtures-desk-golden-iv.json","tests/fixtures-desk-golden.json"]},
     {"name": "pipeline", "class": "N", "group": "shard", "timing": false, "medianS": 192.2, "files": ["../scripts/flows-pipeline.mjs","flows-pipeline-contract.mjs"], "covers": ["worker.js"]},
-    {"name": "flows-probe", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "files": ["flows-probe-contract.mjs"], "covers": ["scripts/flows-pipeline.mjs"]},
+    {"name": "flows-probe", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "files": ["flows-probe-contract.mjs"], "covers": ["docs/uw-openapi.yaml","scripts/flows-pipeline.mjs","worker.js"]},
     {"name": "flows-ws-probe", "class": "N", "group": "shard", "timing": true, "medianS": 56.7, "files": ["flows-ws-probe-contract.mjs"], "covers": []},
     {"name": "flows-universe", "class": "N", "group": "shard", "timing": false, "medianS": 0.2, "files": ["flows-universe-contract.mjs"], "covers": []},
     {"name": "flows-legs", "class": "N", "group": "shard", "timing": false, "medianS": 1.3, "files": ["flows-legs-contract.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/fixtures-flows-legs-probe.json","worker.js"]},

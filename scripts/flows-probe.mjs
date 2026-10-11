@@ -13,12 +13,14 @@ export const LIST_PATH = fileURLToPath(new URL("./flows-probe-list.json", import
 export const DEFAULT_TICKERS = Object.freeze(["AAPL", "NVDA"]);
 export const MAX_TICKERS = 10;
 export const MIN_GAP_MS = 250;
-export const SAMPLE_ROWS = 5;
-export const SAMPLE_CHARS = 700;
+export const SAMPLE_ROWS = 500;
 export const CALL_TIMEOUT_MS = 30_000;
 export const MAX_LIMITED_RETRIES = 3;
 export const MAX_RETRY_AFTER_MS = 30_000;
 export const MONTHLY_MIN_DAYS = 14;
+export const GOLD_MONTHS = Object.freeze([2, 4, 6, 8, 12]);
+export const NOTICE_MARGIN_DAYS = 5;
+export const MIN_BOUND_CHARS = 4;
 export const CLOSE_MINUTES = 16 * 60;
 export const REDACTED = "[redacted]";
 export const TIERS = Object.freeze(["used", "1", "2"]);
@@ -37,13 +39,19 @@ const MAX_NAMES = 40;
 const LINE_WIDTH = 118;
 const DAY_MS = 86_400_000;
 const TOKEN = /\{([A-Za-z0-9-]+)\}/g;
-const DATE_TOKEN = /\{(date|date-\d{1,4}d|next-session|weekly|monthly|monthly2)\}/;
+const DATE_TOKEN = /\{(date|date-\d{1,4}d|next-session|weekly|monthly|monthly2|gold-front)\}/;
 const TICKER = /^[A-Z][A-Z0-9.-]{0,9}$/;
+const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const DIGIT_RUN = /\d{4}/;
+const MONTH_CODES = "FGHJKMNQUVXZ";
 const LIMIT_HEADER = /rate-?limit|retry-after|quota|remaining|reset|req-?count|req-?limit|req-per|counter/i;
 const NEVER_HEADER = /authorization|cookie|api-?key|secret|password/i;
+const TOKEN_SPLIT = /[^a-z0-9_]+/;
 const NUMERIC = /^\s*[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/;
 
 export class UsageError extends Error {}
+
+export const isNameShaped = (key) => IDENT.test(key) && !DIGIT_RUN.test(key);
 
 const isObj = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -94,6 +102,27 @@ export function monthlyAtLeast(day, minDays) {
   }
 }
 
+export function lastWeekdayOf(year, month) {
+  let d = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  while (!isWeekday(d)) d = addDays(d, -1);
+  return d;
+}
+
+export function goldFront(day) {
+  let year = Number(day.slice(0, 4));
+  let month = Number(day.slice(5, 7));
+  for (;;) {
+    if (GOLD_MONTHS.includes(month)) {
+      const notice = month === 1 ? lastWeekdayOf(year - 1, 12) : lastWeekdayOf(year, month - 1);
+      if ((Date.parse(notice) - Date.parse(day)) / DAY_MS >= NOTICE_MARGIN_DAYS) {
+        return `GC${MONTH_CODES[month - 1]}${year % 10}`;
+      }
+    }
+    month += 1;
+    if (month > 12) { month = 1; year += 1; }
+  }
+}
+
 export function dateTokens(session) {
   const monthly = monthlyAtLeast(session, MONTHLY_MIN_DAYS);
   return {
@@ -102,6 +131,7 @@ export function dateTokens(session) {
     weekly: fridayAfter(session),
     monthly,
     monthly2: monthlyAtLeast(monthly, 1),
+    "gold-front": goldFront(session),
   };
 }
 
@@ -231,6 +261,27 @@ export function validateList(list) {
       throw new Error(`probe list: gated status for ${op} must be a 4xx status`);
     }
   }
+  for (const key of ["liveOnly", "entitlement"]) {
+    const named = list[key];
+    if (named === undefined) continue;
+    if (!Array.isArray(named) || named.some((op) => typeof op !== "string" || !ops.has(op)) || new Set(named).size !== named.length) {
+      throw new Error(`probe list: ${key} must list distinct operations a probe exercises`);
+    }
+  }
+  for (const op of list.entitlement || []) {
+    if (list.probes.some((p) => p.op === op && p.tier === "used")) throw new Error(`probe list: ${op} is read by the code, so a refusal is a failure, not an entitlement finding`);
+    if (Object.hasOwn(list.gated || {}, op)) throw new Error(`probe list: ${op} is both gated and an entitlement question`);
+  }
+  for (const [op, fields] of Object.entries(list.enums || {})) {
+    if (!ops.has(op)) throw new Error(`probe list: enums names ${op}, which no probe exercises`);
+    if (!isObj(fields) || !Object.keys(fields).length) throw new Error(`probe list: enums for ${op} must name fields`);
+    for (const [field, tokens] of Object.entries(fields)) {
+      if (!Array.isArray(tokens) || !tokens.length || tokens.some((t) => typeof t !== "string" || !/^[A-Za-z0-9_]+$/.test(t)) ||
+          new Set(tokens.map((t) => t.toLowerCase())).size !== tokens.length) {
+        throw new Error(`probe list: enums for ${op} ${field} must be distinct documented tokens`);
+      }
+    }
+  }
   return list;
 }
 
@@ -264,6 +315,9 @@ export function expandProbes(list, tickers) {
         expect: (list.expect && list.expect[p.op]) || null,
         reads: (list.reads && list.reads[p.op]) || null,
         gated: (list.gated && list.gated[p.op]) || null,
+        liveOnly: (list.liveOnly || []).includes(p.op),
+        entitlement: (list.entitlement || []).includes(p.op),
+        enums: (list.enums && list.enums[p.op]) || null,
       });
     }
   }
@@ -328,7 +382,7 @@ export function pickBound(rows, spec) {
   return String(usable.reduce((best, row) => (weight(row) > weight(best) ? row : best))[spec.field]);
 }
 
-export function makeRedactor(secret) {
+export function makeRedactor(secret, bound = {}) {
   const variants = [];
   if (typeof secret === "string" && secret.length) {
     for (const v of [secret, JSON.stringify(secret).slice(1, -1), encodeURIComponent(secret)]) {
@@ -336,9 +390,18 @@ export function makeRedactor(secret) {
     }
     variants.sort((a, b) => b.length - a.length);
   }
+  const named = [];
+  for (const [name, value] of Object.entries(bound || {})) {
+    if (typeof value !== "string" || value.length < MIN_BOUND_CHARS) continue;
+    for (const v of [value, encodeURIComponent(value), JSON.stringify(value).slice(1, -1)]) {
+      if (!named.some(([x]) => x === v)) named.push([v, `{${name}}`]);
+    }
+  }
+  named.sort(([a], [b]) => b.length - a.length);
   return (text) => {
     let out = String(text);
     for (const v of variants) out = out.split(v).join(REDACTED);
+    for (const [v, label] of named) out = out.split(v).join(label);
     return out.replace(/(bearer\s+)(?!\[redacted\])[^\s"',;]+/gi, `$1${REDACTED}`);
   };
 }
@@ -362,16 +425,25 @@ export function typeOf(value) {
   return typeof value;
 }
 
+export function isFilled(value) {
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
 export function unionKeys(rows, limit = SAMPLE_ROWS) {
   const sample = (Array.isArray(rows) ? rows : []).slice(0, limit);
   const objects = sample.filter(isObj);
   const fields = new Map();
+  const valueKeys = new Set();
   for (const row of objects) {
     for (const [key, value] of Object.entries(row)) {
-      const field = fields.get(key) || { key, types: [], present: 0 };
+      if (!isNameShaped(key)) { valueKeys.add(key); continue; }
+      const field = fields.get(key) || { key, types: [], present: 0, filled: 0 };
       const type = typeOf(value);
       if (!field.types.includes(type)) field.types.push(type);
       field.present += 1;
+      if (isFilled(value)) field.filled += 1;
       fields.set(key, field);
     }
   }
@@ -379,46 +451,96 @@ export function unionKeys(rows, limit = SAMPLE_ROWS) {
   for (const row of sample) {
     if (!isObj(row) && !scalars.includes(typeOf(row))) scalars.push(typeOf(row));
   }
-  return { sampled: sample.length, objects: objects.length, fields: [...fields.values()], scalars };
+  return { sampled: sample.length, objects: objects.length, fields: [...fields.values()], scalars, valueKeys: valueKeys.size };
 }
+
+export const valueKeysToken = (n) => `<${n} value-shaped key${n === 1 ? "" : "s"}>`;
 
 export function formatField(field, objects) {
-  return `${field.key}:${field.types.join("|")}${field.present < objects ? "?" : ""}`;
+  const filled = Number.isInteger(field.filled) && field.filled < objects ? `(${field.filled}/${objects})` : "";
+  return `${field.key}:${field.types.join("|")}${field.present < objects ? "?" : ""}${filled}`;
 }
 
+export function tokenCounts(rows, enums, limit = SAMPLE_ROWS) {
+  if (!isObj(enums)) return [];
+  const objects = (Array.isArray(rows) ? rows : []).slice(0, limit).filter(isObj);
+  const out = [];
+  for (const [field, tokens] of Object.entries(enums)) {
+    const lower = tokens.map((t) => t.toLowerCase());
+    const counts = tokens.map(() => 0);
+    const within = tokens.map(() => 0);
+    let filled = 0;
+    let other = 0;
+    for (const row of objects) {
+      const value = row[field];
+      const parts = (Array.isArray(value) ? value : typeof value === "string" ? [value] : [])
+        .filter((v) => typeof v === "string").flatMap((v) => v.toLowerCase().split(TOKEN_SPLIT)).filter(Boolean);
+      if (!parts.length) continue;
+      filled += 1;
+      const seen = new Set(parts);
+      lower.forEach((t, i) => {
+        if (seen.has(t)) counts[i] += 1;
+        else if (parts.some((v) => !lower.includes(v) && v.includes(t))) within[i] += 1;
+      });
+      if (parts.some((v) => !lower.includes(v))) other += 1;
+    }
+    out.push({ field, rows: objects.length, filled, other, counts: tokens.map((t, i) => [t, counts[i]]),
+      within: tokens.map((t, i) => [t, within[i]]).filter(([, n]) => n > 0) });
+  }
+  return out;
+}
+
+export function formatTokens(entry) {
+  return [
+    ...entry.counts.map(([token, n]) => `${entry.field}∋${token}: ${n}/${entry.rows}`),
+    ...(entry.within || []).map(([token, n]) => `${entry.field}∋*${token}*: ${n}/${entry.rows}`),
+    `${entry.field} undocumented: ${entry.other}/${entry.rows}`,
+  ];
+}
+
+export const VALUE_KEY = "<value-shaped key>";
+
+const shownKey = (key) => (isNameShaped(key) ? key : VALUE_KEY);
+
 export function locateRows(body) {
-  if (Array.isArray(body)) return { at: "$", rows: body, single: false };
-  if (!isObj(body)) return { at: null, rows: [], single: false };
-  if (Array.isArray(body.data)) return { at: "data", rows: body.data, single: false };
-  const arrays = Object.entries(body).filter(([, v]) => Array.isArray(v));
+  if (Array.isArray(body)) return { at: "$", shown: "$", rows: body, single: false };
+  if (!isObj(body)) return { at: null, shown: null, rows: [], single: false };
+  if (Array.isArray(body.data)) return { at: "data", shown: "data", rows: body.data, single: false };
+  const arrays = Object.entries(body).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v, shownKey(k)]);
   if (isObj(body.data)) {
-    for (const [k, v] of Object.entries(body.data)) if (Array.isArray(v)) arrays.push([`data.${k}`, v]);
+    for (const [k, v] of Object.entries(body.data)) if (Array.isArray(v)) arrays.push([`data.${k}`, v, `data.${shownKey(k)}`]);
   }
   if (arrays.length) {
     const score = ([, v]) => (v.some(isObj) ? 1e12 : 0) + v.length;
-    const [at, rows] = arrays.reduce((best, entry) => (score(entry) > score(best) ? entry : best));
-    return { at, rows, single: false };
+    const [at, rows, shown] = arrays.reduce((best, entry) => (score(entry) > score(best) ? entry : best));
+    return { at, shown, rows, single: false };
   }
-  if (isObj(body.data)) return { at: "data", rows: [body.data], single: true };
-  return { at: "$", rows: [body], single: true };
+  if (isObj(body.data)) return { at: "data", shown: "data", rows: [body.data], single: true };
+  return { at: "$", shown: "$", rows: [body], single: true };
 }
 
 export function rowsLabel(located) {
   if (located.at === null) return "none";
   if (located.at === "$") return located.single ? "$" : "[]";
-  return located.single ? located.at : `${located.at}[]`;
+  const shown = located.shown ?? located.at;
+  return located.single ? shown : `${shown}[]`;
 }
 
 export function envelopeObjects(body, located) {
   if (!isObj(body) || (located.at === "$" && located.single)) return [];
   const out = [];
-  const consider = (key, value) => {
-    if (isObj(value) && key !== located.at && !String(located.at).startsWith(key + ".")) out.push([key, value]);
+  const level = (object, prefix) => {
+    const folded = [];
+    for (const [k, v] of Object.entries(object)) {
+      const key = prefix + k;
+      if (!isObj(v) || key === located.at || String(located.at).startsWith(key + ".")) continue;
+      if (isNameShaped(k)) out.push([key, [v]]);
+      else folded.push(v);
+    }
+    if (folded.length) out.push([prefix + valueKeysToken(folded.length), folded]);
   };
-  for (const [k, v] of Object.entries(body)) consider(k, v);
-  if (isObj(body.data) && located.at !== "data") {
-    for (const [k, v] of Object.entries(body.data)) consider(`data.${k}`, v);
-  }
+  level(body, "");
+  if (isObj(body.data) && located.at !== "data") level(body.data, "data.");
   return out.slice(0, MAX_EXTRAS);
 }
 
@@ -429,9 +551,11 @@ export function envelopeShape(body, located = locateRows(body)) {
     if (!isObj(value)) return typeOf(value);
     const entries = Object.entries(value);
     if (depth >= 2 || (path && path === located.at)) return `{${entries.length}}`;
-    const parts = entries.slice(0, 12)
+    const named = entries.filter(([k]) => isNameShaped(k));
+    const parts = named.slice(0, 12)
       .map(([k, v]) => `${k}:${render(v, path ? `${path}.${k}` : k, depth + 1)}`);
-    if (entries.length > 12) parts.push(`+${entries.length - 12}`);
+    if (named.length > 12) parts.push(`+${named.length - 12}`);
+    if (named.length < entries.length) parts.push(valueKeysToken(entries.length - named.length));
     return `{${parts.join(",")}}`;
   };
   return render(body, "", 0);
@@ -441,20 +565,31 @@ function nestedSets(rows, label) {
   const sample = rows.slice(0, SAMPLE_ROWS).filter(isObj);
   const keys = [...new Set(sample.flatMap((row) => Object.keys(row)))];
   const out = [];
+  const foldedArrays = new Set();
+  const foldedObjects = new Set();
+  const arrayRows = [];
+  const objectRows = [];
   for (const key of keys) {
     const values = sample.map((row) => row[key]);
     const array = values.find((v) => Array.isArray(v) && v.some(isObj));
+    const objects = array ? [] : values.filter(isObj);
+    if (!isNameShaped(key)) {
+      if (array) { foldedArrays.add(key); arrayRows.push(...array); }
+      else if (objects.length) { foldedObjects.add(key); objectRows.push(...objects); }
+      continue;
+    }
     if (array) { out.push({ label: `${label}.${key}[]`, rows: array }); continue; }
-    const objects = values.filter(isObj);
     if (objects.length) out.push({ label: `${label}.${key}`, rows: objects });
   }
+  if (foldedArrays.size) out.push({ label: `${label}.${valueKeysToken(foldedArrays.size)}[]`, rows: arrayRows });
+  if (foldedObjects.size) out.push({ label: `${label}.${valueKeysToken(foldedObjects.size)}`, rows: objectRows });
   return out;
 }
 
 export function fieldSets(body, located = locateRows(body)) {
   const label = rowsLabel(located);
   const sets = [{ label, rows: located.rows }];
-  for (const [key, value] of envelopeObjects(body, located)) sets.push({ label: key, rows: [value] });
+  for (const [setLabel, rows] of envelopeObjects(body, located)) sets.push({ label: setLabel, rows });
   const nested = [];
   for (const set of sets) nested.push(...nestedSets(set.rows, set.label));
   return [...sets, ...nested.slice(0, MAX_NESTED)]
@@ -508,7 +643,7 @@ export function vendorError(body, text, redact) {
       const v = body[k];
       if (typeof v === "string" || typeof v === "number") parts.push(`${k}=${clip(redact(String(v)), 160)}`);
     }
-    return parts.length ? parts.join("  ") : clip(redact(JSON.stringify(body)), 240);
+    return parts.length ? parts.join("  ") : `body ${clip(envelopeShape(body), 240)}`;
   }
   const flat = redact(String(text || "")).replace(/\s+/g, " ").trim();
   return flat ? clip(flat, 240) : "(empty body)";
@@ -531,7 +666,8 @@ export function classify(result) {
 
 export function analyse(probe, call, redact) {
   const result = {
-    id: probe.id, tier: probe.tier, op: probe.op, url: call.url,
+    id: probe.id, tier: probe.tier, op: probe.op, url: call.url, shown: call.shown || call.url,
+    liveOnly: Boolean(probe.liveOnly), entitlement: Boolean(probe.entitlement),
     status: call.status, ms: call.ms, bytes: call.bytes, limited: call.limited || 0,
     error: call.error ? redact(call.error) : null,
     limits: limitHeaders(call.headers, redact),
@@ -547,7 +683,9 @@ export function analyse(probe, call, redact) {
     result.parsed = false;
   }
   if (call.status < 200 || call.status >= 300 || !result.parsed) {
-    result.errorSummary = vendorError(result.parsed ? body : null, call.text, redact);
+    const failed = call.status < 200 || call.status >= 300;
+    result.errorSummary = failed ? vendorError(result.parsed ? body : null, call.text, redact)
+      : `${formatBytes(call.bytes ?? Buffer.byteLength(String(call.text || "")))}, not JSON`;
     result.code = result.parsed ? redact(vendorCode(body)) : "";
     result.empty = !result.parsed;
     result.cls = classify(result);
@@ -560,13 +698,13 @@ export function analyse(probe, call, redact) {
   result.rowsLabel = rowsLabel(located);
   result.envelope = envelopeShape(body, located);
   result.sets = sets;
-  result.empty = !sets.some((set) => set.union.fields.length || set.union.scalars.length);
+  result.empty = !sets.some((set) => set.union.fields.length || set.union.scalars.length || set.union.valueKeys);
   result.spec = result.empty ? null : specDiff(probe.expect, body, sets);
   if (!result.empty && Array.isArray(probe.reads)) {
     const live = collectKeys(body);
     result.reads = { checked: probe.reads.length, unseen: probe.reads.filter((k) => !live.has(k)) };
   }
-  result.sample = located.rows.length ? clip(redact(JSON.stringify(located.rows[0])), SAMPLE_CHARS) : null;
+  result.tokens = result.empty ? [] : tokenCounts(located.rows, probe.enums);
   result.cls = classify(result);
   return result;
 }
@@ -653,20 +791,26 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
   head.push(result.status ? String(result.status) : "no response", `${result.ms} ms`);
   if (Number.isFinite(result.bytes)) head.push(formatBytes(result.bytes));
   if (result.limited) head.push(`after ${result.limited} x 429`);
-  const lines = [head.join("  "), `   GET ${displayUrl(result.url, { relative: true })}`];
+  const lines = [head.join("  "), `   GET ${displayUrl(result.shown || result.url, { relative: true })}`];
   if (result.cls === "network") return [...lines, `   error ${result.error}`];
   if (result.limits.length) lines.push(...wrapLabelled("   limits ", result.limits.map(([n, v]) => `${n}=${v}`)));
   if (showHeaderNames && result.headerNames.length) lines.push(...wrapLabelled("   headers ", result.headerNames));
   if (result.status < 200 || result.status >= 300) return [...lines, `   error ${result.errorSummary}`];
-  if (!result.parsed) return [...lines, `   body is not JSON: ${result.errorSummary}`];
+  if (!result.parsed) return [...lines, `   body ${result.errorSummary}: no part of it is printed`];
   lines.push(`   envelope ${result.envelope}  rows ${result.rowCount} at ${result.rowsLabel}`);
   for (const set of result.sets) {
     const u = set.union;
-    if (u.fields.length) {
+    if (u.fields.length || u.valueKeys) {
       lines.push(`   fields ${set.label}  ${u.fields.length} keys over ${u.objects} of ${u.sampled} sampled`);
-      lines.push(...wrapTokens(u.fields.map((f) => formatField(f, u.objects)), "     "));
+      const tokens = u.fields.map((f) => formatField(f, u.objects));
+      if (u.valueKeys) tokens.push(valueKeysToken(u.valueKeys));
+      lines.push(...wrapTokens(tokens, "     "));
     }
     if (u.scalars.length) lines.push(`   values ${set.label}  ${u.scalars.join("|")} over ${u.sampled} sampled`);
+  }
+  for (const entry of result.tokens || []) {
+    lines.push(`   tokens ${entry.field}  filled in ${entry.filled} of ${entry.rows} rows`);
+    lines.push(...wrapTokens(formatTokens(entry), "     "));
   }
   if (result.empty) {
     lines.push("   spec unchecked: no rows arrived");
@@ -680,10 +824,11 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
       lines.push(`   spec ${s.undocumented.length} undocumented`);
       lines.push(...wrapTokens(nameList(s.undocumented), "     "));
     }
+  } else if (result.liveOnly) {
+    lines.push("   spec live docs only: the committed spec does not hold this operation");
   } else {
-    lines.push("   spec shape undocumented");
+    lines.push("   spec not compared: the list holds no documented names for this operation");
   }
-  if (result.sample) lines.push(`   sample ${result.sample}`);
   return lines;
 }
 
@@ -712,6 +857,14 @@ export function renderSummary(results, { session, elapsedMs }) {
     if (list.length || ["ok", "empty", "4xx", "5xx"].includes(cls)) lines.push(...row(cls, list.map(describe)));
   }
   if (drift.length) lines.push(...row("drift", drift.map((r) => `${r.id} (${r.spec.unseen.length} unseen)`)));
+  const asked = results.filter((r) => r.entitlement && r.cls !== "skipped");
+  if (asked.length) {
+    const answer = (r) => (r.cls === "ok" || r.cls === "empty"
+      ? `${r.id} ${r.status} (${r.rowCount ?? 0} rows, ${formatBytes(r.bytes)})`
+      : `${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
+    lines.push(...row("entitled", asked.filter((r) => r.cls === "ok" || r.cls === "empty").map(answer)));
+    lines.push(...row("refused", asked.filter((r) => r.cls === "4xx" && r.status !== 429).map(answer)));
+  }
   return lines;
 }
 
@@ -730,7 +883,10 @@ export function strictVerdict(results, list) {
     const expected = Object.hasOwn(gated, r.op) ? gated[r.op] : null;
     if (["4xx", "5xx", "network", "other"].includes(r.cls)) {
       if (expected !== null && r.status === expected) notes.push(`${r.id} ${r.status}: gated, as expected`);
-      else failures.push(`FAIL ${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
+      else if (r.status === 429) failures.push(`FAIL ${r.id} 429 still rate-limited after ${r.limited || 0} retries: no answer to read`);
+      else if (r.entitlement && r.cls === "4xx") {
+        notes.push(`${r.id} ${r.status}${r.code ? " " + r.code : ""}: refused, an entitlement or parameter answer; read the code`);
+      } else failures.push(`FAIL ${r.id} ${r.status || "no response"}${r.code ? " " + r.code : ""}`);
       continue;
     }
     if (expected !== null) notes.push(`${r.id} answers ${r.status} where ${expected} was expected: the plan changed`);
@@ -762,7 +918,10 @@ export async function runProbe(options, deps = {}) {
   emit(`flows-probe  base ${base}  tickers ${tickers.join(",")}  filter ${options.filter ? JSON.stringify(options.filter) : "(all)"}  ` +
     `${selected.length} probes${options.dryRun ? "  dry run" : ""}`);
   emit("   key:type  str# = a number sent as a string  ? = absent from some sampled rows  " +
-    "spec = names the OpenAPI spec documents for the operation");
+    "(n/m) = filled in n of m rows  spec = names the OpenAPI spec documents for the operation");
+  emit("   names, types, fill counts and documented enum tokens only: no vendor value is printed");
+  emit("   calls counts this run; x-uw-daily-req-count counts every caller of the key: the Worker, the pipeline, " +
+    "the live leg and any agent session with UW_API_KEY set through the vendor MCP server in .mcp.json");
 
   const results = [];
   const ctx = { fetchImpl, key, pace: makePacer(MIN_GAP_MS, { now, sleep }), now, sleep };
@@ -793,7 +952,7 @@ export async function runProbe(options, deps = {}) {
   }
   const dates = dateTokens(session);
   emit(`   session ${session} (${source})  next ${dates["next-session"]}  weekly ${dates.weekly}  ` +
-    `monthly ${dates.monthly}  monthly2 ${dates.monthly2}`);
+    `monthly ${dates.monthly}  monthly2 ${dates.monthly2}  gold ${dates["gold-front"]}`);
   const probes = selected.map((p) => finalizeProbe(p, dates));
 
   if (options.dryRun) {
@@ -812,9 +971,11 @@ export async function runProbe(options, deps = {}) {
   for (const p of probes) {
     let path = p.path;
     let missing = null;
+    const boundValues = {};
     for (const [name, b] of Object.entries(p.bind)) {
       const value = pickBound(kept.get(b.from), b);
       if (value === null) { missing = `no ${b.field} from ${b.from}`; break; }
+      boundValues[name] = value;
       path = path.split(`{${name}}`).join(encodeURIComponent(value));
     }
     if (missing) {
@@ -822,7 +983,8 @@ export async function runProbe(options, deps = {}) {
       continue;
     }
     const call = await callVendor(buildUrl(base, path, p.query), ctx);
-    const result = analyse(p, call, redact);
+    call.shown = buildUrl(base, p.path, p.query);
+    const result = analyse(p, call, Object.keys(boundValues).length ? makeRedactor(key, boundValues) : redact);
     if (sources.has(p.id)) kept.set(p.id, result.rows);
     result.rows = null;
     record(result);

@@ -252,6 +252,14 @@ const strips = (page) => rt(page, "window.FlowsUI.rt.strips()");
 const status = (page) => rt(page, "window.FlowsUI.rt.status()");
 const measure = (page) => rt(page, "window.FlowsUI.rt.measure()");
 const transport = (page) => rt(page, "window.FlowsUI.rt.transport()");
+const landed = async (page, R, want, ms = 4000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if ((await transport(page)) === want) return want;
+    await R.pump();
+  }
+  return transport(page);
+};
 const pill = (page) => page.evaluate(() => { const b = document.getElementById("fxFresh"); return b ? { state: b.dataset.state, label: b.dataset.label, feed: b.dataset.feed || "" } : null; });
 const facts = (page) => page.evaluate(() => Object.fromEntries(window.FlowsUI.freshness.details().facts.filter(([, v]) => v !== null && v !== undefined)));
 
@@ -483,7 +491,7 @@ try {
     eq(c1.closed.code, 1000, `bye ${code}: with a normal close`);
     await R.until(() => R.snapHits.length >= 1);
     await R.pump();
-    eq(await transport(page), expect, `bye ${code}: the ladder lands on ${expect}`);
+    eq(await landed(page, R, expect), expect, `bye ${code}: the ladder lands on ${expect}`);
     await R.adv(50000, 5000);
     eq(R.conns.length, 1, `bye ${code}: it does not reconnect inside a minute`);
     if (again) {
@@ -537,7 +545,7 @@ try {
     await R.nextConn();
     await R.until(() => R.snapHits.length >= 1);
     await R.pump();
-    eq(await transport(page), "poll", "A SOCKET THAT WILL NOT OPEN FALLS TO THE POLL RUNG at once");
+    eq(await landed(page, R, "poll"), "poll", "A SOCKET THAT WILL NOT OPEN FALLS TO THE POLL RUNG at once");
     eq((await status(page)).label, "Polling 5 s", "named Polling 5 s");
     eq((await pill(page)).feed, "Polling 5 s", "on the pill too");
     eq((await facts(page)).Feed, "Polling 5 s", "and in the freshness popover");

@@ -727,8 +727,8 @@ export function nopeSection(body, { sessionDate = null, candle = null, prior = [
   for (const p of pts) { if (p.v > hi.v) hi = p; if (p.v < lo.v) lo = p; }
   const ret = candle && candle.open > 0 ? candle.close / candle.open - 1 : null;
   const divergence = ret === null ? note("divergence", "no-price")
-    : last.v > 0 && ret < 0 ? "bullish-vs-price"
-    : last.v < 0 && ret > 0 ? "bearish-vs-price" : "none";
+    : last.v * ret < 0 ? "sign-differs"
+    : last.v * ret > 0 ? "sign-agrees" : "none";
   const history = (Array.isArray(prior) ? prior : [])
     .filter((p) => p && isDay(p.d) && (!isDay(sessionDate) || p.d < sessionDate))
     .sort((a, b) => (a.d < b.d ? -1 : 1))

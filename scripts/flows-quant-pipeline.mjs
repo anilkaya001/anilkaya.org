@@ -195,14 +195,14 @@ export function crossSection(preps) {
   return out;
 }
 
-export function engineBlock({ ticker, sessionDate, spot, atr, card, prep, rate, garch, law, event, state, strikes, crossSection: xs = null }) {
+export function engineBlock({ ticker, sessionDate, spot, atr, card, prep, rate, garch, law, event, state, strikes, crossSection: xs = null, coneThin = null }) {
   if (!prep || !prep.built || !prep.built.length) return null;
   const asOfDay = sessionDate;
   const jump = eventJump(prep.built, event);
   const book = bookLevels(strikes, { spot });
   const facts = engineFacts({
     built: prep.built, spot, atr, card, garch, zero: prep.zero, book, event, jump, asOfDay,
-    crossSection: xs || {},
+    crossSection: xs || {}, coneThin,
   });
   const levels = engineLevels({ book, zero: prep.zero, card, atr });
   return runCardEngine({

@@ -557,6 +557,48 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
 }
 
 {
+  const session = "2026-09-22";
+  const days = weekdaysEnding(session, 300);
+  const rowsWith = (positive) => {
+    const out = [];
+    for (let i = 0; i < 280; i++) {
+      const up = positive(i);
+      out.push({ date: days[i], ticker: "T", rank: "0.5", implied_volatility: "0.3", realized_volatility: up ? "0.25" : "0.35",
+        realized_volatility_days: 21, implied_volatility_days: 30, realized_date: days[i + 20], risk_premium: up ? "0.05" : "-0.05" });
+    }
+    return out;
+  };
+  const half = buildVrpPanel({ data: rowsWith((i) => i % 2 === 0) }, { sessionDate: session });
+  eq(half.n, 252, "the window is the last 252 completed windows");
+  eq(half.hitRate, 0.5, "126 of 252 is a half");
+  eq(half.nEff, 12, "252 daily windows that each span 21 sessions are about 12 independent ones");
+  near(half.hitCi[0], 0.327, 5e-4, "the 80% Wilson interval on 12 independent windows, lower end");
+  near(half.hitCi[1], 0.673, 5e-4, "and its upper end");
+  const wide = half.hitCi[1] - half.hitCi[0];
+  const naive = 2 * 1.2815515655446 * Math.sqrt(0.25 / 252);
+  ok(wide > 3 * naive, `the interval (${wide.toFixed(3)}) is several times the one a count of 252 independent windows would print (${naive.toFixed(3)})`);
+  const three = buildVrpPanel({ data: rowsWith((i) => i % 4 !== 0) }, { sessionDate: session });
+  eq(three.hitRate, 0.75, "189 of 252 is three quarters");
+  eq(three.nEff, 12, "still 12 independent windows");
+  near(three.hitCi[0], 0.567, 5e-4, "the interval is asymmetric about the rate, lower end");
+  near(three.hitCi[1], 0.873, 5e-4, "and upper end");
+  const sixty = buildVrpPanel({ data: rowsWith((i) => i % 2 === 0).slice(-60) }, { sessionDate: session });
+  eq(sixty.n, 60, "sixty completed windows is the shortest history that publishes a rate");
+  eq(sixty.nEff, 2, "and counts as two independent ones");
+  near(sixty.hitCi[0], 0.164, 5e-4, "with a very wide interval, lower end");
+  near(sixty.hitCi[1], 0.836, 5e-4, "and upper end");
+  const thin = buildVrpPanel({ data: rowsWith((i) => i % 2 === 0).slice(-59) }, { sessionDate: session });
+  eq(thin.n, 59, "fifty-nine completed windows");
+  eq(thin.nEff, null, "has no effective sample");
+  eq(thin.hitCi, null, "and no interval");
+  eq(thin.silent.nEff, "short-history", "and says why");
+  eq(thin.silent.hitCi, "short-history", "for the interval too");
+  const all = buildVrpPanel({ data: rowsWith(() => true) }, { sessionDate: session });
+  eq(all.hitRate, 1, "every window won");
+  ok(all.hitCi[0] > 0.8 && all.hitCi[1] === 1, "an all-win record still has a lower end below one and the upper end stops at one");
+}
+
+{
   eq(volVote("rich", "rich"), 1, "same view agrees");
   eq(volVote("rich", "cheap"), -1, "opposite views disagree");
   eq(volVote("neutral", "rich"), 0, "a neutral side is a zero vote");

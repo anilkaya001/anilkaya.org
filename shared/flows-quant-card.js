@@ -11,7 +11,7 @@ import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions
 export const QUANT_CARD_VERSION = 1;
 export const QUANT_CARD_LINES = Object.freeze({
   MAX_EXPIRIES: 10, MAX_DTE: 200, MIN_ROWS: 3, SIG: 5,
-  COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
+  COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_CONVENTION_CAP: 2, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
   PUBLISH_STRUCTURES: 5, RATE_MIN_DAYS: 20, RATE_MAX_DAYS: 200, RATE_LO: -0.01, RATE_HI: 0.15,
   XS_MIN_NAMES: 10, IV_PERCENT_LINE: 5, EVENT_MIN_MOVES: 3, EVENT_MIN_JUMP: 1e-4,
   PARITY_SYMBOLS: Object.freeze(["SPX", "SPXW", "SPY"]),
@@ -220,9 +220,11 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
 
 const atmVolOf = (ex) => sliceVolK(ex.slice, 0);
 
-export function constantMaturity(built, days) {
+export function constantMaturity(built, days, exEvent = null) {
+  const j2 = exEvent && typeof exEvent.date === "string" && fin(exEvent.J2) && exEvent.J2 > 0 ? exEvent.J2 : 0;
   const pts = built.map((e) => ({ days: e.T * 365, w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0);
   if (!pts.length) return null;
+  if (j2) for (const p of pts) if (p.e.expiry >= exEvent.date) p.w -= j2;
   pts.sort((a, b) => a.days - b.days);
   let lo = null, hi = null;
   for (const p of pts) { if (p.days <= days) lo = p; if (p.days >= days && !hi) hi = p; }
@@ -234,7 +236,7 @@ export function constantMaturity(built, days) {
   const only = lo || hi;
   if (!only) return null;
   if (Math.abs(only.days - days) > Math.max(5, days * 0.5)) return null;
-  return { vol: Math.sqrt(only.w / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
+  return { vol: Math.sqrt(Math.max(only.w, 0) / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
 }
 
 function fitGradeOf(slice) {
@@ -312,8 +314,9 @@ export function zeroGammaOf(built, { spot, atr = null, vendorGross = null } = {}
   const coverage = fin(vendorGross) && vendorGross > 0 ? gross / vendorGross : null;
   const L = QUANT_CARD_LINES;
   const nearby = prof.flips.filter((x) => !(fin(atr) && atr > 0) || Math.abs(x - spot) <= L.FLIP_NEAR_ATR * atr);
-  const g = coverage === null ? 2 : coverage >= L.COVER_GOOD ? 3 : coverage >= L.COVER_FAIR ? 2 : 1;
-  const why = coverage === null ? "flip.coverage-unmeasured" : coverage < L.COVER_GOOD ? "flip.coverage" : null;
+  const coverageG = coverage === null ? 2 : coverage >= L.COVER_GOOD ? 3 : coverage >= L.COVER_FAIR ? 2 : 1;
+  const g = Math.min(L.FLIP_CONVENTION_CAP, coverageG);
+  const why = coverage === null ? "flip.coverage-unmeasured" : coverage < L.COVER_GOOD ? "flip.coverage" : "flip.convention";
   const stride = L.PROFILE_STRIDE;
   const px = [], gx = [];
   for (let i = 0; i < prof.grid.length; i += stride) { px.push(dp(prof.grid[i], 4)); gx.push(sig(prof.gex[i])); }
@@ -346,7 +349,7 @@ function factRow(id, v, u, g, extra = {}) {
 }
 
 export function engineFacts(input) {
-  const { built = [], spot, atr = null, card = null, garch = null, zero = null, book = null, event = null, jump = null } = input;
+  const { built = [], spot, atr = null, card = null, garch = null, zero = null, book = null, event = null, jump = null, coneThin = null } = input;
   const xs = input.crossSection || {};
   const facts = [];
   const add = (...a) => { facts.push(factRow(...a)); };
@@ -363,6 +366,10 @@ export function engineFacts(input) {
   const rank = pm && fin(pm.ivRank) && pm.ivRank >= 0 && pm.ivRank <= 1 ? pm.ivRank : null;
   add("iv.rank.1y", rank === null ? null : dp(rank, 4), "frac", 2, rank === null ? { why: "iv.rank-absent" } : {});
   add("iv.pct.30", rank === null ? null : dp(rank, 4), "frac", 2, { why: rank === null ? "iv.rank-absent" : "iv.rank-as-pct" });
+  const volX = card && card.x && typeof card.x === "object" && card.x.vol && typeof card.x.vol === "object" ? card.x.vol : null;
+  const pctile = volX && fin(volX.iv30Pct) && volX.iv30Pct >= 0 && volX.iv30Pct <= 1 ? volX.iv30Pct : null;
+  add("iv.pctile.30.1y", pctile === null ? null : dp(pctile, 4), "frac", coneThin === true ? 1 : 2,
+    pctile === null ? { why: "iv.pctile-absent" } : {});
   const iv30 = cm[30] ? cm[30].vol : null, iv7 = cm[7] ? cm[7].vol : null, iv90 = cm[90] ? cm[90].vol : null;
   const gOf = (id) => { const f = facts.find((x) => x.id === id); return f ? f.g : 0; };
   const slope = iv30 !== null && iv90 !== null && iv90 > 0 ? iv30 / iv90 - 1 : null;
@@ -370,14 +377,13 @@ export function engineFacts(input) {
   add("term.front.7_30", iv7 !== null && iv30 !== null && iv30 > 0 ? dp(iv7 / iv30 - 1, 4) : null, "frac", Math.min(gOf("iv.cm.7"), gOf("iv.cm.30")));
   let slopeEx = slope, exWhy = null;
   const evDays = event && event.date && input.asOfDay ? calendarDays(input.asOfDay, event.date) : null;
-  if (slope !== null && evDays !== null && evDays > 0 && evDays <= 90) {
-    if (jump && fin(jump.J)) {
-      const exOf = (d) => (cm[d] ? Math.sqrt(Math.max(0, cm[d].w - (evDays <= d ? jump.J * jump.J : 0)) / (d / 365)) : null);
-      const e30 = exOf(30), e90 = exOf(90);
-      slopeEx = e30 !== null && e90 !== null && e90 > 0 ? e30 / e90 - 1 : null;
-    } else {
-      exWhy = "event.unremoved";
-    }
+  const exEvent = evDays !== null && evDays > 0 && jump && fin(jump.J) ? { date: event.date, J2: jump.J * jump.J } : null;
+  const exOf = (d) => { const c = constantMaturity(built, d, exEvent); return c ? c.vol : null; };
+  if (slope !== null && exEvent) {
+    const e30 = exOf(30), e90 = exOf(90);
+    slopeEx = e30 !== null && e90 !== null && e90 > 0 ? e30 / e90 - 1 : null;
+  } else if (slope !== null && evDays !== null && evDays > 0 && evDays <= 90) {
+    exWhy = "event.unremoved";
   }
   add("term.slope.30_90.exEvent", slopeEx === null ? null : dp(slopeEx, 4), "frac",
     Math.min(gOf("term.slope.30_90"), exWhy ? 1 : 3), exWhy ? { why: exWhy } : {});
@@ -403,10 +409,8 @@ export function engineFacts(input) {
   add("garch.halfLife", hl === null ? null : dp(hl, 2), "sessions", gGrade, gWhy ? { why: gWhy } : {});
   add("garch.grade", gg ? gGrade : null, "count", gg ? 3 : 0, gWhy ? { why: gWhy } : {});
   let ivEx = iv30, vrpWhy = null;
-  if (iv30 !== null && evDays !== null && evDays > 0 && evDays <= 30) {
-    if (jump && fin(jump.J)) ivEx = Math.sqrt(Math.max(0, cm[30].w - jump.J * jump.J) / (30 / 365));
-    else vrpWhy = "vrp.event-inside";
-  }
+  if (iv30 !== null && exEvent) ivEx = exOf(30);
+  else if (iv30 !== null && evDays !== null && evDays > 0 && evDays <= 30) vrpWhy = "vrp.event-inside";
   const vrpG = Math.min(gOf("iv.cm.30"), gGrade, vrpWhy ? 1 : 3);
   const vVol = ivEx !== null && avg !== null ? ivEx - avg : null;
   add("vrp.var.21", ivEx !== null && avg !== null ? dp(ivEx * ivEx - avg * avg, 5) : null, "var", vrpG, vrpWhy ? { why: vrpWhy } : gWhy ? { why: gWhy } : {});
@@ -422,7 +426,7 @@ export function engineFacts(input) {
   const regime = card && card.regime && typeof card.regime === "object" ? card.regime : {};
   const clash = zero && fin(zero.atSpot) && zero.atSpot !== 0 && fin(regime.bookGamma) && regime.bookGamma !== 0 &&
     Math.sign(zero.atSpot) !== Math.sign(regime.bookGamma);
-  const flipG = zero ? (clash ? Math.min(zero.g, 1) : zero.g) : 0;
+  const flipG = zero ? (clash ? Math.min(zero.g, 1) : Math.min(zero.g, QUANT_CARD_LINES.FLIP_CONVENTION_CAP)) : 0;
   lvl("level.flip", zero ? zero.px : null, flipG, zero ? (clash ? "flip.sign-at-spot" : zero.why) : "flip.no-chain");
   add("level.flip.count", zero ? zero.count : null, "count", flipG, zero ? {} : { why: "flip.no-chain" });
   const cross = card && fin(card.strikeSumCrossing) ? card.strikeSumCrossing : null;

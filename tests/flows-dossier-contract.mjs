@@ -157,7 +157,14 @@ function checkDossier(d, label, ticker = T) {
     const out = fn(body, T);
     ok(out && out.ok === true, id + ": the reducer reads its fixture");
     sinks[id] = sink;
-    const documented = new Set([...VENDOR.documented[op], "data"]);
+    const renames = V.WIRE_RENAMES[op] || {};
+    for (const [specName, wireName] of Object.entries(renames)) {
+      ok(VENDOR.documented[op].includes(specName) && !VENDOR.documented[op].includes(wireName),
+        op + ": " + specName + " is the committed spec's name and " + wireName + " the wire's; retire the rename once the spec documents " + wireName);
+    }
+    const wireOnly = new Set(Object.values(renames));
+    const superseded = new Set(Object.keys(renames));
+    const documented = new Set([...VENDOR.documented[op], "data", ...wireOnly]);
     const stray = [...sink].filter((k) => !documented.has(k) && !/^\d+$/.test(k) && !["length", "map", "filter", "slice", "sort", "find", "some", "every", "reduce", "concat", "includes", "indexOf", "forEach", "entries", "keys", "values", "toString", "constructor", "hasOwnProperty"].includes(k) && k !== "toJSON");
     same(stray, [], op + ": every property the reducer touches is one the spec documents for this operation");
     const declared = V.DOSSIER_READS[op];
@@ -167,8 +174,9 @@ function checkDossier(d, label, ticker = T) {
     const undeclared = [...sink].filter((k) => documented.has(k) && k !== "data" && !declared.includes(k));
     same(undeclared, [], op + ": and declares every documented field it reads, so the weekly probe checks them all");
     const probeReads = probeList.reads[op];
-    ok(Array.isArray(probeReads) && declared.every((k) => probeReads.includes(k)), op + ": the probe list's strict read list holds all of them");
-    ok(probeReads.every((k) => (probeList.expect[op] || []).includes(k)), op + ": and each is a name the spec documents for the operation");
+    ok(Array.isArray(probeReads) && declared.every((k) => superseded.has(k) || probeReads.includes(k)), op + ": the probe list's strict read list holds all of them");
+    ok(probeReads.every((k) => !superseded.has(k)), op + ": except a spec name the wire has renamed, which the strict probe would report as drift every week");
+    ok(probeReads.every((k) => wireOnly.has(k) || (probeList.expect[op] || []).includes(k)), op + ": and each is a name the spec documents for the operation, or the wire's name for one");
     const probes = probeList.probes.filter((p) => p.op === op);
     ok(probes.length >= 1 && probes.every((p) => p.tier === "used"), op + ": probed, and as an operation the code reads");
   }
@@ -178,8 +186,8 @@ function checkDossier(d, label, ticker = T) {
   same([...earn].filter((k) => !earnDocumented.has(k) && !/^\d+$/.test(k) && !["length", "map", "filter", "slice", "sort", "find", "some", "every", "reduce", "toJSON"].includes(k)), [],
     "the nightly's earningsHistory, reused for the vendor's earnings route, reads only documented names");
   for (const k of V.DOSSIER_READS[D.VENDOR_ROUTES.earnings]) ok(earn.has(k), "earningsHistory reads " + k);
-  eq(probeList.gated["/api/companies/{ticker}/profile"], 403, "the Advanced+ profile route is expected-gated in the weekly probe");
-  eq(probeList.gated["/api/companies/{ticker}/earnings-estimates"], 403, "and so are the forward estimates");
+  eq(probeList.gated["/api/companies/{ticker}/profile"], undefined, "the Advanced+ profile route answered 200 in the 2026-10-04 weekly probe (37223455933), so it is no longer expected-gated");
+  eq(probeList.gated["/api/companies/{ticker}/earnings-estimates"], undefined, "and neither are the forward estimates");
   for (const op of ["/api/stock/{ticker}/stock-state"]) ok(probeList.probes.some((p) => p.op === op), op + " (the quote path) is probed");
 }
 
@@ -222,6 +230,48 @@ function checkDossier(d, label, ticker = T) {
   eq(own.n, 8, "ownership: eight holders");
   ok(own.top[0].u >= own.top[1].u, "ownership: largest first");
   eq(own.so, 512000000, "ownership: shares outstanding");
+  eq(own.changeKnown, 8, "ownership: the fixture's spec name units_change is still read when the wire name is absent");
+  const holder = (o) => ({ name: "HOLDER CAPITAL LLC", short_name: "Holder", report_date: "2026-06-30", shares_outstanding: "512000000", ...o });
+  const wire = V.reduceOwnership({ data: [holder({ units: "1162996939", units_changed: "18301514" }), holder({ short_name: "Other", units: 4103, units_changed: -320, units_change: 999 })] });
+  eq(wire.top[0].dU, 18301514, "ownership: the wire's units_changed is read, as a string of shares");
+  eq(wire.top[1].dU, -320, "ownership: and wins over the spec's units_change when both arrive");
+  same([wire.change, wire.changeKnown, wire.up, wire.down], [18301194, 2, 1, 1], "ownership: the net change, the holders known, added and trimmed");
+  const derived = V.reduceOwnership({ data: [holder({ units: "1162996939", historical_units: ["1162996939", "1144695425", "1154665731", "1146332274", "1148838990", "1140202870", "1123417607", "1097495138"] }), holder({ short_name: "Other", units: 4103, historical_units: [4103, 4423] })] });
+  same(derived.top.map((t) => t.dU), [18301514, -320], "ownership: with neither name, the change is units less historical_units[1], the prior report, not the oldest (newest first, as the spec's own example and the AAPL sample of eight reports read)");
+  eq(derived.changeKnown, 2, "ownership: and a derived change counts as known");
+  const neither = V.reduceOwnership({ data: [holder({ units: 52000000 }), holder({ short_name: "Other", units: 4103, historical_units: [4103] }), holder({ short_name: "Third", units: 100, historical_units: [100, null] }),
+    holder({ short_name: "Fourth", units: 5000, historical_units: [4900, 4800] }), holder({ short_name: "Fifth", units: 700, historical_units: [null, 650] })] });
+  same([neither.n, neither.changeKnown, neither.change], [5, 0, 0], "ownership: no units_changed, no units_change and fewer than two usable historical_units, or a history whose newest entry is not the units, leave the change unknown");
+  ok(neither.top.every((t) => t.dU === null), "ownership: and no holder's change is invented as zero");
+  const posOf = (ownership) => D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: {}, vendor: { ownership } }).packets.positioning;
+  const wirePos = posOf(wire);
+  eq(wirePos.facts.find((f) => f.k === "inst.change")?.v, 18301194, "positioning: the wire's name gives inst.change");
+  ok(!wirePos.withheld.some((w) => w.k.startsWith("inst.")), "positioning: and withholds nothing about institutions");
+  const wireChange = wirePos.facts.find((f) => f.k === "inst.change");
+  same([wireChange.display, wireChange.grade, wireChange.note], ["+18.3M shares", 2, null], "positioning: a net change every holder reports prints its sign, at grade 2, with no qualification");
+  eq(wirePos.text.find((x) => x.k === "holder1")?.text, "Holder holds 1.16B shares, changed by +18.3M shares", "positioning: a holder's added shares print with a plus, like every other signed figure");
+  eq(wirePos.text.find((x) => x.k === "holder2")?.text, "Other holds 4.10K shares, changed by \u2212320 shares", "positioning: and a trim with the minus sign");
+  eq(D.showValue(-5000000, "shares", { signed: true }), "\u22125.00M shares", "shares: a signed negative keeps the minus and gains no plus");
+  eq(D.showValue(18301514, "shares"), "18.3M shares", "shares: an unsigned figure gains no plus");
+  const partOwn = V.reduceOwnership({ data: [holder({ units: "1162996939", units_changed: "18301514" }), holder({ short_name: "Other", units: 300000000, units_changed: "-5000000" }), holder({ short_name: "Third", units: 52000000, historical_units: [52000000] })] });
+  same([partOwn.n, partOwn.changeKnown, partOwn.change], [3, 2, 13301514], "ownership: a holder with no known change is not counted in the net change");
+  const mixedPos = posOf(partOwn);
+  for (const k of ["inst.change", "inst.up", "inst.down"]) {
+    const f = mixedPos.facts.find((x) => x.k === k);
+    ok(f && f.grade === 1 && f.note === "2 of 3 holders report a change; the others are not counted", "positioning: when only some holders report a change, " + k + " says how many and is capped at grade 1");
+  }
+  eq(mixedPos.facts.find((f) => f.k === "inst.change")?.display, "+13.3M shares", "positioning: the partial net change still prints, signed");
+  eq(posOf(derived).facts.find((f) => f.k === "inst.change")?.v, 18301194, "positioning: the derived change gives inst.change");
+  const neitherPos = posOf(neither);
+  ok(neitherPos.facts.some((f) => f.k === "inst.holders") && !neitherPos.facts.some((f) => ["inst.change", "inst.up", "inst.down"].includes(f.k)), "positioning: with neither, the holders are read and no change fact is emitted");
+  for (const k of ["inst.change", "inst.up", "inst.down"]) {
+    const w = neitherPos.withheld.find((x) => x.k === k);
+    ok(w && w.reason.startsWith("absent: "), "positioning: " + k + " is withheld with reason absent, not silently dropped");
+  }
+  ok([own, wire, derived, neither].every((x) => x.rv === D.EXTRACT_VERSIONS.ownership), "ownership: every extract carries the reducer's version stamp");
+  const { rv: _rv, ...unstamped } = neither;
+  const oldPos = posOf(unstamped);
+  ok(oldPos.facts.some((f) => f.k === "inst.holders") && !oldPos.withheld.some((w) => w.k.startsWith("inst.")), "positioning: an extract cached before the stamp withholds nothing about the change, as before, because its reducer never read the wire name");
   const sh = V.reduceShort(F.vendorBody("short"));
   eq(sh.date, "2026-09-15", "short interest: the newest settlement");
   eq(sh.shares, 9800000, "short interest: short_interest");

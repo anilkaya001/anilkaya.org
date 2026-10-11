@@ -10,6 +10,7 @@ import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { priceSale } from "../shared/flows-premium.js";
+import { bucketsOf, BUCKET_LINES } from "../shared/flows-quant-structures.js";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -146,6 +147,12 @@ const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, r
   eq(covered.profile.x.length, covered.profile.g.length, "the published profile pairs each spot with its gamma");
 }
 
+function grossOfBuilt() {
+  let v = 1e12, c = 0;
+  for (let i = 0; i < 12 && !(c > 0.1); i++) { v /= 10; c = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: v }).coverage; }
+  return c * v;
+}
+
 {
   const rows = vendorChain();
   const expiryRows = [...new Set(rows.map((r) => QC.parseSymbol(r.option_symbol).expiry))].map((expiry) => {
@@ -166,8 +173,24 @@ const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, r
   const pass = (subset, gammaUnit, vendor) => QP.preparePass({ rowsByTicker: new Map([["SYN", subset]]), sessionDate: SESSION, rate: RATE, spotOf: () => SPOT,
     atrOf: () => 2, expiriesOf: () => vendor, ...(gammaUnit ? { gammaUnit } : {}) }).preps.get("SYN").zero;
   const whole = pass(rows, null, expiryRows);
-  ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 3,
-     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%`);
+  ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 2 && whole.why === "flip.convention",
+     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%, and its flip is capped at grade 2 with flip.convention because the sign rests on the vendor's convention`);
+  {
+    const grades = [];
+    const gross = grossOfBuilt();
+    for (const target of [0.2, 0.4, 0.6, 0.8, 0.9, 1, 1.1, 1.5, 3]) {
+      const z = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: gross / target });
+      grades.push([z.coverage, z.g, z.why]);
+    }
+    for (const vg of [null, 0, -1, NaN]) {
+      const z = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: vg });
+      ok(z.g === 2 && z.coverage === null && z.why === "flip.coverage-unmeasured", `a vendor book of ${vg} leaves the coverage unmeasured and the flip at grade 2, never 3 (g ${z.g}, ${z.why})`);
+    }
+    ok(grades.every(([, g]) => g <= 2), `no flip is graded 3 at any coverage (${grades.map((x) => x.join("/")).join(" ")})`);
+    ok(grades.some(([c, g, w]) => c >= 0.85 && g === 2 && w === "flip.convention") && grades.some(([c, g, w]) => c >= 0.5 && c < 0.85 && g === 2 && w === "flip.coverage") &&
+       grades.some(([c, g, w]) => c < 0.5 && g === 1 && w === "flip.coverage"),
+       "the coverage stays a second cap: good coverage is held at 2 by the convention, fair coverage keeps flip.coverage at 2 and weak coverage keeps grade 1");
+  }
   const quarter = pass(rows.filter((_, i) => i % 4 === 0), null, expiryRows);
   ok(quarter.coverage > 0.15 && quarter.coverage < 0.4 && quarter.g === 1 && quarter.why === "flip.coverage",
      `and a quarter of the contracts measures ${quarter.coverage} and grades the zero-gamma level weak, where dollars divided by shares published ` +
@@ -278,9 +301,12 @@ const FACT_INPUT = () => ({
   ok(by["vrp.trailing.21"].g === 1 && by["vrp.trailing.21"].why === "vrp.trailing-rv",
      "the VRP against trailing realised is published graded weak and says so (defect 7)");
   const cm30 = QC.constantMaturity(slices.built, 30);
-  const ivEx = Math.sqrt((cm30.w - 0.05 * 0.05) / (30 / 365));
+  const exW = (e) => SMILE.sliceTotalVariance(e.slice, 0) - (e.expiry >= "2026-10-20" ? 0.05 * 0.05 : 0);
+  const lo30 = { d: cm30.lo.T * 365, w: exW(cm30.lo) }, hi30 = { d: cm30.hi.T * 365, w: exW(cm30.hi) };
+  ok(cm30.lo.expiry < "2026-10-20" && cm30.hi.expiry >= "2026-10-20", "the fixture's thirty-day point sits between a slice before the event and one after it");
+  const ivEx = Math.sqrt((lo30.w + (30 - lo30.d) / (hi30.d - lo30.d) * (hi30.w - lo30.w)) / (30 / 365));
   near(by["vrp.rel.21"].v, (ivEx - 0.24) / 0.24, 1e-3,
-    "while vrp.rel.21 is implied against the GARCH forward, ex-event on the implied side when earnings fall inside thirty days (D4)");
+    "while vrp.rel.21 is implied against the GARCH forward, ex-event on the implied side: the jump comes out of each slice that holds it, then the thirty-day point is interpolated (D4, W06-P10)");
   near(by["vrp.var.21"].v, ivEx * ivEx - 0.24 * 0.24, 1e-4, "and in variance terms");
   ok(by["level.putWall"].v <= SPOT && by["level.callWall"].v >= SPOT, "walls in the facts are the book's");
   eq(by["level.strikeSumCrossing"].v, 101.5, "and the strike-sum crossing rides under its own id beside level.flip");
@@ -305,6 +331,20 @@ const FACT_INPUT = () => ({
     const agree = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: Math.sign(at) * 2e6 } } }).find((f) => f.id === "level.flip");
     const clash = QC.engineFacts({ ...input, card: { ...input.card, regime: { ...input.card.regime, bookGamma: -Math.sign(at) * 2e6 } } });
     const cf = clash.find((f) => f.id === "level.flip");
+    {
+      const capped = FACT_INPUT();
+      capped.zero = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: grossOfBuilt() / 0.95 });
+      ok(capped.zero.coverage >= 0.85 && capped.zero.g === 2 && capped.zero.why === "flip.convention", "a real good-coverage zeroGammaOf result is the engineFacts input below");
+      const facts = QC.engineFacts(capped);
+      const flip = facts.find((f) => f.id === "level.flip"), count = facts.find((f) => f.id === "level.flip.count");
+      ok(flip.g === 2 && flip.why === "flip.convention" && count.g === 2, `engineFacts carries the capped grade to level.flip (g ${flip.g}, ${flip.why}) and level.flip.count (g ${count.g})`);
+    }
+    {
+      const raised = FACT_INPUT();
+      raised.zero = { ...raised.zero, g: 3, why: null };
+      const rf = QC.engineFacts(raised).find((f) => f.id === "level.flip");
+      ok(rf.g <= 2, `engineFacts holds a flip handed in at grade 3 to the cap (g ${rf.g})`);
+    }
     ok(agree.g === input.zero.g && agree.why === (input.zero.why || undefined), "a book whose sign agrees with the profile at spot leaves the flip's grade as the coverage set it");
     ok(cf.g === 1 && cf.why === "flip.sign-at-spot" && clash.find((f) => f.id === "level.flip.count").g <= 1,
        `UW-F9: a book the opposite sign of our own profile at spot caps the flip at grade 1 and says flip.sign-at-spot (g ${cf.g}, ${cf.why})`);
@@ -318,6 +358,95 @@ const FACT_INPUT = () => ({
   const dg = Object.fromEntries(degenerate.map((f) => [f.id, f]));
   ok(dg["garch.avg.21"].g === 2 && dg["garch.avg.21"].why === "garch.alpha-degenerate" && dg["vrp.rel.21"].g <= 2,
      "a degenerate GARCH grades its forecast and every VRP built on it at most 2, naming the reason (defect 6)");
+}
+
+{
+  const withVol = (vol, extra = {}) => {
+    const input = FACT_INPUT();
+    input.card = { ...input.card, x: { vol } };
+    return QC.engineFacts({ ...input, ...extra });
+  };
+  const get = (facts, id) => facts.find((f) => f.id === id);
+  const FLOORED = { v: 1, iv30Pct: 0.698, iv30: 0.3 };
+
+  const real = withVol(FLOORED, { coneThin: false });
+  const pf = get(real, "iv.pctile.30.1y");
+  eq([pf.v, pf.u, pf.g, "why" in pf], [0.698, "frac", 2, false], "W06-P1(a): the cone's one-year percentile is published as iv.pctile.30.1y, a fraction graded 2 on a full cone");
+  eq(get(real, "iv.rank.1y").v, 0.62, "and the rank rides under its own id at the pricedMove value");
+  eq([get(real, "iv.pct.30").v, get(real, "iv.pct.30").why], [0.62, "iv.rank-as-pct"], "and iv.pct.30 is unchanged for one release: still the rank, still coded as such");
+  ok(pf.v !== get(real, "iv.pct.30").v, "so a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
+  const low = withVol(FLOORED, { coneThin: true });
+  eq([get(low, "iv.pctile.30.1y").v, get(low, "iv.pctile.30.1y").g], [0.698, 1], "a cone the leg flagged thin (under its 200-sample floor) is graded 1, the same value");
+  eq(get(withVol(FLOORED), "iv.pctile.30.1y").g, 2, "and an unknown sample count is not guessed thin");
+  eq(get(withVol(FLOORED, { coneThin: null }), "iv.pctile.30.1y").g, 2, "nor is an explicit null");
+  for (const [label, facts] of [
+    ["a card with no x block", QC.engineFacts(FACT_INPUT())],
+    ["a vol summary the leg marked unavailable", withVol({ v: 1, status: "unavailable", code: "read-failed" })],
+    ["a cone that carried no percentile", withVol({ v: 1, iv30Pct: null })],
+    ["a percentile above one", withVol({ v: 1, iv30Pct: 70 })],
+    ["a negative percentile", withVol({ v: 1, iv30Pct: -0.1 })],
+    ["a non-numeric percentile", withVol({ v: 1, iv30Pct: "0.7" })],
+  ]) {
+    const f = get(facts, "iv.pctile.30.1y");
+    eq([f.v, f.g, f.why, f.u], [null, 0, "iv.pctile-absent", "frac"], `${label}: the percentile is withheld as iv.pctile-absent, and the rank is never put in its place`);
+  }
+  eq(get(withVol(FLOORED), "iv.pctile.30.1y").v, 0.698, "a percentile of exactly the cone's value is kept to four places");
+  eq([get(withVol({ v: 1, iv30Pct: 0 }), "iv.pctile.30.1y").v, get(withVol({ v: 1, iv30Pct: 1 }), "iv.pctile.30.1y").v], [0, 1], "and both ends of the unit interval are values, not absences");
+  const sizeWith = JSON.stringify(real).length, sizeWithout = JSON.stringify(real.filter((f) => f.id !== "iv.pctile.30.1y")).length;
+  ok(sizeWith - sizeWithout > 30 && sizeWith - sizeWithout < 90, `the fact costs about sixty bytes a card (${sizeWith - sizeWithout})`);
+  {
+    const bucketOf = (facts) => bucketsOf(Object.fromEntries(facts.map((f) => [f.id, f])), "A").iv;
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
+      "P0-35: a rank of 0.07 with a percentile of 0.70 buckets mid, not low: the IV axis is read from the percentile");
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
+      "and a rank of 0.90 with a percentile of 0.10 buckets low, at the percentile's own grade");
+    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+      "a card with a rank and no percentile has no IV bucket: the rank is never put in its place");
+    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.pct.30", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+      "nor does one whose percentile is withheld");
+    eq([0.2499, 0.25, 0.5, 0.75, 0.7501].map((v) => bucketOf([{ id: "iv.pctile.30.1y", v, g: 2 }]).bucket), ["low", "mid", "mid", "mid", "high"],
+      "the buckets keep the lines 0.25 and 0.75, inclusive on the mid side");
+    eq([BUCKET_LINES.IV_LOW, BUCKET_LINES.IV_HIGH], [0.25, 0.75], "which are the lines the reading and the screen tier apply to a real percentile");
+    const withRank = withVol({ v: 1, iv30Pct: 0.7 }, { coneThin: false });
+    ok(get(withRank, "iv.pctile.30.1y").v === 0.7, "and the card's fact the bucket reads is the cone's percentile");
+  }
+}
+
+{
+  const SD = 0.3, J = 0.06, AVG = GARCH.avg21Vol / 100;
+  const dayAt = (d) => new Date(Date.parse(SESSION + "T00:00:00Z") + d * 86400000).toISOString().slice(0, 10);
+  const slice = (d, ev) => {
+    const T = d / 365, w = SD * SD * T + (ev <= d ? J * J : 0);
+    return { expiry: dayAt(d), T, dte: d, rows: [], slice: { method: "flat", T, F: 100, D: 1, params: { sigma: Math.sqrt(w / T) } } };
+  };
+  const CASES = [
+    ["A, interior, the event between the slices and before thirty days", [21, 49], 25, 24.55],
+    ["B, interior, the event between the slices and after thirty days", [21, 49], 35, 32.26],
+    ["C, one 21-day slice that holds the event", [21], 10, 32.98],
+    ["C, one 21-day slice, the event after it and inside thirty days", [21], 25, 21.49],
+    ["C, one 40-day slice that holds the event", [40], 10, 28.12],
+    ["C, one 40-day slice, the event after thirty days and inside it", [40], 35, 35.05],
+  ];
+  for (const [label, days, ev, oldReading] of CASES) {
+    const built = days.map((d) => slice(d, ev));
+    const event = { date: dayAt(ev), confirmed: true, moves: [0.05, -0.04, 0.06, -0.03, 0.07, -0.05] };
+    const cm = QC.constantMaturity(built, 30, { date: event.date, J2: J * J });
+    near(cm.vol * 100, 30, 0.01, `W06-P10 case ${label}: the thirty-day ex-event vol is the diffusion's 30.00% (the old removal read ${oldReading}%)`);
+    const by = Object.fromEntries(QC.engineFacts({ ...FACT_INPUT(), built, zero: null, event, jump: { J, meanAbs: J * Math.sqrt(2 / Math.PI), why: null } })
+      .map((f) => [f.id, f]));
+    near((by["vrp.vol.21"].v + AVG) * 100, 30, 0.01, `and vrp.vol.21 is read against that 30.00% in case ${label}`);
+    near(Math.sqrt(by["vrp.var.21"].v + AVG * AVG) * 100, 30, 0.01, `as is vrp.var.21 in case ${label}`);
+    ok(by["vrp.vol.21"].why === undefined, `with no vrp.event-inside code once the jump is removed in case ${label}`);
+    if (days.length === 2) {
+      near(by["term.slope.30_90.exEvent"].v, 0, 1e-4, `and the ex-event term slope of a flat diffusion is flat in case ${label} (${by["term.slope.30_90.exEvent"].v})`);
+    }
+  }
+  const built = [slice(21, 35), slice(49, 35)];
+  const raw = QC.constantMaturity(built, 30), none = QC.constantMaturity(built, 30, null);
+  eq([none.vol, none.w], [raw.vol, raw.w], "with no event to remove the constant maturity is the market's own, event included");
+  ok(raw.vol > 0.3 + 1e-3, `and iv.cm.30 still carries the share of the jump the interpolation holds (${raw.vol})`);
+  const far = QC.constantMaturity([slice(21, 200), slice(49, 200)], 30, { date: dayAt(200), J2: J * J });
+  near(far.vol * 100, 30, 1e-9, "an event after every slice the point reads removes nothing");
 }
 
 {

@@ -105,7 +105,7 @@ const factOf = (facts, id) => {
 };
 
 export function bucketsOf(facts, liquidityTier) {
-  const iv = factOf(facts, "iv.pct.30"), vrp = factOf(facts, "vrp.rel.21");
+  const iv = factOf(facts, "iv.pctile.30.1y"), vrp = factOf(facts, "vrp.rel.21");
   const term = factOf(facts, "term.slope.30_90.exEvent"), skew = factOf(facts, "skew.rr25.30.pct");
   const L = BUCKET_LINES;
   return {

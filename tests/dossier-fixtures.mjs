@@ -26,6 +26,7 @@ export const ENGINE = {
   facts: [
     { id: "iv.cm.30", v: 0.41, u: "vol", g: 3 },
     { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
+    { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 2 },
     { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
     { id: "term.slope.30_90.exEvent", v: 0.05, u: "frac", g: 2 },
     { id: "level.putWall", v: 120, u: "px", g: 3, atr: -2.4 },

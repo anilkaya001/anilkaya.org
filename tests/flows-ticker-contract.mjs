@@ -1248,6 +1248,19 @@ try {
     await mount(page, ivr(null));
     const w2 = await page.evaluate(() => { const m = [...document.querySelectorAll("#m-vol .ui-metric")].find((n) => /IV rank/.test(n.innerText)); const b = m && m.querySelector(".ui-state"); return b ? b.dataset.state : null; });
     eq(w2, "unavailable", "and an absent rank is unavailable, not the bottom of the year");
+    const seller = async (over) => {
+      const cx = clone(cardXOf(full.ticker));
+      cx.vrp = { ...cx.vrp, status: "ok", n: 252, hitRate: 0.5, ...over };
+      await mount(page, full, { cardX: cx });
+      return ((await modInfo(page, "m-vol")).match(/Seller won\n+([^\n]+)/) || [])[1] || "";
+    };
+    const sw = await seller({ nEff: 12, hitCi: [0.327, 0.673] });
+    ok(/^50% of 252 overlapping windows, about 12 independent \(80% range 33% to 67%\)$/.test(sw), `the seller's record names its overlap, its effective sample and its interval (${sw})`);
+    ok(!/completed windows/.test(sw), "and no longer calls 252 overlapping windows 252 completed ones");
+    const sold = await seller({ nEff: undefined, hitCi: undefined });
+    ok(/^50% of 252 overlapping windows$/.test(sold), `a card written before the effective sample was published prints the overlap and invents no interval (${sold})`);
+    const half = await seller({ nEff: 12, hitCi: [null, 0.7] });
+    ok(/^50% of 252 overlapping windows$/.test(half), "an interval with a missing end is not printed");
     const band = async (over) => { const c = clone(card); for (const k of ["vrpTrailing", "vrpTrailingVar", "rvForward", "rvForwardGrade", "vrpForward", "vrpForwardVar", "vrpForwardRel", "richnessFrom", "richnessRel"]) delete c.panels.pricedMove[k]; Object.assign(c.panels.pricedMove, over); await mount(page, c); const t = await infoText(page, "#ftHc .ui-info"); return (t.match(/\nBand\n([^\n]+)/) || [])[1]; };
     eq(await band({ richness: "rich", vrp: 0.03087, rv30: 0.49813 }), "fair", "A CARD BUILT BEFORE THE THREE-WAY BAND still stores 'rich' for +6% of realised; the page derives the band at the shared line");
     eq(await band({ richness: "cheap", vrp: 0.1, rv30: 0.5 }), "rich", "the derivation wins in either direction");

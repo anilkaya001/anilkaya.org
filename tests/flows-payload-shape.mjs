@@ -188,6 +188,48 @@ assert.deepEqual(missingReport, [],
     .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")))
     .filter((c) => c && c.engine && Array.isArray(c.engine.structures) && c.engine.structures.length);
   ok(cards.length > 0, `the dry run publishes cards whose engine block carries priced structures (${cards.length})`);
+  {
+    const wrong = [];
+    let present = 0, absent = 0, thin = 0, full = 0;
+    for (const c of cards) {
+      const f = c.engine.facts.find((x) => x.id === "iv.pctile.30.1y");
+      const want = c.x && c.x.vol && Number.isFinite(c.x.vol.iv30Pct) ? c.x.vol.iv30Pct : null;
+      if (!f) { wrong.push(`${c.ticker}: no iv.pctile.30.1y fact`); continue; }
+      const xf = join(dir, "p-card-x-" + c.ticker + ".json");
+      const cone = existsSync(xf) ? JSON.parse(readFileSync(xf, "utf8")).cone : null;
+      const tenor = cone && Array.isArray(cone.tenors) ? cone.tenors.find((t) => t.days === 30) : null;
+      if (want === null) { absent++; if (f.v !== null || f.g !== 0 || f.why !== "iv.pctile-absent") wrong.push(`${c.ticker}: an absent percentile is not withheld`); }
+      else {
+        present++;
+        if (!tenor || typeof tenor.lowSample !== "boolean") { wrong.push(`${c.ticker}: no 30-day cone tenor with a lowSample flag in card-x`); continue; }
+        const wantG = tenor.lowSample ? 1 : 2;
+        if (tenor.lowSample) thin++; else full++;
+        if (Math.abs(f.v - want) > 5e-5 || f.u !== "frac" || f.g !== wantG) wrong.push(`${c.ticker}: the fact ${f.v} grade ${f.g} is not x.vol.iv30Pct ${want} at grade ${wantG} (lowSample ${tenor.lowSample})`);
+      }
+    }
+    assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, graded 1 on a thin 30-day cone and 2 on a full one, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
+    ok(present > 0, `the dry run reaches the percentile fact with a value (${present}) and without one (${absent})`);
+    ok(thin > 0 && full > 0, `and it reaches both grades: grade 1 on a thin cone (${thin}) and grade 2 on a full one (${full})`);
+    {
+      const { bucketsOf } = await import("../shared/flows-quant-structures.js");
+      const bucketFrom = (c) => bucketsOf(Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "A").iv.bucket;
+      const onRank = (c) => {
+        const r = c.engine.facts.find((x) => x.id === "iv.pct.30");
+        const f = { ...Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "iv.pctile.30.1y": r };
+        return bucketsOf(f, "A").iv.bucket;
+      };
+      let changed = 0, lost = 0, both = 0;
+      for (const c of cards) {
+        const now = bucketFrom(c), was = onRank(c);
+        if (was === null) continue;
+        both++;
+        if (now === null) lost++;
+        else if (now !== was) changed++;
+      }
+      ok(both > 0, `the IV bucket moved from the rank to the percentile is measurable on the dry run's cards (${both})`);
+      console.log(`  P0-35: ${changed} of ${both} fixture cards change IV bucket (${(100 * changed / both).toFixed(1)}%), ${lost} lose it for want of a percentile`);
+    }
+  }
   const src = readFileSync(join(ROOT, "assets/js/flows-ticker.js"), "utf8");
   const IDEA_FNS = ["payoffPoints", "ideaFacts", "legRow", "engineIdeaCard", "standAside"];
   const scope = IDEA_FNS.map((name) => {
@@ -556,7 +598,7 @@ assert.deepEqual(missingReport, [],
     cone: ["asOf", "sameSession", "tenors", "iv30", "pct30", "coneShape", "richCheap", "view", "slope30_90", "front7_30",
       "slope30_90ExEvent", "xPct", "weights", "units", "silent"],
     rv: ["asOf", "sameSession", "bars", "from", "estimator", "cone", "yz", "pk21", "cc21", "gap", "breaks", "units", "silent"],
-    vrp: ["asOf", "latest", "n", "hitRate", "meanRp", "medianRp", "rankOwn", "meanVariance", "exAnte", "garch", "series",
+    vrp: ["asOf", "latest", "n", "hitRate", "nEff", "hitCi", "meanRp", "medianRp", "rankOwn", "meanVariance", "exAnte", "garch", "series",
       "realizedSessions", "units", "silent"],
     term: ["asOf", "sameSession", "expiries", "earnings", "eventExpiry", "eventKink", "eventMove", "minSamples",
       "kinkThreshold", "units", "silent"],

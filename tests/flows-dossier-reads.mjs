@@ -211,6 +211,55 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
 {
   const f = world();
   const get = await client(f.D1);
+  const spec = F.vendorBody("ownership");
+  const wire = { data: spec.data.map(({ units_change: d, ...r }) => ({ ...r, units: String(r.units), units_changed: String(d), historical_units: [r.units, r.units - d, r.units - 2 * d] })) };
+  const netChange = spec.data.reduce((sum, r) => sum + r.units_change, 0);
+  stub.state.bodies.set("ownership", wire);
+  const a = await get("/api/flows/dossier?t=EXMP");
+  await a.settle();
+  const instChange = (r) => r.body.dossier.packets.positioning.facts.find((x) => x.k === "inst.change");
+  const instHeld = (r) => r.body.dossier.packets.positioning.withheld.filter((w) => w.k.startsWith("inst."));
+  eq(instChange(a)?.v, netChange, "OWNERSHIP ON THE WIRE NAME: units_changed gives inst.change (" + netChange + ")");
+  const positioning = () => JSON.parse(f.db.prepare("SELECT payload FROM flows_dossier_cache WHERE ticker = ? AND kind = 'positioning'").get(T).payload);
+  const plant = () => {
+    const row = positioning();
+    const { rv: _rv, ...x } = row.parts.ownership.x;
+    row.parts.ownership.x = { ...x, change: 0, changeKnown: 0, up: 0, down: 0, top: x.top.map((t) => ({ ...t, dU: null })) };
+    f.db.prepare("UPDATE flows_dossier_cache SET payload = ? WHERE ticker = ? AND kind = 'positioning'").run(JSON.stringify(row), T);
+  };
+  eq(positioning().parts.ownership.x.rv, D.EXTRACT_VERSIONS.ownership, "and the cached extract carries the reducer's version stamp");
+  plant();
+  stub.reset();
+  dropHot();
+  const b = await get("/api/flows/dossier?t=EXMP");
+  same(keysCalled().filter((k) => k !== "screener"), ["ownership"], "A POSITIONING ROW CACHED BY THE OLD REDUCER, still inside its 24 h: the first read refetches ownership, and nothing else");
+  eq(instChange(b)?.v, netChange, "and waits for it, so inst.change is the fresh one");
+  same(instHeld(b), [], "with no false absent reason for the change the wire did send");
+  eq(b.body.dossier.fingerprint, a.body.dossier.fingerprint, "so the fingerprint is the fresh read's, and moves once, not twice");
+  eq(b.body.dossier.coverage.pending, 0, "nothing pending");
+  await b.settle();
+  eq(positioning().parts.ownership.x.rv, D.EXTRACT_VERSIONS.ownership, "the row is rewritten with the stamp");
+  stub.reset();
+  dropHot();
+  const c = await get("/api/flows/dossier?t=EXMP");
+  await c.settle();
+  eq(vendorCallsMade(), 0, "and the next read is warm again");
+
+  plant();
+  stub.reset();
+  stub.state.status.set("ownership", 503);
+  dropHot();
+  const d = await get("/api/flows/dossier?t=EXMP");
+  await d.settle();
+  eq(calls("ownership").length, 1, "WHEN THAT REFETCH FAILS");
+  ok(d.body.dossier.packets.positioning.facts.some((x) => x.k === "inst.holders") && !instChange(d), "the unstamped extract is still served, as before the change: the holders, and no change fact");
+  same(instHeld(d), [], "and it withholds nothing under a reason its reducer could not know");
+  ok(!("rv" in positioning().parts.ownership.x), "the old row stays until a refetch succeeds");
+}
+
+{
+  const f = world();
+  const get = await client(f.D1);
   const a = await get("/api/flows/dossier?t=PLAIN");
   eq(a.res.status, 200, "A NAME IN THE UNIVERSE WITH NO CARD: 200");
   eq(a.body.tier, "screen", "its tier is the screen reading, as /api/flows/summary says for it");

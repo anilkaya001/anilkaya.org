@@ -20,9 +20,11 @@ export const SCREEN_LINES = Object.freeze({
   EXPIRED_SESSIONS: 2,
 });
 
+const IVP_LABEL = "Vendor 1-year IV percentile (tenor not documented)";
+
 export const SCREEN_INPUTS = Object.freeze([
   ["gexAdv", "Dealer book gamma"], ["iv30", "30-day implied volatility"], ["dex", "Dealer delta"], ["vanna", "Dealer vanna"],
-  ["charm", "Dealer charm"], ["vrp", "Implied against realised volatility"], ["ivp", "Implied volatility percentile"],
+  ["charm", "Dealer charm"], ["vrp", "Implied against realised volatility"], ["ivp", IVP_LABEL],
   ["ts", "Term slope"], ["im5", "Priced move, 5 days"], ["im30", "Priced move, 30 days"], ["ed", "Next earnings report"],
   ["tilt", "Option flow tilt"], ["dDelta", "Directional delta flow"], ["si", "Short interest"],
 ]);
@@ -161,12 +163,12 @@ export function screenReading(input) {
   }
 
   const ivp = v("ivp");
-  if (ivp === null) withhold("ivp", "Implied volatility percentile", absent("ivp"));
+  if (ivp === null) withhold("ivp", IVP_LABEL, absent("ivp"));
   else {
     push({
-      key: "ivp", group: "premium", label: "Implied volatility percentile", value: r4(ivp),
-      text: ordinal(ivp), unit: "percentile of its own past year of 30-day implied volatility", grade: 1,
-      note: "The share of the past year's sessions with lower 30-day implied volatility, a percentile and not the range-based IV rank.",
+      key: "ivp", group: "premium", label: IVP_LABEL, value: r4(ivp),
+      text: ordinal(ivp), unit: "percentile, as the vendor reports it, over a window the field name gives as one year, on an implied-volatility tenor no document held for it states", grade: 1,
+      note: "The vendor's own percentile, a percentile and not the range-based IV rank. The field name says one year; no document held for it says which expiry's implied volatility it ranks, so it is not read as the 30-day figure.",
     });
   }
   const ts = v("ts");

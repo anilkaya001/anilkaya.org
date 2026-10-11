@@ -4,7 +4,7 @@ import { buildContext, contextLines, contextFacts, promptForNeuron, parseNeuronO
          regimeState, stateIdea, stateSentence, stateChip, STATES, STATE_STRUCTURES, STATE_LINES, STATE_WORD,
          NEURON_CONTEXT_VERSION, NEURON_MAX_IDEAS, NEURON_STRUCTURES,
          engineContext, engineFallback, promptForEngine, parseEngineOutput, vetEngineReply, verdictHolds, claimHolds,
-         VERDICTS, VERDICT_WORD, CLAIM_RELS, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE,
+         VERDICTS, VERDICT_WORD, CLAIM_RELS, CLAIM_LINES, RULE_FACT, VET_CODES, ENGINE_LINES, STATE_CONFIDENCE_MAX, guardOptions, proseIssue, cleanLabel, NEURON_PROSE_CAPS, applyStaleCap, STALE_NOTE,
          neuronTier, abstentionIdea, structuresForState, NEURON_TIERS, TIER_WHY } from "../shared/flows-neuron.js";
 import { TICKER_PANELS, SENTINEL_KEYS } from "../shared/flows-panels.js";
 import { BUCKET_LINES } from "../shared/flows-quant-structures.js";
@@ -845,7 +845,9 @@ const CARD = {
     facts: [
       { id: "iv.cm.30", v: 0.32, u: "vol", g: 3 },
       { id: "iv.cm.90", v: 0.29, u: "vol", g: 2 },
+      { id: "iv.rank.1y", v: 0.82, u: "frac", g: 2 },
       { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
+      { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 2 },
       { id: "garch.avg.21", v: 0.27, u: "vol", g: 3 },
       { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
       { id: "vrp.var.21", v: 0.0295, u: "var", g: 3 },
@@ -902,6 +904,9 @@ const CARD = {
   ok(user.includes("S1 put-credit-spread") && user.includes("vrp.rel.21 = 0.18"), "and hands the model the facts and structures");
   ok(/never add one/.test(system) && /only when that line says the engine stands aside/.test(system) && /at least one of them a fact the structure's own rules rest on/.test(system),
      "and tells it what the vet now enforces: reorder or drop the ranked ideas but never add one, stand aside only when the engine does, and rest each idea on a fact its rules name");
+  ok(/the volatility premium vrp\.rel\.21; the IV percentile iv\.pctile\.30\.1y; the term slope term\.slope\.30_90\.exEvent; the skew skew\.rr25\.30\.pct; or the event ratio move\.event\.ratio\)/.test(system) &&
+     /the state's level level\.magnet when pinned, else level\.flip, and its book gex\.book/.test(system) && !/\brank\b/i.test(system),
+     "and names each axis the rules rest on by the one id the vet accepts for it: the IV percentile is iv.pctile.30.1y, the id RULE_FACT.iv holds, never a rank and never the iv.pct.30 or iv.rank.1y lines beside it");
   same(parseEngineOutput("```json\n{\"verdict\":\"stand-aside\"}\n```"), { verdict: "stand-aside" }, "a fenced JSON reply parses");
   eq(parseEngineOutput("no json here"), null, "and prose is not a reply");
 
@@ -909,7 +914,7 @@ const CARD = {
     claims: [{ a: "iv.cm.30", rel: "gt", b: "garch.avg.21" }, { a: "spot", rel: "between", b: "level.putWall", c: "level.callWall" },
       { a: "vrp.rel.21", rel: "rich" }, { a: "level.magnet", rel: "near", b: "spot" }, { a: "iv.mom.5", rel: "falling" }],
     ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] },
-      { structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"] }] };
+      { structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] };
   const v = vetEngineReply(good, ectx);
   ok(v.ok && v.refused.length === 0, `a reply of ids, codes and true claims is accepted whole (${JSON.stringify(v.refused)})`);
   same(v.ideas.map((i) => [i.structure, i.verdict, i.grade, i.from]), [["S2", "pin-at-level", 2, "model"], ["S1", "harvest-rich-premium", 2, "model"]],
@@ -918,15 +923,15 @@ const CARD = {
   eq(v.verdict, "harvest-rich-premium", "with the overall verdict, because a kept structure satisfies it");
 
   const code = (reply) => vetEngineReply(reply, ectx).refused.map((r) => r.code);
-  same(code({ ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pct.30"], note: "sells 95 puts" }] }),
+  same(code({ ideas: [{ structure: "S1", verdict: "harvest-rich-premium", because: ["vrp.rel.21", "iv.pctile.30.1y"], note: "sells 95 puts" }] }),
        ["digit"], "a digit outside a copied id refuses the whole reply: the model does not write numbers");
   same(code({ verdict: "stand-aside", confidence: 3 }), ["digit"], "so does a bare number in any field");
-  same(code({ ideas: [{ structure: "S9", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["unknown-id"],
+  same(code({ ideas: [{ structure: "S9", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }), ["unknown-id"],
        "an unknown structure id is refused as unknown, not as a digit: digits are allowed inside id fields and checked there");
   same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "vol.of.vol"] }] }), ["unknown-id"], "so is an unknown fact id in because");
   same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "move.event.ratio"] }] }), ["withheld"],
        "a because that leans on a withheld fact is refused as withheld");
-  same(code({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"],
+  same(code({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }), ["avoid"],
        "a structure whose family the state avoids is refused");
   {
     const zero = JSON.parse(JSON.stringify(ecard));
@@ -935,24 +940,24 @@ const CARD = {
     same(vetEngineReply({ ideas: [{ structure: "S2", verdict: "pin-at-level", because: ["level.magnet", "gex.book"] }] }, zctx).refused.map((r) => r.code),
       ["withheld"], "an idea on a structure the engine graded 0 (a leg failed the liquidity gate, or no model) is refused as withheld, not kept at grade 0");
   }
-  same(code({ ideas: [{ structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["undefined-first"],
+  same(code({ ideas: [{ structure: "S3", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }), ["undefined-first"],
        "an undefined-risk first idea is refused while a defined-risk structure is listed");
   same(code({ ideas: [{ structure: "S5", verdict: "buy-cheap-convexity", because: ["vrp.rel.21", "term.front.7_30"] }] }),
        ["verdict-false"], "a verdict whose preconditions fail on the facts is refused: premium is rich, not cheap");
-  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }),
+  same(code({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }),
        ["dup"], "a repeated structure is refused");
   same(code({ claims: [{ a: "iv.cm.30", rel: "lt", b: "garch.avg.21" }] }), ["claim-false"],
        "a false comparison is refused after the server evaluates it on the facts");
   same(code({ claims: [{ a: "iv.cm.30", rel: "gt", b: "level.flip" }] }), ["claim-false"], "so is a comparison across units");
   same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
        "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
-  same(code({ claims: [{ a: "iv.pct.30", rel: "cheap" }] }), ["claim-false"], "a percentile at 0.82 is not cheap");
+  same(code({ claims: [{ a: "iv.pctile.30.1y", rel: "cheap" }] }), ["claim-false"], "an IV rank at 0.82 is not cheap");
   same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
   same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
   same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
   ok(VET_CODES.every((c) => typeof c === "string") && ["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false",
     "withheld", "undefined-first", "dup"].every((c) => VET_CODES.includes(c)), "every refusal code is published");
-  ok(!vetEngineReply({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx).ok,
+  ok(!vetEngineReply({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }, ectx).ok,
      "a reply whose every idea is refused is not ok, so the Worker falls back to the engine ranking");
 
   ok(verdictHolds("pin-at-level", ENGINE.structures[1] && { ...ectx.engine.structures[1] }, ectx.engine),
@@ -972,7 +977,7 @@ const CARD = {
   eq(fb.ideas[0].verdict, "harvest-rich-premium", "the put credit spread reads as harvesting rich premium");
   same(fb.ideas[0].because, ["vrp.rel.21", "level.magnet"],
        "and rests on the facts with the largest affinity contribution: rich VRP at grade 3 adds 2, the pinned state at " +
-       "confidence 2 adds 4/3 and comes before the IV percentile's equal 4/3 in rule order");
+       "confidence 2 adds 4/3 and comes before the IV rank's equal 4/3 in rule order");
   const asReply = { verdict: fb.verdict, ideas: fb.ideas.map(({ structure, verdict, because }) => ({ structure, verdict, because })) };
   const fv = vetEngineReply(asReply, ectx);
   ok(fv.ok && fv.refused.length === 0, `the fallback, written as a model would write it, passes the same vetting (${JSON.stringify(fv.refused)})`);
@@ -993,7 +998,7 @@ const CARD = {
     ok(!standAside.ok && standAside.verdict === null && codes({ verdict: "stand-aside", ideas: [] }).join() === "verdict-false",
        "N-F2: a model that stands aside while the engine ranks three ideas is refused, and its verdict is dropped, where it was accepted whole with an empty list " +
        "(the page then drew the 'Stand aside' tag beside the engine's own three cards)");
-    const mixed = vetEngineReply({ verdict: "stand-aside", ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx);
+    const mixed = vetEngineReply({ verdict: "stand-aside", ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }, ectx);
     ok(mixed.ok && mixed.verdict === null && mixed.ideas.length === 1 && mixed.refused.some((r) => r.code === "verdict-false"),
        "and stand-aside beside a kept idea is a contradiction the vet resolves in the idea's favour");
     const asideCtx = buildContext(aside, { expectedSession: "2026-09-15" });
@@ -1007,29 +1012,40 @@ const CARD = {
     const eventOnly = vetEngineReply({ verdict: "stand-aside", claims: [{ a: "vrp.rel.21", rel: "rich" }] }, ectx);
     ok(!eventOnly.ok && eventOnly.verdict === null && eventOnly.claims.length === 1, "and true claims survive on their own without a verdict");
 
-    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S3", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["not-ranked"],
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }, { structure: "S3", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }), ["not-ranked"],
          "N-F3: a structure with positive EV and a passing grade that the engine did not rank (S3, not among its ideas) is refused as not-ranked");
     const promoted = JSON.parse(JSON.stringify(ecard));
     promoted.engine.structures.splice(2, 1, st("S6", "broken-wing-butterfly", "defined", "neutral", [leg("P", 100, 1), leg("P", 95, -2), leg("P", 88, 1)], 2, ["state.pinned"], [0.3, 0.25], [-80, -120], 300, -400));
     const pctx = buildContext(promoted, { expectedSession: "2026-09-15" });
-    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S6", because: ["vrp.rel.21", "iv.pct.30"] }] }, pctx), ["not-ranked"],
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }, { structure: "S6", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }, pctx), ["not-ranked"],
          "including one whose real-world EV is −120, which the vet used to keep after the engine had refused it");
-    same(vetEngineReply({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S2", because: ["level.magnet", "gex.book"] },
+    same(vetEngineReply({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }, { structure: "S2", because: ["level.magnet", "gex.book"] },
       { structure: "S5", because: ["term.slope.30_90.exEvent", "vrp.rel.21"] }] }, ectx).ideas.map((i) => i.structure), ["S1", "S2", "S5"],
          "while the engine's own three ideas, in any order the model likes, are all kept");
-    same(vetEngineReply({ ideas: [{ structure: "S5", because: ["term.slope.30_90.exEvent", "vrp.rel.21"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }] }, ectx).ideas.map((i) => i.structure), ["S5", "S1"],
+    same(vetEngineReply({ ideas: [{ structure: "S5", because: ["term.slope.30_90.exEvent", "vrp.rel.21"] }, { structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }, ectx).ideas.map((i) => i.structure), ["S5", "S1"],
          "so the model may re-order, and may not add");
     const twin = JSON.parse(JSON.stringify(ecard));
     twin.engine.structures.splice(3, 1, st("S7", "put-credit-spread", "defined", "bull", [leg("P", 93, -1), leg("P", 88, 1)], 2, ["state.pinned", "vrp.rich"], [0.7, 0.75], [-2, 15], 120, -380));
     twin.engine.ideas = ["S1", "S7", "S2"];
-    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pct.30"] }, { structure: "S7", because: ["vrp.rel.21", "iv.pct.30"] }] }, buildContext(twin, { expectedSession: "2026-09-15" })), ["dup"],
+    same(codes({ ideas: [{ structure: "S1", because: ["vrp.rel.21", "iv.pctile.30.1y"] }, { structure: "S7", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }, buildContext(twin, { expectedSession: "2026-09-15" })), ["dup"],
          "and two structures of one family are never kept together, the engine's own one-per-family rule");
 
+    const ivOnly = JSON.parse(JSON.stringify(ecard));
+    ivOnly.engine.structures[0].rules = ["iv.high"];
+    const ivCtx = buildContext(ivOnly, { expectedSession: "2026-09-15" });
+    same(codes({ ideas: [{ structure: "S1", because: ["iv.rank.1y", "iv.cm.30"] }] }, ivCtx), ["off-rules"],
+         "a put credit spread whose rules rest on the IV axis alone, 'because' iv.rank.1y, the rank line every real card prints beside iv.pctile.30.1y at the same value, is refused as off-rules: the vet reads the IV axis only through RULE_FACT.iv, which is why the prompt names that id");
+    same(codes({ ideas: [{ structure: "S1", because: ["iv.rank.1y", "vrp.rel.21"] }] }, ivCtx), ["off-rules"],
+         "and so is the same rank line beside the volatility premium, a fact this structure's rules do not name");
+    ok(vetEngineReply({ ideas: [{ structure: "S1", because: ["iv.pctile.30.1y", "iv.cm.30"] }] }, ivCtx).ideas.length === 1,
+       "while the same idea citing iv.pctile.30.1y, the id the prompt names, is kept");
+    same(codes({ ideas: [{ structure: "S1", because: ["iv.pct.30", "iv.cm.30"] }] }, ivCtx), ["off-rules"],
+         "P0-35: and the rank under its old percentile id, iv.pct.30, no longer rests an IV rule: the vet reads the axis through the percentile only");
     same(codes({ ideas: [{ structure: "S2", because: ["iv.cm.90", "garch.avg.21"] }] }), ["off-rules"],
          "N-F4: an iron condor 'because' the 90-day implied vol and the GARCH average, which none of its rules names, is refused as off-rules, where any two graded facts were accepted");
     ok(vetEngineReply({ ideas: [{ structure: "S2", because: ["iv.cm.90", "vrp.rel.21"] }] }, ectx).ideas.length === 1,
        "while naming one fact its rules rest on is enough to keep it, the other may be context");
-    same(codes({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pct.30"] }] }), ["avoid"], "and the avoid list is still read first");
+    same(codes({ ideas: [{ structure: "S4", because: ["vrp.rel.21", "iv.pctile.30.1y"] }] }), ["avoid"], "and the avoid list is still read first");
     same(codes({ ideas: [{ structure: "S5", because: ["level.putWall", "level.callWall"] }] }), ["off-rules"],
          "a calendar's 'because' is the term structure, not the walls it does not use");
     const fb = engineFallback(ectx);
@@ -1423,22 +1439,51 @@ const CARD = {
   const eng = (facts, over = {}) => ({ spot: 100, atr: 2, facts: facts.map(([id, v, g = 3]) => ({ id, v, u: "frac", g })), structures: [], ideas: [], noTrade: null, state: { state: "pinned" }, ...over });
   const condor = { id: "S1", family: "iron-condor", vol: "short", premium: "credit", short: [] };
   const straddle = { id: "S2", family: "long-straddle", vol: "long", premium: "debit", short: [] };
-  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pct.30", 0.72, 2]])),
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pctile.30.1y", 0.72, 2]])),
      "N-F11: at VRP −15% and IV rank 0.72 selling premium is not 'harvesting rich premium': the audit's fixture held it, on an IV line of 0.70");
-  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pct.30", 0.9, 2]])),
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", -0.15], ["iv.pctile.30.1y", 0.9, 2]])),
      "nor at IV rank 0.9 with a negative variance risk premium: any harvest needs the premium's sign");
-  ok(!verdictHolds("harvest-rich-premium", condor, eng([["iv.pct.30", 0.9, 2]])), "nor with no premium read at all");
-  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.9, 2]])), "while a positive premium with IV rank in the top quartile holds it, at any size");
-  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.72, 2]])), "but not at 0.72, which is inside the mid band on the one line");
-  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.12], ["iv.pct.30", 0.5, 2]])), "and a premium past +10% at a mid IV rank does");
-  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", 0.09], ["iv.pct.30", 0.2, 2]])),
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["iv.pctile.30.1y", 0.9, 2]])), "nor with no premium read at all");
+  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pctile.30.1y", 0.9, 2]])), "while a positive premium with IV rank in the top quartile holds it, at any size");
+  ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pctile.30.1y", 0.72, 2]])), "but not at 0.72, which is inside the mid band on the one line");
+  ok(verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.12], ["iv.pctile.30.1y", 0.5, 2]])), "and a premium past +10% at a mid IV rank does");
+  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", 0.09], ["iv.pctile.30.1y", 0.2, 2]])),
      "at VRP +9% and IV rank 0.20 buying a straddle is not 'buying cheap convexity': the premium is positive, so it is not cheap");
-  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.2, 2]])), "a negative premium at a bottom-quartile IV rank is");
-  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pct.30", 0.6, 2]])), "and one past −10% at a mid IV rank");
-  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pct.30", 0.8, 2]])), "but not with IV rank in the top quartile");
+  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pctile.30.1y", 0.2, 2]])), "a negative premium at a bottom-quartile IV rank is");
+  ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pctile.30.1y", 0.6, 2]])), "and one past −10% at a mid IV rank");
+  ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pctile.30.1y", 0.8, 2]])), "but not with IV rank in the top quartile");
   ok(claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.76, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.72, 2]])).ok &&
      claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.2, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.25, 2]])).ok,
-     "and the claims 'rich' and 'cheap' on an IV percentile read the same two lines, strictly, as the engine's buckets do");
+     "and the claims 'rich' and 'cheap' on an IV rank read the same two lines, strictly, as the engine's buckets do");
+  {
+    const rich = (id, v) => claimHolds({ a: id, rel: "rich" }, eng([[id, v, 2]])).ok;
+    const cheap = (id, v) => claimHolds({ a: id, rel: "cheap" }, eng([[id, v, 2]])).ok;
+    same(Object.keys(CLAIM_LINES).sort(), ["iv.pct.30", "iv.pctile.30.1y", "iv.rank.1y", "skew.rr25.30.pct"],
+      "P0-35: the claim lines are an explicit table over four ids, not a pattern on the id's spelling");
+    ok(Object.isFrozen(CLAIM_LINES) && CLAIM_LINES["iv.pctile.30.1y"].hi === BUCKET_LINES.IV_HIGH && CLAIM_LINES["iv.pctile.30.1y"].lo === BUCKET_LINES.IV_LOW &&
+       CLAIM_LINES["skew.rr25.30.pct"].hi === BUCKET_LINES.SKEW_STEEP && CLAIM_LINES["skew.rr25.30.pct"].lo === BUCKET_LINES.SKEW_FLAT,
+      "the IV ids carry 0.25/0.75 and the skew id 0.2/0.8, each the engine's own bucket line");
+    ok(rich("iv.pctile.30.1y", 0.8) && rich("iv.pctile.30.1y", 0.76) && !rich("iv.pctile.30.1y", 0.75) && !rich("iv.pctile.30.1y", 0.7),
+      "a 'rich' claim on the percentile id at 0.80 is accepted, as at 0.76, and refused at the 0.75 line itself and below it");
+    ok(cheap("iv.pctile.30.1y", 0.2) && !cheap("iv.pctile.30.1y", 0.25) && !cheap("iv.pctile.30.1y", 0.5), "and 'cheap' holds below 0.25 only");
+    ok(!rich("skew.rr25.30.pct", 0.77) && rich("skew.rr25.30.pct", 0.8) && rich("skew.rr25.30.pct", 0.9),
+      "a 'rich' claim on the skew percentile at 0.77 is refused, where the IV lines used to accept it, and holds from the steep line 0.8, the bucket's own");
+    ok(cheap("skew.rr25.30.pct", 0.2) && cheap("skew.rr25.30.pct", 0.1) && !cheap("skew.rr25.30.pct", 0.22),
+      "and a 'cheap' skew claim holds up to the flat line 0.2 inclusive and not at 0.22, which the IV line 0.25 used to accept");
+    ok(rich("iv.rank.1y", 0.76) && !rich("iv.rank.1y", 0.72) && rich("iv.pct.30", 0.76) && !rich("iv.pct.30", 0.72) && cheap("iv.pct.30", 0.2),
+      "the rank ids keep the IV lines for the one release they are still emitted");
+    ok(!claimHolds({ a: "iv.mom.5", rel: "rich" }, eng([["iv.mom.5", 0.9, 2]])).ok && !claimHolds({ a: "gex.book", rel: "cheap" }, eng([["gex.book", 0.1, 2]])).ok,
+      "an id outside the table is refused as a rich or cheap claim, whatever it is spelled like");
+    const neuronSrc = fs.readFileSync(new URL("../shared/flows-neuron.js", import.meta.url), "utf8");
+    ok(!neuronSrc.includes("\\.pct\\b") && !neuronSrc.includes("\\.rank\\."), "and no pattern on the id's spelling is left in the claim vet");
+    ok(RULE_FACT.iv === "iv.pctile.30.1y", "the IV rule fact is the percentile id");
+    ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.07, 2], ["iv.pctile.30.1y", 0.7, 2]])) &&
+       verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.7, 2], ["iv.pctile.30.1y", 0.07, 2]])),
+      "a verdict reads the percentile and not the rank: rank 0.07 with percentile 0.70 is mid and does not hold 'buy cheap convexity', the reverse does");
+    ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.9, 2]])) &&
+       verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.5, 2], ["iv.pctile.30.1y", 0.9, 2]])),
+      "and a card with only the rank has no IV read for a verdict: the percentile is withheld, never replaced by the rank");
+  }
 
   const at = (rank) => {
     const c = JSON.parse(JSON.stringify(CARD));
@@ -1504,7 +1549,7 @@ const CARD = {
 
 {
   const engineOf = (over = {}) => ({
-    facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
+    facts: [{ id: "iv.pctile.30.1y", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
     structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: [], legs: [] }],
     ideas: ["S1"], noTrade: null, ...over });
   const tierOf = (card) => neuronTier(card, { engine: engineContext(card) });
@@ -1615,7 +1660,7 @@ const CARD = {
   same(regimeState(A, { expectedSession: "2026-09-15" }).preferred, regimeState(B, { expectedSession: "2026-09-15" }).preferred, "NOT WIRED INTO RANKING: reversing dealer delta and vanna moves the state's preferred structures not at all");
   eq(regimeState(A, { expectedSession: "2026-09-15" }).state, regimeState(B, { expectedSession: "2026-09-15" }).state, "or its state");
   const ecard = JSON.parse(JSON.stringify(withPanel()));
-  ecard.engine = { facts: [{ id: "iv.pct.30", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
+  ecard.engine = { facts: [{ id: "iv.pctile.30.1y", v: 0.5, u: "frac", g: 2 }, { id: "vrp.rel.21", v: 0.15, u: "frac", g: 2 }],
     structures: [{ id: "S1", family: "iron-condor", risk: "defined", dir: "neutral", grade: 2, rules: ["vrp.rich"], legs: [] }], ideas: ["S1"], noTrade: null, state: null };
   const eng = ctxOf(ecard);
   ok(!promptForEngine(eng).system.includes("exposure") && !promptForEngine(eng).user.includes("Dealer exposures"), "the engine prompt, where the ranking is voted, does not see the exposures");

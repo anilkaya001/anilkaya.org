@@ -6,14 +6,17 @@ import {
   sizeToBuyingPower, planBuyingPower,
   ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
   intrinsic, impossibleQuote, optionRoot, hasNoEarnings, PRICING_RATE, OFF_MARKET_TOLERANCE,
-  deskSmiles,
+  deskSmiles, deskCarry, forwardPlan, forwardGapLimit, midImpliedVol, FORWARD_MIN_PAIRS, FORWARD_MAX_LOG_GAP, FORWARD_GAP_FLOOR,
 } from "../shared/flows-premium.js";
 import { ENGINE_LINES } from "../shared/flows-quant-engine.js";
+import { black76 } from "../shared/flows-quant-bs.js";
+import { yearFraction } from "../shared/flows-quant-time.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
+const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
 
@@ -904,6 +907,140 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(smiles[2].T === 0.5 && smiles[2].smile.params.rho === -0.3, "numbers that arrived as text are numbers when they leave");
   same(deskSmiles(undefined), [], "and a card with no expiries sends none");
   ok(JSON.stringify(smiles[0]).length < 170, `at ${JSON.stringify(smiles[0]).length} bytes an expiry`);
+}
+
+{
+  const spot = 100, readMs = Date.parse("2026-08-25T18:10:00Z"), asOf = "2026-08-25";
+  const expiry = "2027-02-21", T = yearFraction(readMs, expiry);
+  ok(Math.abs(T * 365 - 180) < 1, `the expiry is 180 days out (${(T * 365).toFixed(2)})`);
+  const r = PRICING_RATE, q = 0.03, sigma = 0.30;
+  const D = Math.exp(-r * T), trueF = spot * Math.exp((r - q) * T);
+  const sym = (type, K) => `XYZ${expiry.slice(2).replace(/-/g, "")}${type}${String(Math.round(K * 1000)).padStart(8, "0")}`;
+  const quote = (type, K, half = 0.02, iv = sigma) => {
+    const mid = black76(trueF, D, K, iv, T, type);
+    return { option_symbol: sym(type, K), nbbo_bid: (mid - half).toFixed(9), nbbo_ask: (mid + half).toFixed(9), implied_volatility: String(iv), open_interest: "500", volume: "40" };
+  };
+  const strikes = [85, 90, 95, 100, 105, 110, 115];
+  const paired = strikes.flatMap((K) => [quote("C", K), quote("P", K)]);
+  const otm = strikes.map((K) => quote(K < spot ? "P" : "C", K));
+  const wide = { gates: { minOi: 0, maxSpread: 1, minPremium: 0 } };
+  const rank = (rows, extra = {}) => rankChain(rows, { spot, asOf, readMs, ticker: "XYZ", limit: 50, ...wide, ...extra });
+  const row = (res, type, K) => res.rows.find((x) => x.type === type && x.strike === K);
+  const pts = (x) => Math.abs(x) * 100;
+
+  const old = midImpliedVol({ spot, strike: 90, type: "P", mid: (Number(paired[2 * 1 + 1].nbbo_bid) + Number(paired[2 * 1 + 1].nbbo_ask)) / 2, years: T, rate: r });
+  near(old - sigma, 0.0168, 0.0008, `AT q = 3% AND 180 DAYS THE RATE-ONLY FORWARD READS THE 90 PUT ${pts(old - sigma).toFixed(2)} VOL POINTS TOO HIGH, the bias the audit measured`);
+
+  const parity = rank(paired);
+  const p90 = row(parity, "P", 90), c110 = row(parity, "C", 110);
+  near(p90.ivMid, sigma, 1e-6, "WITH THE CHAIN'S OWN PUT-CALL PARITY THE 90 PUT'S MID INVERTS TO 0.3000");
+  near(c110.ivMid, sigma, 1e-6, "and the 110 call's, which the rate-only forward read 2.1 points low");
+  eq(parity.forwards.length, 1, "one forward is disclosed for the one expiry on the chain");
+  eq(parity.forwards[0].method, "parity", "built from the chain's parity");
+  eq(parity.forwards[0].expiry, expiry, "for that expiry");
+  ok(parity.forwards[0].pairs >= FORWARD_MIN_PAIRS, `from ${parity.forwards[0].pairs} call-put pairs`);
+  ok(JSON.stringify(parity.forwards).length < 80, `at ${JSON.stringify(parity.forwards).length} bytes an expiry`);
+  for (const x of parity.rows) near(x.ivMid, sigma, 1e-6, `${x.type} ${x.strike}: every line of the paired chain reads the one volatility that priced it`);
+
+  const flipped = rank([...paired].reverse());
+  near(row(flipped, "P", 90).ivMid, sigma, 1e-6, "and the order the vendor sends the rows in does not matter");
+  eq(rank(paired, { carry: 0.05 }).forwards[0].method, "parity", "a carry handed in is only a fallback: parity wins over it");
+  near(row(rank(paired, { carry: 0.05 }), "P", 90).ivMid, sigma, 1e-6, "and does not move the volatility");
+
+  const carried = rank(otm, { carry: q });
+  near(row(carried, "P", 90).ivMid, sigma, 1e-6, "ON AN OUT-OF-THE-MONEY-ONLY CHAIN, WHICH HAS NO PAIRS, THE CARD'S 3% CARRY PLACES THE FORWARD: the 90 put reads 0.3000");
+  near(row(carried, "C", 110).ivMid, sigma, 1e-6, "and the 110 call");
+  eq(carried.forwards[0].method, "carry", "disclosed as the carry");
+  eq(carried.forwards[0].pairs, 0, "with no pairs");
+
+  const bare = rank(otm);
+  eq(bare.forwards[0].method, "rate-only", "with no carry the forward is the rate alone, as it was");
+  near(row(bare, "P", 90).ivMid - sigma, 0.0168, 0.0008, "and the 90 put is 1.68 points high, the figure before this change");
+  near(row(bare, "C", 110).ivMid - sigma, -0.0210, 0.0010, "and the 110 call 2.10 points low");
+  near(row(rank(otm, { carry: 0 }), "P", 90).ivMid, row(bare, "P", 90).ivMid, 1e-12, "a carry of zero is the rate alone");
+  near(row(rank(otm, { carry: NaN }), "P", 90).ivMid, row(bare, "P", 90).ivMid, 1e-12, "and so is one that is not a number");
+
+  const twoPairs = rank([quote("C", 100), quote("P", 100), quote("C", 105), quote("P", 105), quote("P", 95), quote("C", 110)], { carry: q });
+  eq(twoPairs.forwards[0].method, "carry", "two pairs are not enough to place a forward: the carry does");
+  near(row(twoPairs, "P", 95).ivMid, sigma, 1e-6, "and still reads 0.3000");
+
+  const floored = (type, K) => ({ option_symbol: sym(type, K), nbbo_bid: "0.01", nbbo_ask: "0.01", implied_volatility: "0.3", open_interest: "500", volume: "1" });
+  const wings = rank([...paired, floored("C", 60), floored("P", 60), floored("C", 150), floored("P", 150)], { gates: { minOi: 0, maxSpread: 1, minPremium: 0 } });
+  near(row(wings, "P", 90).ivMid, sigma, 1e-6, "pairs floored at a cent on the far wings are not used, so they cannot move the forward");
+
+  const lifted = (K) => { const x = quote("P", K); return { ...x, nbbo_bid: String(Number(x.nbbo_bid) + 20), nbbo_ask: String(Number(x.nbbo_ask) + 20) }; };
+  const skew = [...paired.filter((x) => !/P\d+$/.test(x.option_symbol)), ...strikes.map(lifted)];
+  const far = rank(skew, { carry: q });
+  eq(far.forwards[0].method, "carry", `a parity forward more than ${FORWARD_MAX_LOG_GAP * 100}% from the rate forward is not believed: the carry stands`);
+
+  const gappy = rank(paired.map((x) => ({ ...x, nbbo_ask: String(Number(x.nbbo_bid) * 3) })), { carry: q });
+  eq(gappy.forwards[0].method, "carry", "pairs whose spreads are wider than half their mid are not used");
+
+  const quoteAt = (type, K, F, half = 0.02, iv = sigma) => {
+    const mid = black76(F, D, K, iv, T, type);
+    return { option_symbol: sym(type, K), nbbo_bid: (mid - half).toFixed(9), nbbo_ask: (mid + half).toFixed(9), implied_volatility: String(iv), open_interest: "500", volume: "40" };
+  };
+  const rowsAt = (ks, F) => ks.flatMap((K) => [quoteAt("C", K, F), quoteAt("P", K, F)]);
+  const nearTen = [90, 92.5, 95, 97.5, 100, 102.5, 105, 107.5, 110, 112.5];
+  const farWings = [75, 77.5, 80, 82.5, 85, 87.5, 115, 117.5, 120, 122.5, 125];
+  const driftF = trueF * 1.03;
+  const crowded = rank([...rowsAt(nearTen, trueF), ...rowsAt(farWings, driftF)]);
+  eq(crowded.forwards[0].method, "parity", "a chain of twenty-one paired strikes places a parity forward");
+  eq(crowded.forwards[0].pairs, 10, "FROM THE TEN PAIRS NEAREST THE MONEY and no more");
+  near(row(crowded, "P", 95).ivMid, sigma, 1e-6, "so the wings priced off a forward 3% higher do not move it: the 95 put reads 0.3000");
+  near(row(crowded, "C", 105).ivMid, sigma, 1e-6, "nor the 105 call");
+
+  const tight = (type, K) => ({ option_symbol: sym(type, K), nbbo_bid: "0.035", nbbo_ask: "0.045", implied_volatility: "0.3", open_interest: "500", volume: "1" });
+  const cheap = rank([...rowsAt([90, 95, 105, 110], trueF), tight("C", 100), tight("P", 100)]);
+  eq(cheap.forwards[0].method, "parity", "a pair at the money whose legs both mid at four cents with a one-cent spread weighs 2,500 against the 156 of a good pair");
+  eq(cheap.forwards[0].pairs, 4, "AND IS NOT ONE OF THE PAIRS: the mid floor leaves it out");
+  near(row(cheap, "P", 95).ivMid, sigma, 1e-6, "so it cannot pull the forward: the 95 put reads 0.3000");
+
+  const shortExpiry = "2026-09-01", Ts = yearFraction(readMs, shortExpiry);
+  ok(Ts * 365 > 6 && Ts * 365 < 8, `the short expiry is a week out (${(Ts * 365).toFixed(2)} days)`);
+  const Ds = Math.exp(-r * Ts), restF = spot * Math.exp(r * Ts);
+  const symS = (type, K) => `XYZ${shortExpiry.slice(2).replace(/-/g, "")}${type}${String(Math.round(K * 1000)).padStart(8, "0")}`;
+  const quoteS = (type, K, F) => {
+    const mid = black76(F, Ds, K, sigma, Ts, type);
+    return { option_symbol: symS(type, K), nbbo_bid: (mid - 0.01).toFixed(9), nbbo_ask: (mid + 0.01).toFixed(9), implied_volatility: String(sigma), open_interest: "500", volume: "40" };
+  };
+  const weekRows = (F) => [97, 98, 99, 100, 101, 102, 103].flatMap((K) => [quoteS("C", K, F), quoteS("P", K, F)]);
+  const week = rank(weekRows(restF * Math.exp(-0.001)));
+  eq(week.forwards[0].method, "parity", "a week out, a parity forward a tenth of a percent from the rate forward is believed");
+  const stale = rank(weekRows(restF * 1.05));
+  eq(stale.forwards[0].method, "rate-only", "BUT ONE 5% FROM IT IS NOT: a week of carry cannot move a forward that far, so it is a stale or one-sided book");
+  eq(rank(weekRows(restF * 1.05), { carry: 0.03 }).forwards[0].method, "carry", "and the card's carry stands in for it");
+  eq(forwardGapLimit(7 / 365) < 0.035, true, "the gap allowed a week out is under 3.5%");
+  near(forwardGapLimit(2), FORWARD_MAX_LOG_GAP, 0, "and it never exceeds the cap");
+  ok(forwardGapLimit(0) === FORWARD_GAP_FLOOR, "with a floor at expiry");
+
+  eq(rank(otm, { carry: 0.2 }).forwards[0].method, "carry", "a 20% carry over 180 days is a 10% forward shift, inside the cap");
+  eq(rank(otm, { carry: 0.4 }).forwards[0].method, "rate-only", "A 40% CARRY IS NOT BELIEVED: 20% over 180 days is past the cap");
+  eq(rank(otm, { carry: -0.4 }).forwards[0].method, "rate-only", "nor is a negative one of that size");
+  eq(rank(otm, { carry: 3 }).forwards[0].method, "rate-only", "nor 300%");
+  near(row(rank(otm, { carry: 3 }), "P", 90).ivMid, row(bare, "P", 90).ivMid, 1e-12, "and the line reads as it did on the rate alone");
+
+  const plan = forwardPlan([], { spot, readMs });
+  deep(plan("2027-02-21"), { F: null, method: "rate-only", pairs: 0 }, "an empty chain has no forward and says so");
+  eq(forwardPlan(null, { spot, readMs })("x").method, "rate-only", "nor does a missing one");
+  near(midImpliedVol({ spot, strike: 90, type: "P", mid: 3, years: T, rate: r, forward: spot * Math.exp(r * T) }), midImpliedVol({ spot, strike: 90, type: "P", mid: 3, years: T, rate: r }), 1e-12, "a forward equal to the rate forward is the old inversion");
+  ok(midImpliedVol({ spot, strike: 90, type: "P", mid: 3, years: T, rate: r, forward: trueF }) < midImpliedVol({ spot, strike: 90, type: "P", mid: 3, years: T, rate: r }), "and a lower forward lowers a put's volatility");
+}
+
+{
+  const facts = (v, g) => [{ id: "rv.30", v: 0.2, u: "frac", g: 3 }, { id: "carry.implied", v, u: "frac", g }];
+  eq(deskCarry(facts(0.03, 3), "ok"), 0.03, "a coherent chain takes the card's carry at grade 3");
+  eq(deskCarry(facts(0.03, 2), "ok"), 0.03, "and at grade 2");
+  eq(deskCarry(facts(0.03, 1), "ok"), null, "but not at grade 1");
+  eq(deskCarry(facts(0.03, 0), "ok"), null, "nor at grade 0, which is the rate-only forward the card itself used");
+  eq(deskCarry(facts(0.03, 3), "rebased"), null, "A REBASED CHAIN TAKES NO CARRY: the rebased spot has absorbed it over the nearest expiries, and counting it again would double it");
+  eq(deskCarry(facts(0.03, 3), "mismatch"), null, "a mismatch takes none");
+  eq(deskCarry(facts(0.03, 3), "unchecked"), null, "nor does a chain whose check failed");
+  eq(deskCarry(facts(null, 3), "ok"), null, "a null carry is none");
+  eq(deskCarry(facts(0, 3), "ok"), 0, "a zero carry is zero");
+  eq(deskCarry([{ id: "rv.30", v: 0.2, g: 3 }], "ok"), null, "a card without the fact has none");
+  eq(deskCarry(null, "ok"), null, "a card without facts has none");
+  eq(deskCarry({ "carry.implied": { v: 0.03, g: 3 } }, "ok"), null, "and only the list the desk is sent counts");
 }
 
 console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
