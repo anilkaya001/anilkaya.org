@@ -772,7 +772,7 @@
       b.paintRadar(regime);
       b.paintGroups(regime);
     });
-    for (const [group, id] of [["skyline", "mkSkyline"]]) {
+    for (const [group, id] of [["skyline", "mkSkyline"], ["relations", "mkRelations"]]) {
       const host = $(id);
       if (host && UI.defer) UI.defer(group, { when: "visible", el: host, label: "The " + group + " view" }).then(() => window.FlowsUI[group].mount(host, universe, null));
     }

@@ -743,7 +743,7 @@ ${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6, seg: `<div class
 ${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
 ${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
     body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
-${scenes ? marketModule("mkSkylineCard", "Move skyline", "mkSkyline") : ""}
+${scenes ? marketModule("mkSkylineCard", "Move skyline", "mkSkyline") + marketModule("mkRelationsCard", "Relations", "mkRelations", { span: 6 }) : ""}
 ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
@@ -751,7 +751,8 @@ ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
 ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
   <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>${scenes ? `
-  <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>` : ""}
+  <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>
+  <i hidden data-defer="relations" data-src="${v("/assets/js/flows-relations.js")}"></i>` : ""}
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}

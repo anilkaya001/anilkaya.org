@@ -1,0 +1,1 @@
+{"name": "flows-relations-render", "class": "N", "group": "shard", "timing": false, "medianS": 30, "shard": 1, "command": "node flows-relations-render.mjs", "files": ["flows-relations-render.mjs"], "covers": ["assets/js/flows-market.js","assets/js/flows-relations.js","scripts/render-preview.fixtures.json"]}
