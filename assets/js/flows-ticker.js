@@ -1497,14 +1497,14 @@
     if (tp) {
       const d = Array.isArray(tp.nd) ? tp.nd.map((v) => num(v)) : tp.t.map(() => null);
       const u = STATE.tape.units || {};
-      return { src: "tape", times: tp.t.map((t) => F.time(t)), d, p: tp.net.map((v) => num(v)), calls: tp.ncp, puts: tp.npp, centroid: null, dUnit: str(u.nd), pUnit: str(u.net) };
+      return { src: "tape", times: tp.t.map((t) => F.time(t, false)), zone: " TRT", d, p: tp.net.map((v) => num(v)), calls: tp.ncp, puts: tp.npp, centroid: null, dUnit: str(u.nd), pUnit: str(u.net) };
     }
     const P = (card.panels || {}).path;
     if (!P || P.status !== "ok" || !Array.isArray(P.series)) return null;
     const start = Date.parse(P.startedAt);
     const ser = P.series.filter((r) => Array.isArray(r));
     const step = ser.length > 1 && num(P.minutes) ? P.minutes / ser.length : 5;
-    return { src: "card", times: ser.map((_, i) => (Number.isFinite(start) ? F.time(new Date(start + (i + 1) * step * 60000).toISOString()) : String(i + 1))), d: ser.map((r) => num(r[0])), p: ser.map((r) => num(r[1])),
+    return { src: "card", times: ser.map((_, i) => (Number.isFinite(start) ? F.time(start + (i + 1) * step * 60000, false) : String(i + 1))), zone: Number.isFinite(start) ? " TRT" : "", d: ser.map((r) => num(r[0])), p: ser.map((r) => num(r[1])),
       centroid: num(P.centroid), dUnit: P.netDeltaUnit || null, pUnit: P.netPremiumUnit || null, panel: P };
   }
 
@@ -1546,11 +1546,11 @@
       const ticks = Math.min(5, n);
       for (let t = 0; t < ticks; t++) {
         const i = Math.round((t * (n - 1)) / Math.max(1, ticks - 1));
-        s("text", { x: x(i), y: H - 6, text: String(L.times[i] || "").replace(" ET", ""), "text-anchor": t === 0 ? "start" : t === ticks - 1 ? "end" : "middle" }, svg);
+        s("text", { x: x(i), y: H - 6, text: String(L.times[i] || ""), "text-anchor": t === 0 ? "start" : t === ticks - 1 ? "end" : "middle" }, svg);
       }
       C.scrub(el, svg, { xs: L.d.map((_, i) => x(i)), top, bottom: H - bot, label,
         onMove: (i) => ({ dots: [num(L.d[i]) !== null ? { x: x(i), y: yD(L.d[i]), color: "--accent" } : null, hasP && num(L.p[i]) !== null ? { x: x(i), y: yP(L.p[i]), color: "--s-orange" } : null].filter(Boolean),
-          parts: [C.part(L.times[i], "k"), C.part("Δ", "k"), h("b", { "data-tone": tone(L.d[i]) }, F.num(L.d[i], true)), hasP ? C.part("Premium", "k") : null, hasP ? h("b", { "data-tone": tone(L.p[i]) }, F.money(L.p[i], true)) : null] }) });
+          parts: [C.part(L.times[i] + L.zone, "k"), C.part("Δ", "k"), h("b", { "data-tone": tone(L.d[i]) }, F.num(L.d[i], true)), hasP ? C.part("Premium", "k") : null, hasP ? h("b", { "data-tone": tone(L.p[i]) }, F.money(L.p[i], true)) : null] }) });
     });
     return { handle, legend: [keyOf("--accent", "ln", "Delta ±" + F.num(mD)), hasP ? keyOf("--s-orange", "ln", "Premium ±" + F.money(mP)) : null, num(L.centroid) !== null ? keyOf("--label-3", "ln", "Mean minute") : null] };
   }
@@ -2408,7 +2408,7 @@
       const R = (dp.rows || []).filter((r) => num(r.prem) !== null);
       const mx = Math.max(...R.map((r) => r.prem), 1);
       return R.map((r, i) => {
-        const hhmm = Number.isFinite(Date.parse(r.at)) ? F.time(r.at).replace(" ET", "") : DASH;
+        const hhmm = F.time(r.at, false);
         const quote = num(r.bid) !== null && num(r.ask) !== null ? F.px(r.bid) + " / " + F.px(r.ask) : DASH;
         const row = UI.listRow({ primary: F.px(r.px), secondary: hhmm + (S ? SEP + F.pct(r.px / S - 1, 2, true) : ""),
           meter: r.prem / mx, index: i, value: F.money(r.prem), cols: TAPE_COLS.prints });

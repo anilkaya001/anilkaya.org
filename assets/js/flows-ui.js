@@ -143,12 +143,7 @@
     return svg;
   }
 
-  const fmtStamp = (iso) => {
-    const ms = typeof iso === "string" && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(iso.trim())
-      ? Date.parse(iso.trim()) : NaN;
-    if (!Number.isFinite(ms)) return null;
-    return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-  };
+  const fmtStamp = (v) => F.stamp(v);
 
   const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)");
   const WIDE = window.matchMedia("(min-width: 1025px)");
@@ -241,7 +236,34 @@
   }
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const isoDay = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
-  const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+  const TRT_MS = 108e5;
+  const TRT_TOP = Date.UTC(9999, 11, 31, 23, 59, 59, 999) - TRT_MS;
+  const STAMP = /^((?!00)\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:(Z)|([+-])(\d{2})(?::?(\d{2}))?)$/;
+  const two = (n) => (n < 10 ? "0" : "") + n;
+  const dayAt = (d) => {
+    const b = typeof d === "string" && /^(?!00)\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(d + "T00:00:00Z") : NaN;
+    return Number.isFinite(b) && new Date(b).toISOString().slice(0, 10) === d ? b : null;
+  };
+  function instant(v) {
+    let t = null;
+    if (typeof v === "number") t = v;
+    else if (typeof v === "string") {
+      const m = STAMP.exec(v);
+      if (m) {
+        const y = +m[1], oh = +(m[10] || 0), om = +(m[11] || 0), o = m[9] ? (m[9] === "-" ? -1 : 1) * (oh * 60 + om) : 0;
+        const u = Date.UTC(y, m[2] - 1, m[3]);
+        if (m[4] < 24 && m[5] < 60 && (m[6] || 0) < 60 && oh < 24 && om < 60 && dayAt(m[1] + "-" + m[2] + "-" + m[3]) === u)
+          t = Date.UTC(y, m[2] - 1, m[3], m[4], m[5], m[6] || 0, +((m[7] || "") + "00").slice(0, 3)) - o * 6e4;
+      }
+    } else if (typeof v === "object" && v !== null) {
+      try { t = Date.prototype.getTime.call(v); } catch { t = null; }
+    }
+    t = typeof t === "number" && Number.isFinite(t) ? Math.floor(t) : 0;
+    return t > 0 && t <= TRT_TOP ? t : null;
+  }
+  const trt = (v) => { const t = instant(v); return t === null ? null : new Date(t + TRT_MS); };
+  const hhmm = (d) => two(d.getUTCHours()) + ":" + two(d.getUTCMinutes());
+  const ymd = (d) => d.toISOString().slice(0, 10);
   const ET_PARTS = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false, weekday: "short",
@@ -260,7 +282,13 @@
     int: (v, signed = false) => (num(v) === null ? DASH : (signed ? sgn(Math.round(v)) : v < 0 ? MINUS : "") + Math.round(Math.abs(v)).toLocaleString("en-US")),
     signed: (v, dp = 0) => (num(v) === null ? DASH : sgn(+v.toFixed(dp)) + Math.abs(v).toFixed(dp)),
     day: (d) => (isoDay(d) ? MON[+d.slice(5, 7) - 1] + " " + +d.slice(8, 10) : DASH),
-    time: (iso) => { const t = Date.parse(iso); return Number.isFinite(t) ? ET_TIME.format(new Date(t)) + " ET" : DASH; },
+    time: (v, zone) => { const d = trt(v); return d ? hhmm(d) + (zone === false ? "" : " TRT") : DASH; },
+    stamp: (v) => { const d = trt(v); return d ? ymd(d) + " " + hhmm(d) + " TRT" : null; },
+    trtDay: (v) => { const d = trt(v); return d ? ymd(d) : null; },
+    when: (v, now) => { const d = trt(v), n = trt(now); return d ? (n && ymd(n) === ymd(d) ? "" : ymd(d) + " ") + hhmm(d) + " TRT" : null; },
+    axis: (v, day) => { const t = instant(v), b = dayAt(day); return t === null || b === null ? null : Math.floor((t + TRT_MS - b) / 6e4); },
+    tick: (m) => { if (typeof m !== "number" || !Number.isFinite(m)) return null; const n = ((Math.floor(m) % 1440) + 1440) % 1440; return two(Math.floor(n / 60)) + ":" + two(n % 60); },
+    open: (day) => (dayAt(day) === null ? null : 1470 - nyClock(new Date(day + "T12:00:00Z")).mins),
     compact,
     askSplit: (r) => {
       const p = isNum(r && r.prem), side = (v) => { v = isNum(r && r[v]); return v !== null && v >= 0 ? v : null; }, x = side("askPrem"), y = side("bidPrem");
@@ -738,14 +766,14 @@
     return new Date(t).toISOString().slice(0, 10);
   }
   const T0 = Date.now();
-  const SRV = { day: null, at: 0, ph: null, until: 0, busy: 0, asked: 0, local: null, hbAt: 0 };
+  const SRV = { day: null, at: 0, ph: null, until: 0, next: 0, busy: 0, asked: 0, local: null, hbAt: 0 };
   function takeNow(b, hb) {
     if (!b) return;
     SRV.at = Date.now();
     if (hb) SRV.hbAt = SRV.at;
     if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.local = localExpected(nyClock(new Date())); }
     const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
-    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
+    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; SRV.next = Date.parse(b.phase.nextOpen) || 0; }
   }
   const pendingNow = () => Date.now() - SRV.hbAt < 39e4 || SRV.busy > 0 || (!SRV.at && Date.now() - T0 < 2e4 && !!window.FlowsUI.heartbeat);
   function watchNow(p, hb) {
@@ -809,9 +837,15 @@
     else state = "closed";
     return { state, market: m, S, behind };
   }
+  const PHW = { rth: ["Open", "closes"], pre: ["Pre-market", "opens"], post: ["After hours", "ends"] };
+  const marketSaid = (open) => {
+    const w = PHW[SRV.ph], d = trt(SRV.next);
+    if (!open && SRV.ph === "closed" && d && SRV.next > Date.now()) return "Closed \u00b7 opens " + ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + F.time(SRV.next);
+    return w && SRV.until > Date.now() && (SRV.ph === "rth") === open ? w[0] + " \u00b7 " + w[1] + " " + F.time(SRV.until) : open ? "Open" : "Closed";
+  };
   function freshDetails() {
     const { state, market: m, S, behind: late } = freshState();
-    const which = S === m.today ? "today\u2019s session." : "the last completed session, " + F.day(S) + ".";
+    const which = S === F.trtDay(Date.now()) ? "today\u2019s session." : "the last completed session, " + F.day(S) + ".";
     const out = [...FRESH.ffs].filter(([, f]) => f.stateAt() === "stale"), lapsed = [...new Set(out.map(([k]) => named(k)))];
     const sources = [...FRESH.sources.entries()];
     const behind = sources.filter(([, v]) => v !== S);
@@ -832,17 +866,17 @@
           : unlive + quiet + (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which + lag;
     const facts = [
       ["Expected", S !== m.expected ? F.day(m.expected) : null],
-      ["Market", m.open ? "Open" : "Closed"],
-      ["Built", FRESH.generatedAt ? F.time(FRESH.generatedAt) : null],
-      ["Written", FRESH.updatedAt ? F.time(new Date(FRESH.updatedAt).toISOString()) : null],
-      ["Price read", FRESH.readAt ? F.time(FRESH.readAt) : null],
+      ["Market", marketSaid(m.open)],
+      ["Built", FRESH.generatedAt ? F.when(FRESH.generatedAt, t0) : null],
+      ["Written", FRESH.updatedAt ? F.when(FRESH.updatedAt, t0) : null],
+      ["Price read", FRESH.readAt ? F.when(FRESH.readAt, t0) : null],
       ["Feed", FRESH.transport],
       ["Payloads", total ? (bad ? total - bad + " of " + total + " current" : total + " current") : null],
       ...behind.map(([k, v]) => [named(k), F.day(v)]),
     ];
     return {
       title: "Freshness", state, asOf: S ? "Session " + F.day(S) : null, lead, facts,
-      notes: ["Readings come from the dated post-close archive. During market hours only price is re-read live."],
+      notes: ["Readings come from the dated post-close archive. During market hours only price is re-read live.", "Times are T\u00fcrkiye time (TRT, UTC+3, no daylight saving). Session dates are US exchange dates."],
     };
   }
   let paintT = 0;
@@ -866,7 +900,7 @@
     const def = STATES[state] || STATES.pending;
     const age = state === "fresh" && m.open ? readAge() : null;
     schedulePaint(state, age);
-    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : age !== null ? "Fresh " + MID + " " + span(age) : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
+    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : age !== null ? "Fresh " + MID + " " + span(age) : S ? (S === F.trtDay(Date.now()) ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
     const feed = FRESH.transport || "";
     if (b.dataset.state === state && b.dataset.label === label && (b.dataset.feed || "") === feed) return;
     b.dataset.state = state;

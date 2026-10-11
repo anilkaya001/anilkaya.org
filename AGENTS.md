@@ -275,6 +275,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `tests/flows-desk-wiring.mjs`, `tests/fixtures-desk-lab.json`, `tests/gen-desk-lab.py` | The desk's Win % (implied) against an independent reference: `gen-desk-lab.py` (mpmath at 40 digits) prices skewed SVI chains and takes the risk-neutral probability of profit by Breeden-Litzenberger, and the suite proves the page, given the card's smile expiries, lands within 0.5pp of it and of the strategy lab on every line, while the flat fit it replaced misses by 2.5pp; the carry and the smile each line was priced on are read back from its disclosure. Chromium against `page.route` stubs, no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
 | `tests/landing-motion.mjs` | The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame (eight passes, as bright as the settled trail the old loop built; a single pass measures 0.56 of it), draws it once at load and once per viewport change, redraws it at the device scale after a context restore, and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter, Space and a click whether or not it keeps focus, holds after focus leaves, and stays under reduced motion because the prices still auto-update; a refresh that lands while paused is held until Play in both views, a Pause and Play with nothing held leaves the bar and its focused control in place, and a refresh while playing renders at once; the bar stays below the footer at 320, 390 and 1280 px. |
+| `shared/flows-time.js`, `tests/flows-time.mjs` | The Türkiye-time oracle, a leaf over `flows-freshness.js` alone. TRT is fixed UTC+3 arithmetic labelled with the literal `TRT` (Türkiye has no daylight time; the test proves it equal to `Europe/Istanbul` at every half hour of 2026-2028). `instantOf` takes a finite positive number, a `Date` or an ISO string with a time and an explicit `Z` or offset and answers null for a date-only, zone-less or impossible value, so a reader prints the dash; `clock`, `stamp`, `day` and `when` print TRT; `axisMinutes(v, sessionDay)` is minutes since 00:00 TRT of the session day, so a chart axis stays strictly increasing across TRT midnight when the winter close is 00:00, and `tick(m)` prints it modulo a day (never 24:00). `boundaries(day, clock)` derives pre-market, open, close and after-hours end in TRT only from `sessionOpen`, `sessionClose`, `easternInstant` and `closeMinutes`: 16:30 to 23:00 in US summer time, 17:30 to 00:00 in standard time, early closes 20:00 and 21:00; `sessionSaid`, `phaseSaid` and `nextOpenSaid` are the wordings. No importer yet, no asset. `TRT` is also in the Worker's `ASK_NOT_TICKERS`, because it is a real ticker. |
 | `shared/flows-freshness.js` | The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, the freshness threshold table, `X-Fresh-*` headers, and the live clock's due-tests. |
 | `shared/flows-plan-facts.js`, `tests/flows-plan-facts.mjs` | Every platform cap per plan in one table, a leaf that imports nothing. `RESOURCES` is the meter list (vendor day and minute, D1, Worker, Durable Object, Workers AI, Analytics Engine, R2, Queues, Logs, GitHub), `FACTS` the other caps; each cell carries its source id (`SOURCES`: page, how it was read, date) and the Free cell is the downgrade column, the Paid cell the design column. `FLOWS_PLAN_WORKERS` is `free` or `paid` (unset: `paid`; a misspelt value: `free`), `FLOWS_UW_PLAN` is `unknown`, `advanced`, `startup`, `startup-annual` or `kafka` (unset or unrecognised: `unknown`, the minimum of each vendor row). `lines(env)` is the one view a governor or a budget test reads; no other file reads either variable. `renewalState` reports the Workers Paid period and does not change a line. |
 | `tests/flows-vendor-budget.mjs` | The vendor-budget contract, no server: the enforced per-minute ceilings (the rail's `callsPerMinute` through `hubConfig`, the `UW_ONDEMAND` and `MEMBER_VENDOR` limiters parsed from `wrangler.toml`) summed against `lines(env)['uw.min']` of `shared/flows-plan-facts.js` for every vendor plan and for the unread plan's minimum, a rail ceiling raised past the line flagged as a breach, the vendor lines unmoved by `FLOWS_PLAN_WORKERS`, and the downgrade checklist of enforced settings above the Free column (today only the AI neuron cap). The governor reads the same table. |
@@ -1414,7 +1415,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 131 suites: 88 that need only Node (N), 26 that also
+`tests/suites/` registers 132 suites: 89 that need only Node (N), 26 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1439,12 +1440,13 @@ flows-quant-audit         flows-quant-card          flows-readers             fl
 flows-reading-worker      flows-reads               flows-record              flows-relations-render
 flows-rt                  flows-scores              flows-sign                flows-skyline-render
 flows-starts              flows-stats               flows-stock               flows-tape-stats
-flows-targets             flows-truth               flows-universe            flows-variation
-flows-vendor-budget       flows-verdict             flows-vol                 flows-warnings
-flows-weight              flows-ws-probe            lab-write                 launch-readiness
-markets                   mastery                   pipeline                  route-matrix
-server-ai                 server-desk               server-ingest             server-kernel
-server-log                server-pages              server-router             staging
+flows-targets             flows-time                flows-truth               flows-universe
+flows-variation           flows-vendor-budget       flows-verdict             flows-vol
+flows-warnings            flows-weight              flows-ws-probe            lab-write
+launch-readiness          markets                   mastery                   pipeline
+route-matrix              server-ai                 server-desk               server-ingest
+server-kernel             server-log                server-pages              server-router
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

@@ -1868,7 +1868,7 @@ async function tickerNeuron(env, ctx, ticker) {
   return reading();
 }
 
-const ASK_NOT_TICKERS = new Set(["IV", "OI", "ETF", "ETFS", "RSI", "ATR", "ADX", "GEX", "VRP", "DTE", "ITM", "OTM", "ATM", "CPI", "GDP", "FOMC", "EPS", "PE", "YTD", "IPO", "AI", "USD", "US", "VS", "PM", "AM", "ET", "UTC", "CEO", "CFO", "SEC", "FED", "FAQ", "OK", "TA", "IV30"]);
+const ASK_NOT_TICKERS = new Set(["IV", "OI", "ETF", "ETFS", "RSI", "ATR", "ADX", "GEX", "VRP", "DTE", "ITM", "OTM", "ATM", "CPI", "GDP", "FOMC", "EPS", "PE", "YTD", "IPO", "AI", "USD", "US", "VS", "PM", "AM", "ET", "UTC", "TRT", "CEO", "CFO", "SEC", "FED", "FAQ", "OK", "TA", "IV30"]);
 
 function askTicker(question, subject) {
   const text = typeof question === "string" ? question : "";

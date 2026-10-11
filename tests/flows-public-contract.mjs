@@ -122,4 +122,15 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   ok(!/(?:^|[^\w])(\/\/|\/\*)/.test(readRepo("shared/flows-glossary.js").replace(/https?:\/\//g, "")), "the glossary module carries no comments");
 }
 
+{
+  const stamped = (generatedAt) => PAGES.overviewPage({ username: "t", summary: { text: "Bullish premium. Rest of it.", generatedAt } });
+  const time = (html) => /<time datetime="([^"]*)">([^<]*)<\/time>/.exec(html);
+  const summer = time(stamped("2026-10-12T13:31:00.000Z"));
+  eq(summer[2], "2026-10-12 16:31 TRT", "the Neuron's written time is printed in TRT with the zone named, not as UTC");
+  const winter = time(stamped("2026-11-02T22:05:00Z"));
+  eq(winter[2], "2026-11-03 01:05 TRT", "and its date follows the TRT day across midnight");
+  eq(time(stamped("2026-10-12"))[2], "", "a date-only stamp has no clock to print");
+  ok(!/ UTC</.test(stamped("2026-10-12T13:31:00.000Z")), "no UTC label is left on the Home page");
+}
+
 console.log(`✓ flows-public: ${checks} assertions — the front door and the glossary answer a signed-out reader as static, noindexed, headered pages, move to a 404 behind one switch, name only strings the pages themselves show, and link in from the sign-in form`);

@@ -745,7 +745,7 @@ try {
     eq(al.rows.length, 3, "and its disclosure tabulates the same three");
 
     deep(al.rows[0],
-      ["13:47", "ORCL", "C 250 09-18", "$3.0M", "75% ask side \u00b7 100% sided", "RepeatedHits"],
+      ["20:47", "ORCL", "C 250 09-18", "$3.0M", "75% ask side \u00b7 100% sided", "RepeatedHits"],
       "each flagged window names when it opened, the contract, the premium, its ask share of the premium " +
       "sided with the sided coverage printed beside it, and the rule that fired");
     eq(al.rows[1][4], "24% ask side \u00b7 100% sided",
@@ -1156,8 +1156,8 @@ try {
     await tzPage.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
     const tzSaid = await readOf(tzPage);
 
-    ok(/read (\d{4}-\d{2}-\d{2} )?10:28 UTC/.test(tzSaid),
-       `a reader in another zone sees the same instant under the same label, UTC, the one clock ` +
+    ok(/read (\d{4}-\d{2}-\d{2} )?13:28 TRT/.test(tzSaid),
+       `a reader in another zone sees the same instant under the same label, TRT, the one clock ` +
        `every stamp on the site now keeps (${tzSaid})`);
     ok(!/06:28/.test(tzSaid), `never silently converted to the reader's own zone (${tzSaid})`);
     await tzCtx.close();
@@ -3085,7 +3085,7 @@ try {
     const late = await heroAfter();
     eq(late.state, "stale", "a live tide past its fresh window is still drawn, marked stale");
     eq(late.svg, 1, "with its river");
-    ok(/^Stale\s*·\s*(\d{1,2}:\d\d\s*[AP]M|[A-Z][a-z]{2} \d{1,2})$/.test(late.pill),
+    ok(/^Stale\s*·\s*(\d{2}:\d\d TRT|[A-Z][a-z]{2} \d{1,2})$/.test(late.pill),
        `and the pill carries when it was read (${late.pill})`);
 
     {
@@ -3123,7 +3123,7 @@ try {
       eq(broken.state, "stale",
          "a 'closed' header whose phase says the whole day is not trading, while the Eastern clock is inside the session, " +
          "is a broken trading flag: today's single morning read is shown as stale");
-      ok(/^Stale\s*·\s*Sep 24 9:31\s*AM$/.test(broken.pill),
+      ok(/^Stale\s*·\s*Sep 24 16:31 TRT$/.test(broken.pill),
          `and because the tide is of another session than the page's boards, the pill names its day as well as its time (${broken.pill})`);
       eq(broken.note, "One read", "a lone read that was never followed up says one read, not first read, since no second is coming");
       eq(broken.zero, "quiet", "and a 0DTE leg that was never read for a stale tide is quiet, not a pending promise");
@@ -3136,7 +3136,7 @@ try {
       await thuLk.set("market", liveToday({ "X-Fresh-State": "live", "X-Fresh-Phase": "rth" }, 3));
       const live = await pillOf();
       eq(live.state, "live", "a live tide of today under yesterday's boards is live");
-      ok(/^Live\s*·\s*Sep 24 9:31\s*AM$/.test(live.pill), `and its pill still carries the day (${live.pill})`);
+      ok(/^Live\s*·\s*Sep 24 16:31 TRT$/.test(live.pill), `and its pill still carries the day (${live.pill})`);
       eq(live.zero, "pending", "while a live tide's missing 0DTE leg is still pending, since the next read may carry it");
       await thu.close();
     }
@@ -3542,7 +3542,7 @@ try {
     deep(live.metals[0].rel.at(-1), ["AEM", "—", "—"], "and a name neither read carries stays em dashes");
     deep(live.src, ["live", "nightly"], "Metals is all live rows; Leaders, which the live read did not cover, stays nightly");
     eq(live.pills[0].state, "live", "the module wears a Live pill");
-    ok(/^Live\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(live.pills[0].text), `with the read time (${live.pills[0].text})`);
+    ok(/^Live\s*·\s*\d{2}:\d\d TRT$/.test(live.pills[0].text), `with the read time (${live.pills[0].text})`);
     eq(live.pills[1].text, "Aug 24", "while Leaders keeps its own date chip");
     for (const r of [part, live]) {
       r.pills.forEach((p, i) => ok(p.state !== "live" || r.src[i] === "live", "a Live pill never sits over a nightly row"));
@@ -3569,7 +3569,7 @@ try {
     await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "stale"));
     const lapsed = await focusNow();
     eq(lapsed.pills[0].state, "stale", "a live read past its window is dated stale, never left saying Live");
-    ok(/^Aug 25\s*·\s*\d{1,2}:\d\d\s*[AP]M$/.test(lapsed.pills[0].text), `by its day and read time (${lapsed.pills[0].text})`);
+    ok(/^Aug 25\s*·\s*\d{2}:\d\d TRT$/.test(lapsed.pills[0].text), `by its day and read time (${lapsed.pills[0].text})`);
 
     await fxLk.set("strips", liveStrips(SESSION, SESSION + "T17:50:00Z", "closed"));
     const tie = await focusNow();
@@ -3585,8 +3585,8 @@ try {
       headers: { "Content-Type": "application/json", "X-Fresh-State": state },
       body: JSON.stringify({ v: 1, key: "live:focus", status: "ok", session, fresh: { v: 1, readAt, cadenceS: 300, source: "worker", session },
         fields: STRIP_NAMES, rows: Object.fromEntries(ALL.map((t) => [t, stripValues(V[t])])) }) });
-    const nyClock = (iso) => fp.evaluate((x) => new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric",
-      minute: "2-digit" }).format(new Date(x)).replace(/\s/g, ""), iso);
+    const trtClock = (iso) => fp.evaluate((x) => new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Istanbul", hour: "2-digit",
+      minute: "2-digit", hourCycle: "h23" }).format(new Date(x)) + "TRT", iso);
     const bare = (p) => p.text.replace(/\s/g, "");
     const t1 = new Date(Date.now() - 7 * 60000).toISOString();
     await fxLk.set("focus", liveFocus(LIVE_DAY, t0, "live"));
@@ -3594,17 +3594,17 @@ try {
     deep([worker.metals[0].px, worker.leaders[0][1]], ["397.00", "336.00"],
       "WITHOUT ANY ACTIONS RUN the Worker's live:focus takes both modules: the fund's price and every leader's row");
     deep(worker.src, ["live", "live"], "every row in them is a live row");
-    deep(worker.pills.map(bare), Array(2).fill("Live·" + await nyClock(t0)),
+    deep(worker.pills.map(bare), Array(2).fill("Live·" + await trtClock(t0)),
       "and both modules wear a Live pill with the Worker's read time");
     await fxLk.set("strips", liveStrips(LIVE_DAY, t1, "live"));
     const newer = await focusNow();
     eq(newer.metals[0].px, "397.00", "A live:focus ROW FRESHER THAN THE STRIP drives the tile value");
-    eq(bare(newer.pills[0]), "Live·" + await nyClock(t0), "and the pill reads the time of the row it shows");
+    eq(bare(newer.pills[0]), "Live·" + await trtClock(t0), "and the pill reads the time of the row it shows");
     await fxLk.set("focus", liveFocus(LIVE_DAY, t1, "live"));
     await fxLk.set("strips", liveStrips(LIVE_DAY, t0, "live"));
     const older = await focusNow();
     eq(older.metals[0].px, "395.00", "while an older live:focus row yields to the newer strip");
-    eq(bare(older.pills[0]), "Live·" + await nyClock(t0), "whose read time the pill then shows");
+    eq(bare(older.pills[0]), "Live·" + await trtClock(t0), "whose read time the pill then shows");
     await fxLk.unset("strips");
     await fxLk.set("focus", liveFocus("2026-08-21", t0, "live"));
     const past = await focusNow();
@@ -3667,8 +3667,8 @@ try {
     await Promise.all([fp.waitForResponse((r) => r.url().endsWith("/api/flows/lk?k=focus")), beat()]);
     await fp.waitForFunction(() => document.querySelector("#ccMetals .hm-mpx-v")?.textContent.trim() === "399.00", null, { timeout: 15000 });
     const moved = await fp.evaluate(FOCUS_READ);
-    ok(focusReads === readsBefore + 1 && moved.metals[0].px === "399.00" && bare(moved.pills[0]) === "Live·" + await nyClock(t2) &&
-       bare(moved.pills[1]) === "Live·" + await nyClock(t2),
+    ok(focusReads === readsBefore + 1 && moved.metals[0].px === "399.00" && bare(moved.pills[0]) === "Live·" + await trtClock(t2) &&
+       bare(moved.pills[1]) === "Live·" + await trtClock(t2),
     "THE HEARTBEAT RE-READS live:focus WHEN ITS updatedAt MOVES: the open page repaints the fund's price and both " +
       `modules' Live pills at the new read time (${moved.pills[0].text}) without a reload`);
     await fp.unroute(/\/api\/flows\/now\?/);
