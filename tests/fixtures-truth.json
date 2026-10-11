@@ -260,6 +260,43 @@
    "variance": 1.0000000000000004
   }
  ],
+ "jumpGaussian": [
+  {
+   "minutes": 390,
+   "nu": 4,
+   "perMinute": 0.0015039885105677263,
+   "perNameDay": 0.44400559529416805,
+   "threshold": 5.47
+  },
+  {
+   "minutes": 390,
+   "nu": 5,
+   "perMinute": 0.0008804149859170112,
+   "perNameDay": 0.2907257988753643,
+   "threshold": 5.47
+  },
+  {
+   "minutes": 390,
+   "nu": 6,
+   "perMinute": 0.0005368290504797503,
+   "perNameDay": 0.18894511055393082,
+   "threshold": 5.47
+  },
+  {
+   "minutes": 390,
+   "nu": 8,
+   "perMinute": 0.00022875949463861212,
+   "perNameDay": 0.08536153224380716,
+   "threshold": 5.47
+  },
+  {
+   "minutes": 390,
+   "nu": null,
+   "perMinute": 4.5003557896537085e-08,
+   "perNameDay": 1.755123394353575e-05,
+   "threshold": 5.47
+  }
+ ],
  "maxNormal": [
   {
    "expectedMax": 1.538752730835173,
@@ -274,6 +311,13 @@
    "n": 1000
   }
  ],
+ "multiplicity": {
+  "alpha": 0.1,
+  "bhCompleteNull": 0.09516933512888337,
+  "byCompleteNull": 0.0140148621598295,
+  "harmonic": 7.085239460304336,
+  "m": 670
+ },
  "normal": {
   "pStar2": 0.04550026389635839,
   "quantiles": [
@@ -408,7 +452,7 @@
  },
  "provenance": {
   "generator": "tests/gen-truth-fixtures.py",
-  "generatorSha256": "4c9c9a6726a9b730096dc46fe7a458603991544b18fd4ff5acd1a0516ae840ab",
+  "generatorSha256": "bfb4307a41735e97476b1ae7aedf9d9f7220929377f196667213578ce51ad005",
   "nature": "independent references for tests/truth/*: the generator's own sfc32 streams, the Hansen skew-t constants and two-sided tail probabilities by closed form and by quadrature, the look-ahead bait's exact mean score differences, the fair CRPS expectation, the overlap variance factor and the indicator correlation of the calibration world; scipy for every distribution function, no draws",
   "numpy": "2.4.6",
   "python": "3.11.15",

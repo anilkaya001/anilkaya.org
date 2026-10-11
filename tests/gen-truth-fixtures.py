@@ -239,6 +239,31 @@ def f1_fixed_block():
     return {"lambda": lam, "r": r, "thetas": thetas.tolist(), "line": line, "mPrime": m2, "alpha": 0.10, "minutes": minutes, "rows": rows}
 
 
+def jump_gaussian_block():
+    out = []
+    c = 5.47
+    for nu in (4, 5, 6, 8):
+        scale = math.sqrt(nu / (nu - 2))
+        p = 2 * float(stats.t.sf(c * scale, nu))
+        out.append({"nu": nu, "threshold": c, "minutes": 390, "perMinute": p, "perNameDay": 1 - (1 - p) ** 390})
+    p = 2 * float(stats.norm.sf(c))
+    out.append({"nu": None, "threshold": c, "minutes": 390, "perMinute": p, "perNameDay": 1 - (1 - p) ** 390})
+    return out
+
+
+def multiplicity_block():
+    m = 670
+    alpha = 0.10
+    harmonic = sum(1.0 / k for k in range(1, m + 1))
+    return {
+        "m": m,
+        "alpha": alpha,
+        "bhCompleteNull": 1 - (1 - alpha / m) ** m,
+        "byCompleteNull": 1 - (1 - alpha / (m * harmonic)) ** m,
+        "harmonic": harmonic,
+    }
+
+
 def main():
     out = {
         "provenance": {
@@ -262,6 +287,8 @@ def main():
         "maxNormal": maxnormal_block(),
         "probit": probit_block(),
         "f1Fixed": f1_fixed_block(),
+        "jumpGaussian": jump_gaussian_block(),
+        "multiplicity": multiplicity_block(),
     }
     with open(OUT_PATH, "w") as handle:
         json.dump(out, handle, indent=1, sort_keys=True)
