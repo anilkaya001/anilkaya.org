@@ -300,7 +300,7 @@ export async function runCards(ctx) {
     stages.skip("ideas", "no card carries an engine block");
   }
   if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
-    try {
+    await stages.run("calibration", async () => {
       const calibrated = await runCalibration({
         sessionDate, generatedAt, publish,
         readKey: readStored,
@@ -309,12 +309,10 @@ export async function runCards(ctx) {
         fetchBars: async (ticker) => (DRY_RUN || Date.now() > deadline ? null : fetchCloseBars(ticker, sessionDate, dating)),
       });
       (calibrated.state === "published" || calibrated.state === "unchanged" ? console.log : console.warn)(calibrated.line);
-    } catch (error) {
+    }, (error) => {
       console.warn(`  calibration: ${error.message} — no outcome was written tonight`);
-    }
-  }
-  if (ARCHIVE_DATE_RE.test(String(sessionDate || ""))) {
-    try {
+    });
+    await stages.run("dispersion", async () => {
       const ivs = new Map();
       const reporting = new Set();
       for (const r of screener) {
@@ -328,22 +326,25 @@ export async function runCards(ctx) {
       const prior = await readStored("dispersion");
       if (prior.failed) {
         console.warn(`  dispersion: the previous row could not be read (HTTP ${prior.status || 0}), so tonight builds nothing rather than spend the week's close fetches twice`);
-      } else {
-        const held = holdingsStocks(holdings.rows);
-        const built = await runDispersion({
-          sessionDate, generatedAt, publish, prior: prior.payload || null,
-          stocks: held.stocks, asOfHoldings: held.asOf,
-          indexIv: indexRow ? num(indexRow.iv30d, NaN) : null,
-          ivOf: (t) => (ivs.has(t) ? ivs.get(t) : null),
-          eventOf: (t) => reporting.has(t),
-          barsFor: async (ticker) => barsInHand(byTicker.get(ticker)),
-          fetchBars: async (ticker) => (DRY_RUN || Date.now() > deadline ? null : fetchCloseBars(ticker, sessionDate, dating)),
-        });
-        (built.state === "published" ? console.log : console.warn)(built.line);
+        return;
       }
-    } catch (error) {
+      const held = holdingsStocks(holdings.rows);
+      const built = await runDispersion({
+        sessionDate, generatedAt, publish, prior: prior.payload || null,
+        stocks: held.stocks, asOfHoldings: held.asOf,
+        indexIv: indexRow ? num(indexRow.iv30d, NaN) : null,
+        ivOf: (t) => (ivs.has(t) ? ivs.get(t) : null),
+        eventOf: (t) => reporting.has(t),
+        barsFor: async (ticker) => barsInHand(byTicker.get(ticker)),
+        fetchBars: async (ticker) => (DRY_RUN || Date.now() > deadline ? null : fetchCloseBars(ticker, sessionDate, dating)),
+      });
+      (built.state === "published" ? console.log : console.warn)(built.line);
+    }, (error) => {
       console.warn(`  dispersion: ${error.message} — no correlation row tonight`);
-    }
+    });
+  } else {
+    stages.skip("calibration", "no session date");
+    stages.skip("dispersion", "no session date");
   }
   if (perNameCut.names) {
     console.log(`  per-name feeds: ${perNameCut.names} card(s) carried rows from outside ` +
