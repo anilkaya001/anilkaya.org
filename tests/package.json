@@ -123,7 +123,8 @@
     "test:flows-sign": "node flows-sign.mjs",
     "test:flows-reading": "node flows-reading.mjs",
     "test:flows-reading-worker": "node --disable-warning=ExperimentalWarning flows-reading-worker.mjs",
-    "test:flows-reading-render": "node flows-reading-render.mjs"
+    "test:flows-reading-render": "node flows-reading-render.mjs",
+    "test:flows-plan-facts": "node --disable-warning=ExperimentalWarning flows-plan-facts.mjs"
   },
   "devDependencies": {
     "axe-core": "4.13.0",
