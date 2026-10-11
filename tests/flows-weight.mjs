@@ -32,6 +32,7 @@ const CEILING_KIB = {
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
+  statusPage: 79,
 };
 
 const GZIP_KIB = {
@@ -52,6 +53,7 @@ const GZIP_KIB = {
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
+  statusPage: 25,
 };
 
 const CSS_KIB = {
@@ -72,6 +74,7 @@ const CSS_KIB = {
   loginPage: 80 + 565 / 1024,
   aboutPage: 81 + 565 / 1024,
   glossaryPage: 81 + 565 / 1024,
+  statusPage: 82,
 };
 
 const CSS_GZIP_KIB = {
@@ -92,6 +95,7 @@ const CSS_GZIP_KIB = {
   loginPage: 18 + 64 / 1024,
   aboutPage: 18 + 64 / 1024,
   glossaryPage: 18 + 64 / 1024,
+  statusPage: 18,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -136,7 +140,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
-  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80,
 };
 
 const FLOOR_BYTES = 1024;

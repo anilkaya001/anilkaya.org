@@ -1,0 +1,15 @@
+.st-head { display: flex; flex-direction: column; gap: var(--sp-2); padding-bottom: var(--sp-5); }
+.st-head h1 { margin: 0; }
+.st-meta { margin: 0; color: var(--label-2); font: var(--t-callout); font-variant-numeric: tabular-nums; }
+.st-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.st-bar p { margin: 0; color: var(--label-2); font: var(--t-footnote); }
+.st-again { min-height: 36px; padding: 0 14px; border: 0; border-radius: var(--r-sm); background: var(--fill-2); color: var(--label-1); font: var(--t-footnote); font-weight: 500; cursor: pointer; }
+.st-again:disabled { opacity: 0.5; cursor: default; }
+@media (pointer: coarse) { .st-again { min-height: 44px; } }
+.st-grid { display: grid; gap: var(--sp-5); grid-template-columns: minmax(0, 1fr); }
+.st-kv { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: var(--sp-2) var(--sp-5); margin: 0 0 var(--sp-4); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+.st-kv dt { color: var(--label-2); }
+.st-kv dd { margin: 0; overflow-wrap: anywhere; }
+.st-tbl .st-l { text-align: left; }
+.st-why, .st-lines { margin: var(--sp-3) 0 0; padding-left: 18px; color: var(--label-2); font: var(--t-footnote); }
+.st-miss { margin: 0; color: var(--label-2); font: var(--t-footnote); }

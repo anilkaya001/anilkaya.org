@@ -129,6 +129,7 @@ const SPECS = [
   { id: "track", fn: "trackPage", url: "/flows/track/" },
   { id: "history", fn: "historyPage", url: "/flows/history/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
+  { id: "status", fn: "statusPage", url: "/flows/status/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();

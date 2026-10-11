@@ -13,8 +13,8 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "moves", "unusual", "events", "track", "political"];
-eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the fourteen old gated pages in their old order with the owner-gated moves page before unusual");
+const SLUGS = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "moves", "unusual", "events", "track", "political", "status"];
+eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the fifteen gated pages in their old order with the owner-gated moves page before unusual");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
 for (const slug of SLUGS) {
@@ -72,6 +72,7 @@ function oldChain(path, rc, d) {
       "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
       "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
       "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
+      "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
     };
     if (Object.hasOwn(FLOWS_ROUTES, path)) {
       requireMethod(request, ["GET", "HEAD"]);
@@ -81,7 +82,9 @@ function oldChain(path, rc, d) {
         if (mode === "off" || (mode !== "on" && !d.isOwner(env, session.username))) throw HttpError.of("not_found");
       }
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
-      const body = session ? FLOWS_ROUTES[path](session.username, summary, d.isOwner(env, session.username)) : FLOWS_PAGES.loginPage();
+      const owner = session ? d.isOwner(env, session.username) : false;
+      if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
+      const body = session ? FLOWS_ROUTES[path](session.username, summary, owner) : FLOWS_PAGES.loginPage();
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
@@ -90,7 +93,7 @@ function oldChain(path, rc, d) {
         || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/events"
         || path === "/flows/track" || path === "/flows/political"
         || path === "/flows/strategy" || path === "/flows/ask"
-        || path === "/flows/about" || path === "/flows/glossary") {
+        || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary") {
       requireMethod(request, ["GET", "HEAD"]);
       return redirect(new URL(path + "/", url).toString(), 308);
     }
@@ -185,6 +188,18 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq([login.status, await login.text()], [200, FLOWS_PAGES.loginPage()], "an anonymous visitor gets the login page with HTTP 200");
   const hop = await router.find("/flows/watch/").handler(rc("/flows/watch/?t=%20msft%20"));
   eq([hop.status, hop.headers.get("Location"), sc.log.length], [302, "https://anilkaya.org/flows/ticker/?t=msft&s=signal&from=watch", 0], "the reader redirect precedes the session read");
+  const gate = async (user) => {
+    const t = createRouter(flowsPageRows(scenario(user).deps));
+    try {
+      const res = await t.find("/flows/status/").handler(rc("/flows/status/"));
+      return [res.status, (await res.text()) === FLOWS_PAGES.loginPage() ? "login" : "page"];
+    } catch (e) {
+      return [e.status, e.code];
+    }
+  };
+  eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
+  eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
+  eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
 }
@@ -197,7 +212,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|historyPage|deskPage|strategyPage|askPage|tickerPage|unusualPage|movesPage|eventsPage|trackPage|politicalPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|historyPage|deskPage|strategyPage|askPage|tickerPage|unusualPage|movesPage|eventsPage|trackPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");
