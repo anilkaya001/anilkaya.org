@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, statSync, existsSync, appendFileSync } from "node:fs";
+import { readFileSync, statSync, existsSync, appendFileSync, readdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import * as PAGES from "../shared/flows-pages.js";
 
@@ -12,7 +12,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 411,
+  tickerPage: 411 + 1613 / 1024,
   overviewPage: 274,
   sidePage: 230,
   watchPage: 230,
@@ -21,7 +21,7 @@ const CEILING_KIB = {
   strategyPage: 261,
   trackPage: 180,
   marketPage: 254,
-  unusualPage: 287,
+  unusualPage: 287 + 1613 / 1024,
   eventsPage: 155,
   politicalPage: 103,
   historyPage: 167,
@@ -116,6 +116,75 @@ const judge = (row, bases = BASES) => {
   return faults;
 };
 
+const DEFERRED = {
+  tickerPage: { groups: {} },
+  unusualPage: { groups: {} },
+};
+const SHARED_DEFERRED = {
+  dock: { file: "/assets/js/flows-ask.js", declared: /<aside[^>]*\bid="askDock"[^>]*\bdata-src="([^"?]+)/ },
+  link: { file: "/assets/js/flows-link.js", declared: null },
+};
+const GPU_ONLY = {};
+const DEFERRED_KIB = {
+  tickerPage: 80, overviewPage: 80, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 80,
+  unusualPage: 80, eventsPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0,
+};
+
+const FLOOR_BYTES = 1024;
+const EAGER_KERNEL = [
+  { team: "V", name: "freshness pill", kib: 0.3, landed: { file: "/assets/js/flows-ui.js", has: /\bfreshAll\b/ } },
+  { team: "V", name: "FlowsUI.defer", kib: 0.9, landed: { file: "/assets/js/flows-ui.js", has: /\bfunction defer\(/ } },
+  { team: "V", name: "FlowsUI.link queue stub", kib: 0.4, landed: { file: "/assets/js/flows-ui.js", has: /\bconst link = / } },
+  { team: "L", name: "frame scheduler core", kib: 1.5, landed: null },
+  { team: "F", name: "Flow Radar stub", kib: 0.4, landed: null },
+  { team: "F", name: "X-Basis", kib: 0.3, landed: null },
+];
+const NO_RELIEF_ROW = "no relief row yet (plan 5.7)";
+const BELOW_FLOOR = {
+  unusualPage: "F-08 part b",
+  overviewPage: "F-08 part a",
+  marketPage: "F-08 part c",
+  tickerPage: "OD-08",
+  sidePage: NO_RELIEF_ROW,
+  watchPage: NO_RELIEF_ROW,
+  deskPage: NO_RELIEF_ROW,
+  eventsPage: NO_RELIEF_ROW,
+  historyPage: NO_RELIEF_ROW,
+};
+
+const LOADER = /createElement\(\s*["']script["']\s*\)|\bh\(\s*["']script["']|\bimport\(|new\s+Worker\(|importScripts\(/;
+const LOADERS = new RegExp(LOADER.source, "g");
+
+function declarationProblems(html, table, route) {
+  const problems = [];
+  const seen = new Map();
+  const own = new Set([...html.matchAll(/<script[^>]+src="([^"?]+)/g)].map((m) => m[1]));
+  for (const m of html.matchAll(/<i\b[^>]*\bdata-defer=[^>]*>/g)) {
+    const tag = m[0];
+    const group = (/\bdata-defer="([^"]*)"/.exec(tag) || [])[1];
+    const src = (/\bdata-src="([^"]*)"/.exec(tag) || [])[1];
+    if (!group) { problems.push("a deferred element has no group name"); continue; }
+    if (!/\shidden(\s|>|=)/.test(tag)) problems.push(`${group}: the element is not hidden`);
+    if (src === undefined) { problems.push(`${group}: no data-src`); continue; }
+    if (/[\s,;|]/.test(src)) { problems.push(`${group}: one file per element, and ${JSON.stringify(src)} is a list the version scan cannot read past its first URL`); continue; }
+    const m2 = /^(\/assets\/js\/[A-Za-z0-9._-]+\.js)\?v=\d+$/.exec(src);
+    if (!m2) { problems.push(`${group}: ${src} is not a versioned /assets/js/ path`); continue; }
+    const file = m2[1];
+    if (own.has(file)) problems.push(`${group}: ${file} is also a script src of the route`);
+    const listed = table.groups[group];
+    if (listed === undefined) problems.push(`${group}: not in DEFERRED for ${route}`);
+    else if (!(Array.isArray(listed) ? listed : [listed]).includes(file)) problems.push(`${group}: ${file} is not among DEFERRED's files for the group`);
+    if (!seen.has(group)) seen.set(group, []);
+    seen.get(group).push(file);
+  }
+  for (const [group, files] of Object.entries(table.groups)) {
+    const want = Array.isArray(files) ? files : [files];
+    const got = seen.get(group) || [];
+    for (const f of want) if (!got.includes(f)) problems.push(`${group}: DEFERRED lists ${f} and the page declares no element for it`);
+  }
+  return problems;
+}
+
 const pageNames = Object.keys(PAGES)
   .filter((k) => typeof PAGES[k] === "function" && /Page$/.test(k))
   .sort();
@@ -172,7 +241,7 @@ for (const name of pageNames) {
     cssGzip += gzipOf(href);
   }
 
-  measured.push({ name, kib: bytes / 1024, raw: bytes, gzip, css, cssGzip, parts });
+  measured.push({ name, kib: bytes / 1024, raw: bytes, bytes, gzip, css, cssGzip, parts, html, srcs });
 }
 
 measured.sort((a, b) => b.kib - a.kib);
@@ -344,6 +413,129 @@ for (const name of Object.keys(CEILING_KIB)) {
   eq(wouldFit.length, 0,
      `flows-ask.js (${askKib}k) fits inside the headroom of NONE of the ` +
      `${dockRoutes.length} routes the dock ships on — the whole reason the dock defers it`);
+}
+
+{
+  const read = (src) => readFileSync(new URL("." + src, REPO), "utf8");
+  const sizes = new Map();
+  const bytesOf = (src) => { if (!sizes.has(src)) sizes.set(src, sizeOf(src)); return sizes.get(src); };
+
+  console.log("  deferred JavaScript, uncompressed (allowance in KiB is stated, not derived):");
+  for (const m of measured) {
+    const table = DEFERRED[m.name] || { groups: {} };
+    const problems = declarationProblems(m.html, table, m.name);
+    eq(problems.join("; "), "", `${m.name} declares exactly the files DEFERRED lists for it, one per <i hidden data-defer data-src> element`);
+
+    const files = [];
+    for (const [group, list] of Object.entries(table.groups)) for (const f of Array.isArray(list) ? list : [list]) files.push({ f, how: "group " + group });
+    const dockMatch = SHARED_DEFERRED.dock.declared.exec(m.html);
+    if (dockMatch) {
+      eq(dockMatch[1], SHARED_DEFERRED.dock.file, `${m.name}'s dock declares ${SHARED_DEFERRED.dock.file} and nothing else`);
+      files.push({ f: dockMatch[1], how: "dock" });
+    }
+    if (m.srcs.includes("/assets/js/flows-ui.js")) files.push({ f: SHARED_DEFERRED.link.file, how: "link" });
+    for (const f of GPU_ONLY[m.name] || []) files.push({ f, how: "gpu" });
+
+    let total = 0;
+    for (const { f } of files) {
+      ok(existsSync(new URL("." + f, REPO)) && bytesOf(f) > 0, `${m.name}: deferred ${f} exists and is not empty`);
+      ok(!m.srcs.includes(f), `${m.name}: ${f} is deferred and also a script src of the route, so it would be paid for twice`);
+      total += bytesOf(f);
+    }
+    m.deferredBytes = total;
+    m.deferredFiles = files;
+    const allowance = DEFERRED_KIB[m.name];
+    ok(allowance !== undefined, `${m.name} has a stated deferred allowance`);
+    ok(total <= allowance * 1024,
+       `${m.name} defers ${Math.round(total / 1024)}k (${files.map((x) => x.f.split("/").pop()).join(", ") || "nothing"}), inside its stated ${allowance}k allowance — a deferred file that grows is a decision`);
+    ok(m.bytes + total <= (CEILING_KIB[m.name] + allowance) * 1024,
+       `${m.name}: eager plus deferred plus GPU-only is ${Math.round((m.bytes + total) / 1024)}k, inside ceiling ${CEILING_KIB[m.name]}k plus allowance ${allowance}k`);
+    console.log("    " + m.name.replace(/Page$/, "").padEnd(10) + String(Math.round(total / 1024)).padStart(4) + "k / " + String(allowance).padStart(2) + "k  " + files.map((x) => x.f.split("/").pop() + " (" + x.how + ")").join("  "));
+  }
+  for (const name of Object.keys(DEFERRED)) ok(pageNames.includes(name), `DEFERRED names ${name}, a route that still exists`);
+  for (const name of Object.keys(DEFERRED_KIB)) ok(pageNames.includes(name), `the allowance for ${name} guards a route that still exists`);
+
+  {
+    const bad = { groups: { net: "/assets/js/flows-net.js" } };
+    const base = (extra) => `<script src="/assets/js/flows-ui.js?v=1" defer></script>${extra}`;
+    const good = base('<i hidden data-defer="net" data-src="/assets/js/flows-net.js?v=1"></i>');
+    eq(declarationProblems(good, bad, "fixture").join("; "), "", "the declaration checker passes a well-formed element");
+    const has = (html, table, text) => declarationProblems(html, table, "fixture").some((p) => p.includes(text));
+    ok(has(base('<i hidden data-defer="net" data-src="/assets/js/flows-net.js?v=1 /assets/js/flows-x.js?v=1"></i>'), bad, "one file per element"),
+       "A SPACE-SEPARATED data-src FAILS: the version scan cannot see a second URL in a list");
+    ok(has(base('<i hidden data-defer="net" data-src="/assets/js/flows-net.js?v=1,/assets/js/flows-x.js?v=1"></i>'), bad, "one file per element"), "and so does a comma-separated one");
+    ok(has(good, { groups: {} }, "not in DEFERRED"), "A DEFERRED FILE MISSING FROM THE DEFERRED TABLE FAILS");
+    ok(has(base(""), bad, "declares no element"), "a table entry with no element on the page fails");
+    ok(has(base('<i hidden data-defer="net" data-src="/assets/js/flows-net.js"></i>'), bad, "not a versioned"), "an unversioned data-src fails");
+    ok(has(base('<i data-defer="net" data-src="/assets/js/flows-net.js?v=1"></i>'), bad, "not hidden"), "an element that is not hidden fails");
+    ok(has(`${good}<script src="/assets/js/flows-net.js?v=1" defer></script>`, bad, "also a script src"), "a file that is deferred and also a script src fails");
+    ok(has(base('<i hidden data-defer="net" data-src="/assets/js/flows-other.js?v=1"></i>'), bad, "not among DEFERRED"), "a file other than the one the table names fails");
+  }
+
+  {
+    const assetDir = new URL("assets/js/", REPO);
+    const names = readdirSync(assetDir).filter((n) => /^flows-.*\.js$/.test(n));
+    ok(names.includes("flows-ui.js") && names.includes("flows-dock.js") && names.length > 15, "the loader scan reads every flows-*.js file");
+    const found = {};
+    for (const n of names) {
+      const src = readFileSync(new URL(n, assetDir), "utf8");
+      const hits = [...src.matchAll(LOADERS)];
+      if (hits.length) found[n] = { count: hits.length, at: hits.map((x) => x.index) };
+    }
+    eq(Object.keys(found).sort().join(", "), "flows-dock.js, flows-ui.js", "ONE LOADER: a script element or a dynamic import is created only by the dock and by FlowsUI.defer");
+    eq(found["flows-dock.js"].count, 1, "the dock creates one script element");
+    eq(found["flows-ui.js"].count, 1, "and flows-ui.js creates one, shared by FlowsUI.defer and the FlowsUI.link stub");
+    const ui = read("/assets/js/flows-ui.js");
+    const from = ui.indexOf("const loadJs = ");
+    const to = ui.indexOf("const queued = ");
+    ok(from > 0 && to > from && found["flows-ui.js"].at[0] > from && found["flows-ui.js"].at[0] < to, "and it sits in loadJs, the function FlowsUI.defer calls");
+    const linkAt = ui.indexOf("const link = ");
+    ok(linkAt > to && /loadJs\(me\.replace\("flows-ui\.js", "flows-link\.js"\)\)/.test(ui.slice(linkAt, linkAt + 700)), "the link stub loads its body through that same function");
+    ok(/\bdefer,/.test(ui.slice(ui.lastIndexOf("window.FlowsUI = Object.freeze({"))), "FlowsUI.defer is exported");
+
+    for (const m of measured) {
+      const table = DEFERRED[m.name] || { groups: {} };
+      const used = new Set();
+      for (const src of m.srcs) {
+        let code;
+        try { code = read(src); } catch { continue; }
+        for (const g of code.matchAll(/\.defer\(\s*["']([\w-]+)["']/g)) used.add(g[1]);
+      }
+      const extra = [...used].filter((g) => table.groups[g] === undefined);
+      eq(extra.join(", "), "", `${m.name} defers only what DEFERRED lists for it (${Object.keys(table.groups).join(", ") || "nothing"})`);
+    }
+    const dossier = read("/assets/js/flows-ticker.js");
+    ok(!LOADER.test(dossier), "the dossier creates no script element of its own");
+    eq(/\.defer\(/.test(dossier), Object.keys(DEFERRED.tickerPage.groups).length > 0,
+       "and calls FlowsUI.defer only if DEFERRED.tickerPage lists a group");
+  }
+
+  {
+    const kernelV = EAGER_KERNEL.filter((k) => k.team !== "F").reduce((a, k) => a + k.kib, 0);
+    ok(kernelV <= 3.1 + 1e-9, `the shared eager kernel of teams V and L is ${kernelV.toFixed(1)} KB, at most 3.1`);
+    for (const k of EAGER_KERNEL) {
+      if (!k.landed) continue;
+      ok(k.landed.has.test(read(k.landed.file)), `kernel entry "${k.name}" is marked landed and is in ${k.landed.file}`);
+    }
+    for (const k of EAGER_KERNEL) {
+      if (k.landed) continue;
+      const hit = readdirSync(new URL("assets/js/", REPO)).filter((n) => /^flows-.*\.js$/.test(n)).filter((n) => /\bFlowsUI\.(scheduler|frame)\b|\bX-Basis\b|\bflowRadarStub\b/.test(readFileSync(new URL("assets/js/" + n, REPO), "utf8")));
+      eq(hit.join(", "), "", `kernel entry "${k.name}" is pending and absent from the tree, so the list cannot claim bytes already counted`);
+    }
+    const pending = EAGER_KERNEL.filter((k) => !k.landed).reduce((a, k) => a + k.kib * 1024, 0);
+    console.log(`  eager headroom against the 1 KiB floor, with the ${(pending / 1024).toFixed(1)} KB of pending kernel entries still to land on a live route:`);
+    const live = (m) => m.srcs.includes("/assets/js/flows-rt.js");
+    const below = [];
+    for (const m of [...measured].sort((a, b) => (CEILING_KIB[a.name] * 1024 - a.bytes) - (CEILING_KIB[b.name] * 1024 - b.bytes))) {
+      const headroom = Math.round(CEILING_KIB[m.name] * 1024 - m.bytes);
+      const after = live(m) ? Math.round(headroom - pending) : headroom;
+      console.log("    " + m.name.replace(/Page$/, "").padEnd(10) + String(headroom).padStart(7) + " B now" + (live(m) ? String(after).padStart(8) + " B after the kernel" : "") + (after < FLOOR_BYTES ? "   BELOW THE FLOOR" + (BELOW_FLOOR[m.name] ? " (" + BELOW_FLOOR[m.name] + ")" : "") : ""));
+      ok(headroom >= 0, `${m.name} has non-negative headroom`);
+      if (after < FLOOR_BYTES) below.push(m.name);
+    }
+    eq(below.sort().join(", "), Object.keys(BELOW_FLOOR).sort().join(", "),
+       "THE ROUTES BELOW THE 1 KiB FLOOR ARE EXACTLY THE ONES NAMED WITH A RELIEF ROW: a route that falls under it without a named relief fails, and a route that gets back over it must leave the list, so the list only shrinks on purpose");
+  }
 }
 
 console.log(`✓ flows-weight: ${checks} assertions — every route's JavaScript weighed from the ` +

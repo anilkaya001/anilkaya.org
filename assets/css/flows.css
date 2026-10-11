@@ -1450,6 +1450,10 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   cursor: pointer;
 }
 .ui-silent button:hover { background: var(--fill-4); }
+.ui-defer { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-3); margin: 0; padding: var(--sp-4); border-radius: var(--r-md); background: var(--fill-4); color: var(--label-2); font: var(--t-footnote); }
+.ui-defer button { min-height: 44px; padding: 0 var(--sp-4); border: 0; border-radius: 8px; background: none; color: var(--accent-ink); font: inherit; cursor: pointer; }
+.ui-defer button:hover { text-decoration: underline; }
+.ui-defer button:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .ui-dash { color: var(--label-3); }
 
 .ui-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--label-2); font: var(--t-caption); }

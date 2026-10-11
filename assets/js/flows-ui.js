@@ -1180,12 +1180,41 @@
     closeSidebar: () => { if (drawerClose) drawerClose(false); },
   });
 
+  const loadJs = (src) => new Promise((ok, no) => {
+    const n = h("script", { src, onload: ok, onerror: () => { n.remove(); no(); } });
+    n.async = false;
+    document.head.append(n);
+  });
+
+  const queued = new Map(), got = new Set();
+  function defer(group, o = {}) {
+    if (queued.has(group)) return queued.get(group);
+    const srcs = [...document.querySelectorAll('i[data-defer="' + group + '"]')].map((i) => i.dataset.src), slot = o.el, name = o.label || group;
+    let done;
+    const ask = (text, label, fn) => {
+      const q = h("p", { class: "ui-defer", role: "status" }, text, h("button", { type: "button", onclick: () => { q.remove(); fn(); } }, label));
+      slot.prepend(q);
+    };
+    const go = () => Promise.all(srcs.filter((x) => !got.has(x)).map((x) => loadJs(x).then(() => got.add(x))))
+      .then(done, () => slot && ask(name + " is unavailable: its script did not load.", "Retry", go));
+    const start = () => (slot && navigator.connection && navigator.connection.saveData ? ask("Data Saver is on.", "Load " + name, go) : go());
+    const idle = () => (window.requestIdleCallback ? requestIdleCallback(start, { timeout: 1500 }) : setTimeout(start, 200));
+    const see = () => {
+      if (o.when !== "visible" || !slot) return idle();
+      const io = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) { io.disconnect(); idle(); } }, { rootMargin: "200px" });
+      io.observe(slot);
+    };
+    queued.set(group, new Promise((r) => { done = r; }));
+    if (document.readyState === "complete") see(); else addEventListener("load", see, { once: true });
+    return queued.get(group);
+  }
+
   const link = (() => {
     const q = [], me = document.currentScript && document.currentScript.src;
     let impl, asked;
     const run = (f, d) => {
       if (impl) return f();
-      if (!asked && me) { asked = 1; document.head.append(h("script", { src: me.replace("flows-ui.js", "flows-link.js"), async: true })); }
+      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
       if (q.length < 64) q.push(f);
       return d;
     };
@@ -1216,7 +1245,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, freshAggregate, freshAll, link, shell, depths: PAL_G,
+    freshness, freshAggregate, freshAll, defer, link, shell, depths: PAL_G,
   });
 
   if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });
