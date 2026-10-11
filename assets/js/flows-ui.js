@@ -830,14 +830,15 @@
     clearTimeout(paintT);
     paintT = 0;
     let wait = null;
-    if (state === "live") {
+    if (state === "live" || state === "fresh") {
       const t = Date.now();
       for (const [k, f] of FRESH.ffs) {
         const n = FRESH.roles.get(k) === "primary" && typeof f.nextAt === "function" ? f.nextAt() : null;
-        if (n !== null && n > t && (wait === null || n - t < wait)) wait = n - t;
+        if (n !== null && n > t && (wait === null || n - t + 50 < wait)) wait = n - t + 50;
       }
-      wait = wait === null ? 5000 : wait + 50;
-    } else if (age !== null) wait = 5000;
+      if (state === "live" && wait === null) wait = 5000;
+    }
+    if (age !== null && (wait === null || wait > 5000)) wait = 5000;
     if (wait !== null) paintT = setTimeout(paintFresh, wait);
   }
   function paintFresh() {

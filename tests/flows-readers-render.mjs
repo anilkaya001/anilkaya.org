@@ -343,6 +343,18 @@ try {
 
     {
       const { page, errors } = await open();
+      await put(page, { source: "rt:fl", role: "primary", state: "fresh", klass: "rtSlow", staleS: 60 });
+      eq((await look(page)).state, "fresh", "A PAGE WHOSE ONLY PRIMARY IS FRESH (an event stream, no price) shows Fresh");
+      await page.clock.runFor(30000);
+      eq((await look(page)).state, "fresh", "and still Fresh inside the stale window");
+      await page.clock.runFor(35000);
+      eq((await look(page)).state, "stale", "AND TURNS STALE AT THE ENTRY'S STALE LINE with no frame, heartbeat or registration: the pill demotes itself from fresh as it does from live");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page, errors } = await open();
       await put(page, { source: "live:strips", klass: "breadth", liveS: 1200, staleS: 2700, ago: 41, role: null });
       const seen = [];
       for (let i = 0; i < 4; i++) { seen.push(await look(page)); await page.clock.runFor(5000); }
