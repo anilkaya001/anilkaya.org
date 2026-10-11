@@ -1354,6 +1354,108 @@ const seqOk = (ws) => {
 }
 
 {
+  const boards = fakeBoards({ n: 60 });
+  const good = { clock: null, boards: { long: { rows: boards.long.rows }, short: { rows: boards.short.rows }, watch: { rows: boards.watch.rows } }, focus: null };
+  const baseNames = RT.rosterPlan({}).names;
+  const fullNames = RT.rosterPlan({ long: boards.long.rows, short: boards.short.rows, watch: boards.watch.rows, focusPayload: null }).names;
+  const pxCalls = (r) => r.vendor.paramsOf(/screener/).map((p) => p.ticker.split(","));
+  eq(baseNames.length, 25, "hang: the base roster is the 25 names a hub with no boards polls");
+
+  const watch3s = () => {
+    const pending = new Set();
+    const state = { peak: 0, pending, restore: null };
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    globalThis.setTimeout = (fn, ms, ...rest) => {
+      const id = realSet(fn, ms, ...rest);
+      if (ms === 3000) { pending.add(id); state.peak = Math.max(state.peak, pending.size); }
+      return id;
+    };
+    globalThis.clearTimeout = (id) => { pending.delete(id); return realClear(id); };
+    state.restore = () => { globalThis.setTimeout = realSet; globalThis.clearTimeout = realClear; };
+    return state;
+  };
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), roster: () => { reads++; return reads === 1 ? new Promise(() => {}) : Promise.resolve(good); } });
+    r.join();
+    let fullAt = null;
+    for (let s = 1; s <= 40 && fullAt === null; s++) {
+      await r.run(1);
+      const calls = pxCalls(r);
+      if (calls.length && calls.at(-1).length === fullNames.length) fullAt = s;
+    }
+    ok(fullAt !== null && fullAt <= 35, `HANG ONCE: the poll covers the full roster ${fullAt} seconds after the hub starts, inside 35`);
+    ok(fullAt >= 30, `hang: and not before the thirty-second retry falls due (${fullAt} s)`);
+    ok(pxCalls(r).slice(0, -1).every((c) => c.join(",") === baseNames.join(",")), "hang: every poll before it asked the 25 base names, never none");
+    eq(reads, 2, "hang: two reads in all, the hung one and the retry");
+  }
+
+  {
+    let reads = 0;
+    const starts = [];
+    const r = rig({ start: at(10, 0), roster: () => { reads++; starts.push(r.state.t); return reads <= 2 ? new Promise(() => {}) : Promise.resolve(good); } });
+    const t0 = r.state.t;
+    const watched = watch3s();
+    try {
+      r.join();
+      const lateNames = [];
+      for (let s = 1; s <= 75; s++) {
+        await r.run(1);
+        eq(watched.pending.size, 0, `hang: no roster timer outlives its tick (second ${s})`);
+        const calls = pxCalls(r);
+        if (calls.length) lateNames.push(calls.at(-1).length);
+        if (s === 55) eq(reads, 2, "SECOND HANG: the second hung read is not repeated inside its own thirty seconds");
+        if (s === 35) eq(reads, 2, "hang: the second read started when the first retry fell due");
+      }
+      ok(watched.peak <= 1, `hang: at most one roster timer is ever pending (peak ${watched.peak}), nothing stacks`);
+      eq(reads, 3, "hang: the third read, the second retry, succeeded");
+      const gaps = starts.slice(1).map((t, i) => (t - starts[i]) / 1000);
+      ok(gaps.every((g) => g >= 30), `hang: reads start at least thirty seconds apart (${gaps.join(", ")} s)`);
+      ok(starts[0] - t0 === 0, "hang: and the first read is the hub's first tick");
+      eq(r.hub.status().roster.n, fullNames.length, "hang: the full roster is held after two hangs");
+      eq(r.hub.rosterError, null, "hang: and the error is clear");
+      ok(lateNames.slice(0, 60).every((n) => n === baseNames.length), "hang: the polls of the first minute all asked the base names");
+      eq(lateNames.at(-1), fullNames.length, "hang: and the last poll asks the full roster");
+    } finally {
+      watched.restore();
+    }
+  }
+
+  {
+    const r = rig({ start: at(10, 0), roster: async () => { throw new Error("D1 refuses"); } });
+    r.join();
+    await r.run(300);
+    const reads = r.hub.rosterAt;
+    ok(reads > 0, "refused: the hub tried the roster");
+    const calls = pxCalls(r);
+    ok(calls.length >= 50, `NO CHECKPOINT YET: a hub whose D1 never answers still polls (${calls.length} px calls in five minutes)`);
+    ok(calls.every((c) => c.join(",") === baseNames.join(",")), "refused: every one of them asks the 25 base names, never zero and never fewer");
+    eq(r.hub.status().roster.n, baseNames.length, "refused: status says 25 names");
+    ok(r.hub.roster !== null, "refused: the roster is installed, not null, because plan.ready() needs one");
+    ok(/D1 refuses/.test(r.hub.rosterError.message), "refused: and the reason is kept");
+    eq(r.logs.length, 1, "refused: logged once, not every retry");
+  }
+
+  {
+    let reads = 0;
+    const r = rig({ start: at(10, 0), roster: () => { reads++; return reads === 1 ? Promise.resolve(good) : new Promise(() => {}); } });
+    r.join();
+    await r.run(10);
+    eq(r.hub.status().roster.n, fullNames.length, "refresh hang: a good first read");
+    const seen = pxCalls(r).length;
+    await r.run(310);
+    eq(reads, 2, "refresh hang: the five-minute refresh hangs and is not repeated yet");
+    ok(/roster timeout/.test(r.hub.rosterError.message), "refresh hang: it says it timed out");
+    eq(r.hub.status().roster.n, fullNames.length, "A HUNG REFRESH KEEPS THE ROSTER THE HUB HOLDS, it does not fall back to the base names");
+    ok(pxCalls(r).slice(seen).every((c) => c.length === fullNames.length), "refresh hang: every poll of those minutes asked the full roster");
+    await r.run(40);
+    eq(reads, 3, "refresh hang: and the refresh is repeated thirty seconds after the timeout");
+  }
+}
+
+{
   const r = rig({ start: at(10, 0) });
   const a = r.join("anilkaya", { f: "NVDA" });
   await r.run(2000, 1000);
