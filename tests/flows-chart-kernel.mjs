@@ -357,12 +357,35 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
 }
 
 {
+  const page = await open(640, `<script>${PLOT_SRC}</script>`);
+  const r = await page.evaluate(() => {
+    const C = window.FlowsUI.chart, s = window.FlowsUI.s;
+    const oldMark = (g, shape, x, y, color, r) => {
+      if (shape === "dia") return s("rect", { x: x - r, y: y - r, width: 2 * r, height: 2 * r, rx: 1.2, fill: color, transform: "rotate(45 " + x + " " + y + ")" }, g);
+      if (shape === "ring") return s("circle", { cx: x, cy: y, r: r - 0.5, fill: "none", stroke: color, "stroke-width": 1.5 }, g);
+      return s("circle", { cx: x, cy: y, r, fill: color }, g);
+    };
+    const out = [];
+    for (const shape of ["dia", "ring", "dot", undefined]) {
+      const a = s("svg"), b = s("svg");
+      oldMark(a, shape, 12.5, 30, "#abc", 3.4);
+      C.marker(b, shape, 12.5, 30, "#abc", 3.4);
+      out.push(window.ser(a) === window.ser(b));
+    }
+    return out;
+  });
+  eq(r, [true, true, true, true], "marker draws the diamond, ring and dot exactly as the ticker's copy of it did");
+  await page.close();
+}
+
+{
   const src = fs.readFileSync(path.join(HERE, "..", "assets/js/flows-chart.js"), "utf8");
   const fmtUnit = (kind, v) => kind + ":" + v;
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const members = {
     h: () => ({}), s: () => ({}), num: (v) => (typeof v === "number" && Number.isFinite(v) ? v : null),
     clamp: (v, a, b) => Math.max(a, Math.min(b, v)), glyph: () => ({}),
-    F: Object.freeze({ unit: fmtUnit, num: (v) => String(v) }), tone: () => "flat", announce: () => {}, silent: () => ({}),
+    F: Object.freeze({ unit: fmtUnit, num: (v) => String(v), day: (d) => MONTHS[+d.slice(5, 7) - 1] + " " + +d.slice(8, 10) }), tone: () => "flat", announce: () => {}, silent: () => ({}),
     cssVar: (v) => v, DASH: "—", reduced: () => false,
   };
   const ctx = { window: { FlowsUI: Object.freeze(members), ResizeObserver: undefined }, document: {}, requestAnimationFrame: (f) => f() };
@@ -402,6 +425,49 @@ window.T = ["9:30", "9:45", "10:00", "10:15", "10:30", "10:45", "11:00", "11:15"
   eq(C.layout(1000, {}).right, 62, "layout: no labels gives the standing wide gutter");
   eq(C.layout(1000, { right: 9 }).right, 9, "layout: an explicit margin wins");
   eq(C.layout(1000, { height: [200, 220, 240] }).H, 240, "layout: the wide band");
+  const histTicks = (F, ds, xAt, phone, right) => {
+    const out = [], N = ds.length;
+    if (N <= 32) {
+      const every = Math.max(3, Math.round(N / (phone ? 3 : 5)));
+      for (let i = N - 1 - every; i > 0; i -= every) out.push({ i, text: F.day(ds[i]) });
+    } else {
+      let last = null;
+      ds.forEach((d, i) => {
+        const m = d.slice(0, 7);
+        if (last !== null && m !== last) out.push({ i, text: N > 400 && d.slice(0, 4) !== last.slice(0, 4) ? d.slice(0, 4) : F.day(d).split(" ")[0] });
+        last = m;
+      });
+    }
+    return out.filter((q) => xAt(q.i) > 14 && xAt(q.i) < right - 14);
+  };
+  const days = (n, start) => { const out = []; const t0 = Date.UTC(start, 0, 1); for (let i = 0; i < n; i++) out.push(new Date(t0 + i * 86400000).toISOString().slice(0, 10)); return out; };
+  for (const [n, start, phone, width] of [[5, 2026, true, 390], [20, 2026, false, 960], [32, 2026, true, 390], [33, 2026, false, 960], [90, 2026, true, 390], [250, 2025, false, 960], [401, 2024, false, 1200], [900, 2023, true, 390]]) {
+    const ds = days(n, start), xAt = (i) => 2 + (i / Math.max(1, n - 1)) * (width - 60);
+    eq(JSON.parse(JSON.stringify(C.dateTicks(ds, xAt, 5, 0, width - 60, phone))), histTicks(members.F, ds, xAt, phone, width - 60),
+      `dateTicks(0, ...) is the ticker's old histTicks over ${n} sessions from ${start} (${phone ? "phone" : "wide"})`);
+  }
+  eq(C.fx1(12.345), "12.3", "fx1 rounds to a tenth"); eq([C.fx1(-0.04), C.fx1(-12.34)], ["0", "-12.3"], "fx1 prints a negative rounded to nothing as 0 and keeps the sign otherwise, as the old copy did");
+  eq(C.tw("12345"), 5 * 6.4 + 12, "tw is the pill-width estimate the ticker's textW was");
+  eq([C.heightFor([200, 220, 240], 390), C.heightFor([200, 220, 240], 700), C.heightFor([200, 220, 240], 1000), C.heightFor(undefined, 700, 310), C.heightFor(180, 1000)], [200, 220, 240, 310, 180], "heightFor picks the phone, middle and wide band, a fallback and a plain number");
+  const spreadRef = (items, gap, lo, hi) => {
+    items.sort((a, b) => a.y - b.y);
+    for (let it = 0; it < 80; it++) {
+      let moved = false;
+      for (let i = 1; i < items.length; i++) { const d = items[i].y - items[i - 1].y; if (d < gap) { const q = (gap - d) / 2; items[i - 1].y -= q; items[i].y += q; moved = true; } }
+      for (const q of items) q.y = Math.max(lo, Math.min(hi, q.y));
+      if (!moved) break;
+    }
+  };
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  let off = 0;
+  for (let k = 0; k < 200; k++) {
+    const gap = 14 + Math.floor(rnd() * 6);
+    const a = Array.from({ length: 2 + Math.floor(rnd() * 8) }, () => ({ y: rnd() * 300 })), b = a.map((q) => ({ ...q }));
+    C.spread(a, gap, 10, 290); spreadRef(b, gap, 10, 290);
+    if (a.some((q, i) => Math.abs(q.y - b[i].y) > 1e-9)) off++;
+  }
+  eq(off, 0, "spread places 200 random label sets exactly as the ticker's copy of it did");
   let threw = 0;
   for (const bad of [() => C.kind("", { draw() {} }), () => C.kind("x", null), () => C.kind("y", {}), () => C.plot({}, { kind: "nope" })]) { try { bad(); } catch { threw++; } }
   eq(threw, 4, "kind() refuses an empty name, a missing or drawless implementation, and plot() refuses an unknown kind");

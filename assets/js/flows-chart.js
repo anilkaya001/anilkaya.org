@@ -950,7 +950,7 @@
   const chart = Object.freeze({
     mount, svgRoot, lin, niceTicks, pathOf, monoPath, vGrad, clipRect, spread, marker, scrub, part,
     line, sparkline, bars, diverging, heatmap, gauge, payoff,
-    LEVELS, shapeOf, kind, plot, scale, ticks, layout, axes,
+    LEVELS, shapeOf, kind, plot, scale, ticks, layout, axes, dateTicks, fx1, tw, heightFor,
   });
 
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { chart }));

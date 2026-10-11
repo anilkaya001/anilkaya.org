@@ -7,6 +7,7 @@
 
   const { h, s, F, glyph, num, clamp, tone, cap, cssVar } = UI;
   const C = UI.chart;
+  const { fx1, tw: textW, dateTicks, heightFor, marker: mark, spread: spreadTags } = C;
   const DASH = UI.DASH, MINUS = UI.MINUS, SEP = " " + UI.MID + " ";
   const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
   const NOPE_SIGN = { "sign-agrees": "agrees with", "sign-differs": "differs from" };
@@ -492,48 +493,14 @@
     return [{ t: e.sessions, label: "E", name: "Earnings " + F.day(e.d) }];
   }
 
-  const fx1 = (v) => (Math.round(v * 10) / 10).toString();
-  const textW = (t) => String(t).length * 6.4 + 12;
   let coneSeq = 0;
-  function spreadTags(items, gap, lo, hi) {
-    items.sort((a, b) => a.y - b.y);
-    for (let it = 0; it < 80; it++) {
-      let moved = false;
-      for (let i = 1; i < items.length; i++) {
-        const d = items[i].y - items[i - 1].y;
-        if (d < gap) { const q = (gap - d) / 2; items[i - 1].y -= q; items[i].y += q; moved = true; }
-      }
-      for (const t of items) t.y = clamp(t.y, lo, hi);
-      if (!moved) break;
-    }
-  }
-  function mark(g, shape, x, y, color, r) {
-    if (shape === "dia") return s("rect", { x: x - r, y: y - r, width: 2 * r, height: 2 * r, rx: 1.2, fill: color, transform: "rotate(45 " + x + " " + y + ")" }, g);
-    if (shape === "ring") return s("circle", { cx: x, cy: y, r: r - 0.5, fill: "none", stroke: color, "stroke-width": 1.5 }, g);
-    return s("circle", { cx: x, cy: y, r, fill: color }, g);
-  }
-  function histTicks(ds, xAt, phone, right) {
-    const out = [], N = ds.length;
-    if (N <= 32) {
-      const every = Math.max(3, Math.round(N / (phone ? 3 : 5)));
-      for (let i = N - 1 - every; i > 0; i -= every) out.push({ i, text: F.day(ds[i]) });
-    } else {
-      let last = null;
-      ds.forEach((d, i) => {
-        const m = d.slice(0, 7);
-        if (last !== null && m !== last) out.push({ i, text: N > 400 && d.slice(0, 4) !== last.slice(0, 4) ? d.slice(0, 4) : F.day(d).split(" ")[0] });
-        last = m;
-      });
-    }
-    return out.filter((t) => xAt(t.i) > 14 && xAt(t.i) < right - 14);
-  }
 
   function heroCone(host, o) {
     return C.mount(host, (el, w, animate) => {
       const hist = (o.history || []).filter((r) => r && isoOk(r.d) && num(r.c) !== null);
       const S = numOr(o.spot, hist.length ? hist[hist.length - 1].c : null);
       const phone = w < 600;
-      const H = heightOf(w, o.height);
+      const H = heightFor(o.height, w);
       if (!hist.length || S === null) { el.append(UI.silent(ST("unavailable", o.empty), o.label, H)); return; }
       const N = hist.length, Hs = o.horizon;
       const gutter = phone ? 58 : 66;
@@ -627,7 +594,7 @@
         });
         s("text", { x: tx, y: sy + 4, text: "Score", class: "tx-3" }, svg);
       }
-      for (const t of histTicks(hist.map((r) => r.d), xh, phone, xNow)) s("text", { x: xh(t.i), y: H - 5, text: t.text, "text-anchor": "middle" }, svg);
+      for (const t of dateTicks(hist.map((r) => r.d), xh, 5, 0, xNow, phone)) s("text", { x: xh(t.i), y: H - 5, text: t.text, "text-anchor": "middle" }, svg);
       s("text", { x: xf(Hs), y: H - 5, text: "+" + Hs + "d", "text-anchor": "middle" }, svg);
       const xs = hist.map((_, i) => xh(i));
       for (let t = 1; t <= Hs; t++) xs.push(xf(t));
@@ -1194,7 +1161,6 @@
     return { seg, box, leg, start: () => show(cur), views: list };
   }
 
-  const heightOf = (w, hs) => (w < 600 ? hs[0] : w < 900 ? hs[1] : hs[2]);
   const moneyPx = (v) => F.money(v, true);
 
   function worldsExpiry(eng, lead) {
@@ -1306,7 +1272,7 @@
       metric("Lead PoP", num(popP) === null ? DASH : ratioP(popP), { sub: num(popQ) === null ? null : ratioP(popQ) + " implied", state: leadHere ? null : ST("quiet", lead ? "The lead idea expires " + lead.expiry + ", not at this horizon." : "No priced idea leads this card.") }),
     ], { min: 104 }));
     const handle = C.mount(host, (el, w, animate) => {
-      const H = heightOf(w, [220, 250, 270]);
+      const H = heightFor([220, 250, 270], w);
       const top = 34, bot = 44, left = 6, right = 6;
       const x = C.lin(d.lo, d.hi, left, w - right);
       const ymax = Math.max(...d.q, ...d.p.filter((v) => v !== null)) * 1.08 || 1;
@@ -1546,7 +1512,7 @@
     const mP = Math.max(...L.p.map((v) => Math.abs(num(v) || 0)), 0) || 1;
     const label = card.ticker + " session path: cumulative net delta" + (L.dUnit ? " (" + L.dUnit + ")" : "") + (hasP ? " and cumulative net premium" + (L.pUnit ? " (" + L.pUnit + ")" : "") + ", each scaled to its own extreme" : "; no net premium leg, because the session carried none");
     const handle = C.mount(host, (el, w, animate) => {
-      const H = heightOf(w, [200, 220, 240]);
+      const H = heightFor([200, 220, 240], w);
       const left = 10, right = 10, top = 14, bot = 24;
       const n = L.d.length;
       const x = (i) => left + (n > 1 ? i / (n - 1) : 0.5) * (w - left - right);
@@ -1946,7 +1912,7 @@
     const lo = Math.max(Math.min(c0, ...nn(T.map((t) => t.min))), c0 - r), hi = Math.min(Math.max(c1, ...nn(T.map((t) => t.max))), c1 + r);
     const pad = (hi - lo) * 0.08 || 0.01, y0 = Math.max(0, lo - pad), y1 = hi + pad;
     return C.mount(host, (el, w, animate) => {
-      const H = heightOf(w, [280, 300, 320]);
+      const H = heightFor([280, 300, 320], w);
       const top = 16, bot = 24, left = 36, right = 12;
       const sx = (d) => Math.sqrt(d);
       const x = C.lin(sx(T[0].days), sx(T[T.length - 1].days), left + 10, w - right - 10);
@@ -2326,7 +2292,7 @@
     const iD = 0, iW = 1, iE = 2, iM = 3;
     const rows = ev.filter((r) => Array.isArray(r) && isoOk(r[iD])).slice().sort((a, b) => (a[iD] < b[iD] ? -1 : 1));
     return C.mount(host, (el, w, animate) => {
-      const H = heightOf(w, [170, 190, 200]);
+      const H = heightFor([170, 190, 200], w);
       const top = 14, bot = 24, left = 4, right = 44;
       const n = rows.length;
       const band = (w - left - right) / Math.max(1, n);
