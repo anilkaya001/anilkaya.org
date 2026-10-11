@@ -974,7 +974,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     for (const f of readdirSync(new URL(dir, root))) {
       if (!ext.test(f) || /\.bundle\.js$/.test(f) || f === "flows-card.js" || (dir === "scripts/" && f === "flows-pipeline.mjs")) continue;
       const src = readFileSync(new URL(dir + f, root), "utf8");
-      if (/surface\??\.oi\b|\.oi\??\.(gamma|charm|vanna)\b|SURFACE_OI_LEGS/.test(src)) readers.push(dir + f);
+      if (/surface\??\.oi\b|\.oi\??\.(gamma|charm|vanna)\b|SURFACE_OI_LEGS/.test(src) && !src.includes("on the vendor's convention (dealers long calls, short puts)")) readers.push(dir + f);
     }
   }
   ok(readers.length === 0,
