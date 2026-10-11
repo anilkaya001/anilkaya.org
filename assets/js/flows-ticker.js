@@ -2611,10 +2611,21 @@
     sec.classList.toggle("ft-snug", isIndex(card));
   }
 
+  function buildScenes(card) {
+    if (!$("ftScenes") || isIndex(card) || !UI.defer) return;
+    const P = card.panels || {};
+    const input = { ticker: card.ticker, engine: engineOf(card), ivSurface: okOf(P.ivSurface), gamma: okOf(P.surface), asOf: card.generatedAt || null };
+    for (const [kind, id, title] of [["surface", "m-surface", "Volatility surface"], ["terrain", "m-terrain", "Gamma terrain"]]) {
+      const host = h("div", { class: "ft-scene", "data-scene": kind });
+      mod({ id, title, span: [12, 12], st: OK, body: [host], index: 3 });
+      UI.defer("scenes", { when: "visible", el: host, label: "The " + title.toLowerCase() }).then(() => window.FlowsUI.scenes && window.FlowsUI.scenes[kind](host, input));
+    }
+  }
+
   function renderModules(card) {
     gridEl.hidden = false;
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext];
+    const builders = [buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildScenes];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
