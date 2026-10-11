@@ -1710,6 +1710,7 @@
   const IV_YEAR = Math.sqrt(252);
   const IV_EVENT = 21;
   const IV_APART = "Earnings within 30 days: event not separated.";
+  const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => { const c = isNum(chg), v = isNum(iv); return c === null || v === null || !(v > 0) ? null : c / (v / IV_YEAR); };
   function ivdIndex(u) {
     const ok = u && u.status === "ok" && Array.isArray(u.t) && u.cols && u.units;
@@ -1921,7 +1922,7 @@
     const body = h("div", { class: "hm-qlist", role: "group" });
     into.append(body);
     const head = (two) => h("div", { class: "ui-row hm-qrow hm-qhead" + (two ? " is-2" : ""), "aria-hidden": "true" },
-      ["", "", "Price", "Day", "Net premium", "IV 30d", "IV-days"].map((x) => h("span", null, x)));
+      ["", "", "Price", "Day", "Net premium", "IV 30d", "IV-days"].map((x) => h("span", x === "IV-days" ? { title: IV_GRADE } : null, x)));
     const draw = () => {
       const g = groups[at];
       const rows = focusRows(g.tickers);

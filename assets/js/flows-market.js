@@ -466,9 +466,10 @@
     return box;
   }
 
-  const LENS = { on: false, strips: null, uni: null, priced: false, day: null, movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null };
+  const LENS = { on: false, strips: null, uni: null, priced: false, day: null, movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null, sync: null };
   const IV_EVENT = 21;
   const IV_APART = "Earnings within 30 days: event not separated.";
+  const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
 
   function uniRows(u) {
@@ -573,11 +574,12 @@
     show(0);
     host.append(h("div", { class: "mk-lens" }, UI.segmented("Rank risers and fallers by", [{ label: "Raw change" }, { label: "In IV-days" }], (i) => {
       LENS.on = i === 1;
+      if (LENS.on && LENS.sync) LENS.sync();
       LENS.dirty = false;
       if (LENS.ask === 2 && !LENS.strips) LENS.ask = 0;
       paintMovers(LENS.movers);
     }, LENS.on ? 1 : 0)), grid);
-    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, moves ? h("p", null, LENS.src) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured.")));
+    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, moves ? h("p", null, LENS.src) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured."), h("p", null, IV_GRADE)));
     const universe = isNum(movers.universe), ranked = isNum(movers.ranked), priced = isNum(movers.priced);
     const noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
     if (universe === null || ranked === null || priced === null || noChange === null || noPrem === null) {
@@ -1614,7 +1616,7 @@
     paintRadar(regime);
     paintGroups(regime);
     if (typeof UI.heartbeat === "function") {
-      UI.heartbeat({ keys: ["market", "breadth", "strips"], nightly: ["pulse"], page: "market",
+      const beat = (withStrips) => UI.heartbeat({ keys: withStrips ? ["market", "breadth", "strips"] : ["market", "breadth"], nightly: ["pulse"], page: "market",
         onChange(changed) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
           if (LENS.on && !(UI.rt && UI.rt.feeds("px")) && keys.some((c) => /live:strips(?!:)/.test(c))) {
@@ -1638,6 +1640,13 @@
             paintTide(pulse, live, breadth);
           }).catch(() => {});
         } });
+      let beating = beat(LENS.on), withStrips = LENS.on;
+      LENS.sync = () => {
+        if (LENS.on === withStrips || !LENS.on) return;
+        withStrips = true;
+        beating.stop();
+        beating = beat(true);
+      };
     }
     const rt = UI.rt && UI.rt.connect({ topics: ["mk"] });
     if (rt) {

@@ -267,6 +267,8 @@ try {
     eq(got.notes[0], want.ctx, "THE MEDIAN LINE is computed on the prior-close IV, by the leaf's arithmetic");
     eq(got.notes[1], "Live roster, session 2026-09-29: 6 names.", "the source and the population are named");
     eq(got.notes[2], M.CAPTION + " " + M.LINE, "and the caption names the IV and the line says it is a ranking, not a test");
+    eq(got.notes[3], M.GRADE_NOTE, "and the grade is said once: the IV is the 30-day IV, with no surface");
+    ok(page._asked.some((k) => /^now\?.*strips/.test(k)), "the owner's heartbeat reads the live rows from the first beat");
     for (const n of got.notes) ok(!forbidden.test(n), `"${n}" uses none of the forbidden words`);
     ok(M.wordCount(got.notes[0]) <= M.HEADER_WORDS_MAX, "and the context line is within 14 words");
     ok(!forbidden.test(got.text.replace(/screened/g, "")), "the module's text uses none of unusual, alert, screen or rare");
@@ -292,9 +294,11 @@ try {
     const got = await readLists(page);
     deep(got.seg, [["Raw change", "true"], ["In IV-days", "false"]], "MEMBERS OPEN ON RAW CHANGE");
     ok(!page._asked.some((k) => /^lk\?k=.*strips/.test(k)), "and the live rows are not fetched for a lens nobody asked for");
+    ok(page._asked.some((k) => /^now\?/.test(k)) && !page._asked.some((k) => /^now\?.*strips/.test(k)), "THE HEARTBEAT OF A MEMBER WITH THE LENS OFF does not read live:strips, so that key cannot move the pill of a page that does not use it");
     await page.click("#mktMovers .mk-lens .ui-seg-i:nth-child(3)");
     await page.waitForSelector("#mktMovers li[data-t]", { timeout: 15000 });
     await settle(page);
+    ok(page._asked.some((k) => /^now\?.*strips/.test(k)), "and choosing IV-days adds it to the heartbeat");
     const on = await readLists(page);
     ok(page._asked.some((k) => k === "lk?k=strips"), "choosing IV-days reads the live rows once");
     deep(on.cols[1].clean.map((r) => r[0]), ["AAA", "CCC", "DDD"], "and ranks them");
@@ -329,6 +333,25 @@ try {
     eq(page._asked.filter((k) => /^lk\?k=.*strips/.test(k) && !k.includes("market")).length, 1, "WITH THE LIVE ROWS PENDING the lens asks for them once and does not loop on the answer");
     ok(got.cols[0].clean.length === 0 && got.cols[1].clean.length === 0, "and ranks nothing");
     eq(await page.evaluate(() => document.querySelectorAll("#mktMovers .mk-movers-col")[0].querySelectorAll(".ui-silent").length), 1, "saying so in place of the list, not a zero");
+    await page.close();
+  }
+
+  {
+    const EDGE = [
+      { t: "E21", chg: -0.1, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 21 },
+      { t: "E22", chg: -0.09, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 22 },
+      { t: "E0", chg: -0.08, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 0 },
+      { t: "U21", chg: 0.1, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 21 },
+      { t: "U22", chg: 0.09, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 22 },
+    ];
+    const state = { strips: stripsOf(EDGE), upd: 1, universe: EDGE };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    const got = await readLists(page);
+    deep(got.cols[1].clean.map((r) => r[0]), ["E22"], "A NAME 22 SESSIONS FROM EARNINGS is among the clean names");
+    deep(got.cols[1].apart.map((r) => r[0]), ["E21", "E0"], "and one 21 sessions from them is ranked apart, as is one reporting today");
+    deep(got.cols[0].clean.map((r) => r[0]), ["U22"], "on the risers' side likewise");
+    deep(got.cols[0].apart.map((r) => r[0]), ["U21"], "ed 21 never ranks beside the clean names");
     await page.close();
   }
 
@@ -417,18 +440,20 @@ try {
 
   {
     const NIGHT = "2026-09-28";
-    const names = ["AAA", "CCC", "UUU"];
+    const names = ["AAA", "CCC", "UUU", "NOIV", "E21", "E22"];
     const focus = {
       status: "ok", sessionDate: NIGHT, generatedAt: iso(TUE_1330 - 20 * 3600000), readAt: iso(TUE_1330 - 20 * 3600000),
       fields: ["px", "prev", "chg", "net", "lean", "iv30"],
       groups: [{ id: "mag7", kind: "leaders", label: "Mag 7", tickers: names, lead: "AAA" }],
       rows: Object.fromEntries(names.map((t) => [t, [100, 100, 0, 0, 0, 0.3]])), closes: Object.fromEntries(names.map((t) => [t, [100, 100]])),
     };
-    const strips = stripsOf(ROSTER.filter((r) => names.includes(r.t)));
+    const strips = stripsOf(ROSTER.filter((r) => names.includes(r.t)).concat([
+      { t: "E21", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 }, { t: "E22", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 },
+    ]));
     const proj = {
-      status: "ok", v: 1, sessionDate: NIGHT, n: 3, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [],
-      t: names, sectors: ["Tech"], sec: [0, 0, 0],
-      cols: { chg: [0, 0, 0], iv30p: [111, 111, 111], ed: [40, 40, 40] }, units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
+      status: "ok", v: 1, sessionDate: NIGHT, n: 6, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [],
+      t: names, sectors: ["Tech"], sec: [0, 0, 0, 0, 0, 0],
+      cols: { chg: [0, 0, 0, 0, 0, 0], iv30p: [111, 111, 111, 111, 111, 111], ed: [40, 40, 40, 40, 21, 22] }, units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
     };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, {
@@ -446,10 +471,15 @@ try {
     });
     await page.waitForSelector("#ccLeaders a[data-ticker] .hm-qd", { timeout: 15000 });
     await settle(page);
-    const got = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#ccLeaders a.hm-qrow")].map((r) => [r.dataset.ticker, [r.dataset.src, r.querySelector(".hm-qd").firstChild.textContent]])));
+    const got = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#ccLeaders a.hm-qrow")].map((r) => [r.dataset.ticker, [r.dataset.src, r.querySelector(".hm-qd").firstChild.textContent, Boolean(r.querySelector(".hm-qd-e"))]])));
     eq(got.AAA[0], "live", "the live rows are read as live");
     eq(NUM(got.AAA[1]), NUM(M.signedIvDays(M.ivDays(-0.08, 0.4))), "and a live row divides by the strip's own prior-close IV, not the nightly column's 11.1 points nor the current IV");
     eq(NUM(got.UUU[1]), NUM(M.signedIvDays(M.ivDays(0.05, 0.25))), "UUU likewise");
+    eq(got.NOIV[0], "live", "NOIV is read from the live rows");
+    eq(got.NOIV[1], "—", "A LIVE ROW WITH NO STRIP IV is a dash: last night's 11.1 points are never paired with today's change");
+    eq(got.E21[2], true, "a name 21 sessions from earnings carries the event mark");
+    eq(got.E22[2], false, "and one 22 sessions from them does not");
+    eq(NUM(got.E22[1]), NUM(M.signedIvDays(M.ivDays(-0.05, 0.25))), "E22 is read on its strip IV");
     await page.close();
   }
 } finally {
