@@ -2,7 +2,7 @@
   "use strict";
   const UI = window.FlowsUI;
   if (!UI || UI.exportMenu) return;
-  const { h } = UI;
+  const { h, F } = UI;
   const PROPS = ["fill", "stroke", "stroke-width", "stroke-dasharray", "opacity", "fill-opacity", "stroke-opacity", "stop-color",
     "font-family", "font-size", "font-weight", "letter-spacing"];
 
@@ -32,8 +32,8 @@
 
   function exportCsv(spec) {
     const at = new Date().toISOString();
-    save(spec.name + "-" + (spec.asOf || at).slice(0, 10) + ".csv", "text/csv;charset=utf-8", ["﻿", csv(spec.rows, spec.cols, [
-      "Source: " + spec.source + (spec.asOf ? "; as of " + spec.asOf : ""), "Exported " + at + " from anilkaya.org"])]);
+    save(spec.name + "-" + (spec.asOf || F.trtDay(at)) + ".csv", "text/csv;charset=utf-8", ["﻿", csv(spec.rows, spec.cols, [
+      "Source: " + spec.source + (spec.asOf ? "; as of " + spec.asOf : ""), "Exported " + F.stamp(at) + " (" + at.slice(0, 19) + "Z) from anilkaya.org"])]);
     UI.announce("CSV downloaded.");
   }
 
