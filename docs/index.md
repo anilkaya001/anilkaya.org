@@ -1377,7 +1377,7 @@ The Home page's deferred chunk (F-08 part a). `flows-overview.js` keeps the firs
 |---|---|---|
 | `assets/js/flows-overview-below.js` |  | flows-home-below-render, flows-payload-shape |
 | `tests/flows-home-below-render.mjs` |  | flows-home-below-render |
-| `tests/lib/below-fold.mjs` | `tests/lib/below-fold.mjs#BELOW_NOW`, `tests/lib/below-fold.mjs#revealBelow` | flows-market, flows-overview, flows-readers-render, flows-rt-client, flows-unusual |
+| `tests/lib/below-fold.mjs` | `tests/lib/below-fold.mjs#BELOW_NOW`, `tests/lib/below-fold.mjs#revealBelow` | flows-market, flows-moves0, flows-overview, flows-readers-render, flows-rt-client, flows-unusual |
 
 ### `assets/js/flows-unusual-below.js`, `tests/flows-flow-below-render.mjs`
 

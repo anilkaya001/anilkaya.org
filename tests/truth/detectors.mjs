@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const FIXTURES = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures-truth.json", import.meta.url)), "utf8"));
 
 export const W1_BANDS = Object.freeze({
-  nu: [5.2, 5.8],
+  nu: [4.9, 5.5],
   persistence: [0.955, 0.978],
-  tailRatio: [0.75, 0.95],
+  tailRatio: [0.8, 1],
 });
 
 export const SCALE = (() => {

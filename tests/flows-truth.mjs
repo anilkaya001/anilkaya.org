@@ -118,10 +118,10 @@ await section("w1-bands", async () => {
   ok(baseBands.nu >= W1_BANDS.nu[0] && baseBands.nu <= W1_BANDS.nu[1], `median nu-hat ${baseBands.nu} lies in [${W1_BANDS.nu}]`);
   ok(baseBands.persistence >= W1_BANDS.persistence[0] && baseBands.persistence <= W1_BANDS.persistence[1], `median persistence ${baseBands.persistence} lies in [${W1_BANDS.persistence}]`);
   ok(baseBands.tailRatio >= W1_BANDS.tailRatio[0] && baseBands.tailRatio <= W1_BANDS.tailRatio[1], `median fitted over true tail probability ${baseBands.tailRatio} lies in [${W1_BANDS.tailRatio}]`);
-  const k10 = await loadMutated("shared/flows-garch.js", [["export const GARCH_WINSOR_K = 6;", "export const GARCH_WINSOR_K = 10;"]]);
-  const moved = measureW1Bands(k10, { reps: 120 * SCALE.factor });
-  log(`winsorising K 6 to 10 moves the tail ratio ${baseBands.tailRatio.toFixed(3)} to ${moved.tailRatio.toFixed(3)} (up) and nu-hat ${baseBands.nu.toFixed(2)} to ${moved.nu.toFixed(2)}`);
-  ok(moved.tailRatio > baseBands.tailRatio + 0.02, "raising the winsorising limit from 6 to 10 moves the tail ratio up, as the band table records");
+  const k6 = await loadMutated("shared/flows-garch.js", [["export const GARCH_WINSOR_K = 10;", "export const GARCH_WINSOR_K = 6;"]]);
+  const moved = measureW1Bands(k6, { reps: 120 * SCALE.factor });
+  log(`winsorising K 10 to 6 moves the tail ratio ${baseBands.tailRatio.toFixed(3)} to ${moved.tailRatio.toFixed(3)} (down) and nu-hat ${baseBands.nu.toFixed(2)} to ${moved.nu.toFixed(2)}`);
+  ok(moved.tailRatio < baseBands.tailRatio - 0.02, "lowering the winsorising limit from 10 to 6 moves the tail ratio down, as the band table records");
 });
 
 await section("w1-judgement", () => {
