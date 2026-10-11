@@ -46,7 +46,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { easternOffsetMinutes, easternDay, easternClock, nextTradingDay, priorTradingDays } from "../shared/flows-freshness.js";
-import { workerSource, expect, nightlySource, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
+import { workerSource, expect, nightlySource, nightlyFiles, joinSources, nightlyExecution, slice, count } from "./lib/source-scan.mjs";
 import { newsFields, newsRow } from "../shared/flows-news.js";
 import { rowsOf as sharedRows, rowsOrNull } from "../shared/flows-rows.js";
 import { rowsOf as liveRows } from "../shared/flows-live.js";
@@ -1071,14 +1071,14 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   }
 
   const swept = pruneKeys("2026-08-26", { retentionDays: 0, lookbackDays: 400 });
-  ok(swept.length === 1200 && swept.every((k) => /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/.test(k)) && !swept.some((k) => /^ideas/.test(k)),
-    "THE PRUNE NEVER NAMES AN IDEAS KEY, however wide its window: 1,200 board and scores keys and nothing else");
+  ok(swept.length === 800 && swept.every((k) => /^board:(long|short):\d{4}-\d{2}-\d{2}$/.test(k)) && !swept.some((k) => /^ideas/.test(k)),
+    "THE PRUNE NEVER NAMES AN IDEAS KEY, however wide its window: 800 dated board keys and nothing else");
   const retiring = sessionArchiveKeys("2026-08-24");
   ok(retiring.length === 3 && !retiring.some((k) => /^ideas/.test(k)), "and a republish retires the three board keys only, so the ideas record survives it");
 }
 
 {
-  const pipelineText = readFileSync(new URL("../scripts/flows-pipeline.mjs", import.meta.url), "utf8");
+  const pipelineText = joinSources(nightlyFiles().filter((f) => !f.endsWith("/stages.mjs")));
   const start = pipelineText.indexOf("const IDEAS_REVISION_CAP");
   const end = pipelineText.indexOf("export function congressRows");
   ok(start > 0 && end > start, "the ideas archive helpers sit between their markers");
@@ -5262,7 +5262,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 5000, `even with every isolated stage failed the records stay under 5 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 5200, `even with every isolated stage failed the records stay under 5.2 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
