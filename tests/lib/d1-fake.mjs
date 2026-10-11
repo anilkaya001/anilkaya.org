@@ -16,11 +16,14 @@ export function fakeD1({ schema = SCHEMA, latencyMs = 1 } = {}) {
   const cardinality = (name) => {
     try { return db.prepare(`SELECT count(*) AS n FROM ${name}`).get().n; } catch { return 0; }
   };
-  const elements = (path) => {
+  const elements = (path, tables, ids) => {
+    const source = tables.map((t) => `SELECT id, payload FROM ${t}`).join(" UNION ALL ");
+    const only = ids.length ? ` AND p.id IN (${ids.map(() => "?").join(", ")})` : "";
     try {
-      return db.prepare("SELECT max(n) AS n FROM (SELECT (SELECT count(*) FROM json_each(p.payload, ?)) AS n FROM flows_payload p WHERE json_valid(p.payload))").get(path).n || 0;
+      return db.prepare(`SELECT max(n) AS n FROM (SELECT (SELECT count(*) FROM json_each(p.payload, ?)) AS n FROM (${source}) p WHERE json_valid(p.payload)${only})`).get(path, ...ids).n || 0;
     } catch { return 0; }
   };
+  const KEYWORD = "WHERE|LIMIT|ORDER|UNION|JOIN|ON|GROUP|LEFT|FROM|AND|OR|SELECT";
   const scanned = (sql, args, returned) => {
     let plan;
     try { plan = db.prepare("EXPLAIN QUERY PLAN " + sql).all(...args); } catch { return returned; }
@@ -28,19 +31,45 @@ export function fakeD1({ schema = SCHEMA, latencyMs = 1 } = {}) {
     for (const m of sql.matchAll(/\b(?:FROM|JOIN)\s+(\w+)(?:\s+(?:AS\s+)?(?!WHERE\b|LIMIT\b|ORDER\b|UNION\b|JOIN\b|ON\b|GROUP\b|LEFT\b)(\w+))?/gi)) {
       if (m[2]) aliases.set(m[2], m[1]);
     }
+    const tables = [...new Set([...sql.matchAll(/\b(?:FROM|JOIN)\s+(flows_payload|flows_live)\b/gi)].map((m) => m[1].toLowerCase()))];
+    if (!tables.length) tables.push("flows_payload");
+    const ids = [];
+    for (const m of sql.matchAll(/\bid\s*=\s*'([^']+)'/gi)) ids.push(m[1]);
+    for (const m of sql.matchAll(/\bid\s+IN\s*\(([^)]*)\)/gi)) for (const q of m[1].matchAll(/'([^']+)'/g)) ids.push(q[1]);
     const paths = new Map();
-    for (const m of sql.matchAll(/json_each\(\s*\w+\.payload\s*,\s*'([^']+)'\s*\)\s+(\w+)/gi)) paths.set(m[2], m[1]);
-    let rows = 0, searches = 0;
-    for (const { detail } of plan) {
-      const m = /^(SCAN|SEARCH)\s+(\w+)/.exec(detail);
-      if (!m) continue;
-      if (/VIRTUAL TABLE/.test(detail)) {
-        if (paths.has(m[2])) rows += elements(paths.get(m[2]));
-        continue;
-      }
-      if (m[1] === "SCAN") rows += cardinality(aliases.get(m[2]) || m[2]);
-      else searches++;
+    const eachRe = new RegExp("json_each\\(\\s*(?:\\w+\\.)?payload\\s*,\\s*'([^']+)'\\s*\\)\\s+(?:AS\\s+)?(?!(?:" + KEYWORD + ")\\b)(\\w+)", "gi");
+    for (const m of sql.matchAll(eachRe)) paths.set(m[2], m[1]);
+    const byParent = new Map();
+    for (const node of plan) {
+      if (!byParent.has(node.parent)) byParent.set(node.parent, []);
+      byParent.get(node.parent).push(node);
     }
+    let rows = 0, searches = 0;
+    const walk = (parent, mult, root) => {
+      let virtual = 0;
+      const subs = [];
+      for (const node of byParent.get(parent) || []) {
+        const detail = node.detail;
+        if (/^CORRELATED (?:SCALAR|LIST) SUBQUERY/.test(detail)) { subs.push(node); continue; }
+        const m = /^(SCAN|SEARCH)\s+(\w+)/.exec(detail);
+        if (!m) { subs.push(node); continue; }
+        if (/VIRTUAL TABLE/.test(detail)) {
+          if (paths.has(m[2])) {
+            const n = elements(paths.get(m[2]), tables, ids);
+            virtual += n;
+            rows += n * mult;
+          }
+          continue;
+        }
+        if (m[1] === "SCAN") rows += cardinality(aliases.get(m[2]) || m[2]);
+        else searches++;
+      }
+      for (const node of subs) {
+        const correlated = /^CORRELATED/.test(node.detail);
+        walk(node.id, correlated ? mult * (root ? Math.max(1, returned) : virtual > 0 ? virtual : 1) : mult, false);
+      }
+    };
+    walk(0, 1, true);
     return rows + (searches ? Math.max(searches, returned) : 0);
   };
   const clock = { sqlMs: 0 };
