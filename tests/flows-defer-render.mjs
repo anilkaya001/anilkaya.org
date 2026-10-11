@@ -27,14 +27,17 @@ const body = `
 <section id="slot5"></section>
 <i hidden data-defer="ord1" data-src="/fx/ord-a.js?v=1"></i>
 <i hidden data-defer="ord1" data-src="/fx/ord-b.js?v=1"></i>
+<section id="slot6"></section>
+<i hidden data-defer="seq1" data-src="/fx/seq-a.js?v=1"></i>
+<i hidden data-defer="seq1" data-src="/fx/seq-b.js?v=1"></i>
 <img id="slowimg" src="/fx/slow.png" alt="" width="1" height="1">`;
 
 const HTML = PAGES.flowsDocument({ title: "Defer", description: "x", active: "ticker", username: "test", chrome: false, body });
 
-async function open(browser, { saveData = false, badFirst = false, slowImg = 700 } = {}) {
+async function open(browser, { saveData = false, badFirst = false, slowImg = 700, seqBad = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1000, height: 800 } });
   const log = [];
-  const state = { bad: badFirst };
+  const state = { bad: badFirst, seqBad };
   await context.addInitScript((sd) => {
     window.__order = [];
     window.__loadAt = 0;
@@ -53,6 +56,7 @@ async function open(browser, { saveData = false, badFirst = false, slowImg = 700
     if (u.pathname.startsWith("/fx/")) {
       log.push(name);
       if (name === "bad1.js" && state.bad) return route.fulfill({ status: 404, body: "" });
+      if (name === "seq-a.js" && state.seqBad) return route.fulfill({ status: 404, body: "" });
       if (name === "ord-a.js") await sleep(300);
       const id = name.replace(/\.js$/, "");
       return route.fulfill({ contentType: "text/javascript", body: `window.__order.push(${JSON.stringify(id)});` });
@@ -78,6 +82,7 @@ async function open(browser, { saveData = false, badFirst = false, slowImg = 700
         sd1: window.FlowsUI.defer("sd1", { label: "Saver one", el: slot("slot3") }),
         bad1: window.FlowsUI.defer("bad1", { label: "Bad one", el: slot("slot4") }),
         ord1: window.FlowsUI.defer("ord1", { label: "Order one", el: slot("slot5") }),
+        seq1: window.FlowsUI.defer("seq1", { label: "Sequence one", el: slot("slot6") }),
       };
       window.__resolved = {};
       for (const k of Object.keys(window.__p)) window.__p[k].then(() => { window.__resolved[k] = performance.now(); });
@@ -165,6 +170,22 @@ try {
   }
 
   {
+    const { context, page, log, state, errors } = await open(browser, { seqBad: true, slowImg: 50 });
+    await page.goto("https://example.test/flows/defer/");
+    await page.waitForSelector("#slot6 .ui-defer button");
+    await sleep(300);
+    eq(log.filter((x) => /^seq-/.test(x)), ["seq-a.js"], "A GROUP LOADS ITS FILES ONE AFTER ANOTHER: when the first file fails the second is never requested");
+    eq(await page.evaluate(() => window.__order.filter((x) => /^seq-/.test(x))), [], "so nothing of the group has run while the group is reported unavailable");
+    state.seqBad = false;
+    await page.click("#slot6 .ui-defer button");
+    await page.waitForFunction(() => window.__resolved.seq1, null, { timeout: 10000 });
+    eq(await page.evaluate(() => window.__order.filter((x) => /^seq-/.test(x))), ["seq-a", "seq-b"], "and after Retry the files run in the declared order, the one that failed first");
+    eq(log.filter((x) => /^seq-/.test(x)), ["seq-a.js", "seq-a.js", "seq-b.js"], "the retry asks for the failed file again and then for the next, once each");
+    eq(errors.filter((e) => !/seq-a/.test(e)), [], "and nothing else throws");
+    await context.close();
+  }
+
+  {
     const { context, page } = await open(browser, { slowImg: 50 });
     await page.goto("https://example.test/flows/defer/");
     const kind = await page.evaluate(() => Object.keys(window.FlowsUI).filter((k) => k === "defer").concat(typeof window.FlowsUI.defer));
@@ -203,7 +224,7 @@ try {
     const HTML_U = PAGES.unusualPage({ username: "test" });
     const universe = { v: 1, status: "ok", sessionDate: "2026-09-28", t: NAMES.map((x) => x[0]), sectors: ["Technology"], sec: NAMES.map(() => 0) };
 
-    async function openUnusual({ width = 1440, height = 900, saveData = false, netStatus = 200, flowStatus = 200, flowDelay = 0, netDelay = 0 } = {}) {
+    async function openUnusual({ width = 1440, height = 900, saveData = false, netStatus = 200, flowStatus = 200, flowDelay = 0, netDelay = 0, empty = false } = {}) {
       const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" });
       const log = [], state = { net: netStatus };
       await context.addInitScript((sd) => {
@@ -223,7 +244,7 @@ try {
         } catch (e) { void e; }
         if (sd) Object.defineProperty(navigator, "connection", { value: { saveData: true }, configurable: true });
       }, saveData);
-      const payload = flow();
+      const payload = empty ? { ...flow(), rows: [], seen: 0 } : flow();
       await context.route("**/*", async (route) => {
         const u = new URL(route.request().url());
         if (u.pathname.startsWith("/assets/")) {
@@ -352,6 +373,60 @@ try {
       const fn = await page.evaluate(() => document.querySelector("#uaNet .fn-empty") && document.querySelector("#uaNet .fn-empty").textContent);
       ok(/Unavailable|could not be loaded/.test(fn || ""), `a failed read still reaches the network once it mounts (${fn})`);
       eq(errors, [], "and nothing throws");
+      await context.close();
+    }
+    const natural = (page) => page.evaluate(() => {
+      const h = document.getElementById("uaNet"), reserved = parseFloat(getComputedStyle(h).minHeight) || 0;
+      h.style.setProperty("min-height", "0", "important");
+      const own = Math.round(h.getBoundingClientRect().height);
+      h.style.removeProperty("min-height");
+      return { own, reserved, host: Math.round(h.getBoundingClientRect().height), slot: h.classList.contains("is-slot"), quiet: h.classList.contains("is-quiet") };
+    });
+    for (const [label, opts] of [["an empty feed", { empty: true }], ["a 500", { flowStatus: 500 }]]) {
+      for (const width of [1440, 390]) {
+        const { context, page, errors } = await openUnusual({ width, height: width === 1440 ? 900 : 844, ...opts });
+        await page.goto("https://example.test/flows/unusual/");
+        await mounted(page);
+        await page.waitForSelector("#uaNet .fn-empty:not([hidden])");
+        await sleep(500);
+        const m = await natural(page);
+        const cls = await page.evaluate(() => window.__cls);
+        const moved = await page.evaluate(() => window.__ls.filter((e) => e.outside.length).map((e) => e.at + " ms: " + e.outside.join(", ")));
+        console.log(`  unusual ${label} ${width}px: host ${m.host} px, natural ${m.own} px, reserved ${m.reserved} px, layout shift ${cls.toFixed(4)}`);
+        eq([m.slot, m.quiet], [false, true], `THE FULL-SCENE RESERVATION IS RELEASED FOR ${label.toUpperCase()} (${width} px): the host carries is-quiet and not is-slot`);
+        ok(m.host - m.own <= 50, `and the card is not a one-line message in a reserved box: host ${m.host} px against its own ${m.own} px`);
+        ok(m.own - m.reserved <= 6 && m.reserved - m.own <= 50, `the quiet reservation matches the mounted height (${m.reserved} px reserved, ${m.own} px mounted)`);
+        eq(moved, [], `and NOTHING BELOW THE NETWORK'S CARD MOVES (${width} px)`);
+        ok(cls < 0.1, `with a layout shift of ${cls.toFixed(4)}, under the 0.1 line`);
+        eq(errors, [], "and nothing throws");
+        await context.close();
+      }
+    }
+
+    {
+      const off = [];
+      for (const w of [320, 360, 480, 600, 768, 900, 1100, 1280, 1366, 1680, 1920]) {
+        const { context, page } = await openUnusual({ width: w, height: 900, empty: true });
+        await page.goto("https://example.test/flows/unusual/");
+        await mounted(page);
+        await page.waitForSelector("#uaNet .fn-empty:not([hidden])");
+        await sleep(300);
+        const m = await natural(page);
+        off.push({ w, d: m.own - m.reserved });
+        await context.close();
+      }
+      console.log("  quiet reservation against the mounted height at 11 widths, worst shortfall " + Math.max(...off.map((x) => x.d)) + " px, widest surplus " + Math.min(...off.map((x) => x.d)) + " px");
+      ok(off.every((x) => x.d <= 6), `THE QUIET RESERVATION NEVER FALLS SHORT: at every width the mounted empty network fits inside its reserved height to within 6 px (${off.filter((x) => x.d > 6).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+      ok(off.every((x) => x.d >= -50), `and never reserves more than 50 px of empty space under it (${off.filter((x) => x.d < -50).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+    }
+
+    {
+      const { context, page } = await openUnusual({ width: 1440, flowDelay: 300, netDelay: 100 });
+      await page.goto("https://example.test/flows/unusual/");
+      await mounted(page);
+      await page.waitForSelector("#uaNet .fn-stage");
+      const full = await natural(page);
+      eq([full.slot, full.quiet], [true, false], "a feed with rows keeps the full-scene reservation and not the quiet one");
       await context.close();
     }
   }

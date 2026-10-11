@@ -1185,7 +1185,7 @@
     document.head.append(n);
   });
 
-  const queued = new Map(), got = new Set();
+  const queued = new Map();
   function defer(group, o = {}) {
     if (queued.has(group)) return queued.get(group);
     const srcs = [...document.querySelectorAll('i[data-defer="' + group + '"]')].map((i) => i.dataset.src), slot = o.el, name = o.label || group;
@@ -1194,8 +1194,9 @@
       const q = h("p", { class: "ui-defer", role: "status" }, text, h("button", { type: "button", onclick: () => { q.remove(); fn(); } }, label));
       slot.prepend(q);
     };
-    const go = () => Promise.all(srcs.filter((x) => !got.has(x)).map((x) => loadJs(x).then(() => got.add(x))))
-      .then(done, () => slot && ask(name + " is unavailable: its script did not load.", "Retry", go));
+    const go = async () => {
+      try { while (srcs.length) { await loadJs(srcs[0]); srcs.shift(); } done(); } catch { slot && ask(name + " is unavailable: its script did not load.", "Retry", go); }
+    };
     const start = () => (slot && navigator.connection && navigator.connection.saveData ? ask("Data Saver is on.", "Load " + name, go) : go());
     const idle = () => (window.requestIdleCallback ? requestIdleCallback(start, { timeout: 1500 }) : setTimeout(start, 200));
     const see = () => {

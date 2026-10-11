@@ -344,6 +344,11 @@
   }
 
   function takeAlerts(alerts, kind, reason, animate) {
+    if (host.net) {
+      const full = kind === "ok" && alerts.rows.length > 0;
+      host.net.classList.toggle("is-slot", full);
+      host.net.classList.toggle("is-quiet", !full);
+    }
     S.alerts = alerts;
     S.alertsKind = kind;
     S.alertKeys = null;
