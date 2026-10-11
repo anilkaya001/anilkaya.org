@@ -66,7 +66,7 @@ function buildTable() {
       });
     }
   }
-  add({ id: "move.earn.im", kind: "event", family: "earnings", unit: "indicator", scale: "sigma_q1", h: 1, side: "both",
+  add({ id: "move.earn.im", kind: "event", family: "earnings", unit: "indicator", scale: "sigma_qe", k: 1, h: 1, side: "both",
     source: "sigma_q1", rule: "|r_impact| >= sigmaQE, sigmaQE^2 = jumpQ^2 + diffQ^2 of the impact session" });
   add({ id: "move.earn.ratio", kind: "ratio", family: "earnings", unit: "ratio", scale: "none", h: 1, side: "both",
     source: "track", rule: "|m| / M within one track, vendor or platform, never mixed" });
@@ -337,6 +337,8 @@ export function acceptSource(source) {
   return { ok: false, reason: "unknown threshold source" };
 }
 
+const SCALE_FIELD = Object.freeze({ sigma_ref: "sigmaRef", sigma_q1: "sigmaQ1", sigma_qe: "sigmaQE" });
+
 export function threshold(id, ctx = {}) {
   const def = targetFor(id);
   if (!def || def.kind !== "event") return { ok: false, reason: "not an event target" };
@@ -344,12 +346,13 @@ export function threshold(id, ctx = {}) {
   const accepted = acceptSource(source);
   if (!accepted.ok) return { ok: false, reason: accepted.reason };
   if (def.scale === "fixed") {
+    if (!Number.isFinite(def.x) || !(def.x > 0) || !(def.x < 100)) return { ok: false, reason: "no scale" };
     const up = Math.log(1 + def.x / 100);
     const down = Math.log(1 - def.x / 100);
     return { ok: true, up, down, source, grade: accepted.gradeCap };
   }
-  const unit = def.scale === "sigma_ref" ? ctx.sigmaRef : ctx.sigmaQ1;
-  if (!Number.isFinite(unit) || !(unit > 0)) return { ok: false, reason: "no scale" };
+  const unit = SCALE_FIELD[def.scale] === undefined ? undefined : ctx[SCALE_FIELD[def.scale]];
+  if (!Number.isFinite(def.k) || !(def.k > 0) || !Number.isFinite(unit) || !(unit > 0)) return { ok: false, reason: "no scale" };
   const h = def.scale === "sigma_ref" ? hEff(def.h, ctx.nW || 0, ctx.omegaW || 0) : 1;
   const edge = def.k * unit * Math.sqrt(h);
   const fallback = source === "iv30_ex" ? THRESHOLD_SOURCES.iv30_ex : null;
@@ -408,7 +411,7 @@ function multipleText(k) {
 
 export function frequencyText({ route, hits, sessions = EMPIRICAL_SESSIONS, p, rung = null, pFloor = null } = {}) {
   if (route === "empirical") {
-    if (!Number.isFinite(hits) || !Number.isFinite(sessions) || sessions < EMPIRICAL_SESSIONS || hits < 0 || hits > sessions) return null;
+    if (!Number.isFinite(hits) || !Number.isFinite(sessions) || sessions !== EMPIRICAL_SESSIONS || hits < 0 || hits > sessions) return null;
     const w = wilson(hits, sessions);
     const n = hits > 0 ? 1 / (hits / sessions) : Infinity;
     if (n > EMPIRICAL_FLOOR_N) {
@@ -425,7 +428,7 @@ export function frequencyText({ route, hits, sessions = EMPIRICAL_SESSIONS, p, r
     if (!(Number.isFinite(p) && p > 0 && p < 1) || !(Number.isFinite(pFloor) && pFloor > 0)) return null;
     const label = rung ? `, model, rung ${rung}` : ", model";
     if (p < pFloor) return `rarer than the audited limit of 1 in ${Math.floor(1 / pFloor)} sessions${label}`;
-    return `about 1 in ${oneIn(p)} sessions${label}`;
+    return `about 1 in ${Math.max(1, Math.floor(1 / p))} sessions${label}`;
   }
   return null;
 }

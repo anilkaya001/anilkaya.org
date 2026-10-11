@@ -180,6 +180,21 @@ const alternating = (n, a = 0.01) => Array.from({ length: n }, (_, i) => (i % 2 
   ok(T.validateRecord({ target: "move.im1.h1", source: "sigma_q1", clock: "sess-v0" }).ok, "while the registered sources pass");
   ok(!T.validateRecord({ target: "move.k3.h1", source: "mystery" }).ok && !T.validateRecord({ target: "move.k3.h1", clock: "sess-v7" }).ok, "an unknown source or clock version is refused");
   ok(!T.threshold("move.k3.h1", { sigmaRef: null }).ok && !T.threshold("move.k3.h1", { sigmaRef: 0 }).ok && !T.threshold("move.im1.h1", {}).ok, "a missing or non-positive scale gives no threshold");
+  const earn = T.threshold("move.earn.im", { sigmaQE: 0.05 });
+  deep([earn.ok, earn.up, earn.down], [true, 0.05, -0.05], "THE EARNINGS TARGET has a scale and a multiple of one: its edge is the event-inclusive impact-session SD, sigmaQE");
+  eq(T.resolves("move.earn.im", 0.2, { sigmaQE: 0.05 }), 1, "and a 20% impact-session move resolves it");
+  eq(T.resolves("move.earn.im", 0.01, { sigmaQE: 0.05 }), 0, "while a 1% one does not");
+  deep([T.threshold("move.earn.im", { sigmaQ1: 0.05 }).ok, T.resolves("move.earn.im", 0.2, { sigmaQ1: 0.05 })], [false, null], "a one-session scale is not the impact-session scale: with no sigmaQE it is refused and resolves to nothing");
+  const valid = { sigmaRef: 0.02, sigmaQ1: 0.03, sigmaQE: 0.05 };
+  for (const id of T.EVENT_TARGETS) {
+    const t = T.threshold(id, valid);
+    ok(t.ok === true && Number.isFinite(t.up) && Number.isFinite(t.down) && t.up > 0 && t.down < 0, `EVERY EVENT TARGET RESOLVES: ${id} has finite edges from a valid context`);
+    ok(T.resolves(id, 0.9, valid) !== null && T.resolves(id, 0, valid) === 0, `${id} resolves a huge move and a flat day`);
+    if (T.TARGET_BY_ID[id].scale !== "fixed") {
+      const refused = T.threshold(id, {});
+      ok(refused.ok === false && typeof refused.reason === "string" && refused.reason.length > 0 && T.resolves(id, 0.9, {}) === null, `${id} with no scale is refused with a reason and resolves to nothing`);
+    }
+  }
   const x = T.threshold("move.x20.h1");
   near(x.up, Math.log(1.2), 1e-12, "a 20% move up is a log return of ln 1.2");
   near(x.down, Math.log(0.8), 1e-12, "and a 20% move down one of ln 0.8");
@@ -240,6 +255,16 @@ const alternating = (n, a = 0.01) => Array.from({ length: n }, (_, i) => (i % 2 
     if (hits < 5) ok(printedN(text).every((n) => n <= T.EMPIRICAL_FLOOR_N || n === 80), `${hits} hits: below five events the only large number is the 95% bound of 80`);
     if (hits >= 1) ok(printedN(text)[0] <= T.EMPIRICAL_FLOOR_N, `${hits} hits: the first printed N is within the floor`);
   }
+  for (const sessions of [253, 300, 500, 1000]) {
+    for (const hits of [0, 1, 5, 10]) deep(T.rarityText({ k: 3, sigmaRef: 0.02, route: "empirical", hits, sessions }), null, `${hits} hits in ${sessions} sessions prints nothing: the empirical route is a year of ${T.EMPIRICAL_SESSIONS} sessions and no other`);
+  }
+  deep(T.frequencyText({ route: "empirical", hits: 5, sessions: 1000 }), null, "so five events in 1000 sessions cannot print an interval past the floor");
+  const edge = T.frequencyText({ route: "model", p: 0.00399, pFloor: 0.00399 });
+  ok(printedN(edge).every((n) => n <= Math.floor(1 / 0.00399)), "p equal to pFloor prints an N no larger than the floored limit");
+  for (const [p, pf] of [[0.00399, 0.00399], [0.004, 0.00399], [0.00401, 0.00399], [0.0039, 0.00399], [1 / 250.5, 1 / 250.5]]) {
+    const text = T.frequencyText({ route: "model", p, pFloor: pf });
+    ok(printedN(text).every((n) => n <= Math.floor(1 / pf)) || /rarer than/.test(text), `p ${p} against pFloor ${pf}: the printed N never passes floor(1/pFloor)`);
+  }
   const pFloor = 1e-4;
   for (const p of [0.5, 0.1, 0.01, 0.002, 0.00011, 0.0001, 0.00009, 1e-5, 1e-8]) {
     const text = T.rarityText({ k: 4, sigmaRef: 0.02, route: "model", p, pFloor });
@@ -280,7 +305,7 @@ const alternating = (n, a = 0.01) => Array.from({ length: n }, (_, i) => (i % 2 
 }
 
 {
-  const HISTORY = Object.freeze({ 1: "c7f01b9cd9f8bb1fdce22990db1b506b36eff3582f4780b776cc6fab674242bc" });
+  const HISTORY = Object.freeze({ 1: "58c47b52126a134316e17773967383014549bf195243f131b7b3ad9cec925a94" });
   for (const text of ["", "abc", "a".repeat(55), "a".repeat(56), "a".repeat(64), "a".repeat(1000), "\u03c3 \u20ac \ud83d\ude00", JSON.stringify(T.TARGETS)]) {
     eq(T.sha256Hex(text), createHash("sha256").update(text, "utf8").digest("hex"), `SHA-256 agrees with the platform's on ${text.length} characters`);
   }
