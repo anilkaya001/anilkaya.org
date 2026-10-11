@@ -3821,6 +3821,11 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
     "under bash -e) and the Chromium install runs on that output, so a failed install fails the shard");
   ok(!/\|\| true/.test(regression), "no step swallows a failure with || true");
+  ok(/- name: Install Chromium\n(?:.*\n){3}      - name: Check the contracts first\n {8}working-directory: tests\n {8}run: node run\.mjs --only contracts\n {6}- name: Run the shard\n/.test(regShard) &&
+     (regShard.match(/node run\.mjs --only contracts/g) || []).length === 1 && !/--only contracts/.test(regFast),
+    "EVERY SHARD CHECKS THE CONTRACTS FIRST: after npm ci and the Chromium decision, before its own selection, each shard runs " +
+    "node run.mjs --only contracts (about ten seconds), so a red contracts check stops the shard inside its first minute " +
+    "instead of after a complete run of the six, while the fast job still runs the whole fast group once");
   ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
      !/npm test/.test(regression),
     "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");

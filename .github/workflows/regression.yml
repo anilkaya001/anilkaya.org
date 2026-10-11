@@ -106,6 +106,9 @@ jobs:
         if: steps.browser.outputs.needs == 'true'
         working-directory: tests
         run: npx playwright install --with-deps chromium
+      - name: Check the contracts first
+        working-directory: tests
+        run: node run.mjs --only contracts
       - name: Run the shard
         working-directory: tests
         run: node run.mjs --shard ${{ matrix.shard }}/6
