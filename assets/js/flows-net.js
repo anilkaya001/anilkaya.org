@@ -300,7 +300,9 @@
     if (NETS.has(host)) return NETS.get(host);
     const cfg = { names: num(opts.names) };
     const RM = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let frozen = false, still = RM.matches, dead = false;
+    let frozen = false, still = RM.matches, dead = false, ready = false;
+    const keep = (v) => { try { if (v === undefined) { const m = /(?:^|; )fn_ambient=([01])/.exec(document.cookie); return m ? m[1] === "1" : null; } document.cookie = "fn_ambient=" + (v ? 1 : 0) + "; Max-Age=31536000; Path=/flows; SameSite=Lax"; } catch (_) { } return null; };
+    let chosen = keep() !== null, AMB = chosen ? keep() : opts.ambient === true;
     const undo = [];
     const on = (t, e, f, o) => { t.addEventListener(e, f, o); undo.push(() => t.removeEventListener(e, f, o)); };
     const abort = window.AbortController ? new AbortController() : null;
@@ -311,7 +313,9 @@
     const empty = h("div", { class: "fn-empty", hidden: true });
     const home = h("button", { class: "fn-btn fn-home", type: "button", "aria-label": "Recentre the view", title: "Recentre the view", hidden: true }, UI.glyph("home"), h("span", { class: "fn-bl" }, "Recentre"));
     const freeze = h("button", { class: "fn-btn fn-freeze", type: "button", hidden: true }, h("span", { class: "fn-bl" }, "Freeze"));
-    const bar = h("div", { class: "fn-bar" }, h("span", { class: "fn-bar-sp" }), freeze, home);
+    const amb = h("button", { class: "fn-btn fn-amb", type: "button", "aria-pressed": "false", title: "Ambient motion: pulses, sway and breathing that show size, not data", hidden: true }, h("span", { class: "fn-bl" }, "Ambient"));
+    const tag = h("span", { class: "fn-tag", hidden: true, title: "Ambient motion, not data" }, "ambient");
+    const bar = h("div", { class: "fn-bar" }, tag, h("span", { class: "fn-bar-sp" }), amb, freeze, home);
     const stage = h("div", { class: "fn-stage" }, cv, hits, tip, empty);
     const lede = h("p", { class: "fn-lede" });
     const scale = h("div", { class: "fn-scale", hidden: true });
@@ -340,12 +344,13 @@
     let M = null, W = 0, H = 0, dpr = 1, VERT = false, FF = "system-ui, sans-serif";
     const secFn = () => (U.state === "ok" ? (t) => (U.map.has(t) ? U.map.get(t) : null) : () => undefined);
     const N = new Map();
-    let E = [], P = [], NL = [], LN = [[], [], [], []], HD = [], ORD = [], PN = 0, PB = null, READ = null;
-    const FLR = [], PBN = new Int32Array(10);
+    let E = [], P = [], NL = [], LN = [[], [], [], []], HD = [], ORD = [], PN = 0, CAPN = 0, PB = null, READ = null;
+    const FLR = [], ARR = [], PBN = new Int32Array(10);
+    let lastLive = 0;
     let raf = 0, last = 0, T = 0, inView = true, FOC = false, brMax = false, rz = 0;
     let hoverId = null, focusId = null, pinId = null, rowLit = null, rove = null, hitAt = 0, tipId = null, TRACE = null, tableSig = "";
     const REST = [0, 11 * DEG];
-    const cam = { yaw: 0, pitch: REST[1], vy: 0, vp: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, sw: 8 * DEG };
+    const cam = { yaw: 0, pitch: REST[1], vy: 0, vp: 0, coast: 0, user: false, home: false, hold: false, idle: 0, cy: 1, sy: 0, cp: 1, sp: 0, sw: 8 * DEG };
     const RC = { cp: Math.cos(REST[1]), sp: Math.sin(REST[1]) };
     const G = { k: 1, vMax: 1, bpd: PER_M / 1e6, F: 1000, D: 10, ox: 0, oy: 0, s0: 100, top: 0, bottom: 0, midY: 0, floorW: 0, form: "line", cols: [], planes: [], edgeMax: 0 };
     const DRAG = { id: null, on: false, x: 0, y: 0, t: 0, vx: 0, vy: 0, eat: 0, tap: 0, tx: 0, ty: 0 };
@@ -376,7 +381,7 @@
           "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish, bid-side calls and ask-side puts bearish, and none of it is proof of who initiated.",
           "Unsided is premium the vendor left between the quotes, or a window it never split by side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
-          "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Light runs along each band from the side of the quote to its lean, faster the larger the band: a picture of the record, not a feed of executions. A flare marks a window that reached this page while it was open.",
+          "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Motion has two classes. Live motion is an arrival or your hand: a flare marks a window that reached this page while it was open, a band carries light only for premium that arrived in the last five minutes, ranks glide when new data reorders them, and the view moves only while you drag it. Ambient is ambient motion, not data: light runs along every band at a pace set by its size, spheres breathe and the view sways, and none of it is a trade. Ambient starts on after the close and stays as you leave it.",
           "Sectors come from the nightly universe; a name it does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own Eastern date.",
           "Contracts are shown for a name, a sector or an expiry only when every window in it states its size; a side or a lean shows none, because the vendor splits premium by side, not contracts.",
           "Only the largest names and sectors get their own node; the rest are folded into Other, so every layer still sums to the same premium. Drag to turn the network; double click or R recentres it; Freeze holds it still.",
@@ -392,6 +397,7 @@
       pill.dataset.state = st;
       pill.replaceChildren(UI.glyph(def.g), h("span", { class: "fx-fresh-l" }, at ? h("span", { class: "fn-fw" }, word + " " + MID + " ") : word, at));
       pill.setAttribute("aria-label", "Freshness of the flagged windows: " + def.word + (at ? ", read " + at : ""));
+      if (!chosen && opts.ambient === undefined) setAmb(st === "closed", false);
     }
     const fx = document.getElementById("fxFresh");
     if (fx && window.MutationObserver) {
@@ -475,12 +481,14 @@
 
     function paintLegend() {
       const k = (g, cls, text) => h("span", { class: "ui-key fn-k " + cls }, UI.glyph(g), text);
-      legend.replaceChildren(
+      legend.replaceChildren(...[
         k("up", "is-up", "Bullish lean: ask-side calls, bid-side puts"),
         k("down", "is-down", "Bearish lean: bid-side calls, ask-side puts"),
         k("flat", "is-nx", "Unsided"),
         h("span", { class: "ui-key fn-k is-slate" }, h("i", { class: "fn-dot" }), "Other, No sector"),
-        h("span", { class: "ui-key fn-k is-note" }, "Sphere area and band width are premium in USD, one scale throughout; every layer carries the same total" + (still ? "" : "; light runs from side to lean and a flare marks a window that arrived while you watched") + ". Drag to turn; " + (matchMedia("(pointer: coarse)").matches ? "double tap" : "double click") + " to recentre"));
+        h("span", { class: "ui-key fn-k is-note" }, "Sphere area and band width are premium in USD, one scale throughout; every layer carries the same total" + (still ? "" : AMB ? "; a flare marks a window that arrived while you watched" : "; light runs only for premium that arrived in the last five minutes, and a flare marks a window that arrived while you watched") + ". Drag to turn; " + (matchMedia("(pointer: coarse)").matches ? "double tap" : "double click") + " to recentre"),
+        AMB && !still ? h("span", { class: "ui-key fn-k is-amb" }, "ambient motion, not data: pulses show a band's size, not individual trades") : null,
+      ].filter(Boolean));
     }
 
     function paintScale() {
@@ -648,7 +656,7 @@
       if (M && !M.windows) M = null;
       const was = new Map(N);
       N.clear();
-      E = []; P = []; FLR.length = 0;
+      E = []; P = []; FLR.length = 0; PN = 0;
       let vMax = 0;
       if (M) {
         for (const layer of M.layers) for (const d of layer) vMax = Math.max(vMax, d.v);
@@ -686,18 +694,21 @@
           n.out.sort((p, q) => cross(p.b) - cross(q.b) || q.v - p.v);
           n.inn.sort((p, q) => cross(p.a) - cross(q.a) || q.v - p.v);
         }
-        PN = 0;
+        CAPN = 0;
         for (const e of E) {
           const sh = Math.sqrt(e.v / em), len = Math.hypot(e.b.sx - e.a.sx, e.b.sy - e.a.sy) * 1.04;
           e.pn = Math.max(1, Math.min(1 + Math.round(3 * sh), Math.floor(len / 70)));
+          e.cap = Math.max(1, Math.min(4, Math.floor(len / 70)));
           e.per = 7 - 4.6 * sh;
+          e.ln = 0; e.lper = 7; e.np = 0; e.nper = 7;
           e.ph = clamp(e.w0 * 0.55, 2, 8);
           e.pc = Math.min(4, Math.round((e.ph - 2) / 1.5));
           e.pp = (e.id * 0.37) % 1;
-          PN += e.pn;
+          CAPN += e.cap;
         }
         P = M.paths.map((p) => ({ key: p.key, ids: p.ids, v: p.v, e: [0, 1, 2].map((k) => byKey.get(p.ids[k] + "|" + p.ids[k + 1])) }));
-        PB = Array.from({ length: 10 }, () => new Float32Array(Math.max(4, PN * 4)));
+        PB = Array.from({ length: 10 }, () => new Float32Array(Math.max(4, CAPN * 4)));
+        liveRefresh();
       }
       for (const n of NL) if (n.born || isNaN(n.gx) || still) { n.gx = n.sx; n.gy = n.sy; n.cr = still ? n.r : 0; n.born = false; }
       ORD = NL.slice();
@@ -709,6 +720,9 @@
       buildHits();
       home.hidden = !M;
       freeze.hidden = !M || RM.matches;
+      amb.hidden = freeze.hidden;
+      amb.setAttribute("aria-pressed", String(AMB));
+      tag.hidden = amb.hidden || !AMB;
       const st = S.st || { state: "pending" };
       if (M) empty.hidden = true;
       else {
@@ -731,7 +745,7 @@
         const s0 = G.F / UW[2];
         proj(UW[0], UW[1], 0);
         n.px = PJ[0]; n.py = PJ[1]; n.f = PJ[2] / s0; n.pz = PJ[3];
-        n.R = n.cr * n.f * (brMax ? 1.03 : still ? 1 : 1 + 0.015 * (1 - Math.cos(T * tw + n.rk * 0.125 * TAU)));
+        n.R = n.cr * n.f * (brMax ? 1.03 : still || !AMB ? 1 : 1 + 0.015 * (1 - Math.cos(T * tw + n.rk * 0.125 * TAU)));
         n.fog = fogAt(n.pz, 0.6);
         n.A = VERT ? n.py : n.px; n.C = VERT ? n.px : n.py;
         const c = n.chip, lb = n.lb;
@@ -866,8 +880,8 @@
         }
       }
       tr("bands");
-      if (!still) pulses(c);
       c.globalCompositeOperation = "source-over";
+      if (!still && PN) pulses(c);
       if (VERT) c.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
@@ -877,9 +891,10 @@
       for (const e of E) {
         const bright = e.dm < 0.5 ? 0 : 5, ml = e.ma, mb = e.mb, x0 = e.x0, x1 = e.x1, dx = e.dx;
         const du = 16 / e.len, b = PB[e.pc + bright], o0 = PBN[e.pc + bright];
+        if (!e.np) continue;
         let o = o0;
-        for (let i = 0; i < e.pn; i++) {
-          let u = t / e.per + i / e.pn + e.pp;
+        for (let i = 0; i < e.np; i++) {
+          let u = t / e.nper + i / e.np + e.pp;
           u -= Math.floor(u);
           const u0 = u > du ? u - du : 0;
           for (let k = 0; k < 2; k++) {
@@ -923,11 +938,9 @@
         const al = n.fog * (1 - 0.65 * n.dm), sq = Math.sqrt(n.d.v / vm), hot = n.id === hoverId || n.id === focusId || n.id === pinId;
         let fl = 0;
         for (const f of FLR) if (f.n === n) fl = Math.max(fl, f.lit);
-        c.globalCompositeOperation = "lighter";
         c.globalAlpha = al * Math.min(1, 0.1 + 0.3 * sq + (hot ? 0.25 : 0) + 0.4 * fl);
         const hr = R * (1.45 + 0.5 * sq);
         c.drawImage(n.halo, n.px - hr, n.py - hr, hr * 2, hr * 2);
-        c.globalCompositeOperation = "source-over";
         c.globalAlpha = al;
         c.drawImage(n.sph, n.px - R, n.py - R, R * 2, R * 2);
         for (const f of FLR) {
@@ -1231,6 +1244,7 @@
     }
     function stepCam(dt, now) {
       if (DRAG.on) { cam.idle = now; return; }
+      if ((cam.vy || cam.vp) && now - cam.coast > 8000) cam.vy = cam.vp = 0;
       if (cam.vy || cam.vp) {
         const ey = clamp((YAWMAX() - Math.sign(cam.vy) * cam.yaw - 6 * DEG) / (12 * DEG), 0, 1), ep = clamp((PMAX - Math.sign(cam.vp) * cam.pitch - 2 * DEG) / (6 * DEG), 0, 1);
         turn(cam.yaw + cam.vy * ey * dt, cam.pitch + cam.vp * ep * dt);
@@ -1240,10 +1254,23 @@
         if (Math.abs(cam.vy) < 0.5 * DEG && Math.abs(cam.vp) < 0.5 * DEG) cam.vy = cam.vp = 0;
         cam.idle = now;
       } else if (cam.user && now - cam.idle > 4500) cam.user = false;
-      if (cam.user || (cam.hold && !cam.home)) return;
-      const k = Math.min(1, dt * (cam.home ? 4.5 : 0.9)), ty = REST[0] + cam.sw * Math.sin(now / 1000 * TAU / 40);
+      if (cam.user || (cam.hold && !cam.home) || (!AMB && !cam.home)) return;
+      const k = Math.min(1, dt * (cam.home ? 4.5 : 0.9)), ty = REST[0] + (AMB ? cam.sw : 0) * Math.sin(now / 1000 * TAU / 40);
       setCam(cam.yaw + (ty - cam.yaw) * k, cam.pitch + (REST[1] - cam.pitch) * k);
       if (Math.abs(ty - cam.yaw) < 0.2 * DEG) cam.home = false;
+    }
+    function setAmb(on, user) {
+      on = !!on;
+      if (user) { chosen = true; keep(on); }
+      if (on === AMB) return;
+      AMB = on;
+      if (!AMB) cam.home = true;
+      amb.setAttribute("aria-pressed", String(AMB));
+      tag.hidden = amb.hidden || !AMB;
+      applyPulses();
+      paintLegend();
+      host.dispatchEvent(new CustomEvent(AMB ? "ambient:on" : "ambient:off", { bubbles: true, detail: { user: !!user } }));
+      if (ready) { if (still || !running()) paint(); else kick(); }
     }
     function recentre() {
       cam.user = false;
@@ -1252,9 +1279,37 @@
       if (still) { setCam(REST[0], REST[1]); paint(); } else kick();
     }
 
+    function applyPulses() {
+      PN = 0;
+      for (const e of E) {
+        const ln = e.ln;
+        e.np = AMB ? Math.max(e.pn, ln) : ln;
+        e.nper = ln && (!AMB || e.lper < e.per) ? e.lper : e.per;
+        PN += e.np;
+      }
+    }
+
+    function liveRefresh() {
+      const cut = Date.now() - 300000, rate = new Map();
+      let top = 0;
+      while (ARR.length && ARR[0].at < cut) ARR.shift();
+      for (const e of E) e.ln = 0;
+      for (const a of ARR) {
+        const t = String(a.row.t || "").toUpperCase(), nid = N.has("n:" + t) ? "n:" + t : "n:~";
+        for (const q of model([a.row], { out: mode, session: S.session }).paths) {
+          const p = P.find((x) => x.ids[0] === q.ids[0] && x.ids[2] === nid && x.ids[3] === q.ids[3]);
+          if (!p) continue;
+          for (const e of p.e) if (e) { const v = (rate.get(e) || 0) + q.v; rate.set(e, v); if (v > top) top = v; }
+        }
+      }
+      for (const [e, v] of rate) { const sh = Math.sqrt(v / top); e.ln = Math.min(e.cap, 1 + Math.round(3 * sh)); e.lper = 7 - 4.6 * sh; }
+      applyPulses();
+    }
+
     function step(dt, now) {
       stepCam(dt, now);
       T += dt;
+      if (ARR.length && T - lastLive > 1) { lastLive = T; liveRefresh(); }
       const ease = 1 - Math.exp(-dt * 5.5), grow = Math.min(1, dt * 5), k8 = Math.min(1, dt * 8);
       for (const n of NL) {
         n.gx += (n.sx - n.gx) * ease; n.gy += (n.sy - n.gy) * ease; n.cr += (n.r - n.cr) * grow;
@@ -1303,8 +1358,14 @@
       stats.max = Math.max(stats.max, ms);
       stats.ring.push(ms);
       if (stats.ring.length > 240) stats.ring.shift();
-      raf = requestAnimationFrame(frame);
+      if (busy()) raf = requestAnimationFrame(frame);
     }
+    function moving() {
+      for (const n of NL) if (Math.abs(n.sx - n.gx) > 0.01 || Math.abs(n.sy - n.gy) > 0.01 || Math.abs(n.r - n.cr) > 0.01 || Math.abs((FOC && n.tl ? 1 : 0) - n.hl) > 0.002 || Math.abs((FOC && !n.tl ? 1 : 0) - n.dm) > 0.002) return true;
+      for (const e of E) if (Math.abs((FOC && e.tl ? 1 : 0) - e.hl) > 0.002 || Math.abs((FOC && !e.tl ? 1 : 0) - e.dm) > 0.002) return true;
+      return false;
+    }
+    const busy = () => AMB || DRAG.on || !!(cam.vy || cam.vp || cam.home || FLR.length || PN) || moving();
     function kick() {
       if (dead) return;
       if (raf || !running()) { if (!running()) paint(); return; }
@@ -1338,6 +1399,9 @@
       rebuild();
       paintPill();
       if (fresh.length && !still) {
+        for (const r of fresh) ARR.push({ at: Date.now(), row: r });
+        if (ARR.length > 200) ARR.splice(0, ARR.length - 200);
+        liveRefresh();
         const seen = new Map();
         let shot = 0;
         for (const r of fresh) {
@@ -1390,7 +1454,7 @@
         DRAG.eat = e.timeStamp;
         stage.classList.remove("is-drag");
         const k = Math.exp(-Math.max(0, e.timeStamp - DRAG.t) / 150);
-        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -1.4, 1.4); cam.vp = clamp(DRAG.vy * k, -0.6, 0.6); }
+        if (!still && e.type === "pointerup") { cam.vy = clamp(DRAG.vx * k, -1.4, 1.4); cam.vp = clamp(DRAG.vy * k, -0.6, 0.6); cam.coast = performance.now(); }
         cam.idle = performance.now();
         kick();
       } else if (e.type === "pointerup" && e.pointerType === "touch") {
@@ -1432,6 +1496,7 @@
     stage.addEventListener("dblclick", (e) => { if (e.target !== home) recentre(); });
     home.addEventListener("click", recentre);
     home.addEventListener("pointerup", (e) => { if (e.pointerType !== "mouse") recentre(); });
+    amb.addEventListener("click", () => setAmb(!AMB, true));
     freeze.addEventListener("click", () => {
       frozen = !frozen;
       still = RM.matches || frozen;
@@ -1489,6 +1554,7 @@
     paintLegend();
     size();
     rebuild();
+    ready = true;
     fw = fontW();
     if (document.fonts) {
       if (document.fonts.ready) document.fonts.ready.then(relayout);
@@ -1522,8 +1588,10 @@
       sectors: (map) => { U.map = map instanceof Map ? map : new Map(Object.entries(map || {})); U.state = "ok"; if (S.rows.length) rebuild(); },
       mode: (m) => { if (m === "dte" || m === "lean") { seg.pick(m === "dte" ? 1 : 0); setMode(m); } return mode; },
       model: () => M,
+      ambient: (on) => { if (on !== undefined) setAmb(on, false); return AMB; },
+      lanes: () => E.map((e) => ({ from: e.a.id, to: e.b.id, n: e.np })),
       stats: () => ({
-        frames: stats.frames, ms: stats.ms, last: stats.last, max: stats.max, running: !!raf, still, frozen,
+        frames: stats.frames, ms: stats.ms, last: stats.last, max: stats.max, running: !!raf, still, frozen, ambient: AMB, arrivals: ARR.length,
         median: stats.ring.length ? stats.ring.slice().sort((a, b) => a - b)[stats.ring.length >> 1] : null,
         pulses: still || !M ? 0 : PN, hot: FLR.length, flowEdges: E.length, meshEdges: 0, edges: E.length,
         layers: M ? M.layers.map((l) => l.length) : [], w: W, h: H, vert: VERT,
@@ -1543,7 +1611,7 @@
         times.sort((a, b) => a - b);
         return { median: times[times.length >> 1], p90: times[Math.floor(times.length * 0.9)], mean: times.reduce((a, b) => a + b, 0) / times.length, pulses: still ? 0 : PN, edges: E.length };
       },
-      camera: () => ({ yaw: cam.yaw / DEG, pitch: cam.pitch / DEG, rest: REST.map((x) => x / DEG), limits: [VERT ? 30 : 55, 22], sway: cam.sw / DEG, period: 40, auto: !cam.user, spin: Math.hypot(cam.vy, cam.vp) / DEG, zoom: 1 }),
+      camera: () => ({ yaw: cam.yaw / DEG, pitch: cam.pitch / DEG, rest: REST.map((x) => x / DEG), limits: [VERT ? 30 : 55, 22], sway: AMB ? cam.sw / DEG : 0, period: 40, auto: !cam.user || performance.now() - cam.idle > 4500, spin: Math.hypot(cam.vy, cam.vp) / DEG, zoom: 1 }),
       orbit: (yaw, pitch) => { cam.vy = cam.vp = 0; orbit((yaw * DEG - cam.yaw) / (0.32 * DEG), (pitch * DEG - cam.pitch) / (0.22 * DEG)); paint(); return api.camera(); },
       recentre,
       freeze: (on) => { if (frozen !== !!on) freeze.click(); return frozen; },

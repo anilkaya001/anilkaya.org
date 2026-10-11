@@ -69,7 +69,7 @@
     alertKeys: null, feedKeys: null, urgency: new Map(), urgencyAsked: new Set(),
   };
   const charts = { timeline: null };
-  const net = UI.net && host.net ? UI.net.mount(host.net) : null;
+  const net = UI.net && host.net ? UI.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true } : {}) : null;
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");

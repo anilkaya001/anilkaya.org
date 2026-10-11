@@ -99,17 +99,19 @@ function expected(flow, { names = 10 } = {}) {
   };
 }
 
-async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false, patch = null, delayFonts = 0 } = {}) {
+async function mount(browser, { width = 1440, height = 1300, reduced = false, flow = alerts(), uni = universe(), flowStatus = 200, uniStatus = 200, deferAlerts = false, wait = true, touch = false, patch = null, delayFonts = 0, owner = true, init = null, clock = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch });
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource|WebSocket/.test(m.text())) errors.push("console: " + m.text()); });
   page.errors = errors;
+  if (init) await page.addInitScript(init);
+  if (clock) await page.clock.install({ time: new Date(clock) });
   let release = null;
   const gate = deferAlerts ? new Promise((r) => { release = r; }) : null;
   page.release = () => release && release();
-  const html = PAGES.unusualPage({ username: "test" }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>");
+  const html = PAGES.unusualPage({ username: "test", owner }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>");
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
@@ -272,7 +274,7 @@ function crosses(edge, node) {
   return node.x + node.r > Math.min(edge.ax, edge.bx) && node.x - node.r < Math.max(edge.ax, edge.bx) && node.y + node.r > Math.min(edge.ay, edge.by) && node.y - node.r < Math.max(edge.ay, edge.by);
 }
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ["--disable-accelerated-2d-canvas", "--disable-gpu-compositing"] });
 const cpu = {};
 const FLUSH_K = 2.5;
 const FLUSH_FLOOR = 12;
@@ -895,7 +897,7 @@ try {
       host.style.cssText = "width:" + w + "px;overflow:hidden";
       document.body.append(host);
       try {
-        const n = window.FlowsUI.net.mount(host, { universe: false });
+        const n = window.FlowsUI.net.mount(host, { universe: false, ambient: true });
         n.take(flow, { state: "ok" });
         n.orbit(40, 20);
         return w + ":" + n.stats().layers.join("-") + ":" + (n.camera().zoom > 0) + ":" + n.stats().w;
@@ -1077,7 +1079,7 @@ try {
       window.FlowsUI.segmented("Baseline", [{ label: "A" }, { label: "B" }], () => {}, 0);
       const own = obs.size - pre;
       const baseline = new Map(live);
-      const n = window.FlowsUI.net.mount(host, { universe: false });
+      const n = window.FlowsUI.net.mount(host, { universe: false, ambient: true });
       n.take(flow, { state: "ok" });
       await new Promise((r) => setTimeout(r, 600));
       const during = { running: n.stats().running, obs: obs.size };
@@ -1132,7 +1134,7 @@ try {
     });
     await page.goto("https://bench.test/");
     const out = await page.evaluate(async ({ flow, uni }) => {
-      const n = window.FlowsUI.net.mount(document.getElementById("net"), { names: 22, rate: 240, cap: 400, universe: false });
+      const n = window.FlowsUI.net.mount(document.getElementById("net"), { names: 22, rate: 240, cap: 400, universe: false, ambient: true });
       n.sectors(new Map(uni.t.map((t, i) => [t, uni.sectors[uni.sec[i]]])));
       n.take(flow, { state: "ok" });
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1182,6 +1184,156 @@ try {
     ok(best.median < 4, `CPU per frame stays far from a frame budget: ${best.median.toFixed(2)} ms median over 240 frames (target under 2 ms)`);
     await ctx.close();
   }
+  {
+    const SPY = `(() => {
+      window.__clears = 0; window.__ops = new Set();
+      const cr = CanvasRenderingContext2D.prototype.clearRect;
+      CanvasRenderingContext2D.prototype.clearRect = function (...a) { if (this.canvas && this.canvas.className === "fn-cv") window.__clears++; return cr.apply(this, a); };
+      const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, "globalCompositeOperation");
+      Object.defineProperty(CanvasRenderingContext2D.prototype, "globalCompositeOperation", { configurable: true, get: d.get, set(v) { window.__ops.add(String(v)); d.set.call(this, v); } });
+    })()`;
+    for (const html of [PAGES.unusualPage({ username: "t" }), PAGES.unusualPage({ username: "t", owner: true })]) {
+      ok(!/\bat (?:the )?(?:ask|bid)\b/i.test(html), "THE PAGE says neither 'at ask' nor 'at bid'");
+    }
+    for (const f of ["assets/js/flows-net.js", "assets/css/flows-net.css", "assets/js/flows-unusual.js"]) {
+      ok(!/\bat (?:the )?(?:ask|bid)\b/i.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} says neither 'at ask' nor 'at bid'`);
+    }
+    ok(PAGES.unusualPage({ username: "t", owner: true }).includes('data-ambient="1"') && !PAGES.unusualPage({ username: "t" }).includes("data-ambient"), "only the owner's page tells the network to open on Ambient as well");
+
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000, owner: false, init: SPY, clock: AT });
+    const s0 = await stats(page);
+    eq(s0.ambient, false, "MEMBERS LOAD LIVE: ambient is off");
+    const amb = () => page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-amb").getAttribute("aria-pressed"), tag: !document.querySelector("#uaNet .fn-tag").hidden, legend: document.querySelector("#uaNet .fn-legend").textContent }));
+    deep(await amb(), { p: "false", tag: false, legend: (await amb()).legend }, "the Ambient button is offered, unpressed, with no ambient tag");
+    ok(!/ambient motion, not data/.test((await amb()).legend), "and the legend does not claim an ambient motion that is not running");
+    await net(page, "net.mode('dte'); return null;");
+    await page.waitForTimeout(300);
+    await net(page, "net.mode('lean'); return null;");
+    await page.waitForTimeout(3500);
+    const rest = await stats(page);
+    ok(!rest.running && rest.pulses === 0, `LIVE AT REST after a data change settles: no loop, no pulse in flight (${JSON.stringify({ running: rest.running, pulses: rest.pulses })})`);
+    const c0 = await page.evaluate(() => window.__clears), f0 = (await stats(page)).frames;
+    await page.waitForTimeout(10000);
+    const c1 = await page.evaluate(() => window.__clears), f1 = (await stats(page)).frames;
+    eq(c1 - c0, 0, `THE PAINT CENSUS IS 0 over 10 s at rest in Live (${c1 - c0} canvas clears, ${f1 - f0} frames)`);
+    eq(f1 - f0, 0, "and so is the animation-frame count");
+    const cam0 = await camera(page);
+    ok(cam0.sway === 0 && Math.abs(cam0.yaw - cam0.rest[0]) < 1e-6, `Live has no sway: the camera sits at its rest angle (${cam0.yaw})`);
+    const lanes0 = await net(page, "return net.lanes().reduce((a, l) => a + l.n, 0);");
+    eq(lanes0, 0, "and no band carries light when nothing has arrived");
+    const rr = await net(page, "return [0, 1, 2, 3].map((t) => net.scene({ yaw: 0, pitch: 11, t }).spheres.map((s) => s.r.toFixed(4)).join());");
+    eq(new Set(rr).size, 1, "and the spheres do not breathe");
+
+    await drag(page, 140, 6);
+    const dragged = await camera(page);
+    await page.waitForTimeout(1200);
+    const coast = await camera(page);
+    await page.waitForTimeout(9000);
+    const after = await camera(page), censusAfter = await stats(page);
+    ok(dragged.yaw > 2 && coast.spin === 0 && Math.abs(after.yaw - coast.yaw) < 0.01 && !censusAfter.running,
+      `THE CAMERA MOVES ONLY WHILE THE READER DRAGS, plus inertia that is over inside 8 s: it turned to ${dragged.yaw.toFixed(1)}, stopped at ${coast.yaw.toFixed(1)} and stayed at ${after.yaw.toFixed(1)} with the loop idle`);
+    await net(page, "net.recentre(); return null;");
+    await page.waitForFunction(() => Math.abs(window.FlowsUI.net.of(document.getElementById("uaNet")).camera().yaw) < 0.3, null, { timeout: 6000 });
+    ok(true, "and Recentre still brings it home");
+
+    const base = alerts({ n: 140, seed: 11 });
+    const more = JSON.parse(JSON.stringify(base));
+    const big = { ...base.rows[0], oc: "NVDA-ARRIVAL", prem: base.rows[0].prem * 3, askPrem: base.rows[0].prem * 2, bidPrem: base.rows[0].prem * 0.5, spanStart: new Date(AT).toISOString(), firstAt: new Date(AT).toISOString() };
+    more.rows = [big, ...more.rows];
+    await page.evaluate(() => { window.__ops.clear(); });
+    const camBefore = await camera(page);
+    await net(page, "net.take(arg, { state: 'ok' }); return null;", more);
+    await page.waitForTimeout(600);
+    const arr = await stats(page);
+    const lanes1 = await net(page, "return net.lanes().filter((l) => l.n > 0);");
+    ok(arr.running && arr.pulses > 0 && arr.pulses <= 28 && lanes1.length >= 1 && lanes1.length <= 7 && lanes1.some((l) => l.to === "n:NVDA" || l.from === "n:NVDA") && arr.arrivals === 1,
+      `AN ARRIVAL lights only the bands its premium travelled: ${arr.pulses} pulses on ${lanes1.length} of ${arr.edges} bands (${JSON.stringify(lanes1.map((l) => l.n))})`);
+    ok(arr.hot >= 1, "and flares its name");
+    const camArr = await camera(page);
+    ok(Math.abs(camArr.yaw - camBefore.yaw) < 1e-6 && camArr.sway === 0, `and the camera still does not sway while that light runs (yaw ${camBefore.yaw} then ${camArr.yaw})`);
+    const ops = await page.evaluate(() => [...window.__ops]);
+    ok(!ops.includes("lighter") && ops.includes("source-over"), `A RUNTIME SPY FINDS globalCompositeOperation NEVER SET TO lighter in Live (${ops.join(", ")})`);
+    await page.evaluate(() => { const real = Date.now.bind(Date); Date.now = () => real() + 301000; });
+    await page.waitForTimeout(2500);
+    const gone = await stats(page);
+    ok(gone.pulses === 0 && !gone.running, `FIVE MINUTES LATER the light is gone and the loop is idle again (${JSON.stringify({ pulses: gone.pulses, running: gone.running })})`);
+
+    const events = await page.evaluate(() => { window.__ev = []; const h = document.getElementById("uaNet"); h.addEventListener("ambient:on", (e) => window.__ev.push("on:" + e.detail.user)); h.addEventListener("ambient:off", (e) => window.__ev.push("off:" + e.detail.user)); return true; });
+    await page.click("#uaNet .fn-amb");
+    await page.waitForTimeout(1500);
+    const on = await amb(), onStats = await stats(page);
+    ok(on.p === "true" && on.tag && /ambient motion, not data/.test(on.legend) && /not individual trades/.test(on.legend), `AMBIENT: the button is pressed, the 'ambient' tag shows and the legend reads 'ambient motion, not data' (${on.p}, tag ${on.tag})`);
+    ok(onStats.running && onStats.pulses >= onStats.edges && onStats.ambient === true, `with ambient on every band carries light (${onStats.pulses} pulses on ${onStats.edges} bands)`);
+    const a0 = await page.evaluate(() => window.__clears);
+    await page.waitForTimeout(1500);
+    ok((await page.evaluate(() => window.__clears)) - a0 > 20, "and the paint census is above zero");
+    const ops2 = await page.evaluate(() => [...window.__ops]);
+    ok(!ops2.includes("lighter"), `with no lighter pass in Ambient either (${ops2.join(", ")})`);
+    const cam1 = await camera(page);
+    ok(cam1.sway > 0, `Ambient sways about the rest angle (+-${cam1.sway} degrees)`);
+    const rb = await net(page, "return [0, 1.5, 3].map((t) => net.scene({ yaw: 0, pitch: 11, t }).spheres.map((s) => s.r.toFixed(4)).join());");
+    ok(new Set(rb).size > 1, "and the spheres breathe");
+    eq(await page.evaluate(() => (/(?:^|; )fn_ambient=([01])/.exec(document.cookie) || [])[1]), "1", "THE CHOICE IS REMEMBERED on this device, in a first-party preference cookie scoped to /flows");
+    deep(await page.evaluate(() => window.__ev), ["on:true"], "ambient:on is announced with the reader's own click as its cause");
+    await page.reload();
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    eq((await stats(page)).ambient, true, "and a reload opens on Ambient for this reader");
+    await page.click("#uaNet .fn-amb");
+    await page.waitForTimeout(3000);
+    const offStats = await stats(page);
+    ok(offStats.ambient === false && offStats.pulses === 0, "switching it off puts the network back in Live");
+    eq(await page.evaluate(() => (/(?:^|; )fn_ambient=([01])/.exec(document.cookie) || [])[1]), "0", "and that is remembered too");
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000, owner: true });
+    eq((await stats(page)).ambient, true, "THE OWNER'S ACCOUNT LOADS LIVE AND AMBIENT TOGETHER");
+    const lg = await page.evaluate(() => document.querySelector("#uaNet .fn-legend").textContent);
+    ok(/ambient motion, not data: pulses show a band's size, not individual trades/.test(lg), "with the legend that says what the motion is");
+    await page.evaluate(() => { document.cookie = "fn_ambient=0; Path=/flows"; });
+    await page.reload();
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4; }, null, { timeout: 15000 });
+    eq((await stats(page)).ambient, false, "and the reader's own remembered choice wins over the owner default");
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await mount(browser, { width: 1000, height: 800, owner: false, reduced: true, clock: AT });
+    const hidden = await page.evaluate(() => ({ amb: document.querySelector("#uaNet .fn-amb").hidden, tag: document.querySelector("#uaNet .fn-tag").hidden }));
+    deep(hidden, { amb: true, tag: true }, "REDUCED MOTION ALWAYS WINS: no Ambient button and no tag are offered");
+    await ctx.close();
+  }
+
+  {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+    const flow = alerts({ n: 60, seed: 3 });
+    const html = `<!doctype html><html><head><link rel="stylesheet" href="/assets/css/base.css"><link rel="stylesheet" href="/assets/css/flows.css"><link rel="stylesheet" href="/assets/css/flows-net.css"></head>
+<body class="flows-body"><main style="padding:20px;max-width:900px"><div class="fn-host" id="a"></div><div class="fn-host" id="b"></div><div class="fn-host" id="c"></div></main>
+<script src="/assets/js/flows-ui.js"></script><script src="/assets/js/flows-net.js"></script></body></html>`;
+    await page.route("**/*", (route) => {
+      const u = new URL(route.request().url());
+      if (u.pathname.startsWith("/assets/")) return route.fulfill({ path: path.join(ROOT, u.pathname), contentType: MIME[path.extname(u.pathname)] });
+      return route.fulfill({ contentType: "text/html", body: html });
+    });
+    await page.goto("https://closed.test/");
+    const out = await page.evaluate((flow) => {
+      const U = window.FlowsUI, keep = U.freshness.state;
+      const got = {};
+      const mk = (id, o) => { const n = U.net.mount(document.getElementById(id), Object.assign({ universe: false }, o)); n.take(flow, { state: "ok" }); return n; };
+      U.freshness.state = () => "closed";
+      got.closed = mk("a", {}).ambient();
+      document.cookie = "fn_ambient=0; Path=/";
+      got.closedRemembered = mk("b", {}).ambient();
+      document.cookie = "fn_ambient=; Path=/; Max-Age=0";
+      U.freshness.state = () => "live";
+      got.open = mk("c", {}).ambient();
+      U.freshness.state = keep;
+      return got;
+    }, flow);
+    deep(out, { closed: true, closedRemembered: false, open: false }, "OUTSIDE THE SESSION Ambient is the default, so the scene is never a still image; a remembered choice wins, and an open session defaults to Live");
+    await page.close();
+  }
 } finally {
   await browser.close();
 }
@@ -1192,4 +1344,5 @@ console.log(`✓ flows-net-render: ${checks} checks — the flow network drawn i
   `premium conserved through every layer and edge at any angle, contracts on name, sector and expiry nodes only, pointer and touch orbit with clamping, inertia and recentring, ` +
   `hit targets that follow the camera, back-to-front depth order, hover, row and keyboard highlighting, the accessible table and label, the freshness pill, ` +
   `the expiry output, a flare on a new window, pause when hidden or off screen, pending, empty, failed and unread states, ` +
+  `Live at rest with a paint census of zero, the arrival that lights only its own bands, Ambient with its button, tag, legend, cookie and events, the owner and closed-session defaults, no lighter pass and no sway in Live, ` +
   `no overflow, no label or caption collision and every label within half a pitch of its own sphere at 320, 390, 700, 768, 1024, 1280 and 1440 over a yaw by pitch grid, along the sway path and where a long drag stops, every sector and name label with its premium at 768 and at the 1440 yaw limits, a dark chip beside the rank numeral, the tooltip clear of the lit subgraph, the first tap on Recentre after a touch drag, a host 0, 20 or 40 px wide laid out at its stage's own 16, 36 or 56 px, and CPU per frame`);

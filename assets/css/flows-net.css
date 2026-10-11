@@ -95,6 +95,9 @@
 .fn-btn:hover { color: var(--label-1); background: rgba(255, 255, 255, 0.12); }
 .fn-btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .fn-btn[hidden] { display: none; }
+.fn-amb[aria-pressed="true"] { color: var(--label-1); background: rgba(255, 255, 255, 0.14); }
+.fn-tag { display: inline-flex; align-items: center; min-height: 20px; padding: 0 var(--sp-2); border-radius: var(--r-sm); background: rgba(255, 255, 255, 0.06); color: var(--label-3); font: var(--t-caption); letter-spacing: 0.04em; }
+.fn-tag[hidden] { display: none; }
 .fn-btn .ui-g { font-size: 13px; }
 @media (pointer: coarse) { .fn-btn { min-height: 44px; min-width: 44px; justify-content: center; } }
 

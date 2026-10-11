@@ -3469,7 +3469,7 @@ async function route(request, env, url, ctx) {
     "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
 
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
-    "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
+    "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
     "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
 

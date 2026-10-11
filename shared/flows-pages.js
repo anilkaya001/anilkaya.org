@@ -823,7 +823,7 @@ export function trackPage({ username = "" } = {}) {
   });
 }
 
-export function unusualPage({ username = "" } = {}) {
+export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
@@ -841,7 +841,7 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   </div>
   <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
-    <div class="fn-host" id="uaNet"></div>
+    <div class="fn-host" id="uaNet"${owner ? ' data-ambient="1"' : ""}></div>
   </section>
   <div class="fd-chips" id="uaChips"></div>
   <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
