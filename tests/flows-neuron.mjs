@@ -583,7 +583,7 @@ const CARD = {
      "a Workers AI id is printed as the model's name, not as the vendor path a reader cannot parse");
   eq(modelName("@cf/qwen/qwen2.5-coder-32b-instruct"), "Qwen2.5 Coder 32B", "the humanised name keeps the size and drops the serving flags");
   eq(modelName(null), "a language model", "and no id at all is a language model");
-  eq(prov("unreachable:allowance"), "Deterministic reading: the day’s free model allowance is spent, resetting 00:00 UTC.",
+  eq(prov("unreachable:allowance"), "Deterministic reading: the day’s free model allowance is spent, resetting 03:00 TRT (00:00 UTC).",
      "the writers store askFailure().why, so a spent allowance is named by that word and not only by the numeric code nothing writes");
   eq(prov("unreachable:capacity"), "Deterministic reading: the model had no capacity, and nothing was spent.",
      "a capacity refusal is named as one");

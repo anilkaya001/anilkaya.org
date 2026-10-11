@@ -1,5 +1,7 @@
 import { emitFailure } from "./flows-log.js";
 
+export const RESET_SAID = "03:00 TRT (00:00 UTC)";
+
 export const AI_CALL_EPOCH = 2;
 
 export const AI_LENGTH_RETRY_MS = 60 * 60 * 1000;
@@ -49,13 +51,13 @@ export function askFailure(error) {
   if (text.startsWith(AI_BUDGET_MARK)) {
     return { why: "budget",
       say: "The model budget this site allows itself for one day is spent. It resets at " +
-        "00:00 UTC. The readings below were measured by the pipeline and are unaffected." };
+        RESET_SAID + ". The readings below were measured by the pipeline and are unaffected." };
   }
   const code = /\b(3036|3040|5035|5006)\b/.exec(text);
   switch (code && code[1]) {
     case "3036": return { why: "allowance",
       say: "The free daily allowance for the model is spent for today. It resets at " +
-        "00:00 UTC. The readings below were measured by the pipeline and are unaffected." };
+        RESET_SAID + ". The readings below were measured by the pipeline and are unaffected." };
     case "3040": return { why: "capacity",
       say: "The model had no capacity for this question just now — nothing was spent, " +
         "and asking again shortly may work. The readings below are unaffected." };

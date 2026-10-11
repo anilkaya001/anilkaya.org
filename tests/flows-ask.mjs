@@ -1886,9 +1886,9 @@ import { chromium } from "playwright";
      "with nothing to read from, no refresh stamp is invented");
 
   const briefAlerts = (x) => x.facts.find((f) => f.id === "brief:today/alerts");
-  ok(/^2 flagged windows on the tape, read 2026-09-04 08:33 UTC\.$/.test(briefAlerts(index).say),
+  ok(/^2 flagged windows on the tape, read 2026-09-04 11:33 TRT\.$/.test(briefAlerts(index).say),
      "the nightly index carries the brief's own count of the alert feed");
-  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 18:00 UTC.",
+  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 21:00 TRT.",
      "AND THE REFRESH REBUILDS IT from the feed it just wrote. Production served '60 flagged windows " +
      "on the tape, read 17:20' beside 'holds 180 of the 226 alerts read' at 20:15, because only facts " +
      "whose source is the feed were replaced and this one's source is the brief");

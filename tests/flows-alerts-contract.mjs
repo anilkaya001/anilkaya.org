@@ -805,7 +805,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   const published = { v: 1, generatedAt: closeAt, sessionDate: DAY, readAt: closeAt, readDay: DAY,
     refreshed: "nightly", ...night.alerts, vendorLimit: 200, vendorTruncated: false,
     readLimit: night.readLimit, readTruncated: night.readTruncated };
-  ok(/^174 flagged windows on the tape across 30 reads on 2026-09-22, the latest 2026-09-22 21:31 UTC\.$/
+  ok(/^174 flagged windows on the tape across 30 reads on 2026-09-22, the latest 2026-09-23 00:31 TRT\.$/
     .test(briefAlertsFact(published).say),
     `the post-close brief quotes the day's record (${briefAlertsFact(published).say})`);
   ok(!/across/.test(briefAlertsFact({ ...read, readAt: closeAt }).say),

@@ -43,7 +43,7 @@ export const ERRORS = Object.freeze({
   rt_off: entry(404, "The real-time rail is off"),
   rt_unavailable: entry(503, "The real-time rail is unavailable"),
   service_unavailable: entry(503, "Service is temporarily unavailable"),
-  store_quota: entry(503, "The store's daily quota is spent; it resets at 00:00 UTC"),
+  store_quota: entry(503, "The store's daily quota is spent; it resets at 03:00 TRT (00:00 UTC)"),
   store_unreadable: entry(503, "The store could not be read"),
   too_large: entry(413, "Payload is too large"),
   too_many_keys: entry(400, "Too many keys in one request"),

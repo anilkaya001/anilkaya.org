@@ -1,3 +1,5 @@
+import { stamp as trtStamp } from "./flows-time.js";
+
 export function num(v) {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (typeof v !== "string") return null;
@@ -53,8 +55,7 @@ const fact = (id, say, n, lead) => {
 
 const plural = (k, one, many) => (k === 1 ? one : many);
 
-const stampSaid = (iso) => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso)
-  ? iso.slice(0, 10) + " " + iso.slice(11, 16) + " UTC" : iso);
+const stampSaid = (iso) => trtStamp(iso) || iso;
 
 export const BRIEF_SLOTS = Object.freeze({
   long: "board:long",
