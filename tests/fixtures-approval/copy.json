@@ -1,0 +1,17 @@
+{
+ "canonical": {
+  "header": "Ranked by rarity against each name's own norm. Error rate not yet measured.",
+  "alertCount": "{n} price {alerts} today (provisional). Design rate, averaged over sessions: at most 1 in 10 is expected to be false, if the model of each name is right.",
+  "screenBadge": "Screen",
+  "alertBadge": "Alert (provisional)",
+  "paused": "Alerts paused for small caps: scale model heavier than calibrated, as measured through yesterday's close.",
+  "empty": "Nothing has crossed the line this session. That is a reading, not a forecast."
+ },
+ "motion": {
+  "live": "Live: motion is a real arrival or your own hand.",
+  "ambient": "Ambient: pulses and breathing encode premium by speed and density, not individual trades; labelled ambient motion, not data."
+ },
+ "seam": "Bands do not connect across names: calls and puts, and bullish and bearish, are two ways to split the same dollars.",
+ "convention": "on the vendor's convention (dealers long calls, short puts)",
+ "askSide": "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish. Unsided premium is never guessed into a side."
+}

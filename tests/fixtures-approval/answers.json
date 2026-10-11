@@ -1,0 +1,16 @@
+{
+ "decision": "OD-39",
+ "recorded": {
+  "p1": null,
+  "p2": null,
+  "p3": null,
+  "p4": null,
+  "p5": null,
+  "p6": null
+ },
+ "form": "each value is null until the owner answers, then \"yes\" or a list of changes; a null never defaults to yes",
+ "motion": {
+  "decision": "OD-V1",
+  "recorded": null
+ }
+}
