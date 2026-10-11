@@ -766,14 +766,14 @@
     return new Date(t).toISOString().slice(0, 10);
   }
   const T0 = Date.now();
-  const SRV = { day: null, at: 0, ph: null, until: 0, busy: 0, asked: 0, local: null, hbAt: 0 };
+  const SRV = { day: null, at: 0, ph: null, until: 0, next: 0, busy: 0, asked: 0, local: null, hbAt: 0 };
   function takeNow(b, hb) {
     if (!b) return;
     SRV.at = Date.now();
     if (hb) SRV.hbAt = SRV.at;
     if (isoDay(b.expected)) { SRV.day = b.expected.slice(0, 10); SRV.local = localExpected(nyClock(new Date())); }
     const t = b.phase ? Date.parse(b.phase.endsAt) : NaN;
-    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; }
+    if (t > 0) { SRV.ph = b.phase.phase; SRV.until = t; SRV.next = Date.parse(b.phase.nextOpen) || 0; }
   }
   const pendingNow = () => Date.now() - SRV.hbAt < 39e4 || SRV.busy > 0 || (!SRV.at && Date.now() - T0 < 2e4 && !!window.FlowsUI.heartbeat);
   function watchNow(p, hb) {
@@ -839,7 +839,8 @@
   }
   const PHW = { rth: ["Open", "closes"], pre: ["Pre-market", "opens"], post: ["After hours", "ends"] };
   const marketSaid = (open) => {
-    const w = PHW[SRV.ph];
+    const w = PHW[SRV.ph], d = trt(SRV.next);
+    if (!open && SRV.ph === "closed" && d && SRV.next > Date.now()) return "Closed \u00b7 opens " + ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()] + " " + F.time(SRV.next);
     return w && SRV.until > Date.now() && (SRV.ph === "rth") === open ? w[0] + " \u00b7 " + w[1] + " " + F.time(SRV.until) : open ? "Open" : "Closed";
   };
   function freshDetails() {

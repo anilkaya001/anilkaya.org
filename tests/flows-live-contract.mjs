@@ -3287,6 +3287,25 @@ const cronMinutes = (cron) => {
     const env = JSON.parse(body);
     deep(Object.keys(env), ["serverNow", "phase", "keys"], "THE ENVELOPE: serverNow, phase and keys");
     deep([env.serverNow, env.phase], [at, W.phaseView(phaseAt(at, clock))], "stamped with the instant and the phase view /api/flows/now serves");
+    {
+      const iso = (ms) => new Date(ms).toISOString();
+      const view = (d, h, m) => W.phaseView(phaseAt(easternInstant(d, h * 60 + m), clock));
+      const grid = [
+        ["2026-09-23", 10, 0, "rth", "2026-09-23T13:30:00.000Z", "2026-09-23T20:00:00.000Z", "2026-09-24T13:30:00.000Z"],
+        ["2026-01-14", 10, 0, "rth", "2026-01-14T14:30:00.000Z", "2026-01-14T21:00:00.000Z", "2026-01-15T14:30:00.000Z"],
+        ["2026-09-26", 12, 0, "closed", null, null, "2026-09-28T13:30:00.000Z"],
+        ["2026-11-26", 10, 0, "closed", null, null, "2026-11-27T14:30:00.000Z"],
+        ["2026-11-27", 10, 0, "rth", "2026-11-27T14:30:00.000Z", "2026-11-27T18:00:00.000Z", "2026-11-30T14:30:00.000Z"],
+        ["2026-09-23", 20, 30, "closed", "2026-09-23T13:30:00.000Z", "2026-09-23T20:00:00.000Z", "2026-09-24T13:30:00.000Z"],
+      ];
+      for (const [d, h, m, ph, open, close, next] of grid) {
+        const v = view(d, h, m);
+        deep([v.phase, v.open, v.close, v.nextOpen], [ph, open, close, next], `phaseView on ${d} ${h}:${m} carries the exchange's own open, close and next open`);
+      }
+      eq(view("2026-09-26", 12, 0).endsAt, iso(easternInstant("2026-09-28", 4 * 60)), "a weekend's endsAt is untouched");
+      deep(W.phaseView({ phase: "closed", session: null, trading: false, endsAt: NaN, open: NaN, close: null, nextOpen: NaN }),
+        { phase: "closed", session: null, trading: false, endsAt: null, open: null, close: null, nextOpen: null }, "a field that is not finite is null");
+    }
     deep(Object.keys(env.keys), ["market", "vol", "strips"], "keyed by the params as asked");
     deep(env.keys.market, { status: "ok", payload: JSON.parse(rows[0].payload), updatedAt: at - 59_000,
       fresh: W.liveEntry(metaOf(rows[0]), at - 59_000, at, clock) },

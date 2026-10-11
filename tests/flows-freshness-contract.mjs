@@ -430,6 +430,18 @@ const NYSE_PUBLISHED = Object.freeze({
     post.ctx.fetch("/api/flows/now?k=market");
     await post.release();
     eq(Object.fromEntries(post.UI.freshness.details().facts).Market, "After hours \u00b7 ends 04:00 TRT", "the after-hours fact, in winter");
+    const wk = pill("2026-10-10T12:00:00Z", { expected: "2026-10-09", phase: { phase: "closed", endsAt: "2026-10-12T08:00:00.000Z", nextOpen: "2026-10-12T13:30:00.000Z" } });
+    wk.ctx.fetch("/api/flows/now?k=market");
+    await wk.release();
+    eq(Object.fromEntries(wk.UI.freshness.details().facts).Market, "Closed \u00b7 opens Mon 16:30 TRT", "a weekend close names the Monday open in TRT");
+    const wint = pill("2026-11-28T12:00:00Z", { expected: "2026-11-27", phase: { phase: "closed", endsAt: "2026-11-30T09:00:00.000Z", nextOpen: "2026-11-30T14:30:00.000Z" } });
+    wint.ctx.fetch("/api/flows/now?k=market");
+    await wint.release();
+    eq(Object.fromEntries(wint.UI.freshness.details().facts).Market, "Closed \u00b7 opens Mon 17:30 TRT", "and in winter it is 17:30");
+    const old = pill("2026-10-10T12:00:00Z", { expected: "2026-10-09", phase: { phase: "closed", endsAt: "2026-10-12T08:00:00.000Z" } });
+    old.ctx.fetch("/api/flows/now?k=market");
+    await old.release();
+    eq(Object.fromEntries(old.UI.freshness.details().facts).Market, "Closed", "an old server without nextOpen keeps the bare word");
     const late = pill("2026-10-12T22:30:00Z", { expected: "2026-10-12", phase: { phase: "post", endsAt: "2026-10-13T01:00:00.000Z" } });
     late.ctx.fetch("/api/flows/now?k=market");
     await late.release();

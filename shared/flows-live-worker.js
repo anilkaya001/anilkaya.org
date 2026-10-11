@@ -255,7 +255,10 @@ export function pendingEntry(klass) {
 
 export function phaseView(phase) {
   return phase ? { phase: phase.phase, session: phase.session, trading: phase.trading,
-    endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null } : null;
+    endsAt: Number.isFinite(phase.endsAt) ? new Date(phase.endsAt).toISOString() : null,
+    open: Number.isFinite(phase.open) ? new Date(phase.open).toISOString() : null,
+    close: Number.isFinite(phase.close) ? new Date(phase.close).toISOString() : null,
+    nextOpen: Number.isFinite(phase.nextOpen) ? new Date(phase.nextOpen).toISOString() : null } : null;
 }
 
 const withTimeout = (promise, ms) => new Promise((resolve) => {
