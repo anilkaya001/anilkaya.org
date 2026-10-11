@@ -6,9 +6,11 @@ export const SALVAGE_NOTE = "the model's reply was cut off; the list of what is 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const FENCE = /^\s*```(?:json)?\s*/i;
 const LIST_KEYS = Object.freeze(["drivers", "tensions", "watch"]);
+const PRIMITIVE = /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/;
+const canValue = (f) => f.phase === "value" || (f.type === "arr" && f.phase === "valueOrEnd");
 
 function frameOf(type, start, key) {
-  return { type, start, key, phase: type === "obj" ? "key" : "value", cur: null, idx: 0, fields: new Map(), items: [] };
+  return { type, start, key, phase: type === "obj" ? "keyOrEnd" : "valueOrEnd", cur: null, idx: 0, fields: new Map(), items: [] };
 }
 
 export function scanReply(text) {
@@ -40,6 +42,7 @@ export function scanReply(text) {
     if (inStr) {
       if (esc) esc = false;
       else if (c === 92) esc = true;
+      else if (c < 32) { out.malformedAt = i; break; }
       else if (c === 34) {
         inStr = false;
         if (strIsKey) {
@@ -51,32 +54,46 @@ export function scanReply(text) {
       continue;
     }
     if (prim >= 0) {
-      if (c === 44 || c === 93 || c === 125 || c === 32 || c === 10 || c === 13 || c === 9) { complete(prim, i); prim = -1; } else continue;
+      if (c === 44 || c === 93 || c === 125 || c === 32 || c === 10 || c === 13 || c === 9) {
+        if (!PRIMITIVE.test(src.slice(prim, i))) { out.malformedAt = prim; break; }
+        complete(prim, i);
+        prim = -1;
+      } else if (c === 34 || c === 123 || c === 91 || c === 58) { out.malformedAt = i; break; } else continue;
     }
     if (c === 32 || c === 10 || c === 13 || c === 9) continue;
+    const top = stack[stack.length - 1];
     if (c === 123 || c === 91) {
-      const parent = stack[stack.length - 1];
-      stack.push(frameOf(c === 123 ? "obj" : "arr", i, parent && parent.type === "obj" ? parent.cur : parent ? parent.key : null));
-      if (parent && parent.type === "obj") parent.phase = "value";
+      if (top && !canValue(top)) { out.malformedAt = i; break; }
+      stack.push(frameOf(c === 123 ? "obj" : "arr", i, top && top.type === "obj" ? top.cur : top ? top.key : null));
       continue;
     }
     if (c === 125 || c === 93) {
-      const f = stack[stack.length - 1];
-      if (!f || (c === 125) !== (f.type === "obj")) { out.malformedAt = i; break; }
+      if (!top || (c === 125) !== (top.type === "obj")) { out.malformedAt = i; break; }
+      if (top.phase !== "comma" && top.phase !== (top.type === "obj" ? "keyOrEnd" : "valueOrEnd")) { out.malformedAt = i; break; }
       stack.pop();
       if (!stack.length) { out.closedAt = i + 1; i += 1; break; }
-      complete(f.start, i + 1);
+      complete(top.start, i + 1);
       continue;
     }
     if (c === 34) {
-      const top = stack[stack.length - 1];
-      strIsKey = top.type === "obj" && top.phase === "key";
+      if (top.type === "obj" && (top.phase === "key" || top.phase === "keyOrEnd")) strIsKey = true;
+      else if (canValue(top)) strIsKey = false;
+      else { out.malformedAt = i; break; }
       strStart = i;
       inStr = true;
       continue;
     }
-    if (c === 58) { const top = stack[stack.length - 1]; if (top.type === "obj") top.phase = "value"; continue; }
-    if (c === 44) { const top = stack[stack.length - 1]; top.phase = top.type === "obj" ? "key" : "value"; continue; }
+    if (c === 58) {
+      if (top.type !== "obj" || top.phase !== "colon") { out.malformedAt = i; break; }
+      top.phase = "value";
+      continue;
+    }
+    if (c === 44) {
+      if (top.phase !== "comma") { out.malformedAt = i; break; }
+      top.phase = top.type === "obj" ? "key" : "value";
+      continue;
+    }
+    if (!canValue(top)) { out.malformedAt = i; break; }
     prim = i;
   }
   const finished = out.closedAt >= 0;
@@ -279,11 +296,11 @@ export function salvageReading(text, dossier, tags, opts = {}) {
   });
   if (raw.length > SECTION_CAPS.reply) return refuse("oversize", raw.length + " characters against " + SECTION_CAPS.reply);
   const part = parseReadingPartial(raw);
-  if (part.value === null) return refuse("unparsable");
   if (!part.truncated) {
-    const whole = vetReading(part.value, dossier, tags, opts);
+    const whole = vetReading(raw, dossier, tags, opts);
     return { ...whole, salvaged: false, truncated: false, kept: keptCount(whole.sections), scanned: part.kept, guard: null, note: null };
   }
+  if (part.value === null) return refuse("unparsable");
   const reply = { ...part.value };
   delete reply.unknown;
   let trimmed = false;

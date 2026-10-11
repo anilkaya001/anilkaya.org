@@ -4,6 +4,7 @@ import * as S from "../shared/flows-ai-salvage.js";
 import { numeralsIn } from "../shared/flows-ask.js";
 import { archetype, ARCHETYPES } from "./reading-archetypes.mjs";
 import { loadMutated } from "./truth/mutants.mjs";
+import * as CPU from "./lib/cpu-budget.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -137,8 +138,65 @@ ok(offsets > 15000, `A1: ${offsets} cut offsets across ${REPLIES.length} valid r
   same(S.parseReadingPartial("{\"a\": {\"b\": [1]}, \"c\": {\"d\"").value, { a: { b: [1] } }, "an object with a cut member holds back as a whole");
   eq(S.parseReadingPartial("{\"a\": 1} trailing {\"b\": 2}").truncated, false, "the first object is the reply and what follows it is ignored");
   eq(S.parseReadingPartial("{\"a\": ]").value, null, "an unbalanced close is not salvaged");
-  same(S.parseReadingPartial("{\"a\": [1, bad, 3], \"b\": 2}").value, { a: [1, 3], b: 2 }, "an element that is not JSON is dropped and its neighbours kept");
+  eq(S.parseReadingPartial("{\"a\": [1, bad, 3], \"b\": 2}").value, null, "a token that is not JSON is malformed, as parseReading finds it, and nothing is kept");
   eq(S.parseReadingPartial("{\"a\": 1, \"a\": 2}").value.a, 2, "a repeated key takes the last value, as JSON.parse does");
+}
+
+{
+  const P = S.parseReadingPartial;
+  const D = (o) => JSON.stringify(o);
+  const cases = [
+    ["a missing comma between two members", '{"identity":{"text":"a","cites":["x"]} "now":{"text":"b","cites":["y"]},"drivers":['],
+    ["a missing comma between two top-level lists", '{"drivers":[{"text":"a","cites":["x"]}] "tensions":[{"text":"b","cites":["y"]}],"watch":['],
+    ["a missing comma between two list elements", '{"drivers":[{"text":"a","cites":["x"]} {"text":"b","cites":["y"]},'],
+    ["a trailing comma in an object", '{"now":{"text":"a","cites":["x"]},}'],
+    ["a trailing comma in a list", '{"drivers":[{"text":"a","cites":["x"]},],"now":'],
+    ["a comma before the first member", '{,"now":{"text":"a","cites":["x"]}'],
+    ["a double comma", '{"now":{"text":"a","cites":["x"]},,"identity":'],
+    ["a missing colon", '{"now" {"text":"a","cites":["x"]},"identity":'],
+    ["a colon where a comma belongs", '{"now":{"text":"a","cites":["x"]}:"identity":'],
+    ["a key that is not a string", '{now:{"text":"a","cites":["x"]},"identity":'],
+    ["a value that is a bare word", '{"identity":{"text":"a","cites":["x"]},"now":oops,"drivers":['],
+    ["a raw newline inside a string", '{"identity":{"text":"a\nb","cites":["x"]},"now":'],
+    ["a list closed by a brace", '{"drivers":[{"text":"a","cites":["x"}],"now":'],
+  ];
+  for (const [label, text] of cases) {
+    const part = P(text);
+    eq(part.value, null, label + ": nothing is salvaged, so nothing can sit under a wrong key");
+    eq(part.truncated, false, label + ": and the reply is not treated as merely cut off");
+    eq(S.scanReply(text).malformedAt !== undefined, true, label + ": the scanner records where the grammar broke");
+    const sv = S.salvageReading(text, MOMENTUM, MOMENTUM_TAGS, { sources: [] });
+    const vet = R.vetReading(text, MOMENTUM, MOMENTUM_TAGS, { sources: [] });
+    eq(sv.ok, false, label + ": refused");
+    same(sv.refused, vet.refused, label + ": with the refusal vetReading gives the same text");
+  }
+  const whole = D(GOOD);
+  const wholeCases = [
+    ["a trailing comma", whole.slice(0, -1) + ",}"],
+    ["a second object after the first with a brace in the prose", whole + " and also {see}"],
+    ["two objects back to back", whole + whole],
+    ["a missing comma then the end", whole.replace('},"now"', '}"now"')],
+    ["leading prose with a brace", "Reading {draft}: " + whole],
+    ["fenced with trailing prose", "```json\n" + whole + "\n``` thanks"],
+    ["valid", whole],
+    ["valid, indented", JSON.stringify(GOOD, null, 2)],
+    ["valid, fenced", "```json\n" + whole + "\n```"],
+    ["valid, trailing prose without a brace", whole + " Thanks."],
+  ];
+  for (const [label, text] of wholeCases) {
+    const sv = S.salvageReading(text, MOMENTUM, MOMENTUM_TAGS, { sources: [] });
+    const vet = R.vetReading(text, MOMENTUM, MOMENTUM_TAGS, { sources: [] });
+    eq(sv.ok, vet.ok, label + ": a reply that closes is accepted exactly when vetReading accepts the original string");
+    same(sv.sections, vet.sections, label + ": and its sections are vetReading's");
+    same(sv.refused, vet.refused, label + ": and so are its refusals");
+    eq(sv.salvaged, false, label + ": and it is not reported as salvaged");
+  }
+  const mixed = '{"identity":' + D(GOOD.identity) + ' "now":' + D(GOOD.now) + ',"drivers":[';
+  const mp = P(mixed);
+  eq(mp.value, null, "the reported case, a missing comma after identity then a cut, files nothing: now is not read as a value of identity");
+  same(P('{"a":[1,2],"b":{"c":3},"d":[4,5').value, { a: [1, 2], b: { c: 3 }, d: [4] }, "valid grammar with nested lists and objects is untouched");
+  same(P('{"a":-1.5e3,"b":true,"c":null,"d":"x"}').value, { a: -1500, b: true, c: null, d: "x" }, "every JSON primitive is accepted");
+  eq(P('{"a":01}').value, null, "a number with a leading zero is not");
 }
 
 const cpuMs = () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; };
@@ -163,8 +221,10 @@ function perCall(fn) {
 {
   const big = { ...GOOD, drivers: GOOD.drivers.concat(GOOD.drivers), tensions: GOOD.tensions.concat(GOOD.tensions) };
   const text = JSON.stringify(big);
-  const per = perCall(() => S.parseReadingPartial(text.slice(0, 3000)));
-  ok(per < 1, `the scan of a reply cut at 3,000 of ${text.length} characters costs ${per.toFixed(3)} ms of CPU, under the 1 ms budget`);
+  const cut3000 = text.slice(0, 3000);
+  const run = CPU.compare(() => S.parseReadingPartial(cut3000), { perWindow: 200 });
+  CPU.assertBudget(run, { median: 0.25, worst: 0.5 }, "the scan of a cut reply");
+  ok(true, `the scan of a reply cut at 3,000 of ${text.length} characters costs ${run.subject.median.toFixed(3)} ms of CPU, ${run.ratio.median.toFixed(4)} of the reference workload, inside the ratio budget on the ${run.clock} clock`);
   const scaling = [];
   for (const k of [1, 4, 16]) {
     const t = JSON.stringify({ now: GOOD.now, drivers: Array.from({ length: 4 * k }, (_, i) => GOOD.drivers[i % 4]) }).slice(0, -3);
@@ -191,7 +251,7 @@ async function mustFail(label, rel, transforms, run) {
 await mustFail("A WRONG BUILD FAILS A1: a scanner that ignores escapes is caught at some cut offset", "shared/flows-ai-salvage.js",
   [["else if (c === 92) esc = true;", "else if (c === 0) esc = true;"]], (mod) => checkOffsets(mod, REPLIES.find((r) => r.name === "hostile"), "hostile"));
 await mustFail("A WRONG BUILD FAILS A1: a scanner that keeps a number at the end of the text as closed is caught", "shared/flows-ai-salvage.js",
-  [["      if (c === 44 || c === 93 || c === 125 || c === 32 || c === 10 || c === 13 || c === 9) { complete(prim, i); prim = -1; } else continue;", "      if (c === 44 || c === 93 || c === 125 || c === 32 || c === 10 || c === 13 || c === 9) { complete(prim, i); prim = -1; } else { if (i === n - 1) complete(prim, i + 1); continue; }"]],
+  [["malformedAt = i; break; } else continue;", "malformedAt = i; break; } else { if (i === n - 1) complete(prim, i + 1); continue; }"]],
   (mod) => { for (const t of ["{\"a\": 1, \"b\": 22", "{\"a\": [1, 22"]) { const p = mod.parseReadingPartial(t); const q = S.parseReadingPartial(t); if (JSON.stringify(p.value) !== JSON.stringify(q.value)) throw new Error("differs"); } });
 await mustFail("A WRONG BUILD FAILS A1: a scanner that counts a string as closed at an escaped quote is caught on the indented reply", "shared/flows-ai-salvage.js",
   [["if (esc) esc = false;", "if (esc) esc = esc;"]], (mod) => checkOffsets(mod, REPLIES.find((r) => r.name === "hostile-pretty"), "hostile-pretty"));
@@ -385,8 +445,9 @@ ok(salvagedRuns > 800 && accepted > 100 && refusedCut > 50, `A3: ${salvagedRuns}
   const total = perCall(() => S.salvageReading(cut, e.dossier, e.tags, e.opts));
   const vet = perCall(() => R.vetReading(text, e.dossier, e.tags, e.opts));
   const scan = perCall(() => S.parseReadingPartial(cut));
-  ok(scan < 1, `the scan itself costs ${scan.toFixed(3)} ms`);
-  log(`a salvage of a cut reply costs ${total.toFixed(2)} ms in all: ${scan.toFixed(3)} ms of scanning and ${vet.toFixed(2)} ms of vetting the same reply whole`);
+  const added = total - vet;
+  ok(added < 1, `a salvage adds ${added.toFixed(3)} ms of CPU to vetting the same reply whole, under the 1 ms budget`);
+  log(`a salvage of a cut reply costs ${total.toFixed(2)} ms in all: ${scan.toFixed(3)} ms of scanning, ${vet.toFixed(2)} ms of vetting the same reply whole (the existing cost) and ${added.toFixed(3)} ms added`);
 }
 
 {
