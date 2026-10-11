@@ -1179,7 +1179,7 @@ try {
 
     const settle = async () => {
       for (let i = 0; i < 2; i++) {
-        try { await (await get("/flows/")).text(); } catch {   }
+        try { await (await get("/flows/", { signal: AbortSignal.timeout(3000) })).text(); } catch {   }
       }
     };
     await settle();

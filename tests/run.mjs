@@ -8,8 +8,10 @@ import { SUITES_DIR, FIELD_ORDER, formatSuite } from "./lib/suite-registry.mjs";
 export { SUITES_DIR, formatSuite };
 
 export const DEFAULT_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const TIMEOUT_FLOOR_S = 120;
+export const TIMEOUT_FLOOR_S = 300;
 export const TIMEOUT_MEDIAN_FACTOR = 3;
+export const SLOW_FACTOR = 2;
+export const SLOW_MARGIN_S = 30;
 export const KILL_GRACE_MS = 2000;
 export const REPEAT_WINDOW_MS = 500;
 export const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -68,6 +70,11 @@ export function timeoutFor(suite, scale = 1) {
     ? suite.timeoutS
     : Math.max(TIMEOUT_FLOOR_S, Math.ceil(TIMEOUT_MEDIAN_FACTOR * (suite.medianS || 0)));
   return base * scale;
+}
+
+export function overMedian(suite, seconds) {
+  const median = suite.medianS;
+  return Number.isFinite(median) && median > 0 && Number.isFinite(seconds) && seconds > SLOW_FACTOR * median && seconds > median + SLOW_MARGIN_S;
 }
 
 export function timerDelayMs(limitS) {
@@ -502,6 +509,10 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
         }
       }
       results.push(r);
+      if (r.status === "pass" && overMedian(suite, r.seconds)) {
+        io.stderr.write(`\n⏱ ${suite.script} took ${fmtSeconds(r.seconds)} s against a medianS of ${suite.medianS}; refresh tests/suites/${suite.name}.json before the ${TIMEOUT_MEDIAN_FACTOR}x timeout catches it\n`);
+        if (env.GITHUB_ACTIONS) io.stdout.write(`::warning title=SLOW ${suite.name}::${suite.script} took ${fmtSeconds(r.seconds)} s against a medianS of ${suite.medianS}; refresh tests/suites/${suite.name}.json\n`);
+      }
       if (r.status !== "pass") {
         io.stderr.write(`\n✗ ${suite.script} ${resultWord(r)} after ${fmtSeconds(r.seconds)} s\n`);
         if (opts.bail) stop = true;

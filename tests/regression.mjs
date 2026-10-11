@@ -35,9 +35,9 @@ function watch(page, ignored = () => false) {
   });
   page.on("requestfailed", (request) => {
     const reason = request.failure()?.errorText || "unknown";
-
-    const navigationAborted = reason === "net::ERR_ABORTED" &&
-      ["/api/v2/bootstrap", "/api/bootstrap", "/api/me", "/api/markets", "/assets/data/placement-bank.json", "/assets/data/challenge-bank.json"].includes(new URL(request.url()).pathname);
+    const target = new URL(request.url());
+    const navigationAborted = reason === "net::ERR_ABORTED" && request.method() === "GET" && target.origin === new URL(BASE).origin &&
+      (target.pathname.startsWith("/assets/data/") || target.pathname.startsWith("/api/"));
     const detail = `request failed: ${request.url()} (${reason})`;
     if (!navigationAborted && !ignored(detail)) errors.push(detail);
   });
@@ -155,6 +155,32 @@ async function solve(route, answer, expectedPoints, repeat) {
 }
 
 try {
+  {
+    const failure = (reason, target, method = "GET") => {
+      const handlers = {};
+      const clean = watch({ on: (event, handler) => { handlers[event] = handler; } });
+      handlers.requestfailed({ url: () => target, method: () => method, failure: () => ({ errorText: reason }) });
+      try { clean(); return false; } catch { return true; }
+    };
+    const aborted = "net::ERR_ABORTED";
+    for (const path of ["/assets/data/challenge-bank.json?v=1", "/assets/data/courses/ols/ols-math.json", "/assets/data/a-file-added-next-year.json",
+      "/api/me", "/api/v2/bootstrap", "/api/markets", "/api/flows/universe?cols=t,sec"]) {
+      assert.equal(failure(aborted, BASE + path), false, `${path}: a GET aborted by navigation is not a browser error`);
+      for (const reason of ["net::ERR_CONNECTION_REFUSED", "net::ERR_FAILED", "net::ERR_CONNECTION_RESET", "unknown"]) {
+        assert.equal(failure(reason, BASE + path), true, `${path}: ${reason} is still reported`);
+      }
+    }
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      assert.equal(failure(aborted, BASE + "/api/progress", method), true, `an aborted ${method} is still reported: the write may not have happened`);
+    }
+    for (const path of ["/", "/lab/", "/assets/js/lab-core.js?v=1", "/assets/css/base.css", "/assets/data", "/assets/database.json", "/apis/me", "/api"]) {
+      assert.equal(failure(aborted, BASE + path), true, `${path}: only data files and the API are forgiven`);
+    }
+    for (const foreign of ["http://127.0.0.1:1/api/me", "https://example.com/assets/data/placement-bank.json", "https://cdn.jsdelivr.net/api/me"]) {
+      assert.equal(failure(aborted, foreign), true, `${foreign}: another origin is not ours to forgive`);
+    }
+  }
+
   browser = await chromium.launch();
 
   for (const [width, height, mobile] of [[320, 720, true], [390, 844, true], [481, 900, true], [640, 900, true], [768, 1024, true], [1024, 768, true], [1280, 720, false], [1440, 900, false], [2048, 1152, false]]) {
