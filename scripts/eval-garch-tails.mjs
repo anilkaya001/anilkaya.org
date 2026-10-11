@@ -3,7 +3,7 @@ import * as SMILE from "../shared/flows-quant-smile.js";
 import * as WORLD from "../shared/flows-quant-world.js";
 import * as TIME from "../shared/flows-quant-time.js";
 import * as QC from "../shared/flows-quant-card.js";
-import * as QP from "../scripts/flows-quant-pipeline.mjs";
+import * as QP from "./flows-quant-pipeline.mjs";
 import { fitGarch, skewtConstants } from "../shared/flows-garch.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 
