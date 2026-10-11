@@ -1128,7 +1128,7 @@ The real-time rail's pure half: the frozen envelope, topic table, row columns an
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-rt-routes.js` | `shared/flows-rt-routes.js#rtTopics`, `shared/flows-rt-routes.js#serveRt` | flows-basis, flows-dossier-reads, flows-ledger, flows-reading-worker, flows-rt |
+| `shared/flows-rt-routes.js` | `shared/flows-rt-routes.js#rtTopics`, `shared/flows-rt-routes.js#serveRt` | docs, flows-basis, flows-dossier-reads, flows-ledger, flows-reading-worker, flows-rt |
 
 ### `assets/js/flows-rt.js`
 
