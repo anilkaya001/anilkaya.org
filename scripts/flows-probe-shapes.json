@@ -1,0 +1,2258 @@
+{
+ "observed": "2026-10-04",
+ "ops": {
+  "/api/companies/{ticker}/earnings-estimates": {
+   "sets": {
+    "data.estimates[]": {
+     "date": "str",
+     "eps_estimate_analyst_count": "num",
+     "eps_estimate_average": "num",
+     "eps_estimate_high": "num",
+     "eps_estimate_low": "num",
+     "eps_estimate_revision_down_last_week": "null",
+     "eps_estimate_revision_up_last_week": "null",
+     "horizon": "str",
+     "revenue_estimate_analyst_count": "num",
+     "revenue_estimate_average": "num",
+     "revenue_estimate_high": "num",
+     "revenue_estimate_low": "num"
+    }
+   },
+   "undocumented": [
+    "eps_estimate_revision_down_last_week",
+    "eps_estimate_revision_up_last_week"
+   ],
+   "unseen": []
+  },
+  "/api/companies/{ticker}/profile": {
+   "sets": {
+    "data": {
+     "address": "str",
+     "analyst_rating_buy": "num",
+     "analyst_rating_hold": "num",
+     "analyst_rating_sell": "num",
+     "analyst_rating_strong_buy": "num",
+     "analyst_rating_strong_sell": "num",
+     "analyst_target_price": "num",
+     "asset_type": "str",
+     "beta": "num",
+     "book_value": "num",
+     "cik": "str#",
+     "country": "str",
+     "currency": "str",
+     "day_200_moving_average": "num",
+     "day_50_moving_average": "num",
+     "description": "str",
+     "diluted_eps_ttm": "num",
+     "dividend_date": "str",
+     "dividend_per_share": "num",
+     "dividend_yield": "num",
+     "ebitda": "num",
+     "eps": "num",
+     "ev_to_ebitda": "num",
+     "ev_to_revenue": "num",
+     "ex_dividend_date": "str",
+     "exchange": "str",
+     "fiscal_year_end": "str",
+     "forward_pe": "num",
+     "gross_profit_ttm": "num",
+     "industry": "str",
+     "latest_quarter": "str",
+     "market_cap": "num",
+     "name": "str",
+     "official_site": "str",
+     "operating_margin_ttm": "num",
+     "pe_ratio": "num",
+     "peg_ratio": "num",
+     "price_to_book_ratio": "num",
+     "price_to_sales_ratio_ttm": "num",
+     "profit_margin": "num",
+     "quarterly_earnings_growth_yoy": "num",
+     "quarterly_revenue_growth_yoy": "num",
+     "return_on_assets_ttm": "num",
+     "return_on_equity_ttm": "num",
+     "revenue_per_share_ttm": "num",
+     "revenue_ttm": "num",
+     "sector": "str",
+     "shares_outstanding": "num",
+     "ticker": "str",
+     "trailing_pe": "num",
+     "week_52_high": "num",
+     "week_52_low": "num"
+    }
+   },
+   "undocumented": [
+    "address",
+    "analyst_rating_buy",
+    "analyst_rating_hold",
+    "analyst_rating_sell",
+    "analyst_rating_strong_buy",
+    "analyst_rating_strong_sell",
+    "book_value",
+    "day_200_moving_average",
+    "day_50_moving_average",
+    "diluted_eps_ttm",
+    "dividend_date",
+    "dividend_per_share",
+    "ev_to_ebitda",
+    "ev_to_revenue",
+    "ex_dividend_date",
+    "fiscal_year_end",
+    "forward_pe",
+    "gross_profit_ttm",
+    "latest_quarter",
+    "official_site",
+    "operating_margin_ttm",
+    "price_to_book_ratio",
+    "price_to_sales_ratio_ttm",
+    "profit_margin",
+    "quarterly_earnings_growth_yoy",
+    "quarterly_revenue_growth_yoy",
+    "return_on_assets_ttm",
+    "return_on_equity_ttm",
+    "revenue_per_share_ttm",
+    "revenue_ttm",
+    "trailing_pe"
+   ],
+   "unseen": []
+  },
+  "/api/congress/recent-trades": {
+   "sets": {
+    "data[]": {
+     "amounts": "str",
+     "filed_at_date": "str",
+     "is_active": "bool",
+     "issuer": "str",
+     "member_type": "str",
+     "name": "str",
+     "notes": "str",
+     "politician_id": "str",
+     "reporter": "str",
+     "ticker": "null|str",
+     "transaction_date": "str",
+     "txn_type": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/darkpool/recent": {
+   "sets": {
+    "data[]": {
+     "canceled": "bool",
+     "executed_at": "str",
+     "ext_hour_sold_codes": "str",
+     "market_center": "str",
+     "nbbo_ask": "str#",
+     "nbbo_ask_quantity": "num",
+     "nbbo_bid": "str#",
+     "nbbo_bid_quantity": "num",
+     "premium": "str#",
+     "price": "str#",
+     "sale_cond_codes": "null",
+     "size": "num",
+     "ticker": "str",
+     "tracking_id": "num",
+     "trade_code": "null",
+     "trade_settlement": "str",
+     "trf_executed_at": "str",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/darkpool/{ticker}": {
+   "sets": {
+    "data[]": {
+     "canceled": "bool",
+     "executed_at": "str",
+     "ext_hour_sold_codes": "str",
+     "market_center": "str",
+     "nbbo_ask": "str#",
+     "nbbo_ask_quantity": "num",
+     "nbbo_bid": "str#",
+     "nbbo_bid_quantity": "num",
+     "premium": "str#",
+     "price": "str#",
+     "sale_cond_codes": "null",
+     "size": "num",
+     "ticker": "str",
+     "tracking_id": "num",
+     "trade_code": "null",
+     "trade_settlement": "str",
+     "trf_executed_at": "str",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/darkpool/{ticker}/price-levels": {
+   "sets": {
+    "data[]": {
+     "dark_pool_volume": "str#",
+     "price": "str#",
+     "regular_volume": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/earnings/{ticker}": {
+   "sets": {
+    "data[]": {
+     "actual_eps": "null|str#",
+     "ending_fiscal_quarter": "str",
+     "expected_move": "null|str#",
+     "expected_move_perc": "null|str#",
+     "long_straddle_1d": "null|str#",
+     "long_straddle_1w": "null|str#",
+     "post_earnings_move_1d": "null|str#",
+     "post_earnings_move_1w": "null|str#",
+     "post_earnings_move_2w": "null|str#",
+     "post_earnings_move_3d": "null|str#",
+     "pre_earnings_move_1d": "null|str#",
+     "pre_earnings_move_1w": "null|str#",
+     "pre_earnings_move_2w": "null|str#",
+     "pre_earnings_move_3d": "null|str#",
+     "report_date": "str",
+     "report_time": "str",
+     "short_straddle_1d": "null|str#",
+     "short_straddle_1w": "null|str#",
+     "source": "str",
+     "street_mean_est": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/economy/{indicator}": {
+   "sets": {
+    "data.data[]": {
+     "date": "str",
+     "value": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/etfs/{ticker}/holdings": {
+   "sets": {
+    "data[]": {
+     "avg30_volume": "str#",
+     "bearish_premium": "str#",
+     "bullish_premium": "str#",
+     "call_premium": "str#",
+     "call_volume": "num",
+     "close": "str#",
+     "continent": "str",
+     "country_code": "str",
+     "country_name": "str",
+     "cusip": "null",
+     "etf": "str",
+     "has_options": "bool",
+     "high": "str#",
+     "isin": "null",
+     "low": "str#",
+     "name": "null",
+     "open": "str#",
+     "prev_price": "str#",
+     "put_premium": "str#",
+     "put_volume": "num",
+     "sector": "str",
+     "shares": "str#",
+     "short_name": "str",
+     "ticker": "str",
+     "type": "str",
+     "updated": "str",
+     "volume": "str#",
+     "week52_high": "str#",
+     "week52_low": "str#",
+     "weight": "str#"
+    }
+   },
+   "undocumented": [
+    "continent",
+    "country_code",
+    "country_name",
+    "cusip",
+    "etf",
+    "isin",
+    "shares",
+    "short_name",
+    "type",
+    "updated",
+    "week52_high",
+    "week52_low",
+    "weight"
+   ],
+   "unseen": [
+    "week_52_high",
+    "week_52_low"
+   ]
+  },
+  "/api/etfs/{ticker}/in-outflow": {
+   "sets": {
+    "data[]": {
+     "change": "num",
+     "change_prem": "str#",
+     "close": "str#",
+     "date": "str",
+     "expiration_cycle": "str",
+     "is_fomc": "bool",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "expiration_cycle"
+   ],
+   "unseen": []
+  },
+  "/api/group-flow/{flow_group}/greek-flow": {
+   "sets": {
+    "data[]": {
+     "dir_delta_flow": "str#",
+     "dir_vega_flow": "str#",
+     "flow_group": "str",
+     "net_call_premium": "str#",
+     "net_call_volume": "num",
+     "net_put_premium": "str#",
+     "net_put_volume": "num",
+     "otm_dir_delta_flow": "str#",
+     "otm_dir_vega_flow": "str#",
+     "otm_net_call_premium": "str#",
+     "otm_net_call_volume": "num",
+     "otm_net_put_premium": "str#",
+     "otm_net_put_volume": "num",
+     "otm_total_delta_flow": "str#",
+     "otm_total_vega_flow": "str#",
+     "timestamp": "str",
+     "total_delta_flow": "str#",
+     "total_vega_flow": "str#",
+     "transactions": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "otm_net_call_premium",
+    "otm_net_call_volume",
+    "otm_net_put_premium",
+    "otm_net_put_volume"
+   ],
+   "unseen": []
+  },
+  "/api/insider/transactions": {
+   "sets": {
+    "data[]": {
+     "amount": "num",
+     "date_excercisable": "null",
+     "director_indirect": "str",
+     "expiration_date": "null",
+     "filing_date": "str",
+     "formtype": "str#",
+     "id": "str",
+     "ids": "arr",
+     "is_10b5_1": "bool",
+     "is_director": "bool",
+     "is_officer": "bool",
+     "is_s_p_500": "bool",
+     "is_ten_percent_owner": "bool",
+     "marketcap": "str#",
+     "natureofownership": "null|str",
+     "next_earnings_date": "str",
+     "officer_title": "str",
+     "owner_name": "str",
+     "price": "str#",
+     "price_excercisable": "null",
+     "reporter_cik": "str#",
+     "reporter_is_public_company": "bool",
+     "sector": "str",
+     "security_ad_code": "str",
+     "security_title": "str",
+     "shares_owned_after": "num",
+     "shares_owned_before": "num",
+     "stock_price": "str#",
+     "ticker": "str",
+     "transaction_code": "str",
+     "transaction_date": "str",
+     "transactions": "num"
+    }
+   },
+   "undocumented": [
+    "id",
+    "is_s_p_500",
+    "marketcap",
+    "next_earnings_date",
+    "reporter_is_public_company",
+    "sector",
+    "stock_price"
+   ],
+   "unseen": [
+    "accession_no",
+    "amended_original_accession_no",
+    "issuer_cik"
+   ]
+  },
+  "/api/insider/{ticker}/ticker-flow": {
+   "sets": {
+    "data[]": {
+     "avg_price": "str#",
+     "avg_price_10b5": "null|str#",
+     "buy_sell": "str",
+     "date": "str",
+     "premium": "str#",
+     "premium_10b5": "str#",
+     "ticker": "str",
+     "transactions": "num",
+     "transactions_10b5": "num",
+     "uniq_insiders": "num",
+     "uniq_insiders_10b5": "num",
+     "volume": "num",
+     "volume_10b5": "num"
+    }
+   },
+   "undocumented": [
+    "avg_price_10b5",
+    "premium_10b5",
+    "ticker",
+    "transactions_10b5",
+    "uniq_insiders_10b5",
+    "volume_10b5"
+   ],
+   "unseen": []
+  },
+  "/api/institution/{ticker}/ownership": {
+   "renames": {
+    "units_change": "units_changed"
+   },
+   "sets": {
+    "data[]": {
+     "avg_price": "str#",
+     "cik": "str#",
+     "filing_date": "str",
+     "first_buy": "str",
+     "historical_units": "arr",
+     "inst_share_value": "str#",
+     "inst_value": "str#",
+     "name": "str",
+     "people": "arr",
+     "report_date": "str",
+     "shares_outstanding": "str#",
+     "short_name": "null|str",
+     "tags": "arr",
+     "units": "str#",
+     "units_changed": "str#",
+     "value": "str#"
+    }
+   },
+   "undocumented": [
+    "cik",
+    "units_changed"
+   ],
+   "unseen": [
+    "units_change"
+   ]
+  },
+  "/api/market/daily-report": {
+   "sets": {
+    "data.catalysts": {
+     "counts_by_type": "obj",
+     "data": "arr",
+     "date_max": "str",
+     "date_min": "str",
+     "types": "arr"
+    },
+    "data.catalysts.data[]": {
+     "date": "str",
+     "datetime": "str",
+     "has_options": "null",
+     "impact": "str",
+     "marketcap": "null",
+     "meta": "obj",
+     "source_url": "null",
+     "subtitle": "str",
+     "ticker": "null",
+     "title": "str",
+     "type": "str"
+    },
+    "data.flow": {
+     "bearish": "arr",
+     "bullish": "arr"
+    },
+    "data.flow.bearish[]": {
+     "net_premium": "num",
+     "ticker": "str"
+    },
+    "data.flow.bullish[]": {
+     "net_premium": "num",
+     "ticker": "str"
+    },
+    "data.skew[]": {
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str"
+    },
+    "data.skew[].components": {
+     "iv_percentile": "obj",
+     "regime_score": "obj",
+     "skew_percentile": "obj",
+     "vov_percentile": "obj",
+     "vrp_z": "obj"
+    },
+    "data.tide": {
+     "data": "arr",
+     "date": "str"
+    },
+    "data.vol": {
+     "cheapest": "arr",
+     "richest": "arr"
+    },
+    "data.vol.cheapest[]": {
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str"
+    },
+    "data.vol.richest[]": {
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str"
+    }
+   },
+   "undocumented": [
+    "bearish",
+    "bullish",
+    "cheapest",
+    "components",
+    "counts_by_type",
+    "data",
+    "date_max",
+    "date_min",
+    "datetime",
+    "direction",
+    "has_options",
+    "impact",
+    "iv_percentile",
+    "marketcap",
+    "meta",
+    "net_premium",
+    "regime_score",
+    "richest",
+    "sample_size",
+    "score",
+    "skew_percentile",
+    "source_url",
+    "subtitle",
+    "ticker",
+    "title",
+    "type",
+    "types",
+    "updated_at",
+    "vov_percentile",
+    "vrp_z"
+   ],
+   "unseen": []
+  },
+  "/api/market/economic-calendar": {
+   "sets": {
+    "data[]": {
+     "event": "str",
+     "forecast": "null",
+     "prev": "null|str|str#",
+     "reported_period": "null|str",
+     "time": "str",
+     "type": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/market/fda-calendar": {
+   "sets": {
+    "data[]": {
+     "benzinga_id": "str",
+     "catalyst": "str",
+     "commentary": "str",
+     "created_at": "str",
+     "date_string": "str",
+     "description": "str",
+     "drug": "str",
+     "end_date": "null|str",
+     "event_type": "str",
+     "has_options": "bool|null",
+     "indication": "str",
+     "marketcap": "null|str#",
+     "nic_number": "str",
+     "notes": "str",
+     "outcome": "str",
+     "outcome_brief": "str",
+     "source_link": "str",
+     "source_type": "str",
+     "start_date": "str",
+     "status": "str",
+     "target_date": "str",
+     "ticker": "str",
+     "time": "str",
+     "unique_identifier": "str",
+     "updated_at": "str"
+    }
+   },
+   "undocumented": [
+    "benzinga_id",
+    "commentary",
+    "created_at",
+    "date_string",
+    "event_type",
+    "nic_number",
+    "source_type",
+    "target_date",
+    "time",
+    "unique_identifier",
+    "updated_at"
+   ],
+   "unseen": []
+  },
+  "/api/market/insider-buy-sells": {
+   "sets": {
+    "data[]": {
+     "filing_date": "str",
+     "purchases": "num",
+     "purchases_notional": "str#",
+     "sells": "num",
+     "sells_notional": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/market/market-tide": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "net_call_premium": "str#",
+     "net_put_premium": "str#",
+     "net_volume": "num",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [
+    "date"
+   ],
+   "unseen": []
+  },
+  "/api/market/oi-change": {
+   "sets": {
+    "data[]": {
+     "avg_price": "str#",
+     "curr_date": "str",
+     "curr_oi": "num",
+     "days_of_oi_increases": "num",
+     "days_of_vol_greater_than_oi": "num",
+     "last_ask": "str#",
+     "last_bid": "str#",
+     "last_date": "str",
+     "last_fill": "str#",
+     "last_oi": "num",
+     "oi_change": "str#",
+     "oi_diff_plain": "num",
+     "option_symbol": "str",
+     "percentage_of_total": "str#",
+     "prev_ask_volume": "num",
+     "prev_bid_volume": "num",
+     "prev_mid_volume": "num",
+     "prev_multi_leg_volume": "num",
+     "prev_neutral_volume": "num",
+     "prev_stock_multi_leg_volume": "num",
+     "prev_total_premium": "str#",
+     "rnk": "num",
+     "trades": "num",
+     "underlying_symbol": "str",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "days_of_oi_increases",
+    "days_of_vol_greater_than_oi"
+   ],
+   "unseen": []
+  },
+  "/api/market/sector-etfs": {
+   "sets": {
+    "data[]": {
+     "avg30_call_volume": "str#",
+     "avg30_put_volume": "str#",
+     "avg30_stock_volume": "str#",
+     "avg_30_day_call_volume": "str#",
+     "avg_30_day_put_volume": "str#",
+     "avg_7_day_call_volume": "str#",
+     "avg_7_day_put_volume": "str#",
+     "bearish_premium": "str#",
+     "bullish_premium": "str#",
+     "call_premium": "str#",
+     "call_volume": "num",
+     "full_name": "str",
+     "high": "str#",
+     "in_out_flow": "arr",
+     "last": "str#",
+     "low": "str#",
+     "marketcap": "str#",
+     "open": "str#",
+     "prev_close": "str#",
+     "prev_date": "str",
+     "put_premium": "str#",
+     "put_volume": "num",
+     "ticker": "str",
+     "volume": "num",
+     "week52_high": "str#",
+     "week52_low": "str#"
+    },
+    "data[].in_out_flow[]": {
+     "change": "num",
+     "date": "str"
+    }
+   },
+   "undocumented": [
+    "avg30_call_volume",
+    "avg30_put_volume",
+    "change",
+    "date",
+    "in_out_flow",
+    "last",
+    "week52_high",
+    "week52_low"
+   ],
+   "unseen": [
+    "close",
+    "week_52_high",
+    "week_52_low"
+   ]
+  },
+  "/api/market/top-net-impact": {
+   "sets": {
+    "data[]": {
+     "net_premium": "num",
+     "ticker": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/market/total-options-volume": {
+   "sets": {
+    "data[]": {
+     "call_premium": "str#",
+     "call_volume": "num",
+     "date": "str",
+     "put_premium": "str#",
+     "put_volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/market/{sector}/sector-tide": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "net_call_premium": "str#",
+     "net_put_premium": "str#",
+     "net_volume": "num",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [
+    "date"
+   ],
+   "unseen": []
+  },
+  "/api/market/{ticker}/etf-tide": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "net_call_premium": "str#",
+     "net_put_premium": "str#",
+     "net_volume": "str#",
+     "timestamp": "str",
+     "underlying_price": "str#"
+    }
+   },
+   "undocumented": [
+    "date",
+    "underlying_price"
+   ],
+   "unseen": []
+  },
+  "/api/news/headlines": {
+   "sets": {
+    "data[]": {
+     "created_at": "str",
+     "headline": "str",
+     "is_major": "bool",
+     "meta": "obj",
+     "sentiment": "str",
+     "source": "str",
+     "tags": "arr",
+     "tickers": "arr"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/option-activity/unusual": {
+   "sets": {
+    "data[]": {
+     "ask_side_perc_7_day": "str#",
+     "ask_side_volume": "num",
+     "avg_price": "str#",
+     "bid_side_perc_7_day": "str#",
+     "bid_side_volume": "num",
+     "chain_prev_close": "str#",
+     "close": "str#",
+     "cross_volume": "num",
+     "days_of_oi_increases": "num",
+     "days_of_vol_greater_than_oi": "num",
+     "delta": "str#",
+     "er_time": "null|str",
+     "expiry": "str",
+     "floor_volume": "num",
+     "gamma": "str#",
+     "high": "str#",
+     "is_new": "bool",
+     "issue_type": "str",
+     "iv_change": "str#",
+     "last_fill": "str",
+     "low": "str#",
+     "mid_volume": "num",
+     "multileg_volume": "num",
+     "next_earnings_date": "null|str",
+     "no_side_volume": "num",
+     "open": "str#",
+     "open_interest": "num",
+     "option_symbol": "str",
+     "option_type": "str",
+     "option_watchlists": "null",
+     "premium": "str#",
+     "prev_iv": "str#",
+     "prev_oi": "num",
+     "roc": "str#",
+     "sector": "null|str",
+     "stock_multi_leg_volume": "num",
+     "stock_price": "str#",
+     "strike": "str#",
+     "sweep_volume": "num",
+     "theta": "str#",
+     "ticker_symbol": "str",
+     "ticker_vol": "num",
+     "total_ask_changes": "num",
+     "total_bid_changes": "num",
+     "trades": "num",
+     "vega": "str#",
+     "vol_pctile_15d": "null",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "ask_side_perc_7_day",
+    "bid_side_perc_7_day",
+    "days_of_oi_increases",
+    "days_of_vol_greater_than_oi",
+    "delta",
+    "gamma",
+    "is_new",
+    "issue_type",
+    "iv_change",
+    "option_watchlists",
+    "prev_iv",
+    "prev_oi",
+    "roc",
+    "theta",
+    "ticker_symbol",
+    "vega",
+    "vol_pctile_15d"
+   ],
+   "unseen": []
+  },
+  "/api/option-contract/{id}/historic": {
+   "sets": {
+    "chains[]": {
+     "ask_volume": "num",
+     "avg_price": "str#",
+     "bid_volume": "num",
+     "canceled_volume": "num",
+     "cross_volume": "num",
+     "date": "str",
+     "flex_oi_transfer": "null",
+     "floor_volume": "num",
+     "high_price": "str#",
+     "implied_volatility": "str#",
+     "iv_high": "str#",
+     "iv_low": "str#",
+     "last_price": "str#",
+     "last_tape_time": "str",
+     "low_price": "str#",
+     "mid_volume": "num",
+     "multi_leg_volume": "num",
+     "nbbo_ask": "str#",
+     "nbbo_bid": "str#",
+     "neutral_volume": "num",
+     "open_interest": "num",
+     "open_price": "str#",
+     "stock_multi_leg_volume": "num",
+     "sweep_volume": "num",
+     "ticker_vol": "num",
+     "total_ask_changes": "num",
+     "total_bid_changes": "num",
+     "total_premium": "str#",
+     "trades": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/option-trades/flow-alerts": {
+   "sets": {
+    "data[]": {
+     "alert_rule": "str",
+     "all_opening_trades": "bool",
+     "ask": "str#",
+     "bid": "str#",
+     "created_at": "str",
+     "delta": "num",
+     "end_time": "num",
+     "er_time": "null|str",
+     "expiry": "str",
+     "expiry_count": "num",
+     "gamma": "num",
+     "has_floor": "bool",
+     "has_multileg": "bool",
+     "has_singleleg": "bool",
+     "has_sweep": "bool",
+     "id": "str",
+     "issue_type": "null|str",
+     "iv": "num",
+     "iv_end": "str#",
+     "iv_start": "str#",
+     "marketcap": "null|str#",
+     "missing_periscope": "bool",
+     "next_earnings_date": "null|str",
+     "open_interest": "num",
+     "option_chain": "str",
+     "price": "str#",
+     "rho": "num",
+     "rule_id": "str",
+     "sector": "null|str",
+     "start_time": "num",
+     "strike": "str#",
+     "theo": "num",
+     "theta": "num",
+     "ticker": "str",
+     "total_ask_side_prem": "str#",
+     "total_bid_side_prem": "str#",
+     "total_premium": "str#",
+     "total_size": "num",
+     "trade_count": "num",
+     "type": "str",
+     "underlying_price": "null|str#",
+     "vega": "num",
+     "volume": "num",
+     "volume_oi_ratio": "str#"
+    }
+   },
+   "undocumented": [
+    "ask",
+    "bid",
+    "end_time",
+    "er_time",
+    "id",
+    "iv_end",
+    "iv_start",
+    "marketcap",
+    "missing_periscope",
+    "next_earnings_date",
+    "rule_id",
+    "sector",
+    "start_time"
+   ],
+   "unseen": []
+  },
+  "/api/option-trades/multi-leg": {
+   "sets": {
+    "data[]": {
+     "all_opening_legs": "bool",
+     "all_otm": "bool",
+     "avg_iv": "str#",
+     "bid_ask_spread": "str#",
+     "breakevens": "arr",
+     "code": "str",
+     "diff_expirations": "bool",
+     "diff_strikes": "bool",
+     "diff_types": "bool",
+     "direction": "str",
+     "executed_at": "str",
+     "id": "str",
+     "iv_term_spread": "null|str#",
+     "ivs": "arr",
+     "leg_count": "num",
+     "max_dte": "num",
+     "max_loss": "null|str#",
+     "max_profit": "null|str#",
+     "max_strike": "str#",
+     "min_dte": "num",
+     "min_strike": "str#",
+     "net_ask": "str#",
+     "net_bid": "str#",
+     "net_delta": "str#",
+     "net_gamma": "str#",
+     "net_premium": "str#",
+     "net_price": "str#",
+     "net_side": "str",
+     "net_theta": "str#",
+     "net_vega": "str#",
+     "ratios": "num",
+     "size": "num",
+     "strategy": "str",
+     "strikes": "arr",
+     "ticker": "str",
+     "total_premium": "str#",
+     "txns": "num",
+     "underlying_price": "str#",
+     "uniq_exchanges": "arr"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/options-pulse/total": {
+   "sets": {
+    "data.intraday[]": {
+     "call_txn": "num",
+     "hr_min": "str#",
+     "intvl_sntm_score": "num",
+     "mkt_sntm": "num",
+     "put_txn": "num",
+     "sntm_score": "num",
+     "trd_dt": "str"
+    },
+    "data.latest": {
+     "call_txn": "num",
+     "hr_min": "str#",
+     "intvl_sntm_score": "num",
+     "mkt_sntm": "num",
+     "put_txn": "num",
+     "sntm_score": "num",
+     "trd_dt": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/screener/analysts": {
+   "sets": {
+    "data[]": {
+     "action": "str",
+     "analyst_name": "str",
+     "firm": "str",
+     "recommendation": "str",
+     "sector": "str",
+     "target": "str#",
+     "ticker": "str",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/screener/option-contracts": {
+   "sets": {
+    "data[]": {
+     "ask_side_perc_7_day": "str#",
+     "ask_side_volume": "num",
+     "avg_price": "str#",
+     "bid_side_perc_7_day": "str#",
+     "bid_side_volume": "num",
+     "chain_prev_close": "str#",
+     "close": "str#",
+     "cross_volume": "num",
+     "days_of_oi_increases": "num",
+     "days_of_vol_greater_than_oi": "num",
+     "delta": "str#",
+     "er_time": "str",
+     "expiry": "str",
+     "floor_volume": "num",
+     "gamma": "str#",
+     "high": "str#",
+     "is_new": "bool",
+     "issue_type": "str",
+     "iv_change": "str#",
+     "last_fill": "str",
+     "low": "str#",
+     "mid_volume": "num",
+     "multileg_volume": "num",
+     "next_earnings_date": "str",
+     "no_side_volume": "num",
+     "open": "str#",
+     "open_interest": "num",
+     "option_symbol": "str",
+     "option_type": "str",
+     "option_watchlists": "null",
+     "premium": "str#",
+     "prev_iv": "str#",
+     "prev_oi": "num",
+     "roc": "str#",
+     "sector": "str",
+     "stock_multi_leg_volume": "num",
+     "stock_price": "str#",
+     "strike": "str#",
+     "sweep_volume": "num",
+     "theta": "str#",
+     "ticker_symbol": "str",
+     "ticker_vol": "num",
+     "total_ask_changes": "num",
+     "total_bid_changes": "num",
+     "trades": "num",
+     "vega": "str#",
+     "vol_pctile_15d": "null",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "ask_side_perc_7_day",
+    "bid_side_perc_7_day",
+    "days_of_oi_increases",
+    "days_of_vol_greater_than_oi",
+    "delta",
+    "gamma",
+    "is_new",
+    "issue_type",
+    "iv_change",
+    "option_watchlists",
+    "prev_iv",
+    "prev_oi",
+    "roc",
+    "theta",
+    "ticker_symbol",
+    "vega",
+    "vol_pctile_15d"
+   ],
+   "unseen": []
+  },
+  "/api/screener/stocks": {
+   "sets": {
+    "data[]": {
+     "adx_14": "num",
+     "aroon_14_down": "num",
+     "aroon_14_up": "num",
+     "ask": "null",
+     "ask_quantity": "null",
+     "atr_14": "num",
+     "avg30_volume": "str#",
+     "avg_30_day_call_oi": "str#",
+     "avg_30_day_call_volume": "str#",
+     "avg_30_day_put_oi": "str#",
+     "avg_30_day_put_volume": "str#",
+     "avg_3_day_call_volume": "str#",
+     "avg_3_day_put_volume": "str#",
+     "avg_7_day_call_volume": "str#",
+     "avg_7_day_put_volume": "str#",
+     "bb_14_2_lower": "num",
+     "bb_14_2_middle": "num",
+     "bb_14_2_upper": "num",
+     "bb_20_2_lower": "num",
+     "bb_20_2_middle": "num",
+     "bb_20_2_upper": "num",
+     "bearish_premium": "str#",
+     "bid": "null",
+     "bid_quantity": "null",
+     "bullish_premium": "str#",
+     "call_open_interest": "num",
+     "call_premium": "str#",
+     "call_premium_mid_side": "str#",
+     "call_volume": "num",
+     "call_volume_ask_side": "num",
+     "call_volume_bid_side": "num",
+     "call_volume_mid_side": "num",
+     "cci_14": "num",
+     "close": "str#",
+     "cum_dir_delta": "num",
+     "cum_dir_gamma": "num",
+     "cum_dir_vega": "num",
+     "date": "str",
+     "distance_to_52w_high_30d_stddevs": "str#",
+     "distance_to_52w_low_30d_stddevs": "str#",
+     "dividend_yield": "null|str#",
+     "earnings_perc": "str#",
+     "ema_14": "num",
+     "ema_20": "num",
+     "ema_21": "num",
+     "ema_50": "num",
+     "ema_9": "num",
+     "eps_growth_12q": "str#",
+     "eps_growth_16q": "str#",
+     "eps_growth_4q": "str#",
+     "eps_growth_8q": "str#",
+     "er_time": "str",
+     "etf_share_flow": "null",
+     "five_year_close": "str#",
+     "five_year_perc": "str#",
+     "full_name": "null",
+     "gex_charm_per_one_percent_move_dir": "str#",
+     "gex_charm_per_one_percent_move_oi": "str#",
+     "gex_charm_per_one_percent_move_vol": "str#",
+     "gex_daily_call_charm": "str#",
+     "gex_daily_call_delta": "str#",
+     "gex_daily_call_gex": "str#",
+     "gex_daily_call_vanna": "str#",
+     "gex_daily_net_charm": "str#",
+     "gex_daily_net_delta": "str#",
+     "gex_daily_net_gex": "str#",
+     "gex_daily_net_vanna": "str#",
+     "gex_daily_put_charm": "str#",
+     "gex_daily_put_delta": "str#",
+     "gex_daily_put_gex": "str#",
+     "gex_daily_put_vanna": "str#",
+     "gex_delta_per_one_percent_move_oi": "str#",
+     "gex_delta_per_one_percent_move_vol": "str#",
+     "gex_gamma_per_one_percent_move_dir": "str#",
+     "gex_gamma_per_one_percent_move_oi": "str#",
+     "gex_gamma_per_one_percent_move_vol": "str#",
+     "gex_net_change": "str#",
+     "gex_perc_change": "str#",
+     "gex_ratio": "str#",
+     "gex_vanna_per_one_percent_move_dir": "str#",
+     "gex_vanna_per_one_percent_move_oi": "str#",
+     "gex_vanna_per_one_percent_move_vol": "str#",
+     "has_options": "bool",
+     "high": "str#",
+     "implied_move": "str#",
+     "implied_move_1": "str#",
+     "implied_move_14": "str#",
+     "implied_move_180": "str#",
+     "implied_move_30": "str#",
+     "implied_move_365": "str#",
+     "implied_move_5": "str#",
+     "implied_move_60": "str#",
+     "implied_move_7": "str#",
+     "implied_move_90": "str#",
+     "implied_move_perc": "str#",
+     "implied_move_perc_1": "str#",
+     "implied_move_perc_14": "str#",
+     "implied_move_perc_180": "str#",
+     "implied_move_perc_30": "str#",
+     "implied_move_perc_365": "str#",
+     "implied_move_perc_5": "str#",
+     "implied_move_perc_60": "str#",
+     "implied_move_perc_7": "str#",
+     "implied_move_perc_90": "str#",
+     "industry_type": "str",
+     "insider_buy_volume_12m": "num",
+     "insider_buy_volume_3m": "num",
+     "insider_buy_volume_6m": "num",
+     "insider_sell_volume_12m": "num",
+     "insider_sell_volume_3m": "num",
+     "insider_sell_volume_6m": "num",
+     "intraday_change": "str#",
+     "is_index": "bool",
+     "issue_type": "str",
+     "iv30d": "str#",
+     "iv30d_1d": "str#",
+     "iv30d_1m": "str#",
+     "iv30d_1w": "str#",
+     "iv_percentile_1m": "str#",
+     "iv_percentile_1y": "str#",
+     "iv_rank": "str#",
+     "iv_rank_1m": "str#",
+     "last_earnings_date": "str",
+     "last_earnings_price": "str#",
+     "latest_dividend": "null|str#",
+     "latest_dividend_date": "null|str",
+     "latest_dividend_payment_date": "null|str",
+     "log_52w_range_position_perc": "str#",
+     "low": "str#",
+     "macd_12_26_9": "num",
+     "macd_12_26_9_histogram": "num",
+     "macd_12_26_9_signal": "num",
+     "marketcap": "str#",
+     "mfi_14": "num",
+     "net_call_premium": "str#",
+     "net_premium": "str#",
+     "net_put_premium": "str#",
+     "next_dividend_date": "null|str",
+     "next_earnings_date": "str",
+     "obv": "num",
+     "one_day_perc": "str#",
+     "one_day_return_stddevs": "str#",
+     "one_month_close": "str#",
+     "one_month_perc": "str#",
+     "one_month_return_stddevs": "str#",
+     "one_week_close": "str#",
+     "one_week_perc": "str#",
+     "one_week_return_stddevs": "str#",
+     "one_year_close": "str#",
+     "one_year_perc": "str#",
+     "open": "str#",
+     "prev_call_oi": "num",
+     "prev_call_volume": "num",
+     "prev_close": "str#",
+     "prev_put_oi": "num",
+     "prev_put_volume": "num",
+     "put_call_ratio": "str#",
+     "put_open_interest": "num",
+     "put_premium": "str#",
+     "put_premium_mid_side": "str#",
+     "put_volume": "num",
+     "put_volume_ask_side": "num",
+     "put_volume_bid_side": "num",
+     "put_volume_mid_side": "num",
+     "quote_time": "null",
+     "realized_volatility": "str#",
+     "relative_volume": "str#",
+     "rsi_14": "num",
+     "rv_1d_last_12q": "str#",
+     "sector": "str",
+     "shares_outstanding": "str#",
+     "shares_outstanding_growth_12q": "null|str#",
+     "shares_outstanding_growth_4q": "str#",
+     "shares_outstanding_growth_8q": "null|str#",
+     "short_int": "str#",
+     "six_month_close": "str#",
+     "six_month_perc": "str#",
+     "sma_10": "num",
+     "sma_14": "num",
+     "sma_20": "num",
+     "sma_200": "num",
+     "sma_50": "num",
+     "steepness_180_30": "str#",
+     "stoch_5_3_3_d": "num",
+     "stoch_5_3_3_k": "num",
+     "stock_volume": "num",
+     "three_month_close": "str#",
+     "three_month_perc": "str#",
+     "ticker": "str",
+     "total_open_interest": "num",
+     "ttm_dividend": "null|str#",
+     "variance_risk_premium": "str#",
+     "volatility": "str#",
+     "volatility_1": "str#",
+     "volatility_14": "str#",
+     "volatility_180": "str#",
+     "volatility_30": "str#",
+     "volatility_365": "str#",
+     "volatility_5": "str#",
+     "volatility_60": "str#",
+     "volatility_7": "str#",
+     "volatility_90": "str#",
+     "week_52_high": "str#",
+     "week_52_low": "str#",
+     "willr_14": "num",
+     "ytd_close": "str#",
+     "ytd_perc": "str#",
+     "z_score": "str#"
+    }
+   },
+   "undocumented": [
+    "distance_to_52w_high_30d_stddevs",
+    "distance_to_52w_low_30d_stddevs",
+    "log_52w_range_position_perc",
+    "one_day_return_stddevs",
+    "one_month_return_stddevs",
+    "one_week_return_stddevs"
+   ],
+   "unseen": [
+    "missing_periscope"
+   ]
+  },
+  "/api/seasonality/market": {
+   "sets": {
+    "data[]": {
+     "avg_change": "str#",
+     "max_change": "str#",
+     "median_change": "str#",
+     "min_change": "str#",
+     "month": "num",
+     "positive_closes": "num",
+     "positive_months_perc": "str#",
+     "ticker": "str",
+     "years": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/short_screener": {
+   "sets": {
+    "data[]": {
+     "days_to_cover": "str#",
+     "fee_rate": "null",
+     "market_date": "str",
+     "rebate_rate": "null",
+     "short_interest": "num",
+     "short_shares_available": "null",
+     "si_float": "str#",
+     "si_float_with_synth_long_pct_of_total_shares": "str#",
+     "symbol": "str",
+     "total_float": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/shorts/{ticker}/data": {
+   "sets": {
+    "data[]": {
+     "fee_rate": "str#",
+     "name": "str",
+     "rebate_rate": "str#",
+     "short_shares_available": "num",
+     "symbol": "str",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": [
+    "currency"
+   ]
+  },
+  "/api/shorts/{ticker}/interest-float/v2": {
+   "sets": {
+    "data[]": {
+     "days_to_cover": "str#",
+     "fee_rate": "str#",
+     "market_date": "str",
+     "rebate_rate": "str#",
+     "short_interest": "num",
+     "short_shares_available": "num",
+     "si_float": "str#",
+     "si_float_with_synth_long_pct_of_total_shares": "str#",
+     "symbol": "str",
+     "total_float": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/shorts/{ticker}/volume-and-ratio": {
+   "sets": {
+    "si[]": {
+     "market_date": "str",
+     "short_volume": "num",
+     "short_volume_ratio": "str#",
+     "total_volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": [
+    "close_price"
+   ]
+  },
+  "/api/stock/{ticker}/expiry-breakdown": {
+   "sets": {
+    "data[]": {
+     "chains": "num",
+     "expires": "str",
+     "open_interest": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "expires"
+   ],
+   "unseen": [
+    "expiry"
+   ]
+  },
+  "/api/stock/{ticker}/financials": {
+   "sets": {
+    "data.earnings[]": {
+     "estimated_eps": "null|str#",
+     "fiscal_date_ending": "str",
+     "inserted_at": "str",
+     "report_date": "null|str",
+     "report_time": "null|str",
+     "report_type": "str",
+     "reported_eps": "null|str#",
+     "surprise": "null|str#",
+     "surprise_percentage": "null|str#",
+     "ticker": "str",
+     "updated_at": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/flow-per-expiry": {
+   "sets": {
+    "[]": {
+     "call_otm_premium": "str#",
+     "call_otm_trades": "num",
+     "call_otm_volume": "num",
+     "call_premium": "str#",
+     "call_premium_ask_side": "str#",
+     "call_premium_bid_side": "str#",
+     "call_trades": "num",
+     "call_volume": "num",
+     "call_volume_ask_side": "num",
+     "call_volume_bid_side": "num",
+     "date": "str",
+     "expiry": "str",
+     "put_otm_premium": "str#",
+     "put_otm_trades": "num",
+     "put_otm_volume": "num",
+     "put_premium": "str#",
+     "put_premium_ask_side": "str#",
+     "put_premium_bid_side": "str#",
+     "put_trades": "num",
+     "put_volume": "num",
+     "put_volume_ask_side": "num",
+     "put_volume_bid_side": "num",
+     "ticker": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/flow-per-strike": {
+   "sets": {
+    "[]": {
+     "call_otm_premium": "str#",
+     "call_otm_trades": "num",
+     "call_otm_volume": "num",
+     "call_premium": "str#",
+     "call_premium_ask_side": "str#",
+     "call_premium_bid_side": "str#",
+     "call_trades": "num",
+     "call_volume": "num",
+     "call_volume_ask_side": "num",
+     "call_volume_bid_side": "num",
+     "date": "str",
+     "put_otm_premium": "str#",
+     "put_otm_trades": "num",
+     "put_otm_volume": "num",
+     "put_premium": "str#",
+     "put_premium_ask_side": "str#",
+     "put_premium_bid_side": "str#",
+     "put_trades": "num",
+     "put_volume": "num",
+     "put_volume_ask_side": "num",
+     "put_volume_bid_side": "num",
+     "strike": "str#",
+     "ticker": "str",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [
+    "call_otm_premium",
+    "call_otm_trades",
+    "call_otm_volume",
+    "put_otm_premium",
+    "put_otm_trades",
+    "put_otm_volume"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/fundamental-breakdown": {
+   "sets": {
+    "data.rev_breakdown[]": {
+     "axis": "arr",
+     "field": "str",
+     "members": "arr",
+     "report_date": "str",
+     "rev_group": "str",
+     "value": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/gex-levels": {
+   "sets": {},
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/greek-exposure": {
+   "sets": {
+    "data[]": {
+     "call_charm": "str#",
+     "call_delta": "str#",
+     "call_gamma": "str#",
+     "call_vanna": "str#",
+     "date": "str",
+     "put_charm": "str#",
+     "put_delta": "str#",
+     "put_gamma": "str#",
+     "put_vanna": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/greek-exposure/expiry": {
+   "sets": {
+    "data[]": {
+     "call_charm": "str#",
+     "call_delta": "str#",
+     "call_gex": "str#",
+     "call_vanna": "str#",
+     "date": "str",
+     "dte": "num",
+     "expiry": "str",
+     "put_charm": "str#",
+     "put_delta": "str#",
+     "put_gex": "str#",
+     "put_vanna": "str#"
+    }
+   },
+   "undocumented": [
+    "date",
+    "dte"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/greek-flow": {
+   "sets": {
+    "data[]": {
+     "dir_delta_flow": "str#",
+     "dir_vega_flow": "str#",
+     "otm_dir_delta_flow": "str#",
+     "otm_dir_vega_flow": "str#",
+     "otm_total_delta_flow": "str#",
+     "otm_total_vega_flow": "str#",
+     "ticker": "str",
+     "timestamp": "str",
+     "total_delta_flow": "str#",
+     "total_vega_flow": "str#",
+     "transactions": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/greeks": {
+   "sets": {
+    "data[]": {
+     "call_charm": "str#",
+     "call_delta": "str#",
+     "call_gamma": "str#",
+     "call_option_symbol": "str",
+     "call_rho": "str#",
+     "call_theta": "str#",
+     "call_vanna": "str#",
+     "call_vega": "str#",
+     "call_volatility": "str#",
+     "date": "str",
+     "expiry": "str",
+     "put_charm": "str#",
+     "put_delta": "str#",
+     "put_gamma": "str#",
+     "put_option_symbol": "str",
+     "put_rho": "str#",
+     "put_theta": "str#",
+     "put_vanna": "str#",
+     "put_vega": "str#",
+     "put_volatility": "str#",
+     "strike": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/historical-risk-reversal-skew": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "delta": "num",
+     "risk_reversal": "str#",
+     "ticker": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/info": {
+   "sets": {},
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/interpolated-iv/distribution": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "days": "num",
+     "first_date": "str",
+     "max": "str#",
+     "median": "str#",
+     "min": "str#",
+     "percentile": "str#",
+     "q1": "str#",
+     "q3": "str#",
+     "samples": "num",
+     "ticker": "str",
+     "volatility": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/iv-rank": {
+   "sets": {
+    "data[]": {
+     "close": "str#",
+     "date": "str",
+     "iv_rank_1y": "str#",
+     "updated_at": "str",
+     "volatility": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/max-pain": {
+   "sets": {
+    "data[]": {
+     "close": "str#",
+     "expiry": "str",
+     "max_pain": "str#",
+     "next_lower_strike": "str#",
+     "next_upper_strike": "str#",
+     "open": "str#"
+    }
+   },
+   "undocumented": [
+    "close",
+    "next_lower_strike",
+    "next_upper_strike",
+    "open"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/net-prem-ticks": {
+   "sets": {
+    "data[]": {
+     "call_volume": "num",
+     "call_volume_ask_side": "num",
+     "call_volume_bid_side": "num",
+     "date": "str",
+     "net_call_premium": "str#",
+     "net_call_volume": "num",
+     "net_delta": "str#",
+     "net_put_premium": "str#",
+     "net_put_volume": "num",
+     "put_volume": "num",
+     "put_volume_ask_side": "num",
+     "put_volume_bid_side": "num",
+     "tape_time": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/nope": {
+   "sets": {
+    "data[]": {
+     "call_delta": "str#",
+     "call_fill_delta": "str#",
+     "call_vol": "num",
+     "nope": "str#",
+     "nope_fill": "str#",
+     "put_delta": "str#",
+     "put_fill_delta": "str#",
+     "put_vol": "num",
+     "stock_vol": "num",
+     "timestamp": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/ohlc/{candle_size}": {
+   "sets": {
+    "data[]": {
+     "close": "str#",
+     "date": "str",
+     "end_time": "str",
+     "high": "str#",
+     "low": "str#",
+     "market_time": "str",
+     "open": "str#",
+     "start_time": "str",
+     "total_volume": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "date"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/oi-change": {
+   "sets": {
+    "data[]": {
+     "avg_price": "str#",
+     "curr_date": "str",
+     "curr_oi": "num",
+     "days_of_oi_increases": "num",
+     "days_of_vol_greater_than_oi": "num",
+     "last_ask": "str#",
+     "last_bid": "str#",
+     "last_date": "str",
+     "last_fill": "str#",
+     "last_oi": "num",
+     "oi_change": "str#",
+     "oi_diff_plain": "num",
+     "option_symbol": "str",
+     "percentage_of_total": "str#",
+     "prev_ask_volume": "num",
+     "prev_bid_volume": "num",
+     "prev_mid_volume": "num",
+     "prev_multi_leg_volume": "num",
+     "prev_neutral_volume": "num",
+     "prev_stock_multi_leg_volume": "num",
+     "prev_total_premium": "str#",
+     "rnk": "num",
+     "trades": "num",
+     "underlying_symbol": "str",
+     "volume": "num"
+    }
+   },
+   "undocumented": [
+    "days_of_oi_increases",
+    "days_of_vol_greater_than_oi"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/oi-per-strike": {
+   "sets": {
+    "data[]": {
+     "call_oi": "num",
+     "date": "str",
+     "put_oi": "num",
+     "strike": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/option-chains": {
+   "sets": {
+    "data[]": {
+     "delta": "null|str#",
+     "expires": "str",
+     "gamma": "null|str#",
+     "implied_volatility": "null|str#",
+     "last_tape_time": "str",
+     "nbbo_ask": "str#",
+     "nbbo_bid": "str#",
+     "open_interest": "num",
+     "option_symbol": "str",
+     "option_type": "str",
+     "rho": "null|str#",
+     "strike": "str#",
+     "theta": "null|str#",
+     "vega": "null|str#",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/option-contracts": {
+   "sets": {
+    "data[]": {
+     "ask_volume": "num",
+     "avg_price": "str#",
+     "bid_volume": "num",
+     "delta": "num",
+     "floor_volume": "num",
+     "gamma": "num",
+     "high_price": "str#",
+     "implied_volatility": "str#",
+     "last_price": "str#",
+     "last_tape_time": "str",
+     "low_price": "str#",
+     "mid_volume": "num",
+     "multi_leg_volume": "num",
+     "nbbo_ask": "str#",
+     "nbbo_bid": "str#",
+     "no_side_volume": "num",
+     "open_interest": "num",
+     "option_symbol": "str",
+     "prev_oi": "num",
+     "rho": "num",
+     "stock_multi_leg_volume": "num",
+     "sweep_volume": "num",
+     "theta": "num",
+     "total_premium": "str#",
+     "vega": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": [
+    "cross_volume"
+   ]
+  },
+  "/api/stock/{ticker}/options-volume": {
+   "sets": {
+    "data[]": {
+     "avg_30_day_call_volume": "str#",
+     "avg_30_day_put_volume": "str#",
+     "avg_3_day_call_volume": "str#",
+     "avg_3_day_put_volume": "str#",
+     "avg_7_day_call_volume": "str#",
+     "avg_7_day_put_volume": "str#",
+     "bearish_premium": "str#",
+     "bullish_premium": "str#",
+     "call_open_interest": "num",
+     "call_premium": "str#",
+     "call_volume": "num",
+     "call_volume_ask_side": "num",
+     "call_volume_bid_side": "num",
+     "date": "str",
+     "net_call_premium": "str#",
+     "net_put_premium": "str#",
+     "put_open_interest": "num",
+     "put_premium": "str#",
+     "put_volume": "num",
+     "put_volume_ask_side": "num",
+     "put_volume_bid_side": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/spot-exposures": {
+   "sets": {
+    "data[]": {
+     "charm_per_one_percent_move_dir": "str#",
+     "charm_per_one_percent_move_oi": "str#",
+     "charm_per_one_percent_move_vol": "str#",
+     "gamma_per_one_percent_move_dir": "str#",
+     "gamma_per_one_percent_move_oi": "str#",
+     "gamma_per_one_percent_move_vol": "str#",
+     "price": "str#",
+     "start_time": "str",
+     "ticker": "str",
+     "ticker_id": "num",
+     "time": "str",
+     "vanna_per_one_percent_move_dir": "str#",
+     "vanna_per_one_percent_move_oi": "str#",
+     "vanna_per_one_percent_move_vol": "str#"
+    }
+   },
+   "undocumented": [
+    "start_time",
+    "ticker",
+    "ticker_id"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/spot-exposures/expiry-strike": {
+   "sets": {
+    "data[]": {
+     "call_charm_ask": "str#",
+     "call_charm_bid": "str#",
+     "call_charm_oi": "str#",
+     "call_charm_vol": "str#",
+     "call_delta_ask": "str#",
+     "call_delta_bid": "str#",
+     "call_delta_oi": "str#",
+     "call_delta_vol": "str#",
+     "call_gamma_ask": "str#",
+     "call_gamma_bid": "str#",
+     "call_gamma_oi": "str#",
+     "call_gamma_vol": "str#",
+     "call_vanna_ask": "str#",
+     "call_vanna_bid": "str#",
+     "call_vanna_oi": "str#",
+     "call_vanna_vol": "str#",
+     "date": "str",
+     "expiry": "str",
+     "price": "str#",
+     "put_charm_ask": "str#",
+     "put_charm_bid": "str#",
+     "put_charm_oi": "str#",
+     "put_charm_vol": "str#",
+     "put_delta_ask": "str#",
+     "put_delta_bid": "str#",
+     "put_delta_oi": "str#",
+     "put_delta_vol": "str#",
+     "put_gamma_ask": "str#",
+     "put_gamma_bid": "str#",
+     "put_gamma_oi": "str#",
+     "put_gamma_vol": "str#",
+     "put_vanna_ask": "str#",
+     "put_vanna_bid": "str#",
+     "put_vanna_oi": "str#",
+     "put_vanna_vol": "str#",
+     "strike": "str#",
+     "ticker": "str",
+     "time": "str"
+    }
+   },
+   "undocumented": [
+    "date",
+    "expiry",
+    "ticker"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/spot-exposures/strike": {
+   "sets": {
+    "data[]": {
+     "call_charm_ask": "str#",
+     "call_charm_bid": "str#",
+     "call_charm_oi": "str#",
+     "call_charm_vol": "str#",
+     "call_delta_ask": "str#",
+     "call_delta_bid": "str#",
+     "call_delta_oi": "str#",
+     "call_delta_vol": "str#",
+     "call_gamma_ask": "str#",
+     "call_gamma_bid": "str#",
+     "call_gamma_oi": "str#",
+     "call_gamma_vol": "str#",
+     "call_vanna_ask": "str#",
+     "call_vanna_bid": "str#",
+     "call_vanna_oi": "str#",
+     "call_vanna_vol": "str#",
+     "date": "str",
+     "price": "str#",
+     "put_charm_ask": "str#",
+     "put_charm_bid": "str#",
+     "put_charm_oi": "str#",
+     "put_charm_vol": "str#",
+     "put_delta_ask": "str#",
+     "put_delta_bid": "str#",
+     "put_delta_oi": "str#",
+     "put_delta_vol": "str#",
+     "put_gamma_ask": "str#",
+     "put_gamma_bid": "str#",
+     "put_gamma_oi": "str#",
+     "put_gamma_vol": "str#",
+     "put_vanna_ask": "str#",
+     "put_vanna_bid": "str#",
+     "put_vanna_oi": "str#",
+     "put_vanna_vol": "str#",
+     "strike": "str#",
+     "ticker": "str",
+     "time": "str"
+    }
+   },
+   "undocumented": [
+    "date",
+    "ticker"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/stock-state": {
+   "sets": {
+    "data": {
+     "close": "str#",
+     "high": "str#",
+     "low": "str#",
+     "market_time": "str",
+     "open": "str#",
+     "prev_close": "str#",
+     "tape_time": "str",
+     "total_volume": "num",
+     "volume": "num"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/anomaly": {
+   "sets": {
+    "data.history[]": {
+     "date": "str",
+     "direction": "str",
+     "score": "str#"
+    },
+    "data.latest": {
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str"
+    },
+    "data.latest.components": {
+     "iv_percentile": "obj",
+     "regime_score": "obj",
+     "skew_percentile": "obj",
+     "vov_percentile": "obj",
+     "vrp_z": "obj"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/character": {
+   "sets": {
+    "data.history[]": {
+     "character": "str",
+     "date": "str",
+     "half_life_days": "str#",
+     "hurst_rv": "str#"
+    },
+    "data.latest": {
+     "ar1_b": "str#",
+     "character": "str",
+     "date": "str",
+     "entropy_conditional": "str#",
+     "entropy_negative": "str#",
+     "entropy_samples": "num",
+     "half_life_days": "str#",
+     "hurst_rv": "str#",
+     "sample_size": "num",
+     "ticker": "str",
+     "updated_at": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/option-sentiment": {
+   "sets": {
+    "data.history[]": {
+     "avar": "str#",
+     "date": "str",
+     "direction": "str",
+     "score": "str#",
+     "vwks": "str#"
+    },
+    "data.latest": {
+     "avar": "str#",
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str",
+     "vwks": "str#"
+    },
+    "data.latest.components": {
+     "avar": "obj",
+     "vwks": "obj"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/term-structure": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "dte": "num",
+     "expiry": "str",
+     "implied_move": "str#",
+     "implied_move_perc": "str#",
+     "ticker": "str",
+     "volatility": "str#"
+    }
+   },
+   "undocumented": [
+    "ticker"
+   ],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/term-structure/distribution": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "dte": "num",
+     "expiry": "str",
+     "first_date": "str",
+     "max": "str#",
+     "median": "str#",
+     "min": "str#",
+     "percentile": "str#",
+     "q1": "str#",
+     "q3": "str#",
+     "samples": "num",
+     "ticker": "str",
+     "volatility": "str#"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/stock/{ticker}/volatility/variance-risk-premium": {
+   "sets": {
+    "data[]": {
+     "date": "str",
+     "implied_volatility": "str#",
+     "implied_volatility_days": "num",
+     "rank": "str#",
+     "realized_date": "str",
+     "realized_volatility": "str#",
+     "realized_volatility_days": "num",
+     "risk_premium": "str#",
+     "ticker": "str"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/volatility/anomaly/top": {
+   "sets": {
+    "data[]": {
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str"
+    },
+    "data[].components": {
+     "iv_percentile": "obj",
+     "regime_score": "obj",
+     "skew_percentile": "obj",
+     "vov_percentile": "obj",
+     "vrp_z": "obj"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  },
+  "/api/volatility/option-sentiment/top": {
+   "sets": {
+    "data[]": {
+     "avar": "str#",
+     "components": "obj",
+     "date": "str",
+     "direction": "str",
+     "sample_size": "num",
+     "score": "str#",
+     "ticker": "str",
+     "updated_at": "str",
+     "vwks": "str#"
+    },
+    "data[].components": {
+     "avar": "obj",
+     "vwks": "obj"
+    }
+   },
+   "undocumented": [],
+   "unseen": []
+  }
+ },
+ "run": "37223455933",
+ "version": 1
+}

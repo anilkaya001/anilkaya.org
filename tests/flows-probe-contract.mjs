@@ -4,7 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import * as probe from "../scripts/flows-probe.mjs";
+import { createHash } from "node:crypto";
 import { nightlySource, slice } from "./lib/source-scan.mjs";
+import { digestSpec, diffDigests, formatDiff, main as diffMain, SpecError } from "../scripts/uw-spec-diff.mjs";
+import { WIRE_RENAMES } from "../shared/flows-dossier-vendor.js";
 import { OPS, opById, opsFor, pathFor, BUDGETS, PLAN, LICENCES, PLANS, LIMITERS } from "../shared/flows-vendor-ops.js";
 import { PACKET_CLASSES, DOSSIER_OPS } from "../shared/flows-dossier.js";
 import { SOURCES } from "../shared/flows-dossier-worker.js";
@@ -29,6 +32,7 @@ const DIGIT_RUN = /\d{4}/;
 const KEY = "uwkey-7f3c9e1a-SECRET-4b2d-8e6f-0a1b2c3d4e5f";
 const SESSION = "2026-09-22";
 const list = probe.loadList();
+const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"));
 
 {
   const byTier = { used: new Set(), 1: new Set(), 2: new Set() };
@@ -144,7 +148,7 @@ const list = probe.loadList();
     ok(e.reads === null || (Array.isArray(e.reads) && e.reads.length > 0 && new Set(e.reads).size === e.reads.length), `${e.id}: reads are absent or distinct names`);
     const inSpec = blocks.has(e.op);
     eq(e.liveOnly, !inSpec, `${e.id}: ${e.op} is liveOnly exactly when the committed spec lacks it`);
-    if (inSpec) ok(!/^\s+deprecated: true/m.test(blocks.get(e.op)), `${e.id}: ${e.op} is not deprecated in the committed spec`);
+    if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && !specDigest.ops[`GET ${e.op}`].deprecated, `${e.id}: ${e.op} is in the committed spec and not deprecated`);
     const tokens = (e.path.match(/\{[a-z_]+\}/g) || []);
     const opTokens = (e.op.match(/\{[a-z_]+\}/g) || []);
     ok(e.path === e.op || e.path.split("/").every((seg, i) => seg === e.op.split("/")[i] || /^\{[a-z_]+\}$/.test(e.op.split("/")[i])),
@@ -1027,7 +1031,261 @@ const mini = probe.validateList({
        "and never through the shell: no ${{ }} is interpolated into a run line, so an input cannot inject a command");
 }
 
-console.log(`✓ flows-probe: ${checks} assertions — a probe list whose used label is true (every vendor path a ` +
+{
+  const op = ({ path, id, params = [], description = "", deprecated = false }) => [
+    `  ${path}:`,
+    "    get:",
+    "      callbacks: {}",
+    "      description: |",
+    ...description.split("\n").map((l) => `        ${l}`),
+    ...(deprecated ? ["      deprecated: true"] : []),
+    `      operationId: ${id}`,
+    "      parameters:",
+    ...params.flatMap(([where, name, required]) => [
+      "        - description: ''",
+      `          in: ${where}`,
+      `          name: ${name}`,
+      `          required: ${required}`,
+      "          schema:",
+      "            type: string",
+    ]),
+    "      responses:",
+    "        '200':",
+    "          description: ''",
+    "      summary: S",
+    "      tags:",
+    "        - stock",
+  ];
+  const emit = ({ info, changelog, ops }) => [
+    "---", "components:", "  schemas: {}", "info:", "  description: |",
+    "    Documentation for the vendor API", "    ", "    ## Startup Tier", `    ${info}`, "    ",
+    "    ## Changelog", "    ", ...changelog.flatMap((v) => [`    # ${v}`, "    - Changed a thing", "    "]),
+    "  title: Vendor Api", "  version: '1.0'", "openapi: 3.0.0", "paths:", ...ops.flatMap(op),
+    "security:", "  - bearer: []", "tags: []", "",
+  ].join("\n");
+  const A = emit({
+    info: "The Startup tier costs a fixed sum and allows 500 req/min.",
+    changelog: ["2026.08.30", "2026.08.28"],
+    ops: [
+      { path: "/api/a/{ticker}", id: "Api.A.index", description: "Returns A for a ticker.\nAvailable on the Advanced API tier.",
+        params: [["path", "ticker", true], ["query", "date", false], ["query", "limit", false]] },
+      { path: "/api/b", id: "Api.B.index", description: "Returns B.", params: [["query", "x", true]] },
+      { path: "/api/c", id: "Api.C.index", description: "Returns C.\nThe plan is not stated." },
+      { path: "/api/old", id: "Api.Old.index", description: "(This endpoint has been deprecated, use V2 now) Returns old data." },
+    ],
+  });
+  const B = emit({
+    info: "The Startup tier costs a different sum and allows 500 req/min.",
+    changelog: ["2026.09.12", "2026.08.30", "2026.08.28"],
+    ops: [
+      { path: "/api/a/{ticker}", id: "Api.A.index", description: "Returns A for a ticker.\nAvailable on the Advanced API tier, or with the `futures` add-on.",
+        params: [["path", "ticker", true], ["query", "date", true], ["query", "page", false]] },
+      { path: "/api/c", id: "Api.C.v2", description: "Returns C.\nThe plan is not stated.", deprecated: true },
+      { path: "/api/d", id: "Api.D.index", description: "Returns D." },
+      { path: "/api/old", id: "Api.Old.index", description: "(This endpoint has been deprecated, use V2 now) Returns old data." },
+    ],
+  });
+  const a = digestSpec(A);
+  const b = digestSpec(B);
+  deep(Object.keys(a.ops).sort(), ["GET /api/a/{ticker}", "GET /api/b", "GET /api/c", "GET /api/old"], "SPEC DIFF: a digest has one entry for each operation under paths");
+  deep(a.ops["GET /api/a/{ticker}"].params, { "path:ticker": true, "query:date": false, "query:limit": false }, "with its parameters and whether each is required");
+  eq(a.ops["GET /api/a/{ticker}"].id, "Api.A.index", "its operation id");
+  deep(a.ops["GET /api/a/{ticker}"].plan, ["Available on the Advanced API tier."], "and the sentences of its description that speak of a plan");
+  deep(a.ops["GET /api/c"].plan, ["The plan is not stated."], "the word is what counts, not the claim");
+  eq(a.ops["GET /api/old"].deprecated, true, "a description that says the endpoint is deprecated marks it deprecated");
+  eq(b.ops["GET /api/c"].deprecated, true, "so does a deprecated: true line");
+  eq(a.ops["GET /api/b"].deprecated, false, "and nothing else does");
+  deep(a.changelog, ["2026.08.30", "2026.08.28"], "the changelog versions of the info description");
+  deep(a.infoPlan, ["The Startup tier costs a fixed sum and allows 500 req/min."], "and its plan sentences");
+  eq(a.sha256, createHash("sha256").update(A).digest("hex"), "the digest carries the sha256 of the document it read");
+  const d = diffDigests(a, b);
+  deep(d.added, ["GET /api/d"], "the diff names an added operation");
+  deep(d.removed, ["GET /api/b"], "a removed one");
+  deep(d.changed.map((c) => c.key), ["GET /api/a/{ticker}", "GET /api/c"], "and the operations that changed");
+  const ca = d.changed[0];
+  deep(ca.paramsAdded, ["query:page"], "a parameter added");
+  deep(ca.paramsRemoved, ["query:limit"], "a parameter removed");
+  deep(ca.requiredFlipped, ["query:date false->true"], "a parameter that became required");
+  deep(ca.planAdded, ["Available on the Advanced API tier, or with the `futures` add-on."], "a plan sentence added");
+  deep(ca.planRemoved, ["Available on the Advanced API tier."], "and the one it replaced");
+  const cc = d.changed[1];
+  deep([cc.deprecated, cc.id], [[false, true], ["Api.C.index", "Api.C.v2"]], "a new deprecation and a changed operation id");
+  deep(d.infoAdded, ["The Startup tier costs a different sum and allows 500 req/min."], "a plan sentence of the info text added");
+  deep(d.infoRemoved, ["The Startup tier costs a fixed sum and allows 500 req/min."], "and removed");
+  deep(d.changelog, ["2026.09.12"], "a changelog entry the old document lacks");
+  eq(d.empty, false, "the diff is not empty");
+  const text = formatDiff(d, { from: "old.yaml", to: "new.yaml" });
+  deep(text.slice(0, 5), ["uw-spec-diff  old.yaml -> new.yaml", "+ operation GET /api/d", "- operation GET /api/b", "~ GET /api/a/{ticker}", "    + parameter query:page"],
+    "the report reads in a fixed order, one line to a finding");
+  ok(text.includes("    required query:date false->true") && text.includes("    deprecated false -> true") && text.includes("+ changelog 2026.09.12"), "and says what changed in each");
+  const same = diffDigests(a, digestSpec(A));
+  eq(same.empty, true, "a document against itself differs in nothing");
+  deep(formatDiff(same), ["uw-spec-diff  old -> new", "no difference in operations, parameters, deprecations, plan sentences or changelog"], "and says so");
+  throwsLike(() => digestSpec(""), SpecError, "an empty document is refused");
+  throwsLike(() => digestSpec("openapi: 3.0.0\ninfo:\n  title: x\n"), /no top-level paths/, "a document without paths is refused");
+  throwsLike(() => digestSpec("paths:\n  x: y\n"), /no operation was found/, "and one whose layout the reader does not know");
+  const io = (files) => {
+    const out = [];
+    const err = [];
+    return { out, err, read: (f) => { if (!Object.hasOwn(files, f)) throw new Error("missing " + f); return files[f]; }, writeOut: (l) => out.push(l), writeErr: (l) => err.push(l) };
+  };
+  const run = (argv, files) => {
+    const sink = io(files);
+    const code = diffMain(argv, { read: sink.read, out: sink.writeOut, err: sink.writeErr });
+    return { code, out: sink.out, err: sink.err };
+  };
+  const shown = run(["a.yaml", "b.yaml"], { "a.yaml": A, "b.yaml": B });
+  eq(shown.code, 0, "the tool prints the report and exits 0 by default");
+  ok(shown.out.length > 5 && shown.out[0] === "uw-spec-diff  a.yaml -> b.yaml", "naming the two files");
+  eq(run(["a.yaml", "b.yaml", "--check"], { "a.yaml": A, "b.yaml": B }).code, 1, "with --check it exits 1 when the documents differ: the form a weekly drift step runs");
+  eq(run(["a.yaml", "a.yaml", "--check"], { "a.yaml": A }).code, 0, "and 0 when they do not");
+  eq(run(["a.yaml"], { "a.yaml": A }).code, 2, "one file is a usage error");
+  eq(run(["a.yaml", "b.yaml"], { "a.yaml": A, "b.yaml": "not a spec" }).code, 2, "a document it cannot read is a usage error, never a quiet pass");
+  eq(run(["a.yaml", "missing.yaml"], { "a.yaml": A }).code, 2, "so is a missing file");
+
+  const real = specDigest;
+  const specPaths = new Set([...fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8").matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)].map((m) => m[1]));
+  eq(Object.keys(real.ops).length, 218, "the committed spec digests to its 218 operations");
+  eq(new Set(Object.keys(real.ops).map((k) => k.split(" ")[1])).size, 217, "over 217 paths");
+  deep(Object.keys(real.ops).map((k) => k.split(" ")[1]).filter((p, i, all) => all.indexOf(p) === i).sort(), [...specPaths].sort(), "the same paths the regular-expression reading finds");
+  eq(real.sha256, createHash("sha256").update(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8")).digest("hex"), "and carries the file's sha256");
+  deep(Object.keys(real.ops).filter((k) => real.ops[k].deprecated).sort(),
+    ["GET /api/shorts/{ticker}/interest-float", "GET /api/stock/{ticker}/flow-alerts", "GET /api/stock/{ticker}/spot-exposures/{expiry}/strike"],
+    "the operations whose descriptions say they are deprecated, none of them read by the code");
+  eq(real.changelog[0], "2026.08.30", "the newest changelog entry the committed file carries");
+  ok(real.infoPlan.some((s) => /500 req\/min/.test(s)), "and the Startup plan sentence the budget table quotes");
+  eq(diffDigests(real, digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"))).empty, true, "the committed spec against itself differs in nothing");
+  const edited = fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8").replace("  /api/stock/{ticker}/max-pain:\n", "  /api/stock/{ticker}/max-pain-v2:\n");
+  const moved = diffDigests(real, digestSpec(edited));
+  deep([moved.added, moved.removed], [["GET /api/stock/{ticker}/max-pain-v2"], ["GET /api/stock/{ticker}/max-pain"]], "a renamed path in the real document is one removal and one addition");
+  const provenance = fs.readFileSync(path.join(ROOT, "docs/uw-openapi.md"), "utf8");
+  ok(provenance.includes(real.sha256) && /217 paths, 218 operations/.test(provenance) && provenance.includes(real.changelog[0]) && /9c49af3/.test(provenance),
+    "docs/uw-openapi.md records the committed file's commit, size, newest changelog entry and sha256: a refreshed file that leaves the record behind fails here");
+}
+
+{
+  const field = (key, types, present = 5) => ({ key, types, present, filled: present });
+  const result = (op, sets, spec, cls = "ok") => ({ cls, op, sets: sets.map(([label, fields, objects = 5]) => ({ label, union: { objects, fields } })), spec });
+  const aapl = result("/api/x/{ticker}", [["data[]", [field("alpha", ["str#"]), field("beta", ["null", "str"], 3), field("AAPL", ["num"]), field("c2026_row", ["num"])]]],
+    { unseen: ["gone", "old_name"], undocumented: ["extra", "AAPL", "Mixed", "new_name"] });
+  const nvda = result("/api/x/{ticker}", [["data[]", [field("alpha", ["str"]), field("beta", ["str"])]], ["data.rows[]", [field("gamma", ["bool"])]]],
+    { unseen: ["old_name"], undocumented: ["extra"] });
+  const m = probe.shapeManifest([aapl, nvda, result("/api/y", [["data", [field("only", ["num"])]]], null), result("/api/z", [["data[]", [field("skip", ["num"])]]], { unseen: [], undocumented: [] }, "4xx")],
+    null, { observed: "2026-10-04", run: "37223455933" });
+  deep(Object.keys(m), ["observed", "ops", "run", "version"], "the manifest has a version, the day and run it was observed, and the operations");
+  deep(Object.keys(m.ops), ["/api/x/{ticker}", "/api/y"], "only an operation that answered with rows is recorded");
+  deep(m.ops["/api/x/{ticker}"].sets["data[]"], { alpha: "str|str#", beta: "null|str?" },
+    "types are joined over the runs of one operation, sorted, with ? for a field absent from a sampled row; a ticker-shaped key and a date-shaped key never enter");
+  deep(m.ops["/api/x/{ticker}"].sets["data.rows[]"], { gamma: "bool" }, "every row set is kept under its label");
+  deep(m.ops["/api/x/{ticker}"].unseen, ["old_name"], "a documented name is unseen only if no run saw it");
+  deep(m.ops["/api/x/{ticker}"].undocumented, ["extra", "new_name"], "an undocumented name joins over the runs, snake-case names only: a ticker, a mixed-case token and a date-shaped key never enter");
+  deep(m.ops["/api/y"], { sets: { data: { only: "num" } } }, "an operation with no documented list records its shape alone");
+  const prior = { version: 1, observed: "2026-09-23", run: "1", ops: { "/api/x/{ticker}": { sets: {}, renames: { old_name: "new_name" } }, "/api/kept": { sets: { "data[]": { k: "str" } } } } };
+  const next = probe.shapeManifest([aapl, nvda], prior, { observed: "2026-10-11", run: "2" });
+  deep(next.ops["/api/x/{ticker}"].renames, { old_name: "new_name" }, "a rename a person declared survives a new run");
+  deep(next.ops["/api/kept"], prior.ops["/api/kept"], "and an operation a filtered run did not touch is kept");
+  eq(next.observed, "2026-10-11", "the observation day follows the run");
+  const text = probe.serializeShapes(next);
+  ok(text.endsWith("}\n") && text === probe.serializeShapes(JSON.parse(text)), "the file is canonical: serialising what it holds gives it back");
+  deep(probe.parseArgs(["--shapes", "out.json"], {}).shapes, "out.json", "the probe takes --shapes <file>");
+  deep(probe.parseArgs(["--shapes=out.json"], {}).shapes, "out.json", "in both spellings");
+  eq(probe.parseArgs([], {}).shapes, undefined, "and writes nothing without it");
+
+  const written = [];
+  const body = { data: [{ timestamp: "2026-09-22T14:00:00Z", dir_delta_flow: "12.5", call_gex: "0.5", cik: "0002012383" }] };
+  const vendorFetch = async (url) => ({ status: 200, headers: new Headers(), text: async () => JSON.stringify(body), url: String(url) });
+  const one = { version: 1, probes: [{ id: "flow", tier: "used", op: "/api/stock/{ticker}/greek-flow", path: "/api/stock/{t}/greek-flow", query: { date: "{date}" } }],
+    expect: { "/api/stock/{ticker}/greek-flow": ["timestamp", "dir_delta_flow", "call_gex", "put_gex"] } };
+  const lines = [];
+  const ran = await probe.runProbe({ key: KEY, base: "https://vendor.test", tickers: ["AAPL"], filter: "", list: probe.validateList(one), shapes: "/tmp/shapes.json", date: SESSION },
+    { fetch: vendorFetch, log: (l) => lines.push(l), now: () => 0, sleep: async () => {}, clock: () => new Date("2026-09-23T15:00:00Z"),
+      readFile: () => { throw Object.assign(new Error("none"), { code: "ENOENT" }); }, writeFile: (file, content) => written.push([file, content]), env: { GITHUB_RUN_ID: "424242" } });
+  eq(ran.code, 0, "a run that writes shapes exits as it always did");
+  eq(written.length, 1, "one file written");
+  eq(written[0][0], "/tmp/shapes.json", "to the path asked");
+  const wrote = JSON.parse(written[0][1]);
+  deep(wrote.ops["/api/stock/{ticker}/greek-flow"], {
+    sets: { "data[]": { call_gex: "str#", cik: "str#", dir_delta_flow: "str#", timestamp: "str" } }, undocumented: ["cik"], unseen: ["put_gex"],
+  }, "it holds the names, types and the spec's unseen and undocumented names");
+  deep([wrote.observed, wrote.run], [SESSION, "424242"], "the session and the Actions run");
+  ok(lines.some((l) => /shapes +wrote \/tmp\/shapes\.json \(1 operation\)/.test(l)), "and the log says so");
+  const flat = written[0][1];
+  for (const value of ["12.5", "0002012383", "2026-09-22T14:00:00Z", "0.5"]) ok(!flat.includes(value), `VALUE-FREE: the vendor value ${value} is not in the manifest`);
+  ok(!/\d{4}/.test(flat.replace(/"observed": "[^"]*"/, "").replace(/"run": "[^"]*"/, "")), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
+
+  const committed = JSON.parse(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"), "utf8"));
+  eq(committed.version, 1, "THE COMMITTED SHAPE MANIFEST: version 1");
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(committed.observed) && /^\d+$/.test(committed.run), "with the day and the run it records");
+  eq(probe.serializeShapes(committed), fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"), "utf8"), "and is in the form the probe writes");
+  const SNAKE = /^[a-z][a-z0-9_]*$/;
+  const ops = Object.keys(committed.ops);
+  ok(ops.length > 60, `${ops.length} operations observed`);
+  const valueShaped = [];
+  for (const [opName, entry] of Object.entries(committed.ops)) {
+    for (const [label, fields] of Object.entries(entry.sets)) {
+      for (const [key, type] of Object.entries(fields)) {
+        if (!SNAKE.test(key) || !/^(?:(?:arr|bool|null|num|obj|str|str#)(?:\|(?!$))?)+\??$/.test(type)) valueShaped.push(`${opName} ${label} ${key}:${type}`);
+      }
+    }
+    for (const name of [...(entry.unseen || []), ...(entry.undocumented || [])]) if (!SNAKE.test(name)) valueShaped.push(`${opName} ${name}`);
+  }
+  deep(valueShaped, [], "it holds snake-case names and the probe's type tokens, nothing that is a value");
+  ok(!/\d{4}/.test(JSON.stringify({ ...committed, observed: null, run: null })), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
+  const registryOps = new Set(OPS.map((e) => e.op));
+  const unrecorded = [...registryOps].filter((o) => !committed.ops[o]).sort();
+  deep(unrecorded, ["/api/earnings/afterhours", "/api/earnings/premarket", "/api/net-flow/expiry", "/api/politician-portfolios/holders/{ticker}"],
+    "every operation the code reads has a recorded shape, bar the two earnings calendars and the net flow, which answered without rows on 2026-10-04, and the one the plan refuses (422)");
+  const own = committed.ops["/api/institution/{ticker}/ownership"];
+  deep([own.unseen, own.undocumented], [["units_change"], ["cik", "units_changed"]], "the ownership route's wire name: units_changed arrives, the documented units_change does not (weekly run 37223455933)");
+  deep(own.renames, { units_change: "units_changed" }, "declared as a rename of the spec's name");
+  deep(Object.fromEntries(Object.entries(committed.ops).filter(([, e]) => e.renames).map(([o, e]) => [o, e.renames])), WIRE_RENAMES,
+    "and the code's WIRE_RENAMES says the same, so the reducer, the manifest and the fixtures name one rename");
+}
+
+{
+  const FIXTURES = fs.readdirSync(path.join(ROOT, "tests")).filter((f) => /^fixtures-.*\.json$/.test(f)).sort();
+  const PHRASES = /verbatim|live probe|probe-report/i;
+  const LEGACY = ["fixtures-flows-legs-probe.json", "fixtures-flows-positioning.json", "fixtures-live-probe.json", "fixtures-vol-probe.json"];
+  const sourceOf = (file) => {
+    const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", file), "utf8"));
+    if (!doc || Array.isArray(doc) || typeof doc !== "object") return "";
+    const fields = [doc.source, doc.provenance && doc.provenance.nature, doc.provenance && doc.provenance.source, doc.provenance && doc.provenance.generator];
+    return fields.filter((v) => typeof v === "string").join(" ");
+  };
+  ok(FIXTURES.length >= 14, `the fixture sources are read from every tests/fixtures-*.json (${FIXTURES.length})`);
+  deep(FIXTURES.filter((f) => !LEGACY.includes(f) && PHRASES.test(sourceOf(f))), [],
+    "NO FIXTURE SAYS IT IS VENDOR DATA: no source field of a fixture calls its rows verbatim, from a live probe or from a probe report; new fixtures are synthetic and name their generator");
+  deep(LEGACY.filter((f) => !PHRASES.test(sourceOf(f))), [],
+    "and the four older probe-derived fixtures stay pinned by name: when one is regenerated from the spec its entry leaves this list, and the list can only shrink");
+  ok(PHRASES.test("Rows are the probe's printed first row, verbatim") && PHRASES.test("Unusual Whales live probe") && PHRASES.test("nl/probe-report.json") && !PHRASES.test("synthetic bodies built to the schema"),
+    "the phrases catch the three spellings and spare a synthetic source");
+  const dossier = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-dossier-vendor.json"), "utf8"));
+  ok(/synthetic/.test(dossier.provenance.nature) && /not vendor data/.test(dossier.provenance.nature), "the dossier fixtures say they are synthetic");
+  eq(dossier.provenance.generator, "tests/gen-dossier-fixtures.py", "and name the generator that wrote them");
+  eq(dossier.provenance.shapesSha256, createHash("sha256").update(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"))).digest("hex"),
+    "THE FIXTURES WERE BUILT TO THIS SHAPE MANIFEST: scripts/flows-probe-shapes.json still hashes to the value the generator recorded; if it moved, run python3 tests/gen-dossier-fixtures.py and read the diff");
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"), "utf8"));
+  const walk = (value, into) => {
+    if (Array.isArray(value)) for (const v of value) walk(v, into);
+    else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) { into.add(k); walk(v, into); }
+    return into;
+  };
+  for (const [id, opName] of Object.entries(dossier.ops)) {
+    const entry = manifest.ops[opName];
+    ok(entry, `${opName}: the manifest has an observed shape`);
+    const wire = new Set([...dossier.documented[opName].filter((n) => !(entry.unseen || []).includes(n)), ...(entry.undocumented || []), "data"]);
+    const stray = [...walk(dossier.bodies[id], new Set())].filter((k) => !wire.has(k) && !/^\d+$/.test(k));
+    deep(stray, [], `${opName}: every key of the fixture body is a name the wire carried (documented and seen, or observed beyond the documentation)`);
+  }
+  const holders = dossier.bodies.ownership.data;
+  ok(holders.length > 0 && holders.every((h) => Object.hasOwn(h, "units_changed") && !Object.hasOwn(h, "units_change")), "the ownership fixture carries the wire's units_changed and not the spec's units_change");
+  deep(dossier.renames, { "/api/institution/{ticker}/ownership": { units_change: "units_changed" } }, "and records the rename it applied");
+}
+
+console.log(`✓ flows-probe: ${checks} assertions — a registry that declares each vendor operation once, with no vendor path spelled ` +
+  `anywhere else and the probe's strict read list derived from it, a spec reader whose diff names added, removed and changed ` +
+  `operations, parameters, deprecations, plan sentences and changelog entries, a value-free shape manifest the dossier fixture ` +
+  `generator is held to, no new fixture that calls itself vendor data, a probe list whose used label is true (every vendor path a ` +
   `production call site names is probed as used, and nothing else is), the live-only operations named, the eight ` +
   `entitlement routes asked for AAPL and NVDA (a refusal a finding, not a failure), output that names keys, types, ` +
   `fill counts and documented enum tokens and never a vendor value, every token filled from one session date (weekly, both monthlies, ` +

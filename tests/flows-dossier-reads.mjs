@@ -212,8 +212,8 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   const f = world();
   const get = await client(f.D1);
   const spec = F.vendorBody("ownership");
-  const wire = { data: spec.data.map(({ units_change: d, ...r }) => ({ ...r, units: String(r.units), units_changed: String(d), historical_units: [r.units, r.units - d, r.units - 2 * d] })) };
-  const netChange = spec.data.reduce((sum, r) => sum + r.units_change, 0);
+  const wire = { data: spec.data.map(({ units_changed: d, ...r }) => ({ ...r, units: String(r.units), units_changed: String(d), historical_units: [r.units, r.units - d, r.units - 2 * d] })) };
+  const netChange = spec.data.reduce((sum, r) => sum + r.units_changed, 0);
   stub.state.bodies.set("ownership", wire);
   const a = await get("/api/flows/dossier?t=EXMP");
   await a.settle();

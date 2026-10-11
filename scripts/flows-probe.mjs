@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { OPS, opById, pathFor } from "../shared/flows-vendor-ops.js";
 
@@ -198,9 +198,9 @@ export function parseArgs(argv, env = {}) {
     const arg = argv[i];
     if (arg === "--dry-run") { dryRun = true; continue; }
     if (arg === "--strict") { strict = true; continue; }
-    const inline = /^--(tickers|filter|date|list)=(.*)$/s.exec(arg);
+    const inline = /^--(tickers|filter|date|list|shapes)=(.*)$/s.exec(arg);
     if (inline) { raw[inline[1]] = inline[2]; continue; }
-    const named = /^--(tickers|filter|date|list)$/.exec(arg);
+    const named = /^--(tickers|filter|date|list|shapes)$/.exec(arg);
     if (named) {
       if (i + 1 >= argv.length) throw new UsageError(`${arg} needs a value`);
       raw[named[1]] = argv[++i];
@@ -210,7 +210,7 @@ export function parseArgs(argv, env = {}) {
   }
   if (raw.date && !isDay(raw.date)) throw new UsageError(`--date must be YYYY-MM-DD, got ${JSON.stringify(raw.date)}`);
   return { dryRun, strict, tickers: parseTickers(raw.tickers), filter: String(raw.filter || "").trim(), date: raw.date,
-    list: raw.list };
+    list: raw.list, ...(raw.shapes ? { shapes: raw.shapes } : {}) };
 }
 
 export function validateList(list) {
@@ -335,6 +335,63 @@ export function expandProbes(list, tickers) {
   }
   return out;
 }
+
+export const SHAPES_PATH = fileURLToPath(new URL("./flows-probe-shapes.json", import.meta.url));
+
+const SNAKE = /^[a-z][a-z0-9_]*$/;
+
+const shapeName = (key) => SNAKE.test(key) && isNameShaped(key);
+
+const sortKeys = (value) => {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (!isObj(value)) return value;
+  return Object.fromEntries(Object.keys(value).sort().map((k) => [k, sortKeys(value[k])]));
+};
+
+export function shapeManifest(results, prior = null, meta = {}) {
+  const by = new Map();
+  for (const r of results) {
+    if (!r || r.cls !== "ok" || !Array.isArray(r.sets) || typeof r.op !== "string") continue;
+    const acc = by.get(r.op) || { sets: new Map(), unseen: null, undocumented: new Set() };
+    for (const set of r.sets) {
+      const fields = acc.sets.get(set.label) || new Map();
+      for (const f of set.union.fields) {
+        if (!shapeName(f.key)) continue;
+        const held = fields.get(f.key) || { types: new Set(), optional: false };
+        for (const t of f.types) held.types.add(t);
+        if (f.present < set.union.objects) held.optional = true;
+        fields.set(f.key, held);
+      }
+      acc.sets.set(set.label, fields);
+    }
+    if (r.spec) {
+      const unseen = new Set(r.spec.unseen);
+      acc.unseen = acc.unseen === null ? unseen : new Set([...acc.unseen].filter((k) => unseen.has(k)));
+      for (const k of r.spec.undocumented) if (shapeName(k)) acc.undocumented.add(k);
+    }
+    by.set(r.op, acc);
+  }
+  const held = isObj(prior) && isObj(prior.ops) ? prior.ops : {};
+  const ops = { ...held };
+  for (const [op, acc] of by) {
+    const sets = {};
+    for (const [label, fields] of acc.sets) {
+      if (!fields.size) continue;
+      sets[label] = Object.fromEntries([...fields].map(([key, v]) => [key, [...v.types].sort().join("|") + (v.optional ? "?" : "")]));
+    }
+    const entry = { sets };
+    if (acc.unseen !== null) {
+      entry.unseen = [...acc.unseen].sort();
+      entry.undocumented = [...acc.undocumented].sort();
+    }
+    const renames = isObj(held[op]) && isObj(held[op].renames) ? held[op].renames : null;
+    if (renames && Object.keys(renames).length) entry.renames = renames;
+    ops[op] = entry;
+  }
+  return sortKeys({ version: 1, observed: meta.observed || (prior && prior.observed) || null, run: meta.run || null, ops });
+}
+
+export const serializeShapes = (manifest) => JSON.stringify(manifest, null, 1) + "\n";
 
 export function selectProbes(instances, filter) {
   const terms = String(filter || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -913,6 +970,9 @@ export async function runProbe(options, deps = {}) {
   const now = deps.now || (() => Date.now());
   const sleep = deps.sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   const clock = deps.clock || (() => new Date());
+  const readFile = deps.readFile || ((file) => readFileSync(file, "utf8"));
+  const writeFile = deps.writeFile || ((file, text) => writeFileSync(file, text));
+  const env = deps.env || process.env;
   const key = options.key || "";
   const base = options.base || DEFAULT_BASE;
   const tickers = options.tickers || [...DEFAULT_TICKERS];
@@ -1002,6 +1062,18 @@ export async function runProbe(options, deps = {}) {
     record(result);
   }
   for (const line of renderSummary(results, { session, elapsedMs: now() - started })) emit(line);
+  if (options.shapes) {
+    let prior = null;
+    try {
+      prior = JSON.parse(readFile(options.shapes));
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") throw error;
+    }
+    const manifest = shapeManifest(results, prior, { observed: session, run: env.GITHUB_RUN_ID || null });
+    writeFile(options.shapes, serializeShapes(manifest));
+    const n = Object.keys(manifest.ops).length;
+    emit(`   shapes  wrote ${options.shapes} (${n} operation${n === 1 ? "" : "s"})`);
+  }
   const code = exitCode(results);
   if (options.strict) {
     const verdict = strictVerdict(results, list);

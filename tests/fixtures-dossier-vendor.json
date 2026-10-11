@@ -1317,7 +1317,7 @@
       "index"
      ],
      "units": 52000000,
-     "units_change": 900000,
+     "units_changed": 900000,
      "value": 7800000000
     },
     {
@@ -1339,7 +1339,7 @@
       "index"
      ],
      "units": 32500000,
-     "units_change": -450000,
+     "units_changed": -450000,
      "value": 4875000000
     },
     {
@@ -1361,7 +1361,7 @@
       "index"
      ],
      "units": 23636363,
-     "units_change": 300000,
+     "units_changed": 300000,
      "value": 3545454450
     },
     {
@@ -1383,7 +1383,7 @@
       "index"
      ],
      "units": 18571428,
-     "units_change": -225000,
+     "units_changed": -225000,
      "value": 2785714200
     },
     {
@@ -1405,7 +1405,7 @@
       "index"
      ],
      "units": 15294117,
-     "units_change": 180000,
+     "units_changed": 180000,
      "value": 2294117550
     },
     {
@@ -1427,7 +1427,7 @@
       "index"
      ],
      "units": 13000000,
-     "units_change": -150000,
+     "units_changed": -150000,
      "value": 1950000000
     },
     {
@@ -1449,7 +1449,7 @@
       "index"
      ],
      "units": 11304347,
-     "units_change": 128571,
+     "units_changed": 128571,
      "value": 1695652050
     },
     {
@@ -1471,7 +1471,7 @@
       "index"
      ],
      "units": 10000000,
-     "units_change": -112500,
+     "units_changed": -112500,
      "value": 1500000000
     }
    ]
@@ -1888,10 +1888,19 @@
  },
  "provenance": {
   "generator": "tests/gen-dossier-fixtures.py",
-  "nature": "synthetic bodies for the fictional ticker EXMP, built to the 200-response schema of each operation (names, JSON types and nullability checked against the spec by the generator); not vendor data",
+  "nature": "synthetic bodies for the fictional ticker EXMP, built to the 200-response schema of each operation (JSON types and nullability checked against the spec, key names against the probe's observed wire shape; the generator fails where the two disagree); not vendor data",
   "nowDay": "2026-10-02",
+  "shapes": "scripts/flows-probe-shapes.json",
+  "shapesObserved": "2026-10-04",
+  "shapesRun": "37223455933",
+  "shapesSha256": "8a565f75b2095cfe4b7f9836fbba8dd167640f0f4411139e353d297198dcebb2",
   "spec": "docs/uw-openapi.yaml",
   "specSha256": "c8686b3ff855cb5720900c23e17e7f49ff6c61df32835d977e60c85f340b76d7"
+ },
+ "renames": {
+  "/api/institution/{ticker}/ownership": {
+   "units_change": "units_changed"
+  }
  },
  "ticker": "EXMP"
 }
