@@ -102,7 +102,7 @@
     "test:flows-reading-render": "node flows-reading-render.mjs"
   },
   "devDependencies": {
-    "playwright": "1.61.1",
-    "wrangler": "4.110.0"
+    "playwright": "1.64.0",
+    "wrangler": "4.148.0"
   }
 }
