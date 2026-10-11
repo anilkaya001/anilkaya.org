@@ -1886,3 +1886,80 @@ a.ui-row:hover { background: var(--fill-4); }
   .ds-sk { forced-color-adjust: none; background: GrayText; }
   .ds-btn:focus-visible { outline-color: Highlight; }
 }
+
+.flows-tablewrap {
+  overflow-x: auto;
+  outline-offset: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--bg-elev);
+  container-type: inline-size;
+}
+.flows-table {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+  --tbl-pad-y: 0.6rem;
+  --tbl-pad-x: 0.72rem;
+}
+.flows-table.is-dense { --tbl-pad-y: 0.4rem; --tbl-pad-x: 0.5rem; }
+.flows-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  font-size: var(--fs-note);
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--hairline);
+}
+.flows-table th,
+.flows-table td {
+  padding: var(--tbl-pad-y) var(--tbl-pad-x);
+  line-height: 1.25;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+.flows-table thead th {
+  font-family: var(--font-figure);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: var(--table-head-glass);
+}
+.flows-table thead abbr { text-decoration: none; border-bottom: 0; cursor: help; }
+.flows-table tbody tr:last-child > * { border-bottom: 0; }
+.flows-table tbody tr:hover { background: var(--table-head-glass); }
+.c-num,
+.flows-table th.c-num,
+.flows-table td.c-num {
+  text-align: right;
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+}
+body.is-stale .flows-tablewrap {
+  border-color: color-mix(in srgb, var(--flow-down) 55%, transparent);
+}
+.flows-tablewrap {
+  background-image:
+    linear-gradient(to right, var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to left,  var(--bg-elev) 30%, rgba(0, 0, 0, 0)),
+    linear-gradient(to right, rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0)),
+    linear-gradient(to left,  rgba(236, 232, 216, 0.20), rgba(236, 232, 216, 0));
+  background-position: left center, right center, left center, right center;
+  background-size: 2.2rem 100%, 2.2rem 100%, 0.9rem 100%, 0.9rem 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.flows-body .flows-table thead th {
+  font: var(--t-caption);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--label-2);
+}
+.flows-body .flows-table tbody tr:hover { background: var(--fill-4); }
+.flows-body .flows-caption { color: var(--label-3); font: var(--t-footnote); max-width: 68ch; }
