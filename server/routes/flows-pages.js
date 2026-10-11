@@ -6,7 +6,7 @@ const PAGES = Object.freeze([
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
   { slug: "short", from: "short", render: (username) => FLOWS_PAGES.sidePage({ username, side: "short" }) },
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
-  { slug: "market", render: (username, summary, owner) => FLOWS_PAGES.marketPage({ username, owner }) },
+  { slug: "market", render: (username, summary, owner, scenes) => FLOWS_PAGES.marketPage({ username, owner, scenes }) },
   { slug: "history", render: (username) => FLOWS_PAGES.historyPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
@@ -34,7 +34,7 @@ const html = (body) => new Response(body, { status: 200, headers: { "Content-Typ
 const slashed = (slug) => "/flows/" + (slug === "" ? "" : slug + "/");
 
 export function flowsPageRows(deps) {
-  const { currentFlowsUser, readFlowsSummary, isOwner } = deps;
+  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false } = deps;
   const rows = [];
 
   rows.push({
@@ -71,7 +71,7 @@ export function flowsPageRows(deps) {
         }
         const session = await currentFlowsUser(request, env);
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
-        return html(session ? page.render(session.username, summary, isOwner(env, session.username)) : FLOWS_PAGES.loginPage());
+        return html(session ? page.render(session.username, summary, isOwner(env, session.username), scenesOn(env, session.username)) : FLOWS_PAGES.loginPage());
       },
     });
     if (page.slug !== "") {

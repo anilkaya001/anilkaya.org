@@ -715,7 +715,7 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
-export function marketPage({ username = "", owner = false } = {}) {
+export function marketPage({ username = "", owner = false, scenes = false } = {}) {
   return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css", "/assets/css/flows-index.css"])}
 ${shell("Market", "market", username, `
   <header class="flows-head mk-head" data-fx-hero>
@@ -743,13 +743,15 @@ ${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6, seg: `<div class
 ${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
 ${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
     body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
+${scenes ? marketModule("mkSkylineCard", "Move skyline", "mkSkyline") : ""}
 ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
 ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
-  <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
+  <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>${scenes ? `
+  <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>` : ""}
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}

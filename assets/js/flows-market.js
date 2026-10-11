@@ -772,6 +772,10 @@
       b.paintRadar(regime);
       b.paintGroups(regime);
     });
+    for (const [group, id] of [["skyline", "mkSkyline"]]) {
+      const host = $(id);
+      if (host && UI.defer) UI.defer(group, { when: "visible", el: host, label: "The " + group + " view" }).then(() => window.FlowsUI[group].mount(host, universe, null));
+    }
     if (UI.defer) UI.defer("market-below", { when: "visible", el: $("mkSectorsCard"), label: "The lower modules" });
     if (typeof UI.heartbeat === "function") {
       const beat = (withStrips) => UI.heartbeat({ keys: withStrips ? ["market", "breadth", "strips"] : ["market", "breadth"], nightly: ["pulse"], page: "market",

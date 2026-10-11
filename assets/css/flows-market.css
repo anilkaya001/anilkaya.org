@@ -285,6 +285,13 @@
 .mk-tbl .c-num { text-align: right; }
 .mk-tbl tr:last-child > * { border-bottom: 0; }
 
+.mk-sky-c, .mk-rel-c { display: block; max-width: 100%; margin: 0 auto; }
+.mk-sky-c[hidden] { display: none; }
+.mk-sky-n, .mk-rel-n { margin: var(--sp-3) 0 0; color: var(--label-2); font: var(--t-footnote); }
+.mk-sky-d, .mk-rel-d { margin-top: var(--sp-3); }
+.mk-rel-l { min-width: 0; }
+.mk-rel-d ul { margin: var(--sp-2) 0 0; padding-left: 18px; font: var(--t-footnote); }
+
 @media (prefers-reduced-motion: reduce) {
   .mk-bar, .mk-stack .mk-seg { animation: none; }
   .mk-mark .ui-g { animation: none !important; }
