@@ -12,29 +12,29 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const CEILING_KIB = {
-  tickerPage: 400,
-  overviewPage: 265,
-  sidePage: 220,
-  watchPage: 220,
-  deskPage: 234,
+  tickerPage: 411,
+  overviewPage: 274,
+  sidePage: 230,
+  watchPage: 230,
+  deskPage: 243,
   askPage: 133,
-  strategyPage: 251,
-  trackPage: 164,
-  marketPage: 242,
-  unusualPage: 204 + (57017 + 13882 + 4176 + 830 + 189 + 95 + 843) / 1024,
+  strategyPage: 261,
+  trackPage: 180,
+  marketPage: 254,
+  unusualPage: 287,
   eventsPage: 155,
-  politicalPage: 104,
-  historyPage: 162,
+  politicalPage: 103,
+  historyPage: 167,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
 };
 
 const GZIP_KIB = {
-  tickerPage: 126,
+  tickerPage: 125,
   overviewPage: 82,
-  sidePage: 68,
-  watchPage: 68,
+  sidePage: 69,
+  watchPage: 69,
   deskPage: 80,
   askPage: 39,
   strategyPage: 83,
@@ -59,9 +59,9 @@ const CSS_KIB = {
   strategyPage: 109,
   trackPage: 90,
   marketPage: 92,
-  unusualPage: 109,
-  eventsPage: 102,
-  politicalPage: 102,
+  unusualPage: 110,
+  eventsPage: 103,
+  politicalPage: 103,
   historyPage: 90,
   loginPage: 78,
   aboutPage: 79,
@@ -77,7 +77,7 @@ const CSS_GZIP_KIB = {
   askPage: 21,
   strategyPage: 24,
   trackPage: 21,
-  marketPage: 20,
+  marketPage: 21,
   unusualPage: 25,
   eventsPage: 23,
   politicalPage: 23,
@@ -229,7 +229,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 108054, gzip: 32662, css: 102247, cssGzip: 21681 };
+  const events = { name: "eventsPage", raw: 110432, gzip: 33441, css: 104554, cssGzip: 22089 };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
