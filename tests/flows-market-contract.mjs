@@ -160,7 +160,7 @@ const SECTOR_FIXTURE = [
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const TOKEN = "market-token-aaaaaaaaaaaa";
-const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`] });
+const server = await startWorker({ extraVars: [`FLOWS_INGEST_TOKEN:${TOKEN}`, "FLOWS_RT_USERS:nobody-here"] });
 const url = (p) => server.baseURL + p;
 const token = await signSession(
   { sub: FLOWS_TEST_USER, aud: "flows", epoch: "1", exp: Date.now() + 600000 }, SESSION_SECRET);
