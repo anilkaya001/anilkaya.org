@@ -10,6 +10,7 @@ export const URL_ENV = "FLOWS_WS_PROBE_URL";
 export const SECONDS_ENV = "FLOWS_WS_PROBE_SECONDS";
 export const ONLY_ENV = "FLOWS_WS_PROBE_ONLY";
 export const FIREHOSE_ENV = "FLOWS_WS_PROBE_FIREHOSE_SECONDS";
+export const HOLD_ENV = "FLOWS_WS_PROBE_HOLD_SECONDS";
 export const DEFAULT_URL = "wss://api.unusualwhales.com/socket";
 export const DEFAULT_SECONDS = 12;
 export const MAX_SECONDS = 60;
@@ -25,15 +26,27 @@ export const SAMPLE_CAP = 50000;
 export const HANDSHAKE_TIMEOUT_S = 10;
 export const HOLD_TIMEOUT_S = 8;
 export const HOLD_SETTLE_S = 3;
+export const HOLD_SECONDS = 120;
+export const HOLD_MAX_SECONDS = 300;
+export const HOLD_CONNECTIONS = 3;
+export const HOLD_JOINS = 60;
+export const JOIN_MIN_S = 3;
 export const SESSION_SLACK_S = 1;
-export const PARTS = Object.freeze(["handshake", "channels", "firehoses", "connections", "joins"]);
+export const PARTS = Object.freeze(["handshake", "channels", "firehoses", "connections", "joins", "hold"]);
 export const TICKERS = Object.freeze([
   "SPY", "QQQ", "IWM", "DIA", "NVDA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "AVGO", "AMD", "NFLX", "COST",
   "JPM", "XOM", "GLD", "SLV", "COPX", "GDX", "XLE", "XLF", "XLK", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE",
   "XLC", "SMH", "ARKK", "TLT", "HYG", "USO", "UVXY", "SQQQ", "TQQQ", "SOXL", "BAC", "WFC", "GS", "MS", "C", "V", "MA",
   "UNH", "LLY", "ABBV", "MRK", "PFE", "CVX", "COP", "SLB", "OXY", "KO", "PEP", "WMT", "HD",
+  "ORCL", "CRM", "ADBE", "INTC", "CSCO", "QCOM", "TXN", "IBM", "NOW", "UBER", "SHOP", "PLTR", "COIN", "MSTR", "SNOW",
+  "PANW", "CRWD", "MU", "AMAT", "LRCX", "KLAC", "ASML", "TSM", "ARM", "SMCI", "DELL", "HPQ", "ANET", "MRVL", "ON",
+  "DIS", "NKE", "SBUX", "MCD", "TGT", "LOW", "BKNG", "ABNB", "LULU", "CMG", "F", "GM", "RIVN", "NIO", "BA", "LMT",
+  "RTX", "GE", "CAT", "DE", "UPS", "FDX", "HON", "MMM", "T", "VZ", "TMUS", "CMCSA", "PYPL", "SQ", "AXP", "BLK",
+  "SCHW", "USB", "PNC", "TFC", "MRNA", "GILD", "AMGN", "BMY", "CVS", "ISRG", "REGN", "VRTX", "NEM", "FCX", "AA",
+  "CLF", "X", "MOS", "NUE", "DVN", "EOG", "MPC", "VLO", "HAL", "KMI", "WDC", "STX", "TER", "NXPI", "ADI", "MCHP",
+  "FTNT", "DDOG", "NET", "ZS", "TEAM", "HUBS",
 ]);
-export const JOIN_STEPS = Object.freeze([1, 10, 30, 60]);
+export const JOIN_STEPS = Object.freeze([1, 10, 30, 60, 120, 160]);
 export const CONNECTION_STEPS = 4;
 export const HEADER_ECHO = Object.freeze(["server", "cf-ray", "date", "www-authenticate", "sec-websocket-protocol", "content-type"]);
 export const SAMPLE_CHARS = 160;
@@ -106,7 +119,7 @@ export function controlTrust(verdict) {
   return verdict === "refused" || verdict === "no-ack";
 }
 
-export function plannedSeconds({ seconds = DEFAULT_SECONDS, only = [], firehoseSeconds = FIREHOSE_SECONDS } = {}) {
+export function plannedSeconds({ seconds = DEFAULT_SECONDS, only = [], firehoseSeconds = FIREHOSE_SECONDS, holdSeconds = HOLD_SECONDS } = {}) {
   const s = Math.min(MAX_SECONDS, Math.max(2, Number(seconds) || DEFAULT_SECONDS));
   const wants = (name) => only.length === 0 || only.includes(name);
   let total = 0;
@@ -114,7 +127,8 @@ export function plannedSeconds({ seconds = DEFAULT_SECONDS, only = [], firehoseS
   if (wants("channels")) total += CHANNELS.reduce((sum, c) => sum + (c === CONTROL_CHANNEL ? Math.min(s, CONTROL_SECONDS) : s) + SESSION_SLACK_S, 0);
   if (wants("firehoses")) total += FIREHOSES.length * (firehoseSeconds + SESSION_SLACK_S);
   if (wants("connections")) total += (CONNECTION_STEPS - 1) * (HOLD_TIMEOUT_S + HOLD_SETTLE_S);
-  if (wants("joins")) total += JOIN_STEPS.length * (Math.max(6, Math.floor(s / 2)) + SESSION_SLACK_S);
+  if (wants("joins")) total += JOIN_STEPS.length * (Math.max(JOIN_MIN_S, Math.floor(s / 2)) + SESSION_SLACK_S);
+  if (wants("hold")) total += holdSeconds + HOLD_SETTLE_S + SESSION_SLACK_S;
   return total;
 }
 
@@ -231,15 +245,18 @@ export function session(url, token, channels, { seconds = DEFAULT_SECONDS, redac
 export function holdConnections(url, token, count, { redact = redactor(token), Socket = globalThis.WebSocket, settleMs = HOLD_SETTLE_S * 1000 } = {}) {
   return new Promise((resolve) => {
     const held = [];
+    const closes = [];
     let refused = null;
+    let closing = false;
     let pending = count;
     const settle = () => {
       pending -= 1;
       if (pending > 0) return;
       setTimeout(() => {
         const survivors = held.filter((w) => w.readyState === 1).length;
+        closing = true;
         held.forEach((w) => { try { w.close(); } catch {} });
-        resolve({ asked: count, opened: held.length, survivors, refused });
+        resolve({ asked: count, opened: held.length, survivors, refused, closes });
       }, settleMs);
     };
     for (let i = 0; i < count; i++) {
@@ -258,9 +275,49 @@ export function holdConnections(url, token, count, { redact = redactor(token), S
         settle();
       });
       ws.addEventListener("error", () => { clearTimeout(timer); refused = refused || { connection: i + 1, why: "error" }; settle(); });
-      ws.addEventListener("close", (e) => { clearTimeout(timer); if (!held.includes(ws)) { refused = refused || { connection: i + 1, why: `closed ${e.code}` }; } });
+      ws.addEventListener("close", (e) => {
+        clearTimeout(timer);
+        if (!closing) closes.push({ connection: i + 1, code: e.code, reason: redact(e.reason || "") });
+        if (!held.includes(ws)) { refused = refused || { connection: i + 1, why: `closed ${e.code}` }; }
+      });
     }
   });
+}
+
+export function holdJoined(url, token, { connections = HOLD_CONNECTIONS, joins = HOLD_JOINS, seconds = HOLD_SECONDS, redact = redactor(token), Socket = globalThis.WebSocket } = {}) {
+  const channels = TICKERS.slice(0, joins).map((t) => `price:${t}`);
+  const t0 = Date.now();
+  const one = (index) => new Promise((resolve) => {
+    const rec = { connection: index + 1, joined: channels.length, acksOk: 0, acksRefused: 0, messages: 0, openMs: null, closed: null, closedAtS: null, error: null };
+    let ws;
+    let finished = false;
+    let timer;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      try { ws.close(); } catch {}
+      resolve({ ...rec, survived: rec.closed === null });
+    };
+    try { ws = new Socket(socketUrl(url, token)); } catch (e) { rec.error = redact(e.message); resolve({ ...rec, survived: false }); return; }
+    timer = setTimeout(finish, seconds * 1000);
+    ws.addEventListener("open", () => {
+      rec.openMs = Date.now() - t0;
+      for (const channel of channels) ws.send(JSON.stringify({ channel, msg_type: "join" }));
+    });
+    ws.addEventListener("message", (event) => {
+      const m = classify(typeof event.data === "string" ? event.data : String(event.data));
+      if (m.kind === "ack") { if (m.status === "ok") rec.acksOk += 1; else rec.acksRefused += 1; } else if (m.kind === "data") rec.messages += 1;
+    });
+    ws.addEventListener("error", (e) => { rec.error = redact((e && (e.message || e.type)) || "error"); });
+    ws.addEventListener("close", (e) => {
+      if (finished) return;
+      rec.closed = { code: e.code, reason: redact(e.reason || "") };
+      rec.closedAtS = Math.round((Date.now() - t0) / 100) / 10;
+      finish();
+    });
+  });
+  return Promise.all(Array.from({ length: connections }, (_, i) => one(i)));
 }
 
 export async function run(env = process.env, out = (line) => console.log(line)) {
@@ -272,11 +329,12 @@ export async function run(env = process.env, out = (line) => console.log(line)) 
   const url = env[URL_ENV] || DEFAULT_URL;
   const seconds = Math.min(MAX_SECONDS, Math.max(2, Number(env[SECONDS_ENV]) || DEFAULT_SECONDS));
   const firehoseSeconds = Math.min(FIREHOSE_SECONDS, Math.max(1, Number(env[FIREHOSE_ENV]) || FIREHOSE_SECONDS));
+  const holdSeconds = Math.min(HOLD_MAX_SECONDS, Math.max(1, Number(env[HOLD_ENV]) || HOLD_SECONDS));
   const only = String(env[ONLY_ENV] || "").split(",").map((s) => s.trim()).filter(Boolean);
   const redact = redactor(token);
   const say = (record) => out(redact(JSON.stringify(record)));
   const wants = (name) => only.length === 0 || only.includes(name);
-  say({ probe: "start", endpoint: url.replace(/\?.*$/, ""), seconds, plannedS: plannedSeconds({ seconds, only, firehoseSeconds }), node: process.version,
+  say({ probe: "start", endpoint: url.replace(/\?.*$/, ""), seconds, plannedS: plannedSeconds({ seconds, only, firehoseSeconds, holdSeconds }), node: process.version,
     at: new Date().toISOString() });
   if (wants("handshake")) {
     say({ probe: "handshake-query-token", ...(await handshake(url, token, { redact })) });
@@ -306,11 +364,14 @@ export async function run(env = process.env, out = (line) => console.log(line)) 
   }
   if (wants("joins")) {
     for (const n of JOIN_STEPS) {
-      const result = await session(url, token, TICKERS.slice(0, n).map((t) => `price:${t}`), { seconds: Math.max(6, Math.floor(seconds / 2)), redact });
+      const result = await session(url, token, TICKERS.slice(0, n).map((t) => `price:${t}`), { seconds: Math.max(JOIN_MIN_S, Math.floor(seconds / 2)), redact });
       const acked = Object.values(result.acks).filter((s) => s === "ok").length;
       say({ probe: "joins-per-connection", requested: n, acksOk: acked,
         otherAcks: Object.entries(result.acks).filter(([, s]) => s !== "ok").slice(0, 3), ...result, acks: undefined, ackDetail: undefined });
     }
+  }
+  if (wants("hold")) {
+    for (const rec of await holdJoined(url, token, { seconds: holdSeconds, redact })) say({ probe: "hold-connection", holdS: holdSeconds, ...rec });
   }
   say({ probe: "done", at: new Date().toISOString() });
   return 0;
