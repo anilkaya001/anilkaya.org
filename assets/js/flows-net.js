@@ -382,7 +382,7 @@
           "Unsided is premium the vendor left between the quotes, or a window it never split by side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
           "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Motion has two classes. Live motion is an arrival or your hand: a flare marks a window that reached this page while it was open, a band carries light only for premium that arrived in the last five minutes, ranks glide when new data reorders them, and the view moves only while you drag it. Ambient is ambient motion, not data: light runs along every band at a pace set by its size, spheres breathe and the view sways, and none of it is a trade. Ambient starts on after the close and stays as you leave it.",
-          "Sectors come from the nightly universe; a name it does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own Eastern date.",
+          "Sectors come from the nightly universe; a name it does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own US session date.",
           "Contracts are shown for a name, a sector or an expiry only when every window in it states its size; a side or a lean shows none, because the vendor splits premium by side, not contracts.",
           "Only the largest names and sectors get their own node; the rest are folded into Other, so every layer still sums to the same premium. Drag to turn the network; double click or R recentres it; Freeze holds it still.",
         ],

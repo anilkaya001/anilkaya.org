@@ -31,10 +31,7 @@
   const count = (v) => (n(v) === null ? DASH : Math.round(n(v)).toLocaleString("en-US"));
   const pct0 = (v) => (n(v) === null ? DASH : Math.round(n(v) * 100) + "%");
   const plural = (k, one, many) => (k === 1 ? one : many);
-  const instant = (iso) => {
-    const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(iso || ""));
-    return m ? m[1] + " " + m[2] + " UTC" : null;
-  };
+  const instant = (iso) => F.stamp(iso);
   const ET = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
@@ -46,11 +43,8 @@
     for (const x of ET.formatToParts(new Date(t))) p[x.type] = x.value;
     return { day: p.year + "-" + p.month + "-" + p.day, m: (+p.hour % 24) * 60 + +p.minute };
   };
-  const clock = (m) => {
-    const hh = Math.floor(m / 60) % 24, mm = Math.round(m % 60);
-    return ((hh + 11) % 12 + 1) + ":" + String(mm).padStart(2, "0") + " " + (hh < 12 ? "AM" : "PM");
-  };
-  const hourLabel = (m) => { const hh = Math.round(m / 60) % 24; return ((hh + 11) % 12 + 1) + (hh < 12 ? " AM" : " PM"); };
+  const clock = (m) => { const t = F.tick(m); return t === null ? null : t + " TRT"; };
+  const hourLabel = (m) => F.tick(m);
   const cardKey = (t) => String(t || "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
   const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
   const contractText = (r) => (r.cp === "C" || r.cp === "P" ? r.cp + " " + (n(r.k) === null ? "" : F.compact(n(r.k), n(r.k) % 1 ? 1 : 0)) : "") +
