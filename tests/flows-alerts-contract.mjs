@@ -52,6 +52,29 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
 }
 
 {
+  const base = { ticker: "AAA", option_chain: "AAA260918C00150000", total_premium: 5 };
+  eq(alertRow({ ...base, alert_rule: "RepeatedHits" }).rule, "RepeatedHits",
+    "THE REST SHAPE: the rule rides alert_rule");
+  eq(alertRow({ ...base, rule_name: "RepeatedHitsAscendingFill", rule_id: "5ce5ec11" }).rule,
+    "RepeatedHitsAscendingFill",
+    "THE SOCKET SHAPE: the vendor's socket names the rule rule_name, and a rule read only from " +
+    "alert_rule is a null on every row the day the socket feeds the alerts");
+  eq(alertRow({ ...base, rule_name: "Socket", rule_id: "5ce5ec11" }).ruleId, "5ce5ec11",
+    "and the rule's id is kept when the socket sends one");
+  eq(alertRow({ ...base, alert_rule: "Rest", rule_name: "Socket" }).rule, "Rest",
+    "alert_rule wins when both are sent");
+  eq(alertRow({ ...base, alert_rule: "", rule_name: "Socket" }).rule, "Socket",
+    "and an empty alert_rule falls through to rule_name");
+  eq(alertRow({ ...base, alert_rule: 7, rule_name: null }).rule, null,
+    "a rule that is not a string is null");
+  ok(!("ruleId" in alertRow({ ...base, alert_rule: "RepeatedHits" })),
+    "a REST row gains no key, so the stored live row is byte-identical to before");
+  eq(alertKey(alertRow({ ...base, rule_name: "Socket" })),
+    alertKey(alertRow({ ...base, alert_rule: "Socket" })),
+    "and an unspanned window keys the same from either shape");
+}
+
+{
   eq(alertRow({ option_chain: "AAA260918C00150000", total_premium: 5 }), null,
     "no ticker, no row");
   eq(alertRow({ ticker: "AAA", alert_rule: "X", has_sweep: true }), null,

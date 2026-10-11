@@ -384,6 +384,10 @@ function checkDossier(d, label, ticker = T) {
   ok(d.packets.positioning.facts.some((f) => f.k === "short.pctFloat" && Math.abs(f.v - 9800000 / 466000000) < 1e-6), "positioning: short interest over float is shares over float, both documented integers");
   ok(d.packets.positioning.facts.some((f) => f.k === "congress.total" && f.v === 3), "positioning: Congress counts come from the card's panel");
   ok(d.packets.flow.facts.some((f) => f.k === "strip.net") && d.packets.flow.facts.some((f) => f.k === "alerts.largest") && d.packets.flow.facts.some((f) => f.k === "dark.level1"), "flow: the live strip, the flagged alerts and the vendor's dark-pool price levels");
+  const askFact = d.packets.flow.facts.find((f) => f.k === "alerts.askShare");
+  ok(askFact && /\bask side\b/.test(askFact.label) && /undocumented/.test(askFact.note) && !/\bat (the )?(ask|bid)\b/i.test(askFact.label + " " + askFact.note), "flow: the ask share is named in the vendor's term, ask side, and its note says the alert field is undocumented");
+  const askVerdict = guardAnswer(askFact.label + ". " + askFact.note + ".", [{ say: askFact.label + " " + askFact.note }], { smallIntegers: false, modals: true });
+  ok(askVerdict.forecast === false, "flow: and the model-visible wording passes the ask guard's forecast and modal lexicon");
   const heldDark = D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: heldAll(), vendor: { ...reduceAll(), levels: undefined } });
   ok(heldDark.packets.flow.facts.some((f) => f.k === "dark.print1" && f.unit === "usd/share") && !heldDark.packets.flow.facts.some((f) => f.k.startsWith("dark.level")), "flow: with no price-level read the card's own dark-pool prints stand in, and the packet says which");
   ok(d.packets.peers.facts.some((f) => f.k === "etf.change"), "peers: the sector ETF's move");

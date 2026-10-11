@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "253";
+export const ASSET_VERSION = "254";
 
 import { GLOSSARY } from "./flows-glossary.js";
 
@@ -471,6 +471,7 @@ ${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id=
   </div>
 
   <p class="flows-foot hm-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">Track record</a></span></p>
+  <i hidden data-defer="home-below" data-src="${v("/assets/js/flows-overview-below.js")}"></i>
 `, { chrome: false })}
 ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
@@ -584,7 +585,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="t-ann">Time-value yield, annualised: the bid less any intrinsic value, over the collateral, scaled by 365 over the days to expiry.</p>
       <p data-k="t-pq">Chance the position ends in profit under the risk-neutral density of the card&#39;s smile shape levelled to this contract&#39;s implied volatility, or flat at it where the card lists no smile near the expiry. Not a forecast.</p>
       <p data-k="t-pp">Chance the position ends in profit under the real-world law this name&#39;s card publishes.</p>
-      <p data-k="t-ev">Expected profit per contract at the bid, under the real-world law.</p>
+      <p data-k="t-ev">Expected profit per contract sold into the bid, under the real-world law.</p>
       <p data-k="why-q">The engine bundle did not load.</p>
       <p data-k="why-fit">No implied volatility inverts from this contract&#39;s mid.</p>
       <p data-k="why-eng">The engine could not price this line.</p>
@@ -606,7 +607,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="c-liq.spread">The spread is wider than the engine allows for this price (10% of the mid from $1, 15% from 30 cents, 5 cents below), so liquidity does not grade.</p>
       <p data-k="c-liq.oi">Open interest on the short leg is under 250, so liquidity does not grade.</p>
       <p data-k="c-liq.one-sided">The short leg has no two-sided quote, so liquidity does not grade.</p>
-      <p data-k="c-liq.slippage">Selling at the bid gives up more than a fifth of the most this position can make.</p>
+      <p data-k="c-liq.slippage">Selling into the bid gives up more than a fifth of the most this position can make.</p>
       <p data-k="c-edge.small">The real-world expected value is under twice the cost of trading, so the edge is small against friction.</p>
       <p data-k="c-edge.none">No edge can be computed without a real-world figure.</p>
       <p data-k="c-edge.sign-flips">The edge changes sign between the real-world laws tried.</p>
@@ -714,7 +715,7 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
-export function marketPage({ username = "" } = {}) {
+export function marketPage({ username = "", owner = false } = {}) {
   return `${head("Flows \u2014 Market", "The market in depth: the session tide, breadth, sectors, index ETFs, expiries, volatility and the market-wide feeds.", ["/assets/css/flows-market.css", "/assets/css/flows-index.css"])}
 ${shell("Market", "market", username, `
   <header class="flows-head mk-head" data-fx-hero>
@@ -740,13 +741,15 @@ ${marketModule("mkRadarCard", "Radar", "mkRadar", { span: 6, seg: `<div class="m
 ${marketModule("mkAdvCard", "Advancers", "mkAdv", { span: 6 })}
 ${marketModule("mkVolumeCard", "Volume", "mkVolume", { span: 6, seg: `<div class="mk-segc" id="mkVolumeSeg"></div>` })}
 ${marketModule("mkAgainstCard", "Against the tape", "mktAgainst", { span: 6 })}
-${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>` })}
+${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
+    body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
 ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
 ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
+  <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
   <p class="visually-hidden" id="mkPulseFoot"></p>
   <p class="visually-hidden" id="mktFoot"></p>
 `, { chrome: false })}
@@ -822,7 +825,7 @@ export function trackPage({ username = "" } = {}) {
   });
 }
 
-export function unusualPage({ username = "" } = {}) {
+export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
@@ -840,7 +843,8 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   </div>
   <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
-    <div class="fn-host" id="uaNet"></div>
+    <div class="fn-host is-slot" id="uaNet"${owner ? ' data-ambient="1"' : ""}></div>
+    <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
   </section>
   <div class="fd-chips" id="uaChips"></div>
   <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
@@ -852,11 +856,11 @@ ${feedModule("uaUrgencyCard", "Urgency", `<div class="fd-body" id="uaUrgency"></
 ${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"></div>`, { span: 6 })}
 ${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { span: 6 })}
   </div>
+  <i hidden data-defer="flow-below" data-src="${v("/assets/js/flows-unusual-below.js")}"></i>
 `, { chrome: false })}
 ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
-<script src="${v("/assets/js/flows-net.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;

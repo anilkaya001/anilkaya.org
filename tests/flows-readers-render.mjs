@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { revealBelow } from "./lib/below-fold.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -68,7 +69,7 @@ const tick = async (page, ms) => {
 };
 const pill = (page) => page.evaluate(() => { const b = document.getElementById("fxFresh"); return b ? { state: b.dataset.state, label: b.dataset.label } : null; });
 
-const browser = await chromium.launch();
+const browser = revealBelow(await chromium.launch());
 try {
   {
     const TICKERS = ["NVDA", "AMD", "MSFT", "AAPL"];
@@ -281,6 +282,110 @@ try {
     ok((await pill(page)).state !== "stale", "while the same region current leaves it alone");
     eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
     await page.close();
+  }
+  {
+    const board = {
+      side: "long", generatedAt: "2026-09-28T21:30:00.000Z", sessionDate: "2026-09-28", status: "ok", universe: 264, enriched: 60,
+      rows: ["NVDA", "AMD"].map((t, i) => ({ t, r: i + 1, s: 90 - i * 7, cnv: 80, px: 100 + i, chg: 0.01, purity: 0.02, sector: "Technology",
+        gRegime: "long", gFlipDist: -0.1, netPrem: 1e7, fam: { F: 10, P: 20, D: 30, V: 40, O: 50 }, edte: 20 })),
+    };
+    const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
+    const html = PAGES.overviewPage({ username: "test" });
+    const beat = () => ({ body: { serverNow: NOW, expected: "2026-09-28", phase: RTH, keys: {} } });
+    const open = async () => {
+      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.addInitScript(() => { try { sessionStorage.setItem("flows:rt:off", "404:9000000000000000"); } catch {} });
+      await mount(page, { html, url: "/flows/", answer: (key) => (key.startsWith("now") ? beat() : null) });
+      await page.evaluate(() => window.FlowsUI.freshness({ sessionDate: "2026-09-28", source: "pill-test" }));
+      await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
+      await page.clock.runFor(1000);
+      return { page, errors };
+    };
+    const put = (page, o) => page.evaluate((o) => {
+      const U = window.FlowsUI, t = Date.now(), at = t - (o.ago || 0) * 1000, iso = (ms) => new Date(ms).toISOString();
+      const state = o.state || "live";
+      const ff = U.freshFrom({ state, reason: o.reason || "cadence", klass: o.klass || "rt", readAt: iso(at), source: "hub", cadenceS: 5, session: "2026-09-29",
+        liveUntil: state === "live" ? iso(at + (o.liveS || 15) * 1000) : null, staleAt: iso(at + (o.staleS || 60) * 1000) }, { serverNow: t });
+      const x = { ff, source: o.source, role: o.role };
+      if (o.price) x.readAt = iso(at);
+      U.freshness(x);
+    }, o);
+    const look = (page) => page.evaluate(() => {
+      const b = document.getElementById("fxFresh"), d = window.FlowsUI.freshness.details();
+      return { state: b.dataset.state, label: b.dataset.label, aria: b.getAttribute("aria-label"), lead: d.lead, now: window.FlowsUI.freshness.state() };
+    });
+
+    {
+      const { page, errors } = await open();
+      await put(page, { source: "rt:px", role: "primary", price: true });
+      let p = await look(page);
+      eq(p.state, "live", `A PX FRAME AT t IS LIVE AT t (${JSON.stringify(p)})`);
+      eq(p.label, "Live", "and says so");
+      ok(/Live/.test(p.aria), `and the accessible name carries the same word (${p.aria})`);
+      await page.clock.runFor(10000);
+      p = await look(page);
+      eq(p.state, "live", "STILL LIVE AT t + 10 s, inside the rail class's 15 s window");
+      await page.clock.runFor(6000);
+      p = await look(page);
+      eq(p.state, "fresh", `FRESH AT t + 16 s with no new frame and no call from the page: the pill repaints itself when the window closes (today's code stays Live to t + 180 s) (${JSON.stringify(p)})`);
+      ok(/^Fresh \u00b7 1[56] s$/.test(p.label), `and the label is Fresh with the age of the last price read (${p.label})`);
+      ok(/Fresh/.test(p.aria) && !/Live/.test(p.aria), `the accessible name says Fresh and not Live (${p.aria})`);
+      ok(/Not live: Streamed prices last read 1[56] s ago \(live within 15 s\)/.test(p.lead), `the details name the source that lags, with its window (${p.lead.slice(0, 160)})`);
+      await page.clock.runFor(150000);
+      eq((await look(page)).state, "stale", "and the same entry, left alone past its stale line, turns the pill Stale (primary and stale)");
+      await put(page, { source: "rt:px", role: "primary", price: true });
+      eq((await look(page)).state, "live", "a new frame brings Live back at once");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page, errors } = await open();
+      await put(page, { source: "rt:fl", role: "primary", state: "fresh", klass: "rtSlow", staleS: 60 });
+      eq((await look(page)).state, "fresh", "A PAGE WHOSE ONLY PRIMARY IS FRESH (an event stream, no price) shows Fresh");
+      await page.clock.runFor(30000);
+      eq((await look(page)).state, "fresh", "and still Fresh inside the stale window");
+      await page.clock.runFor(35000);
+      eq((await look(page)).state, "stale", "AND TURNS STALE AT THE ENTRY'S STALE LINE with no frame, heartbeat or registration: the pill demotes itself from fresh as it does from live");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page, errors } = await open();
+      await put(page, { source: "live:strips", klass: "breadth", liveS: 1200, staleS: 2700, ago: 41, role: null });
+      const seen = [];
+      for (let i = 0; i < 4; i++) { seen.push(await look(page)); await page.clock.runFor(5000); }
+      ok(seen.every((p) => p.state !== "live" && p.now !== "live"), `A HEARTBEAT-ONLY PAGE NEVER SHOWS LIVE, though the server calls its breadth key live for another 20 minutes (${seen.map((p) => p.state).join(",")})`);
+      ok(/^Fresh \u00b7 4\d s$/.test(seen[0].label), `it says Fresh with the age of the newest price read (${seen[0].label})`);
+      ok(/Fresh/.test(seen[0].aria), `under the same word for a screen reader (${seen[0].aria})`);
+      const later = await look(page);
+      ok(/^Fresh \u00b7 (5\d|1\d{2}|[6-9]\d) s$|^Fresh \u00b7 1 min$/.test(later.label), `and the age moves on as the page sits (${seen[0].label} then ${later.label})`);
+      ok(/Nothing on this page is a live stream/.test(later.lead), "the details say why it does not claim Live");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page, errors } = await open();
+      await put(page, { source: "rt:px", role: "primary", price: true });
+      await put(page, { source: "rt:fl", role: "primary", state: "fresh", klass: "rtSlow", staleS: 120 });
+      let p = await look(page);
+      eq(p.state, "fresh", `WHERE BOTH ARE PRIMARY, rt:fl at fresh beside rt:px live is Fresh (${p.state})`);
+      await put(page, { source: "rt:fl", role: "secondary", state: "fresh", klass: "rtSlow", staleS: 120, ago: 40 });
+      p = await look(page);
+      eq(p.state, "live", `WHERE fl IS SECONDARY the same pair is Live (${p.state})`);
+      ok(/Not live: Streamed flow alerts last read 40 s ago \(live within 30 s\)/.test(p.lead), `and the details list the secondary entry that is not live (${p.lead.slice(0, 200)})`);
+      await put(page, { source: "rt:fl", role: "secondary", state: "stale", klass: "rtSlow" });
+      p = await look(page);
+      eq(p.state, "fresh", `A STALE SECONDARY ENTRY GIVES FRESH, not Live and not Stale (${p.state})`);
+      await put(page, { source: "rt:fl", state: "stale", klass: "rtSlow" });
+      eq((await look(page)).state, "stale", "while the same entry with no role at all (a payload the page reads) keeps the worst-case rule and turns the pill Stale");
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
   }
   {
     const board = {

@@ -14,7 +14,7 @@ const t0 = process.hrtime.bigint();
 
 const disk = (rel) => readFileSync(path.join(ROOT, rel), "utf8");
 const tracked = trackedFiles(ROOT);
-const manifest = JSON.parse(disk("tests/suites.json"));
+const manifest = { suites: tracked.filter((f) => /^tests\/suites\/[^/]+\.json$/.test(f)).sort().map((f) => JSON.parse(disk(f))).sort((a, b) => (a.group === "fast" ? 0 : 1) - (b.group === "fast" ? 0 : 1) || (a.name < b.name ? -1 : 1)) };
 const matrix = suiteMatrix(ROOT, manifest, new Set([...tracked, "docs/index.md"]));
 const real = buildAll({ root: ROOT, tracked, matrix });
 
@@ -61,7 +61,7 @@ agentsEdit("a region duplicated", (t) => t.replace("<!-- /gen:globals -->", "<!-
 
 inputMoves("a course renamed", "assets/js/course-catalog.js", (t) => t.replace("id: \"ols\"", "id: \"olsx\""));
 inputMoves("a review item dropped", "assets/data/review-bank.json", (t) => { const j = JSON.parse(t); j.items.pop(); return JSON.stringify(j); });
-inputMoves("a suite reclassified", "tests/suites.json", (t) => t.replace('"name": "contracts", "class": "N"', '"name": "contracts", "class": "W"'));
+inputMoves("a suite reclassified", "tests/suites/contracts.json", (t) => t.replace('"name": "contracts", "class": "N"', '"name": "contracts", "class": "W"'));
 inputMoves("a global added", "docs/globals.json", (t) => t.replace('"Lab"', '"Lab","Zed"'));
 inputMoves("a role reworded", "docs/modules.json", (t) => t.replace("Landing page and particle-field hero.", "Home page."), "index");
 inputMoves("a file moved to another domain", "docs/modules.json", (t) => t.replace('"role":"Landing page and particle-field hero.","domain":"site"', '"role":"Landing page and particle-field hero.","domain":"lab"'), "index");

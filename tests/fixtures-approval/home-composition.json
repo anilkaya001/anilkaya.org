@@ -1,0 +1,277 @@
+{
+ "decision": "F-03",
+ "answers": "PC-20",
+ "read": "the owner reads this table with the renders of F-02 (placement 1); the default stands if nothing is said within the first week",
+ "page": "overviewPage",
+ "hero": {
+  "id": "hmHero",
+  "title": "Market tide",
+  "decision": "keep",
+  "reason": "The page's first paint and its largest-contentful-paint element: the tide value and caption, then the chart. It never waits for a deferred chunk."
+ },
+ "decisions": [
+  "keep",
+  "merge",
+  "retire",
+  "defer"
+ ],
+ "modules": [
+  {
+   "id": "hmMetals",
+   "title": "Metals",
+   "bodyId": "ccMetals",
+   "decision": "keep",
+   "effect": "now",
+   "rendered": true,
+   "reason": "The owner's focus groups and the only module that answers 'what is gold doing' without a click. First-paint; the first module under the verdict, so its top is the peek at 1440."
+  },
+  {
+   "id": "hmLeaders",
+   "title": "Leaders",
+   "bodyId": "ccLeaders",
+   "decision": "keep",
+   "effect": "now",
+   "rendered": true,
+   "reason": "The names that carry the session. It gains the IV-days column of F-05 beside the change. First-paint, below the fold at both sizes."
+  },
+  {
+   "id": "hmVerdict",
+   "title": "Neuron verdict",
+   "bodyId": "hmVerdictT",
+   "decision": "keep",
+   "effect": "now",
+   "rendered": true,
+   "reason": "One sentence that says what the session is, written once a night. It sits directly under the tide row at 1440, wholly above the fold, and after the network and the Moves band when the page is stacked at 390, where nothing but the tide fits wholly."
+  },
+  {
+   "id": "hmBull",
+   "title": "Bullish",
+   "bodyId": "ccBull",
+   "decision": "merge",
+   "into": "network.lean",
+   "effect": "with:F-09",
+   "rendered": true,
+   "reason": "The bullish board is the network's Lean output: the same names ranked by the same premium. Once the network mounts, the module stays as the board brief below the fold and links to the board; it stops being a separate first-paint ask."
+  },
+  {
+   "id": "hmBear",
+   "title": "Bearish",
+   "bodyId": "ccBear",
+   "decision": "merge",
+   "into": "network.lean",
+   "effect": "with:F-09",
+   "rendered": true,
+   "reason": "The mirror of Bullish, merged the same way: the network's Lean output with the board brief kept below the fold."
+  },
+  {
+   "id": "hmChg",
+   "title": "What changed",
+   "bodyId": "ccChg",
+   "decision": "defer",
+   "effect": "now",
+   "rendered": true,
+   "reason": "A study of the session against the last, read once the first screen has been read. It carries the spine plot and the largest share of the page's script, so it loads when it scrolls into view."
+  },
+  {
+   "id": "hmVol",
+   "title": "Volatility",
+   "bodyId": "ccVol",
+   "decision": "defer",
+   "effect": "now",
+   "rendered": true,
+   "reason": "Regime and implied-volatility context. Nothing above the fold depends on it; it loads when it scrolls into view."
+  },
+  {
+   "id": "hmLean",
+   "title": "Sectors",
+   "bodyId": "ccLean",
+   "decision": "keep",
+   "effect": "now",
+   "rendered": true,
+   "reason": "The sector lean table has no replacement: the network's Sector layer shows the top five by premium, not every sector's lean. First-paint, below the fold. The proposal named no verdict for it, so keep is the default."
+  },
+  {
+   "id": "hmAlerts",
+   "title": "Flagged",
+   "bodyId": "ccAlerts",
+   "decision": "retire",
+   "into": "network.flagged-mode",
+   "link": "/flows/unusual/",
+   "effect": "with:F-09",
+   "rendered": false,
+   "reason": "The flagged windows are the network's Flagged data switch, with identified paths. Until the network ships the module stays; afterwards it is removed and the page keeps a link to the Flow page."
+  },
+  {
+   "id": "hmEvents",
+   "title": "Reporting",
+   "bodyId": "ccEvents",
+   "decision": "defer",
+   "effect": "now",
+   "rendered": true,
+   "reason": "Who reports next. Useful, never urgent at 10:41; it loads when it scrolls into view."
+  },
+  {
+   "id": "hmWatch",
+   "title": "Nearly in",
+   "bodyId": "ccWatch",
+   "decision": "retire",
+   "into": "page.watchlist",
+   "link": "/flows/watch/",
+   "effect": "with:P3-35",
+   "rendered": false,
+   "reason": "A list of names, which belongs on the page that keeps lists. It stays until the Watchlist page exists, then leaves Home with a link."
+  },
+  {
+   "id": "hmNews",
+   "title": "Headlines",
+   "bodyId": "ccNews",
+   "decision": "defer",
+   "effect": "now",
+   "rendered": true,
+   "reason": "Headlines are a feed the first screen does not need and the largest block of text on the page; it loads when it scrolls into view."
+  }
+ ],
+ "order": [
+  "hmHero",
+  "network",
+  "moves",
+  "hmVerdict",
+  "hmMetals",
+  "hmLeaders",
+  "hmBull",
+  "hmBear",
+  "hmLean",
+  "hmAlerts",
+  "hmWatch",
+  "hmChg",
+  "hmVol",
+  "hmEvents",
+  "hmNews"
+ ],
+ "deferGroup": "home-below",
+ "deferred": [
+  "hmChg",
+  "hmVol",
+  "hmEvents",
+  "hmNews"
+ ],
+ "slots": {
+  "network": {
+   "title": "The market flow network",
+   "row": "F-09",
+   "heightPx": {
+    "1440x900": 403,
+    "390x844": 300
+   },
+   "reason": "Beside the tide at 1440 and stacked under it at 390, where the 2D twin (300 px) stands in and the 3D scene is one tap away."
+  },
+  "moves": {
+   "title": "The Moves band",
+   "row": "F-57",
+   "heightPx": {
+    "1440x900": 392,
+    "390x844": 392
+   },
+   "rows": 8,
+   "rowPx": 44,
+   "headPx": 40,
+   "reason": "Eight rows under a 40 px header; to the right of the network at 1440, below the network at 390. Raw change is its quiet state until F-05's IV-days lens and F-57's lenses arrive."
+  }
+ },
+ "additions": [
+  {
+   "id": "network",
+   "kind": "slot",
+   "row": "F-09"
+  },
+  {
+   "id": "moves",
+   "kind": "slot",
+   "row": "F-57"
+  },
+  {
+   "id": "chance-line",
+   "kind": "inside",
+   "in": "moves",
+   "row": "F-57",
+   "reason": "One composed line in the band's header; it adds no row."
+  },
+  {
+   "id": "ribbon",
+   "kind": "inside",
+   "in": "hmHero",
+   "row": "F-01",
+   "reason": "The freshness chip and ribbon sit in the tide's chip row, which exists."
+  },
+  {
+   "id": "most-unusual-chip",
+   "kind": "inside",
+   "in": "network",
+   "row": "F-54",
+   "reason": "A name-filter chip in the network's controls, shown only once a rate is printed."
+  },
+  {
+   "id": "relations-toggle",
+   "kind": "inside",
+   "in": "network",
+   "row": "F-98",
+   "reason": "A switch in the network's controls."
+  },
+  {
+   "id": "replay",
+   "kind": "inside",
+   "in": "network",
+   "row": "F-09",
+   "reason": "The after-hours replay plays in the network's own scene, with its label as a caption."
+  },
+  {
+   "id": "cluster-captions",
+   "kind": "inside",
+   "in": "network",
+   "row": "F-09",
+   "reason": "DOM text under the scene."
+  },
+  {
+   "id": "wraps",
+   "kind": "inside",
+   "in": "hmVerdict",
+   "row": "F-107",
+   "reason": "The session wrap is the verdict's second sentence, in its More panel."
+  },
+  {
+   "id": "toasts",
+   "kind": "overlay",
+   "row": "F-99",
+   "reason": "A toast floats over the page and takes no height."
+  }
+ ],
+ "layouts": {
+  "1440x900": {
+   "width": 1440,
+   "height": 900,
+   "fit": [
+    [
+     "hmHero",
+     "network",
+     "moves"
+    ],
+    [
+     "hmVerdict"
+    ]
+   ],
+   "peek": "hmMetals",
+   "peekPx": 96
+  },
+  "390x844": {
+   "width": 390,
+   "height": 844,
+   "fit": [
+    [
+     "hmHero"
+    ]
+   ],
+   "peek": "network",
+   "peekPx": 96
+  }
+ }
+}

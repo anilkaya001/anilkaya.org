@@ -18,6 +18,7 @@ export const ERRORS = Object.freeze({
   chain_upstream: entry(502, "Market data provider returned an error"),
   forbidden: entry(403, "Forbidden"),
   internal_error: entry(500, "Internal server error"),
+  invalid_cols: entry(400, "cols must name one to twelve universe columns"),
   invalid_expiry: entry(400, "Expiry must be YYYY-MM-DD"),
   invalid_json: entry(400, "Body must be a valid JSON object"),
   invalid_key: entry(400, "Unknown payload key"),

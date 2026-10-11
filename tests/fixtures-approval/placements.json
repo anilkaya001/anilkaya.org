@@ -1,0 +1,128 @@
+{
+ "decision": "OD-39",
+ "asked": "H11",
+ "placements": [
+  {
+   "id": "p1",
+   "n": 1,
+   "slug": "home-network",
+   "title": "The Home network, All sided premium, with the seam at the Name layer",
+   "for": "F-09 (the visible pull request) and F-36 (the scene core)",
+   "releases": [
+    "F-36",
+    "F-09"
+   ],
+   "purpose": "The market-wide conserved flow network that sits beside the tide on Home. Money is the shape: sphere area and band width are premium in dollars. Calls and Puts pass through Sector to a Name, and each Name is a split ring: the bands entering it and the bands leaving it are two ways to split the same dollars, so no band runs through a name and no pulse spans two bands. Three states are shown: the default session, the after-hours replay of the last session's flagged windows, and a live arrival.",
+   "useTest": "At least 25% of Home sessions interact with the network (a hover, a click or a mode) in the 28 days before the reading; under 10% it moves below the fold and the 2D twin becomes the default.",
+   "states": [
+    "default",
+    "replay",
+    "arrival"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  },
+  {
+   "id": "p2",
+   "n": 2,
+   "slug": "moves",
+   "title": "The Moves page: the Now list first, with the five canonical strings",
+   "for": "F-57 (the Moves page), F-37 (visual language) and F-103 (the evidence ladder)",
+   "releases": [
+    "F-57",
+    "F-37",
+    "F-103"
+   ],
+   "purpose": "The page that ranks every name by how rare its move is against its own norm. The Now list comes first; the header sentence, the alert count line, the Screen and Alert badges, the paused state and the empty state are the five canonical strings of F-38, written once. The frames show the words as they will read once the gates hold, so the strings can be read before the numbers behind them exist.",
+   "useTest": "At least 30% of Flows sessions open Moves in the four weeks after members get it; the Field is judged separately and is never the default before its comprehension check passes.",
+   "states": [
+    "now",
+    "paused",
+    "empty"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  },
+  {
+   "id": "p3",
+   "n": 3,
+   "slug": "skyline",
+   "title": "The move skyline: rarity in 3D with direction on the colour channel",
+   "for": "F-95",
+   "releases": [
+    "F-95"
+   ],
+   "purpose": "Height is rarity in decades of the scan p; the floor is the Map's tiles coloured by direction, so each channel carries one variable. Names above the gold selection plane are called out in a margin list with leader lines, never by labels on the prisms. The plane is dashed and says there is no measured rate yet. On a phone the 2D sorted list with the selection line stands in.",
+   "useTest": "At least 20% of Moves sessions use 3D by week 16, or it is cut and the 2D list stays.",
+   "states": [
+    "default"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  },
+  {
+   "id": "p4",
+   "n": 4,
+   "slug": "terrain",
+   "title": "The strike by expiry terrain: dealer gamma on the vendor's convention",
+   "for": "F-96",
+   "releases": [
+    "F-96"
+   ],
+   "purpose": "One floor of log-moneyness by expiry, coloured by the dealer gamma of the open-interest book in dollars per 1% move, with a zero-gamma line per expiry, a gold back-wall profile with its flip, and a spot plane that carries its own vendor stamp. Every gamma figure names the convention. On a phone the 2D grid stands in.",
+   "useTest": "At least 10% of ticker sessions open the world; under 5% it moves behind the mode bar's overflow.",
+   "states": [
+    "default"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  },
+  {
+   "id": "p5",
+   "n": 5,
+   "slug": "surface",
+   "title": "The volatility surface on the eSSVI contract",
+   "for": "F-97",
+   "releases": [
+    "F-97"
+   ],
+   "purpose": "The mesh is evaluated from at most twelve fitted slices; quote dots carry their bid-ask whiskers; outside each slice's quoted range the surface is translucent and hatched as extrapolated, never shaded as data; the event step is a ridge; seams are marked where the fit fails its audit. On a phone the heatmap view stands in.",
+   "useTest": "At least 10% of ticker sessions open the surface; under 5% it moves behind the mode bar's overflow.",
+   "states": [
+    "default"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  },
+  {
+   "id": "p6",
+   "n": 6,
+   "slug": "relations",
+   "title": "Relations: names on a ring, tested edges only",
+   "for": "F-98",
+   "releases": [
+    "F-98"
+   ],
+   "purpose": "Names sit on a ring by sector. An edge is drawn only if it passed its test, with its bootstrap stability in its label and one of three opacity steps. One layer is visible at a time and the layers are never merged. When nothing is stable the page says so in text.",
+   "useTest": "You open it weekly; whether members get it is your decision, not a threshold.",
+   "states": [
+    "default",
+    "empty"
+   ],
+   "viewports": [
+    "1440x900",
+    "390x844"
+   ]
+  }
+ ]
+}

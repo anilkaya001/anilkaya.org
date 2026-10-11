@@ -1,0 +1,1001 @@
+{
+ "network": {
+  "asOf": "2026-10-09T15:41:00-04:00",
+  "session": "2026-10-09",
+  "windows": 140,
+  "unit": "USD millions",
+  "sectors": [
+   {
+    "id": "tech",
+    "label": "Tech"
+   },
+   {
+    "id": "none",
+    "label": "No sector",
+    "residual": true
+   },
+   {
+    "id": "cyc",
+    "label": "Cyclical"
+   },
+   {
+    "id": "comms",
+    "label": "Comms"
+   },
+   {
+    "id": "energy",
+    "label": "Energy"
+   },
+   {
+    "id": "other",
+    "label": "Other",
+    "residual": true
+   }
+  ],
+  "names": [
+   {
+    "id": "NVDA",
+    "ca": 19.19,
+    "cb": 11.82,
+    "pb": 2.05,
+    "pa": 1.88,
+    "u": 1.56,
+    "sectors": {
+     "tech": 36.5
+    },
+    "label": "NVDA",
+    "residual": false,
+    "v": 36.5
+   },
+   {
+    "id": "SPY",
+    "ca": 3.28,
+    "cb": 2.34,
+    "pb": 7.99,
+    "pa": 5.79,
+    "u": 3.19,
+    "sectors": {
+     "none": 22.59
+    },
+    "label": "SPY",
+    "residual": false,
+    "v": 22.59
+   },
+   {
+    "id": "QQQ",
+    "ca": 3.56,
+    "cb": 2.58,
+    "pb": 2.2,
+    "pa": 1.83,
+    "u": 5.04,
+    "sectors": {
+     "none": 15.21
+    },
+    "label": "QQQ",
+    "residual": false,
+    "v": 15.21
+   },
+   {
+    "id": "AMZN",
+    "ca": 3.46,
+    "cb": 1.48,
+    "pb": 1.2,
+    "pa": 1.26,
+    "u": 1.11,
+    "sectors": {
+     "cyc": 8.51
+    },
+    "label": "AMZN",
+    "residual": false,
+    "v": 8.51
+   },
+   {
+    "id": "MSFT",
+    "ca": 3.18,
+    "cb": 1.76,
+    "pb": 1.1,
+    "pa": 1.04,
+    "u": 0.99,
+    "sectors": {
+     "tech": 8.07
+    },
+    "label": "MSFT",
+    "residual": false,
+    "v": 8.07
+   },
+   {
+    "id": "AAPL",
+    "ca": 1.98,
+    "cb": 1.94,
+    "pb": 0.8,
+    "pa": 1.15,
+    "u": 0.91,
+    "sectors": {
+     "tech": 6.78
+    },
+    "label": "AAPL",
+    "residual": false,
+    "v": 6.78
+   },
+   {
+    "id": "META",
+    "ca": 2.18,
+    "cb": 0.92,
+    "pb": 0.8,
+    "pa": 0.69,
+    "u": 0.71,
+    "sectors": {
+     "comms": 5.3
+    },
+    "label": "META",
+    "residual": false,
+    "v": 5.3
+   },
+   {
+    "id": "TSLA",
+    "ca": 0.98,
+    "cb": 1.56,
+    "pb": 0.6,
+    "pa": 1.25,
+    "u": 0.66,
+    "sectors": {
+     "cyc": 5.05
+    },
+    "label": "TSLA",
+    "residual": false,
+    "v": 5.05
+   },
+   {
+    "id": "NFLX",
+    "ca": 0.58,
+    "cb": 1.26,
+    "pb": 0.49,
+    "pa": 1.68,
+    "u": 0.59,
+    "sectors": {
+     "comms": 4.6
+    },
+    "label": "NFLX",
+    "residual": false,
+    "v": 4.6
+   },
+   {
+    "id": "MU",
+    "ca": 1.88,
+    "cb": 0.46,
+    "pb": 0.6,
+    "pa": 0.34,
+    "u": 0.58,
+    "sectors": {
+     "tech": 3.86
+    },
+    "label": "MU",
+    "residual": false,
+    "v": 3.86
+   },
+   {
+    "id": "Other",
+    "ca": 4.81,
+    "cb": 3.48,
+    "pb": 3.37,
+    "pa": 3.69,
+    "u": 3.66,
+    "sectors": {
+     "tech": 6.27,
+     "none": 1.8,
+     "comms": 0.89,
+     "energy": 3.45,
+     "other": 6.6
+    },
+    "label": "Other names",
+    "residual": true,
+    "v": 19.01
+   }
+  ],
+  "arrival": {
+   "name": "MU",
+   "sector": "tech",
+   "premium": 1.9,
+   "calls": true,
+   "at": "15:41:07"
+  },
+  "replayOf": "2026-10-08"
+ },
+ "moves": {
+  "rows": [
+   {
+    "t": "SMCI",
+    "sector": "Tech",
+    "chg": 9.6,
+    "zT": 4.8,
+    "state": "alert",
+    "why": "No news",
+    "flow": "High",
+    "p": "p below 0.00002"
+   },
+   {
+    "t": "MU",
+    "sector": "Tech",
+    "chg": 6.8,
+    "zT": 4.1,
+    "state": "alert",
+    "why": "Headline: analyst raise",
+    "flow": "High",
+    "p": "p below 0.00005"
+   },
+   {
+    "t": "COIN",
+    "sector": "Financial",
+    "chg": -6.1,
+    "zT": -3.7,
+    "state": "screen",
+    "why": "Crypto down",
+    "flow": "Moderate",
+    "p": "p below 0.0004"
+   },
+   {
+    "t": "NFLX",
+    "sector": "Comms",
+    "chg": -5.2,
+    "zT": -3.6,
+    "state": "large",
+    "why": "Earnings in 2 days: event not separated",
+    "flow": "Not read",
+    "p": "p below 0.0006"
+   },
+   {
+    "t": "AMD",
+    "sector": "Tech",
+    "chg": 4.4,
+    "zT": 3.2,
+    "state": "screen",
+    "why": "No news",
+    "flow": "High",
+    "p": "p below 0.003"
+   },
+   {
+    "t": "NVDA",
+    "sector": "Tech",
+    "chg": 3.86,
+    "zT": 2.4,
+    "state": "large",
+    "why": "Large, not tested: q above 0.05",
+    "flow": "Normal",
+    "p": "p below 0.02"
+   },
+   {
+    "t": "TSLA",
+    "sector": "Cyclical",
+    "chg": -2.9,
+    "zT": -1.9,
+    "state": "none",
+    "why": "Not tested: inside the quiet mass",
+    "flow": "Normal",
+    "p": ""
+   },
+   {
+    "t": "AMZN",
+    "sector": "Cyclical",
+    "chg": 1.2,
+    "zT": 0.9,
+    "state": "none",
+    "why": "Not tested: inside the quiet mass",
+    "flow": "Normal",
+    "p": ""
+   }
+  ],
+  "sectors": [
+   [
+    "SPY",
+    "S&P 500",
+    0.62
+   ],
+   [
+    "XLK",
+    "Technology",
+    1.64
+   ],
+   [
+    "XLC",
+    "Communication",
+    0.38
+   ],
+   [
+    "XLY",
+    "Discretionary",
+    0.27
+   ],
+   [
+    "XLF",
+    "Financials",
+    0.51
+   ],
+   [
+    "XLI",
+    "Industrials",
+    0.42
+   ],
+   [
+    "XLB",
+    "Materials",
+    0.08
+   ],
+   [
+    "XLV",
+    "Health care",
+    -0.22
+   ],
+   [
+    "XLRE",
+    "Real estate",
+    -0.47
+   ],
+   [
+    "XLP",
+    "Staples",
+    -0.41
+   ],
+   [
+    "XLU",
+    "Utilities",
+    -0.63
+   ],
+   [
+    "XLE",
+    "Energy",
+    -0.84
+   ]
+  ],
+  "asOf": "2026-10-09T15:41:00-04:00",
+  "alertsToday": 2,
+  "scanned": 670
+ },
+ "skyline": {
+  "asOf": "2026-10-09T15:41:00-04:00",
+  "hStar": 4.2,
+  "tiles": [
+   {
+    "t": "NVDA",
+    "dir": -1,
+    "chg": -0.8
+   },
+   {
+    "t": "AMD",
+    "dir": 1,
+    "chg": 4.4
+   },
+   {
+    "t": "MU",
+    "dir": 1,
+    "chg": 6.8
+   },
+   {
+    "t": "AVGO",
+    "dir": 1,
+    "chg": 0.0
+   },
+   {
+    "t": "SMCI",
+    "dir": 1,
+    "chg": 9.6
+   },
+   {
+    "t": "MSFT",
+    "dir": -1,
+    "chg": -0.6
+   },
+   {
+    "t": "AAPL",
+    "dir": 1,
+    "chg": 0.2
+   },
+   {
+    "t": "INTC",
+    "dir": -1,
+    "chg": -0.9
+   },
+   {
+    "t": "META",
+    "dir": -1,
+    "chg": -1.9
+   },
+   {
+    "t": "GOOGL",
+    "dir": -1,
+    "chg": -1.9
+   },
+   {
+    "t": "NFLX",
+    "dir": -1,
+    "chg": -5.2
+   },
+   {
+    "t": "PLTR",
+    "dir": 1,
+    "chg": 3.9
+   },
+   {
+    "t": "SNOW",
+    "dir": -1,
+    "chg": -3.9
+   },
+   {
+    "t": "CRM",
+    "dir": -1,
+    "chg": -2.0
+   },
+   {
+    "t": "ORCL",
+    "dir": 1,
+    "chg": 1.6
+   },
+   {
+    "t": "ADBE",
+    "dir": -1,
+    "chg": -0.8
+   },
+   {
+    "t": "AMZN",
+    "dir": 1,
+    "chg": 0.7
+   },
+   {
+    "t": "TSLA",
+    "dir": -1,
+    "chg": -1.5
+   },
+   {
+    "t": "RIVN",
+    "dir": -1,
+    "chg": -4.8
+   },
+   {
+    "t": "HD",
+    "dir": 1,
+    "chg": 2.0
+   },
+   {
+    "t": "LOW",
+    "dir": 1,
+    "chg": 0.3
+   },
+   {
+    "t": "NKE",
+    "dir": -1,
+    "chg": -0.5
+   },
+   {
+    "t": "DIS",
+    "dir": 1,
+    "chg": 2.1
+   },
+   {
+    "t": "UBER",
+    "dir": 1,
+    "chg": 1.4
+   },
+   {
+    "t": "JPM",
+    "dir": -1,
+    "chg": -2.0
+   },
+   {
+    "t": "GS",
+    "dir": -1,
+    "chg": -0.3
+   },
+   {
+    "t": "BAC",
+    "dir": -1,
+    "chg": -1.9
+   },
+   {
+    "t": "COIN",
+    "dir": -1,
+    "chg": -6.1
+   },
+   {
+    "t": "SQ",
+    "dir": 1,
+    "chg": 0.4
+   },
+   {
+    "t": "SHOP",
+    "dir": -1,
+    "chg": -1.4
+   },
+   {
+    "t": "ROKU",
+    "dir": 1,
+    "chg": 0.6
+   },
+   {
+    "t": "ABNB",
+    "dir": -1,
+    "chg": -0.6
+   },
+   {
+    "t": "XOM",
+    "dir": -1,
+    "chg": -1.8
+   },
+   {
+    "t": "CVX",
+    "dir": -1,
+    "chg": -0.3
+   },
+   {
+    "t": "OXY",
+    "dir": 1,
+    "chg": 1.4
+   },
+   {
+    "t": "LLY",
+    "dir": -1,
+    "chg": -1.7
+   },
+   {
+    "t": "UNH",
+    "dir": -1,
+    "chg": -1.2
+   },
+   {
+    "t": "PFE",
+    "dir": 1,
+    "chg": 0.6
+   },
+   {
+    "t": "QCOM",
+    "dir": -1,
+    "chg": -1.6
+   },
+   {
+    "t": "TXN",
+    "dir": -1,
+    "chg": -1.7
+   }
+  ],
+  "rows": [
+   {
+    "t": "SMCI",
+    "h": 4.7,
+    "dir": 1,
+    "chg": 9.6
+   },
+   {
+    "t": "MU",
+    "h": 4.34,
+    "dir": 1,
+    "chg": 6.8
+   },
+   {
+    "t": "COIN",
+    "h": 3.4,
+    "dir": -1,
+    "chg": -6.1
+   },
+   {
+    "t": "NFLX",
+    "h": 3.22,
+    "dir": -1,
+    "chg": -5.2
+   },
+   {
+    "t": "AMD",
+    "h": 2.52,
+    "dir": 1,
+    "chg": 4.4
+   },
+   {
+    "t": "PLTR",
+    "h": 2.31,
+    "dir": 1,
+    "chg": 3.9
+   },
+   {
+    "t": "RIVN",
+    "h": 2.12,
+    "dir": -1,
+    "chg": -4.8
+   },
+   {
+    "t": "SNOW",
+    "h": 2.05,
+    "dir": -1,
+    "chg": -3.9
+   }
+  ]
+ },
+ "terrain": {
+  "underlying": "SPY",
+  "spot": 548.12,
+  "spotK": 0.0,
+  "scale": 1.0,
+  "bookAsOf": "2026-10-08 close",
+  "spotStamp": "15:41:07 ET",
+  "expiries": [
+   {
+    "label": "Oct 9",
+    "days": 1
+   },
+   {
+    "label": "Oct 16",
+    "days": 7
+   },
+   {
+    "label": "Oct 23",
+    "days": 14
+   },
+   {
+    "label": "Oct 30",
+    "days": 21
+   },
+   {
+    "label": "Nov 20",
+    "days": 42
+   },
+   {
+    "label": "Dec 18",
+    "days": 70
+   },
+   {
+    "label": "Jan 15",
+    "days": 98
+   },
+   {
+    "label": "Mar 19",
+    "days": 160
+   }
+  ]
+ },
+ "surface": {
+  "underlying": "NVDA",
+  "slices": [
+   {
+    "tau": 0.03,
+    "label": "Oct 9",
+    "theta": 0.00581,
+    "rho": -0.62,
+    "psi": 0.1186,
+    "kq": 0.08
+   },
+   {
+    "tau": 0.07,
+    "label": "Oct 30",
+    "theta": 0.0175,
+    "rho": -0.6,
+    "psi": 0.1691,
+    "kq": 0.11
+   },
+   {
+    "tau": 0.12,
+    "label": "Nov 20",
+    "theta": 0.0192,
+    "rho": -0.58,
+    "psi": 0.1747,
+    "kq": 0.14
+   },
+   {
+    "tau": 0.25,
+    "label": "Jan 15",
+    "theta": 0.0289,
+    "rho": -0.56,
+    "psi": 0.203,
+    "kq": 0.18
+   },
+   {
+    "tau": 0.5,
+    "label": "Apr 9",
+    "theta": 0.04805,
+    "rho": -0.54,
+    "psi": 0.2473,
+    "kq": 0.22
+   },
+   {
+    "tau": 0.75,
+    "label": "Jul 9",
+    "theta": 0.06307,
+    "rho": -0.52,
+    "psi": 0.276,
+    "kq": 0.26
+   },
+   {
+    "tau": 1.0,
+    "label": "Oct 8 '27",
+    "theta": 0.0784,
+    "rho": -0.5,
+    "psi": 0.302,
+    "kq": 0.28
+   },
+   {
+    "tau": 1.5,
+    "label": "Apr '28",
+    "theta": 0.10935,
+    "rho": -0.48,
+    "psi": 0.3476,
+    "kq": 0.3
+   }
+  ],
+  "quotesPerSlice": 9,
+  "outliers": [
+   [
+    0.25,
+    3
+   ],
+   [
+    0.5,
+    7
+   ]
+  ],
+  "event": {
+   "tau": 0.052,
+   "label": "Earnings Oct 28: event step"
+  },
+  "seam": {
+   "j": 9,
+   "i": 6
+  }
+ },
+ "relations": {
+  "layer": "T",
+  "asOf": "2026-10-09",
+  "sectors": [
+   {
+    "id": "tech",
+    "color": "#388cf0"
+   },
+   {
+    "id": "comms",
+    "color": "#19a4b7"
+   },
+   {
+    "id": "cyc",
+    "color": "#d9741b"
+   },
+   {
+    "id": "fin",
+    "color": "#a464e3"
+   },
+   {
+    "id": "energy",
+    "color": "#b18f23"
+   },
+   {
+    "id": "health",
+    "color": "#30d158"
+   }
+  ],
+  "names": [
+   {
+    "t": "NVDA",
+    "s": "tech"
+   },
+   {
+    "t": "AMD",
+    "s": "tech"
+   },
+   {
+    "t": "MU",
+    "s": "tech"
+   },
+   {
+    "t": "AVGO",
+    "s": "tech"
+   },
+   {
+    "t": "SMCI",
+    "s": "tech"
+   },
+   {
+    "t": "MSFT",
+    "s": "tech"
+   },
+   {
+    "t": "AAPL",
+    "s": "tech"
+   },
+   {
+    "t": "META",
+    "s": "comms"
+   },
+   {
+    "t": "GOOGL",
+    "s": "comms"
+   },
+   {
+    "t": "NFLX",
+    "s": "comms"
+   },
+   {
+    "t": "AMZN",
+    "s": "cyc"
+   },
+   {
+    "t": "TSLA",
+    "s": "cyc"
+   },
+   {
+    "t": "HD",
+    "s": "cyc"
+   },
+   {
+    "t": "JPM",
+    "s": "fin"
+   },
+   {
+    "t": "GS",
+    "s": "fin"
+   },
+   {
+    "t": "BAC",
+    "s": "fin"
+   },
+   {
+    "t": "COIN",
+    "s": "fin"
+   },
+   {
+    "t": "XOM",
+    "s": "energy"
+   },
+   {
+    "t": "CVX",
+    "s": "energy"
+   },
+   {
+    "t": "OXY",
+    "s": "energy"
+   },
+   {
+    "t": "LLY",
+    "s": "health"
+   },
+   {
+    "t": "UNH",
+    "s": "health"
+   },
+   {
+    "t": "PFE",
+    "s": "health"
+   }
+  ],
+  "edges": [
+   {
+    "a": "NVDA",
+    "b": "AMD",
+    "stab": 0.96,
+    "lag": 0,
+    "label": true
+   },
+   {
+    "a": "NVDA",
+    "b": "MU",
+    "stab": 0.93,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "AMD",
+    "b": "MU",
+    "stab": 0.88,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "NVDA",
+    "b": "AVGO",
+    "stab": 0.91,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "AVGO",
+    "b": "AMD",
+    "stab": 0.86,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "SMCI",
+    "b": "NVDA",
+    "stab": 0.72,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "MU",
+    "b": "SMCI",
+    "stab": 0.66,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "XOM",
+    "b": "CVX",
+    "stab": 0.95,
+    "lag": 0,
+    "label": true
+   },
+   {
+    "a": "CVX",
+    "b": "OXY",
+    "stab": 0.84,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "XOM",
+    "b": "OXY",
+    "stab": 0.9,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "JPM",
+    "b": "GS",
+    "stab": 0.94,
+    "lag": 0,
+    "label": true
+   },
+   {
+    "a": "JPM",
+    "b": "BAC",
+    "stab": 0.89,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "META",
+    "b": "GOOGL",
+    "stab": 0.78,
+    "lag": 0,
+    "label": true
+   },
+   {
+    "a": "AMZN",
+    "b": "TSLA",
+    "stab": 0.62,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "MSFT",
+    "b": "AAPL",
+    "stab": 0.7,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "LLY",
+    "b": "UNH",
+    "stab": 0.55,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "NFLX",
+    "b": "META",
+    "stab": 0.5,
+    "lag": 0,
+    "label": false
+   },
+   {
+    "a": "GS",
+    "b": "COIN",
+    "stab": 0.44,
+    "lag": 0,
+    "label": false
+   }
+  ],
+  "community": {
+   "members": [
+    "NVDA",
+    "AMD",
+    "MU",
+    "AVGO",
+    "SMCI"
+   ],
+   "caption": "Semiconductors move together"
+  }
+ }
+}

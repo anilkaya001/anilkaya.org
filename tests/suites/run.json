@@ -1,0 +1,1 @@
+{"name": "run", "class": "N", "group": "fast", "timing": false, "medianS": null, "files": ["run-contract.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/flows-pipeline-contract.mjs","tests/lib/browser.mjs","tests/package.json","tests/quarantine.json","tests/suites/*.json","tests/worker-server.mjs"]}

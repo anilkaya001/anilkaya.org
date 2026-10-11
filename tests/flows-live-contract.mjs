@@ -3880,6 +3880,28 @@ const cronMinutes = (cron) => {
   ok(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][0] === "qa" && /seconds/.test(L.STRIP_FIELDS[L.STRIP_FIELDS.length - 1][2]),
     "the age is the LAST strip field, so every reader that indexes by position or by name keeps working, and it names its unit");
 
+  {
+    const names = L.STRIP_FIELDS.map(([n]) => n);
+    const at = (row) => { const v = L.stripValues(row, { at: at0 }); return (n) => v[names.indexOf(n)]; };
+    const day = at({ ticker: "MOVE", close: "92", prev_close: "100", iv30d: "0.56", iv30d_1d: "0.40",
+      call_premium: "5839180", put_premium: "4802145", call_volume_bid_side: 40164, put_volume_bid_side: 8113,
+      call_volume_ask_side: 43669, put_volume_ask_side: 20145 });
+    deep([day("cp"), day("pp"), day("cvBid"), day("pvBid"), day("cvAsk"), day("pvAsk")], [5839180, 4802145, 40164, 8113, 43669, 20145],
+      "THE FIVE NEW STRIP COLUMNS: call and put premium and the bid-side volumes ride the row beside the ask-side ones the strip already carried");
+    eq(day("iv30p"), 0.4, "IV-DAYS DENOMINATOR: a name whose implied volatility rose from 40% to 56% after an 8% fall carries the previous trading day's 0.40 in iv30p");
+    eq(day("iv30"), 0.56, "while iv30 stays the current 0.56, so a build that divided by iv30 would rank this shock lowest and fail here");
+    ok(Math.abs(day("chg") / (day("iv30p") / Math.sqrt(252)) - -0.08 / (0.4 / Math.sqrt(252))) < 1e-9, "and the move in IV-days is worked on the prior-close volatility");
+    const bare = at({ ticker: "NOPE", close: "10" });
+    deep([bare("cp"), bare("pp"), bare("cvBid"), bare("pvBid"), bare("iv30p")], [null, null, null, null, null],
+      "a row that sends none of them has a null in each, never a zero");
+    deep([at({ ticker: "Z", iv30d_1d: "0" })("iv30p"), at({ ticker: "Z", iv30d_1d: "-0.1" })("iv30p")], [null, null], "a zero or negative prior volatility is null, never a denominator");
+    ok(L.STRIP_FIELDS.find(([n]) => n === "iv30p")[1] === "iv30d_1d" && /previous trading day/.test(L.STRIP_FIELDS.find(([n]) => n === "iv30p")[2]),
+      "iv30p names the vendor field the spec documents as the previous trading day's 30-day implied volatility");
+    const body = L.shapeStrips({ data: [{ ticker: "MOVE", close: "92", prev_close: "100", iv30d_1d: "0.40", call_premium: "1", quote_time: at0 }] },
+      { at: at0, session: S, names: ["MOVE"], writer: "t" });
+    ok(body.fields.includes("iv30p") && body.fields.length === body.rows.MOVE.length, "and the shaped payload names the columns and keeps every row as wide as its field list");
+  }
+
   const mv = L.shapeMovers({ status: "ok", fields: filled.fields, rows: { ...filled.rows, X: filled.rows.SPY } }, { at: at0, session: S });
   deep([mv.ranked, mv.unranked, mv.up[0].t, mv.up[0].chg], [8, 1, "H", 1.2],
     "LIVE:MOVERS RANKS EVERY NAME IT HAS A BASE FOR: the two filled names are ranked (H at +120% first), the one with no base is counted unranked");

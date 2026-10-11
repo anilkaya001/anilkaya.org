@@ -8,10 +8,11 @@ import {
   DEFAULT_DIR, TIMEOUT_FLOOR_S, KILL_GRACE_MS, TAIL_LINES, TAIL_LINE_CHARS, REPEAT_WINDOW_MS, MAX_TIMER_MS,
   loadManifest, timeoutFor, timerDelayMs, exitCodeFor, interrupt, countAssertions, parseArgs, selectSuites, UsageError, tailCollector,
   packShards, chooseSuites, needsBrowser, groupOf, CHROMIUM_SETUP_S, MAX_SHARDS,
+  CI_SHARDS, SHARD_BALANCE, SUITES_DIR, shardBalance, shardLoad, formatSuite,
 } from "./run.mjs";
 import { checkQuarantine, readQuarantine, recordedFor, dayMs, MAX_QUARANTINE_DAYS } from "./lib/quarantine.mjs";
 import { retryAllowed } from "./run.mjs";
-import { checkRegistry, syncRegistry, serialize, globMatches, scanSuite, trackedFiles, scriptFiles, ROOT as REPO } from "./lib/suite-registry.mjs";
+import { checkRegistry, syncRegistry, readRegistry, globMatches, scanSuite, trackedFiles, scriptFiles, ROOT as REPO } from "./lib/suite-registry.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUN = path.join(HERE, "run.mjs");
@@ -20,6 +21,12 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const throwsLike = (fn, re, msg) => { assert.throws(fn, re, msg); checks++; };
+const writeSuites = (dir, list) => {
+  const root = path.join(dir, SUITES_DIR);
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  for (const s of list) writeFileSync(path.join(root, `${s.name}.json`), formatSuite(s));
+};
 const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "run-contract-")));
 process.on("exit", () => {
   const dir = path.join(scratch, "marks");
@@ -38,10 +45,17 @@ process.on("exit", () => {
   eq(pkg.scripts.test, "node run.mjs", "npm test is the fail-late runner, not an && chain that stops at the first failure");
   const suites = loadManifest();
   const scriptNames = Object.keys(pkg.scripts).filter((k) => k.startsWith("test:")).sort();
-  deep(suites.map((s) => s.script).sort(), scriptNames, "suites.json lists every test:* script of package.json exactly once, and no other");
+  const scripted = suites.filter((s) => pkg.scripts[s.script] !== undefined);
+  deep(scripted.map((s) => s.script).sort(), scriptNames, "tests/suites/ registers every test:* script of package.json exactly once, and no other");
+  ok(suites.every((s) => pkg.scripts[s.script] !== undefined || (typeof s.command === "string" && s.command.trim() !== "")), "a suite without a package.json script carries its own command, so a new suite touches no line of package.json");
   eq(new Set(suites.map((s) => s.name)).size, suites.length, "no suite is listed twice");
-  ok(suites.length >= 78, `the 77 suites of the old chain plus this contract are all registered (${suites.length})`);
-  eq(suites[0].name, "contracts", "the asset and curriculum contracts still run first");
+  ok(suites.length >= 80, `the suites of the old chain are all registered (${suites.length})`);
+  eq(suites[0].name, "contracts", "the asset and curriculum contracts still run first, the fast suites ahead of the rest and each group in name order");
+  deep(suites.map((s) => s.name), [...suites].sort((a, b) => (a.group === "fast" ? 0 : 1) - (b.group === "fast" ? 0 : 1) || (a.name < b.name ? -1 : 1)).map((s) => s.name), "the manifest order is a function of the files' names alone, never of the order they were added in");
+  const filesOnDisk = readdirSync(path.join(HERE, SUITES_DIR)).sort();
+  deep(filesOnDisk, suites.map((s) => `${s.name}.json`).sort(), "one file per suite, named for it, and nothing else in the directory");
+  ok(filesOnDisk.every((f) => /^[a-z0-9][a-z0-9-]*\.json$/.test(f)), "every file name is a suite name");
+  ok(filesOnDisk.every((f) => { const t = readFileSync(path.join(HERE, SUITES_DIR, f), "utf8"); return t.endsWith("}\n") && t.split("\n").length === 2; }), "every suite file is one line, so a suite is added, changed or removed on a line no other suite shares");
   ok(suites.some((s) => s.name === "run" && s.command === "node run-contract.mjs"), "this contract is itself a registered suite");
   for (const s of suites) {
     ok(typeof s.command === "string" && s.command.trim().length > 0, `${s.name}: has a command`);
@@ -52,14 +66,13 @@ process.on("exit", () => {
 }
 
 {
-  const manifestText = readFileSync(path.join(HERE, "suites.json"), "utf8");
-  const manifest = JSON.parse(manifestText);
+  const manifest = readRegistry(REPO);
   const pkg = JSON.parse(readFileSync(path.join(HERE, "package.json"), "utf8"));
   const tracked = trackedFiles(REPO);
-  deep(checkRegistry({ root: REPO, manifest, pkg, tracked }), [], "the committed suites.json agrees with the tree: every suite's files, class, group, timing flag and covers, and every helper registered and reached");
-  eq(serialize(syncRegistry({ root: REPO, manifest, pkg, tracked })), manifestText, "syncing the committed registry changes nothing, so adding a suite is one entry with a name and a sync");
+  deep(checkRegistry({ root: REPO, manifest, pkg, tracked }), [], "the committed tests/suites/ agrees with the tree: every suite's files, class, group, timing flag and covers, and every helper reached by a suite");
+  deep(syncRegistry({ root: REPO, manifest, pkg, tracked }).suites.map(formatSuite), readdirSync(path.join(HERE, SUITES_DIR)).sort().map((f) => readFileSync(path.join(HERE, SUITES_DIR, f), "utf8")), "syncing the committed registry changes nothing, so adding a suite is one file with a name and a sync");
   eq(manifest.version, 2, "the registry is version 2");
-  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name), ["flows-ws-probe", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant"].sort((a, b) => manifest.suites.findIndex((x) => x.name === a) - manifest.suites.findIndex((x) => x.name === b)), "the eight suites with in-process CPU or wall-clock gates carry the timing flag");
+  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name).sort(), ["flows-ws-probe", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant"].sort(), "the eight suites with in-process CPU or wall-clock gates carry the timing flag");
   ok(manifest.suites.every((s) => ["fast", "shard"].includes(s.group)), "every suite names its group");
   deep(manifest.suites.filter((s) => s.group === "fast").map((s) => s.name), ["contracts", "run"], "only contracts and run are fast");
   const classes = manifest.suites.reduce((n, s) => ({ ...n, [s.class]: (n[s.class] || 0) + 1 }), {});
@@ -90,7 +103,7 @@ process.on("exit", () => {
   deep(good.suites.map((x) => [x.name, x.class]), [["alpha", "N"], ["beta", "W"], ["gamma", "C"], ["delta", "N"]], "scan: a worker-server import is W, a playwright import is C, neither is N, and the shared launcher is not counted as a playwright import");
   deep(good.suites.find((x) => x.name === "alpha").covers, ["data/base.json"], "scan: a literal path read outside the import closure becomes a covers entry");
   deep(good.suites.find((x) => x.name === "gamma").covers, ["assets/page.html"], "scan: and so does an HTML page read relative to tests/");
-  deep(good.support, ["helper.mjs", "worker-server.mjs", "lib/browser.mjs"], "scan: every file no suite runs is support");
+  ok(good.support === undefined, "scan: a file no suite runs is not listed anywhere; it is a helper because a suite's import closure reaches it");
   deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "a registry made by sync passes the check");
   const mutate = (fn, extra = {}) => {
     const m = JSON.parse(JSON.stringify(good));
@@ -100,10 +113,10 @@ process.on("exit", () => {
   const has = (problems, re, msg) => ok(problems.some((p) => re.test(p)), `${msg}: ${JSON.stringify(problems.slice(0, 3))}`);
 
   put("tests/zz-dummy.mjs", `console.log("a suite nobody registered");\n`);
-  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/zz-dummy\.mjs is in no suite's files and not in the support list/, "mutation: an unregistered test file fails the check");
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/zz-dummy\.mjs is in no suite's files and no suite's import closure reaches it/, "mutation: an unregistered test file fails the check");
   rmSync(path.join(root, "tests/zz-dummy.mjs"));
   put("tests/lib/zz-helper.mjs", `export const z = 1;\n`);
-  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/lib\/zz-helper\.mjs is in no suite's files/, "mutation: an unregistered helper under lib fails too");
+  has(checkRegistry({ root, manifest: good, pkg, tracked }), /tests\/lib\/zz-helper\.mjs is in no suite's files and no suite's import closure reaches it/, "mutation: an unregistered helper under lib fails too");
   rmSync(path.join(root, "tests/lib/zz-helper.mjs"));
   deep(checkRegistry({ root, manifest: good, pkg, tracked }), [], "and removing them restores a clean check");
 
@@ -122,23 +135,18 @@ process.on("exit", () => {
   has(mutate((m) => { m.suites[0].covers = []; }), /alpha reads data\/base\.json outside its import closure, and no covers entry names it/, "mutation: a read the covers do not name fails");
   has(mutate((m) => { m.suites[0].covers.push("gone/*.json"); }), /alpha covers gone\/\*\.json, which matches no file/, "mutation: a covers glob that matches nothing fails");
   deep(mutate((m) => { m.suites[0].covers = ["data/*.json"]; }), [], "a covers glob that matches the read is enough");
-  has(mutate((m) => { m.support.push("lonely.mjs"); }), /support lists lonely\.mjs, which does not exist/, "mutation: a support file that is not there fails");
   put("tests/lonely.mjs", `console.log("nothing imports me");\n`);
-  has(mutate((m) => { m.support.push("lonely.mjs"); }, { tracked: [...tracked, "tests/lonely.mjs"] }), /support lists tests\/lonely\.mjs, which no suite's import closure reaches/, "mutation: a support file nothing reaches is an orphan and fails");
+  has(mutate(() => {}, { tracked: [...tracked, "tests/lonely.mjs"] }), /tests\/lonely\.mjs is in no suite's files and no suite's import closure reaches it/, "mutation: a file nothing reaches is an orphan and fails");
   rmSync(path.join(root, "tests/lonely.mjs"));
-  has(mutate((m) => { m.support = m.support.filter((f) => f !== "helper.mjs"); }), /tests\/helper\.mjs is in no suite's files and not in the support list/, "mutation: a helper dropped from support fails");
-  has(mutate((m) => { m.support.push("alpha.mjs"); }), /alpha\.mjs is both a suite file and in support/, "mutation: a file both run and listed as support fails");
-  has(mutate((m) => { delete m.support; }), /no support array/, "mutation: a manifest without support fails");
 
   const lm = path.join(scratch, "reg-lm");
   mkdirSync(lm);
   writeFileSync(path.join(lm, "package.json"), JSON.stringify({ scripts: { "test:alpha": "node a.mjs" } }));
-  const load = (suite, extra = {}) => { writeFileSync(path.join(lm, "suites.json"), JSON.stringify({ suites: [suite], ...extra })); return () => loadManifest(lm); };
+  const load = (suite) => { writeSuites(lm, [suite]); return () => loadManifest(lm); };
   deep(load({ name: "alpha", class: "N", group: "shard", timing: true, files: ["a.mjs"], covers: ["x/*.js"] })().map((x) => x.timing), [true], "the runner reads the new fields without changing what it runs");
   throwsLike(load({ name: "alpha", timing: "yes" }), /timing flag/, "the runner refuses a timing flag that is not boolean");
   throwsLike(load({ name: "alpha", files: [] }), /bad files list/, "the runner refuses an empty files list");
   throwsLike(load({ name: "alpha", covers: [3] }), /bad covers list/, "the runner refuses a covers list of non-strings");
-  throwsLike(load({ name: "alpha" }, { support: "x" }), /support is not a list/, "the runner refuses a support that is not a list");
   deep(load({ name: "alpha", class: "N" })().map((x) => x.name), ["alpha"], "and a bare entry, as the fixtures use, still loads");
   void scanSuite;
 }
@@ -221,7 +229,7 @@ const fixtureSuites = {
 };
 const writeFixture = (pkg = fixturePkg, suites = fixtureSuites) => {
   file("package.json", JSON.stringify(pkg, null, 2));
-  file("suites.json", JSON.stringify(suites, null, 2));
+  writeSuites(fx, suites.suites);
 };
 writeFixture();
 
@@ -260,9 +268,9 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   writeFileSync(summary, "previous step's summary\n");
   const r = run([], { summary, env: { ASSET_DIFF_BASE: "abc123" } });
   eq(r.status, 1, `a run with failures exits 1 (got ${r.status}; ${r.stderr.slice(-400)})`);
-  const order = ["test:pass", "test:fail", "test:hang", "test:flaky", "test:late"].map((s) => r.stdout.indexOf(`> ${s}\n`));
+  const order = ["test:fail", "test:flaky", "test:hang", "test:late", "test:pass"].map((s) => r.stdout.indexOf(`> ${s}\n`));
   ok(order.every((i) => i >= 0), "every suite was attempted, the ones after a failure and after a hang included");
-  deep([...order].sort((a, b) => a - b), order, "suites run in manifest order");
+  deep([...order].sort((a, b) => a - b), order, "suites run in manifest order, which is name order");
   ok(existsSync(path.join(marks, "late.json")), "the suite after the failures really ran");
   const late = JSON.parse(readFileSync(path.join(marks, "late.json"), "utf8"));
   eq(late.cwd, fx, "every suite is spawned with the manifest's directory (tests/) as its cwd");
@@ -278,11 +286,11 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   ok(md.startsWith("previous step's summary\n"), "the step summary is appended to, never overwritten");
   const rows = tableRows(md);
   eq(rows.length, 5, "the summary has one row per suite");
-  ok(/`pass` \| ✅ passed \| [\d.]+ \| 1207 \|/.test(rows[0]), `the passing suite's assertions are counted: ${rows[0]}`);
-  ok(/`fail` \| ❌ failed \(exit 1\)/.test(rows[1]), `the failure is reported with its exit code: ${rows[1]}`);
+  ok(/`pass` \| ✅ passed \| [\d.]+ \| 1207 \|/.test(rows[4]), `the passing suite's assertions are counted: ${rows[4]}`);
+  ok(/`fail` \| ❌ failed \(exit 1\)/.test(rows[0]), `the failure is reported with its exit code: ${rows[0]}`);
   ok(/`hang` \| ⏱️ timed out at 1 s/.test(rows[2]), `the hang is reported as a timeout: ${rows[2]}`);
-  ok(/`flaky` \| ❌ failed \(exit 1\)/.test(rows[3]), `a flaky failure is reported, not retried away: ${rows[3]}`);
-  ok(/`late` \| ✅ passed \| [\d.]+ \| 1212 \|/.test(rows[4]), `a suite of two commands sums both counts: ${rows[4]}`);
+  ok(/`flaky` \| ❌ failed \(exit 1\)/.test(rows[1]), `a flaky failure is reported, not retried away: ${rows[1]}`);
+  ok(/`late` \| ✅ passed \| [\d.]+ \| 1212 \|/.test(rows[3]), `a suite of two commands sums both counts: ${rows[3]}`);
   ok(/### Regression suites: 3 of 5 failed/.test(md), "the heading counts the failures");
   ok(/2 passed, 2 failed, 1 timed out, 0 not run; 2419 assertions/.test(md), "the totals line adds every column");
   const failBlock = md.split("<code>fail</code>")[1].split("</details>")[0];
@@ -292,7 +300,7 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   ok(!fenced.includes("fail line 1") && !fenced.includes("fail line 10"), "and not the head of the output");
   ok(md.includes("<code>hang</code>: timed out at 1 s") && md.includes("hang: started"), "the hang's tail is reported too");
   ok(!md.includes("<code>pass</code>"), "a passing suite has no tail");
-  ok(/^\s*5\s+late\s+passed\s+[\d.]+\s+1212$/m.test(r.stdout), "the same table is printed to stdout");
+  ok(/^\s*4\s+late\s+passed\s+[\d.]+\s+1212$/m.test(r.stdout), "the same table is printed to stdout");
   ok(r.stdout.includes("5 suites: 2 passed, 2 failed, 1 timed out, 0 not run"), "with its totals");
 }
 
@@ -306,7 +314,7 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   ok(!existsSync(path.join(marks, "hang.pids")) && !existsSync(path.join(marks, "late.json")), "no later suite starts under --bail");
   const rows = tableRows(readFileSync(summary, "utf8"));
   eq(rows.length, 5, "the suites --bail never started are still listed");
-  ok(rows.slice(2).every((l) => l.includes("⏭️ not run")), "as not run");
+  ok(rows.slice(1).every((l) => l.includes("⏭️ not run")), "as not run");
 }
 
 {
@@ -327,15 +335,32 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
 {
   writeFixture({ ...fixturePkg, scripts: { ...fixturePkg.scripts, "test:orphan": "node pass.mjs" } });
   const r = run([]);
-  eq(r.status, 2, "a test:* script missing from suites.json stops the runner before any suite (exit 2)");
-  ok(r.stderr.includes("test:orphan is not in suites.json"), "naming the script");
+  eq(r.status, 2, "a test:* script with no file in tests/suites/ stops the runner before any suite (exit 2)");
+  ok(r.stderr.includes("test:orphan is not in suites/"), "naming the script");
   ok(!r.stdout.includes("> test:pass"), "and nothing ran");
   writeFixture(fixturePkg, { version: 1, suites: [...fixtureSuites.suites, { name: "ghost", class: "N", medianS: 1 }] });
   const g = run([]);
-  eq(g.status, 2, "a suite with no script is refused");
-  ok(g.stderr.includes("ghost has no test:ghost script"), "naming the suite");
-  writeFixture(fixturePkg, { version: 1, suites: [...fixtureSuites.suites, fixtureSuites.suites[0]] });
-  ok(run([]).stderr.includes("pass is listed twice"), "a duplicate suite is refused");
+  eq(g.status, 2, "a suite with neither a script nor a command is refused");
+  ok(g.stderr.includes("ghost has neither a command nor a test:ghost script"), "naming the suite");
+  writeFixture(fixturePkg, { version: 1, suites: [...fixtureSuites.suites, { name: "viacmd", class: "N", medianS: 1, command: "node pass.mjs" }] });
+  const c = run(["--only", "viacmd"]);
+  eq(c.status, 0, `a suite that carries its own command runs with no package.json script (${c.stderr.slice(-200)})`);
+  ok(c.stdout.includes("> node pass.mjs") && c.stdout.includes("1 suites: 1 passed"), "and is run by that command");
+  writeFixture(fixturePkg, { version: 1, suites: [...fixtureSuites.suites.slice(1), { ...fixtureSuites.suites[0], command: "node pass.mjs" }] });
+  ok(run([]).stderr.includes("pass has both a command and a test:pass script"), "a suite with a command and a script has two commands and is refused");
+  writeFixture(fixturePkg, { version: 1, suites: [...fixtureSuites.suites, { name: "late2", class: "N", medianS: 1, command: " " }] });
+  ok(run([]).stderr.includes("late2 has an empty command"), "an empty command is refused");
+  writeFixture();
+  writeFileSync(path.join(fx, SUITES_DIR, "pass.json"), formatSuite({ name: "fail", class: "N", medianS: 0.1 }));
+  const dupe = run([]);
+  ok(dupe.status === 2 && dupe.stderr.includes("pass.json: holds suite \"fail\""), "a file that registers another file's suite is refused, so a suite is listed once by construction");
+  writeFileSync(path.join(fx, SUITES_DIR, "pass.json"), "{not json\n");
+  ok(run([]).stderr.includes("pass.json: not valid JSON"), "a file that is not JSON is refused");
+  writeFixture();
+  writeSuites(fx, fixtureSuites.suites.map((s, i) => (i === 0 ? { ...s, shard: 7 } : s)));
+  ok(run([]).stderr.includes(`pass pins shard 7, not an integer from 1 to ${CI_SHARDS}`), "a pin outside the shard count is refused");
+  writeSuites(fx, fixtureSuites.suites.map((s, i) => (i === 0 ? { ...s, shard: 2.5 } : s)));
+  ok(run([]).stderr.includes("pass pins shard 2.5"), "and a fractional one");
   writeFixture();
   const u = run(["--only", "nope"]);
   eq(u.status, 2, "--only of an unknown suite exits 2");
@@ -403,7 +428,7 @@ writeFileSync(path.join(fx2, "package.json"), JSON.stringify({
   scripts: {
     test: "node run.mjs",
     "test:pass": "node pass.mjs",
-    "test:after": "node after.mjs",
+    "test:zafter": "node after.mjs",
     "test:sweeper": "node sweeper.mjs",
     "test:stubborn": "node stubborn.mjs",
     "test:escapee": "node escapee.mjs",
@@ -414,16 +439,16 @@ writeFileSync(path.join(fx2, "package.json"), JSON.stringify({
     ...Object.fromEntries(wideNames.map((n) => [`test:${n}`, "sh wide.sh"])),
   },
 }, null, 2));
-writeFileSync(path.join(fx2, "suites.json"), JSON.stringify({
+writeSuites(fx2, ((x) => x.suites)({
   version: 1,
   suites: [
     { name: "escapee", class: "N", medianS: 0.1, timeoutS: 2 },
-    ...["pass", "sweeper", "stubborn", "after", "loud", "split"].map((name) => ({ name, class: "N", medianS: 0.1 })),
+    ...["pass", "sweeper", "stubborn", "zafter", "loud", "split"].map((name) => ({ name, class: "N", medianS: 0.1 })),
     { name: "lingerer", class: "N", medianS: 0.1, timeoutS: 10 },
     { name: "quitter", class: "N", medianS: 0.1, timeoutS: 1 },
     ...wideNames.map((name) => ({ name, class: "N", medianS: 0.1 })),
   ],
-}, null, 2));
+}));
 
 const waitFor = async (cond, ms, what) => {
   const until = Date.now() + ms;
@@ -461,7 +486,7 @@ const signalled = async (args, { ready, signals, summary }) => {
 {
   const summary = path.join(scratch, "summary-sigterm.md");
   writeFileSync(summary, "previous\n");
-  const r = await signalled(["--only", "pass,sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGTERM", 0]], summary });
+  const r = await signalled(["--only", "pass,sweeper,zafter"], { ready: mark("sweeper.pids"), signals: [["SIGTERM", 0]], summary });
   eq(r.code, 143, `SIGTERM to the runner exits 143 (got ${r.code}; ${r.stderr.slice(-300)})`);
   const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
   ok(existsSync(mark("sweeper.swept")), "the running suite got the SIGTERM itself and its own cleanup ran (not an immediate SIGKILL)");
@@ -475,14 +500,14 @@ const signalled = async (args, { ready, signals, summary }) => {
   eq(rows.length, 3, "an interrupted run still writes one row per selected suite");
   ok(/`pass` \| ✅ passed/.test(rows[0]), `the suites that finished keep their result: ${rows[0]}`);
   ok(/`sweeper` \| ❌ failed \(interrupted by SIGTERM\)/.test(rows[1]), `the interrupted suite is a failure, interrupted: ${rows[1]}`);
-  ok(/`after` \| ⏭️ not run/.test(rows[2]), `the suites after it are not run: ${rows[2]}`);
+  ok(/`zafter` \| ⏭️ not run/.test(rows[2]), `the suites after it are not run: ${rows[2]}`);
   ok(md.includes("(run interrupted by SIGTERM)") && md.includes("sweeper: SIGTERM received, sweeping"), "the heading says the run was interrupted, and the suite's tail is kept");
   ok(r.stdout.includes("3 suites: 1 passed, 1 failed, 0 timed out, 1 not run"), "the table is printed to stdout too");
 }
 
 {
   const summary = path.join(scratch, "summary-sigint.md");
-  const r = await signalled(["--only", "stubborn,after", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0]], summary });
+  const r = await signalled(["--only", "stubborn,zafter", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0]], summary });
   eq(r.code, 130, `SIGINT to the runner exits 130 (got ${r.code})`);
   ok(await goneSoon(Number(readFileSync(mark("stubborn.pid"), "utf8"))), "a suite that ignores the signal is SIGKILLed after the grace");
   ok(r.ms >= KILL_GRACE_MS - 100 && r.ms < KILL_GRACE_MS + 6000, `after the grace, not at once and not at its timeout (${r.ms} ms)`);
@@ -494,7 +519,7 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 {
   clearMarks("sweeper.pids", "sweeper.swept", "after.ran");
   const summary = path.join(scratch, "summary-double.md");
-  const r = await signalled(["--only", "sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGINT", 0], ["SIGINT", 5]], summary });
+  const r = await signalled(["--only", "sweeper,zafter"], { ready: mark("sweeper.pids"), signals: [["SIGINT", 0], ["SIGINT", 5]], summary });
   eq(r.code, 130, `two SIGINTs 5 ms apart (one Ctrl-C, from the terminal and from npm) exit 130 (got ${r.code}; ${r.stderr.slice(-300)})`);
   const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
   ok(existsSync(mark("sweeper.swept")), "the repeat inside the window did not escalate: the suite's own sweep ran");
@@ -507,7 +532,7 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 {
   clearMarks("sweeper.pids", "sweeper.swept", "after.ran");
   const summary = path.join(scratch, "summary-sighup.md");
-  const r = await signalled(["--only", "sweeper,after"], { ready: mark("sweeper.pids"), signals: [["SIGHUP", 0]], summary });
+  const r = await signalled(["--only", "sweeper,zafter"], { ready: mark("sweeper.pids"), signals: [["SIGHUP", 0]], summary });
   eq(r.code, 129, `SIGHUP (the terminal closed) exits 129 (got ${r.code}; ${r.stderr.slice(-300)})`);
   const pids = JSON.parse(readFileSync(mark("sweeper.pids"), "utf8"));
   eq(existsSync(mark("sweeper.swept")) && readFileSync(mark("sweeper.swept"), "utf8"), "SIGHUP", "the SIGHUP was passed to the suite in its own session, and its sweep ran");
@@ -519,7 +544,7 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
 {
   clearMarks("stubborn.pid", "after.ran");
   const summary = path.join(scratch, "summary-escalate.md");
-  const r = await signalled(["--only", "stubborn,after", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0], ["SIGINT", REPEAT_WINDOW_MS + 300]], summary });
+  const r = await signalled(["--only", "stubborn,zafter", "--timeout-scale", "100"], { ready: mark("stubborn.pid"), signals: [["SIGINT", 0], ["SIGINT", REPEAT_WINDOW_MS + 300]], summary });
   eq(r.code, 130, `a second SIGINT after the window still exits 130 (got ${r.code})`);
   ok(await goneSoon(Number(readFileSync(mark("stubborn.pid"), "utf8"))), "the suite that ignores signals is gone");
   ok(r.ms >= REPEAT_WINDOW_MS + 200 && r.ms < KILL_GRACE_MS - 300, `a second signal after the window SIGKILLs at once, before the grace runs out (${r.ms} ms)`);
@@ -606,42 +631,22 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
   ok(md.includes("earlier lines left out to keep the summary small") && md.includes("39 0000000000"), "shortened from the head, so each keeps its last line, and says so");
 }
 
-const PUBLISHED_SHARDS = [
-  ["flows-worker", "flows-market", "flows-strategy", "flows-brief", "flows-ask-render", "flows-quant-card",
-    "flows-neuron", "flows-variation", "flows-dossier", "flows-reading-worker", "architecture",
-    "server-kernel", "server-router", "flows-conviction-render"],
-  ["mastery", "placement", "flows-rt-client", "flows-ticker", "flows-events", "flows-payload-shape",
-    "flows-scores", "flows-mint", "flows-freshness", "flows-rt", "flows-export", "flows-ledger",
-    "flows-weight", "flows-ask", "flows-garch", "route-matrix", "server-desk", "flows-dispersion"],
-  ["markets", "landing-motion", "flows-universe", "flows-legs", "flows-chain-panels", "worker",
-    "flows-desk-wiring", "flows-sections", "flows-permits", "flows-board-render", "flows-strip", "flows-vol",
-    "flows-positioning", "flows-quant-audit", "docs", "flows-conviction", "flows-index",
-    "flows-deadline-render"],
-  ["market-ticker", "pipeline", "flows-chain", "flows-desk-client", "flows-overview", "browser",
-    "flows-alerts", "flows-pulse", "flows-reads", "flows-verdict", "flows-political-render", "flows-warnings",
-    "flows-sign", "flows-dossier-reads", "flows-ai-broker", "flows-public", "staging"],
-  ["flows", "flows-record", "academy", "flows-desk", "flows-motion", "flows-render", "flows-unusual",
-    "flows-live", "flows-starts", "flows-readers", "flows-political", "flows-net-render", "flows-track-render",
-    "server-ai", "server-ingest", "flows-stats", "flows-kit", "lab-write"],
-  ["flows-probe", "flows-ws-probe", "flows-rt-server", "flows-basis", "flows-legacy", "flows-readers-render",
-    "flows-stock", "flows-overlay", "flows-watch-render", "flows-quant", "flows-neuron-screen",
-    "flows-reading", "flows-reading-render", "flows-chart-kernel", "launch-readiness", "flows-pages-render",
-    "flows-calibration"],
-];
-const CI_SHARDS = 6;
-
 {
   const suites = loadManifest();
   const names = (list) => list.map((s) => s.name);
   const sorted = (list) => [...list].sort();
   const fast = suites.filter((s) => groupOf(s) === "fast");
   deep(names(fast), ["contracts", "run"], "the fast job runs the asset and curriculum contracts (the one suite that needs fetch-depth 0 and ASSET_DIFF_BASE) and this contract, neither of which needs Chromium or workerd");
+  const sharded = suites.filter((s) => groupOf(s) === "shard");
+  const unpinned = sharded.filter((s) => s.shard === undefined);
+  deep(names(unpinned), [], `EVERY SUITE OF THE SHARD GROUP PINS ITS SHARD: add "shard": <1 to ${CI_SHARDS}> to the suite's own file in tests/suites/, or run node run.mjs --repin to rebalance them all`);
+  ok(fast.every((s) => s.shard === undefined), "a fast suite pins no shard, since it runs in no shard");
   const shards = packShards(suites, CI_SHARDS);
-  const packed = shards.map((sh) => sorted(names(sh)));
-  const same = JSON.stringify(packed) === JSON.stringify(PUBLISHED_SHARDS.map(sorted));
-  deep(packed, PUBLISHED_SHARDS.map(sorted),
-    "THE SIX-SHARD ASSIGNMENT EQUALS THE PUBLISHED TABLE (W09-P3 and its measured medians, contracts moved to the fast job): a median refresh or a new suite that moves a suite between shards fails here until the table is republished with it" +
-      (same ? "" : `; republish PUBLISHED_SHARDS as the packing computed now: ${JSON.stringify(shards.map(names))}`));
+  deep(shards.map((sh) => sorted(names(sh))), Array.from({ length: CI_SHARDS }, (_, i) => sorted(names(sharded.filter((s) => s.shard === i + 1)))),
+    "the six CI shards are exactly the suites' own pins, whatever medians say");
+  const bal = shardBalance(shards);
+  ok(bal.within, `A SHARD FAR OUTSIDE THE TOLERANCE FAILS: the heaviest shard (${bal.heaviest.toFixed(1)} s) is within ${SHARD_BALANCE}x of the lightest (${bal.lightest.toFixed(1)} s, ratio ${bal.ratio.toFixed(3)}); loads ${JSON.stringify(bal.loads.map((l) => Math.round(l)))}; rebalance with node run.mjs --repin and commit the changed pins`);
+  eq(SHARD_BALANCE, 1.3, "the stated tolerance is a heaviest shard within 1.3 times the lightest, loads counted as medians plus the Chromium install");
   for (let n = 1; n <= 8; n++) {
     const a = packShards(suites, n);
     deep(packShards(suites, n), a, `${n} shards: the packing is deterministic`);
@@ -653,10 +658,8 @@ const CI_SHARDS = 6;
   }
   deep(names(chooseSuites(suites, { group: "shard" })).length + fast.length, suites.length, "--group shard is everything but the fast job");
   const unfasted = suites.map((s) => (s.name === "contracts" ? { ...s, group: undefined } : s));
-  const home = packShards(unfasted, CI_SHARDS).findIndex((sh) => sh.some((s) => s.name === "contracts"));
-  ok(home >= 0, "contracts, weighed as a shard suite, lands in exactly one shard");
-  deep(packShards(unfasted, CI_SHARDS).map(names), shards.map((sh, i) => names(suites.filter((s) => sh.includes(s) || (i === home && s.name === "contracts")))),
-    "the packing weighs the whole chain, fast suites included, so moving contracts into or out of the fast job changes no other suite's shard");
+  deep(packShards(unfasted, CI_SHARDS).map(names).map((sh) => sh.filter((n) => n !== "contracts")), shards.map(names),
+    "pins are read per suite, so moving contracts into or out of the fast job changes no other suite's shard");
   ok(shards.every(needsBrowser), "every one of the six shards holds a browser or workerd suite, so each installs Chromium");
   ok(!needsBrowser(fast), "the fast job holds none and installs no Chromium");
   ok(fast.every((s) => s.class === "N"), "every fast suite is a Node suite");
@@ -698,6 +701,100 @@ const CI_SHARDS = 6;
   throwsLike(() => chooseSuites([w("a", "N", 1)], { group: "fast" }), /group fast holds no suite/, "and so is an empty group");
 }
 
+{
+  const w = (name, cls, medianS, extra = {}) => ({ name, class: cls, medianS, ...extra });
+  const bal = (loads) => shardBalance(loads.map((l) => [{ name: "x", class: "N", medianS: l }]));
+  ok(bal([100, 100, 100, 100, 100, 100]).within && bal([100, 130, 100, 100, 100, 100]).within, "equal shards and a heaviest exactly 1.3 times the lightest are inside the tolerance");
+  ok(!bal([100, 131, 100, 100, 100, 100]).within && !bal([415, 415, 415, 415, 415, 900]).within, "a heaviest past 1.3 times the lightest is outside it");
+  ok(!bal([0, 100]).within, "an empty shard beside a loaded one is outside it");
+  eq(shardLoad([w("a", "N", 5), w("b", "C", 10)]), 39, "a shard's load is its medians plus the Chromium install when it holds a browser suite");
+  eq(shardLoad([w("a", "N", 5), w("b", "N", 10)]), 15, "and nothing more when it holds none");
+
+  const six = [w("a", "N", 50, { shard: 6 }), w("b", "N", 40, { shard: 1 }), w("c", "N", 30), w("d", "N", 20, { shard: 99 }), w("e", "N", 10, { group: "fast", shard: 3 })];
+  const at6 = packShards(six, CI_SHARDS).map((sh) => sh.map((s) => s.name));
+  eq(at6[5][0], "a", "a pin puts a suite in that shard");
+  eq(at6[0][0], "b", "of the six");
+  ok(at6.flat().includes("c") && at6.flat().includes("d"), "a suite with no pin or an out-of-range pin is still placed, in the lightest shard, never dropped");
+  ok(!at6.flat().includes("e"), "a fast suite is in no shard whatever it pins");
+  const at4 = packShards(six, 4).map((sh) => sh.map((s) => s.name));
+  deep(at4.flat().sort(), ["a", "b", "c", "d"], "a shard count other than the CI count packs by weight and reads no pin");
+  ok(at4.every((sh) => sh.length === 1), "four suites in four shards");
+
+  const fx4 = path.join(scratch, "fx4");
+  mkdirSync(fx4);
+  const fx4Names = ["p", "q", "r", "s", "t", "u", "v"];
+  writeFileSync(path.join(fx4, "package.json"), JSON.stringify({ name: "fixture4", private: true, type: "module", scripts: { test: "node run.mjs" } }));
+  const lopsided = fx4Names.map((n, i) => ({ name: n, class: "N", medianS: [300, 200, 200, 100, 100, 100, 100][i], command: "true", shard: 1 }));
+  writeSuites(fx4, lopsided);
+  const fx4Pkgless = () => loadManifest(fx4);
+  ok(!shardBalance(packShards(fx4Pkgless(), CI_SHARDS)).within, "a table that pins every suite to one shard is far outside the tolerance");
+  const before = readdirSync(path.join(fx4, SUITES_DIR)).map((f) => readFileSync(path.join(fx4, SUITES_DIR, f), "utf8"));
+  const rp = run(["--repin", "--only", "p"], { dir: fx4 });
+  ok(rp.status === 2 && /--repin rewrites the pins and takes no other selection/.test(rp.stderr), "--repin takes no selection");
+  const rp2 = run(["--repin"], { dir: fx4 });
+  eq(rp2.status, 0, `--repin succeeds (${rp2.stderr.slice(-200)})`);
+  ok(rp2.stdout.startsWith("repinned 6 suites"), "and names what it changed");
+  const after = loadManifest(fx4);
+  const rebalanced = shardBalance(packShards(after, CI_SHARDS));
+  ok(rebalanced.heaviest <= 300 && after.every((s) => Number.isInteger(s.shard) && s.shard >= 1 && s.shard <= CI_SHARDS), `the pins are rewritten to the packing (heaviest ${rebalanced.heaviest} s)`);
+  ok(readdirSync(path.join(fx4, SUITES_DIR)).every((f, i) => readFileSync(path.join(fx4, SUITES_DIR, f), "utf8").endsWith("}\n")) && readFileSync(path.join(fx4, SUITES_DIR, "q.json"), "utf8") !== before[1], "each file is still one line, rewritten in place");
+  const rp3 = run(["--repin"], { dir: fx4 });
+  ok(rp3.status === 0 && rp3.stdout.includes("already equals"), "repinning twice changes nothing the second time");
+  writeSuites(fx4, [...lopsided.slice(0, 2), { ...lopsided[2], group: "fast" }]);
+  run(["--repin"], { dir: fx4 });
+  ok(readFileSync(path.join(fx4, SUITES_DIR, "r.json"), "utf8").indexOf("shard") === -1, "repinning strips the pin from a suite that moved to the fast job");
+}
+
+{
+  const git = (cwd, ...args) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args], {
+    cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  });
+  const commit = (cwd, msg) => { git(cwd, "add", "-A"); return git(cwd, "commit", "-q", "-m", msg); };
+  const repo = path.join(scratch, "merge-repo");
+  mkdirSync(path.join(repo, SUITES_DIR), { recursive: true });
+  eq(git(repo, "init", "-q", "-b", "main").status, 0, "a scratch repository for the merge experiments");
+  for (const f of readdirSync(path.join(HERE, SUITES_DIR))) writeFileSync(path.join(repo, SUITES_DIR, f), readFileSync(path.join(HERE, SUITES_DIR, f)));
+  writeFileSync(path.join(repo, "package.json"), readFileSync(path.join(HERE, "package.json")));
+  commit(repo, "base");
+  const branchWith = (name, files) => {
+    git(repo, "checkout", "-q", "-b", name, "main");
+    for (const s of files) writeFileSync(path.join(repo, SUITES_DIR, `${s.name}.json`), formatSuite(s));
+    commit(repo, name);
+  };
+  const newSuite = (name, shard) => ({ name, class: "N", medianS: 2, shard, command: "node pass.mjs" });
+  branchWith("lane-a", [newSuite("zz-lane-a", 1)]);
+  branchWith("lane-b", [newSuite("zz-lane-b", 2)]);
+  branchWith("lane-c", [newSuite("aa-lane-c", 3)]);
+  git(repo, "checkout", "-q", "lane-a");
+  const m1 = git(repo, "merge", "-q", "--no-edit", "lane-b");
+  eq(m1.status, 0, `TWO BRANCHES THAT EACH ADD A SUITE MERGE WITHOUT A TEXTUAL CONFLICT (${m1.stdout.slice(-200)}${m1.stderr.slice(-200)})`);
+  const m2 = git(repo, "merge", "-q", "--no-edit", "lane-c");
+  eq(m2.status, 0, "and so do three");
+  const merged = loadManifest(repo);
+  deep(["zz-lane-a", "zz-lane-b", "aa-lane-c"].filter((n) => merged.some((s) => s.name === n)), ["zz-lane-a", "zz-lane-b", "aa-lane-c"], "the merged tree registers every lane's suite");
+  const mShards = packShards(merged, CI_SHARDS);
+  ok(merged.filter((s) => groupOf(s) === "shard").every((s) => s.shard !== undefined), "and every suite of it is pinned");
+  ok(shardBalance(mShards).within, `and stays inside the balance tolerance (ratio ${shardBalance(mShards).ratio.toFixed(3)})`);
+  deep(mShards.map((sh) => sh.filter((s) => s.name.endsWith("lane-a") || s.name.endsWith("lane-b") || s.name.endsWith("lane-c")).map((s) => s.name)),
+    [["zz-lane-a"], ["zz-lane-b"], ["aa-lane-c"], [], [], []], "each lane's suite runs in the shard its own file pinned");
+  const mfile = readdirSync(path.join(repo, SUITES_DIR));
+  ok(["zz-lane-a.json", "zz-lane-b.json", "aa-lane-c.json"].every((f) => mfile.includes(f)), "as three files");
+
+  const legacy = path.join(scratch, "legacy-repo");
+  mkdirSync(legacy);
+  git(legacy, "init", "-q", "-b", "main");
+  const arr = (extra) => `{\n  "version": 1,\n  "suites": [\n    {"name": "a", "class": "N", "medianS": 1}${extra.map((e) => `,\n    ${e}`).join("")}\n  ]\n}\n`;
+  writeFileSync(path.join(legacy, "suites.json"), arr([]));
+  commit(legacy, "base");
+  for (const [b, n] of [["x", "lane-x"], ["y", "lane-y"]]) {
+    git(legacy, "checkout", "-q", "-b", b, "main");
+    writeFileSync(path.join(legacy, "suites.json"), arr([`{"name": "${n}", "class": "N", "medianS": 1}`]));
+    commit(legacy, b);
+  }
+  git(legacy, "checkout", "-q", "x");
+  ok(git(legacy, "merge", "-q", "--no-edit", "y").status !== 0, "the experiment can fail: the same two additions to one suites.json array conflict, as they did before the registry was a directory");
+}
+
 const fx3 = path.join(scratch, "fx3");
 mkdirSync(fx3);
 writeFileSync(path.join(fx3, "s.mjs"), `import { writeFileSync } from "node:fs";
@@ -718,7 +815,7 @@ const fx3Suites = [
   { name: "a", class: "N", medianS: 5 },
   { name: "u", class: "N", medianS: null },
 ];
-writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: fx3Suites }, null, 2));
+writeSuites(fx3, fx3Suites);
 const ran = () => fx3Names.filter((n) => existsSync(mark(`ran-${n}`)));
 const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { force: true }); };
 
@@ -752,7 +849,7 @@ const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { fo
     eq(r.status, 2, `${args.join(" ")} exits 2`);
     ok(re.test(r.stderr) && !ran().length, `${args.join(" ")} names the problem and runs nothing`);
   }
-  writeFileSync(path.join(fx3, "suites.json"), JSON.stringify({ version: 1, suites: [...fx3Suites.slice(0, -1), { ...fx3Suites.at(-1), group: "slow" }] }, null, 2));
+  writeSuites(fx3, [...fx3Suites.slice(0, -1), { ...fx3Suites.at(-1), group: "slow" }]);
   const g = run(["--shard", "1/2"], { dir: fx3 });
   ok(g.status === 2 && g.stderr.includes("u has group \"slow\", not fast or shard"), "a suite in an unknown group is refused before anything runs");
 }
@@ -823,7 +920,7 @@ setInterval(() => {}, 1000);\n`);
       { name: "steady", class: "N", timing: true, medianS: 0.1 },
     ].map((x) => ({ ...x, ...(over[x.name] || {}) })),
   });
-  put("suites.json", JSON.stringify(suitesOf()));
+  writeSuites(q, suitesOf().suites);
   const countOf = (name) => (existsSync(path.join(marks, "count-" + name)) ? readFileSync(path.join(marks, "count-" + name), "utf8").length : 0);
   const reset = () => { for (const n of [...Object.keys(names), "slow", "steady"]) rmSync(path.join(marks, "count-" + n), { force: true }); };
 
@@ -880,15 +977,15 @@ setInterval(() => {}, 1000);\n`);
   eq(quiet.status, 0, "the annotation is for GitHub Actions only");
   ok(!quiet.stdout.includes("::warning"), "no annotation without it");
 
-  put("suites.json", JSON.stringify(suitesOf({ plain: { timing: true, class: "C" } })));
+  writeSuites(q, suitesOf({ plain: { timing: true, class: "C" } }).suites);
   const refused = run(["--only", "once"], { dir: q, env: { CI: "true" } });
   eq(refused.status, 2, "a manifest that tags a Chromium suite timing is refused before anything runs");
   ok(/plain is tagged timing but is class "C"/.test(refused.stderr), "naming the suite and the rule");
-  put("suites.json", JSON.stringify(suitesOf()));
+  writeSuites(q, suitesOf().suites);
   put("quarantine.json", "{ not json");
   const broken = run(["--only", "steady"], { dir: q, env: { CI: "true" } });
   ok(broken.status === 2 && /quarantine\.json is not valid JSON/.test(broken.stderr), "a quarantine file that does not parse stops the run instead of being ignored");
   rmSync(path.join(q, "quarantine.json"));
 }
 
-console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script left out of suites.json refused before anything runs, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, the six CI shards equal to the published table and, with the fast job, every suite exactly once for one to eight shards, --shard, --group and --needs-browser on a hand-worked fixture, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);
+console.log(`✓ run: ${checks} assertions — every registered suite attempted after a failure and after a hang, the hang and its children killed at the manifest's timeout, exit 1 on any failure and 0 only when all pass, one summary row per suite appended to the step summary with the last 40 lines of each failure inside a bounded summary, --bail and --only, an empty selection and a test:* script with no file in tests/suites/ refused before anything runs, a suite file that names another suite, carries two commands or pins a shard that does not exist refused, a suite whose output outlives it ended at its timeout, a child left in a suite's group killed when the suite exits or closes, a character split across a pipe chunk decoded whole, a timeout past setTimeout's range capped rather than fired at once, every shard-group suite pinning its own shard, the six CI shards equal to those pins and balanced within 1.3 times, --repin rewriting the pins, two branches that each add a suite merging without a conflict, and, with the fast job, every suite exactly once for one to eight shards, --shard, --group and --needs-browser on a hand-worked fixture, and SIGINT, SIGTERM or SIGHUP passed to the running suite with a partial summary written, a repeat within ${REPEAT_WINDOW_MS} ms not escalated and a later one escalated to SIGKILL`);

@@ -1066,7 +1066,8 @@ const rebuild = (em) => {
     ],
   });
 
-  const browser = await chromium.launch();
+  const { revealBelow } = await import("./lib/below-fold.mjs");
+  const browser = revealBelow(await chromium.launch());
   const newPage = async (options) => {
     const p = await browser.newPage(Object.assign({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" }, options || {}));
     await p.context().addCookies([{ name: "flows_session", value: session, url: server.baseURL }]);
@@ -1485,12 +1486,12 @@ const rebuild = (em) => {
     }));
     await askless.close();
     const solid = marks.bubbles.find((b) => !b.dash), open = marks.bubbles.find((b) => b.dash);
-    ok(solid && Number(solid.fill) > 0.8, `a window the vendor put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
+    ok(solid && Number(solid.fill) > 0.8, `a window the vendor put wholly on the ask side is drawn solid (${JSON.stringify(marks.bubbles)})`);
     ok(open && Number(open.fill) === 0,
        "AND A WINDOW WITH NO ASK-SIDE PREMIUM ON IT IS NOT DRAWN AS A LOW ASK SHARE. The fill used to stand a null in " +
-       "for a fifth of the premium, which is the ring the legend reads as dollars that were not at the ask — a reading " +
+       "for a fifth of the premium, which is the ring the legend reads as dollars that were not on the ask side — a reading " +
        "the vendor never sent — so it is an open dashed outline instead");
-    ok(marks.keys.includes("Ask not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
+    ok(marks.keys.includes("Ask side not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
     ok(!marks.keys.some((k) => /bid/i.test(k)),
        "and no key names the bid: a thin fill means the premium was not attributed to the ask, which is not a claim " +
        "that it was attributed to the bid");

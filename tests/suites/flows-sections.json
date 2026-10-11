@@ -1,0 +1,1 @@
+{"name": "flows-sections", "class": "W", "group": "shard", "timing": false, "medianS": 9.5, "shard": 3, "files": ["flows-sections-contract.mjs"], "covers": ["schema.sql"]}

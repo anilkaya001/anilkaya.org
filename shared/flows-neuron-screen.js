@@ -212,7 +212,7 @@ export function screenReading(input) {
   else {
     push({
       key: "delta", group: "flow", label: "Directional delta flow", value: r4(dDelta * 100),
-      text: signed(dDelta * 100, 2) + "%", unit: "of average daily share volume (delta bought at the ask less sold at the bid)", grade: 1,
+      text: signed(dDelta * 100, 2) + "%", unit: "of average daily share volume (delta on the ask side less delta on the bid side)", grade: 1,
       note: "The session's directionalized delta in shares, signed so that buying calls or selling puts is positive. Today's tape and not a standing position.",
     });
   }

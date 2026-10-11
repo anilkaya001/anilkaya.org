@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,8 @@ const SERVER = "tests/worker-server.mjs";
 const STATIC = /(?:^|[;}])\s*(?:import|export)\b[^;]*?\bfrom\s*(["'])([^"'\n]+)\1|(?:^|[;}])\s*import\s*(["'])([^"'\n]+)\3/gm;
 const DYNAMIC = /\bimport\s*\(\s*(?:"([^"\n]+)"|'([^'\n]+)')\s*\)/g;
 const LITERAL = /(["'`])((?:\.{1,2}\/)*[A-Za-z0-9_@][A-Za-z0-9_.@\-/]*\.[A-Za-z0-9]{1,8})\1/g;
-const FIELD_ORDER = ["name", "class", "group", "timing", "medianS", "timeoutS", "files", "covers"];
+export const SUITES_DIR = "suites";
+export const FIELD_ORDER = ["name", "class", "group", "timing", "medianS", "timeoutS", "shard", "command", "files", "covers"];
 
 const posix = (p) => p.split(path.sep).join("/");
 
@@ -118,9 +119,9 @@ export function checkRegistry({ root = ROOT, manifest, pkg, tracked = trackedFil
   const reached = new Set();
   const named = new Set();
   for (const s of suites) {
-    const at = `suites.json: ${s.name}`;
-    const command = scripts[`test:${s.name}`];
-    if (typeof command !== "string") { problems.push(`${at} has no test:${s.name} script`); continue; }
+    const at = `tests/${SUITES_DIR}/${s.name}.json: ${s.name}`;
+    const command = commandOf(s, scripts);
+    if (typeof command !== "string") { problems.push(`${at} has neither a test:${s.name} script nor a command`); continue; }
     const got = scanSuite(root, s, command, tracked);
     for (const f of got.files) named.add(f.startsWith("../") ? f.slice(3) : "tests/" + f);
     for (const f of got.scan.files) reached.add(f);
@@ -142,58 +143,57 @@ export function checkRegistry({ root = ROOT, manifest, pkg, tracked = trackedFil
       if (!s.covers.some((c) => globMatches(c, read))) problems.push(`${at} reads ${read} outside its import closure, and no covers entry names it`);
     }
   }
-  const support = Array.isArray(manifest && manifest.support) ? manifest.support : null;
-  if (!support) problems.push("suites.json: no support array naming the helper files");
-  const supportSet = new Set(support || []);
   for (const f of [...listDir(root, "tests"), ...listDir(root, "tests/lib")]) {
-    if (named.has(f)) {
-      if (supportSet.has(f.slice(6))) problems.push(`suites.json: ${f.slice(6)} is both a suite file and in support`);
-      continue;
-    }
-    if (!supportSet.has(f.slice(6))) problems.push(`${f} is in no suite's files and not in the support list, so nothing registers it`);
-  }
-  for (const f of supportSet) {
-    if (!existsSync(path.join(root, "tests", f))) problems.push(`suites.json: support lists ${f}, which does not exist`);
-    else if (!reached.has("tests/" + f)) problems.push(`suites.json: support lists tests/${f}, which no suite's import closure reaches`);
+    if (named.has(f)) continue;
+    if (!reached.has(f)) problems.push(`${f} is in no suite's files and no suite's import closure reaches it, so nothing registers it`);
   }
   return problems;
 }
 
-const line = (s) => {
-  const keys = [...FIELD_ORDER.filter((k) => s[k] !== undefined), ...Object.keys(s).filter((k) => !FIELD_ORDER.includes(k))];
-  return "    {" + keys.map((k) => `${JSON.stringify(k)}: ${JSON.stringify(s[k])}`).join(", ") + "}";
-};
+export function formatSuite(entry) {
+  const keys = [...FIELD_ORDER.filter((k) => entry[k] !== undefined), ...Object.keys(entry).filter((k) => !FIELD_ORDER.includes(k) && entry[k] !== undefined)];
+  return `{${keys.map((k) => `${JSON.stringify(k)}: ${JSON.stringify(entry[k])}`).join(", ")}}\n`;
+}
 
-export function serialize(manifest) {
-  const head = Object.keys(manifest).filter((k) => k !== "suites" && k !== "support");
-  const parts = head.map((k) => `  ${JSON.stringify(k)}: ${JSON.stringify(manifest[k])}`);
-  parts.push(`  "suites": [\n${manifest.suites.map(line).join(",\n")}\n  ]`);
-  if (manifest.support) parts.push(`  "support": ${JSON.stringify(manifest.support)}`);
-  return "{\n" + parts.join(",\n") + "\n}\n";
+export function readSuiteEntries(testsDir) {
+  const dir = path.join(testsDir, SUITES_DIR);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")));
+}
+
+export function readRegistry(root = ROOT) {
+  return { version: 2, suites: readSuiteEntries(path.join(root, "tests")) };
+}
+
+export function commandOf(suite, scripts) {
+  const script = scripts[`test:${suite.name}`];
+  return typeof script === "string" ? script : suite.command;
 }
 
 export function syncRegistry({ root = ROOT, manifest, pkg, tracked = trackedFiles(root) }) {
   const scripts = pkg.scripts || {};
-  const named = new Set();
   const suites = manifest.suites.map((s) => {
-    const command = scripts[`test:${s.name}`];
-    const got = scanSuite(root, s, command, tracked);
-    for (const f of got.files) named.add(f.startsWith("../") ? f.slice(3) : "tests/" + f);
+    const got = scanSuite(root, s, commandOf(s, scripts), tracked);
     const covers = [...new Set([...(Array.isArray(s.covers) ? s.covers : []), ...got.reads])]
       .filter((c) => tracked.some((f) => globMatches(c, f))).sort();
     return { ...s, class: got.class, group: s.group || "shard", timing: s.timing === true, files: got.files, covers };
   });
-  const support = [...listDir(root, "tests"), ...listDir(root, "tests/lib")].filter((f) => !named.has(f)).map((f) => f.slice(6));
-  return { ...manifest, version: 2, suites, support };
+  return { ...manifest, version: 2, suites };
+}
+
+export function writeRegistry(root, manifest) {
+  const dir = path.join(root, "tests", SUITES_DIR);
+  const keep = new Set(manifest.suites.map((s) => `${s.name}.json`));
+  for (const f of existsSync(dir) ? readdirSync(dir) : []) if (f.endsWith(".json") && !keep.has(f)) rmSync(path.join(dir, f));
+  for (const s of manifest.suites) writeFileSync(path.join(dir, `${s.name}.json`), formatSuite(s));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const manifestPath = path.join(ROOT, "tests", "suites.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const manifest = readRegistry(ROOT);
   const pkg = JSON.parse(readFileSync(path.join(ROOT, "tests", "package.json"), "utf8"));
   if (process.argv.includes("--write")) {
-    writeFileSync(manifestPath, serialize(syncRegistry({ manifest, pkg })));
-    console.log("suites.json rewritten");
+    writeRegistry(ROOT, syncRegistry({ manifest, pkg }));
+    console.log("tests/suites/ rewritten");
   } else {
     const problems = checkRegistry({ manifest, pkg });
     for (const p of problems) console.error(p);

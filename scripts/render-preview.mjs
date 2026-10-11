@@ -19,6 +19,15 @@ const OUT = argOf("--out", path.join(os.tmpdir(), "flows-render-preview"));
 const CARDS = argOf("--cards", null);
 mkdirSync(OUT, { recursive: true });
 
+if (argv.includes("--approval")) {
+  const { renderApproval } = await import("./approval-frames.mjs");
+  const dir = path.join(OUT, "approval");
+  const result = await renderApproval({ out: dir, chromium, capture: argv.includes("--capture"), log: (name) => console.log("  " + name) });
+  const bad = result.info.filter((i) => i.errors.length);
+  console.log(`approval pack: ${result.frames.length} frames in ${dir}${bad.length ? `, ${bad.length} with page errors` : ""}`);
+  process.exit(bad.length ? 1 : 0);
+}
+
 const pages = await import(path.join(ROOT, "shared/flows-pages.js"));
 const CSS = ["assets/css/base.css", "assets/css/flows.css"]
   .map((f) => `<style>${readFileSync(path.join(ROOT, f), "utf8")}</style>`).join("\n");

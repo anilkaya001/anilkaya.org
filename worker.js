@@ -48,7 +48,7 @@ import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt } from "./shared/flows-rt-routes.js";
-import { RT_LIMITS } from "./shared/flows-rt.js";
+import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
 
@@ -947,7 +947,7 @@ function lastGoodKey(request, url) {
 function rememberLastGood(request, url, response, ctx, now = Date.now()) {
   const cache = edgeCache.handle();
   if (!cache || response.status !== 200 || !Number(response.headers.get("X-Payload-Updated")) || response.headers.has("X-Fresh-Last-Good")) return;
-  const key = lastGoodKey(request, url);
+  const key = url.searchParams.has("cols") ? null : lastGoodKey(request, url);
   if (!key || !ctx || typeof ctx.waitUntil !== "function") return;
   const seen = state.lastGoodStamped.get(key.url);
   if (seen !== undefined && now - seen < LAST_GOOD_REFRESH_MS) return;
@@ -3461,7 +3461,7 @@ async function route(request, env, url, ctx) {
     "/flows/long/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "long" }),
     "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
     "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
-    "/flows/market/": (u) => FLOWS_PAGES.marketPage({ username: u }),
+    "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
     "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
     "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
 
@@ -3469,7 +3469,7 @@ async function route(request, env, url, ctx) {
     "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
 
     "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
-    "/flows/unusual/": (u) => FLOWS_PAGES.unusualPage({ username: u }),
+    "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
     "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
     "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
 
@@ -3483,7 +3483,7 @@ async function route(request, env, url, ctx) {
       ? await readFlowsSummary(env, "board")
       : null;
     const body = session
-      ? FLOWS_ROUTES[path](session.username, summary)
+      ? FLOWS_ROUTES[path](session.username, summary, rtIsOwner(rtSwitches(env), session.username))
       : FLOWS_PAGES.loginPage();
     return new Response(body, {
       status: 200,

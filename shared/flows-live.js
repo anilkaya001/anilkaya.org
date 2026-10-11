@@ -583,10 +583,13 @@ export const STRIP_FIELDS = Object.freeze([
   ["gDir", "gex_gamma_per_one_percent_move_dir", "USD per 1% move"],
   ["pcr", "put_call_ratio", "ratio"], ["rvol", "relative_volume", "ratio"],
   ["vol", "stock_volume", "shares"],
+  ["cp", "call_premium", "USD, total call premium"], ["pp", "put_premium", "USD, total put premium"],
+  ["cvBid", "call_volume_bid_side", "contracts"], ["pvBid", "put_volume_bid_side", "contracts"],
+  ["iv30p", "iv30d_1d", "fraction, the previous trading day's 30-day implied volatility (the vendor's iv30d_1d)"],
   ["qa", null, "seconds, the read instant minus the vendor's quote_time; null when the row has no stamp or one after the read"],
 ].map((x) => Object.freeze(x)));
 
-const STRIP_DP = Object.freeze({ px: 4, prev: 4, chg: 6, lean: 6, iv30: 4, ivRank: 2, im: 4, pcr: 4, rvol: 4 });
+const STRIP_DP = Object.freeze({ px: 4, prev: 4, chg: 6, lean: 6, iv30: 4, iv30p: 4, ivRank: 2, im: 4, pcr: 4, rvol: 4 });
 
 export const QUOTE_SKEW_MS = 60 * 1000;
 
@@ -605,13 +608,14 @@ const STRIP_SOURCE = STRIP_FIELDS.map(([, field]) => field);
 
 const STRIP_PLACES = STRIP_FIELDS.map(([n]) => (Object.hasOwn(STRIP_DP, n) ? STRIP_DP[n] : 0));
 
-const [PX, PREV, CHG, NCP, NPP, NET, BULL, BEAR, LEAN] = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean"].map(stripAt);
+const [PX, PREV, CHG, NCP, NPP, NET, BULL, BEAR, LEAN, IV30P] = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean", "iv30p"].map(stripAt);
 
 export function stripValues(row, { at = NaN, fill = null } = {}) {
   const v = new Array(STRIP_FIELDS.length).fill(null);
   for (let i = 0; i < v.length; i++) if (STRIP_SOURCE[i]) v[i] = vnum(row[STRIP_SOURCE[i]]);
   if (v[PREV] === null && fill > 0) v[PREV] = fill;
   v[CHG] = v[PX] !== null && v[PREV] !== null && v[PREV] !== 0 ? v[PX] / v[PREV] - 1 : null;
+  if (v[IV30P] !== null && !(v[IV30P] > 0)) v[IV30P] = null;
   v[QA_AT] = lagSeconds(at, row.quote_time);
   v[NET] = v[NCP] !== null && v[NPP] !== null ? v[NCP] - v[NPP] : null;
   const gross = v[BULL] !== null && v[BEAR] !== null ? v[BULL] + v[BEAR] : null;

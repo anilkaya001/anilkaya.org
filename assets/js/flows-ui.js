@@ -747,7 +747,7 @@
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSource: null, live: false, transport: null, sources: new Map(), ffs: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSkew: 0, readSource: null, transport: null, sources: new Map(), ffs: new Map(), roles: new Map(), explicit: false, settled: false };
   const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts", "rt:px": "Streamed prices", "rt:fl": "Streamed flow alerts", "rt:gx": "Streamed gamma", "rt:mk": "Streamed market tide", "rt:nw": "Streamed headlines" };
   const named = (k) => { k = k.replace(/^(?:lk\?k=|live:)|\?.*/g, ""); return NAMES[k] || k[0].toUpperCase() + k.slice(1); };
   function freshAggregate(list, phase) {
@@ -755,17 +755,37 @@
     return !s.length ? "pending" : has("stale") ? "stale" : has("live") ? "live"
       : (phase && phase !== "rth") || s.every((x) => x === "closed") ? "closed" : has("fresh") ? "fresh" : s[0];
   }
+  function freshAll(list) {
+    let primary = 0, off = 0, stale = false, hard = false;
+    for (const x of list || []) {
+      if (!x) continue;
+      const s = typeof x === "string" ? x : x.stateAt ? x.stateAt() : x.state;
+      if (s === "stale") { stale = true; if (x.role !== "secondary") hard = true; }
+      if (x.role === "primary") { primary++; if (s !== "live") off++; }
+    }
+    return hard ? "stale" : stale || !primary || off ? "fresh" : "live";
+  }
+  const entries = () => [...FRESH.ffs].map(([k, f]) => ({ k, f, state: f.stateAt(), role: FRESH.roles.get(k), primary: FRESH.roles.get(k) === "primary" }));
+  const PRICES = /(?:^|[:=?])(?:strips|px)(?:$|&)/;
+  const LIVE_S = { rt: 15, rtSlow: 30, rtNews: 75 };
+  const span = (s) => (s < 60 ? Math.floor(s) + " s" : s < 3600 ? Math.floor(s / 60) + " min" : Math.floor(s / 3600) + " h");
+  function readAge() {
+    const t = Date.now(), ages = [];
+    if (FRESH.readAt) ages.push(t + FRESH.readSkew - Date.parse(FRESH.readAt));
+    for (const [k, f] of FRESH.ffs) if (PRICES.test(k) && f.readAt) ages.push(t + (f.skewMs || 0) - f.readAt);
+    const a = Math.min(...ages.filter(Number.isFinite));
+    return Number.isFinite(a) ? Math.max(0, a / 1000) : null;
+  }
   function freshState() {
     const m = market(new Date());
     const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
-    const liveNow = FRESH.live && FRESH.readAt && Date.now() - Date.parse(FRESH.readAt) < 3 * 60 * 1000 && m.open;
+    const verdict = freshAll(entries());
     let behind = !!S && S < m.expected;
     if (behind && m.source === "local") { confirmExpected(); behind = !pendingNow(); }
     let state;
-    if (behind || freshAggregate([...FRESH.ffs.values()]) === "stale") state = "stale";
+    if (behind || verdict === "stale") state = "stale";
     else if (!S) state = FRESH.settled ? (m.open ? "fresh" : "closed") : "pending";
-    else if (liveNow) state = "live";
-    else if (m.open) state = "fresh";
+    else if (m.open) state = verdict === "live" ? "live" : "fresh";
     else state = "closed";
     return { state, market: m, S, behind };
   }
@@ -776,12 +796,20 @@
     const sources = [...FRESH.sources.entries()];
     const behind = sources.filter(([, v]) => v !== S);
     const total = sources.length + FRESH.ffs.size, bad = behind.length + out.length;
+    const t0 = Date.now(), all = entries();
+    const slow = m.open ? all.filter((e) => e.state !== "live" && e.f.klass !== "nightly" && (e.f.liveUntil != null || /^rt/.test(e.f.klass || ""))).sort((a, b) => b.primary - a.primary) : [];
+    const unlive = slow.length ? "Not live: " + slow.map((e) => {
+      const w = LIVE_S[e.f.klass] || (e.f.liveUntil != null && e.f.readAt != null ? Math.round((e.f.liveUntil - e.f.readAt) / 1000) : 0);
+      return named(e.k) + (e.f.reason === "vendor-lag" ? " behind the vendor" : e.f.readAt != null ? " last read " + span(Math.max(0, (t0 + (e.f.skewMs || 0) - e.f.readAt) / 1000)) + " ago" : " not live") + (w ? " (live within " + w + " s)" : "");
+    }).join("; ") + ". " : "";
+    const age = state === "fresh" && m.open && !all.some((e) => e.primary) ? readAge() : null;
+    const quiet = age !== null ? "Nothing on this page is a live stream, so it does not claim Live; the newest price was read " + span(age) + " ago. " : "";
     const lag = behind.length ? " " + bad + " of " + total + " payloads are older: " + behind.map(([k, v]) => named(k) + " " + F.day(v)).join(", ") + "." : "";
     const lead = state === "stale" ? (late ? `These readings are the ${F.day(S)} session; the last completed session is ${F.day(m.expected)}.`
       : "Past the server\u2019s stale line: " + lapsed.join(", ") + ".")
-      : state === "live" ? "The market is open and the last price was read moments ago." + (lag || " Everything else is the last completed session.")
+      : state === "live" ? "The market is open and the last price was read moments ago. " + unlive + (lag || "Everything else is the last completed session.")
         : !S ? (state === "pending" ? "No payload on this page has reported its session yet." : "No session is published yet.")
-          : (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which + lag;
+          : unlive + quiet + (m.open ? "The market is open. " : "The market is closed. ") + "These readings are " + which + lag;
     const facts = [
       ["Expected", S !== m.expected ? F.day(m.expected) : null],
       ["Market", m.open ? "Open" : "Closed"],
@@ -797,25 +825,45 @@
       notes: ["Readings come from the dated post-close archive. During market hours only price is re-read live."],
     };
   }
+  let paintT = 0;
+  function schedulePaint(state, age) {
+    clearTimeout(paintT);
+    let wait = age !== null ? 5000 : null;
+    if (state === "live" || state === "fresh") {
+      const t = Date.now();
+      for (const [k, f] of FRESH.ffs) {
+        const n = FRESH.roles.get(k) === "primary" && typeof f.nextAt === "function" ? f.nextAt() : null;
+        if (n > t && (wait === null || n - t + 50 < wait)) wait = n - t + 50;
+      }
+    }
+    if (state === "live") wait ??= 5000;
+    paintT = wait === null ? 0 : setTimeout(paintFresh, wait);
+  }
   function paintFresh() {
     const b = $("fxFresh");
     if (!b) return;
     const { state, market: m, S, behind } = freshState();
     const def = STATES[state] || STATES.pending;
-    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
+    const age = state === "fresh" && m.open ? readAge() : null;
+    schedulePaint(state, age);
+    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : age !== null ? "Fresh " + MID + " " + span(age) : S ? (S === m.today ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
     const feed = FRESH.transport || "";
     if (b.dataset.state === state && b.dataset.label === label && (b.dataset.feed || "") === feed) return;
     b.dataset.state = state;
     b.dataset.label = label;
     b.dataset.feed = feed;
     b.replaceChildren(glyph(def.g), h("span", { class: "fx-fresh-l" }, label));
-    b.setAttribute("aria-label", "Freshness: " + def.word + (S ? ", session " + S : "") + (feed ? ", feed " + feed : ""));
-    if (feed) b.title = def.word + " · " + feed;
+    b.setAttribute("aria-label", "Freshness: " + (age !== null ? label : def.word) + (S ? ", session " + S : "") + (feed ? ", feed " + feed : ""));
+    if (feed) b.title = (age !== null ? label : def.word) + " · " + feed;
     else if (b.title) b.title = "";
   }
   function freshness(o = {}) {
     if (o.explicit !== false && !o.ff) FRESH.explicit = true;
-    if (o.ff) FRESH.ffs.set(o.source || "page", o.ff);
+    if (o.ff) {
+      FRESH.ffs.set(o.source || "page", o.ff);
+      if (o.role === "primary" || o.role === "secondary") FRESH.roles.set(o.source || "page", o.role);
+      else FRESH.roles.delete(o.source || "page");
+    }
     if (isoDay(o.sessionDate)) {
       const d = o.sessionDate.slice(0, 10);
       if (o.primary === true) FRESH.primary = d;
@@ -824,16 +872,17 @@
     }
     if (typeof o.generatedAt === "string" && (!FRESH.generatedAt || o.generatedAt > FRESH.generatedAt)) FRESH.generatedAt = o.generatedAt;
     if (num(o.updatedAt) !== null && o.updatedAt > 0) FRESH.updatedAt = Math.max(FRESH.updatedAt || 0, o.updatedAt);
-    if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.live = o.live !== false; FRESH.readSource = o.source || null; }
+    if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.readSkew = (o.ff && o.ff.skewMs) || 0; FRESH.readSource = o.source || null; }
     FRESH.settled = true;
     paintFresh();
     return freshState().state;
   }
   freshness.drop = (source) => {
     const had = FRESH.ffs.delete(source);
+    FRESH.roles.delete(source);
     FRESH.sources.delete(source);
     const claimed = Boolean(source) && FRESH.readSource === source;
-    if (claimed) { FRESH.readAt = null; FRESH.live = false; FRESH.readSource = null; }
+    if (claimed) { FRESH.readAt = null; FRESH.readSource = null; }
     if (had || claimed) paintFresh();
     return had;
   };
@@ -1130,6 +1179,60 @@
     closeSidebar: () => { if (drawerClose) drawerClose(false); },
   });
 
+  const loadJs = (src) => new Promise((ok, no) => {
+    const n = h("script", { src, onload: ok, onerror: () => { n.remove(); no(); } });
+    n.async = false;
+    document.head.append(n);
+  });
+
+  const queued = new Map();
+  function defer(group, o = {}) {
+    if (queued.has(group)) return queued.get(group);
+    const srcs = [...document.querySelectorAll('i[data-defer="' + group + '"]')].map((i) => i.dataset.src), slot = o.el, name = o.label || group;
+    let done;
+    const ask = (text, label, fn) => {
+      const q = h("p", { class: "ui-defer", role: "status" }, text, h("button", { type: "button", onclick: () => { q.remove(); fn(); } }, label));
+      slot.prepend(q);
+    };
+    const go = async () => {
+      try { while (srcs.length) { await loadJs(srcs[0]); srcs.shift(); } done(); } catch { slot && ask(name + " is unavailable: its script did not load.", "Retry", go); }
+    };
+    const start = () => (slot && navigator.connection && navigator.connection.saveData ? ask("Data Saver is on.", "Load " + name, go) : go());
+    const idle = () => (window.requestIdleCallback ? requestIdleCallback(start, { timeout: 1500 }) : setTimeout(start, 200));
+    const see = () => {
+      if (o.when !== "visible" || !slot) return idle();
+      const io = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) { io.disconnect(); idle(); } }, { rootMargin: "200px" });
+      io.observe(slot);
+    };
+    queued.set(group, new Promise((r) => { done = r; }));
+    if (document.readyState === "complete") see(); else addEventListener("load", see, { once: true });
+    return queued.get(group);
+  }
+
+  const link = (() => {
+    const q = [], me = document.currentScript && document.currentScript.src;
+    let impl, asked, ready;
+    const run = (f, d) => {
+      if (impl) return f();
+      if (!asked && me) { asked = 1; loadJs(me.replace("flows-ui.js", "flows-link.js")).catch(() => {}); }
+      if (q.length < 64) q.push(f);
+      return d;
+    };
+    const body = new Promise((r) => (ready = r));
+    const api = {
+      attach(i) { impl = i; delete api.attach; ready(); q.splice(0).forEach((f) => f()); },
+      ready: () => (run(Object, 0), body),
+      join(o, c) {
+        let r, g;
+        return run(() => { r = impl.join(o, c); if (g) r.leave(); return r; }, 0) || { leave() { g = 1; if (r) r.leave(); } };
+      },
+      cursor: (...a) => (a.length ? run(() => impl.cursor(...a), null) : impl ? impl.cursor() : null),
+      describe: () => run(() => impl.describe(), { scene: null, mode: null, tau: null, clock: null, selection: {} }),
+    };
+    for (const m of ["emit", "context", "popout"]) api[m] = (...a) => run(() => impl[m](...a), false);
+    return api;
+  })();
+
   window.FlowsUI = Object.freeze({
     MINUS, DASH, MID,
     isNum,
@@ -1144,7 +1247,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, freshAggregate, shell, depths: PAL_G,
+    freshness, freshAggregate, freshAll, defer, link, shell, depths: PAL_G,
   });
 
   if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });

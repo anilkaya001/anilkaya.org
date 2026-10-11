@@ -146,6 +146,7 @@
     var liveUntil = stamp(entry.liveUntil);
     var staleAt = stamp(entry.staleAt);
     return {
+      skewMs: skew, klass: entry.klass || null, reason: entry.reason || null, readAt: stamp(entry.readAt), liveUntil: liveUntil,
       stateAt: function (now) {
         var t = (typeof now === "number" ? now : Date.now()) + skew;
         if (entry.state === "pending" || entry.state === "stale") return entry.state;
@@ -153,6 +154,11 @@
         if (liveUntil !== null && t < liveUntil) return "live";
         if (staleAt !== null && t < staleAt) return "fresh";
         return staleAt === null ? entry.state : "stale";
+      },
+      nextAt: function (now) {
+        var t = (typeof now === "number" ? now : Date.now()) + skew;
+        var next = [liveUntil, staleAt].filter(function (x) { return x !== null && x > t; });
+        return next.length ? Math.min.apply(null, next) - skew : null;
       },
     };
   }
@@ -167,7 +173,7 @@
     T.regAt = now;
     var ff = typeof UI.freshFrom === "function" ? UI.freshFrom(fr, { serverNow: f.at }) : stateOf(fr, f.at);
     if (!ff) return;
-    var o = { ff: ff, source: "rt:" + k };
+    var o = { ff: ff, source: "rt:" + k, role: S.handles.some(function (h) { return h.primary.indexOf(k) >= 0; }) ? "primary" : "secondary" };
     if (k === "px" && fr.state === "live" && typeof fr.readAt === "string" && ff.stateAt() === "live") { o.readAt = fr.readAt; o.live = true; }
     stats.reg++;
     UI.freshness(o);
@@ -800,7 +806,8 @@
     var focus = typeof o.focus === "string" && TICKER.test(o.focus.trim().toUpperCase()) ? o.focus.trim().toUpperCase() : null;
     var key = topics.join(",") + "|" + (focus || "");
     for (var i = 0; i < S.handles.length; i++) if (S.handles[i].key === key) return S.handles[i].api;
-    var hd = { key: key, topics: topics, focus: focus, offs: [], api: null };
+    var lead = Array.isArray(o.primary) ? topics.filter(function (k) { return o.primary.indexOf(k) >= 0; }) : [];
+    var hd = { key: key, topics: topics, focus: focus, offs: [], api: null, primary: lead.length ? lead : topics.indexOf("px") >= 0 ? ["px"] : topics };
     hd.api = {
       close: function () {
         var at = S.handles.indexOf(hd);

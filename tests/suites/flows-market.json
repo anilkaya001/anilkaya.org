@@ -1,0 +1,1 @@
+{"name": "flows-market", "class": "W", "group": "shard", "timing": false, "medianS": 30.8, "shard": 1, "files": ["flows-market-contract.mjs"], "covers": ["assets/js/flows-market.js","schema.sql"]}

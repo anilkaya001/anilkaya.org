@@ -391,7 +391,9 @@ export async function realContext(root = ROOT, now = new Date()) {
     ? readdirSync(path.join(root, "migrations")).filter((f) => f.endsWith(".sql")).sort().map((f) => read("migrations/" + f))
     : [];
   const schema = [read("schema.sql") || "", ...migrations].join("\n");
-  const suites = JSON.parse(read("tests/suites.json") || '{"suites":[]}').suites.map((s) => s.name);
+  const suites = existsSync(path.join(root, "tests/suites"))
+    ? readdirSync(path.join(root, "tests/suites")).filter((f) => f.endsWith(".json")).sort().map((f) => JSON.parse(read("tests/suites/" + f)).name)
+    : [];
   const scripts = Object.keys(JSON.parse(read("tests/package.json") || "{}").scripts || {});
   let worker = null;
   return {

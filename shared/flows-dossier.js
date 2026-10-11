@@ -1339,7 +1339,7 @@ export function buildFlowPacket(inp) {
       rec.fact("alerts.callPremium", "Of which calls", sum(calls.map((r) => r.prem)), "usd", { grade: g, silent: true });
       rec.fact("alerts.putPremium", "Of which puts", sum(puts.map((r) => r.prem)), "usd", { grade: g, silent: true });
       const ask = rows.filter((r) => isNum(r.askPrem));
-      if (ask.length) rec.fact("alerts.askShare", "Share of that premium traded at the ask", sum(ask.map((r) => r.askPrem)) / Math.max(1, sum(ask.map((r) => r.prem))), "fraction", { grade: 2, note: "the vendor's attribution against the quote; no intent is implied" });
+      if (ask.length) rec.fact("alerts.askShare", "Share of that premium on the ask side", sum(ask.map((r) => r.askPrem)) / Math.max(1, sum(ask.map((r) => r.prem))), "fraction", { grade: 2, note: "the vendor's ask-side attribution; the alert field is undocumented, and no intent is implied" });
       rec.fact("alerts.sweeps", "Alerts flagged as sweeps", rows.filter((r) => r.sweep === true).length, "count", { grade: g, silent: true });
       const top = rows.slice().sort((a, b) => b.prem - a.prem)[0];
       if (top) {

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { revealBelow } from "./lib/below-fold.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 import * as RT from "../shared/flows-rt.js";
 import { STRIP_FIELDS } from "../shared/flows-live.js";
@@ -314,7 +315,7 @@ function rigHub(page, R, { roster = async () => null } = {}) {
 }
 
 const want = (name) => !process.env.RT_ONLY || new RegExp(process.env.RT_ONLY).test(name);
-const browser = await chromium.launch();
+const browser = revealBelow(await chromium.launch());
 try {
   if (want("merge")) {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
@@ -338,7 +339,7 @@ try {
     const s = await strips(page);
     deep(s.fields, FIELDS, "px rows map back to the live:strips field order the pages already read");
     deep(Object.keys(s.rows).sort(), ["AMD", "NVDA", "SPY"], "one row per ticker");
-    eq(s.rows.NVDA.length, FIELDS.length, "each row is the 23 strip values, without the ticker and the vendor stamp");
+    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the vendor stamp");
     eq(s.rows.NVDA[0], 200, "px first");
     eq(s.rows.NVDA[FIELDS.indexOf("chg")], chgOf(200, 190), "and the change the server computed from the same row's prev");
     eq(s.session, DAY, "the session comes from the frame's fresh entry");
@@ -717,6 +718,27 @@ try {
     await page.waitForTimeout(20);
     ok((await measure(page)).transitMs.p50 >= 0, "transit: no sample is negative");
     deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
+  if (want("pilllive")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    await page.evaluate((d) => window.FlowsUI.freshness({ sessionDate: d, source: "pill-test" }), PREV);
+    await connect(page, { topics: ["px", "mk"] });
+    const c1 = await R.nextConn();
+    R.send(c1, R.hello(["px", "mk"], { px: [quote("NVDA", 200, 190, R.now - 1000)], mk: [{ id: "tide", status: "ok", date: DAY, t: iso(T1 - 60000), ncp: 1, npp: 2, net: -1, nv: 3 }] }));
+    await R.pump(80);
+    const p0 = await pill(page);
+    eq(p0.state, "live", `A PX FRAME IS LIVE AT ONCE through the rail's own registration, the streamed price being the page's primary entry (${JSON.stringify(p0)})`);
+    await R.alive(10000, 2500);
+    eq((await pill(page)).state, "live", "and 10 s on, with only heartbeats since");
+    await R.alive(5600, 2800);
+    const p1 = await pill(page);
+    eq(p1.state, "fresh", `AND FRESH AT t + 16 s, the pill repainting itself when the rail class's 15 s window closes, not after three minutes (${JSON.stringify(p1)})`);
+    ok(/^Fresh \u00b7 1[56] s$/.test(p1.label), `under the age of the price read (${p1.label})`);
+    R.send(c1, R.delta("px", [quote("NVDA", 201, 190, R.now - 500)]));
+    await R.pump(80);
+    eq((await pill(page)).state, "live", "and the next frame brings it back");
     await ctx.close();
   }
 

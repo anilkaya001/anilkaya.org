@@ -69,6 +69,13 @@ export const ALERTS_NOTES = Object.freeze({
     "so no number here is an execution price either.",
 });
 
+function ruleOf(raw) {
+  for (const k of ["alert_rule", "rule_name"]) {
+    if (typeof raw[k] === "string" && raw[k]) return raw[k];
+  }
+  return null;
+}
+
 export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
   if (!raw || typeof raw !== "object") return null;
   const t = typeof raw.ticker === "string" && raw.ticker ? raw.ticker : null;
@@ -111,7 +118,8 @@ export function alertRow(raw, { stageOf, stageComplete = true } = {}) {
     spanStart,
     spanEnd: alertStamp(raw.end_time) ?? created,
     ...(created !== null ? { spanFrom: "created_at" } : {}),
-    rule: typeof raw.alert_rule === "string" && raw.alert_rule ? raw.alert_rule : null,
+    rule: ruleOf(raw),
+    ...(typeof raw.rule_id === "string" && raw.rule_id ? { ruleId: raw.rule_id } : {}),
 
     st: typeof stageOf === "function"
       ? (stageOf(t) || (stageComplete ? "foreign" : null))

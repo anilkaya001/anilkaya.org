@@ -855,7 +855,7 @@ export const KIND_NAME = Object.freeze({
   positioning: "Short interest, insiders and institutions", flow: "Option flow and dark-pool levels", peers: "Sector and peers", macro: "Market backdrop",
 });
 
-function unknownEntries(dossier) {
+export function unknownEntries(dossier) {
   const out = [];
   const kinds = KINDS.filter((k) => dossier.packets[k]).sort((a, b) => PRIORITY[b] - PRIORITY[a]);
   for (const kind of kinds) {

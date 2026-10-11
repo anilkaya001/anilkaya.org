@@ -48,7 +48,7 @@ Every part is a repository check the script runs against config, schema, routes 
 
 ## Recorded readbacks
 
-One row per observation, appended and never edited: the part, the UTC date, who read it, the evidence with the `key=value` tokens the part names, and, where the part asks for one, a registered suite from `tests/suites.json`. The newest valid row for a part counts. A row with an unknown date, a future date, a missing token, an unregistered suite or (part 9a) an age past 92 days is ignored and the part stays open. Do not record a readback you have not made: the vendor email, counsel, the ruleset and the restore drill stay open until the owner reports them.
+One row per observation, appended and never edited: the part, the UTC date, who read it, the evidence with the `key=value` tokens the part names, and, where the part asks for one, a registered suite from `tests/suites/`. The newest valid row for a part counts. A row with an unknown date, a future date, a missing token, an unregistered suite or (part 9a) an age past 92 days is ignored and the part stays open. Do not record a readback you have not made: the vendor email, counsel, the ruleset and the restore drill stay open until the owner reports them.
 
 | Part | Date (UTC) | By | Evidence | Suite |
 |---|---|---|---|---|

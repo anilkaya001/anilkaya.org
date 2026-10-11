@@ -2210,7 +2210,7 @@
     const tileList = [
       offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alert tape"),
         info: () => ({ title: "Flow alerts", lead: al ? al.n + " alerts on this name in the session, " + F.money(al.prem) + " of premium" + (al.complete ? "." : "; the read stopped before the open, so the count is a floor.") : null,
-          facts: [["At the ask", F.pct(al && al.askShare, 0)], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
+          facts: [["Ask side", F.pct(al && al.askShare, 0)], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
         body: al ? h("div", { class: "ft-meters" }, meter("Ask", al.askShare, "--up-mark"), meter("Sweep", al.sweepShare, "--s-orange"), meter("Open", al.openingShare, "--s-blue")) : null }),
       offIndex(card, X.multiLeg) ? null : UI.tile({ title: "Structures", value: ml ? String(ml.n) : DASH, unit: ml ? F.money(ml.grossPrem) : null, state: ml ? null : xSt(X.multiLeg, "multi-leg read"),
         info: () => ({ title: "Multi-leg structures", lead: ml ? ml.n + " multi-leg structures traded in the session" + (ml.truncated ? " (the read hit its page ceiling, so this is a floor)" : "") + "." : null,
@@ -2360,7 +2360,7 @@
     contracts: "24px minmax(0,1fr) var(--mw, minmax(40px,80px)) 52px 56px", oi: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 48px 56px",
     prints: "minmax(0,1fr) var(--mw, minmax(40px,90px)) 64px", alerts: "24px minmax(0,1fr) var(--mw, minmax(40px,72px)) 56px 44px",
   };
-  const TAPE_HEADS = { contracts: ["Contract", "Volume", "Net"], oi: ["Contract", "OI", "Change"], alerts: ["Contract", "Premium", "At ask"], prints: ["Print", "Premium"] };
+  const TAPE_HEADS = { contracts: ["Contract", "Volume", "Net"], oi: ["Contract", "OI", "Change"], alerts: ["Contract", "Premium", "Ask side"], prints: ["Print", "Premium"] };
   function tapeHead(kind) {
     const [a, b, c] = TAPE_HEADS[kind];
     return h("div", { class: "ft-lh", style: { "--cols": TAPE_COLS[kind] } }, kind === "prints" ? null : h("span", { class: "ft-lh-b" }),
@@ -2396,7 +2396,7 @@
           const meterEl = row.querySelector(".ui-meter");
           if (meterEl) meterEl.replaceWith(sp); else row.append(sp);
           requestAnimationFrame(() => C.sparkline(sp, lf.oi, { color: r.cp === "C" ? "--up" : "--down", height: 22 }));
-          row.title += "; built over " + (lf.buildSessions || 0) + " sessions from " + (lf.buildStart || DASH) + ", " + F.pct(lf.askShareBuild, 0) + " of the building volume at the ask";
+          row.title += "; built over " + (lf.buildSessions || 0) + " sessions from " + (lf.buildStart || DASH) + ", " + F.pct(lf.askShareBuild, 0) + " of the building volume on the ask side";
         }
         return row;
       });
@@ -2491,7 +2491,7 @@
         title: "Tape", state: st.state === "ok" ? null : st.state,
         sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the vendor reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the vendor clears on."] },
           { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the vendor counts them; a missing counter is a dash, never a zero."] },
-          views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium taken at the ask." : reasonOf(views[2].st)] },
+          views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium the vendor attributes to the ask side." : reasonOf(views[2].st)] },
           { title: "Prints", lines: [leadOf(dp) || reasonOf(views[3].st), dp && dp.note, dp && num(dp.shed) ? dp.rows.length + " kept of " + dp.seen + " prints" + (num(dp.unpriced) ? ", +" + dp.unpriced + " unpriced print" + (dp.unpriced === 1 ? "" : "s") : "") + "." : null, "Each print shows its time, price, distance from the close and the quote at execution; a print missing either side of the quote shows a dash, never half a spread."] },
           views[4].never ? null : { title: "Shelves", lines: [dl ? "Dark and lit volume by price within " + dl.bandAtr + " ATR of spot; " + F.pct(dl.darkShare, 0) + " of the in-band volume printed dark. The purple rows are the three largest dark shelves." : reasonOf(views[4].st)] }],
       }) });

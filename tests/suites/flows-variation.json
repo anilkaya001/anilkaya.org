@@ -1,0 +1,1 @@
+{"name": "flows-variation", "class": "N", "group": "shard", "timing": false, "medianS": 0.2, "shard": 1, "files": ["flows-variation.mjs"], "covers": ["tests/fixtures-variation-cards.json"]}

@@ -268,7 +268,7 @@ async function runMain() {
       ok(frames.every((f) => f.ep === hello.ep), `${k}: one epoch`);
     }
     const px = c1.data("px").find((f) => f.rows.length);
-    eq(px.rows[0].length, RT_ROW_FIELDS.px.length, "px: a row is ticker, quote time and the 23 strip values");
+    eq(px.rows[0].length, RT_ROW_FIELDS.px.length, "px: a row is ticker, quote time and the strip values");
     deep(px.meta.cols, RT_ROW_FIELDS.px, "px: the snapshot names its columns");
     const pxNames = new Set(c1.data("px").flatMap((f) => f.rows.map((r) => r[0])));
     ok(pxNames.has("SYL001") && pxNames.has("NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
