@@ -1,0 +1,1 @@
+{"name": "flows-ready", "class": "N", "group": "shard", "timing": false, "medianS": 1, "shard": 1, "command": "node flows-ready.mjs", "files": ["flows-ready.mjs"], "covers": []}

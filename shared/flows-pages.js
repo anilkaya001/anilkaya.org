@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "262";
+export const ASSET_VERSION = "265";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1172,6 +1172,7 @@ export function statusPage({ username = "" } = {}) {
   <header class="flows-head st-head" data-fx-hero>
     <h1 id="fxTitle">Status</h1>
     <p class="st-meta" id="stMeta"></p>
+    <p class="st-meta" id="stReady" role="status">Reading readiness…</p>
   </header>
   <div class="st-bar"><button type="button" class="st-again" id="stAgain">Read again</button><p id="stNote" role="status">Reading the status…</p></div>
   <div class="st-grid">

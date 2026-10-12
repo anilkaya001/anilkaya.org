@@ -8,6 +8,7 @@
   const DASH = UI.DASH;
   const host = {
     meta: document.getElementById("stMeta"),
+    ready: document.getElementById("stReady"),
     note: document.getElementById("stNote"),
     rail: document.getElementById("stRail"),
     night: document.getElementById("stNight"),
@@ -161,10 +162,28 @@
     return true;
   }
 
+  function paintReady(r) {
+    if (!host.ready) return true;
+    if (!r.ok || !r.body || typeof r.body !== "object") {
+      host.ready.textContent = "Readiness: " + DASH + " (" + (r.reason || "not read") + ").";
+      return false;
+    }
+    const b = r.body;
+    const opens = b.opens && Number.isFinite(b.opens.ms) ? b.opens.ms : null;
+    const list = Array.isArray(b.blockers) ? b.blockers : [];
+    const head = b.ok ? "Ready" : list.length + (list.length === 1 ? " blocker" : " blockers");
+    const tail = opens === null ? "" : b.phase === "rth" ? ". US session open" : ". US open " + trt(opens, Date.now()) +
+      (num(b.minutesToOpen) === null ? "" : ", in " + whole(b.minutesToOpen) + " min");
+    host.ready.replaceChildren(h("strong", null, "Readiness: "), document.createTextNode(head + tail + "."),
+      ...(list.length ? [h("ul", { class: "st-why" }, ...list.map((x) => h("li", null, String(x && x.sentence || x && x.code || DASH))))] : []));
+    return true;
+  }
+
   async function load() {
     host.again.disabled = true;
     host.note.textContent = "Reading the status…";
-    const [rail, night, ai] = await Promise.all([read("/api/rt/status"), read("/api/flows/meta"), read("/api/flows/ai-usage")]);
+    const [rail, night, ai, ready] = await Promise.all([read("/api/rt/status"), read("/api/flows/meta"), read("/api/flows/ai-usage"), read("/api/flows/ready")]);
+    paintReady(ready);
     const now = Date.now();
     const bad = [paintRail(rail, now), paintNight(night, now), paintAi(ai, now)].filter((x) => !x).length;
     host.meta.textContent = "Read at " + clock(now) + ". The page reads three existing routes and calls no vendor and no model.";
