@@ -1027,8 +1027,8 @@
     if (read.status === "generating") bits.push("Model wording is being written");
     if (read.asOf) bits.push("Dossier as of " + F.time(read.asOf));
     if (read.generated && read.generatedAt) bits.push("Written " + F.time(read.generatedAt));
-    root.append(h("h3", { id: "ftReadT" }, "The name, read as a stock"),
-      h("p", { class: "ft-read-prov", id: "ftReadSrc" }, bits.join(" \u00b7 "), read.provenance ? h("span", null, " " + String(read.provenance)) : null));
+    root.append(h("h3", { id: "ftReadT", class: "visually-hidden" }, "The name, read as a stock"),
+      h("p", { class: "ft-read-prov visually-hidden", id: "ftReadSrc" }, bits.join(" \u00b7 "), read.provenance ? h("span", null, " " + String(read.provenance)) : null));
     if (read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !sec.now && !sec.identity)) {
       root.append(h("p", { class: "ft-read-state", role: "status" }, String(read.note || (read.status === "generating" ? "The dossier is being assembled; the reading follows it." : "No reading is available for this name."))));
     }
