@@ -98,26 +98,17 @@ async function mount(page, read_, o = {}) {
 }
 
 const block = (page) => page.evaluate(() => {
-  const r = document.querySelector("#ftVerdict .ft-read");
-  if (!r) return null;
-  const chips = [...r.querySelectorAll("button.ft-read-fn[data-id]")];
-  const lead = [...r.querySelectorAll(".ft-read-lead")];
-  const prose = [...r.querySelectorAll(".ft-read-lead, .ft-read-now, .ft-read-t")];
+  const r = document.getElementById("ftReadRail");
+  if (!r || r.hidden) return null;
+  const c = r.cloneNode(true);
+  c.querySelectorAll(".visually-hidden").forEach((n) => n.remove());
   return {
-    status: r.dataset.status, generated: r.dataset.generated, text: r.innerText,
-    headings: [...document.querySelectorAll("#ftVerdict h2, #ftVerdict h3, #ftVerdict h4")].map((h) => [Number(h.tagName[1]), h.textContent.trim()]),
-    tags: [...r.querySelectorAll("button.ft-read-tag[data-code]")].map((b) => b.dataset.code),
-    leads: lead.length, leadFont: lead[0] ? parseFloat(getComputedStyle(lead[0]).fontSize) : 0, bodyFont: parseFloat(getComputedStyle(r.querySelector(".ft-read-l") || r).fontSize),
-    measure: Math.max(0, ...prose.map((p) => p.getBoundingClientRect().width / parseFloat(getComputedStyle(p).fontSize))), rootW: r.getBoundingClientRect().width,
-    inlinePills: prose.reduce((n, p) => n + [...p.querySelectorAll("button, .ui-tag")].filter((x) => !x.closest(".ft-read-fns")).length, 0),
-    marks: [...r.querySelectorAll(".ft-read-mk")].map((m) => [m.dataset.list, m.textContent, m.getAttribute("aria-hidden")]),
-    unk: (() => { const d = r.querySelector("details.ft-read-unk"); return d ? { open: d.open, summary: d.querySelector("summary").textContent } : null; })(),
-    tagRows: r.querySelectorAll(".ft-read-tagrow").length,
-    chips: chips.map((b) => ({ id: b.dataset.id, aria: b.getAttribute("aria-label"), title: b.getAttribute("title"), text: b.textContent, expanded: b.getAttribute("aria-expanded"), quoted: b.dataset.quoted === "1", type: b.type, tag: b.tagName })),
-    link: (() => { const a = r.querySelector("a.ft-read-link"); return a ? { href: a.getAttribute("href"), target: a.target, rel: a.rel, text: a.textContent } : null; })(),
-    lists: [...r.querySelectorAll("ul[data-list]")].map((u) => [u.dataset.list, u.children.length]),
-    labelled: r.getAttribute("aria-labelledby"), titleId: !!document.getElementById("ftReadT"),
-    imgs: r.querySelectorAll("img, script, iframe, a[href^='javascript'], i, b:not(.ft-read-ev b), li li, li > li").length,
+    status: r.dataset.status || null, text: c.textContent.replace(/\s+/g, " ").trim(), full: r.textContent,
+    claims: [...r.querySelectorAll(".ft-claim")].map((b) => ({ id: b.dataset.claim, list: b.dataset.list, text: b.querySelector(".ft-claim-t").textContent })),
+    lead: (r.querySelector(".ft-rail-lead") || {}).textContent || null,
+    headings: [...document.querySelectorAll("#ftGlance h1, #ftGlance h2, #ftVerdict h2")].map((h) => [Number(h.tagName[1]), h.textContent.trim()]),
+    foot: (r.querySelector(".ft-foot") || {}).textContent || "",
+    imgs: r.querySelectorAll("img, script, iframe, a[href^='javascript'], [onerror]").length,
     pwned: window.__pwned,
     overflow: document.documentElement.scrollWidth > window.innerWidth,
     wide: [...document.querySelectorAll("body *")].filter((el) => el.getBoundingClientRect().right > window.innerWidth + 1 && getComputedStyle(el).position !== "fixed").slice(0, 4).map((el) => el.tagName + "." + String(el.className).slice(0, 40) + ":" + Math.round(el.getBoundingClientRect().right)),
@@ -125,118 +116,60 @@ const block = (page) => page.evaluate(() => {
 });
 
 {
-  const src = TICKER_SRC.slice(TICKER_SRC.indexOf("const READ_LISTS"), TICKER_SRC.indexOf("function renderVerdictCard"));
-  ok(src.length > 1500, "(setup) the reading renderer is " + src.length + " characters of source");
+  const src = TICKER_SRC.slice(TICKER_SRC.indexOf("const arr = (v)"), TICKER_SRC.indexOf("function renderVerdict(card, neuron)"));
+  ok(src.length > 4000, "(setup) the reading rail renderer is " + src.length + " characters of source");
   ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|createContextualFragment|DOMParser/.test(src), "NO INNERHTML OF MODEL TEXT: the renderer never sets markup, inserts adjacent HTML or writes a document");
-  ok(/h\("button"/.test(src) && !/h\("div", \{ class: "ft-read".*innerHTML/.test(src), "footnotes are built with the page's own element builder, whose text goes in as text nodes");
+  ok(/h\("button"/.test(src), "claims are built with the page's own element builder, whose text goes in as text nodes");
 }
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 390, height: 900 }, hasTouch: false });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, hasTouch: false });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
+  const ready = (re) => page.waitForFunction((s) => new RegExp(s).test(document.getElementById("ftReadRail")?.textContent || ""), re, { timeout: 20000 }).then(() => true, () => false);
 
   await mount(page, READ);
   let b = await block(page);
-  ok(b, "A READY READING is drawn inside the Neuron panel");
+  ok(b, "A READY READING is drawn in the reading rail");
   eq(b.status, "ready", "status ready");
-  eq(b.generated, "1", "generated");
-  ok(b.text.includes("Model wording") && b.text.includes("Glm 4.7 Flash") && b.text.includes("56 neurons"), "the label, the model and the neuron cost are visible: " + JSON.stringify(b.text.slice(0, 160)));
-  ok(/Dossier as of .* TRT/.test(b.text), "and the dossier's as-of time in TRT");
-  ok(/Written .* TRT/.test(b.text), "and when it was written");
-  ok(b.text.includes("Example Technologies sells software to mid-sized firms."), "the identity line");
-  ok(b.text.includes("Now") && b.text.includes("The last price is $127.40"), "a Now paragraph");
-  ok(["What is driving it", "Where the evidence disagrees", "What to watch", "Character"].every((h) => b.headings.some((x) => x[1] === h)), "and the driver, tension, watch and character headings: " + JSON.stringify(b.headings.map((h) => h[1])));
-  same(b.lists.map((l) => l[0]), ["drivers", "tensions", "watch", "unknown"], "four lists");
-  same(b.tags, ["dealer-pinned", "news-driven"], "TAGS in the model's order");
-  eq(b.tagRows, 1, "TAGS ARE ONE QUIET ROW");
-  eq(b.leads, 1, "HIERARCHY: exactly one lead sentence");
-  ok(b.leadFont >= b.bodyFont + 2, "and it is set larger than the body (" + b.leadFont + " against " + b.bodyFont + ")");
-  ok(b.measure <= 70, "MEASURE: no prose line is wider than 70 characters of its own font (" + b.measure.toFixed(1) + "em)");
-  eq(b.inlinePills, 0, "NO INLINE PILLS in prose: the only controls inside a sentence are numbered footnotes");
-  same(b.marks.map((m) => m[0]), ["drivers", "drivers", "tensions", "watch"], "SIGN MARKS on every list item");
-  ok(b.marks.every((m) => m[1].length === 1 && m[2] === "true") && new Set(b.marks.map((m) => m[1])).size === 3, "each a printed glyph, different by list (colour is not the only cue), hidden from screen readers");
-  same(b.unk, { open: false, summary: "What is not known (1)" }, "WHAT IS NOT KNOWN is a collapsed disclosure");
-  eq(b.chips.length, 8, "EVERY CITED FACT IS A FOOTNOTE: eight cites, eight buttons (" + b.chips.map((c) => c.id).join(", ") + ")");
-  ok(b.chips.every((c) => c.tag === "BUTTON" && c.type === "button" && c.expanded === "false"), "each a collapsed button that submits nothing");
-  same(b.chips.map((c) => c.text), ["1", "2", "3", "4", "5", "6", "7", "8"], "numbered in reading order");
-  const price = b.chips.find((c) => c.id === "price.last");
-  ok(price.aria.includes("Last price") && price.aria.includes("$127.40"), "its accessible name carries the label and the value with its unit: " + price.aria);
-  ok(/as of .* TRT, \d+ minutes before the dossier was read/.test(price.aria) && price.aria.includes("Last price: $127.40"), "its accessible name carries the age: " + price.aria);
-  ok(/before the dossier was read/.test(price.title), "and its title does too");
-  const desc = b.chips.find((c) => c.id === "identity.description");
-  ok(desc.quoted && desc.aria.includes("quoted third-party text") && desc.aria.includes(String.fromCharCode(0x201c)), "a quotation is marked as third-party text and named in quotes");
-  ok(b.link && b.link.href === "/api/flows/dossier?t=" + T + "&render=1" && b.link.text === "What the model saw" && b.link.target === "_blank" && /noopener/.test(b.link.rel), "THE LINK to what the model saw: " + JSON.stringify(b.link));
-  eq(b.labelled, "ftReadT", "the section is labelled by its heading");
-  ok(b.titleId, "and the heading exists");
+  ok(b.lead.startsWith("The last price is $127.40"), "the headline is the now section");
+  same(b.claims.map((c) => [c.id, c.list]), [["1", "now"], ["2", "drivers"], ["3", "drivers"], ["4", "tensions"]], "four numbered claims, now then drivers then tensions then watch, as the chart numbers them");
+  ok(/as of .* TRT/.test(b.text), "and the dossier's as-of time in TRT");
+  ok(!/Glm|neurons|Model wording|Written/.test(b.text), "no model, cost or written-at line in the rail");
   const levels = b.headings.map((h) => h[0]);
-  ok(levels.every((l, i) => i === 0 || l - levels[i - 1] <= 1), "no heading level is skipped inside the panel: " + levels.join(" "));
-  ok(!b.overflow, "no horizontal scroll at 390 px " + JSON.stringify(b.wide));
-
-  if (process.env.READING_SHOT) await page.locator("#ftVerdict").screenshot({ path: process.env.READING_SHOT });
-  const fn = (id) => page.locator("#ftVerdict .ft-read button.ft-read-fn[data-id='" + id + "']");
-  const evOpen = page.locator("#ftVerdict .ft-read .ft-read-ev:not([hidden])");
-  eq(await evOpen.count(), 0, "no evidence is open until asked for");
-  await fn("price.last").click();
-  eq(await fn("price.last").getAttribute("aria-expanded"), "true", "TAPPING a footnote opens it");
-  const open = await evOpen.innerText();
-  ok(open.includes("Last price") && open.includes("$127.40") && /as of .* TRT, \d+ minutes before the dossier was read/.test(open), "with its label, value, unit and source time: " + JSON.stringify(open));
-  await fn("price.change").click();
-  eq(await fn("price.last").getAttribute("aria-expanded"), "false", "opening a sibling closes the first");
-  ok((await evOpen.innerText()).includes("+1.27%"), "and shows the sibling's figure");
-  await page.keyboard.press("Escape");
-  eq(await evOpen.count(), 0, "Escape closes it");
-  await fn("identity.description").focus();
-  await page.keyboard.press("Enter");
-  const quote = await evOpen.innerText();
-  ok(/no source time/.test(quote) && quote.includes("quoted third-party text") && quote.includes(String.fromCharCode(0x201c)), "KEYBOARD opens a quotation: marked as third-party text, with no source time: " + JSON.stringify(quote));
-  await page.keyboard.press("Enter");
-  eq(await evOpen.count(), 0, "and Enter again closes it");
-  await page.locator("#ftVerdict .ft-read button.ft-read-tag").first().click();
-  ok((await evOpen.innerText()).includes("dealers long calls, short puts"), "a tag opens its rule's sentence");
-  await page.keyboard.press("Escape");
-  await page.locator("#ftVerdict .ft-read details.ft-read-unk summary").click();
-  ok(await page.locator("#ftVerdict .ft-read details.ft-read-unk").evaluate((d) => d.open) && (await page.locator("#ftVerdict .ft-read details.ft-read-unk").innerText()).includes("Fundamentals are withheld"), "the disclosure opens to what is not known");
-  const order = await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-read button, #ftVerdict .ft-read a[href], #ftVerdict .ft-read summary")].map((el) => el.dataset.id || el.dataset.code || el.tagName));
-  ok(order.length >= 12 && order.includes("price.last") && order.includes("dealer-pinned"), "every footnote, tag, the disclosure and the link are tabbable in reading order (" + order.length + " stops)");
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  ok(await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-read *")].every((e) => Math.max(...getComputedStyle(e).transitionDuration.split(",").map(parseFloat)) < 0.05)), "nothing in the block transitions under reduced motion");
+  ok(levels.every((l, i) => i === 0 || l - levels[i - 1] <= 1), "no heading level is skipped: " + levels.join(" "));
+  ok(!b.overflow, "no horizontal scroll at 1440 px " + JSON.stringify(b.wide));
+  ok(await page.evaluate(() => /Model wording/.test(document.getElementById("ftReadSrc").textContent)), "the provenance is one visually hidden sentence for screen readers");
 
   const templated = clone(READ);
   templated.sections.identity = { ...templated.sections.identity, template: true };
   await mount(page, templated);
   b = await block(page);
-  ok(b.text.includes("not model wording"), "AN IDENTITY LINE THAT IS THE PROFILE'S OWN, not the model's, says so");
+  ok(b.lead.startsWith("The last price"), "an identity section never replaces the now headline");
 
   await mount(page, HOSTILE);
   b = await block(page);
   ok(b, "A HOSTILE READING still draws");
-  eq(b.imgs, 0, "NO ELEMENT WAS BUILT FROM MODEL TEXT: no img, script, iframe, javascript link, b or i from the stubbed strings");
+  eq(b.imgs, 0, "NO ELEMENT WAS BUILT FROM MODEL TEXT: no img, script, iframe, javascript link or handler from the stubbed strings");
   eq(b.pwned, undefined, "and no handler ran");
   ok(b.text.includes("<img src=x") && b.text.includes("<script>") && b.text.includes("**bold**"), "the markup is shown as the text it is");
-  await fn("price.last").click();
-  ok((await evOpen.innerText()).includes("<img src=x"), "inside an opened footnote too");
 
   await mount(page, FALLBACK);
   b = await block(page);
   eq(b.status, "fallback", "A FALLBACK READING is drawn");
-  eq(b.generated, "0", "not generated");
-  ok(b.text.includes("Deterministic reading") && !b.text.includes("neurons") && !b.text.includes("Model wording is being written"), "labelled deterministic, with no neuron cost");
-  ok(b.text.includes("No model is configured for this site."), "and the reason");
-  eq(b.chips.length, 8, "with all its chips");
+  ok(/Deterministic reading/.test(b.foot) && !/neurons|Model wording is being written/.test(b.text), "labelled deterministic in the footnote line, with no neuron cost");
+  eq(b.claims.length, 4, "with all its claims");
 
   await mount(page, GENERATING, { queue: [GENERATING, READ] });
   b = await block(page);
   eq(b.status, "generating", "A GENERATING READING is drawn with its deterministic sections");
-  ok(b.text.includes("Model wording is being written") && b.text.includes("Deterministic reading") && b.chips.length === 8, "and says the model's wording is coming");
-  const polled = await page.waitForFunction(() => document.querySelector("#ftVerdict .ft-read")?.dataset.status === "ready", null, { timeout: 20000 }).then(() => true, () => false);
+  ok(/being written/.test(b.text) && b.claims.length === 4, "and says the model's wording is coming");
+  const polled = await page.waitForFunction(() => document.getElementById("ftReadRail")?.dataset.status === "ready", null, { timeout: 20000 }).then(() => true, () => false);
   ok(polled, "THE PAGE POLLS THE SUMMARY and swaps in the model's wording when it lands");
   ok(stubs.calls.length >= 2, "(" + stubs.calls.length + " summary requests in all)");
-  b = await block(page);
-  ok(b.text.includes("Model wording") && b.text.includes("56 neurons") && b.generated === "1", "the swapped block is the model's, with its cost");
-  eq(await page.locator("#ftVerdict .ft-read").count(), 1, "and there is still exactly one reading block");
+  eq(await page.locator("#ftReadRail").count(), 1, "and there is still exactly one reading rail");
 
   const LATER = clone(READ);
   LATER.sections.now = { ...LATER.sections.now, text: "The last price is $128.10, +1.82% from the previous close." };
@@ -244,10 +177,8 @@ try {
   const HELD = { ...clone(READ), held: "previous", refreshing: true, note: "This reading was written for an earlier dossier of " + T + " and is kept until a reading of the current one is written and passes the checks." };
   await mount(page, HELD, { queue: [HELD, LATER] });
   b = await block(page);
-  ok(b.status === "ready" && b.text.includes("The last price is $127.40"), "A HELD PREVIOUS READING that is refreshing is drawn as it was written");
-  const swapped = await page.waitForFunction(() => (document.querySelector("#ftVerdict .ft-read")?.innerText || "").includes("$128.10"), null, { timeout: 20000 }).then(() => true, () => false);
-  ok(swapped, "THE PAGE KEEPS POLLING while held is previous and refreshing is true, and swaps in the new reading when it lands (" + stubs.calls.length + " summary requests)");
-  eq(await page.locator("#ftVerdict .ft-read").count(), 1, "still exactly one reading block");
+  ok(b.status === "ready" && b.lead.includes("$127.40"), "A HELD PREVIOUS READING that is refreshing is drawn as it was written");
+  ok(await ready("\\$128\\.10"), "THE PAGE KEEPS POLLING while held is previous and refreshing is true, and swaps in the new reading when it lands (" + stubs.calls.length + " summary requests)");
 
   await mount(page, { ...HELD, refreshing: false });
   await page.waitForTimeout(5000);
@@ -256,43 +187,31 @@ try {
   const neuronOld = { status: "ok", tier: "priced", summary: "The earlier card's reading of " + T + ".", llm: true, model: "@cf/zai-org/glm-4.7-flash", generatedAt: "2026-10-01T15:00:00.000Z" };
   await mount(page, READ, { neuron: { ...neuronOld, held: "previous", refreshing: true }, neurons: [{ ...neuronOld, held: "previous", refreshing: true }, { ...neuronOld, summary: "The current card's reading of " + T + ".", generatedAt: "2026-10-02T15:00:00.000Z", held: undefined, refreshing: undefined }] });
   ok((await page.locator("#ftVerdictT").textContent()).includes("earlier card"), "A HELD PREVIOUS NEURON OUTPUT that is refreshing is drawn");
-  const neuronSwapped = await page.waitForFunction(() => (document.getElementById("ftVerdictT")?.textContent || "").includes("current card"), null, { timeout: 25000 }).then(() => true, () => false);
-  ok(neuronSwapped, "THE PAGE POLLS THE NEURON while it is held and refreshing, and swaps in the new output when it lands (" + stubs.calls.length + " summary requests)");
+  const neuronSwapped = await page.waitForFunction(() => (document.getElementById("ftVerdictT")?.textContent || "").includes("current card") && (document.querySelector(".ft-strip-line")?.textContent || "").includes("current card"), null, { timeout: 25000 }).then(() => true, () => false);
+  ok(neuronSwapped, "THE PAGE POLLS THE NEURON while it is held and refreshing, and swaps in the new output into the card and the strip (" + stubs.calls.length + " summary requests)");
 
   await mount(page, BOXED);
   b = await block(page);
   eq(b.status, "generating", "A DOSSIER STILL BEING ASSEMBLED: generating with no sections");
-  ok(b.text.includes("still being assembled") && b.chips.length === 0, "says so and draws no chip");
+  ok(b.text.includes("still being assembled") && b.claims.length === 0, "says so and draws no claim");
 
   await mount(page, ABSENT);
   b = await block(page);
   eq(b.status, "absent", "AN ABSENT READING");
   ok(b.text.includes("Nothing is held for " + T), "says nothing is held");
-  same(b.lists, [["unknown", 2]], "and names what is unknown");
-  eq(b.unk.open, false, "behind the collapsed disclosure");
-  eq(b.link.href, "/api/flows/dossier?t=" + T + "&render=1", "with the link to the dossier text");
-  eq(b.chips.length, 0, "no chip");
+  ok(/What is not known/.test(b.foot) && b.claims.length === 0, "and keeps what is not known one button away");
 
   await mount(page, null);
-  eq(await page.locator("#ftVerdict .ft-read").count(), 0, "A SUMMARY WITH NO read FIELD (an older Worker) draws no block and breaks nothing");
+  ok(/No reading is available/.test((await block(page)).text), "A SUMMARY WITH NO read FIELD (an older Worker) draws a quiet line and breaks nothing");
   await mount(page, { status: "weird", sections: 5 });
-  eq(await page.locator("#ftVerdict .ft-read").count(), 0, "and an unknown status draws none");
+  ok(/No reading is available/.test((await block(page)).text), "and an unknown status draws the same");
 
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await mount(page, READ);
-  b = await block(page);
-  ok(b && !b.overflow, "NO HORIZONTAL SCROLL at 1280 px either " + JSON.stringify(b && b.wide));
-  for (const w of [768, 1440]) {
+  for (const w of [1280, 768, 390, 320]) {
     await page.setViewportSize({ width: w, height: 900 });
     await mount(page, READ);
     b = await block(page);
-    ok(b && !b.overflow && b.measure <= 70, "no overflow and a held measure at " + w + " px " + JSON.stringify(b && b.wide));
+    ok(b && !b.overflow, "no horizontal scroll at " + w + " px " + JSON.stringify(b && b.wide));
   }
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.setViewportSize({ width: 320, height: 900 });
-  await mount(page, READ);
-  b = await block(page);
-  ok(b && !b.overflow, "nor at 320 px " + JSON.stringify(b && b.wide));
 
   const mine = errors.filter((e) => !/flows-ticker: (buildGamma|buildFlow) failed/.test(e));
   eq(mine.length, 0, "no page error or console error through any of it, beyond the two modules the thin fixture card cannot feed (gamma and flow): " + mine.join(" | "));

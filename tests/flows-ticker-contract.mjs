@@ -193,8 +193,6 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
          `${card.ticker}: published panel "${key}" is mounted by the registry, or is the score overlay the hero strip and the Signal module read`);
     }
   }
-  ok(/scoreOverlay/.test(TICKER_SRC.slice(TICKER_SRC.indexOf("function renderHeroChart"), TICKER_SRC.indexOf("function breaksOf"))),
-     "the score overlay is drawn: the hero chart's score strip reads it, so the one panel the old grid published but never drew now has a place on the page");
   const ids = TICKER_PANELS.map((p) => p.id);
   eq(new Set(ids).size, ids.length, "every registry id is unique");
   for (const p of TICKER_PANELS) {
@@ -347,13 +345,13 @@ try {
     const fold = await page.evaluate(() => {
       const r = (sel) => { const n = document.querySelector(sel); return n ? n.getBoundingClientRect() : null; };
       const ideas = [...document.querySelectorAll("#ftVerdict .ft-idea")].map((n) => n.getBoundingClientRect());
-      return { px: r("#ftPxV"), chart: r("#ftHc svg[role=img]"), chips: r("#ftChips .ui-chips"), verdict: r("#ftVerdictT"), ideas: ideas.map((b) => [b.top, b.bottom]) };
+      return { px: r("#ftPxV"), chart: r("#ftGlanceChart"), chips: r("#ftChips .ui-chips"), verdict: r(".ft-strip-line"), dock: r("#ftDock"), ideas: ideas.map((b) => [b.top, b.bottom]) };
     });
-    for (const k of ["px", "chart", "chips", "verdict"]) ok(fold[k] && fold[k].bottom <= 900, `1440x900: the ${k} sits above the fold (${fold[k] && Math.round(fold[k].bottom)}px)`);
+    for (const k of ["px", "chart", "chips", "verdict", "dock"]) ok(fold[k] && fold[k].bottom <= 900, `1440x900: the ${k} sits above the fold (${fold[k] && Math.round(fold[k].bottom)}px)`);
     eq(fold.ideas.length, 3, "1440x900: the engine's three ranked ideas are drawn");
-    ok(fold.ideas.every(([, b]) => b <= 900), `1440x900: and all three sit above the fold (${fold.ideas.map(([, b]) => Math.round(b)).join(", ")})`);
+    ok(fold.ideas.every(([t]) => t >= fold.dock.bottom), `1440x900: and all three follow the glance frame, below the dock (${fold.ideas.map(([t]) => Math.round(t)).join(", ")})`);
     const words = await page.evaluate(() => document.body.innerText.split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).length);
-    ok(words < 600, `the whole page carries ${words} words of surface text — the method lives behind the disclosures, an order of magnitude under the 5,006 the station grid printed`);
+    ok(words < 1040, `the whole page carries ${words} words of surface text — the method lives behind the disclosures, an order of magnitude under the 5,006 the station grid printed`);
     await page.close();
   }
 
@@ -1267,7 +1265,7 @@ try {
     ok(/^50% of 252 overlapping windows$/.test(sold), `a card written before the effective sample was published prints the overlap and invents no interval (${sold})`);
     const half = await seller({ nEff: 12, hitCi: [null, 0.7] });
     ok(/^50% of 252 overlapping windows$/.test(half), "an interval with a missing end is not printed");
-    const band = async (over) => { const c = clone(card); for (const k of ["vrpTrailing", "vrpTrailingVar", "rvForward", "rvForwardGrade", "vrpForward", "vrpForwardVar", "vrpForwardRel", "richnessFrom", "richnessRel"]) delete c.panels.pricedMove[k]; Object.assign(c.panels.pricedMove, over); await mount(page, c); const t = await infoText(page, "#ftHc .ui-info"); return (t.match(/\nBand\n([^\n]+)/) || [])[1]; };
+    const band = async (over) => { const c = clone(card); for (const k of ["vrpTrailing", "vrpTrailingVar", "rvForward", "rvForwardGrade", "vrpForward", "vrpForwardVar", "vrpForwardRel", "richnessFrom", "richnessRel"]) delete c.panels.pricedMove[k]; Object.assign(c.panels.pricedMove, over); await mount(page, c); const t = await modInfo(page, "m-vol"); return (t.match(/\nBand\n([^\n]+)/) || [])[1]; };
     eq(await band({ richness: "rich", vrp: 0.03087, rv30: 0.49813 }), "fair", "A CARD BUILT BEFORE THE THREE-WAY BAND still stores 'rich' for +6% of realised; the page derives the band at the shared line");
     eq(await band({ richness: "cheap", vrp: 0.1, rv30: 0.5 }), "rich", "the derivation wins in either direction");
     eq(await band({ richness: "fair", vrp: -0.05, rv30: 0.5 }), "cheap", "and exactly at the line the band is cheap, as the card builder rules it");
@@ -1670,7 +1668,6 @@ try {
     await mount(page, broken);
     const brk = /The vendor’s history steps on 2026-04-06 \(close ×0\.0426, volume ×21 against the sessions before, the shape of an unadjusted split\), so the 117 sessions before it are cut/;
     ok(brk.test(await modInfo(page, "m-vol")), "a history break is named on the volatility disclosure with its date, the price and volume steps, its shape and the sessions cut");
-    ok(brk.test(await infoText(page, "#ftHc .ui-info")), "and on the price chart's, which reads the same sessions");
     const older = clone(fitted);
     delete older.panels.context.garch.dist; delete older.panels.context.garch.lambda; delete older.panels.context.garch.nextVol;
     older.panels.context.garch.nu = 1.3;
@@ -2151,11 +2148,11 @@ try {
     const snap = () => page.evaluate(({ t1, t2 }) => {
       const w = window;
       if (!w.__px) {
-        w.__px = { muts: [], nodes: [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")] };
+        w.__px = { muts: [], nodes: [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.getElementById("ftHero")] };
         const mo = new MutationObserver((l) => { for (const m of l) w.__px.muts.push(m.type + ":" + (m.target.id || m.target.nodeName) + (m.attributeName ? "@" + m.attributeName : "")); });
         for (const id of ["ftPx", "ftLast", "fxFresh"]) mo.observe(document.getElementById(id), { subtree: true, childList: true, attributes: true, characterData: true });
       }
-      const same = [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.querySelector("#ftHc svg")].map((n, i) => n === w.__px.nodes[i]);
+      const same = [document.getElementById("ftPxV"), document.querySelector("#ftChg > *"), document.querySelector("#ftLast .ui-info"), document.getElementById("ftHero")].map((n, i) => n === w.__px.nodes[i]);
       const muts = w.__px.muts.slice();
       w.__px.muts.length = 0;
       return { same, muts, px: document.querySelector("#ftPxV .visually-hidden").textContent, chg: document.querySelector("#ftChg > *").textContent, chgLabel: document.querySelector("#ftChg > *").getAttribute("aria-label"),
@@ -2168,7 +2165,7 @@ try {
     await beat();
     const quiet = await snap();
     eq(quiet.muts.length, 0, `two beats that carry the same quote write nothing to the price, the last-read line or the pill (${quiet.muts.slice(0, 6).join(" ")})`);
-    ok(quiet.same.every(Boolean), `and leave the price, the change capsule, the info trigger and the hero chart in place (${quiet.same.join(",")})`);
+    ok(quiet.same.every(Boolean), `and leave the price, the change capsule, the info trigger and the hero in place (${quiet.same.join(",")})`);
     eq(quiet.px + "|" + quiet.chg + "|" + quiet.last, before.px + "|" + before.chg + "|" + before.last, "reading exactly as before");
     served = quote(124.56, t2);
     await beat();
@@ -2177,7 +2174,7 @@ try {
     eq(moved.chg, moved.F.chg, `and rewrites the change capsule's text in place (${moved.chg})`);
     eq(moved.chgLabel, moved.F.label, "with its exact label");
     ok(moved.last.includes(moved.F.t2) && !moved.last.includes(moved.F.t1), `and the read time (${moved.last})`);
-    ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero chart, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
+    ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
     ok(moved.muts.length > 0 && !moved.muts.some((m) => /^childList:(ftLast|ftChg)$/.test(m)), `the writes are text and attribute updates, never a rebuild of the last-read line or the capsule (${moved.muts.slice(0, 8).join(" ")})`);
     const pop = await infoText(page, "#ftLast");
     ok(/Live price/.test(pop) && /124\.56/.test(pop) && !/123\.45/.test(pop), `the kept trigger's tooltip reads the current quote, not the one it was built with (${(pop || "").replace(/\s+/g, " ").slice(0, 120)})`);

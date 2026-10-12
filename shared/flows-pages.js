@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "282";
+export const ASSET_VERSION = "283";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -921,20 +921,34 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     username,
     chrome: false,
     styles: ["/assets/css/flows-ticker.css", "/assets/css/flows-index.css"],
-    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker-glance.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
     body: `
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
+  <div class="ft-glance" id="ftGlance" data-glance="off">
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
     <div class="ft-id">
       <div class="ft-name"><h1 class="ft-t" id="ftHeroT" data-fx-title></h1><span class="ft-sub" id="ftHeroSub"></span><span class="ft-flags" id="ftHeroFlags"></span></div>
       <div class="ft-px" id="ftPx"></div>
       <div class="ft-last" id="ftLast" hidden></div>
+      <span class="ft-asof" id="ftAsOf"></span>
       <div class="ft-chips" id="ftChips"></div>
     </div>
     <div class="ft-hc" id="ftHc"></div>
   </div></section>
+  <section class="ft-strip" id="ftStrip" aria-label="Neuron verdict" hidden></section>
+  <div class="ft-gmain" id="ftGMain">
+    <section class="ft-gchart" aria-labelledby="ftGChartT">
+      <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span class="ft-sp"></span><span id="ftGRange"></span></div>
+      <div class="ft-glance-chart" id="ftGlanceChart"></div>
+    </section>
+    <section class="ft-rail" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
+  </div>
+  <div class="ft-glance-cards" id="ftGlanceCards"></div>
+  <nav class="ft-dock" id="ftDock" aria-label="Open in place"></nav>
+  </div>
   <section class="ui-card ft-verdict" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
   ${INDEX_NAV}
+  <h2 class="ft-dive" id="ftDive" hidden>Dive</h2>
   <div class="ft-grid" id="ftGrid" hidden></div>
   <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
   <div id="ftCopy" hidden>
