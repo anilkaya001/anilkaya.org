@@ -74,7 +74,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 2,
-  "targetsUnder44": 33
+  "targetsUnder44": 25
  },
  "overview@390": {
   "contrast": 0,
@@ -82,7 +82,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 2,
-  "targetsUnder44": 32
+  "targetsUnder44": 24
  },
  "overview@1440": {
   "contrast": 0,
@@ -165,23 +165,23 @@
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 1,
-  "targetsUnder44": 42
+  "targetsUnder24": 0,
+  "targetsUnder44": 11
  },
  "market@390": {
   "contrast": 0,
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 1,
-  "targetsUnder44": 41
+  "targetsUnder24": 0,
+  "targetsUnder44": 10
  },
  "market@1440": {
   "contrast": 0,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 1
+  "targetsUnder24": 0
  },
  "unusual@320": {
   "contrast": 0,
@@ -189,7 +189,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 5,
-  "targetsUnder44": 31
+  "targetsUnder44": 17
  },
  "unusual@390": {
   "contrast": 0,
@@ -197,7 +197,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 5,
-  "targetsUnder44": 34
+  "targetsUnder44": 20
  },
  "unusual@1440": {
   "contrast": 0,
@@ -395,23 +395,23 @@
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 11,
-  "targetsUnder44": 66
+  "targetsUnder24": 6,
+  "targetsUnder44": 61
  },
  "ticker@390": {
   "contrast": 0,
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 11,
-  "targetsUnder44": 65
+  "targetsUnder24": 6,
+  "targetsUnder44": 60
  },
  "ticker@1440": {
   "contrast": 0,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 11
+  "targetsUnder24": 10
  },
  "status@320": {
   "contrast": 0,
