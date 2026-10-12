@@ -18,6 +18,32 @@ export const APART = "Earnings within 30 days: event not separated.";
 
 export const GRADE_NOTE = "From 30-day IV; no surface.";
 
+export const SECTOR_BEYOND = 2;
+
+export const NARROW_PX = 640;
+
+export const NO_SECTOR = "No sector";
+
+export const VIEWS = Object.freeze(["field", "map", "sectors"]);
+
+export const STEP_EDGES = Object.freeze([0.5, 1, 2, 3]);
+
+export const MAP_CAP_LINE = "Tile area is market cap; colour is the move in IV-days.";
+
+export const MAP_EQUAL_LINE = "Every tile has the same area; colour is the move in IV-days.";
+
+export const SECTORS_LINE = "Each sector's median move, and its names beyond 2 IV-days.";
+
+export const KEY_EVENT = "Dashed outline: earnings within 30 days, event not separated.";
+
+export const MEDIAN_NOTE = "Median is signed, in IV-days.";
+
+export const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat, up or down.";
+
+export const SHARE_NOTE = "Share is that count over the sector's names.";
+
+export const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
+
 export const FORBIDDEN_WORDS = Object.freeze(["unusual", "alert", "screen", "rare"]);
 
 export const HEADER_WORDS_MAX = 14;
@@ -93,8 +119,25 @@ export function signedIvDays(m) {
   return (m < 0 ? "−" : m > 0 ? "+" : "") + (m < 0 ? s.slice(1) : s);
 }
 
+export function dirOf(m) {
+  if (!Number.isFinite(m)) return null;
+  return m > 0 ? "up" : m < 0 ? "down" : "flat";
+}
+
+export function stepOf(m) {
+  if (!Number.isFinite(m)) return null;
+  const a = Math.abs(m);
+  let n = 0;
+  while (n < STEP_EDGES.length && a >= STEP_EDGES[n]) n++;
+  return n;
+}
+
 export const wordCount = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
-export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE]);
+export const VIEW_SENTENCES = Object.freeze([
+  MAP_CAP_LINE, MAP_EQUAL_LINE, SECTORS_LINE, KEY_EVENT, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE,
+]);
+
+export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES]);
 
 export const registered = isTarget(MOVE_ID);

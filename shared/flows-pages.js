@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "268";
+export const ASSET_VERSION = "270";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -827,10 +827,19 @@ ${shell("Moves", "moves", username, `${feedHead("mv", "Moves")}
   <p class="visually-hidden" id="mvStatus" role="status">Loading the universe\u2026</p>
   <p class="fd-meta" id="mvLine"></p>
   <p class="fd-meta" id="mvCtx"></p>
-  <div class="ui-grid fd-grid">
+  <div class="mv-tabs" id="mvTabs" hidden></div>
+  <div class="mv-pane" id="mvPaneField" role="tabpanel" aria-labelledby="mvTabField" tabindex="0">
+    <div class="ui-grid fd-grid">
 ${feedModule("mvUpCard", "Risers", `<div class="fd-body" id="mvUp"></div>`, { span: 6 })}
 ${feedModule("mvDownCard", "Fallers", `<div class="fd-body" id="mvDown"></div>`, { span: 6 })}
 ${feedModule("mvApartCard", "Earnings within 30 days", `<div class="fd-body" id="mvApart"></div>`)}
+    </div>
+  </div>
+  <div class="mv-pane" id="mvPaneMap" role="tabpanel" aria-labelledby="mvTabMap" tabindex="0" hidden>
+${feedModule("mvMapCard", "Map", `<div class="fd-body" id="mvMap"></div>`)}
+  </div>
+  <div class="mv-pane" id="mvPaneSectors" role="tabpanel" aria-labelledby="mvTabSectors" tabindex="0" hidden>
+${feedModule("mvSectorsCard", "Sectors", `<div class="fd-body" id="mvSectors"></div>`)}
   </div>
 `, { chrome: false })}
 ${UI_SCRIPT}
