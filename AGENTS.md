@@ -339,6 +339,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `tests/flows-readers-contract.mjs`, `tests/flows-readers-render.mjs` | What a reader is told about age: the tape's TTL against the close, the quote card's own read time, the news overlay; and the boards' live dots, the home page's pill and news card, driven with stubbed routes. The ticker's tape labels are in `tests/flows-ticker-contract.mjs`. |
 | `assets/js/flows-status.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs` | The owner-only Status page, `/flows/status/` (`statusPage`, a row in `server/routes/flows-pages.js` marked `ownerOnly`: a signed-in member who is not an owner gets the unknown-page 404, an anonymous visitor the sign-in page, and no switch opens it to members). It reads four routes and nothing else: `/api/flows/ready` (one readiness line: ready or the count of blockers, each with its sentence, and the US open in TRT with the minutes to it), `/api/rt/status` (rail mode, sockets, vendor calls a minute, degraded episode, kill switches, per topic last frame, lag, calls, failures), `/api/flows/meta` (the nightly run: written time, cards, health and the stage ledger) and `/api/flows/ai-usage` (the model day's calls, tokens and neurons by model). It makes no vendor call and no model call and adds no payload or global. Every time is written `HH:MM TRT` by a local formatter that adds three hours to the instant (Türkiye has no DST), with the date only when it is not today; a source that cannot be read, or a value it does not carry, is a dash with its reason, never zero. The Operations group of the sidebar shows only on this page. The suite is Chromium with `page.route` stubs, no server: the four routes and no others, the readiness line, the heading outline, TRT conversions, units, dashes for every missing case, no other zone named, no overflow at 320, 390 and 1440 px. |
 | `scripts/uw-spec-diff.mjs` | Reads two copies of the vendor's OpenAPI document in the layout `docs/uw-openapi.yaml` has and names what moved between them: operations added and removed, parameters added, removed or flipped between required and optional, new deprecations (a `deprecated: true` line or a description that says so), changed plan sentences and new changelog entries. `--check` exits 1 on any difference, 2 on a document it cannot read. It prints no response data; `docs/uw-openapi.md` says when to run it. |
+| `tests/lib/affected.mjs`, `tests/ci-affected.mjs` | Affected-suite selection for pull requests: `node run.mjs --affected <base-ref>` (from `tests/`) reads `git diff --name-only <base>...HEAD`, joins each changed file to the suites whose import closure (the registry's walker, static and literal dynamic imports) or `covers` globs reach it, and runs those plus the whole `fast` group; `--affected-list` prints the selection without running, and with `--shard i/n` the shard keeps only its affected suites. Any doubt selects everything: an unreadable or empty diff, a file that maps to no suite (a deletion included), a file under `tests/lib/`, `tests/run.mjs`, the lockfile and `tests/package.json`, `.github/`, `wrangler*.toml`, `worker.js`, `.assetsignore` or `_headers`, or a file that reaches more than 40% of the suites. The workflow's `plan` job runs the list on pull requests only; the push-to-main run, the weekly schedule and manual dispatch never select, and a partial pull-request run writes no `tested-tree` status, so `scripts/ci-reuse.mjs` can never skip the push gate on a partial run. `ci-affected` proves exact selections on a miniature repository (leaf, transitive, literal dynamic import, covers, registry file), every fallback, the real `git diff`, and that selectors ignoring `covers` or transitive imports fail the same expectations. |
 | `tests/lab-write-contract.mjs` | The Lab write limiter and the attempt ledgers with no server: `worker.js` in Node over `node:sqlite`, a counting `LAB_WRITE` fake (the 31st mutation in a window is a 429 with `Retry-After`, every mutation route is behind it, reads are not, a missing or failing limiter admits the write, a refused request makes no D1 trip), the attempt statements planned by primary key only, the `received_at` indexes and the 03:00 ET prune. |
 | `tests/flows-pages-render.mjs`, `tests/fixtures-pages-render-baseline.json` | Every page function in `FLOWS_PAGES` (fifteen) rendered in Chromium at 320, 390 and 1440 px against the pipeline's dry-run emit, served from `page.route` with no server (about 2.5 minutes, 60 s of it the emit). Hard assertions: one `h1`, no skipped heading level, no page error, and the Ask dock (a dialog with `aria-modal`, nothing outside it focusable, focus inside and the main region `inert` when narrow; a complementary landmark beside a usable page when wide; Escape closes and focus returns to the tab). Counted against the committed baseline, which may fall but not rise: axe-core `color-contrast`, unnamed controls, structure rules, horizontal-overflow pixels, targets under 24 px, and (coarse pointer) targets under 44 px. `PAGES_RENDER_UPDATE=1` rewrites the baseline; the metrics go to `$GITHUB_STEP_SUMMARY`; no screenshot is kept. `axe-core` is pinned in `tests/package.json`; where `tests/node_modules` predates the pin, `NODE_PATH` can point at a directory that has it. |
 | `wrangler.staging.toml`, `scripts/ops-probe.mjs`, `scripts/staging-load.mjs`, `tests/staging-contract.mjs` | The staging Worker's complete, separate configuration (own D1 and `PULSE`, namespaces 2101 to 2106, no cron, no route, no AI binding, live dispatch off, no secret); the external prober (`probe`: `/api/health` and one page, two failures to alert, a webhook from the environment) and the `smoke` checks; the 20-member poll and socket load test, which refuses production and prices a Free run first. `staging-contract` runs the configuration through wrangler's own reader and the tools against fakes, with no server. DEPLOY.md 10.6. |
@@ -1417,7 +1418,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 133 suites: 90 that need only Node (N), 26 that also
+`tests/suites/` registers 134 suites: 91 that need only Node (N), 26 that also
 need Playwright's Chromium (C) and 17 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1427,28 +1428,28 @@ Confirmed to run with no server and no browser (N):
 
 ```
 contracts                 run                       academy                   approval-frames
-architecture              docs                      flows                     flows-ai-broker
-flows-ai-salvage          flows-alert-grid          flows-alerts              flows-basis
-flows-brief               flows-calibration         flows-chain-panels        flows-conviction
-flows-copy-lint           flows-d1-budget           flows-defer-render        flows-dispersion
-flows-dossier             flows-dossier-reads       flows-engine-budget       flows-fact-ids
-flows-flow-below-render   flows-freshness           flows-garch               flows-home-below-render
-flows-home-composition    flows-home-net-render     flows-ledger              flows-legs
-flows-live                flows-market-below-render flows-mint                flows-moves-render
-flows-neuron              flows-neuron-screen       flows-overlay             flows-payload-shape
-flows-permits             flows-plan-facts          flows-political           flows-positioning
-flows-probe               flows-public              flows-pulse               flows-quant
-flows-quant-audit         flows-quant-card          flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-relations-render    flows-rt                  flows-scores              flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-truth
-flows-universe            flows-variation           flows-vendor-budget       flows-verdict
-flows-vol                 flows-warnings            flows-weight              flows-ws-probe
-lab-write                 launch-readiness          markets                   mastery
-pipeline                  route-matrix              server-ai                 server-desk
-server-ingest             server-kernel             server-log                server-pages
-server-router             staging
+architecture              ci-affected               docs                      flows
+flows-ai-broker           flows-ai-salvage          flows-alert-grid          flows-alerts
+flows-basis               flows-brief               flows-calibration         flows-chain-panels
+flows-conviction          flows-copy-lint           flows-d1-budget           flows-defer-render
+flows-dispersion          flows-dossier             flows-dossier-reads       flows-engine-budget
+flows-fact-ids            flows-flow-below-render   flows-freshness           flows-garch
+flows-home-below-render   flows-home-composition    flows-home-net-render     flows-ledger
+flows-legs                flows-live                flows-market-below-render flows-mint
+flows-moves-render        flows-neuron              flows-neuron-screen       flows-overlay
+flows-payload-shape       flows-permits             flows-plan-facts          flows-political
+flows-positioning         flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-readers
+flows-reading             flows-reading-worker      flows-reads               flows-ready
+flows-record              flows-relations-render    flows-rt                  flows-scores
+flows-sign                flows-skyline-render      flows-starts              flows-stats
+flows-stock               flows-tape-stats          flows-targets             flows-time
+flows-truth               flows-universe            flows-variation           flows-vendor-budget
+flows-verdict             flows-vol                 flows-warnings            flows-weight
+flows-ws-probe            lab-write                 launch-readiness          markets
+mastery                   pipeline                  route-matrix              server-ai
+server-desk               server-ingest             server-kernel             server-log
+server-pages              server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
