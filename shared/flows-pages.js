@@ -105,7 +105,7 @@ export const FLOWS_NAV = [
   ] },
   { group: "Market", id: "railMarket", items: [
     { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
-    { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave", ownerOnly: true },
+    { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave" },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },

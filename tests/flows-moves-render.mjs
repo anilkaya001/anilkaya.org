@@ -18,7 +18,7 @@ const HTML = PAGES.movesPage({ username: "test" });
 const FORBID = /\b(unusual|alert|alerts|screen|rare|radar)\b/i;
 
 const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
-ok(/^FLOWS_MOVES = "owner"$/m.test(wrangler), "the kill switch ships owner-only: the approval answer for the Moves page is null, so members do not see it");
+ok(/^FLOWS_MOVES = "on"$/m.test(wrangler), "the switch ships on: the owner opened the Moves page to every member on 2026-10-12");
 
 {
   const doc = HTML;
@@ -28,7 +28,7 @@ ok(/^FLOWS_MOVES = "owner"$/m.test(wrangler), "the kill switch ships owner-only:
     "no forbidden word in the page's own text, title or description");
   const nav = /<aside class="fx-side"[\s\S]*?<\/aside>/.exec(doc)[0];
   ok(/href="\/flows\/moves\/"[^>]*aria-current="page"/.test(nav) && nav.includes(">Moves<"), "the rail names Moves on its own page");
-  ok(!/href="\/flows\/moves\/"/.test(PAGES.marketPage({ username: "test" })), "and no other page links it while it is owner-only");
+  ok(/href="\/flows\/moves\/"/.test(PAGES.marketPage({ username: "test" })), "and every other page links it in the rail now that it is open to members");
   ok(/\/assets\/js\/flows-moves\.js\?v=\d+/.test(doc) && /\/assets\/css\/flows-moves\.css\?v=\d+/.test(doc), "the controller and the sheet are versioned");
   ok(!/flows-chart\.js/.test(doc), "no chart script: a ranked list needs none");
   for (const w of [M.LINE, M.CAPTION, M.APART, M.GRADE_NOTE]) ok(M.wordCount(w) <= M.HEADER_WORDS_MAX, "a header sentence stays inside fourteen words: " + w);

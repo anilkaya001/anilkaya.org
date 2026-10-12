@@ -2834,7 +2834,10 @@ flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ens
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
-  scenesOn: (env, username) => String((env && env.FLOWS_SCENES) || "").trim().toLowerCase() === "owner" && rtIsOwner(rtSwitches(env), username) }));
+  scenesOn: (env, username) => {
+    const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
+    return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
+  } }));
 
 async function route(request, env, url, ctx) {
   const path = url.pathname;
