@@ -608,7 +608,7 @@ Worker source of truth: name, entrypoint, static directory, `ASSETS`, D1 `DB`, t
 
 | File | Exports | Suites |
 |---|---|---|
-| `wrangler.toml` |  | contracts, flows-d1-budget, flows-engine-budget, flows-freshness, flows-home-net-render, flows-live and 11 more |
+| `wrangler.toml` |  | contracts, flows-d1-budget, flows-engine-budget, flows-freshness, flows-home-net-render, flows-live and 13 more |
 
 ### `migrations/*.sql`
 
