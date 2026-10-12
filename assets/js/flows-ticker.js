@@ -2638,6 +2638,16 @@
     sec.classList.toggle("ft-snug", isIndex(card));
   }
 
+  const MOVELAB = { host: null };
+
+  function buildMoveLab(card) {
+    if (isIndex(card) || !UI.defer || !$("ftMoveLab")) return;
+    const host = MOVELAB.host || (MOVELAB.host = h("div", { class: "ft-ml is-slot" }, UI.silent(ST("quiet", "The move lab loads when this module comes into view."), "Move lab", 140)));
+    const raw = { card, cardX: STATE.cardX, spot: spotOf(card), closes: candlesOf(card).map((r) => [r.d, r.c]) };
+    mod({ id: "m-movelab", title: "Move lab", span: [12, 12], st: OK, body: [host], index: 3 });
+    UI.defer("movelab", { when: "visible", el: host, label: "The move lab" }).then(() => window.FlowsUI.moveLab && window.FlowsUI.moveLab.mount(host, raw));
+  }
+
   function buildScenes(card) {
     if (!$("ftScenes") || isIndex(card) || !UI.defer) return;
     const P = card.panels || {};
@@ -2652,7 +2662,7 @@
   function renderModules(card) {
     gridEl.hidden = false;
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildScenes];
+    const builders = [buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildScenes];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
