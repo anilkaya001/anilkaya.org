@@ -173,7 +173,7 @@ async function pickView(page, mod, label) {
   return true;
 }
 
-const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow", "m-tape", "m-events", "m-pos", "m-context"];
+const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow", "m-tape", "m-events", "m-pos", "m-context", "m-movelab"];
 
 {
   for (const k of SENTINEL_KEYS) ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
@@ -182,7 +182,7 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const map = new Map([...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*): "([a-zA-Z-]+)"/g)].map((m) => [m[1], m[2]]));
   const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]));
   eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
-     "the page builds exactly the ten dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below");
+     "the page builds exactly the eleven dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below");
   for (const p of TICKER_PANELS) {
     ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
@@ -670,7 +670,7 @@ try {
     ok(pal.filter((r) => ["GLD", "NVDA", "COST"].includes(r[0])).every((r) => r[2]), "beside its depth glyph");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
-    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 10 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
+    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 11 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
     eq(errors.length, 0, `the switcher throws nothing (${errors.join("; ")})`);
     await page.close();
   }
@@ -1559,7 +1559,7 @@ try {
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, full, { hash: bad });
-      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 10), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
+      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 11), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
       eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
       await page.close();
     }
