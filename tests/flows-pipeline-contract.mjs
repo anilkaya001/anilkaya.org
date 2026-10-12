@@ -3833,7 +3833,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      /wrangler deploy --dry-run --outdir \/tmp\/anilkaya-worker-dry-run/.test(regFast) && !/playwright/.test(regFast),
     "the fast job alone fetches the history and sets ASSET_DIFF_BASE for the asset contract, validates the Worker " +
     "bundle, and installs no Chromium");
-  ok(!/fetch-depth: 0/.test(regShard) && /fetch-depth: \$\{\{ needs\.plan\.outputs\.mode == 'partial' && 0 \|\| 1 \}\}/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test, and take history only when the plan is partial");
+  ok(!/fetch-depth: 0/.test(regShard) && /fetch-depth: \$\{\{ needs\.plan\.outputs\.mode == 'partial' && '0' \|\| '1' \}\}/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test, and take history only when the plan is partial (the strings matter: 0 is falsy in an expression, so a numeric 0 would always fall through to 1)");
   ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
     "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
   const allUses = [];

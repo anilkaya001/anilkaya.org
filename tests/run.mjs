@@ -485,7 +485,7 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
         io.stdout.write(describeSelection(sel, all).join("\n") + "\n");
         return 0;
       }
-      io.stdout.write(`run.mjs: ${describeSelection(sel, all)[0]}\n`);
+      (opts.needsBrowser ? io.stderr : io.stdout).write(`run.mjs: ${describeSelection(sel, all)[0]}\n`);
       affected = sel.full ? null : sel.names;
     }
     suites = chooseSuites(all, opts, affected);

@@ -948,82 +948,108 @@
     return "as of " + F.time(c.asOf) + ", " + word + " before the dossier was read";
   }
 
-  function reveal(el, text) {
-    let note = null;
-    const show = () => { if (!note) { note = h("span", { class: "ft-read-age" }, text); el.append(note); } };
-    const hide = () => { if (note) { note.remove(); note = null; } };
-    el.addEventListener("mouseenter", show);
-    el.addEventListener("focus", show);
-    el.addEventListener("mouseleave", () => { if (document.activeElement !== el) hide(); });
-    el.addEventListener("blur", hide);
-    el.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+  const READ_MARKS = { drivers: ["+", "drives"], tensions: ["\u2260", "disagrees"], watch: ["\u2192", "watch"] };
+
+  function citeLabel(c, age) {
+    const value = c.untrusted === true ? "\u201c" + c.display + "\u201d" : c.display;
+    return c.label + ": " + value + (c.untrusted === true ? ", quoted third-party text" : "") + ", " + age;
   }
 
-  function chipLabel(label) {
-    const t = String(label);
-    if (t.length <= 32) return t;
-    const cut = t.slice(0, 31).replace(/[\s,;:(\u2013\u2014-]+\S*$/, "").replace(/[\s,;:(]+$/, "");
-    return (cut || t.slice(0, 31)) + "…";
-  }
-
-  function citeChip(c, read) {
+  function evidenceRow(c, read) {
     const quoted = c.untrusted === true;
-    const age = readAge(c, read);
-    const value = quoted ? "“" + c.display + "”" : c.display;
-    const chip = h("button", {
-      class: "ui-tag ft-read-chip", type: "button", "data-id": c.id, "data-kind": c.kind || null, "data-quoted": quoted ? "1" : null,
-      "aria-label": c.label + ": " + value + (quoted ? ", quoted third-party text" : "") + ", " + age, title: c.label + ": " + value + " (" + age + ")",
-    }, h("span", { class: "ft-read-chip-l" }, chipLabel(c.label)), " ", h("b", null, value));
-    reveal(chip, age);
-    return chip;
+    return h("p", { class: "ft-read-ev-row", "data-quoted": quoted ? "1" : null },
+      h("span", { class: "ft-read-ev-l" }, c.label),
+      h("b", null, quoted ? "\u201c" + c.display + "\u201d" : c.display),
+      h("span", { class: "ft-read-age" }, quoted ? "quoted third-party text, " + readAge(c, read) : readAge(c, read)));
   }
 
-  function readLine(item, read, wrap) {
+  function openPanel(panel, buttons, btn, fill) {
+    const open = btn.getAttribute("aria-expanded") === "true";
+    for (const b of buttons) b.setAttribute("aria-expanded", "false");
+    panel.replaceChildren();
+    panel.hidden = true;
+    if (open) return;
+    btn.setAttribute("aria-expanded", "true");
+    panel.append(fill());
+    panel.hidden = false;
+  }
+
+  function wirePanel(panel, buttons) {
+    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { const on = buttons.find((b) => b.getAttribute("aria-expanded") === "true"); if (on) { on.click(); on.focus(); } } });
+    for (const b of buttons) b.addEventListener("keydown", (e) => { if (e.key === "Escape" && b.getAttribute("aria-expanded") === "true") b.click(); });
+  }
+
+  function readLine(item, read, wrap, ctr, mark) {
     const cites = Array.isArray(item.cites) ? item.cites : [];
-    return h(wrap || "span", { class: wrap === "li" ? "ft-read-i" : null },
-      typo(String(item.text)),
-      item.template === true ? h("span", { class: "ft-read-cites" }, tag("From the vendor's profile, quoted: not model wording")) : null,
-      cites.length ? h("span", { class: "ft-read-cites", role: "group", "aria-label": "Facts this rests on" }, cites.map((c) => citeChip(c, read))) : null);
+    const panel = h("div", { class: "ft-read-ev", hidden: "", "aria-live": "polite" });
+    const buttons = cites.map((c) => {
+      const n = ++ctr.n;
+      const age = readAge(c, read);
+      const b = h("button", {
+        class: "ft-read-fn", type: "button", "data-id": c.id, "data-kind": c.kind || null, "data-quoted": c.untrusted === true ? "1" : null,
+        "aria-expanded": "false", "aria-label": citeLabel(c, age), title: citeLabel(c, age),
+      }, h("span", { "aria-hidden": "true" }, String(n)));
+      b.addEventListener("click", () => openPanel(panel, buttons, b, () => evidenceRow(c, read)));
+      return b;
+    });
+    wirePanel(panel, buttons);
+    return h(wrap, { class: wrap === "li" ? "ft-read-i" : null, "data-list": null },
+      mark ? h("span", { class: "ft-read-mk", "aria-hidden": "true", "data-list": mark }, READ_MARKS[mark][0]) : null,
+      h("span", { class: "ft-read-t" },
+        typo(String(item.text)),
+        item.template === true ? h("span", { class: "ft-read-src" }, " From the vendor\u2019s profile, quoted: not model wording.") : null,
+        buttons.length ? h("span", { class: "ft-read-fns", role: "group", "aria-label": "Facts this rests on" }, buttons) : null),
+      panel);
   }
 
-  function readTag(t) {
-    const chip = h("button", { class: "ui-tag ft-read-chip", type: "button", "data-code": t.code, "aria-label": t.label + ": " + t.sentence, title: t.sentence }, t.label);
-    reveal(chip, t.sentence);
-    return chip;
+  function readTags(tags) {
+    const panel = h("div", { class: "ft-read-ev", hidden: "", "aria-live": "polite" });
+    const buttons = tags.map((t) => {
+      const b = h("button", { class: "ft-read-tag", type: "button", "data-code": t.code, "aria-expanded": "false", "aria-label": t.label + ": " + t.sentence, title: t.sentence }, t.label);
+      b.addEventListener("click", () => openPanel(panel, buttons, b, () => h("p", { class: "ft-read-ev-row" }, h("b", null, t.label), h("span", null, t.sentence))));
+      return b;
+    });
+    wirePanel(panel, buttons);
+    return h("div", { class: "ft-read-tags" },
+      h("h4", null, "Character"),
+      h("div", { class: "ft-read-tagrow", role: "group", "aria-label": "Character tags the rules found to hold" }, buttons),
+      panel);
   }
 
   function readingBlock(read) {
     if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return null;
     const sec = read.sections && typeof read.sections === "object" ? read.sections : {};
+    const ctr = { n: 0 };
     const root = h("section", { class: "ft-read", "aria-labelledby": "ftReadT", "data-status": read.status, "data-generated": read.generated ? "1" : "0" });
-    const meta = h("div", { class: "ft-v-meta" },
-      tag(read.generated ? "Model wording" : "Deterministic reading", { accent: !!read.generated }),
-      read.generated && read.modelName ? tag(String(read.modelName)) : null,
-      read.generated && typeof read.neurons === "number" ? tag(read.neurons + " neurons") : null,
-      read.status === "generating" ? tag("Model wording is being written") : null,
-      read.asOf ? h("span", { class: "ui-key" }, glyph("clock"), "Dossier as of " + F.time(read.asOf)) : null,
-      read.generated && read.generatedAt ? h("span", { class: "ui-key" }, "Written " + F.time(read.generatedAt)) : null);
-    root.append(h("h3", { id: "ftReadT" }, "The name, read as a stock"), meta);
-    if (read.provenance) root.append(h("p", { class: "ft-v-src", id: "ftReadSrc" }, String(read.provenance)));
+    const bits = [read.generated ? "Model wording" : "Deterministic reading"];
+    if (read.generated && read.modelName) bits.push(String(read.modelName));
+    if (read.generated && typeof read.neurons === "number") bits.push(read.neurons + " neurons");
+    if (read.status === "generating") bits.push("Model wording is being written");
+    if (read.asOf) bits.push("Dossier as of " + F.time(read.asOf));
+    if (read.generated && read.generatedAt) bits.push("Written " + F.time(read.generatedAt));
+    root.append(h("h3", { id: "ftReadT" }, "The name, read as a stock"),
+      h("p", { class: "ft-read-prov", id: "ftReadSrc" }, bits.join(" \u00b7 "), read.provenance ? h("span", null, " " + String(read.provenance)) : null));
     if (read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !sec.now && !sec.identity)) {
-      root.append(h("p", { class: "ft-v-src", role: "status" }, String(read.note || (read.status === "generating" ? "The dossier is being assembled; the reading follows it." : "No reading is available for this name."))));
+      root.append(h("p", { class: "ft-read-state", role: "status" }, String(read.note || (read.status === "generating" ? "The dossier is being assembled; the reading follows it." : "No reading is available for this name."))));
     }
-    if (sec.identity) root.append(h("p", { class: "ft-read-identity" }, readLine(sec.identity, read)));
-    if (sec.now) root.append(h("h4", null, "Now"), h("p", { class: "ft-read-now" }, readLine(sec.now, read)));
+    const leadItem = sec.identity || sec.now;
+    if (leadItem) root.append(h("p", { class: "ft-read-lead" }, readLine(leadItem, read, "span", ctr)));
+    if (sec.identity && sec.now) root.append(h("div", { class: "ft-read-b" }, h("h4", null, "Now"), h("p", { class: "ft-read-now" }, readLine(sec.now, read, "span", ctr))));
+    const tags = Array.isArray(read.tags) ? read.tags : [];
+    if (tags.length) root.append(readTags(tags));
     for (const [key, title] of READ_LISTS) {
       const list = Array.isArray(sec[key]) ? sec[key] : [];
-      if (list.length) root.append(h("h4", null, title), h("ul", { class: "ft-read-l", "data-list": key }, list.map((it) => readLine(it, read, "li"))));
+      if (list.length) root.append(h("div", { class: "ft-read-b" }, h("h4", null, title), h("ul", { class: "ft-read-l", "data-list": key }, list.map((it) => readLine(it, read, "li", ctr, key)))));
     }
     const unknown = Array.isArray(sec.unknown) ? sec.unknown : [];
     if (unknown.length) {
-      root.append(h("h4", null, "Not known"), h("ul", { class: "ft-read-l", "data-list": "unknown" },
-        unknown.map((u) => h("li", { class: "ft-read-i" }, typo(String(u.text)), h("span", { class: "ft-read-cites" }, (Array.isArray(u.missing) ? u.missing : []).map((k) => tag(String(k))))))));
+      root.append(h("details", { class: "ft-read-unk" }, h("summary", null, "What is not known (" + unknown.length + ")"),
+        h("ul", { class: "ft-read-l", "data-list": "unknown" },
+          unknown.map((u) => h("li", { class: "ft-read-i" }, h("span", { class: "ft-read-t" }, typo(String(u.text)), (Array.isArray(u.missing) ? u.missing : []).map((k) => h("span", { class: "ft-read-miss" }, " " + String(k)))))))));
     }
-    const tags = Array.isArray(read.tags) ? read.tags : [];
-    if (tags.length) root.append(h("h4", null, "Character"), h("div", { class: "ui-tags", role: "group", "aria-label": "Character tags the rules found to hold" }, tags.map(readTag)));
     if (read.ticker) {
-      root.append(h("p", { class: "ft-v-src" }, h("a", { class: "ft-read-link", href: "/api/flows/dossier?t=" + encodeURIComponent(read.ticker) + "&render=1", target: "_blank", rel: "noopener" }, "What the model saw"),
-        " — the dossier text this reading was written from, with every id a chip cites."));
+      root.append(h("p", { class: "ft-read-foot" }, h("a", { class: "ft-read-link", href: "/api/flows/dossier?t=" + encodeURIComponent(read.ticker) + "&render=1", target: "_blank", rel: "noopener" }, "What the model saw"),
+        " \u2014 the dossier text this reading was written from, with every id a footnote cites."));
     }
     return root;
   }

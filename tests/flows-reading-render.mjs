@@ -100,16 +100,24 @@ async function mount(page, read_, o = {}) {
 const block = (page) => page.evaluate(() => {
   const r = document.querySelector("#ftVerdict .ft-read");
   if (!r) return null;
-  const chips = [...r.querySelectorAll("button.ft-read-chip[data-id]")];
+  const chips = [...r.querySelectorAll("button.ft-read-fn[data-id]")];
+  const lead = [...r.querySelectorAll(".ft-read-lead")];
+  const prose = [...r.querySelectorAll(".ft-read-lead, .ft-read-now, .ft-read-t")];
   return {
     status: r.dataset.status, generated: r.dataset.generated, text: r.innerText,
     headings: [...document.querySelectorAll("#ftVerdict h2, #ftVerdict h3, #ftVerdict h4")].map((h) => [Number(h.tagName[1]), h.textContent.trim()]),
-    tags: [...r.querySelectorAll("button.ft-read-chip[data-code]")].map((b) => b.dataset.code),
-    chips: chips.map((b) => ({ id: b.dataset.id, aria: b.getAttribute("aria-label"), title: b.getAttribute("title"), text: b.textContent, quoted: b.dataset.quoted === "1", type: b.type, tag: b.tagName })),
+    tags: [...r.querySelectorAll("button.ft-read-tag[data-code]")].map((b) => b.dataset.code),
+    leads: lead.length, leadFont: lead[0] ? parseFloat(getComputedStyle(lead[0]).fontSize) : 0, bodyFont: parseFloat(getComputedStyle(r.querySelector(".ft-read-l") || r).fontSize),
+    measure: Math.max(0, ...prose.map((p) => p.getBoundingClientRect().width / parseFloat(getComputedStyle(p).fontSize))), rootW: r.getBoundingClientRect().width,
+    inlinePills: prose.reduce((n, p) => n + [...p.querySelectorAll("button, .ui-tag")].filter((x) => !x.closest(".ft-read-fns")).length, 0),
+    marks: [...r.querySelectorAll(".ft-read-mk")].map((m) => [m.dataset.list, m.textContent, m.getAttribute("aria-hidden")]),
+    unk: (() => { const d = r.querySelector("details.ft-read-unk"); return d ? { open: d.open, summary: d.querySelector("summary").textContent } : null; })(),
+    tagRows: r.querySelectorAll(".ft-read-tagrow").length,
+    chips: chips.map((b) => ({ id: b.dataset.id, aria: b.getAttribute("aria-label"), title: b.getAttribute("title"), text: b.textContent, expanded: b.getAttribute("aria-expanded"), quoted: b.dataset.quoted === "1", type: b.type, tag: b.tagName })),
     link: (() => { const a = r.querySelector("a.ft-read-link"); return a ? { href: a.getAttribute("href"), target: a.target, rel: a.rel, text: a.textContent } : null; })(),
     lists: [...r.querySelectorAll("ul[data-list]")].map((u) => [u.dataset.list, u.children.length]),
     labelled: r.getAttribute("aria-labelledby"), titleId: !!document.getElementById("ftReadT"),
-    imgs: r.querySelectorAll("img, script, iframe, a[href^='javascript'], i, b:not(.ft-read-chip b), li li, li > li").length,
+    imgs: r.querySelectorAll("img, script, iframe, a[href^='javascript'], i, b:not(.ft-read-ev b), li li, li > li").length,
     pwned: window.__pwned,
     overflow: document.documentElement.scrollWidth > window.innerWidth,
     wide: [...document.querySelectorAll("body *")].filter((el) => el.getBoundingClientRect().right > window.innerWidth + 1 && getComputedStyle(el).position !== "fixed").slice(0, 4).map((el) => el.tagName + "." + String(el.className).slice(0, 40) + ":" + Math.round(el.getBoundingClientRect().right)),
@@ -120,7 +128,7 @@ const block = (page) => page.evaluate(() => {
   const src = TICKER_SRC.slice(TICKER_SRC.indexOf("const READ_LISTS"), TICKER_SRC.indexOf("function renderVerdictCard"));
   ok(src.length > 1500, "(setup) the reading renderer is " + src.length + " characters of source");
   ok(!/innerHTML|insertAdjacentHTML|outerHTML|document\.write|createContextualFragment|DOMParser/.test(src), "NO INNERHTML OF MODEL TEXT: the renderer never sets markup, inserts adjacent HTML or writes a document");
-  ok(/h\("button"/.test(src) && !/h\("div", \{ class: "ft-read".*innerHTML/.test(src), "chips are built with the page's own element builder, whose text goes in as text nodes");
+  ok(/h\("button"/.test(src) && !/h\("div", \{ class: "ft-read".*innerHTML/.test(src), "footnotes are built with the page's own element builder, whose text goes in as text nodes");
 }
 
 const browser = await chromium.launch();
@@ -136,21 +144,30 @@ try {
   eq(b.status, "ready", "status ready");
   eq(b.generated, "1", "generated");
   ok(b.text.includes("Model wording") && b.text.includes("Glm 4.7 Flash") && b.text.includes("56 neurons"), "the label, the model and the neuron cost are visible: " + JSON.stringify(b.text.slice(0, 160)));
-  ok(/Dossier as of/.test(b.text), "and the dossier's as-of time");
-  ok(/Written/.test(b.text), "and when it was written");
+  ok(/Dossier as of .* TRT/.test(b.text), "and the dossier's as-of time in TRT");
+  ok(/Written .* TRT/.test(b.text), "and when it was written");
   ok(b.text.includes("Example Technologies sells software to mid-sized firms."), "the identity line");
   ok(b.text.includes("Now") && b.text.includes("The last price is $127.40"), "a Now paragraph");
-  ok(["What is driving it", "Where the evidence disagrees", "What to watch", "Not known", "Character"].every((h) => b.headings.some((x) => x[1] === h)), "and the driver, tension, watch, unknown and character headings: " + JSON.stringify(b.headings.map((h) => h[1])));
+  ok(["What is driving it", "Where the evidence disagrees", "What to watch", "Character"].every((h) => b.headings.some((x) => x[1] === h)), "and the driver, tension, watch and character headings: " + JSON.stringify(b.headings.map((h) => h[1])));
   same(b.lists.map((l) => l[0]), ["drivers", "tensions", "watch", "unknown"], "four lists");
-  same(b.tags, ["dealer-pinned", "news-driven"], "TAG CHIPS in the model's order");
-  eq(b.chips.length, 8, "EVERY CITED FACT IS A CHIP: eight cites, eight chips (" + b.chips.map((c) => c.id).join(", ") + ")");
-  ok(b.chips.every((c) => c.tag === "BUTTON" && c.type === "button"), "each a button that submits nothing");
+  same(b.tags, ["dealer-pinned", "news-driven"], "TAGS in the model's order");
+  eq(b.tagRows, 1, "TAGS ARE ONE QUIET ROW");
+  eq(b.leads, 1, "HIERARCHY: exactly one lead sentence");
+  ok(b.leadFont >= b.bodyFont + 2, "and it is set larger than the body (" + b.leadFont + " against " + b.bodyFont + ")");
+  ok(b.measure <= 70, "MEASURE: no prose line is wider than 70 characters of its own font (" + b.measure.toFixed(1) + "em)");
+  eq(b.inlinePills, 0, "NO INLINE PILLS in prose: the only controls inside a sentence are numbered footnotes");
+  same(b.marks.map((m) => m[0]), ["drivers", "drivers", "tensions", "watch"], "SIGN MARKS on every list item");
+  ok(b.marks.every((m) => m[1].length === 1 && m[2] === "true") && new Set(b.marks.map((m) => m[1])).size === 3, "each a printed glyph, different by list (colour is not the only cue), hidden from screen readers");
+  same(b.unk, { open: false, summary: "What is not known (1)" }, "WHAT IS NOT KNOWN is a collapsed disclosure");
+  eq(b.chips.length, 8, "EVERY CITED FACT IS A FOOTNOTE: eight cites, eight buttons (" + b.chips.map((c) => c.id).join(", ") + ")");
+  ok(b.chips.every((c) => c.tag === "BUTTON" && c.type === "button" && c.expanded === "false"), "each a collapsed button that submits nothing");
+  same(b.chips.map((c) => c.text), ["1", "2", "3", "4", "5", "6", "7", "8"], "numbered in reading order");
   const price = b.chips.find((c) => c.id === "price.last");
-  ok(price.text.includes("Last price") && price.text.includes("$127.40"), "a chip shows the label and the value with its unit: " + price.text);
+  ok(price.aria.includes("Last price") && price.aria.includes("$127.40"), "its accessible name carries the label and the value with its unit: " + price.aria);
   ok(/as of .* TRT, \d+ minutes before the dossier was read/.test(price.aria) && price.aria.includes("Last price: $127.40"), "its accessible name carries the age: " + price.aria);
   ok(/before the dossier was read/.test(price.title), "and its title does too");
   const desc = b.chips.find((c) => c.id === "identity.description");
-  ok(desc.quoted && desc.aria.includes("quoted third-party text") && desc.text.includes(String.fromCharCode(0x201c)), "a quotation is marked as third-party text and drawn in quotes");
+  ok(desc.quoted && desc.aria.includes("quoted third-party text") && desc.aria.includes(String.fromCharCode(0x201c)), "a quotation is marked as third-party text and named in quotes");
   ok(b.link && b.link.href === "/api/flows/dossier?t=" + T + "&render=1" && b.link.text === "What the model saw" && b.link.target === "_blank" && /noopener/.test(b.link.rel), "THE LINK to what the model saw: " + JSON.stringify(b.link));
   eq(b.labelled, "ftReadT", "the section is labelled by its heading");
   ok(b.titleId, "and the heading exists");
@@ -159,41 +176,33 @@ try {
   ok(!b.overflow, "no horizontal scroll at 390 px " + JSON.stringify(b.wide));
 
   if (process.env.READING_SHOT) await page.locator("#ftVerdict").screenshot({ path: process.env.READING_SHOT });
-  const chip = page.locator("#ftVerdict .ft-read button.ft-read-chip[data-id='price.last']");
-  await chip.hover();
-  ok(await page.locator("#ftVerdict .ft-read button[data-id='price.last'] .ft-read-age").count() === 1, "HOVER shows the age on the chip");
-  await page.mouse.move(5, 5);
-  eq(await page.locator("#ftVerdict .ft-read .ft-read-age").count(), 0, "and moving away hides it");
-  await page.locator("#ftVerdict .ft-read button.ft-read-chip[data-id]").first().focus();
-  eq(await page.locator("#ftVerdict .ft-read .ft-read-age").count(), 1, "KEYBOARD FOCUS shows the age too");
-  const shown = await page.locator("#ftVerdict .ft-read .ft-read-age").first().textContent();
-  ok(/no source time/.test(shown), "the age text of a vendor profile that carries no time: " + shown);
-  await page.locator("#ftVerdict .ft-read button.ft-read-chip[data-id='price.last']").focus();
-  ok(/as of .* TRT/.test(await page.locator("#ftVerdict .ft-read .ft-read-age").first().textContent()), "and of a priced fact, its source time");
+  const fn = (id) => page.locator("#ftVerdict .ft-read button.ft-read-fn[data-id='" + id + "']");
+  const evOpen = page.locator("#ftVerdict .ft-read .ft-read-ev:not([hidden])");
+  eq(await evOpen.count(), 0, "no evidence is open until asked for");
+  await fn("price.last").click();
+  eq(await fn("price.last").getAttribute("aria-expanded"), "true", "TAPPING a footnote opens it");
+  const open = await evOpen.innerText();
+  ok(open.includes("Last price") && open.includes("$127.40") && /as of .* TRT, \d+ minutes before the dossier was read/.test(open), "with its label, value, unit and source time: " + JSON.stringify(open));
+  await fn("price.change").click();
+  eq(await fn("price.last").getAttribute("aria-expanded"), "false", "opening a sibling closes the first");
+  ok((await evOpen.innerText()).includes("+1.27%"), "and shows the sibling's figure");
   await page.keyboard.press("Escape");
-  eq(await page.locator("#ftVerdict .ft-read .ft-read-age").count(), 0, "Escape hides it");
-  await page.keyboard.press("Tab");
-  const focused = await page.evaluate(() => (document.activeElement.dataset.id || document.activeElement.dataset.code || document.activeElement.tagName));
-  ok(typeof focused === "string" && focused.length > 0, "Tab moves to the next chip (" + focused + ")");
-  eq(await page.locator("#ftVerdict .ft-read .ft-read-age").count(), 1, "which shows its age as it takes focus");
-  const order = await page.evaluate(async () => {
-    const ids = [];
-    const r = document.querySelector("#ftVerdict .ft-read");
-    r.querySelector("button.ft-read-chip").focus();
-    for (let i = 0; i < 40; i++) {
-      const el = document.activeElement;
-      if (!r.contains(el)) break;
-      ids.push(el.dataset.id || el.dataset.code || el.tagName);
-      const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true });
-      el.dispatchEvent(ev);
-      const all = [...r.querySelectorAll("button, a[href]")];
-      const next = all[all.indexOf(el) + 1];
-      if (!next) break;
-      next.focus();
-    }
-    return ids;
-  });
-  ok(order.length >= 10 && order.includes("price.last") && order.includes("dealer-pinned"), "every chip, tag and the link is reachable in reading order (" + order.length + " stops)");
+  eq(await evOpen.count(), 0, "Escape closes it");
+  await fn("identity.description").focus();
+  await page.keyboard.press("Enter");
+  const quote = await evOpen.innerText();
+  ok(/no source time/.test(quote) && quote.includes("quoted third-party text") && quote.includes(String.fromCharCode(0x201c)), "KEYBOARD opens a quotation: marked as third-party text, with no source time: " + JSON.stringify(quote));
+  await page.keyboard.press("Enter");
+  eq(await evOpen.count(), 0, "and Enter again closes it");
+  await page.locator("#ftVerdict .ft-read button.ft-read-tag").first().click();
+  ok((await evOpen.innerText()).includes("dealers long calls, short puts"), "a tag opens its rule's sentence");
+  await page.keyboard.press("Escape");
+  await page.locator("#ftVerdict .ft-read details.ft-read-unk summary").click();
+  ok(await page.locator("#ftVerdict .ft-read details.ft-read-unk").evaluate((d) => d.open) && (await page.locator("#ftVerdict .ft-read details.ft-read-unk").innerText()).includes("Fundamentals are withheld"), "the disclosure opens to what is not known");
+  const order = await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-read button, #ftVerdict .ft-read a[href], #ftVerdict .ft-read summary")].map((el) => el.dataset.id || el.dataset.code || el.tagName));
+  ok(order.length >= 12 && order.includes("price.last") && order.includes("dealer-pinned"), "every footnote, tag, the disclosure and the link are tabbable in reading order (" + order.length + " stops)");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  ok(await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-read *")].every((e) => Math.max(...getComputedStyle(e).transitionDuration.split(",").map(parseFloat)) < 0.05)), "nothing in the block transitions under reduced motion");
 
   const templated = clone(READ);
   templated.sections.identity = { ...templated.sections.identity, template: true };
@@ -207,7 +216,8 @@ try {
   eq(b.imgs, 0, "NO ELEMENT WAS BUILT FROM MODEL TEXT: no img, script, iframe, javascript link, b or i from the stubbed strings");
   eq(b.pwned, undefined, "and no handler ran");
   ok(b.text.includes("<img src=x") && b.text.includes("<script>") && b.text.includes("**bold**"), "the markup is shown as the text it is");
-  ok(b.chips.some((c) => c.text.includes("<img src=x")), "inside a chip too");
+  await fn("price.last").click();
+  ok((await evOpen.innerText()).includes("<img src=x"), "inside an opened footnote too");
 
   await mount(page, FALLBACK);
   b = await block(page);
@@ -259,6 +269,7 @@ try {
   eq(b.status, "absent", "AN ABSENT READING");
   ok(b.text.includes("Nothing is held for " + T), "says nothing is held");
   same(b.lists, [["unknown", 2]], "and names what is unknown");
+  eq(b.unk.open, false, "behind the collapsed disclosure");
   eq(b.link.href, "/api/flows/dossier?t=" + T + "&render=1", "with the link to the dossier text");
   eq(b.chips.length, 0, "no chip");
 
@@ -271,6 +282,13 @@ try {
   await mount(page, READ);
   b = await block(page);
   ok(b && !b.overflow, "NO HORIZONTAL SCROLL at 1280 px either " + JSON.stringify(b && b.wide));
+  for (const w of [768, 1440]) {
+    await page.setViewportSize({ width: w, height: 900 });
+    await mount(page, READ);
+    b = await block(page);
+    ok(b && !b.overflow && b.measure <= 70, "no overflow and a held measure at " + w + " px " + JSON.stringify(b && b.wide));
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.setViewportSize({ width: 320, height: 900 });
   await mount(page, READ);
   b = await block(page);

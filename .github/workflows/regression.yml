@@ -115,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          fetch-depth: ${{ needs.plan.outputs.mode == 'partial' && 0 || 1 }}
+          fetch-depth: ${{ needs.plan.outputs.mode == 'partial' && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
