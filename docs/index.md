@@ -1214,7 +1214,7 @@ The ready family in the route table: `flowsReadyRows(deps)` is `GET /api/flows/r
 
 | File | Exports | Suites |
 |---|---|---|
-| `server/routes/flows-ready.js` | `server/routes/flows-ready.js#flowsReadyRows` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-ledger, flows-public and 5 more |
+| `server/routes/flows-ready.js` | `server/routes/flows-ready.js#flowsReadyRows` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-ledger, flows-public and 6 more |
 
 ## flows-rail
 
