@@ -3806,8 +3806,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     [["10"], ["30"], ["5"]],
     "THE CHAIN RUNS AS A FAST JOB AND SIX SHARDS, each with its own cap: fast 10 minutes, a shard 30 (its slowest " +
     "suite's own run.mjs timeout plus setup, which run-contract holds), and the aggregate test 5"); checks++;
-  ok(/^ {4}needs: \[reuse, fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
-    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs the reuse check, fast and every shard and runs if: always(), so a failed or " +
+  ok(/^ {4}needs: \[reuse, plan, fast, shard\]$/m.test(regTest) && /^ {4}if: always\(\)$/m.test(regTest),
+    "THE ONE REQUIRED CHECK KEEPS ITS NAME: test needs the reuse check, the plan, fast and every shard and runs if: always(), so a failed or " +
     "cancelled shard turns it red instead of skipping it (a skipped required check would pass)");
   ok(/FAST: \$\{\{ needs\.fast\.result \}\}/.test(regTest) && /SHARDS: \$\{\{ needs\.shard\.result \}\}/.test(regTest) &&
      /REUSED: \$\{\{ needs\.reuse\.outputs\.reused \}\}/.test(regTest) &&
@@ -3815,7 +3815,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "and it is green only when the fast job and the shard matrix both report success, or when a verified reuse skipped both; it checks out nothing");
   ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m.test(regShard),
     "the shard matrix is 1 to 6 with fail-fast off, so one red shard never cancels the others' reports");
-  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 --needs-browser\)"/.test(regShard) &&
+  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 \$\{\{ steps\.select\.outputs\.args \}\} --needs-browser\)"/.test(regShard) &&
      /echo "needs=\$needs" >> "\$GITHUB_OUTPUT"/.test(regShard) && /^ {8}id: browser$/m.test(regShard) &&
      /- name: Install Chromium\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: npx playwright install --with-deps chromium\n/.test(regShard),
     "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
@@ -3826,14 +3826,14 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "EVERY SHARD CHECKS THE CONTRACTS FIRST: after npm ci and the Chromium decision, before its own selection, each shard runs " +
     "node run.mjs --only contracts (about ten seconds), so a red contracts check stops the shard inside its first minute " +
     "instead of after a complete run of the six, while the fast job still runs the whole fast group once");
-  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
+  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 \$\{\{ steps\.select\.outputs\.args \}\}\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
      !/npm test/.test(regression),
     "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");
   ok(/fetch-depth: 0/.test(regFast) && /ASSET_DIFF_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/.test(regFast) &&
      /wrangler deploy --dry-run --outdir \/tmp\/anilkaya-worker-dry-run/.test(regFast) && !/playwright/.test(regFast),
     "the fast job alone fetches the history and sets ASSET_DIFF_BASE for the asset contract, validates the Worker " +
     "bundle, and installs no Chromium");
-  ok(!/fetch-depth/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test");
+  ok(!/fetch-depth: 0/.test(regShard) && /fetch-depth: \$\{\{ needs\.plan\.outputs\.mode == 'partial' && 0 \|\| 1 \}\}/.test(regShard) && !/ASSET_DIFF_BASE/.test(regShard), "the shards check out the one commit they test, and take history only when the plan is partial");
   ok(/^ {2}cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m.test(regression),
     "a newer push cancels a superseded pull-request run only; a main run in progress is never cancelled (GitHub still replaces a pending one)");
   const allUses = [];
@@ -5032,14 +5032,14 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(/^ {4}permissions:\n {6}statuses: write\n/m.test(gate) && !/statuses: write/.test(reuse + fast + shard) && !/pull-requests:/.test(fast + shard + gate),
     "statuses: write is held by the test job alone and pull-requests: read by the reuse job alone");
   const gateAfter = "if: ${{ !cancelled() && needs.reuse.outputs.reused != 'true' }}";
-  ok(fast.includes(`needs: [reuse]\n    ${gateAfter}`) && shard.includes(`needs: [reuse]\n    ${gateAfter}`),
+  ok(fast.includes(`needs: [reuse]\n    ${gateAfter}`) && shard.includes(`needs: [reuse, plan]\n    ${gateAfter}`),
     "fast and every shard run unless the reuse check said true, and still run when it was skipped, failed or crashed (not cancelled), so an API outage costs time and never coverage");
   ok(/test "\$\(git rev-parse HEAD\)" = "\$GITHUB_SHA"/.test(fast) && /echo "tree=\$\(git rev-parse 'HEAD\^\{tree\}'\)" >> "\$GITHUB_OUTPUT"/.test(fast) && /tree: \$\{\{ steps\.tree\.outputs\.tree \}\}/.test(fast),
     "the fast job records the tree of the very commit it checked out, after asserting the checkout is the workflow's sha");
-  ok(/if: github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/.test(gate) &&
+  ok(/if: github\.event_name == 'pull_request' && needs\.plan\.outputs\.mode == 'full' && github\.event\.pull_request\.head\.repo\.full_name == github\.repository/.test(gate) &&
      /context=tested-tree/.test(gate) && /description="\$TREE"/.test(gate) && /target_url="\$RUN_URL"/.test(gate) && /test -n "\$TREE"/.test(gate) &&
      gate.indexOf("Require the fast job") < gate.indexOf("Record the tested tree"),
-  "a pull-request run of this repository records the tree on its head only after the gate step passed, with a link back to the run; a fork, whose token cannot write, records nothing");
+  "a full pull-request run of this repository records the tree on its head only after the gate step passed, with a link back to the run; a partial run and a fork, whose token cannot write, record nothing");
   ok(TESTED_CONTEXT === "tested-tree" && WORKFLOW_PATH === ".github/workflows/regression.yml" && STATUS_AUTHOR === "github-actions[bot]",
     "the script and the workflow agree on the context, the workflow path and the status author");
 
