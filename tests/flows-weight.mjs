@@ -57,7 +57,7 @@ const GZIP_KIB = {
 };
 
 const CSS_KIB = {
-  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024,
+  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024 + 9900 / 1024,
   overviewPage: 104 + (779 + 11690) / 1024,
   sidePage: 102 + 565 / 1024,
   watchPage: 102 + 565 / 1024,
@@ -78,7 +78,7 @@ const CSS_KIB = {
 };
 
 const CSS_GZIP_KIB = {
-  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024,
+  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024,
   overviewPage: 23 + (100 + 2592) / 1024,
   sidePage: 22 + 64 / 1024,
   watchPage: 22 + 64 / 1024,
