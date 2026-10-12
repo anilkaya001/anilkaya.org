@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readQuarantine, recordedFor, todayUtc } from "./lib/quarantine.mjs";
 import { SUITES_DIR, FIELD_ORDER, formatSuite } from "./lib/suite-registry.mjs";
+import { changedFiles, selectAffected, describeSelection, rootOf } from "./lib/affected.mjs";
 export { SUITES_DIR, formatSuite };
 
 export const DEFAULT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,7 @@ const GROUPS = new Set(["fast", "shard"]);
 export class UsageError extends Error {}
 
 export function parseArgs(argv) {
-  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1, shard: null, group: null, needsBrowser: false, repin: false };
+  const opts = { dir: DEFAULT_DIR, bail: false, only: null, timeoutScale: 1, shard: null, group: null, needsBrowser: false, repin: false, affected: null, affectedList: false };
   for (let i = 0; i < argv.length; i++) {
     const raw = argv[i];
     const eqAt = raw.indexOf("=");
@@ -57,8 +58,15 @@ export function parseArgs(argv) {
       opts.group = v;
     } else if (flag === "--needs-browser") opts.needsBrowser = true;
     else if (flag === "--repin") opts.repin = true;
+    else if (flag === "--affected") {
+      const v = value();
+      if (!v || v.startsWith("-")) throw new UsageError(`--affected needs a base ref, not ${JSON.stringify(v)}`);
+      opts.affected = v;
+    } else if (flag === "--affected-list") opts.affectedList = true;
     else throw new UsageError(`unknown argument ${raw}`);
   }
+  if (opts.affectedList && !opts.affected) throw new UsageError("--affected-list needs --affected <base-ref>");
+  if (opts.affected && (opts.only || opts.repin)) throw new UsageError("--affected selects suites itself, so it takes no --only and no --repin");
   if (opts.repin && (opts.only || opts.shard || opts.group || opts.needsBrowser)) throw new UsageError("--repin rewrites the pins and takes no other selection");
   if (opts.only && (opts.shard || opts.group)) throw new UsageError("--only names its suites itself, so it takes no --shard or --group");
   if (opts.shard && opts.group === "fast") throw new UsageError("--shard splits the shard group, so it cannot run with --group fast");
@@ -212,12 +220,13 @@ export function repin(dir = DEFAULT_DIR) {
   return changed;
 }
 
-export function chooseSuites(suites, opts) {
+export function chooseSuites(suites, opts, affected = null) {
   if (opts.only) return selectSuites(suites, opts.only);
-  if (!opts.shard && !opts.group) return suites;
+  if (!opts.shard && !opts.group) return affected ? suites.filter((s) => affected.has(s.name)) : suites;
   const chosen = opts.shard
     ? packShards(suites, opts.shard.count)[opts.shard.index - 1]
     : suites.filter((s) => groupOf(s) === opts.group);
+  if (affected) return chosen.filter((s) => affected.has(s.name));
   if (!chosen.length) throw new UsageError(`${opts.shard ? `shard ${opts.shard.index}/${opts.shard.count}` : `group ${opts.group}`} holds no suite, and a run of no suite proves nothing`);
   return chosen;
 }
@@ -468,7 +477,18 @@ export async function main(argv, io = { stdout: process.stdout, stderr: process.
       io.stdout.write(changed.length ? `repinned ${changed.length} suites to the ${CI_SHARDS}-shard packing: ${changed.join(", ")}\n` : `every pin already equals the ${CI_SHARDS}-shard packing\n`);
       return 0;
     }
-    suites = chooseSuites(loadManifest(opts.dir), opts);
+    const all = loadManifest(opts.dir);
+    let affected = null;
+    if (opts.affected) {
+      const sel = selectAffected({ root: rootOf(opts.dir), suites: all, changed: changedFiles(rootOf(opts.dir), opts.affected) });
+      if (opts.affectedList) {
+        io.stdout.write(describeSelection(sel, all).join("\n") + "\n");
+        return 0;
+      }
+      io.stdout.write(`run.mjs: ${describeSelection(sel, all)[0]}\n`);
+      affected = sel.full ? null : sel.names;
+    }
+    suites = chooseSuites(all, opts, affected);
     const q = readQuarantine(opts.dir);
     if (q.problems.length) throw new UsageError(q.problems.join("\n"));
     quarantine = q.entries;
