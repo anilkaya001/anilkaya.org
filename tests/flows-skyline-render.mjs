@@ -40,8 +40,8 @@ const KNOWN = ROWS.filter((r) => r[3] !== null && Math.abs(expectM(r[2], r[3])) 
   const bare = flowsPageRows({ currentFlowsUser: async () => ({ username: "u" }), readFlowsSummary: async () => null, isOwner: () => true }).find((r) => r.id === "flows.pages.market");
   ok(!(await bare.handler({ request: new Request("https://x.test/flows/market/"), env: {}, url: new URL("https://x.test/flows/market/") }).then((x) => x.text())).includes("mkSkyline"), "a router with no switch defaults to off");
   const w = read("worker.js");
-  ok(/scenesOn: \(env, username\) => String\(\(env && env\.FLOWS_SCENES\) \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "owner" && rtIsOwner\(/.test(w), "the Worker admits only FLOWS_SCENES=owner and only an owner");
-  ok(/^FLOWS_SCENES = "owner"$/m.test(read("wrangler.toml")), "wrangler.toml ships the switch at owner");
+  ok(/scenesOn: \(env, username\) => \{\s*const mode = String\(\(env && env\.FLOWS_SCENES\) \|\| ""\)\.trim\(\)\.toLowerCase\(\);\s*return mode === "on" \|\| \(mode === "owner" && rtIsOwner\(/.test(w), "the Worker admits FLOWS_SCENES=on for every member, and owner only for an owner");
+  ok(/^FLOWS_SCENES = "on"$/m.test(read("wrangler.toml")), "wrangler.toml ships the switch on");
   ok(!PAGES.marketPage({ username: "u", owner: true }).includes("mkSkyline"), "an owner page without the switch has no skyline");
   ok(!/data-defer="skyline"/.test(PAGES.marketPage({ username: "u" })), "a member page declares no skyline group");
   eq(PAGES.marketPage({ username: "u", owner: true, scenes: true }).match(/<i\b[^>]*data-defer="skyline"[^>]*>/g).length, 1, "the owner page declares the group once");

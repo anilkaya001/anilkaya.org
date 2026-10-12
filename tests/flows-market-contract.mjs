@@ -179,7 +179,9 @@ const MODULES = ["mkTideCard", "mkBreadthCard", "mkTapeCard", "mkEtfSPYCard", "m
   "mkSecTidesCard", "mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard",
   "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard",
   "mkSeasonCard"];
-const FEEDS = ["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason"];
+const SCENE_MODULES = /^FLOWS_SCENES\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"))
+  ? ["mkSkylineCard", "mkRelationsCard"] : [];
+const FEEDS =["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason"];
 
 const browser = revealBelow(await chromium.launch());
 
@@ -1866,7 +1868,9 @@ try {
     });
     deep(wordy, [], "no prose on the surface: no visible run of text on the market page is longer than six words");
     const titles = await deepPage.$$eval(".mk-grid .ui-mod-t", (hs) => hs.map((h) => h.childNodes[0].textContent.trim()));
-    eq(titles.length, MODULES.length, "every module carries a title");
+    const scenes = await deepPage.evaluate((ids) => ids.filter((id) => document.getElementById(id)), ["mkSkylineCard", "mkRelationsCard"]);
+    deep(scenes, SCENE_MODULES, "the scene modules are on the page exactly when wrangler.toml ships FLOWS_SCENES on");
+    eq(titles.length, MODULES.length + SCENE_MODULES.length, "every module carries a title");
     for (const t of titles) {
       ok(t.split(/\s+/).length <= 3, `a module title is one to three words (${t})`);
       ok(!/^[A-Z0-9 ]{4,}$/.test(t) || /^(SPY|QQQ|IWM)$/.test(t), `and sentence case, never ALL-CAPS (${t})`);

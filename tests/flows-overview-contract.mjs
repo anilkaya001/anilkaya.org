@@ -324,10 +324,12 @@ try {
         jump: document.querySelectorAll(".cc-jump").length,
       };
     });
-    deep(seat.ids, ["hmHero", "hmMetals", "hmLeaders", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean",
+    const netOn = /^FLOWS_HOME_NET\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"));
+    deep(seat.ids, ["hmHero", ...(netOn ? ["hmNet"] : []), "hmMetals", "hmLeaders", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean",
       "hmAlerts", "hmEvents", "hmWatch", "hmNews"],
-      "the page reads hero, the metals and the index leaders the owner watches most, verdict, both boards, " +
-      "what changed, volatility, sectors, flagged windows, the calendar, the band's edge and the headlines, in that order");
+      "the page reads hero, the flow network when wrangler.toml ships it on, the metals and the index leaders the owner " +
+      "watches most, verdict, both boards, what changed, volatility, sectors, flagged windows, the calendar, the band's edge " +
+      "and the headlines, in that order");
     ok(Math.abs(seat.heroW - seat.gridW) <= 2,
       `the market hero spans the whole grid (${seat.heroW} of ${seat.gridW})`);
     ok(seat.chipsInHero, "and carries the session readings inside it rather than as a second bar");
@@ -3207,7 +3209,7 @@ try {
       const out = [];
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const el = n.parentElement;
-        if (!el || el.closest("svg, .visually-hidden, .hm-verdict, .hm-news-h, [hidden]")) continue;
+        if (!el || el.closest("svg, .visually-hidden, .hm-verdict, .hm-news-h, .fn-host, [hidden]")) continue;
         if (!el.checkVisibility()) continue;
         const words = n.textContent.trim().split(/\s+/).filter(Boolean).length;
         if (words > 6) out.push(n.textContent.trim());
@@ -3215,8 +3217,9 @@ try {
       return out;
     });
     deep(wordy, [],
-      "no prose on the surface: outside the Neuron verdict line and a headline, no visible run of " +
-      "text is longer than six words — every sentence lives behind a disclosure");
+      "no prose on the surface: outside the Neuron verdict line, a headline and the flow network's own legend " +
+      "(held by flows-net-render and the copy lint), no visible run of text is longer than six words — every " +
+      "sentence lives behind a disclosure");
     const infos = await page.$$eval(".hm-grid [data-info]", (ns) => ns.length);
     ok(infos >= 15, `and the sentences are there, one tap away (${infos} disclosures)`);
 

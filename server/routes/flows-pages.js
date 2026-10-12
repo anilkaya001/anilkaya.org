@@ -1,7 +1,10 @@
 import { HttpError, redirect } from "../http.js";
 import { FLOWS_PAGES } from "../../shared/flows-pages.js";
 
-const homeNet = (env, owner) => owner === true && String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase() === "owner";
+const homeNet = (env, owner) => {
+  const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
+  return mode === "on" || (mode === "owner" && owner === true);
+};
 
 const PAGES = Object.freeze([
   { slug: "", from: "overview", summary: true, render: (username, summary, owner, scenes, env) => FLOWS_PAGES.overviewPage({ username, summary, net: homeNet(env, owner) }) },

@@ -39,11 +39,13 @@ ok(ON.includes("/assets/css/flows-net.css"), "and its stylesheet is linked");
     [{ FLOWS_HOME_NET: "off" }, true, false, "off is off"],
     [{ FLOWS_HOME_NET: "" }, true, false, "empty is off"],
     [{ FLOWS_HOME_NET: "maybe" }, true, false, "an unknown value is off"],
-    [{ FLOWS_HOME_NET: "members" }, false, false, "no value but owner admits a member"],
+    [{ FLOWS_HOME_NET: "members" }, false, false, "a value other than on or owner admits nobody"],
     [{ FLOWS_HOME_NET: "owner" }, false, false, "owner mode shows a member nothing"],
     [{ FLOWS_HOME_NET: " Owner " }, true, true, "owner mode shows the owner the slot"],
+    [{ FLOWS_HOME_NET: "on" }, false, true, "on shows a member the slot"],
+    [{ FLOWS_HOME_NET: " ON " }, true, true, "on shows the owner the slot"],
   ]) ok((await call(env, owner)).includes('id="hmNet"') === want, `${why}`);
-  ok(/^FLOWS_HOME_NET\s*=\s*"off"/m.test(read("wrangler.toml")), "wrangler.toml ships the switch off: OD-39 placement 1 has no answer, and a null answer is never read as yes");
+  ok(/^FLOWS_HOME_NET\s*=\s*"on"/m.test(read("wrangler.toml")), "wrangler.toml ships the switch on: the owner opened the Home network to every member on 2026-10-12");
 }
 
 async function open(browser, { viewport = { width: 1440, height: 900 }, html = ON, alerts = FIX.overview.flowalerts, status = 200, netStatus = 200 } = {}) {
