@@ -3,11 +3,13 @@
 .mv-rank { color: var(--label-3); font-variant-numeric: tabular-nums; }
 .mv-t { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; font-weight: 600; }
 .mv-m { font-variant-numeric: tabular-nums; }
-.mv-c, .mv-n { color: var(--label-2); font: var(--t-footnote); }
+.mv-c, .mv-n, .mv-r { color: var(--label-2); font: var(--t-footnote); }
 .mv-c { grid-column: 4; }
 .mv-n { grid-column: 2 / -1; }
+.mv-r { grid-column: 2 / -1; }
 @media (max-width: 540px) {
   .mv-row { grid-template-columns: 2ch minmax(0, 1fr) auto; }
   .mv-c { grid-column: 2 / -1; }
   .mv-n { grid-column: 2 / -1; }
+  .mv-r { grid-column: 2 / -1; }
 }

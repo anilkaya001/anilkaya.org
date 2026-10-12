@@ -22,6 +22,32 @@
   const byT = (a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
   const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(String(t).toUpperCase().replace(/[^A-Z0-9.\-]/g, ""));
 
+  const SESSIONS = 252;
+  const FLOOR_N = 250;
+  const oneIn = (p) => Math.max(1, Math.round(1 / p));
+  const pctText = (x) => (x * 100).toFixed(x * 100 >= 10 ? 0 : 1) + "%";
+  function wilson(hits, n) {
+    const z = 1.96, p = hits / n, d = 1 + (z * z) / n, c = p + (z * z) / (2 * n);
+    const w = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n));
+    return { lo: Math.max(0, (c - w) / d), hi: Math.min(1, (c + w) / d) };
+  }
+  function rarity(x) {
+    if (x.sig === null || !(x.sig > 0)) return null;
+    const k = Math.abs(x.chg) / x.sig;
+    const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+    const hits = level === 3 ? x.f3 : level === 2 ? x.f2 : null;
+    if (!level || hits === null || !Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return null;
+    let how;
+    if (hits === 0 || SESSIONS / hits > FLOOR_N) {
+      how = "rarer than 1 in " + FLOOR_N + " sessions for this name over the last year";
+      if (hits === 0) how += ", and fewer than 1 in " + Math.floor(1 / (1 - Math.pow(0.05, 1 / SESSIONS)) / 10) * 10 + " at 95%";
+    } else {
+      how = "about 1 in " + oneIn(hits / SESSIONS) + " sessions for this name over the last year";
+      if (hits >= 5) { const w = wilson(hits, SESSIONS); how += " (95% interval 1 in " + oneIn(w.hi) + " to 1 in " + oneIn(w.lo) + ")"; }
+    }
+    return "a " + level + "x typical-day move: typical day " + pctText(x.sig) + "; " + how;
+  }
+
   const S = { rows: null, day: null, live: null, hold: false, dirty: false, waiting: 0 };
 
   function uniRows(u) {
@@ -30,8 +56,8 @@
       const c = u.cols[k], sc = u.units[k] && num(u.units[k][1]);
       return Array.isArray(c) && sc ? c.map((x) => (num(x) === null ? null : x / sc)) : null;
     };
-    const chg = col("chg"), iv = col("iv30p"), ed = col("ed");
-    return chg ? u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null })) : null;
+    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), sig = col("sig"), f2 = col("f2"), f3 = col("f3");
+    return chg ? u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null })) : null;
   }
 
   function liveRows() {
@@ -39,15 +65,16 @@
     if (!s || s.status !== "ok" || !Array.isArray(s.fields) || !s.rows || !S.day || !(s.session > S.day)) return null;
     const ci = s.fields.indexOf("chg"), ii = s.fields.indexOf("iv30p");
     if (ci < 0 || ii < 0) return null;
-    const ed = new Map((S.rows || []).map((r) => [r.t, r.ed]));
-    return { session: s.session, rows: Object.keys(s.rows).map((t) => ({ t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: ed.has(t) ? ed.get(t) : null })) };
+    const known = new Map((S.rows || []).map((r) => [r.t, r]));
+    const pick = (t, k) => (known.has(t) ? known.get(t)[k] : null);
+    return { session: s.session, rows: Object.keys(s.rows).map((t) => ({ t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") })) };
   }
 
   function moves(rows) {
     const out = [];
     for (const r of rows) {
       const m = ivDays(r.chg, r.iv);
-      if (m !== null) out.push({ t: r.t, chg: r.chg, m, event: num(r.ed) !== null && r.ed <= EVENT_SESSIONS });
+      if (m !== null) out.push({ t: r.t, chg: r.chg, m, sig: num(r.sig), f2: num(r.f2), f3: num(r.f3), event: num(r.ed) !== null && r.ed <= EVENT_SESSIONS });
     }
     return out;
   }
@@ -71,7 +98,8 @@
       h("a", { class: "mv-t", href: tickerHref(x.t), text: x.t }),
       h("span", { class: "fu-v mv-m", text: signed(x.m) + " " + UNIT }),
       h("span", { class: "mv-c", text: F.pct(x.chg * 100, 1, true) + " on the day" }),
-      x.event ? null : h("span", { class: "mv-n", text: atLeast(abs, Math.abs(x.m)) + " of " + total + " names this far out today" }))));
+      x.event ? null : h("span", { class: "mv-n", text: atLeast(abs, Math.abs(x.m)) + " of " + total + " names this far out today" }),
+      x.event || rarity(x) === null ? null : h("span", { class: "mv-r", text: rarity(x) }))));
   }
 
   function paint() {
@@ -119,7 +147,7 @@
     el.addEventListener("focusout", () => setTimeout(() => setHold(lists.some((n) => n.matches(":hover, :focus-within"))), 0));
   }
 
-  fetch("/api/flows/universe?cols=t,sec,chg,iv30p,ed", { credentials: "same-origin", headers: { Accept: "application/json" } })
+  fetch("/api/flows/universe?cols=t,sec,chg,iv30p,ed,sig,f2,f3", { credentials: "same-origin", headers: { Accept: "application/json" } })
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
     .then((u) => {
       const rows = uniRows(u);

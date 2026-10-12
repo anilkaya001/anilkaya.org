@@ -244,10 +244,10 @@ export function harvestBlock(h) {
 }
 
 export function universePayload(rows, {
-  sessionDate, generatedAt, harvest, screened, readAt,
+  sessionDate, generatedAt, harvest, screened, readAt, sigma = null,
 } = {}) {
   return buildUniverse(rows, {
-    sessionDate, generatedAt, screened,
+    sessionDate, generatedAt, screened, sigma,
     harvest: harvest ? harvestBlock(harvest) : null,
     fresh: freshStamp({ readAt, session: sessionDate }),
   });
