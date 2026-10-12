@@ -324,6 +324,13 @@ export function shortIntOf(row) {
   return v !== null && v > 0 ? v : null;
 }
 
+function sigmaCell(r, ctx, field) {
+  const m = ctx && ctx.sigma;
+  const e = m && r && typeof m.get === "function" ? m.get(r.ticker) : null;
+  const v = e ? e[field] : null;
+  return Number.isFinite(v) && v >= 0 && (field !== "s" || v > 0) ? v : null;
+}
+
 export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "px", unit: "usd", scale: 100, prio: 1,
     get: (r) => { const v = vnum(r.close); return v !== null && v > 0 ? v : null; } },
@@ -374,6 +381,9 @@ export const UNIVERSE_COLUMNS = Object.freeze([
       if (b === null || s === null || so === null || !(so > 0)) return null;
       return (b - s) / so;
     } },
+  { key: "sig", unit: "fraction", scale: 1e5, prio: 2, get: (r, ctx) => sigmaCell(r, ctx, "s") },
+  { key: "f2", unit: "days per 252", scale: 1, prio: 2, get: (r, ctx) => sigmaCell(r, ctx, "f2") },
+  { key: "f3", unit: "days per 252", scale: 1, prio: 2, get: (r, ctx) => sigmaCell(r, ctx, "f3") },
   { key: "ed", unit: "sessions", scale: 1, prio: 2, get: (r, ctx) => sessionsToEarnings(r, ctx) },
   { key: "rsi", unit: "index100", scale: 1, prio: 3,
     get: (r) => { const v = vnum(r.rsi_14); return v !== null && v >= 0 && v <= 100 ? v : null; } },
@@ -435,6 +445,7 @@ export function buildUniverse(rows, {
   screened = null,
   harvest = null,
   fresh = null,
+  sigma = null,
   columns = UNIVERSE_COLUMNS,
   percentiles = UNIVERSE_PERCENTILES,
 } = {}) {
@@ -444,7 +455,7 @@ export function buildUniverse(rows, {
     .sort((a, b) => (vnum(b.marketcap) ?? -1) - (vnum(a.marketcap) ?? -1) ||
       (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0));
   const tiltsBySector = sectorTilts(list);
-  const ctx = { sessionDate, sectorTilts: tiltsBySector };
+  const ctx = { sessionDate, sectorTilts: tiltsBySector, sigma };
   const sectors = [];
   const sectorIndex = new Map();
   const sec = list.map((r) => {

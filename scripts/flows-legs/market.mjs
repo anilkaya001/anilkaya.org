@@ -27,7 +27,7 @@ export const MARKET_LEG_CALLS =
 export async function runMarketLegs({
   uw, sessionDate = null, screenerDate = null, generatedAt = null, harvest = null, filters = {},
   eligible = () => true, cardedTickers = [], deepTickers = [], windowTickers = [],
-  deadline = null, pool = null, width = 1, stats = null, log = () => {},
+  deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null,
 } = {}) {
   const meter = makeCallMeter(stats);
   const lines = [];
@@ -59,7 +59,7 @@ export async function runMarketLegs({
     `, ${regime.bytes} bytes`);
 
   const universe = universePayload(eligibleRows, {
-    sessionDate, generatedAt, readAt, harvest: h, screened: harvested.length,
+    sessionDate, generatedAt, readAt, harvest: h, screened: harvested.length, sigma,
   });
   say(`  universe: ${universe.n} names, ${universe.cols ? Object.keys(universe.cols).length : 0} columns` +
     (universe.shed.length ? `, shed ${universe.shed.join(", ")}` : "") + `, ${universe.bytes} bytes` +

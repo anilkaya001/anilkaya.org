@@ -313,6 +313,14 @@ export function sigmaRef(bars, {
   return { ...common, ok: true, sigmaRef: s, reason: null };
 }
 
+export function sigmaProfile(bars, opts = {}) {
+  const r = sigmaRef(bars, { ...opts, keep: true });
+  if (!r.ok) return { ok: false, reason: r.reason, n: r.n };
+  const n = r.returns.length;
+  const per = (k) => Math.round((r.returns.filter((x) => Math.abs(x) >= k * r.sigmaRef).length * EMPIRICAL_SESSIONS) / n);
+  return { ok: true, reason: null, s: r.sigmaRef, n, f2: per(2), f3: per(3) };
+}
+
 export const cardField = (result) => (result && result.ok
   ? { s: Math.round(result.sigmaRef * 1e5) / 1e5, n: result.n, k: result.clock }
   : null);

@@ -308,6 +308,18 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(fit.counts.iv30p > 300 && fit.counts.charm > 300, "and each carries a value for most names");
   const inputs = ["iv30", "ivp", "ts", "vrp", "gexAdv", "dDelta", "tilt", "ed", "si", "dex", "im30"];
   ok(inputs.every((k) => fit.cols[k] && fit.counts[k] > 300), "every input the screen reading is built on survives with a value for most names");
+  {
+    const sigma = new Map(rows.slice(0, 150).map((r, i) => [r.ticker, { s: 0.01 + (i % 30) / 1000, f2: 8 + (i % 9), f3: i % 4 }]));
+    const withSig = buildUniverse(rows, { sessionDate: S, generatedAt: "t", sigma });
+    ok(withSig.status === "ok" && withSig.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE 100 KiB BUDGET with the three reference-scale columns for 150 names: ${withSig.bytes} bytes (shed: ${withSig.shed.join(", ")})`);
+    ok(withSig.cols.sig && withSig.cols.f2 && withSig.cols.f3 && !withSig.shed.some((k) => ["sig", "f2", "f3", "iv30p", "charm"].includes(k)), "sig, f2 and f3 survive beside iv30p and charm");
+    eq(withSig.counts.sig, 150, "only the names with a published scale carry one; the rest are null, never zero");
+    near(universeValue(withSig, rows[3].ticker, "sig"), 0.013, 1e-9, "sig decodes back to the name's typical day");
+    eq(universeValue(withSig, rows[3].ticker, "f2"), 11, "f2 decodes to its count per 252");
+    eq(universeValue(withSig, rows[300].ticker, "sig"), null, "a name outside the map has no scale");
+    const bare = buildUniverse(rows, { sessionDate: S, generatedAt: "t" });
+    eq(bare.counts.sig, 0, "no map, no scale");
+  }
   ok(whole.cols.dex && whole.cols.vanna && whole.cols.charm && whole.cols.im5 && whole.cols.im30, "and the unbudgeted payload carries all five new columns");
 }
 

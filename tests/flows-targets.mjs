@@ -344,4 +344,18 @@ const alternating = (n, a = 0.01) => Array.from({ length: n }, (_, i) => (i % 2 
   ok(verdict.ok, `NIGHTLY CPU: 670 names take ${measured.subject.median.toFixed(1)} ms of ${measured.clock} CPU, ${measured.ratio.median.toFixed(1)}x the reference kernel (budget 16x, about 50 ms where the reference runs in 3 ms); ${verdict.failures.join("; ")}`);
 }
 
+{
+  const mk = (n) => { let c = 100; const out = [{ d: "2025-01-01", c }]; const day = Date.UTC(2025, 0, 1); for (let i = 1; i <= n; i++) { c *= Math.exp(i % 10 === 0 ? 0.05 : i % 2 ? 0.01 : -0.01); out.push({ d: new Date(day + i * 86400000).toISOString().slice(0, 10), c }); } return out; };
+  const bars = mk(252);
+  const prof = T.sigmaProfile(bars);
+  const ref = T.sigmaRef(bars, { keep: true });
+  ok(prof.ok && prof.s === ref.sigmaRef && prof.n === ref.returns.length, "sigmaProfile carries sigmaRef and its count");
+  const hits = (k) => Math.round((ref.returns.filter((x) => Math.abs(x) >= k * ref.sigmaRef).length * 252) / ref.returns.length);
+  eq(prof.f2, hits(2), "f2 is the count of returns at or beyond 2 scales, per 252");
+  eq(prof.f3, hits(3), "f3 likewise at 3");
+  ok(prof.f2 > 0 && prof.f3 <= prof.f2, "the 5 percent days are beyond 2 scales and 3 is never more than 2");
+  const short = T.sigmaProfile(mk(150));
+  ok(!short.ok && short.reason === "history", "under 200 returns the name is not forecast, with the reason");
+}
+
 console.log(`\u2713 flows-targets: ${checks} assertions \u2014 the canonical large-move table frozen and hashed (a definition changed without a version bump fails), sigmaRef worked by hand on a pattern whose median absolute deviation is known, an earnings session, a split, a break and a data gap each excluded or adjusted as written with a revert-proof that keeping the earnings session doubles the scale, 199 returns refused and 200 accepted with the reason counted, impactSession for a before-open, an after-close and an unstated report, thresholds for every family with the vendor's implied_move_perc refused, the reader rule's frequency beside every multiple with each printed N within its route's floor and a scan p never printed as 1 in N, a source scan that no rarity string says sigma, and 670 names inside the nightly's CPU budget`);

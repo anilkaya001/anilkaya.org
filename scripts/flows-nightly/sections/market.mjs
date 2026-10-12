@@ -5,8 +5,9 @@ import { runMarketLegs, windowTickersOf } from "../../flows-legs/market.mjs";
 import { makeCardXStore } from "../../flows-legs/card-x.mjs";
 import { DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
 import { poolWidth, runPooled, stats } from "../vendor.mjs";
+import { sigmaProfile, tallyReasons } from "../../../shared/flows-targets.js";
 import { publish } from "../store.mjs";
-import { BOARD_SCHEMA_VERSION, MOVER_ROWS, buildMovers, daysToEarnings } from "../rank.mjs";
+import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, daysToEarnings } from "../rank.mjs";
 
 export async function runMarket(ctx) {
   const {
@@ -60,12 +61,24 @@ export async function runMarket(ctx) {
   });
 
   const cardX = makeCardXStore();
+  const sigma = new Map();
+  const sigmaResults = [];
+  for (const [t, entry] of byCard) {
+    const held = barsInHand(entry);
+    const r = held ? sigmaProfile(held.bars, { breaks: held.breaks }) : { ok: false, reason: "history" };
+    sigmaResults.push(r);
+    if (r.ok) sigma.set(t, r);
+  }
+  const tally = tallyReasons(sigmaResults);
+  console.log(`  sigma: ${tally.forecast} of ${sigmaResults.length} carded name(s) forecast` +
+    (Object.keys(tally.notForecast).length ? `, not forecast ${JSON.stringify(tally.notForecast)}` : ""));
   let marketLegs = null;
   await stages.run("market-legs", async () => {
     marketLegs = await runMarketLegs({
       uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
       cardedTickers: [...byCard.keys()],
+      sigma,
       deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
