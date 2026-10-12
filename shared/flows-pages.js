@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "279";
+export const ASSET_VERSION = "280";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -745,8 +745,8 @@ ${marketModule("mkTideCard", "Tide", "mkTide", { seg: `<div class="mk-segc" id="
     body: `<div class="mk-body"><div id="mkTideLegs"></div><div id="mkTide"></div></div>` })}
 ${marketModule("mkBreadthCard", "Breadth", "", { span: 5, body: `<div class="mk-body"><div id="mktTilt"></div><div id="mktBreadth"></div></div>` })}
 ${marketModule("mkTapeCard", "Tape", "mktTape", { span: 7 })}
-${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf" + t, { span: 4, sub: dossier(t) })).join("")}
 ${marketModule("mkSecTidesCard", "Sector tides", "mkSecTides")}
+${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf" + t, { span: 4, sub: dossier(t) })).join("")}
 ${marketModule("mkSectorsCard", "Momentum", "mktSectors", { span: 6 })}
 ${marketModule("mkGroupsCard", "Groups", "mkGroups", { span: 6 })}
 ${marketModule("mkExpiryCard", "Expiry", "mkExpiry", { span: 5 })}
@@ -762,7 +762,7 @@ ${marketModule("mkOiCard", "Open interest", "mkOi", { span: 6 })}
 ${marketModule("mkDarkCard", "Dark pool", "mkDark", { span: 6 })}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact", { span: 6 })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders", { span: 6 })}
-${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
+${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { span: scenes ? 6 : "", seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}
   </div>
   <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>${scenes ? `
   <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>

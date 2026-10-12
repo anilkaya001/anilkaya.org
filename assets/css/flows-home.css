@@ -562,3 +562,23 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
   .hm-cell { animation: none; }
   .hm-pill .ui-g, .hm-mark .ui-g, .hm-chip-g .ui-g { animation: none !important; }
 }
+
+.flows-body .hm-head { padding-bottom: var(--sp-4); }
+.hm-grid { container-type: inline-size; container-name: hmg; }
+.hm-verdict { align-content: start; }
+@container hero (min-width: 640px) and (max-width: 859.98px) {
+  .hm-hero-in {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-rows: auto auto;
+    column-gap: var(--sp-7);
+    row-gap: var(--sp-5);
+  }
+  .hm-hero-id { grid-column: 1; grid-row: 1; align-self: start; }
+  .hm-hero-chips { grid-column: 1 / -1; grid-row: 2; }
+  .hm-hero-chart { grid-column: 2; grid-row: 1; align-self: start; min-height: 214px; }
+}
+@container hmg (min-width: 1000px) {
+  .hm-grid > #hmHero { grid-row: 1; grid-column: 1 / span 8; }
+  .hm-grid > #hmVerdict { grid-row: 1; grid-column: 9 / span 4; }
+  .hm-grid > #hmHero { padding: var(--sp-5) var(--sp-6); }
+}

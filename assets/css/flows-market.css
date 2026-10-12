@@ -37,7 +37,8 @@
 .mk-pill::after { content: ""; position: absolute; inset: -8px -2px; }
 .mk-pill .ui-g { font-size: 13px; }
 
-.mk-grid { align-items: stretch; }
+.flows-body .mk-head { padding-bottom: var(--sp-3); }
+.mk-grid { align-items: stretch; container-type: inline-size; container-name: mkg; }
 .mk-body { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
 .mk-segc { min-width: 0; }
 .mk-segc:empty { display: none; }
@@ -260,7 +261,6 @@
 .mk-sea-p { color: var(--label-3); font: var(--t-caption2); font-variant-numeric: tabular-nums; }
 
 .mk-smalls { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--sp-3); }
-@container mod (max-width: 1000px) { .mk-smalls { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container mod (max-width: 640px) {
   .mk-smalls { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
   .mk-small { padding: 8px 8px 4px; }
@@ -298,4 +298,24 @@
 @media (prefers-reduced-motion: reduce) {
   .mk-bar, .mk-stack .mk-seg { animation: none; }
   .mk-mark .ui-g { animation: none !important; }
+}
+
+@container mod (min-width: 640px) {
+  #mkTideCard .mk-body { display: grid; grid-template-columns: minmax(150px, 190px) minmax(0, 1fr); gap: var(--sp-6); align-items: center; }
+  #mkTideCard #mkTideLegs .ui-metrics { grid-template-columns: minmax(0, 1fr); row-gap: var(--sp-3); }
+}
+@container mkg (min-width: 1000px) {
+  .mk-grid > #mkTideCard { grid-column: span 8; }
+  .mk-grid > #mkBreadthCard { grid-column: span 4; }
+  .mk-grid > #mkTapeCard { grid-column: span 4; }
+  .mk-grid > #mkSecTidesCard { grid-column: span 8; }
+}
+@container mkg (min-width: 1400px) {
+  .mk-grid > #mkTideCard { grid-column: span 6; }
+  .mk-grid > #mkBreadthCard, .mk-grid > #mkTapeCard { grid-column: span 3; }
+  .mk-grid > #mkSecTidesCard { grid-column: 1 / -1; }
+  .mk-grid > :is(#mkSectorsCard, #mkGroupsCard, #mkExpiryCard, #mkRadarCard, #mkAdvCard, #mkVolumeCard, #mkAgainstCard, #mkRelationsCard, #mkOiCard, #mkDarkCard, #mkImpactCard, #mkInsidersCard) { grid-column: span 4; }
+  .mk-grid > #mkVolCard { grid-column: span 8; }
+  .mk-grid > #mkSeasonCard { grid-column: span 8; }
+  .mk-grid > #mkRelationsCard ~ #mkSeasonCard { grid-column: span 4; }
 }
