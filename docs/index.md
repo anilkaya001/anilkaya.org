@@ -1547,7 +1547,7 @@ Flows page controllers, one IIFE per page: home, boards, market, ticker, premium
 | `assets/js/flows-political.js` |  | flows-payload-shape |
 | `assets/js/flows-strategy.js` |  |  |
 | `assets/js/flows-ticker.js` |  | flows, flows-payload-shape, flows-quant-card, flows-reading-render, flows-render, flows-ticker and 1 more |
-| `assets/js/flows-track.js` |  | flows-payload-shape, flows-public |
+| `assets/js/flows-track.js` |  | flows-payload-shape, flows-public, flows-track-render |
 | `assets/js/flows-unusual.js` |  | flows-flow-below-render, flows-net-render, flows-payload-shape |
 
 ### `assets/js/flows-status.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs`
