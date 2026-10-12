@@ -1255,8 +1255,11 @@ try {
     ok(dragged.yaw > 2 && coast.spin === 0 && Math.abs(after.yaw - coast.yaw) < 0.01 && !censusAfter.running,
       `THE CAMERA MOVES ONLY WHILE THE READER DRAGS, plus inertia that is over inside 8 s: it turned to ${dragged.yaw.toFixed(1)}, stopped at ${coast.yaw.toFixed(1)} and stayed at ${after.yaw.toFixed(1)} with the loop idle`);
     await net(page, "net.recentre(); return null;");
-    await page.waitForFunction(() => Math.abs(window.FlowsUI.net.of(document.getElementById("uaNet")).camera().yaw) < 0.3, null, { timeout: 6000 });
-    ok(true, "and Recentre still brings it home");
+    await page.waitForFunction(() => {
+      const n = window.FlowsUI.net.of(document.getElementById("uaNet"));
+      return Math.abs(n.camera().yaw) < 0.3 && !n.stats().running;
+    }, null, { timeout: 8000 });
+    ok(true, "and Recentre still brings it home, the glide finished and the loop idle before the next measurement");
 
     const base = alerts({ n: 140, seed: 11 });
     const more = JSON.parse(JSON.stringify(base));
