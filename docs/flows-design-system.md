@@ -86,6 +86,10 @@ module's footer, `.ds-foot`, names its source, its as-of time and its grade.
 | `.ds-row` | A table or list row, `--row-h` tall, tabular figures. |
 | `.ds-sg` | A signed figure: `data-dir` is `up`, `down` or `flat`, an `<i>` draws the shape, and the text carries `+` or U+2212. |
 
+## Adopted by
+
+Track (`/flows/track/`, `assets/css/flows-track.css`) is the first page to adopt the kit. Every silence on it (loading, quiet, pending, unavailable) is a `.ds-st` chip with its name and glyph followed by the plain sentence for the reason, and each signed figure is a `.ds-sg` with a printed sign and a triangle or bar. The page's own `st-` classes add the figure (`st-fig`: number first in a large tabular face, then its unit, then its denominator) and the caption (`st-cap`: the one stated scale of a block and the printed first and latest values of its series), neither of which is part of the kit.
+
 ## Forced colors
 
 `@media (forced-colors: active)` gives the module, chip and button a

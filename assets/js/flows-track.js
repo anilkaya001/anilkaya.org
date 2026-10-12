@@ -20,10 +20,40 @@
   const pct = (v, d = 1) => F.pct(v, d, true);
   const PAGE = window.matchMedia && window.matchMedia("(min-width: 1200px)").matches ? 80 : 24;
   const HORIZONS = [1, 5, 10];
+  const HZ_WORD = { 1: "one session", 5: "five sessions", 10: "ten sessions" };
+  const hzSaid = (k) => HZ_WORD[k] || sessionsSaid(k);
+  const STATE_WORD = { loading: "Loading", quiet: "Quiet", partial: "Partial", pending: "Pending", stale: "Stale", withheld: "Withheld", unavailable: "Unavailable" };
+  const RETURN_STEPS = [0.005, 0.01, 0.02, 0.025, 0.03, 0.04, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.5, 1];
 
   const state = { q: "", sort: "now", shown: PAGE, t: null, k: 5 };
   let ctx = null;
   const cards = new Map();
+  const ideas = { phase: "loading", c: null };
+
+  function silence(kind, text) {
+    const word = STATE_WORD[kind] ? kind : "unavailable";
+    return h("p", { class: "st-sil", "data-s": word, role: "note" },
+      h("span", { class: "ds-st", "data-s": word }, h("i", { "aria-hidden": "true" }), STATE_WORD[word]),
+      h("span", { class: "st-sil-t" }, text));
+  }
+  function loading(text) {
+    return h("div", { class: "st-sk", "aria-busy": "true" }, silence("loading", text), h("span", { class: "ds-sk", style: { width: "72%" } }), h("span", { class: "ds-sk", style: { width: "48%" } }), h("span", { class: "ds-sk", style: { width: "60%" } }));
+  }
+  const signedN = (v, text) => h("span", { class: "ds-sg", "data-dir": v > 0 ? "up" : v < 0 ? "down" : "flat" }, h("i", { "aria-hidden": "true" }), text);
+  function fig(o) {
+    return h("div", { class: "st-fig" + (o.minor ? " is-minor" : ""), "data-fig": o.id },
+      h("span", { class: "st-fig-n", "data-tone": o.tone || null }, o.n, o.of ? h("span", { class: "st-fig-of" }, " of " + o.of) : null),
+      h("span", { class: "st-fig-u" }, o.unit),
+      o.sub ? h("span", { class: "st-fig-d" }, o.sub) : null);
+  }
+  const what = (text, id) => h("p", { class: "st-what", id: id || null }, text);
+  const caption = (id, max, ...parts) => h("p", { class: "st-cap", "data-cap": id, "data-max": max === null ? null : String(max) }, parts.filter(Boolean).map((p) => h("span", null, p)));
+  const fact = (label, value, id) => h("div", { "data-fact": id }, h("dt", null, label), h("dd", null, value));
+  const bold = (v, tone) => h("b", { "data-tone": tone || null }, v);
+  function niceReturn(v) {
+    for (const step of RETURN_STEPS) if (step >= v * 1.05) return step;
+    return Math.ceil(v * 1.05 * 10) / 10;
+  }
 
   function get(path) {
     return fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }).then((r) => {
@@ -92,7 +122,7 @@
     let top = 1;
     for (const r of rows) for (const v of r.s) if (v !== null && Math.abs(v) > top) top = Math.abs(v);
     return {
-      sessions, rows, boundary, top,
+      sessions, rows, boundary, top: Math.max(top, isNum(payload.deadBand) || 0),
       deadBand: isNum(payload.deadBand),
       epoch: typeof payload.epoch === "string" ? payload.epoch : null,
       change: payload.change && typeof payload.change === "object" ? payload.change : null,
@@ -194,7 +224,15 @@
     moreBtn.textContent = "Show " + Math.min(PAGE, list.length - upto) + " more";
   }
 
-  function namesModule() {
+  function namesInfo(keys, labels) {
+    return {
+      title: "Score track per name",
+      lead: "Every name the track carries, one row each: its score session by session, oldest on the left, then its last measured score and its change since its previous scored session.",
+      sections: [{ title: "Order", lines: keys.map((k) => labels[k] + ": " + SORT_WORDS[k] + ".") }, { title: "Strip", lines: [noteSaid()] }],
+    };
+  }
+
+  function namesPane() {
     const input = h("input", { class: "st-q", type: "search", placeholder: "Ticker", "aria-label": "Filter names", autocomplete: "off", spellcheck: "false", id: "stQ" });
     input.addEventListener("input", () => { state.q = input.value; state.shown = PAGE; renderList(false); });
     const first = ctx.has.nowScore ? "now" : "abs";
@@ -207,17 +245,9 @@
     capEl = h("p", { class: "visually-hidden", id: "stCaption", "aria-live": "polite" });
     moreBtn = h("button", { class: "ui-disclose st-more", type: "button", hidden: true, onclick: () => { state.shown += PAGE; renderList(true); } });
     const head = h("div", { class: "st-cols", "aria-hidden": "true" }, h("span", null, "Name"), h("span", null, sessionsSaid(ctx.sessions.length)), h("span", null, "Last"), h("span", null, "Δ"));
-    const mod = UI.moduleCard({
-      id: "stNames", title: "Names", index: 5,
-      info: () => ({
-        title: "Names",
-        lead: "Every name the track carries, one row each: its score session by session, oldest on the left, then its last measured score and its change since its previous scored session.",
-        sections: [{ title: "Order", lines: keys.map((k) => labels[k] + ": " + SORT_WORDS[k] + ".") }, { title: "Strip", lines: [noteSaid()] }],
-      }),
-      body: [h("div", { class: "st-tools" }, input, seg), head, listHost, moreBtn, capEl],
-    });
     state.sort = keys.indexOf(state.sort) >= 0 ? state.sort : first;
-    return mod;
+    detail.namesInfo = () => namesInfo(keys, labels);
+    return h("div", { class: "st-names", id: "stNames" }, h("div", { class: "st-tools" }, input, seg), head, listHost, moreBtn, capEl);
   }
 
   function closesOf(card) {
@@ -309,8 +339,7 @@
         const bx = xAt(ctx.boundary) - band / 2;
         s("line", { x1: bx, x2: bx, y1: top, y2: sBot, class: "st-erule" }, svg);
       }
-      const vals = r.s.filter((v) => v !== null);
-      const max = Math.max(ctx.deadBand || 1, 10, ...vals.map(Math.abs));
+      const max = ctx.top;
       const mid = (sTop + sBot) / 2, half = (sBot - sTop) / 2 - 1;
       const sy = (v) => mid - (v / max) * half;
       if (ctx.deadBand) s("rect", { x: left, y: sy(ctx.deadBand), width: w - left - right, height: Math.max(1, sy(-ctx.deadBand) - sy(ctx.deadBand)), class: "st-band" }, svg);
@@ -382,16 +411,11 @@
     });
   }
 
-  function calibChart(host, pts, k) {
+  function calibChart(host, pts, k, R) {
     return C.mount(host, (el, w, animate) => {
       const H = w < 600 ? 220 : 240;
       const top = 12, bot = 24, left = 4, right = 52;
-      if (pts.length < 3) {
-        el.append(UI.silent({ state: "quiet", reason: "Fewer than three scored sessions have a close " + k + " sessions later, so there is no relation to draw." }, "Calibration", H));
-        return;
-      }
-      const xm = Math.max(10, ...pts.map((p) => Math.abs(p.x))) * 1.1;
-      const ym = Math.max(0.005, ...pts.map((p) => Math.abs(p.y))) * 1.15;
+      const xm = ctx.top, ym = R;
       const x = C.lin(-xm, xm, left, w - right), y = C.lin(-ym, ym, H - bot, top);
       const svg = C.svgRoot(el, w, H, animate, "Score against the return " + k + " sessions later, one point per scored session");
       s("rect", { x: x(0), y: top, width: w - right - x(0), height: y(0) - top, class: "sc-q" }, svg);
@@ -415,11 +439,11 @@
       }
       const sorted = pts.slice().sort((a, b) => a.x - b.x);
       sorted.forEach((p, i) => s("circle", { cx: x(p.x), cy: y(p.y), r: 4, class: "sc-pt fade " + (p.hit === null ? "is-in" : p.hit ? "is-hit" : "is-miss"), style: { "--delay": 200 + i * 25 + "ms" } }, svg));
-      s("text", { x: w - right + 6, y: y(ym * 0.85) + 4, text: "+" + (ym * 85).toFixed(1) + "%", class: "tx-3" }, svg);
-      s("text", { x: w - right + 6, y: y(-ym * 0.85) + 4, text: MINUS + (ym * 85).toFixed(1) + "%", class: "tx-3" }, svg);
-      s("text", { x: x(-xm * 0.9), y: H - 6, text: MINUS + Math.round(xm * 0.9), "text-anchor": "start" }, svg);
+      s("text", { x: w - right + 6, y: top + 4, text: pct(ym, ym < 0.1 ? 1 : 0), class: "tx-3" }, svg);
+      s("text", { x: w - right + 6, y: H - bot + 4, text: pct(-ym, ym < 0.1 ? 1 : 0), class: "tx-3" }, svg);
+      s("text", { x: x(-xm), y: H - 6, text: MINUS + xm, "text-anchor": "start" }, svg);
       s("text", { x: x(0), y: H - 6, text: "0", "text-anchor": "middle" }, svg);
-      s("text", { x: x(xm * 0.9), y: H - 6, text: "+" + Math.round(xm * 0.9), "text-anchor": "end" }, svg);
+      s("text", { x: x(xm), y: H - 6, text: "+" + xm, "text-anchor": "end" }, svg);
       C.scrub(el, svg, {
         xs: sorted.map((p) => x(p.x)), top, bottom: H - bot, label: "Calibration",
         onMove: (i) => {
@@ -446,118 +470,200 @@
     return { node: h("div", { class: "st-meter-w" }, h("span", null, "0"), track, h("span", null, "100%")), naive, adj };
   }
 
-  let detail = { name: null, outcomes: null, calib: null, chart: null };
+  const detail = { name: null, what: null, callsBody: null, ideasBody: null, lede: null, note: null, prov: null, chart: null, scatter: null, rec: null, detOpen: false, nameInfo: null, callsInfo: null, ideasInfo: null, namesInfo: null };
+
+  function sessionsOver() {
+    const S = ctx.sessions.length;
+    const from = F.day(ctx.sessions[0].d), to = F.day(ctx.sessions[S - 1].d);
+    return (S === 1 ? "the one session" : "the " + S + " sessions") + (S > 1 && from !== DASH && to !== DASH ? " from " + from + " to " + to : "");
+  }
+
+  function leadSaid(r) {
+    const over = sessionsOver();
+    const k = state.k, rec = detail.rec;
+    const scored = (r.n === null ? "an unstated number of " : r.n + " of ") + over;
+    if (!rec || rec.t !== r.t || rec.status === "loading") return r.t + " was scored on " + scored + "; its closes are still loading, so no call is counted yet.";
+    if (rec.status === "unavailable") return r.t + " was scored on " + scored + "; no closes are on hand for it, so none of its calls is scored.";
+    if (rec.status === "quiet") return r.t + " made no call across " + over + ", so there is nothing to score.";
+    const open = rec.o.open ? "; " + rec.o.open + (rec.o.open === 1 ? " is" : " are") + " still open" : "";
+    const n = rec.o.closed.length;
+    if (rec.status === "pending") return "No call on " + r.t + " has closed " + hzSaid(k) + " on yet, across " + over + open + ".";
+    return r.t + " was right on " + rec.o.hits + " of " + n + plural(n, " call that has", " calls that have") + " closed " + hzSaid(k) + " on, across " + over + open + ".";
+  }
+
+  function ideasSaid() {
+    if (ideas.phase === "pending") return "No idea has settled yet.";
+    if (ideas.phase === "fail") return "The idea record could not be loaded.";
+    if (ideas.phase !== "ok") return null;
+    const c = ideas.c, n = isNum(c.n) === null ? 0 : c.n, nEff = isNum(c.nEff), needed = isNum(c.needed) === null ? 100 : c.needed;
+    const head = n + plural(n, " idea has", " ideas have") + " settled";
+    if (nEff === null) return head + ".";
+    return head + "; effective n " + nEff.toFixed(1) + (nEff >= needed ? " clears" : " is short of") + " the " + needed + " needed to check the chances the engine stated.";
+  }
+
+  function paintLede() {
+    const r = ctx && ctx.rows.find((x) => x.t === state.t);
+    if (!r || !detail.lede) return;
+    detail.lede.textContent = leadSaid(r);
+    detail.note.textContent = [ideasSaid(), "A record of calls already made, gross of costs."].filter(Boolean).join(" ");
+  }
+
   function paintName(r) {
     const host = detail.name;
     const card = cards.get(r.t);
     const closes = card && card.body ? closesOf(card.body) : [];
     const cross = r.d1 && r.d1.cross;
+    const S = ctx.sessions.length;
+    const day = (i) => (i !== null && ctx.sessions[i] ? F.day(ctx.sessions[i].d) : DASH);
     const hiOn = r.ext && r.ext.hiAt !== null && ctx.sessions[r.ext.hiAt] ? ctx.sessions[r.ext.hiAt].d : null;
     const loOn = r.ext && r.ext.loAt !== null && ctx.sessions[r.ext.loAt] ? ctx.sessions[r.ext.loAt].d : null;
-    host.querySelector(".st-open-t").textContent = r.t;
-    const link = host.querySelector(".st-open");
-    link.href = "/flows/ticker/?t=" + encodeURIComponent(r.t);
-    link.setAttribute("aria-label", "Open " + r.t);
-    const body = host.querySelector(".st-name-b");
-    const moveSub = r.d1 ? (r.d1.gap === 1 ? "overnight" : sessionsSaid(r.d1.gap)) : null;
-    body.replaceChildren(
-      UI.metrics([
-        UI.metric("Last", signed(r.last), { tone: r.last === null ? null : UI.tone(r.last), hero: true, id: "last", sub: r.staleBy ? sessionsSaid(r.staleBy) + " old" : r.lastAt !== null ? F.day(ctx.sessions[r.lastAt] && ctx.sessions[r.lastAt].d) : null, state: r.last === null ? { state: "unavailable", reason: "No last score was published for this name. Not measured — not zero." } : null }),
-        UI.metric("Change", r.d1 ? signed(r.d1.v) : DASH, { tone: r.d1 ? UI.tone(r.d1.v) : null, id: "move", sub: moveSub, state: r.d1 ? null : { state: "unavailable", reason: r.n !== null && r.n < 2 ? "This name was scored on fewer than two sessions in this window, so there is no previous score for it to have changed from. Absent, not zero." : "This payload published no move for this name, so no change can be stated for it. Absent, not zero." } }),
-        UI.metric("Run", r.run === null ? DASH : String(r.run), { id: "run", sub: r.run === null ? null : plural(r.run, "session", "sessions"), state: r.run === null ? { state: "unavailable", reason: "This payload published no run length for this name." } : null }),
-        UI.metric("Range", r.ext ? signed(r.ext.hi) + " / " + signed(r.ext.lo) : DASH, { id: "range", sub: "high / low" }),
-        UI.metric("Scored", r.n === null ? DASH : r.n + " of " + ctx.sessions.length, { id: "n" }),
-      ], { min: 96 }),
-      h("div", { class: "ui-tags st-tags" },
-        r.d1 ? h("button", { type: "button", class: "ui-tag st-ev", "data-tone": cross === "cleared" ? "up" : cross === "faded" ? "warn" : null, "aria-haspopup": "dialog", "aria-controls": "fxPop",
-          "data-info": UI.info({ title: cross ? UI.cap(cross).replace(/\.$/, "") : r.d1.v === 0 ? "Held" : "Drift", lead: cross ? CROSS_SAID[cross] : r.d1.v === 0 ? HELD_SAID : DRIFT_SAID }) },
-        cross ? UI.cap(cross).replace(/\.$/, "") : r.d1.v === 0 ? "Held" : "Drift") : null,
-        r.ext && r.ext.hiAt !== null && r.ext.hiAt === r.lastAt ? UI.tag("At window high", { tone: "up" }) : null,
-        r.ext && r.ext.loAt !== null && r.ext.loAt === r.lastAt ? UI.tag("At window low", { tone: "down" }) : null),
-      h("div", { class: "st-chart", id: "stChart" }),
-      UI.legend([["--accent", "ln", "Close"], ["--up-mark", "", "Score +"], ["--down-mark", "", "Score " + MINUS], ["--label-4", "", "Dead band"], ctx.sessions.some((x) => x.source === "boards") ? ["--fill-2", "", "Board-only"] : null, ctx.boundary !== null ? ["--lvl-flip", "ln", "Rule change"] : null].filter(Boolean)));
+    const scoredAt = r.s.map((v, i) => (v === null ? -1 : i)).filter((i) => i >= 0);
+    const fi = scoredAt[0], li = scoredAt[scoredAt.length - 1];
+    const cmap = new Map(closes.map((c) => [c.d, c.c]));
+    const pxAt = ctx.sessions.map((x, i) => (cmap.has(x.d) ? i : -1)).filter((i) => i >= 0);
+    const p0 = pxAt[0], p1 = pxAt[pxAt.length - 1];
     detail.nameInfo = () => ({
       title: r.t, lead: stripSaid(r) + ".",
       facts: [["Last", signed(r.last)], ["Change", r.d1 ? signed(r.d1.v) + " over " + (r.d1.gap === 1 ? "one session" : sessionsSaid(r.d1.gap)) : DASH],
         ["Residual Δ", r.d1 && r.d1.qv !== null ? signed(r.d1.qv) + " × 10⁻⁴" : null], ["Window high", r.ext ? signed(r.ext.hi) + (hiOn ? " on " + hiOn : "") : null], ["Window low", r.ext ? signed(r.ext.lo) + (loOn ? " on " + loOn : "") : null]],
-      notes: [card && card.body && closes.length ? "The close above the score is the name's daily close from its card, " + (card.body.sessionDate ? "session " + card.body.sessionDate : "undated") + "." : "No close series is on hand for this name, so only the score is drawn.", noteSaid()],
+      notes: [card && card.body && closes.length ? "The close above the score is the name's daily close from its card, " + (card.body.sessionDate ? "session " + card.body.sessionDate : "undated") + "." : "No close series is on hand for this name, so only the score is drawn.", noteSaid(),
+        r.d1 ? null : r.n !== null && r.n < 2 ? "This name was scored on fewer than two sessions in this window, so there is no previous score for it to have changed from. Absent, not zero." : "This payload published no move for this name, so no change can be stated for it. Absent, not zero.",
+        r.run === null ? "This payload published no run length for this name." : null].filter(Boolean),
     });
-    detail.chart = trackChart(body.querySelector("#stChart"), r, closes);
+    if (detail.chart && detail.chart.destroy) detail.chart.destroy();
+    host.replaceChildren(
+      h("div", { class: "st-name-h" },
+        h("h3", { class: "st-name-t" }, h("a", { class: "st-open", href: "/flows/ticker/?t=" + encodeURIComponent(r.t), "aria-label": "Open " + r.t }, h("span", { class: "st-open-t" }, r.t), UI.glyph("next"))),
+        h("div", { class: "ui-tags st-tags" },
+          r.d1 ? h("button", { type: "button", class: "ui-tag st-ev", "data-tone": cross === "cleared" ? "up" : cross === "faded" ? "warn" : null, "aria-haspopup": "dialog", "aria-controls": "fxPop",
+            "data-info": UI.info({ title: cross ? UI.cap(cross).replace(/\.$/, "") : r.d1.v === 0 ? "Held" : "Drift", lead: cross ? CROSS_SAID[cross] : r.d1.v === 0 ? HELD_SAID : DRIFT_SAID }) },
+          cross ? UI.cap(cross).replace(/\.$/, "") : r.d1.v === 0 ? "Held" : "Drift") : null,
+          r.ext && r.ext.hiAt !== null && r.ext.hiAt === r.lastAt ? UI.tag("At window high", { tone: "up" }) : null,
+          r.ext && r.ext.loAt !== null && r.ext.loAt === r.lastAt ? UI.tag("At window low", { tone: "down" }) : null),
+        UI.infoButton("this name", () => (detail.nameInfo ? detail.nameInfo() : { title: r.t }))),
+      r.last === null
+        ? silence("unavailable", "No last score was published for this name. Not measured — not zero.")
+        : h("div", { class: "st-figs" }, fig({
+          id: "last", n: signedN(r.last, signed(r.last)),
+          unit: r.lastAt !== null && ctx.sessions[r.lastAt] ? "last score, " + day(r.lastAt) + (r.staleBy ? ", " + sessionsSaid(r.staleBy) + " old" : "") : "last score",
+          sub: "scored on " + (r.n === null ? "an unstated number of " : r.n + " of ") + S + " " + plural(S, "session", "sessions"),
+        })),
+      h("dl", { class: "st-facts" },
+        fact("Change", r.d1 ? signed(r.d1.v) + " over " + (r.d1.gap === 1 ? "one session" : sessionsSaid(r.d1.gap)) : DASH, "move"),
+        fact("Run", r.run === null ? DASH : r.run + " " + plural(r.run, "session", "sessions") + " on one sign", "run"),
+        fact("Range", r.ext ? "high " + signed(r.ext.hi) + " " + MID + " low " + signed(r.ext.lo) : DASH, "range")),
+      h("div", { class: "st-chart", id: "stChart" }),
+      caption("score-scale", ctx.top,
+        ["Score scale ", bold(MINUS + ctx.top + " to +" + ctx.top), " points, the same on every strip and on this chart"],
+        ctx.deadBand ? ["Dead band ±" + ctx.deadBand + " shaded"] : null),
+      caption("score-ends", null,
+        fi === undefined ? null : fi === li ? ["Only score, " + day(fi) + " ", bold(signed(r.s[fi]))] : ["First score, " + day(fi) + " ", bold(signed(r.s[fi]))],
+        fi === undefined || fi === li ? null : ["Latest score, " + day(li) + " ", bold(signed(r.s[li]))],
+        p0 === undefined ? null : p0 === p1 ? ["Close, " + day(p0) + " ", bold(F.px(cmap.get(ctx.sessions[p0].d)))] : ["Close, " + day(p0) + " ", bold(F.px(cmap.get(ctx.sessions[p0].d))), " to " + day(p1) + " ", bold(F.px(cmap.get(ctx.sessions[p1].d)))]),
+      UI.legend([["--accent", "ln", "Close"], ["--up-mark", "", "Score +"], ["--down-mark", "", "Score " + MINUS], ["--label-4", "", "Dead band"], ctx.sessions.some((x) => x.source === "boards") ? ["--fill-2", "", "Board-only"] : null, ctx.boundary !== null ? ["--lvl-flip", "ln", "Rule change"] : null].filter(Boolean)));
+    detail.chart = trackChart(host.querySelector("#stChart"), r, closes);
   }
 
-  function paintOutcomes(r) {
+  function callsWhat(k) {
+    return "How often a score " + (ctx.deadBand ? "outside the ±" + ctx.deadBand + " dead band" : "other than zero") + " was followed, " + hzSaid(k) + " on, by a price move the same way.";
+  }
+
+  function paintCalls(r) {
     const card = cards.get(r.t);
-    const mod = detail.outcomes, cal = detail.calib;
-    const ob = mod.querySelector(".st-out-b"), cb = cal.querySelector(".st-cal-b");
+    const host = detail.callsBody;
     const k = state.k;
+    detail.what.textContent = callsWhat(k);
+    detail.callsInfo = null;
+    host.classList.remove("is-ok");
+    if (detail.scatter && detail.scatter.destroy) detail.scatter.destroy();
+    detail.scatter = null;
+    const done = (status, o) => { detail.rec = { t: r.t, status, o: o || null }; paintLede(); };
     if (!card || card.pending) {
-      ob.replaceChildren(h("div", { class: "st-loading", "aria-busy": "true" }));
-      cb.replaceChildren();
+      host.replaceChildren(loading("Reading the closes for " + r.t + "."));
+      done("loading");
       return;
     }
     const closes = card.body ? closesOf(card.body) : [];
     if (!closes.length) {
-      const st = { state: card.state || "unavailable", reason: card.reason || "No card for " + r.t + " is published this session, so its closes are not on hand and no call can be scored against what followed. The score track above is unaffected." };
-      ob.replaceChildren(UI.silent(st, "Outcomes", 200));
-      cb.replaceChildren(UI.silent(st, "Calibration", 200));
-      detail.outInfo = null;
+      host.replaceChildren(silence(card.state || "unavailable", card.reason || "No card for " + r.t + " is published this session, so its closes are not on hand and no call can be scored against what followed. The score track below is unaffected."));
+      done("unavailable");
       return;
     }
     const o = outcomes(r, closes, k);
     const n = o.closed.length;
     const p = n ? o.hits / n : null;
     const meter = p === null ? null : hitMeter(p, n, k);
-    const callsHost = h("div", { class: "st-calls" });
-    ob.replaceChildren(
-      UI.metrics([
-        UI.metric("Hit", p === null ? DASH : F.pct(p, 0), { id: "hit", hero: true, tone: meter && meter.adj && (meter.adj[0] > 0.5 || meter.adj[1] < 0.5) ? (p > 0.5 ? "up" : "down") : null, sub: [n ? o.hits + " of " + n + " calls" : null, o.open ? o.open + " open" : null].filter(Boolean).join(" " + MID + " ") || null, state: n ? null : { state: "pending", reason: "No call on " + r.t + " has had " + k + " sessions to close yet." + (o.open ? " " + o.open + (o.open === 1 ? " call is" : " calls are") + " still open." : "") } }),
-        UI.metric("Mean", o.mean === null ? DASH : pct(o.mean, 2), { id: "mean", tone: o.mean === null ? null : UI.tone(o.mean), sub: "signed " + k + "d return", state: o.mean === null ? { state: "pending", reason: "No call on " + r.t + " has closed at " + k + " sessions, so there is no return to average yet." } : null }),
-      ], { min: 72 }),
-      meter ? meter.node : null,
-      callsHost,
-      UI.legend([["--up-mark", "", "Right"], ["--down-mark", "", "Wrong"], ["--label-4", "dot", "Open"]]));
-    if (o.calls.length) {
-      const extreme = (sign) => o.closed.reduce((b, c) => (sign * c.sr > 0 && (!b || Math.abs(c.sr) > Math.abs(b.sr)) ? c : b), null);
-      const ends = [extreme(1), extreme(-1)].filter(Boolean).map((c) => ({ x: c.d, text: pct(c.sr, 1) }));
-      C.diverging(callsHost, {
-        labels: ends,
-        values: o.calls.map((c) => c.sr), x: o.calls.map((c) => c.d), xType: "index", height: [150, 160, 170],
-        format: (v) => pct(v, 1), label: "Signed return " + k + " sessions after each call on " + r.t,
-        readout: (i) => {
-          const c = o.calls[i];
-          return [C.part(F.day(c.d), "k"), h("b", { "data-tone": UI.tone(c.v) }, signed(c.v)), c.sr === null ? C.part(c.state === "lost" ? "no close" : "open", "k") : h("b", { "data-tone": UI.tone(c.sr) }, pct(c.sr, 2))];
-        },
-      });
-    } else {
-      callsHost.append(UI.silent({ state: "quiet", reason: "No session in the window scored " + r.t + " outside the dead band, so there is no call to score." }, "Calls", 150));
-    }
+    const clear = !!(meter && meter.adj && (meter.adj[0] > 0.5 || meter.adj[1] < 0.5));
     const rho = spearman(o.points);
-    cb.replaceChildren(
-      UI.metrics([
-        UI.metric("ρ", rho === null ? DASH : F.signed(rho, 2), { id: "rho", tone: rho === null ? null : UI.tone(rho, 0.1), sub: "rank correlation" }),
-        UI.metric("Points", String(o.points.length), { id: "pts", sub: k + "d closes" }),
-      ], { min: 88 }),
-      h("div", { class: "st-cal", id: "stCalib" }),
-      UI.legend([["--up-mark", "dot", "Right"], ["--down-mark", "dot", "Wrong"], UI.key("--label-2", "ring", "In band"), UI.key("--label-2", "ln", "Fit")]));
-    calibChart(cb.querySelector("#stCalib"), o.points, k);
-    detail.outInfo = () => ({
-      title: "Outcomes · " + k + "d",
+    const rangeSaid = meter && meter.adj ? "the adjusted 95% interval runs " + F.pct(meter.adj[0], 0) + " to " + F.pct(meter.adj[1], 0) : "the adjusted 95% interval is unbounded, because fewer than two independent windows have closed";
+    detail.callsInfo = () => ({
+      title: "Calls scored · " + k + "d",
       lead: "Every session that scored " + r.t + " outside the dead band is a call. Each call is scored by the close " + k + " sessions later against the close of the session it was made on, signed by the call's direction: a bullish score is right when the price rose.",
       facts: [["Calls", String(o.calls.length)], ["Closed", String(n)], ["Right", String(o.hits)], ["Open", String(o.open)], ["No close", String(o.lost)],
         ["Naive 95%", meter && meter.naive ? F.pct(meter.naive[0], 0) + " to " + F.pct(meter.naive[1], 0) : null],
-        ["Adjusted 95%", meter && meter.adj ? F.pct(meter.adj[0], 0) + " to " + F.pct(meter.adj[1], 0) : meter ? "unbounded" : null]],
+        ["Adjusted 95%", meter && meter.adj ? F.pct(meter.adj[0], 0) + " to " + F.pct(meter.adj[1], 0) : meter ? "unbounded" : null],
+        ["Spearman ρ", rho === null ? DASH : rho.toFixed(3)], ["Points", String(o.points.length)]],
       sections: [{ title: "Intervals", lines: [
         "The thick capsule is the naive 95% interval: every call treated as an independent coin.",
         "The thin whisker is the adjusted 95% interval: consecutive calls share most of a " + k + "-session window, so the sample is divided by the horizon. Where it spans 50% the record cannot yet be told apart from chance, and where it runs dashed across the whole track fewer than two independent windows remain and the interval is unbounded.",
         "The hit rate is coloured only when its adjusted interval clears 50%.",
+      ] }, { title: "Score against the return", lines: [
+        "Each point is one scored session: its score across, and the return " + k + " sessions later up. A score that means something puts points in the tinted quadrants, where the sign of the score and the sign of the return agree, and tilts the fitted line upward.",
+        "Hollow points sit inside the dead band: scored, but not a call. With a window this short one session can move ρ a long way; read it with its count.",
       ] }, { title: "Not a strategy", lines: ["Price returns from daily closes, gross of everything: no costs, no slippage, no borrow, no sizing."] }],
     });
-    detail.calInfo = () => ({
-      title: "Calibration · " + k + "d",
-      lead: "Each point is one scored session: its score across, and the return " + k + " sessions later up. A score that means something puts points in the tinted quadrants, where the sign of the score and the sign of the return agree, and tilts the fitted line upward.",
-      facts: [["Spearman ρ", rho === null ? DASH : rho.toFixed(3)], ["Points", String(o.points.length)]],
-      notes: ["Hollow points sit inside the dead band: scored, but not a call. With a window this short one session can move ρ a long way; read it with its count."],
+    if (!o.calls.length) {
+      host.replaceChildren(silence("quiet", "No session in the window scored " + r.t + " outside the dead band, so there is no call to score."));
+      done("quiet", o);
+      return;
+    }
+    const unit = "calls right, " + hzSaid(k) + " on";
+    if (!n) {
+      host.replaceChildren(
+        h("div", { class: "st-figs" }, fig({ id: "hit", n: DASH, unit })),
+        silence("pending", "No call on " + r.t + " has had " + k + " sessions to close yet." + (o.open ? " " + o.open + (o.open === 1 ? " call is" : " calls are") + " still open." : "")));
+      done("pending", o);
+      return;
+    }
+    const R = niceReturn(Math.max(0, ...o.closed.map((c) => Math.abs(c.sr)), ...o.points.map((q) => Math.abs(q.y))));
+    const dp = R < 0.1 ? 1 : 0;
+    const first = o.closed[0], last = o.closed[o.closed.length - 1];
+    const callsHost = h("div", { class: "st-calls" });
+    const calHost = h("div", { class: "st-cal", id: "stCalib" });
+    const mean = o.mean;
+    host.classList.add("is-ok");
+    host.replaceChildren(
+      h("div", { class: "st-figs" },
+        fig({ id: "hit", n: String(o.hits), of: String(n), unit, tone: clear ? (p > 0.5 ? "up" : "down") : null, sub: [F.pct(p, 0) + " of closed calls", o.open ? o.open + " still open" : null].filter(Boolean).join(" " + MID + " ") }),
+        fig({ id: "mean", minor: true, n: signedN(mean, pct(mean, 2)), unit: "mean signed return after a call", sub: hzSaid(k) + " on, gross of costs" })),
+      h("div", { class: "st-hit" }, meter.node, h("p", { class: "st-cap", "data-cap": "hit-range" }, h("span", null, "Hit rate on a 0 to 100% scale, the line at 50% a coin toss; " + rangeSaid + "."))),
+      h("div", { class: "st-chart-w" },
+        callsHost,
+        caption("calls-scale", R,
+          ["Return scale ", bold(pct(-R, dp) + " to " + pct(R, dp)), ", one scale for both charts here"],
+          ["First closed call, " + F.day(first.d) + " ", bold(pct(first.sr, 1))],
+          first === last ? null : ["Latest closed call, " + F.day(last.d) + " ", bold(pct(last.sr, 1))]),
+        UI.legend([["--up-mark", "", "Right"], ["--down-mark", "", "Wrong"], ["--label-4", "dot", "Open"]])),
+      h("details", { class: "st-det", open: detail.detOpen, ontoggle: (e) => { detail.detOpen = e.target.open; } },
+        h("summary", null, "Score against the return, point by point"),
+        h("div", { class: "st-det-b" },
+          h("dl", { class: "st-facts" }, fact("Rank correlation ρ", rho === null ? DASH : F.signed(rho, 2), "rho"), fact("Points", o.points.length + " scored sessions with a " + k + "d close", "pts")),
+          o.points.length < 3 ? silence("quiet", "Fewer than three scored sessions have a close " + k + " sessions later, so there is no relation to draw.") : calHost,
+          o.points.length < 3 ? null : caption("calib-scale", R,
+            ["Across: score ", bold(MINUS + ctx.top + " to +" + ctx.top)],
+            ["Up: return ", bold(pct(-R, dp) + " to " + pct(R, dp))]),
+          o.points.length < 3 ? null : UI.legend([["--up-mark", "dot", "Right"], ["--down-mark", "dot", "Wrong"], UI.key("--label-2", "ring", "In band"), UI.key("--label-2", "ln", "Fit")]))));
+    C.diverging(callsHost, {
+      labels: first === last ? [{ x: first.d, text: pct(first.sr, 1) }] : [{ x: first.d, text: pct(first.sr, 1) }, { x: last.d, text: pct(last.sr, 1) }],
+      values: o.calls.map((c) => c.sr), x: o.calls.map((c) => c.d), xType: "index", height: [150, 160, 170], max: R,
+      format: (v) => pct(v, 1), label: "Signed return " + k + " sessions after each call on " + r.t,
+      readout: (i) => {
+        const c = o.calls[i];
+        return [C.part(F.day(c.d), "k"), h("b", { "data-tone": UI.tone(c.v) }, signed(c.v)), c.sr === null ? C.part(c.state === "lost" ? "no close" : "open", "k") : h("b", { "data-tone": UI.tone(c.sr) }, pct(c.sr, 2))];
+      },
     });
+    if (o.points.length >= 3) detail.scatter = calibChart(calHost, o.points, k, R);
+    done("ok", o);
   }
 
   function select(t, user) {
@@ -576,11 +682,11 @@
       get("/api/flows/card?t=" + encodeURIComponent(t)).then((body) => {
         if (!body) return;
         const ok = body.panels && typeof body.panels === "object";
-        cards.set(t, ok ? { body } : { body: null, state: body.status === "pending" ? "unavailable" : "unavailable" });
+        cards.set(t, ok ? { body } : { body: null, state: "unavailable" });
       }).catch((e) => cards.set(t, { body: null, state: "unavailable", reason: "The card for " + t + " could not be read (" + (e && e.message ? e.message : "request failed") + "), so no call can be scored here. Refresh to try again." }))
-        .then(() => { if (state.t === t) { paintName(r); paintOutcomes(r); } });
+        .then(() => { if (state.t === t) { paintName(r); paintCalls(r); } });
     }
-    paintOutcomes(r);
+    paintCalls(r);
     if (user && detail.name.scrollIntoView && window.innerWidth < 1200) detail.name.scrollIntoView({ block: "start", behavior: UI.reduced() ? "auto" : "smooth" });
   }
 
@@ -699,36 +805,73 @@
     });
   }
 
-  function chipsFor() {
-    const ch = ctx.change || {};
-    const cr = ch.crossings && typeof ch.crossings === "object" ? ch.crossings : {};
-    const comparable = isNum(ch.comparable), moved = isNum(ch.moved);
-    const cs = (key) => (isNum(cr[key]) === null ? DASH : String(cr[key]));
-    const say = changeSaid();
-    const crossChip = (key, label, color) => UI.gaugeChip({
-      ring: isNum(cr[key]) !== null && comparable ? Math.min(1, cr[key] / comparable) : null, color, value: cs(key), label,
-      info: () => ({ title: label, lead: CROSS_SAID[key], facts: [["Names", cs(key)], ["Of compared", comparable === null ? null : String(comparable)], ["Band", ctx.deadBand === null ? null : "±" + ctx.deadBand]], notes: ["The ring is the share of the names compared across the two sessions."] }),
-    });
-    return UI.chips([
-      UI.gaugeChip({ ring: isNum(ch.current) !== null && ctx.rows.length ? Math.min(1, ch.current / ctx.rows.length) : null, color: "--s-blue", value: isNum(ch.current) === null ? DASH : String(ch.current), label: "Scored", info: () => ({ title: "Scored", lead: say, facts: [["Session", ch.session || null], ["Names carried", String(ctx.rows.length)], ["New", isNum(ch.entered) === null ? null : String(ch.entered)], ["Left", isNum(ch.left) === null ? null : String(ch.left)]] }) }),
-      UI.gaugeChip({ ring: moved !== null && comparable ? moved / comparable : null, color: "--label-1", value: moved === null ? DASH : String(moved), label: "Moved", info: () => ({ title: "Moved", lead: say, facts: [["Compared", comparable === null ? null : String(comparable)], ["Held", isNum(ch.held) === null ? null : String(ch.held)], ["One session apart", isNum(ch.consecutive) === null ? null : String(ch.consecutive)]] }) }),
-      crossChip("cleared", "Cleared", "--accent"),
-      crossChip("faded", "Faded", "--warn"),
-      crossChip("flipped", "Flipped", "--s-purple"),
-    ], "Session change");
+  function sessSaid() {
+    const ch = ctx.change;
+    if (!ch) return null;
+    const current = isNum(ch.current), moved = isNum(ch.moved), comparable = isNum(ch.comparable);
+    const cr = ch.crossings && typeof ch.crossings === "object" ? ch.crossings : null;
+    const cleared = cr ? isNum(cr.cleared) : null, faded = cr ? isNum(cr.faded) : null, flipped = cr ? isNum(cr.flipped) : null;
+    const parts = [];
+    if (current !== null) parts.push(current + plural(current, " name", " names") + " scored in the latest session");
+    if (moved !== null && comparable !== null) parts.push(moved + " of " + comparable + " compared " + "moved");
+    if (cleared !== null && faded !== null && flipped !== null) parts.push(cleared + " cleared the dead band, " + faded + " faded back inside, " + flipped + " flipped sides");
+    return parts.length ? UI.cap(parts.join("; ")) : null;
   }
+
+  const SCORE_WHAT = "Each name's score after every close, oldest on the left; a break in a trace is a session it was not scored, never zero.";
+  const IDEAS_WHAT = "Each night's lead idea is frozen when first shown and settled on its expiry's close; this checks the chances the engine stated against what happened.";
 
   function build() {
     const seg = UI.segmented("Horizon", HORIZONS.map((k) => ({ label: k + "d" })), (i) => {
       state.k = HORIZONS[i];
       const r = ctx.rows.find((x) => x.t === state.t);
-      if (r) paintOutcomes(r);
+      if (r) paintCalls(r);
     }, HORIZONS.indexOf(state.k));
-    const openLink = h("a", { class: "st-open", href: "/flows/ticker/" }, h("span", { class: "st-open-t" }, DASH), UI.glyph("next"));
-    detail.name = UI.moduleCard({ id: "stName", title: openLink, infoLabel: "this name", index: 1, info: () => (detail.nameInfo ? detail.nameInfo() : { title: "Name" }), body: h("div", { class: "st-name-b" }) });
-    detail.outcomes = UI.moduleCard({ id: "stOutcomes", title: "Outcomes", index: 2, seg, info: () => (detail.outInfo ? detail.outInfo() : { title: "Outcomes", lead: "Pending the name's closes." }), body: h("div", { class: "st-out-b" }) });
-    detail.calib = UI.moduleCard({ id: "stCalib", title: "Calibration", index: 3, info: () => (detail.calInfo ? detail.calInfo() : { title: "Calibration", lead: "Pending the name's closes." }), body: h("div", { class: "st-cal-b" }) });
-    app.replaceChildren(h("div", { class: "st-chips" }, chipsFor()), detail.name, detail.outcomes, detail.calib, namesModule());
+    detail.what = what("", "stCallsWhat");
+    detail.callsBody = h("div", { class: "st-calls-b" });
+    detail.name = h("div", { class: "st-sel", id: "stName" });
+    detail.ideasBody = h("div", { class: "st-ide-b" });
+    detail.lede = h("p", { class: "st-lede", id: "stLede" });
+    detail.note = h("p", { class: "st-lede-n", id: "stLedeN" });
+    detail.prov = h("p", { class: "st-prov", id: "stProv" });
+    const sess = sessSaid();
+    const calls = UI.moduleCard({ id: "stCalls", title: "Calls scored", index: 1, seg, info: () => (detail.callsInfo ? detail.callsInfo() : { title: "Calls scored", lead: "Pending the name's closes." }), body: h("div", { class: "st-blk-b" }, detail.what, detail.callsBody) });
+    const score = UI.moduleCard({ id: "stScore", title: "Score track per name", index: 2, info: () => (detail.namesInfo ? detail.namesInfo() : { title: "Score track per name" }),
+      body: h("div", { class: "st-blk-b" }, what(SCORE_WHAT), sess ? h("p", { class: "st-sess", id: "stSess" }, sess) : null, h("div", { class: "st-split" }, detail.name, namesPane())) });
+    const idea = UI.moduleCard({ id: "stIdeas", title: "Ideas settled", index: 3, info: () => ideasInfo(), body: h("div", { class: "st-blk-b" }, what(IDEAS_WHAT), detail.ideasBody) });
+    app.replaceChildren(h("div", { class: "st-top" }, detail.lede, detail.note), calls, score, idea, detail.prov);
+  }
+
+  function provSaid(payload) {
+    const built = F.stamp(payload.generatedAt);
+    const parts = [];
+    if (built) parts.push("Built " + built);
+    if (typeof payload.sessionDate === "string" && payload.sessionDate) parts.push("session " + payload.sessionDate);
+    parts.push(sessionsSaid(ctx.sessions.length) + ", " + ctx.rows.length + " " + plural(ctx.rows.length, "name", "names"));
+    parts.push("no vendor calls");
+    return parts.join(" " + MID + " ") + ".";
+  }
+
+  function ideasInfo() {
+    const c = ideas.c;
+    const n = c && isNum(c.n) !== null ? c.n : 0;
+    return {
+      title: "Ideas settled",
+      lead: "Each night the engine ranks one lead structure for every name it prices. This freezes that idea, its fill and its stated chances the first night it appears, and settles it on the close of its expiry. A re-recommendation of the same strikes and expiry is not a new trial.",
+      facts: c ? [["Resolved", String(n)], ["Effective n", isNum(c.nEff) === null ? null : c.nEff.toFixed(1)], ["Clusters (expiry weeks)", isNum(c.clusters) === null ? null : String(c.clusters)], ["Intra-cluster correlation", isNum(c.rho) === null ? null : c.rho.toFixed(2) + (c.rhoFloored ? " (floored)" : "")], ["Since", c.firstArchive || null]] : null,
+      sections: [
+        { title: "Method", lines: [(c && c.note) || "European payoff at expiry from the daily close, early assignment ignored.", "Ideas that expire in the same ISO week share one market path, so they count as one cluster and the effective n is smaller than the number of ideas.", "Until the effective n reaches " + (c && isNum(c.needed) !== null ? c.needed : 100) + " no reliability figure is shown."] },
+        { title: "What is left out", lines: ["Calendars and diagonals cannot be settled from one close and are excluded, as are ideas across a split. Ideas on names that left the deep set are settled from a separate close fetch; those with no close yet are counted in No close yet, never dropped."] },
+      ],
+    };
+  }
+
+  function evidence(nEff, needed) {
+    const f = nEff === null ? 0 : Math.max(0, Math.min(1, nEff / needed));
+    return h("div", { class: "st-prog-w" },
+      h("span", null, "0"),
+      h("div", { class: "st-prog", role: "img", "aria-label": "Effective n " + (nEff === null ? "unstated" : nEff.toFixed(1)) + " of " + needed + " needed" }, h("i", { style: { width: (f * 100).toFixed(1) + "%" } })),
+      h("span", null, String(needed)));
   }
 
   function ideasBody(c) {
@@ -737,14 +880,12 @@
     const needed = isNum(c.needed) === null ? 100 : c.needed;
     const counts = c.counts && typeof c.counts === "object" ? c.counts : {};
     const share = isNum(counts.unresolvedShare);
-    const excluded = counts.excluded && typeof counts.excluded === "object" ? Object.keys(counts.excluded).reduce((a, k) => a + (isNum(counts.excluded[k]) || 0), 0) : 0;
-    const head = UI.metrics([
-      UI.metric("Resolved", String(n), { id: "ideasN", sub: "ideas with an expiry close" }),
-      UI.metric("Effective n", nEff === null ? DASH : nEff.toFixed(1), { id: "ideasEff", hero: true, sub: "of " + needed + " needed" }),
-      UI.metric("No close yet", share === null ? DASH : F.pct(share, 0), { id: "ideasGap", sub: (isNum(counts.pending) || 0) + " waiting, " + (isNum(counts.lost) || 0) + " lost" }),
-    ], { min: 96 });
+    const head = h("div", { class: "st-figs" },
+      fig({ id: "ideas", n: String(n), unit: plural(n, "idea settled", "ideas settled"), sub: share === null ? null : F.pct(share, 0) + " still without a close " + MID + " " + (isNum(counts.pending) || 0) + " waiting, " + (isNum(counts.lost) || 0) + " lost" }),
+      fig({ id: "eff", minor: true, n: nEff === null ? DASH : nEff.toFixed(1), of: String(needed), unit: "effective n, counting ideas of one expiry week once" }));
+    const meter = evidence(nEff, needed);
     if (!c.measured || !c.popP) {
-      return [head, h("p", { class: "st-note", role: "note" }, "Not yet measured. The model\u2019s real-world chance of profit has no outcome record that can be read yet: " + n + " resolved " + plural(n, "idea", "ideas") + ", effective n " + (nEff === null ? DASH : nEff.toFixed(1)) + " of " + needed + " needed, after ideas that expire in one week are counted as one. Until then each chance is shown with the note \u201cNot yet calibrated\u201d.")];
+      return [head, meter, silence("pending", "Not yet measured. The model’s real-world chance of profit has no outcome record that can be read yet: " + n + " resolved " + plural(n, "idea", "ideas") + ", effective n " + (nEff === null ? DASH : nEff.toFixed(1)) + " of " + needed + " needed, after ideas that expire in one week are counted as one. Until then each chance is shown with the note “Not yet calibrated”.")];
     }
     const view = c.popP;
     const rows = view.bins.filter((b) => b && b.n > 0).map((b) => h("tr", null,
@@ -755,54 +896,46 @@
       h("td", null, b.ci ? F.pct(b.ci[0], 0) + MID + F.pct(b.ci[1], 0) : DASH)));
     const q = c.popQ;
     const fix = (v, d = 3) => (isNum(v) === null ? DASH : v.toFixed(d));
-    return [head,
+    return [head, meter,
       h("div", { class: "flows-tablewrap" }, h("table", { class: "flows-table is-dense st-rel" },
         h("caption", { class: "flows-caption" }, "Stated chance of profit against what happened, ideas grouped by the chance the model gave them"),
         h("thead", null, h("tr", null, h("th", { scope: "col" }, "Stated"), h("th", { scope: "col" }, "Ideas"), h("th", { scope: "col" }, "Mean stated"), h("th", { scope: "col" }, "Profited"), h("th", { scope: "col" }, "95% interval"))),
         h("tbody", null, ...rows))),
-      UI.metrics([
-        UI.metric("Brier", fix(view.brier), { id: "ideasBrier", sub: "lower is better; " + fix(view.uncertainty) + " if every chance were the base rate" }),
-        UI.metric("Reliability", fix(view.reliability), { id: "ideasRel", sub: "gap between stated and observed" }),
-        UI.metric("Resolution", fix(view.resolution), { id: "ideasRes", sub: "how far the chances separated outcomes" }),
-        UI.metric("Log score", fix(view.logScore), { id: "ideasLog", sub: "lower is better" }),
-      ], { min: 120 }),
+      h("dl", { class: "st-facts" },
+        fact("Brier", fix(view.brier) + " " + MID + " lower is better; " + fix(view.uncertainty) + " if every chance were the base rate", "ideasBrier"),
+        fact("Reliability", fix(view.reliability) + " " + MID + " gap between stated and observed", "ideasRel"),
+        fact("Resolution", fix(view.resolution) + " " + MID + " how far the chances separated outcomes", "ideasRes"),
+        fact("Log score", fix(view.logScore) + " " + MID + " lower is better", "ideasLog")),
       q ? h("p", { class: "st-note" }, "The risk-neutral chance (popQ) is not meant to match frequencies; its Brier score here is " + fix(q.brier) + " against " + fix(view.brier) + " for the real-world chance, and its gap measures the risk premium.") : null,
     ];
   }
 
-  function ideasModule(c) {
-    const body = h("div", { class: "st-ide-b" }, ...ideasBody(c));
-    return UI.moduleCard({
-      id: "stIdeas", title: "Idea calibration", index: 4,
-      info: () => ({
-        title: "Idea calibration",
-        lead: "Each night the engine ranks one lead structure for every name it prices. This freezes that idea, its fill and its stated chances the first night it appears, and settles it on the close of its expiry. A re-recommendation of the same strikes and expiry is not a new trial.",
-        facts: [["Resolved", String(isNum(c.n) === null ? 0 : c.n)], ["Effective n", isNum(c.nEff) === null ? null : c.nEff.toFixed(1)], ["Clusters (expiry weeks)", isNum(c.clusters) === null ? null : String(c.clusters)], ["Intra-cluster correlation", isNum(c.rho) === null ? null : c.rho.toFixed(2) + (c.rhoFloored ? " (floored)" : "")], ["Since", c.firstArchive || null]],
-        sections: [
-          { title: "Method", lines: [c.note || "European payoff at expiry from the daily close, early assignment ignored.", "Ideas that expire in the same ISO week share one market path, so they count as one cluster and the effective n is smaller than the number of ideas.", "Until the effective n reaches " + (isNum(c.needed) === null ? 100 : c.needed) + " no reliability figure is shown."] },
-          { title: "What is left out", lines: ["Calendars and diagonals cannot be settled from one close and are excluded, as are ideas across a split. Ideas on names that left the deep set are settled from a separate close fetch; those with no close yet are counted in No close yet, never dropped."] },
-        ],
-      }),
-      body,
-    });
+  function paintIdeas() {
+    const host = detail.ideasBody;
+    if (!host) return;
+    if (ideas.phase === "loading") host.replaceChildren(loading("Reading the idea record."));
+    else if (ideas.phase === "fail") host.replaceChildren(silence("unavailable", "The calibration record could not be loaded. The score track above is unaffected."));
+    else if (ideas.phase === "pending") host.replaceChildren(silence("pending", "Not yet measured. No idea has been settled yet: the first one expires after the archive that records it, and the record starts with the first nightly run that wrote it."));
+    else host.replaceChildren(...ideasBody(ideas.c));
+    paintLede();
   }
 
   function loadIdeas() {
+    paintIdeas();
     get("/api/flows/calib").then((c) => {
       if (!c || typeof c !== "object") return;
-      const at = app.lastElementChild;
-      const mod = c.status === "pending"
-        ? UI.moduleCard({ id: "stIdeas", title: "Idea calibration", index: 4, body: h("p", { class: "st-note", role: "note" }, "Not yet measured. No idea has been settled yet: the first one expires after the archive that records it, and the record starts with the first nightly run that wrote it.") })
-        : ideasModule(c);
-      app.insertBefore(mod, at);
+      ideas.c = c.status === "pending" ? null : c;
+      ideas.phase = c.status === "pending" ? "pending" : "ok";
+      paintIdeas();
     }).catch(() => {
-      app.insertBefore(UI.moduleCard({ id: "stIdeas", title: "Idea calibration", index: 4, body: UI.silent({ state: "unavailable", reason: "The calibration record could not be loaded. The score track above is unaffected." }, "Idea calibration", 120) }), app.lastElementChild);
+      ideas.phase = "fail";
+      paintIdeas();
     });
   }
 
   function fail(kind, msg) {
     statusEl.textContent = msg;
-    app.replaceChildren(UI.moduleCard({ id: "stEmpty", title: "Track", body: UI.silent({ state: kind, reason: msg }, "Score track", 240) }));
+    app.replaceChildren(UI.moduleCard({ id: "stEmpty", title: "Track", body: silence(kind, msg) }));
   }
 
   get("/api/flows/scoretrack").then((payload) => {
@@ -835,6 +968,7 @@
     const stale = UI.staleness ? UI.staleness(payload, Date.now(), { subject: "This track" }) : null;
     if (head && stale && stale.message) head.replaceChildren(UI.stateButton({ state: "stale", reason: stale.message + " The right-hand edge of every strip is that run's session and not today's." }, "Track"));
     build();
+    detail.prov.textContent = provSaid(payload);
     renderList(false);
     loadIdeas();
     let want = null;

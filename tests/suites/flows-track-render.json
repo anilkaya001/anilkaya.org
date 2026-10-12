@@ -1,1 +1,1 @@
-{"name": "flows-track-render", "class": "C", "group": "shard", "timing": false, "medianS": 7.5, "shard": 5, "files": ["flows-track-render.mjs"], "covers": []}
+{"name": "flows-track-render", "class": "C", "group": "shard", "timing": false, "medianS": 7.5, "shard": 5, "files": ["flows-track-render.mjs"], "covers": ["assets/js/flows-track.js"]}

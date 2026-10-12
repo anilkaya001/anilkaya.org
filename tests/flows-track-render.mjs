@@ -39,14 +39,16 @@ const errors = [];
 let trackBody = TRACK;
 let calibBody = { status: "pending" };
 
-async function open(query = "", viewport = { width: 1440, height: 900 }, init = null) {
-  const page = await browser.newPage({ viewport });
+const TRACK_SRC = await readFile(new URL("assets/js/flows-track.js", ROOT), "utf8");
+async function open(query = "", viewport = { width: 1440, height: 900 }, init = null, opts = {}) {
+  const page = opts.touch ? await (await browser.newContext({ viewport, hasTouch: true, isMobile: true })).newPage() : await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(e.message));
   await page.addInitScript(() => { window.__winErrors = []; addEventListener("error", (e) => window.__winErrors.push(String(e.message))); });
   if (init) await page.addInitScript(init);
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     const json = (b) => route.fulfill({ contentType: "application/json", body: JSON.stringify(b) });
+    if (opts.src && u.pathname === "/assets/js/flows-track.js") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: opts.src });
     if (u.pathname === "/api/flows/scoretrack") return json(trackBody);
     if (u.pathname === "/api/flows/calib") return json(calibBody);
     if (u.pathname === "/api/flows/card") return json(u.searchParams.get("t") === "AAA" ? CARD : { ticker: u.searchParams.get("t"), status: "pending" });
@@ -111,41 +113,41 @@ const popOf = (page, sel) => page.evaluate((sel) => {
      JSON.stringify(strips) + ")");
 
   const out = await page.evaluate(() => {
-    const m = (id) => { const n = document.querySelector(`#stOutcomes [data-metric="${id}"]`); return n ? n.textContent : null; };
-    return { hit: m("hit"), calls: document.querySelectorAll("#stOutcomes .st-calls rect.grow").length,
-      open: !!document.querySelector("#stOutcomes .st-m-wh.is-open"),
-      tone: document.querySelector('#stOutcomes [data-metric="hit"] .ui-metric-v').getAttribute("data-tone") };
+    const m = (id) => { const n = document.querySelector(`#stCalls [data-fig="${id}"]`); return n ? n.innerText.replace(/\s+/g, " ") : null; };
+    return { hit: m("hit"), calls: document.querySelectorAll("#stCalls .st-calls rect.grow").length,
+      open: !!document.querySelector("#stCalls .st-m-wh.is-open"),
+      tone: document.querySelector('#stCalls [data-fig="hit"] .st-fig-n').getAttribute("data-tone") };
   });
   ok(out.open && !out.tone,
      "two closed calls at a five-session horizon are under two independent windows, so the adjusted " +
      "interval is drawn unbounded across the whole meter and the hit rate stays uncoloured — not a " +
      "Wilson interval on a sample rounded up to one (" + JSON.stringify({ open: out.open, tone: out.tone }) + ")");
-  ok(/50%/.test(out.hit) && /1 of 2 calls/.test(out.hit),
+  ok(/50%/.test(out.hit) && /1 of 2 calls right/.test(out.hit),
      "five sessions after each call, AAA was right once in two closed calls: the bullish call on " +
      "Sep 1 closed flat (100 → 100, not a hit), the bearish call on Sep 3 fell 101 → 97 (a hit) — " +
      "and the zero on Sep 4 is inside the band, so it is no call at all (" + out.hit + ")");
-  ok(/1 open/.test(out.hit) && !/of 3 calls/.test(out.hit),
+  ok(/1 still open/.test(out.hit) && !/of 3 calls/.test(out.hit),
      "the call on Sep 5 has no close five sessions later yet, so it is counted open beside the hit rate, " +
      "not added to its denominator as a miss (" + out.hit + ")");
 
   const settled = (before) => page.waitForFunction((b) => {
-    const n = document.querySelector('#stOutcomes [data-metric="hit"]');
-    return n && n.textContent !== b;
+    const n = document.querySelector('#stCalls [data-fig="hit"]');
+    return n && n.innerText.replace(/\s+/g, " ") !== b;
   }, before, { timeout: 4000 }).catch(() => {});
-  await page.click("#stOutcomes .ui-seg-i >> nth=0");
+  await page.click("#stCalls .ui-seg-i >> nth=0");
   await settled(out.hit);
-  const one = await page.evaluate(() => document.querySelector('#stOutcomes [data-metric="hit"]').textContent);
-  ok(await page.evaluate(() => !document.querySelector("#stOutcomes .st-m-wh.is-open") && !!document.querySelector("#stOutcomes .st-m-wh")),
+  const one = await page.evaluate(() => document.querySelector('#stCalls [data-fig="hit"]').innerText.replace(/\s+/g, " "));
+  ok(await page.evaluate(() => !document.querySelector("#stCalls .st-m-wh.is-open") && !!document.querySelector("#stCalls .st-m-wh")),
      "while three one-session calls are three independent windows, and the adjusted interval is bounded");
-  ok(/100%/.test(one) && /3 of 3 calls/.test(one),
+  ok(/100%/.test(one) && /3 of 3 calls right/.test(one),
      "one session after each call all three were right: +2.0% after the bullish Sep 1, −2.0% " +
      "after the bearish Sep 3, +2.0% after the bullish Sep 5 (" + one + ")");
-  await page.click("#stOutcomes .ui-seg-i >> nth=2");
+  await page.click("#stCalls .ui-seg-i >> nth=2");
   await settled(one);
-  const ten = await page.evaluate(() => document.querySelector('#stOutcomes [data-metric="hit"] .ui-state') !== null);
+  const ten = await page.evaluate(() => document.querySelector('#stCalls .st-sil[data-s="pending"] .ds-st') !== null && !/0%/.test(document.querySelector('#stCalls [data-fig="hit"]').innerText));
   ok(ten, "and at ten sessions no call has closed yet, so the hit rate is a pending glyph rather than 0%");
 
-  const outInfo = await popOf(page, "#stOutcomes .ui-mod-h .ui-info");
+  const outInfo = await popOf(page, "#stCalls .ui-mod-h .ui-info");
   ok(/adjusted 95% interval/i.test(outInfo) && /divided by the horizon/.test(outInfo),
      "the outcomes disclosure states both intervals and why the adjusted one is wider");
 
@@ -166,13 +168,13 @@ const popOf = (page, sel) => page.evaluate((sel) => {
      "a link that names a ticker opens on that name");
   await page.waitForTimeout(300);
   const sil = await page.evaluate(() => {
-    const s = document.querySelector("#stOutcomes .ui-silent");
-    return s ? s.getAttribute("data-state") : null;
+    const s = document.querySelector('#stCalls .st-sil .ds-st');
+    return s ? s.getAttribute("data-s") : null;
   });
   eq(sil, "unavailable",
      "a name with no published card has no closes on hand, so its outcomes are drawn as the " +
      "unavailable state rather than as zero calls or an empty chart");
-  const why = await popOf(page, "#stOutcomes .ui-silent [data-info]");
+  const why = await page.evaluate(() => document.querySelector("#stCalls .st-sil-t").textContent);
   ok(/BBB/.test(why) && /closes/.test(why),
      "and the reason names the name and what is missing (" + why + ")");
   await page.close();
@@ -181,7 +183,7 @@ const popOf = (page, sel) => page.evaluate((sel) => {
 {
   trackBody = { status: "pending" };
   const page = await open();
-  eq(await page.evaluate(() => document.querySelector("#stTrack .ui-silent").getAttribute("data-state")), "pending",
+  eq(await page.evaluate(() => document.querySelector("#stTrack .st-sil").getAttribute("data-s")), "pending",
      "an unpublished track is the pending state");
   ok(/not published this key yet/.test(await page.evaluate(() => document.getElementById("stStatus").textContent)),
      "and says it has not been published, not that the pool was empty");
@@ -193,9 +195,9 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   const page = await open("", { width: 390, height: 844 });
   const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   ok(over <= 1, "nothing widens the document at 390px (" + over + "px)");
-  const order = await page.evaluate(() => [...document.querySelectorAll("#stTrack > .ui-mod")].map((m) => m.id));
-  ok(order.indexOf("stName") < order.indexOf("stOutcomes") && order.indexOf("stOutcomes") < order.indexOf("stNames"),
-     "on a phone the selected name and its outcomes come before the list of every name (" + order.join(", ") + ")");
+  const order = await page.evaluate(() => [...document.querySelectorAll("#stTrack .ui-mod, #stName, #stNames")].map((m) => m.id));
+  ok(order.indexOf("stCalls") < order.indexOf("stName") && order.indexOf("stName") < order.indexOf("stNames") && order.indexOf("stNames") < order.indexOf("stIdeas"),
+     "on a phone the calls and the selected name come before the list of every name, and the ideas last (" + order.join(", ") + ")");
   await page.close();
 }
 
@@ -836,7 +838,7 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   await page.waitForSelector("#stIdeas");
   ok(/Not yet measured/.test(await text(page, "#stIdeas")), "IDEA CALIBRATION: before any idea has settled, Track says it is not yet measured");
   eq(await page.evaluate(() => document.querySelectorAll("#stIdeas table").length), 0, "and draws no table of numbers it does not have");
-  eq(await page.evaluate(() => document.getElementById("stIdeas").nextElementSibling === document.getElementById("stNames")), true, "the module sits ahead of the names list");
+  eq(await page.evaluate(() => document.getElementById("stScore").nextElementSibling === document.getElementById("stIdeas")), true, "the ideas block follows the score track block");
   await page.close();
 
   calibBody = CALIB;
@@ -868,6 +870,200 @@ const popOf = (page, sel) => page.evaluate((sel) => {
   calibBody = { status: "pending" };
 }
 
+
+const TRACK3 = { ...TRACK, namesSeen: 3, names: [...TRACK.names, { t: "CCC", s: [10, null, -10, 5, null], n: 3, last: 5, lastAt: 3, d1: { v: 15, gap: 2, qv: 10, cross: null }, run: 1, ext: { hi: 10, hiAt: 0, lo: -10, loAt: 2 } }] };
+const CALIB3 = { v: 1, status: "ok", sessionDate: "2026-09-05", generatedAt: "2026-09-06T02:00:00.000Z", through: "2026-09-05", firstArchive: "2026-03-02", needed: 100, measured: false, nEff: 31.4, n: 88, clusters: 19, icc: 0.12, rho: 0.12, rhoFloored: true, counts: { resolved: 88, pending: 4, lost: 1, excluded: {}, noPopP: 0, unresolvedShare: 0.0538 }, popP: null, popQ: null, note: "x" };
+
+const nextFrames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 120)))));
+async function pick(page, t) {
+  await page.click(`.st-row[data-t="${t}"]`);
+  await page.waitForFunction((t) => document.querySelector(".st-name-t .st-open-t").textContent === t, t);
+  await nextFrames(page);
+  await page.waitForTimeout(250);
+}
+const maxBar = (page) => page.evaluate(() => Math.max(...[...document.querySelectorAll("#stChart svg rect.grow")].map((r) => +r.getAttribute("height"))));
+
+async function hierarchy(page) {
+  const bad = [];
+  const note = (c, m) => { if (!c) bad.push(m); };
+  const txt = (sel) => page.evaluate((sel) => { const e = document.querySelector(sel); return e ? e.innerText.replace(/\s+/g, " ").trim() : null; }, sel);
+  const lede = await page.evaluate(() => {
+    const e = document.getElementById("stLede"), c = document.getElementById("stCalls");
+    if (!e || !c) return null;
+    return { text: e.innerText.replace(/\s+/g, " ").trim(), size: parseFloat(getComputedStyle(e).fontSize), above: e.getBoundingClientRect().bottom <= c.getBoundingClientRect().top };
+  });
+  note(lede && /^AAA was right on 1 of 2 calls that have closed five sessions on, across the 5 sessions from Sep 1 to Sep 5; 1 is still open\.$/.test(lede.text), "LEAD: one sentence with the hit count, its denominator and the sessions it covers (" + (lede && lede.text) + ")");
+  note(lede && !/\b(will|expect|should|guarantee|promise|predict|forecast|likely)\b/i.test(lede.text), "LEAD: no promise in the sentence");
+  note(lede && lede.size >= 18 && lede.above, "LEAD: set larger than body text and above every block");
+  const blocks = await page.evaluate(() => ["stCalls", "stScore", "stIdeas"].map((id) => {
+    const sec = document.getElementById(id);
+    if (!sec) return null;
+    const h2 = sec.querySelector("h2"), w = sec.querySelector(".st-what"), head = sec.querySelector(".ui-mod-h");
+    const lh = w ? parseFloat(getComputedStyle(w).lineHeight) : 0;
+    return { h2: h2 && h2.textContent, what: w && w.textContent, directly: !!w && w === sec.querySelector(".st-blk-b").firstElementChild && head.nextElementSibling === sec.querySelector(".st-blk-b"), lines: w ? Math.round(w.getBoundingClientRect().height / lh) : 0, over: w && h2 ? w.getBoundingClientRect().top >= h2.getBoundingClientRect().bottom : false };
+  }));
+  const names = ["Calls scored", "Score track per name", "Ideas settled"];
+  blocks.forEach((b, i) => {
+    note(b && b.h2 === names[i], "BLOCK: " + names[i] + " is a labelled section in order");
+    note(b && b.directly && b.over && /\.$/.test(b.what) && b.what.length <= 160, "BLOCK: " + names[i] + " states what it measures in one plain sentence under its heading");
+    note(b && b.lines === 1, "BLOCK: and it fits one line at 1440 px (" + (b && b.lines) + ")");
+  });
+  const figs = await page.evaluate(() => ["stCalls", "stScore", "stIdeas"].map((id) => {
+    const f = document.querySelector(`#${id} .st-fig`);
+    if (!f) return null;
+    const n = f.querySelector(".st-fig-n"), u = f.querySelector(".st-fig-u");
+    return { first: !!(n.compareDocumentPosition(u) & Node.DOCUMENT_POSITION_FOLLOWING), big: parseFloat(getComputedStyle(n).fontSize) > parseFloat(getComputedStyle(u).fontSize) * 1.5, tab: /tabular-nums/.test(getComputedStyle(n).fontVariantNumeric), text: f.innerText.replace(/\s+/g, " ") };
+  }));
+  figs.forEach((f, i) => {
+    note(f && f.first && f.big && f.tab, "FIGURE: " + names[i] + " leads with its number, large and tabular, before its label");
+  });
+  note(figs[0] && /^1 of 2 calls right, five sessions on/.test(figs[0].text), "FIGURE: calls print the count over its denominator and the horizon (" + (figs[0] && figs[0].text) + ")");
+  note(figs[1] && /of 5 sessions/.test(figs[1].text), "FIGURE: the score prints the sessions it was scored on out of (" + (figs[1] && figs[1].text) + ")");
+  note(figs[2] && /^88 ideas settled/.test(figs[2].text) && /31\.4 of 100/.test(await txt("#stIdeas")), "FIGURE: ideas print the count and the effective n against the 100 needed");
+  const cap = (id) => page.evaluate((id) => { const e = document.querySelector(`[data-cap="${id}"]`); return e ? { text: e.innerText.replace(/\s+/g, " "), max: +e.dataset.max } : null; }, id);
+  const sc = await cap("score-scale"), se = await cap("score-ends");
+  note(sc && sc.max === 40 && /−40 to \+40/.test(sc.text), "SCALE: the score block states one scale, the page's largest score (" + (sc && sc.text) + ")");
+  const strips = await page.evaluate(() => {
+    const out = {};
+    for (const t of ["AAA", "CCC"]) {
+      const st = document.querySelector(`.st-row[data-t="${t}"] .st-strip`);
+      const mid = +st.querySelector("line.st-zero").getAttribute("y1");
+      out[t] = { mid, hs: [...st.querySelectorAll("rect")].map((r) => +r.getAttribute("height")) };
+    }
+    return out;
+  });
+  note(Math.abs(Math.max(...strips.AAA.hs) - (strips.AAA.mid - 1)) < 0.01 && Math.abs(Math.max(...strips.CCC.hs) - (10 / 40) * (strips.CCC.mid - 1)) < 0.01, "SCALE: every strip is drawn at value over the stated scale, so a name of ±10 is a quarter of one of ±40");
+  note(se && /First score, Sep 1 \+10/.test(se.text) && /Latest score, Sep 5 \+40/.test(se.text) && /Close, Sep 1 100\.00 to Sep 5 98\.00/.test(se.text), "ENDPOINTS: first and latest score and close are printed (" + (se && se.text) + ")");
+  const hb = await maxBar(page);
+  await pick(page, "BBB");
+  const hB = await maxBar(page);
+  await pick(page, "CCC");
+  const hC = await maxBar(page);
+  note(Math.abs(hC / hB - 0.25) < 0.02, "SCALE: the name chart is on the page scale, ±10 a quarter of ±40 (" + (hC / hB).toFixed(3) + ")");
+  note(hb > 0, "chart draws");
+  await pick(page, "AAA");
+  await page.click("#stCalls .ui-seg-i >> nth=0");
+  await page.waitForFunction(() => /3 of 3/.test(document.querySelector('#stCalls [data-fig="hit"]').innerText.replace(/\s+/g, ' ')));
+  await page.evaluate(() => { document.querySelector("#stCalls details").open = true; });
+  await nextFrames(page);
+  await page.waitForTimeout(400);
+  const ce = await cap("calls-scale"), cs = await cap("calib-scale");
+  const maxAbs = 100 / 98 - 1;
+  note(ce && ce.max >= maxAbs && ce.max < 2 * maxAbs && cs && cs.max === ce.max, "SCALE: the calls block states one return scale for both charts (" + (ce && ce.max) + ")");
+  note(ce && ce.text.includes("First closed call, Sep 1 +2.0%") && ce.text.includes("Latest closed call, Sep 5 +2.0%"), "ENDPOINTS: first and latest closed call printed (" + (ce && ce.text) + ")");
+  const geo = await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
+    const host = document.querySelector("#stCalls .st-calls");
+    const ref = document.createElement("div");
+    ref.style.width = host.clientWidth + "px";
+    document.body.append(ref);
+    window.FlowsUI.chart.diverging(ref, { values: [1, -1], max: 1, height: [150, 160, 170], label: "ref" });
+    await frame(); await frame();
+    const half = Math.max(...[...ref.querySelectorAll("rect.grow")].map((r) => +r.getAttribute("height")));
+    ref.remove();
+    const bars = [...host.querySelectorAll("rect.grow")].map((r) => +r.getAttribute("height"));
+    const sc = document.querySelector("#stCalib svg");
+    const q = sc.querySelector("rect.sc-q");
+    const base = [...sc.querySelectorAll("line.base")];
+    const hz = base.find((l) => l.getAttribute("y1") === l.getAttribute("y2")), vt = base.find((l) => l.getAttribute("x1") === l.getAttribute("x2"));
+    const pts = [...sc.querySelectorAll("circle.sc-pt")].map((c) => ({ cx: +c.getAttribute("cx"), cy: +c.getAttribute("cy") }));
+    return { half, bars, qh: +q.getAttribute("height"), qw: +q.getAttribute("width"), y0: +hz.getAttribute("y1"), x0: +vt.getAttribute("x1"), pts };
+  });
+  note(geo.bars.length === 3 && Math.abs(Math.max(...geo.bars) - (maxAbs / ce.max) * geo.half) < 0.6, "SCALE: the bars are drawn at return over the stated scale (" + Math.max(...geo.bars).toFixed(2) + " vs " + ((maxAbs / ce.max) * geo.half).toFixed(2) + ")");
+  const right = geo.pts.reduce((a, b) => (b.cx > a.cx ? b : a));
+  note(Math.abs((geo.y0 - right.cy) - (maxAbs / ce.max) * geo.qh) < 0.6 && Math.abs((right.cx - geo.x0) - geo.qw) < 0.6, "SCALE: the scatter's return axis is the same stated scale and its score axis the page's");
+  await page.click("#stCalls .ui-seg-i >> nth=1");
+  await page.waitForFunction(() => /1 of 2/.test(document.querySelector('#stCalls [data-fig="hit"]').innerText.replace(/\s+/g, ' ')));
+  await pick(page, "BBB");
+  const sil = await page.evaluate(() => [...document.querySelectorAll("#stCalls .ds-st")].map((c) => c.dataset.s + ":" + c.textContent + ":" + (c.querySelector("i") ? 1 : 0)));
+  note(sil.join() === "unavailable:Unavailable:1", "STATE: a silence is the kit's state chip with its glyph and name (" + sil.join() + ")");
+  await pick(page, "AAA");
+  return bad;
+}
+
+{
+  trackBody = TRACK3;
+  calibBody = CALIB3;
+  const page = await open();
+  eq(JSON.stringify(await hierarchy(page)), "[]", "the redesigned hierarchy passes its own audit");
+  const prov = await page.evaluate(() => document.getElementById("stProv").innerText);
+  ok(/^Built 2026-09-06 05:00 TRT · session 2026-09-05 · 5 sessions, 3 names · no vendor calls\.$/.test(prov), "provenance is one quiet line in TRT (" + prov + ")");
+  await page.close();
+
+  const MUTANTS = [
+    ["const max = ctx.top;", "const max = Math.max(...r.s.filter((v) => v !== null).map(Math.abs), 1);", "chart on its own scale"],
+    ["const max = Math.max(1, top);", "const max = Math.max(1, ...values.filter((v) => v !== null).map(Math.abs));", "strips on their own scale"],
+    ['"Score scale ", bold(MINUS + ctx.top + " to +" + ctx.top)', '"Score scale ", bold(MINUS + 100 + " to +" + 100)', "a stated scale that is not the drawn one"],
+    ["detail.lede.textContent = leadSaid(r);", 'detail.lede.textContent = "";', "no lead sentence"],
+    ['h("span", { class: "st-fig-n", "data-tone": o.tone || null }, o.n, o.of ? h("span", { class: "st-fig-of" }, " of " + o.of) : null),\n      h("span", { class: "st-fig-u" }, o.unit),', 'h("span", { class: "st-fig-u" }, o.unit),\n      h("span", { class: "st-fig-n", "data-tone": o.tone || null }, o.n, o.of ? h("span", { class: "st-fig-of" }, " of " + o.of) : null),', "label before number"],
+    ['caption("score-ends", null,', 'caption("score-ends-none", null,', "no printed endpoints"],
+    ["const xm = ctx.top, ym = R;", "const xm = ctx.top, ym = Math.max(0.005, ...pts.map((p) => Math.abs(p.y))) * 1.15;", "scatter on its own return scale"],
+    ["height: [150, 160, 170], max: R,", "height: [150, 160, 170],", "bars on their own return scale"],
+    ['return r.t + " was right on " + rec.o.hits', 'return r.t + " will be right on " + rec.o.hits', "a promise in the lead"],
+    ['silence(card.state || "unavailable", card.reason', 'h("p", { class: "st-sil" }, card.reason', "silence without the state chip"],
+  ];
+  for (const [from, to, why] of MUTANTS) {
+    ok(TRACK_SRC.includes(from), `the planted build "${why}" targets code that exists`);
+    const bad = await (async () => {
+      const pg = await open("", { width: 1440, height: 900 }, null, { src: TRACK_SRC.replace(from, to) });
+      try { return await hierarchy(pg); } catch (e) { return ["threw: " + e.message.split("\n")[0]]; } finally { await pg.close(); }
+    })();
+    ok(bad.length > 0, `the audit fails the planted build "${why}"`);
+  }
+  trackBody = TRACK;
+  calibBody = { status: "pending" };
+}
+
+{
+  trackBody = TRACK3;
+  for (const w of [320, 390, 768, 1440]) {
+    const page = await open("", { width: w, height: 844 }, null, { touch: w < 768 });
+    ok((await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1, `${w}px: no horizontal overflow`);
+    const outline = await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3")].map((h) => h.tagName + ":" + h.textContent.trim()));
+    ok(outline[0] === "H1:Track" && outline.filter((x) => x.startsWith("H2")).length === 3 && outline.every((x, i, a) => i === 0 || +x[1] <= +a[i - 1][1] + 1), `${w}px: heading outline h1, three h2, h3 under them (${outline.join(" | ")})`);
+    await page.evaluate(() => { const d = document.querySelector("#stCalls details"); if (d) d.open = true; });
+    await page.waitForTimeout(300);
+    const skew = await page.evaluate(() => [...document.querySelectorAll("#stChart svg, #stCalls .st-calls svg")].map((svg) => { const b = svg.getBoundingClientRect(), v = svg.viewBox.baseVal; return Math.abs(b.width - v.width) + Math.abs(b.height - v.height); }));
+    ok(skew.length >= 1 && skew.every((d) => d < 1.5), `${w}px: charts keep their aspect (${skew.join(",")})`);
+    if (w < 768) {
+      const small = await page.evaluate(() => {
+        const out = [];
+        for (const c of document.querySelectorAll("#stTrack button, #stTrack a[href], #stTrack summary, #stTrack input")) {
+          if (c.closest(".visually-hidden") || !c.offsetParent) continue;
+          c.scrollIntoView({ block: "center", behavior: "instant" });
+          const r = c.getBoundingClientRect();
+          if (r.width >= 43.5 && r.height >= 43.5) continue;
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          const hit = [[-21, 0], [21, 0], [0, -21], [0, 21]].every(([dx, dy]) => { const e = document.elementFromPoint(Math.min(innerWidth - 1, Math.max(0, cx + dx)), Math.min(innerHeight - 1, Math.max(0, cy + dy))); return e && (c === e || c.contains(e)); });
+          if (!hit) out.push((c.className || c.tagName) + " " + Math.round(r.width) + "x" + Math.round(r.height));
+        }
+        return out;
+      });
+      eq(small.join("; "), "", `${w}px: every control reaches a 44 px target`);
+    }
+    await page.close();
+  }
+  {
+    const ctxR = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+    const pg = await ctxR.newPage();
+    await pg.route("**/*", async (route) => {
+      const u = new URL(route.request().url());
+      const json = (b) => route.fulfill({ contentType: "application/json", body: JSON.stringify(b) });
+      if (u.pathname === "/api/flows/scoretrack") return json(TRACK3);
+      if (u.pathname.startsWith("/api/")) return json({ status: "pending" });
+      if (u.pathname.startsWith("/assets/")) return route.fulfill({ contentType: u.pathname.endsWith(".css") ? "text/css" : "text/javascript", body: await readFile(new URL("." + u.pathname, ROOT)).catch(() => "") });
+      return route.fulfill({ contentType: "text/html; charset=utf-8", body: trackPage({ username: "tester" }) });
+    });
+    await pg.goto("https://x.test/flows/track/");
+    await pg.waitForSelector("#stLede");
+    await pg.waitForTimeout(600);
+    const moving = await pg.evaluate(() => document.getAnimations().filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && t.iterations === Infinity; }).length);
+    eq(moving, 0, "reduced motion: nothing on the page loops");
+    await ctxR.close();
+  }
+  trackBody = TRACK;
+}
+
 eq(errors.length, 0, "and the page threw nothing: " + errors.join(" | "));
 await browser.close();
 
@@ -883,4 +1079,4 @@ console.log(`✓ flows-track-render: ${checks} assertions — a score track that
   `read from one computed style; a live line updated in place, its svg, crosshair, readout and focus kept, ` +
   `the newest point drawn and nothing re-animated; an exact zero drawn neutral by diverging and heatmap, ` +
   `its dot and readout without a side, and apart from an absence in the cell, the readout and the legend key; ` +
-  `and a score track with no published dead band still draws its zero neutral on the axis`);
+  `and a score track with no published dead band still draws its zero neutral on the axis; and a record that opens on one lead sentence with its hit count and the sessions it covers, three labelled blocks each with a plain line on what it measures, its number before its label, one stated scale per block and its endpoints printed, silences as state chips, ten planted wrong builds failed, and no overflow, skewed chart or short tap target at 320, 390, 768 and 1440`);
