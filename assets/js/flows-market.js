@@ -421,7 +421,7 @@
         return;
       }
       const opts = {
-          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: ax.fmt, zero: true, height: [220, 260, 300],
+          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: ax.fmt, zero: true, height: [200, 210, 220],
           series: [
             { values: v.call, color: "--up", label: "Net calls", format: usdS },
             { values: v.put, color: "--down", label: "Net puts", dash: true, format: usdS },

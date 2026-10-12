@@ -252,11 +252,9 @@
    "fit": [
     [
      "hmHero",
+     "hmVerdict",
      "network",
      "moves"
-    ],
-    [
-     "hmVerdict"
     ]
    ],
    "peek": "hmMetals",

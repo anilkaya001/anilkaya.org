@@ -149,7 +149,7 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   eq(TABLE.deferred, ["hmChg", "hmVol", "hmEvents", "hmNews"], "the deferred chunk F-08 cuts holds exactly What changed, Volatility, Reporting and Headlines");
   ok(TABLE.modules.every((m) => facts.referenced(m.bodyId)), "every module's body id is still the one the page and its script use");
   ok(TABLE.modules.filter((m) => m.effect !== "now").every((m) => facts.referenced(m.id)), "a retirement that waits for its replacement leaves the module rendered until then");
-  eq(TABLE.layouts["1440x900"].fit, [["hmHero", "network", "moves"], ["hmVerdict"]], "at 1440x900 the tide, the network and the Moves band share the first row and the verdict sits under them");
+  eq(TABLE.layouts["1440x900"].fit, [["hmHero", "hmVerdict", "network", "moves"]], "at 1440x900 the tide, the verdict beside it, the network and the Moves band share the first row");
   eq(TABLE.layouts["390x844"].fit, [["hmHero"]], "at 390x844 only the tide is wholly above the fold and the network peeks under it");
   eq(TABLE.layouts["390x844"].peek, "network", "the stacked network is what a phone reader sees begin");
 }
@@ -200,7 +200,7 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(weightNone !== weightWith, "the removal of the Home entry found its anchor");
   ok(has(bad(() => {}, () => facts, weightNone), "neither defers"), "with no entry and no pointer to F-08 part a it fails");
 
-  ok(has(bad((t) => { t.layouts["1440x900"].fit[1].push("hmChg"); }), "hmChg is deferred and cannot be in the fold"), "a deferred module in the fold fails");
+  ok(has(bad((t) => { t.layouts["1440x900"].fit[0].push("hmChg"); }), "hmChg is deferred and cannot be in the fold"), "a deferred module in the fold fails");
   ok(has(bad((t) => { t.layouts["1440x900"].peek = "hmAlerts"; }), "hmAlerts is retired and cannot be in the fold"), "a retired module in the fold fails");
   ok(has(bad((t) => { t.layouts["390x844"].fit.push(["network"]); }), "an id is placed twice in the fold"), "an id placed twice in a fold fails");
   ok(has(bad((t) => { t.order.push("hmNew"); }), "neither the hero, a module nor a slot"), "an unknown id in the order fails");
@@ -219,11 +219,11 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   const measured = (headBottom, gap, heights) => ({ headBottom, gap, heights });
   const good = foldProblems(t, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 105, hmMetals: 340 }));
   eq(good.problems, [], "on the heights measured at a3ce932 the 1440x900 fold holds the tide row and the verdict");
-  eq(good.peekTop, 701, "and Metals begins at 701 px, 199 px of it above the fold");
+  eq(good.peekTop, 576, "and Metals begins at 576 px, 324 px of it above the fold");
   const slotTall = clone(t);
-  slotTall.slots.network.heightPx["1440x900"] = 700;
+  slotTall.slots.network.heightPx["1440x900"] = 800;
   ok(has(foldProblems(slotTall, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 105 })).problems, "below the 900 px fold"), "A SLOT TALLER THAN THE FOLD ALLOWS FAILS");
-  ok(has(foldProblems(t, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 400 })).problems, "starts at"), "a verdict that grows until Metals no longer shows fails");
+  ok(has(foldProblems(t, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 700 })).problems, "starts at"), "a verdict that grows until Metals no longer shows fails");
   ok(has(foldProblems(t, "1440x900", measured(153, 20, { hmHero: 900, hmVerdict: 105 })).problems, "below the 900 px fold"), "a hero that grows past the fold fails");
   ok(has(foldProblems(t, "390x844", measured(153, 16, { hmHero: 700 })).problems, "starts at"), "a phone tide so tall that the network does not peek fails");
   const phone = foldProblems(t, "390x844", measured(153, 16, { hmHero: 552 }));
@@ -289,6 +289,10 @@ try {
     eq(m.ids, [TABLE.hero.id, ...pageFacts(html, OVERVIEW_JS).modules], `${vp}: the rendered grid is the hero and the twelve modules the table decides`);
     ok(m.ids.filter((i) => i !== TABLE.hero.id).every((i) => TABLE.modules.some((x) => x.id === i)), `${vp}: every rendered module has a decision`);
     ok(m.overflowX <= 0, `${vp}: no horizontal scroll`);
+    if (layout.width >= 1440) {
+      eq(m.tops.hmVerdict, m.tops.hmHero, `${vp}: the verdict sits beside the tide`);
+      ok(m.tops.hmHero + m.heights.hmHero <= layout.height && m.tops.hmVerdict + m.heights.hmVerdict <= layout.height, `${vp}: the tide and the verdict end inside the first screen`);
+    }
     ok(m.headBottom > 0 && m.gap >= 8 && m.gap <= 40, `${vp}: the head ends at ${m.headBottom} px and modules sit ${m.gap} px apart`);
     const f = foldProblems(TABLE, vp, m);
     eq(f.problems, [], `${vp}: the modules and slots the table puts above the fold fit it, and ${layout.peek} begins at ${f.peekTop} px (${layout.height - f.peekTop} px above the fold)`);

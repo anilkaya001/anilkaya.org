@@ -65,7 +65,7 @@ const CSS_KIB = {
   askPage: 93 + 565 / 1024,
   strategyPage: 111 + 565 / 1024,
   trackPage: 99,
-  marketPage: 94 + 1263 / 1024,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024,
   unusualPage: 113 + 5007 / 1024,
   eventsPage: 105 + 565 / 1024,
   movesPage: 113,

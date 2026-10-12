@@ -39,7 +39,7 @@ const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQ
   ok(/UI\.defer\("market-below", \{ when: "visible", el: \$\("mkSectorsCard"\)/.test(first), "the first-paint file asks for the group when Momentum, the first lower module, is visible");
 }
 
-async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = "ok", chunkDelay = 0, dataDelay = 0, saveData = false } = {}) {
+async function open(browser, { viewport = { width: 1440, height: 700 }, chunk = "ok", chunkDelay = 0, dataDelay = 0, saveData = false } = {}) {
   const context = await browser.newContext({ viewport });
   const log = [];
   const state = { chunk };
@@ -92,7 +92,7 @@ try {
     await upperReady(page);
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
     await sleep(2500);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED WHILE THE FIRST LOWER MODULE IS FAR BELOW THE FOLD: nothing asked for it in 2.5 s after the load event at 1440x900");
+    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED WHILE THE FIRST LOWER MODULE IS FAR BELOW THE FOLD: nothing asked for it in 2.5 s after the load event at 1440x700");
     ok(await page.evaluate(() => document.getElementById("mkSectorsCard").getBoundingClientRect().top > innerHeight + 200), "Momentum is more than 200 px below the viewport");
     eq(await bodies(page, LOWER), zero(LOWER), "the fourteen lower bodies hold no drawing");
     eq(await page.evaluate(() => window.FlowsUI.marketKit.attached), false, "FlowsUI.marketKit says it is not attached");
@@ -180,6 +180,19 @@ try {
     await page.click("#mkSectorsCard .ui-defer button");
     await lowerPainted(page);
     eq(requested(log).length, 1, "pressing it loads the chunk once");
+    eq(errors, [], "no page error");
+    await context.close();
+  }
+
+  for (const [width, height] of [[1440, 900], [1920, 1080]]) {
+    const { context, page, errors } = await open(browser, { viewport: { width, height } });
+    await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
+    await upperReady(page);
+    await sleep(800);
+    const bottoms = await page.evaluate(() => Object.fromEntries(["mkTideCard", "mkBreadthCard", "mkTapeCard", "mkSecTidesCard"].map((id) => [id, Math.round(document.getElementById(id).getBoundingClientRect().bottom)])));
+    for (const [id, bottom] of Object.entries(bottoms)) ok(bottom <= height, `AT ${width}x${height} ${id} ends at ${bottom} px, inside the first screen`);
+    const row = await page.evaluate(() => ["mkTideCard", "mkBreadthCard"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
+    eq(row[0], row[1], `and the Tide and Breadth sit side by side at ${width}`);
     eq(errors, [], "no page error");
     await context.close();
   }
