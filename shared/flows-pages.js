@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "270";
+export const ASSET_VERSION = "271";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -857,7 +857,7 @@ export function trackPage({ username = "" } = {}) {
     active: "track", chart: true,
     username,
     chrome: false,
-    styles: ["/assets/css/flows-record.css"],
+    styles: ["/assets/css/flows-record.css", "/assets/css/flows-track.css"],
     scripts: ["/assets/js/flows-track.js"],
     body: `
   <header class="flows-head rec-head" data-fx-hero>
