@@ -1,1 +1,1 @@
-{"name": "flows-overview", "class": "W", "group": "shard", "timing": false, "medianS": 73.2, "shard": 4, "files": ["flows-overview-contract.mjs"], "covers": ["schema.sql"]}
+{"name": "flows-overview", "class": "W", "group": "shard", "timing": false, "medianS": 73.2, "shard": 4, "files": ["flows-overview-contract.mjs"], "covers": ["schema.sql","wrangler.toml"]}
