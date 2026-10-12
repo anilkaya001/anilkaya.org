@@ -12,6 +12,7 @@ import { OPS, opById, opsFor, pathFor, BUDGETS, PLAN, LICENCES, PLANS, LIMITERS 
 import { PACKET_CLASSES, DOSSIER_OPS } from "../shared/flows-dossier.js";
 import { SOURCES } from "../shared/flows-dossier-worker.js";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
+import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
 import { RATE as NIGHTLY_RATE } from "../scripts/flows-nightly/vendor-params.mjs";
 
@@ -237,6 +238,9 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(BUDGETS.tier2.paceMs, LIVE_BUDGET.tier2PaceMs, "BUDGETS: Tier 2's pace is the live registry's");
   eq(BUDGETS.tier2.perMinute, Math.floor(60000 / LIVE_BUDGET.tier2PaceMs), "and its calls a minute follow from the pace");
   eq(BUDGETS.tier2.maxCallsPerPass, LIVE_BUDGET.tier2MaxCalls, "BUDGETS: Tier 2's calls a pass are the live registry's");
+  eq(BUDGETS.premarketNews.everyMin, PREMARKET_NEWS.everyMin, "BUDGETS: the pre-market news cadence is the Worker's");
+  eq(BUDGETS.premarketNews.callsPerFiring, PREMARKET_NEWS.callsPerFiring, "and its calls a firing");
+  eq(BUDGETS.premarketNews.maxFiringsPerDay, PREMARKET_NEWS.maxFiringsPerDay, "and its firings a day");
   eq(BUDGETS.rail.perMinute, RT_LIMITS.callsPerMinute, "BUDGETS: the rail's calls a minute are the hub's");
   ok(Object.hasOwn(PLAN, PLAN.selected) && PLAN.selected === "observed", "PLAN selects the observed key, whose per-minute line is the vendor's header value");
   eq(PLAN.observed.perMinute, 1000000, "x-uw-req-per-minute-remaining as measured on 2026-10-04");

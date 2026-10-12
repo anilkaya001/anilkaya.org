@@ -37,7 +37,7 @@ const META = {
 const SPEND = { spend: { day: "2026-10-11", calls: 41, tokensIn: 52000, tokensOut: 9000, allowanceNeurons: 10000, neurons: 2300, remaining: 7700,
   byModel: [{ model: "m-one", calls: 30, tokensIn: 40000, tokensOut: 7000, neurons: 1800 }, { model: "m-two", calls: 11, tokensIn: 12000, tokensOut: 2000, neurons: null }] } };
 
-async function open(browser, { width = 1440, rail, meta, ai }) {
+async function open(browser, { width = 1440, rail, meta, ai, ready }) {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const asked = [];
   const errors = [];
@@ -52,7 +52,7 @@ async function open(browser, { width = 1440, rail, meta, ai }) {
     if (u.pathname === "/flows/status/") return route.fulfill({ contentType: "text/html; charset=utf-8", body: PAGES.statusPage({ username: "anilkaya" }) });
     if (u.pathname.startsWith("/api/")) {
       asked.push(u.pathname);
-      const world = { "/api/rt/status": rail, "/api/flows/meta": meta, "/api/flows/ai-usage": ai }[u.pathname];
+      const world = { "/api/rt/status": rail, "/api/flows/meta": meta, "/api/flows/ai-usage": ai, "/api/flows/ready": ready }[u.pathname];
       if (!world) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "not_found", message: "Not found" } }) });
       return route.fulfill({ status: world.status || 200, contentType: "application/json", body: JSON.stringify(world.body) });
     }
@@ -69,8 +69,12 @@ const text = (page, sel) => page.evaluate((s) => document.querySelector(s).inner
 const browser = await chromium.launch();
 try {
   {
-    const { page, asked, errors } = await open(browser, { rail: { body: RAIL }, meta: { body: META }, ai: { body: SPEND } });
-    eq([...new Set(asked)].sort(), ["/api/flows/ai-usage", "/api/flows/meta", "/api/rt/status"], "the page reads the three existing owner routes and no other API route");
+    const READY = { ok: false, phase: "pre", minutesToOpen: 83, opens: { ms: Date.parse("2026-10-12T13:30:00Z") },
+      blockers: [{ code: "universe", sentence: "The universe is still the 2026-10-08 session; the 2026-10-09 one has not landed." }] };
+    const { page, asked, errors } = await open(browser, { rail: { body: RAIL }, meta: { body: META }, ai: { body: SPEND }, ready: { body: READY } });
+    eq([...new Set(asked)].sort(), ["/api/flows/ai-usage", "/api/flows/meta", "/api/flows/ready", "/api/rt/status"], "the page reads the three existing owner routes and the readiness route, no other API route");
+    const line = await text(page, "#stReady");
+    ok(/1 blocker/.test(line) && line.includes("16:30 TRT") && /in 83 min/.test(line) && line.includes("2026-10-09 one has not landed"), "the readiness line counts the blocker, prints the open in TRT and the minutes: " + line);
     eq(await page.evaluate(() => [...document.querySelectorAll("h1")].length), 1, "one h1");
     eq(await page.evaluate(() => [...document.querySelectorAll("main h1, main h2, main h3")].map((x) => x.tagName)), ["H1", "H2", "H2", "H2"], "the outline is h1 then three h2");
     const rail = await text(page, "#stRail");

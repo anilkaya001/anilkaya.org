@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsReadRows } from "../server/routes/flows-read.js";
+import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import * as FLOWS_ASK from "../shared/flows-ask.js";
 import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
 import { workerSource, expect, absent, treeFiles, moduleSource } from "./lib/source-scan.mjs";
@@ -386,6 +387,78 @@ for (const r of table.rows) {
     ok(imports.every((i) => i.startsWith("../") || i.startsWith("../../shared/")), f + " reaches only server/ and shared/");
   }
   for (const f of treeFiles("shared")) ok(!/from "\.\.\/server\//.test(moduleSource(f)), f + " never imports server/");
+}
+
+{
+  const NOW = Date.parse("2026-10-12T11:00:00Z");
+  const log = [];
+  const entry = (day) => ({ present: true, sessionDate: day, generatedAt: null, updatedAt: 1, bytes: 1 });
+  const deps = (over = {}) => ({
+    store: { metadata: async (env, asked) => { log.push(["metadata", asked]); return Object.fromEntries(asked.map((k) => [k, entry("2026-10-09")])); } },
+    ensureFlowsTables: async () => { log.push(["ensure"]); },
+    readClock: async () => { log.push(["clock"]); return { day: "2026-10-12", trading: 1, tier1At: null, tier1OkAt: null, tier1Why: "" }; },
+    railReadiness: async () => { log.push(["rail"]); return { mode: "on", reachable: true, degraded: false, rosterError: false }; },
+    isOwner: (env, username) => username === "owner",
+    now: () => NOW,
+    ...over,
+  });
+  const table = createRouter(flowsReadyRows(deps()));
+  const ready = table.find("/api/flows/ready");
+  const health = table.find("/api/health");
+  eq(table.rows.map((r) => [r.id, r.path, r.methods, r.auth]), [["flows.ready", "/api/flows/ready", ["GET"], "flows"], ["health", "/api/health", ["GET"], "none"]], "the ready family is two rows: readiness behind the Flows session and health with none");
+  const rcOf = (path, env, username) => ({ request: req("GET", path), env, url: new URL("https://anilkaya.org" + path), ctx: {}, session: username ? { username } : null });
+  const on = { DB: {}, FLOWS_READY: "on", FLOWS_HEALTH: "on" };
+
+  const member = await (await ready.handler(rcOf("/api/flows/ready", on, "member"))).json();
+  eq(member.ok, true, "a member is told the system is ready");
+  eq(member.owner, false, "and that the rail was not asked");
+  ok(!log.some((l) => l[0] === "rail"), "a member read makes no rail call");
+  eq(log.find((l) => l[0] === "metadata")[1], ["meta", "universe", "board:long", "board:short", "regime", "events"], "one metadata read names the six keys");
+  eq(log.map((l) => l[0]), ["ensure", "clock", "metadata"], "the schema is ensured first, then the clock and the keys, nothing else");
+  eq(member.minutesToOpen, 150, "the open is 150 minutes away");
+  eq(member.opens.trt, "16:30 TRT", "in TRT");
+
+  log.length = 0;
+  const owner = await (await ready.handler(rcOf("/api/flows/ready", on, "owner"))).json();
+  eq(owner.owner, true, "an owner read says so");
+  ok(log.some((l) => l[0] === "rail"), "and asks the rail");
+
+  const stale = createRouter(flowsReadyRows(deps({ store: { metadata: async (env, asked) => Object.fromEntries(asked.map((k) => [k, entry("2026-10-08")])) } })));
+  const behind = await (await stale.find("/api/flows/ready").handler(rcOf("/api/flows/ready", on, "member"))).json();
+  eq(behind.blockers.length, 5, "a store one session behind lists five blockers");
+
+  for (const off of [undefined, "", "off", "ON ", "true", "1"]) {
+    const env = { ...on, FLOWS_READY: off };
+    const e = off === "ON " ? null : await thrown(() => ready.handler(rcOf("/api/flows/ready", env, "member")));
+    if (off === "ON ") {
+      eq((await ready.handler(rcOf("/api/flows/ready", env, "member"))).status, 200, "the switch tolerates case and a trailing space");
+      continue;
+    }
+    eq(view(e) && [view(e).status, view(e).code], [404, "ready_off"], "FLOWS_READY " + JSON.stringify(off) + " fails closed with ready_off");
+  }
+  for (const off of [undefined, "", "off", "yes"]) {
+    const e = await thrown(() => health.handler(rcOf("/api/health", { ...on, FLOWS_HEALTH: off }, null)));
+    eq(view(e) && [view(e).status, view(e).code], [404, "health_off"], "FLOWS_HEALTH " + JSON.stringify(off) + " fails closed with health_off");
+  }
+  log.length = 0;
+  const open = await health.handler(rcOf("/api/health", on, null));
+  eq(await open.json(), { ok: true, asOf: "2026-10-12T11:00:00.000Z", session: "2026-10-12" }, "health answers three fields and nothing else");
+  eq(log, [], "and touches no store, clock or rail");
+
+  const noDb = await thrown(() => ready.handler(rcOf("/api/flows/ready", { FLOWS_READY: "on" }, "member")));
+  eq(view(noDb).code, "store_unreadable", "readiness with no database is store_unreadable");
+
+  const gates = { flows: async (r) => (r.headers.get("x-member") ? { username: "member" } : null) };
+  const anonHealth = await table.handle({ request: req("GET", "/api/health"), env: on, url: new URL("https://anilkaya.org/api/health"), ctx: {} }, gates);
+  eq(anonHealth.status, 200, "health answers an anonymous caller");
+  const anonReady = await thrown(() => table.handle({ request: req("GET", "/api/flows/ready"), env: on, url: new URL("https://anilkaya.org/api/flows/ready"), ctx: {} }, gates));
+  eq(view(anonReady).code, "unauthorized", "readiness refuses an anonymous caller");
+  const post = await thrown(() => table.handle({ request: req("POST", "/api/flows/ready"), env: on, url: new URL("https://anilkaya.org/api/flows/ready"), ctx: {} }, gates));
+  eq(view(post).code, "method_not_allowed", "and a POST is the 405 before the session");
+
+  const w = workerSource();
+  expect(w, /flowsReadyRows\(\{/, { min: 1, max: 1, why: "the Worker mounts the ready family once" });
+  ok(K.HttpError.of("ready_off").status === 404 && K.HttpError.of("health_off").status === 404, "both codes are registered");
 }
 
 globalThis.Date = RealDate;

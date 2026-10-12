@@ -7,6 +7,8 @@ import { RT_LIMITS } from "../shared/flows-rt.js";
 import { hubConfig } from "../shared/flows-rt-hub.js";
 import { aiCapNeurons, aiCapCalls } from "../shared/flows-ai.js";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
+import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
+import { BUDGETS } from "../shared/flows-vendor-ops.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -77,6 +79,15 @@ export function downgradeBreaches(env = {}) {
   eq(c.tier1, 3, "and Tier 1 with the focus tick is its two calls plus one");
   eq(budgetPlanSum(), 240 + 120 + 180 + 3, "THE AS-BUILT REGULAR-SESSION CEILINGS OF THE PLAN'S LEDGER (rail, on-demand, Tier 2, Tier 1 and focus) SUM TO 543");
   eq(vendorMinuteSum(), 240 + 120 + 60 + 180 + 3, "and with the member limiter every enforced ceiling sums to 603, counting each limiter once");
+}
+
+{
+  const c = vendorMinuteCeilings();
+  const premarket = c.rail + c.onDemand + c.member + PREMARKET_NEWS.callsPerFiring;
+  ok(premarket <= vendorMinuteSum(), "THE PRE-MARKET NEWS PASS ADDS ONE CALL A FIRING TO A WINDOW WHERE TIER 1 AND TIER 2 ARE OFF, SO IT STAYS UNDER THE REGULAR-SESSION SUM");
+  eq(PREMARKET_NEWS.callsPerFiring * PREMARKET_NEWS.maxFiringsPerDay, 11, "and costs at most 11 vendor calls a trading day");
+  eq(BUDGETS.premarketNews.perMinute, 1, "BUDGETS states one call in any minute");
+  eq(Math.floor((9 * 60 + 30 - 4 * 60 - 1) / PREMARKET_NEWS.everyMin) + 1, PREMARKET_NEWS.maxFiringsPerDay, "the window 04:00-09:30 ET holds 11 half-hour firings");
 }
 
 {

@@ -38,6 +38,7 @@ import { createRouter } from "./server/router.js";
 import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
+import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
@@ -48,7 +49,7 @@ import * as FLOWS_READING from "./shared/flows-reading-worker.js";
 import { LAB_SESSION_MS, recordSignIn } from "./shared/lab-sign-in.js";
 import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shared/flows-live.js";
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
-import { serveRt } from "./shared/flows-rt-routes.js";
+import { serveRt, railReadiness } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
@@ -2833,6 +2834,8 @@ flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrat
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
+flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
+  isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
@@ -3585,6 +3588,12 @@ export default {
     }
 
     guard("market refresh failed", refreshMarketSnapshotIfDue(env, at));
+
+    guard("flows premarket news failed", (async () => {
+      if (!FLOWS_LIVE.premarketNewsOn(env) || !FLOWS_LIVE.premarketNewsDue(at, FLOWS_LIVE.memoizedClock(at))) return;
+      await ensureFlowsTables(env);
+      return FLOWS_LIVE.premarketNewsTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
+    })());
 
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);

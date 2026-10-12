@@ -1,7 +1,7 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, TIER1_CALLS, TAPE_SPEC, shapeMarketLive, tideSessionState, tideLastAt, checkLiveWrite,
   liveKeyFromParam, shapeTapePrem, shapeTapeGex, assembleTape, nextTapeLeg, pulseWithLive, liveAlertsWin,
-  nightlyFreshMeta, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictReprobeUntilMin, verdictPatch, parseClosedDays, shapeStrips,
+  nightlyFreshMeta, freshEnvelope, rowsOf, timeMs, anyAnswered, marketFeeds, VERDICT, verdictReprobeUntilMin, verdictPatch, parseClosedDays, shapeStrips,
   priorCloseBase, liveNewsWins, newsWithLive,
 } from "./flows-live.js";
 import {
@@ -13,6 +13,7 @@ import { focusStripNames } from "./flows-focus.js";
 import { pathFor } from "./flows-vendor-ops.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
 import { emitFailure } from "./flows-log.js";
+import { newsFields } from "./flows-news.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
   ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
@@ -583,6 +584,62 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
     readAt: at, session, cadenceS: spec.cadenceS, source: "worker", writer: FOCUS_WRITER,
   }, at)], tally(true, false, false));
   return { ...out, written: true, why, bytes: text.length };
+}
+
+export const PREMARKET_NEWS = Object.freeze({
+  everyMin: 30,
+  callsPerFiring: 1,
+  maxFiringsPerDay: 11,
+  limit: 100,
+  rows: 60,
+  writer: "worker@premarket-news",
+});
+
+export function premarketNewsOn(env) {
+  const v = env && typeof env.FLOWS_PREMARKET_NEWS === "string" ? env.FLOWS_PREMARKET_NEWS.trim().toLowerCase() : "";
+  return v === "on";
+}
+
+export function premarketNewsDue(at, clock = null) {
+  const p = phaseAt(at, clock);
+  return !!p && p.trading && p.phase === "pre" && new Date(at).getUTCMinutes() % PREMARKET_NEWS.everyMin === 0;
+}
+
+export function shapePremarketNews(raw, { at, session, writer = PREMARKET_NEWS.writer }) {
+  const wire = rowsOf(raw);
+  const rows = wire.map(newsFields).filter((r) => r !== null)
+    .sort((a, b) => (b.createdAtMs ?? -Infinity) - (a.createdAtMs ?? -Infinity)).slice(0, PREMARKET_NEWS.rows);
+  return {
+    v: 1, key: "live:news", session,
+    fresh: freshEnvelope({ readAt: at, source: "worker", cadenceS: PREMARKET_NEWS.everyMin * 60, session, writer }),
+    rows, requested: PREMARKET_NEWS.limit, returned: wire.length, kept: rows.length,
+    status: rows.length ? "ok" : (wire.length ? "unreadable" : "quiet"),
+  };
+}
+
+export async function premarketNewsTick(env, at, { fetchVendor, log = console } = {}) {
+  if (!env || !env.DB) return { written: false, why: "no-db" };
+  if (!premarketNewsOn(env)) return { written: false, why: "off" };
+  if (!premarketNewsDue(at, memoizedClock(at))) return { written: false, why: "not-due" };
+  if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { written: false, why: "no-key" };
+  const session = easternDay(at);
+  const raw = await withTimeout(fetchVendor(pathFor("news"), { limit: PREMARKET_NEWS.limit }), LIVE_BUDGET.tier1TimeoutMs);
+  if (!raw || raw.__failed) {
+    emitFailure(log, "warn", "premarket news read failed", { why: raw && raw.__failed ? String(raw.__failed).slice(0, 80) : "empty" });
+    return { written: false, why: "vendor-failed" };
+  }
+  const news = shapePremarketNews(raw, { at, session });
+  if (news.status !== "ok") return { written: false, why: news.status };
+  const text = JSON.stringify(news);
+  const spec = LIVE_KEYS["live:news"];
+  if (text.length > spec.maxBytes) {
+    emitFailure(log, "error", "live:news over its byte cap", { bytes: text.length, cap: spec.maxBytes });
+    return { written: false, why: "over-cap" };
+  }
+  await writeLiveStatement(env.DB, "live:news", text, {
+    readAt: at, session, cadenceS: PREMARKET_NEWS.everyMin * 60, source: "worker", writer: PREMARKET_NEWS.writer,
+  }, at).run();
+  return { written: true, bytes: text.length };
 }
 
 export async function nightlyTick(env, at, { fetchImpl = fetch, log = console } = {}) {

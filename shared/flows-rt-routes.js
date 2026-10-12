@@ -81,3 +81,20 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
     worker: { mode: sw.mode, audience: sw.audience, users: sw.users, hint: sw.hint, binding: true },
   });
 }
+
+const RAIL_WAIT_MS = 1500;
+
+export async function railReadiness(env) {
+  const sw = rtSwitches(env);
+  const ns = env && env.PULSE;
+  if (sw.mode !== "on" || !ns || typeof ns.idFromName !== "function" || typeof ns.get !== "function") return { mode: "off", reachable: true };
+  try {
+    const stub = ns.get(ns.idFromName(RT_OBJECT_NAME), sw.hint ? { locationHint: sw.hint } : undefined);
+    const asked = stub.fetch(new Request("https://pulse.internal/status", { method: "GET" })).then((res) => (res.ok ? res.json() : null));
+    const body = await Promise.race([asked, new Promise((resolve) => setTimeout(() => resolve(null), RAIL_WAIT_MS))]);
+    if (!body || typeof body !== "object") return { mode: "on", reachable: false };
+    return { mode: "on", reachable: true, degraded: !!body.degraded, rosterError: !!(body.roster && body.roster.error) };
+  } catch {
+    return { mode: "on", reachable: false };
+  }
+}
