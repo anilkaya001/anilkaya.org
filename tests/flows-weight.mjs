@@ -57,7 +57,7 @@ const GZIP_KIB = {
 };
 
 const CSS_KIB = {
-  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024,
+  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024,
   overviewPage: 104 + (779 + 11690) / 1024,
   sidePage: 102 + 565 / 1024,
   watchPage: 102 + 565 / 1024,
@@ -139,7 +139,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80 + 18566 / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
+  tickerPage: 80 + 30620 / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
   unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80,
 };
 

@@ -2641,7 +2641,7 @@
   function buildScenes(card) {
     if (!$("ftScenes") || isIndex(card) || !UI.defer) return;
     const P = card.panels || {};
-    const input = { ticker: card.ticker, engine: engineOf(card), ivSurface: okOf(P.ivSurface), gamma: okOf(P.surface), asOf: card.generatedAt || null };
+    const input = { ticker: card.ticker, engine: engineOf(card), ivSurface: okOf(P.ivSurface), gamma: P.surface, asOf: card.generatedAt || null };
     for (const [kind, id, title] of [["surface", "m-surface", "Volatility surface"], ["terrain", "m-terrain", "Gamma terrain"]]) {
       const host = h("div", { class: "ft-scene", "data-scene": kind });
       mod({ id, title, span: [12, 12], st: OK, body: [host], index: 3 });
