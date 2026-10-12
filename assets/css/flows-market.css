@@ -289,6 +289,9 @@
 .mk-sky-c[hidden] { display: none; }
 .mk-sky-n, .mk-rel-n { margin: var(--sp-3) 0 0; color: var(--label-2); font: var(--t-footnote); }
 .mk-sky-d, .mk-rel-d { margin-top: var(--sp-3); }
+.mk-sky-seg { margin: 0 0 var(--sp-3); }
+.mk-sky-seg:empty, .mk-sky-n[hidden] { display: none; }
+.mk-sky-co td.mk-sky-s { white-space: normal; }
 .mk-rel-l { min-width: 0; }
 .mk-rel-d ul { margin: var(--sp-2) 0 0; padding-left: 18px; font: var(--t-footnote); }
 
