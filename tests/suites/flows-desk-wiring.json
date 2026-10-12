@@ -1,1 +1,1 @@
-{"name": "flows-desk-wiring", "class": "C", "group": "shard", "timing": false, "medianS": 12, "shard": 3, "files": ["flows-desk-wiring.mjs"], "covers": ["shared/flows-pages.js","tests/fixtures-desk-lab.json"]}
+{"name": "flows-desk-wiring", "class": "C", "group": "shard", "timing": false, "medianS": 12, "shard": 6, "files": ["flows-desk-wiring.mjs"], "covers": ["shared/flows-pages.js","tests/fixtures-desk-lab.json"]}

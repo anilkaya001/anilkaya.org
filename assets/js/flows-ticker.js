@@ -364,7 +364,6 @@
     renderFlags(card);
     paintPrice(card, true);
     renderChips(card, pm);
-    renderHeroChart(card, pm);
   }
 
   function kindTag(card) {
@@ -451,6 +450,7 @@
       const b = open && (!f || f === document.body || $("fxPop").contains(f)) ? last.querySelector(".ui-info") : null;
       if (b) b.focus({ preventScroll: true });
     }
+    put($("ftAsOf"), (mode === "close" || mode === "close0") && pp.readAt ? "as of " + F.time(pp.readAt) : "");
     const slots = last.querySelectorAll("[data-c]");
     cells.forEach((c, i) => put(slots[i], c));
     if (mode === "read" && slots[1].dataset.tone !== dTone) slots[1].dataset.tone = dTone;
@@ -485,175 +485,6 @@
           notes: [pm.bandNote] }) }),
     ];
     $("ftChips").replaceChildren(UI.chips(chipList.filter(Boolean), "Signal"));
-  }
-
-  function eventInHorizon(card, Hs) {
-    const cx = STATE.cardX;
-    const e = cx && cx.earnings && cx.earnings.status !== "unavailable" && cx.earnings.next ? cx.earnings.next : null;
-    if (!e || num(e.sessions) === null || e.sessions < 1 || e.sessions > Hs) return [];
-    return [{ t: e.sessions, label: "E", name: "Earnings " + F.day(e.d) }];
-  }
-
-  let coneSeq = 0;
-
-  function heroCone(host, o) {
-    return C.mount(host, (el, w, animate) => {
-      const hist = (o.history || []).filter((r) => r && isoOk(r.d) && num(r.c) !== null);
-      const S = numOr(o.spot, hist.length ? hist[hist.length - 1].c : null);
-      const phone = w < 600;
-      const H = heightFor(o.height, w);
-      if (!hist.length || S === null) { el.append(UI.silent(ST("unavailable", o.empty), o.label, H)); return; }
-      const N = hist.length, Hs = o.horizon;
-      const gutter = phone ? 58 : 66;
-      const top = 30, stripH = o.strip ? 30 : 0, axisH = 20;
-      const plotB = H - axisH - stripH - (o.strip ? 12 : 4);
-      const plotW = w - gutter;
-      const fw = Math.max(plotW * Hs / (N + Hs), plotW * (phone ? 0.3 : 0.26));
-      const xNow = plotW - fw;
-      const xh = (i) => (N === 1 ? xNow : (i / (N - 1)) * (xNow - 4));
-      const xf = (t) => xNow + (t / Hs) * (fw - 8);
-      const conePx = (end) => (t) => S * (end / S) ** Math.sqrt(t / Hs);
-      const band = num(o.hi) !== null && num(o.lo) !== null && S > 0 && o.hi > 0 && o.lo > 0;
-      const real = num(o.realized.hi) !== null && num(o.realized.lo) !== null && o.realized.hi > 0 && o.realized.lo > 0 && S > 0;
-      const hiT = conePx(o.hi), loT = conePx(o.lo), rHiT = conePx(o.realized.hi), rLoT = conePx(o.realized.lo);
-      const lv = o.levels.filter((l) => l && num(l.px) !== null && C.LEVELS[l.kind] && Math.abs(l.px / S - 1) <= 0.12);
-      const vals = hist.map((r) => r.c).concat([S], band ? [o.hi, o.lo] : [], real ? [o.realized.hi, o.realized.lo] : [], lv.map((l) => l.px));
-      let y0 = Math.min(...vals), y1 = Math.max(...vals);
-      const pad = (y1 - y0) * 0.06 || S * 0.01;
-      y0 -= pad; y1 += pad;
-      const y = C.lin(y0, y1, plotB, top);
-      const svg = C.svgRoot(el, w, H, animate, o.label);
-      const first = hist[0].c, last = hist[N - 1].c;
-      const upDay = last >= first;
-      const lineC = cssVar(upDay ? "--up" : "--down");
-      const pts = hist.map((r, i) => [xh(i), y(r.c)]);
-      pts.push([xNow, y(S)]);
-      s("path", { d: C.pathOf(pts) + "L" + fx1(xNow) + " " + fx1(plotB) + "L" + fx1(pts[0][0]) + " " + fx1(plotB) + "Z", fill: C.vGrad(svg, lineC, 0.13, 0), class: "fade", style: { "--delay": "250ms" } }, svg);
-      s("line", { x1: xNow, x2: xNow, y1: top - 6, y2: H - axisH, class: "hair" }, svg);
-      const accent = cssVar("--accent");
-      const path = (fn) => { const a = []; for (let k = 0; k <= 24; k++) { const t = (k / 24) * Hs; a.push([xf(t), y(fn(t))]); } return a; };
-      if (band) {
-        const up = path(hiT), dn = path(loT);
-        const gid = "ftCone" + ++coneSeq;
-        const defs = svg.querySelector("defs") || s("defs", null, svg);
-        const lg = s("linearGradient", { id: gid, x1: 0, y1: 0, x2: 1, y2: 0 }, defs);
-        s("stop", { offset: 0, "stop-color": accent, "stop-opacity": 0.34 }, lg);
-        s("stop", { offset: 1, "stop-color": accent, "stop-opacity": 0.12 }, lg);
-        s("path", { d: C.pathOf(up) + dn.slice().reverse().map((q) => "L" + fx1(q[0]) + " " + fx1(q[1])).join("") + "Z", fill: "url(#" + gid + ")", class: "fade", style: { "--delay": "420ms" } }, svg);
-        for (const a of [up, dn]) s("path", { d: C.pathOf(a), class: "ln draw", stroke: accent, "stroke-opacity": 0.7, "stroke-width": 1, pathLength: 1, style: { "--delay": "520ms" } }, svg);
-      }
-      if (real) {
-        const rg = s("g", { class: "fade ft-rc", style: { "--delay": "620ms" } }, svg);
-        for (const a of [path(rHiT), path(rLoT)]) s("path", { d: C.pathOf(a), class: "ln", stroke: cssVar("--s-gray"), "stroke-width": 1.25, "stroke-dasharray": "3 3" }, rg);
-        s("rect", { x: xf(Hs) - 1, y: y(o.realized.hi), width: 4, height: Math.max(2, y(o.realized.lo) - y(o.realized.hi)), rx: 2, fill: cssVar("--s-gray"), class: "fade", style: { "--delay": "650ms" } }, svg);
-      }
-      const evs = o.events.filter((e) => num(e.t) !== null && e.t > 0 && e.t <= Hs);
-      for (const e of evs) {
-        const ex = xf(e.t);
-        const eg = s("g", { class: "fade ft-ev", style: { "--delay": "680ms" } }, svg);
-        s("line", { x1: ex, x2: ex, y1: top - 4, y2: plotB, stroke: cssVar("--lvl-flip"), "stroke-width": 1, "stroke-opacity": 0.55, "stroke-dasharray": "2 3" }, eg);
-        mark(eg, "dia", ex, top - 8, cssVar("--lvl-flip"), 3.4);
-        s("text", { x: ex, y: top - 15, text: e.label, "text-anchor": "middle", class: "tx-1 tx-b" }, eg);
-      }
-      const lvG = fadeG(600, svg);
-      for (const l of lv) s("line", { x1: xNow, x2: xf(Hs), y1: y(l.px), y2: y(l.px), stroke: cssVar(C.LEVELS[l.kind].color), "stroke-width": 1, "stroke-opacity": 0.75 }, lvG);
-      s("path", { d: C.pathOf(pts), class: "ln draw", stroke: lineC, pathLength: 1 }, svg);
-      if (o.live) s("circle", { cx: xNow, cy: y(S), r: 4, fill: lineC, class: "pulse" }, svg);
-      s("circle", { cx: xNow, cy: y(S), r: 4, fill: cssVar("--label-1"), class: "ring" }, svg);
-      const tags = [{ y: y(S), y0: y(S), text: F.px(S), kind: "spot" }];
-      if (band) tags.push({ y: y(o.hi), y0: y(o.hi), text: F.px(o.hi), kind: "band" }, { y: y(o.lo), y0: y(o.lo), text: F.px(o.lo), kind: "band" });
-      for (const l of lv) tags.push({ y: y(l.px), y0: y(l.px), text: F.px(l.px), kind: l.kind });
-      spreadTags(tags, 17, top, plotB);
-      const tg = fadeG(700, svg);
-      const tx = plotW + 8;
-      for (const t of tags) {
-        if (Math.abs(t.y - t.y0) > 2) s("path", { d: "M" + fx1(xf(Hs) + 3) + " " + fx1(t.y0) + "L" + fx1(tx - 3) + " " + fx1(t.y), stroke: cssVar("--label-4"), "stroke-width": 1, fill: "none" }, tg);
-        if (t.kind === "spot") {
-          s("rect", { x: tx - 2, y: t.y - 9, width: textW(t.text), height: 18, rx: 9, fill: cssVar("--label-1") }, tg);
-          s("text", { x: tx + 4, y: t.y + 3.8, text: t.text, class: "tx-b tx-ink" }, tg);
-        } else if (t.kind === "band") {
-          s("rect", { x: tx, y: t.y - 4, width: 6, height: 8, rx: 2, fill: accent, opacity: 0.6 }, tg);
-          s("text", { x: tx + 10, y: t.y + 3.8, text: t.text, style: { fill: cssVar("--accent-soft") } }, tg);
-        } else {
-          const d = C.LEVELS[t.kind];
-          mark(tg, d.shape, tx + 3, t.y, cssVar(d.color), 3.2);
-          s("text", { x: tx + 10, y: t.y + 3.8, text: t.text, class: "tx-1" }, tg);
-        }
-      }
-      const sm = new Map();
-      if (o.strip) {
-        for (const k of Object.keys(o.strip)) if (num(o.strip[k]) !== null) sm.set(k, o.strip[k]);
-        const sy = plotB + 12 + stripH / 2;
-        s("line", { x1: 0, x2: xNow, y1: sy, y2: sy, class: "hair" }, svg);
-        const bw = clamp((N > 1 ? (xNow - 4) / (N - 1) : 8) * 0.62, 1.5, 6);
-        hist.forEach((r, i) => {
-          const v = sm.get(r.d);
-          if (v === undefined) { s("circle", { cx: xh(i), cy: sy, r: 1, fill: cssVar("--label-4") }, svg); return; }
-          const hh = Math.max(1.5, (Math.abs(v) / 100) * (stripH / 2));
-          const neg = v < 0;
-          s("rect", { x: xh(i) - bw / 2, y: neg ? sy : sy - hh, width: bw, height: hh, rx: Math.min(1.5, bw / 2), fill: cssVar(neg ? "--down-mark" : v > 0 ? "--up-mark" : "--label-3"), class: "grow", style: { "--i": String(i), "--origin": neg ? "top" : "bottom" } }, svg);
-        });
-        s("text", { x: tx, y: sy + 4, text: "Score", class: "tx-3" }, svg);
-      }
-      for (const t of dateTicks(hist.map((r) => r.d), xh, 5, 0, xNow, phone)) s("text", { x: xh(t.i), y: H - 5, text: t.text, "text-anchor": "middle" }, svg);
-      s("text", { x: xf(Hs), y: H - 5, text: "+" + Hs + "d", "text-anchor": "middle" }, svg);
-      const xs = hist.map((_, i) => xh(i));
-      for (let t = 1; t <= Hs; t++) xs.push(xf(t));
-      const range = (a, b) => F.px(a) + " " + String.fromCharCode(8211) + " " + F.px(b);
-      C.scrub(el, svg, { xs, top, bottom: plotB, label: o.label,
-        onMove: (i) => {
-          if (i < N) {
-            const r = hist[i], v = sm.get(r.d);
-            const p1 = i > 0 ? r.c / hist[i - 1].c - 1 : null;
-            return { dots: [{ x: xh(i), y: y(r.c), color: upDay ? "--up" : "--down" }],
-              parts: [C.part(F.day(r.d), "k"), h("b", null, F.px(r.c)), p1 === null ? null : C.part(F.pct(p1, 2, true), null, tone(p1)),
-                o.strip ? (v === undefined ? C.part("no score", "k") : C.part("score " + F.signed(v), null, tone(v))) : null] };
-          }
-          const t = i - N + 1;
-          const ev = evs.find((e) => Math.round(e.t) === t);
-          const dots = [], parts = [C.part("+" + t + " sessions", "k")];
-          if (band) { dots.push({ x: xf(t), y: y(hiT(t)), color: "--accent" }, { x: xf(t), y: y(loT(t)), color: "--accent" }); parts.push(h("b", null, range(loT(t), hiT(t)))); }
-          if (real) { dots.push({ x: xf(t), y: y(rHiT(t)), color: "--s-gray" }, { x: xf(t), y: y(rLoT(t)), color: "--s-gray" }); parts.push(C.part("Realized", "k"), C.part(range(rLoT(t), rHiT(t)))); }
-          if (ev) parts.push(C.part(ev.name, null, "warn"));
-          return { dots, parts };
-        } });
-    });
-  }
-
-  function renderHeroChart(card, pm) {
-    const host = $("ftHc");
-    host.replaceChildren();
-    const P = card.panels || {};
-    const C0 = candlesOf(card);
-    const S = spotOf(card);
-    const Hs = num(pm.sessions) || 10;
-    const strip = {};
-    const so = P.scoreOverlay;
-    if (so && so.status === "ok" && Array.isArray(so.rows)) for (const r of so.rows) if (isoOk(r.d) && num(r.score) !== null) strip[r.d] = r.score;
-    if (isoOk(card.sessionDate) && num(card.score) !== null && strip[card.sessionDate] === undefined) strip[card.sessionDate] = card.score;
-    const hasStrip = Object.keys(strip).length > 0;
-    const events = eventInHorizon(card, Hs);
-    const chartHost = h("div", { class: "ft-hc-chart" });
-    const draw = () => heroCone(chartHost, {
-      history: C0.slice(-RANGES[rangePick][1]).map((r) => ({ d: r.d, c: r.c })), spot: S, hi: pm.impliedHigh, lo: pm.impliedLow, horizon: Hs,
-      realized: { hi: pm.realizedHigh, lo: pm.realizedLow }, levels: levelList(card), strip: hasStrip ? strip : null,
-      events, live: !!liveQuote(), height: [240, 270, 286], label: card.ticker + " price, the priced " + Hs + "-session range and the realized range",
-      empty: "The card carries no price history.",
-    });
-    let handle = null;
-    const seg = UI.segmented("Range", RANGES.map(([l]) => ({ label: l })), (i) => { rangePick = i; if (handle) handle.destroy(); handle = draw(); }, rangePick);
-    const head = h("div", { class: "ft-hc-h" }, seg, h("span", { class: "ft-sp" }),
-      info("the price chart", () => ({ title: "Price and priced move", asOf: pm.asOf || null, lead: leadOf(P.pricedMove),
-        facts: [["Implied low", F.px(pm.impliedLow)], ["Implied high", F.px(pm.impliedHigh)], ["Realized low", F.px(pm.realizedLow)], ["Realized high", F.px(pm.realizedHigh)], ["Band", richnessBand(pm) || DASH], ["Band shape", pm.band || null], ["Sessions", String(Hs)]],
-        sections: [{ title: "History", lines: notesOf(P.context, ["note"]).concat(breaksOf(P.context)) }],
-        notes: [pm.bandNote, "The blue cone widens with the square root of time between spot and the priced range at the horizon; the dashed grey cone is the realized range drawn the same way. Bars under the price are the daily options score; a dot is a session with no score, which is not a zero.",
-          events.length ? "The diamond marks the next earnings report inside the horizon (" + events[0].name + ")." : null] })));
-    host.append(head, chartHost, legend([
-      keyOf("--accent", "", "Implied"), dashKey("--s-gray", "Realized"),
-      ...Object.values(levelsOf(card)).filter((l) => LVL_KEY[l.kind] && S && Math.abs(l.px / S - 1) <= 0.12).map((l) => keyOf(...LVL_KEY[l.kind])),
-      hasStrip ? keyOf("--label-2", "split", "Score") : null, events.length ? keyOf("--lvl-flip", "dia", "Earnings") : null,
-    ]));
-    handle = draw();
   }
 
   function breaksOf(ctx) {
@@ -933,137 +764,377 @@
       h("p", { class: "ft-v-src" }, i.text), i.kind === "none" ? h("p", { class: "ft-v-src" }, s.limits) : null);
   }
 
-  const READ_LISTS = [["drivers", "What is driving it"], ["tensions", "Where the evidence disagrees"], ["watch", "What to watch"]];
   const readIs = (r, ...states) => !!r && typeof r === "object" && states.includes(r.status);
   const refreshing = (x) => !!x && typeof x === "object" && x.held === "previous" && x.refreshing === true;
   const readPending = (neuron) => !!neuron && (readIs(neuron.read, "generating") || (readIs(neuron.read, "ready") && refreshing(neuron.read)));
   const neuronPending = (neuron) => !!neuron && (neuron.status === "pending" || (neuron.status === "ok" && refreshing(neuron)));
 
-  function readAge(c, read) {
-    const at = Date.parse(c.asOf || "");
-    const base = Date.parse(read.asOf || "");
-    if (!Number.isFinite(at)) return "no source time";
-    const sec = Math.max(0, Math.round(((Number.isFinite(base) ? base : Date.now()) - at) / 1000));
-    const word = sec < 90 ? sec + " seconds" : sec < 5400 ? Math.round(sec / 60) + " minutes" : sec < 172800 ? Math.round(sec / 3600) + " hours" : Math.round(sec / 86400) + " days";
-    return "as of " + F.time(c.asOf) + ", " + word + " before the dossier was read";
+  const statePillOf = (state) => { const d = UI.STATES[state]; return d ? h("span", { class: "ui-pill", "data-state": state }, glyph(d.g), d.word) : null; };
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  const citesOf = (it) => arr(it && it.cites).filter((c) => c && typeof c.id === "string");
+  const CLAIM_TONES = ["--accent", "--lvl-flip", "--warn", "--s-teal"];
+  const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null };
+  const frameEl = $("ftGlance"), stripEl = $("ftStrip"), railEl = $("ftReadRail"), dockEl = $("ftDock"), diveEl = $("ftDive");
+
+  function emitFocus(id, source) {
+    document.dispatchEvent(new CustomEvent("ft:focus", { bubbles: true, detail: { id, source } }));
   }
 
-  const READ_MARKS = { drivers: ["+", "drives"], tensions: ["\u2260", "disagrees"], watch: ["\u2192", "watch"] };
-
-  function citeLabel(c, age) {
-    const value = c.untrusted === true ? "\u201c" + c.display + "\u201d" : c.display;
-    return c.label + ": " + value + (c.untrusted === true ? ", quoted third-party text" : "") + ", " + age;
+  function citeIndex(read) {
+    const sec = read && read.sections && typeof read.sections === "object" ? read.sections : {};
+    const items = [sec.identity, sec.now].concat(arr(sec.drivers), arr(sec.tensions), arr(sec.watch)).filter(Boolean);
+    const list = [], at = new Map();
+    for (const it of items) for (const c of citesOf(it)) if (!at.has(c.id)) { at.set(c.id, list.length + 1); list.push(c); }
+    return { list, at };
   }
 
-  function evidenceRow(c, read) {
-    const quoted = c.untrusted === true;
-    return h("p", { class: "ft-read-ev-row", "data-quoted": quoted ? "1" : null },
-      h("span", { class: "ft-read-ev-l" }, c.label),
-      h("b", null, quoted ? "\u201c" + c.display + "\u201d" : c.display),
-      h("span", { class: "ft-read-age" }, quoted ? "quoted third-party text, " + readAge(c, read) : readAge(c, read)));
+  function claimsOf(read) {
+    const sec = read && read.sections && typeof read.sections === "object" ? read.sections : {};
+    const items = [["now", sec.now]].concat(["drivers", "tensions", "watch"].flatMap((k) => arr(sec[k]).map((it) => [k, it])))
+      .filter(([, it]) => it && typeof it.text === "string" && it.text.trim() && citesOf(it).length);
+    return items.slice(0, 4).map(([list, it], i) => ({ it, list, id: String(i + 1) }));
   }
 
-  function openPanel(panel, buttons, btn, fill) {
-    const open = btn.getAttribute("aria-expanded") === "true";
-    for (const b of buttons) b.setAttribute("aria-expanded", "false");
-    panel.replaceChildren();
-    panel.hidden = true;
-    if (open) return;
+  const citeText = (c) => c.label + " " + (c.untrusted === true ? "“" + c.display + "”" : c.display);
+  const nums = (it, idx) => citesOf(it).map((c) => idx.at.get(c.id));
+  const sup = (list) => (list.length ? h("sup", { "aria-label": "sources " + list.join(", ") }, list.join(" ")) : null);
+
+  function engineWord(card, neuron) {
+    const eng = engineOf(card);
+    if (eng && eng.noTrade) return "Engine: stand aside";
+    if (eng && eng.structures.length) return "Engine: " + eng.structures.length + " priced";
+    return neuron && neuron.tier && neuron.tier !== "none" ? "Engine: not priced" : "";
+  }
+
+  function paintStrip(card, neuron) {
+    if (!stripEl) return;
+    stripEl.hidden = !STATE.glance;
+    if (!STATE.glance) return;
+    const n = neuron || { status: "unavailable" };
+    const ok = n.status === "ok" && typeof n.summary === "string" && n.summary.trim();
+    const own = ok ? null : cardRead(card, n);
+    const said = ok ? n.summary.trim() : own ? own.text : null;
+    const caveat = ok && said.startsWith(STALE_LEAD) && said.length > STALE_LEAD.length + 1 ? STALE_LEAD : null;
+    const body = said ? typo(caveat ? said.slice(caveat.length).trim() : said) : null;
+    const st = ok ? (n.context && n.context.state) || null : own && own.st;
+    const conf = st && num(st.confidence) !== null ? " " + SEP.trim() + " confidence " + st.confidence + " of 2" : "";
+    stripEl.replaceChildren(
+      h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")),
+      h("div", { class: "ft-strip-m" }, h("span", { class: "ft-strip-k" }, "Neuron" + conf),
+        h("p", { class: "ft-strip-line" + (body ? "" : " is-empty"), title: body || null }, body || "No read")),
+      h("span", { class: "ft-eng" }, engineWord(card, n)));
+  }
+
+  function closePop(focus) {
+    const p = GLANCE.pop, b = GLANCE.popBtn;
+    GLANCE.pop = null;
+    GLANCE.popBtn = null;
+    if (p) p.remove();
+    if (b) { b.setAttribute("aria-expanded", "false"); if (focus && b.isConnected) b.focus(); }
+  }
+
+  function openPop(btn, title, build) {
+    const was = GLANCE.popBtn === btn;
+    closePop(false);
+    if (was) return;
+    const foot = railEl.querySelector(".ft-foot");
+    const pop = h("div", { class: "ft-pop", role: "dialog", "aria-label": title, tabindex: "-1" }, h("div", { class: "ft-pop-t" }, title), build(),
+      h("button", { class: "ft-pop-x", type: "button", onclick: () => closePop(true) }, "Close"));
+    foot.append(pop);
+    GLANCE.pop = pop;
+    GLANCE.popBtn = btn;
     btn.setAttribute("aria-expanded", "true");
-    panel.append(fill());
-    panel.hidden = false;
+    pop.focus({ preventScroll: true });
   }
 
-  function wirePanel(panel, buttons) {
-    panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { const on = buttons.find((b) => b.getAttribute("aria-expanded") === "true"); if (on) { on.click(); on.focus(); } } });
-    for (const b of buttons) b.addEventListener("keydown", (e) => { if (e.key === "Escape" && b.getAttribute("aria-expanded") === "true") b.click(); });
+  function citeList(read, idx) {
+    return h("ul", null, idx.list.map((c, i) => h("li", null, h("span", null, String(i + 1)),
+      h("div", null, h("b", null, citeText(c)), h("span", { class: "ft-pop-id" }, c.id)),
+      h("i", null, c.asOf ? F.time(c.asOf) : "no source time"))));
   }
 
-  function readLine(item, read, wrap, ctr, mark) {
-    const cites = Array.isArray(item.cites) ? item.cites : [];
-    const panel = h("div", { class: "ft-read-ev", hidden: "", "aria-live": "polite" });
-    const buttons = cites.map((c) => {
-      const n = ++ctr.n;
-      const age = readAge(c, read);
-      const b = h("button", {
-        class: "ft-read-fn", type: "button", "data-id": c.id, "data-kind": c.kind || null, "data-quoted": c.untrusted === true ? "1" : null,
-        "aria-expanded": "false", "aria-label": citeLabel(c, age), title: citeLabel(c, age),
-      }, h("span", { "aria-hidden": "true" }, String(n)));
-      b.addEventListener("click", () => openPanel(panel, buttons, b, () => evidenceRow(c, read)));
-      return b;
-    });
-    wirePanel(panel, buttons);
-    return h(wrap, { class: wrap === "li" ? "ft-read-i" : null, "data-list": null },
-      mark ? h("span", { class: "ft-read-mk", "aria-hidden": "true", "data-list": mark }, READ_MARKS[mark][0]) : null,
-      h("span", { class: "ft-read-t" },
-        typo(String(item.text)),
-        item.template === true ? h("span", { class: "ft-read-src" }, " From the vendor\u2019s profile, quoted: not model wording.") : null,
-        buttons.length ? h("span", { class: "ft-read-fns", role: "group", "aria-label": "Facts this rests on" }, buttons) : null),
-      panel);
+  function paintFoot() {
+    const foot = railEl.querySelector(".ft-foot");
+    if (!foot) return;
+    const read = GLANCE.read, idx = GLANCE.idx;
+    const keep = GLANCE.pop && GLANCE.popBtn && foot.contains(GLANCE.pop) ? GLANCE.pop : null;
+    const claim = GLANCE.focus ? GLANCE.claims.find((c) => c.id === GLANCE.focus) : null;
+    const old = foot.querySelector(".ft-foot-body");
+    let next;
+    if (claim) {
+      next = h("ul", { class: "ft-foot-cs ft-foot-body", "data-claim": claim.id },
+        citesOf(claim.it).map((c) => h("li", { title: citeText(c) }, h("span", { class: "ft-foot-n" }, String(idx.at.get(c.id))), h("span", { class: "ft-foot-t" }, citeText(c)))));
+      if (!citesOf(claim.it).length) next = h("p", { class: "ft-foot-body" }, "This claim cites no figure.");
+    } else {
+      const sec = read.sections || {};
+      const shown = new Set(nums(sec.now || sec.identity, idx));
+      for (const c of GLANCE.claims) for (const n of nums(c.it, idx)) shown.add(n);
+      const top = [...shown].sort((a, b) => a - b).slice(0, 8);
+      const unknown = arr(sec.unknown);
+      const allBtn = idx.list.length ? h("button", { class: "ft-foot-b", type: "button", "aria-expanded": "false", "aria-haspopup": "dialog", id: "ftAllCites" }, "all " + idx.list.length) : null;
+      const unkBtn = unknown.length ? h("button", { class: "ft-foot-b", type: "button", "aria-expanded": "false", "aria-haspopup": "dialog", id: "ftUnknown" }, "What is not known") : null;
+      if (allBtn) allBtn.addEventListener("click", () => openPop(allBtn, "All sources", () => citeList(read, idx)));
+      if (unkBtn) unkBtn.addEventListener("click", () => openPop(unkBtn, "What is not known", () => h("ul", null, unknown.map((u) =>
+        h("li", null, h("span", null, "•"), h("b", null, typo(String(u.text))), h("i", null, arr(u.missing).join(", ")))))));
+      next = h("div", { class: "ft-foot-r ft-foot-body" },
+        read.status === "fallback" ? h("span", null, "Deterministic reading") : null,
+        top.length ? h("span", null, "sources ", top.map((n, i) => [i ? " " : "", h("span", { class: "ft-foot-m" }, String(n))])) : null,
+        allBtn, unkBtn);
+      if (GLANCE.popBtn && !foot.contains(GLANCE.popBtn)) {
+        const again = allBtn && GLANCE.popBtn.id === "ftAllCites" ? allBtn : unkBtn && GLANCE.popBtn.id === "ftUnknown" ? unkBtn : null;
+        if (again) { again.setAttribute("aria-expanded", "true"); GLANCE.popBtn = again; }
+      }
+    }
+    if (old) old.replaceWith(next); else foot.prepend(next);
+    if (keep && !claim && !foot.contains(keep)) foot.append(keep);
   }
 
-  function readTags(tags) {
-    const panel = h("div", { class: "ft-read-ev", hidden: "", "aria-live": "polite" });
-    const buttons = tags.map((t) => {
-      const b = h("button", { class: "ft-read-tag", type: "button", "data-code": t.code, "aria-expanded": "false", "aria-label": t.label + ": " + t.sentence, title: t.sentence }, t.label);
-      b.addEventListener("click", () => openPanel(panel, buttons, b, () => h("p", { class: "ft-read-ev-row" }, h("b", null, t.label), h("span", null, t.sentence))));
-      return b;
-    });
-    wirePanel(panel, buttons);
-    return h("div", { class: "ft-read-tags" },
-      h("h4", null, "Character"),
-      h("div", { class: "ft-read-tagrow", role: "group", "aria-label": "Character tags the rules found to hold" }, buttons),
-      panel);
+  function setRailFocus(id) {
+    const hit = id !== null && GLANCE.claims.some((c) => c.id === id) ? id : null;
+    if (GLANCE.focus === hit || !railEl) return;
+    GLANCE.focus = hit;
+    railEl.dataset.focus = hit || "";
+    for (const b of railEl.querySelectorAll(".ft-claim")) b.classList.toggle("is-on", b.dataset.claim === hit);
+    paintFoot();
   }
 
-  function readingBlock(read) {
-    if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return null;
+  document.addEventListener("ft:focus", (e) => { const d = e.detail || {}; setRailFocus(d.id === null || d.id === undefined ? null : String(d.id)); });
+
+  const opposed = (a, b) => {
+    const sign = (c) => (/[0-9]/.test(String(c.display)) ? (/^\s*[−-]/.test(String(c.display)) || /[−-]\s*\$?\d/.test(String(c.display)) ? -1 : 1) : 0);
+    return sign(a) !== 0 && sign(b) !== 0 && sign(a) !== sign(b);
+  };
+
+  function disagreeBlock(read, idx) {
+    const t = arr(read.sections && read.sections.tensions)[0];
+    if (!t || typeof t.text !== "string") return null;
+    const cs = citesOf(t);
+    const box = h("div", { class: "ft-dis", id: "ftDis" }, h("span", { class: "ft-dis-k" }, "Where it disagrees"));
+    if (cs.length === 2 && opposed(cs[0], cs[1])) {
+      const chip = (c) => { const up = !/[−-]\s*\$?\d/.test(String(c.display)); return h("div", { class: "ft-dis-c", "data-tone": up ? "up" : "down" }, h("span", { "aria-hidden": "true" }, up ? "▲" : "▼"), h("span", null, c.label), h("b", null, c.display), sup([idx.at.get(c.id)])); };
+      box.append(h("div", { class: "ft-dis-row" }, chip(cs[0]), h("span", { class: "ft-dis-v" }, "versus"), chip(cs[1])));
+    } else box.append(h("p", { class: "ft-dis-one" }, typo(t.text), sup(nums(t, idx))));
+    return box;
+  }
+
+  function paintRail(read) {
+    if (!railEl) return;
+    closePop(false);
+    railEl.hidden = !STATE.glance;
+    railEl.replaceChildren();
+    GLANCE.focus = null;
+    railEl.dataset.focus = "";
+    if (!STATE.glance) return;
+    const known = readIs(read, "ready", "generating", "fallback", "absent", "unavailable");
+    railEl.append(h("div", { class: "ft-rail-h" }, h("h2", { id: "ftReadRailT" }, "Reading"), known && read.asOf ? h("span", { class: "ft-rail-at" }, "as of " + F.time(read.asOf)) : null));
+    if (!known) {
+      GLANCE.read = null; GLANCE.claims = []; GLANCE.idx = null;
+      railEl.append(h("p", { class: "ft-rail-state", role: "status" }, statePillOf("quiet"), "No reading is available for this name."));
+      return;
+    }
     const sec = read.sections && typeof read.sections === "object" ? read.sections : {};
-    const ctr = { n: 0 };
-    const root = h("section", { class: "ft-read", "aria-labelledby": "ftReadT", "data-status": read.status, "data-generated": read.generated ? "1" : "0" });
+    const idx = citeIndex(read), claims = claimsOf(read);
+    Object.assign(GLANCE, { read, idx, claims });
+    const lead = sec.now || sec.identity;
+    const bare = read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !lead);
+    railEl.dataset.status = read.status;
     const bits = [read.generated ? "Model wording" : "Deterministic reading"];
-    if (read.generated && read.modelName) bits.push(String(read.modelName));
-    if (read.generated && typeof read.neurons === "number") bits.push(read.neurons + " neurons");
-    if (read.status === "generating") bits.push("Model wording is being written");
     if (read.asOf) bits.push("Dossier as of " + F.time(read.asOf));
-    if (read.generated && read.generatedAt) bits.push("Written " + F.time(read.generatedAt));
-    root.append(h("h3", { id: "ftReadT", class: "visually-hidden" }, "The name, read as a stock"),
-      h("p", { class: "ft-read-prov visually-hidden", id: "ftReadSrc" }, bits.join(" \u00b7 "), read.provenance ? h("span", null, " " + String(read.provenance)) : null));
-    if (read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !sec.now && !sec.identity)) {
-      root.append(h("p", { class: "ft-read-state", role: "status" }, String(read.note || (read.status === "generating" ? "The dossier is being assembled; the reading follows it." : "No reading is available for this name."))));
+    railEl.append(h("p", { class: "visually-hidden", id: "ftReadSrc" }, bits.join(" · ") + "." + (read.provenance ? " " + String(read.provenance) : "")));
+    if (bare) {
+      const state = read.status === "generating" ? "pending" : read.status === "absent" ? "quiet" : "unavailable";
+      railEl.append(h("p", { class: "ft-rail-state", role: "status" }, statePillOf(state),
+        String(read.note || (read.status === "generating" ? "The reading is being written." : "No reading is available for this name."))));
+    } else if (read.status === "generating") {
+      railEl.append(h("p", { class: "ft-rail-state", role: "status" }, "Model wording is being written."));
     }
-    const leadItem = sec.identity || sec.now;
-    if (leadItem) root.append(h("p", { class: "ft-read-lead" }, readLine(leadItem, read, "span", ctr)));
-    if (sec.identity && sec.now) root.append(h("div", { class: "ft-read-b" }, h("h4", null, "Now"), h("p", { class: "ft-read-now" }, readLine(sec.now, read, "span", ctr))));
-    const tags = Array.isArray(read.tags) ? read.tags : [];
-    if (tags.length) root.append(readTags(tags));
-    for (const [key, title] of READ_LISTS) {
-      const list = Array.isArray(sec[key]) ? sec[key] : [];
-      if (list.length) root.append(h("div", { class: "ft-read-b" }, h("h4", null, title), h("ul", { class: "ft-read-l", "data-list": key }, list.map((it) => readLine(it, read, "li", ctr, key)))));
+    if (lead) railEl.append(h("p", { class: "ft-rail-lead" }, typo(String(lead.text)), sup(nums(lead, idx))));
+    if (claims.length) {
+      const ol = h("ol", { class: "ft-claims", "aria-label": "What the reading rests on", role: "list" });
+      if (window.matchMedia && matchMedia("(max-width: 599.98px)").matches) { ol.setAttribute("role", "region"); ol.setAttribute("aria-label", "What the reading rests on, swipe for more"); ol.tabIndex = 0; }
+      for (const c of claims) {
+        const b = h("button", { class: "ft-claim", type: "button", "data-claim": c.id, "data-list": c.list, style: { "--c": "var(" + CLAIM_TONES[Number(c.id) - 1] + ")" } },
+          h("span", { class: "ft-claim-n", "aria-hidden": "true" }, c.id), h("span", { class: "ft-claim-t" }, typo(String(c.it.text)), sup(nums(c.it, idx))));
+        b.addEventListener("mouseenter", () => emitFocus(c.id, "claim"));
+        b.addEventListener("mouseleave", () => emitFocus(null, "claim"));
+        b.addEventListener("focus", () => emitFocus(c.id, "claim"));
+        b.addEventListener("blur", () => emitFocus(null, "claim"));
+        ol.append(h("li", null, b));
+      }
+      railEl.append(ol);
     }
-    const unknown = Array.isArray(sec.unknown) ? sec.unknown : [];
-    if (unknown.length) {
-      root.append(h("details", { class: "ft-read-unk" }, h("summary", null, "What is not known (" + unknown.length + ")"),
-        h("ul", { class: "ft-read-l", "data-list": "unknown" },
-          unknown.map((u) => h("li", { class: "ft-read-i" }, h("span", { class: "ft-read-t" }, typo(String(u.text)), (Array.isArray(u.missing) ? u.missing : []).map((k) => h("span", { class: "ft-read-miss" }, " " + String(k)))))))));
-    }
-    if (read.ticker) {
-      root.append(h("p", { class: "ft-read-foot" }, h("a", { class: "ft-read-link", href: "/api/flows/dossier?t=" + encodeURIComponent(read.ticker) + "&render=1", target: "_blank", rel: "noopener" }, "What the model saw"),
-        " \u2014 the dossier text this reading was written from, with every id a footnote cites."));
-    }
-    return root;
+    const dis = disagreeBlock(read, idx);
+    if (dis) railEl.append(dis);
+    railEl.append(h("div", { class: "ft-foot" }));
+    paintFoot();
   }
+
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && GLANCE.pop && railEl.contains(document.activeElement)) { e.preventDefault(); closePop(true); } });
+  document.addEventListener("pointerdown", (e) => { if (GLANCE.pop && !GLANCE.pop.contains(e.target) && !(GLANCE.popBtn && GLANCE.popBtn.contains(e.target))) closePop(false); });
 
   function paintReading(read) {
-    const old = verdictEl.querySelector(".ft-read");
-    const next = readingBlock(read);
-    if (old && next) old.replaceWith(next);
-    else if (old) old.remove();
-    else if (next) verdictEl.append(next);
+    paintRail(read);
+    if (GLANCE.ready) glanceUpdate();
+  }
+
+  const DOCK = [["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-surface", "Volatility surface"], ["m-terrain", "Gamma terrain"], ["m-network", "Flow network"]];
+
+  function glanceOpts() {
+    const n = STATE.neuron || null;
+    return { reading: n && readIs(n.read, "ready", "generating", "fallback", "absent", "unavailable") ? n.read : null, claims: GLANCE.claims.map((c) => ({ id: c.id, cites: citesOf(c.it) })), cardX: STATE.cardX, tape: STATE.tape };
+  }
+
+  function glanceUpdate() {
+    if (GLANCE.mount && typeof GLANCE.mount.update === "function") {
+      try { GLANCE.mount.update({ ...glanceOpts(), summary: STATE.neuron || null, card: STATE.card }); } catch (e) { console.error("flows-ticker: glance update failed", e); }
+    }
+  }
+
+  function mountGlance() {
+    if (!frameEl || !STATE.glance || !STATE.card) return;
+    if (GLANCE.mount && GLANCE.mount.destroy) { try { GLANCE.mount.destroy(); } catch (e) { console.error("flows-ticker: glance destroy failed", e); } }
+    GLANCE.mount = null;
+    const hosts = { chart: $("ftGlanceChart"), cards: $("ftGlanceCards") };
+    hosts.chart.replaceChildren();
+    hosts.cards.replaceChildren();
+    const api = window.FlowsUI && window.FlowsUI.tickerGlance;
+    if (!api || typeof api.mount !== "function") return;
+    const n = STATE.neuron || null;
+    try { GLANCE.mount = api.mount(STATE.card, hosts, { ...glanceOpts(), summary: n, range: RANGES[rangePick][0] }); }
+    catch (e) { console.error("flows-ticker: glance mount failed", e); }
+  }
+
+  function paintRange() {
+    const host = $("ftGRange");
+    if (!host || host.firstChild) return;
+    host.append(UI.segmented("Range", RANGES.map(([l]) => ({ label: l })), (i) => { rangePick = i; if (GLANCE.mount && GLANCE.mount.setRange) GLANCE.mount.setRange(RANGES[i][0]); }, rangePick));
+  }
+
+  const BEHIND = "body > .flows-skip, #fxSide, #fxScrim, #fxBar, #flowsMain, #fxTabs, #askDock";
+
+  function placeholderFor(m, id) {
+    const keep = [...m.classList].filter((c) => /^ft-(lg|md)\d+$/.test(c));
+    return h("div", { class: ["ft-ph", ...keep].join(" "), "data-for": id, "aria-hidden": "true", style: { height: m.getBoundingClientRect().height + "px" } });
+  }
+
+  function seat(id) {
+    const s = GLANCE.sheet;
+    const m = $(id);
+    if (!m) return false;
+    if (s.cur) {
+      const back = $(s.cur);
+      const slot = gridEl.querySelector('.ft-ph[data-for="' + s.cur + '"]');
+      if (back && slot) slot.replaceWith(back);
+    }
+    const ph = placeholderFor(m, id);
+    m.replaceWith(ph);
+    s.body.replaceChildren(m);
+    s.cur = id;
+    for (const t of s.tabs) { const on = t.dataset.mod === id; t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; }
+    s.body.setAttribute("aria-labelledby", s.tabs.find((t) => t.dataset.mod === id).id);
+    s.shell.setAttribute("aria-label", s.tabs.find((t) => t.dataset.mod === id).textContent);
+    for (const b of dockEl.querySelectorAll(".ft-dock-b")) b.setAttribute("aria-pressed", String(b.dataset.mod === id));
+    s.body.scrollTop = 0;
+    return true;
+  }
+
+  function closeSheet(quiet) {
+    const s = GLANCE.sheet;
+    if (!s) return;
+    GLANCE.sheet = null;
+    const back = s.cur && $(s.cur), slot = s.cur && gridEl.querySelector('.ft-ph[data-for="' + s.cur + '"]');
+    if (back && slot) slot.replaceWith(back);
+    else if (slot) slot.remove();
+    s.shell.remove();
+    s.scrim.remove();
+    for (const n of s.behind) n.inert = false;
+    for (const b of dockEl.querySelectorAll(".ft-dock-b")) b.setAttribute("aria-pressed", "false");
+    document.removeEventListener("keydown", s.key, true);
+    if (quiet) return;
+    const o = s.opener && s.opener.isConnected && s.opener.getClientRects().length ? s.opener : dockEl.querySelector(".ft-dock-b");
+    if (o) o.focus({ preventScroll: true });
+  }
+
+  function openSheet(id, opener) {
+    if (GLANCE.sheet) { if (GLANCE.sheet.cur !== id) { seat(id); const t = GLANCE.sheet.tabs.find((x) => x.dataset.mod === id); if (t) t.focus(); } return; }
+    if (!$(id)) return;
+    const mods = DOCK.filter(([m]) => $(m));
+    const scrim = h("div", { class: "ft-scrim" });
+    const tabs = mods.map(([m, label], i) => h("button", { class: "ft-sheet-tab", type: "button", role: "tab", id: "ftTab" + i, "data-mod": m, "aria-selected": "false", tabindex: "-1" }, label));
+    const head = h("div", { class: "ft-sheet-h", role: "tablist", "aria-label": "Open in place" }, tabs);
+    const x = h("button", { class: "ft-sheet-x", type: "button", "aria-label": "Close" }, glyph("x"));
+    const bar = h("div", { class: "ft-sheet-h ft-sheet-top" }, h("div", { class: "ft-sheet-h", style: { flex: "1 1 0", minWidth: 0 } }, head), h("span", { class: "ft-sheet-k" }, "Esc"), x);
+    const body = h("div", { class: "ft-sheet-b", role: "tabpanel" });
+    const shell = h("section", { class: "ft-sheet", role: "dialog", "aria-modal": "true" }, bar, body);
+    const main = $("flowsMain");
+    const r = main ? main.getBoundingClientRect() : null;
+    if (r && window.innerWidth >= 600) {
+      const cs = main ? getComputedStyle(main) : null;
+      shell.style.setProperty("--sheet-l", Math.round(r.left + parseFloat(cs.paddingLeft || "0")) + "px");
+      shell.style.setProperty("--sheet-r", Math.round(window.innerWidth - r.right + parseFloat(cs.paddingRight || "0")) + "px");
+    }
+    const behind = [...document.querySelectorAll(BEHIND)].filter((n) => !n.inert);
+    const key = (e) => {
+      if (e.key === "Escape") {
+        try { if (document.querySelector(":popover-open")) return; } catch (err) { void err; }
+        e.preventDefault(); e.stopPropagation(); closeSheet(false); return;
+      }
+      if (e.key === "Tab") {
+        const f = [...shell.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((n) => !n.disabled && n.tabIndex >= 0 && n.getClientRects().length);
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1], a = document.activeElement;
+        if (!shell.contains(a)) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    GLANCE.sheet = { shell, scrim, body, tabs, cur: null, behind, opener, key };
+    document.body.append(scrim, shell);
+    for (const n of behind) n.inert = true;
+    document.addEventListener("keydown", key, true);
+    scrim.addEventListener("click", () => closeSheet(false));
+    x.addEventListener("click", () => closeSheet(false));
+    tabs.forEach((t, i) => {
+      t.addEventListener("click", () => { seat(t.dataset.mod); });
+      t.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+        e.preventDefault();
+        const n = tabs[(i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+        seat(n.dataset.mod);
+        n.focus();
+      });
+    });
+    seat(id);
+    const on = tabs.find((t) => t.dataset.mod === id);
+    if (on) on.focus({ preventScroll: true });
+  }
+
+  function paintDock() {
+    if (!dockEl) return;
+    const mods = DOCK.filter(([m]) => $(m) || (GLANCE.sheet && GLANCE.sheet.cur === m));
+    dockEl.hidden = !STATE.glance || !mods.length;
+    dockEl.replaceChildren(h("span", { class: "ft-dock-l" }, "Open in place"),
+      ...mods.map(([m, label]) => { const b = h("button", { class: "ft-dock-b", type: "button", "data-mod": m, "aria-pressed": "false" }, label); b.addEventListener("click", () => openSheet(m, b)); return b; }),
+      h("span", { class: "ft-dock-sp" }),
+      h("a", { class: "ft-dock-a", href: "#ftGrid", onclick: (e) => { e.preventDefault(); closeSheet(true); gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } }, "Every module, as one page"));
+  }
+
+  function setGlance(on) {
+    STATE.glance = on;
+    if (frameEl) frameEl.dataset.glance = on ? "on" : "off";
+    if (diveEl) diveEl.hidden = !on;
+  }
+
+  function renderGlance(card) {
+    paintRange();
+    paintDock();
+    mountGlance();
+    GLANCE.ready = true;
   }
 
   function renderVerdict(card, neuron) {
     renderVerdictCard(card, neuron);
+    paintStrip(card, neuron);
     paintReading(neuron && neuron.read);
   }
 
@@ -1157,7 +1228,7 @@
     sec.classList.add("ft-m", "ft-lg" + o.span[1], "ft-md" + o.span[0]);
     const old = $(o.id);
     const had = !!(old && document.activeElement && old.contains(document.activeElement));
-    if (old && old.parentNode === gridEl) old.replaceWith(sec); else gridEl.append(sec);
+    if (old && (old.parentNode === gridEl || old.closest(".ft-sheet-b"))) old.replaceWith(sec); else gridEl.append(sec);
     if (had) { const b = sec.querySelector(".ui-seg-i[aria-selected=true]"); if (b) b.focus({ preventScroll: true }); }
     return sec;
   }
@@ -2672,9 +2743,13 @@
 
   function paintAll() {
     const card = STATE.card;
+    GLANCE.ready = false;
+    closeSheet(true);
+    setGlance(true);
     renderHero(card);
     renderVerdict(card, STATE.neuron);
     renderModules(card);
+    renderGlance(card);
     paintFreshness(card);
     STATE.first = false;
   }
@@ -2744,6 +2819,8 @@
   }
 
   function paintLite(card) {
+    closeSheet(true);
+    setGlance(false);
     heroEl.hidden = false;
     heroEl.classList.remove("is-loading");
     $("ftHeroT").textContent = card.ticker;
@@ -2879,6 +2956,7 @@
     if (tape.session < (m.open ? m.today : m.expected)) return;
     const before = STATE.tape && STATE.tape.prem ? STATE.tape.prem.readAt : null, was = STATE.tapeLive;
     STATE.tape = tape;
+    glanceUpdate();
     STATE.tapeLive = state === "live" || state === "fresh";
     if ((!tape.prem || tape.prem.readAt !== before || STATE.tapeLive !== was) && STATE.card) flowOf(STATE.card);
   }
@@ -2925,7 +3003,7 @@
     STATE.quote = q && typeof q === "object" ? q : null;
     paintPrice(STATE.card, false);
     paintFreshness(STATE.card);
-    if (!STATE.card.lite && was !== !!liveQuote()) renderHeroChart(STATE.card, okOf(STATE.card.panels.pricedMove) || {});
+    if (!STATE.card.lite && was !== !!liveQuote()) glanceUpdate();
   }
 
   function streamQuote(t) {
