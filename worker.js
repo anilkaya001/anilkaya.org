@@ -39,6 +39,7 @@ import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
+import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
@@ -66,6 +67,7 @@ function createState() {
     flowsSchemaFlight: null,
     spendRecorderFailed: false,
     aiRecorderFailed: false,
+    dispatchCheckAt: 0,
   };
 }
 const state = createState();
@@ -2836,6 +2838,13 @@ flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ens
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential, record: FLOWS_LIVE.recordDispatchWhy,
+  isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
+  claim: (at) => {
+    if (at - state.dispatchCheckAt < 60000) return false;
+    state.dispatchCheckAt = at;
+    return true;
+  } }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();

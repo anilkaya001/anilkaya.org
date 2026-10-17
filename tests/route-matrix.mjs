@@ -12,6 +12,7 @@ import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { flowsAiRows } from "../server/routes/flows-ai.js";
 import { flowsPageRows } from "../server/routes/flows-pages.js";
 import { flowsReadyRows } from "../server/routes/flows-ready.js";
+import { flowsDispatchRows } from "../server/routes/flows-dispatch.js";
 import { createRouter } from "../server/router.js";
 
 const FIXTURE_PATH = new URL("./fixtures-route-matrix.json", import.meta.url);
@@ -58,14 +59,14 @@ const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-
 
 const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
-  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready"];
+  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check"];
 const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "events", "track", "political", "status", "about", "glossary"];
 const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "ticker", "unusual", "moves", "events", "track", "political", "status", "strategy", "ask", "about", "glossary"];
 const LEGACY = ["/lab/course", "/lab/course.html", "/lab/course/", "/lab/lesson", "/lab/lesson.html", "/lab/lesson/"];
 const SLUGS = Object.keys(COURSE_BY_SLUG);
 
 const MUTATING = new Set(["/auth/logout", "/api/v2/progress", "/api/v2/attempt", "/api/v2/preferences", "/api/v2/project",
-  "/api/progress", "/api/stats", "/api/placement", "/api/mastery", "/flows/login", "/flows/logout", "/api/flows/ask", "/api/flows/ingest"]);
+  "/api/progress", "/api/stats", "/api/placement", "/api/mastery", "/flows/login", "/flows/logout", "/api/flows/ask", "/api/flows/ingest", "/api/flows/dispatch-check"]);
 
 const rows = [];
 const row = (path, extra = {}) => rows.push({ path, ...extra });
@@ -266,7 +267,7 @@ const src = workerSource();
   for (const m of slice(src, "const LEGACY_COURSE_PATHS = new Set([", "]);").matchAll(/"(\/lab\/[^"]+)"/g)) literals.add(m[1]);
   expect(src, /\bpath === "\//, { min: 20, why: "the route chain is scanned, not an empty match" });
   const stub = new Proxy({}, { get: () => () => null });
-  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPageRows(stub), flowsReadyRows(stub)).rows;
+  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPageRows(stub), flowsReadyRows(stub), flowsDispatchRows(stub)).rows;
   ok(table.length >= 55, "the router table holds the flows-read, flows-desk, flows-ai and flows-pages families: " + table.length + " rows");
   for (const r of table) literals.add(r.path);
   ok(literals.size >= 70, "the chain and the table together declare every route literal: " + literals.size);

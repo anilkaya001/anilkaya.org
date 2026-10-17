@@ -364,6 +364,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `assets/js/flows-political.js`, `assets/css/flows-political.css`, `tests/flows-political-render.mjs` | The Political page (`/flows/political/`), stock first and one screen with no page scroll at 1440x820, 1024x768 and 390x844. Rows are tickers read from the one `GET /api/flows/political` row; people appear only as initials of evidence. Left panel: tabs Accumulating, Reducing and Convergence (counts with funds hidden; `FUND_TICKERS` behind a toggle), a Map or List switch and a Dollars or Filers switch. The map is a squarified treemap whose tile area is the square root of disclosed dollars (bought plus sold band midpoints; `treemapWeight`) or filers plus a dollar tiebreak, at most 18 tiles (12 on a phone), each with a ring of the median lag over the window (`blindShare`) and a state from `netBounds` and `stateOf`: low bound = bought low minus twice the sold midpoint, high bound = bought high minus an eighth of it, firm accumulating only when the low bound is above zero and no band is open, and no name is ever firm reducing. Right panel: the newest filings that name a stock, with a Show all dialog of all of them. Bottom rail for the selected name: disclosed dollars with range, breadth and median lag, the traded-versus-filed strip with the typically-unfiled band, Flows context and evidence. Flows context is one lazy `GET /api/flows/card?t=` per selected name, debounced 220 ms and cached, reading conviction, IV rank, dealer gamma book and flow, the last net premium and the price since the newest buy; an absent card or field is an em dash with its reason and a failure offers Retry. Phones switch between Stocks, Filings and Detail. Arrow keys move between tiles by geometry, Enter opens the ticker page. Only tokens, no colour literal. `tests/flows-political-render.mjs` (Chromium, `page.route` stubs on a synthetic payload of the real shape, no server) holds the scroll, areas, states, rings, strip, keyboard, card states and copy to independent computations and fails ten planted wrong builds. |
 | `shared/flows-ready.js`, `tests/flows-ready.mjs` | The readiness leaf, a module over `flows-time.js` and `flows-freshness.js` alone. `readiness(state, now)` answers for the current session whether Flows can serve the open: the nightly landed for `expectedNightlySession` (the run record `meta`, then `universe`, `regime`, `events` and both `board` sides each at or beyond it), Tier 1 ticking in the session (`tier1At` within 11 minutes, `tier1OkAt` within 16, a holiday verdict skipped, an 11-minute grace after the open), the rail when the caller is an owner and the day is a trading day inside 04:00-20:00 ET (off, unreachable, degraded or a roster error each block), and the clock row. It returns `ok`, `blockers` (`code` and a plain `sentence`), `checks` (`ok`, `blocked` or `skipped` each), `expected`, the session the open belongs to, `minutesToOpen` and `opens` in TRT through `flows-time.js`. `healthOf` is the three-field public body. A null or unreadable input is a blocker, never a pass. `tests/flows-ready.mjs` holds each blocker from both sides at a pinned clock, the pre-market news cadence and its kill switch, and the one-call-one-row write. |
 | `server/routes/flows-ready.js` | The ready family in the route table: `flowsReadyRows(deps)` is `GET /api/flows/ready` behind the Flows session and the anonymous `GET /api/health`. Readiness reads the clock row and one `store.metadata` call for the six nightly keys (about six rows and two trips, never a payload), asks the rail (`railReadiness` in `shared/flows-rt-routes.js`, a 1.5 s read of the object's own status) only for an owner, and answers `shared/flows-ready.js`'s body with `owner`. `FLOWS_READY` and `FLOWS_HEALTH` in `wrangler.toml` are `on`; anything else is a 404 `ready_off` or `health_off`. Health is `{ok, asOf, session}` computed from the calendar, no store, no clock row, no rail. The pre-market news pass (`premarketNewsTick` in `shared/flows-live-worker.js`, `FLOWS_PREMARKET_NEWS`) runs on the half-hourly housekeeping firing between 04:00 and 09:30 ET on trading days, makes one vendor call (the news headlines, limit 100) and upserts `live:news` for the day's session, at most 11 calls and 11 rows a day (`BUDGETS.premarketNews`). |
+| `server/routes/flows-dispatch.js`, `tests/flows-dispatch-check.mjs` | The owner-only dispatch credential check: `flowsDispatchRows(deps)` is `POST /api/flows/dispatch-check` behind the Flows session. A non-owner is `403 owner_only` (`FLOWS_RT_USERS` through `isOwner`), a cross-origin call `403`, and a second call inside 60 s in one isolate `429 rate_limited` with `Retry-After: 60` (`state.dispatchCheckAt`). `checkDispatchCredential` in `shared/flows-live-worker.js` makes one read-only `GET /repos/{repo}/actions/workflows/{FLOWS_LIVE_WORKFLOW}` with the Worker's token (200 `ok`, 401 `bad-token`, 403 and 404 `no-access`, a network failure `unreachable`) and one `dispatchWorkflow` of the live workflow with `{origin: manual, drill: true}`, which opens one witness issue and closes it at once under the concurrency group `flows-live-drill`. The outcome is written to `flows_clock.dispatch_why` through `recordDispatchWhy` (one upsert, failure ignored, nothing written for a missing token). The body is `{ok, read, dispatch, recorded, repo, workflow, at}` and never carries the token or a header value. `tests/flows-dispatch-check.mjs` drives `worker.js` with a scripted GitHub for seven status pairs, the token-absent and store-failure cases, every principal and the rate limit, and fails seven planted wrong builds of the route. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1422,7 +1423,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 137 suites: 92 that need only Node (N), 29 that also
+`tests/suites/` registers 138 suites: 93 that need only Node (N), 29 that also
 need Playwright's Chromium (C) and 16 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1436,24 +1437,25 @@ architecture              ci-affected               docs                      fl
 flows-ai-broker           flows-ai-salvage          flows-alert-grid          flows-alerts
 flows-basis               flows-brief               flows-calibration         flows-chain-panels
 flows-conviction          flows-copy-lint           flows-d1-budget           flows-defer-render
-flows-dispersion          flows-dossier             flows-dossier-reads       flows-engine-budget
-flows-fact-ids            flows-flow-below-render   flows-freshness           flows-garch
-flows-home-below-render   flows-home-composition    flows-home-net-render     flows-ledger
-flows-legs                flows-live                flows-market-below-render flows-mint
-flows-moves-render        flows-neuron              flows-neuron-screen       flows-overlay
-flows-payload-shape       flows-permits             flows-plan-facts          flows-political
-flows-political-render    flows-positioning         flows-probe               flows-public
-flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
-flows-readers             flows-reading             flows-reading-worker      flows-reads
-flows-ready               flows-record              flows-relations-render    flows-rt
-flows-scores              flows-sign                flows-skyline-render      flows-starts
-flows-stats               flows-stock               flows-tape-stats          flows-targets
-flows-time                flows-truth               flows-universe            flows-variation
-flows-vendor-budget       flows-verdict             flows-vol                 flows-warnings
-flows-weight              flows-ws-probe            lab-write                 launch-readiness
-markets                   mastery                   pipeline                  route-matrix
-server-ai                 server-desk               server-ingest             server-kernel
-server-log                server-pages              server-router             staging
+flows-dispatch-check      flows-dispersion          flows-dossier             flows-dossier-reads
+flows-engine-budget       flows-fact-ids            flows-flow-below-render   flows-freshness
+flows-garch               flows-home-below-render   flows-home-composition    flows-home-net-render
+flows-ledger              flows-legs                flows-live                flows-market-below-render
+flows-mint                flows-moves-render        flows-neuron              flows-neuron-screen
+flows-overlay             flows-payload-shape       flows-permits             flows-plan-facts
+flows-political           flows-political-render    flows-positioning         flows-probe
+flows-public              flows-pulse               flows-quant               flows-quant-audit
+flows-quant-card          flows-readers             flows-reading             flows-reading-worker
+flows-reads               flows-ready               flows-record              flows-relations-render
+flows-rt                  flows-scores              flows-sign                flows-skyline-render
+flows-starts              flows-stats               flows-stock               flows-tape-stats
+flows-targets             flows-time                flows-truth               flows-universe
+flows-variation           flows-vendor-budget       flows-verdict             flows-vol
+flows-warnings            flows-weight              flows-ws-probe            lab-write
+launch-readiness          markets                   mastery                   pipeline
+route-matrix              server-ai                 server-desk               server-ingest
+server-kernel             server-log                server-pages              server-router
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
