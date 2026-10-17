@@ -1015,6 +1015,7 @@ try {
       await page.waitForFunction(() => /Close/.test(document.getElementById("ftLast").textContent), null, { timeout: 8000 }).catch(() => {});
       const got = await page.evaluate((w) => ({ last: document.getElementById("ftLast").innerText.replace(/\s+/g, " ").trim(), want: w ? window.FlowsUI.F.day(w) : null,
         sat: window.FlowsUI.F.day("2026-09-26"), aria: (document.querySelector("#ftHeroFlags .ft-stale") || { getAttribute: () => null }).getAttribute("aria-label"), card: window.FlowsUI.F.day("2026-09-16") }), want);
+      got.last = got.last.replace(/ Session close [\d,.]+$/, "");
       if (want) eq(got.last, "Close " + got.want, `T5: the close is dated by ${why} (${got.last})`);
       else eq(got.last, "Close", `T5: ${why} (${got.last})`);
       ok(!got.last.includes(got.sat), "never by the Saturday the quote was read on");

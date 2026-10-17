@@ -374,6 +374,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `tests/flows-read-failures.mjs`, `tests/flows-meter-worker.mjs` | Two small suites for the measured half of the data backbone. `flows-read-failures` holds the failed-is-not-empty rule: a card built with an empty failure list is byte for byte the card built with none, a failed read marks the panel it feeds `unavailable` with code `failed` and a reason that names the route and the HTTP status or the timeout, a panel no failed read feeds is untouched, `uw()` reaches its caller with `status` on every HTTP failure (404, a 503 that outlasts its retries, and a 429 that exhausts them) and as a timeout or a parse failure otherwise, the meter counts each attempt in the class it landed in, the nightly deadline is 30 s, 45 s for an option-contracts page and the two-year bars, and `FLOWS_UW_NIGHTLY_DEADLINE=off` restores the unbounded client, all against a loopback vendor. `flows-meter-worker` drives `worker.js` with `FLOWS_METER` off, on, malformed and unset: no timing header and an unmetered `uwFetch` unless the word is `on`, `Server-Timing: total;dur` on API answers (errors and 401s included) and never on a page, and the Worker's vendor meter counting a chain read and a vendor 503 as a 5xx, per instance. |
 | `tests/pipeline-sim/*.mjs`, `tests/flows-pipeline-chaos.mjs` | The deterministic pipeline simulator and its invariant harness. `tests/pipeline-sim/clock.mjs` is a virtual clock that replaces `setTimeout`, `clearTimeout`, `Date.now` and `AbortSignal.timeout` and drives a promise by firing the earliest timer whenever nothing else can run, so the real `uw()` client, with its permit queue, backoff, `Retry-After` waits and deadlines, runs thousands of faulted calls in milliseconds; a promise that no timer can ever settle is reported as hung. `vendor.mjs` is a fake vendor behind `fetch` that serves the registered operations from a per-path script of faults (ok, a clean empty answer, 404 and 5xx, a 429 with `Retry-After`, a stall that never answers, a slow answer, a body that is not JSON) and refuses any origin but its own; `world.mjs` seeds one sfc32 stream from sha256 and keeps a trace. Seven worlds are built on them: `client` (the real `uw()` against scripted faults: attempts, results and failure kinds match an independent statement of the retry rules, no call outlives its bound, the meter's count and classes equal what the vendor answered, the rate floor stays inside its range), `cards` (the real `readDeepFeeds` into `buildCard`: the failed reads are exactly the scripted ones, the panels they feed are code failed and no other panel changes, a healthy card is byte for byte unchanged, every card validates), `cards-plan` (the same with the failures handed in), `store` (a night's keys with crashes, stale carries, absent and unsessioned keys, skewed sessions, cut and unreadable listings, stale globals: the verifier's states, counts, predicates, completeness and ordering equal a restatement from the world's own bookkeeping, conservation holds, no false green and no false alarm, and its frozen inputs are never written), `contracts` (planted corruptions refused by code and path, synthetic names refused outside a test, canonical form independent of key order and stamps), `meter` and `stages`. `tests/flows-pipeline-chaos.mjs` runs all seven for 300 seeds (about 12 s) or, with `FLOWS_TRUTH_DEEP=1`, 20,000, prints a table, and on a violation prints the seed, the first broken invariant and the last events, with the command that replays it. The door's own invariants (a write never replaces a newer, better or earlier-session row, a refused write leaves the last good row byte for byte) wait for the door that enforces them; nothing here models it. |
 | `tests/truth/pipeline-detectors.mjs`, `tests/truth/pipeline-mutants.mjs`, `tests/flows-pipeline-mutants.mjs` | The pipeline's kill matrix. `tests/truth/pipeline-mutants.mjs` plants 38 wrong builds the way `alert-mutants.mjs` does, each an exact-once string transform of a production module loaded through a data URL, never an edit: no deadline on the nightly client, the long deadline missing, timeouts retried forever, a clean empty answer thrown as an error, a 404 read as empty, a 429 exhaustion with no status, an unreadable body left out of the meter, a failure code dropped from a panel, a healthy card carrying an empty failure list, a darkpool failure on the wrong panel, the stale comparison reversed, a report that is complete with a key missing, a cut listing read as a failure, an unreadable listing read as ok, a verifier that writes to its inputs, synthetic names allowed, the canonical form keeping stamps or key order, a card for another ticker accepted, a literal route filed under its template, a refusal filed as a client error, a stage that reports the run's wire time. `tests/truth/pipeline-detectors.mjs` holds one detector for each of six targets (the vendor client, `flows-card.js`, `flows-coverage.js`, `flows-contracts.js`, the call meter and the stage runner), each running its simulator world over seeded runs; `tests/flows-pipeline-mutants.mjs` requires that every detector passes the correct build and fails every mutant meant for it. |
+| `scripts/flows-legs/sigma-ledger.mjs`, `tests/flows-data-fixes.mjs` | The typical-day scale for the whole universe. The nightly holds daily bars only for carded names, so `runSigmaLedger` keeps a rotating ledger inside the `regime` payload (`sigmaLedger`: ticker, scale at 1e5, count, `f2`, `f3`, day, plus a retry list for names short of history): tonight's fresh scales win, then up to 120 names with no scale or the oldest scale are re-read from the vendor's one-year daily bars, an entry older than 45 days is dropped, and a name short of 200 closes is not retried for 20 days. The universe publishes `sig`, `f2` and `f3` from the merged map with `sigmaBasis` (covered, fresh, rotated, short, oldest day), so coverage reaches the whole universe in about six nights at 120 vendor calls a night, never a guess. `shared/flows-events.js` `fitEvents` sheds far-dated rows of the `events` payload to stay under 120 KiB, below the 128 KiB ingest cap whose 413 stopped the events key advancing on 2026-10-15 and 2026-10-16. The suite uses synthetic bars only. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1483,7 +1484,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 145 suites: 102 that need only Node (N), 28 that also
+`tests/suites/` registers 146 suites: 103 that need only Node (N), 28 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1497,27 +1498,27 @@ architecture              ci-affected               docs                      fi
 flows                     flows-ai-broker           flows-ai-salvage          flows-alert-grid
 flows-alerts              flows-basis               flows-brief               flows-calibration
 flows-chain-panels        flows-contracts           flows-conviction          flows-copy-lint
-flows-coverage            flows-d1-budget           flows-defer-render        flows-dispatch-check
-flows-dispersion          flows-door-v2             flows-dossier             flows-dossier-reads
-flows-engine-budget       flows-fact-ids            flows-flow-below-render   flows-freshness
-flows-garch               flows-home-below-render   flows-home-composition    flows-home-net-render
-flows-ledger              flows-legs                flows-live                flows-market-below-render
-flows-meter-worker        flows-mint                flows-moves-render        flows-neuron
-flows-neuron-screen       flows-overlay             flows-payload-shape       flows-permits
-flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts          flows-political
-flows-political-render    flows-positioning         flows-probe               flows-public
-flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
-flows-read-failures       flows-readers             flows-reading             flows-reading-worker
-flows-reads               flows-ready               flows-record              flows-registry-contract
-flows-relations-render    flows-rt                  flows-scores              flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-truth
-flows-universe            flows-variation           flows-vendor-budget       flows-verdict
-flows-vol                 flows-warnings            flows-weight              flows-ws-probe
-lab-write                 launch-readiness          markets                   mastery
-pipeline                  route-matrix              server-ai                 server-desk
-server-ingest             server-kernel             server-log                server-pages
-server-router             staging
+flows-coverage            flows-d1-budget           flows-data-fixes          flows-defer-render
+flows-dispatch-check      flows-dispersion          flows-door-v2             flows-dossier
+flows-dossier-reads       flows-engine-budget       flows-fact-ids            flows-flow-below-render
+flows-freshness           flows-garch               flows-home-below-render   flows-home-composition
+flows-home-net-render     flows-ledger              flows-legs                flows-live
+flows-market-below-render flows-meter-worker        flows-mint                flows-moves-render
+flows-neuron              flows-neuron-screen       flows-overlay             flows-payload-shape
+flows-permits             flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts
+flows-political           flows-political-render    flows-positioning         flows-probe
+flows-public              flows-pulse               flows-quant               flows-quant-audit
+flows-quant-card          flows-read-failures       flows-readers             flows-reading
+flows-reading-worker      flows-reads               flows-ready               flows-record
+flows-registry-contract   flows-relations-render    flows-rt                  flows-scores
+flows-sign                flows-skyline-render      flows-starts              flows-stats
+flows-stock               flows-tape-stats          flows-targets             flows-time
+flows-truth               flows-universe            flows-variation           flows-vendor-budget
+flows-verdict             flows-vol                 flows-warnings            flows-weight
+flows-ws-probe            lab-write                 launch-readiness          markets
+mastery                   pipeline                  route-matrix              server-ai
+server-desk               server-ingest             server-kernel             server-log
+server-pages              server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

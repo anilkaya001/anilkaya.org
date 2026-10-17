@@ -392,7 +392,7 @@
   const liveInfo = () => ({ title: "Live price", state: "live", asOf: F.time(PX.pp.readAt),
     lead: "Re-read from the vendor's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
     facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Session open", F.px(PX.q.open)], ["High", F.px(PX.q.high)], ["Low", F.px(PX.q.low)], ["Tape time", PX.q.tapeTime ? F.time(PX.q.tapeTime) : null], ["Card close", F.px(PX.S)]] });
-  const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The vendor's last price. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
+  const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The vendor's last price, which can include trades after the regular session closed. The session close is the figure below as Card close. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
     facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Card close", F.px(PX.S)]] });
   const readInfo = () => ({ title: "Last read", asOf: F.time(PX.at),
     lead: PX.q ? "The vendor's quote as last read; the market is not in its regular session, so the dossier stays on the session close." : PX.rp.note,
@@ -400,7 +400,7 @@
   const cell = (tag) => h(tag, { "data-c": "" });
   const LAST = {
     live: () => [h("span", { class: "ft-live" }, glyph("live")), cell("span"), info("the live price", liveInfo)],
-    close: () => [glyph("closed"), h("span", null, "Close"), cell("b"), info("the close", closeInfo)],
+    close: () => [glyph("closed"), h("span", null, "Close"), cell("b"), cell("span"), info("the close", closeInfo)],
     close0: () => [glyph("closed"), h("span", null, "Close"), info("the close", closeInfo)],
     read: () => [glyph("closed"), cell("b"), cell("span"), cell("span"), info("the last read price", readInfo)],
     none: () => [],
@@ -422,7 +422,7 @@
     const dTone = tone(d, 0.00005);
     const chgText = chg === null ? null : F.px(Math.abs(chg)) + "  " + F.pct(Math.abs(pct), 2);
     const chgLabel = chg === null ? null : (pp.live ? "Change against the previous close " : "Session change ") + F.px(chg) + ", " + F.pct(pct, 2, true);
-    const cells = mode === "live" ? [F.time(at)] : mode === "close" ? [day(pp.day)] : mode === "read" ? [F.px(lastPx), F.pct(d, 2, true), F.time(at)] : [];
+    const cells = mode === "live" ? [F.time(at)] : mode === "close" ? [day(pp.day), S !== null && pp.px !== null && Math.abs(pp.px - S) >= 0.005 ? "Session close " + F.px(S) : ""] : mode === "read" ? [F.px(lastPx), F.pct(d, 2, true), F.time(at)] : [];
     const key = [text, mode, t, chgText, chgLabel, dTone, ...cells].join("\n");
     Object.assign(PX, { card, pp, q, S, rp, lastPx, at });
     const fresh = !$("ftPxV") || STATE.pxShown === null;

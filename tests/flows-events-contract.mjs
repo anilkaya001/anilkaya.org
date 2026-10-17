@@ -1205,7 +1205,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
         lanes: [...document.querySelectorAll("#evWeek .fe-lane > span:first-child")].map((n) => n.textContent),
         divCells: document.querySelectorAll("#evWeek .fe-c-div").length,
         macroRows: document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head)").length,
-        weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > *").length,
+        weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > :not(.fe-none)").length,
         forecast: (document.querySelector("#evMacro .fe-mrow:not(.fu-head) .fu-strong") || {}).textContent,
         listTimes: [...document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head) .fe-edate small")].map((n) => n.textContent.trim()),
         weekTimes: [...document.querySelectorAll("#evWeek .fe-c-macro .fe-time")].map((n) => n.textContent.trim()),
@@ -1227,6 +1227,32 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
       ok(r.over <= 1, `[${width}] and nothing overflows (${r.over}px)`);
       await page.close();
     }
+  } finally {
+    await browser.close();
+  }
+}
+
+{
+  const NEXT_CAL = buildEvents([nameAt("WEEKX", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  const browser = await chromium.launch();
+  try {
+    const marks = async (now) => {
+      const { page, errors } = await openEvents(browser, NEXT_CAL, { now });
+      const r = await page.evaluate(() => ({
+        marks: [...document.querySelectorAll("#evWeek .fe-next")].map((n) => n.textContent),
+        cols: document.querySelectorAll("#evWeek .fe-col:not(.fe-labels)").length,
+      }));
+      await page.close();
+      return { ...r, errors };
+    };
+    const onDay = await marks(Date.parse(GATE_ORIGIN + "T15:00:00Z"));
+    deep(onDay.errors, [], "the week renders on the gate day");
+    deep(onDay.marks, ["Today"], "on a session day exactly that day reads Today and no other column is marked");
+    const before = await marks(Date.parse("2026-08-20T15:00:00Z"));
+    deep(before.marks, ["Next"], "before the first session in the list the first upcoming day alone reads Next");
+    const past = await marks(Date.parse("2026-12-01T15:00:00Z"));
+    deep(past.marks, [], "when every listed day is already past no column reads Today or Next");
+    ok(past.cols > 0, "and the past days are still drawn");
   } finally {
     await browser.close();
   }
