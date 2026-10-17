@@ -9,7 +9,8 @@ export function flowsOpsRows(deps) {
   const ops = async ({ env, url, session }) => {
     if (!on(env.FLOWS_OPS)) throw HttpError.of("ops_off");
     if (!isOwner(env, session.username)) throw HttpError.of("forbidden");
-    const part = url.searchParams.get("part") === "ai" ? "ai" : null;
+    const asked = url.searchParams.get("part");
+    const part = asked === "ai" || asked === "coverage" ? asked : null;
     return json(await readOps(env, { ensureFlowsTables, now, meter }, { part }));
   };
 

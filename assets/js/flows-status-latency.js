@@ -6,7 +6,7 @@
   if (!kit) return;
   const {
     h, DASH, num, whole, trt, clockSec, span, ago, share, bytes, median, chip, stateChip, table, facts, why, fill, unread, lagOf, lagReason,
-    engineCards, okBody, whyOf, BASIS, TOPIC_NAME, state,
+    engineCards, engineData, mini, rest, line, okBody, whyOf, BASIS, TOPIC_NAME, state,
   } = kit;
   const $ = (id) => document.getElementById(id);
   const SVG = "http://www.w3.org/2000/svg";
@@ -91,10 +91,11 @@
   function paintSession(now) {
     const host = $("stSession");
     const series = state().D.series;
-    const parts = [h("p", { class: "st-miss lt-gap" }, DASH + " The rail's own latency by five-minute window is not recorded: it keeps its figures in memory and resets them when the last viewer leaves, so there is no rail timeline to draw (the window recorder is not built).")];
+    const parts = [];
     if (!series || !series.ok) {
       fill(host, ...parts, h("p", { class: "st-miss" }, DASH + " The Tier 2 quote-age series was not read: " + (series ? series.reason : "no read yet") + ". Nothing is claimed about it."));
       drawn = null; chart = null;
+      fill($("stSessionTbl"), h("p", { class: "st-miss" }, DASH + " no series was read"));
       return;
     }
     const b = series.body || {};
@@ -103,6 +104,7 @@
     if (b.status === "pending" || !t.length || !lag) {
       fill(host, ...parts, h("p", { class: "st-miss" }, DASH + " The Tier 2 series holds no pass yet: " + (b.status === "pending" ? "it has not been published" : "its quote-age columns are empty") + "."));
       drawn = null; chart = null;
+      fill($("stSessionTbl"), h("p", { class: "st-miss" }, DASH + " the series holds no pass"));
       return;
     }
     const ops = okBody("ops");
@@ -118,31 +120,82 @@
     if (key === drawn && $("stSessionChart")) return;
     const wrap = h("div", { class: "lt-chart", id: "stSessionChart" });
     const text = h("p", { class: "st-foot" },
-      "Tier 2 quote age per pass, in seconds: the median, the 90th percentile and the largest of the read instant minus each row's quote time. " +
-      (line === null ? "The live window was not read, so no line is drawn." : "The dashed line is the Actions feed's live window, " + whole(line) + " s.") +
-      (over === null ? "" : " " + whole(over) + " of " + whole(p90.filter((v) => v !== null).length) + " passes had a 90th percentile past it.") +
-      " Rows quoted later than the read: " + (ahead.some((v) => v !== null) ? "up to " + whole(Math.max(...ahead.filter((v) => v !== null))) + " in a pass" : DASH + " not recorded") + ".");
+      "Tier 2 quote age per pass (p50, p90, largest); the rail's own per-window latency is " + DASH + " not recorded, it lives in memory. " +
+      (line === null ? "Live window not read, so no line." : "Dashed: the live window, " + whole(line) + " s.") +
+      (over === null ? "" : " " + whole(over) + " of " + whole(p90.filter((v) => v !== null).length) + " passes had p90 past it."));
     fill(host, ...parts, wrap, text);
+    fill($("stSessionTbl"), table("Tier 2 quote age by pass", ["Pass", "p50", "p90", "Largest"], t.map((_, i) => [labels[i], p50[i] === null ? DASH : span(p50[i] * 1000), p90[i] === null ? DASH : span(p90[i] * 1000), mx[i] === null ? DASH : span(mx[i] * 1000)])));
     const C = window.FlowsUI.chart;
     if (!C || typeof C.plot !== "function") {
-      fill(wrap, table("Tier 2 quote age", ["Pass", "p50", "p90", "Largest"], t.map((_, i) => [labels[i], p50[i] === null ? DASH : span(p50[i] * 1000), p90[i] === null ? DASH : span(p90[i] * 1000), mx[i] === null ? DASH : span(mx[i] * 1000)])));
+      fill(wrap, h("p", { class: "st-miss" }, DASH + " The chart library did not load; the passes are in Details."));
       return;
     }
     try {
       chart = C.plot(wrap, {
-        kind: "line", label: "Tier 2 quote age per pass", x: labels, xType: "category", table: true, smooth: false, yFormat: (v) => span(v * 1000),
+        kind: "line", label: "Tier 2 quote age per pass", x: labels, xType: "category", table: false, smooth: false, yFormat: (v) => span(v * 1000),
         series: [
           { label: "p50", values: p50, color: "--accent", format: (v) => span(v * 1000) },
           { label: "p90", values: p90, color: "--s-orange", format: (v) => span(v * 1000) },
           { label: "Largest", values: mx, color: "--s-gray", dash: true, format: (v) => span(v * 1000) },
         ],
         refs: line === null ? [] : [{ y: line, dash: true, color: "--warn" }],
-        height: [180, 200, 220],
+        height: [88, 100, 124],
       });
       drawn = key;
     } catch {
       fill(wrap, h("p", { class: "st-miss" }, DASH + " The chart could not be drawn; the numbers are in the heartbeat's series."));
     }
+  }
+
+  function sumFeeds(now) {
+    const host = $("lFeeds");
+    const rail = state().D.rail;
+    if (!rail || !rail.ok) { unread(host, "The real-time rail", rail ? rail.reason : "no read yet"); return; }
+    const body = rail.body || {};
+    const rows = FEEDS.map((k) => {
+      const t = body.topics && body.topics[k] ? body.topics[k] : {};
+      const lag = lagOf(k, t);
+      const has = lag && num(lag.p50) !== null;
+      const win = t.window && typeof t.window === "object" ? t.window : null;
+      return [TOPIC_NAME[k], has ? span(lag.p50) : DASH, has ? span(lag.p95) : DASH, win ? span(win.liveMs) : DASH, stateChip(t.fresh && t.fresh.state)];
+    });
+    rows.push(["Option prints", DASH, DASH, DASH, chip("withheld", "no feed")]);
+    fill(host,
+      mini("Feed latency", ["Feed", "p50", "p95", "Live line", "State"], rows, "feeds"),
+      line(body.running ? "Behind the vendor's stamp; alerts and news behind the item's own time." : DASH + " rail idle: nothing is polled, so no latency is held. Figures return when a viewer connects."));
+  }
+
+  function sumStored(now) {
+    const host = $("lStored");
+    const ops = state().D.ops;
+    if (!ops || !ops.ok) { unread(host, "The stored feeds", ops ? ops.reason : "no read yet"); return; }
+    const live = ops.body.live;
+    if (!Array.isArray(live)) { unread(host, "The stored feeds", ops.body.why ? "the store could not be read" : "the answer carried none"); return; }
+    const rank = (l) => (l.present === false ? 3 : l.state === "stale" ? 2 : l.state === "fresh" ? 1 : 0);
+    const ordered = live.slice().sort((a, b) => rank(b) - rank(a) || (b.ageS ?? 0) - (a.ageS ?? 0));
+    const late = live.filter((l) => l.present === false || l.state === "stale").length;
+    fill(host,
+      line(late ? late + " of " + live.length + " keys are stale or missing; worst first." : "All " + live.length + " keys are inside their lines."),
+      mini("Stored feeds, worst first", ["Key", "Age", "Behind vendor", "State"], ordered.map((l) => (l.present === false
+        ? [l.key, DASH, DASH, chip("pending", "no row")]
+        : [l.key, span((l.ageS ?? NaN) * 1000), l.behindS === null ? "unstamped" : span(l.behindS * 1000), stateChip(l.state)])), "keys"));
+  }
+
+  function sumTiming(now) {
+    const host = $("lTime");
+    const S = state();
+    const rail = S.D.rail;
+    const sock = rail && rail.ok && rail.body && rail.body.upstream ? rail.body.upstream.socket : null;
+    const t2 = engineData(true, now).find((c) => c.name === "Tier 2");
+    const trips = S.trips;
+    const off = S.offsets.length ? median(S.offsets) : null;
+    fill(host,
+      mini("Timing", ["Source", "Reading"], [
+        ["Tier 2 pass", t2 ? t2.lines[1] || t2.lines[0] : DASH],
+        ["Vendor socket", !rail || !rail.ok ? DASH + " rail not read" : sock ? (sock.connected ? "connected" : sock.connecting ? "connecting" : "not connected") + ", " + whole(sock.messages) + " messages" : "REST polling, no socket"],
+        ["This page's reads", trips.length ? "median " + span(median(trips.map((x) => x.ms))) + " over " + trips.length : DASH + " none finished"],
+        ["Worker clock vs browser", off === null ? DASH + " not carried" : (off >= 0 ? "+" : "−") + span(Math.abs(off))],
+      ]));
   }
 
   function paintStored(now) {
@@ -216,13 +269,16 @@
   }
 
   function latency(now) {
+    sumFeeds(now);
+    sumStored(now);
+    sumTiming(now);
     paintFeeds(now);
     paintSession(now);
     paintStored(now);
     paintTiming(now);
     paintSocket(now);
     paintBrowser(now);
-    for (const [id, key] of [["stFeeds", "rail"], ["stSession", "series"], ["stStored", "ops"], ["stTiming", "ops"], ["stSocket", "rail"], ["stBrowser", "rail"]]) {
+    for (const [id, key] of [["lFeeds", "rail"], ["lStored", "ops"], ["lTime", "rail"], ["stFeeds", "rail"], ["stSession", "series"], ["stStored", "ops"], ["stTiming", "ops"], ["stSocket", "rail"], ["stBrowser", "rail"]]) {
       const el = $(id + "Asof");
       const r = state().D[key];
       if (el) el.textContent = r && r.finished ? "read " + clockSec(r.finished) : "";

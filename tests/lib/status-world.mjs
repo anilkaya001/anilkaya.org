@@ -97,6 +97,18 @@ function ledgerRow(over = {}) {
   };
 }
 
+const COVERAGE_ROWS = [
+  { id: "universe", updated_at: NOW - 66e5, bytes: 100609, session: "2026-10-09" },
+  { id: "meta", updated_at: NOW - 66e5, bytes: 9400, session: "2026-10-09" },
+  { id: "board:long", updated_at: NOW - 66e5, bytes: 61800, session: "2026-10-09" },
+  { id: "board:short", updated_at: NOW - 66e5, bytes: 58800, session: "2026-10-09" },
+  { id: "market", updated_at: NOW - 66e5, bytes: 42100, session: "2026-10-09" },
+  { id: "events", updated_at: NOW - 66e5, bytes: 22800, session: "2026-10-09" },
+  { id: "political", updated_at: NOW - 66e5, bytes: 30400, session: "2026-10-08" },
+  { id: "unusual", updated_at: NOW - 66e5, bytes: 51200, session: null },
+  { id: "regime", updated_at: NOW - 66e5, bytes: 3100, session: "2026-10-09" },
+];
+
 export function opsFor(over = {}, { part = null } = {}) {
   const clock = {
     id: 1, day: DAY, trading: 1, early_close: 0, tier1_at: NOW - 60000, tier1_ok_at: NOW - 60000, tier1_why: "written", dispatch_why: "refused:403", summary_at: NOW - 120000,
@@ -119,6 +131,7 @@ export function opsFor(over = {}, { part = null } = {}) {
   const results = [
     { results: over.ledger === null ? [] : [ledgerRow(over.ledgerRow || {})] }, { results: [clock] }, { results: live }, { results: [usage] }, { results: models },
     ...(part === "ai" ? [{ results: counters }, { results: ring }] : []),
+    ...(part === "coverage" ? [{ results: over.coverage || COVERAGE_ROWS }] : []),
   ];
   return opsBody({ FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", FLOWS_ASK_FALLBACK_NEURONS: "26668,204805", FLOWS_AI_DAILY_CAP_NEURONS: "30000", FLOWS_AI_DAILY_CAP_CALLS: "2500", FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "socket",
     FLOWS_RT_SOCKET_HOURS: "session", FLOWS_READ_MODE: "on", FLOWS_LIVE_MODE: "actions", FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_HEALTH: "on" }, NOW, results, { part, meter: over.meter || null });
@@ -131,6 +144,7 @@ export const world = () => ({
   "/api/flows/ready": { body: READY },
   "/api/flows/ops": { body: opsFor() },
   "/api/flows/ops?part=ai": { body: opsFor({}, { part: "ai" }) },
+  "/api/flows/ops?part=coverage": { body: opsFor({}, { part: "coverage" }) },
   "/api/flows/lk?k=heartbeat": { body: HEARTBEAT },
   "/api/flows/lk?k=strips:series": { body: SERIES },
 });

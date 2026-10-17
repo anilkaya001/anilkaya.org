@@ -198,7 +198,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
-  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "moves", "unusual", "events", "track", "political", "status"];
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
     const env = { FLOWS_MOVES: "on" };

@@ -8,14 +8,14 @@
   const DASH = UI.DASH;
   const $ = (id) => document.getElementById(id);
   const host = {
-    meta: $("stMeta"), ready: $("stReady"), note: $("stNote"), again: $("stAgain"), tabs: $("stTabs"),
+    meta: $("stMeta"), ready: $("stReady"), note: $("stNote"), again: $("stAgain"), tabs: $("stTabs"), sub: $("stSub"),
     rail: $("stRail"), night: $("stNight"), ai: $("stAi"), eng: $("stEng"), sw: $("stSw"),
   };
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const TRT_MS = 3 * 36e5;
   const pad = (k) => (k < 10 ? "0" : "") + k;
-  const VIEWS = ["health", "latency", "usage"];
-  const VIEW_LABELS = { health: "Health", latency: "Latency", usage: "Usage" };
+  const VIEWS = ["health", "capacity", "latency", "coverage"];
+  const VIEW_LABELS = { health: "Health", capacity: "Capacity", latency: "Latency", coverage: "Coverage" };
   const MAX_BACKOFF_MS = 300e3;
 
   const num = (v) => {
@@ -88,18 +88,19 @@
   };
 
   const READS = {
-    rail: { path: "/api/rt/status", every: { health: 30e3, latency: 10e3, usage: 10e3 } },
-    ops: { path: "/api/flows/ops", every: { health: 60e3, latency: 60e3, usage: 60e3 } },
-    opsAi: { path: "/api/flows/ops?part=ai", once: true, every: { latency: 1, usage: 1 } },
+    rail: { path: "/api/rt/status", every: { health: 30e3, capacity: 30e3, latency: 10e3, coverage: 30e3 } },
+    ops: { path: "/api/flows/ops", every: { health: 60e3, capacity: 60e3, latency: 60e3, coverage: 60e3 } },
+    opsAi: { path: "/api/flows/ops?part=ai", once: true, every: { capacity: 1, latency: 1 } },
+    cover: { path: "/api/flows/ops?part=coverage", every: { coverage: 300e3 } },
     hb: { path: "/api/flows/lk?k=heartbeat", every: { health: 60e3, latency: 60e3 } },
     series: { path: "/api/flows/lk?k=strips:series", every: { latency: 300e3 } },
-    meta: { path: "/api/flows/meta", every: { health: 300e3, latency: 300e3, usage: 300e3 } },
-    ready: { path: "/api/flows/ready", every: { health: 300e3, latency: 300e3, usage: 300e3 } },
-    ai: { path: "/api/flows/ai-usage", every: { health: 300e3, usage: 300e3 } },
+    meta: { path: "/api/flows/meta", every: { health: 300e3, capacity: 300e3, latency: 300e3, coverage: 300e3 } },
+    ready: { path: "/api/flows/ready", every: { health: 300e3, capacity: 300e3, latency: 300e3, coverage: 300e3 } },
+    ai: { path: "/api/flows/ai-usage", every: { health: 300e3, capacity: 300e3 } },
   };
   const readsFor = (view) => Object.keys(READS).filter((k) => READS[k].every[view] !== undefined);
 
-  const S = { tab: "health", D: {}, nextAt: {}, fails: {}, busy: {}, lastRound: null, trips: [], offsets: [], timer: null, loaded: false };
+  const S = { tab: "health", card: {}, D: {}, nextAt: {}, fails: {}, busy: {}, lastRound: null, trips: [], offsets: [], timer: null, loaded: false };
 
   const read = async (path) => {
     const t0 = performance.now();
@@ -245,8 +246,10 @@
 
   function paintReady(r) {
     if (!host.ready) return true;
+    const why = $("stWhy");
     if (!r || !r.ok || !r.body || typeof r.body !== "object") {
       host.ready.textContent = "Readiness: " + DASH + " (" + (r && r.reason ? r.reason : "not read") + ").";
+      if (why) why.hidden = true;
       return false;
     }
     const b = r.body;
@@ -255,8 +258,10 @@
     const head = b.ok ? "Ready" : list.length + (list.length === 1 ? " blocker" : " blockers");
     const tail = opens === null ? "" : b.phase === "rth" ? ". US session open" : ". US open " + trt(opens, Date.now()) +
       (num(b.minutesToOpen) === null ? "" : ", in " + whole(b.minutesToOpen) + " min");
-    host.ready.replaceChildren(h("strong", null, "Readiness: "), document.createTextNode(head + tail + "."),
-      ...(list.length ? [h("ul", { class: "st-why" }, ...list.map((x) => h("li", null, String(x && x.sentence || x && x.code || DASH))))] : []));
+    host.ready.replaceChildren(h("strong", null, "Readiness: "), document.createTextNode(head + tail + "."));
+    if (why) why.hidden = !list.length;
+    const body = $("stReadyBody");
+    if (body) body.replaceChildren(h("ul", { class: "st-why" }, ...list.map((x) => h("li", null, String(x && x.sentence || x && x.code || DASH)))));
     return true;
   }
 
@@ -267,7 +272,7 @@
     const el = $(id);
     if (!el) return;
     const label = el.querySelector(".st-tile-l");
-    el.replaceChildren(label, h("span", { class: "st-tile-v" }, chip(state[0], state[1]), h("b", null, figure)), h("span", { class: "st-tile-s" }, sub));
+    el.replaceChildren(label, h("span", { class: "st-tile-v" }, chip(state[0], state[1]), h("b", null, figure)), h("span", { class: "st-tile-s", title: sub }, sub));
   }
 
   function lagTile(id, k, now) {
@@ -330,10 +335,9 @@
     return [chip("stale", why), "the last dispatch outcome was " + why];
   };
 
-  function engineCards(full, now) {
+  function engineData(full, now) {
     const cards = [];
-    const card = (name, state, lines) => h("div", { class: "st-eng" }, h("div", { class: "st-eng-h" }, h("span", { class: "st-eng-n" }, name), state),
-      h("ul", { class: "st-eng-l" }, ...lines.map((t) => h("li", null, t))));
+    const card = (name, state, lines) => ({ name, state, lines });
     const meta = okBody("meta");
     const nightlyLines = [];
     let nightlyState = chip("pending", "not read");
@@ -418,6 +422,9 @@
     return cards;
   }
 
+  const engineCards = (full, now) => engineData(full, now).map((c) => h("div", { class: "st-eng" }, h("div", { class: "st-eng-h" }, h("span", { class: "st-eng-n" }, c.name), c.state),
+    h("ul", { class: "st-eng-l" }, ...c.lines.map((t) => h("li", null, t)))));
+
   const SWITCH_EFFECT = {
     FLOWS_RT_MODE: "on runs the real-time rail; anything else is off and its routes answer 404",
     FLOWS_RT_AUDIENCE: "members lets every signed-in member open the rail; anything else is owner only",
@@ -450,9 +457,101 @@
     return true;
   }
 
+  const mini = (label, heads, rows, what) => {
+    const body = h("tbody");
+    for (const r of rows) body.appendChild(h("tr", null, ...r.map((c, i) => (i === 0 ? h("th", { scope: "row" }, c) : h("td", null, c)))));
+    return h("table", { class: "st-mt", "aria-label": label, "data-what": what || null }, h("thead", null, h("tr", null, ...heads.map((t) => h("th", { scope: "col" }, t)))), body);
+  };
+  const rest = () => null;
+  function fit(el) {
+    if (!el) return;
+    const t = el.querySelector("table.st-mt[data-what]");
+    if (!t || !t.tBodies[0]) return;
+    const rows = [...t.tBodies[0].rows];
+    const what = t.getAttribute("data-what");
+    const note = h("p", { class: "st-rest" });
+    el.append(note);
+    let n = rows.length;
+    const place = () => {
+      rows.forEach((r, i) => { r.hidden = i >= n; });
+      t.hidden = n === 0;
+      const hid = rows.length - n;
+      note.textContent = hid ? "+" + hid + " more " + what + " in Details" : "";
+      note.hidden = !hid;
+    };
+    place();
+    while (el.scrollHeight > el.clientHeight + 1 && n > 0) { n--; place(); }
+  }
+  const fitAll = () => {
+    for (const id of ["hEng", "hRail", "hNight", "hSw", "cVendor", "cAi", "cPlat", "cLimits", "lFeeds", "lStored", "lTime", "kStore"]) {
+      const el = $(id);
+      if (el && el.offsetParent !== null) fit(el);
+    }
+  };
+  const line = (text) => h("p", { class: "st-line" }, text);
+
+  function sumEngines(now) {
+    const host = $("hEng");
+    if (!okBody("meta") && !okBody("ops") && !okBody("hb")) {
+      unread(host, "The engines", "the nightly record, the ops view and the heartbeat were all unavailable (" + whyOf("ops") + ")");
+      return;
+    }
+    const data = engineData(false, now);
+    fill(host, mini("Engines", ["Engine", "State", "Latest"], data.map((c) => [c.name, c.state, h("span", { class: "st-t" }, c.lines[0])]), "engines"));
+  }
+
+  function sumRail(now) {
+    const host = $("hRail");
+    const r = S.D.rail;
+    if (!r || !r.ok) { unread(host, "The real-time rail", r ? r.reason : "no read yet"); return; }
+    const s = r.body || {};
+    const sockets = s.sockets || {};
+    const calls = s.calls || {};
+    const up = s.upstream || {};
+    const topics = s.topics && typeof s.topics === "object" ? s.topics : {};
+    const rows = Object.keys(topics).map((k) => {
+      const lag = lagOf(k, topics[k] || {}) || {};
+      return [(TOPIC_NAME[k] || k), topics[k] && topics[k].demanded ? span(lag.p50) : DASH, topics[k] && topics[k].demanded ? span(lag.p95) : DASH,
+        stateChip(topics[k] && topics[k].fresh && topics[k].fresh.state)];
+    });
+    fill(host,
+      line((s.running ? "Running" : "Idle, no viewer") + " · upstream " + (up.kind ? String(up.kind) : DASH) + " · sockets " + whole(sockets.n) + " of " + whole(sockets.max) +
+        " · vendor calls " + whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " this minute"),
+      s.degraded ? line("Degraded since " + trt(s.degraded.since, now) + ": " + String(s.degraded.reason)) : null,
+      rows.length ? mini("Rail topics", ["Topic", "p50", "p95", "State"], rows, "topics") : line(DASH + " the rail reported no topics"),
+      s.running ? null : line("An idle rail polls nothing and keeps no latency; figures return when a viewer connects."));
+  }
+
+  function sumNight(now) {
+    const host = $("hNight");
+    const r = S.D.meta;
+    if (!r || !r.ok) { unread(host, "The nightly record", r ? r.reason : "no read yet"); return; }
+    const m = r.body || {};
+    if (!m.generatedAt) { unread(host, "The nightly record", "no run has been published yet"); return; }
+    const hl = m.health || null;
+    const stages = Array.isArray(m.stages) ? m.stages : [];
+    const slow = stages.filter((x) => num(x.ms) !== null).sort((a, b) => b.ms - a.ms);
+    fill(host,
+      line("Written " + trt(m.generatedAt, now) + " (" + ago(Date.parse(m.generatedAt), now) + ") · session " + (m.sessionDate ? String(m.sessionDate) : DASH)),
+      line(whole(m.universe) + " names · cards " + whole(m.cardsBuilt) + " built, " + whole(m.cardsFailed) + " failed, " + whole(m.cardsSkipped) + " skipped · " +
+        (hl ? whole(hl.failures) + " health failures, " + whole(hl.warnings) + " warnings" : "health " + DASH + " not in this record")),
+      slow.length ? mini("Slowest nightly stages", ["Slowest stages", "Time", "Status"], slow.map((x) => [String(x.id), span(x.ms), String(x.status)]), "stages") : line(DASH + " this run's record carries no stage ledger"));
+  }
+
+  function sumSwitches() {
+    const host = $("hSw");
+    const ops = okBody("ops");
+    if (!ops || !ops.switches) { unread(host, "The switch values", ops === null ? whyOf("ops") : "the answer carried none"); return; }
+    const all = Object.keys(ops.switches);
+    const off = all.filter((k) => ops.switches[k] !== "on");
+    fill(host,
+      line(all.length - off.length + " of " + all.length + " switches are on. Read-only; set in wrangler.toml, and a value that is not the one named is off."),
+      off.length ? mini("Switches not on", ["Not on", "Value"], off.map((k) => [k, ops.switches[k] === null ? "unset" : String(ops.switches[k])]), "switches") : null);
+  }
+
   const kit = {
     h, DASH, num, whole, clock, clockSec, trt, span, ago, share, bytes, usd, median, chip, stateChip, table, facts, why, fill, unread,
-    lagOf, lagReason, engineCards, capOf, vendorReading, sameDay, okBody, whyOf, EVENT, BASIS, TOPIC_NAME, SWITCH_EFFECT, DISPATCH,
+    lagOf, lagReason, engineCards, engineData, paintAi, mini, rest, line, capOf, vendorReading, sameDay, okBody, whyOf, EVENT, BASIS, TOPIC_NAME, SWITCH_EFFECT, DISPATCH,
     state: () => S, panels: {},
     attach(panels) {
       Object.assign(kit.panels, panels);
@@ -483,15 +582,19 @@
     paintReady(S.D.ready);
     paintTiles(now);
     if (S.tab === "health") {
+      sumEngines(now); modAsof("hEng", "ops");
+      sumRail(now); modAsof("hRail", "rail");
+      sumNight(now); modAsof("hNight", "meta");
+      sumSwitches(); modAsof("hSw", "ops");
       paintRail(S.D.rail, now); modAsof("stRail", "rail");
       paintNight(S.D.meta, now); modAsof("stNight", "meta");
-      paintAi(S.D.ai, now); modAsof("stAi", "ai");
       paintEngines(); modAsof("stEng", "ops");
       paintSwitches(); modAsof("stSw", "ops");
     } else if (kit.panels[S.tab]) {
       kit.panels[S.tab](now);
     }
     paintHeader(now);
+    fitAll();
   }
 
   function nextDelay(key) {
@@ -545,11 +648,42 @@
   const stop = () => { if (S.timer !== null) { clearInterval(S.timer); S.timer = null; } };
 
   const viewFromHash = () => {
-    const m = /(?:^#|[&;])view=(health|latency|usage)(?:$|[&;])/.exec(window.location.hash || "");
-    return m ? m[1] : "health";
+    const m = /(?:^#|[&;])view=(health|capacity|usage|latency|coverage)(?:$|[&;])/.exec(window.location.hash || "");
+    if (!m) return "health";
+    return m[1] === "usage" ? "capacity" : m[1];
   };
 
   let seg = null;
+  function setCard(view, idx) {
+    const cards = [...document.querySelectorAll("#stPanel-" + view + " .st-card")];
+    S.card[view] = idx;
+    cards.forEach((c, j) => c.classList.toggle("is-on", j === idx));
+    window.dispatchEvent(new Event("resize"));
+  }
+  function mountSub(view) {
+    const cards = [...document.querySelectorAll("#stPanel-" + view + " .st-card")];
+    if (!host.sub || !cards.length) return;
+    const idx = Math.min(S.card[view] || 0, cards.length - 1);
+    cards.forEach((c, j) => c.classList.toggle("is-on", j === idx));
+    const sg = UI.segmented("Card in " + VIEW_LABELS[view], cards.map((c) => ({ label: c.dataset.short })), (i) => setCard(view, i), idx);
+    [...sg.querySelectorAll('[role="tab"]')].forEach((b, i) => b.setAttribute("aria-controls", cards[i].id));
+    host.sub.replaceChildren(sg);
+  }
+  document.addEventListener("click", (e) => {
+    const open = e.target.closest ? e.target.closest("[data-dlg]") : null;
+    if (open) {
+      const d = $(open.getAttribute("data-dlg"));
+      if (d && typeof d.showModal === "function" && !d.open) d.showModal();
+      return;
+    }
+    const close = e.target.closest ? e.target.closest("[data-close]") : null;
+    if (close) {
+      const d = close.closest("dialog");
+      if (d) d.close();
+      return;
+    }
+    if (e.target && e.target.tagName === "DIALOG" && e.target.open) e.target.close();
+  });
   function syncRail() {
     const rail = document.querySelector("#railOps");
     if (!rail) return;
@@ -573,9 +707,10 @@
       try { window.history.replaceState(null, "", window.location.pathname + window.location.search + "#view=" + view); } catch { S.hashBlocked = true; }
     }
     syncRail();
+    mountSub(view);
     if (view !== "health" && UI.defer && !S.loaded) {
       S.loaded = true;
-      UI.defer("status-panels", { when: "idle", label: "the latency and usage panels" });
+      UI.defer("status-panels", { when: "idle", label: "the capacity, latency and coverage panels" });
     }
     runReads(dueKeys(false), manual === true);
     paint();
@@ -602,6 +737,11 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stop();
     else { runReads(dueKeys(true), false); start(); }
+  });
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (resizeTimer !== null) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { resizeTimer = null; paint(); }, 120);
   });
   window.addEventListener("hashchange", () => {
     const v = viewFromHash();

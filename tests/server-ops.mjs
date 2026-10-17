@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
-import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
+import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, coverageView, COVERAGE_KEYS, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { workerSource, expect, moduleSource } from "./lib/source-scan.mjs";
@@ -213,6 +213,37 @@ function build(f, over = {}) {
   const clockRow = { id: 1, day: DAY, trading: 1, uw_daily: 900, uw_daily_at: NOW - 5000 };
   const both = opsBody({}, NOW, [{ results: [] }, { results: [clockRow] }, { results: [] }, { results: [] }, { results: [] }], { meter: { daily: 950, at: NOW - 1000 } });
   eq(both.vendor.reading.daily, 950, "the newer of the clock's reading and the Worker's wins");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
+  const put = f.db.prepare("INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?)");
+  put.run("universe", JSON.stringify({ sessionDate: DAY, pad: "x".repeat(51200) }), NOW - 3600000);
+  put.run("meta", JSON.stringify({ sessionDate: DAY, generatedAt: "2026-10-12T01:00:00Z" }), NOW - 7200000);
+  put.run("board:long", "not json", NOW - 1000);
+  put.run("card:AAPL", JSON.stringify({ sessionDate: DAY }), NOW);
+  const { table, rc } = build(f);
+  const trips0 = f.trips.length;
+  const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops?part=coverage", {}, "owner.one"))).json();
+  eq(f.trips.length - trips0, 1, "COVERAGE IS ONE TRIP, in the same batch as the rest");
+  const rows = f.rowsRead(trips0);
+  ok(rows <= 24 + COVERAGE_KEYS.length, `part=coverage costs ${rows} rows, the default 24 plus at most one per key (${COVERAGE_KEYS.length})`);
+  eq(body.coverage.budgetBytes, 102400, "the budget is the universe payload's 100 KiB");
+  eq(body.coverage.keys.map((k) => k.key), [...COVERAGE_KEYS], "every expected key is listed, in the declared order");
+  const uni = body.coverage.keys.find((k) => k.key === "universe");
+  ok(uni.present && uni.bytes > 51200 && Math.abs(uni.share - uni.bytes / 102400) < 1e-9, "a present key carries its bytes and its share of the budget");
+  eq([uni.session, uni.updatedAt], [DAY, NOW - 3600000], "with its session date and write time");
+  const bad = body.coverage.keys.find((k) => k.key === "board:long");
+  eq([bad.present, bad.session], [true, null], "a payload that is not JSON is present with no session and no throw");
+  eq(body.coverage.keys.find((k) => k.key === "regime"), { key: "regime", present: false }, "a key never written is absent, not zero bytes");
+  ok(!body.coverage.keys.some((k) => k.key === "card:AAPL"), "a card key is never listed: no scan of the card rows");
+  const none = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
+  eq(none.coverage, null, "without the part there is no coverage");
+  const sqls = opsStatements({ DB: { prepare: (sql) => ({ sql, bind() { return this; } }) } }, NOW, { part: "coverage" }).map((q) => q.sql);
+  const cov = sqls[sqls.length - 1];
+  ok(/FROM flows_payload WHERE id IN \(/.test(cov) && !/json_each|LIKE|LIMIT|ORDER/i.test(cov), "the coverage read is a primary-key lookup of a fixed list");
+  eq(coverageView(null), null, "an unreadable result is null");
 }
 
 {

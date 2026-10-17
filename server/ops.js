@@ -1,6 +1,8 @@
 import { easternDay, shiftDay, freshnessState, classOf, FRESH_CLASSES } from "../shared/flows-freshness.js";
 import { LIVE_KEYS, LIVE_BUDGET } from "../shared/flows-live.js";
-import { normalizeClock, ingestClockView } from "../shared/flows-live-worker.js";
+import { coverageSql } from "./store.js";
+import { UNIVERSE_BUDGET_BYTES } from "../shared/flows-cross.js";
+import { normalizeClock, ingestClockView, NOW_NIGHTLY_KEYS } from "../shared/flows-live-worker.js";
 import { ledgerView } from "../shared/flows-ledger.js";
 import { lines, planOf, renewalState } from "../shared/flows-plan-facts.js";
 import { spendShape } from "../shared/flows-ai.js";
@@ -23,6 +25,8 @@ export const RATE_LIMITS = Object.freeze([
   Object.freeze({ name: "LAB_WRITE", limit: 30, periodS: 60 }),
 ]);
 
+export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion"])]);
+
 const LIVE_IDS = Object.freeze(Object.keys(LIVE_KEYS));
 
 const LEDGER_SQL = "SELECT * FROM flows_ledger WHERE day >= ?1 ORDER BY day DESC LIMIT " + OPS_LEDGER_DAYS;
@@ -30,6 +34,7 @@ const CLOCK_SQL = "SELECT * FROM flows_clock WHERE id = 1";
 const LIVE_SQL = "SELECT id, read_at, session, cadence_s, source, writer, updated_at, " +
   "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.fresh.vendorAt') END AS vendor_at " +
   "FROM flows_live WHERE id IN (" + LIVE_IDS.map((k) => `'${k}'`).join(", ") + ")";
+const COVERAGE_SQL = coverageSql(COVERAGE_KEYS);
 const USAGE_SQL = "SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?1";
 const USAGE_MODEL_SQL = "SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ?1 ORDER BY model";
 const COUNTERS_SQL = "SELECT day, surface, model, outcome, reason, n, ms_sum, ms_max FROM flows_ai_outcome WHERE day >= ?1 AND day <= ?2";
@@ -134,16 +139,34 @@ export function opsStatements(env, now, { part = null } = {}) {
     env.DB.prepare(USAGE_MODEL_SQL).bind(aiDay),
   ];
   if (part === "ai") out.push(env.DB.prepare(COUNTERS_SQL).bind(aiDay, aiDay), env.DB.prepare(RING_SQL));
+  if (part === "coverage") out.push(env.DB.prepare(COVERAGE_SQL));
   return out;
+}
+
+export function coverageView(rows) {
+  const list = rowsOf({ results: rows });
+  if (!list) return null;
+  const byId = new Map(list.map((r) => [r.id, r]));
+  return {
+    budgetBytes: UNIVERSE_BUDGET_BYTES,
+    keys: COVERAGE_KEYS.map((key) => {
+      const r = byId.get(key);
+      if (!r) return { key, present: false };
+      const bytes = whole(r.bytes);
+      return { key, present: true, bytes, share: bytes === null ? null : bytes / UNIVERSE_BUDGET_BYTES,
+        updatedAt: whole(r.updated_at), session: typeof r.session === "string" ? r.session : null };
+    }),
+  };
 }
 
 export function opsBody(env, now, results, { part = null, meter = null } = {}) {
   const base = { v: 1, now, owner: true, ...staticOps(env, now) };
   if (!Array.isArray(results)) {
     return { ...base, why: "store", ledger: null, clock: null, live: null, vendor: null,
-      ai: { spend: null, cap: aiCapOf(env), block: null } };
+      ai: { spend: null, cap: aiCapOf(env), block: null }, coverage: null };
   }
   const [ledgerRes, clockRes, liveRes, usageRes, modelRes, countersRes, ringRes] = results;
+  const coverageRes = part === "coverage" ? countersRes : null;
   const ledgerRows = rowsOf(ledgerRes);
   const clock = normalizeClock(firstOf(clockRes));
   const clockView = clock ? ingestClockView(clock) : null;
@@ -168,6 +191,7 @@ export function opsBody(env, now, results, { part = null, meter = null } = {}) {
     live: liveRes && rowsOf(liveRes) ? liveView(rowsOf(liveRes), now, clock) : null,
     vendor: vendorView(ledger, clockOut, meter),
     ai: { spend, cap: aiCapOf(env), block },
+    coverage: part === "coverage" && coverageRes ? coverageView(rowsOf(coverageRes)) : null,
   };
 }
 

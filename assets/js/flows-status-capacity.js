@@ -5,7 +5,7 @@
   const kit = UI && UI.statusKit;
   if (!kit) return;
   const {
-    h, DASH, num, whole, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, capOf, sameDay,
+    h, DASH, num, whole, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, capOf, sameDay, mini, rest, line, paintAi,
   } = kit;
   const $ = (id) => document.getElementById(id);
   const BAND = { low: 0.8, high: 0.85 };
@@ -183,18 +183,103 @@
         table("Plan lines", ["Line", "Unit", "Cap", "Per", "Plan", "How it is known", "Source", "Cap from"], rows, true)));
   }
 
-  function usage(now) {
+  function bar(name, used, cap, o) {
+    const p = pct(used, cap);
+    const known = num(used) !== null;
+    return h("div", { class: "st-gr" },
+      h("div", { class: "st-gr-h" }, h("span", { class: "st-gr-n" }, name),
+        h("span", { class: "st-gr-v" }, known ? h("b", null, o.format(used)) : DASH, cap === null || cap === undefined ? " of " + DASH : " of " + o.format(cap), " ", o.unit, known ? " · " + pctText(p) : "")),
+      known ? gauge(used, cap, o.marks) : h("p", { class: "lt-none st-why1" }, DASH + " " + o.unread));
+  }
+
+  function sumVendor(now) {
+    const host = $("cVendor");
+    const ops = okBody("ops");
+    if (!ops) { unread(host, "The ops view", state().D.ops ? state().D.ops.reason : "no read yet"); return; }
+    const lines = ops.lines || {};
+    const reading = vendorReading(now);
+    const uw = lines["uw.day"];
+    const rail = okBody("rail");
+    const calls = rail && rail.calls ? rail.calls : null;
+    const own = ops.vendor ? ops.vendor.own : null;
+    const rows = own ? [["Tier 1", own.tier1], ["Focus", own.focus], ["Tier 2", own.tier2]].map(([k, v]) => [k, num(v) === null ? DASH : whole(v)]) : [];
+    fill(host,
+      bar("Whole key today", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
+        format: whole, unit: "calls",
+        unread: reading ? "last counter read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the vendor's counter yet",
+      }),
+      bar("Rail, this minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, { format: whole, unit: "calls", unread: "the rail was not read: " + whyOf("rail") }),
+      rows.length ? mini("Own engines today", ["Engine", "Calls counted"], rows, "engine counts") : line(DASH + " no ledger day, so the engines' own counts are not read"),
+      line("Cap: " + lineText(uw)));
+  }
+
+  function sumAi() {
+    const host = $("cAi");
+    const cap = capOf();
+    const aiBody = okBody("ai");
+    const ops = okBody("ops");
+    const spend = aiBody && aiBody.spend ? aiBody.spend : ops && ops.ai ? ops.ai.spend : null;
+    if (!spend) { unread(host, "The model day", state().D.ai && !state().D.ai.ok ? state().D.ai.reason : "no read yet"); return; }
+    const neurons = num(spend.neurons) !== null ? spend.neurons : null;
+    const over = neurons === null ? null : Math.max(0, neurons - (cap ? cap.allowanceNeurons : 10000));
+    const block = okBody("opsAi") && okBody("opsAi").ai ? okBody("opsAi").ai.block : null;
+    const surf = block && block.surfaces ? Object.values(block.surfaces) : [];
+    const calls = surf.reduce((a, v) => a + (num(v.calls) || 0), 0);
+    const bad = surf.reduce((a, v) => a + (num(v.calls) || 0) * (num(v.refusalRate) || 0), 0);
+    fill(host,
+      bar("Neurons today", neurons, cap ? cap.neurons : null, {
+        format: whole, unit: "neurons", unread: "a model on the day has no configured rate, so the total is not worked",
+        marks: cap ? [{ at: cap.allowanceNeurons, label: "free allowance " + whole(cap.allowanceNeurons) }, { at: cap.readsStopAt, label: "readings stop at " + whole(cap.readsStopAt) }] : [],
+      }),
+      bar("Calls today", spend.calls, cap ? cap.calls : null, { format: whole, unit: "calls", unread: "the model day was not read" }),
+      line("Beyond the free allowance: " + (over === null ? DASH : whole(over) + " neurons, about " + usd((over / 1000) * FREE_NEURONS_USD_PER_1000)) +
+        (cap ? " · readings stop at " + whole(cap.readsStopAt) : "") + " · model day " + String(spend.day || DASH)),
+      line(block ? "Wording refusals today: " + (calls ? whole(Math.round(bad)) + " of " + whole(calls) + " calls" : "no call recorded") : "Refusals: " + DASH + " the outcome block was not read"));
+  }
+
+  function sumPlatform(now) {
+    const host = $("cPlat");
+    const ops = okBody("ops");
+    if (!ops) { unread(host, "The ops view", state().D.ops ? state().D.ops.reason : "no read yet"); return; }
+    const lines = ops.lines || {};
+    const cell = (id) => (lines[id] && lines[id].cap !== null ? whole(lines[id].cap) + " per " + lines[id].per : DASH + " no cap listed");
+    const names = [["d1.read", "D1 rows read"], ["d1.write", "D1 rows written"], ["do.req", "Durable Object requests"], ["cf.req", "Workers requests"]];
+    const day = ops.ledger && Array.isArray(ops.ledger.days) && ops.ledger.days.length ? ops.ledger.days[0] : null;
+    const rows = names.map(([id, n]) => [n, cell(id), DASH]);
+    fill(host,
+      mini("Platform meters", ["Meter", "Allowance", "Used"], rows, "meters"),
+      line(DASH + " Used: Cloudflare reports none to the Worker (read-back is P2-04); the fuse is the 503 store_quota answer."),
+      day ? line(day.day + ": Tier 1 " + whole(day.tier1.ok) + " ok, " + whole(day.tier1.fail) + " failed · focus " + whole(day.focus.ok) + " · Tier 2 " + whole(day.tier2.passes) + " passes")
+        : line("Cron ticks: " + DASH + " no ledger day yet"));
+  }
+
+  function sumLimits() {
+    const host = $("cLimits");
+    const ops = okBody("ops");
+    if (!ops || !Array.isArray(ops.limits)) { unread(host, "The enforced limits", ops ? "the answer carried none" : (state().D.ops ? state().D.ops.reason : "no read yet")); return; }
+    const per = (x) => (x === null ? "" : x === 60 ? " / min" : x === 86400 ? " / day" : " / " + x + " s");
+    fill(host,
+      mini("Limits enforced", ["Limit", "Value", "Scope"], ops.limits.map((l) => [l.name, l.limit === null ? DASH + " platform" : whole(l.limit) + per(l.periodS), l.scope]), "limits"),
+      line("No daily vendor line or D1 line sheds work yet (P1-30, F-25); the 80 to 85% band on the meters is a target."));
+  }
+
+  function capacity(now) {
+    paintAi(state().D.ai, now);
+    sumVendor(now);
+    sumAi();
+    sumPlatform(now);
+    sumLimits();
     paintMeters(now);
     paintConsumers(now);
     paintLimits();
     paintOutcomes();
     paintPlan();
-    for (const [id, key] of [["stMeters", "ops"], ["stConsumers", "ops"], ["stLimits", "ops"], ["stOutcomes", "opsAi"], ["stPlan", "ops"]]) {
+    for (const [id, key] of [["cVendor", "ops"], ["cAi", "ai"], ["cPlat", "ops"], ["cLimits", "ops"], ["stMeters", "ops"], ["stConsumers", "ops"], ["stLimits", "ops"], ["stOutcomes", "opsAi"], ["stPlan", "ops"], ["stAi", "ai"]]) {
       const el = $(id + "Asof");
       const r = state().D[key];
       if (el) el.textContent = r && r.finished ? "read " + clockSec(r.finished) : "";
     }
   }
 
-  kit.attach({ usage });
+  kit.attach({ capacity });
 })();
