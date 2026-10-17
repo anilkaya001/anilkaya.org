@@ -104,7 +104,7 @@ const HOME = [
   "/api/flows/focus", HOME_LIVE, "/api/flows/now?n=board:long,board:short,meta,focus",
 ];
 const SCHEMA_RE = /^CREATE TABLE IF NOT EXISTS flows_payload/;
-const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
+const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
 
 {
   const f = fakeD1();
@@ -116,9 +116,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   eq(f.count(SCHEMA_RE), 1,
      "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the twenty-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
-  eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of the schema bootstrap once");
+  eq(f.count(PRAGMA_RE), 1, "and the two column PRAGMAs of the schema bootstrap, the clock's and the ledger's, ride that one batch");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 22 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 23 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");

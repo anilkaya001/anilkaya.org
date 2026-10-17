@@ -11,6 +11,7 @@ import { workerSource, expect, moduleSource } from "./lib/source-scan.mjs";
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+const deep0 = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const thrown = async (fn) => { try { await fn(); } catch (e) { return e; } return null; };
 const view = (e) => (e ? { status: e.status, code: e.code } : null);
 
@@ -163,6 +164,26 @@ function build(f, over = {}) {
 {
   const f = fakeD1();
   seed(f);
+  f.db.prepare("UPDATE flows_clock SET uw_daily = 21000, uw_daily_at = ? WHERE id = 1").run(NOW - 120000);
+  f.db.prepare("UPDATE flows_ledger SET t1_calls = 366, focus_calls = 125, uw_daily_max = 21400, uw_daily_at = ? WHERE day = ?").run(NOW - 60000, DAY);
+  const { table, rc } = build(f);
+  const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
+  deep0(body.clock.vendor, { daily: 21000, at: NOW - 120000 }, "the clock row's reading is on the clock");
+  deep0(body.vendor.reading, { daily: 21400, at: NOW - 60000 }, "THE VENDOR READING is the newest of the clock row's and the day's ledger maximum");
+  eq(body.vendor.own.tier1, 366, "the engines' own counts come from the ledger: Tier 1");
+  eq([body.vendor.own.focus, body.vendor.own.tier2, body.vendor.own.tier2Failed], [125, 900, 4], "focus and Tier 2");
+  eq(body.vendor.dayBoundary, "assumed", "and the vendor's day boundary is said to be assumed");
+  const held = await (await build(f, { meter: () => ({ daily: 21500, at: NOW - 1000 }) }).table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
+  eq(held.vendor.reading.daily, 21500, "a reading this isolate made later than the stored ones wins");
+  f.db.prepare("UPDATE flows_ledger SET t1_calls = 0, focus_calls = 0, uw_daily_max = NULL, uw_daily_at = NULL").run();
+  f.db.prepare("UPDATE flows_clock SET uw_daily = NULL, uw_daily_at = NULL").run();
+  const none = await (await build(f).table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
+  eq([none.vendor.reading, none.clock.vendor], [null, null], "with no reading anywhere the reading is null and not a zero count");
+}
+
+{
+  const f = fakeD1();
+  seed(f);
   f.db.prepare("UPDATE flows_live SET payload = 'not json' WHERE id = 'live:vol'").run();
   const { table, rc } = build(f);
   const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
@@ -257,6 +278,9 @@ function build(f, over = {}) {
 {
   const w = workerSource();
   expect(w, /flowsOpsRows\(\{/, { min: 1, max: 1, why: "the Worker mounts the ops family once" });
+  expect(w, /meter: \(\) => state\.vendorMeter/, { min: 1, max: 1, why: "the family is handed this isolate's own vendor reading" });
+  expect(w, /state\.vendorMeter = newerMeter\(state\.vendorMeter, seen\)/, { min: 1, max: 1, why: "and uwFetch, the one door every Worker vendor call passes, is where it is taken, before the status is judged" });
+  ok(/const seen = vendorMeter\(response\.headers, Date\.now\(\)\);[\s\S]{0,260}response\.status === 429/.test(w), "the counter header is read from a 429 as well as from a success");
   for (const f of ["server/ops.js", "server/routes/flows-ops.js"]) {
     const t = moduleSource(f);
     ok(!/FLOWS_UW_PLAN|FLOWS_PLAN_WORKERS|FLOWS_PLAN_PAID_THROUGH/.test(t), f + " reads no plan variable itself: only lines(env), planOf(env) and renewalState do");

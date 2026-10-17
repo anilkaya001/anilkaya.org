@@ -9,7 +9,7 @@ import {
 } from "../shared/flows-rt-hub.js";
 import * as SOCK from "../shared/flows-rt-socket.js";
 import { rtTopics } from "../shared/flows-rt-routes.js";
-import { vendorBase, vendorBaseInfo, vendorRedirected, vendorUrl, unwrap as vendorUnwrap, classifyStatus, retryAfterMs as vendorRetryAfterMs, VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
+import { vendorBase, vendorBaseInfo, vendorRedirected, vendorUrl, unwrap as vendorUnwrap, classifyStatus, retryAfterMs as vendorRetryAfterMs, VENDOR_BASE_DEFAULT, vendorMeter, newerMeter, VENDOR_METER_HEADERS } from "../shared/flows-vendor-core.js";
 import {
   FRESH_CLASSES, freshnessState, classOf, easternInstant, sessionOpen, phaseAt,
 } from "../shared/flows-freshness.js";
@@ -458,10 +458,15 @@ const plainPlan = (names = ["SPY", "QQQ"], extra = {}) => ({
   ...extra,
 });
 
-const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinute = 240, scale = 1, timeoutMs = 4000, base = "http://uw.test" } = {}) => {
+const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinute = 240, scale = 1, timeoutMs = 4000, base = "http://uw.test", extraHeaders = null } = {}) => {
   const calls = [];
   const inner = fetchFor(vendor);
-  const fetchImpl = async (url, init) => { calls.push({ url: new URL(String(url)), init }); return inner(url, init); };
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: new URL(String(url)), init });
+    const res = await inner(url, init);
+    if (!extraHeaders) return res;
+    return new Response(await res.text(), { status: res.status, headers: { ...Object.fromEntries(res.headers), ...extraHeaders() } });
+  };
   const cfg = hubConfig({ UW_API_KEY: key, UW_BASE: base, FLOWS_RT_MODE: "on", FLOWS_RT_SCALE: String(scale) });
   const frames = [];
   const errors = [];
@@ -545,6 +550,42 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   await h.up.tick(t + 10000);
   eq(h.frames.length, 1, "adapter: and a restarted run is not poisoned by the old one");
   h.up.stop();
+}
+
+{
+  const H = (o) => new Headers(o);
+  deep(vendorMeter(H({ "x-uw-daily-req-count": "21400", "x-uw-req-per-minute-remaining": "1000000", "x-uw-req-per-minute-reset": "60000", "x-uw-token-req-limit": "100000000" }), 5000),
+    { at: 5000, daily: 21400, minuteRemaining: 1000000, minuteResetMs: 60000, tokenLimit: 100000000 }, "meter: the four headers the vendor sends are read as whole numbers with the instant of the read");
+  deep(vendorMeter(H({ "x-uw-daily-req-count": "173" }), 7), { at: 7, daily: 173, minuteRemaining: null, minuteResetMs: null, tokenLimit: null }, "meter: a header that is absent is null, not zero");
+  eq(vendorMeter(H({}), 7), null, "meter: no header at all is no reading");
+  eq(vendorMeter(H({ "x-uw-daily-req-count": "abc", "x-uw-req-per-minute-reset": "-4", "x-uw-token-req-limit": "1.5", "x-uw-req-per-minute-remaining": "99999999999999999999" }), 7), null, "meter: garbage, a negative, a fraction and an unsafe integer are refused");
+  eq(vendorMeter(H({ "x-uw-daily-req-count": " 42 " }), 7).daily, 42, "meter: surrounding space is trimmed");
+  eq(vendorMeter(null, 7), null, "meter: no headers object is no reading");
+  eq(vendorMeter(H({ "x-uw-daily-req-count": "1" }), NaN), null, "meter: and no instant is no reading");
+  deep(Object.values(VENDOR_METER_HEADERS), ["x-uw-daily-req-count", "x-uw-req-per-minute-remaining", "x-uw-req-per-minute-reset", "x-uw-token-req-limit"], "meter: the header names are the vendor's");
+  const a = { at: 1, daily: 1 };
+  const b = { at: 2, daily: 2 };
+  deep([newerMeter(a, b), newerMeter(b, a), newerMeter(null, a), newerMeter(a, null), newerMeter(null, null)], [b, b, a, a, null], "meter: the later reading wins and a missing one never replaces one held");
+
+  let t = SESSION_NOW;
+  let daily = 100;
+  const vendor = createFakeVendor({ session: DAY, clock: () => t });
+  const u = upstreamOf(vendor, { clock: () => t, extraHeaders: () => ({ "x-uw-daily-req-count": String(daily++), "x-uw-req-per-minute-remaining": "1000000" }) });
+  eq(u.up.state().vendor, null, "meter: the adapter has no reading before its first call");
+  u.up.start({ ...plainPlan(), topics: new Set(["px"]) }, u.handlers);
+  await u.up.tick(t);
+  const first = u.up.state().vendor;
+  ok(first && first.daily >= 100 && first.at === t && first.minuteRemaining === 1000000, "meter: the adapter keeps the newest reading in its state, stamped with the time of the call: " + JSON.stringify(first));
+  t += 6000;
+  await u.up.tick(t);
+  ok(u.up.state().vendor.daily > first.daily && u.up.state().vendor.at === t, "meter: and moves it on the next call");
+  u.up.stop();
+  ok(u.up.state().vendor !== null, "meter: a stop does not forget it");
+  const plain = upstreamOf(createFakeVendor({ session: DAY, clock: () => t }), { clock: () => t });
+  plain.up.start({ ...plainPlan(), topics: new Set(["px"]) }, plain.handlers);
+  await plain.up.tick(t);
+  eq(plain.up.state().vendor, null, "meter: a vendor that sends no header leaves the reading null");
+  plain.up.stop();
 }
 
 {
@@ -983,6 +1024,9 @@ const seqOk = (ws) => {
   ok(r.vendor.paramsOf(/screener/).every((p) => p.ticker.split(",").includes("NVDA")), "demand: and the focus ticker still joins the px read");
   const st = r.hub.status();
   deep(Object.keys(st.topics), TOPICS.slice(), "status: still lists all five topics");
+  deep(TOPICS.map((k) => [st.topics[k].window.klass, st.topics[k].window.liveMs, st.topics[k].window.staleMs]),
+    TOPICS.map((k) => [RT.RT_TOPICS[k].klass, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS + RT.RT_TOPICS[k].barS) * 1000, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].staleS + RT.RT_TOPICS[k].barS) * 1000]),
+    "status: each topic carries its own live and stale windows, the class's line plus the vendor's bar (prices and alerts 15 s and 60 s, gamma 90 s and 180 s, market tide 330 s and 420 s, news 75 s and 300 s)");
   deep(TOPICS.map((k) => st.topics[k].demanded), [true, false, false, false, false], "status: and says which are demanded");
   deep(Array.from(r.hub.plan.topics), ["px"], "demand: the plan's topics are the union of what sockets ask");
   r.hub.lastBroadcastAt = 0;

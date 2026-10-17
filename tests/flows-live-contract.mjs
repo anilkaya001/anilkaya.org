@@ -909,6 +909,7 @@ const cronMinutes = (cron) => {
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
   const verdictMigration = read("migrations/0012_flows_clock_verdict.sql");
   const summaryMigration = read("migrations/0014_flows_clock_summary.sql");
+  const meterMigration = read("migrations/0022_flows_vendor_meter.sql");
   const schema = read("schema.sql");
   const clockBlock = /CREATE TABLE IF NOT EXISTS flows_clock \([\s\S]*?\n\);\n/;
   ok(schema.includes(migration.replace(clockBlock, "").trim().split("\n\n")[0].trim()) &&
@@ -920,14 +921,15 @@ const cronMinutes = (cron) => {
     "and a trigger makes the dated archive immutable at the storage layer");
   ok(!/ALTER TABLE/.test(migration), "every statement is IF NOT EXISTS, so applying it twice is safe");
   const alters = (sql) => [...sql.matchAll(/ALTER TABLE flows_clock ADD COLUMN (\w+) (\w+);/g)].map((m) => [m[1], m[2]]);
-  const added = [...alters(clockMigration), ...alters(verdictMigration), ...alters(summaryMigration)];
+  const added = [...alters(clockMigration), ...alters(verdictMigration), ...alters(summaryMigration), ...alters(meterMigration)];
   deep(added, W.CLOCK_ADDED_COLUMNS.map((c) => [...c]),
     "TIER 1 TELEMETRY, THE VERDICT AND THE SUMMARY FIRING: 0011 adds tier1_at, tier1_ok_at and tier1_why, 0012 adds " +
-    "closed_probe_at, closed_days and dispatch_why, 0014 adds summary_at, and the Worker's first-use path adds exactly " +
+    "closed_probe_at, closed_days and dispatch_why, 0014 adds summary_at, 0022 adds uw_daily and uw_daily_at, and the Worker's first-use path adds exactly " +
     "those columns to a production table that predates them");
   eq(clockMigration.trim().split("\n").length, alters(clockMigration).length, "and 0011 does nothing else");
   eq(verdictMigration.trim().split("\n").length, alters(verdictMigration).length, "nor does 0012");
   eq(summaryMigration.trim().split("\n").length, alters(summaryMigration).length, "nor does 0014");
+  eq(meterMigration.trim().split("\n").filter((line) => /ALTER TABLE flows_clock /.test(line)).length, alters(meterMigration).length, "and 0022 adds the two clock columns and four ledger ones");
   const cols = (sql, table) => {
     const body = new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\)(?:;|")`).exec(sql);
     return body ? body[1].split(",").map((c) => c.trim().split(/\s+/)[0]).filter((c) => /^[a-z_0-9]+$/.test(c)) : [];
@@ -1032,10 +1034,11 @@ const cronMinutes = (cron) => {
         "never written, and the nightly health gate's live:focus check is what says so");
   }
   ok(/const job = FLOWS_LIVE\.cronJob\(event && event\.cron, at\);\s*if \(job === "rth"\)/.test(worker) &&
-     /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\) \}\);/.test(worker),
+     /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, tickVendor\(env\)\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
     "the focus job reads the vendor through the same uwFetch as Tier 1");
-  ok(/return FLOWS_LIVE\.rthTick\(env, at, \{ fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\) \}\);/.test(worker) &&
+  ok(/return FLOWS_LIVE\.rthTick\(env, at, tickVendor\(env\)\);/.test(worker) &&
+     /function tickVendor\(env\) \{[\s\S]*?deadlineMs: LIVE_BUDGET\.tier1TimeoutMs, onMeter: \(m\) => \{ seen = newerMeter\(seen, m\); \},/.test(worker) &&
      /fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\),\s*admit:/.test(worker),
     "the Tier 1 tick, the focus tick and the tape pass tier1TimeoutMs to uwFetch, so the subrequest a race gives up on is aborted " +
     "at the same instant rather than left running behind it");
@@ -1916,13 +1919,14 @@ const cronMinutes = (cron) => {
     },
   });
   const CLOCK = (db, known) => upgradeColumns(db, "flows_clock", W.CLOCK_ADDED_COLUMNS, known);
-  const later = ["closed_probe_at", "closed_days", "dispatch_why", "summary_at"];
+  const later = ["closed_probe_at", "closed_days", "dispatch_why", "summary_at", "uw_daily", "uw_daily_at"];
   deep(await CLOCK(fakeDb(["id", "day", "tier1_at", "closed_days"])),
-    ["tier1_ok_at", "tier1_why", "closed_probe_at", "dispatch_why", "summary_at"],
+    ["tier1_ok_at", "tier1_why", "closed_probe_at", "dispatch_why", "summary_at", "uw_daily", "uw_daily_at"],
     "THE PRODUCTION TABLE UPGRADES ITSELF: the first-use path adds only the columns flows_clock lacks");
   deep(upgrades, ["ALTER TABLE flows_clock ADD COLUMN tier1_ok_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN tier1_why TEXT",
     "ALTER TABLE flows_clock ADD COLUMN closed_probe_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN dispatch_why TEXT",
-    "ALTER TABLE flows_clock ADD COLUMN summary_at INTEGER"],
+    "ALTER TABLE flows_clock ADD COLUMN summary_at INTEGER", "ALTER TABLE flows_clock ADD COLUMN uw_daily INTEGER",
+    "ALTER TABLE flows_clock ADD COLUMN uw_daily_at INTEGER"],
   "with one ALTER TABLE ADD COLUMN each");
   deep(await CLOCK(fakeDb(["id"], ["tier1_at", "duplicate column name: tier1_at"])),
     ["tier1_ok_at", "tier1_why", ...later], "a racing isolate that added a column first is tolerated (duplicate column)");

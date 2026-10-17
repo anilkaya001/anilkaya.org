@@ -116,7 +116,10 @@ export function liveView(rows, now, clock) {
 export function vendorView(ledger, clockView, held) {
   const today = ledger && Array.isArray(ledger.days) && ledger.days.length ? ledger.days[0] : null;
   const fromClock = clockView && clockView.vendor ? clockView.vendor : null;
-  const candidates = [fromClock, held].filter((m) => m && Number.isFinite(m.daily) && Number.isFinite(m.at));
+  const atOf = Date.parse(today && today.vendor ? today.vendor.at : "");
+  const fromLedger = today && today.vendor && Number.isFinite(today.vendor.dailyMax) && Number.isFinite(atOf)
+    ? { daily: today.vendor.dailyMax, at: atOf } : null;
+  const candidates = [fromClock, fromLedger, held].filter((m) => m && Number.isFinite(m.daily) && Number.isFinite(m.at));
   const reading = candidates.length ? candidates.reduce((a, b) => (b.at > a.at ? b : a)) : null;
   const own = today
     ? { day: today.day, tier1: today.tier1.calls ?? null, focus: today.focus.calls ?? null, tier2: today.tier2.calls, tier2Failed: today.tier2.failedCalls }

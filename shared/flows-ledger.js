@@ -20,9 +20,13 @@ export const LEDGER_SCHEMA_SQL =
   "t2_passes INTEGER NOT NULL DEFAULT 0, t2_first_at INTEGER, t2_last_at INTEGER, t2_gap_ms INTEGER NOT NULL DEFAULT 0, " +
   "t2_gap_end INTEGER, t2_calls INTEGER NOT NULL DEFAULT 0, t2_failed INTEGER NOT NULL DEFAULT 0, " +
   "stale_ticks INTEGER NOT NULL DEFAULT 0, stale_over_s INTEGER, stale_key TEXT, " +
-  "nightly_at INTEGER, nightly_runs INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)";
+  "nightly_at INTEGER, nightly_runs INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, " +
+  "t1_calls INTEGER NOT NULL DEFAULT 0, focus_calls INTEGER NOT NULL DEFAULT 0, uw_daily_max INTEGER, uw_daily_at INTEGER)";
 
-export const LEDGER_ADDED_COLUMNS = Object.freeze([]);
+export const LEDGER_ADDED_COLUMNS = Object.freeze([
+  Object.freeze(["t1_calls", "INTEGER NOT NULL DEFAULT 0"]), Object.freeze(["focus_calls", "INTEGER NOT NULL DEFAULT 0"]),
+  Object.freeze(["uw_daily_max", "INTEGER"]), Object.freeze(["uw_daily_at", "INTEGER"]),
+]);
 
 const int = (v) => Math.round(Number(v));
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
@@ -51,34 +55,47 @@ export function ledgerTickStatement(db, { day, at, start, end }) {
   return db.prepare(TICK_SQL).bind(day, int(at), Math.max(0, here - int(start)), here, int(start), int(end));
 }
 
-export function ledgerOutcomeStatement(db, { day, at, start, end, ok, failed, stale = null }) {
+const meterBinds = (meter) => {
+  const daily = meter && Number.isSafeInteger(meter.daily) && meter.daily >= 0 ? meter.daily : null;
+  return [daily, daily === null ? null : int(meter.at)];
+};
+
+export function ledgerOutcomeStatement(db, { day, at, start, end, ok, failed, stale = null, calls = 0, meter = null }) {
   const here = clamp(int(at), int(start), int(end));
   const over = stale && Number.isFinite(stale.over) ? int(stale.over) : null;
+  const [daily, dailyAt] = meterBinds(meter);
   return db.prepare(
-    "INSERT INTO flows_ledger (day, t1_ok, t1_fail, t1_ok_at, t1_ok_gap_ms, t1_ok_gap_end, stale_ticks, stale_over_s, stale_key, updated_at) " +
-    "VALUES (?1, ?7, ?8, CASE WHEN ?7 = 1 THEN ?2 END, CASE WHEN ?7 = 1 THEN ?3 ELSE 0 END, CASE WHEN ?7 = 1 THEN ?4 END, ?9, ?10, ?11, ?2) " +
+    "INSERT INTO flows_ledger (day, t1_ok, t1_fail, t1_ok_at, t1_ok_gap_ms, t1_ok_gap_end, stale_ticks, stale_over_s, stale_key, updated_at, t1_calls, uw_daily_max, uw_daily_at) " +
+    "VALUES (?1, ?7, ?8, CASE WHEN ?7 = 1 THEN ?2 END, CASE WHEN ?7 = 1 THEN ?3 ELSE 0 END, CASE WHEN ?7 = 1 THEN ?4 END, ?9, ?10, ?11, ?2, ?12, ?13, CASE WHEN ?13 IS NOT NULL THEN ?14 END) " +
     "ON CONFLICT(day) DO UPDATE SET t1_ok = t1_ok + ?7, t1_fail = t1_fail + ?8, " +
     "t1_ok_gap_end = CASE WHEN ?7 = 1 AND ?4 - min(max(coalesce(t1_ok_at, ?5), ?5), ?6) > t1_ok_gap_ms THEN ?4 ELSE t1_ok_gap_end END, " +
     "t1_ok_gap_ms = CASE WHEN ?7 = 1 THEN max(t1_ok_gap_ms, ?4 - min(max(coalesce(t1_ok_at, ?5), ?5), ?6)) ELSE t1_ok_gap_ms END, " +
     "t1_ok_at = CASE WHEN ?7 = 1 THEN max(coalesce(t1_ok_at, ?2), ?2) ELSE t1_ok_at END, " +
     "stale_ticks = stale_ticks + ?9, " +
     "stale_key = CASE WHEN ?10 IS NOT NULL AND ?10 > coalesce(stale_over_s, -1) THEN ?11 ELSE stale_key END, " +
-    "stale_over_s = CASE WHEN ?10 IS NOT NULL AND ?10 > coalesce(stale_over_s, -1) THEN ?10 ELSE stale_over_s END, updated_at = ?2",
+    "stale_over_s = CASE WHEN ?10 IS NOT NULL AND ?10 > coalesce(stale_over_s, -1) THEN ?10 ELSE stale_over_s END, " +
+    "t1_calls = t1_calls + ?12, " +
+    "uw_daily_at = CASE WHEN ?13 IS NOT NULL AND ?13 >= coalesce(uw_daily_max, -1) THEN ?14 ELSE uw_daily_at END, " +
+    "uw_daily_max = CASE WHEN ?13 IS NOT NULL THEN max(coalesce(uw_daily_max, ?13), ?13) ELSE uw_daily_max END, updated_at = ?2",
   ).bind(day, int(at), Math.max(0, here - int(start)), here, int(start), int(end), ok ? 1 : 0, failed ? 1 : 0,
-    over === null ? 0 : 1, over, over === null ? null : String(stale.key || "").slice(0, 32));
+    over === null ? 0 : 1, over, over === null ? null : String(stale.key || "").slice(0, 32), count(calls), daily, dailyAt);
 }
 
-export function ledgerFocusStatement(db, { day, at, start, end, ok, partial, failed }) {
+export function ledgerFocusStatement(db, { day, at, start, end, ok, partial, failed, calls = 0, meter = null }) {
   const here = clamp(int(at), int(start), int(end));
+  const [daily, dailyAt] = meterBinds(meter);
   return db.prepare(
-    "INSERT INTO flows_ledger (day, focus_ok, focus_partial, focus_fail, focus_ok_at, focus_gap_ms, focus_gap_end, updated_at) " +
-    "VALUES (?1, ?7, ?8, ?9, CASE WHEN ?7 = 1 THEN ?2 END, CASE WHEN ?7 = 1 THEN ?3 ELSE 0 END, CASE WHEN ?7 = 1 THEN ?4 END, ?2) " +
+    "INSERT INTO flows_ledger (day, focus_ok, focus_partial, focus_fail, focus_ok_at, focus_gap_ms, focus_gap_end, updated_at, focus_calls, uw_daily_max, uw_daily_at) " +
+    "VALUES (?1, ?7, ?8, ?9, CASE WHEN ?7 = 1 THEN ?2 END, CASE WHEN ?7 = 1 THEN ?3 ELSE 0 END, CASE WHEN ?7 = 1 THEN ?4 END, ?2, ?10, ?11, CASE WHEN ?11 IS NOT NULL THEN ?12 END) " +
     "ON CONFLICT(day) DO UPDATE SET focus_ok = focus_ok + ?7, focus_partial = focus_partial + ?8, focus_fail = focus_fail + ?9, " +
     "focus_gap_end = CASE WHEN ?7 = 1 AND ?4 - min(max(coalesce(focus_ok_at, ?5), ?5), ?6) > focus_gap_ms THEN ?4 ELSE focus_gap_end END, " +
     "focus_gap_ms = CASE WHEN ?7 = 1 THEN max(focus_gap_ms, ?4 - min(max(coalesce(focus_ok_at, ?5), ?5), ?6)) ELSE focus_gap_ms END, " +
-    "focus_ok_at = CASE WHEN ?7 = 1 THEN max(coalesce(focus_ok_at, ?2), ?2) ELSE focus_ok_at END, updated_at = ?2",
+    "focus_ok_at = CASE WHEN ?7 = 1 THEN max(coalesce(focus_ok_at, ?2), ?2) ELSE focus_ok_at END, " +
+    "focus_calls = focus_calls + ?10, " +
+    "uw_daily_at = CASE WHEN ?11 IS NOT NULL AND ?11 >= coalesce(uw_daily_max, -1) THEN ?12 ELSE uw_daily_at END, " +
+    "uw_daily_max = CASE WHEN ?11 IS NOT NULL THEN max(coalesce(uw_daily_max, ?11), ?11) ELSE uw_daily_max END, updated_at = ?2",
   ).bind(day, int(at), Math.max(0, here - int(start)), here, int(start), int(end), ok ? 1 : 0, partial ? 1 : 0,
-    failed ? 1 : 0);
+    failed ? 1 : 0, count(calls), daily, dailyAt);
 }
 
 const PASS_SQL =
@@ -111,6 +128,7 @@ export function ledgerPruneCutoff(today) {
 
 const iso = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? new Date(Number(v)).toISOString() : null);
 const or0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const counted = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 export function ledgerRowView(r) {
   if (!r || typeof r !== "object" || typeof r.day !== "string") return null;
@@ -118,14 +136,15 @@ export function ledgerRowView(r) {
     day: r.day,
     ticks: or0(r.ticks),
     tier1: { lastAt: iso(r.t1_last_at), gapMs: or0(r.t1_gap_ms), gapEndAt: iso(r.t1_gap_end), ok: or0(r.t1_ok), fail: or0(r.t1_fail),
-      okAt: iso(r.t1_ok_at), okGapMs: or0(r.t1_ok_gap_ms), okGapEndAt: iso(r.t1_ok_gap_end) },
+      okAt: iso(r.t1_ok_at), okGapMs: or0(r.t1_ok_gap_ms), okGapEndAt: iso(r.t1_ok_gap_end), calls: counted(r.t1_calls) },
     focus: { ok: or0(r.focus_ok), partial: or0(r.focus_partial), fail: or0(r.focus_fail), okAt: iso(r.focus_ok_at),
-      gapMs: or0(r.focus_gap_ms), gapEndAt: iso(r.focus_gap_end) },
+      gapMs: or0(r.focus_gap_ms), gapEndAt: iso(r.focus_gap_end), calls: counted(r.focus_calls) },
     tier2: { passes: or0(r.t2_passes), firstAt: iso(r.t2_first_at), lastAt: iso(r.t2_last_at), gapMs: or0(r.t2_gap_ms),
       gapEndAt: iso(r.t2_gap_end), calls: or0(r.t2_calls), failedCalls: or0(r.t2_failed) },
     stale: { ticks: or0(r.stale_ticks), overS: r.stale_over_s === null || r.stale_over_s === undefined ? null : or0(r.stale_over_s),
       key: typeof r.stale_key === "string" ? r.stale_key : null },
     nightly: { at: iso(r.nightly_at), runs: or0(r.nightly_runs) },
+    vendor: { dailyMax: counted(r.uw_daily_max), at: iso(r.uw_daily_at) },
     updatedAt: iso(r.updated_at),
   };
 }

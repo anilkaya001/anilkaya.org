@@ -76,7 +76,7 @@ export const COLD_START = Object.freeze({
   trips: 6,
   written: 22,
   startsPerWeekday: 312,
-  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (22 statements, 20 of them CREATE); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
+  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
 });
 
 export const TIER2 = Object.freeze({

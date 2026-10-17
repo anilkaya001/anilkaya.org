@@ -56,7 +56,7 @@ import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt, railReadiness } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
-import { vendorBase, vendorRedirected, vendorUrl } from "./shared/flows-vendor-core.js";
+import { vendorBase, vendorRedirected, vendorUrl, vendorMeter, newerMeter } from "./shared/flows-vendor-core.js";
 import { pathFor } from "./shared/flows-vendor-ops.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
@@ -72,6 +72,7 @@ function createState() {
     aiRecorderFailed: false,
     dispatchCheckAt: 0,
     vendorMeter: createCallMeter(),
+    keyCounter: null,
   };
 }
 const state = createState();
@@ -2060,6 +2061,15 @@ const UW_CHAIN_DEADLINE_MS = 8000;
 const UW_DOSSIER_DEADLINE_MS = 20000;
 
 const meterOn = (env) => typeof (env && env.FLOWS_METER) === "string" && env.FLOWS_METER.trim().toLowerCase() === "on";
+function tickVendor(env) {
+  let seen = null;
+  return {
+    fetchVendor: (p, params) => uwFetch(env, p, params, {
+      deadlineMs: LIVE_BUDGET.tier1TimeoutMs, onMeter: (m) => { seen = newerMeter(seen, m); },
+    }),
+    meter: () => seen,
+  };
+}
 
 async function uwFetch(env, path, params, opts) {
   if (!meterOn(env)) return uwFetchUnmetered(env, path, params, opts);
@@ -2093,6 +2103,11 @@ async function uwFetchUnmetered(env, path, params, opts) {
     });
   } catch {
     throw failed("Market data provider unreachable");
+  }
+  const seen = vendorMeter(response.headers, Date.now());
+  if (seen) {
+    state.keyCounter = newerMeter(state.keyCounter, seen);
+    if (opts && typeof opts.onMeter === "function") opts.onMeter(seen);
   }
   if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
   if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
@@ -2870,7 +2885,7 @@ flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential
 flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
-flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => null }),
+flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
@@ -3606,14 +3621,14 @@ export default {
     if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.rthTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
+        return FLOWS_LIVE.rthTick(env, at, tickVendor(env));
       })());
       return;
     }
     if (job === "focus") {
       guard("flows focus tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.focusTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
+        return FLOWS_LIVE.focusTick(env, at, tickVendor(env));
       })());
       return;
     }

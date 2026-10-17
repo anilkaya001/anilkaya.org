@@ -58,3 +58,35 @@ export function retryAfterMs(value, now) {
   const d = Date.parse(value);
   return Number.isFinite(d) ? Math.max(0, d - now) : null;
 }
+
+export const VENDOR_METER_HEADERS = Object.freeze({
+  daily: "x-uw-daily-req-count",
+  minuteRemaining: "x-uw-req-per-minute-remaining",
+  minuteResetMs: "x-uw-req-per-minute-reset",
+  tokenLimit: "x-uw-token-req-limit",
+});
+
+const meterInt = (raw) => {
+  if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw.trim())) return null;
+  const n = Number(raw.trim());
+  return Number.isSafeInteger(n) ? n : null;
+};
+
+export function vendorMeter(headers, at) {
+  if (!headers || typeof headers.get !== "function" || !Number.isFinite(at)) return null;
+  const out = { at: Math.trunc(at) };
+  let any = false;
+  for (const [field, name] of Object.entries(VENDOR_METER_HEADERS)) {
+    let raw = null;
+    try { raw = headers.get(name); } catch { raw = null; }
+    out[field] = meterInt(raw);
+    if (out[field] !== null) any = true;
+  }
+  return any ? out : null;
+}
+
+export function newerMeter(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return b.at >= a.at ? b : a;
+}
