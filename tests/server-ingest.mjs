@@ -6,7 +6,7 @@ import { createRouter } from "../server/router.js";
 import { flowsIngestRows } from "../server/routes/flows-ingest.js";
 import { createFlowsStore, ingestKeyParts, storedFrom } from "../server/store.js";
 import {
-  FLOWS_REGISTRY, FLOWS_SCHEMA_SQL, LEDGER_ADDED_COLUMNS, applySchema, checkAdded, columnProbe, registryOf, upgradeColumns,
+  FLOWS_REGISTRY, FLOWS_SCHEMA_SQL, LEDGER_ADDED_COLUMNS, PAYLOAD_ADDED_COLUMNS, applySchema, checkAdded, columnProbe, registryOf, upgradeColumns,
   upgradeTables, withAddedColumns,
 } from "../server/schema.js";
 import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
@@ -206,7 +206,8 @@ function oldIngest({ ensureFlowsTables, passthrough, storeGone }) {
       const wroteAt = Date.now();
       const upsert = env.DB.prepare(
         "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
-        "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at"
+        "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, " +
+        "chash = NULL, session = NULL, quality = 0, epoch = 0, asof = 0, rev = flows_payload.rev + 1"
       ).bind(key, payload, wroteAt);
       const landing = key === "meta" ? FLOWS_LIVE.nightlyLedger(env.DB, JSON.parse(payload), wroteAt) : null;
       if (landing) await FLOWS_LIVE.batchWithLedger(env.DB, [upsert], landing);
@@ -475,8 +476,8 @@ try {
 {
   const names = ["flows_payload", "flows_login_failures", "flows_ai_usage", "flows_ai_usage_model", "flows_ai_summary", "flows_neuron",
     "flows_live", "flows_tape", "flows_clock", "flows_ledger", "flows_archive_immutable", "flows_permanent_no_update", "flows_permanent_no_delete",
-    "flows_dossier_cache", "flows_ai_outcome", "flows_ai_reject"];
-  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them, the two triggers that keep the permanent ideas rows (P0-42) and the counter tables after them");
+    "flows_dossier_cache", "flows_ai_outcome", "flows_ai_reject", "flows_quarantine", "flows_payload_manifest_i", "flows_payload_manifest_u", "flows_payload_manifest_d"];
+  eq(FLOWS_REGISTRY.map((e) => e.name), names, "THE REGISTRY HOLDS THE TWELVE STATEMENTS THE WORKER HAS ALWAYS SENT, in the order it sent them, the two triggers that keep the permanent ideas rows (P0-42) and the counter tables after them, then the door's quarantine ring and the three triggers that keep the manifest row");
   eq([...FLOWS_SCHEMA_SQL], FLOWS_REGISTRY.map((e) => e.ddl), "and FLOWS_SCHEMA_SQL is derived from it");
   eq([...FLOWS_SCHEMA_SQL.slice(6, 13)], [...LIVE_SCHEMA_SQL], "with the live layer's statements as that module exports them");
   eq(FLOWS_SCHEMA_SQL[13], DOSSIER_SCHEMA_SQL, "and the dossier cache as its module exports it");
@@ -498,14 +499,14 @@ try {
       eq(statementOf(schemaSql, e.name), norm(e.ddl), e.name + ": and so does schema.sql");
     } else {
       for (const [column, type] of e.addedColumns) {
-        const alter = Object.values(migrations).some((text) => new RegExp("ALTER TABLE " + e.table + " ADD COLUMN " + column + " " + type.split(" ")[0] + ";").test(text));
+        const alter = Object.values(migrations).some((text) => new RegExp("ALTER TABLE " + e.table + " ADD COLUMN " + column + " " + type + ";").test(text));
         ok(alter, e.table + "." + column + " is added by a migration with that type");
         const declared = new RegExp("\\b" + column + " " + type.split(" ")[0] + "\\b", "i");
         ok(declared.test(e.ddl) && declared.test(statementOf(schemaSql, e.name) || ""), "and declared by the DDL and schema.sql");
       }
     }
   }
-  eq(upgradeTables(FLOWS_REGISTRY), ["flows_clock"], "only flows_clock is probed for added columns today");
+  eq(upgradeTables(FLOWS_REGISTRY), ["flows_payload", "flows_clock"], "only flows_payload and flows_clock are probed for added columns today");
   ok(Array.isArray(LEDGER_ADDED_COLUMNS) && Object.isFrozen(LEDGER_ADDED_COLUMNS) && LEDGER_ADDED_COLUMNS.length === 0, "the ledger's list exists and is empty, because no column has been added since its migration");
 
   const throws = (fn, re, msg) => { assert.throws(fn, re, msg); checks++; };
@@ -525,7 +526,7 @@ try {
   throws(() => withAddedColumns(FLOWS_REGISTRY, "nothing", []), /not in the registry/, "a registry extension names an entry that exists");
   const grown = withAddedColumns(FLOWS_REGISTRY, "flows_ledger", [["z_col", "INTEGER NOT NULL DEFAULT 0"]]);
   eq([grown.find((e) => e.name === "flows_ledger").addedColumns.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [1, 0], "and returns a new registry, leaving the shipped one as it was");
-  eq(upgradeTables(grown), ["flows_clock", "flows_ledger"], "which probes the ledger as well");
+  eq(upgradeTables(grown), ["flows_payload", "flows_clock", "flows_ledger"], "which probes the ledger as well");
   eq(columnProbe("flows_clock"), "PRAGMA table_info(flows_clock)", "the probe is the PRAGMA the Worker has always sent");
 }
 
@@ -565,16 +566,16 @@ try {
   const fresh = fakeD1({ schema: "", latencyMs: 0 });
   const done = await applySchema(fresh.D1);
   eq(done, {}, "a database with nothing in it takes the registry's DDL and adds no column");
-  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 17]], "in one batch of the sixteen CREATEs and the one probe");
-  eq(fresh.trips[0].sqls.slice(0, 16), [...FLOWS_SCHEMA_SQL], "in registry order");
-  eq(fresh.trips[0].sqls[16], "PRAGMA table_info(flows_clock)", "with the probe last");
+  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 22]], "in one batch of the twenty CREATEs and the two probes");
+  eq(fresh.trips[0].sqls.slice(0, 20), [...FLOWS_SCHEMA_SQL], "in registry order");
+  eq(fresh.trips[0].sqls.slice(20), ["PRAGMA table_info(flows_payload)", "PRAGMA table_info(flows_clock)"], "with the probes last");
   eq((await applySchema(fresh.D1), fresh.trips.length), 2, "and a second bootstrap is one more batch");
 
   const old = fakeD1({ schema: "", latencyMs: 0 });
   for (const f of ["0005_flows.sql", "0006_flows_ai_usage.sql", "0007_flows_ai_summary.sql", "0008_flows_neuron.sql", "0009_flows_ai_usage_model.sql", "0010_flows_live.sql", "0015_flows_ledger.sql", "0016_flows_dossier_cache.sql"]) old.db.exec(MIG(f));
   const cols = (d) => d.db.prepare("PRAGMA table_info(flows_clock)").all().map((c) => c.name);
   ok(!cols(old).includes("tier1_at") && !cols(old).includes("summary_at"), "the production table before its upgrades lacks the later columns");
-  eq(await applySchema(old.D1), { flows_clock: FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([c]) => c) }, "and the first use adds every one of them");
+  eq(await applySchema(old.D1), { flows_payload: PAYLOAD_ADDED_COLUMNS.map(([c]) => c), flows_clock: FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([c]) => c) }, "and the first use adds every one of them, the door's columns on flows_payload included");
   const migrated = fakeD1({ schema: "", latencyMs: 0 });
   for (const f of readdirSync(new URL("../migrations/", import.meta.url)).sort().filter((n) => !/^000[1-4]|0013|0018/.test(n))) migrated.db.exec(MIG(f));
   eq(cols(old), cols(migrated), "leaving the columns, in order, a database built from the migrations has");
@@ -662,7 +663,8 @@ try {
     const text = moduleSource(f);
     absent(text, /^(?:let|var) |cloudflare:|from "\.\.\/worker\.js"|Date\.now\(\)\s*\{/m, { anchor: /^export /m, why: f + " holds no top-level mutable state and imports neither the Worker nor the platform" });
   }
-  const writers = closure("worker.js").filter((file) => /FROM flows_payload|INTO flows_payload/.test(moduleSource(file)) && file.startsWith("server/"));
+  const withoutDdl = (text) => text.replace(/^const \w+ =\s*"CREATE [\s\S]*?";$/gm, "");
+  const writers = closure("worker.js").filter((file) => /FROM flows_payload|INTO flows_payload/.test(withoutDdl(moduleSource(file))) && file.startsWith("server/"));
   eq(writers, ["server/store.js"], "among the server modules only the store holds flows_payload SQL");
 }
 

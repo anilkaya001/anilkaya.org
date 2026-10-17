@@ -19,7 +19,8 @@ const ARCHIVE_INSERT_SQL =
 
 const UPSERT_SQL =
   "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) " +
-  "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at";
+  "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, " +
+  "chash = NULL, session = NULL, quality = 0, epoch = 0, asof = 0, rev = flows_payload.rev + 1";
 
 const DELETE_SQL = "DELETE FROM flows_payload WHERE id = ?";
 
