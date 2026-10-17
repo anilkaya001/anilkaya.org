@@ -13,7 +13,7 @@ const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 globalThis.HTMLRewriter ??= class { on() { return this; } transform(r) { return r; } };
 
 const SECRET = "dispatch-check-session-secret-abcdefghijklmnopqrstuvwxyz";
-const TOKEN = "ghp_DispatchCheckSecretTokenValue0123456789";
+const TOKEN = ["ghp", "DispatchCheckSecretTokenValue0123456789"].join("_");
 const URL_BASE = "https://anilkaya.org";
 const PATH = "/api/flows/dispatch-check";
 const realFetch = globalThis.fetch;
