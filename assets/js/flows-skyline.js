@@ -396,6 +396,15 @@
     const tables = el("div", { class: "mk-sky-tb" });
     const details = el("details", { class: "mk-sky-d" }, el("summary", null, "Table of the " + md.prisms.length + " names"), tables);
     const bar = el("div", { class: "mk-sky-seg" });
+    const callBox = el("div", { class: "mk-sky-cb" });
+    const dlg = el("dialog", { class: "nm-dlg", "aria-labelledby": "mkSkyDlgT" });
+    const moreBtn = el("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog" }, "Show all " + md.prisms.length + " names");
+    moreBtn.addEventListener("click", () => {
+      const close = el("button", { type: "button", class: "nm-link" }, "Close");
+      close.addEventListener("click", () => dlg.close());
+      dlg.replaceChildren(el("div", { class: "nm-dg" }, el("h3", { id: "mkSkyDlgT" }, md.prisms.length + " names that moved " + MIN + " IV-days or more"), el("div", { class: "nm-dtw" }, table(md, mode)), el("div", { class: "nm-dx" }, close)));
+      if (typeof dlg.showModal === "function") dlg.showModal();
+    });
     const noteA = el("p", { class: "mk-sky-n", "aria-live": "polite" });
     const noteB = el("p", { class: "mk-sky-n", "data-note": "absent" });
     const noteC = el("p", { class: "mk-sky-n" });
@@ -420,6 +429,7 @@
       noteB.textContent = showAbsent ? (off ? "How often is off: none of these names has a published typical-day move with a 2x or 3x count to draw. " : "") + absentNote(md) : "";
       noteC.textContent = LINE + " " + CAPTION + (md.apart && mode === "ivdays" ? " Hatched prisms: " + APART : "");
       tables.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode), table(md, mode));
+      callBox.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode));
       draw();
     };
 
@@ -427,8 +437,11 @@
       const W = Math.max(280, Math.floor(host.clientWidth));
       const on = W >= NARROW;
       canvas.hidden = !on;
-      if (!on) { details.open = true; sc = null; return; }
-      sc = layout(md, W, 360, { mode, measure });
+      details.hidden = !on;
+      callBox.hidden = on;
+      moreBtn.hidden = on;
+      if (!on) { sc = null; return; }
+      sc = layout(md, W, Math.max(240, Math.min(560, Math.floor(host.clientHeight) - 150)), { mode, measure });
       canvas.style.width = W + "px";
       canvas.style.height = sc.H + "px";
       paint(canvas, sc);
@@ -442,8 +455,7 @@
       ], (i) => { mode = i === 1 ? "often" : "ivdays"; render(); }));
     }
 
-    host.append(bar, canvas, details, noteA, noteB, noteC);
-    if (host.clientWidth < NARROW) details.open = true;
+    host.append(bar, canvas, callBox, moreBtn, details, el("details", { class: "mk-sky-nd" }, el("summary", null, "Notes and what the picture is not"), noteA, noteB, noteC), dlg);
     render();
     if (window.ResizeObserver) new ResizeObserver(draw).observe(host);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);

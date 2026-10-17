@@ -1720,14 +1720,16 @@ The move skyline (F-95, placement 3) on the Market page. `FLOWS_SCENES` (`wrangl
 | `assets/js/flows-skyline.js` |  | flows-skyline-render |
 | `tests/flows-skyline-render.mjs` |  | flows-skyline-render |
 
-### `assets/js/flows-relations.js`, `tests/flows-relations-render.mjs`
+### `assets/js/flows-relations.js`, `tests/flows-relations-render.mjs`, `tests/fixtures-relations.json`, `tests/gen-relations-fixtures.py`
 
-The Relations view (F-98, placement 6), beside the move skyline on the Market page under the same `FLOWS_SCENES` switch. Names sit on a ring by sector (the nightly universe's `sec`, largest by market cap first, at most 60), with a table of the names by sector as the alternative. `mount(host, universe, graph)` draws an edge only if it passed its test: a layer is `T` (moved together beyond the market) or `C` (residual partial correlation), an edge needs `passed === true`, a finite bootstrap stability of 0.5 or more and two names on the ring, and is drawn at one of three opacity steps (0.9 and up, 0.7 to 0.9, 0.5 to 0.7) with its stability in a table row; one layer is shown at a time and the draw lists are never merged; any other layer id, the flow layer included, is ignored. No relations payload exists on main (the statistics of F-80 are not built), so `flows-market.js` passes `null` and the module shows the ring and the text `No tested links yet`; a graph whose edges all fail says `No stable links this week`. Communities and the live co-occurrence light are not built. `tests/flows-relations-render.mjs` (Chromium, `page.route`, no server) holds the draw lists and opacity steps to a hand-worked graph, the pixel at each curve's midpoint, the layers apart, the empty states as text, no overflow at 320, 390 and 1440, and six planted wrong builds.
+The Relations tab on the Market page (`FlowsUI.relations`: `mount`, `model`, `pearson`, `fisher`), under the `FLOWS_SCENES` switch. It relates the names that carry the day's flagged option windows, the data the page already reads from `/api/flows/flowalerts` and nothing else: each window's premium (and its net bullish premium, calls on the ask side and puts on the bid side minus the reverse, by convention) is put into ten-minute bins from its own `spanStart`, the twelve names with the most flagged premium and at least four active bins are kept, a bin with no window is zero, and every pair gets Pearson r, the Fisher z 95% interval on the bin count, and r in each half of the window. A pair is drawn only when its interval excludes zero, the absolute r is at least 0.3 and both halves keep the sign (`stable`); there are two relations (`Active together` and `Lean together`) shown one at a time. The page says how many of the pairs would pass by chance (5% of those tested), that windows arrive in bursts so the interval is too narrow, and that it is not a forecast. Fewer than 40 windows, 20 bins or three names is `thin` with the counts and no drawing; a failed or unpublished feed says so with its reason. It is a ring by sector (each node its ticker and its sector, every one labelled) beside a list of the tested pairs with a Show all dialog; under 900 px the ring and the list are a switch. Two things are not built: the market-wide residual and partial-correlation layers (they need daily closes for the universe, which no stored payload carries) and the sector ETF return correlation (the sectors payload holds a smoothed TRIX series, whose correlation would be spurious). `tests/gen-relations-fixtures.py` (numpy, scipy; versions and its own SHA-256 in the fixture) writes three seeded worlds (a factor world, a null world and a short one) with the expected r, interval, halves and verdict of every pair; `tests/flows-relations-render.mjs` (Chromium, no server) holds the module to them at 1e-9, the thin, quiet, failed and pending states, three viewports, and nine planted wrong builds.
 
 | File | Exports | Suites |
 |---|---|---|
 | `assets/js/flows-relations.js` |  | flows-relations-render |
+| `tests/fixtures-relations.json` |  | flows-relations-render |
 | `tests/flows-relations-render.mjs` |  | flows-relations-render |
+| `tests/gen-relations-fixtures.py` |  | flows-relations-render |
 
 ### `assets/js/flows-moves.js`, `assets/css/flows-moves.css`, `tests/flows-moves-render.mjs`, `tests/lib/moves-fixture.mjs`
 
@@ -1749,6 +1751,25 @@ The Political page (`/flows/political/`), stock first and one screen with no pag
 | `assets/css/flows-political.css` |  | flows-political-render |
 | `assets/js/flows-political.js` |  | flows-payload-shape, flows-political-render |
 | `tests/flows-political-render.mjs` |  | flows-political-render |
+
+### `assets/js/flows-net-map.js`, `assets/css/flows-net-map.css`, `tests/flows-net-map-render.mjs`
+
+The Market page's flow network, condensed (`FlowsUI.netMap`: `mount`, `of`, `readout`), loaded as the `netmap` defer group after `flows-net.js` (its pure `FlowsUI.net.model` does the routing, so a premium is split, sectored and bucketed once, the way the Unusual page's scene does it). Four columns of chips on one screen, SVG not canvas: side (calls and puts on the ask or bid side, unsided), sector, name (the largest ten, fewer when the height asks, and Other names), and lean or expiry. Every chip carries its full label and its figure and share (`$41.3M · 25%`); a sector name is abbreviated only when it will not fit the chip, and then the full name is in the chip's title, accessible name and the readout. A chip is two lines whenever the height allows. Bands run between chips at a width that is the premium (one scale for every band, a legend swatch shows a round dollar figure on it), colour by dominant lean, and the chip's base carries the node's own bullish, unsided and bearish split. A persistent readout names the selected node's layer, its premium, its share of the total, where it comes from and where it goes, its windows and contracts, and the lean convention; at rest it is the largest name, a click, Enter or the arrow keys change it, and the selected paths are lit. Other and Other names say what they fold in and open a member list with each member's premium. The table twin lists every path by side, sector, name, lean or expiry, premium and share, top rows with Show all. Under 640 px one layer at a time is a switch and the legend is a button. `tests/flows-net-map-render.mjs` (Chromium, `page.route`, no server) audits every chip against independent sums over the same alert rows, its text against its width, chips and captions for overlap, the bands' widths, the readout, the legend and the table at 1440, 1024 and 390 px, and fails eleven planted wrong builds. The Unusual and Home scenes (`flows-net.js`) are unchanged.
+
+| File | Exports | Suites |
+|---|---|---|
+| `assets/css/flows-net-map.css` |  |  |
+| `assets/js/flows-net-map.js` |  | flows-net-map-render |
+| `tests/flows-net-map-render.mjs` |  | flows-net-map-render |
+
+### `tests/flows-market-onescreen.mjs`, `tests/lib/market-fixtures.mjs`
+
+The Market page's one-screen contract. `marketPage` is a header, a tablist of eight views (Tide, Sectors, Indices, Network, Extremes, Relations when `FLOWS_SCENES` allows it, Prints, Context) and a stage that fills the rest of the viewport (`100dvh`, no page scroll at 1440x820, 1024x768 or 390x844). The modules keep their ids and painters; each tab is a grid of one to five of them, the inactive panels are `inert` and `visibility: hidden` in the same box (so the charts keep their measured size and the deferred groups still load), the tab and the address (`#view=network`) agree, and under 900 px each panel shows one module at a time behind a second switch of the module titles. A fitter in `flows-market.js` hides the trailing rows of any list that does not fit its module, shrinks the tallest chart, falls to a compact padding last, and puts a Show all button in the header that opens the whole body in a dialog; native `UI.list` disclosures are off on this page. `tests/lib/market-fixtures.mjs` is the synthetic harness (thirty names with sectors, a bursty alerts feed, a universe with the skyline's columns, the preview fixtures for the rest) that opens the page in Chromium. `tests/flows-market-onescreen.mjs` sweeps every tab (and every module on a phone) at the three viewports for page scroll, sideways scroll and any element that leaves its module, checks inert and visibility, the tablist from the keyboard, the address, the Show all dialogs, 44 px targets, the scenes switch off and reduced motion, and fails nine planted wrong builds.
+
+| File | Exports | Suites |
+|---|---|---|
+| `tests/flows-market-onescreen.mjs` |  | flows-market-onescreen |
+| `tests/lib/market-fixtures.mjs` | `tests/lib/market-fixtures.mjs#NAMES`, `tests/lib/market-fixtures.mjs#ROOT`, `tests/lib/market-fixtures.mjs#SESSION`, `tests/lib/market-fixtures.mjs#TABS`, `tests/lib/market-fixtures.mjs#alertsFixture`, `tests/lib/market-fixtures.mjs#openMarket`, `tests/lib/market-fixtures.mjs#universeFixture` | flows-market-onescreen, flows-net-map-render, flows-relations-render |
 
 ## tooling
 
@@ -2135,7 +2156,7 @@ Shared test helpers: source scans, the browser launcher, the served-tree walk, t
 | File | Exports | Suites |
 |---|---|---|
 | `tests/lib/ai-guard.mjs` | `tests/lib/ai-guard.mjs#AI_BROKER`, `tests/lib/ai-guard.mjs#AI_HOME`, `tests/lib/ai-guard.mjs#aiGuardStats`, `tests/lib/ai-guard.mjs#assertAiGuarded`, `tests/lib/ai-guard.mjs#bindingReads`, `tests/lib/ai-guard.mjs#callArgs`, `tests/lib/ai-guard.mjs#cappedAiSpan`, `tests/lib/ai-guard.mjs#checkModelCalls`, `tests/lib/ai-guard.mjs#guardAi`, `tests/lib/ai-guard.mjs#insideCappedAi`, `tests/lib/ai-guard.mjs#modelCallFiles`, `tests/lib/ai-guard.mjs#modelCallReport`, `tests/lib/ai-guard.mjs#spendReaderArg` | flows-ai-broker, flows-dossier-reads, flows-neuron, flows-reading-worker, flows-reads |
-| `tests/lib/browser.mjs` | `tests/lib/browser.mjs#CHROMIUM_PATH_VAR`, `tests/lib/browser.mjs#launch`, `tests/lib/browser.mjs#launchOptions` | approval-frames, architecture, ci-affected, contracts, docs, flows-defer-render and 10 more |
+| `tests/lib/browser.mjs` | `tests/lib/browser.mjs#CHROMIUM_PATH_VAR`, `tests/lib/browser.mjs#launch`, `tests/lib/browser.mjs#launchOptions` | approval-frames, architecture, ci-affected, contracts, docs, flows-defer-render and 12 more |
 | `tests/lib/cpu-budget.mjs` | `tests/lib/cpu-budget.mjs#CPU_CLOCK`, `tests/lib/cpu-budget.mjs#assertBudget`, `tests/lib/cpu-budget.mjs#checkBudget`, `tests/lib/cpu-budget.mjs#clockResolution`, `tests/lib/cpu-budget.mjs#compare`, `tests/lib/cpu-budget.mjs#cpuClock`, `tests/lib/cpu-budget.mjs#cpuNow`, `tests/lib/cpu-budget.mjs#measure`, `tests/lib/cpu-budget.mjs#referenceKernel`, `tests/lib/cpu-budget.mjs#summarize` | contracts, flows-ai-salvage, flows-conviction, flows-quant, flows-targets, flows-vol |
 | `tests/lib/d1-fake.mjs` | `tests/lib/d1-fake.mjs#SCHEMA`, `tests/lib/d1-fake.mjs#fakeD1` | contracts, flows-ai-broker, flows-dispatch-check, flows-door-v2, flows-engine-budget, flows-meter-worker and 4 more |
 | `tests/lib/fixture-roster.mjs` | `tests/lib/fixture-roster.mjs#FIXTURE_MEMBER`, `tests/lib/fixture-roster.mjs#FIXTURE_MEMBER_2`, `tests/lib/fixture-roster.mjs#FIXTURE_OWNER`, `tests/lib/fixture-roster.mjs#FIXTURE_ROSTER` | browser, flows, flows-basis, flows-board-render, flows-chain, flows-desk and 21 more |
@@ -2214,6 +2235,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-link.json` |  | architecture, docs, run |
 | `tests/suites/flows-live.json` |  | architecture, docs, run |
 | `tests/suites/flows-market-below-render.json` |  | architecture, docs, run |
+| `tests/suites/flows-market-onescreen.json` |  | architecture, docs, run |
 | `tests/suites/flows-market.json` |  | architecture, docs, run |
 | `tests/suites/flows-meter-worker.json` |  | architecture, docs, run |
 | `tests/suites/flows-mint.json` |  | architecture, docs, run |
@@ -2221,6 +2243,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-movelab-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-moves-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-moves0.json` |  | architecture, docs, run |
+| `tests/suites/flows-net-map-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-net-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-neuron-screen.json` |  | architecture, docs, run |
 | `tests/suites/flows-neuron.json` |  | architecture, docs, run |
