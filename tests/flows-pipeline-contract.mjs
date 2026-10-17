@@ -34,8 +34,9 @@ import {
   plainRedispatchSaid, retireAndRoster, bootstrapLedger, callModel, CALL_COST, NOMINAL_SHAPE, markGate,
   screenerDollarVolume, gatedWorthEnriching, GATED_LIQUIDITY_MARGIN, pickPriorRoster,
   probeStored, LEDGER_PROBE_CHUNK, LEDGER_PROBE_MAX, dryRosterProbe, DRY_PROBE_BYTES,
-  shedCardToCap, CARD_SHED, CARD_SELF_CHECK_BYTES,
+  shedCardToCap, CARD_SHED, CARD_SELF_CHECK_BYTES, publishRefusal, targetRefusal,
 } from "../scripts/flows-pipeline.mjs";
+import { touch, clearTaint } from "../scripts/flows-legs/taint.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
 import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
@@ -5570,6 +5571,55 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   same(positioningRows({ chains: [1] }, "chains"), [1], "positioning's chains rule is its own and unchanged");
   same(positioningRows([1], "chains"), null, "an array is not a chains body");
   same(positioningRows({ data: { a: 1 } }, "object"), { a: 1 }, "nor is its object rule");
+}
+
+{
+  const realFetch = globalThis.fetch;
+  const prev = { url: process.env.FLOWS_INGEST_URL, token: process.env.FLOWS_INGEST_TOKEN, exit: process.exitCode };
+  let posts = 0;
+  const quietLog = console.log;
+  globalThis.fetch = async () => { posts++; return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } }); };
+  process.env.FLOWS_INGEST_TOKEN = "t";
+  process.env.FLOWS_INGEST_URL = "https://ingest.example/api/flows/ingest";
+  console.log = () => {};
+  const refused = async (key, payload) => {
+    const before = posts;
+    let code = null;
+    try { await publish(key, payload); } catch (error) { code = error && error.fixtureLeak === true ? error.code : "other"; }
+    process.exitCode = prev.exit;
+    return [code, posts - before];
+  };
+  try {
+    clearTaint();
+    same(await refused("universe", { t: ["NVDA", "SYN001"] }), ["fixture_ticker", 0], "FIXTURE GUARD: a universe naming a fixture ticker is refused before the network on a production ingest");
+    same(await refused("card:SYN001", { v: 2 }), ["fixture_ticker", 0], "and so is a card under a fixture name");
+    same(await refused("card:AAPL", { fixture: true }), ["fixture_payload", 0], "and a stamped payload under a real name");
+    touch("fakeChain");
+    same(await refused("card:AAPL", { v: 2 }), ["fixture_code", 0], "and any payload once a fake has run");
+    clearTaint();
+    same(await refused("card:AAPL", { v: 2 }), [null, 1], "while a clean payload still posts");
+    process.env.FLOWS_INGEST_URL = "http://127.0.0.1:9/api/flows/ingest";
+    same(await refused("card:SYN001", { v: 2 }), [null, 1], "and a loopback ingest takes a fixture, as every stub of this suite relies on");
+    ok(typeof targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) === "string",
+       "a loopback vendor with the production ingest is refused before the first vendor call");
+    ok(publishRefusal("card:SYN001", "{}", { env: { FLOWS_INGEST_URL: "https://x.test/y" }, taint: null }) === null, "a .test ingest is a test host too");
+  } finally {
+    console.log = quietLog;
+    globalThis.fetch = realFetch;
+    clearTaint();
+    if (prev.url === undefined) delete process.env.FLOWS_INGEST_URL; else process.env.FLOWS_INGEST_URL = prev.url;
+    if (prev.token === undefined) delete process.env.FLOWS_INGEST_TOKEN; else process.env.FLOWS_INGEST_TOKEN = prev.token;
+    process.exitCode = prev.exit;
+  }
+  const stageTable = [
+    Object.freeze({ id: "a", isolation: ISOLATION.fatal, needs: Object.freeze([]), publishes: Object.freeze([]) }),
+    Object.freeze({ id: "b", isolation: ISOLATION.isolated, needs: Object.freeze(["a"]), publishes: Object.freeze([]) }),
+  ];
+  const runner = createStageRunner({ table: stageTable });
+  runner.step("a");
+  let leaked = null;
+  try { await runner.run("b", async () => { throw Object.assign(new Error("leak"), { fixtureLeak: true }); }, () => {}); } catch (error) { leaked = error; }
+  ok(leaked && leaked.fixtureLeak === true, "a fixture leak in an isolated stage rethrows and ends the run, where any other failure is recorded and survived");
 }
 
 console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

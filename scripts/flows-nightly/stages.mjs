@@ -121,7 +121,7 @@ export function createStageRunner({ table = STAGES, clock = () => Date.now(), ca
         return out;
       } catch (error) {
         close(frame, "failed", error && error.message ? error.message : String(error));
-        if (spec.isolation === ISOLATION.fatal) throw error;
+        if (spec.isolation === ISOLATION.fatal || (error && error.fixtureLeak === true)) throw error;
         if (onError) onError(error);
         return undefined;
       } finally {

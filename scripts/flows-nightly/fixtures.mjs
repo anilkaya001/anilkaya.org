@@ -4,6 +4,7 @@ import { CHAIN_PAGE_SIZE } from "../../shared/flows-chain.js";
 import { black76 } from "../../shared/flows-quant-bs.js";
 import { ALERT_VENDOR_LIMIT, NEWS_VENDOR_LIMIT, UNIVERSE } from "./vendor-params.mjs";
 import { BOARD_SCHEMA_VERSION, SECTOR_ETFS } from "./rank.mjs";
+import { touch } from "../flows-legs/taint.mjs";
 
 function mulberry(seed) {
   return () => {
@@ -38,6 +39,7 @@ export const DRY_FOCUS_ROWS = Object.freeze([
 ].map((r) => Object.freeze(r)));
 
 export function fakeFocusRows() {
+  touch("fakeFocusRows");
   const gateOrigin = nextTradingDay(DRY_SESSION_DATE, null);
   const rnd = mulberry(20260925);
   return DRY_FOCUS_ROWS.map(([ticker, price, cap, sector, name, earnIn]) => {
@@ -73,6 +75,7 @@ export function fakeFocusRows() {
 }
 
 export function fakeScreener(count) {
+  touch("fakeScreener");
 
   const gateOrigin = nextTradingDay(DRY_SESSION_DATE, null);
   const rnd = mulberry(20260825);
@@ -145,6 +148,7 @@ export function fakeScreener(count) {
 }
 
 export function fakeSectorCandles(etf) {
+  touch("fakeSectorCandles");
   const i = SECTOR_ETFS.findIndex((s) => s.etf === etf);
   const driftBp = (i - 5) * 12;
   const sessions = etf === "XLRE" ? 20 : 252;
@@ -168,6 +172,7 @@ export function fakeSectorCandles(etf) {
 }
 
 export function fakeSectorEtfs() {
+  touch("fakeSectorEtfs");
   const rnd = mulberry(4711);
 
   const BASKETS = [{ sector: "S&P 500 Index", etf: "SPY" }, ...SECTOR_ETFS];
@@ -203,6 +208,7 @@ export function fakeSectorEtfs() {
 }
 
 export function fakeNewsHeadlines(tickers) {
+  touch("fakeNewsHeadlines");
   const rnd = mulberry(8123);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
   const SOURCES = ["BusinessWire", "MarketNews", "Reuters", "Bloomberg", "PRNewswire"];
@@ -240,6 +246,7 @@ export function fakeNewsHeadlines(tickers) {
 }
 
 export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, page = 0 } = {}) {
+  touch("fakeChain");
   const rnd = mulberry(seed);
   const rows = [];
   const ladder = wide
@@ -308,10 +315,12 @@ export function fakeChain(ticker, spot, seed, { wide = false, expiry = null, pag
 }
 
 export function fakeTreasury(sessionDate) {
+  touch("fakeTreasury");
   return { data: { data: [{ value: 4.17, date: sessionDate || "2026-08-24" }, { value: 4.2, date: "2026-08-21" }], name: "3month", unit: "percent" } };
 }
 
 export function fakeEarnings(ticker, sessionDate) {
+  touch("fakeEarnings");
   const rnd = mulberry(ticker.length * 977 + ticker.charCodeAt(0));
   const rows = [];
   const base = Date.parse((sessionDate || "2026-08-24") + "T00:00:00Z");
@@ -329,6 +338,7 @@ export function fakeEarnings(ticker, sessionDate) {
 }
 
 export function fakeSurface(ticker, spot, expiries) {
+  touch("fakeSurface");
   if (!(spot > 0) || !expiries || !expiries.length) return [];
   const rnd = mulberry(ticker.length * 421 + Math.round(spot * 7));
   const rows = [];
@@ -369,6 +379,7 @@ export function fakeSurface(ticker, spot, expiries) {
 }
 
 export function fakeMaxPain(ticker, spot) {
+  touch("fakeMaxPain");
   const rnd = mulberry(ticker.length * 977 + Math.round(spot));
   return Array.from({ length: 5 }, (_, i) => ({
     expiry: new Date(Date.UTC(2026, 7, 28) + i * 7 * 86400000).toISOString().slice(0, 10),
@@ -377,6 +388,7 @@ export function fakeMaxPain(ticker, spot) {
 }
 
 export function fakeStockDarkpool(ticker, spot) {
+  touch("fakeStockDarkpool");
   const rnd = mulberry(ticker.length * 1289 + Math.round(spot));
   if (ticker.length % 7 === 3) return [];
   const late = Array.from({ length: 4 }, (_, i) => ({
@@ -402,6 +414,7 @@ export function fakeStockDarkpool(ticker, spot) {
 }
 
 export function fakeStockOiChange(ticker, spot) {
+  touch("fakeStockOiChange");
   const rnd = mulberry(ticker.length * 2039 + Math.round(spot));
   return Array.from({ length: 14 }, (_, i) => {
     const k = Math.max(1, Math.round(spot * (0.8 + rnd() * 0.4)));
@@ -434,6 +447,7 @@ export function fakeStockOiChange(ticker, spot) {
 }
 
 export function fakeTermStructure(ticker, spot, params = {}) {
+  touch("fakeTermStructure");
   const rnd = mulberry(ticker.length * 3167);
   const anchor = params && typeof params.date === "string" ? params.date : "2026-08-28";
   const base = Date.parse(anchor + "T00:00:00Z");
@@ -454,6 +468,7 @@ export function fakeTermStructure(ticker, spot, params = {}) {
 const IV_RANK_VENDOR_DEFAULT_ROWS = 5;
 
 export function fakeIvRank(ticker, spot, params = {}) {
+  touch("fakeIvRank");
   const rnd = mulberry(ticker.length * 4271);
   const count = params && params.timespan === "1y" ? 251 : params && params.timespan === "3m" ? 64
     : IV_RANK_VENDOR_DEFAULT_ROWS;
@@ -479,6 +494,7 @@ export function fakeIvRank(ticker, spot, params = {}) {
 }
 
 export function fakeCongress(ticker) {
+  touch("fakeCongress");
   const rnd = mulberry(ticker.length * 613);
   const n = Math.floor(rnd() * 5);
   return Array.from({ length: n }, (_, i) => {
@@ -499,6 +515,7 @@ export function fakeCongress(ticker) {
 }
 
 export function fakePriorUnusual(rows, sessionDate) {
+  touch("fakePriorUnusual");
   const list = Array.isArray(rows) ? rows : [];
   if (!list.length) return null;
   const kept = list.filter((_, i) => i % 3 !== 0).map((r) => ({
@@ -530,6 +547,7 @@ export function fakePriorUnusual(rows, sessionDate) {
 }
 
 export function fakePriorBoard(side, pool, sessionDate) {
+  touch("fakePriorBoard");
   const ranked = (Array.isArray(pool) ? pool : []).slice(0, UNIVERSE.boardSize);
   if (!ranked.length) return null;
 
@@ -559,6 +577,7 @@ export function fakePriorBoard(side, pool, sessionDate) {
 }
 
 export function fakeFlowAlerts(tickers) {
+  touch("fakeFlowAlerts");
   const rnd = mulberry(4177);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 24);
   const rows = [];
@@ -610,6 +629,7 @@ export function fakeFlowAlerts(tickers) {
 }
 
 export function fakePoliticalRaws(tickers) {
+  touch("fakePoliticalRaws");
   const rnd = mulberry(4471);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 12);
   const BANDS = ["$1,001 - $15,000", "$15,001 - $50,000", "$50,001 - $100,000",
@@ -663,6 +683,7 @@ export function fakePoliticalRaws(tickers) {
 }
 
 export function fakePulseRaws(tickers) {
+  touch("fakePulseRaws");
   const rnd = mulberry(6229);
   const names = (tickers && tickers.length ? tickers : ["SYN001"]).slice(0, 20);
   const pick = () => names[Math.floor(rnd() * names.length)];
@@ -766,12 +787,14 @@ const FAKE_RATE = 0.04;
 export const fakeLadders = new Map();
 
 export function tickerSeed(ticker) {
+  touch("tickerSeed");
   let h = 2166136261;
   for (const ch of String(ticker)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
   return h;
 }
 
 export function fakeOiLadder(ticker, spot, iv) {
+  touch("fakeOiLadder");
   const rnd = mulberry(tickerSeed(ticker));
   const vol = Number.isFinite(iv) && iv > 0.02 ? iv : 0.3;
   const strikes = Array.from({ length: 41 }, (_, j) => spot * (0.7 + j * 0.015));
@@ -797,6 +820,7 @@ export function fakeOiLadder(ticker, spot, iv) {
 }
 
 export function fakeLadderGreeks(ladder) {
+  touch("fakeLadderGreeks");
   const { spot, vol, strikes, expiries, oiCall, oiPut } = ladder;
   const rows = expiries.map((e, i) => {
     const out = { expiry: e.expiry, dte: e.days, gc: 0, gp: 0, dc: 0, dp: 0, vc: 0, vp: 0, cc: 0, cp: 0 };
@@ -824,6 +848,7 @@ export function fakeLadderGreeks(ladder) {
 }
 
 export function fakeLadderChain(ladder, expiry) {
+  touch("fakeLadderChain");
   const i = ladder.expiries.findIndex((e) => e.expiry === expiry);
   if (i < 0) return [];
   const yymmdd = expiry.slice(2, 4) + expiry.slice(5, 7) + expiry.slice(8, 10);
@@ -842,6 +867,7 @@ export function fakeLadderChain(ladder, expiry) {
 }
 
 export function fakeEnrichment(ticker, spot, seed, iv = null) {
+  touch("fakeEnrichment");
   const rnd = mulberry(seed);
   const ladder = fakeOiLadder(ticker, spot, iv);
   const book = fakeLadderGreeks(ladder);
@@ -967,6 +993,7 @@ function dryPriorRoster(sessionDate) {
 }
 
 export function dryRosterReader(sessionDate) {
+  touch("dryRosterReader");
   const prior = dryPriorRoster(sessionDate);
   return async (key) => (key === "roster" ? { payload: prior, status: 200 } : { payload: null, absent: true, status: 0 });
 }
@@ -974,6 +1001,7 @@ export function dryRosterReader(sessionDate) {
 export const DRY_PROBE_BYTES = Object.freeze({ card: 61440, "card-x": 20480, hist: 10240 });
 
 export function dryRosterProbe(sessionDate) {
+  touch("dryRosterProbe");
   const prior = dryPriorRoster(sessionDate);
   const stored = { ...prior.held, "hist:ZZHLD": prior.held["card:ZZHLD"] };
   return async (keys) => {
@@ -990,6 +1018,7 @@ export function dryRosterProbe(sessionDate) {
 }
 
 export function dryRosterList(sessionDate) {
+  touch("dryRosterList");
   const prior = dryPriorRoster(sessionDate);
   const stored = { ...prior.held, "hist:ZZHLD": prior.held["card:ZZHLD"], "card:ZZORF": prior.held["card:ZZRET"] };
   return async () => {

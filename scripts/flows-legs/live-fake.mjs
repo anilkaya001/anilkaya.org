@@ -1,5 +1,6 @@
 import { sessionOpen, easternInstant, PHASE_MINUTES, prevWeekdayDay } from "../../shared/flows-freshness.js";
 import { SECTOR_TIDES, INDEX_NAMES } from "../../shared/flows-live.js";
+import { touch } from "./taint.mjs";
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -300,6 +301,7 @@ export function fakeNews({ session, now, tickers = [] } = {}) {
 }
 
 export function fakeBoards({ n = 40, sessionDate = null, session = null } = {}) {
+  touch("fakeBoards");
   const priced = (t) => (sessionDate && session ? { px: Number(fakeScreenerRows([t], { session }).data[0].prev_close) } : {});
   const make = (prefix, sign) => Array.from({ length: n }, (_, i) => {
     const t = `${prefix}${String(i + 1).padStart(3, "0")}`;
@@ -317,6 +319,7 @@ export function fakeBoards({ n = 40, sessionDate = null, session = null } = {}) 
 }
 
 export function fakeLiveVendor({ now, session, nullPrev = false, aheadS = 0 }) {
+  touch("fakeLiveVendor");
   const calls = [];
   const clock = typeof now === "function" ? now : () => now;
   async function fakeUw(path, params = {}, { envelope = false } = {}) {
