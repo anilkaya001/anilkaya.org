@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=286") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=287") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -176,6 +176,12 @@
   --seq-3: #2f84d6;
   --seq-4: #6fb1f2;
   --seq-5: #bcdcfb;
+  --vol-1: #2b3a8f;
+  --vol-2: #1f6fbf;
+  --vol-3: #19a4b7;
+  --vol-4: #79c47a;
+  --vol-5: #e8c547;
+  --vol-6: #e8812b;
 }
 
 [data-density="compact"] { --row-h: 32px; --cell-px: 10px; --mod-pad: 14px; }
