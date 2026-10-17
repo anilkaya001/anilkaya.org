@@ -107,6 +107,8 @@ const signalNotes = () => page.evaluate(() => {
 });
 
 await page.goto(url("/flows/ticker/?t=INTC&s=signal&from=long"), { waitUntil: "load" });
+await page.waitForFunction(() => document.getElementById("ftStatus") && document.getElementById("ftStatus").textContent !== "Loading the name…");
+await page.evaluate(() => { const g = document.getElementById("ftGrid"), l = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && l) { l.click(); window.scrollTo(0, 0); } });
 await page.waitForSelector("#m-signal .ft-fam");
 const fam = await readFams();
 
@@ -134,6 +136,8 @@ await post("board:long", currentBoard);
 await post("card:CURR", currentCard);
 
 await page.goto(url("/flows/ticker/?t=CURR&s=signal&from=long"), { waitUntil: "load" });
+await page.waitForFunction(() => document.getElementById("ftStatus") && document.getElementById("ftStatus").textContent !== "Loading the name…");
+await page.evaluate(() => { const g = document.getElementById("ftGrid"), l = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && l) { l.click(); window.scrollTo(0, 0); } });
 await page.waitForSelector("#m-signal .ft-fam");
 const famV2 = await readFams();
 const v2 = (k) => famV2.find((f) => f.k === k);

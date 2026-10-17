@@ -116,6 +116,7 @@ if (cards.length) {
         if (!clocked) { await page.clock.setFixedTime(new Date(Date.parse(card.generatedAt) + 3600e3)); clocked = true; }
         await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(card.ticker));
         await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
+        await page.evaluate(() => { const g = document.getElementById("ftGrid"), l = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && l) { l.click(); window.scrollTo(0, 0); } });
         await page.waitForLoadState("networkidle").catch(() => {});
         await page.waitForTimeout(350);
         out.push(await page.evaluate(() => {

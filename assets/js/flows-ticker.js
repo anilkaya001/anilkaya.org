@@ -3016,6 +3016,14 @@
   }
 
   function jumpToHash() {
+    if (location.hash === "#ftGrid" && STATE.glance && !STATE.all) {
+      closeSheet(true);
+      STATE.all = true;
+      showGrid();
+      paintDock();
+      requestAnimationFrame(() => { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); });
+      return;
+    }
     const m = /^#(?:panel-|ftg-|m-)?([A-Za-z_]\w*)$/.exec(String(location.hash || ""));
     if (!m) return;
     const id = PANEL_MOD[m[1]] || ($("m-" + m[1]) ? "m-" + m[1] : null);

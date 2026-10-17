@@ -1556,6 +1556,17 @@ try {
       eq(errors.length, 0, `a deep link throws nothing (${errors.join("; ")})`);
       await page.close();
     }
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 820 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, full, { hash: "ftGrid", glance: true });
+      await page.waitForTimeout(200);
+      const got = await page.evaluate(() => ({ shown: !document.getElementById("ftGrid").hidden, dive: !document.getElementById("ftDive").hidden, label: document.querySelector("#ftDock .ft-dock-a").textContent }));
+      ok(got.shown && got.dive && /Back to one screen/.test(got.label), "a shared #ftGrid link opens the page with every module shown and the toggle reading back to one screen");
+      eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
     for (const bad of ["<img src=x onerror=alert(1)>", "panel-", "%E0%A4%A", "m-nothing"]) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       const errors = [];
