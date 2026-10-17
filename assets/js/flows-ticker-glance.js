@@ -15,6 +15,7 @@
   const numOr = (...vs) => { for (const v of vs) if (num(v) !== null) return v; return null; };
   const isoOk = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
   const okOf = (p) => (p && p.status === "ok" ? p : null);
+  const GSIGN = { "-1": UI.MINUS, "1": "+", "0": "" };
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const tone = (v) => (num(v) === null || v === 0 ? "flat" : v > 0 ? "up" : "down");
   const volPts = (v) => (num(v) === null ? DASH : F.signed(v * 100, 1));
@@ -810,7 +811,7 @@
     const iv = smileAt(row, q, K);
     const g = i >= 0 && row.gamma ? row.gamma[i] : null;
     const parts = ["Strike " + F.px(K), iv !== null ? "IV " + F.pct(iv, 1) : "IV " + DASH];
-    if (i >= 0 && row.gamma) parts.push("gamma " + (g === null ? DASH + " (not returned)" : (g < 0 ? MINUS : "+") + gammaWord(xp, Math.abs(g))) + " at the " + F.px(xp.strikes[i], xp.strikes[i] % 1 ? 1 : 0) + " strike");
+    if (i >= 0 && row.gamma) parts.push("gamma " + (g === null ? DASH + " (not returned)" : GSIGN[Math.sign(g)] + gammaWord(xp, Math.abs(g))) + " at the " + F.px(xp.strikes[i], xp.strikes[i] % 1 ? 1 : 0) + " strike");
     if (m.S !== null) parts.push(F.pct(K / m.S - 1, 1, true) + " from spot");
     return parts.join(MID);
   }

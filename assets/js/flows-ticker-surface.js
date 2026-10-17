@@ -14,6 +14,7 @@
   const NK = 44;
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const GSIGN = { "-1": UI.MINUS, "1": "+", "0": "" };
   const MINUS = UI.MINUS, DASH = UI.DASH, MID = " " + UI.MID + " ";
 
   function parseColor(c) {
@@ -691,8 +692,8 @@
       ? "Calendar check: " + sm.calendar.breaks.length + " strikes where total variance falls with expiry across fitted expiries, first at " + F.px(sm.calendar.breaks[0].K) + "."
       : fitN > 1 ? "Calendar check: no break in total variance across " + fitN + " fitted expiries, " + sm.calendar.checked + " strike and expiry pairs." : "Calendar check: fewer than two fitted expiries, nothing to compare.");
     const tabG = tm ? tableOf(ticker + (sm.xp.basis === "traded" ? " traded gamma" : " open-interest book gamma, dollars per 1% move ") + " by strike and expiry " + DEALER_CLAUSE, ["Strike"].concat(tm.rows.map((r) => F.day(r.expiry))),
-      tm.strikes.map((K) => [F.px(K, K % 1 ? 1 : 0)].concat(tm.rows.map((r) => { const g = r.gamma[sm.xp.strikes.indexOf(K)]; return g === null ? DASH : (g < 0 ? MINUS : "+") + gWord(sm.xp, Math.abs(g)); })))
-        .concat([["Net, measured cells"].concat(tm.net.map((v) => (v === null ? DASH : (v < 0 ? MINUS : "+") + gWord(sm.xp, Math.abs(v)))))])) : null;
+      tm.strikes.map((K) => [F.px(K, K % 1 ? 1 : 0)].concat(tm.rows.map((r) => { const g = r.gamma[sm.xp.strikes.indexOf(K)]; return g === null ? DASH : GSIGN[Math.sign(g)] + gWord(sm.xp, Math.abs(g)); })))
+        .concat([["Net, measured cells"].concat(tm.net.map((v) => (v === null ? DASH : GSIGN[Math.sign(v)] + gWord(sm.xp, Math.abs(v)))))])) : null;
     dockEl.append(h("details", { class: "ftsf-tab" }, h("summary", null, "Read it as a table, and how it is drawn"), tabV, calNote, tabG || h("p", { class: "ftsf-cap" }, "No gamma cells to list."),
       h("p", { class: "ftsf-cap" }, "Fitted body: the engine's stored SVI parameters, read at strikes on the forward of each expiry; between two fitted expiries the surface interpolates total variance linearly in time at a fixed strike, and an expiry with no fit is a ring at its at-the-money level, never a curve. Faded rows interpolate across an expiry with no fit. Gamma is exposure at listed strikes, so it is columns, and a pair the vendor did not return is a dashed outline, never zero. Nothing here is a forecast.")));
 
