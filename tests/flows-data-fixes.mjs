@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { fitEvents, EVENTS_PAYLOAD_BUDGET } from "../shared/flows-events.js";
-import { runSigmaLedger, readLedger, SIGMA_ROTATE } from "../scripts/flows-legs/sigma-ledger.mjs";
+import { CALL_COST, callModel, NOMINAL_SHAPE } from "../scripts/flows-nightly/vendor-params.mjs";
+import { runSigmaLedger, readLedger, writeLedger, SIGMA_ROTATE } from "../scripts/flows-legs/sigma-ledger.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
+
+eq(CALL_COST.sigmaLedger, SIGMA_ROTATE, "the call model prices exactly the ledger's nightly rotation");
+eq(callModel(NOMINAL_SHAPE).legs.sigmaLedger, SIGMA_ROTATE, "and the nominal night counts those calls in its own leg");
 
 const addDays = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
 
@@ -25,8 +29,11 @@ eq(fitted.lastShownDate, fitted.rows[fitted.rows.length - 1].d, "lastShownDate f
 ok(fitted.rows.every((r, i) => r === rows[i]), "the nearest dates are kept, the far ones shed");
 eq(Object.values(fitted.byStage).reduce((a, b) => a + b, 0), fitted.shown, "byStage sums to shown");
 const small = fitEvents({ ...payload, rows: rows.slice(0, 5) });
-eq(small.shedRows, 0, "a small payload is untouched");
+ok(!("shedRows" in small), "a small payload gains no key");
 eq(small.rows.length, 5, "a small payload keeps its rows");
+const shuffled = fitEvents({ ...payload, rows: rows.slice().reverse() });
+eq(shuffled.lastShownDate, fitted.lastShownDate, "rows given in descending date order shed the same far dates");
+ok(shuffled.rows.every((r, i, a) => i === 0 || a[i - 1].d <= r.d), "and the kept rows come back date-ascending");
 
 const wd = (start, n) => {
   const out = [];
@@ -75,5 +82,13 @@ eq(shortRun.basis.short, 1, "a short-history name is counted");
 const shortAgain = [];
 await runSigmaLedger({ sessionDate: "2026-10-19", universe: new Set(["N298"]), fresh: new Map(), prior: { sigmaLedger: shortRun.ledger }, fetchBars: async (t) => { shortAgain.push(t); return null; } });
 eq(shortAgain.length, 0, "a short-history name is not retried for 20 days");
+
+{
+  const big = new Map();
+  for (let i = 0; i < 1000; i++) big.set("T" + String(i).padStart(4, "0"), { s: 0.0123 + i * 1e-5, n: 251, f2: 12, f3: 3, d: "2026-10-16" });
+  const bytes = JSON.stringify(writeLedger(big)).length;
+  ok(bytes < 40000, "a thousand-name ledger stays under 40 KB (" + bytes + ")");
+  ok(bytes + 64 * 1024 < 128 * 1024, "and with the regime's own 64 KiB it clears the 128 KiB ingest cap");
+}
 
 console.log(`flows-data-fixes: ${checks} checks passed`);

@@ -163,6 +163,12 @@
   const key = (...kids) => h("span", { class: "ui-key" }, ...kids);
   const tally = (g, word, v) => key(g, word + " ", h("b", null, String(v)));
 
+  function nextMark(list, nowDay, origin) {
+    const floor = ISO.test(String(nowDay)) ? nowDay : ISO.test(String(origin)) ? origin : null;
+    if (floor === null) return null;
+    return list.find((x) => x >= floor) || null;
+  }
+
   function paintWeek(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const cal = calIndex(payload);
@@ -188,11 +194,10 @@
     const laneHead = (name, st) => h("div", { class: "fe-lane" }, h("span", null, name), st && st.state !== "ok" ? UI.stateButton(st, name) : null);
     grid.append(h("div", { class: "fe-col fe-labels" },
       h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), divSt ? laneHead("Ex-div", divSt) : null));
-    const today = payload.gateOrigin;
-    const now = UI.freshness.market().today;
+    const mark = nextMark(list, nowDay, payload.gateOrigin);
     list.forEach((d, k) => {
       const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
-      col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === (list.includes(now) ? now : list.find((x) => x >= today && x >= now)) ? h("i", { class: "fe-next" }, d === now ? "Today" : "Next") : null));
+      col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
       col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, DASH) : null));
       const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))

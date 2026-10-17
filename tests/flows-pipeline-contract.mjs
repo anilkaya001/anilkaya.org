@@ -4661,9 +4661,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 });
+  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0 });
   ok(Math.abs(measured.total - 3071) / 3071 < 0.01,
-     `the call model reproduces the 2026-09-24 nightly (3,071 calls) from its own shape: ${measured.total}`);
+     `the call model reproduces the 2026-09-24 nightly (3,071 calls, before the sigma ledger's rotation existed) from its own shape: ${measured.total}`);
   eq(measured.legs.vol, 632, "leg by leg: the vol leg's 632 calls exactly (8 deep, 2 cross, 10 per dossier, 4 radar)");
   eq(measured.legs.enrich, 745, "and the enrichment's 745 (five reads a name)");
   ok(CALL_BUDGET >= callModel({ enriched: 175, deep: 70, cross: 105, dossiers: 12, earnings: 90 }).total,

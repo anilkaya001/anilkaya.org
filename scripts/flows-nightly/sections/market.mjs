@@ -3,7 +3,7 @@ import { marketAggregate, MARKET_NOTES } from "../../../shared/flows-market.js";
 import { withPrefetched } from "../../flows-legs/universe.mjs";
 import { runMarketLegs, windowTickersOf } from "../../flows-legs/market.mjs";
 import { makeCardXStore } from "../../flows-legs/card-x.mjs";
-import { DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
+import { CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
 import { poolWidth, runPooled, stats, uw } from "../vendor.mjs";
 import { sigmaProfile, tallyReasons } from "../../../shared/flows-targets.js";
 import { publish, readStored } from "../store.mjs";
@@ -88,7 +88,8 @@ export async function runMarket(ctx) {
         universe: new Set(withTilt.map((w) => w.row && w.row.ticker).filter(Boolean)),
         fresh: sigma,
         prior: priorRegime.payload || null,
-        stop: () => Date.now() > stats.startedAt + DEADLINE_MS * 0.5,
+        rotate: CALL_COST.sigmaLedger,
+        stop: () => Date.now() > stats.startedAt + DEADLINE_MS * 0.5 || stats.calls >= CALL_BUDGET * (1 + CALL_OVERRUN_MARGIN),
         fetchBars: DRY_RUN ? null : async (ticker) => {
           const raw = await uw(pathFor("ohlc-1d", { ticker }), {
             timeframe: "1Y",

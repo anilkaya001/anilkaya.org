@@ -1232,6 +1232,32 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
   }
 }
 
+{
+  const NEXT_CAL = buildEvents([nameAt("WEEKX", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  const browser = await chromium.launch();
+  try {
+    const marks = async (now) => {
+      const { page, errors } = await openEvents(browser, NEXT_CAL, { now });
+      const r = await page.evaluate(() => ({
+        marks: [...document.querySelectorAll("#evWeek .fe-next")].map((n) => n.textContent),
+        cols: document.querySelectorAll("#evWeek .fe-col:not(.fe-labels)").length,
+      }));
+      await page.close();
+      return { ...r, errors };
+    };
+    const onDay = await marks(Date.parse(GATE_ORIGIN + "T15:00:00Z"));
+    deep(onDay.errors, [], "the week renders on the gate day");
+    deep(onDay.marks, ["Today"], "on a session day exactly that day reads Today and no other column is marked");
+    const before = await marks(Date.parse("2026-08-20T15:00:00Z"));
+    deep(before.marks, ["Next"], "before the first session in the list the first upcoming day alone reads Next");
+    const past = await marks(Date.parse("2026-12-01T15:00:00Z"));
+    deep(past.marks, [], "when every listed day is already past no column reads Today or Next");
+    ok(past.cols > 0, "and the past days are still drawn");
+  } finally {
+    await browser.close();
+  }
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the ` +
   `next session and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +
