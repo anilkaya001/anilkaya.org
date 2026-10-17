@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "293";
+export const ASSET_VERSION = "299";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -775,7 +775,6 @@ ${UI_CHART_SCRIPTS}
 }
 
 const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
-const MOVES_CSS = ["/assets/css/flows-feeds.css", "/assets/css/flows-moves.css"];
 
 const feedModule = (id, title, body, { span = "", seg = "" } = {}) => `
     <section class="ui-card ui-mod ui-enter fd-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
@@ -817,32 +816,56 @@ ${UI_SCRIPT}
 }
 
 export function movesPage({ username = "" } = {}) {
-  return `${head("Flows \u2014 Moves", "Today's moves in units of each name's own implied one-day move, with earnings names ranked apart and no error rate claimed.", MOVES_CSS)}
-${shell("Moves", "moves", username, `${feedHead("mv", "Moves")}
+  return flowsDocument({
+    title: "Moves",
+    description: "Every name's move today against its own typical day and its options-implied day, with earnings names ringed and no error rate claimed.",
+    active: "moves",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-moves.css"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-moves.js"],
+    body: `
   <p class="visually-hidden" id="mvStatus" role="status">Loading the universe\u2026</p>
-  <p class="fd-meta" id="mvLine"></p>
-  <p class="fd-meta" id="mvCtx"></p>
-  <div class="mv-tabs" id="mvTabs" hidden></div>
-  <div class="mv-pane" id="mvPaneField" role="tabpanel" aria-labelledby="mvTabField" tabindex="0">
-    <div class="ui-grid fd-grid">
-${feedModule("mvUpCard", "Risers", `<div class="fd-body" id="mvUp"></div>`, { span: 6 })}
-${feedModule("mvDownCard", "Fallers", `<div class="fd-body" id="mvDown"></div>`, { span: 6 })}
-${feedModule("mvApartCard", "Earnings within 30 days", `<div class="fd-body" id="mvApart"></div>`)}
+  <div class="mv" id="mv">
+    <div class="mv-title" data-fx-hero>
+      <h1 id="fxTitle">Large moves</h1>
+      <div class="mv-stamp" id="mvStamp"></div>
+      <div class="mv-chips" id="mvChips"><span class="mv-chip warn">Not a test</span><span class="mv-chip mut opt">No error rate measured</span></div>
+      <button type="button" class="mv-ibtn" id="mvInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
+    </div>
+    <p class="mv-note" id="mvNote" hidden></p>
+    <div class="mv-seg5" role="tablist" aria-label="Panels" id="mvSeg5">
+      <button type="button" role="tab" aria-selected="true" aria-controls="mvMain" data-v="field">Field</button><button type="button" role="tab" aria-selected="false" aria-controls="mvLists" data-v="lists">Lists</button><button type="button" role="tab" aria-selected="false" aria-controls="mvRail" data-v="detail">Detail</button>
+    </div>
+    <div class="mv-stage" id="mvStage" data-view="field">
+      <section class="mv-panel" id="mvMain" aria-label="Every name, this snapshot">
+        <div class="mv-ph">
+          <div class="mv-seg" role="group" aria-label="Direction" id="mvDir"><button type="button" data-dir="up" aria-pressed="false">\u25b2 Up</button><button type="button" data-dir="down" aria-pressed="false">\u25bc Down</button></div>
+          <button type="button" class="mv-tog" id="mvEarn" aria-pressed="false">Earnings week</button>
+          <label class="mv-sel"><span class="visually-hidden">Sector</span><select id="mvSector" aria-label="Sector"><option value="">All sectors</option></select></label>
+          <button type="button" class="link" id="mvClear">Clear</button>
+          <div class="r"><span class="mv-count" id="mvCount"></span><button type="button" class="mv-tog" id="mvFreeze" aria-pressed="false">Freeze</button></div>
+        </div>
+        <div class="mv-plot" id="mvPlot"></div>
+        <div class="mv-foot"><div class="mv-lg" id="mvLegend"></div><span class="mv-fnote" id="mvFnote"></span></div>
+      </section>
+      <section class="mv-panel mv-lists" id="mvLists" aria-label="Largest moves">
+        <div class="mv-box mv-box-now">
+          <div class="mv-bh"><h2>Large now</h2><span class="note" id="mvNowNote"></span><button type="button" class="link" id="mvMore" aria-haspopup="dialog">Show more</button></div>
+          <div class="mv-listbox" id="mvNow" role="group" aria-label="Largest moves in IV-days"></div>
+        </div>
+        <div class="mv-box mv-box-apart">
+          <div class="mv-bh"><h2>Earnings within 30 days</h2><span class="note" id="mvApartNote"></span></div>
+          <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within 30 days"></div>
+        </div>
+      </section>
+      <section class="mv-panel mv-rail" id="mvRail" aria-label="Selected name"></section>
     </div>
   </div>
-  <div class="mv-pane" id="mvPaneMap" role="tabpanel" aria-labelledby="mvTabMap" tabindex="0" hidden>
-${feedModule("mvMapCard", "Map", `<div class="fd-body" id="mvMap"></div>`)}
-  </div>
-  <div class="mv-pane" id="mvPaneSectors" role="tabpanel" aria-labelledby="mvTabSectors" tabindex="0" hidden>
-${feedModule("mvSectorsCard", "Sectors", `<div class="fd-body" id="mvSectors"></div>`)}
-  </div>
-`, { chrome: false })}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-fresh.js")}" defer></script>
-<script src="${v("/assets/js/flows-rt.js")}" defer></script>
-<script src="${v("/assets/js/flows-moves.js")}" defer></script>
-</body>
-</html>`;
+  <dialog class="mv-dlg" id="mvMoreDlg" aria-labelledby="mvMoreT"><div class="dg"><h2 id="mvMoreT"></h2><p id="mvMoreP"></p><div class="mv-grid3" id="mvMoreG"></div><div class="x"><button type="button" class="link" id="mvMoreX">Close</button></div></div></dialog>
+  <dialog class="mv-dlg" id="mvInfoDlg" aria-labelledby="mvInfoT"><div class="dg"><h2 id="mvInfoT">How to read this page</h2><div class="body" id="mvInfoB"></div><div class="x"><button type="button" class="link" id="mvInfoX">Close</button></div></div></dialog>
+`,
+  });
 }
 
 export function trackPage({ username = "" } = {}) {
