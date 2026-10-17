@@ -102,6 +102,10 @@ async function mount(page, card, o = {}) {
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(o.settle || 250);
+  if (!o.glance) {
+    const shown = await page.evaluate(() => { const g = document.getElementById("ftGrid"), a = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && a) { a.click(); window.scrollTo(0, 0); return true; } return false; });
+    if (shown) await page.waitForTimeout(o.settle || 250);
+  }
   await settleMotion(page);
 }
 
@@ -180,9 +184,9 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const block = TICKER_SRC.slice(TICKER_SRC.indexOf("const PANEL_MOD = {"));
   const body = block.slice(0, block.indexOf("};"));
   const map = new Map([...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*): "([a-zA-Z-]+)"/g)].map((m) => [m[1], m[2]]));
-  const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]));
+  const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]).filter((id) => id !== "m-ideas"));
   eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
-     "the page builds exactly the eleven dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below");
+     "the page builds exactly the eleven dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
   for (const p of TICKER_PANELS) {
     ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
@@ -255,7 +259,7 @@ function sweep() {
       }
     }
     const secBox = sec.getBoundingClientRect();
-    const spill = [...sec.querySelectorAll("*")].filter((n) => !n.closest(".visually-hidden") && !n.closest(".ui-readout") && n.getBoundingClientRect().width > 0)
+    const spill = [...sec.querySelectorAll("*")].filter((n) => !n.closest(".visually-hidden") && !n.closest(".ui-readout") && !(n.parentElement && n.parentElement.closest(".ft-ideas")) && n.getBoundingClientRect().width > 0)
       .map((n) => n.getBoundingClientRect().right - secBox.right).reduce((a, b) => Math.max(a, b), -Infinity);
     out.mods.push({
       id: sec.id, empty: !sec.querySelector(".ui-mod-h ~ *, .ui-mod-h + *") || sec.textContent.trim().length < 3,
@@ -279,13 +283,13 @@ try {
     eq(nows.length, 1, `${width}px: exactly one /api/flows/now request on load, the heartbeat's own (${nows.join(" | ")})`);
     ok(/[?&]t=/.test(nows[0]), `${width}px: and it carries the ticker, so the first beat brings the quote (${nows[0]})`);
     const got = await page.evaluate(sweep);
-    eq(got.mods.map((m) => m.id).join(" "), MODULES.join(" "), `${width}px: every module is mounted, in reading order`);
+    eq(got.mods.map((m) => m.id).filter((id) => id !== "m-ideas").join(" "), MODULES.join(" "), `${width}px: every module is mounted, in reading order`);
     const index = await page.evaluate(() => {
       const nav = document.getElementById("fxIndex");
       return { hidden: nav.hidden, chips: Array.from(nav.querySelectorAll("a"), (a) => [a.getAttribute("href"), a.textContent]) };
     });
     eq(index.hidden, false, `${width}px: the section index appears once the dossier has drawn its modules`);
-    eq(index.chips.map((c) => c[0]).join(" "), MODULES.map((id) => "#" + id).join(" "), `${width}px: it lists every module, in the order they are drawn`);
+    eq(index.chips.map((c) => c[0]).filter((c) => c !== "#m-ideas").join(" "), MODULES.map((id) => "#" + id).join(" "), `${width}px: it lists every module, in the order they are drawn`);
     ok(index.chips.every((c, i) => got.mods[i].heading.startsWith(c[1]) && c[1].length > 1), `${width}px: each chip is its module's own title`);
     for (const m of got.mods) {
       ok(!m.empty, `${width}px ${m.id}: renders content or an explicit designed silence`);
@@ -668,7 +672,7 @@ try {
     ok(pal.filter((r) => ["GLD", "NVDA", "COST"].includes(r[0])).every((r) => r[2]), "beside its depth glyph");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
-    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 11 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
+    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 11 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
     eq(errors.length, 0, `the switcher throws nothing (${errors.join("; ")})`);
     await page.close();
   }
@@ -758,7 +762,7 @@ try {
         chips: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l")].map((n) => n.textContent),
         clipped: [...document.querySelectorAll("#ftChips .ui-gchip .ui-chip-l, #ftChips .ui-gchip .ui-chip-v")].filter((n) => n.scrollWidth > n.clientWidth + 1).length,
         ranks: [...document.querySelectorAll("#ftHc .ft-meter > span:first-child")].map((n) => n.textContent),
-        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), verdict: document.getElementById("ftVerdict").hidden,
+        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"), verdict: document.getElementById("ftVerdict").hidden,
         screen: [...document.querySelectorAll("#m-screen .ui-metric-l")].map((n) => n.textContent),
         waiting: [...document.querySelectorAll("[data-state=pending]")].filter((n) => n.getClientRects().length && n.id !== "fxFresh").length }));
       eq(got.px, "72.52", `${width}px T7: a lite card draws the universe's close as the headline price`);
@@ -790,7 +794,7 @@ try {
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, quote, { neuron: { status: "unavailable" }, cardX: { ticker: "GLD", status: "absent", why: "not-covered" }, hist: { status: "absent" }, at });
       const got = await page.evaluate(() => ({ sub: document.getElementById("ftHeroSub").innerText, flags: document.getElementById("ftHeroFlags").innerText.trim(),
-        silent: document.getElementById("ftHero").classList.contains("is-silent"), mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+        silent: document.getElementById("ftHero").classList.contains("is-silent"), mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"),
         screen: [...document.querySelectorAll("#m-screen .ui-metric-l")].map((n) => n.textContent), px: document.querySelector("#ftPxV .visually-hidden").textContent }));
       ok(/SPDR Gold Shares/.test(got.sub) && /ETF/.test(got.sub), `T7: an ETF outside the universe opens a quote page with its name and an ETF tag (${got.sub})`);
       eq(got.flags, "Quote", "whose depth word is Quote");
@@ -1041,7 +1045,7 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await mount(page, fund, { cardX: { ...(cardXOf(spy.ticker) || {}), ticker: "GLD", insiders: { status: "ok", net90: 1e6, dots: [["2026-08-01", 1e6, "P"]] } }, hist: histOf(spy.ticker) || { status: "absent" } });
-    const got = await page.evaluate(() => ({ sub: document.getElementById("ftHeroSub").innerText, mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+    const got = await page.evaluate(() => ({ sub: document.getElementById("ftHeroSub").innerText, mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"),
       pos: [...document.querySelectorAll("#m-pos .ui-seg-i, #m-pos .ui-metric-l")].map((n) => n.textContent.trim()) }));
     ok(/ETF/.test(got.sub), `T2: a fund dossier carries an ETF tag (${got.sub})`);
     ok(!got.mods.includes("m-signal") && !got.mods.includes("m-events"), `and, like an index, no Signal and no Events module (${got.mods.join(" ")})`);
@@ -1552,12 +1556,23 @@ try {
       eq(errors.length, 0, `a deep link throws nothing (${errors.join("; ")})`);
       await page.close();
     }
+    {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 820 } });
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await mount(page, full, { hash: "ftGrid", glance: true });
+      await page.waitForTimeout(200);
+      const got = await page.evaluate(() => ({ shown: !document.getElementById("ftGrid").hidden, dive: !document.getElementById("ftDive").hidden, label: document.querySelector("#ftDock .ft-dock-a").textContent }));
+      ok(got.shown && got.dive && /Back to one screen/.test(got.label), "a shared #ftGrid link opens the page with every module shown and the toggle reading back to one screen");
+      eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
+      await page.close();
+    }
     for (const bad of ["<img src=x onerror=alert(1)>", "panel-", "%E0%A4%A", "m-nothing"]) {
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, full, { hash: bad });
-      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section").length === 11), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
+      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 11), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
       eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
       await page.close();
     }
@@ -1934,7 +1949,7 @@ try {
       const vis = (n) => n && n.getClientRects().length > 0;
       const segs = (id) => [...document.querySelectorAll("#" + id + " .ui-seg-i")].map((b) => b.textContent.trim());
       return {
-        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id),
+        mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"),
         read: document.getElementById("ftVerdict").dataset.read,
         line: document.getElementById("ftVerdictT").textContent,
         vStates: [...document.querySelectorAll("#ftVerdict [data-state]")].filter(vis).map((n) => n.dataset.state),
@@ -2097,7 +2112,7 @@ try {
        "card-x, hist and the summary are asked before the card answers: the companions are read in parallel with the card, not after it");
     ok(when("tape", "asked") > when("card", "answered"), "the tape is asked only once the card has answered, so a name with no card never costs an on-demand tape read");
     ok(when("tape", "asked") < when("card-x", "answered") && when("tape", "asked") < when("hist", "answered"), "but before the companions answer: it waits on neither them nor the paint");
-    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), px: document.querySelector("#ftPxV .visually-hidden").textContent, flows: document.querySelectorAll("#m-flow").length }));
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"), px: document.querySelector("#ftPxV .visually-hidden").textContent, flows: document.querySelectorAll("#m-flow").length }));
     eq(got.mods.join(" "), MODULES.join(" "), "and every module is mounted once the slow companions land");
     eq(got.flows, 1, "with one Flow module, not one per tape arrival");
     eq(errors.length, 0, `the parallel read throws nothing (${errors.join("; ")})`);
@@ -2118,7 +2133,7 @@ try {
     await mount(page, lite, { neuron: { status: "unavailable" }, cardX: { status: "absent" }, hist: { status: "absent" }, tape, at, trace, delay: { "card-x": 600, hist: 600 } });
     const when = (k, ph) => { const e = trace.find((x) => x[0] === k && x[1] === ph); return e ? e[2] : Infinity; };
     ok(when("tape", "asked") > when("card", "answered") && when("tape", "answered") < when("card-x", "answered"), "on a lite card the tape is asked after the card and answers before the companions do");
-    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id), flows: document.querySelectorAll("#m-flow").length }));
+    const got = await page.evaluate(() => ({ mods: [...document.querySelectorAll("#ftGrid > section")].map((m) => m.id).filter((id) => id !== "m-ideas"), flows: document.querySelectorAll("#m-flow").length }));
     eq(got.mods.join(" "), "m-screen m-flow", `so the lite paint itself draws the Flow module from the tape that landed first (${got.mods.join(" ")})`);
     eq(got.flows, 1, "exactly once");
     eq(errors.length, 0, `the early lite tape throws nothing (${errors.join("; ")})`);

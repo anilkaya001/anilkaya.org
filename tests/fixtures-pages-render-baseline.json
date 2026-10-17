@@ -350,7 +350,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 1,
-  "targetsUnder44": 41
+  "targetsUnder44": 7
  },
  "track@390": {
   "contrast": 0,
@@ -358,7 +358,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 1,
-  "targetsUnder44": 40
+  "targetsUnder44": 6
  },
  "track@1440": {
   "contrast": 0,
@@ -395,23 +395,23 @@
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 6,
-  "targetsUnder44": 61
+  "targetsUnder24": 0,
+  "targetsUnder44": 9
  },
  "ticker@390": {
   "contrast": 0,
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 6,
-  "targetsUnder44": 60
+  "targetsUnder24": 0,
+  "targetsUnder44": 8
  },
  "ticker@1440": {
-  "contrast": 0,
+  "contrast": 2,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 10
+  "targetsUnder24": 0
  },
  "status@320": {
   "contrast": 0,

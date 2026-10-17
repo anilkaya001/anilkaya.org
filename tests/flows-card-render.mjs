@@ -69,6 +69,8 @@ async function mount(page, card, o = {}) {
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name…"; }, null, { timeout: 15000 });
   await page.evaluate(() => document.fonts && document.fonts.ready);
   await page.waitForTimeout(200);
+  const shown = await page.evaluate(() => { const g = document.getElementById("ftGrid"), l = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && l) { l.click(); window.scrollTo(0, 0); return true; } return false; });
+  if (shown) await page.waitForTimeout(250);
   await settle(page);
 }
 

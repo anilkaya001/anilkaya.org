@@ -352,6 +352,7 @@ async function mountWorld(page, world, trace) {
 }
 
 async function reveal(page) {
+  await page.evaluate(() => { const g = document.getElementById("ftGrid"), a = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && a) a.click(); });
   await page.locator("#m-movelab").scrollIntoViewIfNeeded();
   await page.waitForFunction(() => {
     const st = document.querySelector("#m-movelab .ft-ml-st");

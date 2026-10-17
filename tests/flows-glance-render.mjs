@@ -443,7 +443,7 @@ for (const [w, hgt, cw, name, touch] of [[390, 844, 330, "390x844", true], [320,
   await page.context().close();
 }
 
-for (const [w, expectCols] of [[700, 2], [900, 3]]) {
+for (const [w, expectCols] of [[700, 2], [770, 3], [900, 6]]) {
   const page = await boot({ width: w + 40, height: 900 }, { chartW: 0, pad: 20 });
   const m = await page.evaluate(() => ({ cols: getComputedStyle(document.querySelector(".ftg-cards-in")).gridTemplateColumns.split(" ").length, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, h: document.querySelector(".ftg-card").getBoundingClientRect().height, gamma: document.querySelectorAll(".ftg-gl").length }));
   eq(m.cols, expectCols, `${w}px container: ${expectCols} card columns`);

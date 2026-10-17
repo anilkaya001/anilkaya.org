@@ -806,6 +806,13 @@
     return neuron && neuron.tier && neuron.tier !== "none" ? "Engine: not priced" : "";
   }
 
+  function engineChip(word) {
+    if (!word) return h("span", { class: "ft-eng" }, word);
+    const b = h("button", { class: "ft-eng", type: "button", "aria-haspopup": "dialog" }, word);
+    b.addEventListener("click", () => { if ($("m-ideas") || (GLANCE.sheet && GLANCE.sheet.cur === "m-ideas")) openSheet("m-ideas", b); });
+    return b;
+  }
+
   function paintStrip(card, neuron) {
     if (!stripEl) return;
     stripEl.hidden = !STATE.glance;
@@ -822,7 +829,7 @@
       h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")),
       h("div", { class: "ft-strip-m" }, h("span", { class: "ft-strip-k" }, "Neuron" + conf),
         h("p", { class: "ft-strip-line" + (body ? "" : " is-empty"), title: body || null }, body || "No read")),
-      h("span", { class: "ft-eng" }, engineWord(card, n)));
+      engineChip(engineWord(card, n)));
   }
 
   function closePop(focus) {
@@ -948,7 +955,8 @@
     } else if (read.status === "generating") {
       railEl.append(h("p", { class: "ft-rail-state", role: "status" }, "Model wording is being written."));
     }
-    if (lead) railEl.append(h("p", { class: "ft-rail-lead" }, typo(String(lead.text)), sup(nums(lead, idx))));
+    const said = claims.length && claims[0] && claims[0].it && String(claims[0].it.text) === String(lead && lead.text);
+    if (lead && !said) railEl.append(h("p", { class: "ft-rail-lead" }, typo(String(lead.text)), sup(nums(lead, idx))));
     if (claims.length) {
       const ol = h("ol", { class: "ft-claims", "aria-label": "What the reading rests on", role: "list" });
       if (window.matchMedia && matchMedia("(max-width: 599.98px)").matches) { ol.setAttribute("role", "region"); ol.setAttribute("aria-label", "What the reading rests on, swipe for more"); ol.tabIndex = 0; }
@@ -977,7 +985,7 @@
     if (GLANCE.ready) glanceUpdate();
   }
 
-  const DOCK = [["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-surface", "Volatility surface"], ["m-terrain", "Gamma terrain"], ["m-network", "Flow network"]];
+  const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-surface", "Volatility surface"], ["m-terrain", "Gamma terrain"], ["m-network", "Flow network"]];
 
   function glanceOpts() {
     const n = STATE.neuron || null;
@@ -1116,13 +1124,20 @@
     dockEl.replaceChildren(h("span", { class: "ft-dock-l" }, "Open in place"),
       ...mods.map(([m, label]) => { const b = h("button", { class: "ft-dock-b", type: "button", "data-mod": m, "aria-pressed": "false" }, label); b.addEventListener("click", () => openSheet(m, b)); return b; }),
       h("span", { class: "ft-dock-sp" }),
-      h("a", { class: "ft-dock-a", href: "#ftGrid", onclick: (e) => { e.preventDefault(); closeSheet(true); gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } }, "Every module, as one page"));
+      h("a", { class: "ft-dock-a", href: "#ftGrid", "aria-expanded": String(!!STATE.all), onclick: (e) => { e.preventDefault(); closeSheet(true); STATE.all = !STATE.all; showGrid(); paintDock(); if (STATE.all) { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } else window.scrollTo({ top: 0, behavior: "instant" }); } }, STATE.all ? "Back to one screen" : "Every module, as one page"));
+  }
+
+  function showGrid() {
+    const all = !STATE.glance || !!STATE.all;
+    gridEl.hidden = !all;
+    if (diveEl) diveEl.hidden = !(STATE.glance && STATE.all);
   }
 
   function setGlance(on) {
     STATE.glance = on;
+    if (!on) STATE.all = false;
     if (frameEl) frameEl.dataset.glance = on ? "on" : "off";
-    if (diveEl) diveEl.hidden = !on;
+    showGrid();
   }
 
   function renderGlance(card) {
@@ -2730,10 +2745,22 @@
     }
   }
 
+  const VERDICT_HOME = { parent: verdictEl.parentNode, before: verdictEl.nextSibling };
+
+  function parkVerdict() {
+    if (verdictEl.parentNode !== VERDICT_HOME.parent && VERDICT_HOME.parent) VERDICT_HOME.parent.insertBefore(verdictEl, VERDICT_HOME.before);
+  }
+
+  function buildIdeas() {
+    if (!STATE.glance || !verdictEl.querySelector(".ft-ideas")) return;
+    mod({ id: "m-ideas", title: "Ideas", span: [12, 12], st: OK, body: [verdictEl], index: 0 });
+  }
+
   function renderModules(card) {
-    gridEl.hidden = false;
+    showGrid();
+    parkVerdict();
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildScenes];
+    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildScenes];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
@@ -2832,6 +2859,7 @@
     $("ftChips").replaceChildren(UI.chips(liteChips(card), "Signal"));
     liteRanks(card);
     gridEl.hidden = false;
+    parkVerdict();
     gridEl.replaceChildren();
     buildScreen(card);
     if (STATE.cardX && STATE.cardX.earnings) buildEvents(card);
@@ -2988,11 +3016,25 @@
   }
 
   function jumpToHash() {
+    if (location.hash === "#ftGrid" && STATE.glance && !STATE.all) {
+      closeSheet(true);
+      STATE.all = true;
+      showGrid();
+      paintDock();
+      requestAnimationFrame(() => { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); });
+      return;
+    }
     const m = /^#(?:panel-|ftg-|m-)?([A-Za-z_]\w*)$/.exec(String(location.hash || ""));
     if (!m) return;
     const id = PANEL_MOD[m[1]] || ($("m-" + m[1]) ? "m-" + m[1] : null);
     const target = id && $(id);
     if (!target) return;
+    if (STATE.glance && !STATE.all && gridEl.contains(target)) {
+      closeSheet(true);
+      STATE.all = true;
+      showGrid();
+      paintDock();
+    }
     target.setAttribute("tabindex", "-1");
     requestAnimationFrame(() => { target.scrollIntoView({ block: "start", behavior: "instant" }); try { target.focus({ preventScroll: true }); } catch { target.focus(); } });
   }

@@ -105,7 +105,7 @@ const block = (page) => page.evaluate(() => {
   return {
     status: r.dataset.status || null, text: c.textContent.replace(/\s+/g, " ").trim(), full: r.textContent,
     claims: [...r.querySelectorAll(".ft-claim")].map((b) => ({ id: b.dataset.claim, list: b.dataset.list, text: b.querySelector(".ft-claim-t").textContent })),
-    lead: (r.querySelector(".ft-rail-lead") || {}).textContent || null,
+    lead: (r.querySelector(".ft-rail-lead") || r.querySelector(".ft-claim-t") || {}).textContent || null,
     headings: [...document.querySelectorAll("#ftGlance h1, #ftGlance h2, #ftVerdict h2")].map((h) => [Number(h.tagName[1]), h.textContent.trim()]),
     foot: (r.querySelector(".ft-foot") || {}).textContent || "",
     imgs: r.querySelectorAll("img, script, iframe, a[href^='javascript'], [onerror]").length,
