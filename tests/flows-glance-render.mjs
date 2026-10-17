@@ -24,7 +24,10 @@ ok(!/min-width:\s*(?:6[0-4]\d|1[01]\d\d)px[^}]*max-width|max-width:\s*(?:640|110
 
 const EMIT = nightlyEmit();
 const cards = fs.readdirSync(EMIT).filter((f) => /^-card-[A-Z][A-Z0-9.\-]*\.json$/.test(f)).map((f) => JSON.parse(fs.readFileSync(path.join(EMIT, f), "utf8")));
-const card = cards.find((c) => c.ticker === "AAPL") || cards.find((c) => c.panels && c.panels.pricedMove && c.panels.pricedMove.status === "ok" && c.panels.gamma && c.panels.gamma.status === "ok" && c.panels.context && c.panels.context.candles && c.panels.context.candles.length > 100);
+const card0 = cards.find((c) => c.ticker === "AAPL") || cards.find((c) => c.panels && c.panels.pricedMove && c.panels.pricedMove.status === "ok" && c.panels.gamma && c.panels.gamma.status === "ok" && c.panels.context && c.panels.context.candles && c.panels.context.candles.length > 100);
+const card = JSON.parse(JSON.stringify(card0));
+delete card.engine;
+card.panels.surface = { status: "unavailable" };
 ok(card && card.panels.pricedMove.status === "ok" && card.panels.gamma.status === "ok" && card.panels.context.candles.length > 100, "the dry-run emit holds a card with a priced move, gamma by strike and a year of closes");
 const clone = (x) => JSON.parse(JSON.stringify(x));
 

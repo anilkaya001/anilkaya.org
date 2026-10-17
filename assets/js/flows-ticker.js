@@ -773,7 +773,8 @@
   const arr = (v) => (Array.isArray(v) ? v : []);
   const citesOf = (it) => arr(it && it.cites).filter((c) => c && typeof c.id === "string");
   const CLAIM_TONES = ["--accent", "--lvl-flip", "--warn", "--s-teal"];
-  const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null };
+  const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null, expiry: null };
+  const SURF = { view: "price", api: null, load: null, tabs: null, seq: 0 };
   const frameEl = $("ftGlance"), stripEl = $("ftStrip"), railEl = $("ftReadRail"), dockEl = $("ftDock"), diveEl = $("ftDive");
 
   function emitFocus(id, source) {
@@ -906,6 +907,32 @@
   }
 
   document.addEventListener("ft:focus", (e) => { const d = e.detail || {}; setRailFocus(d.id === null || d.id === undefined ? null : String(d.id)); });
+  document.addEventListener("ft:expiry", (e) => { const d = e.detail || {}; if (typeof d.expiry === "string") GLANCE.expiry = d.expiry; });
+
+  let fitRaf = 0;
+  const scheduleFit = () => { cancelAnimationFrame(fitRaf); fitRaf = requestAnimationFrame(fitClaims); };
+  if (railEl && typeof ResizeObserver === "function") { let last = ""; new ResizeObserver(() => { const k = railEl.clientWidth + "x" + railEl.clientHeight; if (k === last) return; last = k; scheduleFit(); }).observe(railEl); }
+
+  function fitClaims() {
+    const ol = railEl && railEl.querySelector(".ft-claims");
+    if (!ol || railEl.hidden || !railEl.clientHeight) return;
+    const ts = [...ol.querySelectorAll(".ft-claim-t")];
+    const set = (el, n) => el.style.setProperty("--claim-lines", String(n));
+    const over = () => railEl.scrollHeight > railEl.clientHeight + 1;
+    let n = 8;
+    ts.forEach((el) => set(el, n));
+    while (n > 2 && over()) { n--; ts.forEach((el) => set(el, n)); }
+    if (over()) return;
+    for (let more = true, pass = 0; more && pass < 6; pass++) {
+      more = false;
+      for (const el of ts) {
+        const cur = Number(el.style.getPropertyValue("--claim-lines"));
+        if (cur >= 8) continue;
+        set(el, cur + 1);
+        if (over()) set(el, cur); else more = true;
+      }
+    }
+  }
 
   const opposed = (a, b) => {
     const sign = (c) => (/[0-9]/.test(String(c.display)) ? (/^\s*[−-]/.test(String(c.display)) || /[−-]\s*\$?\d/.test(String(c.display)) ? -1 : 1) : 0);
@@ -927,7 +954,7 @@
   function paintRail(read) {
     if (!railEl) return;
     closePop(false);
-    railEl.hidden = !STATE.glance;
+    railEl.hidden = !STATE.glance || SURF.view === "surface";
     railEl.replaceChildren();
     GLANCE.focus = null;
     railEl.dataset.focus = "";
@@ -975,6 +1002,9 @@
     if (dis) railEl.append(dis);
     railEl.append(h("div", { class: "ft-foot" }));
     paintFoot();
+    fitClaims();
+    scheduleFit();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
   }
 
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && GLANCE.pop && railEl.contains(document.activeElement)) { e.preventDefault(); closePop(true); } });
@@ -985,11 +1015,11 @@
     if (GLANCE.ready) glanceUpdate();
   }
 
-  const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-surface", "Volatility surface"], ["m-terrain", "Gamma terrain"], ["m-network", "Flow network"]];
+  const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-network", "Flow network"]];
 
   function glanceOpts() {
     const n = STATE.neuron || null;
-    return { reading: n && readIs(n.read, "ready", "generating", "fallback", "absent", "unavailable") ? n.read : null, claims: GLANCE.claims.map((c) => ({ id: c.id, cites: citesOf(c.it) })), cardX: STATE.cardX, tape: STATE.tape };
+    return { reading: n && readIs(n.read, "ready", "generating", "fallback", "absent", "unavailable") ? n.read : null, claims: GLANCE.claims.map((c) => ({ id: c.id, cites: citesOf(c.it) })), cardX: STATE.cardX, tape: STATE.tape, expiry: GLANCE.expiry };
   }
 
   function glanceUpdate() {
@@ -1016,6 +1046,60 @@
     const host = $("ftGRange");
     if (!host || host.firstChild) return;
     host.append(UI.segmented("Range", RANGES.map(([l]) => ({ label: l })), (i) => { rangePick = i; if (GLANCE.mount && GLANCE.mount.setRange) GLANCE.mount.setRange(RANGES[i][0]); }, rangePick));
+  }
+
+  function surfaceInput() {
+    return { card: STATE.card, ticker: STATE.card.ticker, expiry: GLANCE.mount && GLANCE.mount.expiry ? GLANCE.mount.expiry() : GLANCE.expiry };
+  }
+
+  function dropSurface() {
+    SURF.seq++;
+    if (SURF.api && SURF.api.destroy) { try { SURF.api.destroy(); } catch (e) { console.error("flows-ticker: surface destroy failed", e); } }
+    SURF.api = null;
+    SURF.load = null;
+  }
+
+  function loadSurface() {
+    const host = $("ftGSurf");
+    if (!host || !STATE.card) return;
+    if (SURF.api) { SURF.api.repaint(); return; }
+    if (SURF.load) return;
+    const seq = ++SURF.seq;
+    host.replaceChildren(UI.silent(ST("pending", "The surface and terrain load when this tab opens."), "Surface and terrain", 140));
+    SURF.load = UI.defer("surface", { when: "visible", el: host, label: "The surface and terrain" }).then(() => {
+      if (seq !== SURF.seq || SURF.view !== "surface") { SURF.load = null; return; }
+      const api = window.FlowsUI && window.FlowsUI.tickerSurface;
+      if (!api) { SURF.load = null; return; }
+      try { SURF.api = api.mount(host, surfaceInput()); } catch (e) { console.error("flows-ticker: surface mount failed", e); host.replaceChildren(UI.silent(ST("unavailable", "The surface could not be drawn."), "Surface and terrain", 140)); }
+      SURF.load = null;
+    });
+  }
+
+  function setView(view) {
+    const main = $("ftGMain"), a = $("ftGlanceChart"), b = $("ftGSurf");
+    if (!main || !a || !b || (view === "surface" && !$("ftSurface"))) return;
+    SURF.view = view;
+    main.dataset.view = view;
+    a.hidden = view === "surface";
+    b.hidden = view !== "surface";
+    const range = $("ftGRange"), reset = $("ftGReset");
+    if (range) range.hidden = view === "surface";
+    if (reset) reset.hidden = view !== "surface";
+    railEl.hidden = !STATE.glance || view === "surface";
+    if (view === "surface") loadSurface();
+    else { dropSurface(); b.replaceChildren(); fitClaims(); }
+  }
+
+  function paintTabs() {
+    const host = $("ftGTabs");
+    if (!host || host.firstChild || !$("ftSurface")) return;
+    const seg = UI.segmented("Chart view", [{ label: "Price & levels" }, { label: "Surface & terrain" }], (i) => setView(i === 1 ? "surface" : "price"), SURF.view === "surface" ? 1 : 0);
+    const btns = [...seg.querySelectorAll("button")];
+    ["ftTabPrice", "ftTabSurface"].forEach((id, i) => { btns[i].id = id; btns[i].dataset.tab = i ? "surface" : "price"; btns[i].setAttribute("aria-controls", i ? "ftGSurf" : "ftGlanceChart"); });
+    host.append(seg);
+    SURF.tabs = seg;
+    const reset = $("ftGReset");
+    if (reset && !reset.firstChild) { reset.hidden = true; reset.append(h("button", { class: "ft-gbtn", type: "button", onclick: () => { if (SURF.api) SURF.api.reset(); } }, "Reset view")); }
   }
 
   const BEHIND = "body > .flows-skip, #fxSide, #fxScrim, #fxBar, #flowsMain, #fxTabs, #askDock";
@@ -1142,6 +1226,9 @@
 
   function renderGlance(card) {
     paintRange();
+    paintTabs();
+    dropSurface();
+    if (SURF.view === "surface") loadSurface();
     paintDock();
     mountGlance();
     GLANCE.ready = true;
@@ -2734,17 +2821,6 @@
     UI.defer("movelab", { when: "visible", el: host, label: "The move lab" }).then(() => window.FlowsUI.moveLab && window.FlowsUI.moveLab.mount(host, raw));
   }
 
-  function buildScenes(card) {
-    if (!$("ftScenes") || isIndex(card) || !UI.defer) return;
-    const P = card.panels || {};
-    const input = { ticker: card.ticker, engine: engineOf(card), ivSurface: okOf(P.ivSurface), gamma: P.surface, asOf: card.generatedAt || null };
-    for (const [kind, id, title] of [["surface", "m-surface", "Volatility surface"], ["terrain", "m-terrain", "Gamma terrain"]]) {
-      const host = h("div", { class: "ft-scene", "data-scene": kind });
-      mod({ id, title, span: [12, 12], st: OK, body: [host], index: 3 });
-      UI.defer("scenes", { when: "visible", el: host, label: "The " + title.toLowerCase() }).then(() => window.FlowsUI.scenes && window.FlowsUI.scenes[kind](host, input));
-    }
-  }
-
   const VERDICT_HOME = { parent: verdictEl.parentNode, before: verdictEl.nextSibling };
 
   function parkVerdict() {
@@ -2760,7 +2836,7 @@
     showGrid();
     parkVerdict();
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildScenes];
+    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }

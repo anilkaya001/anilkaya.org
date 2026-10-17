@@ -8,11 +8,14 @@
   const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
   const RANGES = { "1M": 20, "3M": 63, "6M": 126, "1Y": 252 };
   const FWD = 20;
+  const RAIL_PLOT_MIN = 236;
+  const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const numOr = (...vs) => { for (const v of vs) if (num(v) !== null) return v; return null; };
   const isoOk = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
   const okOf = (p) => (p && p.status === "ok" ? p : null);
+  const GSIGN = { "-1": UI.MINUS, "1": "+", "0": "" };
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const tone = (v) => (num(v) === null || v === 0 ? "flat" : v > 0 ? "up" : "down");
   const volPts = (v) => (num(v) === null ? DASH : F.signed(v * 100, 1));
@@ -157,6 +160,91 @@
     return null;
   }
 
+  const quant = () => {
+    const q = window.FlowsQuant;
+    return q && typeof q.sliceFromSummary === "function" && typeof q.sliceVolK === "function" && typeof q.skewMetrics === "function" ? q : null;
+  };
+  const MSTATE = { svi: ["fit", "FITTED SVI"], "svi-repaired": ["repaired", "SVI, REPAIRED"], ssvi: ["fit", "FITTED SSVI"], mixture: ["fit", "FITTED MIXTURE"], flat: ["none", "NO FIT"] };
+  const dayMs = (d) => Date.parse(String(d).slice(0, 10) + "T12:00:00Z");
+  const daysBetween = (a, b) => Math.round((dayMs(b) - dayMs(a)) / 86400000);
+  function sessionsBetween(a, b) {
+    let k = 0;
+    const d = new Date(dayMs(a)), e = dayMs(b);
+    while (d.getTime() < e) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) k++; }
+    return k;
+  }
+  const measuredGrid = (a) => Array.isArray(a) && a.some((r) => Array.isArray(r) && r.some((v) => num(v) !== null));
+
+  function expiryModel(card, q) {
+    const P = (card && card.panels) || {};
+    const eng = card && card.engine && Array.isArray(card.engine.expiries) ? card.engine.expiries.filter((e) => e && isoOk(e.expiry)) : [];
+    const sf = okOf(P.surface);
+    const grid = sf && Array.isArray(sf.strikes) && sf.strikes.length && Array.isArray(sf.expiries) ? sf : null;
+    const asOf = card && isoOk(card.sessionDate) ? card.sessionDate.slice(0, 10) : grid && isoOk(grid.asOf) ? grid.asOf.slice(0, 10) : null;
+    const book = grid && grid.oi && measuredGrid(grid.oi.gamma) ? grid.oi.gamma : null;
+    const traded = grid && measuredGrid(grid.grid) ? grid.grid : null;
+    const cells = book || traded;
+    const basis = book ? "book" : traded ? "traded" : null;
+    const strikes = grid ? grid.strikes.map(num) : [];
+    const why = {};
+    if (!grid) why.gamma = P.surface && P.surface.reason ? String(P.surface.reason) : "The card carries no gamma by strike and expiry.";
+    else if (!basis) why.gamma = "No strike and expiry pair carried gamma.";
+    if (!eng.length) why.smile = "The card carries no fitted smile.";
+    else if (!q) why.smile = "The smile reader did not load.";
+    const byDate = new Map(eng.map((e) => [e.expiry.slice(0, 10), e]));
+    const gridDates = grid ? grid.expiries.map((d) => String(d).slice(0, 10)) : [];
+    const dates = [...new Set(gridDates.filter(isoOk).concat(eng.map((e) => e.expiry.slice(0, 10))))].sort();
+    const ivs = okOf(P.ivSurface);
+    const rows = [];
+    dates.forEach((d) => {
+      const gj = gridDates.indexOf(d);
+      const e = byDate.get(d) || null;
+      const sm = e && e.smile && typeof e.smile === "object" ? e.smile : null;
+      const st = sm && MSTATE[sm.method] ? MSTATE[sm.method] : ["none", "NO FIT"];
+      const dte = e && num(e.dte) !== null ? e.dte : asOf ? daysBetween(asOf, d) : null;
+      if (dte === null || dte <= 0) return;
+      const sessions = e && num(e.sessions) !== null ? e.sessions : asOf ? sessionsBetween(asOf, d) : null;
+      const T = e && num(e.T) > 0 ? e.T : null;
+      const atm = sm && num(sm.atmIv) > 0 ? sm.atmIv : null;
+      const quotes = [];
+      if (ivs && Array.isArray(ivs.expiries) && Array.isArray(ivs.strike) && Array.isArray(ivs.iv)) {
+        const c = ivs.expiries.findIndex((x) => x && String(x.expiry).slice(0, 10) === d);
+        if (c >= 0) ivs.iv.forEach((r, ri) => { const v = num(r && r[c]), K = num(ivs.strike[ri] && ivs.strike[ri][c]); if (v !== null && v > 0 && K !== null) quotes.push([K, v]); });
+      }
+      rows.push({
+        j: rows.length, col: gj, expiry: d, dte, sessions, T, atm, F: e && e.forward ? num(e.forward.F) : null, method: sm ? sm.method : null, state: st[0], label: st[1],
+        slice: q && e && st[0] !== "none" ? q.sliceFromSummary(e) : null,
+        sd: atm !== null && T !== null ? atm * Math.sqrt(T) : null,
+        gamma: cells && gj >= 0 ? strikes.map((_, i) => num(cells[i] && cells[i][gj])) : null,
+        quotes, eng: sm ? { rr25: num(sm.rr25), bf25: num(sm.bf25), rmse: num(sm.rmseIvPts), n: num(sm.n), minG: sm.checks ? num(sm.checks.minG) : null } : null,
+      });
+    });
+    const mags = [];
+    for (const r of rows) if (r.gamma) for (const g of r.gamma) if (g !== null && g !== 0) mags.push(Math.abs(g));
+    mags.sort((a, b) => a - b);
+    const cap = mags.length ? mags[Math.min(mags.length - 1, Math.round(0.98 * (mags.length - 1)))] : null;
+    return { rows, strikes, basis, cap, why, asOf, q, spot: spotOf(card || {}), levels: levelsOf(card || {}) };
+  }
+  const defaultExpiry = (rows) => { const r = rows.find((x) => x.dte >= 7) || rows[rows.length - 1]; return r ? r.expiry : null; };
+  function skewOf(row, q) {
+    if (!row || row.state === "none" || !row.slice || !q) return null;
+    if (row.sk !== undefined) return row.sk;
+    let k = null;
+    try { k = q.skewMetrics(row.slice); } catch (e) { k = null; }
+    const atm = (() => { try { return num(q.sliceVolK(row.slice, 0)); } catch (e) { return null; } })();
+    row.sk = k && k.strikes ? { Kp: k.strikes.put25, Kc: k.strikes.call25, ivp: k.vols.put25, ivc: k.vols.call25, rr: k.rr25, bf: k.bf25, atm } : null;
+    return row.sk;
+  }
+  function smileAt(row, q, K) {
+    if (!row || row.state === "none" || !row.slice || !q || !(row.F > 0) || !(K > 0)) return null;
+    try { return num(q.sliceVolK(row.slice, Math.log(K / row.F))); } catch (e) { return null; }
+  }
+  const nearestStrike = (xp, K) => {
+    let b = -1;
+    xp.strikes.forEach((k, i) => { if (k !== null && (b < 0 || Math.abs(k - K) < Math.abs(xp.strikes[b] - K))) b = i; });
+    return b;
+  };
+
   function model(card, range, x) {
     x = x && typeof x === "object" ? x : {};
     const P = (card && card.panels) || {};
@@ -191,8 +279,11 @@
     const lv = levelsOf(card || {});
     const levels = LEVEL_KINDS.map(([kind, label]) => (lv[kind] && S !== null && Math.abs(lv[kind].px / S - 1) <= 0.12 ? { kind, label, px: lv[kind].px } : null)).filter(Boolean);
     for (const [kind, label] of LEVEL_KINDS) if (!lv[kind] || (S !== null && Math.abs(lv[kind].px / S - 1) > 0.12)) why[kind] = lv[kind] ? label + " is more than 12% from spot." : "The card carries no " + label.toLowerCase() + " level.";
+    const xp = expiryModel(card || {}, quant());
+    const sel = x.expiry && xp.rows.some((r) => r.expiry === x.expiry) ? x.expiry : defaultExpiry(xp.rows);
     const vals = hist.map((r) => r.c).concat(S === null ? [] : [S], levels.map((l) => l.px));
     for (const c of [q, p]) if (c) { const e = c[c.length - 1]; if (Math.abs(Math.log(e.up / S)) < 0.25 && Math.abs(Math.log(S / e.lo)) < 0.25) vals.push(e.up, e.lo); }
+    if (S !== null) for (const r of xp.rows) if (r.sd !== null && r.sd < 0.25 && r.sessions !== null && r.sessions <= FWD) vals.push(S * Math.exp(r.sd), S * Math.exp(-r.sd));
     let y0 = vals.length ? Math.min(...vals) : 0, y1 = vals.length ? Math.max(...vals) : 1;
     const pad = (y1 - y0) * 0.06 || (S || 1) * 0.01;
     y0 -= pad; y1 += pad;
@@ -209,21 +300,27 @@
     const hasScore = scoreRows.some((r) => r.v !== null);
     if (!hasScore) why.score = "The card carries no score history for these sessions.";
     return { range: RANGES[range] ? range : "1M", N: hist.length - 1, F: FWD, S, hist, Hs, q, p, qEnd: end(q), pEnd: end(p), event, levels, y0, y1, bars, book, bookSide: reg.label === "short" ? "short" : reg.label === "long" ? "long" : null,
-      flipSide: reg.crossingSide || null, score: { rows: scoreRows, has: hasScore }, why, ticker: card.ticker, sessionDate: card.sessionDate };
+      flipSide: reg.crossingSide || null, score: { rows: scoreRows, has: hasScore }, why, ticker: card.ticker, sessionDate: card.sessionDate, xp, sel };
   }
 
   function layout(m, W, H) {
-    const phone = W < 520;
-    const hasProf = !phone && m.bars.length > 0;
+    const narrow = W < 520;
+    const rows = m.xp ? m.xp.rows : [];
+    const gW = clamp(Math.round(W * 0.15), 80, 150), sW = clamp(Math.round(W * 0.2), 104, 230), RG = 8, LW = 64;
+    const railW = LW + gW + sW + 2 * RG + 6;
+    const rail = rows.length > 0 && !narrow && W - railW - 44 >= RAIL_PLOT_MIN;
+    const stack = rows.length > 0 && !rail;
+    const phone = narrow || stack;
+    const hasProf = !phone && !rail && m.bars.length > 0;
     const profW = hasProf ? clamp(Math.round(W * 0.1), 56, 128) : 0;
-    const labelW = phone ? 0 : 80;
-    const XL = phone ? 6 : 44;
-    const XR = Math.round(W - (phone ? 8 : (hasProf ? profW + 14 : 0) + labelW + 8));
+    const labelW = phone || rail ? 0 : 80;
+    const XL = narrow ? 6 : 44;
+    const XR = Math.round(W - (rail ? railW : phone ? 8 : (hasProf ? profW + 14 : 0) + labelW + 8));
     const nb = Math.max(1, m.N);
     const ffrac = Math.max(FWD / (nb + FWD), 0.3);
     const XT = XL + (XR - XL) * (1 - ffrac);
-    const top = 8;
-    const strip = !phone && m.score.has;
+    const top = rail ? 26 : 8;
+    const strip = !narrow && m.score.has;
     const sh = strip ? clamp(Math.round(H * 0.2), 44, 90) : 0;
     const plotB = H - 18 - (strip ? sh : 0) - 6;
     const y = (v) => top + (m.y1 - v) * (plotB - top) / (m.y1 - m.y0);
@@ -231,7 +328,8 @@
     const xf = (t) => XT + (XR - XT) * t / FWD;
     const clampY = (v) => clamp(v, top, plotB);
     const poly = (c, k) => c.map((o) => [xf(o.h), clampY(y(o[k]))]);
-    const out = { phone, W, H, XL, XR, XT, top, plotB, profW, labelW, y, xb, xf, strip, hasProf };
+    const out = { phone, narrow, stack, W, H, XL, XR, XT, top, plotB, profW, labelW, y, xb, xf, strip, hasProf, rail: null };
+    if (rail) { const g0 = XR + LW + RG, g1 = g0 + gW, s0 = g1 + RG; out.rail = { lx: XR + 10, g0, g1, s0, s1: W - 6, gW, sW: W - 6 - s0 }; }
     if (m.q) out.q = { up: poly(m.q, "up"), lo: poly(m.q, "lo") };
     if (m.p) out.p = { up: poly(m.p, "up"), lo: poly(m.p, "lo") };
     const gap = 14;
@@ -294,7 +392,9 @@
     out.push(m.event ? "A report on " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") + " steps both bands" + (m.event.q !== null ? ": options price plus or minus " + F.pct(m.event.q, 1) : "") + (m.event.p !== null ? ", past reports moved plus or minus " + F.pct(m.event.p, 1) : "") + "." : m.why.event);
     const lv = m.levels.map((l) => LEVEL_NAMES[l.kind] + " " + F.px(l.px));
     out.push(lv.length ? "Levels: " + lv.join(", ") + "." : "No levels near spot on this card.");
-    out.push(m.bars.length ? "Dealer gamma by strike is on the right edge: long bars to the right in blue, short bars hatched in orange" + (m.book !== null ? ", book " + F.money(m.book, true) + " per 1%" : "") + ", " + DEALER_CLAUSE + "." : "Dealer gamma by strike: " + m.why.gamma);
+    if (m.xp.rows.length) out.push(railDescribe(m, m.xp.rows.find((r) => r.expiry === m.sel) || null) + " Click an expiry tick under the forward axis, or focus one and use the arrow keys, to move the cursor.");
+    else out.push("Strike rail: " + (m.xp.why.gamma || m.xp.why.smile || "the card carries no expiries") + ".");
+    if (!m.xp.rows.length) out.push(m.bars.length ? "Dealer gamma by strike is on the right edge: long bars to the right in blue, short bars hatched in orange" + (m.book !== null ? ", book " + F.money(m.book, true) + " per 1%" : "") + ", " + DEALER_CLAUSE + "." : "Dealer gamma by strike: " + m.why.gamma);
     const last = m.score.rows.length ? m.score.rows[m.score.rows.length - 1].v : null;
     out.push(m.score.has ? "Flows score by session under the price" + (last !== null ? ", today " + F.signed(last) : "") + "." : "Flows score: " + m.why.score);
     out.push("Use the left and right arrow keys to move through sessions.");
@@ -417,9 +517,9 @@
     s("rect", { width: 2, height: 4, class: "ftg-hatch" }, hx);
     const { XL, XR, XT, top, plotB, y, xb, xf } = L;
     s("rect", { x: XT, y: top, width: XR - XT, height: plotB - top, class: "ftg-fwd" }, svg);
-    const ticks = niceTicks(m.y0, m.y1, L.phone ? 4 : 6).filter((v) => v > m.y0 && v < m.y1);
-    s("path", { d: ticks.map((v) => "M" + XL + "," + f1(y(v)) + "H" + XR).join(""), class: "ftg-grid" }, svg);
-    if (!L.phone) for (const v of ticks) s("text", { x: XL - 6, y: y(v) + 3.5, "text-anchor": "end", class: "ftg-tx", text: F.px(v, v % 1 ? 2 : 0) }, svg);
+    const ticks = niceTicks(m.y0, m.y1, L.narrow ? 4 : 6).filter((v) => v > m.y0 && v < m.y1);
+    s("path", { d: ticks.map((v) => "M" + XL + "," + f1(y(v)) + "H" + (L.rail ? XR + 6 + "M" + (L.rail.g0 - 4) + "," + f1(y(v)) + "H" + L.rail.s1 : XR)).join(""), class: "ftg-grid" }, svg);
+    if (!L.narrow) for (const v of ticks) s("text", { x: XL - 6, y: y(v) + 3.5, "text-anchor": "end", class: "ftg-tx", text: F.px(v, v % 1 ? 2 : 0) }, svg);
     const layer = (name, extra) => s("g", Object.assign({ "data-layer": name }, extra || null), svg);
 
     const cone = layer("cone");
@@ -432,13 +532,13 @@
       s("polyline", { points: poly(L.p.up), class: "ftg-p" }, cone);
       s("polyline", { points: poly(L.p.lo), class: "ftg-p" }, cone);
     }
-    if (L.q || L.p) s("line", { x1: XT, x2: XR, y1: y(m.S), y2: y(m.S), class: "ftg-spotline" }, cone);
-    if (L.q) {
+    if (L.q || L.p) s("line", { x1: XT, x2: L.rail ? XR + 6 : XR, y1: y(m.S), y2: y(m.S), class: "ftg-spotline" }, cone);
+    if (L.q && !L.rail) {
       const qy = L.q.up[L.q.up.length - 1][1];
       const crowd = m.event && !L.phone && xf(m.event.h) - XT <= 210 && XR - xf(m.event.h) < 300;
       s("text", { x: XR - 4, y: qy - 6 >= top + 10 && !crowd ? qy - 6 : qy + 14, "text-anchor": "end", class: "ftg-tx ftg-q-tx", text: "Q ±" + F.pct(m.qEnd, 1) }, cone);
     }
-    if (L.p) s("text", { x: XR - 4, y: clamp(L.p.lo[L.p.lo.length - 1][1] + 14, top + 10, plotB - 4), "text-anchor": "end", class: "ftg-tx ftg-p-tx", text: "P ±" + F.pct(m.pEnd, 1) }, cone);
+    if (L.p && !L.rail) s("text", { x: XR - 4, y: clamp(L.p.lo[L.p.lo.length - 1][1] + 14, top + 10, plotB - 4), "text-anchor": "end", class: "ftg-tx ftg-p-tx", text: "P ±" + F.pct(m.pEnd, 1) }, cone);
 
     if (m.event) {
       const ex = xf(m.event.h);
@@ -463,10 +563,11 @@
       const l = byKind[kind];
       if (!l) continue;
       const g = layer(kind === "gamma_flip" ? "flip" : "walls");
-      s("line", { x1: XT, x2: XR + 10, y1: y(l.px), y2: y(l.px), class: "ftg-lv ftg-lv-" + kind }, g);
+      s("line", { x1: XT, x2: L.rail ? XR + 6 : XR + 10, y1: y(l.px), y2: y(l.px), class: "ftg-lv ftg-lv-" + kind }, g);
+      if (L.rail) s("line", { x1: L.rail.g0 - 4, x2: L.rail.s1, y1: y(l.px), y2: y(l.px), class: "ftg-lv ftg-lv-" + kind }, g);
       const lab = L.labels.find((o) => o.kind === kind);
       if (lab) {
-        const lx = XR + (L.hasProf ? L.profW + 14 : 0) + 12;
+        const lx = L.rail ? L.rail.lx : XR + (L.hasProf ? L.profW + 14 : 0) + 12;
         s("line", { x1: lx - 11, x2: lx - 3, y1: lab.ly1, y2: lab.ly2, class: "ftg-lead ftg-lv-" + kind }, g);
         s("text", { x: lx, y: lab.y, class: "ftg-tx ftg-lt ftg-lv-" + kind, text: lab.text }, g);
       }
@@ -480,7 +581,7 @@
     }
     const spot = L.labels.find((o) => o.kind === "spot");
     if (spot) {
-      const lx = XR + (L.hasProf ? L.profW + 14 : 0) + 12;
+      const lx = L.rail ? L.rail.lx : XR + (L.hasProf ? L.profW + 14 : 0) + 12;
       const g = s("g", { "data-layer": "spot" }, svg);
       s("line", { x1: lx - 11, x2: lx - 3, y1: spot.ly1, y2: spot.ly2, class: "ftg-lead ftg-lv-spot" }, g);
       s("text", { x: lx, y: spot.y, class: "ftg-tx ftg-lt ftg-lv-spot", text: spot.text }, g);
@@ -498,6 +599,9 @@
       for (const b of L.bars) s("rect", { x: L.profX + 1, y: b.y, width: Math.max(1, b.w), height: b.h, class: b.g > 0 ? "ftg-gl" : "ftg-gs", fill: b.g > 0 ? null : "url(#" + id + "h)" }, g);
     }
 
+    const G = { rail: layer("gamma"), cur: layer("cursor"), ticks: layer("xticks") };
+    const selRow = () => m.xp.rows.find((r) => r.expiry === m.sel) || null;
+    const info = L.rail ? paintRail(G, L, m, selRow(), "url(#" + id + "h)", st.pick) : null;
     const sc = L.score;
     if (sc) {
       const g = layer("score");
@@ -524,8 +628,8 @@
       const back = [[0, "start"], [Math.round(n / 2), "middle"]];
       for (const [i, a] of back) if (i > 0 || a === "start") s("text", { x: i === 0 ? XL : xb(i), y: ay, "text-anchor": a, class: "ftg-tx", text: F.day(m.hist[i].d) }, svg);
       s("text", { x: XT, y: ay, "text-anchor": "middle", class: "ftg-tx ftg-today-tx", text: F.day(m.hist[n].d) }, svg);
-      if (!L.phone) s("text", { x: xf(FWD / 2), y: ay, "text-anchor": "middle", class: "ftg-tx", text: F.day(dateAt(m, FWD / 2)) }, svg);
-      if (!L.phone || !m.event) s("text", { x: XR, y: ay, "text-anchor": "end", class: "ftg-tx", text: F.day(dateAt(m, FWD)) }, svg);
+      if (!L.phone && !L.rail) s("text", { x: xf(FWD / 2), y: ay, "text-anchor": "middle", class: "ftg-tx", text: F.day(dateAt(m, FWD / 2)) }, svg);
+      if ((!L.phone || !m.event) && !L.rail) s("text", { x: XR, y: ay, "text-anchor": "end", class: "ftg-tx", text: F.day(dateAt(m, FWD)) }, svg);
     }
 
     if (st.claims.length) {
@@ -534,7 +638,7 @@
       const anchor = {
         flip: () => [XT + (XR - XT) * 0.6, L.levelY.gamma_flip],
         event: () => (m.event ? [xf(m.event.h), top + 6] : null),
-        gamma: () => (L.hasProf ? [Math.min(W - 12, L.profX + L.profW + 8), top + 34] : null),
+        gamma: () => (L.rail ? [L.rail.g1 - 12, top + 16] : L.hasProf ? [Math.min(W - 12, L.profX + L.profW + 8), top + 34] : null),
         walls: () => { const k = ["call_wall", "put_wall", "max_pain"].find((q) => L.levelY[q] !== undefined); return k ? [XT + (XR - XT) * 0.8, L.levelY[k] - 12] : null; },
         cone: () => (L.q ? [XR - 16, clamp(L.q.up[L.q.up.length - 1][1] - 12, top + 8, plotB)] : null),
       };
@@ -558,7 +662,224 @@
     const cross = s("g", { class: "ftg-cross", hidden: "", "aria-hidden": "true" }, svg);
     s("line", { x1: 0, x2: 0, y1: top, y2: plotB, class: "ftg-cross-l" }, cross);
     const dot = s("circle", { r: 4, class: "ftg-cross-d" }, cross);
-    return { svg, L, cross, dot };
+    const rl = L.rail ? s("line", { x1: XT, x2: L.rail.s1, y1: 0, y2: 0, class: "ftg-cross-l ftg-cross-h", hidden: "" }, svg) : null;
+    return { svg, L, cross, dot, G, rail: info, rl, selRow, repaint: () => (L.rail ? paintRail(G, L, m, selRow(), "url(#" + id + "h)", st.pick) : null) };
+  }
+
+  const gammaWord = (xp, v) => (xp.basis === "traded" ? F.num(v) : F.money(v));
+  const fmtPct = (v) => F.pct(v, 0);
+
+  function domainOf(row, q, m) {
+    const sk = skewOf(row, q);
+    const pts = [];
+    if (row.state !== "none" && row.slice && q) for (let a = 0; a <= 72; a++) { const K = m.y0 + (m.y1 - m.y0) * a / 72; pts.push([K, smileAt(row, q, K)]); }
+    const vs = pts.map((p) => p[1]).filter((v) => v !== null);
+    if (!vs.length) {
+      const c = row.atm;
+      return { pts, sk, lo: c === null ? null : Math.max(0, Math.floor((c - 0.08) / 0.05) * 0.05), hi: c === null ? null : Math.ceil((c + 0.08) / 0.05) * 0.05 };
+    }
+    const base = row.atm !== null ? row.atm : vs.slice().sort((a, b) => a - b)[Math.floor(vs.length / 2)];
+    let lo = Math.min(...vs), hi = Math.max(...vs);
+    hi = Math.min(hi, Math.max(base * 1.8, sk ? Math.max(sk.ivp, sk.ivc) * 1.15 : 0));
+    lo = Math.floor((lo - 0.005) / 0.05) * 0.05;
+    hi = Math.ceil((hi + 0.005) / 0.05) * 0.05;
+    if (hi - lo < 0.1) hi = lo + 0.1;
+    return { pts, sk, lo: Math.max(0, lo), hi };
+  }
+  function ivTicks(lo, hi, n) {
+    const span = hi - lo;
+    const step = span / 0.05 > n * 2 ? 0.2 : span / 0.05 > n ? 0.1 : 0.05;
+    const t = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9; v += step) t.push(+v.toFixed(4));
+    return t;
+  }
+
+  function expiryTicks(G, L, m, sel, pick) {
+    G.ticks.replaceChildren();
+    const rows = m.xp.rows.filter((r) => r.sessions !== null && r.sessions >= 0 && r.sessions <= FWD);
+    if (!rows.length) return;
+    const ay = L.plotB + 14;
+    const wOf = (e) => e.w || String(+e.r.expiry.slice(8, 10)).length * 6 + 6;
+    const ents = rows.map((r) => ({ r, x: L.xf(r.sessions), on: r.expiry === sel }));
+    const kept = [];
+    const obstacles = [{ x: L.XT, w: 48 }];
+    const fits = (e) => kept.concat(obstacles).every((k) => Math.abs(k.x - e.x) >= (wOf(k) + wOf(e)) / 2 + 2);
+    for (const e of ents.filter((o) => o.on)) kept.push(e);
+    for (const e of [ents[ents.length - 1]].concat(ents)) if (!kept.includes(e) && fits(e)) kept.push(e);
+    const mons = new Set(rows.map((r) => MON3[+r.expiry.slice(5, 7) - 1]));
+    s("text", { x: L.xf(FWD / 2), y: ay + 12, "text-anchor": "middle", class: "ftg-tx ftg-cap ftg-xt-cap", text: "expiry day " + UI.MID + " " + [...mons].join("-") }, G.ticks);
+    ents.forEach((e, i) => {
+      const prev = ents[i - 1] ? e.x - ents[i - 1].x : Infinity, next = ents[i + 1] ? ents[i + 1].x - e.x : Infinity;
+      const wd = clamp(Math.min(prev, next) - 1, 14, 30);
+      const g = s("g", { class: "ftg-xt" + (e.on ? " ftg-xt-on" : ""), role: "radio", "aria-checked": String(e.on), tabindex: e.on ? 0 : -1, "data-expiry": e.r.expiry,
+        "aria-label": "Expiry " + F.day(e.r.expiry) + ", " + e.r.dte + " days, " + e.r.label.toLowerCase() }, G.ticks);
+      s("rect", { x: e.x - wd / 2, y: L.plotB - 2, width: wd, height: 22, class: "ftg-xt-hit" }, g);
+      s("line", { x1: e.x, x2: e.x, y1: L.plotB, y2: L.plotB + (e.on ? 7 : 4), class: "ftg-xt-l" }, g);
+      if (kept.includes(e)) s("text", { x: e.x, y: ay, "text-anchor": "middle", class: "ftg-tx ftg-xt-t", text: String(+e.r.expiry.slice(8, 10)) }, g);
+      g.addEventListener("click", () => pick(e.r.expiry));
+      g.addEventListener("keydown", (ev) => {
+        const d = ev.key === "ArrowRight" || ev.key === "ArrowUp" ? 1 : ev.key === "ArrowLeft" || ev.key === "ArrowDown" ? -1 : ev.key === "Home" ? -99 : ev.key === "End" ? 99 : 0;
+        if (d) { ev.preventDefault(); ev.stopPropagation(); const at = clamp(i + d, 0, ents.length - 1); pick(ents[at].r.expiry, true); }
+        else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(e.r.expiry, true); }
+      });
+    });
+    G.ticks.setAttribute("role", "radiogroup");
+    G.ticks.setAttribute("aria-label", "Expiry cursor, click a tick or use the arrow keys");
+  }
+
+  function paintRail(G, L, m, row, pat, pick) {
+    for (const g of [G.rail, G.cur]) g.replaceChildren();
+    expiryTicks(G, L, m, row ? row.expiry : null, pick);
+    const R = L.rail;
+    if (!R || !row) return null;
+    const { top, plotB, y } = L;
+    const xp = m.xp, q = xp.q, S = m.S;
+    const cx = row.sessions === null ? L.XR : L.xf(clamp(row.sessions, 0, FWD));
+    const far = row.sessions !== null && row.sessions > FWD;
+    const out = { cx, far, up: null, dn: null };
+    s("line", { x1: cx, x2: cx, y1: top, y2: plotB, class: "ftg-xc" }, G.cur);
+    s("text", { x: (R.g0 + R.g1) / 2, y: top - 12, "text-anchor": "middle", class: "ftg-tx ftg-cap ftg-rh", text: (R.gW >= 120 ? "Gamma by strike" : "Gamma") + MID + F.day(row.expiry) }, G.rail);
+    s("text", { x: (R.s0 + R.s1) / 2, y: top - 12, "text-anchor": "middle", class: "ftg-tx ftg-cap ftg-rh", text: "Smile" + MID + F.day(row.expiry) }, G.rail);
+    if (row.sd !== null && S !== null) {
+      const up = S * Math.exp(row.sd), dn = S * Math.exp(-row.sd);
+      out.up = up; out.dn = dn;
+      const yu = clamp(y(up), top, plotB), yd = clamp(y(dn), top, plotB);
+      s("rect", { x: R.g0 - 4, y: yu, width: R.s1 - R.g0 + 4, height: Math.max(0, yd - yu), class: "ftg-sig" }, G.rail);
+      for (const yy of [yu, yd]) s("line", { x1: cx, x2: R.s1, y1: yy, y2: yy, class: "ftg-sig-l" }, G.cur);
+      for (const [v, yy, lab] of [[up, yu, "+1 SD " + F.px(up)], [dn, yd, MINUS + "1 SD " + F.px(dn)]]) {
+        s("circle", { cx, cy: yy, r: 3.4, class: "ftg-xd" }, G.cur);
+        s("text", { x: cx - 7, y: v === up ? yy + 12 : yy - 5, "text-anchor": "end", class: "ftg-tx ftg-sig-t", text: lab }, G.cur);
+      }
+    }
+    if (far) s("text", { x: cx - 4, y: top - 12, "text-anchor": "end", class: "ftg-tx ftg-cap", text: F.day(row.expiry) + " is past the month" }, G.cur);
+    const cxg = (R.g0 + R.g1) / 2;
+    s("line", { x1: cxg, x2: cxg, y1: top, y2: plotB, class: "ftg-axis" }, G.rail);
+    const vis = [];
+    xp.strikes.forEach((K, i) => { if (K !== null && K >= m.y0 && K <= m.y1) vis.push(i); });
+    let mx = 0;
+    for (const i of vis) { const g = row.gamma ? row.gamma[i] : null; if (g !== null && g !== undefined) mx = Math.max(mx, Math.abs(g)); }
+    let pitch = Infinity;
+    for (let a = 1; a < vis.length; a++) pitch = Math.min(pitch, Math.abs(y(xp.strikes[vis[a]]) - y(xp.strikes[vis[a - 1]])));
+    const th = clamp(pitch * 0.78, 1.5, 7), half = R.gW / 2 - 6;
+    if (!row.gamma || !vis.length || mx === 0) s("text", { x: cxg, y: (top + plotB) / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: row.gamma ? "No gamma here" : DASH + " no gamma" }, G.rail);
+    else {
+      for (const i of vis) {
+        const K = xp.strikes[i], g = row.gamma[i], yy = y(K) - th / 2;
+        if (g === null) { s("rect", { x: cxg - 3.5, y: yy, width: 7, height: th, class: "ftg-gn", "data-k": K }, G.rail); continue; }
+        const wd = Math.abs(g) / mx * half;
+        s("rect", { x: g >= 0 ? cxg : cxg - wd, y: yy, width: Math.max(1, wd), height: th, class: g >= 0 ? "ftg-gl" : "ftg-gs", fill: g >= 0 ? null : pat, "data-k": K }, G.rail);
+      }
+      s("text", { x: R.g0, y: plotB + 12, class: "ftg-tx ftg-xt-t", text: MINUS + gammaWord(xp, mx) }, G.rail);
+      s("text", { x: R.g1, y: plotB + 12, "text-anchor": "end", class: "ftg-tx ftg-xt-t", text: "+" + gammaWord(xp, mx) }, G.rail);
+    }
+    const dm = domainOf(row, q, m);
+    const mid = (R.s0 + R.s1) / 2;
+    if (dm.lo === null || (!dm.pts.some((p) => p[1] !== null) && row.atm === null)) {
+      s("text", { x: mid, y: (top + plotB) / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: xp.why.smile || "No smile at this expiry" }, G.rail);
+    } else {
+      const sx = (v) => clamp(R.s0 + 6 + (v - dm.lo) / (dm.hi - dm.lo) * (R.sW - 12), R.s0, R.s1);
+      const ticks = ivTicks(dm.lo, dm.hi, Math.max(2, Math.floor(R.sW / 38)));
+      s("path", { d: ticks.map((v) => "M" + f1(sx(v)) + "," + top + "V" + plotB).join(""), class: "ftg-grid" }, G.rail);
+      for (const v of ticks) s("text", { x: sx(v), y: plotB + 12, "text-anchor": "middle", class: "ftg-tx ftg-xt-t", text: fmtPct(v) }, G.rail);
+      const run = dm.pts.filter((p) => p[1] !== null);
+      if (run.length > 1) s("polyline", { points: poly(run.map((p) => [sx(p[1]), y(p[0])])), class: "ftg-sm" }, G.rail);
+      else if (row.atm !== null) {
+        s("line", { x1: sx(row.atm), x2: sx(row.atm), y1: top, y2: plotB, class: "ftg-nf" }, G.rail);
+        s("text", { x: sx(row.atm) + (sx(row.atm) > mid ? -4 : 4), y: top + 12, "text-anchor": sx(row.atm) > mid ? "end" : "start", class: "ftg-tx ftg-nf-t", text: row.state === "none" && row.method === "flat" ? "ATM " + F.pct(row.atm, 1) + ", no fit" : "ATM " + F.pct(row.atm, 1) }, G.rail);
+      }
+      for (const [K, v] of row.quotes) if (K >= m.y0 && K <= m.y1 && v >= dm.lo && v <= dm.hi) s("circle", { cx: sx(v), cy: y(K), r: 2.3, class: "ftg-qd" }, G.rail);
+      const sk = dm.sk;
+      if (sk) for (const [K, v, cls, lab, left] of [[sk.Kp, sk.ivp, "ftg-d25p", "25Δp", true], [sk.Kc, sk.ivc, "ftg-d25c", "25Δc", false]]) {
+        if (!(K >= m.y0 && K <= m.y1) || v === null) continue;
+        const px = sx(v), room = left ? px - R.s0 : R.s1 - px;
+        s("circle", { cx: px, cy: y(K), r: 4.2, class: cls, "data-delta": lab }, G.rail);
+        const toLeft = left ? room >= 40 : room < 40;
+        s("text", { x: px + (toLeft ? -8 : 8), y: y(K) + 3.5, "text-anchor": toLeft ? "end" : "start", class: "ftg-tx " + cls + "-t", text: lab }, G.rail);
+      }
+      if (S !== null) {
+        const v = smileAt(row, q, S);
+        if (v !== null && v >= dm.lo && v <= dm.hi) s("circle", { cx: sx(v), cy: y(S), r: 4, class: "ftg-sp-r" }, G.rail);
+      }
+    }
+    if (S !== null) s("line", { x1: R.g0 - 4, x2: R.s1, y1: y(S), y2: y(S), class: "ftg-spotline ftg-rail-spot" }, G.rail);
+    return out;
+  }
+
+  function railReading(m, row, K) {
+    const xp = m.xp, q = xp.q;
+    const i = nearestStrike(xp, K);
+    const iv = smileAt(row, q, K);
+    const g = i >= 0 && row.gamma ? row.gamma[i] : null;
+    const parts = ["Strike " + F.px(K), iv !== null ? "IV " + F.pct(iv, 1) : "IV " + DASH];
+    if (i >= 0 && row.gamma) parts.push("gamma " + (g === null ? DASH + " (not returned)" : GSIGN[Math.sign(g)] + gammaWord(xp, Math.abs(g))) + " at the " + F.px(xp.strikes[i], xp.strikes[i] % 1 ? 1 : 0) + " strike");
+    if (m.S !== null) parts.push(F.pct(K / m.S - 1, 1, true) + " from spot");
+    return parts.join(MID);
+  }
+
+  function railDescribe(m, row) {
+    if (!row) return "";
+    const xp = m.xp, q = xp.q, sk = skewOf(row, q);
+    const out = ["Strike rail for the " + F.day(row.expiry) + " expiry, " + row.dte + " days, " + row.label.toLowerCase() + "."];
+    if (row.sd !== null && m.S !== null) out.push("The priced one-sigma range is " + F.px(m.S * Math.exp(-row.sd)) + " to " + F.px(m.S * Math.exp(row.sd)) + ".");
+    if (sk) out.push("The 25-delta put sits at " + F.px(sk.Kp) + " at " + F.pct(sk.ivp, 1) + " and the call at " + F.px(sk.Kc) + " at " + F.pct(sk.ivc, 1) + ", risk reversal " + volPts(sk.rr) + " vol points.");
+    else out.push(row.state === "none" ? "No fitted smile: the engine published an at-the-money level" + (row.atm !== null ? " of " + F.pct(row.atm, 1) : "") + " only." : xp.why.smile || "");
+    out.push(row.gamma ? "Dealer gamma by strike for this expiry is drawn beside it " + DEALER_CLAUSE + "." : "Gamma by strike: " + (xp.why.gamma || "none for this expiry") + ".");
+    return out.join(" ");
+  }
+
+  function miniRail(m, row, W, o) {
+    o = o || {};
+    const xp = m.xp, q = xp.q, S = m.S;
+    const box = h("div", { class: "ftg-mini" });
+    if (!row) return box;
+        const lo = m.y0, hi = m.y1, PL = 8, PR = 8, wd = W - PL - PR;
+    const X = (K) => PL + (K - lo) / (hi - lo) * wd;
+    const vis = [];
+    xp.strikes.forEach((K, i) => { if (K !== null && K >= lo && K <= hi) vis.push(i); });
+    let mx = 0;
+    for (const i of vis) { const g = row.gamma ? row.gamma[i] : null; if (g !== null && g !== undefined) mx = Math.max(mx, Math.abs(g)); }
+    let pitch = Infinity;
+    for (let a = 1; a < vis.length; a++) pitch = Math.min(pitch, Math.abs(X(xp.strikes[vis[a]]) - X(xp.strikes[vis[a - 1]])));
+    const th = clamp(pitch * 0.78, 1.5, 9);
+    const gh = o.gh || 84, gz = 14 + (gh - 28) / 2, gs = (gh - 28) / 2;
+    const gv = s("svg", { class: "ftg-msvg", viewBox: "0 0 " + W + " " + gh, width: "100%", height: gh, role: "img", "aria-label": "Gamma by strike for the " + F.day(row.expiry) + " expiry" });
+    const hid = "ftgmh" + ++uid;
+    s("rect", { width: 2, height: 4, class: "ftg-hatch" }, s("pattern", { id: hid, width: 4, height: 4, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, s("defs", null, gv)));
+    s("text", { x: PL, y: 10, class: "ftg-tx ftg-cap", text: o.titles === false ? "Gamma by strike, " + (xp.basis === "traded" ? "traded" : "$ per 1% move") : "Gamma by strike" + MID + F.day(row.expiry) }, gv);
+    s("line", { x1: PL, x2: W - PR, y1: gz, y2: gz, class: "ftg-axis" }, gv);
+    if (!row.gamma || !vis.length || mx === 0) s("text", { x: W / 2, y: gh / 2 + 4, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: row.gamma ? "No gamma here" : DASH + " no gamma" }, gv);
+    else {
+      for (const i of vis) {
+        const K = xp.strikes[i], g = row.gamma[i];
+        if (g === null) { s("rect", { x: X(K) - th / 2, y: gz - 3.5, width: th, height: 7, class: "ftg-gn" }, gv); continue; }
+        const hh = Math.max(1, Math.abs(g) / mx * gs);
+        s("rect", { x: X(K) - th / 2, y: g >= 0 ? gz - hh : gz, width: th, height: hh, class: g >= 0 ? "ftg-gl" : "ftg-gs", fill: g >= 0 ? null : "url(#" + hid + ")" }, gv);
+      }
+      s("text", { x: PL, y: gh - 3, class: "ftg-tx ftg-xt-t", text: "±" + gammaWord(xp, mx) }, gv);
+    }
+    if (S !== null) s("line", { x1: X(S), x2: X(S), y1: 14, y2: gh - 14, class: "ftg-spotline" }, gv);
+    const sh = o.sh || 118, ST = o.titles === false ? 8 : 18, SB = sh - 16;
+    const sv = s("svg", { class: "ftg-msvg", viewBox: "0 0 " + W + " " + sh, width: "100%", height: sh, role: "img", "aria-label": "Volatility smile for the " + F.day(row.expiry) + " expiry" });
+    if (o.titles !== false) s("text", { x: PL, y: 10, class: "ftg-tx ftg-cap", text: "Smile" + MID + F.day(row.expiry) }, sv);
+    const dm = domainOf(row, q, m);
+    if (dm.lo === null) s("text", { x: W / 2, y: sh / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: xp.why.smile || "No smile at this expiry" }, sv);
+    else {
+      const Y = (v) => SB - (v - dm.lo) / (dm.hi - dm.lo) * (SB - ST);
+      if (row.sd !== null && S !== null) s("rect", { x: X(S * Math.exp(-row.sd)), y: ST, width: Math.max(0, X(S * Math.exp(row.sd)) - X(S * Math.exp(-row.sd))), height: SB - ST, class: "ftg-sig" }, sv);
+      const ticks = ivTicks(dm.lo, dm.hi, 3);
+      s("path", { d: ticks.map((v) => "M" + PL + "," + f1(Y(v)) + "H" + (W - PR)).join(""), class: "ftg-grid" }, sv);
+      for (const v of ticks) s("text", { x: PL + 2, y: Y(v) - 2 > 9 ? Y(v) - 2 : Y(v) + 10, class: "ftg-tx ftg-xt-t", text: fmtPct(v) }, sv);
+      const run = dm.pts.filter((p) => p[1] !== null);
+      if (run.length > 1) s("polyline", { points: poly(run.map((p) => [X(p[0]), clamp(Y(p[1]), ST, SB)])), class: "ftg-sm" }, sv);
+      else if (row.atm !== null) s("line", { x1: PL, x2: W - PR, y1: Y(row.atm), y2: Y(row.atm), class: "ftg-nf" }, sv);
+      for (const [K, v] of row.quotes) if (K >= lo && K <= hi && v >= dm.lo && v <= dm.hi) s("circle", { cx: X(K), cy: Y(v), r: 2.3, class: "ftg-qd" }, sv);
+      if (dm.sk) for (const [K, v, cls] of [[dm.sk.Kp, dm.sk.ivp, "ftg-d25p"], [dm.sk.Kc, dm.sk.ivc, "ftg-d25c"]]) if (K >= lo && K <= hi && v >= dm.lo && v <= dm.hi) s("circle", { cx: X(K), cy: Y(v), r: 4, class: cls }, sv);
+      if (S !== null) s("line", { x1: X(S), x2: X(S), y1: ST, y2: SB, class: "ftg-spotline" }, sv);
+      s("text", { x: PL, y: sh - 3, class: "ftg-tx ftg-xt-t", text: F.px(lo, 0) }, sv);
+      s("text", { x: W - PR, y: sh - 3, "text-anchor": "end", class: "ftg-tx ftg-xt-t", text: F.px(hi, 0) }, sv);
+    }
+    box.append(...(o.titles === false ? [sv, gv] : [gv, sv]));
+    return box;
   }
 
   function legend(m, L) {
@@ -574,8 +895,12 @@
     if (m.levels.some((l) => l.kind === "gamma_flip")) add(sw((e) => s("line", { x1: 0, y1: 4, x2: 18, y2: 4, class: "ftg-lv ftg-lv-gamma_flip" }, e), 18, 8), "Flip");
     if (m.levels.some((l) => l.kind === "call_wall" || l.kind === "put_wall")) add(sw((e) => { s("line", { x1: 0, y1: 2, x2: 18, y2: 2, class: "ftg-lv ftg-lv-call_wall" }, e); s("line", { x1: 0, y1: 6, x2: 18, y2: 6, class: "ftg-lv ftg-lv-put_wall" }, e); }, 18, 8), "Call and put walls");
     if (!m.levels.length) miss("Levels: none near spot on this card.");
-    if (m.bars.length && !L.phone) add(sw((e) => { s("rect", { x: 0, y: 1, width: 8, height: 8, class: "ftg-gl" }, e); s("rect", { x: 10, y: 1, width: 8, height: 8, class: "ftg-gs ftg-gs-sw" }, e); }), "Dealer γ long, short");
-    else if (!m.bars.length) miss("Dealer γ: " + m.why.gamma);
+    if (L.rail) {
+      add(sw((e) => s("rect", { x: 0.5, y: 0.5, width: 17, height: 9, rx: 2, class: "ftg-sig" }, e)), "±1 SD to the expiry");
+      if (m.xp.rows.some((r) => r.state !== "none")) add(sw((e) => { s("circle", { cx: 5, cy: 5, r: 3.6, class: "ftg-d25p" }, e); s("circle", { cx: 14, cy: 5, r: 3.6, class: "ftg-d25c" }, e); }), "25Δ put, call");
+    }
+    if ((m.bars.length && !L.phone && !L.rail) || (L.rail && m.xp.basis)) add(sw((e) => { s("rect", { x: 0, y: 1, width: 8, height: 8, class: "ftg-gl" }, e); s("rect", { x: 10, y: 1, width: 8, height: 8, class: "ftg-gs ftg-gs-sw" }, e); }), "Dealer γ long, short");
+    else if (L.rail ? !m.xp.basis : !m.bars.length) miss("Dealer γ: " + (L.rail ? m.xp.why.gamma : m.why.gamma));
     if (!m.score.has) miss("Score: " + m.why.score);
     if (m.why.event && m.q) miss(m.why.event);
     return items;
@@ -645,7 +970,7 @@
       const sx = (i) => 4 + i * 172 / (vals.length - 1), sy = (v) => 52 - (v - lo) / span * 40;
       if (c.mean !== null) {
         s("line", { x1: 4, x2: 180, y1: f1(sy(c.mean)), y2: f1(sy(c.mean)), class: "ftg-mean" }, svg);
-        s("text", { x: 4, y: sy(c.mean) + 12, class: "ftg-ct", text: "60-day mean " + F.pct(c.mean, 0) }, svg);
+        s("text", { x: 4, y: 65, class: "ftg-ct", text: "60-day mean " + F.pct(c.mean, 0) }, svg);
       }
       s("polyline", { points: poly(vals.map((v, i) => [sx(i), sy(v)])), class: "ftg-pos" }, svg);
       s("circle", { cx: f1(sx(vals.length - 1)), cy: f1(sy(vals[vals.length - 1])), r: 3.4, class: "ftg-pos-d" }, svg);
@@ -700,7 +1025,7 @@
   }
 
   function mount(card, hosts, opts) {
-    const st = { card, opts: Object.assign({}, opts), x: {}, range: RANGES[opts && opts.range] ? opts.range : "1M", claims: [], ev: evidence([]), m: null, chart: null, raf: 0, cur: null, dead: false };
+    const st = { card, opts: Object.assign({}, opts), x: {}, range: RANGES[opts && opts.range] ? opts.range : "1M", claims: [], ev: evidence([]), m: null, chart: null, raf: 0, cur: null, dead: false, expiry: opts && typeof opts.expiry === "string" ? opts.expiry : null, pick: null };
     if (opts && (opts.cardX || opts.tape)) st.x = { cardX: opts.cardX, tape: opts.tape };
     const chartHost = hosts && hosts.chart, cardsHost = hosts && hosts.cards;
     const root = h("div", { class: "ftg-chart" });
@@ -708,7 +1033,8 @@
     const legendEl = h("div", { class: "ftg-legend" });
     const readEl = h("div", { class: "ftg-readout", "aria-live": "polite" });
     const descEl = h("p", { class: "visually-hidden", id: "ftg-d" + ++uid });
-    root.append(svgBox, h("div", { class: "ftg-lrow" }, legendEl, readEl), descEl);
+    const railBox = h("div", { class: "ftg-railbox" });
+    root.append(svgBox, railBox, h("div", { class: "ftg-lrow" }, legendEl, readEl), descEl);
     if (chartHost) { chartHost.classList.add("ftg-host"); chartHost.replaceChildren(root); }
     const grid = h("div", { class: "ftg-cards-in" });
     if (cardsHost) { cardsHost.classList.add("ftg-host"); cardsHost.replaceChildren(grid); }
@@ -720,7 +1046,7 @@
         for (const n of host.querySelectorAll("[data-layer],[data-card]")) {
           if (!reading) { n.removeAttribute("data-claims"); continue; }
           const k = n.getAttribute("data-layer") || n.getAttribute("data-card");
-          const ids = k === "mark" ? [n.getAttribute("data-mark")] : k === "spot" ? null : st.ev.by[k] || [];
+          const ids = k === "mark" ? [n.getAttribute("data-mark")] : k === "spot" || k === "cursor" || k === "xticks" ? null : st.ev.by[k] || [];
           if (ids === null) n.removeAttribute("data-claims"); else n.setAttribute("data-claims", ids.join(" "));
         }
         for (const n of host.querySelectorAll(".ftg-badges")) {
@@ -761,18 +1087,48 @@
     };
     const nearest = (px) => { const xs = st.chart.L.xs; let b = 0; for (let i = 1; i < xs.length; i++) if (Math.abs(xs[i] - px) < Math.abs(xs[b] - px)) b = i; return b; };
 
+    const emitExpiry = (iso, source) => document.dispatchEvent(new CustomEvent("ft:expiry", { bubbles: true, detail: { expiry: iso, source } }));
+    const paintStack = () => {
+      const c = st.chart;
+      railBox.replaceChildren();
+      if (!c || !c.L.stack || !st.m.xp.rows.length) return;
+      const chips = h("div", { class: "ftg-xchips", role: "group", "aria-label": "Expiry" }, st.m.xp.rows.map((r) => h("button", { class: "ftg-xchip", type: "button", "aria-pressed": String(r.expiry === st.expiry), "data-expiry": r.expiry, onclick: () => st.pick(r.expiry, false) }, F.day(r.expiry), h("i", null, r.dte + "d"))));
+      railBox.append(chips, miniRail(st.m, c.selRow(), Math.max(200, st.W)));
+    };
+    const repaintRail = (refocus) => {
+      const c = st.chart;
+      if (!c || !st.m) return;
+      st.m.sel = st.expiry;
+      c.repaint();
+      descEl.textContent = describe(st.m);
+      paintStack();
+      if (refocus) { const on = c.svg.querySelector('.ftg-xt[aria-checked="true"]'); if (on) on.focus({ preventScroll: true }); }
+    };
+    const setExpiry = (iso, source, refocus) => {
+      if (!st.m || !st.m.xp.rows.some((r) => r.expiry === iso) || (iso === st.expiry && !refocus)) return;
+      const changed = iso !== st.expiry;
+      st.expiry = iso;
+      repaintRail(refocus);
+      if (changed && source) emitExpiry(iso, source);
+    };
+    st.pick = (iso, refocus) => setExpiry(iso, "chart", refocus);
+    const onExpiry = (e) => { const d = e.detail || {}; if (d.source !== "chart" && typeof d.expiry === "string" && d.expiry !== st.expiry) setExpiry(d.expiry, null, false); };
+    document.addEventListener("ft:expiry", onExpiry);
+
     const paintChart = () => {
-      if (st.dead || !chartHost) return;
+      if (st.dead || !chartHost || chartHost.hidden) return;
       const W = Math.max(200, Math.floor(chartHost.clientWidth || root.clientWidth || 600));
       const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
       const fit = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches && room >= 250;
       const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
-      st.m = model(st.card, st.range, st.x);
+      st.m = model(st.card, st.range, Object.assign({}, st.x, { expiry: st.expiry }));
+      st.expiry = st.m.sel;
       st.W = W;
       const had = st.cur;
       const c = drawChart(st.m, W, Hh, st);
       st.chart = c;
       svgBox.replaceChildren(c.svg);
+      paintStack();
       legendEl.replaceChildren(...legend(st.m, c.L));
       descEl.textContent = describe(st.m);
       c.svg.setAttribute("aria-describedby", descEl.id);
@@ -785,8 +1141,22 @@
       });
       c.svg.addEventListener("focus", () => { if (st.cur === null) showCross(st.m.hist.length - 1); });
       c.svg.addEventListener("blur", () => showCross(null));
-      c.svg.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") showCross(nearest(e.clientX - c.svg.getBoundingClientRect().left)); });
-      c.svg.addEventListener("pointerleave", () => showCross(null));
+      c.svg.addEventListener("pointermove", (e) => {
+        if (e.pointerType !== "mouse") return;
+        const r = c.svg.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+        if (c.L.rail && px >= c.L.XR && py >= c.L.top && py <= c.L.plotB) {
+          const K = st.m.y1 - (py - c.L.top) * (st.m.y1 - st.m.y0) / (c.L.plotB - c.L.top);
+          c.cross.setAttribute("hidden", "");
+          c.rl.removeAttribute("hidden");
+          c.rl.setAttribute("y1", py);
+          c.rl.setAttribute("y2", py);
+          readEl.textContent = railReading(st.m, c.selRow(), K);
+          return;
+        }
+        if (c.rl) c.rl.setAttribute("hidden", "");
+        showCross(nearest(px));
+      });
+      c.svg.addEventListener("pointerleave", () => { if (c.rl) c.rl.setAttribute("hidden", ""); showCross(null); });
       apply();
       if (had !== null) showCross(had);
     };
@@ -812,9 +1182,12 @@
     }
     return {
       setRange(r) { if (RANGES[r] && r !== st.range) { st.range = r; paintChart(); } },
+      setExpiry(iso) { setExpiry(iso, "api", false); },
+      expiry() { return st.expiry; },
       update(next) {
         if (next && typeof next === "object") {
           for (const k of ["reading", "summary", "claims"]) if (k in next) st.opts[k] = next[k];
+          if (typeof next.expiry === "string") st.expiry = next.expiry;
           if ("cardX" in next) st.x = Object.assign({}, st.x, { cardX: next.cardX });
           if ("tape" in next) st.x = Object.assign({}, st.x, { tape: next.tape });
           if (next.card) st.card = next.card;
@@ -825,6 +1198,7 @@
       destroy() {
         st.dead = true;
         document.removeEventListener("ft:focus", focus);
+        document.removeEventListener("ft:expiry", onExpiry);
         if (ro) ro.disconnect();
         cancelAnimationFrame(st.raf);
         root.remove();
@@ -833,6 +1207,6 @@
     };
   }
 
-  const glance = Object.freeze({ mount, model: Object.assign(model, { layout, cluster, cards, readout, describe, claims: claimsOf, evidence, evidenceOf: (layer) => EVIDENCE[layer] || null, stepsFor }) });
+  const glance = Object.freeze({ mount, model: Object.assign(model, { layout, cluster, cards, readout, describe, claims: claimsOf, evidence, evidenceOf: (layer) => EVIDENCE[layer] || null, stepsFor, expiries: expiryModel, defaultExpiry, skew: skewOf, smileAt, railReading, miniRail, quant }) });
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { tickerGlance: glance }));
 })();

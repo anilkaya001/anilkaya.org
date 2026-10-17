@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "286";
+export const ASSET_VERSION = "289";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -938,8 +938,9 @@ export function tickerPage({ username = "", scenes = false } = {}) {
   <section class="ft-strip" id="ftStrip" aria-label="Neuron verdict" hidden></section>
   <div class="ft-gmain" id="ftGMain">
     <section class="ft-gchart" aria-labelledby="ftGChartT">
-      <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span class="ft-sp"></span><span id="ftGRange"></span></div>
-      <div class="ft-glance-chart" id="ftGlanceChart"></div>
+      <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span id="ftGTabs"></span><span class="ft-sp"></span><span id="ftGRange"></span><span id="ftGReset"></span></div>
+      <div class="ft-glance-chart" id="ftGlanceChart" role="tabpanel"></div>
+      <div class="ft-gsurf" id="ftGSurf" role="tabpanel" hidden></div>
     </section>
     <section class="ft-rail" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
   </div>
@@ -980,7 +981,7 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     <p data-k="legacy-vo">This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.</p>
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>${scenes ? `
-  <i hidden data-defer="scenes" data-src="${v("/assets/js/flows-ticker-scenes.js")}" id="ftScenes"></i>` : ""}
+  <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"></i>` : ""}
 `,
   });
 }

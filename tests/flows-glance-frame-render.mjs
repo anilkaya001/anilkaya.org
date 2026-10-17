@@ -216,7 +216,7 @@ async function scenario(page) {
   await page.click('#ftGRange [role="tab"]:nth-child(3)');
   await page.waitForFunction(() => window.__glance.ranges.length > 0, null, { timeout: 4000 }).catch(() => {});
   const g = await page.evaluate(() => window.__glance);
-  r.rangeWired = g.ranges.join() === "3M" && g.mounts.length >= 1 && g.mounts[0].range === "1M" && g.mounts[0].hasReading && g.mounts[0].keys === "cardX,claims,range,reading,summary,tape" && g.mounts[0].hosts === "cards,chart" && g.mounts[0].ticker === T;
+  r.rangeWired = g.ranges.join() === "3M" && g.mounts.length >= 1 && g.mounts[0].range === "1M" && g.mounts[0].hasReading && g.mounts[0].keys === "cardX,claims,expiry,range,reading,summary,tape" && g.mounts[0].hosts === "cards,chart" && g.mounts[0].ticker === T;
   await page.click("#ftDock .ft-dock-a");
   r.allToggles = await page.evaluate(() => document.getElementById("ftGrid").hidden && document.getElementById("ftDive").hidden && /Every module, as one page/.test(document.querySelector("#ftDock .ft-dock-a").textContent));
   r.moduleGridKept = await page.evaluate(() => { const ids = [...document.querySelectorAll("#ftGrid > .ui-mod")].map((m) => m.id); return ids.length >= 6 && ids.includes("m-signal") && ids.includes("m-gamma") && document.getElementById("ftDive").textContent === "Dive" && !!document.getElementById("fxIndex"); });
@@ -271,7 +271,7 @@ try {
     await mount(page, GENERATING, { queue: [GENERATING, READ] });
     await page.waitForFunction(() => document.getElementById("ftReadRail").dataset.status === "ready", null, { timeout: 20000 });
     const up = await page.evaluate(() => ({ n: window.__glance.mounts.length, u: window.__glance.updates || [] }));
-    ok(up.n === 1 && up.u.length >= 1 && up.u[up.u.length - 1].claims === "1,2,3,4" && up.u[up.u.length - 1].keys === "card,cardX,claims,reading,summary,tape", "a reading that lands late updates the mounted chart with the rail's own claim ids, without a second mount");
+    ok(up.n === 1 && up.u.length >= 1 && up.u[up.u.length - 1].claims === "1,2,3,4" && up.u[up.u.length - 1].keys === "card,cardX,claims,expiry,reading,summary,tape", "a reading that lands late updates the mounted chart with the rail's own claim ids, without a second mount");
     const noGl = await newPage(1440, 820);
     await mount(noGl, READ, { noGlance: true });
     ok((await noGl.evaluate(() => document.getElementById("ftGlanceChart").childElementCount)) === 0, "without the chart module the call is guarded and the frame still stands");

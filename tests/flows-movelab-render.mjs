@@ -24,9 +24,9 @@ const SESSIONS = 252;
 const PAGE = FLOWS_PAGES.tickerPage({ username: "u" });
 ok(/<i hidden data-defer="movelab" data-src="\/assets\/js\/flows-ticker-movelab\.js\?v=\d+" id="ftMoveLab"><\/i>/.test(PAGE), "the ticker page declares the move lab as one hidden, versioned deferred file");
 ok(!/<script[^>]+flows-ticker-movelab/.test(PAGE), "and does not ship it as a script");
-ok(!/data-defer="scenes"/.test(PAGE) && /data-defer="scenes"/.test(FLOWS_PAGES.tickerPage({ username: "u", scenes: true })), "the scenes switch is independent of the move lab");
+ok(!/data-defer="surface"/.test(PAGE) && /data-defer="surface"/.test(FLOWS_PAGES.tickerPage({ username: "u", scenes: true })), "the surface switch is independent of the move lab");
 ok(/\.defer\("movelab", \{ when: "visible"/.test(TICKER_SRC) && !/data-defer="movelab"/.test(TICKER_SRC), "the controller defers the group when its module nears the viewport and declares nothing itself");
-ok(!/sigma|σ|standard deviation/i.test(SRC) && !/sigma|σ|standard deviation/i.test(TICKER_SRC.slice(TICKER_SRC.indexOf("function buildMoveLab"), TICKER_SRC.indexOf("function buildScenes"))), "no sigma wording in the module or in its stub");
+ok(!/sigma|σ|standard deviation/i.test(SRC) && !/sigma|σ|standard deviation/i.test(TICKER_SRC.slice(TICKER_SRC.indexOf("function buildMoveLab"), TICKER_SRC.indexOf("const VERDICT_HOME"))), "no sigma wording in the module or in its stub");
 
 function load(src) {
   const win = { FlowsUI: { h: () => ({}), F: { day: (d) => d }, DASH: "—", infoButton: () => ({}), tag: () => ({}) } };
