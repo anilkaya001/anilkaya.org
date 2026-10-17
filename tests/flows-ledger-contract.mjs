@@ -102,8 +102,8 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
     old.trips.length = 0;
     const done = await applySchema(old.D1, grown);
     deep(done, { flows_ledger: ["t1_over_ms"] }, "THE FIRST USE ADDS THE COLUMN: the schema bootstrap reports exactly the column the registry names");
-    deep(old.trips.map((t) => [t.kind, t.sqls.length]).slice(0, 1), [["batch", FLOWS_REGISTRY.length + 2]],
-      "in one batch of the twelve CREATEs and the two column probes, flows_clock's and the ledger's");
+    deep(old.trips.map((t) => [t.kind, t.sqls.length]).slice(0, 1), [["batch", FLOWS_REGISTRY.length + 3]],
+      "in one batch of the registry's CREATEs and the three column probes, flows_payload's, flows_clock's and the ledger's");
     eq(old.trips.filter((t) => t.sqls.some((q) => /ALTER TABLE/.test(q))).length, 1, "with one ALTER and no other trip");
     await W.batchWithLedger(old.D1, [L.ledgerTickStatement(old.D1, { day: DAY, at: at(9, 36), ...win })], extra(old, at(9, 36)));
     deep([warnings.length, old.row(DAY).ticks, old.row(DAY).t1_over_ms], [0, 2, 3], "and the next tick writes the new column with no refusal warning");

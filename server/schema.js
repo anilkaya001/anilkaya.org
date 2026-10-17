@@ -5,7 +5,8 @@ import { DOSSIER_SCHEMA_SQL } from "../shared/flows-dossier-worker.js";
 export { LEDGER_ADDED_COLUMNS };
 
 const PAYLOAD_SQL =
-  "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0))";
+  "CREATE TABLE IF NOT EXISTS flows_payload (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at INTEGER NOT NULL CHECK (updated_at > 0), " +
+  "chash TEXT, session TEXT, quality INTEGER NOT NULL DEFAULT 0, epoch INTEGER NOT NULL DEFAULT 0, asof INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0)";
 const LOGIN_FAILURES_SQL =
   "CREATE TABLE IF NOT EXISTS flows_login_failures (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0 CHECK (failures BETWEEN 0 AND 1000000), first_at INTEGER NOT NULL CHECK (first_at > 0))";
 const AI_USAGE_SQL =
@@ -22,13 +23,45 @@ const AI_OUTCOME_SQL =
 const AI_REJECT_SQL =
   "CREATE TABLE IF NOT EXISTS flows_ai_reject (surface TEXT NOT NULL, slot INTEGER NOT NULL CHECK (slot BETWEEN 0 AND 49), at INTEGER NOT NULL CHECK (at > 0), model TEXT NOT NULL, reason TEXT NOT NULL, culprit TEXT NOT NULL CHECK (length(culprit) <= 40), PRIMARY KEY (surface, slot)) WITHOUT ROWID";
 
+const QUARANTINE_SQL =
+  "CREATE TABLE IF NOT EXISTS flows_quarantine (id INTEGER PRIMARY KEY, payload_key TEXT NOT NULL, chash TEXT, reason TEXT NOT NULL, " +
+  "path TEXT NOT NULL DEFAULT '', bytes INTEGER NOT NULL DEFAULT 0 CHECK (bytes >= 0), producer TEXT NOT NULL DEFAULT '', " +
+  "mode TEXT NOT NULL CHECK (mode IN ('warn', 'held')), at INTEGER NOT NULL CHECK (at > 0), " +
+  "braked INTEGER NOT NULL DEFAULT 0 CHECK (braked IN (0, 1)), body TEXT)";
+const MANIFEST_INSERT_SQL =
+  "CREATE TRIGGER IF NOT EXISTS flows_payload_manifest_i AFTER INSERT ON flows_payload " +
+  "WHEN NEW.chash IS NOT NULL AND NEW.id <> 'manifest' AND NEW.id NOT GLOB '*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' " +
+  "BEGIN INSERT INTO flows_payload (id, payload, updated_at) VALUES ('manifest', json_object(NEW.id, " +
+  "json_array(substr(NEW.chash, 1, 8), NEW.session, NEW.quality, NEW.epoch)), NEW.updated_at) " +
+  "ON CONFLICT(id) DO UPDATE SET payload = json_set(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END, '$.\"' || NEW.id || '\"', " +
+  "json_array(substr(NEW.chash, 1, 8), NEW.session, NEW.quality, NEW.epoch)), updated_at = NEW.updated_at; END";
+const MANIFEST_UPDATE_SQL =
+  "CREATE TRIGGER IF NOT EXISTS flows_payload_manifest_u AFTER UPDATE ON flows_payload " +
+  "WHEN (NEW.chash IS NOT NULL OR OLD.chash IS NOT NULL) AND NEW.id <> 'manifest' AND NEW.id NOT GLOB '*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' " +
+  "BEGIN INSERT INTO flows_payload (id, payload, updated_at) VALUES ('manifest', json_object(NEW.id, " +
+  "CASE WHEN NEW.chash IS NULL THEN json('null') ELSE json_array(substr(NEW.chash, 1, 8), NEW.session, NEW.quality, NEW.epoch) END), NEW.updated_at) " +
+  "ON CONFLICT(id) DO UPDATE SET payload = json_set(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END, '$.\"' || NEW.id || '\"', " +
+  "CASE WHEN NEW.chash IS NULL THEN json('null') ELSE json_array(substr(NEW.chash, 1, 8), NEW.session, NEW.quality, NEW.epoch) END), " +
+  "updated_at = NEW.updated_at; END";
+const MANIFEST_DELETE_SQL =
+  "CREATE TRIGGER IF NOT EXISTS flows_payload_manifest_d AFTER DELETE ON flows_payload " +
+  "WHEN OLD.id <> 'manifest' AND OLD.id NOT GLOB '*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' " +
+  "BEGIN UPDATE flows_payload SET payload = json_remove(CASE WHEN json_valid(payload) THEN payload ELSE '{}' END, '$.\"' || OLD.id || '\"') " +
+  "WHERE id = 'manifest'; END";
+
+export const PAYLOAD_ADDED_COLUMNS = Object.freeze([
+  Object.freeze(["chash", "TEXT"]), Object.freeze(["session", "TEXT"]),
+  Object.freeze(["quality", "INTEGER NOT NULL DEFAULT 0"]), Object.freeze(["epoch", "INTEGER NOT NULL DEFAULT 0"]),
+  Object.freeze(["asof", "INTEGER NOT NULL DEFAULT 0"]), Object.freeze(["rev", "INTEGER NOT NULL DEFAULT 0"]),
+]);
+
 const NONE = Object.freeze([]);
 const COLUMN_RE = /^[a-z][a-z0-9_]*$/;
 const TYPE_RE = /^(?:INTEGER|TEXT|REAL)(?: NOT NULL DEFAULT (?:-?\d+(?:\.\d+)?|'[^'\\]*'))?$/;
 const DDL_RE = /^CREATE (?:TABLE|TRIGGER|INDEX) IF NOT EXISTS (\w+)/;
 
 const META = Object.freeze({
-  flows_payload: { table: "flows_payload", migration: "0005_flows.sql", owner: "ingest" },
+  flows_payload: { table: "flows_payload", migration: "0005_flows.sql", owner: "ingest", added: PAYLOAD_ADDED_COLUMNS },
   flows_login_failures: { table: "flows_login_failures", migration: "0005_flows.sql", owner: "auth" },
   flows_ai_usage: { table: "flows_ai_usage", migration: "0006_flows_ai_usage.sql", owner: "ai" },
   flows_ai_usage_model: { table: "flows_ai_usage_model", migration: "0009_flows_ai_usage_model.sql", owner: "ai" },
@@ -44,6 +77,10 @@ const META = Object.freeze({
   flows_dossier_cache: { table: "flows_dossier_cache", migration: "0016_flows_dossier_cache.sql", owner: "dossier" },
   flows_ai_outcome: { table: "flows_ai_outcome", migration: "0017_flows_ai_outcome.sql", owner: "ai" },
   flows_ai_reject: { table: "flows_ai_reject", migration: "0017_flows_ai_outcome.sql", owner: "ai" },
+  flows_quarantine: { table: "flows_quarantine", migration: "0023_flows_quarantine.sql", owner: "ingest" },
+  flows_payload_manifest_i: { table: "flows_payload", migration: "0022_flows_payload_door.sql", owner: "ingest" },
+  flows_payload_manifest_u: { table: "flows_payload", migration: "0022_flows_payload_door.sql", owner: "ingest" },
+  flows_payload_manifest_d: { table: "flows_payload", migration: "0022_flows_payload_door.sql", owner: "ingest" },
 });
 
 export function checkAdded(table, added) {
@@ -86,6 +123,7 @@ export const FLOWS_REGISTRY = registryOf([
   ...LIVE_SCHEMA_SQL,
   DOSSIER_SCHEMA_SQL,
   AI_OUTCOME_SQL, AI_REJECT_SQL,
+  QUARANTINE_SQL, MANIFEST_INSERT_SQL, MANIFEST_UPDATE_SQL, MANIFEST_DELETE_SQL,
 ]);
 
 export function withAddedColumns(registry, name, added, ddl = null) {
