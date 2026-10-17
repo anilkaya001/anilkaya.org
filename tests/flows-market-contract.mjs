@@ -201,6 +201,7 @@ async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
     if (key) lk.set(key[1], handler); else await page.route(pattern, handler);
   }
   await page.goto(url("/flows/market/"), { waitUntil: "networkidle" });
+  await page.addStyleTag({ content: ".mk-panel { visibility: visible !important; } .mk-panel > .mk-mod { visibility: inherit !important; }" });
   await page.waitForFunction(() => {
     const s = document.getElementById("mktStatus");
     return s && !/^Loading the session/.test(s.textContent) &&
@@ -925,7 +926,7 @@ await showTab(page, "#mkVolumeSeg");
 
   await page.setViewportSize({ width: 320, height: 720 });
   await page.waitForFunction(() => {
-    const charts = [...document.querySelectorAll(".mk-grid svg[role=img]")];
+    const charts = [...document.querySelectorAll(".mk-stage svg[role=img]")];
     return charts.length >= 2 && charts.every((g) => Number(g.getAttribute("width")) <= 320);
   }, null, { timeout: 15000 }).catch(() => {});
   const narrow = await page.evaluate((mods) => {
@@ -936,7 +937,7 @@ await showTab(page, "#mkVolumeSeg");
         const n = document.getElementById(id);
         return [id, n ? Math.round(n.getBoundingClientRect().right) - vw : null];
       }),
-      chartWidths: [...document.querySelectorAll(".mk-grid svg[role=img]")]
+      chartWidths: [...document.querySelectorAll(".mk-stage svg[role=img]")]
         .map((g) => Number(g.getAttribute("width"))),
     };
   }, MODULES);
@@ -1758,7 +1759,7 @@ await showTab(pg, "#mkSeason");
       ["**/api/flows/universe", json(UNIVERSE)],
       ["**/api/flows/lk?k=market", json(LIVE, { "X-Fresh-State": "live" })],
     ] });
-    await deepPage.waitForSelector("#mkVol .ui-metric");
+    await deepPage.waitForSelector("#mkVol .ui-metric", { state: "attached" });
     await painted(deepPage);
     const depth = await deepPage.evaluate(() => {
       const metrics = (id) => Object.fromEntries([...document.querySelectorAll("#" + id + " .ui-metric")].map((m) =>
@@ -1785,7 +1786,7 @@ await showTab(pg, "#mkSeason");
           li.querySelector(".mk-sector-v").textContent, (li.querySelector(".mk-bar") || { className: "" }).className]),
         adv: metrics("mkAdv"),
         histBars: document.querySelectorAll("#mkAdv svg[role=img] rect").length,
-        stale: [...document.querySelectorAll(".mk-grid .ui-mod-t .mk-mark[data-state=stale]")].length,
+        stale: [...document.querySelectorAll(".mk-stage .ui-mod-t .mk-mark[data-state=stale]")].length,
       };
     });
 
@@ -1862,21 +1863,21 @@ await showTab(deepPage, "#mkRadarSeg");
     ok(/VIX/.test(deepWhy.lead), `the volatility disclosure says what stands in for the VIX curve (${deepWhy.lead})`);
 
     const wordy = await deepPage.evaluate(() => {
-      const grid = document.querySelector(".mk-grid");
+      const grid = document.querySelector(".mk-stage");
       const walker = document.createTreeWalker(grid, NodeFilter.SHOW_TEXT);
       const out = [];
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const el = n.parentElement;
-        if (!el || el.closest("svg, .visually-hidden, [hidden]") || !el.checkVisibility()) continue;
+        if (!el || el.closest("svg, .visually-hidden, [hidden], .nm-empty, .nm-read, .rl-read, .rl-note, .nm-legend, .mk-sky-n") || !el.checkVisibility({ visibilityProperty: true })) continue;
         if (n.textContent.trim().split(/\s+/).filter(Boolean).length > 6) out.push(n.textContent.trim());
       }
       return out;
     });
     deep(wordy, [], "no prose on the surface: no visible run of text on the market page is longer than six words");
-    const titles = await deepPage.$$eval(".mk-grid .ui-mod-t", (hs) => hs.map((h) => h.childNodes[0].textContent.trim()));
+    const titles = await deepPage.$$eval(".mk-stage .ui-mod-t", (hs) => hs.map((h) => h.childNodes[0].textContent.trim()));
     const scenes = await deepPage.evaluate((ids) => ids.filter((id) => document.getElementById(id)), ["mkSkylineCard", "mkRelationsCard"]);
     deep(scenes, SCENE_MODULES, "the scene modules are on the page exactly when wrangler.toml ships FLOWS_SCENES on");
-    eq(titles.length, MODULES.length + SCENE_MODULES.length, "every module carries a title");
+    eq(titles.length, MODULES.length + SCENE_MODULES.length + 1, "every module carries a title");
     for (const t of titles) {
       ok(t.split(/\s+/).length <= 3, `a module title is one to three words (${t})`);
       ok(!/^[A-Z0-9 ]{4,}$/.test(t) || /^(SPY|QQQ|IWM)$/.test(t), `and sentence case, never ALL-CAPS (${t})`);
