@@ -161,6 +161,12 @@ async function scenario(page) {
 
   const dockBtns = await page.$$eval("#ftDock .ft-dock-b", (b) => b.map((x) => x.dataset.mod));
   r.dockList = dockBtns.includes("m-movelab") && dockBtns.length >= 3 && dockBtns.includes("m-tape");
+  r.gridHiddenByDefault = await page.evaluate(() => document.getElementById("ftGrid").hidden && document.getElementById("ftDive").hidden && document.getElementById("ftVerdict").getClientRects().length === 0 && document.querySelectorAll("#ftStrip .ft-strip-line").length === 1);
+  r.ideasTab = dockBtns[0] === "m-ideas" && await page.evaluate(() => !!document.querySelector("#m-ideas #ftVerdict .ft-ideas"));
+  await page.click("#ftDock .ft-dock-a");
+  r.allShows = await page.evaluate(() => !document.getElementById("ftGrid").hidden && !document.getElementById("ftDive").hidden && /Back to one screen/.test(document.querySelector("#ftDock .ft-dock-a").textContent));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.waitForTimeout(700);
   const before = await page.evaluate(() => { const g = document.getElementById("ftGrid"); const t = document.getElementById("m-tape"); const x = t.getBoundingClientRect(); return { gh: g.getBoundingClientRect().height, th: x.height, tt: x.top - g.getBoundingClientRect().top, labs: window.__labLoaded || 0, order: [...g.children].map((c) => c.id || c.className).join("|"), tops: [...g.children].map((c) => Math.round(c.getBoundingClientRect().top - g.getBoundingClientRect().top)).join() }; });
   r.labNotYet = counts.lab === 0;
   await page.click('#ftDock .ft-dock-b[data-mod="m-tape"]');
@@ -211,6 +217,8 @@ async function scenario(page) {
   await page.waitForFunction(() => window.__glance.ranges.length > 0, null, { timeout: 4000 }).catch(() => {});
   const g = await page.evaluate(() => window.__glance);
   r.rangeWired = g.ranges.join() === "3M" && g.mounts.length >= 1 && g.mounts[0].range === "1M" && g.mounts[0].hasReading && g.mounts[0].keys === "cardX,claims,range,reading,summary,tape" && g.mounts[0].hosts === "cards,chart" && g.mounts[0].ticker === T;
+  await page.click("#ftDock .ft-dock-a");
+  r.allToggles = await page.evaluate(() => document.getElementById("ftGrid").hidden && document.getElementById("ftDive").hidden && /Every module, as one page/.test(document.querySelector("#ftDock .ft-dock-a").textContent));
   r.moduleGridKept = await page.evaluate(() => { const ids = [...document.querySelectorAll("#ftGrid > .ui-mod")].map((m) => m.id); return ids.length >= 6 && ids.includes("m-signal") && ids.includes("m-gamma") && document.getElementById("ftDive").textContent === "Dive" && !!document.getElementById("fxIndex"); });
   return r;
 }
@@ -282,13 +290,13 @@ try {
       const li = [...ol.children].map((x) => x.getBoundingClientRect().width);
       const dock = [...document.querySelectorAll("#ftDock .ft-dock-b, #ftDock .ft-dock-a")].map((b) => b.getBoundingClientRect().height);
       const claim = [...document.querySelectorAll(".ft-claim")].map((b) => b.getBoundingClientRect().height);
-      return { sw: document.documentElement.scrollWidth, iw: innerWidth, region: ol.getAttribute("role"), label: ol.getAttribute("aria-label"), snap: getComputedStyle(ol).scrollSnapType, scrolls: ol.scrollWidth > ol.clientWidth, li, dock, claim, cols: getComputedStyle(document.getElementById("ftGlanceCards")).gridTemplateColumns.split(" ").length, tab: ol.tabIndex, order: ["ftStrip", "ftGMain", "ftGlanceCards", "ftDock"].map((id) => document.getElementById(id).getBoundingClientRect().top) };
+      return { sw: document.documentElement.scrollWidth, iw: innerWidth, region: ol.getAttribute("role"), label: ol.getAttribute("aria-label"), snap: getComputedStyle(ol).scrollSnapType, scrolls: ol.scrollWidth > ol.clientWidth, li, dock, claim, cols: getComputedStyle(document.getElementById("ftGlanceCards")).display, tab: ol.tabIndex, order: ["ftStrip", "ftGMain", "ftGlanceCards", "ftDock"].map((id) => document.getElementById(id).getBoundingClientRect().top) };
     });
     ok(m.sw <= m.iw, `${w}: no horizontal page overflow (${m.sw} of ${m.iw})`);
     ok(m.region === "region" && /swipe/.test(m.label) && m.tab === 0 && /x mandatory/.test(m.snap) && m.scrolls, `${w}: claims are a labelled, focusable, scroll-snapped region that scrolls`);
     ok(m.li.length === 4 && m.li.every((x) => Math.abs(x - 300) < 1), `${w}: each claim card is 300 px wide`);
     ok(m.dock.every((x) => x >= 44) && m.claim.every((x) => x >= 44), `${w}: dock and claim targets are at least 44 px`);
-    ok(m.cols === 2, `${w}: the cards sit in two columns`);
+    ok(m.cols === "block", `${w}: the cards host is a plain block, so the glance module is the only grid that lays the cards out`);
     ok(m.order.every((v, i, a) => !i || v > a[i - 1]), `${w}: verdict, chart and reading, cards, dock stack in order`);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `glance-${w}.png`) });
     await page.close();

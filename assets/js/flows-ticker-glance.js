@@ -234,7 +234,7 @@
     const out = { phone, W, H, XL, XR, XT, top, plotB, profW, labelW, y, xb, xf, strip, hasProf };
     if (m.q) out.q = { up: poly(m.q, "up"), lo: poly(m.q, "lo") };
     if (m.p) out.p = { up: poly(m.p, "up"), lo: poly(m.p, "lo") };
-    const gap = 12;
+    const gap = 14;
     const items = m.levels.map((l) => ({ kind: l.kind, text: l.label + " " + F.px(l.px), px: l.px })).concat(m.S === null ? [] : [{ kind: "spot", text: "Spot " + F.px(m.S), px: m.S }]);
     const lab = phone ? [] : items;
     const ys = cluster(lab.map((l) => y(l.px) + 3.5), gap, top + 8, plotB);
@@ -444,16 +444,17 @@
       const ex = xf(m.event.h);
       const ev = layer("event");
       s("line", { x1: ex, x2: ex, y1: top + 16, y2: plotB, class: "ftg-ev" }, ev);
-      const right = ex - XT > 210;
+      const right = ex - XT > 210 || XR - (ex + 16) < 200;
       const ax = right ? ex - 8 : ex + 16, anchor = right ? "end" : "start";
       if (L.phone) s("text", { x: clamp(ex, XL + 16, XR - 16), y: plotB + 14, "text-anchor": "middle", class: "ftg-tx ftg-ev-tx", text: F.day(m.event.d) }, ev);
       else {
         s("text", { x: ax, y: top + 10, "text-anchor": anchor, class: "ftg-tx ftg-ev-tx", text: "Report " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") }, ev);
         const t2 = s("text", { x: ax, y: top + 23, "text-anchor": anchor, class: "ftg-tx ftg-ev-sub" }, ev);
         if (m.event.q !== null) s("tspan", { class: "ftg-q-tx", text: "Q ±" + F.pct(m.event.q, 1) }, t2);
-        if (m.event.q !== null && m.event.p !== null) t2.append(" priced " + UI.MID + " ");
+        const brief = right ? false : XR - ax < 260;
+        if (m.event.q !== null && m.event.p !== null) t2.append(brief ? " " + UI.MID + " " : " priced " + UI.MID + " ");
         if (m.event.p !== null) s("tspan", { class: "ftg-p-tx", text: "P ±" + F.pct(m.event.p, 1) }, t2);
-        if (m.event.p !== null) t2.append(" realised");
+        if (m.event.p !== null && !brief) t2.append(" realised");
       }
     }
 
@@ -533,7 +534,7 @@
       const anchor = {
         flip: () => [XT + (XR - XT) * 0.6, L.levelY.gamma_flip],
         event: () => (m.event ? [xf(m.event.h), top + 6] : null),
-        gamma: () => (L.hasProf ? [Math.min(W - 12, L.profX + L.profW + 8), top + 8] : null),
+        gamma: () => (L.hasProf ? [Math.min(W - 12, L.profX + L.profW + 8), top + 34] : null),
         walls: () => { const k = ["call_wall", "put_wall", "max_pain"].find((q) => L.levelY[q] !== undefined); return k ? [XT + (XR - XT) * 0.8, L.levelY[k] - 12] : null; },
         cone: () => (L.q ? [XR - 16, clamp(L.q.up[L.q.up.length - 1][1] - 12, top + 8, plotB)] : null),
       };
@@ -686,7 +687,7 @@
       h("div", { class: "ftg-ch" }, h("h3", { id: id + "-t" }, c.title), h("span", { class: "ftg-sub" }, c.sub), h("span", { class: "ftg-badges" })),
       h("div", { class: "ftg-fig" }, h("span", { class: "ftg-f", "data-tone": c.fig.tone }, c.fig.text), h("span", { class: "ftg-u" }, c.unit)),
       body ? h("div", { class: "ftg-cb" }, body) : null,
-      c.chips ? h("div", { class: "ftg-chips" }, c.chips.map((k) => h("span", { class: "ftg-chip", "data-tone": k.tone }, k.k + " " + k.text))) : null,
+      c.chips ? h("div", { class: "ftg-chips" }, c.chips.map((k) => h("span", { class: "ftg-chip", "data-tone": k.tone }, h("span", { class: "ftg-ck" }, k.k), " " + k.text))) : null,
       h("p", { class: "ftg-foot" }, footParts),
       h("span", { class: "visually-hidden", id: id + "-d" }, c.title + ", " + c.sub + ". " + c.fig.text + " " + c.unit + ". " + footParts));
     const on = () => { const ids = (el.getAttribute("data-claims") || "").split(" ").filter(Boolean); if (ids.length) emit(ids[0], "card"); };
@@ -763,7 +764,9 @@
     const paintChart = () => {
       if (st.dead || !chartHost) return;
       const W = Math.max(200, Math.floor(chartHost.clientWidth || root.clientWidth || 600));
-      const Hh = W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
+      const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
+      const fit = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches && room >= 250;
+      const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
       st.m = model(st.card, st.range, st.x);
       st.W = W;
       const had = st.cur;

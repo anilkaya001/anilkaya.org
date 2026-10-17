@@ -216,6 +216,9 @@ try {
     page.on("pageerror", (e) => errors.push(String(e)));
     const trace = [];
     await mount(page, FLOWS_PAGES.tickerPage({ username: "u", scenes: true }), card, trace);
+    await page.click("#ftDock .ft-dock-a");
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(300);
     ok(!trace.some((p) => /flows-ticker-scenes/.test(p)), `${w}px: nothing of the scenes loads while the modules are far below the fold`);
     await page.locator("#m-surface").scrollIntoViewIfNeeded();
     await page.waitForSelector("#m-surface canvas", { timeout: 15000 });
@@ -314,6 +317,7 @@ try {
     const errs = [];
     vp.on("pageerror", (e) => errs.push(String(e)));
     await mount(vp, FLOWS_PAGES.tickerPage({ username: "u", scenes: true }), card2, []);
+    await vp.click("#ftDock .ft-dock-a");
     await vp.locator("#m-terrain").scrollIntoViewIfNeeded();
     await vp.waitForFunction(() => { const t = document.getElementById("m-terrain"); return t && (t.querySelector("canvas") || t.querySelector(".ui-silent")); }, null, { timeout: 15000 });
     await fn(vp);
