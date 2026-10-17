@@ -11,6 +11,7 @@ import { fakeD1 } from "./lib/d1-fake.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { flowsAiRows } from "../server/routes/flows-ai.js";
+import { flowsPipelineRows, COVERAGE_ROW_CEILING } from "../server/routes/flows-pipeline.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -798,10 +799,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     return new Response(JSON.stringify({ data: [] }), { headers: { "Content-Type": "application/json" } });
   };
   const getVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const getCoverage = await client(f.D1, { FLOWS_COVERAGE: "on", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const cost = async (path, { init, vendor = false } = {}) => {
+  const cost = async (path, { init, vendor = false, coverage = false } = {}) => {
     const n = f.trips.length;
-    const r = await (vendor ? getVendor : get)(path, init);
+    const r = await (coverage ? getCoverage : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -820,6 +822,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/strategy?t=NVDA", 3, { vendor: true, status: 502 }],
     ["/api/flows/strategy?t=NVDA&expiry=2026-10-16", 3, { vendor: true }],
     ["/api/flows/dossier?t=NVDA", 20, { vendor: true }], ["/api/flows/dossier?t=LITE", 20, { vendor: true }], ["/api/flows/dossier?t=ZZZZ", 20, { vendor: true }],
+    ["/api/flows/coverage", COVERAGE_ROW_CEILING, { coverage: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -849,7 +852,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub)).rows.map((r) => r.path);
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPipelineRows(stub)).rows.map((r) => r.path);
   ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk and flows-ai families: " + routerPaths.length + " rows");
   expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
   const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);

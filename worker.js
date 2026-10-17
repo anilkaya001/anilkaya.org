@@ -40,6 +40,8 @@ import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
+import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
+import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
@@ -68,6 +70,7 @@ function createState() {
     spendRecorderFailed: false,
     aiRecorderFailed: false,
     dispatchCheckAt: 0,
+    vendorMeter: createCallMeter(),
   };
 }
 const state = createState();
@@ -2055,7 +2058,25 @@ const UW_CHAIN_DEADLINE_MS = 8000;
 
 const UW_DOSSIER_DEADLINE_MS = 20000;
 
+const meterOn = (env) => typeof (env && env.FLOWS_METER) === "string" && env.FLOWS_METER.trim().toLowerCase() === "on";
+
 async function uwFetch(env, path, params, opts) {
+  if (!meterOn(env)) return uwFetchUnmetered(env, path, params, opts);
+  const started = Date.now();
+  try {
+    const body = await uwFetchUnmetered(env, path, params, opts);
+    state.vendorMeter.record({ path, ms: Date.now() - started, status: 200 });
+    return body;
+  } catch (error) {
+    if (!(error instanceof HttpError && error.code === "chain_unconfigured")) {
+      const upstream = Number.isInteger(error && error.upstream) ? error.upstream : 0;
+      state.vendorMeter.record({ path, ms: Date.now() - started, status: upstream, kind: error && error.code === "chain_timeout" ? "timeout" : upstream ? undefined : "network" });
+    }
+    throw error;
+  }
+}
+
+async function uwFetchUnmetered(env, path, params, opts) {
   if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
   const url = vendorUrl(vendorBase(env), path, params);
   const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
@@ -2845,6 +2866,9 @@ flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential
     state.dispatchCheckAt = at;
     return true;
   } }),
+flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock,
+  isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
+  vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
@@ -3619,22 +3643,28 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const started = Date.now();
+    const done = (response) => {
+      const out = finalize(response, request, url);
+      if (meterOn(env) && url.pathname.startsWith("/api/")) out.headers.set("Server-Timing", "total;dur=" + Math.max(0, Date.now() - started));
+      return out;
+    };
     try {
       const response = await route(request, env, url, ctx);
       rememberLastGood(request, url, response, ctx);
-      return finalize(response, request, url);
+      return done(response);
     } catch (error) {
       if (error instanceof HttpError) {
         const kept = error.code === "store_unreadable" ? await recallLastGood(request, url) : null;
-        if (kept) return finalize(kept, request, url);
-        return finalize(apiError(error.status, error.code, error.message, error.headers, error.details), request, url);
+        if (kept) return done(kept);
+        return done(apiError(error.status, error.code, error.message, error.headers, error.details));
       }
       logFailure("error", "request failed", { method: request.method, path: url.pathname }, error);
       if (isStoreQuota(error)) {
-        return finalize(apiError(503, "store_quota", "The store's daily quota is spent; it resets at " + RESET_SAID,
-          { "Retry-After": String(secondsToUtcMidnight(Date.now())) }), request, url);
+        return done(apiError(503, "store_quota", "The store's daily quota is spent; it resets at " + RESET_SAID,
+          { "Retry-After": String(secondsToUtcMidnight(Date.now())) }));
       }
-      return finalize(apiError(500, "internal_error", "Internal server error"), request, url);
+      return done(apiError(500, "internal_error", "Internal server error"));
     }
   },
 };
