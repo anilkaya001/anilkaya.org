@@ -1,7 +1,8 @@
 import { makePermitQueue } from "../../shared/flows-permits.js";
+import { createCallMeter, opIdOf } from "../../shared/flows-call-meter.js";
 import { createProgress } from "../flows-legs/live.mjs";
 import { LIVE_MODE } from "./flags.mjs";
-import { LIVE_VENDOR, RATE } from "./vendor-params.mjs";
+import { LIVE_VENDOR, NIGHTLY_VENDOR, RATE } from "./vendor-params.mjs";
 
 const BASE = process.env.FLOWS_UW_BASE_URL || "https://api.unusualwhales.com";
 
@@ -193,13 +194,28 @@ export function describeFloorVerdict(meter) {
     "down one step at a time, re-reading this line each morning.";
 }
 
-export function vendorTimeoutMs() {
-  if (!LIVE_MODE) return 0;
+export const wire = createCallMeter();
+
+export function vendorTimeoutMs(path = "", params = {}) {
   const set = Number(process.env.FLOWS_UW_TIMEOUT_MS);
-  return Number.isFinite(set) && set >= 100 && set <= 60_000 ? set : LIVE_VENDOR.timeoutMs;
+  const override = Number.isFinite(set) && set >= 100 && set <= 60_000 ? set : null;
+  if (LIVE_MODE) return override !== null ? override : LIVE_VENDOR.timeoutMs;
+  if (process.env.FLOWS_UW_NIGHTLY_DEADLINE === "off") return 0;
+  if (override !== null) return override;
+  const op = opIdOf(path);
+  const long = op === "option-contracts" || (op === "ohlc-1d" && params && params.timeframe === "2Y");
+  return long ? NIGHTLY_VENDOR.longTimeoutMs : NIGHTLY_VENDOR.timeoutMs;
 }
 
 const isTimeout = (error) => !!error && (error.name === "TimeoutError" || error.name === "AbortError");
+
+export function readFailure(route, error) {
+  const status = error && Number.isInteger(error.status) ? error.status : null;
+  const kind = status !== null ? "http" : isTimeout(error) ? "timeout" : error && error.name === "SyntaxError" ? "parse" : "network";
+  return { route, status, kind };
+}
+
+const httpFailure = (path, status) => Object.assign(new Error(`${path} -> HTTP ${status}`), { status });
 
 export async function uw(path, params = {}, { envelope = false } = {}) {
   const url = new URL(BASE + path);
@@ -215,7 +231,8 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     url.searchParams.set(k, String(v));
   }
 
-  const limitMs = vendorTimeoutMs();
+  const limitMs = vendorTimeoutMs(path, params);
+  const timeoutRetries = (LIVE_MODE ? LIVE_VENDOR : NIGHTLY_VENDOR).timeoutRetries;
   let timeouts = 0;
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
 
@@ -240,18 +257,22 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
       const timedOut = !!limitMs && isTimeout(error);
+      wire.record({ path, ms: Date.now() - wireStarted, kind: timedOut ? "timeout" : "network" });
       if (timedOut) {
         stats.timedOut++;
         timeouts++;
       }
-      if (attempt === RATE.maxRetries || (timedOut && timeouts > LIVE_VENDOR.timeoutRetries)) throw error;
+      if (attempt === RATE.maxRetries || (timedOut && timeouts > timeoutRetries)) throw error;
       continue;
     }
     stats.networkMs += Date.now() - wireStarted;
     landed();
     wireProgress.settled();
+    const declared = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("content-length")) : NaN;
+    const noteWire = () => wire.record({ path, ms: Date.now() - wireStarted, status: response.status, bytes: declared });
 
     if (response.status === 429) {
+      noteWire();
       stats.rateLimited++;
       const retryAfter = Number(response.headers.get("Retry-After"));
 
@@ -270,14 +291,18 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     }
 
     if (response.status >= 500) {
+      noteWire();
       stats.retries++;
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
-      if (attempt === RATE.maxRetries) throw new Error(`${path} -> HTTP ${response.status}`);
+      if (attempt === RATE.maxRetries) throw httpFailure(path, response.status);
       continue;
     }
 
-    if (!response.ok) throw new Error(`${path} -> HTTP ${response.status}`);
+    if (!response.ok) {
+      noteWire();
+      throw httpFailure(path, response.status);
+    }
 
     ({ delayMs, floorMs: delayFloorMs } = stepRateController(
       { delayMs, floorMs: delayFloorMs }, "ok"));
@@ -286,12 +311,14 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       body = await response.json();
     } catch (error) {
       if (limitMs && isTimeout(error)) stats.timedOut++;
+      wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : "network" });
       throw error;
     } finally {
       wireProgress.settled();
     }
+    noteWire();
     if (envelope) return body;
     return Array.isArray(body) ? body : (body && body.data) || [];
   }
-  throw new Error(`${path} -> exhausted retries`);
+  throw Object.assign(new Error(`${path} -> exhausted retries`), { status: 429 });
 }

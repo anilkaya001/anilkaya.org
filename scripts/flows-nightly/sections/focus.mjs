@@ -13,7 +13,7 @@ import { publishCardX } from "../../flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "../../flows-legs/index-dossier.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { IV_RANK_PARAMS } from "../vendor-params.mjs";
-import { poolWidth, runPooled, uw } from "../vendor.mjs";
+import { poolWidth, readFailure, runPooled, uw } from "../vendor.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE, publish, publishedStore, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
@@ -40,27 +40,33 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
       const expiries = (raw.expiries || [])
         .map((r) => (r && r.expiry ? String(r.expiry).slice(0, 10) : null))
         .filter((d) => d && (!sessionDate || d > sessionDate)).sort().slice(0, SURFACE_EXPIRIES);
+      const lost = [...(raw.readFailures || [])];
+      const soft = (route, fallback) => (error) => {
+        lost.push(readFailure(route, error));
+        return fallback;
+      };
       const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw] = DRY_RUN
         ? [fakeMaxPain(ticker, spot), fakeSurface(ticker, spot, expiries), fakeStockDarkpool(ticker, spot),
           fakeStockOiChange(ticker, spot), fakeTermStructure(ticker, spot, onSession), fakeIvRank(ticker, spot, IV_RANK_PARAMS)]
         : await Promise.all([
-          uw(pathFor("max-pain", { ticker }), onSession).catch(() => []),
+          uw(pathFor("max-pain", { ticker }), onSession).catch(soft("max-pain", [])),
           expiries.length
             ? uw(pathFor("spot-exposures-expiry-strike", { ticker }), {
               "expirations[]": expiries, ...onSession,
               min_strike: Math.floor(spot * 0.9), max_strike: Math.ceil(spot * 1.1), limit: 500,
-            }).catch(() => [])
+            }).catch(soft("spot-exposures-expiry-strike", []))
             : Promise.resolve([]),
-          uw(pathFor("darkpool", { ticker }), { limit: 60, ...onSession }).catch(() => null),
-          uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(() => null),
-          uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(() => null),
-          uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
+          uw(pathFor("darkpool", { ticker }), { limit: 60, ...onSession }).catch(soft("darkpool", null)),
+          uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(soft("oi-change", null)),
+          uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(soft("term-structure", null)),
+          uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(soft("iv-rank", null)),
         ]);
       return {
         maxPain, surface,
         darkpool: sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate).raw,
         oiDeltas: oiRaw, termStructure: termRaw,
         ivRank: sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate, { through: true }).raw,
+        readFailures: lost,
       };
     },
     chain: async (ticker, spot) => {
@@ -81,7 +87,7 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
         scoreHistory: null, weights: null,
         maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
         darkpool: reads.darkpool, oiDeltas: reads.oiDeltas, termStructure: reads.termStructure, ivRank: reads.ivRank,
-        marketCross, variation: variationOptions(variationRun),
+        marketCross, variation: variationOptions(variationRun), readFailures: reads.readFailures,
       });
       card.readPx = readPxOf({ row, features }, screenerReadAt);
       attachVol(card, volLeg, ticker);

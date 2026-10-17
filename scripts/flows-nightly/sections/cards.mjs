@@ -1,6 +1,6 @@
 import { num } from "../../../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../../../shared/flows-card.js";
-import { sessionPrints, sessionPrintParams } from "../../../shared/flows-positioning.js";
+import { sessionPrints } from "../../../shared/flows-positioning.js";
 import { holdingsStocks } from "../../../shared/flows-focus.js";
 import { regimeState } from "../../../shared/flows-neuron.js";
 import { cardTier } from "../../../shared/flows-neuron-coverage.js";
@@ -14,7 +14,7 @@ import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { ARCHIVE_DATE_RE, publish, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
 import { ideaRecord, archiveRow, archivePayload, runCalibration } from "../../flows-legs/calibration.mjs";
-import { archiveIdeas, archivePermanent, barsInHand, candleDate, candlesAscending, congressRows, ideasPayload, readPxOf, repairCandles, sessionCandles, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
+import { archiveIdeas, archivePermanent, barsInHand, candleDate, candlesAscending, congressRows, ideasPayload, readDeepFeeds, readPxOf, repairCandles, sessionCandles, sessionRow, sessionRows, variationOptions } from "../rank.mjs";
 import {
   fakeEarnings, fakeIvRank, fakeMaxPain, fakeStockDarkpool, fakeStockOiChange, fakeSurface, fakeTermStructure,
 } from "../fixtures.mjs";
@@ -91,7 +91,6 @@ export async function runCards(ctx) {
   } = ctx;
   stages.step("cards");
   let surfaceReported = false;
-  const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
@@ -117,35 +116,19 @@ export async function runCards(ctx) {
 
       const congress = congressRows(ticker, congressState);
       const quantPrep = quantPass.preps.get(ticker) || null;
-      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw] = DRY_RUN
-        ? [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
-           fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
-           fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
-           fakeIvRank(ticker, spotPx, IV_RANK_PARAMS), quantPrep ? fakeEarnings(ticker, sessionDate) : null]
-        : await Promise.all([
-
-          uw(pathFor("max-pain", { ticker }), sessionDate ? { date: sessionDate } : {}).catch(() => []),
-
-          surfaceExpiries.length
-            ? uw(pathFor("spot-exposures-expiry-strike", { ticker }), {
-              "expirations[]": surfaceExpiries,
-              ...(sessionDate ? { date: sessionDate } : {}),
-
-              ...(spotPx >= 20
-                ? { min_strike: Math.floor(spotPx * 0.75), max_strike: Math.ceil(spotPx * 1.25) }
-                : {}),
-              limit: 500,
-            }).catch(() => [])
-            : Promise.resolve([]),
-
-          uw(pathFor("darkpool", { ticker }), { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
-            .catch(() => null),
-          uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(() => null),
-          uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(() => null),
-          uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(() => null),
-
-          quantPrep ? uw(pathFor("earnings", { ticker }), {}).catch(() => null) : Promise.resolve(null),
-        ]);
+      let lost = [...(e.raw.readFailures || [])];
+      let feeds;
+      if (DRY_RUN) {
+        feeds = [fakeMaxPain(ticker, spotPx), fakeSurface(ticker, spotPx, surfaceExpiries),
+          fakeStockDarkpool(ticker, spotPx), fakeStockOiChange(ticker, spotPx),
+          fakeTermStructure(ticker, spotPx, sessionDate ? { date: sessionDate } : {}),
+          fakeIvRank(ticker, spotPx, IV_RANK_PARAMS), quantPrep ? fakeEarnings(ticker, sessionDate) : null];
+      } else {
+        const read = await readDeepFeeds({ ticker, sessionDate, surfaceExpiries, spotPx, quantPrep, carried: lost });
+        lost = read.lost;
+        feeds = [read.maxPain, read.surface, read.dpRaw, read.oiRaw, read.termRaw, read.rankRaw, read.earnRaw];
+      }
+      const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw] = feeds;
       const darkpoolCut = sessionRows(dpRaw, (r) => easternDayOf(r && r.executed_at), sessionDate);
       const darkpoolRth = sessionPrints(dpRaw, sessionDate, { limit: 500 });
       const rankCut = sessionRows(rankRaw, (r) => easternDayOf(r && r.date), sessionDate,
@@ -207,6 +190,7 @@ export async function runCards(ctx) {
 
         marketCross,
         variation: variationOptions(variationRun),
+        readFailures: lost,
       });
       card.readPx = readPxOf(e, screenerReadAt);
       if (!deepSet.has(ticker)) card.depth = "focus";

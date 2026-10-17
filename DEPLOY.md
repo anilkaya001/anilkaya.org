@@ -2971,8 +2971,10 @@ seconds for a stalled response (measured 300.9 s on 2026-09-29), five tries per
 call. In `--live` mode each try now has a 20 second deadline
 (`AbortSignal.timeout`), a timed-out try is retried once, and the pass log names
 how many requests timed out. `FLOWS_UW_TIMEOUT_MS` (100 to 60000) overrides the
-20 seconds, which the tests use. The nightly's client is unchanged, and so are
-the ingest writes, which still carry no deadline of their own. The loop's own
+20 seconds, which the tests use. The nightly's client now has one too, 30 seconds
+a try (45 for an option-contracts page and the two-year bars), one retry after a
+timeout, and `FLOWS_UW_NIGHTLY_DEADLINE=off` in the job's environment restores
+the old unbounded client; the ingest writes still carry no deadline of their own. The loop's own
 clock read, made before every tick, has the same 10 second deadline as each of
 the watch's reads, and spends it the same way: a first attempt of at most 4.5
 seconds, then, if it was challenged, one second's wait and a second attempt of at

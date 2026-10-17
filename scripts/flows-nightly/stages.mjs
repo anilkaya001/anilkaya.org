@@ -1,3 +1,5 @@
+import { wireDelta } from "../../shared/flows-call-meter.js";
+
 export const ISOLATION = Object.freeze({ fatal: "fatal", isolated: "isolated" });
 
 export const WHY_CAP = 120;
@@ -61,16 +63,16 @@ const clip = (text, cap) => {
 
 export const DETAIL_KEYS = 6;
 
-const RECORD_KEYS = Object.freeze(["id", "status", "ms", "calls", "keys", "cpu", "why", "undeclared"]);
+const RECORD_KEYS = Object.freeze(["id", "status", "ms", "calls", "keys", "cpu", "wire", "why", "undeclared"]);
 
-export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0, cpu = null } = {}) {
+export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0, cpu = null, wire = null } = {}) {
   const byId = new Map(table.map((s) => [s.id, s]));
   const done = new Map();
   const outside = [];
   let open = null;
 
   const begin = (spec) => ({
-    spec, at: clock(), calls: calls(), cpu: cpu ? cpu() : 0, keys: 0, undeclared: [], detail: {},
+    spec, at: clock(), calls: calls(), cpu: cpu ? cpu() : 0, wire: wire ? wire() : null, keys: 0, undeclared: [], detail: {},
   });
 
   const close = (frame, status, why) => {
@@ -79,6 +81,10 @@ export function createStageRunner({ table = STAGES, clock = () => Date.now(), ca
       calls: Math.max(0, calls() - frame.calls), keys: frame.keys,
     };
     if (cpu) record.cpu = Math.max(0, Math.round(cpu() - frame.cpu));
+    if (wire && frame.wire) {
+      const used = wireDelta(frame.wire, wire());
+      if (used.n > 0) record.wire = { ms: used.ms, kb: Math.round(used.bytes / 1024), bad: used.bad };
+    }
     Object.assign(record, frame.detail);
     if (why) record.why = clip(why, WHY_CAP);
     if (frame.undeclared.length) record.undeclared = frame.undeclared.slice(0, 5);

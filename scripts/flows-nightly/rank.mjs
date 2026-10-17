@@ -8,13 +8,14 @@ import {
   conventionProbe, estimateKc, unitFamily, nextSessionAfter, scoreVarianceShares, VARIATION_LINES, VARIATION_CODES,
 } from "../../shared/flows-variation.js";
 import { SPOT_EXPOSURE_PAGE } from "../../shared/flows-card.js";
+import { sessionPrintParams } from "../../shared/flows-positioning.js";
 import { fitGarch } from "../../shared/flows-garch.js";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { unwrapRows as unwrapVendorRows } from "../../shared/flows-political.js";
 import { yearOfCandles } from "../flows-legs/vol.mjs";
 import { newsFields } from "../../shared/flows-news.js";
-import { NEWS_VENDOR_LIMIT, UNIVERSE } from "./vendor-params.mjs";
-import { uw } from "./vendor.mjs";
+import { IV_RANK_PARAMS, NEWS_VENDOR_LIMIT, UNIVERSE } from "./vendor-params.mjs";
+import { readFailure, uw } from "./vendor.mjs";
 import { ARCHIVE_DATE_RE } from "./store.mjs";
 
 let tickFieldsReported = false;
@@ -160,16 +161,21 @@ export async function enrich(ticker, spot, sessionDate, dating = { date: true, e
 
   const dated = sessionDate && dating.date ? { date: sessionDate } : {};
 
+  const lost = [];
+  const soft = (route) => (error) => {
+    lost.push(readFailure(route, error));
+    return [];
+  };
   const [greekFlow, ticks, strikes, expiries, ohlc] = await Promise.all([
-    uw(pathFor("greek-flow", { ticker }), dated).catch(() => []),
-    uw(pathFor("net-prem-ticks", { ticker }), dated).catch(() => []),
-    uw(pathFor("spot-exposures-strike", { ticker }), { ...band, ...dated, limit: SPOT_EXPOSURE_PAGE }).catch(() => []),
-    uw(pathFor("greek-exposure-expiry", { ticker }), dated).catch(() => []),
+    uw(pathFor("greek-flow", { ticker }), dated).catch(soft("greek-flow")),
+    uw(pathFor("net-prem-ticks", { ticker }), dated).catch(soft("net-prem-ticks")),
+    uw(pathFor("spot-exposures-strike", { ticker }), { ...band, ...dated, limit: SPOT_EXPOSURE_PAGE }).catch(soft("spot-exposures-strike")),
+    uw(pathFor("greek-exposure-expiry", { ticker }), dated).catch(soft("greek-exposure-expiry")),
 
     uw(pathFor("ohlc-1d", { ticker }), {
       timeframe: "2Y",
       ...(sessionDate && dating.endDate ? { end_date: sessionDate } : {}),
-    }).catch(() => []),
+    }).catch(soft("ohlc-1d")),
   ]);
 
   if (!tickFieldsReported && ticks.length) {
@@ -204,14 +210,55 @@ export async function enrich(ticker, spot, sessionDate, dating = { date: true, e
   if (!greekFlow.length) missing.push("greek-flow");
   if (!strikes.length) missing.push("spot-exposures/strike");
   if (!kept.length) missing.push(ohlc.length ? `ohlc/1d on or before ${sessionDate}` : "ohlc/1d");
-  if (missing.length) throw new Error(`no data from ${missing.join(", ")}`);
+  if (missing.length) {
+    const why = lost.filter((l) => missing.some((m) => m.startsWith(l.route.replace("spot-exposures-strike", "spot-exposures/strike"))))
+      .map((l) => `${l.route} ${l.status !== null ? "HTTP " + l.status : l.kind}`);
+    throw new Error(`no data from ${missing.join(", ")}${why.length ? ` (failed: ${why.join(", ")})` : ""}`);
+  }
 
   const past = candleCut(ohlc, sessionDate);
   return {
-    raw: { greekFlow, ticks, strikes, expiries, ohlc: yearOfCandles(kept, sessionDate), ohlc2y: kept },
+    raw: {
+      greekFlow, ticks, strikes, expiries, ohlc: yearOfCandles(kept, sessionDate), ohlc2y: kept,
+      ...(lost.length ? { readFailures: lost } : {}),
+    },
     pastSession: past.past,
     pastLatest: past.latest,
   };
+}
+
+export async function readDeepFeeds({ ticker, sessionDate, surfaceExpiries, spotPx, quantPrep, carried = [] }) {
+  const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
+  const lost = [...carried];
+  const soft = (route, fallback) => (error) => {
+    lost.push(readFailure(route, error));
+    return fallback;
+  };
+  const [maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw] = await Promise.all([
+
+    uw(pathFor("max-pain", { ticker }), sessionDate ? { date: sessionDate } : {}).catch(soft("max-pain", [])),
+
+    surfaceExpiries.length
+      ? uw(pathFor("spot-exposures-expiry-strike", { ticker }), {
+        "expirations[]": surfaceExpiries,
+        ...(sessionDate ? { date: sessionDate } : {}),
+
+        ...(spotPx >= 20
+          ? { min_strike: Math.floor(spotPx * 0.75), max_strike: Math.ceil(spotPx * 1.25) }
+          : {}),
+        limit: 500,
+      }).catch(soft("spot-exposures-expiry-strike", []))
+      : Promise.resolve([]),
+
+    uw(pathFor("darkpool", { ticker }), { limit: 500, ...onSession, ...sessionPrintParams(sessionDate) })
+      .catch(soft("darkpool", null)),
+    uw(pathFor("oi-change", { ticker }), { limit: 30, ...onSession }).catch(soft("oi-change", null)),
+    uw(pathFor("term-structure", { ticker }), { ...onSession }).catch(soft("term-structure", null)),
+    uw(pathFor("iv-rank", { ticker }), { ...IV_RANK_PARAMS, ...onSession }).catch(soft("iv-rank", null)),
+
+    quantPrep ? uw(pathFor("earnings", { ticker }), {}).catch(soft("earnings", null)) : Promise.resolve(null),
+  ]);
+  return { maxPain, surface, dpRaw, oiRaw, termRaw, rankRaw, earnRaw, lost };
 }
 
 export function medianDollarVolume(candles, { window = 60 } = {}) {

@@ -1555,6 +1555,8 @@ export function buildCard({
   chainMissing = null,
 
   quant = null,
+
+  readFailures = null,
 }) {
   const f = features || {};
   const putSigns = putMultipliers(variationOpts && variationOpts.probe ? variationOpts.probe : null);
@@ -1718,6 +1720,42 @@ export function buildCard({
   if (book && card.panels.levels.status === "ok") {
     card.panels.levels.book = { callWall: book.callWall, putWall: book.putWall, magnet: book.magnet,
       putSign: book.putSign, strikes: book.strikes };
+  }
+  applyReadFailures(card, readFailures);
+  return card;
+}
+
+export const READ_FAILURE_PANELS = Object.freeze({
+  "spot-exposures-expiry-strike": Object.freeze(["surface"]),
+  darkpool: Object.freeze(["darkpool"]),
+  "oi-change": Object.freeze(["oiDeltas"]),
+  "term-structure": Object.freeze(["volContext"]),
+  "iv-rank": Object.freeze(["volContext"]),
+  "net-prem-ticks": Object.freeze(["path"]),
+  "greek-exposure-expiry": Object.freeze(["calendar", "vanna", "charm", "deltaExposure"]),
+});
+
+export const READ_FAILURES_MAX = 12;
+
+export function failedRead(failure) {
+  const route = String((failure && failure.route) || "a vendor");
+  const status = failure && Number.isInteger(failure.status) ? failure.status : null;
+  const how = status !== null ? `answered HTTP ${status}` : failure && failure.kind === "timeout" ? "timed out"
+    : failure && failure.kind === "parse" ? "answered with a body that could not be read" : "could not be reached";
+  return `the vendor's ${route} read ${how} on this run, so this is a failed read and not an empty one`;
+}
+
+export function applyReadFailures(card, failures) {
+  const list = (Array.isArray(failures) ? failures : []).filter((f) => f && typeof f.route === "string").slice(0, READ_FAILURES_MAX);
+  if (!list.length || !card || !card.panels) return card;
+  card.readFailures = list.map((f) => ({ route: f.route, status: Number.isInteger(f.status) ? f.status : null, kind: f.kind || null }));
+  for (const f of list) {
+    for (const key of READ_FAILURE_PANELS[f.route] || []) {
+      const panel = card.panels[key];
+      if (panel && panel.status !== "ok" && panel.code !== "failed") {
+        card.panels[key] = { ...panel, status: "unavailable", code: "failed", reason: failedRead(f) };
+      }
+    }
   }
   return card;
 }
