@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS } from "../server/routes/flows-pages.js";
-import { FLOWS_PAGES } from "../shared/flows-pages.js";
+import { FLOWS_PAGES, ownerNav } from "../shared/flows-pages.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
@@ -81,7 +81,8 @@ function oldChain(path, rc, d) {
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
       const owner = session ? d.isOwner(env, session.username) : false;
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
-      const body = session ? FLOWS_ROUTES[path](session.username, summary, owner) : FLOWS_PAGES.loginPage();
+      const page = session ? FLOWS_ROUTES[path](session.username, summary, owner) : FLOWS_PAGES.loginPage();
+      const body = session && owner ? ownerNav(page) : page;
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
@@ -197,6 +198,23 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "moves", "unusual", "events", "track", "political", "status"];
+  for (const slug of SIDEBAR_PAGES) {
+    const path = "/flows/" + (slug ? slug + "/" : "");
+    const env = { FLOWS_MOVES: "on" };
+    const call = (deps) => createRouter(flowsPageRows(deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
+    const asOwner = await call(scenario({ username: "anilkaya" }).deps);
+    if (slug === "status") {
+      ok(asOwner.includes('id="railOps"') && asOwner.split('id="railOps"').length === 2, "the status page carries the Operations group once");
+      continue;
+    }
+    const asMember = await call({ ...scenario({ username: "anilkaya" }).deps, isOwner: () => false });
+    ok(asOwner.split('id="railOps"').length === 2, path + ": an owner's sidebar carries the Operations group exactly once");
+    ok(asOwner.includes('<a href="/flows/status/"') && asOwner.includes('href="/flows/status/#view=latency"'), path + ": with Status and Latency links");
+    ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
+    if (slug === "market" || slug === "unusual") continue;
+    eq(asOwner.replace(/\n    <p class="rail-group" id="railOps">[\s\S]*?<\/div>(?=\n  <\/nav>)/, ""), asMember, path + ": and is otherwise byte-identical to the member's");
+  }
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
 }

@@ -42,6 +42,7 @@ import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
 import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
+import { flowsOpsRows } from "./server/routes/flows-ops.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
@@ -2855,7 +2856,7 @@ const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWi
   absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
-  readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S }),
+  readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
@@ -2869,6 +2870,7 @@ flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential
 flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
+flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => null }),
 flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();

@@ -1,4 +1,6 @@
-import { aiChain, aiCallSignature, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS } from "./flows-ai.js";
+import {
+  aiChain, aiCallSignature, modelRates, AI_INTRADAY_REFRESH_MS, AI_LENGTH_RETRY_MS, AI_DAILY_NEURONS, aiCapNeurons, aiCapCalls,
+} from "./flows-ai.js";
 import {
   READING_VERSION, READING_MAX_TOKENS, READING_TEMPERATURE, heldTags, readingFallback, readingShape, absentShape, hasSubstance, renderForReading, promptForReading,
   parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS, readIndex,
@@ -14,6 +16,14 @@ export const READ_GENERATING_MS = 90 * 1000;
 export const READ_LIMITED_RETRY_S = 60;
 export const READ_BOX_MS = 1500;
 export const READ_BUDGET_SHARE = 0.75;
+
+export const aiCapOf = (env) => {
+  const neurons = aiCapNeurons(env);
+  return {
+    neurons, calls: aiCapCalls(env), readShare: READ_BUDGET_SHARE, readsStopAt: Math.floor(neurons * READ_BUDGET_SHARE),
+    allowanceNeurons: AI_DAILY_NEURONS,
+  };
+};
 
 export const READ_COOLDOWN_MS = Object.freeze({
   "read:refused": 20 * 60 * 1000,

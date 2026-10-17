@@ -115,8 +115,13 @@ export const FLOWS_NAV = [
   ] },
   { group: "Operations", id: "railOps", only: "status", items: [
     { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
+    { key: "latency", href: "/flows/status/#view=latency", label: "Latency", glyph: "clock" },
   ] },
 ];
+
+const RAIL_END = `
+  </nav>
+  <div class="fx-side-f">`;
 
 const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
@@ -125,14 +130,28 @@ const TABS = [
   { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "events", "political"] },
 ];
 
+const railItem = (active) => (it) => {
+  if (it.ownerOnly && it.key !== active) return "";
+  const on = it.key === active;
+  const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
+  return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
+    `${glyph(it.glyph)}<span class="rail-label">${it.label}</span>${badge}</a>`;
+};
+
+const railGroup = (g, active) => `
+    <p class="rail-group" id="${g.id}">${g.group}</p>
+    <div class="rail-items" role="group" aria-labelledby="${g.id}">
+      ${g.items.map(railItem(active)).filter(Boolean).join("\n      ")}
+    </div>`;
+
+export function ownerNav(html) {
+  const text = String(html);
+  if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
+  const ops = FLOWS_NAV.find((g) => g.id === "railOps");
+  return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
+}
+
 const sidebar = (active, username) => {
-  const item = (it) => {
-    if (it.ownerOnly && it.key !== active) return "";
-    const on = it.key === active;
-    const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
-    return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
-      `${glyph(it.glyph)}<span class="rail-label">${it.label}</span>${badge}</a>`;
-  };
   const who = escapeHTML(String(username || ""));
   return `
 <aside class="fx-side" id="fxSide" aria-label="Sidebar">
@@ -140,13 +159,7 @@ const sidebar = (active, username) => {
     <a class="fx-mark" href="/" aria-label="anilkaya.org">&#949;</a>
     <span class="fx-side-t">Flows</span>
   </div>
-  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.filter((g) => !g.only || g.only === active).map((g) => `
-    <p class="rail-group" id="${g.id}">${g.group}</p>
-    <div class="rail-items" role="group" aria-labelledby="${g.id}">
-      ${g.items.map(item).filter(Boolean).join("\n      ")}
-    </div>`).join("")}
-  </nav>
-  <div class="fx-side-f">
+  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.filter((g) => !g.only || g.only === active).map((g) => railGroup(g, active)).join("")}${RAIL_END}
     <nav class="fx-site" aria-label="Site">
       <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
     </nav>

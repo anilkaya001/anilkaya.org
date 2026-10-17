@@ -1,5 +1,5 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, ownerNav } from "../../shared/flows-pages.js";
 
 const homeNet = (env, owner) => {
   const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
@@ -83,7 +83,8 @@ export function flowsPageRows(deps) {
         if (!session) return html(FLOWS_PAGES.loginPage());
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
-        return html(page.render(session.username, summary, owner, scenesOn(env, session.username), env));
+        const rendered = page.render(session.username, summary, owner, scenesOn(env, session.username), env);
+        return html(owner ? ownerNav(rendered) : rendered);
       },
     });
     if (page.slug !== "") {
