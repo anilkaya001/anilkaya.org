@@ -707,7 +707,6 @@
     if (!body || !mod.getBoundingClientRect().height) return;
     const lists = [...body.querySelectorAll(".ui-list, ul, ol, tbody, [role=list]")].filter((l) => l.children.length > FIT_MIN && !l.closest("[hidden]"));
     for (const l of lists) for (const c of l.children) { if (c.hasAttribute("data-fit")) { c.hidden = false; c.removeAttribute("data-fit"); } else if (c.hidden && !c.classList.contains("ui-disclose") && c.tagName !== "BUTTON") { c.hidden = false; c.setAttribute("data-fit", "1"); } }
-    for (const sv of body.querySelectorAll("svg[data-fit-h]")) { sv.style.removeProperty("height"); sv.removeAttribute("data-fit-h"); }
     mod.removeAttribute("data-tight");
     let hid = 0;
     const over = () => body.scrollHeight - body.clientHeight;
@@ -723,15 +722,6 @@
       hid++;
     }
     if (over() > 1) mod.setAttribute("data-tight", "");
-    if (over() > 1) {
-      const svgs = [...body.querySelectorAll("svg")].filter((sv) => sv.viewBox && sv.viewBox.baseVal && sv.viewBox.baseVal.height && sv.getBoundingClientRect().height > 80).sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height);
-      if (svgs[0]) {
-        const sv = svgs[0];
-        sv.style.height = Math.max(70, Math.floor(sv.getBoundingClientRect().height - over())) + "px";
-        sv.style.width = "100%";
-        sv.setAttribute("data-fit-h", "1");
-      }
-    }
     let btn = mod.querySelector(":scope > .ui-mod-h > .mk-all");
     if (hid) {
       if (!btn) {
@@ -739,7 +729,6 @@
         btn.addEventListener("click", () => {
           const copy = body.cloneNode(true);
           for (const c of copy.querySelectorAll("[data-fit]")) { c.hidden = false; c.removeAttribute("data-fit"); }
-          for (const c of copy.querySelectorAll("svg[data-fit-h]")) c.style.removeProperty("height");
           const t = mod.querySelector(".ui-mod-t");
           const close = h("button", { type: "button", class: "nm-link", onclick: () => fitDlg.close() }, "Close");
           fitDlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "mkFitT" }, t ? t.textContent : "All"), h("div", { class: "nm-dtw" }, copy), h("div", { class: "nm-dx" }, close)));
@@ -785,7 +774,7 @@
       subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, title ? title.textContent : "View " + (i + 1)));
     });
   }
-  function showTab(key, focus) {
+  function showTab(key, focus, quiet) {
     const t = TABS.find((x) => x.dataset.tab === key) || TABS[0];
     key = t.dataset.tab;
     stage.dataset.view = key;
@@ -793,7 +782,7 @@
     for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
     buildSub(key);
     if (focus) t.focus();
-    try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; }
+    if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
   }
   for (const [i, t] of TABS.entries()) {
     t.addEventListener("click", () => showTab(t.dataset.tab, false));
@@ -805,8 +794,8 @@
     });
   }
   const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "tide"; };
-  showTab(fromHash(), false);
-  addEventListener("hashchange", () => showTab(fromHash(), false));
+  showTab(fromHash(), false, true);
+  addEventListener("hashchange", () => showTab(fromHash(), false, true));
 
   Promise.all([
     optional("/api/flows/market"),

@@ -102,6 +102,13 @@
       "Sign is carried by position and by the glyph on the number, not by colour alone.";
   }
 
+  function roomH(el, dflt, min, below) {
+    const body = el.closest(".mk-body");
+    if (!body || !body.clientHeight) return dflt;
+    const top = el.getBoundingClientRect().top;
+    return Math.max(min, Math.min(dflt, Math.floor(body.getBoundingClientRect().bottom - top - below)));
+  }
+
   function moverList(title, rows, key, opts) {
     const o = opts || {};
     const said = o.said || title.toLowerCase();
@@ -433,7 +440,7 @@
       const plot = h("div", { class: "mk-pairs" });
       slot.replaceChildren(plot);
       chart = C.mount(plot, (el, w, animate) => {
-        const H = w < 600 ? 150 : 170, top = 10, bot = 22, mid = top + (H - top - bot) / 2;
+        const H = roomH(el, w < 600 ? 150 : 170, 90, 30), top = 10, bot = 22, mid = top + (H - top - bot) / 2;
         const svg = C.svgRoot(el, w, H, animate, "Call " + V.said + " up and put " + V.said + " down per session, oldest at the left");
         const N = ordered.length, band = (w - 8) / N;
         const hi = Math.max(1, ...ordered.map((r) => Math.max(isNum(r[V.c]) || 0, isNum(r[V.p]) || 0)));
@@ -545,7 +552,7 @@
     const plot = h("div", { class: "mk-pairs" });
     host.append(plot);
     C.mount(plot, (el, w, animate) => {
-      const H = w < 600 ? 130 : 170, top = 6, bot = 20, mid = top + (H - top - bot) / 2, half = (H - top - bot) / 2 - 2;
+      const H = roomH(el, w < 600 ? 130 : 170, 80, 4), top = 6, bot = 20, mid = top + (H - top - bot) / 2, half = (H - top - bot) / 2 - 2;
       const svg = C.svgRoot(el, w, H, animate, "Insider buy and sell notional per filing day");
       const N = ordered.length, band = (w - 8) / N, bw = Math.max(2, Math.min(12, band * 0.6));
       const hi = Math.max(1, ...ordered.map((r) => Math.max(Math.abs(isNum(r.buysNotional) || 0), Math.abs(isNum(r.sellsNotional) || 0))));

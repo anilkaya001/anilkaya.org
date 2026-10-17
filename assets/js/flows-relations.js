@@ -169,7 +169,7 @@
       const top = rows.slice(0, cap);
       const head = h("div", { class: "rl-lh" }, shown.length ? shown.length + plural(shown.length, " tested pair", " tested pairs") + " of " + all.length : "No pair passed", sel ? h("button", { type: "button", class: "nm-link", onclick: () => { sel = null; paint(); } }, "Clear " + sel) : null);
       const li = top.map((p) => h("button", { type: "button", class: "rl-pair", onclick: () => { sel = sel === p.a ? p.b : p.a; paint(); }, "aria-label": rLine(p) },
-        h("span", { class: "rl-pn" }, p.a + " ↔ " + p.b), h("span", { class: "rl-ps" }, secName(p.a) + (secName(p.a) === secName(p.b) ? "" : " / " + secName(p.b))),
+        h("span", { class: "rl-pn" }, p.a + " ↔ " + p.b), h("span", { class: "rl-ps", title: secName(p.a) + " / " + secName(p.b) }, secName(p.a) + (secName(p.a) === secName(p.b) ? "" : " / " + secName(p.b))),
         h("span", { class: "rl-pr " + (p.r >= 0 ? "pos" : "neg") }, sgn(p.r)), h("span", { class: "rl-pi" }, "[" + sgn(p.lo) + ", " + sgn(p.hi) + "]")));
       const more = rows.length > top.length ? h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => full(rows) }, "Show all " + rows.length) : null;
       const none = !rows.length ? h("p", { class: "rl-none" }, shown.length ? sel + " has no tested pair in this layer." : "No pair has an interval clear of zero that holds in both halves of the session. That is a statement about this read, not about the market.") : null;

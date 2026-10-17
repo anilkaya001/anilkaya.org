@@ -159,7 +159,7 @@ const MUTANTS = [
   ["inactive panels stay visible", CSS, [["visibility: hidden; min-height: 0; min-width: 0; }", "min-height: 0; min-width: 0; }"]]],
   ["the phone has no module switch", JS, [["subBar.hidden = mods.length < 2;", "subBar.hidden = true;"]]],
   ["the selected tab is never marked", JS, [["x.setAttribute(\"aria-selected\", String(on));", "void on;"]]],
-  ["the address is ignored", JS, [["showTab(fromHash(), false);\n  addEventListener", "showTab(\"tide\", false);\n  addEventListener"]]],
+  ["the address is ignored", JS, [["showTab(fromHash(), false, true);\n  addEventListener", "showTab(\"tide\", false, true);\n  addEventListener"]]],
   ["the tab list ignores the keyboard", JS, [["if (to === null) return;", "return;"]]],
   ["every module is shown on the phone", CSS, [[".mk-panel > .mk-mod { position: absolute; inset: 0; visibility: hidden; }", ".mk-panel > .mk-mod { position: absolute; inset: 0; }"]]],
 ];

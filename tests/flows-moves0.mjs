@@ -175,6 +175,7 @@ async function mount(page, { html, url, answer }) {
   page.on("requestfailed", done);
   await page.clock.install({ time: new Date(TUE_1330) });
   await page.goto("https://example.test" + url);
+  if (/flows\/market/.test(url)) await page.click("#mkT-extremes");
   await settle(page);
 }
 
