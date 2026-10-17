@@ -5,6 +5,8 @@ import { archiveWriteAction, ARCHIVE_REFUSALS, PERMANENT_ARCHIVE_KEY_RE } from "
 import {
   DATED_ARCHIVE_KEY_RE, INGEST_LIST_KINDS, INGEST_META_KEYS_MAX, ingestKeyParts,
 } from "../store.js";
+import { createDoor } from "../door.js";
+import { doorMode } from "../../shared/flows-door.js";
 
 const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE.FLOWS_MAX_PAYLOAD_BYTES;
 
@@ -24,6 +26,7 @@ export function contentRefusal(url, key, text) {
 
 export function flowsIngestRows(deps) {
   const { store, ensureFlowsTables, storeGone, passthrough } = deps;
+  const door = createDoor({ store, ensureFlowsTables, storeGone, log: deps.log });
 
   const ingest = async ({ request, env, url }) => {
     requireMethod(request, ["GET", "POST", "DELETE"]);
@@ -42,6 +45,9 @@ export function flowsIngestRows(deps) {
       tokenKind = check.kind;
     }
     if (!tokenKind) throw new HttpError(401, "unauthorized", "Authentication required");
+
+    const mode = doorMode(env);
+    if (mode !== "off" && url.searchParams.has("op")) return door.operation({ request, env, url, tokenKind });
 
     if (url.searchParams.has("list")) {
       requireMethod(request, ["GET"]);
@@ -160,6 +166,8 @@ export function flowsIngestRows(deps) {
       }
       return json({ ok: true, key, bytes: payload.length, stored: "created" });
     }
+
+    if (mode !== "off") return door.write({ request, env, key, payload });
 
     await store.write(env, key, payload, Date.now());
 

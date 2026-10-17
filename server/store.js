@@ -1,5 +1,7 @@
 import { nightlyFreshMeta, TICKER_RE } from "../shared/flows-live.js";
 import { NIGHTLY_ROW_SQL, nightlyLedger, batchWithLedger } from "../shared/flows-live-worker.js";
+import { DOOR_LIMITS } from "../shared/flows-door.js";
+import { errorText } from "../shared/flows-log.js";
 
 export const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
@@ -23,6 +25,53 @@ const UPSERT_SQL =
   "chash = NULL, session = NULL, quality = 0, epoch = 0, asof = 0, rev = flows_payload.rev + 1";
 
 const DELETE_SQL = "DELETE FROM flows_payload WHERE id = ?";
+
+const DOOR_UPSERT_SQL =
+  "INSERT INTO flows_payload (id, payload, updated_at, chash, session, quality, epoch, asof, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1) " +
+  "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, chash = excluded.chash, " +
+  "session = excluded.session, quality = excluded.quality, epoch = excluded.epoch, asof = excluded.asof, rev = flows_payload.rev + 1";
+
+const DOOR_CAS_SQL =
+  " WHERE flows_payload.chash IS NOT excluded.chash AND (excluded.epoch, COALESCE(excluded.session, ''), excluded.quality, excluded.asof) >= " +
+  "(COALESCE(flows_payload.epoch, 0), COALESCE(flows_payload.session, ''), COALESCE(flows_payload.quality, 0), COALESCE(flows_payload.asof, 0))";
+
+const DOOR_TUPLE_SQL =
+  "SELECT id, chash, session, quality, epoch, asof, rev, length(payload) AS bytes FROM flows_payload WHERE id IN (";
+
+const UNIVERSE_NAMES_SQL = "SELECT json_extract(payload, '$.t') AS names FROM flows_payload WHERE id = 'universe'";
+
+const HAVE_SQL = "SELECT id, chash FROM flows_payload WHERE id IN (";
+
+const PLAN_UPSERT_SQL =
+  "INSERT INTO flows_payload (id, payload, updated_at) VALUES ('plan', ?, ?) " +
+  "ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at " +
+  "WHERE COALESCE(json_extract(flows_payload.payload, '$.session'), '') <= COALESCE(json_extract(excluded.payload, '$.session'), '')";
+
+const PLAN_READ_SQL = "SELECT payload, updated_at FROM flows_payload WHERE id = 'plan'";
+
+const RING_INSERT_SQL =
+  "INSERT INTO flows_quarantine (payload_key, chash, reason, path, bytes, producer, mode, at, braked, body) " +
+  "SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, CASE WHEN b.n >= ?9 THEN 1 ELSE 0 END, CASE WHEN b.n >= ?9 THEN NULL ELSE ?10 END " +
+  "FROM (SELECT count(*) AS n FROM flows_quarantine WHERE id > COALESCE((SELECT max(id) FROM flows_quarantine), 0) - ?11 " +
+  "AND producer = ?6 AND reason = ?3) AS b";
+
+const RING_PRUNE_SQL =
+  "DELETE FROM flows_quarantine WHERE id <= COALESCE((SELECT max(id) FROM flows_quarantine), 0) - ?";
+
+const RING_CLEAR_SQL =
+  "UPDATE flows_quarantine SET body = NULL WHERE body IS NOT NULL " +
+  "AND id <= COALESCE((SELECT max(id) FROM flows_quarantine), 0) - ?1 " +
+  "AND id > COALESCE((SELECT max(id) FROM flows_quarantine), 0) - ?1 - ?2";
+
+const TRANSIENT_RE = /quota|exceeded|overload|time[ds]? ?out|temporar|unavailable|network|connection|reset|locked|busy|internal error|\b7500\b|too many requests/i;
+
+const marks = (n) => Array.from({ length: n }, () => "?").join(", ");
+
+const chunks = (list, size) => {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+};
 
 export function ingestKeyParts(key) {
   const tickerKey = /^(card|card-x|hist):/.exec(key);
@@ -102,6 +151,91 @@ export function createFlowsStore({ ensureFlowsTables }) {
       const landing = key === "meta" ? nightlyLedger(env.DB, JSON.parse(payload), at) : null;
       if (landing) await batchWithLedger(env.DB, [upsert], landing);
       else await upsert.run();
+    },
+
+    async doorRead(env, ids, { names = false } = {}) {
+      const groups = chunks(ids, DOOR_LIMITS.haveItems);
+      const statements = groups.map((g) => env.DB.prepare(DOOR_TUPLE_SQL + marks(g.length) + ")").bind(...g));
+      if (names) statements.push(env.DB.prepare(UNIVERSE_NAMES_SQL));
+      if (!statements.length) return { stored: new Map(), names: null };
+      const results = await env.DB.batch(statements);
+      const stored = new Map();
+      for (let i = 0; i < groups.length; i++) for (const r of (results[i] && results[i].results) || []) stored.set(r.id, r);
+      let list = null;
+      if (names) {
+        const row = ((results[groups.length] && results[groups.length].results) || [])[0];
+        try { const parsed = row && typeof row.names === "string" ? JSON.parse(row.names) : null; list = Array.isArray(parsed) ? parsed : null; }
+        catch { list = null; }
+      }
+      return { stored, names: list };
+    },
+
+    async doorWrite(env, key, payload, at, m, { enforce = false } = {}) {
+      const upsert = env.DB.prepare(DOOR_UPSERT_SQL + (enforce ? DOOR_CAS_SQL : ""))
+        .bind(key, payload, at, m.chash, m.session, m.quality, m.epoch, m.asof);
+      const landing = key === "meta" ? nightlyLedger(env.DB, JSON.parse(payload), at) : null;
+      const done = landing ? await batchWithLedger(env.DB, [upsert], landing) : await upsert.run();
+      const first = Array.isArray(done) ? done[0] : done;
+      return first && first.meta ? Number(first.meta.changes) || 0 : 0;
+    },
+
+    async doorBatch(env, items, at, { enforce = false } = {}) {
+      const out = new Array(items.length);
+      const prepared = items.map((it, index) => ({
+        index,
+        stmt: env.DB.prepare(DOOR_UPSERT_SQL + (enforce ? DOOR_CAS_SQL : ""))
+          .bind(it.key, it.payload, at, it.m.chash, it.m.session, it.m.quality, it.m.epoch, it.m.asof),
+      }));
+      let trips = 0;
+      let failed = 0;
+      const commit = async (group) => {
+        trips++;
+        try {
+          const done = await env.DB.batch(group.map((g) => g.stmt));
+          group.forEach((g, i) => { out[g.index] = { ok: true, changed: done && done[i] && done[i].meta ? Number(done[i].meta.changes) || 0 : 0 }; });
+        } catch (error) {
+          const message = errorText(error);
+          failed++;
+          if (TRANSIENT_RE.test(message) || failed > DOOR_LIMITS.bisectBudget) throw error;
+          if (group.length === 1) { out[group[0].index] = { ok: false, message }; return; }
+          const mid = group.length >> 1;
+          await commit(group.slice(0, mid));
+          await commit(group.slice(mid));
+        }
+      };
+      for (const group of chunks(prepared, DOOR_LIMITS.statementsPerBatch)) await commit(group);
+      return { results: out, trips };
+    },
+
+    async have(env, pairs) {
+      const ids = pairs.map((p) => p.key);
+      const rows = await env.DB.prepare(HAVE_SQL + marks(ids.length) + ")").bind(...ids).all();
+      const held = new Map(((rows && rows.results) || []).map((r) => [r.id, r.chash]));
+      return pairs.map((p) => ({ key: p.key, have: typeof held.get(p.key) === "string" && held.get(p.key) === p.chash }));
+    },
+
+    async planWrite(env, text, at) {
+      const written = await env.DB.prepare(PLAN_UPSERT_SQL).bind(text, at).run();
+      return written && written.meta ? Number(written.meta.changes) || 0 : 0;
+    },
+
+    async planRead(env) {
+      const row = await env.DB.prepare(PLAN_READ_SQL).first();
+      return row && row.payload ? { payload: row.payload, updatedAt: row.updated_at } : null;
+    },
+
+    async quarantine(env, events, at) {
+      if (!events.length) return 0;
+      const inserts = events.map((e) => env.DB.prepare(RING_INSERT_SQL).bind(
+        e.key, e.chash || null, e.code, String(e.path || "").slice(0, DOOR_LIMITS.pathChars), Number(e.bytes) || 0, e.producer || "",
+        e.mode, at, DOOR_LIMITS.brakeAfter, e.body || null, DOOR_LIMITS.brakeWindow,
+      ));
+      for (const group of chunks(inserts, DOOR_LIMITS.statementsPerBatch - 2)) await env.DB.batch(group);
+      await env.DB.batch([
+        env.DB.prepare(RING_PRUNE_SQL).bind(DOOR_LIMITS.ringSize),
+        env.DB.prepare(RING_CLEAR_SQL).bind(DOOR_LIMITS.ringBodies, events.length),
+      ]);
+      return events.length;
     },
   });
 }
