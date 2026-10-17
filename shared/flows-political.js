@@ -451,3 +451,48 @@ export function buildPolitical(raws = {}) {
 
   return out;
 }
+
+export const FUND_TICKERS = Object.freeze([
+  "AGG", "BND", "DIA", "EEM", "EFA", "GLD", "GOVT", "HYG", "IEF", "IGOV", "IOO", "IVV", "IWM",
+  "LQD", "QQQ", "SHY", "SLV", "SPY", "TLT", "VEA", "VGK", "VOO", "VTI", "VWO",
+  "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+]);
+
+export const isFund = (ticker) => typeof ticker === "string" && FUND_TICKERS.includes(ticker.toUpperCase());
+
+export const SELL_BAND_HIGH_OVER_MID = 2;
+export const SELL_BAND_LOW_UNDER_MID = 8;
+
+export function netBounds(row) {
+  const bought = num(row && row.bought), sold = num(row && row.sold, 0);
+  const lo = num(row && row.boughtLo), hi = num(row && row.boughtHi);
+  if (bought === null || lo === null || hi === null) return null;
+  return {
+    mid: bought - sold,
+    lo: lo - SELL_BAND_HIGH_OVER_MID * sold,
+    hi: hi - sold / SELL_BAND_LOW_UNDER_MID,
+  };
+}
+
+export function stateOf(row) {
+  const b = netBounds(row);
+  if (!b) return null;
+  const gross = num(row.bought) + num(row.sold, 0);
+  const share = gross > 0 ? b.mid / gross : 0;
+  const open = num(row.openBands, 0) > 0;
+  if (!open && b.lo > 0) return "accF";
+  if (share >= 0.2) return "accM";
+  if (share <= -0.2) return "redM";
+  return "mix";
+}
+
+export const blindShare = (lagDays, windowDays) => {
+  const lag = num(lagDays), win = num(windowDays);
+  if (lag === null || win === null || win <= 0) return null;
+  return Math.min(1, Math.max(0, lag / win));
+};
+
+export const treemapWeight = (row, size) => {
+  const gross = num(row && row.bought, 0) + num(row && row.sold, 0);
+  return size === "fil" ? num(row && row.filers, 0) + Math.sqrt(gross) / 4e3 : Math.sqrt(gross);
+};

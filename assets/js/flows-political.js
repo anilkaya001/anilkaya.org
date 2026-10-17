@@ -1,496 +1,692 @@
 (() => {
   "use strict";
 
-  const UI = window.FlowsUI;
-  const status = document.getElementById("plStatus");
-  if (!UI || !status) return;
-  const { h, F, isNum } = UI;
-  const DASH = UI.DASH, MID = UI.MID;
-  const FRESH = "•";
-  const STATUTE = 45;
-  const V = { class: "fu-v" }, HIDE = { "aria-hidden": "true" };
-
-  const host = {
-    meta: document.getElementById("plMeta"),
-    about: document.getElementById("plAboutSlot"),
-    chips: document.getElementById("plChips"),
-    buyers: document.getElementById("plBuyers"),
-    assets: document.getElementById("plAssets"),
-    recent: document.getElementById("plRecent"),
-    holders: document.getElementById("plHolders"),
+  const MINUS = "−", DASH = "—", DAY = 864e5;
+  const FUNDS = new Set([
+    "AGG", "BND", "DIA", "EEM", "EFA", "GLD", "GOVT", "HYG", "IEF", "IGOV", "IOO", "IVV", "IWM",
+    "LQD", "QQQ", "SHY", "SLV", "SPY", "TLT", "VEA", "VGK", "VOO", "VTI", "VWO",
+    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+  ]);
+  const STL = {
+    accF: "Accumulating · bounds agree",
+    accM: "Leans accumulating",
+    mix: "Mixed",
+    redM: "Leans reducing",
+  };
+  const STS = { accF: "Firm accumulating", accM: "Leans accumulating", mix: "Mixed", redM: "Leans reducing" };
+  const WHY = {
+    accF: "Even the low bound is a net purchase.",
+    accM: "The midpoint leans buying; the bounds straddle zero.",
+    mix: "Buys and sells roughly offset.",
+    redM: "Sales are midpoints only, so this is a lean, never a firm reduction.",
+  };
+  const GLY = { accF: "▲", accM: "▲", mix: "◆", redM: "▼" };
+  const TONE = { accF: "up", accM: "up", mix: "warn", redM: "down" };
+  const CHAMBER = { H: "House", S: "Senate", E: "Executive" };
+  const RING_R = 8;
+  const TAB_NOTES = {
+    acc: "Disclosed purchases exceed disclosed sales, by band midpoint. Whiskers give the low to high bound.",
+    red: "Sales exceed purchases. Sales carry midpoints only, so none is called firm. The feed ranks names by purchases and by filer breadth, so reducers are under-counted.",
+    cvg: "At least {n} distinct filers, most filers first. Breadth, not the size of one account.",
   };
 
-  const usd = F.unit.of("moneyCompact", { dp: "short" });
-  const qty = (v) => (isNum(v) === null ? DASH : isNum(v).toLocaleString("en-US"));
-  const lagText = (v) => (isNum(v) === null ? DASH : Math.round(isNum(v)) + "d");
+  const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const chOf = (m) => (m === "senate" ? "S" : m === "executive" ? "E" : "H");
   const cardKey = (t) => String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
-  const MEMBER = { house: "House", senate: "Senate", executive: "Executive" };
-
-  const setModuleState = (hostEl, st, label) => {
-    const card = hostEl && hostEl.closest(".fd-mod");
-    if (!card) return;
-    card.dataset.state = st.state;
-    const t = card.querySelector(".ui-mod-t");
-    const old = t.querySelector(".ui-state");
-    if (old) old.remove();
-    const b = UI.stateButton(st, label);
-    if (b) t.append(b);
-  };
-  const setModuleInfo = (hostEl, label, build) => {
-    const card = hostEl && hostEl.closest(".fd-mod");
-    if (!card) return;
-    const head = card.querySelector(".ui-mod-h");
-    const old = head.querySelector(":scope > .ui-info");
-    if (old) old.remove();
-    head.append(UI.infoButton(label, build));
+  const initials = (name) => {
+    const parts = String(name || "").replace(/\b(Hon\.|Jr\.?|Sr\.?|III|II)\b/g, "").trim().split(/\s+/).filter(Boolean);
+    return parts.length ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() : "?";
   };
 
-  function feedState(feed, measured) {
-    if (!feed) {
-      return { state: "pending", kind: "absent", reason: "This section has not been published yet. It appears with the first pipeline run after it shipped." };
-    }
-    if (feed.status === "unavailable") {
-      return { state: "unavailable", kind: "unavailable", reason: "The vendor did not answer for this feed" + (feed.reason ? " (" + feed.reason + ")" : "") + ", so nothing is drawn. This is a fact about the request, not about what anyone disclosed." };
-    }
-    if (feed.status !== "ok" || !Array.isArray(feed.rows) || !feed.rows.length) {
-      return { state: "quiet", kind: "quiet", reason: measured || "The window was read and held no filing this panel could rank." };
-    }
-    return null;
+  function netBounds(r) {
+    const B = finite(r.bought), S = finite(r.sold) || 0, lo = finite(r.boughtLo), hi = finite(r.boughtHi);
+    if (B === null || lo === null || hi === null) return null;
+    return { mid: B - S, lo: lo - 2 * S, hi: hi - S / 8 };
   }
-  const silence = (hostEl, st, label, height) => {
-    const box = UI.silent(st, label, height || 180);
-    box.dataset.empty = st.kind || st.state;
-    hostEl.replaceChildren(box);
-    setModuleState(hostEl, st, label);
-    return box;
+
+  function stateOf(r) {
+    const b = netBounds(r);
+    if (!b) return null;
+    const g = r.bought + (finite(r.sold) || 0);
+    const share = g > 0 ? b.mid / g : 0;
+    const open = (finite(r.openBands) || 0) > 0;
+    if (!open && b.lo > 0) return "accF";
+    if (share >= 0.2) return "accM";
+    if (share <= -0.2) return "redM";
+    return "mix";
+  }
+
+  const blind = (lag, win) => (finite(lag) === null || finite(win) === null || win <= 0 ? null : Math.min(1, Math.max(0, lag / win)));
+  const weight = (r, size) => {
+    const g = (finite(r.bought) || 0) + (finite(r.sold) || 0);
+    return size === "fil" ? (finite(r.filers) || 0) + Math.sqrt(g) / 4e3 : Math.sqrt(g);
   };
 
-  function overlaps(rows) {
-    let n = 0, comparable = 0;
-    for (let i = 1; i < rows.length; i++) {
-      const a = rows[i - 1], b = rows[i];
-      const aLo = isNum(a.boughtLo), aHi = isNum(a.boughtHi), bLo = isNum(b.boughtLo), bHi = isNum(b.boughtHi);
-      if (aLo === null || aHi === null || bLo === null || bHi === null) continue;
-      comparable++;
-      if (aLo <= bHi && bLo <= aHi) n++;
-    }
-    return { n, comparable };
-  }
-  function overlapNote(rows) {
-    if (rows.length < 2) return "";
-    const o = overlaps(rows);
-    if (!o.comparable) return "No two neighbours here state both a low and a high, so whether this ordering is one the disclosed ranges can carry was not measured.";
-    if (!o.n) return "No two of the " + o.comparable + " comparable neighbouring pairs have overlapping bands, so the order is one the disclosed ranges can carry.";
-    return o.n + " of the " + o.comparable + " comparable neighbouring pairs have overlapping bands — their whiskers cross, and those pairs are not separated by anything the filings state. The bar is a midpoint; the whisker is what was actually disclosed.";
-  }
-  function openNote(rows, subject) {
-    let bands = 0, floor = 0;
-    for (const r of rows) { bands += isNum(r.openBands) || 0; floor += isNum(r.openFloor) || 0; }
-    if (!bands) return "";
-    return bands + " disclosure" + (bands === 1 ? "" : "s") + " here state" + (bands === 1 ? "s" : "") +
-      " a floor and no ceiling (“Over $50,000,000” and its kind). Those have no midpoint to sum, so they are excluded from every total in this panel; the floors they do state add to " +
-      usd(floor) + " of disclosed " + subject + " that no bar includes.";
-  }
-  function ownerNote(rows, unit) {
-    let known = 0, self = 0, carried = false;
-    for (const r of rows) {
-      const k = isNum(r.ownerKnown);
-      if (k === null) continue;
-      carried = true;
-      known += k;
-      const sf = isNum(r.selfFiled);
-      if (sf !== null) self += sf;
-    }
-    if (!carried) return "This payload does not carry the executing account behind these " + unit + ", so the share disclosed in a filer’s own name cannot be stated here. That is a gap in what was published, not a reading about the filings.";
-    if (!known) return "The vendor stated an executing account on none of the filings behind these " + unit + ", so the share disclosed in a filer’s own name is UNKNOWN here — which is not the same fact as all of them being their own.";
-    return self + " of the " + known + " filings that state an executing account are the filer’s own; the rest are a spouse’s, a dependant’s or joint.";
-  }
-  function freshNote(p, drawn, subject) {
-    if (!p.latestFiled) return "";
-    let when = "";
-    if (p.sessionDate) {
-      when = p.sessionDate === p.latestFiled ? ", which is the last completed session"
-        : p.latestFiled < p.sessionDate ? ", which is before the last completed session on " + p.sessionDate
-          : ", which is after the last completed session on " + p.sessionDate;
-    }
-    if (!drawn) return "The newest disclosure date in this window is " + p.latestFiled + when + ", and no row drawn here carries it, so nothing is marked new.";
-    return FRESH + " marks the " + drawn + " row" + (drawn === 1 ? "" : "s") + " " + (subject || "filed on") + " " + p.latestFiled + ", the newest disclosure date in this window" + when + ".";
-  }
-  function listedNote(rows) {
-    let other = 0, filings = 0;
-    for (const r of rows) {
-      const o = isNum(r.boughtOther), c = isNum(r.buysOther);
-      if (o !== null) other += o;
-      if (c !== null) filings += c;
-    }
-    if (!filings) return "";
-    return filings + " of the disclosures behind these totals named no listed security (Treasury bills, funds and partnership interests carry no ticker), adding " + usd(other) + " that the ranking by name cannot show.";
-  }
-  function countedNote(feed, unit, cut) {
-    const seen = isNum(feed.seen), shed = isNum(feed.shed);
-    if (seen === null) return "";
-    if (!shed) return seen + " " + unit + (seen === 1 ? "" : "s") + " in the window.";
-    return "Top " + feed.rows.length + " of " + seen + " " + unit + "s in the window; " + shed + " " + (cut || "ranked below the cut") + " and are not drawn.";
-  }
-
-  function cardedSet(p) {
-    if (!Array.isArray(p.carded)) return null;
-    return new Set(p.carded.map(cardKey));
-  }
-  function tickerCell(t, carded) {
-    const text = t === null || t === undefined ? DASH : String(t);
-    if (!carded || !t || !carded.has(cardKey(t))) return h("span", { class: "pl-tick" }, text);
-    return h("a", { class: "pl-tick", href: "/flows/ticker/?t=" + encodeURIComponent(cardKey(t)), title: "Open the detail card the board published for " + text + "." }, text);
-  }
-
-  function rangeBar(scale, mid, lo, hi, i) {
-    const wrap = h("span", { class: "pl-bar", ...HIDE });
-    const m = isNum(mid), l = isNum(lo), hh = isNum(hi);
-    if (l !== null && hh !== null && hh > l && scale > 0) {
-      wrap.append(h("i", { class: "pl-bar-band", style: { left: Math.min(100, (l / scale) * 100) + "%", width: Math.max(0.4, Math.min(100, ((hh - l) / scale) * 100)) + "%" } }));
-    }
-    if (m !== null && scale > 0) {
-      wrap.append(h("i", { class: "pl-bar-fill", style: { width: Math.max(0.4, Math.min(100, (m / scale) * 100)) + "%", "--i": String(i || 0) } }));
-    }
-    return wrap;
-  }
-  const scaleOf = (rows) => rows.reduce((s, r) => Math.max(s, isNum(r.boughtHi) || 0, isNum(r.bought) || 0), 0);
-  const lagCell = (v) => {
-    const x = isNum(v);
-    return h("span", { class: "fu-v pl-lagv", "data-tone": x !== null && x > STATUTE ? "warn" : null, title: x !== null && x > STATUTE ? "Past the 45 days the STOCK Act allows." : null }, lagText(v));
-  };
-
-  function paintBuyers(p) {
-    const feed = p.buyers;
-    const st = feedState(feed, "The window was read and no filer in it disclosed a purchase this panel could rank. Sales and transfers do not enter a purchase ranking.");
-    if (st) { silence(host.buyers, st, "Buyers", 220); return; }
-    setModuleState(host.buyers, { state: "ok" }, "Buyers");
-    const rows = feed.rows;
-    const scale = scaleOf(rows);
-    const items = rows.map((r, j) => {
-      const otherBuys = isNum(r.buysOther), nNames = isNum(r.names);
-      const other = otherBuys
-        ? { text: usd(r.boughtOther), title: otherBuys + " of this filer’s " + isNum(r.buys) + " disclosed purchases named no listed security — Treasury bills, funds and partnership interests carry no ticker — so that size is in the total and in no row of the ranking by name." }
-        : { text: DASH, title: otherBuys === null ? "This payload does not split the total by whether a listed security was named." : "Every disclosed purchase behind this total named a listed security." };
-      const names = nNames === null
-        ? { text: DASH, title: "None of this filer’s disclosed purchases named a listed security, so there is no name count here. That is not a count of zero." }
-        : { text: String(nNames), title: nNames + " listed names" };
-      const row = h("div", { class: "pl-row pl-buyer", role: "listitem", "data-names": names.text, "data-other": other.text,
-        title: [(r.who || DASH), "low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi), (isNum(r.buys) ?? DASH) + " filings",
-          "names " + names.text + ": " + names.title, "not listed " + other.text + ": " + other.title].join(" " + MID + " ") },
-      h("span", { class: "pl-rank" }, String(j + 1)),
-      h("span", { class: "pl-who" },
-        h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh", title: isNum(r.freshBuys) + " of these purchases were disclosed on the window’s newest filing date." }, FRESH) : null,
-          h("b", { class: "pl-name" }, r.who || DASH)),
-        h("small", { class: "pl-chamber" }, MEMBER[r.memberType] || (r.memberType ? String(r.memberType) : ""))),
-      rangeBar(scale, r.bought, r.boughtLo, r.boughtHi, j),
-      h("span", { class: "fu-v fu-strong pl-mid" }, usd(r.bought)),
-      lagCell(r.medianLagDays),
-      h("span", { class: "fu-v fu-wide pl-sold", title: "Disclosed sales, shown beside the purchases and never folded into them." }, isNum(r.sells) ? usd(r.sold) : DASH));
-      return row;
-    });
-    host.buyers.replaceChildren(
-      h("div", { class: "pl-row pl-buyer fu-head", ...HIDE }, h("span"), h("span", null, "Filer"), h("span", null, "Disclosed purchases"), h("span", V, "Mid"), h("span", V, "Lag"), h("span", { class: "fu-v fu-wide" }, "Sold")),
-      listed(UI.list(items, { visible: 8, label: "Filers ranked by disclosed purchase size" })),
-      UI.legend([h("span", { class: "ui-key" }, h("i", { class: "pl-key-fill" }), "Midpoint"), h("span", { class: "ui-key" }, h("i", { class: "pl-key-band" }), "Disclosed range"), h("span", { class: "ui-key" }, h("i", { class: "is-dot", style: { "--c": UI.cssVar("--warn") } }), "Late")]));
-  }
-  const listed = (el) => { (el.classList.contains("ui-list") ? [el] : [...el.querySelectorAll(".ui-list")]).forEach((l) => l.classList.add("fu-list")); return el; };
-
-  function buyersNote(p) {
-    const feed = p.buyers;
-    if (!feed || !Array.isArray(feed.rows) || !feed.rows.length) return "";
-    const rows = feed.rows;
-    return [countedNote(feed, "filer"), overlapNote(rows), openNote(rows, "purchases"), listedNote(rows), ownerNote(rows, "totals"),
-      freshNote(p, rows.filter((r) => isNum(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ");
-  }
-
-  function paintAssets(p, mode) {
-    const carded = cardedSet(p);
-    const size = p.assets, breadth = p.clusters;
-    const body = h("div", { class: "fd-body" });
-    if (mode === 1) body.append(breadthView(p, breadth, carded));
-    else {
-      const st = feedState(size, "The window was read and no name in it drew a disclosed purchase.");
-      if (st) {
-        const box = UI.silent(st, "Names by size", 200);
-        box.dataset.empty = st.kind;
-        body.append(box);
-      } else {
-        const scale = scaleOf(size.rows);
-        const items = size.rows.map((r, j) => h(carded && r.t && carded.has(cardKey(r.t)) ? "a" : "div", {
-          class: "pl-row pl-asset-row", role: carded && r.t && carded.has(cardKey(r.t)) ? null : "listitem",
-          href: carded && r.t && carded.has(cardKey(r.t)) ? "/flows/ticker/?t=" + encodeURIComponent(cardKey(r.t)) : null,
-          title: String(r.t || r.asset || DASH) + " " + MID + " low " + usd(r.boughtLo) + ", high " + usd(r.boughtHi) + " " + MID + " " + (isNum(r.buys) ?? DASH) + " filings" + (isNum(r.sells) ? " " + MID + " sold " + usd(r.sold) : ""),
-        },
-        h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
-          r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
-        rangeBar(scale, r.bought, r.boughtLo, r.boughtHi, j),
-        h("span", { class: "fu-v fu-strong pl-mid" }, usd(r.bought)),
-        h("span", V, isNum(r.filers) === null ? DASH : String(isNum(r.filers)))));
-        body.append(
-          h("div", { class: "pl-row pl-asset-row fu-head", ...HIDE }, h("span", null, "Name"), h("span", null, "Disclosed purchases"), h("span", V, "Mid"), h("span", V, "Filers")),
-          listed(UI.list(items, { visible: 8, label: "Names ranked by disclosed purchase size" })));
+  function squarify(items, x, y, w, h) {
+    const out = [];
+    const tot = items.reduce((s, i) => s + i.v, 0);
+    if (!tot) return out;
+    const k = (w * h) / tot;
+    const rest = items.map((i) => ({ i, a: i.v * k }));
+    while (rest.length) {
+      const sh = Math.min(w, h);
+      let row = [], sum = 0, best = Infinity;
+      const worst = (r, s) => {
+        const mx = Math.max(...r.map((z) => z.a)), mn = Math.min(...r.map((z) => z.a));
+        return Math.max((sh * sh * mx) / (s * s), (s * s) / (sh * sh * mn));
+      };
+      while (rest.length) {
+        const c = rest[0], nr = row.concat([c]), ns = sum + c.a, wv = worst(nr, ns);
+        if (row.length && wv > best) break;
+        row = nr; sum = ns; best = wv; rest.shift();
       }
+      const th = sum / sh;
+      let off = 0;
+      for (const z of row) {
+        const len = z.a / th;
+        if (w >= h) out.push({ i: z.i, x, y: y + off, w: th, h: len });
+        else out.push({ i: z.i, x: x + off, y, w: len, h: th });
+        off += len;
+      }
+      if (w >= h) { x += th; w -= th; } else { y += th; h -= th; }
     }
-    return body;
+    return out;
   }
 
-  function breadthView(p, feed, carded) {
-    if (!feed) {
-      const box = UI.silent({ state: "pending", reason: "This section has not been published yet." }, "Names by breadth", 200);
-      box.dataset.empty = "absent";
-      return h("div", { class: "pl-clusters" }, box);
-    }
-    if (feed.status === "unavailable") {
-      const box = UI.silent({ state: "unavailable", reason: "The vendor did not answer for this feed" + (feed.reason ? " (" + feed.reason + ")" : "") + ", so nothing is ordered here." }, "Names by breadth", 200);
-      box.dataset.empty = "unavailable";
-      return h("div", { class: "pl-clusters" }, box);
-    }
-    const rows = Array.isArray(feed.rows) ? feed.rows : [];
-    if (!rows.length) {
-      const floor = isNum(feed.minFilers);
-      const box = UI.silent({ state: "quiet", reason: floor === null
-        ? "No name in this window drew disclosed purchases from enough separate filers to clear the floor. This payload does not state what that floor was, so the emptiness cannot be read against it here."
-        : "No name in this window drew disclosed purchases from " + floor + " or more separate filers" + (isNum(feed.namesSeen) ? ", across the " + feed.namesSeen + " names that drew any" : "") + ". The floor is not relaxed to fill the panel." }, "Names by breadth", 200);
-      box.dataset.empty = "quiet";
-      return h("div", { class: "pl-clusters" }, box);
-    }
-    const maxF = Math.max(1, ...rows.map((r) => isNum(r.filers) || 0));
-    const items = rows.map((r) => {
-      const f = isNum(r.filers) || 0;
-      const linked = carded && r.t && carded.has(cardKey(r.t));
-      return h(linked ? "a" : "div", { class: "pl-row pl-cluster", role: linked ? null : "listitem", href: linked ? "/flows/ticker/?t=" + encodeURIComponent(cardKey(r.t)) : null,
-        title: String(r.t || DASH) + " " + MID + " " + f + " distinct filers " + MID + " median lag " + lagText(r.medianLagDays) + " " + MID + " midpoint " + usd(r.bought) },
-      h("span", { class: "pl-who" }, h("span", { class: "pl-who-l" }, isNum(r.freshBuys) ? h("span", { class: "pl-fresh" }, FRESH) : null, h("b", { class: "pl-tick" }, String(r.t || DASH))),
-        r.asset ? h("small", { class: "pl-asset" }, String(r.asset)) : null),
-      h("span", { class: "pl-dots", ...HIDE }, Array.from({ length: Math.min(f, 12) }, () => h("i")), f > 12 ? h("b", null, "+") : null, h("span", { class: "pl-dots-rest", style: { "--n": String(Math.max(0, maxF - f)) } })),
-      h("span", { class: "fu-v fu-strong pl-filers" }, String(f)),
-      h("span", { class: "fu-v pl-mid" }, usd(r.bought)));
-    });
-    return h("div", { class: "pl-clusters" },
-      h("div", { class: "pl-row pl-cluster fu-head", ...HIDE }, h("span", null, "Name"), h("span", null, "Distinct filers"), h("span", V, "Filers"), h("span", V, "Mid")),
-      listed(UI.list(items, { visible: 8, label: "Names ordered by the number of separate filers" })));
-  }
+  const cap1 = (s) => (typeof s === "string" && s ? s[0].toUpperCase() + s.slice(1) : null);
 
-  function clustersNote(feed) {
-    if (!feed || feed.status !== "ok" || !Array.isArray(feed.rows) || !feed.rows.length) return "";
-    const floor = isNum(feed.minFilers), cleared = isNum(feed.seen), pool = isNum(feed.namesSeen);
-    return (isNum(feed.shed) || pool === null || cleared === null ? countedNote(feed, "name", "drew fewer filers") : cleared + " of the " + pool + " names in the window clear" + (cleared === 1 ? "s" : "") + " the floor.") + " " +
-      (floor === null ? "This payload does not state the floor these rows cleared, so the ordering is drawn without it. "
-        : "The floor is " + floor + " separate filers, stated rather than tuned" + (floor === 2 ? ": two is the smallest number that could be called convergence at all. " : ", above the two that coincidence alone supplies on a market-wide window. ")) +
-      "Nothing here blends breadth with size into a single figure — each key breaks ties in the one before it, so the order can be checked by eye against the columns.";
-  }
-
-  let assetsMode = 0;
-  function mountAssets(p) {
-    const card = host.assets.closest(".fd-mod");
-    const head = card.querySelector(".ui-mod-h");
-    if (!head.querySelector(".ui-seg")) {
-      const seg = UI.segmented("Rank names by", [{ label: "Size" }, { label: "Breadth" }], (i) => {
-        assetsMode = i;
-        host.assets.replaceChildren(...paintAssets(p, i).childNodes);
-      }, 0);
-      const info = head.querySelector(".ui-info");
-      head.insertBefore(seg, info || null);
-    }
-    host.assets.replaceChildren(...paintAssets(p, assetsMode).childNodes);
-    const sizeSt = feedState(p.assets, "The window was read and no name in it drew a disclosed purchase.");
-    const breadthSt = !p.clusters ? { state: "pending", reason: "This section has not been published yet." }
-      : p.clusters.status === "unavailable" ? { state: "unavailable", reason: "The vendor did not answer for the breadth feed." }
-        : Array.isArray(p.clusters.rows) && p.clusters.rows.length ? null : { state: "quiet", reason: "No name cleared the breadth floor." };
-    setModuleState(host.assets, UI.partial([{ name: "Size", st: sizeSt || { state: "ok" } }, { name: "Breadth", st: breadthSt || { state: "ok" } }]), "Names");
-  }
-
-  function paintRecent(p) {
-    const feed = p.recent;
-    const st = feedState(feed, "The window was read and held no disclosure with a filing date.");
-    if (st) { silence(host.recent, st, "Newest", 220); return; }
-    setModuleState(host.recent, { state: "ok" }, "Newest");
-    const carded = cardedSet(p);
-    const rows = feed.rows;
-    const maxLag = Math.max(90, Math.ceil(Math.max(...rows.map((r) => isNum(r.lagDays) || 0)) / 15) * 15);
-    const mark = (STATUTE / maxLag) * 100;
-    const items = rows.map((r, i) => {
-      const lag = isNum(r.lagDays);
-      const late = lag !== null && lag > STATUTE;
-      const fresh = p.latestFiled && r.filedDate === p.latestFiled;
-      const side = r.side === "buy" ? "is-buy" : r.side === "sell" ? "is-sell" : "is-neither";
-      const owner = r.executedBy === null || r.executedBy === undefined ? null : String(r.executedBy);
-      return h("div", { class: "pl-row pl-recent", role: "listitem",
-        title: (r.who || DASH) + " " + MID + " transacted " + (r.txnDate || DASH) + ", filed " + (r.filedDate || DASH) + (r.notes ? " " + MID + " " + r.notes : "") },
-      h("span", { class: "pl-filed" }, fresh ? h("span", { class: "pl-fresh", title: "Filed on " + p.latestFiled + ", the newest disclosure date in this window." }, FRESH) : null, h("b", { "data-date": r.filedDate || "" }, F.day(r.filedDate))),
-      h("span", { class: "pl-who" }, h("b", { class: "pl-name" }, r.who || DASH),
-        h("small", { class: "pl-owner" + (owner ? "" : " is-unknown") }, owner || "not stated")),
-      r.t ? h("span", { class: "pl-who pl-what" }, tickerCell(r.t, carded), (r.asset || r.notes) ? h("small", { class: "pl-asset" }, String(r.asset || r.notes)) : null)
-        : h("span", { class: "pl-who pl-what" }, h("span", { class: "pl-asset pl-untick" }, String(r.asset || r.notes || DASH))),
-      h("span", { class: "pl-side " + side }, r.txnType || DASH),
-      h("span", { class: "fu-v pl-band fu-wide" }, bandText(r)),
-      h("span", { class: "pl-lag", ...HIDE, style: { "--mark": mark.toFixed(2) + "%" } },
-        lag === null ? null : h("i", { class: "pl-lag-a", style: { width: (Math.min(lag, STATUTE) / maxLag * 100).toFixed(2) + "%", "--i": String(i) } }),
-        late ? h("i", { class: "pl-lag-b", style: { left: mark.toFixed(2) + "%", width: ((Math.min(lag, maxLag) - STATUTE) / maxLag * 100).toFixed(2) + "%", "--i": String(i) } }) : null),
-      h("span", { class: "fu-v pl-lagv" + (late ? " pl-late" : ""), "data-tone": late ? "warn" : null, title: late ? "Past the 45 days the STOCK Act allows." : null }, lagText(r.lagDays)));
-    });
-    host.recent.replaceChildren(
-      h("div", { class: "pl-row pl-recent fu-head", ...HIDE }, h("span", null, "Filed"), h("span", null, "Filer"), h("span", null, "Name"), h("span", null, "Side"), h("span", { class: "fu-v fu-wide" }, "Range"),
-        h("span", { class: "pl-lag-axis", style: { "--mark": mark.toFixed(2) + "%" } }, h("span", null, "Trade"), h("span", { class: "pl-lag-45" }, "45d"), h("span", null, maxLag + "d")), h("span", V, "Lag")),
-      listed(UI.list(items, { visible: 10, label: "Most recent disclosures" })),
-      UI.legend([h("span", { class: "ui-key" }, h("i", { class: "pl-key-lag" }), "Days from trade to filing"), h("span", { class: "ui-key" }, h("i", { class: "is-dot", style: { "--c": UI.cssVar("--warn") } }), "Past 45 days")]));
-  }
-
-  function bandText(r) {
-    const lo = isNum(r.lo), hi = isNum(r.hi);
-    if (lo !== null && hi !== null) return usd(lo) + "–" + usd(hi);
-    if (lo !== null) return "over " + usd(lo);
-    if (isNum(r.mid) !== null) return usd(r.mid);
-    return DASH;
-  }
-
-  function recentNote(p) {
-    const feed = p.recent;
-    if (!feed || !Array.isArray(feed.rows) || !feed.rows.length) return "";
-    let late = 0, dated = 0, fresh = 0;
-    for (const r of feed.rows) {
-      if (isNum(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
-      if (p.latestFiled && r.filedDate === p.latestFiled) fresh++;
-    }
-    return [countedNote(feed, "disclosure", "were filed earlier"),
-      dated ? late + " of the " + dated + " shown were filed past the 45 days the STOCK Act allows, which is the ordinary case rather than the exception." : "",
-      freshNote(p, fresh)].filter(Boolean).join(" ");
-  }
-
-  function holdersShown(on) {
-    const card = document.getElementById("plHoldersCard");
-    if (card) card.hidden = !on;
-  }
-
-  function paintHolders(p) {
-    const feed = p.holders;
-    const st = feedState(feed, "The feed answered and named no holder in the board’s names.");
-    holdersShown(!(st && st.kind === "unavailable" && /HTTP 4(?!08|29)\d\d/.test(String(feed.reason))));
-    if (st) { silence(host.holders, st, "Holdings", 120); return; }
-    setModuleState(host.holders, { state: "ok" }, "Holdings");
-    const maxQ = Math.max(1, ...feed.rows.map((r) => isNum(r.maxQty) || 0));
-    const items = feed.rows.map((r) => {
-      const lo = isNum(r.minQty), hi = isNum(r.maxQty);
-      return h("div", { class: "pl-row pl-holder", role: "listitem" },
-        h("span", { class: "pl-who" }, h("b", { class: "pl-name" }, r.who || DASH), h("small", { class: "pl-owner" + (r.owner === null || r.owner === undefined ? " is-unknown" : "") }, r.owner === null || r.owner === undefined ? "not stated" : String(r.owner))),
-        h("b", { class: "pl-tick" }, String(r.t || DASH)),
-        h("span", { class: "pl-bar", ...HIDE }, lo !== null && hi !== null ? h("i", { class: "pl-bar-band", style: { left: (lo / maxQ * 100).toFixed(2) + "%", width: Math.max(0.4, (hi - lo) / maxQ * 100).toFixed(2) + "%" } }) : null),
-        h("span", { class: "fu-v pl-q" }, qty(r.minQty) + "–" + qty(r.maxQty)),
-        h("span", { class: "fu-v fu-strong pl-q" }, qty(r.midQty)));
-    });
-    host.holders.replaceChildren(
-      h("div", { class: "pl-row pl-holder fu-head", ...HIDE }, h("span", null, "Holder"), h("span", null, "Name"), h("span", null, "Range"), h("span", V, "Low–high"), h("span", V, "Mid")),
-      listed(UI.list(items, { visible: 8, label: "Politician portfolio holders" })));
-  }
-
-  function holdersNote(p) {
-    const feed = p.holders;
-    if (!feed || feed.status !== "ok") return { lead: null, notes: [] };
-    const known = isNum(feed.ownerKnown), self = isNum(feed.selfFiled);
+  function cardFields(c) {
+    if (!c || typeof c !== "object" || !c.panels || typeof c.panels !== "object") return null;
+    const vol = c.x && c.x.vol && typeof c.x.vol === "object" ? c.x.vol : null;
+    const reg = c.regime && typeof c.regime === "object" ? c.regime : null;
+    const track = c.panels.premiumTrack && Array.isArray(c.panels.premiumTrack.rows) ? c.panels.premiumTrack.rows : [];
+    let last = null;
+    for (const r of track) if (r && finite(r.p) !== null) last = r;
+    const overlay = c.panels.scoreOverlay && Array.isArray(c.panels.scoreOverlay.rows) ? c.panels.scoreOverlay.rows : [];
+    const closes = overlay.filter((r) => r && typeof r.d === "string" && finite(r.close) !== null).map((r) => [r.d, r.close]);
+    const trades = c.panels.congress && c.panels.congress.status === "ok" && Array.isArray(c.panels.congress.trades) ? c.panels.congress.trades : null;
+    const iv = vol && finite(vol.iv30Pct) !== null ? Math.round(vol.iv30Pct * 100) : null;
     return {
-      lead: "Holdings by politician in the names the board went deep on. The figures are a " + String(feed.qtyUnit || "quantity the vendor does not define").replace(/\.?$/, ".") + " They are not summed with, or ranked against, the dollar bands above.",
-      notes: [countedNote(feed, "holding", "hold less by the vendor's own midpoint"),
-        known ? self + " of the " + known + " holdings with a stated account are the filer’s own; the rest are a spouse’s, a dependant’s or joint."
-          : "The vendor stated an account owner on none of these rows, so the share held in a filer’s own name is UNKNOWN here — which is not the same fact as all of them being their own."],
+      conviction: finite(c.conviction),
+      ivRank: iv,
+      iv30: vol && finite(vol.iv30) !== null ? vol.iv30 : null,
+      gammaBook: reg ? cap1(reg.label) : null,
+      gammaFlow: reg ? cap1(reg.flowLabel) : null,
+      flowP: last ? last.p : null,
+      flowDay: last && typeof last.d === "string" ? last.d : null,
+      asOf: typeof c.sessionDate === "string" ? c.sessionDate : null,
+      px: c.panels.surface && finite(c.panels.surface.spot) !== null ? c.panels.surface.spot : null,
+      closes,
+      trades: trades ? trades.filter((x) => x && typeof x === "object") : null,
     };
   }
 
-  function idle(st, hh) {
-    holdersShown(true);
-    for (const [el, label] of [[host.buyers, "Buyers"], [host.assets, "Names"], [host.recent, "Newest"], [host.holders, "Holdings"]]) silence(el, st, label, label === "Holdings" ? 160 : hh);
-    host.chips.replaceChildren(UI.chips(["Disclosures", "Newest", "Buyers", "Names", "Late"].map((label) =>
-      UI.gaugeChip({ g: UI.iconChip((UI.STATES[st.state] || UI.STATES.unavailable).g, "--label-3"), value: DASH, label, info: { title: label, state: st.state, lead: st.reason } })), "Disclosure window"));
+  if (typeof document === "undefined") {
+    globalThis.__PoliticalTest = Object.freeze({ netBounds, stateOf, blind, weight, squarify, initials, cardFields, FUNDS: [...FUNDS] });
+    return;
   }
 
-  function paintChips(p) {
-    const recent = p.recent && Array.isArray(p.recent.rows) ? p.recent.rows : [];
-    let late = 0, dated = 0;
-    for (const r of recent) if (isNum(r.lagDays) !== null) { dated++; if (r.lagDays > STATUTE) late++; }
-    const filings = isNum(p.filings);
-    host.chips.replaceChildren(UI.chips([
-      UI.gaugeChip({ icon: "hall", color: "--accent-ink", value: filings === null ? DASH : filings.toLocaleString("en-US"), label: "Disclosures",
-        info: { title: "Disclosures", lead: "Statutory filings in the window.", facts: [["Window", p.window && p.window.from ? p.window.from + " to " + (p.window.to || "") : null]] } }),
-      UI.gaugeChip({ icon: "live", color: "--up", value: isNum(p.freshFilings) === null ? DASH : String(isNum(p.freshFilings)), label: p.latestFiled ? "Filed " + F.day(p.latestFiled) : "Newest",
-        info: { title: "Newest filings", lead: p.latestFiled ? "Disclosures filed on " + p.latestFiled + ", the newest filing date in the window." : "The payload carries no newest filing date." } }),
-      UI.gaugeChip({ icon: "long", color: "--up", value: p.buyers && isNum(p.buyers.seen) !== null ? String(isNum(p.buyers.seen)) : DASH, label: "Buyers",
-        info: { title: "Buyers", lead: "Filers who disclosed at least one purchase in the window." } }),
-      UI.gaugeChip({ icon: "list", color: "--label-2", value: p.assets && isNum(p.assets.seen) !== null ? String(isNum(p.assets.seen)) : DASH, label: "Names",
-        info: { title: "Names", lead: "Listed names that drew at least one disclosed purchase." } }),
-      UI.gaugeChip({ ring: dated ? late / dated : null, color: "--warn", value: dated ? Math.round((late / dated) * 100) + "%" : DASH, label: "Late",
-        info: { title: "Late filings", lead: "Share of the newest disclosures filed past the 45 days the STOCK Act allows." } }),
-    ], "Disclosure window"));
+  const UI = window.FlowsUI;
+  const status = document.getElementById("plStatus");
+  if (!UI || !status) return;
+  const { F, isNum } = UI;
+  const usd = F.unit.of("moneyCompact", { dp: "short" });
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const mobile = () => matchMedia("(max-width:899px)").matches;
+  const coarse = () => matchMedia("(pointer:coarse)").matches;
+  const dms = (s) => Date.parse(s + "T00:00:00Z");
+  const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const fday = (s) => F.day(s);
+  const fwd = (s) => (typeof s === "string" && !Number.isNaN(dms(s)) ? WD[new Date(dms(s)).getUTCDay()] + " " + fday(s) : DASH);
+  const addDays = (s, n) => new Date(dms(s) + n * DAY).toISOString().slice(0, 10);
+  const smoney = (v) => usd(v, true);
+  const spct = (v) => F.pct(v, 1, true);
+  const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
+
+  let P = null, ALL = [], carded = new Set(), WIN = null, ASOF = null, minFilers = 3, seen = null, recent = [], tapeNamed = [];
+  const S = { tab: "acc", view: "map", size: "usd", funds: false, sort: null, sel: null, win: 90, topN: 10, tabs: null };
+  const cards = new Map();
+  let tiles = [];
+  let cardTimer = 0;
+
+  const byNet = (a, b) => b.net - a.net;
+  const byNetAsc = (a, b) => a.net - b.net;
+  const byFilers = (a, b) => b.filers - a.filers || b.B - a.B;
+  const TABS = [
+    { id: "acc", label: "Accumulating", f: (x) => x.net > 0, def: "net", cmp: byNet },
+    { id: "red", label: "Reducing", f: (x) => x.net < 0, def: "net", cmp: byNetAsc },
+    { id: "cvg", label: "Convergence", f: (x) => x.filers >= minFilers, def: "filers", cmp: byFilers },
+  ];
+  const tabOf = (id) => TABS.find((t) => t.id === id) || TABS[0];
+  const tabNote = (t) => TAB_NOTES[t.id].replace("{n}", String(minFilers));
+  const pool = () => ALL.filter((x) => S.funds || !x.fund);
+  const sortKey = () => S.sort || tabOf(S.tab).def;
+  const cmpFor = () => {
+    const k = sortKey();
+    if (k === "filers") return byFilers;
+    if (k === "lag") return (a, b) => (b.lag || 0) - (a.lag || 0) || b.g - a.g;
+    return tabOf(S.tab).cmp;
+  };
+  const rowsOf = (tab) => {
+    const t = tab || tabOf(S.tab);
+    return pool().filter(t.f).sort(tab ? tab.cmp : cmpFor());
+  };
+  const tabFor = (x) => (x.net < 0 ? "red" : "acc");
+
+  function cardEvents(cf) {
+    return cf.trades.map((x) => ({ who: x.member, ch: chOf(x.chamber), side: x.side, lo: x.amountLow, hi: x.amountHigh, txn: x.txnDate, filed: x.filedDate }))
+      .filter((e) => e.who && (e.side === "buy" || e.side === "sell") && finite(e.lo) !== null && finite(e.hi) !== null && typeof e.txn === "string" && typeof e.filed === "string");
+  }
+  function feedEvents(t) {
+    return recent.filter((x) => x.t === t && (x.side === "buy" || x.side === "sell") && finite(x.lo) !== null && finite(x.hi) !== null && x.txnDate && x.filedDate)
+      .map((x) => ({ who: x.who, ch: chOf(x.memberType), side: x.side, lo: x.lo, hi: x.hi, txn: x.txnDate, filed: x.filedDate }));
   }
 
-  function paintMeta(p) {
-    const w = p.window || {}, src = p.source || {};
-    const bits = [];
-    if (w.from && w.to) bits.push(F.day(w.from) + " – " + F.day(w.to));
-    if (isNum(w.days) !== null) bits.push(isNum(w.days) + " days");
-    let warnText = null;
-    if (src.paginated === false) warnText = "The vendor returned the same page twice, so only the first was kept: this window is one page deep rather than the " + (src.pages || 1) + " it asked for. The ranking is over that narrower population.";
-    if (src.windowed === false) warnText = "The windowed route refused, so this page is the most recent disclosures the vendor will return in one call, with no date range. The ranking is over that selection rather than over the window named above.";
-    const pill = h("button", { class: "fd-pill", type: "button", id: "plSource", hidden: warnText ? null : true,
-      "aria-haspopup": "dialog", "aria-controls": "fxPop", "data-info": UI.info(() => ({ title: "A narrower read", state: "quiet", lead: warnText })) }, UI.glyph("stack"), "Partial read");
-    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), h("span", null, b)] : [h("span", null, b)])), pill);
+  function prep(r) {
+    const b = netBounds(r), st = stateOf(r);
+    if (!b || !st || !r.t) return null;
+    const B = r.bought, Sd = finite(r.sold) || 0, g = B + Sd;
+    const lag = finite(r.medianLagDays);
+    return {
+      r, t: r.t, B, S: Sd, net: b.mid, g, lo: b.lo, hi: b.hi, share: g > 0 ? b.mid / g : 0, st,
+      lag, blind: blind(lag, WIN), filers: finite(r.filers) || 0, buys: finite(r.buys) || 0, sells: finite(r.sells) || 0,
+      fresh: finite(r.freshBuys), fund: FUNDS.has(String(r.t).toUpperCase()), has: carded.has(cardKey(r.t)),
+    };
   }
 
-  function paintStatus(p) {
-    const w = p.window || {}, src = p.source || {};
-    const pages = isNum(src.pages);
-    const how = src.route ? "via " + src.route + (pages !== null ? ", " + pages + " page" + (pages === 1 ? "" : "s") + " deep" : "") : "";
-    const freshCount = isNum(p.freshFilings), filings = isNum(p.filings);
-    const filedWhen = w.from ? " filed between " + w.from + " and " + (w.to || "today") : "";
-    const read = Date.parse(String(p.readAt || ""));
-    status.textContent = [
-      filings === null ? (filedWhen ? "Disclosures" + filedWhen : "") : filings + " disclosure" + (filings === 1 ? "" : "s") + filedWhen,
-      freshCount !== null && p.latestFiled ? freshCount + " of them on " + p.latestFiled + ", the newest filing date here" : "",
-      how,
-      isNum(p.unusable) ? isNum(p.unusable) + " carried no filer or name and were dropped" : "",
-      F.stamp(read) ? "read " + F.stamp(read) : "",
-    ].filter(Boolean).join(" · ");
+  function cardOf(x) {
+    const e = cards.get(x.t);
+    return e && e.state === "ok" ? e.cf : null;
+  }
+  function eventsOf(x) {
+    const cf = cardOf(x);
+    if (cf && cf.trades && cf.trades.length) { const ev = cardEvents(cf); if (ev.length) return { evs: ev, src: "card" }; }
+    return { evs: feedEvents(x.t), src: "feed" };
   }
 
-  let P = null;
-  function wireInfos() {
-    const notes = () => (P && P.notes) || {};
-    if (host.about && !host.about.firstChild) {
-      const src = document.getElementById("plAbout");
-      host.about.append(UI.infoButton("this page", () => ({
-        title: "Political",
-        lead: P ? status.textContent : null,
-        sections: [
-          { title: "What a row is", lines: [notes().unit, notes().lag] },
-          { title: "Size and breadth", lines: [notes().size, notes().listed, notes().breadth] },
-          { title: "New and attributed", lines: [notes().fresh, notes().attribution] },
-          { title: "Refused", lines: [notes().refusals] },
-        ],
-        node: src ? h("div", { class: "fd-about-pop" }, [...src.children].map((x) => x.cloneNode(true))) : null,
-      })));
+  let dlo = 0, dhi = 1;
+  const sq = (v) => Math.sign(v) * Math.sqrt(Math.abs(v));
+  const domain = (rows) => {
+    let a = 0, b = 0;
+    for (const x of rows) { a = Math.min(a, x.lo); b = Math.max(b, x.hi); }
+    dlo = a; dhi = b > a ? b : a + 1;
+  };
+  const pos = (v) => (100 * (sq(v) - sq(dlo))) / (sq(dhi) - sq(dlo));
+
+  function ringSvg(f) {
+    const c = 2 * Math.PI * RING_R;
+    return '<svg class="ring" viewBox="0 0 22 22" aria-hidden="true" data-blind="' + f.toFixed(4) + '"><circle cx="11" cy="11" r="' + RING_R + '"/><circle cx="11" cy="11" r="' + RING_R + '" stroke-dasharray="' + (c * f).toFixed(1) + " " + c.toFixed(1) + '" transform="rotate(-90 11 11)"/></svg>';
+  }
+
+  function renderMap(rows) {
+    const host = $("plMap");
+    const W = host.clientWidth, H = host.clientHeight;
+    if (!W || !H) return;
+    const cap = mobile() ? 12 : 18;
+    const top = rows.slice().sort((a, b) => (S.size === "usd" ? b.g - a.g : b.filers - a.filers || b.g - a.g)).slice(0, cap);
+    if (S.sel && !top.some((x) => x.t === S.sel)) {
+      const s = rows.find((x) => x.t === S.sel);
+      if (s) { top.pop(); top.push(s); }
     }
-    setModuleInfo(host.buyers, "buyers", () => ({
-      title: "Buyers",
-      lead: "Filers ranked by the summed midpoint of their disclosed purchases. The bar is that midpoint on one axis shared by every row; the pale band across it runs from the summed low to the summed high of the same filings. Lag is the median days from trade to filing.",
-      notes: [P ? buyersNote(P) : null, P && P.buyers && P.buyers.basis ? String(P.buyers.basis) : null],
-    }));
-    setModuleInfo(host.assets, "names", () => ({
-      title: "Names",
-      lead: "Size ranks names by the summed midpoint of disclosed purchases across every filer. Breadth orders them by how many distinct filers disclosed a purchase, then by median lag, then by size.",
-      sections: [
-        { title: "Size", lines: [P && P.assets && Array.isArray(P.assets.rows) ? [countedNote(P.assets, "name"), overlapNote(P.assets.rows), openNote(P.assets.rows, "purchases"), ownerNote(P.assets.rows, "names"), freshNote(P, P.assets.rows.filter((r) => isNum(r.freshBuys)).length, "carrying a purchase disclosed on")].filter(Boolean).join(" ") : null] },
-        { title: "Breadth", lines: [P && P.clusters ? clustersNote(P.clusters) : null, P && P.clusters && P.clusters.basis ? String(P.clusters.basis) : null, "Size is the weakest thing this data knows: one account’s large purchase of a single name outranks several separate filers converging on another wherever dollars decide the order."] },
-        { title: "Links", lines: [P && Array.isArray(P.carded) ? "A name is a link where the board published a detail card for it and plain text where it did not; the list of carded names comes from the payload." : "Names are plain text: this payload carries no list of the names a detail card exists for."] },
-      ],
-    }));
-    setModuleInfo(host.recent, "the newest disclosures", () => ({
-      title: "Newest",
-      lead: "Newest disclosure first, not newest transaction: the filing is what changed. The bar runs from the trade to its filing; the part past the 45-day mark is late under the STOCK Act.",
-      notes: [P ? recentNote(P) : null, "The side is the filing's own word: a gift or a receipt is neither a purchase nor a sale."],
-    }));
-    setModuleInfo(host.holders, "holdings", () => {
-      const hn = P ? holdersNote(P) : { lead: null, notes: [] };
-      return { title: "Holdings", lead: hn.lead || "Holdings by politician in the names the board went deep on, when the vendor answers for them.", notes: hn.notes };
+    const items = top.map((r) => ({ r, v: weight(r.r, S.size) })).sort((a, b) => b.v - a.v);
+    const lay = squarify(items, 0, 0, W, H);
+    tiles = lay.map((l) => ({ t: l.i.r.t, cx: l.x + l.w / 2, cy: l.y + l.h / 2 }));
+    const hasSel = lay.some((z) => z.i.r.t === S.sel);
+    host.innerHTML = lay.map((l, ix) => {
+      const r = l.i.r, w = l.w - 3, h = l.h - 3;
+      const big = w >= 96 && h >= 64, mid = w >= 62 && h >= 44;
+      const i = Math.min(1, Math.abs(r.share));
+      const aria = r.t + ", " + STL[r.st] + ", net " + smoney(r.net) + " estimated, " + plural(r.filers, "distinct filer", "distinct filers");
+      let inner = '<span class="t">' + esc(r.t) + "</span>";
+      if (mid) inner += '<span class="n"><span class="gl ' + TONE[r.st] + '-t">' + GLY[r.st] + "</span>" + smoney(r.net) + "</span>";
+      if (big) inner += '<span class="f">' + plural(r.filers, "filer", "filers") + "</span>";
+      return '<button type="button" class="pl-tile ' + r.st + (w < 62 ? " sm" : "") + '" data-t="' + esc(r.t) + '" style="left:' + (l.x + 1.5) + "px;top:" + (l.y + 1.5) + "px;width:" + w + "px;height:" + h + "px;--i:" + i.toFixed(2) + '" tabindex="' + (r.t === S.sel || (ix === 0 && !hasSel) ? 0 : -1) + '" aria-pressed="' + (r.t === S.sel) + '" aria-label="' + esc(aria) + '">' + (w >= 48 && h >= 44 && r.blind !== null ? ringSvg(r.blind) : "") + inner + "</button>";
+    }).join("");
+    if (!lay.length) host.innerHTML = '<div class="pl-empty">Nothing in this view.</div>';
+  }
+
+  function flCell(x) {
+    const e = cards.get(x.t);
+    if (e && e.state === "ok" && e.cf.conviction !== null) {
+      return '<span class="pl-fl" title="Flows card: conviction ' + e.cf.conviction + " of 100" + (e.cf.ivRank === null ? "" : ", IV rank " + e.cf.ivRank) + '"><b>' + e.cf.conviction + "</b>" + (e.cf.ivRank === null ? "" : " · IVR " + e.cf.ivRank) + "</span>";
+    }
+    if (x.has || (e && e.state === "ok")) return '<span class="pl-fl mut-t" title="This name has a Flows card. Select it to read the card.">card ↗</span>';
+    return '<span class="pl-fl mut-t">' + DASH + "</span>";
+  }
+
+  function rowHTML(x, rank) {
+    const col = x.net > 0 ? "var(--up-mark)" : x.net < 0 ? "var(--down-mark)" : "var(--label-3)";
+    const a = pos(0), b = pos(x.net), bl = Math.min(a, b), bw = Math.abs(b - a), wl = pos(x.lo), wr = pos(x.hi);
+    const tone = x.net > 0 ? "up" : x.net < 0 ? "down" : "mut";
+    const lagTxt = x.lag === null ? DASH : Math.round(x.lag) + " d" + (x.blind === null ? "" : " · " + Math.round(x.blind * 100) + "%");
+    const e = cards.get(x.t);
+    const hasCard = x.has || (e && e.state === "ok");
+    return '<div class="pl-row" role="option" data-t="' + esc(x.t) + '" aria-selected="' + (x.t === S.sel) + '" tabindex="' + (x.t === S.sel ? 0 : -1) + '" aria-label="' + esc(x.t + ", rank " + rank + ", " + STL[x.st] + ", net " + smoney(x.net) + " estimated, " + plural(x.filers, "distinct filer", "distinct filers") + ", " + plural(x.buys, "buy", "buys") + ", " + plural(x.sells, "sell", "sells")) + '">' +
+      '<span class="pl-rk">' + rank + "</span>" +
+      '<span class="pl-tk">' + esc(x.t) + "<i class='" + (hasCard ? "" : "n") + "' title='" + (hasCard ? "Has a Flows card" : "No Flows card") + "'></i></span>" +
+      '<span class="pl-bar" aria-hidden="true"><span class="z" style="left:' + pos(0).toFixed(2) + '%"></span><span class="b" style="left:' + bl.toFixed(2) + "%;width:" + bw.toFixed(2) + "%;background:" + col + '"></span><span class="w" style="left:' + wl.toFixed(2) + "%;width:" + Math.max(0, wr - wl).toFixed(2) + '%"></span></span>' +
+      '<span class="pl-num ' + tone + '-t">' + (x.net > 0 ? "▲ " : x.net < 0 ? "▼ " : "") + smoney(x.net) + "<small>" + usd(x.lo) + " to " + usd(x.hi) + "</small></span>" +
+      '<span class="pl-num">' + x.filers + "</span>" +
+      '<span class="pl-num hide-m hide-s"><span class="up-t">' + x.buys + '</span>/<span class="down-t">' + x.sells + "</span></span>" +
+      '<span class="pl-bl hide-m" title="Median lag ' + (x.lag === null ? "unknown" : x.lag + " days") + ': trades in about that last stretch are typically not yet filed"><span>' + lagTxt + "</span><i><s style=\"width:" + ((x.blind || 0) * 100).toFixed(0) + '%"></s></i></span>' +
+      '<span class="hide-m hide-s">' + flCell(x) + "</span></div>";
+  }
+
+  function renderList(rows) {
+    domain(rows);
+    const box = $("plList");
+    const rh = parseFloat(getComputedStyle(document.querySelector(".pl-row") || box).getPropertyValue("--rh")) || (mobile() || coarse() ? 44 : 36);
+    S.topN = Math.max(4, Math.floor(box.clientHeight / rh));
+    let shown = rows.slice(0, S.topN), html = null;
+    if (S.sel && !shown.some((x) => x.t === S.sel)) {
+      const i = rows.findIndex((x) => x.t === S.sel);
+      if (i >= 0) {
+        shown = rows.slice(0, S.topN - 1);
+        html = shown.map((x, k) => rowHTML(x, k + 1)).join("") + rowHTML(rows[i], i + 1);
+      }
+    }
+    if (html === null) html = shown.map((x, k) => rowHTML(x, k + 1)).join("");
+    box.innerHTML = rows.length ? html : '<div class="pl-empty">Nothing in this view.</div>';
+    if (!box.querySelector('.pl-row[tabindex="0"]')) { const f = box.querySelector(".pl-row"); if (f) f.tabIndex = 0; }
+    $("plAxis").textContent = mobile() ? "Net, low to high" : "Net, √ scale, low to high";
+    for (const b of document.querySelectorAll(".pl-bh button[data-sort]")) b.setAttribute("aria-pressed", String(b.dataset.sort === sortKey()));
+  }
+
+  function drawTabs() {
+    const base = pool();
+    $("plTabs").innerHTML = TABS.map((t) => '<button type="button" role="tab" id="plTab-' + t.id + '" aria-selected="' + (t.id === S.tab) + '" tabindex="' + (t.id === S.tab ? 0 : -1) + '" data-id="' + t.id + '" aria-controls="plMain">' + t.label + " <em>" + base.filter(t.f).length + "</em></button>").join("");
+  }
+
+  function renderMain() {
+    drawTabs();
+    const tab = tabOf(S.tab);
+    const rows = rowsOf();
+    if (!rows.some((x) => x.t === S.sel)) S.sel = rows[0] ? rows[0].t : null;
+    const isMap = S.view === "map";
+    $("plMap").style.display = isMap ? "" : "none";
+    $("plListView").style.display = isMap ? "none" : "flex";
+    $("plSizeSeg").style.display = isMap ? "" : "none";
+    $("plLegend").style.display = isMap ? "" : "none";
+    for (const b of $("plViewSeg").children) b.setAttribute("aria-pressed", String(b.dataset.view === S.view));
+    for (const b of $("plSizeSeg").children) b.setAttribute("aria-pressed", String(b.dataset.size === S.size));
+    if (isMap) renderMap(rows); else renderList(rows);
+    $("plLegend").innerHTML = ["accF", "accM", "mix", "redM"].map((k) => '<span><i class="sw ' + k + '"></i>' + STS[k] + "</span>").join("") + "<span>◔ share still unfiled</span>";
+    $("plFnote").textContent = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab) : tabNote(tab);
+    const fundN = ALL.filter((x) => x.fund).length;
+    const hid = !S.funds && fundN;
+    const fb = $("plFundBtn");
+    fb.style.display = fundN ? "" : "none";
+    fb.textContent = S.funds ? "Hide " + fundN + " funds" : hid + " funds hidden · Include";
+    fb.setAttribute("aria-pressed", String(S.funds));
+    fb.setAttribute("aria-label", S.funds ? "Hide index and bond funds" : hid + " index and bond funds are hidden. Include them.");
+    $("plAllBtn").textContent = "Show all " + rows.length;
+    $("plAllBtn").style.display = (isMap ? rows.length > (mobile() ? 12 : 18) : rows.length > S.topN) ? "" : "none";
+    $("plAllBtn").setAttribute("aria-label", "Show all " + rows.length + " stocks in " + tab.label);
+    renderSel();
+    if (S.sel) loadCard(S.sel);
+  }
+
+  function evHTML(x, ev) {
+    const evs = ev.evs;
+    if (!evs.length) {
+      return '<div class="pl-who"></div><span class="sub c">Filer names are not in this payload for this stock; the count of distinct filers is the evidence. The feed lists only the ' + recent.length + " newest filings overall, and none names " + esc(x.t) + ".</span>";
+    }
+    const g = new Map();
+    for (const e of evs) {
+      if (!g.has(e.who)) g.set(e.who, { who: e.who, ch: e.ch, b: 0, s: 0, mid: 0 });
+      const o = g.get(e.who);
+      if (e.side === "buy") o.b++; else o.s++;
+      o.mid += (e.lo + e.hi) / 2;
+    }
+    const arr = [...g.values()].sort((a, b) => b.mid - a.mid);
+    const max = mobile() ? 5 : 3;
+    const monos = arr.slice(0, max).map((o) => {
+      const k = o.b && o.s ? "m" : o.b ? "b" : "s";
+      const act = (o.b ? plural(o.b, "buy", "buys") : "") + (o.b && o.s ? ", " : "") + (o.s ? plural(o.s, "sale", "sales") : "");
+      return '<span class="pl-mono ' + k + '" title="' + esc(o.who + ", " + CHAMBER[o.ch] + ": " + act) + '" aria-label="' + esc(o.who + ", " + CHAMBER[o.ch] + ", " + act) + '"><b aria-hidden="true">' + esc(initials(o.who)) + "</b>" + o.ch + " " + (o.b ? "▲" + o.b : "") + (o.b && o.s ? " " : "") + (o.s ? "▼" + o.s : "") + "</span>";
+    }).join("") + (arr.length > max ? '<span class="pl-mono" style="padding-left:9px">+' + (arr.length - max) + "</span>" : "");
+    const hs = arr.filter((o) => o.ch === "H").length, sn = arr.filter((o) => o.ch === "S").length, ex = arr.filter((o) => o.ch === "E").length;
+    const line = ev.src === "card" ? "From the card's disclosure list: " + plural(evs.length, "filing", "filings") + ", " + plural(arr.length, "filer", "filers") + "." : evs.length + " of the " + recent.length + " newest filings name it. The other filers behind its totals are not named.";
+    return '<div class="pl-who">' + monos + '</div><span class="sub c">' + line + " House " + hs + " · Senate " + sn + (ex ? " · Exec " + ex : "") + ".</span>";
+  }
+
+  function closeOn(closes, d) {
+    let v = null;
+    for (const [dd, px] of closes) { if (dd <= d) v = px; else break; }
+    return v;
+  }
+
+  function ctxHTML(x, evs) {
+    const kv = (a, b) => '<div class="kv"><span>' + a + "</span><b>" + b + "</b></div>";
+    const e = cards.get(x.t);
+    const rows = (v) => kv("Conviction", v[0]) + kv("IV rank", v[1]) + kv("Dealer γ book", v[2]) + kv("Dealer γ flow", v[3]) + kv("Premium C−P", v[4]) + kv("Price since", v[5]);
+    const dash = [DASH, DASH, DASH, DASH, DASH, DASH];
+    if (!e || e.state === "pending") return { head: "", html: rows(dash) + '<span class="sub c">The Flows card appears here once it is read.</span>' };
+    if (e.state === "absent") return { head: "", html: rows(dash) + '<span class="sub c">No Flows card: not in the nightly universe.</span>' };
+    if (e.state === "failed") return { head: "", html: rows(dash) + '<span class="sub c">' + esc(e.reason) + ' <button type="button" class="link" data-retry="' + esc(x.t) + '">Retry</button></span>' };
+    const cf = e.cf;
+    let since = null, why = "no closes";
+    const nb = evs.filter((v) => v.side === "buy").sort((a, b) => (a.txn < b.txn ? 1 : -1))[0];
+    if (cf.px !== null && nb) {
+      const p0 = closeOn(cf.closes, nb.txn);
+      if (p0) since = cf.px / p0 - 1; else why = "no close before " + fday(nb.txn);
+    } else if (!nb) why = "no buy rows";
+    const a = Math.sign(x.net), f = cf.flowP === null ? 0 : Math.sign(cf.flowP);
+    const ag = cf.flowP === null ? "No net premium was published for this name." : f === 0 ? "Net premium is flat, so options flow neither agrees nor disagrees." : a === f ? "Options flow agrees with the filings. A check, not a signal." : "Options flow (" + (f > 0 ? "net calls" : f < 0 ? "net puts" : "flat") + ") disagrees: filings are weeks old.";
+    const tn = (v) => (v === null ? "mut" : v > 0 ? "up" : v < 0 ? "down" : "mut");
+    const miss = [];
+    if (cf.conviction === null) miss.push("conviction");
+    if (cf.ivRank === null) miss.push("IV rank");
+    if (cf.gammaBook === null || cf.gammaFlow === null) miss.push("dealer gamma");
+    if (cf.flowP === null) miss.push("net premium");
+    return {
+      head: cf.asOf ? "card " + fday(cf.asOf) : "",
+      html: rows([
+        cf.conviction === null ? DASH : cf.conviction + " /100",
+        cf.ivRank === null ? DASH : cf.ivRank + (cf.iv30 === null ? "" : " · IV " + F.pct(cf.iv30, 1)),
+        cf.gammaBook || DASH,
+        cf.gammaFlow || DASH,
+        cf.flowP === null ? DASH : '<span class="' + tn(cf.flowP) + '-t">' + smoney(cf.flowP) + "</span>",
+        since === null ? DASH : '<span class="' + tn(since) + '-t">' + spct(since) + "</span>",
+      ]) + '<span class="sub c" title="Net premium is calls minus puts, in dollars">' + ag + (since === null ? " Price since: " + why + "." : "") + (miss.length ? " Not on the card: " + miss.join(", ") + "." : "") + "</span>",
+    };
+  }
+
+  function renderSel() {
+    const x = ALL.find((a) => a.t === S.sel);
+    const el = $("plRail");
+    if (!x) {
+      el.innerHTML = '<div class="pl-empty">Select a stock.</div>';
+      $("plSelbar").innerHTML = "";
+      return;
+    }
+    const tone = TONE[x.st];
+    const ev = eventsOf(x);
+    const ws = x.lag === null || !ASOF ? null : addDays(ASOF, -Math.round(x.lag));
+    const kv = (a, b) => '<div class="kv"><span>' + a + "</span><b>" + b + "</b></div>";
+    const cx = ctxHTML(x, ev.evs);
+    const bw = x.lag === null || !ws ? "Lag not published; nothing inferred." : "Trades since about " + fday(ws) + " are typically still unfiled. No dollars imputed.";
+    el.innerHTML =
+      '<div class="pl-rhead"><span class="big">' + esc(x.t) + '</span><span class="pl-st ' + x.st + '">' + GLY[x.st] + ' <span class="l">' + STL[x.st] + '</span><span class="s">' + STS[x.st] + '</span></span><span class="why">' + WHY[x.st] + " " + plural(x.filers, "filer", "filers") + (x.filers >= minFilers ? ", broad" : ", narrow") + '.</span><a class="pl-open" href="/flows/ticker/?t=' + encodeURIComponent(x.t) + '" aria-label="Open the ' + esc(x.t) + ' ticker page">Open ticker ↗</a></div>' +
+      '<div class="pl-rc first"><h3>Disclosed dollars</h3>' + kv("Buys", '<span class="up-t">' + usd(x.B) + "</span>") + kv("Range", usd(x.r.boughtLo) + "–" + usd(x.r.boughtHi)) + kv("Sells mid", '<span class="down-t">' + usd(x.S) + "</span>") + kv("Net mid", '<span class="' + tone + '-t">' + smoney(x.net) + "</span>") + kv("Net low bound", smoney(x.lo)) + "</div>" +
+      '<div class="pl-rc"><h3>Breadth, freshness</h3>' + kv("Distinct filers", x.filers) + kv("Filings buy / sell", '<span class="up-t">' + x.buys + '</span> / <span class="down-t">' + x.sells + "</span>") + kv("Median lag", x.lag === null ? DASH : Math.round(x.lag) + " d") + kv("Filed " + (ASOF ? fday(ASOF) : DASH), x.buys && x.fresh !== null ? x.fresh + " of " + x.buys + " buys" : DASH) + "</div>" +
+      '<div class="pl-rc chart"><h3>Traded vs filed<span class="pl-seg sm" role="group" aria-label="Chart window"><button type="button" data-w="30" aria-pressed="' + (S.win === 30) + '">30 d</button><button type="button" data-w="90" aria-pressed="' + (S.win === 90) + '">90 d</button></span></h3><div class="pl-svgwrap" id="plSvg" role="img" aria-label=""></div><span class="sub c" id="plStNote"></span></div>' +
+      '<div class="pl-rc ctx"><h3>Flows context<span class="tx">' + esc(cx.head) + "</span></h3>" + cx.html + "</div>" +
+      '<div class="pl-rc ev"><h3>Evidence<span class="tx">' + (ev.evs.length ? ev.evs.length + " rows" : "names not in feed") + "</span></h3>" + evHTML(x, ev) + "</div>";
+    $("plSelbar").innerHTML = "<b>" + esc(x.t) + '</b><span><span class="' + tone + '-t">' + GLY[x.st] + "</span> " + STS[x.st] + '</span><span style="margin-left:auto">' + smoney(x.net) + " ›</span>";
+    for (const b of el.querySelectorAll("[data-w]")) b.addEventListener("click", () => { S.win = +b.dataset.w; renderSel(); });
+    for (const b of el.querySelectorAll("[data-retry]")) b.addEventListener("click", () => { cards.delete(b.dataset.retry); loadCard(b.dataset.retry, true); renderSel(); });
+    drawStrip(x, ev.evs, bw);
+  }
+
+  function drawStrip(x, evs, bw) {
+    const wrap = $("plSvg");
+    if (!wrap || !ASOF) return;
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    if (!W || !H) return;
+    const asMs = dms(ASOF), win = S.win, start = asMs - win * DAY, end = asMs + DAY * 0.5;
+    const L = 4, R = 6, xs = (d) => L + ((d - start) / (end - start)) * (W - L - R);
+    const top = 14, bot = H - 14, tY = top + (bot - top) * 0.28, fY = top + (bot - top) * 0.78;
+    let s = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" aria-hidden="true"><defs><pattern id="plHat" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hatch" width="2" height="6"/></pattern></defs>';
+    if (x.lag !== null) {
+      const bx = Math.max(L, xs(asMs - x.lag * DAY));
+      s += '<rect class="band" data-blind="1" x="' + bx + '" y="2" width="' + (W - R - bx) + '" height="' + (bot - 2) + '"/><rect class="overlay" fill="url(#plHat)" x="' + bx + '" y="2" width="' + (W - R - bx) + '" height="' + (bot - 2) + '"/>';
+      s += '<text class="warn" x="' + (W - R - 3) + '" y="11" text-anchor="end">typically unfiled: last ' + Math.round(x.lag) + " d</text>";
+    }
+    s += '<line class="axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + tY + '" y2="' + tY + '"/><line class="axis" x1="' + L + '" x2="' + (W - R) + '" y1="' + fY + '" y2="' + fY + '"/>';
+    s += '<text x="' + L + '" y="' + (tY - 5) + '">traded</text><text x="' + L + '" y="' + (fY - 5) + '">filed</text>';
+    const inWin = evs.filter((e) => dms(e.txn) >= start).sort((a, b) => (a.txn < b.txn ? -1 : 1));
+    const mx = Math.max(1, ...evs.map((e) => (e.lo + e.hi) / 2));
+    for (const e of inWin) {
+      const xt = xs(dms(e.txn)), xf = xs(dms(e.filed)), r = 3 + 3.5 * Math.sqrt((e.lo + e.hi) / 2 / mx), k = e.side;
+      s += '<line class="ln ' + k + '" x1="' + xt.toFixed(1) + '" y1="' + tY + '" x2="' + xf.toFixed(1) + '" y2="' + fY + '"/><circle class="dot ' + k + '" cx="' + xf.toFixed(1) + '" cy="' + fY + '" r="2.4"/>';
+      const tri = k === "buy" ? [[xt, tY - r], [xt - r, tY + r * 0.7], [xt + r, tY + r * 0.7]] : [[xt, tY + r], [xt - r, tY - r * 0.7], [xt + r, tY - r * 0.7]];
+      s += '<polygon class="tri ' + k + '" data-txn="' + esc(e.txn) + '" data-filed="' + esc(e.filed) + '" points="' + tri.map((q) => q[0].toFixed(1) + "," + q[1].toFixed(1)).join(" ") + '"><title>' + esc(e.who + " " + e.side + " " + usd(e.lo) + " to " + usd(e.hi) + ", traded " + fday(e.txn) + ", filed " + fday(e.filed)) + "</title></polygon>";
+    }
+    const ticks = win === 30 ? [0, 10, 20, 30] : [0, 30, 60, 90];
+    for (const k of ticks) {
+      const d = asMs - (win - k) * DAY, xx = xs(d);
+      s += '<text x="' + Math.min(W - R - 26, Math.max(L, xx - 12)).toFixed(0) + '" y="' + (H - 2) + '">' + fday(new Date(d).toISOString().slice(0, 10)) + "</text>";
+    }
+    s += "</svg>";
+    wrap.innerHTML = s;
+    const filedAgo = evs.length ? Math.round((asMs - Math.max(...evs.map((e) => dms(e.filed)))) / DAY) : null;
+    const msg = evs.length ? "▲▼ traded, dots filed, size by band · " + inWin.length + " of " + evs.length + " in view · newest filed " + filedAgo + " d before the cut. " + bw : "No per-filing rows for this name. " + bw;
+    $("plStNote").textContent = msg;
+    wrap.setAttribute("aria-label", "Trade and filing dates for " + x.t + ". " + msg);
+  }
+
+  function loadCard(t, now) {
+    clearTimeout(cardTimer);
+    if (cards.has(t)) return;
+    const run = () => {
+      if (cards.has(t)) return;
+      cards.set(t, { state: "pending" });
+      get("/api/flows/card?t=" + encodeURIComponent(cardKey(t))).then((body) => {
+        if (!body) return;
+        const cf = cardFields(body);
+        cards.set(t, cf ? { state: "ok", cf } : { state: "absent" });
+      }).catch((err) => cards.set(t, { state: "failed", reason: "The Flows card for " + t + " could not be read (" + (err && err.message ? err.message : "request failed") + "). The filings are unaffected." }))
+        .then(() => { if (S.sel === t) renderSel(); refreshList(); });
+    };
+    if (now) run(); else cardTimer = setTimeout(() => { if (S.sel === t) run(); }, 220);
+  }
+
+  function refreshList() {
+    if (S.view !== "list") return;
+    renderList(rowsOf());
+  }
+
+  function select(t) {
+    S.sel = t;
+    for (const b of document.querySelectorAll(".pl-tile,.pl-row")) {
+      const on = b.dataset.t === t;
+      b.setAttribute(b.classList.contains("pl-row") ? "aria-selected" : "aria-pressed", String(on));
+      b.tabIndex = on ? 0 : -1;
+    }
+    if (!document.querySelector('.pl-tile[tabindex="0"]')) { const f = document.querySelector(".pl-tile"); if (f) f.tabIndex = 0; }
+    if (!document.querySelector('#plList .pl-row[tabindex="0"]')) { const f = document.querySelector("#plList .pl-row"); if (f) f.tabIndex = 0; }
+    renderSel();
+    loadCard(t);
+  }
+  const go = (t) => { location.href = "/flows/ticker/?t=" + encodeURIComponent(t); };
+  function reveal(t) {
+    const x = ALL.find((a) => a.t === t);
+    if (!x) return false;
+    if (x.fund && !S.funds) S.funds = true;
+    if (!tabOf(S.tab).f(x)) S.tab = tabFor(x);
+    S.sel = t;
+    renderMain();
+    loadCard(t);
+    return true;
+  }
+
+  function nearest(from, dir) {
+    const c = tiles.find((t) => t.t === from);
+    if (!c) return null;
+    let best = null, bs = Infinity;
+    for (const t of tiles) {
+      if (t === c) continue;
+      const dx = t.cx - c.cx, dy = t.cy - c.cy;
+      const ok = dir === "R" ? dx > 4 : dir === "L" ? dx < -4 : dir === "D" ? dy > 4 : dy < -4;
+      if (!ok) continue;
+      const sc = dir === "R" || dir === "L" ? Math.abs(dx) + 2.5 * Math.abs(dy) : Math.abs(dy) + 2.5 * Math.abs(dx);
+      if (sc < bs) { bs = sc; best = t; }
+    }
+    return best;
+  }
+
+  function listKeys(root, sel, onPick) {
+    root.addEventListener("keydown", (e) => {
+      const b = e.target.closest(sel);
+      if (!b) return;
+      const all = [...root.querySelectorAll(sel)], i = all.indexOf(b);
+      const mv = (n) => { if (n) { n.focus(); if (onPick) onPick(n); } };
+      if (e.key === "ArrowDown") { e.preventDefault(); mv(all[i + 1]); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); mv(all[i - 1]); }
+      else if (e.key === "Home") { e.preventDefault(); mv(all[0]); }
+      else if (e.key === "End") { e.preventDefault(); mv(all[all.length - 1]); }
+      else if (e.key === "Enter" && b.dataset.t) { e.preventDefault(); go(b.dataset.t); }
     });
+  }
+
+  function setView(v) {
+    $("plStage").dataset.view = v;
+    for (const b of $("plSeg5").children) b.setAttribute("aria-selected", String(b.dataset.v === v));
+    requestAnimationFrame(() => { if (v === "stocks") renderMain(); else if (v === "tape") renderTape(); else renderSel(); });
+  }
+
+  function openAll() {
+    const rows = rowsOf(), tab = tabOf(S.tab);
+    $("plAllT").textContent = tab.label + ": all " + rows.length + " stocks";
+    $("plAllP").textContent = "Net estimate from band midpoints, disclosed through " + fwd(ASOF) + ". Choose one to read it.";
+    $("plAllG").innerHTML = rows.map((x) => '<button type="button" data-t="' + esc(x.t) + '" aria-pressed="' + (x.t === S.sel) + '"><b>' + esc(x.t) + '</b><span class="' + TONE[x.st] + '-t">' + GLY[x.st] + " " + smoney(x.net) + "</span></button>").join("");
+    $("plAllDlg").showModal();
+    const f = $("plAllG").querySelector('[aria-pressed="true"]') || $("plAllG").firstElementChild;
+    if (f) f.focus();
+  }
+
+  function tapeRow(r) {
+    const buy = r.side === "buy", sell = r.side === "sell";
+    const inAll = ALL.some((a) => a.t === r.t);
+    const act = inAll ? "Select " + r.t : "Open the " + r.t + " ticker page";
+    const side = buy ? "bought" : sell ? "sold" : "filed";
+    return '<button type="button" class="pl-trow" data-t="' + esc(r.t) + '" tabindex="-1" aria-label="' + esc(r.t + " " + side + ", " + usd(r.lo) + " to " + usd(r.hi) + ", traded " + fday(r.txnDate) + ", filed " + fday(r.filedDate) + ", " + (r.lagDays === null || r.lagDays === undefined ? "lag unknown" : r.lagDays + " days late") + ". " + act) + '" title="' + esc(act) + '"><span class="pl-tk"><span class="gl ' + (buy ? "up" : sell ? "down" : "mut") + '-t">' + (buy ? "▲" : sell ? "▼" : "◆") + "</span>" + esc(r.t) + '</span><span class="bd"><span>' + usd(r.lo) + "–" + usd(r.hi) + "</span><small>" + fday(r.txnDate) + " → " + fday(r.filedDate) + '</small></span><span class="lg2">' + (r.lagDays === null || r.lagDays === undefined ? DASH : r.lagDays + " d") + '</span><span class="pl-mono t" title="' + esc((r.who || "") + ", " + CHAMBER[chOf(r.memberType)]) + '"><b aria-hidden="true">' + esc(initials(r.who)) + "</b></span></button>";
+  }
+
+  function renderTape() {
+    const box = $("plTapeList");
+    const rh = mobile() || coarse() ? 44 : 36;
+    const n = Math.max(4, Math.floor(box.clientHeight / rh));
+    box.innerHTML = tapeNamed.slice(0, n).map(tapeRow).join("");
+    const f = box.querySelector(".pl-trow");
+    if (f) f.tabIndex = 0;
+    const un = recent.length - tapeNamed.length;
+    $("plTapeNote").textContent = recent.length + " latest · " + tapeNamed.length + " name a stock";
+    $("plTapeFoot").textContent = un + " of " + recent.length + " carry no ticker (bonds, funds, private assets).";
+    $("plTapeAll").textContent = "Show all " + recent.length;
+    $("plTapeAll").style.display = recent.length ? "" : "none";
+  }
+
+  function openTape() {
+    $("plTapeT").textContent = "All " + recent.length + " newest filings";
+    const first = recent.reduce((a, r) => (r.filedDate && r.filedDate < a ? r.filedDate : a), "9999");
+    $("plTapeP").textContent = "Every disclosure filed " + fday(first) + " to " + fday(ASOF) + ". Filers appear as initials; the stock is the subject.";
+    $("plTapeL").innerHTML = recent.map((r) => {
+      const g = r.side === "buy" ? '<span class="up-t">▲</span>' : r.side === "sell" ? '<span class="down-t">▼</span>' : '<span class="mut-t">◆</span>';
+      const nm = r.t || (r.notes ? String(r.notes).replace(/\s*\[[A-Z]+\]\s*$/, "") : "Unnamed asset");
+      return "<li>" + g + "<div><span><b>" + esc(nm) + "</b></span><small>" + fday(r.txnDate) + " → " + fday(r.filedDate) + '<span class="ch"> · ' + esc(CHAMBER[chOf(r.memberType)]) + "</span></small></div><span>" + usd(r.lo) + "–" + usd(r.hi) + "</span></li>";
+    }).join("");
+    $("plTapeDlg").showModal();
+    $("plTapeX").focus();
+  }
+
+  function openInfo() {
+    const n = P && P.notes && typeof P.notes === "object" ? P.notes : {};
+    const para = (t) => (typeof t === "string" && t ? "<p>" + esc(t) + "</p>" : "");
+    $("plInfoB").innerHTML =
+      "<p><b>Each row is a stock, not a politician.</b> The bar is disclosed purchases minus disclosed sales from the midpoint of each dollar band. The whisker runs from the low bound (purchases at their band floor, sales at twice their midpoint) to the high bound (purchases at their band ceiling, sales at an eighth of their midpoint). Sales carry midpoints only, so no name is ever called a firm reduction. Bars use a signed square-root scale so one large name does not flatten the rest.</p>" +
+      "<p><b>Bounds agree</b> means the whole whisker is on the buying side of zero. <b>Still blind</b> is the name’s median filing lag as a share of the " + (WIN === null ? "disclosure" : WIN + "-day") + " window: trades in that stretch are typically not filed yet, and no dollars are guessed for them.</p>" +
+      "<p><b>Filers</b> are distinct people. Breadth tells you more than the size of one account. The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.</p>" +
+      para(n.unit) + para(n.lag) + para(n.refusals) +
+      "<p>" + (isNum(P && P.filings) === null ? "" : P.filings.toLocaleString("en-US") + " filings read " + (P.window ? fday(P.window.from) + " to " + fday(P.window.to) : "") + ". ") + "The feed lists the top names by purchases and by filer breadth (" + ALL.length + (seen === null ? "" : " of " + seen) + " names), so the Reducing view is under-counted. Estimates from disclosed ranges, not advice.</p>";
+    $("plInfoDlg").showModal();
+    const title = $("plInfoT");
+    title.tabIndex = -1;
+    title.focus({ preventScroll: true });
+    $("plInfoDlg").scrollTop = 0;
+  }
+
+  function paintHead() {
+    const readAt = P.readAt;
+    const day = F.trtDay(readAt);
+    const read = day ? fday(day) + " " + F.time(readAt) : DASH;
+    $("plStamp").innerHTML = "As disclosed through <b>" + fwd(ASOF) + "</b> · read " + read + " · " + (WIN === null ? DASH : WIN + "-day window");
+  }
+
+  function wire() {
+    $("plMap").addEventListener("keydown", (e) => {
+      const b = e.target.closest(".pl-tile");
+      if (!b) return;
+      const m = { ArrowRight: "R", ArrowLeft: "L", ArrowDown: "D", ArrowUp: "U" }[e.key];
+      if (m) {
+        e.preventDefault();
+        const n = nearest(b.dataset.t, m);
+        if (n) { select(n.t); const el = document.querySelector('.pl-tile[data-t="' + CSS.escape(n.t) + '"]'); if (el) el.focus(); }
+      } else if (e.key === "Enter") { e.preventDefault(); go(b.dataset.t); }
+    });
+    $("plMap").addEventListener("click", (e) => { const b = e.target.closest(".pl-tile"); if (b) { select(b.dataset.t); if (mobile()) setView("detail"); } });
+    $("plMap").addEventListener("mouseover", (e) => { const b = e.target.closest(".pl-tile"); if (b && !mobile() && b.dataset.t !== S.sel) select(b.dataset.t); });
+    listKeys($("plList"), ".pl-row", (n) => select(n.dataset.t));
+    $("plList").addEventListener("click", (e) => { const b = e.target.closest(".pl-row"); if (!b) return; select(b.dataset.t); if (mobile()) setView("detail"); });
+    $("plSelbar").addEventListener("click", () => setView("detail"));
+    document.querySelector(".pl-bh").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-sort]");
+      if (!b) return;
+      const def = tabOf(S.tab).def;
+      S.sort = b.dataset.sort === def && !S.sort ? null : S.sort === b.dataset.sort ? null : b.dataset.sort;
+      renderMain();
+    });
+    const pickTab = (id) => { S.tab = id; S.sort = null; S.sel = null; renderMain(); };
+    $("plTabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) pickTab(b.dataset.id); });
+    $("plTabs").addEventListener("keydown", (e) => {
+      const i = TABS.findIndex((t) => t.id === S.tab);
+      let n = null;
+      if (e.key === "ArrowRight") n = (i + 1) % 3; else if (e.key === "ArrowLeft") n = (i + 2) % 3; else if (e.key === "Home") n = 0; else if (e.key === "End") n = 2;
+      if (n === null) return;
+      e.preventDefault();
+      pickTab(TABS[n].id);
+      $("plTab-" + TABS[n].id).focus();
+    });
+    $("plViewSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { S.view = b.dataset.view; renderMain(); } });
+    $("plSizeSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { S.size = b.dataset.size; renderMain(); } });
+    $("plFundBtn").addEventListener("click", () => { S.funds = !S.funds; renderMain(); });
+    $("plAllBtn").addEventListener("click", openAll);
+    $("plAllG").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $("plAllDlg").close(); reveal(b.dataset.t); if (mobile()) setView("detail"); });
+    $("plAllG").addEventListener("keydown", (e) => {
+      const bs = [...$("plAllG").children], i = bs.indexOf(document.activeElement);
+      if (i < 0) return;
+      const cols = getComputedStyle($("plAllG")).gridTemplateColumns.split(" ").length;
+      const d = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: cols, ArrowUp: -cols }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      const n = bs[i + d];
+      if (n) n.focus();
+    });
+    $("plAllX").addEventListener("click", () => $("plAllDlg").close());
+    listKeys($("plTapeList"), ".pl-trow");
+    $("plTapeList").addEventListener("click", (e) => {
+      const b = e.target.closest(".pl-trow");
+      if (!b) return;
+      if (!reveal(b.dataset.t)) go(b.dataset.t); else if (mobile()) setView("detail");
+    });
+    $("plTapeAll").addEventListener("click", openTape);
+    $("plTapeX").addEventListener("click", () => $("plTapeDlg").close());
+    $("plInfoBtn").addEventListener("click", openInfo);
+    $("plInfoX").addEventListener("click", () => $("plInfoDlg").close());
+    for (const d of document.querySelectorAll(".pl-dlg")) d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
+    for (const b of $("plSeg5").children) b.addEventListener("click", () => setView(b.dataset.v));
+    $("plSeg5").addEventListener("keydown", (e) => {
+      const bs = [...$("plSeg5").children], i = bs.findIndex((b) => b.getAttribute("aria-selected") === "true");
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        const n = bs[(i + (e.key === "ArrowRight" ? 1 : bs.length - 1)) % bs.length];
+        n.click();
+        n.focus();
+      }
+    });
+    let rz = 0;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(rz);
+      rz = setTimeout(() => {
+        const v = $("plStage").dataset.view;
+        if (!mobile() || v === "stocks") renderMain();
+        if (!mobile() || v === "tape") renderTape();
+        if (!mobile() || v === "detail") renderSel();
+      }, 60);
+    });
+    ro.observe($("plStage"));
   }
 
   function get(path) {
@@ -505,28 +701,56 @@
     });
   }
 
-  wireInfos();
+  function empty(kind, text) {
+    status.textContent = text;
+    status.dataset.empty = kind;
+    $("plStage").hidden = true;
+    $("plSeg5").hidden = true;
+    const box = $("plNote");
+    box.hidden = false;
+    box.textContent = text;
+    box.dataset.empty = kind;
+  }
+
+  function boot(p) {
+    const rowsOfFeed = (f) => (f && f.status === "ok" && Array.isArray(f.rows) ? f.rows : []);
+    const assets = rowsOfFeed(p.assets), clusters = rowsOfFeed(p.clusters);
+    if (p.status === "pending" || (!assets.length && !clusters.length)) {
+      if (p.status === "pending" || (!p.assets && !p.clusters)) return empty("pending", "No disclosure window has been read yet. This page appears with the first pipeline run after it shipped.");
+      return empty("quiet", "The window was read and held no purchase that names a listed stock, so there is nothing to rank.");
+    }
+    P = p;
+    WIN = p.window && finite(p.window.days) !== null ? p.window.days : null;
+    ASOF = typeof p.latestFiled === "string" ? p.latestFiled : p.window && typeof p.window.to === "string" ? p.window.to : null;
+    minFilers = p.clusters && finite(p.clusters.minFilers) !== null ? p.clusters.minFilers : 3;
+    seen = p.clusters && finite(p.clusters.namesSeen) !== null ? p.clusters.namesSeen : null;
+    carded = new Set((Array.isArray(p.carded) ? p.carded : []).map(cardKey));
+    recent = rowsOfFeed(p.recent);
+    tapeNamed = recent.filter((r) => r.t);
+    const src = new Map();
+    for (const r of assets) src.set(r.t, r);
+    for (const r of clusters) if (!src.has(r.t)) src.set(r.t, r);
+    ALL = [...src.values()].map(prep).filter(Boolean);
+    paintHead();
+    wire();
+    status.textContent = "Disclosures read: " + ALL.length + " stocks.";
+    renderMain();
+    renderTape();
+  }
+
   get("/api/flows/political").then((p) => {
     if (!p) return;
     UI.freshness({ sessionDate: p.sessionDate, generatedAt: p.generatedAt, updatedAt: p.__updatedAt, source: "political" });
-    if (p.status === "pending" || (!p.buyers && !p.holders)) {
-      status.textContent = "No disclosure window has been read yet. This page appears with the first pipeline run after it shipped.";
-      status.dataset.empty = "pending";
-      idle({ state: "pending", kind: "pending", reason: status.textContent }, 220);
-      return;
-    }
-    P = p;
-    paintStatus(p);
-    paintMeta(p);
-    paintChips(p);
-    paintBuyers(p);
-    mountAssets(p);
-    paintRecent(p);
-    paintHolders(p);
-    wireInfos();
+    boot(p);
   }).catch((error) => {
-    status.textContent = "The disclosure window could not be loaded: " + error.message;
+    const t = "The disclosure window could not be loaded: " + error.message;
+    status.textContent = t;
     status.dataset.empty = "unavailable";
-    idle({ state: "unavailable", kind: "unavailable", reason: status.textContent }, 200);
+    const box = $("plNote");
+    if (box) { box.hidden = false; box.textContent = t; box.dataset.empty = "unavailable"; }
+    const st = $("plStage");
+    if (st) st.hidden = true;
+    const sg = $("plSeg5");
+    if (sg) sg.hidden = true;
   });
 })();
