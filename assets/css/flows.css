@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=305") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=308") center / cover no-repeat;
   --ground:
     linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
     radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
@@ -1247,7 +1247,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
 :is(.ui-metric-v, .ui-metric-d, .ui-chip-v, .ui-row-v, .ui-tile-v, .ui-readout span, .ui-readout b, .ui-num)[data-tone] { color: var(--tone); }
 
 .ui-roll { display: inline-flex; line-height: 1; height: 1em; overflow: hidden; }
-.ui-roll-d { display: inline-block; height: 1em; overflow: hidden; }
+.ui-roll-d { display: inline-block; height: 1em; overflow: hidden; flex: none; }
 .ui-roll-s {
   display: flex;
   flex-direction: column;
@@ -1256,7 +1256,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   transition-delay: calc(var(--k, 0) * 28ms);
 }
 .ui-roll-s > span { height: 1em; line-height: 1; }
-.ui-roll-c { display: inline-block; }
+.ui-roll-c { display: inline-block; flex: none; }
 
 .ui-seg {
   position: relative;
@@ -1360,7 +1360,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
 .ui-tag.is-accent { background: var(--accent-fill); color: var(--accent-soft); }
 .ui-tag[data-tone] { color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent); }
 .ui-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.ui-calib { position: relative; flex: none; border: 0; cursor: pointer; }
+.ui-calib { position: relative; flex: none; border: 0; cursor: pointer; min-height: 24px; }
 .ui-calib::after { content: ""; position: absolute; inset: -11px 0; }
 .ui-calib:hover, .ui-calib[aria-expanded="true"] { color: var(--label-1); background: var(--fill-4); }
 .ui-capsule {

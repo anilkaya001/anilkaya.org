@@ -364,10 +364,23 @@
     return h("span", { class: "bd-idea", role: "img", "aria-label": "Lead idea: " + name, title: cap(name) }, svg);
   }
 
+  const atEdge = (d) => d !== null && d.exact !== null && Math.abs(d.exact) >= d.edge;
+  function watchScoreCell(row) {
+    const n = num(row.s), d = distanceToBand(row, bandOf());
+    if (n === 0 && d !== null && d.exact !== null && Math.abs(d.exact) >= 0.05) {
+      return cellText(F.signed(d.exact, 1), "bd-n", { "data-tone": toneOf(d.exact), title: "Unrounded score from the residual (" + d.exact.toFixed(2) + "). The published integer is 0 for a name that is not on a side." });
+    }
+    if (n === null) return cellText(DASH, "bd-n", { "data-tone": "silent", title: "No score published for this name." });
+    return cellText(signedInt(n), "bd-n", { "data-tone": toneOf(n) });
+  }
   function bandCell(row) {
     const band = bandOf();
     const d = distanceToBand(row, band);
     const wrap = h("span", { class: "bd-band" });
+    if (atEdge(d)) {
+      wrap.append(h("span", { class: "bd-band-1" }, h("span", { class: "bd-v", title: "The unrounded score (" + d.exact.toFixed(2) + ") is at or past the band edge (" + d.edge + "), so the distance is not a number above zero." }, "At edge")));
+      return wrap;
+    }
     const ap = approachOf(row, band, entryFor(row));
     const fill = d === null || !(d.edge > 0) ? 0 : Math.max(0, Math.min(1, 1 - d.value / d.edge));
     wrap.append(
@@ -438,7 +451,7 @@
     { key: "r", label: "#", title: "Nearest the edge first", sort: { first: "asc", get: (row) => num(row.__edge) }, cell: (row) => cellText(String(row.__edge ?? DASH), "bd-rank") },
     { key: "t", label: "Name", sort: { first: "asc", text: true, get: (row) => (row.t ? String(row.t) : null) }, cell: nameCell },
     { key: "band", label: "To band", title: "Distance from the band edge, in score points", sort: { first: "asc", get: (row) => { const d = distanceToBand(row, bandOf()); return d === null ? null : d.value; } }, cell: bandCell, attrs: bandCellAttrs },
-    { key: "s", label: "Score", sort: { first: "desc", get: (row) => num(row.s) }, cell: (row) => cellText(signedInt(row.s), "bd-n", { "data-tone": toneOf(row.s) }) },
+    { key: "s", label: "Score", sort: { first: "desc", get: (row) => num(row.s) }, cell: watchScoreCell },
     { key: "cnv", label: "Conv", title: "Conviction", sort: { first: "desc", get: (row) => num(row.cnv) }, cell: convCell },
     { key: "px", label: "Price", title: "Last price and today's change; sorts by the change", sort: { first: "desc", get: (row) => num(row.chg) }, cell: priceCell },
     { key: "strip", label: "5d", title: "Score over the last five scored sessions", cell: stripCell },
@@ -821,11 +834,11 @@
     });
 
     const premChip = UI.gaugeChip({
-      diverging: gross ? (sum / gross) * 100 : null, value: prem.length ? F.money(sum, true) : DASH, label: "Premium",
+      diverging: gross ? (sum / gross) * 100 : null, value: prem.length ? F.money(sum, true) : DASH, label: "Net premium",
       tone: prem.length ? toneOf(sum) : null,
       info: () => ({
         title: "Net premium", asOf,
-        lead: "Call premium bought minus put premium bought, summed across the session and across the " + prem.length + " names that carry it. The ring is that sum over the gross, so a full ring means every dollar leaned one way.",
+        lead: "Call premium bought minus put premium bought, summed across the session and across the " + prem.length + " names that carry it. The ring is that sum over the gross, so a full ring means every dollar leaned one way. " + (side === "long" ? "On the bullish board a negative figure means the options flow leans against the scores." : side === "short" ? "On the bearish board a positive figure means the options flow leans against the scores." : ""),
         facts: [["Names", String(prem.length)], ["Gross", F.money(gross)]],
       }),
     });

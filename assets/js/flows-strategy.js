@@ -1501,7 +1501,21 @@
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { st.domain = null; }, 120); });
   setInterval(() => { if (st.ctx) paintHero(); }, 30000);
 
+  async function topName() {
+    try {
+      const r = await fetch("/api/flows/board?side=long", { credentials: "same-origin", headers: { Accept: "application/json" }, signal: AbortSignal.timeout?.(8000) });
+      const rows = r.ok ? (await r.json()).rows : null;
+      const t = Array.isArray(rows) && rows[0] ? String(rows[0].t || "").toUpperCase() : "";
+      return /^[A-Z][A-Z0-9.-]{0,9}$/.test(t) ? t : null;
+    } catch { return null; }
+  }
+
   readURL();
   paint();
   if (st.t) loadContext(false);
+  else topName().then((t) => {
+    if (!t || st.t) return;
+    const go = h("button", { type: "button", class: "dk-suggest", onclick: () => { go.remove(); if (!st.t) { st.t = t; writeURL(); paint(); loadContext(false); } } }, "Try " + t);
+    input.after(go);
+  });
 })();

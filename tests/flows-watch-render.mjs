@@ -346,6 +346,52 @@ try {
        `a silent watch list fits the same reserve (${at}): the hero keeps its skeleton's height and the module does not move`);
     ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} (${at})`);
   }
+  {
+    const HONEST = {
+      ...WATCH,
+      rows: [
+        watchRow("BARE", R.BARE),
+        { ...watchRow("EDGE", 0.0100), s: 0 },
+        { ...watchRow("NOSC", R.BARE), s: null, resid: null },
+      ],
+    };
+    await put("board:watch", HONEST);
+    const read = async (mutate) => {
+      const pg = await open();
+      if (mutate) {
+        await pg.route("**/assets/js/flows-board.js*", async (route) => {
+          const res = await route.fetch();
+          await route.fulfill({ response: res, body: mutate(await res.text()) });
+        });
+      }
+      await pg.goto(url("/flows/watch/"), { waitUntil: "networkidle" });
+      await pg.waitForSelector(ROW);
+      const cell = (t, sel) => pg.$eval(rowOf(t) + " " + sel, (n) => n.textContent.trim());
+      const got = {
+        edgeBand: await cell("EDGE", ".c-toband"),
+        edgeScore: await cell("EDGE", '.bd-c[data-col="s"]'),
+        bareScore: await cell("BARE", '.bd-c[data-col="s"]'),
+        noScore: await cell("NOSC", '.bd-c[data-col="s"]'),
+      };
+      await pg.close();
+      return got;
+    };
+    const verdict = (g) => g.edgeBand === "At edge" && g.edgeScore === "+1.8" && g.bareScore === "+0.2" && g.noScore === "\u2014";
+    const good = await read(null);
+    eq(good.edgeBand, "At edge", "a name whose own residual is at or past the band edge says so instead of printing a distance of 0.00");
+    eq(good.edgeScore, "+1.8", "and its score is the unrounded one the residual implies, not the published integer 0 that read as an unfilled board");
+    eq(good.bareScore, "+0.2", "an in-band name with a published 0 shows the residual's own score to a tenth");
+    eq(good.noScore, "\u2014", "a name with no score is a dash, never a zero");
+    const planted = [
+      ["a distance of 0.00 for a name at the edge", (t) => t.replace('"At edge"', '"0.00"')],
+      ["the rounded integer 0 for an unrounded score", (t) => t.replace('cellText(F.signed(d.exact, 1), "bd-n"', 'cellText("0", "bd-n"')],
+      ["a missing score printed as 0", (t) => t.replace('cellText(DASH, "bd-n", { "data-tone": "silent", title: "No score published for this name." })', 'cellText("0", "bd-n")')],
+    ];
+    for (const [name, mutate] of planted) {
+      const g = await read(mutate);
+      ok(!verdict(g), "PLANTED WRONG BUILD caught: " + name + " (" + JSON.stringify(g) + ")");
+    }
+  }
   await put("board:watch", WATCH);
 } finally {
   await browser.close();

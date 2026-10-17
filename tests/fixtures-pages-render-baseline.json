@@ -97,7 +97,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 50,
-  "targetsUnder44": 61
+  "targetsUnder44": 60
  },
  "long@390": {
   "contrast": 1,
@@ -105,7 +105,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 50,
-  "targetsUnder44": 60
+  "targetsUnder44": 59
  },
  "long@1440": {
   "contrast": 0,
@@ -120,7 +120,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 50,
-  "targetsUnder44": 61
+  "targetsUnder44": 60
  },
  "short@390": {
   "contrast": 0,
@@ -128,7 +128,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 50,
-  "targetsUnder44": 60
+  "targetsUnder44": 59
  },
  "short@1440": {
   "contrast": 0,
@@ -143,7 +143,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0,
-  "targetsUnder44": 6
+  "targetsUnder44": 5
  },
  "watch@390": {
   "contrast": 0,
@@ -151,7 +151,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0,
-  "targetsUnder44": 5
+  "targetsUnder44": 4
  },
  "watch@1440": {
   "contrast": 0,
@@ -304,7 +304,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0,
-  "targetsUnder44": 14
+  "targetsUnder44": 24
  },
  "desk@390": {
   "contrast": 1,
@@ -312,7 +312,7 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0,
-  "targetsUnder44": 13
+  "targetsUnder44": 23
  },
  "desk@1440": {
   "contrast": 1,

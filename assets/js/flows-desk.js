@@ -608,7 +608,7 @@
     const phone = w < 600;
     const H = phone ? 240 : 300;
     mods.legend.replaceChildren();
-    if (!rows.length) { host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : 180)); return; }
+    if (!rows.length) { host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : phone ? 140 : 180)); return; }
     const xOf = axis === 0 ? netOf : popQ;
     const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.annualized) })).filter((p) => p.x !== null && p.y !== null);
     if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: T("fr-none") }, "Frontier", H)); return; }
@@ -1024,9 +1024,23 @@
     rankTimer = setTimeout(() => { rankTimer = null; runPool(recut, {}); }, wait);
   }
 
+  async function topName() {
+    try {
+      const r = await fetch("/api/flows/board?side=long", { credentials: "same-origin", headers: { Accept: "application/json" }, signal: AbortSignal.timeout?.(8000) });
+      const rows = r.ok ? (await r.json()).rows : null;
+      const t = Array.isArray(rows) && rows[0] ? String(rows[0].t || "").toUpperCase() : "";
+      return /^[A-Z][A-Z0-9.-]{0,9}$/.test(t) ? t : null;
+    } catch { return null; }
+  }
+
   const initial = readURL();
   ensureModules();
   renderChips();
   render();
   if (initial.length) add(initial);
+  else topName().then((t) => {
+    if (!t || book.size) return;
+    const go = h("button", { type: "button", class: "dk-suggest", onclick: () => { go.remove(); if (!book.size) add([t]); } }, "Try " + t);
+    (list.closest(".dk-chipw") || list).after(go);
+  });
 })();

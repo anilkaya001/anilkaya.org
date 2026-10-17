@@ -1484,7 +1484,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 146 suites: 103 that need only Node (N), 28 that also
+`tests/suites/` registers 147 suites: 103 that need only Node (N), 29 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1524,13 +1524,14 @@ server-pages              server-router             staging
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
 
 ```
-flows-ask                 flows-chart-kernel        flows-deadline-render     flows-desk-client
-flows-desk-wiring         flows-events              flows-export              flows-fixture-guard-render
-flows-glance-frame-render flows-glance-render       flows-index               flows-kit
-flows-link                flows-movelab-render      flows-moves0              flows-net-render
-flows-pages-render        flows-readers-render      flows-reading-render      flows-render
-flows-rt-client           flows-status-render       flows-strip               flows-surface-render
-flows-ticker              landing-motion            market-ticker             placement
+flows-ask                 flows-chart-kernel        flows-deadline-render     flows-defaults-render
+flows-desk-client         flows-desk-wiring         flows-events              flows-export
+flows-fixture-guard-renderflows-glance-frame-render flows-glance-render       flows-index
+flows-kit                 flows-link                flows-movelab-render      flows-moves0
+flows-net-render          flows-pages-render        flows-readers-render      flows-reading-render
+flows-render              flows-rt-client           flows-status-render       flows-strip
+flows-surface-render      flows-ticker              landing-motion            market-ticker
+placement
 ```
 <!-- /gen:suites-local -->
 
