@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "289";
+export const ASSET_VERSION = "292";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1015,28 +1015,57 @@ function escapeHTML(value) {
 }
 
 export function politicalPage({ username = "" } = {}) {
-  return `${head("Flows — Political", "Who disclosed the largest purchases, and in what, with the range each filing stated and the delay since the trade.", FEEDS_CSS)}
-${shell("Political", "political", username, `${feedHead("pl", "Political")}
-  <p class="visually-hidden" id="plStatus" role="status">Loading the disclosure window…</p>
-  <div class="fd-about" id="plAbout" hidden>
-    <p class="pl-lede-warn">Every row on this page is a statutory disclosure, not a trade seen on
-    a tape. Filing is late by law and later in practice: the STOCK Act allows 45 days and late
-    filers routinely exceed 100. Each row carries the days between its transaction and its filing,
-    and each ranked total carries the median lag of the filings behind it. This page ranks what has
-    been <em>disclosed</em>, which is never the same question as what is being done now.</p>
+  return flowsDocument({
+    title: "Political",
+    description: "The stocks politicians disclosed buying and selling, with the range each filing stated, how many people filed, and the delay since the trade.",
+    active: "political",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-political.css"],
+    scripts: ["/assets/js/flows-political.js"],
+    body: `
+  <p class="visually-hidden" id="plStatus" role="status">Loading the disclosure window\u2026</p>
+  <div class="pl" id="pl">
+    <div class="pl-title" data-fx-hero>
+      <h1 id="fxTitle">Political</h1>
+      <div class="pl-stamp" id="plStamp"></div>
+      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred."><span class="l">Party not in feed</span><span class="s">No party in feed</span></span></div>
+      <button type="button" class="pl-ibtn" id="plInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
+    </div>
+    <p class="pl-note" id="plNote" hidden></p>
+    <div class="pl-seg5" role="tablist" aria-label="Panels" id="plSeg5">
+      <button type="button" role="tab" aria-selected="true" aria-controls="plMain" data-v="stocks">Stocks</button><button type="button" role="tab" aria-selected="false" aria-controls="plTape" data-v="tape">Filings</button><button type="button" role="tab" aria-selected="false" aria-controls="plRail" data-v="detail">Detail</button>
+    </div>
+    <div class="pl-stage" id="plStage" data-view="stocks">
+      <section class="pl-panel" id="plMain" aria-label="Stocks by disclosed net position">
+        <div class="pl-ph">
+          <div class="pl-seg" role="tablist" aria-label="Show stocks that are" id="plTabs"></div>
+          <div class="r">
+            <div class="pl-seg sm" role="group" aria-label="View" id="plViewSeg"><button type="button" data-view="map" aria-pressed="true">Map</button><button type="button" data-view="list" aria-pressed="false">List</button></div>
+            <div class="pl-seg sm" role="group" aria-label="Tile size" id="plSizeSeg"><button type="button" data-size="usd" aria-pressed="true">Dollars</button><button type="button" data-size="fil" aria-pressed="false">Filers</button></div>
+          </div>
+        </div>
+        <div class="pl-map" id="plMap" role="group" aria-label="Treemap of stocks. Arrow keys move, Enter opens the ticker page."></div>
+        <div class="pl-listview" id="plListView">
+          <div class="pl-bh pl-cols"><span aria-hidden="true">#</span><span aria-hidden="true">Stock</span><span aria-hidden="true" id="plAxis">Net, \u221a scale, low to high</span><button type="button" class="r" data-sort="net" aria-pressed="true">Net est.</button><button type="button" class="r" data-sort="filers" aria-pressed="false">Filers</button><span class="r hide-m hide-s" aria-hidden="true" style="text-align:right">B/S</span><button type="button" class="hide-m" data-sort="lag" aria-pressed="false">Still blind</button><span class="hide-m hide-s" aria-hidden="true">Flows card</span></div>
+          <div class="pl-listbox" id="plList" role="listbox" aria-label="Stocks"></div>
+        </div>
+        <button type="button" class="pl-selbar" id="plSelbar" aria-label="Open detail for the selected stock"></button>
+        <div class="pl-foot"><div class="pl-lg" id="plLegend"></div><span class="pl-fnote" id="plFnote"></span><span class="pl-acts"><button type="button" class="link q" id="plFundBtn" aria-pressed="false"></button><button type="button" class="link" id="plAllBtn" aria-haspopup="dialog"></button></span></div>
+      </section>
+      <section class="pl-panel" id="plTape" aria-label="Newest filings">
+        <div class="pl-ph"><h2>Newest filings</h2><span class="note" id="plTapeNote"></span></div>
+        <div class="pl-listbox" id="plTapeList" role="group" aria-label="Newest filings that name a stock"></div>
+        <div class="pl-foot"><span class="pl-fnote" id="plTapeFoot"></span><span class="pl-acts"><button type="button" class="link" id="plTapeAll" aria-haspopup="dialog"></button></span></div>
+      </section>
+      <section class="pl-panel pl-rail" id="plRail" aria-label="Selected stock"></section>
+    </div>
   </div>
-  <div class="fd-chips" id="plChips"></div>
-  <div class="ui-grid fd-grid">
-${feedModule("plBuyersCard", "Buyers", `<div class="fd-body" id="plBuyers"></div>`, { span: 7 })}
-${feedModule("plAssetsCard", "Names", `<div class="fd-body" id="plAssets"></div>`, { span: 5 })}
-${feedModule("plRecentCard", "Newest", `<div class="fd-body" id="plRecent"></div>`)}
-${feedModule("plHoldersCard", "Holdings", `<div class="fd-body" id="plHolders"></div>`)}
-  </div>
-`, { chrome: false })}
-${UI_SCRIPT}
-<script src="${v("/assets/js/flows-political.js")}" defer></script>
-</body>
-</html>`;
+  <dialog class="pl-dlg" id="plAllDlg" aria-labelledby="plAllT"><div class="dg"><h2 id="plAllT"></h2><p id="plAllP"></p><div class="pl-grid3" id="plAllG"></div><div class="x"><button type="button" class="link" id="plAllX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plTapeDlg" aria-labelledby="plTapeT"><div class="dg"><h2 id="plTapeT"></h2><p id="plTapeP"></p><ul class="pl-tl" id="plTapeL"></ul><div class="x"><button type="button" class="link" id="plTapeX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plInfoDlg" aria-labelledby="plInfoT"><div class="dg"><h2 id="plInfoT">How to read this page</h2><div class="body" id="plInfoB"></div><div class="x"><button type="button" class="link" id="plInfoX">Close</button></div></div></dialog>
+`,
+  });
 }
 export function askPage({ username = "" } = {}) {
   return flowsDocument({

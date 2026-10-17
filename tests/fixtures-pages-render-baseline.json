@@ -257,23 +257,23 @@
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 10,
-  "targetsUnder44": 20
+  "targetsUnder24": 0,
+  "targetsUnder44": 2
  },
  "political@390": {
   "contrast": 0,
   "names": 1,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 10,
-  "targetsUnder44": 19
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
  },
  "political@1440": {
   "contrast": 0,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 10
+  "targetsUnder24": 0
  },
  "strategy@320": {
   "contrast": 1,
