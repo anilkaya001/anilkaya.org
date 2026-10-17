@@ -113,11 +113,6 @@ export const FLOWS_NAV = [
   { group: "Tools", id: "railTools", items: [
     { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
     { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
-    { key: "ask", href: "/flows/ask/", label: "Ask", glyph: "bubble" },
-  ] },
-  { group: "Record", id: "railRecord", items: [
-    { key: "track", href: "/flows/track/", label: "Track", glyph: "track" },
-    { key: "history", href: "/flows/history/", label: "History", glyph: "history" },
   ] },
   { group: "Operations", id: "railOps", only: "status", items: [
     { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },

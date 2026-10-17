@@ -743,12 +743,10 @@ try {
 
     const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
     ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
-    for (const back of ["/flows/history/", "/flows/track/"]) {
-      ok(rail.includes(`href="${back}"`),
-         `the RAIL links to ${back} again, under Record — it was taken off to keep a sideways ` +
-         "phone strip short, and the sidebar that replaced the strip is a grouped vertical list");
-      const still = await get(back, { headers: { Cookie: "flows_session=" + token } });
-      eq(still.status, 200, `and ${back} answers for a session`);
+    for (const gone of ["/flows/history/", "/flows/track/", "/flows/ask/"]) {
+      ok(!rail.includes(`href="${gone}"`), `the RAIL no longer lists ${gone}`);
+      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
+      eq(still.status, 200, `and ${gone} still answers for a session`);
     }
 
     const api = await get("/api/flows/board?side=long", {
