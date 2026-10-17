@@ -33,7 +33,7 @@
 
   var timers = {};
   var listening = 0;
-  var stats = { msgs: 0, bytes: 0, frames: 0, snaps: 0, gaps: 0, dups: 0, orphans: 0, bad: 0, sent: 0, sentBytes: 0, refused: 0, flushes: 0, polls: 0, pollBytes: 0, opens: 0, applied: 0, reg: 0, ms: 0, maxMs: 0, kinds: {} };
+  var stats = { msgs: 0, bytes: 0, frames: 0, snaps: 0, gaps: 0, dups: 0, orphans: 0, bad: 0, sent: 0, sentBytes: 0, refused: 0, flushes: 0, polls: 0, pollBytes: 0, opens: 0, applied: 0, reg: 0, fixture: 0, ms: 0, maxMs: 0, kinds: {} };
 
   var TRANSIT_N = 64;
   var transit = { buf: [], head: 0, off: null };
@@ -551,6 +551,7 @@
     stats.msgs++;
     stats.bytes += data && data.length ? data.length : 0;
     if (typeof data !== "string") return "binary";
+    if (!UI.fixture.host && UI.fixture.nameIn(data)) { stats.fixture++; return "fixture"; }
     var f;
     try { f = JSON.parse(data); } catch (e) { stats.bad++; return "bad"; }
     if (!f || typeof f !== "object") { stats.bad++; return "bad"; }
@@ -684,6 +685,9 @@
         var frames;
         try { frames = JSON.parse(text); } catch (e) { frames = null; }
         if (!Array.isArray(frames)) { pollFailed(0); return; }
+        if (!UI.fixture.host && UI.fixture.nameIn(text)) {
+          frames = frames.filter(function (x) { if (!UI.fixture.nameIn(JSON.stringify(x))) return true; stats.fixture++; return false; });
+        }
         stats.pollBytes += text.length;
         S.pollFails = 0;
         pace(r.headers);

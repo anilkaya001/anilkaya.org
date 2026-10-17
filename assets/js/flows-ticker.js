@@ -2960,7 +2960,7 @@
     let raw = null;
     try { raw = new URL(location.href).searchParams.get("t"); } catch { raw = null; }
     const t = String(raw || "").trim().toUpperCase();
-    return TICKER_RE.test(t) ? t : null;
+    return TICKER_RE.test(t) && !UI.fixture.refuses(t) ? t : null;
   }
 
   function boardRows(long, short) {
