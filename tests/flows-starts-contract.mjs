@@ -1456,7 +1456,7 @@ const MIN = 60 * 1000;
       res.end("{}");
       return;
     }
-    if (req.url.startsWith("/ok") || req.url.startsWith("/limited")) {
+    if (req.url.startsWith("/ok") || req.url.startsWith("/limited") || req.url.includes("/option-contracts") || req.url.includes("/ohlc/1d")) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ data: [{ t: "AAPL" }] }));
     }
@@ -1478,6 +1478,11 @@ const MIN = 60 * 1000;
     }
     out.hangMs = Date.now() - started;
     out.ok = (await m.uw("/ok/x")).length;
+    if (process.env.LONG === "1") {
+      await m.uw("/api/stock/AAPL/option-contracts");
+      await m.uw("/api/stock/AAPL/ohlc/1d", { timeframe: "2Y" });
+      await m.uw("/api/stock/AAPL/ohlc/1d", { timeframe: "1M" });
+    }
     if (process.env.SKIP_HANG !== "1") {
       const limited = m.uw("/limited/x");
       const asked = Date.now();
@@ -1513,6 +1518,16 @@ const MIN = 60 * 1000;
     "and the deadline is 20 s by default, whatever a malformed override says");
   const clamped = JSON.parse(await run(true, { FLOWS_UW_TIMEOUT_MS: "5", SKIP_HANG: "1" }));
   eq(clamped.timeouts[0], 20000, "an override below 100 ms is ignored");
+  const nightlyRun = JSON.parse(await run(false, { FLOWS_UW_TIMEOUT_MS: "300" }));
+  ok(nightlyRun.hang === "TimeoutError" && nightlyRun.hangMs >= 550 && nightlyRun.hangMs < 5000 && nightlyRun.ok === 1,
+    `THE NIGHTLY'S CLIENT gives up on a connection that never answers too (${nightlyRun.hangMs} ms for two 300 ms tries), and still reads a healthy endpoint`);
+  eq(hangs.filter((u) => u.startsWith("/hang")).length, 4, "with one retry after a timeout, as the live client has");
+  deep(nightlyRun.timeouts.slice(0, 2), [300, 300], "each try carries its own deadline");
+  const nightlyDefaults = JSON.parse(await run(false, { FLOWS_UW_TIMEOUT_MS: "", SKIP_HANG: "1", LONG: "1" }));
+  deep(nightlyDefaults.timeouts, [30000, 45000, 45000, 30000],
+    "and the deadline is 30 s by default, 45 s for an option-contracts page and the two-year bars, whatever a malformed override says");
+  const nightlyOff = JSON.parse(await run(false, { FLOWS_UW_TIMEOUT_MS: "", SKIP_HANG: "1", FLOWS_UW_NIGHTLY_DEADLINE: "off" }));
+  deep(nightlyOff.timeouts, [], "and FLOWS_UW_NIGHTLY_DEADLINE=off brings the old unbounded client back");
   server.close();
   const seen = [];
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
@@ -1522,7 +1537,7 @@ const MIN = 60 * 1000;
     await m.uw("/api/x");
   `], { encoding: "utf8", env: { ...process.env, UW_API_KEY: "k" } });
   seen.push(child.stdout.trim());
-  eq(seen[0], '{"signal":false}', "THE NIGHTLY'S CLIENT is untouched: no deadline outside --live");
+  eq(seen[0], '{"signal":true}', "and every nightly call carries a signal by default");
   const src = nightlySource();
   ok(/const keep = process\.env\.FLOWS_LIVE_KEEP === "1";/.test(src) && /chainWithRetry\(\(\) => chainDispatch\(\{ env: process\.env, at \}\)\)/.test(src) &&
      /createWatch\(\{ readOnce: readStoredOnce, latestClock: \(\) => clockBody, env: process\.env \}\)/.test(src),

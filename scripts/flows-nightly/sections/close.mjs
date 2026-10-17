@@ -9,7 +9,8 @@ import { reportHealth } from "../../flows-legs/witness.mjs";
 import { DRY_RUN } from "../flags.mjs";
 import { healthRecord } from "../stages.mjs";
 import { CALL_BUDGET, CALL_OVERRUN_MARGIN, RATE, callModel } from "../vendor-params.mjs";
-import { delayFloorMs, delayMs, describeFloorVerdict, permits, stats } from "../vendor.mjs";
+import { delayFloorMs, delayMs, describeFloorVerdict, permits, stats, wire } from "../vendor.mjs";
+import { summarize } from "../../../shared/flows-call-meter.js";
 import {
   ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish,
   publishedStore, readStored,
@@ -159,6 +160,7 @@ export async function runClose(ctx) {
       crossSectionCards: extraBuilt,
       cardsTotal: cardsBuilt + extraBuilt,
       apiCalls: stats.calls,
+      ...(stats.calls > 0 ? { vendor: summarize(wire.snapshot()) } : {}),
       coverage: {
         membership: { source: membership.source, asOf: membership.asOf, members: membership.members.length,
           fallback: membership.fallback, constantAsOf: NDX_AS_OF, constantAgeDays: ndxAge.days },

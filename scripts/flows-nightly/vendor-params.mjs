@@ -104,6 +104,8 @@ export const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 
 export const LIVE_VENDOR = Object.freeze({ timeoutMs: 20_000, timeoutRetries: 1 });
 
+export const NIGHTLY_VENDOR = Object.freeze({ timeoutMs: 30_000, longTimeoutMs: 45_000, timeoutRetries: 1 });
+
 export const NEWS_VENDOR_LIMIT = 100;
 
 export const IV_RANK_PARAMS = Object.freeze({ timespan: "1y" });

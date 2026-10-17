@@ -11,7 +11,7 @@ import { republishRepair } from "./flows-legs/health.mjs";
 import { stampNow, stampPinned } from "./flows-legs/stamp.mjs";
 import { DRY_RUN, LIVE_MODE } from "./flows-nightly/flags.mjs";
 import { createStageRunner } from "./flows-nightly/stages.mjs";
-import { raiseReadPace, stats, uw, vendorTimeoutMs, wireProgress } from "./flows-nightly/vendor.mjs";
+import { raiseReadPace, stats, uw, vendorTimeoutMs, wire, wireProgress } from "./flows-nightly/vendor.mjs";
 import {
   bindStages, ingestURL, liveCredentialSource, publish, publishedStore, readStored, readStoredOnce,
   resetPublishRetryBudget, sessionArchiveKeys, targetRefusal,
@@ -198,6 +198,7 @@ async function main() {
 
   const stages = createStageRunner({
     clock: () => (stampPinned() ? 0 : Date.now()), calls: () => stats.calls, cpu: () => (stampPinned() ? 0 : processCpuMs()),
+    wire: () => wire.totals(),
   });
   bindStages(stages);
   stages.step("session");
