@@ -16,6 +16,8 @@ export const ERRORS = Object.freeze({
   chain_too_large: entry(502, "Market data provider body is over the parse ceiling"),
   chain_unconfigured: entry(503, "Live chain lookup is not configured"),
   chain_upstream: entry(502, "Market data provider returned an error"),
+  fixture_payload: entry(422, "Fixture payloads are never stored"),
+  fixture_ticker: entry(422, "Fixture ticker names are never stored"),
   forbidden: entry(403, "Forbidden"),
   internal_error: entry(500, "Internal server error"),
   health_off: entry(404, "The health check is off"),

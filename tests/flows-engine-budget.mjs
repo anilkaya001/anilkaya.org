@@ -175,7 +175,7 @@ const bump = (job, trips, read, written) => {
         now = nextPass;
         const n = f.trips.length;
         await runLive({ uw: vendor(), now: () => now, log: () => {}, warn: () => {}, force: true, shapeNews, readStored,
-          publish: async (k, p) => { await W.ingestLive(env, k, "POST", JSON.stringify(p), now, { json }); } });
+          publish: async (k, p) => { await W.ingestLive(env, k, "POST", JSON.stringify(p), now, { json, host: "127.0.0.1" }); } });
         bump("tier2", f.trips.length - n, f.rowsRead(n), f.written(n));
         nextPass += 15 * 60000;
       }

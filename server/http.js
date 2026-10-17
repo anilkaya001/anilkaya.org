@@ -1,4 +1,5 @@
 import { TICKER_RE } from "../shared/flows-live.js";
+import { fixtureHost, isFixtureTicker } from "../shared/flows-fixture-names.js";
 import { errorEntry } from "./errors.js";
 import { errorText } from "../shared/flows-log.js";
 
@@ -121,9 +122,11 @@ export async function readJSON(request) {
 
 export const tickerParam = (url, name = "t") => String(url.searchParams.get(name) || "").trim().toUpperCase();
 
+export const fixtureRefused = (url, ticker) => isFixtureTicker(ticker) && !fixtureHost(url.hostname);
+
 export function requireTicker(url, name = "t") {
   const ticker = tickerParam(url, name);
-  if (!TICKER_RE.test(ticker)) throw HttpError.of("invalid_ticker");
+  if (!TICKER_RE.test(ticker) || fixtureRefused(url, ticker)) throw HttpError.of("invalid_ticker");
   return ticker;
 }
 

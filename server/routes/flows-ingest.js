@@ -1,4 +1,5 @@
 import { HttpError, json, readBounded, requireMethod } from "../http.js";
+import { fixtureHost, fixtureRefusal } from "../../shared/flows-fixture-names.js";
 import * as FLOWS_LIVE from "../../shared/flows-live-worker.js";
 import { archiveWriteAction, ARCHIVE_REFUSALS, PERMANENT_ARCHIVE_KEY_RE } from "../../shared/flows-archive.js";
 import {
@@ -13,6 +14,12 @@ function timingSafeEqualStr(a, b) {
   let diff = x.length ^ y.length;
   for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
   return diff === 0;
+}
+
+export function contentRefusal(url, key, text) {
+  if (fixtureHost(url.hostname)) return null;
+  const refusal = fixtureRefusal(key, text);
+  return refusal ? HttpError.of(refusal.code, undefined, undefined, refusal.name ? { name: refusal.name } : undefined) : null;
 }
 
 export function flowsIngestRows(deps) {
@@ -83,13 +90,16 @@ export function flowsIngestRows(deps) {
       const text = request.method === "POST"
         ? new TextDecoder().decode(await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"))
         : "";
-      return FLOWS_LIVE.ingestLive(env, key, request.method, text, Date.now(), { json });
+      return FLOWS_LIVE.ingestLive(env, key, request.method, text, Date.now(), { json, host: url.hostname });
     }
 
     const { tickerKey, valid: validKey } = ingestKeyParts(key);
     if (!validKey) {
       throw new HttpError(400, "invalid_key", "Unknown payload key");
     }
+
+    const keyRefusal = contentRefusal(url, key, "");
+    if (keyRefusal) throw keyRefusal;
 
     const scope = FLOWS_LIVE.ingestScope(key, request.method, tokenKind);
     if (!scope.ok) throw new HttpError(scope.status, scope.code, scope.message);
@@ -119,6 +129,9 @@ export function flowsIngestRows(deps) {
 
     try { JSON.parse(payload); }
     catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
+
+    const bodyRefusal = contentRefusal(url, key, payload);
+    if (bodyRefusal) throw bodyRefusal;
 
     await ensureFlowsTables(env);
 
