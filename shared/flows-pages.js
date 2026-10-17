@@ -1170,14 +1170,23 @@ export function strategyPage({ username = "" } = {}) {
 export const FLOWS_SPRITE = SPRITE;
 
 export function statusPage({ username = "" } = {}) {
-  const module = (id, title, body) => `
-    <section class="ui-card ui-mod" id="${id}Card" aria-labelledby="${id}T">
-      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2></header>
-      <div id="${id}">${body}</div>
+  const wait = `<p class="st-miss">Reading…</p>`;
+  const module = (id, title, body = wait, extra = "") => `
+    <section class="ui-card ui-mod st-mod" id="${id}Card" aria-labelledby="${id}T">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="st-asof" id="${id}Asof"></span></header>
+      <div id="${id}">${body}</div>${extra}
     </section>`;
+  const tile = (id, label) => `
+    <div class="st-tile" id="${id}"><span class="st-tile-l">${label}</span><span class="st-tile-v">—</span><span class="st-tile-s">Reading…</span></div>`;
+  const later = `<p class="st-miss">Loads when this tab opens.</p>`;
+  const panel = (view, hidden, inner) => `
+  <div class="st-panel" id="stPanel-${view}" role="tabpanel" aria-labelledby="stTab-${view}" data-view="${view}"${hidden ? " hidden" : ""}>
+    <div class="st-grid st-grid-${view}">${inner}
+    </div>
+  </div>`;
   return flowsDocument({
     title: "Status",
-    description: "Owner view of the real-time rail, the nightly run and the model spend, read from routes the site already serves.",
+    description: "Owner view of the real-time rail, the nightly run, the model spend, feed latency and API usage, read from routes the site already serves.",
     active: "status", chrome: false, username,
     styles: ["/assets/css/flows-status.css"],
     scripts: ["/assets/js/flows-status.js"],
@@ -1189,11 +1198,28 @@ export function statusPage({ username = "" } = {}) {
     <p class="st-meta" id="stReady" role="status">Reading readiness…</p>
   </header>
   <div class="st-bar"><button type="button" class="st-again" id="stAgain">Read again</button><p id="stNote" role="status">Reading the status…</p></div>
-  <div class="st-grid">
-${module("stRail", "Real-time rail", `<p class="st-miss">Reading…</p>`)}
-${module("stNight", "Nightly run", `<p class="st-miss">Reading…</p>`)}
-${module("stAi", "Model spend today", `<p class="st-miss">Reading…</p>`)}
+  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Vendor calls today")}${tile("stTileAi", "Model neurons today")}
   </div>
+  <div class="st-tabs" id="stTabs"></div>${panel("health", false, `
+${module("stRail", "Real-time rail")}
+${module("stNight", "Nightly run")}
+${module("stAi", "Model spend today")}
+${module("stEng", "Engines")}
+${module("stSw", "Switches")}`)}${panel("latency", true, `
+${module("stFeeds", "Feed latency now", later)}
+${module("stSession", "Through the session", later)}
+${module("stStored", "Stored feeds", later)}
+${module("stTiming", "Engines' timing", later)}
+${module("stSocket", "Socket upstream", later)}
+${module("stBrowser", "This browser", later)}`)}${panel("usage", true, `
+${module("stMeters", "Meters", later)}
+${module("stConsumers", "Vendor calls by consumer", later)}
+${module("stLimits", "What stops at each line today", later)}
+${module("stOutcomes", "Model outcomes", later)}
+${module("stPlan", "Plan lines and sources", later)}`)}
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-chart.js")}"></i>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-latency.js")}"></i>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-usage.js")}"></i>
   </div>`,
   });
 }

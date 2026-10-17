@@ -29,7 +29,7 @@ const CEILING_KIB = {
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
-  statusPage: 80 + 1792 / 1024 + 2010 / 1024 + 2010 / 1024,
+  statusPage: 80 + 1792 / 1024 + 24.5,
 };
 
 const GZIP_KIB = {
@@ -47,7 +47,7 @@ const GZIP_KIB = {
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
-  statusPage: 27 + 641 / 1024 + 641 / 1024,
+  statusPage: 27 + 8,
 };
 
 const CSS_KIB = {
@@ -65,7 +65,7 @@ const CSS_KIB = {
   loginPage: 80 + 565 / 1024,
   aboutPage: 81 + 565 / 1024,
   glossaryPage: 81 + 565 / 1024,
-  statusPage: 82,
+  statusPage: 82 + 7.5,
 };
 
 const CSS_GZIP_KIB = {
@@ -83,7 +83,7 @@ const CSS_GZIP_KIB = {
   loginPage: 18 + 64 / 1024,
   aboutPage: 18 + 64 / 1024,
   glossaryPage: 18 + 64 / 1024,
-  statusPage: 18,
+  statusPage: 18 + 2.5,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -119,6 +119,7 @@ const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { "market-below": "/assets/js/flows-market-below.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-usage.js"] } },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
@@ -128,7 +129,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 136,
-  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80,
+  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80,
 };
 
 const FLOOR_BYTES = 1024;
