@@ -43,6 +43,11 @@ function inline(html, scripts) {
   return out.replace(/<script src="[^"]*flows-dock\.js[^"]*"[^>]*><\/script>/, "");
 }
 
+const RIBBON = '<div id="fixtureRibbon" style="position:fixed;right:8px;bottom:8px;z-index:2147483647;padding:3px 10px;border-radius:10px;' +
+  'background:var(--bg-elev);color:var(--ink);border:1px solid var(--hairline);font:600 11.5px/1.4 var(--font-ui);pointer-events:none">' +
+  "Fixture data \u00b7 invented figures, not production</div>";
+const ribboned = (html) => (/<body[^>]*>/.test(html) ? html.replace(/<body[^>]*>/, (m) => m + RIBBON) : RIBBON + html);
+
 const stubFetch = (map) => `<script>
 const S = ${JSON.stringify(map)};
 window.fetch = (u) => {
@@ -66,9 +71,9 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
   page.on("pageerror", (e) => errs.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text()); });
 
-  await page.route(/^https:\/\/preview\.local\//, (r) => {
+  await page.route(/^https:\/\/preview\.test\//, (r) => {
     const u = new URL(r.request().url());
-    if (u.pathname === "/") return r.fulfill({ contentType: "text/html", body: html });
+    if (u.pathname === "/") return r.fulfill({ contentType: "text/html", body: ribboned(html) });
     const f = /^\/assets\/fonts\/([A-Za-z0-9._-]+\.(?:woff2?|ttf|otf))$/.exec(u.pathname);
     if (f) {
       try {
@@ -89,7 +94,7 @@ async function shot(name, html, { width = 1440, height = 1400, settle = 2500, pr
     }
     return r.fulfill({ status: 404, body: "" });
   });
-  await page.goto("https://preview.local/", { waitUntil: "load" });
+  await page.goto("https://preview.test/", { waitUntil: "load" });
   await page.waitForTimeout(settle);
   const seen = probe ? await page.evaluate(probe) : {};
 

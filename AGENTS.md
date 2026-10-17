@@ -365,6 +365,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `shared/flows-ready.js`, `tests/flows-ready.mjs` | The readiness leaf, a module over `flows-time.js` and `flows-freshness.js` alone. `readiness(state, now)` answers for the current session whether Flows can serve the open: the nightly landed for `expectedNightlySession` (the run record `meta`, then `universe`, `regime`, `events` and both `board` sides each at or beyond it), Tier 1 ticking in the session (`tier1At` within 11 minutes, `tier1OkAt` within 16, a holiday verdict skipped, an 11-minute grace after the open), the rail when the caller is an owner and the day is a trading day inside 04:00-20:00 ET (off, unreachable, degraded or a roster error each block), and the clock row. It returns `ok`, `blockers` (`code` and a plain `sentence`), `checks` (`ok`, `blocked` or `skipped` each), `expected`, the session the open belongs to, `minutesToOpen` and `opens` in TRT through `flows-time.js`. `healthOf` is the three-field public body. A null or unreadable input is a blocker, never a pass. `tests/flows-ready.mjs` holds each blocker from both sides at a pinned clock, the pre-market news cadence and its kill switch, and the one-call-one-row write. |
 | `server/routes/flows-ready.js` | The ready family in the route table: `flowsReadyRows(deps)` is `GET /api/flows/ready` behind the Flows session and the anonymous `GET /api/health`. Readiness reads the clock row and one `store.metadata` call for the six nightly keys (about six rows and two trips, never a payload), asks the rail (`railReadiness` in `shared/flows-rt-routes.js`, a 1.5 s read of the object's own status) only for an owner, and answers `shared/flows-ready.js`'s body with `owner`. `FLOWS_READY` and `FLOWS_HEALTH` in `wrangler.toml` are `on`; anything else is a 404 `ready_off` or `health_off`. Health is `{ok, asOf, session}` computed from the calendar, no store, no clock row, no rail. The pre-market news pass (`premarketNewsTick` in `shared/flows-live-worker.js`, `FLOWS_PREMARKET_NEWS`) runs on the half-hourly housekeeping firing between 04:00 and 09:30 ET on trading days, makes one vendor call (the news headlines, limit 100) and upserts `live:news` for the day's session, at most 11 calls and 11 rows a day (`BUDGETS.premarketNews`). |
 | `server/routes/flows-dispatch.js`, `tests/flows-dispatch-check.mjs` | The owner-only dispatch credential check: `flowsDispatchRows(deps)` is `POST /api/flows/dispatch-check` behind the Flows session. A non-owner is `403 owner_only` (`FLOWS_RT_USERS` through `isOwner`), a cross-origin call `403`, and a second call inside 60 s in one isolate `429 rate_limited` with `Retry-After: 60` (`state.dispatchCheckAt`). `checkDispatchCredential` in `shared/flows-live-worker.js` makes one read-only `GET /repos/{repo}/actions/workflows/{FLOWS_LIVE_WORKFLOW}` with the Worker's token (200 `ok`, 401 `bad-token`, 403 and 404 `no-access`, a network failure `unreachable`) and one `dispatchWorkflow` of the live workflow with `{origin: manual, drill: true}`, which opens one witness issue and closes it at once under the concurrency group `flows-live-drill`. The outcome is written to `flows_clock.dispatch_why` through `recordDispatchWhy` (one upsert, failure ignored, nothing written for a missing token). The body is `{ok, read, dispatch, recorded, repo, workflow, at}` and never carries the token or a header value. `tests/flows-dispatch-check.mjs` drives `worker.js` with a scripted GitHub for seven status pairs, the token-absent and store-failure cases, every principal and the rate limit, and fails seven planted wrong builds of the route. |
+| `shared/flows-fixture-names.js`, `scripts/flows-legs/taint.mjs`, `tests/fixture-guard.mjs`, `tests/flows-fixture-guard-render.mjs` | The fixture guard (SYN-01 to SYN-11 of the 2026-10-13 synthetic audit): nothing invented can reach a member. `shared/flows-fixture-names.js` is the reserved namespace, a leaf that imports nothing: `FIXTURE_TICKER_RE` (SY, one letter, three digits, or GONE and one digit, which no exchange symbol can match because symbols hold no digits), `FIXTURE_TOKEN_RE` (a whole JSON string, never a word inside a headline), `isFixtureTicker`, `fixtureNameIn`, `fixtureMarked` (a top-level `fixture: true`), `fixtureHost` (loopback or a `.test` name, the only waiver), `fixtureRefusal(key, text)` and `FIXTURE_REFUSALS` (the 422 `fixture_ticker` and `fixture_payload` rows `server/errors.js` repeats). Worker door: `server/routes/flows-ingest.js` `contentRefusal(url, key, text)` refuses a fixture ticker key on every method, a body naming one and a stamped body before any D1 statement, and passes the request host into `ingestLive` for live keys; it is the one seam a later door (schema, compare-and-set, quarantine) extends. The read side answers 400 `invalid_ticker` for a fixture name off a test host (`requireTicker`, the summary route, the rail's `f`). No variable can switch the guard off: only the request host waives it. Pipeline: `publish()` in `scripts/flows-nightly/store.mjs` refuses before the network (`publishRefusal`: a fixture name, a stamped body, or `fixture_code` when `scripts/flows-legs/taint.mjs` says a fake ran) unless the ingest host is a test host, sets the exit code and throws an error with `fixtureLeak`, which `createStageRunner.run` rethrows even for an isolated stage; every dry-run payload that is an object is written with `fixture: true`; `targetRefusal` stops a run whose `FLOWS_UW_BASE_URL` is a redirect or invalid base from publishing to a non-test ingest, before the first vendor call, nightly and live. `taint.mjs` is a leaf (`touch`, `tainted`, `clearTaint`, the last for tests only); every export of `fixtures.mjs` and each fake constructor touches it on entry. Backstops: the health gate adds a `fixture-name` failure when any live body it already reads names a fixture; the client (`FlowsUI.fixture` in `assets/js/flows-ui.js`, a copy of the token and host rules the suite holds equal to the leaf) quarantines a page that is sent a fixture name or `fixture: true` (hidden main, the unavailable pill, one console error, later Flows requests held), drops rail frames that carry one and counts them in `stats.fixture`, and refuses a fixture `?t=` before asking for a card; `scripts/render-preview.mjs` runs on a `.test` origin and prints a Fixture data ribbon on every page. `tests/fixture-guard.mjs` (class N) holds the namespace table with five wrong rules, the Worker door and the pipeline battery against copies of the source with planted wrong builds each of which must fail, the dry-run stamp, the stage rethrow, the configuration preflight as spawned processes, the health line, the static confinement scan (a fixture token only in tests, docs, the fakes, the preview fixtures and the leaf; a fake called outside a dry-run branch; every fake taints on entry; only tests clear the taint) with its own mutations, the Vision sample-world strings absent from served files, and the dry emit stamped. `tests/flows-fixture-guard-render.mjs` (class C, `page.route`, no server) renders the long board and ticker from the dry emit on the production origin and on `.test` and loopback origins, the rail on both, a stamped real-named card, and five planted wrong builds of the served scripts. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1211,6 +1212,57 @@ throws on a missing marker or a cut across a module boundary, `expect()`
 takes a `min` of at least 1, and `absent()` requires a positive `anchor` that
 must match the same source, so no scan passes on an empty match.
 
+**Fixture policy (the repository is public).** A fixture is invented and says
+so, and nothing invented may reach a member. The guard is four independent
+layers, each proved by planted wrong builds in `tests/fixture-guard.mjs` and
+`tests/flows-fixture-guard-render.mjs`: the pipeline refuses before the network
+(`publish()` in `scripts/flows-nightly/store.mjs`: a fixture name, a
+`fixture: true` stamp, or any fake having run, unless the ingest host is
+loopback or a `.test` name; and a fake vendor base never publishes to a
+non-test ingest), the Worker's ingest door answers 422 `fixture_ticker` or
+`fixture_payload` for the same, the read routes answer 400 `invalid_ticker`
+for a fixture name, and the browser quarantines a page that is sent one. The
+only waiver is the request host; no variable switches a guard off. Rules for
+what goes into a fixture:
+
+1. An invented ticker is `SY<letter><3 digits>` (`SYN` for screener names,
+   `SYL`, `SYS` and `SYW` for live boards, `SYX` for anything else) or
+   `GONE<digit>`: `shared/flows-fixture-names.js` is the one definition. Never
+   a letters-only word, which is or can become a listing, and never a bare
+   prefix rule, which would refuse a real symbol. Letters-only names are
+   tolerated only in pure unit tests that never reach publish, ingest or a page.
+2. A real symbol appears in a fixture only where the code keys on that name
+   (SPY, QQQ, IWM, DIA, the XL* sector ETFs, the focus roster of
+   `shared/flows-focus.js`, the Mag 7 in the focus tests). Its figures are
+   invented, and the dry run says so: every object payload it writes carries
+   `fixture: true`.
+3. A fixture token (the namespace above) is written only in `tests/`, `docs/`,
+   Markdown, `scripts/flows-nightly/fixtures.mjs`, `scripts/flows-legs/*-fake.mjs`,
+   `scripts/flows-legs/fake-vendor.mjs`, `scripts/flows-legs/live-day.mjs`,
+   `scripts/render-preview.fixtures.json` and `scripts/eval-garch-tails.mjs`.
+   A fake is called outside those files only inside a dry-run branch, and each
+   fake taints the process on entry (`scripts/flows-legs/taint.mjs`).
+4. No real person's name and no real issuer attached to a real symbol: invent
+   both, as `fakePoliticalRaws` does.
+5. No vendor row, verbatim or clipped. A fixture is written from the vendor's
+   OpenAPI document and `scripts/flows-probe-shapes.json` by a generator it
+   names in `source` or `provenance.generator` (see `tests/gen-dossier-fixtures.py`).
+   The four that still say they are verbatim rows of one Actions run are listed
+   in `LEGACY` in `tests/flows-probe-contract.mjs` and are to be regenerated:
+   `tests/fixtures-live-probe.json`, `tests/fixtures-flows-legs-probe.json`,
+   `tests/fixtures-vol-probe.json` and `tests/fixtures-flows-positioning.json`.
+   Purging them from git history is the owner's decision.
+6. The Lab teaching datasets (`assets/data/projects/*-synthetic-v1.csv`,
+   `synthetic: true` in their provenance) are not tickers and stay.
+7. The Flows Vision sample world (calibration, latency and budget figures with
+   real symbols) is concept data. `tests/fixture-guard.mjs` fails when one of its
+   signature figures appears in a served or Worker file; the latency tab and the
+   ticker rebuild that port those boards must compute their figures.
+8. A page rendered from the dry emit for a screenshot goes through
+   `scripts/render-preview.mjs`, which serves it from a `.test` origin and prints
+   a Fixture data ribbon; a screenshot without that ribbon is not evidence of
+   what production shows.
+
 The other shared test helpers live beside it, each held by
 `tests/lib-contract.mjs` (run after `contracts.mjs` in `test:contracts`):
 `tests/lib/browser.mjs` (`launch()` is `chromium.launch()` plus
@@ -1423,7 +1475,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 135 suites: 93 that need only Node (N), 27 that also
+`tests/suites/` registers 137 suites: 94 that need only Node (N), 28 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1433,41 +1485,41 @@ Confirmed to run with no server and no browser (N):
 
 ```
 contracts                 run                       academy                   approval-frames
-architecture              ci-affected               docs                      flows
-flows-ai-broker           flows-ai-salvage          flows-alert-grid          flows-alerts
-flows-basis               flows-brief               flows-calibration         flows-chain-panels
-flows-conviction          flows-copy-lint           flows-d1-budget           flows-defer-render
-flows-dispatch-check      flows-dispersion          flows-dossier             flows-dossier-reads
-flows-engine-budget       flows-fact-ids            flows-flow-below-render   flows-freshness
-flows-garch               flows-home-below-render   flows-home-composition    flows-home-net-render
-flows-ledger              flows-legs                flows-live                flows-market-below-render
-flows-mint                flows-moves-render        flows-neuron              flows-neuron-screen
-flows-overlay             flows-payload-shape       flows-permits             flows-plan-facts
-flows-political           flows-political-render    flows-positioning         flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-readers             flows-reading             flows-reading-worker
-flows-reads               flows-ready               flows-record              flows-relations-render
-flows-rt                  flows-scores              flows-sign                flows-skyline-render
-flows-starts              flows-stats               flows-stock               flows-tape-stats
-flows-targets             flows-time                flows-truth               flows-universe
-flows-variation           flows-vendor-budget       flows-verdict             flows-vol
-flows-warnings            flows-weight              flows-ws-probe            lab-write
-launch-readiness          markets                   mastery                   pipeline
-route-matrix              server-ai                 server-desk               server-ingest
-server-kernel             server-log                server-pages              server-router
-staging
+architecture              ci-affected               docs                      fixture-guard
+flows                     flows-ai-broker           flows-ai-salvage          flows-alert-grid
+flows-alerts              flows-basis               flows-brief               flows-calibration
+flows-chain-panels        flows-conviction          flows-copy-lint           flows-d1-budget
+flows-defer-render        flows-dispatch-check      flows-dispersion          flows-dossier
+flows-dossier-reads       flows-engine-budget       flows-fact-ids            flows-flow-below-render
+flows-freshness           flows-garch               flows-home-below-render   flows-home-composition
+flows-home-net-render     flows-ledger              flows-legs                flows-live
+flows-market-below-render flows-mint                flows-moves-render        flows-neuron
+flows-neuron-screen       flows-overlay             flows-payload-shape       flows-permits
+flows-plan-facts          flows-political           flows-political-render    flows-positioning
+flows-probe               flows-public              flows-pulse               flows-quant
+flows-quant-audit         flows-quant-card          flows-readers             flows-reading
+flows-reading-worker      flows-reads               flows-ready               flows-record
+flows-relations-render    flows-rt                  flows-scores              flows-sign
+flows-skyline-render      flows-starts              flows-stats               flows-stock
+flows-tape-stats          flows-targets             flows-time                flows-truth
+flows-universe            flows-variation           flows-vendor-budget       flows-verdict
+flows-vol                 flows-warnings            flows-weight              flows-ws-probe
+lab-write                 launch-readiness          markets                   mastery
+pipeline                  route-matrix              server-ai                 server-desk
+server-ingest             server-kernel             server-log                server-pages
+server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
 
 ```
 flows-ask                 flows-chart-kernel        flows-deadline-render     flows-desk-client
-flows-desk-wiring         flows-events              flows-export              flows-glance-frame-render
-flows-glance-render       flows-index               flows-kit                 flows-link
-flows-movelab-render      flows-moves0              flows-net-render          flows-pages-render
-flows-readers-render      flows-reading-render      flows-render              flows-rt-client
-flows-status-render       flows-strip               flows-surface-render      flows-ticker
-landing-motion            market-ticker             placement
+flows-desk-wiring         flows-events              flows-export              flows-fixture-guard-render
+flows-glance-frame-render flows-glance-render       flows-index               flows-kit
+flows-link                flows-movelab-render      flows-moves0              flows-net-render
+flows-pages-render        flows-readers-render      flows-reading-render      flows-render
+flows-rt-client           flows-status-render       flows-strip               flows-surface-render
+flows-ticker              landing-motion            market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 
