@@ -689,28 +689,6 @@ try {
     }
 
     {
-      const st = await get("/flows/track/", { headers: { Cookie: "flows_session=" + token } });
-      eq(st.status, 200, "/flows/track/ renders for an authenticated session");
-      const stHtml = await st.text();
-      ok(stHtml.includes("/assets/js/flows-track.js"), "the track page loads its own controller");
-      ok(stHtml.includes("/assets/js/flows-ui.js"), "and the shared UI module");
-      ok(stHtml.indexOf("/assets/js/flows-ui.js") < stHtml.indexOf("/assets/js/flows-chart.js") &&
-         stHtml.indexOf("/assets/js/flows-chart.js") < stHtml.indexOf("/assets/js/flows-track.js"),
-         "with the module and the chart library BEFORE the controller — the load order is the dependency order");
-      ok(stHtml.includes('id="stTrack"'), "and carries the trace host");
-      ok(stHtml.includes('id="stBasis"'), "and the basis panel, which is the page's honesty");
-      ok(/never zero/i.test(stHtml),
-         "the page's own lede states that a gap is not a zero — the one sentence a " +
-         "reader must not have to infer");
-
-      const anonSt = await get("/flows/track/");
-      eq(anonSt.status, 200, "/flows/track/ serves a page to an anonymous visitor");
-      ok(!(await anonSt.text()).includes('id="stTrack"'),
-         "/flows/track/ leaks nothing to an anonymous visitor");
-
-      const bareSt = await get("/flows/track");
-      eq(bareSt.status, 308, "/flows/track without its trailing slash redirects");
-
       const stApi = await get("/api/flows/scoretrack", { headers: { Cookie: "flows_session=" + token } });
       eq(stApi.status, 200, "an authenticated scoretrack request succeeds");
       const stPayload = await stApi.json();
@@ -743,10 +721,12 @@ try {
 
     const rail = (/<nav class="flows-rail"[\s\S]*?<\/nav>/.exec(html) || [""])[0];
     ok(rail.includes("flows-rail"), "the rail markup is found before it is read");
-    for (const gone of ["/flows/history/", "/flows/track/", "/flows/ask/"]) {
-      ok(!rail.includes(`href="${gone}"`), `the RAIL no longer lists ${gone}`);
-      const still = await get(gone, { headers: { Cookie: "flows_session=" + token } });
-      eq(still.status, 200, `and ${gone} still answers for a session`);
+    for (const gone of ["/flows/history/", "/flows/track/", "/flows/ask/", "/flows/history", "/flows/track", "/flows/ask"]) {
+      ok(!rail.includes(`href="${gone}"`), `the RAIL does not list ${gone}`);
+      for (const headers of [{ Cookie: "flows_session=" + token }, {}]) {
+        const gonePage = await get(gone, { headers });
+        eq(gonePage.status, 404, `${gone} is the unknown-page 404`);
+      }
     }
 
     const api = await get("/api/flows/board?side=long", {

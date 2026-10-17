@@ -1526,8 +1526,8 @@ try {
 
     const tabs = await page.evaluate(() => [...document.querySelectorAll(".fx-tabs a")]
       .map((a) => a.getAttribute("href")));
-    assert.deepEqual(tabs, ["/flows/", "/flows/long/", "/flows/ticker/", "/flows/market/", "/flows/ask/"],
-      "at 390px the bottom tab bar carries Home, Boards, Search, Market and Ask"); checks++;
+    assert.deepEqual(tabs, ["/flows/", "/flows/long/", "/flows/ticker/", "/flows/market/"],
+      "at 390px the bottom tab bar carries Home, Boards, Search and Market"); checks++;
     for (const dest of ["/flows/", "/flows/long/"]) {
       ok(await page.locator(`.fx-tabs a[href="${dest}"]`).isVisible(),
          `${dest} is one tap away in the tab bar at 390px`);

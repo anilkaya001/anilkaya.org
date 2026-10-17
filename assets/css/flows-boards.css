@@ -453,22 +453,6 @@
 .bd-empty .ui-silent { min-height: 240px; }
 .bd-silent .ui-silent-t small { display: block; margin-top: 2px; color: var(--label-3); font: var(--t-caption); font-variant-numeric: tabular-nums; }
 
-.flows-foot.bd-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-4); padding: 0; border: 0; }
-.bd-mod:has([aria-busy="true"]) + .bd-foot { visibility: hidden; }
-.bd-foot a {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 var(--sp-3);
-  border-radius: 8px;
-  color: var(--label-2);
-  font: var(--t-footnote);
-  text-decoration: none;
-}
-.bd-foot a:hover { color: var(--accent-ink); background: var(--fill-4); }
-.bd-foot a .ui-g { font-size: 14px; }
-
 @media (prefers-reduced-motion: reduce) {
   .bd-row.is-flip { transition: none; }
 }

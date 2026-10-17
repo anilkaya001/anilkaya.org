@@ -832,7 +832,7 @@
     const question = String(input.value || "").trim();
     if (question === "") {
       const s = "No question was typed, so nothing was sent and no model call was spent. " + (DOCKED
-        ? "Nothing on this page changes; the session's briefing is a page of its own, at /flows/ask/."
+        ? "Nothing on this page changes."
         : "The briefing below stands whether or not anything is asked.");
       answerHost.replaceChildren(h("p", { class: "ak-empty", role: "note" }, UI.glyph("quiet"), h("span", null, s)));
       input.focus();
@@ -848,7 +848,7 @@
       if (gated) return;
       failAnswer(question, error && error.said ? error.said
         : "The question could not be sent: " + (error && error.message ? error.message : error) + ". That is this page failing to reach its route, not a statement about what has been published — " + (DOCKED
-          ? "this rail draws no briefing, and the one at /flows/ask/ is read from a different route."
+          ? "this rail draws no briefing."
           : "the briefing below was read separately and still stands."));
     }).then(() => { if (!gated) setAsking(false); });
   });

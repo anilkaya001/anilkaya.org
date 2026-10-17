@@ -30,8 +30,6 @@ const SURFACES = [
   { key: "unusual", file: "assets/js/flows-unusual.js", fn: null, vars: ["payload"] },
   { key: "unusual", file: "assets/js/flows-unusual-below.js", fn: null, vars: ["payload"] },
   { key: "events", file: "assets/js/flows-events.js", fn: null, vars: ["payload"] },
-  { key: "record", file: "assets/js/flows-history.js", fn: null, vars: ["payload"] },
-  { key: "scoretrack", file: "assets/js/flows-track.js", fn: null, vars: ["payload"] },
 
   { key: "flowalerts", file: "assets/js/flows-unusual.js", fn: null, vars: ["alerts"] },
   { key: "flowalerts", file: "assets/js/flows-unusual-below.js", fn: null, vars: ["alerts"] },

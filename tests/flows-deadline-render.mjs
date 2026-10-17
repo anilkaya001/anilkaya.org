@@ -107,12 +107,9 @@ const SUITE = [
   { id: "events", fn: "eventsPage", url: "/flows/events/", ms: 20000 },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA", ms: 20000 },
   { id: "political", fn: "politicalPage", url: "/flows/political/", ms: 20000 },
-  { id: "history", fn: "historyPage", url: "/flows/history/", ms: 20000 },
-  { id: "track", fn: "trackPage", url: "/flows/track/", ms: 20000 },
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/", ms: 20000 },
   { id: "desk", fn: "deskPage", url: "/flows/desk/?t=NVDA", ms: 45000 },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA", ms: 45000 },
-  { id: "ask", fn: "askPage", url: "/flows/ask/", ms: 15000 },
 ];
 
 const browser = await chromium.launch();

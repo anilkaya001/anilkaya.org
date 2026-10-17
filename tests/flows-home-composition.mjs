@@ -24,7 +24,7 @@ const EFFECT = /^(now|with:[A-Z]\d?-\d+)$/;
 
 function pageFacts(html, js) {
   const start = html.indexOf('class="ui-grid hm-grid"');
-  const end = html.indexOf('class="flows-foot hm-foot"');
+  const end = html.indexOf('data-defer="home-below"');
   const grid = start >= 0 && end > start ? html.slice(start, end) : "";
   const ids = [...grid.matchAll(/<section\b[^>]*?\sid="([^"]+)"/g)].map((m) => m[1]);
   const hero = ids.filter((i) => i === TABLE.hero.id);

@@ -44,10 +44,6 @@ export async function boardShift(browser, { baseURL, cookie, route, width, heigh
       await page.evaluate(() => { window.__shifts = []; });
     }
     const before = await tops();
-    const busyBefore = await page.evaluate(() => {
-      const f = document.querySelector(".bd-foot");
-      return f ? getComputedStyle(f).visibility : null;
-    });
     release();
     await page.waitForSelector(settled);
     await page.waitForFunction(() => !document.querySelector('.bd-body[aria-busy="true"]'));
@@ -55,8 +51,7 @@ export async function boardShift(browser, { baseURL, cookie, route, width, heigh
     const after = await tops();
     const shifts = await page.evaluate(() => window.__shifts);
     const pointer = await page.evaluate(() => (matchMedia("(pointer: coarse)").matches ? "coarse" : "fine"));
-    const footAfter = await page.evaluate(() => getComputedStyle(document.querySelector(".bd-foot")).visibility);
-    return { before, after, shifts, pointer, busyBefore, footAfter, cls: shifts.reduce((a, s) => a + s.v, 0) };
+    return { before, after, shifts, pointer, cls: shifts.reduce((a, s) => a + s.v, 0) };
   } finally {
     await ctx.close();
   }

@@ -1268,7 +1268,7 @@ import { chromium } from "playwright";
        "the rail never points at a briefing on the page: paintBrief is skipped when docked, " +
        "so on every route this box is docked on that sentence would direct a reader to a " +
        "region that is not on the page");
-    ok(/\/flows\/ask\//.test(d.all), "it points at the route the briefing is actually on");
+    ok(!/\/flows\/ask/.test(d.all), "and it points at no page that no longer exists");
 
     const page = await mount();
     await page.fill("#askQ", "");

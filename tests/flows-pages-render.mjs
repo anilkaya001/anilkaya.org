@@ -125,9 +125,6 @@ const SPECS = [
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA" },
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
-  { id: "ask", fn: "askPage", url: "/flows/ask/", dock: false },
-  { id: "track", fn: "trackPage", url: "/flows/track/" },
-  { id: "history", fn: "historyPage", url: "/flows/history/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
 ];
