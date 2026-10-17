@@ -1122,6 +1122,52 @@ production, so the first real quota or D1 outage is the check (read
 `X-Fresh-Last-Good` on the response). The Cache API does nothing on a
 `workers.dev` hostname, so a preview there proves nothing either way.
 
+### 10.4d The ingest door v2 (warn mode): what it records, how to read it, how to turn it off
+
+`FLOWS_DOOR_V2` in `wrangler.toml` is `off` and ships `off`. Only the exact word `warn` turns
+the door on; every other value, `enforce` included, is `off` until the row that enforces. With it
+`off` the ingest route, its responses and its statements are what they were, `?op=` and
+`X-Content-Hash` are ignored, and the manifest triggers never fire.
+
+The schema is the Worker's first-use DDL (`flows_payload` gains `chash`, `session`, `quality`,
+`epoch`, `asof` and `rev`; `flows_quarantine` and the three `flows_payload_manifest_*` triggers
+are created), so a deploy applies it. Apply the migrations as well, **before** the first deploy of
+this code: once the Worker has added the columns at first use, the first `ALTER` in 0022 fails with
+`duplicate column name` and stops the file, and nothing is missing (the triggers are first-use DDL
+too, so only a fresh database built from `migrations/` needs the file at all):
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0022_flows_payload_door.sql
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --file=./migrations/0023_flows_quarantine.sql
+```
+
+With `warn`, a write is still stored exactly as before. The door adds one batch before it (the
+key's stored tuple and, for a ticker key, the universe's name list: two rows read) and records
+what it computed on the row and in the response's `door` field: the canonical hash, the session,
+the quality (4 x the share of base panels that are ok, out of 63, plus the tier), the epoch and
+the as-of minute. A finding that the enforcing door would refuse is written to `flows_quarantine`
+with mode `warn`. Read the would-have-refused count by reason and producer:
+
+```bash
+./tests/node_modules/.bin/wrangler d1 execute iewt --remote --command="SELECT reason, mode, producer, count(*) AS n, max(at) AS last FROM flows_quarantine GROUP BY reason, mode, producer ORDER BY n DESC;"
+```
+
+`superseded` and `regression` are the two to watch before any enforcement: a clean week of the
+nightly with none of either, and no structural reason on a payload that was right, is the
+evidence that the next row flips on. A cap of 200 rows bounds the ring; the brake stops keeping
+bodies after twenty events of one check from one producer. The regression guard logs
+`door would hold regressions` with a count.
+
+The manifest row `manifest` in `flows_payload` is `{ key: [short hash, session, quality, epoch] }`
+for every verified key and is maintained by the triggers in the same transaction as the write.
+**Turning the door off** needs no cleanup: the next write of a key by the v1 writer sets its
+metadata to NULL and zero and its manifest entry to `null`. Rows written before the door are
+unverified (no hash, quality 0) and read as `need` to `?op=have`.
+
+The costs are priced in `tests/lib/d1-budget.mjs` (`door.v2`): one more row written per nightly
+post (the manifest) and two rows read; about 7 ms of CPU for a 107 KB card in the sandbox. The
+synthetic and fixture refusal is not part of this row.
+
 ### 10.5 The data pipeline
 
 Compute runs in GitHub Actions, never on Cloudflare: the Workers Free plan
