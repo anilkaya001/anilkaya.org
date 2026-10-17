@@ -603,7 +603,7 @@
   font: var(--t-footnote);
   cursor: pointer;
 }
-.dk-all input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.dk-all input { width: 24px; height: 24px; margin: 0; accent-color: var(--accent); }
 .tl .dk-pill {
   position: relative;
   height: 30px;
@@ -631,6 +631,7 @@
 
 .dk-grid[hidden] { display: none; }
 .dk-scatter { min-height: 180px; }
+@media (max-width: 639.98px) { .dk-scatter { min-height: 140px; } }
 .dk-scatter .dk-front { stroke: var(--accent); stroke-width: 1.5; }
 .dk-scatter .dk-front.is-off { stroke-dasharray: 3 4; opacity: 0.7; }
 

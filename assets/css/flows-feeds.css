@@ -225,6 +225,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fe-none { color: var(--label-2); font: var(--t-caption2); }
 .fe-lane { display: flex; align-items: flex-start; gap: 4px; padding: var(--sp-3) 0; border-top: 1px solid var(--sep); color: var(--label-2); font: var(--t-caption); }
 .fe-lane .ui-state { margin-top: -2px; }
+.fe-c-macro.is-ok:empty::after { content: "None scheduled"; color: var(--label-3); font: var(--t-caption2); }
 .fe-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: var(--sp-3) 0; border-top: 1px solid var(--sep); }
 .fe-chip {
   position: relative;

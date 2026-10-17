@@ -100,7 +100,7 @@ export function nvdaAfter() {
 
 const TYPES = { css: "text/css", js: "text/javascript", json: "application/json", woff2: "font/woff2", svg: "image/svg+xml" };
 
-export async function openDesk(browser, { root = REPO, payloads = {}, query = "", viewport = { width: 1440, height: 1000 }, init = null, errors = [], onChain = null } = {}) {
+export async function openDesk(browser, { root = REPO, payloads = {}, query = "", viewport = { width: 1440, height: 1000 }, init = null, errors = [], onChain = null, api = null } = {}) {
   const pages = await import(pathToFileURL(new URL("shared/flows-pages.js", root).pathname).href);
   const page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(String(e && e.message || e)));
@@ -117,7 +117,10 @@ export async function openDesk(browser, { root = REPO, payloads = {}, query = ""
       if (!p) return json({ error: { code: "chain_empty", message: "none" } }, 404);
       return json(typeof p === "function" ? p(u.searchParams) : p, 200, { "x-chain-age": "0" });
     }
-    if (u.pathname.startsWith("/api/")) return json({ status: "pending" });
+    if (u.pathname.startsWith("/api/")) {
+      const given = api ? await api(u) : null;
+      return json(given || { status: "pending" });
+    }
     if (u.pathname.startsWith("/assets/")) {
       const body = await readFile(new URL("." + u.pathname, root)).catch(() => null);
       if (body === null) return route.fulfill({ status: 404, body: "" });

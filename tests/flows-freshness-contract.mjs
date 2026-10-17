@@ -450,6 +450,30 @@ const NYSE_PUBLISHED = Object.freeze({
     ok(/Oct 12/.test(late.UI.freshness.details().lead), "it is named by its US date");
   }
   {
+    const fresh = readFileSync(new URL("../assets/js/flows-fresh.js", import.meta.url), "utf8");
+    const build = async (iso, expected, phase) => {
+      const p = pill(iso, { serverNow: Date.parse(iso), expected, phase, keys: {} });
+      p.ctx.fetch("/api/flows/now?k=market");
+      await p.release();
+      vm.runInContext(fresh, p.ctx);
+      return p;
+    };
+    const closedPhase = { phase: "closed", endsAt: "2026-10-19T08:00:00.000Z", nextOpen: "2026-10-19T13:30:00.000Z" };
+    const sat = await build("2026-10-17T12:00:00Z", "2026-10-16", closedPhase);
+    const E = (p, extra) => p.ctx.window.FlowsUI.freshFrom({ state: "stale", reason: "missed-close", klass: "market", session: "2026-10-16", readAt: "2026-10-16T18:00:00.000Z", ...extra },
+      { serverNow: Date.parse("2026-10-17T12:00:00Z"), phase: closedPhase });
+    sat.UI.freshness({ sessionDate: "2026-10-16", source: "boards" });
+    sat.UI.freshness({ ff: E(sat), source: "live:market" });
+    eq(sat.UI.freshness.state(), "closed", "A CLOSED WEEKEND IS ONE WORD: a live key that never saw the Friday close (missed-close) does not turn a current Friday session Stale");
+    ok(/The market is closed\. These readings are the last completed session, Oct 16/.test(sat.UI.freshness.details().lead), "and its popover says it is closed on the last completed session");
+    sat.UI.freshness({ ff: E(sat, { reason: "behind", klass: "nightly" }), source: "events" });
+    eq(sat.UI.freshness.state(), "stale", "a payload that is truly behind (not a missed close) still turns the closed pill Stale");
+    const open = await build("2026-10-16T15:00:00Z", "2026-10-15", { phase: "rth", endsAt: "2026-10-16T20:00:00.000Z" });
+    open.UI.freshness({ sessionDate: "2026-10-15", source: "boards" });
+    open.UI.freshness({ ff: open.ctx.window.FlowsUI.freshFrom({ state: "stale", reason: "missed-close", klass: "market", session: "2026-10-15", readAt: "2026-10-15T18:00:00.000Z" }, { serverNow: Date.parse("2026-10-16T15:00:00Z"), phase: { phase: "rth" } }), source: "live:market" });
+    eq(open.UI.freshness.state(), "stale", "while the market is open the same stale entry still counts");
+  }
+  {
     const p = pill("2026-09-23T20:30:00-04:00", null);
     const m = p.UI.freshness.market();
     ok(m.expected === "2026-09-22" && m.source === "local",

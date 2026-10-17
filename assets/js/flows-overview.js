@@ -572,8 +572,9 @@
     const past = tide.session && tide.session < m.today;
     const age = Date.now() - Date.parse(tide.readAt);
     let s = tide.live && tide.ff ? tide.ff.stateAt() : null;
+    if (s === "stale" && !m.open && tide.ff.reason === "missed-close") s = "closed";
     if (!s && tide.session && tide.session < m.expected) return ["stale", "Stale", day];
-    if (!tide.live) return past ? ["last", "Last session", day] : ["closed", "Closed", day];
+    if (!tide.live) return past ? ["last", "Closed \u00b7 last session", day] : ["closed", "Closed", day];
     const broken = s === "closed" && tide.ff && tide.ff.phase === "closed" && m.open && !past;
     if (!s || broken) s = m.open && !past ? (age <= 600000 ? "live" : "stale") : "closed";
     const other = boardsDay && tide.session && tide.session !== boardsDay;
@@ -581,7 +582,7 @@
     if (s === "live") return ["live", "Live", at];
     if (s === "fresh") return ["fresh", "Updated", at];
     if (s === "stale") return ["stale", "Stale", past ? day : at];
-    return past ? ["last", "Last session", day] : ["closed", "Closed", day];
+    return past ? ["last", "Closed \u00b7 last session", day] : ["closed", "Closed", day];
   }
 
   function paintPill(tide) {
@@ -1348,7 +1349,7 @@
       });
     }
     const wrote = document.querySelector(".hm-verdict time");
-    if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = F.stamp(wrote.dateTime) || wrote.textContent;
+    if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = F.trtDay(wrote.dateTime) ? F.day(F.trtDay(wrote.dateTime)) + " " + F.time(wrote.dateTime) : wrote.textContent;
     const built = Date.parse((lng && lng.generatedAt) || (sht && sht.generatedAt) || "");
     if (wrote && Number.isFinite(built) && Date.parse(wrote.dateTime) < built) {
       const box = wrote.closest(".hm-verdict");

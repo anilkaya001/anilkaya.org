@@ -306,6 +306,23 @@ try {
         const m = await page.evaluate(measure);
         const a = await axeCounts(page);
         const dock = spec.dock === false ? { present: false } : await dockState(page, width);
+        if (spec.id === "overview") {
+          const heroRead = () => page.evaluate(() => {
+            const v = document.getElementById("hmTideV");
+            if (!v) return null;
+            const fs = parseFloat(getComputedStyle(v).fontSize);
+            const digits = [...v.querySelectorAll(".ui-roll-d")].map((d) => d.getBoundingClientRect().width / fs);
+            return { digits, narrowest: digits.length ? Math.min(...digits) : null, clipped: v.scrollWidth > v.clientWidth + 1, fs };
+          });
+          const hero = await heroRead();
+          if (hero && hero.narrowest !== null) {
+            ok(hero.narrowest >= 0.5, `${spec.id} at ${width}px: every digit of the hero figure keeps its full tabular width (${hero.narrowest.toFixed(2)}em), so no glyph is cut by its neighbour`);
+            ok(!hero.clipped, `${spec.id} at ${width}px: the hero figure fits its column`);
+            await page.addStyleTag({ content: ".ui-roll-d, .ui-roll-c { flex: 0 1 auto !important; } .hm-hero-v { font-size: 68px !important; }" });
+            const planted = await heroRead();
+            ok(planted.narrowest < 0.5 || planted.clipped || width < 640, `${spec.id} at ${width}px: PLANTED WRONG BUILD caught: the old 68px figure with shrinkable digits is measured (${planted.narrowest.toFixed(2)}em)`);
+          }
+        }
         measured[key] = { ...m, overflowPx: Math.max(0, m.overflowX), contrast: a.contrast, names: a.names, structure: a.structure, requests: asked.length, coarse };
 
         const label = `${spec.id} at ${width}px`;

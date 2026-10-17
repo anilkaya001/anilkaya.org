@@ -827,7 +827,7 @@
   function freshState() {
     const m = market(new Date());
     const S = FRESH.primary || FRESH.sessionDate || FRESH.nightly;
-    const verdict = freshAll(entries());
+    const verdict = freshAll(entries().filter((e) => m.open || e.state !== "stale" || e.f.reason !== "missed-close"));
     let behind = !!S && S < m.expected;
     if (behind && m.source === "local") { confirmExpected(); behind = !pendingNow(); }
     let state;
@@ -900,7 +900,7 @@
     const def = STATES[state] || STATES.pending;
     const age = state === "fresh" && m.open ? readAge() : null;
     schedulePaint(state, age);
-    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : age !== null ? "Fresh " + MID + " " + span(age) : S ? (S === F.trtDay(Date.now()) ? "Today" : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
+    const label = state === "live" ? "Live" : state === "stale" && !behind ? "Stale" : age !== null ? "Fresh " + MID + " " + span(age) : S ? (S === F.trtDay(Date.now()) ? "Today" : state === "closed" ? "Closed " + MID + " " + F.day(S) : F.day(S)) : state === "pending" ? "Session" : state === "closed" ? "Closed" : "Open";
     const feed = FRESH.transport || "";
     if (b.dataset.state === state && b.dataset.label === label && (b.dataset.feed || "") === feed) return;
     b.dataset.state = state;

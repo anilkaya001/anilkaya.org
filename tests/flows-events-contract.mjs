@@ -949,6 +949,9 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
           weekOver: week ? week.scrollWidth - week.clientWidth : null,
           pageOver: document.documentElement.scrollWidth - window.innerWidth,
           stale: stale ? { hidden: stale.hidden } : null,
+          weekDays: [...document.querySelectorAll("#evWeek .fe-col:not(.fe-labels) .fe-dh span")].map((n) => n.textContent),
+          nextBadges: [...document.querySelectorAll("#evWeek .fe-next")].map((n) => n.textContent),
+          noMacro: [...document.querySelectorAll("#evWeek .fe-c-macro")].map((n) => ({ ok: n.classList.contains("is-ok"), empty: n.childElementCount === 0 })),
         };
       });
       read.about = await disclose(page, "#evAboutSlot .ui-info");
@@ -1102,6 +1105,21 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     const weekend = await render(CAL, { now: MON, updatedAt: Date.parse("2026-10-03T00:30:00Z") });
     eq(weekend.stale && weekend.stale.hidden, true,
        "A CALENDAR WRITTEN FRIDAY EVENING IS STILL CURRENT ON MONDAY MORNING: 62 hours of weekend is not a missed run, so no stale pill (the owner saw one on 2026-10-05)");
+    const BEFORE = Date.parse("2026-08-25T15:00:00Z");
+    const LATE = Date.parse("2026-08-28T15:00:00Z");
+    const early = await render(CAL, { now: BEFORE, updatedAt: BEFORE - HOUR });
+    eq(early.weekDays.join(","), "Aug 26,Aug 27,Aug 28,Aug 31,Sep 1", "before the run's day zero the week lists its five sessions");
+    eq(early.nextBadges.join(","), "Next", "and the first of them is badged Next");
+    const late = await render(CAL, { now: LATE, updatedAt: LATE - HOUR });
+    eq(late.weekDays.join(","), "Aug 28,Aug 31,Sep 1", "TWO DAYS INTO A STALE CALENDAR THE WEEK DROPS ITS PAST DAYS instead of listing Wednesday and Thursday as the week ahead");
+    eq(late.nextBadges.length, 0, "and a past day carries no Next badge, because Next on a day that has gone reads as a broken page");
+    ok(late.noMacro.length === 3 && late.noMacro.every((m) => !m.ok || m.empty), "an empty macro cell on a published calendar is marked so the grid can say None scheduled");
+    ok(await (async () => {
+      const css = fs.readFileSync(path.join(ROOT, "assets/css/flows-feeds.css"), "utf8");
+      return /\.fe-c-macro\.is-ok:empty::after\s*\{[^}]*None scheduled/.test(css);
+    })(), "the stylesheet writes None scheduled into an empty published macro cell");
+    const plantedSrc = fs.readFileSync(path.join(ROOT, "assets/js/flows-events.js"), "utf8");
+    ok(/d === today && d >= now/.test(plantedSrc) && /all\.filter\(\(d\) => d >= nowDay\)/.test(plantedSrc), "the two guards are in the served source, so a build without either is the failure this block names");
     const missed = await render(CAL, { now: Date.parse("2026-10-06T03:00:00Z"), updatedAt: Date.parse("2026-10-03T00:30:00Z") });
     eq(missed.stale && missed.stale.hidden, false, "while the same calendar once Monday's run is overdue (after 02:00 UTC Tuesday) raises it");
     eq(wide.stale && wide.stale.hidden, true, "while a fresh payload raises no pill");
