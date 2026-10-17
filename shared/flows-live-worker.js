@@ -361,6 +361,41 @@ export async function dispatchWorkflow(env, workflow, inputs, fetchImpl = fetch)
   }
 }
 
+const CHECK_DEADLINE_MS = 8000;
+
+const readWhy = (status) => (status === 200 ? "ok" : status === 401 ? "bad-token" : status === 403 || status === 404 ? "no-access" : "unexpected");
+
+export async function checkDispatchCredential(env, fetchImpl = fetch) {
+  const workflow = env.FLOWS_LIVE_WORKFLOW || "flows-live.yml";
+  const target = githubTarget(env);
+  if (target.why) {
+    return { read: { status: null, why: target.why }, dispatch: { sent: false, status: null, why: target.why }, repo: null, workflow, outcome: null };
+  }
+  let read;
+  try {
+    const res = await fetchImpl(`${target.base}/repos/${target.repo}/actions/workflows/${encodeURIComponent(workflow)}`, {
+      method: "GET", headers: target.headers,
+      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(CHECK_DEADLINE_MS) : undefined,
+    });
+    read = { status: res.status, why: readWhy(res.status) };
+  } catch {
+    read = { status: null, why: "unreachable" };
+  }
+  const sent = await dispatchWorkflow(env, workflow, { origin: "manual", drill: "true" }, fetchImpl);
+  const dispatch = { sent: sent.sent === true, status: Number.isInteger(sent.status) ? sent.status : null, why: sent.why };
+  return { read, dispatch, repo: target.repo, workflow, outcome: dispatchOutcome(sent) };
+}
+
+export async function recordDispatchWhy(env, why, at) {
+  if (!env.DB || typeof why !== "string" || !why) return false;
+  try {
+    await clockPatchStatement(env.DB, { dispatchWhy: why }, at).run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const CANCEL_DEADLINE_MS = 8000;
 
 export async function cancelHungRun(env, workflow, startedBefore, fetchImpl = fetch) {

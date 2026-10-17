@@ -35,6 +35,7 @@ export const ERRORS = Object.freeze({
   invalid_topic: entry(400, "Unknown topic"),
   live_token_scope: entry(403, "The live token reads one key at a time"),
   method_not_allowed: entry(405, "Method not allowed"),
+  owner_only: entry(403, "This check is limited to the owner"),
   no_question: entry(400, "Ask a question in the `question` field."),
   not_found: entry(404, "Not found"),
   payload_too_large: entry(413, "Payload is too large"),
