@@ -44,6 +44,22 @@ export const SHARE_NOTE = "Share is that count over the sector's names.";
 
 export const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
 
+export const X_LINE = "Across: the move in the name's own typical days.";
+
+export const Y_LINE = "Up: the move as a multiple of the implied day.";
+
+export const SIZE_LINE = "Dot area is market cap; the smallest dot when unknown.";
+
+export const REF_LINE = "Dashed lines are reference marks, not a test.";
+
+export const NOTEST_LINE = "Significance test: not yet published.";
+
+export const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
+
+export const MIN_DOT_PX = 2.5;
+
+export const TOP_INTERACTIVE = 60;
+
 export const FORBIDDEN_WORDS = Object.freeze(["unusual", "alert", "screen", "rare"]);
 
 export const HEADER_WORDS_MAX = 14;
@@ -132,12 +148,53 @@ export function stepOf(m) {
   return n;
 }
 
+export function zOf(chg, sig) {
+  const c = finite(chg);
+  const s = finite(sig);
+  if (c === null || s === null || !(s > 0)) return null;
+  return c / s;
+}
+
+export function impliedDay(iv30p) {
+  const iv = finite(iv30p);
+  return iv === null || !(iv > 0) ? null : iv / SQRT_YEAR;
+}
+
+export function impliedMultiple(chg, iv30p) {
+  const m = ivDays(chg, iv30p);
+  return m === null ? null : Math.abs(m);
+}
+
+export function radarPoint(row) {
+  const x = moveOf(row);
+  if (!x) return null;
+  return { ...x, sig: finite(row.sig), z: zOf(row.chg, row.sig), r: Math.abs(x.m), cap: finite(row.cap) > 0 ? row.cap : null };
+}
+
+export const DOMAIN_QUANTILE = 0.995;
+
+export function quantileOf(values) {
+  if (!values.length) return 0;
+  const v = values.slice().sort((a, b) => a - b);
+  return v[Math.max(0, Math.ceil(DOMAIN_QUANTILE * v.length) - 1)];
+}
+
+export function radarDomain(points) {
+  const p = points.filter((x) => x.z !== null);
+  return {
+    xmax: Math.min(12, Math.max(3, Math.ceil(quantileOf(p.map((x) => Math.abs(x.z)))))),
+    ymax: Math.min(10, Math.max(3, Math.ceil(quantileOf(p.map((x) => x.r))))),
+  };
+}
+
 export const wordCount = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
 export const VIEW_SENTENCES = Object.freeze([
   MAP_CAP_LINE, MAP_EQUAL_LINE, SECTORS_LINE, KEY_EVENT, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE,
 ]);
 
-export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES]);
+export const RADAR_SENTENCES = Object.freeze([X_LINE, Y_LINE, SIZE_LINE, REF_LINE, NOTEST_LINE, FROZEN_LINE]);
+
+export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES, ...RADAR_SENTENCES]);
 
 export const registered = isTarget(MOVE_ID);
