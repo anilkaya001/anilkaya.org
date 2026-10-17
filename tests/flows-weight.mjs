@@ -20,15 +20,12 @@ const CEILING_KIB = {
   sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024),
   watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024),
   deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024),
-  askPage: 133 + 5786 / 1024 + (133 + 5786 / 1024 + 2327 / 1024) - (133 + 5786 / 1024) + (133 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (133 + 5786 / 1024 + 2327 / 1024),
   strategyPage: 261 + 5786 / 1024 + (261 + 5786 / 1024 + 2327 / 1024) - (261 + 5786 / 1024) + (261 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (261 + 5786 / 1024 + 2327 / 1024),
-  trackPage: 190.6,
   marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024),
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024),
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024),
   movesPage: 151,
   politicalPage: 118,
-  historyPage: 167 + 5786 / 1024 + (167 + 5786 / 1024 + 2327 / 1024) - (167 + 5786 / 1024) + (167 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (167 + 5786 / 1024 + 2327 / 1024),
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
@@ -41,15 +38,12 @@ const GZIP_KIB = {
   sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024),
   watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024),
   deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024),
-  askPage: 39 + 1932 / 1024 + (39 + 1932 / 1024 + 830 / 1024) - (39 + 1932 / 1024) + (39 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (39 + 1932 / 1024 + 830 / 1024),
   strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024),
-  trackPage: 59.5,
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024),
   unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024),
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024),
   movesPage: 47.5,
   politicalPage: 37.5,
-  historyPage: 51 + 1932 / 1024 + (51 + 1932 / 1024 + 830 / 1024) - (51 + 1932 / 1024) + (51 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (51 + 1932 / 1024 + 830 / 1024),
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
@@ -62,15 +56,12 @@ const CSS_KIB = {
   sidePage: 102 + 565 / 1024,
   watchPage: 102 + 565 / 1024,
   deskPage: 111 + 565 / 1024,
-  askPage: 93 + 565 / 1024,
   strategyPage: 111 + 565 / 1024,
-  trackPage: 99,
   marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024,
   unusualPage: 113 + 5007 / 1024,
   eventsPage: 105 + 565 / 1024 + 160 / 1024,
   movesPage: 95.5,
   politicalPage: 100.5,
-  historyPage: 88.5,
   loginPage: 80 + 565 / 1024,
   aboutPage: 81 + 565 / 1024,
   glossaryPage: 81 + 565 / 1024,
@@ -83,15 +74,12 @@ const CSS_GZIP_KIB = {
   sidePage: 22 + 64 / 1024,
   watchPage: 22 + 64 / 1024,
   deskPage: 24 + 64 / 1024,
-  askPage: 21 + 64 / 1024,
   strategyPage: 24 + 64 / 1024,
-  trackPage: 23,
   marketPage: 21 + 206 / 1024,
   unusualPage: 25 + 599 / 1024,
   eventsPage: 23 + 64 / 1024,
   movesPage: 21,
   politicalPage: 22.5,
-  historyPage: 20.5,
   loginPage: 18 + 64 / 1024,
   aboutPage: 18 + 64 / 1024,
   glossaryPage: 18 + 64 / 1024,
@@ -139,8 +127,8 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, trackPage: 80, marketPage: 136,
-  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, historyPage: 80, askPage: 12, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80,
+  tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 136,
+  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80,
 };
 
 const FLOOR_BYTES = 1024;
@@ -390,12 +378,12 @@ for (const name of Object.keys(CEILING_KIB)) {
   }
 
   {
-    const CHART_ROUTES = ["deskPage", "historyPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage", "trackPage",
+    const CHART_ROUTES = ["deskPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
       "unusualPage", "watchPage"];
-    const FREE_ROUTES = ["aboutPage", "askPage", "eventsPage", "glossaryPage", "loginPage", "politicalPage"];
+    const FREE_ROUTES = ["aboutPage", "eventsPage", "glossaryPage", "loginPage", "politicalPage"];
     const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
     eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
-       "the chart library ships on exactly the ten routes that draw a chart, and the routes that draw none never download it");
+       "the chart library ships on exactly the eight routes that draw a chart, and the routes that draw none never download it");
     for (const name of FREE_ROUTES) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }

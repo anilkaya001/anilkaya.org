@@ -150,8 +150,7 @@ try {
 
     for (const route of ["/flows/", "/flows/long/", "/flows/short/", "/flows/watch/",
                          "/flows/market/", "/flows/unusual/", "/flows/events/",
-                         "/flows/ticker/", "/flows/desk/", "/flows/track/",
-                         "/flows/history/", "/flows/political/"]) {
+                         "/flows/ticker/", "/flows/desk/", "/flows/political/"]) {
       await page.goto(url(route), { waitUntil: "load" });
       await page.evaluate(() => document.fonts && document.fonts.ready);
       const overflow = await page.evaluate(
@@ -159,7 +158,7 @@ try {
       ok(overflow <= 1, `[320px] ${route} widened the document by ${overflow}px`);
     }
 
-    await page.goto(url("/flows/track/"), { waitUntil: "load" });
+    await page.goto(url("/flows/political/"), { waitUntil: "load" });
     await page.waitForFunction(() => !!window.FlowsUI, null, { timeout: 15000 });
     const silences = await page.evaluate(() => {
       const kinds = ["pending", "unavailable", "unreadable", "failed", "empty", "quiet"];
@@ -318,21 +317,9 @@ try {
 
     for (const route of ["/flows/", "/flows/long/", "/flows/short/"]) {
       await page.goto(url(route), { waitUntil: "domcontentloaded" });
-      const foot = await page.evaluate(() => {
-        const p = document.querySelector(".flows-foot");
-        const slot = document.querySelector("#flowsHitRate");
-        return {
-          text: p ? p.textContent.replace(/\s+/g, " ").trim() : null,
-          slot: slot ? slot.textContent.replace(/\s+/g, " ").trim() : null,
-          href: slot ? slot.querySelector("a")?.getAttribute("href") : null,
-        };
-      });
-      ok(foot.text && !/\d\d\s*(?:%|&ndash;|–|-)\s*\d\d\s*%/.test(foot.text),
-         `[${route}] the footer states no unmeasured hit rate (got "${foot.text}")`);
-      ok(foot.slot && foot.slot.length > 0,
-         `[${route}] and the slot ships a sentence that is true before any fetch`);
-      eq(foot.href, "/flows/history/",
-         `[${route}] pointing at the page that measures it`);
+      const foot = await page.evaluate(() => ({ p: !!document.querySelector(".hm-foot, .bd-foot"), slot: !!document.querySelector("#flowsHitRate"),
+        link: [...document.querySelectorAll("a")].some((a) => /\/flows\/(history|track|ask)\/?$/.test(a.getAttribute("href") || "")) }));
+      ok(!foot.p && !foot.slot && !foot.link, `[${route}] carries no footer hit-rate slot and no link to a removed page`);
     }
     await context.close();
   }

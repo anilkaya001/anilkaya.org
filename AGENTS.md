@@ -246,7 +246,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `scripts/flows-pipeline.mjs`, `scripts/flows-nightly/*.mjs`, `scripts/flows-nightly/sections/*.mjs` | The nightly. The entry is the command line: the session prelude and the unranked-refresh early return, `runLiveMode`, `main` (one `ctx`, eleven awaited sections), and a re-export of every name the suites import, so no suite imports a module path. The modules sit in layers and an import may only point down: `flags` (the process flags and the `FLOWS_DRY_NOW` pin), `vendor-params` (what is asked of the vendor and the call budget), `vendor` (`uw`, the permit queue, the read pace and the pool), `store` (ingest URL, the live credential, read, publish, retire, prune and the dated-key grammar), `clock`, `rank` (scoring and shaping, `enrich`), `fixtures` (the dry run's synthetic vendor), `archive` (board memory, the dated walk, the record's inputs, the roster ledger), then the sections, `runUniverse` to `runClose` (`runCompute` between `runFocus` and `runClose`), none importing another; `stages` is a leaf. A section destructures what it reads from `ctx` and returns what a later one needs with `Object.assign(ctx, ...)`; `tests/flows-legs-contract.mjs` holds each declaration to its module, the layer rule and the no-comment rule for the whole tree. A test reads the nightly through `nightlySource()` (entry, then every module, each marked), `nightlySlice()` (throws when a slice crosses a module) or `nightlyExecution()` (the entry with each section spliced in where it runs) from `tests/lib/source-scan.mjs`, never by reading one file. |
 | `scripts/flows-nightly/stages.mjs` | The nightly's stage table (`STAGES`: id, fatal or isolated, `needs`, declared `publishes`) and `createStageRunner`: `step(id)` for a fatal stage, `run(id, work, onError)` for an isolated one (the failure is recorded and handed to `onError`, a fatal one rethrows), `skip`, `note(key)` from `publish`, `detail(fields)` (at most six extra numbers or short strings on the open stage's record, never a record field), `finish`, `records()`; given a `cpu` clock the runner adds `cpu` (whole milliseconds of the process's CPU time) to every record, and the dry run pins that clock to 0 with the stamp. `meta` is the last write of the nightly, after the health gate, and carries `stages` and `health` (`healthRecord`); `publishedStore.meta` is set earlier so the brief still reads it. The pipeline's pipeline-contract block holds the table to the source (every id once, in order, fatal stages stepped and isolated ones run) and to the dry run (every key declared, `meta` last). |
 | `scripts/flows-nightly/sections/compute.mjs` | The compute stage, an isolated stage after `card-x` and before `roster`, once the vendor reads are done: it imports no vendor client, store or archive, so it cannot call the vendor or publish. `computeNames` runs the registered `COMPUTE_JOBS` (frozen, empty until a model brings one: `{ id, run(ticker, ctx) }`) over the carded names one at a time with a turn of the event loop between names; a name that spends more than `COMPUTE_NAME_CPU_MS` (1,000) of CPU is named in `over`, the stage stops before the next name once its share (names times that budget) is spent or the run's deadline has passed, and a job that throws costs that name that job only. Values are kept by job and ticker on `ctx.computed` for a later stage to publish. The stage record carries `cpu`, `names`, `jobs`, `over`, `failed` and `stopped`. |
-| `shared/flows-conviction.js`, `tests/flows-conviction.mjs`, `tests/flows-conviction-render.mjs`, `tests/gen-conviction-fixtures.py`, `tests/fixtures-conviction.json`, `tests/conviction-sim.mjs` | Does conviction order outcomes (P2-22): a pure leaf over `flows-record.js`'s forward-close rule that scores each archived board name as a hit when it beat the session's equal-weight board average in its board's direction, fits `logit P(hit) = a + b·cnv/100` with a session-clustered sandwich and Student t on G-1 degrees of freedom, reads terciles of `cnv` with Wilson intervals on the effective count, the clustered top-minus-bottom gap and its minimum detectable size (2.8 standard errors), the pooled Spearman with a leave-one-session-out jackknife, and breadth's own coefficient. `evaluateConviction` returns `keep` (slope interval above zero and rising terciles), `relabel` (the number is an "Agreement index") or `pending` (under 60 scored sessions and 600 rows at the ten-session horizon, or no fit), published as `record.conviction`. The contract holds the estimators to numpy and scipy on 500 committed reference rows (`gen-conviction-fixtures.py` writes the JSON) and to simulated boards with a known slope; the render suite is the History page's module in Chromium against stubbed `/api/flows/record`. |
+| `shared/flows-conviction.js`, `tests/flows-conviction.mjs`, `tests/gen-conviction-fixtures.py`, `tests/fixtures-conviction.json`, `tests/conviction-sim.mjs` | Does conviction order outcomes (P2-22): a pure leaf over `flows-record.js`'s forward-close rule that scores each archived board name as a hit when it beat the session's equal-weight board average in its board's direction, fits `logit P(hit) = a + b·cnv/100` with a session-clustered sandwich and Student t on G-1 degrees of freedom, reads terciles of `cnv` with Wilson intervals on the effective count, the clustered top-minus-bottom gap and its minimum detectable size (2.8 standard errors), the pooled Spearman with a leave-one-session-out jackknife, and breadth's own coefficient. `evaluateConviction` returns `keep` (slope interval above zero and rising terciles), `relabel` (the number is an "Agreement index") or `pending` (under 60 scored sessions and 600 rows at the ten-session horizon, or no fit), published as `record.conviction`. The contract holds the estimators to numpy and scipy on 500 committed reference rows (`gen-conviction-fixtures.py` writes the JSON) and to simulated boards with a known slope. The History page that displayed it is removed. |
 | `scripts/eval-garch-tails.mjs` | Prints the distribution of fitted nu, the probability of profit, dollars per lot and idea-order changes between the old and the new GARCH clip on a synthetic chain; the evidence for the break mask, not a suite. |
 | `tests/gen-quant-audit.py` | Generator of `tests/fixtures-quant-audit.json`: the options engine's reference values from scipy, with the version, path count and seed in the fixture's provenance string. |
 | `.github/dependabot.yml` | Monthly grouped dependency refresh for the development-only npm tree under `tests/` and for the GitHub Actions workflows. |
@@ -849,7 +849,7 @@ every Flows page, make no API or vendor call, load `nav.js` alone, and go throug
 security headers, the HTML CSP). `FLOWS_FRONT_DOOR` (`wrangler.toml` [vars], default `on`): `off` turns both into the
 Flows 404; anything else means on. The sign-in form links to both and the members' sidebar footer repeats the links.
 The about copy states what the product is not; it is placeholder wording until counsel has read it (the plan's A-13),
-and it makes no performance claim, because the only statement of how readings have done is the History page.
+and it makes no performance claim.
 
 ## Real-time rail
 
@@ -1423,8 +1423,8 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 138 suites: 93 that need only Node (N), 29 that also
-need Playwright's Chromium (C) and 16 that boot workerd (W). The class is derived from
+`tests/suites/` registers 135 suites: 93 that need only Node (N), 27 that also
+need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
 `node run.mjs --only <name>` from `tests/`.
@@ -1461,14 +1461,13 @@ staging
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
 
 ```
-flows-ask                 flows-chart-kernel        flows-conviction-render   flows-deadline-render
-flows-desk-client         flows-desk-wiring         flows-events              flows-export
-flows-glance-frame-render flows-glance-render       flows-index               flows-kit
-flows-link                flows-movelab-render      flows-moves0              flows-net-render
-flows-pages-render        flows-readers-render      flows-reading-render      flows-render
-flows-rt-client           flows-status-render       flows-strip               flows-surface-render
-flows-ticker              flows-track-render        landing-motion            market-ticker
-placement
+flows-ask                 flows-chart-kernel        flows-deadline-render     flows-desk-client
+flows-desk-wiring         flows-events              flows-export              flows-glance-frame-render
+flows-glance-render       flows-index               flows-kit                 flows-link
+flows-movelab-render      flows-moves0              flows-net-render          flows-pages-render
+flows-readers-render      flows-reading-render      flows-render              flows-rt-client
+flows-status-render       flows-strip               flows-surface-render      flows-ticker
+landing-motion            market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 
@@ -1723,10 +1722,10 @@ elsewhere, so it runs on macOS too.
 Confirmed to need one (W; set `FLOWS_TEST_SANDBOX=1` in the agent sandbox):
 
 ```
-browser                   flows-ask-render          flows-board-render        flows-chain
-flows-desk                flows-legacy              flows-market              flows-motion
-flows-overview            flows-rt-server           flows-sections            flows-strategy
-flows-unusual             flows-watch-render        flows-worker              worker
+browser                   flows-board-render        flows-chain               flows-desk
+flows-legacy              flows-market              flows-motion              flows-overview
+flows-rt-server           flows-sections            flows-strategy            flows-unusual
+flows-watch-render        flows-worker              worker
 ```
 <!-- /gen:suites-server -->
 
@@ -1867,7 +1866,7 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   minus U+2212 and the absent-value em dash, and the
   score-strip chart whose gap-is-not-zero contract is enforced in the
   primitive rather than re-derived per page) — the seed of the component
-  layer, introduced with `/flows/track/`.
+  layer, introduced with the Track page, since removed.
   `FlowsQuant` is the options engine's browser face: the generated bundle
   of the same `shared/flows-quant-*` modules the pipeline and the Worker run,
   exposing what `/flows/strategy/` needs to reprice a leg the reader edits,

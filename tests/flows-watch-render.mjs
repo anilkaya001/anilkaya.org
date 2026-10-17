@@ -345,7 +345,6 @@ try {
     eq(moved(shot, ["bdHero", "bdModT", "bdMod"]).join("; "), "",
        `a silent watch list fits the same reserve (${at}): the hero keeps its skeleton's height and the module does not move`);
     ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} (${at})`);
-    eq(shot.footAfter, "visible", `and the footer shows once the list settles (${at})`);
   }
   await put("board:watch", WATCH);
 } finally {

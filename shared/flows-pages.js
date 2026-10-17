@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "299";
+export const ASSET_VERSION = "301";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -62,7 +62,6 @@ const GLYPHS = {
   layers: '<path d="M12 4 3.5 8.4 12 12.8l8.5-4.4z"/><path d="M3.5 12.4 12 16.8l8.5-4.4"/><path d="M3.5 16.2 12 20.6l8.5-4.4"/>',
   bubble: '<path d="M6 5h12a2.5 2.5 0 0 1 2.5 2.5v7A2.5 2.5 0 0 1 18 17h-6.2l-4.3 3.4V17H6a2.5 2.5 0 0 1-2.5-2.5v-7A2.5 2.5 0 0 1 6 5z"/>',
   track: '<path d="M3 13h3.2l2.3-6 3.4 11 3.2-8.5 1.9 3.5H21"/>',
-  history: '<path d="M4.6 12a7.4 7.4 0 1 0 2.2-5.3"/><path d="M4.5 4.6v3.6h3.6"/><path d="M12 8.2V12l2.8 1.8"/>',
   sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
@@ -124,7 +123,6 @@ const TABS = [
   { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
   { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "events", "political"] },
-  { href: "/flows/ask/", label: "Ask", glyph: "bubble", keys: ["ask"] },
 ];
 
 const sidebar = (active, username) => {
@@ -396,7 +394,6 @@ export function aboutPage() {
       <li>Every figure carries its source and its age. A figure that was not measured is shown as withheld, never as zero.</li>
       <li>Written readings are labelled as model wording or as a deterministic template. The model is asked to explain figures it was given; a sentence that adds a figure, a forecast or advice is refused.</li>
       <li>Priced structures are the output of a model, shown with the assumptions behind them. They are not recommendations.</li>
-      <li>The track record on the History page is the only statement of how the readings have done, misses included.</li>
     </ul>
   </section>
   <section aria-labelledby="aNot">
@@ -479,7 +476,6 @@ ${homeModule("hmWatch", "Nearly in", "ccWatch", { span: 4, sub: `<a class="hm-co
 ${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id="ccNewsSub"></span>` })}
   </div>
 
-  <p class="flows-foot hm-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">Track record</a></span></p>
   <i hidden data-defer="home-below" data-src="${v("/assets/js/flows-overview-below.js")}"></i>
 `, { chrome: false })}
 ${UI_CHART_SCRIPTS}
@@ -530,7 +526,6 @@ const boardBody = (key, { status, body, label }) => `
     ${key === "watch" ? "" : '<div class="bd-map" id="bdMap" hidden></div>'}
     <div class="bd-empty" id="bdEmpty" hidden></div>
   </section>
-  <p class="flows-foot bd-foot"><span class="foot-hit" id="flowsHitRate"><a href="/flows/history/">${glyph("history")}<span>Track record</span></a></span></p>
 `;
 
 export function sidePage({ username = "", side = "long" } = {}) {
@@ -868,28 +863,6 @@ export function movesPage({ username = "" } = {}) {
   });
 }
 
-export function trackPage({ username = "" } = {}) {
-  return flowsDocument({
-    title: "Track",
-    description: "Each name's daily score traced across sessions, with what followed each call. A gap is a session the name was not scored, never zero.",
-    active: "track", chart: true,
-    username,
-    chrome: false,
-    styles: ["/assets/css/flows-record.css", "/assets/css/flows-track.css"],
-    scripts: ["/assets/js/flows-track.js"],
-    body: `
-  <header class="flows-head rec-head" data-fx-hero>
-    <h1 id="fxTitle">Track</h1>
-    <span class="rec-head-s" id="stHeadState"></span>
-    <button type="button" class="ui-info" id="stBasis" aria-label="About the score track"
-            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
-  </header>
-  <p class="visually-hidden" id="stStatus" role="status">Loading the track\u2026</p>
-  <div class="ui-grid st-grid" id="stTrack"></div>
-`,
-  });
-}
-
 export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
@@ -1004,28 +977,6 @@ export function tickerPage({ username = "", scenes = false } = {}) {
   });
 }
 
-export function historyPage({ username = "" } = {}) {
-  return flowsDocument({
-    title: "History",
-    description: "What the board said, and what happened next.",
-    active: "history", chart: true,
-    username,
-    chrome: false,
-    styles: ["/assets/css/flows-record.css"],
-    scripts: ["/assets/js/flows-history.js"],
-    body: `
-  <header class="flows-head rec-head" data-fx-hero>
-    <h1 id="fxTitle">History</h1>
-    <span class="rec-head-s" id="recHeadState"></span>
-    <button type="button" class="ui-info" id="recAbout" aria-label="About the track record"
-            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
-  </header>
-  <p class="visually-hidden" id="recStatus" role="status">Loading the record\u2026</p>
-  <div class="ui-grid rec-grid" id="recApp"></div>
-`,
-  });
-}
-
 function escapeHTML(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -1085,28 +1036,6 @@ export function politicalPage({ username = "" } = {}) {
 `,
   });
 }
-export function askPage({ username = "" } = {}) {
-  return flowsDocument({
-    title: "Ask",
-    description: "Yesterday, today, and what is already scheduled, from the readings this site has published. The wording may be a model's; the figures never are.",
-    active: "ask",
-    username,
-    chrome: false,
-    styles: ["/assets/css/flows-ask.css"],
-    scripts: ["/assets/js/flows-ask.js"],
-    body: `
-  <header class="flows-head ak-head" data-fx-hero>
-    <h1 id="fxTitle">Ask</h1>
-    <span class="ak-head-s" id="askHeadState"></span>
-    <button type="button" class="ui-info" id="askAbout" aria-label="About Ask"
-            aria-haspopup="dialog" aria-controls="fxPop" aria-expanded="false">${glyph("info")}</button>
-  </header>
-  <p class="visually-hidden" id="askStatus" role="status">Reading the session\u2019s briefing\u2026</p>
-  <div id="askApp" class="ak-app"></div>
-`,
-  });
-}
-
 export function strategyPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Strategy",
@@ -1269,8 +1198,8 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 }
 
 export const FLOWS_PAGES = {
-  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, historyPage, deskPage,
+  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, movesPage, statusPage, eventsPage, trackPage, strategyPage, askPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
 

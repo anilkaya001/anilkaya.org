@@ -491,9 +491,6 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 .hm-news-open .ui-g { color: var(--label-3); font-size: 14px; }
 @container mod (max-width: 520px) { .hm-news-a { display: none; } }
 
-.hm-foot { margin-top: var(--sp-8); text-align: center; color: var(--label-3); font: var(--t-footnote); }
-.hm-foot a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--sp-4); color: var(--accent-ink); text-decoration: none; }
-.hm-foot a:hover { text-decoration: underline; }
 
 .hm-tw { max-width: 100%; overflow-x: auto; margin-top: var(--sp-3); }
 .hm-tbl { width: 100%; border-collapse: collapse; font: var(--t-footnote); font-variant-numeric: tabular-nums; }

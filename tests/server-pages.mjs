@@ -13,7 +13,7 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "history", "desk", "strategy", "ask", "ticker", "moves", "unusual", "events", "track", "political", "status"];
+const SLUGS = ["", "long", "short", "watch", "market", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
 eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the fifteen gated pages in their old order with the owner-gated moves page before unusual");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
@@ -62,15 +62,12 @@ function oldChain(path, rc, d) {
       "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
       "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
       "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
-      "/flows/history/": (u) => FLOWS_PAGES.historyPage({ username: u }),
       "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
       "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
-      "/flows/ask/": (u) => FLOWS_PAGES.askPage({ username: u }),
       "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
-      "/flows/track/": (u) => FLOWS_PAGES.trackPage({ username: u }),
       "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
     };
@@ -88,11 +85,11 @@ function oldChain(path, rc, d) {
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
-        || path === "/flows/watch" || path === "/flows/history"
+        || path === "/flows/watch"
         || path === "/flows/market" || path === "/flows/ticker"
         || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/events"
-        || path === "/flows/track" || path === "/flows/political"
-        || path === "/flows/strategy" || path === "/flows/ask"
+        || path === "/flows/political"
+        || path === "/flows/strategy"
         || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary") {
       requireMethod(request, ["GET", "HEAD"]);
       return redirect(new URL(path + "/", url).toString(), 308);
@@ -212,7 +209,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|historyPage|deskPage|strategyPage|askPage|tickerPage|unusualPage|movesPage|eventsPage|trackPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|eventsPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

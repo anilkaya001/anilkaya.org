@@ -63,11 +63,11 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 
 {
   const html = await (await call("/flows/about/")).text();
-  for (const needle of ["Not investment advice", "withheld", "History", "assigned credential"]) {
+  for (const needle of ["Not investment advice", "withheld", "assigned credential"]) {
     ok(html.includes(needle), `the about page says: ${needle}`);
   }
-  ok(!/\b(returns?|outperform|beat the market|guarantee|profit)\b/i.test(html.replace(/History page is the only statement[^<]*/, "")),
-     "and makes no performance claim of its own: the only statement of how readings did is the History page");
+  ok(!/\b(returns?|outperform|beat the market|guarantee|profit)\b/i.test(html),
+     "and makes no performance claim");
   const links = [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1]);
   for (const href of ["/flows/login/", "/flows/glossary/", "/"]) ok(links.includes(href), `the about page links ${href}`);
 }
@@ -109,7 +109,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
      "every glossary line is the exact string the information button on its page opens, so the two cannot drift");
   const mutated = GLOSSARY.map((g, i) => (i === 0 ? { ...g, lines: [g.lines[0] + " (edited)"] } : g));
   eq(driftOf(mutated, readRepo).length, 1, "and an edited line is caught, naming the entry");
-  const moved = GLOSSARY.map((g, i) => (i === 0 ? { ...g, file: "assets/js/flows-track.js" } : g));
+  const moved = GLOSSARY.map((g, i) => (i === 0 ? { ...g, file: "assets/js/flows-board.js" } : g));
   ok(driftOf(moved, readRepo).length > 0, "so is an entry whose source moved to a file that does not hold the string");
   for (const g of GLOSSARY) ok(fs.existsSync(path.join(ROOT, g.file)), `${g.key} cites ${g.file} and it exists`);
 }

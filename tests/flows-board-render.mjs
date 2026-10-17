@@ -904,8 +904,6 @@ for (const view of SHIFT_VIEWS) {
   ok(shot.cls < 0.02,
      `and the page's layout shift through the whole fill is ${shot.cls.toFixed(4)} at ${at}, under 0.02 ` +
      `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
-  eq(shot.busyBefore, "hidden", `the footer waits unseen while the table is busy at ${at}, so it is not dragged down the viewport by the rows`);
-  eq(shot.footAfter, "visible", `and it shows once the rows land at ${at}`);
 }
 await put("board:long", { side: "long", rows: [], generatedAt: null, status: "pending" });
 for (const view of [SHIFT_VIEWS[0], SHIFT_VIEWS[2], SHIFT_VIEWS[3]]) {
@@ -923,8 +921,6 @@ for (const view of [SHIFT_VIEWS[0], SHIFT_VIEWS[2], SHIFT_VIEWS[3]]) {
      `a board that could not be read fits the same reserve at ${at}: the failed fetch empties the hero to its skeleton and the silence takes the table's place without moving the module`);
   ok(shot.cls < 0.02, `and its layout shift is ${shot.cls.toFixed(4)} at ${at} ` +
      `(${shot.shifts.map((x) => x.v.toFixed(4) + " " + x.src).join(", ") || "no shift"})`);
-  eq(shot.busyBefore, "hidden", `the footer waits unseen while the failing read is busy at ${at}`);
-  eq(shot.footAfter, "visible", `and the failure path's finally clears aria-busy, so the footer shows again at ${at}`);
 }
 for (const [width, css, said] of [
   [440, ":root { --gutter: 0px; }", "a 440 px viewport with no gutter"],
