@@ -983,11 +983,11 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "vendor-params.mjs": [
       "UNIVERSE", "RATE", "CALL_COST", "NOMINAL_SHAPE", "callModel", "CALL_BUDGET", "CALL_OVERRUN_MARGIN",
       "EARNINGS_GATE_DAYS", "SCREENER_PAGE_ROWS", "SCREENER_SPLIT_DEPTH", "DEEP_NAMES", "MARKET_CROSS_LIMIT",
-      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NEWS_VENDOR_LIMIT", "ALERT_VENDOR_LIMIT",
+      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NIGHTLY_VENDOR", "NEWS_VENDOR_LIMIT", "ALERT_VENDOR_LIMIT",
       "IV_RANK_PARAMS", "CHAIN_RESERVE_MS",
     ],
     "vendor.mjs": [
-      "BASE", "vendorTimeoutMs", "isTimeout", "stats", "delayMs", "delayFloorMs", "raiseReadPace", "wireProgress",
+      "BASE", "wire", "vendorTimeoutMs", "isTimeout", "readFailure", "httpFailure", "stats", "delayMs", "delayFloorMs", "raiseReadPace", "wireProgress",
       "sleep", "permits", "rateFloorSurvivesBudget", "raiseRateFloor", "stepRateController", "POOL_MAX_WIDTH",
       "POOL_EVIDENCE_MIN", "POOL_REFUSAL_HALT", "POOL_REFUSAL_EASE", "meterRead", "poolWidth", "runPooled",
       "foldCardOutcomes", "describeFloorVerdict", "uw",
@@ -1019,7 +1019,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "SECTOR_ETFS", "TRIX_SPAN", "TRIX_SERIES", "TRIX_WARMUP", "TRIX_MIN_CANDLES", "ema", "trixSeriesBp",
       "TRIX_FULL_SCALE_BP", "scaleTrix", "sectorTrix", "sectorLean", "NEWS_ROWS", "shapeNews", "HOLDERS_RETRY_DAYS",
       "holdersRefusal", "unusualContractId", "markNewContracts", "priorNote", "ideasPayload", "congressRows",
-      "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich",
+      "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich", "readDeepFeeds",
     ],
     "fixtures.mjs": [
       "mulberry", "SECTORS", "DRY_FOCUS_ROWS", "fakeFocusRows", "fakeScreener", "fakeSectorCandles", "fakeSectorEtfs",
