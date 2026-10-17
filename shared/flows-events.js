@@ -248,3 +248,41 @@ export const EVENTS_NOTES = Object.freeze({
     "most rows withhold it. The count of rows that carry one is published beside " +
     "the column rather than left to be inferred from the em dashes.",
 });
+
+export const EVENTS_PAYLOAD_BUDGET = 120 * 1024;
+
+export function fitEvents(payload, maxBytes = EVENTS_PAYLOAD_BUDGET) {
+  const size = (p) => new TextEncoder().encode(JSON.stringify(p)).length;
+  if (size(payload) <= maxBytes || !Array.isArray(payload.rows) || !payload.rows.length) {
+    return { ...payload, shedRows: 0 };
+  }
+  const total = payload.rows.length;
+  const build = (n) => {
+    const rows = payload.rows.slice(0, n);
+    const byStage = {};
+    for (const r of rows) {
+      const k = r.st || "unclassified";
+      byStage[k] = (byStage[k] || 0) + 1;
+    }
+    return {
+      ...payload,
+      rows,
+      shown: n,
+      capBound: true,
+      beyondCap: (payload.beyondCap || 0) + (total - n),
+      lastShownDate: n ? rows[n - 1].d : null,
+      byStage,
+      rvMeasured: rows.filter((r) => r.rv !== null).length,
+      evMeasured: rows.filter((r) => r.ev !== null).length,
+      shedRows: total - n,
+    };
+  };
+  let lo = 0;
+  let hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (size(build(mid)) <= maxBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  return build(lo);
+}

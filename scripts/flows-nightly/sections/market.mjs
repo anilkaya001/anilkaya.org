@@ -1,13 +1,17 @@
-import { buildEvents, EVENTS_NOTES } from "../../../shared/flows-events.js";
+import { buildEvents, fitEvents, EVENTS_NOTES } from "../../../shared/flows-events.js";
 import { marketAggregate, MARKET_NOTES } from "../../../shared/flows-market.js";
 import { withPrefetched } from "../../flows-legs/universe.mjs";
 import { runMarketLegs, windowTickersOf } from "../../flows-legs/market.mjs";
 import { makeCardXStore } from "../../flows-legs/card-x.mjs";
 import { DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
-import { poolWidth, runPooled, stats } from "../vendor.mjs";
+import { poolWidth, runPooled, stats, uw } from "../vendor.mjs";
 import { sigmaProfile, tallyReasons } from "../../../shared/flows-targets.js";
-import { publish } from "../store.mjs";
-import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, daysToEarnings } from "../rank.mjs";
+import { publish, readStored } from "../store.mjs";
+import { DRY_RUN } from "../flags.mjs";
+import { pathFor } from "../../../shared/flows-vendor-ops.js";
+import { num } from "../../../shared/flows-features.js";
+import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
+import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, candleDate, candlesAscending, daysToEarnings, repairCandles, sessionCandles, sessionRow } from "../rank.mjs";
 
 export async function runMarket(ctx) {
   const {
@@ -72,12 +76,48 @@ export async function runMarket(ctx) {
   const tally = tallyReasons(sigmaResults);
   console.log(`  sigma: ${tally.forecast} of ${sigmaResults.length} carded name(s) forecast` +
     (Object.keys(tally.notForecast).length ? `, not forecast ${JSON.stringify(tally.notForecast)}` : ""));
+  let sigmaLedger = null;
+  let sigmaBasis = null;
+  try {
+    const priorRegime = await readStored("regime");
+    if (priorRegime.failed) {
+      console.warn(`  sigma ledger: the previous regime row could not be read (HTTP ${priorRegime.status || 0}); tonight carries only the ${sigma.size} fresh name(s)`);
+    } else {
+      const ledgerRun = await runSigmaLedger({
+        sessionDate,
+        universe: new Set(withTilt.map((w) => w.row && w.row.ticker).filter(Boolean)),
+        fresh: sigma,
+        prior: priorRegime.payload || null,
+        stop: () => Date.now() > stats.startedAt + DEADLINE_MS * 0.5,
+        fetchBars: DRY_RUN ? null : async (ticker) => {
+          const raw = await uw(pathFor("ohlc-1d", { ticker }), {
+            timeframe: "1Y",
+            ...(sessionDate && ctx.dating && ctx.dating.endDate ? { end_date: sessionDate } : {}),
+          });
+          const cut = sessionCandles(raw, sessionDate);
+          return {
+            bars: candlesAscending(cut)
+              .map((c) => ({ d: candleDate(c), h: num(c.high, null), l: num(c.low, null), c: num(c.close, null) }))
+              .filter((b) => b.d),
+            breaks: repairCandles(cut).breaks.map((b) => b.date).filter(Boolean),
+          };
+        },
+      });
+      for (const [t, r] of ledgerRun.sigma) if (!sigma.has(t)) sigma.set(t, r);
+      sigmaLedger = ledgerRun.ledger;
+      sigmaBasis = ledgerRun.basis;
+      console.log(`  sigma ledger: ${sigmaBasis.covered} of ${sigmaBasis.universe} name(s) covered (${sigmaBasis.fresh} fresh, ${sigmaBasis.rotated} read tonight, ${sigmaBasis.short} short of history, oldest ${sigmaBasis.oldest || "none"})`);
+    }
+  } catch (error) {
+    console.warn(`  sigma ledger: ${error.message}`);
+  }
   let marketLegs = null;
   await stages.run("market-legs", async () => {
     marketLegs = await runMarketLegs({
       uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
       cardedTickers: [...byCard.keys()],
+      rowOf: (r) => (r && byCard.has(r.ticker) ? sessionRow(r, byCard.get(r.ticker).features) : r),
       sigma,
       deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
@@ -94,6 +134,8 @@ export async function runMarket(ctx) {
     console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);
   });
   if (marketLegs) {
+    if (sigmaBasis) marketLegs.universe = { ...marketLegs.universe, sigmaBasis };
+    if (sigmaLedger) marketLegs.regime = { ...marketLegs.regime, sigmaLedger };
     await stages.run("market-universe", () => publish("universe", marketLegs.universe), (error) => {
       console.warn(`  universe: ${error.message} — the other market keys are published regardless`);
     });
@@ -145,7 +187,7 @@ export async function runMarket(ctx) {
       scoreOf: (t) => (scoreByTicker.has(t) ? scoreByTicker.get(t) : null),
     });
 
-    await publish("events", {
+    const eventsPayload = fitEvents({
       v: BOARD_SCHEMA_VERSION,
       generatedAt,
 
@@ -159,6 +201,8 @@ export async function runMarket(ctx) {
       ...(marketLegs ? marketLegs.eventsAdditions : {}),
       notes: EVENTS_NOTES,
     });
+    await publish("events", eventsPayload);
+    if (eventsPayload.shedRows) console.warn(`  events: ${eventsPayload.shedRows} far-dated row(s) shed to stay under the ingest cap`);
     const gatedShown = events.byStage.gated || 0;
     console.log(
       `  events: ${events.shown} of ${events.inWindow} names reporting within ` +

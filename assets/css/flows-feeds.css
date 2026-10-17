@@ -222,6 +222,7 @@ a.fu-nrow:hover, a.fu-urow:hover, a.fu-crow:hover, a.fu-srow:hover { background:
 .fe-dh b { font: var(--t-headline); letter-spacing: var(--t-headline-track); }
 .fe-dh span { color: var(--label-2); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
 .fe-next { margin-left: auto; padding: 1px 7px; border-radius: var(--r-pill); background: var(--accent-fill); color: var(--accent-soft); font: var(--t-caption2); font-style: normal; }
+.fe-none { color: var(--label-2); font: var(--t-caption2); }
 .fe-lane { display: flex; align-items: flex-start; gap: 4px; padding: var(--sp-3) 0; border-top: 1px solid var(--sep); color: var(--label-2); font: var(--t-caption); }
 .fe-lane .ui-state { margin-top: -2px; }
 .fe-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: var(--sp-3) 0; border-top: 1px solid var(--sep); }

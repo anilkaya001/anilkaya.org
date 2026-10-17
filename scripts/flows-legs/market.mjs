@@ -26,7 +26,7 @@ export const MARKET_LEG_CALLS =
 
 export async function runMarketLegs({
   uw, sessionDate = null, screenerDate = null, generatedAt = null, harvest = null, filters = {},
-  eligible = () => true, cardedTickers = [], deepTickers = [], windowTickers = [],
+  eligible = () => true, rowOf = (r) => r, cardedTickers = [], deepTickers = [], windowTickers = [],
   deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null,
 } = {}) {
   const meter = makeCallMeter(stats);
@@ -36,7 +36,7 @@ export async function runMarketLegs({
   const h = harvest || await harvestScreener(uw, { filters, date: screenerDate });
   const readAt = h.readAt || stampNow();
   const harvested = h.rows || [];
-  const eligibleRows = harvested.filter((r) => { try { return eligible(r); } catch { return false; } });
+  const eligibleRows = harvested.filter((r) => { try { return eligible(r); } catch { return false; } }).map((r) => rowOf(r));
   const screenerByTicker = new Map(harvested.map((r) => [r.ticker, r]));
   say(`  universe ${h.source || "harvest"}: ${harvested.length} row(s) in ${h.pages} page(s) of ${h.limit}` +
     (h.truncated ? " — TRUNCATED at the page cap" : "") + (h.repeated ? " — a page repeated its predecessor" : "") +
