@@ -87,7 +87,7 @@ async function client(extra = {}, D1 = undefined) {
   eq(after.body.calls.n, 0, "a second Worker instance has its own, empty, meter: the state is per isolate");
   const again = await on("/api/flows/coverage");
   ok(again.body.calls.n >= 1, `the instance that made the call counts it (${again.body.calls.n} call(s))`);
-  ok(again.body.calls.slowest.every((s) => typeof s.op === "string" && Number.isFinite(s.avgMs)) && again.body.calls.slowest[0].op === "option-contracts", "by registered operation: " + again.body.calls.slowest.map((s) => s.op).join(","));
+  ok(again.body.calls.slowest.every((s) => typeof s.op === "string" && Number.isFinite(s.avgMs)) && again.body.calls.slowest.length >= 1 && again.body.calls.slowest.every((s) => s.op !== "other") && again.body.calls.slowest.some((s) => s.op === "option-contracts"), "by registered operation: " + again.body.calls.slowest.map((s) => s.op).join(","));
   const boom = await on("/api/flows/chain?t=BOOM");
   const withBad = await on("/api/flows/coverage");
   ok(withBad.body.calls.bad >= 1 && withBad.body.calls.slowest.some((s) => (s.classes["5xx"] || 0) >= 1), "a 503 from the vendor is counted as a 5xx");

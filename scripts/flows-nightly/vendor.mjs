@@ -311,6 +311,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       body = await response.json();
     } catch (error) {
       if (limitMs && isTimeout(error)) stats.timedOut++;
+      wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : "network" });
       throw error;
     } finally {
       wireProgress.settled();
