@@ -535,7 +535,8 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   ok(absent(worker, /async function refreshFlowsIntraday/, { anchor: /async scheduled\(event, env, ctx\)/ }),
     "ONE WRITER PER KEY: the Worker's cron no longer rewrites the nightly flowalerts, pulse or brief " +
     "rows. Two writers on one key is how the 2026-09-22 morning union was lost");
-  const inserts = expect(worker, "INSERT INTO flows_payload", { min: 1, why: "the nightly's rows are written somewhere in the Worker" });
+  const stripDdl = (text) => text.replace(/^const \w+ =\s*"CREATE [\s\S]*?";$/gm, "");
+  const inserts = expect(stripDdl(worker), "INSERT INTO flows_payload", { min: 1, why: "the nightly's rows are written somewhere in the Worker" });
   eq(moduleSource("server/store.js").split("INSERT INTO flows_payload").length - 1, inserts,
     "and every write to flows_payload in the Worker's closure is in server/store.js, the one module that holds the store's SQL");
   const writers = closure("worker.js").filter((file) => /\bstore\.(createArchive|write|remove)\(/.test(moduleSource(file)));
