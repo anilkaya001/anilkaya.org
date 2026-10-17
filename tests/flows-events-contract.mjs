@@ -1205,7 +1205,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
         lanes: [...document.querySelectorAll("#evWeek .fe-lane > span:first-child")].map((n) => n.textContent),
         divCells: document.querySelectorAll("#evWeek .fe-c-div").length,
         macroRows: document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head)").length,
-        weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > *").length,
+        weekMacro: document.querySelectorAll("#evWeek .fe-c-macro > :not(.fe-none)").length,
         forecast: (document.querySelector("#evMacro .fe-mrow:not(.fu-head) .fu-strong") || {}).textContent,
         listTimes: [...document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head) .fe-edate small")].map((n) => n.textContent.trim()),
         weekTimes: [...document.querySelectorAll("#evWeek .fe-c-macro .fe-time")].map((n) => n.textContent.trim()),
