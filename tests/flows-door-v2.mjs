@@ -256,7 +256,7 @@ const tickerOfDepth = (depth) => Object.keys(rosterDepth).find((t) => rosterDept
 
 const NIGHTLY = "nightly-token-abcdefghijklmnopqrstuvwxyz";
 const LIVE = "live-token-abcdefghijklmnopqrstuvwxyz0123";
-const BASE = "https://anilkaya.org";
+const BASE = "https://anilkaya.test";
 
 function rig({ modules = {}, env: extra = {} } = {}) {
   const d = fakeD1({ latencyMs: 0 });
