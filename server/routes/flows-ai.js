@@ -1,4 +1,4 @@
-import { HttpError, json, requireSameOrigin, requireTicker, tickerParam } from "../http.js";
+import { HttpError, fixtureRefused, json, requireSameOrigin, requireTicker, tickerParam } from "../http.js";
 import { memberAllowed } from "../../shared/flows-access.js";
 import { TICKER_RE } from "../../shared/flows-live.js";
 
@@ -13,7 +13,7 @@ export function flowsAiRows(deps) {
   const summary = async ({ env, ctx, url, session }) => {
     const subject = tickerParam(url);
     if (subject !== "") {
-      if (!TICKER_RE.test(subject)) {
+      if (!TICKER_RE.test(subject) || fixtureRefused(url, subject)) {
         throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       }
       return summaryResponse(env, ctx, subject, session);

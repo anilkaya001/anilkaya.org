@@ -14,7 +14,7 @@ import { createStageRunner } from "./flows-nightly/stages.mjs";
 import { raiseReadPace, stats, uw, vendorTimeoutMs, wireProgress } from "./flows-nightly/vendor.mjs";
 import {
   bindStages, ingestURL, liveCredentialSource, publish, publishedStore, readStored, readStoredOnce,
-  resetPublishRetryBudget, sessionArchiveKeys,
+  resetPublishRetryBudget, sessionArchiveKeys, targetRefusal,
 } from "./flows-nightly/store.mjs";
 import { easternNow, intradayRefusal, sessionBarOverdue } from "./flows-nightly/clock.mjs";
 import { candlesAscending, shapeNews } from "./flows-nightly/rank.mjs";
@@ -45,8 +45,8 @@ export {
 export {
   ARCHIVE_PRUNE_LOOKBACK_DAYS, ARCHIVE_RETENTION_DAYS, LEDGER_LIST_KINDS, LIVE_BEARER_MARGIN_MS, PUBLISH_RETRYABLE,
   PUBLISH_SPACING_MS, READ_RETRIES, datedKey, edgeRefusals, edgeSnapshot, listStored, liveCredential,
-  liveCredentialSource, noteRefusal, probeStored, pruneArchive, pruneKeys, publish, publishRetryDelay, readStored,
-  resetEdgeRefusals, resetPublishRetryBudget, retireSession, sessionArchiveKeys, summarize,
+  liveCredentialSource, noteRefusal, probeStored, pruneArchive, pruneKeys, publish, publishRefusal, publishRetryDelay, readStored,
+  resetEdgeRefusals, resetPublishRetryBudget, retireSession, sessionArchiveKeys, summarize, targetRefusal,
 } from "./flows-nightly/store.mjs";
 export {
   PIPELINE_CADENCE, SESSION_CLOSE_MINUTES, SESSION_OPEN_MINUTES, closedPriceWindow, easternNow, intradayRefusal,
@@ -120,6 +120,8 @@ async function runLiveMode() {
       throw new Error(`missing required environment variable${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}` +
         " — the live mode refuses the nightly FLOWS_INGEST_TOKEN on purpose");
     }
+    const target = targetRefusal();
+    if (target) throw new Error(target);
     console.log(`publishing to ${ingestURL()} as ${source}`);
   }
   raiseReadPace(LIVE_READ_PACE_MS);
@@ -213,6 +215,8 @@ async function main() {
         ` Settings > Secrets and variables > Actions`,
       );
     }
+    const target = targetRefusal();
+    if (target) throw new Error(target);
     console.log(`publishing to ${ingestURL()}`);
   }
 

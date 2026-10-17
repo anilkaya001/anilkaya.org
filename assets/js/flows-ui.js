@@ -951,12 +951,40 @@
   freshness.market = market;
 
   const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+  const FIXTURE = (() => {
+    const TOKEN = /"(SY[A-Z]\d{3}|GONE\d)"/, TICKER = /^(?:SY[A-Z]\d{3}|GONE\d)$/;
+    let host = false;
+    try { const n = location.hostname.toLowerCase(); host = n === "127.0.0.1" || n === "localhost" || /\.test$/.test(n); } catch {}
+    const nameIn = (t) => { const m = TOKEN.exec(typeof t === "string" ? t : ""); return m ? m[1] : null; };
+    const marked = (t) => {
+      if (typeof t !== "string" || !/^\s*\{/.test(t) || !/"fixture"\s*:\s*true/.test(t)) return false;
+      try { return JSON.parse(t).fixture === true; } catch { return false; }
+    };
+    const isTicker = (t) => TICKER.test(String(t));
+    return Object.freeze({ host, nameIn, marked, isTicker, refuses: (t) => !host && isTicker(t), hit: { name: null, on: false } });
+  })();
+  const BODIES = new WeakMap();
+  const bodyText = (res) => {
+    let t = BODIES.get(res);
+    if (!t) { t = res.clone().text(); BODIES.set(res, t); }
+    return t;
+  };
+  function quarantine(name) {
+    if (FIXTURE.hit.on) return;
+    FIXTURE.hit.on = true;
+    FIXTURE.hit.name = name;
+    try { document.documentElement.setAttribute("data-fixture", name || "marked"); } catch {}
+    const main = $("flowsMain");
+    if (main) main.hidden = true;
+    showGate("off", name ? "This page was sent test data (" + name + "), so nothing on it is shown." : "This page was sent a payload marked as test data, so nothing on it is shown.");
+    try { console.error("flows: fixture data refused" + (name ? " (" + name + ")" : "")); } catch {}
+  }
   function observe(url, res) {
     if (!res || !res.ok || FRESH.explicit) return;
     let path = "";
     try { path = new URL(url, location.href).pathname.replace(/^\/api\/flows\//, ""); } catch { return; }
     const upd = Number(res.headers.get("X-Payload-Updated")) || null;
-    res.clone().text().then((t) => {
+    bodyText(res).then((t) => {
       if (FRESH.explicit) return;
       const sd = /"sessionDate"\s*:\s*"(\d{4}-\d{2}-\d{2})/.exec(t);
       const ga = /"generatedAt"\s*:\s*"([^"]+)"/.exec(t);
@@ -1009,7 +1037,7 @@
     } else if (r.status === 403 && !GATE.on) {
       const m = r.headers.get("cf-mitigated");
       if (m || !/json/.test(r.headers.get("content-type") || "")) showGate("off", "The network edge refused this page’s requests" + (m ? " (" + m + ")" : "") + ". The readings are unchanged; try again in a minute.");
-    } else if (r.ok && GATE.on === "off") showGate(null);
+    } else if (r.ok && GATE.on === "off" && !FIXTURE.hit.on) showGate(null);
   }
   const HANG = new Promise(() => {});
   const DEADLINE_MS = 20000;
@@ -1038,12 +1066,21 @@
     window.fetch = function (input, init) {
       const url = String((input && input.url) || input || "");
       if (url.indexOf("/api/flows/") < 0) return nativeFetch(input, init);
-      if (GATE.on === "out") return HANG;
+      if (GATE.on === "out" || FIXTURE.hit.on) return HANG;
       const { p, stop } = bounded(input, init);
       if (url.indexOf("/api/flows/meta") >= 0) takeMeta(p);
       if (url.indexOf("/api/flows/now") >= 0) watchNow(p, url.indexOf("?") > 0);
       p.then((r) => observe(url, r), () => {});
-      return p.then((r) => { try { gate(r); } catch {} if (r.status === 401) { stop(); return HANG; } return r; });
+      return p.then(async (r) => {
+        try { gate(r); } catch {}
+        if (r.status === 401) { stop(); return HANG; }
+        if (!FIXTURE.host && r.ok) {
+          const t = await bodyText(r).catch(() => "");
+          const name = FIXTURE.nameIn(t);
+          if (name || FIXTURE.marked(t)) { stop(); quarantine(name); return HANG; }
+        }
+        return r;
+      });
     };
   }
 
@@ -1061,6 +1098,7 @@
         const add = (r, side, session) => {
           if (!r || typeof r.t !== "string") return;
           const t = r.t.toUpperCase();
+          if (FIXTURE.refuses(t)) return;
           if (!by.has(t)) by.set(t, { t, side, sector: r.sector || null, px: num(r.px), s: num(r.s), session });
         };
         for (const [p, side] of [[L, "Bullish"], [S, "Bearish"], [W, "Watch"]]) if (p && Array.isArray(p.rows)) for (const r of p.rows) add(r, side, p.sessionDate);
@@ -1302,6 +1340,7 @@
     segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
     freshness, freshAggregate, freshAll, defer, link, shell, depths: PAL_G,
+    fixture: Object.freeze({ host: FIXTURE.host, nameIn: FIXTURE.nameIn, marked: FIXTURE.marked, isTicker: FIXTURE.isTicker, refuses: FIXTURE.refuses }),
   });
 
   if (document.readyState === "loading") onDoc("DOMContentLoaded", initShell, { once: true });

@@ -5,6 +5,7 @@ import { timeMs } from "../../shared/flows-live.js";
 import { LEDGER_LIMITS } from "../../shared/flows-ledger.js";
 import { ledgerSum, LEDGER_TIERS } from "../../shared/flows-neuron-coverage.js";
 import { LIVE_LOOP } from "./live.mjs";
+import { fixtureNameIn } from "../../shared/flows-fixture-names.js";
 
 export const HEALTH = Object.freeze({
   focusCron: "3-58/5 13-21 * * MON-FRI",
@@ -540,6 +541,12 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   if (lab.failure) failures.push(lab.failure);
   if (lab.warning) warnings.push(lab.warning);
   if (lab.note) notes.push(lab.note);
+  for (const [key, read] of [["clock", clockRead], ["live:market", marketRead], ["live:focus", focusRead], ["live:heartbeat", heartbeatRead],
+    ["live:strips:series", seriesRead]]) {
+    const held = payloadOf(read);
+    const name = held ? fixtureNameIn(JSON.stringify(held)) : null;
+    if (name) failures.push(`HEALTH: a stored payload names the fixture ticker ${name} (${key}); fixture data must never be stored in production`);
+  }
   if (typeof sessionDate !== "string" || !DAY_RE.test(sessionDate)) {
     return { applies: false, why: "no session date", failures, warnings, notes };
   }
@@ -729,6 +736,7 @@ export const HEALTH_CODES = Object.freeze([
   ["ingest-unrayed", /carried no cf-ray/, "ingest answers never passed through Cloudflare"],
   ["ingest-retries", /ingest retries spent/, "ingest retries used most of their budget"],
   ["lab-sign-in", /Google sign-in to the Lab/, "the Lab's Google OAuth client has been idle past the failure line"],
+  ["fixture-name", /names the fixture ticker/, "a stored payload names a fixture ticker"],
   ["cards-failed", /card\(s\) failed to build/, "cards failed to build or publish"],
   ["cards-skipped", /skipped past the run's deadline/, "cards were skipped past the run's deadline"],
   ["roster-unwritten", /roster was not written/, "the roster was not written"],

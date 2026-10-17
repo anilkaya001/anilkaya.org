@@ -3,11 +3,41 @@ import {
   refusalOf, refusalTally, tallyRefusal, tallyAnswer, retriedStatus, refusalBrief, storeQuotaWait, QUOTA_WAIT,
 } from "../flows-legs/health.mjs";
 import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../../shared/flows-oidc.js";
+import { fixtureHost, fixtureRefusal } from "../../shared/flows-fixture-names.js";
+import { vendorBaseInfo } from "../../shared/flows-vendor-core.js";
+import { tainted } from "../flows-legs/taint.mjs";
 import { DRY_RUN, LIVE_MODE, EMIT } from "./flags.mjs";
 import { sleep, wireProgress } from "./vendor.mjs";
 
 export function ingestURL() {
   return process.env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest";
+}
+
+export function ingestHost(env = process.env) {
+  try {
+    return new URL(env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest").hostname;
+  } catch {
+    return "";
+  }
+}
+
+export function fixtureLeakError(refusal, subject) {
+  return Object.assign(new Error(
+    `${subject} refused before the network: ${refusal.code}${refusal.name ? ` (${refusal.name})` : ""} — fixture data never leaves the runner`,
+  ), { fixtureLeak: true, code: refusal.code });
+}
+
+export function publishRefusal(key, body, { env = process.env, taint = tainted() } = {}) {
+  if (fixtureHost(ingestHost(env))) return null;
+  return fixtureRefusal(key, body) || (taint ? { code: "fixture_code", name: taint } : null);
+}
+
+export function targetRefusal(env = process.env) {
+  const vendor = vendorBaseInfo(env.FLOWS_UW_BASE_URL);
+  if (vendor.status !== "redirect" && vendor.status !== "invalid") return null;
+  const host = ingestHost(env);
+  if (fixtureHost(host)) return null;
+  return `a run against ${env.FLOWS_UW_BASE_URL} never publishes to ${host || "an unreadable ingest URL"}: the vendor base is not the production origin`;
 }
 
 const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)";
@@ -368,7 +398,8 @@ export async function publish(key, payload) {
   }
   publishedStore[key] = payload;
   if (activeStages) activeStages.note(key);
-  const body = JSON.stringify(payload);
+  const plain = payload !== null && typeof payload === "object" && !Array.isArray(payload);
+  const body = JSON.stringify(EMIT || DRY_RUN ? (plain ? { ...payload, fixture: true } : payload) : payload);
   if (EMIT || DRY_RUN) {
     if (EMIT) {
       const { writeFileSync } = await import("node:fs");
@@ -377,6 +408,11 @@ export async function publish(key, payload) {
     console.log(`  [dry-run] ${key}: ${summarize(payload)}, ${body.length} bytes`);
     landedKeys.add(key);
     return;
+  }
+  const leak = publishRefusal(key, body);
+  if (leak) {
+    process.exitCode = 1;
+    throw fixtureLeakError(leak, `publish ${key}`);
   }
   let response, refusal = null, heard = null, lastDetail = "";
   for (let attempt = 0; ; attempt++) {

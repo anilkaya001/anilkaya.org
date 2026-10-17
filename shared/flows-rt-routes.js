@@ -1,4 +1,5 @@
 import { readMembers, memberOf } from "./flows-auth.js";
+import { fixtureHost, isFixtureTicker } from "./flows-fixture-names.js";
 import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
 
 const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
@@ -43,7 +44,7 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
       }
       requireSameOrigin(request);
       const f = String(url.searchParams.get("f") || "").trim().toUpperCase();
-      if (f && !TICKER_RE.test(f)) throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+      if (f && (!TICKER_RE.test(f) || (isFixtureTicker(f) && !fixtureHost(url.hostname)))) throw new HttpError(400, "invalid_ticker", "Unknown ticker");
       target.searchParams.set("k", asked.topics.join(","));
       if (f) target.searchParams.set("f", f);
       const headers = new Headers(request.headers);
@@ -58,7 +59,7 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
       if (path === "/api/rt/snap") {
         target.searchParams.set("k", asked.topics.join(","));
         const f = String(url.searchParams.get("f") || "").trim().toUpperCase();
-        if (f && !TICKER_RE.test(f)) throw new HttpError(400, "invalid_ticker", "Unknown ticker");
+        if (f && (!TICKER_RE.test(f) || (isFixtureTicker(f) && !fixtureHost(url.hostname)))) throw new HttpError(400, "invalid_ticker", "Unknown ticker");
         if (f) target.searchParams.set("f", f);
       }
       res = await stub.fetch(new Request(target, { method: "GET" }));

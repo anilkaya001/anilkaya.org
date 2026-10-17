@@ -33,7 +33,7 @@ function chain() {
         const bid = Math.max(0, Math.round((mid - half) * 100) / 100), ask = Math.round((mid + half) * 100) / 100 + 0.01;
         const otm = type === "C" ? K >= SPOT : K <= SPOT;
         const oi = Math.round((otm ? 5000 : 1800) * Math.exp(-Math.abs(k) / 0.1)) + 50;
-        rows.push({ option_symbol: "SYN" + code(expiry) + type + String(Math.round(K * 1000)).padStart(8, "0"),
+        rows.push({ option_symbol: "SYN000" + code(expiry) + type + String(Math.round(K * 1000)).padStart(8, "0"),
           nbbo_bid: String(bid), nbbo_ask: String(ask), implied_volatility: String(vol), open_interest: oi, volume: Math.round(oi / 7),
           last_tape_time: "2026-09-21T19:58:00Z" });
       }
@@ -55,7 +55,7 @@ function history(N, nu, seedKey) {
   return { px, dates };
 }
 
-const vchain = QC.chainRowsByExpiry(chain(), { ticker: "SYN", sessionDate: SESSION });
+const vchain = QC.chainRowsByExpiry(chain(), { ticker: "SYN000", sessionDate: SESSION });
 const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, rate: R });
 const RATE = { r: R, method: "constant", n: 0 };
 const levels = { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 };
@@ -67,7 +67,7 @@ const summary = (xs) => xs.length ? `n ${xs.length}, median ${quantile(xs, 0.5).
 function run(garch, closes, stateName, seedKey) {
   const law = QP.garchLaw({ garch, ticker: "SYN" + seedKey, sessionDate: SESSION, closes, rate: R, paths });
   const state = { state: stateName, direction: null, confidence: 2, ...STATE_STRUCTURES[stateName].rich };
-  const block = QC.runCardEngine({ ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts: [], state,
+  const block = QC.runCardEngine({ ticker: "SYN000", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts: [], state,
     pLaw: law, levels, atr: 2, publishLaw: false });
   return block;
 }

@@ -14,6 +14,7 @@ import { pathFor } from "./flows-vendor-ops.js";
 import { readLabActiveAt } from "./lab-sign-in.js";
 import { emitFailure } from "./flows-log.js";
 import { newsFields } from "./flows-news.js";
+import { FIXTURE_REFUSALS, fixtureHost, fixtureRefusal } from "./flows-fixture-names.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
   ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
@@ -826,7 +827,7 @@ export function ingestScope(key, method, kind) {
   return { ok: false, status: 401, code: "unauthorized", message: "Authentication required" };
 }
 
-export async function ingestLive(env, key, method, text, now, { json }) {
+export async function ingestLive(env, key, method, text, now, { json, host }) {
   if (!Object.hasOwn(LIVE_KEYS, key)) return json({ error: { code: "invalid_key", message: "Unknown payload key" } }, 400);
   if (method === "GET") {
     const row = await readLive(env.DB, key);
@@ -839,6 +840,13 @@ export async function ingestLive(env, key, method, text, now, { json }) {
   let body;
   try { body = JSON.parse(text); } catch {
     return json({ error: { code: "invalid_payload", message: "Payload is not valid JSON" } }, 400);
+  }
+  if (!fixtureHost(host)) {
+    const refusal = fixtureRefusal(key, text);
+    if (refusal) {
+      const known = FIXTURE_REFUSALS[refusal.code];
+      return json({ error: { code: refusal.code, message: known[1] }, ...(refusal.name ? { name: refusal.name } : {}) }, known[0]);
+    }
   }
   const spec = LIVE_KEYS[key];
   if (text.length > spec.maxBytes) {

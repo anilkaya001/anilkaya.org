@@ -1,4 +1,5 @@
 import { sessionWindow, packSeries, toMs } from "../../shared/flows-positioning.js";
+import { touch } from "./taint.mjs";
 
 const hash = (s) => {
   let h = 2166136261;
@@ -51,6 +52,7 @@ const expiriesFrom = (day, n) => {
 const failAt = (t, mod, hit) => hash(t + "#" + mod) % mod === hit;
 
 export function makeFlowFakeVendor({ sessionDate, spotOf = () => 100 }) {
+  touch("makeFlowFakeVendor");
   const win = sessionWindow(sessionDate);
   const history = weekdaysEndingAt(sessionDate, 260);
   const spotFor = (t) => {
@@ -351,6 +353,7 @@ export function makeFlowFakeVendor({ sessionDate, spotOf = () => 100 }) {
 }
 
 export function makeFlowFakeStore({ sessionDate }) {
+  touch("makeFlowFakeStore");
   const prior = weekdaysEndingAt(sessionDate, 60).slice(0, -1);
   return async (key) => {
     const t = String(key).replace(/^hist:/, "");

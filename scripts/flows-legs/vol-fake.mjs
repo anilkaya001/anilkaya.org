@@ -1,4 +1,5 @@
 import { addDays, dayDiff, eventDayOf } from "../../shared/flows-vol.js";
+import { touch } from "./taint.mjs";
 
 function seedOf(text) {
   let h = 2166136261;
@@ -311,6 +312,7 @@ function fakeRadar(kind, direction, sessionDate) {
 const refuse = (path, status) => { throw new Error(`${path} -> HTTP ${status}`); };
 
 export function fakeVolVendor({ sessionDate, names = [] } = {}) {
+  touch("fakeVolVendor");
   const earningsOf = new Map(names.map((n) => [n.ticker, n.earnings || null]));
   return async (path, params = {}) => {
     const day = params.date || params.end_date || sessionDate;

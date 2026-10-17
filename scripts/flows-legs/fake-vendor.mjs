@@ -1,4 +1,5 @@
 import { addDays, weekdaysAhead, priorWeekdayIso, isWeekdayIso } from "../../shared/flows-cross.js";
+import { touch } from "./taint.mjs";
 
 function prng(seed) {
   let s = seed | 0;
@@ -37,6 +38,7 @@ const fakeEtfPx = (t) => FAKE_INDEX[t] || FAKE_FUNDS[t] || null;
 const TENORS = [1, 5, 7, 14, 30, 60, 90, 180, 365];
 
 export function augmentScreenerRow(row, { sessionDate }) {
+  touch("augmentScreenerRow");
   const rnd = prng(hash("aug:" + row.ticker));
   const close = Number(row.close) || 50;
   const iv30 = row.iv30d !== undefined ? Number(row.iv30d) : null;
@@ -98,6 +100,7 @@ export function augmentScreenerRow(row, { sessionDate }) {
 }
 
 export function fakeIndexRow(ticker, { sessionDate }) {
+  touch("fakeIndexRow");
   const px = fakeEtfPx(ticker) || 100;
   const rnd = prng(hash("idx:" + ticker));
   const extra = prng(hash("etf:" + ticker));
@@ -168,6 +171,7 @@ function anomaly(ticker, dir, rnd, day) {
 }
 
 export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } = {}) {
+  touch("makeFakeVendor");
   const S = sessionDate;
   const augmented = screenerRows.map((r) => augmentScreenerRow(r, { sessionDate: S }));
   const tickers = augmented.map((r) => r.ticker);
@@ -398,7 +402,7 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
       const targets = [addDays(S, 12), addDays(S, 40), `${y}-Q4`, `${y}-LATE`, `${y}-MID`, `${y + 1}-H1`,
         addDays(S, 90), `${y}-11`, "2025-MID", addDays(S, 200), "TBD", addDays(S, 7)];
       return { data: targets.map((tgt, i) => ({
-        status: "Phase 3", time: "07:44:07", description: "synthetic", ticker: i === 10 ? "NOPT" : tickers[(i * 37) % tickers.length],
+        status: "Phase 3", time: "07:44:07", description: "synthetic", ticker: i === 10 ? "SYX010" : tickers[(i * 37) % tickers.length],
         created_at: S + "T13:22:07Z", event_type: i % 2 ? "PDUFA" : "Top-line Data Due", updated_at: S + "T13:23:09Z",
         outcome: "", source_type: "Press Release", start_date: S, end_date: null, notes: "", has_options: i !== 10,
         marketcap: String(Math.round(1e9 + rnd() * 3e10)), target_date: tgt, catalyst: i % 2 ? "PDUFA" : "Top-line Data Due",

@@ -393,6 +393,81 @@ try {
     const noDb = await observe(async () => table.handle({ request: new Request(BASE + "/api/flows/ingest?list=card", { headers: { Authorization: "Bearer " + NIGHTLY } }), env: { FLOWS_INGEST_TOKEN: NIGHTLY }, url: new URL(BASE + "/api/flows/ingest?list=card"), ctx: {} }, {}));
     eq(noDb.error.code, "store_unreadable", "and a Worker with no D1 binding says the same");
   }
+
+  {
+    const d = fakeD1({ latencyMs: 0 });
+    seed(d);
+    const nd = stubDeps(d, []);
+    const table = createRouter(flowsIngestRows({ store: createFlowsStore({ ensureFlowsTables: nd.ensureFlowsTables }), ...nd }));
+    const env = envOf(d);
+    const send = (base, q, method, body, token = NIGHTLY, extraEnv = {}) => observe(async () => table.handle({
+      request: new Request(base + "/api/flows/ingest" + q, { method, headers: { Authorization: "Bearer " + token }, body }),
+      env: { ...env, ...extraEnv }, url: new URL(base + "/api/flows/ingest" + q), ctx: {},
+    }, {}));
+    const refused = async (label, base, q, method, body, code, extraEnv) => {
+      const trips = d.trips.length;
+      const before = JSON.stringify(dump(d));
+      const got = await send(base, q, method, body, NIGHTLY, extraEnv);
+      eq([got.error && got.error.status, got.error && got.error.code], [422, code], label + " is 422 " + code);
+      eq(d.trips.length, trips, label + " ran no D1 statement");
+      eq(JSON.stringify(dump(d)), before, label + " left the store as it was");
+    };
+    const synCard = JSON.stringify({ v: 2, ticker: "SYN001", sessionDate: "2026-01-02" });
+    await refused("POST card:SYN001 on the production host", BASE, "?key=card:SYN001", "POST", synCard, "fixture_ticker");
+    await refused("POST card-x:SYL040", BASE, "?key=card-x:SYL040", "POST", "{}", "fixture_ticker");
+    await refused("POST hist:GONE1", BASE, "?key=hist:GONE1", "POST", "{}", "fixture_ticker");
+    await refused("GET card:SYN001", BASE, "?key=card:SYN001", "GET", undefined, "fixture_ticker");
+    await refused("DELETE card:SYN001", BASE, "?key=card:SYN001", "DELETE", undefined, "fixture_ticker");
+    await refused("a universe naming SYN001", BASE, "?key=universe", "POST", JSON.stringify({ t: ["NVDA", "SYN001"], sessionDate: "2026-01-02" }), "fixture_ticker");
+    await refused("a board row naming SYS012 as an object key", BASE, "?key=board:long", "POST", JSON.stringify({ rows: [{ SYS012: 1 }] }), "fixture_ticker");
+    await refused("a payload stamped fixture:true under a real name", BASE, "?key=card:AAPL", "POST", JSON.stringify({ fixture: true, ticker: "AAPL" }), "fixture_payload");
+    await refused("a meta stamped fixture:true", BASE, "?key=meta", "POST", JSON.stringify({ fixture: true, sessionDate: "2026-01-02" }), "fixture_payload");
+    await refused("a dated archive stamped fixture:true", BASE, "?key=scores:2026-01-02", "POST", JSON.stringify({ fixture: true }), "fixture_payload");
+    await refused("a refusal with an environment variable offered to waive it", BASE, "?key=card:SYN001", "POST", synCard, "fixture_ticker",
+      { FLOWS_ALLOW_FIXTURES: "1", ALLOW_FIXTURES: "on", FIXTURE_HOST: "anilkaya.org", ENVIRONMENT: "test", FLOWS_TEST: "1" });
+    for (const host of ["https://staging.example.workers.dev", "https://anilkaya.org.test.evil.com", "https://evil.localhost", "https://test", "https://127.0.0.1.evil.com", "https://notlocalhost"]) {
+      await refused("POST card:SYN001 on " + host, host, "?key=card:SYN001", "POST", synCard, "fixture_ticker");
+    }
+    const live = await send(BASE, "?key=live:strips", "POST", JSON.stringify({ rows: [{ t: "SYN001" }] }), LIVE);
+    eq(live.error && live.error.code, "unauthorized", "the static live token is not even a credential on the production host");
+
+    const closed = [];
+    const answer = (b, st = 200) => { closed.push([st, b]); return b; };
+    const trips = d.trips.length;
+    const cut = await FLOWS_LIVE.ingestLive({ DB: d.D1 }, "live:strips", "POST", JSON.stringify({ readAt: 1, rows: [["SYN001", 1]] }), Date.now(), { json: answer, host: "anilkaya.org" });
+    eq([closed[0][0], closed[0][1].error.code, closed[0][1].name], [422, "fixture_ticker", "SYN001"], "ingestLive refuses a live body naming SYN001 on the production host");
+    eq(d.trips.length, trips, "before any D1 statement and before checkLiveWrite");
+    const unmarked = await FLOWS_LIVE.ingestLive({ DB: d.D1 }, "live:strips", "POST", JSON.stringify({ fixture: true }), Date.now(), { json: answer, host: "anilkaya.org" });
+    eq([closed[1][0], closed[1][1].error.code], [422, "fixture_payload"], "and a live body stamped fixture:true");
+    const missing = await FLOWS_LIVE.ingestLive({ DB: d.D1 }, "live:strips", "POST", JSON.stringify({ readAt: 1, rows: [["SYN001", 1]] }), Date.now(), { json: answer });
+    eq(closed[2][1].error.code, "fixture_ticker", "a caller that passes no host is not waived");
+    const local = await FLOWS_LIVE.ingestLive({ DB: d.D1 }, "live:strips", "POST", JSON.stringify({ readAt: 1, rows: [["SYN001", 1]] }), Date.now(), { json: answer, host: "127.0.0.1" });
+    ok(closed[3][1].error === undefined || closed[3][1].error.code !== "fixture_ticker", "while a loopback host reaches checkLiveWrite as before");
+    ok(cut === closed[0][1] && unmarked === closed[1][1] && missing === closed[2][1] && local === closed[3][1], "through the injected json");
+
+    for (const base of [LOCAL, "http://localhost:8787", "https://example.test", "https://pages.example.test"]) {
+      const posted = await send(base, "?key=card:SYN001", "POST", synCard);
+      eq([posted.status, JSON.parse(posted.text).ok], [200, true], "POST card:SYN001 on " + base + " is stored as before");
+      const read = await send(base, "?key=card:SYN001", "GET");
+      eq(read.status, 200, "and read back");
+      const stamped = await send(base, "?key=card:SYN002", "POST", JSON.stringify({ fixture: true, rows: ["SYN002"] }));
+      eq(stamped.status, 200, "and a stamped payload with a fixture name is stored there");
+      const removed = await send(base, "?key=card:SYN001", "DELETE");
+      eq(removed.status, 200, "and removed");
+      await send(base, "?key=card:SYN002", "DELETE");
+    }
+
+    for (const ticker of ["SYNA", "SYK", "SYY", "SYF", "AAA", "BRK.B", "SOXS", "SYN", "NOPT"]) {
+      const kept = await send(BASE, "?key=card:" + ticker, "POST", JSON.stringify({ v: 2, ticker }));
+      eq(kept.status, 200, "a listed or lookalike symbol " + ticker + " is not a fixture name");
+      await send(BASE, "?key=card:" + ticker, "DELETE");
+    }
+    const headline = await send(BASE, "?key=news", "POST", JSON.stringify({ rows: [{ headline: "SYS100 launch", tickers: ["SYK"] }] }));
+    eq(headline.status, 200, "a headline that says SYS100 is not a whole JSON string, so a vendor sentence cannot trip the guard");
+    const mentioned = await send(BASE, "?key=news", "POST", JSON.stringify({ rows: [{ headline: "fixture: true is how we mark it" }], fixture: false }));
+    eq(mentioned.status, 200, "and neither does fixture:false");
+    eq(JSON.stringify(dump(d).payload.filter(([id]) => /SY[A-Z]\d{3}|GONE/.test(id) || /"SY[A-Z]\d{3}"/.test(id))), "[]", "no fixture row is in the store after all of it");
+  }
 } finally {
   Date.now = realNow;
 }
