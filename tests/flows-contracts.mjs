@@ -29,7 +29,7 @@ for (const [key, payload] of keys) {
 ok(refusedSynthetic >= 100, `SYNTHETIC NAMES ARE REFUSED WITHOUT THE TEST ALLOWANCE: ${refusedSynthetic} of ${keys.size} emitted payloads carry a SYN name`);
 
 const aaplKey = "card:AAPL";
-const aapl = keys.get(aaplKey);
+const aapl = (({ fixture, ...rest }) => rest)(keys.get(aaplKey));
 const universe = keys.get("universe");
 ok(aapl && universe, "the emit holds a deep card and the universe");
 const real = validate(aaplKey, aapl);
