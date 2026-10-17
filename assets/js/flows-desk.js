@@ -1041,6 +1041,6 @@
   else topName().then((t) => {
     if (!t || book.size) return;
     const go = h("button", { type: "button", class: "dk-suggest", onclick: () => { go.remove(); if (!book.size) add([t]); } }, "Try " + t);
-    list.after(go);
+    (list.closest(".dk-chipw") || list).after(go);
   });
 })();

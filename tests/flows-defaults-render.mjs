@@ -22,8 +22,13 @@ try {
       viewport: { width: 1440, height: 820 }, api: boardApi, payloads: { NVDA: nvdaBefore() },
       onChain: async (route, u) => { asked.push(u.searchParams.get("t")); return false; },
     });
+    await page.waitForSelector(".dk-suggest", { timeout: 8000 });
+    eq((await page.textContent(".dk-suggest")).trim(), "Try NVDA", "A DESK OPENED WITH NO SYMBOL OFFERS THE TOP BULLISH NAME as a button instead of a blank Quiet frontier");
+    await page.waitForTimeout(600);
+    eq(asked.length, 0, "and the vendor chain is not read until the reader presses it: an empty visit costs no call");
+    await page.click(".dk-suggest");
     await page.waitForFunction(() => document.querySelectorAll("#dkChips .desk-chip, .desk-chip").length > 0, null, { timeout: 8000 });
-    eq(asked.join(","), "NVDA", "A DESK OPENED WITH NO SYMBOL LOADS THE TOP BULLISH NAME instead of a blank Quiet frontier: exactly one chain read, for the board's first row");
+    eq(asked.join(","), "NVDA", "pressing it makes exactly one chain read, for the board's first row");
     ok(/t=NVDA/.test(page.url()), "and the address records it, so a reload or a shared link opens the same desk");
     await page.close();
   }
@@ -74,15 +79,22 @@ try {
     });
     await page.goto("https://x.test/flows/strategy/", { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1500);
+    const before = asked.length;
+    const button = await page.$(".dk-suggest");
+    const label = button ? (await button.textContent()).trim() : null;
+    if (button) { await button.click(); await page.waitForTimeout(1200); }
     const url = page.url();
     await page.close();
-    return { asked, url };
+    return { asked, url, before, label };
   };
   const withBoard = await strategy(boardApi);
-  eq(withBoard.asked[0], "NVDA", "THE STRATEGY LAB OPENED WITH NO SYMBOL READS THE TOP BULLISH NAME: its first context request is for the board's first row");
+  eq(withBoard.label, "Try NVDA", "THE STRATEGY LAB OPENED WITH NO SYMBOL OFFERS THE TOP BULLISH NAME as a button");
+  eq(withBoard.before, 0, "and asks for no context until it is pressed");
+  eq(withBoard.asked[0], "NVDA", "pressing it makes the first context request, for the board's first row");
   ok(/t=NVDA/.test(withBoard.url), "and records it in the address");
   const without = await strategy(() => null);
   eq(without.asked.length, 0, "with no board published it asks for nothing");
+  eq(without.label, null, "and offers no button");
 } finally {
   await browser.close();
 }
