@@ -783,3 +783,16 @@
 .ivs-dot { fill: var(--label-1); }
 .ivs-termline { stroke: var(--label-1); stroke-width: 1.4; }
 .ivs-cellgroup, .ivs-colhead, .ivs-levelgroup { cursor: help; }
+
+.tl .dk-suggest {
+  min-height: 44px;
+  margin: var(--space-2, 8px) 0 0;
+  padding: 0 var(--space-4, 16px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.tl .dk-suggest:focus-visible { outline: 2px solid var(--focus, currentColor); outline-offset: 2px; }

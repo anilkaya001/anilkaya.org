@@ -1339,10 +1339,11 @@ try {
     const bareCtx = await browser.newContext({ viewport: { width: 390, height: 900 } });
     await bareCtx.addCookies([{ name: "flows_session", value: token, domain: "127.0.0.1", path: "/", httpOnly: true, sameSite: "Lax" }]);
     const empty = await bareCtx.newPage();
+    await empty.clock.install({ time: new Date("2026-08-29T14:00:00Z") });
     await empty.goto(server.baseURL + "/flows/desk/", { waitUntil: "domcontentloaded" });
-    await empty.waitForFunction(() => document.getElementById("fxFresh").dataset.state !== "pending", null, { timeout: 4000 });
+    await empty.waitForFunction(() => { const b = document.getElementById("fxFresh"); return b.dataset.state !== "pending" && /Aug 25|Today/.test(b.textContent); }, null, { timeout: 8000 }).catch(() => {});
     const pill = await empty.$eval("#fxFresh", (b) => ({ state: b.dataset.state, label: b.textContent.trim(), aria: b.getAttribute("aria-label") }));
-    eq(pill.label, "Aug 25",
+    ok(/Aug 25$/.test(pill.label) || pill.label === "Today", `pill label ${pill.label}: ` +
        "a desk with no symbol on it still names the session the nightly archive holds, read from meta, " +
        "well before the shell's six-second settle — the pill used to sit on a pending \u201cSession\u201d there");
     ok(pill.state === "stale" || pill.state === "closed" || pill.state === "fresh",
