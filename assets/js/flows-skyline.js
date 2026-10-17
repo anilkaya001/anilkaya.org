@@ -156,7 +156,7 @@
     const CW = Math.max(170, Math.min(250, Math.round(W * 0.26)));
     const bx = W - 12 - CW;
     const gridR = bx - 28;
-    const cw = Math.max(8, Math.min(46, (2 * (gridR - LEFT - 16)) / (cols + rows)));
+    const cw = Math.max(8, Math.min(84, (2 * (gridR - LEFT - 16)) / (cols + rows)));
     const hw = cw * 0.34, d = hw * 0.5;
     const ox = (LEFT + gridR) / 2 - (cols - rows) * cw * 0.25;
     const calls = ranked(list, mode);
@@ -409,6 +409,7 @@
     const noteB = el("p", { class: "mk-sky-n", "data-note": "absent" });
     const noteC = el("p", { class: "mk-sky-n" });
     const off = md.plotted === 0;
+    let filled = "";
 
     const label = () => {
       const top = md.prisms.slice().sort(byHeight)[0];
@@ -428,8 +429,7 @@
       noteB.hidden = !showAbsent;
       noteB.textContent = showAbsent ? (off ? "How often is off: none of these names has a published typical-day move with a 2x or 3x count to draw. " : "") + absentNote(md) : "";
       noteC.textContent = LINE + " " + CAPTION + (md.apart && mode === "ivdays" ? " Hatched prisms: " + APART : "");
-      tables.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode), table(md, mode));
-      callBox.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode));
+      filled = "";
       draw();
     };
 
@@ -440,8 +440,19 @@
       details.hidden = !on;
       callBox.hidden = on;
       moreBtn.hidden = on;
+      const key = mode + (on ? "w" : "n");
+      if (key !== filled) {
+        filled = key;
+        if (on) {
+          tables.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode), table(md, mode));
+          callBox.replaceChildren();
+        } else {
+          tables.replaceChildren();
+          callBox.replaceChildren(calloutTable(ranked(shown(md, mode), mode), mode));
+        }
+      }
       if (!on) { sc = null; return; }
-      sc = layout(md, W, Math.max(240, Math.min(560, Math.floor(host.clientHeight) - 150)), { mode, measure });
+      sc = layout(md, W, host.closest(".mk-panel") ? Math.max(240, Math.min(560, Math.floor(host.clientHeight) - 150)) : 360, { mode, measure });
       canvas.style.width = W + "px";
       canvas.style.height = sc.H + "px";
       paint(canvas, sc);

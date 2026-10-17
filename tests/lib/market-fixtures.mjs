@@ -121,3 +121,21 @@ export async function openMarket(browser, { viewport = { width: 1440, height: 82
 }
 
 export const TABS = ["tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
+
+export async function showTab(page, selector) {
+  const key = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const panel = el && el.closest(".mk-panel");
+    return panel ? panel.dataset.panel : null;
+  }, selector);
+  if (!key) return;
+  if ((await page.evaluate(() => document.getElementById("mkStage").dataset.view)) !== key) await page.click("#mkT-" + key);
+  const sub = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const mod = el && el.closest(".mk-mod");
+    const bar = document.getElementById("mkSub");
+    if (!mod || !bar || getComputedStyle(bar).display === "none" || bar.hidden) return -1;
+    return [...mod.parentElement.querySelectorAll(":scope > .mk-mod")].indexOf(mod);
+  }, selector);
+  if (sub >= 0) await page.locator("#mkSub button").nth(sub).click();
+}

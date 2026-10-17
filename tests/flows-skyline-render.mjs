@@ -213,6 +213,8 @@ const mountIn = async (page, uni) => {
 
 const reveal = async (page) => {
   await page.waitForSelector("#mkSkyline", { state: "attached", timeout: 15000 });
+  await page.click("#mkT-extremes");
+  if (await page.evaluate(() => getComputedStyle(document.getElementById("mkSub")).display !== "none")) await page.click("#mkSub button:has-text('Move skyline')");
   for (let i = 0; i < 60; i++) {
     await page.evaluate(() => document.getElementById("mkSkylineCard").scrollIntoView({ block: "center" }));
     if (await page.evaluate(() => Boolean(document.getElementById("mkSkyline").dataset.state))) return;
@@ -347,11 +349,9 @@ try {
   {
     const { context, page, log, errors } = await open(browser);
     await page.waitForFunction(() => window.FlowsUI && window.FlowsUI.marketKit, null, { timeout: 15000 });
-    await sleep(1500);
-    eq(log.filter((p) => p === SKY).length, 0, "THE SKYLINE FILE IS NOT REQUESTED WHILE ITS MODULE IS FAR BELOW THE FOLD");
     await reveal(page);
     await page.waitForFunction(() => document.querySelector("#mkSkyline canvas"), null, { timeout: 15000 });
-    eq(log.filter((p) => p === SKY).length, 1, "and is requested once when the module nears the viewport");
+    eq(log.filter((p) => p === SKY).length, 1, "THE SKYLINE FILE IS REQUESTED ONCE, after the universe was read, and mounts without its tab being open");
     await mountIn(page, await page.evaluate(async () => (await fetch("/api/flows/universe")).json()));
     const model = await page.evaluate(() => window.FlowsUI.skyline.model(window.__md));
     eq(model.prisms.map((p) => p.t).sort(), EXP.map((k) => k.t).sort(), "the model keeps exactly the names beyond 2 IV-days, a null previous IV and a small move left out");
@@ -393,10 +393,13 @@ try {
     const { context, page, errors } = await open(browser, { viewport: { width, height: 800 } });
     await reveal(page);
     await page.waitForFunction(() => document.querySelector("#mkSkyline table"), null, { timeout: 15000 });
-    ok(await page.evaluate(() => document.querySelector("#mkSkyline canvas").hidden && document.querySelector("#mkSkyline details").open), `AT ${width} PX THE SORTED TABLE STANDS IN FOR THE CANVAS`);
+    ok(await page.evaluate(() => document.querySelector("#mkSkyline canvas").hidden && document.querySelector("#mkSkyline details.mk-sky-d").hidden), `AT ${width} PX THE CALLOUT TABLE STANDS IN FOR THE CANVAS AND THE NAMES ARE ONE BUTTON AWAY`);
     for (const mode of ["ivdays", "often"]) {
       if (mode === "often") await switchTo(page, "often", "key");
+      await page.click("#mkSkyline .nm-link");
+      await page.waitForSelector("#mkSkyline dialog[open] .mk-sky-t");
       const r = await inspect(page);
+      await page.keyboard.press("Escape");
       eq(r.calls.map((x) => x.t), ranked(mode), `${width}: the callout table lists the three ${mode === "often" ? "rarest" : "tallest"}`);
       eq(r.rows.map((x) => x.t), ORDER[mode], `${width}: the names table is ${mode === "often" ? "rarest" : "largest"} first`);
       const rects = await page.evaluate(() => [...document.querySelectorAll("#mkSkyline .mk-sky-co tbody tr")].map((tr) => { const b = tr.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }));

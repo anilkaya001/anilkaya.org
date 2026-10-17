@@ -1,3 +1,4 @@
+import { showTab } from "./lib/market-fixtures.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -276,6 +277,7 @@ try {
     ok(!/RAWUP|RAWDN/.test(got.cols[0].clean.concat(got.cols[1].clean).flat().join(" ")), "no raw-change name leaks into the IV-days lists");
     ok(got.cols[2].head.includes("Calls") && got.cols[3].head.includes("Puts"), "Calls and Puts are untouched");
 
+await showTab(page, "#mktMovers");
     await page.click("#mktMovers .mk-lens .ui-seg-i:nth-child(2)");
     await page.waitForFunction(() => !document.querySelector("#mktMovers li[data-t]"), null, { timeout: 15000 });
     await settle(page);
@@ -296,6 +298,7 @@ try {
     deep(got.seg, [["Raw change", "true"], ["In IV-days", "false"]], "MEMBERS OPEN ON RAW CHANGE");
     ok(!page._asked.some((k) => /^lk\?k=.*strips/.test(k)), "and the live rows are not fetched for a lens nobody asked for");
     ok(page._asked.some((k) => /^now\?/.test(k)) && !page._asked.some((k) => /^now\?.*strips/.test(k)), "THE HEARTBEAT OF A MEMBER WITH THE LENS OFF does not read live:strips, so that key cannot move the pill of a page that does not use it");
+await showTab(page, "#mktMovers");
     await page.click("#mktMovers .mk-lens .ui-seg-i:nth-child(3)");
     await page.waitForSelector("#mktMovers li[data-t]", { timeout: 15000 });
     await settle(page);

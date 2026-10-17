@@ -1,3 +1,4 @@
+import { showTab } from "./lib/market-fixtures.mjs";
 import assert from "node:assert/strict";
 import { lkMock } from "./lk-mock.mjs";
 import { readFileSync } from "node:fs";
@@ -760,11 +761,13 @@ try {
   const volLabel = () => page.evaluate(() => document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label"));
   ok(/contracts/.test(await volLabel()),
      "the volume module draws contracts by default — the unit its title and its P/C reading are in");
+await showTab(page, "#mkVolumeSeg");
   await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Premium" }).click();
   await page.waitForFunction(() => /premium/.test(document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label")),
     null, { timeout: 5000 }).catch(() => {});
   ok(/premium/.test(await volLabel()), "and draws premium one tap away, on the same session axis");
   eq(await page.locator("#mkVolume svg text.mk-vol-x").count(), totalsTicks.length, "with the same dated ticks");
+await showTab(page, "#mkVolumeSeg");
   await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Contracts" }).click();
 
   ok(/screened universe/i.test(read.foot),
@@ -1536,6 +1539,7 @@ try {
        "nothing the grid draws sits outside its own canvas: the hover frame used to be parked at (-99, -99), and a chart " +
        "svg lets overflow show, so it hung as a stray empty box above the first row until a pointer arrived");
     eq(first.framed, 0, "and no cell is framed before a pointer or a key has picked one");
+await showTab(pg, "#mkSeason");
     await pg.locator("#mkSeason svg").scrollIntoViewIfNeeded();
     const box = await pg.locator("#mkSeason svg").boundingBox();
     await pg.mouse.move(box.x + 60, box.y + 12);
@@ -1788,6 +1792,7 @@ try {
     deep(depth.tideTabs, ["Market", "0DTE", "SPY", "QQQ"],
       "a live market layer newer than the pulse gives the tide four views: the market, the zero-day, SPY and QQQ");
     eq(depth.tideNet, "+$240.0M", "and the market view's net is the live layer's, not the pulse's");
+await showTab(deepPage, "#mkTideSeg");
     await deepPage.locator("#mkTideSeg .ui-seg-i", { hasText: "0DTE" }).click();
     await deepPage.waitForFunction(() => /\+\$8\.0M/.test((document.querySelector("#mkTideLegs .ui-metric .ui-metric-v") || {}).textContent || ""),
       null, { timeout: 5000 }).catch(() => {});
@@ -1834,6 +1839,7 @@ try {
     deep(depth.radarRows.map((r) => r[1]), ["SOXS", "EEE"], "the rich screen lists the vendor's names in its order");
     deep(depth.radarRows[1], ["A", "EEE", "/flows/ticker/?t=EEE"], "and a name with a card today links to its reader");
     eq(depth.radarRows[0][0], "DIV", "while one without a card is plain");
+await showTab(deepPage, "#mkRadarSeg");
     await deepPage.locator("#mkRadarSeg .ui-seg-i", { hasText: "Bearish" }).click();
     await deepPage.waitForSelector("#mkRadar [data-empty]", { timeout: 5000 }).catch(() => {});
     const bearish = await silenceAt(deepPage, "#mkRadar [data-empty]");

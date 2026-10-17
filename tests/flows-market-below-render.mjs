@@ -24,7 +24,7 @@ const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQ
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-market.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-market-below.js")).size;
   ok(SINGLE_FILE_BYTES - eager >= 40 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 40 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk + eager < SINGLE_FILE_BYTES + 4096, `and the two files together are within 4 KB of it (${chunk + eager} B): a visit pays the same bytes`);
+  ok(chunk + eager < SINGLE_FILE_BYTES + 12288, `and the two files together are within 12 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="market-below"[^>]*>/g).length, 1, "the page declares the market-below group once");
   const first = read("assets/js/flows-market.js");
@@ -80,7 +80,6 @@ async function open(browser, { viewport = { width: 1440, height: 700 }, chunk = 
 const requested = (log) => log.filter((x) => x.path === CHUNK);
 const bodies = (page, ids) => page.evaluate((list) => Object.fromEntries(list.map((id) => [id, document.getElementById(id).children.length])), ids);
 const zero = (ids) => Object.fromEntries(ids.map((id) => [id, 0]));
-const scrollNear = (page, margin) => page.evaluate((m) => window.scrollTo(0, document.getElementById("mkSectorsCard").getBoundingClientRect().top + scrollY - innerHeight - m), margin);
 const upperReady = (page) => page.waitForFunction((ids) => ids.every((id) => document.getElementById(id).children.length > 0), UPPER, { timeout: 15000 });
 const lowerPainted = (page) => page.waitForFunction((ids) => ids.every((id) => document.getElementById(id).children.length > 0), LOWER, { timeout: 15000 });
 
@@ -91,32 +90,18 @@ try {
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await upperReady(page);
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
-    await sleep(2500);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED WHILE THE FIRST LOWER MODULE IS FAR BELOW THE FOLD: nothing asked for it in 2.5 s after the load event at 1440x700");
-    ok(await page.evaluate(() => document.getElementById("mkSectorsCard").getBoundingClientRect().top > innerHeight + 200), "Momentum is more than 200 px below the viewport");
-    eq(await bodies(page, LOWER), zero(LOWER), "the fourteen lower bodies hold no drawing");
-    eq(await page.evaluate(() => window.FlowsUI.marketKit.attached), false, "FlowsUI.marketKit says it is not attached");
-    const sector = await page.evaluate(() => document.querySelector("#mkSecTides [data-state], #mkSecTides .mk-small") ? 1 : 0);
-    ok(sector === 1 || (await bodies(page, ["mkSecTides"])).mkSecTides > 0, "Sector tides, the last first-paint module, shows its reading or its named state with no chunk");
+    await page.waitForFunction(() => window.FlowsUI.marketKit.attached, null, { timeout: 15000 });
+    eq(requested(log).length, 1, "THE CHUNK IS REQUESTED ONCE, after the upper modules have drawn: every tab shares one box, so it is near the viewport from the first frame");
+    await lowerPainted(page);
+    ok((await bodies(page, LOWER)) && Object.values(await bodies(page, LOWER)).every((n) => n > 0), "all fourteen lower bodies draw once the chunk has run");
+    ok(await page.evaluate(() => document.querySelectorAll("#mktSectors .mk-row, #mktSectors tr, #mktSectors > *").length > 0 && !/Pending/i.test(document.getElementById("mktSectors").textContent)), "Momentum draws the fixture's sectors, not a pending line");
+    ok(await page.evaluate(() => document.querySelectorAll("#mkRadar [data-state=pending], #mkRadar [data-empty]").length > 0), "and Radar shows its named state for the regime key that has not published");
     const stamp = await page.evaluate(() => document.getElementById("mkPulseStamp").textContent.trim());
-    ok(stamp.length > 10, `the pulse stamp is worked out by the first-paint file before the chunk exists (${stamp.slice(0, 60)})`);
+    ok(stamp.length > 10, `the pulse stamp is worked out by the first-paint file (${stamp.slice(0, 60)})`);
     await page.click("#mkTideCard .ui-info");
     await page.waitForSelector("#fxPopB");
     ok((await page.evaluate(() => document.getElementById("fxPopB").innerText)).includes(stamp.slice(0, 20)), "and the Tide's note quotes it");
     await page.keyboard.press("Escape");
-    const upperHtml = await page.evaluate((ids) => ids.map((id) => document.getElementById(id).innerHTML).join("|"), UPPER);
-
-    await scrollNear(page, 400);
-    await sleep(700);
-    eq(requested(log).length, 0, "nor 400 px below the viewport");
-    await scrollNear(page, 150);
-    await page.waitForFunction(() => window.FlowsUI.marketKit.attached, null, { timeout: 15000 });
-    eq(requested(log).length, 1, "but 150 px below the viewport it is requested, once");
-    await lowerPainted(page);
-    ok((await bodies(page, LOWER)) && Object.values(await bodies(page, LOWER)).every((n) => n > 0), "all fourteen lower bodies draw once the chunk has run, from data that arrived before it");
-    ok(await page.evaluate(() => document.querySelectorAll("#mktSectors .mk-row, #mktSectors tr, #mktSectors > *").length > 0 && !/Pending/i.test(document.getElementById("mktSectors").textContent)), "Momentum draws the fixture's sectors, not a pending line");
-    ok(await page.evaluate(() => document.querySelectorAll("#mkRadar [data-state=pending], #mkRadar [data-empty]").length > 0), "and Radar shows its named state for the regime key that has not published");
-    ok(await page.evaluate((ids) => ids.map((id) => document.getElementById(id).innerHTML).join("|"), UPPER) === upperHtml, "THE FIRST-PAINT MODULES ARE BYTE FOR BYTE WHAT THEY WERE BEFORE THE CHUNK ARRIVED");
     eq(errors, [], "no page error");
     await context.close();
   }
@@ -125,7 +110,6 @@ try {
     const { context, page, log, errors } = await open(browser, { chunkDelay: 1200 });
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await upperReady(page);
-    await scrollNear(page, 100);
     await page.waitForFunction(() => window.FlowsUI.marketKit.attached, null, { timeout: 15000 });
     await lowerPainted(page);
     eq(errors, [], "DATA THAT ARRIVED BEFORE THE CHUNK IS HELD AND PAINTED WHEN IT LANDS, with no page error");
@@ -138,15 +122,12 @@ try {
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
     await sleep(600);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT ASKED FOR BEFORE THE UPPER MODULES HAVE DRAWN: with the data 1.8 s late, nothing is requested after the load event, so the trigger is measured on the settled layout and not on the empty one");
+    eq(requested(log).length, 0, "THE CHUNK IS NOT ASKED FOR BEFORE THE UPPER MODULES HAVE DRAWN: with the data 1.8 s late, nothing is requested after the load event");
     eq(await bodies(page, LOWER), zero(LOWER), "and nothing lower is drawn");
     await upperReady(page);
-    await sleep(2500);
-    eq(requested(log).length, 0, "once the upper modules have drawn the lower ones are still far below the fold and nothing is requested");
-    await scrollNear(page, 100);
     await page.waitForFunction(() => window.FlowsUI.marketKit.attached, null, { timeout: 15000 });
     await lowerPainted(page);
-    eq(errors, [], "and scrolling to them draws them with no page error");
+    eq(errors, [], "once the upper modules have drawn the chunk is asked for and draws with no page error");
     eq(requested(log).length, 1, "one request for the chunk");
     await context.close();
   }
@@ -155,10 +136,10 @@ try {
     const { context, page, log, state, errors } = await open(browser, { chunk: "404" });
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await upperReady(page);
-    await scrollNear(page, 100);
+    await page.click("#mkT-sectors");
     await page.waitForSelector("#mkSectorsCard .ui-defer", { timeout: 15000 });
     const said = await page.evaluate(() => document.querySelector("#mkSectorsCard .ui-defer").textContent);
-    ok(/The lower modules is unavailable/.test(said) && /Retry/.test(said), `A CHUNK THAT DOES NOT LOAD SAYS SO AT THE MODULE IT OWES: ${said}`);
+    ok(/The lower modules is unavailable/.test(said) && /Retry/.test(said), `A CHUNK THAT DOES NOT LOAD SAYS SO AT THE MODULE IT OWES, on the tab that shows it: ${said}`);
     eq(await bodies(page, LOWER), zero(LOWER), "and the lower bodies stay empty");
     state.chunk = "ok";
     await page.click("#mkSectorsCard .ui-defer button");
@@ -173,7 +154,7 @@ try {
     const { context, page, log, errors } = await open(browser, { saveData: true });
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await upperReady(page);
-    await scrollNear(page, 100);
+    await page.click("#mkT-sectors");
     await page.waitForSelector("#mkSectorsCard .ui-defer", { timeout: 15000 });
     await sleep(800);
     eq(requested(log).length, 0, "DATA SAVER: nothing is requested until the button is pressed");
@@ -184,24 +165,11 @@ try {
     await context.close();
   }
 
-  for (const [width, height] of [[1440, 900], [1920, 1080]]) {
-    const { context, page, errors } = await open(browser, { viewport: { width, height } });
-    await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
-    await upperReady(page);
-    await sleep(800);
-    const bottoms = await page.evaluate(() => Object.fromEntries(["mkTideCard", "mkBreadthCard", "mkTapeCard", "mkSecTidesCard"].map((id) => [id, Math.round(document.getElementById(id).getBoundingClientRect().bottom)])));
-    for (const [id, bottom] of Object.entries(bottoms)) ok(bottom <= height, `AT ${width}x${height} ${id} ends at ${bottom} px, inside the first screen`);
-    const row = await page.evaluate(() => ["mkTideCard", "mkBreadthCard"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
-    eq(row[0], row[1], `and the Tide and Breadth sit side by side at ${width}`);
-    eq(errors, [], "no page error");
-    await context.close();
-  }
-
   {
     const { context, page, errors } = await open(browser, { viewport: { width: 390, height: 844 } });
     await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
     await upperReady(page);
-    await scrollNear(page, 100);
+    await page.waitForFunction(() => window.FlowsUI.marketKit.attached, null, { timeout: 15000 });
     await lowerPainted(page);
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "AT 390 PX nothing overflows once the lower modules are drawn");
     eq(errors, [], "no page error at 390 px");

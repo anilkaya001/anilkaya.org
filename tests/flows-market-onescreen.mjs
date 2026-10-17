@@ -26,8 +26,9 @@ const MEASURE = () => {
   const panels = [...document.querySelectorAll(".mk-panel")].map((p) => ({ k: p.dataset.panel, inert: p.inert, hidden: getComputedStyle(p).visibility === "hidden" }));
   const sel = [...document.querySelectorAll("#mkTabs [role=tab]")].filter((t) => t.getAttribute("aria-selected") === "true").map((t) => t.dataset.tab);
   const visibleMods = [...document.querySelectorAll(".mk-mod")].filter((m) => !m.closest("[inert]") && getComputedStyle(m).visibility !== "hidden" && m.getBoundingClientRect().height > 40).map((m) => m.id);
+  const painted = [...document.querySelectorAll(".mk-mod")].filter((m) => getComputedStyle(m).visibility !== "hidden" && m.getBoundingClientRect().height > 40).map((m) => m.id);
   const sub = document.getElementById("mkSub");
-  return { sh: d.scrollHeight, ih: innerHeight, sw: d.scrollWidth, iw: innerWidth, clip, panels, sel, view: document.getElementById("mkStage").dataset.view, hash: location.hash, visibleMods, subCount: sub ? sub.children.length : 0, subHidden: sub ? sub.hidden : true };
+  return { sh: d.scrollHeight, ih: innerHeight, sw: d.scrollWidth, iw: innerWidth, clip, panels, sel, view: document.getElementById("mkStage").dataset.view, hash: location.hash, visibleMods, painted, subCount: sub ? sub.children.length : 0, subHidden: sub ? sub.hidden : true };
 };
 
 async function sweep(page, label, { phone }) {
@@ -54,7 +55,7 @@ async function sweep(page, label, { phone }) {
       if (m.panels.some((p) => p.k !== t && !p.hidden)) bad.push(`${at}: an inactive panel is visible`);
       if (!m.visibleMods.length) bad.push(`${at}: no module is visible`);
       if (phone && mods.length > 1 && (m.subHidden || m.subCount !== mods.length)) bad.push(`${at}: the module switch is missing`);
-      if (phone && m.visibleMods.length !== 1) bad.push(`${at}: ${m.visibleMods.length} modules share the phone screen`);
+      if (phone && m.painted.length !== 1) bad.push(`${at}: ${m.painted.length} modules share the phone screen`);
       if (m.hash !== "#view=" + t) bad.push(`${at}: the address says ${m.hash}`);
     }
   }
