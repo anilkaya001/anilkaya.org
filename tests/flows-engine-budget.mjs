@@ -230,7 +230,7 @@ const bump = (job, trips, read, written) => {
     `the weekday's cron engines, driven for real, wrote ${engineWritten} rows and read ${engineRead} (upserts counted as reads), inside the declared ${declared.written} and ${declared.read}`);
   console.log(`  weekday cron engines, measured: ${engineWritten} rows written, ${engineRead} read; declared ceilings ${declared.written} and ${declared.read}`);
   const all = totals(rows);
-  ok(all.written < CAPS.written * 0.2 && all.read < CAPS.read * 0.2,
+  ok(all.written < CAPS.written * 0.3 && all.read < CAPS.read * 0.2,
     `with every other writer and reader declared the weekday is ${all.written} rows written (${(100 * all.written / CAPS.written).toFixed(1)}% of ${CAPS.written}) and ${all.read} read (${(100 * all.read / CAPS.read).toFixed(1)}% of ${CAPS.read})`);
 }
 

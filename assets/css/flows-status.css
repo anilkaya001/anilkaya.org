@@ -32,7 +32,8 @@
 .st-panel { height: 100%; min-height: 0; }
 .st-panel[hidden] { display: none; }
 .st-grid { height: 100%; display: grid; gap: var(--sp-3); grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
-.st-grid-coverage { grid-template-rows: minmax(0, 1fr); }
+.st-grid-coverage { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+#kNightCard { grid-row: span 2; }
 .st-card { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: 0; }
 .st-ch { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 44px; padding: 6px 12px 2px; }
 .st-ch h2 { margin: 0; font: 600 16px / 1.2 var(--font-text); letter-spacing: -0.01em; }
@@ -143,6 +144,7 @@
   .st-tabs { max-width: none; }
   .st-sub { display: block; }
   .st-grid, .st-grid-coverage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  #kNightCard { grid-row: auto; }
   .st-card:not(.is-on) { display: none; }
   .st-engs, .lt-feeds { grid-template-columns: minmax(0, 1fr); }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 0; }

@@ -192,6 +192,30 @@
       known ? gauge(used, cap, o.marks) : h("p", { class: "lt-none st-why1" }, DASH + " " + o.unread));
   }
 
+  function mixOf(meta) {
+    const v = meta && meta.vendor;
+    return v && Array.isArray(v.mix) && v.mix.length ? v.mix.filter((m) => m && typeof m.op === "string" && num(m.n) !== null) : null;
+  }
+
+  function mixLine(meta) {
+    if (!meta || !meta.generatedAt) return "Nightly call mix: " + DASH + " the nightly record was not read";
+    const mix = mixOf(meta);
+    if (!mix) return "Nightly call mix: " + DASH + " the last run recorded none (" + (meta.vendor ? "its record predates the mix" : "it made no vendor call") + ")";
+    return "Nightly call mix: " + mix.slice(0, 3).map((m) => m.op + " " + whole(m.n)).join(" · ") + " of " + whole(meta.vendor.n) + " attempts";
+  }
+
+  function paintMix(now) {
+    const host = $("stMix");
+    const meta = okBody("meta");
+    if (!meta) { unread(host, "The nightly record", whyOf("meta")); return; }
+    const mix = mixOf(meta);
+    if (!mix) { unread(host, "The call mix", meta.generatedAt ? "the last run recorded none: " + (meta.vendor ? "its record predates the mix" : "it made no vendor call") : "no run has been published yet"); return; }
+    const total = num(meta.vendor.n);
+    fill(host,
+      table("Nightly calls by operation", ["Operation", "Attempts", "Share", "Not 2xx"], mix.map((m) => [m.op, whole(m.n), total ? pctText(m.n / total) : DASH, whole(m.bad)]), true),
+      h("p", { class: "st-foot" }, "The eight most-called registered operations of the run that landed " + trt(meta.generatedAt, now) + ", counted per attempt including retries; the rest are not listed."));
+  }
+
   function sumVendor(now) {
     const host = $("cVendor");
     const ops = okBody("ops");
@@ -210,6 +234,7 @@
       }),
       bar("Rail, this minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, { format: whole, unit: "calls", unread: "the rail was not read: " + whyOf("rail") }),
       rows.length ? mini("Own engines today", ["Engine", "Calls counted"], rows, "engine counts") : line(DASH + " no ledger day, so the engines' own counts are not read"),
+      line(mixLine(okBody("meta"))),
       line("Cap: " + lineText(uw)));
   }
 
@@ -271,10 +296,11 @@
     sumLimits();
     paintMeters(now);
     paintConsumers(now);
+    paintMix(now);
     paintLimits();
     paintOutcomes();
     paintPlan();
-    for (const [id, key] of [["cVendor", "ops"], ["cAi", "ai"], ["cPlat", "ops"], ["cLimits", "ops"], ["stMeters", "ops"], ["stConsumers", "ops"], ["stLimits", "ops"], ["stOutcomes", "opsAi"], ["stPlan", "ops"], ["stAi", "ai"]]) {
+    for (const [id, key] of [["cVendor", "ops"], ["cAi", "ai"], ["cPlat", "ops"], ["cLimits", "ops"], ["stMeters", "ops"], ["stConsumers", "ops"], ["stMix", "meta"], ["stLimits", "ops"], ["stOutcomes", "opsAi"], ["stPlan", "ops"], ["stAi", "ai"]]) {
       const el = $(id + "Asof");
       const r = state().D[key];
       if (el) el.textContent = r && r.finished ? "read " + clockSec(r.finished) : "";

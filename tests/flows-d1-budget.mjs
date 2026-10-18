@@ -28,7 +28,7 @@ for (const r of PLANNED) ok(typeof r.row === "string" && r.row.length > 0 && typ
 for (const x of [TIER2, NIGHTLY, RAIL, MEMBERS, COLD_START]) ok(typeof x.source === "string" && x.source.length > 20, "a declared quantity says where its number comes from");
 
 const posts = Object.values(NIGHTLY.posts).reduce((a, b) => a + b, 0);
-eq(posts, 698, "the nightly writes about 700 keys: 171 cards, 333 card-x, 159 hist, 27 views and 8 deletes");
+eq(posts, 2303, "a full deepening night writes 2,303 keys: 706 cards, 868 card-x, 694 hist, 27 views and 8 deletes");
 eq(railLoads(), 192, "the rail loads its roster 192 times in a 16-hour demanded day");
 ok(MEASURED_CEILINGS.rosterRead >= 3 * 60, "and a load is priced for three boards of sixty names, not for the three index lookups of its statement");
 

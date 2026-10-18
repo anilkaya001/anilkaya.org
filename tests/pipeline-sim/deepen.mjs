@@ -2,6 +2,8 @@ import { world } from "./world.mjs";
 
 const LINE = Object.freeze({ day: 60000, minute: 500 });
 
+const CEILING = Object.freeze({ daySharePct: 0.85, timeSharePct: 0.8, minuteSharePct: 0.8, hardCap: 900, deadlineMs: 90 * 60 * 1000, overrunMargin: 0.1 });
+
 const pad3 = (n) => String(n % 1000).padStart(3, "0");
 
 const nameOf = (i) => "SY" + String.fromCharCode(65 + (Math.floor(i / 1000) % 26)) + pad3(i);
@@ -24,6 +26,10 @@ export async function deepenScenario(seed, mod, opts = {}) {
   const w = world(seed, "deepen");
   const ok = (condition, message) => (condition ? (w.checks++, true) : w.check(false, typeof message === "function" ? message() : message));
   const D = mod.DEEPEN;
+  w.check(D.daySharePct <= CEILING.daySharePct && D.timeSharePct <= CEILING.timeSharePct && D.minuteSharePct <= CEILING.minuteSharePct,
+    `the shares (day ${D.daySharePct}, time ${D.timeSharePct}, minute ${D.minuteSharePct}) are inside the registered ceilings`);
+  w.check(D.hardCap <= CEILING.hardCap && D.deadlineMs <= CEILING.deadlineMs && D.overrunMargin >= CEILING.overrunMargin,
+    `the hard cap ${D.hardCap}, the deadline ${D.deadlineMs} and the overrun margin ${D.overrunMargin} are inside the registered bounds`);
   const N = opts.names || 60 + w.int(240);
   const cap = w.pick([undefined, 80, 80, 40, 24, 120, 5000]);
   const crossCount = Math.min(N, 20 + w.int(100));
@@ -41,7 +47,7 @@ export async function deepenScenario(seed, mod, opts = {}) {
   const start = "2026-10-05";
   const backlog = N - boardSize;
   const perNight = Math.min(cap === undefined ? D.perNightCap : cap, D.hardCap, D.perNightCap * 3);
-  const nights = 3 * Math.ceil(backlog / Math.max(1, Math.min(perNight, 80))) + 30;
+  const nights = 3 * Math.ceil(backlog / Math.max(1, Math.min(perNight, 400))) + 30;
   const days = weekdays(start, nights);
   for (const t of cross) store.set(t, { depth: "cross-section", session: "2026-10-02" });
 
@@ -62,6 +68,7 @@ export async function deepenScenario(seed, mod, opts = {}) {
     if (mode === "off") offNights++;
     const heavy = w.chance(0.06);
     const callsSoFar = heavy ? w.int(30000) : 800 + w.int(1700);
+    const dailySeen = w.chance(0.5) ? null : callsSoFar + w.int(heavy ? 25000 : 12000);
     const elapsedMs = heavy ? w.int(40 * 60 * 1000) : 60000 + w.int(60000);
     const board = new Set(names.filter((t) => !poison.has(t) && w.chance(boardSize / N)).slice(0, boardSize));
     const lost = new Set([...store.keys()].filter(() => w.chance(0.01)));
@@ -73,7 +80,7 @@ export async function deepenScenario(seed, mod, opts = {}) {
     const capNow = mod.capFromEnv(env, D.perNightCap);
     const plan = mod.planNight({
       mode, cap: capNow, payload, readable, sessionDate, rows, board, rosterKnown,
-      dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar, elapsedMs,
+      dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar, dailySeen, elapsedMs,
     });
     const gov = plan.gov;
     const picked = plan.picked.picked;
@@ -104,8 +111,7 @@ export async function deepenScenario(seed, mod, opts = {}) {
     if (mode === "off") w.check(picked.length === 0, `${sessionDate}: the switch off chooses nothing`);
     if (!readable) w.check(picked.length === 0, `${sessionDate}: an unreadable ledger chooses nothing blind`);
     if (picked.length) {
-      const remainingCalls = Math.max(D.baselineCalls - callsSoFar, 0);
-      const projected = callsSoFar + remainingCalls * (1 + D.overrunMargin) + picked.length * D.callsPerName;
+      const projected = Math.max(callsSoFar, dailySeen || 0, D.baselineCalls) + D.baselineCalls * D.overrunMargin + picked.length * D.callsPerName;
       w.check(projected <= LINE.day * D.daySharePct + 1e-6, `${sessionDate}: ${picked.length} name(s) keep the night's calls (${Math.round(projected)}) inside ${D.daySharePct} of the day line`);
       const remainingMs = Math.max(D.baselineMs - elapsedMs, 0);
       const finish = elapsedMs + remainingMs + picked.length * D.msPerName;
@@ -116,13 +122,13 @@ export async function deepenScenario(seed, mod, opts = {}) {
 
     let last = Infinity;
     for (const extra of [0, 500, 1500, 4000, 9000, 20000]) {
-      const g = mod.governor({ mode: "on", cap: capNow, backlog: plan.candidates, dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar: callsSoFar + extra, elapsedMs });
+      const g = mod.governor({ mode: "on", cap: capNow, backlog: plan.candidates, dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar: callsSoFar + extra, dailySeen: dailySeen === null ? null : dailySeen + extra, elapsedMs });
       w.check(g.n <= last, `${sessionDate}: spending ${extra} more calls never widens the rotation (${g.n} after ${last})`);
       last = g.n;
     }
     last = Infinity;
     for (const extra of [0, 60000, 300000, 600000, 1200000, 2400000]) {
-      const g = mod.governor({ mode: "on", cap: capNow, backlog: plan.candidates, dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar, elapsedMs: elapsedMs + extra });
+      const g = mod.governor({ mode: "on", cap: capNow, backlog: plan.candidates, dayLine: LINE.day, minuteLine: LINE.minute, callsSoFar, dailySeen, elapsedMs: elapsedMs + extra });
       w.check(g.n <= last, `${sessionDate}: ${extra} ms more elapsed never widens the rotation (${g.n} after ${last})`);
       last = g.n;
     }
@@ -156,7 +162,12 @@ export async function deepenScenario(seed, mod, opts = {}) {
         sessionDate, generatedAt: sessionDate + "T21:30:00Z",
         landed: new Set([...deepNow, ...settled.landed]), failed: settled.failed, universe,
         plan: { n: picked.length, binding: gov.binding, never: plan.picked.never },
+        usage: { calls: callsSoFar, dailySeen, dayLine: LINE.day, minuteLine: LINE.minute },
       });
+      const sum = out.payload.summary;
+      w.check(sum && sum.carded === out.payload.names && sum.tonight <= sum.carded && sum.planned === picked.length && (sum.universe === null || sum.universe === N),
+        `${sessionDate}: the ledger summary counts what the ledger holds`);
+      w.check(sum.oldest === null || sum.oldest <= sessionDate, `${sessionDate}: the oldest read on the summary is not in the future`);
       w.check(out.fits, `${sessionDate}: the ledger (${out.bytes} bytes) fits its ${D.ledgerBudgetBytes} byte budget`);
       if (out.fits) { ledgerStored = JSON.stringify(out.payload); ledgerWrites++; }
     }

@@ -48,6 +48,7 @@ export const RAIL = {
 export const META = {
   generatedAt: "2026-10-12T00:30:00.000Z", sessionDate: "2026-10-09", universe: 670, cardsBuilt: 500, cardsFailed: 2, cardsSkipped: 8, apiCalls: 4100,
   health: { failures: 1, warnings: 2, first: ["cards: 2 failed"] },
+  vendor: { n: 24100, ms: 9e6, kb: 90000, bad: 40, slowest: [], mix: [{ op: "option-contracts", n: 9800, bad: 12 }, { op: "ohlc-1d", n: 5200, bad: 3 }, { op: "flow-per-strike", n: 3100, bad: 0 }, { op: "stock-state", n: 1500, bad: 25 }] },
   callStats: { retries: 14, rateLimited: 2, failures: 1, timedOut: 0, networkMs: 810000, permitWaitMs: 12000, rateLimitWaitMs: 3000 },
   stages: [
     { id: "universe", status: "ok", ms: 4200, calls: 12, keys: 1, cpu: 900 },
@@ -97,7 +98,7 @@ function ledgerRow(over = {}) {
   };
 }
 
-const COVERAGE_ROWS = [
+export const COVERAGE_ROWS = [
   { id: "universe", updated_at: NOW - 66e5, bytes: 100609, session: "2026-10-09" },
   { id: "meta", updated_at: NOW - 66e5, bytes: 9400, session: "2026-10-09" },
   { id: "board:long", updated_at: NOW - 66e5, bytes: 61800, session: "2026-10-09" },
@@ -107,6 +108,8 @@ const COVERAGE_ROWS = [
   { id: "political", updated_at: NOW - 66e5, bytes: 30400, session: "2026-10-08" },
   { id: "unusual", updated_at: NOW - 66e5, bytes: 51200, session: null },
   { id: "regime", updated_at: NOW - 66e5, bytes: 3100, session: "2026-10-09" },
+  { id: "deepen", updated_at: NOW - 66e5, bytes: 30720, session: "2026-10-09",
+    summary: JSON.stringify({ carded: 612, universe: 856, tonight: 530, oldest: "2026-10-05", planned: 530, read: 530, calls: 24100, dailySeen: 31200, dayLine: 60000, minuteLine: 500 }) },
 ];
 
 export function opsFor(over = {}, { part = null } = {}) {

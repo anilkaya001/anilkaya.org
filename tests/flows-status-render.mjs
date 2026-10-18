@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { chromium } from "playwright";
-import { ROOT, NOW, RAIL, world, serve, opsFor } from "./lib/status-world.mjs";
+import { ROOT, NOW, RAIL, world, serve, opsFor, COVERAGE_ROWS } from "./lib/status-world.mjs";
 import { COVERAGE_KEYS } from "../server/ops.js";
 
 let checks = 0;
@@ -22,7 +22,7 @@ const ROUTES = {
 const READY_ASOF = { health: "#hEngAsof", capacity: "#cVendorAsof", latency: "#lFeedsAsof", coverage: "#kStoreAsof" };
 const ALLOWED = /^\/api\/(rt\/status|flows\/(ops|lk|meta|ready|ai-usage))/;
 const VIEWPORTS = [[1440, 820], [1024, 768], [390, 844]];
-const SHOWN = { health: ["hEng", "hRail", "hNight", "hSw"], capacity: ["cVendor", "cAi", "cPlat", "cLimits"], latency: ["lFeeds", "stSession", "lStored", "lTime"], coverage: ["kStore", "kNight"] };
+const SHOWN = { health: ["hEng", "hRail", "hNight", "hSw"], capacity: ["cVendor", "cAi", "cPlat", "cLimits"], latency: ["lFeeds", "stSession", "lStored", "lTime"], coverage: ["kStore", "kNight", "kDeep"] };
 
 async function open(browser, { width = 1440, height = 820, view = "health", map = world(), serveOpts = {}, mutate = null, pause = false } = {}) {
   const page = await browser.newPage({ viewport: { width, height } });
@@ -169,6 +169,7 @@ try {
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+21,400 of 60,000 calls · 36%/.test(cv) && /Rail, this minute\s+26 of 240 calls · 11%/.test(cv), "vendor calls against the advisory day line and the rail's minute: " + cv.slice(0, 400));
     ok(/Cap: 60,000 per day/.test(cv), "the cap line carries its plan and source");
+    ok(/Nightly call mix: option-contracts 9,800 \u00b7 ohlc-1d 5,200 \u00b7 flow-per-strike 3,100 of 24,100 attempts/.test(cv), "the nightly call mix by operation: " + cv.slice(0, 600));
     const ai = await text(page, "#cAi");
     ok(/Neurons today\s+14,900 of 30,000 neurons · 50%/.test(ai) && /Calls today\s+268 of 2,500 calls · 11%/.test(ai), "model use against the enforced cap, not the free allowance: " + ai.slice(0, 400));
     ok(/Beyond the free allowance: 4,900 neurons, about \$0\.054/.test(ai) && /readings stop at 22,500/.test(ai), "the allowance excess in dollars and where readings stop");
@@ -187,6 +188,7 @@ try {
     await page.click("#cVendorCard .st-more");
     await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
     const cons = await text(page, "#cVendorDlg");
+    ok(/option-contracts\s+9,800\s+41%\s+12/.test(cons) && /stock-state\s+1,500\s+6\.2%\s+25/.test(cons), "the call mix detail lists each operation with its share and failures: " + cons.slice(0, 900));
     ok(/Nightly run\s+4,100/.test(cons) && /Tier 1 \(Worker\)\s+366/.test(cons) && /Everything else on the key\s+15,889/.test(cons), "vendor calls by consumer, the remainder worked from the vendor's count: " + cons.slice(0, 500));
     await page.keyboard.press("Escape");
     await page.click("#cPlatCard .st-more");
@@ -229,11 +231,18 @@ try {
   {
     const { page } = await open(browser, { view: "coverage" });
     const st = await text(page, "#kStore");
-    ok(new RegExp("9 of " + COVERAGE_KEYS.length + " expected keys present · 371\\.3 KiB stored · 1 behind the nightly session 2026-10-09").test(st), "payload store headline: " + st.slice(0, 300));
+    ok(new RegExp("10 of " + COVERAGE_KEYS.length + " expected keys present · 401\\.3 KiB stored · 1 behind the nightly session 2026-10-09").test(st), "payload store headline: " + st.slice(0, 300));
     ok(/universe\s+98\.3 KiB\s+98%\s+19:51 TRT/.test(st), "the largest key against the 100 KiB budget, written time in TRT");
     ok(/Missing: board:watch/.test(st), "the missing keys are named");
     const nc = await text(page, "#kNight");
     ok(/Names in the universe\s+670/.test(nc) && /Cards built\s+500 \(75% of the universe\)/.test(nc) && /Health gate\s+1 failures, 2 warnings/.test(nc), "nightly coverage: " + nc.slice(0, 400));
+    const kd = await text(page, "#kDeep");
+    ok(/Names with a deep read\s+612 of 856 \(71%\)/.test(kd) && /Oldest deep read\s+2026-10-05/.test(kd) && /Tonight, planned and read\s+530 planned, 530 read/.test(kd), "rotation card: " + kd.slice(0, 400));
+    ok(/Vendor calls, this run\s+24,100/.test(kd) && /Vendor calls, the key today\s+31,200 of 60,000 \(52%\)/.test(kd), "rotation calls against the day line: " + kd.slice(0, 500));
+    await page.click("#kDeepCard .st-more");
+    await page.waitForFunction(() => document.getElementById("kDeepDlg").open);
+    ok(/Ledger session\s+2026-10-09/.test(await text(page, "#kDeepDlg")), "the detail keeps every figure");
+    await page.keyboard.press("Escape");
     await page.click("#kStoreCard .st-more");
     await page.waitForFunction(() => document.getElementById("kStoreDlg").open);
     const all = await text(page, "#kStoreDlg");
@@ -251,6 +260,16 @@ try {
     const { page } = await open(browser, { view: "coverage", map });
     ok(/was not read: the store could not be read/.test(await text(page, "#kStore")), "an unreadable store is a dash with the reason, never an empty table");
     await page.close();
+    const noLedger = world();
+    noLedger["/api/flows/ops?part=coverage"] = { body: opsFor({ coverage: COVERAGE_ROWS.filter((r) => r.id !== "deepen") }, { part: "coverage" }) };
+    const nl = await open(browser, { view: "coverage", map: noLedger });
+    ok(/was not read: the ledger has never been written/.test(await text(nl.page, "#kDeep")), "a rotation with no ledger is a dash with its reason");
+    await nl.page.close();
+    const bare = world();
+    bare["/api/flows/ops?part=coverage"] = { body: opsFor({ coverage: COVERAGE_ROWS.map((r) => (r.id === "deepen" ? { ...r, summary: null } : r)) }, { part: "coverage" }) };
+    const bl = await open(browser, { view: "coverage", map: bare });
+    ok(/the ledger carries no summary yet/.test(await text(bl.page, "#kDeep")), "a ledger from before the summary is a dash with its reason");
+    await bl.page.close();
     const map2 = world();
     fail(map2, "/api/flows/ops?part=coverage", 404, "ops_off");
     const b = await open(browser, { view: "coverage", map: map2 });

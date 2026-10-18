@@ -17,7 +17,8 @@ const INGEST_META_SQL =
   "FROM flows_payload WHERE id IN (";
 
 export const coverageSql = (keys) => "SELECT id, updated_at, length(payload) AS bytes, " +
-  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionDate') END AS session " +
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionDate') END AS session, " +
+  "CASE WHEN id = 'deepen' AND json_valid(payload) THEN json_extract(payload, '$.summary') END AS summary " +
   "FROM flows_payload WHERE id IN (" + keys.map((k) => `'${k}'`).join(", ") + ")";
 
 const ARCHIVE_INSERT_SQL =

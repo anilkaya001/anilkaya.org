@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       deepen_cap:
-        description: "Names the deepening rotation may read in full tonight; 0 skips it for this run, blank uses the repository variable FLOWS_DEEPEN_CAP or the default"
+        description: "Names the deepening rotation may read in full tonight; 0 skips it for this run, blank uses the repository variable FLOWS_DEEPEN_CAP or the default (530; hard ceiling 900)"
         type: string
         required: false
         default: ""
@@ -41,7 +41,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     permissions:
       contents: read
       issues: write

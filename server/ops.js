@@ -25,7 +25,7 @@ export const RATE_LIMITS = Object.freeze([
   Object.freeze({ name: "LAB_WRITE", limit: 30, periodS: 60 }),
 ]);
 
-export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion"])]);
+export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion", "deepen"])]);
 
 const LIVE_IDS = Object.freeze(Object.keys(LIVE_KEYS));
 
@@ -146,12 +146,29 @@ export function opsStatements(env, now, { part = null } = {}) {
   return out;
 }
 
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function rotationView(row) {
+  if (!row) return { present: false, why: "the ledger has never been written" };
+  let sum = null;
+  try { sum = typeof row.summary === "string" ? JSON.parse(row.summary) : row.summary; } catch { sum = null; }
+  if (!sum || typeof sum !== "object" || Array.isArray(sum)) return { present: true, summary: false, why: "the ledger carries no summary yet" };
+  const n = (v) => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+  return {
+    present: true, summary: true, session: typeof row.session === "string" ? row.session : null,
+    carded: n(sum.carded), universe: n(sum.universe), tonight: n(sum.tonight), planned: n(sum.planned), read: n(sum.read),
+    oldest: typeof sum.oldest === "string" && DAY_RE.test(sum.oldest) ? sum.oldest : null,
+    calls: n(sum.calls), dailySeen: n(sum.dailySeen), dayLine: n(sum.dayLine), minuteLine: n(sum.minuteLine),
+  };
+}
+
 export function coverageView(rows) {
   const list = rowsOf({ results: rows });
   if (!list) return null;
   const byId = new Map(list.map((r) => [r.id, r]));
   return {
     budgetBytes: UNIVERSE_BUDGET_BYTES,
+    rotation: rotationView(byId.get("deepen")),
     keys: COVERAGE_KEYS.map((key) => {
       const r = byId.get(key);
       if (!r) return { key, present: false };

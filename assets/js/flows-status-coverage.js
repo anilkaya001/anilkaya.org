@@ -16,6 +16,35 @@
     return chip("fresh", k.session);
   }
 
+  function rotation(now) {
+    const r = state().D.cover;
+    const short = $("kDeep");
+    const full = $("stDeep");
+    const dash = (why) => {
+      unread(short, "The deepening ledger", why);
+      unread(full, "The deepening ledger", why);
+    };
+    if (!r || !r.ok) { dash(r ? r.reason : "no read yet"); return; }
+    if (!r.body.coverage) { dash("the answer carried no coverage"); return; }
+    const x = r.body.coverage.rotation;
+    if (!x) { dash("the answer carried none"); return; }
+    if (!x.present || !x.summary) { dash(x.why); return; }
+    const share = num(x.carded) !== null && num(x.universe) ? x.carded / x.universe : null;
+    const usedShare = num(x.dailySeen) !== null && num(x.dayLine) ? x.dailySeen / x.dayLine : null;
+    const rows = [
+      ["Names with a deep read", num(x.carded) === null ? DASH : whole(x.carded) + (num(x.universe) ? " of " + whole(x.universe) + " (" + pctOf(share) + ")" : " (" + DASH + " universe size not recorded)")],
+      ["Oldest deep read", x.oldest || DASH + " no read on record"],
+      ["Tonight, planned and read", num(x.planned) === null ? DASH + " not recorded" : whole(x.planned) + " planned, " + (num(x.read) === null ? DASH + " not recorded" : whole(x.read)) + " read"],
+      ["Vendor calls, this run", num(x.calls) === null ? DASH + " not recorded" : whole(x.calls)],
+      ["Vendor calls, the key today", num(x.dailySeen) === null ? DASH + " the vendor's counter was not read" : whole(x.dailySeen) + (num(x.dayLine) ? " of " + whole(x.dayLine) + " (" + pctOf(usedShare) + ")" : "")],
+      ["Ledger session", x.session || DASH + " unstamped"],
+    ];
+    fill(short, mini("Deepening rotation", ["Measure", "Reading"], rows, "figures"),
+      line("Names are read in turn: never read first, then the oldest read."));
+    fill(full, table("Deepening rotation", ["Measure", "Reading"], rows, true),
+      h("p", { class: "st-foot" }, "Written by the nightly into the deepen ledger. The day line is the plan's working line; the key's count includes every caller. Calls for this run are attempts including retries. A figure the ledger did not record is a dash, not zero."));
+  }
+
   function coverage() {
     const r = state().D.cover;
     const meta = okBody("meta");
@@ -70,7 +99,8 @@
         hl && Array.isArray(hl.first) && hl.first.length ? h("ul", { class: "st-lines" }, ...hl.first.slice(0, 2).map((t) => h("li", null, String(t)))) : null,
         line("Per-name coverage is the nightly's own count; this page reads no card rows."));
     }
-    for (const [id, key] of [["kStore", "cover"], ["stCover", "cover"], ["kNight", "meta"]]) {
+    rotation(now);
+    for (const [id, key] of [["kStore", "cover"], ["stCover", "cover"], ["kNight", "meta"], ["kDeep", "cover"], ["stDeep", "cover"]]) {
       const el = $(id + "Asof");
       const x = state().D[key];
       if (el) el.textContent = x && x.finished ? "read " + clockSec(x.finished) : "";

@@ -1581,6 +1581,8 @@ ranking that looks complete.
 
 ### 10.5c The deadline, and why it is 36 minutes
 
+Superseded 2026-10-18: `DEADLINE_MS` is 90 minutes and the nightly job's `timeout-minutes` 120, sized with the deepening rotation (docs/deepening.md, "Sizing"). The reasoning below is the history of the 36 minutes.
+
 `DEADLINE_MS` was 30 minutes until 2026-08-26 and it was BINDING — on the
 wrong leg, which is why nothing looked wrong.
 

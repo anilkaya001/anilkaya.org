@@ -28,7 +28,7 @@ export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs =
 }
 
 export const stats = {
-  calls: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
+  calls: 0, dailySeen: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
 
   permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
 };
@@ -269,6 +269,8 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     landed();
     wireProgress.settled();
     const declared = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("content-length")) : NaN;
+    const seenDaily = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("x-uw-daily-req-count")) : NaN;
+    if (Number.isSafeInteger(seenDaily) && seenDaily > stats.dailySeen) stats.dailySeen = seenDaily;
     const noteWire = () => wire.record({ path, ms: Date.now() - wireStarted, status: response.status, bytes: declared });
 
     if (response.status === 429) {
