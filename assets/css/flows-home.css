@@ -261,7 +261,7 @@ a.hm-count:hover { color: var(--label-1); background: var(--fill-4); }
 .hm-qhead.is-2 { display: none; }
 .hm-qiv { color: var(--label-2); }
 .hm-qd { color: var(--tone, var(--label-2)); font: var(--t-footnote); font-weight: 500; }
-.hm-qd-e { margin-left: 2px; color: var(--label-3); font-size: 9px; font-weight: 600; }
+.hm-qd-e { display: inline-block; width: 6px; height: 6px; margin-left: 4px; border: 1.5px solid var(--label-3); border-radius: 50%; vertical-align: middle; }
 @container mod (min-width: 960px) {
   .hm-qlist {
     display: grid;

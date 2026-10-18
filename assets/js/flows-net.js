@@ -396,6 +396,7 @@
       const at = S.readAt ? F.time(S.readAt) : null;
       pill.dataset.state = st;
       pill.replaceChildren(UI.glyph(def.g), h("span", { class: "fx-fresh-l" }, at ? h("span", { class: "fn-fw" }, word + " " + MID + " ") : word, at));
+      pill.title = st === "stale" ? "The page's freshness verdict. Open the pill in the header to see which feed is past its line." : "";
       pill.setAttribute("aria-label", "Freshness of the flagged windows: " + def.word + (at ? ", read " + at : ""));
     }
     const fx = document.getElementById("fxFresh");
