@@ -1975,9 +1975,16 @@ class FakeCache {
   const brief = await timed("/api/flows/brief");
   ok(brief.res.status === 200 && brief.trips.length === 2, "THE BRIEF STILL READS ITS ROW AND THE FOUR LIVE FEEDS: two statements-groups, five rows");
   ok(brief.ms < 40 * 2 * 0.85 + 30, `and the two trips overlap, so the read waits one hop and not two (${brief.ms.toFixed(0)} ms at 40 ms a trip)`);
+  const spendDay = new Date().toISOString().slice(0, 10);
+  f.db.prepare("INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 7, 1200, 340)").run(spendDay);
+  f.db.prepare("INSERT INTO flows_ai_usage_model (day, model, calls, tokens_in, tokens_out) VALUES (?, 'm-seeded', 7, 1200, 340)").run(spendDay);
   const usage = await timed("/api/flows/ai-usage");
   ok(usage.res.status === 200 && usage.trips.length === 1 && usage.trips[0].kind === "batch" && usage.trips[0].sqls.length === 2,
     "AI USAGE IS ONE BATCH of the day's total and its split, not two sequential trips");
+  ok(usage.body.spend.calls === 7 && usage.body.spend.tokensIn === 1200 && usage.body.spend.tokensOut === 340,
+    "and the batch's total row is what the answer carries, not a zero");
+  ok(Array.isArray(usage.body.spend.byModel) && usage.body.spend.byModel.length === 1 && usage.body.spend.byModel[0].model === "m-seeded" && usage.body.spend.byModel[0].calls === 7,
+    "and its split row is the model line the answer carries");
   f.fail(/FROM flows_ai_usage_model/);
   const failed = await timed("/api/flows/ai-usage");
   ok(failed.res.status === 200 && failed.body.spend && failed.body.spend.calls === 0, "and a store fault is still a 200 with the lenient shape, not a 500");

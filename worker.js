@@ -1217,10 +1217,10 @@ async function askSpend(env) {
   if (!env.DB) return null;
   await ensureFlowsTables(env);
   const day = aiDay();
-  const [row0, split0] = await env.DB.batch([
+  const [row0, split0] = await Promise.resolve().then(() => env.DB.batch([
     env.DB.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?").bind(day),
     env.DB.prepare("SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ? ORDER BY model").bind(day),
-  ]).catch(() => [null, null]);
+  ])).catch(() => [null, null]);
   const row = row0 && Array.isArray(row0.results) ? row0.results[0] || null : null;
   const split = split0;
 
