@@ -19,9 +19,9 @@ in `tests/suites/<name>.json` name it, from those files' own fields; `**` covers
 - [flows-server](#flows-server): Flows logic shared by the Worker, the pipeline and the browser bundles (135 files)
 - [flows-rail](#flows-rail): The real-time rail (5 files)
 - [flows-pipeline](#flows-pipeline): The nightly pipeline, the live leg and their tools (58 files)
-- [flows-client](#flows-client): Flows pages, scripts and styles (80 files)
+- [flows-client](#flows-client): Flows pages, scripts and styles (82 files)
 - [tooling](#tooling): Generators and authoring tools (31 files)
-- [tests](#tests): Suites, helpers and fixtures (315 files)
+- [tests](#tests): Suites, helpers and fixtures (316 files)
 - [ci](#ci): GitHub Actions workflows (12 files)
 - [config](#config): Repository configuration (3 files)
 - [docs](#docs): Documents and the generated index (8 files)
@@ -172,7 +172,7 @@ Defensive HMAC-SHA256 session sign/verify and cookie helpers.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/session.js` | `shared/session.js#cookie`, `shared/session.js#fromB64url`, `shared/session.js#getCookie`, `shared/session.js#signSession`, `shared/session.js#verifySession` | academy, browser, contracts, flows, flows-ai-broker, flows-alerts and 61 more |
+| `shared/session.js` | `shared/session.js#cookie`, `shared/session.js#fromB64url`, `shared/session.js#getCookie`, `shared/session.js#signSession`, `shared/session.js#verifySession` | academy, browser, contracts, flows, flows-ai-broker, flows-alerts and 62 more |
 
 ### `shared/lab-sign-in.js`
 
@@ -180,7 +180,7 @@ The Lab session lifetime, the OAuth callback's `users` upsert (`created_at` once
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/lab-sign-in.js` | `shared/lab-sign-in.js#LAB_ACTIVITY`, `shared/lab-sign-in.js#LAB_SESSION_MS`, `shared/lab-sign-in.js#LEGACY_SIGN_IN_SQL`, `shared/lab-sign-in.js#SIGNED_IN_COLUMN_SQL`, `shared/lab-sign-in.js#SIGN_IN_SQL`, `shared/lab-sign-in.js#readLabActiveAt`, `shared/lab-sign-in.js#recordSignIn` | academy, flows, flows-ai-broker, flows-alerts, flows-ask, flows-basis and 38 more |
+| `shared/lab-sign-in.js` | `shared/lab-sign-in.js#LAB_ACTIVITY`, `shared/lab-sign-in.js#LAB_SESSION_MS`, `shared/lab-sign-in.js#LEGACY_SIGN_IN_SQL`, `shared/lab-sign-in.js#SIGNED_IN_COLUMN_SQL`, `shared/lab-sign-in.js#SIGN_IN_SQL`, `shared/lab-sign-in.js#readLabActiveAt`, `shared/lab-sign-in.js#recordSignIn` | academy, flows, flows-ai-broker, flows-alerts, flows-ask, flows-basis and 39 more |
 
 ### `shared/course-points.js`
 
@@ -534,7 +534,7 @@ The Worker-only HTTP kernel. `http.js`: `HttpError` (with `HttpError.of(code, me
 | `server/errors.js` | `server/errors.js#ERRORS`, `server/errors.js#errorEntry` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 20 more |
 | `server/http.js` | `server/http.js#HttpError`, `server/http.js#MAX_JSON_BYTES`, `server/http.js#apiError`, `server/http.js#edgeCache`, `server/http.js#errorText`, `server/http.js#fixtureRefused`, `server/http.js#internalKey`, `server/http.js#json`, `server/http.js#keepAlive`, `server/http.js#readBounded`, `server/http.js#readJSON`, `server/http.js#redirect`, `server/http.js#requireMethod`, `server/http.js#requireMutationOwner`, `server/http.js#requireReadOwnerIfPresent`, `server/http.js#requireSameOrigin`, `server/http.js#requireTicker`, `server/http.js#tickerParam` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 20 more |
 | `server/log.js` | `server/log.js#failureEntry`, `server/log.js#failureLine`, `server/log.js#logFailure` | flows, flows-basis, flows-door-v2, flows-dossier-reads, flows-engine-budget, flows-ledger and 7 more |
-| `shared/flows-log.js` | `shared/flows-log.js#emitFailure`, `shared/flows-log.js#errorText`, `shared/flows-log.js#failureEntry`, `shared/flows-log.js#failureLine` | academy, contracts, fixture-guard, flows, flows-ai-broker, flows-alerts and 73 more |
+| `shared/flows-log.js` | `shared/flows-log.js#emitFailure`, `shared/flows-log.js#errorText`, `shared/flows-log.js#failureEntry`, `shared/flows-log.js#failureLine` | academy, contracts, fixture-guard, flows, flows-ai-broker, flows-alerts and 74 more |
 | `tests/server-kernel.mjs` |  | server-kernel |
 | `tests/server-log.mjs` |  | server-log |
 
@@ -703,7 +703,7 @@ The Türkiye-time oracle, a leaf over `flows-freshness.js` alone. TRT is fixed U
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-time.js` | `shared/flows-time.js#TRT_LABEL`, `shared/flows-time.js#TRT_OFFSET_MIN`, `shared/flows-time.js#axisMinutes`, `shared/flows-time.js#boundaries`, `shared/flows-time.js#clock`, `shared/flows-time.js#day`, `shared/flows-time.js#instantOf`, `shared/flows-time.js#nextOpenSaid`, `shared/flows-time.js#phaseSaid`, `shared/flows-time.js#sessionSaid`, `shared/flows-time.js#stamp`, `shared/flows-time.js#tick`, `shared/flows-time.js#when` | academy, contracts, fixture-guard, flows, flows-ai-broker, flows-ai-salvage and 82 more |
+| `shared/flows-time.js` | `shared/flows-time.js#TRT_LABEL`, `shared/flows-time.js#TRT_OFFSET_MIN`, `shared/flows-time.js#axisMinutes`, `shared/flows-time.js#boundaries`, `shared/flows-time.js#clock`, `shared/flows-time.js#day`, `shared/flows-time.js#instantOf`, `shared/flows-time.js#nextOpenSaid`, `shared/flows-time.js#phaseSaid`, `shared/flows-time.js#sessionSaid`, `shared/flows-time.js#stamp`, `shared/flows-time.js#tick`, `shared/flows-time.js#when` | academy, contracts, fixture-guard, flows, flows-ai-broker, flows-ai-salvage and 83 more |
 | `tests/flows-time.mjs` |  | flows-time |
 
 ### `shared/flows-freshness.js`
@@ -712,7 +712,7 @@ The Eastern clock (arithmetic, proven equal to the IANA zone), market phases, th
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-freshness.js` | `shared/flows-freshness.js#FRESH_CLASSES`, `shared/flows-freshness.js#LIVE_CLOCK`, `shared/flows-freshness.js#PHASE_MINUTES`, `shared/flows-freshness.js#REFRESH_CADENCE_MINUTES`, `shared/flows-freshness.js#classOf`, `shared/flows-freshness.js#clockClosed`, `shared/flows-freshness.js#closeMinutes`, `shared/flows-freshness.js#dayWeekday`, `shared/flows-freshness.js#easternClock`, `shared/flows-freshness.js#easternDay`, `shared/flows-freshness.js#easternInstant`, `shared/flows-freshness.js#easternOffsetMinutes`, `shared/flows-freshness.js#expectedNightlySession`, `shared/flows-freshness.js#freshHeaders`, `shared/flows-freshness.js#freshnessState`, `shared/flows-freshness.js#inferredEarlyClose`, `shared/flows-freshness.js#isEarlyCloseDay`, `shared/flows-freshness.js#isHoliday`, `shared/flows-freshness.js#isRefreshWindow`, `shared/flows-freshness.js#isTradingDay`, `shared/flows-freshness.js#isWeekdayDay`, `shared/flows-freshness.js#lastCompletedSession`, `shared/flows-freshness.js#liveDispatchDue`, `shared/flows-freshness.js#liveStalled`, `shared/flows-freshness.js#nextTradingDay`, `shared/flows-freshness.js#nextWeekdayDay`, `shared/flows-freshness.js#nightlyDispatchDue`, `shared/flows-freshness.js#pendingHeaders`, `shared/flows-freshness.js#phaseAt`, `shared/flows-freshness.js#prevTradingDay`, `shared/flows-freshness.js#prevWeekdayDay`, `shared/flows-freshness.js#priorTradingDays`, `shared/flows-freshness.js#sessionClose`, `shared/flows-freshness.js#sessionOpen`, `shared/flows-freshness.js#shiftDay`, `shared/flows-freshness.js#tier1Due` | academy, browser, contracts, fixture-guard, flows, flows-ai-broker and 117 more |
+| `shared/flows-freshness.js` | `shared/flows-freshness.js#FRESH_CLASSES`, `shared/flows-freshness.js#LIVE_CLOCK`, `shared/flows-freshness.js#PHASE_MINUTES`, `shared/flows-freshness.js#REFRESH_CADENCE_MINUTES`, `shared/flows-freshness.js#classOf`, `shared/flows-freshness.js#clockClosed`, `shared/flows-freshness.js#closeMinutes`, `shared/flows-freshness.js#dayWeekday`, `shared/flows-freshness.js#easternClock`, `shared/flows-freshness.js#easternDay`, `shared/flows-freshness.js#easternInstant`, `shared/flows-freshness.js#easternOffsetMinutes`, `shared/flows-freshness.js#expectedNightlySession`, `shared/flows-freshness.js#freshHeaders`, `shared/flows-freshness.js#freshnessState`, `shared/flows-freshness.js#inferredEarlyClose`, `shared/flows-freshness.js#isEarlyCloseDay`, `shared/flows-freshness.js#isHoliday`, `shared/flows-freshness.js#isRefreshWindow`, `shared/flows-freshness.js#isTradingDay`, `shared/flows-freshness.js#isWeekdayDay`, `shared/flows-freshness.js#lastCompletedSession`, `shared/flows-freshness.js#liveDispatchDue`, `shared/flows-freshness.js#liveStalled`, `shared/flows-freshness.js#nextTradingDay`, `shared/flows-freshness.js#nextWeekdayDay`, `shared/flows-freshness.js#nightlyDispatchDue`, `shared/flows-freshness.js#pendingHeaders`, `shared/flows-freshness.js#phaseAt`, `shared/flows-freshness.js#prevTradingDay`, `shared/flows-freshness.js#prevWeekdayDay`, `shared/flows-freshness.js#priorTradingDays`, `shared/flows-freshness.js#sessionClose`, `shared/flows-freshness.js#sessionOpen`, `shared/flows-freshness.js#shiftDay`, `shared/flows-freshness.js#tier1Due` | academy, browser, contracts, fixture-guard, flows, flows-ai-broker and 118 more |
 
 ### `shared/flows-plan-facts.js`, `tests/flows-plan-facts.mjs`
 
@@ -729,7 +729,7 @@ The per-day session ledger: the `flows_ledger` DDL, the statement builders the T
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-ledger.js` | `shared/flows-ledger.js#LEDGER_ADDED_COLUMNS`, `shared/flows-ledger.js#LEDGER_LIMITS`, `shared/flows-ledger.js#LEDGER_RETAIN_DAYS`, `shared/flows-ledger.js#LEDGER_ROWS_SQL`, `shared/flows-ledger.js#LEDGER_SCHEMA_SQL`, `shared/flows-ledger.js#ledgerFocusStatement`, `shared/flows-ledger.js#ledgerNightlyStatement`, `shared/flows-ledger.js#ledgerOutcomeStatement`, `shared/flows-ledger.js#ledgerPassStatement`, `shared/flows-ledger.js#ledgerPruneCutoff`, `shared/flows-ledger.js#ledgerRowView`, `shared/flows-ledger.js#ledgerTickStatement`, `shared/flows-ledger.js#ledgerView`, `shared/flows-ledger.js#tickWindow`, `shared/flows-ledger.js#worstStale` | academy, fixture-guard, flows, flows-ai-broker, flows-alerts, flows-ask and 46 more |
+| `shared/flows-ledger.js` | `shared/flows-ledger.js#LEDGER_ADDED_COLUMNS`, `shared/flows-ledger.js#LEDGER_LIMITS`, `shared/flows-ledger.js#LEDGER_RETAIN_DAYS`, `shared/flows-ledger.js#LEDGER_ROWS_SQL`, `shared/flows-ledger.js#LEDGER_SCHEMA_SQL`, `shared/flows-ledger.js#ledgerFocusStatement`, `shared/flows-ledger.js#ledgerNightlyStatement`, `shared/flows-ledger.js#ledgerOutcomeStatement`, `shared/flows-ledger.js#ledgerPassStatement`, `shared/flows-ledger.js#ledgerPruneCutoff`, `shared/flows-ledger.js#ledgerRowView`, `shared/flows-ledger.js#ledgerTickStatement`, `shared/flows-ledger.js#ledgerView`, `shared/flows-ledger.js#tickWindow`, `shared/flows-ledger.js#worstStale` | academy, fixture-guard, flows, flows-ai-broker, flows-alerts, flows-ask and 47 more |
 
 ### `shared/flows-live.js`, `shared/flows-live-worker.js`
 
@@ -746,7 +746,7 @@ The live credential: the GitHub OIDC claim policy (this repository by id, `flows
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-oidc.js` | `shared/flows-oidc.js#LIVE_OIDC`, `shared/flows-oidc.js#actionsIdToken`, `shared/flows-oidc.js#claimsBrief`, `shared/flows-oidc.js#claimsProblem`, `shared/flows-oidc.js#decodeJwt`, `shared/flows-oidc.js#inspectLiveOidc`, `shared/flows-oidc.js#jwkFor`, `shared/flows-oidc.js#jwtExpiry`, `shared/flows-oidc.js#looksLikeJwt`, `shared/flows-oidc.js#rsaKeys`, `shared/flows-oidc.js#rsaVerify`, `shared/flows-oidc.js#verifyLiveOidc` | academy, flows, flows-ai-broker, flows-alerts, flows-ask, flows-basis and 45 more |
+| `shared/flows-oidc.js` | `shared/flows-oidc.js#LIVE_OIDC`, `shared/flows-oidc.js#actionsIdToken`, `shared/flows-oidc.js#claimsBrief`, `shared/flows-oidc.js#claimsProblem`, `shared/flows-oidc.js#decodeJwt`, `shared/flows-oidc.js#inspectLiveOidc`, `shared/flows-oidc.js#jwkFor`, `shared/flows-oidc.js#jwtExpiry`, `shared/flows-oidc.js#looksLikeJwt`, `shared/flows-oidc.js#rsaKeys`, `shared/flows-oidc.js#rsaVerify`, `shared/flows-oidc.js#verifyLiveOidc` | academy, flows, flows-ai-broker, flows-alerts, flows-ask, flows-basis and 46 more |
 
 ### `shared/flows-basis.js`, `tests/flows-basis-contract.mjs`
 
@@ -798,7 +798,7 @@ The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the met
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-focus.js` | `shared/flows-focus.js#FOCUS_BUDGET_BYTES`, `shared/flows-focus.js#FOCUS_CLOSES`, `shared/flows-focus.js#FOCUS_FIELDS`, `shared/flows-focus.js#FOCUS_FUNDS`, `shared/flows-focus.js#FOCUS_METALS`, `shared/flows-focus.js#FOCUS_MINERS`, `shared/flows-focus.js#FOCUS_NAME_CHARS`, `shared/flows-focus.js#FOCUS_STRIP_FALLBACK`, `shared/flows-focus.js#MAG7`, `shared/flows-focus.js#NDX_MEMBERSHIP_MIN`, `shared/flows-focus.js#NDX_TOP`, `shared/flows-focus.js#SHARE_CLASS`, `shared/flows-focus.js#canonicalClass`, `shared/flows-focus.js#focusCloses`, `shared/flows-focus.js#focusDeepSet`, `shared/flows-focus.js#focusGroups`, `shared/flows-focus.js#focusStripNames`, `shared/flows-focus.js#focusTickers`, `shared/flows-focus.js#holdingsStocks`, `shared/flows-focus.js#ndx10`, `shared/flows-focus.js#ndxMembership` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-alerts and 51 more |
+| `shared/flows-focus.js` | `shared/flows-focus.js#FOCUS_BUDGET_BYTES`, `shared/flows-focus.js#FOCUS_CLOSES`, `shared/flows-focus.js#FOCUS_FIELDS`, `shared/flows-focus.js#FOCUS_FUNDS`, `shared/flows-focus.js#FOCUS_METALS`, `shared/flows-focus.js#FOCUS_MINERS`, `shared/flows-focus.js#FOCUS_NAME_CHARS`, `shared/flows-focus.js#FOCUS_STRIP_FALLBACK`, `shared/flows-focus.js#MAG7`, `shared/flows-focus.js#NDX_MEMBERSHIP_MIN`, `shared/flows-focus.js#NDX_TOP`, `shared/flows-focus.js#SHARE_CLASS`, `shared/flows-focus.js#canonicalClass`, `shared/flows-focus.js#focusCloses`, `shared/flows-focus.js#focusDeepSet`, `shared/flows-focus.js#focusGroups`, `shared/flows-focus.js#focusStripNames`, `shared/flows-focus.js#focusTickers`, `shared/flows-focus.js#holdingsStocks`, `shared/flows-focus.js#ndx10`, `shared/flows-focus.js#ndxMembership` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-alerts and 52 more |
 
 ### `shared/flows-quant-dealer.js`
 
@@ -949,7 +949,7 @@ Flows audience, cookie and session constants, PBKDF2 password verification and m
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-ai.js` | `shared/flows-ai.js#AI_BUDGET_MARK`, `shared/flows-ai.js#AI_CALL_EPOCH`, `shared/flows-ai.js#AI_CAP_DEFAULT_CALLS`, `shared/flows-ai.js#AI_CAP_DEFAULT_NEURONS`, `shared/flows-ai.js#AI_CHARS_PER_TOKEN`, `shared/flows-ai.js#AI_DAILY_NEURONS`, `shared/flows-ai.js#AI_INTRADAY_REFRESH_MS`, `shared/flows-ai.js#AI_LENGTH_RETRY_MS`, `shared/flows-ai.js#AI_WORST_RATES`, `shared/flows-ai.js#RESET_SAID`, `shared/flows-ai.js#aiCallSignature`, `shared/flows-ai.js#aiCapCalls`, `shared/flows-ai.js#aiCapNeurons`, `shared/flows-ai.js#aiChain`, `shared/flows-ai.js#aiText`, `shared/flows-ai.js#askFailure`, `shared/flows-ai.js#askModels`, `shared/flows-ai.js#budgetVerdict`, `shared/flows-ai.js#cappedAi`, `shared/flows-ai.js#emptyNote`, `shared/flows-ai.js#estimateUsage`, `shared/flows-ai.js#fallbackNote`, `shared/flows-ai.js#intradayFloorMs`, `shared/flows-ai.js#modelInput`, `shared/flows-ai.js#modelRates`, `shared/flows-ai.js#neuronsSpent`, `shared/flows-ai.js#primaryRates`, `shared/flows-ai.js#repliedGuard`, `shared/flows-ai.js#retryableGuard`, `shared/flows-ai.js#spendShape`, `shared/flows-ai.js#thrownThenEmptyNote` | contracts, flows, flows-ai-broker, flows-ask, flows-basis, flows-deadline-render and 50 more |
+| `shared/flows-ai.js` | `shared/flows-ai.js#AI_BUDGET_MARK`, `shared/flows-ai.js#AI_CALL_EPOCH`, `shared/flows-ai.js#AI_CAP_DEFAULT_CALLS`, `shared/flows-ai.js#AI_CAP_DEFAULT_NEURONS`, `shared/flows-ai.js#AI_CHARS_PER_TOKEN`, `shared/flows-ai.js#AI_DAILY_NEURONS`, `shared/flows-ai.js#AI_INTRADAY_REFRESH_MS`, `shared/flows-ai.js#AI_LENGTH_RETRY_MS`, `shared/flows-ai.js#AI_WORST_RATES`, `shared/flows-ai.js#RESET_SAID`, `shared/flows-ai.js#aiCallSignature`, `shared/flows-ai.js#aiCapCalls`, `shared/flows-ai.js#aiCapNeurons`, `shared/flows-ai.js#aiChain`, `shared/flows-ai.js#aiText`, `shared/flows-ai.js#askFailure`, `shared/flows-ai.js#askModels`, `shared/flows-ai.js#budgetVerdict`, `shared/flows-ai.js#cappedAi`, `shared/flows-ai.js#emptyNote`, `shared/flows-ai.js#estimateUsage`, `shared/flows-ai.js#fallbackNote`, `shared/flows-ai.js#intradayFloorMs`, `shared/flows-ai.js#modelInput`, `shared/flows-ai.js#modelRates`, `shared/flows-ai.js#neuronsSpent`, `shared/flows-ai.js#primaryRates`, `shared/flows-ai.js#repliedGuard`, `shared/flows-ai.js#retryableGuard`, `shared/flows-ai.js#spendShape`, `shared/flows-ai.js#thrownThenEmptyNote` | contracts, flows, flows-ai-broker, flows-ask, flows-basis, flows-deadline-render and 51 more |
 
 ### `shared/flows-alerts.js`
 
@@ -1069,7 +1069,7 @@ Server-rendered Flows page shells, navigation, and `ASSET_VERSION`.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-pages.js` | `shared/flows-pages.js#ASSET_VERSION`, `shared/flows-pages.js#FLOWS_NAV`, `shared/flows-pages.js#FLOWS_PAGES`, `shared/flows-pages.js#FLOWS_SPRITE`, `shared/flows-pages.js#aboutPage`, `shared/flows-pages.js#deskPage`, `shared/flows-pages.js#eventsPage`, `shared/flows-pages.js#flowsDocument`, `shared/flows-pages.js#glossaryPage`, `shared/flows-pages.js#loginPage`, `shared/flows-pages.js#marketPage`, `shared/flows-pages.js#modelName`, `shared/flows-pages.js#movesPage`, `shared/flows-pages.js#neuronProvenance`, `shared/flows-pages.js#overviewPage`, `shared/flows-pages.js#ownerNav`, `shared/flows-pages.js#politicalPage`, `shared/flows-pages.js#sidePage`, `shared/flows-pages.js#statusPage`, `shared/flows-pages.js#strategyPage`, `shared/flows-pages.js#tickerPage`, `shared/flows-pages.js#unusualPage`, `shared/flows-pages.js#watchPage` | contracts, flows, flows-basis, flows-deadline-render, flows-defaults-render, flows-defer-render and 48 more |
+| `shared/flows-pages.js` | `shared/flows-pages.js#ASSET_VERSION`, `shared/flows-pages.js#FLOWS_NAV`, `shared/flows-pages.js#FLOWS_PAGES`, `shared/flows-pages.js#FLOWS_SPRITE`, `shared/flows-pages.js#aboutPage`, `shared/flows-pages.js#deskPage`, `shared/flows-pages.js#eventsPage`, `shared/flows-pages.js#flowsDocument`, `shared/flows-pages.js#glossaryPage`, `shared/flows-pages.js#loginPage`, `shared/flows-pages.js#marketPage`, `shared/flows-pages.js#modelName`, `shared/flows-pages.js#movesPage`, `shared/flows-pages.js#neuronProvenance`, `shared/flows-pages.js#overviewPage`, `shared/flows-pages.js#ownerNav`, `shared/flows-pages.js#politicalPage`, `shared/flows-pages.js#sidePage`, `shared/flows-pages.js#statusPage`, `shared/flows-pages.js#strategyPage`, `shared/flows-pages.js#tickerPage`, `shared/flows-pages.js#unusualPage`, `shared/flows-pages.js#watchPage` | contracts, flows, flows-basis, flows-deadline-render, flows-defaults-render, flows-defer-render and 49 more |
 
 ### `shared/flows-panels.js`
 
@@ -1244,7 +1244,7 @@ The fixture guard (SYN-01 to SYN-11 of the 2026-10-13 synthetic audit): nothing 
 | File | Exports | Suites |
 |---|---|---|
 | `scripts/flows-legs/taint.mjs` | `scripts/flows-legs/taint.mjs#clearTaint`, `scripts/flows-legs/taint.mjs#tainted`, `scripts/flows-legs/taint.mjs#touch` | fixture-guard, flows, flows-engine-budget, flows-events, flows-garch, flows-ledger and 16 more |
-| `shared/flows-fixture-names.js` | `shared/flows-fixture-names.js#FIXTURE_HOSTS`, `shared/flows-fixture-names.js#FIXTURE_REFUSALS`, `shared/flows-fixture-names.js#FIXTURE_TICKER_RE`, `shared/flows-fixture-names.js#FIXTURE_TOKEN_RE`, `shared/flows-fixture-names.js#fixtureHost`, `shared/flows-fixture-names.js#fixtureMarked`, `shared/flows-fixture-names.js#fixtureNameIn`, `shared/flows-fixture-names.js#fixtureRefusal`, `shared/flows-fixture-names.js#isFixtureTicker` | academy, fixture-guard, flows, flows-ai-broker, flows-alerts, flows-ask and 54 more |
+| `shared/flows-fixture-names.js` | `shared/flows-fixture-names.js#FIXTURE_HOSTS`, `shared/flows-fixture-names.js#FIXTURE_REFUSALS`, `shared/flows-fixture-names.js#FIXTURE_TICKER_RE`, `shared/flows-fixture-names.js#FIXTURE_TOKEN_RE`, `shared/flows-fixture-names.js#fixtureHost`, `shared/flows-fixture-names.js#fixtureMarked`, `shared/flows-fixture-names.js#fixtureNameIn`, `shared/flows-fixture-names.js#fixtureRefusal`, `shared/flows-fixture-names.js#isFixtureTicker` | academy, fixture-guard, flows, flows-ai-broker, flows-alerts, flows-ask and 55 more |
 | `tests/fixture-guard.mjs` |  | fixture-guard |
 | `tests/flows-fixture-guard-render.mjs` |  | flows-fixture-guard-render |
 
@@ -1711,7 +1711,7 @@ The public front door: `aboutPage` and `glossaryPage` in `shared/flows-pages.js`
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-public.css` |  |  |
-| `shared/flows-glossary.js` | `shared/flows-glossary.js#GLOSSARY` | contracts, flows, flows-basis, flows-deadline-render, flows-defer-render, flows-dossier-reads and 44 more |
+| `shared/flows-glossary.js` | `shared/flows-glossary.js#GLOSSARY` | contracts, flows, flows-basis, flows-deadline-render, flows-defer-render, flows-dossier-reads and 45 more |
 | `tests/flows-public-contract.mjs` |  | flows-public |
 
 ### `assets/js/flows-chart.js`
@@ -1780,6 +1780,15 @@ The Market page's flow network, condensed (`FlowsUI.netMap`: `mount`, `of`, `rea
 | `assets/js/flows-net-map.js` |  | flows-net-map-render |
 | `tests/flows-net-map-render.mjs` |  | flows-net-map-render |
 
+### `assets/js/flows-market-floor.js`, `tests/flows-market-floor-render.mjs`
+
+The Market page's opening view, the Floor (`FlowsUI.floor`: `model`, `layout`, `mount`, `of`, `sideOf`, `valueOf`, `classify`), loaded as the `floor` defer group into the first tab, `#view=floor`, which is the page's default (the Session river is the second tab). A lit perspective floor on Canvas 2D with one glass pillar for each class of what the vendor flagged today, read from `/api/flows/flowalerts` and the universe's sectors and nothing else (no new request, payload or vendor call): the four index funds (SPY, QQQ, IWM, DIA), the eleven sector ETFs (XLK to XLRE), any flagged class of other funds (Bonds, Commodities, Volatility, Crypto, International, by a fixed ticker table) and single stocks grouped by the universe's sector (`No sector`, or one `Sector unread` tile when the universe has not published). Rows run from the back in that order, each headed by its group's flagged premium and share, so the question of whether funds, sector ETFs or stocks draw the most is answered at a glance. A height switch (`FlowsUI.segmented`: Premium, Volume, Net lean) sets pillar height on one scale across every class: the sum of flagged premium, the sum of the windows' contract counts (a window with no count adds nothing and the class says how many windows the figure comes from; a class with none is a dash, never a zero), or the absolute net lean (calls on the ask side and puts on the bid side minus the reverse, by convention). Colour is lean by convention, `--up-mark`, `--down-mark` or slate when the net is within 10 per cent of premium, deepening to full at 60 per cent; the white stripe along each base is the class's share of all flagged premium relative to the largest; a class with nothing flagged is a dashed slate tile, never a zero. Pillars are glass boxes (vertical gradient, specular strip on the lit face, rim, soft shadow sprite, glow by share) drawn far to near with fog by depth. A persistent readout (`role=status`) names the hovered or selected class with premium, share, volume, lean and its top three names; clicking or pressing Enter on a pillar drills a side list (shown from 800 px of module width, never scrolling: its rows are fitted to the height) to that class's names ranked by premium, each linking to its ticker page, and the same list ranks all classes by the chosen measure at rest. On a phone the long rows wrap to six pillars a line. The camera orbits by drag (yaw within 40 degrees, pitch 18 to 62), by Shift and the arrow keys, and Recentre returns to the opening view; the arrows alone, Home and End move a roving tab stop over the pillars (opening on the tallest), Enter selects and Escape clears. Labels go through one declutter pass and class names stagger to a lower line where neighbours would meet. Every colour is read from the page's tokens. No loop: a paint happens on mount, on data, on resize, on the switch, on hover, focus or selection and while dragging, and never at rest. The accessible twin is the canvas description, a hit button over each pillar with a full spoken sentence, and a dialog with the classes ranked by premium and the 40 largest names. A failed, pending or empty feed is a state with its reason. `tests/flows-market-floor-render.mjs` (Chromium, `page.route`, no server) recomputes every class sum, share, lean, height on the shared scale, row and column, and projection from the fixture rows with its own camera, in all three measures at 1440x820, 1024x768 and 390x844, holds labels for overlap and the canvas for the page, checks the readout, the side list, the tables, the keyboard, the orbit and its clamps, pixel colours, the dash for a class with no count, no universe, the failure states, a zero paint census at rest, the frame cost against a reference canvas workload, and fourteen planted wrong builds.
+
+| File | Exports | Suites |
+|---|---|---|
+| `assets/js/flows-market-floor.js` |  | flows-market-floor-render |
+| `tests/flows-market-floor-render.mjs` |  | flows-market-floor-render |
+
 ### `assets/js/flows-market-river.js`, `tests/flows-market-river-render.mjs`
 
 The Market page's opening scene, the Session (`FlowsUI.river`: `model`, `layout`, `mount`, `of`, `sideOf`, `trtOf`), loaded as the `river` defer group into the first tab, `#view=session`, which is the page's default view. Depth is time: the open at the back, the last read at the front, under a now line stamped in TRT. The lanes across are the sectors of the names the vendor flagged today (the universe's sector, `Index funds` for SPY, QQQ, IWM and DIA, `No sector` for a name the universe lacks, `Sector unread` for every name when the universe has not published), ordered by flagged premium. Each flagged window of `/api/flows/flowalerts` is a lit sphere sprite (the one `flows-net.js` draws) at its `spanStart` minute in its name's lane, radius `0.03 + 0.12 sqrt(premium / largest)` in lane units so area follows premium on one scale; colour is the side by convention (a call with more ask than bid premium or a put with more bid green, bullish; the reverse red, bearish; no split or equal blue, unsided). The lane floor is tiled by the live breadth key's 5-minute steps and tinted by the sector's `net` at that step (the funds lane the sum of the ETF tides), slate with a dashed edge and a stated reason when the key is absent, for another session or missing the sector, never a zero. The market tide of `pulse` (calls up, puts down) stands on the left wall along the same minutes, only when it is the same session. Camera, fit, fog, floor grid, glass wall and label declutter follow `flows-ticker-surface.js` and `flows-net.js`; every colour is read from the page's tokens. No motion: a paint happens on mount, on data, on resize, on hover or focus, and never at rest. The accessible twin is a readout (`role=status`, the largest window at rest, the hovered or focused window or lane otherwise), a hit link over each of the 40 largest windows (one roving tab stop, arrows, Home, End, Escape; Enter opens the ticker page), a button over each lane header, a canvas description, and two tables (lanes with their tide; the largest windows with time in TRT, side, premium, expiry). A failed, pending or empty feed is a state with its reason. `tests/flows-market-river-render.mjs` (Chromium, `page.route`, no server) recomputes every lane sum, side, lane band, minute position, radius and screen projection from the fixture rows with its own camera, holds the tiles to the emitted breadth key and samples their pixels, checks labels for overlap, the TRT ticks, the now line, three viewports with no scroll, reduced motion, the keyboard, a zero paint census at rest, the frame cost against a reference canvas workload, the four states, and twelve planted wrong builds.
@@ -1796,7 +1805,7 @@ The Market page's one-screen contract. `marketPage` is a title row with a tablis
 | File | Exports | Suites |
 |---|---|---|
 | `tests/flows-market-onescreen.mjs` |  | flows-market-onescreen |
-| `tests/lib/market-fixtures.mjs` | `tests/lib/market-fixtures.mjs#NAMES`, `tests/lib/market-fixtures.mjs#ROOT`, `tests/lib/market-fixtures.mjs#SESSION`, `tests/lib/market-fixtures.mjs#TABS`, `tests/lib/market-fixtures.mjs#alertsFixture`, `tests/lib/market-fixtures.mjs#openMarket`, `tests/lib/market-fixtures.mjs#showTab`, `tests/lib/market-fixtures.mjs#universeFixture` | flows-market, flows-market-onescreen, flows-market-river-render, flows-market-visual, flows-moves0, flows-net-map-render and 1 more |
+| `tests/lib/market-fixtures.mjs` | `tests/lib/market-fixtures.mjs#NAMES`, `tests/lib/market-fixtures.mjs#ROOT`, `tests/lib/market-fixtures.mjs#SESSION`, `tests/lib/market-fixtures.mjs#TABS`, `tests/lib/market-fixtures.mjs#alertsFixture`, `tests/lib/market-fixtures.mjs#openMarket`, `tests/lib/market-fixtures.mjs#showTab`, `tests/lib/market-fixtures.mjs#universeFixture` | flows-market, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual, flows-moves0 and 2 more |
 
 ### `tests/flows-market-visual.mjs`
 
@@ -1870,7 +1879,7 @@ Authoring tools: Open Graph image optimiser, a one-off dead CSS pruner, the comm
 |---|---|---|
 | `scripts/optimize-og-images.py` |  |  |
 | `scripts/prune-dead-css.py` |  |  |
-| `scripts/render-preview.fixtures.json` |  | fixture-guard, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-market, flows-market-below-render and 7 more |
+| `scripts/render-preview.fixtures.json` |  | fixture-guard, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-market, flows-market-below-render and 8 more |
 | `scripts/render-preview.mjs` |  | approval-frames, architecture, fixture-guard |
 | `scripts/strip-comments.mjs` | `scripts/strip-comments.mjs#stripComments`, `scripts/strip-comments.mjs#stripTree` | architecture, flows-quant, flows-strip |
 
@@ -2191,7 +2200,7 @@ Shared test helpers: source scans, the browser launcher, the served-tree walk, t
 | File | Exports | Suites |
 |---|---|---|
 | `tests/lib/ai-guard.mjs` | `tests/lib/ai-guard.mjs#AI_BROKER`, `tests/lib/ai-guard.mjs#AI_HOME`, `tests/lib/ai-guard.mjs#aiGuardStats`, `tests/lib/ai-guard.mjs#assertAiGuarded`, `tests/lib/ai-guard.mjs#bindingReads`, `tests/lib/ai-guard.mjs#callArgs`, `tests/lib/ai-guard.mjs#cappedAiSpan`, `tests/lib/ai-guard.mjs#checkModelCalls`, `tests/lib/ai-guard.mjs#guardAi`, `tests/lib/ai-guard.mjs#insideCappedAi`, `tests/lib/ai-guard.mjs#modelCallFiles`, `tests/lib/ai-guard.mjs#modelCallReport`, `tests/lib/ai-guard.mjs#spendReaderArg` | flows-ai-broker, flows-dossier-reads, flows-neuron, flows-reading-worker, flows-reads |
-| `tests/lib/browser.mjs` | `tests/lib/browser.mjs#CHROMIUM_PATH_VAR`, `tests/lib/browser.mjs#launch`, `tests/lib/browser.mjs#launchOptions` | approval-frames, architecture, ci-affected, contracts, docs, flows-defer-render and 14 more |
+| `tests/lib/browser.mjs` | `tests/lib/browser.mjs#CHROMIUM_PATH_VAR`, `tests/lib/browser.mjs#launch`, `tests/lib/browser.mjs#launchOptions` | approval-frames, architecture, ci-affected, contracts, docs, flows-defer-render and 15 more |
 | `tests/lib/cpu-budget.mjs` | `tests/lib/cpu-budget.mjs#CPU_CLOCK`, `tests/lib/cpu-budget.mjs#assertBudget`, `tests/lib/cpu-budget.mjs#checkBudget`, `tests/lib/cpu-budget.mjs#clockResolution`, `tests/lib/cpu-budget.mjs#compare`, `tests/lib/cpu-budget.mjs#cpuClock`, `tests/lib/cpu-budget.mjs#cpuNow`, `tests/lib/cpu-budget.mjs#measure`, `tests/lib/cpu-budget.mjs#referenceKernel`, `tests/lib/cpu-budget.mjs#summarize` | contracts, flows-ai-salvage, flows-conviction, flows-quant, flows-targets, flows-vol |
 | `tests/lib/d1-fake.mjs` | `tests/lib/d1-fake.mjs#SCHEMA`, `tests/lib/d1-fake.mjs#fakeD1` | contracts, flows-ai-broker, flows-dispatch-check, flows-door-v2, flows-engine-budget, flows-meter-worker and 4 more |
 | `tests/lib/fixture-roster.mjs` | `tests/lib/fixture-roster.mjs#FIXTURE_MEMBER`, `tests/lib/fixture-roster.mjs#FIXTURE_MEMBER_2`, `tests/lib/fixture-roster.mjs#FIXTURE_OWNER`, `tests/lib/fixture-roster.mjs#FIXTURE_ROSTER` | browser, flows, flows-basis, flows-board-render, flows-chain, flows-desk and 21 more |
@@ -2271,6 +2280,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-link.json` |  | architecture, docs, run |
 | `tests/suites/flows-live.json` |  | architecture, docs, run |
 | `tests/suites/flows-market-below-render.json` |  | architecture, docs, run |
+| `tests/suites/flows-market-floor-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-market-onescreen.json` |  | architecture, docs, run |
 | `tests/suites/flows-market-river-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-market-visual.json` |  | architecture, docs, run |

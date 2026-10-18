@@ -1491,7 +1491,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 152 suites: 108 that need only Node (N), 29 that also
+`tests/suites/` registers 153 suites: 109 that need only Node (N), 29 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or

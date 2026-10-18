@@ -149,13 +149,13 @@ const alerts = alertsFixture(), universe = universeFixture();
 const EXP = expected(alerts, universe);
 {
   const html = PAGES.marketPage({ username: "u", owner: true, scenes: true });
-  ok(/data-view="session"/.test(html) && html.indexOf('id="mkP-session"') < html.indexOf('id="mkP-tide"') && /data-defer="river"/.test(html), "THE SESSION IS THE MARKET PAGE'S FIRST AND DEFAULT VIEW, LOADED AS THE river DEFER GROUP");
+  ok(html.indexOf('id="mkP-floor"') < html.indexOf('id="mkP-session"') && html.indexOf('id="mkP-session"') < html.indexOf('id="mkP-tide"') && /data-defer="river"/.test(html), "THE SESSION IS THE MARKET PAGE'S SECOND VIEW, LOADED AS THE river DEFER GROUP");
   ok(!/\/\/|\/\*/.test(SRC.replace(/"[^"\n]*"|'[^'\n]*'/g, "")), "no comment in the module");
   ok(EXP.windows.length === 160 && EXP.order.length >= 8, "the fixture: " + EXP.windows.length + " windows in " + EXP.order.length + " lanes");
   console.log("  lanes by hand: " + EXP.order.map((n) => n + " " + Math.round(EXP.lanes.get(n).prem / 1e5) / 10 + "M").join(", "));
 }
 async function open(o = {}) {
-  const r = await openMarket(browser, { ...o });
+  const r = await openMarket(browser, { hash: "#view=session", ...o });
   await r.page.waitForFunction(() => { const h = document.getElementById("mkRiver"); return h && window.FlowsUI.river && window.FlowsUI.river.of(h) && window.FlowsUI.river.of(h).scene() !== null || (h && h.querySelector(".mk-rv") && h.querySelector(".mk-rv").dataset.state !== "pending" && h.querySelector(".mk-rv").dataset.state !== "ok"); }, null, { timeout: 15000 }).catch(() => {});
   await r.page.waitForTimeout(400);
   return r;
@@ -189,6 +189,7 @@ try {
       const dlgState = await page.evaluate(() => { const d = document.querySelector(".mk-rv-dlg"); return { open: d.open, tables: d.querySelectorAll(".mk-rv-t").length, fits: d.getBoundingClientRect().height <= innerHeight + 1 }; });
       eq(dlgState, { open: true, tables: 2, fits: true }, "THE TABLES BUTTON OPENS THE TWIN IN A DIALOG THAT FITS THE SCREEN");
       await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
       eq(await page.evaluate(() => ({ open: document.querySelector(".mk-rv-dlg").open, hidden: document.querySelector(".mk-rv-tables").hidden })), { open: false, hidden: true }, "and Escape closes it, hiding the tables again");
       const before = await page.evaluate(() => window.FlowsUI.river.of(document.getElementById("mkRiver")).paints());
       await page.waitForTimeout(2000);

@@ -1877,7 +1877,7 @@ await showTab(deepPage, "#mkRadarSeg");
     const titles = await deepPage.$$eval(".mk-stage .ui-mod-t", (hs) => hs.map((h) => h.childNodes[0].textContent.trim()));
     const scenes = await deepPage.evaluate((ids) => ids.filter((id) => document.getElementById(id)), ["mkSkylineCard", "mkRelationsCard"]);
     deep(scenes, SCENE_MODULES, "the scene modules are on the page exactly when wrangler.toml ships FLOWS_SCENES on");
-    eq(titles.length, MODULES.length + SCENE_MODULES.length + 2, "every module carries a title");
+    eq(titles.length, MODULES.length + SCENE_MODULES.length + 3, "every module carries a title");
     for (const t of titles) {
       ok(t.split(/\s+/).length <= 3, `a module title is one to three words (${t})`);
       ok(!/^[A-Z0-9 ]{4,}$/.test(t) || /^(SPY|QQQ|IWM)$/.test(t), `and sentence case, never ALL-CAPS (${t})`);

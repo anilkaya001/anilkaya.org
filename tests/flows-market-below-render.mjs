@@ -98,6 +98,7 @@ try {
     ok(await page.evaluate(() => document.querySelectorAll("#mkRadar [data-state=pending], #mkRadar [data-empty]").length > 0), "and Radar shows its named state for the regime key that has not published");
     const stamp = await page.evaluate(() => document.getElementById("mkPulseStamp").textContent.trim());
     ok(stamp.length > 10, `the pulse stamp is worked out by the first-paint file (${stamp.slice(0, 60)})`);
+    await page.click("#mkT-tide");
     await page.click("#mkTideCard .ui-info");
     await page.waitForSelector("#fxPopB");
     ok((await page.evaluate(() => document.getElementById("fxPopB").innerText)).includes(stamp.slice(0, 20)), "and the Tide's note quotes it");

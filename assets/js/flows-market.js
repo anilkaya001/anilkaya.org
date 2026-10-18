@@ -830,7 +830,7 @@
       this.timer = setInterval(run, 60000);
     },
   };
-  if ($("mkNet") || $("mkRelations") || $("mkRiver")) ALERTS.kick();
+  if ($("mkNet") || $("mkRelations") || $("mkRiver") || $("mkFloor")) ALERTS.kick();
   let RIVER = null;
 
   const FIT_MIN = 3;
@@ -930,7 +930,7 @@
       showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
     });
   }
-  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "session"; };
+  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "floor"; };
   showTab(fromHash(), false, true);
   addEventListener("hashchange", () => showTab(fromHash(), false, true));
 
@@ -1031,6 +1031,13 @@
           if (group === "relations" && api) ALERTS.sub((a, st) => api.take(a, st));
         });
       }
+    }
+    const floorHost = $("mkFloor");
+    if (floorHost && UI.defer) {
+      UI.defer("floor", { when: "visible", el: floorHost, label: "The trading floor" }).then(() => {
+        const api = window.FlowsUI.floor.mount(floorHost, { universe });
+        if (api) ALERTS.sub((a, st) => api.take(a, st));
+      });
     }
     const riverHost = $("mkRiver");
     if (riverHost && UI.defer) {
