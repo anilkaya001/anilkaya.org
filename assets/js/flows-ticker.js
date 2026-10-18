@@ -1081,6 +1081,7 @@
   const CHART_TITLES = { price: "Price, levels and the month ahead", surface: "Volatility surface and dealer gamma terrain" };
 
   function setView(view) {
+    if (view === "surface" && SURF.gated) view = "price";
     const main = $("ftGMain"), a = $("ftGlanceChart"), b = $("ftGSurf");
     if (!main || !a || !b || (view === "surface" && !$("ftSurface"))) return;
     SURF.view = view;
@@ -1100,18 +1101,17 @@
   function paintTabs() {
     const host = $("ftGTabs");
     if (!host || host.firstChild || !$("ftSurface")) return;
-    const seg = UI.segmented("Chart view", [{ label: "Price & levels" }, { label: "Surface & terrain" }], (i) => setView(i === 1 ? "surface" : "price"), SURF.view === "surface" ? 1 : 0);
-    const btns = [...seg.querySelectorAll("button")];
-    ["ftTabPrice", "ftTabSurface"].forEach((id, i) => { btns[i].id = id; btns[i].dataset.tab = i ? "surface" : "price"; btns[i].setAttribute("aria-controls", i ? "ftGSurf" : "ftGlanceChart"); });
     const gl = window.FlowsUI && window.FlowsUI.tickerGlance;
     let em = null;
     try { em = gl && STATE.card ? gl.model.expiries(STATE.card, window.FlowsQuant || null) : null; } catch (e) { em = null; }
-    if (em && !em.rows.length) {
-      btns[1].disabled = true;
-      btns[1].title = "Not on this card: " + (em.why.gamma || em.why.smile || "no expiries") + (em.why.gamma && em.why.smile ? " " + em.why.smile : "");
-      btns[1].setAttribute("aria-disabled", "true");
-      if (SURF.view === "surface") setView("price");
-    }
+    const gated = !!(em && !em.rows.length);
+    const why = gated ? "Not on this card: " + (em.why.gamma || em.why.smile || "no expiries") + (em.why.gamma && em.why.smile ? " " + em.why.smile : "") : null;
+    SURF.gated = gated;
+    if (gated && SURF.view === "surface") setView("price");
+    const seg = UI.segmented("Chart view", [{ label: "Price & levels" }, { label: "Surface & terrain", disabled: gated, title: why }], (i) => setView(i === 1 ? "surface" : "price"), SURF.view === "surface" ? 1 : 0);
+    const btns = [...seg.querySelectorAll("button")];
+    ["ftTabPrice", "ftTabSurface"].forEach((id, i) => { btns[i].id = id; btns[i].dataset.tab = i ? "surface" : "price"; btns[i].setAttribute("aria-controls", i ? "ftGSurf" : "ftGlanceChart"); });
+    if (gated) btns[1].setAttribute("aria-disabled", "true");
     host.append(seg);
     SURF.tabs = seg;
     const reset = $("ftGReset");
@@ -1226,7 +1226,8 @@
     dockEl.hidden = !STATE.glance || !mods.length;
     dockEl.replaceChildren(h("span", { class: "ft-dock-l" }, "Open in place"),
       ...mods.map(([m, label]) => { const b = h("button", { class: "ft-dock-b", type: "button", "data-mod": m, "aria-pressed": "false" }, label); b.addEventListener("click", () => openSheet(m, b)); return b; }),
-      ...gone.map(([m, label]) => h("button", { class: "ft-dock-b", type: "button", disabled: true, "data-mod": m, title: DOCK_WHY[m] || "Not built for this name." }, label)),
+      ...gone.map(([m, label]) => { const why = DOCK_WHY[m] || "Not built for this name."; return h("button", { class: "ft-dock-b", type: "button", "aria-disabled": "true", "data-mod": m, title: why, "aria-label": label + ": " + why, onclick: () => { const w = dockEl.querySelector(".ft-dock-why"); if (w) w.textContent = label + ": " + why; } }, label); }),
+      h("span", { class: "ft-dock-why", role: "status" }),
       h("span", { class: "ft-dock-sp" }),
       h("a", { class: "ft-dock-a", href: "#ftGrid", "aria-expanded": String(!!STATE.all), onclick: (e) => { e.preventDefault(); closeSheet(true); STATE.all = !STATE.all; showGrid(); paintDock(); if (STATE.all) { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } else window.scrollTo({ top: 0, behavior: "instant" }); } }, STATE.all ? "Back to one screen" : "Every module, as one page"));
   }
