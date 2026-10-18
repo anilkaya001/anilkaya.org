@@ -117,7 +117,7 @@ try {
     ok(Math.abs(cons.same - cons.total) < 1, "and equals the pure model on the same rows, so Home and Unusual share one model");
     for (const s of cons.sums) ok(Math.abs(s - cons.want) < 1, `and every layer sums to the same premium (${s})`);
     ok(/is-slot/.test(cons.host), "the host keeps its reserved height while the network has rows");
-    eq(await page.evaluate(() => window.FlowsUI.net.of(document.getElementById("hmNetHost")).ambient()), true, "the owner's Home opens with Ambient on, as the Unusual page does");
+    eq(await page.evaluate(() => window.FlowsUI.net.of(document.getElementById("hmNetHost")).ambient()), false, "the owner's Home opens still, as the Unusual page does");
     const before = await page.evaluate(() => window.__ls.size);
     await page.evaluate(() => window.FlowsUI.net.of(document.getElementById("hmNetHost")).destroy());
     const after = await page.evaluate(() => window.__ls.size);
