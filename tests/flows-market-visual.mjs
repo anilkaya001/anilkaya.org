@@ -68,7 +68,9 @@ const FACTS = () => {
     const u = m && m.querySelector(".mk-mt-u");
     return { label: g.querySelector(".ui-metric-l").textContent, fill: f ? rect(f).width / rect(m).width : null, up: u ? rect(u).width / rect(m).width : null };
   });
-  return { hero, tm: box && { w: box.width, h: box.height }, tiles, gts };
+  const leak = [...document.querySelectorAll("#mkP-sectors .mk-small-p, #mkP-sectors .mk-small-p *")]
+    .filter((e) => getComputedStyle(e).visibility !== "hidden").length;
+  return { hero, tm: box && { w: box.width, h: box.height }, tiles, gts, leak };
 };
 
 function audit(f, { phone, small = false }) {
@@ -135,6 +137,7 @@ function audit(f, { phone, small = false }) {
     need(nets.every((n, i) => i === 0 || nets[i - 1] >= n), "the tiles are not listed from the most net-bought sector to the most net-sold");
   }
 
+  need(f.leak === 0, "a sector tile chart stays visible on another tab: " + f.leak);
   const G = Object.fromEntries(f.gts.map((g) => [g.label, g]));
   const split = market.premium.netPositive / (Math.abs(market.premium.netPositive) + Math.abs(market.premium.netNegative));
   need(G["Net premium"] && G["Net premium"].up !== null && Math.abs(G["Net premium"].up - split) < 0.03, "the net premium split is not calls over calls plus puts");
@@ -160,11 +163,13 @@ async function run(browser, { phone, patch = null, small = false }) {
   await page.waitForTimeout(600);
   const third = await page.evaluate(FACTS);
   await context.close();
-  return { facts: { hero: first.hero, tm: second.tm, tiles: second.tiles, gts: third.gts }, errors };
+  return { facts: { hero: first.hero, tm: second.tm, tiles: second.tiles, gts: third.gts, leak: third.leak }, errors };
 }
 
 const JS = "/assets/js/flows-market.js";
+const CSS = "/assets/css/flows-market.css";
 const MUTANTS = [
+  ["tile charts leak onto other tabs", CSS, [["{ .mk-small-p { visibility: inherit; } }", "{ .mk-small-p { visibility: visible; } }"]]],
   ["area ignores the floor", JS, [["Math.max(Math.abs(c.net === null ? 0 : c.net), top * TM_FLOOR)", "Math.abs(c.net === null ? 0 : c.net)"]]],
   ["tiles not most net-bought first", JS, [["cells.sort((a, b) => (b.net ?? -Infinity) - (a.net ?? -Infinity));", "cells.sort((a, b) => (a.net ?? -Infinity) - (b.net ?? -Infinity));"]]],
   ["breadth segments swapped", JS, [['h("i", { class: "is-pos", style: { width: (bull / bt * 100) + "%" } })', 'h("i", { class: "is-pos", style: { width: (bear / bt * 100) + "%" } })']]],
