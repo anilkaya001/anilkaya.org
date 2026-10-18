@@ -351,15 +351,15 @@
 
   function uniCell(key) {
     return (row) => {
-      if (st.uniState.state !== "ok") return h("span", { class: "bd-q" }, DASH);
+      if (st.uniState.state !== "ok") return h("span", { class: "bd-q", title: st.uniState.reason || "The cross-section is not read yet" }, DASH);
       const v = uniPct(key, row);
-      return quietPct(v, v === null ? "Not in the cross-section of eligible names" : null);
+      return quietPct(v, v === null ? (key === "si" ? "Short interest not read for this name" : "Not in the cross-section of eligible names") : null);
     };
   }
 
   function ideaCell(row) {
     const name = ideaOf(row);
-    if (!name) return h("span", { class: "bd-q" }, DASH);
+    if (!name) return h("span", { class: "bd-q", title: "No structure cleared for this name tonight" }, DASH);
     const svg = UI.chart.payoff(null, { structure: name });
     return h("span", { class: "bd-idea", role: "img", "aria-label": "Lead idea: " + name, title: cap(name) }, svg);
   }
@@ -717,6 +717,37 @@
   }
 
   let flipFrame = 0;
+  let fitting = false;
+  const allBtn = h("button", { type: "button", class: "bd-all", "aria-haspopup": "dialog", hidden: true }, "Show all");
+  const allDlg = h("dialog", { class: "bd-dlg", "aria-labelledby": "bdAllT" });
+  document.body.append(allDlg);
+  allBtn.addEventListener("click", () => {
+    const copy = table.cloneNode(true);
+    copy.removeAttribute("id");
+    for (const r of copy.querySelectorAll(".bd-row[hidden]")) r.hidden = false;
+    const close = h("button", { type: "button", class: "bd-clear", onclick: () => allDlg.close() }, "Close");
+    allDlg.replaceChildren(h("div", { class: "bd-dg" }, h("h3", { id: "bdAllT" }, WATCH ? "Near the edge" : "Names"), h("div", { class: "bd-dt" }, copy), close));
+    if (typeof allDlg.showModal === "function") allDlg.showModal();
+  });
+  function fitRows() {
+    if (fitting) return;
+    fitting = true;
+    try {
+      const rows = [...body.children].filter((r) => r.classList.contains("bd-row") && !r.classList.contains("bd-none"));
+      for (const r of rows) r.hidden = false;
+      let n = rows.length;
+      if (!table.hidden && table.clientHeight > 0) {
+        while (n > 3 && table.scrollHeight > table.clientHeight + 1) rows[--n].hidden = true;
+      }
+      const hid = rows.length - n;
+      allBtn.hidden = hid === 0;
+      allBtn.textContent = hid ? "Show all " + rows.length : "Show all";
+      const sp = modHead && modHead.querySelector(".ui-mod-sp");
+      if (!allBtn.isConnected && sp) sp.append(allBtn);
+    } finally { fitting = false; }
+  }
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => fitRows()).observe(table);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitRows);
 
   function paintRows(animate) {
     if (!st.rows.length) return;
@@ -733,6 +764,7 @@
       clear.addEventListener("click", () => { searchEl.value = ""; st.q = ""; paintRows(false); if (st.view === "map") redrawMap(); searchEl.focus(); });
       body.replaceChildren(h("div", { class: "bd-row bd-none", role: "row", "data-empty": "filtered" },
         h("div", { class: "bd-c", role: "cell" }, h("span", null, "No match"), clear)));
+      fitRows();
       return;
     }
     const first = !st.painted;
@@ -745,6 +777,7 @@
       return r;
     }));
     st.painted = true;
+    fitRows();
     if (!move) return;
     const moved = [];
     for (const r of body.children) {
@@ -1011,6 +1044,7 @@
     const map = st.view === "map";
     table.hidden = map || !st.rows.length;
     if (mapHost) mapHost.hidden = !map || !st.rows.length;
+    fitRows();
     const sortWrap = tools.querySelector(".bd-sort");
     if (sortWrap) sortWrap.hidden = map;
     if (map) redrawMap();
@@ -1060,7 +1094,8 @@
       host.append(h("div", { class: "bd-map-none" }, "No match"));
       return;
     }
-    const H = w < 600 ? Math.round(w * 1.65) : Math.round(Math.min(620, Math.max(400, w * 0.5)));
+    const room = host.clientHeight;
+    const H = room > 160 ? room : w < 600 ? Math.round(w * 1.65) : Math.round(Math.min(620, Math.max(400, w * 0.5)));
     const prem = view.map(({ row }) => Math.abs(num(row.netPrem) || 0));
     const gross = prem.reduce((a, b) => a + b, 0);
     const floor = Math.max(gross * 0.01, 1);
