@@ -114,7 +114,7 @@ const browser = await launch();
 {
   const { context, page } = await openMarket(browser, { alertsStatus: 500 });
   await page.click("#mkT-relations");
-  await page.waitForSelector("#mkRelations .nm-empty", { timeout: 15000 });
+  await page.waitForFunction(() => { const e = document.querySelector("#mkRelations .nm-empty"); return !!e && !/^Reading/.test(e.textContent || ""); }, null, { timeout: 15000 });
   const said = await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent);
   ok(/Unavailable/.test(said) && /HTTP 500/.test(said), "A FAILED READ SAYS SO WITH ITS REASON, NOT 'NO RELATIONS': " + said);
   await context.close();
@@ -122,7 +122,7 @@ const browser = await launch();
 {
   const { context, page } = await openMarket(browser, { alerts: { ...alertsFixture(), rows: alertsFixture().rows.slice(0, 6) } });
   await page.click("#mkT-relations");
-  await page.waitForSelector("#mkRelations .nm-empty", { timeout: 15000 });
+  await page.waitForFunction(() => { const e = document.querySelector("#mkRelations .nm-empty"); return !!e && !/^Reading/.test(e.textContent || ""); }, null, { timeout: 15000 });
   const said = await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent);
   ok(/Not enough to relate/.test(said) && /relations need 40 windows/.test(said), "too few windows says how many are needed: " + said);
   await context.close();
@@ -130,7 +130,7 @@ const browser = await launch();
 {
   const { context, page } = await openMarket(browser, { alerts: { status: "pending", rows: [] } });
   await page.click("#mkT-relations");
-  await page.waitForSelector("#mkRelations .nm-empty", { timeout: 15000 });
+  await page.waitForFunction(() => /not published/.test((document.querySelector("#mkRelations .nm-empty") || {}).textContent || ""), null, { timeout: 15000 });
   ok(/not published/.test(await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent)), "a feed the pipeline has not published is named as such");
   await context.close();
 }
