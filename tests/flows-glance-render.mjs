@@ -154,7 +154,7 @@ const qUp = Math.log(pm.impliedHigh / S), qDn = Math.log(S / pm.impliedLow), pUp
   }, { card, x: X });
   eq(far.e, null, "a report beyond the 20-session horizon draws no step");
   eq(far.n, 21, "and the cone has no extra point");
-  ok(/next 20 sessions/.test(far.why), "and says why");
+  ok(/30 sessions away, past the month shown/.test(far.why), "and says why");
   eq(far.b, 19.5, "a report before the open steps half a session before its session");
 
   const lay = await page.evaluate(({ card, x }) => {

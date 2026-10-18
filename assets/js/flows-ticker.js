@@ -919,9 +919,12 @@
     const ts = [...ol.querySelectorAll(".ft-claim-t")];
     const set = (el, n) => el.style.setProperty("--claim-lines", String(n));
     const over = () => railEl.scrollHeight > railEl.clientHeight + 1;
+    const dis = railEl.querySelector(".ft-dis");
+    if (dis) dis.classList.remove("is-cut");
     let n = 8;
     ts.forEach((el) => set(el, n));
     while (n > 2 && over()) { n--; ts.forEach((el) => set(el, n)); }
+    if (over() && dis) dis.classList.add("is-cut");
     if (over()) return;
     for (let more = true, pass = 0; more && pass < 6; pass++) {
       more = false;

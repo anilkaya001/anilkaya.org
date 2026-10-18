@@ -503,12 +503,10 @@ const settle = async (page) => { await page.waitForSelector('.ftsf[data-motion="
   const a = await page.evaluate(() => ({ rail: !!document.querySelector('.ftg-svg [data-layer="gamma"] rect[data-k]'), tick: document.querySelectorAll(".ftg-xt").length, svg: !!document.querySelector(".ftg-svg"), legend: document.querySelector(".ftg-legend").textContent }));
   eq(a.tick, 0, "a card with no expiries draws no expiry ticks");
   ok(a.svg && !a.rail, "and no rail, while the price chart still draws");
-  await page.locator("#ftTabSurface").click();
-  await page.waitForSelector(".ftsf, .ft-gsurf .ui-silent", { timeout: 8000 });
-  await page.waitForTimeout(300);
-  const b = await page.evaluate(() => ({ text: document.getElementById("ftGSurf").textContent.replace(/\s+/g, " "), silent: document.querySelectorAll("#ftGSurf .ui-silent").length, canvases: document.querySelectorAll("#ftGSurf canvas").length, h: document.getElementById("ftGSurf").getBoundingClientRect().height }));
-  ok(b.silent >= 1 && b.canvases === 0 && /no surface or terrain to draw/.test(b.text), `a fund with neither surface nor smile says why instead of a blank panel (${b.text.slice(0, 120)})`);
-  ok(b.h > 100, "and the panel keeps its size");
+  const b = await page.evaluate(() => { const t = document.getElementById("ftTabSurface"); return { disabled: t.disabled, aria: t.getAttribute("aria-disabled"), title: t.title, view: document.getElementById("ftGMain").dataset.view || "price", hidden: document.getElementById("ftGSurf").hidden }; });
+  ok(b.disabled && b.aria === "true", "a fund with neither surface nor smile has its surface tab disabled instead of opening a blank panel");
+  ok(/^Not on this card: /.test(b.title) && /no strike and expiry gamma for this fund/.test(b.title) && /no fitted smile/i.test(b.title), `and the tab says why (${b.title})`);
+  ok(b.view !== "surface" && b.hidden, "and the price view stays in place");
   eq(page.__errors, [], "no page error");
   await page.context().close();
 
