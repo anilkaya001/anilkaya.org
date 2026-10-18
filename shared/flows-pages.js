@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "325";
+export const ASSET_VERSION = "327";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -449,7 +449,7 @@ const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "
 const homeNetModule = (net) => net ? `
     <section class="ui-card ui-mod hm-mod fn-card" id="hmNet" aria-labelledby="hmNetT">
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="hmNetT">Flow network</h2><span class="ui-mod-sp"></span></header>
-      <div class="fn-host is-slot" id="hmNetHost" data-ambient="1"></div>
+      <div class="fn-host is-slot" id="hmNetHost"></div>
       <i hidden data-defer="home-net" data-src="${v("/assets/js/flows-net.js")}"></i>
     </section>` : "";
 
@@ -924,7 +924,7 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   </div>
   <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
-    <div class="fn-host is-slot" id="uaNet"${owner ? ' data-ambient="1"' : ""}></div>
+    <div class="fn-host is-slot" id="uaNet"></div>
     <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
   </section>
   <div class="fd-chips" id="uaChips"></div>

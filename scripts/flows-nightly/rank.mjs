@@ -1,3 +1,4 @@
+import { OWNER_HOLDINGS } from "../../shared/flows-focus.js";
 import {
   num, quantile, winsorize, robustZ, neutralize, flowPurity, aggressorGamma, bookDisplacement, pathSignature,
   gammaDecayCalendar, positioningQuality, effectiveBreadth, crossFamilyRedundancy, qualityGate, percentileRank,
@@ -55,6 +56,10 @@ export function eligible(row, { skipCap = false } = {}) {
   if (!(callVol + putVol >= UNIVERSE.minOptionVolume)) return false;
   if (!(oi >= UNIVERSE.minOpenInterest)) return false;
   return true;
+}
+
+export function ownerHeld(row) {
+  return !!row && OWNER_HOLDINGS.includes(row.ticker) && row.is_index !== true && num(row.close) > 0;
 }
 
 export const GATED_LIQUIDITY_MARGIN = 0.8;

@@ -292,7 +292,7 @@ try {
   {
     const flow = alerts();
     const want = expected(flow);
-    const { ctx, page } = await mount(browser, { width: 1440, height: 900 });
+    const { ctx, page } = await mount(browser, { width: 1440, height: 900, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
     await page.waitForTimeout(400);
     const st = await stats(page);
     deep(st.layers, want.layers, `the four layers carry the node counts the data implies: ${want.layers.join("-")} (side, sector, name, lean)`);
@@ -653,7 +653,7 @@ try {
   }
 
   {
-    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     await page.waitForTimeout(300);
     const c0 = await camera(page);
@@ -986,7 +986,7 @@ try {
       for (let i = 0; i <= 400; i++) { const t = i / 10, sc = n.scene({ yaw: c.sway * Math.sin(2 * Math.PI * t / c.period), pitch: c.rest[1], t }); seen++; for (const b of f(sc, false)) if (bad.length < 8) bad.push("t=" + t + " " + b); }
       return { bad, seen, sway: c.sway }; })()`);
     for (const width of [1440, 1024, 390]) {
-      const { ctx, page } = await mount(browser, { width, height: 1400 });
+      const { ctx, page } = await mount(browser, { width, height: 1400, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
       const sc0 = await net(page, "return net.scale();");
       eq(sc0.vert, width < 640, `the rows layout is used below 640 px and the columns above (${width})`);
       deep(await restOf(page), [], `SYMMETRY AND THE MONEY SCALE AT REST, ${width}px: layers equally spaced, every stack centred on the midline, chips on one edge per column, sphere radius, band width and the outgoing slices of every node on the one scale, one total on every header, nothing overlapping`);
@@ -1051,7 +1051,7 @@ try {
   }
 
   {
-    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
     const a = await stats(page);
     ok(a.pulses >= a.edges && a.edges > 40, `every band carries light: ${a.pulses} pulses on ${a.edges} bands`);
     const radii = (t) => net(page, "return net.scene({ yaw: 0, pitch: 11, t: arg }).spheres.map((s) => s.r);", t);
@@ -1123,7 +1123,7 @@ try {
   }
 
   {
-    const { ctx, page } = await mount(browser, { width: 1440, height: 1000 });
+    const { ctx, page } = await mount(browser, { width: 1440, height: 1000, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
     const cdp = await ctx.newCDPSession(page);
     await cdp.send("HeapProfiler.enable");
     const heap = async (gc) => { if (gc) await cdp.send("HeapProfiler.collectGarbage"); return (await cdp.send("Runtime.getHeapUsage")).usedSize; };
@@ -1220,7 +1220,7 @@ try {
     for (const f of ["assets/js/flows-net.js", "assets/css/flows-net.css", "assets/js/flows-unusual.js"]) {
       ok(!/\bat (?:the )?(?:ask|bid)\b/i.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} says neither 'at ask' nor 'at bid'`);
     }
-    ok(PAGES.unusualPage({ username: "t", owner: true }).includes('data-ambient="1"') && !PAGES.unusualPage({ username: "t" }).includes("data-ambient"), "only the owner's page tells the network to open on Ambient as well");
+    ok(!PAGES.unusualPage({ username: "t", owner: true }).includes("data-ambient") && !PAGES.unusualPage({ username: "t" }).includes("data-ambient"), "no page tells the network to open on Ambient");
 
     const { ctx, page } = await mount(browser, { width: 1440, height: 1000, owner: false, init: SPY, clock: AT });
     const s0 = await stats(page);
@@ -1313,13 +1313,11 @@ try {
 
   {
     const { ctx, page } = await mount(browser, { width: 1440, height: 1000, owner: true });
-    eq((await stats(page)).ambient, true, "THE OWNER'S ACCOUNT LOADS LIVE AND AMBIENT TOGETHER");
-    const lg = await page.evaluate(() => document.querySelector("#uaNet .fn-legend").textContent);
-    ok(/ambient motion, not data: pulses show a band's size, not individual trades/.test(lg), "with the legend that says what the motion is");
-    await page.evaluate(() => { document.cookie = "fn_ambient=0; Path=/flows"; });
+    eq((await stats(page)).ambient, false, "THE OWNER'S ACCOUNT LOADS LIVE AND SITS STILL UNTIL AMBIENT IS PRESSED");
+    await page.evaluate(() => { document.cookie = "fn_ambient=1; Path=/flows"; });
     await page.reload();
     await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4; }, null, { timeout: 15000 });
-    eq((await stats(page)).ambient, false, "and the reader's own remembered choice wins over the owner default");
+    eq((await stats(page)).ambient, true, "and the reader's own remembered choice wins");
     await ctx.close();
   }
 
@@ -1356,7 +1354,7 @@ try {
       U.freshness.state = keep;
       return got;
     }, flow);
-    deep(out, { closed: true, closedRemembered: false, open: false }, "OUTSIDE THE SESSION Ambient is the default, so the scene is never a still image; a remembered choice wins, and an open session defaults to Live");
+    deep(out, { closed: false, closedRemembered: false, open: false }, "OUTSIDE THE SESSION the scene sits still until Ambient is pressed");
     await page.close();
   }
 } finally {

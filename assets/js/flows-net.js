@@ -397,7 +397,6 @@
       pill.dataset.state = st;
       pill.replaceChildren(UI.glyph(def.g), h("span", { class: "fx-fresh-l" }, at ? h("span", { class: "fn-fw" }, word + " " + MID + " ") : word, at));
       pill.setAttribute("aria-label", "Freshness of the flagged windows: " + def.word + (at ? ", read " + at : ""));
-      if (!chosen && opts.ambient === undefined) setAmb(st === "closed", false);
     }
     const fx = document.getElementById("fxFresh");
     if (fx && window.MutationObserver) {
