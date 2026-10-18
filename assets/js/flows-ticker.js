@@ -402,7 +402,7 @@
     live: () => [h("span", { class: "ft-live" }, glyph("live")), cell("span"), info("the live price", liveInfo)],
     close: () => [glyph("closed"), h("span", null, "Close"), cell("b"), cell("span"), info("the close", closeInfo)],
     close0: () => [glyph("closed"), h("span", null, "Close"), info("the close", closeInfo)],
-    read: () => [glyph("closed"), cell("b"), cell("span"), cell("span"), info("the last read price", readInfo)],
+    read: () => [glyph("closed"), h("span", null, "Last print"), cell("b"), cell("span"), cell("span"), info("the last read price", readInfo)],
     none: () => [],
   };
 
@@ -1075,11 +1075,15 @@
     });
   }
 
+  const CHART_TITLES = { price: "Price, levels and the month ahead", surface: "Volatility surface and dealer gamma terrain" };
+
   function setView(view) {
     const main = $("ftGMain"), a = $("ftGlanceChart"), b = $("ftGSurf");
     if (!main || !a || !b || (view === "surface" && !$("ftSurface"))) return;
     SURF.view = view;
     main.dataset.view = view;
+    const ttl = $("ftGChartT");
+    if (ttl) ttl.textContent = CHART_TITLES[view] || CHART_TITLES.price;
     a.hidden = view === "surface";
     b.hidden = view !== "surface";
     const range = $("ftGRange"), reset = $("ftGReset");
@@ -1096,6 +1100,15 @@
     const seg = UI.segmented("Chart view", [{ label: "Price & levels" }, { label: "Surface & terrain" }], (i) => setView(i === 1 ? "surface" : "price"), SURF.view === "surface" ? 1 : 0);
     const btns = [...seg.querySelectorAll("button")];
     ["ftTabPrice", "ftTabSurface"].forEach((id, i) => { btns[i].id = id; btns[i].dataset.tab = i ? "surface" : "price"; btns[i].setAttribute("aria-controls", i ? "ftGSurf" : "ftGlanceChart"); });
+    const gl = window.FlowsUI && window.FlowsUI.tickerGlance;
+    let em = null;
+    try { em = gl && STATE.card ? gl.model.expiries(STATE.card, window.FlowsQuant || null) : null; } catch (e) { em = null; }
+    if (em && !em.rows.length) {
+      btns[1].disabled = true;
+      btns[1].title = "Not on this card: " + (em.why.gamma || em.why.smile || "no expiries") + (em.why.gamma && em.why.smile ? " " + em.why.smile : "");
+      btns[1].setAttribute("aria-disabled", "true");
+      if (SURF.view === "surface") setView("price");
+    }
     host.append(seg);
     SURF.tabs = seg;
     const reset = $("ftGReset");
@@ -1201,12 +1214,16 @@
     if (on) on.focus({ preventScroll: true });
   }
 
+  const DOCK_WHY = { "m-movelab": "Not for index funds and funds: they have no single-company report or typical day.", "m-worlds": "Not on this card: no fitted smile to draw two worlds from.", "m-hedge": "Not on this card: no priced structures to hedge with.", "m-ideas": "Not on this card: the engine priced no ideas.", "m-network": "Not built for this name.", "m-tape": "Not on this card: no tape was read." };
+
   function paintDock() {
     if (!dockEl) return;
     const mods = DOCK.filter(([m]) => $(m) || (GLANCE.sheet && GLANCE.sheet.cur === m));
+    const gone = DOCK.filter((d) => !mods.includes(d));
     dockEl.hidden = !STATE.glance || !mods.length;
     dockEl.replaceChildren(h("span", { class: "ft-dock-l" }, "Open in place"),
       ...mods.map(([m, label]) => { const b = h("button", { class: "ft-dock-b", type: "button", "data-mod": m, "aria-pressed": "false" }, label); b.addEventListener("click", () => openSheet(m, b)); return b; }),
+      ...gone.map(([m, label]) => h("button", { class: "ft-dock-b", type: "button", disabled: true, "data-mod": m, title: DOCK_WHY[m] || "Not built for this name." }, label)),
       h("span", { class: "ft-dock-sp" }),
       h("a", { class: "ft-dock-a", href: "#ftGrid", "aria-expanded": String(!!STATE.all), onclick: (e) => { e.preventDefault(); closeSheet(true); STATE.all = !STATE.all; showGrid(); paintDock(); if (STATE.all) { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } else window.scrollTo({ top: 0, behavior: "instant" }); } }, STATE.all ? "Back to one screen" : "Every module, as one page"));
   }

@@ -308,10 +308,10 @@ try {
     const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, chart: document.getElementById("ftGlanceChart").getBoundingClientRect().right, rail: document.getElementById("ftReadRail").getBoundingClientRect().left }));
     ok(m.sw <= m.iw && m.chart <= m.rail + 1, "1100 px: the glance layout holds beside the rail with no overflow");
     await page.close();
-    const p2 = await newPage(900, 800);
+    const p2 = await newPage(800, 800);
     await mount(p2, READ);
     const k = await p2.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, stacked: document.getElementById("ftReadRail").getBoundingClientRect().top >= document.getElementById("ftGlanceChart").getBoundingClientRect().bottom - 1 }));
-    ok(k.sw <= k.iw && k.stacked, "900 px: below 1100 the frame stacks the chart over the reading");
+    ok(k.sw <= k.iw && k.stacked, "800 px: below 900 the frame stacks the chart over the reading");
     await p2.close();
   }
 
