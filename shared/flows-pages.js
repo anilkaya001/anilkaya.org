@@ -897,11 +897,14 @@ ${UI_CHART_SCRIPTS}
 
 const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
 
-const feedModule = (id, title, body, { span = "", seg = "" } = {}) => `
-    <section class="ui-card ui-mod ui-enter fd-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
+const feedModule = (id, title, body, { span = "", seg = "", tab = "", free = false } = {}) => `
+    <section class="ui-card ui-mod ui-enter fd-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T"${tab ? ` data-tab="${tab}"` : ""}${free ? " data-free" : ""}>
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${seg}</header>
       ${body}
     </section>`;
+
+const feedTabs = (tabs) => `
+  <div class="fd-tabs" role="tablist" aria-label="Views" id="fdTabs">${tabs.map(([k, t, id], i) => `<button type="button" role="tab" id="fdT-${k}" aria-controls="${id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>`;
 
 const feedHead = (key, title) => `
   <header class="flows-head fd-head" data-fx-hero>
@@ -918,19 +921,21 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
     and what else is scheduled: economic prints and FDA dates.</p>
     <p>Gated: the board was FORBIDDEN from scoring a name that reports inside the gate window.
     It is not a low score. There is no score under it at all.</p>
-    <p>Every day count is measured from the run&#39;s own Eastern date; every price is the last
+    <p>Every day count is measured from the run&#39;s own session date; every price is the last
     completed session&#39;s close. Nothing here is a forecast.</p>
   </div>
   <div class="fd-chips" id="evChips"></div>
-  <div class="ui-grid fd-grid">
-${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`)}
-${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { span: 7 })}
-${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { span: 5 })}
-${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { span: 6 })}
-${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { span: 6 })}
+${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
+  <div class="fd-stage" id="fdStage" data-view="week">
+${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
+${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
+${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
+${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
+${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>
 `, { chrome: false })}
 ${UI_SCRIPT}
+<script src="${v("/assets/js/flows-feed-os.js")}" defer></script>
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
 </body>
 </html>`;
@@ -1005,26 +1010,28 @@ ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
     <p>A dash where a vendor flag belongs means the vendor did not carry that flag on the window,
     which is not the same fact as the flag being off.</p>
   </div>
-  <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard" aria-labelledby="uaNetCardT">
+  <div class="fd-chips" id="uaChips"></div>
+  <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
+  <p class="visually-hidden" id="uaFilterNote" role="status"></p>
+${feedTabs([["network", "Network", "uaNetCard"], ["timeline", "Timeline", "uaTimelineCard"], ["names", "Names", "uaNamesCard"], ["urgency", "Urgency", "uaUrgencyCard"], ["voi", "Vol/OI", "uaFeedCard"], ["surprise", "Surprise", "uaSurpriseCard"]])}
+  <div class="fd-stage" id="fdStage" data-view="network">
+  <section class="ui-card ui-mod ui-enter fn-card fd-mod" id="uaNetCard" aria-labelledby="uaNetCardT" data-tab="network" data-free>
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
     <div class="fn-host is-slot" id="uaNet"></div>
     <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
   </section>
-  <div class="fd-chips" id="uaChips"></div>
-  <div class="fd-filters" id="uaFilters" role="group" aria-label="Narrow the page"></div>
-  <p class="visually-hidden" id="uaFilterNote" role="status"></p>
-  <div class="ui-grid fd-grid">
-${feedModule("uaTimelineCard", "Timeline", `<div class="fd-body" id="uaTimeline"></div>`)}
-${feedModule("uaNamesCard", "Names", `<div class="fd-body" id="uaNames"></div>`, { span: 7 })}
-${feedModule("uaUrgencyCard", "Urgency", `<div class="fd-body" id="uaUrgency"></div>`, { span: 5 })}
-${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"></div>`, { span: 6 })}
-${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { span: 6 })}
+${feedModule("uaTimelineCard", "Timeline", `<div class="fd-body" id="uaTimeline"></div>`, { tab: "timeline" })}
+${feedModule("uaNamesCard", "Names", `<div class="fd-body" id="uaNames"></div>`, { tab: "names" })}
+${feedModule("uaUrgencyCard", "Urgency", `<div class="fd-body" id="uaUrgency"></div>`, { tab: "urgency" })}
+${feedModule("uaFeedCard", "Volume over OI", `<div class="fd-body" id="uaFeed"></div>`, { tab: "voi" })}
+${feedModule("uaSurpriseCard", "Surprise", `<div class="fd-body" id="uaSurprise"></div>`, { tab: "surprise" })}
   </div>
   <i hidden data-defer="flow-below" data-src="${v("/assets/js/flows-unusual-below.js")}"></i>
 `, { chrome: false })}
 ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-fresh.js")}" defer></script>
 <script src="${v("/assets/js/flows-rt.js")}" defer></script>
+<script src="${v("/assets/js/flows-feed-os.js")}" defer></script>
 <script src="${v("/assets/js/flows-unusual.js")}" defer></script>
 </body>
 </html>`;
@@ -1156,8 +1163,8 @@ export function politicalPage({ username = "" } = {}) {
       <section class="pl-panel pl-rail" id="plRail" aria-label="Selected stock"></section>
     </div>
   </div>
-  <dialog class="pl-dlg" id="plAllDlg" aria-labelledby="plAllT"><div class="dg"><h2 id="plAllT"></h2><p id="plAllP"></p><div class="pl-grid3" id="plAllG"></div><div class="x"><button type="button" class="link" id="plAllX">Close</button></div></div></dialog>
-  <dialog class="pl-dlg" id="plTapeDlg" aria-labelledby="plTapeT"><div class="dg"><h2 id="plTapeT"></h2><p id="plTapeP"></p><ul class="pl-tl" id="plTapeL"></ul><div class="x"><button type="button" class="link" id="plTapeX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plAllDlg" aria-labelledby="plAllT"><div class="dg"><h2 id="plAllT">All stocks</h2><p id="plAllP"></p><div class="pl-grid3" id="plAllG"></div><div class="x"><button type="button" class="link" id="plAllX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plTapeDlg" aria-labelledby="plTapeT"><div class="dg"><h2 id="plTapeT">All filings</h2><p id="plTapeP"></p><ul class="pl-tl" id="plTapeL"></ul><div class="x"><button type="button" class="link" id="plTapeX">Close</button></div></div></dialog>
   <dialog class="pl-dlg" id="plInfoDlg" aria-labelledby="plInfoT"><div class="dg"><h2 id="plInfoT">How to read this page</h2><div class="body" id="plInfoB"></div><div class="x"><button type="button" class="link" id="plInfoX">Close</button></div></div></dialog>
 `,
   });

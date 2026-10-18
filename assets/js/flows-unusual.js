@@ -506,7 +506,7 @@
     },
   });
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { flowKit }));
-  if (UI.defer) UI.defer("flow-below", { when: "visible", el: $("uaTimelineCard"), label: "The lower modules" });
+  if (UI.defer) UI.defer("flow-below", { when: "idle", el: $("uaTimelineCard"), label: "The lower modules" });
 
   buildFilters();
   wireInfos();

@@ -1593,7 +1593,7 @@ The Flow page's deferred chunk (F-08 part b), built the way the Home one is. `fl
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-unusual-below.js` |  | flows-flow-below-render, flows-payload-shape |
+| `assets/js/flows-unusual-below.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-payload-shape |
 | `tests/flows-flow-below-render.mjs` |  | flows-flow-below-render |
 
 ### `assets/js/flows-market-below.js`, `tests/flows-market-below-render.mjs`
@@ -1611,8 +1611,8 @@ The flow network, attached as `FlowsUI.net` (`model`, `mount`, `of`) and loaded 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-net.css` |  | flows-net-render |
-| `assets/js/flows-net.js` |  | flows-copy-lint, flows-net-render, flows-payload-shape |
+| `assets/css/flows-net.css` |  | flows-feeds-onescreen, flows-net-render |
+| `assets/js/flows-net.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-net-render, flows-payload-shape |
 
 ### `assets/js/flows-export.js`, `tests/flows-export.mjs`
 
@@ -1631,7 +1631,7 @@ Stylesheets of the Flows pages: the shared system, boards, home, market, ticker,
 |---|---|---|
 | `assets/css/flows-ask.css` |  |  |
 | `assets/css/flows-boards.css` |  |  |
-| `assets/css/flows-feeds.css` |  | flows-events, flows-moves-render |
+| `assets/css/flows-feeds.css` |  | flows-events, flows-feeds-onescreen, flows-moves-render |
 | `assets/css/flows-home.css` |  |  |
 | `assets/css/flows-market.css` |  | flows-skyline-render |
 | `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-render, flows-movelab-render, flows-surface-render, flows-ticker |
@@ -1661,7 +1661,7 @@ Flows page controllers, one IIFE per page: home, boards, market, ticker, premium
 | `assets/js/flows-overview.js` |  | flows-home-below-render, flows-home-composition, flows-payload-shape |
 | `assets/js/flows-strategy.js` |  | flows-defaults-render |
 | `assets/js/flows-ticker.js` |  | fixture-guard, flows, flows-deepen, flows-fixture-guard-render, flows-glance-frame-render, flows-movelab-render and 7 more |
-| `assets/js/flows-unusual.js` |  | flows-flow-below-render, flows-net-render, flows-payload-shape |
+| `assets/js/flows-unusual.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-render, flows-payload-shape |
 
 ### `assets/js/flows-status.js`, `assets/js/flows-status-latency.js`, `assets/js/flows-status-capacity.js`, `assets/js/flows-status-coverage.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs`, `tests/lib/status-world.mjs`
 
@@ -2298,6 +2298,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-events.json` |  | architecture, docs, run |
 | `tests/suites/flows-export.json` |  | architecture, docs, run |
 | `tests/suites/flows-fact-ids.json` |  | architecture, docs, run |
+| `tests/suites/flows-feeds-onescreen.json` |  | architecture, docs, run |
 | `tests/suites/flows-fixture-guard-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-flow-below-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-freshness.json` |  | architecture, docs, run |

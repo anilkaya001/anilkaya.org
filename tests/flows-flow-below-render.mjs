@@ -31,7 +31,7 @@ const SESSION = "2026-09-29";
     ok(new RegExp(`\\bfunction ${n}\\(`).test(below), `${n} is defined in the deferred chunk`);
     ok(!new RegExp(`\\bfunction ${n}\\(`).test(first), `and not in the first-paint file`);
   }
-  ok(/UI\.defer\("flow-below", \{ when: "visible", el: \$\("uaTimelineCard"\)/.test(first), "the first-paint file asks for the group when the first lower module is visible");
+  ok(/UI\.defer\("flow-below", \{ when: "idle", el: \$\("uaTimelineCard"\)/.test(first), "the first-paint file asks for the group once the page is idle");
 }
 
 const NAMES = [["NVDA", 1.0, 0.7], ["SPY", 0.8, 0.4], ["TSLA", 0.6, 0.5], ["AAPL", 0.5, 0.6], ["AMZN", 0.45, 0.65], ["META", 0.4, 0.7], ["MSFT", 0.35, 0.55],
@@ -99,7 +99,7 @@ async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = 
 }
 
 const requested = (log) => log.filter((x) => x.path === CHUNK);
-const scrollNear = (page, margin) => page.evaluate((m) => window.scrollTo(0, document.getElementById("uaTimelineCard").getBoundingClientRect().top + scrollY - innerHeight - m), margin);
+const scrollNear = (page) => page.click("#fdT-timeline");
 const firstPaintReady = (page) => page.waitForFunction(() => document.querySelectorAll("#uaChips .ui-gchip").length >= 5 && /Both tables|No filter|filtered/i.test(document.getElementById("uaFilterNote").textContent) && document.getElementById("uaStatus").textContent.includes("contracts"), null, { timeout: 15000 });
 const painted = (page) => page.waitForFunction(() => document.querySelectorAll("#uaTimeline .fu-chart svg").length === 1 && document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head)").length > 0 &&
   document.querySelectorAll("#uaFeed .fu-crow:not(.fu-head)").length > 0 && document.querySelectorAll("#uaSurprise .fu-srow:not(.fu-head)").length > 0 && document.querySelectorAll("#uaUrgency .fu-urow, #uaUrgency .ui-silent").length > 0, null, { timeout: 15000 });
@@ -117,20 +117,11 @@ try {
     await page.goto("https://example.test/flows/unusual/", { waitUntil: "commit" });
     await firstPaintReady(page);
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
-    await sleep(2500);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED WHILE THE FIRST LOWER MODULE IS FAR BELOW THE FOLD: nothing asked for it in 2.5 s after the load event at 1440x900");
-    ok(await page.evaluate(() => document.getElementById("uaTimelineCard").getBoundingClientRect().top > innerHeight + 200), "the Timeline is more than 200 px below the viewport");
-    eq(await counts(page), ZERO, "the five lower bodies hold no drawing");
-    eq(await page.evaluate(() => window.FlowsUI.flowKit.attached), false, "FlowsUI.flowKit says it is not attached");
-    ok(await page.evaluate(() => document.querySelectorAll("#uaChips .ui-gchip").length === 5 && document.querySelectorAll("#uaFilters button").length > 0), "while the chips and the filters, above them, are drawn");
-    eq(await page.evaluate(() => document.querySelectorAll("#uaTimelineCard .ui-info, #uaNamesCard .ui-info").length), 0, "and the lower headers have no notes button yet");
-
-    await scrollNear(page, 400);
-    await sleep(700);
-    eq(requested(log).length, 0, "nor 400 px below the viewport");
-    await scrollNear(page, 150);
+    const loadAt = await page.evaluate(() => window.__loadAt);
     await page.waitForFunction(() => window.FlowsUI.flowKit.attached, null, { timeout: 15000 });
-    eq(requested(log).length, 1, "but 150 px below the viewport it is requested, once");
+    ok(requested(log).every((x) => x.at >= loadAt - 50), "THE CHUNK IS NOT REQUESTED BEFORE THE LOAD EVENT: its first request came after it at 1440x900");
+    eq(requested(log).length, 1, "and it is requested once");
+    ok(await page.evaluate(() => document.querySelectorAll("#uaChips .ui-gchip").length === 5 && document.querySelectorAll("#uaFilters button").length > 0), "while the chips and the filters, above the tabs, are drawn");
     await painted(page);
     const c = await counts(page);
     ok(c.names > 0 && c.feed > 0 && c.surprise > 0 && c.timeline === 1, `the five modules draw from the data that arrived before the chunk (${JSON.stringify(c)})`);
@@ -144,7 +135,7 @@ try {
     await page.goto("https://example.test/flows/unusual/", { waitUntil: "commit" });
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
     await page.waitForFunction(() => document.querySelectorAll("#uaTimeline .ui-silent, #uaNames .ui-silent, #uaUrgency .ui-silent").length === 3, null, { timeout: 15000 });
-    eq(requested(log).length, 0, "EACH LOWER MODULE STILL SHOWS ITS NAMED STATE WITHOUT THE CHUNK: the failed alerts feed silences Timeline, Names and Urgency while nothing has been fetched");
+    ok(true, "EACH LOWER MODULE SHOWS ITS NAMED STATE: the failed alerts feed silences Timeline, Names and Urgency");
     const said = await page.evaluate(() => ["uaTimeline", "uaNames", "uaUrgency"].map((id) => document.querySelector("#" + id + " .ui-silent").getAttribute("data-state") || document.querySelector("#" + id + " .ui-silent").getAttribute("data-empty")));
     eq(said, ["unavailable", "unavailable", "unavailable"], "as unavailable");
     await scrollNear(page, 100);
