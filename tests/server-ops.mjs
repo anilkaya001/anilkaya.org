@@ -278,8 +278,8 @@ function build(f, over = {}) {
 {
   const w = workerSource();
   expect(w, /flowsOpsRows\(\{/, { min: 1, max: 1, why: "the Worker mounts the ops family once" });
-  expect(w, /meter: \(\) => state\.vendorMeter/, { min: 1, max: 1, why: "the family is handed this isolate's own vendor reading" });
-  expect(w, /state\.vendorMeter = newerMeter\(state\.vendorMeter, seen\)/, { min: 1, max: 1, why: "and uwFetch, the one door every Worker vendor call passes, is where it is taken, before the status is judged" });
+  expect(w, /meter: \(\) => state\.keyCounter/, { min: 1, max: 1, why: "the family is handed this isolate's own vendor reading" });
+  expect(w, /state\.keyCounter = newerMeter\(state\.keyCounter, seen\)/, { min: 1, max: 1, why: "and uwFetch, the one door every Worker vendor call passes, is where it is taken, before the status is judged" });
   ok(/const seen = vendorMeter\(response\.headers, Date\.now\(\)\);[\s\S]{0,260}response\.status === 429/.test(w), "the counter header is read from a 429 as well as from a success");
   for (const f of ["server/ops.js", "server/routes/flows-ops.js"]) {
     const t = moduleSource(f);

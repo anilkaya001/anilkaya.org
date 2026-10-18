@@ -909,7 +909,7 @@ const cronMinutes = (cron) => {
   const clockMigration = read("migrations/0011_flows_clock_tier1.sql");
   const verdictMigration = read("migrations/0012_flows_clock_verdict.sql");
   const summaryMigration = read("migrations/0014_flows_clock_summary.sql");
-  const meterMigration = read("migrations/0022_flows_vendor_meter.sql");
+  const meterMigration = read("migrations/0024_flows_vendor_meter.sql");
   const schema = read("schema.sql");
   const clockBlock = /CREATE TABLE IF NOT EXISTS flows_clock \([\s\S]*?\n\);\n/;
   ok(schema.includes(migration.replace(clockBlock, "").trim().split("\n\n")[0].trim()) &&

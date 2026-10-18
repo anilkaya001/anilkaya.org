@@ -69,7 +69,7 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   ok(W.LIVE_SCHEMA_SQL.includes(L.LEDGER_SCHEMA_SQL), "and the Worker's idempotent bootstrap batch carries it, so a database that predates the table gets it on the first Flows request");
   const migration = read("migrations/0015_flows_ledger.sql");
   const fromMigration = sqliteD1({ schema: "" });
-  const later = read("migrations/0022_flows_vendor_meter.sql").split("\n").filter((line) => /^ALTER TABLE flows_ledger /.test(line)).join("\n");
+  const later = read("migrations/0024_flows_vendor_meter.sql").split("\n").filter((line) => /^ALTER TABLE flows_ledger /.test(line)).join("\n");
   fromMigration.db.exec(migration + "\n" + later);
   deep(sqlColumns(fromMigration.db, "flows_ledger"), sqlColumns(shipped.db, "flows_ledger"), "and so do migrations/0015_flows_ledger.sql and the four columns 0022 adds");
   ok(/CREATE TABLE IF NOT EXISTS flows_ledger/.test(SCHEMA) && migration.trim().endsWith(");"), "a migration that can be applied twice");
