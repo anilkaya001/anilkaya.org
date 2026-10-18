@@ -695,6 +695,7 @@
       this.timer = setInterval(run, 60000);
     },
   };
+  if ($("mkNet") || $("mkRelations")) ALERTS.kick();
 
   const FIT_MIN = 3;
   const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "mkFitT" });
