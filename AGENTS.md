@@ -1513,25 +1513,25 @@ flows-coverage            flows-d1-budget           flows-data-fixes          fl
 flows-defer-render        flows-dispatch-check      flows-dispersion          flows-door-v2
 flows-dossier             flows-dossier-reads       flows-engine-budget       flows-fact-ids
 flows-flow-below-render   flows-freshness           flows-garch               flows-home-below-render
-flows-home-composition    flows-home-net-render     flows-ledger              flows-legs
-flows-live                flows-market-below-render flows-market-floor-render flows-market-onescreen
-flows-market-river-render flows-market-visual       flows-meter-worker        flows-mint
-flows-moves-render        flows-net-map-render      flows-neuron              flows-neuron-screen
-flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
-flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
-flows-positioning         flows-probe               flows-public              flows-pulse
-flows-quant               flows-quant-audit         flows-quant-card          flows-read-failures
-flows-readers             flows-reading             flows-reading-worker      flows-reads
-flows-ready               flows-record              flows-registry-contract   flows-relations-render
-flows-rt                  flows-scores              flows-sign                flows-skyline-render
-flows-starts              flows-stats               flows-stock               flows-tape-stats
-flows-targets             flows-time                flows-truth               flows-universe
-flows-variation           flows-vendor-budget       flows-verdict             flows-vol
-flows-warnings            flows-weight              flows-ws-probe            lab-write
-launch-readiness          markets                   mastery                   pipeline
-route-matrix              server-ai                 server-desk               server-ingest
-server-kernel             server-log                server-ops                server-pages
-server-router             staging
+flows-home-composition    flows-home-net-render     flows-home-onescreen      flows-ledger
+flows-legs                flows-live                flows-market-below-render flows-market-floor-render
+flows-market-onescreen    flows-market-river-render flows-market-visual       flows-meter-worker
+flows-mint                flows-moves-render        flows-net-map-render      flows-neuron
+flows-neuron-screen       flows-overlay             flows-payload-shape       flows-permits
+flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts          flows-political
+flows-political-render    flows-positioning         flows-probe               flows-public
+flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
+flows-read-failures       flows-readers             flows-reading             flows-reading-worker
+flows-reads               flows-ready               flows-record              flows-registry-contract
+flows-relations-render    flows-rt                  flows-scores              flows-sign
+flows-skyline-render      flows-starts              flows-stats               flows-stock
+flows-tape-stats          flows-targets             flows-time                flows-truth
+flows-universe            flows-variation           flows-vendor-budget       flows-verdict
+flows-vol                 flows-warnings            flows-weight              flows-ws-probe
+lab-write                 launch-readiness          markets                   mastery
+pipeline                  route-matrix              server-ai                 server-desk
+server-ingest             server-kernel             server-log                server-ops
+server-pages              server-router             staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
