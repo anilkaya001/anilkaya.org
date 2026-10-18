@@ -16,7 +16,7 @@ in `tests/suites/<name>.json` name it, from those files' own fields; `**` covers
 - [site](#site): The landing page, articles and site-wide assets (36 files)
 - [lab](#lab): The Econometrics Lab: courses, review, placement, projects and their storage (133 files)
 - [worker](#worker): The Worker, its configuration, schema and migrations (52 files)
-- [flows-server](#flows-server): Flows logic shared by the Worker, the pipeline and the browser bundles (135 files)
+- [flows-server](#flows-server): Flows logic shared by the Worker, the pipeline and the browser bundles (147 files)
 - [flows-rail](#flows-rail): The real-time rail (5 files)
 - [flows-pipeline](#flows-pipeline): The nightly pipeline, the live leg and their tools (58 files)
 - [flows-client](#flows-client): Flows pages, scripts and styles (94 files)
@@ -507,7 +507,7 @@ Routing, response policy, OAuth, API, D1 synchronization, SEO rewriting.
 
 | File | Exports | Suites |
 |---|---|---|
-| `worker.js` | `worker.js#Pulse`, `worker.js#default` | academy, architecture, ci-affected, contracts, docs, fixture-guard and 44 more |
+| `worker.js` | `worker.js#Pulse`, `worker.js#default` | academy, architecture, ci-affected, contracts, docs, fixture-guard and 45 more |
 
 ### `_headers`
 
@@ -531,8 +531,8 @@ The Worker-only HTTP kernel. `http.js`: `HttpError` (with `HttpError.of(code, me
 
 | File | Exports | Suites |
 |---|---|---|
-| `server/errors.js` | `server/errors.js#ERRORS`, `server/errors.js#errorEntry` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 20 more |
-| `server/http.js` | `server/http.js#HttpError`, `server/http.js#MAX_JSON_BYTES`, `server/http.js#apiError`, `server/http.js#edgeCache`, `server/http.js#errorText`, `server/http.js#fixtureRefused`, `server/http.js#internalKey`, `server/http.js#json`, `server/http.js#keepAlive`, `server/http.js#readBounded`, `server/http.js#readJSON`, `server/http.js#redirect`, `server/http.js#requireMethod`, `server/http.js#requireMutationOwner`, `server/http.js#requireReadOwnerIfPresent`, `server/http.js#requireSameOrigin`, `server/http.js#requireTicker`, `server/http.js#tickerParam` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 20 more |
+| `server/errors.js` | `server/errors.js#ERRORS`, `server/errors.js#errorEntry` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 21 more |
+| `server/http.js` | `server/http.js#HttpError`, `server/http.js#MAX_JSON_BYTES`, `server/http.js#apiError`, `server/http.js#edgeCache`, `server/http.js#errorText`, `server/http.js#fixtureRefused`, `server/http.js#internalKey`, `server/http.js#json`, `server/http.js#keepAlive`, `server/http.js#readBounded`, `server/http.js#readJSON`, `server/http.js#redirect`, `server/http.js#requireMethod`, `server/http.js#requireMutationOwner`, `server/http.js#requireReadOwnerIfPresent`, `server/http.js#requireSameOrigin`, `server/http.js#requireTicker`, `server/http.js#tickerParam` | fixture-guard, flows, flows-basis, flows-coverage, flows-dispatch-check, flows-door-v2 and 21 more |
 | `server/log.js` | `server/log.js#failureEntry`, `server/log.js#failureLine`, `server/log.js#logFailure` | flows, flows-basis, flows-door-v2, flows-dossier-reads, flows-engine-budget, flows-ledger and 7 more |
 | `shared/flows-log.js` | `shared/flows-log.js#emitFailure`, `shared/flows-log.js#errorText`, `shared/flows-log.js#failureEntry`, `shared/flows-log.js#failureLine` | academy, contracts, fixture-guard, flows, flows-ai-broker, flows-alerts and 78 more |
 | `tests/server-kernel.mjs` |  | server-kernel |
@@ -544,7 +544,7 @@ The Worker's route table, consulted first by `route()` and falling through to th
 
 | File | Exports | Suites |
 |---|---|---|
-| `server/router.js` | `server/router.js#createRouter` | flows, flows-basis, flows-coverage, flows-door-v2, flows-dossier-reads, flows-engine-budget and 15 more |
+| `server/router.js` | `server/router.js#createRouter` | flows, flows-basis, flows-coverage, flows-door-v2, flows-dossier-reads, flows-engine-budget and 16 more |
 | `server/routes/flows-read.js` | `server/routes/flows-read.js#flowsReadRows` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-ledger, flows-legs and 8 more |
 | `tests/server-router.mjs` |  | server-router |
 
@@ -574,7 +574,7 @@ The flows-ingest family, the store and the schema registry. `flowsIngestRows(dep
 |---|---|---|
 | `server/routes/flows-ingest.js` | `server/routes/flows-ingest.js#contentRefusal`, `server/routes/flows-ingest.js#flowsIngestRows` | fixture-guard, flows, flows-alerts, flows-basis, flows-door-v2, flows-dossier-reads and 10 more |
 | `server/schema.js` | `server/schema.js#FLOWS_REGISTRY`, `server/schema.js#FLOWS_SCHEMA_SQL`, `server/schema.js#LEDGER_ADDED_COLUMNS`, `server/schema.js#PAYLOAD_ADDED_COLUMNS`, `server/schema.js#addedOf`, `server/schema.js#applySchema`, `server/schema.js#checkAdded`, `server/schema.js#columnProbe`, `server/schema.js#registryOf`, `server/schema.js#upgradeColumns`, `server/schema.js#upgradeTables`, `server/schema.js#withAddedColumns` | academy, flows, flows-ai-broker, flows-basis, flows-d1-budget, flows-door-v2 and 11 more |
-| `server/store.js` | `server/store.js#DATED_ARCHIVE_KEY_RE`, `server/store.js#INGEST_LIST_KINDS`, `server/store.js#INGEST_LIST_MAX`, `server/store.js#INGEST_META_KEYS_MAX`, `server/store.js#INGEST_VIEW_KEY_RE`, `server/store.js#coverageSql`, `server/store.js#createFlowsStore`, `server/store.js#ingestKeyParts`, `server/store.js#ingestListSql`, `server/store.js#ingestListing`, `server/store.js#ingestMetadata`, `server/store.js#storedFrom` | flows, flows-alerts, flows-basis, flows-d1-budget, flows-deepen, flows-door-v2 and 13 more |
+| `server/store.js` | `server/store.js#DATED_ARCHIVE_KEY_RE`, `server/store.js#INGEST_LIST_KINDS`, `server/store.js#INGEST_LIST_MAX`, `server/store.js#INGEST_META_KEYS_MAX`, `server/store.js#INGEST_VIEW_KEY_RE`, `server/store.js#coverageSql`, `server/store.js#createFlowsStore`, `server/store.js#ingestKeyParts`, `server/store.js#ingestListSql`, `server/store.js#ingestListing`, `server/store.js#ingestMetadata`, `server/store.js#storedFrom` | flows, flows-alerts, flows-basis, flows-d1-budget, flows-deepen, flows-door-v2 and 15 more |
 | `tests/server-ingest.mjs` |  | server-ingest |
 
 ### `shared/flows-door.js`, `server/door.js`, `tests/flows-door-v2.mjs`
@@ -584,7 +584,7 @@ The ingest door v2 in warn mode (B3a and B3), behind `FLOWS_DOOR_V2` (`wrangler.
 | File | Exports | Suites |
 |---|---|---|
 | `server/door.js` | `server/door.js#createDoor` | flows, flows-basis, flows-door-v2, flows-dossier-reads, flows-engine-budget, flows-ledger and 7 more |
-| `shared/flows-door.js` | `shared/flows-door.js#COLLAPSE_PRODUCTS`, `shared/flows-door.js#DOOR_LIMITS`, `shared/flows-door.js#DOOR_MODES`, `shared/flows-door.js#PRODUCTS`, `shared/flows-door.js#WOULD_ORDER`, `shared/flows-door.js#assess`, `shared/flows-door.js#canonicalize`, `shared/flows-door.js#casVerdict`, `shared/flows-door.js#compareTuple`, `shared/flows-door.js#doorMode`, `shared/flows-door.js#horizonSession`, `shared/flows-door.js#inspect`, `shared/flows-door.js#membershipFlag`, `shared/flows-door.js#parseHashHeader`, `shared/flows-door.js#planOf`, `shared/flows-door.js#producerOf`, `shared/flows-door.js#productOf`, `shared/flows-door.js#regressionOf`, `shared/flows-door.js#sha256Hex`, `shared/flows-door.js#tickerOfKey`, `shared/flows-door.js#tupleOf` | flows, flows-basis, flows-deepen, flows-door-v2, flows-dossier-reads, flows-engine-budget and 10 more |
+| `shared/flows-door.js` | `shared/flows-door.js#COLLAPSE_PRODUCTS`, `shared/flows-door.js#DOOR_LIMITS`, `shared/flows-door.js#DOOR_MODES`, `shared/flows-door.js#PRODUCTS`, `shared/flows-door.js#WOULD_ORDER`, `shared/flows-door.js#assess`, `shared/flows-door.js#canonicalize`, `shared/flows-door.js#casVerdict`, `shared/flows-door.js#compareTuple`, `shared/flows-door.js#doorMode`, `shared/flows-door.js#horizonSession`, `shared/flows-door.js#inspect`, `shared/flows-door.js#membershipFlag`, `shared/flows-door.js#parseHashHeader`, `shared/flows-door.js#planOf`, `shared/flows-door.js#producerOf`, `shared/flows-door.js#productOf`, `shared/flows-door.js#regressionOf`, `shared/flows-door.js#sha256Hex`, `shared/flows-door.js#tickerOfKey`, `shared/flows-door.js#tupleOf` | flows, flows-basis, flows-deepen, flows-door-v2, flows-dossier-reads, flows-engine-budget and 11 more |
 | `tests/flows-door-v2.mjs` |  | flows-door-v2 |
 
 ### `server/routes/flows-pages.js`, `tests/server-pages.mjs`
@@ -618,7 +618,7 @@ Worker source of truth: name, entrypoint, static directory, `ASSETS`, D1 `DB`, t
 
 | File | Exports | Suites |
 |---|---|---|
-| `wrangler.toml` |  | ci-affected, contracts, flows-d1-budget, flows-engine-budget, flows-freshness, flows-home-net-render and 14 more |
+| `wrangler.toml` |  | ci-affected, contracts, flows-d1-budget, flows-engine-budget, flows-freshness, flows-home-net-render and 15 more |
 
 ### `migrations/*.sql`
 
@@ -916,7 +916,7 @@ The `universe` payload's column store (`UNIVERSE_COLUMNS`, one integer column pe
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-cross.js` | `shared/flows-cross.js#CROSS_SCHEMA_VERSION`, `shared/flows-cross.js#IMPLIED_CORR_MIN_COVERAGE`, `shared/flows-cross.js#SILENCE`, `shared/flows-cross.js#UNIVERSE_BUDGET_BYTES`, `shared/flows-cross.js#UNIVERSE_COLUMNS`, `shared/flows-cross.js#UNIVERSE_PERCENTILES`, `shared/flows-cross.js#UNIVERSE_PROJECTION_KEY`, `shared/flows-cross.js#UNIVERSE_PROJECTION_MAX`, `shared/flows-cross.js#UNIVERSE_SHOCK`, `shared/flows-cross.js#addDays`, `shared/flows-cross.js#bandPosition`, `shared/flows-cross.js#buildUniverse`, `shared/flows-cross.js#compactNumbers`, `shared/flows-cross.js#decodeColumn`, `shared/flows-cross.js#dollarVolume`, `shared/flows-cross.js#easternDayOfInstant`, `shared/flows-cross.js#encodeColumn`, `shared/flows-cross.js#firstPositive`, `shared/flows-cross.js#frontStress`, `shared/flows-cross.js#gammaDollarsPerAdv`, `shared/flows-cross.js#gexPerAdv`, `shared/flows-cross.js#impliedCorrelation`, `shared/flows-cross.js#impliedMoveOf`, `shared/flows-cross.js#isWeekdayIso`, `shared/flows-cross.js#isoDay`, `shared/flows-cross.js#ivChange`, `shared/flows-cross.js#ivChangeRel`, `shared/flows-cross.js#mean`, `shared/flows-cross.js#medianOf`, `shared/flows-cross.js#netTilt`, `shared/flows-cross.js#nextWeekdayIso`, `shared/flows-cross.js#ownZ`, `shared/flows-cross.js#pctOf`, `shared/flows-cross.js#pctRanks`, `shared/flows-cross.js#priorWeekdayIso`, `shared/flows-cross.js#projectUniverse`, `shared/flows-cross.js#projectionColumns`, `shared/flows-cross.js#ratioMinusOne`, `shared/flows-cross.js#sampleSd`, `shared/flows-cross.js#sectorTilts`, `shared/flows-cross.js#sessionsBetween`, `shared/flows-cross.js#sharesPerAdv`, `shared/flows-cross.js#shortIntOf`, `shared/flows-cross.js#termSlope`, `shared/flows-cross.js#universeColumn`, `shared/flows-cross.js#universeValue`, `shared/flows-cross.js#vegaDollarsPerAdv`, `shared/flows-cross.js#vnum`, `shared/flows-cross.js#vrpTrailing`, `shared/flows-cross.js#vstr`, `shared/flows-cross.js#weekdaysAhead`, `shared/flows-cross.js#zScores` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-ai-salvage and 49 more |
+| `shared/flows-cross.js` | `shared/flows-cross.js#CROSS_SCHEMA_VERSION`, `shared/flows-cross.js#IMPLIED_CORR_MIN_COVERAGE`, `shared/flows-cross.js#SILENCE`, `shared/flows-cross.js#UNIVERSE_BUDGET_BYTES`, `shared/flows-cross.js#UNIVERSE_COLUMNS`, `shared/flows-cross.js#UNIVERSE_PERCENTILES`, `shared/flows-cross.js#UNIVERSE_PROJECTION_KEY`, `shared/flows-cross.js#UNIVERSE_PROJECTION_MAX`, `shared/flows-cross.js#UNIVERSE_SHOCK`, `shared/flows-cross.js#addDays`, `shared/flows-cross.js#bandPosition`, `shared/flows-cross.js#buildUniverse`, `shared/flows-cross.js#compactNumbers`, `shared/flows-cross.js#decodeColumn`, `shared/flows-cross.js#dollarVolume`, `shared/flows-cross.js#easternDayOfInstant`, `shared/flows-cross.js#encodeColumn`, `shared/flows-cross.js#firstPositive`, `shared/flows-cross.js#frontStress`, `shared/flows-cross.js#gammaDollarsPerAdv`, `shared/flows-cross.js#gexPerAdv`, `shared/flows-cross.js#impliedCorrelation`, `shared/flows-cross.js#impliedMoveOf`, `shared/flows-cross.js#isWeekdayIso`, `shared/flows-cross.js#isoDay`, `shared/flows-cross.js#ivChange`, `shared/flows-cross.js#ivChangeRel`, `shared/flows-cross.js#mean`, `shared/flows-cross.js#medianOf`, `shared/flows-cross.js#netTilt`, `shared/flows-cross.js#nextWeekdayIso`, `shared/flows-cross.js#ownZ`, `shared/flows-cross.js#pctOf`, `shared/flows-cross.js#pctRanks`, `shared/flows-cross.js#priorWeekdayIso`, `shared/flows-cross.js#projectUniverse`, `shared/flows-cross.js#projectionColumns`, `shared/flows-cross.js#ratioMinusOne`, `shared/flows-cross.js#sampleSd`, `shared/flows-cross.js#sectorTilts`, `shared/flows-cross.js#sessionsBetween`, `shared/flows-cross.js#sharesPerAdv`, `shared/flows-cross.js#shortIntOf`, `shared/flows-cross.js#termSlope`, `shared/flows-cross.js#universeColumn`, `shared/flows-cross.js#universeValue`, `shared/flows-cross.js#vegaDollarsPerAdv`, `shared/flows-cross.js#vnum`, `shared/flows-cross.js#vrpTrailing`, `shared/flows-cross.js#vstr`, `shared/flows-cross.js#weekdaysAhead`, `shared/flows-cross.js#zScores` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-ai-salvage and 51 more |
 
 ### `shared/flows-activity.js`, `scripts/flows-legs/activity.mjs`
 
@@ -989,7 +989,7 @@ The per-name card: schema version, panels, quiet and unavailable states.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-card.js` | `shared/flows-card.js#CARD_SCHEMA_VERSION`, `shared/flows-card.js#COHORT_NOTES`, `shared/flows-card.js#COHORT_ROWS`, `shared/flows-card.js#CROSS_FEEDS`, `shared/flows-card.js#CROSS_NOTES`, `shared/flows-card.js#CROSS_ROWS`, `shared/flows-card.js#GAMMA_FLOW_READS`, `shared/flows-card.js#HORIZON_SESSIONS`, `shared/flows-card.js#LEVEL_KINDS`, `shared/flows-card.js#MAX_PAIN_MIN_SHARE`, `shared/flows-card.js#PIN_LINES`, `shared/flows-card.js#POLARITY`, `shared/flows-card.js#READ_FAILURES_MAX`, `shared/flows-card.js#READ_FAILURE_PANELS`, `shared/flows-card.js#RICHNESS_LINE`, `shared/flows-card.js#SMA_SESSIONS`, `shared/flows-card.js#SPOT_EXPOSURE_PAGE`, `shared/flows-card.js#SURFACE_EXPIRIES`, `shared/flows-card.js#SURFACE_OI_BASIS`, `shared/flows-card.js#SURFACE_OI_LEGS`, `shared/flows-card.js#WALL_EDGE_NOTE`, `shared/flows-card.js#applyReadFailures`, `shared/flows-card.js#buildCalendar`, `shared/flows-card.js#buildCard`, `shared/flows-card.js#buildCohort`, `shared/flows-card.js#buildCongress`, `shared/flows-card.js#buildContext`, `shared/flows-card.js#buildDisplacement`, `shared/flows-card.js#buildGammaProfile`, `shared/flows-card.js#buildLevels`, `shared/flows-card.js#buildMarketCross`, `shared/flows-card.js#buildPath`, `shared/flows-card.js#buildPricedMove`, `shared/flows-card.js#buildSurface`, `shared/flows-card.js#buildVariation`, `shared/flows-card.js#expiryGammaShare`, `shared/flows-card.js#failedRead`, `shared/flows-card.js#indexCrossFeed`, `shared/flows-card.js#indexMarketCross`, `shared/flows-card.js#lastRangeOf`, `shared/flows-card.js#measureOiBasis`, `shared/flows-card.js#measureOrder`, `shared/flows-card.js#numOrNull`, `shared/flows-card.js#ok`, `shared/flows-card.js#panelLead`, `shared/flows-card.js#pickMaxPain`, `shared/flows-card.js#pickMaxPainRow`, `shared/flows-card.js#pinReading`, `shared/flows-card.js#polarityOf`, `shared/flows-card.js#quiet`, `shared/flows-card.js#readCrossFeed`, `shared/flows-card.js#regimeLabel`, `shared/flows-card.js#saidMagnitude`, `shared/flows-card.js#unavailable`, `shared/flows-card.js#varianceRiskPremium` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 15 more |
+| `shared/flows-card.js` | `shared/flows-card.js#CARD_SCHEMA_VERSION`, `shared/flows-card.js#COHORT_NOTES`, `shared/flows-card.js#COHORT_ROWS`, `shared/flows-card.js#CROSS_FEEDS`, `shared/flows-card.js#CROSS_NOTES`, `shared/flows-card.js#CROSS_ROWS`, `shared/flows-card.js#GAMMA_FLOW_READS`, `shared/flows-card.js#HORIZON_SESSIONS`, `shared/flows-card.js#LEVEL_KINDS`, `shared/flows-card.js#MAX_PAIN_MIN_SHARE`, `shared/flows-card.js#PIN_LINES`, `shared/flows-card.js#POLARITY`, `shared/flows-card.js#READ_FAILURES_MAX`, `shared/flows-card.js#READ_FAILURE_PANELS`, `shared/flows-card.js#RICHNESS_LINE`, `shared/flows-card.js#SMA_SESSIONS`, `shared/flows-card.js#SPOT_EXPOSURE_PAGE`, `shared/flows-card.js#SURFACE_EXPIRIES`, `shared/flows-card.js#SURFACE_OI_BASIS`, `shared/flows-card.js#SURFACE_OI_LEGS`, `shared/flows-card.js#WALL_EDGE_NOTE`, `shared/flows-card.js#applyReadFailures`, `shared/flows-card.js#buildCalendar`, `shared/flows-card.js#buildCard`, `shared/flows-card.js#buildCohort`, `shared/flows-card.js#buildCongress`, `shared/flows-card.js#buildContext`, `shared/flows-card.js#buildDisplacement`, `shared/flows-card.js#buildGammaProfile`, `shared/flows-card.js#buildLevels`, `shared/flows-card.js#buildMarketCross`, `shared/flows-card.js#buildPath`, `shared/flows-card.js#buildPricedMove`, `shared/flows-card.js#buildSurface`, `shared/flows-card.js#buildVariation`, `shared/flows-card.js#expiryGammaShare`, `shared/flows-card.js#failedRead`, `shared/flows-card.js#indexCrossFeed`, `shared/flows-card.js#indexMarketCross`, `shared/flows-card.js#lastRangeOf`, `shared/flows-card.js#measureOiBasis`, `shared/flows-card.js#measureOrder`, `shared/flows-card.js#numOrNull`, `shared/flows-card.js#ok`, `shared/flows-card.js#panelLead`, `shared/flows-card.js#pickMaxPain`, `shared/flows-card.js#pickMaxPainRow`, `shared/flows-card.js#pinReading`, `shared/flows-card.js#polarityOf`, `shared/flows-card.js#quiet`, `shared/flows-card.js#readCrossFeed`, `shared/flows-card.js#regimeLabel`, `shared/flows-card.js#saidMagnitude`, `shared/flows-card.js#unavailable`, `shared/flows-card.js#varianceRiskPremium` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 16 more |
 
 ### `shared/flows-catalysts.js`
 
@@ -1053,7 +1053,7 @@ Joins score rows to prices for the track overlay.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-overlay.js` | `shared/flows-overlay.js#OVERLAY_NOTES`, `shared/flows-overlay.js#joinScoreToPrice`, `shared/flows-overlay.js#scoreRowFor` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 16 more |
+| `shared/flows-overlay.js` | `shared/flows-overlay.js#OVERLAY_NOTES`, `shared/flows-overlay.js#joinScoreToPrice`, `shared/flows-overlay.js#scoreRowFor` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 17 more |
 
 ### `shared/flows-ownership.js`
 
@@ -1109,7 +1109,7 @@ The pulse payload shapers: tide, totals, OI change, net impact and insiders.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-pulse.js` | `shared/flows-pulse.js#PULSE_CAPS`, `shared/flows-pulse.js#PULSE_FEEDS`, `shared/flows-pulse.js#PULSE_NOTES`, `shared/flows-pulse.js#buildPulse`, `shared/flows-pulse.js#shapeDarkpool`, `shared/flows-pulse.js#shapeInsiders`, `shared/flows-pulse.js#shapeNetImpact`, `shared/flows-pulse.js#shapeOiChange`, `shared/flows-pulse.js#shapeSeasonality`, `shared/flows-pulse.js#shapeTide`, `shared/flows-pulse.js#shapeTotals`, `shared/flows-pulse.js#unwrapRows` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 16 more |
+| `shared/flows-pulse.js` | `shared/flows-pulse.js#PULSE_CAPS`, `shared/flows-pulse.js#PULSE_FEEDS`, `shared/flows-pulse.js#PULSE_NOTES`, `shared/flows-pulse.js#buildPulse`, `shared/flows-pulse.js#shapeDarkpool`, `shared/flows-pulse.js#shapeInsiders`, `shared/flows-pulse.js#shapeNetImpact`, `shared/flows-pulse.js#shapeOiChange`, `shared/flows-pulse.js#shapeSeasonality`, `shared/flows-pulse.js#shapeTide`, `shared/flows-pulse.js#shapeTotals`, `shared/flows-pulse.js#unwrapRows` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 17 more |
 
 ### `shared/flows-quant-*.js`
 
@@ -1159,7 +1159,7 @@ Per-stock vendor reads shaped for the ticker: dark pool, OI change, term structu
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-stock.js` | `shared/flows-stock.js#STOCK_CAPS`, `shared/flows-stock.js#STOCK_NOTES`, `shared/flows-stock.js#buildVolContext`, `shared/flows-stock.js#shapeIvRank`, `shared/flows-stock.js#shapeStockDarkpool`, `shared/flows-stock.js#shapeStockOiChange`, `shared/flows-stock.js#shapeTermStructure` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 16 more |
+| `shared/flows-stock.js` | `shared/flows-stock.js#STOCK_CAPS`, `shared/flows-stock.js#STOCK_NOTES`, `shared/flows-stock.js#buildVolContext`, `shared/flows-stock.js#shapeIvRank`, `shared/flows-stock.js#shapeStockDarkpool`, `shared/flows-stock.js#shapeStockOiChange`, `shared/flows-stock.js#shapeTermStructure` | flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2, flows-engine-budget and 17 more |
 
 ### `shared/flows-universe.js`
 
@@ -1175,7 +1175,7 @@ Unusual-activity rows, volume and open-interest floors, and the banned-claims le
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-unusual.js` | `shared/flows-unusual.js#OI_BASIS_MIN_SEEN`, `shared/flows-unusual.js#UA_BANNED_CLAIMS`, `shared/flows-unusual.js#UA_MIN_OI`, `shared/flows-unusual.js#UA_MIN_VOLUME`, `shared/flows-unusual.js#UA_NAMES`, `shared/flows-unusual.js#UA_PER_NAME_MAX`, `shared/flows-unusual.js#UA_PER_NAME_MIN`, `shared/flows-unusual.js#UA_ROWS`, `shared/flows-unusual.js#UNUSUAL_NOTES`, `shared/flows-unusual.js#buildUnusualRows`, `shared/flows-unusual.js#describeFlowAlerts`, `shared/flows-unusual.js#describeOiBasis`, `shared/flows-unusual.js#perNameCap`, `shared/flows-unusual.js#poolOiBasis`, `shared/flows-unusual.js#rankUnusual`, `shared/flows-unusual.js#rankUnusualNames`, `shared/flows-unusual.js#unusualNameRow` | contracts, flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2 and 17 more |
+| `shared/flows-unusual.js` | `shared/flows-unusual.js#OI_BASIS_MIN_SEEN`, `shared/flows-unusual.js#UA_BANNED_CLAIMS`, `shared/flows-unusual.js#UA_MIN_OI`, `shared/flows-unusual.js#UA_MIN_VOLUME`, `shared/flows-unusual.js#UA_NAMES`, `shared/flows-unusual.js#UA_PER_NAME_MAX`, `shared/flows-unusual.js#UA_PER_NAME_MIN`, `shared/flows-unusual.js#UA_ROWS`, `shared/flows-unusual.js#UNUSUAL_NOTES`, `shared/flows-unusual.js#buildUnusualRows`, `shared/flows-unusual.js#describeFlowAlerts`, `shared/flows-unusual.js#describeOiBasis`, `shared/flows-unusual.js#perNameCap`, `shared/flows-unusual.js#poolOiBasis`, `shared/flows-unusual.js#rankUnusual`, `shared/flows-unusual.js#rankUnusualNames`, `shared/flows-unusual.js#unusualNameRow` | contracts, flows, flows-chain-panels, flows-contracts, flows-deepen, flows-door-v2 and 18 more |
 
 ### `shared/flows-variation.js`
 
@@ -1262,7 +1262,7 @@ The product registry, a data-only leaf over the live key registry: one frozen en
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-products.js` | `shared/flows-products.js#CARD_DEPTHS`, `shared/flows-products.js#CONTRACT`, `shared/flows-products.js#DAY_GRAMMAR`, `shared/flows-products.js#DEPTHS`, `shared/flows-products.js#DEPTH_OF_CARD`, `shared/flows-products.js#DUE_BY_MIN`, `shared/flows-products.js#GLOBAL_KEYS`, `shared/flows-products.js#L0_COLUMNS`, `shared/flows-products.js#NAME_KEY_EXPECTED`, `shared/flows-products.js#NAME_KINDS`, `shared/flows-products.js#PANELS`, `shared/flows-products.js#PANEL_IDS`, `shared/flows-products.js#PAYLOAD_CAP_BYTES`, `shared/flows-products.js#PRODUCTS`, `shared/flows-products.js#REGISTRY_VERSION`, `shared/flows-products.js#STATE`, `shared/flows-products.js#STATE_NAMES`, `shared/flows-products.js#SYNTHETIC_GRAMMAR`, `shared/flows-products.js#TARGET_BY_MIN`, `shared/flows-products.js#TICKER_GRAMMAR`, `shared/flows-products.js#UNFETCHED_REASON`, `shared/flows-products.js#VOLATILE`, `shared/flows-products.js#contractFor`, `shared/flows-products.js#expectedKinds`, `shared/flows-products.js#keysOf`, `shared/flows-products.js#productById`, `shared/flows-products.js#productOf`, `shared/flows-products.js#tickerOfKey` | flows, flows-basis, flows-contracts, flows-coverage, flows-deepen, flows-dossier-reads and 12 more |
+| `shared/flows-products.js` | `shared/flows-products.js#CARD_DEPTHS`, `shared/flows-products.js#CONTRACT`, `shared/flows-products.js#DAY_GRAMMAR`, `shared/flows-products.js#DEPTHS`, `shared/flows-products.js#DEPTH_OF_CARD`, `shared/flows-products.js#DUE_BY_MIN`, `shared/flows-products.js#GLOBAL_KEYS`, `shared/flows-products.js#L0_COLUMNS`, `shared/flows-products.js#NAME_KEY_EXPECTED`, `shared/flows-products.js#NAME_KINDS`, `shared/flows-products.js#PANELS`, `shared/flows-products.js#PANEL_IDS`, `shared/flows-products.js#PAYLOAD_CAP_BYTES`, `shared/flows-products.js#PRODUCTS`, `shared/flows-products.js#REGISTRY_VERSION`, `shared/flows-products.js#STATE`, `shared/flows-products.js#STATE_NAMES`, `shared/flows-products.js#SYNTHETIC_GRAMMAR`, `shared/flows-products.js#TARGET_BY_MIN`, `shared/flows-products.js#TICKER_GRAMMAR`, `shared/flows-products.js#UNFETCHED_REASON`, `shared/flows-products.js#VOLATILE`, `shared/flows-products.js#contractFor`, `shared/flows-products.js#expectedKinds`, `shared/flows-products.js#keysOf`, `shared/flows-products.js#productById`, `shared/flows-products.js#productOf`, `shared/flows-products.js#tickerOfKey` | flows, flows-basis, flows-contracts, flows-coverage, flows-deepen, flows-dossier-reads and 13 more |
 | `tests/flows-registry-contract.mjs` |  | flows-registry-contract |
 | `tests/lib/emit-keys.mjs` | `tests/lib/emit-keys.mjs#emitFile`, `tests/lib/emit-keys.mjs#emitKeys`, `tests/lib/emit-keys.mjs#keyOfFile` | flows-contracts, flows-coverage, flows-meter-worker, flows-registry-contract |
 
@@ -1272,7 +1272,7 @@ The payload contracts, a pure leaf over the registry and the card schema version
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-contracts.js` | `shared/flows-contracts.js#CARD_CORE_PANELS`, `shared/flows-contracts.js#CARD_PANELS`, `shared/flows-contracts.js#CODES`, `shared/flows-contracts.js#PANEL_STATUSES`, `shared/flows-contracts.js#ROSTER_DEPTHS`, `shared/flows-contracts.js#canonical`, `shared/flows-contracts.js#canonicalHash`, `shared/flows-contracts.js#checkPayload`, `shared/flows-contracts.js#isDay`, `shared/flows-contracts.js#isStamp`, `shared/flows-contracts.js#validate` | flows-contracts, flows-deepen, flows-pipeline-chaos, flows-pipeline-mutants |
+| `shared/flows-contracts.js` | `shared/flows-contracts.js#CARD_CORE_PANELS`, `shared/flows-contracts.js#CARD_PANELS`, `shared/flows-contracts.js#CODES`, `shared/flows-contracts.js#PANEL_STATUSES`, `shared/flows-contracts.js#ROSTER_DEPTHS`, `shared/flows-contracts.js#canonical`, `shared/flows-contracts.js#canonicalHash`, `shared/flows-contracts.js#checkPayload`, `shared/flows-contracts.js#isDay`, `shared/flows-contracts.js#isStamp`, `shared/flows-contracts.js#validate` | flows-contracts, flows-deepen, flows-oracle, flows-pipeline-chaos, flows-pipeline-mutants |
 | `tests/flows-contracts.mjs` |  | flows-contracts |
 
 ### `shared/flows-coverage.js`, `server/routes/flows-pipeline.js`, `tests/flows-coverage.mjs`
@@ -1314,6 +1314,25 @@ The deepening rotation (design in `docs/deepening.md`): every name in the univer
 | `scripts/flows-nightly/sections/deepen.mjs` | `scripts/flows-nightly/sections/deepen.mjs#NONE`, `scripts/flows-nightly/sections/deepen.mjs#runDeepenLedger`, `scripts/flows-nightly/sections/deepen.mjs#runDeepenPlan` | flows, flows-engine-budget, flows-events, flows-garch, flows-live, flows-sections and 4 more |
 | `shared/flows-deepen.js` | `shared/flows-deepen.js#DEEPEN`, `shared/flows-deepen.js#DEPTH_RANK`, `shared/flows-deepen.js#backoffSessions`, `shared/flows-deepen.js#capFromEnv`, `shared/flows-deepen.js#carriedFrom`, `shared/flows-deepen.js#coverageNights`, `shared/flows-deepen.js#deepReadSaid`, `shared/flows-deepen.js#deepenMode`, `shared/flows-deepen.js#depthRank`, `shared/flows-deepen.js#governor`, `shared/flows-deepen.js#holdSet`, `shared/flows-deepen.js#holds`, `shared/flows-deepen.js#ledgerPayload`, `shared/flows-deepen.js#ledgerSummary`, `shared/flows-deepen.js#mayPublish`, `shared/flows-deepen.js#paceFor`, `shared/flows-deepen.js#parseLedger`, `shared/flows-deepen.js#pickRotation`, `shared/flows-deepen.js#planNight`, `shared/flows-deepen.js#ready`, `shared/flows-deepen.js#sessionsAgo`, `shared/flows-deepen.js#settleNight`, `shared/flows-deepen.js#splitCross`, `shared/flows-deepen.js#updateLedger` | flows, flows-deepen, flows-engine-budget, flows-events, flows-garch, flows-live and 7 more |
 | `tests/flows-deepen.mjs` |  | flows-deepen |
+
+### `shared/flows-oracle.js`, `shared/flows-oracle-words.js`, `shared/flows-oracle-live.js`, `server/routes/flows-oracle.js`, `scripts/flows-legs/oracle.mjs`, `scripts/flows-legs/oracle-norm.mjs`, `scripts/flows-nightly/sections/oracle.mjs`, `docs/oracle.md`, `tests/flows-oracle.mjs`, `tests/flows-oracle-live.mjs`, `tests/server-oracle.mjs`, `tests/lib/oracle-fixtures.mjs`
+
+The Oracle, the Neuron's always-on view of each name (design in `docs/oracle.md`). `shared/flows-oracle.js` is a pure leaf that turns a card and its engine block into the stored record `oracle:<T>` (state, stance, at most three cheap or rich calls, context, withheld reasons, limits), with every sentence from `shared/flows-oracle-words.js` (no forecast, modal or advice word, and the model-implied footer on every call). A call comes only from a single-leg structure the engine published, and only when its edge clears the pre-registered bars. `COMPUTE_JOBS` now holds `ORACLE_JOB`; the isolated `oracle-publish` stage publishes `oracle:<T>`, the `oracle-top` ranking and the `oracle-norm` ledger (`FLOWS_ORACLE_BUILD=off` skips it). `GET /api/flows/oracle` (`?t=`, `?ts=`, `?top=1`) is a row in the route table behind `FLOWS_ORACLE` (`on`, `owner` or off, fail closed). `shared/flows-oracle-live.js` holds the seven live-flow detectors the client runs over the rail's alert rows.
+
+| File | Exports | Suites |
+|---|---|---|
+| `docs/oracle.md` |  |  |
+| `scripts/flows-legs/oracle-norm.mjs` | `scripts/flows-legs/oracle-norm.mjs#NORM_KEY`, `scripts/flows-legs/oracle-norm.mjs#NORM_MAX_NAMES`, `scripts/flows-legs/oracle-norm.mjs#NORM_WINDOW`, `scripts/flows-legs/oracle-norm.mjs#emptyNorm`, `scripts/flows-legs/oracle-norm.mjs#foldNorm`, `scripts/flows-legs/oracle-norm.mjs#normOf` | flows, flows-engine-budget, flows-events, flows-garch, flows-live, flows-oracle and 5 more |
+| `scripts/flows-legs/oracle.mjs` | `scripts/flows-legs/oracle.mjs#ORACLE_BUILD_ENV`, `scripts/flows-legs/oracle.mjs#ORACLE_JOB`, `scripts/flows-legs/oracle.mjs#oracleBuildOn` | flows, flows-engine-budget, flows-events, flows-garch, flows-live, flows-oracle and 5 more |
+| `scripts/flows-nightly/sections/oracle.mjs` | `scripts/flows-nightly/sections/oracle.mjs#ORACLE_TOP_KEY`, `scripts/flows-nightly/sections/oracle.mjs#ORACLE_TOP_ROWS`, `scripts/flows-nightly/sections/oracle.mjs#runOraclePrep`, `scripts/flows-nightly/sections/oracle.mjs#runOraclePublish` | flows, flows-engine-budget, flows-events, flows-garch, flows-live, flows-oracle and 5 more |
+| `server/routes/flows-oracle.js` | `server/routes/flows-oracle.js#ORACLE_BATCH_MAX`, `server/routes/flows-oracle.js#ORACLE_TICKER_RE`, `server/routes/flows-oracle.js#absentRecord`, `server/routes/flows-oracle.js#flowsOracleRows` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-ledger, flows-oracle and 5 more |
+| `shared/flows-oracle-live.js` | `shared/flows-oracle-live.js#KINDS`, `shared/flows-oracle-live.js#LIVE_LINES`, `shared/flows-oracle-live.js#createLiveState`, `shared/flows-oracle-live.js#detect`, `shared/flows-oracle-live.js#detectName` | flows-oracle, flows-oracle-live |
+| `shared/flows-oracle-words.js` | `shared/flows-oracle-words.js#BUILDING_LINES`, `shared/flows-oracle-words.js#CALL_VERBS`, `shared/flows-oracle-words.js#CONVENTION`, `shared/flows-oracle-words.js#CONVICTION_WORDS`, `shared/flows-oracle-words.js#LEANS`, `shared/flows-oracle-words.js#MODEL_IMPLIED`, `shared/flows-oracle-words.js#STANCE_LINES`, `shared/flows-oracle-words.js#callSay`, `shared/flows-oracle-words.js#calmLine`, `shared/flows-oracle-words.js#dayLabel`, `shared/flows-oracle-words.js#leanWord`, `shared/flows-oracle-words.js#liveSay`, `shared/flows-oracle-words.js#pct`, `shared/flows-oracle-words.js#strikeLabel`, `shared/flows-oracle-words.js#usd`, `shared/flows-oracle-words.js#usdShort`, `shared/flows-oracle-words.js#volPoints` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-events, flows-garch and 14 more |
+| `shared/flows-oracle.js` | `shared/flows-oracle.js#ASSUMPTIONS`, `shared/flows-oracle.js#LIMITS`, `shared/flows-oracle.js#ORACLE_BYTE_CAP`, `shared/flows-oracle.js#ORACLE_VERSION`, `shared/flows-oracle.js#STATES`, `shared/flows-oracle.js#STATE_WHY`, `shared/flows-oracle.js#THRESHOLDS`, `shared/flows-oracle.js#buildOracle`, `shared/flows-oracle.js#callsFor`, `shared/flows-oracle.js#contextOf`, `shared/flows-oracle.js#engineOf`, `shared/flows-oracle.js#fit`, `shared/flows-oracle.js#rankTop`, `shared/flows-oracle.js#screenOracle`, `shared/flows-oracle.js#staleView`, `shared/flows-oracle.js#stanceOf`, `shared/flows-oracle.js#topHeader` | flows, flows-basis, flows-dossier-reads, flows-engine-budget, flows-events, flows-garch and 13 more |
+| `tests/flows-oracle-live.mjs` |  | flows-oracle-live |
+| `tests/flows-oracle.mjs` |  | flows-oracle |
+| `tests/lib/oracle-fixtures.mjs` | `tests/lib/oracle-fixtures.mjs#NEXT`, `tests/lib/oracle-fixtures.mjs#NORM`, `tests/lib/oracle-fixtures.mjs#SESSION`, `tests/lib/oracle-fixtures.mjs#block`, `tests/lib/oracle-fixtures.mjs#card`, `tests/lib/oracle-fixtures.mjs#leg`, `tests/lib/oracle-fixtures.mjs#structure` | flows-oracle, flows-oracle-live, server-oracle |
+| `tests/server-oracle.mjs` |  | server-oracle |
 
 ## flows-rail
 
@@ -1430,7 +1449,7 @@ The nightly's stage table (`STAGES`: id, fatal or isolated, `needs`, declared `p
 
 ### `scripts/flows-nightly/sections/compute.mjs`
 
-The compute stage, an isolated stage after `card-x` and before `roster`, once the vendor reads are done: it imports no vendor client, store or archive, so it cannot call the vendor or publish. `computeNames` runs the registered `COMPUTE_JOBS` (frozen, empty until a model brings one: `{ id, run(ticker, ctx) }`) over the carded names one at a time with a turn of the event loop between names; a name that spends more than `COMPUTE_NAME_CPU_MS` (1,000) of CPU is named in `over`, the stage stops before the next name once its share (names times that budget) is spent or the run's deadline has passed, and a job that throws costs that name that job only. Values are kept by job and ticker on `ctx.computed` for a later stage to publish. The stage record carries `cpu`, `names`, `jobs`, `over`, `failed` and `stopped`.
+The compute stage, an isolated stage after `card-x` and before `roster`, once the vendor reads are done: it imports no vendor client, store or archive, so it cannot call the vendor or publish. `computeNames` runs the registered `COMPUTE_JOBS` (frozen, holding the Oracle job: `{ id, run(ticker, ctx) }`) over the carded names one at a time with a turn of the event loop between names; a name that spends more than `COMPUTE_NAME_CPU_MS` (1,000) of CPU is named in `over`, the stage stops before the next name once its share (names times that budget) is spent or the run's deadline has passed, and a job that throws costs that name that job only. Values are kept by job and ticker on `ctx.computed` for a later stage to publish. The stage record carries `cpu`, `names`, `jobs`, `over`, `failed` and `stopped`.
 
 | File | Exports | Suites |
 |---|---|---|
@@ -2341,6 +2360,8 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-net-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-neuron-screen.json` |  | architecture, docs, run |
 | `tests/suites/flows-neuron.json` |  | architecture, docs, run |
+| `tests/suites/flows-oracle-live.json` |  | architecture, docs, run |
+| `tests/suites/flows-oracle.json` |  | architecture, docs, run |
 | `tests/suites/flows-overlay.json` |  | architecture, docs, run |
 | `tests/suites/flows-overview.json` |  | architecture, docs, run |
 | `tests/suites/flows-pages-render.json` |  | architecture, docs, run |
@@ -2417,6 +2438,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/server-kernel.json` |  | architecture, docs, run |
 | `tests/suites/server-log.json` |  | architecture, docs, run |
 | `tests/suites/server-ops.json` |  | architecture, docs, run |
+| `tests/suites/server-oracle.json` |  | architecture, docs, run |
 | `tests/suites/server-pages.json` |  | architecture, docs, run |
 | `tests/suites/server-router.json` |  | architecture, docs, run |
 | `tests/suites/staging.json` |  | architecture, docs, run |

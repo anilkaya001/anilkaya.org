@@ -4587,8 +4587,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const cardCount = [...log.matchAll(/^  cards: (\d+) name\(s\)/gm)].map((m) => Number(m[1]))[0];
   ok(compute && compute.status === "ok" && compute.jobs === COMPUTE_JOBS.length && compute.over === 0 && compute.failed === 0,
      "the compute stage runs after card-x and records its jobs, none over budget and none failed");
-  eq(compute.names, 0, "and with no job registered it spends no name");
-  ok(cardCount > 0 && /compute: 0 of \d+ deep name\(s\), 0 job\(s\)/.test(log), "its log line counts the carded names it was offered");
+  ok(compute.names > 0 && compute.names <= cardCount, "and with the Oracle registered it computes the carded names the run built");
+  ok(cardCount > 0 && /compute: \d+ of \d+ deep name\(s\), 1 job\(s\)/.test(log), "its log line counts the carded names it was offered");
   ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
   ok(JSON.stringify(meta.stages).length < 3000, `and the records add under 3 KiB to meta (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
@@ -5275,7 +5275,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 5700, `even with every isolated stage failed the records stay under 5.7 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 5900, `even with every isolated stage failed the records stay under 5.9 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
@@ -5321,7 +5321,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const idle = await computeNames({ names, jobs: [], cpu, turn: noTurn });
   same([idle.names, idle.jobs, idle.stopped, idle.over, idle.failed], [0, 0, null, [], []], "compute: no job registered spends no name");
-  eq(COMPUTE_JOBS.length, 0, "compute: and the nightly registers none until a model brings one");
+  same(COMPUTE_JOBS.map((j) => j.id), ["oracle"], "compute: the nightly registers the Oracle job and no other");
   ok(Object.isFrozen(COMPUTE_JOBS), "compute: the registry is frozen");
 
   used = 0;

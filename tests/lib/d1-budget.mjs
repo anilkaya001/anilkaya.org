@@ -106,6 +106,7 @@ export const MEMBERS = Object.freeze({
 });
 
 export const PLANNED = Object.freeze([
+  Object.freeze({ id: "oracle.nightly", row: "oracle", written: 1730, read: 1730, source: "docs/oracle.md: one oracle row for each of the 856 carded names, oracle-top and oracle-norm, each post adding one manifest row through the door trigger (written 862 x 2) and, in warn mode, reading two rows for its tuple" }),
   Object.freeze({ id: "observer", row: "P1-25", written: 4, read: 672, source: "PLAN.final.md 5.3: transitions only; 48 firings of a 14-row batch" }),
   Object.freeze({ id: "ai.counters", row: "P1-08, P1-44", written: 660, read: 0, source: "PLAN.final.md 5.3: about 260 outcome and 400 class rows at about 200 calls" }),
   Object.freeze({ id: "ai.notes", row: "P1-45", written: 40, read: 0, source: "PLAN.final.md 5.3" }),

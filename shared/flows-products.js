@@ -61,6 +61,8 @@ const GLOBALS = [
   global("ideas"),
   global("focus"),
   global("deepen"),
+  global("oracle-top", { capBytes: 16 * 1024, required: ["items", "sessionDate"] }),
+  global("oracle-norm", { capBytes: 100 * 1024, required: ["t", "sessionDate"] }),
 ];
 
 const dated = (id, source, over = {}) => product(id, "dated", { pattern: source, archive: true, ...over });
@@ -82,11 +84,15 @@ const NAMES = [
   named("hist", { population: "carded" }),
 ];
 
+const UNLISTED_NAMES = [
+  named("oracle", { population: "carded", capBytes: 6 * 1024, required: ["v", "ticker", "sessionDate", "generatedAt", "state", "calls"] }),
+];
+
 const live = Object.entries(LIVE_KEYS).map(([key, spec]) => product(key, "live", {
   key, level: "L0", exec: spec.writer, klass: spec.klass, capBytes: spec.maxBytes, targetByMin: null, dueByMin: null, cadenceS: spec.cadenceS,
 }));
 
-export const PRODUCTS = frozen([...GLOBALS, ...DATED, ...NAMES, ...live]);
+export const PRODUCTS = frozen([...GLOBALS, ...DATED, ...NAMES, ...UNLISTED_NAMES, ...live]);
 
 const BY_ID = new Map(PRODUCTS.map((p) => [p.id, p]));
 

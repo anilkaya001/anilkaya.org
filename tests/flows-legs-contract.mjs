@@ -957,7 +957,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 {
   const worker = workerSource();
   ok(/\^universe\$\|\^regime\$/.test(worker), "the ingest allowlist accepts universe and regime");
-  ok(/\/\^\(card\|card-x\|hist\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
+  ok(/\/\^\(card\|card-x\|hist\|oracle\):\/\.exec\(key\)/.test(worker), "and card-x:<T> under the ticker rule");
   const table = createRouter(flowsReadRows(new Proxy({}, { get: () => () => null }))).rows.map((r) => r.path);
   ok(table.includes("/api/flows/universe") && table.includes("/api/flows/regime"), "both read routes exist");
   ok(table.includes("/api/flows/card-x"), "and the per-name card-x route");
