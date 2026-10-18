@@ -745,6 +745,7 @@ export function marketPage({ username = "", owner = false, scenes = false } = {}
   return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css"])}
 ${shell("Market", "market", username, `
   <div class="mk" id="mk">
+  <div class="mk-top">
   <header class="flows-head mk-head" data-fx-hero>
     <h1 id="fxTitle">Market</h1>
     <p class="mk-meta" id="mkMeta"></p><span id="mkStalePill"></span>
@@ -753,6 +754,8 @@ ${shell("Market", "market", username, `
   <p class="visually-hidden" id="mktStale" role="status" hidden></p>
   <p class="visually-hidden" id="mkPulseStamp"></p>
   <div class="mk-tabs" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
+  </div>
+  <section class="mk-hero" id="mkHero" aria-label="The market at a glance"></section>
   <div class="mk-sub" id="mkSub" role="tablist" aria-label="Modules in this view" hidden></div>
   <div class="mk-stage" id="mkStage" data-view="tide">
 ${panel("tide", `
