@@ -794,11 +794,11 @@ The premium desk's ranking: gates, annualization, the strike divisor and `rankCh
 
 ### `shared/flows-focus.js`
 
-The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle.
+The home page's focus roster (Gold, Silver and Copper groups, the Mag 7, the metal funds and miners), the owner's holdings (`OWNER_HOLDINGS`: NASA, guaranteed a deep card every night) and the NASDAQ-10 derivation from QQQ holdings. A leaf module: it imports nothing, so the Worker, the pipeline and the live leg can all read it without a cycle.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-focus.js` | `shared/flows-focus.js#FOCUS_BUDGET_BYTES`, `shared/flows-focus.js#FOCUS_CLOSES`, `shared/flows-focus.js#FOCUS_FIELDS`, `shared/flows-focus.js#FOCUS_FUNDS`, `shared/flows-focus.js#FOCUS_METALS`, `shared/flows-focus.js#FOCUS_MINERS`, `shared/flows-focus.js#FOCUS_NAME_CHARS`, `shared/flows-focus.js#FOCUS_STRIP_FALLBACK`, `shared/flows-focus.js#MAG7`, `shared/flows-focus.js#NDX_MEMBERSHIP_MIN`, `shared/flows-focus.js#NDX_TOP`, `shared/flows-focus.js#SHARE_CLASS`, `shared/flows-focus.js#canonicalClass`, `shared/flows-focus.js#focusCloses`, `shared/flows-focus.js#focusDeepSet`, `shared/flows-focus.js#focusGroups`, `shared/flows-focus.js#focusStripNames`, `shared/flows-focus.js#focusTickers`, `shared/flows-focus.js#holdingsStocks`, `shared/flows-focus.js#ndx10`, `shared/flows-focus.js#ndxMembership` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-alerts and 52 more |
+| `shared/flows-focus.js` | `shared/flows-focus.js#FOCUS_BUDGET_BYTES`, `shared/flows-focus.js#FOCUS_CLOSES`, `shared/flows-focus.js#FOCUS_FIELDS`, `shared/flows-focus.js#FOCUS_FUNDS`, `shared/flows-focus.js#FOCUS_METALS`, `shared/flows-focus.js#FOCUS_MINERS`, `shared/flows-focus.js#FOCUS_NAME_CHARS`, `shared/flows-focus.js#FOCUS_STRIP_FALLBACK`, `shared/flows-focus.js#MAG7`, `shared/flows-focus.js#NDX_MEMBERSHIP_MIN`, `shared/flows-focus.js#NDX_TOP`, `shared/flows-focus.js#OWNER_HOLDINGS`, `shared/flows-focus.js#SHARE_CLASS`, `shared/flows-focus.js#canonicalClass`, `shared/flows-focus.js#focusCloses`, `shared/flows-focus.js#focusDeepSet`, `shared/flows-focus.js#focusGroups`, `shared/flows-focus.js#focusStripNames`, `shared/flows-focus.js#focusTickers`, `shared/flows-focus.js#holdingsStocks`, `shared/flows-focus.js#ndx10`, `shared/flows-focus.js#ndxMembership` | academy, architecture, fixture-guard, flows, flows-ai-broker, flows-alerts and 52 more |
 
 ### `shared/flows-quant-dealer.js`
 

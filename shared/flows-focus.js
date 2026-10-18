@@ -10,6 +10,8 @@ export const FOCUS_FUNDS = Object.freeze(["GLD", "IAU", "SLV", "CPER", "COPX", "
 
 export const FOCUS_MINERS = Object.freeze(["NEM", "AEM", "PAAS", "WPM", "FCX", "SCCO"]);
 
+export const OWNER_HOLDINGS = Object.freeze(["NASA"]);
+
 export const NDX_TOP = 10;
 
 export const NDX_MEMBERSHIP_MIN = 90;
@@ -140,7 +142,7 @@ export function ndxMembership(holdingsRows, { fallback = [], min = NDX_MEMBERSHI
 
 export function focusDeepSet(ndx) {
   const list = Array.isArray(ndx) ? ndx : ndx && Array.isArray(ndx.tickers) ? ndx.tickers : [];
-  return new Set([...MAG7, ...list, ...FOCUS_MINERS]);
+  return new Set([...MAG7, ...list, ...FOCUS_MINERS, ...OWNER_HOLDINGS]);
 }
 
 export function focusGroups(ndx) {

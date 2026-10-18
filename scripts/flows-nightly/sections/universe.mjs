@@ -3,7 +3,7 @@ import { unwrapRows as unwrapVendorRows } from "../../../shared/flows-political.
 import {
   capBands, selectCoverage, NDX_100, NDX_AS_OF, PICK_INDEX, ndxConstantAge,
 } from "../../../shared/flows-universe.js";
-import { MAG7 as FOCUS_MAG7, FOCUS_MINERS, ndx10, ndxMembership, focusDeepSet } from "../../../shared/flows-focus.js";
+import { MAG7 as FOCUS_MAG7, FOCUS_MINERS, OWNER_HOLDINGS, ndx10, ndxMembership, focusDeepSet } from "../../../shared/flows-focus.js";
 import { harvestScreener, fetchMissingMembers, readHoldings } from "../../flows-legs/universe.mjs";
 import { makeFakeVendor } from "../../flows-legs/fake-vendor.mjs";
 import { stampNow } from "../../flows-legs/stamp.mjs";
@@ -264,7 +264,7 @@ export async function runUniverse(ctx) {
     coverageNotes.push(`The Nasdaq-100 fallback constant is ${ndxAge.days} days old (dated ${NDX_AS_OF}); refresh it from the QQQ holdings.`);
     console.warn(`  nasdaq-100: the fallback constant is ${ndxAge.days} days old (dated ${NDX_AS_OF})`);
   }
-  const guaranteed = [...new Set([...membership.members, ...FOCUS_MAG7, ...FOCUS_MINERS, ...ndx.tickers])];
+  const guaranteed = [...new Set([...membership.members, ...FOCUS_MAG7, ...FOCUS_MINERS, ...OWNER_HOLDINGS, ...ndx.tickers])];
   {
     const fetched = await fetchMissingMembers(vendor, guaranteed, new Set(screener.map((r) => r && r.ticker)),
       { date: screenerDate });

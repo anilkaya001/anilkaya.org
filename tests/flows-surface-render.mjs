@@ -640,7 +640,7 @@ async function chkInertia(page) {
   const e = await motionOf(page, "i");
   eq([e.vy, e.vp], [0, 0], "inertia ends: no residual velocity once the loop stops");
   const c = await viewOf(page, "i");
-  ok(c.yaw - v0.yaw > 3 && c.yaw - v0.yaw < 40, `and the glide is short, ${(c.yaw - v0.yaw).toFixed(1)} degrees in all`);
+  ok(c.yaw - v0.yaw > 3 && c.yaw - a.yaw > 0 && c.yaw - a.yaw < m.vy, `and the glide is short: ${(c.yaw - a.yaw).toFixed(1)} degrees after release, under one second at the ${m.vy.toFixed(0)} deg/s it was released at`);
   await page.waitForTimeout(300);
   eq(await viewOf(page, "i"), c, "and the scene is still");
   await dragBy(page, "i", 160, 0, { steps: 8, hold: true });

@@ -232,7 +232,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(focusTickers(null).includes("CPER") && focusTickers(null).includes("NVDA"),
      "an absent payload falls back to the constants, so a reader is never left with nothing");
   const deep = focusDeepSet(ndx);
-  ok(deep.has("AVGO") && deep.has("PAAS") && !deep.has("GLD"), "the deep focus set is Mag 7, NDX 10 and miners; funds go the dossier path");
+  ok(deep.has("AVGO") && deep.has("PAAS") && deep.has("NASA") && !deep.has("GLD"), "the deep focus set is Mag 7, NDX 10, miners and the owner's holdings; funds go the dossier path");
 
   const leaf = fs.readFileSync(new URL("../shared/flows-focus.js", import.meta.url), "utf8");
   ok(!/^\s*import\b|\bimport\s*\(|^\s*export\s[^;]*\bfrom\s/m.test(leaf),
