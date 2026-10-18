@@ -153,7 +153,7 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
   return { context, page, errors };
 }
 
-export const TABS = ["tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
+export const TABS = ["session", "tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
 
 export async function showTab(page, selector) {
   const key = await page.evaluate((sel) => {

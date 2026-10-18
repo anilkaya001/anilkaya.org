@@ -733,14 +733,14 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
 const MARKET_TABS = (scenes) => [
-  ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ["network", "Network"],
+  ["session", "Session"], ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ["network", "Network"],
   ["extremes", "Extremes"], ...(scenes ? [["relations", "Relations"]] : []), ["prints", "Prints"], ["context", "Context"],
 ];
 
 export function marketPage({ username = "", owner = false, scenes = false } = {}) {
   const tabs = MARKET_TABS(scenes);
   const panel = (key, body) => `
-    <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "tide" ? "" : " inert"}>${body}
+    <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "session" ? "" : " inert"}>${body}
     </div>`;
   return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css"])}
 ${shell("Market", "market", username, `
@@ -757,7 +757,9 @@ ${shell("Market", "market", username, `
   </div>
   <section class="mk-hero" id="mkHero" aria-label="The market at a glance"></section>
   <div class="mk-sub" id="mkSub" role="tablist" aria-label="Modules in this view" hidden></div>
-  <div class="mk-stage" id="mkStage" data-view="tide">
+  <div class="mk-stage" id="mkStage" data-view="session">
+${panel("session", `
+${marketModule("mkRiverCard", "Session", "mkRiver", { sub: `<span class="mk-rv-sub" id="mkRiverSub">Flow by sector lane and minute</span>` })}`)}
 ${panel("tide", `
 ${marketModule("mkTideCard", "Tide", "mkTide", { seg: `<div class="mk-segc" id="mkTideSeg"></div>`, body: `<div class="mk-body"><div id="mkTideLegs"></div><div id="mkTide"></div></div>` })}
 ${marketModule("mkBreadthCard", "Breadth", "", { body: `<div class="mk-body"><div id="mktTilt"></div><div id="mktBreadth"></div></div>` })}
@@ -790,6 +792,7 @@ ${marketModule("mkInsidersCard", "Insiders", "mkInsiders")}
 ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk-segc" id="mkSeasonSeg"></div>` })}`)}
   </div>
   </div>
+  <i hidden data-defer="river" data-src="${v("/assets/js/flows-market-river.js")}"></i>
   <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
   <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
   <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>${scenes ? `

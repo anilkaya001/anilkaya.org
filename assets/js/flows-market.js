@@ -830,7 +830,8 @@
       this.timer = setInterval(run, 60000);
     },
   };
-  if ($("mkNet") || $("mkRelations")) ALERTS.kick();
+  if ($("mkNet") || $("mkRelations") || $("mkRiver")) ALERTS.kick();
+  let RIVER = null;
 
   const FIT_MIN = 3;
   const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "mkFitT" });
@@ -929,7 +930,7 @@
       showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
     });
   }
-  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "tide"; };
+  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "session"; };
   showTab(fromHash(), false, true);
   addEventListener("hashchange", () => showTab(fromHash(), false, true));
 
@@ -1031,6 +1032,15 @@
         });
       }
     }
+    const riverHost = $("mkRiver");
+    if (riverHost && UI.defer) {
+      UI.defer("river", { when: "visible", el: riverHost, label: "The session" }).then(() => {
+        const api = window.FlowsUI.river.mount(riverHost, { universe, breadth, tide: HERO.tide });
+        if (!api) return;
+        RIVER = api;
+        ALERTS.sub((a, st) => api.take(a, st));
+      });
+    }
     const netHost = $("mkNet");
     if (netHost && UI.defer) {
       UI.defer("net", { when: "visible", el: netHost, label: "The flow network" }).then(() => UI.defer("netmap", { when: "idle", el: netHost, label: "The flow network" })).then(() => {
@@ -1062,6 +1072,7 @@
             later("expiry", (b) => b.paintExpiry(regime, breadth));
             paintEtfs(regime, live, breadth);
             paintTide(pulse, live, breadth);
+            if (RIVER) RIVER.update({ breadth, tide: HERO.tide });
           }).catch(() => {});
         } });
       let beating = beat(LENS.on), withStrips = LENS.on;
