@@ -15,7 +15,8 @@
   const DEF = Object.freeze({ binMin: 10, names: 12, minBins: 20, minActive: 4, minWindows: 40, minCorr: 0.3 });
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const money = (v) => F.money(v);
-  const sgn = (r, dp) => (r < 0 ? MINUS : "+") + Math.abs(r).toFixed(dp === undefined ? 2 : dp);
+  const SIGNS = { "-1": MINUS, "1": "+", "0": "" }, TONES = { "-1": "neg", "1": "pos", "0": "flat" };
+  const sgn = (r, dp) => SIGNS[Math.sign(r)] + Math.abs(r).toFixed(dp === undefined ? 2 : dp);
 
   function pearson(x, y) {
     const n = x.length;
@@ -147,7 +148,7 @@
       const lit = (p) => !sel || p.a === sel || p.b === sel;
       for (const p of shown) {
         const A = pos.get(p.a), B = pos.get(p.b);
-        s.append(svg("path", { d: "M" + A.x + " " + A.y + " Q" + cx + " " + cy + " " + B.x + " " + B.y, fill: "none", class: "rl-edge " + (p.r >= 0 ? "pos" : "neg") + (lit(p) ? "" : " off"), "stroke-width": (1 + 4 * Math.abs(p.r)).toFixed(2) },
+        s.append(svg("path", { d: "M" + A.x + " " + A.y + " Q" + cx + " " + cy + " " + B.x + " " + B.y, fill: "none", class: "rl-edge " + TONES[Math.sign(p.r)] + (lit(p) ? "" : " off"), "stroke-width": (1 + 4 * Math.abs(p.r)).toFixed(2) },
           svg("title", null, rLine(p))));
       }
       for (const t of order) {
@@ -170,7 +171,7 @@
       const head = h("div", { class: "rl-lh" }, shown.length ? shown.length + plural(shown.length, " tested pair", " tested pairs") + " of " + all.length : "No pair passed", sel ? h("button", { type: "button", class: "nm-link", onclick: () => { sel = null; paint(); } }, "Clear " + sel) : null);
       const li = top.map((p) => h("button", { type: "button", class: "rl-pair", onclick: () => { sel = sel === p.a ? p.b : p.a; paint(); }, "aria-label": rLine(p) },
         h("span", { class: "rl-pn" }, p.a + " ↔ " + p.b), h("span", { class: "rl-ps", title: secName(p.a) + " / " + secName(p.b) }, secName(p.a) + (secName(p.a) === secName(p.b) ? "" : " / " + secName(p.b))),
-        h("span", { class: "rl-pr " + (p.r >= 0 ? "pos" : "neg") }, sgn(p.r)), h("span", { class: "rl-pi" }, "[" + sgn(p.lo) + ", " + sgn(p.hi) + "]")));
+        h("span", { class: "rl-pr " + TONES[Math.sign(p.r)] }, sgn(p.r)), h("span", { class: "rl-pi" }, "[" + sgn(p.lo) + ", " + sgn(p.hi) + "]")));
       const more = rows.length > top.length ? h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => full(rows) }, "Show all " + rows.length) : null;
       const none = !rows.length ? h("p", { class: "rl-none" }, shown.length ? sel + " has no tested pair in this layer." : "No pair has an interval clear of zero that holds in both halves of the session. That is a statement about this read, not about the market.") : null;
       listBox.replaceChildren(...[head, h("div", { class: "rl-pairs" }, li), none, more].filter(Boolean));
