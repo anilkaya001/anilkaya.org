@@ -178,7 +178,7 @@
     const rows = Object.entries(ops.lines).map(([id, l]) => [id, l.unit, l.cap === null ? DASH : whole(l.cap), l.per, l.plan, l.via, l.source, l.capFrom || "plan"]);
     const plan = ops.plan || {};
     fill(host,
-      facts([["Workers plan", (plan.workers || DASH) + (plan.workersExplicit ? "" : " (default; FLOWS_PLAN_WORKERS is not set)")], ["Vendor plan", (plan.uw || DASH) + (plan.uwExplicit ? "" : " (not recorded; the working line is advisory)")]]),
+      facts([["Workers plan", (plan.workers || DASH) + (plan.workersExplicit ? "" : " (default; no plan is recorded)")], ["Vendor plan", (plan.uw || DASH) + (plan.uwExplicit ? "" : " (not recorded; the working line is advisory)")]]),
       h("details", { class: "lt-details" }, h("summary", null, "Every line, with the page it was read from"),
         table("Plan lines", ["Line", "Unit", "Cap", "Per", "Plan", "How it is known", "Source", "Cap from"], rows, true)));
   }

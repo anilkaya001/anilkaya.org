@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "310";
+export const ASSET_VERSION = "311";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1216,7 +1216,7 @@ ${card("hRail", "Real-time rail", "Rail", wait, [["stRail", "Rail detail"]])}
 ${card("hNight", "Nightly run", "Nightly", wait, [["stNight", "Nightly stage ledger"]])}
 ${card("hSw", "Switches", "Switches", wait, [["stSw", "All switches"]])}`)}${panel("capacity", true, `
 ${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"]])}
-${card("cAi", "Workers AI", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
+${card("cAi", "Model day", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
 ${card("cPlat", "Platform meters", "Platform", later, [["stMeters", "All meters"]])}
 ${card("cLimits", "Limits enforced", "Limits", later, [["stLimits", "Limits enforced today"], ["stPlan", "Plan lines and sources"]])}`)}${panel("latency", true, `
 ${card("lFeeds", "Feed latency now", "Feeds", later, [["stFeeds", "Feed latency, per topic"]])}

@@ -206,7 +206,7 @@ function build(f, over = {}) {
   ok(base.lines["uw.day"].cap !== startup.lines["uw.day"].cap || base.lines["d1.write"].cap !== startup.lines["d1.write"].cap, "and the caps move with them");
   const capped = await run({ FLOWS_AI_DAILY_CAP_NEURONS: "12000", FLOWS_AI_DAILY_CAP_CALLS: "900" });
   eq([capped.ai.cap.neurons, capped.ai.cap.calls, capped.ai.cap.readsStopAt], [12000, 900, 9000], "the AI cap follows the Worker's variables");
-  eq(limitsOf({ FLOWS_AI_DAILY_CAP_NEURONS: "12000" }).find((l) => l.name === "Workers AI neurons").limit, 12000, "and so does the limits table");
+  eq(limitsOf({ FLOWS_AI_DAILY_CAP_NEURONS: "12000" }).find((l) => l.name === "Model neurons").limit, 12000, "and so does the limits table");
 }
 
 {
