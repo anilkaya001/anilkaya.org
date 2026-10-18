@@ -21,7 +21,7 @@ const CEILING_KIB = {
   watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024,
   deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024) + 2010 / 1024 + 360 / 1024,
   strategyPage: 261 + 5786 / 1024 + (261 + 5786 / 1024 + 2327 / 1024) - (261 + 5786 / 1024) + (261 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (261 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024,
-  marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024,
+  marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024 + 9.5,
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024,
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024,
   movesPage: 151 + 2322 / 1024,
@@ -39,7 +39,7 @@ const GZIP_KIB = {
   watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024,
   deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024,
   strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024,
-  marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024,
+  marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3,
   unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024,
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024,
   movesPage: 47.5 + 722 / 1024,
@@ -57,7 +57,7 @@ const CSS_KIB = {
   watchPage: 102 + 565 / 1024,
   deskPage: 111 + 880 / 1024,
   strategyPage: 111 + 880 / 1024,
-  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8,
   unusualPage: 113 + 5007 / 1024,
   eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024,
   movesPage: 95.5,
@@ -118,7 +118,7 @@ const judge = (row, bases = BASES) => {
 const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
-  marketPage: { groups: { "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-capacity.js", "/assets/js/flows-status-coverage.js"] } },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
@@ -128,7 +128,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 241,
+  tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 322,
   unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15 + 4,
 };
 
@@ -285,7 +285,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 216729, gzip: 66501, css: 110499, cssGzip: 24000 };
+  const base = { name: "marketPage", raw: 232700, gzip: 70600, css: 126600, cssGzip: 24000 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");

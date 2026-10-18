@@ -101,6 +101,12 @@
         }))))));
   }
 
+  const roomH = (el, dflt, min, below) => {
+    const body = el.closest(".mk-body");
+    if (!body || !body.clientHeight) return dflt;
+    const top = el.getBoundingClientRect().top;
+    return Math.max(min, Math.min(dflt, Math.floor(body.getBoundingClientRect().bottom - top - below)));
+  };
   const clear = (id) => { const n = $(id); if (n) n.replaceChildren(); return n; };
   const unreadable = (feed) => Boolean(feed && feed.__unreadable === true);
   const pendingOf = (feed) => !feed || feed.status === "pending";
@@ -321,13 +327,33 @@
       ["IV 30d median", "Median 30-day implied vol", pct(vol.iv30dMedian), vol.iv30dQuoted, null],
       ["IV rank median", "Median IV rank", pct(vol.ivRankMedian), vol.ivRankQuoted, null],
     ];
-    host.append(UI.metrics(rows.map(([label, long, value, pop, tone]) => {
+    const unit = (v) => { const n = isNum(v); return n === null ? null : Math.max(0, Math.min(1, n)); };
+    const pos = isNum(p.netPositive), neg = isNum(p.netNegative);
+    const bars = [
+      pos !== null && neg !== null && Math.abs(pos) + Math.abs(neg) > 0 ? { split: Math.abs(pos) / (Math.abs(pos) + Math.abs(neg)), words: usd(pos) + " net call premium against " + usd(neg) + " net put premium" } : null,
+      pcrVol === null ? null : { frac: Math.min(pcrVol / 2, 1), mark: 0.5, words: "parity at 1.0, scale 0 to 2" },
+      pcrPrem === null ? null : { frac: Math.min(pcrPrem / 2, 1), mark: 0.5, words: "parity at 1.0, scale 0 to 2" },
+      unit(ag.callLift) === null ? null : { frac: unit(ag.callLift), mark: 0.5, words: "half marked, scale 0 to 100%" },
+      unit(ag.putLift) === null ? null : { frac: unit(ag.putLift), mark: 0.5, words: "half marked, scale 0 to 100%" },
+      unit(vol.iv30dMedian) === null ? null : { frac: unit(vol.iv30dMedian), words: "scale 0 to 100%" },
+      unit(vol.ivRankMedian) === null ? null : { frac: unit(vol.ivRankMedian), words: "scale 0 to 100%" },
+    ];
+    const grid = h("div", { class: "mk-gts" });
+    rows.forEach(([label, long, value, pop, tone], i) => {
       const n = isNum(pop);
       const shown = n === 0 ? DASH : value;
       const node = UI.metric(label, shown, { tone: n === 0 || shown === DASH ? null : tone, id: long });
       node.dataset.pop = n === null ? DASH : String(n);
-      return node;
-    }), { min: 120 }));
+      const bar = n === 0 ? null : bars[i];
+      const meter = !bar ? h("span", { class: "mk-mt is-none", "aria-hidden": "true" })
+        : bar.split !== undefined
+          ? h("span", { class: "mk-mt is-split", role: "img", "aria-label": bar.words, title: bar.words },
+            h("i", { class: "mk-mt-u", style: { width: (bar.split * 100) + "%" } }), h("i", { class: "mk-mt-d", style: { width: ((1 - bar.split) * 100) + "%" } }))
+          : h("span", { class: "mk-mt", role: "img", "aria-label": label + " " + shown + ", " + bar.words, title: bar.words },
+            h("i", { class: "mk-mt-f", style: { width: (bar.frac * 100) + "%" } }), bar.mark === undefined ? null : h("i", { class: "mk-mt-m", style: { left: (bar.mark * 100) + "%" } }));
+      grid.append(h("div", { class: "mk-gt", title: n ? grouped(n) + " names measured" : null }, node, h("span", { class: "mk-gt-c" }, n ? h("b", null, grouped(n)) : null, n ? " names measured" : n === 0 ? "no names measured" : "population not published"), meter));
+    });
+    host.append(grid);
     host.dataset.rows = JSON.stringify(rows.map(([, long, value, pop]) => [long, isNum(pop) === 0 ? DASH : value, isNum(pop) === null ? DASH : String(isNum(pop))]));
   }
 
@@ -384,6 +410,58 @@
   let tideChart = null;
   let tideLabel = null;
 
+  const HERO = { m: null, tide: null, etf: null, iv: {} };
+  function paintHero() {
+    const host = $("mkHero");
+    if (!host) return;
+    const m = HERO.m;
+    if (!m) { host.hidden = true; return; }
+    host.hidden = false;
+    const lastNum = (arr) => lastOf(nums(arr));
+    const jobs = [];
+    const cell = (o) => {
+      const el = h(o.href ? "a" : "div", { class: "mk-hc" + (o.cls ? " " + o.cls : ""), href: o.href || null, "data-tone": o.tone || null, title: o.title || null },
+        h("span", { class: "mk-hc-k" }, o.k), h("b", { class: "mk-hc-v" }, o.v), h("span", { class: "mk-hc-s" }, o.s || ""));
+      if (o.node) el.append(o.node);
+      if (o.vals && drawn(nums(o.vals)) >= 2) {
+        const sp = h("span", { class: "mk-hc-p", "aria-hidden": "true" });
+        el.append(sp);
+        jobs.push(() => C.sparkline(sp, o.vals, { area: true, height: 34, color: o.tone === "down" ? "--down" : o.tone === "up" ? "--up" : "--accent", label: o.k + " path" }));
+      }
+      return el;
+    };
+    const prem = m.premium || {}, br = m.breadth || {}, pcr = m.pcr || {}, vol = m.vol || {};
+    const tv = HERO.tide;
+    const tideNet = tv ? lastNum(tv.net) : null;
+    const net = tideNet !== null ? tideNet : isNum(prem.net);
+    const cells = [
+      cell({ k: tv && tideNet !== null ? "Net tide" : "Net premium", v: usdS(net), tone: toneOf(net),
+        s: tv && tideNet !== null ? "Calls " + usdS(lastNum(tv.call)) + " \u00b7 Puts " + usdS(lastNum(tv.put)) : "Session total, all screened names",
+        vals: tv && tideNet !== null ? tv.net : null, title: net === null ? "No net premium was carried this session." : null }),
+    ];
+    const bull = isNum(br.bull), bear = isNum(br.bear), flat = isNum(br.flat);
+    const bt = bull === null || bear === null || flat === null ? 0 : bull + bear + flat;
+    cells.push(cell({ k: "Breadth", v: signed(br.tilt, 2), tone: toneOf(br.tilt),
+      s: bt ? bull + " bought \u00b7 " + bear + " sold" : "No priced names",
+      node: bt ? h("span", { class: "mk-hc-b", role: "img", "aria-label": bull + " names net bought, " + flat + " level, " + bear + " net sold" },
+        h("i", { class: "is-pos", style: { width: (bull / bt * 100) + "%" } }), h("i", { class: "is-flat", style: { width: (flat / bt * 100) + "%" } }), h("i", { class: "is-neg", style: { width: (bear / bt * 100) + "%" } })) : null }));
+    const pp = isNum(pcr.premium), pv = isNum(pcr.volume);
+    cells.push(cell({ k: "Put / call", v: pp === null ? DASH : pp.toFixed(2), s: pv === null ? "premium" : "contracts " + pv.toFixed(2),
+      node: pp === null ? null : h("span", { class: "mk-mt", role: "img", "aria-label": "Put to call premium " + pp.toFixed(2) + ", parity at 1.0", title: "Parity at 1.0, scale 0 to 2" },
+        h("i", { class: "mk-mt-f", style: { width: (Math.min(pp / 2, 1) * 100) + "%" } }), h("i", { class: "mk-mt-m", style: { left: "50%" } })) }));
+    for (const T of ["SPY", "QQQ", "IWM"]) {
+      const t = HERO.etf && HERO.etf[T];
+      const iv = isNum(HERO.iv[T]);
+      cells.push(cell({ k: T, v: t ? usdS(t.net) : DASH, tone: t ? toneOf(t.net) : null, s: iv === null ? "options net premium" : "IV 30d " + F.pct(iv, 1),
+        vals: t ? t.path : null, href: "/flows/ticker/?t=" + T, cls: "is-etf", title: t && t.net === null ? "No " + T + " tide was carried." : null }));
+    }
+    const ivm = isNum(vol.iv30dMedian), ivr = isNum(vol.ivRankMedian);
+    cells.push(cell({ k: "IV 30d median", v: ivm === null ? DASH : pct(ivm), s: ivr === null ? "all screened names" : "IV rank " + pct(ivr, 0), cls: "is-vol",
+      node: ivr === null ? null : h("span", { class: "mk-mt", role: "img", "aria-label": "IV rank median " + pct(ivr, 0), title: "Scale 0 to 100%" }, h("i", { class: "mk-mt-f", style: { width: (Math.min(ivr, 1) * 100) + "%" } })) }));
+    host.replaceChildren(...cells);
+    for (const j of jobs) j();
+  }
+
   function paintTide(pulse, live, breadth) {
     const host = $("mkTide");
     const legs = clear("mkTideLegs");
@@ -391,6 +469,8 @@
     if (!host) return;
     const drop = () => { if (tideChart) { tideChart.destroy(); tideChart = null; } host.replaceChildren(); };
     const { views, today } = tideViews(pulse, live, breadth);
+    HERO.tide = views.find((v) => v.label === "Market") || null;
+    paintHero();
     headMark("mkTideCard", null);
     if (!views.length) {
       drop();
@@ -421,10 +501,10 @@
         return;
       }
       const opts = {
-          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: ax.fmt, zero: true, height: [200, 210, 220],
+          x: ax.x, xType: ax.xType, xTicks: ax.ticks(host.clientWidth || 600), xFormat: ax.fmt, zero: true, height: roomH(host, 380, 170, 42),
           series: [
-            { values: v.call, color: "--up", label: "Net calls", format: usdS },
-            { values: v.put, color: "--down", label: "Net puts", dash: true, format: usdS },
+            { values: v.call, color: "--up", label: "Net calls", format: usdS, area: true, fill: 0.3 },
+            { values: v.put, color: "--down", label: "Net puts", dash: true, format: usdS, area: true, fill: 0.16 },
           ],
           yFormat: usdS, label: v.label + " tide: net call and net put premium across the session, times in TRT",
           readout: (i) => [C.part(clock(v.t[i]), "k"), C.part("Calls", "k"), h("b", { "data-tone": "up" }, usdS(v.call[i])),
@@ -471,6 +551,39 @@
   const TIDE_SHORT = { "Consumer Cyclical": "Cyclicals", "Consumer Defensive": "Defensives", "Communication Services": "Comms",
     "Financial Services": "Financials", "Basic Materials": "Materials" };
 
+  const TM_FLOOR = 0.06;
+  function squarify(items, W, H) {
+    const sum = items.reduce((a, it) => a + it.w, 0) || 1;
+    const out = [];
+    const nodes = items.map((it) => ({ item: it, a: it.w / sum * W * H }));
+    let x = 0, y = 0, w = W, hgt = H, i = 0;
+    const worst = (row, side) => {
+      const s2 = row.reduce((a, n) => a + n.a, 0);
+      const mx = Math.max(...row.map((n) => n.a)), mn = Math.min(...row.map((n) => n.a));
+      return Math.max(side * side * mx / (s2 * s2), s2 * s2 / (side * side * mn));
+    };
+    while (i < nodes.length) {
+      const side = Math.min(w, hgt);
+      let row = [nodes[i]];
+      let j = i + 1;
+      while (j < nodes.length && worst(row.concat(nodes[j]), side) <= worst(row, side)) { row = row.concat(nodes[j]); j++; }
+      const s2 = row.reduce((a, n) => a + n.a, 0);
+      if (w >= hgt) {
+        const rw = s2 / hgt;
+        let yy = y;
+        for (const n of row) { const rh = n.a / rw; out.push({ item: n.item, x, y: yy, w: rw, h: rh }); yy += rh; }
+        x += rw; w -= rw;
+      } else {
+        const rh = s2 / w;
+        let xx = x;
+        for (const n of row) { const rw = n.a / rh; out.push({ item: n.item, x: xx, y, w: rw, h: rh }); xx += rw; }
+        y += rh; hgt -= rh;
+      }
+      i = j;
+    }
+    return out;
+  }
+
   function paintSectorTides(regime, breadth) {
     const host = clear("mkSecTides");
     if (!host) return;
@@ -495,15 +608,24 @@
     const liveTs = lb && Array.isArray(lb.sectors.t) ? lb.sectors.t : [];
     cells.sort((a, b) => (b.net ?? -Infinity) - (a.net ?? -Infinity));
     const peak = Math.max(1, ...cells.map((c) => Math.max(...c.path.filter((x) => x !== null).map(Math.abs), 0)));
-    const grid = h("div", { class: "mk-smalls" });
-    host.append(grid);
-    for (const c of cells) {
-      const cell = h("div", { class: "mk-small", "data-tone": toneOf(c.net) },
-        h("div", { class: "mk-small-h" }, h("span", { class: "mk-small-n", title: c.name }, TIDE_SHORT[c.name] || c.name),
-          tb(c.net)));
+    const top = Math.max(1, ...cells.map((c) => Math.abs(c.net === null ? 0 : c.net)));
+    const total = cells.reduce((a, c) => a + (c.net === null ? 0 : Math.abs(c.net)), 0);
+    const tm = h("div", { class: "mk-tm", role: "group", "aria-label": "Sector heat map: tile area is the size of the net premium, colour its sign and strength" });
+    host.append(tm, h("p", { class: "mk-tm-key" },
+      h("span", { class: "mk-tm-sw", "data-tone": "up" }), "net calls", h("span", { class: "mk-tm-sw", "data-tone": "down" }), "net puts",
+      h("span", { class: "mk-tm-n" }, "area = net size")));
+    const items = cells.map((c) => ({ c, w: Math.max(Math.abs(c.net === null ? 0 : c.net), top * TM_FLOOR) }));
+    items.forEach((it) => {
+      const c = it.c;
+      const strength = c.net === null ? 0 : Math.min(1, Math.abs(c.net) / top);
+      const cell = h("div", { class: "mk-small", "data-tone": toneOf(c.net), "data-nil": c.net === null ? "" : null,
+        "data-share": c.net === null || !total ? null : String(Math.abs(c.net) / total), style: { "--str": strength.toFixed(3) } },
+      h("div", { class: "mk-small-h" }, h("span", { class: "mk-small-n", title: c.name }, TIDE_SHORT[c.name] || c.name),
+        h("span", { class: "mk-small-g", "aria-hidden": "true" }, c.net === null ? "" : c.net > 0 ? "\u25b2" : c.net < 0 ? "\u25bc" : "\u25ac"), tb(c.net),
+        c.net === null || !total ? null : h("small", { class: "mk-small-s" }, Math.round(Math.abs(c.net) / total * 100) + "% of the flow")));
       const plot = h("div", { class: "mk-small-p" });
       cell.append(plot);
-      grid.append(cell);
+      tm.append(cell);
       if (drawn(c.path) >= 2) {
         C.line(plot, { series: [{ values: c.path, format: usdS }], twoTone: true, zero: true, yDomain: [-peak, peak], height: 56,
           xAxis: false, yTicks: false, endLabels: false, gutter: 4, label: c.name + " sector tide", readout: (i) => [C.part(c.name, "k"), tb(c.path[i])] });
@@ -512,13 +634,23 @@
       } else {
         plot.append(h("div", { class: "mk-small-none" }, DASH, inlineHush("unavailable", c.why || "No path was carried for this sector.", c.name)));
       }
-    }
+      it.cell = cell;
+    });
+    const lay = () => {
+      const W = tm.clientWidth, H = tm.clientHeight;
+      if (!W || !H) return;
+      squarify(items.slice().sort((a, b) => b.w - a.w), W, H).forEach((b) => {
+        Object.assign(b.item.cell.style, { left: (b.x / W * 100) + "%", top: (b.y / H * 100) + "%", width: (b.w / W * 100) + "%", height: (b.h / H * 100) + "%" });
+      });
+    };
+    lay();
+    if (typeof ResizeObserver === "function") new ResizeObserver(lay).observe(tm);
     const session = useLive ? lb.session : reg && reg.sessionDate;
     staleMark("mkSecTidesCard", session, "sector tides", calmOf({ opening, fellBack, session, at: liveTs[liveTs.length - 1] }, "sector tide"));
     infoInto("mkSecTidesCard", "sector tides", () => ({
       title: "Sector tides", lead: "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
       facts: [["Source", useLive ? "live:breadth" : "regime"], ["Session", session || null], ["Scale", "±" + usd(peak)]],
-      notes: ["Net is net call premium minus net put premium, cumulative; the vendor's sector tide is assumed cumulative, and the session value is the last row."],
+      notes: ["Net is net call premium minus net put premium, cumulative; the vendor's sector tide is assumed cumulative, and the session value is the last row.", "Tile area is the net size, floored at " + Math.round(TM_FLOOR * 100) + "% of the largest so a small sector stays readable; colour is the strength, and the triangle gives the sign."],
     }));
   }
 
@@ -535,6 +667,7 @@
       return { regRow, path: [], net: null, src: null, session: null };
     };
     const tides = { SPY: tideOf("SPY"), QQQ: tideOf("QQQ"), IWM: tideOf("IWM") };
+    HERO.etf = tides;
     const seen = Object.values(tides).flatMap((t) => t.path.filter((x) => x !== null));
     const lo = Math.min(0, ...seen), hi = Math.max(0, ...seen), pad = (hi - lo) * 0.08 || 1;
     const shared = [lo - (lo < 0 ? pad : 0), hi + pad];
@@ -547,6 +680,7 @@
       const flow = reg && reg.fundFlows && reg.fundFlows.byEtf ? reg.fundFlows.byEtf[T] : null;
       const f20 = flow && flow.status === "ok" ? isNum(flow.cum20Usd) : null;
       const z20 = flow && flow.status === "ok" ? isNum(flow.z20) : null;
+      HERO.iv[T] = iv30;
       const own = net === null && regRow ? isNum(regRow.ownNet) : null;
       if (src === null && !curve && !flow && own === null) {
         if (!newGate(host, regime, "the " + T + " tide", 150)) host.append(emptyLine("unavailable", "No tide was carried for " + T + ".", T + " tide", 150));
@@ -564,7 +698,7 @@
       const plot = h("div", { class: "mk-etf-p" });
       host.append(plot);
       if (drawn(path) >= 2) {
-        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: 84, xAxis: false, yTicks: false, gutter: 60,
+        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: roomH(plot, 240, 64, 4), xAxis: false, yTicks: false, gutter: 60,
           label: T + " options tide", readout: (i) => [C.part(T, "k"), tb(path[i])] });
       }
       staleMark("mkEtf" + T + "Card", session, T, calmOf(tides[T], T + " tide"));
@@ -577,6 +711,7 @@
           "The dossier opens the full reader for " + T + "."],
       }));
     }
+    paintHero();
   }
 
   function textInfo(sectionId, label, host, title, extra) {
@@ -695,7 +830,8 @@
       this.timer = setInterval(run, 60000);
     },
   };
-  if ($("mkNet") || $("mkRelations")) ALERTS.kick();
+  if ($("mkNet") || $("mkRelations") || $("mkRiver") || $("mkFloor")) ALERTS.kick();
+  let RIVER = null;
 
   const FIT_MIN = 3;
   const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "mkFitT" });
@@ -794,7 +930,7 @@
       showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
     });
   }
-  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "tide"; };
+  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "floor"; };
   showTab(fromHash(), false, true);
   addEventListener("hashchange", () => showTab(fromHash(), false, true));
 
@@ -818,6 +954,7 @@
     const level = unreadable(m) ? "unreadable" : m.status === "pending" || n === null ? "pending" : "ok";
     const meta = $("mkMeta");
     if (level !== "ok") {
+      paintHero();
       marketSilence(level === "unreadable" ? unreadableLine(m, "the market level (/api/flows/market)")
         : pendingLine("the market level", "It appears with the next pipeline run."));
       if (statusEl) {
@@ -829,6 +966,8 @@
     } else {
       if (statusEl) statusEl.removeAttribute("data-empty");
       setStale(typeof UI.staleness === "function" ? UI.staleness(m, Date.now(), { subject: "This market level" }) : null);
+      HERO.m = m;
+      paintHero();
       paintTilt(m);
       paintBreadth(m);
       paintTape(m);
@@ -893,6 +1032,22 @@
         });
       }
     }
+    const floorHost = $("mkFloor");
+    if (floorHost && UI.defer) {
+      UI.defer("floor", { when: "visible", el: floorHost, label: "The trading floor" }).then(() => {
+        const api = window.FlowsUI.floor.mount(floorHost, { universe });
+        if (api) ALERTS.sub((a, st) => api.take(a, st));
+      });
+    }
+    const riverHost = $("mkRiver");
+    if (riverHost && UI.defer) {
+      UI.defer("river", { when: "visible", el: riverHost, label: "The session" }).then(() => {
+        const api = window.FlowsUI.river.mount(riverHost, { universe, breadth, tide: HERO.tide });
+        if (!api) return;
+        RIVER = api;
+        ALERTS.sub((a, st) => api.take(a, st));
+      });
+    }
     const netHost = $("mkNet");
     if (netHost && UI.defer) {
       UI.defer("net", { when: "visible", el: netHost, label: "The flow network" }).then(() => UI.defer("netmap", { when: "idle", el: netHost, label: "The flow network" })).then(() => {
@@ -924,6 +1079,7 @@
             later("expiry", (b) => b.paintExpiry(regime, breadth));
             paintEtfs(regime, live, breadth);
             paintTide(pulse, live, breadth);
+            if (RIVER) RIVER.update({ breadth, tide: HERO.tide });
           }).catch(() => {});
         } });
       let beating = beat(LENS.on), withStrips = LENS.on;

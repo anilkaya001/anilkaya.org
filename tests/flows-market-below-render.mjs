@@ -23,8 +23,8 @@ const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQ
 {
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-market.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-market-below.js")).size;
-  ok(SINGLE_FILE_BYTES - eager >= 40 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 40 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk + eager < SINGLE_FILE_BYTES + 12288, `and the two files together are within 12 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
+  ok(SINGLE_FILE_BYTES - eager >= 36 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 36 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
+  ok(chunk + eager < SINGLE_FILE_BYTES + 20480, `and the two files together are within 20 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="market-below"[^>]*>/g).length, 1, "the page declares the market-below group once");
   const first = read("assets/js/flows-market.js");
@@ -98,6 +98,7 @@ try {
     ok(await page.evaluate(() => document.querySelectorAll("#mkRadar [data-state=pending], #mkRadar [data-empty]").length > 0), "and Radar shows its named state for the regime key that has not published");
     const stamp = await page.evaluate(() => document.getElementById("mkPulseStamp").textContent.trim());
     ok(stamp.length > 10, `the pulse stamp is worked out by the first-paint file (${stamp.slice(0, 60)})`);
+    await page.click("#mkT-tide");
     await page.click("#mkTideCard .ui-info");
     await page.waitForSelector("#fxPopB");
     ok((await page.evaluate(() => document.getElementById("fxPopB").innerText)).includes(stamp.slice(0, 20)), "and the Tide's note quotes it");

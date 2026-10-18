@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../../shared/flows-pages.js";
+import { liveEntry, phaseView } from "../../shared/flows-live-worker.js";
+import { phaseAt } from "../../shared/flows-freshness.js";
+import { nightlyEmit, emitRead } from "./nightly-emit.mjs";
 
 export const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
@@ -82,12 +85,37 @@ export function universeFixture(names = NAMES) {
   };
 }
 
-export async function openMarket(browser, { viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "" } = {}) {
+const RICH_NOW = Date.parse("2026-08-24T15:25:00.000Z");
+
+function richAnswer(dir, route, u) {
+  const q = u.searchParams;
+  const read = (k) => emitRead(dir, k);
+  switch (route) {
+    case "board": return read("board-" + (q.get("side") || "long"));
+    case "sectors": return read("sector-trix") || { status: "pending", rows: [] };
+    case "market": case "pulse": case "movers": case "regime": return read(route) || { status: "pending" };
+    case "lk": {
+      const keys = {};
+      for (const k of String(q.get("k") || "").split(",").filter(Boolean)) {
+        const p = read("live-" + k);
+        const f = p && p.fresh;
+        keys[k] = p ? { status: "ok", payload: p, updatedAt: Date.parse(f.readAt), fresh: liveEntry({ readAt: Date.parse(f.readAt), session: f.session, cadenceS: f.cadenceS, source: f.source }, Date.parse(f.readAt), RICH_NOW, null) }
+          : { status: "pending", fresh: { state: "pending", reason: "unpublished", klass: "market" } };
+      }
+      return { serverNow: RICH_NOW, phase: phaseView(phaseAt(RICH_NOW, null)), keys };
+    }
+    default: return undefined;
+  }
+}
+
+export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "" } = {}) {
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.errors = errors;
+  const dir = rich ? nightlyEmit() : null;
+  if (rich) await page.clock.install({ time: now });
   const html = PAGES.marketPage({ username: "test", owner, scenes });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
@@ -109,6 +137,11 @@ export async function openMarket(browser, { viewport = { width: 1440, height: 82
     }
     if (u.pathname === "/api/flows/universe") return route.fulfill({ contentType: "application/json", body: JSON.stringify(universe) });
     if (u.pathname.startsWith("/api/flows/")) {
+      if (rich) {
+        const body = richAnswer(dir, u.pathname.slice("/api/flows/".length), u);
+        if (body && tweak) tweak(u.pathname.slice("/api/flows/".length), body);
+        if (body !== undefined) return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      }
       const key = u.pathname.slice("/api/flows/".length) + u.search;
       const k = Object.keys(FIXTURES).find((x) => key.includes(x.replace(/^flows\//, "")));
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(k ? FIXTURES[k] : { status: "pending", rows: [] }) });
@@ -120,7 +153,7 @@ export async function openMarket(browser, { viewport = { width: 1440, height: 82
   return { context, page, errors };
 }
 
-export const TABS = ["tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
+export const TABS = ["floor", "session", "tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
 
 export async function showTab(page, selector) {
   const key = await page.evaluate((sel) => {

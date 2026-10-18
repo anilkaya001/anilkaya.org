@@ -86,17 +86,17 @@ async function allDialogs(page, label) {
 
 async function keyboard(page, label) {
   const bad = [];
-  await page.focus("#mkT-tide");
+  await page.focus(`#mkT-${TABS[0]}`);
   await page.keyboard.press("ArrowRight");
   let v = await page.evaluate(() => document.getElementById("mkStage").dataset.view);
-  if (v !== "sectors") bad.push(`${label}: ArrowRight did not move to Sectors (${v})`);
-  if (await page.evaluate(() => document.activeElement.id) !== "mkT-sectors") bad.push(`${label}: focus did not follow the tab`);
+  if (v !== TABS[1]) bad.push(`${label}: ArrowRight did not move to ${TABS[1]} (${v})`);
+  if (await page.evaluate(() => document.activeElement.id) !== "mkT-" + TABS[1]) bad.push(`${label}: focus did not follow the tab`);
   await page.keyboard.press("End");
   v = await page.evaluate(() => document.getElementById("mkStage").dataset.view);
   if (v !== TABS[TABS.length - 1]) bad.push(`${label}: End did not reach ${TABS[TABS.length - 1]} (${v})`);
   await page.keyboard.press("ArrowRight");
   v = await page.evaluate(() => document.getElementById("mkStage").dataset.view);
-  if (v !== "tide") bad.push(`${label}: the tab list does not wrap (${v})`);
+  if (v !== TABS[0]) bad.push(`${label}: the tab list does not wrap (${v})`);
   await page.keyboard.press("Home");
   const roving = await page.evaluate(() => [...document.querySelectorAll("#mkTabs [role=tab]")].filter((t) => t.tabIndex === 0).length);
   if (roving !== 1) bad.push(`${label}: ${roving} tabs are in the tab order`);
@@ -131,7 +131,7 @@ for (const [w, h] of [[1440, 820], [1024, 768], [390, 844]]) {
   eq(await page.evaluate(() => document.getElementById("mkStage").dataset.view), "prints", "and following another address changes it");
   await page.evaluate(() => { location.hash = "#view=nonsense"; });
   await page.waitForTimeout(300);
-  eq(await page.evaluate(() => document.getElementById("mkStage").dataset.view), "tide", "an unknown view falls back to the first");
+  eq(await page.evaluate(() => document.getElementById("mkStage").dataset.view), TABS[0], "an unknown view falls back to the first");
   await context.close();
 }
 

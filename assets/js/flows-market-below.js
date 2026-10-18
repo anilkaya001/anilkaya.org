@@ -440,7 +440,7 @@
       const plot = h("div", { class: "mk-pairs" });
       slot.replaceChildren(plot);
       chart = C.mount(plot, (el, w, animate) => {
-        const H = roomH(el, w < 600 ? 150 : 170, 90, 30), top = 10, bot = 22, mid = top + (H - top - bot) / 2;
+        const H = roomH(el, w < 600 ? 150 : 170, 64, 40), top = 10, bot = 22, mid = top + (H - top - bot) / 2;
         const svg = C.svgRoot(el, w, H, animate, "Call " + V.said + " up and put " + V.said + " down per session, oldest at the left");
         const N = ordered.length, band = (w - 8) / N;
         const hi = Math.max(1, ...ordered.map((r) => Math.max(isNum(r[V.c]) || 0, isNum(r[V.p]) || 0)));
@@ -692,7 +692,7 @@
       return;
     }
     const livePath = useLive && lb.zero && lb.zero.status === "ok" && Array.isArray(lb.zero.t) && Array.isArray(lb.zero.net) ? lb.zero : null;
-    const gauge = C.gauge({ value: share === null ? null : share * 100, max: 100, arc: 180, size: 150, stroke: 10, color: "--s-orange",
+    const gauge = C.gauge({ value: share === null ? null : share * 100, max: 100, arc: 180, size: 112, stroke: 9, color: "--s-orange",
       text: share === null ? DASH : Math.round(share * 100) + "%", label: "0DTE share of net premium" });
     host.append(h("div", { class: "mk-expiry-top" }, h("div", { class: "mk-gauge" }, gauge, h("span", null, "0DTE share")),
       UI.metrics([
@@ -709,7 +709,7 @@
       host.append(plot);
       const ax = timeAxis(P.t, useLive ? breadth.session : reg && reg.sessionDate);
       C.line(plot, { x: ax.x, xType: ax.xType, xTicks: ax.ticks(0), xFormat: ax.fmt, series: [{ values: P.net, format: usdS }],
-        twoTone: true, zero: true, height: [120, 130, 140], yFormat: usdS, label: "0DTE net premium through the session, times in TRT",
+        twoTone: true, zero: true, height: roomH(plot, 170, 56, 4), yFormat: usdS, label: "0DTE net premium through the session, times in TRT",
         readout: (i) => [C.part(clock(P.t[i]), "k"), tb(P.net[i]),
           P.px ? C.part("SPY " + (P.px[i] === null ? DASH : P.px[i].toFixed(2)), "k") : null].filter(Boolean) });
     }
