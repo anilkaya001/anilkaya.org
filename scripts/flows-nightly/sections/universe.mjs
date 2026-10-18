@@ -15,7 +15,7 @@ import { ARCHIVE_DATE_RE } from "../store.mjs";
 import {
   GATED_LIQUIDITY_MARGIN, candleCut, candleDate, collapseShareClasses, computeFeatures, daysToEarnings, eligible,
   enrich, gatedWorthEnriching, measureVariationProbes, netPremiumOf, onWire, partitionSides, scoreBoard, screenerTilt,
-  sessionCandles,
+  ownerHeld, sessionCandles,
 } from "../rank.mjs";
 import { fakeEnrichment, fakeFocusRows, fakeScreener } from "../fixtures.mjs";
 
@@ -275,7 +275,7 @@ export async function runUniverse(ctx) {
         (fetched.ok ? "" : ` — the read FAILED (${fetched.error})`) : ""));
   }
 
-  const eligibleFor = (row) => eligible(row) || (!!row && focusDeep.has(row.ticker) && eligible(row, { skipCap: true }));
+  const eligibleFor = (row) => eligible(row) || (!!row && focusDeep.has(row.ticker) && eligible(row, { skipCap: true })) || ownerHeld(row);
   const universe = screener.filter(eligibleFor);
   console.log(`universe: ${universe.length} eligible of ${screener.length} screened`);
   if (universe.length < 50) throw new Error(`universe too small (${universe.length}) — refusing to publish`);

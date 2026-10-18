@@ -57,7 +57,7 @@ export {
   BOARD_SCHEMA_VERSION, CANDLE_BREAK_LOG, CANDLE_BREAK_VOLUME, DEAD_BAND, GATED_LIQUIDITY_MARGIN, HOLDERS_RETRY_DAYS,
   MOVER_ROWS, NEWS_ROWS, SECTOR_ETFS, TICK_FIELDS_READ, TRIX_FULL_SCALE_BP, TRIX_MIN_CANDLES, TRIX_SERIES, TRIX_SPAN,
   TRIX_WARMUP, WATCH_ROWS, atr14, boardRow, boardVariationMeta, buildMovers, candleCut, candlesAscending,
-  collapseShareClasses, computeFeatures, congressRows, daysToEarnings, describeTickFields, eligible, ema,
+  collapseShareClasses, computeFeatures, congressRows, daysToEarnings, describeTickFields, eligible, ema, ownerHeld,
   featuresVariationInput, gatedWorthEnriching, holdersRefusal, ideasPayload, ideasArchiveKey, archiveIdeas, archivePermanent,
   permanentArchiveKey, barsInHand, markNewContracts, measureVariationProbes,
   medianDollarVolume, moverRow, packSpark, partitionSides, priorNote, readPxOf, repairCandles, ret, returnCorrelation,
