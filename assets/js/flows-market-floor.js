@@ -64,9 +64,9 @@
   }
 
   function sideOf(r) {
-    const ask = isNum(r.askPrem) ? r.askPrem : null, bid = isNum(r.bidPrem) ? r.bidPrem : null;
-    if (ask === null || bid === null || ask === bid) return "nx";
-    const askSide = ask > bid;
+    const x = UI.F.askSplit(r);
+    if (!x || !x.askStated || !x.bidStated || x.ask === x.bid) return "nx";
+    const askSide = x.ask > x.bid;
     return r.cp === "C" ? (askSide ? "up" : "down") : (askSide ? "down" : "up");
   }
 
