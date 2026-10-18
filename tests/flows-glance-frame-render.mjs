@@ -166,7 +166,7 @@ async function scenario(page) {
   await page.click("#ftDock .ft-dock-a");
   r.allShows = await page.evaluate(() => !document.getElementById("ftGrid").hidden && !document.getElementById("ftDive").hidden && /Back to one screen/.test(document.querySelector("#ftDock .ft-dock-a").textContent));
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1800);
   const before = await page.evaluate(() => { const g = document.getElementById("ftGrid"); const t = document.getElementById("m-tape"); const x = t.getBoundingClientRect(); return { gh: g.getBoundingClientRect().height, th: x.height, tt: x.top - g.getBoundingClientRect().top, labs: window.__labLoaded || 0, order: [...g.children].map((c) => c.id || c.className).join("|"), tops: [...g.children].map((c) => Math.round(c.getBoundingClientRect().top - g.getBoundingClientRect().top)).join() }; });
   r.labNotYet = counts.lab === 0;
   await page.click('#ftDock .ft-dock-b[data-mod="m-tape"]');

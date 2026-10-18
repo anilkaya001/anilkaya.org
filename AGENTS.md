@@ -1536,14 +1536,14 @@ server-router             staging
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
 
 ```
-flows-ask                 flows-chart-kernel        flows-deadline-render     flows-defaults-render
-flows-desk-client         flows-desk-wiring         flows-events              flows-export
-flows-fixture-guard-renderflows-glance-frame-render flows-glance-render       flows-index
-flows-kit                 flows-link                flows-movelab-render      flows-moves0
-flows-net-render          flows-pages-render        flows-readers-render      flows-reading-render
-flows-render              flows-rt-client           flows-status-render       flows-strip
-flows-surface-render      flows-ticker              landing-motion            market-ticker
-placement
+flows-ask                 flows-brand-render        flows-chart-kernel        flows-deadline-render
+flows-defaults-render     flows-desk-client         flows-desk-wiring         flows-events
+flows-export              flows-fixture-guard-renderflows-glance-frame-render flows-glance-render
+flows-index               flows-kit                 flows-link                flows-movelab-render
+flows-moves0              flows-net-render          flows-pages-render        flows-readers-render
+flows-reading-render      flows-render              flows-rt-client           flows-status-render
+flows-strip               flows-surface-render      flows-ticker              landing-motion
+market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 

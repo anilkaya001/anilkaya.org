@@ -785,6 +785,49 @@ td.c-num { white-space: nowrap; }
 }
 .flows-rail a.is-on .rail-count { color: var(--label-2); }
 
+.ff-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--label-3);
+  font: 600 12px / 1.2 var(--font-text);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.ff-brand:hover { color: var(--label-1); }
+a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.ff-glyph { width: 14px; height: 14px; flex: none; overflow: visible; }
+.ff-core { fill: var(--s-orange); transform-box: fill-box; transform-origin: 50% 100%; }
+.ff-halo { fill: none; stroke: var(--s-orange); stroke-width: 1; opacity: 0.35; transform-box: fill-box; transform-origin: 50% 50%; }
+.ff-word sup { margin-left: 1px; font-size: 0.62em; line-height: 1; vertical-align: top; }
+@media (pointer: coarse) {
+  a.ff-brand { min-height: 44px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body:has(#fxFresh:is([data-state="live"], [data-state="fresh"], [data-state="closed"])) .ff-core {
+    animation: ff-breathe 3.2s ease-in-out infinite;
+  }
+  body:has(#fxFresh:is([data-state="live"], [data-state="fresh"], [data-state="closed"])) .ff-halo {
+    animation: ff-halo 3.2s ease-in-out infinite;
+  }
+}
+@keyframes ff-breathe {
+  0%, 100% { opacity: 0.8; transform: scale(0.94); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+@keyframes ff-halo {
+  0%, 100% { opacity: 0.15; transform: scale(0.9); }
+  50% { opacity: 0.5; transform: scale(1.1); }
+}
+@media (forced-colors: active) {
+  .ff-brand, a.ff-brand:hover { color: CanvasText; }
+  .ff-core { fill: CanvasText; }
+  .ff-halo { stroke: CanvasText; }
+}
+.fx-doc-h .ff-brand, .st-title .ff-brand { font-size: 13px; }
+
 .fx-side-f {
   display: grid;
   gap: var(--sp-3);

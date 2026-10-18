@@ -602,7 +602,7 @@ Canonical cache version of `assets/css`, `assets/js` and `assets/data`: the `?v=
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/version.txt` |  | contracts, flows, flows-chart-kernel, flows-kit, flows-movelab-render, flows-net-render and 2 more |
+| `assets/version.txt` |  | contracts, flows, flows-brand-render, flows-chart-kernel, flows-kit, flows-movelab-render and 3 more |
 
 ### `assets/fonts-version.txt`
 
@@ -1636,7 +1636,7 @@ Stylesheets of the Flows pages: the shared system, boards, home, market, ticker,
 | `assets/css/flows-market.css` |  | flows-skyline-render |
 | `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-render, flows-movelab-render, flows-surface-render, flows-ticker |
 | `assets/css/flows-tools.css` |  | flows-defaults-render |
-| `assets/css/flows.css` |  | contracts, flows-events, flows-kit, flows-motion, flows-movelab-render, flows-moves-render and 4 more |
+| `assets/css/flows.css` |  | contracts, flows-brand-render, flows-events, flows-kit, flows-motion, flows-movelab-render and 5 more |
 
 ### `assets/js/flows-ui.js`, `assets/js/flows-dock.js`
 
@@ -1814,6 +1814,14 @@ The Market page's opening view, the Floor (`FlowsUI.floor`: `model`, `layout`, `
 |---|---|---|
 | `assets/js/flows-market-floor.js` |  | flows-market-floor-render |
 | `tests/flows-market-floor-render.mjs` |  | flows-market-floor-render |
+
+### `tests/flows-brand-render.mjs`
+
+The Fire & Forget trade-mark (`brandMark` in `shared/flows-pages.js`, the `.ff-brand` rules in `assets/css/flows.css`, no script and no global). A flame glyph and the words `Fire & Forget™` sit in the sidebar footer of every Flows page (a link to `/flows/about/` for members, to `/flows/status/#view=coverage` for owners through `ownerNav`), in the About header with a paragraph on what the rotation and live pipeline do and do not promise, and in the Status header; other surfaces reuse the class or `brandMark`. The glyph breathes (opacity and transform only) only while the page's own freshness pill reads live, fresh or closed, by a CSS `:has` rule over `#fxFresh`, so it makes no request and a page with no pill is still; it is static under reduced motion and drawn in `CanvasText` under forced colors. The suite is Chromium with `page.route`, no server: links and accessible name for member, owner and Status, the breathing and stillness states, reduced motion, forced colors, light and dark contrast, no sideways scroll at 320 to 1440 px, no performance claim in the About copy, and eleven planted wrong builds that each fail.
+
+| File | Exports | Suites |
+|---|---|---|
+| `tests/flows-brand-render.mjs` |  | flows-brand-render |
 
 ## tooling
 
@@ -2236,6 +2244,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/suites/flows-ask.json` |  | architecture, docs, run |
 | `tests/suites/flows-basis.json` |  | architecture, docs, run |
 | `tests/suites/flows-board-render.json` |  | architecture, docs, run |
+| `tests/suites/flows-brand-render.json` |  | architecture, docs, run |
 | `tests/suites/flows-brief.json` |  | architecture, docs, run |
 | `tests/suites/flows-calibration.json` |  | architecture, docs, run |
 | `tests/suites/flows-chain-panels.json` |  | architecture, docs, run |
