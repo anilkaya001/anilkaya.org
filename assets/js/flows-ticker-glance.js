@@ -1095,11 +1095,31 @@
       const chips = h("div", { class: "ftg-xchips", role: "group", "aria-label": "Expiry" }, st.m.xp.rows.map((r) => h("button", { class: "ftg-xchip", type: "button", "aria-pressed": String(r.expiry === st.expiry), "data-expiry": r.expiry, onclick: () => st.pick(r.expiry, false) }, F.day(r.expiry), h("i", null, r.dte + "d"))));
       railBox.append(chips, miniRail(st.m, c.selRow(), Math.max(200, st.W)));
     };
+    const EASE_OUT = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+    const animateRail = (svg, prevX) => {
+      if (!svg || typeof svg.animate !== "function" || (UI.reduced && UI.reduced())) return;
+      const cur = svg.querySelector("line.ftg-xc");
+      const at = cur ? +cur.getAttribute("x1") : null;
+      if (cur && prevX !== null && at !== null && Math.abs(prevX - at) > 0.5) cur.animate([{ transform: "translateX(" + (prevX - at) + "px)" }, { transform: "translateX(0px)" }], { duration: 340, easing: EASE_OUT });
+      const axis = svg.querySelector('[data-layer="gamma"] line.ftg-axis');
+      if (axis) {
+        const ox = axis.getAttribute("x1") + "px 0px";
+        svg.querySelectorAll('[data-layer="gamma"] rect[data-k]').forEach((b, i) => {
+          b.style.transformOrigin = ox;
+          b.animate([{ transform: "scaleX(0.12)", opacity: 0.35 }, { transform: "scaleX(1)", opacity: 1 }], { duration: 380, delay: Math.min(i * 7, 200), easing: EASE_OUT, fill: "backwards" });
+        });
+      }
+      const band = svg.querySelector("rect.ftg-sig");
+      if (band) band.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: EASE_OUT });
+    };
     const repaintRail = (refocus) => {
       const c = st.chart;
       if (!c || !st.m) return;
       st.m.sel = st.expiry;
+      const prevLine = c.svg.querySelector("line.ftg-xc");
+      const prevX = prevLine ? +prevLine.getAttribute("x1") : null;
       c.repaint();
+      animateRail(c.svg, prevX);
       descEl.textContent = describe(st.m);
       paintStack();
       if (refocus) { const on = c.svg.querySelector('.ftg-xt[aria-checked="true"]'); if (on) on.focus({ preventScroll: true }); }
@@ -1128,6 +1148,7 @@
       const c = drawChart(st.m, W, Hh, st);
       st.chart = c;
       svgBox.replaceChildren(c.svg);
+      if (!st.entered) { st.entered = true; animateRail(c.svg, null); }
       paintStack();
       legendEl.replaceChildren(...legend(st.m, c.L));
       descEl.textContent = describe(st.m);

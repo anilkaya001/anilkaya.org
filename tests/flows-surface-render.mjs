@@ -340,7 +340,8 @@ const VP = { width: 1440, height: 820 };
   await page.context().close();
 }
 
-const ready = async (page) => { await page.waitForSelector(".ftsf", { timeout: 10000 }); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(400); };
+const ready = async (page) => { await page.waitForSelector(".ftsf", { timeout: 10000 }); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(150); await page.waitForSelector('.ftsf[data-motion="rest"]', { timeout: 10000 }); await page.waitForTimeout(100); };
+const settle = async (page) => { await page.waitForSelector('.ftsf[data-motion="rest"]', { timeout: 10000 }); await page.waitForTimeout(60); };
 {
   const page = await boot(VP);
   const tabs = await page.evaluate(() => ({ role: document.querySelector("#ftGTabs [role=tablist]").getAttribute("role"), tabs: [...document.querySelectorAll("#ftGTabs [role=tab]")].map((b) => [b.id, b.getAttribute("aria-selected"), b.getAttribute("aria-controls"), b.textContent]), rail: !document.getElementById("ftReadRail").hidden, surf: document.getElementById("ftGSurf").hidden }));
@@ -427,11 +428,11 @@ const ready = async (page) => { await page.waitForSelector(".ftsf", { timeout: 1
   const px0 = await page.evaluate(() => document.querySelectorAll(".ftsf canvas")[0].toDataURL().length + ":" + document.querySelectorAll(".ftsf canvas")[1].toDataURL().length);
   await page.keyboard.press("ArrowRight");
   await page.keyboard.press("ArrowUp");
-  await page.waitForTimeout(200);
+  await settle(page);
   const px1 = await page.evaluate(() => document.querySelectorAll(".ftsf canvas")[0].toDataURL().length + ":" + document.querySelectorAll(".ftsf canvas")[1].toDataURL().length);
   ok(px0 !== px1, "arrow keys turn the scene, and both scenes share the one camera");
   await page.locator("#ftGReset button").click();
-  await page.waitForTimeout(200);
+  await settle(page);
   const px2 = await page.evaluate(() => document.querySelectorAll(".ftsf canvas")[0].toDataURL().length + ":" + document.querySelectorAll(".ftsf canvas")[1].toDataURL().length);
   eq(px2, px0, "Reset view returns both scenes to the rest view, pixel for pixel");
 
@@ -559,6 +560,463 @@ const ready = async (page) => { await page.waitForSelector(".ftsf", { timeout: 1
   await page.context().close();
 }
 
+const HOSTCSS = "position:fixed;left:20px;top:20px;width:1100px;height:540px;background:var(--surface-1);z-index:99999;display:flex;flex-direction:column";
+const HALF = (n) => "position:fixed;left:" + (n ? 725 : 5) + "px;top:20px;width:700px;height:540px;background:var(--surface-1);z-index:99999;display:flex;flex-direction:column";
+const YAW_MAX_DEG = 55, PITCH_MIN_DEG = 8, PITCH_MAX_DEG = 60, ZOOM_LO = 0.7, ZOOM_HI = 2.4;
+const REST = { yaw: -34, pitch: 36, zoom: 1 };
+
+async function openSurface(vp, o = {}) {
+  const page = await boot(vp, o);
+  await page.locator("#ftTabSurface").click();
+  await ready(page);
+  return page;
+}
+async function mountAt(page, id, o = {}) {
+  await page.evaluate(({ id, card, expiry, css }) => {
+    window.__apis = window.__apis || {};
+    const host = document.createElement("div");
+    host.id = "h-" + id;
+    host.style.cssText = css;
+    document.body.append(host);
+    window.__apis[id] = window.FlowsUI.tickerSurface.mount(host, { card, expiry });
+  }, { id, card: o.card || CARD, expiry: o.expiry || null, css: o.css || HOSTCSS });
+}
+const unmountAt = (page, id) => page.evaluate((id) => { window.__apis[id].destroy(); document.getElementById("h-" + id).remove(); delete window.__apis[id]; }, id);
+const motionOf = (page, id) => page.evaluate((id) => window.__apis[id].motion(), id);
+const viewOf = (page, id) => page.evaluate((id) => window.__apis[id].view(), id);
+const rested = (page, id, timeout = 4000) => page.waitForFunction((id) => window.__apis[id].motion().state === "rest", id, { timeout });
+const frames = (page, id) => page.evaluate((id) => window.__apis[id].stages.map((st) => st.cv.toDataURL()), id);
+const canvasBox = async (page, id, n = 0) => (await page.locator("#h-" + id + " canvas").nth(n).boundingBox());
+const near2 = (a, b, tol, m) => near(a, b, tol, m);
+
+async function dragBy(page, id, dx, dy, o = {}) {
+  const b = await canvasBox(page, id, 0);
+  const x0 = b.x + b.width / 2, y0 = b.y + b.height / 2;
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  const n = o.steps || 12;
+  for (let i = 1; i <= n; i++) { await page.mouse.move(x0 + (dx * i) / n, y0 + (dy * i) / n); if (o.gap) await page.waitForTimeout(o.gap); }
+  if (!o.hold) await page.mouse.up();
+  return { x: x0 + dx, y: y0 + dy };
+}
+
+async function chkClamp(page) {
+  await mountAt(page, "c");
+  await rested(page, "c");
+  await dragBy(page, "c", 900, 700, { steps: 30, hold: true });
+  const hi = await viewOf(page, "c");
+  ok(hi.yaw <= YAW_MAX_DEG + 1e-9 && hi.pitch <= PITCH_MAX_DEG + 1e-9, `a hard drag one way stops at the clamps while the pointer is still down (yaw ${hi.yaw.toFixed(2)}, pitch ${hi.pitch.toFixed(2)})`);
+  near2(hi.yaw, YAW_MAX_DEG, 1e-9, "yaw reaches exactly its limit");
+  near2(hi.pitch, PITCH_MAX_DEG, 1e-9, "pitch reaches exactly its limit");
+  await page.mouse.up();
+  await rested(page, "c");
+  await dragBy(page, "c", -2200, -1700, { steps: 40, hold: true });
+  const lo = await viewOf(page, "c");
+  near2(lo.yaw, -YAW_MAX_DEG, 1e-9, "and the other way stops at the other limit");
+  near2(lo.pitch, PITCH_MIN_DEG, 1e-9, "pitch stops at its floor");
+  await page.mouse.up();
+  await rested(page, "c");
+  await unmountAt(page, "c");
+}
+
+async function chkInertia(page) {
+  await mountAt(page, "i");
+  await rested(page, "i");
+  await page.evaluate(() => window.__apis.i.go("front"));
+  await rested(page, "i");
+  const v0 = await viewOf(page, "i");
+  await dragBy(page, "i", 36, 0, { steps: 6, hold: true });
+  await page.mouse.up();
+  const m = await motionOf(page, "i");
+  ok(m.vy > 10, `a flick leaves the scene turning (${m.vy.toFixed(1)} deg/s)`);
+  const a = await viewOf(page, "i");
+  await page.waitForTimeout(120);
+  const b = await viewOf(page, "i");
+  ok(b.yaw - a.yaw > 0.05, "it keeps turning after the pointer is released, in the direction of the flick");
+  await page.waitForTimeout(280);
+  const mid = await motionOf(page, "i");
+  ok(mid.vy < m.vy * 0.5, `and slows as it goes (${m.vy.toFixed(0)} to ${mid.vy.toFixed(0)} deg/s in 0.4 s)`);
+  await rested(page, "i", 3000);
+  const e = await motionOf(page, "i");
+  eq([e.vy, e.vp], [0, 0], "inertia ends: no residual velocity once the loop stops");
+  const c = await viewOf(page, "i");
+  ok(c.yaw - v0.yaw > 3 && c.yaw - v0.yaw < 40, `and the glide is short, ${(c.yaw - v0.yaw).toFixed(1)} degrees in all`);
+  await page.waitForTimeout(300);
+  eq(await viewOf(page, "i"), c, "and the scene is still");
+  await dragBy(page, "i", 160, 0, { steps: 8, hold: true });
+  await page.mouse.up();
+  await page.waitForTimeout(40);
+  const bx = await canvasBox(page, "i", 0);
+  await page.mouse.move(bx.x + 30, bx.y + 30);
+  await page.mouse.down();
+  const s1 = await viewOf(page, "i");
+  await page.waitForTimeout(150);
+  eq(await viewOf(page, "i"), s1, "touching the scene again stops the glide at once");
+  await page.mouse.up();
+  await unmountAt(page, "i");
+}
+
+async function chkZoom(page) {
+  await mountAt(page, "z");
+  await rested(page, "z");
+  const b = await canvasBox(page, "z", 0);
+  await page.mouse.move(b.x + 40, b.y + 40);
+  await page.mouse.wheel(0, -200);
+  await rested(page, "z");
+  ok((await viewOf(page, "z")).zoom > 1.1, "the wheel zooms in");
+  for (let i = 0; i < 14; i++) await page.mouse.wheel(0, -600);
+  await rested(page, "z");
+  near2((await viewOf(page, "z")).zoom, ZOOM_HI, 1e-9, "zoom in stops at its limit");
+  for (let i = 0; i < 30; i++) await page.mouse.wheel(0, 600);
+  await rested(page, "z");
+  near2((await viewOf(page, "z")).zoom, ZOOM_LO, 1e-9, "zoom out stops at its limit");
+  await page.evaluate(() => {
+    const cv = document.querySelector("#h-z canvas");
+    const at = (id, x, y, type) => cv.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y, bubbles: true, isPrimary: id === 11 }));
+    const r = cv.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    at(11, cx - 20, cy, "pointerdown"); at(12, cx + 20, cy, "pointerdown");
+    for (let i = 1; i <= 8; i++) { at(11, cx - 20 - i * 12, cy, "pointermove"); at(12, cx + 20 + i * 12, cy, "pointermove"); }
+    at(11, cx, cy, "pointerup"); at(12, cx, cy, "pointerup");
+  });
+  await rested(page, "z");
+  const pz = (await viewOf(page, "z")).zoom;
+  ok(pz > 1.5, `spreading two fingers zooms in (${pz.toFixed(2)}) and does not orbit`);
+  eq((await viewOf(page, "z")).yaw, REST.yaw, "a pinch leaves the yaw where it was");
+  await page.keyboard.press("Tab");
+  await unmountAt(page, "z");
+}
+
+async function chkKeys(page) {
+  await mountAt(page, "k");
+  await rested(page, "k");
+  await page.locator("#h-k canvas").first().focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowUp");
+  near2((await viewOf(page, "k")).yaw, REST.yaw + 15, 1e-9, "each right arrow turns five degrees");
+  near2((await viewOf(page, "k")).pitch, REST.pitch + 3, 1e-9, "and up tilts three");
+  await page.keyboard.press("+");
+  await rested(page, "k");
+  near2((await viewOf(page, "k")).zoom, 1.2, 1e-9, "plus zooms in by a fifth");
+  await page.keyboard.press("-");
+  await page.keyboard.press("-");
+  await rested(page, "k");
+  near2((await viewOf(page, "k")).zoom, 1 / 1.2, 1e-9, "minus zooms out");
+  await page.keyboard.press("Home");
+  await rested(page, "k");
+  eq(await viewOf(page, "k"), REST, "Home glides back to the rest view exactly");
+  await dragBy(page, "k", 120, 60, { steps: 6 });
+  await rested(page, "k");
+  ok((await viewOf(page, "k")).yaw !== REST.yaw, "a drag moves the view");
+  const b = await canvasBox(page, "k", 0);
+  await page.mouse.dblclick(b.x + 10, b.y + 10);
+  await rested(page, "k");
+  eq(await viewOf(page, "k"), REST, "a double click recentres exactly");
+  await unmountAt(page, "k");
+}
+
+async function chkPresets(page) {
+  await mountAt(page, "p");
+  await rested(page, "p");
+  for (const [name, to] of [["side", { yaw: 52, pitch: 14, zoom: 1 }], ["top", { yaw: 0, pitch: PITCH_MAX_DEG, zoom: 1 }], ["front", { yaw: 0, pitch: 14, zoom: 1 }], ["reset", REST]]) {
+    const from = await viewOf(page, "p");
+    const trace = await page.evaluate(({ name }) => new Promise((res) => {
+      const api = window.__apis.p, t0 = performance.now(), out = [];
+      document.querySelector('#h-p .ftsf-vb[data-view="' + name + '"]').click();
+      const tick = () => { const v = api.view(); out.push([performance.now() - t0, v.yaw, v.pitch, api.motion().state]); if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else res(out); };
+      requestAnimationFrame(tick);
+    }), { name });
+    const end = trace[trace.length - 1];
+    near2(end[1], to.yaw, 1e-9, `${name}: yaw ends exactly on the preset`);
+    near2(end[2], to.pitch, 1e-9, `${name}: pitch ends exactly on the preset`);
+    const settledAt = (trace.find((r) => r[3] === "rest") || [9999])[0];
+    ok(settledAt <= 720 && settledAt >= 300, `${name}: the glide takes ${Math.round(settledAt)} ms, under 700 and not a cut`);
+    const dist = trace.map((r) => Math.hypot(r[1] - to.yaw, (r[2] - to.pitch) * 1.3));
+    let mono = true;
+    for (let i = 1; i < dist.length; i++) if (dist[i] > dist[i - 1] + 1e-6) mono = false;
+    ok(mono, `${name}: the distance to the target never grows during the glide`);
+    if (Math.hypot(from.yaw - to.yaw, from.pitch - to.pitch) > 5) ok(trace.some((r, i) => i > 0 && Math.hypot(r[1] - from.yaw, r[2] - from.pitch) > 0.5 && Math.hypot(r[1] - to.yaw, r[2] - to.pitch) > 0.5), `${name}: there are frames strictly between the two views`);
+    const on = await page.evaluate(() => [...document.querySelectorAll("#h-p .ftsf-vb[data-view]")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset.view));
+    eq(on, [name], `${name}: its button is the one pressed`);
+  }
+  await unmountAt(page, "p");
+}
+
+async function chkAuto(page) {
+  await mountAt(page, "a");
+  await rested(page, "a");
+  const btn = page.locator("#h-a .ftsf-auto");
+  eq(await btn.getAttribute("aria-pressed"), "false", "Auto starts off");
+  const y0 = (await viewOf(page, "a")).yaw;
+  await btn.click();
+  eq(await btn.getAttribute("aria-pressed"), "true", "the toggle is a pressed button");
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(900);
+  near2((await viewOf(page, "a")).yaw, y0, 1e-9, "it waits for the reader to be still before it drifts");
+  await page.waitForTimeout(1700);
+  const y1 = (await viewOf(page, "a")).yaw;
+  ok(Math.abs(y1 - y0) > 0.8, `then it drifts gently (${(y1 - y0).toFixed(2)} degrees)`);
+  ok((await motionOf(page, "a")).state === "moving", "and the loop runs while it does");
+  const b = await canvasBox(page, "a", 0);
+  await page.mouse.move(b.x + 20, b.y + 20);
+  await page.mouse.down();
+  const y2 = (await viewOf(page, "a")).yaw;
+  await page.waitForTimeout(500);
+  near2((await viewOf(page, "a")).yaw, y2, 1e-9, "holding the scene pauses it");
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  near2((await viewOf(page, "a")).yaw, y2, 1e-9, "and it stays paused for a moment after you let go");
+  await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" }); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.waitForTimeout(900);
+  const hid = await motionOf(page, "a");
+  const y3 = (await viewOf(page, "a")).yaw;
+  await page.waitForTimeout(500);
+  eq([(await viewOf(page, "a")).yaw, (await motionOf(page, "a")).frames], [y3, hid.frames], "a hidden tab turns nothing and runs no frame");
+  await page.evaluate(() => { delete document.visibilityState; document.dispatchEvent(new Event("visibilitychange")); });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => { document.getElementById("h-a").style.transform = "translateY(-4000px)"; });
+  await page.waitForTimeout(500);
+  const off = await motionOf(page, "a");
+  const y4 = (await viewOf(page, "a")).yaw;
+  await page.waitForTimeout(500);
+  eq([(await viewOf(page, "a")).yaw, (await motionOf(page, "a")).frames], [y4, off.frames], "a scene scrolled out of view turns nothing and runs no frame");
+  await page.evaluate(() => { document.getElementById("h-a").style.transform = ""; });
+  await page.waitForTimeout(600);
+  await btn.click();
+  await rested(page, "a");
+  eq(await btn.getAttribute("aria-pressed"), "false", "toggling off ends the loop");
+  await unmountAt(page, "a");
+}
+
+async function chkCensus(page) {
+  await mountAt(page, "n");
+  await rested(page, "n");
+  const a = await motionOf(page, "n");
+  await page.waitForTimeout(900);
+  const b = await motionOf(page, "n");
+  eq([b.paints, b.frames, b.state], [a.paints, a.frames, "rest"], "at rest nothing paints and no frame runs");
+  await page.mouse.move(700, 300);
+  await page.mouse.move(720, 310);
+  await rested(page, "n");
+  const c = await motionOf(page, "n");
+  await page.waitForTimeout(700);
+  eq((await motionOf(page, "n")).paints, c.paints, "after a hover settles the census is zero again");
+  await unmountAt(page, "n");
+}
+
+function gammaWordIn(page, g) {
+  return page.evaluate((g) => { const F = window.FlowsUI.F, traded = window.__apis.h.model.surface.xp.basis === "traded"; return (g < 0 ? window.FlowsUI.MINUS : g > 0 ? "+" : "") + (traded ? F.num(Math.abs(g)) : F.money(Math.abs(g))); }, g);
+}
+
+async function chkHover(page) {
+  await mountAt(page, "h");
+  await rested(page, "h");
+  const pts = await page.evaluate(() => { const st = window.__apis.h.stages[0].s; return st.pool.slice(0, st.np).map((p) => ({ x: p.x, y: p.y, j: p.j, i: p.i, K: p.K, v: p.v })); });
+  ok(pts.length > 60, `the terrain exposes ${pts.length} hit points, one for each drawn column`);
+  const b = await canvasBox(page, "h", 0);
+  const pick = (f) => pts.filter((p) => p.v !== null && Math.abs(p.v) > 1e6).reduce((a, p) => (f(p) < f(a) ? p : a));
+  const A = pick((p) => p.x + p.y), B = pick((p) => -(p.x + p.y));
+  ok(A.v !== B.v, "two distinct columns to hover");
+  await page.mouse.move(b.x + A.x, b.y + A.y);
+  await page.mouse.move(b.x + A.x + 0.5, b.y + A.y);
+  await rested(page, "h");
+  const m = await motionOf(page, "h");
+  ok(m.hover && m.hover.j === A.j && m.hover.i === A.i, "the pointer picks the column under it");
+  const row = await page.evaluate((j) => window.__apis.h.model.surface.rows.find((r) => r.j === j).expiry, A.j);
+  const di = SURFACE_GAMMA_DATES.indexOf(row);
+  const cardG = CARD.panels.surface.oi.gamma[A.i][di];
+  eq(cardG, A.v, "its value is the card's own gamma cell");
+  const tip = await page.evaluate(() => { const t = document.querySelector("#h-h .ftsf-tip:not([hidden])"); return t ? { l: t.querySelector(".ftsf-tip-l").textContent, v: t.querySelector(".ftsf-tip-v").textContent } : null; });
+  ok(tip !== null, "a floating readout appears");
+  eq(tip.v, await gammaWordIn(page, A.v), "and says the cell's value exactly once the count settles");
+  const want = await page.evaluate(({ K, row }) => "$" + window.FlowsUI.F.px(K, K % 1 ? 1 : 0) + " " + window.FlowsUI.MID + " " + window.FlowsUI.F.day(row), { K: A.K, row });
+  eq(tip.l, want, "with its strike and expiry");
+  const lit = await page.evaluate(() => window.__apis.h.stages[0].cv.toDataURL());
+  await page.mouse.move(b.x + B.x, b.y + B.y);
+  const seen = new Set();
+  const t0 = Date.now();
+  let last = Date.now();
+  let prev = null;
+  while (Date.now() - t0 < 900) {
+    const v = await page.evaluate(() => { const t = document.querySelector("#h-h .ftsf-tip:not([hidden]) .ftsf-tip-v"); return t ? t.textContent : null; });
+    if (v !== prev) { seen.add(v); prev = v; last = Date.now(); }
+    await page.waitForTimeout(8);
+  }
+  const expectB = await gammaWordIn(page, B.v);
+  eq(prev, expectB, "the readout lands on the new cell's exact value");
+  ok(seen.size >= 3, `and it counted through ${seen.size - 1} figures on the way`);
+  ok(last - t0 < 700, `the count and the slide finish within 700 ms (${last - t0} ms)`);
+  await rested(page, "h");
+  ok((await page.evaluate(() => window.__apis.h.stages[0].cv.toDataURL())) !== lit, "the lit cell moved with the pointer");
+  await page.mouse.move(5, 5);
+  await rested(page, "h");
+  eq(await page.evaluate(() => document.querySelectorAll("#h-h .ftsf-tip:not([hidden])").length), 0, "leaving the scene hides the readout");
+  await unmountAt(page, "h");
+}
+
+async function chkSettled(page, reducedFrames) {
+  const CARD2 = clone(CARD);
+  CARD2.panels.surface.oi.gamma = CARD2.panels.surface.oi.gamma.map((r, i) => r.map((v, j) => (v === null ? null : Math.round(v * (1.7 - 0.9 * Math.sin(i + j))))));
+  const alt = surfaceCard(JSON.parse(JSON.stringify(base)), { scale: { "2026-08-28": 1.25, "2026-08-31": 1.12, "2026-09-18": 0.9 } });
+  CARD2.engine = alt.engine;
+  await mountAt(page, "A", { css: HALF(0) });
+  await mountAt(page, "B", { card: CARD2, css: HALF(1) });
+  await rested(page, "A");
+  await rested(page, "B");
+  const A0 = await frames(page, "A"), B0 = await frames(page, "B");
+  ok(A0[0] !== B0[0] && A0[1] !== B0[1], "the two cards draw differently");
+  const ok1 = await page.evaluate((card) => window.__apis.A.update(card), CARD2);
+  eq(ok1, true, "an update with the same shape is accepted");
+  await page.waitForTimeout(170);
+  const mid = await frames(page, "A");
+  ok(mid[0] !== A0[0] && mid[0] !== B0[0], "mid-tween the terrain is neither the old nor the new frame");
+  ok(mid[1] !== A0[1] && mid[1] !== B0[1], "and neither is the surface");
+  await rested(page, "A", 1500);
+  const A1 = await frames(page, "A");
+  eq(A1[0] === B0[0] && A1[1] === B0[1], true, "once the tween ends the frame equals a fresh mount of the new card, pixel for pixel");
+  const m = await motionOf(page, "A");
+  eq([m.tween, m.grow], [1, 1], "and the tween and the grow are both at one");
+  await page.evaluate(() => window.__apis.A.setExpiry("2026-09-11"));
+  await page.waitForTimeout(160);
+  const midE = await frames(page, "A");
+  await rested(page, "A", 1500);
+  const AE = await frames(page, "A");
+  ok(midE[0] !== AE[0], "an expiry change rises the chosen row on the way");
+  await unmountAt(page, "B");
+  await mountAt(page, "B", { card: CARD2, expiry: "2026-09-11", css: HALF(1) });
+  await rested(page, "B");
+  const BE = await frames(page, "B");
+  eq(AE[0] === BE[0] && AE[1] === BE[1], true, "after the move the frame equals a fresh mount at that expiry");
+  await unmountAt(page, "A");
+  await unmountAt(page, "B");
+  await mountAt(page, "G");
+  await page.waitForTimeout(110);
+  const grow = await frames(page, "G");
+  const gm = await motionOf(page, "G");
+  ok(gm.grow < 1 && gm.state === "moving", "a fresh mount grows from the floor");
+  await rested(page, "G", 1500);
+  const done = await frames(page, "G");
+  ok(grow[0] !== done[0] && grow[1] !== done[1], "the entry frames differ from the settled ones");
+  if (reducedFrames) { eq(done, reducedFrames, "the settled frame equals the one drawn with reduced motion, pixel for pixel"); }
+  await unmountAt(page, "G");
+  return done;
+}
+
+async function chkReduced(page) {
+  await mountAt(page, "r");
+  const m = await motionOf(page, "r");
+  eq([m.grow, m.state, m.reduced], [1, "rest", true], "under reduced motion a mount is settled at once");
+  const btn = page.locator("#h-r .ftsf-auto");
+  ok(await btn.isDisabled(), "Auto-rotate is switched off and says so");
+  await page.evaluate(() => document.querySelector("#h-r .ftsf-auto").click());
+  const y0 = (await viewOf(page, "r")).yaw;
+  await page.waitForTimeout(2600);
+  eq([(await viewOf(page, "r")).yaw, (await motionOf(page, "r")).state], [y0, "rest"], "it never turns");
+  await page.evaluate(() => document.querySelector('#h-r .ftsf-vb[data-view="side"]').click());
+  eq((await viewOf(page, "r")).yaw, 52, "a preset cuts straight to its view");
+  const b = await canvasBox(page, "r", 0);
+  await page.mouse.move(b.x + 20, b.y + 20);
+  await page.mouse.wheel(0, -300);
+  ok((await viewOf(page, "r")).zoom > 1.2, "zoom lands at once");
+  await dragBy(page, "r", 160, 0, { steps: 8, hold: true });
+  await page.mouse.up();
+  await rested(page, "r");
+  eq([(await motionOf(page, "r")).vy, (await motionOf(page, "r")).state], [0, "rest"], "a flick does not glide");
+  await unmountAt(page, "r");
+}
+
+async function chkCost(page) {
+  await mountAt(page, "f");
+  await rested(page, "f");
+  const r = await page.evaluate(() => {
+    const api = window.__apis.f;
+    const t = [], q = [];
+    const c = document.createElement("canvas");
+    c.width = 360; c.height = 200;
+    const x = c.getContext("2d");
+    const refwork = () => { for (let n = 0; n < 1600; n++) { x.beginPath(); x.moveTo(n % 300, 10); x.lineTo(n % 300 + 9, 14); x.lineTo(n % 300 + 6, 40); x.lineTo(n % 300 - 3, 30); x.closePath(); x.globalAlpha = 0.5; x.fillStyle = "rgb(10,200,30)"; x.fill(); x.stroke(); } };
+    for (let i = 0; i < 12; i++) { api.repaint(); refwork(); }
+    for (let i = 0; i < 160; i++) {
+      const a = performance.now(); api.repaint(); t.push(performance.now() - a);
+      const b = performance.now(); refwork(); q.push(performance.now() - b);
+    }
+    t.sort((u, v) => u - v); q.sort((u, v) => u - v);
+    return { sub: t[80], ref: q[80], p90: t[144] };
+  });
+  console.log(`  frame cost (both canvases): median ${r.sub.toFixed(2)} ms, p90 ${r.p90.toFixed(2)} ms, reference ${r.ref.toFixed(2)} ms, ratio ${(r.sub / r.ref).toFixed(2)}`);
+  ok(r.sub < 3.5, `a frame of both scenes costs ${r.sub.toFixed(2)} ms at the median, under 3.5`);
+  ok(r.sub / r.ref < 3, `and ${(r.sub / r.ref).toFixed(2)} times a reference canvas workload of the same path count, under 3`);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("HeapProfiler.collectGarbage");
+  const h0 = await cdp.send("Runtime.getHeapUsage");
+  await page.evaluate(() => { for (let i = 0; i < 40; i++) window.__apis.f.repaint(); });
+  const h1 = await cdp.send("Runtime.getHeapUsage");
+  const kib = (h1.usedSize - h0.usedSize) / 40 / 1024;
+  ok(kib < 64, `a frame allocates ${kib.toFixed(1)} KiB, a small constant (no mesh or cell arrays are rebuilt)`);
+  await cdp.detach();
+  await unmountAt(page, "f");
+}
+
+async function chkTouch(page) {
+  await mountAt(page, "t", { css: "position:fixed;left:16px;top:60px;width:358px;height:700px;background:var(--surface-1);z-index:99999;display:flex;flex-direction:column;container-type:inline-size" });
+  await rested(page, "t");
+  const ta = await page.evaluate(() => getComputedStyle(document.querySelector("#h-t canvas")).touchAction);
+  eq(ta, "pan-y", "a canvas hands vertical panning to the page and keeps horizontal drags");
+  const b = await canvasBox(page, "t", 0);
+  const cdp = await page.context().newCDPSession(page);
+  const touch = async (pts) => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [pts[0]] });
+    for (const p of pts.slice(1)) { await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [p] }); await page.waitForTimeout(10); }
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+  const y0 = (await viewOf(page, "t")).yaw;
+  await touch(Array.from({ length: 10 }, (_, i) => ({ x: cx - 60 + i * 12, y: cy })));
+  await rested(page, "t", 3000);
+  const y1 = (await viewOf(page, "t")).yaw;
+  ok(Math.abs(y1 - y0) > 15, `a horizontal swipe on the scene turns it (${(y1 - y0).toFixed(1)} degrees)`);
+  await touch(Array.from({ length: 10 }, (_, i) => ({ x: cx, y: cy - 60 + i * 12 })));
+  await rested(page, "t", 3000);
+  const y2 = (await viewOf(page, "t")).yaw;
+  ok(Math.abs(y2 - y1) < 2, `a vertical swipe does not turn it, the page takes it (${(y2 - y1).toFixed(2)} degrees)`);
+  await cdp.detach();
+  await unmountAt(page, "t");
+}
+
+let REDUCED_FRAMES;
+{
+  const page = await boot(VP, { reduced: true });
+  await page.locator("#ftTabSurface").click();
+  await ready(page);
+  await chkReduced(page);
+  await mountAt(page, "x");
+  await rested(page, "x");
+  REDUCED_FRAMES = await frames(page, "x");
+  await unmountAt(page, "x");
+  eq(page.__errors, [], "no page error under reduced motion");
+  await page.context().close();
+}
+{
+  const page = await openSurface(VP);
+  await chkClamp(page);
+  await chkInertia(page);
+  await chkZoom(page);
+  await chkKeys(page);
+  await chkPresets(page);
+  await chkAuto(page);
+  await chkCensus(page);
+  await chkHover(page);
+  await chkSettled(page, REDUCED_FRAMES);
+  await chkCost(page);
+  eq(page.__errors, [], "no page error across orbit, zoom, presets, auto-rotate, hover and tweens");
+  await page.context().close();
+}
+{
+  const page = await openSurface({ width: 390, height: 844 }, { touch: true });
+  await chkTouch(page);
+  eq(page.__errors, [], "no page error with touch");
+  await page.context().close();
+}
+
 const MUTANTS = [
   ["the rail is drawn three pixels off the price axis", "/assets/js/flows-ticker-glance.js", (s) => s.replace("yy = y(K) - th / 2;", "yy = y(K) - th / 2 + 3;"), "rail"],
   ["the one-sigma band is half as wide", "/assets/js/flows-ticker-glance.js", (s) => s.replace("const up = S * Math.exp(row.sd), dn = S * Math.exp(-row.sd);", "const up = S * Math.exp(row.sd / 2), dn = S * Math.exp(-row.sd / 2);"), "rail"],
@@ -634,5 +1092,35 @@ for (const [name, file, fn, kind] of MUTANTS) {
   await page.context().close();
 }
 
+
+const ORBIT_MUTANTS = [
+  ["a drag orbits without the yaw clamp", "/assets/js/flows-ticker-surface.js", (s) => s.replace("view.yaw = clamp(view.yaw + dy * DEG, -YAW_MAX, YAW_MAX);", "view.yaw = view.yaw + dy * DEG;"), "clamp"],
+  ["inertia never decays", "/assets/js/flows-ticker-surface.js", (s) => s.replace("const k = Math.exp(-dt / 0.32);", "const k = 1;"), "inertia"],
+  ["a data tween never reaches one", "/assets/js/flows-ticker-surface.js", (s) => s.replace("M.tw = p >= 1 || M.reduced ? 1 : Math.max(0, p);", "M.tw = Math.min(0.98, Math.max(0, p));"), "settled"],
+  ["the entry grow never reaches one", "/assets/js/flows-ticker-surface.js", (s) => s.replace("M.grow = p >= 1 || M.reduced ? 1 : Math.max(0, p);", "M.grow = Math.min(0.97, Math.max(0, p));"), "settled"],
+  ["a count-up stops short and leaves the mid-count figure on screen", "/assets/js/flows-ticker-surface.js", (s) => s.replace("if (p >= 1) { M.shown = M.cu.to; M.cu = null; }", "if (p >= 1) { M.cu = null; }").replace("M.shown = lerp(M.cu.from, M.cu.to, EASE.out(Math.max(0, p)));", "M.shown = lerp(M.cu.from, M.cu.to, EASE.out(Math.max(0, p)) * 0.8);"), "hover"],
+  ["auto-rotate ignores reduced motion", "/assets/js/flows-ticker-surface.js", (s) => s.replace("autoBtn.disabled = M.reduced;", "autoBtn.disabled = false;").replace("M.auto = !M.auto && !M.reduced;", "M.auto = !M.auto;").replace("if (M.auto && !M.reduced && M.visible && M.inView) {", "if (M.auto && M.visible && M.inView) {"), "reduced"],
+  ["auto-rotate keeps running in a hidden or off-screen scene", "/assets/js/flows-ticker-surface.js", (s) => s.replace("if (M.auto && !M.reduced && M.visible && M.inView) {", "if (M.auto && !M.reduced) {").replace("if (again && M.visible) M.raf", "if (again) M.raf"), "auto"],
+  ["wheel zoom has no clamp", "/assets/js/flows-ticker-surface.js", (s) => s.replace("M.zt = clamp(z, ZOOM_MIN, ZOOM_MAX);", "M.zt = z;"), "zoom"],
+  ["a preset cuts instead of gliding", "/assets/js/flows-ticker-surface.js", (s) => s.replace("if (M.reduced) cutTo(to);", "if (true) cutTo(to);"), "presets"],
+  ["a double click does nothing", "/assets/js/flows-ticker-surface.js", (s) => s.replace('cv.addEventListener("dblclick"', 'cv.addEventListener("dblclickx"'), "keys"],
+  ["the loop never stops at rest", "/assets/js/flows-ticker-surface.js", (s) => s.replace("if (again && M.visible) M.raf = requestAnimationFrame(step); else {", "if (true) M.raf = requestAnimationFrame(step); else {"), "census"],
+  ["the canvas takes every touch, vertical ones included", "/assets/css/flows-ticker.css", (s) => s.replace("touch-action: pan-y;", "touch-action: none;"), "touch"],
+];
+const ORBIT_CHECK = { clamp: chkClamp, inertia: chkInertia, settled: (p) => chkSettled(p, null), hover: chkHover, reduced: chkReduced, auto: chkAuto, zoom: chkZoom, presets: chkPresets, keys: chkKeys, census: chkCensus, touch: chkTouch };
+for (const [name, file, fn, kind] of ORBIT_MUTANTS) {
+  const src = fs.readFileSync(path.join(ROOT, file.slice(1)), "utf8");
+  ok(fn(src) !== src, `mutant "${name}" changes the file`);
+  const page = await boot(kind === "touch" ? { width: 390, height: 844 } : VP, { mutate: { [file]: fn }, reduced: kind === "reduced", touch: kind === "touch" });
+  let caught = null;
+  try {
+    await page.locator("#ftTabSurface").click();
+    await ready(page);
+    await ORBIT_CHECK[kind](page);
+  } catch (e) { caught = String(e.message).split("\n")[0]; }
+  ok(caught !== null, `planted wrong build "${name}" is caught (${caught || "NOT CAUGHT"})`);
+  await page.context().close();
+}
+
 await browser.close();
-console.log(`flows-surface-render: ${checks} assertions - the strike rail on one price axis, the expiry cursor and its one-sigma band, 25-delta, risk reversal and butterfly against an independent solve and the engine's own figures, missing cells as dashed outlines, thinned time-axis labels, the chart panel's tab, the three-up surface and terrain, total-variance interpolation and the calendar check, withheld states, and ${MUTANTS.length} planted wrong builds`);
+console.log(`flows-surface-render: ${checks} assertions - the strike rail on one price axis, the expiry cursor and its one-sigma band, 25-delta, risk reversal and butterfly against an independent solve and the engine's own figures, missing cells as dashed outlines, thinned time-axis labels, the chart panel's tab, the three-up surface and terrain, total-variance interpolation and the calendar check, withheld states, and ${MUTANTS.length + ORBIT_MUTANTS.length} planted wrong builds, and the orbit: drag, flick inertia, wheel and pinch zoom with clamps, keys, double click, presets, auto-rotate that stops hidden, off screen and under reduced motion, the hover readout and its count-up, entry grow and data tweens that settle to the fresh-mount frame pixel for pixel, a zero paint census at rest, frame cost and touch`);
