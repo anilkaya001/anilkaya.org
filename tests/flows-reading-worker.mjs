@@ -851,7 +851,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
     "and the meter the answer carries is read after the recording, so the page shows the call it just made");
   const touching = f.trips.slice(before).filter((t) => t.sqls.some((q) => /^(SELECT|INSERT).*flows_ai_usage/.test(q)));
   eq(touching.filter((t) => t.sqls.some((q) => /^INSERT INTO flows_ai_usage /.test(q))).length, 1, "the recording is one trip");
-  eq(touching.length, 5, "beside the page's meter read before the call (two trips), the cap's read, and the one batch that reads the meter back for the answer (two sequential trips before, six in all)");
+  eq(touching.length, 4, "beside the page's meter read before the call (one batch, two trips before), the cap's read, and the one batch that reads the meter back for the answer (five in all before this change)");
   eq(RW.neuronCost({ FLOWS_ASK_MODEL: MODEL, FLOWS_ASK_NEURONS: RATES }, MODEL, { prompt_tokens: 5400, completion_tokens: 700, estimated: true }), null,
     "an estimated usage is never printed as a reading's reported cost");
   ok(RW.neuronCost({ FLOWS_ASK_MODEL: MODEL, FLOWS_ASK_NEURONS: RATES }, MODEL, USAGE) !== null, "while a reported one still is");
