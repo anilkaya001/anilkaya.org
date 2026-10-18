@@ -2,182 +2,194 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as PAGES from "../shared/flows-pages.js";
 import { launch } from "./lib/browser.mjs";
+import { openMarket, alertsFixture, universeFixture } from "./lib/market-fixtures.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+const near = (a, b, tol, msg) => { assert.ok(a === b || (a !== null && b !== null && Math.abs(a - b) <= tol), msg + ` (${a} against ${b})`); checks++; };
 const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
-const FIX = JSON.parse(read("scripts/render-preview.fixtures.json")).market;
-const SRC = read("assets/js/flows-relations.js");
+const FIXTURE = JSON.parse(read("tests/fixtures-relations.json"));
 const REL = "/assets/js/flows-relations.js";
+const SRC = read("assets/js/flows-relations.js");
 
-const SECTORS = ["Technology", "Energy", "Financials"];
-const NAMES = [["NVDA", 0], ["AAPL", 0], ["MSFT", 0], ["XOM", 1], ["CVX", 1], ["JPM", 2], ["GS", 2], ["BAC", 2], ["WFC", 2]];
-const UNI = { status: "ok", sessionDate: "2026-10-09", t: NAMES.map((n) => n[0]), sectors: SECTORS, sec: NAMES.map((n) => n[1]), units: {}, cols: {} };
-const e = (a, b, passed, stability, lag) => ({ a, b, passed, stability, lag });
-const GRAPH = {
-  layers: [
-    { id: "T", edges: [e("NVDA", "AAPL", true, 0.95, 5), e("NVDA", "XOM", true, 0.8, null), e("AAPL", "CVX", true, 0.6, null), e("MSFT", "JPM", true, 0.4, null),
-      e("GS", "BAC", false, 0.99, null), e("NVDA", "ZZZZ", true, 0.99, null), e("JPM", "JPM", true, 0.99, null), e("WFC", "GS", true, 0.5, null), e("XOM", "CVX", true, null, null)] },
-    { id: "C", edges: [e("JPM", "WFC", true, 0.92, null)] },
-    { id: "F", edges: [e("NVDA", "MSFT", true, 0.99, 3)] },
-  ],
-};
-const WANT = {
-  T: [["NVDA", "AAPL", 0.95, 1], ["NVDA", "XOM", 0.8, 0.6], ["AAPL", "CVX", 0.6, 0.35], ["WFC", "GS", 0.5, 0.35]],
-  C: [["JPM", "WFC", 0.92, 1]],
-};
-
-async function open(browser, { viewport = { width: 1440, height: 900 }, source = SRC } = {}) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
-  const page = await context.newPage();
-  const errors = [];
-  page.on("pageerror", (x) => errors.push(String(x)));
-  await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
-  await page.route("**/*", async (route) => {
-    const u = new URL(route.request().url());
-    if (u.pathname === REL) return route.fulfill({ body: source, contentType: "text/javascript" });
-    if (u.pathname.startsWith("/assets/")) {
-      const f = path.join(ROOT, u.pathname);
-      if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
-      return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
-    }
-    if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "rt_off", message: "off" } }) });
-    if (u.pathname.startsWith("/api/flows/universe")) return route.fulfill({ contentType: "application/json", body: JSON.stringify(UNI) });
-    if (u.pathname.startsWith("/api/flows/")) {
-      const key = u.pathname.slice("/api/flows/".length) + u.search;
-      const k = Object.keys(FIX).find((x) => key.includes(x.replace(/^flows\//, "")));
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(k ? FIX[k] : { status: "pending", rows: [] }) });
-    }
-    if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: PAGES.marketPage({ username: "test", owner: true, scenes: true }) });
-    return route.fulfill({ status: 404, body: "" });
-  });
-  await page.goto("https://example.test/flows/market/", { waitUntil: "commit" });
-  return { context, page, errors };
+{
+  ok(FIXTURE.provenance.numpy && FIXTURE.provenance.scipy && /^[0-9a-f]{64}$/.test(FIXTURE.provenance.script_sha256), "THE FIXTURE NAMES THE NUMPY AND SCIPY VERSIONS AND THE GENERATOR'S SHA-256");
+  const sha = (await import("node:crypto")).createHash("sha256").update(fs.readFileSync(path.join(ROOT, "tests/gen-relations-fixtures.py"))).digest("hex");
+  eq(sha, FIXTURE.provenance.script_sha256, "and the generator has not changed since the fixture was written");
+  ok(!/\bsigma\b|forecast(?!\.)/i.test(SRC.replace(/Not a forecast\./g, "")), "the module's copy claims no forecast");
 }
 
-const reveal = async (page) => {
-  await page.waitForSelector("#mkRelations", { state: "attached", timeout: 15000 });
-  for (let i = 0; i < 60; i++) {
-    await page.evaluate(() => document.getElementById("mkRelationsCard").scrollIntoView({ block: "center" }));
-    if (await page.evaluate(() => Boolean(document.getElementById("mkRelations").dataset.state))) return;
-    await sleep(250);
-  }
-  throw new Error("the relations view never mounted");
-};
+async function modelOf(page, rows, opts) {
+  return page.evaluate(({ rows, opts }) => window.FlowsUI.relations.model(rows, opts), { rows, opts });
+}
 
-async function check(page) {
-  const bad = [];
-  const need = (c, m) => { if (!c) bad.push(m); };
-  const r = await page.evaluate((graph) => {
-    const R = window.FlowsUI.relations;
-    const u = window.__uni;
-    const ring = R.ring(u);
-    const lists = R.lists(ring, graph);
-    const host = document.getElementById("mkRelations");
-    const out = { keys: Object.keys(lists), lists: Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, v.map((x) => [x.a, x.b, x.stability, x.alpha])])), layers: {} };
-    const mounted = R.mount(host, u, graph);
-    for (const k of ["T", "C"]) {
-      const b = host.querySelector(`button[data-layer="${k}"]`);
-      if (b) b.click();
-      const canvas = host.querySelector("canvas");
-      const W = parseInt(canvas.style.width, 10);
-      const g = canvas.getContext("2d");
-      const c = W / 2, rad = W / 2 - 34;
-      const at = (n) => { const a = mounted.ring.pos.get(n); return [c + Math.cos(a) * rad, c + Math.sin(a) * rad]; };
-      const px = (L) => {
-        const [x1, y1] = at(L[0]), [x2, y2] = at(L[1]);
-        const x = Math.round(0.25 * x1 + 0.5 * c + 0.25 * x2), y = Math.round(0.25 * y1 + 0.5 * c + 0.25 * y2);
-        let a = 0;
-        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) a = Math.max(a, g.getImageData(x + dx, y + dy, 1, 1).data[3]);
-        return a;
-      };
-      out.layers[k] = { rows: [...host.querySelectorAll("tbody tr")].map((tr) => [tr.dataset.a, tr.dataset.b, tr.children[2].textContent]), edges: host.dataset.edges, layer: host.dataset.layer, label: canvas.getAttribute("aria-label"), alpha: mounted.edges().map((x) => [x.a, x.b, px([x.a, x.b])]), status: host.querySelector('[role="status"]').textContent };
+function compare(model, exp, label) {
+  eq(model.status, "ok", label + ": enough windows, bins and names for a reading");
+  eq(model.bins, exp.bins, label + ": the bin count");
+  eq(model.windows, exp.windows, label + ": the window count");
+  eq(model.names.map((n) => n.t), exp.names, label + ": the names kept, by flagged premium");
+  for (const L of ["A", "L"]) {
+    const got = new Map(model.pairs[L].map((p) => [p.a + "|" + p.b, p]));
+    eq(got.size, exp.pairs[L].length, label + ` ${L}: the number of pairs`);
+    for (const x of exp.pairs[L]) {
+      const p = got.get(x.a + "|" + x.b);
+      ok(p, label + ` ${L}: pair ${x.a} ${x.b} is present`);
+      near(p.r, x.r, 1e-9, label + ` ${L} ${x.a}/${x.b} r against numpy.corrcoef`);
+      near(p.lo, x.lo, 1e-9, label + ` ${L} ${x.a}/${x.b} lower Fisher bound against scipy`);
+      near(p.hi, x.hi, 1e-9, label + ` ${L} ${x.a}/${x.b} upper Fisher bound against scipy`);
+      near(p.r1, x.r1, 1e-9, label + ` ${L} ${x.a}/${x.b} first-half r`);
+      near(p.r2, x.r2, 1e-9, label + ` ${L} ${x.a}/${x.b} second-half r`);
+      eq(p.passed, x.passed, label + ` ${L} ${x.a}/${x.b} passed`);
+      eq(p.stable, x.stable, label + ` ${L} ${x.a}/${x.b} stable`);
     }
-    return out;
-  }, GRAPH);
-  eq(r.keys.sort(), ["C", "T"], "only the two registered layers produce edges: the flow layer is not drawn");
-  for (const k of ["T", "C"]) {
-    need(JSON.stringify(r.lists[k]) === JSON.stringify(WANT[k]), `layer ${k} draw list ${JSON.stringify(r.lists[k])}`);
-    const L = r.layers[k];
-    need(L.layer === k && L.edges === String(WANT[k].length), `layer ${k} shows ${L.edges} edges`);
-    need(JSON.stringify(L.rows.map((x) => x.slice(0, 2))) === JSON.stringify(WANT[k].map((x) => x.slice(0, 2))), `layer ${k} table rows ${JSON.stringify(L.rows)}`);
-    need(L.rows.every((x, i) => x[2] === WANT[k][i][2].toFixed(2)), `layer ${k} stability in the label`);
-    need(L.alpha.every(([, , a], i) => (WANT[k][i][3] === 1 ? a > 200 : WANT[k][i][3] === 0.6 ? a > 110 && a < 200 : a > 55 && a < 110)), `layer ${k} opacity steps on the canvas ${JSON.stringify(L.alpha)}`);
-    need(new RegExp(`${WANT[k].length} tested links`).test(L.label), "the canvas is described with its link count");
   }
-  return bad;
+}
+
+async function modelVerdict(browser, patch) {
+  const { context, page } = await openMarket(browser, { patch });
+  try {
+    await page.waitForFunction(() => window.FlowsUI && window.FlowsUI.relations, null, { timeout: 15000 });
+    for (const c of FIXTURE.cases) compare(await modelOf(page, c.rows, {}), c.expected, c.label);
+    return true;
+  } catch (error) {
+    return false;
+  } finally {
+    await context.close();
+  }
 }
 
 const browser = await launch();
-try {
-  eq(!PAGES.marketPage({ username: "u", owner: true }).includes("mkRelations") && !PAGES.marketPage({ username: "u" }).includes("relations"), true, "THE RELATIONS MODULE AND ITS GROUP ARE NOT IN A PAGE WITHOUT THE SWITCH");
-  eq(PAGES.marketPage({ username: "u", owner: true, scenes: true }).match(/<i\b[^>]*data-defer="relations"[^>]*>/g).length, 1, "the switched page declares the group once");
 
-  {
-    const { context, page, errors } = await open(browser);
-    await reveal(page);
-    ok(await page.evaluate(() => {
-      const h = document.getElementById("mkRelations");
-      return h.dataset.state === "untested" && h.dataset.edges === "0" && /No tested links yet/.test(h.textContent) && h.querySelector("details li") !== null;
-    }), "WITH NO RELATIONS PAYLOAD ON MAIN THE MODULE IS THE RING AND A TEXT STATE: no tested links, none drawn");
-    const px = await page.evaluate(() => {
-      const c = document.querySelector("#mkRelations canvas");
-      const g = c.getContext("2d");
-      const d = g.getImageData(0, 0, c.width, c.height).data;
-      const inner = [];
-      const W = c.width, cx = W / 2;
-      for (let y = Math.round(cx - 40); y < cx + 40; y++) for (let x = Math.round(cx - 40); x < cx + 40; x++) inner.push(d[(y * W + x) * 4 + 3]);
-      return Math.max(...inner);
-    });
-    eq(px, 0, "and the middle of the ring holds no pixel: no edge is invented");
-    ok(await page.evaluate(() => document.querySelector("#mkRelations canvas").getAttribute("role") === "img" && /no relation has been tested/.test(document.querySelector("#mkRelations canvas").getAttribute("aria-label"))), "the canvas is described");
-    eq(await page.evaluate(() => [...document.querySelectorAll("#mkRelations details li")].map((l) => l.textContent)), ["Technology: NVDA, AAPL, MSFT", "Energy: XOM, CVX", "Financials: JPM, GS, BAC, WFC"], "the ring lists the names by sector in payload order");
-    await page.evaluate(async () => { window.__uni = await (await fetch("/api/flows/universe")).json(); });
-    const bad = await check(page);
-    eq(bad, [], "ONLY TESTED EDGES ARE DRAWN: a failed test, a stability under 0.5, an unknown name, a self-pair, a null stability and the flow layer draw nothing; the steps are 1, 0.6 and 0.35; the layers stay apart");
-    await page.evaluate(() => window.FlowsUI.relations.mount(document.getElementById("mkRelations"), window.__uni, { layers: [{ id: "T", edges: [{ a: "NVDA", b: "AAPL", passed: true, stability: 0.3 }] }] }));
-    ok(await page.evaluate(() => /No stable links this week/.test(document.getElementById("mkRelations").textContent) && document.getElementById("mkRelations").dataset.edges === "0"), "a layer with nothing stable says so in text");
-    ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "no overflow at 1440");
-    eq(errors, [], "no page error");
-    await context.close();
-  }
-
-  for (const width of [390, 320]) {
-    const { context, page, errors } = await open(browser, { viewport: { width, height: 800 } });
-    await reveal(page);
-    await page.evaluate(async (g) => { const u = await (await fetch("/api/flows/universe")).json(); window.FlowsUI.relations.mount(document.getElementById("mkRelations"), u, g); }, GRAPH);
-    ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `no horizontal overflow at ${width} with links drawn`);
-    ok(await page.evaluate(() => { const c = document.querySelector("#mkRelations canvas"); return c.getBoundingClientRect().right <= innerWidth; }), `the ring fits inside the viewport at ${width}`);
-    eq(errors, [], `no page error at ${width}`);
-    await context.close();
-  }
-
-  const MUTANTS = [
-    ["floor at 0.3", "const FLOOR = 0.5;", "const FLOOR = 0.3;"],
-    ["a failed test still draws", "e.passed === true && ", ""],
-    ["every step opaque", "return s >= 0.9 ? 1 : s >= 0.7 ? 0.6 : 0.35;", "return 1;"],
-    ["flow layer admitted", 'C: "Residual partial correlation" }', 'C: "Residual partial correlation", F: "Flow" }'],
-    ["layers merged", "const edges = cur ? by[cur] : [];", "const edges = cur ? Object.values(by).flat() : [];"],
-    ["steps at the wrong edge", "s >= 0.9 ? 1 : s >= 0.7", "s >= 0.95 ? 1 : s >= 0.7"],
-  ];
-  for (const [name, from, to] of MUTANTS) {
-    ok(SRC.includes(from), `mutant "${name}" anchors on the served module`);
-    const { context, page } = await open(browser, { source: SRC.replace(from, to) });
-    await reveal(page);
-    await page.evaluate(async () => { window.__uni = await (await fetch("/api/flows/universe")).json(); });
-    let failed = false;
-    try { failed = (await check(page)).length > 0; } catch { failed = true; }
-    ok(failed, `THE PLANTED WRONG BUILD "${name}" FAILS THE KNOWN-ANSWER CHECKS`);
-    await context.close();
-  }
-} finally {
-  await browser.close();
+{
+  const { context, page, errors } = await openMarket(browser);
+  await page.waitForFunction(() => window.FlowsUI && window.FlowsUI.relations, null, { timeout: 15000 });
+  for (const c of FIXTURE.cases) compare(await modelOf(page, c.rows, {}), c.expected, c.label);
+  eq((await modelOf(page, FIXTURE.cases[0].rows, {})).params, FIXTURE.params, "THE MODULE'S DEFAULTS ARE THE PARAMETERS THE FIXTURE WAS WRITTEN WITH");
+  const thin = await modelOf(page, FIXTURE.cases[0].rows.slice(0, 12), {});
+  eq(thin.status, "thin", "TOO FEW WINDOWS IS NAMED THIN, NOT DRAWN");
+  ok(/windows over/.test(thin.reason) && /relations need/.test(thin.reason), "and its reason says how many windows, bins and names it had and how many it needs");
+  eq((await modelOf(page, [], null)).status, "quiet", "no rows is quiet");
+  eq((await modelOf(page, [{ t: "X", prem: 0, spanStart: "2026-09-29T14:00:00.000Z" }, { t: "Y", prem: 5, spanStart: "nope" }, { prem: 5 }], null)).status, "quiet", "rows with no premium, no time or no name are not windows");
+  const flat = [];
+  for (let i = 0; i < 50; i++) for (const t of ["AA", "BB", "CC", "DD"]) flat.push({ t, cp: "C", prem: 1000, askPrem: 600, bidPrem: 100, spanStart: new Date(Date.parse("2026-09-29T14:00:00Z") + i * 600000).toISOString() });
+  const constant = await modelOf(page, flat, null);
+  ok(constant.pairs.A.every((p) => p.r === null && p.passed === false), "A CONSTANT SERIES HAS NO CORRELATION: null, never a zero or a pass");
+  await page.evaluate(() => window.FlowsUI.relations.fisher(0.5, 3));
+  eq(await page.evaluate(() => window.FlowsUI.relations.fisher(0.5, 3)), null, "a Fisher interval needs at least four bins");
+  eq(errors, [], "no page error");
+  await context.close();
 }
 
-console.log(`flows-relations-render: ${checks} checks passed`);
+{
+  const { context, page, errors } = await openMarket(browser, { alerts: alertsFixture({ n: 220, seed: 5 }), universe: universeFixture() });
+  await page.click("#mkT-relations");
+  await page.waitForSelector("#mkRelations .rl-node", { timeout: 15000 });
+  const m = await page.evaluate(() => {
+    const api = window.FlowsUI.relations.of(document.getElementById("mkRelations"));
+    const M = api.model();
+    return { names: M.names.map((n) => n.t), nodes: [...document.querySelectorAll("#mkRelations .rl-node")].map((n) => n.dataset.t), labels: [...document.querySelectorAll("#mkRelations .rl-node .rl-lb")].map((n) => n.textContent), sectors: [...document.querySelectorAll("#mkRelations .rl-node .rl-sc")].map((n) => n.textContent), stats: document.querySelector("#mkRelations .rl-stats").textContent, read: document.querySelector("#mkRelations .rl-read").textContent, note: document.querySelector("#mkRelations .rl-note").textContent, pairs: document.querySelectorAll("#mkRelations .rl-pair").length, drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: M.pairs.A.filter((p) => p.stable).length };
+  });
+  eq(m.nodes.sort(), m.names.slice().sort(), "EVERY NAME THE MODEL KEPT IS A NODE AND EVERY NODE IS LABELLED WITH ITS TICKER");
+  eq(m.labels.slice().sort(), m.names.slice().sort(), "the label is the ticker");
+  ok(m.sectors.length === m.names.length && m.sectors.every((s) => s && s.length > 1), "and every node carries its sector, or No sector, in words");
+  eq(m.drawn, m.stable, "only pairs that passed in both halves are drawn, one curve each");
+  ok(/windows/.test(m.stats) && /bins/.test(m.stats) && /read \d\d:\d\d TRT/.test(m.stats), "the stats line has windows, bins and the read time in TRT: " + m.stats);
+  ok(/pass by chance/.test(m.note) && /not a forecast/i.test(m.note), "the note says how many pairs would pass by chance and that it is not a forecast");
+  ok(/pairs pass/.test(m.read), "the readout says how many pairs pass");
+  await page.click("#mkRelations .rl-node");
+  const sel = await page.evaluate(() => ({ read: document.querySelector("#mkRelations .rl-read").textContent, on: document.querySelectorAll("#mkRelations .rl-node.is-sel").length }));
+  eq(sel.on, 1, "a click selects one node");
+  ok(/\(.+\):/.test(sel.read), "and the readout names it with its sector: " + sel.read);
+  await page.click("#mkRelations .rl-seg button[data-l='L']");
+  eq(await page.evaluate(() => document.querySelector("#mkRelations .rl-seg button[data-l='L']").getAttribute("aria-pressed")), "true", "the second relation can be chosen");
+  const shape = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: innerHeight, sw: document.documentElement.scrollWidth, iw: innerWidth }));
+  ok(shape.sh <= shape.ih + 1 && shape.sw <= shape.iw, "the Relations tab does not scroll the page");
+  eq(errors, [], "no page error");
+  await context.close();
+}
+
+{
+  const { context, page } = await openMarket(browser, { alertsStatus: 500 });
+  await page.click("#mkT-relations");
+  await page.waitForFunction(() => { const e = document.querySelector("#mkRelations .nm-empty"); return !!e && !/^Reading/.test(e.textContent || ""); }, null, { timeout: 15000 });
+  const said = await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent);
+  ok(/Unavailable/.test(said) && /HTTP 500/.test(said), "A FAILED READ SAYS SO WITH ITS REASON, NOT 'NO RELATIONS': " + said);
+  await context.close();
+}
+{
+  const { context, page } = await openMarket(browser, { alerts: { ...alertsFixture(), rows: alertsFixture().rows.slice(0, 6) } });
+  await page.click("#mkT-relations");
+  await page.waitForFunction(() => { const e = document.querySelector("#mkRelations .nm-empty"); return !!e && !/^Reading/.test(e.textContent || ""); }, null, { timeout: 15000 });
+  const said = await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent);
+  ok(/Not enough to relate/.test(said) && /relations need 40 windows/.test(said), "too few windows says how many are needed: " + said);
+  await context.close();
+}
+{
+  const { context, page } = await openMarket(browser, { alerts: { status: "pending", rows: [] } });
+  await page.click("#mkT-relations");
+  await page.waitForFunction(() => /not published/.test((document.querySelector("#mkRelations .nm-empty") || {}).textContent || ""), null, { timeout: 15000 });
+  ok(/not published/.test(await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent)), "a feed the pipeline has not published is named as such");
+  await context.close();
+}
+
+for (const [w, h] of [[1440, 820], [1024, 768], [390, 844]]) {
+  const { context, page } = await openMarket(browser, { viewport: { width: w, height: h }, coarse: w < 500 });
+  await page.click("#mkT-relations");
+  await page.waitForSelector("#mkRelations .rl-seg", { timeout: 15000 });
+  const measure = () => page.evaluate(() => {
+    const host = document.getElementById("mkRelations").getBoundingClientRect();
+    const mod = document.getElementById("mkRelationsCard").getBoundingClientRect();
+    const visible = [...document.querySelectorAll("#mkRelations .rl-node, #mkRelations .rl-pair")].filter((n) => n.getBoundingClientRect().width > 0);
+    const outside = visible.filter((n) => { const r = n.getBoundingClientRect(); return r.left < mod.left - 1 || r.right > mod.right + 1 || r.bottom > mod.bottom + 1 || r.top < mod.top - 1; }).length;
+    const small = [...document.querySelectorAll("#mkRelations button")].filter((b) => b.getBoundingClientRect().width > 0 && (matchMedia("(pointer: coarse)").matches ? b.getBoundingClientRect().height < 43.5 : false)).length;
+    return { sh: document.documentElement.scrollHeight, ih: innerHeight, outside, small, nodes: visible.length };
+  });
+  let g = await measure();
+  for (let i = 0; i < 8 && g.outside; i++) { await page.waitForTimeout(250); g = await measure(); }
+  ok(g.sh <= g.ih + 1, `${w}: no page scroll`);
+  eq(g.outside, 0, `${w}: no node or pair row outside the module`);
+  eq(g.small, 0, `${w}: coarse targets are 44 px`);
+  ok(g.nodes > 0, `${w}: something is drawn`);
+  if (w < 900) {
+    await page.click("#mkRelations .rl-panes button[data-p='pairs']");
+    ok(await page.evaluate(() => document.querySelectorAll("#mkRelations .rl-pair").length > 0 || !!document.querySelector("#mkRelations .rl-none")), `${w}: the Pairs pane lists the pairs or says none passed`);
+  }
+  await context.close();
+}
+
+const MUTANTS = [
+  ["Fisher interval uses n - 2", [["const z = Math.atanh(rr), se = 1 / Math.sqrt(n - 3);", "const z = Math.atanh(rr), se = 1 / Math.sqrt(n - 2);"]]],
+  ["bins of five minutes", [["binMin: 10", "binMin: 5"]]],
+  ["lean sign not flipped for puts", [["r.cp === \"C\" ? sp.ask - sp.bid : sp.bid - sp.ask", "sp.ask - sp.bid"]]],
+  ["passed ignores the interval", [["(ci[0] > 0 || ci[1] < 0) && Math.abs(r) >= P.minCorr", "Math.abs(r) >= P.minCorr"]]],
+  ["a bin keeps only its last window", [["s.A[b] += p.prem;", "s.A[b] = p.prem;"]]],
+  ["stable ignores the halves", [["const sameSign = r1 !== null && r2 !== null && Math.sign(r1) === Math.sign(r) && Math.sign(r2) === Math.sign(r);", "const sameSign = true;"]]],
+  ["names kept by count instead of premium", [["b.prem - a.prem || (a.t < b.t ? -1 : 1)).slice(0, P.names)", "b.active.size - a.active.size || (a.t < b.t ? -1 : 1)).slice(0, P.names)"]]],
+];
+for (const [name, edits] of MUTANTS) {
+  ok(!(await modelVerdict(browser, { [REL]: edits })), `PLANTED WRONG BUILD FAILS THE NUMPY AND SCIPY FIXTURE: ${name}`);
+}
+
+const PAGE_MUTANTS = [
+  ["draws pairs that did not pass", "const { shown } = pairsList();\n      const lit", "const shown = M.pairs[layer];\n      const lit", /drawn/],
+  ["the chance sentence is gone", "so about \" + chance + \" of these \" + total + \" would pass by chance. Not a forecast.", "so the interval is narrow.", /chance/],
+];
+for (const [name, from, to] of PAGE_MUTANTS) {
+  const { context, page } = await openMarket(browser, { patch: { [REL]: [[from, to]] }, alerts: alertsFixture({ n: 220, seed: 5 }) }).catch(() => ({ context: null }));
+  if (!context) { ok(true, `PLANTED WRONG BUILD CANNOT EVEN BE BUILT: ${name}`); continue; }
+  await page.click("#mkT-relations");
+  await page.waitForSelector("#mkRelations .rl-node", { timeout: 15000 });
+  const bad = await page.evaluate(() => {
+    const api = window.FlowsUI.relations.of(document.getElementById("mkRelations"));
+    const M = api.model();
+    return { drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: M.pairs.A.filter((p) => p.stable).length, note: document.querySelector("#mkRelations .rl-note").textContent };
+  });
+  ok(bad.drawn !== bad.stable || !/pass by chance/.test(bad.note), `PLANTED WRONG BUILD FAILS THE PAGE CHECKS: ${name}`);
+  await context.close();
+}
+
+await browser.close();
+console.log(`flows-relations-render: ${checks} checks, flow co-movement against numpy and scipy on three seeded worlds, the honest states, three viewports and ${MUTANTS.length + PAGE_MUTANTS.length} planted wrong builds`);

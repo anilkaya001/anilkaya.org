@@ -11,7 +11,6 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
-const MARKET = PAGES.marketPage({ username: "test" });
 const TICKER = PAGES.tickerPage({ username: "test" });
 const KEEP = new Set(["flows-index.js"]);
 
@@ -46,14 +45,31 @@ const settle = async (page, ms = 320) => {
 
 const browser = await chromium.launch();
 
-for (const [name, html] of [["market", MARKET], ["ticker", TICKER]]) {
+const TITLES = ["Tide", "Breadth", "Tape", "Sector tides", "SPY", "QQQ", "IWM", "Momentum", "Groups", "Expiry", "Volatility", "Radar", "Advancers", "Volume", "Against the tape", "Extremes", "Open interest", "Dark pool", "Net impact", "Insiders", "Seasonality"];
+async function mountLong(page) {
+  await mount(page, TICKER, "/flows/ticker/?t=AAPL");
+  await page.addStyleTag({ content: "html { scroll-behavior: auto !important; } #ftGrid { display: block !important; } #ftGrid > .ui-mod { margin-bottom: 12px; }" });
+  await page.evaluate((titles) => {
+    const g = document.getElementById("ftGrid");
+    g.hidden = false;
+    titles.forEach((t, i) => {
+      const s = document.createElement("section");
+      s.className = "ui-card ui-mod ft-m";
+      s.id = "m-long" + i;
+      s.innerHTML = `<header class="ui-mod-h"><h2 class="ui-mod-t">${t}</h2></header><div style="height:300px"></div>`;
+      g.append(s);
+    });
+  }, TITLES);
+}
+
+for (const [name, html] of [["ticker", TICKER]]) {
   ok(/<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden><\/nav>/.test(html), `${name} ships the empty, hidden index in its HTML`);
-  ok(html.indexOf('id="fxIndex"') < html.indexOf(name === "market" ? 'class="ui-grid mk-grid"' : 'id="ftGrid"'), `${name} places it above the modules it indexes`);
+  ok(html.indexOf('id="fxIndex"') < html.indexOf('id="ftGrid"'), `${name} places it above the modules it indexes`);
   ok(/<script src="\/assets\/js\/flows-index\.js\?v=\d+" defer><\/script>/.test(html), `${name} loads the index script deferred`);
   ok(html.includes("/assets/css/flows-index.css?v="), `${name} loads the index sheet`);
 }
 for (const [name, fn] of Object.entries(PAGES)) {
-  if (!/Page$/.test(name) || ["marketPage", "tickerPage"].includes(name) || typeof fn !== "function") continue;
+  if (!/Page$/.test(name) || ["tickerPage"].includes(name) || typeof fn !== "function") continue;
   const html = String(fn({ username: "test", ticker: "AAPL" }));
   ok(!html.includes("fxIndex") && !html.includes("flows-index"), `${name} carries no index`);
 }
@@ -66,13 +82,13 @@ for (const [name, fn] of Object.entries(PAGES)) {
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
-  await mount(page, MARKET, "/flows/market/");
+  await mountLong(page);
   await settle(page);
   const expected = await page.evaluate(() => Array.from(document.querySelectorAll("#flowsMain .ui-mod[id]"), (s) => {
     const t = s.querySelector(".ui-mod-t");
     return { id: s.id, text: t.textContent.trim() };
   }));
-  ok(expected.length >= 20, `the market page has its modules (${expected.length})`);
+  ok(expected.length >= 20, `a long page has its modules (${expected.length})`);
   const got = await chips(page);
   eq(got.map((c) => c.href), expected.map((e) => "#" + e.id), "a chip for every module, in page order, each pointing at its id");
   eq(got.map((c) => c.text), expected.map((e) => e.text), "named by the module's own title");
@@ -123,7 +139,7 @@ for (const [name, fn] of Object.entries(PAGES)) {
 for (const [w, h, touch] of [[320, 700, true], [390, 800, true], [768, 900, false], [1440, 900, false]]) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: touch, isMobile: touch, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
-  await mount(page, MARKET, "/flows/market/");
+  await mountLong(page);
   await settle(page);
   const m = await page.evaluate(() => {
     const n = document.getElementById("fxIndex");
@@ -155,7 +171,7 @@ for (const [w, h, touch] of [[320, 700, true], [390, 800, true], [768, 900, fals
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
-  await mount(page, MARKET, "/flows/market/");
+  await mountLong(page);
   await settle(page);
   await page.keyboard.press("Tab");
   let guard = 0;

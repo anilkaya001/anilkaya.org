@@ -671,6 +671,133 @@
     return LENS.on;
   }
 
+  const ALERTS = {
+    subs: new Set(), last: null, timer: 0,
+    sub(fn) { this.subs.add(fn); if (this.last) fn(this.last.alerts, this.last.st); this.kick(); },
+    emit(alerts, st) { this.last = { alerts, st }; for (const fn of this.subs) fn(alerts, st); },
+    kick() {
+      if (this.timer) return;
+      const run = () => {
+        if (document.hidden) return;
+        fetch("/api/flows/flowalerts", { credentials: "same-origin", headers: { Accept: "application/json" } }).then((res) => {
+          if (res.status === 401) { location.replace("/flows/"); return null; }
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        }).then((a) => {
+          if (a === null) return;
+          if (!a || typeof a !== "object") throw new Error("not a payload");
+          if (a.status === "pending") ALERTS.emit(null, { state: "pending", reason: "The pipeline has not published the flagged windows yet." });
+          else if (!Array.isArray(a.rows)) ALERTS.emit(null, { state: "unavailable", reason: "The payload carries no rows array: a gap in the payload, not a quiet market." });
+          else ALERTS.emit(a, { state: "ok" });
+        }).catch((error) => ALERTS.emit(null, { state: "unavailable", reason: "The flagged windows could not be loaded (" + (error && error.message ? error.message : "no message") + ")." }));
+      };
+      run();
+      this.timer = setInterval(run, 60000);
+    },
+  };
+  if ($("mkNet") || $("mkRelations")) ALERTS.kick();
+
+  const FIT_MIN = 3;
+  const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "mkFitT" });
+  document.body.append(fitDlg);
+  function fitBody(mod) {
+    return mod.querySelector(":scope > .mk-body") || mod.querySelector(":scope > div:not(.ui-mod-h)");
+  }
+  function fit(mod) {
+    const body = fitBody(mod);
+    if (!body || !mod.getBoundingClientRect().height) return;
+    const lists = [...body.querySelectorAll(".ui-list, ul, ol, tbody, [role=list]")].filter((l) => l.children.length > FIT_MIN && !l.closest("[hidden]"));
+    for (const l of lists) for (const c of l.children) { if (c.hasAttribute("data-fit")) { c.hidden = false; c.removeAttribute("data-fit"); } else if (c.hidden && !c.classList.contains("ui-disclose") && c.tagName !== "BUTTON") { c.hidden = false; c.setAttribute("data-fit", "1"); } }
+    mod.removeAttribute("data-tight");
+    let hid = 0;
+    const over = () => body.scrollHeight - body.clientHeight;
+    let guard = 80;
+    while (over() > 1 && guard-- > 0) {
+      let best = null, bestN = FIT_MIN;
+      for (const l of lists) { const n = [...l.children].filter((c) => !c.hidden && c.tagName !== "BUTTON").length; if (n > bestN) { best = l; bestN = n; } }
+      if (!best) break;
+      const vis = [...best.children].filter((c) => !c.hidden && c.tagName !== "BUTTON");
+      const last = vis[vis.length - 1];
+      last.hidden = true;
+      last.setAttribute("data-fit", "1");
+      hid++;
+    }
+    if (over() > 1) mod.setAttribute("data-tight", "");
+    let btn = mod.querySelector(":scope > .ui-mod-h > .mk-all");
+    if (hid) {
+      if (!btn) {
+        btn = h("button", { type: "button", class: "mk-all", "aria-haspopup": "dialog" });
+        btn.addEventListener("click", () => {
+          const copy = body.cloneNode(true);
+          for (const c of copy.querySelectorAll("[data-fit]")) { c.hidden = false; c.removeAttribute("data-fit"); }
+          const t = mod.querySelector(".ui-mod-t");
+          const close = h("button", { type: "button", class: "nm-link", onclick: () => fitDlg.close() }, "Close");
+          fitDlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "mkFitT" }, t ? t.textContent : "All"), h("div", { class: "nm-dtw" }, copy), h("div", { class: "nm-dx" }, close)));
+          if (typeof fitDlg.showModal === "function") fitDlg.showModal();
+        });
+        const head = mod.querySelector(":scope > .ui-mod-h");
+        if (head) head.append(btn);
+      }
+      btn.textContent = "Show all";
+      btn.hidden = false;
+    } else if (btn) btn.hidden = true;
+  }
+  const FITTING = new Map();
+  function scheduleFit(mod) {
+    if (FITTING.get(mod)) return;
+    FITTING.set(mod, requestAnimationFrame(() => { FITTING.set(mod, 0); try { fit(mod); } catch (error) { void error; } }));
+  }
+  for (const mod of document.querySelectorAll(".mk-panel > .mk-mod")) {
+    const body = fitBody(mod);
+    if (!body) continue;
+    new MutationObserver(() => scheduleFit(mod)).observe(body, { childList: true, subtree: true });
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => scheduleFit(mod)).observe(body);
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const mod of document.querySelectorAll(".mk-panel > .mk-mod")) scheduleFit(mod); });
+
+  const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];
+  const stage = $("mkStage"), subBar = $("mkSub");
+  const subPick = {};
+  const NARROW = window.matchMedia("(max-width: 899px)");
+  NARROW.addEventListener("change", () => buildSub(stage.dataset.view));
+  function buildSub(key) {
+    const panel = document.getElementById("mkP-" + key);
+    const mods = panel ? [...panel.querySelectorAll(":scope > .mk-mod")] : [];
+    if (!subBar) return;
+    subBar.replaceChildren();
+    subBar.hidden = mods.length < 2;
+    const pick = Math.min(subPick[key] || 0, Math.max(0, mods.length - 1));
+    mods.forEach((m, i) => {
+      if (i === pick) m.setAttribute("data-on", ""); else m.removeAttribute("data-on");
+      m.inert = NARROW.matches && i !== pick;
+      if (mods.length < 2) return;
+      const title = m.querySelector(".ui-mod-t");
+      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, title ? title.textContent : "View " + (i + 1)));
+    });
+  }
+  function showTab(key, focus, quiet) {
+    const t = TABS.find((x) => x.dataset.tab === key) || TABS[0];
+    key = t.dataset.tab;
+    stage.dataset.view = key;
+    for (const x of TABS) { const on = x === t; x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1; }
+    for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
+    buildSub(key);
+    if (focus) t.focus();
+    if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
+  }
+  for (const [i, t] of TABS.entries()) {
+    t.addEventListener("click", () => showTab(t.dataset.tab, false));
+    t.addEventListener("keydown", (ev) => {
+      const to = ev.key === "ArrowRight" ? i + 1 : ev.key === "ArrowLeft" ? i - 1 : ev.key === "Home" ? 0 : ev.key === "End" ? TABS.length - 1 : null;
+      if (to === null) return;
+      ev.preventDefault();
+      showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
+    });
+  }
+  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "tide"; };
+  showTab(fromHash(), false, true);
+  addEventListener("hashchange", () => showTab(fromHash(), false, true));
+
   Promise.all([
     optional("/api/flows/market"),
     optional("/api/flows/sectors"),
@@ -759,7 +886,19 @@
     });
     for (const [group, id] of [["skyline", "mkSkyline"], ["relations", "mkRelations"]]) {
       const host = $(id);
-      if (host && UI.defer) UI.defer(group, { when: "visible", el: host, label: "The " + group + " view" }).then(() => window.FlowsUI[group].mount(host, universe, null));
+      if (host && UI.defer) {
+        UI.defer(group, { when: "visible", el: host, label: "The " + group + " view" }).then(() => {
+          const api = group === "relations" ? window.FlowsUI.relations.mount(host, { universe }) : window.FlowsUI.skyline.mount(host, universe, null);
+          if (group === "relations" && api) ALERTS.sub((a, st) => api.take(a, st));
+        });
+      }
+    }
+    const netHost = $("mkNet");
+    if (netHost && UI.defer) {
+      UI.defer("net", { when: "visible", el: netHost, label: "The flow network" }).then(() => UI.defer("netmap", { when: "idle", el: netHost, label: "The flow network" })).then(() => {
+        const api = window.FlowsUI.netMap.mount(netHost, { sectors: universe });
+        if (api) ALERTS.sub((a, st) => api.take(a, st));
+      });
     }
     if (UI.defer) UI.defer("market-below", { when: "visible", el: $("mkSectorsCard"), label: "The lower modules" });
     if (typeof UI.heartbeat === "function") {

@@ -38,7 +38,6 @@
   font-weight: 600;
 }
 @media (pointer: coarse) { .fx-index a { min-height: 44px; } }
-[data-flows-page="market"] .ui-mod[id],
 [data-flows-page="ticker"] .ft-m {
   scroll-margin-top: calc(var(--bar-h) + var(--safe-t) + 72px);
 }
