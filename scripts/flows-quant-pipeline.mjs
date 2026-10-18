@@ -153,7 +153,7 @@ export function vendorGrossPer1pct(gross, spot, unit) {
   return fin(spot) && spot > 0 ? gross * spot * spot / 100 : null;
 }
 
-export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, expiriesOf, eventOf = () => null, gammaUnit = "share" } = {}) {
+export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, expiriesOf, eventOf = () => null, gammaUnit = "share", cohort = null } = {}) {
   const asOfMs = closeUtcMs(sessionDate);
   const preps = new Map();
   for (const ticker of [...rowsByTicker.keys()].sort()) {
@@ -170,12 +170,12 @@ export function preparePass({ rowsByTicker, sessionDate, rate, spotOf, atrOf, ex
     const sk = near30 && near30.slice.method !== "mixture" && near30.slice.method !== "flat" ? skewMetrics(near30.slice) : null;
     preps.set(ticker, { ticker, spot, asOfMs, chain, input, built, zero, rr25: sk ? sk.rr25 : null, contracts: chain.contracts });
   }
-  const xs = crossSection(preps);
+  const xs = crossSection(preps, { cohort });
   return { preps, crossSection: xs };
 }
 
-export function crossSection(preps) {
-  const vals = [...preps.values()].filter((p) => fin(p.rr25));
+export function crossSection(preps, { cohort = null } = {}) {
+  const vals = [...preps].filter(([t, p]) => (!cohort || cohort.has(t)) && fin(p.rr25)).map(([, p]) => p);
   const out = new Map();
   if (vals.length < QUANT_CARD_LINES.XS_MIN_NAMES) {
     for (const t of preps.keys()) out.set(t, { rr25Pct: null, why: "xs.too-few" });

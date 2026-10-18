@@ -30,6 +30,7 @@ import { runCards } from "./flows-nightly/sections/cards.mjs";
 import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
+import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 
@@ -269,6 +270,9 @@ async function main() {
   const ctx = { stages, sessionDate, intraday, gateOrigin, gate };
   await runUniverse(ctx);
   await runBoards(ctx);
+  await stages.run("deepen-plan", () => runDeepenPlan(ctx), (error) => {
+    console.warn(`  deepen: ${error.message} — no rotation tonight`);
+  });
   await runMarket(ctx);
   await runRecord(ctx);
   await runChains(ctx);
@@ -277,6 +281,9 @@ async function main() {
   await runCards(ctx);
   await runFocus(ctx);
   await runCompute(ctx);
+  await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
+    console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);
+  });
   await runClose(ctx);
 }
 

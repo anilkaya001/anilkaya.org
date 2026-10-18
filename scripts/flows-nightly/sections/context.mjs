@@ -14,15 +14,17 @@ import { fakeCongress } from "../fixtures.mjs";
 export async function runContext(ctx) {
   const {
     stages, deepTickers, sideOfRow, byCard, scored, politicalFilings, POLITICAL_WINDOW_DAYS, crossRaws, marketLegs,
-    sessionDate,
+    sessionDate, deepen,
   } = ctx;
   stages.step("congress");
   const onBoard = new Map();
   for (const t of deepTickers) onBoard.set(t, sideOfRow.get(t) || null);
+  for (const t of deepen ? deepen.names : []) if (!onBoard.has(t)) onBoard.set(t, null);
   const byTicker = byCard;
   const scoredByTicker = new Map(scored.map((r) => [r.ticker, r]));
 
-  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t));
+  const held = deepen ? deepen.keep : new Set();
+  const crossSectionTickers = [...byTicker.keys()].filter((t) => !onBoard.has(t) && !held.has(t));
   const cardedTickers = [...onBoard.keys()].concat(crossSectionTickers);
   const carded = new Set(cardedTickers);
 

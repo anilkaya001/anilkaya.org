@@ -14,11 +14,11 @@ export const STATE = Object.freeze({ ok: 0, quiet: 1, failed: 2, unfetched: 3, s
 
 export const STATE_NAMES = Object.freeze(["ok", "quiet", "failed", "unfetched", "stale", "pending"]);
 
-export const DEPTHS = Object.freeze(["board", "focus", "cross", "index", "fund", "screen"]);
+export const DEPTHS = Object.freeze(["board", "focus", "deep", "cross", "index", "fund", "screen"]);
 
-export const CARD_DEPTHS = Object.freeze(["board", "focus", "cross-section", "breadth", "index", "fund"]);
+export const CARD_DEPTHS = Object.freeze(["board", "focus", "deepened", "cross-section", "breadth", "index", "fund"]);
 
-export const DEPTH_OF_CARD = Object.freeze({ board: "board", focus: "focus", "cross-section": "cross", breadth: "cross", index: "index", fund: "fund" });
+export const DEPTH_OF_CARD = Object.freeze({ board: "board", focus: "focus", deepened: "deep", "cross-section": "cross", breadth: "cross", index: "index", fund: "fund" });
 
 export const VOLATILE = Object.freeze(["generatedAt", "readAt", "screenerReadAt", "refreshedAt", "producer"]);
 
@@ -60,6 +60,7 @@ const GLOBALS = [
   global("brief"),
   global("ideas"),
   global("focus"),
+  global("deepen"),
 ];
 
 const dated = (id, source, over = {}) => product(id, "dated", { pattern: source, archive: true, ...over });
@@ -138,6 +139,7 @@ export const CONTRACT = frozen({
   index: frozen([...BASE, "gamma", "surface"]),
   fund: frozen([...BASE, "gamma", "surface"]),
   focus: frozen([...BASE, "gamma", "surface", "flow", "events", "positioning", "engine"]),
+  deep: frozen([...BASE, "gamma", "surface", "flow", "events", "positioning", "engine"]),
   board: frozen([...BASE, "gamma", "surface", "flow", "events", "positioning", "engine"]),
 });
 
@@ -146,6 +148,7 @@ export const contractFor = (depth) => (Object.hasOwn(CONTRACT, depth) ? CONTRACT
 export const NAME_KEY_EXPECTED = frozen({
   board: frozen(["card", "card-x", "hist"]),
   focus: frozen(["card", "card-x", "hist"]),
+  deep: frozen(["card", "card-x", "hist"]),
   cross: frozen(["card", "card-x", "hist"]),
   index: frozen(["card", "card-x"]),
   fund: frozen(["card", "card-x"]),

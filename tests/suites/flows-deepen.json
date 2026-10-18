@@ -1,0 +1,1 @@
+{"name": "flows-deepen", "class": "N", "group": "shard", "timing": false, "medianS": 90, "shard": 6, "command": "node --disable-warning=ExperimentalWarning flows-deepen.mjs", "files": ["flows-deepen.mjs"], "covers": ["assets/js/flows-ticker.js","scripts/flows-pipeline.mjs","server/store.js","worker.js"]}

@@ -5,6 +5,7 @@ import { cardScenario } from "./pipeline-sim/cards.mjs";
 import { storeScenario } from "./pipeline-sim/store.mjs";
 import { contractsScenario } from "./pipeline-sim/contracts.mjs";
 import { meterScenario, stagesScenario } from "./pipeline-sim/meter.mjs";
+import { deepenScenario } from "./pipeline-sim/deepen.mjs";
 
 simEnv();
 const time = boot();
@@ -21,6 +22,7 @@ const coverage = await load("shared/flows-coverage.js");
 const contracts = await load("shared/flows-contracts.js");
 const products = await load("shared/flows-products.js");
 const meter = await load("shared/flows-call-meter.js");
+const deepen = await load("shared/flows-deepen.js");
 
 const FAMILIES = [
   ["client", async (seed) => clientScenario(seed, await freshVendor(), { time })],
@@ -30,6 +32,7 @@ const FAMILIES = [
   ["contracts", (seed) => contractsScenario(seed, contracts, { card, products })],
   ["meter", (seed) => meterScenario(seed, meter)],
   ["stages", (seed) => stagesScenario(seed, stages)],
+  ["deepen", (seed) => deepenScenario(seed, deepen)],
 ];
 
 const failures = [];

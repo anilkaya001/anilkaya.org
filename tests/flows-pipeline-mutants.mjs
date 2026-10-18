@@ -4,12 +4,12 @@ import { PIPELINE_MUTANTS, runPipelineKillMatrix } from "./truth/pipeline-mutant
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 
-ok(PIPELINE_MUTANTS.length >= 35, "the kill matrix holds " + PIPELINE_MUTANTS.length + " planted wrong builds");
+ok(PIPELINE_MUTANTS.length >= 46, "the kill matrix holds " + PIPELINE_MUTANTS.length + " planted wrong builds");
 ok(new Set(PIPELINE_MUTANTS.map((m) => m.id)).size === PIPELINE_MUTANTS.length, "each is registered once");
 const targets = new Set(PIPELINE_MUTANTS.map((m) => m.target));
-ok(targets.size >= 6, "across " + targets.size + " production modules: " + [...targets].join(", "));
+ok(targets.size >= 7, "across " + targets.size + " production modules: " + [...targets].join(", "));
 const detectors = new Set(PIPELINE_MUTANTS.map((m) => m.detector));
-ok(detectors.size === 6, "and every detector has a mutant to prove it: " + [...detectors].join(", "));
+ok(detectors.size === 7, "and every detector has a mutant to prove it: " + [...detectors].join(", "));
 
 const rows = await runPipelineKillMatrix();
 const survived = [];

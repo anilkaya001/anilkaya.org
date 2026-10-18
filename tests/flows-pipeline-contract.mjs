@@ -1537,7 +1537,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       if (!c) { recount[hasScreenInput(i) ? "screen" : "unpriceable"]++; return; }
       const eng = c.engine && Array.isArray(c.engine.structures) ? c.engine : null;
       if (eng) recount[eng.ideas.length && !eng.noTrade ? "priced" : "standAside"]++;
-      else if (c.depth === "board" || c.depth === "focus") recount.unpriceable++;
+      else if (c.depth === "board" || c.depth === "focus" || c.depth === "deepened") recount.unpriceable++;
       else recount.family++;
     });
     eq(L.universe, uni.n, "the ledger's universe is the published universe's name count");
@@ -1550,8 +1550,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     ok(L.screenIdeas.none === Object.values(L.screenIdeas.codes).reduce((a, b) => a + b, 0), "and every No position carries a code");
     assert.deepEqual(L.absentInputs, [], "no screen input is missing from the payload on the fixture"); checks++;
     const emittedNames = fs.readdirSync(path.dirname(prefix)).map((f) => /-card-([A-Z].*)\.json$/.exec(f)).filter(Boolean).map((m) => m[1]);
-    const cards = emittedNames.map(cardOf).filter((c) => c && (c.depth === "board" || c.depth === "focus" || c.depth === "cross-section") && uni.t.includes(c.ticker));
-    eq(L.engine.expected, cards.filter((c) => c.depth !== "cross-section").length, "the engine yield is over the board and focus cards");
+    const cards = emittedNames.map(cardOf).filter((c) => c && (c.depth === "board" || c.depth === "focus" || c.depth === "deepened" || c.depth === "cross-section") && uni.t.includes(c.ticker));
+    eq(L.engine.expected, cards.filter((c) => c.depth !== "cross-section").length, "the engine yield is over the board, focus and deepened cards");
     ok(/neuron coverage: \d+ universe name\(s\) — priced \d+, stand-aside \d+, family \d+, screen \d+/.test(runLog), "and the run prints the ledger line");
   }
 
@@ -1570,7 +1570,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       const c = JSON.parse(fs.readFileSync(`${prefix}-card-${t}.json`, "utf8"));
       return c.depth;
     };
-    const byDepth = { board: new Set(), focus: new Set(), "cross-section": new Set(), index: new Set(), fund: new Set(), other: new Set() };
+    const byDepth = { board: new Set(), focus: new Set(), deepened: new Set(), "cross-section": new Set(), index: new Set(), fund: new Set(), other: new Set() };
     for (const t of emitted) {
       const d = depthOf(t);
       (byDepth[d] || byDepth.other).add(t);
@@ -1590,6 +1590,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     ok(byDepth.board.size <= DEEP_NAMES,
        `the deep lane stayed inside its ${DEEP_NAMES}-name budget (${byDepth.board.size} board-depth ` +
        "cards), however wide the board or the cross-section got");
+    ok(byDepth.deepened.size > 0 && ![...byDepth.deepened].some((t) => claimed.has(t)), `the rotation deepened ${byDepth.deepened.size} name(s), none of which a board row advertises as a deep card`);
     const onBoardRows = new Set([...long.rows, ...short.rows].map((r) => r.t));
     const focusOnBoard = [...byDepth.focus].filter((t) => onBoardRows.has(t));
     assert.deepEqual([...byDepth.board, ...focusOnBoard].sort(), [...claimed].sort(),
@@ -1635,7 +1636,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
            `${c.ticker}: and it is not on either board, because the gate still keeps it out of the score`);
       }
       const roster = read("roster");
-      const depthName = { board: "board", focus: "focus", "cross-section": "cross", index: "index", fund: "fund" };
+      const depthName = { board: "board", focus: "focus", deepened: "deep", "cross-section": "cross", index: "index", fund: "fund" };
       for (const t of emitted) {
         eq(roster.depth[t], depthName[depthOf(t)], `${t}: the roster lists the card this run published, at its depth`);
       }
@@ -1662,7 +1663,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
          "knew, ZZXON's card-x: two of each kind — while NVDA's held card, rebuilt tonight, is never asked");
       ok(Object.hasOwn(roster.held, "hist:ZZHLD") && roster.ledger === "bootstrap",
          "a key only the store knew — hist:ZZHLD, two sessions young — is found by the probe and held, and the ledger is whole");
-      ok(Buffer.byteLength(JSON.stringify(roster)) <= 32 * 1024, "the roster is inside its 32 KB cap");
+      ok(Buffer.byteLength(JSON.stringify(roster)) <= 96 * 1024, "the roster is inside its 96 KB cap");
       const meta = read("meta");
       ok(meta.coverage && meta.coverage.membership.source === "qqq-holdings" && meta.coverage.focusDeep > 0 &&
          meta.coverage.dossiers.fund === FOCUS_FUNDS.length && Array.isArray(meta.warnings),
@@ -1674,8 +1675,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
          "MU, a Nasdaq-100 name days from earnings in the fixture, still gets a card for THIS session " +
          "instead of freezing on the last card it had before the gate");
       const inNdx10 = read("focus").groups.find((g) => g.id === "ndx10").tickers.includes("MU");
-      ok(inNdx10 ? mu.depth === "focus" || mu.depth === "board" : mu.depth === "cross-section",
-         `and its depth follows the focus roster: ${inNdx10 ? "deep, because it is in the NDX 10" : "cross-section, because it is not in the NDX 10"}`);
+      ok(inNdx10 ? mu.depth === "focus" || mu.depth === "board" : mu.depth === "cross-section" || mu.depth === "deepened",
+         `and its depth follows the focus roster: ${inNdx10 ? "deep, because it is in the NDX 10" : "cross-section or a rotation read, because it is not in the NDX 10"}`);
     }
     ok(byDepth["cross-section"].size > 0,
        `and the cross-section lane ran (${byDepth["cross-section"].size} cards), so the split above is ` +
@@ -2543,8 +2544,8 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "than throwing or claiming it was built");
 
   const src = nightlySource();
-  ok(/foldCardOutcomes\(cardTickers, cardsRun\)/.test(src),
-     "the cards leg folds its pooled run through foldCardOutcomes");
+  ok(/foldCardOutcomes\(core\.tickers, core\.run\)/.test(src) && /foldCardOutcomes\(rotated\.tickers, rotated\.run\)/.test(src),
+     "the cards leg folds its pooled run through foldCardOutcomes, the board and focus names apart from the rotation");
   ok(/runPooled\(cardTickers,/.test(src) && /stopEarly: \(\) => Date\.now\(\) > deadline/.test(src),
      "and the leg is pooled with the deadline checked by every worker before it claims a name, " +
      "rather than once at dispatch");
@@ -5274,7 +5275,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 5200, `even with every isolated stage failed the records stay under 5.2 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 5700, `even with every isolated stage failed the records stay under 5.7 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });

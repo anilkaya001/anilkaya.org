@@ -93,8 +93,9 @@ export function vannaProbeSample(ticker, { rows, expiry, sessionDate, expiries, 
 export async function runChains(ctx) {
   const {
     stages, deepTickers, focusCarded, byCard, payloads, sessionDate, variationRun, boardVariation, withTilt,
-    generatedAt, tilted, liquid, moversPayload,
+    generatedAt, tilted, liquid, moversPayload, deepen,
   } = ctx;
+  const deepened = deepen ? deepen.names : [];
   const chainByTicker = new Map();
   const quantRows = new Map();
   let quantPass = { preps: new Map(), crossSection: new Map() };
@@ -103,9 +104,9 @@ export async function runChains(ctx) {
   const chainMiss = new Map();
   await stages.run("chains", async () => {
 
-  const boardTickers = deepTickers.slice();
+  const boardTickers = deepTickers.concat(deepened.filter((t) => !deepTickers.includes(t)));
   const spotByTicker = new Map();
-  for (const t of focusCarded) {
+  for (const t of [...focusCarded, ...deepened]) {
     const px = num(byCard.get(t).features.spot) || num(byCard.get(t).row.close);
     if (px > 0) spotByTicker.set(t, px);
   }
@@ -278,7 +279,7 @@ export async function runChains(ctx) {
             expiries: expiriesByTicker.get(ticker),
             spot: spotOfLiquid.get(ticker) || spotByTicker.get(ticker) || null,
           });
-          if (sample) vannaSamples.push(sample);
+          if (sample && !deepened.includes(ticker)) vannaSamples.push(sample);
         } catch (error) {
           console.warn(`  vanna check (${ticker}): ${error.message}`);
         }
@@ -391,6 +392,7 @@ export async function runChains(ctx) {
       rowsByTicker: quantRows, sessionDate, rate: quantRate, spotOf: spotOfQuant,
       atrOf: (t) => atrOfLiquid.get(t) || null, expiriesOf: (t) => expiriesByTicker.get(t) || [],
       gammaUnit: variationRun.unit.used,
+      cohort: deepened.length ? new Set(deepTickers) : null,
     });
     const zeros = [...quantPass.preps.values()].filter((p) => p.zero && p.zero.px !== null).length;
     const slices = [...quantPass.preps.values()].reduce((a, p) => a + p.built.length, 0);
@@ -416,11 +418,12 @@ export async function runChains(ctx) {
     return true;
   };
 
-  for (const line of await republishWithChain(payloads, chainByTicker, sessionDate, publish,
+  const boardChains = new Map([...chainByTicker].filter(([t]) => !deepened.includes(t)));
+  for (const line of await republishWithChain(payloads, boardChains, sessionDate, publish,
     refreshVariation, boardVariationMeta(variationRun))) {
     console.log(line);
   }
-  if (!chainByTicker.size) {
+  if (!boardChains.size) {
     for (const line of await archiveDatedBoards(payloads, sessionDate, publish)) {
       console.log(line);
     }
@@ -431,8 +434,9 @@ export async function runChains(ctx) {
     const coverage = [];
     let namesTruncated = 0, foreign = 0;
     const divisors = new Set();
+    const rotating = new Set(deepened);
     for (const [ticker, c] of chainByTicker) {
-      if (!c || c.status !== "ok" || !Array.isArray(c.unusualRows)) continue;
+      if (rotating.has(ticker) || !c || c.status !== "ok" || !Array.isArray(c.unusualRows)) continue;
       pooled.push(...c.unusualRows);
       if (c.truncated) namesTruncated++;
       foreign += Number(c.foreignRows) || 0;
@@ -449,7 +453,7 @@ export async function runChains(ctx) {
     const namesSeen = coverage.length;
     const contracts = rankUnusual(pooled, { namesSeen });
     const pooledOiBasis = poolOiBasis(
-      [...chainByTicker.values()].filter((c) => c && c.status === "ok").map((c) => c.oiBasis),
+      [...chainByTicker].filter(([t, c]) => !rotating.has(t) && c && c.status === "ok").map(([, c]) => c.oiBasis),
       { dryRun: DRY_RUN });
     const names = rankUnusualNames(withTilt);
 

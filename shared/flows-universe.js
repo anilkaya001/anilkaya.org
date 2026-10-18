@@ -86,13 +86,13 @@ export const UNIVERSE_NOTES = Object.freeze({
     "reports the two separately rather than averaging them.",
 });
 
-export const ROSTER_DEPTHS = Object.freeze(["board", "focus", "cross", "index", "fund"]);
+export const ROSTER_DEPTHS = Object.freeze(["board", "focus", "deep", "cross", "index", "fund"]);
 
 export const ROSTER_KEY_KINDS = Object.freeze(["card", "card-x", "hist"]);
 
 export const RETIRE_AFTER_SESSIONS = 3;
 
-export const ROSTER_BUDGET_BYTES = 32 * 1024;
+export const ROSTER_BUDGET_BYTES = 96 * 1024;
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -109,17 +109,22 @@ export function tradingSessionsBetween(from, to) {
   let n = 0;
   let t = Date.parse(from + "T00:00:00Z");
   const end = Date.parse(to + "T00:00:00Z");
+  const closed = new Map();
   while (t < end) {
     t += 86400000;
     const d = new Date(t);
     const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6 && !nyseHolidays(d.getUTCFullYear()).has(d.toISOString().slice(0, 10))) n++;
+    if (wd === 0 || wd === 6) continue;
+    const year = d.getUTCFullYear();
+    if (!closed.has(year)) closed.set(year, nyseHolidays(year));
+    if (!closed.get(year).has(d.toISOString().slice(0, 10))) n++;
   }
   return n;
 }
 
 export function cardDepthOf(depth) {
   if (depth === "cross-section") return "cross";
+  if (depth === "deepened") return "deep";
   return ROSTER_DEPTHS.includes(depth) ? depth : null;
 }
 
