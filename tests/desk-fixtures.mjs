@@ -98,9 +98,39 @@ export function nvdaAfter() {
     engine: engineBlock("NVDA", "2026-09-29", 190) });
 }
 
+function erf(x) {
+  const a = [0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429], p = 0.3275911;
+  const t = 1 / (1 + p * Math.abs(x));
+  const y = 1 - (((((a[4] * t + a[3]) * t) + a[2]) * t + a[1]) * t + a[0]) * t * Math.exp(-x * x);
+  return Math.sign(x) * y;
+}
+
+const ncdf = (x) => 0.5 * (1 + erf(x / Math.SQRT2));
+
+export function callValue(S, K, vol, years, r = 0.04) {
+  const sd = vol * Math.sqrt(years), d1 = (Math.log(S / K) + (r + vol * vol / 2) * years) / sd;
+  return S * ncdf(d1) - K * Math.exp(-r * years) * ncdf(d1 - sd);
+}
+
+export const SYX_EXPIRIES = ["2026-10-02", "2026-10-09", "2026-10-23", "2026-11-20"];
+export const SYX_STRIKE_STEPS = [0.96, 0.99, 1, 1.02, 1.05, 1.1];
+
+export function syxChain(ticker, { spot = 100, asOf = "2026-09-29", vol = 0.34, expiries = SYX_EXPIRIES, steps = SYX_STRIKE_STEPS, facts = [], start = 50, minBid = 0.06, card = true } = {}) {
+  const lines = [];
+  for (const expiry of expiries) {
+    const years = (Date.parse(expiry) - Date.parse(asOf)) / DAY / 365;
+    for (const step of steps) {
+      const strike = Math.round(spot * step * 2) / 2;
+      const bid = Math.max(minBid, Math.round(callValue(spot, strike, vol * (1 + 0.15 * Math.abs(Math.log(strike / spot))), years) * 100 - 1) / 100);
+      lines.push({ type: "C", strike, expiry, bid });
+    }
+  }
+  return chain({ ticker, spot, asOf, lines, engine: card ? engineBlock(ticker, asOf, start, facts.length ? { facts } : {}) : null, source: "stock-state" });
+}
+
 const TYPES = { css: "text/css", js: "text/javascript", json: "application/json", woff2: "font/woff2", svg: "image/svg+xml" };
 
-export async function openDesk(browser, { root = REPO, payloads = {}, query = "", viewport = { width: 1440, height: 1000 }, init = null, errors = [], onChain = null, api = null } = {}) {
+export async function openDesk(browser, { root = REPO, payloads = {}, query = "", viewport = { width: 1440, height: 1000 }, init = null, errors = [], onChain = null, api = null, before = null } = {}) {
   const pages = await import(pathToFileURL(new URL("shared/flows-pages.js", root).pathname).href);
   const page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(String(e && e.message || e)));
@@ -128,6 +158,12 @@ export async function openDesk(browser, { root = REPO, payloads = {}, query = ""
     }
     return route.fulfill({ contentType: "text/html; charset=utf-8", body: pages.deskPage({ username: "tester" }) });
   });
+  if (before) await before(page);
   await page.goto("https://x.test/flows/desk/" + query, { waitUntil: "domcontentloaded" });
   return Object.assign(page, { asked });
+}
+
+export async function showView(page, view) {
+  await page.evaluate((v) => { location.hash = "view=" + v; }, view);
+  await page.waitForFunction((v) => { const n = document.getElementById("dkP-" + v); return !!n && !n.inert && document.getElementById("dkGrid").dataset.view === v; }, view, { timeout: 5000 });
 }

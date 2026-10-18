@@ -70,10 +70,13 @@
   const CONCURRENCY = 3;
   const AGE_TICK_MS = 30000;
   const QUOTE_STALE_SECONDS = 300;
-  const SHOWN = 12;
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
-  const SIDES = ["csp", "cc", "both"];
+  const SIDES = ["csp", "cc", "both", "sc"];
+  const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "cc" };
   const RANKS = [["annualized", "Annualised yield"], ["premium", "Premium received"], ["yieldOnCollateral", "Yield on collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Premium collectible"], ["edge", "EV real world"]];
+  const SC_RANKS = [["annualized", "Annualised ratio"], ["ratio", "Premium ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Premium collectible"], ["edge", "EV real world"]];
+  const ranksFor = () => (side === "sc" ? SC_RANKS : RANKS);
+  const calls = () => (side === "sc" ? window.FlowsUI.deskCalls || null : null);
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
   const WIN_Q = "Win % (implied)", WIN_P = "Win % (real-world)";
 
@@ -114,7 +117,7 @@
       const st = q.get("strategy");
       if (SIDES.includes(st)) side = st;
       const r = q.get("rank");
-      if (r && RANKS.some(([k]) => k === r)) rank = r;
+      if (r && ranksFor().some(([k]) => k === r)) rank = r;
       buyingPower = parseBuyingPower(q.get("bp"));
       if (rank === "collectible" && buyingPower === null) rank = "annualized";
       const sf = String(q.get("surface") || "").trim().toUpperCase();
@@ -199,7 +202,7 @@
     allBox.indeterminate = on > 0 && on < book.size;
   }
 
-  const serverRank = (k) => (k === "collectible" || k === "edge" ? "yieldOnCollateral" : k);
+  const serverRank = (k) => (k === "collectible" || k === "edge" ? "yieldOnCollateral" : k === "ratio" ? "annualized" : k);
 
   function messageFor(status, body) {
     const code = body && body.error && body.error.code;
@@ -220,7 +223,7 @@
     const seq = (e.seq || 0) + 1;
     e.seq = seq;
     renderChips();
-    const params = new URLSearchParams({ t: sym, strategy: side, rank: serverRank(rank) });
+    const params = new URLSearchParams({ t: sym, strategy: SERVER_SIDE[side], rank: serverRank(rank) });
     if (refresh) params.set("refresh", "1");
     try {
       const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
@@ -263,7 +266,8 @@
     const chainDay = /^\d{4}-\d{2}-\d{2}$/.test(String(p.sessionDate || p.asOf || "")) ? String(p.sessionDate || p.asOf) : null;
     for (const r of p.rows || []) {
       r.__day = chainDay;
-      r.__eng = r.__fit = r.__code = null;
+      r.__eng = r.__fit = r.__code = r.__setup = null;
+      r.__nk = undefined;
       if (!Q) { r.__why = T("why-q"); continue; }
       const type = r.type === "P" ? "P" : "C";
       const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv), opposite: r.opposite };
@@ -274,6 +278,7 @@
         r.__fit = fit.slice;
         const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [row] }], lawCache: laws });
         const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
+        r.__setup = setup;
         r.__eng = Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
         if (!r.__eng) r.__why = T("why-eng");
       } catch { r.__eng = null; r.__why = T("why-eng"); }
@@ -321,10 +326,12 @@
         for (const [k, n] of Object.entries(p.gated || {})) gated[k] = (gated[k] || 0) + (isNum(n) || 0);
       }
       if (sell !== null && kept < sell) slices.push({ sym, kept, sell, rankedBy: p.rankedBy || null });
-      for (const r of p.rows || []) rows.push(Object.assign(r, { __spot: spotOf(p), __sym: sym }));
+      for (const r of p.rows || []) if (side !== "sc" || r.type === "C") rows.push(Object.assign(r, { __spot: spotOf(p), __sym: sym }));
     }
     for (const r of rows) r.__sizing = sizeRow(r, buyingPower);
-    const key = rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.collectible : null) : rank === "edge" ? evP : (r) => r[rank];
+    const dc = calls();
+    if (dc) dc.annotate(rows, buyingPower);
+    const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.collectible : null) : rank === "edge" ? evP : (r) => r[rank];
     rows.sort((a, b) => {
       const x = isNum(key(a)), y = isNum(key(b));
       if (x === null && y === null) return 0;
@@ -338,29 +345,91 @@
   const inTenor = (r) => { const t = TENORS[tenor]; return r.days >= t[1] && r.days <= t[2]; };
 
   const mods = {};
+  const TAB_KEYS = ["frontier", "lines", "smile", "plan"];
+  const tabs = Object.fromEntries(TAB_KEYS.map((k) => [k, $("dkT-" + k)]));
+  const panels = Object.fromEntries(TAB_KEYS.map((k) => [k, $("dkP-" + k)]));
+  const NARROW = window.matchMedia("(max-width: 899.98px)");
+  let curTab = "frontier";
+
+  const tabAllowed = (k) => (k === "smile" ? !!mods.smileCard && !mods.smileCard.hidden : k === "plan" ? NARROW.matches : true);
+
+  function showTab(key, focus, quiet) {
+    const k = tabAllowed(key) ? key : "frontier";
+    curTab = k;
+    grid.dataset.view = k;
+    for (const x of TAB_KEYS) {
+      const on = x === k;
+      tabs[x].hidden = !tabAllowed(x);
+      tabs[x].setAttribute("aria-selected", String(on));
+      tabs[x].tabIndex = on ? 0 : -1;
+      panels[x].inert = !on;
+    }
+    if (focus) tabs[k].focus();
+    if (!quiet) { try { const url = new URL(location.href); url.hash = "view=" + k; history.replaceState(null, "", url); } catch { return; } }
+  }
+
+  const viewFromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m && TAB_KEYS.includes(m[1]) ? m[1] : "frontier"; };
+
+  const PHONE = window.matchMedia("(max-width: 639.98px)");
+  const filterDlg = $("dkFilterDlg"), filterBtn = $("dkFilterBtn"), filterSlot = $("dkFilterSlot");
+  function placeFilters() {
+    const to = PHONE.matches && filterSlot ? filterSlot : filters;
+    if (mods.sideSeg) to.prepend(mods.sideSeg, mods.tenorSeg);
+    if (mods.terms) to.append(mods.terms);
+  }
+  PHONE.addEventListener("change", placeFilters);
+  if (filterBtn && filterDlg) {
+    filterBtn.addEventListener("click", () => filterDlg.showModal());
+    $("dkFilterDone").addEventListener("click", () => filterDlg.close());
+    filterDlg.addEventListener("close", () => filterBtn.focus());
+  }
+
+  function placeSizing() {
+    if (mods.sizing) (NARROW.matches ? panels.plan : panels.frontier).append(mods.sizing);
+  }
+
+  TAB_KEYS.forEach((k, i) => {
+    tabs[k].addEventListener("click", () => showTab(k, false));
+    tabs[k].addEventListener("keydown", (ev) => {
+      const open = TAB_KEYS.filter((x) => tabAllowed(x));
+      const at = open.indexOf(k);
+      const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: open.length - 1 }[ev.key];
+      if (to === undefined) return;
+      ev.preventDefault();
+      showTab(open[(to + open.length) % open.length], true);
+    });
+  });
+  NARROW.addEventListener("change", () => { placeSizing(); showTab(curTab, false, true); drawScatter(); });
+  addEventListener("hashchange", () => showTab(viewFromHash(), false, true));
+  if (window.ResizeObserver) {
+    let last = 0;
+    new ResizeObserver(() => { const hh = grid.clientHeight; if (hh !== last) { last = hh; if (mods.chart) drawScatter(true); if (mods.linesCard) fitLines(); } }).observe(grid);
+  }
+
   function ensureModules() {
     if (mods.scatter) return;
-    mods.sideSeg = UI.segmented("Sell", [{ label: "Puts" }, { label: "Calls" }, { label: "Both" }], (i) => setSide(SIDES[i]), SIDES.indexOf(side));
+    mods.sideSeg = UI.segmented("Sell", [{ label: "Puts" }, { label: "Calls" }, { label: "Both" }, { label: "Short calls" }], (i) => setSide(SIDES[i]), SIDES.indexOf(side));
     mods.sideSeg.id = "deskStrategy";
     mods.tenorSeg = UI.segmented("Days to expiry", TENORS.map(([l]) => ({ label: l })), (i) => { tenor = i; render(); }, tenor);
     mods.tenorSeg.id = "dkTenor";
-    filters.prepend(mods.sideSeg, mods.tenorSeg);
+    placeFilters();
     mods.axisSeg = UI.segmented("Risk axis", [{ label: "Net delta" }, { label: WIN_Q }], (i) => { axis = i; drawScatter(); }, axis);
     mods.scatter = h("div", { class: "dk-scatter", id: "dkScatter" });
     mods.legend = h("div", { class: "tl-legend" });
-    const frontier = UI.moduleCard({ id: "dkFrontierM", title: "Frontier", span: 8, index: 0, seg: mods.axisSeg, info: frontierInfo, body: [mods.scatter, mods.legend] });
+    mods.scLoad = h("div", { id: "dkScLoad", class: "dk-scload" });
+    const frontier = UI.moduleCard({ id: "dkFrontierM", title: "Frontier", span: 8, index: 0, seg: mods.axisSeg, info: frontierInfo, body: [mods.scLoad, mods.scatter, mods.legend] });
     mods.bp = h("input", { id: "deskBP", name: "bp", type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false", placeholder: "25,000", "aria-label": "Buying power in dollars" });
     mods.bpClear = h("button", { type: "button", class: "dk-pill", id: "deskBPClear", hidden: true }, "Clear");
     mods.plan = h("div", { class: "dk-plan", id: "deskPlan", hidden: true });
     const sizing = UI.moduleCard({ id: "dkSizingM", title: "Sizing", span: 4, index: 1, info: () => ({ title: "Buying power", lead: T("bp") }), body: h("div", { class: "dk-size" },
       h("label", { class: "dk-bp" }, h("span", { class: "dk-bp-l" }, "Buying power"), h("span", { class: "dk-bp-f" }, h("span", { "aria-hidden": "true" }, "$"), mods.bp, mods.bpClear)),
       h("div", { class: "dk-size-r" }, mods.plan, mods.best = h("div", { class: "dk-best" }))) });
-    mods.rankSel = h("select", { id: "deskRank", class: "dk-select", "aria-label": "Rank by" }, RANKS.map(([k, l]) => h("option", { value: k }, l)));
-    mods.rankSel.value = rank;
+    mods.rankSel = h("select", { id: "deskRank", class: "dk-select", "aria-label": "Rank by" });
+    syncRanks();
     mods.list = h("div", { class: "dk-list", id: "dkList", role: "list", "aria-label": "Sellable lines" });
-    mods.more = h("button", { type: "button", class: "ui-disclose", "aria-expanded": "false", hidden: true, onclick: () => { mods.open = !mods.open; renderList(); } }, h("span"), glyph("chev"));
-    const lines = UI.moduleCard({ id: "dkLinesM", title: "Lines", span: 12, index: 2, info: linesInfo, body: [mods.list, mods.more] });
-    lines.querySelector(".ui-mod-h").insertBefore(h("span", { class: "dk-rank" }, UI.calibTag(), mods.rankSel), lines.querySelector(".ui-mod-h .ui-info"));
+    mods.more = h("button", { type: "button", class: "dk-pill dk-all-btn", id: "dkShowAll", hidden: true, "aria-haspopup": "dialog", onclick: openAll });
+    const lines = UI.moduleCard({ id: "dkLinesM", title: "Lines", span: 12, index: 2, info: linesInfo, body: [mods.list] });
+    lines.querySelector(".ui-mod-h").insertBefore(h("span", { class: "dk-rank" }, UI.calibTag(), mods.rankSel, mods.more), lines.querySelector(".ui-mod-h .ui-info"));
     if (UI.exportMenu) lines.querySelector(".ui-mod-h").insertBefore(UI.exportMenu({ name: "flows-desk-frontier", csv: exportSpec, svg: () => mods.scatter.querySelector("svg") }), lines.querySelector(".ui-mod-h .ui-info"));
     mods.smileSel = h("select", { id: "deskSurfaceSymbol", class: "dk-select", "aria-label": "Smile for symbol" });
     mods.smileSel.addEventListener("change", () => { surfaceSymbol = mods.smileSel.value || null; writeURL(); if (mods.smileChart) mods.smileChart.redraw(true); });
@@ -369,11 +438,30 @@
     mods.smileCard.querySelector(".ui-mod-h").insertBefore(mods.smileSel, mods.smileCard.querySelector(".ui-mod-h .ui-info"));
     mods.smileCard.hidden = true;
     mods.linesCard = lines;
-    grid.append(frontier, sizing, lines, mods.smileCard);
+    mods.sizing = sizing;
+    panels.frontier.append(frontier);
+    panels.lines.append(lines);
+    panels.smile.append(mods.smileCard);
+    placeSizing();
     mods.chart = C.mount(mods.scatter, (host, w, animate) => drawScatterInto(host, w, animate));
     mods.smileChart = C.mount(mods.smile, (host, w) => drawSurfaceInto(host, w));
     wireBP();
     mods.rankSel.addEventListener("change", onRank);
+  }
+
+  function syncRanks() {
+    const sel = mods.rankSel;
+    if (!sel) return;
+    if (!ranksFor().some(([k]) => k === rank)) rank = "annualized";
+    sel.replaceChildren(...ranksFor().map(([k, l]) => h("option", { value: k }, l)));
+    sel.value = rank;
+  }
+
+  let callsAsked = false;
+  function loadCalls() {
+    if (callsAsked || !UI.defer) return;
+    callsAsked = true;
+    UI.defer("desk-calls", { when: "idle", el: mods.scLoad, label: "The short-call view" });
   }
 
   const EXPORT_COLS = [
@@ -390,6 +478,8 @@
     { label: "Expected value, real world", unit: "USD", get: evP },
   ];
   const exportSpec = () => {
+    const dc = calls();
+    if (dc) return dc.exportSpec(view);
     const rows = view.shown || [];
     const days = [...new Set(rows.map((r) => r.__day).filter(Boolean))];
     return { name: "flows-desk-lines", source: "anilkaya.org Flows desk, own model outputs", asOf: days.length === 1 ? days[0] : null, rows, cols: EXPORT_COLS };
@@ -404,6 +494,7 @@
     ensureModules();
     v.shown = v.rows.filter(inTenor);
     foot.textContent = footText(v, chosen);
+    if (window.FlowsUI.deskCalls) window.FlowsUI.deskCalls.sync(side);
     renderPlan(v.shown);
     const off = basisLines(priceable.filter((s0) => mismatched(book.get(s0).payload)), true);
     if (!v.rows.length && off.length) mods.empty = off.join(" ");
@@ -426,6 +517,7 @@
     return T("f-uni", { p: v.priced, s: v.screened, least: cut.length ? "at least " : "" }) + (dropped.length ? ". " + T("f-gate", { list: dropped.join(", ") }) : ".") +
       (v.uncounted.length ? " " + T("f-unc", { who: v.uncounted.join(", "), is: one(v.uncounted.length, "is", "are"), that: one(v.uncounted.length, "that payload", "those payloads") }) : "") +
       (v.slices.length ? " " + T("f-slice", { parts: v.slices.map((c) => T("f-part", { sym: c.sym, kept: fmtInt(c.kept), sell: fmtInt(c.sell), by: rankWord(c.rankedBy) })).join("; "), n: fmtInt(below), lines: one(below, "line", "lines"), is: one(below, "is", "are"), names: one(v.slices.length, "this name", "these names") }) : "") +
+      (side === "sc" && v.slices.length ? " " + T("sc-slice") : "") +
       (cut.length ? " " + T("f-cut", { who: cut.join(", "), has: one(cut.length, "has", "have"), its: one(cut.length, "its", "their") }) : "");
   }
 
@@ -451,6 +543,14 @@
   function renderPlan(rows) {
     const plan = mods.plan;
     mods.best.replaceChildren();
+    if (side === "sc") {
+      const dc = calls();
+      if (dc) { dc.renderPlan(rows); return; }
+      plan.hidden = true;
+      plan.replaceChildren();
+      mods.best.append(h("p", { class: "dk-hint" }, T("sc-loading")));
+      return;
+    }
     if (buyingPower === null || !rows.length) {
       plan.hidden = true;
       plan.replaceChildren();
@@ -494,6 +594,43 @@
     plan.dataset.plan = sentence;
   }
 
+  function listHead(dc) {
+    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Collect", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
+  }
+
+  function fillList(box, rows, dc) {
+    box.classList.toggle("is-sc", side === "sc");
+    box.classList.toggle("has-col", buyingPower !== null && side !== "sc");
+    box.append(listHead(dc));
+    rows.forEach((r, i) => box.append(dc ? dc.rowFor(r, i) : rowFor(r, i)));
+  }
+
+  function fitLines() {
+    const box = mods.list;
+    const rows = [...box.querySelectorAll(".dk-row")];
+    if (!rows.length) { mods.more.hidden = true; return; }
+    for (const r of rows) r.hidden = false;
+    let shown = rows.length;
+    while (shown > 1 && box.scrollHeight > box.clientHeight + 1) rows[--shown].hidden = true;
+    mods.more.hidden = shown === rows.length;
+    mods.more.textContent = "Show all " + rows.length;
+  }
+
+  function openAll() {
+    const rows = view.shown || [];
+    const dc = calls();
+    if (!mods.allDlg) {
+      mods.allBox = h("div", { class: "dk-list dk-all-list", role: "list", "aria-label": "Every sellable line" });
+      mods.allDlg = h("dialog", { class: "dk-sc-dialog dk-all-dlg", "aria-labelledby": "dkAllT" },
+        h("div", { class: "dk-sc-body" }, h("h2", { id: "dkAllT" }, "Every line"), mods.allBox, h("div", { class: "dk-sc-act" }, h("span"), h("button", { type: "button", class: "dk-pill dk-pill-main", onclick: () => mods.allDlg.close() }, "Done"))));
+      mods.allDlg.addEventListener("close", () => mods.more.focus());
+      document.body.append(mods.allDlg);
+    }
+    mods.allBox.replaceChildren();
+    fillList(mods.allBox, rows, dc);
+    mods.allDlg.showModal();
+  }
+
   function renderList() {
     const rows = view.shown || [];
     const box = mods.list;
@@ -503,13 +640,15 @@
       mods.more.hidden = true;
       return;
     }
-    const limit = mods.open ? rows.length : SHOWN;
-    box.classList.toggle("has-col", buyingPower !== null);
-    box.append(h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Collect", ""].filter((x) => x !== null).map((x) => h("span", null, x))));
-    rows.forEach((r, i) => { const n = rowFor(r, i); if (i >= limit) n.hidden = true; box.append(n); });
-    mods.more.hidden = rows.length <= SHOWN;
-    mods.more.setAttribute("aria-expanded", String(!!mods.open));
-    mods.more.firstChild.textContent = mods.open ? "Fewer" : "All " + rows.length;
+    const dc = calls();
+    box.classList.toggle("is-sc", side === "sc");
+    if (side === "sc" && !dc) {
+      box.append(UI.silent({ state: "pending", reason: T("sc-loading") }, "Lines", 120));
+      mods.more.hidden = true;
+      return;
+    }
+    fillList(box, rows, dc);
+    fitLines();
   }
 
   function labHref(r) {
@@ -603,12 +742,25 @@
   function focusPoint(r) { focused = r; drawScatter(true); }
   function drawScatter(quick) { if (mods.chart) { mods.quick = !!quick; mods.chart.redraw(false); } }
 
+  const clampN = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const chartHeight = (w) => {
+    const stage = grid.clientHeight;
+    if (!(stage > 0)) return w < 600 ? 240 : 300;
+    return w < 600 ? clampN(stage - 190, 150, 240) : clampN(stage - (side === "sc" ? 112 : 92), 200, 480);
+  };
+  const emptyFrontier = (host, H, phone) => host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : phone ? 140 : 180));
+
   function drawScatterInto(host, w, animate) {
-    const rows = (view.shown || []).filter((r) => r.__eng);
     const phone = w < 600;
-    const H = phone ? 240 : 300;
+    const H = chartHeight(w);
     mods.legend.replaceChildren();
-    if (!rows.length) { host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : phone ? 140 : 180)); return; }
+    if (side === "sc") {
+      const dc = calls();
+      if (dc) dc.drawScatter(host, w, animate); else host.append(UI.silent({ state: "pending", reason: T("sc-loading") }, "Frontier", H));
+      return;
+    }
+    const rows = (view.shown || []).filter((r) => r.__eng);
+    if (!rows.length) { emptyFrontier(host, H, phone); return; }
     const xOf = axis === 0 ? netOf : popQ;
     const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.annualized) })).filter((p) => p.x !== null && p.y !== null);
     if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: T("fr-none") }, "Frontier", H)); return; }
@@ -687,13 +839,20 @@
   function renderSurface() {
     const card = mods.smileCard;
     const list0 = surfaceCandidates();
-    if (!list0.length) { card.hidden = true; mods.smile.replaceChildren(); return; }
+    if (!list0.length) {
+      card.hidden = true;
+      tabs.smile.hidden = true;
+      mods.smile.replaceChildren();
+      if (curTab === "smile") showTab("frontier", false, true);
+      return;
+    }
     if (surfaceSymbol === null || !list0.includes(surfaceSymbol)) surfaceSymbol = list0[0];
     mods.smileSel.replaceChildren(...list0.map((sym) => h("option", { value: sym }, sym)));
     mods.smileSel.value = surfaceSymbol;
     mods.smileSel.disabled = list0.length < 2;
     const was = card.hidden;
     card.hidden = false;
+    tabs.smile.hidden = false;
     if (mods.smileChart) mods.smileChart.redraw(was);
   }
 
@@ -848,9 +1007,13 @@
   }
 
   function frontierInfo() {
+    const dc = calls();
+    if (dc) return dc.frontierInfo();
     return { title: "Frontier", lead: T("frontier"), sections: [{ title: "Axes", lines: [T("frontier-x")] }, { title: "Engine", lines: [T("engine")] }], notes: [T("refuse")] };
   }
   function linesInfo() {
+    const dc = calls();
+    if (dc) return dc.linesInfo(foot.textContent);
     return { title: "Lines", lead: T("premium"), sections: [{ title: "What is on this list", lines: [foot.textContent] }, { title: "Engine", lines: [T("engine")] }], notes: [T("annualized"), T("refuse")] };
   }
 
@@ -986,8 +1149,12 @@
 
   function setSide(next) {
     if (next === side) return;
+    const reuse = SERVER_SIDE[next] === SERVER_SIDE[side];
     side = next;
+    syncRanks();
     writeURL();
+    if (side === "sc") loadCalls();
+    if (reuse) { renderChips(); render(); return; }
     for (const e of book.values()) { e.state = "idle"; e.payload = null; }
     renderChips();
     const chosen = selectedSymbols();
@@ -1034,7 +1201,14 @@
   }
 
   const initial = readURL();
+  window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { deskKit: Object.freeze({
+    UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
+    filters, st: () => ({ side, rank, tenor, axis, buyingPower, bpBad, view, focused, quick: mods.quick }),
+    render, focusPoint, chartHeight, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); },
+  }) }));
   ensureModules();
+  showTab(viewFromHash(), false, true);
+  if (side === "sc") loadCalls();
   renderChips();
   render();
   if (initial.length) add(initial);

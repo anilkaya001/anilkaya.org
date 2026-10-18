@@ -359,6 +359,8 @@ try {
     ok(!(await strikesOf()).includes(30),
        "the zero-bid contract is absent — no bid is no sale, not a cheap one");
 
+    await page.evaluate(() => { location.hash = "view=lines"; });
+    await page.waitForFunction(() => !document.getElementById("dkP-lines").inert);
     const lines = await openInfo(page.locator('#dkLinesM [aria-label="About lines"]'));
     ok(/of 3 quoted contracts/.test(lines) && /first gate it failed/.test(lines),
        "and the same partition is one tap away in the Lines disclosure, where a sighted reader finds it");
