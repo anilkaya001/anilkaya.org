@@ -669,7 +669,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const dryBare = await runHealthGate({ dry: true, log: (l) => dryLines.push("bare " + l), warn: () => {} });
   ok(dryBare.failures.length === 0 && !dryLines.some((l) => /^bare .*run facts/.test(l)), "with no run facts a dry run says only that it skipped");
   const pipeline = nightlySource();
-  ok(/night: \{\s*cardsFailed: cardsFailed \+ extraFailed, deadlineSkipped: deadlineSkipped \+ extraSkipped,\s*planned: byCard\.size \+ dossierBuilt\.size, rostered: rosterSummary \? rosterSummary\.rostered : null,/.test(pipeline) &&
+  ok(/night: \{\s*cardsFailed: cardsFailed \+ extraFailed, deadlineSkipped: deadlineSkipped \+ extraSkipped,\s*planned: byCard\.size[^\n]*\+ dossierBuilt\.size, rostered: rosterSummary \? rosterSummary\.rostered : null,/.test(pipeline) &&
      /rosterThrew = true;/.test(pipeline) && /rostered: Object\.keys\(built\.payload\.depth\)\.length/.test(pipeline),
     "and the nightly hands it the card counts, the plan and the roster it published");
 }

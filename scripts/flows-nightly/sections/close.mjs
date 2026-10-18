@@ -60,22 +60,26 @@ export async function runClose(ctx) {
     guaranteed, earlyRoster, deadline, gammaProfiles, prunePromise, scoresPayload, payloads, marketLegs, universe,
     neuronTiers, enriched, liquid, cardsBuilt, cardsFailed, cardsSkipped, extraBuilt, membership, ndxAge, ndx,
     focusCarded, byCard, coverageNotes, gate, intraday, screenerReadAt, screenerTruncated, dating, variationRun,
-    deepTickers, vendor, extraFailed, deadlineSkipped, extraSkipped,
+    deepTickers, vendor, extraFailed, deadlineSkipped, extraSkipped, deepen, rotationCards,
   } = ctx;
+  const rotation = deepen ? deepen.set : new Set();
+  const carriedDeep = deepen ? deepen.carried : new Map();
   let rosterSummary = null;
   let rosterThrew = false;
   const probeBudget = { spentMs: 0, budgetMs: LEDGER_PROBE_RETRY_BUDGET_MS };
+  const rosterCandidates = [...new Set([...screener.map((r) => r && r.ticker).filter(Boolean), ...guaranteed, ...FOCUS_FUNDS,
+    ...INDEX_TICKERS, ...NDX_100])];
   await stages.run("roster", async () => {
     rosterSummary = await retireAndRoster({
       sessionDate, generatedAt,
       depth: new Map([
         ...crossSectionTickers.map((t) => [t, "cross"]),
-        ...[...onBoard.keys()].map((t) => [t, deepSet.has(t) ? "board" : "focus"]),
+        ...[...onBoard.keys()].map((t) => [t, deepSet.has(t) ? "board" : rotation.has(t) ? "deep" : "focus"]),
         ...dossierBuilt,
       ]),
-      exempt: new Set([...INDEX_TICKERS, ...FOCUS_FUNDS, ...focusDeep]),
-      candidates: [...new Set([...screener.map((r) => r && r.ticker).filter(Boolean), ...guaranteed, ...FOCUS_FUNDS,
-        ...INDEX_TICKERS, ...NDX_100])],
+      exempt: new Set([...INDEX_TICKERS, ...FOCUS_FUNDS, ...focusDeep, ...carriedDeep.keys(),
+        ...(deepen && deepen.mode === "protect" ? rosterCandidates : [])]),
+      candidates: rosterCandidates,
       reader: DRY_RUN ? dryRosterReader(sessionDate)
         : (key) => readStored(key, { budget: probeBudget }),
       probeMany: DRY_RUN ? dryRosterProbe(sessionDate)
@@ -156,9 +160,14 @@ export async function runClose(ctx) {
       liquid: liquid.length,
       cardsBuilt, cardsFailed, cardsSkipped,
       ...(neuronLedger ? { neuron: neuronLedger } : {}),
+      ...(deepen && deepen.plan ? { deepen: {
+        mode: deepen.mode, chosen: deepen.plan.n, built: rotationCards ? rotationCards.built : 0,
+        failed: rotationCards ? rotationCards.failed : 0, carried: carriedDeep.size, never: deepen.plan.never ?? 0,
+        binding: deepen.plan.binding, nights: deepen.plan.nights ?? null,
+      } } : {}),
 
       crossSectionCards: extraBuilt,
-      cardsTotal: cardsBuilt + extraBuilt,
+      cardsTotal: cardsBuilt + extraBuilt + (rotationCards ? rotationCards.built : 0),
       apiCalls: stats.calls,
       ...(stats.calls > 0 ? { vendor: summarize(wire.snapshot()) } : {}),
       coverage: {
@@ -201,7 +210,7 @@ export async function runClose(ctx) {
     const { buildFactIndex } = await import("../../../shared/flows-ask.js");
     const { assess, assessStoreFrom } = await import("../../../shared/flows-warnings.js");
 
-    const index = buildFactIndex(publishedStore);
+    const index = buildFactIndex(Object.fromEntries(Object.entries(publishedStore).filter(([k]) => !(k.startsWith("card:") && rotation.has(k.slice(5))))));
 
     const alarm = assess(assessStoreFrom(publishedStore));
     if (alarm.warnings.length) {
@@ -314,7 +323,7 @@ export async function runClose(ctx) {
     annotate: process.env.GITHUB_ACTIONS === "true",
     night: {
       cardsFailed: cardsFailed + extraFailed, deadlineSkipped: deadlineSkipped + extraSkipped,
-      planned: byCard.size + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
+      planned: byCard.size - (deepen ? deepen.added.size : 0) - [...(deepen ? deepen.keep : [])].filter((t) => byCard.has(t)).length + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
       neuron: neuronLedger,
     } });

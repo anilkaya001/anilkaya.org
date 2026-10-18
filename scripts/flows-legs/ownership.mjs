@@ -31,23 +31,24 @@ export async function readDeepOwnership(uw, tickers, {
 }
 
 export function ownershipParts({
-  tickers = [], deepTickers = [], shortInterestRows = [], insiderRows = [], deep = new Map(),
+  tickers = [], deepTickers = [], readTickers = deepTickers, shortInterestRows = [], insiderRows = [], deep = new Map(),
   screenerByTicker = new Map(), sessionDate = null, insidersRead = true, shortRead = true,
   shortUnread = new Map(), insiderUnread = new Map(), insiderPartial = new Set(),
 } = {}) {
   const si = latestShortInterest(shortInterestRows, { sessionDate });
   const insiders = groupInsiderRows(insiderRows);
   const deepSet = new Set(deepTickers);
+  const readSet = new Set([...deepTickers, ...readTickers]);
   const parts = new Map();
   const squeezeInputs = [];
 
   for (const t of tickers) {
     const d = deep.get(t);
-    const borrow = !deepSet.has(t) ? notRead("only the deep names carry a borrow read")
+    const borrow = !readSet.has(t) ? notRead("only the deep names carry a borrow read")
       : !d ? notRead("the deep read did not run before the deadline")
         : d.borrow.ok ? borrowSummary(rowsOf(d.borrow.body), { sessionDate })
           : { status: "unavailable", reason: d.borrow.gated ? SILENCE.gated : SILENCE.unreadable, http: d.borrow.status };
-    const volume = !deepSet.has(t) ? notRead("only the deep names carry a short-volume read")
+    const volume = !readSet.has(t) ? notRead("only the deep names carry a short-volume read")
       : !d ? notRead("the deep read did not run before the deadline")
         : d.volume.ok ? shortVolumeSummary(rowsOf(d.volume.body, "si"), { sessionDate })
           : { status: "unavailable", reason: d.volume.gated ? SILENCE.gated : SILENCE.unreadable, http: d.volume.status };

@@ -10,8 +10,9 @@ import { cardScenario } from "../pipeline-sim/cards.mjs";
 import { storeScenario } from "../pipeline-sim/store.mjs";
 import { contractsScenario } from "../pipeline-sim/contracts.mjs";
 import { meterScenario, stagesScenario } from "../pipeline-sim/meter.mjs";
+import { deepenScenario } from "../pipeline-sim/deepen.mjs";
 
-export const SEEDS = Object.freeze({ client: 10, card: 24, store: 40, contracts: 25, meter: 6, stages: 25 });
+export const SEEDS = Object.freeze({ client: 10, card: 24, store: 40, contracts: 25, meter: 6, stages: 25, deepen: 14 });
 
 async function across(count, run) {
   const found = [];
@@ -43,6 +44,8 @@ export const meterDetector = (mod) => across(SEEDS.meter, (seed) => meterScenari
 
 export const stagesDetector = (mod) => across(SEEDS.stages, (seed) => stagesScenario(seed, mod));
 
-export const DETECTOR_OF = Object.freeze({ clientDetector, cardDetector, coverageDetector, contractsDetector, meterDetector, stagesDetector });
+export const deepenDetector = (mod) => across(SEEDS.deepen, (seed) => deepenScenario(seed, mod));
+
+export const DETECTOR_OF = Object.freeze({ clientDetector, cardDetector, coverageDetector, contractsDetector, meterDetector, stagesDetector, deepenDetector });
 
 export { meter, stages, contracts };

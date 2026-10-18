@@ -49,7 +49,7 @@
   const NA = (reason) => ST("unavailable", reason, "Unavailable");
   const OK = ST("ok");
   const isIndex = (card) => !!card && (card.depth === "index" || card.depth === "fund");
-  const isDeep = (card) => !!card && (card.depth === "board" || card.depth === "focus" || !!engineOf(card));
+  const isDeep = (card) => !!card && (card.depth === "board" || card.depth === "focus" || card.depth === "deepened" || !!engineOf(card));
   const behind = (card) => isoOk(card.sessionDate) && card.sessionDate < UI.freshness.market().expected;
   const etDay = (t) => { const d = new Date(t || NaN); return isNaN(d) ? null : d.toLocaleDateString("en-CA", { timeZone: "America/New_York" }); };
   function joined(x, card) {
@@ -344,7 +344,7 @@
     const out = [];
     if (isoOk(card.sessionDate) && card.sessionDate < m.expected) {
       const board = STATE.meta && isoOk(STATE.meta.sessionDate) && STATE.meta.sessionDate > card.sessionDate ? STATE.meta.sessionDate : null;
-      out.push(ST("stale", "Stale: every figure on this page is from the session of " + card.sessionDate + (board ? ", and the board has since published " + board : ", and the last completed session is " + m.expected) + "."));
+      out.push(ST("stale", "Stale: every figure on this page is from the session of " + card.sessionDate + (board ? ", and the board has since published " + board : ", and the last completed session is " + m.expected) + "." + (card.depth === "deepened" ? " Read in full in turn, oldest first: this read is " + dayDiff(card.sessionDate, m.expected) + " days old." : "")));
     }
     const meta = STATE.meta;
     if (meta && meta.sessionDate === card.sessionDate && Date.parse(meta.generatedAt) > Date.parse(card.generatedAt)) {
@@ -2978,7 +2978,7 @@
     if (all.length > shown.length) return "Today’s board ranks " + NAMES(all.length) + " and this run built a card for " + shown.length + " of them, which are the rows below. A card costs vendor calls the run cannot spend on every name, so the rest are ranked without one and are not listed: such a page would have nothing on it. " + tail;
     return "All " + NAMES(all.length) + " on today’s board, every one of which carries a card. " + tail;
   }
-  const DEPTH_G = UI.depths;
+  const DEPTH_G = { ...UI.depths, deep: ["list", "Deep read"] };
   const ROSTER_NOTE = "Every name with a dossier this session: focus names, funds and indexes first.";
   async function rosterRows() {
     const r = await soft(getJSON("/api/flows/roster"));

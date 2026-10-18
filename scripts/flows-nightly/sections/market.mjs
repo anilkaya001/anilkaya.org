@@ -17,7 +17,7 @@ export async function runMarket(ctx) {
   const {
     stages, generatedAt, sessionDate, withTilt, screener, universe, vendor, holdings, screenerDate, harvest,
     universeSource, screenerFilters, eligibleFor, byCard, deepTickers, gateOrigin, tilted, picks, liquid, payloads,
-    enriched,
+    enriched, deepen,
   } = ctx;
   await stages.run("market", async () => {
     await publish("market", {
@@ -118,6 +118,7 @@ export async function runMarket(ctx) {
       uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
       cardedTickers: [...byCard.keys()],
+      readTickers: [...byCard.keys()].filter((t) => !(deepen && deepen.keep.has(t))),
       rowOf: (r) => (r && byCard.has(r.ticker) ? sessionRow(r, byCard.get(r.ticker).features) : r),
       sigma,
       deepTickers,

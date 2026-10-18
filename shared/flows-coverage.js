@@ -118,7 +118,7 @@ export function cardProducts(card, cardX, hist, opts = {}) {
     put("positioning", bestOf(["short", "insiders"].map((k) => fromSection(x, k))));
   }
   const engine = (isObject(card.engine) && card.engine.state) || (isObject(cardX) && isObject(cardX.engine) && cardX.engine.state) ? true : false;
-  put("engine", engine ? [STATE.ok, null] : depth === "board" || depth === "focus" ? [STATE.failed, "the engine block did not build"] : [STATE.unfetched, "no engine for this tier"]);
+  put("engine", engine ? [STATE.ok, null] : depth === "board" || depth === "focus" || depth === "deep" ? [STATE.failed, "the engine block did not build"] : [STATE.unfetched, "no engine for this tier"]);
   put("reading", opts.reading ? [STATE.ok, null] : [STATE.pending, null]);
   if (isObject(hist) && hist.status === "absent") why.hist = "no hist for this name";
   return { codes: out, why };

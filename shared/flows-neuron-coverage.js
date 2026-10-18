@@ -59,7 +59,7 @@ export function neuronCoverage({ universe, eligible = null, cards = new Map(), h
   const counts = uni.counts && typeof uni.counts === "object" ? uni.counts : {};
   const inputs = {};
   for (const [k] of SCREEN_INPUTS) inputs[k] = Object.hasOwn(columns, k) ? num(counts[k]) : null;
-  const deep = [...(cards instanceof Map ? cards.values() : [])].filter((c) => c && (c.depth === "board" || c.depth === "focus"));
+  const deep = [...(cards instanceof Map ? cards.values() : [])].filter((c) => c && (c.depth === "board" || c.depth === "focus" || c.depth === "deepened"));
   return {
     ...ledger,
     screenIdeas, unpriceableCodes, inputs,

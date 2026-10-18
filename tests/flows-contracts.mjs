@@ -73,7 +73,7 @@ refuse("a universe column with no unit", "universe", (() => { const u = clone(un
 refuse("a universe rank column of the wrong length", "universe", (() => { const u = clone(universe); u.pct.iv30.pop(); return u; })(), CODES.badShape, "pct.iv30");
 refuse("a universe holding a bad ticker", "universe", (() => { const u = clone(universe); u.t[3] = "bad ticker"; return u; })(), CODES.badShape, "t.3");
 refuse("a universe with no columns", "universe", (() => { const u = clone(universe); delete u.cols; return u; })(), CODES.missing, "cols");
-refuse("a roster with an unknown depth", "roster", (() => { const r = clone(keys.get("roster")); r.depth.AAPL = "deep"; return r; })(), CODES.badShape, "depth.AAPL");
+refuse("a roster with an unknown depth", "roster", (() => { const r = clone(keys.get("roster")); r.depth.AAPL = "deeper"; return r; })(), CODES.badShape, "depth.AAPL");
 refuse("a roster with a bad session for a name", "roster", (() => { const r = clone(keys.get("roster")); r.session.AAPL = "x"; return r; })(), CODES.badSession, "session.AAPL");
 refuse("a run record with no stages", "meta", (() => { const m = clone(keys.get("meta")); delete m.stages; return m; })(), CODES.missing, "stages");
 refuse("a board on the wrong side", "board:long", { ...clone(keys.get("board:long")), side: "short" }, CODES.badShape, "side");

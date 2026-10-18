@@ -10,6 +10,7 @@ const COVERAGE = "shared/flows-coverage.js";
 const CONTRACTS = "shared/flows-contracts.js";
 const METER = "shared/flows-call-meter.js";
 const STAGES = "scripts/flows-nightly/stages.mjs";
+const DEEPEN = "shared/flows-deepen.js";
 
 function plant(id, title, target, transforms, detector, row = "B2") {
   if (PIPELINE_MUTANTS.some((m) => m.id === id)) throw new Error(`pipeline mutant ${id} registered twice`);
@@ -98,6 +99,30 @@ plant("stages-wire-is-the-run-total", "a stage reports the run's wire time to da
   [["const used = wireDelta(frame.wire, wire());", "const used = wireDelta(null, wire());"]], "stagesDetector");
 plant("stages-wire-on-an-idle-stage", "a stage that made no call still carries a wire field", STAGES,
   [["if (used.n > 0) record.wire", "if (true) record.wire"]], "stagesDetector");
+
+
+plant("deepen-cap-ignored", "the rotation is held to the hard cap, not to the cap it was given", DEEPEN,
+  [["cap: Math.min(Math.max(0, Math.floor(cap)), budget.hardCap),", "cap: budget.hardCap,"]], "deepenDetector");
+plant("deepen-day-line-ignored", "the rotation is sized without the day's vendor line", DEEPEN,
+  [["const byCalls = Math.floor((day * budget.daySharePct - spentCalls) / budget.callsPerName);", "const byCalls = budget.hardCap;"]], "deepenDetector");
+plant("deepen-deadline-ignored", "the rotation is sized without the run's time", DEEPEN,
+  [["const byTime = Math.floor((deadlineMs * budget.timeSharePct - Math.max(0, elapsedMs) - remainingBaselineMs) / budget.msPerName);", "const byTime = budget.hardCap;"]], "deepenDetector");
+plant("deepen-pace-over-the-line", "the pace allows twice the minute line", DEEPEN,
+  [["const perMinute = Math.max(1, Math.floor(line * share));", "const perMinute = Math.max(1, Math.floor(line * share * 2));"]], "deepenDetector");
+plant("deepen-newest-first", "the rotation reads the most recently read names before the oldest", DEEPEN,
+  [["if (a.at && b.at && a.at !== b.at) return a.at < b.at ? -1 : 1;", "if (a.at && b.at && a.at !== b.at) return a.at < b.at ? 1 : -1;"]], "deepenDetector");
+plant("deepen-failures-retried-at-once", "a name that failed is chosen again the next night", DEEPEN,
+  [["  if (!Number.isInteger(failures) || failures < 1) return 0;\n  return Math.min(2 ** (failures - 1), DEEPEN.failBackoffMax);", "  return 0;"]], "deepenDetector");
+plant("deepen-cross-card-over-a-deep-one", "a carried name is rebuilt as a cross-section card", DEEPEN,
+  [["for (const t of tickers) (keep.has(t) ? held : build).push(t);", "for (const t of tickers) build.push(t);"]], "deepenDetector");
+plant("deepen-failed-read-counted-deep", "a name whose card did not land goes on the ledger as read", DEEPEN,
+  [["if (cardLanded(t) && cardXLanded(t)) landed.add(t);", "if (cardLanded(t) || true) landed.add(t);"]], "deepenDetector");
+plant("deepen-unreadable-ledger-touches-cards", "a night with an unreadable ledger still rebuilds the other cards", DEEPEN,
+  [['protectAll: !readable && mode !== "off"', "protectAll: false"]], "deepenDetector");
+plant("deepen-overwritten-card-still-carried", "a name whose card was rebuilt shallower is still held as deep", DEEPEN,
+  [["return stored === null || stored === undefined || stored === c.session;", "return true;"]], "deepenDetector");
+plant("deepen-board-names-chosen", "the rotation spends its slots on names already on the board", DEEPEN,
+  [["const candidates = rows.filter((r) => r && !board.has(r.t));", "const candidates = rows.filter((r) => !!r);"]], "deepenDetector");
 
 const baselines = new Map();
 

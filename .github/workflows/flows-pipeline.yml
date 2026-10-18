@@ -20,6 +20,11 @@ on:
         description: "The session is already archived: delete its scores and dated boards and rewrite them with the live boards, record and cards"
         type: boolean
         default: false
+      deepen_cap:
+        description: "Names the deepening rotation may read in full tonight; 0 skips it for this run, blank uses the repository variable FLOWS_DEEPEN_CAP or the default"
+        type: string
+        required: false
+        default: ""
       origin:
         description: "Who dispatched the run: worker (the post-close clock), live-loop (the Tier 2 loop's own token) or manual"
         type: string
@@ -89,6 +94,8 @@ jobs:
           FLOWS_ALLOW_INTRADAY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_intraday && '1' || '' }}
           FLOWS_REPUBLISH_SESSION: ${{ github.event_name == 'workflow_dispatch' && inputs.republish_session && '1' || '' }}
           FLOWS_UNUSUAL_V2: ${{ vars.FLOWS_UNUSUAL_V2 }}
+          FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
+          FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/flows-pipeline.mjs
 

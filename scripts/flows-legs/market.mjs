@@ -26,7 +26,7 @@ export const MARKET_LEG_CALLS =
 
 export async function runMarketLegs({
   uw, sessionDate = null, screenerDate = null, generatedAt = null, harvest = null, filters = {},
-  eligible = () => true, rowOf = (r) => r, cardedTickers = [], deepTickers = [], windowTickers = [],
+  eligible = () => true, rowOf = (r) => r, cardedTickers = [], deepTickers = [], readTickers = [], windowTickers = [],
   deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null,
 } = {}) {
   const meter = makeCallMeter(stats);
@@ -78,17 +78,18 @@ export async function runMarketLegs({
     (insiderRead.partial.size ? `; insiders INCOMPLETE for ${insiderRead.partial.size} name(s)` +
       (insiderRead.repeated ? " (a page repeated its predecessor: the page parameter may be 1-based)" : "") : ""));
 
-  const deep = await readDeepOwnership(uw, deepTickers, { sessionDate, deadline, pool, width });
+  const owned = [...new Set([...deepTickers, ...readTickers])];
+  const deep = await readDeepOwnership(uw, owned, { sessionDate, deadline, pool, width });
   const { parts: ownership, future } = ownershipParts({
-    tickers: carded, deepTickers, shortInterestRows: shortRead.rows, insiderRows: insiderRead.rows,
+    tickers: carded, deepTickers, readTickers: owned, shortInterestRows: shortRead.rows, insiderRows: insiderRead.rows,
     deep: deep.byTicker, screenerByTicker, sessionDate,
     insidersRead: insiderRead.calls > insiderRead.failed, shortRead: shortRead.calls > shortRead.failed,
     shortUnread: shortRead.unread, insiderUnread: insiderRead.unread, insiderPartial: insiderRead.partial,
   });
-  say(`  deep ownership: ${deep.byTicker.size} of ${deepTickers.length} name(s) read in ${deep.calls} call(s)` +
+  say(`  deep ownership: ${deep.byTicker.size} of ${owned.length} name(s) read in ${deep.calls} call(s)` +
     (future ? `; ${future} short-interest row(s) dated after the session were cut` : ""));
 
-  const earningsTickers = [...new Set([...deepTickers, ...windowTickers])];
+  const earningsTickers = [...new Set([...owned, ...windowTickers])];
   const rawCatalysts = await readCatalysts(uw, { sessionDate, earningsTickers, deadline, pool, width });
   const { additions, earnings } = assembleCatalysts(rawCatalysts, {
     sessionDate, carded: new Set(carded), reportCatalysts, windowTickers, screenerByTicker,

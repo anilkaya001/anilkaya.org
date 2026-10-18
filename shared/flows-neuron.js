@@ -851,7 +851,7 @@ export function neuronTier(card, context) {
   if (block && (block.status === "unreadable" || block.status === "unavailable" || block.status === "split")) {
     return { tier: "family", code: "engine.unreadable", why: TIER_WHY["engine.unreadable"] };
   }
-  if (c.depth === "board" || c.depth === "focus") {
+  if (c.depth === "board" || c.depth === "focus" || c.depth === "deepened") {
     const iv = c.panels && c.panels.ivSurface;
     const code = iv && iv.status !== "ok" ? "chain.absent" : "engine.absent";
     return { tier: "unpriceable", code, why: TIER_WHY[code] };

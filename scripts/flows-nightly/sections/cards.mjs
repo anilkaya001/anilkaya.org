@@ -87,14 +87,15 @@ export async function runCards(ctx) {
   const {
     stages, sessionDate, onBoard, byTicker, congressState, quantPass, scoredByTicker, chainByTicker, chainMiss,
     scoreTrack, scoreTrackPremium, first, generatedAt, marketCross, variationRun, screenerReadAt, deepSet, volLeg,
-    quantRate, crossSectionTickers, dating, screener, holdings, marketLegs,
+    quantRate, crossSectionTickers, dating, screener, holdings, marketLegs, deepen,
   } = ctx;
+  const rotation = deepen ? deepen.set : new Set();
   stages.step("cards");
   let surfaceReported = false;
   const perNameCut = { names: 0, darkpool: 0, ivRank: 0 };
   const deadline = stats.startedAt + DEADLINE_MS;
   const cardTickers = [...onBoard.keys()];
-  const quantStats = { built: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
+  const quantStats = { built: 0, rotated: 0, withIdeas: 0, split: 0, failed: 0, bytes: [] };
   const neuronTiers = new Map();
   const cardLane = poolWidth(2);
   const ideaByTicker = new Map();
@@ -193,7 +194,8 @@ export async function runCards(ctx) {
         readFailures: lost,
       });
       card.readPx = readPxOf(e, screenerReadAt);
-      if (!deepSet.has(ticker)) card.depth = "focus";
+      if (rotation.has(ticker)) card.depth = "deepened";
+      else if (!deepSet.has(ticker)) card.depth = "focus";
       markGate(card, e);
       attachVol(card, volLeg, ticker, { ivRank: rankCut.raw });
       if (card.panels.darkpool && darkpoolRth && darkpoolRth.session) card.panels.darkpool.session = darkpoolRth.session;
@@ -221,12 +223,13 @@ export async function runCards(ctx) {
           });
           engineOut = QP.attachEngine(card, block);
           engineBlock = block;
-          const idea = QP.leadIdea(block);
+          const idea = rotation.has(ticker) ? null : QP.leadIdea(block);
           if (idea) ideaByTicker.set(ticker, idea);
           const record = idea ? ideaRecord(block, ticker) : null;
           if (record) ideaRecordByTicker.set(ticker, record);
-          quantStats.built++;
-          if (block && block.ideas.length) quantStats.withIdeas++;
+          if (rotation.has(ticker)) quantStats.rotated++;
+          else quantStats.built++;
+          if (!rotation.has(ticker) && block && block.ideas.length) quantStats.withIdeas++;
           if (engineOut.split) quantStats.split++;
           quantStats.bytes.push(engineOut.bytes);
         } catch (error) {
@@ -260,10 +263,26 @@ export async function runCards(ctx) {
     stopEarly: () => Date.now() > deadline,
   });
 
-  const cards = foldCardOutcomes(cardTickers, cardsRun);
-  if (quantStats.built || quantStats.failed) {
+  const slice = (pick) => {
+    const idx = cardTickers.map((t, i) => i).filter((i) => pick(cardTickers[i]));
+    return {
+      tickers: idx.map((i) => cardTickers[i]),
+      run: { attempted: idx.map((i) => cardsRun.attempted[i]), results: idx.map((i) => cardsRun.results[i]) },
+    };
+  };
+  const core = slice((t) => !rotation.has(t));
+  const rotated = slice((t) => rotation.has(t));
+  const cards = foldCardOutcomes(core.tickers, core.run);
+  const rotationCards = foldCardOutcomes(rotated.tickers, rotated.run);
+  if (rotated.tickers.length) {
+    console.log(`  deepened cards: ${rotationCards.built}/${rotated.tickers.length} built` +
+      (rotationCards.failed ? `, ${rotationCards.failed} failed` : "") +
+      (rotationCards.deadlineSkipped ? `, ${rotationCards.deadlineSkipped} not reached before the deadline` : "") +
+      " — a name that did not land keeps its last card and is tried again by the rotation");
+  }
+  if (quantStats.built || quantStats.failed || quantStats.rotated) {
     const big = quantStats.bytes.length ? Math.max(...quantStats.bytes) : 0;
-    console.log(`  engine: ${quantStats.built} card(s) carry an engine block, ${quantStats.withIdeas} with ranked ideas, ` +
+    console.log(`  engine: ${quantStats.built} card(s) carry an engine block, ${quantStats.withIdeas} with ranked ideas` + (quantStats.rotated ? `, and ${quantStats.rotated} deepened card(s) carry one outside the board's idea list` : "") + ", " +
       `${quantStats.split} split to card-x for the ${QP.QUANT_PIPELINE_LINES.INGEST_CAP / 1024}KB ingest cap` +
       (quantStats.failed ? `, ${quantStats.failed} failed` : "") + `; largest card ${(big / 1024).toFixed(1)}KB`);
   }
@@ -369,7 +388,7 @@ export async function runCards(ctx) {
     );
   }
   console.log(
-    `cards: ${cardsBuilt}/${onBoard.size} built` +
+    `cards: ${cardsBuilt}/${core.tickers.length} built` +
     (cardsFailed ? `, ${cardsFailed} failed` : "") +
 
     (unenriched ? `, ${unenriched} with no enrichment row to build from` : "") +
@@ -457,6 +476,6 @@ export async function runCards(ctx) {
   }
   Object.assign(ctx, {
     deadline, cardTickers, neuronTiers, cardsBuilt, cardsFailed, cardsSkipped, deadlineSkipped, gammaProfiles,
-    extraBuilt, extraFailed, extraSkipped,
+    extraBuilt, extraFailed, extraSkipped, rotationCards,
   });
 }

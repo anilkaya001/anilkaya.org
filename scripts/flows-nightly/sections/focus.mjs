@@ -99,7 +99,7 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
 export async function runFocus(ctx) {
   const {
     stages, volLeg, sessionDate, generatedAt, byTicker, deadline, cardTickers, crossSectionTickers, variationRun, ndx,
-    vendor, screenerDate, marketLegs, dating, screenerReadAt, congressState, marketCross, enriched, screener, cardX,
+    vendor, screenerDate, marketLegs, dating, screenerReadAt, congressState, marketCross, enriched, screener, cardX, deepen,
   } = ctx;
   stages.step("vol-flow");
   await publishVol(volLeg, {
@@ -192,8 +192,9 @@ export async function runFocus(ctx) {
     const cx = await publishCardX(cardX, publish, {
       generatedAt, sessionDate, readAt: marketLegs ? marketLegs.readAt : null,
       stored: (key) => publishedStore[key] || null, log: (line) => console.warn(line),
+      skip: deepen ? deepen.keep : new Set(),
     });
-    console.log(`  card-x: ${cx.written} written` + (cx.failed ? `, ${cx.failed} failed` : "") +
+    console.log(`  card-x: ${cx.written} written` + (cx.kept ? `, ${cx.kept} deep read(s) kept as they stand` : "") + (cx.failed ? `, ${cx.failed} failed` : "") +
       (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);
   }
   Object.assign(ctx, { dossierBuilt });
