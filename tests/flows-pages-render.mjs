@@ -318,9 +318,9 @@ try {
           if (hero && hero.narrowest !== null) {
             ok(hero.narrowest >= 0.5, `${spec.id} at ${width}px: every digit of the hero figure keeps its full tabular width (${hero.narrowest.toFixed(2)}em), so no glyph is cut by its neighbour`);
             ok(!hero.clipped, `${spec.id} at ${width}px: the hero figure fits its column`);
-            await page.addStyleTag({ content: ".ui-roll-d, .ui-roll-c { flex: 0 1 auto !important; } .hm-hero-v { font-size: 68px !important; }" });
+            await page.addStyleTag({ content: ".ui-roll-d, .ui-roll-c { flex: 0 1 auto !important; } .hm-hero-v { font-size: 150px !important; }" });
             const planted = await heroRead();
-            ok(planted.narrowest < 0.5 || planted.clipped || width < 640, `${spec.id} at ${width}px: PLANTED WRONG BUILD caught: the old 68px figure with shrinkable digits is measured (${planted.narrowest.toFixed(2)}em)`);
+            ok(planted.narrowest < 0.5 || planted.clipped || width < 640, `${spec.id} at ${width}px: PLANTED WRONG BUILD caught: an oversized figure with shrinkable digits is measured (${planted.narrowest.toFixed(2)}em)`);
           }
         }
         measured[key] = { ...m, overflowPx: Math.max(0, m.overflowX), contrast: a.contrast, names: a.names, structure: a.structure, requests: asked.length, coarse };

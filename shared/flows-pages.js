@@ -473,42 +473,58 @@ const homeNetModule = (net) => net ? `
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="hmNetT">Flow network</h2><span class="ui-mod-sp"></span></header>
       <div class="fn-host is-slot" id="hmNetHost"></div>
       <i hidden data-defer="home-net" data-src="${v("/assets/js/flows-net.js")}"></i>
+      <i hidden data-defer="home-netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>
     </section>` : "";
 
+const HOME_TABS = () => [["session", "Session"], ["flow", "Flow"], ["names", "Names"], ["focus", "Focus"], ["moves", "Moves"], ["calendar", "Calendar"]];
+
 export function overviewPage({ username = "", summary = null, net = false } = {}) {
-  return `${head("Flows — Home", "The market in one glance: the tide, the regime, both leaders, what changed and what reports next.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-net.css"] : ["/assets/css/flows-home.css"])}
+  const tabs = HOME_TABS();
+  const panel = (key, body) => `
+    <div class="hm-panel" role="tabpanel" id="hmP-${key}" aria-labelledby="hmT-${key}" data-panel="${key}"${key === "session" ? "" : " inert"}>${body}
+    </div>`;
+  return `${head("Flows \u2014 Home", "The market in one screen: the tide, the regime, both leaders, what changed and what reports next, each a tab.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-net.css", "/assets/css/flows-net-map.css"] : ["/assets/css/flows-home.css"])}
 ${shell("Session", "overview", username, `
+  <div class="hm" id="hm">
   <header class="flows-head hm-head" data-fx-hero>
     <h1 id="fxTitle">Session</h1>
     <p class="hm-meta"><time id="ccMetaDate"></time><span id="hmStale"></span><span id="ccMetaScreened" hidden></span></p>
   </header>
-  <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session…</p>
+  <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session\u2026</p>
   <p class="visually-hidden" id="flowsStale" role="status" hidden></p>
-
-  <div class="ui-grid hm-grid">
+  <div class="hm-tabs" role="tablist" aria-label="Home views" id="hmTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="hmT-${k}" aria-controls="hmP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
+  <div class="hm-sub" id="hmSub" role="tablist" aria-label="Modules in this view" hidden></div>
+  <div class="hm-stage" id="hmStage" data-view="session">
+${panel("session", `
     <section class="ui-card hm-hero" id="hmHero" aria-labelledby="hmHeroT"><div class="hm-hero-in">
       <div class="hm-hero-id">
         <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
-        <div class="hm-hero-v" id="hmTideV" data-tone="silent">—</div>
+        <div class="hm-hero-v" id="hmTideV" data-tone="silent">\u2014</div>
         <div class="hm-hero-cap" id="hmTideCap"></div>
         <div class="hm-hero-legs" id="hmTideLegs"></div>
       </div>
       <div class="hm-hero-chart" id="hmTide"></div>
       <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
-    </div></section>${homeNetModule(net)}
-${homeModule("hmMetals", "Metals", "ccMetals", { sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}
+    </div></section>
+${neuronVerdict(summary)}`)}
+${panel("flow", `${homeNetModule(net)}
+${homeModule("hmAlerts", "Flagged", "ccAlerts", { sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
+${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}`)}
+${panel("names", `
+${homeModule("hmBull", "Bullish", "ccBull", { sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
+${homeModule("hmBear", "Bearish", "ccBear", { sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
+${homeModule("hmWatch", "Nearly in", "ccWatch", { sub: `<a class="hm-count" href="/flows/watch/" id="ccWatchSub"></a>` })}`)}
+${panel("focus", `
 ${homeModule("hmLeaders", "Leaders", "ccLeaders", { sub: `<span class="hm-when" id="ccLeadersWhen"></span>`, seg: `<div class="hm-seg" id="ccLeadSeg"></div>` })}
-${neuronVerdict(summary)}
-${homeModule("hmBull", "Bullish", "ccBull", { span: 6, sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
-${homeModule("hmBear", "Bearish", "ccBear", { span: 6, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
-${homeModule("hmChg", "What changed", "ccChg", { span: 7, sub: `<span class="hm-count" id="ccChgSub"></span>`,
+${homeModule("hmMetals", "Metals", "ccMetals", { sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}`)}
+${panel("moves", `
+${homeModule("hmChg", "What changed", "ccChg", { sub: `<span class="hm-count" id="ccChgSub"></span>`,
     body: `<div class="hm-body" id="ccChg"><div id="ccChgStats"></div><div class="hm-spine" id="spinePlot"></div><div id="ccChgNote"></div><div id="ccChgList"></div></div>` })}
-${homeModule("hmVol", "Volatility", "ccVol", { span: 5, sub: `<a class="hm-count" href="/flows/market/#mkVolCard">Curve on Market</a>` })}
-${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}
-${homeModule("hmAlerts", "Flagged", "ccAlerts", { span: 4, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
-${homeModule("hmEvents", "Reporting", "ccEvents", { span: 4, sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
-${homeModule("hmWatch", "Nearly in", "ccWatch", { span: 4, sub: `<a class="hm-count" href="/flows/watch/" id="ccWatchSub"></a>` })}
-${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id="ccNewsSub"></span>` })}
+${homeModule("hmVol", "Volatility", "ccVol", { sub: `<a class="hm-count" href="/flows/market/#mkVolCard">Curve on Market</a>` })}`)}
+${panel("calendar", `
+${homeModule("hmEvents", "Reporting", "ccEvents", { sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
+${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id="ccNewsSub"></span>` })}`)}
+  </div>
   </div>
 
   <i hidden data-defer="home-below" data-src="${v("/assets/js/flows-overview-below.js")}"></i>

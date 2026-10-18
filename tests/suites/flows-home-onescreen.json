@@ -1,0 +1,1 @@
+{"name": "flows-home-onescreen", "class": "N", "group": "shard", "timing": false, "medianS": 200, "shard": 5, "command": "node flows-home-onescreen.mjs", "files": ["flows-home-onescreen.mjs"], "covers": ["scripts/render-preview.fixtures.json"]}

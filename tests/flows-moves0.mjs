@@ -422,7 +422,7 @@ await showTab(page, "#mktMovers");
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await mount(page, {
-      html: PAGES.overviewPage({ username: "test" }), url: "/flows/",
+      html: PAGES.overviewPage({ username: "test" }), url: "/flows/#view=focus",
       answer: (key) => (key.startsWith("focus") ? { body: focus } : key.startsWith("universe?cols=") ? { body: proj }
         : key.startsWith("now") ? { body: { serverNow: NOW, expected: NIGHT, phase: RTH, keys: {} } } : null),
     });
@@ -462,7 +462,7 @@ await showTab(page, "#mktMovers");
     };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, {
-      html: PAGES.overviewPage({ username: "test" }), url: "/flows/",
+      html: PAGES.overviewPage({ username: "test" }), url: "/flows/#view=focus",
       answer: (key) => {
         if (key.startsWith("focus")) return { body: focus };
         if (key.startsWith("universe?cols=")) return { body: proj };

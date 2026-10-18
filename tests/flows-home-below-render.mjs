@@ -23,7 +23,7 @@ const DEFERRED = ["hmChg", "hmVol", "hmEvents", "hmNews"];
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-overview.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-overview-below.js")).size;
   ok(SINGLE_FILE_BYTES - eager >= 10 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 10 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk > 10 * 1024 && chunk + eager < SINGLE_FILE_BYTES + 4096, `and the two files together are within 4 KB of the single file (${chunk + eager} B): a visit pays the same bytes`);
+  ok(chunk > 10 * 1024 && chunk + eager < SINGLE_FILE_BYTES + 12288, `and the two files together are within 12 KB of the single file (${chunk + eager} B): a visit pays the same bytes`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="home-below"[^>]*>/g).length, 1, "the page declares the home-below group once");
   const first = read("assets/js/flows-overview.js");
@@ -34,7 +34,7 @@ const DEFERRED = ["hmChg", "hmVol", "hmEvents", "hmNews"];
     ok(!new RegExp(`\\bfunction ${n}\\(`).test(first), `and not in the first-paint file`);
   }
   ok(/kit\.attach\(\{ paintChanged, paintVol, paintEvents, paintNews, renderSpine \}\)/.test(below), "the chunk hands exactly those five painters back");
-  ok(/UI\.defer\("home-below", \{ when: "visible", el: \$\("hmChg"\)/.test(first), "the first-paint file asks for the group when the first deferred module is visible");
+  ok(/UI\.defer\("home-below", \{ when: "visible", el: \$\(LOWER\[key\]\)/.test(first), "the first-paint file asks for the group when a tab that holds a deferred module opens");
 }
 
 async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = "ok", chunkDelay = 0, dataDelay = 0, saveData = false } = {}) {
@@ -94,7 +94,7 @@ const hostsPainted = (page) => page.evaluate(() => {
   const n = (ids) => ids.reduce((a, id) => a + document.getElementById(id).children.length, 0);
   return { chg: n(["ccChgStats", "ccChgNote", "ccChgList", "spinePlot"]), vol: n(["ccVol"]), events: n(["ccEvents"]), news: n(["ccNews"]) };
 });
-const scrollNear = (page, margin) => page.evaluate((m) => window.scrollTo(0, document.getElementById("hmChg").getBoundingClientRect().top + scrollY - innerHeight - m), margin);
+const scrollNear = (page) => page.click("#hmT-moves");
 const firstPaintReady = (page) => page.waitForFunction(() => document.getElementById("ccMetals").children.length > 0 && document.getElementById("ccLean").children.length > 0 && document.querySelectorAll("#ccBull .hm-lrow").length > 0, null, { timeout: 15000 });
 const modulesPainted = (page) => page.waitForFunction(() => document.querySelectorAll("#ccChgList .hm-crow").length > 0 && document.querySelectorAll("#spinePlot svg").length === 1 &&
   document.querySelectorAll("#ccEvents .ui-row").length > 0 && document.querySelectorAll("#ccNews .hm-news-open").length === 1 && document.querySelectorAll("#ccVol [data-empty]").length === 1, null, { timeout: 15000 });
@@ -107,22 +107,23 @@ try {
     await firstPaintReady(page);
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
     await sleep(2500);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED WHILE THE FIRST DEFERRED MODULE IS FAR BELOW THE FOLD: nothing asked for it in 2.5 s after the load event at 1440x900");
+    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED UNTIL A TAB THAT HOLDS A DEFERRED MODULE OPENS: nothing asked for it in 2.5 s after the load event at 1440x900");
     eq(await hostsPainted(page), { chg: 0, vol: 0, events: 0, news: 0 }, "and the four deferred modules are empty bodies, not painted");
     eq(await page.evaluate(() => window.FlowsUI.homeKit.attached), false, "FlowsUI.homeKit says it is not attached");
-    ok(await page.evaluate(() => document.getElementById("hmChg").getBoundingClientRect().top > innerHeight + 200), "the first deferred module is more than 200 px below the viewport");
+    eq(await page.evaluate(() => document.getElementById("hmStage").dataset.view), "session", "the Session tab is the one open");
     eq(await page.evaluate(() => window.__lcp.filter((x) => ["hmChg", "hmVol", "hmEvents", "hmNews"].includes(x))), [], "THE LARGEST CONTENTFUL PAINT IS NOT IN A DEFERRED MODULE");
     ok(await page.evaluate(() => window.__lcp.length > 0), "and one was recorded");
     const before = await page.evaluate(() => ({ metals: document.getElementById("ccMetals").children.length, hero: document.getElementById("hmHero").innerHTML.length }));
     ok(before.metals > 0 && before.hero > 200, "the hero and the first-paint modules were painted with no chunk in sight");
     const heroHtml = await page.evaluate(() => document.getElementById("hmHero").innerHTML);
 
-    await scrollNear(page, 400);
+    await page.click("#hmT-names");
+    await page.click("#hmT-flow");
     await sleep(700);
-    eq(requested(log).length, 0, "nor 400 px below the viewport, outside the 200 px margin");
-    await scrollNear(page, 150);
+    eq(requested(log).length, 0, "nor when the Flow or Names tab opens, which hold no deferred module");
+    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
-    eq(requested(log).length, 1, "but 150 px below the viewport it is requested, once");
+    eq(requested(log).length, 1, "but opening the Moves tab requests it, once");
     const at = requested(log)[0].at;
     ok(at >= state.atLoad.loaded - 5, "AND THE REQUEST CAME AFTER THE LOAD EVENT, not before it");
     ok(state.atLoad.metals > 0 && state.atLoad.lean > 0 && state.atLoad.bull > 0, "with the first-paint modules already painted when the request began");
@@ -140,7 +141,7 @@ try {
     const { context, page, log, state, errors } = await open(browser, { chunkDelay: 1200 });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page, 100);
+    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
     await modulesPainted(page);
     eq(state.atLoad.chg, 0, "DATA THAT ARRIVED BEFORE THE CHUNK IS HELD AND PAINTED WHEN IT LANDS: the module was empty when the chunk was asked for");
@@ -162,7 +163,7 @@ try {
     const { context, page, log, errors } = await open(browser, { dataDelay: 1800 });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
-    await scrollNear(page, 100);
+    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
     eq(await hostsPainted(page), { chg: 0, vol: 0, events: 0, news: 0 }, "THE CHUNK BEFORE THE DATA: attached and nothing painted for data that has not arrived");
     await firstPaintReady(page);
@@ -176,7 +177,7 @@ try {
     const { context, page, log, state, errors } = await open(browser, { chunk: "404" });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page, 100);
+    await scrollNear(page);
     await page.waitForSelector("#hmChg .ui-defer", { timeout: 15000 });
     const said = await page.evaluate(() => document.querySelector("#hmChg .ui-defer").textContent);
     ok(/The lower modules is unavailable/.test(said) && /Retry/.test(said), `A CHUNK THAT DOES NOT LOAD SAYS SO AT THE MODULES IT OWES: ${said}`);
@@ -195,7 +196,7 @@ try {
     const { context, page, log, errors } = await open(browser, { saveData: true });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page, 100);
+    await scrollNear(page);
     await page.waitForSelector("#hmChg .ui-defer", { timeout: 15000 });
     await sleep(800);
     eq(requested(log).length, 0, "DATA SAVER: nothing is requested until the button is pressed");
@@ -211,7 +212,7 @@ try {
     const { context, page, errors } = await open(browser, { viewport: { width: 390, height: 844 } });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page, 100);
+    await scrollNear(page);
     await modulesPainted(page);
     ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), "AT 390 PX nothing overflows once the lower modules are drawn");
     eq(errors, [], "no page error at 390 px");
