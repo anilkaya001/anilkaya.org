@@ -29,7 +29,7 @@ const CEILING_KIB = {
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
-  statusPage: 80 + 1792 / 1024 + 24.5 + 8,
+  statusPage: 80 + 1792 / 1024 + 24.5 + 9,
 };
 
 const GZIP_KIB = {

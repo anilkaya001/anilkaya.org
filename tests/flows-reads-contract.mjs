@@ -12,6 +12,8 @@ import { flowsReadRows } from "../server/routes/flows-read.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { flowsAiRows } from "../server/routes/flows-ai.js";
 import { flowsPipelineRows, COVERAGE_ROW_CEILING } from "../server/routes/flows-pipeline.js";
+import { flowsIngestRows } from "../server/routes/flows-ingest.js";
+import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { createRouter } from "../server/router.js";
 
