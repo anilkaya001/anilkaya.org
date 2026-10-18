@@ -1217,12 +1217,12 @@ async function askSpend(env) {
   if (!env.DB) return null;
   await ensureFlowsTables(env);
   const day = aiDay();
-  const row = await env.DB.prepare(
-    "SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?"
-  ).bind(day).first().catch(() => null);
-  const split = await env.DB.prepare(
-    "SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ? ORDER BY model"
-  ).bind(day).all().catch(() => null);
+  const [row0, split0] = await Promise.resolve().then(() => env.DB.batch([
+    env.DB.prepare("SELECT calls, tokens_in, tokens_out FROM flows_ai_usage WHERE day = ?").bind(day),
+    env.DB.prepare("SELECT model, calls, tokens_in, tokens_out FROM flows_ai_usage_model WHERE day = ? ORDER BY model").bind(day),
+  ])).catch(() => [null, null]);
+  const row = row0 && Array.isArray(row0.results) ? row0.results[0] || null : null;
+  const split = split0;
 
   const calls = row ? Number(row.calls) || 0 : 0;
   const tokensIn = row ? Number(row.tokens_in) || 0 : 0;
@@ -1295,10 +1295,14 @@ async function askRecordSpend(env, usage, model) {
   }
 }
 
-async function briefWithLive(env, index) {
+function briefFeedsAhead(env) {
+  return env.DB ? FLOWS_LIVE.liveBriefFeeds(env.DB).catch(() => ({})) : null;
+}
+
+async function briefWithLive(env, index, ahead) {
   if (!env.DB || !index || typeof index !== "object") return { index, overlay: null };
   try {
-    const feeds = await FLOWS_LIVE.liveBriefFeeds(env.DB);
+    const feeds = await (ahead || FLOWS_LIVE.liveBriefFeeds(env.DB));
     const keys = Object.keys(feeds);
     if (!keys.length) return { index, overlay: null };
     return { index: FLOWS_ASK.refreshIntradayFacts(index, feeds),
@@ -1423,6 +1427,23 @@ async function readFlowsSummary(env, scope) {
       generatedAt: typeof row.generated_at === "string" ? row.generated_at : null,
     };
   } catch { return null; }
+}
+
+const HOME_SUMMARY_TTL_S = 60;
+
+async function readHomeSummary(env, scope) {
+  const key = internalKey("home-summary", scope || "board");
+  const hit = await edgeCache.get(key);
+  if (hit) {
+    const cached = await hit.json().catch(() => null);
+    if (cached && typeof cached === "object" && typeof cached.text === "string") return cached;
+  }
+  const row = await readFlowsSummary(env, scope);
+  if (row && edgeCache.handle()) {
+    await edgeCache.put(key, new Response(JSON.stringify(row), { headers: {
+      "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${HOME_SUMMARY_TTL_S}` } }));
+  }
+  return row;
 }
 
 const NEURON_GENERATING_MS = 90 * 1000;
@@ -2868,7 +2889,7 @@ async function renderCourse(request, env, url, meta, ctx) {
 }
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
-  absentKey, cardWithEngine, briefWithLive, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
+  absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
@@ -2886,7 +2907,7 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
-flowsPageRows({ currentFlowsUser, readFlowsSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
+flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));

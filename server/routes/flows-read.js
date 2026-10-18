@@ -36,7 +36,7 @@ const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + nam
 
 export function flowsReadRows(deps) {
   const { readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone, absentKey, cardWithEngine,
-    briefWithLive, nightlyFreshHeaders, splitEngineMark } = deps;
+    briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark } = deps;
 
   const nightly = (key, pending) => async ({ env }) => {
     const stored = await readServed(env, key);
@@ -122,6 +122,7 @@ export function flowsReadRows(deps) {
   };
 
   const brief = async ({ env }) => {
+    const ahead = typeof briefFeedsAhead === "function" ? briefFeedsAhead(env) : null;
     const stored = await readServed(env, "brief");
     if (stored === null) {
       return json({ status: "pending", today: null, yesterday: null, next: null,
@@ -130,7 +131,7 @@ export function flowsReadRows(deps) {
     let index = null;
     try { index = JSON.parse(stored.payload); } catch { index = null; }
     if (!index || typeof index !== "object" || Array.isArray(index)) return passthrough(stored);
-    const live = await briefWithLive(env, index);
+    const live = await briefWithLive(env, index, ahead);
     return json({ ...live.index, session: FLOWS_ASK.briefAge(live.index, new Date(), FLOWS_LIVE.memoizedClock()) }, 200,
       { "X-Payload-Updated": String(stored.updatedAt || 0), ...nightlyFreshHeaders(stored),
         ...(live.overlay ? { "X-Live-Overlay": live.overlay } : {}) });

@@ -1959,5 +1959,54 @@ class FakeCache {
   unshift();
 }
 
+{
+  const f = fakeD1({ latencyMs: 40 });
+  seed(f);
+  f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  f.db.prepare("INSERT INTO flows_ai_summary (scope, text, llm, fingerprint, generated_at) VALUES ('board', 'Board text', 0, 'fp', '2026-10-16T14:00:00.000Z')").run();
+  const get = await client(f.D1);
+  await get("/api/flows/meta");
+  const timed = async (path) => {
+    const n = f.trips.length;
+    const t0 = performance.now();
+    const r = await get(path);
+    return { ...r, ms: performance.now() - t0, trips: f.since(n) };
+  };
+  const brief = await timed("/api/flows/brief");
+  ok(brief.res.status === 200 && brief.trips.length === 2, "THE BRIEF STILL READS ITS ROW AND THE FOUR LIVE FEEDS: two statements-groups, five rows");
+  ok(brief.ms < 40 * 2 * 0.85 + 30, `and the two trips overlap, so the read waits one hop and not two (${brief.ms.toFixed(0)} ms at 40 ms a trip)`);
+  const spendDay = new Date().toISOString().slice(0, 10);
+  f.db.prepare("INSERT INTO flows_ai_usage (day, calls, tokens_in, tokens_out) VALUES (?, 7, 1200, 340)").run(spendDay);
+  f.db.prepare("INSERT INTO flows_ai_usage_model (day, model, calls, tokens_in, tokens_out) VALUES (?, 'm-seeded', 7, 1200, 340)").run(spendDay);
+  const usage = await timed("/api/flows/ai-usage");
+  ok(usage.res.status === 200 && usage.trips.length === 1 && usage.trips[0].kind === "batch" && usage.trips[0].sqls.length === 2,
+    "AI USAGE IS ONE BATCH of the day's total and its split, not two sequential trips");
+  ok(usage.body.spend.calls === 7 && usage.body.spend.tokensIn === 1200 && usage.body.spend.tokensOut === 340,
+    "and the batch's total row is what the answer carries, not a zero");
+  ok(Array.isArray(usage.body.spend.byModel) && usage.body.spend.byModel.length === 1 && usage.body.spend.byModel[0].model === "m-seeded" && usage.body.spend.byModel[0].calls === 7,
+    "and its split row is the model line the answer carries");
+  f.fail(/FROM flows_ai_usage_model/);
+  const failed = await timed("/api/flows/ai-usage");
+  ok(failed.res.status === 200 && failed.body.spend && failed.body.spend.calls === 0, "and a store fault is still a 200 with the lenient shape, not a 500");
+  f.fail(null);
+
+  const cache = new FakeCache();
+  globalThis.caches = { default: cache };
+  try {
+    const first = await timed("/flows/");
+    const second = await timed("/flows/");
+    const reads = (r) => r.trips.filter((t) => t.sqls.some((q) => /FROM flows_ai_summary WHERE scope/.test(q))).length;
+    ok(first.res.status === 200 && reads(first) === 1 && reads(second) === 0 && second.text === first.text,
+      "THE HOME PAGE READS THE BOARD SUMMARY FROM THE EDGE COPY: one D1 trip cold, none within the minute, the same page");
+    f.db.prepare("DELETE FROM flows_ai_summary").run();
+    cache.entries.clear();
+    const absent = await timed("/flows/");
+    const again = await timed("/flows/");
+    ok(reads(absent) === 1 && reads(again) === 1 && cache.puts.length === 1, "and a missing row is never kept: every read goes to the store until a summary exists");
+  } finally {
+    delete globalThis.caches;
+  }
+}
+
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, `EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js (${aiGuardStats().allowed} calls)`);
 console.log(`flows-reads-contract: ${checks} checks passed`);
