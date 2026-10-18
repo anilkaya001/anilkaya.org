@@ -71,7 +71,7 @@ async function mount(page, read, o = {}) {
   const queue = (o.queue || []).slice();
   const neuron = { status: "ok", scope: T, summary: "Pinned near $127, flow leaning bullish into the report.", ideas: [], tier: "priced", code: null, why: null, ...(o.neuron || {}), read };
   const api = {
-    card, summary: neuron, "card-x": { status: "pending" }, hist: { status: "pending" }, tape: { status: "pending" }, meta: { status: "pending" }, events: { status: "pending", rows: [] },
+    card: o.card || card, summary: neuron, "card-x": { status: "pending" }, hist: { status: "pending" }, tape: { status: "pending" }, meta: { status: "pending" }, events: { status: "pending", rows: [] },
     now: { serverNow: Date.parse(card.generatedAt || "2026-08-24T22:00:00Z"), phase: { phase: "closed", session: card.sessionDate, trading: false, endsAt: null }, keys: {} },
   };
   await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -235,11 +235,13 @@ try {
   };
 
   const sizes = {};
-  for (const [w, h] of [[1440, 820], [1920, 1080]]) {
+  for (const [w, h] of [[1440, 820], [1024, 768], [1920, 1080]]) {
     const page = await newPage(w, h);
     await mount(page, READ);
     const r = await scenario(page);
     for (const [k, v] of Object.entries(r)) ok(v === true, `${w}x${h}: ${k}`);
+    const fit = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: innerHeight, sy: (scrollTo(0, 9999), scrollY) }));
+    ok(fit.sh <= fit.ih && fit.sy === 0, `${w}x${h}: the page fits one screen with no document scroll (scrollHeight ${fit.sh} of ${fit.ih})`);
     sizes[w] = await page.evaluate(() => ({ chart: document.getElementById("ftGlanceChart").getBoundingClientRect().height, cards: document.getElementById("ftGlanceCards").getBoundingClientRect().height }));
     if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: path.join(SHOTS, `glance-${w}.png`) }); }
     await page.close();
@@ -292,6 +294,25 @@ try {
       const claim = [...document.querySelectorAll(".ft-claim")].map((b) => b.getBoundingClientRect().height);
       return { sw: document.documentElement.scrollWidth, iw: innerWidth, region: ol.getAttribute("role"), label: ol.getAttribute("aria-label"), snap: getComputedStyle(ol).scrollSnapType, scrolls: ol.scrollWidth > ol.clientWidth, li, dock, claim, cols: getComputedStyle(document.getElementById("ftGlanceCards")).display, tab: ol.tabIndex, order: ["ftStrip", "ftGMain", "ftGlanceCards", "ftDock"].map((id) => document.getElementById(id).getBoundingClientRect().top) };
     });
+    const ov = await page.evaluate(() => {
+      const r = (q) => { const n = document.querySelector(q); if (!n) return null; if (!n.firstChild || n.firstChild.nodeType !== 3) return n.getBoundingClientRect(); const g = document.createRange(); g.selectNodeContents(n); const a = n.getBoundingClientRect(), b = g.getBoundingClientRect(); return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) }; };
+      const hit = (x, y) => x && y && x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
+      const eng = r("#ftStrip .ft-eng");
+      return { eng: !!eng, k: hit(eng, r("#ftStrip .ft-strip-k")), line: hit(eng, r("#ftStrip .ft-strip-line")), icon: hit(eng, r("#ftStrip .ft-neuron")), inside: eng && eng.right <= innerWidth };
+    });
+    ok(ov.eng && !ov.k && !ov.line && !ov.icon && ov.inside, `${w}: the engine chip overlaps neither the Neuron eyebrow, the headline nor the icon (${JSON.stringify(ov)})`);
+    const aside = JSON.parse(JSON.stringify(card));
+    aside.engine = { expiries: [], ...(aside.engine || {}), structures: [], noTrade: { code: "edge.none", why: "No structure cleared." } };
+    await mount(page, READ, { card: aside, neuron: { context: { state: { confidence: 1 } } } });
+    const ov2 = await page.evaluate(() => {
+      const r = (q) => { const n = document.querySelector(q); if (!n) return null; if (!n.firstChild || n.firstChild.nodeType !== 3) return n.getBoundingClientRect(); const g = document.createRange(); g.selectNodeContents(n); const a = n.getBoundingClientRect(), b = g.getBoundingClientRect(); return { left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) }; };
+      const hit = (x, y) => x && y && x.left < y.right - 0.5 && y.left < x.right - 0.5 && x.top < y.bottom - 0.5 && y.top < x.bottom - 0.5;
+      const eng = r("#ftStrip .ft-eng");
+      return { word: document.querySelector("#ftStrip .ft-eng").textContent, k: document.querySelector("#ftStrip .ft-strip-k").textContent, hitK: hit(eng, r("#ftStrip .ft-strip-k")), hitLine: hit(eng, r("#ftStrip .ft-strip-line")), hitIcon: hit(eng, r("#ftStrip .ft-neuron")), inside: eng.right <= innerWidth && eng.left >= 0 };
+    });
+    ok(/stand aside/.test(ov2.word) && /confidence 1 of 2/i.test(ov2.k), `${w}: the stand-aside case carries its chip and the confidence eyebrow (${ov2.word} / ${ov2.k})`);
+    ok(!ov2.hitK && !ov2.hitLine && !ov2.hitIcon && ov2.inside, `${w}: Engine: stand aside wraps clear of the confidence eyebrow and the headline (${JSON.stringify(ov2)})`);
+    await mount(page, READ);
     ok(m.sw <= m.iw, `${w}: no horizontal page overflow (${m.sw} of ${m.iw})`);
     ok(m.region === "region" && /swipe/.test(m.label) && m.tab === 0 && /x mandatory/.test(m.snap) && m.scrolls, `${w}: claims are a labelled, focusable, scroll-snapped region that scrolls`);
     ok(m.li.length === 4 && m.li.every((x) => Math.abs(x - 300) < 1), `${w}: each claim card is 300 px wide`);
@@ -308,10 +329,10 @@ try {
     const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, chart: document.getElementById("ftGlanceChart").getBoundingClientRect().right, rail: document.getElementById("ftReadRail").getBoundingClientRect().left }));
     ok(m.sw <= m.iw && m.chart <= m.rail + 1, "1100 px: the glance layout holds beside the rail with no overflow");
     await page.close();
-    const p2 = await newPage(900, 800);
+    const p2 = await newPage(800, 800);
     await mount(p2, READ);
     const k = await p2.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, stacked: document.getElementById("ftReadRail").getBoundingClientRect().top >= document.getElementById("ftGlanceChart").getBoundingClientRect().bottom - 1 }));
-    ok(k.sw <= k.iw && k.stacked, "900 px: below 1100 the frame stacks the chart over the reading");
+    ok(k.sw <= k.iw && k.stacked, "800 px: below 900 the frame stacks the chart over the reading");
     await p2.close();
   }
 

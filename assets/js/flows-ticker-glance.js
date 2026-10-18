@@ -245,6 +245,16 @@
     return b;
   };
 
+  function reportOf(card, E) {
+    const u = (card && card.u) || {};
+    const g = card && card.gate && isoOk(card.gate.earnings) ? card.gate.earnings : null;
+    const nx = E && E.next && isoOk(E.next.d) ? E.next : null;
+    const sess = nx && num(nx.sessions) !== null ? nx.sessions : num(u.ed);
+    const d = nx ? nx.d : g;
+    if (d === null && sess === null) return null;
+    return { d, sessions: sess, history: !!E, src: nx ? "card" : g ? "gate" : "screen" };
+  }
+
   function model(card, range, x) {
     x = x && typeof x === "object" ? x : {};
     const P = (card && card.panels) || {};
@@ -271,7 +281,12 @@
       const w = String(nx.when || "");
       const tE = Math.min(FWD, nx.sessions + (/post|after|amc|close/i.test(w) ? 0.5 : /pre|before|bmo|open/i.test(w) ? -0.5 : 0));
       event = { d: nx.d, sessions: nx.sessions, h: tE, when: /post|after|amc|close/i.test(w) ? "after the close" : /pre|before|bmo|open/i.test(w) ? "before the open" : null, q: em, p: E ? num(E.medianAbsMove) : null };
-    } else why.event = E ? "No report inside the next " + FWD + " sessions." : "The card carries no earnings calendar for this name.";
+    } else {
+      const rp = reportOf(card, E);
+      why.event = rp && rp.sessions !== null && rp.sessions > FWD ? "The next report is " + plural(rp.sessions, "session") + " away, past the month shown."
+        : rp ? "A report is " + (rp.sessions === null ? "due" : plural(rp.sessions, "session") + " away") + (rp.d ? " on " + F.day(rp.d) : "") + "; the card holds no report calendar to step the bands with."
+        : E ? "No report inside the next " + FWD + " sessions." : "The card carries no earnings calendar for this name.";
+    }
     const tE = event ? event.h : null;
     const q = qb ? coneOf(S, qb, event ? event.q : null, tE) : null;
     const p = pb ? coneOf(S, pb, event ? event.p : null, tE) : null;
@@ -467,11 +482,12 @@
     const evs = E && Array.isArray(E.events) ? E.events.filter((r) => Array.isArray(r) && isoOk(r[0])).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-8).map((r) => ({ d: r[0], em: num(r[2]), mv: num(r[3]) })) : [];
     const beat = evs.filter((r) => r.mv !== null && r.em !== null && r.em > 0 && Math.abs(r.mv) > r.em).length;
     const both = evs.filter((r) => r.mv !== null && r.em !== null && r.em > 0).length;
+    const rp = nx ? null : reportOf(card, E);
     const w = nx ? String(nx.when || "") : "";
     out.push({ id: "earnings", title: "Earnings", sub: /post|after|amc|close/i.test(w) ? "after the close" : /pre|before|bmo|open/i.test(w) ? "before the open" : nx ? (nx.confirmed ? "confirmed" : "estimated") : "",
-      fig: nx ? fig(F.day(nx.d), "warn") : fig(DASH), unit: nx ? (num(nx.sessions) === null ? "" : "in " + plural(nx.sessions, "session")) : "", events: evs, next: em, bars: evs,
-      foot: !nx ? (E ? "No upcoming report on the calendar." : "The card carries no earnings history for this name.") : "Priced " + (em === null ? DASH : "±" + F.pct(em, 1)) + MID + "realised " + (E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH) + MID + (both ? beat + " of " + both + " beat it" : DASH + " beat it"),
-      missing: !nx, parts: { priced: em, realised: E ? num(E.medianAbsMove) : null, beat, of: both } });
+      fig: nx ? fig(F.day(nx.d), "warn") : rp ? fig(rp.d ? F.day(rp.d) : rp.sessions + "d", "warn") : fig(DASH), unit: nx ? (num(nx.sessions) === null ? "" : "in " + plural(nx.sessions, "session")) : rp && rp.sessions !== null ? "in " + plural(rp.sessions, "session") : "", events: evs, next: em, bars: evs,
+      foot: !nx ? (rp ? "Report " + (rp.d ? "date" : "timing") + " from the nightly screen; no report history on the card." : E ? "No upcoming report on the calendar." : card && (card.depth === "fund" || card.depth === "index") ? "Not applicable to " + (card.depth === "index" ? "an index" : "a fund") + ": it has no earnings." : "Not on the card: no report history for this name.") : "Priced " + (em === null ? DASH : "±" + F.pct(em, 1)) + MID + "realised " + (E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH) + MID + (both ? beat + " of " + both + " beat it" : DASH + " beat it"),
+      missing: !nx && !rp, parts: { priced: em, realised: E ? num(E.medianAbsMove) : null, beat, of: both } });
 
     const ctx = okOf(P.context) || {};
     const yr = candles(card).slice(-252);
@@ -482,7 +498,7 @@
     const cg = okOf(P.congress);
     out.push({ id: "range", title: "Range", sub: "52 weeks", fig: pos === null ? fig(DASH) : fig(F.pct(pos, 0)), unit: pos === null ? "" : "of the way to the high", lo, hi, pos,
       chips: [["1W", num(ctx.r5)], ["1M", num(ctx.r21)], ["3M", r63]].map(([l, v]) => ({ k: l, v, text: v === null ? DASH : F.pct(v, 1, true), tone: tone(v) })),
-      foot: pos === null ? "No 52-week range on the card." : "Congress " + (cg ? plural(cg.buys || 0, "buy") + MID + plural(cg.sells || 0, "sell") : DASH) + (card.sector ? MID + card.sector : ""), missing: pos === null, parts: { congress: cg ? [cg.buys || 0, cg.sells || 0] : null } });
+      foot: pos === null ? "No 52-week range on the card." : "Congress " + (cg ? plural(cg.buys || 0, "buy") + MID + plural(cg.sells || 0, "sell") : card && (card.depth === "fund" || card.depth === "index") ? "n/a for funds" : "not on card") + (card.sector ? MID + card.sector : ""), missing: pos === null, parts: { congress: cg ? [cg.buys || 0, cg.sells || 0] : null } });
     return out;
   }
 
@@ -1010,10 +1026,10 @@
     const footParts = c.foot;
     const el = h("section", { class: "ftg-card", id, "data-card": c.id, tabindex: 0, "aria-labelledby": id + "-t", "aria-describedby": id + "-d", "data-missing": c.missing ? "1" : null },
       h("div", { class: "ftg-ch" }, h("h3", { id: id + "-t" }, c.title), h("span", { class: "ftg-sub" }, c.sub), h("span", { class: "ftg-badges" })),
-      h("div", { class: "ftg-fig" }, h("span", { class: "ftg-f", "data-tone": c.fig.tone }, c.fig.text), h("span", { class: "ftg-u" }, c.unit)),
+      h("div", { class: "ftg-fig" }, h("span", { class: "ftg-f", "data-tone": c.fig.tone }, c.fig.text), h("span", { class: "ftg-u", title: c.unit || null }, c.unit)),
       body ? h("div", { class: "ftg-cb" }, body) : null,
       c.chips ? h("div", { class: "ftg-chips" }, c.chips.map((k) => h("span", { class: "ftg-chip", "data-tone": k.tone }, h("span", { class: "ftg-ck" }, k.k), " " + k.text))) : null,
-      h("p", { class: "ftg-foot" }, footParts),
+      h("p", { class: "ftg-foot", title: typeof footParts === "string" ? footParts : null }, footParts),
       h("span", { class: "visually-hidden", id: id + "-d" }, c.title + ", " + c.sub + ". " + c.fig.text + " " + c.unit + ". " + footParts));
     const on = () => { const ids = (el.getAttribute("data-claims") || "").split(" ").filter(Boolean); if (ids.length) emit(ids[0], "card"); };
     const off = () => { if ((el.getAttribute("data-claims") || "").trim()) emit(null, "card"); };
