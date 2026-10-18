@@ -100,7 +100,7 @@ export function deepNames(published, limit = DEEP_NAMES) {
   return rows.slice(0, Math.max(0, limit));
 }
 
-export const DEADLINE_MS = 36 * 60 * 1000;
+export const DEADLINE_MS = 90 * 60 * 1000;
 
 export const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 

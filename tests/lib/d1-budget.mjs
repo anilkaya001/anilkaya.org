@@ -88,9 +88,9 @@ export const TIER2 = Object.freeze({
 });
 
 export const NIGHTLY = Object.freeze({
-  posts: Object.freeze({ cards: 171, cardX: 333, hist: 159, views: 27, deletes: 8 }),
-  readRows: 2300,
-  source: "measured log 2026-10-02 (W02 section 2.5, DEPLOY.md 832-837, 928-932): about 700 keys written, upsert reads about 700, archive walk about 270, store listing about 580",
+  posts: Object.freeze({ cards: 706, cardX: 868, hist: 694, views: 27, deletes: 8 }),
+  readRows: 3900,
+  source: "measured log 2026-10-02 (W02 section 2.5, DEPLOY.md 832-837, 928-932): about 700 keys written, upsert reads about 700, archive walk about 270, store listing about 580; plus a full deepening night (docs/deepening.md): the governor's 535 rotated names each post a card, a card-x and a hist",
 });
 
 export const RAIL = Object.freeze({
@@ -117,7 +117,7 @@ export const PLANNED = Object.freeze([
   Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 4800, source: "24 rows a minute for 2.5 hours of owner viewing plus ten AI-block reads of 280 plus thirty coverage reads of 48" }),
   Object.freeze({ id: "coverage.view", row: "B1", written: 0, read: 6000, source: "B1 of the pipeline design: the owner's coverage read costs the 2,001-row listing ceiling at worst and about 500 rows in production (167 cards, 167 card-x, about 150 hist, 26 metadata ids), held 60 s in the Cache API, so a dozen reads a day is under 6,000" }),
   Object.freeze({ id: "lab.active-at", row: "P1-71", written: 0, read: 3, source: "PLAN.final.md 5.3: at most 3 rows after the scans are removed" }),
-  Object.freeze({ id: "door.v2", row: "B3", written: 2800, read: 29400, source: "DESIGN.md 2.1 and 12 (B3, warn mode): 698 nightly posts add one manifest row each through the trigger and read two rows (the key's stored tuple and the universe's name list); the quarantine ring is priced at 700 would-have-refused events, each an insert plus its prune and body-clear rows (3), and a brake count of at most 40 rows read" }),
+  Object.freeze({ id: "door.v2", row: "B3", written: 9212, read: 96800, source: "DESIGN.md 2.1 and 12 (B3, warn mode): 2,303 nightly posts (a full deepening night) add one manifest row each through the trigger and read two rows (the key's stored tuple and the universe's name list); the quarantine ring is priced at 2,303 would-have-refused events, each an insert plus its prune and body-clear rows (3), and a brake count of at most 40 rows read" }),
 ]);
 
 export const AI_CAP_WORST_WRITES = 5000;

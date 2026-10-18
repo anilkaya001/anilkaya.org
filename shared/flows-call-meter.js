@@ -109,7 +109,8 @@ export function summarize(snapshot, { top = 5 } = {}) {
   }));
   ops.sort((a, b) => b.avgMs * b.n - a.avgMs * a.n || (a.op < b.op ? -1 : 1));
   const t = (snapshot && snapshot.total) || { n: 0, ms: 0, bytes: 0, bad: 0 };
-  return { n: t.n, ms: t.ms, kb: Math.round(t.bytes / 1024), bad: t.bad, slowest: ops.slice(0, top) };
+  const mix = ops.map((o) => ({ op: o.op, n: o.n, bad: o.bad })).sort((a, b) => b.n - a.n || (a.op < b.op ? -1 : 1)).slice(0, 8);
+  return { n: t.n, ms: t.ms, kb: Math.round(t.bytes / 1024), bad: t.bad, slowest: ops.slice(0, top), mix };
 }
 
 export function wireDelta(before, after) {

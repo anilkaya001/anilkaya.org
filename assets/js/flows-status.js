@@ -483,7 +483,7 @@
     while (el.scrollHeight > el.clientHeight + 1 && n > 0) { n--; place(); }
   }
   const fitAll = () => {
-    for (const id of ["hEng", "hRail", "hNight", "hSw", "cVendor", "cAi", "cPlat", "cLimits", "lFeeds", "lStored", "lTime", "kStore"]) {
+    for (const id of ["hEng", "hRail", "hNight", "hSw", "cVendor", "cAi", "cPlat", "cLimits", "lFeeds", "lStored", "lTime", "kStore", "kDeep"]) {
       const el = $(id);
       if (el && el.offsetParent !== null) fit(el);
     }

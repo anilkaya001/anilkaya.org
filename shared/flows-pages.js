@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "318";
+export const ASSET_VERSION = "321";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1236,7 +1236,7 @@ ${card("hEng", "Engines", "Engines", wait, [["stEng", "Engine detail"]])}
 ${card("hRail", "Real-time rail", "Rail", wait, [["stRail", "Rail detail"]])}
 ${card("hNight", "Nightly run", "Nightly", wait, [["stNight", "Nightly stage ledger"]])}
 ${card("hSw", "Switches", "Switches", wait, [["stSw", "All switches"]])}`)}${panel("capacity", true, `
-${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"]])}
+${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"], ["stMix", "Nightly calls by operation"]])}
 ${card("cAi", "Model day", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
 ${card("cPlat", "Platform meters", "Platform", later, [["stMeters", "All meters"]])}
 ${card("cLimits", "Limits enforced", "Limits", later, [["stLimits", "Limits enforced today"], ["stPlan", "Plan lines and sources"]])}`)}${panel("latency", true, `
@@ -1245,7 +1245,8 @@ ${card("lSession", "Through the session", "Session", later, [["stSessionTbl", "Q
 ${card("lStored", "Stored feeds", "Stored", later, [["stStored", "Stored feeds"]])}
 ${card("lTime", "Timing and socket", "Timing", later, [["stTiming", "Engines' timing"], ["stSocket", "Socket upstream"], ["stBrowser", "This browser"]])}`)}${panel("coverage", true, `
 ${card("kStore", "Payload store", "Store", later, [["stCover", "Every stored key"]])}
-${card("kNight", "Nightly coverage", "Coverage", later, [])}`)}
+${card("kNight", "Nightly coverage", "Coverage", later, [])}
+${card("kDeep", "Deepening rotation", "Rotation", later, [["stDeep", "Deepening rotation"]])}`)}
   </div>
   <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-chart.js")}"></i>
   <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-latency.js")}"></i>

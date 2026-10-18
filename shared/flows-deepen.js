@@ -5,17 +5,17 @@ export const DEEPEN = Object.freeze({
   key: "deepen",
   switchEnv: "FLOWS_DEEPEN",
   capEnv: "FLOWS_DEEPEN_CAP",
-  perNightCap: 80,
+  perNightCap: 530,
   dryRunCap: 24,
-  hardCap: 240,
+  hardCap: 900,
   minBatch: 4,
   keepSessions: 40,
   callsPerName: 38,
   msPerName: 6500,
   baselineCalls: 4400,
   baselineMs: 14 * 60 * 1000,
-  deadlineMs: 36 * 60 * 1000,
-  daySharePct: 0.25,
+  deadlineMs: 90 * 60 * 1000,
+  daySharePct: 0.85,
   timeSharePct: 0.8,
   minuteSharePct: 0.8,
   overrunMargin: 0.1,
@@ -71,14 +71,14 @@ export function paceFor(minuteLine, share = DEEPEN.minuteSharePct) {
 
 export function governor({
   mode = "on", cap = DEEPEN.perNightCap, backlog = 0, dayLine = null, minuteLine = null, callsSoFar = 0, elapsedMs = 0,
-  deadlineMs = DEEPEN.deadlineMs, budget = DEEPEN,
+  deadlineMs = DEEPEN.deadlineMs, budget = DEEPEN, dailySeen = null,
 } = {}) {
   const pace = paceFor(minuteLine, budget.minuteSharePct);
   const out = { n: 0, binding: "none", limits: {}, pace, why: "" };
   if (mode === "off") return { ...out, binding: "switch", why: "the switch is off" };
   const day = num(dayLine) !== null && dayLine > 0 ? dayLine : budget.workingDayLine;
-  const remainingBaselineCalls = Math.max(budget.baselineCalls - Math.max(0, callsSoFar), 0);
-  const spentCalls = Math.max(0, callsSoFar) + remainingBaselineCalls * (1 + budget.overrunMargin);
+  const seen = num(dailySeen) !== null && dailySeen > 0 ? dailySeen : 0;
+  const spentCalls = Math.max(Math.max(0, callsSoFar), seen, budget.baselineCalls) + budget.baselineCalls * budget.overrunMargin;
   const byCalls = Math.floor((day * budget.daySharePct - spentCalls) / budget.callsPerName);
   const remainingBaselineMs = Math.max(budget.baselineMs - Math.max(0, elapsedMs), 0);
   const byTime = Math.floor((deadlineMs * budget.timeSharePct - Math.max(0, elapsedMs) - remainingBaselineMs) / budget.msPerName);
@@ -163,7 +163,7 @@ export function pickRotation({ candidates = [], ledger, sessionDate, exclude = n
 
 export function planNight({
   mode = "on", cap = DEEPEN.perNightCap, payload = null, readable = true, sessionDate, rows = [], board = new Set(),
-  rosterKnown = null, dayLine = null, minuteLine = null, callsSoFar = 0, elapsedMs = 0, deadlineMs = DEEPEN.deadlineMs,
+  rosterKnown = null, dayLine = null, minuteLine = null, callsSoFar = 0, elapsedMs = 0, deadlineMs = DEEPEN.deadlineMs, dailySeen = null,
 } = {}) {
   const ledger = parseLedger(readable ? payload : null);
   let carried = readable ? carriedFrom(ledger, sessionDate) : new Map();
@@ -176,7 +176,7 @@ export function planNight({
   }
   const candidates = rows.filter((r) => r && !board.has(r.t));
   const gov = governor({
-    mode: readable ? mode : "off", cap, backlog: candidates.length, dayLine, minuteLine, callsSoFar, elapsedMs, deadlineMs,
+    mode: readable ? mode : "off", cap, backlog: candidates.length, dayLine, minuteLine, callsSoFar, elapsedMs, deadlineMs, dailySeen,
   });
   const picked = gov.n > 0
     ? pickRotation({ candidates, ledger, sessionDate, n: gov.n })
@@ -231,7 +231,24 @@ export function updateLedger(prior, { sessionDate, landed = new Set(), failed = 
   return { at: sorted(at), tries: sorted(tries) };
 }
 
-export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, failed, universe = null, plan = null } = {}) {
+export function ledgerSummary(at, { sessionDate, universe = null, planned = null, usage = null } = {}) {
+  const days = Object.values(at);
+  const u = usage && typeof usage === "object" ? usage : {};
+  return {
+    carded: days.length,
+    universe: universe ? universe.size : null,
+    tonight: days.filter((d) => d === sessionDate).length,
+    oldest: days.length ? days.reduce((a, b) => (b < a ? b : a)) : null,
+    planned: num(planned),
+    read: num(u.read),
+    calls: num(u.calls),
+    dailySeen: num(u.dailySeen),
+    dayLine: num(u.dayLine),
+    minuteLine: num(u.minuteLine),
+  };
+}
+
+export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, failed, universe = null, plan = null, usage = null } = {}) {
   const next = updateLedger(prior, { sessionDate, landed, failed, universe });
   const names = Object.keys(next.at).length;
   const payload = {
@@ -241,6 +258,7 @@ export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, 
     tries: next.tries,
     names,
     plan,
+    summary: ledgerSummary(next.at, { sessionDate, universe, planned: plan ? plan.n : null, usage }),
   };
   const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
   return { payload: { ...payload, bytes }, bytes, fits: bytes <= DEEPEN.ledgerBudgetBytes };

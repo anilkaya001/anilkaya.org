@@ -37,7 +37,7 @@ export async function runDeepenPlan(ctx) {
     rows: rows.map((r) => ({ t: r.ticker, w: screenerDollarVolume(r) ?? num(r.marketcap, 0) })),
     board: new Set(deepTickers), rosterKnown,
     dayLine: lines["uw.day"].cap, minuteLine: lines["uw.min"].cap,
-    callsSoFar: stats.calls, elapsedMs: Date.now() - stats.startedAt, deadlineMs: DEADLINE_MS,
+    callsSoFar: stats.calls, dailySeen: stats.dailySeen, elapsedMs: Date.now() - stats.startedAt, deadlineMs: DEADLINE_MS,
   });
   const { carried, gov, picked } = night;
   const ledgerBody = readable ? read.payload : null;
@@ -118,10 +118,12 @@ export async function runDeepenLedger(ctx) {
     cardLanded: (t) => landedKeys.has("card:" + t), cardXLanded: (t) => landedKeys.has("card-x:" + t),
   });
   const landed = new Set([...deepNow, ...settled.landed]);
+  const lines = planLines(process.env);
   const built = ledgerPayload(deepen.ledger, {
     sessionDate, generatedAt, landed, failed: settled.failed,
     universe: new Set((universe || []).map((r) => r && r.ticker).filter(Boolean)),
     plan: { n: deepen.plan.n, binding: deepen.plan.binding, never: deepen.plan.never ?? 0 },
+    usage: { read: settled.landed.size, calls: stats.calls, dailySeen: stats.dailySeen || null, dayLine: lines["uw.day"].cap, minuteLine: lines["uw.min"].cap },
   });
   if (!built.fits) {
     console.warn(`  deepen ledger: ${built.bytes} bytes, over its ${DEEPEN.ledgerBudgetBytes} cap — not written`);

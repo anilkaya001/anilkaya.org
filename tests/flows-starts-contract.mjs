@@ -58,7 +58,7 @@ const MIN = 60 * 1000;
     "and no new action joined the job, every one still pinned to a commit");
   const pipeline = read(".github/workflows/flows-pipeline.yml");
   ok(/\npermissions:\n {2}contents: read\n\nconcurrency:/.test(pipeline) &&
-     /\n {2}build:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 45\n {4}permissions:\n {6}contents: read\n {6}issues: write\n {4}steps:/.test(pipeline) &&
+     /\n {2}build:\n {4}runs-on: ubuntu-24\.04\n {4}timeout-minutes: 120\n {4}permissions:\n {6}contents: read\n {6}issues: write\n {4}steps:/.test(pipeline) &&
      (pipeline.match(/issues:/g) || []).length === 1 && (pipeline.match(/actions: write/g) || []).length === 1 &&
      !/id-token|contents: write|pull-requests|checks:/.test(pipeline),
     "while the nightly workflow gained exactly one permission: issues: write on the build job alone (the workflow stays read-only, " +

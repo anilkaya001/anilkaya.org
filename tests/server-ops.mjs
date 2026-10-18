@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
-import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, coverageView, COVERAGE_KEYS, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
+import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, coverageView, rotationView, COVERAGE_KEYS, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { workerSource, expect, moduleSource } from "./lib/source-scan.mjs";
@@ -244,6 +244,7 @@ function build(f, over = {}) {
   put.run("meta", JSON.stringify({ sessionDate: DAY, generatedAt: "2026-10-12T01:00:00Z" }), NOW - 7200000);
   put.run("board:long", "not json", NOW - 1000);
   put.run("card:AAPL", JSON.stringify({ sessionDate: DAY }), NOW);
+  put.run("deepen", JSON.stringify({ v: 1, sessionDate: DAY, at: { AAA: DAY }, summary: { carded: 612, universe: 856, tonight: 530, oldest: "2026-10-05", planned: 530, read: 528, calls: 24100, dailySeen: 31200, dayLine: 60000, minuteLine: 500, extra: "dropped" } }), NOW - 1000);
   const { table, rc } = build(f);
   const trips0 = f.trips.length;
   const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops?part=coverage", {}, "owner.one"))).json();
@@ -258,6 +259,13 @@ function build(f, over = {}) {
   const bad = body.coverage.keys.find((k) => k.key === "board:long");
   eq([bad.present, bad.session], [true, null], "a payload that is not JSON is present with no session and no throw");
   eq(body.coverage.keys.find((k) => k.key === "regime"), { key: "regime", present: false }, "a key never written is absent, not zero bytes");
+  eq(body.coverage.rotation, { present: true, summary: true, session: DAY, carded: 612, universe: 856, tonight: 530, planned: 530, read: 528, oldest: "2026-10-05", calls: 24100, dailySeen: 31200, dayLine: 60000, minuteLine: 500 }, "the rotation view carries the ledger's summary and nothing else of the row");
+  ok(body.coverage.keys.some((k) => k.key === "deepen" && k.present), "and the ledger is one of the expected keys");
+  eq(rotationView(undefined), { present: false, why: "the ledger has never been written" }, "no ledger row is a reason, not a zero");
+  eq(rotationView({ session: DAY, summary: null }).summary, false, "a ledger from before the summary says so");
+  eq(rotationView({ session: DAY, summary: "not json" }).summary, false, "a summary that is not JSON is the same");
+  eq(rotationView({ session: DAY, summary: JSON.stringify({ carded: -3, universe: "856", oldest: "yesterday", calls: 1.5 }) }),
+    { present: true, summary: true, session: DAY, carded: null, universe: null, tonight: null, planned: null, read: null, oldest: null, calls: null, dailySeen: null, dayLine: null, minuteLine: null }, "malformed figures are null, never coerced");
   ok(!body.coverage.keys.some((k) => k.key === "card:AAPL"), "a card key is never listed: no scan of the card rows");
   const none = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   eq(none.coverage, null, "without the part there is no coverage");

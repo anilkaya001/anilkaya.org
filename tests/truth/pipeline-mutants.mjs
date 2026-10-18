@@ -123,6 +123,16 @@ plant("deepen-overwritten-card-still-carried", "a name whose card was rebuilt sh
   [["return stored === null || stored === undefined || stored === c.session;", "return true;"]], "deepenDetector");
 plant("deepen-board-names-chosen", "the rotation spends its slots on names already on the board", DEEPEN,
   [["const candidates = rows.filter((r) => r && !board.has(r.t));", "const candidates = rows.filter((r) => !!r);"]], "deepenDetector");
+plant("deepen-daily-count-ignored", "the rotation is sized as if the key had been quiet all day", DEEPEN,
+  [["Math.max(Math.max(0, callsSoFar), seen, budget.baselineCalls)", "Math.max(Math.max(0, callsSoFar), budget.baselineCalls)"]], "deepenDetector");
+plant("deepen-day-share-lifted", "the rotation may spend nearly the whole day line", DEEPEN,
+  [["daySharePct: 0.85,", "daySharePct: 0.99,"]], "deepenDetector");
+plant("deepen-hard-cap-lifted", "the hard ceiling on a night is out of reach of any sane run", DEEPEN,
+  [["hardCap: 900,", "hardCap: 5000,"]], "deepenDetector");
+plant("deepen-overrun-margin-dropped", "the baseline is projected with no room for retries", DEEPEN,
+  [["overrunMargin: 0.1,", "overrunMargin: 0,"]], "deepenDetector");
+plant("deepen-deadline-stretched", "the rotation is sized against a deadline the workflow cannot honour", DEEPEN,
+  [["deadlineMs: 90 * 60 * 1000,", "deadlineMs: 300 * 60 * 1000,"]], "deepenDetector");
 
 const baselines = new Map();
 

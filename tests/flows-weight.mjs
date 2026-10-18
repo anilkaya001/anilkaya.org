@@ -129,7 +129,7 @@ const SHARED_DEFERRED = {
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024, overviewPage: 120 + 82272 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 241,
-  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15,
+  unusualPage: 196, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15 + 4,
 };
 
 const FLOOR_BYTES = 1024;
