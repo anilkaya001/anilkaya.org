@@ -128,6 +128,10 @@ const SHARED_DEFERRED = {
   link: { file: "/assets/js/flows-link.js", declared: null },
 };
 const GPU_ONLY = {};
+const SHARED_GROUPS = new Set(["oracle"]);
+const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracle.js", "/assets/js/flows-oracle-boot.js"];
+const ORACLE_DEFERRED_KIB = 60;
+const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 322,
   unusualPage: 196 + 900 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15 + 4,
@@ -522,8 +526,17 @@ for (const name of Object.keys(CEILING_KIB)) {
         try { code = read(src); } catch { continue; }
         for (const g of code.matchAll(/\.defer\(\s*["']([\w-]+)["']/g)) used.add(g[1]);
       }
-      const extra = [...used].filter((g) => table.groups[g] === undefined);
+      const extra = [...used].filter((g) => table.groups[g] === undefined && !SHARED_GROUPS.has(g));
       eq(extra.join(", "), "", `${m.name} defers only what DEFERRED lists for it (${Object.keys(table.groups).join(", ") || "nothing"})`);
+    }
+    const oracleBytes = ORACLE_FILES.reduce((a, f) => a + sizeOf(f), 0);
+    ok(oracleBytes > 0 && oracleBytes <= ORACLE_DEFERRED_KIB * 1024, `the Neuron's two files weigh ${oracleBytes} B, inside their stated ${ORACLE_DEFERRED_KIB} KiB, and load only when a page carries its markup`);
+    for (const m of measured) {
+      if (!m.parts.some((p) => /^flows-dock\.js/.test(p))) continue;
+      const shelled = PAGES.oracleShell(m.html, "on", "overview");
+      const added = shelled.length - m.html.length;
+      ok(added > 0 && added <= ORACLE_MARKUP_BYTES + 400, `${m.name}: the Neuron's placeholder adds ${added} B of markup`);
+      eq(PAGES.oracleShell(m.html, "off", "overview"), m.html, `${m.name}: with the switch off the page is untouched`);
     }
     const dossier = read("/assets/js/flows-ticker.js");
     ok(!LOADER.test(dossier), "the dossier creates no script element of its own");

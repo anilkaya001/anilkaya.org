@@ -425,7 +425,7 @@ Design system and Lab/course/review/placement UI.
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/base.css` |  | contracts, flows-events, flows-motion, flows-moves-render, flows-political-render, worker |
+| `assets/css/base.css` |  | contracts, flows-events, flows-motion, flows-moves-render, flows-oracle-render, flows-political-render and 1 more |
 | `assets/css/lab.css` |  |  |
 | `assets/css/placement.css` |  |  |
 | `assets/css/review.css` |  |  |
@@ -1663,8 +1663,8 @@ Flows UI primitives published as `FlowsUI` (formatters, the score strip chart, t
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-dock.js` |  | contracts, flows-political-render |
-| `assets/js/flows-ui.js` |  | fixture-guard, flows-events, flows-fixture-guard-render, flows-freshness, flows-live, flows-movelab-render and 6 more |
+| `assets/js/flows-dock.js` |  | contracts, flows-oracle-render, flows-political-render |
+| `assets/js/flows-ui.js` |  | fixture-guard, flows-events, flows-fixture-guard-render, flows-freshness, flows-live, flows-movelab-render and 7 more |
 
 ### `assets/js/flows-overview.js`, `assets/js/flows-board.js`, `assets/js/flows-market.js`, `assets/js/flows-ticker.js`, `assets/js/flows-desk.js`, `assets/js/flows-strategy.js`, `assets/js/flows-events.js`, `assets/js/flows-unusual.js`, `assets/js/flows-ask.js`
 
@@ -2627,6 +2627,17 @@ The pipeline's kill matrix. `tests/truth/pipeline-mutants.mjs` plants 38 wrong b
 | `tests/flows-pipeline-mutants.mjs` |  | flows-pipeline-mutants |
 | `tests/truth/pipeline-detectors.mjs` | `tests/truth/pipeline-detectors.mjs#DETECTOR_OF`, `tests/truth/pipeline-detectors.mjs#SEEDS`, `tests/truth/pipeline-detectors.mjs#cardDetector`, `tests/truth/pipeline-detectors.mjs#clientDetector`, `tests/truth/pipeline-detectors.mjs#contracts`, `tests/truth/pipeline-detectors.mjs#contractsDetector`, `tests/truth/pipeline-detectors.mjs#coverageDetector`, `tests/truth/pipeline-detectors.mjs#deepenDetector`, `tests/truth/pipeline-detectors.mjs#meter`, `tests/truth/pipeline-detectors.mjs#meterDetector`, `tests/truth/pipeline-detectors.mjs#stages`, `tests/truth/pipeline-detectors.mjs#stagesDetector` | flows-pipeline-mutants |
 | `tests/truth/pipeline-mutants.mjs` | `tests/truth/pipeline-mutants.mjs#PIPELINE_MUTANTS`, `tests/truth/pipeline-mutants.mjs#runPipelineKillMatrix` | flows-pipeline-mutants |
+
+### `tests/flows-oracle-core.mjs`, `tests/flows-oracle-render.mjs`, `tests/lib/oracle-fixtures.mjs`, `tests/lib/oracle-world.mjs`
+
+The Neuron's client lane. `flows-oracle-core` loads the core in a bare `vm` and holds the formatters, every template and every detector threshold from both sides (at the bar and one dollar under it, at 64.4 and 64.6 per cent printed, 749 and 750 contracts, 19 and 20 minutes into the session) to independent computations, runs 400 random calls and every template through the Ask guard with modals on and the advice and lint lexicons, proves the Eastern arithmetic against the zone, and plants 28 wrong builds. `flows-oracle-render` (Chromium, `page.route`, no server) holds the sheet, the orb, the tab bar, the focus trap, the inert page, Escape and focus return at 1440, 1024, 390 and 320 px, the figures to an independent formatter, the dash for a null, TRT only, the resting state and Retry, the preference cookie, the glance block on a ticker rail, a scripted `fl` stream through the real detectors (messages, pill, count, throttled announcements, no message from a stale feed, a hostile ticker that never reaches `innerHTML`), reduced motion with no running animation, a zero paint census, a source scan for colour literals, comments, layout transitions and storage, and 12 planted wrong builds of the served files. `oracle-fixtures` builds records to the frozen contract with fixture tickers (`SYO001`...) and `oracle-world` serves a page and the routes.
+
+| File | Exports | Suites |
+|---|---|---|
+| `tests/flows-oracle-core.mjs` |  | flows-oracle-core |
+| `tests/flows-oracle-render.mjs` |  | flows-oracle-render |
+| `tests/lib/oracle-fixtures.mjs` | `tests/lib/oracle-fixtures.mjs#BUILDING`, `tests/lib/oracle-fixtures.mjs#CALM`, `tests/lib/oracle-fixtures.mjs#CHEAP`, `tests/lib/oracle-fixtures.mjs#CONFLICT`, `tests/lib/oracle-fixtures.mjs#CORE`, `tests/lib/oracle-fixtures.mjs#NOW`, `tests/lib/oracle-fixtures.mjs#RICH`, `tests/lib/oracle-fixtures.mjs#STALE`, `tests/lib/oracle-fixtures.mjs#loadCore`, `tests/lib/oracle-fixtures.mjs#record`, `tests/lib/oracle-fixtures.mjs#row`, `tests/lib/oracle-fixtures.mjs#top` | flows-oracle-core, flows-oracle-render |
+| `tests/lib/oracle-world.mjs` | `tests/lib/oracle-world.mjs#BODY`, `tests/lib/oracle-world.mjs#FAKE_RT`, `tests/lib/oracle-world.mjs#ROOT`, `tests/lib/oracle-world.mjs#harnessHtml`, `tests/lib/oracle-world.mjs#launch`, `tests/lib/oracle-world.mjs#open`, `tests/lib/oracle-world.mjs#settle`, `tests/lib/oracle-world.mjs#waitOracle` | flows-oracle-render |
 
 ## ci
 
