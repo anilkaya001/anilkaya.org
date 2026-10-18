@@ -1,1 +1,1 @@
-{"name": "flows-status-render", "class": "C", "group": "shard", "timing": false, "medianS": 6, "shard": 3, "command": "node flows-status-render.mjs", "files": ["flows-status-render.mjs"], "covers": []}
+{"name": "flows-status-render", "class": "C", "group": "shard", "timing": false, "medianS": 6, "shard": 3, "command": "node flows-status-render.mjs", "files": ["flows-status-render.mjs"], "covers": ["assets/css/flows-status.css"]}

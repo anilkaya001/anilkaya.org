@@ -4,11 +4,11 @@ import {
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
   rosterPlan, pickFocus, rtSwitches, rtCadenceMs, createRedactor, rtSecretsOf,
 } from "./flows-rt.js";
-import { phaseAt } from "./flows-freshness.js";
+import { phaseAt, FRESH_CLASSES } from "./flows-freshness.js";
 import { priorCloseBase, nightlySources, TICKER_RE } from "./flows-live.js";
 import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
 import { MEMBER_NAME, readMembers, memberOf, memberActive } from "./flows-auth.js";
-import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs } from "./flows-vendor-core.js";
+import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs, vendorMeter, newerMeter } from "./flows-vendor-core.js";
 import { failureEntry } from "./flows-log.js";
 import {
   SOCKET_LIMITS, socketUrl, socketWindowOk, wantChannels, parseMessage, backoffMs, shapePxTicks, shapeSocketFrame, mergePxRow, tickerOfPayload,
@@ -78,6 +78,7 @@ export function createRestUpstream({
   let handlers = null;
   let pausedUntil = 0;
   let n429 = 0;
+  let meter = null;
   let own = { fl: { cursor: null }, gx: { i: 0 } };
 
   async function call(c) {
@@ -89,6 +90,7 @@ export function createRestUpstream({
       const res = await fetchImpl(url, {
         headers: { Authorization: "Bearer " + cfg.key, Accept: "application/json" }, signal: ac.signal,
       });
+      meter = newerMeter(meter, vendorMeter(res.headers, now()));
       const bad = classifyStatus(res.status);
       if (bad === "http_429") {
         return { ok: false, error: { code: bad, status: 429, retryAfterMs: retryAfterMs(res.headers.get("Retry-After"), now()) } };
@@ -219,7 +221,7 @@ export function createRestUpstream({
     },
     paused: (at) => at < pausedUntil,
     state: () => ({
-      running, pausedUntil: pausedUntil || null, n429, key: !!cfg.key, base: cfg.redirected ? "redirected" : cfg.baseStatus === "invalid" ? "invalid" : "production", host: hostOf(cfg.base),
+      running, pausedUntil: pausedUntil || null, n429, vendor: meter, key: !!cfg.key, base: cfg.redirected ? "redirected" : cfg.baseStatus === "invalid" ? "invalid" : "production", host: hostOf(cfg.base),
       topics: Object.fromEntries(ORDER.map((k) => [k, { due: topics[k].due, inflight: topics[k].inflight, fails: topics[k].fails }])),
     }),
   };
@@ -1361,6 +1363,8 @@ export class RtHub {
         lagMs: t.lag.summary(), rowLagMs: k === "px" ? t.rowLag.summary() : null,
         rttMs: t.rtt.summary(), itemLagMs: k === "fl" || k === "nw" ? t.itemLag.summary() : null,
         emptyFrames: t.emptyFrames, time: { ...t.time },
+        window: { klass: RT_TOPICS[k].klass, liveMs: (FRESH_CLASSES[RT_TOPICS[k].klass].liveS + RT_TOPICS[k].barS) * 1000,
+          staleMs: (FRESH_CLASSES[RT_TOPICS[k].klass].staleS + RT_TOPICS[k].barS) * 1000 },
         calls: { minute: minute[k], hour: hour[k] },
         fresh: t.hasData ? this.freshOf(k, now) : pendingStream(k),
       };

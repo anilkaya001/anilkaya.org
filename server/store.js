@@ -16,6 +16,10 @@ const INGEST_META_SQL =
   "json_extract(payload, '$.generatedAt') AS generated, json_extract(payload, '$.status') AS status " +
   "FROM flows_payload WHERE id IN (";
 
+export const coverageSql = (keys) => "SELECT id, updated_at, length(payload) AS bytes, " +
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionDate') END AS session " +
+  "FROM flows_payload WHERE id IN (" + keys.map((k) => `'${k}'`).join(", ") + ")";
+
 const ARCHIVE_INSERT_SQL =
   "INSERT INTO flows_payload (id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO NOTHING";
 

@@ -506,8 +506,9 @@ try {
       }
     }
   }
-  eq(upgradeTables(FLOWS_REGISTRY), ["flows_payload", "flows_clock"], "only flows_payload and flows_clock are probed for added columns today");
-  ok(Array.isArray(LEDGER_ADDED_COLUMNS) && Object.isFrozen(LEDGER_ADDED_COLUMNS) && LEDGER_ADDED_COLUMNS.length === 0, "the ledger's list exists and is empty, because no column has been added since its migration");
+  eq(upgradeTables(FLOWS_REGISTRY), ["flows_payload", "flows_clock", "flows_ledger"], "flows_payload, flows_clock and flows_ledger are probed for added columns today");
+  eq(LEDGER_ADDED_COLUMNS.map(([name]) => name), ["t1_calls", "focus_calls", "uw_daily_max", "uw_daily_at"], "the ledger's list holds the four columns of the vendor meter (migration 0022)");
+  ok(Object.isFrozen(LEDGER_ADDED_COLUMNS), "frozen");
 
   const throws = (fn, re, msg) => { assert.throws(fn, re, msg); checks++; };
   throws(() => registryOf(["CREATE TABLE flows_payload (id TEXT)"]), /idempotent CREATE/, "a statement that is not CREATE ... IF NOT EXISTS is refused");
@@ -525,7 +526,7 @@ try {
   }
   throws(() => withAddedColumns(FLOWS_REGISTRY, "nothing", []), /not in the registry/, "a registry extension names an entry that exists");
   const grown = withAddedColumns(FLOWS_REGISTRY, "flows_ledger", [["z_col", "INTEGER NOT NULL DEFAULT 0"]]);
-  eq([grown.find((e) => e.name === "flows_ledger").addedColumns.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [1, 0], "and returns a new registry, leaving the shipped one as it was");
+  eq([grown.find((e) => e.name === "flows_ledger").addedColumns.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [5, 4], "and returns a new registry, leaving the shipped one as it was");
   eq(upgradeTables(grown), ["flows_payload", "flows_clock", "flows_ledger"], "which probes the ledger as well");
   eq(columnProbe("flows_clock"), "PRAGMA table_info(flows_clock)", "the probe is the PRAGMA the Worker has always sent");
 }
@@ -566,16 +567,16 @@ try {
   const fresh = fakeD1({ schema: "", latencyMs: 0 });
   const done = await applySchema(fresh.D1);
   eq(done, {}, "a database with nothing in it takes the registry's DDL and adds no column");
-  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 22]], "in one batch of the twenty CREATEs and the two probes");
+  eq(fresh.trips.map((t) => [t.kind, t.sqls.length]), [["batch", 23]], "in one batch of the twenty CREATEs and the three probes");
   eq(fresh.trips[0].sqls.slice(0, 20), [...FLOWS_SCHEMA_SQL], "in registry order");
-  eq(fresh.trips[0].sqls.slice(20), ["PRAGMA table_info(flows_payload)", "PRAGMA table_info(flows_clock)"], "with the probes last");
+  eq(fresh.trips[0].sqls.slice(20), ["PRAGMA table_info(flows_payload)", "PRAGMA table_info(flows_clock)", "PRAGMA table_info(flows_ledger)"], "with the probes last");
   eq((await applySchema(fresh.D1), fresh.trips.length), 2, "and a second bootstrap is one more batch");
 
   const old = fakeD1({ schema: "", latencyMs: 0 });
   for (const f of ["0005_flows.sql", "0006_flows_ai_usage.sql", "0007_flows_ai_summary.sql", "0008_flows_neuron.sql", "0009_flows_ai_usage_model.sql", "0010_flows_live.sql", "0015_flows_ledger.sql", "0016_flows_dossier_cache.sql"]) old.db.exec(MIG(f));
   const cols = (d) => d.db.prepare("PRAGMA table_info(flows_clock)").all().map((c) => c.name);
   ok(!cols(old).includes("tier1_at") && !cols(old).includes("summary_at"), "the production table before its upgrades lacks the later columns");
-  eq(await applySchema(old.D1), { flows_payload: PAYLOAD_ADDED_COLUMNS.map(([c]) => c), flows_clock: FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([c]) => c) }, "and the first use adds every one of them, the door's columns on flows_payload included");
+  eq(await applySchema(old.D1), { flows_payload: PAYLOAD_ADDED_COLUMNS.map(([c]) => c), flows_clock: FLOWS_LIVE.CLOCK_ADDED_COLUMNS.map(([c]) => c), flows_ledger: LEDGER_ADDED_COLUMNS.map(([c]) => c) }, "and the first use adds every one of them, the ledger's four meter columns among them");
   const migrated = fakeD1({ schema: "", latencyMs: 0 });
   for (const f of readdirSync(new URL("../migrations/", import.meta.url)).sort().filter((n) => !/^000[1-4]|0013|0018/.test(n))) migrated.db.exec(MIG(f));
   eq(cols(old), cols(migrated), "leaving the columns, in order, a database built from the migrations has");

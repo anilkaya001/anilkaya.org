@@ -69,8 +69,9 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   ok(W.LIVE_SCHEMA_SQL.includes(L.LEDGER_SCHEMA_SQL), "and the Worker's idempotent bootstrap batch carries it, so a database that predates the table gets it on the first Flows request");
   const migration = read("migrations/0015_flows_ledger.sql");
   const fromMigration = sqliteD1({ schema: "" });
-  fromMigration.db.exec(migration);
-  deep(sqlColumns(fromMigration.db, "flows_ledger"), sqlColumns(shipped.db, "flows_ledger"), "and so does migrations/0015_flows_ledger.sql");
+  const later = read("migrations/0024_flows_vendor_meter.sql").split("\n").filter((line) => /^ALTER TABLE flows_ledger /.test(line)).join("\n");
+  fromMigration.db.exec(migration + "\n" + later);
+  deep(sqlColumns(fromMigration.db, "flows_ledger"), sqlColumns(shipped.db, "flows_ledger"), "and so do migrations/0015_flows_ledger.sql and the four columns 0022 adds");
   ok(/CREATE TABLE IF NOT EXISTS flows_ledger/.test(SCHEMA) && migration.trim().endsWith(");"), "a migration that can be applied twice");
   eq(L.LEDGER_RETAIN_DAYS, 30, "the ledger keeps thirty days");
   eq(L.LEDGER_LIMITS.tier1Ms, FRESH_CLASSES.market.staleS * 1000, "the Tier 1 and focus gap limit IS the Worker class's stale line, read from the table that draws the reader's stale mark");
@@ -82,8 +83,8 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   const newDdl = L.LEDGER_SCHEMA_SQL.replace("nightly_runs INTEGER NOT NULL DEFAULT 0, updated_at", "nightly_runs INTEGER NOT NULL DEFAULT 0, t1_over_ms INTEGER NOT NULL DEFAULT 0, updated_at");
   ok(newDdl !== L.LEDGER_SCHEMA_SQL, "the grown ledger DDL differs from the shipped one by the one column");
   const grown = withAddedColumns(FLOWS_REGISTRY, "flows_ledger", OVER, newDdl);
-  deep([LEDGER_ADDED_COLUMNS.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [0, 0],
-    "no column has been added to the ledger since its migration, so the shipped registry probes only flows_clock");
+  deep([LEDGER_ADDED_COLUMNS.length, FLOWS_REGISTRY.find((e) => e.name === "flows_ledger").addedColumns.length], [4, 4],
+    "the four vendor-meter columns are the ledger's added columns (migration 0022), so the shipped registry probes the ledger as well as flows_clock");
   const win = L.tickWindow(DAY, null);
   const extra = (store, at0) => store.D1.prepare(
     "INSERT INTO flows_ledger (day, ticks, t1_over_ms, updated_at) VALUES (?1, 0, 3, ?2) ON CONFLICT(day) DO UPDATE SET t1_over_ms = t1_over_ms + 3, updated_at = ?2",
@@ -170,6 +171,40 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
 
 {
   const s = sqliteD1();
+  const win = L.tickWindow(DAY, null);
+  const go = (st) => apply(s, st);
+  const out = (h, m, extra) => go(L.ledgerOutcomeStatement(s.D1, { day: DAY, at: at(h, m), ...win, ok: true, failed: false, stale: null, ...extra }));
+  const foc = (h, m, extra) => go(L.ledgerFocusStatement(s.D1, { day: DAY, at: at(h, m), ...win, ok: true, partial: false, failed: false, ...extra }));
+  out(9, 31, { calls: 2, meter: { daily: 100, at: at(9, 31) } });
+  let r = s.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [2, 100, at(9, 31)], "THE VENDOR METER: a Tier 1 tick adds its calls and records the vendor's daily count with its instant, in the statement it already issues");
+  foc(9, 33, { calls: 1, meter: { daily: 140, at: at(9, 33) } });
+  r = s.row(DAY);
+  deep([r.focus_calls, r.uw_daily_max, r.uw_daily_at], [1, 140, at(9, 33)], "a focus tick adds its call and moves the maximum, which the two ticks share");
+  out(9, 36, { calls: 2, meter: { daily: 120, at: at(9, 36) } });
+  r = s.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [4, 140, at(9, 33)], "a lower reading later never lowers the maximum nor moves its instant");
+  out(9, 41, { calls: 2, meter: null });
+  out(9, 46, { calls: 0, meter: { daily: null, at: at(9, 46) } });
+  r = s.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [6, 140, at(9, 33)], "a tick that read no header leaves the maximum alone and still counts its calls; a tick that made none counts none");
+  out(9, 51, { calls: 2, meter: { daily: 180, at: at(9, 51) } });
+  foc(9, 53, { calls: 1, meter: { daily: 180, at: at(9, 53) } });
+  r = s.row(DAY);
+  deep([r.uw_daily_max, r.uw_daily_at, r.t1_calls, r.focus_calls], [180, at(9, 53), 8, 2], "an equal reading moves the instant to the later one");
+  const blank = sqliteD1();
+  apply(blank, L.ledgerOutcomeStatement(blank.D1, { day: DAY, at: at(9, 31), ...win, ok: true, failed: false, stale: null }));
+  deep([blank.row(DAY).t1_calls, blank.row(DAY).uw_daily_max, blank.row(DAY).uw_daily_at], [0, null, null], "a tick with no meter and no calls writes 0 calls and a null reading, never a zero reading");
+  const view = L.ledgerRowView(s.row(DAY));
+  deep([view.tier1.calls, view.focus.calls, view.vendor.dailyMax, view.vendor.at], [8, 2, 180, new Date(at(9, 53)).toISOString()], "and the view carries them");
+  deep([L.ledgerRowView(blank.row(DAY)).vendor, L.ledgerRowView({ day: DAY, updated_at: 1 }).tier1.calls], [{ dailyMax: null, at: null }, null], "an unread meter is null in the view, and a row that predates the columns has null calls, not 0");
+  const hostile = sqliteD1();
+  apply(hostile, L.ledgerOutcomeStatement(hostile.D1, { day: DAY, at: at(9, 31), ...win, ok: true, failed: false, stale: null, calls: -5, meter: { daily: -1, at: at(9, 31) } }));
+  deep([hostile.row(DAY).t1_calls, hostile.row(DAY).uw_daily_max], [0, null], "a negative count or reading is not written");
+}
+
+{
+  const s = sqliteD1();
   const go = (st) => apply(s, st);
   const pass = (h, m, extra = {}) => go(L.ledgerPassStatement(s.D1, { day: DAY, at: at(h, m), calls: 40, failedCalls: 0, ...extra }));
   pass(9, 35, { failedCalls: 1 });
@@ -204,8 +239,8 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   const view = L.ledgerView(s.db.prepare(L.LEDGER_ROWS_SQL).all());
   eq(view.retainDays, 30, "the view names the retention");
   deep(view.days.map((d) => d.day), [DAY], "one entry a day");
-  deep(Object.keys(view.days[0]).sort(), ["day", "focus", "nightly", "stale", "tier1", "tier2", "ticks", "updatedAt"].sort(), "in one documented shape");
-  deep(Object.keys(view.days[0].tier1).sort(), ["fail", "gapEndAt", "gapMs", "lastAt", "ok", "okAt", "okGapEndAt", "okGapMs"], "Tier 1's members");
+  deep(Object.keys(view.days[0]).sort(), ["day", "focus", "nightly", "stale", "tier1", "tier2", "ticks", "updatedAt", "vendor"].sort(), "in one documented shape");
+  deep(Object.keys(view.days[0].tier1).sort(), ["calls", "fail", "gapEndAt", "gapMs", "lastAt", "ok", "okAt", "okGapEndAt", "okGapMs"], "Tier 1's members");
   eq(view.days[0].focus.gapEndAt, new Date(at(10, 3)).toISOString(), "instants are ISO strings");
   deep(L.ledgerView(null), { retainDays: 30, days: [] }, "and a missing table reads as no days");
 }
@@ -324,6 +359,44 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   await W.rthTick(rthEnv(failing), T, { fetchVendor: dead, log: quiet });
   r = failing.row(DAY);
   deep([r.t1_fail, r.stale_ticks, r.stale_key], [1, 1, "live:alerts"], "and a tick whose vendor read failed still records what the Worker saw");
+}
+
+{
+  const T = at(10, 30);
+  const s = sqliteD1();
+  let reading = { at: T, daily: 5000, minuteRemaining: 1000000, minuteResetMs: null, tokenLimit: null };
+  const meter = () => reading;
+  const out = await W.rthTick(rthEnv(s), T, { fetchVendor: tier1Vendor(T), log: quiet, meter });
+  ok(out.tier1.written, "a Tier 1 tick that reads the vendor writes");
+  let r = s.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [2, 5000, T], "THE TICK RECORDS ITS TWO VENDOR CALLS AND THE VENDOR'S DAILY COUNT in the ledger statement it already issued");
+  const clock = s.db.prepare("SELECT uw_daily, uw_daily_at FROM flows_clock WHERE id = 1").get();
+  deep([clock.uw_daily, clock.uw_daily_at], [5000, T], "and the latest reading in the clock row's patch");
+  const batches = s.trips.filter((t) => t.kind === "batch").length;
+  const t2 = T + 5 * MIN;
+  reading = { at: t2, daily: 5040, minuteRemaining: 1000000, minuteResetMs: null, tokenLimit: null };
+  await W.rthTick(rthEnv(s), t2, { fetchVendor: tier1Vendor(t2), log: quiet, meter });
+  r = s.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [4, 5040, t2], "a second tick adds its calls and moves the maximum");
+  const plain = sqliteD1();
+  await W.rthTick(rthEnv(plain), T, { fetchVendor: tier1Vendor(T), log: quiet });
+  const plainBatches = plain.trips.filter((t) => t.kind === "batch").length;
+  const metered = sqliteD1();
+  await W.rthTick(rthEnv(metered), T, { fetchVendor: tier1Vendor(T), log: quiet, meter });
+  eq(metered.trips.filter((t) => t.kind === "batch").length, plainBatches, "THE METER ADDS NO TRIP: a tick that records it makes as many batches as one that does not");
+  ok(batches > 0, "the batches were counted");
+  const quiet2 = sqliteD1();
+  await W.rthTick(rthEnv(quiet2), T, { fetchVendor: tier1Vendor(T), log: quiet });
+  r = quiet2.row(DAY);
+  deep([r.t1_calls, r.uw_daily_max, quiet2.db.prepare("SELECT uw_daily FROM flows_clock WHERE id = 1").get().uw_daily], [2, null, null], "a vendor that sent no counter header leaves the reading null, never zero, and the calls still count");
+  const failing = sqliteD1();
+  await W.rthTick(rthEnv(failing), T, { fetchVendor: dead, log: quiet, meter: () => null });
+  deep([failing.row(DAY).t1_calls, failing.row(DAY).t1_fail], [2, 1], "a tick whose reads all failed still counts the calls it made");
+  const f = sqliteD1();
+  const focused = await W.focusTick(rthEnv(f), at(9, 33), { fetchVendor: focusVendor(at(9, 33)), log: quiet, meter: () => ({ at: at(9, 33), daily: 6100, minuteRemaining: null, minuteResetMs: null, tokenLimit: null }) });
+  ok(focused.written === true, "the focus tick writes");
+  r = f.row(DAY);
+  deep([r.focus_calls, r.uw_daily_max, r.uw_daily_at], [1, 6100, at(9, 33)], "A FOCUS TICK COUNTS ITS ONE CALL and records the vendor's count with its instant");
 }
 
 {

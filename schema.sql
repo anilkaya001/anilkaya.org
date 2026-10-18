@@ -238,7 +238,9 @@ CREATE TABLE IF NOT EXISTS flows_clock (
   closed_probe_at         INTEGER,
   closed_days             TEXT,
   dispatch_why            TEXT,
-  summary_at              INTEGER
+  summary_at              INTEGER,
+  uw_daily                INTEGER,
+  uw_daily_at             INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS flows_ledger (
@@ -270,7 +272,11 @@ CREATE TABLE IF NOT EXISTS flows_ledger (
   stale_key     TEXT,
   nightly_at    INTEGER,
   nightly_runs  INTEGER NOT NULL DEFAULT 0,
-  updated_at    INTEGER NOT NULL
+  updated_at    INTEGER NOT NULL,
+  t1_calls      INTEGER NOT NULL DEFAULT 0,
+  focus_calls   INTEGER NOT NULL DEFAULT 0,
+  uw_daily_max  INTEGER,
+  uw_daily_at   INTEGER
 );
 
 CREATE TRIGGER IF NOT EXISTS flows_archive_immutable

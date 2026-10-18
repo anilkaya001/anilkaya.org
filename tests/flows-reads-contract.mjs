@@ -12,6 +12,9 @@ import { flowsReadRows } from "../server/routes/flows-read.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { flowsAiRows } from "../server/routes/flows-ai.js";
 import { flowsPipelineRows, COVERAGE_ROW_CEILING } from "../server/routes/flows-pipeline.js";
+import { flowsIngestRows } from "../server/routes/flows-ingest.js";
+import { flowsReadyRows } from "../server/routes/flows-ready.js";
+import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -101,7 +104,7 @@ const HOME = [
   "/api/flows/focus", HOME_LIVE, "/api/flows/now?n=board:long,board:short,meta,focus",
 ];
 const SCHEMA_RE = /^CREATE TABLE IF NOT EXISTS flows_payload/;
-const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
+const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
 
 {
   const f = fakeD1();
@@ -113,9 +116,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   eq(f.count(SCHEMA_RE), 1,
      "SINGLE-FLIGHT SCHEMA: thirteen concurrent requests on a cold isolate run the twenty-statement schema batch once, " +
      "not once each (the investigation counted 17 redundant batches per cold home load, when the page made 17 requests)");
-  eq(f.count(PRAGMA_RE), 1, "and the clock-column PRAGMA of the schema bootstrap once");
+  eq(f.count(PRAGMA_RE), 1, "and the two column PRAGMAs of the schema bootstrap, the clock's and the ledger's, ride that one batch");
   const schema = f.trips.find((t) => t.sqls.some((s) => SCHEMA_RE.test(s)));
-  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 22 &&
+  ok(schema.kind === "batch" && PRAGMA_RE.test(schema.sqls[schema.sqls.length - 1]) && schema.sqls.length === 23 &&
      !f.trips.some((t) => t.kind === "all" && PRAGMA_RE.test(t.sqls[0])),
      "THE PRAGMA RIDES THE SCHEMA BATCH as its last statement, after the CREATE of flows_clock, not a trip of its own after it " +
      "(two sequential trips before any read on a cold isolate before, one now)");
@@ -801,9 +804,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const getVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getCoverage = await client(f.D1, { FLOWS_COVERAGE: "on", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const cost = async (path, { init, vendor = false, coverage = false } = {}) => {
+  const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false } = {}) => {
     const n = f.trips.length;
-    const r = await (coverage ? getCoverage : vendor ? getVendor : get)(path, init);
+    const r = await (coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -823,6 +827,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
     ["/api/flows/strategy?t=NVDA&expiry=2026-10-16", 3, { vendor: true }],
     ["/api/flows/dossier?t=NVDA", 20, { vendor: true }], ["/api/flows/dossier?t=LITE", 20, { vendor: true }], ["/api/flows/dossier?t=ZZZZ", 20, { vendor: true }],
     ["/api/flows/coverage", COVERAGE_ROW_CEILING, { coverage: true }],
+    ["/api/flows/ready", 8, { owner: true }],
+    ["/api/flows/ops", 24, { owner: true }],
+    ["/api/flows/ops?part=ai", 280, { owner: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -852,8 +859,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_clock\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPipelineRows(stub)).rows.map((r) => r.path);
-  ok(routerPaths.length >= 20 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk and flows-ai families: " + routerPaths.length + " rows");
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub))
+    .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
+  ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
+  ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");
   expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
   const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);
   const declared = [...new Set([...routerPaths, ...chain])]

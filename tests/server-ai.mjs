@@ -63,6 +63,7 @@ function scenario({ brief = "none", board = "none", questionFails = false, askBo
     },
     briefWithLive: async (env, index) => { rec("briefWithLive", index); return { index: { ...index, live: true }, overlay: null }; },
     askFloodPeriodS: 60,
+    aiCap: (env) => { rec("aiCap"); return { neurons: 30000, calls: 2500 }; },
   };
   return { log, deps };
 }
@@ -72,7 +73,7 @@ async function reference(path, rc, d) {
   const { json, HttpError, requireTicker, requireSameOrigin, tickerParam } = K;
   const askSpend = d.askSpend;
   if (path === "/api/flows/ai-usage") {
-    return json({ spend: await askSpend(env) });
+    return json({ spend: await askSpend(env), cap: d.aiCap(env) });
   }
   if (path === "/api/flows/summary") {
     const subject = tickerParam(url);
@@ -257,6 +258,8 @@ CASES.push({ path: "/api/flows/ask", q: "", method: "POST", init: ASK_INIT.plain
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:/.test(src), "and imports neither the Worker nor the platform");
   expect(w, /await aiCall\(env, aiDeps\(env\)/, { min: 4, max: 4, why: "all four Worker call sites go through the broker and are still found in the Worker's closure after the move" });
   expect(w, /async function summaryResponse\(/, { min: 1, max: 1, why: "the helpers the rows call stay one copy each in the Worker" });
+  expect(w, /aiCap: FLOWS_READING\.aiCapOf/, { min: 1, max: 1, why: "the usage row is handed the enforced cap, so the page never measures spend against the free allowance" });
+  expect(src, /cap: aiCap\(env\)/, { min: 1, max: 1, why: "and the usage body carries it beside the spend" });
 }
 
 globalThis.Date = RealDate;

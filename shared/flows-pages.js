@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "308";
+export const ASSET_VERSION = "311";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -115,8 +115,13 @@ export const FLOWS_NAV = [
   ] },
   { group: "Operations", id: "railOps", only: "status", items: [
     { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
+    { key: "latency", href: "/flows/status/#view=latency", label: "Latency", glyph: "clock" },
   ] },
 ];
+
+const RAIL_END = `
+  </nav>
+  <div class="fx-side-f">`;
 
 const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
@@ -125,14 +130,28 @@ const TABS = [
   { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "events", "political"] },
 ];
 
+const railItem = (active) => (it) => {
+  if (it.ownerOnly && it.key !== active) return "";
+  const on = it.key === active;
+  const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
+  return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
+    `${glyph(it.glyph)}<span class="rail-label">${it.label}</span>${badge}</a>`;
+};
+
+const railGroup = (g, active) => `
+    <p class="rail-group" id="${g.id}">${g.group}</p>
+    <div class="rail-items" role="group" aria-labelledby="${g.id}">
+      ${g.items.map(railItem(active)).filter(Boolean).join("\n      ")}
+    </div>`;
+
+export function ownerNav(html) {
+  const text = String(html);
+  if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
+  const ops = FLOWS_NAV.find((g) => g.id === "railOps");
+  return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
+}
+
 const sidebar = (active, username) => {
-  const item = (it) => {
-    if (it.ownerOnly && it.key !== active) return "";
-    const on = it.key === active;
-    const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
-    return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
-      `${glyph(it.glyph)}<span class="rail-label">${it.label}</span>${badge}</a>`;
-  };
   const who = escapeHTML(String(username || ""));
   return `
 <aside class="fx-side" id="fxSide" aria-label="Sidebar">
@@ -140,13 +159,7 @@ const sidebar = (active, username) => {
     <a class="fx-mark" href="/" aria-label="anilkaya.org">&#949;</a>
     <span class="fx-side-t">Flows</span>
   </div>
-  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.filter((g) => !g.only || g.only === active).map((g) => `
-    <p class="rail-group" id="${g.id}">${g.group}</p>
-    <div class="rail-items" role="group" aria-labelledby="${g.id}">
-      ${g.items.map(item).filter(Boolean).join("\n      ")}
-    </div>`).join("")}
-  </nav>
-  <div class="fx-side-f">
+  <nav class="flows-rail" aria-label="Flows">${FLOWS_NAV.filter((g) => !g.only || g.only === active).map((g) => railGroup(g, active)).join("")}${RAIL_END}
     <nav class="fx-site" aria-label="Site">
       <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
     </nav>
@@ -1157,30 +1170,66 @@ export function strategyPage({ username = "" } = {}) {
 export const FLOWS_SPRITE = SPRITE;
 
 export function statusPage({ username = "" } = {}) {
-  const module = (id, title, body) => `
-    <section class="ui-card ui-mod" id="${id}Card" aria-labelledby="${id}T">
-      <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2></header>
-      <div id="${id}">${body}</div>
-    </section>`;
+  const wait = `<p class="st-miss">Reading…</p>`;
+  const later = `<p class="st-miss">Loads when this tab opens.</p>`;
+  const dlg = (id, title, parts) => `
+    <dialog class="st-dlg" id="${id}Dlg" aria-labelledby="${id}DT">
+      <header class="st-dh"><h2 id="${id}DT">${title}</h2><button type="button" class="st-x" data-close>Close</button></header>
+      <div class="st-db">${parts.map(([pid, ptitle]) => `
+        <section class="st-dsec" aria-labelledby="${pid}T"><h3 id="${pid}T">${ptitle}<span class="st-asof" id="${pid}Asof"></span></h3><div id="${pid}">${later}</div></section>`).join("")}
+      </div>
+    </dialog>`;
+  const card = (id, title, short, body, parts, host = id) => `
+    <section class="ui-card st-card" id="${id}Card" data-short="${short}" aria-labelledby="${id}T">
+      <header class="st-ch"><h2 id="${id}T">${title}</h2><span class="st-asof" id="${host}Asof"></span>${parts.length ? `<button type="button" class="st-more" data-dlg="${id}Dlg" aria-haspopup="dialog">Details</button>` : ""}</header>
+      <div class="st-cb" id="${host}">${wait}</div>
+    </section>${parts.length ? dlg(id, title, parts) : ""}`;
+  const tile = (id, label) => `
+    <div class="st-tile" id="${id}"><span class="st-tile-l">${label}</span><span class="st-tile-v">—</span><span class="st-tile-s">Reading…</span></div>`;
+  const panel = (view, hidden, cards) => `
+  <div class="st-panel" id="stPanel-${view}" role="tabpanel" aria-labelledby="stTab-${view}" data-view="${view}"${hidden ? " hidden" : ""}>
+    <div class="st-grid st-grid-${view}">${cards}
+    </div>
+  </div>`;
   return flowsDocument({
     title: "Status",
-    description: "Owner view of the real-time rail, the nightly run and the model spend, read from routes the site already serves.",
+    description: "Owner view of site health, capacity against the plan, feed latency and data coverage, read from routes the site already serves.",
     active: "status", chrome: false, username,
     styles: ["/assets/css/flows-status.css"],
     scripts: ["/assets/js/flows-status.js"],
     body: `
-  <div id="stMain">
-  <header class="flows-head st-head" data-fx-hero>
+  <div id="stMain" class="st">
+  <header class="st-title" data-fx-hero>
     <h1 id="fxTitle">Status</h1>
-    <p class="st-meta" id="stMeta"></p>
-    <p class="st-meta" id="stReady" role="status">Reading readiness…</p>
+    <p class="st-stamp" id="stMeta"></p>
+    <div class="st-act"><p class="st-note" id="stNote" role="status">Reading the status…</p><button type="button" class="st-again" id="stAgain">Read again</button></div>
   </header>
-  <div class="st-bar"><button type="button" class="st-again" id="stAgain">Read again</button><p id="stNote" role="status">Reading the status…</p></div>
-  <div class="st-grid">
-${module("stRail", "Real-time rail", `<p class="st-miss">Reading…</p>`)}
-${module("stNight", "Nightly run", `<p class="st-miss">Reading…</p>`)}
-${module("stAi", "Model spend today", `<p class="st-miss">Reading…</p>`)}
+  <div class="st-ready"><p id="stReady" role="status">Reading readiness…</p><button type="button" class="st-more" id="stWhy" data-dlg="stReadyDlg" aria-haspopup="dialog" hidden>Blockers</button></div>
+  <dialog class="st-dlg" id="stReadyDlg" aria-labelledby="stReadyDT"><header class="st-dh"><h2 id="stReadyDT">Readiness blockers</h2><button type="button" class="st-x" data-close>Close</button></header><div class="st-db" id="stReadyBody"></div></dialog>
+  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Vendor calls today")}${tile("stTileAi", "Model neurons today")}
   </div>
+  <div class="st-tabs" id="stTabs"></div>
+  <div class="st-sub" id="stSub"></div>
+  <div class="st-stage">${panel("health", false, `
+${card("hEng", "Engines", "Engines", wait, [["stEng", "Engine detail"]])}
+${card("hRail", "Real-time rail", "Rail", wait, [["stRail", "Rail detail"]])}
+${card("hNight", "Nightly run", "Nightly", wait, [["stNight", "Nightly stage ledger"]])}
+${card("hSw", "Switches", "Switches", wait, [["stSw", "All switches"]])}`)}${panel("capacity", true, `
+${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"]])}
+${card("cAi", "Model day", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
+${card("cPlat", "Platform meters", "Platform", later, [["stMeters", "All meters"]])}
+${card("cLimits", "Limits enforced", "Limits", later, [["stLimits", "Limits enforced today"], ["stPlan", "Plan lines and sources"]])}`)}${panel("latency", true, `
+${card("lFeeds", "Feed latency now", "Feeds", later, [["stFeeds", "Feed latency, per topic"]])}
+${card("lSession", "Through the session", "Session", later, [["stSessionTbl", "Quote age, every pass"]], "stSession")}
+${card("lStored", "Stored feeds", "Stored", later, [["stStored", "Stored feeds"]])}
+${card("lTime", "Timing and socket", "Timing", later, [["stTiming", "Engines' timing"], ["stSocket", "Socket upstream"], ["stBrowser", "This browser"]])}`)}${panel("coverage", true, `
+${card("kStore", "Payload store", "Store", later, [["stCover", "Every stored key"]])}
+${card("kNight", "Nightly coverage", "Coverage", later, [])}`)}
+  </div>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-chart.js")}"></i>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-latency.js")}"></i>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-capacity.js")}"></i>
+  <i hidden data-defer="status-panels" data-src="${v("/assets/js/flows-status-coverage.js")}"></i>
   </div>`,
   });
 }

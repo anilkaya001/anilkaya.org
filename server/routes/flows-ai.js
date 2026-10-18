@@ -6,9 +6,9 @@ const row = (name, methods, handler) => ({ id: "flows." + name, path: "/api/flow
 
 export function flowsAiRows(deps) {
   const { askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
-    readFlowsPayload, briefWithLive, askFloodPeriodS } = deps;
+    readFlowsPayload, briefWithLive, askFloodPeriodS, aiCap } = deps;
 
-  const aiUsage = async ({ env }) => json({ spend: await askSpend(env) });
+  const aiUsage = async ({ env }) => json({ spend: await askSpend(env), cap: aiCap(env) });
 
   const summary = async ({ env, ctx, url, session }) => {
     const subject = tickerParam(url);

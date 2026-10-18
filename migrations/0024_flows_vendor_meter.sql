@@ -1,0 +1,6 @@
+ALTER TABLE flows_clock ADD COLUMN uw_daily INTEGER;
+ALTER TABLE flows_clock ADD COLUMN uw_daily_at INTEGER;
+ALTER TABLE flows_ledger ADD COLUMN t1_calls INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE flows_ledger ADD COLUMN focus_calls INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE flows_ledger ADD COLUMN uw_daily_max INTEGER;
+ALTER TABLE flows_ledger ADD COLUMN uw_daily_at INTEGER;

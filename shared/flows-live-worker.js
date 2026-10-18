@@ -32,7 +32,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
     "early_close INTEGER, tape_at INTEGER, tape_moved_at INTEGER, live_dispatched_at INTEGER, live_done_at INTEGER, " +
     "live_redispatched_at INTEGER, nightly_day TEXT, nightly_dispatched_at INTEGER, nightly_redispatched_at INTEGER, " +
     "summary_stamp TEXT, updated_at INTEGER, tier1_at INTEGER, tier1_ok_at INTEGER, tier1_why TEXT, " +
-    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER)",
+    "closed_probe_at INTEGER, closed_days TEXT, dispatch_why TEXT, summary_at INTEGER, uw_daily INTEGER, uw_daily_at INTEGER)",
   LEDGER_SCHEMA_SQL,
   "CREATE TRIGGER IF NOT EXISTS flows_archive_immutable BEFORE UPDATE ON flows_payload " +
     "WHEN OLD.id GLOB 'board:*:[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' " +
@@ -51,7 +51,7 @@ export const LIVE_SCHEMA_SQL = Object.freeze([
 export const CLOCK_ADDED_COLUMNS = Object.freeze([
   Object.freeze(["tier1_at", "INTEGER"]), Object.freeze(["tier1_ok_at", "INTEGER"]), Object.freeze(["tier1_why", "TEXT"]),
   Object.freeze(["closed_probe_at", "INTEGER"]), Object.freeze(["closed_days", "TEXT"]), Object.freeze(["dispatch_why", "TEXT"]),
-  Object.freeze(["summary_at", "INTEGER"]),
+  Object.freeze(["summary_at", "INTEGER"]), Object.freeze(["uw_daily", "INTEGER"]), Object.freeze(["uw_daily_at", "INTEGER"]),
 ]);
 
 export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
@@ -90,6 +90,7 @@ const CLOCK_COLUMNS = Object.freeze({
   nightlyRedispatchedAt: "nightly_redispatched_at", summaryStamp: "summary_stamp",
   tier1At: "tier1_at", tier1OkAt: "tier1_ok_at", tier1Why: "tier1_why",
   closedProbeAt: "closed_probe_at", closedDays: "closed_days", dispatchWhy: "dispatch_why", summaryAt: "summary_at",
+  uwDaily: "uw_daily", uwDailyAt: "uw_daily_at",
 });
 
 export function tier1Why(value) {
@@ -431,7 +432,7 @@ export function liveMode(env) {
   return m === "off" ? "off" : m === "worker" ? "worker" : "actions";
 }
 
-export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = console } = {}) {
+export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = console, meter = null } = {}) {
   const out = { tier1: null, dispatch: null, watchdog: null };
   if (!env || !env.DB) return { ...out, skipped: "no-db" };
   const today = easternDay(at);
@@ -462,12 +463,16 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const statements = [];
   const patch = {};
   let why = "not-due";
+  let calls = 0;
+  let seen = null;
 
   if (reprobe || tier1Due(at, clock)) {
     if (!env.UW_API_KEY || typeof fetchVendor !== "function") why = "error:no-key";
     else {
+      calls = TIER1_CALLS.length;
       try {
         const raws = await tier1Reads(fetchVendor);
+        seen = typeof meter === "function" ? meter() : null;
         Object.assign(patch, sessionStatePatch(clock, raws, at, today));
         const payload = shapeMarketLive(raws, { at, session: today, writer: "worker@tier1" });
         const text = JSON.stringify(payload);
@@ -497,6 +502,8 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
         out.tier1 = { written: false, why };
         emitFailure(log, "error", "tier 1 read failed", { why }, error);
       }
+      if (!seen && typeof meter === "function") seen = meter();
+      if (seen && Number.isSafeInteger(seen.daily) && seen.daily >= 0) Object.assign(patch, { uwDaily: seen.daily, uwDailyAt: seen.at });
     }
   }
   if (!telemetry) delete patch.tier1OkAt;
@@ -505,7 +512,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
   const merged = { ...(clock || {}), ...patch };
   const ledgerStatement = telemetry && today && why !== "not-due"
     ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
-      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged, LIVE_KEY_IDS) })
+      failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged, LIVE_KEY_IDS), calls, meter: seen })
     : null;
   const stalled = liveStalled(at, breadthReadAt, merged);
   const again = Number(merged.liveRedispatchedAt);
@@ -572,7 +579,7 @@ export const FOCUS_HELD_SQL = "SELECT session, read_at, (SELECT json_group_array
   "WHERE json_extract(r.value, '$[' || (SELECT f.key FROM json_each(payload, '$.fields') AS f WHERE f.value = 'px') || ']') " +
   "IS NOT NULL) AS priced FROM flows_live WHERE id = 'live:focus' AND json_valid(payload)";
 
-export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
+export async function focusTick(env, at, { fetchVendor, log = console, meter = null } = {}) {
   if (!env || !env.DB) return { skipped: "no-db" };
   if (liveMode(env) === "off") return { skipped: "off" };
   const read = await env.DB.batch([
@@ -589,6 +596,7 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   const session = easternDay(at);
   const raw = await withTimeout(fetchVendor(FOCUS_READ.path, { ticker: plan.names.join(","), limit: FOCUS_READ.limit }),
     LIVE_BUDGET.tier1TimeoutMs);
+  const seen = typeof meter === "function" ? meter() : null;
   let closes = null;
   try { closes = nightly && typeof nightly.closes === "string" ? JSON.parse(nightly.closes) : null; } catch { closes = null; }
   const base = priorCloseBase([{ name: "focus", sessionDate: nightly && nightly.session, close: closes }], session, clock);
@@ -609,7 +617,7 @@ export async function focusTick(env, at, { fetchVendor, log = console } = {}) {
   const text = usable && !lost.length ? JSON.stringify(payload) : null;
   const why = !usable ? (payload.status === "ok" ? "none-priced" : payload.reason || payload.status)
     : text === null ? "partial" : text.length > spec.maxBytes ? "over-cap" : "written";
-  const tally = (ok, partial, failed) => ledgerFocusStatement(env.DB, { day: session, at, ...tickWindow(session, clock), ok, partial, failed });
+  const tally = (ok, partial, failed) => ledgerFocusStatement(env.DB, { day: session, at, ...tickWindow(session, clock), ok, partial, failed, calls: 1, meter: seen });
   if (why !== "written") {
     emitFailure(log, "error", "live:focus not written", { why, status: payload.status, asked, hit,
       lost: lost.slice(0, 10), bytes: text === null ? null : text.length, detail: payload.detail || null });

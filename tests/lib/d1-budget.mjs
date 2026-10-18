@@ -76,7 +76,7 @@ export const COLD_START = Object.freeze({
   trips: 6,
   written: 22,
   startsPerWeekday: 312,
-  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (22 statements, 20 of them CREATE); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
+  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
 });
 
 export const TIER2 = Object.freeze({
@@ -114,7 +114,7 @@ export const PLANNED = Object.freeze([
   Object.freeze({ id: "dossier.slow-kinds", row: "P3-11", written: 800, read: 0, source: "PLAN.final.md 5.3" }),
   Object.freeze({ id: "prefs", row: "P3-35", written: 3000, read: 1200, source: "PLAN.final.md 5.3: 100 members times 30 changes; about 10 reads a member-day" }),
   Object.freeze({ id: "audit.log", row: "P2-26", written: 10, read: 0, source: "PLAN.final.md 5.3" }),
-  Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 2000, source: "PLAN.final.md 5.3: 228 rows an owner read and 38 a members view" }),
+  Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 4800, source: "24 rows a minute for 2.5 hours of owner viewing plus ten AI-block reads of 280 plus thirty coverage reads of 48" }),
   Object.freeze({ id: "coverage.view", row: "B1", written: 0, read: 6000, source: "B1 of the pipeline design: the owner's coverage read costs the 2,001-row listing ceiling at worst and about 500 rows in production (167 cards, 167 card-x, about 150 hist, 26 metadata ids), held 60 s in the Cache API, so a dozen reads a day is under 6,000" }),
   Object.freeze({ id: "lab.active-at", row: "P1-71", written: 0, read: 3, source: "PLAN.final.md 5.3: at most 3 rows after the scans are removed" }),
   Object.freeze({ id: "door.v2", row: "B3", written: 2800, read: 29400, source: "DESIGN.md 2.1 and 12 (B3, warn mode): 698 nightly posts add one manifest row each through the trigger and read two rows (the key's stored tuple and the universe's name list); the quarantine ring is priced at 700 would-have-refused events, each an insert plus its prune and body-clear rows (3), and a brake count of at most 40 rows read" }),
@@ -127,6 +127,7 @@ export const MEASURED_CEILINGS = Object.freeze({ nightlyPostWritten: 1, rosterRe
 export const D1_USERS = Object.freeze({
   "worker.js": ["engines", "members.pages", "nightly.ingest", "tier2.ingest", "ops.views", "ai.counters"],
   "server/ai.js": ["ai.counters"],
+  "server/ops.js": ["ops.views"],
   "server/schema.js": ["engines"],
   "server/store.js": ["nightly.ingest", "members.pages", "door.v2", "coverage.view"],
   "shared/flows-dossier-worker.js": ["members.pages", "dossier.slow-kinds"],
