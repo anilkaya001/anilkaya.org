@@ -4598,7 +4598,10 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(wrote.filter((k) => k === "meta").length, 1, "and it is written once");
   const stray = wrote.filter((k) => k !== "meta" && !STAGES.some((x) => declares(x, k)));
   same(stray, [], "every other key written belongs to a stage's declared keys");
-  eq(meta.stages.reduce((n, r) => n + r.keys, 0), wrote.length - 1, "and the stages' key counts add up to every write but meta's own");
+  const held = [...log.matchAll(/^ {2}\[dry-run\] held (\S+)$/gm)].map((m) => m[1]);
+  ok(held.length > 0 && held.every((k) => k.startsWith("card-x:")), `the vol leg holds its ${held.length} card-x payloads for the flow leg's merged write`);
+  same(held.filter((k) => !wrote.includes(k)), [], "and every held key is written before the run ends");
+  eq(meta.stages.reduce((n, r) => n + r.keys, 0), wrote.length - 1 + held.length, "and the stages' key counts add up to every write and hold but meta's own");
   const long = read("board-long");
   const sv = long.scoreVariance;
   ok(sv && /residual/.test(sv.basis) && /blended/.test(sv.blended.basis),

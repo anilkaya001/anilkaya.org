@@ -8,6 +8,8 @@ import { buildCard, applyReadFailures, failedRead, READ_FAILURE_PANELS, READ_FAI
 import { createCallMeter, opIdOf, classOf, quantileMs, summarize, wireDelta, LATENCY_EDGES_MS, OTHER_OP } from "../shared/flows-call-meter.js";
 import { OPS } from "../shared/flows-vendor-ops.js";
 import { createStageRunner } from "../scripts/flows-nightly/stages.mjs";
+import { stepRateController } from "../scripts/flows-nightly/vendor.mjs";
+import { RATE } from "../scripts/flows-nightly/vendor-params.mjs";
 import { nightlySource } from "./lib/source-scan.mjs";
 
 let checks = 0;
@@ -115,6 +117,45 @@ const BASE = {
   ok(!("wire" in dry.records()[0]), "a runner with no meter writes none");
   assert.throws(() => { const r = createStageRunner(); r.step("session"); r.detail({ wire: 1 }); }, /record field/);
   checks++;
+}
+
+{
+  const meter = createCallMeter();
+  for (let i = 0; i < 40; i++) meter.record({ path: "/api/stock/AAPL/option-contracts", ms: 900, status: 200 });
+  meter.record({ path: "/api/stock/AAPL/option-contracts", ms: 900, status: 503, note: { t: "plain", pg: 2, a: 0 } });
+  meter.record({ path: "/api/option-trades/multi-leg", ms: 80, status: 422, note: { t: "plain", pg: 500, a: 0, ticker: "AAPL", url: "/api/option-trades/multi-leg?ticker_symbol=AAPL" } });
+  meter.record({ path: "/api/option-trades/multi-leg", ms: 90, status: 422, note: { t: "dot", pg: 500, a: 0 } });
+  meter.record({ path: "/api/option-trades/multi-leg", ms: 70, status: 200, kind: "parse", note: { pg: 0, a: 0 } });
+  meter.record({ path: "/api/option-trades/multi-leg", ms: 60, status: 200 });
+  const snap = meter.snapshot();
+  eq(snap.ops["multi-leg"].codes, { 422: 2, parse: 1 }, "every failed attempt is filed by its exact code: the HTTP status, or timeout, network or parse");
+  eq(snap.ops["multi-leg"].classes, { "4xx": 2, network: 1, "2xx": 1 }, "while the class tally keeps its seven classes");
+  eq(snap.ops["multi-leg"].first, [{ code: "422", ms: 80, t: "plain", pg: 500, a: 0 }, { code: "422", ms: 90, t: "dot", pg: 500, a: 0 }, { code: "parse", ms: 70, pg: 0, a: 0 }],
+    "the first three failures keep their code, time, ticker shape, page and attempt, and never the ticker or the URL");
+  const s = summarize(snap, { top: 1 });
+  eq(s.slowest.map((o) => o.op), ["option-contracts"], "multi-leg is not among the slowest");
+  eq(s.fails.map((f) => [f.op, f.bad, f.codes]), [["multi-leg", 3, { 422: 2, parse: 1 }], ["option-contracts", 1, { 503: 1 }]],
+    "BUT THE SUMMARY NAMES EVERY OPERATION THAT FAILED, worst first, with its codes");
+  ok(JSON.stringify(s.fails).length < 600, "in a few hundred bytes");
+
+  let wire = { n: 0, ms: 0, bytes: 0, bad: 0 };
+  let fails = {};
+  const runner = createStageRunner({ clock: () => 0, wire: () => ({ ...wire }), fails: () => ({ ...fails }) });
+  runner.step("session");
+  wire = { n: 90, ms: 9000, bytes: 0, bad: 3 };
+  fails = { "multi-leg 422": 2, "option-contracts 503": 1 };
+  runner.step("universe");
+  wire = { n: 95, ms: 9500, bytes: 0, bad: 3 };
+  runner.finish();
+  eq(runner.records()[0].wire.fail, "multi-leg 422: 2, option-contracts 503: 1", "a stage with failed calls says which operation failed and how");
+  ok(!("fail" in runner.records()[1].wire), "and a clean stage says nothing");
+
+  let st = { delayMs: 150, floorMs: 150 };
+  for (let i = 0; i < 5; i++) st = stepRateController(st, "error");
+  eq(st, { delayMs: 150 * RATE.errorBackoffX, floorMs: 150 },
+    "five failures in a row slow the pace to four times the floor, not to the 5 s ceiling: one failing call's retries no longer stall every other call");
+  eq(stepRateController({ delayMs: 5000, floorMs: 150 }, "error").delayMs, 5000, "and a failure never shortens a backoff a 429 set");
+  ok(RATE.errorBackoffX * RATE.floorCeilingMs <= RATE.maxDelayMs, "the error ceiling sits inside the 5 s per-call ceiling at every floor");
 }
 
 {

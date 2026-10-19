@@ -17,6 +17,8 @@ export const RATE = {
   maxRetryAfterMs: 30_000,
 
   floorCeilingMs: 400,
+
+  errorBackoffX: 4,
 };
 
 export const CALL_COST = Object.freeze({

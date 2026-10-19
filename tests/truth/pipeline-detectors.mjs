@@ -4,15 +4,17 @@ import * as contracts from "../../shared/flows-contracts.js";
 import * as products from "../../shared/flows-products.js";
 import * as meter from "../../shared/flows-call-meter.js";
 import * as stages from "../../scripts/flows-nightly/stages.mjs";
-import { boot } from "../pipeline-sim/index.mjs";
+import * as flowLeg from "../../scripts/flows-legs/flow.mjs";
+import { boot, freshStore, freshVendor } from "../pipeline-sim/index.mjs";
 import { clientScenario } from "../pipeline-sim/client.mjs";
 import { cardScenario } from "../pipeline-sim/cards.mjs";
 import { storeScenario } from "../pipeline-sim/store.mjs";
 import { contractsScenario } from "../pipeline-sim/contracts.mjs";
 import { meterScenario, stagesScenario } from "../pipeline-sim/meter.mjs";
 import { deepenScenario } from "../pipeline-sim/deepen.mjs";
+import { volflowScenario } from "../pipeline-sim/volflow.mjs";
 
-export const SEEDS = Object.freeze({ client: 10, card: 24, store: 40, contracts: 25, meter: 6, stages: 25, deepen: 14 });
+export const SEEDS = Object.freeze({ client: 10, card: 24, store: 40, contracts: 25, meter: 6, stages: 25, deepen: 14, volflow: 8 });
 
 async function across(count, run) {
   const found = [];
@@ -46,6 +48,20 @@ export const stagesDetector = (mod) => across(SEEDS.stages, (seed) => stagesScen
 
 export const deepenDetector = (mod) => across(SEEDS.deepen, (seed) => deepenScenario(seed, mod));
 
-export const DETECTOR_OF = Object.freeze({ clientDetector, cardDetector, coverageDetector, contractsDetector, meterDetector, stagesDetector, deepenDetector });
+export async function volflowDetector(mod) {
+  const time = boot();
+  try {
+    return await across(SEEDS.volflow, async (seed) => volflowScenario(seed, {
+      time,
+      vendor: mod.uw ? mod : await freshVendor(),
+      flow: mod.runFlowLeg ? mod : flowLeg,
+      store: mod.flushHeld ? mod : await freshStore(),
+    }));
+  } finally {
+    time.uninstall();
+  }
+}
+
+export const DETECTOR_OF = Object.freeze({ clientDetector, cardDetector, coverageDetector, contractsDetector, meterDetector, stagesDetector, deepenDetector, volflowDetector });
 
 export { meter, stages, contracts };

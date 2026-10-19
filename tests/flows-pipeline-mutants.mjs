@@ -9,7 +9,7 @@ ok(new Set(PIPELINE_MUTANTS.map((m) => m.id)).size === PIPELINE_MUTANTS.length, 
 const targets = new Set(PIPELINE_MUTANTS.map((m) => m.target));
 ok(targets.size >= 7, "across " + targets.size + " production modules: " + [...targets].join(", "));
 const detectors = new Set(PIPELINE_MUTANTS.map((m) => m.detector));
-ok(detectors.size === 7, "and every detector has a mutant to prove it: " + [...detectors].join(", "));
+ok(detectors.size === 8, "and every detector has a mutant to prove it: " + [...detectors].join(", "));
 
 const rows = await runPipelineKillMatrix();
 const survived = [];

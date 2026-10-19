@@ -23,6 +23,7 @@ export const FLOW_LEG = Object.freeze({
   NOPE_KEEP: 252,
   HIST_TRIM_STEP: 21,
   POOL_MAX: 3,
+  EMIT_BACKLOG: 24,
 });
 
 export const DEEP_SECTIONS = Object.freeze([
@@ -81,7 +82,7 @@ export async function readAlertBatch(read, names, win, { limit = FLOW_LEG.ALERT_
 
 export async function readMultiLeg(read, ticker, win, { limit = FLOW_LEG.MULTI_LIMIT, maxOffset = FLOW_LEG.MULTI_MAX_OFFSET } = {}) {
   const rows = [];
-  let truncated = false, calls = 0;
+  let truncated = false, calls = 0, full = false;
   for (let offset = 0; offset <= maxOffset; offset += limit) {
     const body = await read(pathFor("multi-leg"), {
       ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: win.closeIso,
@@ -89,21 +90,22 @@ export async function readMultiLeg(read, ticker, win, { limit = FLOW_LEG.MULTI_L
     });
     calls++;
     if (body && typeof body === "object" && !Array.isArray(body) && typeof body.__failed === "string") {
-      if (!rows.length) return { rows: body, truncated: false, calls };
+      if (!rows.length) return { rows: body, truncated: false, calls, full, failedAt: offset };
       truncated = true;
-      break;
+      return { rows, truncated, calls, full, failedAt: offset };
     }
     const got = rowsOf(body, "data");
     if (got === null) {
-      if (!rows.length) return { rows: null, truncated: false, calls };
+      if (!rows.length) return { rows: null, truncated: false, calls, full, failedAt: offset };
       truncated = true;
-      break;
+      return { rows, truncated, calls, full, failedAt: offset };
     }
     for (const r of got) rows.push(r);
     truncated = got.length >= limit;
+    if (offset === 0) full = truncated;
     if (!truncated) break;
   }
-  return { rows, truncated, calls };
+  return { rows, truncated, calls, full, failedAt: null };
 }
 
 export function buildHist({ ticker, sessionDate, generatedAt, fresh, gex, volume, nope, cap = FLOW_LEG.HIST_CAP }) {
@@ -239,6 +241,23 @@ async function flowLeg(ctx) {
     }
   };
   const published = { cardX: 0, hist: 0, histHeld: 0, failed: 0, shed: 0 };
+  const mlTally = { names: 0, full: 0, pages: 0, firstBad: 0, laterBad: 0 };
+  const pending = new Set();
+  const queued = [];
+  const queue = (ticker, work) => {
+    const p = work.catch((e) => {
+      published.failed++;
+      log(`  flow ${ticker}: ${e.message}`);
+      return { status: "failed" };
+    });
+    pending.add(p);
+    queued.push(p);
+    p.then(() => pending.delete(p));
+    return p;
+  };
+  const room = async () => {
+    while (pending.size >= FLOW_LEG.EMIT_BACKLOG) await Promise.race(pending);
+  };
   const readPrior = (ticker) => Promise.resolve()
     .then(() => readStored("hist:" + ticker))
     .then((r) => (r && typeof r === "object" ? r : { payload: null, failed: true, status: 0 }))
@@ -302,9 +321,16 @@ async function flowLeg(ctx) {
       read(pathFor("nope", { ticker }), dated),
       read(pathFor("spot-exposures", { ticker }), dated),
       read(pathFor("darkpool-levels", { ticker }), dated),
-      win ? readMultiLeg(read, ticker, win) : Promise.resolve({ rows: undefined, truncated: false }),
+      win ? readMultiLeg(read, ticker, win) : Promise.resolve({ rows: undefined, truncated: false, calls: 0, full: false, failedAt: null }),
       readPrior(ticker),
     ]);
+    if (ml.calls) {
+      mlTally.names++;
+      mlTally.pages += ml.calls;
+      if (ml.full) mlTally.full++;
+      if (ml.failedAt === 0) mlTally.firstBad++;
+      else if (ml.failedAt !== null && ml.failedAt !== undefined) mlTally.laterBad++;
+    }
     const priorFailed = prior.failed === true;
     const kept = priorFailed ? [] : histNope(prior, sessionDate);
     const card = cardOf(ticker);
@@ -347,10 +373,12 @@ async function flowLeg(ctx) {
     };
     const nopeHistory = kept.slice();
     if (nope.close !== null && isDay(sessionDate)) nopeHistory.push({ d: sessionDate, v: nope.close });
-    return emit(ticker, "deep", sections, {
+    await room();
+    queue(ticker, emit(ticker, "deep", sections, {
       readAt: oldestRead, gex: gex.series, volume: volume.series, nope: nopeHistory.slice(-FLOW_LEG.NOPE_KEEP),
       priorFailed, priorStatus: prior.status || null,
-    });
+    }));
+    return { status: "queued" };
   };
 
   const crossName = async (ticker) => {
@@ -370,11 +398,13 @@ async function flowLeg(ctx) {
       volume: volume.section,
       oiWalls: oiWalls(oiRaw, { sessionDate, spot: f.spot, atr: f.atr }),
     };
-    return emit(ticker, "cross", sections, {
+    await room();
+    queue(ticker, emit(ticker, "cross", sections, {
       readAt, gex: gex.series, volume: volume.series,
       nope: priorFailed ? [] : histNope(prior, sessionDate).slice(-FLOW_LEG.NOPE_KEEP),
       priorFailed, priorStatus: prior.status || null,
-    });
+    }));
+    return { status: "queued" };
   };
 
   const lane = Math.max(1, Math.min(width, FLOW_LEG.POOL_MAX));
@@ -389,17 +419,21 @@ async function flowLeg(ctx) {
     return { status: "failed" };
   }), { width: lane, stopEarly: past });
 
+  const emitted = await Promise.all(queued);
   const skipped = deepRun.attempted.filter((a) => !a).length + crossRun.attempted.filter((a) => !a).length;
-  const sizes = [...deepRun.results, ...crossRun.results].filter((r) => r && r.bytes).map((r) => r.bytes);
+  const sizes = emitted.filter((r) => r && r.bytes).map((r) => r.bytes);
   const summary = {
     deep: deep.length, cross: cross.length,
     calls: meter.calls, failedCalls: meter.failed, alertPages,
     published, skipped,
     maxCardXBytes: sizes.length ? Math.max(...sizes) : null,
     sections: tally,
+    multiLeg: mlTally,
   };
   log(`  flow leg: ${deep.length} deep + ${cross.length} cross-section name(s), ${meter.calls} vendor ` +
     `call(s) (${meter.failed} failed), ${alertPages} flow-alert page(s)`);
+  log(`  flow multi-leg: ${mlTally.names} name(s) in ${mlTally.pages} page(s), ${mlTally.full} with a full first page; ` +
+    `${mlTally.firstBad} first page(s) failed, ${mlTally.laterBad} later page(s) failed`);
   log(`  flow leg: card-x ${published.cardX} and hist ${published.hist} published` +
     (published.histHeld ? ` (${published.histHeld} hist held unrewritten: the stored history could not be read back)` : "") +
     `, ${published.failed} failed, ` +

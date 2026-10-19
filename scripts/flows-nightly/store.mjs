@@ -391,13 +391,59 @@ export function bindStages(stages) {
 
 export const landedKeys = new Set();
 
-export async function publish(key, payload) {
+const liveOnly = (key) => {
   if (LIVE_MODE && !/^live:[a-z]+(?::[a-z]+)?$/.test(key)) {
     throw new Error(`--live publishes live:* keys only, and ${key} is not one — the session archive is never ` +
       "written by the live layer");
   }
+};
+
+export const heldKeys = new Map();
+
+export function hold(key, payload) {
+  liveOnly(key);
   publishedStore[key] = payload;
   if (activeStages) activeStages.note(key);
+  heldKeys.set(key, payload);
+  console.log(EMIT || DRY_RUN ? `  [dry-run] held ${key}` : `  held ${key} for its merged write`);
+}
+
+export async function flushHeld({ log = () => {} } = {}) {
+  const out = { held: heldKeys.size, landed: 0, flushed: 0, failed: 0 };
+  for (const [key, original] of [...heldKeys]) {
+    heldKeys.delete(key);
+    if (landedKeys.has(key)) { out.landed++; continue; }
+    const latest = publishedStore[key];
+    try {
+      await send(key, latest === undefined ? original : latest);
+      out.flushed++;
+    } catch (error) {
+      if (latest !== undefined && latest !== original) {
+        try {
+          publishedStore[key] = original;
+          await send(key, original);
+          out.flushed++;
+          log(`  ${key}: the merged payload was refused (${error.message}), the held one landed instead`);
+          continue;
+        } catch (again) {
+          error = again;
+        }
+      }
+      out.failed++;
+      log(`  ${key}: ${error.message}`);
+    }
+  }
+  return out;
+}
+
+export async function publish(key, payload) {
+  liveOnly(key);
+  publishedStore[key] = payload;
+  if (activeStages) activeStages.note(key);
+  return send(key, payload);
+}
+
+async function send(key, payload) {
   const plain = payload !== null && typeof payload === "object" && !Array.isArray(payload);
   const body = JSON.stringify(EMIT || DRY_RUN ? (plain ? { ...payload, fixture: true } : payload) : payload);
   if (EMIT || DRY_RUN) {

@@ -25,4 +25,9 @@ export async function freshVendor() {
   return import(new URL("scripts/flows-nightly/vendor.mjs", ROOT).href + "?sim=" + (++counter));
 }
 
+export async function freshStore() {
+  simEnv();
+  return import(new URL("scripts/flows-nightly/store.mjs", ROOT).href + "?sim=" + (++counter));
+}
+
 export { createVirtualTime };
