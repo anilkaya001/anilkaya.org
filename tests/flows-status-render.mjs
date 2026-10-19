@@ -330,7 +330,7 @@ try {
     const { page } = await open(browser, { view: "capacity", map });
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+21,400 of 100,000,000 calls · 0\.0%/.test(cv), "THE RECORDED ADVANCED PLAN: the whole key is set against the 100M day its dashboard states: " + cv.slice(0, 400));
-    ok(/Cap: 100,000,000 per day \(advanced plan, the plan's figure; the vendor's dashboard, observed on the key\)/.test(cv), "and the cap names the plan and the dashboard readback, in words: " + cv.slice(0, 600));
+    ok(/Cap: 100,000,000 per day; sources in Details/.test(cv), "and the card's cap line is the plan's day line, its sources in Details: " + cv.slice(0, 600));
     const tiles = await text(page, "#stTiles");
     ok(/the vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)/.test(tiles), "THE VENDOR'S DAY TURNS WHEN THE DASHBOARD SAYS, printed in TRT: " + tiles.replace(/\n/g, "|"));
     await page.click("#cLimitsCard .st-more");
@@ -342,7 +342,9 @@ try {
     await page.keyboard.press("Escape");
     await page.click("#cPlatCard .st-more");
     await page.waitForFunction(() => document.getElementById("cPlatDlg").open);
-    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(await text(page, "#cPlatDlg")), "the meter's source line says the same");
+    const platDlg = await text(page, "#cPlatDlg");
+    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(platDlg), "the meter's source line says the same");
+    ok(/Cap: 100,000,000 per day \(advanced plan, the plan's figure; the vendor's dashboard, observed on the key\)/.test(platDlg), "and in Details the cap names the plan and the dashboard readback, in words: " + platDlg.slice(0, 900));
     await page.keyboard.press("Escape");
     await page.click("#cVendorCard .st-more");
     await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
