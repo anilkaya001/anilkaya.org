@@ -302,6 +302,9 @@
     let y0 = vals.length ? Math.min(...vals) : 0, y1 = vals.length ? Math.max(...vals) : 1;
     const pad = (y1 - y0) * 0.06 || (S || 1) * 0.01;
     y0 -= pad; y1 += pad;
+    const last = num(x.last) > 0 ? x.last : null;
+    if (x.dom) { y0 = Math.min(y0, x.dom[0]); y1 = Math.max(y1, x.dom[1]); }
+    if (last !== null && (last < y0 || last > y1)) { const lp = (y1 - y0) * 0.06; y0 = Math.min(y0, last - lp); y1 = Math.max(y1, last + lp); }
     const reg = card.regime || {};
     const gp = okOf(P.gamma);
     const bars = gp && Array.isArray(gp.bars) ? gp.bars.filter((b) => b && num(b.k) !== null && num(b.g) !== null && b.k >= y0 && b.k <= y1).sort((a, b) => a.k - b.k).map((b) => ({ k: b.k, g: b.g })) : [];
@@ -315,7 +318,7 @@
     const hasScore = scoreRows.some((r) => r.v !== null);
     if (!hasScore) why.score = "The card carries no score history for these sessions.";
     return { range: RANGES[range] ? range : "1M", N: hist.length - 1, F: FWD, S, hist, Hs, q, p, qEnd: end(q), pEnd: end(p), event, levels, y0, y1, bars, book, bookSide: reg.label === "short" ? "short" : reg.label === "long" ? "long" : null,
-      flipSide: reg.crossingSide || null, score: { rows: scoreRows, has: hasScore }, why, ticker: card.ticker, sessionDate: card.sessionDate, xp, sel };
+      flipSide: reg.crossingSide || null, score: { rows: scoreRows, has: hasScore }, why, ticker: card.ticker, sessionDate: card.sessionDate, xp, sel, last };
   }
 
   function layout(m, W, H) {
@@ -348,7 +351,7 @@
     if (m.q) out.q = { up: poly(m.q, "up"), lo: poly(m.q, "lo") };
     if (m.p) out.p = { up: poly(m.p, "up"), lo: poly(m.p, "lo") };
     const gap = 14;
-    const items = m.levels.map((l) => ({ kind: l.kind, text: l.label + " " + F.px(l.px), px: l.px })).concat(m.S === null ? [] : [{ kind: "spot", text: "Spot " + F.px(m.S), px: m.S }]);
+    const items = m.levels.map((l) => ({ kind: l.kind, text: l.label + " " + F.px(l.px), px: l.px })).concat(m.S === null ? [] : [{ kind: "spot", text: (m.last ? "Last " : "Spot ") + F.px(m.last || m.S), px: m.last || m.S }]);
     const lab = phone ? [] : items;
     const ys = cluster(lab.map((l) => y(l.px) + 3.5), gap, top + 8, plotB);
     out.labels = lab.map((l, i) => ({ kind: l.kind, text: l.text, want: y(l.px) + 3.5, y: ys[i], ly1: y(l.px), ly2: ys[i] - 4 }));
@@ -1136,7 +1139,7 @@
       const prevX = prevLine ? +prevLine.getAttribute("x1") : null;
       c.repaint();
       animateRail(c.svg, prevX);
-      descEl.textContent = describe(st.m);
+      descEl.textContent = describe(st.m) + (st.hook ? st.hook.said() : "");
       paintStack();
       if (refocus) { const on = c.svg.querySelector('.ftg-xt[aria-checked="true"]'); if (on) on.focus({ preventScroll: true }); }
     };
@@ -1157,9 +1160,10 @@
       const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
       const fit = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches && room >= 250;
       const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
-      st.m = model(st.card, st.range, Object.assign({}, st.x, { expiry: st.expiry }));
+      st.m = model(st.card, st.range, Object.assign({}, st.x, { expiry: st.expiry }, st.hook && st.hook.input()));
       st.expiry = st.m.sel;
       st.W = W;
+      st.H = Hh;
       const had = st.cur;
       const c = drawChart(st.m, W, Hh, st);
       st.chart = c;
@@ -1167,7 +1171,7 @@
       if (!st.entered) { st.entered = true; animateRail(c.svg, null); }
       paintStack();
       legendEl.replaceChildren(...legend(st.m, c.L));
-      descEl.textContent = describe(st.m);
+      descEl.textContent = describe(st.m) + (st.hook ? st.hook.said() : "");
       c.svg.setAttribute("aria-describedby", descEl.id);
       c.svg.addEventListener("keydown", (e) => {
         const n = c.L.xs.length;
@@ -1196,11 +1200,13 @@
       c.svg.addEventListener("pointerleave", () => { if (c.rl) c.rl.setAttribute("hidden", ""); showCross(null); });
       apply();
       if (had !== null) showCross(had);
+      if (st.hook) st.hook.drawn();
     };
     const paintCards = () => {
       if (st.dead || !cardsHost) return;
       grid.replaceChildren(...cards(st.card, st.x).map((c) => cardEl(c)));
       apply();
+      if (st.hook) st.hook.cards();
     };
     const paintAll = () => { paintChart(); paintCards(); };
     setClaims();
@@ -1221,7 +1227,9 @@
       setRange(r) { if (RANGES[r] && r !== st.range) { st.range = r; paintChart(); } },
       setExpiry(iso) { setExpiry(iso, "api", false); },
       expiry() { return st.expiry; },
+      attach(hook) { st.hook = hook; return { st, root, grid, desc: descEl, paintChart, paintCards, setClaims }; },
       update(next) {
+        if (st.hook && next && st.hook.update(next)) return;
         if (next && typeof next === "object") {
           for (const k of ["reading", "summary", "claims"]) if (k in next) st.opts[k] = next[k];
           if (typeof next.expiry === "string") st.expiry = next.expiry;

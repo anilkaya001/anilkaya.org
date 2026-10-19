@@ -776,3 +776,15 @@ button.ft-eng { cursor: pointer; }
   .ftg-u { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; line-height: 1.2; overflow-wrap: anywhere; }
   .ftg-foot { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
 }
+.ftg-live, .ftg-gx { font: var(--t-footnote); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--label-1); }
+.ftg-gx { font-weight: 600; color: var(--accent-ink); }
+.ftg-gx[data-side="short"] { color: var(--warn); }
+.ftg-live-c { stroke: var(--label-2); stroke-opacity: 0.7; stroke-dasharray: 2 3; }
+.ftg-live-p { fill: none; stroke: var(--accent-soft); stroke-width: 1.8; stroke-linejoin: round; }
+.ftg-live-h, .ftg-live-d { fill: var(--accent-soft); }
+.ftg-live-h { fill-opacity: 0.2; }
+.ftg-dot.is-anchor { fill: var(--surface-1); stroke: var(--label-1); stroke-width: 1.4; }
+.ftg-dot-halo.is-anchor { fill-opacity: 0; }
+.ui-fresh .fx-fresh-lag { white-space: nowrap; }
+.ui-fresh:has(.fx-fresh-lag) .fx-fresh-l { min-width: 0; }
+@media (max-width: 899.98px) { .ui-fresh .fx-fresh-lag { display: none; } }

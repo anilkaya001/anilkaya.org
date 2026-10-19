@@ -355,6 +355,7 @@
     if (T.ring.length > RING[k]) T.ring.splice(0, T.ring.length - RING[k]);
     if (k === "fl") { T.dropped = num(meta.dropped) || T.dropped; T.truncated = meta.truncated === true; }
     T.meta = meta;
+    var was = T.fresh && T.fresh.state;
     T.fresh = f.fresh || T.fresh;
     T.sq = f.sq;
     T.at = f.at;
@@ -362,7 +363,7 @@
     T.cold = false;
     if (ids.length || fresh.length) T.ver++;
     stats.applied += ids.length + fresh.length;
-    if (ids.length || fresh.length) queue(k, ids, fresh, false, false);
+    if (ids.length || fresh.length || (f.fresh && f.fresh.state !== was)) queue(k, ids, fresh, false, false);
     register(k, f);
   }
 
