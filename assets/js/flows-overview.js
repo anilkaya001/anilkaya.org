@@ -1048,7 +1048,7 @@
     const m = ivDays(v.chg, v.iv30p);
     const event = isNum(v.ed) !== null && v.ed <= IV_EVENT;
     return h("span", { class: "hm-qd", "data-tone": toneOf(m), title: m === null ? "No prior-close implied volatility" : "Day move over the IV struck at the previous close" },
-      m === null ? DASH : fmtSigned(m, 1), event ? h("sup", { class: "hm-qd-e", title: IV_APART, "aria-label": IV_APART }, "E") : null);
+      m === null ? DASH : fmtSigned(m, 1), event ? h("i", { class: "hm-qd-e", role: "img", title: IV_APART, "aria-label": IV_APART }) : null);
   };
   const premOf = (v) => h("span", { class: "hm-prem", "data-tone": toneOf(v.net) }, usdS(v.net));
   const said = (v, label) => [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
