@@ -969,6 +969,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const pipe = nightlySource();
   ok(pipe.includes("harvest: harvest || universeSource"),
     "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
+  ok(/const held = fetched\.rows\.filter\(ownerHeld\);\s*if \(held\.length\) \{\s*if \(harvest\) harvest = \{ \.\.\.harvest, rows: harvest\.rows\.concat\(held\) \};\s*if \(universeSource\) universeSource = \{ \.\.\.universeSource, rows: universeSource\.rows\.concat\(held\) \};/.test(pipe),
+    "an owner holding read by ticker joins whichever source the market legs are handed, the harvest when it was usable and the sweep's rows when it was not, so the published universe carries it on both paths");
   ok(/await stages\.run\("market-universe", \(\) => publish\("universe", marketLegs\.universe\), \(error\) => \{/.test(pipe) &&
      /await stages\.run\("market-regime", \(\) => publish\("regime", marketLegs\.regime\), \(error\) => \{/.test(pipe) &&
      !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),

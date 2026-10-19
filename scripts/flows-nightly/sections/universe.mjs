@@ -270,7 +270,10 @@ export async function runUniverse(ctx) {
       { date: screenerDate });
     if (fetched.rows.length) screener = screener.concat(fetched.rows);
     const held = fetched.rows.filter(ownerHeld);
-    if (held.length && universeSource) universeSource = { ...universeSource, rows: universeSource.rows.concat(held) };
+    if (held.length) {
+      if (harvest) harvest = { ...harvest, rows: harvest.rows.concat(held) };
+      if (universeSource) universeSource = { ...universeSource, rows: universeSource.rows.concat(held) };
+    }
     console.log(`  guaranteed names: ${guaranteed.length}; ${fetched.asked.length} absent from the harvest` +
       (fetched.calls ? `, read by ticker in ${fetched.calls} call(s): ${fetched.rows.length} returned` +
         (fetched.missing.length ? `, ${fetched.missing.length} unknown to the screener (${fetched.missing.slice(0, 12).join(", ")})` : "") +
