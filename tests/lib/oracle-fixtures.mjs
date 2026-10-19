@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { askSplit } from "../../shared/flows-tape-stats.js";
 
 export const SESSION = "2026-10-16";
 export const NEXT = "2026-10-19";
@@ -38,7 +39,7 @@ export const NORM = Object.freeze({ winN: 40, premiumMedian: 150000, premiumP90:
 const CORE_URL = new URL("../../assets/js/flows-oracle-core.js", import.meta.url);
 
 export function loadCore(source) {
-  const box = vm.createContext({});
+  const box = vm.createContext({ FlowsUI: { F: { askSplit } } });
   vm.runInContext(source === undefined ? readFileSync(CORE_URL, "utf8") : source, box);
   return box.__OracleCoreTest;
 }

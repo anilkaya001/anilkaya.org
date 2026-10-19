@@ -193,10 +193,15 @@
     for (var i = 0; i < rows.length; i++) s += rows[i].prem;
     return s;
   }
+  function split(r) {
+    var g = typeof window !== "undefined" ? window : globalThis;
+    var U = g.FlowsUI;
+    return U && U.F && typeof U.F.askSplit === "function" ? U.F.askSplit(r) : null;
+  }
   function leanOf(rows) {
     var ca = 0, cb = 0, pa = 0, pb = 0, sided = 0, all = 0;
     for (var i = 0; i < rows.length; i++) {
-      var r = rows[i], a = fin(r.askPrem) || 0, b = fin(r.bidPrem) || 0, c = cpWord(r.cp);
+      var r = rows[i], a = r.stated ? r.ask : 0, b = r.stated ? r.bid : 0, c = cpWord(r.cp);
       all += r.prem;
       sided += a + b;
       if (c === "call") { ca += a; cb += b; } else if (c === "put") { pa += a; pb += b; }
@@ -222,7 +227,8 @@
       state.seen.add(key);
       var arr = state.byName.get(r.t);
       if (!arr) { arr = []; state.byName.set(r.t, arr); }
-      arr.push({ t: r.t, at: at, prem: r.prem, size: fin(r.size), askPrem: fin(r.askPrem), bidPrem: fin(r.bidPrem), cp: r.cp, k: fin(r.k), exp: typeof r.exp === "string" ? r.exp : null, sweep: r.sweep === true, id: key });
+      var sp = split(r);
+      arr.push({ t: r.t, at: at, prem: r.prem, size: fin(r.size), ask: sp ? sp.ask : 0, bid: sp ? sp.bid : 0, stated: !!(sp && sp.askStated && sp.bidStated), cp: r.cp, k: fin(r.k), exp: typeof r.exp === "string" ? r.exp : null, sweep: r.sweep === true, id: key });
     }
     if (now === null || o.live !== true) return out;
     var sess = sessionOf(now);
@@ -302,7 +308,7 @@
       var sw = all.filter(function (x) { return x.sweep && x.at > now - T.sweepMin * MIN && x.at <= now; });
       if (sw.length >= T.sweepN) {
         var ask = 0, bid = 0;
-        sw.forEach(function (x) { ask += x.askPrem || 0; bid += x.bidPrem || 0; });
+        sw.forEach(function (x) { if (x.stated) { ask += x.ask; bid += x.bid; } });
         var P3 = sumPrem(sw);
         if (ask + bid > 0 && Math.round(100 * ask / (ask + bid)) >= T.sweepAsk && P3 >= T.sweepFloor) {
           found.push({ kind: "sweeps", t: t, strength: sw.length >= 8 ? 3 : sw.length >= 6 ? 2 : 1, prem: P3,
