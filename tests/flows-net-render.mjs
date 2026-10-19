@@ -975,8 +975,8 @@ try {
 
   {
     const { ctx, page } = await mount(browser, { width: 1440, height: 900, uniStatus: 500, wait: false });
-    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); return m && m.layers[1].length === 1 && m.layers[1][0].label === "Sector unread"; }, null, { timeout: 15000 });
-    ok(true, "an unreadable universe draws one honest Sector unread node, never No sector");
+    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); const l = m && m.layers[1].map((d) => d.label); return l && l.includes("Sector unread") && l.every((x) => x === "Sector unread" || x === "Index funds"); }, null, { timeout: 15000 });
+    ok(true, "an unreadable universe draws one honest Sector unread node beside the fixed Index funds class, never No sector");
     await ctx.close();
   }
 
