@@ -469,6 +469,8 @@
 .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main > .bd-mod { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .bd-mod > .bd-table { flex: 1; min-height: 0; overflow: hidden; }
 .bd-mod > .bd-map { flex: 1; min-height: 0; }
+.bd-mod > .bd-map > .bd-map-plot { flex: 1; min-height: 0; overflow: hidden; }
+.bd-mod > .bd-map > .bd-map-foot { flex: none; }
 .bd-row[hidden] { display: none; }
 .bd-all { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font: var(--t-footnote); font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 0 var(--sp-3); height: 28px; min-height: 0; line-height: 28px; white-space: nowrap; border-radius: var(--r-pill); cursor: pointer; }
 .bd-all:hover { background: var(--fill-4); }
@@ -479,9 +481,22 @@
 .bd-dg h3 { margin: 0; font: var(--t-title3, 600 17px / 1.2 var(--font-text)); }
 .bd-dt { overflow: auto; min-height: 0; }
 .bd-dt .bd-table { margin-inline: 0; }
+.bd-dt .bd-head { top: 0; }
 .bd-q-in { text-overflow: ellipsis; }
 @media (prefers-reduced-motion: reduce) { .bd-row.is-in, .bd-row.is-flip { animation: none; transition: none; } }
 .bd-mod > .bd-table > .bd-head { position: relative; top: 0; }
 .bd-mod .ui-mod-sp { position: relative; align-self: stretch; min-width: 0; }
 .bd-mod > .bd-tools { flex: none; }
 .bd-mod > .bd-table:has(> .bd-body:empty) { display: none; }
+#bdHero .bd-v-short { display: none; }
+@container chips (max-width: 420px) {
+  #bdHero .bd-v-full { display: none; }
+  #bdHero .bd-v-short { display: inline; }
+}
+.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-table { padding-bottom: 56px; }
+.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map > .bd-map-foot { padding-inline-end: 64px; }
+.flows-head .bd-meta { min-height: 18px; margin: var(--sp-1) 0 0; color: var(--label-2); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+@media (max-width: 767.98px) {
+  .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+}
+@media (min-width: 768px) { .flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map { padding-bottom: 28px; } }

@@ -37,7 +37,7 @@
   const st = {
     payload: null, rows: [], sortKey: null, sortDir: "desc", q: "", view: "list",
     trackState: "loading", uni: null, uniIndex: null, uniState: { state: "pending", reason: "Reading the cross-section." },
-    horizon: null, knowsDeep: false, painted: false, mapChart: null, hasIdea: false,
+    horizon: null, knowsDeep: false, painted: false, mapChart: null, hasIdea: false, livePx: false,
   };
   const mem = { rows: "absent", status: null, note: null, prior: null };
 
@@ -359,7 +359,10 @@
 
   function ideaCell(row) {
     const name = ideaOf(row);
-    if (!name) return h("span", { class: "bd-q", title: "No structure cleared for this name tonight" }, DASH);
+    if (!name) {
+      const day = st.payload && st.payload.sessionDate ? F.day(st.payload.sessionDate) : null;
+      return h("span", { class: "bd-q", title: "No structure cleared for this name " + (day && day !== DASH ? "for the " + day + " session" : "in the last nightly run") }, DASH);
+    }
     const svg = UI.chart.payoff(null, { structure: name });
     return h("span", { class: "bd-idea", role: "img", "aria-label": "Lead idea: " + name, title: cap(name) }, svg);
   }
@@ -741,7 +744,8 @@
       }
       const hid = rows.length - n;
       allBtn.hidden = hid === 0;
-      allBtn.textContent = hid ? "Show all " + rows.length : "Show all";
+      const pool = !WATCH && !st.q && st.payload ? num(st.payload.cleared) : null;
+      allBtn.textContent = hid ? "Show all " + rows.length + (pool !== null && pool > rows.length ? " of " + pool : "") : "Show all";
       const sp = modHead && modHead.querySelector(".ui-mod-sp");
       if (!allBtn.isConnected && sp) sp.append(allBtn);
     } finally { fitting = false; }
@@ -807,6 +811,11 @@
     return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
   }
 
+  function shortMoney(v) {
+    const a = Math.abs(v), u = a >= 1e9 ? 1e9 : a >= 1e6 ? 1e6 : a >= 1e3 ? 1e3 : 1;
+    return F.money(v, true, a / u >= 10 ? 0 : 1);
+  }
+
   function sideHero(payload, rows) {
     const scored = num(payload.scored);
     const cleared = num(payload.cleared) ?? rows.length;
@@ -867,7 +876,9 @@
     });
 
     const premChip = UI.gaugeChip({
-      diverging: gross ? (sum / gross) * 100 : null, value: prem.length ? F.money(sum, true) : DASH, label: "Net premium",
+      diverging: gross ? (sum / gross) * 100 : null,
+      value: prem.length ? [h("span", { class: "bd-v-full" }, F.money(sum, true)), h("span", { class: "bd-v-short" }, shortMoney(sum))] : DASH,
+      label: [h("span", { class: "bd-v-full" }, "Net premium"), h("span", { class: "bd-v-short" }, "Net prem.")],
       tone: prem.length ? toneOf(sum) : null,
       info: () => ({
         title: "Net premium", asOf,
@@ -1272,6 +1283,15 @@
       const plot = h("div", { class: "bd-map-plot" });
       mapHost.replaceChildren(plot, h("div", { class: "bd-map-foot" }, legend, UI.infoButton("the board map", mapInfo, { small: true })));
       st.mapChart = UI.chart.mount(plot, drawMap);
+      if (typeof ResizeObserver === "function") {
+        let tall = plot.clientHeight;
+        new ResizeObserver(() => {
+          const now = plot.clientHeight;
+          if (Math.abs(now - tall) < 2 || !st.mapChart || mapHost.hidden) return;
+          tall = now;
+          st.mapChart.redraw(false);
+        }).observe(plot);
+      }
     } else {
       st.mapChart.redraw(false);
     }
@@ -1480,6 +1500,7 @@
     if (lapsed()) {
       for (const [row, was] of held) Object.assign(row, was);
       held.clear();
+      if (st.livePx) { st.livePx = false; paintBoardMeta(); }
       if (!streamed) pollLive(6e4);
       refresh(["t", "px"], true);
       return;
@@ -1506,6 +1527,7 @@
       hit++;
     }
     if (!hit) return;
+    if (!st.livePx) { st.livePx = true; paintBoardMeta(); }
     if (!streamed) {
       pollLive(wait);
       if (live.fresh && typeof live.fresh.readAt === "string") UI.freshness({ readAt: live.fresh.readAt, live: true, source: "strips" });
@@ -1528,6 +1550,17 @@
     if (rt) rt.on("px", () => takeLive(UI.rt.strips()));
   }
 
+  function paintBoardMeta() {
+    const meta = document.getElementById("bdMeta");
+    const p = st.payload;
+    if (!meta || !p) return;
+    const d = typeof p.sessionDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.sessionDate) ? p.sessionDate : null;
+    if (!d) { meta.textContent = ""; return; }
+    const t = Date.parse(d + "T12:00:00Z");
+    const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(t).getUTCDay()] + ", " + F.day(d);
+    meta.textContent = (WATCH ? "Scored at the " : "Ranked at the ") + day + " close" + (st.livePx ? " · prices live" : "");
+  }
+
   function render() {
     statusEl.textContent = WATCH ? "Loading the session…" : "Loading the " + side + " board…";
     delete statusEl.dataset.empty;
@@ -1544,6 +1577,7 @@
         for (const r of rows) if (r && !r.idea && typeof r.t === "string" && byT.has(r.t.toUpperCase())) r.idea = byT.get(r.t.toUpperCase());
       }
       railCount(payload, rows);
+      paintBoardMeta();
       UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "board" });
       const scoredN = num(payload.scored);
 

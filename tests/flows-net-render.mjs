@@ -78,7 +78,7 @@ function expected(flow, { names = 10 } = {}) {
   const total = rows.reduce((s, r) => s + r.prem, 0);
   const kinds = { ca: 0, cb: 0, pa: 0, pb: 0, nx: 0 };
   const byName = new Map(), bySector = new Map();
-  const secOf = new Map(NAMES.map((x) => [x[0], x[1] ? SHORT.find(([re]) => re.test(x[1].toLowerCase()))[1] : "No sector"]));
+  const secOf = new Map(NAMES.map((x) => [x[0], x[1] ? SHORT.find(([re]) => re.test(x[1].toLowerCase()))[1] : ["SPY", "QQQ", "IWM", "DIA"].includes(x[0]) ? "Index funds" : "No sector"]));
   for (const r of rows) {
     let a = r.askPrem || 0, b = r.bidPrem || 0;
     if (a + b > r.prem) { a *= r.prem / (a + b); b *= r.prem / (a + b); }
@@ -149,7 +149,7 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   });
   await page.goto("https://example.test/flows/unusual/", delayFonts ? { waitUntil: "commit" } : undefined);
   if (!wait) await page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
-  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
   return { ctx, page };
 }
 
@@ -316,9 +316,10 @@ try {
     near(node("s:tech").v, want.bySector.get("Tech"), "a sector node carries its names' premium");
     near(m.lean.bull, want.bull, "bullish lean is ask-side calls plus bid-side puts");
     near(m.lean.bear, want.bear, "bearish lean is bid-side calls plus ask-side puts");
-    eq(node("s:none").label, "No sector", "index funds the universe does not carry are drawn under No sector, not guessed");
-    deep(m.layers[1].map((d) => d.label), ["Tech", "Cyclical", "Comms", "Energy", "Other", "No sector"],
-      "the sector layer is ranked by premium with Other and then No sector last, although No sector carries the second largest premium");
+    eq(node("s:fund").label, "Index funds", "SPY, QQQ and IWM, which the universe gives no sector, are the fixed Index funds class the Market Floor uses, not a guessed sector");
+    eq(node("s:none"), undefined, "and with every other name carried by the universe there is no No sector node at all");
+    deep(m.layers[1].map((d) => d.label), ["Tech", "Index funds", "Cyclical", "Comms", "Energy", "Other"],
+      "the sector layer is ranked by premium with Other last, and Index funds, which carries the second largest premium, ranks second as a class of its own");
     deep(m.layers[2].slice(0, 3).map((d) => d.label), ["NVDA", "SPY", "QQQ"], "the name layer is ranked by premium, not grouped by sector");
     eq(m.layers[2][m.layers[2].length - 1].id, "n:~", "and Other names closes it");
     await ranked(page, "at rest");
@@ -646,6 +647,7 @@ try {
     const { ctx, page } = await mount(browser, { width: 700, height: 1400, delayFonts: 1500 });
     const widths = async () => (await net(page, "return net.labels();")).filter((l) => !l.id.startsWith("cap:")).reduce((a, l) => a + l.w, 0);
     ok(await page.evaluate(() => [...document.fonts].some((f) => /Inter/.test(f.family) && f.status === "loaded")), "THE LAZY NETWORK IS FIRST DRAWN AFTER THE FONT: the load event waits for the face the page uses, so the network is measured in the loaded face");
+    for (let i = 0; i < 100 && !(await net(page, "return net.labels();")).some((l) => l.id === "s:tech"); i++) await page.waitForTimeout(100);
     const w0 = await widths();
     await page.waitForTimeout(900);
     const w1 = await widths();
@@ -752,7 +754,7 @@ try {
     await Promise.all([page.waitForURL(/\/flows\/ticker\/\?t=AAPL$/, { timeout: 10000 }), page.mouse.click(b.x + aapl2.x, b.y + aapl2.y)]);
     ok(true, `and a click there after the rotation opens AAPL's ticker page (${page.url()})`);
     await page.goto(backUrl);
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
     await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), sy);
 
     await page.mouse.move(5, 5);
@@ -973,8 +975,8 @@ try {
 
   {
     const { ctx, page } = await mount(browser, { width: 1440, height: 900, uniStatus: 500, wait: false });
-    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); return m && m.layers[1].length === 1 && m.layers[1][0].label === "Sector unread"; }, null, { timeout: 15000 });
-    ok(true, "an unreadable universe draws one honest Sector unread node, never No sector");
+    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); const l = m && m.layers[1].map((d) => d.label); return l && l.includes("Sector unread") && l.every((x) => x === "Sector unread" || x === "Index funds"); }, null, { timeout: 15000 });
+    ok(true, "an unreadable universe draws one honest Sector unread node beside the fixed Index funds class, never No sector");
     await ctx.close();
   }
 
@@ -1303,7 +1305,7 @@ try {
     eq(await page.evaluate(() => (/(?:^|; )fn_ambient=([01])/.exec(document.cookie) || [])[1]), "1", "THE CHOICE IS REMEMBERED on this device, in a first-party preference cookie scoped to /flows");
     deep(await page.evaluate(() => window.__ev), ["on:true"], "ambient:on is announced with the reader's own click as its cause");
     await page.reload();
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
     eq((await stats(page)).ambient, true, "and a reload opens on Ambient for this reader");
     await page.click("#uaNet .fn-amb");
     await page.waitForTimeout(3000);

@@ -25,6 +25,15 @@
     [/industr/, "ind", "Industrial"], [/energy/, "energy", "Energy"], [/material/, "mat", "Materials"],
     [/real estate/, "re", "Real estate"], [/utilit/, "util", "Utilities"], [/communic/, "comm", "Comms"],
   ];
+  const INDEX_ROOTS = new Set(["SPX", "SPXW", "NDX", "NDXP", "RUT", "RUTW", "VIX", "VIXW", "XSP", "DJX", "MRUT"]);
+  const INDEX_FUNDS = new Set(["SPY", "QQQ", "IWM", "DIA"]);
+  const INDEX_OPTIONS = { k: "idx", label: "Index options", full: "Index options: cash-settled index products such as SPX, NDX and VIX", tok: "--sect-none" };
+  const INDEX_FUND = { k: "fund", label: "Index funds", full: "Index funds: SPY, QQQ, IWM and DIA", tok: "--sect-none" };
+  function groupOf(t, name, unread) {
+    if (INDEX_ROOTS.has(t)) return INDEX_OPTIONS;
+    if (INDEX_FUNDS.has(t)) return INDEX_FUND;
+    return sectorGroup(name, unread);
+  }
   function sectorGroup(name, unread) {
     if (name === undefined) return unread ? { k: "unread", label: "Sector unread", full: "The universe could not be read", tok: "--sect-none" } : { k: "wait", label: "Sector pending", full: "Sector not read yet", tok: "--sect-none" };
     if (!name) return { k: "none", label: "No sector", full: "No sector in the universe", tok: "--sect-none" };
@@ -74,7 +83,7 @@
       const cp = r.cp === "C" || r.cp === "P" ? r.cp : null;
       const sp = cp ? F.askSplit(r) : null;
       let a = sp ? sp.ask : 0, b = sp ? sp.bid : 0;
-      const g = sectorGroup(secOf(t), o.unread), x = dteBucket(r, o.session), sz = num(r.size);
+      const g = groupOf(t, secOf(t), o.unread), x = dteBucket(r, o.session), sz = num(r.size);
       const push = (k, v) => { if (v > prem * 1e-9) parts.push({ r: ri, t, g, k, v, lean: KINDS[k].lean, x, sz: sz !== null && sz >= 0 ? sz : null }); };
       push(cp === "C" ? "ca" : "pa", a);
       push(cp === "C" ? "cb" : "pb", b);
@@ -383,7 +392,7 @@
           "Unsided is premium the vendor left between the quotes, or a window it never split by side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
           "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Motion has two classes. Live motion is an arrival or your hand: a flare marks a window that reached this page while it was open, a band carries light only for premium that arrived in the last five minutes, ranks glide when new data reorders them, and the view moves only while you drag it. Ambient is ambient motion, not data: light runs along every band at a pace set by its size, spheres breathe and the view sways, and none of it is a trade. Ambient starts on after the close and stays as you leave it.",
-          "Sectors come from the nightly universe; a name it does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own US session date.",
+          "Sectors come from the nightly universe; index products such as SPX and VIX are Index options, SPY, QQQ, IWM and DIA are Index funds, and any other name the universe does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own US session date.",
           "Contracts are shown for a name, a sector or an expiry only when every window in it states its size; a side or a lean shows none, because the vendor splits premium by side, not contracts.",
           "Only the largest names and sectors get their own node; the rest are folded into Other, so every layer still sums to the same premium. Drag to turn the network; double click or R recentres it; Freeze holds it still.",
         ],

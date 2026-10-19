@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "356";
+export const ASSET_VERSION = "363";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -338,7 +338,7 @@ function neuronVerdict(summary) {
 
 const pageHead = (title, active) => `
   <header class="flows-head${active === "ticker" ? " flows-head--quiet" : ""}"${active === "ticker" ? "" : " data-fx-hero"}>
-    <h1 id="fxTitle">${title}</h1>
+    <h1 id="fxTitle">${title}</h1>${["long", "short", "watch"].includes(active) ? '\n    <p class="bd-meta" id="bdMeta"></p>' : ""}
   </header>`;
 
 const UI_SCRIPT = `<script src="${v("/assets/js/flows-ui.js")}" defer></script>`;

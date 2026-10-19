@@ -78,7 +78,8 @@
 
   function loadTop() {
     return get("/api/flows/oracle?top=1").then(function (r) {
-      if (r.kind === "ok" && r.body && Array.isArray(r.body.items)) { S.top = r.body; S.route = "ok"; } else { S.top = null; S.route = r.kind === "ok" ? "failed" : r.kind; }
+      var unbuilt = r.kind === "ok" && r.body && (r.body.status === "pending" || r.body.generatedAt === null);
+      if (r.kind === "ok" && r.body && Array.isArray(r.body.items) && !unbuilt) { S.top = r.body; S.route = "ok"; } else { S.top = null; S.route = unbuilt ? "absent" : r.kind === "ok" ? "failed" : r.kind; }
       paint();
     });
   }
@@ -132,6 +133,11 @@
   function focusRec() {
     var t = ticker();
     return t ? S.rec.get(t) || null : null;
+  }
+  function streamsFlow() {
+    if (host.getAttribute("data-page") === "unusual") return true;
+    var st = U.rt && typeof U.rt.status === "function" ? U.rt.status() : null;
+    return !!(st && st.topics && st.topics.fl && (st.topics.fl.synced || st.topics.fl.rows > 0));
   }
   function feedLive() {
     var rt = U.rt;
@@ -449,9 +455,20 @@
     var now = Date.now();
     var msgs = S.msgs.filter(function (m) { return now - m.at <= 60 * MIN; }).sort(function (a, b) { return b.at - a.at; }).slice(0, 6);
     if (msgs.length) { msgs.forEach(function (m) { box.append(msgCard(m)); }); if (S.liveState.quiet > 0) box.append(h("p", { class: "orc-prov" }, "+" + S.liveState.quiet + " more quiet ones")); return box; }
-    var why = feedLive() ? "Watching live. Nothing is running far from its usual pace." : S.lastFlowAt ? "Quiet. The last flow was at " + K.trt(S.lastFlowAt) + "." : "Not watching live on this page, or the session is closed.";
-    box.append(h("p", { class: "orc-quiet" }, why));
+    if (feedLive() || S.lastFlowAt) {
+      box.append(h("p", { class: "orc-quiet" }, feedLive() ? "Watching live. Nothing is running far from its usual pace." : "Quiet. The last flow was at " + K.trt(S.lastFlowAt) + "."));
+      return box;
+    }
+    var m = U.freshness && typeof U.freshness.market === "function" ? U.freshness.market() : null;
+    if (m && !m.open) box.append(h("p", { class: "orc-quiet" }, "The regular session is closed. Live flow is watched while it is open."));
+    else if (!streamsFlow()) box.append(h("p", { class: "orc-quiet" }, "This page does not stream flow. ", h("a", { class: "orc-open", href: "/flows/unusual/" }, "Flow"), " watches it live."));
+    else box.append(h("p", { class: "orc-quiet" }, "The flow feed is not live right now."));
     return box;
+  }
+
+  function noCallText() {
+    var day = S.top && typeof S.top.session === "string" && /^\d{4}-\d{2}-\d{2}$/.test(S.top.session) ? U.F.day(S.top.session) : null;
+    return "No call clears the bar" + (day ? " for the " + day + " session." : " in the last nightly run.");
   }
 
   function topBlock() {
@@ -461,7 +478,7 @@
       box.append(h("p", { class: "orc-empty", "data-empty": "unavailable" }, S.route === "idle" ? "Reading…" : "Neuron is resting. " + (S.route === "absent" ? "No view is published yet." : "The read failed."), " ", h("button", { type: "button", class: "orc-retry", onclick: loadTop }, "Retry")));
       return box;
     }
-    if (!S.top.items.length) { box.append(h("p", { class: "orc-quiet" }, "No call clears the bar tonight.")); return box; }
+    if (!S.top.items.length) { box.append(h("p", { class: "orc-quiet" }, noCallText())); return box; }
     var ul = h("ul", { class: "orc-top" });
     S.top.items.slice(0, 6).forEach(function (it) {
       if (refuses(it.t)) return;
@@ -500,7 +517,7 @@
     el.setAttribute("data-state", items.length ? "ok" : S.route);
     el.append(h("span", { class: "orc-home-k" }, h("span", { class: "orc-home-s", "aria-hidden": "true" }, spark()), "Neuron’s view"));
     if (!items.length) {
-      var txt = { idle: "Reading…", ok: "No call clears the bar tonight.", absent: "Resting. No view is published yet.", failed: "Resting. The read failed." }[S.route] || "Resting.";
+      var txt = { idle: "Reading…", ok: noCallText(), absent: "Resting. No view is published yet.", failed: "Resting. The read failed." }[S.route] || "Resting.";
       el.append(h("span", { class: "orc-home-t" }, txt));
       return;
     }
