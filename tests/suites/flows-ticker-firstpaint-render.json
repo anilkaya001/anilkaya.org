@@ -1,0 +1,1 @@
+{"name": "flows-ticker-firstpaint-render", "class": "C", "group": "shard", "timing": false, "medianS": 90, "shard": 6, "command": "node flows-ticker-firstpaint-render.mjs", "files": ["flows-ticker-firstpaint-render.mjs"], "covers": ["assets/js/flows-ticker.js","scripts/flows-pipeline.mjs"]}
