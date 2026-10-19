@@ -1892,7 +1892,7 @@ The Neuron's always-on presence in the Flows shell (the client lane of the Oracl
 |---|---|---|
 | `assets/css/flows-oracle.css` |  | flows-oracle-render |
 | `assets/js/flows-oracle-boot.js` |  |  |
-| `assets/js/flows-oracle-core.js` |  | flows-oracle-core, flows-oracle-render |
+| `assets/js/flows-oracle-core.js` |  | flows-oracle, flows-oracle-core, flows-oracle-live, flows-oracle-render, server-oracle |
 | `assets/js/flows-oracle.js` |  | flows-oracle-render |
 
 ## tooling
