@@ -770,7 +770,8 @@ button.ft-eng { cursor: pointer; }
   .ft-glance[data-glance="on"] { --ft-cards-h: clamp(160px, 21dvh, 220px); --ft-main-h: clamp(300px, calc(100dvh - 258px - var(--ft-cards-h)), 720px); }
 }
 .ft-gsurf:has(.ftsf-empty) { min-height: 0; }
-.ft-dock-b:disabled { opacity: 0.45; cursor: not-allowed; }
+.ft-dock-b[aria-disabled="true"] { opacity: 0.45; cursor: not-allowed; }
+.ft-dock-why { font: var(--t-caption); color: var(--label-2); }
 @container (min-width: 641px) {
   .ftg-u { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; line-height: 1.2; overflow-wrap: anywhere; }
   .ftg-foot { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
