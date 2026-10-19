@@ -638,7 +638,7 @@
   function onKey(e) {
     if (!S.gesture) S.gesture = true;
     if (e.key === "Escape" && S.open && !e.defaultPrevented) { e.preventDefault(); setOpen(false); return; }
-    if (e.key === "N" && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.code === "KeyN" && e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey) {
       var a = document.activeElement, tag = a && a.tagName ? a.tagName.toLowerCase() : "";
       if (tag === "input" || tag === "textarea" || tag === "select" || (a && a.isContentEditable)) return;
       if (S.pref === "off" && PREF[S.mode] > 0) { e.preventDefault(); setPref("quiet"); }

@@ -110,9 +110,9 @@ for (const [w, h] of VIEWS) {
   await quiet.close();
   const off = await boot(browser, { cookies: [{ name: "fn_oracle", value: "off", path: "/flows" }], wait: false });
   eq(await off.page.evaluate(() => document.getElementById("fxOracle").hidden), true, "the hidden preference removes the orb");
-  await off.page.keyboard.press("Shift+N");
+  await off.page.keyboard.press("Alt+Shift+KeyN");
   await settle(off.page, 300);
-  eq(await off.page.evaluate(() => document.getElementById("fxOracle").hidden), false, "Shift+N brings it back");
+  eq(await off.page.evaluate(() => document.getElementById("fxOracle").hidden), false, "Alt+Shift+N brings it back");
   await off.close();
 }
 
