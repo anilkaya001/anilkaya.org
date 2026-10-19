@@ -213,7 +213,10 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(asOwner.includes('<a href="/flows/status/"') && asOwner.includes('href="/flows/status/#view=latency"'), path + ": with Status and Latency links");
     ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
     if (slug === "market" || slug === "unusual") continue;
-    eq(asOwner.replace(/\n    <p class="rail-group" id="railOps">[\s\S]*?<\/div>(?=\n  <\/nav>)/, ""), asMember, path + ": and is otherwise byte-identical to the member's");
+    const brand = /<a class="ff-brand" href="([^"]*)"/;
+    ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
+    const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
+    eq(noBrand(asOwner.replace(/\n    <p class="rail-group" id="railOps">[\s\S]*?<\/div>(?=\n  <\/nav>)/, "")), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
   }
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");

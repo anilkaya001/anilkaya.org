@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "331";
+export const ASSET_VERSION = "332";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -144,8 +144,23 @@ const railGroup = (g, active) => `
       ${g.items.map(railItem(active)).filter(Boolean).join("\n      ")}
     </div>`;
 
+const BRAND_GLYPH = '<svg class="ff-glyph" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle class="ff-halo" cx="8" cy="8" r="6.5"/><path class="ff-core" d="M8 2.2c.5 2.4 3.2 3.7 3.2 6.5a3.2 3.2 0 0 1-6.4 0c0-1.5.8-2.2 1.4-3.2.5.7 1 .9 1.3.9C7.7 5.6 7.9 4.4 8 2.2z"/></svg>';
+const BRAND_WORD = 'Fire &amp; Forget<sup>&#8482;</sup>';
+const BRAND_MEMBER = "/flows/about/";
+const BRAND_OWNER = "/flows/status/#view=coverage";
+const BRAND_NAME = "Fire and Forget, the nightly and live pipeline that keeps every name current";
+
+export function brandMark(href) {
+  if (!href) return `<span class="ff-brand">${BRAND_GLYPH}<span class="ff-word">${BRAND_WORD}</span></span>`;
+  const to = href === BRAND_OWNER ? "Open data coverage" : "Read about it";
+  return `<a class="ff-brand" href="${href}" aria-label="Fire &amp; Forget. ${BRAND_NAME}. ${to}">${BRAND_GLYPH}<span class="ff-word">${BRAND_WORD}</span></a>`;
+}
+
+const BRAND_LINK = brandMark(BRAND_MEMBER);
+
 export function ownerNav(html) {
-  const text = String(html);
+  let text = String(html);
+  if (text.includes(BRAND_LINK)) text = text.replace(BRAND_LINK, () => brandMark(BRAND_OWNER));
   if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
   const ops = FLOWS_NAV.find((g) => g.id === "railOps");
   return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
@@ -166,6 +181,7 @@ const sidebar = (active, username) => {
     <nav class="fx-site" aria-label="About Flows">
       <a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
     </nav>
+    ${brandMark(active === "status" ? BRAND_OWNER : BRAND_MEMBER)}
     <div class="fx-who">
       <span class="fx-avatar" aria-hidden="true">${initials(username)}</span>
       <span class="fx-who-n" title="Signed in as ${who}">${who}</span>
@@ -390,6 +406,7 @@ export function aboutPage() {
   <header class="fx-doc-h">
     <span class="fx-mark" aria-hidden="true">&#949;</span>
     <h1>Flows</h1>
+    ${brandMark(null)}
     <p class="fx-doc-lede">Options-flow research for US equities. Flows reads what the options market did, writes down what it found, and shows how old each figure is and how it was measured.</p>
   </header>
   <section aria-labelledby="aWhat">
@@ -408,6 +425,11 @@ export function aboutPage() {
       <li>Written readings are labelled as model wording or as a deterministic template. The model is asked to explain figures it was given; a sentence that adds a figure, a forecast or advice is refused.</li>
       <li>Priced structures are the output of a model, shown with the assumptions behind them. They are not recommendations.</li>
     </ul>
+  </section>
+  <section aria-labelledby="aFire">
+    <h2 id="aFire">Fire &amp; Forget&#8482;</h2>
+    <p>Fire &amp; Forget is the name for the part of Flows that runs without anyone choosing tickers. A nightly run reads the options market for the whole universe, a rotation gives each name a full card within a bounded number of nights, and a live pass keeps the session's prices and alerts current.</p>
+    <p>It promises that the work is scheduled, bounded and checked, and that a name it could not read is shown as withheld with the reason. It does not promise that every name is fresh at every moment, that the vendor is never late, or that any figure is right.</p>
   </section>
   <section aria-labelledby="aNot">
     <h2 id="aNot">What it is not</h2>
@@ -1231,6 +1253,7 @@ export function statusPage({ username = "" } = {}) {
   <div id="stMain" class="st">
   <header class="st-title" data-fx-hero>
     <h1 id="fxTitle">Status</h1>
+    ${brandMark(null)}
     <p class="st-stamp" id="stMeta"></p>
     <div class="st-act"><p class="st-note" id="stNote" role="status">Reading the status…</p><button type="button" class="st-again" id="stAgain">Read again</button></div>
   </header>
