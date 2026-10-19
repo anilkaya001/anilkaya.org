@@ -46,7 +46,8 @@ export const RAIL = {
 };
 
 export const META = {
-  generatedAt: "2026-10-12T00:30:00.000Z", sessionDate: "2026-10-09", universe: 670, cardsBuilt: 500, cardsFailed: 2, cardsSkipped: 8, apiCalls: 4100,
+  generatedAt: "2026-10-12T00:30:00.000Z", sessionDate: "2026-10-09", universe: 670, cardsBuilt: 64, cardsFailed: 2, cardsSkipped: 8, apiCalls: 4100,
+  crossSectionCards: 1, cardsTotal: 500, deepen: { mode: "on", chosen: 435, built: 435, failed: 0, carried: 0, never: 120, binding: "cap", nights: 1 },
   health: { failures: 1, warnings: 2, first: ["cards: 2 failed"] },
   vendor: { n: 24100, ms: 9e6, kb: 90000, bad: 40, slowest: [], mix: [{ op: "option-contracts", n: 9800, bad: 12 }, { op: "ohlc-1d", n: 5200, bad: 3 }, { op: "flow-per-strike", n: 3100, bad: 0 }, { op: "stock-state", n: 1500, bad: 25 }] },
   callStats: { retries: 14, rateLimited: 2, failures: 1, timedOut: 0, networkMs: 810000, permitWaitMs: 12000, rateLimitWaitMs: 3000 },

@@ -103,6 +103,12 @@
 .lt-p95 { fill: var(--accent-soft); stroke: var(--surface-1); stroke-width: 1.5; }
 .lt-ax { fill: var(--label-2); font: 400 10px / 1 var(--font-text); font-variant-numeric: tabular-nums; }
 .lt-chart { min-height: 0; }
+.lt-key { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; color: var(--label-2); font: var(--t-caption); }
+.lt-key span { display: inline-flex; align-items: center; gap: 6px; }
+.lt-key i { display: inline-block; inline-size: 16px; block-size: 0; border-top: 2px solid var(--accent); }
+.lt-key i[data-s="p90"] { border-top-color: var(--s-orange); }
+.lt-key i[data-s="max"] { border-top: 2px dashed var(--s-gray); }
+.lt-key i[data-s="line"] { border-top: 2px dashed var(--warn); }
 .lt-gap { margin-bottom: var(--sp-4); }
 .lt-meters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
 .lt-meter { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--sep); border-radius: var(--r-sm); background: var(--fill-4); }

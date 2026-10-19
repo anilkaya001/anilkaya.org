@@ -5,7 +5,7 @@
   const kit = UI && UI.statusKit;
   if (!kit) return;
   const {
-    h, DASH, num, whole, trt, clockSec, span, ago, share, bytes, median, chip, stateChip, table, facts, why, fill, unread, lagOf, lagReason,
+    h, DASH, num, whole, count, viaWord, trt, clockSec, span, ago, share, bytes, median, chip, stateChip, table, facts, why, fill, unread, lagOf, lagReason,
     engineCards, engineData, mini, rest, line, okBody, whyOf, BASIS, TOPIC_NAME, state,
   } = kit;
   const $ = (id) => document.getElementById(id);
@@ -51,17 +51,17 @@
     const watched = time && num(time.demandedMs) > 0 ? num(time.demandedMs) : null;
     const rows = [
       ["Measured as", BASIS[k]],
-      ["Via", via ? String(via) : DASH + " the upstream did not say"],
+      ["Via", via ? viaWord(via) : DASH + " the upstream did not say"],
     ];
-    if (k === "px") rows.push(["Quote age p95", t.rowLagMs && num(t.rowLagMs.p95) !== null ? span(t.rowLagMs.p95) + ", " + whole(t.rowLagMs.n) + " rows" : DASH + " no row age yet"]);
+    if (k === "px") rows.push(["Quote age p95", t.rowLagMs && num(t.rowLagMs.p95) !== null ? span(t.rowLagMs.p95) + ", " + count(t.rowLagMs.n, "row") : DASH + " no row age yet"]);
     const rtt = t.rttMs && typeof t.rttMs === "object" ? t.rttMs : null;
     rows.push(["Poll round trip", via === "socket" ? "socket: no poll" : rtt && num(rtt.p50) !== null ? "p50 " + span(rtt.p50) + ", p95 " + span(rtt.p95) : DASH + " no poll in this epoch"]);
     rows.push(["Live share of watched time", watched === null ? DASH + " not watched in this epoch"
       : share(time.liveMs, watched) + " of " + span(watched) + " (vendor lag " + share(time.vendorLagMs, watched) + ", ours " + share(time.oursMs, watched) + ")"]);
     rows.push(["Line", win ? "live window " + span(win.liveMs) + ", stale at " + span(win.staleMs) : DASH + " the rail sent no window"]);
     return h("article", { class: "lt-card", "data-topic": k },
-      h("div", { class: "lt-card-h" }, h("h3", null, TOPIC_NAME[k]), h("code", null, k), stateChip(t.fresh && t.fresh.state)),
-      has ? h("p", { class: "lt-fig" }, "p50 ", h("b", null, span(lag.p50)), " · p95 ", h("b", null, span(lag.p95)), " · ", whole(lag.n), " samples")
+      h("div", { class: "lt-card-h" }, h("h3", null, TOPIC_NAME[k]), stateChip(t.fresh && t.fresh.state)),
+      has ? h("p", { class: "lt-fig" }, "p50 ", h("b", null, span(lag.p50)), " · p95 ", h("b", null, span(lag.p95)), " · ", count(lag.n, "sample"))
         : h("p", { class: "lt-fig lt-none" }, DASH + " " + lagReason(rail, k)),
       has ? rangeBar(lag, win, TOPIC_NAME[k]) : null,
       facts(rows));
@@ -79,8 +79,8 @@
       idle ? h("p", { class: "lt-idle", role: "status" }, "Rail idle: no one is watching, so nothing is polled. Its latency figures live in memory and are reset when the last viewer leaves, so an idle rail shows none.") : null,
       h("div", { class: "lt-feeds" }, ...FEEDS.map((k) => feedCard(k, rail, now)),
         h("article", { class: "lt-card", "data-topic": "prints" },
-          h("div", { class: "lt-card-h" }, h("h3", null, "Option prints"), h("code", null, "prints"), chip("withheld", "no feed")),
-          h("p", { class: "lt-fig lt-none" }, DASH + " No option-prints feed on the rail (F-94, F-116)."))),
+          h("div", { class: "lt-card-h" }, h("h3", null, "Option prints"), chip("withheld", "no feed")),
+          h("p", { class: "lt-fig lt-none" }, DASH + " The rail carries no feed of single option prints; it is not built."))),
       h("p", { class: "st-foot" }, "Behind the vendor's own stamp. The vendor's pipeline before it stamps a row is upstream of these figures. " + VENDOR_SOCKET_NOTE));
     const el = $("stFeedsAsof");
     if (el) el.textContent = rail.finished ? "read " + clockSec(rail.finished) : "";
@@ -116,30 +116,44 @@
     const mx = (lag.max || []).map((v) => num(v));
     const ahead = (lag.ahead || []).map((v) => num(v));
     const over = line === null ? null : p90.filter((v) => v !== null && v > line).length;
-    const key = [t.length, t[t.length - 1], p90[p90.length - 1], line].join("|");
-    if (key === drawn && $("stSessionChart")) return;
+    const known = (list) => list.filter((v) => v !== null);
+    const tail = known(p90).length ? Math.max(...known(p90)) : known(p50).length ? Math.max(...known(p50)) : null;
+    const top = tail === null ? null : Math.max(tail * 1.15, 1);
+    const lineIn = line !== null && top !== null && line <= top;
+    const clipped = top === null ? 0 : known(mx).filter((v) => v > top).length;
+    const legend = h("p", { class: "lt-key", "aria-hidden": "true" },
+      h("span", null, h("i", { "data-s": "p50" }), "p50 typical"), h("span", null, h("i", { "data-s": "p90" }), "p90 slow tail"),
+      h("span", null, h("i", { "data-s": "max" }), "Largest"), lineIn ? h("span", null, h("i", { "data-s": "line" }), "Live window") : null);
     const wrap = h("div", { class: "lt-chart", id: "stSessionChart" });
     const text = h("p", { class: "st-foot" },
-      "Tier 2 quote age per pass (p50, p90, largest); the rail's own per-window latency is " + DASH + " not recorded, it lives in memory. " +
-      (line === null ? "Live window not read, so no line." : "Dashed: the live window, " + whole(line) + " s.") +
-      (over === null ? "" : " " + whole(over) + " of " + whole(p90.filter((v) => v !== null).length) + " passes had p90 past it."));
-    fill(host, ...parts, wrap, text);
+      "Price age on each Tier 2 pass, in TRT; the rail's own latency stays in memory and is not recorded. " +
+      (line === null ? "The live window was not read, so there is no line." : lineIn ? "Dashed: the live window, " + span(line * 1000) + "." : "The live window, " + span(line * 1000) + ", is above the top of the chart.") +
+      (over === null ? "" : " " + whole(over) + " of " + whole(known(p90).length) + " passes had p90 past it.") +
+      (clipped ? " The largest age ran past the top on " + count(clipped, "pass", "passes") + "; every figure is in Details." : ""));
+    const key = [t.length, t[t.length - 1], p90[p90.length - 1], mx[mx.length - 1], line, host.clientHeight, host.clientWidth].join("|");
+    if (key === drawn && $("stSessionChart") && $("stSessionChart").firstChild) return;
+    fill(host, ...parts, legend, wrap, text);
+    const cs = getComputedStyle(host);
+    const gap = parseFloat(cs.rowGap) || 0;
+    const room = Math.floor(host.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0) - legend.offsetHeight - text.offsetHeight - 2 * gap - 8);
+    const height = Math.max(64, Math.min(360, room));
     fill($("stSessionTbl"), table("Tier 2 quote age by pass", ["Pass", "p50", "p90", "Largest"], t.map((_, i) => [labels[i], p50[i] === null ? DASH : span(p50[i] * 1000), p90[i] === null ? DASH : span(p90[i] * 1000), mx[i] === null ? DASH : span(mx[i] * 1000)])));
     const C = window.FlowsUI.chart;
     if (!C || typeof C.plot !== "function") {
       fill(wrap, h("p", { class: "st-miss" }, DASH + " The chart library did not load; the passes are in Details."));
       return;
     }
+    const age = (v) => span(v * 1000);
+    const cap = (list) => list.map((v) => (v === null || top === null ? v : Math.min(v, top)));
+    const SERIES = [["p50", p50, "--accent", false], ["p90", p90, "--s-orange", false], ["Largest", mx, "--s-gray", true]];
     try {
       chart = C.plot(wrap, {
-        kind: "line", label: "Tier 2 quote age per pass", x: labels, xType: "category", table: false, smooth: false, yFormat: (v) => span(v * 1000),
-        series: [
-          { label: "p50", values: p50, color: "--accent", format: (v) => span(v * 1000) },
-          { label: "p90", values: p90, color: "--s-orange", format: (v) => span(v * 1000) },
-          { label: "Largest", values: mx, color: "--s-gray", dash: true, format: (v) => span(v * 1000) },
-        ],
-        refs: line === null ? [] : [{ y: line, dash: true, color: "--warn" }],
-        height: [88, 100, 124],
+        kind: "line", label: "Tier 2 quote age per pass", x: labels, xType: "category", table: false, smooth: false, yFormat: age, endLabels: false,
+        yDomain: top === null ? undefined : [0, top],
+        series: SERIES.map(([label, values, color, dash]) => ({ label, values: cap(values), color, dash, format: age })),
+        refs: lineIn ? [{ y: line, dash: true, color: "--warn" }] : [],
+        readout: (i) => [C.part(labels[i], "k"), ...SERIES.flatMap(([label, values]) => [C.part(label, "k"), C.part(values[i] === null ? "no reading" : age(values[i]))])],
+        height,
       });
       drawn = key;
     } catch {
@@ -192,7 +206,7 @@
     fill(host,
       mini("Timing", ["Source", "Reading"], [
         ["Tier 2 pass", t2 ? t2.lines[1] || t2.lines[0] : DASH],
-        ["Vendor socket", !rail || !rail.ok ? DASH + " rail not read" : sock ? (sock.connected ? "connected" : sock.connecting ? "connecting" : "not connected") + ", " + whole(sock.messages) + " messages" : "REST polling, no socket"],
+        ["Vendor socket", !rail || !rail.ok ? DASH + " rail not read" : sock ? (sock.connected ? "connected" : sock.connecting ? "connecting" : "not connected") + ", " + count(sock.messages, "message") : "REST polling, no socket"],
         ["This page's reads", trips.length ? "median " + span(median(trips.map((x) => x.ms))) + " over " + trips.length : DASH + " none finished"],
         ["Worker clock vs browser", off === null ? DASH + " not carried" : (off >= 0 ? "+" : "−") + span(Math.abs(off))],
       ]));
@@ -245,7 +259,7 @@
       ["Refused", refused.length ? refused.map(([k, v]) => k + " (" + v + ")").join(", ") : "none"],
       ["Messages", whole(sock.messages) + ", " + bytes(sock.bytes)],
       ["Messages a second", memo.rate ? memo.rate.perS.toFixed(1) + " between the last two reads, " + memo.rate.over.toFixed(0) + " s apart" : DASH + " needs two reads of the rail"],
-      ["Reconnects", whole(sock.reconnects) + ", " + whole(sock.failures) + " failures"],
+      ["Reconnects", whole(sock.reconnects) + ", " + count(sock.failures, "failure")],
       ["Last error", err ? [err.code, err.message, err.at ? trt(err.at, now) : null].filter(Boolean).join(", ") || "recorded" : "none"],
       ["Last message", sock.lastMsgAt ? ago(sock.lastMsgAt, now) : DASH + " none in this epoch"],
     ]), h("p", { class: "st-foot" }, "Messages a second is the change between this read and the one before it, not a rate the Worker measured."));

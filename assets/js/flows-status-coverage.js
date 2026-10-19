@@ -4,7 +4,7 @@
   const UI = window.FlowsUI;
   const kit = UI && UI.statusKit;
   if (!kit) return;
-  const { h, DASH, num, whole, trt, clockSec, ago, bytes, table, fill, unread, chip, mini, rest, line, okBody, whyOf, state } = kit;
+  const { h, DASH, num, whole, count, cardsOf, trt, clockSec, ago, bytes, table, fill, unread, chip, mini, rest, line, okBody, whyOf, state, sameDay } = kit;
   const $ = (id) => document.getElementById(id);
 
   const pctOf = (p) => (num(p) === null ? DASH : (p * 100 < 10 ? (p * 100).toFixed(1) : Math.round(p * 100)) + "%");
@@ -31,12 +31,16 @@
     if (!x.present || !x.summary) { dash(x.why); return; }
     const share = num(x.carded) !== null && num(x.universe) ? x.carded / x.universe : null;
     const usedShare = num(x.dailySeen) !== null && num(x.dayLine) ? x.dailySeen / x.dayLine : null;
+    const written = num(x.writtenAt);
+    const runToday = written !== null && sameDay(new Date(written), new Date(now));
+    const keyLabel = runToday ? "Vendor calls, the key today" : "Vendor calls, the key on the run's day";
+    const keyRead = written === null ? ", " + DASH + " when it was read is not recorded" : ", read " + trt(written, now);
     const rows = [
       ["Names with a deep read", num(x.carded) === null ? DASH : whole(x.carded) + (num(x.universe) ? " of " + whole(x.universe) + " (" + pctOf(share) + ")" : " (" + DASH + " universe size not recorded)")],
       ["Oldest deep read", x.oldest || DASH + " no read on record"],
       ["Tonight, planned and read", num(x.planned) === null ? DASH + " not recorded" : whole(x.planned) + " planned, " + (num(x.read) === null ? DASH + " not recorded" : whole(x.read)) + " read"],
       ["Vendor calls, this run", num(x.calls) === null ? DASH + " not recorded" : whole(x.calls)],
-      ["Vendor calls, the key today", num(x.dailySeen) === null ? DASH + " the vendor's counter was not read" : whole(x.dailySeen) + (num(x.dayLine) ? " of " + whole(x.dayLine) + " (" + pctOf(usedShare) + ")" : "")],
+      [keyLabel, num(x.dailySeen) === null ? DASH + " the vendor's counter was not read" : whole(x.dailySeen) + (num(x.dayLine) ? " of " + whole(x.dayLine) + " (" + pctOf(usedShare) + ")" : "") + keyRead],
       ["Ledger session", x.session || DASH + " unstamped"],
     ];
     fill(short, mini("Deepening rotation", ["Measure", "Reading"], rows, "figures"),
@@ -65,7 +69,7 @@
       const total = present.reduce((a, k) => a + (num(k.bytes) || 0), 0);
       const behind = present.filter((k) => k.session && sessionDate && k.session < sessionDate).length;
       const big = present.slice().sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
-      const capOf = (k) => (num(k.capBytes) ? bytes(k.capBytes) : DASH + " no cap");
+      const capOf = (k) => (num(k.capBytes) ? bytes(k.capBytes) : DASH + " no cap sent");
       fill(store,
         line(present.length + " of " + c.keys.length + " expected keys present · " + bytes(total) + " stored · " + behind + " behind the nightly session" + (sessionDate ? " " + sessionDate : "") +
           " · each key against its own cap"),
@@ -74,7 +78,7 @@
       fill(full,
         table("Every stored key", ["Key", "Session", "Size", "Cap", "Of its cap", "Written", "Age"], c.keys.map((k) => [k.key, verdict(k, sessionDate),
           k.present ? bytes(k.bytes) : DASH, capOf(k), k.present ? pctOf(k.share) : DASH, k.present && k.updatedAt ? trt(k.updatedAt, now) : DASH, k.present && k.updatedAt ? ago(k.updatedAt, now) : DASH]), true),
-        h("p", { class: "st-foot" }, "Sizes are the stored JSON text, each against its own cap: the universe's shedding budget, the events fitter's size, the ingest door's 128 KiB otherwise. Only the declared nightly and shared keys are read, by primary key; card rows are not counted because counting them scans the table. A key with no session stamp is shown as such, not as fresh."));
+        h("p", { class: "st-foot" }, "Sizes are the stored JSON text. Each key is measured against its own cap in the product registry: the universe against its shedding budget, events against the size its fitter keeps under, the rest against the ingest door's 128 KiB. Only the declared nightly and shared keys are read, by primary key; the card rows are not counted here because counting them scans the table. A key with no session stamp is shown as such, not as fresh."));
     }
     const night = $("kNight");
     if (!meta) {
@@ -83,7 +87,8 @@
       unread(night, "The nightly record", "no run has been published yet");
     } else {
       const universe = num(meta.universe);
-      const built = num(meta.cardsBuilt);
+      const cards = cardsOf(meta);
+      const built = cards.total;
       const hl = meta.health || null;
       const share = universe && built !== null ? built / universe : null;
       const stages = Array.isArray(meta.stages) ? meta.stages : [];
@@ -91,9 +96,10 @@
       fill(night,
         mini("Nightly coverage", ["Measure", "Reading"], [
           ["Names in the universe", whole(universe)],
-          ["Cards built", built === null ? DASH : whole(built) + " (" + pctOf(share) + " of the universe)"],
+          ["Cards built", built === null ? DASH + " the total is not recorded" : whole(built) + " (" + pctOf(share) + " of the universe)"],
+          ...(cards.split ? [["Of which", cards.split]] : []),
           ["Cards failed or skipped", whole(meta.cardsFailed) + " failed, " + whole(meta.cardsSkipped) + " skipped"],
-          ["Health gate", hl ? whole(hl.failures) + " failures, " + whole(hl.warnings) + " warnings" : DASH + " not in this record"],
+          ["Health gate", hl ? count(hl.failures, "failure") + ", " + count(hl.warnings, "warning") : DASH + " not in this record"],
           ["Stages not ok", stages.length ? String(failedStages.length) + " of " + stages.length : DASH + " no stage ledger"],
           ["Landed", trt(meta.generatedAt, now) + " · session " + (meta.sessionDate ? String(meta.sessionDate) : DASH)],
         ]),
