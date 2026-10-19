@@ -43,6 +43,7 @@ export const ERRORS = Object.freeze({
   owner_only: entry(403, "This check is limited to the owner"),
   no_question: entry(400, "Ask a question in the `question` field."),
   not_found: entry(404, "Not found"),
+  oracle_off: entry(404, "The Neuron's view is off"),
   ops_off: entry(404, "The owner operations view is off"),
   payload_too_large: entry(413, "Payload is too large"),
   ready_off: entry(404, "The readiness check is off"),

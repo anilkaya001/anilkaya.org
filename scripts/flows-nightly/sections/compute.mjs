@@ -1,6 +1,8 @@
+import { ORACLE_JOB } from "../../flows-legs/oracle.mjs";
+
 export const COMPUTE_NAME_CPU_MS = 1000;
 
-export const COMPUTE_JOBS = Object.freeze([]);
+export const COMPUTE_JOBS = Object.freeze([ORACLE_JOB]);
 
 export function processCpuMs() {
   const used = process.cpuUsage();

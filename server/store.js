@@ -5,7 +5,7 @@ import { errorText } from "../shared/flows-log.js";
 
 export const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
-export const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^calib$|^dispersion$|^deepen$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$|^focus$|^roster$/;
+export const INGEST_VIEW_KEY_RE = /^board:(long|short|watch)$|^board:(long|short):\d{4}-\d{2}-\d{2}$|^scores:\d{4}-\d{2}-\d{2}$|^scoretrack$|^calib$|^dispersion$|^deepen$|^oracle-top$|^oracle-norm$|^flowalerts$|^pulse$|^political$|^record$|^movers$|^market$|^unusual$|^events$|^sector:trix$|^sector:premium$|^news$|^brief$|^meta$|^universe$|^regime$|^ideas$|^ideas(-out)?:\d{4}-\d{2}-\d{2}(:r\d+)?$|^focus$|^roster$/;
 
 export const INGEST_META_KEYS_MAX = 96;
 export const INGEST_LIST_KINDS = Object.freeze(["card", "card-x", "hist"]);
@@ -79,7 +79,7 @@ const chunks = (list, size) => {
 };
 
 export function ingestKeyParts(key) {
-  const tickerKey = /^(card|card-x|hist):/.exec(key);
+  const tickerKey = /^(card|card-x|hist|oracle):/.exec(key);
   const card = tickerKey ? key.slice(tickerKey[0].length) : null;
   return { tickerKey, valid: card !== null ? TICKER_RE.test(card) : INGEST_VIEW_KEY_RE.test(key) };
 }
@@ -128,6 +128,15 @@ export function createFlowsStore({ ensureFlowsTables }) {
       const row = await env.DB.prepare(NIGHTLY_ROW_SQL).bind(key).first()
         .catch(() => { if (trace) trace.failed = true; return null; });
       return storedFrom(row);
+    },
+
+    async readMany(env, keys) {
+      if (!env.DB) return null;
+      await ensureFlowsTables(env);
+      const sql = NIGHTLY_ROW_SQL.replace("payload, updated_at,", "id, payload, updated_at,").replace("WHERE id = ?", "WHERE id IN (" + marks(keys.length) + ")");
+      const rows = await env.DB.prepare(sql).bind(...keys).all().catch(() => null);
+      if (!rows) return null;
+      return new Map((rows.results || []).map((r) => [r.id, storedFrom(r)]));
     },
 
     async metadata(env, asked) {

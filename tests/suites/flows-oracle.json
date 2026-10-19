@@ -1,0 +1,1 @@
+{"name": "flows-oracle", "class": "N", "group": "shard", "timing": false, "medianS": 1, "shard": 1, "command": "node flows-oracle.mjs", "files": ["flows-oracle.mjs"], "covers": ["scripts/flows-legs/oracle.mjs","scripts/flows-nightly/sections/oracle.mjs","server/routes/flows-oracle.js","shared/flows-oracle-live.js"]}

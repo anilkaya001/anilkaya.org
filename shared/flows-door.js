@@ -53,6 +53,7 @@ export const PRODUCTS = Object.freeze({
   card: product({ kind: "ticker", required: ["v", "ticker", "depth", "sessionDate", "generatedAt", "panels"] }),
   "card-x": product({ kind: "ticker", required: ["v", "ticker", "sessionDate", "generatedAt"] }),
   hist: product({ kind: "ticker", required: ["v", "ticker", "sessionDate", "generatedAt"] }),
+  oracle: product({ kind: "ticker", shrinks: true, required: ["v", "ticker", "sessionDate", "generatedAt", "state", "calls"] }),
   universe: product({ kind: "view", required: ["v", "sessionDate", "generatedAt", "n", "t", "cols", "units"] }),
   board: product({ kind: "view", required: ["v", "side", "sessionDate", "generatedAt", "rows"] }),
   roster: product({ kind: "view", required: ["v", "sessionDate", "generatedAt", "depth"] }),
@@ -63,7 +64,7 @@ export const PRODUCTS = Object.freeze({
 
 export function productOf(key) {
   const text = String(key);
-  const prefixed = /^(card-x|card|hist):/.exec(text);
+  const prefixed = /^(card-x|card|hist|oracle):/.exec(text);
   if (prefixed) return prefixed[1];
   if (text === "universe" || text === "roster" || text === "focus" || text === "meta") return text;
   if (text.startsWith("board:")) return "board";
@@ -71,7 +72,7 @@ export function productOf(key) {
 }
 
 export const tickerOfKey = (key) => {
-  const prefixed = /^(?:card-x|card|hist):(.*)$/.exec(String(key));
+  const prefixed = /^(?:card-x|card|hist|oracle):(.*)$/.exec(String(key));
   return prefixed ? prefixed[1] : null;
 };
 
@@ -225,6 +226,15 @@ function boardChecks(obj, structural) {
   }
 }
 
+const ORACLE_STATES = Object.freeze(["calm", "building", "signal", "conflict", "stale"]);
+
+function oracleChecks(obj, structural) {
+  if (obj.v !== undefined && obj.v !== 1) structural.push({ code: "schema_version", path: "v" });
+  if (obj.state !== undefined && !ORACLE_STATES.includes(obj.state)) structural.push({ code: "invalid_shape", path: "state" });
+  if (obj.calls !== undefined && !Array.isArray(obj.calls)) structural.push({ code: "rows_type", path: "calls" });
+  else if (Array.isArray(obj.calls) && obj.calls.length > 3) structural.push({ code: "invalid_shape", path: "calls" });
+}
+
 function basePanels(id, obj) {
   if (id === "card") return { names: CARD_PANELS, ok: (n) => obj.panels && isObj(obj.panels) && isObj(obj.panels[n]) && PASS.has(obj.panels[n].status) };
   if (id === "card-x") return { names: CARDX_SECTIONS, ok: (n) => isObj(obj[n]) && PASS.has(obj[n].status) };
@@ -278,6 +288,7 @@ export function inspect(key, text, { now = Date.now() } = {}) {
     if (id === "card") cardChecks(obj, structural);
     if (id === "card-x" && obj.v !== undefined && !(Number.isInteger(obj.v) && obj.v >= 1)) structural.push({ code: "schema_version", path: "v" });
     if (id === "hist" && obj.v !== undefined && !(Number.isInteger(obj.v) && obj.v >= 1)) structural.push({ code: "schema_version", path: "v" });
+    if (id === "oracle") oracleChecks(obj, structural);
     if (id === "universe") universeChecks(obj, structural, flags);
     if (id === "board") boardChecks(obj, structural);
     if (id === "focus" && obj.rows !== undefined && !isObj(obj.rows)) structural.push({ code: "invalid_shape", path: "rows" });

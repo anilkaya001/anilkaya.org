@@ -195,6 +195,25 @@ function boardRules(key, payload, structural) {
   }
 }
 
+const ORACLE_STATES = Object.freeze(["calm", "building", "signal", "conflict", "stale"]);
+const ORACLE_REQUIRED_CALL = Object.freeze(["id", "strike", "side", "expiry", "verdict", "action", "marketIv", "fairIv", "edgeUsd", "ev", "pop", "grade", "say"]);
+
+function oracleRules(payload, structural) {
+  if (payload.v !== 1) structural.push({ code: CODES.schemaVersion, path: "v" });
+  if (!ORACLE_STATES.includes(payload.state)) structural.push({ code: CODES.badShape, path: "state" });
+  if (!Number.isInteger(payload.grade) || payload.grade < 0 || payload.grade > 3) structural.push({ code: CODES.badShape, path: "grade" });
+  if (!Array.isArray(payload.calls)) {
+    structural.push({ code: CODES.badShape, path: "calls" });
+    return;
+  }
+  payload.calls.forEach((c, i) => {
+    for (const k of ORACLE_REQUIRED_CALL) {
+      if (c === null || typeof c !== "object" || c[k] === undefined || c[k] === null) structural.push({ code: CODES.badShape, path: "calls[" + i + "]." + k });
+    }
+  });
+  if (!payload.stance || typeof payload.stance !== "object") structural.push({ code: CODES.badShape, path: "stance" });
+}
+
 export function validate(key, payload, ctx = {}) {
   const p = productOf(key);
   const structural = [];
@@ -224,6 +243,7 @@ export function validate(key, payload, ctx = {}) {
     sessionAndStamp(p, payload, structural);
     if (p.family === "name") {
       if (payload.ticker !== t && p.id !== "card") structural.push({ code: CODES.tickerMismatch, path: "ticker" });
+      if (p.id === "oracle") oracleRules(payload, structural);
       if (p.id === "card") {
         const read = cardRules(key, payload, structural, flags, ctx);
         out.baseOk = read.baseOk;

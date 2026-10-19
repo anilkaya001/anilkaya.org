@@ -45,6 +45,7 @@ export const STAGES = Object.freeze([
   stage("focus", ISOLATION.isolated, ["dossiers"], ["focus"]),
   stage("card-x", ISOLATION.fatal, ["dossiers"], ["card-x:*"]),
   stage("compute", ISOLATION.isolated, ["card-x"]),
+  stage("oracle-publish", ISOLATION.isolated, ["compute"], ["oracle:*", "oracle-top", "oracle-norm"]),
   stage("deepen-ledger", ISOLATION.isolated, ["compute"], ["deepen"]),
   stage("roster", ISOLATION.isolated, ["compute"], ["roster"]),
   stage("archive-check", ISOLATION.fatal, ["roster"]),
