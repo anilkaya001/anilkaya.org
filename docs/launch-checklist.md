@@ -58,4 +58,5 @@ One row per observation, appended and never edited: the part, the UTC date, who 
 
 - OD-02 (c), 2026-10-10 17:45 UTC: main keeps deploying on merge and every merge is made only on green CI. The release branch, the promote job and the five audited promotions of the original line 6 are dropped (part 6c). The test required on main (6a) and staging (6b) stay.
 - OD-34: the paid product is Flows only; the Lab stays free and is not a line here.
+- The vendor plan, read on 2026-10-19 from the owner's screenshot of the vendor's API dashboard, is API Advanced and is recorded as `FLOWS_UW_PLAN = "advanced"` in `wrangler.toml` (`shared/flows-plan-facts.js`, source `uw.dashboard`). It answers how much the key may call, not what members may be shown, so it is not a readback of part 2a: the vendor's specification offers commercial use with its Startup tier, and line 2 still needs the vendor's written answer.
 - Every switch defaults off: no readback above enables anything. Opening the paid surface is the owner's step after the script prints READY.

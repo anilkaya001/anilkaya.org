@@ -137,7 +137,7 @@ export function opsFor(over = {}, { part = null } = {}) {
     ...(part === "coverage" ? [{ results: over.coverage || COVERAGE_ROWS }] : []),
   ];
   return opsBody({ FLOWS_ASK_MODEL: "@cf/zai-org/glm-4.7-flash", FLOWS_ASK_NEURONS: "5500,36400", FLOWS_ASK_FALLBACK_MODEL: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", FLOWS_ASK_FALLBACK_NEURONS: "26668,204805", FLOWS_AI_DAILY_CAP_NEURONS: "30000", FLOWS_AI_DAILY_CAP_CALLS: "2500", FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "socket",
-    FLOWS_RT_SOCKET_HOURS: "session", FLOWS_READ_MODE: "on", FLOWS_LIVE_MODE: "actions", FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_HEALTH: "on" }, NOW, results, { part, meter: over.meter || null });
+    FLOWS_RT_SOCKET_HOURS: "session", FLOWS_READ_MODE: "on", FLOWS_LIVE_MODE: "actions", FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_HEALTH: "on", ...(over.env || {}) }, NOW, results, { part, meter: over.meter || null });
 }
 
 export const world = () => ({

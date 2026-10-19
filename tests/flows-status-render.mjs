@@ -299,6 +299,62 @@ try {
 
   {
     const map = world();
+    const advanced = opsFor({ env: { FLOWS_UW_PLAN: "advanced" } });
+    advanced.vendor.own.current = false;
+    map["/api/flows/ops"] = { body: advanced };
+    const { page } = await open(browser, { view: "capacity", map });
+    const cv = await text(page, "#cVendor");
+    ok(/Whole key today\s+21,400 of 100,000,000 calls · 0\.0%/.test(cv), "THE RECORDED ADVANCED PLAN: the whole key is set against the 100M day its dashboard states: " + cv.slice(0, 400));
+    ok(/Cap: 100,000,000 per day \(advanced plan, plan; observed, uw\.dashboard\)/.test(cv), "and the cap names the plan and the dashboard readback: " + cv.slice(0, 600));
+    const tiles = await text(page, "#stTiles");
+    ok(/the vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)/.test(tiles), "THE VENDOR'S DAY TURNS WHEN THE DASHBOARD SAYS, printed in TRT: " + tiles.replace(/\n/g, "|"));
+    await page.click("#cLimitsCard .st-more");
+    await page.waitForFunction(() => document.getElementById("cLimitsDlg").open);
+    await page.locator("#cLimitsDlg details summary").first().click();
+    const plan = await text(page, "#cLimitsDlg");
+    ok(/uw\.min\s+calls\s+500\s+minute\s+advanced\s+observed\s+uw\.dashboard\s+advisory from uw\.working/.test(plan), "the unread minute line is the 500 working line and says where it comes from: " + plan.slice(Math.max(0, plan.indexOf("uw.min") - 40), plan.indexOf("uw.min") + 200));
+    ok(/Vendor plan\s+advanced(?! \(not recorded)/.test(plan), "and the vendor plan is recorded");
+    await page.keyboard.press("Escape");
+    await page.click("#cPlatCard .st-more");
+    await page.waitForFunction(() => document.getElementById("cPlatDlg").open);
+    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(await text(page, "#cPlatDlg")), "the meter's source line says the same");
+    await page.keyboard.press("Escape");
+    await page.click("#cVendorCard .st-more");
+    await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
+    const cons = await text(page, "#cVendorDlg");
+    ok(/Everything else on the key\s+\u2014\s+the engines' counts are for the vendor day before this one/.test(cons), "ENGINE COUNTS FROM ANOTHER VENDOR DAY ARE NEVER SUBTRACTED from this one's counter: " + cons.slice(0, 600));
+    await page.close();
+  }
+
+  {
+    const map = world();
+    const old = opsFor();
+    old.vendor.reading.window = { day: "2026-10-11", start: Date.parse("2026-10-11T00:00:00Z"), end: NOW - 1000 };
+    old.vendor.reading.current = false;
+    map["/api/flows/ops"] = { body: old };
+    const { page } = await open(browser, { view: "capacity", map });
+    const tiles = await text(page, "#stTiles");
+    ok(/VENDOR CALLS TODAY[\s\S]*the last vendor counter was read 21:40 TRT, before today/.test(tiles), "A READING FROM AN EARLIER VENDOR WINDOW IS NOT TODAY'S, even on the same UTC day: " + tiles.replace(/\n/g, "|"));
+    const cv = await text(page, "#cVendor");
+    ok(/Whole key today\s+\u2014 of 60,000/.test(cv), "and it is never set against the day line: " + cv.slice(0, 300));
+    await page.close();
+  }
+
+  {
+    const map = world();
+    const bare = opsFor();
+    delete bare.vendor.window;
+    delete bare.vendor.reading.window;
+    delete bare.vendor.reading.current;
+    map["/api/flows/ops"] = { body: bare };
+    const { page } = await open(browser, { view: "capacity", map });
+    const tiles = await text(page, "#stTiles");
+    ok(/21,400[\s\S]*the vendor's day is assumed to turn at 03:00 TRT/.test(tiles), "an ops body from before the window was stated keeps the old reading and says the boundary is assumed: " + tiles.replace(/\n/g, "|"));
+    await page.close();
+  }
+
+  {
+    const map = world();
     map["/api/flows/ready"] = { body: { ok: false, phase: "pre", minutesToOpen: 38, opens: { ms: Date.parse("2026-10-12T13:30:00Z") }, blockers: [{ code: "nightly", sentence: "The nightly has not landed for 2026-10-09." }, { code: "tier1", sentence: "Tier 1 has not ticked in 11 minutes." }] } };
     const { page } = await open(browser, { map });
     const line = await text(page, "#stReady");

@@ -290,11 +290,19 @@
   }
 
   const sumKnown = (list) => (list.every((x) => num(x) !== null) ? list.reduce((a, b) => a + num(b), 0) : null);
+  const vendorWindow = () => {
+    const o = okBody("ops"), w = o && o.vendor && o.vendor.window;
+    return w && num(w.start) !== null && num(w.end) !== null ? w : null;
+  };
   const vendorReading = (now) => {
     const o = okBody("ops");
     const r = o && o.vendor && o.vendor.reading ? o.vendor.reading : null;
-    if (r && num(r.daily) !== null && num(r.at) !== null) return { ...r, today: sameDay(new Date(r.at), new Date(now)) };
+    if (r && num(r.daily) !== null && num(r.at) !== null) return { ...r, today: r.window ? now >= r.window.start && now < r.window.end : sameDay(new Date(r.at), new Date(now)) };
     return null;
+  };
+  const vendorTurn = (now) => {
+    const w = vendorWindow();
+    return "the vendor's day " + (!w ? "is assumed to turn at 03:00 TRT" : w.basis === "stated" ? "turns at " + trt(w.end, now) + ", as its dashboard states (read " + w.readOn + ")" : "is assumed to turn at " + trt(w.end, now));
   };
 
   function paintTiles(now) {
@@ -305,7 +313,7 @@
     const own = ops && ops.vendor ? ops.vendor.own : null;
     if (reading && reading.today) {
       tileSet("stTileUw", ["fresh", "counted"], whole(reading.daily),
-        "calls on the vendor key today, every caller included, read " + trt(reading.at, now, true) + "; the vendor's day is assumed to turn at 03:00 TRT");
+        "calls on the vendor key today, every caller included, read " + trt(reading.at, now, true) + "; " + vendorTurn(now));
     } else {
       const ownSum = own ? sumKnown([own.tier1, own.focus, own.tier2]) : null;
       const reason = !S.D.ops ? "no read yet" : !S.D.ops.ok ? "the ops view was not read: " + S.D.ops.reason
@@ -551,7 +559,7 @@
 
   const kit = {
     h, DASH, num, whole, clock, clockSec, trt, span, ago, share, bytes, usd, median, chip, stateChip, table, facts, why, fill, unread,
-    lagOf, lagReason, engineCards, engineData, paintAi, mini, rest, line, capOf, vendorReading, sameDay, okBody, whyOf, EVENT, BASIS, TOPIC_NAME, SWITCH_EFFECT, DISPATCH,
+    lagOf, lagReason, engineCards, engineData, paintAi, mini, rest, line, capOf, vendorReading, vendorTurn, vendorWindow, sameDay, okBody, whyOf, EVENT, BASIS, TOPIC_NAME, SWITCH_EFFECT, DISPATCH,
     state: () => S, panels: {},
     attach(panels) {
       Object.assign(kit.panels, panels);
