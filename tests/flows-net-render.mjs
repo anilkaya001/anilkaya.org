@@ -647,6 +647,7 @@ try {
     const { ctx, page } = await mount(browser, { width: 700, height: 1400, delayFonts: 1500 });
     const widths = async () => (await net(page, "return net.labels();")).filter((l) => !l.id.startsWith("cap:")).reduce((a, l) => a + l.w, 0);
     ok(await page.evaluate(() => [...document.fonts].some((f) => /Inter/.test(f.family) && f.status === "loaded")), "THE LAZY NETWORK IS FIRST DRAWN AFTER THE FONT: the load event waits for the face the page uses, so the network is measured in the loaded face");
+    for (let i = 0; i < 100 && !(await net(page, "return net.labels();")).some((l) => l.id === "s:tech"); i++) await page.waitForTimeout(100);
     const w0 = await widths();
     await page.waitForTimeout(900);
     const w1 = await widths();
