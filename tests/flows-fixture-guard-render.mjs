@@ -83,6 +83,7 @@ const view = (page) => page.evaluate(() => {
     attr: document.documentElement.getAttribute("data-fixture"),
     mainShown: shown,
     mainText: shown ? main.innerText : "",
+    mainAll: shown ? main.textContent : "",
     links: [...document.querySelectorAll("a[href*='/flows/ticker/?t=']")].map((a) => a.getAttribute("href")),
     gate: (document.getElementById("fxGate") || {}).textContent || null,
     gateKind: (document.getElementById("fxGate") || { dataset: {} }).dataset.state || null,
@@ -116,7 +117,7 @@ try {
     const c = await view(control.page);
     eq(c.attr, null, "THE SAME PAGE ON A .test ORIGIN (the control) is left alone");
     eq(c.mainShown, true, "with its main region shown");
-    const names = new Set(c.mainText.match(/\bSY[NLSW]\d{3}\b/g) || []);
+    const names = new Set(c.mainAll.match(/SY[NLSW]\d{3}/g) || []);
     ok(names.size >= 20, "and prints the board's fixture names as it did before (" + names.size + " distinct)");
     ok(c.links.filter((h) => /t=SY[NLSW]\d{3}/.test(h)).length >= 10, "with their links (" + c.links.filter((h) => /t=SY/.test(h)).length + ")");
     eq(control.logged.filter((t) => /fixture data refused/.test(t)), [], "and no refusal logged");
