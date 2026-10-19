@@ -388,6 +388,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `tests/flows-brand-render.mjs` | The Fire & Forget trade-mark (`brandMark` in `shared/flows-pages.js`, the `.ff-brand` rules in `assets/css/flows.css`, no script and no global). A flame glyph and the words `Fire & Forget™` sit in the sidebar footer of every Flows page (a link to `/flows/about/` for members, to `/flows/status/#view=coverage` for owners through `ownerNav`), in the About header with a paragraph on what the rotation and live pipeline do and do not promise, and in the Status header; other surfaces reuse the class or `brandMark`. The glyph breathes (opacity and transform only) only while the page's own freshness pill reads live, fresh or closed, by a CSS `:has` rule over `#fxFresh`, so it makes no request and a page with no pill is still; it is static under reduced motion and drawn in `CanvasText` under forced colors. The suite is Chromium with `page.route`, no server: links and accessible name for member, owner and Status, the breathing and stillness states, reduced motion, forced colors, light and dark contrast, no sideways scroll at 320 to 1440 px, no performance claim in the About copy, and eleven planted wrong builds that each fail. |
 | `tests/flows-home-onescreen.mjs`, `tests/lib/home-fixtures.mjs` | The Home page's one-screen contract (the Market page's, applied to Home). `overviewPage` is a header, a tablist of six views (Session, Flow, Names, Focus, Moves, Calendar) and a stage that fills the rest of the viewport (`100dvh`, no page scroll at 1440x820, 1024x768 or 390x844). Session is the tide hero and the Neuron line; Flow is the flow network (the 3D scene fitted to the stage by `fit: true`, with fewer names when the stage is short, and the condensed `FlowsUI.netMap` under 640 px of host width) beside Flagged and Sectors; Names is Bullish, Bearish and Nearly in; Focus is Leaders and Metals; Moves is What changed and Volatility; Calendar is Reporting and Headlines. Every module keeps its id and painter. Inactive panels are `inert` and `visibility: hidden` in the same box, the tab and the address (`#view=flow`) agree, and under 900 px each panel shows one module at a time behind a second switch. A fitter in `flows-overview.js` hides the trailing rows of a list that does not fit and puts a Show all button in the module header that opens the whole body in a dialog; the tide chart takes the height the hero has. `tests/lib/home-fixtures.mjs` opens the page in Chromium against `page.route` stubs. `tests/flows-home-onescreen.mjs` sweeps every tab (and every module on a phone) at the three viewports for page scroll, sideways scroll, inner scroll and any element that leaves its module or the box that clips it, checks inert and visibility, the tablist from the keyboard, the address, the Show all dialogs, 44 px targets, the network switch off, pending feeds and reduced motion, and fails nine planted wrong builds. |
 | `assets/js/flows-desk-calls.js`, `assets/css/flows-desk.css`, `tests/flows-desk-calls.mjs`, `tests/flows-desk-calls-render.mjs`, `tests/flows-desk-onescreen.mjs`, `tests/gen-shortcall-fixtures.py`, `tests/fixtures-shortcall.json` | The premium desk's Short calls view (`strategy=sc`, the fourth item of Sell) and the desk's one-screen stage. `assets/js/flows-desk-calls.js` is the deferred group `desk-calls` (`FlowsUI.deskCalls`, built on `FlowsUI.deskKit`, which `flows-desk.js` publishes and the chunk reads at call time): it prices the chain `strategy=cc` already fetches as uncovered short calls (the lab's `custom` family on the same smile and law, so Calls to Short calls makes no request), sized to N contracts (default 100 of 100 shares, a reading the page states) under a labelled collateral convention: delta-adjusted `100 x spot x max(h x absolute delta, f)` with h 30% and f 10% by default, a Reg-T style `100 x max(0.2 x spot - OTM, 0.1 x spot)`, or shares held (the covered call). Premium is the bid; the ratio is time value over collateral, annualised on 365 days; the terms live in a Terms dialog and the address (`n`, `cv`, `h`, `f`, defaults omitted). The frontier plots the annualised ratio on a square-root scale against the magnitude of net delta or implied win %, with the floor guide at f over h and a diamond where the floor binds. Money is integer cents with half-up ties. The export follows OD-30 (no bid, ask, premium or spot column). The pure oracle is `shortCallLine` and its helpers in `shared/flows-premium.js`. `assets/css/flows-desk.css` also holds the desk's one-screen stage: a tablist (Frontier, Lines, Smile, and Plan below 900 px) over a stage that fills the viewport, inactive panels `inert` and hidden in the same box, a Lines fitter with a Show all dialog, and a Filters dialog on a phone. `tests/gen-shortcall-fixtures.py` (Fractions) writes the cases of `tests/fixtures-shortcall.json`; `flows-desk-calls` holds the oracle and the chunk's copy to them in cents, 20,000 random draws to a BigInt reference, the engine ties and the planted wrong builds; `flows-desk-calls-render` holds every printed figure, the frontier's pixels, the popover formulas, the URL, the dialog, the export and the failure states; `flows-desk-onescreen` sweeps every state at 1440x820, 1024x768 and 390x844 for page scroll, clipping, inert panels and the Show all dialog, and fails six planted builds. |
+| `assets/js/flows-feed-os.js`, `tests/flows-feeds-onescreen.mjs` | The one-screen stage for Unusual and Events (`/flows/unusual/`, `/flows/events/`). `feedTabs` in `shared/flows-pages.js` renders a tablist over a `#fdStage` whose `.fd-mod` children are stacked and only the one with `data-on` is visible (the others `inert` and `visibility: hidden`), with `#view=<tab>` in the address; `.flows-main` is `100dvh` with no page scroll at 1440x820, 1024x768 and 390x844, laid out by `assets/css/flows-feeds.css`. `flows-feed-os.js` wires the tabs (arrow keys, Home, End) and a fitter: it unhides rows the painter hid behind its own disclosure, finds the vertically stacked group of repeated siblings in a module body that adds the most height, hides trailing rows until nothing overflows (`fd-cut`), then trailing legend and note lines, and puts a Show all button in the module header that opens the whole body in a dialog; it re-runs on mutation, resize and font load. The Flow network module is `data-free` (its own host scrolls inside the module, the one place a module scrolls, because the scene is taller than one screen). Events no longer names an Eastern date (the run's own session date), prints its build time in TRT, and writes `No print` and `No date` where a day has no macro release or FDA date, with a line naming the next macro print and FDA date beyond the five sessions. `tests/flows-feeds-onescreen.mjs` (Chromium, `page.route`, no server) sweeps every tab of both pages at the three sizes for page scroll, sideways scroll, clipped content, inert and hidden inactive modules, the address and the keyboard, opens each Show all dialog, holds the Events copy, and fails three planted wrong builds. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1497,7 +1498,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 159 suites: 112 that need only Node (N), 32 that also
+`tests/suites/` registers 160 suites: 113 that need only Node (N), 32 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1514,26 +1515,27 @@ flows-chain-panels        flows-contracts           flows-conviction          fl
 flows-coverage            flows-d1-budget           flows-data-fixes          flows-deepen
 flows-defer-render        flows-desk-calls          flows-dispatch-check      flows-dispersion
 flows-door-v2             flows-dossier             flows-dossier-reads       flows-engine-budget
-flows-fact-ids            flows-flow-below-render   flows-freshness           flows-garch
-flows-home-below-render   flows-home-composition    flows-home-net-render     flows-home-onescreen
-flows-ledger              flows-legs                flows-live                flows-market-below-render
-flows-market-floor-render flows-market-onescreen    flows-market-river-render flows-market-visual
-flows-meter-worker        flows-mint                flows-moves-render        flows-net-map-render
-flows-neuron              flows-neuron-screen       flows-overlay             flows-payload-shape
-flows-permits             flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts
-flows-political           flows-political-render    flows-positioning         flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-read-failures       flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-registry-contract   flows-relations-render    flows-rt                  flows-scores
-flows-sign                flows-skyline-render      flows-starts              flows-stats
-flows-stock               flows-tape-stats          flows-targets             flows-time
-flows-truth               flows-universe            flows-variation           flows-vendor-budget
-flows-verdict             flows-vol                 flows-warnings            flows-weight
-flows-ws-probe            lab-write                 launch-readiness          markets
-mastery                   pipeline                  route-matrix              server-ai
-server-desk               server-ingest             server-kernel             server-log
-server-ops                server-pages              server-router             staging
+flows-fact-ids            flows-feeds-onescreen     flows-flow-below-render   flows-freshness
+flows-garch               flows-home-below-render   flows-home-composition    flows-home-net-render
+flows-home-onescreen      flows-ledger              flows-legs                flows-live
+flows-market-below-render flows-market-floor-render flows-market-onescreen    flows-market-river-render
+flows-market-visual       flows-meter-worker        flows-mint                flows-moves-render
+flows-net-map-render      flows-neuron              flows-neuron-screen       flows-overlay
+flows-payload-shape       flows-permits             flows-pipeline-chaos      flows-pipeline-mutants
+flows-plan-facts          flows-political           flows-political-render    flows-positioning
+flows-probe               flows-public              flows-pulse               flows-quant
+flows-quant-audit         flows-quant-card          flows-read-failures       flows-readers
+flows-reading             flows-reading-worker      flows-reads               flows-ready
+flows-record              flows-registry-contract   flows-relations-render    flows-rt
+flows-scores              flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-time                flows-truth               flows-universe            flows-variation
+flows-vendor-budget       flows-verdict             flows-vol                 flows-warnings
+flows-weight              flows-ws-probe            lab-write                 launch-readiness
+markets                   mastery                   pipeline                  route-matrix
+server-ai                 server-desk               server-ingest             server-kernel
+server-log                server-ops                server-pages              server-router
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
