@@ -1,10 +1,10 @@
-import { easternDay, shiftDay, freshnessState, classOf, FRESH_CLASSES } from "../shared/flows-freshness.js";
+import { easternDay, easternClock, easternInstant, shiftDay, freshnessState, classOf, FRESH_CLASSES } from "../shared/flows-freshness.js";
 import { LIVE_KEYS, LIVE_BUDGET } from "../shared/flows-live.js";
 import { coverageSql } from "./store.js";
 import { UNIVERSE_BUDGET_BYTES } from "../shared/flows-cross.js";
 import { normalizeClock, ingestClockView, NOW_NIGHTLY_KEYS } from "../shared/flows-live-worker.js";
 import { ledgerView } from "../shared/flows-ledger.js";
-import { lines, planOf, renewalState } from "../shared/flows-plan-facts.js";
+import { lines, planOf, renewalState, vendorDay } from "../shared/flows-plan-facts.js";
 import { spendShape } from "../shared/flows-ai.js";
 import { aiCapOf } from "../shared/flows-reading-worker.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
@@ -113,7 +113,25 @@ export function liveView(rows, now, clock) {
   });
 }
 
-export function vendorView(ledger, clockView, held) {
+const UTC_DAY_MS = 86_400_000;
+
+export function vendorWindow(ms, resetMinuteEt) {
+  if (!Number.isFinite(ms)) return null;
+  if (!Number.isInteger(resetMinuteEt)) {
+    const day = new Date(ms).toISOString().slice(0, 10);
+    const start = Date.parse(day + "T00:00:00Z");
+    return { day, start, end: start + UTC_DAY_MS };
+  }
+  const wall = easternClock(ms);
+  const here = easternDay(ms);
+  if (!wall || !here) return null;
+  const day = wall.minutes < resetMinuteEt ? here : shiftDay(here, 1);
+  return { day, start: easternInstant(shiftDay(day, -1), resetMinuteEt), end: easternInstant(day, resetMinuteEt) };
+}
+
+export function vendorView(ledger, clockView, held, env = {}, now = Date.now()) {
+  const vday = vendorDay(env);
+  const current = vendorWindow(now, vday.resetMinuteEt);
   const today = ledger && Array.isArray(ledger.days) && ledger.days.length ? ledger.days[0] : null;
   const fromClock = clockView && clockView.vendor ? clockView.vendor : null;
   const atOf = Date.parse(today && today.vendor ? today.vendor.at : "");
@@ -122,12 +140,17 @@ export function vendorView(ledger, clockView, held) {
   const candidates = [fromClock, fromLedger, held].filter((m) => m && Number.isFinite(m.daily) && Number.isFinite(m.at));
   const reading = candidates.length ? candidates.reduce((a, b) => (b.at > a.at ? b : a)) : null;
   const own = today
-    ? { day: today.day, tier1: today.tier1.calls ?? null, focus: today.focus.calls ?? null, tier2: today.tier2.calls, tier2Failed: today.tier2.failedCalls }
+    ? { day: today.day, tier1: today.tier1.calls ?? null, focus: today.focus.calls ?? null, tier2: today.tier2.calls, tier2Failed: today.tier2.failedCalls,
+      current: !!current && today.day === current.day }
     : null;
+  const readWindow = reading ? vendorWindow(reading.at, vday.resetMinuteEt) : null;
   return {
-    reading: reading ? { daily: reading.daily, at: reading.at } : null,
+    reading: reading
+      ? { daily: reading.daily, at: reading.at, window: readWindow, current: !!(readWindow && current && readWindow.day === current.day) }
+      : null,
     own,
-    dayBoundary: "assumed",
+    dayBoundary: vday.basis,
+    window: current ? { ...current, basis: vday.basis, resetMinuteEt: vday.resetMinuteEt, source: vday.source, via: vday.via, readOn: vday.readOn } : null,
   };
 }
 
@@ -209,7 +232,7 @@ export function opsBody(env, now, results, { part = null, meter = null } = {}) {
     ...base,
     ledger, clock: clockOut,
     live: liveRes && rowsOf(liveRes) ? liveView(rowsOf(liveRes), now, clock) : null,
-    vendor: vendorView(ledger, clockOut, meter),
+    vendor: vendorView(ledger, clockOut, meter, env, now),
     ai: { spend, cap: aiCapOf(env), block },
     coverage: part === "coverage" && coverageRes ? coverageView(rowsOf(coverageRes)) : null,
   };

@@ -7,7 +7,7 @@ export const UW_PLAN_DEFAULT = "unknown";
 export const PLAN_ENV = Object.freeze({ workers: "FLOWS_PLAN_WORKERS", uw: "FLOWS_UW_PLAN", paidThrough: "FLOWS_PLAN_PAID_THROUGH" });
 export const OWNER_LINE_ENV = Object.freeze({ "uw.day": "FLOWS_UW_DAILY_LIMIT", "ai.usd": "FLOWS_AI_USD_DAY" });
 export const VIA = Object.freeze(["page", "snippet", "recall", "inferred", "observed", "repo", "unverified"]);
-export const KINDS = Object.freeze(["hard", "money", "quota", "guard"]);
+export const KINDS = Object.freeze(["hard", "money", "quota", "guard", "clock"]);
 export const WINDOWS = Object.freeze(["minute", "hour", "day", "week", "month", "invocation", "static"]);
 
 const src = (kind, page, via, readOn, extra = {}) => ({ kind, page, via, readOn, ...extra });
@@ -49,6 +49,23 @@ export const SOURCES = {
     quote: "Startup + Kafka tier at $3,000/mo adds real-time Kafka cluster access",
   }),
   "uw.advanced": src("observed", "x-uw-token-req-limit=100000000 and no documented day cap", "observed", "2026-10-05"),
+  "uw.dashboard": src("owner", "owner's screenshot of the vendor API dashboard, plan API Advanced, Active", "observed", "2026-10-19", {
+    readAt: "about 18:00 TRT",
+    agrees: "uw.advanced",
+    quotes: [
+      "API Advanced",
+      "Daily requests included 100M",
+      "unlimited requests per day",
+      "Window resets 8:00pm ET",
+      "Lookback window 2 years",
+      "Websockets Included",
+      "Used today 8,913 of 100M",
+      "Daily requests over the past 30 days: total 378K, daily average 13K, peak day 24K, days over 80% 0",
+      "Request health, past 24 hours: rate limited 429: 57; not found 404: 4; other errors: 97",
+    ],
+    unstated: ["a per-minute line", "a concurrency line"],
+    note: "The page states both 100M daily requests included and unlimited requests per day; the table keeps 100M as the cap.",
+  }),
   "uw.working": src("programme", "budget.md: until the key's plan is read the working line is 60,000 a day and 500 a minute", "inferred", "2026-10-10"),
   "repo.ai-cap": src("repo", "shared/flows-ai.js AI_CAP_DEFAULT_CALLS", "repo", "2026-10-11"),
   "owner.ai-usd": src("owner", "FLOWS_AI_USD_DAY default: (30,000 - 10,000) neurons at $0.011 per 1,000", "repo", "2026-10-10"),
@@ -67,13 +84,13 @@ const each = (v, source) => cell(v, "invocation", source);
 
 export const RESOURCES = [
   vendor("uw.day", "calls", "hard", {
-    advanced: day(null, "uw.advanced"),
+    advanced: day(100_000_000, "uw.dashboard"),
     startup: day(80000, "uw.tier"),
     "startup-annual": day(80000, "uw.annual-day"),
     kafka: day(80000, "uw.kafka"),
   }),
   vendor("uw.min", "calls", "guard", {
-    advanced: cell(null, "minute", "uw.advanced"),
+    advanced: cell(null, "minute", "uw.dashboard"),
     startup: cell(500, "minute", "uw.tier"),
     "startup-annual": cell(1000, "minute", "uw.annual"),
     kafka: cell(500, "minute", "uw.kafka"),
@@ -176,21 +193,28 @@ export const FACTS = [
     month(5, "owner.od01")),
   metered("gh.concurrent", "jobs", "guard", "github", cell(20, "static", "gh.limits"), cell(20, "static", "gh.limits")),
   vendor("uw.lookback", "days", "quota", {
-    advanced: cell(null, "static", "uw.advanced"),
+    advanced: cell(730, "static", "uw.dashboard"),
     startup: cell(90, "static", "uw.tier"),
     "startup-annual": cell(90, "static", "uw.tier"),
     kafka: cell(90, "static", "uw.kafka"),
   }),
   vendor("uw.conc", "requests", "guard", {
-    advanced: cell(null, "static", "uw.advanced"),
+    advanced: cell(null, "static", "uw.dashboard"),
     startup: cell(null, "static", "uw.tier"),
     "startup-annual": cell(10, "static", "uw.annual"),
     kafka: cell(null, "static", "uw.kafka"),
+  }),
+  vendor("uw.reset", "minute of the Eastern day", "clock", {
+    advanced: day(1200, "uw.dashboard"),
+    startup: day(null, "uw.tier"),
+    "startup-annual": day(null, "uw.annual"),
+    kafka: day(null, "uw.kafka"),
   }),
 ];
 
 export const ADVISORY = {
   "uw.day": cell(60000, "day", "uw.working"),
+  "uw.min": cell(500, "minute", "uw.working"),
 };
 
 export const WORKERS_PAID_PERIOD = {
@@ -289,8 +313,14 @@ function capOf(row, plans, env) {
     cap = owner;
     from = "owner";
   }
+  if (cap === null && ADVISORY[row.id]) {
+    cap = ADVISORY[row.id].v;
+    from = "advisory";
+  }
   return { cap, from };
 }
+
+const capSourceOf = (row, active, from) => (from === "advisory" ? ADVISORY[row.id].src : from === "owner" ? OWNER_LINE_ENV[row.id] : active.src);
 
 export function lineOf(row, plans, env) {
   const active = activeCell(row, plans);
@@ -304,6 +334,7 @@ export function lineOf(row, plans, env) {
     per: active.per,
     cap,
     capFrom: from,
+    capSource: capSourceOf(row, active, from),
     planCap: active.v,
     over: active.over,
     source: active.src,
@@ -325,6 +356,21 @@ export function facts(env) {
   const out = {};
   for (const row of FACTS) out[row.id] = lineOf(row, plans, env);
   return Object.freeze(out);
+}
+
+export function vendorDay(env) {
+  const row = FACTS.find((r) => r.id === "uw.reset");
+  const line = lineOf(row, planOf(env), env);
+  const m = line.cap;
+  const stated = Number.isInteger(m) && m >= 0 && m < 1440;
+  return Object.freeze({
+    basis: stated ? "stated" : "assumed",
+    resetMinuteEt: stated ? m : null,
+    plan: line.plan,
+    source: line.source,
+    via: line.via,
+    readOn: SOURCES[line.source].readOn,
+  });
 }
 
 export function lineFor(env, id) {

@@ -5,12 +5,17 @@
   const kit = UI && UI.statusKit;
   if (!kit) return;
   const {
-    h, DASH, num, whole, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, capOf, sameDay, mini, rest, line, paintAi,
+    h, DASH, num, whole, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, vendorTurn, vendorWindow, capOf, sameDay, mini, rest, line, paintAi,
   } = kit;
   const $ = (id) => document.getElementById(id);
   const BAND = { low: 0.8, high: 0.85 };
   const FREE_NEURONS_USD_PER_1000 = 0.011;
 
+  const inVendorDay = (ms, now) => {
+    const w = vendorWindow();
+    if (!w) return sameDay(new Date(ms), new Date(now));
+    return now < w.end ? ms >= w.start && ms < w.end : ms >= w.end && ms <= now;
+  };
   const pct = (used, cap) => (num(used) === null || !(num(cap) > 0) ? null : used / cap);
   const pctText = (p) => (p === null ? DASH : (p * 100 < 10 ? (p * 100).toFixed(1) : Math.round(p * 100)) + "%");
 
@@ -38,7 +43,8 @@
       h("p", { class: "lt-src" }, o.source));
   }
 
-  const lineText = (l) => (!l ? DASH + " the plan table has no line" : (l.cap === null ? "no cap listed" : whole(l.cap)) + " per " + l.per + " (" + l.plan + " plan, " + (l.capFrom || "plan") + "; " + l.via + ", " + l.source + ")");
+  const capFromText = (l) => (l.capFrom || "plan") + (l.capSource && l.capSource !== l.source ? " from " + l.capSource : "");
+  const lineText = (l, full) => (!l ? DASH + " the plan table has no line" : (l.cap === null ? "no cap listed" : whole(l.cap)) + " per " + l.per + " (" + l.plan + " plan, " + (full ? capFromText(l) : l.capFrom || "plan") + "; " + l.via + ", " + l.source + ")");
 
   function paintMeters(now) {
     const host = $("stMeters");
@@ -52,14 +58,14 @@
     cards.push(meter("Vendor calls today, whole key", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
       format: whole, unit: "calls",
       unread: reading ? "the last counter was read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the vendor's counter header yet",
-      source: "The vendor's own count of every call on the key, MCP sessions and probes included" + (reading ? ", read " + trt(reading.at, now, true) : "") + ". Cap: " + lineText(uw) +
-        ". The vendor's day boundary is assumed to turn at 03:00 TRT, not learned.",
+      source: "The vendor's own count of every call on the key, MCP sessions and probes included" + (reading ? ", read " + trt(reading.at, now, true) : "") + ". Cap: " + lineText(uw, true) +
+        ". " + vendorTurn(now).replace(/^the/, "The") + ".",
     }));
     const rail = okBody("rail");
     const calls = rail && rail.calls ? rail.calls : null;
     cards.push(meter("Vendor calls, rail, last minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, {
       format: whole, unit: "calls a minute", unread: "the rail was not read: " + whyOf("rail"),
-      source: "The rail's own enforced ceiling; past it a topic is degraded with reason budget. Key-wide per minute: " + DASH + " not measured, the vendor's per-minute header never decrements. Vendor ceiling: " + lineText(lines["uw.min"]) + ".",
+      source: "The rail's own enforced ceiling; past it a topic is degraded with reason budget. Key-wide per minute: " + DASH + " not measured, the vendor's per-minute header never decrements. Vendor ceiling: " + lineText(lines["uw.min"], true) + ".",
     }));
     const cap = capOf();
     const aiBody = okBody("ai");
@@ -112,7 +118,7 @@
     const own = ops.vendor ? ops.vendor.own : null;
     const reading = vendorReading(now);
     const meta = okBody("meta");
-    const nightlyToday = meta && meta.generatedAt ? sameDay(new Date(Date.parse(meta.generatedAt)), new Date(now)) : false;
+    const nightlyToday = meta && meta.generatedAt ? inVendorDay(Date.parse(meta.generatedAt), now) : false;
     const rail = okBody("rail");
     const railHour = rail && rail.topics ? Object.values(rail.topics).reduce((a, t) => a + (num(t && t.calls && t.calls.hour) ?? 0), 0) : null;
     const rows = [
@@ -124,9 +130,10 @@
     const known = rows.filter((r) => num(r[1]) !== null).reduce((a, r) => a + r[1], 0);
     const complete = rows.slice(1).every((r) => num(r[1]) !== null);
     const total = reading && reading.today ? reading.daily : null;
-    const residual = total !== null && complete ? total - known : null;
+    const elsewhere = !!own && own.current === false;
+    const residual = total !== null && complete && !elsewhere ? total - known : null;
     rows.push(["Everything else on the key", residual, residual === null
-      ? (total === null ? "the vendor's count was not read today" : "an engine's count is missing, so the remainder is not worked")
+      ? (total === null ? "the vendor's count was not read today" : elsewhere ? "the engines' counts are for the vendor day before this one, so the remainder is not worked" : "an engine's count is missing, so the remainder is not worked")
       : "on-demand reads, pre-market news, MCP sessions and probes; valid only inside one vendor day" + (residual < 0 ? "; negative means a count above is wrong or the day boundary moved" : "")]);
     const max = Math.max(1, ...rows.map((r) => num(r[1]) ?? 0));
     const list = h("ul", { class: "lt-bars" }, ...rows.map((r) => h("li", null,
@@ -175,7 +182,7 @@
     const host = $("stPlan");
     const ops = okBody("ops");
     if (!ops || !ops.lines) { unread(host, "The plan lines", ops ? "the answer carried none" : (state().D.ops ? state().D.ops.reason : "no read yet")); return; }
-    const rows = Object.entries(ops.lines).map(([id, l]) => [id, l.unit, l.cap === null ? DASH : whole(l.cap), l.per, l.plan, l.via, l.source, l.capFrom || "plan"]);
+    const rows = Object.entries(ops.lines).map(([id, l]) => [id, l.unit, l.cap === null ? DASH : whole(l.cap), l.per, l.plan, l.via, l.source, capFromText(l)]);
     const plan = ops.plan || {};
     fill(host,
       facts([["Workers plan", (plan.workers || DASH) + (plan.workersExplicit ? "" : " (default; no plan is recorded)")], ["Vendor plan", (plan.uw || DASH) + (plan.uwExplicit ? "" : " (not recorded; the working line is advisory)")]]),

@@ -1453,11 +1453,22 @@ or the `futures` add-on). The vendor does send four headers, measured on 156 of
 `x-uw-req-per-minute-reset` (60000) and `x-uw-daily-req-count` (a running count
 that rose from 21 to 173 over the run). No production client reads them yet.
 Refusals are rare: the nightly of 2026-10-02 made 3,742 calls in 675.6 s (5.54
-requests a second) and was refused with a 429 once. The key's plan is inferred
-from what answers (Advanced routes 200, `vix-term-structure` 403
-`volatility_scope_required`), not read from an account page. The limiter
-therefore stays adaptive and discovers the working rate. The last line of every
-run is the measurement:
+requests a second) and was refused with a 429 once. The key's plan was first
+inferred from what answers (Advanced routes 200, `vix-term-structure` 403
+`volatility_scope_required`). On 2026-10-19 the owner's screenshot of the
+vendor's API dashboard named it: API Advanced, Active; "Daily requests included
+100M" (the same page also says unlimited requests per day, and the site keeps
+100M as the cap, which `x-uw-token-req-limit` above agrees with); "Window resets
+8:00pm ET", which is 03:00 TRT in US daylight time and 04:00 TRT from 2026-11-01;
+a two-year lookback; websockets included. It shows no per-minute and no
+concurrency limit, yet counted 57 answers refused with a 429 in the 24 hours
+before it was read, so a limit exists that the page does not state.
+`FLOWS_UW_PLAN = "advanced"` in `wrangler.toml` and in the nightly's build step
+records the plan (`shared/flows-plan-facts.js`, source `uw.dashboard`): the day
+line is 100M, the minute line stays the 500 working line every governor paces
+by, and `/api/flows/ops` sets the vendor's counter against the window that ends
+at 20:00 ET (`dayBoundary` `stated`). The limiter therefore stays adaptive and
+discovers the working rate. The last line of every run is the measurement:
 
 ```
 done in 178.2s — 408 API calls, 0 retries, 43 rate-limited,

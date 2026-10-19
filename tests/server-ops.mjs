@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
-import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, coverageView, rotationView, COVERAGE_KEYS, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
+import { opsBody, opsStatements, readOps, liveView, limitsOf, switchesOf, coverageView, rotationView, vendorWindow, vendorView, COVERAGE_KEYS, OPS_SWITCHES, OPS_LEDGER_DAYS } from "../server/ops.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { workerSource, expect, moduleSource } from "./lib/source-scan.mjs";
@@ -169,16 +169,47 @@ function build(f, over = {}) {
   const { table, rc } = build(f);
   const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   deep0(body.clock.vendor, { daily: 21000, at: NOW - 120000 }, "the clock row's reading is on the clock");
-  deep0(body.vendor.reading, { daily: 21400, at: NOW - 60000 }, "THE VENDOR READING is the newest of the clock row's and the day's ledger maximum");
+  const W12 = { day: "2026-10-12", start: T("2026-10-12T00:00:00Z"), end: T("2026-10-13T00:00:00Z") };
+  deep0(body.vendor.reading, { daily: 21400, at: NOW - 60000, window: W12, current: true }, "THE VENDOR READING is the newest of the clock row's and the day's ledger maximum, with the vendor window it was read in");
   eq(body.vendor.own.tier1, 366, "the engines' own counts come from the ledger: Tier 1");
   eq([body.vendor.own.focus, body.vendor.own.tier2, body.vendor.own.tier2Failed], [125, 900, 4], "focus and Tier 2");
-  eq(body.vendor.dayBoundary, "assumed", "and the vendor's day boundary is said to be assumed");
+  eq(body.vendor.own.current, true, "and the ledger's Eastern day is the vendor window's, so the two can be set against each other");
+  eq(body.vendor.dayBoundary, "stated", "THE VENDOR'S DAY BOUNDARY IS THE STATED ONE, no longer assumed");
+  deep0(body.vendor.window, { ...W12, basis: "stated", resetMinuteEt: 1200, source: "uw.dashboard", via: "observed", readOn: "2026-10-19" },
+    "the current window runs from 20:00 ET to 20:00 ET (00:00 to 00:00 UTC in daylight time) and cites the dashboard");
   const held = await (await build(f, { meter: () => ({ daily: 21500, at: NOW - 1000 }) }).table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   eq(held.vendor.reading.daily, 21500, "a reading this isolate made later than the stored ones wins");
   f.db.prepare("UPDATE flows_ledger SET t1_calls = 0, focus_calls = 0, uw_daily_max = NULL, uw_daily_at = NULL").run();
   f.db.prepare("UPDATE flows_clock SET uw_daily = NULL, uw_daily_at = NULL").run();
   const none = await (await build(f).table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   eq([none.vendor.reading, none.clock.vendor], [null, null], "with no reading anywhere the reading is null and not a zero count");
+}
+
+{
+  const W = (iso, m = 1200) => vendorWindow(T(iso), m);
+  const iso = (w) => [w.day, new Date(w.start).toISOString(), new Date(w.end).toISOString()];
+  deep0(iso(W("2026-10-19T23:59:59Z")), ["2026-10-19", "2026-10-19T00:00:00.000Z", "2026-10-20T00:00:00.000Z"], "A READING BEFORE 20:00 ET BELONGS TO THE WINDOW THAT ENDS AT 20:00 ET THAT DAY");
+  deep0(iso(W("2026-10-20T00:00:00Z")), ["2026-10-20", "2026-10-20T00:00:00.000Z", "2026-10-21T00:00:00.000Z"], "and one at 20:00 ET or after to the next");
+  deep0(iso(W("2026-11-02T00:30:00Z")), ["2026-11-01", "2026-11-01T00:00:00.000Z", "2026-11-02T01:00:00.000Z"], "the window across the end of daylight time is 25 hours, so 19:30 EST is still the old window");
+  deep0(iso(W("2026-11-02T01:00:00Z")), ["2026-11-02", "2026-11-02T01:00:00.000Z", "2026-11-03T01:00:00.000Z"], "and from then 20:00 ET is 01:00 UTC, 04:00 TRT");
+  deep0(iso(W("2026-03-08T12:00:00Z")), ["2026-03-08", "2026-03-08T01:00:00.000Z", "2026-03-09T00:00:00.000Z"], "the window across the start of daylight time is 23 hours");
+  deep0(iso(W("2026-10-19T15:00:00Z", null)), ["2026-10-19", "2026-10-19T00:00:00.000Z", "2026-10-20T00:00:00.000Z"], "with no stated reset the window is the UTC day, the old assumption");
+  eq(vendorWindow(NaN, 1200), null, "no instant, no window");
+  const at = (iso2) => ({ daily: 500, at: T(iso2) });
+  const before = vendorView(null, null, at("2026-10-19T23:58:00Z"), { FLOWS_UW_PLAN: "advanced" }, T("2026-10-19T23:59:00Z"));
+  eq([before.reading.current, before.dayBoundary], [true, "stated"], "a reading at 19:58 ET compared at 19:59 ET is the current window's");
+  const after = vendorView(null, null, at("2026-10-19T23:58:00Z"), { FLOWS_UW_PLAN: "advanced" }, T("2026-10-20T00:01:00Z"));
+  eq(after.reading.current, false, "THE SAME READING AFTER 20:00 ET IS THE LAST WINDOW'S, so it is never set against the new window's line");
+  eq(after.reading.daily, 500, "though it is still reported, with its own window");
+  eq(after.window.day, "2026-10-20", "and the current window is the next one");
+  const utc = vendorView(null, null, at("2026-10-19T23:58:00Z"), { FLOWS_UW_PLAN: "startup" }, T("2026-10-20T00:01:00Z"));
+  eq([utc.dayBoundary, utc.window.basis, utc.window.resetMinuteEt, utc.reading.current], ["assumed", "assumed", null, false], "a plan whose window is unread falls back to the UTC day and says it is assumed");
+  const ledgerDay = { days: [{ day: "2026-10-19", tier1: { calls: 300 }, focus: { calls: 100 }, tier2: { calls: 800, failedCalls: 2 }, vendor: { dailyMax: 9000, at: "2026-10-19T21:55:00.000Z" } }] };
+  eq(vendorView(ledgerDay, null, null, {}, T("2026-10-19T23:30:00Z")).own.current, true, "the engines' Eastern day is the current window's before 20:00 ET");
+  const late = vendorView(ledgerDay, null, at("2026-10-20T00:40:00Z"), {}, T("2026-10-20T00:45:00Z"));
+  eq([late.own.current, late.reading.current], [false, true], "AFTER 20:00 ET THE ENGINES' DAY IS THE LAST WINDOW'S while a reading taken after the reset is the new one's, so no remainder is worked across the two");
+  const est = vendorView(null, null, at("2026-11-03T00:30:00Z"), {}, T("2026-11-03T00:50:00Z"));
+  eq(est.reading.current, true, "in standard time 19:30 and 19:50 EST share a window that the UTC day would have split");
 }
 
 {
@@ -204,6 +235,10 @@ function build(f, over = {}) {
   eq([base.plan.uw, base.plan.workers], ["unknown", "paid"], "the plan defaults");
   eq([startup.plan.uw, startup.plan.workers], ["startup", "free"], "THE LINES FOLLOW THE PLAN VARIABLES through lines(env)");
   ok(base.lines["uw.day"].cap !== startup.lines["uw.day"].cap || base.lines["d1.write"].cap !== startup.lines["d1.write"].cap, "and the caps move with them");
+  const advanced = await run({ FLOWS_UW_PLAN: "advanced" });
+  eq([advanced.plan.uw, advanced.lines["uw.day"].cap, advanced.lines["uw.day"].capFrom], ["advanced", 100000000, "plan"], "THE RECORDED ADVANCED PLAN serves its 100M day line");
+  eq([advanced.lines["uw.min"].cap, advanced.lines["uw.min"].capFrom, advanced.lines["uw.min"].planCap], [500, "advisory", null], "and its unread minute line as the 500 working line, never as no line");
+  eq(advanced.vendor.dayBoundary, "stated", "with the vendor's stated day boundary");
   const capped = await run({ FLOWS_AI_DAILY_CAP_NEURONS: "12000", FLOWS_AI_DAILY_CAP_CALLS: "900" });
   eq([capped.ai.cap.neurons, capped.ai.cap.calls, capped.ai.cap.readsStopAt], [12000, 900, 9000], "the AI cap follows the Worker's variables");
   eq(limitsOf({ FLOWS_AI_DAILY_CAP_NEURONS: "12000" }).find((l) => l.name === "Model neurons").limit, 12000, "and so does the limits table");
@@ -230,7 +265,8 @@ function build(f, over = {}) {
   eq([body.ledger.days, body.clock, body.ai.spend.calls], [[], null, 0], "an empty store is an empty ledger, no clock and a true 0 calls");
   eq(body.vendor.own, null, "with no ledger day there is no own count");
   const held = opsBody({}, NOW, results, { meter: { daily: 1234, at: NOW - 1000 } });
-  eq(held.vendor.reading, { daily: 1234, at: NOW - 1000 }, "the Worker's own reading stands when the clock has none");
+  eq(held.vendor.reading, { daily: 1234, at: NOW - 1000, window: { day: DAY, start: T("2026-10-12T00:00:00Z"), end: T("2026-10-13T00:00:00Z") }, current: true },
+    "the Worker's own reading stands when the clock has none");
   const clockRow = { id: 1, day: DAY, trading: 1, uw_daily: 900, uw_daily_at: NOW - 5000 };
   const both = opsBody({}, NOW, [{ results: [] }, { results: [clockRow] }, { results: [] }, { results: [] }, { results: [] }], { meter: { daily: 950, at: NOW - 1000 } });
   eq(both.vendor.reading.daily, 950, "the newer of the clock's reading and the Worker's wins");

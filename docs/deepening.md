@@ -84,6 +84,21 @@ ownership, earnings, engine, card-x, hist), not by a second implementation.
 no protection, no ledger read). `FLOWS_DEEPEN_CAP` and the workflow's
 `deepen_cap` dispatch input set the size for one run or for good.
 
+## The recorded plan, 2026-10-19
+
+The table below was worked against the 60,000 working line of an unread plan.
+The owner's screenshot of the vendor's API dashboard has since named the plan,
+API Advanced with 100M daily requests included, and `FLOWS_UW_PLAN = "advanced"`
+is set for the Worker and for the nightly's build step. The governor's day term
+is therefore about 2.2 million names and never binds: an ordinary night is still
+the cap (530), an uncapped one still the deadline (535), and the pace still comes
+from the minute line, which the dashboard does not state and so stays the 500
+working line (400 a minute for the rotation). The only night that changes is one
+on which more than about 30,400 calls of the key were already spent, by the run or
+by other callers, before the rotation was planned: it used to shrink and now reads
+the cap. A whole night at the hard cap (4,500 + 900 x 38 = 38,700 calls) is under
+a two-thousandth of the day line.
+
 ## Sizing, 2026-10-18: spend the budget
 
 The owner's directive was to use almost all of the vendor limit until no name

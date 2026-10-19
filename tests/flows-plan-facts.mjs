@@ -92,7 +92,7 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     }
     rows++;
   }
-  eq(rows, 4, "four vendor rows resolve unknown");
+  eq(rows, 5, "five vendor rows resolve unknown");
   eq(P.RESOURCES.find((r) => r.id === "uw.min").plans.unknown.v, 500, "the per-minute line for an unread plan is Startup's 500, as budget.md's working line says");
   eq(P.RESOURCES.find((r) => r.id === "uw.day").plans.unknown.v, 80000, "and the strictest documented day is 80,000");
   eq(P.FACTS.find((r) => r.id === "uw.lookback").plans.unknown.v, 90, "the lookback of an unread plan is the 90 days Startup documents");
@@ -102,15 +102,17 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     ok(P.UW_PLANS.includes(r.plan), `a vendor plan value ${JSON.stringify(String(raw).slice(0, 12))} resolves inside the known set (${r.plan})`);
   }
   const vendorFigures = {
-    "uw.day": { advanced: null, startup: 80000, "startup-annual": 80000, kafka: 80000 },
+    "uw.day": { advanced: 100_000_000, startup: 80000, "startup-annual": 80000, kafka: 80000 },
     "uw.min": { advanced: null, startup: 500, "startup-annual": 1000, kafka: 500 },
-    "uw.lookback": { advanced: null, startup: 90, "startup-annual": 90, kafka: 90 },
+    "uw.lookback": { advanced: 730, startup: 90, "startup-annual": 90, kafka: 90 },
     "uw.conc": { advanced: null, startup: null, "startup-annual": 10, kafka: null },
+    "uw.reset": { advanced: 1200, startup: null, "startup-annual": null, kafka: null },
   };
   for (const [id, byPlan] of Object.entries(vendorFigures)) {
     const row = ALL_ROWS.find((r) => r.id === id);
-    for (const [plan, v] of Object.entries(byPlan)) eq(row.plans[plan].v, v, `${id} on ${plan} as the vendor's spec states it`);
+    for (const [plan, v] of Object.entries(byPlan)) eq(row.plans[plan].v, v, `${id} on ${plan} as the vendor's spec or dashboard states it`);
   }
+  eq(P.FACTS.find((r) => r.id === "uw.reset").plans.unknown.v, 1200, "the vendor's window is the vendor's, so an unread plan takes the one stated reset");
   eq(P.resolveUwPlan("enterprise").plan, "unknown", "an unrecognised vendor plan is the strictest one");
   eq(P.resolveUwPlan("enterprise").recognised, false, "and says it was not recognised");
   eq(P.resolveUwPlan(" Startup-Annual ").plan, "startup-annual", "case and spaces are forgiven");
@@ -203,13 +205,27 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   eq(day({ FLOWS_UW_PLAN: "startup" }).cap, 80000, "Startup is 80,000");
   eq(day({ FLOWS_UW_PLAN: "startup", FLOWS_UW_DAILY_LIMIT: "60000" }).cap, 60000, "an owner line below the plan wins");
   eq(day({ FLOWS_UW_PLAN: "startup", FLOWS_UW_DAILY_LIMIT: "200000" }).cap, 80000, "an owner line above the plan is held to the plan");
-  eq(day({ FLOWS_UW_PLAN: "advanced" }).cap, null, "Advanced documents no day cap");
+  eq(day({ FLOWS_UW_PLAN: "advanced" }).cap, 100_000_000, "Advanced is the 100M daily requests its dashboard says are included");
+  eq(day({ FLOWS_UW_PLAN: "advanced" }).capFrom, "plan", "read from the plan, not the advisory line");
+  eq(day({ FLOWS_UW_PLAN: "advanced" }).source, "uw.dashboard", "and cites the owner's dashboard readback");
   eq(day({ FLOWS_UW_PLAN: "advanced", FLOWS_UW_DAILY_LIMIT: "50000" }).cap, 50000, "and takes the owner's line as given");
   eq(day({ FLOWS_UW_DAILY_LIMIT: "30000" }).cap, 30000, "an unread plan takes an owner line below the working line");
   for (const bad of ["abc", "0", "-5", "1.5", "", " ", "1e400"]) eq(day({ FLOWS_UW_PLAN: "startup", FLOWS_UW_DAILY_LIMIT: bad }).capFrom, "plan", `owner line ${JSON.stringify(bad)} is ignored`);
   eq(P.lines({ FLOWS_UW_PLAN: "startup-annual" })["uw.min"].cap, 1000, "the annual plan is 1,000 a minute");
   eq(P.lines({ FLOWS_UW_PLAN: "kafka" })["uw.min"].cap, 500, "the Kafka tier 500");
-  eq(P.lines({ FLOWS_UW_PLAN: "advanced" })["uw.min"].cap, null, "Advanced documents no minute line");
+  const advMin = P.lines({ FLOWS_UW_PLAN: "advanced" })["uw.min"];
+  eq(advMin.planCap, null, "Advanced states no minute line");
+  eq(advMin.cap, 500, "AN UNREAD MINUTE LINE IS THE 500 WORKING LINE, NEVER UNLIMITED");
+  same([advMin.capFrom, advMin.capSource], ["advisory", "uw.working"], "and says it is advisory and where the 500 comes from");
+  eq(day({ FLOWS_UW_PLAN: "advanced" }).capSource, "uw.dashboard", "a plan cap names its own source as the cap's");
+  eq(day({}).capSource, "uw.working", "an advisory cap names the working line");
+  eq(day({ FLOWS_UW_PLAN: "startup", FLOWS_UW_DAILY_LIMIT: "60000" }).capSource, "FLOWS_UW_DAILY_LIMIT", "and an owner line names its variable");
+  for (const plan of P.UW_PLANS) {
+    for (const id of ["uw.day", "uw.min"]) {
+      const l = P.lines({ FLOWS_UW_PLAN: plan })[id];
+      ok(Number.isInteger(l.cap) && l.cap > 0, `${id} on ${plan} resolves to a finite line (${l.cap}), so no governor or budget reads an unlimited vendor`);
+    }
+  }
   eq(P.lines({})["uw.min"].cap, 500, "and an unread plan 500");
   same(P.lines({ FLOWS_UW_PLAN: "startup-annual" })["uw.min"].downgrade, P.lines({})["uw.min"].design, "the vendor downgrade column is the strictest value: the unread plan");
 }
@@ -261,8 +277,9 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     return out;
   };
   const files = ["worker.js", "wrangler.toml", ...walk("shared"), ...walk("scripts"), ...walk("assets/js"), ...walk(".github")];
-  const readers = files.filter((f) => /FLOWS_PLAN_WORKERS|FLOWS_UW_PLAN/.test(read(f)));
-  same(readers, ["shared/flows-plan-facts.js"], "ONE PLACE: no other source file reads either plan variable");
+  const named = files.filter((f) => /FLOWS_PLAN_WORKERS|FLOWS_UW_PLAN/.test(read(f)));
+  same(named.filter((f) => /\.m?js$/.test(f)), ["shared/flows-plan-facts.js"], "ONE PLACE: no other source file reads either plan variable");
+  same(named.filter((f) => !/\.m?js$/.test(f)).sort(), [".github/workflows/flows-pipeline.yml", "wrangler.toml"], "and two configuration files set the vendor plan: the Worker's and the nightly's");
   const agents = read("AGENTS.md");
   ok(agents.includes("100,000 rows written and 5,000,000 rows read"), "AGENTS.md states the D1 Free caps");
   eq(P.lines({ FLOWS_PLAN_WORKERS: "free" })["d1.write"].cap, 100_000, "which are the Free lines here");
@@ -271,6 +288,49 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   ok(RT_LIMITS.callsPerMinute <= P.lines({})["uw.min"].cap, "the rail's default per-minute ceiling is inside the strictest vendor minute line");
 }
 
+{
+  const d = P.SOURCES["uw.dashboard"];
+  same([d.kind, d.via, d.readOn], ["owner", "observed", "2026-10-19"], "THE ADVANCED CELLS CITE THE OWNER'S DASHBOARD READBACK of 2026-10-19");
+  ok(/screenshot of the vendor API dashboard/.test(d.page), "and say how it was read");
+  for (const q of ["API Advanced", "Daily requests included 100M", "unlimited requests per day", "Window resets 8:00pm ET", "Lookback window 2 years", "Websockets Included"]) {
+    ok(d.quotes.includes(q), `the readback quotes "${q}"`);
+  }
+  same([...d.unstated], ["a per-minute line", "a concurrency line"], "and names the two lines the dashboard does not state");
+  ok(Object.hasOwn(P.SOURCES, d.agrees), "the header observation it agrees with is a source too");
+  ok(/x-uw-token-req-limit=100000000/.test(P.SOURCES[d.agrees].page), "the 100M day agrees with the token limit header observed on 2026-10-05");
+  ok(/100M/.test(d.note) && /unlimited/.test(d.note), "the note says the page claims both 100M and unlimited, and which the table keeps");
+  const advanced = P.facts({ FLOWS_UW_PLAN: "advanced" });
+  eq(advanced["uw.lookback"].cap, 730, "two years of lookback, in days");
+  eq(advanced["uw.conc"].cap, null, "no concurrency line is stated, so none is claimed");
+  eq(advanced["uw.reset"].cap, 1200, "the vendor's daily window resets at 20:00 ET, minute 1,200 of the Eastern day");
+  eq(advanced["uw.reset"].kind, "clock", "a clock fact, not a cap");
+  same(P.vendorDay({ FLOWS_UW_PLAN: "advanced" }), { basis: "stated", resetMinuteEt: 1200, plan: "advanced", source: "uw.dashboard", via: "observed", readOn: "2026-10-19" },
+    "vendorDay names the stated boundary with its source and date");
+  eq(P.vendorDay({}).basis, "stated", "an unread plan uses the vendor's stated window too");
+  same(P.vendorDay({ FLOWS_UW_PLAN: "startup" }), { basis: "assumed", resetMinuteEt: null, plan: "startup", source: "uw.tier", via: "page", readOn: "2026-10-11" },
+    "a plan whose window nobody has read says the boundary is assumed");
+  ok(Object.isFrozen(P.vendorDay({})), "and is frozen");
+}
+
+{
+  const toml = read("wrangler.toml");
+  const vars = toml.slice(toml.indexOf("[vars]"));
+  const m = /^FLOWS_UW_PLAN = "([^"]*)"$/m.exec(vars);
+  ok(m, "WRANGLER.TOML RECORDS THE VENDOR PLAN in [vars]");
+  eq(m[1], "advanced", "as advanced, the API Advanced plan the dashboard names");
+  const plan = P.planOf({ FLOWS_UW_PLAN: m[1] });
+  same([plan.uw, plan.uwRecognised, plan.uwExplicit], ["advanced", true, true], "which the table recognises as an explicit plan");
+  const wf = read(".github/workflows/flows-pipeline.yml");
+  const w = /^ {10}FLOWS_UW_PLAN: (\S+)$/m.exec(wf);
+  ok(w, "the nightly's build step sets the vendor plan in its env");
+  eq(w[1], m[1], "to the same plan as the Worker, so the deepening governor and the Status page read one table");
+  const dry = /- name: Verify the pipeline runs against fixtures\n[\s\S]*?run: node scripts\/flows-pipeline\.mjs --dry-run/.exec(wf);
+  ok(dry && !/FLOWS_UW_PLAN/.test(dry[0]), "the dry run is left on the unread plan, so the golden emit does not move with the plan");
+  const live = P.lines({ FLOWS_UW_PLAN: m[1] });
+  eq(live["uw.day"].cap, 100_000_000, "production's day line is the plan's 100M");
+  eq(live["uw.min"].cap, 500, "and its minute line the 500 working line");
+}
+
 function near(a, b, tol, m) { assert.ok(Math.abs(a - b) <= tol, `${m} (got ${a}, want ${b})`); checks++; }
 
-console.log(`✓ flows-plan-facts: ${checks} assertions — every cap per Workers plan and per vendor plan with its source page and the date read, snippet and recall marks on the figures not yet read from an official page, unknown resolving to the minimum of each vendor row, Paid as the default and a misspelt plan the strict one, the downgrade and design columns, money lines priced beyond the Paid allowance, the AI dollar line equal to the enforced neuron cap priced, the vendor day as the one hard line with owner and advisory lines, the Paid renewal monitor, a frozen table and one place that reads either plan variable`);
+console.log(`✓ flows-plan-facts: ${checks} assertions — every cap per Workers plan and per vendor plan with its source page and the date read, snippet and recall marks on the figures not yet read from an official page, unknown resolving to the minimum of each vendor row, Paid as the default and a misspelt plan the strict one, the downgrade and design columns, money lines priced beyond the Paid allowance, the AI dollar line equal to the enforced neuron cap priced, the vendor day as the one hard line with owner and advisory lines, the API Advanced cells from the owner's dashboard readback with the unread minute line held to the 500 working line and the vendor's 20:00 ET window as a clock fact, the plan recorded in wrangler.toml and the nightly alike, the Paid renewal monitor, a frozen table and one place that reads either plan variable`);

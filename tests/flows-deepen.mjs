@@ -52,6 +52,17 @@ eq(gov({ minuteLine: 500 }).pace.spacingMs, 150, "500 calls a minute is paced at
 eq(gov({ minuteLine: 1000 }).pace.spacingMs, 75, "and a larger line is paced faster");
 ok(gov().pace.perMinute <= 500 * D.DEEPEN.minuteSharePct, "the rotation never claims the whole minute line");
 
+const adv = lines({ FLOWS_UW_PLAN: "advanced" });
+const advGov = (over = {}) => gov({ dayLine: adv["uw.day"].cap, minuteLine: adv["uw.min"].cap, ...over });
+eq([adv["uw.day"].cap, adv["uw.min"].cap], [100_000_000, 500], "THE RECORDED ADVANCED PLAN hands the governor a 100M day line and the 500 working minute line");
+eq(advGov().pace, gov().pace, "THE RAISED DAY LINE DOES NOT RAISE THE PACE: the minute line alone sets it, 400 calls a minute");
+eq([advGov().n, advGov().binding], [530, "cap"], "an ordinary night is still the shipped cap");
+eq([advGov({ cap: 100000, callsSoFar: 0 }).n, advGov({ cap: 100000, callsSoFar: 0 }).binding], [535, "time"], "an uncapped night is still bounded by the deadline");
+eq(advGov({ cap: 100000 }).n, gov({ cap: 100000 }).n, "the same uncapped night as on the working line: the deadline, not the day line, sets it");
+ok(gov({ dailySeen: 40000 }).n < advGov({ dailySeen: 40000 }).n, "only a day already spent past about 30,400 calls reads more names than before");
+eq(advGov({ dailySeen: 40000 }).n, 530, "and then no more than the cap");
+ok((D.DEEPEN.baselineCalls + D.DEEPEN.hardCap * D.DEEPEN.callsPerName) < adv["uw.day"].cap * D.DEEPEN.daySharePct / 1000, "a night at the hard cap is under a thousandth of the plan's day share, so the day term never binds on this plan");
+
 eq(D.deepenMode({}), "on", "an unset switch is on");
 eq(D.deepenMode({ FLOWS_DEEPEN: "off" }), "off", "off is off");
 eq(D.deepenMode({ FLOWS_DEEPEN: " OFF " }), "off", "in any case");

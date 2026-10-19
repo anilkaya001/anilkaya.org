@@ -104,18 +104,32 @@ export function downgradeBreaches(env = {}) {
   const plans = UW_PLANS.map((plan) => ({ plan, line: lines({ FLOWS_UW_PLAN: plan })["uw.min"] }));
   for (const { plan, line } of plans) {
     eq(line.plan, plan, `${plan}: the line reports the plan it was read for`);
-    if (line.cap === null) {
-      eq(plan, "advanced", `${plan}: only Advanced has no documented minute line`);
-      same(budgetBreaches({ FLOWS_UW_PLAN: plan }), [], `${plan}: no documented line, no breach`);
-    } else if (vendorMinuteSum() > line.cap) {
+    ok(line.cap !== null, `${plan}: every vendor plan resolves to a minute line, so no plan reads as unlimited`);
+    if (line.planCap === null) {
+      eq(plan, "advanced", `${plan}: only Advanced states no minute line`);
+      same([line.cap, line.capFrom], [500, "advisory"], `${plan}: AN UNSTATED MINUTE LINE IS HELD TO THE 500 WORKING LINE`);
+    }
+    if (vendorMinuteSum() > line.cap) {
       same(budgetBreaches({ FLOWS_UW_PLAN: plan }), ["uw.min"], `${plan}: the ceilings (${vendorMinuteSum()}) are over its ${line.cap} a minute`);
     } else {
       same(budgetBreaches({ FLOWS_UW_PLAN: plan }), [], `${plan}: the ceilings (${vendorMinuteSum()}) fit its ${line.cap} a minute`);
     }
   }
   same(plans.filter((p) => p.line.cap !== null && vendorMinuteSum() <= p.line.cap).map((p) => p.plan), ["startup-annual"], "only the annual plan's 1,000 a minute covers the as-built ceilings");
-  const caps = plans.filter((p) => p.line.cap !== null).map((p) => p.line.cap);
+  const caps = plans.filter((p) => p.line.planCap !== null).map((p) => p.line.planCap);
   eq(lines({})["uw.min"].cap, Math.min(...caps), "an unread plan is the smallest documented line");
+  same(budgetBreaches({ FLOWS_UW_PLAN: "advanced" }), ["uw.min"], "EXPECTED BREACH ON THE RECORDED PLAN: Advanced states no minute line, so the 603 is held to the 500 working line and P1-31 still clears it");
+}
+
+{
+  const recorded = /^FLOWS_UW_PLAN = "([^"]*)"$/m.exec(toml);
+  ok(recorded, "wrangler.toml records the vendor plan");
+  const prod = { FLOWS_UW_PLAN: recorded[1] };
+  eq(lines(prod)["uw.day"].plan, "advanced", "as Advanced");
+  same(vendorMinuteCeilings(prod), vendorMinuteCeilings({}), "RECORDING THE PLAN MOVES NO ENFORCED PER-MINUTE CEILING: the rail, the limiters, Tier 2 and Tier 1 are set in code and wrangler.toml, not by the day line");
+  eq(lines(prod)["uw.min"].cap, lines({})["uw.min"].cap, "and the minute line they are summed against is the same 500");
+  eq(lines(prod)["uw.day"].cap, 100_000_000, "while the day line rises from the 60,000 working line to the plan's 100M");
+  ok(vendorMinuteSum(prod) * 60 * 24 < lines(prod)["uw.day"].cap, "which every enforced ceiling run flat out for a whole day (868,320 calls) cannot reach");
 }
 
 {
@@ -159,4 +173,4 @@ export function downgradeBreaches(env = {}) {
   eq(lines({})["uw.day"].source, "uw.tier", "the strictest day line cites the spec's tier text");
 }
 
-console.log(`✓ flows-vendor-budget: ${checks} assertions — the enforced per-minute vendor ceilings (rail, on-demand and member limiters, the Tier 2 pace, Tier 1 and focus) summed to 543 and 603 and held against the same plan-facts table the governor reads, with the as-built breach of the unread plan's 500 asserted as expected and the per-location limiters counted at four locations, for every vendor plan, a rail ceiling moved across the line, the vendor lines unmoved by a Workers plan change while 14 serving lines move, and the downgrade checklist of enforced settings above the Free column`);
+console.log(`✓ flows-vendor-budget: ${checks} assertions — the enforced per-minute vendor ceilings (rail, on-demand and member limiters, the Tier 2 pace, Tier 1 and focus) summed to 543 and 603 and held against the same plan-facts table the governor reads, with the as-built breach of the unread plan's 500 asserted as expected and the per-location limiters counted at four locations, for every vendor plan with Advanced's unstated minute line held to the 500 working line, the recorded plan moving no ceiling, a rail ceiling moved across the line, the vendor lines unmoved by a Workers plan change while 14 serving lines move, and the downgrade checklist of enforced settings above the Free column`);

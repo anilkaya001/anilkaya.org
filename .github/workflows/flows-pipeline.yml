@@ -96,6 +96,7 @@ jobs:
           FLOWS_UNUSUAL_V2: ${{ vars.FLOWS_UNUSUAL_V2 }}
           FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
           FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}
+          FLOWS_UW_PLAN: advanced
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/flows-pipeline.mjs
 
