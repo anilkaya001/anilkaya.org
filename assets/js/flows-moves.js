@@ -157,9 +157,16 @@
   function paintHead(M) {
     const readAt = S.generatedAt;
     const read = readAt && F.trtDay(readAt) ? fday(F.trtDay(readAt)) + " " + F.time(readAt) : DASH;
-    const src = M.live ? "Live roster, session <b>" + esc(fday(M.live.session)) + "</b>" : "Nightly, session <b>" + esc(S.day ? fday(S.day) : DASH) + "</b> · read " + esc(read);
-    const frozen = S.frozen ? " · <b>Frozen at " + esc(F.time(S.frozenAt)) + "</b> · " + esc(FROZEN_LINE) : "";
-    $("mvStamp").innerHTML = src + " · " + M.plotted.length + " of " + M.rows.length + " names with a typical day" + frozen;
+    const parts = M.live ? [["Live roster, session "], [fday(M.live.session), true]] : [["Nightly, session "], [S.day ? fday(S.day) : DASH, true], [" · read " + read]];
+    parts.push([" · " + M.plotted.length + " of " + M.rows.length + " names with a typical day"]);
+    if (S.frozen) parts.push([" · "], ["Frozen at " + F.time(S.frozenAt), true], [" · " + FROZEN_LINE]);
+    const stamp = $("mvStamp");
+    stamp.replaceChildren(...parts.map(([text, bold]) => {
+      if (!bold) return document.createTextNode(text);
+      const b = document.createElement("b");
+      b.textContent = text;
+      return b;
+    }));
     statusEl.textContent = M.all.length ? "Measured " + M.all.length + " names; " + M.plotted.length + " drawn." : "No name could be measured.";
   }
 
