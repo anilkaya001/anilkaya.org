@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import * as ENGINE from "../shared/flows-quant-engine.js";
 import { deskSmiles } from "../shared/flows-premium.js";
-import { chain, engineBlock, openDesk } from "./desk-fixtures.mjs";
+import { chain, engineBlock, openDesk, showView } from "./desk-fixtures.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -51,6 +51,7 @@ try {
       let miss = 0, missLab = 0;
       for (const line of g.lines) {
         const sel = `#dkList .dk-row[data-strike="${line.K}"][data-strategy="${line.strategy}"][data-expiry="${g.expiry}"]`;
+        await showView(page, "lines");
         await page.locator(sel + " .ui-info").first().click();
         await page.waitForSelector("#fxPop:popover-open");
         const facts = await page.$$eval("#fxPop dt", (dts) => Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));

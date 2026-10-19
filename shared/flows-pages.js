@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "337";
+export const ASSET_VERSION = "339";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -600,11 +600,20 @@ export function deskPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Premium desk",
     description: "Option sales across your names, priced by the engine and ranked on a frontier.",
-    active: "desk", username, chart: true,
-    styles: ["/assets/css/flows-tools.css"],
+    active: "desk", username, chart: true, chrome: false,
+    styles: ["/assets/css/flows-tools.css", "/assets/css/flows-desk.css"],
     scripts: ["/assets/js/flows-quant.bundle.js", "/assets/js/flows-export.js", "/assets/js/flows-desk.js"],
     body: `
   <div class="tl dk" id="dkMain">
+    <div class="dk-top">
+      <header class="flows-head dk-head1"><h1 id="fxTitle">Premium desk</h1></header>
+      <div class="dk-tabs" role="tablist" aria-label="Desk views" id="dkTabs">
+        <button type="button" role="tab" id="dkT-frontier" aria-controls="dkP-frontier" aria-selected="true" data-tab="frontier">Frontier</button>
+        <button type="button" role="tab" id="dkT-lines" aria-controls="dkP-lines" aria-selected="false" tabindex="-1" data-tab="lines">Lines</button>
+        <button type="button" role="tab" id="dkT-smile" aria-controls="dkP-smile" aria-selected="false" tabindex="-1" data-tab="smile" hidden>Smile</button>
+        <button type="button" role="tab" id="dkT-plan" aria-controls="dkP-plan" aria-selected="false" tabindex="-1" data-tab="plan" hidden>Plan</button>
+      </div>
+    </div>
     <section class="ui-card dk-bar" aria-label="Desk controls">
       <div class="dk-row1">
         <form class="tl-find dk-find" id="deskEntry" role="search" autocomplete="off">
@@ -615,15 +624,23 @@ export function deskPage({ username = "" } = {}) {
           <button type="submit" class="desk-add">Add</button>
         </form>
         <div class="tl-stripw dk-chipw"><div class="dk-chips" id="deskList" role="group" aria-label="Watchlist"></div></div>
+        <div class="dk-acts">
+          <label class="dk-all"><input type="checkbox" id="deskAll"><span>All names</span></label>
+          <button type="button" class="dk-pill" id="deskRefresh">Refresh</button>
+          <button type="button" class="dk-pill" id="deskClear">Remove all</button>
+          <button type="button" class="dk-pill dk-filter-btn" id="dkFilterBtn" aria-haspopup="dialog">Filters</button>
+        </div>
       </div>
-      <div class="dk-row2" id="dkFilters">
-        <label class="dk-all"><input type="checkbox" id="deskAll"><span>All names</span></label>
-        <button type="button" class="dk-pill" id="deskRefresh">Refresh</button>
-        <button type="button" class="dk-pill" id="deskClear">Remove all</button>
-      </div>
+      <div class="dk-row2" id="dkFilters"></div>
       <p class="dk-note visually-hidden" id="deskStatus" role="status">Add a symbol to begin.</p>
     </section>
-    <div class="ui-grid dk-grid" id="dkGrid"></div>
+    <div class="dk-stage dk-grid" id="dkGrid" data-view="frontier">
+      <div class="dk-panel" role="tabpanel" id="dkP-frontier" aria-labelledby="dkT-frontier" data-panel="frontier"></div>
+      <div class="dk-panel" role="tabpanel" id="dkP-lines" aria-labelledby="dkT-lines" data-panel="lines" inert></div>
+      <div class="dk-panel" role="tabpanel" id="dkP-smile" aria-labelledby="dkT-smile" data-panel="smile" inert></div>
+      <div class="dk-panel" role="tabpanel" id="dkP-plan" aria-labelledby="dkT-plan" data-panel="plan" inert></div>
+    </div>
+    <dialog class="dk-sc-dialog" id="dkFilterDlg" aria-labelledby="dkFilterT"><div class="dk-sc-body"><h2 id="dkFilterT">Filters</h2><div class="dk-filter-slot" id="dkFilterSlot"></div><div class="dk-sc-act"><span></span><button type="button" class="dk-pill dk-pill-main" id="dkFilterDone">Done</button></div></div></dialog>
     <p class="visually-hidden" id="deskFoot" role="note"></p>
   </div>
   <div id="dkCopy" hidden>
@@ -668,7 +685,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="c-edge.sign-flips">The edge changes sign between the real-world laws tried.</p>
       <p data-k="c-model.none">This name&#39;s card publishes no real-world law.</p>
       <p data-k="c-card.stale">The card is older than the session it should describe, which caps the grade.</p>
-      <p data-k="c-risk.undefined">A short put&#39;s loss is not fenced by a spread, so the engine caps its grade at 2.</p>
+      <p data-k="c-risk.undefined">A short option&#39;s loss is not fenced by a spread, so the engine caps its grade at 2.</p>
       <p data-k="c-event.smooth-slice">An earnings report falls inside this expiry and the smile is a smooth curve, not a mixture that separates the report&#39;s jump.</p>
       <p data-k="c-event.few-moves">Only three to five past report moves are on record to weigh the event.</p>
       <p data-k="c-event.q-equals-p">Fewer than three past report moves are on record, so the real-world view of the event cannot be told from the implied one.</p>
@@ -695,6 +712,33 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-num">The number in a cell is the vendor&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
       <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
+      <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised premium over collateral up, delta across. Premium is the time value the bid pays; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
+      <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta, drawn as a magnitude. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back, and every ratio counts only the time value.</p>
+      <p data-k="sc-contracts">100 options sold is read as 100 contracts of 100 shares, 10,000 shares in all. To mean 100 option-shares, enter 1.</p>
+      <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
+      <p data-k="sc-regt">Reg-T style collateral = 100 shares × the larger of 20% of spot less the amount the strike is above spot, and 10% of spot. It leaves out the option&#39;s own value, which the premium you receive pays for.</p>
+      <p data-k="sc-shares">Shares held: the collateral is the shares, 100 a contract at spot, and the line is priced as a covered call. The desk cannot see what you hold; the shares are assumed, not bought.</p>
+      <p data-k="sc-leaves-out">Left out: your broker&#39;s own rates and per-contract minimums, portfolio margin, broad-index options and leveraged funds, commissions, taxes, the margin a short stock position needs after assignment, and any netting across lines. Each line is sized alone.</p>
+      <p data-k="sc-assign">An American-style call can be assigned before expiry, most often just before an ex-dividend date when the dividend is more than the time value left. The engine prices every line as European. Uncovered, assignment sells 100 shares a contract at the strike and leaves you short stock; covered, the shares are called away.</p>
+      <p data-k="sc-early">Time value {tv} is below the {div} of dividends the card expects before expiry, so early assignment is a live possibility. The card&#39;s yield is an implied carry and can include more than dividends.</p>
+      <p data-k="sc-itm-deep">Deep in the money, a short call behaves like short stock and is most often assigned near expiry or before an ex-dividend date.</p>
+      <p data-k="sc-slice">The server cuts each name to its top 120 calls by time value over the stock price, not over this collateral, so the frontier is drawn over that cut.</p>
+      <p data-k="sc-no-delta">No delta: the engine could not price this call. Reg-T style collateral needs no delta.</p>
+      <p data-k="sc-no-delta-all">No delta could be read for these lines, so delta-adjusted collateral is withheld; the Reg-T style needs no delta.</p>
+      <p data-k="sc-nobad">Contracts must be a whole number from 1 to 100,000.</p>
+      <p data-k="sc-uncovered">Uncovered: loss has no cap.</p>
+      <p data-k="sc-loading">Loading the short-call view…</p>
+      <p data-k="sc-bp-ask">Enter a balance to see how many fit.</p>
+      <p data-k="sc-why-no-spot">No usable price for the underlying, so nothing is sized.</p>
+      <p data-k="sc-why-no-bid">No quotable bid, so there is no premium.</p>
+      <p data-k="sc-why-bad-delta">The engine returned a delta outside zero to one, so delta-adjusted collateral is withheld.</p>
+      <p data-k="sc-why-no-collateral">The convention asks for no collateral here, so no ratio is formed.</p>
+      <p data-k="sc-why-bad-terms">The haircut or floor is outside its allowed range.</p>
+      <p data-k="sc-fr-aria">Annualised premium over collateral, square-root scale, against {x} for {n} calls. Collateral convention: {conv}.</p>
+      <p data-k="sc-plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} call expiring {e} collects {c}, ties up {d} of collateral under {conv} and leaves {i} idle. Best means the largest gross premium one line collects — not annualised and not risk-adjusted — and counts at most {N} contracts.</p>
+      <p data-k="t-ratio">Time value over collateral for one trip to expiry: the bid less any intrinsic value, over the collateral the stated convention asks. Not a return anyone earns until the call expires out of the money.</p>
+      <p data-k="t-collat">What the stated convention asks for the contracts shown. See the information button for the formula.</p>
       <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
       <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
       <p data-k="sm-aged">so their volatility is of unknown age. Those cells are drawn with a broken border and NONE of them set an expiry&#39;s level — a stale cell is one marked number, but a stale level would tilt a whole column&#39;s smile with no marker on any cell it moved.</p>
@@ -742,7 +786,8 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="unagedN">{n} symbols&#39; quote ages were not stated by the route</p>
       <p data-k="full">The desk holds {n} symbols; each one is a live lookup. {dropped}Remove one to add another.</p>
       <p data-k="refuse">Selling options has unbounded loss on the call side and equity-sized loss on the put side. This is a screen, not advice.</p>
-  </div>`,
+  </div>
+  <i hidden data-defer="desk-calls" data-src="${v("/assets/js/flows-desk-calls.js")}"></i>`,
   });
 }
 

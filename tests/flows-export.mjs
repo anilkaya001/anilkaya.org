@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
-import { openDesk, nvdaAfter } from "./desk-fixtures.mjs";
+import { openDesk, nvdaAfter, showView } from "./desk-fixtures.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -184,6 +184,7 @@ try {
     const page = await openDesk(browser, { payloads: { NVDA: nvdaAfter() }, query: "?t=NVDA&strategy=both&rank=annualized", errors });
     await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length >= 9 && !!document.querySelector("#dkScatter svg"), null, { timeout: 15000 });
     await page.waitForTimeout(300);
+    await showView(page, "lines");
     const items = await menuItems(page);
     eq(items, ["CSV", "SVG", "PNG"], "the desk offers its lines and its frontier chart");
     const csv = (await download(page, "CSV")).bytes.toString("utf8");

@@ -19,7 +19,7 @@ const CEILING_KIB = {
   overviewPage: 246 + 1483 / 1024 + (246 + 2327 / 1024) - (246) + (246 + 2327 / 1024 + 265 / 1024) - (246 + 2327 / 1024) + (246 + 2327 / 1024 + 265 / 1024 - 958 / 1024) - (246 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 3600 / 1024,
   sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024,
   watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024,
-  deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024) + 2010 / 1024 + 360 / 1024,
+  deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024) + 2010 / 1024 + 360 / 1024 + 8400 / 1024,
   strategyPage: 261 + 5786 / 1024 + (261 + 5786 / 1024 + 2327 / 1024) - (261 + 5786 / 1024) + (261 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (261 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024,
   marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024 + 9.5,
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024,
@@ -37,7 +37,7 @@ const GZIP_KIB = {
   overviewPage: 82 - 7712 / 1024 + (82 - 7712 / 1024 + 830 / 1024) - (82 - 7712 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) - (82 - 7712 / 1024 + 830 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024 - 288 / 1024) - (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 1800 / 1024,
   sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024,
   watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024,
-  deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024,
+  deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024 + 2900 / 1024,
   strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024,
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3,
   unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024,
@@ -55,7 +55,7 @@ const CSS_KIB = {
   overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024,
   sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024,
   watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024,
   strategyPage: 111 + 880 / 1024 + 1700 / 1024,
   marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8,
   unusualPage: 113 + 5007 / 1024 + 1700 / 1024,
@@ -73,7 +73,7 @@ const CSS_GZIP_KIB = {
   overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024,
   sidePage: 22 + 64 / 1024 + 400 / 1024,
   watchPage: 22 + 64 / 1024 + 400 / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024,
   strategyPage: 24 + 64 / 1024 + 400 / 1024,
   marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024,
   unusualPage: 25 + 599 / 1024 + 400 / 1024,
@@ -119,6 +119,7 @@ const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-capacity.js", "/assets/js/flows-status-coverage.js"] } },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js", "home-netmap": "/assets/js/flows-net-map.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
@@ -128,7 +129,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 80, strategyPage: 80, marketPage: 322,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 322,
   unusualPage: 196 + 900 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15 + 4,
 };
 
@@ -146,7 +147,6 @@ const BELOW_FLOOR = {
   tickerPage: "OD-08",
   sidePage: NO_RELIEF_ROW,
   watchPage: NO_RELIEF_ROW,
-  deskPage: NO_RELIEF_ROW,
   movesPage: NO_RELIEF_ROW,
   marketPage: NO_RELIEF_ROW,
   overviewPage: NO_RELIEF_ROW,

@@ -3,7 +3,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 import vm from "node:vm";
 import { chromium } from "playwright";
 import { ivSurface } from "../shared/flows-premium.js";
-import { chain, sale, nvdaAfter, nvdaBefore, engineBlock, NODE_Q, REPO, openDesk } from "./desk-fixtures.mjs";
+import { chain, sale, nvdaAfter, nvdaBefore, engineBlock, NODE_Q, REPO, openDesk, showView } from "./desk-fixtures.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -116,6 +116,7 @@ try {
   const closeInfo = async (page) => { await page.keyboard.press("Escape"); await page.waitForSelector("#fxPop:not(:popover-open)", { state: "attached" }); };
   const factsOf = (page) => page.$$eval("#fxPop dt", (dts) => Object.fromEntries(dts.map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()])));
   const lineInfo = async (page, sel) => {
+    await showView(page, "lines");
     const text = await openInfo(page, page.locator(sel + " .ui-info").first());
     const facts = await factsOf(page);
     await closeInfo(page);
@@ -183,6 +184,7 @@ try {
     ok(/Win % \(implied\) is the risk-neutral chance/.test(frontier), "and what the implied win chance is");
     await closeInfo(page);
 
+    await showView(page, "frontier");
     await page.locator("#dkFrontierM .ui-seg-i", { hasText: "Win % (implied)" }).click();
     await page.waitForFunction(() => /implied chance of profit/.test(document.querySelector("#dkScatter svg")?.getAttribute("aria-label") || ""), null, { timeout: 5000 });
     const chanceTexts = await page.$$eval("#dkScatter svg text", (ts) => ts.map((t) => t.textContent));
@@ -349,6 +351,7 @@ try {
     eq(await statusShown(page), true, "on the surface");
     const empty = flat(await page.locator("#dkList .ui-silent").getAttribute("aria-label"));
     ok(/these quotes do not agree with the price/.test(empty) || /Lines/.test(empty), "the list says so in the silence vocabulary");
+    await showView(page, "lines");
     const silentInfo = await openInfo(page, page.locator("#dkList .ui-silent [data-info]"));
     ok(/these quotes do not agree with the price \(231\.02\), so nothing is ranked/.test(silentInfo), `and the reason is one tap away where the lines would be (${silentInfo})`);
     await closeInfo(page);
@@ -453,6 +456,7 @@ try {
     const page = await openDesk(browser, { payloads: { SMI: payload }, query: "?t=SMI&strategy=both", errors });
     await ready(page, 3);
     await page.waitForFunction(() => document.querySelectorAll("#deskSurface .ivs-cell").length > 0, null, { timeout: 10000 });
+    await showView(page, "smile");
     const note = await openInfo(page, page.locator('#deskSurface [aria-label="About smile"]'));
     await closeInfo(page);
     ok(/vendor.s implied volatility for that contract.s last transaction/.test(note), "the smile says each cell is the vendor's last-transaction volatility");
@@ -518,6 +522,7 @@ try {
     eq(head.next, "deskRank", "and it sits beside the rank option that can order the lines by that uncalibrated figure");
     eq(head.tags, 1, "one note on the page, not one per line");
     ok(head.inside && !head.clipped && !head.page, `and at ${width}px it fits its header, unclipped, with no page overflow`);
+    await showView(page, "lines");
     if (width === 1440) {
       const text = await openInfo(page, page.locator("#dkLinesM .ui-calib"));
       const pop = await page.evaluate(() => ({ title: document.getElementById("fxPopT").textContent, lead: document.querySelector("#fxPop .ui-lead").textContent }));
@@ -528,6 +533,7 @@ try {
         .map((c) => { const n = window.FlowsUI.calibTag(c); return n ? n.textContent : null; }));
       same(cond, ["Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", "Not yet calibrated", null, null],
         "the note shows while no calibration record is held, or its effective n is under 100 or not a number, and comes off only at nEff 100 or more");
+      await showView(page, "frontier");
       await page.locator("#dkScatter .tl-scrub").focus();
       const reads = [];
       for (let k = 0; k < 12; k++) {

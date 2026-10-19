@@ -664,3 +664,94 @@ export function planBuyingPower(rows, buyingPower) {
   }
   return { buyingPower: bp, rows: out, affordable: affordable.length, best };
 }
+
+export const SC_DEFAULTS = Object.freeze({ contracts: 100, convention: "delta", haircut: 0.3, floor: 0.1 });
+export const SC_REG_T = Object.freeze({ base: 0.2, floor: 0.1 });
+export const SC_LIMITS = Object.freeze({ contractsMax: 100000, haircut: Object.freeze([0.05, 1]), floor: Object.freeze([0, 0.5]) });
+export const SC_CONVENTIONS = Object.freeze(["delta", "regt", "shares"]);
+
+export const roundCents = (dollars) => Math.round(dollars * 100 + 1e-9 + Math.abs(dollars) * 1e-13);
+
+export function parseContracts(raw) {
+  const text = String(raw === null || raw === undefined ? "" : raw).trim().toLowerCase();
+  const m = /^(\d{1,3}(?:,\d{3})+|\d+)(k?)$/.exec(text);
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, "")) * (m[2] ? 1000 : 1);
+  return Number.isInteger(n) && n >= 1 && n <= SC_LIMITS.contractsMax ? n : null;
+}
+
+export function parsePercent(raw, [lo, hi]) {
+  const text = String(raw === null || raw === undefined ? "" : raw).trim();
+  const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(text);
+  if (!m) return null;
+  const v = Math.round(Number(m[1]) / 100 * 1e4) / 1e4;
+  return v >= lo && v <= hi ? v : null;
+}
+
+export function shortCallCollateral({ convention = SC_DEFAULTS.convention, spot, strike, delta = null, haircut = SC_DEFAULTS.haircut, floor = SC_DEFAULTS.floor } = {}) {
+  const fail = (why) => ({ ok: false, m1C: null, binding: null, why });
+  const S = numOrNull(spot), K = numOrNull(strike);
+  if (S === null || K === null || !(S > 0) || !(K > 0)) return fail("no-spot");
+  let m, binding;
+  if (convention === "regt") {
+    const a = SC_REG_T.base * S - Math.max(0, K - S), fl = SC_REG_T.floor * S;
+    m = SHARES_PER_CONTRACT * Math.max(a, fl);
+    binding = a > fl ? "regt-otm" : "floor";
+  } else if (convention === "shares") {
+    m = SHARES_PER_CONTRACT * S;
+    binding = "shares";
+  } else if (convention === "delta") {
+    const hc = numOrNull(haircut), fl = numOrNull(floor);
+    if (hc === null || fl === null || hc < SC_LIMITS.haircut[0] || hc > SC_LIMITS.haircut[1] || fl < SC_LIMITS.floor[0] || fl > SC_LIMITS.floor[1]) return fail("bad-terms");
+    const d = numOrNull(delta);
+    if (d === null) return fail("no-delta");
+    if (d < 0 || d > 1) return fail("bad-delta");
+    m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);
+    binding = hc * d > fl ? "delta" : "floor";
+  } else return fail("bad-terms");
+  const m1C = roundCents(m);
+  if (!(m1C > 0)) return fail("no-collateral");
+  return { ok: true, m1C, binding, why: null };
+}
+
+export function dividendsToExpiry({ spot, r, q, years }) {
+  const S = numOrNull(spot), rr = numOrNull(r), qq = numOrNull(q), T = numOrNull(years);
+  if (S === null || rr === null || qq === null || T === null || !(qq > 0) || !(T > 0) || !(S > 0)) return 0;
+  return S * (Math.exp(rr * T) - Math.exp((rr - qq) * T));
+}
+
+export function shortCallLine(row, { spot, delta = null, days, contracts = SC_DEFAULTS.contracts, convention = SC_DEFAULTS.convention, haircut = SC_DEFAULTS.haircut, floor = SC_DEFAULTS.floor, buyingPower = null } = {}) {
+  const S = numOrNull(spot), K = numOrNull(row && row.strike), bid = numOrNull(row && row.bid);
+  const base = { ok: false, why: null, binding: null, asked: contracts, n: null, bidC: null, tvC: null, intrC: null, m1C: null, regtM1C: null, ratio: null, grossRatio: null, annRatio: null, limited: false, affordable: false, premiumC: null, collateralC: null, idleC: null, deltaShares: null, deltaDollarsC: null };
+  if (S === null || K === null || !(S > 0) || !(K > 0)) return { ...base, why: "no-spot" };
+  if (bid === null || !(bid > 0)) return { ...base, why: "no-bid" };
+  const col = shortCallCollateral({ convention, spot: S, strike: K, delta, haircut, floor });
+  const regt = shortCallCollateral({ convention: "regt", spot: S, strike: K });
+  const bidC = Math.round(bid * 10000);
+  const intrC = Math.round(Math.max(0, S - K) * 10000);
+  const tvC = Math.max(0, bidC - intrC);
+  const out = { ...base, bidC, intrC, tvC, regtM1C: regt.ok ? regt.m1C : null };
+  if (!col.ok) return { ...out, why: col.why };
+  const d = numOrNull(delta);
+  const bpC = numOrNull(buyingPower) === null || !(buyingPower > 0) ? null : Math.round(buyingPower * 100);
+  const n = bpC === null ? contracts : Math.min(contracts, Math.floor(bpC / col.m1C));
+  const ratio = tvC / col.m1C;
+  const dayN = numOrNull(days);
+  return {
+    ...out, ok: true, why: null, binding: col.binding, m1C: col.m1C, n,
+    ratio, grossRatio: bidC / col.m1C, annRatio: dayN !== null && dayN >= 1 ? ratio * DAYS_PER_YEAR / dayN : null,
+    limited: bpC !== null && n < contracts, affordable: n >= 1,
+    premiumC: n * bidC, collateralC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
+    deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * contracts, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * contracts),
+  };
+}
+
+export function planShortCalls(lines) {
+  let best = null, affordable = 0;
+  for (const l of lines) {
+    if (!l || !l.ok || !l.affordable) continue;
+    affordable++;
+    if (best === null || l.premiumC > best.premiumC) best = l;
+  }
+  return { best, affordable };
+}
