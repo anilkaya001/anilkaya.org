@@ -112,7 +112,9 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   const gate = deferAlerts ? new Promise((r) => { release = r; }) : null;
   page.release = () => release && release();
   const version = fs.readFileSync(path.join(ROOT, "assets/version.txt"), "utf8").trim();
-  const html = PAGES.unusualPage({ username: "test", owner }).replace("</head>", "<style>html{scroll-behavior:auto!important}</style></head>")
+  const html = PAGES.unusualPage({ username: "test", owner }).replace("</head>", "<style>html{scroll-behavior:auto!important}.flows-body[data-flows-page=unusual] .flows-main{height:auto!important;overflow:visible!important;display:block!important}</style></head>")
+    .replace(/<div class="fd-tabs"[\s\S]*?<\/div>\n/, "").replace(/<div class="fd-stage"[^>]*>/, "").replace(/<\/div>\n(\s*<i hidden data-defer="flow-below")/, "$1")
+    .replace(' fn-card fd-mod"', ' fn-card"').replace(' data-tab="network" data-free', "").replace(/<script src="[^"]*flows-feed-os\.js[^"]*" defer><\/script>\n/, "")
     .replace(eager ? /<i hidden data-defer="net"[^>]*><\/i>/ : /$^/, "")
     .replace(eager ? /(<script src="[^"]*flows-unusual\.js[^"]*" defer><\/script>)/ : /$^/, `<script src="/assets/js/flows-net.js?v=${version}" defer></script>\n$1`);
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));

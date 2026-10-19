@@ -314,7 +314,7 @@ async function exercise(browser, js, full) {
   await page.click('.pl-tile[data-t="BRVO"]');
   await page.waitForFunction(() => /Not on the card/.test(document.querySelector("#plRail .ctx").innerText), null, { timeout: 5000 }).catch(() => {});
   rt = await railText(page);
-  chk(rt.ctx.every(([k, v]) => v === DASH || k === "IV rank" && false), "a card with no volatility, regime or premium shows a dash for each, never a zero: " + JSON.stringify(rt.ctx));
+  chk(rt.ctx.every(([k, v]) => v === DASH || v.startsWith(DASH + " ")), "a card with no volatility, regime or premium shows a dash for each, never a zero: " + JSON.stringify(rt.ctx));
   chk(/Not on the card: conviction, IV rank, dealer gamma, net premium\./.test(rt.ctxSub || ""), "and names what the card lacked: " + rt.ctxSub);
 
   await page.click('.pl-tile[data-t="DUNE"]');
@@ -578,7 +578,7 @@ const MUTANTS = [
   ["low and high bound swapped in the rail", "kv(\"Net low bound\", smoney(x.lo))", "kv(\"Net low bound\", smoney(x.hi))"],
   ["an executive counted as a chamber", "const chOf = (m) => (m === \"senate\" ? \"S\" : m === \"executive\" ? \"E\" : \"H\");", "const chOf = (m) => (m === \"senate\" ? \"S\" : \"H\");"],
   ["tile area linear in dollars", "Math.sqrt(g) / 4e3 : Math.sqrt(g);", "Math.sqrt(g) / 4e3 : g;"],
-  ["a missing conviction shown as zero", "cf.conviction === null ? DASH : cf.conviction + \" /100\"", "cf.conviction === null ? \"0 /100\" : cf.conviction + \" /100\""],
+  ["a missing conviction shown as zero", "cf.conviction === null ? gap(\"not on the card\") : cf.conviction + \" /100\"", "cf.conviction === null ? \"0 /100\" : cf.conviction + \" /100\""],
   ["the read time printed in UTC", "fday(day) + \" \" + F.time(readAt)", "fday(day) + \" \" + new Date(readAt).toISOString().slice(11, 16) + \" UTC\""],
   ["a firm reduction resurrected", "if (share <= -0.2) return \"redM\";", "if (b.hi < 0 && !open) return \"redF\"; if (share <= -0.2) return \"redM\";"],
   ["the ring drawn as the unfiled share's complement", "(c * f).toFixed(1)", "(c * (1 - f)).toFixed(1)"],

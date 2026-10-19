@@ -199,7 +199,7 @@
       const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
       col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
-      col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, DASH) : null));
+      col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, "No print") : null));
       const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))
         .sort((a, b) => laneRank(a.r) - laneRank(b.r) || (n(b.c && b.c.mcap) ?? -1) - (n(a.c && a.c.mcap) ?? -1) || String(a.r.t).localeCompare(String(b.r.t)));
       const cell = h("div", { class: "fe-cell fe-c-earn", "data-lane": "Earnings" });
@@ -217,7 +217,7 @@
       }
       col.append(cell);
       const fd = fdaSt.state === "ok" ? (payload.fda.rows || []).filter((f) => f && f.tgt && f.tgt.p === "day" && f.tgt.from === d) : [];
-      col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.map(fdaPill)));
+      col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.length ? fd.map(fdaPill) : fdaSt.state === "ok" ? h("span", { class: "fe-none", title: "No FDA date falls on this day in the vendor calendar" }, "No date") : null));
       if (divSt) col.append(h("div", { class: "fe-cell fe-c-div", "data-lane": "Ex-div" }, divRows.filter((c) => c.date === d).map((c) => h("a", { class: "fe-pill", href: tickerHref(c.t) }, h("b", null, String(c.t || DASH))))));
       grid.append(col);
     });
@@ -234,7 +234,16 @@
       whens.has("postmarket") ? key(UI.glyph("closed", "fe-when"), "After the close") : null,
     ].filter(Boolean));
     legend.classList.add("fe-legend");
-    host.week.replaceChildren(grid, legend);
+    const lastDay = list[list.length - 1];
+    const later = (st, rows, pick) => {
+      if (st.state !== "ok") return null;
+      const days = (rows || []).map(pick).filter((x) => ISO.test(String(x)) && x > lastDay).sort();
+      return days.length ? weekday(days[0]) + " " + F.day(days[0]) : null;
+    };
+    const nextMacro = later(macroSt, payload.macro && payload.macro.rows, (m) => m && m.day);
+    const nextFda = later(fdaSt, payload.fda && payload.fda.rows, (f) => f && f.tgt && f.tgt.p === "day" ? f.tgt.from : null);
+    const beyond = [nextMacro ? "next macro print " + nextMacro : null, nextFda ? "next FDA date " + nextFda : null].filter(Boolean);
+    host.week.replaceChildren(grid, legend, ...(beyond.length ? [h("p", { class: "fe-beyond" }, "After these five sessions: " + beyond.join(" " + MID + " "))] : []));
     setModuleState(host.week, UI.partial([{ name: "Macro", st: macroSt }, { name: "Earnings", st: earnSt }, { name: "FDA", st: fdaSt }, ...(divSt ? [{ name: "Ex-dividends", st: divSt }] : [])]), "Week ahead");
   }
 
@@ -284,7 +293,7 @@
       asOf: payload.gateOrigin || null,
       lead: "The next five sessions: economic prints, earnings and FDA dates, day by day. Each name is a link to its page; the bar under it is its implied move against the largest this week, so the names that can move the most stand out.",
       facts: [
-        ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the run's own Eastern date" : null],
+        ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the run's own session date" : null],
         ["Prices", payload.sessionDate ? "closes of " + payload.sessionDate : null],
         ["Gate", n(payload.gateDays) === null ? null : "day 0 to day " + payload.gateDays + ", calendar days"],
         ["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))],
@@ -565,7 +574,7 @@
     if (cap !== null && inWindow !== null && inWindow > shown) parts.push("the cap holds the list to " + cap);
     const sd = payload.sessionDate, go = payload.gateOrigin;
     parts.push("prices are the " + (sd || "last completed") + " session's closes; every day count is measured from " +
-      (go ? go + ", the run's own Eastern date and the origin the earnings gate used" : "the run's own Eastern date") +
+      (go ? go + ", the run's own session date and the origin the earnings gate used" : "the run's own session date") +
       (S.staleDays === null ? "" : ", which was " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago — these counts are that run's, not today's"));
     statusEl.textContent = parts.join(" " + MID + " ") + ".";
     if (rows.length) delete statusEl.dataset.empty; else statusEl.dataset.empty = "quiet";
@@ -581,6 +590,8 @@
     const bits = [];
     if (ISO.test(String(payload.sessionDate || ""))) bits.push(h("span", null, F.day(payload.sessionDate)));
     if (n(payload.windowDays) !== null) bits.push(h("span", null, n(payload.windowDays) + "-day window"));
+    const built = F.stamp(payload.generatedAt);
+    if (built) bits.push(h("span", { class: "fe-built" }, "built " + built));
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");

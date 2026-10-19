@@ -259,3 +259,4 @@
   .pl-tile, .pl-panel { border: 1px solid CanvasText; }
   .pl-tile[aria-pressed="true"] { outline: 2px solid Highlight; }
 }
+.kv small.why { color: var(--label-2); font: var(--t-caption2); font-weight: 400; }

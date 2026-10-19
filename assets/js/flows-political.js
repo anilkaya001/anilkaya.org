@@ -312,6 +312,7 @@
     for (const b of $("plSizeSeg").children) b.setAttribute("aria-pressed", String(b.dataset.size === S.size));
     if (isMap) renderMap(rows); else renderList(rows);
     $("plLegend").innerHTML = ["accF", "accM", "mix", "redM"].map((k) => '<span><i class="sw ' + k + '"></i>' + STS[k] + "</span>").join("") + "<span>◔ share still unfiled</span>";
+    $("plFnote").title = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab) : tabNote(tab);
     $("plFnote").textContent = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab) : tabNote(tab);
     const fundN = ALL.filter((x) => x.fund).length;
     const hid = !S.funds && fundN;
@@ -357,6 +358,7 @@
     return v;
   }
 
+  const gap = (why) => DASH + '<small class="why"> ' + why + "</small>";
   function ctxHTML(x, evs) {
     const kv = (a, b) => '<div class="kv"><span>' + a + "</span><b>" + b + "</b></div>";
     const e = cards.get(x.t);
@@ -383,12 +385,12 @@
     return {
       head: cf.asOf ? "card " + fday(cf.asOf) : "",
       html: rows([
-        cf.conviction === null ? DASH : cf.conviction + " /100",
-        cf.ivRank === null ? DASH : cf.ivRank + (cf.iv30 === null ? "" : " · IV " + F.pct(cf.iv30, 1)),
-        cf.gammaBook || DASH,
-        cf.gammaFlow || DASH,
-        cf.flowP === null ? DASH : '<span class="' + tn(cf.flowP) + '-t">' + smoney(cf.flowP) + "</span>",
-        since === null ? DASH : '<span class="' + tn(since) + '-t">' + spct(since) + "</span>",
+        cf.conviction === null ? gap("not on the card") : cf.conviction + " /100",
+        cf.ivRank === null ? gap("not on the card") : cf.ivRank + (cf.iv30 === null ? "" : " · IV " + F.pct(cf.iv30, 1)),
+        cf.gammaBook || gap("not on the card"),
+        cf.gammaFlow || gap("not on the card"),
+        cf.flowP === null ? gap("none published") : '<span class="' + tn(cf.flowP) + '-t">' + smoney(cf.flowP) + "</span>",
+        since === null ? gap(why) : '<span class="' + tn(since) + '-t">' + spct(since) + "</span>",
       ]) + '<span class="sub c" title="Net premium is calls minus puts, in dollars">' + ag + (since === null ? " Price since: " + why + "." : "") + (miss.length ? " Not on the card: " + miss.join(", ") + "." : "") + "</span>",
     };
   }

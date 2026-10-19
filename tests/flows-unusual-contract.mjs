@@ -1471,7 +1471,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     await load(dead);
     const broke = await dead.evaluate(() => ({
       statusMark: document.getElementById("uaStatus").getAttribute("data-empty"),
-      states: [...document.querySelectorAll(".fd-mod")].map((m) => m.id + ":" + m.dataset.state),
+      states: [...document.querySelectorAll(".fd-mod:not([data-free])")].map((m) => m.id + ":" + m.dataset.state),
       filterNote: document.getElementById("uaFilterNote").textContent,
     }));
     const deadFeedPop = await info(dead, "uaFeedCard");
@@ -1548,6 +1548,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
       })),
       bubbles: [...document.querySelectorAll("#uaTimeline .fu-b")].map((b) => b.dataset.side || null).sort(),
     }), ASK_SHARE);
+    await known.click("#fdT-timeline");
     await known.focus('#uaTimeline [aria-roledescription="chart"]');
     await known.keyboard.press("Home");
     const scrubText = await known.$eval("#uaTimeline .ui-readout", (r) => r.textContent);
@@ -1630,6 +1631,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
        `null premium, no time), though none of them states a side, because the key names a mark on the chart (${JSON.stringify(zs)})`);
     ok(zs.bubbles.some((b) => b.side === "thin" && Number(b.fill) === 0.4) && zs.cell === "none sided",
        `it is drawn with the faint mixed or thinly sided fill, and its Names cell prints none sided, not the dash the note reserves for a missing field (${JSON.stringify(zs)})`);
+    await zero.click("#fdT-timeline");
     await zero.focus('#uaTimeline [aria-roledescription="chart"]');
     const widths = [];
     for (const key of ["Home", "ArrowRight", "ArrowRight", "End"]) {
@@ -1681,7 +1683,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     await put("flowalerts", { ...urgent, rows: urgent.rows.filter((r) => r.t === "CCC") });
     const noDeep = await newPage();
     await load(noDeep);
-    await noDeep.waitForSelector("#uaUrgency .ui-silent");
+    await noDeep.waitForSelector("#uaUrgency .ui-silent", { state: "attached" });
     eq(await noDeep.$eval("#uaUrgency .ui-silent", (n) => n.dataset.state), "quiet",
       "and a session whose flagged board names are all cross-section reads as quiet, not as a wall of missing tapes");
     await noDeep.close();
