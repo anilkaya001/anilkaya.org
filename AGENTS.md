@@ -1080,7 +1080,16 @@ not overwrite a streamed one while frames are arriving.
    everything it serves and `_headers` repeats them, verbatim, on asset-first
    `/assets/*` responses. CSP applies only to HTML and
    permits jsDelivr plus eval/WebAssembly evaluation required by Pyodide, and
-   the first-party Cloudflare Web Analytics beacon origins.
+   the first-party Cloudflare Web Analytics beacon origins. Its `script-src`
+   also carries a fresh `'nonce-…'` per HTML response (16 bytes from
+   `crypto.getRandomValues`, base64), which no page uses: Cloudflare's
+   JavaScript Detections reads it from the header and puts it on the inline
+   script it injects to load `/cdn-cgi/challenge-platform/scripts/jsd/main.js`,
+   which the policy otherwise refuses. Never `'unsafe-inline'` for scripts,
+   never a fixed nonce, and no `no-transform` (it would also stop the edge's
+   compression). `tests/route-matrix.mjs` holds the policy byte for byte with
+   the nonce normalised, one 16-byte `script-src` nonce per HTML response,
+   a different one each time, and no CSP on a non-HTML response.
 4. HTML is `no-cache`; successful/304 versioned assets are immutable for one
    year; other successful/304 assets cache for one hour; API/auth is `no-store`.
    Under `/assets/*` the policy is written by path in `_headers` (`css`, `js`,

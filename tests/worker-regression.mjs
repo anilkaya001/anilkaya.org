@@ -81,9 +81,21 @@ const attr = (html, selector, name = "content") => {
   return value ? decode(value[1]) : null;
 };
 
+function scriptNonce(response) {
+  const policy = response.headers.get("content-security-policy") || "";
+  const nonces = [...policy.matchAll(/'nonce-([^']*)'/g)];
+  assert.equal(nonces.length, 1, `${response.url}: the HTML CSP carries exactly one nonce`);
+  const holder = policy.split("; ").find((directive) => directive.includes(nonces[0][0]));
+  assert.match(holder, /^script-src 'self' /, `${response.url}: the nonce is a script-src source`);
+  assert.match(nonces[0][1], /^[A-Za-z0-9+\/]{22}==$/, `${response.url}: the nonce is the base64 of 16 bytes`);
+  assert.equal(Buffer.from(nonces[0][1], "base64").length, 16, `${response.url}: the nonce decodes to 16 bytes`);
+  return nonces[0][1];
+}
+
 function assertSecurity(response, html = false) {
   for (const name of securityHeaders) assert(response.headers.get(name), `${name} missing on ${response.url}`);
   assert.equal(!!response.headers.get("content-security-policy"), html, `CSP scope wrong on ${response.url}`);
+  if (html) scriptNonce(response);
 }
 
 async function json(response, status) {
@@ -112,6 +124,9 @@ try {
   assert.equal(root.headers.get("clear-site-data"), null, "one-time cache purge is retired");
   assertSecurity(root, true);
   assert.match(root.headers.get("content-security-policy") || "", /https:\/\/static\.cloudflareinsights\.com/, "CSP must allow Cloudflare Web Analytics");
+  const again = await fetch(base + "/");
+  await again.arrayBuffer();
+  assert.notEqual(scriptNonce(again), scriptNonce(root), "every HTML response carries a fresh script-src nonce for the edge's injected scripts");
   const rootHtml = await root.text();
   assert.match(rootHtml, /In Econometrics We Trust/);
   assert.match(rootHtml, /id="marketBoard"/, "landing page must carry the market-clock mount point");

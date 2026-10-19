@@ -143,7 +143,7 @@ const PATH_IDS = new Set(["complete-core", "causal", "applied-micro", "time-seri
 const SESSION_MINUTES = new Set([10, 20, 45]);
 const STAGE_KEY_BY_COURSE = Object.freeze(Object.fromEntries(Object.entries(COURSE_STAGE_BY_ID).map(([key, stage]) => [key, stage])));
 
-const CSP = [
+const CSP_DIRECTIVES = Object.freeze([
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
@@ -156,7 +156,12 @@ const CSP = [
   "worker-src 'self' blob:",
   "form-action 'self'",
   "upgrade-insecure-requests",
-].join("; ");
+]);
+
+function htmlCsp() {
+  const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+  return CSP_DIRECTIVES.map((directive) => directive.startsWith("script-src ") ? directive + " 'nonce-" + nonce + "'" : directive).join("; ");
+}
 
 const SECURITY_HEADERS = {
   "Strict-Transport-Security": "max-age=31536000",
@@ -3609,7 +3614,7 @@ function finalize(response, request, url) {
   const contentType = out.headers.get("Content-Type") || "";
   const cacheableMethod = request.method === "GET" || request.method === "HEAD";
   const cacheableStatus = out.status === 200 || out.status === 304;
-  if (contentType.includes("text/html")) out.headers.set("Content-Security-Policy", CSP);
+  if (contentType.includes("text/html")) out.headers.set("Content-Security-Policy", htmlCsp());
   else out.headers.delete("Content-Security-Policy");
 
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/") ||
