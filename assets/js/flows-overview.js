@@ -383,7 +383,7 @@
 
     const mDay = isoDayOf(market && market.sessionDate);
     const pDay = isoDayOf(pc.date) || isoDayOf(pulse && pulse.sessionDate);
-    const aDay = isoDayOf(alerts && (alerts.sessionDate || alerts.session));
+    const aDay = isoDayOf(alerts && alerts.sessionDate);
     const stamps = { bias: ptSilence ? null : stampFor(mDay), breadth: brSilence ? null : stampFor(mDay), cleared: clSilence ? null : stampFor(DAY.boards),
       pc: pcSilence ? null : stampFor(pDay), flagged: flSilence ? null : stampFor(aDay) };
     const sessionFact = (d) => ["Session", d ? dayShort(d) : null];
