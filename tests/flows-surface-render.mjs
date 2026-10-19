@@ -448,6 +448,7 @@ const settle = async (page) => { await page.waitForSelector('.ftsf[data-motion="
   eq(await page.evaluate(() => document.querySelector('.ftsf-chip[aria-pressed="true"]').dataset.expiry), "2026-08-28", "ArrowRight on a chip moves to the next expiry");
 
   await page.locator("#ftTabPrice").click();
+  await page.waitForFunction(() => document.getElementById("ftGMain").dataset.view === "price", null, { timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(300);
   const back = await page.evaluate(() => ({ rail: !document.getElementById("ftReadRail").hidden, view: document.getElementById("ftGMain").dataset.view, on: [...document.querySelectorAll(".ftg-xt")].filter((t) => t.getAttribute("aria-checked") === "true").map((t) => t.dataset.expiry), heads: [...document.querySelectorAll(".ftg-rh")].map((n) => n.textContent) }));
   ok(back.rail && back.view === "price", "back on the price view the Reading rail returns");

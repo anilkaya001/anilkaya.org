@@ -37,7 +37,7 @@ const wrap = (words, indent, width = WIDTH) => {
 
 const columns = (names, per = 4, pad = 26) => {
   const out = [];
-  for (let i = 0; i < names.length; i += per) out.push(names.slice(i, i + per).map((n) => n.padEnd(pad)).join("").trimEnd());
+  for (let i = 0; i < names.length; i += per) out.push(names.slice(i, i + per).map((n) => (n + " ").padEnd(pad)).join("").trimEnd());
   return out.join("\n");
 };
 
