@@ -149,7 +149,7 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   });
   await page.goto("https://example.test/flows/unusual/", delayFonts ? { waitUntil: "commit" } : undefined);
   if (!wait) await page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
-  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
   return { ctx, page };
 }
 
@@ -754,7 +754,7 @@ try {
     await Promise.all([page.waitForURL(/\/flows\/ticker\/\?t=AAPL$/, { timeout: 10000 }), page.mouse.click(b.x + aapl2.x, b.y + aapl2.y)]);
     ok(true, `and a click there after the rotation opens AAPL's ticker page (${page.url()})`);
     await page.goto(backUrl);
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
     await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), sy);
 
     await page.mouse.move(5, 5);
@@ -1305,7 +1305,7 @@ try {
     eq(await page.evaluate(() => (/(?:^|; )fn_ambient=([01])/.exec(document.cookie) || [])[1]), "1", "THE CHOICE IS REMEMBERED on this device, in a first-party preference cookie scoped to /flows");
     deep(await page.evaluate(() => window.__ev), ["on:true"], "ambient:on is announced with the reader's own click as its cause");
     await page.reload();
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 1; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
     eq((await stats(page)).ambient, true, "and a reload opens on Ambient for this reader");
     await page.click("#uaNet .fn-amb");
     await page.waitForTimeout(3000);
