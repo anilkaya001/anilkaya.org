@@ -8,7 +8,7 @@ import * as WORLD from "../shared/flows-quant-world.js";
 import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
-import { NODE_Q } from "./desk-fixtures.mjs";
+import { NODE_Q, showView } from "./desk-fixtures.mjs";
 import { closeUtcMs, yearFraction } from "../shared/flows-quant-time.js";
 
 let checks = 0;
@@ -421,6 +421,9 @@ try {
   }
 
   {
+    await page.setViewportSize({ width: 390, height: 1400 });
+    await showView(page, "lines");
+    await page.waitForFunction(() => [...document.querySelectorAll("#dkList .dk-row")].every((r) => !r.hidden), null, { timeout: 5000 });
     const cc = await rowInfo('#dkList .dk-row[data-strategy="cc"]');
     ok(/%/.test(cc.facts["If called"] || ""), `a covered call states its called-away return (${cc.facts["If called"]})`);
     ok(/run/.test(cc.facts["If called"] || ""), "and how far the market must run to get there");
@@ -428,6 +431,7 @@ try {
     ok((csp.facts["If called"] || "").startsWith(DASH), "a put shows a dash — it has no upside cap");
     ok(/no upside cap/.test(csp.facts["If called"] || ""),
        "and the dash SAYS it is an absence, not missing data");
+    await page.setViewportSize({ width: 390, height: 900 });
   }
 
   {
@@ -649,6 +653,7 @@ try {
     }
 
     assert.deepEqual(await tickers(), ["AAA", "BBB", "AAA"], "before the switch the list is ranked by the default key"); checks++;
+    await showView(page, "lines");
     await page.selectOption("#deskRank", "collectible");
     await page.waitForFunction(() => {
       const t = Array.from(document.querySelectorAll("#dkList .dk-row")).map((r) => r.dataset.t);
@@ -656,6 +661,7 @@ try {
     }, null, { timeout: 5000 }).catch(() => {});
     assert.deepEqual(await tickers(), ["AAA", "AAA", "BBB"], "ranking by premium collectible sinks the line this account cannot buy"); checks++;
     eq(upstreamCalls, callsBefore, "and re-ranking still spends no vendor call");
+    await showView(page, "frontier");
 
     {
       chainRequests.length = 0;
@@ -739,6 +745,7 @@ try {
       }
     }
 
+    await showView(probe, "lines");
     const bInfo = await probe.locator('#dkList .dk-row[data-t="BBB"] .ui-info').first();
     await bInfo.click();
     await probe.waitForSelector("#fxPop:popover-open");
@@ -755,6 +762,7 @@ try {
     ok(/^\/flows\/strategy\/\?t=AAA&s=short-put&expiry=2026-09-18&basis=natural&legs=AAA260918P00047000%40-1$/.test(lab),
        `each line opens in the strategy lab as the same structure on the same fill basis (${lab})`);
 
+    await showView(probe, "frontier");
     {
       const chart = await probe.evaluate(() => {
         const svg = document.querySelector("#dkScatter svg");
@@ -781,6 +789,7 @@ try {
       await probe.locator("#dkTenor .ui-seg-i", { hasText: "> 6w" }).click();
       await probe.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length === 0, null, { timeout: 5000 }).catch(() => {});
       eq(await probe.locator("#dkList .dk-row").count(), 0, "and drops every line outside it");
+      await showView(probe, "lines");
       await probe.locator("#dkList .ui-silent [data-info]").click();
       await probe.waitForSelector("#fxPop:popover-open");
       ok(/No line on the desk expires inside this window/.test(await popText(probe)), "and says the window is empty rather than showing an empty list");
@@ -802,6 +811,7 @@ try {
     await wired.goto(server.baseURL + "/flows/desk/?t=AAA,EEE,OPP&strategy=both&rank=annualized", { waitUntil: "domcontentloaded" });
     await settle(8, wired);
     for (let i = 0; i < 60 && !["AAA", "EEE", "OPP"].every((t) => got.some((p) => p && p.ticker === t)); i++) await wired.waitForTimeout(250);
+    await showView(wired, "lines");
     const aaa = got.find((p) => p && p.ticker === "AAA"), eee = got.find((p) => p && p.ticker === "EEE"), opp = got.find((p) => p && p.ticker === "OPP");
     ok(aaa && eee && opp, "the test holds the exact payloads the page priced");
 
@@ -855,31 +865,36 @@ try {
   }
 
   {
-    await page.goto(server.baseURL + "/flows/desk/?t=AAA,BBB&strategy=both&rank=annualized&bp=10000", { waitUntil: "domcontentloaded" });
-    await settle(3);
+    await page.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized", { waitUntil: "domcontentloaded" });
+    await settle(120);
+    await showView(page, "lines");
     const sticky = await page.evaluate(() => {
       const head = document.querySelector("#dkList .dk-head");
       const cs = getComputedStyle(head);
-      const bar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bar-h")) || 56;
-      return { position: cs.position, top: parseFloat(cs.top), bar, bg: cs.backgroundColor };
+      return { position: cs.position, top: parseFloat(cs.top), bg: cs.backgroundColor, pageScroll: document.documentElement.scrollHeight > window.innerHeight + 1 };
     });
-    eq(sticky.position, "sticky", "the column header is pinned while the rows scroll under it");
-    ok(sticky.top >= sticky.bar, `below the fixed top bar rather than underneath it (${sticky.top}px)`);
+    eq(sticky.position, "sticky", "the column header is pinned at the top of its own list");
+    eq(sticky.top, 0, `at the list's top edge, because the page no longer scrolls under a fixed bar (${sticky.top}px)`);
+    eq(sticky.pageScroll, false, "the desk is one screen: nothing scrolls the page");
     ok(!/, 0\)$/.test(sticky.bg) && sticky.bg !== "transparent", `with a ground the rows cannot show through (${sticky.bg})`);
     await page.setViewportSize({ width: 1440, height: 560 });
-    await page.waitForFunction(() => !!document.querySelector("#deskSurface .ivs"), null, { timeout: 10000 });
+    await page.waitForFunction(() => !document.getElementById("dkShowAll").hidden, null, { timeout: 10000 });
+    await page.locator("#dkShowAll").click();
+    await page.waitForSelector(".dk-all-dlg[open]");
     const stuck = await page.evaluate(async () => {
-      await Promise.all(document.getElementById("dkLinesM").getAnimations().map((a) => a.finished.catch(() => null)));
-      const list = document.getElementById("dkList");
-      const bar = parseFloat(getComputedStyle(document.querySelector("#dkList .dk-head")).top);
-      window.scrollTo({ top: list.getBoundingClientRect().top + window.scrollY - bar + 60, behavior: "instant" });
+      const box = document.querySelector(".dk-all-dlg .dk-all-list");
+      const head = box.querySelector(".dk-head");
+      const first = box.querySelector(".dk-row");
+      const was = Math.round(first.getBoundingClientRect().top);
+      box.scrollTop = 400;
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const head = document.querySelector("#dkList .dk-head");
-      return { listTop: Math.round(list.getBoundingClientRect().top), headTop: Math.round(head.getBoundingClientRect().top), bar: Math.round(parseFloat(getComputedStyle(head).top)) };
+      return { was, rowTop: Math.round(first.getBoundingClientRect().top), headTop: Math.round(head.getBoundingClientRect().top), boxTop: Math.round(box.getBoundingClientRect().top), scrolled: box.scrollTop, headPos: getComputedStyle(head).position };
     });
-    ok(stuck.listTop < stuck.bar, `the rows have scrolled up past the top bar (${stuck.listTop}px)`);
-    ok(Math.abs(stuck.headTop - stuck.bar) <= 2, `and the header row is still where it was pinned, just under the bar (${stuck.headTop}px)`);
-    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    ok(stuck.scrolled > 0 && stuck.rowTop < stuck.was, `in the dialog that holds every line the rows scroll up (${stuck.rowTop}px from ${stuck.was}px)`);
+    eq(stuck.headPos, "sticky", "while the header row is sticky there too");
+    ok(Math.abs(stuck.headTop - stuck.boxTop) <= 2, `pinned at the top of the scrolling list (${stuck.headTop}px against ${stuck.boxTop}px)`);
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector(".dk-all-dlg[open]"));
     await page.setViewportSize({ width: 1440, height: 1000 });
   }
 
@@ -888,6 +903,7 @@ try {
     await page.goto(server.baseURL + "/flows/desk/?t=CCC,DDD&strategy=both&rank=annualized", { waitUntil: "domcontentloaded" });
     await settle(3);
     await page.waitForFunction(() => document.querySelectorAll("#deskSurface .ivs-cell").length > 0, null, { timeout: 10000 });
+    await showView(page, "smile");
 
     const smileNote = async () => {
       const text = await openInfo(page.locator('#deskSurface [aria-label="About smile"]'));
@@ -1068,10 +1084,16 @@ try {
     await page.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized", { waitUntil: "domcontentloaded" });
     await settle(120);
     eq(await rowCount(), 120, "the route sends its top 120 and the desk holds all of them");
-    eq(await page.locator(ROWS + ":not([hidden])").count(), 12, "and shows the first twelve until asked");
-    await page.locator("#dkLinesM .ui-disclose").click();
-    eq(await page.locator(ROWS + ":not([hidden])").count(), 120, "one tap shows all 120");
-    await page.locator("#dkLinesM .ui-disclose").click();
+    await showView(page, "lines");
+    await page.waitForFunction(() => !document.getElementById("dkShowAll").hidden, null, { timeout: 5000 });
+    const fitted = await page.locator(ROWS + ":not([hidden])").count();
+    ok(fitted >= 1 && fitted < 120, `and shows the lines that fit the panel (${fitted}) until asked`);
+    eq((await page.locator("#dkShowAll").textContent()).trim(), "Show all 120", "one tap offers all 120");
+    await page.locator("#dkShowAll").click();
+    await page.waitForSelector(".dk-all-dlg[open]");
+    eq(await page.locator(".dk-all-dlg .dk-row").count(), 120, "in a dialog that holds every line");
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => !document.querySelector(".dk-all-dlg[open]"));
 
     const note = await page.locator(".desk-chip__note").first().textContent();
     ok(/120 of 130 sellable/.test(note), `the chip states what is on the list AND what it was cut from (${note})`);
@@ -1090,6 +1112,7 @@ try {
     const watchRank = (req) => { if (req.url().includes("/api/flows/chain")) asked.push(new URL(req.url()).searchParams.get("rank")); };
     page.on("request", watchRank);
     const callsBefore = upstreamCalls;
+    await showView(page, "lines");
     await page.selectOption("#deskRank", "premium");
     await page.waitForFunction(() => Array.from(document.querySelectorAll("#dkList .dk-row")).some((r) => Number(r.dataset.strike) >= 1100),
       null, { timeout: 15000 }).catch(() => {});
@@ -1143,6 +1166,7 @@ try {
     twin.on("request", (req) => { if (req.url().includes("/api/flows/chain")) asked.push(new URL(req.url()).searchParams.get("rank")); });
     await twin.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=yieldOnCollateral&bp=50000", { waitUntil: "domcontentloaded" });
     await twin.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length === 120, null, { timeout: 20000 });
+    await showView(twin, "lines");
     eq(asked.length, 1, `the first load asks the route once (${asked.join(",")})`);
     const askedBefore = asked.length;
     await twin.selectOption("#deskRank", "collectible");
@@ -1169,6 +1193,7 @@ try {
     });
     await racer.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized", { waitUntil: "domcontentloaded" });
     await racer.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length === 120, null, { timeout: 20000 });
+    await showView(racer, "lines");
     await racer.selectOption("#deskRank", "premium");
     await racer.selectOption("#deskRank", "cushionSigmas");
     await racer.waitForFunction(() => /ranked by cushion/.test(document.getElementById("deskFoot").textContent), null, { timeout: 20000 });
@@ -1191,6 +1216,7 @@ try {
     });
     await stepper.goto(server.baseURL + "/flows/desk/?t=FFF&strategy=csp&rank=annualized", { waitUntil: "domcontentloaded" });
     await stepper.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length === 120, null, { timeout: 20000 });
+    await showView(stepper, "lines");
     const settled = asked.length;
     ok(settled > 0, "the first load spends its calls, so the count below is a measurement of the re-ranking rather than of an empty page");
     await stepper.selectOption("#deskRank", "premium");
