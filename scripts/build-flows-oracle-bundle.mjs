@@ -33,6 +33,13 @@ export async function buildOracleBundle(spec) {
     pure: ["Object.freeze"],
     banner: { js: "\"use strict\";" },
     logLevel: "silent",
+    plugins: [{
+      name: "page-ask-split",
+      setup(build) {
+        build.onResolve({ filter: /flows-tape-stats\.js$/ }, () => ({ path: "flows-tape-stats", namespace: "page" }));
+        build.onLoad({ filter: /.*/, namespace: "page" }, () => ({ contents: "export const askSplit = (row) => window.FlowsUI.F.askSplit(row);", loader: "js" }));
+      },
+    }],
   });
   return result.outputFiles[0].text;
 }

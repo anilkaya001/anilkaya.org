@@ -1,4 +1,5 @@
 import { liveSay, usdShort } from "./flows-oracle-words.js";
+import { askSplit } from "./flows-tape-stats.js";
 
 export const KINDS = Object.freeze(["surge", "repeat", "flip", "cluster", "sweeps", "size", "sector"]);
 
@@ -48,9 +49,10 @@ function windowOf(r) {
   const at = fin(r.ts) ? r.ts : Date.parse(r.firstAt || r.spanStart || "");
   if (!Number.isFinite(at)) return null;
   const id = r.id !== undefined && r.id !== null ? String(r.id) : [r.t, r.exp, r.k, r.cp, r.firstAt || at, r.prem].join("|");
+  const side = askSplit(r);
   return {
     id, t: r.t, at, cp: r.cp === "C" || r.cp === "P" ? r.cp : null, k: fin(r.k) ? r.k : null, exp: typeof r.exp === "string" ? r.exp : null,
-    prem: r.prem, ask: fin(r.askPrem) ? r.askPrem : 0, bid: fin(r.bidPrem) ? r.bidPrem : 0,
+    prem: r.prem, ask: side ? side.ask : 0, bid: side ? side.bid : 0, stated: !!(side && side.askStated && side.bidStated),
     size: fin(r.size) ? r.size : null, sweep: r.sweep === true,
   };
 }
@@ -149,7 +151,7 @@ export function detectName(ticker, wins, ctx, nowMs) {
 
   const sw = wins.filter((w) => w.sweep && w.at > nowMs - L.sweepMs && w.at <= nowMs);
   if (sw.length >= L.sweepHits) {
-    const ask = sum(sw, "ask"), bid = sum(sw, "bid"), P = sum(sw, "prem");
+    const both = sw.filter((w) => w.stated), ask = sum(both, "ask"), bid = sum(both, "bid"), P = sum(sw, "prem");
     const share = ask + bid > 0 ? Math.round(ask / (ask + bid) * 100) : 0;
     if (share >= L.sweepAskShare && P >= L.sweepFloor) {
       const minutes = (nowMs - Math.min(...sw.map((w) => w.at))) / 60000;
