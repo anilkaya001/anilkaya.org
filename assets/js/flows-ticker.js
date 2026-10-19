@@ -76,7 +76,7 @@
   }
   const xSt = (sec, what) => {
     const X = STATE.cardX;
-    if (X && X.status === "pending") return ST("pending", "Publishes with tonight's run.");
+    if (X && X.status === "pending") return ST("pending", X.loading ? "Loading this name's dossier." : "Publishes with tonight's run.");
     if (!X || X.status === "absent" || X.status === "unavailable") return NA(X && X.off ? "Built for " + day(X.off) + ", not this card's session." : X && X.reason === "store" ? "The store could not be read." : "Not built for this name.");
     if (!sec || typeof sec !== "object") return ST("unavailable", "This name's dossier carries no " + what + ".");
     const why = STATE.cardX.why || {};
@@ -769,6 +769,7 @@
   const readPending = (neuron) => !!neuron && (readIs(neuron.read, "generating") || (readIs(neuron.read, "ready") && refreshing(neuron.read)));
   const neuronPending = (neuron) => !!neuron && (neuron.status === "pending" || (neuron.status === "ok" && refreshing(neuron)));
 
+  const LOADING_READ = "Loading the Neuron's read.";
   const statePillOf = (state) => { const d = UI.STATES[state]; return d ? h("span", { class: "ui-pill", "data-state": state }, glyph(d.g), d.word) : null; };
   const arr = (v) => (Array.isArray(v) ? v : []);
   const citesOf = (it) => arr(it && it.cites).filter((c) => c && typeof c.id === "string");
@@ -829,7 +830,7 @@
     stripEl.replaceChildren(
       h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")),
       h("div", { class: "ft-strip-m" }, h("span", { class: "ft-strip-k" }, "Neuron" + conf),
-        h("p", { class: "ft-strip-line" + (body ? "" : " is-empty"), title: body || null }, body || "No read")),
+        h("p", { class: "ft-strip-line" + (body ? "" : " is-empty"), title: body || null }, body || (n.loading ? LOADING_READ : "No read"))),
       engineChip(engineWord(card, n)));
   }
 
@@ -967,7 +968,8 @@
     railEl.append(h("div", { class: "ft-rail-h" }, h("h2", { id: "ftReadRailT" }, "Reading"), known && read.asOf ? h("span", { class: "ft-rail-at" }, "as of " + F.time(read.asOf)) : null));
     if (!known) {
       GLANCE.read = null; GLANCE.claims = []; GLANCE.idx = null;
-      railEl.append(h("p", { class: "ft-rail-state", role: "status" }, statePillOf("quiet"), "No reading is available for this name."));
+      const wait = !!(STATE.neuron && STATE.neuron.loading);
+      railEl.append(h("p", { class: "ft-rail-state", role: "status" }, statePillOf(wait ? "pending" : "quiet"), wait ? "Loading the reading." : "No reading is available for this name."));
       return;
     }
     const sec = read.sections && typeof read.sections === "object" ? read.sections : {};
@@ -1310,9 +1312,9 @@
       verdictEl.append(head, x);
     } else {
       const status = typeof n.status === "string" ? n.status : "unavailable";
-      const reason = n.why || (status === "pending" ? "Not published yet." : status === "quiet" ? "This card carries no reading to summarise." : "No read could be fetched for this name.");
+      const reason = n.why || (n.loading ? LOADING_READ : status === "pending" ? "Not published yet." : status === "quiet" ? "This card carries no reading to summarise." : "No read could be fetched for this name.");
       const st = ST(status === "pending" ? "pending" : status === "quiet" ? "quiet" : "unavailable", reason);
-      mid.append(h("h2", { class: "ft-v-line is-empty", id: "ftVerdictT" }, "No read"));
+      mid.append(h("h2", { class: "ft-v-line is-empty", id: "ftVerdictT" }, n.loading ? "Loading the read" : "No read"));
       mid.append(h("div", { class: "ft-v-meta" }, UI.capsule(dirWord(tn), { tone: tn }), UI.stateButton(st, "Neuron")));
       head.append(mid);
       verdictEl.append(head);
@@ -1328,7 +1330,7 @@
       row.append(standAside(eng));
     } else if (!eng && !isIndex(card) && isDeep(card)) {
       row.append(h("article", { class: "ft-idea is-silent is-wide is-bare", role: "listitem" },
-        UI.silent(NA("The options engine did not price this card, and the Neuron published no idea."), "Ideas", 64)));
+        UI.silent(n.loading ? ST("pending", "The options engine did not price this card. Loading the Neuron's ideas.") : NA("The options engine did not price this card, and the Neuron published no idea."), "Ideas", 64)));
     }
     if (!row.childElementCount) return;
     row.classList.toggle("is-single", row.childElementCount === 1 && row.firstElementChild.classList.contains("is-wide"));
@@ -1916,7 +1918,7 @@
     const stB = prof ? OK : P.levels && P.levels.status === "ok" ? ST("unavailable", "This card predates the open-interest book profile, so the book cannot be drawn against spot; the flow view still reads.") : panelSt(card, "levels", "levels panel");
     const axis = histAxis(STATE.hist);
     const g1y = axis && STATE.hist.gex ? unpack(STATE.hist.gex.g, axis.length) : null;
-    const stY = g1y && g1y.some((v) => v !== null) ? OK : STATE.hist && STATE.hist.status === "pending" ? ST("pending", "Publishes with tonight's run.") : NA("No one-year dealer-gamma history for this name.");
+    const stY = g1y && g1y.some((v) => v !== null) ? OK : STATE.hist && STATE.hist.status === "pending" ? ST("pending", STATE.hist.loading ? "Loading the one-year history." : "Publishes with tonight's run.") : NA("No one-year dealer-gamma history for this name.");
     const vendorMarks = vl ? [["flip", "gamma_flip"], ["callWall", "call_wall"], ["putWall", "put_wall"]].filter(([k]) => num(vl[k]) !== null).map(([k, kind]) => ({ x: vl[k], shape: "ring", color: C.LEVELS[kind].color, row: "base", r: 4.5 })) : [];
     const ourMarks = (withFlip) => [
       withFlip && lv.gamma_flip ? { x: lv.gamma_flip.px, shape: "dia", color: "--lvl-flip", rule: true } : null,
@@ -3175,7 +3177,7 @@
         Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))
           .then(([card, neuron, cx, hist]) => {
             if (!card || !card.panels) return;
-            STATE.card = card; STATE.neuron = neuron || STATE.neuron; STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
+            STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
             paintAll();
             if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
             else if (readPending(STATE.neuron)) awaitReading(t, card);
@@ -3184,13 +3186,36 @@
     });
   }
 
+  const DOSSIER_GRACE_MS = 250;
+
+  function seatIdeas() {
+    if (!STATE.glance || $("m-ideas") || (GLANCE.sheet && GLANCE.sheet.cur === "m-ideas") || !verdictEl.querySelector(".ft-ideas")) return;
+    buildIdeas();
+    const m = $("m-ideas");
+    if (m && m.parentNode === gridEl) gridEl.prepend(m);
+    paintDock();
+  }
+
+  function paintDossier(card) {
+    if (card.lite) { paintLite(card); return; }
+    const s = GLANCE.sheet, back = s && s.cur ? { id: s.cur, opener: s.opener } : null;
+    const f = document.activeElement, dm = f && dockEl && dockEl.contains(f) ? f.dataset.mod : null;
+    closeSheet(true);
+    renderModules(card);
+    paintDock();
+    glanceUpdate();
+    if (back && $(back.id)) openSheet(back.id, back.opener);
+    else if (dm) { const b = dockEl.querySelector('.ft-dock-b[data-mod="' + dm + '"]'); if (b) b.focus({ preventScroll: true }); }
+  }
+
   async function start() {
     const ticker = readTicker();
     STATE.ticker = ticker;
     if (!ticker) { await noTicker(); return; }
     heroEl.classList.add("is-loading");
     $("ftHeroT").textContent = ticker;
-    const [neuronP, cxP, histP] = ["summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, ticker))));
+    const landed = {};
+    const [neuronP, cxP, histP] = ["summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, ticker))).then((v) => { landed[p] = { v }; return v; }));
     let card;
     try { card = await getJSON(api("card", ticker)); } catch {
       const text = "This page could not be loaded. Reload to try again.";
@@ -3202,18 +3227,41 @@
     if ((card.status && card.status !== "ok") || !(card.panels || card.lite)) { await absentCard(ticker, card); return; }
     fetchTape(ticker);
     paintFreshness(card);
-    const [neuron, cx, hist] = await Promise.all([neuronP, cxP, histP]);
+    await Promise.race([Promise.all([cxP, histP]), new Promise((r) => setTimeout(r, DOSSIER_GRACE_MS))]);
+    const waiting = { status: "pending", loading: true };
+    const had = (p) => landed[p] !== undefined;
     STATE.card = card;
-    STATE.neuron = neuron || { status: "unavailable" };
-    STATE.cardX = joined(cx, card);
-    STATE.hist = joined(hist, card);
+    STATE.neuron = had("summary") ? landed.summary.v || { status: "unavailable" } : waiting;
+    STATE.cardX = had("card-x") ? joined(landed["card-x"].v, card) : waiting;
+    STATE.hist = had("hist") ? joined(landed.hist.v, card) : waiting;
     document.title = card.ticker + " · Flows";
     if (card.lite) paintLite(card); else paintAll();
     sayStatus("");
     jumpToHash();
+    const watch = (neuron) => {
+      if (card.lite) return;
+      if (neuronPending(neuron)) awaitNeuron(ticker, card);
+      else if (readPending(neuron)) awaitReading(ticker, card);
+    };
+    if (had("summary")) watch(STATE.neuron);
+    else neuronP.then((neuron) => {
+      if (STATE.card !== card) return;
+      STATE.neuron = neuron || { status: "unavailable" };
+      if (card.lite) { if (STATE.neuron.tier) renderVerdict(card, STATE.neuron); return; }
+      renderVerdict(card, STATE.neuron);
+      buildWorlds(card);
+      seatIdeas();
+      watch(STATE.neuron);
+    });
+    if (!had("card-x") || !had("hist")) {
+      Promise.all([cxP, histP]).then(([cx, hist]) => {
+        if (STATE.card !== card) return;
+        if (STATE.cardX === waiting) STATE.cardX = joined(cx, card);
+        if (STATE.hist === waiting) STATE.hist = joined(hist, card);
+        paintDossier(card);
+      });
+    }
     if (!card.lite) {
-      if (neuronPending(STATE.neuron)) awaitNeuron(ticker, card);
-      else if (readPending(STATE.neuron)) awaitReading(ticker, card);
       const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
       idle(() => soft(getJSON("/api/flows/meta")).then((m) => {
         if (!m || !isoOk(m.sessionDate) || STATE.card !== card) return;
