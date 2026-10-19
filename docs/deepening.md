@@ -96,17 +96,17 @@ works from:
 | day share of the 60,000 working line | 25 per cent (15,000) | 85 per cent (51,000), leaving 9,000 calls to the Worker, the rail, members and probes |
 | run deadline (`DEADLINE_MS`) | 36 minutes | 90 minutes, workflow `timeout-minutes` 120 (30 minutes for the stages after the deadline) |
 | time term | (36 x 0.8 - 14) x 60 / 6.5 = 80 names | (90 x 0.8 - 14) x 60 / 6.5 = 535 names |
-| day term, nothing else spent | 267 names | (51,000 - 4,840) / 38 = 1,214 names |
+| day term, nothing else spent | 267 names | (51,000 - 4,950) / 38 = 1,211 names |
 | default cap, hard ceiling | 80, 240 | 530, 900 |
 | minute pace | 80 per cent of 500 (400 a minute) | unchanged |
 | names a night | 80 | 530 |
 | nights for the 794 names behind the board | 10 | 2 |
-| calls a night, rotation plus baseline | 7,440 (12 per cent of the day) | 24,540 (41 per cent of the day, 48 per cent of the 51,000 allowed) |
+| calls a night, rotation plus baseline | 7,440 (12 per cent of the day) | 24,640 (41 per cent of the day, 48 per cent of the 51,000 allowed) |
 
 The deadline is what binds, not the day line or the minute line: 530 names at
 6.5 s is 57 minutes, which with the 14 minute baseline is 71 minutes of the 72
 the time share allows, and 20,140 rotation calls in those 57 minutes is 353 a
-minute, under the 400 pace. The day line would allow 1,214 names, the cap 900.
+minute, under the 400 pace. The day line would allow 1,211 names, the cap 900.
 A one-night full cover of 794 names needs (794 x 6.5 s + 14 min) / 0.8 = 125
 minutes of deadline and a workflow timeout of about 150, which the platform
 allows (a job may run six hours) and which is a two-line change (`DEADLINE_MS` in
@@ -168,7 +168,7 @@ the rotation its own timeout, but it would have to rebuild the run's context
 (the cross-section feeds, the variation probes, the quant pass, the vol and flow
 legs' inputs) from stored payloads, which is a second implementation of the
 card builder that would drift. The measured budget leaves room: at the shipped
-cap a night adds about 20,000 calls and 57 minutes to a run of 4,400 calls and
+cap a night adds about 20,000 calls and 57 minutes to a run of 4,500 calls and
 about 14: 71 minutes against the 72 the governor allows (80 per cent of the 90 minute deadline). If a
 measured run shows the time term binding (`binding: "time"` in the stage record
 and `meta.deepen.binding`), the next step is the second job; the ledger and the

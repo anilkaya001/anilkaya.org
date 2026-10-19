@@ -27,6 +27,7 @@
   const OTHER = {
     Bonds: ["TLT", "IEF", "SHY", "TLH", "HYG", "LQD", "AGG", "BND", "JNK", "TBT", "TMF"],
     Commodities: ["GLD", "SLV", "USO", "UNG", "GDX", "GDXJ", "COPX", "DBC", "PDBC", "IAU", "PPLT", "CPER", "URA", "SIL"],
+    "Index options": ["SPX", "SPXW", "NDX", "NDXP", "RUT", "RUTW", "VIX", "VIXW", "XSP", "DJX", "MRUT"],
     Volatility: ["VXX", "UVXY", "SVXY", "VIXY", "SVIX", "UVIX"],
     Crypto: ["IBIT", "BITO", "ETHA", "FBTC", "GBTC", "ETHE", "ARKB", "BITX"],
     International: ["EEM", "EFA", "FXI", "EWZ", "KWEB", "EWJ", "INDA", "EWY", "EWT", "VWO", "MCHI", "EWG"],
@@ -107,7 +108,7 @@
       let tile;
       if (FUND_OF.has(T)) tile = tiles.get("funds:" + T);
       else if (ETF_OF.has(T)) tile = tiles.get("etf:" + T);
-      else if (OTHER_OF.has(T)) tile = ensure("other:" + OTHER_OF.get(T), "other", OTHER_OF.get(T), "Other fund class", 0);
+      else if (OTHER_OF.has(T)) tile = ensure("other:" + OTHER_OF.get(T), "other", OTHER_OF.get(T), OTHER_OF.get(T) === "Index options" ? "Cash-settled index roots" : "Other fund class", 0);
       else {
         const sec = !uniOk ? STOCK_UNREAD : secOf.get(T) || STOCK_NONE;
         tile = ensure("stocks:" + sec, "stocks", SHORT[sec] || sec, sec, 0);

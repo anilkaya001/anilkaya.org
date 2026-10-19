@@ -10,7 +10,7 @@
   const LANE_W = 0.5, R0 = 0.03, R1 = 0.12, WALL_H = 0.55, WALL_GAP = 0.25;
   const OPEN_MIN = 9 * 60 + 30, CLOSE_MIN = 16 * 60, STEP_MS = 5 * 60000;
   const FUNDS = new Set(["SPY", "QQQ", "IWM", "DIA"]);
-  const FUNDS_LANE = "Index funds", NONE_LANE = "No sector", UNREAD_LANE = "Sector unread";
+  const FUNDS_LANE = "Index funds", NONE_LANE = "No sector", INDEX_LANE = "Index options", INDEX_ROOTS = new Set(["SPX", "SPXW", "NDX", "NDXP", "RUT", "RUTW", "VIX", "VIXW", "XSP", "DJX", "MRUT"]), UNREAD_LANE = "Sector unread";
   const TOP_LABELS = 12, TOP_HITS = 40;
   const SHORT = { "Technology": "Tech", "Consumer Cyclical": "Cyclicals", "Communication Services": "Comms", "Financial Services": "Financials", "Consumer Defensive": "Defensives", "Basic Materials": "Materials", "Real Estate": "Real estate" };
   const SIDE_WORD = { up: "bullish by convention", down: "bearish by convention", nx: "unsided" };
@@ -65,7 +65,7 @@
       const ms = Date.parse(r.spanStart || r.firstAt || "");
       if (!Number.isFinite(ms)) { dropped++; return; }
       const t = r.t.toUpperCase();
-      const lane = FUNDS.has(t) ? FUNDS_LANE : !uniOk ? UNREAD_LANE : secOf.get(t) || NONE_LANE;
+      const lane = FUNDS.has(t) ? FUNDS_LANE : INDEX_ROOTS.has(t) ? INDEX_LANE : !uniOk ? UNREAD_LANE : secOf.get(t) || NONE_LANE;
       windows.push({ i, t, lane, ms, minute: etMinute(ms), day: etDay(ms), prem: r.prem, side: sideOf(r), cp: r.cp === "P" ? "P" : "C", exp: typeof r.exp === "string" ? r.exp.slice(0, 10) : null, sweep: r.sweep === true, contracts: isNum(r.size) ? r.size : null });
     });
     const byLane = new Map();

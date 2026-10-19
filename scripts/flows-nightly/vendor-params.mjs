@@ -41,7 +41,7 @@ export const CALL_COST = Object.freeze({
   dossier: 13,
   focus: 1,
   activity: 1,
-  sigmaLedger: 120,
+  sigmaLedger: 240,
   misc: 67,
 });
 

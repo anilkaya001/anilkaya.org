@@ -1,7 +1,7 @@
 import { sigmaProfile } from "../../shared/flows-targets.js";
 
 export const SIGMA_LEDGER_VERSION = 1;
-export const SIGMA_ROTATE = 120;
+export const SIGMA_ROTATE = 240;
 export const SIGMA_MAX_AGE_DAYS = 45;
 
 const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ""));

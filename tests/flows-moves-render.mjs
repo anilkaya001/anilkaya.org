@@ -370,7 +370,7 @@ async function exercise(browser, js, early) {
       P(d.shapes === 0, "no boundary curve is drawn");
       const stamp = await page.locator("#mvStamp").innerText();
       P(/Oct 16/.test(stamp) && /read Oct 17 00:31 TRT/.test(stamp), "the stamp prints the read in TRT: " + stamp);
-      P(new RegExp(M0.all.length + " of " + DEC.length + " names measured").test(stamp), "and the number of names measured");
+      P(new RegExp(M0.plotted.length + " of " + DEC.length + " names with a typical day").test(stamp), "and the number of names measured");
       P(!/UTC|GMT/.test(await page.locator("body").innerText()), "no other zone is named");
       P((await page.locator("#mvCount").innerText()) === M0.plotted.length + " of " + M0.plotted.length + " shown", "the count reads every drawn name");
       const fn = await page.locator("#mvFnote").innerText();
@@ -576,7 +576,7 @@ async function exercise(browser, js, early) {
       await strips({ LIVE1: [0.08, 0.4], LIVE2: [-0.03, 0.3], BIGUP: [0.01, 0.4] }, "2026-10-19");
       await page.waitForTimeout(150);
       P(/Live roster/.test(await page.locator("#mvStamp").innerText()), "a roster for a newer session replaces the population and says so");
-      P((await page.locator("#mvStamp").innerText()).includes("3 of 3 names measured"), "and counts it");
+      P((await page.locator("#mvStamp").innerText()).includes("1 of 3 names with a typical day"), "and counts it");
       const live = await listRows(page, "mvNow");
       const val = { LIVE1: 0.08 / (0.4 / SQRT252), LIVE2: 0.03 / (0.3 / SQRT252), BIGUP: 0.01 / (0.4 / SQRT252) };
       same(live.map((r) => r.t), Object.keys(val).sort((x, y) => val[y] - val[x]), "the live roster is ranked by IV-days");

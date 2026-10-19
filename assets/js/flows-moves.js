@@ -159,7 +159,7 @@
     const read = readAt && F.trtDay(readAt) ? fday(F.trtDay(readAt)) + " " + F.time(readAt) : DASH;
     const src = M.live ? "Live roster, session <b>" + esc(fday(M.live.session)) + "</b>" : "Nightly, session <b>" + esc(S.day ? fday(S.day) : DASH) + "</b> · read " + esc(read);
     const frozen = S.frozen ? " · <b>Frozen at " + esc(F.time(S.frozenAt)) + "</b> · " + esc(FROZEN_LINE) : "";
-    $("mvStamp").innerHTML = src + " · " + M.all.length + " of " + M.rows.length + " names measured" + frozen;
+    $("mvStamp").innerHTML = src + " · " + M.plotted.length + " of " + M.rows.length + " names with a typical day" + frozen;
     statusEl.textContent = M.all.length ? "Measured " + M.all.length + " names; " + M.plotted.length + " drawn." : "No name could be measured.";
   }
 
@@ -478,7 +478,7 @@
     S.model = model();
     const M = S.model;
     if (!S.sel || !M.all.some((x) => x.t === S.sel)) {
-      const top = lists(M).now[0] || lists(M).apart[0] || null;
+      const L = lists(M), top = L.now.find((x) => x.z !== null) || L.apart.find((x) => x.z !== null) || M.plotted[0] || L.now[0] || L.apart[0] || null;
       S.sel = top ? top.t : null;
     }
     S.dirty = false;
