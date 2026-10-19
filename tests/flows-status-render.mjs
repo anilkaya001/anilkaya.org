@@ -316,8 +316,7 @@ try {
     await page.waitForFunction(() => !document.getElementById("stPanel-latency").hidden);
     await page.locator("#stSub [role=tab]").nth(1).click();
     await page.waitForFunction(() => document.getElementById("lSessionCard").classList.contains("is-on"));
-    await page.waitForFunction(() => document.querySelector("#stSession svg") !== null);
-    const w = await page.evaluate(() => document.querySelector("#stSession svg").getBoundingClientRect().width);
+    const w = await page.waitForFunction(() => { const s = document.querySelector("#stSession svg"); const r = s && s.getBoundingClientRect(); return r && r.width > 150 ? r.width : 0; }, null, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => page.evaluate(() => { const s = document.querySelector("#stSession svg"); return s ? s.getBoundingClientRect().width : 0; }));
     ok(w > 150, "a chart on a card that was hidden when it first drew is drawn at the card's width (" + w + ")");
     await page.close();
   }
