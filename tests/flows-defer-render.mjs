@@ -380,7 +380,8 @@ try {
       h.style.setProperty("min-height", "0", "important");
       const own = Math.round(h.getBoundingClientRect().height);
       h.style.removeProperty("min-height");
-      return { own, reserved, host: Math.round(h.getBoundingClientRect().height), slot: h.classList.contains("is-slot"), quiet: h.classList.contains("is-quiet") };
+      const card = document.getElementById("uaNetCard");
+      return { own, reserved, host: Math.round(h.getBoundingClientRect().height), slot: h.classList.contains("is-slot"), quiet: h.classList.contains("is-quiet"), inner: card ? card.scrollHeight - card.clientHeight : 0 };
     });
     for (const [label, opts] of [["an empty feed", { empty: true }], ["a 500", { flowStatus: 500 }]]) {
       for (const width of [1440, 390]) {
@@ -395,7 +396,7 @@ try {
         console.log(`  unusual ${label} ${width}px: host ${m.host} px, natural ${m.own} px, reserved ${m.reserved} px, layout shift ${cls.toFixed(4)}`);
         eq([m.slot, m.quiet], [false, true], `THE FULL-SCENE RESERVATION IS RELEASED FOR ${label.toUpperCase()} (${width} px): the host carries is-quiet and not is-slot`);
         ok(m.host - m.own <= 50, `and the card is not a one-line message in a reserved box: host ${m.host} px against its own ${m.own} px`);
-        ok(m.own - m.reserved <= 6 && m.reserved - m.own <= 50, `the quiet reservation matches the mounted height (${m.reserved} px reserved, ${m.own} px mounted)`);
+        ok(m.reserved === 0 && m.inner <= 1, `inside the one-screen stage the quiet network reserves nothing and fills its own card without an inner scroll (${m.reserved} px reserved, ${m.own} px mounted, ${m.inner} px of inner scroll)`);
         eq(moved, [], `and NOTHING BELOW THE NETWORK'S CARD MOVES (${width} px)`);
         ok(cls < 0.15, `with a layout shift of ${cls.toFixed(4)}, under the 0.15 line (the network card scrolls inside its own module now)`);
         eq(errors, [], "and nothing throws");
@@ -412,12 +413,12 @@ try {
         await page.waitForSelector("#uaNet .fn-empty:not([hidden])");
         await sleep(300);
         const m = await natural(page);
-        off.push({ w, d: m.own - m.reserved });
+        off.push({ w, reserved: m.reserved, gap: m.host - m.own, inner: m.inner });
         await context.close();
       }
-      console.log("  quiet reservation against the mounted height at 11 widths, worst shortfall " + Math.max(...off.map((x) => x.d)) + " px, widest surplus " + Math.min(...off.map((x) => x.d)) + " px");
-      ok(off.every((x) => x.d <= 6), `THE QUIET RESERVATION NEVER FALLS SHORT: at every width the mounted empty network fits inside its reserved height to within 6 px (${off.filter((x) => x.d > 6).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
-      ok(off.every((x) => x.d >= -80), `and never reserves more than 80 px of empty space under it (${off.filter((x) => x.d < -80).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+      console.log("  quiet network in the stage at 11 widths: reserved " + [...new Set(off.map((x) => x.reserved))].join("/") + " px, worst host surplus " + Math.max(...off.map((x) => x.gap)) + " px, worst inner scroll " + Math.max(...off.map((x) => x.inner)) + " px");
+      ok(off.every((x) => x.reserved === 0 && x.gap <= 1), `THE QUIET NETWORK FILLS ITS CARD AT EVERY WIDTH: no height is reserved inside the one-screen stage, so the host is its card's own height (${off.filter((x) => x.reserved !== 0 || x.gap > 1).map((x) => x.w + ": " + x.reserved + "/" + x.gap).join(", ") || "none"})`);
+      ok(off.every((x) => x.inner <= 1), `and the card never scrolls for an empty feed (${off.filter((x) => x.inner > 1).map((x) => x.w + ": " + x.inner).join(", ") || "none"})`);
     }
 
     {
