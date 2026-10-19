@@ -2192,6 +2192,28 @@ try {
     ok(moved.last.includes(moved.F.t2) && !moved.last.includes(moved.F.t1), `and the read time (${moved.last})`);
     ok(moved.same[1] && moved.same[2] && moved.same[3], `keeping the capsule, the info trigger and the hero, so an open tooltip stays anchored and no closure is left behind (${moved.same.join(",")})`);
     ok(moved.muts.length > 0 && !moved.muts.some((m) => /^childList:(ftLast|ftChg)$/.test(m)), `the writes are text and attribute updates, never a rebuild of the last-read line or the capsule (${moved.muts.slice(0, 8).join(" ")})`);
+    const shown = () => page.evaluate(() => [...document.querySelectorAll("#ftPxV > .ui-roll-d, #ftPxV > .ui-roll-c")].map((n) => {
+      if (n.classList.contains("ui-roll-c")) return n.textContent;
+      const top = n.getBoundingClientRect().top, d = [...n.firstElementChild.children].find((c) => Math.abs(c.getBoundingClientRect().top - top) < 1);
+      return d ? d.textContent : "?";
+    }).join(""));
+    const capsule = () => page.evaluate(() => document.querySelector("#ftChg > *").textContent);
+    await page.waitForTimeout(1500);
+    const landed = await shown();
+    eq(landed, "124.56", `THE DIGITS ON SCREEN land on the quote the capsule measures: the visible strips read ${landed}`);
+    ok((await capsule()).startsWith((124.56 - 120).toFixed(2)), "and the price on screen less the previous close is the change the capsule prints");
+    await page.evaluate(() => { window.__raf = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
+    served = quote(125.67, t2);
+    await beat();
+    await page.waitForTimeout(1500);
+    const frameless = await shown();
+    eq(frameless, "125.67", `with no animation frame at all (a hidden tab, a headless capture) the strips still land on the new quote (${frameless}), never on the one before it`);
+    ok((await capsule()).startsWith((125.67 - 120).toFixed(2)), "matching the capsule's change");
+    await page.evaluate(() => { window.requestAnimationFrame = window.__raf; });
+    served = quote(124.56, t2);
+    await beat();
+    await page.waitForTimeout(1500);
+    eq(await shown(), "124.56", "and once frames run again the next roll animates and lands as before");
     const pop = await infoText(page, "#ftLast");
     ok(/Live price/.test(pop) && /124\.56/.test(pop) && !/123\.45/.test(pop), `the kept trigger's tooltip reads the current quote, not the one it was built with (${(pop || "").replace(/\s+/g, " ").slice(0, 120)})`);
     await page.click("#ftLast .ui-info");

@@ -195,6 +195,24 @@ async function checkRail(page, expiry, label) {
 
 function overlap(a, b) { return a[0] < b[2] - 0.5 && b[0] < a[2] - 0.5 && a[1] < b[3] - 0.5 && b[1] < a[3] - 0.5; }
 
+const labelFacts = (page) => page.evaluate(() => {
+  const svg = document.querySelector(".ftg-svg");
+  const W = +svg.getAttribute("width"), H = +svg.getAttribute("height");
+  const box = (n) => { const b = n.getBBox(); return [b.x, b.y, b.x + b.width, b.y + b.height, n.textContent]; };
+  const g = svg.querySelector('[data-layer="gamma"]');
+  const chart = document.querySelector(".ft-gchart").getBoundingClientRect(), lrow = document.querySelector(".ftg-lrow").getBoundingClientRect();
+  return { W, H, rail: !!g && !!svg.querySelector(".ftg-xt"), axis: g ? [...g.querySelectorAll("text.ftg-xt-t")].map(box) : [], cap: [...svg.querySelectorAll("text.ftg-xt-cap")].map(box),
+    nf: [...svg.querySelectorAll("text.ftg-nf-t")].map(box), said: g ? [...g.querySelectorAll("text.ftg-cap:not(.ftg-rh)")].map(box) : [], legendOut: lrow.bottom - chart.bottom };
+});
+async function checkLabels(page, label) {
+  const f = await labelFacts(page);
+  if (f.rail) ok(f.cap.length === 1 && f.cap[0][3] <= f.H + 0.5, `${label}: the expiry caption sits inside the chart, in a row of its own (${JSON.stringify(f.cap.map((b) => b.slice(1, 4).map(Math.round)))} in ${f.H})`);
+  for (const b of f.nf) ok(b[0] >= -0.5 && b[2] <= f.W - 1, `${label}: the at-the-money label '${b[4]}' stays inside the rail (${Math.round(b[0])} to ${Math.round(b[2])} of ${f.W})`);
+  for (const b of f.said) ok(b[0] >= -0.5 && b[2] <= f.W - 1, `${label}: '${b[4]}' is wrapped to the rail (${Math.round(b[0])} to ${Math.round(b[2])} of ${f.W})`);
+  for (let i = 0; i < f.axis.length; i++) for (let j = i + 1; j < f.axis.length; j++) ok(!overlap(f.axis[i], f.axis[j]) && Math.max(f.axis[i][0], f.axis[j][0]) - Math.min(f.axis[i][2], f.axis[j][2]) >= 2, `${label}: rail axis labels '${f.axis[i][4]}' and '${f.axis[j][4]}' keep apart`);
+  ok(f.legendOut <= 0.5, `${label}: the legend stays inside the chart card (${Math.round(f.legendOut)} px past it)`);
+}
+
 let runRail = async (page) => {
   const f = await checkRail(page, "2026-08-31", "default");
   return f;
@@ -525,7 +543,8 @@ const settle = async (page) => { await page.waitForSelector('.ftsf[data-motion="
   const noEng = clone(CARD);
   delete noEng.engine;
   const p3 = await boot(VP, { card: noEng });
-  const railOnly = await p3.evaluate(() => ({ ticks: document.querySelectorAll(".ftg-xt").length, heads: [...document.querySelectorAll(".ftg-rh")].map((n) => n.textContent), sm: document.querySelectorAll("polyline.ftg-sm").length, text: [...document.querySelectorAll('.ftg-svg [data-layer="gamma"] text')].map((n) => n.textContent).join("|"), sig: document.querySelectorAll(".ftg-svg rect.ftg-sig").length }));
+  const railOnly = await p3.evaluate(() => ({ ticks: document.querySelectorAll(".ftg-xt").length, heads: [...document.querySelectorAll(".ftg-rh")].map((n) => n.textContent), sm: document.querySelectorAll("polyline.ftg-sm").length, text: [...document.querySelectorAll('.ftg-svg [data-layer="gamma"] text')].map((n) => n.textContent).join(" "), sig: document.querySelectorAll(".ftg-svg rect.ftg-sig").length }));
+  await checkLabels(p3, "no engine, 1440");
   ok(railOnly.ticks > 0 && railOnly.sm === 0 && railOnly.sig === 0, "with gamma but no engine the rail keeps the gamma bars and says the smile is missing instead of drawing one " + JSON.stringify(railOnly));
   ok(/no fitted smile/i.test(railOnly.text), `in words (${railOnly.text})`);
   await p3.locator("#ftTabSurface").click();
@@ -1016,6 +1035,35 @@ let REDUCED_FRAMES;
   await page.context().close();
 }
 
+{
+  const noStrip = clone(CARD);
+  noStrip.score = null;
+  noStrip.panels.scoreOverlay = { status: "unavailable" };
+  for (const [vp, name] of [[{ width: 1440, height: 820 }, "1440x820"], [{ width: 1920, height: 1080 }, "1920x1080"], [{ width: 1024, height: 768 }, "1024x768"]]) {
+    for (const [card, kind] of [[CARD, "with a score strip"], [noStrip, "with no score strip"]]) {
+      const page = await boot(vp, { card });
+      for (const e of ["2026-08-31", "2026-09-02", "2026-09-04"]) {
+        const t = page.locator('.ftg-xt[data-expiry="' + e + '"] rect');
+        if (!(await t.count())) continue;
+        await t.click();
+        await page.waitForTimeout(120);
+        await checkLabels(page, `${name} ${kind} ${e}`);
+      }
+      eq(page.__errors, [], `${name} ${kind}: no page error`);
+      await page.context().close();
+    }
+  }
+}
+
+const LABEL_CARDS = (() => {
+  const noStrip = clone(CARD);
+  noStrip.score = null;
+  noStrip.panels.scoreOverlay = { status: "unavailable" };
+  const noEng = clone(CARD);
+  delete noEng.engine;
+  return { "the expiry caption gets no row of its own": noStrip, "the no-smile sentence is one unwrapped line": noEng };
+})();
+
 const MUTANTS = [
   ["the rail is drawn three pixels off the price axis", "/assets/js/flows-ticker-glance.js", (s) => s.replace("yy = y(K) - th / 2;", "yy = y(K) - th / 2 + 3;"), "rail"],
   ["the one-sigma band is half as wide", "/assets/js/flows-ticker-glance.js", (s) => s.replace("const up = S * Math.exp(row.sd), dn = S * Math.exp(-row.sd);", "const up = S * Math.exp(row.sd / 2), dn = S * Math.exp(-row.sd / 2);"), "rail"],
@@ -1023,6 +1071,8 @@ const MUTANTS = [
   ["a missing gamma cell is drawn as a zero bar", "/assets/js/flows-ticker-glance.js", (s) => s.replace("if (g === null) { s(\"rect\", { x: cxg - 3.5", "if (false) { s(\"rect\", { x: cxg - 3.5"), "rail"],
   ["the cursor starts on the first expiry", "/assets/js/flows-ticker-glance.js", (s) => s.replace("const r = rows.find((x) => x.dte >= 7) || rows[rows.length - 1];", "const r = rows[0];"), "rail"],
   ["time-axis labels are not thinned", "/assets/js/flows-ticker-glance.js", (s) => s.replace("for (const e of [ents[ents.length - 1]].concat(ents)) if (!kept.includes(e) && fits(e)) kept.push(e);", "for (const e of ents) if (!kept.includes(e)) kept.push(e);"), "rail"],
+  ["the expiry caption gets no row of its own", "/assets/js/flows-ticker-glance.js", (s) => s.replace(" - (rail && !strip ? 12 : 0);", ";"), "labels"],
+  ["the no-smile sentence is one unwrapped line", "/assets/js/flows-ticker-glance.js", (s) => s.replace('textLines(G.rail, mid, (top + plotB) / 2, xp.why.smile || "No smile at this expiry", R.sW - 8, "ftg-tx ftg-cap");', 's("text", { x: mid, y: (top + plotB) / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: xp.why.smile || "No smile at this expiry" }, G.rail);'), "labels"],
   ["the cursor ignores the clicked tick", "/assets/js/flows-ticker-glance.js", (s) => s.replace("g.addEventListener(\"click\", () => pick(e.r.expiry));", "g.addEventListener(\"click\", () => pick(rows[0].expiry));"), "click"],
   ["a flat expiry is drawn as a fitted curve", "/assets/js/flows-ticker-glance.js", (s) => s.replace("const st = sm && MSTATE[sm.method] ? MSTATE[sm.method] : [\"none\", \"NO FIT\"];", "const st = sm && MSTATE[sm.method] ? (sm.method === \"flat\" ? [\"fit\", \"FITTED SVI\"] : MSTATE[sm.method]) : [\"none\", \"NO FIT\"];"), "model"],
   ["the surface interpolates implied vol instead of total variance", "/assets/js/flows-ticker-surface.js", (s) => s.replace("const w = w0 + (w1 - w0) * u, T = r0.Tx + (r1.Tx - r0.Tx) * u;", "const w = (Math.sqrt(w0 / r0.Tx) * (1 - u) + Math.sqrt(w1 / r1.Tx) * u) ** 2 * (r0.Tx + (r1.Tx - r0.Tx) * u), T = r0.Tx + (r1.Tx - r0.Tx) * u;"), "surface"],
@@ -1035,7 +1085,9 @@ const MUTANTS = [
 async function mutantFacts(page, kind) {
   const out = [];
   const guard = async (name, fn) => { try { await fn(); } catch (e) { out.push(name + ": " + String(e.message).split("\n")[0]); } };
-  if (kind === "rail") {
+  if (kind === "labels") {
+    await guard("labels", () => checkLabels(page, "mutant"));
+  } else if (kind === "rail") {
     await guard("rail", () => checkRail(page, "2026-08-31", "mutant"));
   } else if (kind === "click") {
     await guard("click", async () => {
@@ -1079,7 +1131,7 @@ const MUTANT_ARB = clone(CARD);
   await clean.context().close();
 }
 for (const [name, file, fn, kind] of MUTANTS) {
-  const page = await boot(VP, { mutate: { [file]: fn }, card: kind === "calendar" ? MUTANT_ARB : CARD });
+  const page = await boot(VP, { mutate: { [file]: fn }, card: kind === "calendar" ? MUTANT_ARB : LABEL_CARDS[name] || CARD });
   const src = fs.readFileSync(path.join(ROOT, file.slice(1)), "utf8");
   ok(fn(src) !== src, `mutant "${name}" changes the module`);
   if (kind === "surface" || kind === "calendar") {

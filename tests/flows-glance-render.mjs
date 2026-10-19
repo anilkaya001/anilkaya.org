@@ -446,6 +446,33 @@ for (const [w, hgt, cw, name, touch] of [[390, 844, 330, "390x844", true], [320,
   await page.context().close();
 }
 
+{
+  const bare = cutCard((c) => { c.score = null; });
+  for (const [bandH, label, o] of [[200, "the 1440x820 band", {}], [161, "the 1024x768 band", {}], [200, "a card with no score", { card: bare }]]) {
+    const page = await boot({ width: 1440, height: 900 }, { chartW: 868, ...o });
+    await page.evaluate((hh) => { const k = document.getElementById("ftGlanceCards"); k.classList.add("ft-glance-cards"); k.style.height = hh + "px"; }, bandH);
+    await page.waitForTimeout(300);
+    const got = await page.evaluate(() => [...document.querySelectorAll(".ftg-card")].map((c) => {
+      const cr = c.getBoundingClientRect(), pb = parseFloat(getComputedStyle(c).paddingBottom);
+      const kids = [...c.children].filter((n) => n.getClientRects().length && !n.classList.contains("visually-hidden"));
+      const cut = kids.filter((n) => n.getBoundingClientRect().bottom > cr.bottom - pb + 0.5).map((n) => n.className);
+      const squeezed = kids.filter((n) => !n.classList.contains("ftg-foot") && n.scrollHeight > n.clientHeight + 1).map((n) => n.className);
+      const foot = c.querySelector(".ftg-foot"), lh = parseFloat(getComputedStyle(foot).lineHeight), fh = foot.getBoundingClientRect().height;
+      return { id: c.dataset.card, h: Math.round(cr.height), cut, squeezed, lines: fh / lh, missing: c.dataset.missing === "1", footFull: foot.scrollHeight <= foot.clientHeight + 1, rows: [...c.querySelectorAll(".ftg-fam")].filter((r) => !r.hidden).length };
+    }));
+    for (const g of got) {
+      ok(g.h === bandH, `${label}: ${g.id} fills the ${bandH} px band (${g.h})`);
+      eq(g.cut, [], `${label}: nothing in ${g.id} runs past its bottom edge`);
+      eq(g.squeezed, [], `${label}: no part of ${g.id} is squeezed shorter than its content`);
+      ok(Math.abs(g.lines - Math.round(g.lines)) < 0.15 && Math.round(g.lines) >= 1, `${label}: ${g.id}'s footer shows whole lines (${g.lines.toFixed(2)})`);
+      if (g.missing) ok(g.footFull, `${label}: ${g.id} has no figure, so its footer keeps the whole reason`);
+    }
+    if (bandH === 200 && !o.card) ok(got.find((g) => g.id === "signal").rows >= 2, "the Signal card keeps at least two factor rows");
+    eq(page.__errors, [], `${label}: no page error`);
+    await page.context().close();
+  }
+}
+
 for (const [w, expectCols] of [[700, 2], [770, 3], [900, 6]]) {
   const page = await boot({ width: w + 40, height: 900 }, { chartW: 0, pad: 20 });
   const m = await page.evaluate(() => ({ cols: getComputedStyle(document.querySelector(".ftg-cards-in")).gridTemplateColumns.split(" ").length, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, h: document.querySelector(".ftg-card").getBoundingClientRect().height, gamma: document.querySelectorAll(".ftg-gl").length }));

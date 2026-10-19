@@ -785,14 +785,18 @@
 .ivs-cellgroup, .ivs-colhead, .ivs-levelgroup { cursor: help; }
 
 .tl .dk-suggest {
-  min-height: 44px;
-  margin: var(--space-2, 8px) 0 0;
-  padding: 0 var(--space-4, 16px);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-1);
-  color: var(--text);
-  font: inherit;
+  flex: none;
+  height: 36px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--fill-3);
+  box-shadow: inset 0 0 0 1px var(--sep);
+  color: var(--label-1);
+  font: var(--t-footnote);
   cursor: pointer;
 }
-.tl .dk-suggest:focus-visible { outline: 2px solid var(--focus, currentColor); outline-offset: 2px; }
+.tl .dk-suggest:hover { background: var(--fill-2); }
+.tl .dk-suggest:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+@media (pointer: coarse) { .tl .dk-suggest { height: 44px; } }

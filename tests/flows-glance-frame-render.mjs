@@ -42,6 +42,11 @@ const READ = {
 const CITES = 7;
 const ONE_SIDED = clone(READ);
 ONE_SIDED.sections.tensions = [{ text: "Flow leans to puts while price is stretched.", cites: [cite("flow.lean", "Lean", MINUS + "0.47")] }];
+const ONE_SIDED_LATE = clone(ONE_SIDED);
+ONE_SIDED_LATE.sections.drivers.push({ text: "The report lands inside the month the chart shows.", cites: [cite("events.next", "Report", "Nov 2")] });
+ONE_SIDED_LATE.sections.tensions = [{ text: "Flow leans to puts while price is stretched far above its fifty-day line and the dealer book still damps every move it makes.", cites: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => cite("flow.f" + i, "Factor " + i, String(i))) }];
+const HELD = { ...clone(READ), held: "previous", refreshing: false, retryAfterS: 900, note: "This reading was written for an earlier dossier of " + T + " and is kept until a reading of the current one is written and passes the checks." };
+const HELD_SOON = { ...clone(HELD), refreshing: true, retryAfterS: undefined };
 const FALLBACK = { ...clone(READ), status: "fallback", generated: false, label: "Deterministic reading", model: null, modelName: null, neurons: null, why: "cooldown", provenance: "Deterministic reading." };
 const GENERATING = { ...clone(FALLBACK), status: "generating", why: "generating" };
 const BOXED = { version: 1, status: "generating", ticker: T, generated: false, provenance: "The dossier is being assembled.", note: "The dossier for " + T + " is still being assembled.", why: "assembling", asOf: null, coverage: { ok: 0, partial: 0, withheld: 0, pending: 0 }, tags: [], sections: { identity: null, now: null, drivers: [], tensions: [], unknown: [], watch: [] }, refused: [] };
@@ -92,11 +97,11 @@ async function mount(page, read, o = {}) {
       const body = next ? { ...neuron, read: next } : key === "board" ? { status: "pending", rows: [] } : api[key] === undefined ? { status: "pending" } : api[key];
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
     }
-    if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: PAGE_HTML });
+    if (u.pathname.startsWith("/flows/ticker")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || PAGE_HTML });
     return route.fulfill({ status: 404, body: "" });
   });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
-  await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(T));
+  await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(T) + (o.hash ? "#" + o.hash : ""));
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name\u2026"; }, null, { timeout: 15000 });
   await page.waitForTimeout(250);
 }
@@ -207,7 +212,7 @@ async function scenario(page) {
   r.noShift = Math.abs(after.gh - before.gh) < 2 && Math.abs(after.tt - before.tt) < 2 && Math.abs(after.th - before.th) < 3;
 
   await page.click('#ftDock .ft-dock-b[data-mod="m-movelab"]');
-  await page.waitForTimeout(500);
+  for (let i = 0; i < 25 && counts.lab < 1; i++) await page.waitForTimeout(200);
   r.labLoadsOnOpen = counts.lab >= 1;
   await page.mouse.click(300, 60);
   await page.waitForTimeout(100);
@@ -267,7 +272,19 @@ try {
     s = await st(READ);
     ok(/Model wording/.test(s.src) && s.src.length > 0 && !/Model wording/.test(s.text), "provenance is one visually hidden sentence, not rail text");
     s = await st(ONE_SIDED);
-    ok(await page.evaluate(() => !!document.querySelector(".ft-dis-one") && !document.querySelector(".ft-dis-row")), "a tension with one cite is a single row");
+    ok(await page.evaluate(() => !document.querySelector(".ft-dis") && [...document.querySelectorAll(".ft-claim-t")].some((n) => /Flow leans to puts/.test(n.textContent))), "a one-cite tension that is already a numbered claim is not repeated in a disagreement box");
+    s = await st(ONE_SIDED_LATE);
+    const dis = await page.evaluate(() => { const p = document.querySelector(".ft-dis-one"), sup = p && p.querySelector("sup"); if (!p || !sup) return null; const a = p.getBoundingClientRect(), b = sup.getBoundingClientRect(); return { row: !document.querySelector(".ft-dis-row"), inside: b.bottom <= a.bottom + 0.5 && b.right <= a.right + 0.5 && b.top >= a.top - 0.5 && b.height > 0, sup: sup.textContent, claims: [...document.querySelectorAll(".ft-claim-t")].some((n) => /far above its fifty-day/.test(n.textContent)) }; });
+    ok(dis && dis.row && !dis.claims, "a one-cite tension past the four claims is a single row in the disagreement box");
+    ok(dis && dis.inside && /^(\d+ ){11}\d+$/.test(dis.sup), `and its source numbers sit inside the box, never cut by the two-line clamp (${JSON.stringify(dis)})`);
+    s = await st(HELD);
+    const held = await page.evaluate(() => { const p = document.querySelector(".ft-rail-held"); return p ? { pill: p.querySelector(".ui-pill") && p.querySelector(".ui-pill").textContent, text: p.textContent, role: p.getAttribute("role") } : null; });
+    ok(held && /Stale/.test(held.pill) && /next attempt is in about 15 minutes/.test(held.text) && /earlier dossier/.test(held.text) && held.role === "status", `A READING HELD FROM AN EARLIER DOSSIER says so in the rail, with a Stale pill and when the next attempt is (${JSON.stringify(held)})`);
+    s = await st(HELD_SOON);
+    const soon = await page.evaluate(() => { const p = document.querySelector(".ft-rail-held"); return p ? { pill: p.querySelector(".ui-pill") && p.querySelector(".ui-pill").textContent, text: p.textContent } : null; });
+    ok(soon && /Pending/.test(soon.pill) && /newer reading is being written/.test(soon.text) && /earlier dossier/.test(soon.text), `and while a newer reading is being written, a Pending pill says that (${JSON.stringify(soon)})`);
+    s = await st(READ);
+    ok(await page.evaluate(() => !document.querySelector(".ft-rail-held")), "a reading of the current dossier carries no held line");
     await st(READ);
     ok(await page.evaluate(() => !!document.querySelector(".ft-dis-row") && document.querySelectorAll(".ft-dis-c").length === 2), "a tension citing two opposed figures is two chips");
     await mount(page, GENERATING, { queue: [GENERATING, READ] });
@@ -334,6 +351,57 @@ try {
     const k = await p2.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, stacked: document.getElementById("ftReadRail").getBoundingClientRect().top >= document.getElementById("ftGlanceChart").getBoundingClientRect().bottom - 1 }));
     ok(k.sw <= k.iw && k.stacked, "800 px: below 900 the frame stacks the chart over the reading");
     await p2.close();
+  }
+
+  {
+    const bare = clone(card);
+    delete bare.engine;
+    bare.depth = "index";
+    for (const [w, hh] of [[1920, 1080], [1440, 820]]) {
+      const page = await newPage(w, hh);
+      await mount(page, READ, { card: bare, neuron: { summary: "The greeks imply a squeeze state for " + T + " with flow bearish (confidence 1 of 2).", context: { state: { confidence: 1 } } } });
+      const g = await page.evaluate(() => ({ seen: document.getElementById("ftVerdict").getClientRects().length, ideas: !!document.getElementById("m-ideas"), dis: (document.querySelector('#ftDock [data-mod="m-ideas"]') || {}).getAttribute && document.querySelector('#ftDock [data-mod="m-ideas"]').getAttribute("aria-disabled"), sh: document.documentElement.scrollHeight, ih: innerHeight, line: document.querySelector(".ft-strip-line").textContent }));
+      ok(g.seen === 0 && !g.ideas && g.dis === "true", `${w}x${hh}: A VERDICT WITH NO IDEAS is not left in its home slot under the dock on the one-screen glance; the strip carries the headline and Ideas is disabled (${JSON.stringify(g)})`);
+      ok(g.sh <= g.ih && /squeeze state/.test(g.line), `${w}x${hh}: nothing is cut at the bottom edge (${g.sh} of ${g.ih})`);
+      await page.click("#ftDock .ft-dock-a");
+      await page.waitForTimeout(200);
+      ok(await page.evaluate(() => document.getElementById("ftVerdict").getClientRects().length > 0 && /squeeze state/.test(document.getElementById("ftVerdict").textContent)), `${w}x${hh}: Every module, as one page shows the verdict above the modules`);
+      await page.click("#ftDock .ft-dock-a");
+      await page.waitForTimeout(200);
+      ok(await page.evaluate(() => document.getElementById("ftVerdict").getClientRects().length === 0), `${w}x${hh}: and Back to one screen hides it again`);
+      await page.close();
+    }
+  }
+
+  {
+    const html = FLOWS_PAGES.oracleShell(PAGE_HTML, "on", "ticker");
+    for (const [w, hh] of [[1920, 1080], [1440, 820], [1024, 768]]) {
+      const page = await newPage(w, hh);
+      await mount(page, READ, { html });
+      await page.waitForFunction(() => { const o = document.getElementById("fxOracle"); return o && !o.hidden && o.getBoundingClientRect().width > 0; }, null, { timeout: 15000 });
+      await page.waitForTimeout(300);
+      const hit = await page.evaluate(() => {
+        const o = document.getElementById("fxOracle").getBoundingClientRect();
+        return [...document.querySelectorAll("#ftDock .ft-dock-a, #ftDock .ft-dock-b")].map((n) => { const r = n.getBoundingClientRect(); return { t: n.textContent, over: r.left < o.right && o.left < r.right && r.top < o.bottom && o.top < r.bottom }; }).filter((x) => x.over).map((x) => x.t);
+      });
+      ok(hit.length === 0, `${w}x${hh}: THE NEURON ORB covers no dock control, the link to every module included (${hit.join(", ")})`);
+      await page.close();
+    }
+  }
+
+  {
+    const page = await newPage(1440, 820);
+    await mount(page, READ, { hash: "ftGrid" });
+    await page.waitForTimeout(400);
+    const j = await page.evaluate(() => {
+      const g = document.getElementById("ftGrid"), first = g.querySelector(".ui-mod-h"), idx = document.getElementById("fxIndex");
+      const top = first.getBoundingClientRect().top, under = idx && !idx.hidden ? idx.getBoundingClientRect().bottom : 0, dive = document.getElementById("ftDive");
+      return { focused: document.activeElement === g, outline: getComputedStyle(g).outlineStyle, top, under, dive: dive && !dive.hidden ? dive.getBoundingClientRect().top - under : null, sy: scrollY };
+    });
+    ok(j.focused && j.sy > 0, `A JUMP TO #ftGrid opens every module, scrolls to them and focuses the grid (${JSON.stringify(j)})`);
+    ok(j.top >= j.under - 0.5 && (j.dive === null || j.dive >= -0.5), `and lands the first module's header and the Dive heading below the sticky section index, not under it (${JSON.stringify(j)})`);
+    ok(j.outline === "none", "and the focused grid draws no ring around every module");
+    await page.close();
   }
 
   const MUTANTS = [

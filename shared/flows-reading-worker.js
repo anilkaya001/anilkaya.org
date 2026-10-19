@@ -181,6 +181,10 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
   return { stored: "ready", shape };
 }
 
+function limitedNote(ticker) {
+  return "This reading was written for an earlier dossier of " + ticker + ". Some of the current dossier's vendor reads were held back by a rate limit, so no new reading was asked for; a later read asks again.";
+}
+
 function heldNote(ticker, sameDossier) {
   if (sameDossier) return "This reading of " + ticker + " was written by another model configuration and is kept until a reading by the current one is written and passes the checks.";
   return "This reading was written for an earlier dossier of " + ticker + " and is kept until a reading of the current one is written and passes the checks.";
@@ -302,7 +306,7 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
 
   const kept = good(stored) && stored.fingerprint.endsWith("|r" + READING_VERSION)
     ? heldReading(stored, dossier, result.neuron ? result.neuron.tier : null, ticker, tags) : null;
-  const previous = (refreshing, otherwise) => (kept ? readyFrom(kept, { held: "previous", refreshing, note: kept.note }) : otherwise());
+  const previous = (refreshing, otherwise, extra) => (kept ? readyFrom(kept, { held: "previous", refreshing, note: kept.note, ...(extra || {}) }) : otherwise());
   const read = await attemptRead;
   if (read.failed) return previous(false, () => fb("fallback", "store"));
   const attempt = read.row || (stored && !good(stored) ? stored : null);
@@ -312,11 +316,14 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
 
   if (attempt && attempt.guard !== "generating" && attempt.guard) {
     const wait = cooldownMs(attempt.guard);
-    if (attemptAge < wait) return previous(false, () => fb("fallback", "cooldown", { guard: attempt.guard, retryAfterS: Math.ceil((wait - attemptAge) / 1000) }));
+    if (attemptAge < wait) {
+      const retryAfterS = Math.ceil((wait - attemptAge) / 1000);
+      return previous(false, () => fb("fallback", "cooldown", { guard: attempt.guard, retryAfterS }), { retryAfterS });
+    }
   }
 
   if (heldBack(result)) {
-    if (good(stored) && stored.fingerprint.endsWith("|" + signature)) return readyFrom(stored, { held: "limited" });
+    if (kept && stored.fingerprint.endsWith("|" + signature)) return readyFrom(kept, { held: "limited", refreshing: false, note: limitedNote(ticker), retryAfterS: READ_LIMITED_RETRY_S });
     return fb("fallback", "limited", { retryAfterS: READ_LIMITED_RETRY_S });
   }
 

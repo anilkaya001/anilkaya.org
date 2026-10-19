@@ -504,13 +504,16 @@
     liveNode.textContent = text;
   }
 
+  const ROLLS = new WeakMap();
   function roll(el, text, fromText, animate) {
     const t = String(text);
+    clearTimeout(ROLLS.get(el));
     el.classList.add("ui-roll");
     el.replaceChildren(h("span", { class: "visually-hidden" }, t));
     const chars = [...t];
     const from = fromText ? [...String(fromText).padStart(chars.length, " ")].slice(-chars.length) : null;
     const go = animate === undefined ? moving() : animate && moving();
+    const moves = [];
     let k = 0;
     chars.forEach((ch, i) => {
       if (/\d/.test(ch)) {
@@ -520,11 +523,16 @@
         strip.style.setProperty("--d", start);
         strip.style.setProperty("--k", k++);
         el.append(h("span", { class: "ui-roll-d", ...AH }, strip));
-        if (go && start !== ch) RAF(() => RAF(() => strip.style.setProperty("--d", ch)));
+        if (go && start !== ch) moves.push([strip, ch]);
       } else {
         el.append(h("span", { class: "ui-roll-c", ...AH }, ch));
       }
     });
+    if (moves.length) {
+      const land = (snap) => { for (const [strip, ch] of moves) { if (snap) strip.style.transition = "none"; strip.style.setProperty("--d", ch); } };
+      RAF(() => RAF(() => land(false)));
+      ROLLS.set(el, setTimeout(land, 1200 + 28 * k, true));
+    }
     el.dataset.value = t;
     return el;
   }
@@ -752,6 +760,7 @@
       class: "ui-card ui-mod" + (o.enter === false ? "" : " ui-enter") + (o.span ? " ui-span-" + o.span : ""),
       id, "aria-labelledby": id + "-t", style: { "--i": o.index || 0 },
     }, head, o.body || null);
+    if (o.enter !== false) setTimeout(() => card.classList.remove("ui-enter"), 1600 + 45 * (o.index || 0));
     return card;
   }
 

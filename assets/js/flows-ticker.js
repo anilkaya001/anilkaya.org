@@ -945,7 +945,7 @@
     return sign(a) !== 0 && sign(b) !== 0 && sign(a) !== sign(b);
   };
 
-  function disagreeBlock(read, idx) {
+  function disagreeBlock(read, idx, claims) {
     const t = arr(read.sections && read.sections.tensions)[0];
     if (!t || typeof t.text !== "string") return null;
     const cs = citesOf(t);
@@ -953,7 +953,11 @@
     if (cs.length === 2 && opposed(cs[0], cs[1])) {
       const chip = (c) => { const up = !/[−-]\s*\$?\d/.test(String(c.display)); return h("div", { class: "ft-dis-c", "data-tone": up ? "up" : "down" }, h("span", { "aria-hidden": "true" }, up ? "▲" : "▼"), h("span", null, c.label), h("b", null, c.display), sup([idx.at.get(c.id)])); };
       box.append(h("div", { class: "ft-dis-row" }, chip(cs[0]), h("span", { class: "ft-dis-v" }, "versus"), chip(cs[1])));
-    } else box.append(h("p", { class: "ft-dis-one" }, typo(t.text), sup(nums(t, idx))));
+    } else {
+      const said = (s) => String(s).replace(/\s+/g, " ").trim().toLowerCase();
+      if (arr(claims).some((c) => c.it === t || said(c.it.text) === said(t.text))) return null;
+      box.append(h("p", { class: "ft-dis-one" }, h("span", { class: "ft-dis-tx" }, typo(t.text)), sup(nums(t, idx))));
+    }
     return box;
   }
 
@@ -988,6 +992,11 @@
         String(read.note || (read.status === "generating" ? "The reading is being written." : "No reading is available for this name."))));
     } else if (read.status === "generating") {
       railEl.append(h("p", { class: "ft-rail-state", role: "status" }, "Model wording is being written."));
+    } else if (read.status === "ready" && (read.held === "previous" || read.held === "limited") && typeof read.note === "string" && read.note) {
+      const soon = read.refreshing === true;
+      const mins = !soon && Number.isFinite(read.retryAfterS) && read.retryAfterS > 0 ? Math.max(1, Math.round(read.retryAfterS / 60)) : null;
+      const said = (soon ? "A newer reading is being written. " : mins !== null ? "The next attempt is in about " + mins + (mins === 1 ? " minute. " : " minutes. ") : "") + read.note;
+      railEl.append(h("p", { class: "ft-rail-state ft-rail-held", role: "status", title: said }, statePillOf(soon ? "pending" : "stale"), h("span", null, said)));
     }
     const said = claims.length && claims[0] && claims[0].it && String(claims[0].it.text) === String(lead && lead.text);
     if (lead && !said) railEl.append(h("p", { class: "ft-rail-lead" }, typo(String(lead.text)), sup(nums(lead, idx))));
@@ -1005,7 +1014,7 @@
       }
       railEl.append(ol);
     }
-    const dis = disagreeBlock(read, idx);
+    const dis = disagreeBlock(read, idx, claims);
     if (dis) railEl.append(dis);
     railEl.append(h("div", { class: "ft-foot" }));
     if (STATE.ticker && window.FlowsUI.oracle) window.FlowsUI.oracle.glance(railEl, STATE.ticker);
@@ -1235,13 +1244,20 @@
       ...gone.map(([m, label]) => { const why = DOCK_WHY[m] || "Not built for this name."; return h("button", { class: "ft-dock-b", type: "button", "aria-disabled": "true", "data-mod": m, title: why, "aria-label": label + ": " + why, onclick: () => { const w = dockEl.querySelector(".ft-dock-why"); if (w) w.textContent = label + ": " + why; } }, label); }),
       h("span", { class: "ft-dock-why", role: "status" }),
       h("span", { class: "ft-dock-sp" }),
-      h("a", { class: "ft-dock-a", href: "#ftGrid", "aria-expanded": String(!!STATE.all), onclick: (e) => { e.preventDefault(); closeSheet(true); STATE.all = !STATE.all; showGrid(); paintDock(); if (STATE.all) { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); } else window.scrollTo({ top: 0, behavior: "instant" }); } }, STATE.all ? "Back to one screen" : "Every module, as one page"));
+      h("a", { class: "ft-dock-a", href: "#ftGrid", "aria-expanded": String(!!STATE.all), onclick: (e) => { e.preventDefault(); closeSheet(true); STATE.all = !STATE.all; showGrid(); paintDock(); if (STATE.all) enterGrid(); else window.scrollTo({ top: 0, behavior: "instant" }); } }, STATE.all ? "Back to one screen" : "Every module, as one page"));
+  }
+
+  function enterGrid() {
+    gridEl.setAttribute("tabindex", "-1");
+    (diveEl && !diveEl.hidden ? diveEl : gridEl).scrollIntoView({ block: "start", behavior: "instant" });
+    gridEl.focus({ preventScroll: true });
   }
 
   function showGrid() {
     const all = !STATE.glance || !!STATE.all;
     gridEl.hidden = !all;
     if (diveEl) diveEl.hidden = !(STATE.glance && STATE.all);
+    if (verdictEl.firstChild) homeVerdict();
   }
 
   function setGlance(on) {
@@ -1263,6 +1279,7 @@
 
   function renderVerdict(card, neuron) {
     renderVerdictCard(card, neuron);
+    seatVerdict();
     paintStrip(card, neuron);
     paintReading(neuron && neuron.read);
   }
@@ -2854,9 +2871,24 @@
     if (verdictEl.parentNode !== VERDICT_HOME.parent && VERDICT_HOME.parent) VERDICT_HOME.parent.insertBefore(verdictEl, VERDICT_HOME.before);
   }
 
+  function homeVerdict() {
+    if (verdictEl.parentNode === VERDICT_HOME.parent) verdictEl.hidden = !!STATE.glance && !STATE.all;
+  }
+
   function buildIdeas() {
-    if (!STATE.glance || !verdictEl.querySelector(".ft-ideas")) return;
+    if (!STATE.glance) return;
+    if (!verdictEl.querySelector(".ft-ideas")) { homeVerdict(); return; }
+    verdictEl.hidden = false;
     mod({ id: "m-ideas", title: "Ideas", span: [12, 12], st: OK, body: [verdictEl], index: 0 });
+  }
+
+  function seatVerdict() {
+    if (!STATE.glance || verdictEl.parentNode !== VERDICT_HOME.parent) return;
+    if (!GLANCE.ready || !verdictEl.querySelector(".ft-ideas")) { homeVerdict(); return; }
+    buildIdeas();
+    const m = $("m-ideas");
+    if (m && m.parentNode === gridEl && gridEl.firstElementChild !== m) gridEl.prepend(m);
+    paintDock();
   }
 
   function renderModules(card) {
@@ -3124,7 +3156,7 @@
       STATE.all = true;
       showGrid();
       paintDock();
-      requestAnimationFrame(() => { gridEl.setAttribute("tabindex", "-1"); gridEl.scrollIntoView({ block: "start", behavior: "instant" }); gridEl.focus({ preventScroll: true }); });
+      requestAnimationFrame(enterGrid);
       return;
     }
     const m = /^#(?:panel-|ftg-|m-)?([A-Za-z_]\w*)$/.exec(String(location.hash || ""));

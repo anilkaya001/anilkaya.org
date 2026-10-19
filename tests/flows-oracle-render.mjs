@@ -155,6 +155,19 @@ for (const [w, h] of VIEWS) {
   await g.close();
 }
 
+for (const [key, rec, want] of [["SYO002", FX.CALM(), "Nothing stands out."], ["SYO005", FX.BUILDING(), "There is no card for this name yet"], ["SYO002", FX.record({ ticker: "SYO002", state: "calm", calls: [], stance: { lean: "up", conviction: 0, basis: [], line: "No view on direction for this name." } }), "Nothing stands out."]]) {
+  const html = harnessHtml({ mode: "on", slug: "ticker", active: "ticker", body: `<section id="ftHero"><div id="ftReadRail" style="display:flex;flex-direction:column;width:360px;height:300px"><p class="ft-rail-lead">The reading.</p><div class="ft-foot">foot</div></div></section>` });
+  const g = await open(browser, { url: TICKER_URL(key), slug: "ticker", html, records: { ...RECORDS, [key]: rec }, topBody: FX.top() });
+  await waitOracle(g.page);
+  await settle(g.page, 600);
+  const gl = await g.page.evaluate(() => { const b = document.querySelector("#ftReadRail .orc-glance"); return b ? { text: b.textContent, chip: b.querySelector(".orc-chip").textContent, lean: b.querySelector(".orc-chip").dataset.lean, i: b.querySelectorAll(".orc-chip i").length } : null; });
+  ok(gl, `${key} ${rec.stance.lean}/${rec.stance.conviction}: the glance block is drawn`);
+  eq((gl.text.match(/No view/g) || []).length, 1, `${key} ${rec.stance.lean}/${rec.stance.conviction}: a name with no view says No view once, not three times (${gl.text})`);
+  ok(gl.chip.endsWith("No view") && gl.i === 0 && gl.lean === "none", `and the chip carries no second conviction word nor a lean it does not hold (${gl.chip})`);
+  ok(gl.text.includes(want), `the line says why there is no view instead (${gl.text})`);
+  await g.close();
+}
+
 {
   const records = { ...RECORDS, SYO001: FX.record({ calls: [{ ...FX.CHEAP, ev: null, pop: null, breakeven: null, say: undefined }] }) };
   const w = await open(browser, { url: TICKER_URL("SYO001"), slug: "ticker", html: harnessHtml({ mode: "on", slug: "ticker", active: "ticker" }), records, topBody: FX.top() });
