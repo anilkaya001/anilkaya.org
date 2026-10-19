@@ -5,7 +5,7 @@ import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { signSession } from "../shared/session.js";
 import { memoClock } from "../shared/flows-live-worker.js";
 import { COURSE_BY_SLUG } from "../shared/course-seo.js";
-import { workerSource, slice, expect, count, treeFiles, moduleSource } from "./lib/source-scan.mjs";
+import { workerSource, slice, expect, absent, count, treeFiles, moduleSource } from "./lib/source-scan.mjs";
 import { fakeD1 } from "./lib/d1-fake.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
@@ -334,6 +334,81 @@ eq(status(cell("on", "member", "GET", "/api/rt/snap")), 403, "a member is refuse
 eq(status(cell("on", "owner", "GET", "/api/rt/snap")), 200, "and the owner reads through the object");
 eq(status(cell("base", "anon", "GET", "/lab/ordinary-least-squares/")), 200, "a course page renders through the asset fake");
 eq(status(cell("base", "anon", "GET", "/lab/course?m=ols")), 308, "a legacy course URL is a 308");
+
+const HTML_CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "img-src 'self' data: blob:",
+  "font-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com 'nonce-<nonce>'",
+  "connect-src 'self' wss://anilkaya.org https://cdn.jsdelivr.net https://cloudflareinsights.com",
+  "worker-src 'self' blob:",
+  "form-action 'self'",
+  "upgrade-insecure-requests",
+].join("; ");
+const NONCE_RE = /'nonce-([A-Za-z0-9+\/_-]+={0,2})'/g;
+
+function cspNonce(policy) {
+  const found = [...String(policy || "").matchAll(NONCE_RE)];
+  if (found.length !== 1) return { problem: found.length + " nonce sources" };
+  const holder = String(policy).split("; ").find((directive) => directive.includes(found[0][0]));
+  if (!holder.startsWith("script-src ")) return { problem: "the nonce sits in " + holder.split(" ")[0] };
+  const value = found[0][1];
+  if (!/^[A-Za-z0-9+\/]{22}==$/.test(value)) return { problem: "the nonce is not standard base64 of 16 bytes: " + value };
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.length !== 16) return { problem: "the nonce decodes to " + bytes.length + " bytes" };
+  return { value, normalised: String(policy).replace(NONCE_RE, "'nonce-<nonce>'") };
+}
+
+{
+  const fixed = HTML_CSP.replace("<nonce>", "AAAAAAAAAAAAAAAAAAAAAA==");
+  ok(cspNonce(fixed).value === "AAAAAAAAAAAAAAAAAAAAAA==", "the nonce reader accepts one script-src nonce of 16 bytes");
+  ok(/2 nonce/.test(cspNonce(fixed + "; script-src-elem 'nonce-AAAAAAAAAAAAAAAAAAAAAA=='").problem), "and refuses a policy with two nonces");
+  ok(/0 nonce/.test(cspNonce(HTML_CSP.replace(" 'nonce-<nonce>'", "")).problem), "and a policy with none");
+  ok(/style-src/.test(cspNonce(HTML_CSP.replace(" 'nonce-<nonce>'", "").replace("style-src 'self'", "style-src 'self' 'nonce-AAAAAAAAAAAAAAAAAAAAAA=='")).problem),
+    "and a nonce outside script-src");
+  ok(/16 bytes/.test(cspNonce(HTML_CSP.replace("<nonce>", "AAAAAAAAAAAAAAAA")).problem), "and a nonce of 12 bytes");
+
+  const restoreClock = pinClock();
+  console.error = console.warn = () => {};
+  globalThis.fetch = async () => { outbound++; return new Response("{}", { status: 503, headers: { "Content-Type": "application/json" } }); };
+  const nonces = [];
+  try {
+    const worker = (await import("../worker.js?matrix=csp-" + process.pid)).default;
+    const f = fakeD1({ latencyMs: 0 });
+    seed(f);
+    const ctx = { waitUntil: () => {} };
+    const html = ["/", "/", "/index.html", "/lab/", "/lab/ordinary-least-squares/", "/flows/login/", "/flows/", "/flows/about/", "/articles/"];
+    for (const p of html) {
+      const res = await worker.fetch(new Request("https://anilkaya.org" + p, { headers: { "Sec-Fetch-Site": "same-origin" } }), envFor(undefined, f.D1), ctx);
+      await res.text();
+      ok(/text\/html/.test(res.headers.get("Content-Type") || ""), p + " is an HTML response");
+      const read = cspNonce(res.headers.get("Content-Security-Policy"));
+      eq(read.problem, undefined, "THE HTML CSP OF " + p + " CARRIES EXACTLY ONE script-src NONCE OF 16 BYTES");
+      eq(read.normalised, HTML_CSP, "and, the nonce aside, the policy of " + p + " is the Worker's, directive for directive and byte for byte");
+      nonces.push(read.value);
+    }
+    eq(new Set(nonces).size, nonces.length, "EVERY HTML RESPONSE CARRIES A FRESH NONCE: " + nonces.length + " responses, " + new Set(nonces).size + " nonces");
+    for (const p of ["/api/me", "/api/zz", "/api/flows/zz", "/assets/css/base.css?v=1", "/assets/css/base.css", "/robots.txt"]) {
+      const res = await worker.fetch(new Request("https://anilkaya.org" + p, { headers: { "Sec-Fetch-Site": "same-origin" } }), envFor(undefined, f.D1), ctx);
+      await res.text();
+      ok(!/text\/html/.test(res.headers.get("Content-Type") || ""), p + " is not an HTML response");
+      eq(res.headers.get("Content-Security-Policy"), null, "A NON-HTML RESPONSE CARRIES NO CSP: " + p);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = realConsole.error;
+    console.warn = realConsole.warn;
+    restoreClock();
+  }
+  eq(expect(src, /crypto\.getRandomValues\(new Uint8Array\(16\)\)/, { min: 1, max: 1, why: "the nonce is drawn once per HTML response from the platform's random source" }), 1,
+    "the Worker draws the nonce from crypto.getRandomValues, 16 bytes, in one place");
+  ok(absent(src, /'nonce-[A-Za-z0-9+\/=_-]/, { anchor: /'nonce-" \+ nonce \+ "'/, why: "the Worker writes no fixed nonce" }), "the Worker's source holds no fixed nonce");
+  ok(absent(src, /script-src[^"]*'unsafe-inline'/, { anchor: /"script-src 'self'/, why: "a nonce never travels with 'unsafe-inline' for scripts" }), "and no 'unsafe-inline' for scripts");
+}
 
 const sorted = Object.fromEntries([...results.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
 const render = () => "{\n" + Object.entries(sorted).map(([k, v]) => "  " + JSON.stringify(k) + ": " + JSON.stringify(v)).join(",\n") + "\n}\n";
