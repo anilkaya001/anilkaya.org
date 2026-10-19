@@ -911,6 +911,7 @@
 
   let fitRaf = 0;
   const scheduleFit = () => { cancelAnimationFrame(fitRaf); fitRaf = requestAnimationFrame(fitClaims); };
+  document.addEventListener("oracle:glance", () => scheduleFit());
   if (railEl && typeof ResizeObserver === "function") { let last = ""; new ResizeObserver(() => { const k = railEl.clientWidth + "x" + railEl.clientHeight; if (k === last) return; last = k; scheduleFit(); }).observe(railEl); }
 
   function fitClaims() {
@@ -1004,6 +1005,7 @@
     const dis = disagreeBlock(read, idx);
     if (dis) railEl.append(dis);
     railEl.append(h("div", { class: "ft-foot" }));
+    if (STATE.ticker && window.FlowsUI.oracle) window.FlowsUI.oracle.glance(railEl, STATE.ticker);
     paintFoot();
     fitClaims();
     scheduleFit();

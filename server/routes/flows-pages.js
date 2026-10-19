@@ -1,9 +1,15 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, ownerNav } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, ownerNav, oracleShell } from "../../shared/flows-pages.js";
 
 const homeNet = (env, owner) => {
   const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
   return mode === "on" || (mode === "owner" && owner === true);
+};
+
+const oracleMode = (env, owner) => {
+  const mode = String(env && env.FLOWS_ORACLE || "").trim().toLowerCase();
+  if (mode === "on") return "on";
+  return mode === "owner" && owner === true ? "on" : "off";
 };
 
 const PAGES = Object.freeze([
@@ -83,7 +89,7 @@ export function flowsPageRows(deps) {
         if (!session) return html(FLOWS_PAGES.loginPage());
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
-        const rendered = page.render(session.username, summary, owner, scenesOn(env, session.username), env);
+        const rendered = oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env), oracleMode(env, owner), page.slug || "overview");
         return html(owner ? ownerNav(rendered) : rendered);
       },
     });

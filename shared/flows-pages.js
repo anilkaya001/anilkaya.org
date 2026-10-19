@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "344";
+export const ASSET_VERSION = "347";
 
 import { GLOSSARY } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1366,6 +1366,25 @@ ${chart ? UI_CHART_SCRIPTS : UI_SCRIPT}
 ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("\n")}
 </body>
 </html>`;
+}
+
+const ORACLE_MODES = Object.freeze(["on", "quiet"]);
+
+export function oracleShell(html, mode, slug) {
+  if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
+  const page = escapeHTML(String(slug || "overview"));
+  const slot = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>
+<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")}"></i>
+<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle.js")}"></i>
+<script src="${v("/assets/js/flows-oracle-boot.js")}" defer></script>`;
+  let out = html.replace("</body>", () => slot + "\n</body>");
+  if (page === "overview") {
+    out = out.replace('<p class="visually-hidden" id="flowsStatus"', () => '<div class="orc-strip" id="orcHome" data-state="idle" style="min-height:40px"></div>\n  <p class="visually-hidden" id="flowsStatus"');
+  }
+  if (page === "unusual") {
+    out = out.replace('<section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard"', () => '<div class="orc-band" id="orcBand" style="min-height:40px"></div>\n  <section class="ui-card ui-mod ui-enter fn-card" id="uaNetCard"');
+  }
+  return out;
 }
 
 export const FLOWS_PAGES = {
