@@ -78,7 +78,7 @@ function expected(flow, { names = 10 } = {}) {
   const total = rows.reduce((s, r) => s + r.prem, 0);
   const kinds = { ca: 0, cb: 0, pa: 0, pb: 0, nx: 0 };
   const byName = new Map(), bySector = new Map();
-  const secOf = new Map(NAMES.map((x) => [x[0], x[1] ? SHORT.find(([re]) => re.test(x[1].toLowerCase()))[1] : "No sector"]));
+  const secOf = new Map(NAMES.map((x) => [x[0], x[1] ? SHORT.find(([re]) => re.test(x[1].toLowerCase()))[1] : ["SPY", "QQQ", "IWM", "DIA"].includes(x[0]) ? "Index funds" : "No sector"]));
   for (const r of rows) {
     let a = r.askPrem || 0, b = r.bidPrem || 0;
     if (a + b > r.prem) { a *= r.prem / (a + b); b *= r.prem / (a + b); }
@@ -316,9 +316,10 @@ try {
     near(node("s:tech").v, want.bySector.get("Tech"), "a sector node carries its names' premium");
     near(m.lean.bull, want.bull, "bullish lean is ask-side calls plus bid-side puts");
     near(m.lean.bear, want.bear, "bearish lean is bid-side calls plus ask-side puts");
-    eq(node("s:none").label, "No sector", "index funds the universe does not carry are drawn under No sector, not guessed");
-    deep(m.layers[1].map((d) => d.label), ["Tech", "Cyclical", "Comms", "Energy", "Other", "No sector"],
-      "the sector layer is ranked by premium with Other and then No sector last, although No sector carries the second largest premium");
+    eq(node("s:fund").label, "Index funds", "SPY, QQQ and IWM, which the universe gives no sector, are the fixed Index funds class the Market Floor uses, not a guessed sector");
+    eq(node("s:none"), undefined, "and with every other name carried by the universe there is no No sector node at all");
+    deep(m.layers[1].map((d) => d.label), ["Tech", "Index funds", "Cyclical", "Comms", "Energy", "Other"],
+      "the sector layer is ranked by premium with Other last, and Index funds, which carries the second largest premium, ranks second as a class of its own");
     deep(m.layers[2].slice(0, 3).map((d) => d.label), ["NVDA", "SPY", "QQQ"], "the name layer is ranked by premium, not grouped by sector");
     eq(m.layers[2][m.layers[2].length - 1].id, "n:~", "and Other names closes it");
     await ranked(page, "at rest");

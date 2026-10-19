@@ -1227,16 +1227,17 @@ try {
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
     const zeroSided = await page.evaluate(() => [...document.querySelectorAll("#ccAlerts .hm-arow")].map((row) => {
-      const m = row.querySelector(".ui-meter.hm-side");
+      const m = row.querySelector(".ui-meter.hm-side"), n = row.querySelector(".hm-none");
       return { t: row.querySelector("b").textContent, label: row.getAttribute("aria-label"), dash: Boolean(row.querySelector(".ui-dash.hm-side")),
+        none: n ? { text: n.textContent, title: n.getAttribute("title") } : null,
         meter: m ? { side: m.dataset.side, title: m.getAttribute("title"), w: m.firstChild.style.getPropertyValue("--w").trim() } : null };
     }));
     const zr = zeroSided.find((r) => r.t === "ZRO"), kla = zeroSided.find((r) => r.t === "KLA");
-    ok(zr && !zr.dash && zr.meter && zr.meter.w === "0.0%" && zr.meter.side === "thin" &&
-       zr.meter.title === "Ask-side share of the premium the vendor sided: none sided" && /none sided$/.test(zr.label),
-       `A WINDOW THE VENDOR SIDED AS ZERO IS NOT DRAWN AS ONE WITH NO SIDE STATED: it gets an empty meter titled none sided, ` +
-       `matching its disclosure row and its spoken label (${JSON.stringify(zr)})`);
-    ok(kla && kla.dash && !kla.meter, `while a window that states neither side keeps the dash (${JSON.stringify(kla)})`);
+    ok(zr && !zr.meter && !zr.dash && zr.none && zr.none.text === "none sided" &&
+       zr.none.title === "Ask-side share of the premium the vendor sided: none sided" && /none sided$/.test(zr.label),
+       `A WINDOW THE VENDOR SIDED AS ZERO IS NOT DRAWN AS ONE WITH NO SIDE STATED, NOR AS A ZERO-WIDTH METER that reads as a measured zero: ` +
+       `it prints none sided, as the Unusual page's Names cell does, matching its disclosure row and its spoken label (${JSON.stringify(zr)})`);
+    ok(kla && kla.dash && !kla.meter && !kla.none, `while a window that states neither side keeps the dash (${JSON.stringify(kla)})`);
     await moduleWhy(page, "hmAlerts");
     const zeroNote = await page.evaluate(() => document.getElementById("fxPopB").textContent);
     await shut(page);
@@ -1630,8 +1631,8 @@ try {
     eq(marks.DE, null, "and a name that reports outside the window carries no marker at all");
 
     const ev = await moduleWhy(page, "hmEvents");
-    deep(ev.rows[0], ["ORCL", "2026-08-27", "3s", "±6.4%", "+88", "ranked"],
-      "the calendar row carries the score and the funnel stage it already held");
+    deep(ev.rows[0], ["ORCL", "2026-08-27", "past", "±6.4%", "+88", "ranked"],
+      "the calendar row counts sessions from today, so a fixture report already behind today reads past rather than the nightly's 3s, and it carries the score and the funnel stage it already held");
     eq(ev.rows[1][4], "—",
        "a gated name has no score, and an em dash is not a zero");
     eq(ev.rows[1][5], "gated", "and the stage says the board was forbidden, not neutral");
@@ -3113,6 +3114,8 @@ try {
           const pill = document.querySelector("#hmTideState .hm-pill");
           return { state: pill.dataset.state, pill: pill.textContent.trim(),
             title: document.getElementById("fxTitle").textContent.trim(),
+            boards: (document.getElementById("hmBoardsDay") || {}).textContent || null,
+            date: document.getElementById("ccMetaDate").getAttribute("datetime"),
             note: (document.querySelector("#hmTide .ui-silent-t") || {}).textContent || null,
             zero: (document.querySelector("#hmTideLegs [data-state]") || {}).dataset?.state || null };
         });
@@ -3120,7 +3123,9 @@ try {
 
       await thuLk.set("market", liveToday({ "X-Fresh-State": "closed", "X-Fresh-Phase": "closed" }));
       const broken = await pillOf();
-      eq(broken.title, "Last session", "on a Thursday afternoon the boards of an earlier session are the last session");
+      eq(broken.title, "Today", "on a Thursday afternoon a tide of Thursday's own session titles the page Today, even under the boards of an earlier session");
+      eq(broken.date, today, "and the caption's date is the tide's session");
+      eq(broken.boards, "Boards from Mon, Aug 24", "while the boards' older session is named beside it rather than hidden");
       eq(broken.state, "stale",
          "a 'closed' header whose phase says the whole day is not trading, while the Eastern clock is inside the session, " +
          "is a broken trading flag: today's single morning read is shown as stale");

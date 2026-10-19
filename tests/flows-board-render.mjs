@@ -954,7 +954,65 @@ for (const [width, css, said] of [
   ok(priced.NVDA.live && priced.NVAX.live, "both rows are marked live");
   ok(!priced.AAPL.live && priced.AAPL.px === "102.00" && priced.AAPL.chg === "+1.00%",
      "and a name the live strip does not carry keeps its nightly price and change together, unmarked");
+  eq(await livePage.$eval("#bdMeta", (el) => el.textContent), "Ranked at the Thu, Sep 3 close · prices live",
+     "THE BOARD SAYS WHICH SESSION RANKED IT under its title, and that the prices beside the ranking are live");
   await livePage.close();
+}
+{
+  const many = Array.from({ length: 53 }, (_, i) => ({
+    ...boardRow(TICKERS[i % TICKERS.length], i % TICKERS.length, true), t: i < TICKERS.length ? TICKERS[i] : "SYX" + String(100 + i), r: i + 1, s: 95 - i,
+  }));
+  await put("board:long", { ...board("long", true), rows: many, cleared: 64, scored: 120 });
+  for (const [vw, vh] of [[1440, 820], [390, 844]]) {
+    const sp = await browser.newPage({ viewport: { width: vw, height: vh } });
+    await sp.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await sp.goto(url("/flows/long/"), { waitUntil: "networkidle" });
+    await sp.waitForSelector(ROWS);
+    await sp.waitForTimeout(300);
+    const head = await sp.evaluate(() => {
+      const chip = [...document.querySelectorAll("#bdHero .ui-gchip")].find((c) => /Net prem/.test(c.querySelector(".ui-chip-l").innerText));
+      const cut = (el) => el.scrollWidth > el.clientWidth + 1;
+      const tabs = document.getElementById("fxTabs");
+      const tb = tabs && getComputedStyle(tabs).display !== "none" ? tabs.getBoundingClientRect().top : innerHeight;
+      return { meta: document.getElementById("bdMeta").textContent, all: document.querySelector(".bd-all").textContent,
+        value: chip.querySelector(".ui-chip-v").innerText, label: chip.querySelector(".ui-chip-l").innerText,
+        cut: cut(chip.querySelector(".ui-chip-v")) || cut(chip.querySelector(".ui-chip-l")),
+        modBottom: document.getElementById("bdMod").getBoundingClientRect().bottom, tabTop: tb };
+    });
+    eq(head.meta, "Ranked at the Thu, Sep 3 close", `the meta line names the ranking's session at ${vw}`);
+    eq(head.all, "Show all 53 of 64", `SHOW ALL SAYS THE BOARD HOLDS 53 OF THE 64 THAT CLEARED, so the Cleared chip and the button agree at ${vw}`);
+    ok(!head.cut, `THE NET PREMIUM CHIP PRINTS ITS FIGURE AND LABEL WHOLE at ${vw} (${head.value} ${head.label})`);
+    if (vw < 768) {
+      eq(head.value + " " + head.label, "+$12M Net prem.", "on a phone it is the compact figure and a short label");
+      ok(head.modBottom <= head.tabTop + 1, `and the module ends above the phone tab bar, so no row sits behind it (${head.modBottom} vs ${head.tabTop})`);
+    }
+    await sp.getByRole("tab", { name: "Map", exact: true }).click();
+    await sp.waitForSelector("#bdMap svg.bd-map-svg");
+    await sp.waitForTimeout(400);
+    const map = await sp.evaluate(() => {
+      const r = (el) => el.getBoundingClientRect();
+      const svg = r(document.querySelector("#bdMap svg.bd-map-svg")), foot = r(document.querySelector("#bdMap .bd-map-foot")), mod = r(document.getElementById("bdMod"));
+      return { svgBottom: svg.bottom, footTop: foot.top, footBottom: foot.bottom, modBottom: mod.bottom };
+    });
+    ok(map.svgBottom <= map.footTop + 1 && map.footBottom <= map.modBottom + 1,
+       `THE BOARD MAP FITS ITS MODULE at ${vw}x${vh}: the tiles end above the legend and the legend inside the card (${JSON.stringify(map)})`);
+    if (vw >= 1440) {
+      await sp.getByRole("tab", { name: "List", exact: true }).click();
+      await sp.waitForSelector("#bdTable:not([hidden])");
+      await sp.click(".bd-all");
+      await sp.waitForSelector(".bd-dlg[open]");
+      const dlg = await sp.evaluate(() => {
+        const dt = document.querySelector(".bd-dt"), head = dt.querySelector(".bd-head"), first = dt.querySelector(".bd-body .bd-row");
+        return { head: head.getBoundingClientRect().top - dt.getBoundingClientRect().top, first: first.getBoundingClientRect().top - head.getBoundingClientRect().bottom, sw: dt.scrollWidth, cw: dt.clientWidth };
+      });
+      ok(Math.abs(dlg.head) <= 1, `THE SHOW ALL DIALOG'S COLUMN HEADER SITS AT THE TOP OF ITS SCROLLER, not 56 px down over row 1 (${dlg.head})`);
+      ok(dlg.first >= -1, `and row 1 starts below it (${dlg.first})`);
+      ok(dlg.sw <= dlg.cw + 1, `and the dialog table has no sideways scroll (${dlg.sw} of ${dlg.cw})`);
+      await sp.keyboard.press("Escape");
+    }
+    await sp.close();
+  }
+  await put("board:long", board("long", true));
 }
 for (const route of ["/flows/long/", "/flows/short/"]) {
   for (const [vw, vh] of [[1440, 820], [1024, 768], [390, 844]]) {

@@ -392,6 +392,20 @@
     return im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%";
   };
 
+  const weekdaysAfter = (a, b) => {
+    let n = 0;
+    const end = Date.parse(b + "T12:00:00Z");
+    for (let t = Date.parse(a + "T12:00:00Z") + 864e5, i = 0; t <= end && i < 400; t += 864e5, i++) if (![0, 6].includes(new Date(t).getUTCDay())) n++;
+    return n;
+  };
+  const isDay = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  function aheadOf(sd, origin, today) {
+    if (sd === null) return null;
+    if (!isDay(origin) || !isDay(today) || origin === today) return sd;
+    return today < origin ? sd + 1 : sd - weekdaysAfter(origin, today);
+  }
+  const aheadSaid = (n) => (n === null ? "" : n < 0 ? " · past" : n === 0 ? " · today" : n === 1 ? " · next session" : " · in " + n + " sessions");
+
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) return;
     const rows = rowsOf(payload);
@@ -409,11 +423,12 @@
         ? " and " + opinionless + " reached this calendar with none, so the boards hold no " +
           "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
         : ", so every name here can be read against the ranking above.");
+    const today = UI.freshness.market().today;
+    const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today);
     const list = drawn.map((row) => {
-      const sd = isNum(row.sdte);
       return UI.listRow({
         primary: row.t || DASH,
-        secondary: (row.d ? F.day(row.d) : DASH) + (sd === null ? "" : sd === 0 ? " · next session" : " · in " + sd + "s"),
+        secondary: (row.d ? F.day(row.d) : DASH) + aheadSaid(ahead(row)),
         value: moveSaid(row.im),
         signed: isNum(row.s) === null ? h("span", { class: "hm-tag", title: row.st === "gated" ? "The board was forbidden from holding an opinion on this name." : "No score was published for this name." }, row.st === "gated" ? "gated" : "unscored") : fmtSigned(row.s),
         signedValue: isNum(row.s), signedTone: isNum(row.s) === null ? "silent" : undefined,
@@ -423,12 +438,12 @@
     const label = "Names reporting inside the window";
     into.append(UI.list(list, { visible: SHOW, label }));
     const detail = table(label, [
-      ["Name", false], ["Date", false], ["In · sessions", true], ["Priced move", true], ["Score", true],
+      ["Name", false], ["Date", false], ["Sessions from today", true, "0 is a report today, 1 the next session; past means the date is before today."], ["Priced move", true], ["Score", true],
       ["Stage", false, "Where this name stopped in the run's funnel. \"gated\" means the board was forbidden from holding an opinion on it, not that it had none."],
     ], drawn.map((row) => {
       return {
         cells: [[row.t || DASH, "cc-t"], [row.d || DASH, "cc-date"],
-          [isNum(row.sdte) === null ? DASH : row.sdte + "s", "c-num"],
+          [ahead(row) === null ? DASH : ahead(row) < 0 ? "past" : String(ahead(row)), "c-num"],
           [moveSaid(row.im), "c-num"],
           [fmtSigned(row.s), "c-num"], [row.st || DASH, "cc-dim"]],
       };

@@ -232,7 +232,8 @@
           "conv " + (conv === null ? DASH : String(Math.round(conv)))));
 
       const trk = h("span", { class: "hm-trk cc-trk", "aria-busy": "true" });
-      drawn.push({ t, row, name, trk });
+      const c = namesChg(t, row);
+      const chg = chgNode(c);
 
       const score = isNum(row.s);
       const kids = [
@@ -240,15 +241,37 @@
         h("span", { class: "hm-who" }, name, sub),
         trk,
         h("span", { class: "hm-score cc-score", "data-tone": toneOf(score) }, fmtSigned(row.s)),
-        h("span", { class: "hm-chg", "data-tone": toneOf(row.chg), title: "The session's price return: close over the prior close. Not the score move." }, pct(row.chg)),
+        chg,
       ];
-      const said = t + ", score " + fmtSigned(row.s) + ", conviction " + (conv === null ? DASH : Math.round(conv)) +
-        ", price " + pct(row.chg) + ", net premium " + usd(row.netPrem);
-      list.push(card
-        ? h("a", { class: "ui-row hm-lrow cc-open", href: readerHref(t), "aria-label": said + ". Open the reader.", "data-ticker": t }, kids)
-        : h("div", { class: "ui-row hm-lrow cc-flat", role: "listitem", title: t ? NO_CARD_SAID : null, "aria-label": said, "data-ticker": t }, kids));
+      const node = card
+        ? h("a", { class: "ui-row hm-lrow cc-open", href: readerHref(t), "aria-label": nameSaid(t, row, c, true), "data-ticker": t }, kids)
+        : h("div", { class: "ui-row hm-lrow cc-flat", role: "listitem", title: t ? NO_CARD_SAID : null, "aria-label": nameSaid(t, row, c, false), "data-ticker": t }, kids);
+      drawn.push({ t, row, name, trk, chg, node, card });
+      list.push(node);
     }
     into.append(UI.list(list, { visible: SHOW, label }));
+  }
+
+  const nameSaid = (t, row, c, card) => t + ", score " + fmtSigned(row.s) + ", conviction " + (isNum(row.cnv) === null ? DASH : Math.round(row.cnv)) +
+    ", price " + pct(c.v) + (c.live ? " today" : "") + ", net premium " + usd(row.netPrem) + (card ? ". Open the reader." : "");
+  function namesChg(t, row) {
+    const v = t ? focusRows([t])[0] : null;
+    return v && v.src === "live" && v.chg !== null ? { v: v.chg, live: true } : { v: isNum(row.chg), stamp: stampFor(DAY.boards) };
+  }
+  const chgNode = (c) => h("span", { class: "hm-chg", "data-tone": toneOf(c.v), "data-src": c.live ? "live" : null, "data-session": c.stamp ? c.stamp.day : null,
+    title: (c.live ? "Live price return over the previous close." : "Session price return, close over the prior close." + (c.stamp ? " " + c.stamp.said : "")) + " Not the score move." },
+  pct(c.v), c.stamp ? h("span", { class: "hm-chg-s" }, c.stamp.text) : null);
+
+  function patchNames() {
+    for (const d of drawn) {
+      if (!d.chg || !d.chg.isConnected) continue;
+      const c = namesChg(d.t, d.row);
+      const next = chgNode(c);
+      if (next.textContent === d.chg.textContent && next.dataset.src === d.chg.dataset.src) continue;
+      d.chg.replaceWith(next);
+      d.chg = next;
+      if (d.node) d.node.setAttribute("aria-label", nameSaid(d.t, d.row, c, d.card));
+    }
   }
 
   function readTrack(payload) {
@@ -305,7 +328,11 @@
     const g = o.silence
       ? h("span", { class: "ui-gchip-g hm-chip-g", "data-empty": o.silence[0] }, glyph((KIND[o.silence[0]] || KIND.unavailable)[0]))
       : o.g;
-    return h("button", attrs, g,
+    if (o.stamp) attrs["data-session"] = o.stamp.day;
+    const top = o.stamp
+      ? h("span", { class: "hm-chip-top" }, g, h("span", { class: "hm-chip-s", title: o.stamp.said }, o.stamp.text, h("span", { class: "hm-chip-sx" }, " close")))
+      : g;
+    return h("button", attrs, top,
       h("span", { class: "ui-chip-v", "data-tone": o.silence ? "silent" : o.tone || null }, o.value),
       h("span", { class: "ui-chip-l" }, o.key));
   }
@@ -318,7 +345,15 @@
     h("span", { class: "hm-v-short", "aria-hidden": "true" }, whole || (a === null ? DASH : String(a)) + "/" + (b === null ? DASH : String(b)))];
   }
 
+  let verdictArgs = null;
+  function stampFor(day) {
+    const d = isoDayOf(day), p = pageDay(), t = Date.parse(d + "T12:00:00Z");
+    if (!d || !p || d >= p) return null;
+    return { day: d, text: Date.parse(p + "T12:00:00Z") - t < 6.5 * 864e5 ? dayShort(d).slice(0, 3) : F.day(d), said: "Close of " + dayShort(d) + "." };
+  }
+
   function paintVerdict(into, long, short, market, alerts, pulse) {
+    verdictArgs = [into, long, short, market, alerts, pulse];
     into.replaceChildren();
     const breadth = (market && market.breadth) || {};
     const premium = (market && market.premium) || {};
@@ -346,6 +381,13 @@
     const clSilence = bulls === null && bears === null ? boardsSilence(false) : null;
     const flSilence = keySilence(alerts, seen !== null, null);
 
+    const mDay = isoDayOf(market && market.sessionDate);
+    const pDay = isoDayOf(pc.date) || isoDayOf(pulse && pulse.sessionDate);
+    const aDay = isoDayOf(alerts && (alerts.sessionDate || alerts.session));
+    const stamps = { bias: ptSilence ? null : stampFor(mDay), breadth: brSilence ? null : stampFor(mDay), cleared: clSilence ? null : stampFor(DAY.boards),
+      pc: pcSilence ? null : stampFor(pDay), flagged: flSilence ? null : stampFor(aDay) };
+    const sessionFact = (d) => ["Session", d ? dayShort(d) : null];
+
     const share = (a, b) => (a !== null && b !== null && a + b > 0 ? a / (a + b) : null);
     const silenceSaid = (s, subject) => (!s ? null
       : s[0] === "unreadable" ? cap1(subject) + " could not be read — refresh to try again."
@@ -354,7 +396,7 @@
 
     const chips = [
       chip({
-        key: "Flow bias", value: pct(pt, 1), tone: toneOf(pt), silence: ptSilence,
+        key: "Flow bias", value: pct(pt, 1), tone: toneOf(pt), silence: ptSilence, stamp: stamps.bias,
         g: UI.divRing(pt === null ? null : pt * 100, { max: 25 }),
         info: () => ({
           title: "Flow bias", state: null,
@@ -365,13 +407,14 @@
             ["Names equally weighted", bt !== null ? pct(bt, 1) : btSilence ? btSilence[1] : DASH],
             ["Net call premium", usd(premium.netPositive)],
             ["Net put premium", usd(premium.netNegative)],
+            sessionFact(mDay),
           ],
           notes: [bt !== null && pt !== null && (bt > 0) !== (pt > 0) && bt !== 0 && pt !== 0
             ? "The two weightings point opposite ways: breadth without size, or size without breadth." : null],
         }),
       }),
       chip({
-        key: "Breadth", value: pair(bull, bear, "names net bought against net sold"), silence: brSilence,
+        key: "Breadth", value: pair(bull, bear, "names net bought against net sold"), silence: brSilence, stamp: stamps.breadth,
         g: UI.ring(share(bull, bear), { color: "--up-mark" }),
         info: () => ({
           title: "Breadth",
@@ -379,22 +422,22 @@
             : "Screened names whose net premium was bought against those whose net premium was sold.",
           facts: [["Bought", bull === null ? DASH : String(bull)], ["Sold", bear === null ? DASH : String(bear)],
             ["Bought share", share(bull, bear) === null ? DASH : F.pct(share(bull, bear), 0)],
-            ["Screened", isNum(market && market.n) === null ? DASH : String(market.n)]],
+            ["Screened", isNum(market && market.n) === null ? DASH : String(market.n)], sessionFact(mDay)],
         }),
       }),
       chip({
         key: "Cleared", value: pair(bulls, bears, "names cleared the band bullish against bearish"),
-        silence: clSilence,
+        silence: clSilence, stamp: stamps.cleared,
         g: UI.ring(share(bulls, bears), { color: "--up-mark" }),
         info: () => ({
           title: "Cleared the band",
           lead: clSilence ? silenceSaid(clSilence, "the cleared pool")
             : "Names past the dead band on each board, counted whole rather than to the rows this page draws.",
-          facts: [["Bullish", bulls === null ? DASH : String(bulls)], ["Bearish", bears === null ? DASH : String(bears)]],
+          facts: [["Bullish", bulls === null ? DASH : String(bulls)], ["Bearish", bears === null ? DASH : String(bears)], sessionFact(DAY.boards)],
         }),
       }),
       chip({
-        key: "Put/call", value: pc.now === null ? DASH : pc.now.toFixed(2), silence: pcSilence,
+        key: "Put/call", value: pc.now === null ? DASH : pc.now.toFixed(2), silence: pcSilence, stamp: stamps.pc,
         tone: pc.z === null ? null : pc.z > 1 ? "down" : pc.z < -1 ? "up" : null,
         g: pc.z !== null ? UI.divRing(-pc.z, { max: 3 }) : UI.ring(pc.now === null ? null : Math.min(1, pc.now / 1.5), { color: "--label-2" }),
         info: () => ({
@@ -408,13 +451,13 @@
       }),
       chip({
         key: "Flagged", value: seen === null ? DASH : (atLimit ? "≥" : "") + seen,
-        silence: flSilence,
+        silence: flSilence, stamp: stamps.flagged,
         g: UI.iconChip("unusual", "--s-orange"),
         info: () => ({
           title: "Flagged windows",
           lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "Option windows the vendor's own rules flagged in this read." +
             (atLimit ? " The read hit the vendor's ceiling, so the count is a floor and never a census." : ""),
-          facts: [["Seen", seen === null ? DASH : (atLimit ? "≥" : "") + seen], ["Carried", alertRows === null ? DASH : String(alertRows)]],
+          facts: [["Seen", seen === null ? DASH : (atLimit ? "≥" : "") + seen], ["Carried", alertRows === null ? DASH : String(alertRows)], sessionFact(aDay)],
         }),
       }),
     ];
@@ -456,32 +499,54 @@
     return { silence, date };
   }
 
-  function titleFor(date) {
+  const DAY = { boards: null, tide: null, quiet: null, read: false, word: null };
+  const isoDayOf = (d) => (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null);
+  const pageDay = () => (DAY.tide && (!DAY.boards || DAY.tide > DAY.boards) ? DAY.tide : DAY.boards);
+
+  function titleFor() {
     const m = UI.freshness.market();
-    const t = $("fxTitle");
-    const word = (date || m.expected) === m.today ? "Today" : "Last session";
-    if (t) t.textContent = word;
-    UI.shell.title(word);
+    const word = (pageDay() || m.expected) === m.today ? "Today" : "Last session";
+    if (word !== DAY.word) {
+      DAY.word = word;
+      const t = $("fxTitle");
+      if (t) t.textContent = word;
+      UI.shell.title(word);
+    }
+    paintDay();
   }
-  titleFor(null);
+
+  function paintDay() {
+    const el = $("ccMetaDate");
+    if (!el || !DAY.read) return;
+    const quiet = DAY.quiet;
+    const day = !DAY.boards && quiet ? null : pageDay();
+    el.replaceChildren();
+    if (day) {
+      el.setAttribute("datetime", day);
+      el.textContent = dayLong(day);
+      delete el.dataset.empty;
+    } else {
+      el.removeAttribute("datetime");
+      el.append("Session ", mark(quiet ? quiet[0] : "unavailable", "The session " + (quiet ? quiet[1] : "is unknown") + ".", "session"));
+      el.dataset.empty = quiet ? quiet[0] : "unavailable";
+      el.dataset.said = "session " + (quiet ? quiet[1] : "unknown");
+    }
+    let note = $("hmBoardsDay");
+    if (DAY.boards && day && DAY.boards !== day) {
+      if (!note) { note = h("span", { class: "hm-boards-day", id: "hmBoardsDay" }); el.after(note); }
+      note.textContent = "Boards from " + dayShort(DAY.boards);
+    } else if (note) note.remove();
+  }
+  titleFor();
 
   function paintMeta(dateEl, screenedEl, boards, market) {
     const { silence: boardsSilence, date } = boardsRead(boards[0], boards[1]);
-    titleFor(date);
-    const quiet = boardsSilence(date !== null);
     if (dateEl) {
-      dateEl.replaceChildren();
-      if (date) {
-        dateEl.setAttribute("datetime", date);
-        dateEl.textContent = dayLong(date);
-        delete dateEl.dataset.empty;
-      } else {
-        dateEl.removeAttribute("datetime");
-        dateEl.append("Session ", mark(quiet ? quiet[0] : "unavailable", "The session " + (quiet ? quiet[1] : "is unknown") + ".", "session"));
-        dateEl.dataset.empty = quiet ? quiet[0] : "unavailable";
-        dateEl.dataset.said = "session " + (quiet ? quiet[1] : "unknown");
-      }
+      DAY.boards = isoDayOf(date);
+      DAY.quiet = boardsSilence(date !== null);
+      DAY.read = true;
     }
+    titleFor();
     const n = isNum(market && market.n);
     const nQuiet = keySilence(market, n !== null, null);
     if (screenedEl) {
@@ -497,6 +562,8 @@
       screenedEl.hidden = n === null && !nQuiet;
     }
   }
+
+  const dayShort = (iso) => dayLong(iso).replace(/^(\w{3})\w*/, "$1");
 
   function dayLong(iso) {
     const t = Date.parse(iso + "T12:00:00Z");
@@ -613,7 +680,16 @@
   let tideShown = null;
   let heroTide = null;
   const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null, boardsDay: null };
-  const hero = () => paintHero(heroTide = tideOf(S));
+  const hero = () => {
+    paintHero(heroTide = tideOf(S));
+    const was = pageDay();
+    DAY.tide = heroTide ? isoDayOf(heroTide.session) : null;
+    titleFor();
+    if (pageDay() !== was) {
+      if (verdictArgs) paintVerdict(...verdictArgs);
+      patchNames();
+    }
+  };
 
   function paintHero(tide) {
     const v = $("hmTideV"), cap = $("hmTideCap"), legs = $("hmTideLegs"), plot = $("hmTide");
@@ -666,7 +742,9 @@
     }
     const mins = tide.t.map((t) => F.axis(t, tide.session));
     const timed = mins.every((m) => m !== null) && mins.every((m, i) => i === 0 || m > mins[i - 1]);
+    const ends = series.map((sr) => lastOf(sr.values)).filter((x) => x !== null).map((x) => C.tw(series[0].format(x)));
     const opts = {
+      gutter: Math.ceil(Math.max(plot.clientWidth < 600 ? 54 : 62, ...ends)),
       x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (m) => F.tick(m),
       xTicks: timed ? hourTicks(mins[0], mins[mins.length - 1], plot.clientWidth < 480 ? 120 : 60) : undefined, series, twoTone: true, zero: true,
       height: tideHeight(plot), live: state === "live",
@@ -722,6 +800,7 @@
         h("span", { class: "ui-badge", "data-tone": row.cp === "C" ? "up" : row.cp === "P" ? "down" : null, "aria-label": row.cp === "C" ? "Call" : row.cp === "P" ? "Put" : null }, row.cp === "C" || row.cp === "P" ? row.cp : "·"),
         h("span", { class: "ui-row-m" }, h("b", null, row.t || DASH), h("span", null, (isNum(row.k) === null ? DASH : row.k) + (row.exp ? " · " + F.day(String(row.exp)) : ""))),
         a.classified === null ? h("span", { class: "ui-dash hm-side" }, DASH)
+          : a.share === null ? h("span", { class: "hm-side hm-none", title: F.askLabel + ": none sided" }, "none sided")
           : h("span", { class: "ui-meter hm-side", title: F.askLabel + ": " + F.askSaid(a), "data-side": a.side }, h("i", { style: { "--w": ((s || 0) * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar(a.side === "ask" ? "--label-1" : a.side === "bid" ? "--side-bid" : "--label-3") } })),
         h("span", { class: "ui-row-v" }, usd(row.prem)));
     });
@@ -756,7 +835,7 @@
       title: "Flagged windows", lead: lede,
       facts: [["Seen", seen === null ? DASH : (payload.vendorTruncated === true || payload.readTruncated === true ? "≥" : "") + seen],
         ["Read", read]],
-      notes: ["The meter is the " + F.askLabel.toLowerCase() + ". It is coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less. A dash is a window that does not state both sides; an empty meter, none sided, is one that put none of its premium on either side."],
+      notes: ["The meter is the " + F.askLabel.toLowerCase() + ". It is coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less. A dash is a window that does not state both sides; none sided, printed in place of a meter that would read as a measured zero, is one that put none of its premium on either side."],
       node: detail,
     }));
   }
@@ -1071,6 +1150,7 @@
   }
 
   function patchFocus(changed) {
+    patchNames();
     const anchors = [...document.querySelectorAll("#ccMetals a[data-ticker], #ccLeaders a[data-ticker]")];
     if (!anchors.length) return;
     const rows = new Map(focusRows([...new Set(anchors.map((a) => a.dataset.ticker))]).map((v) => [v.t, v]));
@@ -1233,6 +1313,7 @@
   }
 
   function paintFocus() {
+    patchNames();
     const a = document.activeElement;
     const q = a && a.closest && a.closest("#hmMetals, #hmLeaders") &&
       (a.dataset.ticker ? '[data-ticker="' + a.dataset.ticker + '"]' : a.closest("#ccLeadSeg") && "[aria-selected=true]");
