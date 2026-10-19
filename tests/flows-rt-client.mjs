@@ -1148,7 +1148,7 @@ try {
     await R.until(() => R.conns.length >= 1, 15000);
     eq(R.conns.length, 1, "the ticker opens one socket");
     const url = new URL(R.conns[0].url);
-    deep([url.searchParams.get("k"), url.searchParams.get("f")], ["px", "NVDA"], "for the quote, naming the focus ticker so the hub reads this name's gamma too");
+    deep([url.searchParams.get("k"), url.searchParams.get("f")], ["px,fl,gx", "NVDA"], "for the quote, the flagged flow and this name's dealer gamma, naming the focus ticker so the hub reads its gamma");
     const c1 = R.conns[0];
     await page.waitForFunction(() => /400\.00/.test(document.getElementById("ftPx").textContent), null, { timeout: 5000 }).catch(() => {});
     const px = () => page.evaluate(() => document.getElementById("ftPx").textContent);

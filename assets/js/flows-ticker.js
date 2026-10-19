@@ -774,6 +774,7 @@
   const arr = (v) => (Array.isArray(v) ? v : []);
   const citesOf = (it) => arr(it && it.cites).filter((c) => c && typeof c.id === "string");
   const CLAIM_TONES = ["--accent", "--lvl-flip", "--warn", "--s-teal"];
+  const LIVE = { asked: 0, ping: null, beat: null };
   const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null, expiry: null };
   const SURF = { view: "price", api: null, load: null, tabs: null, seq: 0 };
   const frameEl = $("ftGlance"), stripEl = $("ftStrip"), railEl = $("ftReadRail"), dockEl = $("ftDock"), diveEl = $("ftDive");
@@ -1047,6 +1048,7 @@
     const n = STATE.neuron || null;
     try { GLANCE.mount = api.mount(STATE.card, hosts, { ...glanceOpts(), summary: n, range: RANGES[rangePick][0] }); }
     catch (e) { console.error("flows-ticker: glance mount failed", e); }
+    if (LIVE.ping) LIVE.ping();
   }
 
   function paintRange() {
@@ -3149,12 +3151,20 @@
     if (!STATE.card.lite && was !== !!liveQuote()) glanceUpdate();
   }
 
+  function liveLayer(t) {
+    if (LIVE.asked || !UI.defer || !$("ftLive") || !STATE.card || STATE.card.lite || !UI.freshness.market().open) return;
+    LIVE.asked = 1;
+    UI.defer("live").then(() => { const L = window.FlowsUI.tickerLive; if (L) L.start({ t, LIVE, glance: () => GLANCE.mount, take: takeQuote, quote: () => STATE.quote }); });
+  }
+
   function streamQuote(t) {
-    const rt = UI.rt && UI.rt.connect({ topics: ["px"], focus: t });
+    const rt = UI.rt && UI.rt.connect({ topics: ["px", "fl", "gx"], focus: t });
     if (!rt) return;
     rt.on("px", () => {
       const q = UI.rt.quote(t);
-      if (q) takeQuote(Object.assign({}, STATE.quote, Object.fromEntries(Object.entries(q).filter(([, v]) => v !== null))));
+      if (!q) return;
+      takeQuote(Object.assign({}, STATE.quote, Object.fromEntries(Object.entries(q).filter(([, v]) => v !== null))));
+      liveLayer(t);
     });
   }
 
@@ -3170,8 +3180,9 @@
         STATE.lastClosed = body && body.phase ? body.phase.lastClosed : null;
         STATE.beats++;
         if (STATE.phase === "rth" ? STATE.beats % 3 === 0 : was === "rth") fetchTape(t);
+        if (STATE.phase === "rth") liveLayer(t);
       },
-      onQuote: takeQuote,
+      onQuote: (q) => (LIVE.beat || takeQuote)(q),
       onChange: (changed) => {
         if (lite || !changed.includes("card:" + t)) return;
         Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))
