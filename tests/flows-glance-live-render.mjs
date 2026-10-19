@@ -341,7 +341,7 @@ async function live(browser, o = {}) {
   await shot(page, "live-3");
 
   R.keep = false;
-  await R.adv(5000);
+  await R.adv(1000);
   R.tick(out, 40000);
   await R.adv(200, 100);
   const sl = await snap(page);
