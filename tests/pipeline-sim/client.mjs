@@ -141,6 +141,21 @@ export async function clientScenario(seed, mod, { time, calls = 24, width = 3 } 
   const truth = vendor.classes();
   w.check(JSON.stringify(sortKeys(seen)) === JSON.stringify(sortKeys(truth)), `the meter's classes by operation differ from what the vendor answered: meter ${JSON.stringify(sortKeys(seen))} vendor ${JSON.stringify(sortKeys(truth))}`);
   for (const [op] of Object.entries(seen)) w.check(truth[op] !== undefined, `the meter names an operation the vendor never served: ${op}`);
+  const codes = {};
+  for (const [op, e] of Object.entries(after.ops)) {
+    const was = before.ops[op] ? before.ops[op].codes || {} : {};
+    for (const [code, n] of Object.entries(e.codes || {})) {
+      const d = n - (was[code] || 0);
+      if (d) { codes[op] = codes[op] || {}; codes[op][code] = d; }
+    }
+  }
+  w.check(JSON.stringify(sortKeys(codes)) === JSON.stringify(sortKeys(vendor.codes())), `the meter's exact failure codes by operation differ from what the vendor answered: meter ${JSON.stringify(sortKeys(codes))} vendor ${JSON.stringify(sortKeys(vendor.codes()))}`);
+  for (const e of Object.values(after.ops)) {
+    for (const f of e.first || []) {
+      w.check(typeof f.code === "string" && Number.isInteger(f.ms) && Number.isInteger(f.pg) && Number.isInteger(f.a) && f.a < SPEC.attempts && Object.keys(f).every((k) => ["code", "ms", "t", "pg", "a"].includes(k)),
+        `a failure sample carries its code, time, page and attempt and nothing else: ${JSON.stringify(f)}`);
+    }
+  }
   w.check(mod.delayFloorMs >= SPEC.floorMin && mod.delayFloorMs <= SPEC.floorCeiling, `the rate floor ${mod.delayFloorMs} ms left [${SPEC.floorMin}, ${SPEC.floorCeiling}]`);
   w.check(time.now() - started >= 0, "time never runs backwards");
   w.log(`${plan.length} calls, ${vendor.requests.length} attempts, ${time.now() - started} ms of virtual time`);

@@ -28,11 +28,11 @@ export function absolutise(source, dir) {
   return source.replace(SPECIFIER, (m, head, quote, spec) => head + quote + pathToFileURL(path.resolve(dir, spec)).href + quote);
 }
 
-export async function loadMutated(rel, transforms = []) {
+export async function loadMutated(rel, transforms = [], { salt = 0 } = {}) {
   const abs = path.join(ROOT, rel);
   const original = readFileSync(abs, "utf8");
   const mutated = applyTransforms(original, transforms, rel);
-  const body = absolutise(mutated, path.dirname(abs));
+  const body = absolutise(mutated, path.dirname(abs)) + "\n".repeat(salt);
   const url = "data:text/javascript;base64," + Buffer.from(body).toString("base64");
   return import(url);
 }

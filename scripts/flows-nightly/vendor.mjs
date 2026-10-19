@@ -1,5 +1,5 @@
 import { makePermitQueue } from "../../shared/flows-permits.js";
-import { createCallMeter, opIdOf } from "../../shared/flows-call-meter.js";
+import { createCallMeter, opIdOf, pageOf, shapeOf, tickerOf } from "../../shared/flows-call-meter.js";
 import { createProgress } from "../flows-legs/live.mjs";
 import { LIVE_MODE } from "./flags.mjs";
 import { LIVE_VENDOR, NIGHTLY_VENDOR, RATE } from "./vendor-params.mjs";
@@ -16,13 +16,14 @@ export function raiseRateFloor(floor, { minStepMs = 150, ceilingMs = RATE.floorC
   return Math.min(Math.max(floor * 1.5, minStepMs), ceilingMs);
 }
 
-export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs = RATE.maxDelayMs } = {}) {
+export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs = RATE.maxDelayMs, errorBackoffX = RATE.errorBackoffX } = {}) {
   if (outcome === "limited") {
     const raised = raiseRateFloor(floorMs);
     return { floorMs: raised, delayMs: Math.min(Math.max(delayMs * 2, raised), maxDelayMs) };
   }
   if (outcome === "error") {
-    return { floorMs, delayMs: Math.min(delayMs * 2, maxDelayMs) };
+    const ceiling = Math.min(maxDelayMs, floorMs * errorBackoffX);
+    return { floorMs, delayMs: Math.max(delayMs, Math.min(delayMs * 2, ceiling)) };
   }
   return { floorMs, delayMs: Math.max(floorMs, delayMs * 0.9) };
 }
@@ -233,8 +234,11 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
 
   const limitMs = vendorTimeoutMs(path, params);
   const timeoutRetries = (LIVE_MODE ? LIVE_VENDOR : NIGHTLY_VENDOR).timeoutRetries;
+  const shape = shapeOf(tickerOf(path, params));
+  const page = pageOf(params);
   let timeouts = 0;
   for (let attempt = 0; attempt <= RATE.maxRetries; attempt++) {
+    const note = { ...(shape ? { t: shape } : {}), pg: page, a: attempt };
 
     stats.permitWaitMs += await permits.acquire();
     stats.calls++;
@@ -257,7 +261,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(
         { delayMs, floorMs: delayFloorMs }, "error"));
       const timedOut = !!limitMs && isTimeout(error);
-      wire.record({ path, ms: Date.now() - wireStarted, kind: timedOut ? "timeout" : "network" });
+      wire.record({ path, ms: Date.now() - wireStarted, kind: timedOut ? "timeout" : "network", note });
       if (timedOut) {
         stats.timedOut++;
         timeouts++;
@@ -271,7 +275,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     const declared = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("content-length")) : NaN;
     const seenDaily = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("x-uw-daily-req-count")) : NaN;
     if (Number.isSafeInteger(seenDaily) && seenDaily > stats.dailySeen) stats.dailySeen = seenDaily;
-    const noteWire = () => wire.record({ path, ms: Date.now() - wireStarted, status: response.status, bytes: declared });
+    const noteWire = () => wire.record({ path, ms: Date.now() - wireStarted, status: response.status, bytes: declared, note });
 
     if (response.status === 429) {
       noteWire();
@@ -313,7 +317,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       body = await response.json();
     } catch (error) {
       if (limitMs && isTimeout(error)) stats.timedOut++;
-      wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : "network" });
+      wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : error && error.name === "SyntaxError" ? "parse" : "network", note });
       throw error;
     } finally {
       wireProgress.settled();

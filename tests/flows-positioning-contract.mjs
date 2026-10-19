@@ -688,6 +688,11 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(calls, 2, "in two calls");
   const full = await readMultiLeg(mlRead([500, 500]), "AAA", WIN);
   eq(full.truncated, true, "two full pages hit the documented offset ceiling and say so");
+  assert.deepEqual([two.full, two.failedAt, full.failedAt], [true, null, null], "a full first page is marked, and no page failed"); checks++;
+  const cut = await readMultiLeg(async (path, params) => (params.offset ? { __failed: "refused" } : { data: Array.from({ length: 500 }, (_, i) => ({ id: "c" + i })) }), "AAA", WIN);
+  assert.deepEqual([cut.rows.length, cut.truncated, cut.full, cut.failedAt, cut.calls], [500, true, true, 500, 2], "a refused second page keeps the first, says so and names the offset that failed"); checks++;
+  const none = await readMultiLeg(async () => ({ __failed: "failed" }), "AAA", WIN);
+  assert.deepEqual([none.rows.__failed, none.failedAt, none.full], ["failed", 0, false], "a failed first page is the section's failure, at offset 0"); checks++;
 }
 
 {

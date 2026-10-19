@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { boot, freshVendor, simEnv } from "./pipeline-sim/index.mjs";
+import { boot, freshStore, freshVendor, simEnv } from "./pipeline-sim/index.mjs";
 import { clientScenario } from "./pipeline-sim/client.mjs";
 import { cardScenario } from "./pipeline-sim/cards.mjs";
 import { storeScenario } from "./pipeline-sim/store.mjs";
 import { contractsScenario } from "./pipeline-sim/contracts.mjs";
 import { meterScenario, stagesScenario } from "./pipeline-sim/meter.mjs";
 import { deepenScenario } from "./pipeline-sim/deepen.mjs";
+import { volflowScenario } from "./pipeline-sim/volflow.mjs";
 
 simEnv();
 const time = boot();
@@ -23,6 +24,8 @@ const contracts = await load("shared/flows-contracts.js");
 const products = await load("shared/flows-products.js");
 const meter = await load("shared/flows-call-meter.js");
 const deepen = await load("shared/flows-deepen.js");
+const flowLeg = await load("scripts/flows-legs/flow.mjs");
+const VOLFLOW_EVERY = 10;
 
 const FAMILIES = [
   ["client", async (seed) => clientScenario(seed, await freshVendor(), { time })],
@@ -33,6 +36,7 @@ const FAMILIES = [
   ["meter", (seed) => meterScenario(seed, meter)],
   ["stages", (seed) => stagesScenario(seed, stages)],
   ["deepen", (seed) => deepenScenario(seed, deepen)],
+  ["volflow", async (seed) => (seed % VOLFLOW_EVERY ? null : volflowScenario(seed, { time, vendor: await freshVendor(), flow: flowLeg, store: await freshStore() }))],
 ];
 
 const failures = [];
@@ -41,6 +45,7 @@ const started = process.hrtime.bigint();
 for (let seed = 0; seed < SEEDS; seed++) {
   for (const [name, run] of FAMILIES) {
     const result = await run(seed);
+    if (result === null) continue;
     const t = tally.get(name);
     t.seeds++;
     t.checks += result.checks;

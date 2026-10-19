@@ -1,4 +1,4 @@
-import { wireDelta } from "../../shared/flows-call-meter.js";
+import { failLine, failsDelta, wireDelta } from "../../shared/flows-call-meter.js";
 
 export const ISOLATION = Object.freeze({ fatal: "fatal", isolated: "isolated" });
 
@@ -68,14 +68,14 @@ export const DETAIL_KEYS = 6;
 
 const RECORD_KEYS = Object.freeze(["id", "status", "ms", "calls", "keys", "cpu", "wire", "why", "undeclared"]);
 
-export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0, cpu = null, wire = null } = {}) {
+export function createStageRunner({ table = STAGES, clock = () => Date.now(), calls = () => 0, cpu = null, wire = null, fails = null } = {}) {
   const byId = new Map(table.map((s) => [s.id, s]));
   const done = new Map();
   const outside = [];
   let open = null;
 
   const begin = (spec) => ({
-    spec, at: clock(), calls: calls(), cpu: cpu ? cpu() : 0, wire: wire ? wire() : null, keys: 0, undeclared: [], detail: {},
+    spec, at: clock(), calls: calls(), cpu: cpu ? cpu() : 0, wire: wire ? wire() : null, fails: fails ? fails() : null, keys: 0, undeclared: [], detail: {},
   });
 
   const close = (frame, status, why) => {
@@ -87,6 +87,10 @@ export function createStageRunner({ table = STAGES, clock = () => Date.now(), ca
     if (wire && frame.wire) {
       const used = wireDelta(frame.wire, wire());
       if (used.n > 0) record.wire = { ms: used.ms, kb: Math.round(used.bytes / 1024), bad: used.bad };
+      if (record.wire && used.bad > 0 && fails && frame.fails) {
+        const line = failLine(failsDelta(frame.fails, fails()));
+        if (line) record.wire.fail = clip(line, WHY_CAP);
+      }
     }
     Object.assign(record, frame.detail);
     if (why) record.why = clip(why, WHY_CAP);

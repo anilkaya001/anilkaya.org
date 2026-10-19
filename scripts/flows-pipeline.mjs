@@ -200,7 +200,7 @@ async function main() {
 
   const stages = createStageRunner({
     clock: () => (stampPinned() ? 0 : Date.now()), calls: () => stats.calls, cpu: () => (stampPinned() ? 0 : processCpuMs()),
-    wire: () => wire.totals(),
+    wire: () => wire.totals(), fails: () => wire.fails(),
   });
   bindStages(stages);
   stages.step("session");

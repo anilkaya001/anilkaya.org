@@ -15,7 +15,7 @@ import { DRY_RUN } from "../flags.mjs";
 import { IV_RANK_PARAMS } from "../vendor-params.mjs";
 import { poolWidth, readFailure, runPooled, uw } from "../vendor.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
-import { ARCHIVE_DATE_RE, publish, publishedStore, readStored } from "../store.mjs";
+import { ARCHIVE_DATE_RE, flushHeld, hold, publish, publishedStore, readStored } from "../store.mjs";
 import { easternDayOf } from "../clock.mjs";
 import {
   computeFeatures, congressRows, enrich, readPxOf, screenerTilt, sessionCandles, sessionRow, sessionRows,
@@ -102,20 +102,31 @@ export async function runFocus(ctx) {
     vendor, screenerDate, marketLegs, dating, screenerReadAt, congressState, marketCross, enriched, screener, cardX, deepen,
   } = ctx;
   stages.step("vol-flow");
+  const flowDeep = cardTickers.filter((t) => byTicker.has(t));
+  const flowKeys = new Set([...flowDeep, ...crossSectionTickers].map((t) => "card-x:" + t));
   await publishVol(volLeg, {
-    publish, stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
-  await runFlowLeg({
+    publish: async (key, body) => (flowKeys.has(key) ? hold(key, body) : publish(key, body)),
+    stored: (key) => publishedStore[key] || null, sessionDate, generatedAt, log: (line) => console.log(line) });
+  const flow = await runFlowLeg({
     uw: DRY_RUN
       ? makeFlowFakeVendor({ sessionDate, spotOf: (t) => byTicker.get(t) && byTicker.get(t).features.spot })
       : uw,
     readStored: DRY_RUN ? makeFlowFakeStore({ sessionDate }) : readStored,
     publish, stored: (key) => publishedStore[key] || null, runPooled,
     deadline, sessionDate, generatedAt,
-    deep: cardTickers.filter((t) => byTicker.has(t)), cross: crossSectionTickers,
+    deep: flowDeep, cross: crossSectionTickers,
     featuresOf: (t) => (byTicker.get(t) || {}).features, strikesOf: (t) => ((byTicker.get(t) || {}).raw || {}).strikes,
     cardOf: (t) => publishedStore["card:" + t] || null, variation: variationRun,
     width: poolWidth(3).width, log: (line) => console.log(line),
   });
+  const flushed = await flushHeld({ log: (line) => console.warn(line) });
+  console.log(`  card-x: ${flushed.held} vol payload(s) held for the flow leg's merged write, ${flushed.landed} landed with it` +
+    (flushed.flushed ? `, ${flushed.flushed} written on their own` : "") + (flushed.failed ? `, ${flushed.failed} failed` : ""));
+  const ml = flow && flow.multiLeg;
+  if (ml && (ml.firstBad || ml.laterBad)) {
+    stages.detail({ mlNames: ml.names, mlFull: ml.full, mlFirstBad: ml.firstBad, mlLaterBad: ml.laterBad });
+  }
+  if (flushed.flushed || flushed.failed) stages.detail({ volFlushed: flushed.flushed, volFailed: flushed.failed });
   stages.step("dossiers");
   const focusAsk = focusTickers({ groups: focusGroups(ndx) });
   const focusRead = await readFocusRows(vendor, [...new Set([...focusAsk, ...FOCUS_FUNDS])], { date: screenerDate });

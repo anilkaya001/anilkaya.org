@@ -47,6 +47,19 @@ export function classOfFault(f, deadlineMs) {
   }
 }
 
+export function codeOfFault(f, deadlineMs) {
+  switch (f.kind) {
+    case "ok":
+    case "empty": return null;
+    case "slow": return f.ms >= deadlineMs ? "timeout" : null;
+    case "http": return String(f.status);
+    case "rate": return "429";
+    case "stall": return "timeout";
+    case "malformed": return "parse";
+    default: return "network";
+  }
+}
+
 export function createVendor({ time, scripts }) {
   const requests = [];
   const seen = new Map();
@@ -95,6 +108,16 @@ export function createVendor({ time, scripts }) {
     fetch: fetchFake,
     requests,
     attemptsOn: (pathname) => seen.get(pathname) || 0,
+    codes() {
+      const out = {};
+      for (const r of requests) {
+        const code = codeOfFault(r.fault, r.deadline);
+        if (code === null) continue;
+        out[r.op] = out[r.op] || {};
+        out[r.op][code] = (out[r.op][code] || 0) + 1;
+      }
+      return out;
+    },
     classes() {
       const out = {};
       for (const r of requests) {

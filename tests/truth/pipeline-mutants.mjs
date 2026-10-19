@@ -11,6 +11,8 @@ const CONTRACTS = "shared/flows-contracts.js";
 const METER = "shared/flows-call-meter.js";
 const STAGES = "scripts/flows-nightly/stages.mjs";
 const DEEPEN = "shared/flows-deepen.js";
+const FLOW = "scripts/flows-legs/flow.mjs";
+const STORE = "scripts/flows-nightly/store.mjs";
 
 function plant(id, title, target, transforms, detector, row = "B2") {
   if (PIPELINE_MUTANTS.some((m) => m.id === id)) throw new Error(`pipeline mutant ${id} registered twice`);
@@ -31,9 +33,13 @@ plant("client-404-is-empty", "a 404 or 422 is read as an empty body and returned
 plant("client-429-exhaustion-carries-no-status", "a call that spent its attempts on 429s throws with no status", VENDOR,
   [["{ status: 429 }", "{}"]], "clientDetector");
 plant("client-unreadable-body-not-metered", "an attempt whose body could not be parsed is left out of the meter", VENDOR,
-  [['wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : "network" });\n      throw error;', "throw error;"]], "clientDetector");
+  [['wire.record({ path, ms: Date.now() - wireStarted, kind: isTimeout(error) ? "timeout" : error && error.name === "SyntaxError" ? "parse" : "network", note });\n      throw error;', "throw error;"]], "clientDetector");
 plant("client-429-not-metered", "a refused attempt is left out of the meter", VENDOR,
   [["if (response.status === 429) {\n      noteWire();", "if (response.status === 429) {"]], "clientDetector");
+plant("client-parse-filed-as-network", "a body that could not be parsed is metered as a network failure, so the record cannot tell the two apart", VENDOR,
+  [['error && error.name === "SyntaxError" ? "parse" : "network", note });', '"network", note });']], "clientDetector");
+plant("client-error-backoff-uncapped", "one failing call's retries slow every other call to the 5 s ceiling", VENDOR,
+  [["const ceiling = Math.min(maxDelayMs, floorMs * errorBackoffX);", "const ceiling = maxDelayMs;"]], "volflowDetector");
 plant("client-failure-kind-collapsed", "readFailure answers network for a timeout and for an unreadable body", VENDOR,
   [['const kind = status !== null ? "http" : isTimeout(error) ? "timeout" : error && error.name === "SyntaxError" ? "parse" : "network";', 'const kind = status !== null ? "http" : "network";']], "clientDetector");
 
@@ -94,11 +100,28 @@ plant("meter-every-call-is-bad", "a good call is counted among the failures", ME
   [['if (cls !== "2xx") total.bad++;', "total.bad++;"]], "meterDetector");
 plant("meter-operations-uncapped", "the meter keeps a row for every operation it is ever shown", METER,
   [["if (id !== OTHER_OP && ops.size >= maxOps) return entry(OTHER_OP);", ""]], "meterDetector");
+plant("meter-failure-code-is-the-class", "a failure is filed by its class, so a 422 and a 404 read the same", METER,
+  [["const code = codeOf(status, kind);", "const code = cls;"]], "meterDetector");
+plant("meter-fails-left-to-the-slowest", "the summary names the failures of no operation outside the slowest", METER,
+  [[".filter((f) => f.bad > 0)", ".filter((f) => f.bad > 0 && f.n > 1e9)"]], "meterDetector");
 
 plant("stages-wire-is-the-run-total", "a stage reports the run's wire time to date, not its own", STAGES,
   [["const used = wireDelta(frame.wire, wire());", "const used = wireDelta(null, wire());"]], "stagesDetector");
 plant("stages-wire-on-an-idle-stage", "a stage that made no call still carries a wire field", STAGES,
   [["if (used.n > 0) record.wire", "if (true) record.wire"]], "stagesDetector");
+plant("stages-failures-unnamed", "a stage with failed calls does not say which operation failed or how", STAGES,
+  [["if (line) record.wire.fail = clip(line, WHY_CAP);", ""]], "stagesDetector");
+
+plant("flow-write-on-the-lane", "a deep name's lane waits for its card-x and hist writes before it reads the next name", FLOW,
+  [['    queue(ticker, emit(ticker, "deep", sections, {', '    await queue(ticker, emit(ticker, "deep", sections, {']], "volflowDetector");
+plant("flow-later-page-counted-first", "a failed later multi-leg page is counted as a failed first page", FLOW,
+  [["if (ml.failedAt === 0) mlTally.firstBad++;", "if (ml.failedAt !== null) mlTally.firstBad++;"]], "volflowDetector");
+plant("store-held-key-written-at-once", "a held vol payload is written at once and again with the flow sections", STORE,
+  [["  heldKeys.set(key, payload);\n", "  heldKeys.set(key, payload);\n  if (key) return send(key, payload);\n"]], "volflowDetector");
+plant("store-flush-drops-unlanded", "a held key whose merged write never landed is dropped instead of written", STORE,
+  [["if (landedKeys.has(key)) { out.landed++; continue; }", "{ out.landed++; continue; }"]], "volflowDetector");
+plant("store-flush-never-falls-back", "a held key whose merged write keeps being refused loses its vol section", STORE,
+  [["if (latest !== undefined && latest !== original) {", "if (false) {"]], "volflowDetector");
 
 
 plant("deepen-cap-ignored", "the rotation is held to the hard cap, not to the cap it was given", DEEPEN,
@@ -143,7 +166,7 @@ export async function runPipelineKillMatrix(selected = PIPELINE_MUTANTS) {
     if (!targetPresent(m.target)) { rows.push({ id: m.id, armed: false, why: `target ${m.target} is not in the tree` }); continue; }
     const detect = DETECTOR_OF[m.detector];
     const baseKey = m.target + "|" + m.detector;
-    if (!baselines.has(baseKey)) baselines.set(baseKey, await detect(await loadMutated(m.target)));
+    if (!baselines.has(baseKey)) baselines.set(baseKey, await detect(await loadMutated(m.target, [], { salt: baselines.size + 1 })));
     const baseline = baselines.get(baseKey);
     const mutated = await detect(await loadMutated(m.target, m.transforms));
     rows.push({ id: m.id, title: m.title, row: m.row, armed: true, baselineOk: baseline.ok, baselineNote: baseline.note, killed: baseline.ok && !mutated.ok, mutatedNote: mutated.note });
