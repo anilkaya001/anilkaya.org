@@ -956,6 +956,35 @@ for (const [width, css, said] of [
      "and a name the live strip does not carry keeps its nightly price and change together, unmarked");
   await livePage.close();
 }
+for (const route of ["/flows/long/", "/flows/short/"]) {
+  for (const [vw, vh] of [[1440, 820], [1024, 768], [390, 844]]) {
+    const sp = await browser.newPage({ viewport: { width: vw, height: vh } });
+    await sp.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
+    await sp.goto(url(route), { waitUntil: "networkidle" });
+    await sp.waitForSelector(ROWS);
+    await sp.waitForTimeout(300);
+    const fit = await sp.evaluate(() => {
+      const d = document.documentElement;
+      const rows = [...document.querySelectorAll("#flowsBody .bd-row[data-flip]")];
+      const mod = document.getElementById("bdMod").getBoundingClientRect();
+      const all = document.querySelector(".bd-all");
+      return { sh: d.scrollHeight, ih: innerHeight, sw: d.scrollWidth, iw: innerWidth, bottom: mod.bottom,
+        shown: rows.filter((r) => !r.hidden).length, total: rows.length, all: all && !all.hidden };
+    });
+    ok(fit.sh <= fit.ih + 1, route + " fits one screen at " + vw + "x" + vh + ": " + fit.sh + " vs " + fit.ih);
+    ok(fit.sw <= fit.iw, route + " has no sideways scroll at " + vw);
+    ok(fit.bottom <= fit.ih + 1, route + " module ends inside the viewport at " + vw);
+    ok(fit.shown >= 1 && (fit.shown === fit.total || fit.all), route + " trims rows only with a Show all button at " + vw);
+    if (fit.shown < fit.total) {
+      await sp.click(".bd-all");
+      await sp.waitForSelector(".bd-dlg[open]");
+      const n = await sp.$$eval(".bd-dlg .bd-row[data-flip]", (r) => r.filter((x) => !x.hidden).length);
+      eq(n, fit.total, route + " Show all lists every name at " + vw);
+      await sp.keyboard.press("Escape");
+    }
+    await sp.close();
+  }
+}
 eq(errors.length, 0,
    "no page error and no console error across both board routes: " + errors.join(" | "));
 

@@ -456,3 +456,32 @@
 @media (prefers-reduced-motion: reduce) {
   .bd-row.is-flip { transition: none; }
 }
+
+.flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main {
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main > * { max-width: none; flex: none; }
+.flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main > .bd-mod { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.bd-mod > .bd-table { flex: 1; min-height: 0; overflow: hidden; }
+.bd-mod > .bd-map { flex: 1; min-height: 0; }
+.bd-row[hidden] { display: none; }
+.bd-all { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font: var(--t-footnote); font-weight: 500; color: var(--accent-ink); background: none; border: 0; padding: 0 var(--sp-3); height: 28px; min-height: 0; line-height: 28px; white-space: nowrap; border-radius: var(--r-pill); cursor: pointer; }
+.bd-all:hover { background: var(--fill-4); }
+.bd-all:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.bd-all[hidden] { display: none; }
+.bd-dlg { margin: auto; border: 0; border-radius: var(--r-lg); background: var(--mat-opaque); color: var(--label-1); box-shadow: var(--lift-3), var(--mat-edge); padding: 0; width: min(1000px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: hidden; }
+.bd-dg { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-5); max-height: calc(100dvh - 24px); }
+.bd-dg h3 { margin: 0; font: var(--t-title3, 600 17px / 1.2 var(--font-text)); }
+.bd-dt { overflow: auto; min-height: 0; }
+.bd-dt .bd-table { margin-inline: 0; }
+.bd-q-in { text-overflow: ellipsis; }
+@media (prefers-reduced-motion: reduce) { .bd-row.is-in, .bd-row.is-flip { animation: none; transition: none; } }
+.bd-mod > .bd-table > .bd-head { position: relative; top: 0; }
+.bd-mod .ui-mod-sp { position: relative; align-self: stretch; min-width: 0; }
+.bd-mod > .bd-tools { flex: none; }
+.bd-mod > .bd-table:has(> .bd-body:empty) { display: none; }
