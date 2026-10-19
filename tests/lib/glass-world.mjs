@@ -405,6 +405,35 @@ const buildLensRig = (css) => {
   seg.style.backgroundPositionX = (((first.offsetLeft + 5) % 10) + 10) % 10 + "px";
 };
 
+export async function openStaticShell(browser, name, { patch = null, viewport = VIEWPORTS[1] } = {}) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  const html = String(PAGES.FLOWS_PAGES[name]({ username: "test", ticker: "AAPL", net: true, scenes: false }));
+  await page.route("**/*", async (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname.startsWith("/assets/") && /\.(css|woff2)$/.test(u.pathname)) {
+      const f = path.join(ROOT, u.pathname);
+      if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
+      if (patch && patch[u.pathname]) {
+        let src = fs.readFileSync(f, "utf8");
+        for (const [from, to] of patch[u.pathname]) { if (!src.includes(from)) throw new Error("mutant anchor missing: " + from); src = src.replaceAll(from, to); }
+        return route.fulfill({ body: src, contentType: MIME[path.extname(f)] });
+      }
+      return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
+    }
+    if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: html });
+    return route.fulfill({ status: 404, body: "" });
+  });
+  await page.goto(ORIGIN + "/flows/x/");
+  await page.evaluate(() => document.fonts.ready);
+  return { context, page };
+}
+
+export const scrollRims = () => [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].filter((c) => {
+  const s = getComputedStyle(c);
+  return /auto|scroll/.test(s.overflowY + s.overflowX) && getComputedStyle(c, "::before").content !== "none";
+}).map((c) => c.id || c.className);
+
 export async function openLensRig(browser, { htmlPatch = null, patch = null, viewport = VIEWPORTS[1] } = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
   const page = await context.newPage();

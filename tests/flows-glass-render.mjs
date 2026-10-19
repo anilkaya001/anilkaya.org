@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { launch } from "./lib/browser.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 import { workerSource } from "./lib/source-scan.mjs";
-import { openGlass, openLensRig, measureLens, lensMutants, settle, applyMode, clearMode, measureText, measureMaterial, low, MUTANTS, patchOf, PAGE_KINDS, VIEWPORTS, MODES, PROBE_INKS, PROBE_NUMS } from "./lib/glass-world.mjs";
+import { openGlass, openLensRig, openStaticShell, scrollRims, measureLens, lensMutants, settle, applyMode, clearMode, measureText, measureMaterial, low, MUTANTS, patchOf, PAGE_KINDS, VIEWPORTS, MODES, PROBE_INKS, PROBE_NUMS } from "./lib/glass-world.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CSS = fs.readFileSync(path.join(ROOT, "assets/css/flows.css"), "utf8");
@@ -332,6 +332,18 @@ let engineBends = null;
 }
 
 {
+  console.log("  scroll containers carry no rim:");
+  const names = Object.keys(PAGES.FLOWS_PAGES).filter((n) => /Page$/.test(n) && typeof PAGES.FLOWS_PAGES[n] === "function" && String(PAGES.FLOWS_PAGES[n]({ username: "tester", ticker: "AAPL", net: true })).includes('id="g-home"'));
+  ok(names.length >= 12, `every shell page is swept (${names.length})`);
+  for (const name of names) {
+    const { context, page } = await openStaticShell(browser, name);
+    try {
+      eq(await page.evaluate(scrollRims), [], `${name}: no tile that scrolls draws a rim`);
+    } finally { await context.close(); }
+  }
+}
+
+{
   console.log("  planted wrong builds (each must fail the checks above):");
   for (const name of ["label-3 back at 0.52 with the sheen at 0.065", "mat-regular alpha 0.50", "aurora alphas doubled", "a sheen of 0.08 reaching 60%"]) {
     await trial(name, async () => {
@@ -362,6 +374,12 @@ let engineBends = null;
       assert.deepEqual([...new Set(rims)], ["none"], "rims");
     } finally { await context.close(); }
   });
+  await trial("the free card keeps its rim", async () => {
+    const { context, page } = await openStaticShell(browser, "unusualPage", { patch: { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod[data-free]::before { content: none; }\n", ""]] } });
+    try {
+      assert.deepEqual(await page.evaluate(scrollRims), [], "a scrolling tile with a rim");
+    } finally { await context.close(); }
+  });
   const lensM = lensMutants(PAGES.lensMap);
   for (const [name, opts] of Object.entries(lensM)) {
     const gate = /reduced|forced/.test(name);
@@ -384,7 +402,7 @@ let engineBends = null;
       } finally { await context.close(); }
     });
   }
-  eq(Object.keys(MUTANTS).length + Object.keys(lensM).length, 13, "thirteen planted wrong builds are declared and each was run");
+  eq(Object.keys(MUTANTS).length + Object.keys(lensM).length + 1, 14, "fourteen planted wrong builds are declared and each was run");
 }
 
 {
@@ -407,4 +425,4 @@ let engineBends = null;
 
 await browser.close();
 const ms = Date.now() - t0;
-console.log(`✓ flows-glass-render: ${checks} assertions — Home, the long board, Market and the ticker at 1920x1080, 1440x820 and 390x844 from fixtures with no server: every visible text run measured against the brightest pixel under it with the ink made transparent, the material probed with every budget ink on the aurora pools, the floating sidebar, the tile layers, the bar controls and the segmented knob, the three fallbacks and forced colours, reduced motion, the lens that refracts four surfaces behind @supports, measured on a hairline grid, and thirteen planted wrong builds each caught; ${Math.round(ms / 1000)} s, ${Math.round(pageTime.reduce((a, b) => a + b, 0) / pageTime.length)} ms a page`);
+console.log(`✓ flows-glass-render: ${checks} assertions — Home, the long board, Market and the ticker at 1920x1080, 1440x820 and 390x844 from fixtures with no server: every visible text run measured against the brightest pixel under it with the ink made transparent, the material probed with every budget ink on the aurora pools, the floating sidebar, the tile layers, the bar controls and the segmented knob, the three fallbacks and forced colours, reduced motion, the lens that refracts four surfaces behind @supports, measured on a hairline grid, and fourteen planted wrong builds each caught; ${Math.round(ms / 1000)} s, ${Math.round(pageTime.reduce((a, b) => a + b, 0) / pageTime.length)} ms a page`);
