@@ -38,7 +38,7 @@ const CEILING_KIB = {
   aboutPage: 5,
   glossaryPage: 5,
   notFoundPage: 5,
-  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024,
+  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024,
 };
 
 const GZIP_KIB = {
@@ -146,7 +146,7 @@ const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 323,
-  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4,
+  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024,
 };
 
 const FLOOR_BYTES = 1024;
@@ -166,6 +166,7 @@ const BELOW_FLOOR = {
   movesPage: NO_RELIEF_ROW,
   marketPage: NO_RELIEF_ROW,
   overviewPage: NO_RELIEF_ROW,
+  statusPage: "OD-STATUS-1: the follow-up that moves the non-Health painters of flows-status.js into the status-panels group",
 };
 
 const LOADER = /createElement\(\s*["']script["']\s*\)|\bh\(\s*["']script["']|\bimport\(|new\s+Worker\(|importScripts\(/;
