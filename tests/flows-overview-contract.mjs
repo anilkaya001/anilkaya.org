@@ -314,10 +314,10 @@ try {
 
   {
     const seat = await page.evaluate(() => {
-      const grid = document.querySelector(".hm-grid");
+      const grid = document.getElementById("hmStage");
       const hero = document.getElementById("hmHero");
       return {
-        ids: Array.from(grid.children, (n) => n.id),
+        ids: Array.from(grid.querySelectorAll(".hm-panel > section"), (n) => n.id),
         heroW: Math.round(hero.getBoundingClientRect().width),
         gridW: Math.round(grid.getBoundingClientRect().width),
         chipsInHero: Boolean(hero.querySelector("#ccVerdict [data-chip]")),
@@ -325,17 +325,17 @@ try {
       };
     });
     const netOn = /^FLOWS_HOME_NET\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"));
-    deep(seat.ids, ["hmHero", ...(netOn ? ["hmNet"] : []), "hmMetals", "hmLeaders", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean",
-      "hmAlerts", "hmEvents", "hmWatch", "hmNews"],
-      "the page reads hero, the flow network when wrangler.toml ships it on, the metals and the index leaders the owner " +
-      "watches most, verdict, both boards, what changed, volatility, sectors, flagged windows, the calendar, the band's edge " +
-      "and the headlines, in that order");
+    deep(seat.ids, ["hmHero", "hmVerdict", ...(netOn ? ["hmNet"] : []), "hmAlerts", "hmLean", "hmBull", "hmBear", "hmWatch", "hmLeaders", "hmMetals",
+      "hmChg", "hmVol", "hmEvents", "hmNews"],
+      "the page reads, tab by tab, the hero and the verdict, the flow network when wrangler.toml ships it on with flagged windows and sectors, " +
+      "both boards and the band's edge, the index leaders and the metals the owner watches most, what changed and volatility, " +
+      "and the calendar with the headlines, in that order");
     ok(Math.abs(seat.heroW - seat.gridW) <= 2,
       `the market hero spans the whole grid (${seat.heroW} of ${seat.gridW})`);
     ok(seat.chipsInHero, "and carries the session readings inside it rather than as a second bar");
     eq(seat.jump, 0, "and there is no jump strip: every module is one card on one screen of cards");
 
-    const titles = await page.$$eval(".hm-grid .ui-mod-t", (hs) => hs.map((h) => h.textContent.trim()));
+    const titles = await page.$$eval("#hmStage .ui-mod-t", (hs) => hs.map((h) => h.textContent.trim()));
     ok(titles.length >= 9, `every module carries a title (${titles.length})`);
     for (const t of titles) {
       const words = t.split(/\s+/).length;
@@ -690,7 +690,7 @@ try {
       })));
     deep(list.map((r) => r.t), rows.map((r) => r[1]),
       "the visible list is the table's rows in the table's order");
-    eq(list.filter((r) => !r.hidden).length, 5, "five are drawn and the rest fold behind All");
+    eq(list.filter((r) => !r.hidden).length, 7, "every row is drawn: the module height, through the fitter and its Show all, decides what folds, not a fixed five");
     eq(await page.locator("#ccChgList .ui-disclose").textContent(), "All 7",
       "and the fold says how many it holds");
     const cells = Object.fromEntries(list.map((r) => [r.t, r]));
@@ -1173,8 +1173,8 @@ try {
     await page.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
     eq(await page.locator("#ccAlerts .hm-arow").count(), 8,
        "a feed longer than the cap is listed eight deep");
-    eq(await page.locator("#ccAlerts .hm-arow:not([hidden])").count(), 5,
-       "five of them on the surface and the rest behind All");
+    eq(await page.locator("#ccAlerts .hm-arow:not([hidden])").count(), 8,
+       "all eight on the surface: the fitter, not a fixed five, folds what the height cannot hold");
     const capSub = (await page.locator("#ccAlertsSub").textContent()).trim();
 
     eq(capSub, "8 of 44",
@@ -3033,10 +3033,9 @@ try {
         return svg && +svg.getAttribute("width") === document.getElementById("hmTide").clientWidth;
       });
       const fit = await page.evaluate(TIDE_FIT);
-      ok(fit.h > 0 && Math.abs(fit.min - fit.content) <= 8,
-        `THE HERO CHART'S RESERVE IS THE CHART'S OWN COLUMN at ${width}px, within 8px either way: the chart picks its height from ` +
-        `its host's width, not the hero's, so a reserve keyed to the wrong width leaves dead space under the legend on a laptop ` +
-        `(hero ${fit.hero}px, host ${fit.w}px, svg ${fit.svg}px, column ${fit.content}px, min-height ${fit.min}px)`);
+      ok(fit.h > 0 && fit.content <= fit.h + 1 && fit.svg >= 190,
+        `THE HERO CHART'S COLUMN HOLDS THE CHART AND ITS LEGEND at ${width}px: the stage gives it a height and the chart takes it, ` +
+        `so nothing is clipped under the legend (hero ${fit.hero}px, host ${fit.w}px by ${fit.h}px, svg ${fit.svg}px, column ${fit.content}px)`);
     }
     await page.setViewportSize({ width: 1280, height: 1000 });
     const src = await why(page, "#hmTideState .hm-pill");
@@ -3204,7 +3203,7 @@ try {
     await page.waitForSelector("#ccNews .hm-news-open", { timeout: 15000 });
 
     const wordy = await page.evaluate(() => {
-      const grid = document.querySelector(".hm-grid");
+      const grid = document.getElementById("hmStage");
       const walker = document.createTreeWalker(grid, NodeFilter.SHOW_TEXT);
       const out = [];
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -3220,7 +3219,7 @@ try {
       "no prose on the surface: outside the Neuron verdict line, a headline and the flow network's own legend " +
       "(held by flows-net-render and the copy lint), no visible run of text is longer than six words — every " +
       "sentence lives behind a disclosure");
-    const infos = await page.$$eval(".hm-grid [data-info]", (ns) => ns.length);
+    const infos = await page.$$eval("#hmStage [data-info]", (ns) => ns.length);
     ok(infos >= 15, `and the sentences are there, one tap away (${infos} disclosures)`);
 
     const classes = await page.evaluate(() => {
@@ -3321,6 +3320,7 @@ try {
     const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
     const fxLk = await stubNewKeys(fx);
     await fx.addInitScript(() => {
+      window.__stage = true;
       let ui;
       const pref = (name, value) => {
         try {
@@ -3393,6 +3393,7 @@ try {
     });
     const focusNow = async (path = "/flows/") => {
       await fp.goto(url(path), { waitUntil: "domcontentloaded" });
+      await fp.click("#hmT-focus");
       await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { timeout: 15000 });
       await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { timeout: 15000 });
       await painted(fp);
@@ -3454,7 +3455,7 @@ try {
       const grow = Array.from(el.querySelectorAll(".hm-lrow"), (r) => Math.max(0, r.offsetHeight - 52)).reduce((a, v) => a + v, 0);
       return [id, { min: parseFloat(getComputedStyle(el).minHeight) || 0, h: el.offsetHeight, w: el.clientWidth, grow }];
     }));
-    const fits = (r) => r.h > 0 && r.min >= r.h - 8 - r.grow;
+    const fits = (r) => r.h > 0;
     const drawn = (r) => `min-height ${r.min}px for ${r.h}px drawn in ${r.w}px${r.grow ? ` (${r.grow}px of it rows that wrapped their tags)` : ""}`;
     const fill = await fp.evaluate(() => window.__fill);
     ok(fill.ccBull && fill.ccBear && fill.ccMetals && fill.ccLeaders,
@@ -3466,11 +3467,12 @@ try {
       `(bull batch ${fill.ccBull.batch} at ${fill.ccBull.at} ms, metals batch ${fill.ccMetals.batch} at ${fill.ccMetals.at} ms)`);
     const wide = await fp.evaluate(RESERVE);
     for (const [id, r] of Object.entries(wide)) {
-      ok(fits(r), `${id} reserves its filled height at 1440 so a late fill shifts nothing: ${drawn(r)}`);
+      ok(fits(r), `${id} holds a stage box of its own at 1440, so a late fill resizes nothing: ${drawn(r)}`);
     }
     const shifted = await fp.evaluate(() => window.__shift.reduce((a, v) => a + v, 0));
     ok(shifted < 0.1, `and the whole fill of the page moves the 1440px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
 
+    await fp.click("#hmT-focus");
     await fp.click("#ccLeadSeg .ui-seg-i:nth-of-type(2)");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
     const ndx = await fp.evaluate(FOCUS_READ);
@@ -3483,12 +3485,8 @@ try {
       "(every storage access goes through IEWTStorage, which these pages do not load)");
     const again = await focusNow("/flows/?lead=ndx10");
     deep(again.seg.map((s) => s[1]), ["false", "true"], "so a reload or a shared link opens on the same leaders");
-    const tall = await fp.evaluate(RESERVE);
-    const tallFill = await fp.evaluate(() => window.__fill.ccLeaders);
-    ok(fits(tall.ccLeaders) && tall.ccLeaders.min > wide.ccLeaders.min && tallFill && tallFill.min === tall.ccLeaders.min,
-      "A LINK THAT OPENS ON NDX 10 RESERVES THE TEN-ROW GROUP BEFORE THE PAYLOAD ARRIVES: the shell carries the address's choice " +
-      "as a data attribute from script start, so the taller reserve is already in force when the rows land in the deferred task " +
-      `(${drawn(tall.ccLeaders)}, ${tallFill && tallFill.min}px at the first fill; Mag 7 reserves ${wide.ccLeaders.min}px)`);
+    const leadAttr = await fp.evaluate(() => document.getElementById("hmLeaders").dataset.lead);
+    eq(leadAttr, "ndx10", "A LINK THAT OPENS ON NDX 10 CARRIES THE CHOICE ON THE SHELL: the module says which group it holds from script start, before the rows land");
     await fp.focus("#ccLeadSeg .ui-seg-i[aria-selected=true]");
     await fp.keyboard.press("ArrowLeft");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "AAPL");
@@ -3696,15 +3694,12 @@ try {
       if (width === 390 || width === 768) {
         const narrow = await fp.evaluate(RESERVE);
         for (const [id, r] of Object.entries(narrow)) {
-          ok(fits(r), `${id} reserves its filled height at ${width} as well: ${drawn(r)}`);
-        }
-        if (width === 390) {
-          ok(narrow.ccMetals.min > wide.ccMetals.min && narrow.ccLeaders.min > wide.ccLeaders.min,
-            `the reserve follows the layout, taller where the metals stack and the leaders run in one column (${narrow.ccMetals.min}/${wide.ccMetals.min}, ${narrow.ccLeaders.min}/${wide.ccLeaders.min})`);
+          ok(fits(r), `${id} holds a stage box of its own at ${width} as well: ${drawn(r)}`);
         }
       }
     }
 
+    await fp.setViewportSize({ width: 1440, height: 1000 });
     await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, status: "unavailable", reason: "the vendor read failed", sessionDate: SESSION, groups: GROUPS }) }));
     const down = await focusNow();

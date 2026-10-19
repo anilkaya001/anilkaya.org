@@ -245,7 +245,7 @@ try {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await mount(page, {
-      html: PAGES.overviewPage({ username: "test" }), url: "/flows/",
+      html: PAGES.overviewPage({ username: "test" }), url: "/flows/#view=calendar",
       answer: (key) => (key.startsWith("news") ? st.news : key.startsWith("regime") ? st.regime : key.startsWith("now") ? { ...beat(), body: { ...beat().body, serverNow: readAt + 120000 } } : null),
     });
     await page.waitForSelector("#ccNews .hm-news-open", { timeout: 15000 });

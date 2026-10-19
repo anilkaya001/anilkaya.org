@@ -132,6 +132,18 @@ try {
   for (const width of [320, 390, 1440]) {
     const { context, page, errors } = await open(browser, { viewport: { width, height: 900 } });
     await page.goto("https://example.test/flows/");
+    if (width < 640) {
+      await page.waitForSelector("#hmNetHost .nm", { state: "attached", timeout: 20000 });
+      await page.waitForTimeout(600);
+      const n = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, canvases: document.querySelectorAll("#hmNetHost canvas").length, host: document.getElementById("hmNetHost").className, mapW: document.querySelector("#hmNetHost .nm").getBoundingClientRect().width, hostW: document.getElementById("hmNetHost").getBoundingClientRect().width }));
+      ok(n.sw <= n.cw, `NO HORIZONTAL OVERFLOW AT ${width}: page ${n.sw} of ${n.cw}`);
+      eq(n.canvases, 0, `UNDER 640 PX THE HOME SLOT HOLDS THE CONDENSED NETWORK, NOT THE 3D SCENE, at ${width}`);
+      ok(n.mapW <= n.hostW + 1, `and the map fits its slot at ${width}`);
+      ok(!/is-slot|is-quiet/.test(n.host), `and reserves no 3D height at ${width}`);
+      eq(errors, [], `no page error at ${width}`);
+      await context.close();
+      continue;
+    }
     await mounted(page);
     await page.waitForTimeout(600);
     const o = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, host: document.getElementById("hmNetHost").scrollWidth, hostC: document.getElementById("hmNetHost").clientWidth, canvasW: document.querySelector("#hmNetHost canvas").getBoundingClientRect().width, cardW: document.getElementById("hmNet").getBoundingClientRect().width }));

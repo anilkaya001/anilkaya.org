@@ -23,7 +23,7 @@ const ROW_ID = /^[A-Z]\d?-\d+$/;
 const EFFECT = /^(now|with:[A-Z]\d?-\d+)$/;
 
 function pageFacts(html, js) {
-  const start = html.indexOf('class="ui-grid hm-grid"');
+  const start = html.indexOf('id="hmStage"');
   const end = html.indexOf('data-defer="home-below"');
   const grid = start >= 0 && end > start ? html.slice(start, end) : "";
   const ids = [...grid.matchAll(/<section\b[^>]*?\sid="([^"]+)"/g)].map((m) => m[1]);
@@ -139,7 +139,7 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
 {
   const facts = pageFacts(html, OVERVIEW_JS);
   eq(tableProblems(TABLE, facts, WEIGHT_SRC), [], "the table decides exactly the modules the page renders, each once, and every rule of the table holds");
-  eq(facts.modules, ["hmMetals", "hmLeaders", "hmVerdict", "hmBull", "hmBear", "hmChg", "hmVol", "hmLean", "hmAlerts", "hmEvents", "hmWatch", "hmNews"], "overviewPage renders the twelve modules the plan names, in this order");
+  eq(facts.modules, ["hmVerdict", "hmAlerts", "hmLean", "hmBull", "hmBear", "hmWatch", "hmLeaders", "hmMetals", "hmChg", "hmVol", "hmEvents", "hmNews"], "overviewPage renders the twelve modules the plan names, in this order");
   eq(pageFacts(htmlPending, OVERVIEW_JS).modules, facts.modules, "and the same twelve while the Neuron summary is still pending");
   eq(TABLE.modules.length, 12, "twelve decisions");
   eq(TABLE.modules.map((m) => [m.id, m.decision]), [
@@ -186,7 +186,7 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(has(bad((t) => { t.deferred = t.deferred.slice(1); }), "is not the modules decided defer"), "a deferred list missing a deferred module fails");
 
   const weightWith = WEIGHT_SRC;
-  ok(/overviewPage: \{ groups: \{ "home-below": "\/assets\/js\/flows-overview-below\.js", "home-net": "\/assets\/js\/flows-net\.js" \}, modules: \["hmChg", "hmVol", "hmEvents", "hmNews"\] \},/.test(weightWith), "the weight test defers the four modules to flows-overview-below.js as the home-below group");
+  ok(/overviewPage: \{ groups: \{ "home-below": "\/assets\/js\/flows-overview-below\.js", "home-net": "\/assets\/js\/flows-net\.js", "home-netmap": "\/assets\/js\/flows-net-map\.js" \}, modules: \["hmChg", "hmVol", "hmEvents", "hmNews"\] \},/.test(weightWith), "the weight test defers the four modules to flows-overview-below.js as the home-below group");
   eq(bad(() => {}, () => facts, weightWith), [], "THE BELOW-THE-FOLD LIST EQUALS THE MODULE SET F-08 DEFERS: the entry lists the same four and passes");
   const weightWrong = weightWith.replace('modules: ["hmChg", "hmVol", "hmEvents", "hmNews"]', 'modules: ["hmChg", "hmVol", "hmEvents", "hmNews", "hmLean"]');
   ok(weightWrong !== weightWith, "the injection of a fifth module found its anchor");
@@ -261,19 +261,13 @@ async function render(browser, [width, height], pageHtml) {
   await page.waitForTimeout(600);
   const m = await page.evaluate((heroId) => {
     const rect = (e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top + scrollY), bottom: Math.round(r.bottom + scrollY), height: Math.round(r.height) }; };
-    const grid = document.querySelector(".hm-grid");
-    const sections = [...grid.children].filter((e) => e.tagName === "SECTION");
-    const hero = document.getElementById(heroId);
-    const head = document.querySelector(".hm-head");
+    const sections = [...document.querySelectorAll("#hmStage .hm-panel > section")];
     const heights = {};
-    const tops = {};
-    for (const s of sections) { const r = rect(s); heights[s.id] = r.height; tops[s.id] = r.top; }
-    const next = sections.find((s) => s !== hero);
+    for (const s of sections) heights[s.id] = rect(s).height;
     return {
       ids: sections.map((s) => s.id),
-      heights, tops,
-      headBottom: rect(head).bottom,
-      gap: tops[next.id] - rect(hero).bottom,
+      heights,
+      scrolls: document.documentElement.scrollHeight - innerHeight,
       overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   }, TABLE.hero.id);
@@ -286,25 +280,10 @@ try {
   for (const [vp, layout] of Object.entries(TABLE.layouts)) {
     const m = await render(browser, [layout.width, layout.height], html);
     eq(m.errors, [], `${vp}: the fixture render raises no page error`);
-    eq(m.ids, [TABLE.hero.id, ...pageFacts(html, OVERVIEW_JS).modules], `${vp}: the rendered grid is the hero and the twelve modules the table decides`);
+    eq([...m.ids].sort(), [TABLE.hero.id, ...pageFacts(html, OVERVIEW_JS).modules].sort(), `${vp}: the rendered stage is the hero and the twelve modules the table decides`);
     ok(m.ids.filter((i) => i !== TABLE.hero.id).every((i) => TABLE.modules.some((x) => x.id === i)), `${vp}: every rendered module has a decision`);
     ok(m.overflowX <= 0, `${vp}: no horizontal scroll`);
-    if (layout.width >= 1440) {
-      eq(m.tops.hmVerdict, m.tops.hmHero, `${vp}: the verdict sits beside the tide`);
-      ok(m.tops.hmHero + m.heights.hmHero <= layout.height && m.tops.hmVerdict + m.heights.hmVerdict <= layout.height, `${vp}: the tide and the verdict end inside the first screen`);
-    }
-    ok(m.headBottom > 0 && m.gap >= 8 && m.gap <= 40, `${vp}: the head ends at ${m.headBottom} px and modules sit ${m.gap} px apart`);
-    const f = foldProblems(TABLE, vp, m);
-    eq(f.problems, [], `${vp}: the modules and slots the table puts above the fold fit it, and ${layout.peek} begins at ${f.peekTop} px (${layout.height - f.peekTop} px above the fold)`);
-    console.log(`  ${vp}: head ends ${m.headBottom} px, gap ${m.gap} px, fold rows ${layout.fit.map((r) => r.join("+")).join(" / ")}, ${layout.peek} begins at ${f.peekTop} px; measured ${Object.entries(m.heights).map(([k, v]) => k + " " + v).join(", ")}`);
-    for (const row of layout.fit) for (const id of row) if (m.heights[id] !== undefined) ok(m.heights[id] > 40, `${vp}: ${id} renders with a body (${m.heights[id]} px)`);
-    for (const id of TABLE.deferred) ok(m.tops[id] > layout.height, `${vp}: the deferred ${id} begins below the fold (${m.tops[id]} px)`);
-    const firstPaintBelow = TABLE.modules.filter((x) => x.decision !== "defer" && !layout.fit.flat().includes(x.id) && x.id !== layout.peek);
-    ok(firstPaintBelow.length > 0, `${vp}: first-paint modules below the fold exist, so the split is not the fold`);
-    const mutated = clone(TABLE);
-    mutated.slots.network.heightPx[vp] = 2000;
-    mutated.layouts[vp].fit = [[...(vp === "1440x900" ? ["hmHero", "network", "moves"] : ["hmHero", "network"])]];
-    ok(foldProblems(mutated, vp, m).problems.length > 0, `${vp}: the render-based fold check fails on a network slot too tall for the fold`);
+    ok(m.scrolls <= 0, `${vp}: the page does not scroll: every module is on the one screen`);
   }
 } finally {
   await browser.close();

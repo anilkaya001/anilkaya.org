@@ -1,5 +1,5 @@
 const NOW = () => {
-  const TRIGGERS = ["hmChg", "uaTimelineCard", "mkSectorsCard"];
+  const TRIGGERS = ["hmChg", "hmEvents", "uaTimelineCard", "mkSectorsCard"];
   const Native = window.IntersectionObserver;
   if (Native && !Native.__belowFold) {
     class Seen extends Native {
@@ -19,6 +19,16 @@ const NOW = () => {
     Promise.resolve().then(() => fn({ didTimeout: true, timeRemaining: () => 0 }));
     return 0;
   };
+  addEventListener("DOMContentLoaded", () => {
+    if (!document.getElementById("hmStage") || window.__stage) return;
+    const st = document.createElement("style");
+    st.textContent = ".hm-stage{position:static!important;height:auto!important}.hm-panel{position:static!important;visibility:visible!important;display:block!important}.hm-panel>.hm-mod,.hm-panel>.hm-hero,.hm-panel>.hm-verdict{position:static!important;visibility:visible!important;display:block!important;height:auto!important;overflow:visible!important}.hm-panel .hm-body{overflow:visible!important}";
+    document.head.append(st);
+    const open = () => { for (const p of document.querySelectorAll(".hm-panel, .hm-panel > *")) p.inert = false; };
+    open();
+    new MutationObserver(open).observe(document.body, { attributes: true, attributeFilter: ["inert"], subtree: true });
+  });
+  addEventListener("load", () => { const u = window.FlowsUI, m = document.getElementById("hmChg"); if (u && u.defer && m) u.defer("home-below", { when: "idle", el: m, label: "The lower modules" }); });
 };
 
 export const BELOW_NOW = NOW;

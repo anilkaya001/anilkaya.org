@@ -298,6 +298,7 @@
   function mount(host, opts = {}) {
     if (!host) return null;
     if (NETS.has(host)) return NETS.get(host);
+    const FIT = opts.fit === true;
     const cfg = { names: num(opts.names) };
     const RM = window.matchMedia("(prefers-reduced-motion: reduce)");
     let frozen = false, still = RM.matches, dead = false, ready = false;
@@ -577,7 +578,8 @@
         const ch = G.form === "line" ? 22 : 32, rm = LN.map(rMax), cw = LN.map(cMax);
         const gaps = LN.map((L) => Math.max(6, ...L.slice(1).map((n, i) => ch + 3 - n.r - L[i].r)));
         const spans = LN.map((L, li) => L.reduce((s, n) => s + 2 * n.r, 0) + gapUnits(L) * gaps[li]);
-        H = Math.round(clamp(Math.max(W * 0.42, 520, tops + Math.max(...spans) + tail), 440, 960));
+        const need = tops + Math.max(...spans) + tail;
+        H = FIT ? Math.round(clamp(stage.clientHeight || need, 300, 960)) : Math.round(clamp(Math.max(W * 0.42, 520, need), 440, 960));
         G.top = tops; G.bottom = H - tail; G.midY = (G.top + G.bottom) / 2;
         const left = rm[0] + 8 + cw[0], right = rm[3] + 8 + cw[3], s0 = (W - 2 * margin - left - right) / 6;
         G.ox = W / 2 + (left - right) / 2; G.s0 = Math.max(s0, 1); G.oy = G.midY;
@@ -607,7 +609,7 @@
         });
         const pitch = Math.max(...rows.slice(0, 3).map((r, i) => r.down + rows[i + 1].up + 4), 60), y0 = 8 + rows[0].up;
         LN.forEach((L, li) => L.forEach((n) => { n.sy = y0 + li * pitch; }));
-        H = Math.ceil(y0 + 3 * pitch + rows[3].down + 34);
+        H = FIT ? Math.max(Math.ceil(y0 + 3 * pitch + rows[3].down + 34), 0) : Math.ceil(y0 + 3 * pitch + rows[3].down + 34);
         G.top = y0; G.bottom = y0 + 3 * pitch; G.midY = (G.top + G.bottom) / 2; G.ox = W / 2; G.oy = G.midY; G.s0 = pitch / 2;
         rows.forEach((r, i) => cols.push({ x: y0 + i * pitch, wx: (i - 1.5) * 2, side: "start", rMax: r.rm, up: r.up, down: r.down }));
         G.hd = cols.map((c) => [side, c.x - c.rMax - 17]);
@@ -616,7 +618,7 @@
       G.D = G.F / G.s0;
       G.cols = cols;
       G.ch = G.form === "line" ? 22 : G.form === "stack" ? 32 : 28;
-      stage.style.height = H + "px";
+      if (!FIT) stage.style.height = H + "px";
       const pw = Math.round(W * dpr), ph = Math.round(H * dpr);
       if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
       const keep = [cam.yaw, cam.pitch];
@@ -652,7 +654,7 @@
 
     function rebuild() {
       size();
-      M = S.rows.length ? model(S.rows, { out: mode, names: cfg.names || (VERT ? clamp(Math.floor(W / 46), 5, 9) : 10), session: S.session, sectorOf: secFn(), unread: U.state === "fail" }) : null;
+      M = S.rows.length ? model(S.rows, { out: mode, names: cfg.names || (VERT ? clamp(Math.floor(W / 46), 5, 9) : FIT ? clamp(Math.floor(((stage.clientHeight || 520) - 150) / 40), 4, 10) : 10), session: S.session, sectorOf: secFn(), unread: U.state === "fail" }) : null;
       if (M && !M.windows) M = null;
       const was = new Map(N);
       N.clear();
@@ -1519,7 +1521,7 @@
     if (window.ResizeObserver) {
       const ro = new ResizeObserver(() => {
         cancelAnimationFrame(rz);
-        rz = requestAnimationFrame(() => { if (!dead && Math.abs((stage.clientWidth || 0) - W) > 1) rebuild(); });
+        rz = requestAnimationFrame(() => { if (!dead && (Math.abs((stage.clientWidth || 0) - W) > 1 || (FIT && !VERT && Math.abs((stage.clientHeight || 0) - H) > 1))) rebuild(); });
       });
       ro.observe(host);
       undo.push(() => ro.disconnect());

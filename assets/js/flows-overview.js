@@ -34,6 +34,11 @@
   const usd = F.unit.of("moneyCompact", { dp: "short" });
   const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
 
+  let tideOpts = null;
+  const tideHeight = (plot) => {
+    const room = plot.clientHeight - 30;
+    return room > 190 ? Math.min(room, 440) : [190, 220, 236];
+  };
   const hourTicks = (lo, hi, step) => {
     const out = [];
     const every = step || 60;
@@ -664,13 +669,14 @@
     const opts = {
       x: timed ? mins : tide.t, xType: timed ? "number" : "index", xFormat: (m) => F.tick(m),
       xTicks: timed ? hourTicks(mins[0], mins[mins.length - 1], plot.clientWidth < 480 ? 120 : 60) : undefined, series, twoTone: true, zero: true,
-      height: [190, 220, 236], live: state === "live",
+      height: tideHeight(plot), live: state === "live",
       yFormat: (x) => ((x > 0 ? "+" : "") + usd(x)).replace(/\.0(?=[KMB])/, ""),
       label: "Market tide, net premium across the session, times in TRT",
       readout: (i) => [C.part(F.time(tide.t[i]), "k"), C.part("Net", "k"),
         h("b", { "data-tone": toneOf(tide.net[i]) }, tide.net[i] === null ? DASH : usdS(tide.net[i])),
         tide.zero ? C.part("0DTE " + (tide.zero[i] === null ? DASH : usdS(tide.zero[i])), "k") : null],
     };
+    tideOpts = opts;
     const legend = UI.legend([
       h("span", { class: "ui-key" }, h("i", { class: "is-split", "aria-hidden": "true" }), "Net premium"),
       series.length > 1 ? ["--s-gray", "ln", "0DTE net"] : null,
@@ -1435,27 +1441,160 @@
     },
   });
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { homeKit }));
+  const FIT_MIN = 3;
+  const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "hmFitT" });
+  document.body.append(fitDlg);
+  const fitBody = (mod) => mod.querySelector(":scope > .hm-body") || mod.querySelector(":scope > div:not(.ui-mod-h)");
+  function fit(mod) {
+    const body = fitBody(mod);
+    if (!body || mod.classList.contains("fn-card") || !mod.getBoundingClientRect().height) return;
+    const lists = [...body.querySelectorAll(".ui-list, ul, ol, tbody, [role=list]")].filter((l) => l.children.length > FIT_MIN && !l.closest("[hidden]"));
+    for (const l of lists) for (const c of l.children) { if (c.hasAttribute("data-fit")) { c.hidden = false; c.removeAttribute("data-fit"); } else if (c.hidden && !c.classList.contains("ui-disclose") && c.tagName !== "BUTTON") { c.hidden = false; c.setAttribute("data-fit", "1"); } }
+    mod.removeAttribute("data-tight");
+    let hid = 0;
+    const over = () => body.scrollHeight - body.clientHeight;
+    let guard = 80;
+    while (over() > 1 && guard-- > 0) {
+      let best = null, bestN = FIT_MIN;
+      for (const l of lists) { const n = [...l.children].filter((c) => !c.hidden && c.tagName !== "BUTTON").length; if (n > bestN) { best = l; bestN = n; } }
+      if (!best) break;
+      const vis = [...best.children].filter((c) => !c.hidden && c.tagName !== "BUTTON");
+      const last = vis[vis.length - 1];
+      last.hidden = true;
+      last.setAttribute("data-fit", "1");
+      hid++;
+    }
+    if (over() > 1) mod.setAttribute("data-tight", "");
+    let btn = mod.querySelector(":scope > .ui-mod-h > .hm-all");
+    if (hid) {
+      if (!btn) {
+        btn = h("button", { type: "button", class: "hm-all", "aria-haspopup": "dialog" });
+        btn.addEventListener("click", () => {
+          const copy = body.cloneNode(true);
+          for (const c of copy.querySelectorAll("[data-fit]")) { c.hidden = false; c.removeAttribute("data-fit"); }
+          const t = mod.querySelector(".ui-mod-t");
+          const close = h("button", { type: "button", class: "nm-link", onclick: () => fitDlg.close() }, "Close");
+          fitDlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "hmFitT" }, t ? t.textContent : "All"), h("div", { class: "nm-dtw" }, copy), h("div", { class: "nm-dx" }, close)));
+          if (typeof fitDlg.showModal === "function") fitDlg.showModal();
+        });
+        const head = mod.querySelector(":scope > .ui-mod-h");
+        if (head) head.append(btn);
+      }
+      btn.textContent = "Show all";
+      btn.hidden = false;
+    } else if (btn) btn.hidden = true;
+  }
+  const FITTING = new Map();
+  function scheduleFit(mod) {
+    if (FITTING.get(mod)) return;
+    FITTING.set(mod, requestAnimationFrame(() => { FITTING.set(mod, 0); try { fit(mod); } catch (error) { void error; } }));
+  }
+  for (const mod of document.querySelectorAll(".hm-panel > .hm-mod")) {
+    const body = fitBody(mod);
+    if (!body) continue;
+    new MutationObserver(() => scheduleFit(mod)).observe(body, { childList: true, subtree: true });
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => scheduleFit(mod)).observe(body);
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const mod of document.querySelectorAll(".hm-panel > .hm-mod")) scheduleFit(mod); });
+
+  const tidePlot = $("hmTide");
+  if (tidePlot && typeof ResizeObserver === "function") {
+    let drawn = 0;
+    new ResizeObserver(() => {
+      if (!tideChart || !tideOpts) return;
+      const hgt = tideHeight(tidePlot);
+      if (typeof hgt !== "number" || Math.abs(hgt - drawn) < 8) return;
+      drawn = hgt;
+      tideOpts = Object.assign({}, tideOpts, { height: hgt });
+      tideChart.set(tideOpts);
+    }).observe(tidePlot);
+  }
+
+  const TABS = [...document.querySelectorAll("#hmTabs [role=tab]")];
+  const stage = $("hmStage"), subBar = $("hmSub");
+  const subPick = {};
+  const SUB_TITLE = { hmHero: "Tide", hmVerdict: "Neuron" };
+  const NARROW = window.matchMedia("(max-width: 899px)");
+  const buildSub = (key) => {
+    const panel = document.getElementById("hmP-" + key);
+    const mods = panel ? [...panel.children].filter((m) => !m.hidden) : [];
+    if (!subBar) return;
+    subBar.replaceChildren();
+    subBar.hidden = mods.length < 2;
+    const pick = Math.min(subPick[key] || 0, Math.max(0, mods.length - 1));
+    mods.forEach((m, i) => {
+      if (i === pick) m.setAttribute("data-on", ""); else m.removeAttribute("data-on");
+      m.inert = NARROW.matches && i !== pick;
+      if (mods.length < 2) return;
+      const title = m.querySelector(".ui-mod-t");
+      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, SUB_TITLE[m.id] || (title ? title.textContent : "View " + (i + 1))));
+    });
+  };
+  NARROW.addEventListener("change", () => buildSub(stage.dataset.view));
+  const LOWER = { moves: "hmChg", calendar: "hmEvents" };
+  let lowerAsked = false;
+  const showTab = (key, focus, quiet) => {
+    const t = TABS.find((x) => x.dataset.tab === key) || TABS[0];
+    key = t.dataset.tab;
+    stage.dataset.view = key;
+    for (const x of TABS) { const on = x === t; x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1; }
+    for (const p of document.querySelectorAll(".hm-panel")) p.inert = p.dataset.panel !== key;
+    buildSub(key);
+    if (LOWER[key] && !lowerAsked && UI.defer) { lowerAsked = true; UI.defer("home-below", { when: "visible", el: $(LOWER[key]), label: "The lower modules" }); }
+    if (focus) t.focus();
+    if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
+  };
+  const TO = { ArrowRight: 1, ArrowLeft: -1 };
+  for (const [i, t] of TABS.entries()) {
+    t.addEventListener("click", () => showTab(t.dataset.tab, false));
+    t.addEventListener("keydown", (ev) => {
+      const to = ev.key === "Home" ? 0 : ev.key === "End" ? TABS.length - 1 : TO[ev.key] === undefined ? null : i + TO[ev.key];
+      if (to === null) return;
+      ev.preventDefault();
+      showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
+    });
+  }
+  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "session"; };
+  showTab(fromHash(), false, true);
+  addEventListener("hashchange", () => showTab(fromHash(), false, true));
+  new MutationObserver(() => buildSub(stage.dataset.view)).observe(stage, { attributes: true, subtree: true, attributeFilter: ["hidden"] });
+
   const netHost = $("hmNetHost");
-  let netNow = null, netIn;
+  let netNow = null, netIn, netMapped = false;
   const netSend = () => {
     if (!netNow || netIn === undefined) return;
     const rows = netIn && Array.isArray(netIn.rows) ? netIn.rows : null;
     netNow.take(rows ? netIn : null, rows ? { state: rows.length ? "ok" : "quiet", reason: "Nothing flagged in this read." }
       : { state: netIn ? "pending" : "unavailable", reason: netIn ? "The flagged windows are not published yet." : "The flagged windows could not be read." });
-    netHost.classList.toggle("is-slot", !!rows && rows.length > 0);
-    netHost.classList.toggle("is-quiet", !rows || !rows.length);
+    netHost.classList.toggle("is-slot", !netMapped && !!rows && rows.length > 0);
+    netHost.classList.toggle("is-quiet", !netMapped && (!rows || !rows.length));
+  };
+  const netSectors = (api) => {
+    fetch("/api/flows/universe", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then((res) => (res.ok ? res.json() : null)).catch(() => null)
+      .then((u) => { if (api && typeof api.sectors === "function") api.sectors(u); });
   };
   if (netHost && UI.defer) {
     UI.defer("home-net", { when: "visible", el: netHost, label: "The flow network" }).then(() => {
       const loaded = window.FlowsUI;
       if (!loaded || !loaded.net) return;
-      netNow = loaded.net.mount(netHost, netHost.dataset.ambient === "1" ? { ambient: true } : {});
+      const ambient = netHost.dataset.ambient === "1";
+      if (netHost.clientWidth > 0 && netHost.clientWidth < 640) {
+        return UI.defer("home-netmap", { when: "idle", el: netHost, label: "The flow network" }).then(() => {
+          const map = window.FlowsUI.netMap;
+          if (!map) return;
+          netMapped = true;
+          netNow = map.mount(netHost, {});
+          netSectors(netNow);
+          netSend();
+        });
+      }
+      netNow = loaded.net.mount(netHost, ambient ? { ambient: true, fit: true } : { fit: true });
       netSend();
     });
   }
   when(["alerts"], ({ alerts }) => { netIn = alerts; netSend(); });
 
-  if (UI.defer) UI.defer("home-below", { when: "visible", el: $("hmChg"), label: "The lower modules" });
 
   const fill = (id, paint, ...args) => {
     const el = $(id);
