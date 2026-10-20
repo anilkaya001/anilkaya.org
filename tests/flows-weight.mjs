@@ -29,6 +29,7 @@ const CEILING_KIB = {
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
+  notFoundPage: 5,
   statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024,
 };
 
@@ -47,6 +48,7 @@ const GZIP_KIB = {
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
+  notFoundPage: 3,
   statusPage: 27 + 9.5,
 };
 
@@ -61,10 +63,11 @@ const CSS_KIB = {
   unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024,
   eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024,
   movesPage: 95.5 + 1700 / 1024,
-  politicalPage: 100.5 + 1700 / 1024,
+  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024,
   loginPage: 80 + 565 / 1024 + 1700 / 1024,
   aboutPage: 81 + 565 / 1024 + 1700 / 1024,
   glossaryPage: 81 + 565 / 1024 + 1700 / 1024,
+  notFoundPage: 81 + 565 / 1024 + 1700 / 1024,
   statusPage: 82 + 7.5 + 5.5 + 1700 / 1024,
 };
 
@@ -83,6 +86,7 @@ const CSS_GZIP_KIB = {
   loginPage: 18 + 64 / 1024 + 400 / 1024,
   aboutPage: 18 + 64 / 1024 + 400 / 1024,
   glossaryPage: 18 + 64 / 1024 + 400 / 1024,
+  notFoundPage: 18 + 64 / 1024 + 400 / 1024,
   statusPage: 18 + 4 + 400 / 1024,
 };
 
@@ -134,7 +138,7 @@ const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 323,
-  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, statusPage: 80 + 80 + 15 + 4,
+  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4,
 };
 
 const FLOOR_BYTES = 1024;
@@ -387,7 +391,7 @@ for (const name of Object.keys(CEILING_KIB)) {
   {
     const CHART_ROUTES = ["deskPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
       "unusualPage", "watchPage"];
-    const FREE_ROUTES = ["aboutPage", "eventsPage", "glossaryPage", "loginPage", "politicalPage"];
+    const FREE_ROUTES = ["aboutPage", "eventsPage", "glossaryPage", "loginPage", "notFoundPage", "politicalPage"];
     const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
     eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
        "the chart library ships on exactly the eight routes that draw a chart, and the routes that draw none never download it");

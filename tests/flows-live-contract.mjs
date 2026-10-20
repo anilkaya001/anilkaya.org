@@ -2913,11 +2913,11 @@ const cronMinutes = (cron) => {
     const red = healthChecks({ ...good, edge403: worst.count, edgeKinds: worst.kinds, retrySpentMs: 40000 }).failures;
     eq(red[0], "HEALTH: the edge answered 24 ingest request(s) with HTTP 403 and retries spent 40 s of the 90 s budget",
       "at 24 edge 403s the gate turns red with the count");
-    ok(red.length === 2 && /^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5d-IAD\)/.test(red[1]) &&
-       /Skip rule for \/api\/flows\/ingest in DEPLOY\.md 10\.0 item 3, with Security Level and Browser Integrity Check ticked/.test(red[1]) &&
-       /Bot Fight Mode, which the Free plan cannot skip: turn it off \(Security → Settings → Bot traffic\)$/.test(red[1]),
-    "and a CHALLENGE names its remedy: the Skip rule (item 3) with Security Level ticked, and Bot Fight Mode off if " +
-      "challenges outlive the rule, because the Free plan cannot skip it");
+    ok(red.length === 2 && /^HEALTH: 24 were Cloudflare challenges, from Bot Fight Mode, a WAF rule or Security Level: turn Bot Fight Mode off \(Security → Settings → Bot traffic\), which the Free plan cannot skip/.test(red[1]) &&
+       /keep the Skip rule for \/api\/flows\/ingest in DEPLOY\.md 10\.0 item 3 with Security Level and Browser Integrity Check ticked/.test(red[1]) &&
+       /\(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5d-IAD\)$/.test(red[1]),
+    "and a CHALLENGE names its remedy FIRST, Bot Fight Mode off because the Free plan cannot skip it and the Skip rule (item 3) " +
+      "with Security Level ticked kept, and its evidence (header and Ray IDs) LAST, so a clipped line loses the Ray IDs and not the action");
     const remedyOf = (seen, n = 24) => {
       const t = refusalTally();
       for (let i = 0; i < n; i++) tallyRefusal(t, seen);
@@ -2931,14 +2931,14 @@ const cronMinutes = (cron) => {
       .test(remedyOf(kinds.banned)), "an IP ban names the IP Access rule");
     ok(/no error code, cf-mitigated: block; .*find the Ray ID in Security → Events/.test(remedyOf(kinds.mitigatedBlock)),
       "an unnumbered block sends the owner to the Ray ID");
-    ok(/^HEALTH: 24 were Cloudflare challenges \(a challenge page, no cf-mitigated; Ray ID 8c9d0e1f2a3b4c5e-IAD\), which Bot Fight Mode/
+    ok(/^HEALTH: 24 were Cloudflare challenges, from Bot Fight Mode.*\(a challenge page, no cf-mitigated; Ray ID 8c9d0e1f2a3b4c5e-IAD\)$/
       .test(remedyOf(kinds.pageOnly)) && !/cf-mitigated: challenge/.test(remedyOf(kinds.pageOnly)),
     "a challenge known only from its page says so, and never claims a cf-mitigated header Cloudflare did not send");
     {
       const mixed = refusalTally();
       tallyRefusal(mixed, kinds.pageOnly);
       for (let i = 0; i < 23; i++) tallyRefusal(mixed, kinds.challenge);
-      ok(/^HEALTH: 24 were Cloudflare challenges \(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5e-IAD, 8c9d0e1f2a3b4c5d-IAD\)/
+      ok(/^HEALTH: 24 were Cloudflare challenges, .*\(cf-mitigated: challenge; Ray ID 8c9d0e1f2a3b4c5e-IAD, 8c9d0e1f2a3b4c5d-IAD\)$/
         .test(healthChecks({ ...good, edge403: mixed.count, edgeKinds: mixed.kinds }).failures[1]),
       "and once any challenge in the run carried the header, the line names it");
     }

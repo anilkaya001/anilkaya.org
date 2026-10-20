@@ -4,7 +4,7 @@ import {
   parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, loginNameKey, staleFailureCutoff, verifyCredential,
   signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
 } from "./shared/flows-auth.js";
-import { FLOWS_PAGES, modelName, neuronProvenance } from "./shared/flows-pages.js";
+import { FLOWS_PAGES, modelName, neuronProvenance, notFoundPage } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
 import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
@@ -2920,6 +2920,8 @@ flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (e
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
   } }));
 
+const flowsNotFound = () => new Response(notFoundPage(), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
+
 async function route(request, env, url, ctx) {
   const path = url.pathname;
   const origin = url.origin;
@@ -3575,7 +3577,7 @@ async function route(request, env, url, ctx) {
   }
 
   if (path.startsWith("/flows/")) {
-    throw new HttpError(404, "not_found", "Not found");
+    return flowsNotFound();
   }
 
   if (path.startsWith("/api/rt/")) {
@@ -3700,6 +3702,7 @@ export default {
       return done(response);
     } catch (error) {
       if (error instanceof HttpError) {
+        if (error.status === 404 && url.pathname.startsWith("/flows/")) return done(flowsNotFound());
         const kept = error.code === "store_unreadable" ? await recallLastGood(request, url) : null;
         if (kept) return done(kept);
         return done(apiError(error.status, error.code, error.message, error.headers, error.details));

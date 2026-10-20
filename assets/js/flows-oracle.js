@@ -19,6 +19,7 @@
   var WHY_TEXT = Object.freeze({
     ok: "Priced from last night's chain.",
     "no-card": "There is no card for this name yet, so the model has no chain to price.",
+    unbuilt: "Building. The nightly writes the Neuron’s first view of this name.",
     screen: "Only the universe row is read for this name. No options chain was priced.",
     grade: "The inputs are not complete enough to stand behind a call.",
     "no-engine": "The options engine did not run for this name.",
@@ -31,7 +32,7 @@
   });
   var SILENCE = Object.freeze({
     cap: "Break-even needs a priced quote.", quote: "No two-sided quote.", ev: "The engine could not price this position.", "thin-norm": "Too little history for this name.",
-    unit: "The vendor states no unit.", failed: "The read failed.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
+    unit: "The vendor states no unit.", failed: "The read failed.", absent: "Not written yet.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
   });
   var CLEAR_TEXT = "Nothing stands out. Options are priced about where the model would price them.";
   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";
@@ -196,8 +197,8 @@
     infoBtn = h("button", { type: "button", class: "orc-info", "aria-expanded": "false", "aria-label": "What cheap and rich mean" }, "Cheap and rich?");
     infoNote = h("p", { class: "orc-note", hidden: "" }, INFO_TEXT);
     list = h("div", { class: "orc-list", tabindex: "-1" });
-    prefSeg = h("div", { class: "orc-pref", role: "group", "aria-label": "How the Neuron shows itself" });
-    [["on", "Pill"], ["quiet", "Count"], ["off", "Hide"]].forEach(function (p) {
+    prefSeg = h("div", { class: "orc-pref", role: "group", "aria-labelledby": "orcPrefL" });
+    [["on", "Pill"], ["quiet", "Count"], ["off", "Hidden"]].forEach(function (p) {
       var b = h("button", { type: "button", class: "orc-pref-b", "data-pref": p[0], "aria-pressed": "false" }, p[1]);
       b.addEventListener("click", function () { setPref(p[0]); });
       prefBtns[p[0]] = b;
@@ -207,7 +208,7 @@
       h("span", { class: "orc-grab", "aria-hidden": "true" }),
       h("div", { class: "orc-head" }, h("div", { class: "orc-head-t" }, titleEl, subEl), closeBtn),
       list,
-      h("div", { class: "orc-foot" }, h("p", { class: "orc-model" }, W.MODEL_IMPLIED), h("div", { class: "orc-foot-r" }, infoBtn, prefSeg), infoNote));
+      h("div", { class: "orc-foot" }, h("p", { class: "orc-model" }, W.MODEL_IMPLIED), h("div", { class: "orc-foot-r" }, infoBtn, h("div", { class: "orc-pref-w" }, h("span", { class: "orc-pref-l", id: "orcPrefL" }, "Show the Neuron as"), prefSeg)), infoNote));
     host.append(orb, toast, liveEl, scrim, sheet);
     orb.addEventListener("click", function () { setOpen(!S.open); });
     closeBtn.addEventListener("click", function () { setOpen(false); });
@@ -411,8 +412,29 @@
     return bits.join(" · ");
   }
 
+  function dueText(v) {
+    var d = U.F.trtDay(v);
+    if (!d) return null;
+    return (d === U.F.trtDay(Date.now()) ? "" : U.F.day(d) + ", ") + U.F.time(v);
+  }
+
+  function unbuiltBlock(box, t, rec) {
+    var due = dueText(rec.due);
+    box.append(h("p", { class: "orc-line" }, "Building: the Neuron has not written a view of " + t + " yet."));
+    if (rec.why === "store") {
+      box.append(h("p", { class: "orc-empty", "data-empty": "unavailable" }, "The view could not be read just now. ", h("button", { type: "button", class: "orc-retry", onclick: function () { loadRec(t); } }, "Retry")));
+      return box;
+    }
+    box.append(h("p", { class: "orc-quiet" }, "The nightly writes it once the name has a card" + (due ? "; the next nightly lands about " + due + "." : ".")));
+    return box;
+  }
+
   function recBlock(t, rec, fail) {
     var box = h("section", { class: "orc-sec", "aria-label": t });
+    if (rec && rec.stateWhy === "unbuilt") {
+      box.append(h("h3", { class: "orc-sec-t" }, t));
+      return unbuiltBlock(box, t, rec);
+    }
     box.append(h("h3", { class: "orc-sec-t" }, t, rec ? chipFor(rec) : null));
     if (!rec) {
       box.append(h("p", { class: "orc-empty", "data-empty": "unavailable" }, fail === "absent" ? "The Neuron has not published a view for this name yet." : "The Neuron could not be read just now.", " ",

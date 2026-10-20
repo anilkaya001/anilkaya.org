@@ -25,8 +25,8 @@
   const CHAMBER = { H: "House", S: "Senate", E: "Executive" };
   const RING_R = 8;
   const TAB_NOTES = {
-    acc: "Disclosed purchases exceed disclosed sales, by band midpoint. Whiskers give the low to high bound.",
-    red: "Sales exceed purchases. Sales carry midpoints only, so none is called firm. The feed ranks names by purchases and by filer breadth, so reducers are under-counted.",
+    acc: "Disclosed purchases exceed disclosed sales, by band midpoint.",
+    red: "Sales exceed purchases. Sales are midpoints only, so none is called firm, and the feed under-counts reducers.",
     cvg: "At least {n} distinct filers, most filers first. Breadth, not the size of one account.",
   };
 
@@ -133,7 +133,7 @@
   const usd = F.unit.of("moneyCompact", { dp: "short" });
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const mobile = () => matchMedia("(max-width:899px)").matches;
+  const mobile = () => { const pl = document.getElementById("pl"); return pl ? pl.getBoundingClientRect().width < 900 : matchMedia("(max-width:899px)").matches; };
   const coarse = () => matchMedia("(pointer:coarse)").matches;
   const dms = (s) => Date.parse(s + "T00:00:00Z");
   const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -159,7 +159,7 @@
     { id: "cvg", label: "Convergence", f: (x) => x.filers >= minFilers, def: "filers", cmp: byFilers },
   ];
   const tabOf = (id) => TABS.find((t) => t.id === id) || TABS[0];
-  const tabNote = (t) => TAB_NOTES[t.id].replace("{n}", String(minFilers));
+  const tabNote = (t, list) => TAB_NOTES[t.id].replace("{n}", String(minFilers)) + (list ? " Whiskers give the low to high bound." : "");
   const pool = () => ALL.filter((x) => S.funds || !x.fund);
   const sortKey = () => S.sort || tabOf(S.tab).def;
   const cmpFor = () => {
@@ -310,10 +310,12 @@
     $("plLegend").style.display = isMap ? "" : "none";
     for (const b of $("plViewSeg").children) b.setAttribute("aria-pressed", String(b.dataset.view === S.view));
     for (const b of $("plSizeSeg").children) b.setAttribute("aria-pressed", String(b.dataset.size === S.size));
-    if (isMap) renderMap(rows); else renderList(rows);
     $("plLegend").innerHTML = ["accF", "accM", "mix", "redM"].map((k) => '<span><i class="sw ' + k + '"></i>' + STS[k] + "</span>").join("") + "<span>◔ share still unfiled</span>";
-    $("plFnote").title = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab) : tabNote(tab);
-    $("plFnote").textContent = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab) : tabNote(tab);
+    const fnote = isMap ? (S.size === "usd" ? "Area ∝ √ disclosed $" : "Area ∝ distinct filers") + " · ring = share of window still unfiled · ranges, not amounts. " + tabNote(tab, false) : tabNote(tab, true);
+    $("plFnote").title = fnote;
+    $("plFnote").textContent = fnote;
+    if (isMap) renderMap(rows); else renderList(rows);
+    const mapH = $("plMap").clientHeight;
     const fundN = ALL.filter((x) => x.fund).length;
     const hid = !S.funds && fundN;
     const fb = $("plFundBtn");
@@ -324,6 +326,7 @@
     $("plAllBtn").textContent = "Show all " + rows.length;
     $("plAllBtn").style.display = (isMap ? rows.length > (mobile() ? 12 : 18) : rows.length > S.topN) ? "" : "none";
     $("plAllBtn").setAttribute("aria-label", "Show all " + rows.length + " stocks in " + tab.label);
+    if (isMap && $("plMap").clientHeight !== mapH) renderMap(rows);
     renderSel();
     if (S.sel) loadCard(S.sel);
   }
@@ -391,7 +394,7 @@
         cf.gammaFlow || gap("not on the card"),
         cf.flowP === null ? gap("none published") : '<span class="' + tn(cf.flowP) + '-t">' + smoney(cf.flowP) + "</span>",
         since === null ? gap(why) : '<span class="' + tn(since) + '-t">' + spct(since) + "</span>",
-      ]) + '<span class="sub c" title="Net premium is calls minus puts, in dollars">' + ag + (since === null ? " Price since: " + why + "." : "") + (miss.length ? " Not on the card: " + miss.join(", ") + "." : "") + "</span>",
+      ]) + '<span class="sub c" title="Net premium is calls minus puts, in dollars">' + [miss.length ? "Not on the card: " + miss.join(", ") + "." : "", since === null ? "Price since: " + why + "." : "", cf.flowP === null ? "" : ag].filter(Boolean).join(" ") + "</span>",
     };
   }
 
@@ -589,8 +592,9 @@
     const para = (t) => (typeof t === "string" && t ? "<p>" + esc(t) + "</p>" : "");
     $("plInfoB").innerHTML =
       "<p><b>Each row is a stock, not a politician.</b> The bar is disclosed purchases minus disclosed sales from the midpoint of each dollar band. The whisker runs from the low bound (purchases at their band floor, sales at twice their midpoint) to the high bound (purchases at their band ceiling, sales at an eighth of their midpoint). Sales carry midpoints only, so no name is ever called a firm reduction. Bars use a signed square-root scale so one large name does not flatten the rest.</p>" +
-      "<p><b>Bounds agree</b> means the whole whisker is on the buying side of zero. <b>Still blind</b> is the name’s median filing lag as a share of the " + (WIN === null ? "disclosure" : WIN + "-day") + " window: trades in that stretch are typically not filed yet, and no dollars are guessed for them.</p>" +
-      "<p><b>Filers</b> are distinct people. Breadth tells you more than the size of one account. The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.</p>" +
+      "<p><b>Bounds agree.</b> The whole whisker is on the buying side of zero. Even the low bound is a net purchase.</p>" +
+      "<p><b>Still blind.</b> The share of the window inside the name’s median filing lag, drawn as the ring on a tile. Trades that recent are typically not filed yet, and no dollars are guessed for them." + (WIN === null ? "" : " The window is " + WIN + " days.") + "</p>" +
+      "<p><b>Filers.</b> Distinct people. Breadth tells you more than the size of one account. The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.</p>" +
       para(n.unit) + para(n.lag) + para(n.refusals) +
       "<p>" + (isNum(P && P.filings) === null ? "" : P.filings.toLocaleString("en-US") + " filings read " + (P.window ? fday(P.window.from) + " to " + fday(P.window.to) : "") + ". ") + "The feed lists the top names by purchases and by filer breadth (" + ALL.length + (seen === null ? "" : " of " + seen) + " names), so the Reducing view is under-counted. Estimates from disclosed ranges, not advice.</p>";
     $("plInfoDlg").showModal();

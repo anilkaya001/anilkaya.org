@@ -201,7 +201,6 @@
     inset: auto 0 0 0;
     width: 100%;
     max-width: none;
-    height: 70dvh;
     max-height: 70dvh;
     padding-bottom: var(--safe-b);
     border-radius: var(--r-xl) var(--r-xl) 0 0;
@@ -347,7 +346,9 @@
 .orc-toph { min-width: 0; overflow: hidden; color: var(--label-2); font: var(--t-caption); text-overflow: ellipsis; white-space: nowrap; }
 
 .orc-foot { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3) var(--sp-5) var(--sp-4); border-top: 1px solid var(--sep); }
-.orc-foot-r { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
+.orc-foot-r { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3) var(--sp-4); }
+.orc-pref-w { display: flex; align-items: center; gap: var(--sp-3); margin-left: auto; }
+.orc-pref-l { color: var(--label-2); font: var(--t-caption); white-space: nowrap; }
 .orc-model { margin: 0; color: var(--label-3); font: var(--t-caption2); }
 .orc-note { margin: 0; color: var(--label-2); font: var(--t-caption); }
 .orc-note[hidden] { display: none; }

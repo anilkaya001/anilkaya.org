@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
-import { GLOSSARY } from "../shared/flows-glossary.js";
+import { GLOSSARY, GLOSSARY_PAGES } from "../shared/flows-glossary.js";
 import { workerSource } from "./lib/source-scan.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -89,16 +89,24 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 
 {
   const html = await (await call("/flows/glossary/")).text();
-  const terms = [...html.matchAll(/<dt>([^<]+)<\/dt>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
-  eq(terms.length, GLOSSARY.length, "the glossary prints every entry");
+  const terms = [...html.matchAll(/<h2 id="[a-z0-9-]+-t">([^<]+)<\/h2>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+  eq(terms.length, GLOSSARY.length, "the glossary prints every entry, each term a heading a screen reader can jump between");
+  eq((html.match(/<h2[ >]/g) || []).length, GLOSSARY.length, "and no other second-level heading");
+  ok(!/<dt[ >]/.test(html), "no term is left as a definition-list label that heading navigation cannot reach");
   eq(terms.join("|"), [...GLOSSARY].map((g) => g.term).sort((a, b) => a.localeCompare(b)).join("|"), "in alphabetical order");
   eq(new Set(GLOSSARY.map((g) => g.key)).size, GLOSSARY.length, "keys are unique");
   eq(new Set(GLOSSARY.map((g) => g.term)).size, GLOSSARY.length, "terms are unique");
   for (const g of GLOSSARY) {
-    ok(/^[a-z0-9-]+$/.test(g.key) && html.includes(`id="${g.key}"`), `${g.key} is an anchor`);
+    ok(/^[a-z0-9-]+$/.test(g.key) && html.includes(`id="${g.key}"`) && html.includes(`aria-labelledby="${g.key}-t"`), `${g.key} is an anchor labelled by its heading`);
     ok(g.lines.length > 0 && g.lines.every((l) => typeof l === "string" && l.trim()), `${g.key} has text`);
-    ok(html.includes(`href="${g.href}"`), `${g.key} names the page it appears on`);
+    ok(g.href === null ? !html.includes(`href="/flows/ticker/"`) : html.includes(`href="${g.href}"`), `${g.key} names the page it appears on` + (g.href === null ? ", without a link to a page that needs a name" : ""));
+    ok(GLOSSARY_PAGES.includes(g.page), `${g.key}'s page is one the lede names`);
   }
+  const lede = (html.match(/<p class="fx-doc-lede">([^<]+)<\/p>/) || [])[1] || "";
+  for (const p of GLOSSARY_PAGES) ok(lede.replace(/&#39;/g, "'").includes(p), `the lede names ${p}, and claims no page it does not cover`);
+  ok(!/each page/.test(lede), "the lede does not claim every page");
+  const covered = new Set(GLOSSARY.map((g) => g.href).filter(Boolean));
+  for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
   ok(!/<(?:img|iframe|style)|<script(?![^>]*src=)/i.test(html), "no markup of that kind reaches the page");
   ok(html.includes("expected P&amp;L") && !html.includes("expected P&L"), "ampersands in the strings are escaped");
   ok(html.includes("members&#39; own variances"), "and so are apostrophes");

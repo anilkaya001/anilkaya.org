@@ -1,7 +1,7 @@
 import { easternDay, easternClock, easternInstant, shiftDay, freshnessState, classOf, FRESH_CLASSES } from "../shared/flows-freshness.js";
 import { LIVE_KEYS, LIVE_BUDGET } from "../shared/flows-live.js";
 import { coverageSql } from "./store.js";
-import { UNIVERSE_BUDGET_BYTES } from "../shared/flows-cross.js";
+import { productOf, PAYLOAD_CAP_BYTES } from "../shared/flows-products.js";
 import { normalizeClock, ingestClockView, NOW_NIGHTLY_KEYS } from "../shared/flows-live-worker.js";
 import { ledgerView } from "../shared/flows-ledger.js";
 import { lines, planOf, renewalState, vendorDay } from "../shared/flows-plan-facts.js";
@@ -182,21 +182,27 @@ export function rotationView(row) {
     carded: n(sum.carded), universe: n(sum.universe), tonight: n(sum.tonight), planned: n(sum.planned), read: n(sum.read),
     oldest: typeof sum.oldest === "string" && DAY_RE.test(sum.oldest) ? sum.oldest : null,
     calls: n(sum.calls), dailySeen: n(sum.dailySeen), dayLine: n(sum.dayLine), minuteLine: n(sum.minuteLine),
+    writtenAt: whole(row.updated_at),
   };
 }
+
+export const capBytesOf = (key) => {
+  const p = productOf(key);
+  return p && Number.isSafeInteger(p.capBytes) && p.capBytes > 0 ? p.capBytes : PAYLOAD_CAP_BYTES;
+};
 
 export function coverageView(rows) {
   const list = rowsOf({ results: rows });
   if (!list) return null;
   const byId = new Map(list.map((r) => [r.id, r]));
   return {
-    budgetBytes: UNIVERSE_BUDGET_BYTES,
     rotation: rotationView(byId.get("deepen")),
     keys: COVERAGE_KEYS.map((key) => {
       const r = byId.get(key);
-      if (!r) return { key, present: false };
+      const capBytes = capBytesOf(key);
+      if (!r) return { key, present: false, capBytes };
       const bytes = whole(r.bytes);
-      return { key, present: true, bytes, share: bytes === null ? null : bytes / UNIVERSE_BUDGET_BYTES,
+      return { key, present: true, bytes, capBytes, share: bytes === null ? null : bytes / capBytes,
         updatedAt: whole(r.updated_at), session: typeof r.session === "string" ? r.session : null };
     }),
   };

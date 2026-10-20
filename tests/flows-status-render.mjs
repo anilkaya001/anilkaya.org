@@ -231,8 +231,10 @@ try {
   {
     const { page } = await open(browser, { view: "coverage" });
     const st = await text(page, "#kStore");
-    ok(new RegExp("10 of " + COVERAGE_KEYS.length + " expected keys present · 401\\.3 KiB stored · 1 behind the nightly session 2026-10-09").test(st), "payload store headline: " + st.slice(0, 300));
-    ok(/universe\s+98\.3 KiB\s+98%\s+19:51 TRT/.test(st), "the largest key against the 100 KiB budget, written time in TRT");
+    ok(new RegExp("10 of " + COVERAGE_KEYS.length + " expected keys present · 495\\.9 KiB stored · 1 behind the nightly session 2026-10-09 · each key against its own cap").test(st), "payload store headline: " + st.slice(0, 300));
+    ok(/events\s+116\.9 KiB\s+97% of 120\.0 KiB\s+19:51 TRT/.test(st), "events against the 120 KiB its fitter keeps under, not a flat 100 KiB, written time in TRT: " + st.slice(0, 500));
+    ok(/universe\s+98\.3 KiB\s+79% of 124\.0 KiB/.test(st), "and the universe against its own shedding budget");
+    ok(!/1\d\d%/.test(st), "so no key reads as over a budget it does not have");
     ok(/Missing: board:watch/.test(st), "the missing keys are named");
     const nc = await text(page, "#kNight");
     ok(/Names in the universe\s+670/.test(nc) && /Cards built\s+500 \(75% of the universe\)/.test(nc) && /Health gate\s+1 failures, 2 warnings/.test(nc), "nightly coverage: " + nc.slice(0, 400));
@@ -247,7 +249,8 @@ try {
     await page.waitForFunction(() => document.getElementById("kStoreDlg").open);
     const all = await text(page, "#kStoreDlg");
     ok(new RegExp("political\\s+behind 2026-10-09").test(all), "a key a session behind is marked behind: " + all.slice(0, 600));
-    ok(/unusual\s+no session stamp/.test(all) && /board:watch\s+no row\s+\u2014\s+\u2014/.test(all), "an unstamped key and a missing key are not shown as fresh or as zero bytes");
+    ok(/unusual\s+no session stamp/.test(all) && /board:watch\s+no row\s+\u2014\s+128\.0 KiB\s+\u2014/.test(all), "an unstamped key and a missing key are not shown as fresh or as zero bytes");
+    ok(/Cap/.test(all) && !/Of 100 KiB/.test(all), "the detail names each key's cap in its own column");
     ok(/counting them scans the table/.test(all), "the footnote says why no card rows are counted");
     await page.close();
   }
@@ -558,7 +561,8 @@ try {
     }
     const covMutants = [
       ["a missing key prints as zero bytes", (t, f) => (f === "flows-status-coverage.js" ? t.replace('k.present ? bytes(k.bytes) : DASH', 'bytes(k.bytes || 0)') : t), /board:watch\s+no row\s+\u2014\s+\u2014/],
-      ["the share is taken against one mebibyte", (t, f) => (f === "flows-status-coverage.js" ? t.replace("pctOf(k.share), k.updatedAt", "pctOf(k.bytes / 1048576), k.updatedAt") : t), /universe\s+98\.3 KiB\s+98%/],
+      ["the share is taken against one mebibyte", (t, f) => (f === "flows-status-coverage.js" ? t.replace('pctOf(k.share) + " of " + capOf(k)', 'pctOf(k.bytes / 1048576) + " of " + capOf(k)') : t), /universe\s+98\.3 KiB\s+79% of 124\.0 KiB/],
+      ["every key against the universe's 100 KiB", (t, f) => (f === "flows-status-coverage.js" ? t.replace('pctOf(k.share) + " of " + capOf(k)', 'pctOf(k.bytes / 102400) + " of 100.0 KiB"') : t), /events\s+116\.9 KiB\s+97% of 120\.0 KiB/],
     ];
     for (const [name, mutate, want] of covMutants) {
       const { page } = await open(browser, { mutate, view: "coverage" });

@@ -10,7 +10,7 @@
 .flows-body[data-flows-page="political"] .flows-main > * { max-width: none; }
 .flows-body[data-flows-page="political"] .flows-main > dialog.pl-dlg { width: min(780px, calc(100vw - 24px)); max-width: calc(100vw - 24px); margin: auto; }
 .flows-body[data-flows-page="political"] .flows-main > .visually-hidden { width: 1px; max-width: 1px; margin: -1px; }
-.pl { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; font-variant-numeric: tabular-nums; }
+.pl { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; font-variant-numeric: tabular-nums; container: pl / inline-size; }
 :where(.pl) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
 .pl button:focus-visible, .pl a:focus-visible, .pl-dlg button:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .pl-title { display: flex; align-items: center; gap: 14px; flex: none; min-height: 40px; padding-bottom: 10px; }
@@ -26,7 +26,7 @@
 .pl-ibtn .ui-g { font-size: 20px; }
 .pl-ibtn:hover { background: var(--fill-4); }
 .pl-seg5 { display: none; }
-.pl-stage { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) 232px; gap: 12px; }
+.pl-stage { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) 244px; gap: 12px; }
 .pl-panel { background: var(--mat-regular); -webkit-backdrop-filter: var(--mat-blur); backdrop-filter: var(--mat-blur); box-shadow: var(--mat-edge); border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
 .pl-ph { display: flex; align-items: center; gap: 10px; padding: 8px 12px 4px; flex: none; min-height: 50px; }
 .pl-ph h2 { margin: 0; font: 600 16px / 1.2 var(--font-text); letter-spacing: -0.01em; }
@@ -65,7 +65,7 @@
 .sw.accM { background: color-mix(in srgb, var(--up) 28%, transparent); }
 .sw.mix { background: repeating-linear-gradient(135deg, var(--up-fill) 0 3px, var(--down-fill) 3px 6px); }
 .sw.redM { background: color-mix(in srgb, var(--down) 28%, transparent); }
-.pl-fnote { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pl-fnote { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .pl-acts { display: flex; gap: 4px; align-items: center; margin-left: auto; }
 .pl .link, .pl-dlg .link { color: var(--accent-ink); font-size: 13px; min-height: 34px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--r-xs); white-space: nowrap; }
 .pl .link:hover, .pl-dlg .link:hover { text-decoration: underline; }
@@ -173,12 +173,12 @@
 @media (prefers-reduced-motion: no-preference) {
   .pl-row, .pl-grid3 button, .pl-trow { transition: background 0.12s; }
 }
-@media (max-width: 1280px) {
+@container pl (max-width: 1100px) {
   .pl-chips .opt { display: none; }
   .pl-rail { grid-template-columns: 168px 160px minmax(170px, 1fr) 176px 200px; }
   .pl-stage { grid-template-columns: minmax(0, 1fr) 316px; }
 }
-@media (max-width: 1179px) {
+@container pl (max-width: 1000px) {
   .pl-title { flex-wrap: wrap; row-gap: 4px; }
   .pl-stamp { white-space: normal; flex: 1 1 280px; order: 1; }
   .pl-title .pl-ibtn { order: 2; margin-left: auto; }
@@ -187,7 +187,7 @@
   .hide-s { display: none; }
   .pl-rail { grid-template-columns: 160px 176px minmax(200px, 1fr) 190px 190px; }
 }
-@media (max-width: 899px) {
+@container pl (max-width: 899.98px) {
   .pl-title { gap: 2px 8px; padding-bottom: 6px; min-height: 0; }
   .pl-title h1 { font-size: 24px; }
   .pl-title .pl-ibtn { order: 2; margin-left: auto; margin-top: -6px; margin-bottom: -8px; }
@@ -214,11 +214,6 @@
   .pl-acts { margin-left: 0; width: 100%; justify-content: space-between; }
   .pl-num small { display: none; }
   .kv { gap: 4px; }
-  .pl-tl li { grid-template-columns: 14px minmax(0, 1fr); align-content: center; padding: 3px 8px; row-gap: 0; font-size: 12px; min-height: 0; }
-  .pl-tl li > span:last-child { grid-column: 2; font-size: 11px; color: var(--label-2); }
-  .pl-tl .ch, #plTapeP { display: none; }
-  .pl-tl li div, .pl-tl li small, .pl-tl li > span:last-child { line-height: 1.15; }
-  .dg { padding: 12px 12px 8px; }
   .pl-lg { gap: 4px 10px; font-size: 11px; }
   .pl-cols, .pl-row { grid-template-columns: 20px 56px minmax(40px, 1fr) 78px 30px; }
   .pl-row .hide-m, .pl-bh .hide-m, .hide-s { display: none; }
@@ -240,11 +235,21 @@
   .pl-rhead { grid-column: 1 / -1; flex-wrap: wrap; row-gap: 4px; min-height: 0; }
   .pl-rhead .why { flex-basis: 100%; order: 3; }
   .pl-trow { height: var(--rh, 44px); }
+}
+@media (max-width: 899px) {
+  .pl-tl li { grid-template-columns: 14px minmax(0, 1fr); align-content: center; padding: 3px 8px; row-gap: 0; font-size: 12px; min-height: 0; }
+  .pl-tl li > span:last-child { grid-column: 2; font-size: 11px; color: var(--label-2); }
+  .pl-tl .ch, #plTapeP { display: none; }
+  .pl-tl li div, .pl-tl li small, .pl-tl li > span:last-child { line-height: 1.15; }
+  .dg { padding: 12px 12px 8px; }
   .pl-grid3 { grid-template-columns: 1fr 1fr; }
   .pl-dlg { overflow: auto; }
 }
 @media (max-width: 767.98px) {
   .flows-body[data-flows-page="political"] .flows-main { --pl-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+}
+@media (min-width: 768px) {
+  .flows-body.has-dock-open:has(#fxOracle:not([hidden])) .pl-acts { padding-inline-end: 28px; }
 }
 @media (pointer: coarse) {
   .pl-row, .pl-trow { --rh: 44px; }
@@ -260,3 +265,9 @@
   .pl-tile[aria-pressed="true"] { outline: 2px solid Highlight; }
 }
 .kv small.why { color: var(--label-2); font: var(--t-caption2); font-weight: 400; }
+.pl-rc.ctx .kv small.why { display: none; }
+@container pl (max-width: 899.98px) {
+  .pl-rc.ctx .kv small.why { display: inline; }
+  .flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }
+  .flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }
+}

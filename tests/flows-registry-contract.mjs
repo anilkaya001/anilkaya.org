@@ -8,6 +8,8 @@ import { LIVE_KEYS } from "../shared/flows-live.js";
 import { READY_KEYS } from "../shared/flows-ready.js";
 import { PERMANENT_ARCHIVE_KEY_RE } from "../shared/flows-archive.js";
 import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
+import { UNIVERSE_BUDGET_BYTES } from "../shared/flows-cross.js";
+import { EVENTS_PAYLOAD_BUDGET } from "../shared/flows-events.js";
 import { DATED_ARCHIVE_KEY_RE, INGEST_LIST_KINDS, INGEST_VIEW_KEY_RE, ingestKeyParts } from "../server/store.js";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
 import { emitKeys } from "./lib/emit-keys.mjs";
@@ -26,6 +28,9 @@ ok(PRODUCTS.every((p) => ["global", "dated", "name", "live"].includes(p.family))
 ok(PRODUCTS.every((p) => Number.isInteger(p.epoch) && p.epoch >= 1 && Array.isArray(p.volatile) && p.volatile.includes("generatedAt")), "each has an epoch and the volatile stamps");
 eq(PAYLOAD_CAP_BYTES, FLOWS_MAX_PAYLOAD_BYTES, "the registry's byte cap is the ingest door's");
 ok(PRODUCTS.filter((p) => p.family === "name").every((p) => p.capBytes <= FLOWS_MAX_PAYLOAD_BYTES), "no product's own cap is above the door's");
+ok(PRODUCTS.filter((p) => p.family === "global").every((p) => p.capBytes <= FLOWS_MAX_PAYLOAD_BYTES), "and no shared key's either");
+eq(productById("universe").capBytes, UNIVERSE_BUDGET_BYTES, "the universe's cap is the budget its shedder keeps under, so Status measures it against that");
+eq(productById("events").capBytes, EVENTS_PAYLOAD_BUDGET, "the events cap is the size its fitter keeps under");
 
 const exact = [...INGEST_VIEW_KEY_RE.source.matchAll(/\^([a-z][a-z:-]*[a-z])\$/g)].map((m) => m[1]);
 ok(exact.length >= 18, "the door's grammar is read for its exact keys: " + exact.length);

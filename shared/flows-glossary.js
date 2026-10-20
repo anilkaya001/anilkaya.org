@@ -1,10 +1,59 @@
 const MARKET = { file: "assets/js/flows-market.js", page: "Market", href: "/flows/market/" };
 const MARKET_BELOW = { ...MARKET, file: "assets/js/flows-market-below.js" };
-const TICKER = { file: "assets/js/flows-ticker.js", page: "Ticker", href: "/flows/ticker/" };
+const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker page", href: null };
+const POLITICAL = { file: "assets/js/flows-political.js", page: "Political", href: "/flows/political/" };
+const MOVES = { file: "assets/js/flows-moves.js", page: "Moves", href: "/flows/moves/" };
+const UNUSUAL = { file: "assets/js/flows-unusual.js", page: "Unusual", href: "/flows/unusual/" };
+const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearish boards", href: "/flows/long/" };
 
 export const GLOSSARY = Object.freeze([
   { key: "advancers", term: "Advancers", ...MARKET_BELOW, lines: [
     "The session's price change for every eligible name in the screened universe, in half-point bins.",
+  ] },
+  { key: "ask-share", term: "Ask share", ...UNUSUAL, lines: [
+    "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side.",
+  ] },
+  { key: "board-map", term: "Board map", ...BOARDS, lines: [
+    "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
+  ] },
+  { key: "bounds-agree", term: "Bounds agree", ...POLITICAL, lines: [
+    "The whole whisker is on the buying side of zero. Even the low bound is a net purchase.",
+  ] },
+  { key: "disclosed-net", term: "Disclosed net", ...POLITICAL, lines: [
+    "The bar is disclosed purchases minus disclosed sales from the midpoint of each dollar band.",
+    "The whisker runs from the low bound (purchases at their band floor, sales at twice their midpoint) to the high bound (purchases at their band ceiling, sales at an eighth of their midpoint).",
+    "Sales carry midpoints only, so no name is ever called a firm reduction.",
+  ] },
+  { key: "filers", term: "Filers", ...POLITICAL, lines: [
+    "Distinct people. Breadth tells you more than the size of one account.",
+    "The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.",
+  ] },
+  { key: "flagged-premium", term: "Flagged premium", ...UNUSUAL, lines: [
+    "The vendor's total premium across every flagged window in the record.",
+  ] },
+  { key: "how-often", term: "How often", ...MOVES, lines: [
+    "How often counts days in the last year beyond that many typical days. It is never a model probability.",
+  ] },
+  { key: "implied-day", term: "Implied day", ...MOVES, lines: [
+    "The implied day is prior-close 30-day IV over the square root of 252.",
+  ] },
+  { key: "iv-days", term: "IV-days", ...MOVES, lines: [
+    "IV-days is the move divided by the implied day. The lists rank by it.",
+  ] },
+  { key: "lean", term: "Lean", ...UNUSUAL, lines: [
+    "Lean is a convention: ask-side calls and bid-side puts count bullish.",
+  ] },
+  { key: "score", term: "Score", ...BOARDS, lines: [
+    "Scores run from −100 to +100 and rank names against every scored name; they are a ranked attention signal, not a return forecast.",
+  ] },
+  { key: "still-blind", term: "Still blind", ...POLITICAL, lines: [
+    "The share of the window inside the name’s median filing lag, drawn as the ring on a tile. Trades that recent are typically not filed yet, and no dollars are guessed for them.",
+  ] },
+  { key: "sweep-share", term: "Sweep share", ...UNUSUAL, lines: [
+    "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all.",
+  ] },
+  { key: "typical-day", term: "Typical day", ...MOVES, lines: [
+    "A typical day is a robust one-day scale from the last 252 sessions.",
   ] },
   { key: "conviction", term: "Conviction", ...TICKER, lines: [
     "How far the families agree, how much of the card was measured, and how long the flow persisted.",
@@ -52,3 +101,5 @@ export const GLOSSARY = Object.freeze([
     "The vendor's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
   ] },
 ]);
+
+export const GLOSSARY_PAGES = Object.freeze([MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, BOARDS.page, TICKER.page]);

@@ -1,7 +1,8 @@
 import { HttpError, json, requireTicker, fixtureRefused } from "../http.js";
-import { expectedNightlySession } from "../../shared/flows-freshness.js";
+import { expectedNightlySession, easternDay, isTradingDay, sessionClose, shiftDay } from "../../shared/flows-freshness.js";
 import { staleView } from "../../shared/flows-oracle.js";
-import { STANCE_LINES, MODEL_IMPLIED, BUILDING_LINES } from "../../shared/flows-oracle-words.js";
+import { MODEL_IMPLIED, BUILDING_LINES } from "../../shared/flows-oracle-words.js";
+import { productById, TARGET_BY_MIN } from "../../shared/flows-products.js";
 
 export const ORACLE_BATCH_MAX = 12;
 export const ORACLE_TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -21,14 +22,29 @@ const parse = (stored) => {
   }
 };
 
-export function absentRecord(ticker, session, why) {
+export function nextViewAt(at) {
+  const ms = Number(at);
+  if (!Number.isFinite(ms)) return null;
+  const product = productById("oracle");
+  const after = (product && Number.isFinite(product.targetByMin) ? product.targetByMin : TARGET_BY_MIN) * 60000;
+  let d = easternDay(ms);
+  for (let i = 0; d && i < 14; i++) {
+    if (isTradingDay(d)) {
+      const due = sessionClose(d) + after;
+      if (due > ms) return new Date(due).toISOString();
+    }
+    d = shiftDay(d, 1);
+  }
+  return null;
+}
+
+export function absentRecord(ticker, at, why) {
   return {
-    v: 1, ticker, session, sessionDate: session, generatedAt: null, cardSession: null, cardAsOf: null, engineVersion: 1,
-    state: "building", stateWhy: "no-card", grade: 0,
-    stance: { lean: "none", conviction: 0, basis: [], line: STANCE_LINES.none[0] },
-    context: null, calls: [], withheld: [{ k: "oracle", reason: why === "store" ? "failed" : "absent" }],
-    limits: [], provenance: { source: "engine", cardKey: null, cardxKey: null, ideas: "screen", cites: [] },
-    fresh: { asOf: null, ageS: null, klass: "nightly", liveUntil: null }, modelImplied: MODEL_IMPLIED, line: BUILDING_LINES["no-card"],
+    v: 1, ticker, session: null, sessionDate: null, generatedAt: null, cardSession: null, cardAsOf: null, engineVersion: 1,
+    state: "building", stateWhy: "unbuilt", grade: null, due: nextViewAt(at),
+    stance: null, context: null, calls: [], withheld: why === "store" ? [{ k: "view", reason: "failed" }] : [],
+    limits: [], provenance: { source: "engine", cardKey: null, cardxKey: null, ideas: null, cites: [] },
+    fresh: { asOf: null, ageS: null, klass: "nightly", liveUntil: null }, modelImplied: MODEL_IMPLIED, line: BUILDING_LINES.unbuilt,
     ...(why ? { why } : {}),
   };
 }
@@ -60,10 +76,10 @@ export function flowsOracleRows(deps) {
     if (stored === null && trace.failed) {
       const kept = await recallLastGood(request, url);
       if (kept) return kept;
-      return json({ ...absentRecord(ticker, expected(), "store"), why: "store" });
+      return json({ ...absentRecord(ticker, now(), "store"), why: "store" });
     }
     const record = stored === null ? null : view(stored, ticker);
-    if (record === null) return json(absentRecord(ticker, expected(), null));
+    if (record === null) return json(absentRecord(ticker, now(), null));
     return json(record, 200, nightlyFreshHeaders(stored));
   };
 

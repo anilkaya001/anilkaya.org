@@ -206,8 +206,8 @@
     }));
   }
 
-  const R_SPENT = "The free daily allowance for the model is spent, and it resets at 03:00 TRT (00:00 UTC).";
-  const R_BUDGET = "The model budget this site allows itself for one day is spent, and it resets at 03:00 TRT (00:00 UTC).";
+  const R_SPENT = "Cloudflare declined the call on the daily allowance; it resets at 03:00 TRT (00:00 UTC).";
+  const R_BUDGET = "The site's daily model budget is spent, and it resets at 03:00 TRT (00:00 UTC).";
   const R_BUSY = "The model had no capacity for this question just now, and nothing of today's allowance went on it.";
   const R_PLAN = "The model this site asks for is not available on the plan it runs on, which is a configuration fault here rather than a limit anyone hit.";
   const LLM_REASONS = {
@@ -344,37 +344,43 @@
     return svg;
   }
 
+  let siteCap = null;
   function spendMeter(spend, reason) {
     const how = [];
     if (!spend || typeof spend !== "object") {
-      const lead = "This page could not read what has been spent on the model today" + (reason ? " (" + reason + ")" : "") + ". Nothing follows from that about the allowance or about the readings below, and a question can still be asked: Cloudflare reports a spent allowance itself, and it is the authority here.";
+      const lead = "This page could not read what has been spent on the model today" + (reason ? " (" + reason + ")" : "") + ". Nothing follows about the daily budget or the readings below; a question can still be asked, and the Worker checks the budget.";
       return h("div", { class: "ak-meter", "data-empty": "unreadable" },
         ring(null, "ak-meter-bar"), h("span", { class: "ak-meter-v" }, UI.dash({ state: "withheld", reason: lead }, "Model credits")),
         h("span", { class: "ak-meter-l" }, "credits"));
     }
-    const allowance = isNum(spend.allowanceNeurons), left = isNum(spend.remaining), spent = isNum(spend.neurons);
+    const allowance = isNum(spend.allowanceNeurons), spent = isNum(spend.neurons);
+    const cap = siteCap && isNum(siteCap.neurons) !== null && siteCap.neurons > 0 ? siteCap.neurons : null;
+    const stopAt = siteCap ? isNum(siteCap.readsStopAt) : null;
+    const left = spent !== null && cap !== null ? Math.max(0, cap - spent) : null;
     const calls = isNum(spend.calls), tokIn = isNum(spend.tokensIn), tokOut = isNum(spend.tokensOut);
-    if (text(spend.day)) how.push("The day is " + spend.day + ", counted in UTC because that is the calendar the allowance resets on — at 03:00 TRT (00:00 UTC), not at midnight where you are.");
-    if (calls !== null) how.push("This site has asked the model " + figure(calls) + " time" + (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null ? ", for " + figure(tokIn) + " tokens in and " + figure(tokOut) + " tokens out. Tokens are what the model itself reported; the credit figure is arithmetic over them at the published rate for the model that answered each call, done when this page was drawn rather than stored, so a corrected rate repairs the whole history rather than leaving it stamped at yesterday's." : "."));
-    how.push("Cloudflare is the authority on the allowance and this meter is not. It can only see calls this site made; anything else on the same account draws from the same pool and is invisible here. If a question comes back saying the allowance is spent while this still shows credits left, that difference is the answer — something else spent them — and the answer will say so.");
-    if (left === null || allowance === null) {
-      const lead = (calls === null ? "What has been spent on the model today could not be counted." : "This site has asked the model " + figure(calls) + " time" + (calls === 1 ? "" : "s") + " today.") + " The credits that cost is not shown: the per-token rate for a model this site asked is not set here, and deriving one would put a plausible wrong number where a measurement belongs.";
+    if (text(spend.day)) how.push("The day is " + spend.day + ", counted in UTC: the budget resets at 03:00 TRT (00:00 UTC).");
+    if (calls !== null) how.push("This site has asked the model " + figure(calls) + " time" + (calls === 1 ? "" : "s") + " today" + (tokIn !== null && tokOut !== null ? ", for " + figure(tokIn) + " tokens in and " + figure(tokOut) + " tokens out. Tokens are what the model reported; credits are worked from them at the published rate for each call's model when this page is drawn, so a corrected rate repairs the history." : "."));
+    if (cap !== null) how.push("The limit is the daily budget of " + figure(cap) + " credits: past it no model is asked and answers use the published facts" + (stopAt !== null ? "; readings stop at " + figure(stopAt) + " for this box" : "") + ".");
+    if (allowance !== null) how.push("The free allowance of " + figure(allowance) + " credits a day is where billing starts, not the limit.");
+    how.push("Budget and meter count only this site's calls.");
+    if (left === null) {
+      const lead = (spent !== null ? figure(spent) + " credits spent today by this site. The budget was not sent, so no remainder is shown." : (calls === null ? "Model spend today could not be counted." : "This site has asked the model " + figure(calls) + " time" + (calls === 1 ? "" : "s") + " today.") + " Credit cost is not shown: no per-token rate is set.");
       return h("div", { class: "ak-meter", "data-empty": "withheld" },
         ring(null, "ak-meter-bar"),
-        h("span", { class: "ak-meter-v" }, calls === null ? DASH : figure(calls)),
-        h("span", { class: "ak-meter-l" }, calls === null ? "calls" : plural(calls, "call", "calls") + " today"),
+        h("span", { class: "ak-meter-v" }, spent !== null ? figure(spent) : calls === null ? DASH : figure(calls)),
+        h("span", { class: "ak-meter-l" }, spent !== null ? "credits spent today" : calls === null ? "calls" : plural(calls, "call", "calls") + " today"),
         UI.stateButton({ state: "withheld", reason: lead }, "Model credits"),
         UI.infoButton("model credits", { title: "Model credits", lead, sections: [{ title: "How this is counted", lines: how }] }, { small: true }));
     }
-    const pct = allowance > 0 ? Math.max(0, Math.min(1, left / allowance)) : 0;
-    if (spent !== null) how.unshift("Spent so far today: " + figure(spent) + " of " + figure(allowance) + " credits, rounded up. A meter that rounded a spend down would report less spent than was spent, so this errs toward showing less left.");
-    const lead = figure(left) + " of " + figure(allowance) + " model credits left today, counting only this site's own calls." + (left === 0 ? " By this count today's model credits are gone. Asking is still allowed and nothing here refuses it — and if the model does decline, the answer is still served: every figure in it was measured by the pipeline, and only the phrasing would have come from a model." : "");
+    const pct = Math.max(0, Math.min(1, left / cap));
+    how.unshift("Spent so far today: " + figure(spent) + " of " + figure(cap) + " credits, rounded up.");
+    const lead = figure(left) + " of " + figure(cap) + " model credits left today in the site's daily budget." + (left === 0 ? " By this count the budget is spent. Asking is still allowed: answers use the published facts." : "");
     const bar = ring(pct, "ak-meter-bar");
     bar.setAttribute("data-fill", (pct * 100).toFixed(1));
     return h("div", { class: "ak-meter" },
       bar,
-      h("span", { class: "ak-meter-v" }, h("b", { class: "ak-meter-n" }, figure(left)), h("span", { class: "ak-meter-of" }, " of " + figure(allowance))),
-      h("span", { class: "ak-meter-l" }, "credits · this site's calls"),
+      h("span", { class: "ak-meter-v" }, h("b", { class: "ak-meter-n" }, figure(left)), h("span", { class: "ak-meter-of" }, " of " + figure(cap))),
+      h("span", { class: "ak-meter-l" }, "credits · the site's daily budget"),
       UI.infoButton("model credits", { title: "Model credits", lead, sections: [{ title: "How this is counted", lines: how }] }, { small: true }));
   }
 
@@ -856,6 +862,7 @@
   optional("/api/flows/ai-usage").then((res) => {
     if (gated) return;
     if (res && res.__unreadable) { paintSpend(null, res.__reason); return; }
+    if (res && typeof res === "object" && res.cap && typeof res.cap === "object") siteCap = res.cap;
     paintSpend(res && typeof res === "object" ? res.spend : null, null);
   });
 

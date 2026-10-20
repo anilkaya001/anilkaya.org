@@ -5,7 +5,7 @@ export { mean, sampleSd, medianOf };
 
 export const CROSS_SCHEMA_VERSION = 1;
 
-export const UNIVERSE_BUDGET_BYTES = 100 * 1024;
+export const UNIVERSE_BUDGET_BYTES = 124 * 1024;
 
 export const IMPLIED_CORR_MIN_COVERAGE = 0.8;
 

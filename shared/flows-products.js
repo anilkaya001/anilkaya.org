@@ -36,14 +36,14 @@ const product = (id, family, over) => frozen({
 const global = (key, over = {}) => product(key, "global", { key, ...over });
 
 const GLOBALS = [
-  global("universe", { level: "L0", required: ["n", "t", "cols", "units"] }),
+  global("universe", { level: "L0", capBytes: 124 * 1024, required: ["n", "t", "cols", "units"] }),
   global("roster", { level: "L0", required: ["depth", "session", "sessionDate"] }),
   global("meta", { level: "L0", required: ["sessionDate", "stages"] }),
   global("board:long", { required: ["rows", "sessionDate", "side"] }),
   global("board:short", { required: ["rows", "sessionDate", "side"] }),
   global("board:watch", { required: ["rows", "sessionDate"] }),
   global("regime"),
-  global("events"),
+  global("events", { capBytes: 120 * 1024 }),
   global("market"),
   global("movers"),
   global("record"),
