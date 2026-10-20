@@ -1,1 +1,1 @@
-{"name": "flows-reading-worker", "class": "N", "group": "shard", "timing": true, "medianS": 4.7, "shard": 1, "files": ["flows-reading-worker.mjs"], "covers": ["schema.sql","scripts/flows-pipeline.mjs","tests/fixtures-dossier-vendor.json","worker.js"]}
+{"name": "flows-reading-worker", "class": "N", "group": "shard", "timing": true, "medianS": 4.7, "shard": 2, "files": ["flows-reading-worker.mjs"], "covers": ["schema.sql","scripts/flows-pipeline.mjs","tests/fixtures-dossier-vendor.json","worker.js"]}
