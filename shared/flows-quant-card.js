@@ -1,6 +1,6 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
-import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
-import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
+import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
+import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
   expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
@@ -16,6 +16,7 @@ export const QUANT_CARD_LINES = Object.freeze({
   COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_CONVENTION_CAP: 2, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
   PUBLISH_STRUCTURES: 5, RATE_MIN_DAYS: 20, RATE_MAX_DAYS: 200, RATE_LO: -0.01, RATE_HI: 0.15,
   XS_MIN_NAMES: 10, IV_PERCENT_LINE: 5, EVENT_MIN_MOVES: 3, EVENT_MIN_JUMP: 1e-4,
+  EVENT_FIT_PRE: 2, EVENT_FIT_POST: 4, EVENT_FIT_AFTER_DAYS: 80, EVENT_FIT_RESID: 0.03,
   PARITY_SYMBOLS: Object.freeze(["SPX", "SPXW", "SPY"]),
 });
 export const FACT_UNITS = Object.freeze([
@@ -266,18 +267,31 @@ function fitGradeOf(slice) {
 
 export function eventJump(built, event) {
   if (!event || !event.date) return null;
-  const after = built.filter((e) => e.expiry >= event.date);
-  if (after.length < 2) return { J: null, why: "event.slices" };
-  const front = after[0], back = after[1];
-  const tf = tauOf(front), tb = tauOf(back);
-  if (tf === null || tb === null) return { J: null, why: "event.clock", front: front.expiry, back: back.expiry };
-  const wf = sliceTotalVariance(front.slice, 0), wb = sliceTotalVariance(back.slice, 0);
-  if (!fin(wf) || !(wf > 0) || !fin(wb) || !(wb > 0)) return { J: null, why: "event.slices", front: front.expiry, back: back.expiry };
-  const v = eventVariance({ front: { T: tf, vol: Math.sqrt(wf / tf) }, back: { T: tb, vol: Math.sqrt(wb / tb) } });
-  const priced = fin(v.eventSd) && v.eventSd >= QUANT_CARD_LINES.EVENT_MIN_JUMP;
+  const L = QUANT_CARD_LINES;
+  const horizon = shiftDay(event.date, L.EVENT_FIT_AFTER_DAYS);
+  const pre = built.filter((e) => e.expiry < event.date).slice(-L.EVENT_FIT_PRE);
+  const post = built.filter((e) => e.expiry >= event.date && (horizon === null || e.expiry < horizon)).slice(0, L.EVENT_FIT_POST);
+  if (!post.length || pre.length + post.length < 2) return { J: null, why: "event.slices" };
+  const front = post[0], back = post[1] || null;
+  const used = [];
+  const points = [];
+  for (const e of pre.concat(post)) {
+    const tau = tauOf(e);
+    if (tau === null) return { J: null, why: "event.clock", front: front.expiry, back: back ? back.expiry : null };
+    const mf = modelFreeWindow(e.slice);
+    if (!mf) continue;
+    points.push({ tau, w: mf.w, post: e.expiry >= event.date });
+    used.push(e.expiry);
+  }
+  const fit = eventTermFit(points);
+  const priced = fit.why === null && fin(fit.J) && fit.J >= L.EVENT_MIN_JUMP;
+  const poor = priced && fit.dof > 0 && fit.resid > L.EVENT_FIT_RESID;
   return {
-    J: priced ? v.eventSd : null, meanAbs: priced ? v.eventMeanAbs : null, diffusiveVol: v.diffusiveVol,
-    why: priced ? v.why : v.why || "event.no-premium", front: front.expiry, back: back.expiry,
+    J: priced ? fit.J : null, J2: priced ? fit.J2 : null, meanAbs: priced ? fit.J * Math.sqrt(2 / Math.PI) : null,
+    diffusiveVol: fin(fit.sigma) ? fit.sigma : null, beta: fin(fit.beta) ? fit.beta : null,
+    seJ: fin(fit.seJ) ? fit.seJ : null, n: fit.n, dof: fit.dof, resid: fit.resid,
+    why: fit.why || (priced ? (poor ? "event.residual" : null) : "event.no-premium"),
+    basis: "model-free", front: front.expiry, back: back ? back.expiry : null, used,
   };
 }
 

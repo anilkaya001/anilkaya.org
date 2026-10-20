@@ -297,9 +297,9 @@ const FACT_INPUT = () => ({
   const event = { date: "2026-10-20" };
   const built = sessionWorld(SESSION, ["2026-10-16", "2026-10-23", "2026-11-20"], { sd: SD, jumps: [{ date: event.date, J }] });
   const j = QC.eventJump(built, event);
-  near(j.J, J, 1e-12, "the event jump is the first post-event slice's total variance above the diffusion the next slice implies, on the session clock (E2)");
-  near(j.diffusiveVol, SD, 1e-12, "with the diffusion read off the same two slices");
-  near(j.meanAbs, J * Math.sqrt(2 / Math.PI), 1e-12, "and its mean absolute move under the normal convention kept for the strait case");
+  near(j.J, J, 1e-6, "the event jump is the first post-event slice's model-free variance above the diffusion the next slice implies, on the session clock (E2)");
+  near(j.diffusiveVol, SD, 1e-6, "with the diffusion read off the same two slices");
+  near(j.meanAbs, J * Math.sqrt(2 / Math.PI), 1e-6, "and its mean absolute move under the normal convention kept for the strait case");
   eq([j.front, j.back], ["2026-10-23", "2026-11-20"], "read from the two expiries after the event");
   eq(QC.eventJump(sessionWorld(SESSION, ["2026-10-23", "2026-11-20"], { sd: SD }), event).J, null,
      "and a term structure flat in session time prices no jump, which is absent rather than zero");
@@ -454,6 +454,116 @@ const FACT_INPUT = () => ({
     const withRank = withVol({ v: 1, iv30Pct: 0.7 }, { coneThin: false });
     ok(get(withRank, "iv.pctile.30.1y").v === 0.7, "and the card's fact the bucket reads is the cone's percentile");
   }
+}
+
+{
+  const sd2 = 0.16, J = 0.05, beta = 0.02;
+  const world = (days, post, extra = () => 0) => days.map((d, i) => {
+    const tau = d / 252;
+    return { tau, w: (sd2 * tau + beta * tau * tau + (post[i] ? J * J : 0)) * (1 + extra(i)), post: post[i] };
+  });
+  const three = SMILE.eventTermFit(world([4, 16, 60], [false, true, true]));
+  near(three.beta / beta, 1, 0.01, "a planted curvature beta is recovered to 1% on three expiries, one of them before the event");
+  near(three.J / J, 1, 0.01, "with the event on its own at the same 1%");
+  near(three.sigma2 / sd2, 1, 0.01, "and the diffusion");
+  eq([three.n, three.k, three.dof, three.exact, three.seJ], [3, 3, 0, true, null], "three expiries and three unknowns leave no degree of freedom, so no standard error is claimed");
+  const noBeta = SMILE.eventTermFit(world([4, 16, 60], [false, true, true]).map((p) => ({ ...p, w: p.w - beta * p.tau * p.tau })));
+  near(noBeta.beta, 0, 1e-9, "with no curvature planted the fitted curvature is nil");
+  const two = SMILE.eventTermFit(world([5, 10], [true, true], () => 0).map((p) => ({ ...p, w: sd2 * p.tau + J * J })));
+  const old = SMILE.eventVariance({ front: { T: 5 / 252, vol: Math.sqrt((sd2 * 5 / 252 + J * J) * 252 / 5) }, back: { T: 10 / 252, vol: Math.sqrt((sd2 * 10 / 252 + J * J) * 252 / 10) } });
+  near(two.J, old.eventSd, 1e-12, "two expiries reproduce the two-slice estimator exactly");
+  near(two.sigma, old.diffusiveVol, 1e-12, "diffusion included");
+  eq([two.beta, two.dof, two.exact], [null, 0, true], "with no curvature term and no spare degree of freedom");
+  const rng = WORLD.xoshiro128ss("event-term");
+  const days = [3, 8, 15, 22, 36, 64];
+  const post = [false, false, true, true, true, true];
+  let inside = 0, runs = 200, seen = 0;
+  for (let r = 0; r < runs; r++) {
+    const fit = SMILE.eventTermFit(world(days, post, () => 0.004 * WORLD.normalDraw(rng)));
+    if (fit.seJ2 === null) continue;
+    seen++;
+    if (Math.abs(fit.J2 - J * J) <= 3.182 * fit.seJ2) inside++;
+  }
+  ok(seen === runs && inside / runs > 0.92 && inside / runs < 1, `with 0.4% noise on six expiries the 95% band on J^2 (Student t on its three degrees of freedom) holds ${inside} of ${runs} runs`);
+  const fit6 = SMILE.eventTermFit(world(days, post, () => 0));
+  ok(fit6.dof === 3 && fit6.seJ2 !== null && fit6.seJ2 < 1e-9 && fit6.resid < 1e-12, "and an exact world gives a nil residual and a nil standard error on three degrees of freedom");
+  const bent = SMILE.eventTermFit(world(days, post, (i) => (i === 3 ? 0.08 : 0)));
+  ok(bent.resid > QC.QUANT_CARD_LINES.EVENT_FIT_RESID && bent.seJ2 > fit6.seJ2, "an expiry 8% off the line shows in the residual and widens the standard error");
+  eq(SMILE.eventTermFit(world([5, 10], [true, true]).map((p) => ({ ...p, w: sd2 * p.tau }))).why, "event.no-premium", "no variance above the diffusion is no premium, absent and not zero");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: true }, { tau: 10 / 252, w: 0.015, post: true }]).why, "event.inverted", "a back expiry with less variance than the front is inverted");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: false }, { tau: 10 / 252, w: 0.03, post: false }]).why, "event.slices", "no expiry holding the event is no fit");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: true }]).why, "event.slices", "and one expiry alone is none either");
+  const lone = SMILE.eventTermFit([{ tau: 4 / 252, w: sd2 * 4 / 252, post: false }, { tau: 9 / 252, w: sd2 * 9 / 252 + J * J, post: true }]);
+  near(lone.J, J, 1e-12, "a single expiry after the event is enough when one before it fixes the diffusion");
+}
+
+{
+  const T = 30 / 365;
+  const flat = { method: "flat", T, F: 100, D: 1, params: { sigma: 0.35 } };
+  const mf = DENSITY.modelFreeWindow(flat);
+  near(mf.w / (0.35 * 0.35 * T), 1, 1e-6, "the model-free variance of a flat smile is its total variance, inside the 1e-6 quantile window");
+  ok(mf.eps === 1e-6 && mf.range[0] < -0.4 && mf.range[1] > 0.4, "and the window is the one-in-a-million quantiles of the slice's own law");
+  const svi = { method: "svi", T, F: 100, D: 1, params: SVI };
+  const m = DENSITY.rndMoments(svi);
+  near(DENSITY.modelFreeWindow(svi).w, -2 * m.meanLog, 1e-6, "a skewed smile's model-free variance is minus twice the mean log return of its own density");
+  ok(DENSITY.modelFreeWindow(svi).w > SMILE.sliceTotalVariance(svi, 0), "which exceeds the at-the-money variance the smile's wings add to");
+  const mix = SMILE.mixturePrice({ F: 100, T, diffusiveVol: 0.3, up: Math.exp(0.08 - Math.log(Math.cosh(0.08))), down: Math.exp(-0.08 - Math.log(Math.cosh(0.08))), weights: [0.5, 0.5] }).slice;
+  near(DENSITY.modelFreeWindow(mix).w, 0.3 * 0.3 * T + 2 * Math.log(Math.cosh(0.08)), 1e-6, "and a two-point event on a diffusion adds exactly its log-contract variance, 2 ln cosh J");
+  eq(DENSITY.modelFreeWindow(flat, { eps: 0.7 }), null, "a window that is not a window is nothing");
+}
+
+{
+  const normInv = (p) => BS.normInv(p);
+  const t5cdf = (t) => { const th = Math.atan(t / Math.sqrt(5)); return 0.5 + (th + Math.sin(th) * (Math.cos(th) + 2 / 3 * Math.pow(Math.cos(th), 3))) / Math.PI; };
+  const t5inv = (u) => { let lo = -80, hi = 80; for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (t5cdf(mid) < u) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+  const N = 160;
+  const us = Array.from({ length: N }, (_, i) => (i + 0.5) / N);
+  const unit = {
+    gaussian: us.map((u) => normInv(u)),
+    laplace: us.map((u) => -Math.sign(u - 0.5) * Math.log(1 - 2 * Math.abs(u - 0.5)) / Math.SQRT2),
+    t5: us.map((u) => t5inv(u) / Math.sqrt(5 / 3)),
+  };
+  const nodesOf = (law, sd) => {
+    if (law === "twoPoint") return [[-sd, 0.5], [sd, 0.5]];
+    if (law === "skewCrash") { const p = 0.25; return [[-sd * Math.sqrt((1 - p) / p), p], [sd * Math.sqrt(p / (1 - p)), 1 - p]]; }
+    return unit[law].map((y) => [sd * y, 1 / N]);
+  };
+  const mgfLog = (nodes) => Math.log(nodes.reduce((a, [y, w]) => a + w * Math.exp(y), 0));
+  const sdForJ = (law, J2) => { let lo = 1e-4, hi = 1; for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (2 * mgfLog(nodesOf(law, mid)) < J2) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+  const sliceOf = (nodes, tau, sigmaD) => {
+    const m = mgfLog(nodes);
+    return { method: "mixture", T: tau, F: 100, D: 1, params: { components: nodes.map(([y, w]) => ({ f: Math.exp(y - m), w })), sigmaD } };
+  };
+  const SIGMA = 0.35;
+  const bands = { gaussian: [-0.6, 0.6], laplace: [-12, -2], t5: [-9, -2], twoPoint: [3, 27], skewCrash: [-2, 3] };
+  const ATM = { gaussian: [], laplace: [], t5: [], twoPoint: [], skewCrash: [] };
+  let worst = 0, cases = 0;
+  for (const law of Object.keys(bands)) {
+    for (const Jt of [0.03, 0.05, 0.08, 0.12]) {
+      for (const [d1, d2] of [[2, 9], [6, 13], [3, 31]]) {
+        const nodes = nodesOf(law, sdForJ(law, Jt * Jt));
+        const truth = Math.sqrt(2 * mgfLog(nodes));
+        const t1 = d1 / 252, t2 = d2 / 252;
+        const s1 = sliceOf(nodes, t1, SIGMA), s2 = sliceOf(nodes, t2, SIGMA);
+        const mk = (slice, d, expiry) => ({ expiry, T: d / 365, dte: d, sessions: d, hSessions: d, rows: [], slice });
+        const built = [mk(s1, d1, "2026-10-23"), mk(s2, d2, "2026-11-20")];
+        const got = QC.eventJump(built, { date: "2026-10-20" });
+        const err = (got.J / truth - 1) * 100;
+        worst = Math.max(worst, Math.abs(err));
+        cases++;
+        const atm = SMILE.eventVariance({ front: { T: t1, vol: SMILE.sliceVolK(s1, 0) }, back: { T: t2, vol: SMILE.sliceVolK(s2, 0) } });
+        ATM[law].push((atm.eventSd / truth - 1) * 100);
+        ok(Math.abs(err) < 0.5, `${law} J=${Jt} ${d1}/${d2}: the model-free event size is within 0.5% of the law's log-contract size (${err.toFixed(3)}%)`);
+        near(got.diffusiveVol, SIGMA, 2e-4, `${law} J=${Jt} ${d1}/${d2}: and the diffusion is the one planted`);
+      }
+    }
+  }
+  ok(cases === 60 && worst < 0.5, `all ${cases} cases of the five-law grid hold J_MF within 0.5% (worst ${worst.toFixed(3)}%)`);
+  for (const [law, [lo, hi]] of Object.entries(bands)) {
+    const r = ATM[law];
+    ok(r.every((e) => e >= lo && e <= hi), `negative control, ${law}: the at-the-money two-slice estimator misses by ${Math.min(...r).toFixed(1)} to ${Math.max(...r).toFixed(1)}% (band ${lo} to ${hi})`);
+  }
+  ok(Math.max(...ATM.twoPoint) > 15 && Math.min(...ATM.laplace) < -9, "the at-the-money error is large where the event is far from normal, which is the error the model-free size removes");
 }
 
 {

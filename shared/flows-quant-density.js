@@ -145,6 +145,25 @@ export function modelFreeVariance(input) {
   return { variance, vol: Math.sqrt(Math.max(variance, 0)), truncatedMass, range: [lo, hi] };
 }
 
+export const MODEL_FREE_EPS = 1e-6;
+
+export function modelFreeWindow(input, { eps = MODEL_FREE_EPS } = {}) {
+  const s = asSlice(input);
+  if (!s || !(eps > 0) || !(eps < 0.5)) return null;
+  const lo = riskNeutralQuantile(s, eps), hi = riskNeutralQuantile(s, 1 - eps);
+  if (!(lo > 0) || !fin(hi) || !(hi > lo)) return null;
+  const kLo = Math.log(lo / s.F), kHi = Math.log(hi / s.F);
+  if (!(kLo < 0) || !(kHi > 0)) return null;
+  const f = (k) => {
+    const K = s.F * Math.exp(k);
+    return (k < 0 ? slicePutU(s, K) : sliceCallU(s, K)) * Math.exp(-k) / s.F;
+  };
+  const sd = atmSd(s);
+  const panels = (a, b) => Math.max(8, Math.min(48, Math.ceil((b - a) / sd * 2)));
+  const w = 2 * (integrate(f, kLo, 0, panels(kLo, 0), 24) + integrate(f, 0, kHi, panels(0, kHi), 24));
+  return fin(w) && w > 0 ? { w, eps, range: [kLo, kHi] } : null;
+}
+
 export function impliedMove(input) {
   const s = asSlice(input);
   if (!s) return null;
