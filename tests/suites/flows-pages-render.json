@@ -1,1 +1,1 @@
-{"name": "flows-pages-render", "class": "C", "group": "shard", "timing": false, "medianS": 150, "shard": 6, "files": ["flows-pages-render.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/fixtures-pages-render-baseline.json"]}
+{"name": "flows-pages-render", "class": "C", "group": "shard", "timing": false, "medianS": 150, "shard": 3, "files": ["flows-pages-render.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/fixtures-pages-render-baseline.json"]}

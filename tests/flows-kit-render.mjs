@@ -40,6 +40,7 @@ const TOKENS = [
   "--row-h", "--cell-px", "--mod-pad", "--t-data", "--t-data-sm", "--t-overline",
   "--seq-1", "--seq-2", "--seq-3", "--seq-4", "--seq-5",
   "--up", "--down", "--up-mark", "--down-mark", "--s-blue", "--s-orange", "--g-long", "--g-short", "--lvl-call", "--lvl-put",
+  "--glass-sheen", "--glass-rim", "--glass-lift", "--glass-chrome-edge", "--glass-knob", "--glass-solid", "--num-up-a", "--num-up-b", "--num-down-a", "--num-down-b", "--num-ice-a", "--num-ice-b", "--aur-1", "--r-tile", "--glass-lens",
 ];
 
 const kitHtml = () => `<!doctype html>

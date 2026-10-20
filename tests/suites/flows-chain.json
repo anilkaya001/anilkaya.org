@@ -1,1 +1,1 @@
-{"name": "flows-chain", "class": "W", "group": "shard", "timing": false, "medianS": 10.4, "shard": 1, "files": ["flows-chain-contract.mjs"], "covers": ["schema.sql"]}
+{"name": "flows-chain", "class": "W", "group": "shard", "timing": false, "medianS": 10.4, "shard": 5, "files": ["flows-chain-contract.mjs"], "covers": ["schema.sql"]}

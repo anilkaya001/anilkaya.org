@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "369";
+export const ASSET_VERSION = "370";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -71,6 +71,18 @@ const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" widt
   Object.entries(GLYPHS).map(([k, d]) => `<symbol id="g-${k}" viewBox="0 0 24 24">${d}</symbol>`).join("")}</svg>`;
 
 const glyph = (name) => `<svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-${name}"/></svg>`;
+
+const RAMP = (axis, channel) => {
+  const to = axis === "x" ? 'x2="1" y2="0"' : 'x2="0" y2="1"';
+  const at = (n) => (channel === "r" ? `rgb(${n},0,0)` : `rgb(0,${n},0)`);
+  return `<linearGradient id="${axis}" x1="0" y1="0" ${to}><stop offset="0" stop-color="${at(40)}"/><stop offset=".22" stop-color="${at(128)}"/><stop offset=".78" stop-color="${at(128)}"/><stop offset="1" stop-color="${at(216)}"/></linearGradient>`;
+};
+
+export const lensMap = () => "data:image/svg+xml," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><defs>${RAMP("x", "r")}${RAMP("y", "g")}</defs>` +
+  '<rect width="100" height="100" fill="url(#x)"/><rect width="100" height="100" fill="url(#y)" style="mix-blend-mode:screen"/></svg>');
+
+const LENS = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0"><filter id="fx-lens" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB"><feImage href="${lensMap()}" preserveAspectRatio="none" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></svg>`;
 
 const initials = (username) => {
   const name = String(username || "").trim();
@@ -231,27 +243,6 @@ const dock = (active) => (active === "ask" ? "" : `
 </aside>
 <script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
 
-function neuronMark(id, live) {
-
-  const L = [[5, [7, 14, 21]], [14, [4.5, 11, 17.5, 24]], [23, [10, 18]]];
-  let edges = "";
-  for (let l = 0; l < 2; l++) {
-    for (const a of L[l][1]) for (const b of L[l + 1][1]) {
-      edges += `<line x1="${L[l][0]}" y1="${a}" x2="${L[l + 1][0]}" y2="${b}"/>`;
-    }
-  }
-  let nodes = "";
-  L.forEach(([x, ys], i) => ys.forEach((y, j) => {
-    nodes += `<circle cx="${x}" cy="${y}" r="${i === 1 ? 1.7 : 2}" class="ak-nn-n" style="--d:${((i * 4 + j) * 0.09).toFixed(2)}s"/>`;
-  }));
-  return `<svg class="ak-nn${live ? " is-live" : ""}" viewBox="0 0 28 28" aria-hidden="true" focusable="false">` +
-    `<defs><linearGradient id="akNN${id}" x1="0" y1="0" x2="1" y2="0">` +
-    `<stop offset="0" stop-color="#9bc4d2"/><stop offset="1" stop-color="#da9100"/>` +
-    `</linearGradient></defs>` +
-    `<g class="ak-nn-e" stroke="url(#akNN${id})">${edges}</g>` +
-    `<g fill="url(#akNN${id})">${nodes}</g></svg>`;
-}
-
 export function modelName(id) {
   if (typeof id !== "string" || !id) return "a language model";
   if (!id.startsWith("@cf/")) return id;
@@ -350,6 +341,7 @@ const shell = (title, active, username, body, { chrome = true } = {}) => {
   return `
 <body class="flows-body has-rail" data-flows-page="${active}">
 ${SPRITE}
+${LENS}
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
 ${sidebar(active, username)}
 ${toolbar(title, active, /data-fx-hero/.test(lead + body))}

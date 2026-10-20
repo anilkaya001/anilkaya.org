@@ -384,7 +384,7 @@
     }
     const S = isNum(c.spot), prev = isNum(c.prevClose);
     const live = c.spotSource === "stock-state";
-    pxEl.append(h("span", { class: "tl-spot ui-num" }, F.px(S)));
+    pxEl.append(h("span", { class: "tl-spot tl-num" }, F.px(S)));
     if (S !== null && prev !== null && prev > 0) {
       const d = S - prev;
       pxEl.append(UI.capsule(sg(d) + Math.abs(d).toFixed(2) + "  " + F.pct(d / prev, 2, true), { tone: d > 0 ? "up" : d < 0 ? "down" : "flat" }));
@@ -899,7 +899,7 @@
     const tone = tenths > 0 ? "up" : tenths < 0 ? "down" : "flat";
     row.dataset.tone = tone;
     const txt = sg(tenths) + (Math.abs(tenths) / 10).toFixed(1);
-    row._val.replaceChildren(h("b", { class: "ui-num", "data-tone": tone }, txt), h("small", null, "pts"));
+    row._val.replaceChildren(h("b", { class: "tl-num", "data-tone": tone }, txt), h("small", null, "pts"));
     row.setAttribute("aria-label", "Real world against implied: " + txt + " points of chance of profit, " + pop1(q) + " implied and " + pop1(p) + " real world, drawn on a scale from " + row._lo.textContent + " to " + row._hi.textContent);
   }
 
@@ -922,7 +922,7 @@
       else {
         const txt = pop1(v);
         const cur = row._val.querySelector(".ui-roll");
-        if (cur) UI.roll(cur, txt, cur.dataset.value, animate); else row._val.replaceChildren(UI.roll(h("b", { class: "ui-num" }), txt, null, animate));
+        if (cur) UI.roll(cur, txt, cur.dataset.value, animate); else row._val.replaceChildren(UI.roll(h("b", { class: "tl-num" }), txt, null, animate));
       }
     };
     setRow(m.popQ, popQ, es);
@@ -992,12 +992,12 @@
     const head = h("tr", null, h("th", { scope: "col" }, h("span", { class: "visually-hidden" }, "Spot")),
       ...g.days.map((d, j) => h("th", { scope: "col" }, j === 0 ? "Now" : j === g.days.length - 1 ? F.day(st.legs.filter((l) => l.expiry).map((l) => l.expiry).sort()[0] || st.expiry) : d + "d")));
     const body = order.map((i) => h("tr", { class: i === zi ? "is-spot" : i >= 7 ? "is-level" : null },
-      h("th", { scope: "row" }, h("b", { class: "ui-num" }, F.px(g.spot[i])), h("span", { "data-level": tagOf(i)[1] }, tagOf(i)[0])),
+      h("th", { scope: "row" }, h("b", { class: "tl-num" }, F.px(g.spot[i])), h("span", { "data-level": tagOf(i)[1] }, tagOf(i)[0])),
       ...g.days.map((d, j) => {
         const v = g.pnl[i][vi][j];
         const a = Math.sqrt(Math.abs(v || 0) / max);
         return h("td", {
-          class: "ui-num" + (i === zi && j === 0 && g.vol[vi] === 0 ? " is-now" : ""), "data-tone": v > 0 ? "up" : v < 0 ? "down" : null,
+          class: "tl-num" + (i === zi && j === 0 && g.vol[vi] === 0 ? " is-now" : ""), "data-tone": v > 0 ? "up" : v < 0 ? "down" : null,
           style: { "--a": (0.08 + 0.52 * a).toFixed(3), "--d": j * 40 + "ms" },
         }, whole(v));
       })));
@@ -1016,17 +1016,17 @@
       const del = rl && isNum(rl.delta) !== null ? rl.delta * l.side : null;
       const q = h("span", { class: "tl-qty" },
         h("button", { type: "button", class: "tl-ib", "aria-label": "One fewer of " + legName(l), onclick: () => bump(i, -1) }, MINUS),
-        h("b", { class: "ui-num" }, String(l.qty)),
+        h("b", { class: "tl-num" }, String(l.qty)),
         h("button", { type: "button", class: "tl-ib", "aria-label": "One more of " + legName(l), onclick: () => bump(i, 1) }, "+"));
       return h("div", { class: "tl-leg", role: "listitem", "data-leg": String(i) },
         h("span", { class: "ui-badge", "data-tone": l.type === "C" ? "up" : l.type === "P" ? "down" : null, "aria-label": l.type === "C" ? "Call" : l.type === "P" ? "Put" : "Stock" }, badge),
         h("button", { type: "button", class: "tl-bs", "data-side": l.side > 0 ? "long" : "short", "aria-label": (l.side > 0 ? "Long" : "Short") + ": switch " + legName(l) + " to " + (l.side > 0 ? "short" : "long"), onclick: () => flip(i) }, l.side > 0 ? "Buy" : "Sell"),
-        h("span", { class: "tl-leg-m" }, h("b", { class: "ui-num" }, l.type === "S" ? String(l.qty * LOT) : kf(l.K)), h("span", null, l.type === "S" ? "shares at " + F.px(S) : (l.type === "C" ? "call" : "put") + " " + UI.MID + " " + F.day(l.expiry))),
+        h("span", { class: "tl-leg-m" }, h("b", { class: "tl-num" }, l.type === "S" ? String(l.qty * LOT) : kf(l.K)), h("span", null, l.type === "S" ? "shares at " + F.px(S) : (l.type === "C" ? "call" : "put") + " " + UI.MID + " " + F.day(l.expiry))),
         h("span", { class: "tl-leg-x" },
-          h("span", { class: "tl-leg-c ui-num", title: "Delta per share, signed by side" }, h("small", null, "Δ"), del === null ? DASH : sg(del) + Math.abs(del).toFixed(2)),
-          h("span", { class: "tl-leg-c ui-num", title: "Implied volatility on the fitted smile" }, h("small", null, "IV"), rl && isNum(rl.iv) !== null ? pct(rl.iv, 1) : DASH),
-          h("span", { class: "tl-leg-c tl-leg-q ui-num", title: "Bid and ask" }, l.type === "S" ? DASH : F.px(bid) + " × " + F.px(ask)),
-          h("span", { class: "tl-leg-c ui-num", title: "Model value on the smile" }, h("small", null, "Model"), rl && isNum(rl.model) !== null ? F.px(rl.model) : DASH)),
+          h("span", { class: "tl-leg-c tl-num", title: "Delta per share, signed by side" }, h("small", null, "Δ"), del === null ? DASH : sg(del) + Math.abs(del).toFixed(2)),
+          h("span", { class: "tl-leg-c tl-num", title: "Implied volatility on the fitted smile" }, h("small", null, "IV"), rl && isNum(rl.iv) !== null ? pct(rl.iv, 1) : DASH),
+          h("span", { class: "tl-leg-c tl-leg-q tl-num", title: "Bid and ask" }, l.type === "S" ? DASH : F.px(bid) + " × " + F.px(ask)),
+          h("span", { class: "tl-leg-c tl-num", title: "Model value on the smile" }, h("small", null, "Model"), rl && isNum(rl.model) !== null ? F.px(rl.model) : DASH)),
         q,
         h("button", { type: "button", class: "tl-ib tl-rm", "aria-label": "Remove " + legName(l), onclick: () => removeLeg(i) }, glyph("x")));
     });

@@ -1,1 +1,1 @@
-{"name": "browser", "class": "W", "group": "shard", "timing": false, "medianS": 88.5, "shard": 2, "files": ["regression.mjs"], "covers": ["assets/data/courses/ols.json","schema.sql"]}
+{"name": "browser", "class": "W", "group": "shard", "timing": false, "medianS": 88.5, "shard": 3, "files": ["regression.mjs"], "covers": ["assets/data/courses/ols.json","schema.sql"]}

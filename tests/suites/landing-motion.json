@@ -1,1 +1,1 @@
-{"name": "landing-motion", "class": "C", "group": "shard", "timing": false, "medianS": 29.7, "shard": 4, "files": ["landing-motion.mjs"], "covers": ["assets/js/particles.js","index.html"]}
+{"name": "landing-motion", "class": "C", "group": "shard", "timing": false, "medianS": 29.7, "shard": 2, "files": ["landing-motion.mjs"], "covers": ["assets/js/particles.js","index.html"]}
