@@ -190,10 +190,11 @@
 
     function silent(kind, text) {
       wrap.dataset.state = kind;
-      ringBox.replaceChildren(h("p", { class: "nm-empty", "data-empty": kind }, text));
+      ringBox.replaceChildren(h("p", { class: "nm-empty", "data-empty": kind, role: "status" }, text));
       listBox.replaceChildren();
-      stats.textContent = DASH;
-      readEl.textContent = text;
+      stats.textContent = "";
+      readEl.textContent = "";
+      readEl.style.display = "none";
       note.textContent = "";
     }
 
@@ -203,6 +204,7 @@
       wrap.dataset.pane = pane;
       if (!M) return;
       wrap.dataset.state = "ok";
+      readEl.style.display = "";
       ringDraw();
       listDraw();
       const { shown } = pairsList();

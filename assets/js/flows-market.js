@@ -698,7 +698,7 @@
       const plot = h("div", { class: "mk-etf-p" });
       host.append(plot);
       if (drawn(path) >= 2) {
-        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: roomH(plot, 240, 64, 4), xAxis: false, yTicks: false, gutter: 60,
+        C.line(plot, { series: [{ values: path, format: usdS }], twoTone: true, zero: true, yDomain: shared, height: roomH(plot, 240, 64, 4), xAxis: false, yTicks: false,
           label: T + " options tide", readout: (i) => [C.part(T, "k"), tb(path[i])] });
       }
       staleMark("mkEtf" + T + "Card", session, T, calmOf(tides[T], T + " tide"));
@@ -779,7 +779,7 @@
     if (below.fns) run(below.fns);
     else below.ask.set(key, run);
   };
-  const LENS = { on: false, strips: null, uni: null, priced: false, day: null, movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null, sync: null };
+  const LENS = { on: false, strips: null, uni: null, priced: false, day: null, movers: null, hold: false, dirty: false, shown: false, ask: 0, px: null, sync: null, col: 0 };
 
   const marketKit = Object.freeze({
     $, LENS, getLive, cap1, capLine, clear, clock, count, emptyLine, feedSilence, gap, grouped, infoInto, inlineHush, newGate, newer, nums, okFeed, pct, pendingLine, pendingOf, rowState, signGlyph, signed, signedGrouped, staleMark, table, tb, timeAxis, toneOf, track, unreadable, unreadableLine, usd, usdS,

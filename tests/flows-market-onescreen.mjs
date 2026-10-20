@@ -152,6 +152,90 @@ for (const [w, h] of [[1440, 820], [1024, 768], [390, 844]]) {
   await context.close();
 }
 
+const BELOW = "/assets/js/flows-market-below.js";
+async function extremesReach(page, phone) {
+  await page.click("#mkT-extremes");
+  if (phone) await page.locator("#mkSub button").nth(0).click();
+  await page.waitForFunction(() => document.querySelectorAll("#mktMovers .mk-movers-col").length === 4, null, { timeout: 15000 });
+  await page.waitForTimeout(300);
+  const visible = () => page.evaluate(() => [...document.querySelectorAll("#mktMovers .mk-movers-col")]
+    .filter((c) => getComputedStyle(c).display !== "none" && c.getBoundingClientRect().height > 0)
+    .map((c) => c.querySelector("h3").firstChild.textContent.trim()));
+  const seen = new Set(await visible());
+  const btns = page.locator("#mkMoversSeg .ui-seg-i");
+  const n = await btns.count();
+  for (let i = 0; i < n; i++) {
+    if (!(await btns.nth(i).isVisible())) continue;
+    await btns.nth(i).click();
+    await page.waitForFunction((k) => { const g = document.querySelector("#mktMovers .mk-movers-grid"); return g && g.dataset.show === String(k); }, i, { timeout: 5000 }).catch(() => {});
+    await page.waitForTimeout(100);
+    for (const t of await visible()) seen.add(t);
+  }
+  return [...seen].sort();
+}
+
+for (const [w, h] of [[1920, 1080], [1440, 820], [390, 844]]) {
+  const { context, page, errors } = await openMarket(browser, { viewport: { width: w, height: h }, coarse: w < 500, hash: "#view=extremes" });
+  eq(await extremesReach(page, w < 900), ["Calls", "Fallers", "Puts", "Risers"], `${w}x${h}: EVERY EXTREMES COLUMN CAN BE REACHED: Risers, Fallers, Calls and Puts, by the switch where only one column fits`);
+  eq(errors, [], `${w}: no page error on Extremes`);
+  await context.close();
+}
+{
+  const { context, page } = await openMarket(browser, { viewport: { width: 1440, height: 820 }, hash: "#view=extremes", patch: { [BELOW]: [['if (seg) seg.append(UI.segmented("Extreme"', 'if (false) seg.append(UI.segmented("Extreme"']] } });
+  const got = await extremesReach(page, false).catch((e) => ["threw " + e.message.split("\n")[0]]);
+  ok(got.join() !== "Calls,Fallers,Puts,Risers", `PLANTED WRONG BUILD IS CAUGHT: the Extremes switch never filled leaves only ${got.join(", ")}`);
+  await context.close();
+}
+
+for (const [w, h] of [[1440, 820], [390, 844]]) {
+  const { context, page } = await openMarket(browser, { viewport: { width: w, height: h }, coarse: w < 500, hash: "#view=context" });
+  await page.waitForTimeout(1500);
+  await page.evaluate(() => new Promise((done) => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "/assets/css/flows-oracle.css";
+    link.onload = done;
+    document.head.append(link);
+    const orb = document.createElement("div");
+    orb.id = "fxOracle";
+    orb.className = "orc";
+    document.body.append(orb);
+  }));
+  await page.waitForTimeout(300);
+  const bad = [];
+  for (const t of TABS) {
+    await page.click(`#mkT-${t}`);
+    await page.waitForTimeout(250);
+    const mods = await page.evaluate((k) => [...document.querySelectorAll(`#mkP-${k} > .mk-mod`)].length, t);
+    for (let i = 0; i < (w < 900 ? mods : 1); i++) {
+      if (w < 900 && mods > 1) { await page.locator("#mkSub button").nth(i).click(); await page.waitForTimeout(150); }
+      const hit = await page.evaluate(() => {
+        const o = document.getElementById("fxOracle").getBoundingClientRect();
+        return [...document.querySelectorAll(".mk-panel > .mk-mod")].filter((m) => !m.closest("[inert]") && getComputedStyle(m).visibility !== "hidden")
+          .filter((m) => { const r = m.getBoundingClientRect(); return r.width && r.left < o.right && o.left < r.right && r.top < o.bottom && o.top < r.bottom; }).map((m) => m.id);
+      });
+      if (hit.length) bad.push(t + ": " + hit.join(","));
+      if ((await page.evaluate(() => document.documentElement.scrollHeight > innerHeight + 1))) bad.push(t + ": the page scrolls with the orb's corner reserved");
+    }
+  }
+  eq(bad, [], `${w}x${h}: WITH THE ORACLE ORB ON THE PAGE NO MARKET MODULE RUNS UNDER IT, ON ANY TAB, AND THE PAGE STILL DOES NOT SCROLL`);
+  await context.close();
+}
+
+{
+  const { context, page, release } = await openMarket(browser, { viewport: { width: 1440, height: 820 }, hold: true });
+  await page.waitForTimeout(800);
+  const said = () => [...document.querySelectorAll(".mk-panel > .mk-mod > .mk-body[id]")].filter((b) => !b.children.length && !/Loading/.test(getComputedStyle(b, "::before").content)).map((b) => b.id);
+  const waiting = await page.evaluate(() => [...document.querySelectorAll(".mk-panel > .mk-mod > .mk-body[id]")].filter((b) => !b.children.length).length);
+  eq(await page.evaluate(said), [], "BEFORE ANY DATA ARRIVES EVERY MODULE BODY SAYS IT IS LOADING, NONE IS AN EMPTY CARD");
+  ok(waiting > 0, `and some bodies really are waiting on their data (${waiting})`);
+  release();
+  await page.waitForFunction(() => ["mkP-tide", "mkP-indices"].every((p) => [...document.querySelectorAll("#" + p + " .mk-body[id]")].every((b) => b.children.length)), null, { timeout: 20000 });
+  eq(await page.evaluate(said), [], "and no body is left empty and silent after the data lands");
+  ok(true, "and the loading lines give way to the modules once the data has painted them");
+  await context.close();
+}
+
 const MUTANTS = [
   ["panels stack in the flow and the page scrolls", CSS, [[".mk-panel { position: absolute; inset: 0;", ".mk-panel { position: relative;"]]],
   ["the fitter never runs", JS, [["if (!body || !mod.getBoundingClientRect().height) return;", "return;"]]],

@@ -160,6 +160,14 @@
   }
 
   const raw = (v) => (v ? String(v).replace(/^-/, UI.MINUS) : DASH);
+  const SCALE = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
+  const short = (v) => {
+    const t = String(v).trim();
+    if (!/^-?\d{5,}$/.test(t)) return raw(v);
+    const x = Number(t), u = SCALE.find((q) => Math.abs(x) >= q[0]);
+    return (x < 0 ? UI.MINUS : "") + (Math.abs(x) / u[0]).toPrecision(3) + u[1];
+  };
+  const cell = (v, why, attrs) => (v ? h("span", { ...attrs, title: String(v) }, short(v)) : h("span", { ...attrs, title: why, "aria-label": "None: " + why }, DASH));
   const key = (...kids) => h("span", { class: "ui-key" }, ...kids);
   const tally = (g, word, v) => key(g, word + " ", h("b", null, String(v)));
 
@@ -423,8 +431,8 @@
         h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, trtTime(m.at, false) || F.day(m.day))),
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
-        h("span", { class: "fu-v fu-strong" }, raw(m.forecastRaw)),
-        h("span", V, raw(m.prevRaw)));
+        cell(m.forecastRaw, "No consensus forecast in the vendor calendar", { class: "fu-v fu-strong" }),
+        cell(m.prevRaw, "No prior reading in the vendor calendar", V));
     });
     host.macro.replaceChildren(
       h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),

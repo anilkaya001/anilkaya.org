@@ -830,7 +830,7 @@
     const t = Date.now(), ages = [];
     if (FRESH.readAt) ages.push(t + FRESH.readSkew - Date.parse(FRESH.readAt));
     for (const [k, f] of FRESH.ffs) if (PRICES.test(k) && f.readAt) ages.push(t + (f.skewMs || 0) - f.readAt);
-    const a = Math.min(...ages.filter(Number.isFinite));
+    const a = Math.min(...ages.filter((x) => x < 2.7e6));
     return Number.isFinite(a) ? Math.max(0, a / 1000) : null;
   }
   function freshState() {

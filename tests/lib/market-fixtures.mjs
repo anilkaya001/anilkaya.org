@@ -108,7 +108,9 @@ function richAnswer(dir, route, u) {
   }
 }
 
-export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "" } = {}) {
+export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "", hold = false } = {}) {
+  let release = () => {};
+  const gate = hold ? new Promise((r) => { release = r; }) : null;
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
   const page = await context.newPage();
   const errors = [];
@@ -131,6 +133,7 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "rt_off", message: "off" } }) });
+    if (gate && u.pathname.startsWith("/api/flows/")) await gate;
     if (u.pathname === "/api/flows/flowalerts") {
       if (alertsStatus !== 200) return route.fulfill({ status: alertsStatus, contentType: "application/json", body: "{}" });
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(alerts) });
@@ -150,7 +153,7 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto("https://example.test/flows/market/" + hash);
-  return { context, page, errors };
+  return { context, page, errors, release };
 }
 
 export const TABS = ["floor", "session", "tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];

@@ -125,6 +125,7 @@ const rowsFor = (tab, funds = false) => poolOf(funds).filter(TABS[tab]).sort(ORD
 const mount = async (browser, w, h, o = {}) => {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", ...(o.context || {}) });
   const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date("2026-10-16T22:30:00Z"));
   const errors = [];
   const asked = [];
   page.on("pageerror", (e) => errors.push(String(e)));

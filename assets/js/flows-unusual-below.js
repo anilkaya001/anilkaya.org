@@ -88,6 +88,7 @@
       if (lv < l0 || lv > l1) continue;
       const d = dist(v);
       if (d > half - 4) continue;
+      if (d < 8) { s("text", { x: tx, y: mid + 3.8, text: F.money(v, false, 0), class: "tx-3" }, svg); continue; }
       s("line", { x1: left, x2: w - right, y1: mid - d, y2: mid - d, class: "hair" }, svg);
       s("line", { x1: left, x2: w - right, y1: mid + d, y2: mid + d, class: "hair" }, svg);
       s("text", { x: tx, y: mid - d + 3.8, text: F.money(v, false, 0), class: "tx-3" }, svg);
