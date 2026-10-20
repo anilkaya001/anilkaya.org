@@ -56,7 +56,8 @@ skyline, the surface and terrain, the floor and the river), which paint their
 own backgrounds. Glass applies to `.ui-card` and the three ticker panels
 (`.ft-strip`, `.ft-rail`, `.ft-gchart`), to the sidebar `.fx-side`, the top bar
 `.fx-bar::before`, the bar controls (`.fx-search`, `.ak-dock-tab`, `.ui-fresh`,
-`.fx-iconbtn:hover`), the segmented control `.ui-seg`, and the scrolling sheets
+`.fx-iconbtn:hover`), the segmented control `.ui-seg` and the sidebar's two
+switchers `.fx-site`, which wear its well and its knob, and the scrolling sheets
 (`.ui-pop`, `.ui-pal`, `.ak-dock-panel`), which take the thick material with a
 box-shadow edge and no pseudo rim because their content scrolls under it.
 
@@ -74,6 +75,7 @@ All in the first `:root` of `assets/css/flows.css`.
 | `--glass-track`, `--glass-track-edge` | The segmented control's track: a dark well with an inset shadow. |
 | `--glass-knob`, `--glass-knob-edge` | The segmented control's knob: 14% white with a top highlight and a soft drop. |
 | `--glass-ctl`, `--glass-ctl-hover` | The bar controls at rest (6% white) and on hover (10%). |
+| `--glass-lens` | The backdrop filter of the four refracting surfaces: `blur(12px) saturate(160%)` everywhere, `url("#fx-lens") blur(12px) saturate(160%)` where `@supports (backdrop-filter: url("#fx-lens"))` holds, `none` under reduced transparency, high contrast and forced colours. A surface writes `-webkit-backdrop-filter: var(--glass-lens); backdrop-filter: var(--glass-lens)` and nothing else. |
 | `--glass-solid`, `--glass-solid-thick`, `--glass-solid-chrome` | The opaque colours the materials fall back to where `backdrop-filter` is not supported. |
 | `--mask-on`, `--mask-mid` | Mask stops for the rim ring, so no colour literal sits inside a `mask` function. |
 | `--aur-1`, `--aur-2`, `--aur-3` | The three static aurora pools (blue, violet, cyan) painted on top of the ground, under the overlay; they never move. |
@@ -120,6 +122,40 @@ computed `color` stays the tone and every test that reads `color` keeps working;
 the sign is always printed, `data-tone="silent"` drops the gradient, and the
 gradient goes on each digit span of a rolling figure rather than on the
 transformed `.ui-roll` parent.
+
+### Refraction on four surfaces
+
+Where a glass piece sits over something it can bend without harming legibility
+it refracts its backdrop for real: an SVG displacement filter, `#fx-lens`, in
+`backdrop-filter`. `shared/flows-pages.js` emits the filter once on every
+shell page, right after the glyph sprite, as a zero-size `.ui-sprite` svg (the
+sprite's own pattern: a `display: none` svg is not safe for a filter reference
+in every engine). Its `feImage` carries the displacement map from `lensMap()`,
+a 100 by 100 svg data URI in which the red channel is a horizontal ramp and the
+green channel a vertical one, both flat at 128 across the middle 56% of the box
+and running to 40 at the left and top edges and 216 at the right and bottom
+edges, so the backdrop is left alone in the middle and bent by up to 4.8 px
+(`scale="14"`) at the rim, the way the bevel of a glass lens bends what lies
+beyond it. Chromium displaces whole pixels, so on a 140 px knob the rim moves
+what is behind it by 2 to 3 px, the next 8 px by 1 and the rest by none. The filter region is the box plus 5% on every side, and the map is
+stretched over it with `preserveAspectRatio="none"`, so one map serves every
+size.
+
+The surfaces are exactly four: the segmented knob `.ui-seg-knob`, the dock's
+head `.ak-dock-head` (its own box only), and, when Home lands, the pager's
+selected button `.hm-pager button[aria-current]` and the Neuron tile's pill
+`.hm-ask`, which take `var(--glass-lens)` and no other backdrop filter of their
+own. No running text sits under any of them. The gate is `@supports`, never an
+engine test: where the property does not parse with a `url()` the token stays
+`blur(12px) saturate(160%)`, which is the plain glass control of the bar. Under
+reduced transparency, high contrast and forced colours the token is `none`.
+
+`tests/flows-glass-render.mjs` renders the real segmented knob over a hairline
+grid and measures where the lines land with and without the lens: at least
+2 px of displacement within 10 px of the knob's edge and under 0.5 px at its
+centre. It first proves the engine can displace a backdrop at all with a
+control filter; where it cannot (the gate is a feature test, so the page is
+unchanged there) it records the fallback and passes.
 
 ### The three fallbacks
 

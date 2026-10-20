@@ -72,6 +72,18 @@ const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" widt
 
 const glyph = (name) => `<svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-${name}"/></svg>`;
 
+const RAMP = (axis, channel) => {
+  const to = axis === "x" ? 'x2="1" y2="0"' : 'x2="0" y2="1"';
+  const at = (n) => (channel === "r" ? `rgb(${n},0,0)` : `rgb(0,${n},0)`);
+  return `<linearGradient id="${axis}" x1="0" y1="0" ${to}><stop offset="0" stop-color="${at(40)}"/><stop offset=".22" stop-color="${at(128)}"/><stop offset=".78" stop-color="${at(128)}"/><stop offset="1" stop-color="${at(216)}"/></linearGradient>`;
+};
+
+export const lensMap = () => "data:image/svg+xml," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><defs>${RAMP("x", "r")}${RAMP("y", "g")}</defs>` +
+  '<rect width="100" height="100" fill="url(#x)"/><rect width="100" height="100" fill="url(#y)" style="mix-blend-mode:screen"/></svg>');
+
+const LENS = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0"><filter id="fx-lens" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB"><feImage href="${lensMap()}" preserveAspectRatio="none" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></svg>`;
+
 const initials = (username) => {
   const name = String(username || "").trim();
   if (!name) return "—";
@@ -329,6 +341,7 @@ const shell = (title, active, username, body, { chrome = true } = {}) => {
   return `
 <body class="flows-body has-rail" data-flows-page="${active}">
 ${SPRITE}
+${LENS}
 <a class="flows-skip" href="#flowsMain">Skip to content</a>
 ${sidebar(active, username)}
 ${toolbar(title, active, /data-fx-hero/.test(lead + body))}

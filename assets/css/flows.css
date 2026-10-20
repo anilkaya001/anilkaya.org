@@ -55,6 +55,7 @@
   --glass-knob-edge: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 0 0 0.5px rgba(255, 255, 255, 0.10), 0 4px 12px -4px rgba(0, 0, 0, 0.50);
   --glass-ctl: rgba(255, 255, 255, 0.06);
   --glass-ctl-hover: rgba(255, 255, 255, 0.10);
+  --glass-lens: blur(12px) saturate(160%);
   --glass-solid: #151821;
   --glass-solid-thick: #12141b;
   --glass-solid-chrome: #0f1117;
@@ -242,6 +243,10 @@
   }
 }
 
+@supports (backdrop-filter: url("#fx-lens")) {
+  :root { --glass-lens: url("#fx-lens") blur(12px) saturate(160%); }
+}
+
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root {
     --mat-thin: #202229;
@@ -264,6 +269,7 @@
     --glass-caustic: 0 0 0 transparent;
     --glass-ctl: var(--fill-3);
     --glass-knob: var(--fill-1);
+    --glass-lens: none;
   }
 }
 
@@ -851,7 +857,8 @@ a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   gap: 2px;
   padding: 2px;
   border-radius: 9px;
-  background: var(--fill-4);
+  background: var(--glass-track);
+  box-shadow: var(--glass-track-edge);
 }
 .fx-site a {
   flex: 1;
@@ -865,7 +872,7 @@ a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
   text-decoration: none;
 }
 .fx-site a:hover { color: var(--label-1); background: var(--fill-3); }
-.fx-site a[aria-current] { color: var(--label-1); background: var(--fill-2); }
+.fx-site a[aria-current] { color: var(--label-1); background: var(--glass-knob); box-shadow: var(--glass-knob-edge); }
 @media (pointer: coarse) { .fx-site a { min-height: 40px; } }
 .fx-who { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .fx-avatar {
@@ -1177,7 +1184,15 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   container-type: inline-size;
   container-name: dock;
 }
-.ak-dock-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin: 0 0 var(--sp-4); }
+.ak-dock-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+  -webkit-backdrop-filter: var(--glass-lens);
+  backdrop-filter: var(--glass-lens);
+}
 .ak-dock-title { display: inline-flex; align-items: center; gap: var(--sp-2); margin: 0; font: var(--t-title3); letter-spacing: var(--t-title3-track); }
 .ak-dock-title .ui-g { font-size: 20px; color: var(--accent-ink); }
 .ak-dock-close {
@@ -1391,6 +1406,8 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   border-radius: 7px;
   background: var(--glass-knob);
   box-shadow: var(--glass-knob-edge);
+  -webkit-backdrop-filter: var(--glass-lens);
+  backdrop-filter: var(--glass-lens);
   transition: transform var(--dur-snappy) var(--spring-snappy);
 }
 .ui-seg.is-static .ui-seg-knob { transition: none; }
@@ -1915,6 +1932,7 @@ a.ui-row:hover { background: var(--fill-4); }
 }
 
 @media (forced-colors: active) {
+  :root { --glass-lens: none; }
   .ui-card, .ft-strip, .ft-rail, .ft-gchart, .ui-chips, .ui-pop, .ui-pal, .fx-side, .fx-tabs, .fx-bar { border: 1px solid CanvasText; }
   .ui-card::before, .ft-strip::before, .ft-rail::before, .ft-gchart::before { display: none; }
   .ui-num { background: none; -webkit-text-fill-color: CanvasText; }

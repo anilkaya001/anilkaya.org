@@ -3,7 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launch } from "./lib/browser.mjs";
-import { openGlass, settle, applyMode, measureText, measureMaterial, low, MUTANTS, patchOf, PAGE_KINDS, VIEWPORTS, MODES, PROBE_INKS, PROBE_NUMS } from "./lib/glass-world.mjs";
+import * as PAGES from "../shared/flows-pages.js";
+import { workerSource } from "./lib/source-scan.mjs";
+import { openGlass, openLensRig, measureLens, lensMutants, settle, applyMode, clearMode, measureText, measureMaterial, low, MUTANTS, patchOf, PAGE_KINDS, VIEWPORTS, MODES, PROBE_INKS, PROBE_NUMS } from "./lib/glass-world.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CSS = fs.readFileSync(path.join(ROOT, "assets/css/flows.css"), "utf8");
@@ -96,13 +98,19 @@ async function open(kind, viewport, extra = {}) {
       const chrome = await page.evaluate(() => {
         const read = (sel) => { const e = document.querySelector(sel); if (!e) return null; const c = getComputedStyle(e); return { bg: c.backgroundColor, blur: c.backdropFilter, shadow: c.boxShadow }; };
         const root = getComputedStyle(document.documentElement);
-        return { search: read(".fx-search"), ask: read(".ak-dock-tab"), fresh: read("#fxFresh"), seg: read(".ui-seg"), knob: read(".ui-seg-knob"), ctl: root.getPropertyValue("--glass-ctl").trim(), knobTok: root.getPropertyValue("--glass-knob").trim(), track: root.getPropertyValue("--glass-track").trim() };
+        return { search: read(".fx-search"), ask: read(".ak-dock-tab"), fresh: read("#fxFresh"), seg: read(".ui-seg"), knob: read(".ui-seg-knob"), site: read(".fx-site"), siteNow: read(".fx-site a[aria-current]"), ctl: root.getPropertyValue("--glass-ctl").trim(), knobTok: root.getPropertyValue("--glass-knob").trim(), track: root.getPropertyValue("--glass-track").trim() };
       });
       const rgbaOf = (s) => s.replace(/\s+/g, "");
       for (const [name, c] of [["search", chrome.search], ["ask", chrome.ask], ["fresh", chrome.fresh]]) {
         if (!c) continue;
         ok(rgbaOf(c.bg) === rgbaOf(chrome.ctl) && /blur\(12px\)/.test(c.blur) && /inset/.test(c.shadow), `${tag}: the bar's ${name} control is a glass control (${c.bg}, ${c.blur})`);
       }
+      const lens = await page.evaluate(() => ({ supports: CSS.supports("backdrop-filter", 'url("#fx-lens")'), token: getComputedStyle(document.documentElement).getPropertyValue("--glass-lens").trim(), surfaces: [document.querySelector(".ak-dock-head"), ...document.querySelectorAll(".ui-seg-knob")].map((e) => getComputedStyle(e).backdropFilter), filters: document.querySelectorAll("#fx-lens").length }));
+      eq(lens.filters, 1, `${tag}: the page carries exactly one #fx-lens filter`);
+      ok(lens.surfaces.length >= 1 && lens.surfaces.every((v) => (lens.supports ? /^url\("#fx-lens"\) blur\(12px\) saturate\((1\.6|160%)\)$/ : /^blur\(12px\) saturate\((1\.6|160%)\)$/).test(v)), `${tag}: the dock head and every segmented knob (${lens.surfaces.length}) carry --glass-lens: ${lens.supports ? "the lens, then blur 12 and saturate 160%" : "plain blur 12 and saturate 160%, the engine having no url() backdrop filter"} (${[...new Set(lens.surfaces)].join(" | ")})`);
+      ok(chrome.site && chrome.siteNow, `${tag}: the sidebar has its site switcher with a current link`);
+      ok(rgbaOf(chrome.site.bg) === rgbaOf(chrome.track) && /inset/.test(chrome.site.shadow), `${tag}: the sidebar's site switcher is the glass well of the segmented control (${chrome.site.bg})`);
+      ok(rgbaOf(chrome.siteNow.bg) === rgbaOf(chrome.knobTok) && /inset/.test(chrome.siteNow.shadow), `${tag}: and its current link is the glass knob (${chrome.siteNow.bg})`);
       if (chrome.seg) {
         ok(rgbaOf(chrome.seg.bg) === rgbaOf(chrome.track) && /inset/.test(chrome.seg.shadow), `${tag}: the segmented track is the glass well (${chrome.seg.bg})`);
         ok(chrome.knob && rgbaOf(chrome.knob.bg) === rgbaOf(chrome.knobTok), `${tag}: the segmented knob is the glass knob (${chrome.knob && chrome.knob.bg})`);
@@ -127,9 +135,9 @@ async function open(kind, viewport, extra = {}) {
 
 {
   console.log("  the fallbacks, every page at 1440x820:");
-  for (const mode of MODES.filter((m) => m !== "default")) {
-    for (const kind of PAGE_KINDS) {
-      const { context, page, errors } = await open(kind, L);
+  for (const kind of PAGE_KINDS) {
+    const { context, page, errors } = await open(kind, L);
+    for (const mode of MODES.filter((m) => m !== "default")) {
       await applyMode(page, mode);
       const tag = `${kind} ${mode}`;
       const runs = await measureText(page);
@@ -139,7 +147,7 @@ async function open(kind, viewport, extra = {}) {
           const root = getComputedStyle(document.documentElement);
           const card = document.querySelector(".ui-card, .ft-strip, .ft-gchart");
           const rim = card && getComputedStyle(card, "::before");
-          return { matches: matchMedia(m === "reduced-transparency" ? "(prefers-reduced-transparency: reduce)" : "(prefers-contrast: more)").matches, aur: root.getPropertyValue("--aur-1").trim(), sheen: root.getPropertyValue("--glass-sheen").trim(), ctl: root.getPropertyValue("--glass-ctl").trim(), fill3: root.getPropertyValue("--fill-3").trim(), knob: root.getPropertyValue("--glass-knob").trim(), fill1: root.getPropertyValue("--fill-1").trim(), caustic: root.getPropertyValue("--glass-caustic").trim(), rimBg: rim ? rim.backgroundImage : null, blur: card ? getComputedStyle(card).backdropFilter : null, ground: root.getPropertyValue("--ground").trim() };
+          return { matches: matchMedia(m === "reduced-transparency" ? "(prefers-reduced-transparency: reduce)" : "(prefers-contrast: more)").matches, aur: root.getPropertyValue("--aur-1").trim(), sheen: root.getPropertyValue("--glass-sheen").trim(), ctl: root.getPropertyValue("--glass-ctl").trim(), fill3: root.getPropertyValue("--fill-3").trim(), knob: root.getPropertyValue("--glass-knob").trim(), fill1: root.getPropertyValue("--fill-1").trim(), caustic: root.getPropertyValue("--glass-caustic").trim(), rimBg: rim ? rim.backgroundImage : null, blur: card ? getComputedStyle(card).backdropFilter : null, ground: root.getPropertyValue("--ground").trim(), lensToken: root.getPropertyValue("--glass-lens").trim(), lens: [document.querySelector(".ak-dock-head"), ...document.querySelectorAll(".ui-seg-knob")].map((e) => getComputedStyle(e).backdropFilter) };
         }, mode);
         ok(t.matches, `${tag}: the media feature is emulated`);
         eq(t.aur, "transparent", `${tag}: the aurora pools are transparent`);
@@ -149,6 +157,7 @@ async function open(kind, viewport, extra = {}) {
         eq(t.caustic, "0 0 0 transparent", `${tag}: the caustic is off`);
         ok(t.rimBg && /^linear-gradient\(rgba\(255, 255, 255, 0\.24\), rgba\(255, 255, 255, 0\.24\)\)$/.test(t.rimBg), `${tag}: the rim is a solid --sep-strong line (${t.rimBg})`);
         eq(t.blur, "none", `${tag}: no backdrop blur`);
+        eq([t.lensToken, ...new Set(t.lens)], ["none", "none"], `${tag}: the lens drops with the blur (the token and every refracting surface compute none)`);
         ok(!/radial-gradient/.test(t.ground), `${tag}: the ground is flat`);
         if (kind === "home") {
           const material = await measureMaterial(page);
@@ -182,18 +191,20 @@ async function open(kind, viewport, extra = {}) {
           const rims = [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].map((c) => getComputedStyle(c, "::before").display);
           const knob = document.querySelector(".ui-seg-knob");
           const num = document.querySelector(".ui-num");
-          return { matches: matchMedia("(forced-colors: active)").matches, canvasText, highlight, cards: cards.length, borders: cards.map((c) => { const s = getComputedStyle(c); return s.borderTopStyle + " " + s.borderTopWidth + " " + s.borderTopColor; }), rims, knob: knob ? getComputedStyle(knob).backgroundColor : null, numFill: num ? getComputedStyle(num).webkitTextFillColor : null, numBg: num ? getComputedStyle(num).backgroundImage : null };
+          return { matches: matchMedia("(forced-colors: active)").matches, canvasText, highlight, cards: cards.length, borders: cards.map((c) => { const s = getComputedStyle(c); return s.borderTopStyle + " " + s.borderTopWidth + " " + s.borderTopColor; }), rims, knob: knob ? getComputedStyle(knob).backgroundColor : null, numFill: num ? getComputedStyle(num).webkitTextFillColor : null, numBg: num ? getComputedStyle(num).backgroundImage : null, lensToken: getComputedStyle(document.documentElement).getPropertyValue("--glass-lens").trim(), lens: [document.querySelector(".ak-dock-head"), ...document.querySelectorAll(".ui-seg-knob")].map((e) => getComputedStyle(e).backdropFilter) };
         });
         ok(t.matches, `${tag}: forced colours are emulated`);
         ok(t.cards > 0, `${tag}: the page has tiles to check (${t.cards})`);
         eq([...new Set(t.borders)], [`solid 1px ${t.canvasText}`], `${tag}: every glass tile has a 1 px CanvasText border`);
         eq([...new Set(t.rims)], ["none"], `${tag}: every rim computes display: none`);
+        eq([t.lensToken, ...new Set(t.lens)], ["none", "none"], `${tag}: the lens is dropped (the token and every refracting surface compute none)`);
         if (t.knob !== null) eq(t.knob, t.highlight, `${tag}: the selected segment is Highlight`);
         if (t.numFill !== null) ok(t.numFill === t.canvasText && t.numBg === "none", `${tag}: .ui-num paints CanvasText with no gradient`);
       }
       eq(errors, [], `${tag}: no page error`);
-      await context.close();
+      await clearMode(page, mode);
     }
+    await context.close();
   }
 }
 
@@ -213,23 +224,123 @@ async function open(kind, viewport, extra = {}) {
   await context.close();
 }
 
+const trial = async (name, run) => {
+  let failed = null;
+  try { await run(); } catch (error) { failed = String(error.message || error).split("\n")[0].slice(0, 160); }
+  ok(failed !== null, `PLANTED WRONG BUILD "${name}" is caught`);
+  console.log(`    ${name}: ${failed ? "caught (" + failed + ")" : "NOT CAUGHT"}`);
+};
+
+const LENS_SURFACES = [".ui-seg-knob", ".ak-dock-head", ".hm-pager button[aria-current]", ".hm-ask"];
+
+async function lensChecks(page, tag) {
+  const state = await page.evaluate(() => ({ supports: CSS.supports("backdrop-filter", 'url("#fx-lens")'), knob: getComputedStyle(document.querySelector(".ui-seg-knob")).backdropFilter, head: getComputedStyle(document.querySelector(".ak-dock-head")).backdropFilter }));
+  const want = state.supports ? /^url\("#fx-lens"\) blur\(12px\) saturate\((1\.6|160%)\)$/ : /^blur\(12px\) saturate\((1\.6|160%)\)$/;
+  for (const [name, v] of [["knob", state.knob], ["dock head", state.head]]) {
+    ok(want.test(v), `${tag}: the ${name} computes ${state.supports ? "the lens, then blur 12 and saturate 160%" : "plain blur 12 and saturate 160%, the engine having no url() backdrop filter"} (${v})`);
+  }
+  if (!state.supports) {
+    console.log(`    ${tag}: this engine does not parse backdrop-filter: url("#fx-lens"), so @supports keeps the plain blur and the lens is recorded as its fallback`);
+    return { bends: false };
+  }
+  const probe = await measureLens(page, "probe");
+  const moved = probe.lines.filter((l) => l.shift !== null && Math.abs(l.shift) >= 2);
+  if (moved.length < 3) {
+    console.log(`    ${tag}: a control filter moved ${moved.length} of ${probe.lines.length} probe lines, so this engine parses the lens and does not bend a backdrop with it: the lens is recorded as its fallback`);
+    return { bends: false };
+  }
+  const knob = await measureLens(page, "knob");
+  const edge = knob.lines.filter((l) => l.edge >= 4 && l.edge <= 12);
+  const centre = knob.lines.filter((l) => l.mid <= knob.width * 0.2);
+  ok(edge.length >= 1, `${tag}: the grid has a line within 12 px of the knob's rim (${edge.length})`);
+  ok(centre.length >= 3, `${tag}: the grid has lines across the knob's middle (${centre.length})`);
+  const rim = edge.map((l) => Math.abs(l.shift === null ? 0 : l.shift));
+  const mid = centre.map((l) => Math.abs(l.shift === null ? 99 : l.shift));
+  ok(Math.min(...rim) >= 2, `${tag}: every grid line within 12 px of the knob's rim moves at least 2 px (${edge.map((l) => l.shift).join(", ")})`);
+  ok(Math.max(...mid) < 0.5, `${tag}: no grid line in the middle fifth either side of the knob's centre moves 0.5 px (${centre.map((l) => l.shift).join(", ")})`);
+  return { bends: true, rim, mid };
+}
+
+let engineBends = null;
+
+{
+  console.log("  refraction on four surfaces:");
+  const SHELL = /<body class="flows-body has-rail"/;
+  const shells = [];
+  for (const [name, fn] of Object.entries(PAGES.FLOWS_PAGES)) {
+    if (typeof fn !== "function" || !/Page$/.test(name)) continue;
+    const html = String(fn({ username: "tester", ticker: "AAPL", net: true, scenes: name === "tickerPage" }));
+    const lens = (html.match(/id="fx-lens"/g) || []).length;
+    const sprite = html.includes('id="g-home"');
+    eq(lens, sprite ? 1 : 0, `${name}: #fx-lens is emitted once on a page with the glyph sprite and nowhere else`);
+    if (sprite) {
+      shells.push(name);
+      ok(/<\/symbol><\/svg>\s*<svg class="ui-sprite"[^>]*><filter id="fx-lens"/.test(html), `${name}: the filter follows the glyph sprite directly`);
+      ok(SHELL.test(html), `${name}: and sits in a shell page`);
+    }
+  }
+  ok(shells.length >= 12, `the lens reached every shell page (${shells.length} pages)`);
+
+  const html = PAGES.FLOWS_PAGES.sidePage({ username: "tester", side: "long" });
+  const filter = /<filter id="fx-lens"([^>]*)>(.*?)<\/filter>/s.exec(html);
+  ok(filter, "the page carries the filter");
+  ok(/x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB"/.test(filter[1]), "the filter region is the box plus 5% on every side, in sRGB so the map is not linearised");
+  ok(/<feImage href="([^"]+)" preserveAspectRatio="none" result="m"\/>/.test(filter[2]), "the map is an feImage stretched with preserveAspectRatio none");
+  eq(/<feImage href="([^"]+)"/.exec(filter[2])[1], PAGES.lensMap(), "the data URI is lensMap() and nothing else, so the test rebuilds what the page ships");
+  ok(/<feDisplacementMap in="SourceGraphic" in2="m" scale="14" xChannelSelector="R" yChannelSelector="G"\/>/.test(filter[2]), "the displacement reads red for x and green for y at scale 14");
+  const map = decodeURIComponent(PAGES.lensMap().slice("data:image/svg+xml,".length));
+  eq([...map.matchAll(/stop-color="rgb\((\d+),(\d+),(\d+)\)"/g)].map((m) => [m[1], m[2], m[3]].join(",")), ["40,0,0", "128,0,0", "128,0,0", "216,0,0", "0,40,0", "0,128,0", "0,128,0", "0,216,0"], "the map is flat at 128 across the middle and runs to 40 and 216 at the rim, red along x and green along y");
+  ok(/mix-blend-mode:screen/.test(map), "the two ramps are summed with screen, so each keeps its own channel");
+
+  const csp = /"img-src ([^"]+)"/.exec(workerSource());
+  ok(csp && /(^|\s)data:(\s|$)/.test(csp[1]), "the page's CSP lets img-src load a data: URI, which is how the lens's displacement map reaches feImage in production");
+  const kitAt = CSS.indexOf(".ds-mod {");
+  const first = CSS.slice(0, kitAt);
+  ok(/\n  --glass-lens: blur\(12px\) saturate\(160%\);\n/.test(first), "outside the gate --glass-lens is the plain blur 12 and saturate 160% of the bar controls");
+  ok(/@supports \(backdrop-filter: url\("#fx-lens"\)\) \{\n  :root \{ --glass-lens: url\("#fx-lens"\) blur\(12px\) saturate\(160%\); \}\n\}/.test(first), "the lens is let in by @supports on the property and its value, never by an engine test");
+  const reduced = /@media \(prefers-reduced-transparency: reduce\), \(prefers-contrast: more\) \{[^@]*?\n\}/.exec(first);
+  ok(reduced && /--glass-lens: none;/.test(reduced[0]), "reduced transparency and high contrast drop the lens in the block that drops the blur");
+  ok(first.indexOf('@supports (backdrop-filter: url("#fx-lens"))') < first.indexOf("@media (prefers-reduced-transparency"), "the gate comes before the reduced-transparency block, so none wins");
+  const forced = first.slice(first.lastIndexOf("@media (forced-colors: active)"));
+  ok(/:root \{ --glass-lens: none; \}/.test(forced), "forced colours drop the lens");
+  const users = [];
+  const SHEETS = fs.readdirSync(path.join(ROOT, "assets/css")).filter((f) => f.endsWith(".css"));
+  for (const f of SHEETS) {
+    const text = fs.readFileSync(path.join(ROOT, "assets/css", f), "utf8");
+    for (const m of text.matchAll(/([^{}]+)\{[^{}]*backdrop-filter: var\(--glass-lens\)[^{}]*\}/g)) users.push(...m[1].split(",").map((x) => x.trim()).filter(Boolean));
+    if (f !== "flows.css") ok(!/#fx-lens/.test(text), `${f} names no lens filter`);
+  }
+  eq(users.filter((x) => !LENS_SURFACES.includes(x)), [], "only the four named surfaces take the lens (the knob, the dock head, the pager's selected button and the Neuron tile's pill)");
+  ok(users.includes(".ui-seg-knob") && users.includes(".ak-dock-head"), "the knob and the dock head, the two that exist in this lane, take it");
+  const writes = [...first.matchAll(/(?<=[;{]\s*)(-webkit-)?backdrop-filter: var\(--glass-lens\)/g)].length;
+  eq(writes, 4, "each of the two surfaces writes the -webkit- pair and the standard property, and nothing else");
+
+  {
+    const { context, page } = await openLensRig(browser);
+    const result = await lensChecks(page, "lens rig");
+    engineBends = result.bends;
+    if (result.bends) console.log(`    lens rig: rim lines moved ${result.rim.join(", ")} px, middle lines ${result.mid.join(", ")} px`);
+    await context.close();
+  }
+  for (const mode of ["reduced-transparency", "contrast-more", "forced"]) {
+    const { context, page } = await openLensRig(browser);
+    await applyMode(page, mode);
+    const v = await page.evaluate(() => ({ token: getComputedStyle(document.documentElement).getPropertyValue("--glass-lens").trim(), knob: getComputedStyle(document.querySelector(".ui-seg-knob")).backdropFilter, head: getComputedStyle(document.querySelector(".ak-dock-head")).backdropFilter }));
+    eq([v.token, v.knob, v.head], ["none", "none", "none"], `lens rig ${mode}: the token, the knob and the dock head compute none`);
+    await context.close();
+  }
+}
+
 {
   console.log("  planted wrong builds (each must fail the checks above):");
-  const trial = async (name, run) => {
-    let failed = null;
-    try { await run(); } catch (error) { failed = String(error.message || error).split("\n")[0].slice(0, 160); }
-    ok(failed !== null, `PLANTED WRONG BUILD "${name}" is caught`);
-    console.log(`    ${name}: ${failed ? "caught (" + failed + ")" : "NOT CAUGHT"}`);
-  };
   for (const name of ["label-3 back at 0.52 with the sheen at 0.065", "mat-regular alpha 0.50", "aurora alphas doubled", "a sheen of 0.08 reaching 60%"]) {
     await trial(name, async () => {
       const { context, page } = await open("home", XL, { patch: patchOf(name) });
       try {
         const material = await measureMaterial(page);
-        const textRuns = await measureText(page);
-        const lows = low(material.runs).concat(low(textRuns));
         const over = material.tiles.filter((t) => t.pool === BLUE_POOL && (!within(t.band, BAND_BUDGET) || !within(t.body, BODY_BUDGET))).map((t) => `pool ${t.pool} band rgb(${t.band.join(",")}) body rgb(${t.body.join(",")})`);
-        assert.deepEqual(lows.concat(over), [], "contrast and budget");
+        assert.deepEqual(low(material.runs).concat(over), [], "contrast and budget");
+        assert.deepEqual(low(await measureText(page)), [], "contrast and budget");
       } finally { await context.close(); }
     });
   }
@@ -251,7 +362,29 @@ async function open(kind, viewport, extra = {}) {
       assert.deepEqual([...new Set(rims)], ["none"], "rims");
     } finally { await context.close(); }
   });
-  eq(Object.keys(MUTANTS).length, 6, "six planted wrong builds are declared and each was run");
+  const lensM = lensMutants(PAGES.lensMap);
+  for (const [name, opts] of Object.entries(lensM)) {
+    const gate = /reduced|forced/.test(name);
+    if (!gate && !engineBends) {
+      checks++;
+      console.log(`    ${name}: not run, this engine does not bend a backdrop with the lens`);
+      continue;
+    }
+    await trial(name, async () => {
+      const { context, page } = await openLensRig(browser, opts);
+      try {
+        if (gate) {
+          await applyMode(page, /forced/.test(name) ? "forced" : "reduced-transparency");
+          const v = await page.evaluate(() => [getComputedStyle(document.documentElement).getPropertyValue("--glass-lens").trim(), getComputedStyle(document.querySelector(".ui-seg-knob")).backdropFilter]);
+          assert.deepEqual(v, ["none", "none"], "the lens is dropped");
+        } else {
+          const r = await lensChecks(page, "planted lens");
+          assert.ok(r.bends, "the lens bends the backdrop");
+        }
+      } finally { await context.close(); }
+    });
+  }
+  eq(Object.keys(MUTANTS).length + Object.keys(lensM).length, 13, "thirteen planted wrong builds are declared and each was run");
 }
 
 {
@@ -274,4 +407,4 @@ async function open(kind, viewport, extra = {}) {
 
 await browser.close();
 const ms = Date.now() - t0;
-console.log(`✓ flows-glass-render: ${checks} assertions — Home, the long board, Market and the ticker at 1920x1080, 1440x820 and 390x844 from fixtures with no server: every visible text run measured against the brightest pixel under it with the ink made transparent, the material probed with every budget ink on the aurora pools, the floating sidebar, the tile layers, the bar controls and the segmented knob, the three fallbacks and forced colours, reduced motion, and six planted wrong builds each caught; ${Math.round(ms / 1000)} s, ${Math.round(pageTime.reduce((a, b) => a + b, 0) / pageTime.length)} ms a page`);
+console.log(`✓ flows-glass-render: ${checks} assertions — Home, the long board, Market and the ticker at 1920x1080, 1440x820 and 390x844 from fixtures with no server: every visible text run measured against the brightest pixel under it with the ink made transparent, the material probed with every budget ink on the aurora pools, the floating sidebar, the tile layers, the bar controls and the segmented knob, the three fallbacks and forced colours, reduced motion, the lens that refracts four surfaces behind @supports, measured on a hairline grid, and thirteen planted wrong builds each caught; ${Math.round(ms / 1000)} s, ${Math.round(pageTime.reduce((a, b) => a + b, 0) / pageTime.length)} ms a page`);

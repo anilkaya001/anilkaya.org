@@ -106,13 +106,30 @@ export async function applyMode(page, mode) {
   } else if (mode === "contrast-more") {
     await page.emulateMedia({ contrast: "more" });
   } else if (mode === "no-backdrop") {
-    await page.addStyleTag({ content: ":root { --mat-regular: var(--glass-solid); --mat-thick: var(--glass-solid-thick); --mat-chrome: var(--glass-solid-chrome); --mat-side: var(--glass-solid-chrome); --mat-thin: var(--glass-solid); }" });
+    await page.evaluate((css) => { const s = document.createElement("style"); s.dataset.glassMode = "no-backdrop"; s.textContent = css; document.head.append(s); }, ":root { --mat-regular: var(--glass-solid); --mat-thick: var(--glass-solid-thick); --mat-chrome: var(--glass-solid-chrome); --mat-side: var(--glass-solid-chrome); --mat-thin: var(--glass-solid); }");
   } else if (mode === "forced") {
     await page.emulateMedia({ forcedColors: "active" });
   } else {
     throw new Error("glass-world: unknown mode " + mode);
   }
   await page.waitForTimeout(250);
+}
+
+export async function clearMode(page, mode) {
+  if (mode === "default") return;
+  if (mode === "reduced-transparency") {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "no-preference" }] });
+  } else if (mode === "contrast-more") {
+    await page.emulateMedia({ contrast: "no-preference" });
+  } else if (mode === "no-backdrop") {
+    await page.evaluate(() => document.querySelector("style[data-glass-mode='no-backdrop']")?.remove());
+  } else if (mode === "forced") {
+    await page.emulateMedia({ forcedColors: "none" });
+  } else {
+    throw new Error("glass-world: unknown mode " + mode);
+  }
+  await page.waitForTimeout(150);
 }
 
 const collectRuns = () => {
@@ -143,6 +160,7 @@ const collectRuns = () => {
     return bits.join(" > ");
   };
   const runs = [];
+  const nodes = (window.__glassNodes = []);
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -184,12 +202,30 @@ const collectRuns = () => {
     const boxes = rects.filter((r) => r.w >= 1 && r.h >= 1);
     if (!boxes.length) continue;
     seen.add(node);
+    nodes.push(node);
+    const whole = range.getBoundingClientRect();
     const size = parseFloat(cs.fontSize);
     const weight = parseInt(cs.fontWeight, 10) || 400;
-    runs.push({ text: node.data.replace(/\s+/g, " ").trim().slice(0, 40), path: pathOf(el), size, weight, need: size >= 24 || (size >= 18.66 && weight >= 600) ? 3 : 4.5, ink, stops, opacity, boxes, fixed, probeInk: el.dataset.ink || null, pool: el.closest("[data-pool]") ? el.closest("[data-pool]").dataset.pool : null, row: el.closest("[data-row]") ? el.closest("[data-row]").dataset.row : null });
+    runs.push({ raw: [whole.left, whole.top, whole.width, whole.height], text: node.data.replace(/\s+/g, " ").trim().slice(0, 40), path: pathOf(el), size, weight, need: size >= 24 || (size >= 18.66 && weight >= 600) ? 3 : 4.5, ink, stops, opacity, boxes, fixed, probeInk: el.dataset.ink || null, pool: el.closest("[data-pool]") ? el.closest("[data-pool]").dataset.pool : null, row: el.closest("[data-row]") ? el.closest("[data-row]").dataset.row : null });
   }
   return runs;
 };
+
+const runsHeld = (raws) => {
+  const nodes = window.__glassNodes || [];
+  if (nodes.length !== raws.length) return false;
+  for (let i = 0; i < nodes.length; i++) {
+    if (!nodes[i].isConnected) return false;
+    const range = document.createRange();
+    range.selectNodeContents(nodes[i]);
+    const r = range.getBoundingClientRect();
+    const was = raws[i];
+    if (Math.abs(r.left - was[0]) > 0.75 || Math.abs(r.top - was[1]) > 0.75 || Math.abs(r.width - was[2]) > 0.75 || Math.abs(r.height - was[3]) > 0.75) return false;
+  }
+  return true;
+};
+
+const forgetRuns = () => { for (const n of window.__glassNodes || []) window.__glassSeen.delete(n); };
 
 const judgeRuns = async ({ png, runs }) => {
   const img = new Image();
@@ -228,8 +264,10 @@ export async function measureText(page, { scrollSteps = 3 } = {}) {
   await page.evaluate(() => { window.__glassSeen = new WeakSet(); window.scrollTo(0, 0); });
   const all = [];
   for (let step = 0; step <= scrollSteps; step++) {
-    const runs = await page.evaluate(collectRuns);
-    if (runs.length) {
+    let judged = null;
+    for (let attempt = 0; attempt < 6 && judged === null; attempt++) {
+      const runs = await page.evaluate(collectRuns);
+      if (!runs.length) { judged = []; break; }
       await page.evaluate((css) => {
         const s = document.createElement("style");
         s.id = "glassProbeStyle";
@@ -240,9 +278,11 @@ export async function measureText(page, { scrollSteps = 3 } = {}) {
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
       const png = (await page.screenshot({ type: "png", animations: "disabled", caret: "hide" })).toString("base64");
       await page.evaluate(() => { document.documentElement.removeAttribute("data-glass-probe"); document.getElementById("glassProbeStyle")?.remove(); for (const e of document.querySelectorAll("[data-glass-grad]")) e.removeAttribute("data-glass-grad"); });
-      const judged = await page.evaluate(judgeRuns, { png, runs });
-      for (const j of judged) all.push({ ...j, step });
+      if (await page.evaluate(runsHeld, runs.map((r) => r.raw))) judged = await page.evaluate(judgeRuns, { png, runs });
+      else { await page.evaluate(forgetRuns); await page.waitForTimeout(300); }
     }
+    if (judged === null) throw new Error("glass-world: the layout kept moving, so no text run could be placed on its pixels");
+    for (const j of judged) all.push({ ...j, step });
     const more = await page.evaluate(() => {
       const vh = document.documentElement.clientHeight;
       const max = document.documentElement.scrollHeight - vh;
@@ -344,3 +384,126 @@ export async function measureMaterial(page) {
   }
   return { pools, runs: judged.map((j) => ({ ...j, probe: true })), tiles };
 }
+
+const LENS_RIG_CSS = "#lensRig { position: fixed; left: 24px; top: 24px; z-index: 2147483000; display: grid; gap: 24px; padding: 20px; background: #07090e; } #lensRig[data-lens='off'] { --glass-lens: none; } #lensRig[data-lens='on'] { --glass-lens: url(\"#fx-lens\"); } #lensRig .ui-seg { background-color: #000; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensRig .ui-seg-i { color: transparent; } #lensRig .ui-seg-knob { transition: none; } #lensGrid { position: relative; width: 220px; height: 70px; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensProbe { position: absolute; inset: 5px 30px; } #lensRig[data-lens='on'] #lensProbe { -webkit-backdrop-filter: url(#lensProbeFx); backdrop-filter: url(#lensProbeFx); }";
+
+const buildLensRig = (css) => {
+  const host = document.createElement("div");
+  host.id = "lensRig";
+  host.dataset.lens = "prod";
+  host.innerHTML = '<div class="ui-seg" id="lensSeg"><span class="ui-seg-knob" aria-hidden="true"></span><button class="ui-seg-i" type="button" role="tab" aria-selected="true">Reading window</button><button class="ui-seg-i" type="button" role="tab" aria-selected="false">Other</button></div><div id="lensGrid"><div id="lensProbe"></div></div><svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="lensProbeFx" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB"><feFlood flood-color="rgb(200,128,128)" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></svg>';
+  const style = document.createElement("style");
+  style.id = "lensRigStyle";
+  style.textContent = css;
+  document.head.append(style);
+  document.body.append(host);
+  const first = host.querySelector(".ui-seg-i");
+  const knob = host.querySelector(".ui-seg-knob");
+  knob.style.left = first.offsetLeft + "px";
+  knob.style.width = first.offsetWidth + "px";
+  const seg = host.querySelector(".ui-seg");
+  seg.style.backgroundPositionX = (((first.offsetLeft + 5) % 10) + 10) % 10 + "px";
+};
+
+export async function openLensRig(browser, { htmlPatch = null, patch = null, viewport = VIEWPORTS[1] } = {}) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, reducedMotion: "reduce" });
+  const page = await context.newPage();
+  let html = PAGES.FLOWS_PAGES.sidePage({ username: "test", side: "long" });
+  for (const [from, to] of htmlPatch || []) {
+    if (!html.includes(from)) throw new Error("mutant anchor missing: " + from.slice(0, 60));
+    html = html.replaceAll(from, to);
+  }
+  await page.route("**/*", async (route) => {
+    const u = new URL(route.request().url());
+    if (u.pathname.startsWith("/assets/") && /\.(css|woff2)$/.test(u.pathname)) {
+      const f = path.join(ROOT, u.pathname);
+      if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
+      if (patch && patch[u.pathname]) {
+        let src = fs.readFileSync(f, "utf8");
+        for (const [from, to] of patch[u.pathname]) { if (!src.includes(from)) throw new Error("mutant anchor missing: " + from); src = src.replaceAll(from, to); }
+        return route.fulfill({ body: src, contentType: MIME[path.extname(f)] });
+      }
+      return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
+    }
+    if (u.pathname.startsWith("/flows/")) return route.fulfill({ contentType: "text/html; charset=utf-8", body: html });
+    return route.fulfill({ status: 404, body: "" });
+  });
+  await page.goto(ORIGIN + "/flows/long/");
+  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(buildLensRig, LENS_RIG_CSS);
+  await page.waitForTimeout(150);
+  return { context, page, html };
+}
+
+const lineShifts = async ({ ref, lens }) => {
+  const dec = async (b64) => {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = "data:image/png;base64," + b64; });
+    const cv = document.createElement("canvas");
+    cv.width = img.width; cv.height = img.height;
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(img, 0, 0);
+    return cx.getImageData(0, 0, img.width, img.height);
+  };
+  const A = await dec(ref), B = await dec(lens);
+  const W = A.width;
+  const prof = (im) => {
+    const y0 = Math.floor(im.height * 0.35), y1 = Math.max(y0 + 1, Math.ceil(im.height * 0.65));
+    const out = new Array(im.width).fill(0);
+    for (let x = 0; x < im.width; x++) {
+      let sum = 0;
+      for (let y = y0; y < y1; y++) { const i = (y * im.width + x) * 4; sum += 0.2126 * im.data[i] + 0.7152 * im.data[i + 1] + 0.0722 * im.data[i + 2]; }
+      out[x] = sum / (y1 - y0);
+    }
+    return out;
+  };
+  const pa = prof(A), pb = prof(B);
+  const floor = (p) => p.slice().sort((a, b) => a - b)[Math.floor(p.length * 0.25)];
+  const fa = floor(pa), fb = floor(pb);
+  const centroid = (p, f, lo, hi) => {
+    let sw = 0, sx = 0;
+    for (let x = Math.max(0, lo); x <= Math.min(W - 1, hi); x++) { const w = Math.max(0, p[x] - f - 12); sw += w; sx += w * x; }
+    return sw > 0 ? sx / sw : null;
+  };
+  const peaks = (p, f) => {
+    const out = [];
+    let last = -9;
+    for (let x = 1; x < W - 1; x++) if (p[x] - f > 80 && p[x] >= p[x - 1] && p[x] > p[x + 1] && x - last > 3) { out.push(centroid(p, f, x - 2, x + 2)); last = x; }
+    return out;
+  };
+  const ra = peaks(pa, fa), rb = peaks(pb, fb);
+  const lines = [];
+  for (const c0 of ra) {
+    let best = null;
+    for (const c1 of rb) if (Math.abs(c1 - c0) <= 6 && (best === null || Math.abs(c1 - c0) < Math.abs(best - c0))) best = c1;
+    lines.push({ x: Math.round(c0 * 100) / 100, edge: Math.min(c0, W - 1 - c0), left: c0, mid: Math.abs(c0 - (W - 1) / 2), shift: best === null ? null : Math.round((best - c0) * 100) / 100 });
+  }
+  return { width: W, lines };
+};
+
+export async function measureLens(page, target) {
+  const sel = target === "probe" ? "#lensProbe" : ".ui-seg-knob";
+  const shoot = async (state) => {
+    await page.evaluate((st) => { document.getElementById("lensRig").dataset.lens = st; }, state);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const box = await page.evaluate((q) => { const r = document.querySelector("#lensRig " + q).getBoundingClientRect(); const x = Math.floor(r.left); return { x, y: Math.floor(r.top), width: Math.ceil(r.right) - x, height: Math.ceil(r.height) }; }, sel);
+    return (await page.screenshot({ clip: box, type: "png", animations: "disabled" })).toString("base64");
+  };
+  const ref = await shoot("off");
+  const lens = await shoot("on");
+  const out = await page.evaluate(lineShifts, { ref, lens });
+  await page.evaluate(() => { document.getElementById("lensRig").dataset.lens = "prod"; });
+  return out;
+}
+
+const FLAT_MAP = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="rgb(128,128,0)"/></svg>');
+const swap = (map, from, to) => map.replaceAll(encodeURIComponent(from), encodeURIComponent(to));
+export const lensMutants = (lensMap) => ({
+  "the displacement map is flat": { htmlPatch: [[lensMap(), FLAT_MAP]] },
+  "the map pushes the middle of the box": { htmlPatch: [[lensMap(), swap(lensMap(), "rgb(128,0,0)", "rgb(176,0,0)")]] },
+  "the map is gentle at the rim": { htmlPatch: [[lensMap(), swap(swap(lensMap(), "rgb(40,0,0)", "rgb(110,0,0)"), "rgb(216,0,0)", "rgb(146,0,0)")]] },
+  "the lens filter is not emitted": { htmlPatch: [[/<svg class="ui-sprite"[^>]*><filter id="fx-lens".*?<\/filter><\/svg>/s.exec(PAGES.FLOWS_PAGES.sidePage({ username: "test", side: "long" }))[0], ""]] },
+  "the @supports gate is gone": { patch: { "/assets/css/flows.css": [["@supports (backdrop-filter: url(\"#fx-lens\")) {\n  :root { --glass-lens: url(\"#fx-lens\") blur(12px) saturate(160%); }\n}\n\n", ""]] } },
+  "the lens survives reduced transparency": { patch: { "/assets/css/flows.css": [["    --glass-knob: var(--fill-1);\n    --glass-lens: none;\n", "    --glass-knob: var(--fill-1);\n"]] } },
+  "the lens survives forced colours": { patch: { "/assets/css/flows.css": [["  :root { --glass-lens: none; }\n  .ui-card, .ft-strip", "  .ui-card, .ft-strip"]] } },
+});
