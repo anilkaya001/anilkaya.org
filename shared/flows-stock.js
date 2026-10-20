@@ -40,7 +40,7 @@ export const STOCK_NOTES = Object.freeze({
   oiDeltas:
     "The vendor's largest contract-level open-interest changes in this " +
     "name. An open-interest change compares two clearing snapshots, so it " +
-    "is a settled fact a day late by construction — never today's prints — " +
+    "is a settled fact a day late by construction — never today's trading — " +
     "and the vendor's selection rule for which contracts surface here is " +
     "not published.",
   volContext:

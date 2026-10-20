@@ -5160,7 +5160,7 @@
    "notes": {
     "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
     "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's prints.",
+    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
     "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
     "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
@@ -6789,7 +6789,7 @@
    "notes": {
     "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
     "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's prints.",
+    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
     "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
     "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",

@@ -36,7 +36,7 @@ export const PULSE_NOTES = Object.freeze({
     "The vendor's selection and ordering, under a rule it does not " +
     "publish — so this ranks inside what the vendor chose to surface, not " +
     "the chain universe. Open-interest change compares two clearing " +
-    "snapshots, so it is a day late by construction, never today's prints.",
+    "snapshots, so it is a day late by construction, never today's trading.",
   netImpact:
     "Sign is the vendor's attribution against the quote. Its definition " +
     "of impact is not reproducible from this payload.",

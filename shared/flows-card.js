@@ -1876,7 +1876,7 @@ function oiDeltasLead(panel) {
     `surfaced with a contract count, open interest ${side}: ` +
     `${say(c)} across ${calls.length} call line${calls.length === 1 ? "" : "s"} ` +
     `against ${say(pu)} across ${puts.length} put line${puts.length === 1 ? "" : "s"} ` +
-    `— one clearing day late, never today's prints.`,
+    `— one clearing day late, never today's trading.`,
     {
       counted: rows.length,
       callLines: calls.length,
