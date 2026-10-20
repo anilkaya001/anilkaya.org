@@ -697,7 +697,7 @@ const MIN = 60 * 1000;
 
   const health = read("scripts/flows-legs/health.mjs");
   const heads = [...health.matchAll(/(?:HEALTH: |"HEALTH: )([^\n]*)/g)].map((m) => m[0].replace(/^"/, "").replace(/\$\{[^}]*(?:\{[^}]*\}[^}]*)*\}/g, "1"))
-    .filter((t) => !/^HEALTH: (?:1 |1\.|\/|\$\{)/.test(t) && !t.includes("HEALTH_CODES"));
+    .filter((t) => !/^HEALTH: (?:1[ .,]|\/|\$\{)/.test(t) && !t.includes("HEALTH_CODES"));
   const unmatched = heads.filter((t) => !HEALTH_CODES.some(([, re]) => re.test(t)));
   ok(heads.length >= 30 && unmatched.length === 0,
     `EVERY FAILURE LINE the gate can write belongs to a family (${heads.length} sources scanned); unmatched: ${unmatched.map((t) => t.slice(0, 70)).join(" | ") || "none"}`);
