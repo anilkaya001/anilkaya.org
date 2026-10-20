@@ -1,0 +1,542 @@
+{
+  "version": 1,
+  "registeredAt": "2026-10-11",
+  "outcomesSeen": false,
+  "targets": {
+    "version": 1,
+    "hash": "58c47b52126a134316e17773967383014549bf195243f131b7b3ad9cec925a94"
+  },
+  "protocol": {
+    "returnStartsAt": "flag-publication",
+    "fit": "past-only",
+    "universe": "as-of-date",
+    "pooling": "never-live-with-reconstruction",
+    "evaluationSample": "all-name-days-of-the-universe-as-of-each-date"
+  },
+  "multiplicity": {
+    "family": "all-tests-per-regime",
+    "procedure": "benjamini-hochberg",
+    "q": 0.05,
+    "size": 30,
+    "primary": {
+      "test": "S1.next",
+      "procedure": "holm",
+      "family": [
+        "S1.close",
+        "S1.next",
+        "S1.h5"
+      ],
+      "alpha": 0.05
+    }
+  },
+  "trials": {
+    "logged": true,
+    "rule": "every trial is a row of this registry or of a later version; none is run unregistered"
+  },
+  "signals": [
+    {
+      "id": "S1",
+      "name": "Alert activity",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "membership of the Alert tier of the flow radar in the name's session"
+    },
+    {
+      "id": "S2",
+      "name": "Screen activity",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "membership of the Screen tier of the flow radar in the name's session"
+    },
+    {
+      "id": "S3",
+      "name": "Alert direction with sign",
+      "reconstructible": true,
+      "direction": "signed",
+      "kind": "own",
+      "input": "the sign of the premium imbalance of an Alert, bullish or bearish by the convention of the product"
+    },
+    {
+      "id": "S4",
+      "name": "Burst on vendor alerts",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "a burst of the vendor's flow alerts for the name, beyond self-excitation"
+    },
+    {
+      "id": "S4p",
+      "name": "Burst on large prints",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "a burst of large option prints for the name, from the full tape"
+    },
+    {
+      "id": "S5",
+      "name": "Flow turned",
+      "reconstructible": true,
+      "direction": "signed",
+      "kind": "own",
+      "input": "a turn of the sign of the flow imbalance, with the false-turn budget printed"
+    },
+    {
+      "id": "S6",
+      "name": "Live opening bound",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "the arithmetic bound on the day's opening volume from the first minutes of the live tape"
+    },
+    {
+      "id": "S7",
+      "name": "Vendor sweep and volume over open interest",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "benchmark",
+      "input": "the vendor's own sweep-and-volume-over-open-interest rule"
+    },
+    {
+      "id": "S8",
+      "name": "Vendor unusual preset",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "benchmark",
+      "input": "the vendor's own unusual preset"
+    },
+    {
+      "id": "S10",
+      "name": "Contract-level unusual volume",
+      "reconstructible": true,
+      "direction": "unsigned",
+      "kind": "own",
+      "input": "unusual volume of a single contract against its own sampling noise"
+    }
+  ],
+  "horizons": [
+    {
+      "id": "close",
+      "sessions": 1,
+      "window": "flag-publication to the close of the flag's session",
+      "h": 1,
+      "start": "flag publication",
+      "note": "the window is shorter than a session and the h1 threshold is not scaled down, so the event is rarer than its nominal rate"
+    },
+    {
+      "id": "next",
+      "sessions": 1,
+      "window": "close of the flag's session to the next session's close",
+      "h": 1,
+      "start": "issue close",
+      "note": "exactly the h1 definition"
+    },
+    {
+      "id": "h5",
+      "sessions": 5,
+      "window": "close of the flag's session to the fifth session's close",
+      "h": 5,
+      "start": "issue close",
+      "note": "exactly the h5 definition"
+    }
+  ],
+  "tests": [
+    {
+      "id": "S1.close",
+      "signal": "S1",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S1.close",
+        "reconstructed": "S1r.close"
+      }
+    },
+    {
+      "id": "S1.next",
+      "signal": "S1",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S1.next",
+        "reconstructed": "S1r.next"
+      }
+    },
+    {
+      "id": "S1.h5",
+      "signal": "S1",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S1.h5",
+        "reconstructed": "S1r.h5"
+      }
+    },
+    {
+      "id": "S2.close",
+      "signal": "S2",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S2.close",
+        "reconstructed": "S2r.close"
+      }
+    },
+    {
+      "id": "S2.next",
+      "signal": "S2",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S2.next",
+        "reconstructed": "S2r.next"
+      }
+    },
+    {
+      "id": "S2.h5",
+      "signal": "S2",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S2.h5",
+        "reconstructed": "S2r.h5"
+      }
+    },
+    {
+      "id": "S3.close",
+      "signal": "S3",
+      "horizon": "close",
+      "target": {
+        "up": "move.k3.h1.up",
+        "down": "move.k3.h1.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S3.close",
+        "reconstructed": "S3r.close"
+      }
+    },
+    {
+      "id": "S3.next",
+      "signal": "S3",
+      "horizon": "next",
+      "target": {
+        "up": "move.k3.h1.up",
+        "down": "move.k3.h1.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S3.next",
+        "reconstructed": "S3r.next"
+      }
+    },
+    {
+      "id": "S3.h5",
+      "signal": "S3",
+      "horizon": "h5",
+      "target": {
+        "up": "move.k3.h5.up",
+        "down": "move.k3.h5.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S3.h5",
+        "reconstructed": "S3r.h5"
+      }
+    },
+    {
+      "id": "S4.close",
+      "signal": "S4",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4.close",
+        "reconstructed": "S4r.close"
+      }
+    },
+    {
+      "id": "S4.next",
+      "signal": "S4",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4.next",
+        "reconstructed": "S4r.next"
+      }
+    },
+    {
+      "id": "S4.h5",
+      "signal": "S4",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4.h5",
+        "reconstructed": "S4r.h5"
+      }
+    },
+    {
+      "id": "S4p.close",
+      "signal": "S4p",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4p.close",
+        "reconstructed": "S4pr.close"
+      }
+    },
+    {
+      "id": "S4p.next",
+      "signal": "S4p",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4p.next",
+        "reconstructed": "S4pr.next"
+      }
+    },
+    {
+      "id": "S4p.h5",
+      "signal": "S4p",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S4p.h5",
+        "reconstructed": "S4pr.h5"
+      }
+    },
+    {
+      "id": "S5.close",
+      "signal": "S5",
+      "horizon": "close",
+      "target": {
+        "up": "move.k3.h1.up",
+        "down": "move.k3.h1.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S5.close",
+        "reconstructed": "S5r.close"
+      }
+    },
+    {
+      "id": "S5.next",
+      "signal": "S5",
+      "horizon": "next",
+      "target": {
+        "up": "move.k3.h1.up",
+        "down": "move.k3.h1.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S5.next",
+        "reconstructed": "S5r.next"
+      }
+    },
+    {
+      "id": "S5.h5",
+      "signal": "S5",
+      "horizon": "h5",
+      "target": {
+        "up": "move.k3.h5.up",
+        "down": "move.k3.h5.dn"
+      },
+      "k": 3,
+      "series": {
+        "live": "S5.h5",
+        "reconstructed": "S5r.h5"
+      }
+    },
+    {
+      "id": "S6.close",
+      "signal": "S6",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S6.close",
+        "reconstructed": "S6r.close"
+      }
+    },
+    {
+      "id": "S6.next",
+      "signal": "S6",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S6.next",
+        "reconstructed": "S6r.next"
+      }
+    },
+    {
+      "id": "S6.h5",
+      "signal": "S6",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S6.h5",
+        "reconstructed": "S6r.h5"
+      }
+    },
+    {
+      "id": "S7.close",
+      "signal": "S7",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S7.close",
+        "reconstructed": "S7r.close"
+      }
+    },
+    {
+      "id": "S7.next",
+      "signal": "S7",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S7.next",
+        "reconstructed": "S7r.next"
+      }
+    },
+    {
+      "id": "S7.h5",
+      "signal": "S7",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S7.h5",
+        "reconstructed": "S7r.h5"
+      }
+    },
+    {
+      "id": "S8.close",
+      "signal": "S8",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S8.close",
+        "reconstructed": "S8r.close"
+      }
+    },
+    {
+      "id": "S8.next",
+      "signal": "S8",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S8.next",
+        "reconstructed": "S8r.next"
+      }
+    },
+    {
+      "id": "S8.h5",
+      "signal": "S8",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S8.h5",
+        "reconstructed": "S8r.h5"
+      }
+    },
+    {
+      "id": "S10.close",
+      "signal": "S10",
+      "horizon": "close",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S10.close",
+        "reconstructed": "S10r.close"
+      }
+    },
+    {
+      "id": "S10.next",
+      "signal": "S10",
+      "horizon": "next",
+      "target": {
+        "both": "move.k3.h1"
+      },
+      "k": 3,
+      "series": {
+        "live": "S10.next",
+        "reconstructed": "S10r.next"
+      }
+    },
+    {
+      "id": "S10.h5",
+      "signal": "S10",
+      "horizon": "h5",
+      "target": {
+        "both": "move.k3.h5"
+      },
+      "k": 3,
+      "series": {
+        "live": "S10.h5",
+        "reconstructed": "S10r.h5"
+      }
+    }
+  ]
+}
