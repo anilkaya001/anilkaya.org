@@ -1,4 +1,6 @@
 const NOW = () => {
+  const gc = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (k, ...r) { return /webgl/.test(String(k)) ? null : gc.call(this, k, ...r); };
   const TRIGGERS = ["hmChg", "hmEvents", "uaTimelineCard", "mkSectorsCard"];
   const Native = window.IntersectionObserver;
   if (Native && !Native.__belowFold) {

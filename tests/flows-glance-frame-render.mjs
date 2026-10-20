@@ -161,7 +161,7 @@ async function scenario(page) {
   r.noModelInRail = !/Glm|glm|neurons|56|@cf/.test(rt);
   r.noAgreeWording = !/\b(agree|agrees|agreed|against|unknown)\b/i.test(ft) && !/\d+ of \d+ packets/.test(ft);
   r.noBar = (await page.$$eval("#ftStrip *", (n) => n.filter((e) => /cov|bar|segment/i.test(String(e.className)) || e.getAttribute("role") === "img" || e.getAttribute("role") === "meter" || e.tagName === "PROGRESS" || e.tagName === "METER").length)) === 0;
-  r.stripParts = await page.evaluate(() => { const s = document.getElementById("ftStrip"); return !!s.querySelector(".ft-neuron") && /Neuron/.test(s.querySelector(".ft-strip-k").textContent) && /Pinned near/.test(s.querySelector(".ft-strip-line").textContent) && /Engine/.test(s.querySelector(".ft-eng").textContent) && s.children.length === 3; });
+  r.stripParts = await page.evaluate(() => { const s = document.getElementById("ftStrip"); return !!s.querySelector(".ft-neuron") && /Neuron/.test(s.querySelector(".ft-strip-k").textContent) && /Pinned near/.test(s.querySelector(".ft-strip-line").textContent) && /Engine/.test(s.querySelector(".ft-eng").textContent) && [...s.children].filter((c) => !c.classList.contains("nn-edge")).length === 3; });
   r.oneLine = await page.evaluate(() => { const l = document.querySelector(".ft-strip-line"); return l.getBoundingClientRect().height < 24 && getComputedStyle(l).textOverflow === "ellipsis"; });
 
   const dockBtns = await page.$$eval("#ftDock .ft-dock-b", (b) => b.map((x) => x.dataset.mod));
