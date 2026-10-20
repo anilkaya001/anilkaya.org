@@ -247,7 +247,7 @@ const dock = (active) => (active === "ask" ? "" : `
     <div id="askApp" data-mode="dock"></div>
   </div>
 </aside>
-<i class="nn-host nn-screen" id="nnScreen" data-nn="off" aria-hidden="true"><i class="nn-edge"><i></i><i></i><i></i><i></i></i></i>
+<i class="nn-host nn-veil" id="nnScreen" data-nn="off" aria-hidden="true"><i class="nn-edge"><i></i><i></i><i></i><i></i></i></i>
 <script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
 
 export function modelName(id) {

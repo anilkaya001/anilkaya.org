@@ -369,7 +369,7 @@ const contrastOf = (l) => (0.9 + 0.05) / (l + 0.05);
   await attempt("background-position ribbon", () => assert.ok(!/@keyframes[^{]*\{[^@]*background-position/.test(NN_CSS + "\n@keyframes nn-x { to { background-position: 100% 0; } }\n")));
   await attempt("up colour in ribbon", () => assert.ok(!/--nn-ribbon-x:[^;]*--up/.test(NN_CSS.replace("--nn-ribbon-x: linear-gradient(90deg, var(--nn-cyan)", "--nn-ribbon-x: linear-gradient(90deg, var(--up)"))));
   await attempt("glow 40px", () => assert.ok(/--nn-glow-w: 22px/.test(NN_CSS.replace("--nn-glow-w: 22px", "--nn-glow-w: 40px"))));
-  await attempt("glows visible under forced colours", () => assert.ok(/@media \(forced-colors: active\)[\s\S]*display: none/.test(NN_CSS.replace(".nn-edge, .nn-screen, .nn-orb > i, .nn-orb > canvas, .nn-orb::before, .nn-orb::after { display: none; }", ""))));
+  await attempt("glows visible under forced colours", () => assert.ok(/@media \(forced-colors: active\)[\s\S]*display: none/.test(NN_CSS.replace(".nn-edge, .nn-veil, .nn-orb > i, .nn-orb > canvas, .nn-orb::before, .nn-orb::after { display: none; }", ""))));
   await attempt("spoke on animationend", () => assert.ok(!/animationend/.test(UI_JS.replace("setTimeout(() => { if (el.dataset.nn", "el.addEventListener('animationend', () => { if (el.dataset.nn"))));
   await attempt("missing reduced-motion branch", () => assert.ok(/prefers-reduced-motion: reduce\) \{ \.nn-host\[data-nn="think"\]/.test(NN_CSS.replace("@media (prefers-reduced-motion: reduce)", "@media (prefers-reduced-motion: none)"))));
   await attempt("think not cleared at give-up", () => assert.ok(/NN\.strip = 0; return settle/.test(read("assets/js/flows-ticker.js").replace("NN.strip = 0; return settle", "return settle"))));
