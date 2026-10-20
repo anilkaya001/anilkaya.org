@@ -324,7 +324,7 @@ const mountProbe = ({ inks, nums }) => {
   host.id = "glassProbeHost";
   const style = document.createElement("style");
   style.id = "glassProbeHostStyle";
-  style.textContent = "#glassProbeHost { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; } #glassProbeHost .ui-card { position: absolute; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; padding: 4px 10px 8px; font: 400 13px / 1.3 var(--font-text); } #glassProbeHost .gp-row { display: flex; gap: 10px; white-space: nowrap; } #glassProbeHost .gp-num { font-weight: 600; } body > :not(#glassProbeHost) { visibility: hidden !important; }";
+  style.textContent = "#glassProbeHost { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; } #glassProbeHost .ui-card { position: absolute; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; padding: 4px 10px 8px; font: 400 13px / 1.3 var(--font-text); } #glassProbeHost .gp-row { display: flex; gap: 10px; white-space: nowrap; } #glassProbeHost .gp-num { font-weight: 600; } body > :not(#glassProbeHost) { display: none !important; }";
   document.head.append(style);
   const row = (cls) => {
     const r = document.createElement("div");
