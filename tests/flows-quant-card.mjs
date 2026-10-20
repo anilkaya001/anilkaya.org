@@ -11,7 +11,7 @@ import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { priceSale } from "../shared/flows-premium.js";
-import { bucketsOf, BUCKET_LINES } from "../shared/flows-quant-structures.js";
+import { bucketsOf, BUCKET_LINES, eventBucket } from "../shared/flows-quant-structures.js";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -27,6 +27,18 @@ const AS_OF_MS = TIME.closeUtcMs(SESSION);
 const SPOT = 100, R = 0.04;
 const SVI = Object.freeze({ a: 0.006, b: 0.06, rho: -0.55, m: 0.02, sigma: 0.12 });
 const code = (day) => day.slice(2).replace(/-/g, "");
+
+function sessionWorld(asOfDay, expiries, { sd, beta = 0, jumps = [] }) {
+  const asOfMs = TIME.closeUtcMs(asOfDay);
+  return expiries.map((expiry) => {
+    const T = TIME.yearFraction(asOfMs, expiry), hSessions = TIME.remainingSessions(asOfMs, expiry), tau = hSessions / TIME.SESSIONS_PER_YEAR;
+    const w = sd * sd * tau + beta * tau * tau + jumps.reduce((a, j) => a + (expiry >= j.date ? j.J * j.J : 0), 0);
+    return {
+      expiry, T, dte: TIME.calendarDays(asOfDay, expiry), sessions: TIME.sessionsBetween(asOfDay, expiry), hSessions, rows: [],
+      slice: { method: "flat", T, F: 100, D: 1, params: { sigma: Math.sqrt(w / T) } },
+    };
+  });
+}
 
 function vendorChain({ ticker = "SYN", expiries = ["2026-10-02", "2026-10-16", "2026-10-23", "2026-11-20", "2026-12-18"],
   step = 2.5, lo = 70, hi = 130, rate = R, pct = false, seed = "v" } = {}) {
@@ -281,13 +293,43 @@ const FACT_INPUT = () => ({
 });
 
 {
-  const flat = (expiry, T, vol) => ({ expiry, T, slice: { method: "flat", T, F: 100, D: 1, params: { sigma: vol } } });
-  const j = QC.eventJump([flat("2026-10-16", 25 / 365, 0.3), flat("2026-10-23", 32 / 365, 0.45), flat("2026-11-20", 60 / 365, 0.38)], { date: "2026-10-20" });
-  const w1 = 0.45 * 0.45 * 32 / 365, w2 = 0.38 * 0.38 * 60 / 365, sd2 = (w2 - w1) / ((60 - 32) / 365);
-  near(j.J, Math.sqrt(w1 - sd2 * 32 / 365), 1e-9, "the event jump is the first post-event slice's variance above the diffusion the next slice implies (E2)");
+  const SD = 0.4, J = 0.05;
+  const event = { date: "2026-10-20" };
+  const built = sessionWorld(SESSION, ["2026-10-16", "2026-10-23", "2026-11-20"], { sd: SD, jumps: [{ date: event.date, J }] });
+  const j = QC.eventJump(built, event);
+  near(j.J, J, 1e-6, "the event jump is the first post-event slice's model-free variance above the diffusion the next slice implies, on the session clock (E2)");
+  near(j.diffusiveVol, SD, 1e-6, "with the diffusion read off the same two slices");
+  near(j.meanAbs, J * Math.sqrt(2 / Math.PI), 1e-6, "and its mean absolute move under the normal convention kept for the strait case");
   eq([j.front, j.back], ["2026-10-23", "2026-11-20"], "read from the two expiries after the event");
-  eq(QC.eventJump([flat("2026-10-23", 32 / 365, 0.3), flat("2026-11-20", 60 / 365, 0.3)], { date: "2026-10-20" }).J, null,
-     "and a flat term structure prices no jump, which is absent rather than zero");
+  eq(QC.eventJump(sessionWorld(SESSION, ["2026-10-23", "2026-11-20"], { sd: SD }), event).J, null,
+     "and a term structure flat in session time prices no jump, which is absent rather than zero");
+  eq(QC.eventJump(built.map((e) => ({ ...e, hSessions: undefined })), event).why, "event.clock",
+     "an expiry with no session count has no clock and no jump, and says so");
+}
+
+{
+  const SD = 0.4, J = 0.05;
+  const CASES = [
+    ["asOf Fri 2026-10-09, event Mon 10-12 pre-open; front Mon 10-12, back Fri 10-16", "2026-10-09", "2026-10-12", "2026-10-12", "2026-10-16", -29.9],
+    ["asOf Fri 2026-10-09, event Tue 10-13 pre-open; front Wed 10-14, back Fri 10-16", "2026-10-09", "2026-10-13", "2026-10-14", "2026-10-16", -29.9],
+    ["asOf Thu 2026-10-08, event Thu AMC to Fri; front Fri 10-09, back Fri 10-16", "2026-10-08", "2026-10-09", "2026-10-09", "2026-10-16", 3.6],
+    ["asOf Wed 2026-10-07, event Thu AMC to Fri; front Fri 10-09, back Fri 10-16", "2026-10-07", "2026-10-09", "2026-10-09", "2026-10-16", 7.0],
+    ["asOf Fri 2026-10-09, event Wed AMC to Thu; front Fri 10-16, back Fri 10-23", "2026-10-09", "2026-10-15", "2026-10-16", "2026-10-23", 0],
+    ["asOf Fri 2026-10-09, event Tue AMC to Wed; front Wed 10-14, back Fri 10-23", "2026-10-09", "2026-10-14", "2026-10-14", "2026-10-23", -12.0],
+    ["asOf Wed 2026-11-25, event Mon 11-30 pre-open, Thanksgiving week; front Mon 11-30, back Fri 12-04", "2026-11-25", "2026-11-30", "2026-11-30", "2026-12-04", -51.2],
+  ];
+  for (const [label, asOfDay, date, front, back, calendarErr] of CASES) {
+    const built = sessionWorld(asOfDay, [front, back], { sd: SD, jumps: [{ date, J }] });
+    const got = QC.eventJump(built, { date });
+    near(got.J, J, 1e-4, `${label}: the event move is 5.00% on the session clock`);
+    near(got.meanAbs, J * Math.sqrt(2 / Math.PI), 1e-4, `and its mean absolute move follows`);
+    const cal = SMILE.eventVariance({
+      front: { T: built[0].T, vol: Math.sqrt(SMILE.sliceTotalVariance(built[0].slice, 0) / built[0].T) },
+      back: { T: built[1].T, vol: Math.sqrt(SMILE.sliceTotalVariance(built[1].slice, 0) / built[1].T) },
+    });
+    near((cal.eventSd / J - 1) * 100, calendarErr, 0.1, `while the same two slices read on the calendar clock miss by ${calendarErr}% (the negative control)`);
+    ok(calendarErr === 0 || Math.abs(cal.eventSd - J) > 0.0005, "which is far outside the +-0.01 point the session clock keeps");
+  }
 }
 
 {
@@ -303,9 +345,9 @@ const FACT_INPUT = () => ({
      "the VRP against trailing realised is published graded weak and says so (defect 7)");
   const cm30 = QC.constantMaturity(slices.built, 30);
   const exW = (e) => SMILE.sliceTotalVariance(e.slice, 0) - (e.expiry >= "2026-10-20" ? 0.05 * 0.05 : 0);
-  const lo30 = { d: cm30.lo.T * 365, w: exW(cm30.lo) }, hi30 = { d: cm30.hi.T * 365, w: exW(cm30.hi) };
+  const lo30 = { tau: cm30.lo.hSessions / 252, w: exW(cm30.lo) }, hi30 = { tau: cm30.hi.hSessions / 252, w: exW(cm30.hi) };
   ok(cm30.lo.expiry < "2026-10-20" && cm30.hi.expiry >= "2026-10-20", "the fixture's thirty-day point sits between a slice before the event and one after it");
-  const ivEx = Math.sqrt((lo30.w + (30 - lo30.d) / (hi30.d - lo30.d) * (hi30.w - lo30.w)) / (30 / 365));
+  const ivEx = Math.sqrt((lo30.w + (cm30.tau - lo30.tau) / (hi30.tau - lo30.tau) * (hi30.w - lo30.w)) / (30 / 365));
   near(by["vrp.rel.21"].v, (ivEx - 0.24) / 0.24, 1e-3,
     "while vrp.rel.21 is implied against the GARCH forward, ex-event on the implied side: the jump comes out of each slice that holds it, then the thirty-day point is interpolated (D4, W06-P10)");
   near(by["vrp.var.21"].v, ivEx * ivEx - 0.24 * 0.24, 1e-4, "and in variance terms");
@@ -374,8 +416,9 @@ const FACT_INPUT = () => ({
   const pf = get(real, "iv.pctile.30.1y");
   eq([pf.v, pf.u, pf.g, "why" in pf], [0.698, "frac", 2, false], "W06-P1(a): the cone's one-year percentile is published as iv.pctile.30.1y, a fraction graded 2 on a full cone");
   eq(get(real, "iv.rank.1y").v, 0.62, "and the rank rides under its own id at the pricedMove value");
-  eq([get(real, "iv.pct.30").v, get(real, "iv.pct.30").why], [0.62, "iv.rank-as-pct"], "and iv.pct.30 is unchanged for one release: still the rank, still coded as such");
-  ok(pf.v !== get(real, "iv.pct.30").v, "so a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
+  eq(get(real, "iv.pct.30"), undefined, "P1-41: iv.pct.30 is no longer emitted, with a rank or without one");
+  eq(get(withVol(FLOORED, { coneThin: false }), "iv.pct.30"), undefined, "so the rank has one id and the percentile another");
+  ok(pf.v !== get(real, "iv.rank.1y").v, "a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
   const low = withVol(FLOORED, { coneThin: true });
   eq([get(low, "iv.pctile.30.1y").v, get(low, "iv.pctile.30.1y").g], [0.698, 1], "a cone the leg flagged thin (under its 200-sample floor) is graded 1, the same value");
   eq(get(withVol(FLOORED), "iv.pctile.30.1y").g, 2, "and an unknown sample count is not guessed thin");
@@ -397,13 +440,13 @@ const FACT_INPUT = () => ({
   ok(sizeWith - sizeWithout > 30 && sizeWith - sizeWithout < 90, `the fact costs about sixty bytes a card (${sizeWith - sizeWithout})`);
   {
     const bucketOf = (facts) => bucketsOf(Object.fromEntries(facts.map((f) => [f.id, f])), "A").iv;
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
       "P0-35: a rank of 0.07 with a percentile of 0.70 buckets mid, not low: the IV axis is read from the percentile");
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
       "and a rank of 0.90 with a percentile of 0.10 buckets low, at the percentile's own grade");
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
       "a card with a rank and no percentile has no IV bucket: the rank is never put in its place");
-    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.pct.30", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
       "nor does one whose percentile is withheld");
     eq([0.2499, 0.25, 0.5, 0.75, 0.7501].map((v) => bucketOf([{ id: "iv.pctile.30.1y", v, g: 2 }]).bucket), ["low", "mid", "mid", "mid", "high"],
       "the buckets keep the lines 0.25 and 0.75, inclusive on the mid side");
@@ -414,40 +457,237 @@ const FACT_INPUT = () => ({
 }
 
 {
+  const sd2 = 0.16, J = 0.05, beta = 0.02;
+  const world = (days, post, extra = () => 0) => days.map((d, i) => {
+    const tau = d / 252;
+    return { tau, w: (sd2 * tau + beta * tau * tau + (post[i] ? J * J : 0)) * (1 + extra(i)), post: post[i] };
+  });
+  const three = SMILE.eventTermFit(world([4, 16, 60], [false, true, true]));
+  near(three.beta / beta, 1, 0.01, "a planted curvature beta is recovered to 1% on three expiries, one of them before the event");
+  near(three.J / J, 1, 0.01, "with the event on its own at the same 1%");
+  near(three.sigma2 / sd2, 1, 0.01, "and the diffusion");
+  eq([three.n, three.k, three.dof, three.exact, three.seJ], [3, 3, 0, true, null], "three expiries and three unknowns leave no degree of freedom, so no standard error is claimed");
+  const noBeta = SMILE.eventTermFit(world([4, 16, 60], [false, true, true]).map((p) => ({ ...p, w: p.w - beta * p.tau * p.tau })));
+  near(noBeta.beta, 0, 1e-9, "with no curvature planted the fitted curvature is nil");
+  const two = SMILE.eventTermFit(world([5, 10], [true, true], () => 0).map((p) => ({ ...p, w: sd2 * p.tau + J * J })));
+  const old = SMILE.eventVariance({ front: { T: 5 / 252, vol: Math.sqrt((sd2 * 5 / 252 + J * J) * 252 / 5) }, back: { T: 10 / 252, vol: Math.sqrt((sd2 * 10 / 252 + J * J) * 252 / 10) } });
+  near(two.J, old.eventSd, 1e-12, "two expiries reproduce the two-slice estimator exactly");
+  near(two.sigma, old.diffusiveVol, 1e-12, "diffusion included");
+  eq([two.beta, two.dof, two.exact], [null, 0, true], "with no curvature term and no spare degree of freedom");
+  const rng = WORLD.xoshiro128ss("event-term");
+  const days = [3, 8, 15, 22, 36, 64];
+  const post = [false, false, true, true, true, true];
+  let inside = 0, runs = 200, seen = 0;
+  for (let r = 0; r < runs; r++) {
+    const fit = SMILE.eventTermFit(world(days, post, () => 0.004 * WORLD.normalDraw(rng)));
+    if (fit.seJ2 === null) continue;
+    seen++;
+    if (Math.abs(fit.J2 - J * J) <= 3.182 * fit.seJ2) inside++;
+  }
+  ok(seen === runs && inside / runs > 0.92 && inside / runs < 1, `with 0.4% noise on six expiries the 95% band on J^2 (Student t on its three degrees of freedom) holds ${inside} of ${runs} runs`);
+  const fit6 = SMILE.eventTermFit(world(days, post, () => 0));
+  ok(fit6.dof === 3 && fit6.seJ2 !== null && fit6.seJ2 < 1e-9 && fit6.resid < 1e-12, "and an exact world gives a nil residual and a nil standard error on three degrees of freedom");
+  const bent = SMILE.eventTermFit(world(days, post, (i) => (i === 3 ? 0.08 : 0)));
+  ok(bent.resid > QC.QUANT_CARD_LINES.EVENT_FIT_RESID && bent.seJ2 > fit6.seJ2, "an expiry 8% off the line shows in the residual and widens the standard error");
+  eq(SMILE.eventTermFit(world([5, 10], [true, true]).map((p) => ({ ...p, w: sd2 * p.tau }))).why, "event.no-premium", "no variance above the diffusion is no premium, absent and not zero");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: true }, { tau: 10 / 252, w: 0.015, post: true }]).why, "event.inverted", "a back expiry with less variance than the front is inverted");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: false }, { tau: 10 / 252, w: 0.03, post: false }]).why, "event.slices", "no expiry holding the event is no fit");
+  eq(SMILE.eventTermFit([{ tau: 5 / 252, w: 0.02, post: true }]).why, "event.slices", "and one expiry alone is none either");
+  const lone = SMILE.eventTermFit([{ tau: 4 / 252, w: sd2 * 4 / 252, post: false }, { tau: 9 / 252, w: sd2 * 9 / 252 + J * J, post: true }]);
+  near(lone.J, J, 1e-12, "a single expiry after the event is enough when one before it fixes the diffusion");
+}
+
+{
+  const T = 30 / 365;
+  const flat = { method: "flat", T, F: 100, D: 1, params: { sigma: 0.35 } };
+  const mf = DENSITY.modelFreeWindow(flat);
+  near(mf.w / (0.35 * 0.35 * T), 1, 1e-6, "the model-free variance of a flat smile is its total variance, inside the 1e-6 quantile window");
+  ok(mf.eps === 1e-6 && mf.range[0] < -0.4 && mf.range[1] > 0.4, "and the window is the one-in-a-million quantiles of the slice's own law");
+  const svi = { method: "svi", T, F: 100, D: 1, params: SVI };
+  const m = DENSITY.rndMoments(svi);
+  near(DENSITY.modelFreeWindow(svi).w, -2 * m.meanLog, 1e-6, "a skewed smile's model-free variance is minus twice the mean log return of its own density");
+  ok(DENSITY.modelFreeWindow(svi).w > SMILE.sliceTotalVariance(svi, 0), "which exceeds the at-the-money variance the smile's wings add to");
+  const mix = SMILE.mixturePrice({ F: 100, T, diffusiveVol: 0.3, up: Math.exp(0.08 - Math.log(Math.cosh(0.08))), down: Math.exp(-0.08 - Math.log(Math.cosh(0.08))), weights: [0.5, 0.5] }).slice;
+  near(DENSITY.modelFreeWindow(mix).w, 0.3 * 0.3 * T + 2 * Math.log(Math.cosh(0.08)), 1e-6, "and a two-point event on a diffusion adds exactly its log-contract variance, 2 ln cosh J");
+  eq(DENSITY.modelFreeWindow(flat, { eps: 0.7 }), null, "a window that is not a window is nothing");
+}
+
+{
+  const normInv = (p) => BS.normInv(p);
+  const t5cdf = (t) => { const th = Math.atan(t / Math.sqrt(5)); return 0.5 + (th + Math.sin(th) * (Math.cos(th) + 2 / 3 * Math.pow(Math.cos(th), 3))) / Math.PI; };
+  const t5inv = (u) => { let lo = -80, hi = 80; for (let i = 0; i < 200; i++) { const mid = (lo + hi) / 2; if (t5cdf(mid) < u) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+  const N = 160;
+  const us = Array.from({ length: N }, (_, i) => (i + 0.5) / N);
+  const unit = {
+    gaussian: us.map((u) => normInv(u)),
+    laplace: us.map((u) => -Math.sign(u - 0.5) * Math.log(1 - 2 * Math.abs(u - 0.5)) / Math.SQRT2),
+    t5: us.map((u) => t5inv(u) / Math.sqrt(5 / 3)),
+  };
+  const nodesOf = (law, sd) => {
+    if (law === "twoPoint") return [[-sd, 0.5], [sd, 0.5]];
+    if (law === "skewCrash") { const p = 0.25; return [[-sd * Math.sqrt((1 - p) / p), p], [sd * Math.sqrt(p / (1 - p)), 1 - p]]; }
+    return unit[law].map((y) => [sd * y, 1 / N]);
+  };
+  const mgfLog = (nodes) => Math.log(nodes.reduce((a, [y, w]) => a + w * Math.exp(y), 0));
+  const sdForJ = (law, J2) => { let lo = 1e-4, hi = 1; for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (2 * mgfLog(nodesOf(law, mid)) < J2) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+  const sliceOf = (nodes, tau, sigmaD) => {
+    const m = mgfLog(nodes);
+    return { method: "mixture", T: tau, F: 100, D: 1, params: { components: nodes.map(([y, w]) => ({ f: Math.exp(y - m), w })), sigmaD } };
+  };
+  const SIGMA = 0.35;
+  const MJ_BANDS = { gaussian: [-0.5, 0.5], twoPoint: [-0.5, 0.5], laplace: [-5.5, 0.5], t5: [-9.5, 0.5], skewCrash: [-5.5, 0.5] };
+  const IDENT = { gaussian: [], laplace: [], t5: [], twoPoint: [], skewCrash: [] };
+  const bands = { gaussian: [-0.6, 0.6], laplace: [-12, -2], t5: [-9, -2], twoPoint: [3, 27], skewCrash: [-2, 3] };
+  const ATM = { gaussian: [], laplace: [], t5: [], twoPoint: [], skewCrash: [] };
+  let worst = 0, cases = 0;
+  for (const law of Object.keys(bands)) {
+    for (const Jt of [0.03, 0.05, 0.08, 0.12]) {
+      for (const [d1, d2] of [[2, 9], [6, 13], [3, 31]]) {
+        const nodes = nodesOf(law, sdForJ(law, Jt * Jt));
+        const truth = Math.sqrt(2 * mgfLog(nodes));
+        const t1 = d1 / 252, t2 = d2 / 252;
+        const s1 = sliceOf(nodes, t1, SIGMA), s2 = sliceOf(nodes, t2, SIGMA);
+        const mk = (slice, d, expiry) => ({ expiry, T: d / 365, dte: d, sessions: d, hSessions: d, rows: [], slice });
+        const built = [mk(s1, d1, "2026-10-23"), mk(s2, d2, "2026-11-20")];
+        const got = QC.eventJump(built, { date: "2026-10-20" });
+        const err = (got.J / truth - 1) * 100;
+        worst = Math.max(worst, Math.abs(err));
+        cases++;
+        const atm = SMILE.eventVariance({ front: { T: t1, vol: SMILE.sliceVolK(s1, 0) }, back: { T: t2, vol: SMILE.sliceVolK(s2, 0) } });
+        ATM[law].push((atm.eventSd / truth - 1) * 100);
+        ok(Math.abs(err) < 0.5, `${law} J=${Jt} ${d1}/${d2}: the model-free event size is within 0.5% of the law's log-contract size (${err.toFixed(3)}%)`);
+        near(got.diffusiveVol, SIGMA, 2e-4, `${law} J=${Jt} ${d1}/${d2}: and the diffusion is the one planted`);
+        const m = mgfLog(nodes);
+        const trueM = nodes.reduce((a, [y, w]) => a + w * Math.abs(Math.exp(y - m) - 1), 0);
+        const gate = truth * truth >= SIGMA * SIGMA * t1;
+        const label = `${law} J=${Jt} ${d1}/${d2}`;
+        eq(got.shapeWhy === null, gate, `${label}: the shape is identified exactly where the event variance reaches the front's diffusion variance (${(truth * truth / (SIGMA * SIGMA * t1)).toFixed(2)})`);
+        const mErr = (got.meanAbs / trueM - 1) * 100;
+        if (gate) {
+          const [blo, bhi] = MJ_BANDS[law];
+          ok(mErr >= blo && mErr <= bhi, `${label}: the identified mean absolute event move is inside the measured band ${blo} to ${bhi}% (${mErr.toFixed(2)}%)`);
+          near(got.kappa, got.meanAbs / got.J, 1e-9, `${label}: and kappa_J is that move over J_MF`);
+          const mutant = (Math.sqrt(2 / Math.PI) * truth / trueM - 1) * 100;
+          if (law === "laplace" || law === "twoPoint") ok(mutant < blo || mutant > bhi, `${label}: the mutant that keeps sqrt(2/pi) J_MF where the shape is identified misses by ${mutant.toFixed(1)}%, outside the band`);
+          IDENT[law].push(mErr);
+        } else {
+          near(got.meanAbs, Math.sqrt(2 / Math.PI) * got.J, 1e-12, `${label}: where it is not, the move is the normal convention on J_MF`);
+          eq([got.kappa, got.shape, got.shapeWhy], [null, null, "event.shape-unidentified"], `${label}: and says so, with no kappa`);
+          const f = Object.fromEntries(QC.engineFacts({ ...FACT_INPUT(), built, zero: null, event: { date: "2026-10-20", confirmed: true, moves: [0.05, -0.04, 0.06] }, jump: got }).map((x) => [x.id, x]));
+          eq([f["move.event"].g <= 1, f["move.event"].why], [true, "event.shape-unidentified"], `${label}: the fact is graded at most 1 and carries the code`);
+        }
+      }
+    }
+  }
+  ok(cases === 60 && worst < 0.5, `all ${cases} cases of the five-law grid hold J_MF within 0.5% (worst ${worst.toFixed(3)}%)`);
+  for (const [law, [lo, hi]] of Object.entries(bands)) {
+    const r = ATM[law];
+    ok(r.every((e) => e >= lo && e <= hi), `negative control, ${law}: the at-the-money two-slice estimator misses by ${Math.min(...r).toFixed(1)} to ${Math.max(...r).toFixed(1)}% (band ${lo} to ${hi})`);
+  }
+  for (const law of Object.keys(IDENT)) ok(IDENT[law].length >= 3, `${law}: the shape is identified on ${IDENT[law].length} of the 12 cases, the mean absolute move off by ${Math.min(...IDENT[law]).toFixed(2)} to ${Math.max(...IDENT[law]).toFixed(2)}%`);
+  ok(Math.max(...ATM.twoPoint) > 15 && Math.min(...ATM.laplace) < -9, "the at-the-money error is large where the event is far from normal, which is the error the model-free size removes");
+}
+
+{
+  const T1 = 4 / 252, T2 = 12 / 252, SIGMA = 0.3;
+  const comps = (pts) => { const m = Math.log(pts.reduce((a, [y, w]) => a + w * Math.exp(y), 0)); return { m, parts: pts.map(([y, w]) => ({ f: Math.exp(y - m), w })) }; };
+  const entry = (slice, d, expiry) => ({ expiry, T: d / 365, dte: d, sessions: d, hSessions: d, rows: [], slice });
+  const pre = (d) => entry({ method: "flat", T: d / 252, F: 100, D: 1, params: { sigma: SIGMA } }, d, "2026-10-16");
+  const withEvent = (pts) => {
+    const { parts } = comps(pts);
+    const mk = (d, expiry) => entry({ method: "mixture", T: d / 252, F: 100, D: 1, params: { components: parts, sigmaD: SIGMA } }, d, expiry);
+    return [pre(2), mk(4, "2026-10-23"), mk(12, "2026-11-20")];
+  };
+  const skew = [[-0.12 * Math.sqrt(3), 0.25], [0.12 / Math.sqrt(3), 0.75]];
+  const sym = Array.from({ length: 64 }, (_, i) => [0.12 * BS.normInv((i + 0.5) / 64), 1 / 64]);
+  const third = (pts) => { const mu = pts.reduce((a, [y, w]) => a + w * y, 0); return pts.reduce((a, [y, w]) => a + w * Math.pow(y - mu, 3), 0); };
+  const gs = withEvent(skew), gy = withEvent(sym);
+  const ev = { date: "2026-10-20" };
+  const js = QC.eventJump(gs, ev), jy = QC.eventJump(gy, ev);
+  ok(third(skew) < 0 && js.k3 < 0, "a crash-skewed event shows a negative risk-neutral third cumulant");
+  near(js.k3 / third(skew), 1, 0.02, "which is the planted third cumulant of the event to 2%, the pre-event slice taken off the post-event one");
+  near(jy.k3, 0, 1e-6, "while a symmetric event of the same size has none, which kappa_J alone cannot show");
+  ok(js.kappa !== null && jy.kappa !== null && Math.abs(js.kappa - jy.kappa) < 0.05, `the skewed law's kappa_J (${js.kappa}) is close to the normal one's (${jy.kappa}), so only the cumulant tells them apart`);
+  eq(QC.eventJump(gs.slice(1), ev).k3, null, "with no slice before the event the third cumulant is absent, not zero");
+  const em = QC.engineEvent({ date: "2026-10-20", confirmed: true, moves: [0.05] }, js, QC.engineFacts({ ...FACT_INPUT(), built: gs, event: { date: ev.date, moves: [0.05, 0.04, 0.06] }, jump: js, zero: null }));
+  ok(em.k3 === Number(js.k3.toPrecision(3)) && (em.kappa === null || em.kappa === Number(js.kappa.toFixed(3))), "and the card's event block carries it with kappa_J and the shape");
+}
+
+{
+  const facts = QC.engineFacts(FACT_INPUT());
+  const law = QP.garchLaw({ garch: GARCH, ticker: "SYN", sessionDate: SESSION, closes: CLOSES, rate: R, paths: 2048 });
+  const state = { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich };
+  const block0 = QC.runCardEngine({ ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts, state, pLaw: law,
+    levels: { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 }, event: null, atr: 2 });
+  const exp = block0.expiries;
+  ok(exp.length === 5 && exp.every((e) => Array.isArray(e.smile.kq) && e.smile.kq.length === 2 && e.smile.kq[0] < 0 && e.smile.kq[1] > 0),
+     "every published expiry carries kq, the log-moneyness span of the strikes that were quoted, and the page hatches the law outside it");
+  ok(exp.every((e) => { const b = slices.built.find((x) => x.expiry === e.expiry).slice; return e.smile.kq[0] === Number(b.kMin.toFixed(3)) && e.smile.kq[1] === Number(b.kMax.toFixed(3)); }),
+     "kq is the fitted slice's own span to three decimals");
+  eq(exp[0].smile.cal, null, "the first expiry has nothing before it to be checked against, so its calendar result is null");
+  ok(exp.slice(1).every((e) => e.smile.cal === 1), "and each later one carries the calendar no-arbitrage result against the one before: 1 when it holds");
+  const bytes = JSON.stringify(exp.map((e) => ({ kq: e.smile.kq, cal: e.smile.cal }))).length;
+  ok(bytes < 260, `which costs ${bytes} bytes on a five-expiry card`);
+}
+
+{
+  const ratioOf = (J, n, rng) => {
+    const hist = Array.from({ length: n }, () => Math.abs(J * WORLD.normalDraw(rng))).sort((a, b) => a - b);
+    const med = n % 2 ? hist[(n - 1) / 2] : (hist[n / 2 - 1] + hist[n / 2]) / 2;
+    return (J * Math.sqrt(2 / Math.PI)) / med;
+  };
+  const rng = WORLD.xoshiro128ss("fair-event");
+  for (const n of [6, 8, 12]) {
+    const ratios = Array.from({ length: 4000 }, () => ratioOf(0.06, n, rng));
+    const over = ratios.filter((r) => r >= 1.25).length / ratios.length;
+    ok(over > 0.3 && over < 0.9, `under fair pricing and ${n} past moves the retired 1.25 line called the event overpriced ${(over * 100).toFixed(0)}% of the time`);
+    ok(ratios.every((r) => eventBucket({ date: "2026-10-20", after: "2026-09-21", ratio: r, g: 2 }, "2026-10-23").bucket === "fair"),
+       `and the engine's bucket for all ${ratios.length} of them is fair: an implied mean over a historical median is not a price test`);
+  }
+  near(Math.sqrt(2 / Math.PI) / 0.6744897501960817, 1.183, 1e-3, "because the ratio of a normal's mean absolute move to its median absolute move is 1.183 before any sampling noise");
+  eq(eventBucket({ date: "2026-10-20", after: "2026-09-21", ratio: 0.5 }, "2026-10-23").bucket, "fair", "and a ratio of 0.5 is not called underpriced either");
+  eq(eventBucket({ date: "2026-10-30", after: "2026-09-21", ratio: 3 }, "2026-10-23"), { bucket: "none", g: 3, inside: false }, "an event after the expiry is no event for it, as before");
+  ok(!("EVENT_UNDER" in BUCKET_LINES) && !("EVENT_OVER" in BUCKET_LINES), "and the 0.8 and 1.25 lines are gone from the published bucket lines");
+}
+
+{
   const SD = 0.3, J = 0.06, AVG = GARCH.avg21Vol / 100;
   const dayAt = (d) => new Date(Date.parse(SESSION + "T00:00:00Z") + d * 86400000).toISOString().slice(0, 10);
-  const slice = (d, ev) => {
-    const T = d / 365, w = SD * SD * T + (ev <= d ? J * J : 0);
-    return { expiry: dayAt(d), T, dte: d, rows: [], slice: { method: "flat", T, F: 100, D: 1, params: { sigma: Math.sqrt(w / T) } } };
-  };
+  const slice = (d, ev) => sessionWorld(SESSION, [dayAt(d)], { sd: SD, jumps: [{ date: dayAt(ev), J }] })[0];
+  const tauAt = (days) => TIME.sessionsBetween(SESSION, dayAt(days)) / TIME.SESSIONS_PER_YEAR;
+  const displayVol = (days) => Math.sqrt(SD * SD * tauAt(days) / (days / 365));
   const CASES = [
-    ["A, interior, the event between the slices and before thirty days", [21, 49], 25, 24.55],
-    ["B, interior, the event between the slices and after thirty days", [21, 49], 35, 32.26],
-    ["C, one 21-day slice that holds the event", [21], 10, 32.98],
-    ["C, one 21-day slice, the event after it and inside thirty days", [21], 25, 21.49],
-    ["C, one 40-day slice that holds the event", [40], 10, 28.12],
-    ["C, one 40-day slice, the event after thirty days and inside it", [40], 35, 35.05],
+    ["A, interior, the event between the slices and before thirty days", [21, 49], 25],
+    ["B, interior, the event between the slices and after thirty days", [21, 49], 35],
+    ["C, one 21-day slice that holds the event", [21], 10],
+    ["C, one 21-day slice, the event after it and inside thirty days", [21], 25],
+    ["C, one 40-day slice that holds the event", [40], 10],
+    ["C, one 40-day slice, the event after thirty days and inside it", [40], 35],
   ];
-  for (const [label, days, ev, oldReading] of CASES) {
+  for (const [label, days, ev] of CASES) {
     const built = days.map((d) => slice(d, ev));
     const event = { date: dayAt(ev), confirmed: true, moves: [0.05, -0.04, 0.06, -0.03, 0.07, -0.05] };
     const cm = QC.constantMaturity(built, 30, { date: event.date, J2: J * J });
-    near(cm.vol * 100, 30, 0.01, `W06-P10 case ${label}: the thirty-day ex-event vol is the diffusion's 30.00% (the old removal read ${oldReading}%)`);
+    near(cm.w, SD * SD * tauAt(30), 1e-12, `W06-P10 case ${label}: the thirty-day ex-event total variance is the diffusion's on the session clock, exactly`);
+    near(cm.vol, displayVol(30), 1e-12, `and its ACT/365 display vol is that variance over 30/365`);
     const by = Object.fromEntries(QC.engineFacts({ ...FACT_INPUT(), built, zero: null, event, jump: { J, meanAbs: J * Math.sqrt(2 / Math.PI), why: null } })
       .map((f) => [f.id, f]));
-    near((by["vrp.vol.21"].v + AVG) * 100, 30, 0.01, `and vrp.vol.21 is read against that 30.00% in case ${label}`);
-    near(Math.sqrt(by["vrp.var.21"].v + AVG * AVG) * 100, 30, 0.01, `as is vrp.var.21 in case ${label}`);
+    near(by["vrp.vol.21"].v + AVG, displayVol(30), 1e-4, `and vrp.vol.21 is read against it in case ${label}`);
+    near(Math.sqrt(by["vrp.var.21"].v + AVG * AVG), displayVol(30), 1e-4, `as is vrp.var.21 in case ${label}`);
     ok(by["vrp.vol.21"].why === undefined, `with no vrp.event-inside code once the jump is removed in case ${label}`);
     if (days.length === 2) {
-      near(by["term.slope.30_90.exEvent"].v, 0, 1e-4, `and the ex-event term slope of a flat diffusion is flat in case ${label} (${by["term.slope.30_90.exEvent"].v})`);
+      near(by["term.slope.30_90.exEvent"].v, displayVol(30) / displayVol(90) - 1, 1.5e-4,
+        `and the ex-event term slope of a flat session diffusion is the display convention's alone in case ${label} (${by["term.slope.30_90.exEvent"].v})`);
     }
   }
   const built = [slice(21, 35), slice(49, 35)];
   const raw = QC.constantMaturity(built, 30), none = QC.constantMaturity(built, 30, null);
   eq([none.vol, none.w], [raw.vol, raw.w], "with no event to remove the constant maturity is the market's own, event included");
-  ok(raw.vol > 0.3 + 1e-3, `and iv.cm.30 still carries the share of the jump the interpolation holds (${raw.vol})`);
+  ok(raw.vol > displayVol(30) + 1e-3, `and iv.cm.30 still carries the share of the jump the interpolation holds (${raw.vol})`);
   const far = QC.constantMaturity([slice(21, 200), slice(49, 200)], 30, { date: dayAt(200), J2: J * J });
-  near(far.vol * 100, 30, 1e-9, "an event after every slice the point reads removes nothing");
+  near(far.vol, displayVol(30), 1e-12, "an event after every slice the point reads removes nothing");
+  const dayShift = QC.constantMaturity(built, 30, null);
+  ok(dayShift.tau === tauAt(30), "the point sits at the session count of the thirty calendar days, not at thirty over 365");
 }
 
 {

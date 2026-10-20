@@ -1303,32 +1303,28 @@ import { chromium } from "playwright";
     ok(/live readings it keeps through the session/.test(app.info),
        "and it is folded rather than deleted: every word of it is one tap below the field it constrains");
     const said = app.info.replace(/\s+/g, " ");
-    ok(/the nightly payloads, with the live readings it keeps through the session laid over them/.test(said) &&
-       /can call the market-data vendor, up to [a-z]+ requests a question, for what the site does not hold yet/.test(said) &&
-       /It performs no arithmetic/.test(said),
-       "THE GUARANTEE SAYS WHAT THE BOX DOES: the answer route lays the live keys over the brief " +
-       "(briefWithLive) and a question that names a stock assembles its dossier, whose vendor " +
-       "fan-out can place calls; both are now in the sentence, beside the arithmetic rule that holds");
+    ok(/answers from what this site has already stored: the nightly payloads, with the live readings it keeps through the session laid over them/.test(said) &&
+       /it also reads the dossier the site holds for that stock/.test(said) &&
+       /whichever it has stored\. A stock nobody has opened may have fewer of them\. Asking places no market-data request of its own\. It performs no arithmetic/.test(said),
+       "THE GUARANTEE SAYS WHAT THE BOX DOES (P1-42): the answer route lays the live keys over the brief " +
+       "(briefWithLive) and a question that names a stock reads its dossier from what is stored only " +
+       "(askDossierFor asks for cacheOnly), so the sentence says stored, says the dossier may be thin for a stock " +
+       "nobody opened, and says asking places no market-data request, beside the arithmetic rule that holds");
     {
-      const { SOURCES, BUDGET } = await import("../shared/flows-dossier-worker.js");
-      const named = { info: "profile", profile: "profile", quote: "quote", news: "news", analysts: "analysts",
+      const { SOURCES } = await import("../shared/flows-dossier-worker.js");
+      const named = { info: "profile", profile: "profile", news: "news", analysts: "analysts",
         financials: "financials", breakdown: "financials", ownership: "holders", earnings: "earnings",
         estimates: "earnings", levels: "dark-pool levels", short: "short interest", insiders: "insider trades" };
-      const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
-      const unnamed = SOURCES.filter((s) => !named[s.id] || !said.includes(named[s.id]));
+      const unnamed = SOURCES.filter((s) => s.id !== "quote" && (!named[s.id] || !said.includes(named[s.id])));
       eq(unnamed.map((s) => s.id).join(","), "",
-         "THE GUARANTEE NAMES EVERY SOURCE THE DOSSIER CAN FETCH: each entry of the dossier's SOURCES table, the live " +
-         "quote included (deps.quote reaches the vendor whenever the strip is not fresh), is named in the sentence, so a " +
-         "reader who asks whether the box can read a vendor price is told yes; a source added to the table without a word " +
-         "here fails this line");
-      ok(said.includes("up to " + words[BUDGET.maxCalls] + " requests a question"),
-         "and it states the per-read cap the dossier's planner holds (BUDGET.maxCalls = " + BUDGET.maxCalls + ")");
-      ok(!/already published/.test(said),
-         "and its opening no longer claims everything is already published, which the on-demand fetch in the next sentence contradicted");
+         "THE GUARANTEE NAMES EVERY STORED SOURCE THE DOSSIER CAN HOLD: each entry of the dossier's SOURCES table " +
+         "except the live quote, which the answer path never fetches, is named in the sentence; a source added to " +
+         "the table without a word here fails this line");
+      ok(!/can call the market-data vendor/.test(said) && !/up to [a-z]+ requests a question/.test(said) && !/already published/.test(said),
+         "and it no longer says the box can call the vendor, nor caps its requests, nor claims everything is already published");
     }
-    ok(!/reads nothing live/i.test(said) && !/places no vendor call/i.test(said),
-       "and it no longer promises the two things the Worker does: it read live keys and could " +
-       "call the vendor while the page said it did neither");
+    ok(!/reads nothing live/i.test(said),
+       "and it still does not claim the box reads nothing live: the answer route lays the live keys over the brief");
     ok(!/of 10,000/.test(app.visible) && !/of 10,000 model credits/.test(app.info),
        "THE METER IS NEVER MEASURED AGAINST THE FREE ALLOWANCE: on Workers Paid the limit the Worker enforces is the site's own " +
        "daily budget, and the 10,000 free credits only mark where billing starts");

@@ -1,5 +1,5 @@
 import { makeRng } from "./rng.mjs";
-import { hansen, w1dWorld, w1Closes, w1Garch, closesFromReturns, businessDays, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
+import { hansen, w1dWorld, w2World, w1Closes, w1Garch, closesFromReturns, businessDays, w3Hawkes, w3bSession, w4Bait, w5OiLag, w6Null, w7Calibration, w8Errors } from "./worlds.mjs";
 import { mean, median, quantile, variance, ksUniform } from "./stats.mjs";
 import { w9World } from "./intraday.mjs";
 import { normalCdf } from "./rng.mjs";
@@ -521,4 +521,16 @@ export function jumpFlagTransfer(refMod, { lines, world }) {
     for (let i = 0; i < s.names; i++) { flagged += flags[i]; total += 1; }
   }
   return { share: flagged / total, total };
+}
+
+export function referenceScaleCalibration(mod) {
+  const w = w2World({ seed: `sigma-ref|${SCALE.salt}`, names: 24, days: 1200, jumpRate: 0, splitRate: 0, scaleErrorSd: 0, eventEvery: 63, eventSd: 8, sectors: 0 });
+  const truth = Math.sqrt(w.params.variance);
+  let sum = 0, used = 0;
+  for (let i = 0; i < w.names; i++) {
+    const got = mod.referenceScale(w.r.subarray(i * w.days, (i + 1) * w.days), { events: w.events[i] });
+    if (got !== null) { sum += got; used++; }
+  }
+  const ratio = sum / used / truth;
+  return { ok: used === w.names && ratio >= 0.95 && ratio <= 1.05, note: `the reference scale of ordinary sessions is ${ratio.toFixed(2)} times the true one over ${used} names with a scheduled event every 63 sessions`, ratio };
 }

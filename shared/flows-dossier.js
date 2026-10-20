@@ -657,6 +657,8 @@ function lastPrice(inp) {
   return u && isNum(u.px) ? u.px : null;
 }
 
+export const RETIRED_ENGINE_FACTS = Object.freeze(["iv.pct.30"]);
+
 const ENGINE_UNIT = Object.freeze({
   pct: { unit: "pct" }, px: { unit: "usd/share" }, ratio: { unit: "ratio" }, frac: { unit: "fraction" }, fraction: { unit: "fraction" },
   vol: { unit: "vol" }, z: { unit: "z" }, usdPer1pct: { unit: "usd", suffix: " per 1% move" }, var: { unit: "var", suffix: " (annualised variance)" },
@@ -720,7 +722,7 @@ export function buildOptionsPacket(inp) {
     const eng = isObj(c.engine) ? c.engine : null;
     if (eng) {
       for (const ef of arr(eng.facts)) {
-        if (!isObj(ef) || typeof ef.id !== "string") continue;
+        if (!isObj(ef) || typeof ef.id !== "string" || RETIRED_ENGINE_FACTS.includes(ef.id)) continue;
         const k = "engine." + ef.id;
         if (isNum(ef.v) && isNum(ef.g) && ef.g > 0) {
           const mapped = Object.hasOwn(ENGINE_UNIT, ef.u) ? ENGINE_UNIT[ef.u] : null;

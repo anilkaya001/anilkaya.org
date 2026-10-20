@@ -1,4 +1,5 @@
 export const YEAR_SECONDS = 365 * 86400;
+export const SESSIONS_PER_YEAR = 252;
 const DAY_MS = 86400000;
 
 const pad = (n) => (n < 10 ? "0" + n : String(n));
@@ -151,6 +152,18 @@ export function remainingSessions(asOfMs, expiryDay) {
   const today = etDayOf(asOfMs);
   if (expiryDay < today) return 0;
   return sessionFractionLeft(asOfMs, today) + sessionsBetween(today, expiryDay);
+}
+
+export function sessionTau(asOfMs, expiryDay) {
+  const h = remainingSessions(asOfMs, expiryDay);
+  return h === null ? null : h / SESSIONS_PER_YEAR;
+}
+
+export function shiftDay(day, n) {
+  const p = parseDay(day);
+  if (!p || !Number.isInteger(n)) return null;
+  const d = new Date(p.t + n * DAY_MS);
+  return isoDay(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
 export function yearFraction(asOfMs, expiryDay) {

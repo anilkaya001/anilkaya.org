@@ -1002,6 +1002,152 @@ export function eventVariance(input) {
   return { diffusiveVol: Math.sqrt(sd2), eventSd: J, eventMeanAbs: J * Math.sqrt(2 / Math.PI), why: null };
 }
 
+function solveSmall(A, b) {
+  const k = b.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let c = 0; c < k; c++) {
+    let piv = c;
+    for (let r = c + 1; r < k; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    if (!(Math.abs(M[piv][c]) > 1e-300)) return null;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    for (let r = c + 1; r < k; r++) {
+      const f = M[r][c] / M[c][c];
+      for (let j = c; j <= k; j++) M[r][j] -= f * M[c][j];
+    }
+  }
+  const x = new Array(k);
+  for (let i = k - 1; i >= 0; i--) {
+    let v = M[i][k];
+    for (let j = i + 1; j < k; j++) v -= M[i][j] * x[j];
+    x[i] = v / M[i][i];
+  }
+  return x.every(fin) ? x : null;
+}
+
+function weightedFit(cols, y, wt, keep) {
+  const idx = keep.slice();
+  const k = idx.length;
+  if (!k) {
+    const rss = y.reduce((a, v, i) => a + wt[i] * v * v, 0);
+    return { coef: [], rss, cov: [] };
+  }
+  const A = idx.map((a) => idx.map((b) => cols[a].reduce((s, v, i) => s + wt[i] * v * cols[b][i], 0)));
+  const rhs = idx.map((a) => cols[a].reduce((s, v, i) => s + wt[i] * v * y[i], 0));
+  const coef = solveSmall(A, rhs);
+  if (!coef) return null;
+  let rss = 0;
+  for (let i = 0; i < y.length; i++) {
+    let m = 0;
+    idx.forEach((a, j) => { m += coef[j] * cols[a][i]; });
+    rss += wt[i] * (y[i] - m) * (y[i] - m);
+  }
+  const inv = idx.map((_, j) => solveSmall(A, idx.map((__, i) => (i === j ? 1 : 0))));
+  const cov = inv.every(Boolean) ? idx.map((_, i) => idx.map((__, j) => inv[j][i])) : null;
+  return { coef, rss, cov };
+}
+
+export function eventTermFit(points) {
+  const pts = (Array.isArray(points) ? points : []).filter((p) => p && fin(p.tau) && p.tau > 0 && fin(p.w) && p.w > 0)
+    .slice().sort((a, b) => a.tau - b.tau);
+  const n = pts.length;
+  const out = { sigma2: null, sigma: null, beta: null, J2: null, J: null, seJ2: null, seJ: null, n, k: 0, dof: null, resid: null, exact: false, why: null };
+  if (n < 2 || !pts.some((p) => p.post)) return { ...out, why: "event.slices" };
+  const pre = pts.some((p) => !p.post);
+  const withBeta = pre && n >= 3;
+  const cols = [pts.map((p) => p.tau), pts.map((p) => (p.post ? 1 : 0))];
+  if (withBeta) cols.push(pts.map((p) => p.tau * p.tau));
+  const y = pts.map((p) => p.w), wt = pts.map((p) => 1 / (p.w * p.w));
+  const free = withBeta ? [2] : [];
+  let best = null;
+  for (const mask of [[0, 1], [0], [1], []]) {
+    const keep = [...mask, ...free];
+    const fit = weightedFit(cols, y, wt, keep);
+    if (!fit) continue;
+    if (!mask.every((c, j) => fit.coef[j] >= 0)) continue;
+    if (!best || fit.rss < best.fit.rss - 1e-18) best = { keep, fit };
+  }
+  const k = 2 + free.length;
+  const dof = n - k;
+  if (!best) return { ...out, k, dof, why: "event.singular" };
+  const fit = best.fit, keep = best.keep;
+  const at = (c) => { const j = keep.indexOf(c); return j < 0 ? 0 : fit.coef[j]; };
+  const sigma2 = at(0), J2 = at(1), beta = withBeta ? at(2) : null;
+  const res = pts.map((p, i) => (p.w - sigma2 * cols[0][i] - J2 * cols[1][i] - (withBeta ? beta * cols[2][i] : 0)) / p.w);
+  const resid = Math.max(...res.map(Math.abs));
+  const s = dof > 0 ? Math.sqrt(fit.rss / dof) : null;
+  const jj = keep.indexOf(1);
+  const seJ2 = s !== null && jj >= 0 && fit.cov && fin(fit.cov[jj][jj]) && fit.cov[jj][jj] >= 0 ? s * Math.sqrt(fit.cov[jj][jj]) : null;
+  const J = J2 > 0 ? Math.sqrt(J2) : null;
+  const seJ = seJ2 !== null && J !== null ? seJ2 / (2 * J) : null;
+  const why = !(sigma2 > 0) ? "event.inverted" : !(J2 > 0) ? "event.no-premium" : null;
+  return {
+    sigma2, sigma: sigma2 > 0 ? Math.sqrt(sigma2) : null, beta, J2, J, seJ2, seJ, n, k, dof, resid, exact: dof === 0, why,
+  };
+}
+
+export const EVENT_SHAPE_LINES = Object.freeze({ LAMBDA_LO: -0.97, LAMBDA_HI: 0.999, ITER: 80 });
+
+const lnCosh = (x) => { const a = Math.abs(x); return a + Math.log1p(Math.exp(-2 * a)) - Math.LN2; };
+
+function unitCall(r, v) {
+  if (!(v > 0)) return Math.max(r - 1, 0);
+  const sq = Math.sqrt(v), d1 = (Math.log(r) + v / 2) / sq;
+  return r * normCdf(d1) - normCdf(d1 - sq);
+}
+
+export function eventShapeLaw(lambda, J2) {
+  if (!fin(lambda) || !(lambda > -1) || !(lambda < 1) || !(J2 > 0)) return null;
+  if (lambda >= 0) {
+    const jOf = (sd) => (1 - lambda) * sd * sd + 2 * lnCosh(Math.sqrt(lambda) * sd);
+    let lo = 0, hi = Math.sqrt(J2) + 1;
+    while (jOf(hi) < J2) hi *= 2;
+    for (let i = 0; i < EVENT_SHAPE_LINES.ITER; i++) { const mid = (lo + hi) / 2; if (jOf(mid) < J2) lo = mid; else hi = mid; }
+    const sd = (lo + hi) / 2, a = Math.sqrt(lambda) * sd, b2 = (1 - lambda) * sd * sd, lc = lnCosh(a);
+    return { sd, parts: [{ w: 0.5, r: Math.exp(a - lc), v: b2 }, { w: 0.5, r: Math.exp(-a - lc), v: b2 }] };
+  }
+  const c = -lambda;
+  const jOf = (s) => s + 2 * lnCosh(c * s / 2);
+  let lo = J2 / 2, hi = J2;
+  for (let i = 0; i < EVENT_SHAPE_LINES.ITER; i++) { const mid = (lo + hi) / 2; if (jOf(mid) < J2) lo = mid; else hi = mid; }
+  const s2 = (lo + hi) / 2, lc = lnCosh(c * s2 / 2);
+  return { sd: Math.sqrt(s2), parts: [{ w: 0.5, r: Math.exp(c * s2 / 2 - lc), v: (1 + c) * s2 }, { w: 0.5, r: Math.exp(-c * s2 / 2 - lc), v: (1 - c) * s2 }] };
+}
+
+export function eventShapeMoves(law, wD) {
+  let straddle = 0, mean = 0;
+  for (const p of law.parts) {
+    straddle += 2 * p.w * unitCall(p.r, p.v + wD);
+    mean += 2 * p.w * unitCall(p.r, p.v);
+  }
+  return { straddle, mean };
+}
+
+export function eventShape(input) {
+  const { J2, wD, straddle } = input || {};
+  const gaussian = fin(J2) && J2 > 0 ? Math.sqrt(2 / Math.PI) * Math.sqrt(J2) : null;
+  const none = (why) => ({ identified: false, kappa: null, M: gaussian, lambda: null, family: null, edge: null, why });
+  if (!fin(J2) || !(J2 > 0)) return none("event.no-premium");
+  if (!fin(wD) || !(wD > 0) || !fin(straddle) || !(straddle > 0)) return none("event.shape-unidentified");
+  if (!(J2 >= wD)) return none("event.shape-unidentified");
+  const at = (lam) => eventShapeMoves(eventShapeLaw(lam, J2), wD);
+  const L = EVENT_SHAPE_LINES;
+  let lo = L.LAMBDA_LO, hi = L.LAMBDA_HI, edge = null;
+  const fLo = at(lo).straddle - straddle, fHi = at(hi).straddle - straddle;
+  let lam;
+  if (fLo >= 0) { lam = lo; edge = "lo"; }
+  else if (fHi <= 0) { lam = hi; edge = "hi"; }
+  else {
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (at(mid).straddle < straddle) lo = mid; else hi = mid; }
+    lam = (lo + hi) / 2;
+  }
+  const law = eventShapeLaw(lam, J2), moves = eventShapeMoves(law, wD);
+  const J = Math.sqrt(J2);
+  return {
+    identified: true, kappa: moves.mean / J, M: moves.mean, lambda: lam, edge,
+    family: Math.abs(lam) < 1e-9 ? "normal" : lam < 0 ? "scale" : "location", sd: law.sd, why: null,
+  };
+}
+
 export function forwardVol(w1, T1, w2, T2) {
   if (!(T2 > T1)) return null;
   const d = w2 - w1;

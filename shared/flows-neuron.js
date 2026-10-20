@@ -1134,12 +1134,11 @@ export function contextLines(context) {
 
 export const VERDICTS = Object.freeze([
   "harvest-rich-premium", "buy-cheap-convexity", "pin-at-level", "ride-short-gamma", "fade-to-wall",
-  "event-overpriced", "event-underpriced", "sell-skew", "buy-protection-cheap", "term-roll", "stand-aside",
+  "sell-skew", "buy-protection-cheap", "term-roll", "stand-aside",
 ]);
 export const VERDICT_WORD = Object.freeze({
   "harvest-rich-premium": "Harvest rich premium", "buy-cheap-convexity": "Buy cheap convexity", "pin-at-level": "Pin at level",
-  "ride-short-gamma": "Ride short gamma", "fade-to-wall": "Fade to wall", "event-overpriced": "Event overpriced",
-  "event-underpriced": "Event underpriced", "sell-skew": "Sell skew", "buy-protection-cheap": "Buy cheap protection",
+  "ride-short-gamma": "Ride short gamma", "fade-to-wall": "Fade to wall", "sell-skew": "Sell skew", "buy-protection-cheap": "Buy cheap protection",
   "term-roll": "Term roll", "stand-aside": "Stand aside",
 });
 export const CLAIM_RELS = Object.freeze(["gt", "lt", "near", "between", "rising", "falling", "rich", "cheap"]);
@@ -1147,7 +1146,6 @@ export const VET_CODES = Object.freeze(["schema", "digit", "unknown-id", "avoid"
   "not-ranked", "off-rules"]);
 export const ENGINE_LINES = Object.freeze({
   VRP_RICH: BUCKET_LINES.VRP_RICH, VRP_CHEAP: BUCKET_LINES.VRP_CHEAP, IV_LOW: BUCKET_LINES.IV_LOW, IV_HIGH: BUCKET_LINES.IV_HIGH,
-  EVENT_OVER: BUCKET_LINES.EVENT_OVER, EVENT_UNDER: BUCKET_LINES.EVENT_UNDER,
   SKEW_STEEP: BUCKET_LINES.SKEW_STEEP, SKEW_FLAT: BUCKET_LINES.SKEW_FLAT, FRONT_BID: 0.08, NEAR_ATR: 0.5, NEAR_VOL: 0.01, NEAR_FRAC: 0.02,
   MAX_IDEAS: 3, MAX_STRUCTURES: 5,
 });
@@ -1236,7 +1234,7 @@ function nearLevel(eng, st, levelIds) {
 export function verdictHolds(code, st, eng) {
   const m = factIndex(eng);
   const g = (id) => { const f = m.get(id); return f ? f.g : 0; };
-  const vrp = val(m, "vrp.rel.21"), ivp = val(m, "iv.pctile.30.1y"), ratio = val(m, "move.event.ratio");
+  const vrp = val(m, "vrp.rel.21"), ivp = val(m, "iv.pctile.30.1y");
   const skewPct = val(m, "skew.rr25.30.pct"), front = val(m, "term.front.7_30");
   const L = ENGINE_LINES;
   const state = eng.state || {};
@@ -1264,8 +1262,6 @@ export function verdictHolds(code, st, eng) {
       const beyond = (lv) => lv !== null && (put ? k <= lv && lv <= spot : k >= lv && lv >= spot);
       return beyond(wall) || beyond(flip);
     }
-    case "event-overpriced": return ratio !== null && ratio >= L.EVENT_OVER;
-    case "event-underpriced": return ratio !== null && ratio <= L.EVENT_UNDER;
     case "sell-skew":
       return !!st && skewPct !== null && skewPct >= L.SKEW_STEEP &&
         ["risk-reversal", "put-ratio", "call-ratio", "jade-lizard", "broken-wing-butterfly"].includes(st.family);
@@ -1318,7 +1314,6 @@ export function claimHolds(claim, eng) {
       if (/^vrp\./.test(a.id)) return { ok: rich ? a.v >= (a.id === "vrp.rel.21" ? L.VRP_RICH : 0) : a.v <= (a.id === "vrp.rel.21" ? L.VRP_CHEAP : 0), code: "claim-false" };
       const line = CLAIM_LINES[a.id];
       if (line) return { ok: rich ? (line.strict ? a.v > line.hi : a.v >= line.hi) : (line.strict ? a.v < line.lo : a.v <= line.lo), code: "claim-false" };
-      if (a.id === "move.event.ratio") return { ok: rich ? a.v >= L.EVENT_OVER : a.v <= L.EVENT_UNDER, code: "claim-false" };
       return { ok: false, code: "claim-false" };
     }
     default: return { ok: false, code: "schema" };
@@ -1485,8 +1480,7 @@ export function vetEngineReply(reply, context) {
   if (verdict !== null && !VERDICTS.includes(verdict)) { refuse("schema", "verdict"); verdict = null; }
   if (verdict !== null) {
     const holds = verdict === "stand-aside" ? verdictHolds(verdict, null, eng) && !kept.length
-      : kept.some((k) => verdictHolds(verdict, structureAt(eng, k.structure), eng)) ||
-        (["event-overpriced", "event-underpriced"].includes(verdict) && verdictHolds(verdict, null, eng));
+      : kept.some((k) => verdictHolds(verdict, structureAt(eng, k.structure), eng));
     if (!holds) { refuse("verdict-false", "verdict"); verdict = null; }
   }
   if (!kept.length && verdict !== "stand-aside") verdict = null;

@@ -1,12 +1,12 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
-import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventVariance, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
-import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
+import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, eventShape, sliceCallU, slicePutU, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
+import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, rndMoments, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
   expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
-import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly, shiftDay, SESSIONS_PER_YEAR } from "./flows-quant-time.js";
 
 export { rankModeOf };
 
@@ -16,6 +16,7 @@ export const QUANT_CARD_LINES = Object.freeze({
   COVER_GOOD: 0.85, COVER_FAIR: 0.5, FLIP_CONVENTION_CAP: 2, FLIP_NEAR_ATR: 2, PROFILE_STRIDE: 3,
   PUBLISH_STRUCTURES: 5, RATE_MIN_DAYS: 20, RATE_MAX_DAYS: 200, RATE_LO: -0.01, RATE_HI: 0.15,
   XS_MIN_NAMES: 10, IV_PERCENT_LINE: 5, EVENT_MIN_MOVES: 3, EVENT_MIN_JUMP: 1e-4,
+  EVENT_FIT_PRE: 2, EVENT_FIT_POST: 4, EVENT_FIT_AFTER_DAYS: 80, EVENT_FIT_RESID: 0.03,
   PARITY_SYMBOLS: Object.freeze(["SPX", "SPXW", "SPY"]),
 });
 export const FACT_UNITS = Object.freeze([
@@ -221,25 +222,39 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
   return { built: settled.list, input: eligible, surface: settled.surface };
 }
 
-const atmVolOf = (ex) => sliceVolK(ex.slice, 0);
+
+const tauOf = (e) => (e && fin(e.hSessions) && e.hSessions > 0 ? e.hSessions / SESSIONS_PER_YEAR : null);
+
+function targetTau(built, days) {
+  const e = built.find((x) => x && typeof x.expiry === "string" && Number.isInteger(x.dte) && fin(x.hSessions) && fin(x.sessions));
+  if (!e || !fin(days)) return null;
+  const asOfDay = shiftDay(e.expiry, -e.dte);
+  const target = asOfDay ? shiftDay(asOfDay, Math.round(days)) : null;
+  if (!target) return null;
+  const tau = (Math.max(0, e.hSessions - e.sessions) + sessionsBetween(asOfDay, target)) / SESSIONS_PER_YEAR;
+  return tau > 0 ? tau : null;
+}
 
 export function constantMaturity(built, days, exEvent = null) {
   const j2 = exEvent && typeof exEvent.date === "string" && fin(exEvent.J2) && exEvent.J2 > 0 ? exEvent.J2 : 0;
-  const pts = built.map((e) => ({ days: e.T * 365, w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0);
+  const pts = built.map((e) => ({ days: e.T * 365, tau: tauOf(e), w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0 && p.tau !== null);
   if (!pts.length) return null;
+  const tT = targetTau(built, days);
+  if (tT === null) return null;
   if (j2) for (const p of pts) if (p.e.expiry >= exEvent.date) p.w -= j2;
   pts.sort((a, b) => a.days - b.days);
   let lo = null, hi = null;
   for (const p of pts) { if (p.days <= days) lo = p; if (p.days >= days && !hi) hi = p; }
   if (lo && hi && lo !== hi) {
-    const t = (days - lo.days) / (hi.days - lo.days);
+    const t = (tT - lo.tau) / (hi.tau - lo.tau);
     const w = lo.w + t * (hi.w - lo.w);
-    return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, lo: lo.e, hi: hi.e, extrapolated: false };
+    return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, tau: tT, lo: lo.e, hi: hi.e, extrapolated: false };
   }
   const only = lo || hi;
   if (!only) return null;
   if (Math.abs(only.days - days) > Math.max(5, days * 0.5)) return null;
-  return { vol: Math.sqrt(Math.max(only.w, 0) / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
+  const w = only.w * tT / only.tau;
+  return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, tau: tT, lo: only.e, hi: only.e, extrapolated: true };
 }
 
 function fitGradeOf(slice) {
@@ -252,15 +267,49 @@ function fitGradeOf(slice) {
 
 export function eventJump(built, event) {
   if (!event || !event.date) return null;
-  const after = built.filter((e) => e.expiry >= event.date);
-  if (after.length < 2) return { J: null, why: "event.slices" };
-  const front = after[0], back = after[1];
-  const v = eventVariance({ front: { T: front.T, vol: atmVolOf(front) }, back: { T: back.T, vol: atmVolOf(back) } });
-  const priced = fin(v.eventSd) && v.eventSd >= QUANT_CARD_LINES.EVENT_MIN_JUMP;
-  return {
-    J: priced ? v.eventSd : null, meanAbs: priced ? v.eventMeanAbs : null, diffusiveVol: v.diffusiveVol,
-    why: priced ? v.why : v.why || "event.no-premium", front: front.expiry, back: back.expiry,
+  const L = QUANT_CARD_LINES;
+  const horizon = shiftDay(event.date, L.EVENT_FIT_AFTER_DAYS);
+  const pre = built.filter((e) => e.expiry < event.date).slice(-L.EVENT_FIT_PRE);
+  const post = built.filter((e) => e.expiry >= event.date && (horizon === null || e.expiry < horizon)).slice(0, L.EVENT_FIT_POST);
+  if (!post.length || pre.length + post.length < 2) return { J: null, why: "event.slices" };
+  const front = post[0], back = post[1] || null;
+  const used = [];
+  const points = [];
+  for (const e of pre.concat(post)) {
+    const tau = tauOf(e);
+    if (tau === null) return { J: null, why: "event.clock", front: front.expiry, back: back ? back.expiry : null };
+    const mf = modelFreeWindow(e.slice);
+    if (!mf) continue;
+    points.push({ tau, w: mf.w, post: e.expiry >= event.date });
+    used.push(e.expiry);
+  }
+  const fit = eventTermFit(points);
+  const priced = fit.why === null && fin(fit.J) && fit.J >= L.EVENT_MIN_JUMP;
+  const poor = priced && fit.dof > 0 && fit.resid > L.EVENT_FIT_RESID;
+  const out = {
+    J: priced ? fit.J : null, J2: priced ? fit.J2 : null, meanAbs: null, kappa: null, shape: null, shapeWhy: null, k3: null,
+    diffusiveVol: fin(fit.sigma) ? fit.sigma : null, beta: fin(fit.beta) ? fit.beta : null,
+    seJ: fin(fit.seJ) ? fit.seJ : null, n: fit.n, dof: fit.dof, resid: fit.resid,
+    why: fit.why || (priced ? (poor ? "event.residual" : null) : "event.no-premium"),
+    basis: "model-free", front: front.expiry, back: back ? back.expiry : null, used,
   };
+  if (!priced) return out;
+  const tf = tauOf(front);
+  const wD = fit.sigma2 * tf + (fin(fit.beta) ? fit.beta * tf * tf : 0);
+  const F = asSlice(front.slice).F;
+  const shape = eventShape({ J2: fit.J2, wD, straddle: (sliceCallU(front.slice, F) + slicePutU(front.slice, F)) / F });
+  out.meanAbs = shape.M;
+  out.kappa = shape.identified ? shape.kappa : null;
+  out.shape = shape.identified ? { family: shape.family, lambda: shape.lambda, edge: shape.edge } : null;
+  out.shapeWhy = shape.identified ? null : shape.why;
+  const prior = pre.length ? pre[pre.length - 1] : null;
+  const tp = prior ? tauOf(prior) : null;
+  if (tp !== null) {
+    const cum = (slice) => { const m = rndMoments(slice); return m && fin(m.skewness) && m.varianceLog > 0 ? m.skewness * Math.pow(m.varianceLog, 1.5) : null; };
+    const kf = cum(front.slice), kp = cum(prior.slice);
+    out.k3 = kf !== null && kp !== null ? kf - kp * tf / tp : null;
+  }
+  return out;
 }
 
 export function bookLevels(strikeRows, { spot } = {}) {
@@ -368,7 +417,6 @@ export function engineFacts(input) {
   const pm = ok(panels.pricedMove) ? panels.pricedMove : null;
   const rank = pm && fin(pm.ivRank) && pm.ivRank >= 0 && pm.ivRank <= 1 ? pm.ivRank : null;
   add("iv.rank.1y", rank === null ? null : dp(rank, 4), "frac", 2, rank === null ? { why: "iv.rank-absent" } : {});
-  add("iv.pct.30", rank === null ? null : dp(rank, 4), "frac", 2, { why: rank === null ? "iv.rank-absent" : "iv.rank-as-pct" });
   const volX = card && card.x && typeof card.x === "object" && card.x.vol && typeof card.x.vol === "object" ? card.x.vol : null;
   const pctile = volX && fin(volX.iv30Pct) && volX.iv30Pct >= 0 && volX.iv30Pct <= 1 ? volX.iv30Pct : null;
   add("iv.pctile.30.1y", pctile === null ? null : dp(pctile, 4), "frac", coneThin === true ? 1 : 2,
@@ -452,8 +500,10 @@ export function engineFacts(input) {
   add("move.event.hist.medianAbs", histMed === null ? null : dp(histMed, 4), "frac", hist.length >= 6 ? 3 : 2,
     histMed === null ? { why: event ? "event.few-moves" : "event.none-listed" } : {});
   const jMad = jump && fin(jump.meanAbs) ? jump.meanAbs : null;
-  add("move.event", jMad === null ? null : dp(jMad, 4), "frac", jMad === null ? 0 : 2, jMad === null ? { why: jump ? jump.why || "event.no-jump" : event ? "event.slices" : "event.none-listed" } : {});
-  add("move.event.ratio", jMad !== null && histMed > 0 ? dp(jMad / histMed, 4) : null, "ratio", hist.length >= 6 ? 2 : 1,
+  const evG = jMad === null ? 0 : jump.shapeWhy || jump.why ? 1 : fin(jump.dof) && jump.dof >= 1 ? 3 : 2;
+  const evWhy = jMad === null ? { why: jump ? jump.why || "event.no-jump" : event ? "event.slices" : "event.none-listed" } : jump.shapeWhy || jump.why ? { why: jump.shapeWhy || jump.why } : {};
+  add("move.event", jMad === null ? null : dp(jMad, 4), "frac", evG, evWhy);
+  add("move.event.ratio", jMad !== null && histMed > 0 ? dp(jMad / histMed, 4) : null, "ratio", Math.min(hist.length >= 6 ? 2 : 1, evG || 3),
     jMad !== null && histMed > 0 ? {} : { why: jMad === null ? "event.no-jump" : "event.few-moves" });
   return facts;
 }
@@ -488,7 +538,8 @@ export function engineEvent(event, jump, facts) {
   return {
     date: event.date, confirmed: !!event.confirmed, moves: (event.moves || []).filter(fin).map((m) => dp(m, 4)),
     jq: jump && fin(jump.J) ? dp(jump.J, 5) : null, realizedOverImplied: fin(event.realizedOverImplied) ? dp(event.realizedOverImplied, 4) : null,
-    ratio,
+    ratio, kappa: jump && fin(jump.kappa) ? dp(jump.kappa, 3) : null, shape: jump && jump.shape ? jump.shape.family : null,
+    k3: jump && fin(jump.k3) ? sig(jump.k3, 3) : null,
   };
 }
 

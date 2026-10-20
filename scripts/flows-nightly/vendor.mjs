@@ -1,10 +1,17 @@
 import { makePermitQueue } from "../../shared/flows-permits.js";
+import { vendorBaseInfo, retryAfterMs } from "../../shared/flows-vendor-core.js";
 import { createCallMeter, opIdOf, pageOf, shapeOf, tickerOf } from "../../shared/flows-call-meter.js";
 import { createProgress } from "../flows-legs/live.mjs";
 import { LIVE_MODE } from "./flags.mjs";
 import { LIVE_VENDOR, NIGHTLY_VENDOR, RATE } from "./vendor-params.mjs";
 
-const BASE = process.env.FLOWS_UW_BASE_URL || "https://api.unusualwhales.com";
+const BASE_INFO = vendorBaseInfo(process.env.FLOWS_UW_BASE_URL);
+
+if (BASE_INFO.status === "invalid") {
+  throw new Error("FLOWS_UW_BASE_URL is neither the vendor's origin, a loopback address nor a .test host, so no vendor call is made");
+}
+
+const BASE = BASE_INFO.base;
 
 export function rateFloorSurvivesBudget(
   { floorCeilingMs, callBudget, deadlineMs, reserveMs } = {},
@@ -280,10 +287,10 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     if (response.status === 429) {
       noteWire();
       stats.rateLimited++;
-      const retryAfter = Number(response.headers.get("Retry-After"));
+      const hinted = retryAfterMs(response.headers.get("Retry-After"), Date.now());
 
-      const wait = Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(retryAfter * 1000, RATE.maxRetryAfterMs)
+      const wait = hinted !== null && hinted > 0
+        ? Math.min(hinted, RATE.maxRetryAfterMs)
         : Math.min(delayMs * 4, RATE.maxDelayMs);
 
       ({ delayMs, floorMs: delayFloorMs } = stepRateController(

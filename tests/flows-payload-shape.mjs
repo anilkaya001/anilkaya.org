@@ -203,13 +203,15 @@ assert.deepEqual(missingReport, [],
       }
     }
     assert.deepEqual(wrong, [], "every engine card carries iv.pctile.30.1y equal to the cone's percentile on x.vol, graded 1 on a thin 30-day cone and 2 on a full one, or withheld with its code:\n  " + wrong.join("\n  ")); checks++;
+    ok(cards.every((c) => !c.engine.facts.some((x) => x.id === "iv.pct.30")) && cards.every((c) => c.engine.facts.some((x) => x.id === "iv.rank.1y")),
+       "P1-41: no published card carries the retired iv.pct.30, and every one carries the rank under iv.rank.1y"); checks++;
     ok(present > 0, `the dry run reaches the percentile fact with a value (${present}) and without one (${absent})`);
     ok(thin > 0 && full > 0, `and it reaches both grades: grade 1 on a thin cone (${thin}) and grade 2 on a full one (${full})`);
     {
       const { bucketsOf } = await import("../shared/flows-quant-structures.js");
       const bucketFrom = (c) => bucketsOf(Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "A").iv.bucket;
       const onRank = (c) => {
-        const r = c.engine.facts.find((x) => x.id === "iv.pct.30");
+        const r = c.engine.facts.find((x) => x.id === "iv.rank.1y");
         const f = { ...Object.fromEntries(c.engine.facts.map((x) => [x.id, x])), "iv.pctile.30.1y": r };
         return bucketsOf(f, "A").iv.bucket;
       };

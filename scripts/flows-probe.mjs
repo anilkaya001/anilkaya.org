@@ -3,8 +3,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { OPS, opById, pathFor } from "../shared/flows-vendor-ops.js";
+import { vendorBaseInfo, VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 
-export const DEFAULT_BASE = "https://api.unusualwhales.com";
+export const DEFAULT_BASE = VENDOR_BASE_DEFAULT;
 export const BASE_ENV = "FLOWS_UW_BASE_URL";
 export const KEY_ENV = "UW_API_KEY";
 export const TICKERS_ENV = "FLOWS_PROBE_TICKERS";
@@ -974,7 +975,11 @@ export async function runProbe(options, deps = {}) {
   const writeFile = deps.writeFile || ((file, text) => writeFileSync(file, text));
   const env = deps.env || process.env;
   const key = options.key || "";
-  const base = options.base || DEFAULT_BASE;
+  const baseInfo = vendorBaseInfo(options.base);
+  if (baseInfo.status === "invalid") {
+    throw new UsageError("the vendor base is neither the vendor's origin, a loopback address nor a .test host, so no call is made");
+  }
+  const base = baseInfo.base;
   const tickers = options.tickers || [...DEFAULT_TICKERS];
   const list = options.list || loadList();
   const redact = makeRedactor(key);

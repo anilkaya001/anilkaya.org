@@ -333,28 +333,114 @@ export function w3bSession(opts = {}) {
   return { names: out, params: p };
 }
 
-export const W1D_DEFAULTS = Object.freeze({ names: 60, days: 500, nu: 5, rho: 0.3 });
+export const W1D_DEFAULTS = Object.freeze({ names: 60, days: 500, nu: 5, rho: 0.3, sectors: 0, sectorRho: 0, volShock: 0, scaleSd: 0 });
 
 export function w1dWorld(opts = {}) {
   const p = { ...W1D_DEFAULTS, ...opts };
   const rng = p.rng || makeRng(p.seed ?? "w1d");
   const r = new Float64Array(p.names * p.days);
-  const a = Math.sqrt(p.rho), b = Math.sqrt(1 - p.rho);
+  const a = Math.sqrt(p.rho), b = Math.sqrt(1 - p.rho - (p.sectors ? p.sectorRho : 0));
+  const c = p.sectors ? Math.sqrt(p.sectorRho) : 0;
+  const sector = Int32Array.from({ length: p.names }, (_, i) => (p.sectors ? i % p.sectors : 0));
+  const sectorRng = p.sectors ? rng.child("sectors") : null;
+  const shockRng = p.volShock ? rng.child("volshock") : null;
+  const scaleRng = p.scaleSd ? rng.child("scale") : null;
+  const scale = Float64Array.from({ length: p.names }, () => (p.scaleSd ? Math.exp(p.scaleSd * scaleRng.normal()) : 1));
+  const factorS = new Float64Array(p.sectors || 1);
   for (let t = 0; t < p.days; t++) {
     const factor = rng.studentUnit(p.nu);
     const shared = a * factor;
-    for (let i = 0; i < p.names; i++) r[i * p.days + t] = shared + b * rng.studentUnit(p.nu);
+    if (p.sectors) for (let g = 0; g < p.sectors; g++) factorS[g] = sectorRng.studentUnit(p.nu);
+    const shock = p.volShock ? Math.exp(p.volShock * shockRng.normal() - (p.volShock * p.volShock) / 2) : 1;
+    for (let i = 0; i < p.names; i++) {
+      const base = shared + (p.sectors ? c * factorS[sector[i]] : 0) + b * rng.studentUnit(p.nu);
+      r[i * p.days + t] = p.volShock || p.scaleSd ? base * shock * scale[i] : base;
+    }
   }
-  return { r, names: p.names, days: p.days, params: p };
+  return { r, names: p.names, days: p.days, params: p, sector, scale };
 }
 
 export function w1Independent(opts = {}) {
   return w1dWorld({ ...opts, rho: 0 });
 }
 
+export const W1M_DEFAULTS = Object.freeze({
+  names: 40, days: 1000, alpha: 0.03, gamma: 0.05, beta: 0.91, variance: 4, nu: 5, lambda: -0.15, burn: 300,
+  sectors: 4, sectorRho: 0.15, scaleErrorSd: 0, jumpRate: 0, jumpSd: 4, eventEvery: 0, eventSd: 4, splitRate: 0,
+});
+
+export const W2_DEFAULTS = Object.freeze({ ...W1M_DEFAULTS, jumpRate: 0.004, jumpSd: 4, eventEvery: 63, eventSd: 4, splitRate: 1 / 1500, scaleErrorSd: 0.2 });
+
+const SPLIT_RATIOS = Object.freeze([2, 3, 4, 5, 10]);
+
+export function w1mWorld(opts = {}) {
+  const p = { ...W1M_DEFAULTS, ...opts };
+  const rng = p.rng || makeRng(p.seed ?? "w1m");
+  const dist = hansen(p.nu, p.lambda);
+  const probe = makeRng("w1m|negative-second-moment");
+  let negSq = 0;
+  for (let k = 0; k < 200000; k++) { const x = dist.draw(probe); if (x < 0) negSq += x * x; }
+  const pNeg = negSq / 200000;
+  const omega = p.variance * (1 - p.alpha - p.gamma * pNeg - p.beta);
+  const total = p.days + p.burn;
+  const r = new Float64Array(p.names * p.days), sigma = new Float64Array(p.names * p.days), z = new Float64Array(p.names * p.days);
+  const sector = Int32Array.from({ length: p.names }, (_, i) => (p.sectors ? i % p.sectors : 0));
+  const sectorRng = rng.child("sector"), jumpRng = rng.child("jumps"), eventRng = rng.child("events"), scaleRng = rng.child("scale"), splitRng = rng.child("splits");
+  const sectorShock = Array.from({ length: p.sectors || 1 }, () => new Float64Array(total));
+  if (p.sectors) for (const row of sectorShock) for (let t = 0; t < total; t++) row[t] = dist.draw(sectorRng);
+  const scaleError = Float64Array.from({ length: p.names }, () => Math.exp(p.scaleErrorSd * scaleRng.normal()));
+  const events = [], jumps = [], splits = [];
+  const idio = Math.sqrt(1 - (p.sectors ? p.sectorRho : 0)), common = p.sectors ? Math.sqrt(p.sectorRho) : 0;
+  const adjusted = new Float64Array(p.names * (p.days + 1));
+  for (let i = 0; i < p.names; i++) {
+    const nameRng = rng.child(`name${i}`);
+    const phase = p.eventEvery ? eventRng.int(p.eventEvery) : 0;
+    const evs = [], jps = [];
+    let s2 = p.variance;
+    let level = 0;
+    adjusted[i * (p.days + 1)] = 0;
+    for (let t = 0; t < total; t++) {
+      const s = Math.sqrt(s2);
+      const zt = idio * dist.draw(nameRng) + common * sectorShock[sector[i]][t];
+      const e = s * zt;
+      const day = t - p.burn;
+      if (day >= 0) {
+        let ret = e;
+        if (p.eventEvery && day % p.eventEvery === phase) { ret += s * p.eventSd * eventRng.normal(); evs.push(day); }
+        if (p.jumpRate && jumpRng.uniform() < p.jumpRate) { ret += s * p.jumpSd * jumpRng.normal(); jps.push(day); }
+        const k = i * p.days + day;
+        r[k] = ret; sigma[k] = s; z[k] = zt;
+        level += ret / 100;
+        adjusted[i * (p.days + 1) + day + 1] = level;
+        if (p.splitRate && splitRng.uniform() < p.splitRate) splits.push({ name: i, day, ratio: SPLIT_RATIOS[splitRng.int(SPLIT_RATIOS.length)] });
+      }
+      s2 = omega + (p.alpha + (e < 0 ? p.gamma : 0)) * e * e + p.beta * s2;
+    }
+    events.push(evs);
+    jumps.push(jps);
+  }
+  const closes = new Float64Array(p.names * (p.days + 1));
+  const unadjusted = new Float64Array(p.names * (p.days + 1));
+  for (let i = 0; i < p.names; i++) {
+    const own = splits.filter((x) => x.name === i);
+    for (let t = 0; t <= p.days; t++) {
+      const a = 100 * Math.exp(adjusted[i * (p.days + 1) + t]);
+      closes[i * (p.days + 1) + t] = a;
+      let factor = 1;
+      for (const sp of own) if (sp.day >= t) factor *= sp.ratio;
+      unadjusted[i * (p.days + 1) + t] = a * factor;
+    }
+  }
+  return { r, sigma, z, names: p.names, days: p.days, params: { ...p, omega, pNeg }, dist, sector, scaleError, events, jumps, splits, closes, unadjusted };
+}
+
+export const w2World = (opts = {}) => w1mWorld({ ...W2_DEFAULTS, ...opts });
+
 export const WORLDS = Object.freeze({
   W1: Object.freeze({ id: "W1", title: "GARCH(1,1)-skew-t, the production class", family: "calibration" }),
   W1d: Object.freeze({ id: "W1d", title: "the dependent daily world", family: "calibration" }),
+  W1m: Object.freeze({ id: "W1m", title: "GJR-GARCH with Hansen skew-t innovations, sector correlation and a per-name log-scale error", family: "calibration" }),
+  W2: Object.freeze({ id: "W2", title: "W1m with Poisson jumps, scheduled earnings sessions and splits", family: "calibration" }),
   W3: Object.freeze({ id: "W3", title: "marked Hawkes flow", family: "calibration" }),
   W3b: Object.freeze({ id: "W3b", title: "flow counts with day effects and weather", family: "calibration" }),
   W4: Object.freeze({ id: "W4", title: "look-ahead bait", family: "calibration" }),

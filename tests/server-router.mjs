@@ -461,5 +461,23 @@ for (const r of table.rows) {
   ok(K.HttpError.of("ready_off").status === 404 && K.HttpError.of("health_off").status === 404, "both codes are registered");
 }
 
+{
+  const seen = [];
+  const any = rowOf({ id: "t.any", path: "/api/t/any", auth: "none", methods: ["*"], handler: async (rc) => { seen.push(rc.request.method); return new Response("any"); } });
+  const r = createRouter([any]);
+  eq(r.find("/api/t/any").methods, ["*"], "a row can say it decides its own methods");
+  for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    const res = await r.handle({ request: req(method, "/api/t/any"), env: {}, url: new URL("https://anilkaya.org/api/t/any"), ctx: {} }, { flows: noop });
+    eq([res.status, await res.text()], [200, "any"], method + " reaches a row that decides its own methods, with no 405 from the router");
+  }
+  eq(seen, ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], "and the handler saw each one");
+  for (const [label, methods] of [["the wildcard beside a method", ["*", "GET"]], ["a method beside the wildcard", ["GET", "*"]], ["two wildcards", ["*", "*"]], ["a lower-case wildcard word", ["any"]]]) {
+    ok((() => { try { createRouter([rowOf({ methods })]); } catch (e) { return e instanceof TypeError; } return false; })(), "createRouter refuses " + label);
+  }
+  const gated = createRouter([rowOf({ id: "t.gated", path: "/api/t/gated", auth: "flows", methods: ["*"] })]);
+  const refused = await thrown(() => gated.handle({ request: req("OPTIONS", "/api/t/gated"), env: {}, url: new URL("https://anilkaya.org/api/t/gated"), ctx: {} }, { flows: noop }));
+  eq(view(refused) && [refused.status, refused.code], [401, "unauthorized"], "the wildcard skips the method gate only: a flows row is still 401 before its handler");
+}
+
 globalThis.Date = RealDate;
 console.log(`server-router: ${checks} checks`);

@@ -877,7 +877,6 @@ const CARD = {
       { id: "iv.cm.30", v: 0.32, u: "vol", g: 3 },
       { id: "iv.cm.90", v: 0.29, u: "vol", g: 2 },
       { id: "iv.rank.1y", v: 0.82, u: "frac", g: 2 },
-      { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
       { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 2 },
       { id: "garch.avg.21", v: 0.27, u: "vol", g: 3 },
       { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
@@ -983,7 +982,10 @@ const CARD = {
   same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
        "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
   same(code({ claims: [{ a: "iv.pctile.30.1y", rel: "cheap" }] }), ["claim-false"], "an IV rank at 0.82 is not cheap");
-  same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
+  same(code({ verdict: "event-overpriced" }), ["schema"], "the event premium verdicts are retired with the 0.8 and 1.25 bucket: an implied mean over a historical median is not a price test (F-23, F-83 owns the premium)");
+  same(code({ verdict: "event-underpriced" }), ["schema"], "on either side");
+  ok(!VERDICTS.includes("event-overpriced") && !VERDICTS.includes("event-underpriced") && !("EVENT_OVER" in ENGINE_LINES) && !("EVENT_UNDER" in ENGINE_LINES) &&
+     !("EVENT_OVER" in BUCKET_LINES) && !("EVENT_UNDER" in BUCKET_LINES), "and no line for them is published");
   same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
   same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
   ok(VET_CODES.every((c) => typeof c === "string") && ["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false",
@@ -1070,8 +1072,6 @@ const CARD = {
          "and so is the same rank line beside the volatility premium, a fact this structure's rules do not name");
     ok(vetEngineReply({ ideas: [{ structure: "S1", because: ["iv.pctile.30.1y", "iv.cm.30"] }] }, ivCtx).ideas.length === 1,
        "while the same idea citing iv.pctile.30.1y, the id the prompt names, is kept");
-    same(codes({ ideas: [{ structure: "S1", because: ["iv.pct.30", "iv.cm.30"] }] }, ivCtx), ["off-rules"],
-         "P0-35: and the rank under its old percentile id, iv.pct.30, no longer rests an IV rule: the vet reads the axis through the percentile only");
     same(codes({ ideas: [{ structure: "S2", because: ["iv.cm.90", "garch.avg.21"] }] }), ["off-rules"],
          "N-F4: an iron condor 'because' the 90-day implied vol and the GARCH average, which none of its rules names, is refused as off-rules, where any two graded facts were accepted");
     ok(vetEngineReply({ ideas: [{ structure: "S2", because: ["iv.cm.90", "vrp.rel.21"] }] }, ectx).ideas.length === 1,
@@ -1468,7 +1468,7 @@ const CARD = {
      -STATE_LINES.VRP_RELATIVE === BUCKET_LINES.VRP_CHEAP,
      "N-F11: the state's IV-rank and premium lines are the engine's bucket lines (0.25 and 0.75, ±10%), not their own 0.2 and 0.7");
   ok(ENGINE_LINES.IV_LOW === BUCKET_LINES.IV_LOW && ENGINE_LINES.IV_HIGH === BUCKET_LINES.IV_HIGH && ENGINE_LINES.VRP_RICH === BUCKET_LINES.VRP_RICH &&
-     ENGINE_LINES.VRP_CHEAP === BUCKET_LINES.VRP_CHEAP && ENGINE_LINES.EVENT_OVER === BUCKET_LINES.EVENT_OVER && ENGINE_LINES.EVENT_UNDER === BUCKET_LINES.EVENT_UNDER &&
+     ENGINE_LINES.VRP_CHEAP === BUCKET_LINES.VRP_CHEAP &&
      ENGINE_LINES.SKEW_STEEP === BUCKET_LINES.SKEW_STEEP && ENGINE_LINES.SKEW_FLAT === BUCKET_LINES.SKEW_FLAT && !("IV_MID_HIGH" in ENGINE_LINES),
      "and so are the verdict lines, where 'high' was 0.75 in one place, 0.70 in another and 0.7 in a third");
   ok(!("DISPLACEMENT_ATR" in STATE_LINES), "the displacement line that no branch read is gone: the displacement casts no vote");
@@ -1492,14 +1492,14 @@ const CARD = {
   ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pctile.30.1y", 0.2, 2]])), "a negative premium at a bottom-quartile IV rank is");
   ok(verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pctile.30.1y", 0.6, 2]])), "and one past −10% at a mid IV rank");
   ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.12], ["iv.pctile.30.1y", 0.8, 2]])), "but not with IV rank in the top quartile");
-  ok(claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.76, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "rich" }, eng([["iv.pct.30", 0.72, 2]])).ok &&
-     claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.2, 2]])).ok && !claimHolds({ a: "iv.pct.30", rel: "cheap" }, eng([["iv.pct.30", 0.25, 2]])).ok,
+  ok(claimHolds({ a: "iv.rank.1y", rel: "rich" }, eng([["iv.rank.1y", 0.76, 2]])).ok && !claimHolds({ a: "iv.rank.1y", rel: "rich" }, eng([["iv.rank.1y", 0.72, 2]])).ok &&
+     claimHolds({ a: "iv.rank.1y", rel: "cheap" }, eng([["iv.rank.1y", 0.2, 2]])).ok && !claimHolds({ a: "iv.rank.1y", rel: "cheap" }, eng([["iv.rank.1y", 0.25, 2]])).ok,
      "and the claims 'rich' and 'cheap' on an IV rank read the same two lines, strictly, as the engine's buckets do");
   {
     const rich = (id, v) => claimHolds({ a: id, rel: "rich" }, eng([[id, v, 2]])).ok;
     const cheap = (id, v) => claimHolds({ a: id, rel: "cheap" }, eng([[id, v, 2]])).ok;
-    same(Object.keys(CLAIM_LINES).sort(), ["iv.pct.30", "iv.pctile.30.1y", "iv.rank.1y", "skew.rr25.30.pct"],
-      "P0-35: the claim lines are an explicit table over four ids, not a pattern on the id's spelling");
+    same(Object.keys(CLAIM_LINES).sort(), ["iv.pctile.30.1y", "iv.rank.1y", "skew.rr25.30.pct"],
+      "P0-35: the claim lines are an explicit table over three ids, not a pattern on the id's spelling, and the retired iv.pct.30 is not in it");
     ok(Object.isFrozen(CLAIM_LINES) && CLAIM_LINES["iv.pctile.30.1y"].hi === BUCKET_LINES.IV_HIGH && CLAIM_LINES["iv.pctile.30.1y"].lo === BUCKET_LINES.IV_LOW &&
        CLAIM_LINES["skew.rr25.30.pct"].hi === BUCKET_LINES.SKEW_STEEP && CLAIM_LINES["skew.rr25.30.pct"].lo === BUCKET_LINES.SKEW_FLAT,
       "the IV ids carry 0.25/0.75 and the skew id 0.2/0.8, each the engine's own bucket line");
@@ -1510,18 +1510,20 @@ const CARD = {
       "a 'rich' claim on the skew percentile at 0.77 is refused, where the IV lines used to accept it, and holds from the steep line 0.8, the bucket's own");
     ok(cheap("skew.rr25.30.pct", 0.2) && cheap("skew.rr25.30.pct", 0.1) && !cheap("skew.rr25.30.pct", 0.22),
       "and a 'cheap' skew claim holds up to the flat line 0.2 inclusive and not at 0.22, which the IV line 0.25 used to accept");
-    ok(rich("iv.rank.1y", 0.76) && !rich("iv.rank.1y", 0.72) && rich("iv.pct.30", 0.76) && !rich("iv.pct.30", 0.72) && cheap("iv.pct.30", 0.2),
-      "the rank ids keep the IV lines for the one release they are still emitted");
+    ok(rich("iv.rank.1y", 0.76) && !rich("iv.rank.1y", 0.72) && cheap("iv.rank.1y", 0.2),
+      "the rank id keeps the IV lines");
+    ok(!rich("iv.pct.30", 0.9) && !cheap("iv.pct.30", 0.1),
+      "and a claim on the retired iv.pct.30 is refused at any value, so a stored card that still carries it cannot back a rich or cheap sentence");
     ok(!claimHolds({ a: "iv.mom.5", rel: "rich" }, eng([["iv.mom.5", 0.9, 2]])).ok && !claimHolds({ a: "gex.book", rel: "cheap" }, eng([["gex.book", 0.1, 2]])).ok,
       "an id outside the table is refused as a rich or cheap claim, whatever it is spelled like");
     const neuronSrc = fs.readFileSync(new URL("../shared/flows-neuron.js", import.meta.url), "utf8");
     ok(!neuronSrc.includes("\\.pct\\b") && !neuronSrc.includes("\\.rank\\."), "and no pattern on the id's spelling is left in the claim vet");
     ok(RULE_FACT.iv === "iv.pctile.30.1y", "the IV rule fact is the percentile id");
-    ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.07, 2], ["iv.pctile.30.1y", 0.7, 2]])) &&
-       verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.pct.30", 0.7, 2], ["iv.pctile.30.1y", 0.07, 2]])),
+    ok(!verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.rank.1y", 0.07, 2], ["iv.pctile.30.1y", 0.7, 2]])) &&
+       verdictHolds("buy-cheap-convexity", straddle, eng([["vrp.rel.21", -0.03], ["iv.rank.1y", 0.7, 2], ["iv.pctile.30.1y", 0.07, 2]])),
       "a verdict reads the percentile and not the rank: rank 0.07 with percentile 0.70 is mid and does not hold 'buy cheap convexity', the reverse does");
-    ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.9, 2]])) &&
-       verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.pct.30", 0.5, 2], ["iv.pctile.30.1y", 0.9, 2]])),
+    ok(!verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.rank.1y", 0.9, 2]])) &&
+       verdictHolds("harvest-rich-premium", condor, eng([["vrp.rel.21", 0.03], ["iv.rank.1y", 0.5, 2], ["iv.pctile.30.1y", 0.9, 2]])),
       "and a card with only the rank has no IV read for a verdict: the percentile is withheld, never replaced by the rank");
   }
 

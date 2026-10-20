@@ -25,7 +25,6 @@ export const ENGINE = {
   v: 1, engine: "q1", asOf: "2026-10-01T20:00:00.000Z", spot: 127.4, atr: 3.1,
   facts: [
     { id: "iv.cm.30", v: 0.41, u: "vol", g: 3 },
-    { id: "iv.pct.30", v: 0.82, u: "frac", g: 2 },
     { id: "iv.pctile.30.1y", v: 0.82, u: "frac", g: 2 },
     { id: "vrp.rel.21", v: 0.18, u: "frac", g: 3 },
     { id: "term.slope.30_90.exEvent", v: 0.05, u: "frac", g: 2 },

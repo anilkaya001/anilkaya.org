@@ -11,6 +11,7 @@ import { WIRE_RENAMES } from "../shared/flows-dossier-vendor.js";
 import { OPS, opById, opsFor, pathFor, BUDGETS, PLAN, LICENCES, PLANS, LIMITERS } from "../shared/flows-vendor-ops.js";
 import { PACKET_CLASSES, DOSSIER_OPS } from "../shared/flows-dossier.js";
 import { SOURCES } from "../shared/flows-dossier-worker.js";
+import { VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
 import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
@@ -369,10 +370,10 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
        "the probe sends exactly the pipeline's two vendor headers");
 
   const src = nightlySource();
-  const baseLine = /const BASE = process\.env\.(\w+) \|\| "([^"]+)"/.exec(src);
-  ok(baseLine, "the pipeline still names its vendor base URL in one line");
+  const baseLine = /const BASE_INFO = vendorBaseInfo\(process\.env\.(\w+)\);/.exec(src);
+  ok(baseLine, "the pipeline still names its vendor base URL once, through the vendor core's allow-list");
   eq(baseLine[1], probe.BASE_ENV, "the probe honours the pipeline's base-URL override");
-  eq(baseLine[2], probe.DEFAULT_BASE, "and defaults to the same vendor host");
+  eq(VENDOR_BASE_DEFAULT, probe.DEFAULT_BASE, "and the probe defaults to the core's vendor host, which the pipeline uses for an unset base");
   const uwBody = slice(src, "async function uw(", "\n}\n");
   ok(uwBody.length > 0, "the pipeline's vendor helper is still uw()");
   ok(/Authorization:\s*"Bearer "\s*\+\s*process\.env\.UW_API_KEY/.test(uwBody),
@@ -640,6 +641,28 @@ const mini = probe.validateList({
     "/api/stock/{ticker}/option-contracts": ["option_symbol", "open_interest"],
   },
 });
+
+for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.evil.example", "https://user:pw@api.unusualwhales.com", "https://api.unusualwhales.com/x", "ftp://127.0.0.1", "http://127.0.0.2:9"]) {
+  const vendor = fakeVendor();
+  let refused = null;
+  try {
+    await probe.runProbe({ key: KEY, base: hostile, tickers: ["AAPL"], filter: "", list: mini },
+      { fetch: vendor.fetch, log: () => {}, now: vendor.now, sleep: vendor.sleep, clock: () => new Date("2026-09-23T13:32:00Z") });
+  } catch (error) {
+    refused = error;
+  }
+  ok(refused instanceof probe.UsageError, `the probe refuses the base ${hostile} before any call`);
+  eq(vendor.calls ? vendor.calls.length : 0, 0, `and sends the key nowhere for ${hostile}`);
+}
+
+{
+  const vendorModule = new URL("../scripts/flows-nightly/vendor.mjs", import.meta.url).href;
+  for (const [base, loads] of [["https://evil.example", false], ["https://user:pw@api.unusualwhales.com", false], ["http://127.0.0.1:9", true], ["https://vendor.test", true], ["", true]]) {
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(vendorModule)})`],
+      { env: { ...process.env, FLOWS_UW_BASE_URL: base }, encoding: "utf8" });
+    ok((child.status === 0) === loads, `the nightly's vendor client ${loads ? "loads" : "refuses to load"} with a vendor base of ${JSON.stringify(base)}`);
+  }
+}
 
 {
   const vendor = fakeVendor();

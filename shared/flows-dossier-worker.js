@@ -322,14 +322,15 @@ function writeFast(id, ticker, at, x) {
 const flights = new Map();
 
 export function assembleDossier(env, ctx, ticker, deps, opts = {}) {
-  const existing = flights.get(ticker);
+  const key = opts.cacheOnly === true ? ticker + "|cache-only" : ticker;
+  const existing = flights.get(key);
   if (existing) return existing;
   const flight = (async () => {
     const now = isNum(opts.now) ? opts.now : Date.now();
     const hot = opts.fresh === true ? null : await readAssembled(ticker, now);
     return hot || runAssembly(env, ctx, ticker, deps, opts);
-  })().finally(() => { if (flights.get(ticker) === flight) flights.delete(ticker); });
-  flights.set(ticker, flight);
+  })().finally(() => { if (flights.get(key) === flight) flights.delete(key); });
+  flights.set(key, flight);
   return flight;
 }
 
@@ -359,7 +360,8 @@ function writeAssembled(ticker, at, result) {
 async function runAssembly(env, ctx, ticker, deps, opts) {
   const now = isNum(opts.now) ? opts.now : Date.now();
   const budget = { ...BUDGET, ...(opts.budget || {}) };
-  const trace = { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], limited: [], failed: false, own: opts.own === true };
+  const cacheOnly = opts.cacheOnly === true;
+  const trace = { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], limited: [], failed: false, own: opts.own === true, cacheOnly };
   const statements = env.DB ? dossierStatements(env.DB, ticker) : [];
   const read = env.DB ? await batchWithClock(env.DB, statements, now) : { results: null, clock: memoizedClock(now) };
   trace.trips = 1;
@@ -422,13 +424,13 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   fastIds.forEach((id, i) => { fast[id] = fastHits[i]; });
 
   let admitted = known || opts.own === true;
-  if (!known && opts.own === true && typeof deps.admit === "function") {
+  if (!known && opts.own === true && !cacheOnly && typeof deps.admit === "function") {
     const verdict = await Promise.resolve(deps.admit(ticker)).catch(() => null);
     if (verdict === false) admitted = false;
   }
-  const plan = admitted
+  const plan = admitted && !cacheOnly
     ? planFetches({ ticker, known, own: opts.own === true, cache, fast, held, now, maxCalls: budget.maxCalls })
-    : { picked: [], queued: [], skipped: SOURCES.map((s) => ({ id: s.id, why: "not-admitted" })) };
+    : { picked: [], queued: [], skipped: SOURCES.map((s) => ({ id: s.id, why: cacheOnly ? "cache-only" : "not-admitted" })) };
   trace.skipped = plan.skipped;
   trace.queued = plan.queued;
 
@@ -493,7 +495,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   const metas = freshMetas(held, neuron);
   const result = { dossier, trace, neuron, known, admitted, clock, metas };
   const complete = !trace.failed && dossier.coverage.pending === 0 && trace.pending.length === 0 && !Object.values(extracts).some((x) => x && x.pending);
-  if (complete && opts.noHotWrite !== true) {
+  if (complete && opts.noHotWrite !== true && !cacheOnly) {
     result.prompt = renderDossierForModel(dossier, { budgetTokens: DEFAULT_BUDGET_TOKENS });
     const write = writeAssembled(ticker, Date.now(), result);
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(write); else await write;
