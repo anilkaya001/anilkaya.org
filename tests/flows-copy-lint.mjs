@@ -12,9 +12,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SIDE = /\bat (?:the )?(?:ask|bid)\b/i;
 const BADGE = /["'`>]NOW["'`<]/;
 
+const LITERAL = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`/g;
+const TAPE = /\btapes?\b/i;
+
 const RULES = Object.freeze([
   { id: "side", re: SIDE, scope: "all", why: "the vendor's term is ask side and bid side; a fill price is not carried by the field" },
   { id: "now", re: BADGE, scope: "browser", why: "NOW is retired as a name for the Screen" },
+  { id: "tape", test: (line) => (line.match(LITERAL) || []).some((lit) => TAPE.test(lit) && (/\s/.test(lit) || /^.(?:Tapes?|TAPES?|tapes)\W?.$/.test(lit))), scope: "all", why: "the word is not used in reader-facing or model-visible text; identifiers without a space are not text" },
 ]);
 
 export function lintText(text, kind) {
@@ -23,6 +27,10 @@ export function lintText(text, kind) {
   for (const rule of RULES) {
     if (rule.scope === "browser" && kind !== "browser") continue;
     for (let i = 0; i < lines.length; i++) {
+      if (rule.test) {
+        if (rule.test(lines[i])) hits.push({ rule: rule.id, line: i + 1, text: lines[i].trim().slice(0, 80) });
+        continue;
+      }
       const m = rule.re.exec(lines[i]);
       if (m) hits.push({ rule: rule.id, line: i + 1, text: lines[i].trim().slice(Math.max(0, m.index - 30), m.index + 50) });
     }
@@ -47,7 +55,7 @@ const browserFiles = [
   ...fs.readdirSync(ROOT).filter((f) => f.endsWith(".html")),
   "index.html",
 ].filter((f, i, a) => a.indexOf(f) === i);
-const serverFiles = [...walk("shared", [".js"]), ...walk("scripts", [".mjs", ".js"]), "worker.js"];
+const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...walk("scripts", [".mjs", ".js", ".json"]), "worker.js"];
 
 {
   eq(lintText('label: "Calls at ask"', "browser").length, 1, "a planted 'Calls at ask' is found");
@@ -57,6 +65,13 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("scripts", [".mjs", ".j
   eq(lintText('<span class="b">NOW</span>', "browser")[0].rule, "now", "a planted NOW badge is found in a browser file");
   eq(lintText("const SHOUT = new Set([\"BUY\", \"NOW\"])", "server").length, 0, "and the Worker's shouted-word guard list is not a reader-facing badge");
   eq(lintText("Premium is what the bid pays today", "browser").length, 0, "'what the bid' is not 'at the bid'");
+  eq(lintText('label: "Against the tape"', "browser")[0].rule, "tape", "a planted 'Against the tape' label is found");
+  eq(lintText("`The news tape holds ${n}`", "server")[0].rule, "tape", "a planted template string is found in server text");
+  eq(lintText('title: "Tapes"', "browser").length, 1, "a planted plural is found");
+  eq(lintText('title: "Tape"', "browser").length, 1, "a planted one-word module title is found");
+  eq(lintText("note: 'the tape\\'s floor'", "server").length, 1, "a planted possessive is found");
+  eq(lintText('"TAPE closed"', "server").length, 1, "and any case");
+  eq(lintText('const k = "tape", u = "/api/flows/tape", x = "X-Tape", g = "m-tape"; STATE.tape = tapeSub("live")', "browser").length, 0, "identifiers pass");
   eq(lintText("Calls · ask side, Puts · bid side, Unsided", "browser").length, 0, "the vendor's terms pass");
   eq(lintText("sold into the bid", "browser").length, 0, "and so does a sale into the bid");
 }
@@ -68,7 +83,7 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("scripts", [".mjs", ".j
   const found = [];
   for (const f of browserFiles) for (const h of lintText(fs.readFileSync(path.join(ROOT, f), "utf8"), "browser")) found.push(`${f}:${h.line} [${h.rule}] ${h.text}`);
   for (const f of serverFiles) for (const h of lintText(fs.readFileSync(path.join(ROOT, f), "utf8"), "server")) found.push(`${f}:${h.line} [${h.rule}] ${h.text}`);
-  eq(found.join("\n"), "", "no reader-facing or model-visible string says 'at ask', 'at the ask', 'at bid' or 'at the bid', and no browser file badges the Screen NOW; the allowlist is empty");
+  eq(found.join("\n"), "", "no reader-facing or model-visible string says 'tape', 'at ask', 'at the ask', 'at bid' or 'at the bid', and no browser file badges the Screen NOW; the allowlist is empty");
 }
 
 {
