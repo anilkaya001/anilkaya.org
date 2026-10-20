@@ -369,7 +369,7 @@ try {
     eq((/\nBusiest 5% of minutes\n([^\n]*)\n/.exec(t) || [])[1], Math.round(pth.concentration * 100) + "%", "and so is concentration");
     eq((/\nWeighted mean minute\n([^\n]*)\n/.exec(t) || [])[1], Math.round(pth.centroid * 100) + "%", "and the weighted mean minute");
     ok(/uniform session would put there/.test(t), "the reading states concentration against its own 5% baseline rather than a chosen threshold");
-    ok(/50% for a tape with no direction/.test(t), "and persistence against the coin-flip baseline");
+    ok(/50% for a session with no direction/.test(t), "and persistence against the coin-flip baseline");
     ok(/scaled to its own extreme/.test(t), "and says each leg is scaled to its own extreme, so the two heights are not compared");
   }
 

@@ -255,7 +255,7 @@ try {
       pop: document.getElementById("fxPopB").innerText }));
     ok(/Fetched at .*, 2 min ago\./.test(said.note), `the live headlines say when they were fetched (${said.note.slice(0, 80)})`);
     ok(/re-read every 15 minutes while the market is open/.test(said.note), "and say they are re-read every 15 minutes while the market is open");
-    ok(!/once-a-day/.test(said.note) && !/never a live tape/.test(said.note) && !/once each weekday/.test(said.note),
+    ok(!/once-a-day/.test(said.note) && !/never a live feed/.test(said.note) && !/once each weekday/.test(said.note),
       "THE 'ONCE-A-DAY READ AND NEVER A LIVE TAPE' SENTENCE IS GONE for a feed that is re-read intraday (it was printed under headlines fetched minutes ago)");
     ok(/Intraday snapshot/.test(said.pop), `the coverage line calls it an intraday snapshot, not 'cadence not specified' (${said.pop.slice(-160).replace(/\s+/g, " ")})`);
     await page.keyboard.press("Escape");

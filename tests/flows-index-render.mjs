@@ -45,7 +45,7 @@ const settle = async (page, ms = 320) => {
 
 const browser = await chromium.launch();
 
-const TITLES = ["Tide", "Breadth", "Tape", "Sector tides", "SPY", "QQQ", "IWM", "Momentum", "Groups", "Expiry", "Volatility", "Radar", "Advancers", "Volume", "Against the tape", "Extremes", "Open interest", "Dark pool", "Net impact", "Insiders", "Seasonality"];
+const TITLES = ["Tide", "Breadth", "Prints", "Sector tides", "SPY", "QQQ", "IWM", "Momentum", "Groups", "Expiry", "Volatility", "Radar", "Advancers", "Volume", "Against the prints", "Extremes", "Open interest", "Dark pool", "Net impact", "Insiders", "Seasonality"];
 async function mountLong(page) {
   await mount(page, TICKER, "/flows/ticker/?t=AAPL");
   await page.addStyleTag({ content: "html { scroll-behavior: auto !important; } #ftGrid { display: block !important; } #ftGrid > .ui-mod { margin-bottom: 12px; }" });
