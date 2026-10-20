@@ -186,7 +186,7 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(has(bad((t) => { t.deferred = t.deferred.slice(1); }), "is not the modules decided defer"), "a deferred list missing a deferred module fails");
 
   const weightWith = WEIGHT_SRC;
-  ok(/overviewPage: \{ groups: \{ "home-below": "\/assets\/js\/flows-overview-below\.js", "home-net": "\/assets\/js\/flows-net\.js", "home-netmap": "\/assets\/js\/flows-net-map\.js" \}, modules: \["hmChg", "hmVol", "hmEvents", "hmNews"\] \},/.test(weightWith), "the weight test defers the four modules to flows-overview-below.js as the home-below group");
+  ok(/overviewPage: \{ groups: \{ "home-below": "\/assets\/js\/flows-overview-below\.js", "home-net": "\/assets\/js\/flows-net\.js", "home-netmap": "\/assets\/js\/flows-net-map\.js", "nn-orb": "\/assets\/js\/flows-nn-orb\.js" \}, modules: \["hmChg", "hmVol", "hmEvents", "hmNews"\] \},/.test(weightWith), "the weight test defers the four modules to flows-overview-below.js as the home-below group");
   eq(bad(() => {}, () => facts, weightWith), [], "THE BELOW-THE-FOLD LIST EQUALS THE MODULE SET F-08 DEFERS: the entry lists the same four and passes");
   const weightWrong = weightWith.replace('modules: ["hmChg", "hmVol", "hmEvents", "hmNews"]', 'modules: ["hmChg", "hmVol", "hmEvents", "hmNews", "hmLean"]');
   ok(weightWrong !== weightWith, "the injection of a fifth module found its anchor");
