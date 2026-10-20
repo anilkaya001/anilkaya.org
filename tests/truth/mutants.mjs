@@ -213,9 +213,8 @@ register({
   title: "the reference scale includes earnings sessions",
   target: "shared/flows-evt.js",
   row: "F-13",
-  transforms: [],
-  detector: null,
-  pending: "arms with F-21, which adds scheduled events (W2) and the reference-scale leaf",
+  transforms: [["if (fin(v) && !skip.has(i)) { s += v * v; n++; }", "if (fin(v)) { s += v * v; n++; }"]],
+  detector: "referenceScaleCalibration",
 });
 
 register({

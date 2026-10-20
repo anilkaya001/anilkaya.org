@@ -696,7 +696,7 @@ await section("runner", () => {
   const v = judge([inFamily, well, outFamily]);
   eq(v.rows.map((r) => r.accepted), [true, null, true], "a well-specified cell is reported as a reference and never accepted");
   eq(v.judged, 2, "two cells judged");
-  eq(Object.keys({ ...WORLDS, ...W9_WORLDS }).sort(), ["W1", "W1d", "W3", "W3b", "W4", "W5", "W6", "W7", "W8", "W9", "W9o"], "the worlds registered");
+  eq(Object.keys({ ...WORLDS, ...W9_WORLDS }).sort(), ["W1", "W1d", "W1m", "W2", "W3", "W3b", "W4", "W5", "W6", "W7", "W8", "W9", "W9o"], "the worlds registered");
   const a = w1Garch({ seed: "det", n: 100 }), b = w1Garch({ seed: "det", n: 100 });
   eq(Array.from(a.r), Array.from(b.r), "a world is a pure function of its seed");
 });
