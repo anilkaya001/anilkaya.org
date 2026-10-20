@@ -16,6 +16,7 @@ const GLASS_V3 = { bytes: 3833, gzip: 571, why: "design v3 Lane 1: the liquid-gl
 const GLASS_LENS = { bytes: 396, gzip: 78, why: "design v3 Lane 1, refraction on four surfaces: the --glass-lens token, its @supports gate, the reduced-transparency and forced-colours drops, and the two backdrop-filter pairs on .ui-seg-knob and .ak-dock-head in flows.css; the filter itself is page markup, outside this table; every Flows route links flows.css" };
 const GLASS_SITE = { bytes: 84, gzip: 5, why: "design v3 Lane 1, one more place for visual integration: the sidebar's two switchers (.fx-site, Home Articles Lab Flows and About Glossary) are segmented controls in everything but their paint, so they take the glass well and the glass knob of .ui-seg instead of the flat fills" };
 const GLASS_REBASE = { bytes: 480, gzip: 80, why: "design v3 Lane 1 rebased onto main: the shared flows.css grew under it, 449 to 469 B over the raw CSS ceiling on every page at the rebase; raise approved by the owner" };
+const STATUS_RAISE = { od: "OD-STATUS-1", bytes: 300, deferredBytes: 850, why: "owner-approved: the whole-card counts, per-key caps and readable rail and vendor cards cost 281 B of eager flows-status.js on statusPage, measured against the 115.68 KiB ceiling, and 817 B across the status-panels files, measured against the 179 KiB deferred allowance; the follow-up moves the status painters that only the non-Health tabs use into the status-panels group and deletes this raise" };
 const GLASS_BYTES_PLAIN = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes) / 1024;
 const GLASS_BYTES = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes + GLASS_REBASE.bytes) / 1024;
 const GLASS_GZIP = (GLASS_V3.gzip + GLASS_LENS.gzip + GLASS_SITE.gzip) / 1024;
@@ -38,7 +39,7 @@ const CEILING_KIB = {
   aboutPage: 5,
   glossaryPage: 5,
   notFoundPage: 5,
-  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024,
+  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024,
 };
 
 const GZIP_KIB = {
@@ -146,7 +147,7 @@ const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 323,
-  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4,
+  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024,
 };
 
 const FLOOR_BYTES = 1024;
@@ -166,6 +167,7 @@ const BELOW_FLOOR = {
   movesPage: NO_RELIEF_ROW,
   marketPage: NO_RELIEF_ROW,
   overviewPage: NO_RELIEF_ROW,
+  statusPage: "OD-STATUS-1: the follow-up that moves the non-Health painters of flows-status.js into the status-panels group",
 };
 
 const LOADER = /createElement\(\s*["']script["']\s*\)|\bh\(\s*["']script["']|\bimport\(|new\s+Worker\(|importScripts\(/;

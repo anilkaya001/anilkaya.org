@@ -122,7 +122,8 @@ try {
     ok(/Running · upstream composite · sockets 3 of 40 · vendor calls 26 of 240 this minute/.test(rail), "rail summary: " + rail.slice(0, 300));
     ok(/Prices\s+1\.8 s\s+4\.9 s\s+live/.test(rail) && /Flagged alerts\s+2\.3 s\s+7\.4 s/.test(rail), "rail topics with p50, p95 and state");
     const night = await text(page, "#hNight");
-    ok(/Written 03:30 TRT \(18\.2 h ago\) · session 2026-10-09/.test(night) && /670 names · cards 500 built, 2 failed, 8 skipped/.test(night), "nightly summary: " + night.slice(0, 300));
+    ok(/Written 03:30 TRT \(18\.2 h ago\) · session 2026-10-09/.test(night) && /670 names · cards 500 built \(64 boards and focus, 435 rotation, 1 cross-section\), 2 failed, 8 skipped/.test(night), "nightly summary counts every card the run built, not the boards' alone: " + night.slice(0, 300));
+    ok(/1 health failure, 2 warnings/.test(night) && /cards: 2 failed/.test(night), "with the health counts in the singular where they are one, and the first health line on the card itself");
     ok(/universe\s+4\.2 s\s+ok/.test(night), "slowest stages first");
     const sw = await text(page, "#hSw");
     ok(/5 of 14 switches are on/.test(sw) && /Read-only/.test(sw) && /FLOWS_RT_UPSTREAM\s+socket/.test(sw), "switches are read-only and list those not on");
@@ -142,7 +143,8 @@ try {
     const dlg = await text(page, "#hRailDlg");
     ok(/Vendor key counter\s+21,400 calls today, read 21:41:03 TRT/.test(dlg), "the rail detail keeps the vendor counter with its TRT time: " + dlg.slice(0, 400));
     ok(/Upstream\s+composite, socket connected/.test(dlg) && /Started\s+18:41 TRT/.test(dlg), "and the socket upstream and the start in TRT");
-    ok(/px\s+socket/.test(dlg) && /mk\s+rest/.test(dlg) && /behind the item's own time/.test(dlg), "each topic names its transport and what its lag is measured against");
+    ok(/Prices\s+socket/.test(dlg) && /Market tide\s+REST/.test(dlg) && /behind the item's own time/.test(dlg), "each topic names its transport and what its lag is measured against");
+    ok(!/^(px|fl|gx|mk|nw)\b|\b(px|fl|gx|mk|nw):|\brest\b/m.test(dlg), "by its name, never its internal code, and REST in capitals: " + dlg.slice(0, 600));
     ok(await page.evaluate(() => document.getElementById("hRailDlg").querySelector("[data-close]") !== null), "the dialog has its own close control");
     await page.keyboard.press("Escape");
     await page.waitForFunction(() => !document.getElementById("hRailDlg").open);
@@ -169,6 +171,14 @@ try {
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+21,400 of 60,000 calls · 36%/.test(cv) && /Rail, this minute\s+26 of 240 calls · 11%/.test(cv), "vendor calls against the advisory day line and the rail's minute: " + cv.slice(0, 400));
     ok(/Cap: 60,000 per day/.test(cv), "the cap line carries its plan and source");
+    {
+      const wide = await open(browser, { view: "capacity", width: 1920, height: 1080 });
+      const cw = await text(wide.page, "#cVendor");
+      ok(/Nightly\s+4,100/.test(cw) && /Tier 1\s+366/.test(cw) && /Focus\s+125/.test(cw) && /Tier 2\s+920/.test(cw) && /Everything else \(rail, on-demand, MCP\)\s+15,889/.test(cw),
+        "AT 1920 THE CARD'S CALLERS SUM TO THE WHOLE KEY'S 21,400, the rail and other callers named rather than left out: " + cw.slice(0, 600));
+      await wide.page.close();
+    }
+    ok(!/\b[PFA]\d?-\d+\b|\buw\.[a-z]|\(page,|; page,/.test(cv), "and the copy carries no plan-row code or source id: " + cv.slice(0, 600));
     ok(/Nightly call mix: option-contracts 9,800 \u00b7 ohlc-1d 5,200 \u00b7 flow-per-strike 3,100 of 24,100 attempts/.test(cv), "the nightly call mix by operation: " + cv.slice(0, 600));
     const ai = await text(page, "#cAi");
     ok(/Neurons today\s+14,900 of 30,000 neurons · 50%/.test(ai) && /Calls today\s+268 of 2,500 calls · 11%/.test(ai), "model use against the enforced cap, not the free allowance: " + ai.slice(0, 400));
@@ -210,10 +220,21 @@ try {
     ok(/Worker clock vs browser\s+[+\u2212]\d+ ms/.test(timing), "the clock offset is an estimate in ms");
     ok(await page.evaluate(() => !!document.querySelector("#stSession svg")), "the Tier 2 chart is drawn");
     ok(/passes had p90 past it/.test(await text(page, "#stSession")) && /not recorded/.test(await text(page, "#stSession")), "the chart says what it shows and what is not recorded: " + (await text(page, "#stSession")).slice(0, 300));
+    const sess = await page.evaluate(() => {
+      const host = document.getElementById("stSession");
+      const svg = host.querySelector("svg");
+      return { host: host.clientHeight, svg: svg ? svg.getBoundingClientRect().height : 0, key: [...host.querySelectorAll(".lt-key span")].map((n) => n.textContent),
+        ticks: svg ? [...svg.querySelectorAll("text.tx-3")].length : 0, text: host.innerText };
+    });
+    ok(sess.svg >= 100 && sess.svg >= 0.45 * sess.host, "THE SESSION CHART FILLS ITS CARD: " + sess.svg + " px of a " + sess.host + " px body, not a fixed strip");
+    ok(sess.key.length >= 3 && sess.key.some((k) => /^p50/.test(k)) && sess.key.some((k) => /^p90/.test(k)) && sess.key.some((k) => /^Largest/.test(k)), "a legend names the three series: " + sess.key.join(" | "));
+    ok(sess.ticks >= 1, "and the chart carries a value axis");
+    ok(!/is \u2014 not recorded/.test(sess.text), "the caption says plainly that the rail's latency is not recorded");
     await page.click("#lFeedsCard .st-more");
     await page.waitForFunction(() => document.getElementById("lFeedsDlg").open);
     const d = await text(page, "#lFeedsDlg");
-    ok(/Prices[\s\S]*p50 1\.8 s · p95 4\.9 s · 256 samples/.test(d) && /Live share of watched time\s+96% of 3\.0 h/.test(d) && /No option-prints feed on the rail \(F-94, F-116\)/.test(d), "per-topic detail: " + d.slice(0, 300));
+    ok(/Prices[\s\S]*p50 1\.8 s · p95 4\.9 s · 256 samples/.test(d) && /Live share of watched time\s+96% of 3\.0 h/.test(d) && /The rail carries no feed of single option prints/.test(d), "per-topic detail: " + d.slice(0, 300));
+    ok(!/\b[PFA]\d?-\d+\b/.test(d), "with no plan-row code");
     ok(await page.evaluate(() => document.querySelectorAll("#stFeeds svg.lt-bar").length === 5), "five range bars in the detail");
     await page.keyboard.press("Escape");
     await page.click("#stSession").catch(() => {});
@@ -237,10 +258,11 @@ try {
     ok(!/1\d\d%/.test(st), "so no key reads as over a budget it does not have");
     ok(/Missing: board:watch/.test(st), "the missing keys are named");
     const nc = await text(page, "#kNight");
-    ok(/Names in the universe\s+670/.test(nc) && /Cards built\s+500 \(75% of the universe\)/.test(nc) && /Health gate\s+1 failures, 2 warnings/.test(nc), "nightly coverage: " + nc.slice(0, 400));
+    ok(/Names in the universe\s+670/.test(nc) && /Cards built\s+500 \(75% of the universe\)/.test(nc) && /Health gate\s+1 failure, 2 warnings/.test(nc), "nightly coverage counts the rotation's cards with the boards': " + nc.slice(0, 400));
+    ok(/Of which\s+64 boards and focus, 435 rotation, 1 cross-section/.test(nc), "and splits them by where they came from");
     const kd = await text(page, "#kDeep");
     ok(/Names with a deep read\s+612 of 856 \(71%\)/.test(kd) && /Oldest deep read\s+2026-10-05/.test(kd) && /Tonight, planned and read\s+530 planned, 530 read/.test(kd), "rotation card: " + kd.slice(0, 400));
-    ok(/Vendor calls, this run\s+24,100/.test(kd) && /Vendor calls, the key today\s+31,200 of 60,000 \(52%\)/.test(kd), "rotation calls against the day line: " + kd.slice(0, 500));
+    ok(/Vendor calls, this run\s+24,100/.test(kd) && /Vendor calls, the key today\s+31,200 of 60,000 \(52%\), read 19:51 TRT/.test(kd), "rotation calls against the day line, dated: " + kd.slice(0, 500));
     await page.click("#kDeepCard .st-more");
     await page.waitForFunction(() => document.getElementById("kDeepDlg").open);
     ok(/Ledger session\s+2026-10-09/.test(await text(page, "#kDeepDlg")), "the detail keeps every figure");
@@ -294,8 +316,7 @@ try {
     await page.waitForFunction(() => !document.getElementById("stPanel-latency").hidden);
     await page.locator("#stSub [role=tab]").nth(1).click();
     await page.waitForFunction(() => document.getElementById("lSessionCard").classList.contains("is-on"));
-    await page.waitForFunction(() => document.querySelector("#stSession svg") !== null);
-    const w = await page.evaluate(() => document.querySelector("#stSession svg").getBoundingClientRect().width);
+    const w = await page.waitForFunction(() => { const s = document.querySelector("#stSession svg"); const r = s && s.getBoundingClientRect(); return r && r.width > 150 ? r.width : 0; }, null, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => page.evaluate(() => { const s = document.querySelector("#stSession svg"); return s ? s.getBoundingClientRect().width : 0; }));
     ok(w > 150, "a chart on a card that was hidden when it first drew is drawn at the card's width (" + w + ")");
     await page.close();
   }
@@ -308,7 +329,7 @@ try {
     const { page } = await open(browser, { view: "capacity", map });
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+21,400 of 100,000,000 calls · 0\.0%/.test(cv), "THE RECORDED ADVANCED PLAN: the whole key is set against the 100M day its dashboard states: " + cv.slice(0, 400));
-    ok(/Cap: 100,000,000 per day \(advanced plan, plan; observed, uw\.dashboard\)/.test(cv), "and the cap names the plan and the dashboard readback: " + cv.slice(0, 600));
+    ok(/Cap: 100,000,000 per day; sources in Details/.test(cv), "and the card's cap line is the plan's day line, its sources in Details: " + cv.slice(0, 600));
     const tiles = await text(page, "#stTiles");
     ok(/the vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)/.test(tiles), "THE VENDOR'S DAY TURNS WHEN THE DASHBOARD SAYS, printed in TRT: " + tiles.replace(/\n/g, "|"));
     await page.click("#cLimitsCard .st-more");
@@ -320,7 +341,9 @@ try {
     await page.keyboard.press("Escape");
     await page.click("#cPlatCard .st-more");
     await page.waitForFunction(() => document.getElementById("cPlatDlg").open);
-    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(await text(page, "#cPlatDlg")), "the meter's source line says the same");
+    const platDlg = await text(page, "#cPlatDlg");
+    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(platDlg), "the meter's source line says the same");
+    ok(/Cap: 100,000,000 per day \(advanced plan, the plan's figure; the vendor's dashboard, observed on the key\)/.test(platDlg), "and in Details the cap names the plan and the dashboard readback, in words: " + platDlg.slice(0, 900));
     await page.keyboard.press("Escape");
     await page.click("#cVendorCard .st-more");
     await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
@@ -570,6 +593,48 @@ try {
       await page.waitForFunction(() => document.getElementById("kStoreDlg").open);
       const both = (await text(page, "#kStore")) + (await text(page, "#kStoreDlg"));
       ok(!want.test(both), "PLANTED WRONG BUILD, " + name + ", fails the coverage reading");
+      await page.close();
+    }
+    const nightMutants = [
+      ["cards built read from the boards' count alone", (t, f) => (f === "flows-status-coverage.js" ? t.replace("const built = cards.total;", "const built = num(meta.cardsBuilt);") : t), "#kNight", /Cards built\s+500 \(75% of the universe\)/, "coverage"],
+      ["the run's key count labelled as today's", (t, f) => (f === "flows-status-coverage.js" ? t.replace('const keyLabel = runToday ? "Vendor calls, the key today" : "Vendor calls, the key on the run\'s day";', 'const keyLabel = "Vendor calls, the key today";') : t), "#kDeep", /the key on the run's day\s+31,200/, "coverage", true],
+      ["the session chart kept at a strip", (t, f) => (f === "flows-status-latency.js" ? t.replace("const height = Math.max(64, Math.min(360, room));", "const height = 88;") : t), "#stSession", null, "latency"],
+    ];
+    for (const [name, mutate, sel, want, view, yesterday] of nightMutants) {
+      const map = world();
+      if (yesterday) map["/api/flows/ops?part=coverage"] = { body: opsFor({ coverage: COVERAGE_ROWS.map((r) => (r.id === "deepen" ? { ...r, updated_at: NOW - 30 * 36e5 } : r)) }, { part: "coverage" }) };
+      const { page } = await open(browser, { mutate, view, map });
+      if (want) ok(!want.test(await text(page, sel)), "PLANTED WRONG BUILD, " + name + ", fails its reading");
+      else {
+        await page.waitForFunction(() => document.querySelector("#stSession svg") !== null);
+        const r = await page.evaluate(() => ({ host: document.getElementById("stSession").clientHeight, svg: document.querySelector("#stSession svg").getBoundingClientRect().height }));
+        ok(!(r.svg >= 100 && r.svg >= 0.45 * r.host), "PLANTED WRONG BUILD, " + name + ", fails the chart-height check (" + r.svg + " of " + r.host + ")");
+      }
+      await page.close();
+    }
+    {
+      const map = world();
+      map["/api/flows/ops?part=coverage"] = { body: opsFor({ coverage: COVERAGE_ROWS.map((r) => (r.id === "deepen" ? { ...r, updated_at: NOW - 30 * 36e5 } : r)) }, { part: "coverage" }) };
+      const { page } = await open(browser, { view: "coverage", map });
+      const kd = await text(page, "#kDeep");
+      ok(/Vendor calls, the key on the run's day\s+31,200 of 60,000 \(52%\), read 11 Oct, 15:41 TRT/.test(kd), "A RUN FROM AN EARLIER DAY IS NOT CALLED TODAY'S: the key's count is labelled with the run's day and dated: " + kd.slice(0, 500));
+      await page.close();
+    }
+    {
+      const map = world();
+      const rail = JSON.parse(JSON.stringify(RAIL));
+      rail.topics.fl.demanded = false;
+      rail.topics.gx.lagMs = { n: 0, p50: null, p95: null, max: null };
+      rail.topics.gx.lastFrameAgeMs = null;
+      rail.topics.px.lagMs = { n: 1, p50: 900, p95: 900, max: 900 };
+      rail.upstream.topics.px.via = "rest";
+      map["/api/rt/status"] = { body: rail };
+      const { page } = await open(browser, { map });
+      const card = await text(page, "#hRail");
+      ok(/Flagged alerts: no open page asks for this feed, so it is not polled/.test(card) && /Dealer gamma: no frame yet in this epoch/.test(card), "A RAIL TOPIC WITH NO FIGURE SAYS WHY ON THE CARD, by name: " + card.slice(0, 600));
+      const tiles = await text(page, "#stTiles");
+      ok(/via REST, 1 sample\b/.test(tiles) && !/1 samples/.test(tiles), "one sample is singular and REST is in capitals: " + tiles.replace(/\n/g, "|"));
+      ok(!/\bfl is not demanded|\bfl:|\bgx:/.test(card + tiles), "and no internal topic code is printed");
       await page.close();
     }
     const nulls = world();

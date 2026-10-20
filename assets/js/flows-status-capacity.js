@@ -5,7 +5,7 @@
   const kit = UI && UI.statusKit;
   if (!kit) return;
   const {
-    h, DASH, num, whole, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, vendorTurn, vendorWindow, capOf, sameDay, mini, rest, line, paintAi,
+    h, DASH, num, whole, count, trt, clockSec, span, usd, table, facts, why, fill, unread, okBody, whyOf, state, vendorReading, vendorTurn, vendorWindow, capOf, sameDay, mini, rest, line, paintAi,
   } = kit;
   const $ = (id) => document.getElementById(id);
   const BAND = { low: 0.8, high: 0.85 };
@@ -44,7 +44,13 @@
   }
 
   const capFromText = (l) => (l.capFrom || "plan") + (l.capSource && l.capSource !== l.source ? " from " + l.capSource : "");
-  const lineText = (l, full) => (!l ? DASH + " the plan table has no line" : (l.cap === null ? "no cap listed" : whole(l.cap)) + " per " + l.per + " (" + l.plan + " plan, " + (full ? capFromText(l) : l.capFrom || "plan") + "; " + l.via + ", " + l.source + ")");
+  const VIA_SAID = { page: "read from the published page", snippet: "read from a quoted snippet", recall: "recalled, not re-read", unverified: "not verified", inferred: "inferred", observed: "observed on the key", repo: "set in this repository" };
+  const SOURCE_SAID = { "uw.dashboard": "the vendor's dashboard", "uw.working": "the working budget", cf: "Cloudflare's documentation", uw: "the vendor's specification", gh: "GitHub's documentation", repo: "this repository", owner: "the owner's record", programme: "the working budget" };
+  const FROM_SAID = { plan: "the plan's figure", advisory: "the working line until the plan is known", owner: "the owner's own line" };
+  const sourceSaid = (id) => { const s = String(id || ""); return SOURCE_SAID[s] || SOURCE_SAID[s.split(".")[0]] || (/^[A-Z][A-Z0-9_]+$/.test(s) ? "the owner's setting " + s : "the plan table"); };
+  const planSaid = (p) => (p === "unknown" ? "plan not recorded" : p + " plan");
+  const lineText = (l, full) => (!l ? DASH + " the plan table has no line" : (l.cap === null ? "no cap listed" : whole(l.cap)) + " per " + l.per + " (" + planSaid(l.plan) + ", " +
+    (FROM_SAID[l.capFrom] || FROM_SAID.plan) + (full && l.capSource && l.capSource !== l.source ? " from " + sourceSaid(l.capSource) : "") + "; " + sourceSaid(l.source) + ", " + (VIA_SAID[l.via] || "source not stated") + ")");
 
   function paintMeters(now) {
     const host = $("stMeters");
@@ -90,7 +96,7 @@
     }));
     for (const [id, name, what] of [["d1.read", "D1 rows read", "D1 counts rows per account"], ["d1.write", "D1 rows written", "D1 counts rows per account"]]) {
       cards.push(meter(name, null, lines[id] ? lines[id].cap : null, {
-        format: whole, unit: "rows", unread: "Not measured on the site: " + what + ", and the read-back needs Cloudflare's analytics token (P2-04, A-14)",
+        format: whole, unit: "rows", unread: "Not measured on the site: " + what + ", and reading it back needs Cloudflare's analytics token, which is not set",
         source: "Plan line: " + lineText(lines[id]) + ".",
       }));
     }
@@ -101,20 +107,16 @@
       }));
     }
     cards.push(meter("Workers requests", null, lines["cf.req"] ? lines["cf.req"].cap : null, {
-      format: whole, unit: "requests", unread: "Not measured on the site: needs the analytics read-back (P2-04, token A-14)",
+      format: whole, unit: "requests", unread: "Not measured on the site: reading it back needs Cloudflare's analytics token, which is not set",
       source: "Plan line: " + lineText(lines["cf.req"]) + ".",
     }));
     const renewal = ops.plan && ops.plan.renewal ? ops.plan.renewal : null;
     fill(host, h("div", { class: "lt-meters" }, ...cards),
       renewal ? h("p", { class: "st-foot" }, "Workers " + renewal.workers + " plan, paid through " + renewal.through + ", renews " + renewal.renews +
-        (renewal.daysLeft === null ? "" : " (" + whole(renewal.daysLeft) + " days left)") + (renewal.recorded ? "" : "; the date is the repository's, not one the owner recorded") + ".") : null);
+        (renewal.daysLeft === null ? "" : " (" + count(renewal.daysLeft, "day") + " left)") + (renewal.recorded ? "" : "; the date is the repository's, not one the owner recorded") + ".") : null);
   }
 
-  function paintConsumers(now) {
-    const host = $("stConsumers");
-    const S = state();
-    const ops = okBody("ops");
-    if (!ops) { unread(host, "The ops view", S.D.ops ? S.D.ops.reason : "no read yet"); return; }
+  function consumers(ops, now) {
     const own = ops.vendor ? ops.vendor.own : null;
     const reading = vendorReading(now);
     const meta = okBody("meta");
@@ -135,6 +137,15 @@
     rows.push(["Everything else on the key", residual, residual === null
       ? (total === null ? "the vendor's count was not read today" : elsewhere ? "the engines' counts are for the vendor day before this one, so the remainder is not worked" : "an engine's count is missing, so the remainder is not worked")
       : "on-demand reads, pre-market news, MCP sessions and probes; valid only inside one vendor day" + (residual < 0 ? "; negative means a count above is wrong or the day boundary moved" : "")]);
+    return { rows, total, reading, railHour };
+  }
+
+  function paintConsumers(now) {
+    const host = $("stConsumers");
+    const S = state();
+    const ops = okBody("ops");
+    if (!ops) { unread(host, "The ops view", S.D.ops ? S.D.ops.reason : "no read yet"); return; }
+    const { rows, total, reading, railHour } = consumers(ops, now);
     const max = Math.max(1, ...rows.map((r) => num(r[1]) ?? 0));
     const list = h("ul", { class: "lt-bars" }, ...rows.map((r) => h("li", null,
       h("span", { class: "lt-bars-n" }, r[0]),
@@ -153,7 +164,7 @@
     const per = (s) => (s === null ? DASH : s === 60 ? "minute" : s === 86400 ? "day" : s + " s");
     fill(host,
       table("Limits enforced today", ["Limit", "Scope", "Value", "Per", "What happens past it"], ops.limits.map((l) => [l.name, l.scope, l.limit === null ? DASH + " set by the platform" : whole(l.limit), per(l.periodS), l.effect]), true),
-      h("p", { class: "st-foot" }, "Not enforced yet: a daily vendor line (P1-30, F-26) and a daily D1 line (F-25, F-73). Nothing here sheds work at 80 or 85%; those marks on the meters are the owner's band, not a governor."));
+      h("p", { class: "st-foot" }, "Not enforced yet: a daily vendor line and a daily D1 line. Nothing here sheds work at 80 or 85%; those marks on the meters are the owner's band, not a governor."));
   }
 
   function paintOutcomes() {
@@ -233,16 +244,18 @@
     const rail = okBody("rail");
     const calls = rail && rail.calls ? rail.calls : null;
     const own = ops.vendor ? ops.vendor.own : null;
-    const rows = own ? [["Tier 1", own.tier1], ["Focus", own.focus], ["Tier 2", own.tier2]].map(([k, v]) => [k, num(v) === null ? DASH : whole(v)]) : [];
+    const short = { "Nightly run": "Nightly", "Tier 1 (Worker)": "Tier 1", "Focus (Worker)": "Focus", "Tier 2 (Actions)": "Tier 2", "Everything else on the key": "Everything else (rail, on-demand, MCP)" };
+    const split = consumers(ops, now);
+    const rows = own ? split.rows.filter((r) => r[0] !== "Nightly run" || num(r[1]) !== null).map((r) => [short[r[0]] || r[0], num(r[1]) === null ? DASH : whole(r[1])]) : [];
     fill(host,
       bar("Whole key today", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
         format: whole, unit: "calls",
         unread: reading ? "last counter read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the vendor's counter yet",
       }),
       bar("Rail, this minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, { format: whole, unit: "calls", unread: "the rail was not read: " + whyOf("rail") }),
-      rows.length ? mini("Own engines today", ["Engine", "Calls counted"], rows, "engine counts") : line(DASH + " no ledger day, so the engines' own counts are not read"),
+      rows.length ? mini("Vendor calls today by caller", ["Caller", "Calls today"], rows, "callers") : line(DASH + " no ledger day, so the engines' own counts are not read"),
       line(mixLine(okBody("meta"))),
-      line("Cap: " + lineText(uw)));
+      line("Cap: " + (!uw ? DASH + " the plan table has no line" : (uw.cap === null ? "no cap listed" : whole(uw.cap)) + " per " + uw.per + (uw.capFrom === "advisory" ? ", the working line" : "") + "; sources in Details")));
   }
 
   function sumAi() {
@@ -280,8 +293,8 @@
     const rows = names.map(([id, n]) => [n, cell(id), DASH]);
     fill(host,
       mini("Platform meters", ["Meter", "Allowance", "Used"], rows, "meters"),
-      line(DASH + " Used: Cloudflare reports none to the Worker (read-back is P2-04); the fuse is the 503 store_quota answer."),
-      day ? line(day.day + ": Tier 1 " + whole(day.tier1.ok) + " ok, " + whole(day.tier1.fail) + " failed · focus " + whole(day.focus.ok) + " · Tier 2 " + whole(day.tier2.passes) + " passes")
+      line(DASH + " Used: Cloudflare reports none to the Worker, and the analytics read-back is not built; the fuse is the 503 store_quota answer."),
+      day ? line(day.day + ": Tier 1 " + whole(day.tier1.ok) + " ok, " + whole(day.tier1.fail) + " failed · focus " + whole(day.focus.ok) + " · Tier 2 " + count(day.tier2.passes, "pass", "passes"))
         : line("Cron ticks: " + DASH + " no ledger day yet"));
   }
 
@@ -292,7 +305,7 @@
     const per = (x) => (x === null ? "" : x === 60 ? " / min" : x === 86400 ? " / day" : " / " + x + " s");
     fill(host,
       mini("Limits enforced", ["Limit", "Value", "Scope"], ops.limits.map((l) => [l.name, l.limit === null ? DASH + " platform" : whole(l.limit) + per(l.periodS), l.scope]), "limits"),
-      line("No daily vendor line or D1 line sheds work yet (P1-30, F-25); the 80 to 85% band on the meters is a target."));
+      line("No daily vendor line or D1 line sheds work yet; the 80 to 85% band on the meters is a target."));
   }
 
   function capacity(now) {

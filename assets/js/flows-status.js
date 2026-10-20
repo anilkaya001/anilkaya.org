@@ -24,6 +24,26 @@
     return Number.isFinite(x) ? x : null;
   };
   const whole = (v) => (num(v) === null ? DASH : Math.round(num(v)).toLocaleString("en-US"));
+  const count = (v, one, many) => whole(v) + " " + (num(v) !== null && Math.round(num(v)) === 1 ? one : many || one + "s");
+  const VIA_WORD = { rest: "REST", socket: "socket" };
+  const viaWord = (v) => (v ? VIA_WORD[v] || String(v) : null);
+  const cardsOf = (m) => {
+    const boards = num(m && m.cardsBuilt);
+    const rotation = m && m.deepen ? num(m.deepen.built) : null;
+    const cross = num(m && m.crossSectionCards);
+    const listed = num(m && m.cardsTotal);
+    const total = listed !== null ? listed : boards !== null && rotation === null && cross === null ? boards : null;
+    const parts = [];
+    if (boards !== null) parts.push(whole(boards) + " boards and focus");
+    if (rotation !== null) parts.push(whole(rotation) + " rotation");
+    if (cross !== null && cross > 0) parts.push(whole(cross) + " cross-section");
+    return { total, split: parts.length > 1 ? parts.join(", ") : null };
+  };
+  const cardsLine = (m) => {
+    const c = cardsOf(m);
+    return (c.total === null ? DASH + " total not recorded" : whole(c.total)) + " built" + (c.split ? " (" + c.split + ")" : "") + ", " +
+      whole(m.cardsFailed) + " failed, " + whole(m.cardsSkipped) + " skipped";
+  };
   const clock = (ms) => {
     const t = new Date(ms + TRT_MS);
     return pad(t.getUTCHours()) + ":" + pad(t.getUTCMinutes()) + " TRT";
@@ -135,9 +155,9 @@
     const s = rail.body || {};
     const t = s.topics && s.topics[k];
     if (!s.running) return "rail idle: no one is watching, so nothing is polled";
-    if (!t) return "the rail does not report " + k;
-    if (!t.demanded) return k + " is not demanded, so it is not polled";
-    return "no sample yet in this epoch";
+    if (!t) return "the rail does not report this feed";
+    if (!t.demanded) return "no open page asks for this feed, so it is not polled";
+    return num(t.lastFrameAgeMs) === null ? "no frame yet in this epoch" : "no sample yet in this epoch";
   }
 
   function paintRail(r, now) {
@@ -157,10 +177,11 @@
       const lag = lagOf(k, t) || {};
       const c = t.calls || {};
       const age = num(t.lastFrameAgeMs);
-      if (age === null) gaps.push(k + ": no frame yet in this epoch");
-      if (!t.demanded) gaps.push(k + ": not demanded, so not polled");
-      const via = (up.topics && up.topics[k] && up.topics[k].via) || (sock ? null : up.kind) || null;
-      return [k, via ? String(via) : DASH, t.demanded ? "yes" : "no", age === null ? DASH : span(age) + " ago", span(lag.p50), span(lag.p95),
+      const name = TOPIC_NAME[k] || k;
+      if (age === null) gaps.push(name + ": no frame yet in this epoch");
+      if (!t.demanded) gaps.push(name + ": no open page asks for it, so it is not polled");
+      const via = viaWord((up.topics && up.topics[k] && up.topics[k].via) || (sock ? null : up.kind) || null);
+      return [name, via || DASH, t.demanded ? "yes" : "no", age === null ? DASH : span(age) + " ago", span(lag.p50), span(lag.p95),
         whole(lag.n), BASIS[k] || DASH, whole(c.minute), whole(c.hour), whole(t.fails), t.fresh && t.fresh.state ? String(t.fresh.state) : DASH];
     });
     fill(host.rail,
@@ -196,9 +217,9 @@
         ["Written", trt(m.generatedAt, now) + " (" + ago(Date.parse(m.generatedAt), now) + ")"],
         ["Session", m.sessionDate ? String(m.sessionDate) : DASH],
         ["Universe", whole(m.universe) + " names"],
-        ["Cards", whole(m.cardsBuilt) + " built, " + whole(m.cardsFailed) + " failed, " + whole(m.cardsSkipped) + " skipped"],
+        ["Cards", cardsLine(m)],
         ["Vendor calls", whole(m.apiCalls)],
-        ["Health", hl ? whole(hl.failures) + " failures, " + whole(hl.warnings) + " warnings" : DASH],
+        ["Health", hl ? count(hl.failures, "failure") + ", " + count(hl.warnings, "warning") : DASH],
       ]),
       hl && Array.isArray(hl.first) && hl.first.length ? h("ul", { class: "st-lines" }, ...hl.first.map((t) => h("li", null, String(t)))) : null,
       stages.length ? table("Nightly stages", ["Stage", "Status", "Time", "Calls", "Keys", "Why"], rows) : null,
@@ -284,9 +305,9 @@
       tileSet(id, ["pending", "not read"], DASH, lagReason(rail, k));
       return;
     }
-    const via = body.upstream && body.upstream.topics && body.upstream.topics[k] ? body.upstream.topics[k].via : null;
+    const via = viaWord(body.upstream && body.upstream.topics && body.upstream.topics[k] ? body.upstream.topics[k].via : null);
     tileSet(id, [t.fresh && t.fresh.state ? t.fresh.state : "pending", t.fresh && t.fresh.state ? null : "not read"],
-      span(lag.p50), "p50 " + (EVENT[k] ? "behind the item's own time" : "behind the vendor's stamp") + (via ? ", via " + via : "") + ", " + whole(lag.n) + " samples");
+      span(lag.p50), "p50 " + (EVENT[k] ? "behind the item's own time" : "behind the vendor's stamp") + (via ? ", via " + via : "") + ", " + count(lag.n, "sample"));
   }
 
   const sumKnown = (list) => (list.every((x) => num(x) !== null) ? list.reduce((a, b) => a + num(b), 0) : null);
@@ -381,7 +402,7 @@
       lines.push(t1 && t1.okAt ? "Last write " + trt(t1.okAt, now) : "Last write: " + DASH + " none recorded");
       lines.push("Last verdict " + (why || DASH));
       if (day) {
-        lines.push(day.day + ": " + whole(day.tier1.ok) + " writes, " + whole(day.tier1.fail) + " failed, longest gap between writes " + span(day.tier1.okGapMs));
+        lines.push(day.day + ": " + count(day.tier1.ok, "write") + ", " + whole(day.tier1.fail) + " failed, longest gap between writes " + span(day.tier1.okGapMs));
         if (full) lines.push("Vendor calls counted " + (day.tier1.calls === null ? DASH + " (column not yet written)" : whole(day.tier1.calls)));
       } else lines.push("Ledger: " + DASH + " no day recorded yet");
       cards.push(card("Tier 1", st, lines));
@@ -405,17 +426,17 @@
       const lag = run.quoteLag && typeof run.quoteLag === "object" ? run.quoteLag : null;
       t2State = num(run.failedCalls) > 0 && num(run.calls) === num(run.failedCalls) ? chip("unavailable", "failed") : chip("live", "passing");
       t2.push("Last pass finished " + trt(run.finishedAt, now) + ", " + ago(Date.parse(run.finishedAt), now));
-      t2.push("Took " + span(run.durationMs) + ", " + whole(run.calls) + " calls, " + whole(run.failedCalls) + " failed");
+      t2.push("Took " + span(run.durationMs) + ", " + count(run.calls, "call") + ", " + whole(run.failedCalls) + " failed");
       t2.push(lag ? "Quote age p50 " + span(lag.p50 * 1000) + ", p90 " + span(lag.p90 * 1000) + ", largest " + span(lag.max * 1000) : "Quote age: " + DASH + " the pass measured none");
     }
     if (day && day.tier2) {
-      t2.push(day.day + ": " + whole(day.tier2.passes) + " passes, longest gap " + span(day.tier2.gapMs) + (full ? ", " + whole(day.tier2.calls) + " calls counted" : ""));
+      t2.push(day.day + ": " + count(day.tier2.passes, "pass", "passes") + ", longest gap " + span(day.tier2.gapMs) + (full ? ", " + whole(day.tier2.calls) + " calls counted" : ""));
     }
     cards.push(card("Tier 2", t2State, t2));
     if (ops) {
       const stale = day ? day.stale : null;
       cards.push(card("Worst stale key today", stale && stale.key ? chip("stale", "late") : chip("live", "none"),
-        stale && stale.key ? [stale.key + " ran " + span(stale.overS * 1000) + " past its stale line", whole(stale.ticks) + " ticks saw a lapse"] : ["No stored feed ran past its stale line on a Tier 1 tick today"]));
+        stale && stale.key ? [stale.key + " ran " + span(stale.overS * 1000) + " past its stale line", count(stale.ticks, "tick") + " saw a lapse"] : ["No stored feed ran past its stale line on a Tier 1 tick today"]));
       const [dc, dl] = DISPATCH(ops.clock ? ops.clock.dispatchWhy : null, now);
       cards.push(card("GitHub dispatch", dc, [dl]));
     }
@@ -423,7 +444,7 @@
       const block = okBody("opsAi") && okBody("opsAi").ai ? okBody("opsAi").ai.block : null;
       if (!block) cards.push(card("Model calls", chip("pending", "not read"), [DASH + " the outcome block was not read: " + (S.D.opsAi ? S.D.opsAi.reason || "no block in the answer" : "no read yet")]));
       else {
-        const lines = Object.entries(block.surfaces || {}).map(([k, v]) => k + ": mean " + span(v.msAvg) + ", longest " + span(v.msMax) + ", " + whole(v.calls) + " calls");
+        const lines = Object.entries(block.surfaces || {}).map(([k, v]) => k + ": mean " + span(v.msAvg) + ", longest " + span(v.msMax) + ", " + count(v.calls, "call"));
         cards.push(card("Model calls", lines.length ? chip("live", "recorded") : chip("quiet", "no calls"), lines.length ? lines : ["No model call has been recorded today"]));
       }
     }
@@ -517,9 +538,15 @@
     const calls = s.calls || {};
     const up = s.upstream || {};
     const topics = s.topics && typeof s.topics === "object" ? s.topics : {};
+    const silent = new Map();
     const rows = Object.keys(topics).map((k) => {
       const lag = lagOf(k, topics[k] || {}) || {};
-      return [(TOPIC_NAME[k] || k), topics[k] && topics[k].demanded ? span(lag.p50) : DASH, topics[k] && topics[k].demanded ? span(lag.p95) : DASH,
+      const has = topics[k] && topics[k].demanded && num(lag.p50) !== null;
+      if (!has && s.running) {
+        const why = lagReason(r, k);
+        silent.set(why, [...(silent.get(why) || []), TOPIC_NAME[k] || k]);
+      }
+      return [(TOPIC_NAME[k] || k), has ? span(lag.p50) : DASH, has ? span(lag.p95) : DASH,
         stateChip(topics[k] && topics[k].fresh && topics[k].fresh.state)];
     });
     fill(host,
@@ -527,6 +554,7 @@
         " · vendor calls " + whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " this minute"),
       s.degraded ? line("Degraded since " + trt(s.degraded.since, now) + ": " + String(s.degraded.reason)) : null,
       rows.length ? mini("Rail topics", ["Topic", "p50", "p95", "State"], rows, "topics") : line(DASH + " the rail reported no topics"),
+      silent.size ? line(DASH + " " + [...silent].map(([why, names]) => names.join(", ") + ": " + why).join("; ") + ".") : null,
       s.running ? null : line("An idle rail polls nothing and keeps no latency; figures return when a viewer connects."));
   }
 
@@ -541,8 +569,9 @@
     const slow = stages.filter((x) => num(x.ms) !== null).sort((a, b) => b.ms - a.ms);
     fill(host,
       line("Written " + trt(m.generatedAt, now) + " (" + ago(Date.parse(m.generatedAt), now) + ") · session " + (m.sessionDate ? String(m.sessionDate) : DASH)),
-      line(whole(m.universe) + " names · cards " + whole(m.cardsBuilt) + " built, " + whole(m.cardsFailed) + " failed, " + whole(m.cardsSkipped) + " skipped · " +
-        (hl ? whole(hl.failures) + " health failures, " + whole(hl.warnings) + " warnings" : "health " + DASH + " not in this record")),
+      line(whole(m.universe) + " names · cards " + cardsLine(m) + " · " +
+        (hl ? count(hl.failures, "health failure") + ", " + count(hl.warnings, "warning") : "health " + DASH + " not in this record")),
+      hl && Array.isArray(hl.first) && hl.first.length ? line(String(hl.first[0])) : null,
       slow.length ? mini("Slowest nightly stages", ["Slowest stages", "Time", "Status"], slow.map((x) => [String(x.id), span(x.ms), String(x.status)]), "stages") : line(DASH + " this run's record carries no stage ledger"));
   }
 
@@ -558,7 +587,7 @@
   }
 
   const kit = {
-    h, DASH, num, whole, clock, clockSec, trt, span, ago, share, bytes, usd, median, chip, stateChip, table, facts, why, fill, unread,
+    h, DASH, num, whole, count, viaWord, cardsOf, cardsLine, clock, clockSec, trt, span, ago, share, bytes, usd, median, chip, stateChip, table, facts, why, fill, unread,
     lagOf, lagReason, engineCards, engineData, paintAi, mini, rest, line, capOf, vendorReading, vendorTurn, vendorWindow, sameDay, okBody, whyOf, EVENT, BASIS, TOPIC_NAME, SWITCH_EFFECT, DISPATCH,
     state: () => S, panels: {},
     attach(panels) {
