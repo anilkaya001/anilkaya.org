@@ -72,7 +72,7 @@
       "reconstructible": true,
       "direction": "unsigned",
       "kind": "own",
-      "input": "a burst of large option prints for the name, from the full tape"
+      "input": "a burst of large option prints for the name, from the full print feed"
     },
     {
       "id": "S5",
@@ -88,7 +88,7 @@
       "reconstructible": true,
       "direction": "unsigned",
       "kind": "own",
-      "input": "the arithmetic bound on the day's opening volume from the first minutes of the live tape"
+      "input": "the arithmetic bound on the day's opening volume from the first minutes of the live print feed"
     },
     {
       "id": "S7",
