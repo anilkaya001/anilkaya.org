@@ -83,7 +83,7 @@ async function open(kind, viewport, extra = {}) {
     }
     if (vp === L) {
       const tile = await page.evaluate(() => {
-        const cards = [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.height > 20 && getComputedStyle(c).visibility === "visible"; });
+        const cards = [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].filter((c) => !c.classList.contains("hm-hero")).filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.height > 20 && getComputedStyle(c).visibility === "visible"; });
         const c = cards[0];
         if (!c) return null;
         const cs = getComputedStyle(c);

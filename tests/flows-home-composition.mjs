@@ -15,6 +15,7 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 
 const TABLE = JSON.parse(read("tests/fixtures-approval/home-composition.json"));
 const OVERVIEW_JS = read("assets/js/flows-overview.js");
+const CSS = read("assets/css/flows-home.css");
 const WEIGHT_SRC = read("tests/flows-weight.mjs");
 const FIX = JSON.parse(read("scripts/render-preview.fixtures.json"));
 
@@ -33,7 +34,7 @@ function pageFacts(html, js) {
   return { hero: hero.length === 1, modules, referenced };
 }
 
-function tableProblems(t, facts, weightSrc) {
+function tableProblems(t, facts, weightSrc, css = CSS, js = OVERVIEW_JS) {
   const p = [];
   const ids = t.modules.map((m) => m.id);
   const seen = new Set();
@@ -87,11 +88,12 @@ function tableProblems(t, facts, weightSrc) {
   const firstDeferred = Math.min(...t.deferred.map((id) => order.indexOf(id)));
   for (const id of order) if (!t.deferred.includes(id) && order.indexOf(id) > firstDeferred) p.push(`${id} comes after the deferred chunk begins`);
   for (const [name, s] of Object.entries(t.slots)) {
-    for (const vp of Object.keys(t.layouts)) if (!Number.isInteger(s.heightPx[vp]) || s.heightPx[vp] <= 0) p.push(`slot ${name} has no height at ${vp}`);
+    if (!Object.keys(s.heightPx).length) p.push(`slot ${name} has no height`);
+    for (const [vp, px] of Object.entries(s.heightPx)) if (!Number.isInteger(px) || px <= 0) p.push(`slot ${name} has no height at ${vp}`);
     if (!ROW_ID.test(s.row)) p.push(`slot ${name} names no row`);
   }
   const mv = t.slots.moves;
-  for (const vp of Object.keys(t.layouts)) if (mv.heightPx[vp] !== mv.headPx + mv.rows * mv.rowPx) p.push(`the Moves band at ${vp} is not ${mv.rows} rows of ${mv.rowPx} px under a ${mv.headPx} px header`);
+  for (const vp of Object.keys(mv.heightPx)) if (mv.heightPx[vp] !== mv.headPx + mv.rows * mv.rowPx) p.push(`the Moves band at ${vp} is not ${mv.rows} rows of ${mv.rowPx} px under a ${mv.headPx} px header`);
   if (mv.rows !== 8) p.push("the Moves band is not eight rows");
   const aids = new Set();
   for (const a of t.additions) {
@@ -104,33 +106,86 @@ function tableProblems(t, facts, weightSrc) {
     if (a.kind === "slot" && !t.slots[a.id]) p.push(`addition ${a.id} is a slot with no slot entry`);
   }
   for (const s of Object.keys(t.slots)) if (!aids.has(s)) p.push(`slot ${s} is not among the additions`);
-  for (const [vp, l] of Object.entries(t.layouts)) {
-    const placed = [...l.fit.flat(), l.peek];
-    if (new Set(placed).size !== placed.length) p.push(`${vp}: an id is placed twice in the fold`);
-    for (const id of placed) {
-      if (!known.has(id)) p.push(`${vp}: ${id} is in the fold and is not the hero, a module or a slot`);
-      if (t.deferred.includes(id)) p.push(`${vp}: ${id} is deferred and cannot be in the fold`);
-      const m = t.modules.find((x) => x.id === id);
-      if (m && m.decision === "retire") p.push(`${vp}: ${id} is retired and cannot be in the fold`);
-    }
-    if (`${l.width}x${l.height}` !== vp) p.push(`${vp}: the layout is for ${l.width}x${l.height}`);
-    if (!l.fit.length || l.fit.some((r) => !r.length)) p.push(`${vp}: an empty row in the fold`);
-  }
+  p.push(...layoutProblems(t, css));
+  p.push(...amendmentProblems(t, js));
   return p;
 }
 
-function foldProblems(t, vp, m) {
+const cells = (rows) => rows.map((r) => r.trim().split(/\s+/));
+
+function rectProblems(name, grid, columns) {
   const p = [];
-  const l = t.layouts[vp];
-  const height = (id) => (m.heights[id] !== undefined ? m.heights[id] : t.slots[id].heightPx[vp]);
-  let y = m.headBottom;
-  for (const row of l.fit) {
-    y += Math.max(...row.map(height));
-    if (y > l.height) p.push(`${vp}: ${row.join(" + ")} ends at ${y} px, below the ${l.height} px fold`);
-    y += m.gap;
+  if (grid.some((r) => r.length !== columns)) p.push(`${name}: a row does not have ${columns} columns`);
+  const boxes = new Map();
+  grid.forEach((r, y) => r.forEach((a, x) => {
+    const b = boxes.get(a) || { x0: x, x1: x, y0: y, y1: y, n: 0 };
+    b.x0 = Math.min(b.x0, x); b.x1 = Math.max(b.x1, x); b.y0 = Math.min(b.y0, y); b.y1 = Math.max(b.y1, y); b.n++;
+    boxes.set(a, b);
+  }));
+  for (const [a, b] of boxes) if (b.n !== (b.x1 - b.x0 + 1) * (b.y1 - b.y0 + 1)) p.push(`${name}: ${a} is not one rectangle`);
+  return p;
+}
+
+function cssAreas(css, fit) {
+  const start = css.indexOf(`--hm-fit: ${fit};`);
+  if (start < 0) return null;
+  const end = css.indexOf("\n}\n", start);
+  const block = css.slice(start, end > 0 ? end : undefined);
+  const grab = (from) => {
+    const at = block.indexOf("grid-template-areas:", from);
+    if (at < 0) return null;
+    return [...block.slice(at, block.indexOf(";", at)).matchAll(/"([^"]*)"/g)].map((m) => m[1].trim().split(/\s+/).join(" "));
+  };
+  const net = grab(0);
+  const nonet = block.indexOf(":not([data-net])");
+  return { areas: net, noNet: nonet < 0 ? null : grab(nonet) };
+}
+
+function layoutProblems(t, css) {
+  const p = [];
+  const ids = t.areaIds;
+  const all = Object.keys(ids);
+  if (Object.values(ids).join() !== ["hmHero", "hmVerdict", "hmNet", "hmAlerts", "hmLean", "hmBull", "hmBear", "hmWatch", "hmLeaders", "hmMetals", "hmChg", "hmVol", "hmEvents", "hmNews"].join()) p.push("the area names do not map to the fourteen modules in order");
+  for (const fit of ["xl", "l", "m"]) {
+    const l = t.layouts[fit];
+    if (!l) { p.push(`no ${fit} layout`); continue; }
+    for (const [name, rows, want] of [[fit, l.areas, all], [fit + " without the network", l.noNet, all.filter((a) => a !== "net")]]) {
+      const grid = cells(rows || []);
+      p.push(...rectProblems(name, grid, l.columns));
+      const got = [...new Set(grid.flat())];
+      for (const a of want) if (!got.includes(a)) p.push(`${name}: ${a} (${ids[a]}) is not on the first screen`);
+      for (const a of got) if (!want.includes(a)) p.push(`${name}: ${a} is placed and is not a module of this layout`);
+    }
+    const mine = cssAreas(css, fit);
+    if (!mine) p.push(`${fit}: flows-home.css has no --hm-fit: ${fit} block`);
+    else {
+      if (JSON.stringify(mine.areas) !== JSON.stringify(l.areas.map((r) => r.trim().split(/\s+/).join(" ")))) p.push(`${fit}: the stylesheet's grid-template-areas differ from the table`);
+      if (JSON.stringify(mine.noNet) !== JSON.stringify(l.noNet.map((r) => r.trim().split(/\s+/).join(" ")))) p.push(`${fit}: the stylesheet's grid-template-areas without the network differ from the table`);
+    }
+    for (const id of t.deferred) if (!cells(l.areas).flat().includes(Object.keys(ids).find((k) => ids[k] === id))) p.push(`${fit}: ${id} is deferred and the first screen of this fit does not show it`);
   }
-  if (y > l.height - l.peekPx) p.push(`${vp}: ${l.peek} starts at ${y} px and shows ${l.height - y} px, under the ${l.peekPx} px a reader needs to see it is there`);
-  return { problems: p, peekTop: y };
+  const s = t.layouts.s;
+  if (!s) return [...p, "no s layout"];
+  for (const [name, pages, want] of [["s", s.pages, Object.values(ids)], ["s without the network", { ...s.pages, ...s.noNetPages }, Object.values(ids).filter((x) => x !== "hmNet")]]) {
+    const got = Object.values(pages).flat();
+    if (new Set(got).size !== got.length) p.push(`${name}: a module is on two pages`);
+    for (const id of want) if (!got.includes(id)) p.push(`${name}: ${id} is on no page`);
+    for (const id of got) if (!want.includes(id)) p.push(`${name}: ${id} is on a page and is not a module of this layout`);
+  }
+  if (Object.keys(s.pages).join() !== "now,flow,names,glance") p.push("the S pages are not now, flow, names and glance in order");
+  return p;
+}
+
+function amendmentProblems(t, js) {
+  const p = [];
+  const a = (t.amendments || []).find((x) => x.id === "F-08a");
+  if (!a) return ["the F-08 amendment of 2026-10-19 is not recorded"];
+  if (!/see everything/.test(a.request)) p.push("the F-08 amendment does not cite the owner's request");
+  if (a.chunkAt.xl !== "after-load" || a.chunkAt.l !== "after-load" || a.chunkAt.m !== "after-load" || a.chunkAt.s !== "glance-page") p.push("the F-08 amendment does not say when the chunk is asked for at each fit");
+  if (!/else \{ for \(const m of stage\.children\) m\.inert = false; askLower\(\); \}/.test(js)) p.push("the script does not ask for the lower modules at the xl, l and m fits");
+  if (!/if \(fitNow === "s" && page === "glance"\) askLower\(\);/.test(js)) p.push("the script does not hold the chunk back at S until the Glance page opens");
+  if (!/UI\.defer\("home-below", \{ when: "visible", el: \$\("hmChg"\)/.test(js)) p.push("the chunk is not asked for through the visible trigger on What changed");
+  return p;
 }
 
 const html = PAGES.overviewPage({ username: "x", summary: FIX.summary });
@@ -149,9 +204,11 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   eq(TABLE.deferred, ["hmChg", "hmVol", "hmEvents", "hmNews"], "the deferred chunk F-08 cuts holds exactly What changed, Volatility, Reporting and Headlines");
   ok(TABLE.modules.every((m) => facts.referenced(m.bodyId)), "every module's body id is still the one the page and its script use");
   ok(TABLE.modules.filter((m) => m.effect !== "now").every((m) => facts.referenced(m.id)), "a retirement that waits for its replacement leaves the module rendered until then");
-  eq(TABLE.layouts["1440x900"].fit, [["hmHero", "hmVerdict", "network", "moves"]], "at 1440x900 the tide, the verdict beside it, the network and the Moves band share the first row");
-  eq(TABLE.layouts["390x844"].fit, [["hmHero"]], "at 390x844 only the tide is wholly above the fold and the network peeks under it");
-  eq(TABLE.layouts["390x844"].peek, "network", "the stacked network is what a phone reader sees begin");
+  eq(Object.keys(TABLE.layouts), ["xl", "l", "m", "s"], "the plan has four fits: xl, l, m and s");
+  eq(TABLE.layouts.xl.areas[0], "hero hero hero hero hero neu neu net net net net net", "at the xl fit the tide spans five columns, the Neuron two and the network five");
+  eq(TABLE.layouts.l.areas[2], "net net net net net net bull bull bull bear bear bear", "at the l fit the network is a map tile under the tide");
+  eq(Object.keys(TABLE.layouts.s.pages), ["now", "flow", "names", "glance"], "the s fit pages are now, flow, names and glance");
+  eq(TABLE.amendments[0].id, "F-08a", "the F-08 amendment of 2026-10-19 is recorded with the owner's request");
 }
 
 {
@@ -200,9 +257,14 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(weightNone !== weightWith, "the removal of the Home entry found its anchor");
   ok(has(bad(() => {}, () => facts, weightNone), "neither defers"), "with no entry and no pointer to F-08 part a it fails");
 
-  ok(has(bad((t) => { t.layouts["1440x900"].fit[0].push("hmChg"); }), "hmChg is deferred and cannot be in the fold"), "a deferred module in the fold fails");
-  ok(has(bad((t) => { t.layouts["1440x900"].peek = "hmAlerts"; }), "hmAlerts is retired and cannot be in the fold"), "a retired module in the fold fails");
-  ok(has(bad((t) => { t.layouts["390x844"].fit.push(["network"]); }), "an id is placed twice in the fold"), "an id placed twice in a fold fails");
+  ok(has(bad((t) => { t.layouts.xl.areas[3] = t.layouts.xl.areas[3].replace("vol vol vol", "chg chg chg"); }), "xl: vol (hmVol) is not on the first screen"), "A MODULE LEFT OFF THE XL FIRST SCREEN FAILS");
+  ok(has(bad((t) => { t.layouts.l.noNet[0] = t.layouts.l.noNet[0].replace("hero hero", "hero neu"); }), "l without the network: hero is not one rectangle"), "an area that is not one rectangle fails");
+  ok(has(bad((t) => { t.layouts.m.areas[1] = "hero hero hero hero hero hero news news news news news"; }), "m: a row does not have 12 columns"), "a row of the wrong width fails");
+  ok(has(bad((t) => { t.layouts.xl.areas[0] = t.layouts.xl.areas[0].replace("neu neu", "neu hero"); }), "stylesheet's grid-template-areas differ from the table"), "a table that the stylesheet does not match fails");
+  ok(has(bad((t) => { t.layouts.s.pages.glance.pop(); }), "s: hmNews is on no page"), "a module on no page of the phone fit fails");
+  ok(has(bad((t) => { t.layouts.s.pages.now.push("hmNews"); }), "s: a module is on two pages"), "a module on two pages fails");
+  ok(has(bad((t) => { t.amendments = []; }), "the F-08 amendment of 2026-10-19 is not recorded"), "a table without the amendment fails");
+  ok(has(bad((t) => { t.amendments[0].chunkAt.s = "after-load"; }), "when the chunk is asked for"), "an amendment that asks for the chunk early at S fails");
   ok(has(bad((t) => { t.order.push("hmNew"); }), "neither the hero, a module nor a slot"), "an unknown id in the order fails");
   ok(has(bad((t) => { t.order = t.order.filter((x) => x !== "moves"); }), "the order leaves out moves"), "a slot missing from the order fails");
   ok(has(bad((t) => { t.order = [...t.order.slice(1), t.order[0]]; }), "the tide hero is not first"), "the hero not first fails");
@@ -212,26 +274,6 @@ const htmlPending = PAGES.overviewPage({ username: "x", summary: null });
   ok(has(bad((t) => { t.additions.push({ id: "x", kind: "inside", in: "hmGhost", row: "F-99", reason: "inside a thing that does not exist" }); }), "hmGhost"), "an addition inside a module that does not exist fails");
   ok(has(bad((t) => { t.additions = t.additions.filter((a) => a.id !== "network"); }), "slot network is not among the additions"), "a slot with no addition fails");
   ok(has(bad((t) => { t.additions.push(clone(t.additions[0])); }), "addition network is placed twice"), "an addition placed twice fails");
-}
-
-{
-  const t = clone(TABLE);
-  const measured = (headBottom, gap, heights) => ({ headBottom, gap, heights });
-  const good = foldProblems(t, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 105, hmMetals: 340 }));
-  eq(good.problems, [], "on the heights measured at a3ce932 the 1440x900 fold holds the tide row and the verdict");
-  eq(good.peekTop, 576, "and Metals begins at 576 px, 324 px of it above the fold");
-  const slotTall = clone(t);
-  slotTall.slots.network.heightPx["1440x900"] = 800;
-  ok(has(foldProblems(slotTall, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 105 })).problems, "below the 900 px fold"), "A SLOT TALLER THAN THE FOLD ALLOWS FAILS");
-  ok(has(foldProblems(t, "1440x900", measured(153, 20, { hmHero: 403, hmVerdict: 700 })).problems, "starts at"), "a verdict that grows until Metals no longer shows fails");
-  ok(has(foldProblems(t, "1440x900", measured(153, 20, { hmHero: 900, hmVerdict: 105 })).problems, "below the 900 px fold"), "a hero that grows past the fold fails");
-  ok(has(foldProblems(t, "390x844", measured(153, 16, { hmHero: 700 })).problems, "starts at"), "a phone tide so tall that the network does not peek fails");
-  const phone = foldProblems(t, "390x844", measured(153, 16, { hmHero: 552 }));
-  eq(phone.problems, [], "on the heights measured at a3ce932 the 390x844 fold holds the tide and the network peeks");
-  eq(phone.peekTop, 721, "and the stacked network begins at 721 px, 123 px of it above the fold");
-  const wide = clone(t);
-  wide.layouts["390x844"].fit.push(["network"]);
-  ok(has(foldProblems(wide, "390x844", measured(153, 16, { hmHero: 552 })).problems, "below the 844 px fold"), "asking the phone fold to hold the tide and the whole 300 px network fails");
 }
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
@@ -261,7 +303,7 @@ async function render(browser, [width, height], pageHtml) {
   await page.waitForTimeout(600);
   const m = await page.evaluate((heroId) => {
     const rect = (e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top + scrollY), bottom: Math.round(r.bottom + scrollY), height: Math.round(r.height) }; };
-    const sections = [...document.querySelectorAll("#hmStage .hm-panel > section")];
+    const sections = [...document.querySelectorAll("#hmStage > section")];
     const heights = {};
     for (const s of sections) heights[s.id] = rect(s).height;
     return {
@@ -277,8 +319,9 @@ async function render(browser, [width, height], pageHtml) {
 
 const browser = await launch();
 try {
-  for (const [vp, layout] of Object.entries(TABLE.layouts)) {
-    const m = await render(browser, [layout.width, layout.height], html);
+  for (const layout of Object.values(TABLE.layouts)) {
+    const vp = layout.viewport;
+    const m = await render(browser, vp.split("x").map(Number), html);
     eq(m.errors, [], `${vp}: the fixture render raises no page error`);
     eq([...m.ids].sort(), [TABLE.hero.id, ...pageFacts(html, OVERVIEW_JS).modules].sort(), `${vp}: the rendered stage is the hero and the twelve modules the table decides`);
     ok(m.ids.filter((i) => i !== TABLE.hero.id).every((i) => TABLE.modules.some((x) => x.id === i)), `${vp}: every rendered module has a decision`);

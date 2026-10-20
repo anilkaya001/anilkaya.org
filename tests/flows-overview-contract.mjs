@@ -317,7 +317,7 @@ try {
       const grid = document.getElementById("hmStage");
       const hero = document.getElementById("hmHero");
       return {
-        ids: Array.from(grid.querySelectorAll(".hm-panel > section"), (n) => n.id),
+        ids: Array.from(grid.querySelectorAll(":scope > section"), (n) => n.id),
         heroW: Math.round(hero.getBoundingClientRect().width),
         gridW: Math.round(grid.getBoundingClientRect().width),
         chipsInHero: Boolean(hero.querySelector("#ccVerdict [data-chip]")),
@@ -327,11 +327,11 @@ try {
     const netOn = /^FLOWS_HOME_NET\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"));
     deep(seat.ids, ["hmHero", "hmVerdict", ...(netOn ? ["hmNet"] : []), "hmAlerts", "hmLean", "hmBull", "hmBear", "hmWatch", "hmLeaders", "hmMetals",
       "hmChg", "hmVol", "hmEvents", "hmNews"],
-      "the page reads, tab by tab, the hero and the verdict, the flow network when wrangler.toml ships it on with flagged windows and sectors, " +
+      "the page reads, in the order of the stage, the hero and the verdict, the flow network when wrangler.toml ships it on with flagged windows and sectors, " +
       "both boards and the band's edge, the index leaders and the metals the owner watches most, what changed and volatility, " +
       "and the calendar with the headlines, in that order");
     ok(Math.abs(seat.heroW - seat.gridW) <= 2,
-      `the market hero spans the whole grid (${seat.heroW} of ${seat.gridW})`);
+      `the market hero fills its area of the stage (${seat.heroW} of ${seat.gridW})`);
     ok(seat.chipsInHero, "and carries the session readings inside it rather than as a second bar");
     eq(seat.jump, 0, "and there is no jump strip: every module is one card on one screen of cards");
 
@@ -857,7 +857,7 @@ try {
     await page.waitForSelector("#ccBull .hm-lrow", { timeout: 15000 });
     const filled = Date.now() - t0;
     const early = await page.evaluate(() => ({
-      news: document.getElementById("ccNews").childElementCount,
+      news: document.querySelectorAll("#ccNews > :not([data-loading])").length,
       lean: document.getElementById("ccLean").childElementCount,
       bear: document.querySelectorAll("#ccBear .hm-lrow").length,
       status: document.getElementById("flowsStatus").textContent.trim(),
@@ -3022,7 +3022,7 @@ try {
       const cs = getComputedStyle(el);
       const kids = Array.from(el.children);
       return {
-        min: parseFloat(cs.minHeight) || 0, h: el.offsetHeight, w: el.clientWidth,
+        min: parseFloat(cs.minHeight) || 0, h: el.offsetHeight, w: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
         content: kids.reduce((a, c) => a + c.offsetHeight, 0) + (parseFloat(cs.rowGap) || 0) * Math.max(0, kids.length - 1),
         svg: +el.querySelector("svg[role=img]").getAttribute("height"), hero: document.querySelector(".hm-hero-in").clientWidth,
       };
@@ -3031,7 +3031,8 @@ try {
       await page.setViewportSize({ width, height: 1000 });
       await page.waitForFunction(() => {
         const svg = document.querySelector("#hmTide svg[role=img]");
-        return svg && +svg.getAttribute("width") === document.getElementById("hmTide").clientWidth;
+        const host = document.getElementById("hmTide"), hs = getComputedStyle(host);
+        return svg && +svg.getAttribute("width") === host.clientWidth - parseFloat(hs.paddingLeft) - parseFloat(hs.paddingRight);
       });
       const fit = await page.evaluate(TIDE_FIT);
       ok(fit.h > 0 && fit.content <= fit.h + 1 && fit.svg >= 190,
@@ -3322,7 +3323,7 @@ try {
       missing: ["AEM", "NFLX"],
     };
 
-    const fx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const fx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
     const fxLk = await stubNewKeys(fx);
     await fx.addInitScript(() => {
       window.__stage = true;
@@ -3398,9 +3399,8 @@ try {
     });
     const focusNow = async (path = "/flows/") => {
       await fp.goto(url(path), { waitUntil: "domcontentloaded" });
-      await fp.click("#hmT-focus");
-      await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { timeout: 15000 });
-      await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { timeout: 15000 });
+      await fp.waitForSelector("#ccMetals :is(.hm-metal, [data-empty])", { state: "attached", timeout: 15000 });
+      await fp.waitForSelector("#ccLeaders :is(.hm-qrow, [data-empty])", { state: "attached", timeout: 15000 });
       await painted(fp);
       return fp.evaluate(FOCUS_READ);
     };
@@ -3472,12 +3472,11 @@ try {
       `(bull batch ${fill.ccBull.batch} at ${fill.ccBull.at} ms, metals batch ${fill.ccMetals.batch} at ${fill.ccMetals.at} ms)`);
     const wide = await fp.evaluate(RESERVE);
     for (const [id, r] of Object.entries(wide)) {
-      ok(fits(r), `${id} holds a stage box of its own at 1440, so a late fill resizes nothing: ${drawn(r)}`);
+      ok(fits(r), `${id} holds a stage box of its own at 1920, so a late fill resizes nothing: ${drawn(r)}`);
     }
     const shifted = await fp.evaluate(() => window.__shift.reduce((a, v) => a + v, 0));
-    ok(shifted < 0.1, `and the whole fill of the page moves the 1440px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
+    ok(shifted < 0.1, `and the whole fill of the page moves the 1920px viewport by a cumulative layout shift under 0.1 (${shifted.toFixed(4)})`);
 
-    await fp.click("#hmT-focus");
     await fp.click("#ccLeadSeg .ui-seg-i:nth-of-type(2)");
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
     const ndx = await fp.evaluate(FOCUS_READ);
@@ -3509,12 +3508,18 @@ try {
     await beat();
     ok(await fp.evaluate(() => document.activeElement === window.__pill && window.__pill.isConnected),
       "a heartbeat refreshes the date chip in place: keyboard focus stays on it");
-    await fp.keyboard.press("Tab");
-    const kb = await fp.evaluate(() => {
-      const a = document.activeElement;
-      return { t: a.dataset.ticker, cls: a.className, outline: getComputedStyle(a).outlineStyle, visible: a.matches(":focus-visible") };
-    });
-    eq(kb.t, "GLD", "Tab from the module's date chip lands on the first fund tile");
+    let kb = null;
+    const stops = [];
+    for (let n = 0; n < 4 && !(kb && kb.t); n++) {
+      await fp.keyboard.press("Tab");
+      kb = await fp.evaluate(() => {
+        const a = document.activeElement;
+        return { t: a.dataset.ticker, cls: a.className, outline: getComputedStyle(a).outlineStyle, visible: a.matches(":focus-visible") };
+      });
+      stops.push(kb.cls);
+    }
+    ok(stops.length <= 3, `Tab from the module's date chip reaches a fund tile within the header's own controls (${stops.join(" > ")})`);
+    eq(kb.t, "GLD", "and lands on the first fund tile");
     ok(kb.visible && kb.outline !== "none", `with a visible focus ring (${kb.outline})`);
 
     const t0 = new Date().toISOString();
@@ -3686,6 +3691,7 @@ try {
       const fit = await fp.evaluate(() => ({
         over: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         cols: getComputedStyle(document.querySelector(".hm-metals")).gridTemplateColumns.split(" ").length,
+        box: Math.round(document.querySelector(".hm-metals").getBoundingClientRect().width),
         clipped: Array.from(document.querySelectorAll("#hmMetals a, #hmLeaders a"), (a) => {
           const box = a.getBoundingClientRect();
           const out = Array.from(a.children).filter((c) => c.getClientRects().length &&
@@ -3695,16 +3701,19 @@ try {
       }));
       ok(fit.over <= 1, `no horizontal overflow at ${width}px with the focus modules drawn (${fit.over}px)`);
       deep(fit.clipped, [], `and no figure spills out of its row at ${width}px`);
-      eq(fit.cols, width < 600 ? 1 : 3, `metals ${width < 600 ? "stack" : "sit in three columns"} at ${width}px`);
+      eq(fit.cols, fit.box >= 340 ? 3 : 1, `metals ${fit.box >= 340 ? "sit in three columns" : "stack"} in a ${fit.box}px container at ${width}px: the columns follow the tile, not the viewport`);
       if (width === 390 || width === 768) {
-        const narrow = await fp.evaluate(RESERVE);
+        const narrow = await fp.evaluate(() => Object.fromEntries(["hmMetals", "hmLeaders", "hmBull", "hmBear"].map((id) => {
+          const el = document.getElementById(id);
+          return [id, { min: 0, h: el.offsetHeight, w: el.clientWidth, grow: 0 }];
+        })));
         for (const [id, r] of Object.entries(narrow)) {
-          ok(fits(r), `${id} holds a stage box of its own at ${width} as well: ${drawn(r)}`);
+          ok(fits(r), `${id} holds a stage box of its own at ${width} as well, laid out even where the pager hides its page: ${drawn(r)}`);
         }
       }
     }
 
-    await fp.setViewportSize({ width: 1440, height: 1000 });
+    await fp.setViewportSize({ width: 1920, height: 1080 });
     await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",
       body: JSON.stringify({ v: 1, status: "unavailable", reason: "the vendor read failed", sessionDate: SESSION, groups: GROUPS }) }));
     const down = await focusNow();

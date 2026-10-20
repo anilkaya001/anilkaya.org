@@ -8,7 +8,7 @@
   const C = UI.chart;
   const {
     $, ans, arr, rowsOf, cap1, capSaid, countSaid, sessionsSaid, disclose, POP, silent, hush, headMark, infoInto, table,
-    earningsMark, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX,
+    earningsMark, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX, big, gone,
   } = kit;
 
   const CHANGE_MAX = 12;
@@ -361,7 +361,7 @@
       rows.length ? rows.map((r) => (r.carded
         ? h("a", { class: "hm-chiplink", href: readerHref(r.t), "data-tone": tone }, r.t)
         : h("span", { class: "hm-chiplink", "data-tone": tone }, r.t))) : h("span", { class: "ui-dash" }, DASH));
-    if (radar) into.append(h("div", { class: "hm-radar" }, tagRow("Rich", side("rich"), "short"), tagRow("Cheap", side("cheap"), "long")));
+    if (radar) into.append(h("div", { class: "hm-radar", "data-more": "" }, tagRow("Rich", side("rich"), "short"), tagRow("Cheap", side("cheap"), "long")));
     const sess = (reg && reg.sessionDate) || (lv && lv.session) || null;
     const expected = UI.freshness.market().expected;
     if (sess && sess < expected) {
@@ -407,10 +407,14 @@
   const aheadSaid = (n) => (n === null ? "" : n < 0 ? " · past" : n === 0 ? " · today" : n === 1 ? " · next session" : " · in " + n + " sessions");
 
   function paintEvents(into, payload) {
-    if (silent(into, payload, "events calendar")) return;
+    if (silent(into, payload, "events calendar")) {
+      big("hmEvents", null, "", null, gone(payload, "events calendar"));
+      return;
+    }
     const rows = rowsOf(payload);
     if (!rows.length) {
       hush(into, "empty", "No name in the screened universe reports inside the window.", "reporting soon");
+      big("hmEvents", "0", "reports within five sessions", "ice");
       return;
     }
     const drawn = rows.slice(0, LIST_MAX);
@@ -425,6 +429,9 @@
         : ", so every name here can be read against the ranking above.");
     const today = UI.freshness.market().today;
     const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today);
+    const soon = rows.filter((row) => { const a = ahead(row); return a !== null && a >= 0 && a <= 5; }).length;
+    const lastAhead = ahead(rows[rows.length - 1]);
+    big("hmEvents", (payload.capBound === true && lastAhead !== null && lastAhead <= 5 ? "≥" : "") + soon, "reports within five sessions", "ice");
     const list = drawn.map((row) => {
       return UI.listRow({
         primary: row.t || DASH,

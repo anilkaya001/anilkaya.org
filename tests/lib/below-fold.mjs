@@ -21,15 +21,19 @@ const NOW = () => {
     Promise.resolve().then(() => fn({ didTimeout: true, timeRemaining: () => 0 }));
     return 0;
   };
-  addEventListener("DOMContentLoaded", () => {
+  const flatten = () => {
     if (!document.getElementById("hmStage") || window.__stage) return;
+    window.__stage = true;
     const st = document.createElement("style");
-    st.textContent = ".hm-stage{position:static!important;height:auto!important}.hm-panel{position:static!important;visibility:visible!important;display:block!important}.hm-panel>.hm-mod,.hm-panel>.hm-hero,.hm-panel>.hm-verdict{position:static!important;visibility:visible!important;display:block!important;height:auto!important;overflow:visible!important}.hm-panel .hm-body{overflow:visible!important}";
+    st.textContent = ".hm{container-type:normal!important}.hm-stage{display:block!important;position:static!important;height:auto!important;--hm-fit:flat}.hm-stage>*{position:static!important;visibility:visible!important;display:block!important;height:auto!important;overflow:visible!important;container-type:inline-size!important;margin:0 0 12px!important}.hm-stage .hm-body{overflow:visible!important}.hm-stage .hm-mrel,.hm-stage .hm-mflow{display:flex!important}.hm-stage #ccChg>:not(#ccChgStats){display:block!important}.hm-stage #ccLeaders .hm-qhead:not(.is-2){display:grid!important}.hm-stage #ccLean{container-type:inline-size!important}#hmNetHost{height:480px}";
     document.head.append(st);
-    const open = () => { for (const p of document.querySelectorAll(".hm-panel, .hm-panel > *")) p.inert = false; };
+    const open = () => { for (const p of document.querySelectorAll("#hmStage > *")) p.inert = false; };
     open();
     new MutationObserver(open).observe(document.body, { attributes: true, attributeFilter: ["inert"], subtree: true });
-  });
+    flat.disconnect();
+  };
+  const flat = new MutationObserver(flatten);
+  flat.observe(document, { childList: true, subtree: true });
   addEventListener("load", () => { const u = window.FlowsUI, m = document.getElementById("hmChg"); if (u && u.defer && m) u.defer("home-below", { when: "idle", el: m, label: "The lower modules" }); });
 };
 

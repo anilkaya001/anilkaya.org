@@ -6,6 +6,7 @@ import * as PAGES from "../shared/flows-pages.js";
 import { flowsPageRows } from "../server/routes/flows-pages.js";
 import { launch } from "./lib/browser.mjs";
 import { BELOW_NOW } from "./lib/below-fold.mjs";
+import { openHome } from "./lib/home-fixtures.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -203,6 +204,54 @@ try {
     ok(/The flow network is unavailable/.test(await page.evaluate(() => document.getElementById("hmNetHost").textContent)), "A FAILED MODULE FETCH SAYS SO IN THE SLOT");
     ok(await page.evaluate(() => [...document.querySelectorAll("#hmNetHost button")].some((b) => b.textContent === "Retry")), "with a Retry button");
     ok(await page.evaluate(() => document.getElementById("ccMetals").children.length > 0), "and the rest of Home is unharmed");
+    await context.close();
+  }
+
+  const faces = (page) => page.evaluate(() => ({
+    canvas: document.querySelectorAll("#hmNetHost canvas.fn-cv").length, map: document.querySelectorAll("#hmNetHost .nm").length,
+    stage: (document.querySelector("#hmNetHost .fn-stage") || { clientHeight: 0 }).clientHeight,
+    num: (document.querySelector("#hmNetN .hm-big-v") || { textContent: "" }).textContent, glance: document.getElementById("hmNet").classList.contains("is-glance"),
+  }));
+  for (const [w, h, want] of [[1920, 1080, "3d"], [1920, 929, "3d"], [1440, 820, "map"], [1366, 768, "map"], [1024, 768, "glance"]]) {
+    const { context, page, errors } = await openHome(browser, { viewport: { width: w, height: h } });
+    await page.waitForFunction((mode) => (mode === "3d" ? document.querySelector("#hmNetHost canvas") : mode === "map" ? document.querySelector("#hmNetHost .nm") : document.querySelector("#hmNetN .hm-big-v") && /\d/.test(document.querySelector("#hmNetN .hm-big-v").textContent)), want, { timeout: 20000 });
+    await page.waitForTimeout(700);
+    const f = await faces(page);
+    if (want === "3d") { ok(f.canvas === 1 && f.map === 0, `${w}x${h}: THE NETWORK IS THE 3D SCENE`); ok(f.stage >= 300, `${w}x${h}: its stage is ${f.stage} px tall, at least 300`); }
+    if (want === "map") { ok(f.map === 1 && f.canvas === 0, `${w}x${h}: THE NETWORK IS THE CONDENSED MAP`); ok(!f.glance, `${w}x${h}: and not a glance tile`); }
+    if (want === "glance") {
+      ok(f.canvas === 0 && f.map === 0 && f.glance, `${w}x${h}: THE NETWORK IS A GLANCE TILE: no canvas and no map`);
+      ok(/\d/.test(f.num) && !/^0$/.test(f.num), `${w}x${h}: with the flagged premium as its figure (${f.num})`);
+      await page.click("#hmNet .hm-open");
+      await page.waitForSelector("dialog.hm-sheet canvas", { timeout: 20000 });
+      ok(true, `${w}x${h}: AND OPEN SHOWS THE 3D SCENE IN THE SHEET`);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(700);
+      const back = await faces(page);
+      ok(back.canvas === 0 && back.glance, `${w}x${h}: and Escape returns the tile to its glance with the canvas gone`);
+    }
+    eq(errors, [], `${w}x${h}: no page error`);
+    await context.close();
+  }
+
+  {
+    const { context, page, errors } = await openHome(browser, { viewport: { width: 1920, height: 1080 } });
+    await page.waitForSelector("#hmNetHost canvas", { timeout: 20000 });
+    await page.evaluate(() => {
+      window.__adds = { cv: 0, nm: 0 };
+      new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) { if (n.nodeType === 1) { window.__adds.cv += n.matches("canvas") || n.querySelector("canvas") ? 1 : 0; window.__adds.nm += n.matches(".nm") || n.querySelector(".nm") ? 1 : 0; } } }).observe(document.getElementById("hmNetHost"), { childList: true, subtree: true });
+    });
+    await page.click("#askDockTab");
+    await page.waitForSelector(".ak-dock.is-open");
+    await page.waitForFunction(() => document.getElementById("hmStage").dataset.fit === "l" && document.querySelector("#hmNetHost .nm") && !document.querySelector("#hmNetHost canvas"), null, { timeout: 20000 });
+    await page.waitForTimeout(1200);
+    const n = await page.evaluate(() => ({ adds: window.__adds, canvas: document.querySelectorAll("#hmNetHost canvas.fn-cv").length, map: document.querySelectorAll("#hmNetHost .nm").length, fits: document.querySelectorAll(".fn-stage").length }));
+    eq(n.adds.nm, 1, "OPENING THE ASK DOCK AT 1920 RE-FLOWS THE HOME TO THE L FIT AND REMOUNTS THE NETWORK AS THE MAP EXACTLY ONCE");
+    eq([n.canvas, n.map, n.fits], [0, 1, 0], "with no second scene left behind");
+    await page.click(".ak-dock-close");
+    await page.waitForFunction(() => document.getElementById("hmStage").dataset.fit === "xl" && document.querySelector("#hmNetHost canvas") && !document.querySelector("#hmNetHost .nm"), null, { timeout: 20000 });
+    ok(true, "and closing it returns the scene");
+    eq(errors, [], "no page error across the dock's slide");
     await context.close();
   }
 } finally {

@@ -246,30 +246,147 @@
   }
  ],
  "layouts": {
-  "1440x900": {
-   "width": 1440,
-   "height": 900,
-   "fit": [
-    [
-     "hmHero",
-     "hmVerdict",
-     "network",
-     "moves"
-    ]
+  "xl": {
+   "viewport": "1920x1080",
+   "min": [
+    1400,
+    800
    ],
-   "peek": "hmMetals",
-   "peekPx": 96
+   "columns": 12,
+   "areas": [
+    "hero hero hero hero hero neu neu net net net net net",
+    "hero hero hero hero hero news news net net net net net",
+    "bull bull bull bear bear bear flag flag flag lead lead lead",
+    "lean lean lean lean metl metl metl vol vol vol evt evt",
+    "lean lean lean lean metl metl metl chg chg chg wtch wtch"
+   ],
+   "noNet": [
+    "hero hero hero hero hero neu neu flag flag flag flag flag",
+    "hero hero hero hero hero news news flag flag flag flag flag",
+    "bull bull bull bear bear bear wtch wtch wtch lead lead lead",
+    "lean lean lean lean metl metl metl vol vol vol evt evt",
+    "lean lean lean lean metl metl metl chg chg chg evt evt"
+   ]
   },
-  "390x844": {
-   "width": 390,
-   "height": 844,
-   "fit": [
-    [
-     "hmHero"
-    ]
+  "l": {
+   "viewport": "1440x820",
+   "min": [
+    1040,
+    640
    ],
-   "peek": "network",
-   "peekPx": 96
+   "columns": 12,
+   "areas": [
+    "hero hero hero hero hero hero neu neu neu lean lean lean",
+    "hero hero hero hero hero hero news news news lean lean lean",
+    "net net net net net net bull bull bull bear bear bear",
+    "net net net net net net flag flag flag lead lead lead",
+    "metl metl metl chg chg chg vol vol vol evt evt evt",
+    "metl metl metl wtch wtch wtch vol vol vol evt evt evt"
+   ],
+   "noNet": [
+    "hero hero hero hero hero hero neu neu neu lean lean lean",
+    "hero hero hero hero hero hero news news news lean lean lean",
+    "flag flag flag flag flag flag bull bull bull bear bear bear",
+    "flag flag flag flag flag flag wtch wtch wtch lead lead lead",
+    "metl metl metl chg chg chg vol vol vol evt evt evt",
+    "metl metl metl chg chg chg vol vol vol evt evt evt"
+   ]
+  },
+  "m": {
+   "viewport": "1024x768",
+   "min": [
+    760,
+    560
+   ],
+   "columns": 12,
+   "areas": [
+    "hero hero hero hero hero hero neu neu neu neu neu neu",
+    "hero hero hero hero hero hero news news news news news news",
+    "bull bull bull bear bear bear flag flag flag lead lead lead",
+    "lean lean lean lean lean lean net net net metl metl metl",
+    "chg chg chg vol vol vol evt evt evt wtch wtch wtch"
+   ],
+   "noNet": [
+    "hero hero hero hero hero hero neu neu neu neu neu neu",
+    "hero hero hero hero hero hero news news news news news news",
+    "bull bull bull bear bear bear flag flag flag lead lead lead",
+    "lean lean lean lean lean lean wtch wtch wtch metl metl metl",
+    "chg chg chg vol vol vol evt evt evt evt evt evt"
+   ]
+  },
+  "s": {
+   "viewport": "390x844",
+   "columns": 2,
+   "rows": 12,
+   "pages": {
+    "now": [
+     "hmHero",
+     "hmVerdict"
+    ],
+    "flow": [
+     "hmNet",
+     "hmAlerts"
+    ],
+    "names": [
+     "hmBull",
+     "hmBear"
+    ],
+    "glance": [
+     "hmLean",
+     "hmWatch",
+     "hmLeaders",
+     "hmMetals",
+     "hmChg",
+     "hmVol",
+     "hmEvents",
+     "hmNews"
+    ]
+   },
+   "noNetPages": {
+    "flow": [
+     "hmAlerts",
+     "hmLean"
+    ],
+    "glance": [
+     "hmWatch",
+     "hmLeaders",
+     "hmMetals",
+     "hmChg",
+     "hmVol",
+     "hmEvents",
+     "hmNews"
+    ]
+   }
   }
- }
+ },
+ "areaIds": {
+  "hero": "hmHero",
+  "neu": "hmVerdict",
+  "net": "hmNet",
+  "flag": "hmAlerts",
+  "lean": "hmLean",
+  "bull": "hmBull",
+  "bear": "hmBear",
+  "wtch": "hmWatch",
+  "lead": "hmLeaders",
+  "metl": "hmMetals",
+  "chg": "hmChg",
+  "vol": "hmVol",
+  "evt": "hmEvents",
+  "news": "hmNews"
+ },
+ "amendments": [
+  {
+   "id": "F-08a",
+   "date": "2026-10-19",
+   "request": "so we can actually see everything",
+   "effect": "At the XL, L and M fits, What changed, Volatility, Reporting and Headlines are on the first screen as strip tiles; the home-below chunk is requested after the load event. At the S fit it is requested only when the Glance page opens.",
+   "chunkAt": {
+    "xl": "after-load",
+    "l": "after-load",
+    "m": "after-load",
+    "s": "glance-page"
+   }
+  }
+ ]
 }
