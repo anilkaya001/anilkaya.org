@@ -1,6 +1,6 @@
 import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
-import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
-import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
+import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, eventShape, sliceCallU, slicePutU, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
+import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, rndMoments, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
   expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
@@ -286,13 +286,30 @@ export function eventJump(built, event) {
   const fit = eventTermFit(points);
   const priced = fit.why === null && fin(fit.J) && fit.J >= L.EVENT_MIN_JUMP;
   const poor = priced && fit.dof > 0 && fit.resid > L.EVENT_FIT_RESID;
-  return {
-    J: priced ? fit.J : null, J2: priced ? fit.J2 : null, meanAbs: priced ? fit.J * Math.sqrt(2 / Math.PI) : null,
+  const out = {
+    J: priced ? fit.J : null, J2: priced ? fit.J2 : null, meanAbs: null, kappa: null, shape: null, shapeWhy: null, k3: null,
     diffusiveVol: fin(fit.sigma) ? fit.sigma : null, beta: fin(fit.beta) ? fit.beta : null,
     seJ: fin(fit.seJ) ? fit.seJ : null, n: fit.n, dof: fit.dof, resid: fit.resid,
     why: fit.why || (priced ? (poor ? "event.residual" : null) : "event.no-premium"),
     basis: "model-free", front: front.expiry, back: back ? back.expiry : null, used,
   };
+  if (!priced) return out;
+  const tf = tauOf(front);
+  const wD = fit.sigma2 * tf + (fin(fit.beta) ? fit.beta * tf * tf : 0);
+  const F = asSlice(front.slice).F;
+  const shape = eventShape({ J2: fit.J2, wD, straddle: (sliceCallU(front.slice, F) + slicePutU(front.slice, F)) / F });
+  out.meanAbs = shape.M;
+  out.kappa = shape.identified ? shape.kappa : null;
+  out.shape = shape.identified ? { family: shape.family, lambda: shape.lambda, edge: shape.edge } : null;
+  out.shapeWhy = shape.identified ? null : shape.why;
+  const prior = pre.length ? pre[pre.length - 1] : null;
+  const tp = prior ? tauOf(prior) : null;
+  if (tp !== null) {
+    const cum = (slice) => { const m = rndMoments(slice); return m && fin(m.skewness) && m.varianceLog > 0 ? m.skewness * Math.pow(m.varianceLog, 1.5) : null; };
+    const kf = cum(front.slice), kp = cum(prior.slice);
+    out.k3 = kf !== null && kp !== null ? kf - kp * tf / tp : null;
+  }
+  return out;
 }
 
 export function bookLevels(strikeRows, { spot } = {}) {
@@ -483,8 +500,10 @@ export function engineFacts(input) {
   add("move.event.hist.medianAbs", histMed === null ? null : dp(histMed, 4), "frac", hist.length >= 6 ? 3 : 2,
     histMed === null ? { why: event ? "event.few-moves" : "event.none-listed" } : {});
   const jMad = jump && fin(jump.meanAbs) ? jump.meanAbs : null;
-  add("move.event", jMad === null ? null : dp(jMad, 4), "frac", jMad === null ? 0 : 2, jMad === null ? { why: jump ? jump.why || "event.no-jump" : event ? "event.slices" : "event.none-listed" } : {});
-  add("move.event.ratio", jMad !== null && histMed > 0 ? dp(jMad / histMed, 4) : null, "ratio", hist.length >= 6 ? 2 : 1,
+  const evG = jMad === null ? 0 : jump.shapeWhy || jump.why ? 1 : fin(jump.dof) && jump.dof >= 1 ? 3 : 2;
+  const evWhy = jMad === null ? { why: jump ? jump.why || "event.no-jump" : event ? "event.slices" : "event.none-listed" } : jump.shapeWhy || jump.why ? { why: jump.shapeWhy || jump.why } : {};
+  add("move.event", jMad === null ? null : dp(jMad, 4), "frac", evG, evWhy);
+  add("move.event.ratio", jMad !== null && histMed > 0 ? dp(jMad / histMed, 4) : null, "ratio", Math.min(hist.length >= 6 ? 2 : 1, evG || 3),
     jMad !== null && histMed > 0 ? {} : { why: jMad === null ? "event.no-jump" : "event.few-moves" });
   return facts;
 }
@@ -519,7 +538,8 @@ export function engineEvent(event, jump, facts) {
   return {
     date: event.date, confirmed: !!event.confirmed, moves: (event.moves || []).filter(fin).map((m) => dp(m, 4)),
     jq: jump && fin(jump.J) ? dp(jump.J, 5) : null, realizedOverImplied: fin(event.realizedOverImplied) ? dp(event.realizedOverImplied, 4) : null,
-    ratio,
+    ratio, kappa: jump && fin(jump.kappa) ? dp(jump.kappa, 3) : null, shape: jump && jump.shape ? jump.shape.family : null,
+    k3: jump && fin(jump.k3) ? sig(jump.k3, 3) : null,
   };
 }
 

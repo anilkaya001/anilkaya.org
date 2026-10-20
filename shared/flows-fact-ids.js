@@ -154,11 +154,11 @@ export const FACT_IDS = deepFreeze({
   },
   "move.event": {
     meaning: "Option-implied mean absolute earnings move: the jump the two expiries around the event price beyond diffusion",
-    unit: "frac", tenor: "the event", gradeRule: "2 when a jump is priced; 0 and withheld otherwise", since: ORIGIN,
+    unit: "frac", tenor: "the event", gradeRule: "3 when the term fit has a spare degree of freedom and a clean residual, 2 when a jump is priced, 1 when the shape is unidentified or the fit carries a residual or reason; 0 and withheld otherwise", since: ORIGIN,
   },
   "move.event.ratio": {
     meaning: "move.event over move.event.hist.medianAbs: the earnings move the options price against the name's own history",
-    unit: "ratio", tenor: "the event", gradeRule: "2 from six or more past reactions, else 1; 0 and withheld without both inputs", since: ORIGIN,
+    unit: "ratio", tenor: "the event", gradeRule: "2 from six or more past reactions, else 1, and never above the grade of move.event; 0 and withheld without both inputs", since: ORIGIN,
   },
 });
 

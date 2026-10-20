@@ -11,7 +11,7 @@ import * as QC from "../shared/flows-quant-card.js";
 import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { priceSale } from "../shared/flows-premium.js";
-import { bucketsOf, BUCKET_LINES } from "../shared/flows-quant-structures.js";
+import { bucketsOf, BUCKET_LINES, eventBucket } from "../shared/flows-quant-structures.js";
 
 let n = 0;
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -535,6 +535,8 @@ const FACT_INPUT = () => ({
     return { method: "mixture", T: tau, F: 100, D: 1, params: { components: nodes.map(([y, w]) => ({ f: Math.exp(y - m), w })), sigmaD } };
   };
   const SIGMA = 0.35;
+  const MJ_BANDS = { gaussian: [-0.5, 0.5], twoPoint: [-0.5, 0.5], laplace: [-5.5, 0.5], t5: [-9.5, 0.5], skewCrash: [-5.5, 0.5] };
+  const IDENT = { gaussian: [], laplace: [], t5: [], twoPoint: [], skewCrash: [] };
   const bands = { gaussian: [-0.6, 0.6], laplace: [-12, -2], t5: [-9, -2], twoPoint: [3, 27], skewCrash: [-2, 3] };
   const ATM = { gaussian: [], laplace: [], t5: [], twoPoint: [], skewCrash: [] };
   let worst = 0, cases = 0;
@@ -555,6 +557,25 @@ const FACT_INPUT = () => ({
         ATM[law].push((atm.eventSd / truth - 1) * 100);
         ok(Math.abs(err) < 0.5, `${law} J=${Jt} ${d1}/${d2}: the model-free event size is within 0.5% of the law's log-contract size (${err.toFixed(3)}%)`);
         near(got.diffusiveVol, SIGMA, 2e-4, `${law} J=${Jt} ${d1}/${d2}: and the diffusion is the one planted`);
+        const m = mgfLog(nodes);
+        const trueM = nodes.reduce((a, [y, w]) => a + w * Math.abs(Math.exp(y - m) - 1), 0);
+        const gate = truth * truth >= SIGMA * SIGMA * t1;
+        const label = `${law} J=${Jt} ${d1}/${d2}`;
+        eq(got.shapeWhy === null, gate, `${label}: the shape is identified exactly where the event variance reaches the front's diffusion variance (${(truth * truth / (SIGMA * SIGMA * t1)).toFixed(2)})`);
+        const mErr = (got.meanAbs / trueM - 1) * 100;
+        if (gate) {
+          const [blo, bhi] = MJ_BANDS[law];
+          ok(mErr >= blo && mErr <= bhi, `${label}: the identified mean absolute event move is inside the measured band ${blo} to ${bhi}% (${mErr.toFixed(2)}%)`);
+          near(got.kappa, got.meanAbs / got.J, 1e-9, `${label}: and kappa_J is that move over J_MF`);
+          const mutant = (Math.sqrt(2 / Math.PI) * truth / trueM - 1) * 100;
+          if (law === "laplace" || law === "twoPoint") ok(mutant < blo || mutant > bhi, `${label}: the mutant that keeps sqrt(2/pi) J_MF where the shape is identified misses by ${mutant.toFixed(1)}%, outside the band`);
+          IDENT[law].push(mErr);
+        } else {
+          near(got.meanAbs, Math.sqrt(2 / Math.PI) * got.J, 1e-12, `${label}: where it is not, the move is the normal convention on J_MF`);
+          eq([got.kappa, got.shape, got.shapeWhy], [null, null, "event.shape-unidentified"], `${label}: and says so, with no kappa`);
+          const f = Object.fromEntries(QC.engineFacts({ ...FACT_INPUT(), built, zero: null, event: { date: "2026-10-20", confirmed: true, moves: [0.05, -0.04, 0.06] }, jump: got }).map((x) => [x.id, x]));
+          eq([f["move.event"].g <= 1, f["move.event"].why], [true, "event.shape-unidentified"], `${label}: the fact is graded at most 1 and carries the code`);
+        }
       }
     }
   }
@@ -563,7 +584,70 @@ const FACT_INPUT = () => ({
     const r = ATM[law];
     ok(r.every((e) => e >= lo && e <= hi), `negative control, ${law}: the at-the-money two-slice estimator misses by ${Math.min(...r).toFixed(1)} to ${Math.max(...r).toFixed(1)}% (band ${lo} to ${hi})`);
   }
+  for (const law of Object.keys(IDENT)) ok(IDENT[law].length >= 3, `${law}: the shape is identified on ${IDENT[law].length} of the 12 cases, the mean absolute move off by ${Math.min(...IDENT[law]).toFixed(2)} to ${Math.max(...IDENT[law]).toFixed(2)}%`);
   ok(Math.max(...ATM.twoPoint) > 15 && Math.min(...ATM.laplace) < -9, "the at-the-money error is large where the event is far from normal, which is the error the model-free size removes");
+}
+
+{
+  const T1 = 4 / 252, T2 = 12 / 252, SIGMA = 0.3;
+  const comps = (pts) => { const m = Math.log(pts.reduce((a, [y, w]) => a + w * Math.exp(y), 0)); return { m, parts: pts.map(([y, w]) => ({ f: Math.exp(y - m), w })) }; };
+  const entry = (slice, d, expiry) => ({ expiry, T: d / 365, dte: d, sessions: d, hSessions: d, rows: [], slice });
+  const pre = (d) => entry({ method: "flat", T: d / 252, F: 100, D: 1, params: { sigma: SIGMA } }, d, "2026-10-16");
+  const withEvent = (pts) => {
+    const { parts } = comps(pts);
+    const mk = (d, expiry) => entry({ method: "mixture", T: d / 252, F: 100, D: 1, params: { components: parts, sigmaD: SIGMA } }, d, expiry);
+    return [pre(2), mk(4, "2026-10-23"), mk(12, "2026-11-20")];
+  };
+  const skew = [[-0.12 * Math.sqrt(3), 0.25], [0.12 / Math.sqrt(3), 0.75]];
+  const sym = Array.from({ length: 64 }, (_, i) => [0.12 * BS.normInv((i + 0.5) / 64), 1 / 64]);
+  const third = (pts) => { const mu = pts.reduce((a, [y, w]) => a + w * y, 0); return pts.reduce((a, [y, w]) => a + w * Math.pow(y - mu, 3), 0); };
+  const gs = withEvent(skew), gy = withEvent(sym);
+  const ev = { date: "2026-10-20" };
+  const js = QC.eventJump(gs, ev), jy = QC.eventJump(gy, ev);
+  ok(third(skew) < 0 && js.k3 < 0, "a crash-skewed event shows a negative risk-neutral third cumulant");
+  near(js.k3 / third(skew), 1, 0.02, "which is the planted third cumulant of the event to 2%, the pre-event slice taken off the post-event one");
+  near(jy.k3, 0, 1e-6, "while a symmetric event of the same size has none, which kappa_J alone cannot show");
+  ok(js.kappa !== null && jy.kappa !== null && Math.abs(js.kappa - jy.kappa) < 0.05, `the skewed law's kappa_J (${js.kappa}) is close to the normal one's (${jy.kappa}), so only the cumulant tells them apart`);
+  eq(QC.eventJump(gs.slice(1), ev).k3, null, "with no slice before the event the third cumulant is absent, not zero");
+  const em = QC.engineEvent({ date: "2026-10-20", confirmed: true, moves: [0.05] }, js, QC.engineFacts({ ...FACT_INPUT(), built: gs, event: { date: ev.date, moves: [0.05, 0.04, 0.06] }, jump: js, zero: null }));
+  ok(em.k3 === Number(js.k3.toPrecision(3)) && (em.kappa === null || em.kappa === Number(js.kappa.toFixed(3))), "and the card's event block carries it with kappa_J and the shape");
+}
+
+{
+  const facts = QC.engineFacts(FACT_INPUT());
+  const law = QP.garchLaw({ garch: GARCH, ticker: "SYN", sessionDate: SESSION, closes: CLOSES, rate: R, paths: 2048 });
+  const state = { state: "pinned", direction: null, confidence: 2, ...STATE_STRUCTURES.pinned.rich };
+  const block0 = QC.runCardEngine({ ticker: "SYN", asOfMs: AS_OF_MS, spot: SPOT, rate: RATE, expiries: slices.input, facts, state, pLaw: law,
+    levels: { callWall: 105, putWall: 95, magnet: 100, flip: 99, maxPain: 100, atr: 2 }, event: null, atr: 2 });
+  const exp = block0.expiries;
+  ok(exp.length === 5 && exp.every((e) => Array.isArray(e.smile.kq) && e.smile.kq.length === 2 && e.smile.kq[0] < 0 && e.smile.kq[1] > 0),
+     "every published expiry carries kq, the log-moneyness span of the strikes that were quoted, and the page hatches the law outside it");
+  ok(exp.every((e) => { const b = slices.built.find((x) => x.expiry === e.expiry).slice; return e.smile.kq[0] === Number(b.kMin.toFixed(3)) && e.smile.kq[1] === Number(b.kMax.toFixed(3)); }),
+     "kq is the fitted slice's own span to three decimals");
+  eq(exp[0].smile.cal, null, "the first expiry has nothing before it to be checked against, so its calendar result is null");
+  ok(exp.slice(1).every((e) => e.smile.cal === 1), "and each later one carries the calendar no-arbitrage result against the one before: 1 when it holds");
+  const bytes = JSON.stringify(exp.map((e) => ({ kq: e.smile.kq, cal: e.smile.cal }))).length;
+  ok(bytes < 260, `which costs ${bytes} bytes on a five-expiry card`);
+}
+
+{
+  const ratioOf = (J, n, rng) => {
+    const hist = Array.from({ length: n }, () => Math.abs(J * WORLD.normalDraw(rng))).sort((a, b) => a - b);
+    const med = n % 2 ? hist[(n - 1) / 2] : (hist[n / 2 - 1] + hist[n / 2]) / 2;
+    return (J * Math.sqrt(2 / Math.PI)) / med;
+  };
+  const rng = WORLD.xoshiro128ss("fair-event");
+  for (const n of [6, 8, 12]) {
+    const ratios = Array.from({ length: 4000 }, () => ratioOf(0.06, n, rng));
+    const over = ratios.filter((r) => r >= 1.25).length / ratios.length;
+    ok(over > 0.3 && over < 0.9, `under fair pricing and ${n} past moves the retired 1.25 line called the event overpriced ${(over * 100).toFixed(0)}% of the time`);
+    ok(ratios.every((r) => eventBucket({ date: "2026-10-20", after: "2026-09-21", ratio: r, g: 2 }, "2026-10-23").bucket === "fair"),
+       `and the engine's bucket for all ${ratios.length} of them is fair: an implied mean over a historical median is not a price test`);
+  }
+  near(Math.sqrt(2 / Math.PI) / 0.6744897501960817, 1.183, 1e-3, "because the ratio of a normal's mean absolute move to its median absolute move is 1.183 before any sampling noise");
+  eq(eventBucket({ date: "2026-10-20", after: "2026-09-21", ratio: 0.5 }, "2026-10-23").bucket, "fair", "and a ratio of 0.5 is not called underpriced either");
+  eq(eventBucket({ date: "2026-10-30", after: "2026-09-21", ratio: 3 }, "2026-10-23"), { bucket: "none", g: 3, inside: false }, "an event after the expiry is no event for it, as before");
+  ok(!("EVENT_UNDER" in BUCKET_LINES) && !("EVENT_OVER" in BUCKET_LINES), "and the 0.8 and 1.25 lines are gone from the published bucket lines");
 }
 
 {

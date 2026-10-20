@@ -1085,6 +1085,69 @@ export function eventTermFit(points) {
   };
 }
 
+export const EVENT_SHAPE_LINES = Object.freeze({ LAMBDA_LO: -0.97, LAMBDA_HI: 0.999, ITER: 80 });
+
+const lnCosh = (x) => { const a = Math.abs(x); return a + Math.log1p(Math.exp(-2 * a)) - Math.LN2; };
+
+function unitCall(r, v) {
+  if (!(v > 0)) return Math.max(r - 1, 0);
+  const sq = Math.sqrt(v), d1 = (Math.log(r) + v / 2) / sq;
+  return r * normCdf(d1) - normCdf(d1 - sq);
+}
+
+export function eventShapeLaw(lambda, J2) {
+  if (!fin(lambda) || !(lambda > -1) || !(lambda < 1) || !(J2 > 0)) return null;
+  if (lambda >= 0) {
+    const jOf = (sd) => (1 - lambda) * sd * sd + 2 * lnCosh(Math.sqrt(lambda) * sd);
+    let lo = 0, hi = Math.sqrt(J2) + 1;
+    while (jOf(hi) < J2) hi *= 2;
+    for (let i = 0; i < EVENT_SHAPE_LINES.ITER; i++) { const mid = (lo + hi) / 2; if (jOf(mid) < J2) lo = mid; else hi = mid; }
+    const sd = (lo + hi) / 2, a = Math.sqrt(lambda) * sd, b2 = (1 - lambda) * sd * sd, lc = lnCosh(a);
+    return { sd, parts: [{ w: 0.5, r: Math.exp(a - lc), v: b2 }, { w: 0.5, r: Math.exp(-a - lc), v: b2 }] };
+  }
+  const c = -lambda;
+  const jOf = (s) => s + 2 * lnCosh(c * s / 2);
+  let lo = J2 / 2, hi = J2;
+  for (let i = 0; i < EVENT_SHAPE_LINES.ITER; i++) { const mid = (lo + hi) / 2; if (jOf(mid) < J2) lo = mid; else hi = mid; }
+  const s2 = (lo + hi) / 2, lc = lnCosh(c * s2 / 2);
+  return { sd: Math.sqrt(s2), parts: [{ w: 0.5, r: Math.exp(c * s2 / 2 - lc), v: (1 + c) * s2 }, { w: 0.5, r: Math.exp(-c * s2 / 2 - lc), v: (1 - c) * s2 }] };
+}
+
+export function eventShapeMoves(law, wD) {
+  let straddle = 0, mean = 0;
+  for (const p of law.parts) {
+    straddle += 2 * p.w * unitCall(p.r, p.v + wD);
+    mean += 2 * p.w * unitCall(p.r, p.v);
+  }
+  return { straddle, mean };
+}
+
+export function eventShape(input) {
+  const { J2, wD, straddle } = input || {};
+  const gaussian = fin(J2) && J2 > 0 ? Math.sqrt(2 / Math.PI) * Math.sqrt(J2) : null;
+  const none = (why) => ({ identified: false, kappa: null, M: gaussian, lambda: null, family: null, edge: null, why });
+  if (!fin(J2) || !(J2 > 0)) return none("event.no-premium");
+  if (!fin(wD) || !(wD > 0) || !fin(straddle) || !(straddle > 0)) return none("event.shape-unidentified");
+  if (!(J2 >= wD)) return none("event.shape-unidentified");
+  const at = (lam) => eventShapeMoves(eventShapeLaw(lam, J2), wD);
+  const L = EVENT_SHAPE_LINES;
+  let lo = L.LAMBDA_LO, hi = L.LAMBDA_HI, edge = null;
+  const fLo = at(lo).straddle - straddle, fHi = at(hi).straddle - straddle;
+  let lam;
+  if (fLo >= 0) { lam = lo; edge = "lo"; }
+  else if (fHi <= 0) { lam = hi; edge = "hi"; }
+  else {
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (at(mid).straddle < straddle) lo = mid; else hi = mid; }
+    lam = (lo + hi) / 2;
+  }
+  const law = eventShapeLaw(lam, J2), moves = eventShapeMoves(law, wD);
+  const J = Math.sqrt(J2);
+  return {
+    identified: true, kappa: moves.mean / J, M: moves.mean, lambda: lam, edge,
+    family: Math.abs(lam) < 1e-9 ? "normal" : lam < 0 ? "scale" : "location", sd: law.sd, why: null,
+  };
+}
+
 export function forwardVol(w1, T1, w2, T2) {
   if (!(T2 > T1)) return null;
   const d = w2 - w1;

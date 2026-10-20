@@ -830,7 +830,7 @@ function chooseExpiry(fam, list, ctx) {
   }
   if (ctx.eventMode && ev && ev.date && (fam.id === "long-straddle" || fam.id === "long-strangle" || fam.id === "iron-fly")) {
     const after = list.filter((e) => e.expiry > ev.date && e.sessions >= 1 + (ctx.sessionsTo(ev.date) || 0)).sort((a, b) => a.T - b.T)[0];
-    if (after && after.dte <= ENGINE_LINES.EVENT_MODE_MAX_DTE) return { front: after, crush: true };
+    if (after && after.dte <= ENGINE_LINES.EVENT_MODE_MAX_DTE) return { front: after };
   }
   const inWin = list.filter((e) => e.dte >= fam.window.min && e.dte <= fam.window.max && (!fam.minDte || e.dte >= fam.minDte));
   if (!inWin.length) return null;
@@ -997,8 +997,7 @@ export function runEngine(input) {
     const rules = f.rules.slice();
     if (choice) {
       const ev = eventFor(choice.front.expiry);
-      const crush = !!choice.crush && ev.bucket === "overpriced";
-      const v = eventVeto(fam, ev, crush);
+      const v = eventVeto(fam, ev);
       if (v) veto.push(v);
       const ea = eventAffinity(fam.id, ev);
       if (ea.rule) { score += ea.c; rules.push(ea.rule); }
@@ -1096,5 +1095,7 @@ function smileSummary(slice) {
       : Object.fromEntries(Object.keys(slice.params).sort().map((k) => [k, roundTo(slice.params[k], 8)])),
     rr25: sk ? rv(sk.rr25) : null, bf25: sk ? rv(sk.bf25) : null,
     checks: slice.checks && slice.checks.butterfly ? { ok: slice.checks.ok, minG: roundTo(slice.checks.butterfly.minG, 6) } : null,
+    kq: fin(slice.kMin) && fin(slice.kMax) ? [roundTo(slice.kMin, 3), roundTo(slice.kMax, 3)] : null,
+    cal: slice.checks && slice.checks.calendar ? (slice.checks.calendar.ok ? 1 : 0) : null,
   };
 }

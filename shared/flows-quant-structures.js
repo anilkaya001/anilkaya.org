@@ -18,7 +18,7 @@ export const STRUCTURES = Object.freeze([
   { n: 10, id: "long-strangle", neuron: "long strangle", kin: [], risk: "defined", dir: "neutral", vol: "long", premium: "debit", window: W(21, 60, 40), legs: 2 },
   { n: 11, id: "short-strangle", neuron: null, kin: ["iron condor"], risk: "undefined", dir: "neutral", vol: "short", premium: "credit", window: W(21, 45, 35), minDte: 10, legs: 2 },
   { n: 12, id: "iron-condor", neuron: "iron condor", kin: [], risk: "defined", dir: "neutral", vol: "short", premium: "credit", window: W(21, 45, 35), minDte: 10, legs: 4 },
-  { n: 13, id: "iron-fly", neuron: null, kin: ["iron condor"], risk: "defined", dir: "neutral", vol: "short", premium: "credit", window: W(21, 45, 35), minDte: 10, legs: 4, eventCrush: true },
+  { n: 13, id: "iron-fly", neuron: null, kin: ["iron condor"], risk: "defined", dir: "neutral", vol: "short", premium: "credit", window: W(21, 45, 35), minDte: 10, legs: 4 },
   { n: 14, id: "long-butterfly", neuron: null, kin: ["iron condor"], risk: "defined", dir: "neutral", vol: "short", premium: "debit", window: W(14, 45, 30), legs: 3 },
   { n: 15, id: "broken-wing-butterfly", neuron: null, kin: [], risk: "defined", dir: "state", vol: "short", premium: "either", window: W(14, 45, 30), legs: 3 },
   { n: 16, id: "long-calendar", neuron: "calendar spread", kin: [], risk: "defined", dir: "neutral", vol: "mixed", premium: "debit", window: W(21, 35, 28), back: W(21, 63, 35), legs: 2, multiExpiry: true },
@@ -94,7 +94,7 @@ export const AFFINITY = Object.freeze({
 
 export const BUCKET_LINES = Object.freeze({
   IV_LOW: 0.25, IV_HIGH: 0.75, VRP_CHEAP: -0.10, VRP_RICH: 0.10, TERM_CONTANGO: -0.03, TERM_BACK: 0.03,
-  SKEW_FLAT: 0.2, SKEW_STEEP: 0.8, EVENT_UNDER: 0.8, EVENT_OVER: 1.25, LIQ_A: 0.05, LIQ_B: 0.12,
+  SKEW_FLAT: 0.2, SKEW_STEEP: 0.8, LIQ_A: 0.05, LIQ_B: 0.12,
   TOP_FAMILIES: 5, MAX_CANDIDATES: 24,
 });
 
@@ -123,8 +123,7 @@ export function eventBucket(event, expiryDay) {
   }
   const ratio = fin(event.ratio) ? event.ratio : null;
   const g = fin(event.g) ? event.g : ratio === null ? 1 : 2;
-  const bucket = ratio === null ? "fair" : ratio <= BUCKET_LINES.EVENT_UNDER ? "underpriced" : ratio >= BUCKET_LINES.EVENT_OVER ? "overpriced" : "fair";
-  return { bucket, g, inside: true };
+  return { bucket: "fair", g, inside: true };
 }
 
 export function liquidityTier(medianRelSpread) {
@@ -198,13 +197,9 @@ export function eventAffinity(familyId, ev) {
   return { c, rule: "event." + ev.bucket + (c < 0 ? "−" : "") };
 }
 
-export function eventVeto(family, ev, crushMode) {
+export function eventVeto(family, ev) {
   if (!ev || !ev.inside) return null;
-  if (family.vol === "short" || family.premium === "credit") {
-    if (family.eventCrush && crushMode) return null;
-    return "event.inside";
-  }
-  return null;
+  return family.vol === "short" || family.premium === "credit" ? "event.inside" : null;
 }
 
 export function listedStrikes(rows, type) {

@@ -982,7 +982,10 @@ const CARD = {
   same(code({ claims: [{ a: "level.maxPain", rel: "near", b: "spot" }] }), ["claim-false"],
        "near is half an ATR for prices, so max pain 1.96 ATR away is not near");
   same(code({ claims: [{ a: "iv.pctile.30.1y", rel: "cheap" }] }), ["claim-false"], "an IV rank at 0.82 is not cheap");
-  same(code({ verdict: "event-overpriced" }), ["verdict-false"], "an event verdict with no event ratio is refused");
+  same(code({ verdict: "event-overpriced" }), ["schema"], "the event premium verdicts are retired with the 0.8 and 1.25 bucket: an implied mean over a historical median is not a price test (F-23, F-83 owns the premium)");
+  same(code({ verdict: "event-underpriced" }), ["schema"], "on either side");
+  ok(!VERDICTS.includes("event-overpriced") && !VERDICTS.includes("event-underpriced") && !("EVENT_OVER" in ENGINE_LINES) && !("EVENT_UNDER" in ENGINE_LINES) &&
+     !("EVENT_OVER" in BUCKET_LINES) && !("EVENT_UNDER" in BUCKET_LINES), "and no line for them is published");
   same(code({ verdict: "sell-fast" }), ["schema"], "an unknown verdict code is a schema refusal");
   same(code({ ideas: "S1" }), ["schema"], "and a reply of the wrong shape is refused as schema");
   ok(VET_CODES.every((c) => typeof c === "string") && ["schema", "digit", "unknown-id", "avoid", "verdict-false", "claim-false",
@@ -1465,7 +1468,7 @@ const CARD = {
      -STATE_LINES.VRP_RELATIVE === BUCKET_LINES.VRP_CHEAP,
      "N-F11: the state's IV-rank and premium lines are the engine's bucket lines (0.25 and 0.75, ±10%), not their own 0.2 and 0.7");
   ok(ENGINE_LINES.IV_LOW === BUCKET_LINES.IV_LOW && ENGINE_LINES.IV_HIGH === BUCKET_LINES.IV_HIGH && ENGINE_LINES.VRP_RICH === BUCKET_LINES.VRP_RICH &&
-     ENGINE_LINES.VRP_CHEAP === BUCKET_LINES.VRP_CHEAP && ENGINE_LINES.EVENT_OVER === BUCKET_LINES.EVENT_OVER && ENGINE_LINES.EVENT_UNDER === BUCKET_LINES.EVENT_UNDER &&
+     ENGINE_LINES.VRP_CHEAP === BUCKET_LINES.VRP_CHEAP &&
      ENGINE_LINES.SKEW_STEEP === BUCKET_LINES.SKEW_STEEP && ENGINE_LINES.SKEW_FLAT === BUCKET_LINES.SKEW_FLAT && !("IV_MID_HIGH" in ENGINE_LINES),
      "and so are the verdict lines, where 'high' was 0.75 in one place, 0.70 in another and 0.7 in a third");
   ok(!("DISPLACEMENT_ATR" in STATE_LINES), "the displacement line that no branch read is gone: the displacement casts no vote");
