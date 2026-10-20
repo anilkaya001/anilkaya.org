@@ -144,6 +144,46 @@ try {
     await p2.close();
   }
 
+  const board = (u) => (u.pathname === "/api/flows/board" ? { status: "ok", rows: [{ t: "SYX101" }] } : null);
+  const frozen = async (p) => { const cdp = await p.context().newCDPSession(p); await cdp.send("Animation.enable"); await cdp.send("Animation.setPlaybackRate", { playbackRate: 0 }); };
+  const emptyStage = () => {
+    const vis = (id) => { const n = document.getElementById(id); if (!n || n.closest("[inert]")) return false; const r = n.getBoundingClientRect(), cs = getComputedStyle(n); return r.height > 40 && cs.visibility !== "hidden" && Number(cs.opacity) > 0.99 && r.bottom <= innerHeight + 1; };
+    const tab = document.getElementById("dkT-lines"), go = document.querySelector(".dk-suggest"), find = document.querySelector(".dk-find");
+    const gs = go ? getComputedStyle(go) : null, gr = go && go.getBoundingClientRect(), fr = find.getBoundingClientRect();
+    return { view: document.getElementById("dkGrid").dataset.view, linesTab: tab.hidden, frontier: vis("dkFrontierM"), quiet: !!document.querySelector("#dkFrontierM .ui-silent"), sizing: vis("dkSizingM") || !!document.querySelector("#dkP-plan #dkSizingM"),
+      go: go ? { text: go.textContent, bg: gs.backgroundColor, color: gs.color, ring: gs.boxShadow, mid: gr.top < fr.bottom ? Math.abs((gr.top + gr.bottom) / 2 - (fr.top + fr.bottom) / 2) : Math.abs(gr.left - fr.left), h: gr.height, need: matchMedia("(pointer: coarse)").matches ? 44 : 36 } : null };
+  };
+  for (const [w, h] of [[1920, 1080], [1440, 820], [390, 844]]) {
+    const page = await openDesk(browser, { payloads: payloads(), query: "#view=lines", errors, viewport: { width: w, height: h }, api: board });
+    await page.waitForSelector(".dk-suggest", { timeout: 10000 });
+    await page.waitForTimeout(1900);
+    const m = await page.evaluate(emptyStage);
+    eq([m.view, m.linesTab], ["frontier", true], `${w}x${h} AN EMPTY DESK asked for #view=lines opens the Frontier and hides the Lines tab, so no blank stage is reachable (${m.view}, Lines tab hidden ${m.linesTab})`);
+    ok(m.frontier && m.quiet, `${w}x${h}: the Frontier module is on screen with its quiet state inviting a symbol`);
+    ok(m.go && m.go.text === "Try SYX101" && m.go.color === "rgb(245, 245, 247)" && !/^rgb\(13, 16, 23\)$/.test(m.go.bg) && /inset/.test(m.go.ring) && m.go.mid <= 2, `${w}x${h}: the suggestion chip is drawn in Flows tokens (label colour, a translucent fill and an inset rule) and sits on the search box's centre line, or under its left edge where the row wraps (${JSON.stringify(m.go)})`);
+    ok(m.go && m.go.h >= m.go.need - 0.5, `${w}x${h}: the chip is a full-size target (${m.go && m.go.h} px)`);
+    await page.close();
+  }
+  {
+    const page = await openDesk(browser, { payloads: payloads(), query: "?t=SYX101", errors, viewport: { width: 1440, height: 820 } });
+    await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length > 0, null, { timeout: 20000 });
+    await page.evaluate(() => { location.hash = "view=lines"; });
+    await page.waitForFunction(() => document.getElementById("dkGrid").dataset.view === "lines");
+    await page.locator("#deskClear").click();
+    await page.waitForFunction(() => document.querySelectorAll(".desk-chip").length === 0, null, { timeout: 8000 });
+    await page.waitForTimeout(1900);
+    const m = await page.evaluate(emptyStage);
+    eq([m.view, m.linesTab, m.frontier], ["frontier", true, true], `clearing the book while on Lines falls back to the Frontier with the Lines tab hidden (${m.view})`);
+    await page.close();
+  }
+  for (let i = 0; i < 4; i++) {
+    const page = await openDesk(browser, { payloads: payloads(), query: "", errors, viewport: { width: 1440, height: 820 }, api: board, before: frozen });
+    await page.waitForTimeout(2200);
+    const m = await page.evaluate(emptyStage);
+    ok(m.frontier && m.sizing, `LOAD ${i + 1} AT 1440x820 WITH NO ANIMATION FRAME (a background tab, a headless capture): the Frontier and Sizing cards are on screen, not stuck at their entrance animation's first frame (${JSON.stringify(m)})`);
+    await page.close();
+  }
+
   const SRC = (rel) => fs.readFileSync(new URL(rel, REPO), "utf8");
   const MUT = [
     ["an unfitted lines list", "assets/js/flows-desk.js", [["while (shown > 1 && box.scrollHeight > box.clientHeight + 1) rows[--shown].hidden = true;", "void shown;"]]],

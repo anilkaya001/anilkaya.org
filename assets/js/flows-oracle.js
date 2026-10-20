@@ -325,10 +325,16 @@
 
   function pctText(v) { return K.pct0(v); }
 
+  function noView(rec) {
+    var lean = rec.stance && rec.stance.lean ? rec.stance.lean : "none";
+    var conv = rec.stance && Number.isInteger(rec.stance.conviction) ? rec.stance.conviction : 0;
+    return !W.LEAN_WORD[lean] || lean === "none" || conv <= 0;
+  }
   function chipFor(rec) {
     var lean = rec.stance && rec.stance.lean ? rec.stance.lean : "none";
     var conv = rec.stance && Number.isInteger(rec.stance.conviction) ? rec.stance.conviction : 0;
-    return h("span", { class: "orc-chip", "data-lean": lean }, h("span", { "aria-hidden": "true" }, W.LEAN_GLYPH[lean] || W.LEAN_GLYPH.none), W.LEAN_WORD[lean] || W.LEAN_WORD.none, h("i", null, W.CONVICTION_WORDS[conv] || W.CONVICTION_WORDS[0]));
+    if (noView(rec)) return h("span", { class: "orc-chip", "data-lean": "none" }, h("span", { "aria-hidden": "true" }, W.LEAN_GLYPH.none), W.LEAN_WORD.none);
+    return h("span", { class: "orc-chip", "data-lean": lean }, h("span", { "aria-hidden": "true" }, W.LEAN_GLYPH[lean]), W.LEAN_WORD[lean], h("i", null, W.CONVICTION_WORDS[conv] || W.CONVICTION_WORDS[0]));
   }
 
   function figure(label, value, reason, tone) {
@@ -568,7 +574,7 @@
       var c = Array.isArray(rec.calls) ? rec.calls[0] : null;
       var words = c ? (c.say && c.say.head ? c.say : W.callSay(c)) : null;
       btn.append(h("span", { class: "orc-gl-k" }, h("span", { class: "orc-gl-s", "aria-hidden": "true" }, spark()), "Neuron"), chipFor(rec),
-        h("span", { class: "orc-gl-t" }, words && words.head ? words.head : (rec.stance && rec.stance.line) || (WHY_TEXT[rec.stateWhy] || CLEAR_TEXT)));
+        h("span", { class: "orc-gl-t" }, words && words.head ? words.head : (!noView(rec) && rec.stance && rec.stance.line) || (rec.state === "calm" ? CLEAR_TEXT : WHY_TEXT[rec.stateWhy] || CLEAR_TEXT)));
     }
     btn.setAttribute("aria-haspopup", "dialog");
     btn.addEventListener("click", function () { setOpen(true); });

@@ -20,6 +20,26 @@
   const tone = (v) => (num(v) === null || v === 0 ? "flat" : v > 0 ? "up" : "down");
   const volPts = (v) => (num(v) === null ? DASH : F.signed(v * 100, 1));
   const f1 = (v) => String(Math.round(v * 10) / 10);
+  const CHAR_W = 6;
+  const textW = (t) => String(t).length * CHAR_W;
+  function wrapWords(text, maxW) {
+    const per = Math.max(6, Math.floor(maxW / CHAR_W));
+    const lines = [];
+    let cur = "";
+    for (const w of String(text).split(/\s+/).filter(Boolean)) {
+      if (!cur) cur = w;
+      else if ((cur + " " + w).length <= per) cur += " " + w;
+      else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  function textLines(g, x, y, text, maxW, cls) {
+    const lines = wrapWords(text, maxW);
+    const y0 = y - (lines.length - 1) * 6;
+    lines.forEach((t, i) => s("text", { x, y: y0 + i * 12, "text-anchor": "middle", class: cls, text: t }, g));
+    return lines.length;
+  }
   const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
   let uid = 0;
 
@@ -340,7 +360,7 @@
     const top = rail ? 26 : 8;
     const strip = !narrow && m.score.has;
     const sh = strip ? clamp(Math.round(H * 0.2), 44, 90) : 0;
-    const plotB = H - 18 - (strip ? sh : 0) - 6;
+    const plotB = H - 18 - (strip ? sh : 0) - 6 - (rail && !strip ? 12 : 0);
     const y = (v) => top + (m.y1 - v) * (plotB - top) / (m.y1 - m.y0);
     const xb = (i) => XL + (XT - XL) * i / nb;
     const xf = (t) => XT + (XR - XT) * t / FWD;
@@ -780,7 +800,8 @@
     let pitch = Infinity;
     for (let a = 1; a < vis.length; a++) pitch = Math.min(pitch, Math.abs(y(xp.strikes[vis[a]]) - y(xp.strikes[vis[a - 1]])));
     const th = clamp(pitch * 0.78, 1.5, 7), half = R.gW / 2 - 6;
-    if (!row.gamma || !vis.length || mx === 0) s("text", { x: cxg, y: (top + plotB) / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: row.gamma ? "No gamma here" : DASH + " no gamma" }, G.rail);
+    let gEdge = R.g1;
+    if (!row.gamma || !vis.length || mx === 0) textLines(G.rail, cxg, (top + plotB) / 2, row.gamma ? "No gamma here" : DASH + " no gamma", R.gW - 4, "ftg-tx ftg-cap");
     else {
       for (const i of vis) {
         const K = xp.strikes[i], g = row.gamma[i], yy = y(K) - th / 2;
@@ -788,23 +809,40 @@
         const wd = Math.abs(g) / mx * half;
         s("rect", { x: g >= 0 ? cxg : cxg - wd, y: yy, width: Math.max(1, wd), height: th, class: g >= 0 ? "ftg-gl" : "ftg-gs", fill: g >= 0 ? null : pat, "data-k": K }, G.rail);
       }
-      s("text", { x: R.g0, y: plotB + 12, class: "ftg-tx ftg-xt-t", text: MINUS + gammaWord(xp, mx) }, G.rail);
-      s("text", { x: R.g1, y: plotB + 12, "text-anchor": "end", class: "ftg-tx ftg-xt-t", text: "+" + gammaWord(xp, mx) }, G.rail);
+      const gw = gammaWord(xp, mx);
+      if (2 * textW("+" + gw) + 6 <= R.gW) {
+        s("text", { x: R.g0, y: plotB + 12, class: "ftg-tx ftg-xt-t", text: MINUS + gw }, G.rail);
+        s("text", { x: R.g1, y: plotB + 12, "text-anchor": "end", class: "ftg-tx ftg-xt-t", text: "+" + gw }, G.rail);
+      } else {
+        s("text", { x: cxg, y: plotB + 12, "text-anchor": "middle", class: "ftg-tx ftg-xt-t", text: "±" + gw }, G.rail);
+        gEdge = cxg + textW("±" + gw) / 2;
+      }
     }
     const dm = domainOf(row, q, m);
     const mid = (R.s0 + R.s1) / 2;
     if (dm.lo === null || (!dm.pts.some((p) => p[1] !== null) && row.atm === null)) {
-      s("text", { x: mid, y: (top + plotB) / 2, "text-anchor": "middle", class: "ftg-tx ftg-cap", text: xp.why.smile || "No smile at this expiry" }, G.rail);
+      textLines(G.rail, mid, (top + plotB) / 2, xp.why.smile || "No smile at this expiry", R.sW - 8, "ftg-tx ftg-cap");
     } else {
       const sx = (v) => clamp(R.s0 + 6 + (v - dm.lo) / (dm.hi - dm.lo) * (R.sW - 12), R.s0, R.s1);
       const ticks = ivTicks(dm.lo, dm.hi, Math.max(2, Math.floor(R.sW / 38)));
       s("path", { d: ticks.map((v) => "M" + f1(sx(v)) + "," + top + "V" + plotB).join(""), class: "ftg-grid" }, G.rail);
-      for (const v of ticks) s("text", { x: sx(v), y: plotB + 12, "text-anchor": "middle", class: "ftg-tx ftg-xt-t", text: fmtPct(v) }, G.rail);
+      for (const v of ticks) {
+        const t = fmtPct(v), half = textW(t) / 2;
+        if (sx(v) - half < gEdge + 6 || sx(v) + half > R.s1 + 2) continue;
+        s("text", { x: sx(v), y: plotB + 12, "text-anchor": "middle", class: "ftg-tx ftg-xt-t", text: t }, G.rail);
+      }
       const run = dm.pts.filter((p) => p[1] !== null);
       if (run.length > 1) s("polyline", { points: poly(run.map((p) => [sx(p[1]), y(p[0])])), class: "ftg-sm" }, G.rail);
       else if (row.atm !== null) {
-        s("line", { x1: sx(row.atm), x2: sx(row.atm), y1: top, y2: plotB, class: "ftg-nf" }, G.rail);
-        s("text", { x: sx(row.atm) + (sx(row.atm) > mid ? -4 : 4), y: top + 12, "text-anchor": sx(row.atm) > mid ? "end" : "start", class: "ftg-tx ftg-nf-t", text: row.state === "none" && row.method === "flat" ? "ATM " + F.pct(row.atm, 1) + ", no fit" : "ATM " + F.pct(row.atm, 1) }, G.rail);
+        const ax = sx(row.atm), head = "ATM " + F.pct(row.atm, 1), flat = row.state === "none" && row.method === "flat";
+        s("line", { x1: ax, x2: ax, y1: top, y2: plotB, class: "ftg-nf" }, G.rail);
+        const roomR = R.s1 - ax - 4, roomL = ax - R.s0 - 4;
+        const one = flat ? head + ", no fit" : head;
+        const lines = Math.max(roomR, roomL) >= textW(one) ? [one] : flat ? [head, "no fit"] : [head];
+        const wd = Math.max(...lines.map(textW));
+        const start = roomR >= wd || (roomL < wd && roomR >= roomL);
+        const tx = start ? Math.min(ax + 4, R.s1 - wd) : Math.max(ax - 4, R.s0 + wd);
+        lines.forEach((t, i) => s("text", { x: tx, y: top + 12 + i * 12, "text-anchor": start ? "start" : "end", class: "ftg-tx ftg-nf-t", text: t }, G.rail));
       }
       for (const [K, v] of row.quotes) if (K >= m.y0 && K <= m.y1 && v >= dm.lo && v <= dm.hi) s("circle", { cx: sx(v), cy: y(K), r: 2.3, class: "ftg-qd" }, G.rail);
       const sk = dm.sk;
@@ -939,7 +977,7 @@
       for (const r of c.rows) {
         const f = r.v === null ? 0 : clamp(Math.abs(r.v), 0, 100) / 100;
         const bar = h("i", { class: "ftg-fb", "data-tone": r.signed ? tone(r.v) : "meter", style: { left: (r.signed ? (r.v < 0 ? 50 - f * 50 : 50) : 0) + "%", width: (r.signed ? f * 50 : f * 100) + "%" } });
-        box.append(h("div", { class: "ftg-fam", "data-fam": r.k }, h("span", { class: "ftg-fk" }, r.k), h("span", { class: "ftg-ft" + (r.signed ? " is-signed" : "") }, r.v === null ? null : bar), h("span", { class: "ftg-fv", "data-tone": r.signed ? tone(r.v) : "flat" }, r.text)));
+        box.append(h("div", { class: "ftg-fam", "data-fam": r.k, "data-empty": r.v === null ? "1" : null }, h("span", { class: "ftg-fk" }, r.k), h("span", { class: "ftg-ft" + (r.signed ? " is-signed" : "") }, r.v === null ? null : bar), h("span", { class: "ftg-fv", "data-tone": r.signed ? tone(r.v) : "flat" }, r.text)));
       }
       return box;
     }
@@ -1023,6 +1061,29 @@
     return svg;
   }
 
+  function fitCard(el) {
+    el.removeAttribute("data-fit");
+    const fams = [...el.querySelectorAll(".ftg-fam")];
+    for (const f of fams) f.hidden = false;
+    const over = () => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1;
+    if (!over()) return;
+    el.dataset.fit = "1";
+    if (!over()) return;
+    const order = fams.filter((f) => f.dataset.empty === "1").concat(fams.filter((f) => f.dataset.empty !== "1").reverse());
+    for (const f of order) {
+      if (fams.filter((x) => !x.hidden).length <= 2) break;
+      f.hidden = true;
+      if (!over()) return;
+    }
+    for (const step of ["2", "3", "4"]) {
+      el.dataset.fit = step;
+      if (!over()) return;
+    }
+  }
+  function fitCards(grid) {
+    for (const el of grid.querySelectorAll(".ftg-card")) fitCard(el);
+  }
+
   function cardEl(c) {
     const id = "ftgc-" + c.id + "-" + ++uid;
     const body = cardChart(c);
@@ -1044,7 +1105,7 @@
   }
 
   function mount(card, hosts, opts) {
-    const st = { card, opts: Object.assign({}, opts), x: {}, range: RANGES[opts && opts.range] ? opts.range : "1M", claims: [], ev: evidence([]), m: null, chart: null, raf: 0, cur: null, dead: false, expiry: opts && typeof opts.expiry === "string" ? opts.expiry : null, pick: null };
+    const st = { card, opts: Object.assign({}, opts), x: {}, range: RANGES[opts && opts.range] ? opts.range : "1M", claims: [], ev: evidence([]), m: null, chart: null, raf: 0, fit: 0, cur: null, dead: false, expiry: opts && typeof opts.expiry === "string" ? opts.expiry : null, pick: null };
     if (opts && (opts.cardX || opts.tape)) st.x = { cardX: opts.cardX, tape: opts.tape };
     const chartHost = hosts && hosts.chart, cardsHost = hosts && hosts.cards;
     const root = h("div", { class: "ftg-chart" });
@@ -1157,11 +1218,12 @@
     const paintChart = () => {
       if (st.dead || !chartHost || chartHost.hidden) return;
       const W = Math.max(200, Math.floor(chartHost.clientWidth || root.clientWidth || 600));
-      const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
-      const fit = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches && room >= 250;
-      const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
       st.m = model(st.card, st.range, Object.assign({}, st.x, { expiry: st.expiry }, st.hook && st.hook.input()));
       st.expiry = st.m.sel;
+      legendEl.replaceChildren(...legend(st.m, layout(st.m, W, 400)));
+      const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
+      const fit = matchMedia("(min-width: 1100px)").matches && room >= 250;
+      const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.min(Math.round(W * 0.396), matchMedia("(min-width: 900px)").matches && room > 99 ? ~~room - 20 : 520), 200, 520);
       st.W = W;
       st.H = Hh;
       const had = st.cur;
@@ -1206,6 +1268,7 @@
       if (st.dead || !cardsHost) return;
       grid.replaceChildren(...cards(st.card, st.x).map((c) => cardEl(c)));
       apply();
+      fitCards(grid);
       if (st.hook) st.hook.cards();
     };
     const paintAll = () => { paintChart(); paintCards(); };
@@ -1223,6 +1286,19 @@
       });
       ro.observe(chartHost);
     }
+    let rc = null;
+    if (cardsHost && typeof ResizeObserver === "function") {
+      let size = "";
+      rc = new ResizeObserver(() => {
+        const k = cardsHost.clientWidth + "x" + cardsHost.clientHeight;
+        if (k === size) return;
+        size = k;
+        cancelAnimationFrame(st.fit);
+        st.fit = requestAnimationFrame(() => { if (!st.dead) fitCards(grid); });
+      });
+      rc.observe(cardsHost);
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { if (!st.dead) fitCards(grid); });
     return {
       setRange(r) { if (RANGES[r] && r !== st.range) { st.range = r; paintChart(); } },
       setExpiry(iso) { setExpiry(iso, "api", false); },
@@ -1245,7 +1321,9 @@
         document.removeEventListener("ft:focus", focus);
         document.removeEventListener("ft:expiry", onExpiry);
         if (ro) ro.disconnect();
+        if (rc) rc.disconnect();
         cancelAnimationFrame(st.raf);
+        cancelAnimationFrame(st.fit);
         root.remove();
         grid.remove();
       },

@@ -247,6 +247,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(r.status, "ready", "AFTER A REFUSED REGENERATION the summary serves the previous model reading");
   eq(r.held, "previous", "with held previous");
   eq(r.refreshing, false, "and refreshing: false, because the refusal cools down and no reading is coming");
+  ok(Number.isInteger(r.retryAfterS) && r.retryAfterS > 0 && r.retryAfterS <= RW.READ_COOLDOWN_MS["read:refused"] / 1000, "and retryAfterS says when the next attempt is, inside the refusal's cooldown (" + r.retryAfterS + " s)");
   eq(r.generatedAt, kept.generated_at, "and its own generatedAt");
   eq(r.label, "Model wording", "labelled as model wording");
   eq(r.sections.now.text, GOOD.now.text, "the text the checks passed, unchanged");
@@ -946,6 +947,8 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(vendorCalls(), 0, "PAST THE FLOOR, refused member A again makes 0 vendor calls");
   eq(late.body.read.status, "ready", "and is served the stored model reading");
   eq(late.body.read.held, "limited", "held because the assembly was limited, not regenerated from it");
+  ok(/earlier dossier of /.test(late.body.read.note) && /held back by a rate limit/.test(late.body.read.note), "and its note says it was written for an earlier dossier and why no new one was asked for: " + late.body.read.note);
+  ok(late.body.read.refreshing === false && late.body.read.retryAfterS === RW.READ_LIMITED_RETRY_S, "refreshing false, with the limited retry (" + late.body.read.refreshing + ", " + late.body.read.retryAfterS + ")");
   eq(ai.log.reads.length, 1, "no model call");
   eq(readRow(f).fingerprint, row.fingerprint, "and the row is untouched");
   setNow(F.NOW_ISO);

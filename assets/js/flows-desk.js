@@ -351,7 +351,7 @@
   const NARROW = window.matchMedia("(max-width: 899.98px)");
   let curTab = "frontier";
 
-  const tabAllowed = (k) => (k === "smile" ? !!mods.smileCard && !mods.smileCard.hidden : k === "plan" ? NARROW.matches : true);
+  const tabAllowed = (k) => (k === "smile" ? !!mods.smileCard && !mods.smileCard.hidden : k === "plan" ? NARROW.matches : k === "lines" ? book.size > 0 : true);
 
   function showTab(key, focus, quiet) {
     const k = tabAllowed(key) ? key : "frontier";
@@ -505,6 +505,7 @@
     drawScatter();
     renderSurface();
     for (const n of [allBox.closest("label"), refreshBtn, clearBtn, mods.linesCard]) if (n) n.hidden = !book.size;
+    if (tabs.lines.hidden !== !tabAllowed("lines")) showTab(viewFromHash(), false, true);
     updateStatus();
   }
 
