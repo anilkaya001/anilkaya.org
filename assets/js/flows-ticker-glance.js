@@ -1222,8 +1222,8 @@
       st.expiry = st.m.sel;
       legendEl.replaceChildren(...legend(st.m, layout(st.m, W, 400)));
       const room = chartHost.clientHeight - (root.offsetHeight - svgBox.offsetHeight);
-      const fit = window.matchMedia && window.matchMedia("(min-width: 1100px)").matches && room >= 250;
-      const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.round(W * 0.396), 230, 520);
+      const fit = matchMedia("(min-width: 1100px)").matches && room >= 250;
+      const Hh = fit ? clamp(Math.floor(room) - 20, 230, 640) : W < 520 ? clamp(Math.round(W * 0.54), 170, 260) : clamp(Math.min(Math.round(W * 0.396), matchMedia("(min-width: 900px)").matches && room > 99 ? ~~room - 20 : 520), 200, 520);
       st.W = W;
       st.H = Hh;
       const had = st.cur;
