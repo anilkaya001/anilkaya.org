@@ -25,7 +25,7 @@ export const FACT_IDS = deepFreeze({
   "iv.pct.30": {
     meaning: "The same min-max rank as iv.rank.1y, stored under a percentile-looking id before iv.pctile.30.1y existed: a rank and not a percentile, kept for stored cards until it is retired",
     unit: "frac", tenor: "30-day implied volatility, 1 year lookback", gradeRule: "2 when the panel carries a rank between 0 and 1; 0 and withheld otherwise",
-    claimLines: IV_CLAIM, since: ORIGIN,
+    claimLines: IV_CLAIM, since: ORIGIN, retired: { since: "2026-10-11", by: "iv.pctile.30.1y" },
   },
   "iv.pctile.30.1y": {
     meaning: "Percentile of today's 30-day implied volatility within its own past year of readings, as the volatility cone reports it from its 251-sample history",
@@ -176,9 +176,13 @@ export function factEntry(id) {
   return null;
 }
 
+export function retiredIds() {
+  return Object.freeze(Object.keys(FACT_IDS).filter((id) => FACT_IDS[id].retired));
+}
+
 export function claimLinesOf() {
   const out = {};
-  for (const id of Object.keys(FACT_IDS)) if (FACT_IDS[id].claimLines) out[id] = FACT_IDS[id].claimLines;
+  for (const id of Object.keys(FACT_IDS)) if (FACT_IDS[id].claimLines && !FACT_IDS[id].retired) out[id] = FACT_IDS[id].claimLines;
   return Object.freeze(out);
 }
 

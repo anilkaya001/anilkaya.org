@@ -459,6 +459,16 @@ function checkDossier(d, label, ticker = T) {
 }
 
 {
+  const cx = F.cardX(T);
+  cx.engine = { ...cx.engine, facts: [...cx.engine.facts, { id: "iv.pct.30", v: 0.62, u: "frac", g: 2 }, { id: "iv.pct.30", v: null, u: "frac", g: 0, why: "iv.rank-absent" }] };
+  const d = D.buildDossier(inputs({ cardX: cx }));
+  const ks = d.packets.options.facts.map((f) => f.k).concat(d.packets.options.withheld.map((w) => w.k));
+  ok(ks.includes("engine.iv.pctile.30.1y") && !ks.includes("engine.iv.pct.30"),
+    "P1-41: a card stored before iv.pct.30 was retired builds the options packet without it, as neither a fact nor a withheld entry, and the percentile beside it stays");
+  eq(D.dossierFingerprint(d), D.dossierFingerprint(D.buildDossier(inputs())), "and the fingerprint is the one a card without the retired fact has");
+}
+
+{
   const noCard = D.buildDossier(inputs({ card: null, cardX: null, held: { neuron: null, strip: null, tape: null, alerts: null } }));
   checkDossier(noCard, "no card");
   eq(noCard.packets.options.status, "withheld", "no card, no screen: the options packet is withheld, not guessed");

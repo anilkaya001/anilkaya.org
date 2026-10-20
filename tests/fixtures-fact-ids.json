@@ -97,7 +97,7 @@
    "lo": 0.25,
    "strict": true
   },
-  "retired": false
+  "retired": true
  },
  "iv.pctile.30.1y": {
   "meaning": "Percentile of today's 30-day implied volatility within its own past year of readings, as the volatility cone reports it from its 251-sample history",

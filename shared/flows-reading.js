@@ -59,7 +59,6 @@ export const ENGINE_LABELS = Object.freeze({
   "iv.cm.30": "30-day implied volatility",
   "iv.cm.90": "90-day implied volatility",
   "iv.rank.1y": "Implied volatility rank over one year",
-  "iv.pct.30": "30-day implied volatility rank over one year",
   "iv.pctile.30.1y": "30-day implied volatility percentile over one year",
   "term.slope.30_90": "Implied volatility term slope, 30 to 90 days",
   "term.front.7_30": "Implied volatility front slope, 7 to 30 days",

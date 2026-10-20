@@ -374,8 +374,9 @@ const FACT_INPUT = () => ({
   const pf = get(real, "iv.pctile.30.1y");
   eq([pf.v, pf.u, pf.g, "why" in pf], [0.698, "frac", 2, false], "W06-P1(a): the cone's one-year percentile is published as iv.pctile.30.1y, a fraction graded 2 on a full cone");
   eq(get(real, "iv.rank.1y").v, 0.62, "and the rank rides under its own id at the pricedMove value");
-  eq([get(real, "iv.pct.30").v, get(real, "iv.pct.30").why], [0.62, "iv.rank-as-pct"], "and iv.pct.30 is unchanged for one release: still the rank, still coded as such");
-  ok(pf.v !== get(real, "iv.pct.30").v, "so a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
+  eq(get(real, "iv.pct.30"), undefined, "P1-41: iv.pct.30 is no longer emitted, with a rank or without one");
+  eq(get(withVol(FLOORED, { coneThin: false }), "iv.pct.30"), undefined, "so the rank has one id and the percentile another");
+  ok(pf.v !== get(real, "iv.rank.1y").v, "a rank of 0.62 and a percentile of 0.698 are two facts, never one value under two ids");
   const low = withVol(FLOORED, { coneThin: true });
   eq([get(low, "iv.pctile.30.1y").v, get(low, "iv.pctile.30.1y").g], [0.698, 1], "a cone the leg flagged thin (under its 200-sample floor) is graded 1, the same value");
   eq(get(withVol(FLOORED), "iv.pctile.30.1y").g, 2, "and an unknown sample count is not guessed thin");
@@ -397,13 +398,13 @@ const FACT_INPUT = () => ({
   ok(sizeWith - sizeWithout > 30 && sizeWith - sizeWithout < 90, `the fact costs about sixty bytes a card (${sizeWith - sizeWithout})`);
   {
     const bucketOf = (facts) => bucketsOf(Object.fromEntries(facts.map((f) => [f.id, f])), "A").iv;
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.07, g: 2 }, { id: "iv.pctile.30.1y", v: 0.7, g: 2 }]), { bucket: "mid", g: 2 },
       "P0-35: a rank of 0.07 with a percentile of 0.70 buckets mid, not low: the IV axis is read from the percentile");
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.9, g: 2 }, { id: "iv.pctile.30.1y", v: 0.1, g: 1 }]), { bucket: "low", g: 1 },
       "and a rank of 0.90 with a percentile of 0.10 buckets low, at the percentile's own grade");
-    eq(bucketOf([{ id: "iv.pct.30", v: 0.9, g: 2 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+    eq(bucketOf([{ id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
       "a card with a rank and no percentile has no IV bucket: the rank is never put in its place");
-    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.pct.30", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
+    eq(bucketOf([{ id: "iv.pctile.30.1y", v: null, g: 0 }, { id: "iv.rank.1y", v: 0.9, g: 2 }]), { bucket: null, g: 0 },
       "nor does one whose percentile is withheld");
     eq([0.2499, 0.25, 0.5, 0.75, 0.7501].map((v) => bucketOf([{ id: "iv.pctile.30.1y", v, g: 2 }]).bucket), ["low", "mid", "mid", "mid", "high"],
       "the buckets keep the lines 0.25 and 0.75, inclusive on the mid side");

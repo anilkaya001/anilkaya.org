@@ -7,7 +7,8 @@ import * as QC from "../shared/flows-quant-card.js";
 import * as N from "../shared/flows-neuron.js";
 import { BUCKET_LINES } from "../shared/flows-quant-structures.js";
 import { ENGINE_LABELS } from "../shared/flows-reading.js";
-import { moduleSource, slice, expect } from "./lib/source-scan.mjs";
+import { moduleSource, slice, expect, treeFiles } from "./lib/source-scan.mjs";
+import { RETIRED_ENGINE_FACTS } from "../shared/flows-dossier.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -185,12 +186,12 @@ const withSnap = (s) => Object.fromEntries(Object.entries(s).map(([id, v]) => [i
 
 {
   eq(N.CLAIM_LINES, FI.CLAIM_LINES, "THE CLAIM LINES: the Neuron's table is the registry's, not a copy");
-  same(Object.keys(FI.CLAIM_LINES).sort(), ["iv.pct.30", "iv.pctile.30.1y", "iv.rank.1y", "skew.rr25.30.pct"], "four ids carry claim lines");
-  ok(["iv.pct.30", "iv.pctile.30.1y", "iv.rank.1y"].every((id) => FI.CLAIM_LINES[id].hi === BUCKET_LINES.IV_HIGH && FI.CLAIM_LINES[id].lo === BUCKET_LINES.IV_LOW && FI.CLAIM_LINES[id].strict === true),
+  same(Object.keys(FI.CLAIM_LINES).sort(), ["iv.pctile.30.1y", "iv.rank.1y", "skew.rr25.30.pct"], "three live ids carry claim lines, and the retired iv.pct.30 does not though its entry still holds the lines it had");
+  ok(["iv.pctile.30.1y", "iv.rank.1y"].every((id) => FI.CLAIM_LINES[id].hi === BUCKET_LINES.IV_HIGH && FI.CLAIM_LINES[id].lo === BUCKET_LINES.IV_LOW && FI.CLAIM_LINES[id].strict === true),
     "the IV ids use the bucket lines 0.25 and 0.75, strictly");
   ok(FI.CLAIM_LINES["skew.rr25.30.pct"].hi === BUCKET_LINES.SKEW_STEEP && FI.CLAIM_LINES["skew.rr25.30.pct"].lo === BUCKET_LINES.SKEW_FLAT && FI.CLAIM_LINES["skew.rr25.30.pct"].strict === false,
     "and the skew id 0.2 and 0.8, inclusively");
-  ok(/rank/.test(FI.FACT_IDS["iv.pct.30"].meaning) && /not a percentile/.test(FI.FACT_IDS["iv.pct.30"].meaning), "iv.pct.30 says in its own entry that it is a rank under a percentile-looking id");
+  ok(/rank/.test(FI.FACT_IDS["iv.pct.30"].meaning) && /not a percentile/.test(FI.FACT_IDS["iv.pct.30"].meaning), "iv.pct.30 says in its own entry that it was a rank under a percentile-looking id");
 }
 
 {
@@ -203,28 +204,51 @@ const withSnap = (s) => Object.fromEntries(Object.entries(s).map(([id, v]) => [i
   ok(audit(tenorChanged, em, cons, withSnap(SNAPSHOT)).some((p) => /term\.slope\.30_90\.tenor differs/.test(p)), "and a changed tenor");
   const linesChanged = mutate(REAL, (r) => { r.ids["iv.pctile.30.1y"].claimLines.hi = 0.8; });
   ok(audit(linesChanged, em, cons, withSnap(SNAPSHOT)).some((p) => /iv\.pctile\.30\.1y\.claimLines differs/.test(p)), "and a changed claim line");
-  const dropped = mutate(REAL, (r) => { delete r.ids["iv.pct.30"]; });
+  const dropped = mutate(REAL, (r) => { delete r.ids["iv.rank.1y"]; });
   const droppedProblems = audit(dropped, em, cons, withSnap(SNAPSHOT));
-  ok(droppedProblems.some((p) => /emitted id iv\.pct\.30 is not registered/.test(p)) && droppedProblems.some((p) => /snapshot id iv\.pct\.30 is missing.*never removed/.test(p)),
+  ok(droppedProblems.some((p) => /emitted id iv\.rank\.1y is not registered/.test(p)) && droppedProblems.some((p) => /snapshot id iv\.rank\.1y is missing.*never removed/.test(p)),
     "A DROPPED ID IS CAUGHT twice: the engine still emits it and the snapshot still names it");
+  const droppedRetired = mutate(REAL, (r) => { delete r.ids["iv.pct.30"]; });
+  ok(audit(droppedRetired, em, cons, withSnap(SNAPSHOT)).some((p) => /snapshot id iv\.pct\.30 is missing.*never removed/.test(p)), "and a retired id is never removed from the registry either: the snapshot still names it");
   const phantom = mutate(REAL, (r) => { r.ids["iv.ghost.30"] = { ...r.ids["iv.cm.30"] }; });
   ok(audit(phantom, em, cons, withSnap(SNAPSHOT)).some((p) => /registered id iv\.ghost\.30 is emitted nowhere/.test(p)), "a registered id nothing emits is caught");
-  const retired = mutate(REAL, (r) => { r.ids["iv.pct.30"].retired = { since: "2026-10-12", by: "iv.pctile.30.1y" }; });
+  const retired = mutate(REAL, (r) => { r.ids["iv.rank.1y"].retired = { since: "2026-10-12", by: "iv.pctile.30.1y" }; });
   const retiredProblems = audit(retired, em, cons, withSnap(SNAPSHOT));
-  ok(retiredProblems.some((p) => /emitted id iv\.pct\.30 is retired/.test(p)), "A RETIRED ID THE ENGINE STILL EMITS is caught");
-  ok(retiredProblems.some((p) => /reading ENGINE_LABELS reads iv\.pct\.30, which is retired/.test(p)) && retiredProblems.some((p) => /neuron CLAIM_LINES reads iv\.pct\.30, which is retired/.test(p)),
+  ok(retiredProblems.some((p) => /emitted id iv\.rank\.1y is retired/.test(p)), "A RETIRED ID THE ENGINE STILL EMITS is caught");
+  ok(retiredProblems.some((p) => /reading ENGINE_LABELS reads iv\.rank\.1y, which is retired/.test(p)) && retiredProblems.some((p) => /neuron CLAIM_LINES reads iv\.rank\.1y, which is retired/.test(p)),
     "and so is every consumer that still reads it");
-  ok(retiredProblems.some((p) => /iv\.pct\.30 retired flag differs from the snapshot/.test(p)), "and the retirement must be written into the snapshot too");
+  ok(retiredProblems.some((p) => /iv\.rank\.1y retired flag differs from the snapshot/.test(p)), "and the retirement must be written into the snapshot too");
   const badBy = mutate(REAL, (r) => { r.ids["iv.pct.30"].retired = { since: "2026-10-12", by: "iv.nowhere" }; });
   ok(shapeProblems(badBy).some((p) => /retired id carries/.test(p)), "a retirement names a live successor or null");
   const noEmit = emitted();
-  const stripped = { ...noEmit, exact: noEmit.exact.filter((id) => id !== "iv.pct.30"), run: noEmit.run.filter((id) => id !== "iv.pct.30") };
-  const wasRetiredOk = audit(retired, stripped, cons.filter((c) => !["reading ENGINE_LABELS", "neuron CLAIM_LINES"].includes(c.where) || c.id !== "iv.pct.30"), withSnap({ ...SNAPSHOT, "iv.pct.30": { ...SNAPSHOT["iv.pct.30"], retired: true } }));
+  const stripped = { ...noEmit, exact: noEmit.exact.filter((id) => id !== "iv.rank.1y"), run: noEmit.run.filter((id) => id !== "iv.rank.1y") };
+  const wasRetiredOk = audit(retired, stripped, cons.filter((c) => c.id !== "iv.rank.1y"), withSnap({ ...SNAPSHOT, "iv.rank.1y": { ...SNAPSHOT["iv.rank.1y"], retired: true } }));
   same(wasRetiredOk, [], "a retired id that nothing emits and nothing reads, recorded in the snapshot, passes");
+  const unretired = mutate(REAL, (r) => { delete r.ids["iv.pct.30"].retired; });
+  const unretiredProblems = audit(unretired, em, cons, withSnap(SNAPSHOT));
+  ok(unretiredProblems.some((p) => /registered id iv\.pct\.30 is emitted nowhere/.test(p)) && unretiredProblems.some((p) => /iv\.pct\.30 retired flag differs from the snapshot/.test(p)),
+    "P1-41: reviving iv.pct.30 is caught: nothing emits it and the snapshot records it retired");
   const unknownReader = [...cons, { where: "a new reader", id: "iv.rank.5y" }];
   ok(audit(REAL, em, unknownReader, withSnap(SNAPSHOT)).some((p) => /a new reader reads iv\.rank\.5y, which is not registered/.test(p)), "A CONSUMER OF AN UNREGISTERED ID IS CAUGHT");
   const unregisteredEmit = { ...em, exact: [...em.exact, "iv.new.30"] };
   ok(audit(REAL, unregisteredEmit, cons, withSnap(SNAPSHOT)).some((p) => /emitted id iv\.new\.30 is not registered/.test(p)), "and an emitted id nobody registered");
+}
+
+{
+  const entry = FI.FACT_IDS["iv.pct.30"];
+  same(entry.retired, { since: "2026-10-11", by: "iv.pctile.30.1y" }, "P1-41: iv.pct.30 is retired in the registry, by the percentile, and its entry stays: an id is retired, never removed");
+  same(FI.retiredIds(), ["iv.pct.30"], "it is the one retired id");
+  ok(!em.exact.includes("iv.pct.30") && !em.run.includes("iv.pct.30"), "engineFacts neither names nor emits it");
+  ok(!cons.some((c) => c.id === "iv.pct.30"), "and no consumer of an engine id reads it");
+  ok(!Object.hasOwn(FI.CLAIM_LINES, "iv.pct.30") && !Object.hasOwn(N.CLAIM_LINES, "iv.pct.30") && !Object.hasOwn(ENGINE_LABELS, "iv.pct.30"), "it holds no claim line and no label");
+  same([...RETIRED_ENGINE_FACTS], [...FI.retiredIds()], "the dossier's list of engine facts it drops from a stored card is the registry's retired set");
+  const SCAN = ["shared", "server", "scripts", "assets/js", "assets/data"];
+  const files = [...SCAN.flatMap((d) => treeFiles(d)), "worker.js"].filter((f) => !/\.bundle\.js$/.test(f));
+  expect(files.join("\n"), /shared\/flows-quant-card\.js/, { min: 1, why: "the scan reaches the card" });
+  const hits = files.filter((f) => /\biv\.pct\.30\b/.test(moduleSource(f)));
+  same(hits.sort(), ["shared/flows-dossier.js", "shared/flows-fact-ids.js"], "A GREP FINDS NO iv.pct.30 in the Worker, the pipeline or the browser except the registry entry that retired it and the dossier's drop list");
+  const codeHits = files.filter((f) => /rank-as-pct/.test(moduleSource(f)));
+  same(codeHits, [], "and the code that marked it a rank is gone with it");
 }
 
 {
