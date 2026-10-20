@@ -12,6 +12,8 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 
 const TICKER_RAISE = { od: "OD-08", bytes: 1613, why: "FlowsUI.defer ships on every route that ships flows-ui.js and the ticker defers no group, so the raise is a debt that P2-18 pays with measured savings in its own PR" };
+const GLASS_V3 = { bytes: 3833, gzip: 582, why: "design v3 Lane 1: the liquid-glass tokens, the aurora ground, the .ui-card rim, caustic and lift, the chrome, the glass segmented control, .ui-num and the three fallbacks in flows.css, measured against ca551714 after the dead .ak-nn rules and nineteen unread tokens were deleted; every Flows route links flows.css" };
+const GLASS_V3_TICKER = { bytes: 219, gzip: 36, why: "design v3 Lane 1: the ticker's strip, rail and chart panels take the sheen, the caustic and the lift in flows-ticker.css" };
 const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 1.6 KB where section 2.10 ruling 8 counted 0.9 KB, so the V and L share of the kernel is stated as 3.8 KB instead of 3.1" };
 
 const CEILING_KIB = {
@@ -53,41 +55,41 @@ const GZIP_KIB = {
 };
 
 const CSS_KIB = {
-  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024 + 9900 / 1024 + 12150 / 1024 + 6400 / 1024 + 1030 / 1024 + 3600 / 1024 + 1286 / 1024,
-  overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024,
-  sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024,
-  watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + 20 / 1024,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 100 / 1024,
-  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8,
-  unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024,
-  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024,
-  movesPage: 95.5 + 1700 / 1024,
-  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024,
-  loginPage: 80 + 565 / 1024 + 1700 / 1024,
-  aboutPage: 81 + 565 / 1024 + 1700 / 1024,
-  glossaryPage: 81 + 565 / 1024 + 1700 / 1024,
-  notFoundPage: 81 + 565 / 1024 + 1700 / 1024,
-  statusPage: 82 + 7.5 + 5.5 + 1700 / 1024,
+  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024 + 9900 / 1024 + 12150 / 1024 + 6400 / 1024 + 1030 / 1024 + 3600 / 1024 + 1286 / 1024 + GLASS_V3.bytes / 1024 + GLASS_V3_TICKER.bytes / 1024,
+  overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_V3.bytes / 1024,
+  sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_V3.bytes / 1024,
+  watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_V3.bytes / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + 20 / 1024 + GLASS_V3.bytes / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 100 / 1024 + GLASS_V3.bytes / 1024,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_V3.bytes / 1024,
+  unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_V3.bytes / 1024,
+  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_V3.bytes / 1024,
+  movesPage: 95.5 + 1700 / 1024 + GLASS_V3.bytes / 1024,
+  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_V3.bytes / 1024,
+  loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_V3.bytes / 1024,
+  aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_V3.bytes / 1024,
+  glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_V3.bytes / 1024,
+  notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_V3.bytes / 1024,
+  statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_V3.bytes / 1024,
 };
 
 const CSS_GZIP_KIB = {
-  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024,
-  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024,
-  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024,
-  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 - 17 / 1024,
-  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024,
-  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024,
-  unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024,
-  eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024,
-  movesPage: 21 + 400 / 1024,
-  politicalPage: 22.5 + 400 / 1024,
-  loginPage: 18 + 64 / 1024 + 400 / 1024,
-  aboutPage: 18 + 64 / 1024 + 400 / 1024,
-  glossaryPage: 18 + 64 / 1024 + 400 / 1024,
-  notFoundPage: 18 + 64 / 1024 + 400 / 1024,
-  statusPage: 18 + 4 + 400 / 1024,
+  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024 + GLASS_V3.gzip / 1024 + GLASS_V3_TICKER.gzip / 1024,
+  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + GLASS_V3.gzip / 1024,
+  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + GLASS_V3.gzip / 1024,
+  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + GLASS_V3.gzip / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 - 17 / 1024 + GLASS_V3.gzip / 1024,
+  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + GLASS_V3.gzip / 1024,
+  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + GLASS_V3.gzip / 1024,
+  unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + GLASS_V3.gzip / 1024,
+  eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024 + GLASS_V3.gzip / 1024,
+  movesPage: 21 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  politicalPage: 22.5 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  loginPage: 18 + 64 / 1024 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  aboutPage: 18 + 64 / 1024 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  glossaryPage: 18 + 64 / 1024 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  notFoundPage: 18 + 64 / 1024 + 400 / 1024 + GLASS_V3.gzip / 1024,
+  statusPage: 18 + 4 + 400 / 1024 + GLASS_V3.gzip / 1024,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -294,7 +296,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 232700, gzip: 70600, css: 126600, cssGzip: 24000 };
+  const base = { name: "marketPage", raw: 233434, gzip: 70800, css: 132043, cssGzip: 27347 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -306,7 +308,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228, gzip: 39938, css: 112895, cssGzip: 23776 };
+  const events = { name: "eventsPage", raw: 118228, gzip: 39938, css: 116728, cssGzip: 24358 };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }

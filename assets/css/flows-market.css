@@ -570,8 +570,8 @@
 @media (min-height: 800px) and (min-width: 900px) {
   .mk-panel .ui-list > .ui-row { min-height: 47px; }
 }
-.mk-hc.is-etf .mk-hc-v { font-size: 22px; }
-.mk-hc.is-etf .mk-hc-p { width: 38px; }
+.mk-hc.is-etf .mk-hc-v { font-size: 20px; }
+.mk-hc.is-etf .mk-hc-p { width: 34px; }
 
 .mk-fl-sub { color: var(--label-2); font: var(--t-footnote); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mkFloorCard > .mk-body { display: flex; flex-direction: column; min-height: 0; }
