@@ -6,7 +6,7 @@ import {
   expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
-import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly, shiftDay, SESSIONS_PER_YEAR } from "./flows-quant-time.js";
 
 export { rankModeOf };
 
@@ -221,25 +221,39 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
   return { built: settled.list, input: eligible, surface: settled.surface };
 }
 
-const atmVolOf = (ex) => sliceVolK(ex.slice, 0);
+
+const tauOf = (e) => (e && fin(e.hSessions) && e.hSessions > 0 ? e.hSessions / SESSIONS_PER_YEAR : null);
+
+function targetTau(built, days) {
+  const e = built.find((x) => x && typeof x.expiry === "string" && Number.isInteger(x.dte) && fin(x.hSessions) && fin(x.sessions));
+  if (!e || !fin(days)) return null;
+  const asOfDay = shiftDay(e.expiry, -e.dte);
+  const target = asOfDay ? shiftDay(asOfDay, Math.round(days)) : null;
+  if (!target) return null;
+  const tau = (Math.max(0, e.hSessions - e.sessions) + sessionsBetween(asOfDay, target)) / SESSIONS_PER_YEAR;
+  return tau > 0 ? tau : null;
+}
 
 export function constantMaturity(built, days, exEvent = null) {
   const j2 = exEvent && typeof exEvent.date === "string" && fin(exEvent.J2) && exEvent.J2 > 0 ? exEvent.J2 : 0;
-  const pts = built.map((e) => ({ days: e.T * 365, w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0);
+  const pts = built.map((e) => ({ days: e.T * 365, tau: tauOf(e), w: sliceTotalVariance(e.slice, 0), e })).filter((p) => fin(p.w) && p.w > 0 && p.tau !== null);
   if (!pts.length) return null;
+  const tT = targetTau(built, days);
+  if (tT === null) return null;
   if (j2) for (const p of pts) if (p.e.expiry >= exEvent.date) p.w -= j2;
   pts.sort((a, b) => a.days - b.days);
   let lo = null, hi = null;
   for (const p of pts) { if (p.days <= days) lo = p; if (p.days >= days && !hi) hi = p; }
   if (lo && hi && lo !== hi) {
-    const t = (days - lo.days) / (hi.days - lo.days);
+    const t = (tT - lo.tau) / (hi.tau - lo.tau);
     const w = lo.w + t * (hi.w - lo.w);
-    return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, lo: lo.e, hi: hi.e, extrapolated: false };
+    return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, tau: tT, lo: lo.e, hi: hi.e, extrapolated: false };
   }
   const only = lo || hi;
   if (!only) return null;
   if (Math.abs(only.days - days) > Math.max(5, days * 0.5)) return null;
-  return { vol: Math.sqrt(Math.max(only.w, 0) / (only.days / 365)), w: only.w * days / only.days, lo: only.e, hi: only.e, extrapolated: true };
+  const w = only.w * tT / only.tau;
+  return { vol: Math.sqrt(Math.max(w, 0) / (days / 365)), w, tau: tT, lo: only.e, hi: only.e, extrapolated: true };
 }
 
 function fitGradeOf(slice) {
@@ -255,7 +269,11 @@ export function eventJump(built, event) {
   const after = built.filter((e) => e.expiry >= event.date);
   if (after.length < 2) return { J: null, why: "event.slices" };
   const front = after[0], back = after[1];
-  const v = eventVariance({ front: { T: front.T, vol: atmVolOf(front) }, back: { T: back.T, vol: atmVolOf(back) } });
+  const tf = tauOf(front), tb = tauOf(back);
+  if (tf === null || tb === null) return { J: null, why: "event.clock", front: front.expiry, back: back.expiry };
+  const wf = sliceTotalVariance(front.slice, 0), wb = sliceTotalVariance(back.slice, 0);
+  if (!fin(wf) || !(wf > 0) || !fin(wb) || !(wb > 0)) return { J: null, why: "event.slices", front: front.expiry, back: back.expiry };
+  const v = eventVariance({ front: { T: tf, vol: Math.sqrt(wf / tf) }, back: { T: tb, vol: Math.sqrt(wb / tb) } });
   const priced = fin(v.eventSd) && v.eventSd >= QUANT_CARD_LINES.EVENT_MIN_JUMP;
   return {
     J: priced ? v.eventSd : null, meanAbs: priced ? v.eventMeanAbs : null, diffusiveVol: v.diffusiveVol,
