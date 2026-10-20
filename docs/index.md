@@ -763,7 +763,7 @@ The pure leaf every vendor client reads: `vendorBaseInfo` and `vendorBase` accep
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-vendor-core.js` | `shared/flows-vendor-core.js#VENDOR_BASE_DEFAULT`, `shared/flows-vendor-core.js#VENDOR_ENVELOPE`, `shared/flows-vendor-core.js#VENDOR_METER_HEADERS`, `shared/flows-vendor-core.js#classifyStatus`, `shared/flows-vendor-core.js#newerMeter`, `shared/flows-vendor-core.js#retryAfterMs`, `shared/flows-vendor-core.js#unwrap`, `shared/flows-vendor-core.js#vendorBase`, `shared/flows-vendor-core.js#vendorBaseInfo`, `shared/flows-vendor-core.js#vendorMeter`, `shared/flows-vendor-core.js#vendorRedirected`, `shared/flows-vendor-core.js#vendorUrl` | academy, architecture, flows, flows-ai-broker, flows-ai-salvage, flows-ask and 24 more |
+| `shared/flows-vendor-core.js` | `shared/flows-vendor-core.js#VENDOR_BASE_DEFAULT`, `shared/flows-vendor-core.js#VENDOR_ENVELOPE`, `shared/flows-vendor-core.js#VENDOR_METER_HEADERS`, `shared/flows-vendor-core.js#classifyStatus`, `shared/flows-vendor-core.js#newerMeter`, `shared/flows-vendor-core.js#retryAfterMs`, `shared/flows-vendor-core.js#unwrap`, `shared/flows-vendor-core.js#vendorBase`, `shared/flows-vendor-core.js#vendorBaseInfo`, `shared/flows-vendor-core.js#vendorMeter`, `shared/flows-vendor-core.js#vendorRedirected`, `shared/flows-vendor-core.js#vendorUrl` | academy, architecture, flows, flows-ai-broker, flows-ai-salvage, flows-ask and 25 more |
 | `tests/flows-rt-contract.mjs` |  | flows-rt |
 
 ### `shared/flows-vendor-ops.js`
