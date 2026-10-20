@@ -462,26 +462,31 @@
   const byPremium = (a, b) => (n(b.prem) ?? -Infinity) - (n(a.prem) ?? -Infinity) || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
   const ALERT_CAP = 180;
 
+  const msOf = (v) => { const t = +v || Date.parse(v); return t > 0 ? t : null; };
   function streamAlerts(rows, at) {
     const live = UI.rt.alerts();
     const base = S.alerts && Array.isArray(S.alerts.rows) ? S.alerts : null;
+    const since = base ? msOf(base.cursor) ?? msOf(base.readAt) : null;
     const kept = base ? base.rows : [];
     const have = new Set(kept.map(alertKey));
     const stamp = new Date(at || Date.now()).toISOString();
     const add = [];
+    let fresh = 0;
     for (const r of rows) {
       const row = Object.assign({}, r);
+      const ts = msOf(row.ts) ?? msOf(row.spanStart);
       delete row.id;
       delete row.ts;
       const key = alertKey(row);
       if (!key || have.has(key)) continue;
       have.add(key);
       add.push(Object.assign(row, { firstAt: stamp, lastAt: stamp, reads: 1 }));
+      if (since === null || ts === null || ts > since) fresh++;
     }
     if (!add.length) { if (live.dropped || live.truncated) paintMeta(); return; }
     const union = kept.concat(add).sort(byPremium);
     const next = Object.assign({}, base || { status: "ok", sessionDate: (UI.rt.fresh("fl") || {}).session || null }, {
-      rows: union.slice(0, ALERT_CAP), seen: Math.max(n(base && base.seen) ?? kept.length, kept.length) + add.length,
+      rows: union.slice(0, ALERT_CAP), seen: Math.max(n(base && base.seen) ?? kept.length, kept.length) + fresh,
       shed: Math.max(0, union.length - ALERT_CAP), status: "ok",
     });
     takeAlerts(next, "ok", null, false);

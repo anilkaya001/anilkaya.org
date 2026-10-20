@@ -343,6 +343,20 @@ try {
 
     {
       const { page, errors } = await open();
+      await page.evaluate(() => window.FlowsUI.freshness({ readAt: new Date(Date.now() - 18 * 3600000).toISOString(), source: "flowalerts" }));
+      let p = await look(page);
+      ok(p.state !== "live" && !/^Fresh/.test(p.label) && !/18 h/.test(p.label), `A READ 18 HOURS OLD DURING THE OPEN SESSION IS NEVER LABELLED FRESH WITH ITS AGE: the pill names the session instead (${JSON.stringify(p)})`);
+      eq(p.label, "Sep 28", "it names the session the page's readings are from");
+      ok(!/18 h ago|read 18 h/.test(p.lead), `and the details do not call that read the newest price (${p.lead.slice(0, 160)})`);
+      await page.evaluate(() => window.FlowsUI.freshness({ readAt: new Date(Date.now() - 10 * 60000).toISOString(), source: "flowalerts" }));
+      p = await look(page);
+      ok(/^Fresh · 10 min$/.test(p.label), `while a read ten minutes old still says Fresh with its age (${p.label})`);
+      eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
+      await page.close();
+    }
+
+    {
+      const { page, errors } = await open();
       await put(page, { source: "rt:fl", role: "primary", state: "fresh", klass: "rtSlow", staleS: 60 });
       eq((await look(page)).state, "fresh", "A PAGE WHOSE ONLY PRIMARY IS FRESH (an event stream, no price) shows Fresh");
       await page.clock.runFor(30000);

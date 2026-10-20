@@ -240,8 +240,10 @@
       ? ivList(spec[0], spec[3], moves && lensRank(moves, i ? -1 : 1), LENS.ask === 1)
       : moverList(spec[0], spec[1], spec[2], { said: spec[3] })));
     const grid = h("div", { class: "mk-movers-grid", "data-show": "0" }, cols);
-    const show = (i) => { grid.dataset.show = String(i); cols.forEach((c, j) => c.classList.toggle("is-on", i === j)); };
-    show(0);
+    const show = (i) => { LENS.col = i; grid.dataset.show = String(i); cols.forEach((c, j) => c.classList.toggle("is-on", i === j)); };
+    const col = Math.min(LENS.col, cols.length - 1);
+    show(col);
+    if (seg) seg.append(UI.segmented("Extreme", lists.map((spec) => ({ label: spec[0] })), show, col));
     host.append(h("div", { class: "mk-lens" }, UI.segmented("Rank risers and fallers by", [{ label: "Raw change" }, { label: "In IV-days" }], (i) => {
       LENS.on = i === 1;
       if (LENS.on && LENS.sync) LENS.sync();
@@ -249,7 +251,7 @@
       if (LENS.ask === 2 && !LENS.strips) LENS.ask = 0;
       paintMovers(LENS.movers);
     }, LENS.on ? 1 : 0)), grid);
-    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", null, lensContext(moves)) : null, moves ? h("p", null, LENS.src) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured."), h("p", null, IV_GRADE)));
+    if (LENS.on) host.append(h("div", { class: "mk-lens-note" }, moves ? h("p", { class: "mk-lens-ctx" }, lensContext(moves)) : null, moves ? h("p", null, LENS.src) : null, h("p", null, "IV as of the previous close. A ranking, not a test: no error rate measured."), h("p", null, IV_GRADE)));
     const universe = isNum(movers.universe), ranked = isNum(movers.ranked), priced = isNum(movers.priced);
     const noChange = isNum(movers.unrankedChange), noPrem = isNum(movers.unrankedPremium);
     if (universe === null || ranked === null || priced === null || noChange === null || noPrem === null) {
@@ -481,11 +483,12 @@
   }
 
   function growthSaid(r) {
-    const n = isNum(r.ratio), prev = isNum(r.prevOi);
+    const n = isNum(r.ratio), prev = isNum(r.prevOi), d = isNum(r.diff);
     const p = n === null ? null : n * 100;
     const plain = n === null ? DASH : (() => { const v = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10; return signGlyph(v) + Math.abs(v).toLocaleString("en-US") + "%"; })();
+    const small = prev !== null && prev < 100;
+    if (n !== null && (n > 0 ? small : n === 0 && d > 0)) return ["new", small ? "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything" : "Up " + grouped(d) + " contracts on a ratio the vendor sent as 0"];
     if (n === null || n <= 0) return [plain, null];
-    if (prev !== null && prev < 100) return ["new", "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything"];
     if (n >= 1) {
       const x = 1 + n;
       const times = x >= 10 ? Math.round(x).toLocaleString("en-US") : x.toFixed(1);

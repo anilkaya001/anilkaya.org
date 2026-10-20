@@ -413,7 +413,7 @@ try {
     },
     totals: { status: "ok", rows: totalsRows, seen: 20, cap: 20, shed: 0 },
     oiChange: {
-      status: "ok", seen: 5, cap: 20, shed: 0,
+      status: "ok", seen: 7, cap: 20, shed: 0,
       rows: [
 
         { t: "AAA", cp: "C", k: 150, exp: "2026-09-18", diff: 0, ratio: 0,
@@ -426,6 +426,10 @@ try {
           currOi: 153930, prevOi: 150, vol: 5200 },
         { t: "OIC", cp: "C", k: 230, exp: "2026-09-25", diff: 47481, ratio: 4.7,
           currOi: 57583, prevOi: 10102, vol: 61000 },
+        { t: "SYX101", cp: "P", k: 7, exp: "2026-09-25", diff: 60035, ratio: 0,
+          currOi: 60036, prevOi: 1, vol: 61200 },
+        { t: "SYX102", cp: "C", k: 12, exp: "2026-09-25", diff: 41000, ratio: 0,
+          currOi: 41000, prevOi: null, vol: 42000 },
       ],
     },
     netImpact: {
@@ -892,6 +896,12 @@ await showTab(page, "#mkVolumeSeg");
   eq(read.oi[3][1], "×1,026",
      "and ten-fold growth or more from a real base prints the multiple of the prior " +
      "snapshot, 1 + ratio = current / previous, rather than a five-digit percent");
+  eq(read.oi[5][1], "new",
+     "a contract up 60,035 on a vendor ratio of 0 (a previous open interest of 1) reads 'new', NEVER '0%': " +
+     "the zero is the vendor's division by a base of almost nothing, not a growth of nothing");
+  ok(/From 1 contracts/.test(read.oiTitles[5] || ""), `with the base it grew from behind it (${read.oiTitles[5]})`);
+  eq(read.oi[6][1], "new", "and the same ratio of 0 with no previous open interest published reads 'new' too");
+  ok(/ratio the vendor sent as 0/.test(read.oiTitles[6] || ""), `saying why there is no percentage (${read.oiTitles[6]})`);
   eq(read.seaValues[0], "0.00%",
      "a seasonal average of exactly zero prints '0.00%', never '+0.00%'");
   eq(read.seaValues[1], "−1.25%",

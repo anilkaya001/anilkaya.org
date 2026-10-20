@@ -125,6 +125,15 @@ const browser = await launch();
   await page.waitForFunction(() => { const e = document.querySelector("#mkRelations .nm-empty"); return !!e && !/^Reading/.test(e.textContent || ""); }, null, { timeout: 15000 });
   const said = await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").textContent);
   ok(/Not enough to relate/.test(said) && /relations need 40 windows/.test(said), "too few windows says how many are needed: " + said);
+  const once = await page.evaluate(() => {
+    const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2 && getComputedStyle(el).visibility !== "hidden"; };
+    const all = [...document.querySelectorAll("#mkRelations p, #mkRelations .rl-stats")].filter((el) => shown(el) && /Not enough to relate/.test(el.textContent));
+    const stats = document.querySelector("#mkRelations .rl-stats");
+    return { visible: all.length, stats: stats.textContent, read: document.querySelector("#mkRelations .rl-read").textContent };
+  });
+  eq(once.visible, 1, `THE THIN STATE PRINTS ITS SENTENCE ONCE ON SCREEN, NOT IN THE BANNER AND THE RING BOTH (${JSON.stringify(once)})`);
+  ok(await page.evaluate(() => document.querySelector("#mkRelations .nm-empty").getAttribute("role") === "status"), "and the one sentence is the status a screen reader hears");
+  ok(!/\u2014|—/.test(once.stats), "and the stats slot beside the switch is empty, not a bare dash");
   await context.close();
 }
 {

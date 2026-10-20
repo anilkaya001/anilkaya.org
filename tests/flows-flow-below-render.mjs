@@ -59,8 +59,8 @@ const feedPayload = () => ({
   coverage: NAMES.slice(0, 4).map((x) => ({ t: x[0] })), basis: { unit: { line: "A counter, not a trade." }, date: { line: "The session date." } },
 });
 
-async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = "ok", chunkDelay = 0, alerts = "ok", saveData = false } = {}) {
-  const context = await browser.newContext({ viewport, reducedMotion: "reduce" });
+async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = "ok", chunkDelay = 0, alerts = "ok", saveData = false, motion = false } = {}) {
+  const context = await browser.newContext({ viewport, reducedMotion: motion ? "no-preference" : "reduce" });
   const log = [];
   const state = { chunk };
   await context.addInitScript((sd) => {
@@ -196,6 +196,24 @@ try {
     await painted(page);
     eq(requested(log).length, 1, "pressing it loads the chunk once");
     eq(errors, [], "no page error");
+    await context.close();
+  }
+
+  {
+    const { context, page, errors } = await open(browser, { motion: true });
+    await page.goto("https://example.test/flows/unusual/", { waitUntil: "commit" });
+    await firstPaintReady(page);
+    await scrollNear(page, 100);
+    await painted(page);
+    await sleep(1500);
+    const ticks = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll("#uaTimeline svg text.tx-3")].map((t) => { const r = t.getBoundingClientRect(); return { text: t.textContent, l: r.left, t: r.top, r: r.right, b: r.bottom }; });
+      const clash = [];
+      boxes.forEach((a, i) => boxes.forEach((c, j) => { if (j > i && a.l < c.r && c.l < a.r && a.t < c.b && c.t < a.b) clash.push(a.text + "/" + c.text); }));
+      return { n: boxes.length, clash, low: boxes.filter((x) => x.text === "$100K").length };
+    });
+    ok(ticks.n > 0 && !ticks.clash.length && ticks.low <= 1, `THE TIMELINE'S PREMIUM TICKS DO NOT TOUCH: with every window at or above $100K that tick is printed once, at the centre line (${JSON.stringify(ticks)})`);
+    eq(errors, [], "no page error with motion on");
     await context.close();
   }
 

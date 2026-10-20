@@ -223,11 +223,12 @@
     return cv;
   }
 
-  function labeler(ctx, w, hh, out) {
+  const behind = (cols, own, z, box) => cols.some((c) => c.id !== own && c.z < z && c.box[0] < box[2] && box[0] < c.box[2] && c.box[1] < box[3] && box[1] < c.box[3]);
+  function labeler(ctx, w, hh, out, cols) {
     const q = [];
     const hit = (a, b) => a[0] < b[2] + 3 && b[0] < a[2] + 3 && a[1] < b[3] + 2 && b[1] < a[3] + 2;
     return {
-      add(text, x, y, align, prio, color, font) { q.push({ text, x, y, align, prio, color, font }); },
+      add(text, x, y, align, prio, color, font, own) { q.push({ text, x, y, align, prio, color, font, own }); },
       flush(halo) {
         const kept = [];
         q.sort((a, b) => b.prio - a.prio);
@@ -239,6 +240,7 @@
           const y0 = clamp(it.y - th, 2, hh - th - 2);
           const box = [x0, y0, x0 + tw, y0 + th + 2];
           if (kept.some((k) => hit(k, box))) { out.dropped.push(it.text); continue; }
+          if (it.own && behind(cols, it.own.id, it.own.z, box)) { out.dropped.push(it.text); continue; }
           kept.push(box);
           ctx.textAlign = "left";
           ctx.textBaseline = "alphabetic";
@@ -248,7 +250,7 @@
           ctx.strokeText(it.text, x0, y0 + th);
           ctx.fillStyle = it.color;
           ctx.fillText(it.text, x0, y0 + th);
-          out.labels.push({ text: it.text, box, prio: it.prio });
+          out.labels.push({ text: it.text, box, prio: it.prio, own: it.own && it.own.id });
         }
       },
     };
@@ -457,9 +459,18 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       if (!SC) return;
-      LAB = { labels: [], dropped: [] };
-      const lab = labeler(ctx, W, H, LAB);
+      const cols = [];
+      LAB = { labels: [], dropped: [], cols };
+      const lab = labeler(ctx, W, H, LAB, cols);
       const cam = camera(SC.cam);
+      for (const s of SC.tiles) if (s.v !== null && s.h > 0) {
+        const box = [1e9, 1e9, -1e9, -1e9];
+        for (let k = 0; k < 8; k++) {
+          const p = cam(s.x + (k & 1 ? PIL : -PIL) / 2, k & 2 ? s.h : 0, s.z + (k & 4 ? PIL : -PIL) / 2);
+          box[0] = Math.min(box[0], p.x); box[1] = Math.min(box[1], p.y); box[2] = Math.max(box[2], p.x); box[3] = Math.max(box[3], p.y);
+        }
+        cols.push({ id: s.id, z: s.pz, box });
+      }
       const phone = SC.phone;
       const fl = SC.floor;
       const ctr = cam(0, 0, 0);
@@ -552,27 +563,32 @@
       for (const list of [...lineOf.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1])) {
         list.sort((a, b) => a.col - b.col);
         for (const s of list) {
-          const w = ctx.measureText(s.label).width + 6, y = labelY(s);
-          let lv = 0;
-          while (lv < 3 && placed.some((p) => Math.abs(p.x - s.bx) < (p.w + w) / 2 && Math.abs(p.y - (y + lv * step)) < lh + 3)) lv++;
-          placed.push({ x: s.bx, w, y: y + lv * step });
-          level.set(s.id, lv);
+          const w = ctx.measureText(s.label).width + 6, y = labelY(s), fx = cam(s.x, 0, s.z - PED / 2 - 0.06).x;
+          let at = [0, 0];
+          out: for (const lv of [0, 1, 2, 3, -1, -2, -3, -4, -5]) for (let i = 0; i < 25; i++) {
+            const dx = (i & 1 ? -(i + 1) : i) * w / 4, dy = lv * step, x = fx + dx;
+            if (x < w / 2 + 3 || x > W - w / 2 - 3 || y + dy < 14 || placed.some((p) => Math.abs(p.x - x) < (p.w + w) / 2 && Math.abs(p.y - (y + dy)) < lh + 3) || behind(cols, s.id, s.pz, [x - w / 2, y + dy - 10, x + w / 2, y + dy + 3])) continue;
+            at = [dx, dy];
+            break out;
+          }
+          placed.push({ x: fx + at[0], w, y: y + at[1] });
+          level.set(s.id, at);
         }
       }
       for (const s of SC.tiles) {
         const front = cam(s.x, 0, s.z - PED / 2 - 0.06);
         const hot = hotOf(s);
-        lab.add(s.label, front.x, front.y + (phone ? 10 : 14) + level.get(s.id) * step, "center", hot ? 30 : 25, s.v === null ? TOK.faint : TOK.body, tf);
+        lab.add(s.label, front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1], "center", hot ? 30 : 25, s.v === null ? TOK.faint : TOK.body, tf, { id: s.id, z: s.pz });
         if (s.v !== null && (topSet.has(s.id) || hot)) {
           const t = tileOf(s.id), val = measure === "volume" ? F.num(s.v) : measure === "lean" ? moneyS(s.v) : money(s.v);
-          lab.add(val, s.px, s.py - 6, "center", hot ? 29 : 8 + s.h / (SC.hmax || 1), TOK.strong, vf);
+          lab.add(val, s.px, s.py - 6, "center", hot ? 29 : 8 + s.h / (SC.hmax || 1), TOK.strong, vf, { id: s.id, z: s.pz });
           void t;
         }
       }
       const hf = "600 " + (phone ? 9.5 : 12) + "px " + FONT, hs = (phone ? 9.5 : 11) + "px " + FONT;
       SC.heads.forEach((hd) => {
         const g = M.groups.find((x) => x.id === hd.id);
-        const head = phone ? g.label + MID + (g.n ? money(g.prem) + MID + F.pct(g.share, 0) : DASH) : g.label;
+        const head = phone ? g.label + MID + (g.n ? money(g.prem) + MID + F.pct(g.share, 0) : "none flagged") : g.label;
         if (phone) lab.add(head, 8, hd.p.y, "left", 20, TOK.strong, hf);
         else {
           lab.add(head, 14, hd.p.y - 2, "left", 20, TOK.strong, hf);

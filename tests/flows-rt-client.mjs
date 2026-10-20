@@ -1091,6 +1091,40 @@ try {
     await ctx.close();
   }
 
+  if (want("unusual")) {
+    const alert = (t, prem, at) => ({
+      t, oc: t + "260929C00100000", cp: "C", k: 100, exp: "2026-09-29", prem, size: 10, trades: 2, askPrem: prem * 0.6, bidPrem: prem * 0.3,
+      sweep: true, floor: false, single: true, opening: false, oi: 1000, voi: 1.5, ivStart: 0.3, ivEnd: 0.31, px: 100.5, spanStart: iso(at), spanEnd: iso(at + 500), rule: "RepeatedHits", st: "board:long",
+    });
+    const base = [alert("NVDA", 900000, T0 - 3600000)];
+    const cursor = T0 - 45000;
+    const answer = (key, u, R) => {
+      if (key.startsWith("flowalerts")) {
+        return { headers: { ...fresh("breadth", "live", "cadence", R.now - 60000, R.now + 2640000), "X-Live-Overlay": "live:alerts" },
+          body: { status: "ok", sessionDate: DAY, generatedAt: iso(R.now - 60000), readAt: iso(R.now - 60000), cursor: iso(cursor), rows: base.map((r) => ({ ...r, firstAt: iso(R.now - 60000), lastAt: iso(R.now - 60000), reads: 2 })), seen: 50, shed: 49, cap: 1, record: { date: DAY, reads: 2 } } };
+      }
+      if (key.startsWith("now")) return { body: { serverNow: R.now, expected: PREV, phase: RTH, keys: {} } };
+      return null;
+    };
+    const { ctx, page, R } = await mount(browser, { html: PAGES.unusualPage({ username: "test" }), url: "/flows/unusual/", answer });
+    await R.until(() => R.conns.length >= 1, 15000);
+    const c1 = R.conns[0];
+    const wire = (r, id, ts) => ({ ...r, id, ts });
+    const snap = RT.frame("fl", { ep: R.ep, sq: 0, at: R.now, snap: true, fresh: R.fresh("fl"), meta: { cursor: iso(R.now), read: 3, unusable: 0, dropped: 0, truncated: false },
+      rows: [wire(base[0], "b1", T0 - 3600000), wire(alert("TSLA", 400000, T0 - 60000), "b2", T0 - 60000), wire(alert("AMD", 200000, T0 - 30000), "b3", T0 - 30000)] });
+    R.send(c1, RT.ctlFrame("hello", { ep: R.ep, at: R.now, meta: { transport: "ws", upstream: "rest", mode: "on", audience: "owner", topics: ["fl"], hbS: 5, cold: false, phase: "rth", session: DAY, f: null }, rows: [snap] }));
+    await R.pump(80);
+    const chips = () => page.evaluate(() => document.getElementById("uaChips").textContent);
+    const c0 = await chips();
+    ok(/(?:^|[^\d,])51\s*Windows|Windows\s*≥?51(?!\d)/.test(c0), `THE RAIL'S BACKLOG IS NOT COUNTED TWICE: a window stamped before the stored record's cursor was already in its count of 50, so one later window makes 51, not 52 (${c0})`);
+    R.send(c1, R.delta("fl", [wire(alert("AAPL", 700000, T0 - 1000), "b4", T0 - 1000), wire(base[0], "b1", T0 - 3600000)], { meta: { cursor: iso(R.now), read: 2, unusable: 0, dropped: 0, truncated: false } }));
+    await R.pump(80);
+    const c2 = await chips();
+    ok(/(?:^|[^\d,])52\s*Windows|Windows\s*≥?52(?!\d)/.test(c2), `and a new window after the cursor adds one, a repeated id none (${c2})`);
+    deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
   if (want("market")) {
     const answer = (key, u, R) => (key.startsWith("now") ? { body: { serverNow: R.now, expected: PREV, phase: RTH, keys: {} } } : null);
     const { ctx, page, R } = await mount(browser, { html: PAGES.marketPage({ username: "test" }), url: "/flows/market/", answer });

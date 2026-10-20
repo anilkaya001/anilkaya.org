@@ -16,7 +16,7 @@ const SHOTS = process.env.FLOOR_SHOTS || null;
 
 const FUNDS = ["SPY", "QQQ", "IWM", "DIA"];
 const ETFS = new Map([["XLK", "Tech"], ["XLC", "Comms"], ["XLY", "Cyclicals"], ["XLF", "Financials"], ["XLV", "Health care"], ["XLI", "Industrials"], ["XLP", "Staples"], ["XLE", "Energy"], ["XLB", "Materials"], ["XLU", "Utilities"], ["XLRE", "Real estate"]]);
-const OTHERS = new Map([["TLT", "Bonds"], ["HYG", "Bonds"], ["GLD", "Commodities"], ["SLV", "Commodities"], ["VXX", "Volatility"], ["IBIT", "Crypto"], ["EEM", "International"]]);
+const OTHERS = new Map([["TLT", "Bonds"], ["HYG", "Bonds"], ["GLD", "Commodities"], ["SLV", "Commodities"], ["VXX", "Volatility"], ["IBIT", "Crypto"], ["EEM", "International"], ["SPX", "Index options"], ["NDX", "Index options"]]);
 const SHORT = { "Technology": "Tech", "Consumer Cyclical": "Cyclicals", "Communication Services": "Comms", "Financial Services": "Financials", "Consumer Defensive": "Defensives", "Basic Materials": "Materials", "Real Estate": "Real estate", "Healthcare": "Health care" };
 const GROUPS = ["funds", "etf", "other", "stocks"];
 const GROUP_LABEL = { funds: "Index funds", etf: "Sector ETFs", other: "Other funds", stocks: "Stocks by sector" };
@@ -120,7 +120,7 @@ const INSPECT = () => {
       tiles: M.tiles.map((t) => ({ id: t.id, group: t.group, label: t.label, n: t.n, prem: t.prem, vol: t.vol, volN: t.volN, net: t.net, share: t.share, lean: t.lean && t.lean.cat, top: t.top.map((x) => x.t), names: t.nameList.map((x) => [x.t, x.prem]) })) },
     scene: SC && { cam: SC.cam, view: SC.view, hmax: SC.hmax, vMax: SC.vMax, sMax: SC.sMax, xr: SC.xr, zr: SC.zr, phone: SC.phone, lines: SC.lines, heads: SC.heads.map((x) => x.id),
       tiles: SC.tiles.map((s) => ({ id: s.id, row: s.row, col: s.col, x: s.x, z: s.z, v: s.v, h: s.h, lean: s.lean, stripe: s.stripe, px: s.px, py: s.py, bx: s.bx, by: s.by, pz: s.pz, box: s.box })) },
-    labels: api.labels().labels, dropped: api.labels().dropped,
+    labels: api.labels().labels, dropped: api.labels().dropped, cols: api.labels().cols,
     hits: [...host.querySelectorAll(".mk-fl-hit")].map((b) => ({ id: b.dataset.id, tab: b.tabIndex, w: b.getBoundingClientRect().width, hh: b.getBoundingClientRect().height, label: b.getAttribute("aria-label"), pressed: b.getAttribute("aria-pressed") })),
     side: side ? { hidden: side.hidden, head: (side.querySelector("h3") || {}).textContent || "", items: [...side.querySelectorAll(".mk-fl-list li")].map((li) => li.children[0].textContent), hrefs: [...side.querySelectorAll(".mk-fl-list a")].map((a) => a.getAttribute("href")), more: (side.querySelector(".mk-fl-sn") || {}).textContent || "" } : null,
     tables: [...host.querySelectorAll(".mk-fl-t")].map((t) => ({ caption: t.querySelector("caption").textContent, rows: [...t.querySelectorAll("tbody tr")].map((r) => [...r.children].map((c) => c.textContent)) })),
@@ -197,6 +197,16 @@ function verify(f, EXP, measure, { phone = false, orbit = false } = {}) {
   f.labels.forEach((a, i) => { f.labels.forEach((b, j) => { if (j > i && hit(a.box, b.box)) over++; }); if (a.box[0] < 0 || a.box[1] < 0 || a.box[2] > f.canvas.w + 0.5 || a.box[3] > f.canvas.h + 0.5) out++; });
   need(!over, over + " label pairs overlap");
   need(!out, out + " labels leave the canvas");
+  const PIL = 0.58;
+  const pzOf = new Map(SC.tiles.map((s) => [s.id, s.pz]));
+  const pillars = SC.tiles.filter((s) => s.v !== null && s.h > 0).map((s) => {
+    const pts = [];
+    for (const x of [s.x - PIL / 2, s.x + PIL / 2]) for (const y of [0, s.h]) for (const z of [s.z - PIL / 2, s.z + PIL / 2]) pts.push(cam(x, y, z));
+    return { id: s.id, z: s.pz, box: [Math.min(...pts.map((p) => p.x)), Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.y))] };
+  });
+  const onPillar = f.labels.filter((l) => l.own && pillars.some((c) => c.id !== l.own && c.z < pzOf.get(l.own) && hit(c.box, l.box)));
+  need(!onPillar.length, onPillar.length + " labels sit on a nearer pillar: " + onPillar.map((l) => l.text).join(", "));
+  need(f.labels.filter((l) => SC.tiles.some((s) => s.label === l.text)).every((l) => l.own), "a tile label carries no owner, so its occlusion cannot be checked");
   if (!phone && !orbit) {
     for (const t of EXP.tiles) need(f.labels.some((x) => x.text === t.label), "tile " + t.label + " has no label");
     for (const g of EXP.groups) need(f.labels.some((x) => x.text === GROUP_LABEL[g]), "row " + g + " has no header");
@@ -446,6 +456,31 @@ try {
     ok(g.hits.some((x) => x.pressed === "true") && /SPY/.test(g.read), "a tap selects a pillar and the readout names it: " + g.read);
     await shot(page, "floor-selected-390");
     await context.close();
+  }
+
+  {
+    const NAMES2 = NAMES.concat([["SPX", null, 7.5, 0.5], ["NDX", null, 1.2, 0.5]]);
+    const A2 = alertsFixture({ n: 360, seed: 9, names: NAMES2 });
+    const U2 = universeFixture(NAMES2);
+    const E2 = expected(A2, U2);
+    const io = E2.byId.get("other:Index options");
+    ok(io && io.prem === Math.max(...E2.tiles.map((t) => t.prem)), "THE INDEX OPTIONS WORLD: the Index options class is the largest pillar, in the Other funds row in front of the sector ETFs");
+    for (const [w, h] of [[1920, 1080], [1440, 820]]) {
+      const { context, page, errors } = await open({ viewport: { width: w, height: h }, alerts: A2, universe: U2 });
+      const f = await page.evaluate(INSPECT);
+      eq(verify(f, E2, "premium"), [], `${w}x${h} WITH A TALL INDEX OPTIONS PILLAR IN FRONT OF THE SECTOR ETFS NO LABEL IS DRAWN ON A NEARER PILLAR, NONE OVERLAP, AND EVERY CLASS KEEPS ITS LABEL INSIDE ITS ROW`);
+      console.log(`  index options world ${w}: ${f.labels.length} labels drawn, dropped ${f.dropped.join(", ") || "none"}`);
+      await shot(page, `floor-index-options-${w}`);
+      eq(errors, [], `${w}: no page error in the index options world`);
+      await context.close();
+    }
+    const from = "const behind = (cols, own, z, box) => cols.some(";
+    ok(SRC.includes(from), "the occlusion mutant anchors on the served module");
+    const r = await open({ viewport: { width: 1440, height: 820 }, alerts: A2, universe: U2, patch: { [JS]: [[from, "const behind = (cols, own, z, box) => false && cols.some("]] } });
+    const why = verify(await r.page.evaluate(INSPECT), E2, "premium").find((x) => /nearer pillar/.test(x)) || null;
+    console.log("  planted labels drawn over nearer pillars: " + (why || "NOT CAUGHT").slice(0, 120));
+    ok(why !== null, "THE PLANTED WRONG BUILD THAT DRAWS LABELS OVER NEARER PILLARS FAILS THE OCCLUSION CHECK");
+    await r.context.close();
   }
 
   const MUTANTS = [

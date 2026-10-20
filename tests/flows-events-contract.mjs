@@ -1247,6 +1247,38 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
 }
 
 {
+  const print = (at, event, extra = {}) => ({ at, day: at.slice(0, 10), sd: 1, event, type: "report", tag: null, period: "August", ...extra });
+  const CAL = buildEvents([nameAt("WEEK", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  CAL.macro = { status: "ok", seen: 3, past: 0, rows: [
+    print(GATE_ORIGIN + "T12:30:00.000Z", "Initial Jobless Claims", { prevRaw: "199000", forecastRaw: null }),
+    print(GATE_ORIGIN + "T14:00:00.000Z", "Housing Starts", { prevRaw: "1300000", forecastRaw: "1250000" }),
+    print(GATE_ORIGIN + "T15:00:00.000Z", "Consumer Credit", { prevRaw: "-12500", forecastRaw: "0.4%" }),
+  ] };
+  CAL.catalysts = { status: "ok", rows: [] };
+  const browser = await chromium.launch();
+  try {
+    for (const width of [1440, 390]) {
+      const { page, errors } = await openEvents(browser, CAL, { width, css: true });
+      const rows = await page.evaluate(() => [...document.querySelectorAll("#evMacro .fe-mrow:not(.fu-head)")].map((r) => {
+        const v = r.querySelectorAll(".fu-v");
+        return [...v].map((c) => ({ text: c.textContent.trim(), title: c.getAttribute("title"), aria: c.getAttribute("aria-label") }));
+      }));
+      eq(rows.length, 3, `[${width}] three prints are listed`);
+      eq(rows[0][0].text, "—", `[${width}] a print with no consensus shows the em dash`);
+      ok(/no consensus/i.test(rows[0][0].title || "") && /no consensus/i.test(rows[0][0].aria || ""), `[${width}] AND SAYS WHY: the vendor calendar carries no consensus for it (${JSON.stringify(rows[0][0])})`);
+      eq(rows[0][1].text, "199K", `[${width}] a raw integer prior of 199000 is grouped as 199K`);
+      eq(rows[0][1].title, "199000", `[${width}] with the vendor's own text kept in the title`);
+      deep([rows[1][0].text, rows[1][1].text], ["1.25M", "1.30M"], `[${width}] and millions read 1.25M and 1.30M, not 1250000 and 1300000`);
+      deep([rows[2][0].text, rows[2][1].text], ["0.4%", "−12.5K"], `[${width}] a percent stays as the vendor wrote it and a negative integer keeps the true minus`);
+      deep(errors, [], `[${width}] no page error`);
+      await page.close();
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
+{
   const NEXT_CAL = buildEvents([nameAt("WEEKX", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
   const browser = await chromium.launch();
   try {
