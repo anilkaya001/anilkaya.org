@@ -1,0 +1,134 @@
+:root {
+  --nn-cyan: #5ad8ff;
+  --nn-blue: #4a8dff;
+  --nn-violet: #9c6dff;
+  --nn-pink: #ff62c9;
+  --nn-ink-cyan: #8ee6ff;
+  --nn-ink-blue: #9dbcff;
+  --nn-ink-violet: #c4a8ff;
+  --nn-ink-pink: #ff9edc;
+  --nn-core: #070912;
+  --nn-cap: rgba(255, 255, 255, 0.34);
+  --nn-hair: rgba(255, 255, 255, 0.22);
+  --nn-shade: rgba(90, 110, 255, 0.35);
+  --nn-app-1: #2a6cf0;
+  --nn-app-2: #6a3fe0;
+  --nn-app-3: #c23aa8;
+  --nn-app-glow: rgba(90, 216, 255, 0.45);
+  --nn-ribbon-x: linear-gradient(90deg, var(--nn-cyan), var(--nn-blue) 25%, var(--nn-violet) 50%, var(--nn-pink) 75%, var(--nn-cyan));
+  --nn-ribbon-y: linear-gradient(180deg, var(--nn-cyan), var(--nn-blue) 25%, var(--nn-violet) 50%, var(--nn-pink) 75%, var(--nn-cyan));
+  --nn-ring: linear-gradient(135deg, var(--nn-cyan), var(--nn-blue) 35%, var(--nn-violet) 65%, var(--nn-pink));
+  --nn-word: linear-gradient(90deg, var(--nn-ink-cyan), var(--nn-ink-blue) 35%, var(--nn-ink-violet) 70%, var(--nn-ink-pink));
+  --nn-app: radial-gradient(70% 70% at 80% 90%, var(--nn-app-glow), transparent 70%), linear-gradient(140deg, var(--nn-app-1), var(--nn-app-2) 55%, var(--nn-app-3));
+  --nn-glow-w: 22px;
+  --nn-rim-w: 1.5px;
+  --nn-r: var(--r-lg);
+  --nn-lap: 3.2s;
+  --nn-lap-v: 2s;
+  --nn-spoke: 1s;
+  --nn-bloom: 720ms;
+}
+
+.nn-orb { --s: 40px; position: relative; display: inline-grid; place-items: center; flex: none; inline-size: var(--s); block-size: var(--s); border-radius: 50%; overflow: hidden; isolation: isolate; background: var(--nn-core); box-shadow: inset 0 1px 0 var(--nn-cap), inset 0 0 0 0.5px var(--nn-hair), 0 6px 18px -6px var(--nn-shade); }
+.nn-orb > i { position: absolute; inline-size: 82%; aspect-ratio: 1; border-radius: 50%; mix-blend-mode: screen; opacity: 0.62; }
+.nn-orb > i:nth-child(1) { left: -16%; top: -12%; background: radial-gradient(closest-side, var(--nn-cyan), transparent); }
+.nn-orb > i:nth-child(2) { right: -18%; top: 6%; background: radial-gradient(closest-side, var(--nn-violet), transparent); }
+.nn-orb > i:nth-child(3) { left: 6%; bottom: -22%; background: radial-gradient(closest-side, var(--nn-pink), transparent); }
+.nn-orb::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 50%; background: radial-gradient(circle, var(--nn-core) 0 26%, transparent 62%); opacity: 0.7; }
+.nn-orb::before { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 50%; background: radial-gradient(60% 46% at 34% 20%, var(--nn-cap), transparent 70%); }
+.nn-orb > .ui-g { position: relative; z-index: 3; inline-size: calc(var(--s) * 0.56); block-size: calc(var(--s) * 0.56); color: var(--label-1); stroke-width: 2.1; }
+.nn-orb > canvas { position: absolute; inset: 0; z-index: 1; inline-size: 100%; block-size: 100%; border-radius: 50%; pointer-events: none; }
+.nn-orb.has-gl > i, .nn-orb.has-gl::before, .nn-orb.has-gl::after { display: none; }
+.nn-orb.is-32 { --s: 32px; } .nn-orb.is-44 { --s: 44px; } .nn-orb.is-52 { --s: 52px; } .nn-orb.is-56 { --s: 56px; }
+:is(.nn-host:is([data-nn="plain"], [data-nn="off"]) .nn-orb, .nn-orb:is([data-nn="plain"], [data-nn="off"])) > :is(i, canvas) { display: none; }
+:is(.nn-host[data-nn="plain"] .nn-orb, .nn-orb[data-nn="plain"]) { background: var(--fill-2); box-shadow: inset 0 0 0 0.5px var(--sep-strong); }
+:is(.nn-host[data-nn="plain"] .nn-orb, .nn-orb[data-nn="plain"]) > .ui-g { color: var(--label-2); }
+:is(.nn-host[data-nn="off"] .nn-orb, .nn-orb[data-nn="off"]) { background: transparent; box-shadow: inset 0 0 0 1px var(--sep-strong); }
+:is(.nn-host[data-nn="off"] .nn-orb, .nn-orb[data-nn="off"]) > .ui-g { color: var(--label-3); stroke-width: 1.6; }
+:is(.nn-host:is([data-nn="plain"], [data-nn="off"]) .nn-orb, .nn-orb:is([data-nn="plain"], [data-nn="off"]))::after,
+:is(.nn-host:is([data-nn="plain"], [data-nn="off"]) .nn-orb, .nn-orb:is([data-nn="plain"], [data-nn="off"]))::before { content: none; }
+
+:where(.nn-host) { position: relative; }
+.nn-edge { position: absolute; inset: 0; z-index: 3; border-radius: inherit; pointer-events: none; opacity: 0; }
+.nn-edge::after { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: var(--nn-rim-w); background: var(--nn-ring); opacity: var(--nn-ring-o, 0); -webkit-mask: linear-gradient(var(--mask-on) 0 0) content-box, linear-gradient(var(--mask-on) 0 0); -webkit-mask-composite: xor; mask: linear-gradient(var(--mask-on) 0 0) content-box, linear-gradient(var(--mask-on) 0 0); mask-composite: exclude; }
+.nn-edge > i { position: absolute; overflow: hidden; opacity: var(--nn-strip-o, 0); -webkit-mask: linear-gradient(var(--l), transparent, var(--mask-on) var(--nn-r), var(--mask-on) calc(100% - var(--nn-r)), transparent), linear-gradient(var(--a), var(--mask-on), var(--mask-mid) 2px, transparent); -webkit-mask-composite: source-in; mask: linear-gradient(var(--l), transparent, var(--mask-on) var(--nn-r), var(--mask-on) calc(100% - var(--nn-r)), transparent), linear-gradient(var(--a), var(--mask-on), var(--mask-mid) 2px, transparent); mask-composite: intersect; }
+.nn-edge > i:nth-child(1) { inset: 0 0 auto; height: var(--nn-glow-w); --a: 180deg; --l: 90deg; }
+.nn-edge > i:nth-child(2) { inset: 0 0 0 auto; width: var(--nn-glow-w); --a: 270deg; --l: 180deg; }
+.nn-edge > i:nth-child(3) { inset: auto 0 0; height: var(--nn-glow-w); --a: 0deg; --l: 90deg; }
+.nn-edge > i:nth-child(4) { inset: 0 auto 0 0; width: var(--nn-glow-w); --a: 90deg; --l: 180deg; }
+.nn-edge > i::before { content: ""; position: absolute; inset: 0; }
+.nn-edge > i:nth-child(odd)::before { width: 200%; background: var(--nn-ribbon-x) 0 0 / 50% 100%; }
+.nn-edge > i:nth-child(even)::before { height: 200%; background: var(--nn-ribbon-y) 0 0 / 100% 50%; }
+.nn-host:is([data-nn="idle"], [data-nn="think"], [data-nn="refresh"], [data-nn="spoke"]) > .nn-edge { opacity: 1; }
+.nn-host[data-nn="idle"] > .nn-edge { --nn-ring-o: 0.55; }
+.nn-host[data-nn="think"] > .nn-edge { --nn-ring-o: 1; --nn-strip-o: 0.9; }
+.nn-host[data-nn="refresh"] > .nn-edge { --nn-ring-o: 0.45; --nn-strip-o: 0.4; }
+.nn-host[data-nn="spoke"] > .nn-edge { --nn-ring-o: 1; }
+@supports (corner-shape: superellipse(1.6)) { .nn-edge, .nn-edge::after { corner-shape: superellipse(1.6); } }
+
+.nn-screen { position: fixed; inset: calc(var(--bar-h) + var(--safe-t)) 0 0 0; z-index: 99; pointer-events: none; border-radius: 0; --nn-glow-w: 16px; --nn-r: 24px; }
+.nn-screen > .nn-edge::after, .nn-screen > .nn-edge > i:nth-child(1) { display: none; }
+.nn-screen:not([data-nn="think"]):not([data-nn="spoke"]) { visibility: hidden; }
+@media (min-width: 1025px) { .flows-body.has-rail .nn-screen { left: var(--side-w); } .flows-body.has-rail.is-side-collapsed .nn-screen { left: 0; } }
+@media (min-width: 1200px) { .flows-body.has-dock-open .nn-screen { right: min(420px, 100vw); } }
+@media (max-width: 767.98px) { .nn-screen { display: none; } }
+
+.ak-dock-head.nn-host { padding-bottom: var(--sp-2); }
+.nn-edge.is-line { --nn-glow-w: 10px; }
+.nn-edge.is-line > i:not(:nth-child(3)), .nn-edge.is-line::after { display: none; }
+
+.nn-word { background: var(--nn-word); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; font: 600 20px / 1.1 var(--font-display); letter-spacing: -0.01em; }
+.nn-app { display: inline-grid; place-items: center; inline-size: 26px; block-size: 26px; border-radius: 8px; background: var(--nn-app); color: var(--label-1); box-shadow: inset 0 0 0 0.5px var(--nn-hair); }
+.nn-app .ui-g { inline-size: 62%; block-size: 62%; }
+.nn-app.is-plain { background: var(--fill-2); color: var(--label-2); }
+.nn-app.is-off { background: transparent; color: var(--label-3); box-shadow: inset 0 0 0 1px var(--sep-strong); }
+.nn-calc { --s: 44px; flex: none; inline-size: var(--s); block-size: var(--s); display: inline-grid; place-items: center; border-radius: 30%; background: var(--fill-3); color: var(--label-3); box-shadow: var(--mat-edge); }
+
+.nn-calc .ui-g { font-size: 22px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .nn-host[data-nn="think"] > .nn-edge > i:nth-child(1)::before { animation: nn-run-x var(--nn-lap) linear 56; }
+  .nn-host[data-nn="think"] > .nn-edge > i:nth-child(2)::before { animation: nn-run-y var(--nn-lap-v) linear 90; }
+  .nn-host[data-nn="think"] > .nn-edge > i:nth-child(3)::before { animation: nn-run-x var(--nn-lap) linear 56 reverse; }
+  .nn-host[data-nn="think"] > .nn-edge > i:nth-child(4)::before { animation: nn-run-y var(--nn-lap-v) linear 90 reverse; }
+  .nn-host[data-nn="think"] > .nn-edge::after { animation: nn-glow 1.6s ease-in-out 112 alternate; }
+  .nn-host[data-nn="refresh"] > .nn-edge > i:nth-child(odd)::before { animation: nn-run-x 6.4s linear 28; }
+  .nn-host[data-nn="refresh"] > .nn-edge > i:nth-child(even)::before { animation: nn-run-y 4s linear 45; }
+  .nn-host[data-nn="spoke"] > .nn-edge::after { animation: nn-flash var(--nn-spoke) var(--ease-out) 1 both; }
+  .nn-host[data-nn="spoke"] > .nn-edge > i:nth-child(1) { animation: nn-pass var(--nn-spoke) var(--ease-out) 1 both; }
+  .nn-host[data-nn="spoke"] > .nn-edge > i:nth-child(1)::before { animation: nn-run-x var(--nn-spoke) var(--ease-out) 1 both; }
+  :is(.nn-host:is([data-nn="think"], [data-nn="refresh"]) .nn-orb, .nn-orb:is([data-nn="think"], [data-nn="refresh"]), :root[data-nn-busy] .nn-host[data-nn="idle"] .nn-orb.nn-mirror, :root[data-nn-busy] .nn-orb.nn-mirror[data-nn="idle"]) > i:nth-child(1) { animation: nn-a 5.2s ease-in-out 34 alternate; }
+  :is(.nn-host:is([data-nn="think"], [data-nn="refresh"]) .nn-orb, .nn-orb:is([data-nn="think"], [data-nn="refresh"]), :root[data-nn-busy] .nn-host[data-nn="idle"] .nn-orb.nn-mirror, :root[data-nn-busy] .nn-orb.nn-mirror[data-nn="idle"]) > i:nth-child(2) { animation: nn-b 7.4s ease-in-out 24 alternate; }
+  :is(.nn-host:is([data-nn="think"], [data-nn="refresh"]) .nn-orb, .nn-orb:is([data-nn="think"], [data-nn="refresh"]), :root[data-nn-busy] .nn-host[data-nn="idle"] .nn-orb.nn-mirror, :root[data-nn-busy] .nn-orb.nn-mirror[data-nn="idle"]) > i:nth-child(3) { animation: nn-c 9.1s ease-in-out 20 alternate; }
+  :is(.nn-host[data-nn="refresh"] .nn-orb, .nn-orb[data-nn="refresh"]) > i:nth-child(1) { animation-duration: 10.4s; animation-iteration-count: 17; }
+  :is(.nn-host[data-nn="refresh"] .nn-orb, .nn-orb[data-nn="refresh"]) > i:nth-child(2) { animation-duration: 14.8s; animation-iteration-count: 12; }
+  :is(.nn-host[data-nn="refresh"] .nn-orb, .nn-orb[data-nn="refresh"]) > i:nth-child(3) { animation-duration: 18.2s; animation-iteration-count: 10; }
+  :is(.nn-host[data-nn="think"] .nn-orb, .nn-orb[data-nn="think"]) > .ui-g { animation: nn-breathe 1.4s ease-in-out 128 alternate; }
+  :is(.nn-host[data-nn="spoke"] .nn-orb, .nn-orb[data-nn="spoke"]) { animation: nn-bloom var(--nn-bloom) var(--ease-out) 1; }
+  :root[data-nn-busy] :is(#askDockTab, #fxTabAsk) .ui-g, .ak-dock-head[data-nn="think"] .ak-dock-title .ui-g { animation: nn-breathe 1.4s ease-in-out 128 alternate; }
+}
+@keyframes nn-run-x { from { transform: translateX(-50%); } to { transform: translateX(0); } }
+@keyframes nn-run-y { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+@keyframes nn-glow { from { opacity: 0.7; } to { opacity: 1; } }
+@keyframes nn-flash { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0.55; } }
+@keyframes nn-pass { 0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes nn-a { 50% { transform: translate(22%, 16%) scale(1.18); } 100% { transform: translate(8%, 30%) scale(0.92); } }
+@keyframes nn-b { 50% { transform: translate(-26%, 14%) scale(0.9); } 100% { transform: translate(-10%, 26%) scale(1.14); } }
+@keyframes nn-c { 50% { transform: translate(18%, -20%) scale(1.12); } 100% { transform: translate(26%, -6%) scale(0.95); } }
+@keyframes nn-breathe { to { transform: scale(0.92); } }
+@keyframes nn-bloom { 40% { transform: scale(1.14); } }
+
+@media (prefers-reduced-motion: reduce) { .nn-host[data-nn="think"] > .nn-edge { --nn-strip-o: 0.5; } }
+
+@media (prefers-reduced-transparency: reduce) { .nn-orb > canvas { display: none; } }
+
+[data-nn-cite] { box-shadow: inset 0 0 0 1.5px var(--nn-violet), 0 0 0 1px var(--nn-cyan); }
+
+@media (forced-colors: active) {
+  .nn-edge, .nn-screen, .nn-orb > i, .nn-orb > canvas, .nn-orb::before, .nn-orb::after { display: none; }
+  .nn-orb, .nn-app, .nn-calc { background: Canvas; border: 1px solid CanvasText; color: CanvasText; }
+  .nn-orb > .ui-g { color: CanvasText; }
+  .nn-word { background: none; -webkit-text-fill-color: CanvasText; }
+  .nn-host:is([data-nn="think"], [data-nn="refresh"]):not(.nn-screen) { outline: 2px dashed Highlight; outline-offset: -3px; }
+  [data-nn-cite] { box-shadow: none; outline: 2px solid Highlight; }
+}

@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=372") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=374") center / cover no-repeat;
   --aur-1: rgba(64, 120, 255, 0.16);
   --aur-2: rgba(150, 100, 255, 0.11);
   --aur-3: rgba(60, 200, 240, 0.07);
@@ -1066,6 +1066,9 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   .fx-tabs a .ui-g { font-size: 23px; }
   .fx-tabs a[aria-current] { color: var(--accent-ink); }
   .fx-tabs a:active { opacity: 0.6; }
+  .fx-tabs .fx-tab-ask { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 44px; padding: 0; border: 0; background: none; color: var(--label-3); font: var(--t-caption2); letter-spacing: 0; cursor: pointer; }
+  .fx-tabs .fx-tab-ask .ui-g { font-size: 23px; }
+  .fx-tabs .fx-tab-ask:active { opacity: 0.6; }
   .flows-body.has-rail > .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-8)); }
 }
 
@@ -1185,6 +1188,10 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   container-name: dock;
 }
 .ak-dock-head {
+  position: sticky;
+  top: calc(-1 * var(--sp-4));
+  z-index: 2;
+  background: inherit;
   display: flex;
   align-items: center;
   justify-content: space-between;

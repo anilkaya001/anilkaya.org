@@ -1272,6 +1272,20 @@
     }
   }
 
+  const nnTimer = new WeakMap(), nnBusy = new Set();
+  function nn(el, state, key) {
+    if (el) {
+      clearTimeout(nnTimer.get(el));
+      el.dataset.nn = state;
+      if (state === "spoke") nnTimer.set(el, setTimeout(() => { if (el.dataset.nn === "spoke") el.dataset.nn = "idle"; }, 1100));
+    }
+    if (key) {
+      if (state === "think" || state === "refresh") nnBusy.add(key); else nnBusy.delete(key);
+      document.documentElement.toggleAttribute("data-nn-busy", nnBusy.size > 0);
+    }
+    return state;
+  }
+
   const shell = Object.freeze({
     init: initShell,
     openPalette,
@@ -1348,7 +1362,7 @@
     ring, divRing, iconChip, gaugeChip, chips,
     segmented, tag, calibTag, capsule, key, legend, robustness,
     silent, dash, listRow, list, tile, split, moduleCard,
-    freshness, freshAggregate, freshAll, defer, link, shell, depths: PAL_G,
+    freshness, freshAggregate, freshAll, defer, nn, link, shell, depths: PAL_G,
     fixture: Object.freeze({ host: FIXTURE.host, nameIn: FIXTURE.nameIn, marked: FIXTURE.marked, isTicker: FIXTURE.isTicker, refuses: FIXTURE.refuses }),
   });
 

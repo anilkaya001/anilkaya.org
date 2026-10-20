@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "372";
+export const ASSET_VERSION = "374";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -42,7 +42,9 @@ const GLYPHS = {
   next: '<path d="M9 5l7 7-7 7"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/>',
   star: '<path d="M12 3.8l2.5 5.2 5.6.7-4.1 3.9 1 5.6-5-2.7-5 2.7 1-5.6-4.1-3.9 5.6-.7z"/>',
-  neuron: '<path d="M11 3c.6 4.6 2.4 6.4 7 7-4.6.6-6.4 2.4-7 7-.6-4.6-2.4-6.4-7-7 4.6-.6 6.4-2.4 7-7z"/><path d="M18.5 15c.2 1.6.8 2.2 2.4 2.4-1.6.2-2.2.8-2.4 2.4-.2-1.6-.8-2.2-2.4-2.4 1.6-.2 2.2-.8 2.4-2.4z"/>',
+  neuron: '<circle cx="12" cy="12" r="8.75"/><path d="M6.74 10.08A5.6 5.6 0 0 1 13.92 6.74"/><circle cx="12.7" cy="12.7" r="1.9" fill="currentColor" stroke="none"/>',
+  "neuron-s": '<circle cx="12" cy="12" r="8.75"/><path d="M6.74 10.08A5.6 5.6 0 0 1 13.92 6.74"/>',
+  calc: '<rect x="5" y="3.5" width="14" height="17" rx="3"/><path d="M8.5 8h7M8.5 12h2M13.5 12h2M8.5 16h2M13.5 16h2"/>',
   x: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
   stop: '<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
   cal: '<rect x="4" y="5.5" width="16" height="14.5" rx="3.2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>',
@@ -221,19 +223,23 @@ const toolbar = (title, active, hero) => `
 const tabbar = (active) => `
 <nav class="fx-tabs" id="fxTabs" aria-label="Sections">${TABS.map((t) => `
   <a href="${t.href}"${t.search ? " data-fx-search" : ""}${t.keys.includes(active) ? ' aria-current="true"' : ""}>${glyph(t.glyph)}<span>${t.label}</span></a>`).join("")}
+  ${active === "ask"
+    ? `<a href="/flows/ask/" aria-current="true">${glyph("neuron")}<span>Ask</span></a>`
+    : `<button type="button" id="fxTabAsk" class="fx-tab-ask" aria-controls="askDockPanel" aria-expanded="false">${glyph("neuron")}<span>Ask</span></button>`}
 </nav>`;
 
 const dockTab = (active) => (active === "ask" ? "" : `
   <button type="button" class="ak-dock-tab" id="askDockTab"
           aria-expanded="false" aria-controls="askDockPanel"
-          aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">${glyph("bubble")}<span class="ak-dock-tab-l">Ask</span><span class="ak-dock-tab-k" aria-hidden="true">?</span></button>`);
+          aria-keyshortcuts="?" title="Ask about what has been published — press ? to open">${glyph("neuron")}<span class="ak-dock-tab-l">Ask</span><span class="ak-dock-tab-k" aria-hidden="true">?</span></button>`);
 
 const dock = (active) => (active === "ask" ? "" : `
-<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}" data-css="${v("/assets/css/flows-ask.css")}">
+<aside class="ak-dock" id="askDock" data-src="${v("/assets/js/flows-ask.js")}" data-css="${v("/assets/css/flows-ask.css")} ${v("/assets/css/flows-nn.css")}">
   <div class="ak-dock-scrim" hidden></div>
   <div class="ak-dock-panel" id="askDockPanel" role="complementary"
        aria-label="Ask about the published readings" hidden tabindex="-1">
-    <div class="ak-dock-head">
+    <div class="ak-dock-head nn-host" id="askDockHead" data-nn="off">
+      <i class="nn-edge is-line" aria-hidden="true"><i></i><i></i><i></i><i></i></i>
       <p class="ak-dock-title">${glyph("neuron")}Ask</p>
       <button type="button" class="ak-dock-close" aria-label="Close the assistant">${glyph("x")}</button>
     </div>
@@ -241,6 +247,7 @@ const dock = (active) => (active === "ask" ? "" : `
     <div id="askApp" data-mode="dock"></div>
   </div>
 </aside>
+<i class="nn-host nn-screen" id="nnScreen" data-nn="off" aria-hidden="true"><i class="nn-edge"><i></i><i></i><i></i><i></i></i></i>
 <script src="${v("/assets/js/flows-dock.js")}" defer></script>`);
 
 export function modelName(id) {
@@ -288,10 +295,11 @@ export function neuronProvenance(summary) {
 }
 
 function neuronVerdict(summary) {
-  const glyphTile = `<span class="hm-verdict-g" aria-hidden="true">${glyph("neuron")}</span>`;
+  const mode = !summary || typeof summary.text !== "string" || !summary.text.trim() ? "off" : summary.llm ? "idle" : "plain";
+  const glyphTile = `<span class="hm-verdict-g nn-orb nn-mirror is-44" aria-hidden="true"><i></i><i></i><i></i>${glyph("neuron")}</span>`;
   if (!summary || typeof summary.text !== "string" || !summary.text.trim()) {
     return `
-  <section class="ui-card hm-verdict is-pending" id="hmVerdict" aria-labelledby="hmVerdictT">
+  <section class="ui-card hm-verdict nn-host is-pending" id="hmVerdict" data-nn="off" aria-labelledby="hmVerdictT">
     <div class="hm-verdict-h">
       ${glyphTile}
       <div class="hm-verdict-b">
@@ -311,12 +319,12 @@ function neuronVerdict(summary) {
     ? `<time datetime="${escapeHTML(at)}">${escapeHTML(trtStamp(at) || "")}</time>`
     : "";
   return `
-  <section class="ui-card hm-verdict${summary.llm ? " is-llm" : ""}" id="hmVerdict" aria-labelledby="hmVerdictT">
+  <section class="ui-card hm-verdict nn-host${summary.llm ? " is-llm" : ""}" id="hmVerdict" data-nn="${mode}" aria-labelledby="hmVerdictT">${summary.llm ? '<i class="nn-edge" aria-hidden="true"><i></i><i></i><i></i><i></i></i>' : ""}
     <div class="hm-verdict-h">
       ${glyphTile}
       <div class="hm-verdict-b">
         <h2 class="hm-verdict-line" id="hmVerdictT">${escapeHTML(headline)}</h2>
-        <div class="hm-verdict-meta"><span class="hm-verdict-by">Neuron</span>${when}</div>
+        <div class="hm-verdict-meta"><span class="hm-verdict-by${summary.llm ? " nn-word" : ""}">Neuron</span>${when}</div>
       </div>
       <button class="hm-more" type="button" id="hmNeuronMore" aria-expanded="false" aria-controls="hmNeuronX"><span>More</span>${glyph("chev")}</button>
     </div>
@@ -486,7 +494,7 @@ export function overviewPage({ username = "", summary = null, net = false } = {}
   const panel = (key, body) => `
     <div class="hm-panel" role="tabpanel" id="hmP-${key}" aria-labelledby="hmT-${key}" data-panel="${key}"${key === "session" ? "" : " inert"}>${body}
     </div>`;
-  return `${head("Flows \u2014 Home", "The market in one screen: the tide, the regime, both leaders, what changed and what reports next, each a tab.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-net.css", "/assets/css/flows-net-map.css"] : ["/assets/css/flows-home.css"])}
+  return `${head("Flows \u2014 Home", "The market in one screen: the tide, the regime, both leaders, what changed and what reports next, each a tab.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-nn.css", "/assets/css/flows-net.css", "/assets/css/flows-net-map.css"] : ["/assets/css/flows-home.css", "/assets/css/flows-nn.css"])}
 ${shell("Session", "overview", username, `
   <div class="hm" id="hm">
   <header class="flows-head hm-head" data-fx-hero>
@@ -509,7 +517,8 @@ ${panel("session", `
       <div class="hm-hero-chart" id="hmTide"></div>
       <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
     </div></section>
-${neuronVerdict(summary)}`)}
+${neuronVerdict(summary)}
+    <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`)}
 ${panel("flow", `${homeNetModule(net)}
 ${homeModule("hmAlerts", "Flagged", "ccAlerts", { sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
 ${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}`)}
@@ -1047,9 +1056,10 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     active: "ticker", chart: true,
     username,
     chrome: false,
-    styles: ["/assets/css/flows-ticker.css", "/assets/css/flows-index.css"],
+    styles: ["/assets/css/flows-ticker.css", "/assets/css/flows-nn.css", "/assets/css/flows-index.css"],
     scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker-glance.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
     body: `
+  <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <div class="ft-glance" id="ftGlance" data-glance="off">
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
@@ -1062,19 +1072,19 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     </div>
     <div class="ft-hc" id="ftHc"></div>
   </div></section>
-  <section class="ft-strip" id="ftStrip" aria-label="Neuron verdict" hidden></section>
+  <section class="ft-strip nn-host" data-nn="off" id="ftStrip" aria-label="Neuron verdict" hidden></section>
   <div class="ft-gmain" id="ftGMain">
     <section class="ft-gchart" aria-labelledby="ftGChartT">
       <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span id="ftGTabs"></span><span class="ft-sp"></span><span id="ftGRange"></span><span id="ftGReset"></span></div>
       <div class="ft-glance-chart" id="ftGlanceChart" role="tabpanel"></div>
       <div class="ft-gsurf" id="ftGSurf" role="tabpanel" hidden></div>
     </section>
-    <section class="ft-rail" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
+    <section class="ft-rail nn-host" data-nn="off" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
   </div>
   <div class="ft-glance-cards" id="ftGlanceCards"></div>
   <nav class="ft-dock" id="ftDock" aria-label="Open in place"></nav>
   </div>
-  <section class="ui-card ft-verdict" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
+  <section class="ui-card ft-verdict nn-host" data-nn="off" id="ftVerdict" aria-labelledby="ftVerdictT" hidden></section>
   ${INDEX_NAV}
   <h2 class="ft-dive" id="ftDive" hidden>Dive</h2>
   <div class="ft-grid" id="ftGrid" hidden></div>
@@ -1378,7 +1388,8 @@ export function oracleShell(html, mode, slug) {
   if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
   const page = escapeHTML(String(slug || "overview"));
   const slot = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>
-<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")}"></i>
+<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
+<i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`}
 <i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle.js")}"></i>
 <script src="${v("/assets/js/flows-oracle-boot.js")}" defer></script>`;
   let out = html.replace("</body>", () => slot + "\n</body>");

@@ -501,14 +501,25 @@
     return h("button", { type: "button", class: "ui-tag ak-q", "data-tone": o.tone || null, ...infoAttrs({ title: label, state: o.state || null, lead }) }, o.glyph ? UI.glyph(o.glyph) : null, label);
   }
 
+  const nnHead = document.getElementById("askDockHead"), nnScreen = document.getElementById("nnScreen");
+  const nnWide = () => !!(window.matchMedia && matchMedia("(min-width: 768px)").matches);
+  function nnSettle(kind) {
+    UI.nn(nnHead, kind, "ask");
+    UI.nn(nnScreen, kind === "spoke" ? "spoke" : "off");
+  }
+  const nnTile = (kind) => h("span", { class: "ak-a-g nn-app" + (kind === "spoke" ? "" : " is-" + kind), "aria-hidden": "true" }, UI.glyph("neuron-s"));
+
   function paintAnswer(payload, question) {
     answerHost.replaceChildren();
     if (payload && Object.prototype.hasOwnProperty.call(payload, "spend")) paintSpend(payload.spend, null);
     answerHost.append(h("div", { class: "ak-turn" }, h("p", { class: "ak-asked" }, h("span", { class: "visually-hidden" }, "You asked "), question)));
     const card = h("article", { class: "ak-a", "aria-label": "Answer" });
     answerHost.append(card);
-    const head = h("header", { class: "ak-a-h" }, h("span", { class: "ak-a-g", "aria-hidden": "true" }, UI.glyph("neuron")));
+    const used = !!payload && typeof payload === "object" && payload.status !== "pending" && payload.status !== "unreadable" && llmBlock(payload).used === true && !guardFired(payload.guard && typeof payload.guard === "object" ? payload.guard : null);
+    const kind = !payload || typeof payload !== "object" || payload.status === "pending" || payload.status === "unreadable" ? "off" : used ? "spoke" : "plain";
+    const head = h("header", { class: "ak-a-h" }, nnTile(kind));
     card.append(head);
+    nnSettle(kind);
     if (!payload || typeof payload !== "object") {
       card.append(UI.silent({ state: "withheld", reason: "The route answered in a shape this page cannot read, so there is nothing to show for this question. That is a fault on this page's side of the wire rather than a fact about the session." }, "Answer", 140));
       card.lastChild.setAttribute("data-empty", "unreadable");
@@ -823,6 +834,10 @@
     send.disabled = on;
     form.setAttribute("aria-busy", on ? "true" : "false");
     box.classList.toggle("is-asking", on);
+    if (on) {
+      UI.nn(nnHead, "think", "ask");
+      if (nnWide()) UI.nn(nnScreen, "think");
+    }
   }
   function failAnswer(question, said) {
     answerHost.replaceChildren(h("div", { class: "ak-turn" }, h("p", { class: "ak-asked" }, h("span", { class: "visually-hidden" }, "You asked "), question)));
@@ -830,6 +845,7 @@
     sil.setAttribute("data-empty", "unreadable");
     sil.append(h("span", { class: "visually-hidden" }, said));
     answerHost.append(h("article", { class: "ak-a" }, sil));
+    nnSettle("off");
   }
 
   form.addEventListener("submit", (event) => {
@@ -856,7 +872,7 @@
         : "The question could not be sent: " + (error && error.message ? error.message : error) + ". That is this page failing to reach its route, not a statement about what has been published — " + (DOCKED
           ? "this rail draws no briefing."
           : "the briefing below was read separately and still stands."));
-    }).then(() => { if (!gated) setAsking(false); });
+    }).then(() => { if (!gated) setAsking(false); else nnSettle("off"); });
   });
 
   optional("/api/flows/ai-usage").then((res) => {
@@ -877,7 +893,7 @@
     const first = (said.match(/^.+?[.!?](?=\s|$)/) || [said])[0];
     const when = text(sum.generatedAt) ? F.time(sum.generatedAt) : null;
     greetHost.append(
-      h("span", { class: "ak-a-g", "aria-hidden": "true" }, UI.glyph("neuron")),
+      h("span", { class: "ak-a-g nn-app is-plain", "aria-hidden": "true" }, UI.glyph("neuron-s")),
       h("p", { class: "ak-greet-l" }, first),
       UI.infoButton("the session read", { title: "Neuron", asOf: when, lead: said, notes: [text(sum.provenance)] }, { small: true }));
   });
