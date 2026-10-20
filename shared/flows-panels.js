@@ -101,7 +101,7 @@ export const TICKER_GROUPS = Object.freeze([
   { key: "volatility", label: "Volatility", hash: "ftg-volatility",
     blurb: "What the option chain charges — the smile, the term structure, and " +
       "the move those two imply." },
-  { key: "tape", label: "Tape", hash: "ftg-tape",
+  { key: "tape", label: "Prints", hash: "ftg-tape",
     blurb: "What actually traded: the lifted strikes, the session path, the " +
       "largest lines and the off-exchange prints." },
   { key: "context", label: "Context", hash: "ftg-context",

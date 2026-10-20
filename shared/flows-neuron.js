@@ -205,7 +205,7 @@ function panelRobustness(key, group, p, card) {
       const mins = num(p.minutes), pers = num(p.persistence);
       return mins !== null && mins >= 300 && pers !== null && Math.abs(pers - 0.5) >= 0.15
         ? { r: 3, why: "a full session read with a one-sided persistence" }
-        : { r: 2, why: "a partial session or a two-sided tape" };
+        : { r: 2, why: "a partial session or a two-sided session" };
     }
     case "aggressor": {
       const rep = num(p.reported), un = num(p.unreported);

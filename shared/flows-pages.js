@@ -860,7 +860,7 @@ ${marketModule("mkRiverCard", "Session", "mkRiver", { sub: `<span class="mk-rv-s
 ${panel("tide", `
 ${marketModule("mkTideCard", "Tide", "mkTide", { seg: `<div class="mk-segc" id="mkTideSeg"></div>`, body: `<div class="mk-body"><div id="mkTideLegs"></div><div id="mkTide"></div></div>` })}
 ${marketModule("mkBreadthCard", "Breadth", "", { body: `<div class="mk-body"><div id="mktTilt"></div><div id="mktBreadth"></div></div>` })}
-${marketModule("mkTapeCard", "Tape", "mktTape")}`)}
+${marketModule("mkTapeCard", "Prints", "mktTape")}`)}
 ${panel("sectors", `
 ${marketModule("mkSecTidesCard", "Sector tides", "mkSecTides")}
 ${marketModule("mkSectorsCard", "Momentum", "mktSectors")}
@@ -882,7 +882,7 @@ ${marketModule("mkDarkCard", "Dark pool", "mkDark")}
 ${marketModule("mkImpactCard", "Net impact", "mkImpact")}
 ${marketModule("mkVolumeCard", "Volume", "mkVolume", { seg: `<div class="mk-segc" id="mkVolumeSeg"></div>` })}`)}
 ${panel("context", `
-${marketModule("mkAgainstCard", "Against the tape", "mktAgainst")}
+${marketModule("mkAgainstCard", "Against the prints", "mktAgainst")}
 ${marketModule("mkAdvCard", "Advancers", "mkAdv")}
 ${marketModule("mkRadarCard", "Radar", "mkRadar", { seg: `<div class="mk-segc" id="mkRadarSeg"></div>` })}
 ${marketModule("mkInsidersCard", "Insiders", "mkInsiders")}

@@ -82,7 +82,7 @@ export function readBoardMemory(read, runSessionDate) {
       `The published board this run read is stamped ${prior}, a LATER session than the ${run} ` +
       `this run is publishing, so it cannot be this run's yesterday. Its ${nameCount(rows.length)} ` +
       "were discarded and this board is a cold start. A run publishing an earlier session than " +
-      "the board already live usually means a re-run against a stale tape, and that is worth " +
+      "the board already live usually means a re-run against a stale session, and that is worth " +
       "understanding before the marks here are read as a comparison.");
   }
   return answer("ok", true,
@@ -428,7 +428,7 @@ export async function archiveDatedBoards(payloads, sessionDate, publishFn) {
           `differs from it — the archive is immutable and KEEPS THE FIRST, which is the ` +
           `board the reader saw and the one the record will be scored against. This run's ` +
           `board is live on board:${side} regardless. Two runs on one session disagreeing ` +
-          `is worth understanding: usually a second run against a later tape, but it is ` +
+          `is worth understanding: usually a second run against a later session, but it is ` +
           `also what a scoring change mid-session would look like from here.`);
       } else {
         lines.push(`  archive ${key}: ${error.message}`);

@@ -3093,7 +3093,7 @@
      ]
     },
     {
-     "headline": "Synthetic headline 3 about the broader tape",
+     "headline": "Synthetic headline 3 about the broader market",
      "source": "Reuters",
      "createdAt": "2026-08-21T19:46:00.000Z",
      "createdAtMs": 1787341560000,
@@ -3170,7 +3170,7 @@
      ]
     },
     {
-     "headline": "Synthetic headline 9 about the broader tape",
+     "headline": "Synthetic headline 9 about the broader market",
      "source": "Bloomberg",
      "createdAt": "2026-08-21T19:04:00.000Z",
      "createdAtMs": 1787339040000,
@@ -3199,7 +3199,7 @@
      ]
     },
     {
-     "headline": "Synthetic headline 12 about the broader tape",
+     "headline": "Synthetic headline 12 about the broader market",
      "source": "MarketNews",
      "createdAt": "2026-08-21T18:43:00.000Z",
      "createdAtMs": 1787337780000,
@@ -5160,10 +5160,10 @@
    "notes": {
     "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
     "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's tape.",
+    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's prints.",
     "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
-    "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the tape reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
+    "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
     "seasonality": "Arithmetic over history. It carries no claim about the month ahead.",
     "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the vendor's unpublished definitions, so absence from a list is not evidence of quiet."
    },
@@ -6789,10 +6789,10 @@
    "notes": {
     "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
     "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's tape.",
+    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's prints.",
     "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
-    "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the tape reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
+    "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
     "seasonality": "Arithmetic over history. It carries no claim about the month ahead.",
     "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the vendor's unpublished definitions, so absence from a list is not evidence of quiet."
    },

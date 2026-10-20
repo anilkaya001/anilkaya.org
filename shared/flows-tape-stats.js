@@ -106,7 +106,7 @@ export function largeAt(floor) {
 
 export function largeLabel(floor) {
   const at = largeAt(floor);
-  return at === null ? null : `premium at least ${LARGE_PRINT_MULTIPLE} times the tape's floor of $${Math.round(num(floor)).toLocaleString("en-US")}`;
+  return at === null ? null : `premium at least ${LARGE_PRINT_MULTIPLE} times the stated print floor of $${Math.round(num(floor)).toLocaleString("en-US")}`;
 }
 
 const sideOfTier = (tier) => (tier === "A" || tier === "a" ? 1 : tier === "b" || tier === "B" ? -1 : 0);

@@ -205,7 +205,7 @@ export function screenReading(input) {
     push({
       key: "tilt", group: "flow", label: "Option flow tilt", value: r4(tilt * 100),
       text: signed(tilt * 100, 0) + "%", unit: "of gross option premium (net call premium minus net put premium)", grade: 1,
-      note: "The session's tape at the screener's read, not a standing position. The line for a tilt is ±" + Math.round(L.TILT_DECISIVE * 100) + "%, the share of gross that the card's aggressor ladder also uses.",
+      note: "The session's prints at the screener's read, not a standing position. The line for a tilt is ±" + Math.round(L.TILT_DECISIVE * 100) + "%, the share of gross that the card's aggressor ladder also uses.",
     });
   }
   if (dDelta === null) withhold("dDelta", "Directional delta flow", absent("dDelta"));
@@ -213,7 +213,7 @@ export function screenReading(input) {
     push({
       key: "delta", group: "flow", label: "Directional delta flow", value: r4(dDelta * 100),
       text: signed(dDelta * 100, 2) + "%", unit: "of average daily share volume (delta on the ask side less delta on the bid side)", grade: 1,
-      note: "The session's directionalized delta in shares, signed so that buying calls or selling puts is positive. Today's tape and not a standing position.",
+      note: "The session's directionalized delta in shares, signed so that buying calls or selling puts is positive. Today's prints and not a standing position.",
     });
   }
   const si = v("si");

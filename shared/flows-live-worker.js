@@ -1275,7 +1275,7 @@ export async function serveTape(env, ctx, ticker, now, { fetchVendor, json, admi
       return fresh;
     } catch (error) {
       await release().catch(() => {});
-      emitFailure(console, "error", "tape refresh failed", { ticker }, error);
+      emitFailure(console, "error", "print refresh failed", { ticker }, error);
       return null;
     }
   };

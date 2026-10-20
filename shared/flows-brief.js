@@ -172,7 +172,7 @@ export function briefAlertsFact(payload) {
   const more = seen !== null && Number.isInteger(seen) && seen > ar.length ? seen : null;
   const lead = more === null ? ar.length : more;
   return fact("alerts",
-    lead + " flagged " + plural(lead, "window", "windows") + " on the tape" +
+    lead + " flagged " + plural(lead, "window", "windows") + " in today's prints" +
     (across ? " across " + reads + " reads" + (day ? " on " + day : "") : "") +
     (more === null ? "" : ", " + ar.length + " of them held on the page") +
     (readAt ? (across ? ", the latest " : ", read ") + stampSaid(readAt) : "") + ".",

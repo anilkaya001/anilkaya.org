@@ -693,7 +693,7 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
     .filter((r) => Number.isFinite(r.t))
     .sort((a, b) => a.t - b.t);
 
-  if (rows.length < 3) return unavailable("no intraday tape");
+  if (rows.length < 3) return unavailable("no intraday prints");
 
   const first = rows[0].t;
   const span = rows[rows.length - 1].t - first;
@@ -723,7 +723,7 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
   const pers = sig && sig.persistence !== null && sig.persistence !== undefined
     ? Number(sig.persistence) : null;
   const held = pers === null ? ""
-    : ` — ${Math.round(pers * 100)}% of minutes ran with it, against 50% for a directionless tape`;
+    : ` — ${Math.round(pers * 100)}% of minutes ran with it, against 50% for a directionless session`;
 
   const mag = Math.abs(nd);
   const shown = mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
@@ -732,7 +732,7 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
   const suffix = mag >= 1e6 ? "M" : mag >= 1e3 ? "k" : "";
   const lead = panelLead(
     nd === 0
-      ? `The tape closed FLAT on net delta over ${mins} minute(s): what was bought was sold.`
+      ? `The session's prints closed FLAT on net delta over ${mins} minute(s): what was bought was sold.`
       : `Net ${nd > 0 ? "buying" : "selling"} of ${shown}${suffix} delta-weighted ` +
         `contracts over ${mins} minute(s)${held}.`,
     {
@@ -794,9 +794,9 @@ export function buildCongress(tradeRows, { asOf = null, limit = 12 } = {}) {
   if (!rows.length) {
 
     if (tradeRows === null || tradeRows === undefined) {
-      return unavailable("the disclosure tape was not read for this name in this run");
+      return unavailable("the disclosure feed was not read for this name in this run");
     }
-    return quiet("the disclosure tape was read and named no member trading this ticker");
+    return quiet("the disclosure feed was read and named no member trading this ticker");
   }
   rows.sort((a, b) => b._sort - a._sort);
   const kept = rows.slice(0, limit).map(({ _sort, ...r }) => r);
@@ -1876,7 +1876,7 @@ function oiDeltasLead(panel) {
     `surfaced with a contract count, open interest ${side}: ` +
     `${say(c)} across ${calls.length} call line${calls.length === 1 ? "" : "s"} ` +
     `against ${say(pu)} across ${puts.length} put line${puts.length === 1 ? "" : "s"} ` +
-    `— one clearing day late, never today's tape.`,
+    `— one clearing day late, never today's prints.`,
     {
       counted: rows.length,
       callLines: calls.length,

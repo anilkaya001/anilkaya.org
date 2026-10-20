@@ -31,16 +31,16 @@ export const STOCK_CAPS = Object.freeze({
 
 export const STOCK_NOTES = Object.freeze({
   darkpool:
-    "Off-exchange equity trades in this name, reported to the tape and " +
+    "Off-exchange equity trades in this name, reported to the print feed and " +
     "ranked here by their own dollar size. These are executions — but the " +
-    "tape reports them with delay, attributes no side and no participant, " +
+    "print feed reports them with delay, attributes no side and no participant, " +
     "and 'dark pool' names the off-exchange reporting facility, not a " +
     "venue. A large print says size moved; it does not say which way " +
     "anyone was positioned.",
   oiDeltas:
     "The vendor's largest contract-level open-interest changes in this " +
     "name. An open-interest change compares two clearing snapshots, so it " +
-    "is a settled fact a day late by construction — never today's tape — " +
+    "is a settled fact a day late by construction — never today's prints — " +
     "and the vendor's selection rule for which contracts surface here is " +
     "not published.",
   volContext:
