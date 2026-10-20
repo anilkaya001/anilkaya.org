@@ -186,7 +186,7 @@
   {"paths":["shared/flows-neuron.js"],"role":"The Neuron: implied state table, structures by state, ideas, verdicts and claims.","domain":"flows-server"},
   {"paths":["shared/flows-overlay.js"],"role":"Joins score rows to prices for the track overlay.","domain":"flows-server"},
   {"paths":["shared/flows-ownership.js"],"role":"Ownership reads: short interest, borrow fee, short volume ratio, insider clusters.","domain":"flows-server"},
-  {"paths":["shared/flows-pages.js"],"role":"Server-rendered Flows page shells, navigation, and `ASSET_VERSION`.","domain":"flows-server"},
+  {"paths":["shared/flows-pages.js"],"role":"Server-rendered Flows page shells, navigation, and `ASSET_VERSION` and `FONTS_VERSION` (the Inter preload's token, held equal to `assets/fonts-version.txt`).","domain":"flows-server"},
   {"paths":["shared/flows-panels.js"],"role":"The ticker panel table, tiers and groups.","domain":"flows-server"},
   {"paths":["shared/flows-permits.js"],"role":"The permit queue that spaces on-demand vendor calls: a delay function, an in-flight cap and reservation hooks.","domain":"flows-server"},
   {"paths":["shared/flows-political.js"],"role":"Political trade rows: bands, sides and filing shapes, and the page oracle the browser copy is tested against: `netBounds`, `stateOf` (never a firm reduction: sales carry midpoints only), `blindShare`, `treemapWeight`, `isFund`.","domain":"flows-server"},

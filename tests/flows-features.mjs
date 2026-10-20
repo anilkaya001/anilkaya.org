@@ -848,6 +848,28 @@ const near = (a, b, tol, msg) => {
   ok(ASSET_VERSION === onDisk,
      `flows-pages ASSET_VERSION (${ASSET_VERSION}) matches assets/version.txt (${onDisk})`);
 
+  const { FONTS_VERSION } = PAGES;
+  const fontsOnDisk = readFileSync(new URL("../assets/fonts-version.txt", import.meta.url), "utf8").trim();
+  ok(FONTS_VERSION === fontsOnDisk,
+     `flows-pages FONTS_VERSION (${FONTS_VERSION}) matches assets/fonts-version.txt (${fontsOnDisk}), not the asset version (${onDisk})`);
+  const base = readFileSync(new URL("../assets/css/base.css", import.meta.url), "utf8");
+  ok(base.includes(`url("/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}")`),
+     "base.css names the Inter face at the version the Flows pages preload, so the preload and the @font-face are one request");
+  const preload = `<link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>`;
+  let rendered = 0;
+  for (const [name, fn] of Object.entries(PAGES)) {
+    if (typeof fn !== "function" || !/Page$/.test(name)) continue;
+    const html = String(fn({ username: "tester", ticker: "AAPL" }));
+    const links = [...html.matchAll(/<link\b[^>]*\srel="preload"[^>]*>/g)].map((m) => m[0]);
+    ok(links.filter((l) => l.includes("woff2")).join("") === preload,
+       `${name} preloads Inter-latin once, with the fonts token, as the home page and the Lab shells do`);
+    ok(!/woff2\?v=\d+/.test(html.replace(preload, "")), `${name} carries no other versioned font reference`);
+    ok(html.indexOf(preload) > html.indexOf('rel="icon"') && html.indexOf(preload) < html.indexOf('href="/assets/css/base.css'),
+       `${name} starts the font before the stylesheet that names it`);
+    rendered++;
+  }
+  ok(rendered >= 12, `${rendered} page functions were checked`);
+
   const emitted = new Set();
   for (const [name, fn] of Object.entries(PAGES)) {
     if (typeof fn !== "function" || !/Page$/.test(name)) continue;

@@ -1185,7 +1185,12 @@ pattern reads as `.js`).
 
 A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
 references (eight `@font-face` URLs in `base.css`, one Inter preload in each
-of the eight pages that preload it), and a merge takes such a rewrite from
+of the eight pages that preload it). The Flows pages preload the same file
+from `head()` in `shared/flows-pages.js`, whose `FONTS_VERSION` constant
+(deliberately not `ASSET_VERSION` and not read through `v()`) is held equal to
+`assets/fonts-version.txt` by `tests/flows-features.mjs`; `contracts.mjs` does
+not scan that file, so those references are not in the sixteen, and
+`bump-assets` never moves the constant. A merge takes such a rewrite from
 another branch silently, because this branch's font lines are unchanged.
 The contract test fails on the first moved font reference, naming the file
 and the expected token. After a bump and after any merge, run
@@ -1199,7 +1204,8 @@ When a font under `assets/fonts/` changes:
 1. set `assets/fonts-version.txt` to the new `assets/version.txt` value (the
    `@font-face` URLs change, so `base.css` changes and the asset version
    increments with it);
-2. update every woff2 `?v=` in `base.css` and the HTML preloads;
+2. update every woff2 `?v=` in `base.css` and the HTML preloads, and
+   `FONTS_VERSION` in `shared/flows-pages.js`;
 3. run the contract test.
 
 The fonts token is therefore the asset version at which a font last changed
