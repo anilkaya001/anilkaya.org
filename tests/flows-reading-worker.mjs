@@ -740,6 +740,20 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const f = world();
   F.seed(f, { live: false });
   f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const ai = { run: async (model, input) => ({ response: "EXMP sells subscription software.", usage: { prompt_tokens: 900, completion_tokens: 60 } }) };
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const coldAsk = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
+  await coldAsk.settle();
+  eq(coldAsk.res.status, 200, "ASK, COLD (P1-42): a question about a name nothing has fetched answers");
+  eq(stub.calls.length, 0, "and makes 0 vendor calls (" + stub.calls.length + ")");
+  ok(coldAsk.body.dossierFacts > 0 && !coldAsk.body.facts.some((x) => /^dossier:EXMP\/identity\.description$/.test(x.id)), "and carries the stored facts without a description the vendor has not been asked for");
+}
+
+{
+  const f = world();
+  F.seed(f, { live: false });
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const asks = [];
   const reply = { text: "EXMP sells subscription software and cloud infrastructure, and the last price is $127.40." };
   const ai = {
@@ -751,8 +765,14 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   };
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const warmed = await get("/api/flows/dossier?t=EXMP");
+  await warmed.settle();
+  ok(stub.calls.length > 0, "a full dossier read then fetches (" + stub.calls.length + " calls)");
+  dropHot();
+  const callsBefore = stub.calls.length;
   const a = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
   await a.settle();
+  eq(stub.calls.length, callsBefore, "ASK, WARM: the same question after a full read makes no further vendor call");
   eq(a.res.status, 200, "ASK: a ticker question answers");
   ok(a.body.dossierFacts > 0 && a.body.dossierFacts <= R.ASK_MAX_FACTS, "it carries " + a.body.dossierFacts + " dossier facts");
   ok(a.body.facts.some((x) => /^dossier:EXMP\//.test(x.id)), "among the picked facts");

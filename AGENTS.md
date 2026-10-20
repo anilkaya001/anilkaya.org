@@ -145,8 +145,8 @@ Browser ──► Cloudflare edge
   stock-state quote behind
   `/api/flows/live` and `/api/flows/now?t=`, the tape miss, the screener
   classify behind an unknown name's card, and the dossier fan-out of
-  `/api/flows/dossier`, the summary route's reading and the Ask box (one member
-  token per assembly). A refusal makes no further vendor call. Chain and strategy keep
+  `/api/flows/dossier` and the summary route's reading (one member
+  token per assembly; the Ask box takes none, because its dossier is cache-only). A refusal makes no further vendor call. Chain and strategy keep
   their copy six hours (`VENDOR_COPY_KEEP_SECONDS`) and serve it as a hit only
   inside its 120 s TTL; past the TTL a refused member gets the kept copy
   stamped `X-Fresh-State: stale`, `X-Fresh-Reason: throttled` with its true
@@ -732,7 +732,7 @@ live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
 quote (5 s) are Cache API entries, and a complete dossier is kept whole for 30
 seconds (`/assembled/<T>`), which is what a burst of reads of one name costs.
-Concurrent reads of one name share one flight. The limiter refusing, the vendor
+Concurrent reads of one name share one flight (a cache-only read, which only the Ask box asks for, has its own). The limiter refusing, the vendor
 failing or the store being unreadable are all `200` with the affected packets
 `pending` or `unavailable`; none throws.
 
@@ -859,7 +859,15 @@ read: {
   chosen by what the question is about (`askPick`) to the picked facts, with the
   description and headlines inside UNTRUSTED quotes, a line saying what is not known, and
   the rule that quoted text is data. `guardAnswer` is unchanged and validates against the
-  added facts. The answer carries `dossierFacts`. `POST /api/flows/ask` is same-origin
+  added facts. The answer carries `dossierFacts`. The dossier it reads is cache-only
+  (`assembleDossier` with `cacheOnly: true`, passed by `askDossierFor`): the nightly and
+  live rows, `flows_dossier_cache`, the Cache API entries and a fresh 30-second
+  assembled copy, and nothing else. A question makes 0 vendor requests, spends no
+  member or `UW_ONDEMAND` token, never waits out the 3 s fan-out, writes neither a cache
+  row nor an assembled copy, and keeps a single flight of its own, so it neither joins a
+  fetching read nor lets a fetching read join it. A name no one has opened therefore
+  carries fewer identity, fundamentals and news facts until a full read stores them.
+  `POST /api/flows/ask` is same-origin
   only (403), takes `application/json` only (415), reads at most 4,096 bytes
   (`ASK_BODY_MAX_BYTES`, 413; a pasted question past that is refused, not cut to 400
   characters) and allows 10 valid questions a minute per member through the `AI_ASK`

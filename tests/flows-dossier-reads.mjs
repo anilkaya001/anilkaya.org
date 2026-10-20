@@ -709,6 +709,77 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   ok(consulted.length >= 1 && consulted.every((k) => k === A), "the reading's assembly is metered under A's key (" + consulted.join(",") + ")");
 }
 
+{
+  const [A] = FIXTURE_ROSTER;
+  const consulted = [];
+  const ondemand = { n: 0 };
+  const MEMBER_VENDOR = { limit: async ({ key }) => { consulted.push(key); return { success: true }; } };
+  const UW_ONDEMAND = { limit: async () => { ondemand.n++; return { success: true }; } };
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const factIds = (r) => (r.body.facts || []).map((x) => x.id);
+
+  const f = world();
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  const get = await client(f.D1, { MEMBER_VENDOR, UW_ONDEMAND, AI: undefined }, A);
+  const cold = await get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
+  await cold.settle();
+  eq(cold.res.status, 200, "P1-42, THE ASK PATH: a cold, carded name answers");
+  eq(stub.calls.length, 0, "and the question makes 0 vendor calls (" + stub.calls.length + "), where the same assembly made 8");
+  ok(cold.body.dossierFacts > 0 && factIds(cold).some((id) => /^dossier:EXMP\//.test(id)), "the answer still carries dossier facts from what the site holds (" + cold.body.dossierFacts + ")");
+  ok(factIds(cold).some((id) => /^dossier:EXMP\/identity\.name$/.test(id)) && !factIds(cold).some((id) => /^dossier:EXMP\/(identity\.description|fundamentals\.)/.test(id)),
+    "from the nightly alone: the name is there, the vendor's description and fundamentals are not, because nothing has fetched them");
+  same(consulted, [], "the member limiter is not consulted: a question spends no vendor allowance");
+  eq(ondemand.n, 0, "and no token of the shared UW_ONDEMAND budget");
+  eq(storedKinds(f).length, 0, "nothing is written to flows_dossier_cache from the question");
+  ok(![...cache.store.keys()].some((k) => k.includes("/assembled/")), "and no 30-second assembled copy is kept, so a reader after it is not handed a dossier nobody fetched");
+
+  stub.reset();
+  const full = await get("/api/flows/dossier?t=EXMP");
+  await full.settle();
+  eq(full.res.headers.get("X-Dossier-Vendor-Calls"), "8", "THE NEXT FULL READ STILL FETCHES: the dossier route after the question makes its 8 calls (" + full.res.headers.get("X-Dossier-Vendor-Calls") + ")");
+  ok(full.body.dossier.coverage.pending === 0, "with nothing pending");
+  dropHot();
+  stub.reset();
+  const warm = await get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
+  await warm.settle();
+  eq(stub.calls.length, 0, "AFTER A FULL READ the same question still makes 0 calls");
+  ok(factIds(warm).some((id) => /^dossier:EXMP\/identity\.description$/.test(id)) && factIds(warm).some((id) => /^dossier:EXMP\/fundamentals\./.test(id)),
+    "and now carries the description and fundamentals, read from flows_dossier_cache");
+  stub.reset();
+  const hot = await get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
+  await hot.settle();
+  eq(stub.calls.length, 0, "and a question inside the 30-second copy of a full read makes 0 calls too");
+}
+
+{
+  const f = world();
+  f.put("brief", { v: 1, sessionDate: F.SESSION, generatedAt: F.GENERATED, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
+  for (const k of ["info", "news", "analysts", "financials", "ownership", "profile", "estimates", "breakdown"]) stub.state.delay.set(k, 700);
+  const get = await client(f.D1, { AI: undefined });
+  const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const t0 = Date.now();
+  const fetching = get("/api/flows/dossier?t=EXMP");
+  await wait(10);
+  const asked = get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
+  const a = await asked;
+  const askedAt = Date.now() - t0;
+  const d = await fetching;
+  const dAt = Date.now() - t0;
+  eq(a.res.status, 200, "P1-42, THE FLIGHT IS KEYED BY cacheOnly: a question asked while a full read is fetching answers");
+  ok(askedAt < 500 && dAt >= 700, "without joining the fetching flight: it came back at " + askedAt + " ms, the full read at " + dAt + " ms, which waited for the 700 ms vendor");
+  eq(d.res.headers.get("X-Dossier-Vendor-Calls"), "8", "and the full read made its own 8 calls, none lost to the question");
+  await d.settle();
+  dropHot();
+  stub.reset();
+  const first = get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
+  await wait(5);
+  const second = await get("/api/flows/dossier?t=EXMP");
+  await second.settle();
+  await (await first).settle();
+  ok(second.res.status === 200 && second.body.dossier.coverage.pending === 0, "and a full read that starts while a question's cache-only flight is open does not join it (0 pending)");
+  for (const k of ["info", "news", "analysts", "financials", "ownership", "profile", "estimates", "breakdown"]) stub.state.delay.delete(k);
+}
+
 restoreClock();
 cache.restore();
 stub.restore();

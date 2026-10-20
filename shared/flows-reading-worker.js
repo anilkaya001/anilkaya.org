@@ -355,7 +355,7 @@ export async function readingSafe(env, ctx, ticker, deps, opts) {
 }
 
 export async function askDossierFor(ticker, question, deps) {
-  const result = await deps.assemble({ own: false });
+  const result = await deps.assemble({ own: false, cacheOnly: true });
   const dossier = result.dossier;
   if (!hasSubstance(dossier)) return { facts: [], promptFacts: [], about: null, silent: KINDS.slice(), rule: ASK_QUOTE_RULE };
   const pick = askPick(dossier, question, {});
