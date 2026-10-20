@@ -2,7 +2,7 @@ import { readMembers, memberOf } from "./flows-auth.js";
 import { fixtureHost, isFixtureTicker } from "./flows-fixture-names.js";
 import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
 
-const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
+export const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
 
 export function rtTopics(raw) {
   if (raw === null || raw === "") return { ok: true, topics: RT_TOPIC_KEYS.slice() };

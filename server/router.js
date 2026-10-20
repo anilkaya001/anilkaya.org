@@ -2,13 +2,15 @@ import { HttpError, requireMethod } from "./http.js";
 
 const AUTH = Object.freeze(["none", "flows"]);
 const METHODS = Object.freeze(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+const ANY_METHOD = Object.freeze(["*"]);
+const decidesItsMethods = (methods) => methods.length === 1 && methods[0] === ANY_METHOD[0];
 
 function checked(row, seen) {
   if (row === null || typeof row !== "object") throw new TypeError("router: a row is an object");
   const { id, path, methods, auth, handler } = row;
   if (typeof id !== "string" || id === "") throw new TypeError("router: a row has an id");
   if (typeof path !== "string" || !path.startsWith("/") || path.length < 2) throw new TypeError("router: " + id + " has an absolute path");
-  if (!Array.isArray(methods) || methods.length === 0 || !methods.every((m) => METHODS.includes(m))) {
+  if (!Array.isArray(methods) || methods.length === 0 || !(decidesItsMethods(methods) || methods.every((m) => METHODS.includes(m)))) {
     throw new TypeError("router: " + id + " lists its methods");
   }
   if (!AUTH.includes(auth)) throw new TypeError("router: " + id + " names an auth gate");
@@ -31,7 +33,7 @@ export function createRouter(...families) {
   async function handle(rc, gates) {
     const row = table.get(rc.url.pathname);
     if (row === undefined) return null;
-    requireMethod(rc.request, row.methods);
+    if (!decidesItsMethods(row.methods)) requireMethod(rc.request, row.methods);
     let session = null;
     if (row.auth === "flows") {
       session = await gates.flows(rc.request, rc.env);

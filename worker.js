@@ -46,6 +46,7 @@ import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-cal
 import { flowsOpsRows } from "./server/routes/flows-ops.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
+import { flowsRtRows } from "./server/routes/flows-rt.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
 import { chainFor } from "./shared/flows-ai-broker.js";
@@ -2894,6 +2895,8 @@ async function renderCourse(request, env, url, meta, ctx) {
   return rewritten;
 }
 
+const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
+
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
@@ -2918,7 +2921,8 @@ flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (e
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
-  } }));
+  } }),
+flowsRtRows({ serveRt: rtServe }));
 
 const flowsNotFound = () => new Response(notFoundPage(), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
 
@@ -3581,7 +3585,7 @@ async function route(request, env, url, ctx) {
   }
 
   if (path.startsWith("/api/rt/")) {
-    return serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
+    return rtServe(request, env, url);
   }
 
   if (path.startsWith("/api/")) {
