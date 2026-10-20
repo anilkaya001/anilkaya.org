@@ -775,6 +775,32 @@
   const citesOf = (it) => arr(it && it.cites).filter((c) => c && typeof c.id === "string");
   const CLAIM_TONES = ["--accent", "--lvl-flip", "--warn", "--s-teal"];
   const LIVE = { asked: 0, ping: null, beat: null };
+  const NN = { strip: 0, rail: 0, spoke: false, spokeRail: false };
+  const nnOrb = (size) => h("span", { class: "ft-neuron nn-orb" + (size ? " is-" + size : ""), "aria-hidden": "true" }, h("i"), h("i"), h("i"), glyph("neuron"));
+  const nnEdge = () => h("i", { class: "nn-edge", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i"));
+  function nnSync() {
+    const n = STATE.neuron || {};
+    const ok = n.status === "ok" && typeof n.summary === "string" && n.summary.trim();
+    let a;
+    if (NN.strip && n.status === "pending") a = "think";
+    else if (NN.strip && ok && refreshing(n)) a = "refresh";
+    else if (ok) a = n.llm ? "idle" : "plain";
+    else a = STATE.card && cardRead(STATE.card, n) ? "plain" : "off";
+    if (NN.spoke && a === "idle") a = "spoke";
+    UI.nn(stripEl, a, "strip");
+    UI.nn(verdictEl, a);
+    const r = n.read;
+    const shown = r && typeof r.sections === "object" && r.sections && (r.sections.now || r.sections.identity);
+    let b;
+    if (NN.rail && readIs(r, "generating")) b = "think";
+    else if (NN.rail && readIs(r, "ready") && refreshing(r)) b = "refresh";
+    else if (readIs(r, "ready") && r.generated === true) b = "idle";
+    else if (readIs(r, "ready", "fallback", "generating") && shown) b = "plain";
+    else b = "off";
+    if (NN.spokeRail && b === "idle") b = "spoke";
+    UI.nn(railEl, b, "rail");
+  }
+  const nnLoad = () => { UI.defer("nn-orb", { when: "idle" }).then(() => { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); }); };
   const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null, expiry: null };
   const SURF = { view: "price", api: null, load: null, tabs: null, seq: 0 };
   const frameEl = $("ftGlance"), stripEl = $("ftStrip"), railEl = $("ftReadRail"), dockEl = $("ftDock"), diveEl = $("ftDive");
@@ -829,7 +855,8 @@
     const st = ok ? (n.context && n.context.state) || null : own && own.st;
     const conf = st && num(st.confidence) !== null ? " " + SEP.trim() + " confidence " + st.confidence + " of 2" : "";
     stripEl.replaceChildren(
-      h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")),
+      nnEdge(),
+      nnOrb(32),
       h("div", { class: "ft-strip-m" }, h("span", { class: "ft-strip-k" }, "Neuron" + conf),
         h("p", { class: "ft-strip-line" + (body ? "" : " is-empty"), title: body || null }, body || (n.loading ? LOADING_READ : "No read"))),
       engineChip(engineWord(card, n)));
@@ -904,6 +931,7 @@
     if (GLANCE.focus === hit || !railEl) return;
     GLANCE.focus = hit;
     railEl.dataset.focus = hit || "";
+    for (const n of document.querySelectorAll("[data-claims]")) n.toggleAttribute("data-nn-cite", hit !== null && n.getAttribute("data-claims").split(" ").includes(hit));
     for (const b of railEl.querySelectorAll(".ft-claim")) b.classList.toggle("is-on", b.dataset.claim === hit);
     paintFoot();
   }
@@ -965,7 +993,7 @@
     if (!railEl) return;
     closePop(false);
     railEl.hidden = !STATE.glance || SURF.view === "surface";
-    railEl.replaceChildren();
+    railEl.replaceChildren(nnEdge());
     GLANCE.focus = null;
     railEl.dataset.focus = "";
     if (!STATE.glance) return;
@@ -1030,6 +1058,7 @@
   function paintReading(read) {
     paintRail(read);
     if (GLANCE.ready) glanceUpdate();
+    nnSync();
   }
 
   const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-network", "Flow network"]];
@@ -1282,6 +1311,8 @@
     seatVerdict();
     paintStrip(card, neuron);
     paintReading(neuron && neuron.read);
+    nnSync();
+    nnLoad();
   }
 
   function renderVerdictCard(card, neuron) {
@@ -1292,7 +1323,7 @@
     const ok = n.status === "ok" && typeof n.summary === "string" && n.summary.trim();
     const own = ok ? null : cardRead(card, n);
     const tn = stanceOf(card, n);
-    const head = h("div", { class: "ft-v-h" }, h("span", { class: "ft-neuron", "aria-hidden": "true" }, glyph("neuron")));
+    const head = h("div", { class: "ft-v-h" }, nnOrb());
     const mid = h("div", { class: "ft-v-m" });
     const gone = n.tier === "expired";
     const entries = gone ? [] : ideaEntries(card, n);
@@ -3128,25 +3159,47 @@
   function awaitNeuron(t, card, i = 0) {
     const settle = (s) => renderVerdict(card, { ...STATE.neuron, status: s || "unavailable" });
     if (STATE.card !== card) return;
-    if (i > 6) return STATE.neuron && STATE.neuron.status === "ok" ? undefined : settle();
+    if (i > 6) { NN.strip = 0; return settle(STATE.neuron && STATE.neuron.status === "ok" ? "ok" : undefined); }
+    NN.strip = 1;
+    nnSync();
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const s = nr && nr.status;
+      const again = s === "ok" ? refreshing(nr) : s === "pending";
+      NN.strip = again ? 1 : 0;
+      NN.spoke = s === "ok" && !again && !!nr.llm;
       if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1); else if (readPending(nr)) awaitReading(t, card); }
       else if (s !== "pending") settle(typeof s === "string" && s);
       else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1); }
+      NN.spoke = false;
     }), 5000 + i * 3500);
   }
 
   function awaitReading(t, card, i = 0) {
-    if (STATE.card !== card || i > 9) return;
+    if (STATE.card !== card) return;
+    if (i > 9) {
+      NN.rail = 0;
+      const r = STATE.neuron && STATE.neuron.read;
+      if (readIs(r, "generating") || (readIs(r, "ready") && refreshing(r))) {
+        const done = readIs(r, "generating") ? { ...r, status: "fallback" } : { ...r, refreshing: false };
+        STATE.neuron = { ...STATE.neuron, read: done };
+        paintReading(done);
+      }
+      return;
+    }
+    NN.rail = 1;
+    nnSync();
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const read = nr && nr.read;
-      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) return;
+      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) { NN.rail = 0; nnSync(); return; }
+      const again = read.status === "generating" || refreshing(read);
+      NN.rail = again ? 1 : 0;
+      NN.spokeRail = !again && read.status === "ready" && read.generated === true;
       STATE.neuron = { ...STATE.neuron, read };
       paintReading(read);
-      if (read.status === "generating" || refreshing(read)) awaitReading(t, card, i + 1);
+      NN.spokeRail = false;
+      if (again) awaitReading(t, card, i + 1);
     }), 4000 + i * 2500);
   }
 

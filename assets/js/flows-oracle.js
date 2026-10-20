@@ -42,7 +42,7 @@
     pref: "on", mode: host.getAttribute("data-oracle") === "quiet" ? "quiet" : "on", route: "idle",
     top: null, rec: new Map(), recFail: new Map(), msgs: [], open: false, opener: null, behind: [], expanded: new Set(),
     lastFlowAt: null, announceAt: 0, announceQ: null, announceTimer: null, gesture: false, toastTimer: null,
-    liveState: L.createState(), unsub: null, hidden: false, asked: new Set(), batchAt: 0
+    liveState: L.createState(), unsub: null, hidden: false, asked: new Set(), batchAt: 0, nnState: ""
   };
 
   function cookie(name) {
@@ -175,8 +175,8 @@
   var orb, pill, pillGlyph, pillText, badge, liveEl, toast, sheet, scrim, list, titleEl, subEl, closeBtn, infoBtn, infoNote, prefSeg, prefBtns = {};
 
   function spark() {
-    var svg = s("svg", { class: "orc-spark", viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" });
-    s("path", { d: "M12 3.2c.5 4.6 2.6 7.2 8.8 8.8-6.2 1.6-8.3 4.2-8.8 8.8-.5-4.6-2.6-7.2-8.8-8.8 6.2-1.6 8.3-4.2 8.8-8.8z" }, svg);
+    var svg = s("svg", { class: "ui-g orc-spark", "aria-hidden": "true", focusable: "false" });
+    s("use", { href: "#g-neuron-s" }, svg);
     return svg;
   }
 
@@ -187,7 +187,7 @@
     pill = h("span", { class: "orc-pill", "aria-hidden": "true" }, pillGlyph, pillText);
     badge = h("span", { class: "orc-badge", "aria-hidden": "true", hidden: "" });
     orb = h("button", { type: "button", class: "orc-orb", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-controls": SHEET_ID },
-      pill, h("span", { class: "orc-disc" }, h("span", { class: "orc-glow", "aria-hidden": "true" }), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
+      pill, h("span", { class: "orc-disc nn-orb nn-mirror is-52" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
     liveEl = h("p", { class: "visually-hidden", role: "status", "aria-live": "polite" });
     toast = h("p", { class: "orc-toast", "aria-hidden": "true", hidden: "" });
     scrim = h("div", { class: "orc-scrim", hidden: "" });
@@ -305,6 +305,16 @@
     return base + STATE_NAME[state] + ", press to open";
   }
 
+  function nnApply(state) {
+    var want = state === "stale" ? "off" : "idle";
+    if (S.route === "idle" && S.pref !== "off") want = "think";
+    else if (state === "signal" && S.nnState !== "signal") want = "spoke";
+    else if (want === "idle" && host.dataset.nn === "spoke") want = "spoke";
+    S.nnState = state;
+    if (want === "spoke" && host.dataset.nn === "spoke") return;
+    U.nn(host, want, "oracle");
+  }
+
   function paintOrb() {
     var state = stateNow();
     var n = liveCount() + (focusRec() && focusRec().state === "signal" ? 1 : 0);
@@ -312,6 +322,7 @@
     var showPill = S.pref === "on" && hl && !S.open;
     host.hidden = S.pref === "off";
     host.setAttribute("data-state", state);
+    nnApply(state);
     host.setAttribute("data-pref", S.pref);
     host.classList.toggle("has-pill", !!showPill);
     if (hl) { pillGlyph.textContent = hl.glyph; pillText.textContent = hl.text; }
@@ -645,10 +656,6 @@
     if (S.pref !== "off") say("Neuron: " + top.say);
     if (S.pref === "on" && !S.open && window.matchMedia("(max-width: 767.98px)").matches) showToast(top.ticker + " · " + KIND_SHORT[top.kind]);
     buzz();
-    host.classList.remove("is-flash");
-    void host.offsetWidth;
-    host.classList.add("is-flash");
-    setTimeout(function () { host.classList.remove("is-flash"); }, 700);
     paint();
   }
 
@@ -668,16 +675,20 @@
 
   function loadCss() {
     var i = document.querySelector('i[data-defer="oracle"][data-css]');
-    var href = i ? i.getAttribute("data-css") : null;
-    if (!href || document.querySelector('link[href="' + href + '"]')) return Promise.resolve();
-    return new Promise(function (ok) {
-      var l = document.createElement("link");
-      l.rel = "stylesheet";
-      l.href = href;
-      l.onload = ok;
-      l.onerror = ok;
-      document.head.append(l);
+    var hrefs = (i ? i.getAttribute("data-css") || "" : "").split(" ").filter(function (href) {
+      return href && !document.querySelector('link[href="' + href + '"]');
     });
+    var loads = hrefs.map(function (href) {
+      return new Promise(function (ok) {
+        var l = document.createElement("link");
+        l.rel = "stylesheet";
+        l.href = href;
+        l.onload = ok;
+        l.onerror = ok;
+        document.head.append(l);
+      });
+    });
+    return loads.length ? loads[0] : Promise.resolve();
   }
 
   function onKey(e) {
@@ -699,6 +710,7 @@
     var tick = setInterval(function () { if (!document.hidden) paintOrb(); }, 60000);
     S.timer = tick;
     paint();
+    if (S.pref !== "off") U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
     host.hidden = S.pref === "off";
     return S.pref === "off" ? Promise.resolve() : Promise.all([loadTop(), loadRec(ticker())]).then(paint);
   }
