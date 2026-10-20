@@ -478,7 +478,7 @@
     if (payload.status === "quiet") {
       hush(into, "empty",
         "The headlines feed was read and the vendor returned no rows: a measurement — the " +
-        "tape was checked and was empty — and not a request that failed.", "headlines", 64);
+        "feed was checked and was empty — and not a request that failed.", "headlines", 64);
       return;
     }
     if (payload.status === "unreadable") {
@@ -512,7 +512,7 @@
     else if (typeof payload.cadence === "string" && payload.cadence) {
       said.push("This feed is fetched " + payload.cadence +
         (typeof payload.staleBy === "string" && payload.staleBy ? " and is stale by " + payload.staleBy : "") +
-        ", so it is a once-a-day read and never a live tape.");
+        ", so it is a once-a-day read and never a live feed.");
     }
     const kept = isNum(payload.kept);
     const oldestAt = typeof payload.oldest === "string" ? Date.parse(payload.oldest) : NaN;

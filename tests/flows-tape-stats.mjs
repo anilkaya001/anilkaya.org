@@ -160,7 +160,7 @@ const print = (o = {}) => ({
   ok(hasFlag(f({ premium: "250000" }, { floor: 25000 }), "large"), "exactly ten floors");
   ok(hasFlag(f({ premium: 400000 }, { floor: "25000" }), "large"), "a string floor and a number premium");
   ok(!hasFlag(f({ premium: null }, { floor: 25000 }), "large"), "no premium, no large print");
-  eq(largeLabel(25000), "premium at least 10 times the tape's floor of $25,000", "the label states the multiple and the floor");
+  eq(largeLabel(25000), "premium at least 10 times the stated print floor of $25,000", "the label states the multiple and the floor");
   eq(largeLabel(null), null, "and there is no label without a floor");
 
   for (const [name, o] of [["multi-leg", { upstream_condition_detail: "mlet" }], ["dividend", { tags: ["ask_side", "dividend"] }], ["arbitrage", { tags: ["bid_side", "arbitrage"], price: "1.00" }], ["canceled", { canceled: true }]]) {

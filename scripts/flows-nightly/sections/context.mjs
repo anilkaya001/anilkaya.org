@@ -74,7 +74,7 @@ export async function runContext(ctx) {
         `), ${boardMatched} of ${onBoard.size} board name(s) matched` +
         (crossSectionTickers.length
           ? `, and ${congressByTicker.size - boardMatched} of ${crossSectionTickers.length} ` +
-            "cross-section name(s) from the same tape, at no further call"
+            "cross-section name(s) from the same prints, at no further call"
           : ""));
     } catch (error) {
       congressRead = "failed";

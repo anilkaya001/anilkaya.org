@@ -333,7 +333,7 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
 
 {
   const nightly = briefToday(REAL).facts.find((f) => f.id === "alerts");
-  eq(nightly.say, "2 flagged windows on the tape, read 2026-09-04 11:33 TRT.",
+  eq(nightly.say, "2 flagged windows in today's prints, read 2026-09-04 11:33 TRT.",
      "a nightly read with no session record keeps its one-read sentence");
   const same = briefAlertsFact(ALERTS);
   eq(same.say, nightly.say, "and the builder the intraday refresh calls is the one the brief itself uses");
@@ -341,22 +341,22 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
   const record = briefAlertsFact({ ...ALERTS, readAt: "2026-09-22T20:15:09.000Z",
     rows: Array.from({ length: 180 }, (_, i) => ({ t: "T" + i })),
     record: { date: "2026-09-22", reads: 12 } });
-  eq(record.say, "180 flagged windows on the tape across 12 reads on 2026-09-22, the latest 2026-09-22 23:15 TRT.",
+  eq(record.say, "180 flagged windows in today's prints across 12 reads on 2026-09-22, the latest 2026-09-22 23:15 TRT.",
      "an intraday record says it is a union of reads and names the session it covers, rather than " +
      "calling 180 rows one read");
   eq(record.n.reads, 12, "the read count is pinned for the guard");
   const union = briefAlertsFact({ ...ALERTS, readAt: "2026-09-22T20:15:09.000Z", seen: 226,
     rows: Array.from({ length: 180 }, (_, i) => ({ t: "T" + i })),
     record: { date: "2026-09-22", reads: 12 } });
-  eq(union.say, "226 flagged windows on the tape across 12 reads on 2026-09-22, 180 of them held on the page, " +
+  eq(union.say, "226 flagged windows in today's prints across 12 reads on 2026-09-22, 180 of them held on the page, " +
      "the latest 2026-09-22 23:15 TRT.",
-     "WHEN THE DAY'S UNION IS LARGER THAN THE PAGE the count on the tape is the union and the page count is " +
-     "named as the part held: '180 flagged windows on the tape' sat beside 'holds 180 of the 226 alerts read' " +
-     "and called the page count the tape");
+     "WHEN THE DAY'S UNION IS LARGER THAN THE PAGE the count in today's prints is the union and the page count is " +
+     "named as the part held: '180 flagged windows in today's prints' sat beside 'holds 180 of the 226 alerts read' " +
+     "and called the page count the prints");
   eq(union.n.seen, 226, "with the union pinned for the guard beside the page count");
   eq(union.n.flagged, 180, "and the page count kept under its old name");
   eq(briefAlertsFact({ ...ALERTS, seen: 200, rows: Array.from({ length: 60 }, (_, i) => ({ t: "T" + i })) }).say,
-     "200 flagged windows on the tape, 60 of them held on the page, read 2026-09-04 11:33 TRT.",
+     "200 flagged windows in today's prints, 60 of them held on the page, read 2026-09-04 11:33 TRT.",
      "a nightly read the row cap shed from says the same thing about its one read");
   eq(briefAlertsFact({ ...ALERTS, seen: 2 }).say, nightly.say, "while a page that holds every window read keeps the short sentence");
   eq(briefAlertsFact({ status: "quiet", rows: [] }), null, "a quiet feed states no count");

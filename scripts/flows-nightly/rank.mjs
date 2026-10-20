@@ -1141,7 +1141,7 @@ export function priorNote(mark, runSessionDate, shown) {
         `than the ${runSessionDate || "unresolved session"} this run is publishing, so it ` +
         `cannot be this run's yesterday. Its ${named} were discarded and no row here claims ` +
         "to be a first appearance. A run publishing an earlier session than the feed already " +
-        "live usually means a re-run against a stale tape, and that is worth understanding " +
+        "live usually means a re-run against a stale session, and that is worth understanding " +
         "before these marks are read as a comparison.";
     case "quiet":
       return "The counter feed was read and named no contract this run can identify, so there " +

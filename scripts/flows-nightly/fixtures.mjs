@@ -221,7 +221,7 @@ export function fakeNewsHeadlines(tickers) {
     return {
       created_at: new Date(at).toISOString(),
       headline: `Synthetic headline ${i + 1} about ` +
-        (withTickers ? names[Math.floor(rnd() * names.length)] : "the broader tape"),
+        (withTickers ? names[Math.floor(rnd() * names.length)] : "the broader market"),
       source: SOURCES[i % SOURCES.length],
       sentiment: SENTIMENT[i % SENTIMENT.length],
       is_major: i % 7 === 0,

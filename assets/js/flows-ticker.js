@@ -391,7 +391,7 @@
   const put = (n, text) => { if (n.textContent !== text) n.textContent = text; };
   const liveInfo = () => ({ title: "Live price", state: "live", asOf: F.time(PX.pp.readAt),
     lead: "Re-read from the vendor's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
-    facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Session open", F.px(PX.q.open)], ["High", F.px(PX.q.high)], ["Low", F.px(PX.q.low)], ["Tape time", PX.q.tapeTime ? F.time(PX.q.tapeTime) : null], ["Card close", F.px(PX.S)]] });
+    facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Session open", F.px(PX.q.open)], ["High", F.px(PX.q.high)], ["Low", F.px(PX.q.low)], ["Print time", PX.q.tapeTime ? F.time(PX.q.tapeTime) : null], ["Card close", F.px(PX.S)]] });
   const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The vendor's last price, which can include trades after the regular session closed. The session close is the figure below as Card close. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
     facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Card close", F.px(PX.S)]] });
   const readInfo = () => ({ title: "Last read", asOf: F.time(PX.at),
@@ -1061,7 +1061,7 @@
     nnSync();
   }
 
-  const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Tape"], ["m-movelab", "Move lab"], ["m-network", "Flow network"]];
+  const DOCK = [["m-ideas", "Ideas"], ["m-hedge", "Hedging grid"], ["m-worlds", "Two worlds"], ["m-tape", "Prints"], ["m-movelab", "Move lab"], ["m-network", "Flow network"]];
 
   function glanceOpts() {
     const n = STATE.neuron || null;
@@ -1261,7 +1261,7 @@
     if (on) on.focus({ preventScroll: true });
   }
 
-  const DOCK_WHY = { "m-movelab": "Not for index funds and funds: they have no single-company report or typical day.", "m-worlds": "Not on this card: no fitted smile to draw two worlds from.", "m-hedge": "Not on this card: no priced structures to hedge with.", "m-ideas": "Not on this card: the engine priced no ideas.", "m-network": "Not built for this name.", "m-tape": "Not on this card: no tape was read." };
+  const DOCK_WHY = { "m-movelab": "Not for index funds and funds: they have no single-company report or typical day.", "m-worlds": "Not on this card: no fitted smile to draw two worlds from.", "m-hedge": "Not on this card: no priced structures to hedge with.", "m-ideas": "Not on this card: the engine priced no ideas.", "m-network": "Not built for this name.", "m-tape": "Not on this card: no prints read." };
 
   function paintDock() {
     if (!dockEl) return;
@@ -1834,13 +1834,13 @@
     if (!L) return [];
     const P = L.panel;
     const hasP = L.p.some((v) => num(v) !== null && v !== 0);
-    const out = [L.src === "tape" ? "Drawn from this session's " + (STATE.tapeLive ? "live tape" : "tape, read " + tapeSub("", tapePrem())) + "; the path signature below is the card's, from the session it describes." : null,
-      "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || (L.src === "tape" ? "a unit the live tape does not state" : "the unit the card publishes")) + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
+    const out = [L.src === "tape" ? "Drawn from this session's " + (STATE.tapeLive ? "live prints" : "prints, read " + tapeSub("", tapePrem())) + "; the path signature below is the card's, from the session it describes." : null,
+      "Each leg is scaled to its own extreme, so both reach full height: net delta in " + (L.dUnit || (L.src === "tape" ? "a unit the live feed does not state" : "the unit the card publishes")) + (hasP ? ", net premium in " + (L.pUnit || "dollars") + "." : "."),
       hasP ? null : "The session carried no net premium in either direction, so only the delta leg is drawn."];
     if (P && num(P.persistence) === null && !("persistence" in P)) out.push("This card was built before the path signature was published, so persistence, concentration and the mean minute are not stated, and no mean-minute rule is drawn.");
     else if (P) {
       if (num(P.concentration) !== null) out.push("The busiest 5% of minutes carried " + Math.round(P.concentration * 100) + "% of the delta moved, against the 5% a uniform session would put there.");
-      if (num(P.persistence) !== null) out.push(Math.round(P.persistence * 100) + "% of minutes ran with the net direction, against 50% for a tape with no direction.");
+      if (num(P.persistence) !== null) out.push(Math.round(P.persistence * 100) + "% of minutes ran with the net direction, against 50% for no direction.");
       if (num(P.centroid) !== null) out.push("The delta-weighted mean minute sits " + Math.round(P.centroid * 100) + "% of the way through the session, drawn as the dotted rule.");
     }
     return out;
@@ -2485,7 +2485,7 @@
     const ml = okOf(X.multiLeg);
     const meter = (label, v, c) => h("div", { class: "ft-meter" }, h("span", null, label), h("span", { class: "ui-meter" }, h("i", { style: { "--w": (clamp(num(v) || 0, 0, 1) * 100).toFixed(1) + "%", "--c": cssVar(c) } })), h("b", null, F.pct(v, 0)));
     const tileList = [
-      offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alert tape"),
+      offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alerts"),
         info: () => ({ title: "Flow alerts", lead: al ? al.n + " alerts on this name in the session, " + F.money(al.prem) + " of premium" + (al.complete ? "." : "; the read stopped before the open, so the count is a floor.") : null,
           facts: [["Ask side", F.pct(al && al.askShare, 0)], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
         body: al ? h("div", { class: "ft-meters" }, meter("Ask", al.askShare, "--up-mark"), meter("Sweep", al.sweepShare, "--s-orange"), meter("Open", al.openingShare, "--s-blue")) : null }),
@@ -2499,7 +2499,7 @@
     mod({ id: "m-flow", title: "Flow", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 7, body: [
       mets([
         metric("Net premium", moneyPx(net), { tone: tone(net), sub: tp ? tapeSub("live", tp) : path && num(path.minutes) ? Math.round(path.minutes / 6) / 10 + "h session" : null, state: num(net) === null ? stSession : null }),
-        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? tapeSub("live tape", tp) : "session", state: num(nd) === null ? stSession : null }),
+        metric("Net delta", F.num(nd, true), { tone: tone(nd), sub: tp ? tapeSub("live prints", tp) : "session", state: num(nd) === null ? stSession : null }),
         offIndex(card, X.nope) ? null : metric("NOPE", nope ? F.pct(nope.close, 1, true) : DASH, { tone: nope ? tone(nope.close) : null, sub: nope && num(nope.z) !== null ? "z " + F.signed(nope.z, 1) : nope ? "no history" : null, state: nope ? null : xSt(X.nope, "NOPE read") }),
         metric("Aggressor", F.num(agNet, true), { tone: tone(agNet), sub: agNet === null ? null : agNet < 0 ? "to puts" : "to calls", state: agNet === null ? panelSt(card, "aggressor", "aggressor ladder") : null }),
       ], { min: 96 }), vw.box, vw.leg, tiles],
@@ -2509,7 +2509,7 @@
           ["Tenor", fe ? "conviction " + fx(fe.convictionDte, 1) + " days, bucket " + fe.convictionBucket + ", OTM share " + F.pct(fe.otmShare, 0) : null],
           ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },
-          { title: "Session", lines: [tp ? "Read from the " + (STATE.tapeLive ? "live " : "") + "tape at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
+          { title: "Session", lines: [tp ? "Read from the " + (STATE.tapeLive ? "live " : "") + "prints at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
           { title: "Days", lines: [npY ? "Net premium per session over the year from the vendor's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
       }) });
     vw.start();
@@ -2748,11 +2748,11 @@
     const views = [
       { label: "Contracts", st: panelSt(card, "topContracts", "contract list"), name: "Top contracts", h: 200, draw: list("contracts", "Top contracts") },
       { label: "OI", st: panelSt(card, "oiDeltas", "open-interest list"), name: "Open-interest changes", h: 200, draw: list("oi", "Open-interest changes") },
-      { label: "Alerts", st: al ? OK : xSt(X.alerts, "alert tape"), never: offIndex(card, X.alerts), name: "Flow alerts", h: 200, draw: list("alerts", "Flow alerts") },
+      { label: "Alerts", st: al ? OK : xSt(X.alerts, "alerts"), never: offIndex(card, X.alerts), name: "Flow alerts", h: 200, draw: list("alerts", "Flow alerts") },
       { label: "Prints", st: panelSt(card, "darkpool", "dark-pool prints"), name: "Dark-pool prints", h: 200, draw: list("prints", "Dark-pool prints") },
       { label: "Shelves", st: dl ? OK : xSt(X.dpLevels, "dark-pool price levels"), never: offIndex(card, X.dpLevels), name: "Dark-pool shelves", draw: (host) => ({ handle: shelvesChart(host, card, dl), legend: [keyOf("--s-purple", "", "Top shelves"), keyOf("--label-3", "", "Dark"), keyOf("--fill-2", "", "Lit")] }) },
     ];
-    const vw = viewer("Tape view", views);
+    const vw = viewer("Print view", views);
     const st = vwSt(vw);
     const basis = tc && tc.oiBasis ? tc.oiBasis : null;
     const basisLine = (() => {
@@ -2763,9 +2763,9 @@
       if (basis.verdict === "no-data") return "Quiet — the basis of open interest against volume could not be checked: no line traded " + basis.minVolume + " contracts.";
       return "Unavailable — the basis check published a " + String(basis.verdict || "verdict") + " verdict without a count that supports it, so no reading is drawn from it.";
     })();
-    mod({ id: "m-tape", title: "Tape", span: [12, 7], st, seg: vw.seg, views: vw.views, index: 9, body: [vw.box, vw.leg],
+    mod({ id: "m-tape", title: "Prints", span: [12, 7], st, seg: vw.seg, views: vw.views, index: 9, body: [vw.box, vw.leg],
       info: () => ({
-        title: "Tape", state: st.state === "ok" ? null : st.state,
+        title: "Prints", state: st.state === "ok" ? null : st.state,
         sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the vendor reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the vendor clears on."] },
           { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the vendor counts them; a missing counter is a dash, never a zero."] },
           views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium the vendor attributes to the ask side." : reasonOf(views[2].st)] },
@@ -2930,8 +2930,8 @@
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
-    for (const [x, ids] of [[STATE.cardX, "gamma hedge vol flow pos tape"], [STATE.hist, "gamma flow"]]) if (x.off && x.status !== "absent")
-      for (const id of ids.split(" ")) { const t = document.querySelector("#m-" + id + " .ui-mod-t"); if (t && !t.textContent.includes(day(x.off))) t.append(tag(day(x.off))); }
+    for (const [x, ids] of [[STATE.cardX, ["gamma","hedge","vol","flow","pos","tape"]], [STATE.hist, ["gamma","flow"]]]) if (x.off && x.status !== "absent")
+      for (const id of ids) { const t = document.querySelector("#m-" + id + " .ui-mod-t"); if (t && !t.textContent.includes(day(x.off))) t.append(tag(day(x.off))); }
   }
 
   function paintAll() {
@@ -3005,8 +3005,8 @@
     if (!L || !L.d.some((v) => num(v) !== null)) return;
     const view = h("div", { class: "ft-view" }), leg = h("div", { class: "ft-leg-row" });
     const p = L.p[L.p.length - 1], d = L.d[L.d.length - 1], tp = tapePrem();
-    mod({ id: "m-flow", title: "Flow", span: [12, 6], index: 7, body: [mets([metric("Net premium", moneyPx(p), { tone: tone(p), sub: tapeSub("live", tp) }), metric("Net delta", F.num(d, true), { tone: tone(d), sub: tapeSub("live tape", tp) })], { min: 96 }), h("div", { class: "ft-cbox" }, view), leg],
-      info: () => ({ title: "Flow", lead: "The session's tape for " + card.ticker + ".", sections: [{ title: "Session", lines: pathNotes(card, L) }] }) });
+    mod({ id: "m-flow", title: "Flow", span: [12, 6], index: 7, body: [mets([metric("Net premium", moneyPx(p), { tone: tone(p), sub: tapeSub("live", tp) }), metric("Net delta", F.num(d, true), { tone: tone(d), sub: tapeSub("live prints", tp) })], { min: 96 }), h("div", { class: "ft-cbox" }, view), leg],
+      info: () => ({ title: "Flow", lead: "Session prints for " + card.ticker + ".", sections: [{ title: "Session", lines: pathNotes(card, L) }] }) });
     const r = pathChart(view, card, L);
     if (r.legend) leg.append(legend(r.legend));
   }

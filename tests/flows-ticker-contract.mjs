@@ -770,7 +770,7 @@ try {
       eq(got.chips.join(" "), "IV pct IV 30d Dealer γ Earnings Size", "with the five screen readings as hero chips, the universe's one-year IV percentile named pct, never rank");
       eq(got.clipped, 0, `${width}px no chip label is cut off`);
       eq(got.ranks.join(" "), "IV 30d VRP Term γ / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
-      eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live tape once it resolves");
+      eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live prints once it resolves");
       ok(got.verdict, "and no verdict: there is no card for the Neuron to read");
       ok(["IV 30d", "VRP", "γ / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
          `the Screen draws every column the row carries and none it lacks (${got.screen.join(", ")})`);
@@ -2289,15 +2289,15 @@ try {
     {
       const { page, errors } = await open(tapeOf(session, "20:00"), verdict("live", "cadence"));
       const got = await flow(page);
-      ok(got && /Net premium.*live.*Net delta.*live tape/.test(got.text), `T10: a tape the server calls live is labelled live (${got && got.text.slice(0, 90)})`);
-      ok(got && /Drawn from this session's live tape/.test(got.info), `and its disclosure says the path is the live tape (${got && got.info.slice(0, 160)})`);
+      ok(got && /Net premium.*live.*Net delta.*live prints/.test(got.text), `T10: a tape the server calls live is labelled live (${got && got.text.slice(0, 90)})`);
+      ok(got && /Drawn from this session's live prints/.test(got.info), `and its disclosure says the path is the live prints (${got && got.info.slice(0, 160)})`);
       eq(errors.length, 0, "and throws nothing");
       await page.close();
     }
     {
       const { page } = await open(tapeOf(session, "20:00"), null);
       const got = await flow(page);
-      ok(got && /Net premium.*live.*Net delta.*live tape/.test(got.text), "with no freshness headers at all the label is what it always was");
+      ok(got && /Net premium.*live.*Net delta.*live prints/.test(got.text), "with no freshness headers at all the label is what it always was");
       await page.close();
     }
     {
@@ -2305,8 +2305,8 @@ try {
       const got = await flow(page);
       ok(got && /to 23:00 TRT/.test(got.text) && !/\blive\b/.test(got.text),
         `A TAPE THAT HAS CLOSED IS NOT 'LIVE': it says how far it runs (${got && got.text.slice(0, 120)})`);
-      ok(got && /Drawn from this session's tape, read to 23:00 TRT/.test(got.info) && !/live tape/.test(got.info),
-        `and the disclosure still says the drawn path is the tape's, with how far it was read, instead of going silent once the tape is final (${got && got.info.slice(0, 200)})`);
+      ok(got && /Drawn from this session's prints, read to 23:00 TRT/.test(got.info) && !/live prints/.test(got.info),
+        `and the disclosure still says the drawn path is the prints', with how far it was read, instead of going silent once the tape is final (${got && got.info.slice(0, 200)})`);
       await page.close();
     }
     {
@@ -2315,7 +2315,7 @@ try {
       tape.ticker = card.ticker;
       const { page } = await open(tape, verdict("closed", "session-final"), { card });
       const got = await flow(page);
-      ok(got && /Read from the tape at/.test(got.info) && !/live tape/.test(got.info),
+      ok(got && /Read from the prints at/.test(got.info) && !/live prints/.test(got.info),
         `a full card's Session section says where the drawn path was read from once the tape is final (${got && got.info.slice(0, 240)})`);
       await page.close();
     }
@@ -2325,7 +2325,7 @@ try {
       tape.ticker = card.ticker;
       const { page } = await open(tape, verdict("live", "cadence"), { card });
       const got = await flow(page);
-      ok(got && /Read from the live tape at/.test(got.info), `and a live tape keeps its old wording (${got && got.info.slice(0, 240)})`);
+      ok(got && /Read from the live prints at/.test(got.info), `and a live prints keeps its old wording (${got && got.info.slice(0, 240)})`);
       await page.close();
     }
     {
@@ -2334,8 +2334,8 @@ try {
       const { page, errors } = await open(tape, undefined);
       const first = await flow(page);
       ok(first && /to 17:58 TRT/.test(first.text) && !/\blive\b/.test(first.text),
-        `A TAPE THE SERVER CALLS STALE IS NEVER LABELLED LIVE: a complete row read at 17:58 TRT and shown at 02:00 TRT said 'live tape' (${first && first.text.slice(0, 120)})`);
-      ok(first && !/live tape/.test(first.info), "and its disclosure does not claim to be the live tape");
+        `A TAPE THE SERVER CALLS STALE IS NEVER LABELLED LIVE: a complete row read at 17:58 TRT and shown at 02:00 TRT said 'live prints' (${first && first.text.slice(0, 120)})`);
+      ok(first && !/live prints/.test(first.info), "and its disclosure does not claim to be the live prints");
       eq(page._requested.filter((u) => /^tape/.test(u)).length, 1, "it is asked for once on load");
       await page.waitForFunction(() => /to 23:00 TRT/.test((document.getElementById("m-flow") || {}).innerText || ""), null, { timeout: 12000 }).catch(() => {});
       const healed = await flow(page);
@@ -2411,7 +2411,7 @@ try {
     {
       const { page } = await open(tapeOf(back, "20:00"), verdict("stale", "behind", back));
       const got = await flow(page);
-      ok(!got, `A PREVIOUS SESSION'S TAPE IS NOT DRAWN AS THIS ONE'S: a name last opened five days ago showed that day's premium path under 'live tape' (${got && got.text.slice(0, 100)})`);
+      ok(!got, `A PREVIOUS SESSION'S TAPE IS NOT DRAWN AS THIS ONE'S: a name last opened five days ago showed that day's premium path under 'live prints' (${got && got.text.slice(0, 100)})`);
       await page.close();
     }
     {
@@ -2423,7 +2423,7 @@ try {
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, card, { tape, headers: { tape: verdict("stale", "behind", back) }, now: { ...now, expected: card.sessionDate }, at });
       const got = await flow(page);
-      ok(got && !/live tape/.test(got.text) && !/live tape/.test(got.info) && !/to 23:00 TRT/.test(got.text),
+      ok(got && !/live prints/.test(got.text) && !/live prints/.test(got.info) && !/to 23:00 TRT/.test(got.text),
         `a full card falls back to its own session path rather than the old tape (${got && got.text.slice(0, 140)})`);
       eq(errors.length, 0, "without throwing");
       await page.close();

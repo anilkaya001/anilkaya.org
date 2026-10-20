@@ -3668,12 +3668,12 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const tuesday = at("2026-09-22T14:01:13Z");
   ok(tuesday.inside && tuesday.refuse,
      "THE INTRADAY GUARD REFUSES the 14:01Z firing that published 2026-09-21 from 09-22's tape");
-  ok(/refusing to publish session 2026-09-21 from an in-progress tape/.test(tuesday.message),
+  ok(/refusing to publish session 2026-09-21 from an in-progress session/.test(tuesday.message),
      `with a message naming the session and the clock (${tuesday.message.slice(0, 90)}…)`);
   const allowed = intradayRefusal("2026-09-21", { at: new Date("2026-09-22T17:17:00Z"), allow: true });
   ok(allowed.inside && allowed.allowed && !allowed.refuse,
      "allow_intraday lets a manual run through, and the result says it was allowed");
-  ok(/PUBLISHING FROM AN IN-PROGRESS TAPE/.test(allowed.message), "and the log says what that means");
+  ok(/PUBLISHING FROM AN IN-PROGRESS SESSION/.test(allowed.message), "and the log says what that means");
   ok(!at("2026-09-22T21:30:00Z").inside, "21:30Z in summer is 17:30 EDT — after the close");
   ok(!at("2026-12-15T21:30:00Z").inside, "21:30Z in winter is 16:30 EST — after the close");
   ok(at("2026-12-15T20:30:00Z").inside,

@@ -359,7 +359,7 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
 }
 
 {
-  const { picked } = selectFacts(INDEX, "how did the tape lean on premium");
+  const { picked } = selectFacts(INDEX, "how did the prints lean on premium");
   const breadth = byId("market/breadth");
 
   const faithful = guardAnswer(
@@ -1444,7 +1444,7 @@ import { chromium } from "playwright";
     await ask(page, {
       answer: "Readings.", llm: false, guard: null, capped: false, silences: null, why: "", model: null, note: null,
       facts: [
-        { id: "brief:today/alerts", say: "184 flagged windows on the tape across 14 reads on 2026-09-22, 180 of them held on the page.",
+        { id: "brief:today/alerts", say: "184 flagged windows in today's prints across 14 reads on 2026-09-22, 180 of them held on the page.",
           n: { flagged: 180, seen: 184, reads: 14 }, topic: [], source: "brief", at: STAMP2 },
         { id: "neuron:SYN7/variation", say: "SYN7 — Where hedging flow comes from (robustness 3 of 3): Next session, time alone moves dealer hedges to buy $16.02M of SYN7.",
           n: { robustness: 3, charmPerSession: -16023457 }, topic: ["syn7"], source: "card:SYN7", at: STAMP2 },
@@ -1890,9 +1890,9 @@ import { chromium } from "playwright";
      "with nothing to read from, no refresh stamp is invented");
 
   const briefAlerts = (x) => x.facts.find((f) => f.id === "brief:today/alerts");
-  ok(/^2 flagged windows on the tape, read 2026-09-04 11:33 TRT\.$/.test(briefAlerts(index).say),
+  ok(/^2 flagged windows in today's prints, read 2026-09-04 11:33 TRT\.$/.test(briefAlerts(index).say),
      "the nightly index carries the brief's own count of the alert feed");
-  eq(briefAlerts(next).say, "4 flagged windows on the tape, read 2026-09-04 21:00 TRT.",
+  eq(briefAlerts(next).say, "4 flagged windows in today's prints, read 2026-09-04 21:00 TRT.",
      "AND THE REFRESH REBUILDS IT from the feed it just wrote. Production served '60 flagged windows " +
      "on the tape, read 17:20' beside 'holds 180 of the 226 alerts read' at 20:15, because only facts " +
      "whose source is the feed were replaced and this one's source is the brief");

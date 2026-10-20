@@ -25,7 +25,7 @@ export const SIZE_BASIS =
 
 export const POLITICAL_NOTES = Object.freeze({
   unit:
-    "One row is one statutory disclosure, not a transaction seen on a tape. " +
+    "One row is one statutory disclosure, not a transaction seen in the prints. " +
     "The filing states a date, a side, a security and a dollar RANGE — never " +
     "an amount — so every size on this page is an estimate from a band.",
   lag:
@@ -66,7 +66,7 @@ export const POLITICAL_NOTES = Object.freeze({
     "many disclosures carry it. That date is what \"new\" means on this page — " +
     "not the session date, because on the ordinary morning nothing at all is " +
     "filed, and marking every row stale against a day with no filings would " +
-    "describe the calendar rather than the tape.",
+    "describe the calendar rather than the market.",
   refusals:
     "A disclosure is an opening with no paired closing print, so nothing here " +
     "measures how any position fared and no such measure is shown. Nothing " +

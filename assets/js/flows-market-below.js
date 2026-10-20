@@ -298,7 +298,7 @@
         ranking: "the session's largest net call premium", empty: "No short-board name appears in the session's largest net call premium." },
     ];
     if (!sides.some((side) => Array.isArray(side.list))) {
-      host.append(emptyLine("unavailable", "This movers payload published neither premium extreme, so the boards have nothing to join.", "against the tape"));
+      host.append(emptyLine("unavailable", "This movers payload published neither premium extreme, so the boards have nothing to join.", "against the prints"));
       return;
     }
     let hits = 0, population = 0, agree = 0, agreePop = 0;
@@ -316,7 +316,7 @@
         continue;
       }
       if (!boardRows.length) {
-        col.append(emptyLine("quiet", "The " + side.side + " board ranked no name this session, so nothing on this side is read against the tape.", side.side + " board join", 64));
+        col.append(emptyLine("quiet", "The " + side.side + " board ranked no name this session, so nothing on this side is read against the prints.", side.side + " board join", 64));
         continue;
       }
       const found = crossBoard(boardRows, side.list);
@@ -331,12 +331,12 @@
     }
     host.prepend(UI.metrics([
       UI.metric("Against", population ? hits + " of " + population : DASH, { tone: hits ? "warn" : null, sub: population ? "board names" : null,
-        state: population ? null : { state: "quiet", reason: "No board name was joined against the tape this session." } }),
+        state: population ? null : { state: "quiet", reason: "No board name was joined against the prints this session." } }),
       agreePop ? UI.metric("With", agree + " of " + agreePop, { tone: agree ? "up" : null, sub: "board names" }) : null,
     ].filter(Boolean), { min: 140 }));
     host.append(grid);
     host.dataset.lead = !population
-      ? "No board name was joined against the tape this session, so there is no population to state a count against."
+      ? "No board name was joined against the prints this session, so there is no population to state a count against."
       : hits + " of " + population + " published board names (" + joined.join(", ") + ") appear in the opposite premium extreme this session" +
         (agreePop ? ", and " + agree + " of " + agreePop + " in the extreme on their own side." : ".");
     const caveats = [];
@@ -590,7 +590,7 @@
       h("span", { class: "ui-meter" }, h("i", { style: { "--w": ((isNum(r.prem) || 0) / top * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar("--s-purple") } })),
       h("span", { class: "ui-row-v" }, usd(r.prem)))), { visible: 6, label: "Largest off-exchange prints" }));
     const hhmm = (iso) => (typeof iso === "string" && iso.length >= 16 ? iso.slice(11, 16) : DASH);
-    const detail = table("Off-exchange equity trades reported to the tape, as the vendor surfaces them", [["Name"], ["Time", true], ["Price", true], ["Size", true], ["Premium", true]],
+    const detail = table("Off-exchange equity trades reported to the print feed, as the vendor surfaces them", [["Name"], ["Time", true], ["Price", true], ["Size", true], ["Premium", true]],
       rows.map((r) => [r.t || DASH, hhmm(r.at), isNum(r.px) === null ? DASH : "$" + isNum(r.px).toFixed(2), grouped(r.size), usd(r.prem)]));
     const notes = pulse.notes || {};
     infoInto("mkDarkCard", "dark pool", () => ({ title: "Dark pool", lead: "The largest off-exchange prints by dollar size.", notes: [notes.darkpool, capLine(feed, rows.length, "prints")], node: detail }));

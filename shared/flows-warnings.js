@@ -155,7 +155,7 @@ function checkSessionBoundary(s) {
         session + " session, so a flagged-window count and a board rank are not readings " +
         "from the same day."
       : "The flow-alert record on flowalerts still covers " + day + " while the boards rank " +
-        "the " + session + " session, so the tape shown beside today's board belongs to a " +
+        "the " + session + " session, so the prints shown beside today's board belongs to a " +
         "session that has already closed and the record never reset at the boundary.",
     { recordDay: day, session },
     [KEY.alerts, boardKey])];
@@ -200,7 +200,7 @@ function checkPopulation(s) {
     subject + " against " + prior + " on the " +
     (priorSession === null ? "previous" : priorSession) + " board, a fall of " + fellPct +
     "%, and a fall this size comes from the dead band or the earnings gate cutting deeper " +
-    "as readily as from a quieter tape, which these two row counts cannot tell apart.",
+    "as readily as from a quieter session, which these two row counts cannot tell apart.",
     n, sources)];
 }
 

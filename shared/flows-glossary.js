@@ -86,7 +86,7 @@ export const GLOSSARY = Object.freeze([
   { key: "sector-tides", term: "Sector tides", ...MARKET, lines: [
     "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
   ] },
-  { key: "tape", term: "Tape", ...MARKET, lines: [
+  { key: "tape", term: "Prints", ...MARKET, lines: [
     "Seven aggregate readings over the screened universe; each names the population it was measured over.",
   ] },
   { key: "tide", term: "Tide", ...MARKET, lines: [

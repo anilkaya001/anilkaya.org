@@ -560,7 +560,7 @@ export function buildPricePacket(inp) {
     last = q.price;
     asOf = q.tapeTime || null;
     parts.push({ kind: "live", key: "quote" });
-    rec.fact("last", "Last price", q.price, "usd/share", { grade: asOf ? 3 : 1, note: asOf ? null : "the vendor stamped no tape time on this quote" });
+    rec.fact("last", "Last price", q.price, "usd/share", { grade: asOf ? 3 : 1, note: asOf ? null : "the vendor stamped no print time on this quote" });
     rec.fact("change", "Change from the previous close", q.change, "fraction", { signed: true, grade: asOf ? 3 : 1 });
     rec.fact("open", "Open", q.open, "usd/share", { silent: true });
     rec.fact("high", "Day high", q.high, "usd/share", { silent: true });
@@ -1264,7 +1264,7 @@ export function buildPositioningPacket(inp) {
     rec.fact("congress.sells", "Of which sales", cg.sells, "count", { grade: gradeBySession(cgGap) });
     rec.fact("congress.lag", "Median days from trade to disclosure", cg.medianLagDays, "days", { grade: gradeBySession(cgGap), silent: true });
   } else if (cg && cgGap < 2 && cg.status === "quiet") {
-    rec.fact("congress.total", "Congressional trades disclosed in this name", 0, "count", { grade: gradeBySession(cgGap), note: "the disclosure tape was read and named no member trading it" });
+    rec.fact("congress.total", "Congressional trades disclosed in this name", 0, "count", { grade: gradeBySession(cgGap), note: "the disclosure feed was read and named no member trading it" });
   } else {
     rec.hold("congress", h.card ? why("absent", "the card's congress panel is " + (cg ? cg.status : "missing")) : why("absent", "no card holds a disclosure read for this name"));
   }
@@ -1319,12 +1319,12 @@ export function buildFlowPacket(inp) {
       const at = prem.lastAt || null;
       if (at) stamps.push(at);
       const g = at ? 3 : 1;
-      rec.fact("tape.net", "Net option premium on the tape so far today", lastOf(prem.net), "usd", { signed: true, grade: g, note: "cumulative since the open" });
-      rec.fact("tape.delta", "Net directional delta on the tape so far today", lastOf(prem.nd), "shares", { signed: true, grade: g, silent: true, note: "shares-equivalent" });
+      rec.fact("tape.net", "Net option premium in today's prints so far", lastOf(prem.net), "usd", { signed: true, grade: g, note: "cumulative since the open" });
+      rec.fact("tape.delta", "Net directional delta in today's prints so far", lastOf(prem.nd), "shares", { signed: true, grade: g, silent: true, note: "shares-equivalent" });
     }
     const ta = isObj(tape.alerts) && Array.isArray(tape.alerts.rows) ? tape.alerts.rows : [];
     if (!alerts && ta.length) {
-      rec.fact("tape.alerts", "Flagged option alerts on the tape today", ta.length, "count", { grade: 2 });
+      rec.fact("tape.alerts", "Flagged option alerts in today's prints", ta.length, "count", { grade: 2 });
     }
   }
 
@@ -1652,7 +1652,7 @@ const WORDS = Object.freeze({
   analysts: ["analyst", "analysts", "rating", "ratings", "target", "upgrade", "downgrade"],
   fundamentals: ["revenue", "margin", "margins", "debt", "cash", "profit", "growth", "valuation", "fundamentals"],
   positioning: ["short", "insider", "insiders", "institution", "institutions", "congress", "ownership", "squeeze"],
-  flow: ["flow", "premium", "alerts", "darkpool", "dark", "sweeps", "tape"],
+  flow: ["flow", "premium", "alerts", "darkpool", "dark", "sweeps", "prints"],
   peers: ["sector", "peers", "rank", "percentile"],
   macro: ["market", "macro", "tide", "spy", "backdrop", "regime"],
 });

@@ -359,6 +359,6 @@ export const UNUSUAL_NOTES = Object.freeze({
     "needs a risk-free rate and a dividend yield, which this desk does not invent. " +
     "No “bullish bet” or “bearish bet”: a call taken at the offer is " +
     "equally a collar leg, a short-stock hedge, a closing purchase or a dealer " +
-    "hedge. No “smart money”: the tape carries no counterparty identity at " +
+    "hedge. No “smart money”: the prints carry no counterparty identity at " +
     "any tier.",
 });

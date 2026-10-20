@@ -993,11 +993,11 @@
       notes: [tilt && tilt.dataset.note, breadthHost && breadthHost.dataset.note,
         ...[...document.querySelectorAll("#mktTilt .mk-tilt")].map((r) => r.dataset.note)],
     }));
-    infoInto("mkTapeCard", "tape", () => {
+    infoInto("mkTapeCard", "prints", () => {
       const rows = (() => { try { return JSON.parse(($("mktTape") || {}).dataset.rows || "[]"); } catch { return []; } })();
       const foot = $("mktFoot");
-      return { title: "Tape", lead: "Seven aggregate readings over the screened universe; each names the population it was measured over.",
-        notes: [foot && foot.textContent], node: table("Aggregate tape readings over the screened universe", [["Reading"], ["Value", true], ["Names", true]], rows) };
+      return { title: "Prints", lead: "Seven aggregate readings over the screened universe; each names the population it was measured over.",
+        notes: [foot && foot.textContent], node: table("Aggregate print readings over the screened universe", [["Reading"], ["Value", true], ["Names", true]], rows) };
     });
     pulseStampOf(pulse);
     paintTide(pulse, live, breadth);
@@ -1014,7 +1014,7 @@
       textInfo("mkMoversCard", "extremes", $("mktMovers"), "Extremes", () => ({ notes: [($("mktMovers") || {}).dataset && $("mktMovers").dataset.pop,
         "Ranked over the whole screened universe, not over the board. Only names the board went deep on have a card."] }));
       b.paintAgainst([boardLong, boardShort], movers);
-      textInfo("mkAgainstCard", "against the tape", $("mktAgainst"), "Against the tape", () => ({ notes: [
+      textInfo("mkAgainstCard", "against the prints", $("mktAgainst"), "Against the prints", () => ({ notes: [
         "The board score is a residual, with sector and size divided out, while these lists are the raw level, so the two may disagree; a name where they do is one to read twice, not a signal to fade."] }));
       b.paintPulse(pulse);
       b.paintUniverse(universe);

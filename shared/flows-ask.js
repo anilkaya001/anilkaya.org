@@ -124,7 +124,7 @@ function marketFacts(p, at) {
   const read = num(p.n), bull = num(b.bull), bear = num(b.bear);
   const flat = num(b.flat), unpriced = num(b.unpriced);
   if (all(read, bull, bear, flat, unpriced)) {
-    out.push(f("market/breadth", ["breadth", "bullish", "bearish", "tape", "lean", "names"],
+    out.push(f("market/breadth", ["breadth", "bullish", "bearish", "prints", "lean", "names"],
       "Across the " + read + " names this run read, " + bull +
       " leaned bullish on net option premium, " + bear + " leaned bearish, " + flat +
       " were exactly balanced and " + unpriced + " could not be priced at all.",
@@ -276,8 +276,8 @@ function newsFacts(p, at) {
   const kept = num(p.kept), returned = num(p.returned);
   const requested = num(p.requested), cap = num(p.cap);
   if (all(kept, returned, requested, cap)) {
-    out.push(f("news/coverage", ["news", "headlines", "tape", "coverage"],
-      "The news tape holds " + kept + " headlines of the " + returned +
+    out.push(f("news/coverage", ["news", "headlines", "feed", "coverage"],
+      "The headline feed holds " + kept + " headlines of the " + returned +
       " rows the vendor returned against a request for " + requested +
       ", under a cap of " + cap + " rows.",
       { keptHeadlines: kept, returnedRows: returned,
@@ -310,7 +310,7 @@ function alertFacts(p, at) {
 
   const unusable = num(p.unusable);
   if (all(rows, seen, shed, cap)) {
-    out.push(f("flowalerts/coverage", ["alerts", "flow", "tape", "coverage", "cap"],
+    out.push(f("flowalerts/coverage", ["alerts", "flow", "prints", "coverage", "cap"],
       "The flow-alert page holds " + rows + " of the " + seen + " alerts read, with " +
       shed + " removed by a cap of " + cap + " rows" +
       (unusable === null ? "" : ", beside " + unusable +
@@ -480,7 +480,7 @@ const SURFACES = Object.freeze([
   { key: "movers", what: "movers list", build: moversFacts },
   { key: "unusual", what: "unusual-activity feed", build: unusualFacts },
   { key: "flowalerts", what: "flow-alert feed", build: alertFacts },
-  { key: "news", what: "news tape", build: newsFacts },
+  { key: "news", what: "headline feed", build: newsFacts },
   { key: "sector:trix", what: "sector momentum reading", build: trixFacts },
   { key: "pulse", what: "market pulse", build: pulseFacts },
   { key: "political", what: "disclosure feed", build: politicalFacts },

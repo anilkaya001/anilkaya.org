@@ -2761,7 +2761,7 @@ try {
        "and the cadence the payload publishes, so the age is not read as bad luck");
     ok(/stale by the next weekday's close/.test(note),
        "and how stale it is allowed to get, stated rather than implied");
-    ok(/never a live tape/.test(note),
+    ok(/never a live feed/.test(note),
        `so nothing here implies a stream (${note.slice(0, 40)}…)`);
     ok(/oldest of the 8 stored rows is 9h \d+m old/.test(note),
        `and bounds the whole stored window rather than only the newest row (${note})`);
@@ -2889,7 +2889,7 @@ try {
     await page.waitForSelector("#ccNews [data-empty]", { timeout: 15000 });
     const empty = await silenceOf(page, "#ccNews [data-empty]");
     eq(empty.kind, "empty", "a feed that was read and had nothing in it is the MEASURED silence");
-    ok(/the tape was checked and was empty/.test(empty.text),
+    ok(/the feed was checked and was empty/.test(empty.text),
        `and says which of the three it is (${empty.text})`);
 
     await post("news", newsPayload({ status: "unreadable", rows: [], kept: 0, returned: 40,
