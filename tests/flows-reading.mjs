@@ -529,6 +529,47 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
 }
 
 {
+  const vetT = (reply, trim) => R.vetReading(JSON.stringify(reply), M, MT, { shown: MP.shown, rendered: MP.user, trim });
+  const copied = { text: "Example Technologies sells subscription software and cloud infrastructure services to mid-sized enterprises.", cites: ["identity.name", "identity.description"] };
+  const nowDealer = { text: GOOD.now.text + " Dealers are pinned near the gamma flip at $124.00.", cites: [...GOOD.now.cites, "options.engine.level.flip"] };
+  const driverDealer = { text: "The implied dealer state is pinned near the gamma flip at $124.00.", cites: ["options.state", "options.engine.level.flip"] };
+  const twoSentence = { text: "Option flow leans to calls: bullish against bearish premium is +0.62. Dealers are pinned near the gamma flip at $124.00.", cites: ["flow.strip.lean", "options.engine.level.flip"] };
+  const watchDealer = { text: "Below the gamma flip at $124.00, dealers are net short gamma.", cites: ["options.engine.level.flip"] };
+  const culprits = [];
+  for (const id of [false, true]) for (const nw of [false, true]) for (const dr of [false, true]) for (const two of [false, true]) for (const wa of [false, true]) {
+    if (!(id || nw || dr || two || wa)) continue;
+    culprits.push(patch({
+      ...(id ? { identity: copied } : {}),
+      ...(nw ? { now: nowDealer } : {}),
+      drivers: [dr ? driverDealer : GOOD.drivers[0], two ? twoSentence : GOOD.drivers[1], ...GOOD.drivers.slice(2)],
+      ...(wa ? { watch: [watchDealer] } : {}),
+      tensions: [],
+    }));
+  }
+  const before = culprits.filter((c) => !vetT(c, false).ok).length;
+  const after = culprits.filter((c) => !vetT(c, true).ok).length;
+  console.log("  culprit replies refused whole: " + before + " of " + culprits.length + " without sentence trimming, " + after + " with it");
+  ok(culprits.length === 31, "thirty-one scripted replies built from the culprits of 2026-10-19: a copied company description, dealer sentences without the clause in now, a driver and the watch list");
+  ok(before >= 15, "WITHOUT TRIMMING " + before + " of " + culprits.length + " (" + Math.round(100 * before / culprits.length) + "%) are refused whole, because a dealer sentence in now drops now and with it the reply");
+  eq(after, 0, "WITH SENTENCE TRIMMING NONE IS REFUSED WHOLE (" + after + " of " + culprits.length + "), so a reader gets the model's wording minus the sentences that broke a rule");
+  const r = vetT(patch({ now: nowDealer }), true);
+  ok(r.ok && r.sections.now.text === GOOD.now.text, "the trimmed now keeps every sentence that passed, word for word, and drops the dealer sentence with no clause");
+  ok(!r.sections.now.cites.includes("options.engine.level.flip") && r.sections.now.cites.includes("price.last"), "and drops the dealer cite the removed sentence carried");
+  ok(r.refused.some((x) => x.section === "now" && x.why === "dealer-sign" && x.trimmed === 1), "the trim is recorded as a refusal of one sentence, so the reading says a part was left out");
+  const t2 = vetT(patch({ drivers: [GOOD.drivers[0], twoSentence, ...GOOD.drivers.slice(2)] }), true);
+  ok(t2.ok && t2.sections.drivers.some((d) => d.text === "Option flow leans to calls: bullish against bearish premium is +0.62."), "a two-sentence driver keeps its clean sentence");
+  const idc = vetT(patch({ identity: copied }), true);
+  ok(idc.ok && idc.sections.identity === null && hasWhy(idc, "identity", "quote"), "a one-sentence identity copied from the description is still refused, and the deterministic identity stands in for it");
+  const one = vetT(patch({ drivers: [driverDealer, ...GOOD.drivers.slice(1)] }), true);
+  ok(hasWhy(one, "drivers.0", "dealer-sign") && !one.sections.drivers.some((d) => /pinned near the gamma flip/.test(d.text)), "and a one-sentence dealer driver with no clause is still refused, never rewritten");
+  const mixed = vetT(patch({ now: { text: GOOD.now.text + " The flip sits at $999.00 and dealers are long gamma.", cites: GOOD.now.cites } }), true);
+  ok(!mixed.ok || !/\$999\.00/.test(mixed.sections.now ? mixed.sections.now.text : ""), "a trimmed remainder is checked again, so an invented figure never survives a trim");
+  const p = R.promptForReading(M, MT);
+  ok(/copied word for word inside that same sentence/.test(p.system) && /A sentence without the clause is removed/.test(p.system), "THE PROMPT ASKS FOR THE CLAUSE IN EVERY DEALER SENTENCE and says what happens without it");
+  ok(/Never open with the company's name followed by the description's first words/.test(p.system), "and for an identity in the model's own sentence structure, never the description's opening");
+}
+
+{
   const ground = (text, cites = ["identity.description", "identity.name"]) => vet(patch({ identity: { text, cites } }));
   ok(ground(GOOD.identity.text).sections.identity !== null, "identity grounded in the cited description passes");
   const off = ground("Example Technologies Inc develops gene therapies for rare paediatric diseases through clinical trials.");

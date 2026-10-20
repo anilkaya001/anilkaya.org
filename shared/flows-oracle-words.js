@@ -151,6 +151,7 @@ export function liveSay(m) {
 
 export const BUILDING_LINES = Object.freeze({
   "no-card": "No priced view for this name yet.",
+  unbuilt: "The Neuron has not written a view of this name yet.",
   screen: "Only a thin reading exists for this name, so there are no priced calls.",
   grade: "The engine's grade for this name is too low for a priced call.",
   "no-engine": "The options engine did not price this name tonight.",

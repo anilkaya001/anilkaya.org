@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as PAGES from "../shared/flows-pages.js";
 import * as FX from "./lib/oracle-fixtures.mjs";
+import { absentRecord } from "../server/routes/flows-oracle.js";
 import { launch, open, settle, waitOracle, ROOT, harnessHtml } from "./lib/oracle-world.mjs";
 
 let checks = 0;
@@ -196,6 +197,41 @@ for (const [name, key, wantState, wantWord] of [["calm", "SYO002", "calm", "No v
   await w.close();
 }
 
+async function unbuiltChecks(mutate, why = null) {
+  const fails = [];
+  const need = (c, m) => { if (!c) fails.push(m); };
+  const at = Date.parse("2026-10-14T15:30:00Z");
+  const records = { ...RECORDS, SYO006: { ...absentRecord("SYO006", at, why), ...(why ? { why } : {}) } };
+  const w = await open(browser, { mutate, url: TICKER_URL("SYO006"), slug: "ticker", html: harnessHtml({ mode: "on", slug: "ticker", active: "ticker" }), records, topBody: FX.top() });
+  await waitOracle(w.page);
+  await settle(w.page, 400);
+  await w.page.evaluate(() => window.FlowsUI.oracle.open());
+  await sleep(500);
+  const sec = await w.page.evaluate(() => { const n = document.querySelector(".orc-sec[aria-label='SYO006']"); return n ? n.innerText : ""; });
+  const sub = await w.page.evaluate(() => document.querySelector(".orc-sub").textContent);
+  if (SHOTS && !Object.keys(mutate).length) await w.page.screenshot({ path: path.join(SHOTS, `unbuilt-${why || "ok"}-1440.png`) });
+  need(sec.includes("Building: the Neuron has not written a view of SYO006 yet."), "an unbuilt view says it is being built");
+  need(!/There is no card|no chain to price/.test(sec), "and never that a carded name has no card");
+  need(!/Grade \d of 3|Priced on|Ideas:|absent|screen/.test(sec + sub), "and prints no grade, session, ideas source or raw reason");
+  need(!/No view/.test(sec), "and no stance chip");
+  if (why === "store") need(sec.includes("could not be read") && sec.includes("Retry"), "a failed read offers Retry");
+  else need(sec.includes("the next nightly lands about Oct 15, 01:30 TRT."), "it names the next nightly in TRT, with the date when it is not today");
+  need(!/\b(ET|EST|EDT|UTC)\b/.test(sec), "and no other zone");
+  await w.close();
+  return fails;
+}
+
+{
+  eq(await unbuiltChecks({}), [], "an unbuilt view reads as building, with the next nightly in TRT");
+  eq(await unbuiltChecks({}, "store"), [], "an unreadable store is a read failure with Retry");
+  const MUTANTS = [
+    ["the old no-card wording", { "flows-oracle.js": (t) => t.replace('if (rec && rec.stateWhy === "unbuilt") {', "if (false) {") }],
+    ["the raw reason printed", { "flows-oracle.js": (t) => t.replace("return unbuiltBlock(box, t, rec);", 'box.append(h("p", null, "— oracle: absent")); return unbuiltBlock(box, t, rec);') }],
+    ["an Eastern due time", { "flows-oracle.js": (t) => t.replace('return (d === U.F.trtDay(Date.now()) ? "" : U.F.day(d) + ", ") + U.F.time(v);', 'return "21:30 ET";') }],
+  ];
+  for (const [name, mutate] of MUTANTS) ok((await unbuiltChecks(mutate)).length > 0, `planted wrong build "${name}" is caught`);
+}
+
 {
   const w = await boot(browser, { oracle: "absent", url: TICKER_URL("SYO001"), slug: "ticker", html: harnessHtml({ mode: "on", slug: "ticker", active: "ticker" }) });
   await w.page.click(".orc-orb");
@@ -352,7 +388,7 @@ async function probe(mutate) {
   const good = await probe({});
   eq(good, [], "the shipped build passes every probe");
   const MUTANTS = [
-    ["a sheet taller than the viewport", { "flows-oracle.css": (t) => t.replace("height: 70dvh;\n    max-height: 70dvh;", "height: 140dvh;\n    max-height: none;") }],
+    ["a sheet taller than the viewport", { "flows-oracle.css": (t) => t.replace("    max-height: 70dvh;\n    padding-bottom", "    height: 140dvh;\n    max-height: none;\n    padding-bottom") }],
     ["an orb over the tab bar", { "flows-oracle.css": (t) => t.replace("bottom: calc(var(--tab-h) + var(--safe-b) + 12px);", "bottom: 4px;") }],
     ["no focus trap", { "flows-oracle.js": (t) => t.replace('if (e.key === "Tab") { trapKeys(e); return; }', "") }],
     ["a colour literal", { "flows-oracle.css": (t) => t + "\n.orc-badge { color: #ff0000; }\n" }],
@@ -369,6 +405,43 @@ async function probe(mutate) {
     const fails = await probe(mutate);
     ok(fails.length > 0, `planted wrong build "${name}" is caught`);
   }
+}
+
+async function sheetFit(mutate) {
+  const fails = [];
+  const need = (c, m) => { if (!c) fails.push(m); };
+  for (const [width, height] of [[390, 844], [1440, 820]]) {
+    const w = await open(browser, { width, height, touch: width < 768, mutate, slug: "political", oracle: "absent" });
+    await waitOracle(w.page);
+    await settle(w.page, 300);
+    await w.page.click(".orc-orb");
+    await sleep(500);
+    const m = await w.page.evaluate(() => {
+      const s = document.querySelector(".orc-sheet"), l = s.querySelector(".orc-list"), kids = [...l.children].filter((c) => c.getBoundingClientRect().height > 0);
+      const cs = getComputedStyle(l);
+      const content = kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom + parseFloat(getComputedStyle(kids[kids.length - 1]).marginBottom) - kids[0].getBoundingClientRect().top + parseFloat(getComputedStyle(kids[0]).marginTop) + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) : parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      const lab = document.getElementById("orcPrefL"), seg = s.querySelector(".orc-pref");
+      const lr = lab ? lab.getBoundingClientRect() : null;
+      return { sheet: s.getBoundingClientRect().height, list: l.clientHeight, content, vh: innerHeight,
+        label: lab && lr.width > 0 && getComputedStyle(lab).visibility !== "hidden" ? lab.textContent : null,
+        labelledBy: seg ? seg.getAttribute("aria-labelledby") : null, inSheet: !!(lab && s.contains(lab)),
+        buttons: seg ? [...seg.querySelectorAll("button")].map((b) => b.textContent) : [] };
+    });
+    need(m.list <= m.content + 8, `${width}: the sheet is sized to what it holds, with no empty band (list ${Math.round(m.list)} px for ${Math.round(m.content)} px of content)`);
+    need(m.sheet <= m.vh * 0.7 + 1, `${width}: and never taller than its cap`);
+    need(m.label === "Show the Neuron as" && m.labelledBy === "orcPrefL" && m.inSheet, `${width}: the preference control carries a visible label that names what it sets: ${m.label}`);
+    need(JSON.stringify(m.buttons) === JSON.stringify(["Pill", "Count", "Hidden"]), `${width}: its three choices read as answers to that label: ${m.buttons.join(", ")}`);
+    await w.close();
+  }
+  return fails;
+}
+
+{
+  eq(await sheetFit({}), [], "the resting sheet fits its content at 390 and 1440 and its preference control is labelled");
+  for (const [name, mutate] of [
+    ["a fixed-height phone sheet", { "flows-oracle.css": (t) => t.replace("    max-height: 70dvh;\n    padding-bottom", "    height: 70dvh;\n    max-height: 70dvh;\n    padding-bottom") }],
+    ["a preference with no visible label", { "flows-oracle.js": (t) => t.replace('h("span", { class: "orc-pref-l", id: "orcPrefL" }, "Show the Neuron as"), ', "") }],
+  ]) ok((await sheetFit(mutate)).length > 0, `planted wrong build "${name}" is caught`);
 }
 
 await browser.close();

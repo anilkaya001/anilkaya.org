@@ -1,5 +1,5 @@
 import { buildBrief, briefStoreFrom, briefAlertsFact, silenceOf, num } from "./flows-brief.js";
-import { expectedNightlySession } from "./flows-freshness.js";
+import { expectedNightlySession, easternDay } from "./flows-freshness.js";
 
 function served(store, key) {
   if (!store || typeof store !== "object" || !Object.hasOwn(store, key)) {
@@ -920,17 +920,40 @@ export function briefAge(index, now, clock = null) {
       "that has closed is " + expected + " and its briefing has not been published, so " +
       "nothing here is a reading of that session or of today.";
   }
-  return { sessionDate: session, expected, stale, generatedAt, refreshedAt, say };
+  const read = refreshedAt === null ? null : easternDay(refreshedAt);
+  const liveSession = session !== null && read !== null && read > session ? read : null;
+  return { sessionDate: session, expected, stale, generatedAt, refreshedAt, liveSession, say };
+}
+
+function liveFact(f, meta) {
+  if (!f || !meta || !meta.liveSession || typeof f.at !== "string") return false;
+  const live = INTRADAY_SOURCES.includes(f.source) || (typeof f.id === "string" && f.id.startsWith("brief:today/"));
+  return live && easternDay(f.at) === meta.liveSession;
+}
+
+export function factSession(f, meta) {
+  const a = meta && typeof meta === "object" ? meta : {};
+  if (!a.liveSession || !a.sessionDate) return null;
+  return liveFact(f, a) ? a.liveSession : a.sessionDate;
 }
 
 function factsHeader(meta) {
   const a = meta && typeof meta === "object" ? meta : {};
   const parts = [];
-  if (a.sessionDate) parts.push("These facts describe the trading session of " + a.sessionDate);
-  else parts.push("These facts describe one trading session");
-  if (a.generatedAt) parts.push("the briefing was built at " + a.generatedAt);
-  if (a.refreshedAt) {
-    parts.push("the flow-alert and market-pulse readings were last re-read at " + a.refreshedAt);
+  if (a.liveSession && a.sessionDate) {
+    parts.push("These facts come from two trading sessions. The board, sector, calendar and other " +
+      "briefing facts describe the session of " + a.sessionDate + "; only the flow-alert and " +
+      "market-pulse readings re-read at " + a.refreshedAt + " describe the session of " + a.liveSession +
+      ". Each fact below is tagged with its session. Whenever you state a fact from " + a.sessionDate +
+      ", name that session in the same sentence, and never present it as part of " + a.liveSession);
+    if (a.generatedAt) parts.push("the briefing was built at " + a.generatedAt);
+  } else {
+    if (a.sessionDate) parts.push("These facts describe the trading session of " + a.sessionDate);
+    else parts.push("These facts describe one trading session");
+    if (a.generatedAt) parts.push("the briefing was built at " + a.generatedAt);
+    if (a.refreshedAt) {
+      parts.push("the flow-alert and market-pulse readings were last re-read at " + a.refreshedAt);
+    }
   }
   let line = parts.join("; ") + ".";
   if (a.stale && a.say) {
@@ -1340,8 +1363,8 @@ export function promptFor(picked, question, meta) {
   const user = "Question: " + (typeof question === "string" ? question.trim() : "") +
     coverage +
     "\n\n" + factsHeader(meta) +
-    "\n\nFacts measured for this session:\n" +
-    facts.map((f) => "- " + f.say).join("\n");
+    (meta && meta.liveSession && meta.sessionDate ? "\n\nFacts, each tagged with its session:\n" : "\n\nFacts measured for this session:\n") +
+    facts.map((f) => { const s = factSession(f, meta); return "- " + (s === null ? "" : "[session " + s + "] ") + f.say; }).join("\n");
 
   return { system, user };
 }
@@ -1396,11 +1419,13 @@ export function promptForSummary(picked, meta, options) {
         "is a summary\", and do not refer to the facts by number or position.",
   ].join("\n");
 
+  const split = !!(meta && meta.liveSession && meta.sessionDate);
   const user = factsHeader(meta) +
-    (subject === null
-      ? "\n\nFacts measured for this session:\n"
-      : "\n\nFacts measured for " + subject + " this session:\n") +
-    facts.map((f) => "- " + f.say).join("\n");
+    (split ? "\n\nFacts" + (subject === null ? "" : " for " + subject) + ", each tagged with its session:\n"
+      : subject === null
+        ? "\n\nFacts measured for this session:\n"
+        : "\n\nFacts measured for " + subject + " this session:\n") +
+    facts.map((f) => { const s = split ? factSession(f, meta) : null; return "- " + (s === null ? "" : "[session " + s + "] ") + f.say; }).join("\n");
 
   return { system, user };
 }

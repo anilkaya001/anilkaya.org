@@ -724,9 +724,18 @@ try {
     for (const gone of ["/flows/history/", "/flows/track/", "/flows/ask/", "/flows/history", "/flows/track", "/flows/ask"]) {
       ok(!rail.includes(`href="${gone}"`), `the RAIL does not list ${gone}`);
       for (const headers of [{ Cookie: "flows_session=" + token }, {}]) {
-        const gonePage = await get(gone, { headers });
-        eq(gonePage.status, 404, `${gone} is the unknown-page 404`);
+        const gonePage = await get(gone, { headers, redirect: "manual" });
+        eq(gonePage.status, 308, `${gone} was removed, so it is a 308 to Flows home rather than a dead end`);
+        eq(new URL(gonePage.headers.get("Location"), "https://x.test").pathname, "/flows/", `${gone} lands on /flows/`);
       }
+    }
+    for (const headers of [{ Cookie: "flows_session=" + token }, {}]) {
+      const unknown = await get("/flows/no-such-page/", { headers });
+      const body = await unknown.text();
+      eq(unknown.status, 404, "an unknown Flows page is a 404");
+      ok(/^text\/html/.test(unknown.headers.get("Content-Type") || "") && /<h1>Not found<\/h1>/.test(body) && !/"error"/.test(body),
+        "and the reader is shown the Flows HTML page, not a raw JSON error");
+      ok(/href="\/flows\/"/.test(body), "with a way back to Flows home");
     }
 
     const api = await get("/api/flows/board?side=long", {

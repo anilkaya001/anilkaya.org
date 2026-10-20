@@ -180,11 +180,10 @@ const were = (n, one, many) => (n === 1 ? `1 was ${one}` : `${n} were ${many}`);
 export function edgeRemedy(label, slot) {
   const n = slot.n;
   if (slot.kind === "challenge") {
-    return `HEALTH: ${were(n, "a Cloudflare challenge", "Cloudflare challenges")} ` +
-      `(${slot.mitigated ? "cf-mitigated: " + slot.mitigated : "a challenge page, no cf-mitigated"}${rayNote(slot)}), which Bot ` +
-      `Fight Mode, a WAF rule or Security Level issue: add ${SKIP_RULE}, with Security Level and Browser Integrity ` +
-      "Check ticked; challenges that go on with that rule in place come from Bot Fight Mode, which the Free plan " +
-      "cannot skip: turn it off (Security → Settings → Bot traffic)";
+    return `HEALTH: ${were(n, "a Cloudflare challenge", "Cloudflare challenges")}, from Bot Fight Mode, a WAF rule or ` +
+      "Security Level: turn Bot Fight Mode off (Security → Settings → Bot traffic), which the Free plan cannot skip, and keep " +
+      `${SKIP_RULE} with Security Level and Browser Integrity Check ticked ` +
+      `(${slot.mitigated ? "cf-mitigated: " + slot.mitigated : "a challenge page, no cf-mitigated"}${rayNote(slot)})`;
   }
   if (slot.kind === "block") {
     return `HEALTH: ${were(n, "a Cloudflare block", "Cloudflare blocks")} (${slot.code ? "error " + slot.code : "no error code"}` +

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
-import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS } from "../server/routes/flows-pages.js";
+import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS, FLOWS_GONE_SLUGS } from "../server/routes/flows-pages.js";
 import { FLOWS_PAGES, ownerNav } from "../shared/flows-pages.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
@@ -22,11 +22,14 @@ for (const slug of SLUGS) {
   if (slug) expectedPaths.push("/flows/" + slug);
 }
 for (const slug of FLOWS_PUBLIC_SLUGS) expectedPaths.push("/flows/" + slug + "/", "/flows/" + slug);
-eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, then the two public pages and their bare forms");
+eq(FLOWS_GONE_SLUGS, ["ask", "track", "history"], "the removed pages are Ask, Track and History");
+const gonePaths = FLOWS_GONE_SLUGS.flatMap((slug) => ["/flows/" + slug + "/", "/flows/" + slug]);
+expectedPaths.push(...gonePaths);
+eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, the two public pages and their bare forms, then the removed pages in both forms");
 ok(table.rows.every((r) => r.auth === "none" && r.methods.join() === "GET,HEAD"), "every row is GET and HEAD with no gate: an anonymous visitor gets the login page, not a 401");
 ok(new Set(table.rows.map((r) => r.id)).size === table.rows.length && table.rows.every((r) => r.id.startsWith("flows.pages.")), "ids are unique and namespaced");
 eq(table.rows.filter((r) => r.path.length > "/flows/".length && !r.path.endsWith("/")).map((r) => r.path.slice("/flows/".length)),
-  [...SLUGS.filter(Boolean), ...FLOWS_PUBLIC_SLUGS], "the bare redirects are generated from the page lists, one per page but the overview");
+  [...SLUGS.filter(Boolean), ...FLOWS_PUBLIC_SLUGS, ...FLOWS_GONE_SLUGS], "the bare redirects are generated from the page lists, one per page but the overview, and one per removed page");
 
 const FLOWS_READER_FROM = { "/flows/": "overview", "/flows/long/": "long", "/flows/short/": "short", "/flows/watch/": "watch" };
 
@@ -150,7 +153,12 @@ for (const path of PATHS) {
           const want = await outcome(() => oldChain(path, b.rc, b.sc.deps));
           const key = `${method} ${path}${q} ${user && user.username} ${JSON.stringify(env)}`;
           const publicOff = isOff(env) && (path === "/flows/about/" || path === "/flows/glossary/");
-          if (publicOff && method !== "GET" && method !== "HEAD") {
+          if (gonePaths.includes(path)) {
+            eq(want, { fell: true }, key + ": the chain had no row for a removed page and answered it with the unknown-page 404");
+            if (method === "GET" || method === "HEAD") eq([got.status, got.headers.find((h) => h[0] === "location")], [308, ["location", "https://anilkaya.org/flows/"]], key + ": a removed page is a 308 to Flows home");
+            else eq(got.threw && [got.threw.status, got.threw.code], [405, "method_not_allowed"], key + ": a removed page takes GET and HEAD only");
+            eq(a.sc.log, [], key + ": and reads no session");
+          } else if (publicOff && method !== "GET" && method !== "HEAD") {
             eq(want.threw && want.threw.status, 404, key + ": the chain answered a switched-off front door with the Flows 404 whatever the method");
             eq(got.threw && [got.threw.status, got.threw.code, got.threw.headers.Allow], [405, "method_not_allowed", "GET, HEAD"], key + ": the table answers a method the row does not take with its 405 first");
             offOther++;

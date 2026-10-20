@@ -1,6 +1,6 @@
 export const ASSET_VERSION = "368";
 
-import { GLOSSARY } from "./flows-glossary.js";
+import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 
@@ -448,18 +448,29 @@ export function aboutPage() {
 
 export function glossaryPage() {
   const rows = [...GLOSSARY].sort((a, b) => a.term.localeCompare(b.term)).map((g) => `
-    <div class="fx-doc-term" id="${g.key}">
-      <dt>${escapeHTML(g.term)}</dt>
-      <dd>${g.lines.map((l) => `<p>${escapeHTML(l)}</p>`).join("")}<p class="fx-doc-where">Shown on <a href="${g.href}">${g.page}</a></p></dd>
-    </div>`).join("");
+    <section class="fx-doc-term" id="${g.key}" aria-labelledby="${g.key}-t">
+      <h2 id="${g.key}-t">${escapeHTML(g.term)}</h2>
+      <div class="fx-doc-def">${g.lines.map((l) => `<p>${escapeHTML(l)}</p>`).join("")}<p class="fx-doc-where">Shown on ${g.href ? `<a href="${g.href}">${escapeHTML(g.page)}</a>` : escapeHTML(g.page)}</p></div>
+    </section>`).join("");
+  const pages = GLOSSARY_PAGES.map(escapeHTML);
   return doc("Flows — Glossary", "The terms Flows uses, in the words its own pages use.", `
   <header class="fx-doc-h">
     <h1>Glossary</h1>
-    <p class="fx-doc-lede">The same definitions the information buttons on each page open, collected in one place.</p>
+    <p class="fx-doc-lede">The definitions the information buttons open on ${pages.slice(0, -1).join(", ")} and ${pages[pages.length - 1]}, collected in one place.</p>
   </header>
-  <dl class="fx-doc-list">${rows}
-  </dl>
+  <div class="fx-doc-list">${rows}
+  </div>
   <p class="fx-doc-actions"><a href="/flows/about/">About Flows</a></p>`);
+}
+
+export function notFoundPage() {
+  return doc("Flows — Not found", "There is no Flows page at this address.", `
+  <header class="fx-doc-h">
+    <span class="fx-mark" aria-hidden="true">&#949;</span>
+    <h1>Not found</h1>
+    <p class="fx-doc-lede">There is no Flows page at this address. It may have moved, been removed, or be open to the owner only.</p>
+  </header>
+  <p class="fx-doc-actions"><a href="/flows/">Flows home</a> <a href="/flows/about/">About Flows</a></p>`);
 }
 
 const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "" } = {}) => `
@@ -1132,7 +1143,7 @@ export function politicalPage({ username = "" } = {}) {
     <div class="pl-title" data-fx-hero>
       <h1 id="fxTitle">Political</h1>
       <div class="pl-stamp" id="plStamp"></div>
-      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred."><span class="l">Party not in feed</span><span class="s">No party in feed</span></span></div>
+      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred.">No party in feed</span></div>
       <button type="button" class="pl-ibtn" id="plInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
     </div>
     <p class="pl-note" id="plNote" hidden></p>

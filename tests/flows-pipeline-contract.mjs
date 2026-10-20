@@ -38,7 +38,7 @@ import {
 } from "../scripts/flows-pipeline.mjs";
 import { touch, clearTaint } from "../scripts/flows-legs/taint.mjs";
 import { FOCUS_FUNDS, MAG7 as FOCUS_MAG7, FOCUS_MINERS } from "../shared/flows-focus.js";
-import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT } from "../scripts/flows-legs/health.mjs";
+import { runHealthGate, refusalOf, tallyRefusal, QUOTA_WAIT, edgeRemedy } from "../scripts/flows-legs/health.mjs";
 import { VARIATION_CODES, variationSummary } from "../shared/flows-variation.js";
 import { pinReading, buildCard } from "../shared/flows-card.js";
 import { pearson, horizonMove, HORIZON_SESSIONS, realizedVol } from "../shared/flows-features.js";
@@ -5295,8 +5295,15 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     same(healthRecord(null), { failures: 0, warnings: 0, first: [] }, "no gate verdict is an empty record");
     same(healthRecord({ failures: [], warnings: [] }), { failures: 0, warnings: 0, first: [] }, "a clean verdict is an empty record");
     const h = healthRecord({ failures: ["F1", "F2"], warnings: ["W1", "W2", "W3"] });
-    same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1"] }, "the record counts both and keeps the first three lines, failures first");
-    ok(healthRecord({ failures: ["y".repeat(500)], warnings: [] }).first[0].length <= 160, "and caps each line");
+    same(h, { failures: 2, warnings: 3, first: ["F1", "F2", "W1", "W2", "W3"] }, "the record counts both and keeps every line up to six, failures first");
+    same(healthRecord({ failures: ["F1", "F2", "F3", "F4"], warnings: ["W1", "W2", "W3"] }).first, ["F1", "F2", "F3", "F4", "W1", "W2"], "past six it keeps the failures first");
+    ok(healthRecord({ failures: ["y".repeat(900)], warnings: [] }).first[0].length <= 420, "and caps each line");
+    const edge = ["HEALTH: the edge answered 33 ingest request(s) with HTTP 403 and retries spent 33 s of the 90 s budget",
+      edgeRemedy("challenge", { kind: "challenge", n: 33, mitigated: "challenge", rays: ["a4ca5c606e7acab0-LAX", "a4ca5e288fa95227-LAX", "a4ca65c628d8cab0-LAX"] }),
+      "HEALTH: 1 of 855 universe name(s) have no Neuron reading tonight"];
+    const kept = healthRecord({ failures: edge, warnings: ["W1"] }).first;
+    eq(kept.length, edge.length + 1, "the 2026-10-18 night's edge failures and its warning all reach the record");
+    ok(kept.some((l) => /turn Bot Fight Mode off \(Security → Settings → Bot traffic\)/.test(l) && !l.endsWith("…")), "THE CHALLENGE REMEDY IS KEPT WHOLE, not clipped before the owner's action: " + kept.join(" | "));
   }
 }
 

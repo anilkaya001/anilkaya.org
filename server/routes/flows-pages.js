@@ -37,6 +37,8 @@ export const FLOWS_PAGE_SLUGS = Object.freeze(PAGES.map((page) => page.slug));
 
 export const FLOWS_PUBLIC_SLUGS = Object.freeze(PUBLIC_PAGES.map((page) => page.slug));
 
+export const FLOWS_GONE_SLUGS = Object.freeze(["ask", "track", "history"]);
+
 
 const GET_HEAD = ["GET", "HEAD"];
 
@@ -123,6 +125,18 @@ export function flowsPageRows(deps) {
       auth: "none",
       handler: ({ url }) => redirect(new URL(path, url).toString(), 308),
     });
+  }
+
+  for (const slug of FLOWS_GONE_SLUGS) {
+    for (const path of [slashed(slug), "/flows/" + slug]) {
+      rows.push({
+        id: "flows.pages.gone." + slug + (path.endsWith("/") ? "" : ".bare"),
+        path,
+        methods: GET_HEAD,
+        auth: "none",
+        handler: ({ url }) => redirect(new URL("/flows/", url).toString(), 308),
+      });
+    }
   }
 
   return rows;

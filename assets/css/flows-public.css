@@ -13,7 +13,8 @@
 .fx-doc-actions .flows-submit { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--sp-6); text-decoration: none; }
 .fx-doc-list { margin: var(--sp-6) 0 0; display: grid; gap: var(--sp-6); }
 .fx-doc-term { scroll-margin-top: 6rem; }
-.fx-doc-term dt { font: var(--t-headline); letter-spacing: var(--t-headline-track); }
-.fx-doc-term dd { margin: var(--sp-2) 0 0; display: grid; gap: var(--sp-3); }
-.fx-doc-term dd p { margin: 0; }
+.fx-doc .fx-doc-term h2 { margin: 0; font: var(--t-headline); letter-spacing: var(--t-headline-track); }
+.fx-doc-def { margin: var(--sp-2) 0 0; display: grid; gap: var(--sp-3); }
+.fx-doc-def p { margin: 0; }
 .fx-doc-where { color: var(--label-2); font: var(--t-footnote); }
+.fx-doc-where a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }

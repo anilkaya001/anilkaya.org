@@ -65,15 +65,16 @@
       const total = present.reduce((a, k) => a + (num(k.bytes) || 0), 0);
       const behind = present.filter((k) => k.session && sessionDate && k.session < sessionDate).length;
       const big = present.slice().sort((a, b) => (b.share ?? 0) - (a.share ?? 0));
+      const capOf = (k) => (num(k.capBytes) ? bytes(k.capBytes) : DASH + " no cap");
       fill(store,
         line(present.length + " of " + c.keys.length + " expected keys present · " + bytes(total) + " stored · " + behind + " behind the nightly session" + (sessionDate ? " " + sessionDate : "") +
-          " · budget " + bytes(c.budgetBytes) + " a key"),
-        big.length ? mini("Largest keys", ["Key", "Size", "Of budget", "Written"], big.map((k) => [k.key, bytes(k.bytes), pctOf(k.share), k.updatedAt ? trt(k.updatedAt, now) : DASH]), "keys") : line(DASH + " no key is stored"),
+          " · each key against its own cap"),
+        big.length ? mini("Largest keys", ["Key", "Size", "Of its cap", "Written"], big.map((k) => [k.key, bytes(k.bytes), pctOf(k.share) + " of " + capOf(k), k.updatedAt ? trt(k.updatedAt, now) : DASH]), "keys") : line(DASH + " no key is stored"),
         missing.length ? line("Missing: " + missing.slice(0, 5).map((k) => k.key).join(", ") + (missing.length > 5 ? " and " + (missing.length - 5) + " more" : "")) : line("No expected key is missing."));
       fill(full,
-        table("Every stored key", ["Key", "Session", "Size", "Of 100 KiB", "Written", "Age"], c.keys.map((k) => [k.key, verdict(k, sessionDate),
-          k.present ? bytes(k.bytes) : DASH, k.present ? pctOf(k.share) : DASH, k.present && k.updatedAt ? trt(k.updatedAt, now) : DASH, k.present && k.updatedAt ? ago(k.updatedAt, now) : DASH]), true),
-        h("p", { class: "st-foot" }, "Sizes are the stored JSON text. Only the declared nightly and shared keys are read, by primary key; the card rows are not counted here because counting them scans the table. A key with no session stamp is shown as such, not as fresh."));
+        table("Every stored key", ["Key", "Session", "Size", "Cap", "Of its cap", "Written", "Age"], c.keys.map((k) => [k.key, verdict(k, sessionDate),
+          k.present ? bytes(k.bytes) : DASH, capOf(k), k.present ? pctOf(k.share) : DASH, k.present && k.updatedAt ? trt(k.updatedAt, now) : DASH, k.present && k.updatedAt ? ago(k.updatedAt, now) : DASH]), true),
+        h("p", { class: "st-foot" }, "Sizes are the stored JSON text, each against its own cap: the universe's shedding budget, the events fitter's size, the ingest door's 128 KiB otherwise. Only the declared nightly and shared keys are read, by primary key; card rows are not counted because counting them scans the table. A key with no session stamp is shown as such, not as fresh."));
     }
     const night = $("kNight");
     if (!meta) {

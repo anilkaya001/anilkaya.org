@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { buildFactIndex, selectFacts, numeralsIn, guardAnswer, renderFactsPlain, promptFor,
          tickerCoverage, shedCardFacts, emptySilences, fileSilence, SILENCE_KINDS,
          promptForSummary, renderSummaryPlain, summaryFingerprint, cardFacts, CARD_CORE_FACTS,
-         refreshIntradayFacts, briefAge, INTRADAY_SOURCES, levelMislabels }
+         refreshIntradayFacts, briefAge, INTRADAY_SOURCES, levelMislabels, factSession }
   from "../shared/flows-ask.js";
 import { buildBrief, briefStoreFrom } from "../shared/flows-brief.js";
 
@@ -882,7 +882,8 @@ import { chromium } from "playwright";
   let askBody = null;
   let sentBody = null;
   const SPEND = { spend: { day: "2026-09-04", calls: 7, tokensIn: 41000, tokensOut: 3100,
-    allowanceNeurons: 10000, neurons: 1588, remaining: 8412 } };
+    allowanceNeurons: 10000, neurons: 1588, remaining: 8412 },
+    cap: { neurons: 30000, calls: 2500, readShare: 0.75, readsStopAt: 22500, allowanceNeurons: 10000 } };
 
   const shell = (mode) => `<!doctype html><html><head>
 <link rel="stylesheet" href="/assets/css/base.css"><link rel="stylesheet" href="/assets/css/flows.css">
@@ -1328,7 +1329,10 @@ import { chromium } from "playwright";
     ok(!/reads nothing live/i.test(said) && !/places no vendor call/i.test(said),
        "and it no longer promises the two things the Worker does: it read live keys and could " +
        "call the vendor while the page said it did neither");
-    ok(/8,412 of 10,000 credits · this site.s calls/.test(app.visible.replace(/\s+/g, " ")),
+    ok(!/of 10,000/.test(app.visible) && !/of 10,000 model credits/.test(app.info),
+       "THE METER IS NEVER MEASURED AGAINST THE FREE ALLOWANCE: on Workers Paid the limit the Worker enforces is the site's own " +
+       "daily budget, and the 10,000 free credits only mark where billing starts");
+    ok(/28,412 of 30,000 credits · the site.s daily budget/.test(app.visible.replace(/\s+/g, " ")),
        "while the meter stays OPEN, with its condition beside it, because its numbers are a " +
        "withholding about capacity rather than a reassurance — a budget you can only see " +
        "after spending from it is a receipt");
@@ -1947,6 +1951,41 @@ import { chromium } from "playwright";
      "with no meta at all the header still opens the facts, dated only as 'one session'");
   ok(/session of 2026-09-10/.test(promptForSummary(INDEX.facts.slice(0, 3), late).user),
      "the summary lane is dated the same way");
+}
+
+{
+  const nightly = { ...INDEX, sessionDate: "2026-09-04", generatedAt: "2026-09-04T22:00:00Z" };
+  const alertRead = (at) => ({ ...ALERTS, readAt: at, refreshed: "intraday",
+    rows: [{ t: "SYN35" }, { t: "SYN23" }, { t: "SYN99" }, { t: "SYN12" }], seen: 4 });
+  const monday = refreshIntradayFacts(nightly, { flowalerts: alertRead("2026-09-08T14:45:00.000Z") });
+  const age = briefAge(monday, new Date("2026-09-08T14:50:00Z"));
+  eq(age.stale, false, "a Friday briefing read on Monday morning before the close is still the current nightly");
+  eq(age.liveSession, "2026-09-08", "but the alert feed re-read on Monday belongs to Monday's session");
+  const { user } = promptFor(monday.facts, "where does the session stand", age);
+  ok(/two trading sessions/.test(user) && /briefing facts describe the session of 2026-09-04/.test(user) &&
+     /describe the session of 2026-09-08/.test(user),
+     "THE HEADER SAYS THE FACTS SPAN TWO SESSIONS and which is which: the Ask answer mixed Monday's live flagged " +
+     "windows with Friday's board leaders as one 'session' because the header dated everything to the briefing");
+  ok(/name that session in the same sentence/.test(user), "and requires the answer to name the briefing's session whenever it uses one of its facts");
+  const lines = user.split("\n").filter((l) => l.startsWith("- "));
+  const boardLines = lines.filter((l) => /scored|board/i.test(l) && !/flagged windows|alerts read/.test(l));
+  ok(boardLines.length > 0 && boardLines.every((l) => l.startsWith("- [session 2026-09-04] ")),
+     "every board fact is tagged with Friday's session: " + boardLines.slice(0, 2).join(" | "));
+  const liveLines = lines.filter((l) => /holds 4 of the 4 alerts|4 flagged windows/.test(l));
+  ok(liveLines.length >= 1 && liveLines.every((l) => l.startsWith("- [session 2026-09-08] ")),
+     "and the re-read alert facts with Monday's: " + liveLines.join(" | "));
+  ok(lines.every((l) => /^- \[session 2026-09-0[48]\] /.test(l)), "no fact goes untagged when two sessions are mixed");
+  const summaryLines = promptForSummary(monday.facts, age).user.split("\n").filter((l) => l.startsWith("- "));
+  ok(summaryLines.length > 0 && summaryLines.every((l) => /^- \[session 2026-09-0[48]\] /.test(l)) && /two trading sessions/.test(promptForSummary(monday.facts, age).user),
+     "the board summary's prompt carries the same header and tags, so neither lane claims tags it does not print");
+  eq(monday.facts.filter((f) => factSession(f, age) === "2026-09-08").every((f) => INTRADAY_SOURCES.includes(f.source) || f.id.startsWith("brief:today/")), true,
+     "only a re-read live source is ever dated to the later session");
+  const sameDay = refreshIntradayFacts(nightly, { flowalerts: alertRead("2026-09-04T18:00:00.000Z") });
+  const sameAge = briefAge(sameDay, new Date("2026-09-04T18:05:00Z"));
+  eq(sameAge.liveSession, null, "a re-read inside the briefing's own session is one session");
+  const one = promptFor(sameDay.facts, "where does the session stand", sameAge).user;
+  ok(!/\[session /.test(one) && /These facts describe the trading session of 2026-09-04/.test(one),
+     "so nothing is tagged and the header is unchanged");
 }
 
 console.log(`✓ flows-ask: ${checks} assertions — an index whose every figure is quoted from a ` +

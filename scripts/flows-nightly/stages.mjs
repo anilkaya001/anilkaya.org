@@ -4,9 +4,9 @@ export const ISOLATION = Object.freeze({ fatal: "fatal", isolated: "isolated" })
 
 export const WHY_CAP = 120;
 
-export const HEALTH_LINES = 3;
+export const HEALTH_LINES = 6;
 
-export const HEALTH_LINE_CAP = 160;
+export const HEALTH_LINE_CAP = 420;
 
 const stage = (id, isolation, needs, publishes = []) =>
   Object.freeze({ id, isolation, needs: Object.freeze(needs), publishes: Object.freeze(publishes) });

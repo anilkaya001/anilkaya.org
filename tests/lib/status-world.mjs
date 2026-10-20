@@ -104,7 +104,7 @@ export const COVERAGE_ROWS = [
   { id: "board:long", updated_at: NOW - 66e5, bytes: 61800, session: "2026-10-09" },
   { id: "board:short", updated_at: NOW - 66e5, bytes: 58800, session: "2026-10-09" },
   { id: "market", updated_at: NOW - 66e5, bytes: 42100, session: "2026-10-09" },
-  { id: "events", updated_at: NOW - 66e5, bytes: 22800, session: "2026-10-09" },
+  { id: "events", updated_at: NOW - 66e5, bytes: 119700, session: "2026-10-09" },
   { id: "political", updated_at: NOW - 66e5, bytes: 30400, session: "2026-10-08" },
   { id: "unusual", updated_at: NOW - 66e5, bytes: 51200, session: null },
   { id: "regime", updated_at: NOW - 66e5, bytes: 3100, session: "2026-10-09" },

@@ -37,6 +37,7 @@ import { buildIndexDossiers, shedToFit, dossierRoster } from "../scripts/flows-l
 import { makeFakeVendor, augmentScreenerRow } from "../scripts/flows-legs/fake-vendor.mjs";
 import { neuronCoverage, cardTier, ledgerSum, LEDGER_TIERS } from "../shared/flows-neuron-coverage.js";
 import { neuronChecks, runHealthGate, HEALTH } from "../scripts/flows-legs/health.mjs";
+import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
 import { workerSource, nightlySource, treeFiles, moduleSource, expect, importEdges } from "./lib/source-scan.mjs";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { createRouter } from "../server/router.js";
@@ -273,7 +274,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   near(universeValue(blank, "NVDA", "ts"), f("iv30d") / 0.4 - 1, 1e-3,
     "an empty volatility_30 string falls back to iv30d instead of silencing the slope");
 
-  ok(UNIVERSE_BUDGET_BYTES <= 100 * 1024 && UNIVERSE_BUDGET_BYTES < 128 * 1024, "the universe budget sits under the ingest cap");
+  ok(UNIVERSE_BUDGET_BYTES <= FLOWS_MAX_PAYLOAD_BYTES - 4 * 1024, "the universe budget sits at least 4 KiB under the ingest cap, room for the stamps added after the shedder");
 }
 
 {
@@ -301,8 +302,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const whole = buildUniverse(rows, { sessionDate: S, generatedAt: "t", budgetBytes: 1e9 });
   const prio = new Map(UNIVERSE_COLUMNS.map((c) => [c.key, c.prio]));
   eq(fit.status, "ok", "670 synthetic names publish");
-  ok(fit.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE 100 KiB BUDGET: ${fit.bytes} bytes for 670 names (${whole.bytes} unbudgeted, ${whole.bytes - fit.bytes} shed)`);
-  ok(fit.shed.length > 0, `the dealer-delta, vanna, charm and implied-move columns do not all fit beside the thirty already there: the payload sheds ${fit.shed.join(", ")}`);
+  ok(fit.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE ${UNIVERSE_BUDGET_BYTES / 1024} KiB BUDGET: ${fit.bytes} bytes for 670 names (${whole.bytes} unbudgeted, ${whole.bytes - fit.bytes} shed)`);
+  deep(fit.shed, [], `at 670 names every column fits the budget and nothing is shed (${whole.bytes} bytes unbudgeted)`);
   ok(fit.shed.every((k) => prio.get(k) >= 4), "and what it sheds is priority 4 or 5 only, from the lowest priority up");
   ok(fit.cols.iv30p && fit.cols.charm && !fit.shed.includes("iv30p") && !fit.shed.includes("charm"), `iv30p and charm both survive the 670-name budget (shed: ${fit.shed.join(", ")})`);
   ok(fit.counts.iv30p > 300 && fit.counts.charm > 300, "and each carries a value for most names");
@@ -311,7 +312,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   {
     const sigma = new Map(rows.slice(0, 150).map((r, i) => [r.ticker, { s: 0.01 + (i % 30) / 1000, f2: 8 + (i % 9), f3: i % 4 }]));
     const withSig = buildUniverse(rows, { sessionDate: S, generatedAt: "t", sigma });
-    ok(withSig.status === "ok" && withSig.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE 100 KiB BUDGET with the three reference-scale columns for 150 names: ${withSig.bytes} bytes (shed: ${withSig.shed.join(", ")})`);
+    ok(withSig.status === "ok" && withSig.bytes <= UNIVERSE_BUDGET_BYTES, `INSIDE THE BUDGET with the three reference-scale columns for 150 names: ${withSig.bytes} bytes (shed: ${withSig.shed.join(", ")})`);
     ok(withSig.cols.sig && withSig.cols.f2 && withSig.cols.f3 && !withSig.shed.some((k) => ["sig", "f2", "f3", "iv30p", "charm"].includes(k)), "sig, f2 and f3 survive beside iv30p and charm");
     eq(withSig.counts.sig, 150, "only the names with a published scale carry one; the rest are null, never zero");
     near(universeValue(withSig, rows[3].ticker, "sig"), 0.013, 1e-9, "sig decodes back to the name's typical day");
@@ -321,6 +322,35 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     eq(bare.counts.sig, 0, "no map, no scale");
   }
   ok(whole.cols.dex && whole.cols.vanna && whole.cols.charm && whole.cols.im5 && whole.cols.im30, "and the unbudgeted payload carries all five new columns");
+  {
+    const wide = ["Technology", "Financial Services", "Healthcare", "Energy", "Industrials", "Consumer Cyclical", "Basic Materials", "Utilities", "Real Estate", "Communication Services", "Consumer Defensive"];
+    const big = Array.from({ length: 855 }, (_, i) => {
+      const price = 8 + rnd() * 400;
+      return augmentScreenerRow({
+        ticker: "SYX" + String(i).padStart(3, "0"), close: price.toFixed(2), prev_close: (price * (0.97 + rnd() * 0.06)).toFixed(2),
+        marketcap: String(Math.round(1e9 * Math.exp(rnd() * 6.5))), sector: wide[Math.floor(rnd() * wide.length)],
+        net_call_premium: String(Math.round((rnd() - 0.5) * 6e7)), net_put_premium: String(Math.round((rnd() - 0.5) * 4e7)),
+        call_premium: String(Math.round(rnd() * 6e7)), put_premium: String(Math.round(rnd() * 6e7)),
+        iv30d: (0.18 + rnd() * 0.5).toFixed(4), iv30d_1w: (0.18 + rnd() * 0.5).toFixed(4), iv30d_1d: (0.18 + rnd() * 0.5).toFixed(4),
+        iv30d_1m: (0.18 + rnd() * 0.5).toFixed(4), volatility: (0.18 + rnd() * 0.5).toFixed(4), relative_volume: (0.5 + rnd() * 3).toFixed(2),
+        next_earnings_date: rnd() > 0.5 ? addDays(S, 1 + Math.floor(rnd() * 46)) : null,
+      }, { sessionDate: S });
+    });
+    const sigma = new Map(big.map((r, i) => [r.ticker, { s: 0.01 + (i % 30) / 1000, f2: 8 + (i % 9), f3: i % 4 }]));
+    const harvest = { calls: 9, pages: 9, limit: 500, truncated: false, repeated: false, errors: 0, dated: true, rows: 855, source: "harvest", complete: true };
+    const fresh = { v: 1, readAt: "2026-10-16T21:45:00.000Z", vendorAt: null, source: "nightly", cadenceS: 0, session: S, writer: "actions@nightly" };
+    const at855 = buildUniverse(big, { sessionDate: S, generatedAt: "2026-10-16T22:00:00.000Z", sigma, harvest, fresh, screened: 1900 });
+    const screen = ["vanna", "charm", "im5"];
+    eq(at855.status, "ok", "855 names with a typical-day scale for every name publish");
+    ok(at855.bytes <= UNIVERSE_BUDGET_BYTES, `inside the budget at 855 names: ${at855.bytes} bytes (shed: ${at855.shed.join(", ")})`);
+    ok(at855.shed.every((k) => prio.get(k) >= 4), `at 855 names only priority 4 and 5 columns are shed: ${at855.shed.join(", ")}`);
+    ok(screen.every((k) => at855.cols[k] && at855.counts[k] > 400 && !at855.shed.includes(k)), "THE NEURON SCREEN'S VANNA, CHARM AND IM5 SURVIVE 855 NAMES, each with a value for most names");
+    ok(["iv30p", "sig", "f2", "f3"].every((k) => at855.cols[k] && !at855.shed.includes(k)), "and so do iv30p and the three typical-day columns");
+    const stamped = { ...at855, sigmaBasis: { covered: 855, universe: 855, fresh: 735, rotated: 120, short: 0, oldest: "2026-09-01" }, fixture: true };
+    ok(Buffer.byteLength(JSON.stringify(stamped)) <= FLOWS_MAX_PAYLOAD_BYTES, `with the stamps added after the shedder it stays under the ingest door's cap: ${Buffer.byteLength(JSON.stringify(stamped))} of ${FLOWS_MAX_PAYLOAD_BYTES} bytes`);
+    const old = buildUniverse(big, { sessionDate: S, generatedAt: "2026-10-16T22:00:00.000Z", sigma, harvest, fresh, screened: 1900, budgetBytes: 100 * 1024 });
+    ok(screen.every((k) => old.shed.includes(k)), `the 100 KiB budget the run of 2026-10-16 shipped with shed all three at 855 names (${old.shed.join(", ")}), which is the defect this budget answers`);
+  }
 }
 
 {

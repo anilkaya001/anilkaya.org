@@ -133,6 +133,7 @@ const mount = async (browser, w, h, o = {}) => {
   await page.route("**/*", async (r) => {
     const u = new URL(r.request().url());
     if (u.pathname === "/assets/js/flows-political.js" && o.js) return r.fulfill({ contentType: "text/javascript", body: o.js });
+    if (u.pathname === "/assets/css/flows-political.css" && o.css) return r.fulfill({ contentType: "text/css", body: o.css });
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return r.fulfill({ status: 404, body: "" });
@@ -152,7 +153,7 @@ const mount = async (browser, w, h, o = {}) => {
     }
     if (u.pathname.startsWith("/api/")) return r.fulfill({ status: 404, contentType: "application/json", body: "{}" });
     if (u.pathname === "/flows/ticker/") return r.fulfill({ contentType: "text/html", body: "<title>ticker</title><p>ticker stub</p>" });
-    return r.fulfill({ contentType: "text/html; charset=utf-8", body: HTML });
+    return r.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || HTML });
   });
   await page.goto("https://example.test/flows/political/");
   await page.waitForFunction(() => document.querySelector(".pl-tile") || (document.getElementById("plNote") && !document.getElementById("plNote").hidden), null, { timeout: 15000 });
@@ -225,6 +226,7 @@ const strip = (page) => page.evaluate(() => {
     tris: Array.from(svg.querySelectorAll("polygon.tri"), (p) => ({ k: p.classList.contains("buy") ? "buy" : "sell", txn: p.dataset.txn, filed: p.dataset.filed, pts: p.getAttribute("points") })) };
 });
 
+const settled = (page) => page.waitForFunction(() => { const e = document.querySelector("#plRail .ctx"); return !e || !e.offsetParent || !/appears here/.test(e.innerText); }, null, { timeout: 5000 }).catch(() => {});
 const settleCtx = (page, want) => page.waitForFunction((w) => { const e = document.querySelector("#plRail .ctx"); return e && (w ? e.innerText.includes(w) : !/appears here/.test(e.innerText)); }, want || null, { timeout: 5000 });
 
 async function exercise(browser, js, full) {
@@ -233,7 +235,8 @@ async function exercise(browser, js, full) {
   const { ctx, page, errors, asked, cardHits } = await mount(browser, 1440, 820, { js });
   chk(errors.length === 0, "no page error: " + errors.join("; "));
 
-  for (const t of ["ALFA", "BRVO", "CLDR", "DUNE", "ECHO"]) await page.hover('.pl-tile[data-t="' + t + '"]');
+  const sweep = await page.evaluate((ts) => ts.map((t) => { const r = document.querySelector('.pl-tile[data-t="' + t + '"]').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }), ["ALFA", "BRVO", "CLDR", "DUNE", "ECHO"]);
+  for (const [x, y] of sweep) await page.mouse.move(x, y);
   await page.waitForTimeout(450);
   chk(Object.values(cardHits).reduce((a, b) => a + b, 0) <= 2, "sweeping the pointer across five tiles asks for the card it rests on, not one per tile: " + JSON.stringify(cardHits));
   await page.mouse.move(5, 5);
@@ -354,6 +357,104 @@ async function exercise(browser, js, full) {
   return bad;
 }
 
+const ORACLE_HTML = PAGES.oracleShell(HTML, "on", "political");
+const WHISKERS = "Whiskers give the low to high bound.";
+
+const layoutOf = (page) => page.evaluate(() => {
+  const vis = (el) => { const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return s.display !== "none" && s.visibility !== "hidden" && r.width > 0 && r.height > 0; };
+  const orb = document.querySelector(".orc-orb");
+  const o = orb && vis(orb) ? orb.getBoundingClientRect() : null;
+  const under = [];
+  if (o) {
+    for (const el of document.querySelectorAll(".pl *")) {
+      if (el.children.length || !vis(el) || !el.textContent.trim()) continue;
+      const r = el.getBoundingClientRect();
+      if (r.right > o.left && r.left < o.right && r.bottom > o.top && r.top < o.bottom) under.push(el.className + ":" + el.textContent.trim().slice(0, 24));
+    }
+  }
+  const wide = [];
+  for (const el of document.querySelectorAll(".pl-title, .pl-stamp, .pl-chips, .pl-chip, .pl-ph, .pl-seg, .pl-foot, .pl-acts, .pl-rhead, .pl-rc h3, .pl-seg5")) {
+    if (vis(el) && el.scrollWidth > el.clientWidth + 1) wide.push(el.className + ":" + el.textContent.trim().slice(0, 24));
+  }
+  for (const b of document.querySelectorAll(".pl-seg button, .pl-seg5 button")) {
+    if (!vis(b)) continue;
+    const r = b.getBoundingClientRect(), p = b.parentElement.getBoundingClientRect();
+    if (r.left < p.left - 1 || r.right > p.right + 1) wide.push("tab cut:" + b.textContent.trim());
+  }
+  const fn = document.getElementById("plFnote");
+  const pl = document.getElementById("pl");
+  return {
+    orb: !!o, under, wide, plW: pl.getBoundingClientRect().width,
+    switch: vis(document.getElementById("plSeg5")),
+    dock: document.body.classList.contains("has-dock-open"),
+    fnote: fn && vis(fn) ? { text: fn.textContent, cut: fn.scrollHeight > fn.clientHeight + 1 } : null,
+    tiles: document.querySelectorAll("#plMap .pl-tile").length,
+  };
+});
+
+async function layoutProblems(browser, o = {}) {
+  const bad = [];
+  const chk = (c, m) => { checks++; if (!c) bad.push(m); };
+  const scenes = [
+    { w: 1440, h: 820, dock: false, ctx: {} },
+    { w: 1440, h: 820, dock: true, ctx: {} },
+    { w: 1180, h: 820, dock: false, ctx: {} },
+    { w: 1920, h: 1080, dock: true, ctx: {} },
+    { w: 390, h: 844, dock: false, ctx: { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } },
+  ];
+  for (const sc of scenes) {
+    const tag = sc.w + "x" + sc.h + (sc.dock ? " with the Ask dock open" : "");
+    const { ctx, page, errors } = await mount(browser, sc.w, sc.h, { context: sc.ctx, html: ORACLE_HTML, js: o.js, css: o.css });
+    await page.waitForFunction(() => document.querySelector(".orc-orb"), null, { timeout: 10000 }).catch(() => bad.push(tag + ": the orb never mounted"));
+    if (sc.dock) {
+      await page.click("#askDockTab");
+      await page.waitForFunction(() => document.body.classList.contains("has-dock-open"), null, { timeout: 5000 }).catch(() => bad.push(tag + ": the dock did not open"));
+      await page.waitForTimeout(300);
+    }
+    let L0 = await layoutOf(page);
+    chk(L0.orb, tag + ": the orb is on the page");
+    const compact = L0.plW < 900;
+    chk(L0.switch === compact, tag + ": the panel switch shows exactly when the page is under 900 px wide (" + Math.round(L0.plW) + " px, switch " + L0.switch + ")");
+    const views = compact ? ["stocks", "tape", "detail"] : ["stocks"];
+    for (const v of views) {
+      if (compact) { await page.click('#plSeg5 [data-v="' + v + '"]'); await page.waitForTimeout(150); }
+      const tabs = v === "stocks" ? ["acc", "red", "cvg"] : [null];
+      for (const tab of tabs) {
+        for (const view of v === "stocks" ? ["map", "list"] : [null]) {
+          if (tab) { await page.click("#plTab-" + tab); await page.click('#plViewSeg [data-view="' + view + '"]'); await page.waitForTimeout(120); }
+          const label = tag + " " + v + (tab ? " " + tab + " " + view : "");
+          await settled(page);
+          const L = await layoutOf(page);
+          const f = await fit(page);
+          chk(f.v && f.h, label + ": the page does not scroll (" + f.sh + " of " + f.ih + ", " + f.sw + " of " + f.iw + ")");
+          const cl = await clipped(page);
+          chk(cl.length === 0, label + ": nothing clipped or past its panel: " + cl.slice(0, 3).join(", "));
+          chk(L.wide.length === 0, label + ": no title, stamp, tab, caption or rail heading is cut: " + L.wide.slice(0, 3).join(", "));
+          chk(L.under.length === 0, label + ": nothing the reader needs sits under the orb: " + L.under.join(", "));
+          if (L.fnote) {
+            chk(!L.fnote.cut, label + ": the caption is shown whole, not cut with an ellipsis: " + L.fnote.text);
+            chk(view === "list" ? L.fnote.text.endsWith(WHISKERS) : !/whisker/i.test(L.fnote.text), label + ": the caption names whiskers only where the list draws them: " + L.fnote.text);
+          }
+          if (view === "map") chk(L.tiles === Math.min(compact ? 12 : 18, rowsFor(tab).length), label + ": " + (compact ? "the compact layout draws at most 12 tiles" : "the wide layout draws at most 18 tiles") + " (" + L.tiles + ")");
+        }
+      }
+    }
+    chk(errors.length === 0, tag + ": no page error: " + errors.join("; "));
+    await ctx.close();
+  }
+  return bad;
+}
+
+const LAYOUT_MUTANTS = [
+  ["the compact layout keyed to the viewport again", "css", "@container pl (max-width: 899.98px) {\n  .pl-title {", "@media (max-width: 899px) {\n  .pl-title {"],
+  ["the context reasons printed in the narrow desktop column", "css", ".pl-rc.ctx .kv small.why { display: none; }", ""],
+  ["no end space for the orb in the switch layout", "css", ".flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }", ""],
+  ["the selection bar running under the orb", "css", ".flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }", ""],
+  ["the caption clamped to two lines", "css", "-webkit-line-clamp: 3;", "-webkit-line-clamp: 2;"],
+  ["the tile cap keyed to the viewport again", "js", "const mobile = () => { const pl = document.getElementById(\"pl\"); return pl ? pl.getBoundingClientRect().width < 900 : matchMedia(\"(max-width:899px)\").matches; };", "const mobile = () => matchMedia(\"(max-width:899px)\").matches;"],
+  ["whiskers named under the map", "js", "tabNote(tab, false)", "tabNote(tab, true)"],
+];
+
 const browser = await launch();
 
 {
@@ -389,7 +490,8 @@ const browser = await launch();
   ok(forbidden("an unusual screen") && forbidden("a NOW badge") && forbidden("at the ask") && !forbidden("now that it is open"), "and the lint catches planted words and lets the ordinary word through");
   ok(/\/assets\/js\/flows-political\.js\?v=\d+/.test(HTML) && /\/assets\/css\/flows-political\.css\?v=\d+/.test(HTML), "script and sheet are versioned");
   ok(/data-fx-hero/.test(HTML) && (HTML.match(/<h1[ >]/g) || []).length === 1, "one h1");
-  ok(/Ranges, not amounts/.test(HTML) && /Party not in feed/.test(HTML) && /Not advice/.test(HTML), "the three chips are in the served HTML");
+  ok(/Ranges, not amounts/.test(HTML) && /No party in feed/.test(HTML) && /Not advice/.test(HTML), "the three chips are in the served HTML");
+  eq((HTML.match(/party in feed|party not in feed/gi) || []).length, 1, "the party chip is one string at every width, not a long and a short wording");
   ok(!/\bglobalThis\.|(?<![\w.])window\.[A-Za-z]+\s*=(?!=)/.test(JS.replace(/globalThis\.__PoliticalTest/, "")), "no new global");
   ok(!/\bredF\b/.test(JS + CSS) && !/Firm reducing|Reducing \\u00b7 bounds agree/.test(JS), "the code has no firm-reducing state at all");
 }
@@ -401,6 +503,7 @@ for (const [w, h, extra] of VIEWPORTS) {
   eq(await page.evaluate(() => matchMedia("(pointer:coarse)").matches), phone, w + ": the phone context is a coarse pointer and the others are not");
   const states = [];
   const check = async (label) => {
+    await settled(page);
     const f = await fit(page);
     ok(f.v && f.h, w + "x" + h + " " + label + ": the page does not scroll (" + f.sh + " of " + f.ih + ", " + f.sw + " of " + f.iw + ")");
     ok(f.dlg, w + "x" + h + " " + label + ": an open dialog sits inside the viewport");
@@ -571,6 +674,17 @@ for (const [w, h, extra] of VIEWPORTS) {
   eq(bad, [], "the page passes the whole exercise: " + bad.slice(0, 3).join(" | "));
 }
 
+{
+  const bad = await layoutProblems(browser);
+  eq(bad, [], "with the orb mounted and the Ask dock open or closed, at 1920, 1440, 1180 and 390 px, the page fits, nothing is cut and nothing sits under the orb: " + bad.slice(0, 3).join(" | "));
+  for (const [name, kind, from, to] of LAYOUT_MUTANTS) {
+    const src = kind === "css" ? CSS : JS;
+    ok(src.split(from).length === 2, "the planted layout build changes the " + kind + " exactly once: " + name);
+    const problems = await layoutProblems(browser, kind === "css" ? { css: src.replace(from, to) } : { js: src.replace(from, to) }).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
+    ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (" + problems.length + " failures, first: " + problems[0] + ")");
+  }
+}
+
 const MUTANTS = [
   ["2 x sold replaced by sold", "return { mid: B - S, lo: lo - 2 * S, hi: hi - S / 8 };", "return { mid: B - S, lo: lo - S, hi: hi - S / 8 };"],
   ["sold bound used as the bought bound", "return { mid: B - S, lo: lo - 2 * S, hi: hi - S / 8 };", "return { mid: B - S, lo: lo - 2 * B, hi: hi - S / 8 };"],
@@ -596,4 +710,4 @@ for (const [name, from, to] of MUTANTS) {
 }
 
 await browser.close();
-console.log(`✓ flows-political-render: ${checks} assertions — the Political page in Chromium against a synthetic payload of the real shape, no server: no page scroll, no clipped cell and every dialog inside the viewport at 1440x820, 1024x768 and 390x844 in every tab, view and panel; tile areas equal to the square roots of disclosed dollars and to filers; states, rings and bounds equal to independent sums with no firm reduction anywhere; the strip's blind window; Flows context read from the card with dashes and reasons, a failure and a Retry; the keyboard; 44 px targets; reduced motion; the stamp in TRT; the page's pure functions equal to the leaf's; no colour literal, no forbidden word, no hyphen minus; and ${MUTANTS.length} planted wrong builds that each fail`);
+console.log(`✓ flows-political-render: ${checks} assertions — the Political page in Chromium against a synthetic payload of the real shape, no server: no page scroll, no clipped cell and every dialog inside the viewport at 1440x820, 1024x768 and 390x844 in every tab, view and panel; tile areas equal to the square roots of disclosed dollars and to filers; states, rings and bounds equal to independent sums with no firm reduction anywhere; the strip's blind window; Flows context read from the card with dashes and reasons, a failure and a Retry; the keyboard; 44 px targets; reduced motion; the stamp in TRT; the page's pure functions equal to the leaf's; no colour literal, no forbidden word, no hyphen minus; the page with the orb mounted and the Ask dock open or closed at 1920, 1440, 1180 and 390 px, laid out by its own width with nothing cut and nothing under the orb; and ${MUTANTS.length + LAYOUT_MUTANTS.length} planted wrong builds that each fail`);

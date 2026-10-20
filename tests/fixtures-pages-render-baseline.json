@@ -50,23 +50,23 @@
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 16,
-  "targetsUnder44": 20
+  "targetsUnder24": 1,
+  "targetsUnder44": 5
  },
  "glossary@390": {
   "contrast": 0,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 16,
-  "targetsUnder44": 20
+  "targetsUnder24": 1,
+  "targetsUnder44": 5
  },
  "glossary@1440": {
   "contrast": 0,
   "names": 0,
   "structure": 0,
   "overflowPx": 0,
-  "targetsUnder24": 16
+  "targetsUnder24": 1
  },
  "overview@320": {
   "contrast": 0,
