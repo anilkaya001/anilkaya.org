@@ -90,6 +90,7 @@ if (cards.length) {
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await page.addInitScript(() => { let s = 42; Math.random = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; });
+      await page.addInitScript(() => { const g = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function (k, ...r) { return /webgl/i.test(String(k)) ? null : g.call(this, k, ...r); }; });
       let card = null;
       await page.route("**/*", async (route) => {
         const u = new URL(route.request().url());
@@ -123,7 +124,7 @@ if (cards.length) {
           for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
           const parts = [["hero", document.getElementById("ftHero")], ["verdict", document.getElementById("ftVerdict")],
             ...[...document.querySelectorAll("#ftGrid > [id]")].map((m) => [m.id, m])];
-          return parts.map(([k, el]) => [k, el ? el.innerHTML : null]);
+          return parts.map(([k, el]) => [k, el ? el.innerHTML.replace(/ transition: none;/g, "") : null]);
         }));
       }
       await page.close();

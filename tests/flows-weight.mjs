@@ -17,6 +17,13 @@ const GLASS_LENS = { bytes: 396, gzip: 78, why: "design v3 Lane 1, refraction on
 const GLASS_SITE = { bytes: 84, gzip: 5, why: "design v3 Lane 1, one more place for visual integration: the sidebar's two switchers (.fx-site, Home Articles Lab Flows and About Glossary) are segmented controls in everything but their paint, so they take the glass well and the glass knob of .ui-seg instead of the flat fills" };
 const GLASS_REBASE = { bytes: 480, gzip: 80, why: "design v3 Lane 1 rebased onto main: the shared flows.css grew under it, 449 to 469 B over the raw CSS ceiling on every page at the rebase; raise approved by the owner" };
 const STATUS_RAISE = { od: "OD-STATUS-1", bytes: 300, deferredBytes: 850, why: "owner-approved: the whole-card counts, per-key caps and readable rail and vendor cards cost 281 B of eager flows-status.js on statusPage, measured against the 115.68 KiB ceiling, and 817 B across the status-panels files, measured against the 179 KiB deferred allowance; the follow-up moves the status painters that only the non-Health tabs use into the status-panels group and deletes this raise" };
+const NN_ORB = { bytes: 9815, why: "design v3 Lane 2, the physics orb: flows-nn-orb.js is a deferred group (WebGL ray-traced glass sphere with Fresnel, Snell per channel, thin-film caustic and an environment read from the page tokens) asked for after load on Home and the ticker; it adds nothing to the eager JavaScript" };
+const NN_KERNEL = { bytes: 974, uiBytes: 524, gzip: 250, why: "design v3 Lane 2, owner-approved: FlowsUI.nn in flows-ui.js (the six-state setter and the busy flag, 524 B raw) and the dock's two-stylesheet loader and phone Ask slot in flows-dock.js (450 B) ship on every gated route, measured with node tests/flows-weight.mjs against the Lane 1 base" };
+const NN_TICKER = { bytes: 2438, gzip: 685, why: "design v3 Lane 2, owner-approved: flows-ticker.js wiring on the ticker, the strip, verdict card and rail states, the schedule flags that clear at the give-up, the edges and the evidence rims, measured against the Lane 1 base" };
+const NN_HOME = { bytes: 452, gzip: 129, why: "design v3 Lane 2, owner-approved: flows-overview.js swaps the orb for the calc tile on the computed line and asks for the physics orb group, measured against the Lane 1 base" };
+const NN_ASK = { bytes: 1004, why: "design v3 Lane 2, owner-approved: flows-ask.js settles the dock head and the screen edge on every answer path and draws the answer tile as the app tile; it is the shared deferred dock file of every gated route, measured against the Lane 1 base" };
+const NN_FLOWS_CSS = { bytes: 451, gzip: 69, why: "design v3 Lane 2, owner-approved: flows.css gains the phone Ask slot style and the sticky dock head, measured against the Lane 1 base; every Flows route links flows.css" };
+const NN_IDENTITY = { ticker: { bytes: 12191, gzip: 2722 }, overview: { bytes: 12301, gzip: 2750 }, why: "design v3 Lane 2, owner-approved: flows-nn.css (12.6 KB: the tokens, the CSS orb, the four-strip edge, the screen edge, the motion and the forced-colours block, linked eagerly by Home and the ticker) net of the gradient tiles it deletes from flows-home.css, flows-ticker.css and flows-ask.css, measured against the Lane 1 base; the spec estimated 6.5 KiB and the finished sheet with the cite rims and calc tile is larger" };
 const GLASS_BYTES_PLAIN = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes) / 1024;
 const GLASS_BYTES = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes + GLASS_REBASE.bytes) / 1024;
 const GLASS_GZIP = (GLASS_V3.gzip + GLASS_LENS.gzip + GLASS_SITE.gzip) / 1024;
@@ -24,79 +31,79 @@ const GLASS_V3_TICKER = { bytes: 219, gzip: 37, why: "design v3 Lane 1: the tick
 const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 1.6 KB where section 2.10 ruling 8 counted 0.9 KB, so the V and L share of the kernel is stated as 3.8 KB instead of 3.1" };
 
 const CEILING_KIB = {
-  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024,
-  overviewPage: 246 + 1483 / 1024 + (246 + 2327 / 1024) - (246) + (246 + 2327 / 1024 + 265 / 1024) - (246 + 2327 / 1024) + (246 + 2327 / 1024 + 265 / 1024 - 958 / 1024) - (246 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 3600 / 1024 + 3900 / 1024 + 442 / 1024,
-  sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1400 / 1024 + 442 / 1024,
-  watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1400 / 1024 + 442 / 1024,
-  deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024) + 2010 / 1024 + 360 / 1024 + 8400 / 1024 + 442 / 1024,
-  strategyPage: 261 + 5786 / 1024 + (261 + 5786 / 1024 + 2327 / 1024) - (261 + 5786 / 1024) + (261 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (261 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + 442 / 1024,
-  marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024 + 9.5 + 442 / 1024,
-  unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024,
-  eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024,
-  movesPage: 151 + 2322 / 1024 + 442 / 1024,
-  politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024,
+  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024 + NN_KERNEL.bytes / 1024 + NN_TICKER.bytes / 1024,
+  overviewPage: 246 + 1483 / 1024 + (246 + 2327 / 1024) - (246) + (246 + 2327 / 1024 + 265 / 1024) - (246 + 2327 / 1024) + (246 + 2327 / 1024 + 265 / 1024 - 958 / 1024) - (246 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 3600 / 1024 + 3900 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + NN_HOME.bytes / 1024,
+  sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  deskPage: 243 + 7093 / 1024 + (243 + 7093 / 1024 + 2327 / 1024) - (243 + 7093 / 1024) + (243 + 7093 / 1024 + 2327 / 1024 + 265 / 1024) - (243 + 7093 / 1024 + 2327 / 1024) + 2010 / 1024 + 360 / 1024 + 8400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  strategyPage: 261 + 5786 / 1024 + (261 + 5786 / 1024 + 2327 / 1024) - (261 + 5786 / 1024) + (261 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (261 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024 + 9.5 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
+  movesPage: 151 + 2322 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
   notFoundPage: 5,
-  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024,
+  statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024 + NN_KERNEL.bytes / 1024,
 };
 
 const GZIP_KIB = {
-  tickerPage: 125 + (2126 + 226) / 1024 + (125 + 2126 / 1024 + 821 / 1024) - (125 + 2126 / 1024) + (125 + 2126 / 1024 + 821 / 1024 + 101 / 1024) - (125 + 2126 / 1024 + 821 / 1024) + 150 / 1024 + 15600 / 1024 + 800 / 1024 + 8800 / 1024 + 736 / 1024 + 420 / 1024 + 3500 / 1024 + 1618 / 1024,
-  overviewPage: 82 - 7712 / 1024 + (82 - 7712 / 1024 + 830 / 1024) - (82 - 7712 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) - (82 - 7712 / 1024 + 830 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024 - 288 / 1024) - (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 1800 / 1024 + 1350 / 1024 + 149 / 1024,
-  sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024,
-  watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024,
-  deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024 + 2900 / 1024 + 184 / 1024,
-  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024,
-  marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024,
-  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024,
-  eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024,
-  movesPage: 47.5 + 722 / 1024 + 149 / 1024,
-  politicalPage: 37.5 + 641 / 1024 + 149 / 1024,
+  tickerPage: 125 + (2126 + 226) / 1024 + (125 + 2126 / 1024 + 821 / 1024) - (125 + 2126 / 1024) + (125 + 2126 / 1024 + 821 / 1024 + 101 / 1024) - (125 + 2126 / 1024 + 821 / 1024) + 150 / 1024 + 15600 / 1024 + 800 / 1024 + 8800 / 1024 + 736 / 1024 + 420 / 1024 + 3500 / 1024 + 1618 / 1024 + NN_KERNEL.gzip / 1024 + NN_TICKER.gzip / 1024,
+  overviewPage: 82 - 7712 / 1024 + (82 - 7712 / 1024 + 830 / 1024) - (82 - 7712 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) - (82 - 7712 / 1024 + 830 / 1024) + (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024 - 288 / 1024) - (82 - 7712 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 1800 / 1024 + 1350 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + NN_HOME.gzip / 1024,
+  sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024 + 2900 / 1024 + 184 / 1024 + NN_KERNEL.gzip / 1024,
+  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  movesPage: 47.5 + 722 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
   notFoundPage: 3,
-  statusPage: 27 + 9.5,
+  statusPage: 27 + 9.5 + NN_KERNEL.gzip / 1024,
 };
 
 const CSS_KIB = {
-  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024 + 9900 / 1024 + 12150 / 1024 + 6400 / 1024 + 1030 / 1024 + 3600 / 1024 + 1286 / 1024 + GLASS_BYTES + GLASS_V3_TICKER.bytes / 1024,
-  overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES,
-  sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES,
-  watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + 20 / 1024 + GLASS_BYTES,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 100 / 1024 + GLASS_BYTES,
-  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES,
-  unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_BYTES,
-  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_BYTES,
-  movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES,
-  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES,
-  loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES,
-  aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES,
-  glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES,
-  notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES,
-  statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_BYTES_PLAIN,
+  tickerPage: 103 + (565 + 1294) / 1024 + 1861 / 1024 + 320 / 1024 + 2107 / 1024 + 9900 / 1024 + 12150 / 1024 + 6400 / 1024 + 1030 / 1024 + 3600 / 1024 + 1286 / 1024 + GLASS_BYTES + GLASS_V3_TICKER.bytes / 1024 + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.ticker.bytes / 1024,
+  overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.overview.bytes / 1024,
+  sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + 20 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 100 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_BYTES_PLAIN + NN_FLOWS_CSS.bytes / 1024,
 };
 
 const CSS_GZIP_KIB = {
-  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + GLASS_V3_TICKER.gzip / 1024,
-  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  movesPage: 21 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  politicalPage: 22.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  aboutPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  glossaryPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  notFoundPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
-  statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024,
+  tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + GLASS_V3_TICKER.gzip / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.ticker.gzip / 1024,
+  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024,
+  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  movesPage: 21 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  politicalPage: 22.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  aboutPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  glossaryPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  notFoundPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
 };
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
@@ -129,12 +136,12 @@ const judge = (row, bases = BASES) => {
 };
 
 const DEFERRED = {
-  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", live: "/assets/js/flows-ticker-live.js" } },
+  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-capacity.js", "/assets/js/flows-status-coverage.js"] } },
-  overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js", "home-netmap": "/assets/js/flows-net-map.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
+  overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js", "home-netmap": "/assets/js/flows-net-map.js", "nn-orb": "/assets/js/flows-nn-orb.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
 };
 const SHARED_DEFERRED = {
   dock: { file: "/assets/js/flows-ask.js", declared: /<aside[^>]*\bid="askDock"[^>]*\bdata-src="([^"?]+)/ },
@@ -146,8 +153,8 @@ const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracl
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024, sidePage: 80, watchPage: 80, deskPage: 120, strategyPage: 80, marketPage: 323,
-  unusualPage: 196 + 960 / 1024, eventsPage: 80, movesPage: 80, politicalPage: 80, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024,
 };
 
 const FLOOR_BYTES = 1024;
@@ -316,7 +323,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228, gzip: 39938, css: 118855, cssGzip: 24824 };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 39938 + NN_KERNEL.gzip, css: 118855 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
@@ -418,7 +425,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
@@ -573,7 +580,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       }
     }
     if (TICKER_RAISE) {
-      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "live").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
+      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "live" && g !== "nn-orb").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
       ok(TICKER_RAISE.bytes <= 1613, `the ticker's raise (${TICKER_RAISE.od}) is at most the 1,613 B it was made with`);
       ok(grouped < TICKER_RAISE.bytes, `THE TICKER'S ${TICKER_RAISE.bytes} B RAISE STAYS ONLY WHILE THE TICKER DEFERS LESS THAN IT: ${grouped} B of group files are deferred; once they reach the raise, delete TICKER_RAISE (${TICKER_RAISE.od}) and the ceiling returns to 400 KiB`);
       console.log(`  ticker ceiling carries a pending ${TICKER_RAISE.od} deduction of ${TICKER_RAISE.bytes} B: ${TICKER_RAISE.why}`);

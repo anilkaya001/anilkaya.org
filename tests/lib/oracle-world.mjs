@@ -41,6 +41,8 @@ export async function open(browser, o = {}) {
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch, deviceScaleFactor: 1 });
   const log = { requests: [], errors: [], vibrate: 0, oracleHits: 0, rafCalls: 0 };
   await context.addInitScript(() => {
+    const gc = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (k, ...r) { return /webgl/.test(String(k)) ? null : gc.call(this, k, ...r); };
     window.__vib = 0;
     navigator.vibrate = () => { window.__vib++; return true; };
     const raf = window.requestAnimationFrame.bind(window);

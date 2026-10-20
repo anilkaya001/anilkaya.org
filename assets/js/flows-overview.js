@@ -1413,8 +1413,14 @@
     if (!line) return;
     t.textContent = line;
     box.classList.replace("is-pending", "is-computed");
+    box.dataset.nn = "plain";
+    const orb = box.querySelector(".hm-verdict-g");
+    if (orb) {
+      const calc = h("span", { class: "hm-verdict-g nn-calc is-44", "aria-hidden": "true" }, glyph("calc"));
+      orb.replaceWith(calc);
+    }
     const by = box.querySelector(".hm-verdict-by");
-    if (by) by.textContent = "Computed";
+    if (by) { by.classList.remove("nn-word"); by.textContent = "Computed"; }
     const mk = box.querySelector(".hm-verdict-meta .hm-mark");
     if (mk) {
       mk.replaceWith(h("button", {
@@ -1425,6 +1431,7 @@
   }
 
   function neuronWire(lng, sht) {
+    if (document.querySelector("#hmVerdict .nn-orb")) window.FlowsUI.defer("nn-orb", { when: "idle" }).then(() => { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
     const more = $("hmNeuronMore"), x = $("hmNeuronX");
     if (more && x) {
       more.addEventListener("click", () => {

@@ -127,17 +127,6 @@
 .hm-verdict { display: grid; gap: var(--sp-4); padding: var(--sp-5); }
 @media (min-width: 768px) { .hm-verdict { padding: var(--sp-5) var(--sp-6); } }
 .hm-verdict-h { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); }
-.hm-verdict-g {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 30%, transparent), color-mix(in srgb, var(--s-purple) 26%, transparent));
-  box-shadow: var(--mat-edge);
-  color: var(--accent-soft);
-}
-.hm-verdict-g .ui-g { font-size: 22px; }
 .hm-verdict-b { min-width: 0; }
 .hm-verdict-line {
   margin: 0;

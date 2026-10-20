@@ -169,8 +169,6 @@
 }
 .ak-compose.is-docked ~ .ak-answer .ak-a { padding: var(--sp-4); }
 .ak-a-h { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.ak-a-g { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--accent-fill); color: var(--accent-soft); }
-.ak-a-g .ui-g { font-size: 15px; }
 .ak-a-sp { flex: 1; }
 .ak-prov, .ak-q { border: 0; cursor: pointer; }
 .ak-checked .ui-g { font-size: 9px; }

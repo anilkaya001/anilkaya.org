@@ -19,7 +19,11 @@
     var css = dock.dataset.css;
     if (css) {
       delete dock.dataset.css;
-      document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: css }));
+      css.split(" ").forEach(function (href) {
+        if (href && !document.querySelector('link[href="' + href + '"]')) {
+          document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: href }));
+        }
+      });
     }
     var s = document.createElement("script");
     s.src = dock.getAttribute("data-src");
@@ -75,6 +79,8 @@
     }
     document.body.classList.toggle("has-dock-open", open);
     tab.setAttribute("aria-expanded", open ? "true" : "false");
+    var pt = document.getElementById("fxTabAsk");
+    if (pt) pt.setAttribute("aria-expanded", open ? "true" : "false");
     panel.hidden = !open;
     if (scrim) scrim.hidden = !open;
     if (open) void panel.offsetWidth;
@@ -102,6 +108,10 @@
   });
 
   tab.addEventListener("click", function () {
+    setOpen(!dock.classList.contains("is-open"), true);
+  });
+  var phoneTab = document.getElementById("fxTabAsk");
+  if (phoneTab) phoneTab.addEventListener("click", function () {
     setOpen(!dock.classList.contains("is-open"), true);
   });
   if (closeBtn) closeBtn.addEventListener("click", dismiss);
