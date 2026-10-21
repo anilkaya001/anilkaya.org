@@ -1,1 +1,1 @@
-{"name": "flows-permits", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 3, "files": ["flows-permits-contract.mjs"], "covers": []}
+{"name": "flows-permits", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 11, "files": ["flows-permits-contract.mjs"], "covers": []}
