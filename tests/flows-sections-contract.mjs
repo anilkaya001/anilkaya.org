@@ -22,6 +22,21 @@ const put = (key, bodyObj) => fetch(url("/api/flows/ingest?key=" + encodeURIComp
   body: JSON.stringify(bodyObj),
 });
 
+const settled = async (route) => {
+  const until = Date.now() + 60000;
+  for (;;) {
+    try {
+      const r = await fetch(url(route), { headers: auth, signal: AbortSignal.timeout(15000) });
+      if ((r.headers.get("content-type") || "").includes("json")) { await r.json(); return; }
+    } catch (e) {
+      if (Date.now() > until) throw e;
+    }
+    if (Date.now() > until) throw new Error("worker never answered " + route + " with JSON");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+};
+for (const route of ["/api/flows/board?side=watch", "/api/flows/record", "/api/flows/movers", "/api/flows/sectors"]) await settled(route);
+
 const WROW = "#watchBody .bd-row[data-flip]";
 const readWhy = async (page) => {
   await page.click(".bd-silent[data-empty] [data-info]");

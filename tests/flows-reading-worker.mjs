@@ -571,7 +571,8 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const calls = await Promise.all([get("/api/flows/summary?t=" + T), get("/api/flows/summary?t=" + T), get("/api/flows/summary?t=" + T)]);
   ok(calls.every((c) => c.body.read.status === "generating"), "SINGLE-FLIGHT: three concurrent calls all see generating");
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  for (let i = 0; i < 400 && ai.log.reads.length < 1; i++) await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   eq(ai.log.reads.length, 1, "and one model call is in flight");
   eq(f.db.prepare("SELECT count(*) AS n FROM flows_neuron WHERE scope = 'gen:read:EXMP' AND guard = 'generating'").get().n, 1, "one generating marker");
   const during = await get("/api/flows/summary?t=" + T);
