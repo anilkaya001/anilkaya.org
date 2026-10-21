@@ -1415,7 +1415,7 @@ chain did, and `--timeout-scale=x` multiplies every timeout on a slow
 machine (a timeout past `setTimeout`'s 2^31-1 ms is held there, so a very
 large scale switches timeouts off rather than firing them at once).
 `--group fast|shard` runs one group, in manifest order. `--shard i/n` runs
-the i-th of n shards of the `shard` group. At the CI count (8, `CI_SHARDS` in
+the i-th of n shards of the `shard` group. At the CI count (12, `CI_SHARDS` in
 `run.mjs`) a suite goes to the shard its own file pins; a suite with no valid
 pin is placed after the pinned ones, longest `medianS` first into the cheapest
 shard. At any other count nothing is pinned and every suite is placed that way,
@@ -1451,8 +1451,8 @@ intermediate one.
 
 In CI (`.github/workflows/regression.yml`) the chain runs as a `fast` job
 (full history and `ASSET_DIFF_BASE`, the Worker dry run, then
-`node run.mjs --group fast`, no Chromium), eight `shard` jobs (a matrix of
-`--shard 1/8` to `8/8`, fail-fast off, a shallow checkout, Chromium installed
+`node run.mjs --group fast`, no Chromium), twelve `shard` jobs (a matrix of
+`--shard 1/12` to `12/12`, fail-fast off, a shallow checkout, Chromium installed
 only when `--needs-browser` answers `true`), and `test`, which needs both,
 runs `if: always()`, and is green only when the fast job and every shard
 succeeded. `test` is the job a ruleset on `main` should require (A-15); as
@@ -1475,7 +1475,7 @@ means adding `tests/suites/<name>.json` with a `command` and a `shard` pin from 
 running `node run-contract.mjs` from `tests/`; refreshing a `medianS` means
 editing that one line.** There is no published table to republish
 (`PUBLISHED_SHARDS` is gone). The contract holds each `shard`-group suite to a
-pin (`EVERY SUITE OF THE SHARD GROUP PINS ITS SHARD`) and the eight shards to a
+pin (`EVERY SUITE OF THE SHARD GROUP PINS ITS SHARD`) and the twelve shards to a
 balance: the heaviest, counted as medians plus the Chromium install, within
 1.3 times the lightest (`A SHARD FAR OUTSIDE THE TOLERANCE FAILS`, whose
 message prints the loads). Pin a new suite to the lightest shard; when a

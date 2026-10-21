@@ -1,1 +1,1 @@
-{"name": "server-rt", "class": "N", "group": "shard", "timing": false, "medianS": 0.7, "shard": 3, "command": "node server-rt.mjs", "files": ["server-rt.mjs"], "covers": ["scripts/flows-pipeline.mjs","worker.js"]}
+{"name": "server-rt", "class": "N", "group": "shard", "timing": false, "medianS": 0.7, "shard": 12, "command": "node server-rt.mjs", "files": ["server-rt.mjs"], "covers": ["scripts/flows-pipeline.mjs","worker.js"]}

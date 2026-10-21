@@ -1,1 +1,1 @@
-{"name": "flows-reading-render", "class": "C", "group": "shard", "timing": false, "medianS": 22.8, "shard": 2, "files": ["flows-reading-render.mjs"], "covers": ["assets/js/flows-ticker.js","tests/fixtures-dossier-vendor.json"]}
+{"name": "flows-reading-render", "class": "C", "group": "shard", "timing": false, "medianS": 22.8, "shard": 4, "files": ["flows-reading-render.mjs"], "covers": ["assets/js/flows-ticker.js","tests/fixtures-dossier-vendor.json"]}
