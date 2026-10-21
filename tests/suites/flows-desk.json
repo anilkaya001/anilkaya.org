@@ -1,1 +1,1 @@
-{"name": "flows-desk", "class": "W", "group": "shard", "timing": false, "medianS": 35.2, "shard": 5, "files": ["flows-desk-contract.mjs"], "covers": ["schema.sql","shared/flows-pages.js"]}
+{"name": "flows-desk", "class": "W", "group": "shard", "timing": false, "medianS": 34.8, "shard": 1, "files": ["flows-desk-contract.mjs"], "covers": ["schema.sql","shared/flows-pages.js"]}

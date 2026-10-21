@@ -1,1 +1,1 @@
-{"name": "flows-coverage", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 6, "command": "node --disable-warning=ExperimentalWarning flows-coverage.mjs", "files": ["flows-coverage.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}
+{"name": "flows-coverage", "class": "N", "group": "shard", "timing": false, "medianS": 39.2, "shard": 2, "command": "node --disable-warning=ExperimentalWarning flows-coverage.mjs", "files": ["flows-coverage.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}

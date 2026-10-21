@@ -363,8 +363,8 @@ const tableRows = (md) => md.split("\n").filter((l) => /^\| \d+ \| `/.test(l));
   writeFileSync(path.join(fx, SUITES_DIR, "pass.json"), "{not json\n");
   ok(run([]).stderr.includes("pass.json: not valid JSON"), "a file that is not JSON is refused");
   writeFixture();
-  writeSuites(fx, fixtureSuites.suites.map((s, i) => (i === 0 ? { ...s, shard: 7 } : s)));
-  ok(run([]).stderr.includes(`pass pins shard 7, not an integer from 1 to ${CI_SHARDS}`), "a pin outside the shard count is refused");
+  writeSuites(fx, fixtureSuites.suites.map((s, i) => (i === 0 ? { ...s, shard: CI_SHARDS + 1 } : s)));
+  ok(run([]).stderr.includes(`pass pins shard ${CI_SHARDS + 1}, not an integer from 1 to ${CI_SHARDS}`), "a pin outside the shard count is refused");
   writeSuites(fx, fixtureSuites.suites.map((s, i) => (i === 0 ? { ...s, shard: 2.5 } : s)));
   ok(run([]).stderr.includes("pass pins shard 2.5"), "and a fractional one");
   writeFixture();
@@ -782,7 +782,7 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
   ok(merged.filter((s) => groupOf(s) === "shard").every((s) => s.shard !== undefined), "and every suite of it is pinned");
   ok(shardBalance(mShards).within, `and stays inside the balance tolerance (ratio ${shardBalance(mShards).ratio.toFixed(3)})`);
   deep(mShards.map((sh) => sh.filter((s) => s.name.endsWith("lane-a") || s.name.endsWith("lane-b") || s.name.endsWith("lane-c")).map((s) => s.name)),
-    [["zz-lane-a"], ["zz-lane-b"], ["aa-lane-c"], [], [], []], "each lane's suite runs in the shard its own file pinned");
+    [["zz-lane-a"], ["zz-lane-b"], ["aa-lane-c"], ...Array.from({ length: CI_SHARDS - 3 }, () => [])], "each lane's suite runs in the shard its own file pinned");
   const mfile = readdirSync(path.join(repo, SUITES_DIR));
   ok(["zz-lane-a.json", "zz-lane-b.json", "aa-lane-c.json"].every((f) => mfile.includes(f)), "as three files");
 

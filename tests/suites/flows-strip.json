@@ -1,1 +1,1 @@
-{"name": "flows-strip", "class": "C", "group": "shard", "timing": false, "medianS": 78.8, "shard": 6, "files": ["flows-strip.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}
+{"name": "flows-strip", "class": "C", "group": "shard", "timing": false, "medianS": 45.7, "shard": 8, "files": ["flows-strip.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}

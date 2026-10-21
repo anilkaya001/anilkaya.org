@@ -174,7 +174,7 @@ for (const m of MUTATIONS) {
   const f = fakeD1();
   const env = { DB: f.D1, SESSION_SECRET, LAB_WRITE: limiter(1000) };
   const tables = ["skill_attempts", "mastery_attempts"];
-  const old = Date.now() - 10 * 24 * 60 * 60 * 1000;
+  const old = easternInstant("2026-10-13", 3 * 60) - 10 * 24 * 60 * 60 * 1000;
   const insertSkill = f.db.prepare("INSERT INTO skill_attempts (user_id, attempt_id, skill_id, item_id, correct, hinted, attempt_day, applied, received_at) VALUES (?, ?, ?, ?, 1, 0, '2026-09-01', 1, ?)");
   const insertMastery = f.db.prepare("INSERT INTO mastery_attempts (user_id, attempt_id, item_id, correct, hinted, attempt_day, applied, received_at) VALUES (?, ?, ?, 1, 0, '2026-09-01', 1, ?)");
   f.db.exec("BEGIN");

@@ -3815,9 +3815,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      /REUSED: \$\{\{ needs\.reuse\.outputs\.reused \}\}/.test(regTest) &&
      /else\n\s+test "\$FAST" = success && test "\$SHARDS" = success\n\s+fi/.test(regTest) && !/\buses:/.test(regTest),
     "and it is green only when the fast job and the shard matrix both report success, or when a verified reuse skipped both; it checks out nothing");
-  ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6\]$/m.test(regShard),
-    "the shard matrix is 1 to 6 with fail-fast off, so one red shard never cancels the others' reports");
-  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 \$\{\{ steps\.select\.outputs\.args \}\} --needs-browser\)"/.test(regShard) &&
+  ok(/^ {6}fail-fast: false$/m.test(regShard) && /^ {8}shard: \[1, 2, 3, 4, 5, 6, 7, 8\]$/m.test(regShard),
+    "the shard matrix is 1 to 8 with fail-fast off, so one red shard never cancels the others' reports");
+  ok(/needs="\$\(node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/8 \$\{\{ steps\.select\.outputs\.args \}\} --needs-browser\)"/.test(regShard) &&
      /echo "needs=\$needs" >> "\$GITHUB_OUTPUT"/.test(regShard) && /^ {8}id: browser$/m.test(regShard) &&
      /- name: Install Chromium\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: npx playwright install --with-deps chromium\n/.test(regShard),
     "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
@@ -3828,7 +3828,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "EVERY SHARD CHECKS THE CONTRACTS FIRST: after npm ci and the Chromium decision, before its own selection, each shard runs " +
     "node run.mjs --only contracts (about ten seconds), so a red contracts check stops the shard inside its first minute " +
     "instead of after a complete run of the six, while the fast job still runs the whole fast group once");
-  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/6 \$\{\{ steps\.select\.outputs\.args \}\}\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
+  ok(/run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/8 \$\{\{ steps\.select\.outputs\.args \}\}\n/.test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
      !/npm test/.test(regression),
     "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");
   ok(/fetch-depth: 0/.test(regFast) && /ASSET_DIFF_BASE: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/.test(regFast) &&
