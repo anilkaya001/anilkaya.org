@@ -1,1 +1,1 @@
-{"name": "flows-strategy", "class": "W", "group": "shard", "timing": false, "medianS": 21.8, "shard": 3, "files": ["flows-strategy.mjs"], "covers": ["schema.sql"]}
+{"name": "flows-strategy", "class": "W", "group": "shard", "timing": false, "medianS": 24.9, "shard": 4, "files": ["flows-strategy.mjs"], "covers": ["schema.sql"]}
