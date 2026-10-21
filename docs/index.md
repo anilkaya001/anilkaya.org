@@ -425,7 +425,7 @@ Design system and Lab/course/review/placement UI.
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/base.css` |  | contracts, flows, flows-events, flows-glass-render, flows-motion, flows-moves-render and 4 more |
+| `assets/css/base.css` |  | contracts, flows, flows-events, flows-glass-render, flows-home-onescreen, flows-kit and 8 more |
 | `assets/css/lab.css` |  | flows-glass-render |
 | `assets/css/placement.css` |  | flows-glass-render |
 | `assets/css/review.css` |  | flows-glass-render |
@@ -1093,7 +1093,7 @@ Server-rendered Flows page shells, navigation, and `ASSET_VERSION` and `FONTS_VE
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-pages.js` | `shared/flows-pages.js#ASSET_VERSION`, `shared/flows-pages.js#FLOWS_NAV`, `shared/flows-pages.js#FLOWS_PAGES`, `shared/flows-pages.js#FLOWS_SPRITE`, `shared/flows-pages.js#FONTS_VERSION`, `shared/flows-pages.js#aboutPage`, `shared/flows-pages.js#brandMark`, `shared/flows-pages.js#deskPage`, `shared/flows-pages.js#eventsPage`, `shared/flows-pages.js#flowsDocument`, `shared/flows-pages.js#glossaryPage`, `shared/flows-pages.js#lensMap`, `shared/flows-pages.js#loginPage`, `shared/flows-pages.js#marketPage`, `shared/flows-pages.js#modelName`, `shared/flows-pages.js#movesPage`, `shared/flows-pages.js#neuronProvenance`, `shared/flows-pages.js#notFoundPage`, `shared/flows-pages.js#oracleShell`, `shared/flows-pages.js#overviewPage`, `shared/flows-pages.js#ownerNav`, `shared/flows-pages.js#politicalPage`, `shared/flows-pages.js#sidePage`, `shared/flows-pages.js#statusPage`, `shared/flows-pages.js#strategyPage`, `shared/flows-pages.js#tickerPage`, `shared/flows-pages.js#unusualPage`, `shared/flows-pages.js#watchPage` | contracts, flows, flows-basis, flows-brand-render, flows-deadline-render, flows-defaults-render and 61 more |
+| `shared/flows-pages.js` | `shared/flows-pages.js#ASSET_VERSION`, `shared/flows-pages.js#FLOWS_NAV`, `shared/flows-pages.js#FLOWS_PAGES`, `shared/flows-pages.js#FLOWS_SPRITE`, `shared/flows-pages.js#FONTS_VERSION`, `shared/flows-pages.js#aboutPage`, `shared/flows-pages.js#brandMark`, `shared/flows-pages.js#deskPage`, `shared/flows-pages.js#eventsPage`, `shared/flows-pages.js#flowsDocument`, `shared/flows-pages.js#glossaryPage`, `shared/flows-pages.js#lensMap`, `shared/flows-pages.js#loginPage`, `shared/flows-pages.js#marketPage`, `shared/flows-pages.js#modelName`, `shared/flows-pages.js#movesPage`, `shared/flows-pages.js#neuronProvenance`, `shared/flows-pages.js#notFoundPage`, `shared/flows-pages.js#oracleShell`, `shared/flows-pages.js#overviewPage`, `shared/flows-pages.js#ownerNav`, `shared/flows-pages.js#politicalPage`, `shared/flows-pages.js#sidePage`, `shared/flows-pages.js#statusPage`, `shared/flows-pages.js#strategyPage`, `shared/flows-pages.js#tickerPage`, `shared/flows-pages.js#unusualPage`, `shared/flows-pages.js#watchPage` | contracts, flows, flows-basis, flows-brand-render, flows-deadline-render, flows-defaults-render and 63 more |
 
 ### `shared/flows-panels.js`
 
@@ -1608,7 +1608,7 @@ The Home page's deferred chunk (F-08 part a). `flows-overview.js` keeps the firs
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-overview-below.js` |  | flows-home-below-render, flows-payload-shape |
+| `assets/js/flows-overview-below.js` |  | flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-overview, flows-pages-render and 1 more |
 | `tests/flows-home-below-render.mjs` |  | flows-home-below-render |
 | `tests/lib/below-fold.mjs` | `tests/lib/below-fold.mjs#BELOW_NOW`, `tests/lib/below-fold.mjs#revealBelow` | flows-home-net-render, flows-market, flows-moves0, flows-overview, flows-readers-render, flows-rt-client and 1 more |
 
@@ -1618,7 +1618,7 @@ The ticker's Surface & terrain view, the second tab of the chart panel (`FlowsUI
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-ticker-surface.js` |  | flows-surface-render |
+| `assets/js/flows-ticker-surface.js` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-movelab-render, flows-pages-render, flows-surface-render and 2 more |
 | `tests/flows-surface-render.mjs` |  | flows-surface-render |
 | `tests/lib/surface-card.mjs` | `tests/lib/surface-card.mjs#SURFACE_EXPIRIES`, `tests/lib/surface-card.mjs#SURFACE_GAMMA_DATES`, `tests/lib/surface-card.mjs#engineExpiry`, `tests/lib/surface-card.mjs#surfaceCard`, `tests/lib/surface-card.mjs#sviParams` | flows-surface-render |
 
@@ -1628,7 +1628,7 @@ The ticker glance's hero chart and six instrument cards, attached as `FlowsUI.ti
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-ticker-glance.js` |  | flows-glance-live-render, flows-glance-render, flows-surface-render |
+| `assets/js/flows-ticker-glance.js` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-movelab-render, flows-pages-render, flows-surface-render and 2 more |
 | `tests/flows-glance-render.mjs` |  | flows-glance-render |
 
 ### `assets/js/flows-ticker-live.js`, `tests/flows-glance-live-render.mjs`
@@ -1637,7 +1637,7 @@ The ticker glance's live layer, the deferred group `live`. `tickerPage` always d
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-ticker-live.js` |  | flows-glance-live-render |
+| `assets/js/flows-ticker-live.js` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-movelab-render, flows-pages-render, flows-surface-render and 2 more |
 | `tests/flows-glance-live-render.mjs` |  | flows-glance-live-render |
 
 ### `assets/js/flows-ticker-movelab.js`, `tests/flows-movelab-render.mjs`
@@ -1646,7 +1646,7 @@ The Move lab on the ticker page, for every member. `tickerPage` always declares 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-ticker-movelab.js` |  | flows-movelab-render |
+| `assets/js/flows-ticker-movelab.js` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-movelab-render, flows-pages-render, flows-surface-render and 2 more |
 | `tests/flows-movelab-render.mjs` |  | flows-movelab-render |
 
 ### `assets/js/flows-unusual-below.js`, `tests/flows-flow-below-render.mjs`
@@ -1655,7 +1655,7 @@ The Flow page's deferred chunk (F-08 part b), built the way the Home one is. `fl
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-unusual-below.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-payload-shape |
+| `assets/js/flows-unusual-below.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-map-render, flows-net-render, flows-pages-render, flows-payload-shape |
 | `tests/flows-flow-below-render.mjs` |  | flows-flow-below-render |
 
 ### `assets/js/flows-market-below.js`, `tests/flows-market-below-render.mjs`
@@ -1664,7 +1664,7 @@ The Market page's deferred chunk (F-08 part c), built the way Home's and Flow's 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-market-below.js` |  | flows-market-below-render, flows-payload-shape |
+| `assets/js/flows-market-below.js` |  | flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual, flows-pages-render and 1 more |
 | `tests/flows-market-below-render.mjs` |  | flows-market-below-render |
 
 ### `assets/js/flows-net.js`, `assets/css/flows-net.css`
@@ -1673,8 +1673,8 @@ The flow network, attached as `FlowsUI.net` (`model`, `mount`, `of`) and loaded 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-net.css` |  | flows-feeds-onescreen, flows-glass-render, flows-net-render |
-| `assets/js/flows-net.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-net-render, flows-payload-shape |
+| `assets/css/flows-net.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-net-map-render, flows-net-render, flows-pages-render |
+| `assets/js/flows-net.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-flow-below-render, flows-net-map-render, flows-net-render, flows-pages-render and 1 more |
 
 ### `assets/js/flows-export.js`, `tests/flows-export.mjs`
 
@@ -1693,12 +1693,12 @@ Stylesheets of the Flows pages: the shared system, boards, home, market, ticker,
 |---|---|---|
 | `assets/css/flows-ask.css` |  | flows-glass-render |
 | `assets/css/flows-boards.css` |  | flows-glass-render |
-| `assets/css/flows-feeds.css` |  | flows-events, flows-feeds-onescreen, flows-glass-render, flows-moves-render |
-| `assets/css/flows-home.css` |  | flows-glass-render, flows-home-composition |
-| `assets/css/flows-market.css` |  | flows-glass-render, flows-skyline-render |
-| `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-render, flows-glass-render, flows-movelab-render, flows-surface-render, flows-ticker |
+| `assets/css/flows-feeds.css` |  | flows-events, flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-moves-render, flows-net-map-render and 2 more |
+| `assets/css/flows-home.css` |  | flows-glass-render, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-overview and 1 more |
+| `assets/css/flows-market.css` |  | flows-glass-render, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual and 2 more |
+| `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-glass-render, flows-movelab-render, flows-pages-render and 3 more |
 | `assets/css/flows-tools.css` |  | flows-defaults-render, flows-glass-render |
-| `assets/css/flows.css` |  | contracts, flows-brand-render, flows-events, flows-glass-render, flows-kit, flows-motion and 8 more |
+| `assets/css/flows.css` |  | contracts, flows-brand-render, flows-events, flows-glass-render, flows-home-onescreen, flows-kit and 11 more |
 
 ### `assets/js/flows-ui.js`, `assets/js/flows-dock.js`
 
@@ -1717,13 +1717,13 @@ Flows page controllers, one IIFE per page: home, boards, market, ticker, premium
 |---|---|---|
 | `assets/js/flows-ask.js` |  | flows-brief, flows-nn-render |
 | `assets/js/flows-board.js` |  | flows-payload-shape, flows-public |
-| `assets/js/flows-desk.js` |  | flows-defaults-render, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen |
+| `assets/js/flows-desk.js` |  | flows-defaults-render, flows-desk, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-wiring |
 | `assets/js/flows-events.js` |  | flows-events, flows-feeds-onescreen, flows-payload-shape |
-| `assets/js/flows-market.js` |  | flows-market, flows-market-below-render, flows-payload-shape, flows-relations-render, flows-skyline-render |
-| `assets/js/flows-overview.js` |  | flows-home-below-render, flows-home-composition, flows-nn-render, flows-payload-shape |
+| `assets/js/flows-market.js` |  | flows-market, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual and 4 more |
+| `assets/js/flows-overview.js` |  | flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-nn-render, flows-overview and 2 more |
 | `assets/js/flows-strategy.js` |  | flows-defaults-render |
-| `assets/js/flows-ticker.js` |  | fixture-guard, flows, flows-deepen, flows-fixture-guard-render, flows-glance-frame-render, flows-glance-live-render and 10 more |
-| `assets/js/flows-unusual.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-render, flows-payload-shape |
+| `assets/js/flows-ticker.js` |  | fixture-guard, flows, flows-deepen, flows-fixture-guard-render, flows-glance-frame-render, flows-glance-live-render and 12 more |
+| `assets/js/flows-unusual.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-map-render, flows-net-render, flows-pages-render, flows-payload-shape |
 
 ### `assets/js/flows-status.js`, `assets/js/flows-status-latency.js`, `assets/js/flows-status-capacity.js`, `assets/js/flows-status-coverage.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs`, `tests/lib/status-world.mjs`
 
@@ -1847,8 +1847,8 @@ The Market page's flow network, condensed (`FlowsUI.netMap`: `mount`, `of`, `rea
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-net-map.css` |  | flows-glass-render |
-| `assets/js/flows-net-map.js` |  | flows-net-map-render |
+| `assets/css/flows-net-map.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-net-map-render, flows-net-render, flows-pages-render |
+| `assets/js/flows-net-map.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-map-render, flows-net-render, flows-pages-render |
 | `tests/flows-net-map-render.mjs` |  | flows-net-map-render |
 
 ### `tests/flows-market-onescreen.mjs`, `tests/lib/market-fixtures.mjs`
@@ -1874,7 +1874,7 @@ The Market page's opening scene, the Session (`FlowsUI.river`: `model`, `layout`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-market-river.js` |  | flows-market-river-render |
+| `assets/js/flows-market-river.js` |  | flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual, flows-pages-render |
 | `tests/flows-market-river-render.mjs` |  | flows-market-river-render |
 
 ### `assets/js/flows-market-floor.js`, `tests/flows-market-floor-render.mjs`
@@ -1883,7 +1883,7 @@ The Market page's opening view, the Floor (`FlowsUI.floor`: `model`, `layout`, `
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-market-floor.js` |  | flows-market-floor-render |
+| `assets/js/flows-market-floor.js` |  | flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render, flows-market-visual, flows-pages-render |
 | `tests/flows-market-floor-render.mjs` |  | flows-market-floor-render |
 
 ### `tests/flows-brand-render.mjs`
@@ -1909,8 +1909,8 @@ The premium desk's Short calls view (`strategy=sc`, the fourth item of Sell) and
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-desk.css` |  | flows-desk-onescreen, flows-glass-render |
-| `assets/js/flows-desk-calls.js` |  | flows-desk-calls, flows-desk-calls-render |
+| `assets/css/flows-desk.css` |  | flows-desk, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-wiring, flows-glass-render |
+| `assets/js/flows-desk-calls.js` |  | flows-desk, flows-desk-calls, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-wiring |
 | `tests/fixtures-shortcall.json` |  | flows-desk-calls |
 | `tests/flows-desk-calls-render.mjs` |  | flows-desk-calls-render |
 | `tests/flows-desk-calls.mjs` |  | flows-desk-calls |
@@ -1923,7 +1923,7 @@ The one-screen stage for Unusual and Events (`/flows/unusual/`, `/flows/events/`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-feed-os.js` |  | flows-feeds-onescreen |
+| `assets/js/flows-feed-os.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-net-map-render, flows-net-render, flows-pages-render |
 | `tests/flows-feeds-onescreen.mjs` |  | flows-feeds-onescreen |
 
 ### `scripts/build-flows-oracle-bundle.mjs`, `assets/js/flows-oracle-live.bundle.js`, `assets/js/flows-oracle-words.bundle.js`
@@ -2385,7 +2385,7 @@ The fail-late runner, its contract, the suite registry (one file and one shard p
 | `tests/package.json` |  | architecture, ci-affected, docs, pipeline, run |
 | `tests/quarantine.json` |  | ci-affected, run |
 | `tests/run-contract.mjs` |  | run |
-| `tests/run.mjs` | `tests/run.mjs#CHROMIUM_SETUP_S`, `tests/run.mjs#CI_SHARDS`, `tests/run.mjs#DEFAULT_DIR`, `tests/run.mjs#FORWARDED_SIGNALS`, `tests/run.mjs#KILL_GRACE_MS`, `tests/run.mjs#MAX_SHARDS`, `tests/run.mjs#MAX_TIMER_MS`, `tests/run.mjs#REPEAT_WINDOW_MS`, `tests/run.mjs#SHARD_BALANCE`, `tests/run.mjs#SLOW_FACTOR`, `tests/run.mjs#SLOW_MARGIN_S`, `tests/run.mjs#SUITES_DIR`, `tests/run.mjs#SUMMARY_TAIL_BUDGET`, `tests/run.mjs#TAIL_LINES`, `tests/run.mjs#TAIL_LINE_CHARS`, `tests/run.mjs#TIMEOUT_FLOOR_S`, `tests/run.mjs#TIMEOUT_MEDIAN_FACTOR`, `tests/run.mjs#UsageError`, `tests/run.mjs#capLine`, `tests/run.mjs#chooseSuites`, `tests/run.mjs#countAssertions`, `tests/run.mjs#exitCodeFor`, `tests/run.mjs#formatSuite`, `tests/run.mjs#groupOf`, `tests/run.mjs#interrupt`, `tests/run.mjs#loadManifest`, `tests/run.mjs#main`, `tests/run.mjs#markdownSummary`, `tests/run.mjs#needsBrowser`, `tests/run.mjs#overMedian`, `tests/run.mjs#packShards`, `tests/run.mjs#parseArgs`, `tests/run.mjs#readSuiteFiles`, `tests/run.mjs#repin`, `tests/run.mjs#retryAllowed`, `tests/run.mjs#runLabel`, `tests/run.mjs#selectSuites`, `tests/run.mjs#shardBalance`, `tests/run.mjs#shardLoad`, `tests/run.mjs#tailCollector`, `tests/run.mjs#tally`, `tests/run.mjs#textTable`, `tests/run.mjs#timeoutFor`, `tests/run.mjs#timerDelayMs` | ci-affected, flows-read-failures, flows-starts, run |
+| `tests/run.mjs` | `tests/run.mjs#CHROMIUM_SETUP_S`, `tests/run.mjs#CI_SHARDS`, `tests/run.mjs#DEFAULT_DIR`, `tests/run.mjs#FORWARDED_SIGNALS`, `tests/run.mjs#KILL_GRACE_MS`, `tests/run.mjs#MAX_SHARDS`, `tests/run.mjs#MAX_TIMER_MS`, `tests/run.mjs#REPEAT_WINDOW_MS`, `tests/run.mjs#SHARD_BALANCE`, `tests/run.mjs#SLOW_FACTOR`, `tests/run.mjs#SLOW_MARGIN_S`, `tests/run.mjs#SUITES_DIR`, `tests/run.mjs#SUMMARY_TAIL_BUDGET`, `tests/run.mjs#TAIL_LINES`, `tests/run.mjs#TAIL_LINE_CHARS`, `tests/run.mjs#TIMEOUT_FLOOR_S`, `tests/run.mjs#TIMEOUT_MEDIAN_FACTOR`, `tests/run.mjs#UsageError`, `tests/run.mjs#capLine`, `tests/run.mjs#chooseSuites`, `tests/run.mjs#countAssertions`, `tests/run.mjs#exitCodeFor`, `tests/run.mjs#formatSuite`, `tests/run.mjs#groupOf`, `tests/run.mjs#interrupt`, `tests/run.mjs#loadManifest`, `tests/run.mjs#main`, `tests/run.mjs#markdownSummary`, `tests/run.mjs#needsBrowser`, `tests/run.mjs#overMedian`, `tests/run.mjs#packShards`, `tests/run.mjs#parseArgs`, `tests/run.mjs#readSuiteFiles`, `tests/run.mjs#repin`, `tests/run.mjs#retryAllowed`, `tests/run.mjs#runLabel`, `tests/run.mjs#selectSuites`, `tests/run.mjs#shardBalance`, `tests/run.mjs#shardLoad`, `tests/run.mjs#tailCollector`, `tests/run.mjs#tally`, `tests/run.mjs#textTable`, `tests/run.mjs#timeoutFor`, `tests/run.mjs#timerDelayMs` | ci-affected, flows-read-failures, flows-starts, pipeline, run |
 | `tests/suites/academy.json` |  | architecture, docs, run |
 | `tests/suites/approval-frames.json` |  | architecture, docs, run |
 | `tests/suites/architecture.json` |  | architecture, docs, run |
