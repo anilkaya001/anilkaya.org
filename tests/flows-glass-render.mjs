@@ -83,7 +83,7 @@ async function open(kind, viewport, extra = {}) {
     }
     if (vp === L) {
       const tile = await page.evaluate(() => {
-        const cards = [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.height > 20 && getComputedStyle(c).visibility === "visible"; });
+        const cards = [...document.querySelectorAll(".ui-card, .ft-strip, .ft-rail, .ft-gchart")].filter((c) => !c.classList.contains("hm-hero")).filter((c) => { const r = c.getBoundingClientRect(); return r.width > 40 && r.height > 20 && getComputedStyle(c).visibility === "visible"; });
         const c = cards[0];
         if (!c) return null;
         const cs = getComputedStyle(c);
@@ -169,7 +169,7 @@ async function open(kind, viewport, extra = {}) {
       if (mode === "no-backdrop") {
         const t = await page.evaluate(() => {
           const root = getComputedStyle(document.documentElement);
-          const card = document.querySelector(".ui-card, .ft-strip, .ft-gchart");
+          const card = document.querySelector(".ui-card.ui-mod") || document.querySelector(".ui-card, .ft-strip, .ft-gchart");
           return { reg: root.getPropertyValue("--mat-regular").trim(), solid: root.getPropertyValue("--glass-solid").trim(), side: root.getPropertyValue("--mat-side").trim(), chrome: root.getPropertyValue("--glass-solid-chrome").trim(), bg: card ? getComputedStyle(card).backgroundColor : null };
         });
         eq(t.reg, t.solid, `${tag}: --mat-regular is the opaque solid`);

@@ -18,12 +18,13 @@ const HTML = PAGES.overviewPage({ username: "test", summary: FIX.summary });
 const CHUNK = "/assets/js/flows-overview-below.js";
 const SINGLE_FILE_BYTES = 120103;
 const DEFERRED = ["hmChg", "hmVol", "hmEvents", "hmNews"];
+const HOME_BENTO = { bytes: 12000, why: "design v3 Lane 3: the fit controller, the pager, the sheet, the numerals and the net decision live in the first-paint file, and the lower modules it hands to the chunk are unchanged" };
 
 {
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-overview.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-overview-below.js")).size;
   ok(SINGLE_FILE_BYTES - eager >= 10 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 10 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk > 10 * 1024 && chunk + eager < SINGLE_FILE_BYTES + 16384, `and the two files together are within 16 KB of the single file (${chunk + eager} B): a visit pays the same bytes`);
+  ok(chunk > 10 * 1024 && chunk + eager < SINGLE_FILE_BYTES + 16384 + HOME_BENTO.bytes, `and the two files together are within 16 KB of the single file plus the named bento allowance (${chunk + eager} B)`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="home-below"[^>]*>/g).length, 1, "the page declares the home-below group once");
   const first = read("assets/js/flows-overview.js");
@@ -34,7 +35,7 @@ const DEFERRED = ["hmChg", "hmVol", "hmEvents", "hmNews"];
     ok(!new RegExp(`\\bfunction ${n}\\(`).test(first), `and not in the first-paint file`);
   }
   ok(/kit\.attach\(\{ paintChanged, paintVol, paintEvents, paintNews, renderSpine \}\)/.test(below), "the chunk hands exactly those five painters back");
-  ok(/UI\.defer\("home-below", \{ when: "visible", el: \$\(LOWER\[key\]\)/.test(first), "the first-paint file asks for the group when a tab that holds a deferred module opens");
+  ok(/UI\.defer\("home-below", \{ when: "visible", el: \$\("hmChg"\)/.test(first), "the first-paint file asks for the group through the visible trigger on What changed, which is on the first screen at the xl, l and m fits");
 }
 
 async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = "ok", chunkDelay = 0, dataDelay = 0, saveData = false } = {}) {
@@ -64,7 +65,7 @@ async function open(browser, { viewport = { width: 1440, height: 900 }, chunk = 
         lean: document.getElementById("ccLean").children.length,
         bull: document.querySelectorAll("#ccBull .hm-lrow").length,
         chg: document.getElementById("ccChgList").children.length + document.getElementById("ccChgNote").children.length,
-        news: document.getElementById("ccNews").children.length,
+        news: document.querySelectorAll("#ccNews .hm-news-open").length,
         loaded: window.__loadAt,
         homeKit: Boolean(window.FlowsUI.homeKit),
         attached: window.FlowsUI.homeKit.attached,
@@ -149,13 +150,13 @@ async function openLive(browser, { viewport = { width: 1440, height: 820 }, tide
 
 const requested = (log) => log.filter((x) => x.path === CHUNK);
 const hostsPainted = (page) => page.evaluate(() => {
-  const n = (ids) => ids.reduce((a, id) => a + document.getElementById(id).children.length, 0);
+  const n = (ids) => ids.reduce((a, id) => a + [...document.getElementById(id).children].filter((c) => !c.hasAttribute("data-loading")).length, 0);
   return { chg: n(["ccChgStats", "ccChgNote", "ccChgList", "spinePlot"]), vol: n(["ccVol"]), events: n(["ccEvents"]), news: n(["ccNews"]) };
 });
-const scrollNear = (page) => page.click("#hmT-moves");
+const scrollNear = (page) => page.click("#hmPager [data-page=glance]");
 const firstPaintReady = (page) => page.waitForFunction(() => document.getElementById("ccMetals").children.length > 0 && document.getElementById("ccLean").children.length > 0 && document.querySelectorAll("#ccBull .hm-lrow").length > 0, null, { timeout: 15000 });
-const modulesPainted = (page) => page.waitForFunction(() => document.querySelectorAll("#ccChgList .hm-crow").length > 0 && document.querySelectorAll("#spinePlot svg").length === 1 &&
-  document.querySelectorAll("#ccEvents .ui-row").length > 0 && document.querySelectorAll("#ccNews .hm-news-open").length === 1 && document.querySelectorAll("#ccVol [data-empty]").length === 1, null, { timeout: 15000 });
+const modulesPainted = (page) => page.waitForFunction(() => document.querySelectorAll("#ccChgList .hm-crow").length > 0 &&
+  document.querySelectorAll("#ccEvents .ui-row").length > 0 && document.querySelectorAll("#ccNews .hm-news-open").length === 1 && document.querySelectorAll("#ccVol [data-empty]:not([data-loading])").length === 1, null, { timeout: 15000 });
 
 const browser = await launch();
 try {
@@ -164,34 +165,49 @@ try {
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
-    await sleep(2500);
-    eq(requested(log).length, 0, "THE CHUNK IS NOT REQUESTED UNTIL A TAB THAT HOLDS A DEFERRED MODULE OPENS: nothing asked for it in 2.5 s after the load event at 1440x900");
-    eq(await hostsPainted(page), { chg: 0, vol: 0, events: 0, news: 0 }, "and the four deferred modules are empty bodies, not painted");
-    eq(await page.evaluate(() => window.FlowsUI.homeKit.attached), false, "FlowsUI.homeKit says it is not attached");
-    eq(await page.evaluate(() => document.getElementById("hmStage").dataset.view), "session", "the Session tab is the one open");
-    eq(await page.evaluate(() => window.__lcp.filter((x) => ["hmChg", "hmVol", "hmEvents", "hmNews"].includes(x))), [], "THE LARGEST CONTENTFUL PAINT IS NOT IN A DEFERRED MODULE");
-    ok(await page.evaluate(() => window.__lcp.length > 0), "and one was recorded");
-    const before = await page.evaluate(() => ({ metals: document.getElementById("ccMetals").children.length, hero: document.getElementById("hmHero").innerHTML.length }));
-    ok(before.metals > 0 && before.hero > 200, "the hero and the first-paint modules were painted with no chunk in sight");
-    const heroHtml = await page.evaluate(() => document.getElementById("hmHero").innerHTML);
-
-    await page.click("#hmT-names");
-    await page.click("#hmT-flow");
-    await sleep(700);
-    eq(requested(log).length, 0, "nor when the Flow or Names tab opens, which hold no deferred module");
-    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
-    eq(requested(log).length, 1, "but opening the Moves tab requests it, once");
+    eq(requested(log).length, 1, "AT 1440x900 THE CHUNK IS REQUESTED ONCE WITHOUT ANYONE ASKING: What changed is on the first screen, so the request follows the load event");
     const at = requested(log)[0].at;
     ok(at >= state.atLoad.loaded - 5, "AND THE REQUEST CAME AFTER THE LOAD EVENT, not before it");
     ok(state.atLoad.metals > 0 && state.atLoad.lean > 0 && state.atLoad.bull > 0, "with the first-paint modules already painted when the request began");
     eq(state.atLoad.chg + state.atLoad.news, 0, "and the deferred ones not");
     eq(state.atLoad.attached, false, "the kit was not attached when the request began");
+    eq(await page.evaluate(() => document.getElementById("hmStage").dataset.fit + "/" + document.getElementById("hmStage").dataset.page), "l/now", "the stage is at the l fit on the Now page");
+    eq(await page.evaluate(() => window.__lcp.filter((x) => ["hmChg", "hmVol", "hmEvents", "hmNews"].includes(x))), [], "THE LARGEST CONTENTFUL PAINT IS NOT IN A DEFERRED MODULE");
+    ok(await page.evaluate(() => window.__lcp.length > 0), "and one was recorded");
+    ok(await page.evaluate(() => document.getElementById("hmHero").innerHTML.length > 200), "the hero was painted with no chunk in sight");
+    const heroHtml = await page.evaluate(() => document.getElementById("hmHero").innerHTML);
     await modulesPainted(page);
     eq(Object.values(await hostsPainted(page)).every((n) => n > 0), true, "once the chunk has run all four modules are painted");
     eq(errors, [], "no page error");
     ok(await page.evaluate(() => document.getElementById("hmHero").innerHTML) === heroHtml, "THE HERO IS BYTE FOR BYTE WHAT IT WAS BEFORE THE CHUNK ARRIVED");
     eq(await page.evaluate(() => [...document.querySelectorAll('script[src*="flows-overview-below"]')].length), 1, "and the chunk is one script element");
+    eq(await page.evaluate(() => ["hmVol", "hmEvents", "hmNews"].map((id) => document.querySelector("#" + id + " [data-loading]") === null)), [true, true, true], "the loading faces of Volatility, Reporting and Headlines are gone once the chunk has painted them");
+    eq(await page.evaluate(() => document.querySelectorAll("#spinePlot svg").length), 0, "the score spine is not drawn in the What changed strip, which has no room for it");
+    await page.click("#hmChg .hm-all");
+    await page.waitForFunction(() => document.querySelectorAll("dialog.hm-sheet #spinePlot svg").length === 1 && document.querySelectorAll("dialog.hm-sheet #ccChgList .hm-crow").length > 0, null, { timeout: 15000 });
+    ok(true, "AND SHOW ALL OPENS WHAT CHANGED IN THE SHEET WITH ITS SPINE AND ITS ROWS drawn");
+    await context.close();
+  }
+
+  {
+    const { context, page, log, state } = await open(browser, { viewport: { width: 390, height: 844 }, chunkDelay: 200 });
+    await page.goto("https://example.test/flows/", { waitUntil: "commit" });
+    await firstPaintReady(page);
+    await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
+    await sleep(2500);
+    eq(requested(log).length, 0, "AT 390x844 THE CHUNK IS NOT REQUESTED UNTIL THE GLANCE PAGE OPENS: nothing asked for it in 2.5 s after the load event");
+    eq(await page.evaluate(() => window.FlowsUI.homeKit.attached), false, "FlowsUI.homeKit says it is not attached");
+    eq(await page.evaluate(() => document.getElementById("hmStage").dataset.fit + "/" + document.getElementById("hmStage").dataset.page), "s/now", "the stage is at the s fit on the Now page");
+    eq(await hostsPainted(page), { chg: 0, vol: 0, events: 0, news: 0 }, "and the four deferred modules are not painted");
+    await page.click("#hmPager [data-page=names]");
+    await page.click("#hmPager [data-page=flow]");
+    await sleep(700);
+    eq(requested(log).length, 0, "nor when the Flow or Names page opens, which hold no deferred module");
+    await scrollNear(page);
+    await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
+    eq(requested(log).length, 1, "but opening the Glance page requests it, once");
+    ok(requested(log)[0].at >= state.atLoad.loaded - 5, "after the load event");
     await context.close();
   }
 
@@ -199,14 +215,13 @@ try {
     const { context, page, log, state, errors } = await open(browser, { chunkDelay: 1200 });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
     await modulesPainted(page);
     eq(state.atLoad.chg, 0, "DATA THAT ARRIVED BEFORE THE CHUNK IS HELD AND PAINTED WHEN IT LANDS: the module was empty when the chunk was asked for");
     const rows = await page.evaluate(() => ({
       chg: document.querySelectorAll("#ccChgList .hm-crow").length, sub: document.getElementById("ccChgSub").textContent.trim(),
       ev: document.querySelectorAll("#ccEvents .ui-row").length, evSub: document.getElementById("ccEventsSub").textContent.trim(),
-      news: document.getElementById("ccNewsSub").textContent.trim(), vol: document.querySelector("#ccVol [data-empty]").dataset.empty,
+      news: document.getElementById("ccNewsSub").textContent.trim(), vol: document.querySelector("#ccVol [data-empty]:not([data-loading])").dataset.empty,
     }));
     ok(rows.chg > 0 && /\d/.test(rows.sub), `What changed draws its rows and its count (${rows.chg}, ${rows.sub})`);
     ok(rows.ev > 0 && /\d/.test(rows.evSub), `Reporting draws its rows and its count (${rows.ev}, ${rows.evSub})`);
@@ -221,7 +236,6 @@ try {
     const { context, page, log, errors } = await open(browser, { dataDelay: 1800 });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await page.waitForFunction(() => window.__loadAt > 0, null, { timeout: 15000 });
-    await scrollNear(page);
     await page.waitForFunction(() => window.FlowsUI.homeKit.attached, null, { timeout: 15000 });
     eq(await hostsPainted(page), { chg: 0, vol: 0, events: 0, news: 0 }, "THE CHUNK BEFORE THE DATA: attached and nothing painted for data that has not arrived");
     await firstPaintReady(page);
@@ -235,7 +249,6 @@ try {
     const { context, page, log, state, errors } = await open(browser, { chunk: "404" });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page);
     await page.waitForSelector("#hmChg .ui-defer", { timeout: 15000 });
     const said = await page.evaluate(() => document.querySelector("#hmChg .ui-defer").textContent);
     ok(/The lower modules is unavailable/.test(said) && /Retry/.test(said), `A CHUNK THAT DOES NOT LOAD SAYS SO AT THE MODULES IT OWES: ${said}`);
@@ -254,7 +267,6 @@ try {
     const { context, page, log, errors } = await open(browser, { saveData: true });
     await page.goto("https://example.test/flows/", { waitUntil: "commit" });
     await firstPaintReady(page);
-    await scrollNear(page);
     await page.waitForSelector("#hmChg .ui-defer", { timeout: 15000 });
     await sleep(800);
     eq(requested(log).length, 0, "DATA SAVER: nothing is requested until the button is pressed");
@@ -306,7 +318,6 @@ try {
     });
     ok(tideEnd && tideEnd.right <= tideEnd.edge + 0.5, `the tide's end label sits inside the chart (${JSON.stringify(tideEnd)})`);
 
-    await page.click("#hmT-names");
     const names = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll("#ccBull .hm-lrow")].slice(0, 3).map((r) => {
       const c = r.querySelector(".hm-chg");
       return [r.dataset.ticker, { text: c.textContent, src: c.dataset.src || null, session: c.dataset.session || null }];
@@ -316,7 +327,6 @@ try {
     eq(names.SYN351.session, BOARDS_DAY, "a row with no live price keeps its nightly change and names the session it is from");
     ok(/Mon$/.test(names.SYN351.text), `with the weekday printed under the figure (${names.SYN351.text})`);
 
-    await page.click("#hmT-flow");
     const side = await page.evaluate(() => {
       const row = [...document.querySelectorAll("#ccAlerts .hm-arow")].find((r) => r.querySelector("b").textContent === "SPX");
       const s = row && row.querySelector(".hm-side");
@@ -326,7 +336,6 @@ try {
     eq(side && side.text, "none sided", "it says none sided in the meter's place, the word the Unusual page uses");
     eq(side && side.title, "Ask-side share of the premium the vendor sided: none sided", "under the meter's own label");
 
-    await page.click("#hmT-calendar");
     await page.waitForFunction(() => document.querySelectorAll("#ccEvents .ui-row").length >= 6, null, { timeout: 15000 });
     const ev = await page.evaluate(() => [...document.querySelectorAll("#ccEvents .ui-row")].slice(0, 6).map((r) => r.textContent));
     ok(/Aug 25 · today/.test(ev[0]), `REPORTING COUNTS SESSIONS FROM TODAY, not from the nightly's session: a report today says today (${ev[0]})`);
@@ -369,8 +378,9 @@ try {
       return t ? { right: t.getBoundingClientRect().right, edge: r.right } : null;
     });
     ok(tideEnd && tideEnd.right <= tideEnd.edge + 0.5, `AT 390 PX THE TIDE'S END LABEL IS WHOLE inside the chart, not cut to +$132.4l (${JSON.stringify(tideEnd)})`);
-    await page.click("#hmT-focus");
-    await page.waitForSelector("#ccLeaders .hm-qhead", { timeout: 15000 });
+    await page.click("#hmPager [data-page=glance]");
+    await page.click("#hmLeaders .hm-open");
+    await page.waitForSelector("dialog.hm-sheet #ccLeaders .hm-qhead", { timeout: 15000 });
     const headCells = await page.evaluate(() => [...document.querySelectorAll("#ccLeaders .hm-qhead:not(.is-2) > span")]
       .filter((s) => s.offsetWidth > 0).map((s) => ({ text: s.textContent, cut: s.scrollWidth > s.clientWidth + 1 })));
     const net = headCells.find((c) => c.text === "Net premium");

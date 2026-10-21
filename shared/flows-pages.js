@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "377";
+export const ASSET_VERSION = "381";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -302,7 +302,7 @@ function neuronVerdict(summary) {
   const glyphTile = `<span class="hm-verdict-g nn-orb nn-mirror is-44" aria-hidden="true"><i></i><i></i><i></i>${glyph("neuron")}</span>`;
   if (!summary || typeof summary.text !== "string" || !summary.text.trim()) {
     return `
-  <section class="ui-card hm-verdict nn-host is-pending" id="hmVerdict" data-nn="off" aria-labelledby="hmVerdictT">
+  <section class="ui-card hm-verdict nn-host is-pending" id="hmVerdict" data-page="now" data-nn="off" aria-labelledby="hmVerdictT">
     <div class="hm-verdict-h">
       ${glyphTile}
       <div class="hm-verdict-b">
@@ -311,6 +311,7 @@ function neuronVerdict(summary) {
           <span class="ui-state hm-mark" data-state="quiet" title="Quiet" aria-label="Quiet: the written summary for this session has not been generated yet.">${glyph("quiet")}</span></div>
       </div>
     </div>
+    <button type="button" class="hm-ask" aria-controls="askDockPanel">${glyph("neuron")}<span>Ask Neuron</span></button>
   </section>`;
   }
   const text = String(summary.text).trim();
@@ -322,7 +323,7 @@ function neuronVerdict(summary) {
     ? `<time datetime="${escapeHTML(at)}">${escapeHTML(trtStamp(at) || "")}</time>`
     : "";
   return `
-  <section class="ui-card hm-verdict nn-host${summary.llm ? " is-llm" : ""}" id="hmVerdict" data-nn="${mode}" aria-labelledby="hmVerdictT">${summary.llm ? '<i class="nn-edge" aria-hidden="true"><i></i><i></i><i></i><i></i></i>' : ""}
+  <section class="ui-card hm-verdict nn-host${summary.llm ? " is-llm" : ""}" id="hmVerdict" data-page="now" data-nn="${mode}" aria-labelledby="hmVerdictT">${summary.llm ? '<i class="nn-edge" aria-hidden="true"><i></i><i></i><i></i><i></i></i>' : ""}
     <div class="hm-verdict-h">
       ${glyphTile}
       <div class="hm-verdict-b">
@@ -335,6 +336,7 @@ function neuronVerdict(summary) {
       ${rest ? `<p class="hm-verdict-rest">${escapeHTML(rest)}</p>` : ""}
       <p class="hm-verdict-src"${summary.llm && summary.model ? ` title="${escapeHTML(summary.model)}"` : ""}>${neuronProvenance(summary)}</p>
     </div>
+    <button type="button" class="hm-ask" aria-controls="askDockPanel">${glyph("neuron")}<span>Ask Neuron</span></button>
   </section>`;
 }
 
@@ -476,28 +478,28 @@ export function notFoundPage() {
   <p class="fx-doc-actions"><a href="/flows/">Flows home</a> <a href="/flows/about/">About Flows</a></p>`);
 }
 
-const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "" } = {}) => `
-    <section class="ui-card ui-mod hm-mod${span ? " ui-span-" + span : ""}" id="${id}" aria-labelledby="${id}T">
+const homeBig = (id) => `<p class="hm-big" id="${id}N"><b class="hm-big-v ui-num" data-tone="silent">\u2014</b><span class="hm-big-c">not read yet</span></p>`;
+
+const homeModule = (id, title, bodyId, { span = "", sub = "", seg = "", body = "", big = false, page = "", nofit = false } = {}) => `
+    <section class="ui-card ui-mod hm-mod${span ? " ui-span-" + span : ""}" id="${id}"${page ? ` data-page="${page}"` : ""} aria-labelledby="${id}T">
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${sub}${seg}</header>
-      ${body || `<div class="hm-body" id="${bodyId}"></div>`}
+      ${big ? homeBig(id) : ""}
+      ${body || `<div class="hm-body" id="${bodyId}"${nofit ? " data-nofit" : ""}></div>`}
     </section>`;
 
 const homeNetModule = (net) => net ? `
-    <section class="ui-card ui-mod hm-mod fn-card" id="hmNet" aria-labelledby="hmNetT">
+    <section class="ui-card ui-mod hm-mod fn-card" id="hmNet" data-page="flow" aria-labelledby="hmNetT">
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="hmNetT">Flow network</h2><span class="ui-mod-sp"></span></header>
+      ${homeBig("hmNet")}
       <div class="fn-host is-slot" id="hmNetHost"></div>
       <i hidden data-defer="home-net" data-src="${v("/assets/js/flows-net.js")}"></i>
       <i hidden data-defer="home-netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>
     </section>` : "";
 
-const HOME_TABS = () => [["session", "Session"], ["flow", "Flow"], ["names", "Names"], ["focus", "Focus"], ["moves", "Moves"], ["calendar", "Calendar"]];
+const HOME_PAGES = [["now", "Now"], ["flow", "Flow"], ["names", "Names"], ["glance", "Glance"]];
 
 export function overviewPage({ username = "", summary = null, net = false } = {}) {
-  const tabs = HOME_TABS();
-  const panel = (key, body) => `
-    <div class="hm-panel" role="tabpanel" id="hmP-${key}" aria-labelledby="hmT-${key}" data-panel="${key}"${key === "session" ? "" : " inert"}>${body}
-    </div>`;
-  return `${head("Flows \u2014 Home", "The market in one screen: the tide, the regime, both leaders, what changed and what reports next, each a tab.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-nn.css", "/assets/css/flows-net.css", "/assets/css/flows-net-map.css"] : ["/assets/css/flows-home.css", "/assets/css/flows-nn.css"])}
+  return `${head("Flows \u2014 Home", "The market in one screen: the tide, the regime, both leaders, what changed and what reports next, every module at once.", net ? ["/assets/css/flows-home.css", "/assets/css/flows-nn.css", "/assets/css/flows-net.css", "/assets/css/flows-net-map.css"] : ["/assets/css/flows-home.css", "/assets/css/flows-nn.css"])}
 ${shell("Session", "overview", username, `
   <div class="hm" id="hm">
   <header class="flows-head hm-head" data-fx-hero>
@@ -506,11 +508,9 @@ ${shell("Session", "overview", username, `
   </header>
   <p class="visually-hidden" id="flowsStatus" role="status">Loading the latest session\u2026</p>
   <p class="visually-hidden" id="flowsStale" role="status" hidden></p>
-  <div class="hm-tabs" role="tablist" aria-label="Home views" id="hmTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="hmT-${k}" aria-controls="hmP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
-  <div class="hm-sub" id="hmSub" role="tablist" aria-label="Modules in this view" hidden></div>
-  <div class="hm-stage" id="hmStage" data-view="session">
-${panel("session", `
-    <section class="ui-card hm-hero" id="hmHero" aria-labelledby="hmHeroT"><div class="hm-hero-in">
+  <div class="hm-pager" id="hmPager" role="group" aria-label="Home pages" hidden>${HOME_PAGES.map(([k, t], i) => `<button type="button" data-page="${k}"${i === 0 ? ' aria-current="true"' : ""}>${t}</button>`).join("")}</div>
+  <div class="hm-stage" id="hmStage" data-page="now"${net ? " data-net" : ""}>
+    <section class="ui-card hm-hero" id="hmHero" data-page="now" aria-labelledby="hmHeroT"><div class="hm-hero-in">
       <div class="hm-hero-id">
         <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
         <div class="hm-hero-v" id="hmTideV" data-tone="silent">\u2014</div>
@@ -521,24 +521,20 @@ ${panel("session", `
       <div class="hm-hero-chips" id="ccVerdict" role="group" aria-label="Session readings"></div>
     </div></section>
 ${neuronVerdict(summary)}
-    <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`)}
-${panel("flow", `${homeNetModule(net)}
-${homeModule("hmAlerts", "Flagged", "ccAlerts", { sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
-${homeModule("hmLean", "Sectors", "ccLean", { sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}`)}
-${panel("names", `
-${homeModule("hmBull", "Bullish", "ccBull", { sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
-${homeModule("hmBear", "Bearish", "ccBear", { sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
-${homeModule("hmWatch", "Nearly in", "ccWatch", { sub: `<a class="hm-count" href="/flows/watch/" id="ccWatchSub"></a>` })}`)}
-${panel("focus", `
-${homeModule("hmLeaders", "Leaders", "ccLeaders", { sub: `<span class="hm-when" id="ccLeadersWhen"></span>`, seg: `<div class="hm-seg" id="ccLeadSeg"></div>` })}
-${homeModule("hmMetals", "Metals", "ccMetals", { sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}`)}
-${panel("moves", `
-${homeModule("hmChg", "What changed", "ccChg", { sub: `<span class="hm-count" id="ccChgSub"></span>`,
-    body: `<div class="hm-body" id="ccChg"><div id="ccChgStats"></div><div class="hm-spine" id="spinePlot"></div><div id="ccChgNote"></div><div id="ccChgList"></div></div>` })}
-${homeModule("hmVol", "Volatility", "ccVol", { sub: `<a class="hm-count" href="/flows/market/#mkVolCard">Curve on Market</a>` })}`)}
-${panel("calendar", `
-${homeModule("hmEvents", "Reporting", "ccEvents", { sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
-${homeModule("hmNews", "Headlines", "ccNews", { sub: `<span class="hm-count" id="ccNewsSub"></span>` })}`)}
+    <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>
+${homeNetModule(net)}
+${homeModule("hmAlerts", "Flagged", "ccAlerts", { page: "flow", big: true, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
+${homeModule("hmLean", "Sectors", "ccLean", { page: net ? "glance" : "flow", big: true, nofit: true, sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}
+${homeModule("hmBull", "Bullish", "ccBull", { page: "names", big: true, sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
+${homeModule("hmBear", "Bearish", "ccBear", { page: "names", big: true, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}
+${homeModule("hmWatch", "Nearly in", "ccWatch", { page: "glance", big: true, sub: `<a class="hm-count" href="/flows/watch/" id="ccWatchSub"></a>` })}
+${homeModule("hmLeaders", "Leaders", "ccLeaders", { page: "glance", big: true, sub: `<span class="hm-when" id="ccLeadersWhen"></span>`, seg: `<div class="hm-seg" id="ccLeadSeg"></div>` })}
+${homeModule("hmMetals", "Metals", "ccMetals", { page: "glance", sub: `<span class="hm-when" id="ccMetalsWhen"></span>` })}
+${homeModule("hmChg", "What changed", "ccChg", { page: "glance", sub: `<span class="hm-count" id="ccChgSub"></span>`,
+    body: `<div class="hm-body" id="ccChg"><div id="ccChgStats"></div><div class="hm-spine" id="spinePlot" data-more></div><div id="ccChgNote" data-more></div><div id="ccChgList" data-more></div></div>` })}
+${homeModule("hmVol", "Volatility", "ccVol", { page: "glance", sub: `<a class="hm-count" href="/flows/market/#mkVolCard">Curve on Market</a>` })}
+${homeModule("hmEvents", "Reporting", "ccEvents", { page: "glance", big: true, sub: `<a class="hm-count" href="/flows/events/" id="ccEventsSub"></a>` })}
+${homeModule("hmNews", "Headlines", "ccNews", { page: "glance", sub: `<span class="hm-count" id="ccNewsSub"></span>` })}
   </div>
   </div>
 

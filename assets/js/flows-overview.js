@@ -19,7 +19,9 @@
   const ans = (p) => (p && p.status !== "pending" ? p : null);
   const POP = { "aria-haspopup": "dialog", "aria-controls": "fxPop" };
   const verdictHost = $("ccVerdict");
-  if (!statusEl || !verdictHost) return;
+  const stage = $("hmStage"), hm = $("hm"), pager = $("hmPager");
+  if (!statusEl || !verdictHost || !stage || !hm || !pager) return;
+  const fitOf = () => getComputedStyle(stage).getPropertyValue("--hm-fit").trim() || "flat";
 
   const ROW_MAX = 10;
   const LIST_MAX = 8;
@@ -36,6 +38,11 @@
 
   let tideOpts = null;
   const tideHeight = (plot) => {
+    if (fitOf() !== "flat") {
+      const cs = getComputedStyle(plot), key = plot.querySelector(".ui-legend");
+      const inner = plot.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0) - ((key ? key.offsetHeight : 18) + (parseFloat(cs.rowGap) || 0));
+      return Math.min(440, Math.max(64, Math.floor(inner)));
+    }
     const room = plot.clientHeight - 30;
     return room > 190 ? Math.min(room, 440) : [190, 220, 236];
   };
@@ -88,6 +95,26 @@
   }
 
   const cap1 = (t) => (typeof t === "string" && t ? t[0].toUpperCase() + t.slice(1) : t);
+
+  function big(id, value, caption, tone, why) {
+    const box = $(id + "N");
+    if (!box) return;
+    const v = box.querySelector(".hm-big-v"), c = box.querySelector(".hm-big-c");
+    const none = value === null || value === undefined;
+    v.textContent = none ? DASH : value;
+    if (none) v.dataset.tone = "silent";
+    else if (tone) v.dataset.tone = tone;
+    else v.removeAttribute("data-tone");
+    c.textContent = none ? (why ? why[3] : "not read") : caption;
+    for (const old of box.querySelectorAll(".hm-mark")) old.remove();
+    if (none && why) box.append(mark(why[0], why[1], why[2]));
+  }
+
+  const gone = (payload, what) => (!payload
+    ? ["unreadable", "The " + what + " could not be read, so no figure is shown. That is a fault on this page and not a fact about the session.", what, "could not be read"]
+    : payload.status === "pending"
+      ? ["pending", "The " + what + " has not been published for this session yet. Nothing has been measured, so no figure is shown.", what, "not published yet"]
+      : null);
 
   function silent(into, payload, what, height) {
     if (!payload) {
@@ -900,6 +927,11 @@
     const saySub = (said) => { if (sub) sub.textContent = said; };
     saySub("");
     if (segHost) segHost.replaceChildren();
+    const why = gone(payload, "sector premium lean") || (payload.status === "quiet"
+      ? ["quiet", "The sector feed was read and returned no rows, so no basket is named.", "sector lean", "no basket read"]
+      : payload.status === "unreadable" ? ["unreadable", "No basket carried a readable premium pair, so no basket is named.", "sector lean", "no basket readable"]
+        : !arr(payload.sectors).length ? ["unavailable", "This payload carried no sector rows, so no basket is named.", "sector lean", "not on this payload"] : null);
+    if (why) big("hmLean", null, "", null, why);
     if (silent(into, payload, "sector premium lean")) return;
 
     if (payload.status === "quiet") {
@@ -924,6 +956,9 @@
     }
 
     const ordered = leanOrder(sectors);
+    const net = ordered.filter((r) => isNum(r && r.netPremiumUsd) !== null).sort((a, b) => b.netPremiumUsd - a.netPremiumUsd)[0];
+    big("hmLean", net ? (net.netPremiumUsd > 0 ? (net.etf || net.sector || DASH) + " " + usdS(net.netPremiumUsd) : "None") : null, "most net bought sector",
+      net && net.netPremiumUsd > 0 ? "up" : "ice", net ? null : ["unavailable", "No basket carried a readable net premium, so none is named.", "sector lean", "no net premium read"]);
     const leaned = ordered.filter((s) => isNum(s && s.leanRatio) !== null).length;
     const quietN = ordered.filter((s) => s && s.read === "quiet").length;
     const badN = ordered.length - leaned - quietN;
@@ -1267,7 +1302,7 @@
           h("span", { class: "hm-mpx" }, h("span", { class: "hm-mpx-v" }, F.px(lead.px)), chgOf(lead)),
           sp,
           h("span", { class: "hm-mflow" }, ...mflow(lead))),
-        h("div", { class: "ui-list hm-mrel", role: "group", "aria-label": (g.label || lead.t) + " related" },
+        h("div", { class: "ui-list hm-mrel", "data-more": "", role: "group", "aria-label": (g.label || lead.t) + " related" },
           g.tickers.filter((t) => t !== lead.t).map((t) => by.get(t)).map((v) => link(v, "ui-row hm-mrow", g.label, tick(v), chgOf(v), premOf(v)))));
     })));
     for (const [sp, v] of sparks) sparkIn(sp, v, 44);
@@ -1279,7 +1314,10 @@
     if (!into) return;
     into.replaceChildren();
     if (seg) seg.replaceChildren();
-    if (!focusSilent(into, groups, "leaders", $("ccLeadersWhen"))) return;
+    if (!focusSilent(into, groups, "leaders", $("ccLeadersWhen"))) {
+      big("hmLeaders", null, "", null, gone(FOCUS.focus, "leaders") || ["unavailable", "The focus payload carries none of these names, so no count is shown.", "leaders", "not on this payload"]);
+      return;
+    }
     let at = Math.max(0, groups.findIndex((g) => g.id === FOCUS.lead));
     const body = h("div", { class: "hm-qlist", role: "group" });
     into.append(body);
@@ -1297,6 +1335,14 @@
       const cells = body.querySelectorAll(".hm-qsp");
       rows.forEach((v, i) => sparkIn(cells[i], v, 24));
       whenPill("ccLeadersWhen", rows, g.label || "Leaders");
+      const chgs = rows.map((v) => v.chg).filter((x) => x !== null).sort((a, b) => a - b);
+      const up = chgs.filter((x) => x > 0).length;
+      const mid = chgs.length ? (chgs.length % 2 ? chgs[(chgs.length - 1) / 2] : (chgs[chgs.length / 2 - 1] + chgs[chgs.length / 2]) / 2) : null;
+      const day = rows.some((v) => v.src === "live") && UI.freshness.market().open ? "today" : "at the close";
+      big("hmLeaders", chgs.length ? up + "/" + chgs.length : null,
+        chgs.length === rows.length ? (g.label || "Leaders") + " up " + day : "up · " + chgs.length + " of " + rows.length + " priced",
+        mid === null ? null : mid > 0 ? "up" : mid < 0 ? "down" : "ice",
+        chgs.length ? null : ["unavailable", "No name in this group carried a day change, so no count is shown.", "leaders", "no day change read"]);
     };
     draw();
     if (seg && groups.length > 1) {
@@ -1434,13 +1480,10 @@
     if (document.querySelector("#hmVerdict .nn-orb")) window.FlowsUI.defer("nn-orb", { when: "idle" }).then(() => { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
     const more = $("hmNeuronMore"), x = $("hmNeuronX");
     if (more && x) {
-      more.addEventListener("click", () => {
-        const open = more.getAttribute("aria-expanded") !== "true";
+      more.addEventListener("click", () => openSheet($("hmVerdict"), (open) => {
         more.setAttribute("aria-expanded", String(open));
         x.hidden = !open;
-        const label = more.querySelector("span");
-        if (label) label.textContent = open ? "Less" : "More";
-      });
+      }));
     }
     const wrote = document.querySelector(".hm-verdict time");
     if (wrote && Number.isFinite(Date.parse(wrote.dateTime))) wrote.textContent = F.trtDay(wrote.dateTime) ? F.day(F.trtDay(wrote.dateTime)) + " " + F.time(wrote.dateTime) : wrote.textContent;
@@ -1460,6 +1503,15 @@
         }, glyph("clock")));
       }
     }
+  }
+
+  const askBtn = document.querySelector(".hm-ask");
+  if (askBtn) {
+    askBtn.addEventListener("click", () => {
+      const tab = $("askDockTab"), phone = $("fxTabAsk");
+      const via = tab && tab.getClientRects().length ? tab : phone && phone.getClientRects().length ? phone : tab || phone;
+      if (via) via.click();
+    });
   }
 
   let resizeTimer = 0;
@@ -1516,7 +1568,7 @@
   const paintNewsLater = () => later("news", (b) => fill("ccNews", b.paintNews, R.news, index(R).cards, Date.now()));
   const paintVolLater = (regime, liveVol, liveBreadth) => later("vol", (b) => b.paintVol(regime, liveVol, liveBreadth));
   const homeKit = Object.freeze({
-    $, ans, arr, rowsOf, cap1, capSaid, countSaid, sessionsSaid, disclose, POP, silent, hush, headMark, infoInto, table,
+    $, ans, arr, rowsOf, cap1, capSaid, countSaid, sessionsSaid, disclose, POP, silent, hush, headMark, infoInto, table, big, gone, usd,
     earningsMark, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX,
     get attached() { return below.fns !== null; },
     attach(fns) {
@@ -1529,21 +1581,68 @@
     },
   });
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { homeKit }));
-  const FIT_MIN = 3;
-  const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "hmFitT" });
-  document.body.append(fitDlg);
+  for (const [id, what] of [["ccVol", "volatility"], ["ccEvents", "reporting soon"], ["ccNews", "headlines"]]) {
+    const el = $(id);
+    if (el && !el.firstChild && hush(el, "pending", "This module loads with What changed, a moment after the page.", what, 56)) el.firstChild.setAttribute("data-loading", "");
+  }
+  big("hmEvents", null, "", null, ["pending", "This module loads with What changed, a moment after the page.", "reporting soon", "loading"]);
+  const FIT_MIN = 2;
+  const sheet = h("dialog", { class: "hm-sheet" });
+  document.body.append(sheet);
+  let held = null;
   const fitBody = (mod) => mod.querySelector(":scope > .hm-body") || mod.querySelector(":scope > div:not(.ui-mod-h)");
+  function openSheet(mod, expand) {
+    if (held || typeof sheet.showModal !== "function") return;
+    const ph = h("div", { class: "hm-ph", "aria-hidden": "true" });
+    ph.style.gridArea = getComputedStyle(mod).gridArea;
+    ph.dataset.page = mod.dataset.page || "";
+    mod.before(ph);
+    held = { mod, ph, expand, glance: mod.classList.contains("is-glance") };
+    mod.setAttribute("data-sheet", "");
+    mod.removeAttribute("data-row");
+    mod.removeAttribute("data-strip");
+    mod.classList.remove("is-glance");
+    const inside = fitBody(mod);
+    if (inside) inside.inert = false;
+    if (expand) expand(true);
+    const close = h("button", { type: "button", class: "hm-sheet-x", onclick: () => sheet.close() }, "Close");
+    const t = mod.querySelector("h2");
+    if (t && t.id) sheet.setAttribute("aria-labelledby", t.id);
+    sheet.replaceChildren(close, mod);
+    sheet.showModal();
+    scheduleFit(mod);
+    netDecide();
+  }
+  sheet.addEventListener("close", () => {
+    if (!held) return;
+    const { mod, ph, expand, glance } = held;
+    held = null;
+    mod.removeAttribute("data-sheet");
+    if (glance) mod.classList.add("is-glance");
+    glanceAria(mod);
+    if (expand) expand(false);
+    ph.replaceWith(mod);
+    scheduleFit(mod);
+    netDecide();
+  });
   function fit(mod) {
     const body = fitBody(mod);
     if (!body || mod.classList.contains("fn-card") || !mod.getBoundingClientRect().height) return;
-    const lists = [...body.querySelectorAll(".ui-list, ul, ol, tbody, [role=list]")].filter((l) => l.children.length > FIT_MIN && !l.closest("[hidden]"));
+    const flat = fitOf() === "flat" || mod.hasAttribute("data-sheet") || mod.classList.contains("is-glance");
+    mod.toggleAttribute("data-strip", !flat && mod.clientHeight < 96);
+    mod.toggleAttribute("data-row", !flat && mod.clientHeight < 64);
+    const floor = mod.hasAttribute("data-strip") ? 1 : FIT_MIN;
+    const lists = [...body.querySelectorAll(".ui-list, .hm-qlist, .hm-metals, ul, ol, tbody, [role=list]")].filter((l) => l.children.length > floor && !l.closest("[hidden], [data-nofit]"));
     for (const l of lists) for (const c of l.children) { if (c.hasAttribute("data-fit")) { c.hidden = false; c.removeAttribute("data-fit"); } else if (c.hidden && !c.classList.contains("ui-disclose") && c.tagName !== "BUTTON") { c.hidden = false; c.setAttribute("data-fit", "1"); } }
     mod.removeAttribute("data-tight");
+    const head = mod.querySelector(":scope > .ui-mod-h");
+    let btn = head && head.querySelector(":scope > .hm-all");
+    if (mod.hasAttribute("data-sheet") || mod.classList.contains("is-glance")) { if (btn) btn.hidden = true; return; }
     let hid = 0;
     const over = () => body.scrollHeight - body.clientHeight;
     let guard = 80;
     while (over() > 1 && guard-- > 0) {
-      let best = null, bestN = FIT_MIN;
+      let best = null, bestN = floor;
       for (const l of lists) { const n = [...l.children].filter((c) => !c.hidden && c.tagName !== "BUTTON").length; if (n > bestN) { best = l; bestN = n; } }
       if (!best) break;
       const vis = [...best.children].filter((c) => !c.hidden && c.tagName !== "BUTTON");
@@ -1553,22 +1652,15 @@
       hid++;
     }
     if (over() > 1) mod.setAttribute("data-tight", "");
-    let btn = mod.querySelector(":scope > .ui-mod-h > .hm-all");
-    if (hid) {
+    const cut = [...body.querySelectorAll("[data-more]")].some((e) => e.firstChild && getComputedStyle(e).display === "none");
+    if (hid || cut) {
       if (!btn) {
         btn = h("button", { type: "button", class: "hm-all", "aria-haspopup": "dialog" });
-        btn.addEventListener("click", () => {
-          const copy = body.cloneNode(true);
-          for (const c of copy.querySelectorAll("[data-fit]")) { c.hidden = false; c.removeAttribute("data-fit"); }
-          const t = mod.querySelector(".ui-mod-t");
-          const close = h("button", { type: "button", class: "nm-link", onclick: () => fitDlg.close() }, "Close");
-          fitDlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "hmFitT" }, t ? t.textContent : "All"), h("div", { class: "nm-dtw" }, copy), h("div", { class: "nm-dx" }, close)));
-          if (typeof fitDlg.showModal === "function") fitDlg.showModal();
-        });
-        const head = mod.querySelector(":scope > .ui-mod-h");
+        btn.addEventListener("click", () => openSheet(mod));
         if (head) head.append(btn);
       }
       btn.textContent = "Show all";
+      btn.setAttribute("aria-label", "Show all");
       btn.hidden = false;
     } else if (btn) btn.hidden = true;
   }
@@ -1577,13 +1669,22 @@
     if (FITTING.get(mod)) return;
     FITTING.set(mod, requestAnimationFrame(() => { FITTING.set(mod, 0); try { fit(mod); } catch (error) { void error; } }));
   }
-  for (const mod of document.querySelectorAll(".hm-panel > .hm-mod")) {
+  const tiles = () => [...stage.querySelectorAll(":scope > .hm-mod")];
+  for (const mod of tiles()) {
     const body = fitBody(mod);
     if (!body) continue;
     new MutationObserver(() => scheduleFit(mod)).observe(body, { childList: true, subtree: true });
-    if (typeof ResizeObserver === "function") new ResizeObserver(() => scheduleFit(mod)).observe(body);
+    if (typeof ResizeObserver === "function") { const ro = new ResizeObserver(() => scheduleFit(mod)); ro.observe(body); ro.observe(mod); }
+    const title = mod.querySelector(".ui-mod-t");
+    const open = h("button", { type: "button", class: "hm-open", "aria-label": "Open " + (title ? title.textContent : "this module"), "aria-haspopup": "dialog" });
+    open.addEventListener("click", () => openSheet(mod));
+    mod.append(open);
   }
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const mod of document.querySelectorAll(".hm-panel > .hm-mod")) scheduleFit(mod); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const mod of tiles()) scheduleFit(mod); });
+
+  const heroOpen = h("button", { type: "button", class: "hm-open hm-hero-open", "aria-haspopup": "dialog", "aria-label": "Open Market tide" }, "Open");
+  heroOpen.addEventListener("click", () => openSheet($("hmHero")));
+  $("hmHero").append(heroOpen);
 
   const tidePlot = $("hmTide");
   if (tidePlot && typeof ResizeObserver === "function") {
@@ -1598,90 +1699,155 @@
     }).observe(tidePlot);
   }
 
-  const TABS = [...document.querySelectorAll("#hmTabs [role=tab]")];
-  const stage = $("hmStage"), subBar = $("hmSub");
-  const subPick = {};
-  const SUB_TITLE = { hmHero: "Tide", hmVerdict: "Neuron" };
-  const NARROW = window.matchMedia("(max-width: 899px)");
-  const buildSub = (key) => {
-    const panel = document.getElementById("hmP-" + key);
-    const mods = panel ? [...panel.children].filter((m) => !m.hidden) : [];
-    if (!subBar) return;
-    subBar.replaceChildren();
-    subBar.hidden = mods.length < 2;
-    const pick = Math.min(subPick[key] || 0, Math.max(0, mods.length - 1));
-    mods.forEach((m, i) => {
-      if (i === pick) m.setAttribute("data-on", ""); else m.removeAttribute("data-on");
-      m.inert = NARROW.matches && i !== pick;
-      if (mods.length < 2) return;
-      const title = m.querySelector(".ui-mod-t");
-      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, SUB_TITLE[m.id] || (title ? title.textContent : "View " + (i + 1))));
-    });
+  const PAGES = ["now", "flow", "names", "glance"];
+  const PAGE_WORD = { now: "Now", flow: "Flow", names: "Names", glance: "Glance" };
+  const VIEW_PAGE = { session: "now", flow: "flow", names: "names", focus: "glance", moves: "glance", calendar: "glance" };
+  const VIEW_FIRST = { session: "hmHero", flow: "hmNet", names: "hmBull", focus: "hmLeaders", moves: "hmChg", calendar: "hmEvents" };
+  let fitNow = "", page = "now", lowerAsked = false;
+  const askLower = () => {
+    if (lowerAsked || !UI.defer) return;
+    lowerAsked = true;
+    UI.defer("home-below", { when: "visible", el: $("hmChg"), label: "The lower modules" });
   };
-  NARROW.addEventListener("change", () => buildSub(stage.dataset.view));
-  const LOWER = { moves: "hmChg", calendar: "hmEvents" };
-  let lowerAsked = false;
-  const showTab = (key, focus, quiet) => {
-    const t = TABS.find((x) => x.dataset.tab === key) || TABS[0];
-    key = t.dataset.tab;
-    stage.dataset.view = key;
-    for (const x of TABS) { const on = x === t; x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1; }
-    for (const p of document.querySelectorAll(".hm-panel")) p.inert = p.dataset.panel !== key;
-    buildSub(key);
-    if (LOWER[key] && !lowerAsked && UI.defer) { lowerAsked = true; UI.defer("home-below", { when: "visible", el: $(LOWER[key]), label: "The lower modules" }); }
-    if (focus) t.focus();
-    if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
-  };
-  const TO = { ArrowRight: 1, ArrowLeft: -1 };
-  for (const [i, t] of TABS.entries()) {
-    t.addEventListener("click", () => showTab(t.dataset.tab, false));
-    t.addEventListener("keydown", (ev) => {
-      const to = ev.key === "Home" ? 0 : ev.key === "End" ? TABS.length - 1 : TO[ev.key] === undefined ? null : i + TO[ev.key];
-      if (to === null) return;
-      ev.preventDefault();
-      showTab(TABS[(to + TABS.length) % TABS.length].dataset.tab, true);
-    });
+  function setPage(p, focus, quiet) {
+    page = PAGES.includes(p) ? p : "now";
+    stage.dataset.page = page;
+    for (const b of pager.querySelectorAll("button")) {
+      const on = b.dataset.page === page;
+      b.toggleAttribute("aria-current", on);
+      if (on) b.setAttribute("aria-current", "true");
+      b.tabIndex = on ? 0 : -1;
+      if (on && focus) b.focus();
+    }
+    for (const m of stage.children) m.inert = fitNow === "s" && m.dataset.page !== page;
+    if (fitNow === "s" && page === "glance") askLower();
+    if (!quiet) { try { history.replaceState(null, "", "#page=" + page); } catch (error) { void error; } }
   }
-  const fromHash = () => { const m = /view=([a-z]+)/.exec(location.hash); return m ? m[1] : "session"; };
-  showTab(fromHash(), false, true);
-  addEventListener("hashchange", () => showTab(fromHash(), false, true));
-  new MutationObserver(() => buildSub(stage.dataset.view)).observe(stage, { attributes: true, subtree: true, attributeFilter: ["hidden"] });
+  const turn = (p, focus) => {
+    setPage(p, focus);
+    statusEl.textContent = "Page " + (PAGES.indexOf(page) + 1) + " of " + PAGES.length + ": " + PAGE_WORD[page] + ".";
+  };
+  pager.addEventListener("click", (ev) => { const b = ev.target.closest("button[data-page]"); if (b) turn(b.dataset.page, false); });
+  pager.addEventListener("keydown", (ev) => {
+    const i = PAGES.indexOf(page);
+    const to = ev.key === "Home" ? 0 : ev.key === "End" ? PAGES.length - 1 : ev.key === "ArrowRight" ? i + 1 : ev.key === "ArrowLeft" ? i - 1 : null;
+    if (to === null) return;
+    ev.preventDefault();
+    turn(PAGES[(to + PAGES.length) % PAGES.length], true);
+  });
+  let swipe = null;
+  stage.addEventListener("pointerdown", (ev) => { swipe = fitNow === "s" && !ev.target.closest("canvas, input, button, a") ? { id: ev.pointerId, x: ev.clientX, y: ev.clientY } : null; });
+  stage.addEventListener("pointerup", (ev) => {
+    if (!swipe || swipe.id !== ev.pointerId) return;
+    const dx = ev.clientX - swipe.x, dy = ev.clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dx) > 56 && Math.abs(dx) > 2 * Math.abs(dy)) turn(PAGES[Math.max(0, Math.min(PAGES.length - 1, PAGES.indexOf(page) + (dx < 0 ? 1 : -1)))], false);
+  });
+  const hashOf = () => {
+    const p = /page=([a-z]+)/.exec(location.hash), v = /view=([a-z]+)/.exec(location.hash);
+    return p ? ["page", p[1]] : v ? ["view", v[1]] : null;
+  };
+  function fromHash() {
+    const x = hashOf();
+    const p = !x ? "now" : x[0] === "page" ? x[1] : VIEW_PAGE[x[1]];
+    setPage(PAGES.includes(p) ? p : "now", false, true);
+    const first = x && x[0] === "view" && fitNow !== "s" ? $(VIEW_FIRST[x[1]]) : null;
+    const t = first && first.querySelector("h2");
+    if (t) { t.tabIndex = -1; t.focus({ preventScroll: true }); }
+  }
+  function glanceAria(m) {
+    const open = m.querySelector(":scope > .hm-open"), body = fitBody(m), numeral = $(m.id + "N");
+    const on = m.classList.contains("is-glance");
+    if (open) {
+      const ids = [numeral && numeral.id, body && body.id].filter(Boolean);
+      if (on && ids.length) open.setAttribute("aria-describedby", ids.join(" ")); else open.removeAttribute("aria-describedby");
+    }
+    if (body && !m.hasAttribute("data-sheet")) body.inert = on;
+  }
+  const fitGlance = (m) => (fitNow === "s" ? m.dataset.page === "glance" && m.classList.contains("hm-mod") : fitNow === "m" && m.id === "hmNet");
+  function applyFit() {
+    const f = fitOf();
+    if (f === fitNow) return;
+    fitNow = f;
+    stage.dataset.fit = f;
+    pager.hidden = f !== "s";
+    for (const m of stage.children) m.classList.toggle("is-glance", fitGlance(m));
+    for (const m of tiles()) glanceAria(m);
+    if (f === "s") setPage(page, false, true);
+    else { for (const m of stage.children) m.inert = false; askLower(); }
+    for (const m of tiles()) scheduleFit(m);
+    drawStrips();
+    netApply();
+  }
+  if (typeof ResizeObserver === "function") {
+    let rz = 0;
+    new ResizeObserver(() => { clearTimeout(rz); rz = setTimeout(applyFit, 120); }).observe(hm);
+  }
+  document.addEventListener("transitionend", (ev) => { if (ev.target.classList && ev.target.classList.contains("ak-dock-panel")) netDecide(); }, true);
 
   const netHost = $("hmNetHost");
-  let netNow = null, netIn, netMapped = false;
+  let netNow = null, netIn, netMode = null, netTimer = 0, netTok = 0;
+  const NET_3D = { w: 640, h: 340 }, NETMAP_MIN = { w: 260, h: 180 }, NET_CHROME = 44;
   const netSend = () => {
     if (!netNow || netIn === undefined) return;
     const rows = netIn && Array.isArray(netIn.rows) ? netIn.rows : null;
     netNow.take(rows ? netIn : null, rows ? { state: rows.length ? "ok" : "quiet", reason: "Nothing flagged in this read." }
       : { state: netIn ? "pending" : "unavailable", reason: netIn ? "The flagged windows are not published yet." : "The flagged windows could not be read." });
-    netHost.classList.toggle("is-slot", !netMapped && !!rows && rows.length > 0);
-    netHost.classList.toggle("is-quiet", !netMapped && (!rows || !rows.length));
+    netHost.classList.toggle("is-slot", netMode === "3d" && !!rows && rows.length > 0);
+    netHost.classList.toggle("is-quiet", netMode === "3d" && (!rows || !rows.length));
   };
   const netSectors = (api) => {
     fetch("/api/flows/universe", { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then((res) => (res.ok ? res.json() : null)).catch(() => null)
       .then((u) => { if (api && typeof api.sectors === "function") api.sectors(u); });
   };
-  if (netHost && UI.defer) {
-    UI.defer("home-net", { when: "visible", el: netHost, label: "The flow network" }).then(() => {
-      const loaded = window.FlowsUI;
-      if (!loaded || !loaded.net) return;
-      const ambient = netHost.dataset.ambient === "1";
-      if (netHost.clientWidth > 0 && netHost.clientWidth < 640) {
-        return UI.defer("home-netmap", { when: "idle", el: netHost, label: "The flow network" }).then(() => {
-          const map = window.FlowsUI.netMap;
-          if (!map) return;
-          netMapped = true;
-          netNow = map.mount(netHost, {});
-          netSectors(netNow);
-          netSend();
-        });
-      }
-      netNow = loaded.net.mount(netHost, ambient ? { ambient: true, fit: true } : { fit: true });
+  const netCard = $("hmNet");
+  const netWant = () => {
+    if (!netHost) return null;
+    const sheeted = Boolean(netHost.closest("[data-sheet]")), flat = fitOf() === "flat";
+    if (!sheeted && fitGlance(netCard)) return "glance";
+    const w = sheeted || flat ? netHost.clientWidth : netCard.clientWidth;
+    const hh = sheeted || flat ? netHost.clientHeight : netCard.clientHeight - NET_CHROME;
+    if (w >= NET_3D.w && (flat || hh >= NET_3D.h)) return "3d";
+    if (w >= NETMAP_MIN.w && (flat || hh >= NETMAP_MIN.h)) return "map";
+    return "glance";
+  };
+  const netLoad = (mode) => UI.defer("home-net", { when: "visible", el: netHost, label: "The flow network" })
+    .then(() => (mode === "map" ? UI.defer("home-netmap", { when: "idle", el: netHost, label: "The flow network" }) : null));
+  function netApply() {
+    if (!netHost || !UI.defer) return;
+    const want = netWant();
+    if (!netHost.closest("[data-sheet]")) netCard.classList.toggle("is-glance", fitGlance(netCard) || want === "glance");
+    if (want === netMode) return;
+    const tok = ++netTok;
+    if (want === "glance") {
+      if (netNow) { netNow.destroy(); netNow = null; }
+      netHost.classList.remove("is-slot", "is-quiet");
+      netMode = want;
+      return;
+    }
+    netLoad(want).then(() => {
+      const api = window.FlowsUI;
+      if (tok !== netTok || !api || !api.net) return;
+      if (netNow) { netNow.destroy(); netNow = null; }
+      netHost.classList.remove("is-slot", "is-quiet");
+      netMode = want;
+      if (want === "3d") netNow = api.net.mount(netHost, netHost.dataset.ambient === "1" ? { ambient: true, fit: true } : { fit: true });
+      else if (api.netMap) { netNow = api.netMap.mount(netHost, {}); netSectors(netNow); }
       netSend();
     });
   }
+  function netDecide() {
+    if (!netHost) return;
+    clearTimeout(netTimer);
+    netTimer = setTimeout(netApply, 300);
+  }
   when(["alerts"], ({ alerts }) => { netIn = alerts; netSend(); });
+
+  applyFit();
+  fromHash();
+  addEventListener("hashchange", fromHash);
+  addEventListener("load", applyFit);
 
 
   const fill = (id, paint, ...args) => {
@@ -1726,15 +1892,19 @@
       const sub = $(subId);
       if (!into) continue;
       into.replaceChildren();
+      const mod = "hm" + id.slice(2), tone = id === "ccBull" ? "up" : "down", said = "names cleared " + all;
       if (silent(into, payload, all + " board", 240)) {
+        big(mod, null, said, tone, gone(payload, all + " board"));
         if (sub) { sub.textContent = ""; sub.hidden = true; }
         continue;
       }
       if (!rows.length) {
         hush(into, "empty", "No name leaned " + all + " past the band this session.", all + " board", 240);
+        big(mod, "0", said, "silent");
         if (sub) { sub.textContent = "0"; sub.setAttribute("aria-label", "0 ranked"); sub.hidden = false; }
         continue;
       }
+      big(mod, String(poolCount(payload) ?? rows.length), said, tone);
       sideList(into, rows, isNum(payload && payload.deep) !== null, label);
       infoInto("hm" + id.slice(2), all + " leaders", () => ({
         title: cap1(all), lead: "Names past the dead band on the " + all + " board, in the board's published rank order.",
@@ -1835,6 +2005,11 @@
     const shown = rows && Math.min(rows.length, LIST_MAX);
     const of = seen === null ? rows && rows.length : seen;
     const floor = rows && (alerts.vendorTruncated === true || alerts.readTruncated === true);
+    const off = rows ? null : gone(alerts, "flagged windows") || ["unavailable", "The flagged windows were read and carry no rows, so no figure is shown.", "flagged windows", "not on this payload"];
+    big("hmAlerts", rows ? (floor ? "≥" : "") + of : null, "windows flagged this session", "ice", off);
+    const premSum = rows ? rows.reduce((a, r) => a + (isNum(r && r.prem) ?? 0), 0) : null;
+    big("hmNet", rows && rows.length ? (floor ? "≥" : "") + usd(premSum) : null, floor ? "premium in carried windows" : "flagged premium routed", "ice",
+      rows && !rows.length ? ["quiet", "Nothing was flagged in this read, so no premium was routed.", "flagged premium", "nothing flagged"] : off);
     subSaid($("ccAlertsSub"), rows ? floor ? shown + " of ≥" + of : countSaid(shown, of) : "",
       rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
   });
@@ -1857,6 +2032,9 @@
   when(["watch"], ({ watch }) => {
     fill("ccWatch", paintWatch, watch);
     const n = rowCount(watch), k = Math.min(n, LIST_MAX);
+    big("hmWatch", n === null || (n === 0 && !(watch.status === "thin" || isNum(watch.neutral) === 0)) ? null : String(n), "one step from clearing", "ice",
+      n === null ? gone(watch, "watch board") || ["unavailable", "The watch board was read and carries no rows list.", "watch board", "not on this payload"]
+        : n === 0 && !(watch.status === "thin" || isNum(watch.neutral) === 0) ? ["unavailable", "The watch board published no rows, which is a gap in the payload and not a count of zero.", "watch board", "no rows published"] : null);
     subSaid($("ccWatchSub"), n === null ? "" : countSaid(k, n), n !== null && capSaid(k, n) + " inside the dead band — open the watch board");
     setRailCount("watch", n);
   });

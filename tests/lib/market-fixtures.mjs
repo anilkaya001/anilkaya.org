@@ -85,9 +85,9 @@ export function universeFixture(names = NAMES) {
   };
 }
 
-const RICH_NOW = Date.parse("2026-08-24T15:25:00.000Z");
+export const RICH_NOW = Date.parse("2026-08-24T15:25:00.000Z");
 
-function richAnswer(dir, route, u) {
+export function richAnswer(dir, route, u) {
   const q = u.searchParams;
   const read = (k) => emitRead(dir, k);
   switch (route) {
