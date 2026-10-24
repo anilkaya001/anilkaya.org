@@ -51,6 +51,13 @@ export const SOURCES = Object.freeze([
 
 const SOURCE_BY_ID = Object.freeze(Object.fromEntries(SOURCES.map((s) => [s.id, s])));
 
+export const MARK_TTL_S = 60;
+
+export const markUrl = (id, ticker) => {
+  const src = SOURCE_BY_ID[id];
+  return "https://flows-dossier.internal/failed/" + ((src && src.kind) || "fast") + "/" + id + "/" + ticker;
+};
+
 const REDUCE_PLAIN = new Set(["info", "profile", "financials", "breakdown", "estimates", "ownership", "short", "insiders", "levels"]);
 
 export const REDUCE_TICKER = new Set(["analysts", "news"]);
@@ -244,8 +251,9 @@ function decodeCache(rows) {
   return out;
 }
 
-export function planFetches({ ticker, known, own, cache, fast, held, now, maxCalls = BUDGET.maxCalls }) {
+export function planFetches({ ticker, known, own, cache, fast, held, now, marks = {}, maxCalls = BUDGET.maxCalls }) {
   const need = [];
+  const resting = [];
   const skip = (id, why) => ({ id, why });
   const skipped = [];
   const cardX = held.cardX;
@@ -267,14 +275,21 @@ export function planFetches({ ticker, known, own, cache, fast, held, now, maxCal
     const at = part && isNum(part.at) ? part.at : null;
     if (src.id === "quote") { need.push({ src, state: "missing", ttl }); continue; }
     const rv = EXTRACT_VERSIONS[src.id];
-    if (rv !== undefined && part && isObj(part.x) && part.x.ok === true && part.x.rv !== rv) { need.push({ src, state: "outdated", ttl }); continue; }
-    if (at !== null && now - at < ttl * 1000) continue;
-    need.push({ src, state: at === null ? "missing" : "stale", ttl });
+    const outdated = rv !== undefined && part && isObj(part.x) && part.x.ok === true && part.x.rv !== rv;
+    if (!outdated && at !== null && now - at < ttl * 1000) continue;
+    const state = outdated ? "outdated" : at === null ? "missing" : "stale";
+    const markedAt = marks && isNum(marks[src.id]) ? marks[src.id] : null;
+    if (markedAt !== null && now - markedAt < MARK_TTL_S * 1000) {
+      skipped.push(skip(src.id, "failed-recently"));
+      if (state === "missing") resting.push(src.id);
+      continue;
+    }
+    need.push({ src, state, ttl });
   }
   need.sort((a, b) => a.src.prio - b.src.prio);
   const picked = need.slice(0, maxCalls);
   const queued = need.slice(maxCalls).map((n) => n.src.id);
-  return { picked, queued, skipped };
+  return { picked, queued, skipped, resting };
 }
 
 function reduceBody(src, body, ticker, expected) {
@@ -317,6 +332,32 @@ function writeFast(id, ticker, at, x) {
   if (!cache) return Promise.resolve();
   const response = new Response(JSON.stringify({ at, x }), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=" + FAST_TTL_S[id] } });
   return cache.put(new Request("https://flows-dossier.internal/" + id + "/" + ticker, { method: "GET" }), response).catch(() => {});
+}
+
+async function readMarks(ids, ticker) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const marks = {};
+  if (!cache || !ids.length) return marks;
+  const hits = await Promise.all(ids.map(async (id) => {
+    const hit = await cache.match(new Request(markUrl(id, ticker), { method: "GET" })).catch(() => null);
+    const body = hit ? await hit.json().catch(() => null) : null;
+    return body && isNum(body.at) ? body.at : null;
+  }));
+  ids.forEach((id, i) => { if (hits[i] !== null) marks[id] = hits[i]; });
+  return marks;
+}
+
+function writeMark(id, ticker, at) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (!cache) return Promise.resolve();
+  const response = new Response(JSON.stringify({ at, reason: "failed" }), { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "max-age=" + MARK_TTL_S } });
+  return cache.put(new Request(markUrl(id, ticker), { method: "GET" }), response).catch(() => {});
+}
+
+function clearMark(id, ticker) {
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
+  if (!cache || typeof cache.delete !== "function") return Promise.resolve();
+  return Promise.resolve().then(() => cache.delete(new Request(markUrl(id, ticker), { method: "GET" }))).catch(() => {});
 }
 
 const flights = new Map();
@@ -428,9 +469,13 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     const verdict = await Promise.resolve(deps.admit(ticker)).catch(() => null);
     if (verdict === false) admitted = false;
   }
-  const plan = admitted && !cacheOnly
-    ? planFetches({ ticker, known, own: opts.own === true, cache, fast, held, now, maxCalls: budget.maxCalls })
-    : { picked: [], queued: [], skipped: SOURCES.map((s) => ({ id: s.id, why: cacheOnly ? "cache-only" : "not-admitted" })) };
+  const planArgs = { ticker, known, own: opts.own === true, cache, fast, held, now, maxCalls: budget.maxCalls };
+  const planning = admitted && !cacheOnly;
+  let plan = planning
+    ? planFetches(planArgs)
+    : { picked: [], queued: [], skipped: SOURCES.map((s) => ({ id: s.id, why: cacheOnly ? "cache-only" : "not-admitted" })), resting: [] };
+  const marks = planning ? await readMarks([...plan.picked.map((n) => n.src.id), ...plan.queued].filter((id) => id !== "quote"), ticker) : {};
+  if (Object.keys(marks).length) plan = planFetches({ ...planArgs, marks });
   trace.skipped = plan.skipped;
   trace.queued = plan.queued;
 
@@ -442,6 +487,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     }
   }
   for (const id of plan.queued) if (!extracts[id]) extracts[id] = { pending: true, reason: "budget" };
+  for (const id of plan.resting) if (!extracts[id]) extracts[id] = { pending: true, reason: "failed" };
 
   const results = {};
   const tasks = [];
@@ -483,7 +529,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     }
   }
   trace.limited = Object.keys(extracts).filter((id) => extracts[id] && extracts[id].ok !== true && extracts[id].reason === "limited");
-  const persist = Promise.all(settled).then(() => persistParts({ env, ticker, plan, results, cache, trace, now: Date.now(), deps }));
+  const persist = Promise.all(settled).then(() => persistParts({ env, ticker, plan, results, cache, trace, now: Date.now(), deps, marks }));
   if (settled.length) {
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(persist.catch(() => {}));
     else await persist.catch(() => {});
@@ -511,13 +557,23 @@ function freshMetas(held, neuron) {
   return metas;
 }
 
-async function persistParts({ env, ticker, plan, results, cache, trace, now }) {
+async function persistParts({ env, ticker, plan, results, cache, trace, now, marks }) {
   const byKind = new Map();
+  const flags = [];
   for (const { src } of plan.picked) {
     const done = results[src.id];
     if (!done) continue;
     const storable = done.x.ok === true || (done.x.ok === false && done.x.transient !== true);
+    if (src.id !== "quote" && done.x.ok === false && done.x.transient === true && done.x.reason === "failed") {
+      flags.push(writeMark(src.id, ticker, done.at));
+      trace.wrote.push("mark:" + src.id);
+      continue;
+    }
     if (!storable || src.id === "quote") continue;
+    if (marks && Object.hasOwn(marks, src.id)) {
+      flags.push(clearMark(src.id, ticker));
+      trace.wrote.push("unmark:" + src.id);
+    }
     if (src.fast) {
       await writeFast(src.id, ticker, done.at, done.x);
       trace.wrote.push("cache:" + src.id);
@@ -527,7 +583,9 @@ async function persistParts({ env, ticker, plan, results, cache, trace, now }) {
     const { transient, ...x } = done.x;
     byKind.get(src.kind)[src.id] = { at: done.at, x };
   }
+  await Promise.all(flags);
   if (!byKind.size || !env.DB) return;
+
   const statements = [];
   for (const [kind, fresh] of byKind) {
     const parts = { ...((cache[kind] && cache[kind].parts) || {}), ...fresh };

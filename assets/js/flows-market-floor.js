@@ -38,6 +38,8 @@
   for (const [cls, list] of Object.entries(OTHER)) for (const t of list) OTHER_OF.set(t, cls);
   const SHORT = { "Technology": "Tech", "Consumer Cyclical": "Cyclicals", "Communication Services": "Comms", "Financial Services": "Financials", "Consumer Defensive": "Defensives", "Basic Materials": "Materials", "Real Estate": "Real estate", "Healthcare": "Health care" };
   const STOCK_NONE = "No sector", STOCK_UNREAD = "Sector unread";
+  const RESIDUAL = new Set([STOCK_NONE, STOCK_UNREAD]);
+  const lastOf = (t) => (t.group === "stocks" && RESIDUAL.has(t.sub) ? 1 : 0);
   const LEAN_CAT = { "-1": "down", "0": "mixed", "1": "up" };
   const LEAN_WORD = { up: "bullish by convention", down: "bearish by convention", mixed: "mixed" };
   const FLOORS = new WeakMap();
@@ -133,7 +135,8 @@
     }
     const groups = GROUPS.map((g) => {
       const ts = list.filter((t) => t.group === g.id);
-      if (g.id === "other" || g.id === "stocks") ts.sort((a, b) => b.prem - a.prem || (a.label < b.label ? -1 : 1));
+      if (g.id === "other" || g.id === "stocks") ts.sort((a, b) => lastOf(a) - lastOf(b) || b.prem - a.prem || (a.label < b.label ? -1 : 1));
+
       else ts.sort((a, b) => a.order - b.order);
       const prem = ts.reduce((a, t) => a + t.prem, 0), n = ts.reduce((a, t) => a + t.n, 0);
       const volN = ts.reduce((a, t) => a + t.volN, 0);
