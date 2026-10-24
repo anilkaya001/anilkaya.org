@@ -20,6 +20,8 @@ const OTHERS = new Map([["TLT", "Bonds"], ["HYG", "Bonds"], ["GLD", "Commodities
 const SHORT = { "Technology": "Tech", "Consumer Cyclical": "Cyclicals", "Communication Services": "Comms", "Financial Services": "Financials", "Consumer Defensive": "Defensives", "Basic Materials": "Materials", "Real Estate": "Real estate", "Healthcare": "Health care" };
 const GROUPS = ["funds", "etf", "other", "stocks"];
 const GROUP_LABEL = { funds: "Index funds", etf: "Sector ETFs", other: "Other funds", stocks: "Stocks by sector" };
+const RESIDUAL_LABELS = new Set(["No sector", "Sector unread"]);
+const residualRank = (t) => (RESIDUAL_LABELS.has(t.label) ? 1 : 0);
 const NAMES = [
   ["NVDA", "Technology", 1.0, 0.7], ["TSLA", "Consumer Cyclical", 0.92, 0.45], ["AAPL", "Technology", 0.5, 0.62], ["AMZN", "Consumer Cyclical", 0.46, 0.66],
   ["META", "Communication Services", 0.42, 0.7], ["MSFT", "Technology", 0.4, 0.58], ["AMD", "Technology", 0.36, 0.64], ["GOOGL", "Communication Services", 0.27, 0.6],
@@ -75,7 +77,7 @@ function expected(alerts, universe) {
     const ts = list.filter((t) => t.group === g);
     if (g === "funds") ts.sort((a, b) => FUNDS.indexOf(a.label) - FUNDS.indexOf(b.label));
     else if (g === "etf") ts.sort((a, b) => ETF_ORDER.indexOf(a.label) - ETF_ORDER.indexOf(b.label));
-    else ts.sort((a, b) => b.prem - a.prem || (a.label < b.label ? -1 : 1));
+    else ts.sort((a, b) => (g === "stocks" ? residualRank(a) - residualRank(b) : 0) || b.prem - a.prem || (a.label < b.label ? -1 : 1));
     ordered.push(...ts);
   }
   for (const t of ordered) {
@@ -237,6 +239,11 @@ const browser = await launch();
 const alerts = alertsFixture({ n: 320, seed: 5, names: NAMES });
 const universe = universeFixture(NAMES);
 const EXP = expected(alerts, universe);
+const OFF = "SYA101";
+const NAMES3 = NAMES.concat([[OFF, null, 3.5, 0.55]]);
+const A3 = alertsFixture({ n: 360, seed: 11, names: NAMES3 });
+const U3 = universeFixture(NAMES);
+const E3 = expected(A3, U3);
 {
   const html = PAGES.marketPage({ username: "u", owner: true, scenes: true });
   ok(/data-view="floor"/.test(html) && html.indexOf('id="mkP-floor"') < html.indexOf('id="mkP-session"') && html.indexOf('id="mkP-session"') < html.indexOf('id="mkP-tide"') && /data-defer="floor"/.test(html), "THE FLOOR IS THE MARKET PAGE'S FIRST AND DEFAULT VIEW, LOADED AS THE floor DEFER GROUP, WITH THE SESSION KEPT AS THE SECOND TAB");
@@ -484,6 +491,24 @@ try {
     await r.context.close();
   }
 
+  {
+    const stocks3 = E3.tiles.filter((t) => t.group === "stocks");
+    const none3 = E3.byId.get("stocks:No sector");
+    const offSum = A3.rows.filter((r) => r.t === OFF && r.prem > 0).reduce((a, r) => a + r.prem, 0);
+    ok(none3 && stocks3.length > 1 && stocks3.filter((t) => t !== none3).every((t) => none3.prem > t.prem), "THE NO SECTOR WORLD: the off-universe name puts No sector above every named sector by premium");
+    ok(stocks3[stocks3.length - 1] === none3 && Math.abs(none3.prem - offSum) < 1e-6 && offSum > 0, "in the test's own model the No sector tile is last among the stocks and holds exactly the off-universe premium");
+    const { context, page, errors } = await open({ viewport: { width: 1440, height: 820 }, alerts: A3, universe: U3 });
+    const f = await page.evaluate(INSPECT);
+    eq(verify(f, E3, "premium"), [], "1440x820 WITH AN OFF-UNIVERSE NAME THE RESIDUAL No sector PILLAR SITS LAST IN THE STOCKS ROW WHATEVER ITS PREMIUM");
+    const got = f.model.tiles.filter((t) => t.group === "stocks");
+    eq(got[got.length - 1].id, "stocks:No sector", "the served model puts No sector after every named sector");
+    ok(Math.abs(got[got.length - 1].prem - offSum) < 1e-6, "and its premium equals the off-universe sum computed from the rows: " + got[got.length - 1].prem + " against " + offSum);
+    ok(got.slice(0, -1).every((t, i, a) => i === 0 || a[i - 1].prem > t.prem || (a[i - 1].prem === t.prem && a[i - 1].label < t.label)), "the named sectors keep their premium order");
+    eq(errors, [], "1440: no page error in the No sector world");
+    await shot(page, "floor-no-sector-1440");
+    await context.close();
+  }
+
   const MUTANTS = [
   ["the side list header ignores the switch", 'h("span", null, "Class"), h("span", null, meas().label)', 'h("span", null, "Class"), h("span", null, "Premium")'],
     ["volume ignored for height", 'if (measure === "volume") return t.volN ? t.vol : null;', "if (false) return null;"],
@@ -500,16 +525,17 @@ try {
     ["labels never declutter", "if (kept.some((k) => hit(k, box))) { out.dropped.push(it.text); continue; }", "if (false) { continue; }"],
     ["a window without a premium counted", "if (!r || typeof r.t !== \"string\" || !isNum(r.prem) || !(r.prem > 0)) { dropped++; return; }", "if (!r || typeof r.t !== \"string\") { dropped++; return; }"],
     ["names ranked by name", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => b.prem - a.prem || (a.t < b.t ? -1 : 1));", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => (a.t < b.t ? -1 : 1));"],
+    ["residual stocks sorted among the named sectors", "ts.sort((a, b) => lastOf(a) - lastOf(b) || b.prem - a.prem", "ts.sort((a, b) => b.prem - a.prem", U3, A3],
   ];
   const MA = JSON.parse(JSON.stringify(alerts));
   MA.rows = MA.rows.map((x) => (x.t === "GLD" ? { ...x, size: null } : x));
   MA.rows.push({ ...MA.rows[0], prem: null });
-  for (const [name, from, to, uni] of MUTANTS) {
+  for (const [name, from, to, uni, world] of MUTANTS) {
     ok(SRC.includes(from), `mutant "${name}" anchors on the served module`);
-    const U = uni || universe, E = expected(MA, U);
+    const U = uni || universe, A = world || MA, E = expected(A, U);
     let why = null, context = null;
     try {
-      const r = await open({ patch: { [JS]: [[from, to]] }, alerts: MA, universe: U });
+      const r = await open({ patch: { [JS]: [[from, to]] }, alerts: A, universe: U });
       context = r.context;
       for (const m of MEASURES) {
         if (why) break;

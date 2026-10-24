@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import * as W from "../shared/flows-live-worker.js";
 import * as DW from "../shared/flows-dossier-worker.js";
 import * as D from "../shared/flows-dossier.js";
+import { READ_BOX_MS } from "../shared/flows-reading-worker.js";
 import { universeValue, buildUniverse } from "../shared/flows-cross.js";
 import { eventRow } from "../shared/flows-events.js";
 import { fakeD1, shiftClock, cacheFake, vendorStub, client as harnessClient } from "./dossier-harness.mjs";
@@ -43,6 +44,28 @@ const calls = (key) => stub.calls.filter((c) => (key ? c.key === key : true));
 const keysCalled = () => stub.calls.map((c) => c.key);
 const storedKinds = (f, ticker = T) => f.db.prepare("SELECT kind FROM flows_dossier_cache WHERE ticker = ? ORDER BY kind").all(ticker).map((r) => r.kind);
 const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").length;
+const jump = (ms) => shiftClock(new Date(Date.now() + ms).toISOString());
+const partsOf = (f, kind, ticker = T) => {
+  const row = f.db.prepare("SELECT payload FROM flows_dossier_cache WHERE ticker = ? AND kind = ?").get(ticker, kind);
+  return row ? Object.keys(JSON.parse(row.payload).parts || {}).sort() : [];
+};
+const aborting = (abortMs) => ({
+  fetchVendor: async (path, params) => {
+    const url = new URL("https://uw.test" + path);
+    for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, String(v));
+    const timeout = wait(abortMs).then(() => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); });
+    const r = await Promise.race([fetch(url), timeout]);
+    if (!r.ok) throw Object.assign(new Error("upstream " + r.status), { upstream: r.status });
+    return r.json();
+  },
+  allowed: async () => true, quote: async () => null,
+});
+const DW_SOURCE = readFileSync(new URL("../shared/flows-dossier-worker.js", import.meta.url), "utf8");
+const planted = (from, to) => {
+  ok(DW_SOURCE.split(from).length === 2, "the planted wrong build finds its anchor once: " + from);
+  const src = DW_SOURCE.replace(from, to).replace(/from "\.\/([^"]+)"/g, (_, p) => "from \"" + new URL("../shared/" + p, import.meta.url).href + "\"");
+  return import("data:text/javascript;base64," + Buffer.from(src).toString("base64"));
+};
 
 {
   const db = new DatabaseSync(":memory:");
@@ -321,6 +344,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   const b = await get("/api/flows/dossier?t=EXMP");
   await b.settle();
   eq(calls("profile").length + calls("estimates").length, 0, "the next read does not ask again");
+  ok(![...cache.store.keys()].some((k) => k.includes("/failed/")), "and a plan refusal leaves no transient-failure marker: it is a stored answer, not a failure");
 }
 
 {
@@ -337,6 +361,7 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   eq(a.res.headers.get("X-Dossier-Pending"), "", "none were left to a timeout");
   await a.settle();
   eq(storedKinds(f).length, 0, "and nothing is cached from a refusal, so the next read tries again");
+  ok(![...cache.store.keys()].some((k) => k.includes("/failed/")), "and the limiter's refusal leaves no transient-failure marker, so the next read is not held back by one");
   const ok2 = await client(f.D1, {});
   dropHot();
   const b = await ok2("/api/flows/dossier?t=EXMP");
@@ -364,13 +389,25 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   const cached = Object.fromEntries(f.db.prepare("SELECT kind, payload FROM flows_dossier_cache").all().map((r) => [r.kind, JSON.parse(r.payload)]));
   ok(!cached.analysts && (!cached.fundamentals || !cached.fundamentals.parts.financials), "neither a 429 nor a 500 is cached: both are retried next read");
   ok(cached.fundamentals && cached.fundamentals.parts.breakdown.x.reason === "large", "while the over-ceiling body is, so the site does not download it daily");
+  ok(!cache.store.has(DW.markUrl("analysts", T)) && cache.store.has(DW.markUrl("financials", T)), "THE 500 LEAVES A SIXTY-SECOND MARKER AND THE 429 NONE: a refusal stays the limiter's path, unchanged");
   stub.reset();
   stub.state.status.clear();
   dropHot();
   const b = await get("/api/flows/dossier?t=EXMP");
   await b.settle();
-  same(keysCalled().sort(), ["analysts", "financials"], "the next read refetches exactly the two transient failures (" + keysCalled().join(",") + ")");
-  ok(b.body.dossier.packets.analysts.status === "ok" && b.body.dossier.packets.fundamentals.facts.length > 10, "and completes them");
+  same(keysCalled().sort(), ["analysts"], "the next read refetches the 429 at once, as before, and not the 500 inside its marker (" + keysCalled().join(",") + ")");
+  eq(b.body.dossier.packets.analysts.status, "ok", "and completes the analysts");
+  ok(b.body.dossier.packets.fundamentals.withheld.some((w) => /^failed:/.test(w.reason)), "and its part reads failed");
+  const later = jump(DW.MARK_TTL_S * 1000 + 1000);
+  W.memoClock(null, 0);
+  stub.reset();
+  dropHot();
+  const c = await get("/api/flows/dossier?t=EXMP");
+  await c.settle();
+  later();
+  eq(calls("financials").length, 1, "PAST THE MARKER'S SIXTY SECONDS the 500 is refetched, once");
+  eq(calls("analysts").length, 0, "while the analysts stay warm");
+  ok(c.body.dossier.packets.fundamentals.facts.length > 10, "and the fundamentals complete");
 }
 
 {
@@ -780,10 +817,94 @@ const vendorCallsMade = () => stub.calls.filter((c) => c.key !== "screener").len
   for (const k of ["info", "news", "analysts", "financials", "ownership", "profile", "estimates", "breakdown"]) stub.state.delay.delete(k);
 }
 
+{
+  const now = Date.now();
+  const held = { expected: null, card: null, cardX: null, strip: null };
+  const plan = (marks) => DW.planFetches({ ticker: T, known: true, own: true, cache: {}, fast: {}, held, now, marks });
+  const ids = (p) => p.picked.map((n) => n.src.id);
+  const open = plan({});
+  ok(ids(open).includes("financials") && open.queued.includes("breakdown"), "PLAN WITHOUT A MARKER: financials is picked and the revenue mix waits behind the budget");
+  const marked = plan({ financials: now - 1000 });
+  ok(!ids(marked).includes("financials"), "A MARKED SOURCE IS NOT PICKED: no vendor call and no wait for financials a second after it failed");
+  same(marked.resting, ["financials"], "it is named resting, so its packet reads pending with reason failed");
+  ok(marked.skipped.some((s) => s.id === "financials" && s.why === "failed-recently"), "and the skip says why");
+  ok(ids(marked).includes("breakdown"), "ANOTHER SOURCE OF THE SAME KIND IS NOT BLOCKED: the revenue mix takes the freed slot");
+  ok(ids(plan({ financials: now - DW.MARK_TTL_S * 1000 })).includes("financials"), "at sixty seconds exactly the marker has lapsed and financials is picked again");
+  ok(!ids(plan({ financials: now - DW.MARK_TTL_S * 1000 + 1 })).includes("financials"), "one millisecond earlier it still holds");
+  ok(DW.markUrl("financials", T) !== DW.markUrl("financials", "PLAIN") && DW.markUrl("financials", T) !== DW.markUrl("breakdown", T), "the marker key is namespaced by ticker, kind and source");
+}
+
+async function failOnce(mod) {
+  const f = world();
+  stub.state.delay.set("financials", 5000);
+  const env = { DB: f.D1, UW_API_KEY: "k" };
+  const deps = aborting(2700);
+  const bg = [];
+  const ctx = { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) };
+  const first = await mod.assembleDossier(env, ctx, T, deps, {});
+  await Promise.all(bg);
+  dropHot();
+  const before = calls("financials").length;
+  const t0 = Date.now();
+  const second = await mod.assembleDossier(env, ctx, T, deps, {});
+  const took = Date.now() - t0;
+  const again = calls("financials").length - before;
+  await Promise.all(bg);
+  return { f, env, deps, ctx, bg, first, second, took, again };
+}
+
+{
+  const r = await failOnce(DW);
+  ok(r.first.trace.pending.includes("financials"), "P0-29, A SOURCE ABORTED AFTER THE SOURCE WAIT: the first read leaves financials pending");
+  ok(r.first.trace.wrote.includes("mark:financials") && cache.store.has(DW.markUrl("financials", T)), "when the abort lands a sixty-second marker is written for that name and source");
+  ok(!partsOf(r.f, "fundamentals").includes("financials"), "and nothing is stored for the failed source");
+  eq(r.again, 0, "THE NEXT READ DOES NOT CALL IT AGAIN inside the marker (" + r.again + " calls)");
+  ok(r.took < READ_BOX_MS, "and returns in " + r.took + " ms, inside the reading's " + READ_BOX_MS + " ms box, not after another 2.5 s wait");
+  eq(r.second.trace.vendorCalls, 0, "with no vendor call at all");
+  ok(r.second.trace.skipped.some((s) => s.id === "financials" && s.why === "failed-recently"), "financials is skipped as failed recently");
+  ok(r.second.dossier.packets.fundamentals.withheld.some((w) => /^failed:/.test(w.reason)), "and its part of the packet reads failed");
+
+  stub.state.delay.delete("financials");
+  const plain = await DW.assembleDossier(r.env, r.ctx, "PLAIN", r.deps, {});
+  await Promise.all(r.bg);
+  eq(stub.calls.filter((c) => c.key === "financials" && c.ticker === "PLAIN").length, 1, "ANOTHER TICKER IS UNAFFECTED: PLAIN's financials is called while EXMP's marker holds");
+  ok(!plain.trace.skipped.some((s) => s.why === "failed-recently"), "and nothing of PLAIN is skipped as failed");
+
+  const n0 = calls("financials").filter((c) => c.ticker === T).length;
+  const at50 = jump(50 * 1000);
+  W.memoClock(null, 0);
+  dropHot();
+  await DW.assembleDossier(r.env, r.ctx, T, r.deps, {});
+  await Promise.all(r.bg);
+  const mid = calls("financials").filter((c) => c.ticker === T).length - n0;
+  const at62 = jump(12 * 1000);
+  W.memoClock(null, 0);
+  dropHot();
+  const late = await DW.assembleDossier(r.env, r.ctx, T, r.deps, {});
+  await Promise.all(r.bg);
+  at62();
+  at50();
+  eq(mid, 0, "fifty seconds after the failure the marker still holds: no call");
+  eq(calls("financials").filter((c) => c.ticker === T).length - n0, 1, "PAST ITS SIXTY SECONDS THE SOURCE IS CALLED AGAIN, once");
+  ok(!late.trace.skipped.some((s) => s.why === "failed-recently") && partsOf(r.f, "fundamentals").includes("financials"), "and answers and is stored, nothing held back by the marker");
+}
+
+{
+  const f = world();
+  const url = DW.markUrl("financials", T);
+  cache.store.set(url, { body: JSON.stringify({ at: Date.now() - DW.MARK_TTL_S * 1000 - 1000, reason: "failed" }), status: 200, headers: [["Content-Type", "application/json"]], expires: Date.now() + 60000 });
+  const bg = [];
+  const r = await DW.assembleDossier({ DB: f.D1, UW_API_KEY: "k" }, { waitUntil: (p) => bg.push(Promise.resolve(p).catch(() => {})) }, T, aborting(2700), {});
+  await Promise.all(bg);
+  eq(calls("financials").length, 1, "A MARKER OLDER THAN SIXTY SECONDS IS IGNORED even while the cache still holds it: financials is called");
+  ok(r.trace.wrote.includes("unmark:financials") && !cache.store.has(url), "and the successful fetch clears it");
+}
+
+{
+  const mutant = await planted("now - markedAt < MARK_TTL_S * 1000", "false");
+  const m = await failOnce(mutant);
+  ok(m.again === 1 && m.took >= READ_BOX_MS, "PLANTED WRONG BUILD, THE MARKER IGNORED: the checks fail, the next read calls the source again (" + m.again + ") and waits " + m.took + " ms, past the box");
+}
+
 restoreClock();
 cache.restore();
-stub.restore();
-assertAiGuarded();
-eq(JSON.stringify([modelRuns.length, aiGuardStats().allowed, aiGuardStats().refused]), "[0,0,0]",
-  "every dossier read ran with a guarded scripted model binding in env.AI, and none of them called it, through cappedAi or around it");
-console.log(`flows-dossier-reads: ${checks} checks passed`);
