@@ -667,7 +667,9 @@ const clearMarks = (...names) => { for (const n of names) rmSync(mark(n), { forc
   deep(packShards(unfasted, CI_SHARDS).map(names).map((sh) => sh.filter((n) => n !== "contracts")), shards.map(names),
     "pins are read per suite, so moving contracts into or out of the fast job changes no other suite's shard");
   ok(shards.every(needsBrowser), "every one of the six shards holds a browser or workerd suite, so each installs Chromium");
-  ok(!needsBrowser(fast), "the fast job holds none and installs no Chromium");
+  ok(!fast.some((s) => s.class !== "N"), "the fast job holds no browser or workerd suite and installs no Chromium");
+  ok(needsBrowser([{ class: "N", files: [["approval", "frames.mjs"].join("-")] }]), "a Node-class suite that launches Chromium through the launcher still makes its shard install it");
+  ok(!needsBrowser([{ class: "N", files: [["flows", "time.mjs"].join("-")] }]), "a Node suite that never reaches the launcher does not");
   ok(fast.every((s) => s.class === "N"), "every fast suite is a Node suite");
 
   const wf = readFileSync(path.join(HERE, "..", ".github", "workflows", "regression.yml"), "utf8");

@@ -390,7 +390,7 @@ try {
       return { g: r.greeks, S: en.spot, popQ: r.prob.popQ };
     }, NEAR);
     const money = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "") + "$" + Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: Math.abs(v) < 1000 ? 2 : 0, maximumFractionDigits: Math.abs(v) < 1000 ? 2 : 0 });
-    eq(popQ, (Math.round(want.popQ * 1000) / 10).toFixed(1) + "%", "the implied chance is the engine's, re-priced in the page at the fill the page shows");
+    ok(Math.abs(parseFloat(popQ) - want.popQ * 100) < 0.1 + 1e-9, `the implied chance is the engine's, re-priced in the page at the fill the page shows, within the tenth of a point the two clocks can straddle (${popQ} against ${(want.popQ * 100).toFixed(2)})`);
     const sh = want.g.delta$ / want.S;
     eq(d.value, (sh < 0 ? MINUS : "+") + Math.abs(sh).toFixed(Math.abs(sh) < 10 ? 1 : 0), `the delta is the engine's dollar delta in shares, unmodified (${d.value})`);
     await page.click('[aria-label="About greeks"]');

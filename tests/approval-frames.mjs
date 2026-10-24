@@ -96,7 +96,25 @@ eq(new Set(frames.map((f) => f.id)).size, 22, "each with its own name");
   ok(has(textProblems(infoOf({ chips: ["a chip of four words"] })), "chip"), "and a chip of four words");
 }
 
-const browser = await launch();
+const launchSettled = async () => {
+  let last;
+  for (let i = 0; i < 4; i++) {
+    let b;
+    try {
+      b = await launch();
+      const probe = await b.newPage();
+      await probe.setContent("<p>ready</p>");
+      await probe.close();
+      return b;
+    } catch (e) {
+      last = e;
+      await b?.close().catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    }
+  }
+  throw last;
+};
+const browser = await launchSettled();
 try {
   const results = [];
   for (const f of frames) {
