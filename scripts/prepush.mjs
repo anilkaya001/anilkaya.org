@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TESTS = path.join(ROOT, "tests");
-const ALWAYS = ["contracts", "docs", "flows-weight"];
+const ALWAYS = ["contracts", "docs", "flows-weight", "architecture", "run", "lib-contract", "server-kernel", "server-rt", "server-pages", "server-router", "route-matrix"];
 const RULES = [
   [/^assets\/css\/(flows|base)[^/]*\.css$|^shared\/flows-pages\.js$/, ["flows-pages-render", "flows-glass-render", "flows-overview", "flows-home-onescreen", "flows-kit"]],
   [/^assets\/js\/flows-(overview|home)[^/]*\.js$|^assets\/css\/flows-home\.css$/, ["flows-overview", "flows-home-onescreen", "flows-home-below-render", "flows-home-composition", "flows-pages-render"]],

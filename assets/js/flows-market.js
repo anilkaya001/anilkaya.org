@@ -891,6 +891,20 @@
   }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { for (const mod of document.querySelectorAll(".mk-panel > .mk-mod")) scheduleFit(mod); });
 
+  const popBtn = $("mkNetPop");
+  function syncPop() {
+    if (!popBtn) return;
+    const L = window.FlowsUI && window.FlowsUI.link;
+    popBtn.hidden = !(L && typeof L.popout === "function");
+  }
+  if (popBtn) {
+    popBtn.addEventListener("click", () => {
+      const L = window.FlowsUI && window.FlowsUI.link;
+      if (L && typeof L.popout === "function") L.popout("/flows/network/");
+    });
+  }
+  syncPop();
+
   const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];
   const stage = $("mkStage"), subBar = $("mkSub");
   const subPick = {};
@@ -918,6 +932,7 @@
     for (const x of TABS) { const on = x === t; x.setAttribute("aria-selected", String(on)); x.tabIndex = on ? 0 : -1; }
     for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
     buildSub(key);
+    if (key === "network") syncPop();
     if (focus) t.focus();
     if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
   }
@@ -1053,6 +1068,7 @@
       UI.defer("net", { when: "visible", el: netHost, label: "The flow network" }).then(() => UI.defer("netmap", { when: "idle", el: netHost, label: "The flow network" })).then(() => {
         const api = window.FlowsUI.netMap.mount(netHost, { sectors: universe });
         if (api) ALERTS.sub((a, st) => api.take(a, st));
+        syncPop();
       });
     }
     if (UI.defer) UI.defer("market-below", { when: "visible", el: $("mkSectorsCard"), label: "The lower modules" });

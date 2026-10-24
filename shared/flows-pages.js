@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "385";
+export const ASSET_VERSION = "386";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -846,7 +846,7 @@ export function marketPage({ username = "", owner = false, scenes = false } = {}
   const panel = (key, body) => `
     <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "floor" ? "" : " inert"}>${body}
     </div>`;
-  return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css"])}
+  return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css", "/assets/css/flows-popout.css"])}
 ${shell("Market", "market", username, `
   <div class="mk" id="mk">
   <div class="mk-top">
@@ -879,7 +879,7 @@ ${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf"
 ${marketModule("mkExpiryCard", "Expiry", "mkExpiry")}
 ${marketModule("mkVolCard", "Volatility", "mkVol")}`)}
 ${panel("network", `
-${marketModule("mkNetCard", "Flow network", "mkNet", { sub: "", seg: `<div class="mk-segc" id="mkNetSeg"></div>` })}`)}
+${marketModule("mkNetCard", "Flow network", "mkNet", { sub: `<button type="button" class="mk-pop" id="mkNetPop" aria-label="Pop out the flow network into its own window" hidden>Pop out</button>`, seg: `<div class="mk-segc" id="mkNetSeg"></div>` })}`)}
 ${panel("extremes", `
 ${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
     body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
@@ -914,6 +914,29 @@ ${UI_CHART_SCRIPTS}
 <script src="${v("/assets/js/flows-market.js")}" defer></script>
 </body>
 </html>`;
+}
+
+export function networkPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Flow network",
+    description: "The day's flagged option premium routed from side to sector to name to lean, in its own window, sharing its selection with the page that opened it.",
+    active: "network", username, chart: false, chrome: false,
+    styles: ["/assets/css/flows-net-map.css", "/assets/css/flows-popout.css"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-popout.js"],
+    body: `
+  <div class="pn" id="pn">
+    <header class="flows-head pn-head" data-fx-hero>
+      <h1 id="fxTitle">Flow network</h1>
+    </header>
+    <p class="visually-hidden" id="pnStatus" role="status">Loading the flow network\u2026</p>
+    <section class="ui-card ui-mod pn-mod" id="pnNet" aria-labelledby="pnNetT">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="pnNetT">Flagged premium</h2><span class="ui-mod-sp"></span></header>
+      <div class="pn-host" id="pnNetHost"></div>
+    </section>
+  </div>
+  <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
+  <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>`,
+  });
 }
 
 const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
@@ -1412,7 +1435,8 @@ export function oracleShell(html, mode, slug) {
 }
 
 export const FLOWS_PAGES = {
-  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, deskPage,
+  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, deskPage,
+
   politicalPage,
   tickerPage, unusualPage, movesPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
