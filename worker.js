@@ -2918,12 +2918,12 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
+flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
   } }),
-flowsFilmRows(),
 flowsRtRows({ serveRt: rtServe }));
 
 const flowsNotFound = () => new Response(notFoundPage(), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });
