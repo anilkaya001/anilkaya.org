@@ -18,3 +18,25 @@
 .fx-doc-def p { margin: 0; }
 .fx-doc-where { color: var(--label-2); font: var(--t-footnote); }
 .fx-doc-where a { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; }
+
+.fx-film {
+  width: 100%;
+  max-width: 960px;
+  margin: var(--sp-3) 0 var(--sp-6);
+}
+
+.fx-film video {
+  display: block;
+  width: 100%;
+  max-width: 960px;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+
+.fx-film figcaption {
+  margin-top: var(--sp-2);
+  color: var(--label-2);
+}
