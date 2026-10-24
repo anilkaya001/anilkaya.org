@@ -27,7 +27,7 @@ const settled = async (route) => {
   for (;;) {
     try {
       const r = await fetch(url(route), { headers: auth, signal: AbortSignal.timeout(15000) });
-      if ((r.headers.get("content-type") || "").includes("json")) { await r.json(); return; }
+      if (r.status < 500 && (r.headers.get("content-type") || "").includes("json")) { await r.json(); return; }
     } catch (e) {
       if (Date.now() > until) throw e;
     }

@@ -4,7 +4,7 @@ import { constants, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readQuarantine, recordedFor, todayUtc } from "./lib/quarantine.mjs";
-import { SUITES_DIR, FIELD_ORDER, formatSuite } from "./lib/suite-registry.mjs";
+import { SUITES_DIR, FIELD_ORDER, formatSuite, walkImports, entriesOf, LAUNCHER, ROOT as REPO_ROOT } from "./lib/suite-registry.mjs";
 import { changedFiles, selectAffected, describeSelection, rootOf } from "./lib/affected.mjs";
 export { SUITES_DIR, formatSuite };
 
@@ -159,7 +159,9 @@ export const groupOf = (suite) => suite.group || "shard";
 
 export const retryAllowed = (suite, env = process.env) => env.CI === "true" && suite.timing === true && suite.class === "N";
 
-export const needsBrowser = (suites) => suites.some((s) => s.class !== "N");
+const launchesBrowser = (s) => Array.isArray(s.files) && walkImports(REPO_ROOT, entriesOf(s.files)).files.has(LAUNCHER);
+
+export const needsBrowser = (suites) => suites.some((s) => s.class !== "N" || launchesBrowser(s));
 
 const suiteCost = (s) => s.medianS || 0;
 
