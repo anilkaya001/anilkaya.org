@@ -379,13 +379,15 @@
       }
       side.append(h("div", { class: "mk-fl-sh" }, h("h3", null, "Classes by " + (measure === "volume" ? "volume" : measure === "lean" ? "net lean" : "premium"))));
       const rank = M.tiles.filter((t) => isNum(valueOf(t, measure))).sort((a, b) => Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1));
+      const rowsR = Math.max(3, rowsFit - 1);
+      side.append(h("div", { class: "mk-fl-lh", role: "none" }, h("span", null, "Class"), h("span", null, meas().label), h("span", null, "Share")));
       const list = h("ol", { class: "mk-fl-list" });
-      rank.slice(0, rowsN).forEach((t) => {
+      rank.slice(0, rowsR).forEach((t) => {
         const v = valueOf(t, measure);
         list.append(h("li", { "data-lean": t.lean ? t.lean.cat : "none" }, h("button", { type: "button", class: "mk-fl-pick", "data-id": t.id, onclick: () => select(t) }, t.label), h("span", { class: "mk-fl-v" }, measure === "volume" ? F.num(v) : measure === "lean" ? moneyS(v) : money(v)), h("span", { class: "mk-fl-p" }, isNum(t.share) ? F.pct(t.share, 0) : DASH)));
       });
       side.append(list);
-      const left = M.tiles.length - Math.min(rowsN, rank.length);
+      const left = M.tiles.length - Math.min(rowsR, rank.length);
       if (left > 0) side.append(h("p", { class: "mk-fl-sn" }, "+" + left + " more in the tables"));
     }
 

@@ -122,7 +122,7 @@ const INSPECT = () => {
       tiles: SC.tiles.map((s) => ({ id: s.id, row: s.row, col: s.col, x: s.x, z: s.z, v: s.v, h: s.h, lean: s.lean, stripe: s.stripe, px: s.px, py: s.py, bx: s.bx, by: s.by, pz: s.pz, box: s.box })) },
     labels: api.labels().labels, dropped: api.labels().dropped, cols: api.labels().cols,
     hits: [...host.querySelectorAll(".mk-fl-hit")].map((b) => ({ id: b.dataset.id, tab: b.tabIndex, w: b.getBoundingClientRect().width, hh: b.getBoundingClientRect().height, label: b.getAttribute("aria-label"), pressed: b.getAttribute("aria-pressed") })),
-    side: side ? { hidden: side.hidden, head: (side.querySelector("h3") || {}).textContent || "", items: [...side.querySelectorAll(".mk-fl-list li")].map((li) => li.children[0].textContent), hrefs: [...side.querySelectorAll(".mk-fl-list a")].map((a) => a.getAttribute("href")), more: (side.querySelector(".mk-fl-sn") || {}).textContent || "" } : null,
+    side: side ? { hidden: side.hidden, head: (side.querySelector("h3") || {}).textContent || "", cols: [...side.querySelectorAll(".mk-fl-lh span")].map((s) => s.textContent), items: [...side.querySelectorAll(".mk-fl-list li")].map((li) => li.children[0].textContent), hrefs: [...side.querySelectorAll(".mk-fl-list a")].map((a) => a.getAttribute("href")), more: (side.querySelector(".mk-fl-sn") || {}).textContent || "" } : null,
     tables: [...host.querySelectorAll(".mk-fl-t")].map((t) => ({ caption: t.querySelector("caption").textContent, rows: [...t.querySelectorAll("tbody tr")].map((r) => [...r.children].map((c) => c.textContent)) })),
     seg: [...document.querySelectorAll("#mkFloorCard .ui-seg-i")].map((b) => [b.textContent, b.getAttribute("aria-selected")]),
   };
@@ -222,6 +222,7 @@ function verify(f, EXP, measure, { phone = false, orbit = false } = {}) {
   if (f.side && !f.side.hidden && /^Classes by/.test(f.side.head)) {
     const rk = EXP.tiles.filter((t) => t.value[measure] !== null).sort((a, b) => Math.abs(b.value[measure]) - Math.abs(a.value[measure]) || (a.id < b.id ? -1 : 1)).map((t) => t.label);
     need(f.side.items.join() === rk.slice(0, f.side.items.length).join() && f.side.items.length >= 3, "the side list is not ranked by the measure: " + f.side.items);
+    need(JSON.stringify(f.side.cols) === JSON.stringify(["Class", { premium: "Premium", volume: "Volume", lean: "Net lean" }[measure], "Share"]), "the side list header does not follow the switch: " + f.side.cols);
   }
   need(f.read.startsWith("Most premium: " + GROUP_LABEL[best.g]), "the readout at rest does not lead with " + GROUP_LABEL[best.g] + ": " + f.read);
   need(/by convention/.test(f.legend) && /Bullish/.test(f.legend) && /Bearish/.test(f.legend) && /Mixed/.test(f.legend), "the legend does not state the convention");
@@ -484,6 +485,7 @@ try {
   }
 
   const MUTANTS = [
+  ["the side list header ignores the switch", 'h("span", null, "Class"), h("span", null, meas().label)', 'h("span", null, "Class"), h("span", null, "Premium")'],
     ["volume ignored for height", 'if (measure === "volume") return t.volN ? t.vol : null;', "if (false) return null;"],
     ["a class with no count drawn as zero", "return t.volN ? t.vol : null;", "return t.vol;"],
     ["an empty class drawn as zero", 'return t.n ? (measure === "lean" ? t.net : t.prem) : null;', 'return t.n ? (measure === "lean" ? t.net : t.prem) : 0;'],
@@ -494,7 +496,7 @@ try {
     ["share of the wrong total", "t.share = total > 0 && t.n ? t.prem / total : null;", "t.share = total > 0 && t.n ? t.prem / (2 * total) : null;"],
     ["stocks split by sector without the universe", 'const sec = !uniOk ? STOCK_UNREAD : secOf.get(T) || STOCK_NONE;', "const sec = secOf.get(T) || STOCK_NONE;", { status: "pending" }],
     ["a pillar drawn off its projection", "Object.assign(s, { ped, px: top.x,", "Object.assign(s, { ped, px: top.x + 6,"],
-    ["the side list ranked upward", "Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1));\n      const list", "Math.abs(valueOf(a, measure)) - Math.abs(valueOf(b, measure)) || (a.id < b.id ? -1 : 1));\n      const list"],
+    ["the side list ranked upward", "Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1));\n      const rowsR", "Math.abs(valueOf(a, measure)) - Math.abs(valueOf(b, measure)) || (a.id < b.id ? -1 : 1));\n      const rowsR"],
     ["labels never declutter", "if (kept.some((k) => hit(k, box))) { out.dropped.push(it.text); continue; }", "if (false) { continue; }"],
     ["a window without a premium counted", "if (!r || typeof r.t !== \"string\" || !isNum(r.prem) || !(r.prem > 0)) { dropped++; return; }", "if (!r || typeof r.t !== \"string\") { dropped++; return; }"],
     ["names ranked by name", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => b.prem - a.prem || (a.t < b.t ? -1 : 1));", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => (a.t < b.t ? -1 : 1));"],
