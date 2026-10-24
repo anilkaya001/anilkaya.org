@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -25,7 +25,7 @@ const SCENES = [
   { scene: 3, caption: 'The Market Floor view lays out flagged options activity across sectors.' },
   { scene: 4, caption: 'The Session river shows how premium moved through the trading day.' },
   { scene: 5, caption: 'A ticker page details one name\u2019s contracts, strikes and expiries.' },
-  { scene: 6, caption: 'The Premium desk ranks the largest premium trades of the session.' },
+  { scene: 6, caption: 'The Premium desk plots yield against risk for each option line.' },
   { scene: 7, caption: 'The Status page shows feed health and job timings for the owner.' },
   { scene: 8, caption: 'The Ask dock opens on Home for questions about the flow.' },
   { scene: 9, card: 'end', seconds: 5, caption: 'Fire and Forget. All figures are sample data and not advice.' }
@@ -474,7 +474,7 @@ export async function assembleFilm({ framesDir, outDir, log = defaultLog } = {})
 
     const captured = items.filter((i) => !i.card);
     const posterItem = captured.find((i) => i.scene === 2) || captured[0] || items[0];
-    const posterIndex = posterItem.scene === 2 ? Math.min(40, posterItem.count) : Math.min(40, posterItem.count);
+    const posterIndex = Math.min(40, posterItem.count);
     const posterFrame = path.join(posterItem.dir, `${String(posterIndex).padStart(5, '0')}${posterItem.ext}`);
     await run(FFMPEG, [
       '-hide_banner', '-loglevel', 'error', '-y',

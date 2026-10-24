@@ -46,6 +46,7 @@ import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-cal
 import { flowsOpsRows } from "./server/routes/flows-ops.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
+import { flowsFilmRows } from "./server/routes/flows-film.js";
 import { flowsRtRows } from "./server/routes/flows-rt.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
@@ -2917,6 +2918,7 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
+flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();

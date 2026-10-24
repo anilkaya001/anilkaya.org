@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "382";
+export const ASSET_VERSION = "384";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -418,7 +418,7 @@ export function aboutPage() {
     <h2 id="aFilm">The walkthrough</h2>
     <figure class="fx-film">
       <video controls preload="none" playsinline poster="/assets/img/flows-walkthrough-v2.jpg" width="1920" height="1080">
-        <source src="/assets/img/flows-walkthrough-v2.mp4" type="video/mp4">
+        <source src="/flows/about/film.mp4" type="video/mp4">
         <track kind="captions" srclang="en" label="English" src="/assets/img/flows-walkthrough-v2.vtt" default>
       </video>
       <figcaption>A short walkthrough of real pages rendered from sample data. Figures are invented.</figcaption>

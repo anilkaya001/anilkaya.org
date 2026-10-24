@@ -83,6 +83,7 @@ row("/flows/login", { body: "form" });
 row("/flows/logout");
 for (const name of FLOWS_PAGES_SLASH) light("/flows/" + name + (name ? "/" : ""));
 for (const name of FLOWS_PAGES_BARE) light("/flows/" + name);
+light("/flows/about/film.mp4");
 for (const name of ["long", "short", "watch", ""]) light("/flows/" + name + (name ? "/" : "") + "?t=NVDA");
 light("/flows/zz/");
 light("/flows/zz");

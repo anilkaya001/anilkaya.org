@@ -3,6 +3,7 @@ import { existsSync, statSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { aboutPage } from "../shared/flows-pages.js";
+import { flowsFilmRows } from "../server/routes/flows-film.js";
 import { captureScenes } from "./film/capture.mjs";
 import { assembleFilm } from "./film/assemble.mjs";
 
@@ -45,7 +46,7 @@ assert.doesNotMatch(videoTag, /\bautoplay\b/i);
 assert.doesNotMatch(videoTag, /\bloop\b/i);
 assert.doesNotMatch(html, /<video\b[^>]*\bautoplay\b/i);
 
-assert.match(film, /<source\b[^>]*src="\/assets\/img\/flows-walkthrough-v2\.mp4"[^>]*>/);
+assert.match(film, /<source\b[^>]*src="\/flows\/about\/film\.mp4"[^>]*>/);
 const trackMatch = film.match(/<track\b[^>]*>/);
 assert.ok(trackMatch, "video has a track element");
 const trackTag = trackMatch[0];
@@ -67,7 +68,8 @@ for (const text of captionTexts) {
 
 for (const ext of ["mp4", "jpg", "vtt"]) {
   const p = join(imgDir, `${base}.${ext}`);
-  if (existsSync(p)) {
+  assert.ok(existsSync(p), `${base}.${ext} is committed`);
+  {
     const st = statSync(p);
     assert.ok(st.isFile(), `${base}.${ext} is a file`);
     assert.ok(st.size > 0, `${base}.${ext} is not empty`);
@@ -84,6 +86,32 @@ if (existsSync(vtt)) {
   const body = readFileSync(vtt, "utf8");
   assert.match(body, /^\uFEFF?WEBVTT/);
   assert.doesNotMatch(body, /tape/i, "captions must not mention the banned word");
+}
+
+
+{
+  const bytes = new Uint8Array(1000).map((_, i) => i % 251);
+  const env = { ASSETS: { fetch: async () => new Response(bytes, { status: 200 }) } };
+  const [row] = flowsFilmRows();
+  assert.equal(row.path, "/flows/about/film.mp4");
+  const call = (range, method = "GET", e = env) => row.handler({ request: new Request("https://x.test/flows/about/film.mp4", { method, headers: range ? { Range: range } : {} }), env: e, url: new URL("https://x.test/flows/about/film.mp4") });
+  const whole = await call(null);
+  assert.equal(whole.status, 200);
+  assert.equal(whole.headers.get("accept-ranges"), "bytes");
+  assert.equal((await whole.arrayBuffer()).byteLength, 1000);
+  const part = await call("bytes=10-19");
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get("content-range"), "bytes 10-19/1000");
+  assert.deepEqual([...new Uint8Array(await part.arrayBuffer())], [...bytes.slice(10, 20)]);
+  const open = await call("bytes=990-");
+  assert.equal(open.headers.get("content-range"), "bytes 990-999/1000");
+  const suffix = await call("bytes=-5");
+  assert.equal(suffix.headers.get("content-range"), "bytes 995-999/1000");
+  assert.equal((await call("bytes=0-99999")).headers.get("content-range"), "bytes 0-999/1000");
+  assert.equal((await call("bytes=2000-")).status, 416);
+  assert.equal((await call("bytes=0-9", "HEAD")).status, 206);
+  await assert.rejects(call(null, "GET", { ...env, FLOWS_FRONT_DOOR: "off" }));
+  await assert.rejects(call(null, "GET", { ASSETS: { fetch: async () => new Response("", { status: 404 }) } }));
 }
 
 console.log("✓ flows-film: the About page carries the walkthrough as a captioned video with a poster, no autoplay, a sample-data caption and no banned word, and the film files stay under 8 MB");
