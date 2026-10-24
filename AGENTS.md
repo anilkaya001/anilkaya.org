@@ -731,8 +731,13 @@ API (`markUrl`, `MARK_TTL_S`), written when a source fails transiently
 and cleared by the next success: `planFetches` skips a marked source as
 `failed-recently`, its packet reads `pending` with reason `failed`, and the
 read neither calls nor awaits it. A read that starts before the aborted source
-has failed still re-calls it once, and serving the stored reading when the box
-fires stays with P0-29's held-previous path. Slow kinds
+has failed still re-calls it once; when the reading's 1.5 s box fires before the
+dossier is assembled, a vetted stored reading of the current `READING_VERSION`,
+less than two sessions behind the last close, is served as `ready` with
+`held: "previous"`, `refreshing: true`, its cite grades capped at 1 and no
+tags (they are rules over the current facts, which are not yet known), read
+concurrently with the assembly and costing no extra trip; with none, `generating`
+as before. Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the

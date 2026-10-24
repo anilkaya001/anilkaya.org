@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import * as R from "../shared/flows-reading.js";
 import * as RW from "../shared/flows-reading-worker.js";
 import { AI_INTRADAY_REFRESH_MS } from "../shared/flows-ai.js";
@@ -991,6 +995,98 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(b.body.read.why, "limited", "A MEMBER WHO JOINS A REFUSED MEMBER'S FLIGHT is told the reading was limited too");
   eq(ai.log.reads.length, 0, "no model call from either");
   eq(readRow(f), undefined, "and no row");
+}
+
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const kept = readRow(f);
+  ok(kept && kept.llm === 1 && kept.guard === null, "THE BOX: (setup) a vetted reading of EXMP is stored under read:EXMP");
+  const shape = JSON.parse(kept.ideas).shape;
+  const cites = (r) => [r.sections.identity, r.sections.now, ...r.sections.drivers, ...r.sections.tensions, ...r.sections.watch].filter(Boolean).flatMap((x) => x.cites);
+  ok(cites(shape).some((c) => typeof c.grade === "number" && c.grade > 1), "(setup) and it cites facts graded better than 1 when written");
+  const PAST = Date.parse("2026-10-02T15:20:00.000Z");
+  const refuse = (what) => async () => { throw new Error("the box path " + what); };
+  const env = { ...AI_ENV, AI: { run: refuse("asks no model") }, DB: f.D1 };
+  const boxed = async (mod, at) => {
+    const reads = [];
+    const waited = [];
+    let assembled = 0;
+    const deps = {
+      readRow: async (scope) => {
+        reads.push(scope);
+        return f.D1.prepare("SELECT scope, fingerprint, guard, llm, model, generated_at, ideas, summary FROM flows_neuron WHERE scope = ?").bind(scope).first();
+      },
+      assemble: () => { assembled++; return new Promise(() => {}); },
+      mark: refuse("marks nothing"),
+      write: refuse("writes nothing"),
+      call: refuse("asks no model"),
+    };
+    const n = f.trips.length;
+    const read = await mod.readingFor(env, { waitUntil: (p) => waited.push(p) }, T, deps, { now: at, boxMs: 30 });
+    return { read, reads, waited, assembled, trips: f.trips.slice(n) };
+  };
+
+  const a = await boxed(RW, PAST);
+  eq(a.read.status, "ready", "THE BOX FIRES WITH A VETTED READING STORED: the reader is served it, status ready, not generating");
+  eq(a.read.held, "previous", "held previous");
+  eq(a.read.refreshing, true, "refreshing true, because the dossier is still being assembled behind it");
+  eq(a.read.generated, true, "model wording");
+  eq(a.read.label, "Model wording", "labelled so");
+  eq(a.read.generatedAt, kept.generated_at, "with its own generatedAt");
+  eq(a.read.fingerprint, shape.fingerprint, "and the fingerprint of the dossier it was written from");
+  eq(a.read.sections.now.text, GOOD.now.text, "the stored sections: the text the checks passed, unchanged");
+  same(a.read.sections.drivers.map((d) => d.text), shape.sections.drivers.map((d) => d.text), "and every stored driver");
+  ok(/still being assembled/.test(a.read.note) && /earlier dossier of EXMP/.test(a.read.note), "with a note that says the dossier is still being assembled: " + a.read.note);
+  ok(cites(a.read).length > 0 && cites(a.read).every((c) => typeof c.grade !== "number" || c.grade <= 1), "and every cite capped at grade 1, since no current fact confirms it yet (" + cites(a.read).map((c) => c.id + ":" + c.grade).join(", ") + ")");
+  eq(a.read.tags.length, 0, "and no tag the current dossier has not yet confirmed");
+  eq(a.read.retryAfterS, undefined, "with no retry: the page keeps polling for the reading that follows");
+  eq(a.assembled, 1, "the assembly was started once");
+  eq(a.waited.length, 1, "and continues under waitUntil");
+
+  eq(a.trips.filter(isReadTrip).length, 1, "NO EXTRA ROUND TRIP: the boxed call reads read:EXMP once, the read the floor check already made before the race");
+  same(a.reads, ["read:" + T, "gen:read:" + T], "and reads nothing after the race: the two rows the box path read before this change, in the same order");
+
+  const floor = await boxed(RW, Date.parse(kept.generated_at) + MINUTE);
+  eq(floor.read.held, "floor", "THE FLOOR HIT still returns first, held floor");
+  same(floor.reads, ["read:" + T], "with the reading row read once and nothing else");
+  eq(floor.assembled, 0, "and no assembly started");
+  eq(floor.trips.filter(isReadTrip).length, 1, "one read trip on the floor hit");
+
+  const source = readFileSync(new URL("../shared/flows-reading-worker.js", import.meta.url), "utf8");
+  const base = new URL("../shared/", import.meta.url).href;
+  const planted = source.replace("const boxed = boxedReading(stored, now, ticker);", "const boxed = null;").replaceAll('from "./', 'from "' + base);
+  ok(planted.includes("const boxed = null;") && !planted.includes("= boxedReading(stored"), "(setup) the planted build's box ignores the stored row");
+  const dir = mkdtempSync(join(tmpdir(), "reading-box-"));
+  const file = join(dir, "flows-reading-worker.mjs");
+  writeFileSync(file, planted);
+  const W = await import(pathToFileURL(file).href);
+  rmSync(dir, { recursive: true, force: true });
+  const wrong = await boxed(W, PAST);
+  ok(wrong.read.status !== "ready" || wrong.read.held !== "previous", "A PLANTED WRONG BUILD whose box ignores the stored row is caught: it answers " + wrong.read.status + "/" + wrong.read.why);
+
+  const suffix = "|r" + R.READING_VERSION;
+  ok(kept.fingerprint.endsWith(suffix), "(setup) the stored fingerprint ends in " + suffix);
+  f.db.prepare("UPDATE flows_neuron SET fingerprint = ? WHERE scope = 'read:' || ?").run(kept.fingerprint.slice(0, -suffix.length) + "|r" + (R.READING_VERSION - 1), T);
+  const older = await boxed(RW, PAST);
+  ok(older.read.status === "generating" && older.read.why === "assembling" && older.read.held === undefined,
+    "A STORED READING OF AN EARLIER READING_VERSION is not served when the box fires: generating, assembling (" + older.read.status + ", " + older.read.why + ")");
+  f.db.prepare("UPDATE flows_neuron SET fingerprint = ? WHERE scope = 'read:' || ?").run(kept.fingerprint, T);
+  eq((await boxed(RW, PAST)).read.held, "previous", "(the restored row is served again)");
+
+  const behind = await boxed(RW, Date.parse("2026-10-06T15:20:00.000Z"));
+  ok(behind.read.status === "generating" && behind.read.why === "assembling" && behind.read.held === undefined,
+    "A STORED READING TWO SESSIONS BEHIND is not served when the box fires: generating, assembling (" + behind.read.status + ", " + behind.read.why + ")");
+
+  f.db.prepare("DELETE FROM flows_neuron WHERE scope = ?").run("read:" + T);
+  const none = await boxed(RW, PAST);
+  eq(none.read.status, "generating", "NOTHING STORED: the box still answers generating");
+  eq(none.read.why, "assembling", "why assembling");
+  eq(none.read.held, undefined, "nothing held");
+  ok(/still being assembled/.test(none.read.note), "and the note says the dossier is still being assembled: " + none.read.note);
+  eq(none.trips.filter(isReadTrip).length, 1, "with the one read of read:EXMP it always made");
 }
 
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, "EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js: the binding handed to worker.js throws on any other caller (" + aiGuardStats().allowed + " calls)");
