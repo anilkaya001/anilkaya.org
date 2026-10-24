@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "381";
+export const ASSET_VERSION = "382";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -414,6 +414,16 @@ export function aboutPage() {
     ${brandMark(null)}
     <p class="fx-doc-lede">Options-flow research for US equities. Flows reads what the options market did, writes down what it found, and shows how old each figure is and how it was measured.</p>
   </header>
+  <section aria-labelledby="aFilm">
+    <h2 id="aFilm">The walkthrough</h2>
+    <figure class="fx-film">
+      <video controls preload="none" playsinline poster="/assets/img/flows-walkthrough-v2.jpg" width="1920" height="1080">
+        <source src="/assets/img/flows-walkthrough-v2.mp4" type="video/mp4">
+        <track kind="captions" srclang="en" label="English" src="/assets/img/flows-walkthrough-v2.vtt" default>
+      </video>
+      <figcaption>A short walkthrough of real pages rendered from sample data. Figures are invented.</figcaption>
+    </figure>
+  </section>
   <section aria-labelledby="aWhat">
     <h2 id="aWhat">What it does</h2>
     <ul>
