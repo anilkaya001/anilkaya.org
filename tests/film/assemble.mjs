@@ -25,7 +25,7 @@ const SCENES = [
   { scene: 3, caption: 'The Market Floor view lays out flagged options activity across sectors.' },
   { scene: 4, caption: 'The Session river shows how premium moved through the trading day.' },
   { scene: 5, caption: 'A ticker page details one name\u2019s contracts, strikes and expiries.' },
-  { scene: 6, caption: 'The Premium desk ranks the largest premium trades of the session.' },
+  { scene: 6, caption: 'The Premium desk plots yield against risk for each option line.' },
   { scene: 7, caption: 'The Status page shows feed health and job timings for the owner.' },
   { scene: 8, caption: 'The Ask dock opens on Home for questions about the flow.' },
   { scene: 9, card: 'end', seconds: 5, caption: 'Fire and Forget. All figures are sample data and not advice.' }

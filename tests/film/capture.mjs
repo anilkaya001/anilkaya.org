@@ -19,7 +19,8 @@ const LOADERS = {
   'home-fixtures.mjs': () => import('../lib/home-fixtures.mjs'),
   'market-fixtures.mjs': () => import('../lib/market-fixtures.mjs'),
   'glass-world.mjs': () => import('../lib/glass-world.mjs'),
-  'status-world.mjs': () => import('../lib/status-world.mjs')
+  'status-world.mjs': () => import('../lib/status-world.mjs'),
+  'desk-fixtures.mjs': () => import('../desk-fixtures.mjs')
 };
 
 const moduleCache = new Map();
@@ -402,6 +403,21 @@ function sceneDefs() {
       open: async (browser) => {
         const h = await requireHelper([['glass-world.mjs', 'openGlass']], 'Ticker page');
         return h.fn(browser, { kind: 'ticker', viewport: VIEWPORT, reduced: false });
+      },
+      setup: scrollSetup,
+      step: scrollStep
+    },
+    {
+      scene: 6,
+      name: 'premium-desk',
+      seconds: 8,
+      open: async (browser) => {
+        const d = await loadHelper('desk-fixtures.mjs');
+        if (!d || typeof d.openDesk !== 'function') throw new Error('no helper opens the Premium desk');
+        const page = await d.openDesk(browser, { payloads: { NVDA: d.nvdaBefore() }, query: '?t=NVDA', viewport: VIEWPORT });
+        await page.waitForSelector('main', { timeout: 15000 });
+        await page.waitForTimeout(1500);
+        return { page, context: page.context() };
       },
       setup: scrollSetup,
       step: scrollStep
