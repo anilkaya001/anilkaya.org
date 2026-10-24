@@ -131,7 +131,12 @@ export function cacheFake() {
       const ma = /max-age=(\d+)/.exec(response.headers.get("Cache-Control") || "");
       store.set(key, { body: await response.text(), status: response.status, headers: [...response.headers], expires: Date.now() + (ma ? Number(ma[1]) * 1000 : 0) });
     },
+    async delete(request) {
+      const key = typeof request === "string" ? request : request.url;
+      return store.delete(key);
+    },
   };
+
   globalThis.caches = { default: cache };
   return { store, restore: () => { if (real === undefined) delete globalThis.caches; else globalThis.caches = real; }, clear: () => store.clear() };
 }

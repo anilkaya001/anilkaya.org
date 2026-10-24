@@ -725,10 +725,14 @@ reading's 1.5 s box would always fire first, and the reading would stay
 keeps the reading at `generating` for that name, because each read re-awaits
 it for 2.5 s, longer than the 1.5 s box; a source that answers in 20 to 30 s
 is therefore not stored here, where an unbounded call would eventually have
-been. The cure is a short negative marker that stops `planFetches` from
-re-awaiting a source that just failed transiently, and serving the stored
-reading when the box fires; both are assigned to P0-29 (the reading's
-held-previous path), not to this row. Slow kinds
+been. The cure for the re-await is a 60 second negative marker in the Cache
+API (`markUrl`, `MARK_TTL_S`), written when a source fails transiently
+(a timeout, a 5xx or a network failure; a 429 or a plan refusal writes none)
+and cleared by the next success: `planFetches` skips a marked source as
+`failed-recently`, its packet reads `pending` with reason `failed`, and the
+read neither calls nor awaits it. A read that starts before the aborted source
+has failed still re-calls it once, and serving the stored reading when the box
+fires stays with P0-29's held-previous path. Slow kinds
 (identity and fundamentals 24 h, positioning 24 h, earnings 12 h, analysts 6 h)
 live in `flows_dossier_cache (ticker, kind)`, one row of at most 8 KiB each,
 written once per refresh. News (5 min), the dark-pool levels (60 s) and the
