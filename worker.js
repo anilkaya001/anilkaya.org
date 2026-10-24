@@ -46,6 +46,7 @@ import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-cal
 import { flowsOpsRows } from "./server/routes/flows-ops.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
+import { flowsFilmRows } from "./server/routes/flows-film.js";
 import { flowsRtRows } from "./server/routes/flows-rt.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
@@ -2922,6 +2923,7 @@ flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (e
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
   } }),
+flowsFilmRows(),
 flowsRtRows({ serveRt: rtServe }));
 
 const flowsNotFound = () => new Response(notFoundPage(), { status: 404, headers: { "Content-Type": "text/html; charset=utf-8" } });

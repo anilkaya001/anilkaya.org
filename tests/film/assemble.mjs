@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -474,7 +474,7 @@ export async function assembleFilm({ framesDir, outDir, log = defaultLog } = {})
 
     const captured = items.filter((i) => !i.card);
     const posterItem = captured.find((i) => i.scene === 2) || captured[0] || items[0];
-    const posterIndex = posterItem.scene === 2 ? Math.min(40, posterItem.count) : Math.min(40, posterItem.count);
+    const posterIndex = Math.min(40, posterItem.count);
     const posterFrame = path.join(posterItem.dir, `${String(posterIndex).padStart(5, '0')}${posterItem.ext}`);
     await run(FFMPEG, [
       '-hide_banner', '-loglevel', 'error', '-y',
