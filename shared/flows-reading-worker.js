@@ -5,9 +5,10 @@ import {
   READING_VERSION, READING_MAX_TOKENS, READING_TEMPERATURE, heldTags, readingFallback, readingShape, absentShape, hasSubstance, renderForReading, promptForReading,
   parseReading, vetReading, askPick, ASK_QUOTE_RULE, SECTION_CAPS, readIndex,
 } from "./flows-reading.js";
-import { KINDS } from "./flows-dossier.js";
 import { emitFailure } from "./flows-log.js";
+import { KINDS } from "./flows-dossier.js";
 import { sessionsBetween } from "./flows-cross.js";
+import { expectedNightlySession } from "./flows-freshness.js";
 import { SCREEN_LINES } from "./flows-neuron-screen.js";
 
 export const READ_SCOPE = "read:";
@@ -231,6 +232,26 @@ export function heldReading(kept, dossier, tier, ticker, tags) {
   return { ...kept, shape: { ...kept.shape, sections, tags: keptTags }, note: heldNote(ticker, sameDossier) };
 }
 
+function boxedNote(ticker) {
+  return "This reading was written for an earlier dossier of " + ticker + " and is shown while the current dossier is still being assembled; a reading of the current one follows it once it passes the checks.";
+}
+
+function boxedReading(stored, now, ticker) {
+  if (!good(stored) || !stored.fingerprint.endsWith("|r" + READING_VERSION)) return null;
+  const behind = sessionsBehind(stored.shape.session || null, expectedNightlySession(now));
+  if (behind === null || behind >= SCREEN_LINES.EXPIRED_SESSIONS) return null;
+  const cap = (c) => (isObj(c) && isNum(c.grade) && c.grade > 1 ? { ...c, grade: 1 } : c);
+  const item = (it) => {
+    if (!isObj(it) || !Array.isArray(it.cites)) return it;
+    const { tag, ...rest } = it;
+    return { ...rest, cites: it.cites.map(cap) };
+  };
+  const list = (v) => (Array.isArray(v) ? v.map(item) : []);
+  const s = isObj(stored.shape.sections) ? stored.shape.sections : {};
+  const sections = { ...s, identity: item(s.identity || null), now: item(s.now || null), drivers: list(s.drivers), tensions: list(s.tensions), watch: list(s.watch) };
+  return readyFrom({ ...stored, shape: { ...stored.shape, sections, tags: [] } }, { held: "previous", refreshing: true, note: boxedNote(ticker) });
+}
+
 function fallbackShape({ dossier, tags, env, status, why, describe, guard, note, retryAfterS }) {
   const sections = readingFallback(dossier, tags);
   const shape = readingShape({ dossier, tags, sections, chosen: sections.tags, status, generated: false, provenance: fallbackProvenance(why, describe, guard), note: note || null, why });
@@ -284,6 +305,8 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
     if (raced === BOXED) {
       const keep = assembling.catch(() => {});
       if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(keep);
+      const boxed = boxedReading(stored, now, ticker);
+      if (boxed) return boxed;
       return absentShape(ticker, { status: "generating", why: "assembling", note: "The dossier for " + ticker + " is still being assembled.",
         provenance: "The dossier is being assembled from what the nightly, the live layer and the vendor hold; the reading follows it." });
     }
