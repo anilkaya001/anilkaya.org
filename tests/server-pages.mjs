@@ -13,8 +13,8 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
-eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the fifteen gated pages in their old order with the owner-gated moves page before unusual");
+const SLUGS = ["", "long", "short", "watch", "market", "network", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
+eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network pop-out after Market and the owner-gated moves page before unusual");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
 for (const slug of SLUGS) {
@@ -65,6 +65,7 @@ function oldChain(path, rc, d) {
       "/flows/short/": (u) => FLOWS_PAGES.sidePage({ username: u, side: "short" }),
       "/flows/watch/": (u) => FLOWS_PAGES.watchPage({ username: u }),
       "/flows/market/": (u, summary, owner) => FLOWS_PAGES.marketPage({ username: u, owner }),
+      "/flows/network/": (u) => FLOWS_PAGES.networkPage({ username: u }),
       "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
       "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
       "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
@@ -90,7 +91,7 @@ function oldChain(path, rc, d) {
     }
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
         || path === "/flows/watch"
-        || path === "/flows/market" || path === "/flows/ticker"
+        || path === "/flows/market" || path === "/flows/network" || path === "/flows/ticker"
         || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/events"
         || path === "/flows/political"
         || path === "/flows/strategy"
@@ -206,7 +207,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
-  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "desk", "strategy", "ticker", "moves", "unusual", "events", "political", "status"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
     const env = { FLOWS_MOVES: "on" };
@@ -238,7 +239,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|eventsPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|eventsPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

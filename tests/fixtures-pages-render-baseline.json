@@ -366,5 +366,28 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0
+ },
+ "network@320": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "network@390": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "network@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
  }
 }
