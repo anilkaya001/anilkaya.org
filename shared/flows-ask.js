@@ -26,8 +26,11 @@ export function numeralsIn(text) {
   return text.replace(/−/g, "-").match(new RegExp(NUMERAL_SOURCE, "g")) || [];
 }
 
-const FORECAST = /\b(?:will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds)\b/i;
-const MODALS = /\b(?:would|could(?!\s+not\b|n't)|might)\b/i;
+export const FORECAST_ALT = "will|should|shall|expect\\w*|likely|unlikely|going to|gonna|forecast\\w*|predict\\w*|anticipat\\w*|forese\\w*|poised|target\\w*|(?<!at )odds|imminent|inevitabl\\w*|ought to|due for|in store|on (?:course|pace) to|(?:is|are) about to|'s about to|'re about to|\\w+'ll|won't|shan't";
+export const MODAL_ALT = "would|could(?!\\s+not\\b|n't)|might";
+export const guardText = (v) => (typeof v === "string" ? v.normalize("NFKC").replace(/[\u2018\u2019\u02bc\u00b4`]/g, "'") : "");
+const FORECAST = new RegExp("\\b(?:" + FORECAST_ALT + ")\\b", "i");
+const MODALS = new RegExp("\\b(?:" + MODAL_ALT + ")\\b", "i");
 const MODAL_MAY = /\bmay\b/;
 
 const LEVEL_MARK = /\b(call[- ]wall|put[- ]wall|max(?:imum)?[- ]pain|zero[- ]gamma(?: level)?|strike[- ]sum crossing|(?:gamma )?flip|spot)\b/gi;
@@ -1196,7 +1199,7 @@ function whitelisted(token, allowSmall) {
 export function guardAnswer(answer, picked, options) {
   const o = options || {};
   const allowSmall = o.smallIntegers === undefined ? true : o.smallIntegers === true;
-  const text = typeof answer === "string" ? answer : "";
+  const text = guardText(answer);
   const facts = Array.isArray(picked) ? picked : [];
 
   if (text.trim() === "") {
