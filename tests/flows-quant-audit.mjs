@@ -612,12 +612,19 @@ const b76 = (F, D, K, sig, T, type) => {
       const gap = Math.max(...g.spot.map((x, i) => Math.abs(g.pnl[i][1][0] - g.pnl[i][1][last])));
       note(gap > 1, `${exp}: the first column is today's value, not the expiry value (largest gap ${gap.toFixed(2)})`);
     }
+    const { front } = gridOf(E, "2026-10-02");
+    for (const T of [0, -0.001, NaN, null]) {
+      let got;
+      try { got = E.scenarioGrid([], {}, 0, S0, { dte: 3, T, slice: front.slice }, null); } catch { got = "threw"; }
+      note(got === null, `a front expiry with no time left (${String(T)}) has no scenario grid rather than seven copies of spot`);
+    }
     return bad;
   };
   eq(gridFailures(ENGINE), [], "the scenario grid of an expiry today has seven distinct spot rows, a now column and an expiry column, and an expiry two or more days out keeps its thirds");
   for (const [why, transforms] of [
     ["the spread taken from the whole calendar days left", [["const sd = atmVol * Math.sqrt(front.T);", "const sd = atmVol * Math.sqrt(dte / 365);"]]],
     ["the columns not deduplicated", [["const days = raw.filter((d, i) => i === 0 || i === raw.length - 1 || (d > 0 && d < dte && d !== raw[i - 1]));", "const days = raw;"]]],
+    ["no guard on a front expiry with no time left", [["if (!(front.T > 0) || !fin(atmVol)) return null;", ""]]],
     ["the last column read as expiry only when the day count reaches it", [["const tt = j === last ? front.T : Math.min(front.T, d / 365);", "const tt = d >= dte ? front.T : Math.min(front.T, d / 365);"]]],
   ]) {
     const mutated = await mutantEngine(transforms);

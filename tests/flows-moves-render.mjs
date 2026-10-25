@@ -686,6 +686,8 @@ const rungFailures = (src) => {
     const z = Math.log1p(chg) / sig;
     if (!(Math.abs((it.z === null ? NaN : it.z) - z) < 1e-12)) bad.push(`its typical days are ${it.z}, not ${z}`);
   }
+  const total = X.sigRun([{ t: "AAA", chg: -1, sig: 0.02, f2: 11, f3: 5, ed: null }], 0.1).items[0];
+  if (total.state !== "nomove" || total.p !== null || total.z !== null) bad.push(`a change of -100% is state ${total.state}, not a move that cannot be tested`);
   return bad;
 };
 eq(rungFailures(JS), [], "the rung of a move, the test's rung and its typical days are read off the log return, the way the nightly counts are");
@@ -693,6 +695,7 @@ for (const [why, from, to] of [
   ["the rung read off the simple change", "const level = Math.abs(lm) >= 3 * x.sig ? 3 : Math.abs(lm) >= 2 * x.sig ? 2 : 0;", "const level = Math.abs(x.chg) >= 3 * x.sig ? 3 : Math.abs(x.chg) >= 2 * x.sig ? 2 : 0;"],
   ["the test's rung read off the simple change", "const level = Math.abs(lm) >= 3 * sig ? 3 : 2;", "const level = Math.abs(chg) >= 3 * sig ? 3 : 2;"],
   ["the test's typical days from the simple change", "const z = lm / sig;", "const z = chg / sig;"],
+  ["a total loss said to have no typical day", 'state: "nomove", z: null', 'state: "noscale", z: null'],
 ]) {
   ok(JS.split(from).length === 2, `the planted build "${why}" targets one line`);
   ok(rungFailures(JS.replace(from, to)).length > 0, `the rung table fails the planted build "${why}"`);

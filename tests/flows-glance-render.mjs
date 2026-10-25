@@ -123,7 +123,7 @@ const Hs = pm.sessions;
 const qUp = Math.log(pm.impliedHigh / S), qDn = Math.log(S / pm.impliedLow), pUp = Math.log(pm.realizedHigh / S), pDn = Math.log(S / pm.realizedLow);
 const PAST = X.earnings.events.map((r) => r[3]);
 const dailyP = (pUp * pUp / Hs + pDn * pDn / Hs) / 2;
-const P_JUMP = Math.sqrt(PAST.reduce((a, v) => a + v * v, 0) / PAST.length - dailyP);
+const P_JUMP = Math.sqrt(PAST.reduce((a, v) => a + Math.log1p(v) ** 2, 0) / PAST.length - dailyP);
 const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
 
 {
@@ -574,6 +574,7 @@ async function coreFailures(src) {
           return out;
         })(),
         pairP: (() => { const pp = m.p.filter((o) => o.h === m.event.h); return Math.log(pp[1].up / m.S) ** 2 - Math.log(pp[0].up / m.S) ** 2; })(),
+        pTiny: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.map((r) => [r[0], r[1], r[2], 0.001, r[4], r[5], r[6], r[7]]); const e = M(card, "1M", { cardX: y }); return { p: e.event.p, why: e.why.eventP, said: M.describe(e) }; })(),
         pFew: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.slice(0, 3); return M(card, "1M", { cardX: y }).event.p; })(),
         qAlt: (() => { const y = JSON.parse(JSON.stringify(x)); delete y.term.eventMove; return M(card, "1M", { cardX: y }).event.q; })(),
         h5: m.q.find((o) => o.h === 2), h14: m.q.find((o) => o.h === 6), pair: m.q.filter((o) => o.h === m.event.h), n: m.q.length, gap: ys.slice(1).map((y, i) => y - ys[i]),
@@ -589,6 +590,7 @@ async function coreFailures(src) {
     note(r.pair.length === 2 && r.n === 23 && Math.abs(Math.log(r.pair[1].up / S) ** 2 - Math.log(r.pair[0].up / S) ** 2 - 0.042 ** 2) < 1e-9, "the report step is missing or the wrong size");
     note(Math.abs(r.pairP - P_JUMP * P_JUMP) < 1e-9, "the real-world report step is not the root mean square of the past moves");
     note(r.pFew === null, "three past reports give the real-world band a step");
+    note(r.pTiny.p === null && /no more than an ordinary day/.test(r.pTiny.why || "") && r.pTiny.said.includes(r.pTiny.why), "reports that moved less than an ordinary day give no step, and the chart's description says why");
     note(Math.abs(r.qAlt - Q_FALLBACK) < 1e-12, "the quoted expected move is not scaled to a standard deviation");
     note(r.clusterOverlap >= 12 - 1e-6 && r.gap.every((g) => g >= 12 - 1e-6), "level labels overlap");
     const gmax = Math.max(...r.mg);
@@ -627,8 +629,10 @@ const MUTANTS = [
   ["a calendar that does not reach back to the card's close", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = cal.filter((x) => x > from);"],
   ["forward dates counted over weekends only", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = [];"],
   ["the calendar read from the wrong element", 'document.getElementById("ftCal")', 'document.getElementById("ftCalx")'],
-  ["the median absolute move taken as a standard deviation", "return { sd: Math.sqrt(Math.max(0, second - daily)), n: rows.length, why: null };", "return { sd: Math.abs(E.medianAbsMove), n: rows.length, why: null };"],
-  ["the ordinary session left in the report move", "const daily = pb ? (pb.dUp + pb.dDn) / 2 : 0;", "const daily = 0;"],
+  ["the median absolute move taken as a standard deviation", "return { sd: Math.sqrt(extra), n: rows.length, why: null };", "return { sd: Math.abs(E.medianAbsMove), n: rows.length, why: null };"],
+  ["the ordinary session left in the report move", "const extra = Math.max(0, second - (pb.dUp + pb.dDn) / 2);", "const extra = Math.max(0, second);"],
+  ["simple returns squared where the band is on log returns", "Math.log1p(r[3]) ** 2", "r[3] * r[3]"],
+  ["a zero step drawn for reports quieter than a day", "if (!(extra > 0)) return { sd: null, n: rows.length, why: \"Past reports moved no more than an ordinary day, so the real-world band takes no step.\" };", ""],
   ["the mean absolute expected move taken as a standard deviation", "return em === null ? null : em * SD_OVER_MEAN_ABS;", "return em === null ? null : em;"],
   ["the quoted move ahead of the term structure's", "const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;\n    if (sd !== null) return sd;", "const sd = null;"],
   ["a step from fewer than four reports", "if (rows.length < MIN_REPORTS) return", "if (rows.length < 1) return"],

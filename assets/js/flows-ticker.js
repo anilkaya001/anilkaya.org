@@ -24,7 +24,7 @@
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const K = (k) => (num(k) === null ? DASH : Number.isInteger(k) ? String(k) : Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? k.toFixed(1) : k.toFixed(2));
   const ratioP = (v, dp = 0) => (num(v) === null ? DASH : (v * 100).toFixed(dp) + "%");
-  const popText = (v) => (num(v) === null ? DASH : v >= 0.995 ? ">99%" : v < 0.005 ? "<1%" : Math.round(v * 100) + "%");
+  const popText = (v) => (num(v) === null || v < 0 || v > 1 ? DASH : v >= 0.995 ? ">99%" : v < 0.005 ? "<1%" : Math.round(v * 100) + "%");
   const sentence = (t) => { const x = str(t); return x ? cap(x) : null; };
   const firstSentence = (t) => (typeof t === "string" ? (t.match(/^.*?[.!?](\s|$)/) || [t])[0].trim() : "");
   function headline(t) {

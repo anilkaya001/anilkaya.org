@@ -428,7 +428,7 @@
         info: () => ({
           title: "Flow bias", state: null,
           lead: ptSilence ? silenceSaid(ptSilence, "the dollar-weighted tilt")
-            : "Net premium over the sum of each name's absolute net premium across the screened universe, weighted by dollars.",
+            : "Net premium over the sum of each name's absolute net premium, across the screened universe.",
           facts: [
             ["By dollars", pct(pt, 1)],
             ["Names equally weighted", bt !== null ? pct(bt, 1) : btSilence ? btSilence[1] : DASH],

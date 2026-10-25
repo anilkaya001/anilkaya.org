@@ -1808,7 +1808,7 @@ try {
     const popBuild = (line) => new Function("num", "DASH", line + "\nreturn popText;")((v) => (typeof v === "number" && Number.isFinite(v) ? v : null), "\u2014");
     const popFails = (line) => {
       const f = popBuild(line);
-      const table = [[1, ">99%"], [0.996, ">99%"], [0.995, ">99%"], [0.9949, "99%"], [0.5, "50%"], [0.004, "<1%"], [0.005, "1%"], [0, "<1%"], [NaN, "\u2014"], [null, "\u2014"]];
+      const table = [[1, ">99%"], [0.996, ">99%"], [0.995, ">99%"], [0.9949, "99%"], [0.5, "50%"], [0.004, "<1%"], [0.005, "1%"], [0, "<1%"], [NaN, "\u2014"], [null, "\u2014"], [1.2, "\u2014"], [-0.1, "\u2014"]];
       return table.filter(([v, want]) => f(v) !== want);
     };
     eq(popFails(popLine).length, 0, "a chance of profit of 0.995 or more reads >99% and under 0.005 reads <1%: a model probability is never printed as certain or impossible");
@@ -1816,6 +1816,7 @@ try {
       ["the plain rounding it replaced", "v >= 0.995 ? \">99%\" : v < 0.005 ? \"<1%\" : Math.round(v * 100) + \"%\"", "Math.round(v * 100) + \"%\""],
       ["the upper edge at 0.999", "v >= 0.995 ?", "v >= 0.999 ?"],
       ["the lower edge at 0.001", "v < 0.005 ?", "v < 0.001 ?"],
+      ["a probability above one printed", "|| v < 0 || v > 1 ?", "?"],
     ]) {
       ok(popLine.includes(from), `the planted build "${why}" targets text that exists`);
       ok(popFails(popLine.replace(from, to)).length > 0, `and the table fails the planted build "${why}"`);

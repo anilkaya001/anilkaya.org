@@ -673,6 +673,7 @@ export function scenarioGrid(legs, vctx, cost, S, front, levels) {
   const raw = [0, Math.round(dte / 3), Math.round(2 * dte / 3), dte];
   const days = raw.filter((d, i) => i === 0 || i === raw.length - 1 || (d > 0 && d < dte && d !== raw[i - 1]));
   const atmVol = sliceVolK(front.slice, 0);
+  if (!(front.T > 0) || !fin(atmVol)) return null;
   const sd = atmVol * Math.sqrt(front.T);
   const spots = ENGINE_LINES.GRID_Z.map((z) => S * Math.exp(z * sd));
   const lo = spots[0], hi = spots[spots.length - 1];

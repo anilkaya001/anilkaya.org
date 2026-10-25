@@ -43,7 +43,7 @@
   function often(r) {
     const sig = r.sig;
     if (sig === null || !(sig > 0)) return { why: "scale" };
-    if (!(r.chg > -1)) return { why: "scale" };
+    if (typeof r.chg !== "number" || !Number.isFinite(r.chg) || !(r.chg > -1)) return { why: "scale" };
     const lm = Math.abs(Math.log1p(r.chg));
     const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;
     if (!level) return { why: "under" };

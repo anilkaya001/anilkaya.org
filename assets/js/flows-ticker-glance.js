@@ -157,11 +157,13 @@
     return em === null ? null : em * SD_OVER_MEAN_ABS;
   }
   function eventSdP(E, pb) {
-    const rows = E && Array.isArray(E.events) ? E.events.filter((r) => Array.isArray(r) && isoOk(r[0]) && num(r[3]) !== null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-KEEP_REPORTS) : [];
+    if (!pb) return { sd: null, n: 0, why: null };
+    const rows = E && Array.isArray(E.events) ? E.events.filter((r) => Array.isArray(r) && isoOk(r[0]) && num(r[3]) !== null && r[3] > -1).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-KEEP_REPORTS) : [];
     if (rows.length < MIN_REPORTS) return { sd: null, n: rows.length, why: "Fewer than " + MIN_REPORTS + " past reports carry a one-day move, so the real-world band takes no step." };
-    const second = rows.reduce((a, r) => a + r[3] * r[3], 0) / rows.length;
-    const daily = pb ? (pb.dUp + pb.dDn) / 2 : 0;
-    return { sd: Math.sqrt(Math.max(0, second - daily)), n: rows.length, why: null };
+    const second = rows.reduce((a, r) => a + Math.log1p(r[3]) ** 2, 0) / rows.length;
+    const extra = Math.max(0, second - (pb.dUp + pb.dDn) / 2);
+    if (!(extra > 0)) return { sd: null, n: rows.length, why: "Past reports moved no more than an ordinary day, so the real-world band takes no step." };
+    return { sd: Math.sqrt(extra), n: rows.length, why: null };
   }
   function coneOf(S, b, jump, tE) {
     const J = num(jump) === null ? 0 : jump;
@@ -455,7 +457,7 @@
     else out.push(T + " price over the last " + m.N + " sessions, closing at " + F.px(m.S) + " on " + F.day(m.hist[m.hist.length - 1].d) + ", and the next " + FWD + " sessions.");
     out.push(m.q ? "Options price a range of plus or minus " + F.pct(m.qEnd, 1) + " by session " + FWD + "." : "Options cone: " + m.why.q);
     out.push(m.p ? "The real-world model gives plus or minus " + F.pct(m.pEnd, 1) + "." : "Real-world cone: " + (m.why.p || m.why.q));
-    out.push(m.event ? "A report on " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") + " steps both bands" + (m.event.q !== null ? ": options price a one-sigma report move of " + F.pct(m.event.q, 1) : "") + (m.event.p !== null ? ", the root mean square of the last " + m.event.n + " one-day report moves is " + F.pct(m.event.p, 1) : "") + "." : m.why.event);
+    out.push(m.event ? "A report on " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") + " steps both bands" + (m.event.q !== null ? ": options price a one-sigma report move of " + F.pct(m.event.q, 1) : "") + (m.event.p !== null ? ", past reports moved plus or minus " + F.pct(m.event.p, 1) + " beyond an ordinary day (last " + m.event.n + " reports)" : "") + "." + (m.event.p === null && m.why.eventP ? " " + m.why.eventP : "") : m.why.event);
     const lv = m.levels.map((l) => LEVEL_NAMES[l.kind] + " " + F.px(l.px));
     out.push(lv.length ? "Levels: " + lv.join(", ") + "." : "No levels near spot on this card.");
     if (m.xp.rows.length) out.push(railDescribe(m, m.xp.rows.find((r) => r.expiry === m.sel) || null) + " Click an expiry tick under the forward axis, or focus one and use the arrow keys, to move the cursor.");

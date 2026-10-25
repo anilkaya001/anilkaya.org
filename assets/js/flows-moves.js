@@ -20,7 +20,7 @@
   const SIG_Q = 0.1, SIG_MIN_Z = 2;
   const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
   const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
-  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
@@ -76,7 +76,7 @@
     const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
     if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
     const lm = logMove(chg);
-    if (lm === null) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
+    if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
     const z = lm / sig;
     if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
     if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
