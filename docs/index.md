@@ -2241,7 +2241,7 @@ The generator of the four fixtures that were once the first rows of one Actions 
 
 | File | Exports | Suites |
 |---|---|---|
-| `tests/gen-probe-fixtures.py` |  |  |
+| `tests/gen-probe-fixtures.py` |  | flows-probe |
 
 ### `tests/gen-dossier-fixtures.py`, `tests/fixtures-dossier-vendor.json`
 
