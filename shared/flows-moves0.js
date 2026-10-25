@@ -14,7 +14,7 @@ export const LINE = "A ranking, not a test: no error rate measured.";
 
 export const CAPTION = "IV as of the previous close.";
 
-export const APART = "Earnings within 30 days: event not separated.";
+export const APART = "Earnings within 21 sessions: event not separated.";
 
 export const GRADE_NOTE = "From 30-day IV; no surface.";
 
@@ -34,7 +34,7 @@ export const MAP_EQUAL_LINE = "Every tile has the same area; colour is the move 
 
 export const SECTORS_LINE = "Each sector's median move, and its names beyond 2 IV-days.";
 
-export const KEY_EVENT = "Dashed outline: earnings within 30 days, event not separated.";
+export const KEY_EVENT = "Dashed outline: earnings within 21 sessions, event not separated.";
 
 export const MEDIAN_NOTE = "Median is signed, in IV-days.";
 
@@ -42,7 +42,7 @@ export const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat,
 
 export const SHARE_NOTE = "Share is that count over the sector's names.";
 
-export const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
+export const LEFT_OUT_NOTE = "Names reporting within 21 sessions are left out of every row.";
 
 export const X_LINE = "Across: the move in the name's own typical days.";
 

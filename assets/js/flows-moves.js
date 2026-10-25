@@ -12,7 +12,7 @@
   const PINS = ["SPY", "QQQ"];
   const LINE = "A ranking, not a test: no error rate measured.";
   const CAPTION = "IV as of the previous close.";
-  const APART = "Earnings within 30 days: event not separated.";
+  const APART = "Earnings within 21 sessions: event not separated.";
   const X_LINE = "Across: the move in the name's own typical days.";
   const Y_LINE = "Up: the move as a multiple of the implied day.";
   const SIZE_LINE = "Dot area is market cap; the smallest dot when unknown.";
@@ -20,7 +20,7 @@
   const SIG_Q = 0.1, SIG_MIN_Z = 2;
   const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
   const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
-  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 21 sessions: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
@@ -269,7 +269,7 @@
       const x = d.x, dir = dirOf(x.m), isI = inter.has(x.t) && d.on;
       const R0 = dir === "fl" ? d.r : d.r * TRI;
       if (isI) nInter++;
-      const label = x.t + ", " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + ", " + signed(x.z) + " typical days, " + x.a.toFixed(1) + " times implied" + (x.event ? ", earnings within 30 days" : "");
+      const label = x.t + ", " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + ", " + signed(x.z) + " typical days, " + x.a.toFixed(1) + " times implied" + (x.event ? ", earnings within 21 sessions" : "");
       if (x.event) s += '<circle class="ring' + (d.on ? "" : " off") + '" data-ring="' + esc(x.t) + '" cx="' + d.px.toFixed(2) + '" cy="' + d.py.toFixed(2) + '" r="' + (R0 + 3).toFixed(2) + '" aria-hidden="true"/>';
       if (isI) s += '<g class="hit" data-t="' + esc(x.t) + '" role="button" tabindex="-1" aria-label="' + esc(label) + '"><circle class="hz" cx="' + d.px.toFixed(2) + '" cy="' + d.py.toFixed(2) + '" r="22.5"/>';
       s += '<path class="pt ' + dir + (d.on ? (isI ? "" : " bg") : " off") + '" data-t="' + esc(x.t) + '" data-r="' + d.r.toFixed(3) + '" data-x="' + d.px.toFixed(2) + '" data-y="' + d.py.toFixed(2) + '" transform="translate(' + d.px.toFixed(2) + " " + d.py.toFixed(2) + ')" d="' + markerPath(dir, d.r) + '"' + (isI ? "" : ' aria-hidden="true"') + (S.sel === x.t ? " data-sel" : "") + "/>";
@@ -297,7 +297,7 @@
     if (off > 0) notes.push(plural(off, "name has", "names have") + " no typical day and " + (off === 1 ? "is" : "are") + " listed only.");
     if (clipped > 0) notes.push(plural(clipped, "name is", "names are") + " beyond the axis, drawn at the edge.");
     $("mvFnote").textContent = [X_LINE, Y_LINE, M.capMax > 0 ? SIZE_LINE : "No market cap is published, so every dot is the smallest size.", REF_LINE, ...notes, M.sg.m ? M.sg.flagged + " of " + M.sg.tested + " tested " + (M.sg.flagged === 1 ? "name is" : "names are") + " beyond the usual after correction." : SIG_FOOT_NONE].join(" ");
-    $("mvLegend").innerHTML = '<span><i class="u">▲</i>up</span><span><i class="d">▼</i>down</span><span><i>◆</i>flat</span><span><i>◌</i>ring: earnings within 30 days</span><span><i>■</i>pinned index fund</span>';
+    $("mvLegend").innerHTML = '<span><i class="u">▲</i>up</span><span><i class="d">▼</i>down</span><span><i>◆</i>flat</span><span><i>◌</i>ring: earnings within 21 sessions</span><span><i>■</i>pinned index fund</span>';
   }
 
   function paintLabels() {
@@ -352,7 +352,7 @@
     const apartBox = $("mvApart");
     const nApart = Math.min(3, lt.apart.length);
     apartBox.style.height = (nApart ? nApart * rh : 40) + "px";
-    apartBox.innerHTML = nApart ? lt.apart.slice(0, nApart).map((x, i) => rowHtml(x, i)).join("") : '<p class="mv-empty">' + (S.earn || !M.all.some((x) => x.event) ? "No name matches that reports within 30 days." : "No name with a move matches the filters.") + "</p>";
+    apartBox.innerHTML = nApart ? lt.apart.slice(0, nApart).map((x, i) => rowHtml(x, i)).join("") : '<p class="mv-empty">' + (S.earn || !M.all.some((x) => x.event) ? "No name matches that reports within 21 sessions." : "No name with a move matches the filters.") + "</p>";
     $("mvApartNote").textContent = lt.apart.length ? Math.min(3, lt.apart.length) + " of " + lt.apart.length : "";
     const nowBox = $("mvNow");
     const room = Math.floor(nowBox.clientHeight / rh);
@@ -576,8 +576,8 @@
       "Across: the move in the name's own typical days. A typical day is a robust one-day scale from the last 252 sessions.",
       "Up: the move as a multiple of the implied day. The implied day is prior-close 30-day IV over the square root of 252.",
       "IV-days is the move divided by the implied day. The lists rank by it.",
-      "Dot area is market cap. A triangle points the way the name moved. A ring marks earnings within 30 days.",
-      "Names reporting within 30 days are ranked apart, because the event is not separated.",
+      "Dot area is market cap. A triangle points the way the name moved. A ring marks earnings within 21 sessions.",
+      "Names reporting within 21 sessions are ranked apart, because the event is not separated.",
       "How often counts days in the last year beyond that many typical days. It is never a model probability.",
       REF_LINE,
       ...SIG_INFO_SENTENCES,

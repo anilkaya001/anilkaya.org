@@ -138,7 +138,7 @@
   }
 
   const IV_EVENT = 21;
-  const IV_APART = "Earnings within 30 days: event not separated.";
+  const IV_APART = "Earnings within 21 sessions: event not separated.";
   const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
 

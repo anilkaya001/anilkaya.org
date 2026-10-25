@@ -121,7 +121,7 @@
   const dirWord = (p) => (p.dir > 0 ? "up" : p.dir < 0 ? "down" : "flat");
   const glyphOf = (p) => (p.dir > 0 ? "▲" : p.dir < 0 ? "▼" : "–");
 
-  const APART = "Earnings within 30 days: event not separated.";
+  const APART = "Earnings within 21 sessions: event not separated.";
   const WHY = {
     event: APART,
     scale: "No typical-day move is published for this name.",
@@ -367,7 +367,7 @@
     const a = md.absent, parts = [];
     if (a.scale.length) parts.push("no typical-day move published: " + a.scale.join(", "));
     if (a.under.length) parts.push("under 2 typical days, below the lowest count published: " + a.under.join(", "));
-    if (a.event.length) parts.push("earnings within 30 days, event not separated: " + a.event.join(", "));
+    if (a.event.length) parts.push("earnings within 21 sessions, event not separated: " + a.event.join(", "));
     return "Drawn here: " + md.plotted + " of " + md.prisms.length + ". Shown in IV-days only" + (parts.length ? ", not here: " + parts.join("; ") : "") + ".";
   }
 

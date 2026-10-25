@@ -360,7 +360,7 @@ async function exercise(browser, js, early) {
       P(area === 0, "every triangle has the area of its circle (" + area + " off)");
       P(badShape === 0, "direction is the class and the shape of the marker (" + badShape + " off)");
       P(badMid === 0, "markers are centred on their data position (" + badMid + " off)");
-      P(badRing === 0, "a ring surrounds exactly the names reporting within 30 days (" + badRing + " off)");
+      P(badRing === 0, "a ring surrounds exactly the names reporting within 21 sessions (" + badRing + " off)");
       const edge = d.pts.find((p) => p.t === "EDGE");
       P(Math.abs(edge.x - (d.l + d.w)) < 0.01 && Math.abs(edge.y - d.t) < 0.01, "a name beyond the axis is drawn at the edge, not off the plot");
       const pins = d.pts.filter((p) => p.cls.includes("pin"));
@@ -396,7 +396,7 @@ async function exercise(browser, js, early) {
         P(full === null || r.label.includes(full), r.t + " spoken label carries the sentence");
       }
       const ap = await listRows(page, "mvApart");
-      same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 30 days are ranked apart, three of them");
+      same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 21 sessions are ranked apart, three of them");
       P(ap.every((r) => r.how === ""), "an earnings name carries no rarity chip");
       P((await page.locator("#mvNowNote").innerText()) === now.length + " of " + ranked.length && (await page.locator("#mvApartNote").innerText()) === "3 of " + apart.length, "both notes count");
       P(!(await page.locator("#mvMore").isHidden()), "Show more is offered when the list is longer than the room");
