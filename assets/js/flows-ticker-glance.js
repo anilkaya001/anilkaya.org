@@ -147,6 +147,22 @@
     const up = Math.log(hi / S), dn = Math.log(S / lo);
     return { dUp: up * up / Hs, dDn: dn * dn / Hs, up, dn };
   }
+  const SD_OVER_MEAN_ABS = Math.sqrt(Math.PI / 2);
+  const MIN_REPORTS = 4;
+  const KEEP_REPORTS = 12;
+  function eventSdQ(E, term) {
+    const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;
+    if (sd !== null) return sd;
+    const em = E && E.impliedNext && num(E.impliedNext.em) !== null && E.impliedNext.em > 0 ? E.impliedNext.em : null;
+    return em === null ? null : em * SD_OVER_MEAN_ABS;
+  }
+  function eventSdP(E, pb) {
+    const rows = E && Array.isArray(E.events) ? E.events.filter((r) => Array.isArray(r) && isoOk(r[0]) && num(r[3]) !== null).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-KEEP_REPORTS) : [];
+    if (rows.length < MIN_REPORTS) return { sd: null, n: rows.length, why: "Fewer than " + MIN_REPORTS + " past reports carry a one-day move, so the real-world band takes no step." };
+    const second = rows.reduce((a, r) => a + r[3] * r[3], 0) / rows.length;
+    const daily = pb ? (pb.dUp + pb.dDn) / 2 : 0;
+    return { sd: Math.sqrt(Math.max(0, second - daily)), n: rows.length, why: null };
+  }
   function coneOf(S, b, jump, tE) {
     const J = num(jump) === null ? 0 : jump;
     return stepsFor(tE).map(([hh, ev]) => {
@@ -295,12 +311,14 @@
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const nx = E && E.next && isoOk(E.next.d) && num(E.next.sessions) !== null && E.next.sessions >= 1 && E.next.sessions <= FWD ? E.next : null;
     const term = okOf(X.term);
-    const em = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
+    const em = eventSdQ(E, term);
+    const eventP = eventSdP(E, pb);
     let event = null;
     if (nx) {
       const w = String(nx.when || "");
       const tE = Math.min(FWD, nx.sessions + (/post|after|amc|close/i.test(w) ? 0.5 : /pre|before|bmo|open/i.test(w) ? -0.5 : 0));
-      event = { d: nx.d, sessions: nx.sessions, h: tE, when: /post|after|amc|close/i.test(w) ? "after the close" : /pre|before|bmo|open/i.test(w) ? "before the open" : null, q: em, p: E ? num(E.medianAbsMove) : null };
+      event = { d: nx.d, sessions: nx.sessions, h: tE, when: /post|after|amc|close/i.test(w) ? "after the close" : /pre|before|bmo|open/i.test(w) ? "before the open" : null, q: em, p: eventP.sd, n: eventP.n };
+      if (eventP.sd === null) why.eventP = eventP.why;
     } else {
       const rp = reportOf(card, E);
       why.event = rp && rp.sessions !== null && rp.sessions > FWD ? "The next report is " + plural(rp.sessions, "session") + " away, past the month shown."
@@ -427,7 +445,7 @@
     else out.push(T + " price over the last " + m.N + " sessions, closing at " + F.px(m.S) + " on " + F.day(m.hist[m.hist.length - 1].d) + ", and the next " + FWD + " sessions.");
     out.push(m.q ? "Options price a range of plus or minus " + F.pct(m.qEnd, 1) + " by session " + FWD + "." : "Options cone: " + m.why.q);
     out.push(m.p ? "The real-world model gives plus or minus " + F.pct(m.pEnd, 1) + "." : "Real-world cone: " + (m.why.p || m.why.q));
-    out.push(m.event ? "A report on " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") + " steps both bands" + (m.event.q !== null ? ": options price plus or minus " + F.pct(m.event.q, 1) : "") + (m.event.p !== null ? ", past reports moved plus or minus " + F.pct(m.event.p, 1) : "") + "." : m.why.event);
+    out.push(m.event ? "A report on " + F.day(m.event.d) + (m.event.when ? ", " + m.event.when : "") + " steps both bands" + (m.event.q !== null ? ": options price a one-sigma report move of " + F.pct(m.event.q, 1) : "") + (m.event.p !== null ? ", the root mean square of the last " + m.event.n + " one-day report moves is " + F.pct(m.event.p, 1) : "") + "." : m.why.event);
     const lv = m.levels.map((l) => LEVEL_NAMES[l.kind] + " " + F.px(l.px));
     out.push(lv.length ? "Levels: " + lv.join(", ") + "." : "No levels near spot on this card.");
     if (m.xp.rows.length) out.push(railDescribe(m, m.xp.rows.find((r) => r.expiry === m.sel) || null) + " Click an expiry tick under the forward axis, or focus one and use the arrow keys, to move the cursor.");
@@ -878,7 +896,7 @@
     const xp = m.xp, q = xp.q, sk = skewOf(row, q);
     const out = ["Strike rail for the " + F.day(row.expiry) + " expiry, " + row.dte + " days, " + row.label.toLowerCase() + "."];
     if (row.sd !== null && m.S !== null) out.push("The priced one-sigma range is " + F.px(m.S * Math.exp(-row.sd)) + " to " + F.px(m.S * Math.exp(row.sd)) + ".");
-    if (sk) out.push("The 25-delta put sits at " + F.px(sk.Kp) + " at " + F.pct(sk.ivp, 1) + " and the call at " + F.px(sk.Kc) + " at " + F.pct(sk.ivc, 1) + ", risk reversal " + volPts(sk.rr) + " vol points.");
+    if (sk) out.push("The 25-delta put sits at " + F.px(sk.Kp) + " at " + F.pct(sk.ivp, 1) + " and the call at " + F.px(sk.Kc) + " at " + F.pct(sk.ivc, 1) + ", risk reversal (put minus call) " + volPts(sk.rr) + " vol points.");
     else out.push(row.state === "none" ? "No fitted smile: the engine published an at-the-money level" + (row.atm !== null ? " of " + F.pct(row.atm, 1) : "") + " only." : xp.why.smile || "");
     out.push(row.gamma ? "Dealer gamma by strike for this expiry is drawn beside it " + DEALER_CLAUSE + "." : "Gamma by strike: " + (xp.why.gamma || "none for this expiry") + ".");
     return out.join(" ");
