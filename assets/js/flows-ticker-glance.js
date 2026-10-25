@@ -414,11 +414,20 @@
     return out;
   }
 
+  function calendar() {
+    const el = document.getElementById("ftCal");
+    const list = el && typeof el.dataset.sessions === "string" ? el.dataset.sessions.split(",").filter(isoOk) : [];
+    return list;
+  }
   function dateAt(m, t) {
     const last = m.hist.length ? m.hist[m.hist.length - 1].d : null;
     if (!last) return null;
-    const d = new Date(last.slice(0, 10) + "T12:00:00Z");
-    for (let k = 0; k < t;) { d.setUTCDate(d.getUTCDate() + 1); if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) k++; }
+    const from = last.slice(0, 10);
+    const known = calendar().filter((x) => x > from);
+    const ahead = Math.min(t, known.length);
+    if (ahead === t && t > 0) return known[t - 1];
+    const d = new Date((ahead > 0 ? known[ahead - 1] : from) + "T12:00:00Z");
+    for (let k = ahead; k < t;) { d.setUTCDate(d.getUTCDate() + 1); if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) k++; }
     return d.toISOString().slice(0, 10);
   }
 
