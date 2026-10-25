@@ -298,8 +298,8 @@ async function exercise(browser, js, full) {
   const p0 = c.panels.scoreOverlay.rows.filter((r) => r.d <= nb.txnDate).pop().close;
   const since = c.panels.surface.spot / p0 - 1;
   const sinceT = (since > 0 ? "+" : since < 0 ? MINUS : "") + Math.abs(since * 100).toFixed(1) + "%";
-  const ctxWant = [["Conviction", "64 /100"], ["IV rank", "42 \u00b7 IV 31.8%"], ["Dealer \u03b3 book", "Long"], ["Dealer \u03b3 flow", "Short"], ["Premium C\u2212P", MINUS + "$59.7M"], ["Price since", sinceT]];
-  chk(JSON.stringify(rt.ctx) === JSON.stringify(ctxWant), "Flows context reads the card: conviction, IV rank, both dealer gammas, the last net premium and the price since the newest buy: " + JSON.stringify(rt.ctx) + " vs " + JSON.stringify(ctxWant));
+  const ctxWant = [["Conviction", "64 /100"], ["IV percentile", "42 \u00b7 IV 31.8%"], ["Dealer \u03b3 book", "Long"], ["Dealer \u03b3 flow", "Short"], ["Premium C\u2212P", MINUS + "$59.7M"], ["Price since", sinceT]];
+  chk(JSON.stringify(rt.ctx) === JSON.stringify(ctxWant), "Flows context reads the card: conviction, IV percentile, both dealer gammas, the last net premium and the price since the newest buy: " + JSON.stringify(rt.ctx) + " vs " + JSON.stringify(ctxWant));
   chk(/card Oct 16/.test(rt.ctxHead), "the card date is printed");
   chk(rt.monos.length === 3 && /From the card's disclosure list: 4 filings, 3 filers\. House 1 \u00b7 Senate 1 \u00b7 Exec 1\./.test(rt.evSub), "evidence names filers by initials and splits House, Senate and Executive apart: " + rt.evSub);
   chk(rt.monos.some((m) => /^LT\s?E/.test(m)) && !rt.monos.some((m) => /^LT\s?H/.test(m)), "an executive filer is marked E, never counted as a chamber");
@@ -319,7 +319,7 @@ async function exercise(browser, js, full) {
   await page.waitForFunction(() => /Not on the card/.test(document.querySelector("#plRail .ctx").innerText), null, { timeout: 5000 }).catch(() => {});
   rt = await railText(page);
   chk(rt.ctx.every(([k, v]) => v === DASH || v.startsWith(DASH + " ")), "a card with no volatility, regime or premium shows a dash for each, never a zero: " + JSON.stringify(rt.ctx));
-  chk(/Not on the card: conviction, IV rank, dealer gamma, net premium\./.test(rt.ctxSub || ""), "and names what the card lacked: " + rt.ctxSub);
+  chk(/Not on the card: conviction, IV percentile, dealer gamma, net premium\./.test(rt.ctxSub || ""), "and names what the card lacked: " + rt.ctxSub);
 
   await page.click('.pl-tile[data-t="DUNE"]');
   await page.waitForFunction(() => /No Flows card/.test(document.querySelector("#plRail .ctx").innerText), null, { timeout: 5000 }).catch(() => {});
@@ -710,6 +710,7 @@ const MUTANTS = [
   ["the blind window twice as long", "const bx = Math.max(L, xs(asMs - x.lag * DAY));", "const bx = Math.max(L, xs(asMs - x.lag * DAY * 2));"],
   ["Convergence off by one", "f: (x) => x.filers >= minFilers,", "f: (x) => x.filers > minFilers,"],
   ["a hyphen for a minus", "const smoney = (v) => usd(v, true);", "const smoney = (v) => usd(v, true).replace(\"\\u2212\", \"-\");"],
+  ["the percentile called a rank", "kv(\"IV percentile\", v[1])", "kv(\"IV rank\", v[1])"],
   ["every hover asks for a card at once", "if (now) run(); else cardTimer = setTimeout(() => { if (S.sel === t) run(); }, 220);", "run();"],
 ];
 for (const [name, from, to] of MUTANTS) {

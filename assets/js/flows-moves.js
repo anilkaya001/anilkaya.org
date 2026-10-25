@@ -463,10 +463,10 @@
     } else if (e.state === "failed") {
       h += '<div class="mv-rc chart wide"><h3>21 sessions</h3><span class="sub c">' + esc(e.reason) + '</span><button type="button" class="mv-retry" id="mvRetry">Retry</button></div><div class="mv-rc"><h3>Flows card</h3><span class="sub">' + DASH + "</span></div>";
     } else if (e.state === "absent") {
-      h += '<div class="mv-rc chart"><h3>21 sessions</h3><span class="sub c">' + esc(x.t) + ' has no Flows card, so no closes or context are shown.</span></div><div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", DASH) + kv("IV rank", DASH) + "</div>";
+      h += '<div class="mv-rc chart"><h3>21 sessions</h3><span class="sub c">' + esc(x.t) + ' has no Flows card, so no closes or context are shown.</span></div><div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", DASH) + kv("IV percentile", DASH) + "</div>";
     } else {
       h += '<div class="mv-rc chart"><h3>21 sessions <span class="tx">' + esc(cf.asOf ? "card " + fday(cf.asOf) : "") + "</span></h3>" + spark(cf, x) + "</div>";
-      h += '<div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", cf.conviction === null ? DASH : cf.conviction + " /100") + kv("IV rank", cf.ivRank === null ? DASH : String(cf.ivRank)) + kv("Dealer γ book", cf.gammaBook || DASH) + kv("Latest flow", cf.flowP === null || cf.flowP === undefined ? DASH : F.money(cf.flowP, true)) + "</div>";
+      h += '<div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", cf.conviction === null ? DASH : cf.conviction + " /100") + kv("IV percentile", cf.ivRank === null ? DASH : String(cf.ivRank)) + kv("Dealer γ book", cf.gammaBook || DASH) + kv("Latest flow", cf.flowP === null || cf.flowP === undefined ? DASH : F.money(cf.flowP, true)) + "</div>";
     }
     h += '<div class="mv-rc"><h3>How this is tested</h3><span class="sub c" data-k="sig">' + esc(sigLine(x)) + "</span>" + sigKv(x) + (x.event ? '<span class="sub c">' + esc(APART) + "</span>" : "") + "</div>";
     box.innerHTML = h;

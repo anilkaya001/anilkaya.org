@@ -249,7 +249,7 @@
   function flCell(x) {
     const e = cards.get(x.t);
     if (e && e.state === "ok" && e.cf.conviction !== null) {
-      return '<span class="pl-fl" title="Flows card: conviction ' + e.cf.conviction + " of 100" + (e.cf.ivRank === null ? "" : ", IV rank " + e.cf.ivRank) + '"><b>' + e.cf.conviction + "</b>" + (e.cf.ivRank === null ? "" : " · IVR " + e.cf.ivRank) + "</span>";
+      return '<span class="pl-fl" title="Flows card: conviction ' + e.cf.conviction + " of 100" + (e.cf.ivRank === null ? "" : ", IV percentile " + e.cf.ivRank) + '"><b>' + e.cf.conviction + "</b>" + (e.cf.ivRank === null ? "" : " · IVR " + e.cf.ivRank) + "</span>";
     }
     if (x.has || (e && e.state === "ok")) return '<span class="pl-fl mut-t" title="This name has a Flows card. Select it to read the card.">card ↗</span>';
     return '<span class="pl-fl mut-t">' + DASH + "</span>";
@@ -365,7 +365,7 @@
   function ctxHTML(x, evs) {
     const kv = (a, b) => '<div class="kv"><span>' + a + "</span><b>" + b + "</b></div>";
     const e = cards.get(x.t);
-    const rows = (v) => kv("Conviction", v[0]) + kv("IV rank", v[1]) + kv("Dealer γ book", v[2]) + kv("Dealer γ flow", v[3]) + kv("Premium C−P", v[4]) + kv("Price since", v[5]);
+    const rows = (v) => kv("Conviction", v[0]) + kv("IV percentile", v[1]) + kv("Dealer γ book", v[2]) + kv("Dealer γ flow", v[3]) + kv("Premium C−P", v[4]) + kv("Price since", v[5]);
     const dash = [DASH, DASH, DASH, DASH, DASH, DASH];
     if (!e || e.state === "pending") return { head: "", html: rows(dash) + '<span class="sub c">The Flows card appears here once it is read.</span>' };
     if (e.state === "absent") return { head: "", html: rows(dash) + '<span class="sub c">No Flows card: not in the nightly universe.</span>' };
@@ -382,7 +382,7 @@
     const tn = (v) => (v === null ? "mut" : v > 0 ? "up" : v < 0 ? "down" : "mut");
     const miss = [];
     if (cf.conviction === null) miss.push("conviction");
-    if (cf.ivRank === null) miss.push("IV rank");
+    if (cf.ivRank === null) miss.push("IV percentile");
     if (cf.gammaBook === null || cf.gammaFlow === null) miss.push("dealer gamma");
     if (cf.flowP === null) miss.push("net premium");
     return {
