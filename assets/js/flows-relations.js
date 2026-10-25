@@ -13,6 +13,7 @@
     L: { name: "Lean together", lead: "Net bullish premium per ten minutes: calls on the ask side and puts on the bid side minus the reverse, by convention." },
     P: { name: "Beyond the market", lead: "Active together once the day's shared flow burst is removed from both names." },
   });
+  const CHANCE = 0.06;
   const DEF = Object.freeze({ binMin: 10, names: 12, minBins: 20, minActive: 4, minWindows: 40, minCorr: 0.3, minOthers: 4 });
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const money = (v) => F.money(v);
@@ -251,8 +252,8 @@
       stats.textContent = M.windows + " windows · " + M.bins + " bins · " + M.names.length + " names" + (read ? " · read " + F.time(read) : "") + (session ? " · session " + F.day(session) : "");
       readEl.textContent = held ? M.pReason : (sel ? sel + " (" + secName(sel) + "): " + (shown.filter((p) => p.a === sel || p.b === sel).map((p) => (p.a === sel ? p.b : p.a) + " " + sgn(p.r)).join(", ") || "no tested pair") + ". "
         : LAYERS[layer].lead + " ") + shown.length + " of " + M.pairs[layer].length + " pairs pass.";
-      const total = M.pairs[layer].length, chance = Math.round(total * 0.05);
-      note.textContent = (layer === "P" ? "This removes the day's shared flow burst, not stock-price moves. Price-residual layers need daily closes, which the site does not store. " : "") + "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so " + (chance < 1 ? "fewer than one of these " + total + " is expected" : "about " + chance + " of these " + total + " are expected") + " to pass by chance alone. Not a forecast.";
+      const total = M.pairs[layer].length, chance = Math.round(total * CHANCE);
+      note.textContent = (layer === "P" ? "This removes the day's shared flow burst, not stock-price moves. Price-residual layers need daily closes, which the site does not store. " : "") + "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so " + (chance < 1 ? "fewer than one of these " + total + " is expected" : "up to about " + chance + " of these " + total + " are expected") + " to pass by chance alone. Not a forecast.";
     }
 
     function rebuild() {

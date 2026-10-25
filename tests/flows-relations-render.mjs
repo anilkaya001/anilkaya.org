@@ -106,6 +106,7 @@ const browser = await launch();
   eq(m.drawn, m.stable, "only pairs that passed in both halves are drawn, one curve each");
   ok(/windows/.test(m.stats) && /bins/.test(m.stats) && /read \d\d:\d\d TRT/.test(m.stats), "the stats line has windows, bins and the read time in TRT: " + m.stats);
   ok(/pass by chance/.test(m.note) && /not a forecast/i.test(m.note), "the note says how many pairs would pass by chance and that it is not a forecast");
+  ok(/(?:fewer than one of these \d+ is expected|up to about \d+ of these \d+ are expected) to pass by chance alone/.test(m.note), "and states it as an upper figure, 6 in 100, which the null grid in flows-lean holds: " + m.note);
   await page.click("#mkRelations .rl-seg button[data-l='P']");
   const pm = await page.evaluate(() => ({ note: document.querySelector("#mkRelations .rl-note").textContent, lead: document.querySelector("#mkRelations .rl-read").textContent, drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: window.FlowsUI.relations.of(document.getElementById("mkRelations")).model().pairs.P.filter((p) => p.stable).length }));
   ok(/not stock-price moves/.test(pm.note) && /daily closes/.test(pm.note), "THE THIRD RELATION SAYS IT REMOVES THE SHARED FLOW BURST, NOT PRICE MOVES, AND THAT PRICE LAYERS NEED DAILY CLOSES");

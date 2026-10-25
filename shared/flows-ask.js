@@ -26,9 +26,9 @@ export function numeralsIn(text) {
   return text.replace(/−/g, "-").match(new RegExp(NUMERAL_SOURCE, "g")) || [];
 }
 
-export const FORECAST_ALT = "will|should|shall|expect\\w*|likely|unlikely|going to|gonna|forecast\\w*|predict\\w*|anticipat\\w*|forese\\w*|poised|target\\w*|(?<!at )odds|imminent|inevitabl\\w*|ought to|due for|in store|on (?:course|pace) to|(?:is|are) about to|'s about to|'re about to|\\w+'ll|won't|shan't";
+export const FORECAST_ALT = "will|should|shall|expect\\w*|likely|unlikely|going to|gonna|forecast\\w*|predict\\w*|anticipat\\w*|forese\\w*|poised|target\\w*|(?<!at )odds|imminent|inevitabl\\w*|ought to|due for|in store|on (?:course|pace) to|(?:is|are) about to|'s about to|'re about to|primed|brac(?:e|es|ed|ing) for|(?:is|are|looks|'s|'re) set to (?:rise|rally|fall|drop|climb|slide|sink|surge|jump|rebound|reverse|break|reach|test|hold|move|gap|run|double|halve|pin|flip|report|go|turn|stay|remain|continue|extend|widen|narrow)|\\w+'ll|won't|shan't";
 export const MODAL_ALT = "would|could(?!\\s+not\\b|n't)|might";
-export const guardText = (v) => (typeof v === "string" ? v.normalize("NFKC").replace(/[\u2018\u2019\u02bc\u00b4`]/g, "'") : "");
+export const guardText = (v) => (typeof v === "string" ? v.normalize("NFKC").replace(/\p{Cf}/gu, "").replace(/[\u2018\u2019\u02bc\u00b4`]/g, "'") : "");
 const FORECAST = new RegExp("\\b(?:" + FORECAST_ALT + ")\\b", "i");
 const MODALS = new RegExp("\\b(?:" + MODAL_ALT + ")\\b", "i");
 const MODAL_MAY = /\bmay\b/;

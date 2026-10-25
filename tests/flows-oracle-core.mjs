@@ -252,6 +252,11 @@ for (const [name, mutate] of MUTANTS) {
   checks++;
 }
 
+for (const f of ["worker.js", "shared/flows-pages.js", "server/routes/flows-pages.js", "server/routes/flows-oracle.js", "scripts/flows-nightly/sections/oracle.mjs", "scripts/flows-legs/oracle.mjs", "assets/js/flows-oracle.js", "assets/js/flows-oracle-boot.js", "assets/js/flows-oracle-core.js"]) {
+  assert.ok(!/flows-oracle-live/.test(readFileSync(new URL("../" + f, import.meta.url), "utf8")), f + " references the reference leaf or its bundle, which the pages do not load and which differs from the served core");
+  checks++;
+}
+
 const forbidden = [/\?\s*"[+]"\s*:/, /\?\s*MINUS\s*:/, /\bcolor:\s*#/i, /rgba?\(/];
 for (const re of forbidden) assert.ok(!re.test(SRC), `the core has no two-arm sign pick or colour literal: ${re}`);
 checks += forbidden.length;
