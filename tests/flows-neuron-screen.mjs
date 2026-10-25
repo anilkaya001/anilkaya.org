@@ -218,18 +218,18 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   const row = JSON.parse(chain).specScreenerRow.row;
   const uni = buildUniverse([row], { sessionDate: row.date });
   const u = {};
-  for (const k of Object.keys(uni.cols)) u[k] = universeValue(uni, "NVDA", k);
-  const r = screenReading({ ticker: "NVDA", u, pct: {}, sessionDate: row.date, expectedSession: row.date, sector: "Technology" });
-  eq(r.gamma, "long", "THE VENDOR'S OWN NVDA ROW, through the universe and the reading: gamma $614,273,906.59 per 1% is positive, so long");
-  near(factOf(r, "gamma").value, 614273906.59 / (130548356.35 * 212.32) * 100, 0.006, "2.22% of average daily dollar volume, worked from the row");
-  eq(r.premium, "cheap", "implied 33.9% against realised 44.2% is -23% of realised: cheap");
-  near(factOf(r, "premium").value, (0.339 - 0.442) / 0.442 * 100, 0.4, "-23.3%, worked by hand");
+  for (const k of Object.keys(uni.cols)) u[k] = universeValue(uni, "SYB202", k);
+  const r = screenReading({ ticker: "SYB202", u, pct: {}, sessionDate: row.date, expectedSession: row.date, sector: "Technology" });
+  eq(r.gamma, "long", "THE FIXTURE'S SYB202 ROW, through the universe and the reading: gamma $412,350,000.40 per 1% is positive, so long");
+  near(factOf(r, "gamma").value, 412350000.40 / (96400000.5 * 184.60) * 100, 0.006, "2.32% of average daily dollar volume, worked from the row");
+  eq(r.premium, "cheap", "implied 29.8% against realised 38.9% is -23% of realised: cheap");
+  near(factOf(r, "premium").value, (0.298 - 0.389) / 0.389 * 100, 0.4, "-23.4%, worked by hand");
   eq(r.state, "pinned", "so the state is pinned");
   same(r.families, ["calendar spread"], "and the pinned, cheap row of the consolidated table prefers a calendar spread alone");
-  ok(r.conflicts.length === 0, "with the 8.4th-percentile implied volatility agreeing with a cheap premium");
-  eq(factOf(r, "dex").text, "+3.30", "dealer delta 3.30 times a day's dollar volume");
+  ok(r.conflicts.length === 0, "with the 7.1th-percentile implied volatility agreeing with a cheap premium");
+  eq(factOf(r, "dex").text, "+3.48", "dealer delta 3.48 times a day's dollar volume");
   eq(factOf(r, "charm").text, "negative", "charm negative in the vendor's sign");
-  eq(factOf(r, "move30").text, "±6.6%", "and the 30-day priced move");
+  eq(factOf(r, "move30").text, "±5.8%", "and the 30-day priced move");
   eq(r.lean, null, "the row's tilt (+12%) is under the line and its delta flow is negative: no lean");
 }
 

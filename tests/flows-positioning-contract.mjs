@@ -124,12 +124,12 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const one = gexHistory(FX.greekExposure, { sessionDate: probe.date, spot: 250, adv: 1e10 });
   const s = one.section;
   eq(s.status, "ok", "the probe row reads");
-  rel(s.net, 3515910.88 - 1055065.5743, 1e-5, "net GEX sums the legs: put gamma arrives already negative");
-  rel(s.charm, -23546409.118 + PUT_TO_DEALER.charm * 16324839.2996, 1e-5,
+  rel(s.net, 2846913.42 - 1162844.7136, 1e-5, "net GEX sums the legs: put gamma arrives already negative");
+  rel(s.charm, -18433721.887 + PUT_TO_DEALER.charm * 12905567.1442, 1e-5,
     "net charm applies the run's put convention (PUT_TO_DEALER.charm)");
-  rel(s.vanna, 20950552.9115 + PUT_TO_DEALER.vanna * -54858687.1309, 1e-5, "and so does net vanna");
-  rel(s.usd1pct, (3515910.88 - 1055065.5743) * 0.01 * 250 * 250, 1e-5, "dollar gamma per 1% scales share-gamma by S^2/100");
-  rel(s.adv, (3515910.88 - 1055065.5743) * 0.01 * 250 * 250 / 1e10, 1e-5, "and the hedge is quoted as a share of ADV$");
+  rel(s.vanna, 17368420.6603 + PUT_TO_DEALER.vanna * -41672305.9011, 1e-5, "and so does net vanna");
+  rel(s.usd1pct, (2846913.42 - 1162844.7136) * 0.01 * 250 * 250, 1e-5, "dollar gamma per 1% scales share-gamma by S^2/100");
+  rel(s.adv, (2846913.42 - 1162844.7136) * 0.01 * 250 * 250 / 1e10, 1e-5, "and the hedge is quoted as a share of ADV$");
   eq(s.regime, "long", "a positive book is long gamma");
   eq(s.persist, 1, "one session of history is a run of one");
   eq(s.z, null, "one session has no z-score");
@@ -174,12 +174,12 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 {
   const probe = FX.optionsVolume.data[0];
   const v = volumeHistory(FX.optionsVolume, { sessionDate: SESSION }).section;
-  eq(v.netPrem, -46987757 - 10802282,
+  eq(v.netPrem, -38987757 - 9102282,
     "net premium = net call premium minus net put premium: calls sold and puts bought are both bearish");
-  eq(v.bullBear, 214836481 - 270876420, "bull-bear premium is the vendor's two sums differenced, in whole dollars");
-  eq(v.volume, 942134 + 339609, "volume sums the legs");
+  eq(v.bullBear, 194836481 - 240876420, "bull-bear premium is the vendor's two sums differenced, in whole dollars");
+  eq(v.volume, 801224 + 297310, "volume sums the legs");
   eq(v.volume, FX.contractHistoric.chains[0].ticker_vol, "and equals the contract feed's whole-name volume that day");
-  near(v.pc, Number((339609 / 942134).toFixed(4)), 1e-12, "P/C is puts over calls");
+  near(v.pc, Number((297310 / 801224).toFixed(4)), 1e-12, "P/C is puts over calls");
   eq(v.oi, probe.call_open_interest + probe.put_open_interest, "OI sums the legs");
   eq(v.oiSlope, null, "one session has no OI slope");
   eq(v.gaps.oiSlope, "short-history", "and says so");
@@ -212,15 +212,15 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 
   const L = gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: ladder });
   eq(L.status, "ok", "the probe-shaped object reads from data, not from nearby_flips[]");
-  eq(L.flip, 332.83, "vendor levels arrive as strings and are coerced");
-  near(L.callWallAtr, Number(((345 - 339.75) / FX.atr).toFixed(3)), 1e-12, "wall distance in ATR");
-  near(L.ambiguity, Number(((341.9 - 325) / FX.atr).toFixed(3)), 1e-12, "flip ambiguity = (max - min nearby flips) / ATR");
-  near(L.flipGap, Number(((332.83 - (340 + 10 * 300 / 550)) / FX.atr).toFixed(3)), 1e-12,
+  eq(L.flip, 331.42, "vendor levels arrive as strings and are coerced");
+  near(L.callWallAtr, Number(((345 - 341.2) / FX.atr).toFixed(3)), 1e-12, "wall distance in ATR");
+  near(L.ambiguity, Number(((340.6 - 324.5) / FX.atr).toFixed(3)), 1e-12, "flip ambiguity = (max - min nearby flips) / ATR");
+  near(L.flipGap, Number(((331.42 - (340 + 10 * 300 / 550)) / FX.atr).toFixed(3)), 1e-12,
     "agreement is the vendor flip minus our book flip in ATR");
   eq(L.flipAgree, false, "more than half an ATR apart does not agree");
   eq(L.callWallAgree, false, "vendor 345 against our 340");
   eq(L.putWallAgree, true, "vendor 320 against our 320");
-  const one = gexLevels({ data: { ...FX.gexLevels.data, nearby_flips: ["332.83"], gamma_flip: null } },
+  const one = gexLevels({ data: { ...FX.gexLevels.data, nearby_flips: ["331.42"], gamma_flip: null } },
     { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: ladder });
   eq(one.ambiguity, null, "a single nearby flip has no spread");
   eq(one.gaps.ambiguity, "single-flip", "and says so");
@@ -250,13 +250,13 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 
 {
   const r = FX.flowPerExpiry[0];
-  const npWant = (30418039 - 29518322) - (10079294 - 8351114);
+  const npWant = (26418310 - 24106442) - (9331806 - 7204215);
   const e = flowExpiry(FX.flowPerExpiry, { sessionDate: SESSION, readAt: "2026-09-23T10:00:00Z" });
   eq(e.status, "ok", "the bare array reads");
   eq(e.rows[0].np, npWant, "net premium by expiry = (call ask - call bid) - (put ask - put bid)");
-  eq(e.rows[0].gross, 66895926 + 20972729, "gross premium is calls plus puts");
+  eq(e.rows[0].gross, 58722619 + 18216377, "gross premium is calls plus puts");
   eq(e.rows[0].dte, 1, "days to expiry from the session");
-  near(e.otmShare, Number(((38932415 + 12713509) / (66895926 + 20972729)).toFixed(4)), 1e-12, "OTM share of premium");
+  near(e.otmShare, Number(((31288140 + 10463872) / (58722619 + 18216377)).toFixed(4)), 1e-12, "OTM share of premium");
   eq(e.convictionBucket, "0-7", "the conviction tenor is the bucket with the largest net premium");
   eq(e.convictionDte, 1, "and the |net|-weighted days to expiry");
   eq(e.readAt, "2026-09-23T10:00:00Z", "the route has no date parameter, so the read time is stamped");
@@ -312,11 +312,11 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 {
   const probe = FX.nope.data[0];
   const n = nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 338, close: 339.75 } }).section;
-  eq(n.close, 0.301775, "the vendor's close NOPE is read from a string");
-  near(n.closeCheck, (20844256.702439 - 11861458.951400) / 29766577, 1e-6,
+  eq(n.close, 0.285198, "the vendor's close NOPE is read from a string");
+  near(n.closeCheck, (21406339.118273 - 12508176.402811) / 31200000, 1e-6,
     "and reproduced as (call delta + put delta) / stock volume: the put delta arrives negative");
   eq(n.checkAgrees, true, "the reproduction agrees to 1e-5");
-  eq(n.fill, 0.665683, "NOPE fill is carried beside it");
+  eq(n.fill, 0.66683, "NOPE fill is carried beside it");
   eq(n.divergence, "sign-agrees", "positive NOPE on a rising session is the same sign as the return");
   eq(nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 341, close: 339.75 } }).section.divergence,
     "sign-differs", "positive NOPE on a falling session differs in sign from the return");
@@ -344,14 +344,14 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const post = { ...probe, timestamp: "2026-09-22T20:30:00Z", nope: "9" };
   const early = { ...probe, timestamp: "2026-09-22T13:31:00Z", nope: "-0.2" };
   const w = nopeSection({ data: [post, probe, early, pre] }, { sessionDate: SESSION }).section;
-  eq(w.close, 0.301775, "rows outside the regular session are cut and the newest RTH minute closes");
+  eq(w.close, 0.285198, "rows outside the regular session are cut and the newest RTH minute closes");
   eq(w.low, -0.2, "the low is the session's minimum");
   eq(w.lowM, 1, "at its minute after the open");
   eq(w.highM, 389, "and the high at 15:59 ET");
   const prior = weekdaysEndingAt("2026-09-21", 25).map((d, i) => ({ d, v: (i % 5) / 10 }));
   const z = nopeSection(FX.nope, { sessionDate: SESSION, prior }).section;
   const base = prior.map((p) => p.v);
-  near(z.z, Number(((0.301775 - mean(base)) / sdSample(base)).toFixed(3)), 1e-12,
+  near(z.z, Number(((0.285198 - mean(base)) / sdSample(base)).toFixed(3)), 1e-12,
     "NOPE z is today's close against the closes this pipeline has kept");
   eq(z.historyN, 25, "over the kept sessions");
   const future = nopeSection(FX.nope, { sessionDate: SESSION, prior: [{ d: "2026-09-23", v: 5 }, ...prior] }).section;
@@ -445,7 +445,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 
 {
   const probe = darkpoolLevels(FX.darkpoolLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr });
-  eq(probe.status, "quiet", "the probe's 250 print sits 12 ATR from spot");
+  eq(probe.status, "quiet", "the fixture's 260 print sits 12 ATR from spot");
   eq(probe.why, "outside-band", "so it is banded out, not ranked as a shelf");
   const lv = [[97, 100, 100], [99, 400, 100], [100, 200, 200], [101.5, 300, 0], [104.5, 900, 0]]
     .map(([p, d, l]) => ({ price: String(p), dark_pool_volume: String(d), regular_volume: String(l) }));
@@ -514,9 +514,9 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   near(a.callShare, 0.7, 1e-12, "and the call share");
   near(a.urgency, 100 / 1e5, 1e-12, "urgency = premium that swept into volume above OI, over ADV$");
   eq(a.dots[0].p, 600, "dots are ranked by premium");
-  const live = alertsTape(FX.flowAlerts.data, "AAPL", { sessionDate: SESSION, adv: 1e10 });
+  const live = alertsTape(FX.flowAlerts.data, "SYA101", { sessionDate: SESSION, adv: 1e10 });
   eq(live.n, 1, "the probe alert (start_time epoch-ms, 19:59:55Z) is inside the session");
-  near(live.askShare, Number((1700 / 25394).toFixed(4)), 1e-12, "and its ask share reads from the string fields");
+  near(live.askShare, Number((2130 / 31862).toFixed(4)), 1e-12, "and its ask share reads from the string fields");
   eq(live.urgency, 0, "a non-sweep alert adds no urgency even with volume above OI");
   const partial = alertsTape([], "AAPL", { sessionDate: SESSION, complete: false, coverFromM: 300 });
   eq(partial.why, "truncated", "an empty name in a truncated batch is not called quiet for the whole session");
@@ -531,7 +531,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     executed_at: at("15:0" + i) });
   const m = multiLeg([mk(1, "iron_condor", -1000, 3000, 10, -50, true, "short"), mk(2, "iron_condor", 500, 1000, -4, 20, false, "long"),
     mk(3, "straddle", 2000, 2000, 1, 100, true, "long"), { ...mk(4, "straddle", 1, 1, 1, 1, true, "long"), ticker: "MSFT" }],
-  "AAPL", { sessionDate: SESSION });
+  "SYA101", { sessionDate: SESSION });
   eq(m.n, 3, "only this name's structures in the session count");
   eq(m.netPrem, 1500, "net premium sums signed nets: credits negative");
   eq(m.grossPrem, 6000, "gross premium sums the totals");
@@ -541,9 +541,9 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   near(m.openingShare, Number((5000 / 6000).toFixed(4)), 1e-12, "all-opening share of gross premium");
   assert.deepEqual(m.byStrategy.map((s) => [s.s, s.n, s.np, s.tp]), [["iron_condor", 2, -500, 4000], ["straddle", 1, 2000, 2000]]); checks++;
   eq(m.top[0].tp, 3000, "the largest structure leads");
-  const live = multiLeg(FX.multiLeg.data, "AAPL", { sessionDate: SESSION });
+  const live = multiLeg(FX.multiLeg.data, "SYA101", { sessionDate: SESSION });
   eq(live.n, 1, "the probe structure executed 19:59:59Z is inside the session");
-  eq(live.netPrem, 2860, "its net premium reads from the string");
+  eq(live.netPrem, 3410, "its net premium reads from the string");
   eq(multiLeg([], "AAPL", { truncated: true }).why, "truncated", "a truncated empty read is not a quiet day");
   const unpricedMl = multiLeg([{ id: "u1", ticker: "AAPL", executed_at: at("15:00"), premium: "5000", strategy: "straddle" }],
     "AAPL", { sessionDate: SESSION });
@@ -607,7 +607,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   ok(rankedPanel.rows.every((r, i) => i === 0 || rankedPanel.rows[i - 1].prem >= r.prem),
     "while the print list itself is still ranked by premium by its shaper");
   const recent = sessionPrints(FX.darkpoolRecent, SESSION, { limit: 100 });
-  eq(recent.data.length, 0, "the live recent feed's first row (MRVL 23:59:58Z) is an after-hours print");
+  eq(recent.data.length, 0, "the live recent feed's first row (SYD404 23:59:58Z) is an after-hours print");
   eq(sessionPrints(null, SESSION), null, "an absent read passes through as absent");
   eq(sessionPrints({ __failed: "x" }, SESSION).__failed, "x", "and a failed one as failed");
   const p = sessionPrintParams(SESSION);
@@ -620,7 +620,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 
 {
   const live = readExpiryBreakdown(FX.expiryBreakdown);
-  assert.deepEqual(live, [{ expiry: "2026-09-23", chains: 96, oi: 75260, volume: 735253 }]); checks++;
+  assert.deepEqual(live, [{ expiry: "2026-09-23", chains: 86, oi: 65260, volume: 635253 }]); checks++;
   const mixed = readExpiryBreakdown([{ expiry: "2026-10-16", chains: "5" }, { expires: "2026-09-25", volume: 3 },
     { expires: "not a date" }, null]);
   assert.deepEqual(mixed.map((r) => r.expiry), ["2026-09-25", "2026-10-16"]); checks++;
@@ -934,7 +934,7 @@ for (const file of ["shared/flows-positioning.js", "scripts/flows-legs/flow.mjs"
 eq(POSITIONING_LINES.FLIP_AGREE_ATR, 0.5, "flip agreement is half an ATR");
 
 console.log(`✓ flows-positioning-contract: ${checks} assertions — every positioning and flow metric pinned to a ` +
-  `known answer on the live probe's own rows, every absent input a coded silence rather than a zero, the ` +
+  `known answer on the fixture's synthetic rows, every absent input a coded silence rather than a zero, the ` +
   `envelopes read by rule (bare arrays, chains, objects under data, dated levels), the dark-pool prints cut to the ` +
   `regular session and ranked by premium, the expiry breakdown read under its live field name, and the ` +
   `card-x and hist keys held to their byte caps on the dry run`);
