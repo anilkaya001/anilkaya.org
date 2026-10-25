@@ -672,7 +672,7 @@
 
   function paintGrid() {
     const c = st.ctx;
-    if (!st.t) { status("Enter a symbol to begin."); showSilence({ state: "quiet", reason: T("empty") }, "Payoff"); return; }
+    if (!st.t) { status("Enter a symbol to begin."); showSilence({ state: "quiet", word: "Enter a symbol to begin", reason: T("empty") }, "Payoff"); return; }
     if (st.loading > 0 && !c) { status("Reading the book…", "pending"); showSilence({ state: "pending", reason: "Reading " + st.t + "…" }, "Reading"); return; }
     if (st.ctxErr) {
       const t = st.t + ": " + st.ctxErr + ". " + T("st-fail");

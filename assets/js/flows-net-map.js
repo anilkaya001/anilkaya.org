@@ -152,7 +152,7 @@
       const availH = Math.max(120, H - capY);
       const maxN = phone ? M.layers[layerPick].length : Math.max(...M.layers.map((l) => l.length));
       const gap = 5;
-      const ch = clamp(Math.floor((availH - (maxN - 1) * gap) / maxN), phone ? 30 : 36, phone ? 48 : 44);
+      const ch = clamp(Math.floor((availH - (maxN - 1) * gap) / maxN), phone ? 44 : 36, phone ? 48 : 44);
       const two = ch >= 38 || cw < 180;
       const nodes = new Map();
       const colX = (i) => (phone ? 0 : (i * (W - cw)) / 3);

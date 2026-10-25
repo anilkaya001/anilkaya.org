@@ -637,7 +637,7 @@
     const box = mods.list;
     box.replaceChildren();
     if (!rows.length) {
-      box.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Lines", 120));
+      box.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing…" } : { state: "quiet", word: book.size ? undefined : "Add a symbol to begin", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Lines", 120));
       mods.more.hidden = true;
       return;
     }
@@ -749,7 +749,7 @@
     if (!(stage > 0)) return w < 600 ? 240 : 300;
     return w < 600 ? clampN(stage - 190, 150, 240) : clampN(stage - (side === "sc" ? 112 : 92), 200, 480);
   };
-  const emptyFrontier = (host, H, phone) => host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : phone ? 140 : 180));
+  const emptyFrontier = (host, H, phone) => host.append(UI.silent(inflight && !mods.empty ? { state: "pending", reason: "Pricing the desk…" } : { state: "quiet", word: book.size ? undefined : "Add a symbol to begin", reason: mods.empty || T(view.rows.length ? "e-win" : book.size ? "e-sel" : "e-add") }, "Frontier", book.size ? H : phone ? 140 : 180));
 
   function drawScatterInto(host, w, animate) {
     const phone = w < 600;

@@ -688,3 +688,4 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
   @media (pointer: coarse) { .hm-stage .hm-hero-open { min-height: 44px; } }
 }
 @media (pointer: coarse) { .hm-stage .hm-mlead { min-height: 44px; } }
+@container mod (max-width: 270px) { #ccChgStats .ui-metric:nth-child(n+2) { display: none; } }

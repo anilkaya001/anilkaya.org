@@ -573,6 +573,16 @@ for (const [w, h, extra] of VIEWPORTS) {
       const rh = phone ? 44 : 36;
       const fits = await page.evaluate((x) => Math.max(4, Math.floor(document.getElementById("plTapeList").clientHeight / x)), rh);
       eq(shown, Math.min(named.length, fits), "the tape shows only filings that name a stock, as many as fit");
+      const collide = await page.evaluate(() => Array.from(document.querySelectorAll("#plTapeList .pl-trow"), (row) => {
+        const box = (sel) => { const e = row.querySelector(sel); return e ? e.getBoundingClientRect() : null; };
+        const a = box(".pl-tk"), b = box(".bd"), c = box(".lg2");
+        const bad = [];
+        if (a && b && a.right > b.left + 0.5) bad.push("ticker over range");
+        if (b && c && b.right > c.left + 0.5) bad.push("range over lag");
+        if (c && c.height > parseFloat(getComputedStyle(row.querySelector(".lg2")).fontSize) * 2.4) bad.push("lag wraps");
+        return bad.length ? row.dataset.t + ": " + bad.join(", ") : null;
+      }).filter(Boolean));
+      eq(collide, [], "no row of the newest filings has its ticker, range and lag on top of one another or a lag on two lines");
       eq(await page.locator("#plTapeNote").innerText(), "24 latest \u00b7 " + named.length + " name a stock", "its note counts both");
       await page.click("#plTapeAll");
       await page.waitForTimeout(80);

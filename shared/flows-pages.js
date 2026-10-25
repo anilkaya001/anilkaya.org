@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "386";
+export const ASSET_VERSION = "387";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -927,6 +927,7 @@ export function networkPage({ username = "" } = {}) {
   <div class="pn" id="pn">
     <header class="flows-head pn-head" data-fx-hero>
       <h1 id="fxTitle">Flow network</h1>
+      <a class="mk-pop" href="/flows/market/#view=network">Back to Market</a>
     </header>
     <p class="visually-hidden" id="pnStatus" role="status">Loading the flow network\u2026</p>
     <section class="ui-card ui-mod pn-mod" id="pnNet" aria-labelledby="pnNetT">
