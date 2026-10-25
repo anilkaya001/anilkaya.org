@@ -129,3 +129,11 @@
   .dk-all-btn { padding: 0 10px; }
   .dk-panel .dk-select { max-width: 190px; }
 }
+
+@media (pointer: coarse) {
+  .flows-body[data-flows-page="desk"] .tl-find button { position: relative; }
+  .flows-body[data-flows-page="desk"] .tl-find button::after { content: ""; position: absolute; inset: -6px -2px; }
+  .flows-body[data-flows-page="desk"] .dk-all { position: relative; }
+  .flows-body[data-flows-page="desk"] .dk-all::after { content: ""; position: absolute; inset: -6px -4px; }
+  .flows-body[data-flows-page="desk"] .tl .dk-select { height: 44px; }
+}

@@ -4,6 +4,7 @@ import { createRouter } from "../server/router.js";
 import { flowsDeskRows } from "../server/routes/flows-desk.js";
 import { RANK_KEYS } from "../shared/flows-premium.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
+import { loadMutated } from "./truth/mutants.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -40,6 +41,12 @@ function scenario(over = {}) {
 }
 
 const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function realExpiry(text) {
+  if (!EXPIRY_RE.test(text)) return false;
+  const [y, m, d] = text.split("-").map(Number);
+  const at = new Date(Date.UTC(y, m - 1, d));
+  return y >= 2000 && y <= 2100 && at.getUTCFullYear() === y && at.getUTCMonth() === m - 1 && at.getUTCDate() === d;
+}
 async function reference(path, rc, d) {
   const { url, env, ctx, session } = rc;
   const requireTicker = K.requireTicker;
@@ -72,8 +79,8 @@ async function reference(path, rc, d) {
     const ticker = requireTicker(url);
     const rawExpiry = url.searchParams.get("expiry");
 
-    if (rawExpiry !== null && !EXPIRY_RE.test(rawExpiry)) {
-      throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
+    if (rawExpiry !== null && !realExpiry(rawExpiry)) {
+      throw new HttpError(400, "invalid_expiry", "Expiry must be a real date, YYYY-MM-DD, between 2000 and 2100");
     }
     const expiry = rawExpiry === null ? null : rawExpiry;
     const engine = expiry !== null && url.searchParams.get("engine") === "1";
@@ -106,7 +113,8 @@ const CHAIN_QS = ["", "&strategy=csp", "&strategy=cc", "&strategy=both", "&strat
   ...RANK_KEYS.map((k) => "&rank=" + k), "&rank=nonsense", "&rank=", "&refresh=1", "&refresh=0", "&refresh=true",
   "&strategy=csp&rank=premium&refresh=1", "&strategy=cc&rank=cushionSigmas"];
 const STRATEGY_QS = ["", "&expiry=2026-10-16", "&expiry=2026-10-16&engine=1", "&expiry=2026-10-16&engine=0", "&engine=1", "&expiry=", "&expiry=2026-1-16",
-  "&expiry=2026-10-16x", "&expiry=2026-10-16&refresh=1", "&refresh=1", "&expiry=9999-99-99&engine=1", "&expiry=%202026-10-16"];
+  "&expiry=2026-10-16x", "&expiry=2026-10-16&refresh=1", "&refresh=1", "&expiry=9999-99-99&engine=1", "&expiry=%202026-10-16",
+  "&expiry=2026-02-30", "&expiry=2026-13-45&engine=1", "&expiry=2026-00-10", "&expiry=2025-02-29", "&expiry=0099-01-01", "&expiry=2024-02-29", "&expiry=2100-12-31", "&expiry=2101-01-01", "&expiry=1999-12-31", "&expiry=2026-04-31&engine=1"];
 
 const CASES = [];
 for (const t of TICKERS) {
@@ -154,9 +162,33 @@ for (const t of TICKERS) {
   await rows.find("/api/flows/strategy").handler(rc("/api/flows/strategy?t=NVDA&engine=1"));
   eq(log[1][1], "https://flows-strategy.internal/NVDA", "no expiry reads the context and drops the engine flag");
   const bad = await outcome(() => rows.find("/api/flows/strategy").handler(rc("/api/flows/strategy?t=NVDA&expiry=tomorrow")));
-  eq(bad.threw, { status: 400, code: "invalid_expiry", message: "Expiry must be YYYY-MM-DD", headers: undefined, details: undefined }, "a malformed expiry is 400 before any gate or vendor work");
+  eq(bad.threw, { status: 400, code: "invalid_expiry", message: "Expiry must be a real date, YYYY-MM-DD, between 2000 and 2100", headers: undefined, details: undefined }, "a malformed expiry is 400 before any gate or vendor work");
   const noTicker = await outcome(() => rows.find("/api/flows/live").handler(rc("/api/flows/live")));
   eq(noTicker.threw.status, 400, "a missing ticker is 400");
+}
+
+{
+  const impossible = ["2026-02-30", "2026-13-45", "2026-00-10", "2025-02-29", "0099-01-01", "2026-04-31", "1999-12-31", "2101-01-01", "2026-10-00"];
+  const real = ["2024-02-29", "2026-10-16", "2000-01-01", "2100-12-31", "2026-12-31"];
+  const probe = async (mod, expiry) => {
+    const { log, deps } = scenario();
+    const rows = createRouter(mod.flowsDeskRows(deps));
+    const rc = { request: req("GET", "/x"), env: {}, url: new URL("https://anilkaya.org/api/flows/strategy?t=NVDA&engine=1&expiry=" + expiry), ctx: { tag: "c" }, session: { id: "m" } };
+    const out = await outcome(() => rows.find("/api/flows/strategy").handler(rc));
+    return { out, log };
+  };
+  for (const expiry of impossible) {
+    const { out, log } = await probe({ flowsDeskRows }, expiry);
+    eq([out.threw && out.threw.status, out.threw && out.threw.code, log.length], [400, "invalid_expiry", 0], `${expiry} is 400 invalid_expiry with no gate built, no cache key and no vendor call`);
+  }
+  for (const expiry of real) {
+    const { out, log } = await probe({ flowsDeskRows }, expiry);
+    ok(out.status === 200 && log.some((l) => l[0] === "expiry"), `${expiry} is a real date and reaches the builder`);
+  }
+  const regexOnly = await loadMutated("server/routes/flows-desk.js", [["if (rawExpiry !== null && !validExpiry(rawExpiry)) {", "if (rawExpiry !== null && !/^\\d{4}-\\d{2}-\\d{2}$/.test(rawExpiry)) {"]]);
+  let caught = 0;
+  for (const expiry of impossible) { const { out } = await probe(regexOnly, expiry); if (!out.threw) caught++; }
+  eq(caught, impossible.length, "PLANTED WRONG BUILD: a pattern-only check lets every impossible date through to the vendor, and this block fails it");
 }
 
 {

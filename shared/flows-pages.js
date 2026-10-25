@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "390";
+export const ASSET_VERSION = "391";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -217,7 +217,7 @@ const toolbar = (title, active, hero) => `
           aria-expanded="false" aria-label="Sidebar">${glyph("sidebar")}</button>
   <span class="fx-bar-t" id="fxBarT" aria-hidden="true">${title}</span>
   <span class="fx-bar-sp"></span>
-  <a class="fx-search" id="fxSearch" href="/flows/ticker/" aria-haspopup="dialog"
+  <a class="fx-search" id="fxSearch" href="/flows/ticker/" aria-haspopup="dialog" aria-label="Search"
      aria-keyshortcuts="Meta+K Control+K">${glyph("search")}<span class="fx-search-l">Search</span><kbd>&#8984;K</kbd></a>${dockTab(active)}
   <button type="button" class="ui-fresh" id="fxFresh" data-state="pending"
           aria-haspopup="dialog" aria-label="Freshness">${glyph("pending")}<span class="fx-fresh-l">Session</span></button>
@@ -665,16 +665,16 @@ export function deskPage({ username = "" } = {}) {
     <p class="visually-hidden" id="deskFoot" role="note"></p>
   </div>
   <div id="dkCopy" hidden>
-      <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Covered calls are sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted. Write 25000, 25,000 or 25k; a comma marks thousands only. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
-      <p data-k="bp-bad">That is not a balance this desk can read. Write 25000, 25,000 or 25k; a comma marks thousands only, so 25,5k is refused rather than guessed.</p>
+      <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Covered calls are sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted. Write 25000, 25,000 or 25k; a comma marks thousands only and cents stop at two decimals. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
+      <p data-k="bp-bad">That is not a balance this desk can read. Write 25000, 25,000 or 25k; a comma marks thousands only, so 25,5k is refused rather than guessed, and cents stop at two decimals, so 1.005 is refused rather than rounded.</p>
       <p data-k="cc-size">Sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted.</p>
       <p data-k="frontier">Every line on the list that has an engine reading, as a point: annualised time-value yield up, risk across. The frontier joins the lines no other line beats on both, so a point below it pays less for the same risk. It follows the tenor window above, and annualising a line of one to three days mostly ranks shortness.</p>
       <p data-k="unplotted">Not plotted, for want of an engine reading: {n}.</p>
       <p data-k="frontier-x">The yield axis is a square-root scale: equal steps up are equal steps in the square root of the yield, which spreads the crowded low yields, and its ticks sit on that scale, zero included. The yield is the time value the bid pays, annualised. Net delta is the position&#39;s exposure to the stock, from the short option&#39;s forward delta on its own implied volatility: the put&#39;s delta, and for a covered call one minus the call&#39;s delta, because the shares add one. Win % (implied) is the risk-neutral chance the position ends in profit, on the card&#39;s smile shape levelled to the same volatility; it is not a forecast. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="engine">Each line is priced by the same engine as the strategy lab, on the nightly card&#39;s smile shape re-levelled to this contract&#39;s own implied volatility, inverted from its mid (for an in-the-money strike, from the out-of-the-money quote at the same strike), or on a flat slice at that volatility where the card lists no smile near the expiry. The rate and dividend yield are the card&#39;s, the constant 4% where it measured no rate. The real-world figures use the GARCH law the name&#39;s card publishes, and are an em dash where no card carries one, or where an earnings report falls inside the expiry and the card holds no report move to weigh it.</p>
       <p data-k="premium">Premium is what the bid pays today; the mid is not a price anyone must trade at. Where a strike is in the money, part of the premium is intrinsic value that assignment returns rather than keeps, and the annualised figure counts only the time value.</p>
-      <p data-k="annualized">Time value over the collateral, scaled by 365 over the days to expiry: a convention for comparing tenors, not a return anyone earns. A premium grows with the square root of time, not in proportion to it, so annualising a line of one to three days mostly ranks shortness. The per-week figure in a line&#39;s disclosure is the same yield scaled to seven days.</p>
-      <p data-k="cushion">Distance from spot to breakeven in units of the move a volatility prices over the line&#39;s remaining life. Not a probability. A line&#39;s disclosure states the volatility its cushion is measured in, inverted from the mid at the forward the interest rate alone gives, and the one delta, win % and EV use, inverted from the mid at the card&#39;s forward with its dividend yield. The two differ by a hair on a name that pays a dividend.</p>
+      <p data-k="annualized">Time value over the collateral, scaled by 365 over the days to expiry: a convention for comparing tenors, not a return anyone earns. A premium grows with the square root of time, not in proportion to it, so annualising a line of one to three days mostly ranks shortness. The per-week figure in a line&#39;s disclosure is the same yield scaled to seven days. Every line assumes the option is held to expiry: an in-the-money call whose time value is below a dividend paid before expiry, or a deep in-the-money put whose time value is below the interest on its strike, is likely to be assigned early, and its annualised figure then overstates what is earned.</p>
+      <p data-k="cushion">Distance from spot to breakeven in units of the move a volatility prices over the line&#39;s remaining life. Not a probability. A line&#39;s disclosure states the volatility its cushion is measured in, inverted from the mid at the forward the chain&#39;s own put-call parity places for that expiry (else the card&#39;s implied carry, else the interest rate alone), and the one delta, win % and EV use, inverted from the mid at the card&#39;s forward with its dividend yield. The two forwards agree where the card sees what the chain sees; a name with a dividend the card lacks, or one that is costly to borrow, can differ by well over a hair, and the line&#39;s Forward fact says which forward the cushion used.</p>
       <p data-k="t-ann">Time-value yield, annualised: the bid less any intrinsic value, over the collateral, scaled by 365 over the days to expiry.</p>
       <p data-k="t-pq">Chance the position ends in profit under the risk-neutral density of the card&#39;s smile shape levelled to this contract&#39;s implied volatility, or flat at it where the card lists no smile near the expiry. Not a forecast.</p>
       <p data-k="t-pp">Chance the position ends in profit under the real-world law this name&#39;s card publishes.</p>
@@ -720,7 +720,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fr-aria">Annualised yield, square-root scale, against {x} for {n} lines</p>
       <p data-k="fr-key">Frontier. Use the arrow keys to step through the lines.</p>
       <p data-k="fr-none">No line carries both a risk reading and a yield.</p>
-      <p data-k="rank-bp">Enter a buying power to rank by premium collectible.</p>
+      <p data-k="rank-bp">Enter a buying power to rank by time value collectible.</p>
       <p data-k="sym-bad">That is not a symbol this desk can price.</p>
       <p data-k="y-cc">of stock bought with the option (100 shares, a buy-write)</p>
       <p data-k="y-csp">of cash reserved (cash-secured)</p>
@@ -734,7 +734,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
       <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised premium over collateral up, delta across. Premium is the time value the bid pays; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
-      <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta, drawn as a magnitude. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back, and every ratio counts only the time value.</p>
       <p data-k="sc-contracts">100 options sold is read as 100 contracts of 100 shares, 10,000 shares in all. To mean 100 option-shares, enter 1.</p>
       <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
@@ -757,7 +757,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-why-no-collateral">The convention asks for no collateral here, so no ratio is formed.</p>
       <p data-k="sc-why-bad-terms">The haircut or floor is outside its allowed range.</p>
       <p data-k="sc-fr-aria">Annualised premium over collateral, square-root scale, against {x} for {n} calls. Collateral convention: {conv}.</p>
-      <p data-k="sc-plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} call expiring {e} collects {c}, ties up {d} of collateral under {conv} and leaves {i} idle. Best means the largest gross premium one line collects — not annualised and not risk-adjusted — and counts at most {N} contracts.</p>
+      <p data-k="sc-plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} call expiring {e} earns {c} of time value, ties up {d} of collateral under {conv} and leaves {i} idle. Best means the line that earns the most time value within your buying power — not annualised and not risk-adjusted — and counts at most {N} contracts.</p>
       <p data-k="t-ratio">Time value over collateral for one trip to expiry: the bid less any intrinsic value, over the collateral the stated convention asks. Not a return anyone earns until the call expires out of the money.</p>
       <p data-k="t-collat">What the stated convention asks for the contracts shown. See the information button for the formula.</p>
       <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
@@ -775,22 +775,37 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="f-slice">This list is a slice: {parts} — {n} {lines} below the cut {is} not on this list, and re-sorting the ones that are cannot bring them back — so changing the ranking refetches {names} rather than reordering what is already here.</p>
       <p data-k="f-part">{sym} shows its top {kept} of {sell} sellable lines, ranked by {by}</p>
       <p data-k="f-cut">{who} {has} more contracts than this desk fetches, so {its} ranking is taken over a partial chain.</p>
-      <p data-k="plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} {w} expiring {e} collects {c}, deploying {d} and leaving {i} idle ({y} on capital committed). Best means the largest gross premium one line collects — not annualised and not risk-adjusted, so it favours the longest tenor{itm}; the list ranks by {by}.</p>
-      <p data-k="plan-itm">and, here, an in-the-money strike whose premium is partly intrinsic value</p>
+      <p data-k="plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} {w} expiring {e} earns {c} of time value over the line&#39;s life, deploying {d} and leaving {i} idle ({y} of time value on capital committed). Best means the line that earns the most time value in dollars within your buying power — not annualised and not risk-adjusted, so it favours the longest tenor; the list ranks by {by}.</p>
+      <p data-k="plan-itm">Of the cash in, {x} is the option&#39;s in-the-money value at today&#39;s price, not income; the time value is {t}.</p>
       <p data-k="plan-no">{bp} does not cover a single contract here.</p>
       <p data-k="plan-min">The cheapest line ties up {c}.</p>
+      <p data-k="plan-tv0">{a} lines fit inside {bp}, but none has time value left at these quotes, so none earns anything.</p>
       <p data-k="bp-ask">Enter a balance to size every line.</p>
       <p data-k="e-win">No line on the desk expires inside this window.</p>
       <p data-k="e-sel">Select a symbol to see its lines.</p>
       <p data-k="e-add">Add a symbol to see its option sales.</p>
       <p data-k="col-none">This line has no quotable collateral or premium to size against.</p>
       <p data-k="col-no">One contract ties up {c}, which is more than {b}. Nothing to collect here.</p>
-      <p data-k="col-ok">{n} contract{s} at {p} each. Deploys {d} of {b}, leaving {i} idle — a return of {y} on the capital actually committed.</p>
+      <p data-k="col-ok">{n} contract{s} at {p} each. Deploys {d} of {b}, leaving {i} idle — a return of {y} in time value on the capital actually committed, the figure the Earns column shows in dollars.</p>
+      <p data-k="col-itm">Cash in {g}: {t} time value and {x} in-the-money value at today&#39;s price, which is not income.</p>
+      <p data-k="col-tv-none">This line carries no time value figure, so it is not sized rather than sized on its whole premium.</p>
       <p data-k="t-link">Open {t} on the analysis page. Cards are built only for the names on today&#39;s board; if this one is not among them the page says so.</p>
       <p data-k="lab-a">Open the {t} {k} {w} expiring {e} in the strategy lab</p>
       <p data-k="earn-crosses">Expires after the next earnings report: the cushion on this line is a diffusion number priced against a jump.</p>
       <p data-k="earn-unknown">Whether this contract outlives the next earnings report could not be determined. Treat the cushion with that in mind.</p>
-      <p data-k="stale-q">Quotes are older than this desk will call a price, so treat the list as a record of the market rather than one you can trade; Refresh requotes it.</p>
+      <p data-k="stale-q">Quotes are older than this desk will call a price, so treat the list as a record of the market rather than one you can trade.</p>
+      <p data-k="stale-r">Refresh requotes it.</p>
+      <p data-k="kept-throttled">{who} is shown from the copy kept at {at}: the rate limit refused a fresh read, so Refresh returns the same copy until it lifts.</p>
+      <p data-k="kept-other">{who} is shown from the copy kept at {at}: a fresh read could not be made just now. Refresh asks again.</p>
+      <p data-k="earn-past">{sym}: its last listed report date, {md}, has passed and the next one is not published, so whether a line outlives the next report is not determined.</p>
+      <p data-k="earn-printed">{sym}: the report dated {md} comes before the next sale can be made and the next date is not published, so whether a line outlives the next report is not determined.</p>
+      <p data-k="earn-undetermined">{sym} reports {md} — whether a line expires after it is not determined, for {n} line{s}.</p>
+      <p data-k="fwd-parity">{f}, the chain&#39;s own put-call parity over {n} strikes. The cushion&#39;s volatility is inverted at it.</p>
+      <p data-k="fwd-carry">{f}, from the card&#39;s implied carry: the chain placed no parity forward for this expiry.</p>
+      <p data-k="fwd-rate">the interest rate alone: the chain placed no parity forward for this expiry and the card holds no usable carry.</p>
+      <p data-k="fwd-none">this payload did not name a forward for this expiry.</p>
+      <p data-k="fwd-engine">The engine prices delta, win % and EV on {g} (the card&#39;s carry), {d} from it.</p>
+      <p data-k="fwd-engine-same">The engine prices delta, win % and EV on {g} (the card&#39;s carry).</p>
       <p data-k="sm-ex">Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion.</p>
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>
       <p data-k="sm-exu">Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.</p>

@@ -1,7 +1,13 @@
 import { HttpError, internalKey, requireTicker } from "../http.js";
-import { RANK_KEYS } from "../../shared/flows-premium.js";
+import { RANK_KEYS, isRealDate } from "../../shared/flows-premium.js";
 
-const EXPIRY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EXPIRY_YEARS = [2000, 2100];
+
+const validExpiry = (text) => {
+  if (!isRealDate(text)) return false;
+  const year = Number(text.slice(0, 4));
+  return year >= EXPIRY_YEARS[0] && year <= EXPIRY_YEARS[1];
+};
 
 const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + name, methods: ["GET"], auth: "flows", handler });
 
@@ -30,8 +36,8 @@ export function flowsDeskRows(deps) {
     const ticker = requireTicker(url);
     const rawExpiry = url.searchParams.get("expiry");
 
-    if (rawExpiry !== null && !EXPIRY_RE.test(rawExpiry)) {
-      throw new HttpError(400, "invalid_expiry", "Expiry must be YYYY-MM-DD");
+    if (rawExpiry !== null && !validExpiry(rawExpiry)) {
+      throw new HttpError(400, "invalid_expiry", "Expiry must be a real date, YYYY-MM-DD, between 2000 and 2100");
     }
     const expiry = rawExpiry === null ? null : rawExpiry;
     const engine = expiry !== null && url.searchParams.get("engine") === "1";

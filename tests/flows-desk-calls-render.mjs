@@ -185,7 +185,7 @@ try {
     const plan = await page.$eval("#deskPlan", (n) => n.dataset.plan);
     const { best, affordable } = P.planShortCalls(lines.map((w) => w.line));
     const bw = lines.find((w) => w.line === best);
-    ok(plan.includes(`${best.n}× ${bw.r.ticker} ${bw.r.strike.toFixed(2)} call expiring ${bw.r.expiry} collects ${usdC(best.premiumC)}`), `the plan names the largest gross premium (${plan.slice(0, 120)})`);
+    ok(plan.includes(`${best.n}× ${bw.r.ticker} ${bw.r.strike.toFixed(2)} call expiring ${bw.r.expiry} earns ${usdC(best.timeValueC)} of time value`), `the plan names the line that earns the most time value (${plan.slice(0, 120)})`);
     ok(plan.includes(`${affordable} of ${lines.length} lines affordable`) && plan.includes("counts at most 100 contracts"), "with its affordable count and the ask as a ceiling");
     ok(/Delta 30% of notional, floor 10%/.test(plan), "and the convention in its sentence");
     ok((await page.$eval("#dkP-frontier, #dkP-plan", (n) => n.textContent)).includes("Uncovered: loss has no cap."), "the uncovered chip is on the page");

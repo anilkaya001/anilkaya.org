@@ -452,7 +452,7 @@ try {
 
     const status = await statusText();
     ok(/AAA reports 09-10/.test(status), `the status names the report date (${status})`);
-    ok(/BBB has no known earnings date/.test(status), "and says which symbol it could not date");
+    ok(/BBB earnings date not read: the data provider.s company read did not answer/.test(status), "and says which symbol it could not date, and that the read itself did not answer, rather than that the company has no date");
   }
 
   {
@@ -593,7 +593,7 @@ try {
     }
     ok(expected.size >= 3, `the fixture priced enough lines to size (${expected.size})`);
 
-    eq(await page.locator("#dkList .dk-col").count(), 0, "no Collect column before a buying power is entered");
+    eq(await page.locator("#dkList .dk-col").count(), 0, "no Earns column before a buying power is entered");
     eq(await page.locator("#deskPlan").isHidden(), true, "and no plan");
 
     const chainRequests = [];
@@ -604,7 +604,7 @@ try {
     await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-col").length > 0, null, { timeout: 5000 });
     eq(upstreamCalls, callsBefore, "sizing to a balance spends no vendor call — it is arithmetic on rows already here");
     eq(chainRequests.length, 0, "and issues no request at all");
-    ok(await page.locator("#dkList .dk-head").evaluate((n) => /Collect/.test(n.textContent)), "the Collect column is drawn");
+    ok(await page.locator("#dkList .dk-head").evaluate((n) => /Earns/.test(n.textContent) && !/Collect/.test(n.textContent)), "the Earns column is drawn, and is no longer called Collect");
 
     const rows = await page.$$eval(ROWS, (rs) => rs.map((r) => {
       const c = r.querySelector(".dk-col");
@@ -621,8 +621,8 @@ try {
         ok(r.unaffordable, "and the cell is marked as a verdict rather than a figure");
         ok(r.title && /more than/.test(r.title), `and says by how much it misses (${r.title})`);
       } else {
-        const dollars = "$" + Math.round(want.collectible).toLocaleString("en-US");
-        eq(r.text, `${dollars} (${want.contracts}×)`, `${r.ticker} ${r.strike} collects what sizeToBuyingPower() says it does`);
+        const dollars = "$" + Math.round(want.timeValue).toLocaleString("en-US");
+        eq(r.text, `${dollars} (${want.contracts}×)`, `${r.ticker} ${r.strike} earns the time value sizeToBuyingPower() says it does`);
         ok(r.title && r.title.includes("$" + Math.round(want.deployed).toLocaleString("en-US")), "and the title names the capital it deploys");
         ok(r.title && r.title.includes("$" + Math.round(want.idle).toLocaleString("en-US")),
            "and what it leaves idle — the number a yield percentage hides");
@@ -634,7 +634,7 @@ try {
     const plan = await page.locator("#deskPlan").getAttribute("data-plan");
     ok(/\$10,000 buying power/.test(plan), `the plan states the balance (${plan})`);
     ok(/best single deployment: 2× AAA 47\.00 cash-secured put/.test(plan), `and names the best line, not the highest yield (${plan})`);
-    ok(/collects \$380/.test(plan), "with what it collects");
+    ok(/earns \$380 of time value/.test(plan), "with the time value it earns");
     ok(/leaving \$600 idle/.test(plan), "and the idle cash, which is the cost integer division imposes");
     const planInfo = await openInfo(page.locator('#deskPlan [aria-label="About the best deployment"]'));
     ok(planInfo.includes("best single deployment: 2× AAA 47.00 cash-secured put"), "the whole sentence is one tap away on the plan");
@@ -647,9 +647,9 @@ try {
       const dollars = (s) => Number(String(s).replace(/[^0-9.]/g, ""));
       const best = dollars(await page.locator("#deskPlan .ui-metric").first().locator(".ui-metric-v").textContent());
       const alts = (await page.$$eval("#dkSizingM .dk-alt b", (bs) => bs.map((b) => b.textContent))).map(dollars);
-      const affordable = rows.filter((r) => r.want.affordable).map((r) => Math.round(r.want.collectible)).sort((a, b) => b - a);
-      eq(best, affordable[0], "the best deployment's collect is the largest any affordable line collects");
-      assert.deepEqual(alts, affordable.slice(1, 3), "and the next two are the runners-up in order, so the plan is a ranking and not a single pick"); checks++;
+      const ordered = rows.filter((r) => r.want.affordable && r.want.timeValueC > 0).sort((a, b) => b.want.timeValueC - a.want.timeValueC || a.want.deployedC - b.want.deployedC);
+      eq(best, Math.round(ordered[0].want.timeValue), "the best deployment is the line that earns the most time value, and its Earns is that time value");
+      assert.deepEqual(alts, ordered.slice(1, 3).map((r) => Math.round(r.want.timeValue)), "and the next two are the runners-up by time value in order, so the plan is a ranking and not a single pick"); checks++;
     }
 
     assert.deepEqual(await tickers(), ["AAA", "BBB", "AAA"], "before the switch the list is ranked by the default key"); checks++;
@@ -659,7 +659,7 @@ try {
       const t = Array.from(document.querySelectorAll("#dkList .dk-row")).map((r) => r.dataset.t);
       return t.length === 3 && t[1] === "AAA";
     }, null, { timeout: 5000 }).catch(() => {});
-    assert.deepEqual(await tickers(), ["AAA", "AAA", "BBB"], "ranking by premium collectible sinks the line this account cannot buy"); checks++;
+    assert.deepEqual(await tickers(), ["AAA", "AAA", "BBB"], "ranking by time value collectible sinks the line this account cannot buy"); checks++;
     eq(upstreamCalls, callsBefore, "and re-ranking still spends no vendor call");
     await showView(page, "frontier");
 
@@ -1125,7 +1125,7 @@ try {
 
     {
       eq(await page.locator("#deskBP").inputValue(), "", "no balance is entered here");
-      eq(await page.locator("#dkList .dk-col").count(), 0, "so there is no Collect column");
+      eq(await page.locator("#dkList .dk-col").count(), 0, "so there is no Earns column");
       const cells = await page.$$eval(ROWS, (rs) => rs.map((r) => ({
         strike: Number(r.dataset.strike), away: r.dataset.away, collateral: r.dataset.collateral,
         line: r.querySelector(".dk-meta").textContent, sub: (r.querySelector(".dk-prem .dk-sub") || {}).textContent || "",

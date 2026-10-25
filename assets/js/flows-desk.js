@@ -4,6 +4,7 @@
   const MAX_BUYING_POWER = 1e11;
   const LOT = 100;
   const TENORS = [["All", 0, 1e9], ["≤ 2w", 0, 14], ["2–6w", 15, 42], ["> 6w", 43, 1e9]];
+  const TENOR_KEYS = ["all", "2w", "6w", "long"];
 
   const isNum = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -11,22 +12,40 @@
     return Number.isFinite(n) ? n : null;
   };
 
+  const BP_RE = /^\$?\s*(?:(\d{1,3}(?:,\d{3})+)|(\d{1,3}(?: \d{3})+)|(\d{1,3}(?:_\d{3})+)|(\d+))?(?:\.(\d+))?\s*([kmb])?$/i;
+  const BP_POWER = { k: 3, m: 6, b: 9 };
+
   function parseBuyingPower(raw) {
-    const text = String(raw === null || raw === undefined ? "" : raw).trim().toLowerCase().replace(/^\$\s*/, "");
-    const m = /^((?:\d{1,3}(?:[, _]\d{3})+|\d+)?(?:\.\d+)?)\s*([kmb])?$/.exec(text);
-    if (!m || !/\d/.test(m[1])) return null;
-    const v = Math.round(Number(m[1].replace(/[, _]/g, "")) * (m[2] === "b" ? 1e9 : m[2] === "m" ? 1e6 : m[2] === "k" ? 1e3 : 1) * 100) / 100;
-    return v > 0 && v <= MAX_BUYING_POWER ? v : null;
+    const text = String(raw === null || raw === undefined ? "" : raw).replace(/[\u00a0\u2009\u202f]/g, " ").trim();
+    const m = BP_RE.exec(text);
+    if (!m) return null;
+    const whole = (m[1] || m[2] || m[3] || m[4] || "").replace(/[, _]/g, ""), frac = m[5] || "";
+    if (!whole && !frac) return null;
+    const shift = (m[6] ? BP_POWER[m[6].toLowerCase()] : 0) + 2 - frac.length;
+    if (shift < 0) return null;
+    const digits = (whole + frac + "0".repeat(shift)).replace(/^0+/, "");
+    if (!digits || digits.length > 14) return null;
+    const cents = Number(digits);
+    return cents > 0 && cents <= MAX_BUYING_POWER * 100 ? cents / 100 : null;
   }
 
   function sizeRow(row, bp) {
-    const collateral = isNum(row && row.collateral), premium = isNum(row && row.premium);
+    const collateral = isNum(row && row.collateral), premium = isNum(row && row.premium), extrinsic = isNum(row && row.extrinsic);
     if (bp === null || !(bp > 0) || collateral === null || !(collateral > 0) || premium === null || !(premium > 0)) return null;
-    const cents = Math.round(collateral * 100);
-    if (!(cents > 0)) return null;
-    const total = Math.round(bp * 100), contracts = Math.floor(total / cents);
-    const deployed = contracts * cents / 100;
-    return { contracts, affordable: contracts > 0, collectible: contracts * premium, deployed, idle: (total - contracts * cents) / 100, yieldOnDeployed: deployed > 0 ? (contracts * premium) / deployed : null };
+    const collateralC = Math.round(collateral * 100), premiumC = Math.round(premium * 100);
+    if (!(collateralC > 0)) return null;
+    const timeC = extrinsic === null ? null : Math.max(0, Math.min(premiumC, Math.round(extrinsic * 1e4)));
+    const bpC = Math.round(bp * 100), contracts = Math.floor(bpC / collateralC);
+    const deployedC = contracts * collateralC, grossC = contracts * premiumC, timeValueC = timeC === null ? null : contracts * timeC;
+    return {
+      contracts, affordable: contracts > 0, collectible: grossC / 100, timeValue: timeValueC === null ? null : timeValueC / 100, intrinsicValue: timeValueC === null ? null : (grossC - timeValueC) / 100,
+      deployed: deployedC / 100, idle: (bpC - deployedC) / 100, yieldOnDeployed: deployedC > 0 && timeValueC !== null ? timeValueC / deployedC : null, timeValueC, deployedC,
+    };
+  }
+
+  function betterDeployment(a, b) {
+    if (a.timeValueC !== b.timeValueC) return a.timeValueC > b.timeValueC;
+    return a.deployedC < b.deployedC;
   }
 
   function netDelta(e) {
@@ -44,12 +63,12 @@
     const dir = chance ? -1 : 1;
     const out = [];
     let best = -Infinity;
-    for (const p of pts.slice().sort((a, b) => dir * (a.x - b.x) || b.y - a.y)) if (p.y > best + 1e-12) { out.push(p); best = p.y; }
+    for (const p of pts.filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y)).sort((a, b) => dir * (a.x - b.x) || b.y - a.y)) if (p.y > best + 1e-12) { out.push(p); best = p.y; }
     return chance ? out.reverse() : out;
   }
 
   if (typeof document === "undefined") {
-    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, netDelta, frontierOf });
+    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, betterDeployment, netDelta, frontierOf });
     return;
   }
 
@@ -73,8 +92,8 @@
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const SIDES = ["csp", "cc", "both", "sc"];
   const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "cc" };
-  const RANKS = [["annualized", "Annualised yield"], ["premium", "Premium received"], ["yieldOnCollateral", "Yield on collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Premium collectible"], ["edge", "EV real world"]];
-  const SC_RANKS = [["annualized", "Annualised ratio"], ["ratio", "Premium ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Premium collectible"], ["edge", "EV real world"]];
+  const RANKS = [["annualized", "Annualised yield"], ["premium", "Premium received"], ["yieldOnCollateral", "Yield on collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
+  const SC_RANKS = [["annualized", "Annualised ratio"], ["ratio", "Premium ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
   const ranksFor = () => (side === "sc" ? SC_RANKS : RANKS);
   const calls = () => (side === "sc" ? window.FlowsUI.deskCalls || null : null);
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
@@ -88,9 +107,10 @@
   const say = (text) => { statusEl.textContent = text; statusEl.classList.remove("visually-hidden"); statusOwned = false; };
 
   const fmt2 = (v) => { const n = isNum(v); return n === null ? DASH : n.toFixed(2); };
-  const fmtMoney = (v) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + "$" + Math.round(Math.abs(n)).toLocaleString("en-US"); };
-  const fmtPct = (v, d = 1) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + (Math.abs(n) * 100).toFixed(d) + "%"; };
-  const fmtSd = (v) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + Math.abs(n).toFixed(2) + " SD"; };
+  const minusOf = (n, magnitude) => (n < 0 && Number(magnitude) !== 0 ? MINUS : "");
+  const fmtMoney = (v) => { const n = isNum(v); if (n === null) return DASH; const a = Math.round(Math.abs(n)); return minusOf(n, a) + "$" + a.toLocaleString("en-US"); };
+  const fmtPct = (v, d = 1) => { const n = isNum(v); if (n === null) return DASH; const a = (Math.abs(n) * 100).toFixed(d); return minusOf(n, a) + a + "%"; };
+  const fmtSd = (v) => { const n = isNum(v); if (n === null) return DASH; const a = Math.abs(n).toFixed(2); return minusOf(n, a) + a + " SD"; };
   const fmtInt = (v) => { const n = isNum(v); return n === null ? DASH : Math.round(n).toLocaleString("en-US"); };
   const kf = (K) => String(+(+K).toFixed(2));
   const sg = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
@@ -118,6 +138,8 @@
       if (SIDES.includes(st)) side = st;
       const r = q.get("rank");
       if (r && ranksFor().some(([k]) => k === r)) rank = r;
+      const tk = TENOR_KEYS.indexOf(q.get("tenor"));
+      if (tk >= 0) tenor = tk;
       buyingPower = parseBuyingPower(q.get("bp"));
       if (rank === "collectible" && buyingPower === null) rank = "annualized";
       const sf = String(q.get("surface") || "").trim().toUpperCase();
@@ -133,6 +155,7 @@
       if (syms.length) url.searchParams.set("t", syms.join(",")); else url.searchParams.delete("t");
       url.searchParams.set("strategy", side);
       url.searchParams.set("rank", rank);
+      if (tenor !== 0) url.searchParams.set("tenor", TENOR_KEYS[tenor]); else url.searchParams.delete("tenor");
       if (buyingPower !== null) url.searchParams.set("bp", String(buyingPower)); else url.searchParams.delete("bp");
       if (surfaceSymbol !== null && book.has(surfaceSymbol)) url.searchParams.set("surface", surfaceSymbol); else url.searchParams.delete("surface");
       history.replaceState(null, "", url);
@@ -155,6 +178,7 @@
     parts.push(mismatched(p) ? "quotes disagree with the price" : (priced !== null && shown < priced ? fmtInt(shown) + " of " + fmtInt(priced) : fmtInt(priced)) + " sellable" + (p.truncated ? " of a partial chain" : ""));
     const sec = ageOf(p);
     parts.push(sec === null ? "age not stated" : fmtAge(sec));
+    if (e.kept !== null && e.kept !== undefined) parts.push("kept copy");
     return parts.join(" · ");
   }
 
@@ -202,7 +226,9 @@
     allBox.indeterminate = on > 0 && on < book.size;
   }
 
-  const serverRank = (k) => (k === "collectible" || k === "edge" ? "yieldOnCollateral" : k === "ratio" ? "annualized" : k);
+  const serverRank = (k) => (k === "collectible" || k === "edge" || k === "ratio" ? "yieldOnCollateral" : k);
+
+  const invalidate = (entries) => { for (const e of entries) e.seq = (e.seq || 0) + 1; };
 
   function messageFor(status, body) {
     const code = body && body.error && body.error.code;
@@ -225,16 +251,19 @@
     renderChips();
     const params = new URLSearchParams({ t: sym, strategy: SERVER_SIDE[side], rank: serverRank(rank) });
     if (refresh) params.set("refresh", "1");
+    const current = () => book.get(sym) === e && e.seq === seq;
     try {
       const res = await fetch("/api/flows/chain?" + params.toString(), { credentials: "same-origin", deadlineMs: 45000, headers: { Accept: "application/json" } });
       if (res.status === 401) { location.replace("/flows/"); return; }
       const age = isNum(res.headers.get("X-Chain-Age"));
+      const kept = res.headers.get("X-Fresh-State") === "stale" ? String(res.headers.get("X-Fresh-Reason") || "") : null;
       const body = await res.json().catch(() => null);
-      if (e.seq !== seq) return;
-      if (!res.ok) { e.state = "error"; e.error = messageFor(res.status, body); e.payload = null; }
-      else if (!body || typeof body !== "object") { e.state = "error"; e.error = "unreadable response"; e.payload = null; }
+      if (!current()) return;
+      if (!res.ok) { e.state = "error"; e.error = messageFor(res.status, body); e.payload = null; e.kept = null; }
+      else if (!body || typeof body !== "object") { e.state = "error"; e.error = "unreadable response"; e.payload = null; e.kept = null; }
       else {
         e.state = "ok";
+        e.kept = kept;
         e.payload = body;
         body.__age = age === null ? undefined : age;
         body.__at = age === null ? undefined : Date.now();
@@ -242,8 +271,8 @@
         if (body.sessionDate || body.asOf) UI.freshness({ sessionDate: body.sessionDate || body.asOf, generatedAt: body.generatedAt, source: "desk " + sym });
       }
     } catch {
-      if (e.seq !== seq) return;
-      e.state = "error"; e.error = "network error"; e.payload = null;
+      if (!current()) return;
+      e.state = "error"; e.error = "network error"; e.payload = null; e.kept = null;
     }
     renderChips();
     render();
@@ -262,10 +291,12 @@
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
     const rate = eng && eng.rate ? eng.rate : null;
     const spot = spotOf(p), laws = new Map();
+    const forwards = new Map((Array.isArray(p.forwards) ? p.forwards : []).map((f) => [f.expiry, f]));
     const asOfMs = Q ? quoteMs(p) : null;
     const chainDay = /^\d{4}-\d{2}-\d{2}$/.test(String(p.sessionDate || p.asOf || "")) ? String(p.sessionDate || p.asOf) : null;
     for (const r of p.rows || []) {
       r.__day = chainDay;
+      r.__fwd = forwards.get(r.expiry) || null;
       r.__eng = r.__fit = r.__code = r.__setup = null;
       r.__nk = undefined;
       if (!Q) { r.__why = T("why-q"); continue; }
@@ -331,7 +362,7 @@
     for (const r of rows) r.__sizing = sizeRow(r, buyingPower);
     const dc = calls();
     if (dc) dc.annotate(rows, buyingPower);
-    const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.collectible : null) : rank === "edge" ? evP : (r) => r[rank];
+    const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.timeValue : null) : rank === "edge" ? evP : (r) => r[rank];
     rows.sort((a, b) => {
       const x = isNum(key(a)), y = isNum(key(b));
       if (x === null && y === null) return 0;
@@ -410,7 +441,7 @@
     if (mods.scatter) return;
     mods.sideSeg = UI.segmented("Sell", [{ label: "Puts" }, { label: "Calls" }, { label: "Both" }, { label: "Short calls" }], (i) => setSide(SIDES[i]), SIDES.indexOf(side));
     mods.sideSeg.id = "deskStrategy";
-    mods.tenorSeg = UI.segmented("Days to expiry", TENORS.map(([l]) => ({ label: l })), (i) => { tenor = i; render(); }, tenor);
+    mods.tenorSeg = UI.segmented("Days to expiry", TENORS.map(([l]) => ({ label: l })), (i) => { tenor = i; writeURL(); render(); }, tenor);
     mods.tenorSeg.id = "dkTenor";
     placeFilters();
     mods.axisSeg = UI.segmented("Risk axis", [{ label: "Net delta" }, { label: WIN_Q }], (i) => { axis = i; drawScatter(); }, axis);
@@ -563,40 +594,43 @@
       const z = r.__sizing;
       if (!z || !z.affordable) continue;
       affordable++;
-      if (!best || z.collectible > best.__sizing.collectible) best = r;
+      if (z.timeValueC > 0 && (!best || betterDeployment(z, best.__sizing))) best = r;
     }
     plan.hidden = false;
     let sentence;
     if (!best) {
       let cheapest = null;
       for (const r of rows) { const c = isNum(r.collateral); if (c !== null && (cheapest === null || c < cheapest)) cheapest = c; }
-      sentence = T("plan-no", { bp: fmtMoney(buyingPower) }) + (cheapest === null ? "" : " " + T("plan-min", { c: fmtMoney(cheapest) }));
+      sentence = affordable === 0
+        ? T("plan-no", { bp: fmtMoney(buyingPower) }) + (cheapest === null ? "" : " " + T("plan-min", { c: fmtMoney(cheapest) }))
+        : T("plan-tv0", { bp: fmtMoney(buyingPower), a: affordable });
       plan.className = "dk-plan is-empty";
       plan.replaceChildren(UI.metrics([UI.metric("Best line", DASH, { state: { state: "quiet", reason: sentence } })]));
     } else {
       const z = best.__sizing;
       const sideWord = best.strategy === "cc" ? "buy-write covered call" : "cash-secured put";
-      sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.collectible), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), itm: isItm(best) ? " " + T("plan-itm") : "", by: rankWord(rank) });
+      sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.timeValue), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), by: rankWord(rank) });
       plan.className = "dk-plan";
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.contracts + "× " + best.ticker + " " + kf(best.strike) + (best.strategy === "cc" ? " call" : " put")), h("span", null, F.day(best.expiry))),
-        UI.metrics([UI.metric("Collects", fmtMoney(z.collectible), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", fmtMoney(z.timeValue), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle))], { min: 76 }),
         UI.split([{ color: "--accent", value: z.deployed / buyingPower }, { color: "--fill-2", value: z.idle / buyingPower }], "Deploys " + fmtMoney(z.deployed) + " of " + fmtMoney(buyingPower) + ", " + fmtMoney(z.idle) + " idle"),
-        h("p", { class: "dk-hint" }, affordable + " of " + rows.length + " lines affordable"));
-      const next = rows.filter((r) => r !== best && r.__sizing && r.__sizing.affordable).sort((a, b) => b.__sizing.collectible - a.__sizing.collectible).slice(0, 2);
+        h("p", { class: "dk-hint" }, affordable + " of " + rows.length + " lines affordable"),
+        z.intrinsicValue > 0 ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: fmtMoney(z.intrinsicValue), t: fmtMoney(z.timeValue) })) : null);
+      const next = rows.filter((r) => r !== best && r.__sizing && r.__sizing.affordable && r.__sizing.timeValueC > 0).sort((a, b) => (betterDeployment(a.__sizing, b.__sizing) ? -1 : betterDeployment(b.__sizing, a.__sizing) ? 1 : 0)).slice(0, 2);
       if (next.length) {
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
           next.map((r) => h("div", { class: "dk-alt", role: "listitem" },
             h("span", null, r.__sizing.contracts + "× " + r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put")),
-            h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, fmtMoney(r.__sizing.collectible))))));
+            h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, fmtMoney(r.__sizing.timeValue))))));
       }
     }
     plan.dataset.plan = sentence;
   }
 
   function listHead(dc) {
-    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Collect", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
+    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Earns", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
   }
 
   function fillList(box, rows, dc) {
@@ -668,9 +702,10 @@
     const cell = (cls, label, text, tone, title) => h("span", { class: "dk-c " + cls, "data-tone": tone || null, title: title || null }, h("small", null, label), text);
     const pq = popQ(r), pp = popP(r), ev = evP(r);
     const noEng = r.__eng ? null : r.__why || T("why-eng"), noLaw = r.__eng && pp === null ? lawNote(r) : null;
-    const collect = buyingPower === null ? null : !z ? cell("dk-col", "Collect", DASH, null, T("col-none"))
-      : !z.affordable ? cell("dk-col is-unaffordable", "Collect", "$0", "silent", T("col-no", { c: fmtMoney(r.collateral), b: fmtMoney(buyingPower) }))
-        : cell("dk-col", "Collect", fmtMoney(z.collectible) + " (" + z.contracts + "×)", "up", T("col-ok", { n: z.contracts, s: z.contracts === 1 ? "" : "s", p: fmtMoney(r.premium), d: fmtMoney(z.deployed), b: fmtMoney(buyingPower), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2) }) + (r.strategy === "cc" ? " " + T("cc-size") : ""));
+    const collect = buyingPower === null ? null : !z ? cell("dk-col", "Earns", DASH, null, T("col-none"))
+      : z.timeValue === null ? cell("dk-col", "Earns", DASH, "silent", T("col-tv-none"))
+      : !z.affordable ? cell("dk-col is-unaffordable", "Earns", "$0", "silent", T("col-no", { c: fmtMoney(r.collateral), b: fmtMoney(buyingPower) }))
+        : cell("dk-col", "Earns", fmtMoney(z.timeValue) + " (" + z.contracts + "×)", "up", T("col-ok", { n: z.contracts, s: z.contracts === 1 ? "" : "s", p: fmtMoney(r.premium), d: fmtMoney(z.deployed), b: fmtMoney(buyingPower), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2) }) + (z.intrinsicValue > 0 ? " " + T("col-itm", { g: fmtMoney(z.collectible), t: fmtMoney(z.timeValue), x: fmtMoney(z.intrinsicValue) }) : "") + (r.strategy === "cc" ? " " + T("cc-size") : ""));
     return h("div", {
       class: "dk-row" + (isItm(r) ? " is-itm" : ""), role: "listitem", "data-why": e ? (pp === null ? e.world.why : null) : r.__code || "engine", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": r.strategy, "data-expiry": r.expiry,
       "data-earn": earn, "data-stale-iv": r.ivTraded === false ? "" : null, "data-away": away, "data-collateral": "on " + fmtMoney(r.collateral), "data-days": String(r.days), "data-i": String(i),
@@ -698,6 +733,19 @@
     return why ? T("nrf", { why }) : null;
   };
 
+  const forwardText = (r) => {
+    const f = r.__fwd;
+    if (!f) return DASH + " " + T("fwd-none");
+    const own = f.method === "parity" && isNum(f.F) !== null ? T("fwd-parity", { f: fmt2(f.F), n: f.pairs })
+      : f.method === "carry" && isNum(f.F) !== null ? T("fwd-carry", { f: fmt2(f.F) })
+        : f.method === "rate-only" ? T("fwd-rate") : null;
+    if (own === null) return DASH + " " + T("fwd-none");
+    const e = r.__eng, S = isNum(r.__spot), c = e && e.carry, years = e && isNum(e.T);
+    if (!c || S === null || years === null || isNum(c.r) === null || isNum(c.q) === null) return own;
+    const used = S * Math.exp((c.r - c.q) * years);
+    return own + (isNum(f.F) !== null ? " " + T("fwd-engine", { g: fmt2(used), d: fmtPct(Math.abs(f.F / used - 1), 2) }) : " " + T("fwd-engine-same", { g: fmt2(used) }));
+  };
+
   const rateHow = (m) => { const k = String(m || "fallback"), i = k.indexOf(":"); return T("rm-" + (i < 0 ? k : k.slice(0, i)), { x: k.slice(i + 1) }) || k; };
   const whyText = (c) => T("c-" + c) || Q.codeText(c) || c;
 
@@ -721,6 +769,7 @@
         ["Per week", wk === null ? null : fmtPct(wk, 2) + " " + T("f-week")],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S)) + ", " + (otm ? "out of" : "in") + " the money"],
         ["Cushion", fmtSd(r.cushionSigmas) + (cIv === null ? "" : " on " + fmtPct(cIv, 1) + " volatility") + (r.ivMid === undefined && r.ivTraded === false ? " · " + T("iv-old") : "")],
+        ["Forward", forwardText(r)],
         ["Volatility", legIv === null ? null : fmtPct(legIv, 1) + " " + T("f-vol") + (cIv !== null && Math.abs(cIv - legIv) > 0.005 ? " · " + fmtPct(cIv, 1) + " " + T("f-vol-c") : "")],
         ["Smile", fit ? T(fit.origin === "card-shape" ? "fit-shape" : "fit-flat", { from: fit.shapeFrom }) + (fit.contract && fit.contract.via === "opposite" ? " " + T("fit-via", { side: r.type === "P" ? "call" : "put" }) : "") : null],
         ["Carry", e ? T("carry", { r: fmtPct(e.carry.r, 2), how: rateHow(e.carry.rateMethod), q: fmtPct(e.carry.q, 2) }) + (cc && e.carry.dividend > 0 ? " " + T("carry-div", { d: "$" + fmt2(e.carry.dividend) }) : "") : null],
@@ -1026,36 +1075,51 @@
     const chosen = selectedSymbols();
     if (!chosen.length) { statusEl.textContent = "Select a symbol to price it."; return; }
     const failed = chosen.filter((s0) => (book.get(s0) || {}).state === "error");
-    let oldest = null, unaged = 0;
+    let oldest = null, unaged = 0, oldestKept = false;
     for (const sym of chosen) {
       const e = book.get(sym);
       if (!e || e.state !== "ok" || !e.payload) continue;
       const a = ageOf(e.payload);
       if (a === null) { unaged++; continue; }
-      if (oldest === null || a > oldest) oldest = a;
+      if (oldest === null || a > oldest) { oldest = a; oldestKept = e.kept !== null && e.kept !== undefined; }
     }
+    const kept = chosen.filter((s0) => { const e = book.get(s0); return e && e.state === "ok" && e.kept !== null && e.kept !== undefined; });
     const age = oldest === null ? "" : " · quotes " + fmtAge(oldest);
     const unagedNote = unaged ? " · " + T(unaged === 1 ? "unaged1" : "unagedN", { n: unaged }) : "";
-    const staleQuotes = oldest !== null && oldest > QUOTE_STALE_SECONDS ? T("stale-q") : "";
-    const sessions = new Set(), stale = [], earnBits = [];
+    const staleQuotes = oldest !== null && oldest > QUOTE_STALE_SECONDS ? T("stale-q") + (oldestKept ? "" : " " + T("stale-r")) : "";
+    const sessions = new Set(), stale = [], earnBits = [], keptBits = [];
     for (const sym of chosen) {
-      const p = (book.get(sym) || {}).payload;
+      const e = book.get(sym), p = e && e.payload;
       if (!p) continue;
+      if (e.state === "ok" && e.kept !== null && e.kept !== undefined) keptBits.push(T(e.kept === "throttled" ? "kept-throttled" : "kept-other", { who: sym, at: F.when(p.generatedAt, Date.now()) || "an earlier read" }));
       if (p.marketTime) sessions.add(String(p.marketTime));
       if (p.spotSource === "daily-close") stale.push(sym);
-      const e = p.earnings;
-      const crossing = (p.rows || []).filter((r) => r.crossesEarnings === true).length;
-      if (!e || !e.date) {
-        const etf = e && /etf|index|fund/i.test(String(e.issueType || ""));
-        earnBits.push(sym + (etf ? " has no earnings (" + e.issueType + ")" : " has no known earnings date"));
-      } else earnBits.push(sym + " reports " + String(e.date).slice(5) + " — " + (crossing ? crossing + " of " + (p.rows || []).length + " lines expire after it" : "no line expires after it"));
+      earnBits.push(earningsBit(sym, p));
     }
     const basis = basisLines(chosen);
     const session = sessions.size === 1 ? " · " + [...sessions][0] + " session" : "";
     const staleNote = stale.length ? " · " + stale.join(", ") + " priced off the last close, not a live print" : "";
-    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, staleQuotes, earnBits.join(" · ")];
+    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, ...keptBits, staleQuotes, earnBits.join(" · ")];
     statusEl.replaceChildren(...lines.filter(Boolean).map((t) => h("span", { class: "flows-status-l" }, t)));
-    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length));
+    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length || kept.length));
+  }
+
+  function earningsBit(sym, p) {
+    const e = p.earnings;
+    if (!e) return sym + " earnings date not read: the data provider's company read did not answer";
+    if (!e.date) {
+      const etf = /etf|index|fund/i.test(String(e.issueType || ""));
+      return sym + (etf ? " has no earnings (" + e.issueType + ")" : " has no known earnings date");
+    }
+    const md = String(e.date).slice(5), rows = p.rows || [];
+    if (e.past === true) return T("earn-past", { sym, md });
+    if (e.precedesSale === true) return T("earn-printed", { sym, md });
+    if (!rows.length) return sym + " reports " + md;
+    const crossing = rows.filter((r) => r.crossesEarnings === true).length;
+    if (crossing) return sym + " reports " + md + " — " + crossing + " of " + rows.length + " lines expire after it";
+    const unknown = rows.filter((r) => r.crossesEarnings === null || r.crossesEarnings === undefined).length;
+    if (unknown) return T("earn-undetermined", { sym, md, n: unknown, s: unknown === 1 ? "" : "s" });
+    return sym + " reports " + md + " — no line expires after it";
   }
 
   function tickAges() {
@@ -1156,10 +1220,12 @@
     writeURL();
     if (side === "sc") loadCalls();
     if (reuse) { renderChips(); render(); return; }
-    for (const e of book.values()) { e.state = "idle"; e.payload = null; }
+    invalidate(book.values());
+    for (const e of book.values()) { e.state = "idle"; e.payload = null; e.kept = null; }
     renderChips();
     const chosen = selectedSymbols();
-    if (chosen.length) runPool(chosen, {}); else render();
+    if (chosen.length) runPool(chosen, {});
+    render();
   }
 
   const RANK_REFETCH_MS = 250;
@@ -1205,7 +1271,7 @@
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { deskKit: Object.freeze({
     UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
     filters, st: () => ({ side, rank, tenor, axis, buyingPower, bpBad, view, focused, quick: mods.quick }),
-    render, focusPoint, chartHeight, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); },
+    render, focusPoint, chartHeight, forwardText, betterDeployment, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); },
   }) }));
   ensureModules();
   showTab(viewFromHash(), false, true);

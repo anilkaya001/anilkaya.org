@@ -388,6 +388,10 @@
     if (S !== null && prev !== null && prev > 0) {
       const d = S - prev;
       pxEl.append(UI.capsule(sg(d) + Math.abs(d).toFixed(2) + "  " + F.pct(d / prev, 2, true), { tone: d > 0 ? "up" : d < 0 ? "down" : "flat" }));
+    } else if (S !== null) {
+      const none = UI.capsule(DASH, { tone: "flat", glyph: false });
+      none.append(h("span", { class: "visually-hidden" }, " Previous close not reported"));
+      pxEl.append(none);
     }
     const src = h("button", {
       type: "button", class: "tl-src", "aria-haspopup": "dialog", "aria-controls": "fxPop",
@@ -423,6 +427,7 @@
         ["Spot", F.px(S) + " " + UI.MID + " " + (c.spotSource === "stock-state" ? "live print" : "prior daily close")],
         ["Read", st.ctxAge === null ? "age unknown" : ageText() === "Now" ? "moments ago" : ageText() + " ago"],
         ["Session", c.asOf || DASH],
+        ["Previous close", isNum(c.prevClose) !== null && c.prevClose > 0 ? F.px(c.prevClose) : DASH + " not reported by the data provider, so no day change is shown"],
         ["Beta", beta === null ? DASH : beta.toFixed(2)],
         ["Reference index", idx === null || !c.index ? DASH : c.index.symbol + " " + F.px(idx)],
         ["Next earnings", earn && earn.date ? earn.date + (earn.announceTime ? " " + UI.MID + " " + earn.announceTime : "") : earn && /etf|index/i.test(String(earn.issueType || "")) ? "not applicable " + UI.MID + " " + earn.issueType : DASH],
