@@ -120,6 +120,7 @@ const SPECS = [
   { id: "watch", fn: "watchPage", url: "/flows/watch/" },
   { id: "market", fn: "marketPage", url: "/flows/market/" },
   { id: "network", fn: "networkPage", url: "/flows/network/" },
+  { id: "now", fn: "nowPage", url: "/flows/now/" },
 
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "387";
+export const ASSET_VERSION = "388";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -940,6 +940,28 @@ export function networkPage({ username = "" } = {}) {
   });
 }
 
+export function nowPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Flagged now",
+    description: "The session's flagged option windows, largest premium first, in their own window, sharing the selected ticker with the page that opened it.",
+    active: "now", username, chart: false, chrome: false,
+    styles: ["/assets/css/flows-popout.css", "/assets/css/flows-now.css"],
+    scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-now.js"],
+    body: `
+  <div class="pn pw" id="pw">
+    <header class="flows-head pn-head" data-fx-hero>
+      <h1 id="fxTitle">Flagged now</h1>
+      <a class="mk-pop" href="/flows/unusual/">Back to Unusual</a>
+    </header>
+    <p class="visually-hidden" id="pwStatus" role="status">Loading the flagged windows\u2026</p>
+    <section class="ui-card ui-mod pn-mod" id="pwList" aria-labelledby="pwListT">
+      <header class="ui-mod-h"><h2 class="ui-mod-t" id="pwListT">Largest premium first</h2><span class="ui-mod-sp"></span><span class="pw-count" id="pwCount" title="Reading the flagged windows">\u2014</span></header>
+      <div class="pw-host" id="pwHost"></div>
+    </section>
+  </div>`,
+  });
+}
+
 const FEEDS_CSS = ["/assets/css/flows-feeds.css"];
 
 const feedModule = (id, title, body, { span = "", seg = "", tab = "", free = false } = {}) => `
@@ -1436,8 +1458,7 @@ export function oracleShell(html, mode, slug) {
 }
 
 export const FLOWS_PAGES = {
-  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, deskPage,
-
+  loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage,
   tickerPage, unusualPage, movesPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
