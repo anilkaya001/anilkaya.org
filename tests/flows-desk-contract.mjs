@@ -1146,7 +1146,7 @@ try {
       eq(deep && deep.away, "10.0% ITM", "the distance is a percentage of spot, with its unit");
       const info = await rowInfo('#dkList .dk-row[data-strike="1100"]');
       ok(/above spot/.test(info.facts.Distance || ""), `and the row's disclosure says which side of spot, in words (${info.facts.Distance})`);
-      ok(/cash reserved/.test(info.facts.Yield || ""), "and which collateral it is — cash for a put, shares for a call");
+      ok(/cash reserved/.test(info.facts["Time value ÷ collateral"] || ""), "and which collateral it is — cash for a put, shares for a call");
       ok(/intrinsic/.test(info.text), "and how much of an in-the-money premium is intrinsic value that assignment returns, or that the bid is below it");
       eq(await page.locator('#dkList .dk-row[data-strike="1100"]').evaluate((n) => n.classList.contains("is-itm")), true,
          "and the in-the-money row greys its yield, so a premium that is partly intrinsic does not read as income");

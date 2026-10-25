@@ -29,10 +29,50 @@
     return cents > 0 && cents <= MAX_BUYING_POWER * 100 ? cents / 100 : null;
   }
 
+  const roundCents = (dollars) => Math.round(dollars * 100 + 1e-9 + Math.abs(dollars) * 1e-13);
+
+  function premiumLine(row) {
+    const none = (why, premiumC = null) => ({ ok: false, why, premiumC, collateralC: null, ratio: null });
+    const bid = isNum(row && row.bid);
+    if (bid === null || !(bid > 0)) return none("no-bid");
+    const premiumC = roundCents(bid * LOT);
+    if (!(premiumC > 0)) return none("no-bid");
+    const collateral = isNum(row.collateral);
+    if (collateral === null || !(collateral > 0)) return none(row.strategy === "csp" ? "no-strike" : "no-spot", premiumC);
+    const collateralC = roundCents(collateral);
+    if (!(collateralC > 0)) return none("no-collateral", premiumC);
+    return { ok: true, why: null, premiumC, collateralC, ratio: premiumC / collateralC };
+  }
+
+  function ratioText(p, c) {
+    if (!Number.isSafeInteger(p) || !Number.isSafeInteger(c) || !(p > 0) || !(c > 0) || !Number.isSafeInteger(2 * p * 10000 + c)) return null;
+    const hundredths = Math.floor((2 * p * 10000 + c) / (2 * c));
+    if (hundredths === 0) return "<0.01%";
+    if (hundredths < 1000) return (hundredths / 100).toFixed(2) + "%";
+    const tenths = Math.floor((2 * p * 1000 + c) / (2 * c));
+    return (tenths / 10).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  }
+
+  function centsText(c, always) {
+    if (!Number.isSafeInteger(c) || c < 0) return null;
+    const whole = Math.floor(c / 100), rem = c % 100;
+    return "$" + whole.toLocaleString("en-US") + (rem === 0 && !always ? "" : "." + String(rem).padStart(2, "0"));
+  }
+
+  function ratioFraction(p, c) {
+    if (!Number.isSafeInteger(p) || !Number.isSafeInteger(c) || !(p > 0) || !(c > 0)) return null;
+    if (!Number.isSafeInteger(2 * p * 1e6 + c)) return null;
+    const micro = Math.floor((2 * p * 1e6 + c) / (2 * c));
+    if (micro > 0) return micro / 1e6;
+    if (!Number.isSafeInteger(2 * p * 1e10 + c)) return null;
+    const fine = Math.floor((2 * p * 1e10 + c) / (2 * c));
+    return fine > 0 ? fine / 1e10 : null;
+  }
+
   function sizeRow(row, bp) {
     const collateral = isNum(row && row.collateral), premium = isNum(row && row.premium), extrinsic = isNum(row && row.extrinsic);
     if (bp === null || !(bp > 0) || collateral === null || !(collateral > 0) || premium === null || !(premium > 0)) return null;
-    const collateralC = Math.round(collateral * 100), premiumC = Math.round(premium * 100);
+    const collateralC = roundCents(collateral), premiumC = roundCents(premium);
     if (!(collateralC > 0)) return null;
     const timeC = extrinsic === null ? null : Math.max(0, Math.min(premiumC, Math.round(extrinsic * 1e4)));
     const bpC = Math.round(bp * 100), contracts = Math.floor(bpC / collateralC);
@@ -68,7 +108,7 @@
   }
 
   if (typeof document === "undefined") {
-    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, betterDeployment, netDelta, frontierOf });
+    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, betterDeployment, netDelta, frontierOf, roundCents, premiumLine, ratioText, centsText, ratioFraction });
     return;
   }
 
@@ -92,8 +132,8 @@
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const SIDES = ["csp", "cc", "both", "sc"];
   const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "cc" };
-  const RANKS = [["annualized", "Annualised yield"], ["premium", "Premium received"], ["yieldOnCollateral", "Yield on collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
-  const SC_RANKS = [["annualized", "Annualised ratio"], ["ratio", "Premium ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
+  const RANKS = [["annualized", "Annualised yield"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["premium", "Premium received"], ["yieldOnCollateral", "Time value ÷ collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
+  const SC_RANKS = [["annualized", "Annualised ratio"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["ratio", "Time value ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
   const ranksFor = () => (side === "sc" ? SC_RANKS : RANKS);
   const calls = () => (side === "sc" ? window.FlowsUI.deskCalls || null : null);
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
@@ -359,10 +399,10 @@
       if (sell !== null && kept < sell) slices.push({ sym, kept, sell, rankedBy: p.rankedBy || null });
       for (const r of p.rows || []) if (side !== "sc" || r.type === "C") rows.push(Object.assign(r, { __spot: spotOf(p), __sym: sym }));
     }
-    for (const r of rows) r.__sizing = sizeRow(r, buyingPower);
+    for (const r of rows) { r.__sizing = sizeRow(r, buyingPower); r.__pc = premiumLine(r); }
     const dc = calls();
     if (dc) dc.annotate(rows, buyingPower);
-    const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.timeValue : null) : rank === "edge" ? evP : (r) => r[rank];
+    const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.timeValue : null) : rank === "edge" ? evP : rank === "premiumRatio" ? (r) => r.__pc.ratio : (r) => r[rank];
     rows.sort((a, b) => {
       const x = isNum(key(a)), y = isNum(key(b));
       if (x === null && y === null) return 0;
@@ -502,6 +542,7 @@
     { label: "Chain session", get: (r) => r.__day },
     { label: "Days to expiry", get: (r) => isNum(r.days) },
     { label: "Strike", unit: "USD", get: (r) => isNum(r.strike) },
+    { label: "Premium ÷ collateral", unit: "fraction", get: (r) => { const pc = r.__pc || premiumLine(r); return pc.ok ? ratioFraction(pc.premiumC, pc.collateralC) : null; } },
     { label: "Annualised yield", unit: "fraction", get: (r) => isNum(r.annualized) },
     { label: "Collateral", unit: "USD", get: (r) => isNum(r.collateral) },
     { label: "Win probability (implied)", unit: "fraction", get: popQ },
@@ -614,7 +655,7 @@
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.contracts + "× " + best.ticker + " " + kf(best.strike) + (best.strategy === "cc" ? " call" : " put")), h("span", null, F.day(best.expiry))),
-        UI.metrics([UI.metric("Earns", fmtMoney(z.timeValue), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", fmtMoney(z.timeValue), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle)), UI.metric("Prem. ÷ coll.", planRatio(best))], { min: 76 }),
         UI.split([{ color: "--accent", value: z.deployed / buyingPower }, { color: "--fill-2", value: z.idle / buyingPower }], "Deploys " + fmtMoney(z.deployed) + " of " + fmtMoney(buyingPower) + ", " + fmtMoney(z.idle) + " idle"),
         h("p", { class: "dk-hint" }, affordable + " of " + rows.length + " lines affordable"),
         z.intrinsicValue > 0 ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: fmtMoney(z.intrinsicValue), t: fmtMoney(z.timeValue) })) : null);
@@ -623,14 +664,17 @@
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
           next.map((r) => h("div", { class: "dk-alt", role: "listitem" },
             h("span", null, r.__sizing.contracts + "× " + r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put")),
-            h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, fmtMoney(r.__sizing.timeValue))))));
+            h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("span", { class: "dk-alt-r" }, planRatio(r)), h("b", null, fmtMoney(r.__sizing.timeValue))))));
       }
     }
     plan.dataset.plan = sentence;
   }
 
+  const mostlyIntrinsic = (r, pc) => isNum(r.intrinsic) !== null && roundCents(r.intrinsic * LOT) * 2 > pc.premiumC;
+  const planRatio = (r) => { const pc = r.__pc || premiumLine(r); return pc.ok ? ratioText(pc.premiumC, pc.collateralC) : DASH; };
+
   function listHead(dc) {
-    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Earns", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
+    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Earns", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
   }
 
   function fillList(box, rows, dc) {
@@ -699,7 +743,9 @@
     const away = m === null ? "" : atm ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (otm ? "OTM" : "ITM");
     const earn = r.crossesEarnings === true ? "crosses" : r.crossesEarnings === null ? "unknown" : "clear";
     const z = r.__sizing;
-    const cell = (cls, label, text, tone, title) => h("span", { class: "dk-c " + cls, "data-tone": tone || null, title: title || null }, h("small", null, label), text);
+    const cell = (cls, label, text, tone, title, sub) => h("span", { class: "dk-c " + cls, "data-tone": tone || null, title: title || null }, h("small", null, label), text, sub ? h("em", { class: "dk-sub" }, sub) : null);
+    const pc = r.__pc || premiumLine(r);
+    const pcText = pc.ok ? ratioText(pc.premiumC, pc.collateralC) : null;
     const pq = popQ(r), pp = popP(r), ev = evP(r);
     const noEng = r.__eng ? null : r.__why || T("why-eng"), noLaw = r.__eng && pp === null ? lawNote(r) : null;
     const collect = buyingPower === null ? null : !z ? cell("dk-col", "Earns", DASH, null, T("col-none"))
@@ -709,6 +755,7 @@
     return h("div", {
       class: "dk-row" + (isItm(r) ? " is-itm" : ""), role: "listitem", "data-why": e ? (pp === null ? e.world.why : null) : r.__code || "engine", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": r.strategy, "data-expiry": r.expiry,
       "data-earn": earn, "data-stale-iv": r.ivTraded === false ? "" : null, "data-away": away, "data-collateral": "on " + fmtMoney(r.collateral), "data-days": String(r.days), "data-i": String(i),
+      "data-premium-c": pc.premiumC === null ? null : String(pc.premiumC), "data-collateral-c": pc.collateralC === null ? null : String(pc.collateralC), "data-pc": pc.ok ? pcText : null,
       onpointerenter: () => focusPoint(r), onpointerleave: () => focusPoint(null),
     },
     h("span", { class: "ui-badge", "data-tone": r.strategy === "cc" ? "up" : "down", "aria-label": r.strategy === "cc" ? "Covered call" : "Cash-secured put" }, r.strategy === "cc" ? "C" : "P"),
@@ -719,8 +766,9 @@
       earn === "clear" ? null : h("span", { class: "dk-earn" + (earn === "unknown" ? " is-unknown" : ""), role: "img", "aria-label": T("earn-" + earn), title: T("earn-" + earn) }, glyph(earn === "crosses" ? "cal" : "pending")),
       h("span", { class: "dk-meta" }, F.day(r.expiry) + " · " + r.days + "d" + (away ? " · " + away : ""))),
     h("span", { class: "dk-cells" },
+      pc.ok ? cell("dk-pc", "Premium ÷ collateral", pcText, mostlyIntrinsic(r, pc) ? "silent" : null, mostlyIntrinsic(r, pc) ? T("t-pc-itm") : T("t-pc"), centsText(pc.premiumC, true) + " ÷ " + centsText(pc.collateralC)) : cell("dk-pc", "Premium ÷ collateral", DASH, "silent", T("pc-" + pc.why)),
       cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), null, T("t-ann")),
-      h("span", { class: "dk-c dk-prem" }, h("small", null, "Premium"), fmtMoney(r.premium), h("em", { class: "dk-sub" }, "on " + fmtMoney(r.collateral))),
+      pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid")) : cell("dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem")),
       cell("dk-pq", WIN_Q, pq === null ? DASH : fmtPct(pq, 0), null, noEng || T("t-pq")),
       cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, noEng || noLaw || T("t-pp")),
       cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
@@ -733,6 +781,14 @@
     return why ? T("nrf", { why }) : null;
   };
 
+  const DELTA_MOVE_NOTE = 0.02;
+  const deltaMove = (r, other, used, years) => {
+    const sigma = isNum(r.ivMid === undefined ? r.iv : r.ivMid), K = isNum(r.strike), F = isNum(other);
+    if (sigma === null || !(sigma > 0) || K === null || !(K > 0) || F === null || !(F > 0) || !(used > 0) || !(years > 0)) return null;
+    const sd = sigma * Math.sqrt(years), d1 = (Math.log(used / K) + sd * sd / 2) / sd;
+    return Math.exp(-d1 * d1 / 2) / Math.sqrt(2 * Math.PI) * Math.abs(Math.log(F / used)) / sd;
+  };
+
   const forwardText = (r) => {
     const f = r.__fwd;
     if (!f) return DASH + " " + T("fwd-none");
@@ -743,11 +799,24 @@
     const e = r.__eng, S = isNum(r.__spot), c = e && e.carry, years = e && isNum(e.T);
     if (!c || S === null || years === null || isNum(c.r) === null || isNum(c.q) === null) return own;
     const used = S * Math.exp((c.r - c.q) * years);
-    return own + (isNum(f.F) !== null ? " " + T("fwd-engine", { g: fmt2(used), d: fmtPct(Math.abs(f.F / used - 1), 2) }) : " " + T("fwd-engine-same", { g: fmt2(used) }));
+    const move = deltaMove(r, f.F, used, years);
+    return own + (isNum(f.F) !== null ? " " + T("fwd-engine", { g: fmt2(used), d: fmtPct(Math.abs(f.F / used - 1), 2) }) : " " + T("fwd-engine-same", { g: fmt2(used) })) + (move !== null && move > DELTA_MOVE_NOTE ? " " + T("fwd-delta", { x: move.toFixed(2) }) : "");
   };
 
   const rateHow = (m) => { const k = String(m || "fallback"), i = k.indexOf(":"); return T("rm-" + (i < 0 ? k : k.slice(0, i)), { x: k.slice(i + 1) }) || k; };
   const whyText = (c) => T("c-" + c) || Q.codeText(c) || c;
+
+  function pcPrem(r) {
+    const pc = r.__pc || premiumLine(r);
+    return pc.premiumC === null ? DASH + " " + T("pc-no-bid") : centsText(pc.premiumC, true) + " a contract at the " + fmt2(r.bid) + " bid";
+  }
+
+  function pcLine(r) {
+    const pc = r.__pc || premiumLine(r);
+    if (!pc.ok) return DASH + " " + T("pc-" + pc.why);
+    const intrinsicC = isNum(r.intrinsic) === null ? 0 : Math.min(pc.premiumC, roundCents(r.intrinsic * LOT));
+    return ratioText(pc.premiumC, pc.collateralC) + " = " + centsText(pc.premiumC, true) + " ÷ " + centsText(pc.collateralC, true) + (intrinsicC > 0 ? " · " + T("pc-itm", { x: centsText(intrinsicC, true) }) : "") + " · " + T(r.strategy === "cc" ? "pc-cc" : "pc-csp");
+  }
 
   function rowInfo(r) {
     const e = r.__eng, leg = shortLeg(r), fit = r.__fit;
@@ -762,8 +831,9 @@
       title: r.ticker + " " + kf(r.strike) + " " + (cc ? "covered call" : "cash-secured put"), asOf: F.day(r.expiry) + " · " + r.days + "d",
       lead: T("engine"),
       facts: [
-        ["Premium", fmtMoney(r.premium) + " at the " + fmt2(r.bid) + " bid"],
-        ["Yield", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + " " + T(cc ? "y-cc" : "y-csp")],
+        ["Premium ÷ collateral", pcLine(r)],
+        ["Premium", pcPrem(r)],
+        ["Time value ÷ collateral", fmtPct(r.yieldOnCollateral, 2) + " on " + fmtMoney(r.collateral) + " " + T(cc ? "y-cc" : "y-csp")],
         ["Annualised", fmtPct(r.annualized, 0) + " on time value — a convention"],
         ["Gross annualised", isNum(r.annualizedGross) === null ? null : fmtPct(r.annualizedGross, 0) + " " + T("f-gross")],
         ["Per week", wk === null ? null : fmtPct(wk, 2) + " " + T("f-week")],
@@ -865,10 +935,11 @@
       xs: order.map((p) => x(p.x)), ys: order.map((p) => y(Math.min(p.y, cap))), reach: 30, first: true, xh: 0, top, bottom: H - bottom, label: T("fr-key"),
       onMove: (i) => {
         const p = order[i], r = p.r;
+        const pc = r.__pc || premiumLine(r), pcText = pc.ok ? ratioText(pc.premiumC, pc.collateralC) : DASH;
         return {
-          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtPct(r.annualized, 0) + " annualised",
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtPct(r.annualized, 0) + " annualised, premium over collateral " + pcText,
           parts: [C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-            h("b", null, fmtPct(r.annualized, 0)), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k")],
+            h("b", null, fmtPct(r.annualized, 0)), C.part(pcText + " of collateral", "k"), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k")],
         };
       },
     });
@@ -1269,7 +1340,7 @@
 
   const initial = readURL();
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { deskKit: Object.freeze({
-    UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
+    UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, roundCents, centsText, ratioText, ratioFraction, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
     filters, st: () => ({ side, rank, tenor, axis, buyingPower, bpBad, view, focused, quick: mods.quick }),
     render, focusPoint, chartHeight, forwardText, betterDeployment, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); },
   }) }));

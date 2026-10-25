@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { chromium } from "playwright";
 import * as P from "../shared/flows-premium.js";
 import { syxChain, NODE_Q, REPO, openDesk, showView } from "./desk-fixtures.mjs";
+import { ratioTextExact, dollarsTextExact, ratioMicroExact } from "./lib/pc-oracle.mjs";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -57,9 +58,10 @@ const readRows = (page) => page.$$eval("#dkList .dk-row", (rs) => rs.map((r) => 
   const main = (c) => [...c.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim();
   const cs = [...r.querySelectorAll(".dk-c")];
   return {
-    t: r.dataset.t, strike: r.dataset.strike, expiry: r.dataset.expiry, n: r.dataset.n, m1: r.dataset.m1, bind: r.dataset.bind, ratio: r.dataset.ratio, strategy: r.dataset.strategy, itm: r.classList.contains("is-itm"),
+    t: r.dataset.t, strike: r.dataset.strike, expiry: r.dataset.expiry, n: r.dataset.n, m1: r.dataset.m1, bind: r.dataset.bind, ratio: r.dataset.ratio, pc: r.dataset.pc, premiumC: r.dataset.premiumC, strategy: r.dataset.strategy, itm: r.classList.contains("is-itm"),
     cells: Object.fromEntries(cs.map((c) => [name(c), main(c)])),
     titles: Object.fromEntries(cs.map((c) => [name(c), c.getAttribute("title")])),
+    subs: Object.fromEntries(cs.map((c) => [name(c), (c.querySelector(".dk-sub") || {}).textContent || null])),
   };
 }));
 
@@ -146,7 +148,9 @@ try {
       const w = want.get(key(r)), l = w.line;
       shown++;
       if (!l.ok) { bad++; continue; }
-      if (r.cells.ratio !== ratioText(l.ratio) || r.cells.ann !== annText(l.annRatio)) bad++;
+      if (r.cells.ratio !== ratioTextExact(l.bidC, l.m1C) || r.pc !== r.cells.ratio || r.cells.ann !== annText(l.annRatio)) bad++;
+      if (r.subs.ratio !== dollarsTextExact(l.bidC) + " ÷ " + dollarsTextExact(l.m1C, false)) bad++;
+      if (r.premiumC !== String(l.bidC)) bad++;
       if (r.cells.collat !== usdC(l.collateralC)) bad++;
       if (r.cells.prem !== (l.n === 0 ? "$0" : usdC(l.premiumC))) bad++;
       const nd = w.e ? (t.cv === "shares" ? 1 - w.delta : -w.delta) : null;
@@ -210,11 +214,18 @@ try {
     ok(server.some((v, i) => i > 0 && server[i - 1] < v - 1e-12), "which is not the server's covered-call yield order");
     await showView(page, "lines");
     const ranks = await page.$$eval("#deskRank option", (o) => o.map((x) => x.value));
-    same(ranks, ["annualized", "ratio", "premium", "cushionSigmas", "collectible", "edge"], "the rank menu lists the short-call keys");
+    same(ranks, ["annualized", "premiumRatio", "ratio", "premium", "cushionSigmas", "collectible", "edge"], "the rank menu lists the short-call keys, the gross premium over collateral among them");
+    const labelsOf = await page.$$eval("#deskRank option", (o) => o.map((x) => x.textContent));
+    ok(labelsOf.includes("Premium ÷ collateral") && labelsOf.includes("Time value ÷ collateral"), "the gross ratio and the time-value ratio are named apart");
     await page.selectOption("#deskRank", "ratio");
     await page.waitForFunction(() => new URL(location.href).searchParams.get("rank") === "ratio");
     const byRatio = (await readRows(page)).map((r) => Number(r.ratio));
-    ok(byRatio.every((v, i) => i === 0 || byRatio[i - 1] >= v - 1e-9), "ranking by premium over collateral sorts by that ratio");
+    ok(byRatio.every((v, i) => i === 0 || byRatio[i - 1] >= v - 1e-9), "ranking by time value over collateral sorts by that ratio");
+    await page.selectOption("#deskRank", "premiumRatio");
+    await page.waitForFunction(() => new URL(location.href).searchParams.get("rank") === "premiumRatio");
+    const gross = (await readRows(page)).map((r) => { const l = want.get(key(r)).line; return l.bidC / l.m1C; });
+    ok(gross.length === 48 && gross.every((v, i) => i === 0 || gross[i - 1] >= v - 1e-12), "ranking by Premium ÷ collateral sorts by the whole bid over the collateral, intrinsic value included");
+    ok(gross.some((v, i) => i > 0 && Number(byRatio[i - 1]) !== 0 && v !== gross[i - 1]), "and the order is its own");
     await page.selectOption("#deskRank", "premium");
     await page.waitForTimeout(300);
     await page.locator("#deskStrategy .ui-seg-i", { hasText: /^Calls$/ }).click();
@@ -291,6 +302,8 @@ try {
       ok(m, `the collateral fact prints its formula (${(facts.Collateral || "").slice(0, 90)})`);
       const again = P.shortCallCollateral({ convention: "delta", spot: Number(m[1]), strike: Number(r.strike), delta: Number(m[2]), haircut: 0.3, floor: 0.1 });
       ok(Math.abs(again.m1C - w.line.m1C) <= 1 && facts.Collateral.includes(`$${(w.line.m1C / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })} each`), "recomputing the printed formula gives the printed collateral");
+      ok(facts["Premium ÷ collateral"].startsWith(ratioTextExact(w.line.bidC, w.line.m1C) + " = " + dollarsTextExact(w.line.bidC) + " ÷ " + dollarsTextExact(w.line.m1C)) && /intrinsic value included/.test(facts["Premium ÷ collateral"]), `the Premium ÷ collateral fact prints the ratio and both dollar amounts of one contract (${facts["Premium ÷ collateral"].slice(0, 90)})`);
+      ok(/time value only/.test(facts["Time value ÷ collateral"]) && /annualised over/.test(facts["Time value ÷ collateral"]), "and the time-value ratio keeps its own fact");
       ok(/sold into the/.test(facts.Premium) && /not used for any figure/.test(facts.Premium), "the premium fact says it is the bid and the mid is unused");
       ok(/Reg-T style/.test(Object.keys(facts).join()) && /strategy lab adds the option's value/.test(facts["Reg-T style"]), "the Reg-T comparator is always shown, with the lab's difference named");
       ok(/Assignment/.test(Object.keys(facts).join()) && /short stock/.test(facts.Assignment), "assignment is spelled out");
@@ -401,13 +414,21 @@ try {
     await page.locator(".ui-exp > summary").click();
     const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".ui-exp-i", { hasText: /^CSV$/ }).click()]);
     const grid = parseCsv(fs.readFileSync(await dl.path(), "utf8").slice(1));
-    same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Annualised premium ÷ collateral (fraction)", "Net delta (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
+    same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Time value ÷ collateral (fraction)", "Annualised time value ÷ collateral (fraction)", "Net delta (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
     ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the vendor's quoted figures are not exported");
     const body = grid.slice(1, -2);
     ok(body.length === 48 && body.every((r) => r[1] === "short call, uncovered" && r[9] === "Delta-adjusted"), "every line is a row, named as uncovered, with its convention");
     ok(body.every((r) => r.every((c) => !/−/.test(c))), "no U+2212 in a CSV number");
-    ok(body.every((r) => /^-?[\d.]+$/.test(r[14]) || r[14] === ""), "net delta is a plain signed number or empty");
-    ok(body.some((r) => Number(r[14]) < 0), "naked net delta is negative");
+    ok(body.every((r) => /^-?[\d.]+$/.test(r[15]) || r[15] === ""), "net delta is a plain signed number or empty");
+    ok(body.some((r) => Number(r[15]) < 0), "naked net delta is negative");
+    const wantCsv = expectedOf(payloads, SYMS, t);
+    let csvBad = 0;
+    for (const r of body) {
+      const w = [...wantCsv.values()].find((x) => x.p.ticker === r[0] && x.r.expiry === r[2] && x.r.strike === Number(r[5]));
+      const exact = w && w.line.ok ? ratioMicroExact(w.line.bidC, w.line.m1C) : null;
+      if (!w || String(exact) !== r[12]) csvBad++;
+    }
+    eq(csvBad, 0, "the Premium ÷ collateral column is the whole bid over the collateral, half-up to six decimals from integer cents, on every line");
     await page.close();
   }
 

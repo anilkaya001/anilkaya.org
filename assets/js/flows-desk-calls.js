@@ -72,8 +72,8 @@
     if (bid === null || !(bid > 0)) return { ...base, why: "no-bid" };
     const col = shortCallCollateral({ convention, spot: S, strike: K, delta, haircut, floor });
     const regt = shortCallCollateral({ convention: "regt", spot: S, strike: K });
-    const bidC = Math.round(bid * 10000);
-    const intrC = Math.round(Math.max(0, S - K) * 10000);
+    const bidC = roundCents(bid * SHARES_PER_CONTRACT);
+    const intrC = roundCents(Math.max(0, S - K) * SHARES_PER_CONTRACT);
     const tvC = Math.max(0, bidC - intrC);
     const out = { ...base, bidC, intrC, tvC, regtM1C: regt.ok ? regt.m1C : null };
     if (!col.ok) return { ...out, why: col.why };
@@ -113,9 +113,10 @@
 
   const K = window.FlowsUI && window.FlowsUI.deskKit;
   if (!K) return;
-  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P } = K;
+  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, ratioText, centsText, ratioFraction } = K;
 
   const SIGNS = { "-1": MINUS, "0": "", "1": "+" };
+  const pcOf = (sc) => (sc && sc.ok ? ratioText(sc.bidC, sc.m1C) : null) || DASH;
   const TONES = { "-1": "down", "0": null, "1": "up" };
   const CONV_LABEL = { delta: "Delta-adjusted", regt: "Reg-T style", shares: "Shares held (covered)" };
   const TICKS = [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
@@ -214,6 +215,7 @@
   const KEYS = {
     annualized: (r) => (r.__sc ? r.__sc.annRatio : null),
     ratio: (r) => (r.__sc ? r.__sc.ratio : null),
+    premiumRatio: (r) => (r.__sc && r.__sc.ok && r.__sc.m1C > 0 ? r.__sc.bidC / r.__sc.m1C : null),
     premium: (r) => r.premium,
     cushionSigmas: (r) => r.cushionSigmas,
     collectible: (r) => (r.__sc && r.__sc.ok && r.__sc.timeValueC !== null ? r.__sc.timeValueC : null),
@@ -237,7 +239,7 @@
   };
 
   function head() {
-    return h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Premium ÷ collateral", "Ann.", "Premium", "Collateral", "Net Δ", WIN_Q, "EV", ""].map((x) => h("span", null, x)));
+    return h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", "Collateral", "Net Δ", WIN_Q, "EV", ""].map((x) => h("span", null, x)));
   }
 
   function cellOf(cls, label, text, tone, title, sub) {
@@ -261,7 +263,7 @@
     const nd = sc.netDelta;
     return h("div", {
       class: "dk-row" + (K.isItm(r) ? " is-itm" : ""), role: "listitem", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": "sc", "data-expiry": r.expiry, "data-days": String(r.days), "data-i": String(i),
-      "data-n": sc.ok ? String(sc.n) : null, "data-m1": sc.ok ? String(sc.m1C) : null, "data-bind": sc.ok ? sc.binding : null, "data-ratio": sc.ok ? sc.ratio.toFixed(6) : null,
+      "data-n": sc.ok ? String(sc.n) : null, "data-m1": sc.ok ? String(sc.m1C) : null, "data-bind": sc.ok ? sc.binding : null, "data-ratio": sc.ok ? sc.ratio.toFixed(6) : null, "data-pc": sc.ok ? pcOf(sc) : null, "data-premium-c": Number.isSafeInteger(sc.bidC) ? String(sc.bidC) : null,
       "data-earn": earn, "data-away": away,
       onpointerenter: () => K.focusPoint(r), onpointerleave: () => K.focusPoint(null),
     },
@@ -272,7 +274,7 @@
       earn === "clear" ? null : h("span", { class: "dk-earn" + (earn === "unknown" ? " is-unknown" : ""), role: "img", "aria-label": T("earn-" + earn), title: T("earn-" + earn) }, glyph(earn === "crosses" ? "cal" : "pending")),
       h("span", { class: "dk-meta" }, F.day(r.expiry) + " · " + r.days + "d" + (away ? " · " + away : ""))),
     h("span", { class: "dk-cells" },
-      sc.ok ? cellOf("dk-ratio", "Ratio", fmtRatio(sc.ratio), null, T("t-ratio")) : cellOf("dk-ratio", "Ratio", DASH, "silent", bad),
+      sc.ok ? cellOf("dk-ratio", "Premium ÷ collateral", pcOf(sc), sc.intrC * 2 > sc.bidC ? "silent" : null, sc.intrC * 2 > sc.bidC ? T("t-pc-itm") : T("t-ratio"), centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C)) : cellOf("dk-ratio", "Premium ÷ collateral", DASH, "silent", bad),
       sc.ok ? cellOf("dk-ann", "Ann.", fmtAnn(sc.annRatio), null, T("t-ann")) : cellOf("dk-ann", "Ann.", DASH, "silent", bad),
       premium, collat,
       cellOf("dk-nd", "Net Δ", signedD(nd), null, nd === null ? noEng : T("sc-frontier-x")),
@@ -312,7 +314,8 @@
         ["Collateral", collateralLine()],
         ["Reg-T style", sc.regtM1C === null || sc.regtM1C === undefined ? DASH : money(sc.regtM1C * n) + " on " + groupN(n) + ": 100 × max(20% × " + fmt2(S) + " − " + fmt2(Math.max(0, r.strike - S)) + ", 10% × " + fmt2(S) + "). The strategy lab adds the option's value (" + lab + ") to this requirement; this desk nets it against the premium you collect."],
         ["Shares held", S === null ? DASH : "$" + groupN(S * SHARES_PER_CONTRACT * n) + " of stock for " + groupN(n) + " contract" + (n === 1 ? "" : "s")],
-        ["Premium ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only (gross " + fmtRatio(sc.grossRatio) + ")" : DASH],
+        ["Premium ÷ collateral", sc.ok ? pcOf(sc) + " = " + centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C, true) + " a contract, intrinsic value included" + (sc.intrC > 0 ? " (" + centsText(Math.min(sc.intrC, sc.bidC), true) + " of it intrinsic)" : "") + " · " + T("sc-conv-" + terms.cv) : DASH],
+        ["Time value ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only" : DASH],
         ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? DASH : signedD(sc.netDelta) + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the card's smile, which can only over-state collateral on a dividend payer"],
         ["Forward", K.forwardText(r)],
         ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
@@ -346,7 +349,7 @@
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Top line"), UI.infoButton("the top line", () => ({ title: "Top line", lead: T("sc-premium") }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, groupN(z.n) + "× " + top.ticker + " " + kf(top.strike) + " call"), h("span", null, F.day(top.expiry))),
-        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Ratio", fmtRatio(z.ratio))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 76 }),
         h("p", { class: "dk-hint" }, T("sc-bp-ask")),
         z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
       mods.best.append(uncovered);
@@ -370,14 +373,14 @@
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.n + "× " + bestRow.ticker + " " + kf(bestRow.strike) + " call"), h("span", null, F.day(bestRow.expiry))),
-        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 76 }),
         UI.split([{ color: "--accent", value: z.collateralC / (bp * 100) }, { color: "--fill-2", value: z.idleC / (bp * 100) }], "Deploys " + usdC(z.collateralC) + " of " + K.fmtMoney(bp) + ", " + usdC(z.idleC) + " idle"),
         h("p", { class: "dk-hint" }, affordable + " of " + lines.length + " lines affordable" + (z.limited ? " · Limited by buying power: " + z.n + " of " + z.asked : "")),
         z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
       const next = lines.filter((r) => r !== bestRow && r.__sc.affordable && r.__sc.timeValueC > 0).sort((a, b) => (betterDeployment(a.__sc, b.__sc) ? -1 : betterDeployment(b.__sc, a.__sc) ? 1 : 0)).slice(0, 2);
       if (next.length) {
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
-          next.map((r) => h("div", { class: "dk-alt", role: "listitem" }, h("span", null, r.__sc.n + "× " + r.ticker + " " + kf(r.strike) + " call"), h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, usdC(r.__sc.timeValueC))))));
+          next.map((r) => h("div", { class: "dk-alt", role: "listitem" }, h("span", null, r.__sc.n + "× " + r.ticker + " " + kf(r.strike) + " call"), h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("span", { class: "dk-alt-r" }, pcOf(r.__sc)), h("b", null, usdC(r.__sc.timeValueC))))));
       }
     }
     mods.best.append(uncovered);
@@ -461,8 +464,8 @@
       onMove: (i) => {
         const p = order[i], r = p.r, sc = r.__sc;
         return {
-          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtAnn(sc.annRatio) + " annualised premium over collateral",
-          parts: [C.part(r.ticker + " " + kf(r.strike) + " call", null), C.part(F.day(r.expiry), "k"), C.part(fmtRatio(sc.ratio) + " per trade", "k"),
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtAnn(sc.annRatio) + " annualised time value over collateral, premium over collateral " + pcOf(sc),
+          parts: [C.part(r.ticker + " " + kf(r.strike) + " call", null), C.part(F.day(r.expiry), "k"), C.part(pcOf(sc) + " of collateral", "k"),
             h("b", null, fmtAnn(sc.annRatio)), C.part(axis === 0 ? "Net Δ " + signedD(sc.netDelta) : "Win " + fmtPct(p.x, 0), "k")],
         };
       },
@@ -491,8 +494,9 @@
     { label: "Collateral convention", get: () => CONV_LABEL[terms.cv] },
     { label: "Haircut", unit: "fraction", get: () => (terms.cv === "delta" ? terms.h : null) },
     { label: "Floor", unit: "fraction", get: () => (terms.cv === "delta" ? terms.f : null) },
-    { label: "Premium ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null) },
-    { label: "Annualised premium ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.annRatio : null) },
+    { label: "Premium ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? ratioFraction(r.__sc.bidC, r.__sc.m1C) : null) },
+    { label: "Time value ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null) },
+    { label: "Annualised time value ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.annRatio : null) },
     { label: "Net delta", unit: "delta", get: (r) => (r.__sc ? r.__sc.netDelta : null) },
     { label: "Win probability (implied)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popQ : null) },
     { label: "Win probability (real-world)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popP : null) },

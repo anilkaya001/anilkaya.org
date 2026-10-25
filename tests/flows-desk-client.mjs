@@ -292,8 +292,8 @@ try {
       ok(!("Capital" in info.facts), `the ${name}'s disclosure carries no second capital figure beside the yield's`);
       ok(!/reg-?t|margin/i.test(info.text), `and no margin number (${name})`);
     }
-    ok(/cash reserved \(cash-secured\)/.test(put.facts.Yield), `a put's yield names its basis: cash-secured (${put.facts.Yield})`);
-    ok(/buy-write/.test(otm.facts.Yield) && /100 shares/.test(otm.facts.Yield), `a covered call's names its: stock bought with the option (${otm.facts.Yield})`);
+    ok(/cash reserved \(cash-secured\)/.test(put.facts["Time value ÷ collateral"]), `a put's yield names its basis: cash-secured (${put.facts["Time value ÷ collateral"]})`);
+    ok(/buy-write/.test(otm.facts["Time value ÷ collateral"]) && /100 shares/.test(otm.facts["Time value ÷ collateral"]), `a covered call's names its: stock bought with the option (${otm.facts["Time value ÷ collateral"]})`);
     const ann = parseFloat(otm.facts.Annualised), gross = parseFloat(otm.facts["Gross annualised"]), week = parseFloat(otm.facts["Per week"]);
     ok(/time value/.test(otm.facts.Annualised), "the Ann. figure is labelled as a time-value yield");
     ok(gross >= ann - 0.5, `the gross annualised figure is available in the disclosure (${otm.facts["Gross annualised"]} against ${otm.facts.Annualised})`);

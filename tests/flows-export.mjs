@@ -196,11 +196,11 @@ try {
     eq(items, ["CSV", "SVG", "PNG"], "the desk offers its lines and its frontier chart");
     const csv = (await download(page, "CSV")).bytes.toString("utf8");
     const grid = parseCsv(csv.slice(1));
-    eq(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Annualised yield (fraction)", "Collateral (USD)",
+    eq(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Premium ÷ collateral (fraction)", "Annualised yield (fraction)", "Collateral (USD)",
       "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value, real world (USD)"], "the desk's lines export our own model outputs with their units");
     ok(grid.length >= 1 + 9 + 2, `every priced line is a row (${grid.length - 3})`);
     ok(grid.slice(1, -2).every((r) => r[0] === "NVDA" && /^(covered call|cash-secured put)$/.test(r[1]) && Number.isFinite(Number(r[5]))), "each row is a named structure at a numeric strike");
-    ok(!grid[0].some((c) => /premium|bid|ask/i.test(c)), "and the vendor's quoted premium is not among them");
+    ok(!grid[0].some((c) => /bid|ask|spot|mid\b|quoted|premium(?! ÷ collateral \(fraction\))/i.test(c)) && grid[0].filter((c) => /premium/i.test(c)).length === 1, "and the vendor's quoted premium is not among them: the one premium column is the site's own ratio to the collateral, in a fraction");
     ok(grid.slice(1, -2).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[3])), "each line names the session of the chain it was priced from");
     ok(/as of \d{4}-\d{2}-\d{2}/.test(grid[grid.length - 2][0]), `and the footer carries that session as its as-of day (${grid[grid.length - 2][0]})`);
     await page.close();
