@@ -95,14 +95,18 @@ def expected(rows, params):
     cand = cand[: params["names"]]
     half = B // 2
     out = {"bins": B, "windows": len(rows), "names": [t for t, _ in cand], "pairs": {"A": [], "L": [], "P": []}}
-    factor = np.mean([zscore(s["A"]) for _, s in cand], axis=0)
+    zs = [zscore(s["A"]) for _, s in cand]
+    total = np.sum(zs, axis=0) if zs else None
     for L in ("A", "L", "P"):
         cond = L == "P"
+        if cond and len(cand) - 2 < params["minOthers"]:
+            continue
         key = "A" if cond else L
         for i in range(len(cand)):
             for j in range(i + 1, len(cand)):
                 x, y = cand[i][1][key], cand[j][1][key]
                 if cond:
+                    factor = total - zs[i] - zs[j]
                     r = partial(x, y, factor)
                     r1 = partial(x[:half], y[:half], factor[:half])
                     r2 = partial(x[half:], y[half:], factor[half:])
@@ -119,7 +123,7 @@ def expected(rows, params):
 
 def main():
     rng = np.random.default_rng(SEED)
-    params = {"binMin": 10, "names": 12, "minBins": 20, "minActive": 4, "minWindows": 40, "minCorr": 0.3}
+    params = {"binMin": 10, "names": 12, "minBins": 20, "minActive": 4, "minWindows": 40, "minCorr": 0.3, "minOthers": 4}
     cases = []
     names = ["NVDA", "AMD", "AVGO", "TSLA", "AAPL", "META", "MSFT", "XOM", "JPM", "LLY"]
     for label, nwin, minutes, fac, strength in [("factor", 420, 400, ["NVDA", "AMD", "AVGO"], 2.0), ("null", 300, 360, [], 0.0), ("short", 90, 240, ["NVDA", "AMD"], 1.5)]:
@@ -130,7 +134,7 @@ def main():
         "scipy": scipy.__version__,
         "seed": SEED,
         "script_sha256": hashlib.sha256(open(HERE, "rb").read()).hexdigest(),
-        "method": "Pearson r of per-name ten-minute series (numpy.corrcoef); Fisher z interval with scipy.stats.norm.ppf(0.975) and se 1/sqrt(n-3); first and second half r; layer P is the partial r of the Active series after OLS residuals on the mean of the kept names' z-scored Active series, Fisher se 1/sqrt(n-4)",
+        "method": "Pearson r of per-name ten-minute series (numpy.corrcoef); Fisher z interval with scipy.stats.norm.ppf(0.975) and se 1/sqrt(n-3); first and second half r; layer P is the partial r of the pair's Active series after OLS residuals on the sum of the other kept names' z-scored Active series (the pair itself left out, which removes the -1/(K-1) bias of conditioning on a sum that contains both), Fisher se 1/sqrt(n-4); no P pairs when fewer than minOthers other names remain",
     }
     json.dump({"provenance": prov, "params": params, "cases": cases}, open(sys.argv[1] if len(sys.argv) > 1 else "fixtures-relations.json", "w"), separators=(",", ":"))
 
