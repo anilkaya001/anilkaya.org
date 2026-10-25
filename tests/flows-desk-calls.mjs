@@ -148,10 +148,32 @@ function battery(mod, tag) {
 }
 
 {
-  const lines = [{ ok: true, affordable: true, premiumC: 100 }, { ok: true, affordable: true, premiumC: 300 }, { ok: true, affordable: true, premiumC: 300 }, { ok: true, affordable: false, premiumC: 900 }, { ok: false }];
-  const plan = PREM.planShortCalls(lines);
-  eq([plan.best, plan.affordable], [lines[1], 3], "the best line is the largest gross premium among those affordable, the first winning a tie");
+  const mk = (timeValueC, deployedC, extra = {}) => ({ ok: true, affordable: true, premiumC: timeValueC, timeValueC, deployedC, ...extra });
+  const lines = [mk(100, 10), mk(300, 20), mk(300, 20), mk(300, 15), mk(900, 5, { affordable: false }), { ok: false }, mk(0, 1, { premiumC: 5000 })];
+  for (const [who, mod] of [["oracle", PREM], ["chunk", CHUNK]]) {
+    const plan = mod.planShortCalls(lines);
+    eq([plan.best, plan.affordable], [lines[3], 5], who + ": the best line earns the most time value among those affordable, the smaller deployment winning a tie, and a line with no time value is never best however much cash it brings in");
+    eq(mod.planShortCalls([mk(0, 1, { premiumC: 5000 })]).best, null, who + ": a line that earns nothing is no best line");
+    eq(mod.planShortCalls([mk(300, 20), mk(300, 20, { tag: "second" })]).best.tag, undefined, who + ": a full tie keeps the first");
+    eq(mod.planShortCalls([{ ok: true, affordable: true, premiumC: 900, timeValueC: 100, deployedC: 5 }, { ok: true, affordable: true, premiumC: 500, timeValueC: 400, deployedC: 5 }]).best.timeValueC, 400, who + ": gross cash that is mostly in-the-money value loses to the line with more time value");
+  }
   eq(PREM.planShortCalls([]).best, null, "nothing to plan");
+  const itm = PREM.shortCallLine({ bid: 8.6, strike: 220 }, { spot: 227.28, delta: 0.66, days: 12 });
+  eq([itm.premiumC, itm.timeValueC, itm.premiumC - itm.timeValueC], [100 * 86000, 100 * 13200, 100 * 72800], "an in-the-money line splits its cash into time value and in-the-money value in cents");
+  eq(CHUNK.shortCallLine({ bid: 8.6, strike: 220 }, { spot: 227.28, delta: 0.66, days: 12 }).timeValueC, itm.timeValueC, "and the chunk's copy splits it the same way");
+  eq(itm.deployedC, itm.collateralC, "the capital a line deploys is its collateral, in cents, so the plan's tie-break reads a number and not a patch");
+  eq(PREM.shortCallLine({ bid: null, strike: 220 }, { spot: 227.28, delta: 0.66, days: 12 }).deployedC, null, "and a line that could not be priced deploys nothing");
+
+  let seed = 20261025, bad = 0;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 2000; i++) {
+    const strike = 20 + Math.floor(rnd() * 40000) / 100, spot = Math.max(1, strike + (rnd() - 0.5) * 40);
+    const row = { bid: Math.floor(rnd() * 3000) / 100, strike };
+    const args = { spot, delta: Math.floor(rnd() * 101) / 100, days: 1 + Math.floor(rnd() * 400), contracts: 1 + Math.floor(rnd() * 20), convention: ["delta", "regt", "shares"][i % 3], buyingPower: rnd() < 0.5 ? null : Math.floor(rnd() * 200000) };
+    const a = PREM.shortCallLine(row, args), b = CHUNK.shortCallLine(row, args);
+    if (JSON.stringify(a) !== JSON.stringify(b)) bad++;
+  }
+  eq(bad, 0, "the shared oracle and the page's copy return the same object, field for field, over 2,000 random lines");
 }
 
 {
@@ -190,7 +212,9 @@ const MUTANTS = [
   ["time value ignored for in the money", "const tvC = Math.max(0, bidC - intrC);", "const tvC = bidC;"],
   ["shares convention is the strike", "m = SHARES_PER_CONTRACT * S;\n    binding = \"shares\";", "m = SHARES_PER_CONTRACT * K;\n    binding = \"shares\";"],
   ["dividends flag inverted", "!(qq > 0)", "!(qq < 0)"],
-  ["best by last tie", "l.premiumC > best.premiumC", "l.premiumC >= best.premiumC"],
+  ["best by gross premium", "if (l.timeValueC > 0 && (best === null || betterDeployment(l, best))) best = l;", "if (best === null || l.premiumC > best.premiumC) best = l;"],
+  ["best ties go to the larger deployment", "return a.deployedC < b.deployedC;", "return a.deployedC > b.deployedC;"],
+  ["best ignores a zero time value", "if (l.timeValueC > 0 && (best === null || betterDeployment(l, best))) best = l;", "if (best === null || betterDeployment(l, best)) best = l;"],
   ["contracts accept loose commas", "/^(\\d{1,3}(?:,\\d{3})+|\\d+)(k?)$/", "/^([\\d,]+)(k?)$/"],
   ["contracts allow zero", "n >= 1 && n <= SC_LIMITS.contractsMax", "n >= 0 && n <= SC_LIMITS.contractsMax"],
 ];
@@ -204,8 +228,9 @@ const MUTANTS = [
     for (const [raw, want] of [["1,000", 1000], ["2.5", null], ["0", null], ["1,00", null]]) if (mod.parseContracts(raw) !== want) tableBad++;
     const dv = mod.dividendsToExpiry({ spot: 100, r: 0.04, q: 0.03, years: 0.25 }) > 0 ? 0 : 1;
     const dz = mod.dividendsToExpiry({ spot: 100, r: 0.04, q: 0, years: 0.25 }) === 0 ? 0 : 1;
-    const plan = mod.planShortCalls([{ ok: true, affordable: true, premiumC: 5 }, { ok: true, affordable: true, premiumC: 5, tag: "second" }]);
-    const planBad = plan.best.tag === undefined ? 0 : 1;
+    const mk = (timeValueC, deployedC, extra = {}) => ({ ok: true, affordable: true, premiumC: timeValueC, timeValueC, deployedC, ...extra });
+    const planBad = [mod.planShortCalls([mk(5, 1), mk(5, 1, { tag: "second" })]).best.tag === undefined, mod.planShortCalls([mk(300, 20), mk(300, 15)]).best.deployedC === 15,
+      mod.planShortCalls([mk(0, 1, { premiumC: 5000 })]).best === null, mod.planShortCalls([mk(100, 5, { premiumC: 900 }), mk(400, 5, { premiumC: 500 })]).best.timeValueC === 400].filter((x) => !x).length;
     if (bad.length + tableBad + dv + dz + planBad === 0) survived.push(title);
   }
   eq(survived, [], `all ${MUTANTS.length} planted wrong builds of the oracle fail the battery`);

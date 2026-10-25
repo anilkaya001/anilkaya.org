@@ -53,8 +53,47 @@ ok(D && Object.isFrozen(D), "the desk's pure functions are exposed to a Node con
   const P = D.parseBuyingPower;
   const table = [["10,000", 10000], ["25k", 25000], ["25.5k", 25500], ["25000", 25000], ["$10,000", 10000], ["1,000,000", 1e6], ["10 000", 10000], ["1.5m", 1.5e6],
     ["10000.75", 10000.75], [".5k", 500], ["1,000.50", 1000.5], ["100b", 1e11], ["25 k", 25000],
-    ["25,5k", null], ["25,5", null], ["1,00", null], ["12,34", null], ["1000,000", null], ["25.000.00", null], ["", null], ["0", null], ["-5", null], ["1e5", null], ["101b", null], ["abc", null], ["k", null]];
+    ["25,5k", null], ["25,5", null], ["1,00", null], ["12,34", null], ["1000,000", null], ["25.000.00", null], ["", null], ["0", null], ["-5", null], ["1e5", null], ["101b", null], ["abc", null], ["k", null],
+    ["1.005", null], ["2.675", null], ["0.009", null], ["0.005", null], ["1.000", null], ["1.000,50", null], ["100.", null], ["1,000 000", null], ["1 000 000", 1e6], ["1_000", 1000], ["1.2345k", 1234.5], ["1.234567k", null], ["$ 2,500.5", 2500.5], ["2,500.50", 2500.5], ["0.01", 0.01],
+    ["1\u00a0000", 1000], ["1\u202f000", 1000], ["100000000000.00", 1e11], ["100000000000.01", null], ["٣٠٠", null], ["0.00", null]];
   for (const [raw, want] of table) eq(P(raw), want, `parseBuyingPower(${JSON.stringify(raw)}) is ${want} (a comma marks thousands only, so 25,5k is refused and not read as 255k)`);
+  const source = readFileSync(new URL("assets/js/flows-desk.js", REPO), "utf8");
+  const plant = (edits) => { let t = source; for (const [a, b] of edits) { assert.equal(t.split(a).length - 1, 1, "mutant applies once"); t = t.replace(a, () => b); } const box = {}; vm.createContext(box); vm.runInContext(t, box); return box.__FlowsDeskTest.parseBuyingPower; };
+  const float = plant([["    if (shift < 0) return null;\n", ""], ["whole + frac + \"0\".repeat(shift)", "whole + frac + \"0\".repeat(Math.max(0, shift))"], ["const cents = Number(digits);", "const cents = Math.round(Number(whole + \".\" + (frac || \"0\")) * (m[6] ? 10 ** BP_POWER[m[6].toLowerCase()] : 1) * 100);"]]);
+  ok(table.some(([raw, want]) => float(raw) !== want), "PLANTED WRONG BUILD IS CAUGHT: a float multiply reads 1.005 as 1 and accepts three decimals");
+}
+
+{
+  const { sizeToBuyingPower, betterDeployment } = await import("../shared/flows-premium.js");
+  let seed = 31337;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const rows = [];
+  for (let i = 0; i < 60; i++) {
+    const collateral = (10 + Math.floor(rnd() * 90000)) / 100 * 100, bidC = 1 + Math.floor(rnd() * 3000), premium = bidC / 100 * 100;
+    const extrinsic = rnd() < 0.2 ? undefined : rnd() < 0.3 ? 0 : Math.min(bidC / 100, Math.floor(rnd() * bidC) / 100);
+    rows.push({ collateral, premium, extrinsic });
+  }
+  let bad = 0;
+  for (const row of rows) for (const bp of [0.5, 1000, 25000.37, 400000, 1e7]) {
+    const a = D.sizeRow(row, bp), b = sizeToBuyingPower(row, bp);
+    if ((a === null) !== (b === null)) { bad++; continue; }
+    if (a === null) continue;
+    for (const k of ["contracts", "affordable", "collectible", "timeValue", "intrinsicValue", "deployed", "idle", "timeValueC", "deployedC"]) if (a[k] !== b[k]) bad++;
+    if (!(a.yieldOnDeployed === b.yieldOnDeployed || Math.abs(a.yieldOnDeployed - b.yieldOnDeployed) < 1e-15)) bad++;
+  }
+  eq(bad, 0, "the page's sizing and the server module's sizing agree on every field, in integer cents, over 300 row and balance pairs (cash, time value, in-the-money value, deployed, idle, yield)");
+  const itm = D.sizeRow({ collateral: 10000, premium: 1500, extrinsic: 0.05 }, 100000);
+  ok(itm.timeValue === 50 && itm.intrinsicValue === 14950 && itm.collectible === 15000, "an in-the-money line earns 50 dollars of the 15,000 it brings in");
+  ok(Math.abs(itm.yieldOnDeployed - 0.0005) < 1e-12, "and its return on what is deployed is 0.05%");
+  eq(D.sizeRow({ collateral: 10000, premium: 145 }, 100000).collectible, 1450, "a premium that floats to 14.499999999999998 per share collects whole cents: 10 contracts bring in 1,450 exactly");
+  const bare = D.sizeRow({ collateral: 10000, premium: 150 }, 100000);
+  same([bare.timeValue, bare.timeValueC, bare.intrinsicValue, bare.yieldOnDeployed], [null, null, null, null], "a row with no time value figure has none, rather than being sized as if all its premium were time value");
+  eq(bare.collectible, 1500, "while the cash it brings in is still stated");
+  eq(D.sizeRow({ collateral: 10000, premium: 150, extrinsic: -0.5 }, 100000).timeValueC, 0, "a negative time value is exactly zero");
+  eq(D.sizeRow({ collateral: 10000, premium: 150, extrinsic: 9 }, 100000).timeValueC, 150000, "and a time value above the bid is held to the bid: 10 contracts at 150 dollars each");
+  ok(betterDeployment({ timeValueC: 300, deployedC: 20 }, { timeValueC: 200, deployedC: 10 }) && !betterDeployment({ timeValueC: 200, deployedC: 10 }, { timeValueC: 300, deployedC: 20 }) && betterDeployment({ timeValueC: 300, deployedC: 10 }, { timeValueC: 300, deployedC: 20 }) && !betterDeployment({ timeValueC: 300, deployedC: 20 }, { timeValueC: 300, deployedC: 20 }), "the comparator prefers time value, then the smaller deployment, and a full tie keeps the incumbent");
+  const pts = [{ x: 0.2, y: 1, id: "a" }, { x: NaN, y: 5, id: "nan" }, { x: 0.1, y: undefined, id: "undef" }, { x: 0.2, y: 1, id: "dup" }, { x: Infinity, y: 9, id: "inf" }];
+  same(D.frontierOf(pts, false).map((p) => p.id), ["a"], "a point with a NaN, an undefined or an infinite coordinate is never on the frontier, and of two identical points the first stays");
 }
 
 {

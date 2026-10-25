@@ -1,5 +1,5 @@
 import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
-import { yearFraction } from "./flows-quant-time.js";
+import { closeUtcMs, etDayOf, isSession, shiftDay, yearFraction } from "./flows-quant-time.js";
 import { median } from "./flows-stats.js";
 
 export function numOrNull(value) {
@@ -102,6 +102,9 @@ export function midImpliedVol({ spot, strike, type, mid, years, rate = PRICING_R
   return Number.isFinite(iv) && iv > 0 ? iv : null;
 }
 
+const QUOTE_NOISE = 1e-9;
+const withoutNoise = (dollars) => (Math.abs(dollars) < QUOTE_NOISE ? 0 : dollars);
+
 export function priceSale(row, {
   spot, asOf, ivDivisor = 1, parsed: given = null, readMs = null, rate = PRICING_RATE, midIv = true,
 } = {}) {
@@ -131,7 +134,7 @@ export function priceSale(row, {
     : spot * SHARES_PER_CONTRACT;
 
   const inherent = intrinsic(parsed.type, spot, parsed.strike);
-  const extrinsic = Math.max(0, bid - inherent);
+  const extrinsic = Math.max(0, withoutNoise(bid - inherent));
   const yieldGross = collateral > 0 ? premium / collateral : null;
   const yieldOnCollateral = collateral > 0 ? (extrinsic * SHARES_PER_CONTRACT) / collateral : null;
 
@@ -148,7 +151,7 @@ export function priceSale(row, {
   const iv = ivRaw !== null && ivRaw > 0 ? ivRaw / ivDivisor : null;
 
   const assignedReturn = strategy === "cc"
-    ? (parsed.strike - spot + bid) / spot
+    ? withoutNoise(parsed.strike - spot + bid) / spot
     : null;
 
   const oi = numOrNull(row.open_interest);
@@ -369,7 +372,7 @@ export function rankChain(contracts, {
   attachOpposite(kept, standing, { spot, readMs, rate });
   const forwards = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => {
     const f = forwardAt(expiry);
-    return { expiry, method: f.method, pairs: f.pairs };
+    return { expiry, method: f.method, pairs: f.pairs, F: f.F };
   });
 
   const { divisor, basis } = ivConvention(
@@ -597,7 +600,7 @@ export function ivSurface(priced, {
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-function isRealDate(s) {
+export function isRealDate(s) {
   if (typeof s !== "string" || !ISO_DATE.test(s)) return false;
   const t = Date.parse(s + "T00:00:00Z");
   if (!Number.isFinite(t)) return false;
@@ -607,22 +610,55 @@ function isRealDate(s) {
 const AFTER_CLOSE = new Set(["postmarket", "afterhours", "aftermarket", "after_hours"]);
 const BEFORE_OPEN = new Set(["premarket", "beforeopen", "before_open"]);
 
-export function crossesEarnings(expiry, earningsDate, announceTime, { asOf = null } = {}) {
+const announceOf = (announceTime) => {
+  const token = String(announceTime || "").trim().toLowerCase().replace(/[\s-]/g, "");
+  return BEFORE_OPEN.has(token) ? "before" : AFTER_CLOSE.has(token) ? "after" : "unknown";
+};
+
+export function saleDayOf(readMs) {
+  if (!Number.isFinite(readMs)) return null;
+  let day = etDayOf(readMs);
+  if (!isRealDate(day)) return null;
+  if (isSession(day) && readMs < closeUtcMs(day)) return day;
+  for (let i = 0; i < 10; i++) {
+    day = shiftDay(day, 1);
+    if (isSession(day)) return day;
+  }
+  return null;
+}
+
+export function reportPrecedesSale(earningsDate, announceTime, { readMs = null } = {}) {
+  if (!isRealDate(earningsDate)) return null;
+  const sale = saleDayOf(readMs);
+  if (sale === null) return null;
+  if (earningsDate < sale) return true;
+  if (earningsDate > sale) return false;
+  const when = announceOf(announceTime);
+  return when === "before" ? true : when === "after" ? false : null;
+}
+
+export function crossesEarnings(expiry, earningsDate, announceTime, { asOf = null, readMs = null } = {}) {
 
   if (!isRealDate(expiry)) return null;
   if (!isRealDate(earningsDate)) return null;
   if (isRealDate(asOf) && earningsDate < asOf) return null;
+  if (Number.isFinite(readMs) && reportPrecedesSale(earningsDate, announceTime, { readMs }) !== false) return null;
 
   if (earningsDate < expiry) return true;
   if (earningsDate > expiry) return false;
 
-  const token = String(announceTime || "").trim().toLowerCase().replace(/[\s-]/g, "");
-  if (BEFORE_OPEN.has(token)) return true;
-  if (AFTER_CLOSE.has(token)) return false;
+  const when = announceOf(announceTime);
+  if (when === "before") return true;
+  if (when === "after") return false;
   return null;
 }
 
 const cents = (dollars) => Math.round(dollars * 100);
+
+export function betterDeployment(a, b) {
+  if (a.timeValueC !== b.timeValueC) return a.timeValueC > b.timeValueC;
+  return a.deployedC < b.deployedC;
+}
 
 export function sizeToBuyingPower(row, buyingPower) {
   const bp = numOrNull(buyingPower);
@@ -634,18 +670,25 @@ export function sizeToBuyingPower(row, buyingPower) {
   const premiumCents = cents(row.premium);
   if (!(collateralCents > 0)) return null;
 
+  const extrinsic = numOrNull(row.extrinsic);
+  const timeCents = extrinsic === null ? null : Math.max(0, Math.min(premiumCents, Math.round(extrinsic * 1e4)));
   const contracts = Math.floor(bpCents / collateralCents);
   const deployedCents = contracts * collateralCents;
   const collectibleCents = contracts * premiumCents;
+  const timeValueCents = timeCents === null ? null : contracts * timeCents;
   return {
     contracts,
 
     affordable: contracts > 0,
     collectible: collectibleCents / 100,
+    timeValue: timeValueCents === null ? null : timeValueCents / 100,
+    intrinsicValue: timeValueCents === null ? null : (collectibleCents - timeValueCents) / 100,
     deployed: deployedCents / 100,
     idle: (bpCents - deployedCents) / 100,
 
-    yieldOnDeployed: deployedCents > 0 ? collectibleCents / deployedCents : null,
+    yieldOnDeployed: deployedCents > 0 && timeValueCents !== null ? timeValueCents / deployedCents : null,
+    timeValueC: timeValueCents,
+    deployedC: deployedCents,
   };
 }
 
@@ -660,7 +703,7 @@ export function planBuyingPower(rows, buyingPower) {
 
   let best = null;
   for (const r of affordable) {
-    if (best === null || r.sizing.collectible > best.sizing.collectible) best = r;
+    if (r.sizing.timeValueC > 0 && (best === null || betterDeployment(r.sizing, best.sizing))) best = r;
   }
   return { buyingPower: bp, rows: out, affordable: affordable.length, best };
 }
@@ -722,7 +765,7 @@ export function dividendsToExpiry({ spot, r, q, years }) {
 
 export function shortCallLine(row, { spot, delta = null, days, contracts = SC_DEFAULTS.contracts, convention = SC_DEFAULTS.convention, haircut = SC_DEFAULTS.haircut, floor = SC_DEFAULTS.floor, buyingPower = null } = {}) {
   const S = numOrNull(spot), K = numOrNull(row && row.strike), bid = numOrNull(row && row.bid);
-  const base = { ok: false, why: null, binding: null, asked: contracts, n: null, bidC: null, tvC: null, intrC: null, m1C: null, regtM1C: null, ratio: null, grossRatio: null, annRatio: null, limited: false, affordable: false, premiumC: null, collateralC: null, idleC: null, deltaShares: null, deltaDollarsC: null };
+  const base = { ok: false, why: null, binding: null, asked: contracts, n: null, bidC: null, tvC: null, intrC: null, m1C: null, regtM1C: null, ratio: null, grossRatio: null, annRatio: null, limited: false, affordable: false, premiumC: null, timeValueC: null, collateralC: null, deployedC: null, idleC: null, deltaShares: null, deltaDollarsC: null };
   if (S === null || K === null || !(S > 0) || !(K > 0)) return { ...base, why: "no-spot" };
   if (bid === null || !(bid > 0)) return { ...base, why: "no-bid" };
   const col = shortCallCollateral({ convention, spot: S, strike: K, delta, haircut, floor });
@@ -741,7 +784,7 @@ export function shortCallLine(row, { spot, delta = null, days, contracts = SC_DE
     ...out, ok: true, why: null, binding: col.binding, m1C: col.m1C, n,
     ratio, grossRatio: bidC / col.m1C, annRatio: dayN !== null && dayN >= 1 ? ratio * DAYS_PER_YEAR / dayN : null,
     limited: bpC !== null && n < contracts, affordable: n >= 1,
-    premiumC: n * bidC, collateralC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
+    premiumC: n * bidC, timeValueC: n * tvC, collateralC: n * col.m1C, deployedC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
     deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * contracts, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * contracts),
   };
 }
@@ -751,7 +794,7 @@ export function planShortCalls(lines) {
   for (const l of lines) {
     if (!l || !l.ok || !l.affordable) continue;
     affordable++;
-    if (best === null || l.premiumC > best.premiumC) best = l;
+    if (l.timeValueC > 0 && (best === null || betterDeployment(l, best))) best = l;
   }
   return { best, affordable };
 }

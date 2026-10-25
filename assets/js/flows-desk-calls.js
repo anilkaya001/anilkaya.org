@@ -67,7 +67,7 @@
 
   function shortCallLine(row, { spot, delta = null, days, contracts = SC_DEFAULTS.contracts, convention = SC_DEFAULTS.convention, haircut = SC_DEFAULTS.haircut, floor = SC_DEFAULTS.floor, buyingPower = null } = {}) {
     const S = numOrNull(spot), K = numOrNull(row && row.strike), bid = numOrNull(row && row.bid);
-    const base = { ok: false, why: null, binding: null, asked: contracts, n: null, bidC: null, tvC: null, intrC: null, m1C: null, regtM1C: null, ratio: null, grossRatio: null, annRatio: null, limited: false, affordable: false, premiumC: null, collateralC: null, idleC: null, deltaShares: null, deltaDollarsC: null };
+    const base = { ok: false, why: null, binding: null, asked: contracts, n: null, bidC: null, tvC: null, intrC: null, m1C: null, regtM1C: null, ratio: null, grossRatio: null, annRatio: null, limited: false, affordable: false, premiumC: null, timeValueC: null, collateralC: null, deployedC: null, idleC: null, deltaShares: null, deltaDollarsC: null };
     if (S === null || K === null || !(S > 0) || !(K > 0)) return { ...base, why: "no-spot" };
     if (bid === null || !(bid > 0)) return { ...base, why: "no-bid" };
     const col = shortCallCollateral({ convention, spot: S, strike: K, delta, haircut, floor });
@@ -86,9 +86,14 @@
       ...out, ok: true, why: null, binding: col.binding, m1C: col.m1C, n,
       ratio, grossRatio: bidC / col.m1C, annRatio: dayN !== null && dayN >= 1 ? ratio * DAYS_PER_YEAR / dayN : null,
       limited: bpC !== null && n < contracts, affordable: n >= 1,
-      premiumC: n * bidC, collateralC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
+      premiumC: n * bidC, timeValueC: n * tvC, collateralC: n * col.m1C, deployedC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
       deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * contracts, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * contracts),
     };
+  }
+
+  function betterDeployment(a, b) {
+    if (a.timeValueC !== b.timeValueC) return a.timeValueC > b.timeValueC;
+    return a.deployedC < b.deployedC;
   }
 
   function planShortCalls(lines) {
@@ -96,7 +101,7 @@
     for (const l of lines) {
       if (!l || !l.ok || !l.affordable) continue;
       affordable++;
-      if (best === null || l.premiumC > best.premiumC) best = l;
+      if (l.timeValueC > 0 && (best === null || betterDeployment(l, best))) best = l;
     }
     return { best, affordable };
   }
@@ -125,7 +130,8 @@
   const usdC = (c, dp = 0) => {
     if (c === null || c === undefined) return DASH;
     const d = c / 100;
-    return (d < 0 ? MINUS : "") + "$" + (dp ? Math.abs(d).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.round(Math.abs(d)).toLocaleString("en-US"));
+    const text = dp ? Math.abs(d).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.round(Math.abs(d)).toLocaleString("en-US");
+    return (d < 0 && /[1-9]/.test(text) ? MINUS : "") + "$" + text;
   };
   const fmtRatio = (v) => {
     const n = isNum(v);
@@ -139,7 +145,7 @@
     const p = n * 100;
     return p > 99999 ? "> 99,999%" : groupN(p) + "%";
   };
-  const signedD = (v) => (isNum(v) === null ? DASH : SIGNS[Math.sign(v)] + Math.abs(v).toFixed(2));
+  const signedD = (v) => { const n = isNum(v); if (n === null) return DASH; const a = Math.abs(n).toFixed(2); return (Number(a) === 0 ? "" : SIGNS[Math.sign(n)]) + a; };
 
   const convText = () => (terms.cv === "delta" ? "Delta " + pctWord(terms.h) + " of notional, floor " + pctWord(terms.f) : terms.cv === "regt" ? "Reg-T style" : "shares held");
   const termsSummary = () => groupN(terms.n) + " × · " + (terms.cv === "delta" ? "Delta " + pctWord(terms.h) + " / floor " + pctWord(terms.f) : terms.cv === "regt" ? "Reg-T style" : "Shares held");
@@ -200,7 +206,7 @@
         early: { div, tv: tvShare, watch: div > 0 && tvShare !== null && tvShare < div, deep: delta !== null && delta >= 0.9 },
       });
       r.__sizing = buyingPower !== null && line.ok
-        ? { contracts: line.n, affordable: line.affordable, collectible: line.premiumC / 100, deployed: line.collateralC / 100, idle: line.idleC / 100, yieldOnDeployed: line.collateralC > 0 ? line.n * line.tvC / line.collateralC : null }
+        ? { contracts: line.n, affordable: line.affordable, collectible: line.premiumC / 100, timeValue: line.timeValueC / 100, intrinsicValue: (line.premiumC - line.timeValueC) / 100, deployed: line.collateralC / 100, idle: line.idleC / 100, yieldOnDeployed: line.collateralC > 0 ? line.timeValueC / line.collateralC : null, timeValueC: line.timeValueC, deployedC: line.collateralC }
         : null;
     }
   }
@@ -210,7 +216,7 @@
     ratio: (r) => (r.__sc ? r.__sc.ratio : null),
     premium: (r) => r.premium,
     cushionSigmas: (r) => r.cushionSigmas,
-    collectible: (r) => (r.__sc && r.__sc.ok && r.__sc.premiumC !== null ? r.__sc.premiumC : null),
+    collectible: (r) => (r.__sc && r.__sc.ok && r.__sc.timeValueC !== null ? r.__sc.timeValueC : null),
     edge: (r) => (r.__sc ? r.__sc.evN : null),
   };
   const key = (rank) => KEYS[rank] || KEYS.annualized;
@@ -308,6 +314,7 @@
         ["Shares held", S === null ? DASH : "$" + groupN(S * SHARES_PER_CONTRACT * n) + " of stock for " + groupN(n) + " contract" + (n === 1 ? "" : "s")],
         ["Premium ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only (gross " + fmtRatio(sc.grossRatio) + ")" : DASH],
         ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? DASH : signedD(sc.netDelta) + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the card's smile, which can only over-state collateral on a dividend payer"],
+        ["Forward", K.forwardText(r)],
         ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S))],
         ["Cushion", fmtSd(r.cushionSigmas)],
@@ -339,8 +346,9 @@
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Top line"), UI.infoButton("the top line", () => ({ title: "Top line", lead: T("sc-premium") }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, groupN(z.n) + "× " + top.ticker + " " + kf(top.strike) + " call"), h("span", null, F.day(top.expiry))),
-        UI.metrics([UI.metric("Collects", usdC(z.premiumC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Ratio", fmtRatio(z.ratio))], { min: 76 }),
-        h("p", { class: "dk-hint" }, T("sc-bp-ask")));
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Ratio", fmtRatio(z.ratio))], { min: 76 }),
+        h("p", { class: "dk-hint" }, T("sc-bp-ask")),
+        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
       mods.best.append(uncovered);
       return;
     }
@@ -350,23 +358,26 @@
     let sentence;
     if (!bestRow) {
       const cheapest = lines.reduce((c, r) => (c === null || r.__sc.m1C < c ? r.__sc.m1C : c), null);
-      sentence = T("plan-no", { bp: K.fmtMoney(bp) }) + (cheapest === null ? "" : " " + T("plan-min", { c: usdC(cheapest) }));
+      sentence = affordable === 0
+        ? T("plan-no", { bp: K.fmtMoney(bp) }) + (cheapest === null ? "" : " " + T("plan-min", { c: usdC(cheapest) }))
+        : T("plan-tv0", { bp: K.fmtMoney(bp), a: affordable });
       plan.className = "dk-plan is-empty";
       plan.replaceChildren(UI.metrics([UI.metric("Best line", DASH, { state: { state: "quiet", reason: sentence } })]));
     } else {
       const z = bestRow.__sc;
-      sentence = T("sc-plan", { bp: K.fmtMoney(bp), a: affordable, m: lines.length, n: z.n, t: bestRow.ticker, k: fmt2(bestRow.strike), e: bestRow.expiry, c: usdC(z.premiumC), d: usdC(z.collateralC), i: usdC(z.idleC), conv: convText(), N: groupN(terms.n) });
+      sentence = T("sc-plan", { bp: K.fmtMoney(bp), a: affordable, m: lines.length, n: z.n, t: bestRow.ticker, k: fmt2(bestRow.strike), e: bestRow.expiry, c: usdC(z.timeValueC), d: usdC(z.collateralC), i: usdC(z.idleC), conv: convText(), N: groupN(terms.n) });
       plan.className = "dk-plan";
       plan.replaceChildren(
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.n + "× " + bestRow.ticker + " " + kf(bestRow.strike) + " call"), h("span", null, F.day(bestRow.expiry))),
-        UI.metrics([UI.metric("Collects", usdC(z.premiumC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC))], { min: 76 }),
         UI.split([{ color: "--accent", value: z.collateralC / (bp * 100) }, { color: "--fill-2", value: z.idleC / (bp * 100) }], "Deploys " + usdC(z.collateralC) + " of " + K.fmtMoney(bp) + ", " + usdC(z.idleC) + " idle"),
-        h("p", { class: "dk-hint" }, affordable + " of " + lines.length + " lines affordable" + (z.limited ? " · Limited by buying power: " + z.n + " of " + z.asked : "") + (K.isItm(bestRow) ? " · " + T("plan-itm") : "")));
-      const next = lines.filter((r) => r !== bestRow && r.__sc.affordable).sort((a, b) => b.__sc.premiumC - a.__sc.premiumC).slice(0, 2);
+        h("p", { class: "dk-hint" }, affordable + " of " + lines.length + " lines affordable" + (z.limited ? " · Limited by buying power: " + z.n + " of " + z.asked : "")),
+        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
+      const next = lines.filter((r) => r !== bestRow && r.__sc.affordable && r.__sc.timeValueC > 0).sort((a, b) => (betterDeployment(a.__sc, b.__sc) ? -1 : betterDeployment(b.__sc, a.__sc) ? 1 : 0)).slice(0, 2);
       if (next.length) {
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
-          next.map((r) => h("div", { class: "dk-alt", role: "listitem" }, h("span", null, r.__sc.n + "× " + r.ticker + " " + kf(r.strike) + " call"), h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, usdC(r.__sc.premiumC))))));
+          next.map((r) => h("div", { class: "dk-alt", role: "listitem" }, h("span", null, r.__sc.n + "× " + r.ticker + " " + kf(r.strike) + " call"), h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("b", null, usdC(r.__sc.timeValueC))))));
       }
     }
     mods.best.append(uncovered);

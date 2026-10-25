@@ -140,6 +140,9 @@ const upstream = http.createServer((req, res) => {
       return send(200, { data: { close: "104.00", prev_close: "100.00",
         market_time: "postmarket", tape_time: SESSION_DAY + "T21:30:00Z" } });
     }
+    if (ticker === "NOP") {
+      return send(200, { data: { close: "102.00", market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" } });
+    }
     const state = { close: "102.00", prev_close: "100.00",
       market_time: "regular", tape_time: SESSION_DAY + " 18:06:00+00:00" };
     return send(200, ticker === "BAR" ? state : { data: state });
@@ -708,6 +711,17 @@ try {
     ok(/price above was read/.test(dead),
        `and distinguishes itself from a whole-symbol failure by naming what DID arrive (${dead})`);
     eq(flat(await page.locator("#sgPx .tl-spot").textContent()), "102.00", "the price stays, because a spot that was read is still a reading");
+
+    await page.fill("#sgTicker", "AAA");
+    await page.click(".sg-load");
+    await page.waitForSelector("#sgPx .ui-capsule", { timeout: 20000 });
+    ok(/^[+−]/.test(flat(await page.locator("#sgPx .ui-capsule").first().textContent())), "a name with a previous close prints its day change");
+
+    await page.fill("#sgTicker", "NOP");
+    await page.click(".sg-load");
+    await page.waitForFunction(() => /—/.test((document.querySelector("#sgPx .ui-capsule") || {}).textContent || ""), null, { timeout: 20000 });
+    const noPrev = flat(await page.locator("#sgPx .ui-capsule").first().textContent());
+    ok(/^—/.test(noPrev) && /Previous close not reported/.test(noPrev) && !/0\.00/.test(noPrev), `a name with no previous close prints a dash with its reason, never a flat 0.00% (${noPrev})`);
   }
 
   {

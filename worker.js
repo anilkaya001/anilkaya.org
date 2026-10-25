@@ -21,7 +21,7 @@ import { MARKET_INDICES, MARKET_STALE_MS, marketRefreshDue, parseIndexQuote, bui
 
 import {
   rankChain, crossesEarnings, numOrNull, parseOptionSymbol, ivConvention, ivSurface, deskSmiles,
-  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES, deskCarry,
+  hasNoEarnings, optionRoot, PRICING_RATE, DEFAULT_GATES, deskCarry, reportPrecedesSale,
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
@@ -2329,6 +2329,11 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
   return json(payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "miss", "X-Chain-Age": "0" });
 }
 
+const positiveOrNull = (value) => {
+  const n = numOrNull(value);
+  return n !== null && n > 0 ? n : null;
+};
+
 function chainReadMs(env) {
   if (vendorRedirected(env) && env.UW_NOW) {
     const pinned = Date.parse(env.UW_NOW);
@@ -2422,7 +2427,7 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
   for (const row of ranked.rows) {
     row.crossesEarnings = !info ? null
       : noEarnings ? false
-        : crossesEarnings(row.expiry, earnDate, info.announceTime, { asOf });
+        : crossesEarnings(row.expiry, earnDate, info.announceTime, { asOf, readMs });
   }
   return {
     ticker, spot, asOf,
@@ -2441,7 +2446,7 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
 
     marketTime: print.marketTime,
     tapeTime: print.tapeTime,
-    prevClose: numOrNull(live && live.prev_close) > 0 ? numOrNull(live.prev_close) : print.spot,
+    prevClose: positiveOrNull(live && live.prev_close),
     strategy, ...ranked,
 
     truncated,
@@ -2449,7 +2454,8 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
 
     earnings: info
       ? { date: earnDate, announceTime: info.announceTime, issueType: info.issueType,
-        past: earnDate !== null && earnDate < asOf }
+        past: earnDate !== null && earnDate < asOf,
+        precedesSale: earnDate === null ? null : reportPrecedesSale(earnDate, info.announceTime, { readMs }) }
       : null,
     engine: deskEngine(cardRead && cardRead.card, Date.now()),
     generatedAt: new Date(readMs).toISOString(),
@@ -2561,7 +2567,7 @@ async function buildStrategyContext(env, ctx, vf, ticker) {
     },
     marketTime: print.marketTime,
     tapeTime: print.tapeTime,
-    prevClose: numOrNull(live && live.prev_close) ?? print.spot,
+    prevClose: positiveOrNull(live && live.prev_close),
 
     expiries,
     expiryStatus: breakdown === null ? "unreadable" : (expiries.length ? "ok" : "quiet"),
@@ -2585,7 +2591,7 @@ function strategyEngine({ ticker, expiry, calls, puts, spot, card, nowMs, rank }
   const book = bookRows(calls, puts, optionRoot(ticker));
   const rows = book.length ? [{ expiry, rows: book }] : [];
   if (!rows.length) return { status: "unavailable", reason: "no contract on this expiry parsed as the ticker's own" };
-  if (!(spot > 0)) return { status: "unavailable", reason: "no live spot to price against" };
+  if (!(spot > 0)) return { status: "unavailable", reason: "no regular-session price to price against" };
   const state = block && block.state ? block.state
     : card && card.panels ? engineState(FLOWS_NEURON.regimeState(card, {})) : engineState(null);
   const out = runCardEngine({
@@ -2679,13 +2685,17 @@ async function buildStrategyExpiry(env, ctx, vf, ticker, expiry, { engine = fals
 
   let engineBlock = null;
   if (engine) {
-    const live = liveState && !Array.isArray(liveState) ? (liveState.data && !Array.isArray(liveState.data) ? liveState.data : liveState) : null;
-    const spotLive = numOrNull(live && live.close);
     const card = cardRead && cardRead.card ? cardRead.card : null;
-    const spot = spotLive !== null && spotLive > 0 ? spotLive : card && card.engine && numOrNull(card.engine.spot);
+    const readMs = chainReadMs(env);
+    let print = printOf({ state: liveState, bars: [], readMs });
+    if (print === null || print.source !== "stock-state") {
+      const candles = await vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }).catch(keepRefusal(null));
+      print = printOf({ state: liveState, bars: unwrapRows(candles), readMs });
+    }
+    const spot = print === null ? null : print.spot;
     try {
       engineBlock = strategyEngine({ ticker, expiry, calls: callRows, puts: putRows, spot, card, nowMs: Date.now(), rank: rankModeOf(env && env.FLOWS_RANK) });
-      engineBlock.spotSource = spotLive !== null && spotLive > 0 ? "stock-state" : spot ? "card" : null;
+      engineBlock.spotSource = print === null ? null : print.source;
     } catch (error) {
       engineBlock = { status: "unavailable", reason: "the engine failed on this expiry: " + (errorText(error)) };
     }

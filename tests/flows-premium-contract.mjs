@@ -7,7 +7,9 @@ import {
   ivSurface, SURFACE_ROW_STEPS, SURFACE_MAX_EXPIRIES,
   intrinsic, impossibleQuote, optionRoot, hasNoEarnings, PRICING_RATE, OFF_MARKET_TOLERANCE,
   deskSmiles, deskCarry, forwardPlan, forwardGapLimit, midImpliedVol, FORWARD_MIN_PAIRS, FORWARD_MAX_LOG_GAP, FORWARD_GAP_FLOOR,
+  isRealDate, reportPrecedesSale, saleDayOf,
 } from "../shared/flows-premium.js";
+import { loadMutated } from "./truth/mutants.mjs";
 import { ENGINE_LINES } from "../shared/flows-quant-engine.js";
 import { black76 } from "../shared/flows-quant-bs.js";
 import { yearFraction } from "../shared/flows-quant-time.js";
@@ -273,8 +275,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
 
-  const amgn = { ticker: "AMGN", collateral: 43000, premium: 1290, yieldOnCollateral: 0.03 };
-  const wmb  = { ticker: "WMB",  collateral: 7000,  premium: 210,  yieldOnCollateral: 0.03 };
+  const amgn = { ticker: "AMGN", collateral: 43000, premium: 1290, extrinsic: 12.9, yieldOnCollateral: 0.03 };
+  const wmb  = { ticker: "WMB",  collateral: 7000,  premium: 210,  extrinsic: 2.1, yieldOnCollateral: 0.03 };
 
   const a = sizeToBuyingPower(amgn, 50000);
   const w = sizeToBuyingPower(wmb, 50000);
@@ -291,7 +293,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   near(w.yieldOnDeployed, 1470 / 49000, 1e-12,
        "yield on DEPLOYED capital, which differs from the line's yield whenever there is a remainder");
 
-  const half = sizeToBuyingPower({ collateral: 4000, premium: 100 }, 50000);
+  const half = sizeToBuyingPower({ collateral: 4000, premium: 100, extrinsic: 1 }, 50000);
   eq(half.contracts, 12, "12.5 contracts floors to 12 — rounding would overspend the account");
   eq(half.deployed, 48000, "and deploys only what those contracts require");
   ok(half.deployed <= 50000, "deployed capital NEVER exceeds the buying power entered");
@@ -313,9 +315,9 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const rows = [
-    { ticker: "AMGN", collateral: 43000, premium: 1290 },
-    { ticker: "WMB",  collateral: 7000,  premium: 210 },
-    { ticker: "HUGE", collateral: 900000, premium: 40000 },
+    { ticker: "AMGN", collateral: 43000, premium: 1290, extrinsic: 12.9 },
+    { ticker: "WMB",  collateral: 7000,  premium: 210, extrinsic: 2.1 },
+    { ticker: "HUGE", collateral: 900000, premium: 40000, extrinsic: 400 },
   ];
   const plan = planBuyingPower(rows, 50000);
   eq(plan.buyingPower, 50000);
@@ -825,7 +827,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const one = sizeToBuyingPower({ collateral: 1.1 * 100, premium: 10 }, 110);
+  const one = sizeToBuyingPower({ collateral: 1.1 * 100, premium: 10, extrinsic: 0.1 }, 110);
   eq(one.contracts, 1, "110 of buying power buys the 1.1 x 100 collateral once: floating point made the collateral 110.00000000000001 and the answer zero");
   eq(one.deployed, 110, "deploying exactly 110");
   eq(one.idle, 0, "with nothing idle");
@@ -843,7 +845,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
   }
   eq(wrong, 0, `${cases} budgets against float collateral all size as integer cents do`);
-  const noise = sizeToBuyingPower({ collateral: 23102, premium: 147.00000000000003 }, 50000);
+  const noise = sizeToBuyingPower({ collateral: 23102, premium: 147.00000000000003, extrinsic: 1.47 }, 50000);
   eq(noise.collectible, 294, "a premium carrying float noise collects a whole number of cents");
   eq(noise.idle, 50000 - 2 * 23102, "and the idle cash is exact");
   near(noise.yieldOnDeployed, 294 / 46204, 1e-12, "with the yield on what is deployed");
@@ -1041,6 +1043,168 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(deskCarry([{ id: "rv.30", v: 0.2, g: 3 }], "ok"), null, "a card without the fact has none");
   eq(deskCarry(null, "ok"), null, "a card without facts has none");
   eq(deskCarry({ "carry.implied": { v: 0.03, g: 3 } }, "ok"), null, "and only the list the desk is sent counts");
+}
+
+
+{
+  const row = (type, strike, bid, expiry = "2026-11-20") => ({
+    option_symbol: "SYX" + expiry.slice(2).replace(/-/g, "") + type + String(Math.round(strike * 1000)).padStart(8, "0"),
+    nbbo_bid: bid, nbbo_ask: (Number(bid) + 0.05).toFixed(2), open_interest: "500", implied_volatility: "0.3",
+  });
+  const price = (mod, type, strike, bid, spot) => mod.priceSale(row(type, strike, bid), { spot, asOf: "2026-10-26", midIv: false });
+
+  let residue = 0, cases = 0;
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 4000; i++) {
+    const spotC = 100 + Math.floor(rnd() * 80000), strikeHalf = 2 + Math.floor(rnd() * 1800);
+    const spot = spotC / 100, strike = strikeHalf / 2;
+    for (const type of ["C", "P"]) {
+      const intrC = Math.max(0, type === "C" ? spotC - strikeHalf * 50 : strikeHalf * 50 - spotC);
+      if (intrC === 0) continue;
+      const p = price({ priceSale }, type, strike, (intrC / 100).toFixed(2), spot);
+      cases++;
+      if (!p || !Object.is(p.extrinsic, 0) || p.annualized !== 0 || p.yieldOnCollateral !== 0) residue++;
+    }
+  }
+  ok(cases > 3000, `${cases} in-the-money lines whose bid is exactly their intrinsic value`);
+  eq(residue, 0, "EVERY ONE HAS EXACTLY ZERO TIME VALUE and a zero annualised yield: S - K in doubles left 7e-15 on four in eleven of them (471.26 spot, 410.5 strike, 60.76 bid)");
+  const hit = price({ priceSale }, "C", 410.5, "60.76", 471.26);
+  ok(Object.is(hit.extrinsic, 0) && Object.is(hit.assignedReturn, 0), "the buy-write's return if called is +0 there, never -1e-16 printed as -0.0%");
+  const itm = price({ priceSale }, "C", 95, "5.10", 100.0001);
+  near(itm.intrinsic, 5.0001, 1e-12, "a spot with four decimals keeps its intrinsic value");
+  near(itm.extrinsic, 0.0999, 1e-12, "and the time value is what is left of the bid");
+  const otm = price({ priceSale }, "C", 105, "0.40", 100);
+  eq(otm.intrinsic, 0, "an out-of-the-money call has no intrinsic value");
+  near(otm.extrinsic, 0.4, 1e-12, "and its whole bid is time value, never more than the bid");
+  const under = price({ priceSale }, "P", 120, "19.00", 100);
+  ok(Object.is(under.extrinsic, 0) && under.annualized === 0, "a bid below intrinsic value has exactly +0 time value");
+  near(price({ priceSale }, "P", 100, "2.00", 100).yieldOnCollateral, 0.02, 1e-12, "at the money the yield is the bid over the strike");
+
+  near(price({ priceSale }, "C", 95, "5.005", 100).extrinsic, 0.005, 1e-12, "half a cent of time value on a 5.00 intrinsic is kept, not swept up with the float noise");
+
+  const floatSub = await loadMutated("shared/flows-premium.js", [["Math.max(0, withoutNoise(bid - inherent))", "Math.max(0, bid - inherent)"]]);
+  const wide = await loadMutated("shared/flows-premium.js", [["const QUOTE_NOISE = 1e-9;", "const QUOTE_NOISE = 1e-2;"]]);
+  const probe = (mod) => {
+    const a = price(mod, "C", 410.5, "60.76", 471.26), b = price(mod, "C", 95, "5.005", 100);
+    return !Object.is(a.extrinsic, 0) || Math.abs(b.extrinsic - 0.005) > 1e-12;
+  };
+  ok(probe(floatSub), "PLANTED WRONG BUILD: plain float subtraction of the intrinsic value is caught");
+  ok(probe(wide), "PLANTED WRONG BUILD: a noise threshold wide enough to swallow half a cent of time value is caught");
+  ok(!probe({ priceSale }), "and the shipped build passes the same probe");
+}
+
+{
+  const c = crossesEarnings, pre = reportPrecedesSale;
+  const at = (iso) => Date.parse(iso);
+  const read = (asOf, iso) => ({ asOf, readMs: at(iso) });
+
+  eq(isRealDate("2024-02-29"), true, "a leap day is a date");
+  eq(isRealDate("2025-02-29"), false, "a non-leap 29 February is not");
+  eq(isRealDate("2026-13-45"), false, "month 13 is not");
+  eq(isRealDate("2026-4-5"), false, "and an unpadded one is not the grammar");
+
+  eq(saleDayOf(at("2026-10-15T13:29:00Z")), "2026-10-15", "before the close a sale can still be made today");
+  eq(saleDayOf(at("2026-10-15T20:01:00Z")), "2026-10-16", "after the 16:00 ET close (20:00Z in summer) the first sale is the next session");
+  eq(saleDayOf(at("2026-11-05T20:59:00Z")), "2026-11-05", "in winter the close is 21:00Z: a read at 20:59Z can still sell");
+  eq(saleDayOf(at("2026-11-05T21:01:00Z")), "2026-11-06", "and one at 21:01Z cannot");
+  eq(saleDayOf(at("2026-10-17T15:00:00Z")), "2026-10-19", "a Saturday read sells on Monday");
+  eq(saleDayOf(at("2026-11-27T17:59:00Z")), "2026-11-27", "the day after Thanksgiving closes at 13:00 ET (18:00Z): 17:59Z can sell");
+  eq(saleDayOf(at("2026-11-27T18:01:00Z")), "2026-11-30", "and 18:01Z cannot");
+  eq(saleDayOf(null), null, "with no read time there is no sale day");
+  eq(saleDayOf(at("2026-11-27T18:30:00Z")), "2026-11-30", "13:30 EST on the Friday after Thanksgiving is past the 13:00 early close");
+  eq(saleDayOf(at("2026-03-06T20:30:00Z")), "2026-03-06", "15:30 EST on a Friday can still sell");
+  eq(saleDayOf(at("2026-03-09T20:30:00Z")), "2026-03-10", "16:30 EDT after the clocks changed is past the close");
+  eq(saleDayOf(at("2026-12-24T18:30:00Z")), "2026-12-28", "Christmas Eve closes early and the 25th is a holiday: the next sale is Monday the 28th");
+  eq(saleDayOf(at("2027-07-05T15:00:00Z")), "2027-07-06", "the 2027 holiday table is in force: Independence Day falls on a Sunday, so Monday 5 July 2027 is closed");
+  eq(saleDayOf(at("2027-07-02T15:00:00Z")), "2027-07-02", "and the Friday before it is an ordinary session");
+
+  const BMO = (when, expiry = "2026-10-23") => c(expiry, "2026-10-15", "premarket", read("2026-10-15", when));
+  eq(BMO("2026-10-15T13:29:00Z"), null, "A PRE-MARKET REPORT, READ AT 09:29 ET ON THE DAY: no sale can precede it, so it is not a crossing and not a clear line either (null)");
+  eq(BMO("2026-10-15T13:31:00Z"), null, "and the same at 09:31 ET, after the open: one report, one answer either side of the bell");
+  eq(BMO("2026-10-15T18:00:00Z"), null, "and at lunchtime");
+  eq(c("2026-10-23", "2026-10-15", "premarket", read("2026-10-14", "2026-10-14T15:00:00Z")), true, "read the day before, the same report is ahead of the sale and crosses");
+  eq(c("2026-10-15", "2026-10-15", "premarket", read("2026-10-14", "2026-10-14T15:00:00Z")), true, "an option expiring on the report day, pre-market report, crosses it");
+  eq(c("2026-10-14", "2026-10-15", "premarket", read("2026-10-13", "2026-10-13T15:00:00Z")), false, "and one expiring the day before does not");
+  eq(c("2026-10-23", "2026-10-15", "afterhours", read("2026-10-15", "2026-10-15T19:59:00Z")), true, "AN AFTER-CLOSE REPORT READ AT 15:59 ET crosses: the sale is today, the report is tonight");
+  eq(c("2026-10-15", "2026-10-15", "postmarket", read("2026-10-15", "2026-10-15T19:59:00Z")), false, "an option expiring that day settles before it");
+  eq(c("2026-10-23", "2026-10-15", "afterhours", read("2026-10-15", "2026-10-15T20:01:00Z")), null, "read at 16:01 ET the next possible sale follows the report: null");
+  eq(c("2026-11-12", "2026-11-05", "afterhours", read("2026-11-05", "2026-11-05T20:59:00Z")), true, "winter, 15:59 ET: crosses");
+  eq(c("2026-11-12", "2026-11-05", "afterhours", read("2026-11-05", "2026-11-05T21:01:00Z")), null, "winter, 16:01 ET: null (a fixed 20:00Z close would have said crosses)");
+  eq(c("2026-12-04", "2026-11-27", "afterhours", read("2026-11-27", "2026-11-27T18:01:00Z")), null, "on the early-close Friday 13:01 ET is already after the close");
+  eq(c("2026-10-30", "2026-10-19", "premarket", read("2026-10-17", "2026-10-17T15:00:00Z")), null, "read on the Saturday before a Monday pre-market report: the first sale follows it");
+  eq(c("2026-10-30", "2026-10-19", "afterhours", read("2026-10-17", "2026-10-17T15:00:00Z")), true, "but a Monday after-close report is still ahead of Monday's sale");
+  eq(c("2026-10-23", "2026-10-15", "", read("2026-10-15", "2026-10-15T15:00:00Z")), null, "AN UNKNOWN ANNOUNCE TIME on the sale day is null: the report may precede the sale");
+  eq(c("2026-10-23", "2026-10-15", "at_some_point", read("2026-10-15", "2026-10-15T15:00:00Z")), null, "so is an unrecognised token");
+  eq(c("2026-10-23", "2026-10-16", "", read("2026-10-15", "2026-10-15T15:00:00Z")), true, "an unknown time the next day still crosses an option expiring after it");
+  eq(c("2026-10-23", "2026-10-14", "premarket", read("2026-10-15", "2026-10-15T15:00:00Z")), null, "a report dated before the read keeps its stale-date answer");
+  eq(c("2026-10-23", "2026-10-15", "premarket"), true, "WITHOUT A READ TIME the answer is the calendar's, as before");
+
+  eq(pre("2026-10-15", "premarket", read("2026-10-15", "2026-10-15T15:00:00Z")), true, "the flag says the report precedes every possible sale");
+  eq(pre("2026-03-10", null, read("2026-03-10", "2026-03-10T15:00:00Z")), null, "an unknown announce time on the sale day is undetermined, not printed");
+  eq(pre("2026-03-13", "postmarket", read("2026-03-12", "2026-03-16T14:00:00Z")), true, "THE SALE DAY COMES FROM THE READ CLOCK: read on Monday 16 March, a Friday 13 March report is behind it whatever session date the chain carries");
+  eq(c("2026-03-20", "2026-03-13", "postmarket", read("2026-03-12", "2026-03-16T14:00:00Z")), null, "and no line is said to cross it");
+  eq(pre("2026-10-15", "afterhours", read("2026-10-15", "2026-10-15T15:00:00Z")), false, "not for an after-close report read before the close");
+  eq(pre("2026-10-15", "afterhours", read("2026-10-15", "2026-10-15T20:30:00Z")), true, "and it does once the close has passed");
+  eq(pre("2026-10-22", "premarket", read("2026-10-15", "2026-10-15T15:00:00Z")), false, "a report next week does not");
+  eq(pre("2026-10-15", "premarket", {}), null, "no read time, no answer");
+  eq(pre("garbage", "premarket", read("2026-10-15", "2026-10-15T15:00:00Z")), null, "an unusable date is null");
+
+  const noClose = await loadMutated("shared/flows-premium.js", [["if (isSession(day) && readMs < closeUtcMs(day)) return day;", "if (isSession(day)) return day;"]]);
+  const readClock = await loadMutated("shared/flows-premium.js", [["return when === \"before\" ? true : when === \"after\" ? false : null;", "return when === \"before\" ? readMs >= Date.parse(sale + \"T13:30:00Z\") : when === \"after\" ? false : null;"]]);
+  const probe = (mod) => {
+    const bad = [];
+    if (mod.crossesEarnings("2026-10-23", "2026-10-15", "afterhours", read("2026-10-15", "2026-10-15T20:01:00Z")) !== null) bad.push("close");
+    if (mod.crossesEarnings("2026-10-23", "2026-10-15", "premarket", read("2026-10-15", "2026-10-15T13:29:00Z")) !== null) bad.push("narrow");
+    if (mod.crossesEarnings("2026-10-23", "2026-10-15", "", read("2026-10-15", "2026-10-15T15:00:00Z")) !== null) bad.push("unknown");
+    if (mod.crossesEarnings("2026-11-12", "2026-11-05", "afterhours", read("2026-11-05", "2026-11-05T21:01:00Z")) !== null) bad.push("winter");
+    return bad;
+  };
+  deep(probe({ crossesEarnings }), [], "the shipped rule passes the probe");
+  ok(probe(noClose).length > 0, "PLANTED WRONG BUILD: ignoring the close (a sale day that never rolls) is caught: " + probe(noClose));
+  ok(probe(readClock).length > 0, "PLANTED WRONG BUILD: the narrow rule (null only after the open, true before) is caught at 09:29 ET: " + probe(readClock));
+}
+
+
+{
+  const otm = { collateral: 10000, premium: 120, extrinsic: 1.2, id: "otm" };
+  const itmDeep = { collateral: 10000, premium: 1500, extrinsic: 0.05, id: "deep" };
+  const under = { collateral: 10000, premium: 1400, extrinsic: 0, id: "under" };
+  const z = sizeToBuyingPower(itmDeep, 100000);
+  eq(z.contracts, 10, "ten contracts fit");
+  eq(z.collectible, 15000, "the cash in is the whole bid");
+  near(z.timeValue, 50, 1e-9, "of which 50 dollars is time value");
+  near(z.intrinsicValue, 14950, 1e-9, "and the rest is in-the-money value that is not income");
+  near(z.yieldOnDeployed, 50 / 100000, 1e-12, "so the return on what is deployed is 0.05%, not the 15% the cash suggests");
+  const o = sizeToBuyingPower(otm, 100000);
+  near(o.yieldOnDeployed, 1200 / 100000, 1e-12, "an out-of-the-money line earns its whole bid and nothing changes for it");
+  eq(o.intrinsicValue, 0, "with no in-the-money value");
+  const plan = planBuyingPower([itmDeep, under, otm], 100000);
+  eq(plan.best.id, "otm", "THE BEST DEPLOYMENT IS THE LINE THAT EARNS THE MOST TIME VALUE, not the one that brings in the most cash (a 15.00 bid on a 14.95 intrinsic value used to win)");
+  eq(plan.affordable, 3, "all three are affordable");
+  eq(planBuyingPower([itmDeep, under].map((r, i) => ({ ...r, extrinsic: 0, id: "z" + i })), 100000).best, null, "when no line has time value left there is no best line");
+  const tie = planBuyingPower([{ collateral: 20000, premium: 100, extrinsic: 1, id: "wide" }, { collateral: 10000, premium: 100, extrinsic: 1, id: "narrow" }], 40000);
+  eq(tie.best.id, "narrow", "equal time value goes to the smaller deployment");
+  eq(planBuyingPower([{ collateral: 10000, premium: 100, extrinsic: 1, id: "a" }, { collateral: 10000, premium: 100, extrinsic: 1, id: "b" }], 40000).best.id, "a", "and a full tie goes to the first");
+  const bare = sizeToBuyingPower({ collateral: 10000, premium: 150 }, 100000);
+  deep([bare.timeValue, bare.timeValueC, bare.intrinsicValue, bare.yieldOnDeployed], [null, null, null, null], "a row that carries no time value figure has none: it is not assumed to be all time value");
+  eq(planBuyingPower([{ collateral: 10000, premium: 150, id: "bare" }], 100000).best, null, "and is never the best line");
+  eq(sizeToBuyingPower({ collateral: 10000, premium: 150, extrinsic: -0.5 }, 100000).timeValueC, 0, "a negative time value is clamped to exactly zero, and the in-the-money part never exceeds the cash");
+  const byGross = await loadMutated("shared/flows-premium.js", [["if (r.sizing.timeValueC > 0 && (best === null || betterDeployment(r.sizing, best.sizing))) best = r;", "if (best === null || r.sizing.collectible > best.sizing.collectible) best = r;"]]);
+  eq(byGross.planBuyingPower([itmDeep, under, otm], 100000).best.id, "deep", "PLANTED WRONG BUILD: choosing by gross cash picks the in-the-money line, and the assertions above fail it");
+  const yieldGross = await loadMutated("shared/flows-premium.js", [["yieldOnDeployed: deployedCents > 0 && timeValueCents !== null ? timeValueCents / deployedCents : null,", "yieldOnDeployed: deployedCents > 0 ? collectibleCents / deployedCents : null,"]]);
+  ok(Math.abs(yieldGross.sizeToBuyingPower(itmDeep, 100000).yieldOnDeployed - 50 / 100000) > 0.1, "PLANTED WRONG BUILD: a yield on gross cash is 15% for a line that earns 0.05%, and the assertion above fails it");
+
+  const readMs = Date.parse("2026-10-26T15:00:00Z");
+  const chain = [["C", 100, "2.50"], ["P", 100, "2.40"], ["C", 105, "0.95"], ["P", 105, "5.60"], ["C", 95, "6.10"], ["P", 95, "0.60"]].map(([type, strike, bid]) => ({
+    option_symbol: "SYX" + "261120" + type + String(strike * 1000).padStart(8, "0"), nbbo_bid: bid, nbbo_ask: (Number(bid) + 0.05).toFixed(2), open_interest: "500", implied_volatility: "0.3",
+  }));
+  const ranked = rankChain(chain, { spot: 100, asOf: "2026-10-26", readMs, ticker: "SYX", limit: 10 });
+  const one = ranked.forwards.find((f) => f.expiry === "2026-11-20");
+  eq(one.method, "parity", "the three strikes place a parity forward");
+  ok(Number.isFinite(one.F) && one.F > 99 && one.F < 102, "and the payload names it (" + one.F + ")");
+  const few = rankChain(chain.slice(0, 2), { spot: 100, asOf: "2026-10-26", readMs, ticker: "SYX", limit: 10, gates: { minOi: 0, maxSpread: 1, minPremium: 0 } });
+  deep([few.forwards[0].method, few.forwards[0].F], ["rate-only", null], "with too few pairs the forward is the rate alone and no figure is named");
 }
 
 console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
