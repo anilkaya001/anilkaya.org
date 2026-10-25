@@ -132,9 +132,10 @@ export const MARKET_NOTES = Object.freeze({
     "A market-wide total is a number one large print can own, so the five " +
     "largest names' share of gross net premium is published beside it.",
   aggressor:
-    "Lift is the share of volume that traded at the offer, over names that " +
-    "quoted both sides. It says which side of the quote was hit — not who " +
-    "was buying, and not why.",
+    "Lift is the ask-side share of SIDED volume (ask side plus bid side), over " +
+    "names that quoted both sides. Volume at the midpoint or without a side is " +
+    "left out, so it is not the share of all volume that traded at the offer. It " +
+    "says which side of the quote was hit — not who was buying, and not why.",
   refused:
     "No probability, no forecast and no direction is claimed for the " +
     "market. These are sums and ratios of quoted numbers over a stated " +

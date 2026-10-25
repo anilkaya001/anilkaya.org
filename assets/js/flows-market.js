@@ -230,8 +230,8 @@
     host.append(
       row("By names", breadth.tilt, count(breadth.bull) + " bought, " + count(breadth.bear) + " sold, " +
         count(breadth.flat) + " level, of " + count(premium.priced) + " names that quoted both legs."),
-      row("By dollars", premium.tilt, usd(premium.netPositive) + " of net call premium against " +
-        usd(premium.netNegative) + " of net put premium."),
+      row("By dollars", premium.tilt, usd(premium.netPositive) + " of net premium in names leaning bullish against " +
+        usd(premium.netNegative) + " in names leaning bearish (per name, calls less puts)."),
       h("div", { class: "mk-scale", "aria-hidden": "true" }, h("span", null, MINUS + "1"), h("span", null, "0"), h("span", null, "+1")));
     let said = "", how = "";
     if (b === null || p === null) {
@@ -322,15 +322,15 @@
       ["Net premium", "Net premium, signed", usdS(p.net), p.priced, toneOf(p.net)],
       ["P/C contracts", "Put contracts per call", pcrVol === null ? DASH : pcrVol.toFixed(3), pcr.quotedVolume, null],
       ["P/C premium", "Put premium per call", pcrPrem === null ? DASH : pcrPrem.toFixed(3), pcr.quotedPremium, null],
-      ["Calls at offer", "Calls lifted at the offer", pct(ag.callLift), ag.quoted, null],
-      ["Puts at offer", "Puts lifted at the offer", pct(ag.putLift), ag.quoted, null],
+      ["Call offer share", "Share of sided call volume that traded at the offer; volume at the midpoint or without a side is left out", pct(ag.callLift), ag.quoted, null],
+      ["Put offer share", "Share of sided put volume that traded at the offer; volume at the midpoint or without a side is left out", pct(ag.putLift), ag.quoted, null],
       ["IV 30d median", "Median 30-day implied vol", pct(vol.iv30dMedian), vol.iv30dQuoted, null],
       ["IV rank median", "Median IV rank", pct(vol.ivRankMedian), vol.ivRankQuoted, null],
     ];
     const unit = (v) => { const n = isNum(v); return n === null ? null : Math.max(0, Math.min(1, n)); };
     const pos = isNum(p.netPositive), neg = isNum(p.netNegative);
     const bars = [
-      pos !== null && neg !== null && Math.abs(pos) + Math.abs(neg) > 0 ? { split: Math.abs(pos) / (Math.abs(pos) + Math.abs(neg)), words: usd(pos) + " net call premium against " + usd(neg) + " net put premium" } : null,
+      pos !== null && neg !== null && Math.abs(pos) + Math.abs(neg) > 0 ? { split: Math.abs(pos) / (Math.abs(pos) + Math.abs(neg)), words: usd(pos) + " net premium in names leaning bullish against " + usd(neg) + " in names leaning bearish" } : null,
       pcrVol === null ? null : { frac: Math.min(pcrVol / 2, 1), mark: 0.5, words: "parity at 1.0, scale 0 to 2" },
       pcrPrem === null ? null : { frac: Math.min(pcrPrem / 2, 1), mark: 0.5, words: "parity at 1.0, scale 0 to 2" },
       unit(ag.callLift) === null ? null : { frac: unit(ag.callLift), mark: 0.5, words: "half marked, scale 0 to 100%" },

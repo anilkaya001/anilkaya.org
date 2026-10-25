@@ -140,9 +140,9 @@ function audit(f, { phone, small = false }) {
   need(f.leak === 0, "a sector tile chart stays visible on another tab: " + f.leak);
   const G = Object.fromEntries(f.gts.map((g) => [g.label, g]));
   const split = market.premium.netPositive / (Math.abs(market.premium.netPositive) + Math.abs(market.premium.netNegative));
-  need(G["Net premium"] && G["Net premium"].up !== null && Math.abs(G["Net premium"].up - split) < 0.03, "the net premium split is not calls over calls plus puts");
+  need(G["Net premium"] && G["Net premium"].up !== null && Math.abs(G["Net premium"].up - split) < 0.03, "the net premium split is not bullish-leaning names over bullish plus bearish");
   need(G["P/C contracts"] && Math.abs(G["P/C contracts"].fill - Math.min(market.pcr.volume / 2, 1)) < 0.02, "the P/C contracts meter is not on a 0 to 2 scale");
-  need(G["Calls at offer"] && Math.abs(G["Calls at offer"].fill - market.aggressor.callLift) < 0.02, "the calls at offer meter is not the share");
+  need(G["Call offer share"] && Math.abs(G["Call offer share"].fill - market.aggressor.callLift) < 0.02, "the call offer share meter is not the share");
   need(G["IV rank median"] && Math.abs(G["IV rank median"].fill - market.vol.ivRankMedian) < 0.02, "the IV rank tile meter is not the rank");
   return bad;
 }

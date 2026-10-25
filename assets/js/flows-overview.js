@@ -428,12 +428,12 @@
         info: () => ({
           title: "Flow bias", state: null,
           lead: ptSilence ? silenceSaid(ptSilence, "the dollar-weighted tilt")
-            : "Net premium over gross premium across the screened universe, weighted by dollars.",
+            : "Net premium over the sum of each name's absolute net premium across the screened universe, weighted by dollars.",
           facts: [
             ["By dollars", pct(pt, 1)],
             ["Names equally weighted", bt !== null ? pct(bt, 1) : btSilence ? btSilence[1] : DASH],
-            ["Net call premium", usd(premium.netPositive)],
-            ["Net put premium", usd(premium.netNegative)],
+            ["Net premium, names leaning bullish", usd(premium.netPositive)],
+            ["Net premium, names leaning bearish", usd(premium.netNegative)],
             sessionFact(mDay),
           ],
           notes: [bt !== null && pt !== null && (bt > 0) !== (pt > 0) && bt !== 0 && pt !== 0
