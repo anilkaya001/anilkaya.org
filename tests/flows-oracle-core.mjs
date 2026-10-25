@@ -79,7 +79,9 @@ function battery(src) {
   const surge = run(six("SYO001", 160000), ctxOf());
   eq(kinds(surge, "surge").length, 1, "surge fires at 960K");
   const sm = kinds(surge, "surge")[0];
-  eq(sm && sm.say, `SYO001 options flow is running ${fmt.times(960000 / USUAL)} its usual pace: ${fmt.money(960000)} in the last 30 minutes, against a typical ${fmt.money(USUAL)} for that long.`, "surge words");
+  eq(sm && sm.say, `SYO001 has ${fmt.money(960000)} of flagged options flow across 6 windows in the last 30 minutes. The bar for this name is ${fmt.money(BAR)}.`, "surge words say what was measured: the sum, the windows and the bar, with no pace and no multiple");
+  check(!/pace|usual|typical|\bx\b|\u00D7/.test(sm.say), "and the surge carries no multiple of a usual pace, which the ledger (a single window's p90) cannot support");
+  eq(sm.facts.map((f) => f.label), ["Flagged premium, 30 min", "Bar for this name"], "and its two facts are the sum and the bar");
   eq(sm && sm.strength, 1, "surge strength 1");
   eq(kinds(run(six("SYO001", 153000), ctxOf()), "surge").length, 0, "surge silent below the bar");
   eq(kinds(run(six("SYO001", 225000), ctxOf({ norm: { ...NORM, premiumP90: 5850000 } })), "surge").length, 1, "surge fires exactly at the bar");
@@ -118,7 +120,7 @@ function battery(src) {
 
   const rep = (each, n = 3) => [...Array.from({ length: n }, (_, i) => row("SYO001", 3 + i * 4, { prem: each })), row("SYO001", 14, { prem: 10000, k: 90 }), row("SYO001", 16, { prem: 10000, k: 91 }), row("SYO001", 18, { prem: 10000, k: 92 })];
   eq(kinds(run(rep(90000), ctxOf()), "repeat").length, 1, "repeat fires at 270K");
-  eq(kinds(run(rep(90000), ctxOf()), "repeat")[0].say, "Someone keeps coming back to the 65 call for Nov 20: 3 prints in 20 minutes, $270K in all.", "repeat words");
+  eq(kinds(run(rep(90000), ctxOf()), "repeat")[0].say, "Flow keeps returning to the 65 call for Nov 20: 3 flagged windows in 20 minutes, $270K in all.", "repeat words");
   eq(kinds(run(rep(83000), ctxOf()), "repeat").length, 0, "repeat silent at 249K");
   eq(kinds(run(rep(130000, 2), ctxOf()), "repeat").length, 0, "repeat needs three prints");
 
@@ -142,14 +144,18 @@ function battery(src) {
   eq(kinds(run(clu(120000), ctxOf()), "cluster").length, 0, "cluster silent below a 60 per cent share");
 
   const sw = (n, ask, bid) => [...Array.from({ length: n }, (_, i) => row("SYO001", 1 + i * 2, { prem: 100000, askPrem: ask, bidPrem: bid, sweep: true, k: 60 + i })), ...Array.from({ length: 5 - Math.min(n, 5) }, (_, i) => row("SYO001", 40 + i, { prem: 1000, k: 90 + i }))];
-  eq(kinds(run(sw(5, 70000, 30000), ctxOf()), "sweeps")[0] && kinds(run(sw(5, 70000, 30000), ctxOf()), "sweeps")[0].say, "Several fast, multi-exchange prints on SYO001 in 10 minutes, mostly on the ask side. $500K.", "sweep words");
+  eq(kinds(run(sw(5, 70000, 30000), ctxOf()), "sweeps")[0] && kinds(run(sw(5, 70000, 30000), ctxOf()), "sweeps")[0].say, "SYO001 has 5 fast, multi-exchange windows in 10 minutes, mostly on the ask side. $500K.", "sweep words");
   eq(kinds(run(sw(3, 70000, 30000), ctxOf()), "sweeps").length, 0, "sweeps need four");
   eq(kinds(run(sw(5, 64400, 35600), ctxOf()), "sweeps").length, 0, "sweeps need 65 per cent as printed");
   eq(kinds(run(sw(5, 64600, 35400), ctxOf()), "sweeps").length, 1, "64.6 prints as 65 and passes");
   eq(kinds(run(sw(5, 100000, 0).map((r) => ({ ...r, prem: 50000 })), ctxOf()), "sweeps").length, 0, "sweeps need 300K");
 
   const big = (size, prem) => [row("SYO001", 6, { prem, size, k: 65 }), ...Array.from({ length: 4 }, (_, i) => row("SYO001", 20 + i, { prem: 10000, size: 10, k: 70 + i }))];
-  eq(kinds(run(big(750, 250000), ctxOf()), "size")[0] && kinds(run(big(750, 250000), ctxOf()), "size")[0].say, "One print on SYO001: 750 contracts of the 65 call for Nov 20, $250K. That is 5.0× the name's usual large print.", "size words");
+  eq(kinds(run(big(750, 250000), ctxOf()), "size")[0] && kinds(run(big(750, 250000), ctxOf()), "size")[0].say, "SYO001 has one window of 750 contracts in the 65 call for Nov 20, $250K. That is 5.0× the name's usual large window.", "size words");
+  for (const kind of ["repeat", "sweeps", "size", "surge"]) {
+    const sayings = kinds(run(kind === "repeat" ? rep(90000) : kind === "sweeps" ? sw(5, 70000, 30000) : kind === "size" ? big(750, 250000) : six("SYO001", 160000), ctxOf()), kind).map((m) => m.say + " " + m.facts.map((f) => f.label).join(" "));
+    check(sayings.length >= 1 && sayings.every((t) => !/\b(someone|prints?|trader|buyer|seller|whale|bought|sold|traded)\b/i.test(t)), kind + " names a window, not a print, an actor or a trade: " + sayings.join(" | "));
+  }
   eq(kinds(run(big(749, 250000), ctxOf()), "size").length, 0, "size silent below 5 times p90");
   eq(kinds(run(big(750, 249999), ctxOf()), "size").length, 0, "size silent below 250K");
   eq(kinds(run(big(499, 250000), ctxOf({ norm: { ...NORM, sizeP90: 50 } })), "size").length, 0, "size has a floor of 500 contracts");
@@ -223,6 +229,10 @@ const MUTANTS = [
   ["minus sign dropped", (s) => s.replace('var NEG = Object.freeze({ "-1": MINUS,', 'var NEG = Object.freeze({ "-1": "",')],
   ["null read as zero", (s) => s.replace('return x === null ? DASH : (x * 100).toFixed(1);', 'return (x || 0) === 0 ? "0.0" : (x * 100).toFixed(1);')],
   ["eastern offset fixed", (s) => s.replace("return ms >= start && ms < end ? -4 : -5;", "return -5;")],
+  ["surge claims a pace", (s) => s.replace('" has " + money(m.prem) + " of flagged options flow across " + m.n + " windows in the last " + m.minutes +\n        " minutes. The bar for this name is " + money(m.bar) + "."', '" options flow is running " + times(m.prem / m.bar) + " its usual pace: " + money(m.prem) + " in the last " + m.minutes + " minutes."')],
+  ["a repeat names someone", (s) => s.replace('"Flow keeps returning to the "', '"Someone keeps coming back to the "')],
+  ["a window called a print", (s) => s.replace('" flagged windows in "', '" prints in "')],
+  ["a window called one print", (s) => s.replace('m.ticker + " has one window of "', '"One print on " + m.ticker + ": "')],
   ["advice word in a stance line", (s) => s.replace("Leaning up. Options pricing", "Leaning up. You should expect options pricing")],
   ["convention dropped from the flip", (s) => s.replace('" minutes, " + CONVENTION + ". " + CONVENTION_NOTE + " The lean is "', '" minutes. The lean is "')],
 ];

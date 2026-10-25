@@ -117,11 +117,11 @@
 
   var LIVE = {
     surge: function (m) {
-      return m.ticker + " options flow is running " + times(m.k) + " its usual pace: " + money(m.prem) + " in the last " + m.minutes +
-        " minutes, against a typical " + money(m.usual) + " for that long." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
+      return m.ticker + " has " + money(m.prem) + " of flagged options flow across " + m.n + " windows in the last " + m.minutes +
+        " minutes. The bar for this name is " + money(m.bar) + "." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
     },
     repeat: function (m) {
-      return "Someone keeps coming back to the " + strikeText(m.strike) + " " + m.side + " for " + expiryText(m.expiry) + ": " + m.n + " prints in " + m.minutes + " minutes, " + money(m.prem) + " in all." +
+      return "Flow keeps returning to the " + strikeText(m.strike) + " " + m.side + " for " + expiryText(m.expiry) + ": " + m.n + " flagged windows in " + m.minutes + " minutes, " + money(m.prem) + " in all." +
         (m.event ? " A report is " + m.sessions + " sessions away." : "");
     },
     flip: function (m) {
@@ -132,11 +132,11 @@
       return "Most of " + m.ticker + "'s flow is landing in the " + expiryText(m.expiry) + " expiry: " + Math.round(m.share * 100) + "% of " + money(m.prem) + ".";
     },
     sweeps: function (m) {
-      return "Several fast, multi-exchange prints on " + m.ticker + " in " + m.minutes + " minutes, mostly on the ask side. " + money(m.prem) + ".";
+      return m.ticker + " has " + m.n + " fast, multi-exchange windows in " + m.minutes + " minutes, mostly on the ask side. " + money(m.prem) + ".";
     },
     size: function (m) {
-      return "One print on " + m.ticker + ": " + Math.round(m.size).toLocaleString("en-US") + " contracts of the " + strikeText(m.strike) + " " + m.side + " for " + expiryText(m.expiry) + ", " + money(m.prem) +
-        ". That is " + times(m.k) + " the name's usual large print." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
+      return m.ticker + " has one window of " + Math.round(m.size).toLocaleString("en-US") + " contracts in the " + strikeText(m.strike) + " " + m.side + " for " + expiryText(m.expiry) + ", " + money(m.prem) +
+        ". That is " + times(m.k) + " the name's usual large window." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
     },
     sector: function (m) {
       return m.n + " names in " + m.sector + " are all seeing heavy options flow together: " + m.names.join(", ") + ".";
@@ -253,9 +253,9 @@
         var bar = Math.max(T.surgeMult * usual, T.surgeFloor) * mult;
         if (P >= bar) {
           var st = P >= 3 * bar ? 3 : P >= 2 * bar ? 2 : 1;
-          var m = { kind: "surge", ticker: t, prem: P, usual: usual, k: P / usual, minutes: T.windowMin, event: !!ev, sessions: sessions };
+          var m = { kind: "surge", ticker: t, prem: P, n: recent.length, bar: bar, minutes: T.windowMin, event: !!ev, sessions: sessions };
           surges.push({ t: t, P: P, sector: ctx.sector || null, etf: ctx.sectorEtf || null });
-          found.push({ kind: "surge", t: t, strength: st, prem: P, m: m, facts: [{ label: "Flagged premium, 30 min", display: money(P) }, { label: "Typical for that long", display: money(usual) }] });
+          found.push({ kind: "surge", t: t, strength: st, prem: P, m: m, facts: [{ label: "Flagged premium, 30 min", display: money(P) }, { label: "Bar for this name", display: money(bar) }] });
         }
       }
 
@@ -274,7 +274,7 @@
             var f = gs[0];
             found.push({ kind: "repeat", t: t, strength: P2 >= 3 * Math.max(T.repeatMult * med, T.repeatFloor) * mult ? 3 : P2 >= 2 * Math.max(T.repeatMult * med, T.repeatFloor) * mult ? 2 : 1, prem: P2,
               m: { kind: "repeat", ticker: t, strike: f.k, side: cpWord(f.cp), expiry: f.exp, n: distinct, minutes: T.repeatMin, prem: P2, event: !!ev, sessions: sessions },
-              facts: [{ label: "Prints at one strike", display: String(distinct) }, { label: "Combined premium", display: money(P2) }] });
+              facts: [{ label: "Windows at one strike", display: String(distinct) }, { label: "Combined premium", display: money(P2) }] });
           }
         });
       }
@@ -312,7 +312,7 @@
         var P3 = sumPrem(sw);
         if (ask + bid > 0 && Math.round(100 * ask / (ask + bid)) >= T.sweepAsk && P3 >= T.sweepFloor) {
           found.push({ kind: "sweeps", t: t, strength: sw.length >= 8 ? 3 : sw.length >= 6 ? 2 : 1, prem: P3,
-            m: { kind: "sweeps", ticker: t, minutes: T.sweepMin, prem: P3 }, facts: [{ label: "Fast prints", display: String(sw.length) }, { label: "Ask-side share", display: Math.round(100 * ask / (ask + bid)) + "%" }] });
+            m: { kind: "sweeps", ticker: t, n: sw.length, minutes: T.sweepMin, prem: P3 }, facts: [{ label: "Fast windows", display: String(sw.length) }, { label: "Ask-side share", display: Math.round(100 * ask / (ask + bid)) + "%" }] });
         }
       }
 

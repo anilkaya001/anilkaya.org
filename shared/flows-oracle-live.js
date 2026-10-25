@@ -97,8 +97,8 @@ export function detectName(ticker, wins, ctx, nowMs) {
     const bar = Math.max(L.surgeMultiple * typical, L.surgeFloor) * scale;
     if (P >= bar) {
       const minutes = (nowMs - Math.min(...recent.map((w) => w.at))) / 60000;
-      add("surge", strengthOf(P, bar), { k: P / Math.max(typical, 1), premium: P, minutes: Math.max(minutes, 1), norm: typical },
-        [{ label: "Flagged premium", display: usdShort(P) }, { label: "Typical for that long", display: usdShort(typical) }], nowMs);
+      add("surge", strengthOf(P, bar), { premium: P, n: recent.length, minutes: Math.max(minutes, 1), bar },
+        [{ label: "Flagged premium", display: usdShort(P) }, { label: "Bar for this name", display: usdShort(bar) }], nowMs);
     }
   }
 
@@ -120,7 +120,7 @@ export function detectName(ticker, wins, ctx, nowMs) {
       const w0 = best.list[0];
       const minutes = (nowMs - Math.min(...best.list.map((w) => w.at))) / 60000;
       add("repeat", strengthOf(best.P, bar), { strike: w0.k, side: w0.cp, expiry: w0.exp, n: best.list.length, minutes: Math.max(minutes, 1), premium: best.P },
-        [{ label: "Prints", display: String(best.list.length) }, { label: "Combined premium", display: usdShort(best.P) }], nowMs);
+        [{ label: "Windows", display: String(best.list.length) }, { label: "Combined premium", display: usdShort(best.P) }], nowMs);
     }
   }
 
@@ -155,8 +155,8 @@ export function detectName(ticker, wins, ctx, nowMs) {
     const share = ask + bid > 0 ? Math.round(ask / (ask + bid) * 100) : 0;
     if (share >= L.sweepAskShare && P >= L.sweepFloor) {
       const minutes = (nowMs - Math.min(...sw.map((w) => w.at))) / 60000;
-      add("sweeps", P >= 3 * L.sweepFloor ? 3 : 2, { minutes: Math.max(minutes, 1), premium: P },
-        [{ label: "Fast prints", display: String(sw.length) }, { label: "Ask side share", display: share + "%" }], nowMs);
+      add("sweeps", P >= 3 * L.sweepFloor ? 3 : 2, { n: sw.length, minutes: Math.max(minutes, 1), premium: P },
+        [{ label: "Fast windows", display: String(sw.length) }, { label: "Ask side share", display: share + "%" }], nowMs);
     }
   }
 

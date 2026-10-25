@@ -33,7 +33,8 @@ const quiet = (t = "SYO001", from = 0, to = 60, step = 12) => Array.from({ lengt
   const out = detect(s, burst, ctxOf(), OPEN + 92 * MIN, OPTS);
   const surge = out.find((m) => m.kind === "surge");
   ok(surge, "a burst over the floor is a surge");
-  ok(surge.strength >= 1 && surge.say.includes("usual pace"), "with its wording");
+  ok(surge.strength >= 1 && /flagged options flow across \d+ windows/.test(surge.say) && /The bar for this name is \$/.test(surge.say) && !/pace|usual|typical/.test(surge.say), "with its wording: the sum, the windows and the bar, and no claim about a pace the ledger cannot support");
+  ok(surge.facts.map((f) => f.label).join("|") === "Flagged premium|Bar for this name" && !("k" in surge.f) && !("norm" in surge.f), "and its facts carry the bar and no multiple");
   ok(guardAnswer(surge.say, [{ say: surge.say }], { smallIntegers: false, modals: true }).forecast === false, "that passes the ask guard");
   eq(surge.id.split(":")[0], "SYO001", "the id leads with the ticker");
   const again = detect(s, burst, ctxOf(), OPEN + 93 * MIN, OPTS);
@@ -45,7 +46,7 @@ const quiet = (t = "SYO001", from = 0, to = 60, step = 12) => Array.from({ lengt
   const rows = [...quiet("SYO001", 0, 60), ...Array.from({ length: 4 }, (_, i) => row("SYO001", 80 + i * 3, { k: 77, prem: 120000 }))];
   const out = detect(createLiveState(), rows, ctxOf(), OPEN + 92 * MIN, OPTS);
   const rep = out.find((m) => m.kind === "repeat");
-  ok(rep && rep.say.includes("keeps coming back"), "four prints on one strike in 20 minutes is a repeat");
+  ok(rep && /^Flow keeps returning to/.test(rep.say) && /flagged windows/.test(rep.say) && !/someone|prints?/i.test(rep.say), "four windows on one strike in 20 minutes is a repeat, said without an actor or a print");
   eq(rep.f.n, 4, "with the count");
 }
 
@@ -71,7 +72,7 @@ const quiet = (t = "SYO001", from = 0, to = 60, step = 12) => Array.from({ lengt
 {
   const rows = [...quiet("SYO001", 0, 60), row("SYO001", 75, { size: 4000, prem: 600000, k: 85 })];
   const out = detect(createLiveState(), rows, ctxOf(), OPEN + 76 * MIN, OPTS);
-  ok(out.some((m) => m.kind === "size"), "one print far over the usual large print");
+  ok(out.some((m) => m.kind === "size"), "one window far over the usual large window");
   eq(detect(createLiveState(), [...quiet("SYO001", 0, 60), row("SYO001", 75, { size: 1900, prem: 600000 })], ctxOf(), OPEN + 76 * MIN, OPTS).filter((m) => m.kind === "size").length, 0, "just under the size bar is silent");
 }
 
