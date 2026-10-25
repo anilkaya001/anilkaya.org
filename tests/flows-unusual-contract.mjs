@@ -878,7 +878,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     ok((src.match(/F\.askShare\(/g) || []).length >= 2 && /F\.askSaid\(/.test(src) && /F\.askLabel/.test(src),
        `${files.join(" with ")} reads the share, prints it and labels it through the core`);
   }
-  for (const f of ["flows-net.js", "flows-unusual.js"]) {
+  for (const f of ["flows-net.js", "flows-unusual.js", "flows-market-floor.js", "flows-market-river.js"]) {
     ok(/F\.askSplit\(/.test(fs.readFileSync(path.join(JS, f), "utf8")), `${f} draws its ask, bid and neither dollars from the core's askSplit`);
   }
   ok(ASK_SHARE.cases.length >= 20 && ASK_SHARE.cases.some((c) => c.side === "thin") && ASK_SHARE.cases.some((c) => c.classified === 0) &&

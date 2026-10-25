@@ -209,6 +209,9 @@ try {
         const at = new Date(Date.parse(SESSION + "T13:35:00Z") + Math.floor(r() * 300) * 60000).toISOString();
         rows.push({ t: NAMES[j][0], oc: NAMES[j][0] + "261016" + cp + String(100000 + i), cp, k: 100 + i, exp: "2026-10-16", prem, size: Math.round(prem / 300), trades: 3, askPrem: ask, bidPrem: bid, sweep: false, floor: false, single: true, opening: false, spanStart: at, spanEnd: at, rule: "RepeatedHits", st: null, firstAt: at, lastAt: "2026-09-29T18:41:00.000Z", reads: 2 });
       }
+      const at0 = Date.parse(SESSION + "T14:00:00Z");
+      const one = (t, cp, prem, askPrem, bidPrem, i) => ({ t, oc: t + "261016" + cp + String(200000 + i), cp, k: 50 + i, exp: "2026-10-16", prem, size: 100, trades: 3, askPrem, bidPrem, sweep: false, floor: false, single: true, opening: false, spanStart: new Date(at0 + i * 60000).toISOString(), spanEnd: new Date(at0 + i * 60000).toISOString(), rule: "RepeatedHits", st: null, firstAt: new Date(at0 + i * 60000).toISOString(), lastAt: "2026-09-29T18:41:00.000Z", reads: 2 });
+      rows.push(one("SYX901", "C", 90e6, 4.5e6, 0, 0), one("SYX902", "C", 80e6, 48e6, 32e6, 1), one("SYX903", "C", 70e6, 35.7e6, 34.3e6, 2), one("SYX904", "P", 60e6, 40e6, 5e6, 3));
       rows.sort((a, b) => b.prem - a.prem);
       return { v: 1, status: "ok", generatedAt: "2026-09-29T18:41:05.000Z", sessionDate: SESSION, readAt: "2026-09-29T18:41:00.000Z", refreshed: "intraday", rows, seen: rows.length, unusable: 0, shed: 0, cap: 180, coverage: {}, notes: {} };
     };
@@ -219,7 +222,8 @@ try {
         e.v += r.prem; e.up += r.cp === "C" ? r.askPrem : r.bidPrem; e.down += r.cp === "C" ? r.bidPrem : r.askPrem;
         by.set(r.t, e);
       }
-      return [...by.values()].sort((a, b) => b.v - a.v).slice(0, 8).map((e) => [e.t, e.up > e.down ? "Bullish" : e.down > e.up ? "Bearish" : "Unsided"]);
+      const word = (e) => (e.up + e.down < e.v / 2 ? "Unsided" : (e.up - e.down) / e.v >= 0.1 ? "Bullish" : (e.up - e.down) / e.v <= -0.1 ? "Bearish" : "Mixed");
+      return [...by.values()].sort((a, b) => b.v - a.v).slice(0, 8).map((e) => [e.t, word(e)]);
     };
     const HTML_U = PAGES.unusualPage({ username: "test" });
     const universe = { v: 1, status: "ok", sessionDate: "2026-09-28", t: NAMES.map((x) => x[0]), sectors: ["Technology"], sec: NAMES.map(() => 0) };
@@ -289,6 +293,7 @@ try {
         netNode: !!document.querySelector("#uaNet canvas"),
       }));
       eq(slot.rows, expectTop(payload), `BEFORE THE MODULE MOUNTS THE SLOT SHOWS ITS TABLE (${width} px): the eight largest names by flagged premium, each with its lean by the convention`);
+      eq(slot.rows.slice(0, 4), [["SYX901", "Unsided"], ["SYX902", "Bullish"], ["SYX903", "Mixed"], ["SYX904", "Bearish"]], "KNOWN ANSWERS: a name with 5% of its premium sided is Unsided and not Mixed, 60/40 fully sided is Bullish, 51/49 is Mixed and a put sold on the ask side is Bearish");
       ok(/Lean is a convention/.test(slot.note), "with the convention said under it");
       eq(slot.netNode, false, "and there is no canvas yet");
       const before = await below(page);

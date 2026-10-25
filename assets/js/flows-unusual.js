@@ -313,7 +313,10 @@
       by.set(t, e);
     }
     const top = [...by.values()].sort((x, y) => y.v - x.v || (x.t < y.t ? -1 : 1)).slice(0, 8);
-    const lean = (e) => (e.up > e.down ? ["\u25B2", "Bullish"] : e.down > e.up ? ["\u25BC", "Bearish"] : ["\u2013", "Unsided"]);
+    const lean = (e) => {
+      const q = (e.up - e.down) / e.v;
+      return e.up + e.down < e.v / 2 ? ["\u2013", "Unsided"] : q >= 0.1 ? ["\u25B2", "Bullish"] : q <= -0.1 ? ["\u25BC", "Bearish"] : ["\u2013", "Mixed"];
+    };
     slotEl.replaceChildren(
       h("p", { class: "fn-slot-t" }, "Largest names by flagged premium"),
       top.length

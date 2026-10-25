@@ -66,13 +66,6 @@
     return [136, 136, 136];
   }
 
-  function sideOf(r) {
-    const x = UI.F.askSplit(r);
-    if (!x || !x.askStated || !x.bidStated || x.ask === x.bid) return "nx";
-    const askSide = x.ask > x.bid;
-    return r.cp === "C" ? (askSide ? "up" : "down") : (askSide ? "down" : "up");
-  }
-
   const leanOf = (net, prem) => {
     if (!isNum(net) || !isNum(prem) || !(prem > 0)) return null;
     const r = net / prem;
@@ -115,12 +108,13 @@
         const sec = !uniOk ? STOCK_UNREAD : secOf.get(T) || STOCK_NONE;
         tile = ensure("stocks:" + sec, "stocks", SHORT[sec] || sec, sec, 0);
       }
-      const side = sideOf(r), size = isNum(r.size) && r.size >= 0 ? r.size : null;
-      windows.push({ i, t: T, tile: tile.id, prem: r.prem, side, size });
-      tile.n++; tile.prem += r.prem; tile[side] += r.prem;
+      const sp = UI.F.askSplit(r), up = r.cp === "C" ? sp.ask : r.cp === "P" ? sp.bid : 0, down = r.cp === "C" ? sp.bid : r.cp === "P" ? sp.ask : 0, nx = r.prem - up - down;
+      const size = isNum(r.size) && r.size >= 0 ? r.size : null;
+      windows.push({ i, t: T, tile: tile.id, prem: r.prem, size });
+      tile.n++; tile.prem += r.prem; tile.up += up; tile.down += down; tile.nx += nx;
       if (size !== null) { tile.vol += size; tile.volN++; }
       const nm = tile.names.get(T) || { t: T, n: 0, prem: 0, up: 0, down: 0, nx: 0, vol: 0, volN: 0 };
-      nm.n++; nm.prem += r.prem; nm[side] += r.prem;
+      nm.n++; nm.prem += r.prem; nm.up += up; nm.down += down; nm.nx += nx;
       if (size !== null) { nm.vol += size; nm.volN++; }
       tile.names.set(T, nm);
     });
@@ -757,5 +751,5 @@
     return api;
   }
 
-  window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { floor: Object.freeze({ model, layout, mount, of: (host) => FLOORS.get(host) || null, sideOf, valueOf, classify: (t) => (FUND_OF.has(t) ? "funds" : ETF_OF.has(t) ? "etf" : OTHER_OF.has(t) ? "other" : "stocks") }) }));
+  window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { floor: Object.freeze({ model, layout, mount, of: (host) => FLOORS.get(host) || null, valueOf, classify: (t) => (FUND_OF.has(t) ? "funds" : ETF_OF.has(t) ? "etf" : OTHER_OF.has(t) ? "other" : "stocks") }) }));
 })();

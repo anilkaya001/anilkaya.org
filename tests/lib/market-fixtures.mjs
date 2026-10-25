@@ -29,7 +29,7 @@ export const NAMES = [
 ];
 const EXPIRIES = ["2026-09-29", "2026-10-02", "2026-10-09", "2026-10-16", "2026-10-30", "2026-11-20", "2026-12-18", "2027-01-15"];
 
-export function alertsFixture({ n = 160, seed = 11, names = NAMES, burst = true } = {}) {
+export function alertsFixture({ n = 160, seed = 11, names = NAMES, burst = true, lean = {} } = {}) {
   const r = rng(seed);
   const rows = [];
   const bursts = [[9 * 60 + 40, 0, 1, 3], [11 * 60 + 5, 4, 5, 7], [13 * 60 + 20, 0, 8, 9]];
@@ -45,7 +45,10 @@ export function alertsFixture({ n = 160, seed = 11, names = NAMES, burst = true 
     const [t, , , callBias] = names[j];
     const cp = r() < callBias ? "C" : "P";
     const prem = Math.round(120000 * Math.exp(r() * 3.1) * (0.6 + names[j][2]));
-    const askShare = Math.min(0.97, Math.max(0.03, (cp === "C" ? 0.58 : 0.5) + (r() - 0.5) * 0.9));
+    const noise = r();
+    const askShare = Object.hasOwn(lean, t)
+      ? Math.min(0.97, Math.max(0.03, (cp === "C" ? lean[t] : 1 - lean[t]) + (noise - 0.5) * 0.1))
+      : Math.min(0.97, Math.max(0.03, (cp === "C" ? 0.58 : 0.5) + (noise - 0.5) * 0.9));
     const between = r() * 0.18;
     const askPrem = Math.round(prem * (1 - between) * askShare), bidPrem = Math.round(prem * (1 - between) * (1 - askShare));
     const exp = EXPIRIES[Math.floor(Math.pow(r(), 1.6) * EXPIRIES.length)];

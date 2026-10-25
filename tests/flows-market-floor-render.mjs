@@ -34,10 +34,11 @@ const NAMES = [
 const MEASURES = ["premium", "volume", "lean"];
 const MLABEL = { premium: "Premium", volume: "Volume", lean: "Net lean" };
 
-const sideOf = (r) => {
-  if (typeof r.askPrem !== "number" || typeof r.bidPrem !== "number" || r.askPrem === r.bidPrem) return "nx";
-  const ask = r.askPrem > r.bidPrem;
-  return r.cp === "C" ? (ask ? "up" : "down") : (ask ? "down" : "up");
+const stated = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+const dollars = (r) => {
+  const a0 = stated(r.askPrem) || 0, b0 = stated(r.bidPrem) || 0, k = a0 + b0 > r.prem ? r.prem / (a0 + b0) : 1, a = a0 * k, b = b0 * k;
+  if (r.cp !== "C" && r.cp !== "P") return { up: 0, down: 0 };
+  return r.cp === "C" ? { up: a, down: b } : { up: b, down: a };
 };
 function expected(alerts, universe) {
   const uniOk = Boolean(universe && universe.status === "ok");
@@ -49,8 +50,8 @@ function expected(alerts, universe) {
     if (!tiles.has(id)) tiles.set(id, { id, group, label, n: 0, prem: 0, up: 0, down: 0, vol: 0, volN: 0, names: new Map() });
     const t = tiles.get(id);
     t.n++; t.prem += row.prem;
-    const s = sideOf(row);
-    if (s === "up") t.up += row.prem; else if (s === "down") t.down += row.prem;
+    const s = dollars(row);
+    t.up += s.up; t.down += s.down;
     if (typeof row.size === "number") { t.vol += row.size; t.volN++; }
     const nm = t.names.get(row.t) || { t: row.t, prem: 0 };
     nm.prem += row.prem;
@@ -236,7 +237,8 @@ function verify(f, EXP, measure, { phone = false, orbit = false } = {}) {
 }
 
 const browser = await launch();
-const alerts = alertsFixture({ n: 320, seed: 5, names: NAMES });
+const alerts = alertsFixture({ n: 320, seed: 5, names: NAMES, lean: { SPY: 0.1, QQQ: 0.92, NVDA: 0.9, TSLA: 0.12 } });
+const plainAlerts = alertsFixture({ n: 320, seed: 5, names: NAMES });
 const universe = universeFixture(NAMES);
 const EXP = expected(alerts, universe);
 const OFF = "SYA101";
@@ -517,25 +519,26 @@ try {
     ["net lean height is premium", 'return t.n ? (measure === "lean" ? t.net : t.prem) : null;', "return t.n ? t.prem : null;"],
     ["height not linear in the measure", "(Math.abs(v) / vMax) * hmax", "Math.sqrt(Math.abs(v) / vMax) * hmax"],
     ["sector ETFs counted as index funds", 'else if (ETF_OF.has(T)) tile = tiles.get("etf:" + T);', 'else if (ETF_OF.has(T)) tile = tiles.get("funds:SPY");'],
-    ["sides swapped", 'return r.cp === "C" ? (askSide ? "up" : "down") : (askSide ? "down" : "up");', 'return r.cp === "C" ? (askSide ? "down" : "up") : (askSide ? "up" : "down");'],
+    ["the whole window goes to one side", "tile.up += up; tile.down += down; tile.nx += nx;", "tile[up > down ? 'up' : down > up ? 'down' : 'nx'] += r.prem;"],
+    ["calls and puts swapped", "tile.up += up; tile.down += down; tile.nx += nx;", "tile.up += down; tile.down += up; tile.nx += nx;"],
     ["share of the wrong total", "t.share = total > 0 && t.n ? t.prem / total : null;", "t.share = total > 0 && t.n ? t.prem / (2 * total) : null;"],
     ["stocks split by sector without the universe", 'const sec = !uniOk ? STOCK_UNREAD : secOf.get(T) || STOCK_NONE;', "const sec = secOf.get(T) || STOCK_NONE;", { status: "pending" }],
     ["a pillar drawn off its projection", "Object.assign(s, { ped, px: top.x,", "Object.assign(s, { ped, px: top.x + 6,"],
     ["the side list ranked upward", "Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1));\n      const rowsR", "Math.abs(valueOf(a, measure)) - Math.abs(valueOf(b, measure)) || (a.id < b.id ? -1 : 1));\n      const rowsR"],
-    ["labels never declutter", "if (kept.some((k) => hit(k, box))) { out.dropped.push(it.text); continue; }", "if (false) { continue; }"],
+    ["labels never declutter", "if (kept.some((k) => hit(k, box))) { out.dropped.push(it.text); continue; }", "if (false) { continue; }", null, null, { width: 1024, height: 768 }],
     ["a window without a premium counted", "if (!r || typeof r.t !== \"string\" || !isNum(r.prem) || !(r.prem > 0)) { dropped++; return; }", "if (!r || typeof r.t !== \"string\") { dropped++; return; }"],
     ["names ranked by name", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => b.prem - a.prem || (a.t < b.t ? -1 : 1));", "t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => (a.t < b.t ? -1 : 1));"],
     ["residual stocks sorted among the named sectors", "ts.sort((a, b) => lastOf(a) - lastOf(b) || b.prem - a.prem", "ts.sort((a, b) => b.prem - a.prem", U3, A3],
   ];
-  const MA = JSON.parse(JSON.stringify(alerts));
+  const MA = JSON.parse(JSON.stringify(plainAlerts));
   MA.rows = MA.rows.map((x) => (x.t === "GLD" ? { ...x, size: null } : x));
   MA.rows.push({ ...MA.rows[0], prem: null });
-  for (const [name, from, to, uni, world] of MUTANTS) {
+  for (const [name, from, to, uni, world, vp] of MUTANTS) {
     ok(SRC.includes(from), `mutant "${name}" anchors on the served module`);
     const U = uni || universe, A = world || MA, E = expected(A, U);
     let why = null, context = null;
     try {
-      const r = await open({ patch: { [JS]: [[from, to]] }, alerts: A, universe: U });
+      const r = await open({ patch: { [JS]: [[from, to]] }, alerts: A, universe: U, ...(vp ? { viewport: vp } : {}) });
       context = r.context;
       for (const m of MEASURES) {
         if (why) break;
