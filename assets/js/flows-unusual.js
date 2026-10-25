@@ -206,7 +206,10 @@
       both.setAttribute("aria-pressed", String(view.both));
       repaint();
     });
-    host.filters.replaceChildren(seg, both, h("span", { class: "fu-count", "aria-hidden": "true" }));
+    const pop = h("button", { class: "fu-toggle", type: "button", title: "Open the flagged windows in their own window" }, h("span", null, "Pop out"));
+    if (!UI.link || typeof UI.link.popout !== "function" || (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)) pop.hidden = true;
+    pop.addEventListener("click", () => { if (UI.link && typeof UI.link.popout === "function") UI.link.popout("/flows/now/"); });
+    host.filters.replaceChildren(seg, both, pop, h("span", { class: "fu-count", "aria-hidden": "true" }));
   }
 
   function repaint() {

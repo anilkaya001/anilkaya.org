@@ -9,6 +9,7 @@ const TESTS = path.join(ROOT, "tests");
 const ALWAYS = ["contracts", "docs", "flows-weight", "architecture", "run", "lib-contract", "server-kernel", "server-rt", "server-pages", "server-router", "route-matrix"];
 const RULES = [
   [/^assets\/css\/(flows|base)[^/]*\.css$|^shared\/flows-pages\.js$/, ["flows-pages-render", "flows-glass-render", "flows-overview", "flows-home-onescreen", "flows-kit"]],
+  [/^assets\/js\/flows-(now|link)\.js$|^assets\/css\/flows-(now|popout)\.css$|^shared\/flows-pages\.js$/, ["flows-now-render"]],
   [/^assets\/js\/flows-(overview|home)[^/]*\.js$|^assets\/css\/flows-home\.css$/, ["flows-overview", "flows-home-onescreen", "flows-home-below-render", "flows-home-composition", "flows-pages-render"]],
   [/^assets\/js\/flows-market[^/]*\.js$/, ["flows-market-onescreen", "flows-market-below-render", "flows-pages-render"]],
   [/^assets\/js\/flows-ticker[^/]*\.js$|^assets\/css\/flows-ticker\.css$/, ["flows-ticker", "flows-glance-render", "flows-pages-render"]],

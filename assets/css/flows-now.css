@@ -1,0 +1,155 @@
+body[data-flows-page="now"] .flows-main {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.pw a.mk-pop {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.pw-count {
+  flex: none;
+  font-size: 12px;
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pw-host {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pw-table {
+  flex: none;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-table th,
+.pw-table td {
+  padding: 5px 6px;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pw-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-3);
+  border-bottom: 1px solid var(--label-3);
+}
+
+.pw-table .pw-num {
+  text-align: end;
+}
+
+.pw-c-t {
+  width: 15%;
+}
+
+.pw-c-s {
+  width: 10%;
+}
+
+.pw-c-k {
+  width: 13%;
+}
+
+.pw-c-e {
+  width: 14%;
+}
+
+.pw-c-p {
+  width: 16%;
+}
+
+.pw-c-l {
+  width: 17%;
+}
+
+.pw-c-m {
+  width: 15%;
+}
+
+.pw-table tbody tr {
+  cursor: pointer;
+}
+
+.pw-table tbody tr:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: -2px;
+}
+
+.pw-table tbody tr.is-sel > td {
+  font-weight: 600;
+}
+
+.pw-table tbody tr.is-sel > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent-ink);
+}
+
+.pw-table a {
+  color: var(--label-1);
+}
+
+.pw-more,
+.pw-empty {
+  flex: none;
+  margin: 0;
+  font-size: 12px;
+  color: var(--label-3);
+}
+
+.pw-more {
+  padding-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pw-empty {
+  padding: 12px 0;
+  font-size: 13px;
+  color: var(--label-1);
+}
+
+@media (max-width: 480px) {
+  .pw-table {
+    font-size: 12px;
+  }
+
+  .pw-table th,
+  .pw-table td {
+    padding: 4px 3px;
+  }
+
+  .pw-c-t { width: 17%; }
+  .pw-c-s { width: 9%; }
+  .pw-c-k { width: 11%; }
+  .pw-c-e { width: 17%; }
+  .pw-c-p { width: 17%; }
+  .pw-c-l { width: 15%; }
+  .pw-c-m { width: 14%; }
+}
+
+@media (pointer: coarse) {
+  .pw-table tbody td {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+}
+

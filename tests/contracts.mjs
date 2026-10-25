@@ -276,7 +276,14 @@ assert.deepEqual(sitemapURLs, [
   `${SITE_ORIGIN}/lab/projects/macro-forecasting-desk/`,
   `${SITE_ORIGIN}/lab/projects/fx-volatility-risk/`,
   `${SITE_ORIGIN}/lab/projects/factor-pricing-lab/`,
+  `${SITE_ORIGIN}/lab/placement/`,
+  `${SITE_ORIGIN}/lab/review/`,
 ], "sitemap must contain only final canonical pages");
+for (const page of ["lab/placement/index.html", "lab/review/index.html"]) {
+  const html = read(page);
+  assert(!/<meta name="robots" content="[^"]*noindex/.test(html), `${page}: listed in the sitemap so must stay indexable`);
+  assert(html.includes(`<link rel="canonical" href="${SITE_ORIGIN}/${page.replace(/index\.html$/, "")}">`), `${page}: canonical must match its sitemap entry`);
+}
 assert(!/<(?:priority|changefreq)>/.test(sitemap), "sitemap must not contain ignored priority/changefreq hints");
 assert.match(read("articles/index.html"), /<meta name="robots" content="noindex,follow">/, "empty articles page must stay noindex");
 assert(!sitemap.includes("/articles/"), "empty articles page must not be in the sitemap");

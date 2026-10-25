@@ -323,6 +323,8 @@ try {
     SITE_ORIGIN + "/lab/projects/macro-forecasting-desk/",
     SITE_ORIGIN + "/lab/projects/fx-volatility-risk/",
     SITE_ORIGIN + "/lab/projects/factor-pricing-lab/",
+    SITE_ORIGIN + "/lab/placement/",
+    SITE_ORIGIN + "/lab/review/",
   ]);
   for (const canonicalURL of sitemapURLs) {
     const path = new URL(canonicalURL).pathname;

@@ -19,7 +19,7 @@ const PAGES = Object.freeze([
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
   { slug: "market", render: (username, summary, owner, scenes) => FLOWS_PAGES.marketPage({ username, owner, scenes }) },
   { slug: "network", render: (username) => FLOWS_PAGES.networkPage({ username }) },
-
+  { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },

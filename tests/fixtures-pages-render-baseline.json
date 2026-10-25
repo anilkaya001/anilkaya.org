@@ -389,5 +389,28 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0
+ },
+ "now@320": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 9,
+  "targetsUnder44": 10
+ },
+ "now@390": {
+  "contrast": 0,
+  "names": 1,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 9,
+  "targetsUnder44": 9
+ },
+ "now@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 18
  }
 }
