@@ -11,6 +11,7 @@
   const LAYERS = Object.freeze({
     A: { name: "Active together", lead: "Flagged premium per ten minutes, whatever its direction." },
     L: { name: "Lean together", lead: "Net bullish premium per ten minutes: calls on the ask side and puts on the bid side minus the reverse, by convention." },
+    P: { name: "Beyond the market", lead: "Active together once the day's shared flow burst is removed from both names." },
   });
   const DEF = Object.freeze({ binMin: 10, names: 12, minBins: 20, minActive: 4, minWindows: 40, minCorr: 0.3 });
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -29,10 +30,34 @@
     if (!(sxx > 0) || !(syy > 0)) return null;
     return Math.max(-1, Math.min(1, sxy / Math.sqrt(sxx * syy)));
   }
-  function fisher(r, n) {
-    if (r === null || n < 4) return null;
+  function residual(x, f) {
+    const n = x.length;
+    let mx = 0, mf = 0;
+    for (let i = 0; i < n; i++) { mx += x[i]; mf += f[i]; }
+    mx /= n; mf /= n;
+    let sxf = 0, sff = 0;
+    for (let i = 0; i < n; i++) { const a = f[i] - mf; sxf += (x[i] - mx) * a; sff += a * a; }
+    const b = sff > 0 ? sxf / sff : 0;
+    return x.map((v, i) => v - mx - b * (f[i] - mf));
+  }
+  function partial(x, y, f) {
+    if (x.length < 4) return null;
+    return pearson(residual(x, f), residual(y, f));
+  }
+  function standardise(x) {
+    const n = x.length;
+    let m = 0;
+    for (const v of x) m += v;
+    m /= n;
+    let ss = 0;
+    for (const v of x) ss += (v - m) * (v - m);
+    const sd = Math.sqrt(ss / n);
+    return x.map((v) => (sd > 0 ? (v - m) / sd : 0));
+  }
+  function fisher(r, n, k = 0) {
+    if (r === null || n - k < 4) return null;
     const rr = Math.max(-0.999999, Math.min(0.999999, r));
-    const z = Math.atanh(rr), se = 1 / Math.sqrt(n - 3);
+    const z = Math.atanh(rr), se = 1 / Math.sqrt(n - k - 3);
     return [Math.tanh(z - 1.959963984540054 * se), Math.tanh(z + 1.959963984540054 * se)];
   }
 
@@ -52,7 +77,7 @@
       if (at < t0) t0 = at;
       if (at > t1) t1 = at;
     }
-    const base = { layers: LAYERS, params: P, windows, bins: 0, names: [], pairs: { A: [], L: [] }, status: "ok", reason: null };
+    const base = { layers: LAYERS, params: P, windows, bins: 0, names: [], pairs: { A: [], L: [], P: [] }, status: "ok", reason: null };
     if (!windows) return Object.assign(base, { status: "quiet", reason: "No flagged window carries a premium and a time." });
     const binMs = P.binMin * 60000;
     const b0 = Math.floor(t0 / binMs), B = Math.floor(t1 / binMs) - b0 + 1;
@@ -76,12 +101,19 @@
       return Object.assign(base, { status: "thin", reason: windows + " flagged windows over " + B + " ten-minute bins on " + cand.length + " names with at least " + P.minActive + " active bins; relations need " + P.minWindows + " windows, " + P.minBins + " bins and 3 names." });
     }
     const half = Math.floor(B / 2);
-    for (const L of ["A", "L"]) {
+    const zs = cand.map((s) => standardise(s.A));
+    const factor = new Array(B).fill(0);
+    for (const z of zs) for (let b = 0; b < B; b++) factor[b] += z[b] / zs.length;
+    base.factor = factor;
+    for (const L of ["A", "L", "P"]) {
+      const cond = L === "P";
+      const key = cond ? "A" : L;
+      const corr = cond ? (x, y, f) => partial(x, y, f) : (x, y) => pearson(x, y);
       for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++) {
-        const x = cand[i][L], y = cand[j][L];
-        const r = pearson(x, y);
-        const ci = fisher(r, B);
-        const r1 = pearson(x.slice(0, half), y.slice(0, half)), r2 = pearson(x.slice(half), y.slice(half));
+        const x = cand[i][key], y = cand[j][key];
+        const r = corr(x, y, factor);
+        const ci = fisher(r, B, cond ? 1 : 0);
+        const r1 = corr(x.slice(0, half), y.slice(0, half), factor.slice(0, half)), r2 = corr(x.slice(half), y.slice(half), factor.slice(half));
         const sameSign = r1 !== null && r2 !== null && Math.sign(r1) === Math.sign(r) && Math.sign(r2) === Math.sign(r);
         const passed = r !== null && ci !== null && (ci[0] > 0 || ci[1] < 0) && Math.abs(r) >= P.minCorr;
         base.pairs[L].push({ a: cand[i].t, b: cand[j].t, r, lo: ci ? ci[0] : null, hi: ci ? ci[1] : null, n: B, r1, r2, passed, stable: passed && sameSign });
@@ -212,7 +244,7 @@
       readEl.textContent = (sel ? sel + " (" + secName(sel) + "): " + (shown.filter((p) => p.a === sel || p.b === sel).map((p) => (p.a === sel ? p.b : p.a) + " " + sgn(p.r)).join(", ") || "no tested pair") + ". "
         : LAYERS[layer].lead + " ") + shown.length + " of " + M.pairs[layer].length + " pairs pass.";
       const total = M.pairs[layer].length, chance = Math.max(1, Math.round(total * 0.05));
-      note.textContent = "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so about " + chance + " of these " + total + " would pass by chance. Not a forecast.";
+      note.textContent = (layer === "P" ? "This removes the day's shared flow burst, not stock-price moves. Price-residual layers need daily closes, which the site does not store. " : "") + "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so about " + chance + " of these " + total + " would pass by chance. Not a forecast.";
     }
 
     function rebuild() {
@@ -265,6 +297,6 @@
   }
 
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, {
-    relations: Object.freeze({ mount, model, pearson, fisher, LAYERS, of: (el) => MOUNTS.get(el) || null }),
+    relations: Object.freeze({ mount, model, pearson, partial, fisher, LAYERS, of: (el) => MOUNTS.get(el) || null }),
   }));
 })();

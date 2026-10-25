@@ -48,12 +48,29 @@ def pearson(x, y):
     return float(np.corrcoef(x, y)[0, 1])
 
 
-def fisher(r, n):
-    if r is None or n < 4:
+def residual(x, f):
+    a = np.column_stack([np.ones(len(f)), f])
+    coef, *_ = np.linalg.lstsq(a, x, rcond=None)
+    return x - a @ coef
+
+
+def partial(x, y, f):
+    if len(x) < 4:
+        return None
+    return pearson(residual(x, f), residual(y, f))
+
+
+def zscore(x):
+    sd = np.std(x)
+    return (x - np.mean(x)) / sd if sd > 0 else np.zeros(len(x))
+
+
+def fisher(r, n, k=0):
+    if r is None or n - k < 4:
         return None
     rr = max(-0.999999, min(0.999999, r))
     z = math.atanh(rr)
-    se = 1 / math.sqrt(n - 3)
+    se = 1 / math.sqrt(n - k - 3)
     q = float(st.norm.ppf(0.975))
     return [math.tanh(z - q * se), math.tanh(z + q * se)]
 
@@ -77,15 +94,23 @@ def expected(rows, params):
     cand.sort(key=lambda p: (-p[1]["prem"], p[0]))
     cand = cand[: params["names"]]
     half = B // 2
-    out = {"bins": B, "windows": len(rows), "names": [t for t, _ in cand], "pairs": {"A": [], "L": []}}
-    for L in ("A", "L"):
+    out = {"bins": B, "windows": len(rows), "names": [t for t, _ in cand], "pairs": {"A": [], "L": [], "P": []}}
+    factor = np.mean([zscore(s["A"]) for _, s in cand], axis=0)
+    for L in ("A", "L", "P"):
+        cond = L == "P"
+        key = "A" if cond else L
         for i in range(len(cand)):
             for j in range(i + 1, len(cand)):
-                x, y = cand[i][1][L], cand[j][1][L]
-                r = pearson(x, y)
-                ci = fisher(r, B)
-                r1 = pearson(x[:half], y[:half])
-                r2 = pearson(x[half:], y[half:])
+                x, y = cand[i][1][key], cand[j][1][key]
+                if cond:
+                    r = partial(x, y, factor)
+                    r1 = partial(x[:half], y[:half], factor[:half])
+                    r2 = partial(x[half:], y[half:], factor[half:])
+                else:
+                    r = pearson(x, y)
+                    r1 = pearson(x[:half], y[:half])
+                    r2 = pearson(x[half:], y[half:])
+                ci = fisher(r, B, 1 if cond else 0)
                 same = r1 is not None and r2 is not None and np.sign(r1) == np.sign(r) and np.sign(r2) == np.sign(r)
                 passed = bool(r is not None and ci is not None and (ci[0] > 0 or ci[1] < 0) and abs(r) >= params["minCorr"])
                 out["pairs"][L].append({"a": cand[i][0], "b": cand[j][0], "r": r, "lo": ci[0] if ci else None, "hi": ci[1] if ci else None, "r1": r1, "r2": r2, "n": B, "passed": passed, "stable": bool(passed and same)})
@@ -105,7 +130,7 @@ def main():
         "scipy": scipy.__version__,
         "seed": SEED,
         "script_sha256": hashlib.sha256(open(HERE, "rb").read()).hexdigest(),
-        "method": "Pearson r of per-name ten-minute series (numpy.corrcoef); Fisher z interval with scipy.stats.norm.ppf(0.975) and se 1/sqrt(n-3); first and second half r",
+        "method": "Pearson r of per-name ten-minute series (numpy.corrcoef); Fisher z interval with scipy.stats.norm.ppf(0.975) and se 1/sqrt(n-3); first and second half r; layer P is the partial r of the Active series after OLS residuals on the mean of the kept names' z-scored Active series, Fisher se 1/sqrt(n-4)",
     }
     json.dump({"provenance": prov, "params": params, "cases": cases}, open(sys.argv[1] if len(sys.argv) > 1 else "fixtures-relations.json", "w"), separators=(",", ":"))
 

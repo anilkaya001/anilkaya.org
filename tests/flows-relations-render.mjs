@@ -31,7 +31,7 @@ function compare(model, exp, label) {
   eq(model.bins, exp.bins, label + ": the bin count");
   eq(model.windows, exp.windows, label + ": the window count");
   eq(model.names.map((n) => n.t), exp.names, label + ": the names kept, by flagged premium");
-  for (const L of ["A", "L"]) {
+  for (const L of ["A", "L", "P"]) {
     const got = new Map(model.pairs[L].map((p) => [p.a + "|" + p.b, p]));
     eq(got.size, exp.pairs[L].length, label + ` ${L}: the number of pairs`);
     for (const x of exp.pairs[L]) {
@@ -98,6 +98,13 @@ const browser = await launch();
   eq(m.drawn, m.stable, "only pairs that passed in both halves are drawn, one curve each");
   ok(/windows/.test(m.stats) && /bins/.test(m.stats) && /read \d\d:\d\d TRT/.test(m.stats), "the stats line has windows, bins and the read time in TRT: " + m.stats);
   ok(/pass by chance/.test(m.note) && /not a forecast/i.test(m.note), "the note says how many pairs would pass by chance and that it is not a forecast");
+  await page.click("#mkRelations .rl-seg button[data-l='P']");
+  const pm = await page.evaluate(() => ({ note: document.querySelector("#mkRelations .rl-note").textContent, lead: document.querySelector("#mkRelations .rl-read").textContent, drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: window.FlowsUI.relations.of(document.getElementById("mkRelations")).model().pairs.P.filter((p) => p.stable).length }));
+  ok(/not stock-price moves/.test(pm.note) && /daily closes/.test(pm.note), "THE THIRD RELATION SAYS IT REMOVES THE SHARED FLOW BURST, NOT PRICE MOVES, AND THAT PRICE LAYERS NEED DAILY CLOSES");
+  eq(pm.drawn, pm.stable, "and draws only its own stable pairs");
+  ok(!/\b(tape|unusual|alert|screen|rare|sigma|radar)\b/i.test(pm.note + pm.lead + SRC.match(/Beyond the market[^}]*/)[0]), "and uses none of the barred words");
+  ok(pm.note.split(/(?<=\.)\s+/).filter((t) => t.split(/\s+/).length > 14 && /beyond|removes|closes/.test(t)).length === 0, "and its sentences stay within fourteen words");
+  await page.click("#mkRelations .rl-seg button[data-l='A']");
   ok(/pairs pass/.test(m.read), "the readout says how many pairs pass");
   await page.click("#mkRelations .rl-node");
   const sel = await page.evaluate(() => ({ read: document.querySelector("#mkRelations .rl-read").textContent, on: document.querySelectorAll("#mkRelations .rl-node.is-sel").length }));
@@ -170,7 +177,13 @@ for (const [w, h] of [[1440, 820], [1024, 768], [390, 844]]) {
 }
 
 const MUTANTS = [
-  ["Fisher interval uses n - 2", [["const z = Math.atanh(rr), se = 1 / Math.sqrt(n - 3);", "const z = Math.atanh(rr), se = 1 / Math.sqrt(n - 2);"]]],
+  ["Fisher interval uses n - 2", [["se = 1 / Math.sqrt(n - k - 3);", "se = 1 / Math.sqrt(n - k - 2);"]]],
+  ["no factor removal", [["const corr = cond ? (x, y, f) => partial(x, y, f) : (x, y) => pearson(x, y);", "const corr = (x, y) => pearson(x, y);"]]],
+  ["partial interval uses n - 3", [["fisher(r, B, cond ? 1 : 0)", "fisher(r, B, 0)"]]],
+  ["factor is only the first name", [["for (const z of zs) for (let b = 0; b < B; b++) factor[b] += z[b] / zs.length;", "for (let b = 0; b < B; b++) factor[b] = zs[0][b];"]]],
+  ["factor built from the lean series", [["const zs = cand.map((s) => standardise(s.A));", "const zs = cand.map((s) => standardise(s.L));"]]],
+  ["partial sign flipped", [["return pearson(residual(x, f), residual(y, f));", "const q = pearson(residual(x, f), residual(y, f)); return q === null ? null : -q;"]]],
+  ["residual keeps the factor slope", [["return x.map((v, i) => v - mx - b * (f[i] - mf));", "return x.map((v, i) => v - mx - 0.5 * b * (f[i] - mf));"]]],
   ["bins of five minutes", [["binMin: 10", "binMin: 5"]]],
   ["lean sign not flipped for puts", [["r.cp === \"C\" ? sp.ask - sp.bid : sp.bid - sp.ask", "sp.ask - sp.bid"]]],
   ["passed ignores the interval", [["(ci[0] > 0 || ci[1] < 0) && Math.abs(r) >= P.minCorr", "Math.abs(r) >= P.minCorr"]]],
