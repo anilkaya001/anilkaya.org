@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       deepen_cap:
-        description: "Names the deepening rotation may read in full tonight; 0 skips it for this run, blank uses the repository variable FLOWS_DEEPEN_CAP or the default (530; hard ceiling 900)"
+        description: "Names the deepening rotation may read in full tonight; 0 skips it for this run, blank uses the repository variable FLOWS_DEEPEN_CAP or the default (470; hard ceiling 900)"
         type: string
         required: false
         default: ""
@@ -95,6 +95,8 @@ jobs:
           FLOWS_REPUBLISH_SESSION: ${{ github.event_name == 'workflow_dispatch' && inputs.republish_session && '1' || '' }}
           FLOWS_UNUSUAL_V2: ${{ vars.FLOWS_UNUSUAL_V2 }}
           FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
+          FLOWS_EXTRAS: ${{ vars.FLOWS_EXTRAS }}
+          FLOWS_EXTRAS_CAP: ${{ vars.FLOWS_EXTRAS_CAP }}
           FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}
           FLOWS_UW_PLAN: advanced
           GITHUB_TOKEN: ${{ github.token }}

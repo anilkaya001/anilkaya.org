@@ -1,0 +1,209 @@
+{
+  "bodies": {
+    "dividends": {
+      "data": {
+        "dividends": [
+          {
+            "amount": 0.25,
+            "declaration_date": "2025-12-14",
+            "ex_date": "2026-01-08",
+            "payment_date": "2026-01-22",
+            "record_date": "2026-01-08"
+          },
+          {
+            "amount": 0.25,
+            "declaration_date": "2026-03-15",
+            "ex_date": "2026-04-09",
+            "payment_date": "2026-04-23",
+            "record_date": "2026-04-09"
+          },
+          {
+            "amount": 0.25,
+            "declaration_date": "2026-06-14",
+            "ex_date": "2026-07-09",
+            "payment_date": "2026-07-23",
+            "record_date": "2026-07-09"
+          },
+          {
+            "amount": 0.25,
+            "declaration_date": "2026-09-14",
+            "ex_date": "2026-10-09",
+            "payment_date": "2026-10-23",
+            "record_date": "2026-10-09"
+          },
+          {
+            "amount": 0.26,
+            "declaration_date": "2026-10-12",
+            "ex_date": "2026-11-06",
+            "payment_date": "2026-11-20",
+            "record_date": "2026-11-06"
+          }
+        ],
+        "ticker": "SYX101"
+      }
+    },
+    "dividends-empty": {
+      "data": {
+        "dividends": [],
+        "ticker": "SYX102"
+      }
+    },
+    "etf-exposure": {
+      "data": [
+        {
+          "etf": "SYF101",
+          "full_name": "SYF101 Fixture Fund",
+          "last_price": "56.79",
+          "prev_price": "56.10",
+          "shares": 48427939,
+          "weight": "3.10"
+        },
+        {
+          "etf": "SYF102",
+          "full_name": "SYF102 Fixture Fund",
+          "last_price": "56.79",
+          "prev_price": "56.10",
+          "shares": 1200500,
+          "weight": "0.35"
+        },
+        {
+          "etf": "SYF103",
+          "full_name": "SYF103 Fixture Fund",
+          "last_price": "56.79",
+          "prev_price": "56.10",
+          "shares": 305000,
+          "weight": "5.25"
+        },
+        {
+          "etf": "SYF104",
+          "full_name": "SYF104 Fixture Fund",
+          "last_price": "56.79",
+          "prev_price": "56.10",
+          "shares": 99000,
+          "weight": "0.35"
+        }
+      ]
+    },
+    "interpolated-iv": {
+      "data": [
+        {
+          "date": "2026-10-20",
+          "days": 7,
+          "implied_move_perc": "0.021",
+          "percentile": "91.250",
+          "volatility": "0.412"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 14,
+          "implied_move_perc": "0.027",
+          "percentile": "63.000",
+          "volatility": "0.371"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 30,
+          "implied_move_perc": "0.058",
+          "percentile": "77.193",
+          "volatility": "0.299"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 60,
+          "implied_move_perc": "0.081",
+          "percentile": "55.500",
+          "volatility": "0.288"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 90,
+          "implied_move_perc": "0.098",
+          "percentile": "48.100",
+          "volatility": "0.281"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 180,
+          "implied_move_perc": "0.141",
+          "percentile": "40.800",
+          "volatility": "0.274"
+        },
+        {
+          "date": "2026-10-20",
+          "days": 365,
+          "implied_move_perc": "0.198",
+          "percentile": "33.300",
+          "volatility": "0.266"
+        }
+      ]
+    },
+    "splits": {
+      "data": {
+        "splits": [
+          {
+            "effective_date": "2020-08-31",
+            "split_factor": 4
+          }
+        ],
+        "ticker": "SYX101"
+      }
+    },
+    "splits-empty": {
+      "data": {
+        "splits": [],
+        "ticker": "SYX102"
+      }
+    }
+  },
+  "documented": {
+    "/api/companies/{ticker}/dividends": [
+      "amount",
+      "data",
+      "declaration_date",
+      "dividends",
+      "ex_date",
+      "payment_date",
+      "record_date",
+      "ticker"
+    ],
+    "/api/companies/{ticker}/splits": [
+      "data",
+      "effective_date",
+      "split_factor",
+      "splits",
+      "ticker"
+    ],
+    "/api/etfs/{ticker}/exposure": [
+      "data",
+      "etf",
+      "full_name",
+      "last_price",
+      "prev_price",
+      "shares",
+      "weight"
+    ],
+    "/api/stock/{ticker}/interpolated-iv": [
+      "data",
+      "date",
+      "days",
+      "implied_move_perc",
+      "percentile",
+      "volatility"
+    ]
+  },
+  "nowDay": "2026-10-20",
+  "ops": {
+    "dividends": "/api/companies/{ticker}/dividends",
+    "etf-exposure": "/api/etfs/{ticker}/exposure",
+    "interpolated-iv": "/api/stock/{ticker}/interpolated-iv",
+    "splits": "/api/companies/{ticker}/splits"
+  },
+  "provenance": {
+    "generator": "tests/gen-extras-fixtures.py",
+    "nature": "synthetic bodies built to the committed OpenAPI schema with invented tickers and invented figures; spec-derived, not observed on the wire, not vendor data",
+    "spec": "docs/uw-openapi.yaml",
+    "specSha256": "c8686b3ff855cb5720900c23e17e7f49ff6c61df32835d977e60c85f340b76d7",
+    "wire": "no weekly probe run has answered these four operations yet; scripts/flows-probe-shapes.json holds no shape for them"
+  },
+  "ticker": "SYX101"
+}

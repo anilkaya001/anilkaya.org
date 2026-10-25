@@ -462,6 +462,113 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
       }
       return { data };
     }],
+    [/^\/api\/stock\/([A-Z0-9.]+)\/info$/, (p, m) => {
+      const rnd = prng(hash("info:" + m[1]));
+      return { data: {
+        full_name: m[1] + " Holdings Inc", sector: ["Technology", "Healthcare", "Financial Services", "Energy"][Math.floor(rnd() * 4)],
+        issue_type: "Common Stock", marketcap: String(Math.round(2e9 + rnd() * 5e11)), avg30_volume: String(Math.round(1e6 + rnd() * 5e7)),
+        beta: (0.6 + rnd() * 1.2).toFixed(3), has_options: true, has_dividend: rnd() > 0.35, has_earnings_history: true,
+        next_earnings_date: addDays(S, 10 + Math.floor(rnd() * 60)), announce_time: "afterhours", has_investment_arm: false, logo: null,
+        short_description: "A synthetic company that makes things for the fixture world.",
+      } };
+    }],
+    [/^\/api\/companies\/([A-Z0-9.]+)\/profile$/, (p, m) => {
+      const rnd = prng(hash("prof:" + m[1]));
+      const px = 20 + rnd() * 300;
+      return { data: {
+        name: m[1] + " Holdings Inc", sector: "Technology", industry: "Software", exchange: "NASDAQ", country: "US", currency: "USD",
+        description: "A synthetic company profile written for the fixture world only.", market_cap: String(Math.round(2e9 + rnd() * 5e11)),
+        pe_ratio: (8 + rnd() * 40).toFixed(2), peg_ratio: (0.5 + rnd() * 3).toFixed(2), beta: (0.6 + rnd() * 1.2).toFixed(3),
+        week_52_high: (px * 1.3).toFixed(2), week_52_low: (px * 0.7).toFixed(2), analyst_target_price: (px * 1.1).toFixed(2),
+        shares_outstanding: String(Math.round(5e7 + rnd() * 5e9)),
+      } };
+    }],
+    [/^\/api\/stock\/([A-Z0-9.]+)\/financials$/, (p, m) => {
+      const rnd = prng(hash("fin:" + m[1]));
+      const rows = (kind, n, step) => Array.from({ length: n }, (_, i) => ({
+        fiscal_date_ending: addDays(S, -(30 + i * step)), report_type: kind, reported_currency: "USD",
+        total_revenue: String(Math.round(1e9 + rnd() * 9e9)), gross_profit: String(Math.round(5e8 + rnd() * 4e9)),
+        operating_income: String(Math.round(1e8 + rnd() * 2e9)), net_income: String(Math.round(1e8 + rnd() * 1e9)),
+        ebitda: String(Math.round(2e8 + rnd() * 2e9)), cash_and_short_term_investments: String(Math.round(1e9 + rnd() * 5e9)),
+        short_long_term_debt_total: String(Math.round(1e9 + rnd() * 5e9)), total_shareholder_equity: String(Math.round(2e9 + rnd() * 8e9)),
+        total_assets: String(Math.round(5e9 + rnd() * 2e10)), total_liabilities: String(Math.round(3e9 + rnd() * 1e10)),
+        total_current_assets: String(Math.round(2e9 + rnd() * 5e9)), total_current_liabilities: String(Math.round(1e9 + rnd() * 4e9)),
+        common_stock_shares_outstanding: String(Math.round(5e8 + rnd() * 2e9)), operating_cashflow: String(Math.round(2e8 + rnd() * 2e9)),
+        capital_expenditures: String(Math.round(1e8 + rnd() * 1e9)),
+      }));
+      return { data: {
+        income_statements: [...rows("quarterly", 8, 91), ...rows("annual", 2, 365)],
+        balance_sheets: [...rows("quarterly", 4, 91), ...rows("annual", 1, 365)],
+        cash_flows: [...rows("quarterly", 8, 91), ...rows("annual", 2, 365)],
+        earnings: Array.from({ length: 8 }, (_, i) => ({
+          fiscal_date_ending: addDays(S, -(30 + i * 91)), report_type: "quarterly", report_date: addDays(S, -(10 + i * 91)),
+          reported_eps: (1 + rnd()).toFixed(2), estimated_eps: (1 + rnd()).toFixed(2),
+        })),
+      } };
+    }],
+    [/^\/api\/stock\/([A-Z0-9.]+)\/fundamental-breakdown$/, (p, m) => {
+      const rnd = prng(hash("brk:" + m[1]));
+      return { data: { rev_breakdown: ["Alpha", "Beta", "Gamma"].map((member) => ({
+        report_date: addDays(S, -40), rev_group: "product", field: "Revenue by product", members: [member], value: String(Math.round(1e8 + rnd() * 9e8)),
+      })) } };
+    }],
+    [/^\/api\/companies\/([A-Z0-9.]+)\/earnings-estimates$/, (p, m) => {
+      const rnd = prng(hash("est:" + m[1]));
+      return { data: { ticker: m[1], estimates: ["0q", "+1q", "0y"].map((horizon, i) => ({
+        date: addDays(S, 60 + i * 91), horizon, eps_estimate_average: (1 + rnd()).toFixed(2), eps_estimate_high: (2 + rnd()).toFixed(2),
+        eps_estimate_low: (0.5 + rnd()).toFixed(2), eps_estimate_analyst_count: String(5 + Math.floor(rnd() * 20)),
+        revenue_estimate_average: String(Math.round(1e9 + rnd() * 9e9)), revenue_estimate_analyst_count: String(5 + Math.floor(rnd() * 20)),
+      })) } };
+    }],
+    [/^\/api\/screener\/analysts$/, (p) => {
+      const t = String(p.ticker || "");
+      const rnd = prng(hash("an:" + t));
+      if (rnd() < 0.2) return { data: [] };
+      const recs = ["buy", "hold", "sell"];
+      return { data: Array.from({ length: 4 }, (_, i) => ({
+        ticker: t, timestamp: addDays(S, -(2 + i * 9)) + "T14:00:00Z", firm: ["North Desk", "Harbor Research", "Summit Partners", "Pine Street"][i],
+        action: ["upgraded", "reiterated", "target raised", "maintained"][i], recommendation: recs[Math.floor(rnd() * 3)], target: (50 + rnd() * 300).toFixed(2),
+        analyst_name: "Analyst " + i, sector: "Technology",
+      })) };
+    }],
+    [/^\/api\/institution\/([A-Z0-9.]+)\/ownership$/, (p, m) => {
+      const rnd = prng(hash("own:" + m[1]));
+      return { data: Array.from({ length: 6 }, (_, i) => ({
+        name: `FIXTURE HOLDER ${i} LP`, short_name: `Holder ${i}`, units: Math.round(1e6 + rnd() * 9e7), units_changed: Math.round((rnd() - 0.5) * 2e6),
+        historical_units: [], report_date: addDays(S, -45), shares_outstanding: 1e9, filing_date: addDays(S, -40), value: String(Math.round(1e8 + rnd() * 9e9)),
+      })) };
+    }],
+    [/^\/api\/companies\/([A-Z0-9.]+)\/dividends$/, (p, m) => {
+      const rnd = prng(hash("div:" + m[1]));
+      if (rnd() < 0.3) return { data: { ticker: m[1], dividends: [] } };
+      const first = 5 + Math.floor(rnd() * 70);
+      const dividends = [];
+      for (let k = 0; k < 10; k++) {
+        const ex = addDays(S, -first - k * 91 + 91);
+        dividends.push({
+          amount: (0.1 + rnd() * 0.9).toFixed(4), ex_date: ex, declaration_date: addDays(ex, -25), record_date: ex, payment_date: addDays(ex, 14),
+        });
+      }
+      return { data: { ticker: m[1], dividends } };
+    }],
+    [/^\/api\/companies\/([A-Z0-9.]+)\/splits$/, (p, m) => {
+      const rnd = prng(hash("spl:" + m[1]));
+      return { data: { ticker: m[1], splits: rnd() < 0.15 ? [{ effective_date: addDays(S, -400 - Math.floor(rnd() * 800)), split_factor: rnd() > 0.5 ? 4 : 2 }] : [] } };
+    }],
+    [/^\/api\/stock\/([A-Z0-9.]+)\/interpolated-iv$/, (p, m) => {
+      const rnd = prng(hash("ivp:" + m[1]));
+      return { data: [7, 14, 30, 60, 90, 180, 365].map((days) => ({
+        date: p.date || S, days, volatility: (0.2 + rnd() * 0.4).toFixed(4), implied_move_perc: (0.02 + rnd() * 0.1).toFixed(4), percentile: (rnd() * 100).toFixed(3),
+      })) };
+    }],
+    [/^\/api\/etfs\/([A-Z0-9.]+)\/exposure$/, (p, m) => {
+      const rnd = prng(hash("etf:" + m[1]));
+      const funds = ["SPY", "QQQ", "IWM", "DIA", "XLK", "XLF", "SYF101", "SYF102", "SYF103", "SYF104", "SYF105", "SYF106"];
+      return { data: funds.filter(() => rnd() > 0.25).map((etf) => ({
+        etf, full_name: etf + " Fixture Fund", last_price: (50 + rnd() * 400).toFixed(2), prev_price: (50 + rnd() * 400).toFixed(2),
+        shares: Math.round(1e5 + rnd() * 5e7), weight: (rnd() * 8).toFixed(4),
+      })) };
+    }],
   ];
 
   const vendor = async (path, params = {}, { envelope = false } = {}) => {
