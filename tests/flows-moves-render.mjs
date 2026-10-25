@@ -7,6 +7,7 @@ import { launch } from "./lib/browser.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 import * as M from "../shared/flows-moves0.js";
 import { rarityText } from "../shared/flows-targets.js";
+import * as SIG from "../shared/flows-moves-sig.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS } from "../server/routes/flows-pages.js";
 import { HttpError } from "../server/http.js";
 import * as FX from "./lib/moves-fixture.mjs";
@@ -23,7 +24,7 @@ const CSS = fs.readFileSync(path.join(ROOT, "assets/css/flows-moves.css"), "utf8
 const COLOUR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\(|(?<![-\w])(?:white|black|red|green|blue|gray|grey|orange|yellow)(?![-\w])/;
 const COLOUR_FN = /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\(/;
 const FORBID = /\b(unusual|alert|alerts|screen|rare|sigma|radar)\b|\bat (the )?(ask|bid)\b/i;
-const NOT_BUILT = /\bq\s*(<=|≤|<)|Benjamini|\bflagged\b|\bNOW\b|\bHawkes\b|1 in [\d,]+ of/;
+const NOT_BUILT = /\bq\s*(<=|≤|<)|\bNOW\b|\bHawkes\b|1 in [\d,]+ of/;
 const MINUS = "−", DASH = "—";
 const SQRT252 = Math.sqrt(252);
 const stripHtml = (h) => h.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<aside class="ak-dock"[\s\S]*?<\/aside>/, "").replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "");
@@ -47,7 +48,7 @@ ok(/^FLOWS_MOVES = "on"$/m.test(wrangler), "the switch ships on: the owner opene
   for (const w of M.HEADER_SENTENCES) ok(M.wordCount(w) <= M.HEADER_WORDS_MAX, "a header sentence stays inside fourteen words: " + w);
   ok(!FORBID.test(M.HEADER_SENTENCES.join(" ")), "and uses none of the forbidden words");
   for (const w of [M.LINE, M.CAPTION, M.APART, ...M.RADAR_SENTENCES]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sentence: " + w);
-  ok(M.NOTEST_LINE === "Significance test: not yet published.", "the muted note is the one the owner asked for");
+  ok(!JS.includes("not yet published") && JS.includes(JSON.stringify(SIG.SIG_FLAGGED_LINE).slice(1, -1)), "the muted note is gone and the test's sentence is carried");
   const panels = [...HTML.matchAll(/role="tab" aria-selected="(\w+)" aria-controls="(\w+)" data-v="(\w+)"/g)];
   eq(panels.map((x) => [x[2], x[3], x[1]]), [["mvMain", "field", "true"], ["mvLists", "lists", "false"], ["mvRail", "detail", "false"]], "three phone tabs control three panels, Field first");
   for (const id of ["mvMain", "mvLists", "mvRail", "mvPlot", "mvNow", "mvApart", "mvMoreDlg", "mvInfoDlg", "mvDir", "mvEarn", "mvSector", "mvClear", "mvFreeze"]) ok(new RegExp('id="' + id + '"').test(HTML), "the shell carries #" + id);
@@ -417,7 +418,9 @@ async function exercise(browser, js, early) {
       same(rk.kv["Past 3 typical"], sel.f3 + " of 252", "the beyond-3 count");
       P(rk.spark === 21, "the 21-session sparkline holds the card's last 21 closes (" + rk.spark + ")");
       P(rk.kv.Conviction === "64 /100" && rk.kv["IV rank"] === "42" && rk.kv["Dealer γ book"] === "Long" && rk.kv["Latest flow"] === "+$12.5M", "card context is read, with units");
-      P(rk.text.includes(M.LINE) && rk.text.includes(M.NOTEST_LINE), "the muted note says the significance test is not published");
+      const wantSig = SIG.sigRun(DEC).items.find((i) => i.t === sel.t);
+      const wantLine = wantSig.state === "tested" ? (wantSig.flag ? SIG.SIG_FLAGGED_LINE : SIG.SIG_PLAIN_LINE) : SIG.SIG_REASONS[wantSig.state];
+      P(rk.text.includes(wantLine) && !rk.text.includes("not yet published"), "the drill panel carries the significance result or the reason for none: " + wantLine);
       P(cardHits[sel.t] === 1, "the card is asked for once");
       P(asked.indexOf("/api/flows/card?t=" + sel.t) > asked.findIndex((a) => a.startsWith("/api/flows/universe")), "after the universe, never before first paint");
 
@@ -515,7 +518,8 @@ async function exercise(browser, js, early) {
       P((await railKv(page)).big === ranked[2].t, "choosing a name in the dialog selects it");
       await page.click("#mvInfoBtn");
       const info = await page.locator("#mvInfoB").innerText();
-      P(/Not built yet: a significance test, parts of the move, flow clusters and replay\./.test(info), "the info dialog says what is not built");
+      P(/Not built yet: parts of the move, flow clusters and replay\./.test(info) && !/a significance test/.test(info), "the info dialog says what is not built");
+      for (const w of SIG.SIG_INFO_SENTENCES) P(info.includes(w), "the info dialog states the test's limit: " + w);
       P(info.includes(M.REF_LINE) && !FORBID.test(info) && !NOT_BUILT.test(info), "and holds no forbidden word");
       for (const s of info.split(/(?<=\.)\s+/)) P(M.wordCount(s) <= 14, "an info sentence stays short: " + s.slice(0, 50));
       await page.keyboard.press("Escape");
@@ -552,6 +556,43 @@ async function exercise(browser, js, early) {
       const { ctx, page } = await mount(browser, 1440, 820, { js, body: FX.universe(odd) });
       P((await railKv(page)).big === "NOCARD", "the largest move is selected at load");
       P((await page.locator("#mvRail").innerText()).includes("NOCARD has no Flows card"), "a name with no card says so and shows no invented context");
+      await ctx.close();
+    }
+
+    {
+      const list = [];
+      for (let i = 0; i < 40; i++) list.push(["Q" + String(i).padStart(2, "0"), 0.001, 0.3, 60, "Utilities", 1e10, 0.01, 5, 1]);
+      for (let i = 0; i < 6; i++) list.push(["FLAG" + i, 0.035 + i * 0.001, 0.3, 60, "Technology", 2e10, 0.01, 0, 0]);
+      list.push(["NEAR", 0.06, 0.3, 60, "Technology", 1e10, 0.01, 9, 4]);
+      list.push(["EVT", 0.05, 0.3, 5, "Technology", 1e10, 0.01, 0, 0]);
+      list.push(["NOSC", 0.05, 0.3, 60, "Technology", 1e10, null, null, null]);
+      const dec = FX.decoded(FX.universe(list));
+      const want = SIG.sigRun(dec);
+      const refRej = (() => { const ps = want.items.map((i) => i.p); const live = ps.map((p, i) => [p, i]).filter(([p]) => p !== null).sort((a, b) => a[0] - b[0]); let cut = 0; live.forEach(([p], k) => { if (p <= ((k + 1) * 0.1) / live.length) cut = k + 1; }); return new Set(live.slice(0, cut).map(([, i]) => i)); })();
+      P(want.items.filter((i) => i.state === "tested" && refRej.has(want.items.indexOf(i))).length === 6 && want.flagged === 6 && want.m === 47, "the scenario has six flagged among 47 counted names");
+      const { ctx, page } = await mount(browser, 1440, 820, { js, body: FX.universe(list) });
+      const fn = await page.locator("#mvFnote").innerText();
+      P(fn.includes("6 of 7 tested names are beyond the usual after correction."), "the foot counts the flagged names: " + fn.slice(-90));
+      const pick = async (t) => {
+        const hit = await page.evaluate((x) => { const r = document.querySelector('.mv-row[data-t="' + x + '"]'); if (r) { r.click(); return null; } const e = document.querySelector('.pt[data-t="' + x + '"]'); const b = e.getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, t);
+        if (hit) await page.mouse.click(hit[0], hit[1]);
+        await page.waitForTimeout(120);
+        return railKv(page);
+      };
+      let rk = await pick("FLAG5");
+      P(rk.text.includes(SIG.SIG_FLAGGED_LINE), "a flagged name says it is beyond the usual");
+      const w2 = want.items.find((i) => i.t === "FLAG5");
+      same([rk.kv["p, own rate"], rk.kv["p, adjusted"]], [w2.p.toFixed(3), w2.adj.toFixed(3)], "its p and adjusted p");
+      rk = await pick("NEAR");
+      P(rk.text.includes(SIG.SIG_PLAIN_LINE) && !rk.text.includes(SIG.SIG_FLAGGED_LINE), "a tested name that does not pass says so");
+      const wn = want.items.find((i) => i.t === "NEAR");
+      same(rk.kv["p, adjusted"], wn.adj.toFixed(3), "its adjusted p is over the cut");
+      rk = await pick("EVT");
+      P(rk.text.includes(SIG.SIG_REASONS.event) && rk.kv["p, own rate"] === undefined, "an earnings name is refused with its reason");
+      rk = await pick("Q00");
+      P(rk.text.includes(SIG.SIG_REASONS.below) && rk.kv["p, adjusted"] === undefined, "a small move is not tested and says why");
+      rk = await pick("NOSC");
+      P(rk.big === "NOSC" && rk.text.includes(SIG.SIG_REASONS.noscale), "a name with no scale gets a reason, never a zero");
       await ctx.close();
     }
 
@@ -648,6 +689,14 @@ const MUTANTS = [
   ["the market cap column used as the typical day", "sig: sig ? sig[i] : null, f2", "sig: cap ? cap[i] / 1e12 : null, f2"],
   ["a boundary curve drawn", "s += '<line class=\"ref\" data-ref=\"y1\"", "s += '<path class=\"boundary\" d=\"M0,0\"/><line class=\"ref\" data-ref=\"y1\""],
   ["the percent change multiplied twice", "const pct = (v) => F.pct(v, 1, true);", "const pct = (v) => F.pct(v * 100, 1, true);"],
+  ["no correction: the raw p against the level", "const flag = it.state === \"tested\" && adj[i] <= q;", "const flag = it.state === \"tested\" && it.p <= q;"],
+  ["no add-one in the page's rate", "p: (hits + 1) / (SESSIONS + 1) };\n  }\n  function sigRun", "p: hits / SESSIONS };\n  }\n  function sigRun"],
+  ["names below 2 left out of the correction", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: 1 };\n    const level", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: null };\n    const level"],
+  ["earnings names tested", "if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: \"event\"", "if (false) return { t: x.t, state: \"event\""],
+  ["the flagged sentence on every tested name", "return g.state === \"tested\" ? (g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE)", "return g.state === \"tested\" ? SIG_FLAGGED_LINE"],
+  ["the foot counts the tested as flagged", "M.sg.flagged + \" of \"", "M.sg.tested + \" of \""],
+  ["the old muted note back", "<span class=\"sub c\" data-k=\"sig\">' + esc(sigLine(x)) + \"</span>\"", "<span class=\"sub c\" data-k=\"sig\">Significance test: not yet published.</span>\""],
+  ["the adjusted p shown as the raw p", "kv(\"p, adjusted\", x.sg.adj.toFixed(3))", "kv(\"p, adjusted\", x.sg.p.toFixed(3))"],
   ["a ring on every name", "if (x.event) s += '<circle", "if (true) s += '<circle"],
 ];
 for (const [name, from, to] of MUTANTS) {

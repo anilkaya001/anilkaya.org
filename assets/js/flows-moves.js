@@ -17,7 +17,12 @@
   const Y_LINE = "Up: the move as a multiple of the implied day.";
   const SIZE_LINE = "Dot area is market cap; the smallest dot when unknown.";
   const REF_LINE = "Dashed lines are reference marks, not a test.";
-  const NOTEST_LINE = "Significance test: not yet published.";
+  const SIG_Q = 0.1, SIG_MIN_Z = 2;
+  const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
+  const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
+  const SIG_FOOT_NONE = "No name could be tested.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
   const SHAPE = { up: "▲", dn: "▼", fl: "◆" };
   const TRI = 2 * Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
@@ -63,6 +68,40 @@
     return "The count of days beyond that is not published.";
   }
 
+  function sigOf(x) {
+    const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
+    if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
+    const z = chg / sig;
+    if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
+    const k = Math.abs(z);
+    if (k < SIG_MIN_Z) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
+    const level = k >= 3 ? 3 : 2;
+    const hits = level === 3 ? x.f3 : x.f2;
+    if (!Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return { t: x.t, state: "nocount", z, level, hits: null, p: null };
+    return { t: x.t, state: "tested", z, level, hits, p: (hits + 1) / (SESSIONS + 1) };
+  }
+  function sigRun(rows, q) {
+    const items = rows.map(sigOf);
+    const idx = [];
+    items.forEach((it, i) => { if (it.p !== null) idx.push(i); });
+    const m = idx.length;
+    const adj = items.map(() => null);
+    idx.sort((a, b) => items[a].p - items[b].p);
+    let prev = 1;
+    for (let r = m - 1; r >= 0; r--) {
+      prev = Math.min(prev, items[idx[r]].p * m / (r + 1));
+      adj[idx[r]] = prev;
+    }
+    let tested = 0, flagged = 0;
+    const out = items.map((it, i) => {
+      const flag = it.state === "tested" && adj[i] <= q;
+      if (it.state === "tested") tested++;
+      if (flag) flagged++;
+      return { ...it, adj: it.state === "tested" ? adj[i] : null, flag, counted: it.p !== null };
+    });
+    return { q, m, tested, flagged, items: out };
+  }
+
   const quantile = (vals) => {
     if (!vals.length) return 0;
     const v = vals.slice().sort((a, b) => a - b);
@@ -82,7 +121,7 @@
   }
 
   if (typeof document === "undefined") {
-    globalThis.__MovesTest = Object.freeze({ rarityParts, ivDays, signed, domainOf, radiusOf, markerPath, TRI });
+    globalThis.__MovesTest = Object.freeze({ rarityParts, sigRun, SIG_Q, ivDays, signed, domainOf, radiusOf, markerPath, TRI });
     return;
   }
 
@@ -143,7 +182,9 @@
     const all = points(rows || []);
     const plotted = all.filter((x) => x.z !== null);
     const pins = plotted.filter((x) => PINS.includes(x.t));
-    return { live, rows: rows || [], all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
+    const sg = sigRun(all, SIG_Q);
+    all.forEach((x, i) => { x.sg = sg.items[i]; });
+    return { live, sg, rows: rows || [], all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
   }
 
   function lists(M) {
@@ -255,7 +296,7 @@
     const notes = [];
     if (off > 0) notes.push(plural(off, "name has", "names have") + " no typical day and " + (off === 1 ? "is" : "are") + " listed only.");
     if (clipped > 0) notes.push(plural(clipped, "name is", "names are") + " beyond the axis, drawn at the edge.");
-    $("mvFnote").textContent = [X_LINE, Y_LINE, M.capMax > 0 ? SIZE_LINE : "No market cap is published, so every dot is the smallest size.", REF_LINE, ...notes].join(" ");
+    $("mvFnote").textContent = [X_LINE, Y_LINE, M.capMax > 0 ? SIZE_LINE : "No market cap is published, so every dot is the smallest size.", REF_LINE, ...notes, M.sg.m ? M.sg.flagged + " of " + M.sg.tested + " tested " + (M.sg.flagged === 1 ? "name is" : "names are") + " beyond the usual after correction." : SIG_FOOT_NONE].join(" ");
     $("mvLegend").innerHTML = '<span><i class="u">▲</i>up</span><span><i class="d">▼</i>down</span><span><i>◆</i>flat</span><span><i>◌</i>ring: earnings within 30 days</span><span><i>■</i>pinned index fund</span>';
   }
 
@@ -398,6 +439,12 @@
 
   const kv = (k, v) => '<div class="kv"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>";
 
+  function sigLine(x) {
+    const g = x.sg;
+    return g.state === "tested" ? (g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE) : SIG_REASONS[g.state];
+  }
+  const sigKv = (x) => (x.sg.state === "tested" ? kv("p, own rate", x.sg.p.toFixed(3)) + kv("p, adjusted", x.sg.adj.toFixed(3)) : "");
+
   function renderSel() {
     const box = $("mvRail");
     const M = S.model;
@@ -421,7 +468,7 @@
       h += '<div class="mv-rc chart"><h3>21 sessions <span class="tx">' + esc(cf.asOf ? "card " + fday(cf.asOf) : "") + "</span></h3>" + spark(cf, x) + "</div>";
       h += '<div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", cf.conviction === null ? DASH : cf.conviction + " /100") + kv("IV rank", cf.ivRank === null ? DASH : String(cf.ivRank)) + kv("Dealer γ book", cf.gammaBook || DASH) + kv("Latest flow", cf.flowP === null || cf.flowP === undefined ? DASH : F.money(cf.flowP, true)) + "</div>";
     }
-    h += '<div class="mv-rc"><h3>How this is tested</h3><span class="sub c">' + esc(LINE) + "</span><span class=\"sub c\">" + esc(NOTEST_LINE) + "</span>" + (x.event ? '<span class="sub c">' + esc(APART) + "</span>" : "") + "</div>";
+    h += '<div class="mv-rc"><h3>How this is tested</h3><span class="sub c" data-k="sig">' + esc(sigLine(x)) + "</span>" + sigKv(x) + (x.event ? '<span class="sub c">' + esc(APART) + "</span>" : "") + "</div>";
     box.innerHTML = h;
     const retry = $("mvRetry");
     if (retry) retry.addEventListener("click", () => { cards.delete(x.t); loadCard(x.t, true); renderSel(); });
@@ -533,7 +580,8 @@
       "Names reporting within 30 days are ranked apart, because the event is not separated.",
       "How often counts days in the last year beyond that many typical days. It is never a model probability.",
       REF_LINE,
-      "Not built yet: a significance test, parts of the move, flow clusters and replay.",
+      ...SIG_INFO_SENTENCES,
+      "Not built yet: parts of the move, flow clusters and replay.",
     ].map((t, i, a) => '<p' + (i === a.length - 1 ? ' class="q"' : "") + ">" + esc(t) + "</p>").join("");
     $("mvInfoDlg").showModal();
     $("mvInfoX").focus();

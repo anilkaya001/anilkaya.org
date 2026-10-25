@@ -52,7 +52,6 @@ export const SIZE_LINE = "Dot area is market cap; the smallest dot when unknown.
 
 export const REF_LINE = "Dashed lines are reference marks, not a test.";
 
-export const NOTEST_LINE = "Significance test: not yet published.";
 
 export const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
 
@@ -193,7 +192,7 @@ export const VIEW_SENTENCES = Object.freeze([
   MAP_CAP_LINE, MAP_EQUAL_LINE, SECTORS_LINE, KEY_EVENT, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE,
 ]);
 
-export const RADAR_SENTENCES = Object.freeze([X_LINE, Y_LINE, SIZE_LINE, REF_LINE, NOTEST_LINE, FROZEN_LINE]);
+export const RADAR_SENTENCES = Object.freeze([X_LINE, Y_LINE, SIZE_LINE, REF_LINE, FROZEN_LINE]);
 
 export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES, ...RADAR_SENTENCES]);
 
