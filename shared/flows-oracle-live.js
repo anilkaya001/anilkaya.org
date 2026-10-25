@@ -153,7 +153,7 @@ export function detectName(ticker, wins, ctx, nowMs) {
   if (sw.length >= L.sweepHits) {
     const both = sw.filter((w) => w.stated), ask = sum(both, "ask"), bid = sum(both, "bid"), P = sum(sw, "prem");
     const share = ask + bid > 0 ? Math.round(ask / (ask + bid) * 100) : 0;
-    if (share >= L.sweepAskShare && P >= L.sweepFloor) {
+    if (share >= L.sweepAskShare && Math.round(100 * (ask + bid) / P) >= 50 && P >= L.sweepFloor) {
       const minutes = (nowMs - Math.min(...sw.map((w) => w.at))) / 60000;
       add("sweeps", P >= 3 * L.sweepFloor ? 3 : 2, { n: sw.length, minutes: Math.max(minutes, 1), premium: P },
         [{ label: "Fast windows", display: String(sw.length) }, { label: "Ask side share", display: share + "%" }], nowMs);

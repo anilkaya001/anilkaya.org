@@ -149,6 +149,9 @@ function battery(src) {
   eq(kinds(run(sw(5, 64400, 35600), ctxOf()), "sweeps").length, 0, "sweeps need 65 per cent as printed");
   eq(kinds(run(sw(5, 64600, 35400), ctxOf()), "sweeps").length, 1, "64.6 prints as 65 and passes");
   eq(kinds(run(sw(5, 100000, 0).map((r) => ({ ...r, prem: 50000 })), ctxOf()), "sweeps").length, 0, "sweeps need 300K");
+  eq(kinds(run(sw(5, 7000, 3000), ctxOf()), "sweeps").length, 0, "a sweep burst with 10 per cent of its premium sided is not 'mostly on the ask side'");
+  eq(kinds(run(sw(5, 33000, 16000), ctxOf()), "sweeps").length, 0, "nor at 49 per cent sided");
+  eq(kinds(run(sw(5, 35000, 15000), ctxOf()), "sweeps").length, 1, "but a half-sided burst with 70 per cent of it on the ask is");
 
   const big = (size, prem) => [row("SYO001", 6, { prem, size, k: 65 }), ...Array.from({ length: 4 }, (_, i) => row("SYO001", 20 + i, { prem: 10000, size: 10, k: 70 + i }))];
   eq(kinds(run(big(750, 250000), ctxOf()), "size")[0] && kinds(run(big(750, 250000), ctxOf()), "size")[0].say, "SYO001 has one window of 750 contracts in the 65 call for Nov 20, $250K. That is 5.0× the name's usual large window.", "size words");
@@ -220,6 +223,7 @@ const MUTANTS = [
   ["flip lean sign swapped", (s) => s.replace("(ca + pb - cb - pa) / sided", "(cb + pa - ca - pb) / sided")],
   ["cluster counts the nearest expiry", (s) => s.replace("e !== todayExp &&", "")],
   ["sweep share floor", (s) => s.replace("sweepAsk: 65", "sweepAsk: 50")],
+  ["sweep coverage ignored", (s) => s.replace("Math.round(100 * (ask + bid) / P3) >= 50 && ", "")],
   ["sweep share truncated", (s) => s.replace("Math.round(100 * ask / (ask + bid)) >= T.sweepAsk", "Math.floor(100 * ask / (ask + bid)) >= T.sweepAsk")],
   ["size floor gone", (s) => s.replace("Math.max(T.sizeMult * sp90, T.sizeFloor)", "T.sizeMult * sp90")],
   ["sector counts rows", (s) => s.replace("bySector.get(s.sector).set(s.t, s);", "bySector.get(s.sector).set(s.t + Math.random(), s);")],

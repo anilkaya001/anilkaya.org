@@ -310,7 +310,7 @@
         var ask = 0, bid = 0;
         sw.forEach(function (x) { if (x.stated) { ask += x.ask; bid += x.bid; } });
         var P3 = sumPrem(sw);
-        if (ask + bid > 0 && Math.round(100 * ask / (ask + bid)) >= T.sweepAsk && P3 >= T.sweepFloor) {
+        if (ask + bid > 0 && Math.round(100 * (ask + bid) / P3) >= 50 && Math.round(100 * ask / (ask + bid)) >= T.sweepAsk && P3 >= T.sweepFloor) {
           found.push({ kind: "sweeps", t: t, strength: sw.length >= 8 ? 3 : sw.length >= 6 ? 2 : 1, prem: P3,
             m: { kind: "sweeps", ticker: t, n: sw.length, minutes: T.sweepMin, prem: P3 }, facts: [{ label: "Fast windows", display: String(sw.length) }, { label: "Ask-side share", display: Math.round(100 * ask / (ask + bid)) + "%" }] });
         }
