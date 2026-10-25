@@ -1276,7 +1276,8 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
 {
   const FIXTURES = fs.readdirSync(path.join(ROOT, "tests")).filter((f) => /^fixtures-.*\.json$/.test(f)).sort();
   const PHRASES = /verbatim|live probe|probe-report/i;
-  const LEGACY = ["fixtures-flows-legs-probe.json", "fixtures-flows-positioning.json", "fixtures-live-probe.json", "fixtures-vol-probe.json"];
+  const REGENERATED = ["fixtures-flows-legs-probe.json", "fixtures-flows-positioning.json", "fixtures-live-probe.json", "fixtures-vol-probe.json"];
+  const LEGACY = [];
   const sourceOf = (file) => {
     const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", file), "utf8"));
     if (!doc || Array.isArray(doc) || typeof doc !== "object") return "";
@@ -1286,8 +1287,16 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(FIXTURES.length >= 14, `the fixture sources are read from every tests/fixtures-*.json (${FIXTURES.length})`);
   deep(FIXTURES.filter((f) => !LEGACY.includes(f) && PHRASES.test(sourceOf(f))), [],
     "NO FIXTURE SAYS IT IS VENDOR DATA: no source field of a fixture calls its rows verbatim, from a live probe or from a probe report; new fixtures are synthetic and name their generator");
-  deep(LEGACY.filter((f) => !PHRASES.test(sourceOf(f))), [],
-    "and the four older probe-derived fixtures stay pinned by name: when one is regenerated from the spec its entry leaves this list, and the list can only shrink");
+  deep(LEGACY.filter((f) => !REGENERATED.includes(f)), [],
+    "the legacy list can only shrink: it may name only the four probe-derived fixtures of 2026-09-23, and no other fixture is ever added to it");
+  eq(LEGACY.length, 0, "and it is empty: all four were regenerated as synthetic bodies by tests/gen-probe-fixtures.py");
+  const probeShapes = createHash("sha256").update(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"))).digest("hex");
+  for (const f of REGENERATED) {
+    const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", f), "utf8"));
+    ok(FIXTURES.includes(f) && doc.provenance && doc.provenance.generator === "tests/gen-probe-fixtures.py", `${f} names its generator`);
+    ok(/synthetic/.test(doc.provenance.nature) && /not vendor data/.test(doc.provenance.nature) && /not vendor data/.test(doc.source), `${f} says it is synthetic and not vendor data`);
+    eq(doc.provenance.shapesSha256, probeShapes, `${f} was built to this shape manifest: if scripts/flows-probe-shapes.json moved, run python3 tests/gen-probe-fixtures.py and read the diff`);
+  }
   ok(PHRASES.test("Rows are the probe's printed first row, verbatim") && PHRASES.test("Unusual Whales live probe") && PHRASES.test("nl/probe-report.json") && !PHRASES.test("synthetic bodies built to the schema"),
     "the phrases catch the three spellings and spare a synthetic source");
   const dossier = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-dossier-vendor.json"), "utf8"));
@@ -1316,7 +1325,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
 console.log(`✓ flows-probe: ${checks} assertions — a registry that declares each vendor operation once, with no vendor path spelled ` +
   `anywhere else and the probe's strict read list derived from it, a spec reader whose diff names added, removed and changed ` +
   `operations, parameters, deprecations, plan sentences and changelog entries, a value-free shape manifest the dossier fixture ` +
-  `generator is held to, no new fixture that calls itself vendor data, a probe list whose used label is true (every vendor path a ` +
+  `generator is held to, no fixture that calls itself vendor data, a probe list whose used label is true (every vendor path a ` +
   `production call site names is probed as used, and nothing else is), the live-only operations named, the eight ` +
   `entitlement routes asked for AAPL and NVDA (a refusal a finding, not a failure), output that names keys, types, ` +
   `fill counts and documented enum tokens and never a vendor value, every token filled from one session date (weekly, both monthlies, ` +
