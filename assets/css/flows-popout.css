@@ -68,6 +68,8 @@ body[data-flows-page="network"] .flows-main {
   cursor: pointer;
 }
 
+a.mk-pop { display: inline-flex; align-items: center; text-decoration: none; }
+
 .mk-pop[hidden] {
   display: none;
 }
