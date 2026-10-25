@@ -169,6 +169,12 @@ const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
   eq(dates.last, "2026-08-24", "the card's last close is Monday 24 August");
   ok(/\+9 sessions \(Sep 4\)/.test(dates.at[2]) && /\+10 sessions \(Sep 8\)/.test(dates.at[3]) && /\+11 sessions \(Sep 9\)/.test(dates.at[4]) && /\+20 sessions \(Sep 22\)/.test(dates.at[5]),
     `with the calendar, ten sessions on from 24 August is Tuesday 8 September, over the Labor Day closure, and twenty is 22 September (${dates.at.join(" | ")})`);
+  const uncovered = await calPage.evaluate(({ card, x, list }) => {
+    document.getElementById("ftCal").dataset.sessions = list;
+    const G = window.FlowsUI.tickerGlance.model, m = G(card, "1M", { cardX: x });
+    return G.readout(m, m.hist.length + 9);
+  }, { card, x: X, list: CAL.filter((d) => d >= "2026-08-26").join(",") });
+  ok(/\+10 sessions \(Sep 7\)/.test(uncovered), `a list that starts after the card's last close is not used (it would skip the sessions in between): ${uncovered}`);
   await calPage.context().close();
 
   const alt = await page.evaluate(({ card, x }) => {
@@ -542,7 +548,7 @@ async function coreFailures(src) {
   let page;
   try {
     page = await boot({ width: 1440, height: 900 }, { chartW: 868, src, reading: READING });
-    const r = await page.evaluate(({ card, x, cal }) => {
+    const r = await page.evaluate(({ card, x, cal, calLate }) => {
       const G = window.FlowsUI.tickerGlance, M = G.model, m = M(card, "1M", { cardX: x });
       const L = M.layout(m, 868, 344);
       const ys = L.labels.map((l) => l.y).sort((a, b) => a - b);
@@ -551,6 +557,14 @@ async function coreFailures(src) {
       const cs = M.cards(noScore, { cardX: x });
       const neg = M.cards(card, { cardX: x })[0];
       return {
+        dateLate: (() => {
+          const el = Object.assign(document.createElement("i"), { id: "ftCal", hidden: true });
+          el.dataset.sessions = calLate;
+          document.body.append(el);
+          const out = M.readout(m, m.hist.length + 9);
+          el.remove();
+          return out;
+        })(),
         dateTen: (() => {
           const el = Object.assign(document.createElement("i"), { id: "ftCal", hidden: true });
           el.dataset.sessions = cal;
@@ -568,7 +582,8 @@ async function coreFailures(src) {
         marksBare: 0, clusterOverlap: (() => { const ys2 = M.cluster([100, 101, 102, 103], 12, 0, 400).sort((a, b) => a - b); return Math.min(...ys2.slice(1).map((y, i) => y - ys2[i])); })(), bareFig: bare.map((c) => c.fig.text), bareFoot: bare.map((c) => c.foot),
         gammaClaims: document.querySelector('[data-layer="gamma"]').getAttribute("data-claims"), coneClaims: document.querySelector('[data-layer="cone"]').getAttribute("data-claims"), marks: document.querySelectorAll(".ftg-mk").length,
       };
-    }, { card, x: X, cal: CAL.join(",") });
+    }, { card, x: X, cal: CAL.join(","), calLate: CAL.filter((d) => d >= "2026-08-26").join(",") });
+    note(/\+10 sessions \(Sep 7\)/.test(r.dateLate), "a calendar that starts after the card's close is used");
     note(/\+10 sessions \(Sep 8\)/.test(r.dateTen), "forward dates ignore the exchange calendar: ten sessions on from 24 August is not 8 September");
     note(Math.abs(Math.log(r.h14.up / S) / Math.log(r.h5.up / S) - Math.sqrt(6 / 2)) < 1e-9, "cone half-width is not the square root of time");
     note(r.pair.length === 2 && r.n === 23 && Math.abs(Math.log(r.pair[1].up / S) ** 2 - Math.log(r.pair[0].up / S) ** 2 - 0.042 ** 2) < 1e-9, "the report step is missing or the wrong size");
@@ -609,7 +624,8 @@ async function boot2(page, bad, note) {
 const MUTANTS = [
   ["cone linear in time", "const sUp = Math.sqrt(hh * b.dUp + (ev ? J * J : 0)), sDn = Math.sqrt(hh * b.dDn + (ev ? J * J : 0));", "const sUp = hh * Math.sqrt(b.dUp) * 1.2 + (ev ? J : 0), sDn = hh * Math.sqrt(b.dDn) * 1.2 + (ev ? J : 0);"],
   ["event step missing", "const tE = event ? event.h : null;", "const tE = null;"],
-  ["forward dates counted over weekends only", "const known = calendar().filter((x) => x > from);", "const known = [];"],
+  ["a calendar that does not reach back to the card's close", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = cal.filter((x) => x > from);"],
+  ["forward dates counted over weekends only", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = [];"],
   ["the calendar read from the wrong element", 'document.getElementById("ftCal")', 'document.getElementById("ftCalx")'],
   ["the median absolute move taken as a standard deviation", "return { sd: Math.sqrt(Math.max(0, second - daily)), n: rows.length, why: null };", "return { sd: Math.abs(E.medianAbsMove), n: rows.length, why: null };"],
   ["the ordinary session left in the report move", "const daily = pb ? (pb.dUp + pb.dDn) / 2 : 0;", "const daily = 0;"],

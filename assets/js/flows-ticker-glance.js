@@ -423,7 +423,8 @@
     const last = m.hist.length ? m.hist[m.hist.length - 1].d : null;
     if (!last) return null;
     const from = last.slice(0, 10);
-    const known = calendar().filter((x) => x > from);
+    const cal = calendar();
+    const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];
     const ahead = Math.min(t, known.length);
     if (ahead === t && t > 0) return known[t - 1];
     const d = new Date((ahead > 0 ? known[ahead - 1] : from) + "T12:00:00Z");
