@@ -223,23 +223,23 @@ const cronMinutes = (cron) => {
   const tide = L.shapeTideFeed({ data: [FX.marketTide.row], date: FX.marketTide.date }, { session: "2026-09-22" });
   eq(tide.status, "ok", "PROBE ROW: the market-tide row shapes");
   deep(tide.t, ["2026-09-22T13:30:00Z"], "its -04:00 stamp is normalised to UTC");
-  deep([tide.ncp[0], tide.npp[0], tide.nv[0]], [12437984, -14365849, 105996],
+  deep([tide.ncp[0], tide.npp[0], tide.nv[0]], [8250000, -3150000, 84200],
     "net call and put premium arrive as strings and are coerced; net_volume arrives as a number");
-  eq(tide.net[0], 26803833, "net = ncp − npp = 12,437,984 − (−14,365,849) — a put premium sold on net adds to the bull side");
+  eq(tide.net[0], 11400000, "net = ncp − npp = 8,250,000 − (−3,150,000) — a put premium sold on net adds to the bull side");
 
   const nf = L.shapeNetFlowFeed({ data: [FX.netFlowExpiry.block], date: "2026-09-22", expiration: ["zero_dte"] },
     { session: "2026-09-22", expiration: "zero_dte" });
   eq(nf.n, 1, "PROBE BLOCK: four 1-minute net-flow rows fold into one 5-minute bucket");
   deep(nf.t, ["2026-09-22T13:33:00Z"], "sampled at its last minute, because the series is cumulative");
-  deep([nf.ncp[0], nf.npp[0], nf.nv[0], nf.px[0], nf.net[0]], [-38898, -1028078, 1565, 774.915, 989180],
-    "every value arrives as a string, net_volume included, and net = −38,898.40 − (−1,028,078.20) = 989,179.80");
+  deep([nf.ncp[0], nf.npp[0], nf.nv[0], nf.px[0], nf.net[0]], [-41250, -860401, 1320, 431.375, 819150],
+    "every value arrives as a string, net_volume included, and net = −41,250.30 − (−860,400.70) = 819,150.40");
   deep(nf.echoed, ["zero_dte"], "the expiration echo is kept so a run can see which one combination the vendor honoured");
 
   const spy = L.shapeTideFeed({ data: [FX.etfTideSpy.row], date: "2026-09-22" }, { session: "2026-09-22", withPx: true });
-  deep([spy.net[0], spy.px[0], spy.nv[0]], [-246832, 774.26, 10013],
-    "PROBE ROW: SPY etf-tide net = 626,627 − 873,459; its net_volume is a string here, unlike the market tide's");
+  deep([spy.net[0], spy.px[0], spy.nv[0]], [-194480, 541.26, 8214],
+    "PROBE ROW: SPY etf-tide net = 418,250 − 612,730; its net_volume is a string here, unlike the market tide's");
   const tech = L.shapeTideFeed({ data: [FX.sectorTideTechnology.row], date: "2026-09-22" }, { session: "2026-09-22" });
-  eq(tech.net[0], 1538890, "PROBE ROW: Technology sector-tide net = 2,487,087 − 948,197");
+  eq(tech.net[0], 1234250, "PROBE ROW: Technology sector-tide net = 1,936,400 − 702,150");
 
   const prior = L.shapeTideFeed({ data: [FX.marketTide.row], date: "2026-09-22" }, { session: "2026-09-23" });
   eq(prior.status, "prior", "a tide whose vendor date is before the session is marked prior, not passed off as today");
@@ -253,9 +253,9 @@ const cronMinutes = (cron) => {
     "ABSENT INPUTS STAY NULL: the probe's SPY row (clipped before prev_close and the premium sides) yields no change " +
     "and no lean, never a zero");
   const full = L.shapeSectorEtfs({ data: [FX.sectorEtfs.full] }).rows[0];
-  eq(full.chg, 0.003061, "chg = last / prev_close − 1 = 773.38 / 771.02 − 1");
-  eq(full.lean, 0.232978, "lean = (bull − bear) / (bull + bear) on the vendor's own premium sides");
-  eq(full.net, 426644583, "net = bull − bear in USD");
+  eq(full.chg, 0.004378, "chg = last / prev_close − 1 = 541.38 / 539.02 − 1");
+  eq(full.lean, 0.221488, "lean = (bull − bear) / (bull + bear) on the vendor's own premium sides");
+  eq(full.net, 292644583, "net = bull − bear in USD");
   const zero = L.shapeSectorEtfs({ data: [{ ...FX.sectorEtfs.full, bullish_premium: "0", bearish_premium: "0" }] }).rows[0];
   ok(zero.lean === null && zero.net === 0 && zero.leanWhy === "zero-gross",
     "a measured zero on both sides is a measured net of 0 and an undefined lean (0/0), named zero-gross");
@@ -263,7 +263,7 @@ const cronMinutes = (cron) => {
   const prem = L.shapeTapePrem({ ticks: { data: [FX.netPremTicks.row] }, alerts: { data: [FX.flowAlerts.row] } },
     { at: T("2026-09-22T20:00:00Z"), session: "2026-09-22" });
   deep([prem.prem.ncp[0], prem.prem.npp[0], prem.prem.net[0], prem.prem.nd[0], prem.prem.cva[0], prem.prem.cvb[0]],
-    [1497143, -264970, 1762113, 159715, 13550, 6567],
+    [982350, -154200, 1136550, 98433, 11820, 5410],
     "PROBE ROW: net-prem-ticks is per-minute, cumulated over the session; nd rounds the 18-decimal delta string");
   eq(prem.alerts.rows.length, 1, "PROBE ROW: the flow alert shapes (fields cut by the probe's clip are listed as reconstructed)");
   eq(prem.alerts.rows[0].st, null, "and a per-name read publishes no screener stage it never consulted");

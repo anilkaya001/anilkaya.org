@@ -140,19 +140,19 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const row = probe("screener-tickers");
-  eq(vnum(row.volatility_30), 0.312, "the probe's NVDA row carries volatility_30 as a string");
+  eq(vnum(row.volatility_30), 0.287, "the probe's SYB202 row carries volatility_30 as a string");
   const rows = [
-    { ...row, ticker: "NVDA", marketcap: "5.5e12", close: "228.87", sector: "Technology" },
+    { ...row, ticker: "SYB202", marketcap: "5.5e12", close: "228.87", sector: "Technology" },
     { ticker: "AAA", marketcap: "2e9", close: "10", prev_close: "9.5", sector: "Technology",
       volatility_7: "0.5", volatility_30: "0.4", volatility_90: "0.32", iv30d: "0.4", iv30d_1d: "0.38",
       realized_volatility: "0.3", short_int: "0.086", next_earnings_date: "2026-09-25" },
     { ticker: "BBB", marketcap: "3e9", close: "20", sector: "Energy", iv30d: "0.2" },
   ];
   const u = buildUniverse(rows, { sessionDate: S, generatedAt: "t" });
-  deep(u.t, ["NVDA", "BBB", "AAA"], "the columns are ordered by market cap, largest first");
+  deep(u.t, ["SYB202", "BBB", "AAA"], "the columns are ordered by market cap, largest first");
   eq(u.status, "ok", "a readable cross-section is ok");
   const iv = decodeColumn(u.cols.iv30, u.units.iv30[1]);
-  near(iv[0], 0.312, 1e-9, "the NVDA probe IV decodes back through the published scale");
+  near(iv[0], 0.287, 1e-9, "the SYB202 probe IV decodes back through the published scale");
   eq(universeValue(u, "AAA", "ts"), 0.25, "AAA term slope 0.40/0.32 - 1 decodes to 0.25");
   eq(universeValue(u, "AAA", "fs"), 0.25, "front stress 0.5/0.4 - 1");
   eq(universeValue(u, "AAA", "si"), 0.086, "short interest keeps its fraction");
@@ -240,38 +240,38 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   for (const [k, v] of Object.entries(want)) {
     const scale = u.units[k][1];
     ok(Number.isFinite(v), `the spec row carries every input of ${k}`);
-    near(universeValue(u, "NVDA", k), Math.round(v * scale) / scale, 1e-9,
-      `${k} re-derived by hand from the vendor's own NVDA row, through its published scale`);
+    near(universeValue(u, "SYB202", k), Math.round(v * scale) / scale, 1e-9,
+      `${k} re-derived by hand from the fixture's SYB202 row, through its published scale`);
   }
-  deep([universeValue(u, "NVDA", "dex"), universeValue(u, "NVDA", "vanna"), universeValue(u, "NVDA", "charm")], [3.3, 0.0065, -6.4],
-    "the three dealer exposures are the vendor's dollars per 1% over 130,548,356.35 shares x $212.32 = $27,718,027,020 of average daily dollar volume: " +
-    "91,551,310,557.8 / that = 3.30, 181,215,271.33 / that = 0.0065, -178,109,539,132.43 / that = -6.4, each keeping the vendor's sign");
-  deep([universeValue(u, "NVDA", "im5"), universeValue(u, "NVDA", "im30")], [0.027, 0.066],
-    "the implied moves are the vendor's fractions of price (implied_move_perc_5 0.027, _30 0.066) and are not rescaled");
-  near(universeValue(u, "NVDA", "gexAdv"), Math.round(614273906.59 / 27718027020.232 * 1e4) / 1e4, 1e-9,
+  deep([universeValue(u, "SYB202", "dex"), universeValue(u, "SYB202", "vanna"), universeValue(u, "SYB202", "charm")], [3.48, 0.0066, -5.3],
+    "the three dealer exposures are dollars per 1% over 96,400,000.5 shares x $184.60 = $17,795,440,092.30 of average daily dollar volume: " +
+    "61,884,500,000.50 / that = 3.48, 118,215,271.33 / that = 0.0066, -95,120,000,000.25 / that = -5.3, each keeping the vendor's sign");
+  deep([universeValue(u, "SYB202", "im5"), universeValue(u, "SYB202", "im30")], [0.024, 0.058],
+    "the implied moves are the vendor's fractions of price (implied_move_perc_5 0.024, _30 0.058) and are not rescaled");
+  near(universeValue(u, "SYB202", "gexAdv"), Math.round(412350000.40 / 17795440092.3 * 1e4) / 1e4, 1e-9,
     "and gexAdv divides by the same average daily dollar volume, so the exposures are on one footing");
   {
     const gone = buildUniverse([{ ...row, gex_delta_per_one_percent_move_oi: "", gex_vanna_per_one_percent_move_oi: null,
       gex_charm_per_one_percent_move_oi: "n/a", implied_move_perc_5: "", implied_move_perc_30: "-0.01" }], { sessionDate: row.date });
-    deep(["dex", "vanna", "charm", "im5", "im30"].map((k) => universeValue(gone, "NVDA", k)), [null, null, null, null, null],
+    deep(["dex", "vanna", "charm", "im5", "im30"].map((k) => universeValue(gone, "SYB202", k)), [null, null, null, null, null],
       "an empty string (the vendor's own websocket example publishes delta_per_one_percent_move_oi as an empty string), a null, " +
       "text and a negative implied move all publish as absent, never as a zero");
     const noAdv = buildUniverse([{ ...row, avg30_volume: "0" }], { sessionDate: row.date });
-    deep(["dex", "vanna", "charm", "gexAdv"].map((k) => universeValue(noAdv, "NVDA", k)), [null, null, null, null],
+    deep(["dex", "vanna", "charm", "gexAdv"].map((k) => universeValue(noAdv, "SYB202", k)), [null, null, null, null],
       "and a name with no average volume has no dollar volume to normalise by, so no exposure is published for it");
   }
-  eq(universeValue(u, "NVDA", "ed"), sessionsBetween(row.date, row.next_earnings_date), "ed counts weekdays to next_earnings_date");
-  eq(row.short_int, "0", "the vendor's NVDA row reads short_int '0', where NVDA's float is about 1% short");
-  eq(universeValue(u, "NVDA", "si"), null, "so a zero short_int is the vendor's placeholder and publishes as absent, not a measured 0");
+  eq(universeValue(u, "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date), "ed counts weekdays to next_earnings_date");
+  eq(row.short_int, "0", "the fixture row reads short_int '0', the vendor's placeholder for no reading");
+  eq(universeValue(u, "SYB202", "si"), null, "so a zero short_int is the vendor's placeholder and publishes as absent, not a measured 0");
   eq(u.counts.si, 0, "and it does not enter the column's count or its percentile");
 
   const tonight = { ...row, next_earnings_date: row.date };
-  eq(universeValue(buildUniverse([{ ...tonight, er_time: "postmarket" }], { sessionDate: row.date }), "NVDA", "ed"), 0,
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "postmarket" }], { sessionDate: row.date }), "SYB202", "ed"), 0,
     "a report after the session's close is 0 sessions away");
-  eq(universeValue(buildUniverse([{ ...tonight, er_time: "premarket" }], { sessionDate: row.date }), "NVDA", "ed"), null,
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "premarket" }], { sessionDate: row.date }), "SYB202", "ed"), null,
     "a report before the session's open is behind the session, never 'tonight'");
   const blank = buildUniverse([{ ...row, volatility_30: "", volatility_90: "0.4" }], { sessionDate: row.date });
-  near(universeValue(blank, "NVDA", "ts"), f("iv30d") / 0.4 - 1, 1e-3,
+  near(universeValue(blank, "SYB202", "ts"), f("iv30d") / 0.4 - 1, 1e-3,
     "an empty volatility_30 string falls back to iv30d instead of silencing the slope");
 
   ok(UNIVERSE_BUDGET_BYTES <= FLOWS_MAX_PAYLOAD_BYTES - 4 * 1024, "the universe budget sits at least 4 KiB under the ingest cap, room for the stamps added after the shedder");
@@ -416,10 +416,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const parsed = parseNetFlow(zero);
   eq(parsed.series[0].points.length, nf.data.filter((r) => r.net_call_premium !== undefined).length,
     "the inner rows of the probe envelope are read, not the outer array, and a row with no premium is skipped");
-  near(sessionNet(parsed), -38898.4 + 1028078.2, 1e-6, "net = ncp - npp at the last minute of the cumulative series");
+  near(sessionNet(parsed), -41250.3 + 860400.7, 1e-6, "net = ncp - npp at the last minute of the cumulative series");
   const weekly = { ...zero, data: [{ moneyness: "all", tide_type: "all", data: [{ timestamp: "2026-09-22T13:33:00Z", net_call_premium: "100000", net_put_premium: "-300000" }] }], expiration: ["weekly"] };
   const zd = buildZeroDte({ zero, weekly, sessionDate: S });
-  near(zd.share, 989179.8 / (989179.8 + 400000), 1e-9, "0DTE share = |np0| / (|np0| + |npw|)");
+  near(zd.share, 819150.4 / (819150.4 + 400000), 1e-9, "0DTE share = |np0| / (|np0| + |npw|)");
   eq(zd.sameSession, true, "the envelope date is checked against the session");
   eq(buildZeroDte({ zero, sessionDate: S }).share, null, "without the weekly read the share is absent");
   eq(zeroDteShare(0, 0), null, "0/0 is undefined, not a share");
@@ -430,14 +430,14 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const tide = tideSummary([probe("sector-tide-technology")], { sessionDate: S });
-  near(tide.net, 2487087 - 948197, 1e-6, "sector tide net = ncp - npp");
+  near(tide.net, 1936400 - 702150, 1e-6, "sector tide net = ncp - npp");
   eq(tide.dir, 1, "and carries its sign");
   eq(tide.sameSession, true, "and its date");
   eq(tideSummary([], {}).status, "quiet", "no rows is quiet");
   const g = greekFlowTotals([probe("group-flow-mag7")]);
-  near(g.delta, 190120.64588741100, 1e-6, "group directional delta sums the per-minute rows");
-  near(g.purity, 190120.64588741100 / 1865865.8091589327, 1e-12, "purity = |dir delta| / |total delta|");
-  near(g.net, 1164800 + 1440028, 1e-6, "group net premium = ncp - npp");
+  near(g.delta, 160120.64588741100, 1e-6, "group directional delta sums the per-minute rows");
+  near(g.purity, 160120.64588741100 / 1565865.8091589327, 1e-12, "purity = |dir delta| / |total delta|");
+  near(g.net, 964800 + 1240028, 1e-6, "group net premium = ncp - npp");
   const al = groupAlignment(10, [{ cum_dir_delta: 5 }, { cum_dir_delta: -3 }, { cum_dir_delta: 2 }, { cum_dir_delta: 0 }]);
   deep([al.members, al.agree], [3, 2], "alignment counts members with a sign and those agreeing with the group");
   eq(groupAlignment(0, [{ cum_dir_delta: 5 }]).reason, SILENCE.absent, "a flat group has no sign to agree with");
@@ -454,13 +454,13 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   near(ff.z20, 810 / (20 * Math.sqrt((80 * 81) / 12)), 1e-9, "z against the earlier 20-session sums, sample sd");
   eq(fundFlowSummary(flows, { sessionDate: "2026-01-10" }).z20, null, "ten sessions cannot carry a 20-session z");
   const probeFlow = fundFlowSummary([probe("etf-flow-spy")], { sessionDate: S });
-  eq(probeFlow.changeShares, 3700000, "the probe SPY in-outflow row reads change as shares");
-  eq(probeFlow.changeUsd, 2863800000, "and change_prem as dollars");
+  eq(probeFlow.changeShares, 2900000, "the probe SPY in-outflow row reads change as shares");
+  eq(probeFlow.changeUsd, 2214300000, "and change_prem as dollars");
 
   const tov = probe("total-options-volume");
   const hist = Array.from({ length: 80 }, (_, i) => ({ date: new Date(Date.UTC(2026, 4, 1) + i * 86400000).toISOString().slice(0, 10), call_volume: 100, put_volume: 50 + (i % 5), call_premium: "10", put_premium: "5" }));
   const pc = putCallHistory([...hist, tov], { sessionDate: S });
-  near(pc.pcVolume.now, 25895745 / 39255508, 1e-12, "the probe session's P/C volume ratio");
+  near(pc.pcVolume.now, 24895745 / 36255508, 1e-12, "the probe session's P/C volume ratio");
   ok(pc.pcVolume.z !== null && pc.pcVolume.reason === null, "and a z against the prior sessions");
   eq(putCallHistory([tov], { sessionDate: "2026-09-21" }).status, "quiet", "a row dated after the session is cut, never read ahead");
 }
@@ -479,20 +479,20 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const dr = shapeDailyReport({ date: S, skew: [probe("daily-report")], vol: { richest: [], cheapest: [] }, flow: { bullish: [{ ticker: "AAPL", net_premium: 2.5e6 }], bearish: [] },
     catalysts: { data: [], counts_by_type: {}, date_min: S, date_max: S }, stock_movers: [1, 2], unusual_options: [1], tide: { data: [], date: S } }, { sessionDate: S });
   const sk = dr.skew[0];
-  eq(sk.t, "SPXW", "the anomaly row's ticker");
-  near(sk.score, -70.12234762979683, 1e-9, "score arrives as a string and is coerced");
-  deep(sk.c.ivp, [2.3, -0.954], "components keep raw and value");
+  eq(sk.t, "SYF606", "the anomaly row's ticker");
+  near(sk.score, -58.12234762979683, 1e-9, "score arrives as a string and is coerced");
+  deep(sk.c.ivp, [3.1, -0.938], "components keep raw and value");
   deep(sk.c.vrpz, [null, null], "a null component stays null");
-  deep(sk.c.regime, [-2.92928721836439, -1, 0.5], "regime carries crash_probability");
+  deep(sk.c.regime, [-2.12928721836439, -1, 0.4], "regime carries crash_probability");
   eq(dr.unshaped.stock_movers, 2, "unprobed groups are counted, not parsed");
   eq(dr.catalysts.status, "quiet", "an empty catalyst list is quiet");
   eq(shapeDailyReport(null).status, "unavailable", "an unreadable body is unavailable");
 
   const op = shapeOptionsPulse(FX.probes["options-pulse-total"].sample && { data: { latest: probe("options-pulse-total"), intraday: [probe("options-pulse-total")] }, date: S }, { sessionDate: S });
-  near(op.pcTxn, 112818 / 366905, 1e-12, "put/call transactions from the probe latest row");
+  near(op.pcTxn, 98318 / 341905, 1e-12, "put/call transactions from the probe latest row");
   ok(/unverified/.test(op.meaning), "the gauge's scale is marked unverified");
   const hm = holdingsMembers([probe("etf-holdings-qqq")]);
-  near(hm.members[0].w, 0.08288174, 1e-12, "holdings weight arrives in percent and is divided by 100");
+  near(hm.members[0].w, 0.0741253, 1e-12, "holdings weight arrives in percent and is divided by 100");
   eq(hm.asOf, "2026-09-21", "the weights carry their own date");
   deep(vendorGate(new Error("/api/volatility/vix-term-structure -> HTTP 403")), { status: 403, gated: true }, "a 403 is a plan gate");
   deep(vendorGate(new Error("/x -> HTTP 500")), { status: 500, gated: false }, "a 500 is not");
@@ -500,17 +500,17 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const si = latestShortInterest([probe("short-screener")], { sessionDate: S });
-  const aapl = si.byTicker.get("AAPL");
-  near(aapl.si, 0.006528065187922719, 1e-15, "si_float is a fraction string");
-  eq(aapl.dtc, 1.57, "days to cover is coerced");
+  const aapl = si.byTicker.get("SYA101");
+  near(aapl.si, 0.0053128471939201, 1e-15, "si_float is a fraction string");
+  eq(aapl.dtc, 1.84, "days to cover is coerced");
   eq(aapl.stale, true, "a 2021 settlement is stale by the session");
   const cut = latestShortInterest([{ symbol: "Z", market_date: "2026-09-30", si_float: "0.1" }], { sessionDate: S });
   eq(cut.future, 1, "a settlement dated after the session is cut and counted");
   eq(cut.byTicker.size, 0, "and never read");
 
-  const b = borrowSummary([probe("shorts-data:AAPL")], { sessionDate: S });
-  eq(b.fee, 0.0025, "the fee arrives in percent (0.25) and is published as a fraction");
-  eq(b.rebate, 0.0363, "the rebate likewise");
+  const b = borrowSummary([probe("shorts-data:SYA101")], { sessionDate: S });
+  eq(b.fee, 0.0031, "the fee arrives in percent (0.31) and is published as a fraction");
+  eq(b.rebate, 0.0342, "the rebate likewise");
   eq(b.availCensored, true, "10,000,000 available shares reads as the vendor's cap");
   eq(b.htb, false, "0.25% is not hard to borrow");
   eq(b.dFee5, null, "one snapshot day has no 5-session change");
@@ -525,15 +525,15 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const svRows = Array.from({ length: 61 }, (_, i) => ({ market_date: new Date(Date.UTC(2026, 5, 1) + i * 86400000).toISOString().slice(0, 10), short_volume_ratio: String(i < 60 ? 0.5 + (i % 2 ? 0.02 : -0.02) : 0.6) }));
   const sv = shortVolumeSummary(svRows, { sessionDate: S });
   near(sv.z, (0.6 - 0.5) / Math.sqrt(0.0004 * 60 / 59), 1e-9, "short-volume ratio z against the 60 sessions before it");
-  eq(shortVolumeSummary([probe("shorts-volume:AAPL")], { sessionDate: S }).ratio, 0.5679624989742062, "the probe ratio string is coerced");
-  eq(shortVolumeSummary([probe("shorts-volume:AAPL")], { sessionDate: S }).reason, SILENCE.few, "one session is too few for a z");
-  deep(rowsOf({ si: [probe("shorts-volume:AAPL")] }), [], "the default unwrap would read the si envelope as empty — the trap");
-  eq(rowsOf({ si: [probe("shorts-volume:AAPL")] }, "si").length, 1, "the leg reads the rows under si");
+  eq(shortVolumeSummary([probe("shorts-volume:SYA101")], { sessionDate: S }).ratio, 0.5012345678901234, "the probe ratio string is coerced");
+  eq(shortVolumeSummary([probe("shorts-volume:SYA101")], { sessionDate: S }).reason, SILENCE.few, "one session is too few for a z");
+  deep(rowsOf({ si: [probe("shorts-volume:SYA101")] }), [], "the default unwrap would read the si envelope as empty — the trap");
+  eq(rowsOf({ si: [probe("shorts-volume:SYA101")] }, "si").length, 1, "the leg reads the rows under si");
 
   const ins = probe("insider-transactions");
   const one = insiderSummary([ins, ins], { sessionDate: S });
   eq(one.n, 1, "the same transaction twice is deduplicated by id");
-  near(one.net90, -1366000 * 219.7251, 1e-6, "net 90-day dollars = signed shares x price");
+  near(one.net90, -842000 * 187.315, 1e-6, "net 90-day dollars = signed shares x price");
   eq(one.buyers, 0, "a sale has no buyers");
   eq(one.cluster, false, "and no cluster");
   const buy = (who, d) => ({ id: who + d, ticker: "T", transaction_code: "P", amount: 100, price: "10", owner_name: who, transaction_date: d, filing_date: d });
@@ -579,7 +579,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(reactionDay("2026-09-22", "premarket"), "2026-09-22", "a premarket report reacts the same day");
   eq(reactionDay("2026-09-25", "postmarket"), "2026-09-28", "a Friday postmarket report reacts Monday");
   eq(reactionDay("2026-09-25", "unknown"), "2026-09-28", "an unknown time is treated as after the close");
-  const est = probe("earnings:AAPL");
+  const est = probe("earnings:SYA101");
   const hist = [est];
   for (let q = 0; q < 8; q++) {
     const d = new Date(Date.UTC(2026, 6, 1) - q * 91 * 86400000).toISOString().slice(0, 10);
@@ -614,7 +614,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(!("mv" in historyDigest(recent)) && !("em" in historyDigest(recent)), "a thin digest carries neither: its lane reads quiet");
 
   const kbh = shapeEarningsCalendar([probe("earnings-afterhours")], { sessionDate: S });
-  near(kbh.rows[0].em, 0.08223296974686149, 1e-15, "calendar expected move is a fraction");
+  near(kbh.rows[0].em, 0.071234, 1e-15, "calendar expected move is a fraction");
   eq(kbh.rows[0].emUsd, 4, "and expected_move is dollars");
   eq(kbh.rows[0].realized, null, "a report the same evening has no reaction yet");
   const rg = reactionGauge([{ t: "A", em: 0.05, realized: 0.1 }, { t: "B", em: 0.1, realized: -0.05 }]);
@@ -624,8 +624,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(econ.rows.length, 1, "a release before the session's close is dropped");
   eq(econ.past, 1, "and counted");
   eq(econ.rows[0].sd, 3, "Tuesday to Friday is three sessions");
-  eq(econ.rows[0].prev, 51.7, "prev is coerced when numeric");
-  eq(econ.rows[0].forecast, 47.1, "and forecast");
+  eq(econ.rows[0].prev, 50.3, "prev is coerced when numeric");
+  eq(econ.rows[0].forecast, 48.8, "and forecast");
   eq(macroTag("FOMC Rate Decision"), "fomc", "FOMC is tagged");
   eq(macroTag("Nonfarm Payrolls"), "nfp", "payrolls are tagged");
   eq(macroTag("Consumer Price Index (MoM)"), "cpi", "CPI is tagged");
@@ -845,10 +845,10 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     [SILENCE.unread, SILENCE.unread, SILENCE.unread], "the catalyst reads skipped at the deadline are not_read too");
 
   const parts = ownershipParts({ tickers: ["X"], deepTickers: ["X"], deep: new Map([["X", {
-    borrow: { ok: false, gated: true, status: 403 }, volume: { ok: true, body: { si: [probe("shorts-volume:AAPL")] } } }]]),
+    borrow: { ok: false, gated: true, status: 403 }, volume: { ok: true, body: { si: [probe("shorts-volume:SYA101")] } } }]]),
     sessionDate: S });
   eq(parts.parts.get("X").short.borrow.reason, SILENCE.gated, "a refused borrow read is a plan gate, not zero borrow");
-  eq(parts.parts.get("X").short.volume.ratio, 0.5679624989742062, "the si envelope is read through the leg");
+  eq(parts.parts.get("X").short.volume.ratio, 0.5012345678901234, "the si envelope is read through the leg");
 }
 
 {

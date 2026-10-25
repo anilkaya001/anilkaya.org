@@ -23,7 +23,7 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
 
 {
   const real = { data: probe.stockState.row };
-  eq(stateOf(real).close, probe.stockState.row.close, "THE VENDOR'S ENVELOPE {data:{...}} IS UNWRAPPED: the real stock-state body is what the audit's parse read as an object with no close");
+  eq(stateOf(real).close, probe.stockState.row.close, "THE VENDOR'S ENVELOPE {data:{...}} IS UNWRAPPED: the stock-state fixture body is what the audit's parse read as an object with no close");
   eq(stateOf(real).tape_time, probe.stockState.row.tape_time, "with the tape time inside it");
   eq(stateOf(probe.stockState.row).close, probe.stockState.row.close, "a bare object, the shape every earlier mock returned, still reads");
   eq(stateOf(null), null, "null is no state");
@@ -99,7 +99,7 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
   const mixed = printOf({ state: null, bars: [{ date: "2026-09-24", close: "1.00" }, { date: "2026-09-24", market_time: "r", close: "2.00" }], readMs });
   eq(mixed.spot, 2, "when a day carries both an unstated bar and a stated regular one, the stated one wins");
 
-  const recorded = vol.probes["ohlc-1d:AAPL"];
+  const recorded = vol.probes["ohlc-1d:SYA101"];
   ok(recorded && recorded.row.market_time === "pr" && recorded.row.date === "2026-09-23",
      "the recorded vendor row for the newest date IS a pre-market segment, at the head of the list");
   eq(printOf({ state: null, bars: [recorded.row], readMs: Date.parse("2026-09-23T12:00:00Z") }), null,
@@ -446,7 +446,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
 
 {
   const enveloped = await chainOf({ data: REGULAR });
-  eq(enveloped.res.status, 200, "the chain route answers on the vendor's real stock-state envelope");
+  eq(enveloped.res.status, 200, "the chain route answers on the vendor stock-state envelope");
   eq(enveloped.body.spotSource, "stock-state", "AND USES THE LIVE PRINT IT CONTAINS (the audit's parse read this shape as an object with no close and priced every desk off a daily bar)");
   eq(enveloped.body.spot, 183.4, "at the print");
   eq(enveloped.body.tapeTime, "2026-08-25T18:06:00Z", "with its tape time");
@@ -774,7 +774,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   ok(Math.abs(resid(360, "P", 90)) > Math.abs(resid(180, "P", 90)) && Math.abs(resid(180, "P", 90)) > Math.abs(resid(90, "P", 90)), "the residual grows with the expiry");
 }
 
-console.log(`✓ flows-basis: ${checks} assertions — the vendor's real stock-state envelope, a spot that is only ever a regular-session price, ` +
+console.log(`✓ flows-basis: ${checks} assertions — the vendor stock-state envelope, a spot that is only ever a regular-session price, ` +
   `impossible quotes counted and never ranked, a strike bracket the request itself guarantees, one underlying fitted to the nearest expiries ` +
   `(the screenshot's nine bids give 227.28 against a 231.02 print), a rebase past 0.25% and a refusal when the fit is too thin, ` +
   `an ET read date with the winter close, and the whole thing inside the Free tier's CPU`);
