@@ -245,6 +245,8 @@ const scProbe = async (route) => {
       if (r.pc !== ratioTextExact(l.bidC, l.m1C)) bad.push(`ratio ${r.t} ${r.strike}: ${r.pc}`);
       if (r.sub !== dollarsTextExact(l.bidC) + " ÷ " + dollarsTextExact(l.m1C, false)) bad.push(`dollars ${r.t} ${r.strike}: ${r.sub}`);
     }
+    const planText = await page.$eval("#deskPlan", (n) => n.textContent).catch(() => "");
+    if (/null|undefined/.test(planText)) bad.push("the plan prints " + planText.slice(-30));
     await page.selectOption("#deskRank", "premiumRatio");
     await page.waitForFunction(() => new URL(location.href).searchParams.get("rank") === "premiumRatio", null, { timeout: 5000 }).catch(() => bad.push("rank not in the address"));
     await page.waitForTimeout(300);
@@ -392,6 +394,7 @@ try {
     const w = wantOf(pl[mm[2]], row);
     eq(m[1], w.text, `and it is the best line's own ratio, ${w.text}, the same for ${mm[1]} contracts as for one`);
     ok(plan.alts.length > 0 && plan.alts.every((a) => /\d%/.test(a)), "the next best lines print theirs");
+    ok(!/null|undefined/.test(flat(plan.text)), `and the card prints no stray null or undefined (${flat(plan.text).slice(-40)})`);
     await page.close();
   }
 
@@ -420,7 +423,7 @@ try {
     await page.close();
   }
 
-  for (const [w, h] of [[1920, 1080], [1440, 820], [1024, 768], [390, 844]]) {
+  for (const [w, h] of [[1920, 1080], [1440, 820], [1060, 900], [1024, 768], [390, 844]]) {
     for (const [label, q] of [["both", QUERY + "&bp=25000"], ["short calls", "?t=SYX101,SYX102&strategy=sc&bp=25000"]]) {
       const page = await openDesk(browser, { payloads: payloads(), query: q, errors, viewport: { width: w, height: h } });
       await waitRows(page, 6);
@@ -517,10 +520,11 @@ try {
     ["the rank sorts by the annualised yield", "assets/js/flows-desk.js", [["rank === \"premiumRatio\" ? (r) => r.__pc.ratio", "rank === \"premiumRatio\" ? (r) => r.annualized"]]],
     ["the frontier tooltip drops the ratio", "assets/js/flows-desk.js", [["C.part(pcText + \" of collateral\", \"k\"), ", ""]]],
     ["the plan drops the ratio", "assets/js/flows-desk.js", [[", UI.metric(\"Prem. ÷ coll.\", planRatio(best))", ""]]],
-    ["a missing premium prints zero", "assets/js/flows-desk.js", [["pc.premiumC === null ? cell(\"dk-prem\", \"Premium\", DASH, \"silent\", T(\"pc-no-bid\"))", "pc.premiumC === null ? cell(\"dk-prem\", \"Premium\", \"$0.00\", \"silent\", T(\"pc-no-bid\"))"]]],
+    ["a missing premium prints zero", "assets/js/flows-desk.js", [["cell(\"dk-prem\", \"Premium\", DASH, \"silent\", T(\"pc-no-bid\"), ", "cell(\"dk-prem\", \"Premium\", \"$0.00\", \"silent\", T(\"pc-no-bid\"), "]]],
     ["a deep in-the-money premium is not muted", "assets/js/flows-desk.js", [["mostlyIntrinsic(r, pc) ? \"silent\" : null, mostlyIntrinsic(r, pc) ? T(\"t-pc-itm\") : T(\"t-pc\")", "null, T(\"t-pc\")"]]],
     ["the forward warning is dropped", "assets/js/flows-desk.js", [["(move !== null && move > DELTA_MOVE_NOTE ? \" \" + T(\"fwd-delta\", { x: move.toFixed(2) }) : \"\")", "\"\""]]],
     ["the forward warning always fires", "assets/js/flows-desk.js", [["move !== null && move > DELTA_MOVE_NOTE ?", "move !== null ?"]]],
+    ["a plan with no in-the-money note prints the word null", "assets/js/flows-desk.js", [["const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));", "const putKids = (node, kids) => node.replaceChildren(...kids);"]]],
     ["the dollars are hidden on a narrow screen", "assets/css/flows-tools.css", [["  .dk-pc .dk-sub, .dk-ratio .dk-sub { display: block; }\n", ""]]],
   ];
   for (const [name, rel, edits] of CLIENT) {
@@ -539,13 +543,14 @@ try {
     } else {
       const plant = async (p) => { await p.route(new RegExp("/" + rel.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "text/javascript", body })); };
       bad = /forward warning/.test(name) ? await forwardProbe(plant) : await pageProbe(plant);
-      if (name === "the plan drops the ratio" || name === "a missing premium prints zero") bad = await planProbe(body, name);
+      if (["the plan drops the ratio", "a missing premium prints zero", "a plan with no in-the-money note prints the word null"].includes(name)) bad = await planProbe(body, name);
     }
     ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (page): ${name}`);
   }
   const SC = [
     ["the short-call ratio cell shows the time value ratio", "assets/js/flows-desk-calls.js", [["cellOf(\"dk-ratio\", \"Premium ÷ collateral\", pcOf(sc), sc.intrC * 2", "cellOf(\"dk-ratio\", \"Premium ÷ collateral\", fmtRatio(sc.ratio), sc.intrC * 2"]]],
     ["the short-call gross rank sorts by time value", "assets/js/flows-desk-calls.js", [["premiumRatio: (r) => (r.__sc && r.__sc.ok && r.__sc.m1C > 0 ? r.__sc.bidC / r.__sc.m1C : null),", "premiumRatio: (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null),"]]],
+    ["the short-call plan prints the word null", "assets/js/flows-desk-calls.js", [["const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));", "const putKids = (node, kids) => node.replaceChildren(...kids);"]]],
     ["the short-call dollars are the totals of N contracts", "assets/js/flows-desk-calls.js", [["centsText(sc.bidC, true) + \" ÷ \" + centsText(sc.m1C))", "centsText(sc.premiumC, true) + \" ÷ \" + centsText(sc.collateralC))"]]],
   ];
   for (const [name, rel, edits] of SC) {
@@ -564,11 +569,15 @@ async function planProbe(body, name) {
   const rel = "assets/js/flows-desk.js";
   const pl = payloads();
   if (name === "a missing premium prints zero") pl.SYX101.rows[0] = { ...pl.SYX101.rows[0], bid: null };
-  const page = await openDesk(browser, { payloads: pl, query: QUERY + "&bp=25000", errors: [], viewport: { width: 1440, height: 820 },
+  const page = await openDesk(browser, { payloads: pl, query: /word null/.test(name) ? "?t=SYX101,SYX102&strategy=csp&bp=25000" : QUERY + "&bp=25000", errors: [], viewport: { width: 1440, height: 820 },
     before: async (p) => { await p.route(new RegExp("/" + rel.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "text/javascript", body })); } });
   try {
     await waitRows(page, 6);
-    if (name === "the plan drops the ratio") {
+    if (name === "a plan with no in-the-money note prints the word null") {
+      await showView(page, "frontier");
+      const t = flat(await page.$eval("#deskPlan", (n) => n.textContent));
+      if (/null|undefined/.test(t)) bad.push("the plan prints " + t.slice(-30));
+    } else if (name === "the plan drops the ratio") {
       await showView(page, "frontier");
       const t = flat(await page.$eval("#deskPlan", (n) => n.textContent));
       if (!/Prem\. ÷ coll\./.test(t)) bad.push("no plan ratio");
@@ -582,4 +591,4 @@ async function planProbe(body, name) {
   return bad;
 }
 
-console.log(`✓ flows-desk-ratio: ${checks} assertions — Premium ÷ collateral per contract on every put, covered-call and short-call line: the bid over the collateral in integer cents half-up, printed with both dollar amounts and no click at four sizes, sortable and in the address, in the frontier tooltip, the plan and the export, derived by the page from the bid and the collateral so an older kept copy still shows it, a dash with its reason for a missing figure, and twenty-one planted wrong builds caught`);
+console.log(`✓ flows-desk-ratio: ${checks} assertions — Premium ÷ collateral per contract on every put, covered-call and short-call line: the bid over the collateral in integer cents half-up, printed with both dollar amounts and no click at five widths, sortable and in the address, in the frontier tooltip, the plan and the export, derived by the page from the bid and the collateral so an older kept copy still shows it, a dash with its reason for a missing figure, and twenty-three planted wrong builds caught`);

@@ -613,6 +613,8 @@
     return out;
   }
 
+  const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));
+
   function renderPlan(rows) {
     const plan = mods.plan;
     mods.best.replaceChildren();
@@ -652,13 +654,13 @@
       const sideWord = best.strategy === "cc" ? "buy-write covered call" : "cash-secured put";
       sentence = T("plan", { bp: fmtMoney(buyingPower), a: affordable, m: rows.length, n: z.contracts, t: best.ticker || "?", k: fmt2(best.strike), w: sideWord, e: best.expiry || "?", c: fmtMoney(z.timeValue), d: fmtMoney(z.deployed), i: fmtMoney(z.idle), y: fmtPct(z.yieldOnDeployed, 2), by: rankWord(rank) });
       plan.className = "dk-plan";
-      plan.replaceChildren(
+      putKids(plan, [
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.contracts + "× " + best.ticker + " " + kf(best.strike) + (best.strategy === "cc" ? " call" : " put")), h("span", null, F.day(best.expiry))),
-        UI.metrics([UI.metric("Earns", fmtMoney(z.timeValue), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle)), UI.metric("Prem. ÷ coll.", planRatio(best))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", fmtMoney(z.timeValue), { tone: "up" }), UI.metric("Deploys", fmtMoney(z.deployed)), UI.metric("Idle", fmtMoney(z.idle)), UI.metric("Prem. ÷ coll.", planRatio(best))], { min: 72 }),
         UI.split([{ color: "--accent", value: z.deployed / buyingPower }, { color: "--fill-2", value: z.idle / buyingPower }], "Deploys " + fmtMoney(z.deployed) + " of " + fmtMoney(buyingPower) + ", " + fmtMoney(z.idle) + " idle"),
         h("p", { class: "dk-hint" }, affordable + " of " + rows.length + " lines affordable"),
-        z.intrinsicValue > 0 ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: fmtMoney(z.intrinsicValue), t: fmtMoney(z.timeValue) })) : null);
+        z.intrinsicValue > 0 ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: fmtMoney(z.intrinsicValue), t: fmtMoney(z.timeValue) })) : null]);
       const next = rows.filter((r) => r !== best && r.__sizing && r.__sizing.affordable && r.__sizing.timeValueC > 0).sort((a, b) => (betterDeployment(a.__sizing, b.__sizing) ? -1 : betterDeployment(b.__sizing, a.__sizing) ? 1 : 0)).slice(0, 2);
       if (next.length) {
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),
@@ -768,7 +770,7 @@
     h("span", { class: "dk-cells" },
       pc.ok ? cell("dk-pc", "Premium ÷ collateral", pcText, mostlyIntrinsic(r, pc) ? "silent" : null, mostlyIntrinsic(r, pc) ? T("t-pc-itm") : T("t-pc"), centsText(pc.premiumC, true) + " ÷ " + centsText(pc.collateralC)) : cell("dk-pc", "Premium ÷ collateral", DASH, "silent", T("pc-" + pc.why)),
       cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), null, T("t-ann")),
-      pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid")) : cell("dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem")),
+      pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid"), "on " + fmtMoney(r.collateral)) : cell("dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem"), "on " + fmtMoney(r.collateral)),
       cell("dk-pq", WIN_Q, pq === null ? DASH : fmtPct(pq, 0), null, noEng || T("t-pq")),
       cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, noEng || noLaw || T("t-pp")),
       cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),

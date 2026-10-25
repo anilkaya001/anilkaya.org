@@ -216,7 +216,7 @@ try {
     const ranks = await page.$$eval("#deskRank option", (o) => o.map((x) => x.value));
     same(ranks, ["annualized", "premiumRatio", "ratio", "premium", "cushionSigmas", "collectible", "edge"], "the rank menu lists the short-call keys, the gross premium over collateral among them");
     const labelsOf = await page.$$eval("#deskRank option", (o) => o.map((x) => x.textContent));
-    ok(labelsOf.includes("Premium ÷ collateral") && labelsOf.includes("Time value ÷ collateral"), "the gross ratio and the time-value ratio are named apart");
+    ok(labelsOf.includes("Premium ÷ collateral, in-the-money value included") && labelsOf.includes("Time value ÷ collateral"), "the gross ratio and the time-value ratio are named apart");
     await page.selectOption("#deskRank", "ratio");
     await page.waitForFunction(() => new URL(location.href).searchParams.get("rank") === "ratio");
     const byRatio = (await readRows(page)).map((r) => Number(r.ratio));

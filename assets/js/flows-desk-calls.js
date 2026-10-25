@@ -333,6 +333,8 @@
     };
   }
 
+  const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));
+
   function renderPlan(rows) {
     const st = K.st();
     const plan = mods.plan, bp = st.buyingPower;
@@ -346,12 +348,12 @@
       plan.hidden = false;
       plan.className = "dk-plan";
       plan.dataset.plan = "";
-      plan.replaceChildren(
+      putKids(plan, [
         h("div", { class: "dk-plan-h" }, h("span", null, "Top line"), UI.infoButton("the top line", () => ({ title: "Top line", lead: T("sc-premium") }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, groupN(z.n) + "× " + top.ticker + " " + kf(top.strike) + " call"), h("span", null, F.day(top.expiry))),
-        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 72 }),
         h("p", { class: "dk-hint" }, T("sc-bp-ask")),
-        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
+        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null]);
       mods.best.append(uncovered);
       return;
     }
@@ -370,13 +372,13 @@
       const z = bestRow.__sc;
       sentence = T("sc-plan", { bp: K.fmtMoney(bp), a: affordable, m: lines.length, n: z.n, t: bestRow.ticker, k: fmt2(bestRow.strike), e: bestRow.expiry, c: usdC(z.timeValueC), d: usdC(z.collateralC), i: usdC(z.idleC), conv: convText(), N: groupN(terms.n) });
       plan.className = "dk-plan";
-      plan.replaceChildren(
+      putKids(plan, [
         h("div", { class: "dk-plan-h" }, h("span", null, "Best deployment"), UI.infoButton("the best deployment", () => ({ title: "Best deployment", lead: sentence }), { small: true })),
         h("div", { class: "dk-plan-v" }, h("b", null, z.n + "× " + bestRow.ticker + " " + kf(bestRow.strike) + " call"), h("span", null, F.day(bestRow.expiry))),
-        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 76 }),
+        UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Deploys", usdC(z.collateralC)), UI.metric("Idle", usdC(z.idleC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 72 }),
         UI.split([{ color: "--accent", value: z.collateralC / (bp * 100) }, { color: "--fill-2", value: z.idleC / (bp * 100) }], "Deploys " + usdC(z.collateralC) + " of " + K.fmtMoney(bp) + ", " + usdC(z.idleC) + " idle"),
         h("p", { class: "dk-hint" }, affordable + " of " + lines.length + " lines affordable" + (z.limited ? " · Limited by buying power: " + z.n + " of " + z.asked : "")),
-        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null);
+        z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null]);
       const next = lines.filter((r) => r !== bestRow && r.__sc.affordable && r.__sc.timeValueC > 0).sort((a, b) => (betterDeployment(a.__sc, b.__sc) ? -1 : betterDeployment(b.__sc, a.__sc) ? 1 : 0)).slice(0, 2);
       if (next.length) {
         mods.best.append(h("div", { class: "dk-alts", role: "list", "aria-label": "Next best deployments" }, h("span", { class: "dk-alts-h" }, "Next best"),

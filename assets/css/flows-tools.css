@@ -642,6 +642,7 @@
 }
 .dk-size .ui-split { height: 6px; }
 .dk-plan .ui-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dk-plan .ui-metrics:has(.ui-metric:nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: var(--sp-3); }
 .dk-bp { display: flex; flex-direction: column; gap: var(--sp-2); }
 .dk-bp-l { color: var(--label-2); font: var(--t-footnote); }
 .dk-bp-f {
@@ -752,6 +753,10 @@
 .dk-row.is-itm .dk-ann, .dk-c.is-unaffordable { color: var(--label-3); }
 .dk-row > .ui-info { justify-self: end; margin: 0; }
 .dk-row > .ui-info::after { inset: -8px 0; }
+@container mod (min-width: 700.02px) and (max-width: 800px) {
+  .dk-row, .dk-head { grid-template-columns: 22px minmax(128px, 1.4fr) minmax(96px, 1.3fr) repeat(5, minmax(52px, 1fr)) 28px; column-gap: var(--sp-2); }
+  .dk-list.has-col .dk-row, .dk-list.has-col .dk-head { grid-template-columns: 22px minmax(128px, 1.4fr) minmax(96px, 1.3fr) repeat(5, minmax(52px, 1fr)) minmax(80px, 1.1fr) 28px; }
+}
 @container mod (max-width: 700px) {
   .dk-head { display: none; }
   .dk-row, .dk-list.has-col .dk-row { grid-template-columns: 22px minmax(0, 1fr) 28px; row-gap: var(--sp-1); padding-block: var(--sp-3); }
@@ -762,6 +767,7 @@
   .dk-sub { display: none; }
   .dk-pc .dk-sub, .dk-ratio .dk-sub { display: block; }
   .dk-pc, .dk-ratio { grid-column: span 2; }
+  .dk-list:not(.is-sc) .dk-prem { display: none; }
   .dk-c small { position: static; width: auto; height: auto; overflow: visible; clip: auto; color: var(--label-3); font: var(--t-caption2); font-weight: 400; }
 }
 

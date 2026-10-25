@@ -1173,7 +1173,7 @@ try {
     await twin.waitForTimeout(500);
     eq(asked.length, askedBefore, `switching to the key that maps to the same server rank sends nothing (${asked.join(",")})`);
     eq(await twin.locator("#dkList .dk-row").count(), 120, "and the list is still the slice it already had");
-    ok(/ranked by yield on collateral/.test(await twin.locator("#deskFoot").textContent()),
+    ok(/ranked by time value ÷ collateral/.test(await twin.locator("#deskFoot").textContent()),
        "the footnote still names the ordering that CHOSE the slice, which is the payload's, not the select's");
     await twin.selectOption("#deskRank", "cushionSigmas");
     await twin.waitForFunction(() => /ranked by cushion/.test(document.getElementById("deskFoot").textContent), null, { timeout: 20000 });
