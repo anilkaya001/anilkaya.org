@@ -24,6 +24,7 @@
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const K = (k) => (num(k) === null ? DASH : Number.isInteger(k) ? String(k) : Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? k.toFixed(1) : k.toFixed(2));
   const ratioP = (v, dp = 0) => (num(v) === null ? DASH : (v * 100).toFixed(dp) + "%");
+  const popText = (v) => (num(v) === null ? DASH : v >= 0.995 ? ">99%" : v < 0.005 ? "<1%" : Math.round(v * 100) + "%");
   const sentence = (t) => { const x = str(t); return x ? cap(x) : null; };
   const firstSentence = (t) => (typeof t === "string" ? (t.match(/^.*?[.!?](\s|$)/) || [t])[0].trim() : "");
   function headline(t) {
@@ -641,9 +642,9 @@
       chartHost,
       h("div", { class: "ft-slots" },
         slot("PoP",
-          h("span", { class: "ft-slot-v", "aria-label": "Chance of profit " + (num(pr.popQ) === null ? "not published" : ratioP(pr.popQ)) + " implied, " + (num(pr.popP) === null ? "not published" : ratioP(pr.popP)) + " real world" },
-            h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? UI.dash(noFig("chance of profit on the smile"), "PoP implied") : ratioP(pr.popQ),
-            h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? UI.dash(noFig("real-world chance of profit"), "PoP real world") : ratioP(pr.popP))),
+          h("span", { class: "ft-slot-v", "aria-label": "Chance of profit " + (num(pr.popQ) === null ? "not published" : popText(pr.popQ)) + " implied, " + (num(pr.popP) === null ? "not published" : popText(pr.popP)) + " real world" },
+            h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? UI.dash(noFig("chance of profit on the smile"), "PoP implied") : popText(pr.popQ),
+            h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? UI.dash(noFig("real-world chance of profit"), "PoP real world") : popText(pr.popP))),
         slot("EV",
           h("span", { class: "ft-slot-v", "data-tone": evP === null ? "silent" : tone(evP), "aria-label": evP === null ? null : "Expected P&L in the real world " + (evP > 0 ? "+" : "") + usd0(evP) },
             h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evP === null ? UI.dash(noFig("real-world expected P&L"), "EV") : (evP > 0 ? "+" : "") + usd0(evP))),
@@ -673,7 +674,7 @@
       st ? h("div", { class: "ft-aside-c", "aria-label": "Closest structure" },
         h("span", { class: "ft-aside-l" }, "Closest"), h("b", null, famWord(st.family)),
         h("span", { class: "ft-slot-v", "data-tone": evC === null ? "silent" : tone(evC) }, h("i", { class: "ft-k is-p", "aria-hidden": "true" }), evC === null ? DASH : (evC > 0 ? "+" : "") + usd0(evC)),
-        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : ratioP(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : ratioP(pr.popP)), UI.calibTag()) : null,
+        h("span", { class: "ft-slot-v" }, h("i", { class: "ft-k is-q", "aria-hidden": "true" }), num(pr.popQ) === null ? DASH : popText(pr.popQ), h("i", { class: "ft-k is-p", "aria-hidden": "true" }), num(pr.popP) === null ? DASH : popText(pr.popP)), UI.calibTag()) : null,
       info("standing aside", () => ({ title: "Stand aside", state: "quiet", asOf: eng.asOf || null, lead, facts: st ? ideaFacts(st, null, eng) : [],
         sections: [{ title: "Families", lines: (eng.families || []).map((fm) => famWord(fm.family) + SEP + "score " + fx(fm.score, 2) + (fm.veto && fm.veto.length ? ", vetoed: " + fm.veto.join(", ") : "")) }] })));
   }
@@ -1546,7 +1547,7 @@
       metric("Implied", qm === null ? DASH : "±" + F.pct(qm), { key: keyOf("--accent", "dot", ""), sub: day(e.expiry) + SEP + e.sessions + " sessions" }),
       metric("Real world", pmv === null ? DASH : "±" + F.pct(pmv), { key: keyOf("--label-2", "dot", ""), sub: eng.pLaw ? String(eng.pLaw.model || "law").toUpperCase() : null, state: pmv === null ? d.st : null }),
       metric("Premium", qm !== null && pmv ? F.pct(qm / pmv - 1, 0, true) : DASH, { tone: qm !== null && pmv ? (qm > pmv ? "short" : qm < pmv ? "long" : null) : null, sub: qm !== null && pmv ? (qm > pmv ? "Market wider" : qm < pmv ? "Market narrower" : "Level") : null }),
-      metric("Lead PoP", num(popP) === null ? DASH : ratioP(popP), { sub: num(popQ) === null ? null : ratioP(popQ) + " implied", state: leadHere ? null : ST("quiet", lead ? "The lead idea expires " + lead.expiry + ", not at this horizon." : "No priced idea leads this card.") }),
+      metric("Lead PoP", num(popP) === null ? DASH : popText(popP), { sub: num(popQ) === null ? null : popText(popQ) + " implied", state: leadHere ? null : ST("quiet", lead ? "The lead idea expires " + lead.expiry + ", not at this horizon." : "No priced idea leads this card.") }),
     ], { min: 104 }));
     const handle = C.mount(host, (el, w, animate) => {
       const H = heightFor([220, 250, 270], w);
@@ -2283,7 +2284,7 @@
       { label: "Skew", st: skew && skew.series && Array.isArray(skew.series.d) ? OK : xSt(X.skew, "risk-reversal history"), name: "Skew", draw: (host) => {
         const S2 = skew.series;
         return { handle: C.line(host, { x: S2.d, series: [{ values: S2.rr25, color: "--accent", label: "RR25", format: (v) => pts1(v) }].concat(Array.isArray(S2.rr10) ? [{ values: S2.rr10, color: "--s-orange", label: "RR10", format: (v) => pts1(v) }] : []),
-          zero: true, yFormat: (v) => pts1(v), height: [280, 300, 320], label: card.ticker + " 25 and 10 delta risk reversals, " + skew.expiry }),
+          zero: true, yFormat: (v) => pts1(v), height: [280, 300, 320], label: card.ticker + " 25 and 10 delta risk reversals (put volatility minus call volatility), " + skew.expiry }),
           legend: [keyOf("--accent", "ln", "25Δ"), Array.isArray(S2.rr10) ? keyOf("--s-orange", "ln", "10Δ") : null] };
       } },
       { label: "Smile", st: smile ? OK : panelSt(card, "ivSurface", "volatility surface"), name: "Smile", draw: (host) => {
@@ -2340,7 +2341,7 @@
         facts: [["IV 30d", F.pct(pm.iv30)], ["RV 30d", F.pct(pm.rv30)], ["Premium (ex-ante)", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrp) + " pts, z " + F.signed(vrp.exAnte.z, 2) : num(pm.vrp) !== null ? pts1(pm.vrp) + " pts" : null],
           ["Premium ex-event", vrp && vrp.exAnte ? pts1(vrp.exAnte.vrpExEvent) + " pts" : null], ["Seller won", vrp ? F.pct(vrp.hitRate, 0) + " of " + vrp.n + " overlapping windows" + (num(vrp.nEff) !== null && Array.isArray(vrp.hitCi) && num(vrp.hitCi[0]) !== null && num(vrp.hitCi[1]) !== null ? ", about " + vrp.nEff + " independent (80% range " + F.pct(vrp.hitCi[0], 0) + " to " + F.pct(vrp.hitCi[1], 0) + ")" : "") : null],
           ["Band", richnessBand(pm) || DASH], ["Cone view", cone ? (cone.view || DASH) + " (" + F.signed(cone.richCheap * 100, 1) + ")" : null], ["IV rank", rk.v === null ? null : Math.round(rk.v * 100) + " of 100: where today sits between its 1-year low and high"],
-          ["RR25", skew ? pts1(skew.rr25) + " pts, z " + F.signed(skew.z, 2) + " (" + (skew.zBasis || "raw") + "), 5-day change " + pts1(skew.mom5) : null], ["RR10", skew && num(skew.rr10) !== null ? pts1(skew.rr10) + " pts" : null],
+          ["RR25 (put − call)", skew ? pts1(skew.rr25) + " pts, z " + F.signed(skew.z, 2) + " (" + (skew.zBasis || "raw") + "), 5-day change " + pts1(skew.mom5) : null], ["RR10 (put − call)", skew && num(skew.rr10) !== null ? pts1(skew.rr10) + " pts" : null],
           ["Crash ratio", skew && num(skew.crash) !== null ? skew.crash.toFixed(2) + " (median " + (num(skew.crashMedian) === null ? DASH : skew.crashMedian.toFixed(2)) + ")" : null],
           ["Skew (put − call)", sk && num(sk.skew) !== null ? F.pts(sk.skew) + " pts" + SEP + (sk.skewBasis ? sk.skewBasis.days + "d" : "") : null], ["Term (far − near)", sk && num(sk.term) !== null ? F.pts(sk.term) + " pts" : null],
           ...(sk ? skewTermRead(sk).facts : []), ["Steepest cell", sf ? surfaceRead(sf).steepest : null],
@@ -2351,7 +2352,7 @@
           ...garchFacts(card)],
         sections: [{ title: "Cone", lines: [cone ? "Each tenor's dot is today's implied volatility; the bar is its year's range and the box its middle half. The grey band behind is the realized-volatility cone at the matching window (10th to 90th percentile over two years)." : reasonOf(views[0].st), freshNote(X.cone)] },
           { title: "Term", lines: [term && term.eventKink ? "The first expiry spanning the earnings day carries a premium of " + F.pts(term.eventKink.premium) + " percentile points over its neighbours." : null, term && term.eventMove && num(term.eventMove.sd) !== null ? "The implied earnings move is ±" + F.pct(term.eventMove.sd) + " (one sd)." : null, sk && sk.termReason] },
-          { title: "Skew", lines: (sk ? skewTermRead(sk).lines : []).concat([sk && sk.relation, skew ? "The 25-delta risk reversal is read on the fixed " + skew.expiry + " expiry, so its maturity shrinks along the series; the z is maturity-adjusted." : reasonOf(views[2].st)]) },
+          { title: "Skew", lines: (sk ? skewTermRead(sk).lines : []).concat([sk && sk.relation, skew ? "The 25-delta risk reversal (put minus call) is read on the fixed " + skew.expiry + " expiry, so its maturity shrinks along the series; the z is maturity-adjusted." : reasonOf(views[2].st)]) },
           { title: "Surface", lines: [sf ? surfaceRead(sf).lead : reasonOf(views[4].st), cut] },
           { title: "Smile", lines: [smile ? (smile.source === "engine" ? "Smiles are the engine's own fitted curves per expiry." : "Smiles are the chain's measured points per expiry.") : reasonOf(views[3].st), P.ivSurface && P.ivSurface.ivBasis ? "IV basis: " + P.ivSurface.ivBasis : null,
             cut] },
