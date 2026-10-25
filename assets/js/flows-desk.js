@@ -770,7 +770,7 @@
     h("span", { class: "dk-cells" },
       pc.ok ? cell("dk-pc", "Premium ÷ collateral", pcText, mostlyIntrinsic(r, pc) ? "silent" : null, mostlyIntrinsic(r, pc) ? T("t-pc-itm") : T("t-pc"), centsText(pc.premiumC, true) + " ÷ " + centsText(pc.collateralC)) : cell("dk-pc", "Premium ÷ collateral", DASH, "silent", T("pc-" + pc.why)),
       cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), null, T("t-ann")),
-      pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid"), "on " + fmtMoney(r.collateral)) : cell("dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem"), "on " + fmtMoney(r.collateral)),
+      pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid")) : cell(pc.ok ? "dk-prem is-dup" : "dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem"), Number.isSafeInteger(pc.collateralC) ? "on " + centsText(pc.collateralC) : null),
       cell("dk-pq", WIN_Q, pq === null ? DASH : fmtPct(pq, 0), null, noEng || T("t-pq")),
       cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, noEng || noLaw || T("t-pp")),
       cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
@@ -783,12 +783,12 @@
     return why ? T("nrf", { why }) : null;
   };
 
-  const DELTA_MOVE_NOTE = 0.02;
-  const deltaMove = (r, other, used, years) => {
-    const sigma = isNum(r.ivMid === undefined ? r.iv : r.ivMid), K = isNum(r.strike), F = isNum(other);
-    if (sigma === null || !(sigma > 0) || K === null || !(K > 0) || F === null || !(F > 0) || !(used > 0) || !(years > 0)) return null;
-    const sd = sigma * Math.sqrt(years), d1 = (Math.log(used / K) + sd * sd / 2) / sd;
-    return Math.exp(-d1 * d1 / 2) / Math.sqrt(2 * Math.PI) * Math.abs(Math.log(F / used)) / sd;
+  const DELTA_MOVE_NOTE = 0.02, DELTA_MOVE_PAIRS = 5;
+  const deltaMove = (r, f, used, years) => {
+    const sigma = isNum(r.ivMid === undefined ? r.iv : r.ivMid), K = isNum(r.strike), F = isNum(f.F);
+    if (!Q || typeof Q.normCdf !== "function" || !(f.pairs >= DELTA_MOVE_PAIRS) || sigma === null || !(sigma > 0) || K === null || !(K > 0) || F === null || !(F > 0) || !(used > 0) || !(years > 0)) return null;
+    const sd = sigma * Math.sqrt(years), d1 = (fwd) => (Math.log(fwd / K) + sd * sd / 2) / sd;
+    return Math.abs(Q.normCdf(d1(F)) - Q.normCdf(d1(used)));
   };
 
   const forwardText = (r) => {
@@ -801,7 +801,7 @@
     const e = r.__eng, S = isNum(r.__spot), c = e && e.carry, years = e && isNum(e.T);
     if (!c || S === null || years === null || isNum(c.r) === null || isNum(c.q) === null) return own;
     const used = S * Math.exp((c.r - c.q) * years);
-    const move = deltaMove(r, f.F, used, years);
+    const move = deltaMove(r, f, used, years);
     return own + (isNum(f.F) !== null ? " " + T("fwd-engine", { g: fmt2(used), d: fmtPct(Math.abs(f.F / used - 1), 2) }) : " " + T("fwd-engine-same", { g: fmt2(used) })) + (move !== null && move > DELTA_MOVE_NOTE ? " " + T("fwd-delta", { x: move.toFixed(2) }) : "");
   };
 
@@ -846,7 +846,7 @@
         ["Smile", fit ? T(fit.origin === "card-shape" ? "fit-shape" : "fit-flat", { from: fit.shapeFrom }) + (fit.contract && fit.contract.via === "opposite" ? " " + T("fit-via", { side: r.type === "P" ? "call" : "put" }) : "") : null],
         ["Carry", e ? T("carry", { r: fmtPct(e.carry.r, 2), how: rateHow(e.carry.rateMethod), q: fmtPct(e.carry.q, 2) }) + (cc && e.carry.dividend > 0 ? " " + T("carry-div", { d: "$" + fmt2(e.carry.dividend) }) : "") : null],
         ["Breakeven", fmt2(r.breakeven)],
-        ["If called", cc ? fmtPct(r.assignedReturn, 1) + (m !== null && m < 0 ? " · already through the strike" : cap === null ? "" : " · the market has to run " + fmtSd(cap) + " to get there") : DASH + " · " + T("no-cap")],
+        ["If called", cc ? fmtPct(r.assignedReturn, 1) + " of the stock price" + (m !== null && m < 0 ? " · already through the strike" : cap === null ? "" : " · the market has to run " + fmtSd(cap) + " to get there") : DASH + " · " + T("no-cap")],
         ["Spread", fmtPct(r.spread, 1) + " of the mid"],
         ["Open interest", oi === null ? DASH : fmtInt(oi) + (ch ? " (" + sg(ch) + fmtInt(Math.abs(ch)) + ")" : "")],
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],

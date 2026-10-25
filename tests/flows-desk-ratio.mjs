@@ -4,11 +4,12 @@ import vm from "node:vm";
 import { chromium } from "playwright";
 import * as P from "../shared/flows-premium.js";
 import { yearFraction, closeUtcMs } from "../shared/flows-quant-time.js";
+import { normCdf } from "../shared/flows-quant-bs.js";
 import { loadMutated } from "./truth/mutants.mjs";
 import { chain, engineBlock, openDesk, showView, REPO } from "./desk-fixtures.mjs";
 import { contractCents, ratioTextExact, ratioMicroExact, dollarsTextExact, centsOfDollars } from "./lib/pc-oracle.mjs";
 
-let checks = 0;
+let checks = 0, plants = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); checks++; };
 const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
@@ -67,7 +68,7 @@ eq(P.premiumLine({ bid: 1, strategy: "cc", strike: 100, spot: 0.00004 }).why, "n
     if (frac !== ratioMicroExact(wantP, wantC)) bad++;
     if (D.centsText(server.premiumC, true) !== dollarsTextExact(wantP) || D.centsText(server.collateralC, false) !== dollarsTextExact(wantC, false)) bad++;
   }
-  eq(bad, 0, `over ${n} random bids and strikes the server's and the page's cents, ratio, percentage text, six-decimal fraction and dollar text equal an exact decimal reference (${bad} off)`);
+  eq(bad, 0, `over ${n} random bids and strikes (seed 0x2f6e2b1) the server's and the page's cents, ratio, percentage text, six-decimal fraction and dollar text equal an exact decimal reference (${bad} off)`);
 }
 
 {
@@ -86,6 +87,25 @@ eq(P.premiumLine({ bid: 1, strategy: "cc", strike: 100, spot: 0.00004 }).why, "n
   eq(D.ratioFraction(5, 10000000), 0.000001, "and from half a millionth up it is written to six decimals");
   eq(D.ratioFraction(1, 50000000), 2e-8, "one cent on five hundred thousand dollars is 2e-8");
   eq(D.ratioFraction(1, 4e11), null, "and a figure no ten-decimal fraction can hold is absent, not zero");
+}
+
+{
+  let bad = 0, n = 0;
+  for (let k = 5000; k <= 20000; k++) {
+    const text = (k / 100000).toFixed(5);
+    const want = Number(contractCents(text));
+    n++;
+    if (P.premiumLine({ bid: Number(text), strategy: "csp", strike: 100, spot: 100 }).premiumC !== want || D.premiumLine({ bid: Number(text), strategy: "csp", collateral: 10000 }).premiumC !== want) bad++;
+  }
+  eq(bad, 0, `every one of the ${n} five-decimal bids from 0.05000 to 0.20000, which includes every half-cent tie, is the exact half-up cents on the server and the page`);
+  let off = 0, m = 0;
+  for (const c of [10000, 20000, 40000, 100000, 3333300]) {
+    for (let p = 1; p <= Math.floor(c / 5); p++) {
+      m++;
+      if (D.ratioText(p, c) !== ratioTextExact(p, c)) off++;
+    }
+  }
+  eq(off, 0, `and the percentage text of all ${m} premiums up to a fifth of the collateral, on five collaterals, equals the exact reference: every rounding tie and the 10% change of precision`);
 }
 
 const SPOT = 100;
@@ -157,7 +177,7 @@ const server = {
   for (const [title, edits] of MUT) {
     const mod = await loadMutated("shared/flows-premium.js", edits);
     const bad = await server.probe(mod).catch((e) => ["threw " + e.message]);
-    ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (server): ${title}`);
+    plants++; ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (server): ${title}`);
     caught++;
   }
   eq(caught, MUT.length, "every planted server build was run");
@@ -198,7 +218,11 @@ const waitRows = (page, n) => page.waitForFunction((k) => document.querySelector
 const forwardProbe = async (route) => {
   const bad = [];
   const base = () => chain({ ticker: "SYX101", spot: 100, asOf: "2026-09-29", lines: lines(100), engine: engineBlock("SYX101", "2026-09-29", 50) });
-  const withForward = (f) => ({ ...base(), forwards: [{ expiry: "2026-10-09", method: "parity", pairs: 6, F: f }] });
+  const withForward = (f, pairs, blind) => {
+    const p = { ...base(), forwards: [{ expiry: "2026-10-09", method: "parity", pairs, F: f }] };
+    if (blind) p.rows = p.rows.map((x) => (x.strike === 105 && x.expiry === "2026-10-09" && x.type === "C" ? { ...x, iv: null, ivMid: null } : x));
+    return p;
+  };
   const forwardFact = async (payload, strike) => {
     const page = await openDesk(browser, { payloads: { SYX101: payload }, query: "?t=SYX101&strategy=both", errors: [], viewport: { width: 1440, height: 820 }, before: route || null });
     try {
@@ -210,21 +234,40 @@ const forwardProbe = async (route) => {
     } finally { await page.close(); }
   };
   try {
-    const first = await forwardFact(withForward(100.2), 105);
-    const used = Number(/prices delta, win % and EV on ([\d.]+)/.exec(first)[1]);
-    if (!(used > 100)) bad.push("no engine forward");
-    const quiet = await forwardFact(withForward(+(used * 1.00002).toFixed(2)), 105);
-    if (/would move the delta/.test(quiet)) bad.push("a close forward warns");
-    const target = +(used * 1.02).toFixed(2);
-    const loud = await forwardFact(withForward(target), 105);
-    const m = /would move the delta by about ([\d.]+)/.exec(loud);
-    if (!m) { bad.push("a far forward is silent"); return bad; }
     const row = base().rows.find((x) => x.strike === 105 && x.expiry === "2026-10-09" && x.type === "C");
-    const years = yearFraction(closeUtcMs("2026-09-29"), "2026-10-09"), sd = row.ivMid * Math.sqrt(years);
-    const d1 = (Math.log(used / 105) + sd * sd / 2) / sd;
-    const want = Math.exp(-d1 * d1 / 2) / Math.sqrt(2 * Math.PI) * Math.abs(Math.log(target / used)) / sd;
-    if (!(Math.abs(Number(m[1]) - want) < 0.006 && Number(m[1]) > 0.02)) bad.push(`the figure ${m[1]} is not ${want.toFixed(3)}`);
+    const years = yearFraction(closeUtcMs("2026-09-29"), "2026-10-09"), used = 100 * Math.exp(0.04 * years), sd = row.ivMid * Math.sqrt(years);
+    const d1 = (f) => (Math.log(f / 105) + sd * sd / 2) / sd;
+    const exact = (f) => Math.abs(normCdf(d1(f)) - normCdf(d1(used)));
+    const quiet = +(used * 1.00002).toFixed(2), loud = +(used * 1.02).toFixed(2), huge = +(used * 1.3).toFixed(2);
+    if (!/prices delta, win % and EV on [\d.]+/.test(await forwardFact(withForward(loud, 6), 105))) bad.push("no engine forward");
+    if (/moves the delta/.test(await forwardFact(withForward(quiet, 6), 105))) bad.push("a close forward warns");
+    const far = await forwardFact(withForward(loud, 6), 105);
+    const m = /moves the delta by ([\d.]+);/.exec(far);
+    if (!m) bad.push("a far forward is silent");
+    else if (m[1] !== exact(loud).toFixed(2) || !(exact(loud) > 0.02)) bad.push(`the figure ${m[1]} is not the exact difference of the two deltas ${exact(loud).toFixed(4)}`);
+    const wild = /moves the delta by ([\d.]+);/.exec(await forwardFact(withForward(huge, 6), 105));
+    if (!wild || Number(wild[1]) > 1) bad.push("a huge gap is not a bounded delta difference: " + (wild && wild[1]));
+    if (/moves the delta/.test(await forwardFact(withForward(loud, 4), 105))) bad.push("four pairs is too few to warn");
+    const blind = await forwardFact(withForward(loud, 6, true), 105);
+    if (/moves the delta|NaN|undefined|null/.test(blind) || !/prices delta, win % and EV on/.test(blind)) bad.push("no volatility must omit the sentence, not print NaN: " + blind.slice(-80));
   } catch (e) { bad.push("threw " + String(e.message).split("\n")[0]); }
+  return bad;
+};
+
+const phoneDashProbe = async (route) => {
+  const pl = { SYX101: payloadOf("SYX101", 100) };
+  pl.SYX101.rows = pl.SYX101.rows.filter((r) => r.type === "P").slice(0, 2);
+  delete pl.SYX101.rows[0].collateral;
+  const page = await openDesk(browser, { payloads: pl, query: "?t=SYX101&strategy=csp", errors: [], viewport: { width: 390, height: 844 }, before: route || null });
+  const bad = [];
+  try {
+    await waitRows(page, 2);
+    await showView(page, "lines");
+    const r0 = await page.$eval("#dkList .dk-row", (r) => { const ratio = r.querySelector(".dk-pc"), prem = r.querySelector(".dk-prem"); return { ratio: [...ratio.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim(), premium: prem.checkVisibility(), text: prem.textContent }; });
+    if (r0.ratio !== "—") bad.push("the ratio is " + r0.ratio);
+    if (!r0.premium || !/\$\d/.test(r0.text)) bad.push("the premium is hidden");
+  } catch (e) { bad.push("threw " + String(e.message).split("\n")[0]); }
+  await page.close();
   return bad;
 };
 
@@ -254,6 +297,14 @@ const scProbe = async (route) => {
     if (vals.some((v, i) => i > 0 && vals[i - 1] < v - 1e-12)) bad.push("order is not descending by the gross ratio");
   } catch (e) { bad.push("threw " + String(e.message).split("\n")[0]); }
   await page.close();
+  const shares = await openDesk(browser, { payloads: payloads(), query: "?t=SYX101,SYX102&strategy=sc&cv=shares&bp=25000", errors: [], viewport: { width: 1440, height: 820 }, before: route || null });
+  try {
+    await shares.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='sc']").length >= 4, null, { timeout: 20000 });
+    await showView(shares, "frontier");
+    const t = await shares.$eval("#dkP-frontier", (n) => n.textContent);
+    if (/null|undefined/.test(t)) bad.push("the shares-held plan prints " + t.slice(-30));
+  } catch (e) { bad.push("threw " + String(e.message).split("\n")[0]); }
+  await shares.close();
   return bad;
 };
 
@@ -512,6 +563,108 @@ try {
     eq(bad, [], "a parity forward that would move the delta names the delta it could move, and a close one stays quiet, against the formula worked by hand");
   }
 
+  {
+    const bad = await phoneDashProbe(null);
+    eq(bad, [], "on a phone a line with a bid and no collateral keeps its Premium cell: the dollars are never hidden behind a ratio that is a dash");
+  }
+
+  {
+    const wanted = [["csp", 1440], ["cc", 1440], ["both", 390], ["sc", 1440], ["sc", 390], ["csp", 390]];
+    const hits = [];
+    for (const [side, w] of wanted) {
+      const page = await openDesk(browser, { payloads: payloads(), query: `?t=SYX101,SYX102,SYX103&strategy=${side}&bp=25000`, errors, viewport: { width: w, height: w > 600 ? 820 : 844 } });
+      await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row").length >= 4, null, { timeout: 20000 });
+      await page.waitForTimeout(1200);
+      const ranks = await page.$$eval("#deskRank option", (o) => o.map((x) => x.value));
+      const scan = () => page.evaluate(() => {
+        const found = [];
+        for (const root of [document.querySelector(".flows-main"), ...document.querySelectorAll("dialog, #fxPop")]) {
+          if (!root) continue;
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) if (/null|undefined|NaN|\[object/.test(n.textContent)) found.push(n.textContent.slice(0, 60));
+        }
+        return found;
+      });
+      for (const rank of ranks) {
+        await showView(page, "lines");
+        await page.selectOption("#deskRank", rank);
+        await page.waitForTimeout(120);
+        for (const view of w < 900 ? ["frontier", "lines", "plan"] : ["frontier", "lines"]) {
+          await showView(page, view);
+          hits.push(...(await scan()).map((t) => `${side} ${w} ${rank} ${view}: ${t}`));
+        }
+      }
+      await showView(page, "lines");
+      for (const i of [0, 1]) {
+        await page.evaluate((k) => { const b = document.querySelectorAll("#dkList .dk-row .ui-info")[k]; if (b) b.click(); }, i);
+        await page.waitForTimeout(150);
+        hits.push(...(await scan()).map((t) => `${side} ${w} popover ${i}: ${t}`));
+        await page.keyboard.press("Escape");
+      }
+      await page.close();
+    }
+    eq(hits.slice(0, 5), [], "no text node anywhere on the desk, hidden panels and popovers included, reads null, undefined, NaN or [object, for every side, every rank, every view, at 1440 and 390");
+  }
+
+  for (const w of [1440, 390]) {
+    const page = await openDesk(browser, { payloads: payloads(), query: QUERY + "&bp=25000", errors, viewport: { width: w, height: w > 600 ? 820 : 844 } });
+    await waitRows(page, 6);
+    await showView(page, w > 600 ? "frontier" : "plan");
+    await page.waitForTimeout(300);
+    const m = await page.evaluate(() => { const n = document.querySelector("#deskPlan .ui-metrics"); return { tracks: getComputedStyle(n).gridTemplateColumns.split(" ").length, over: [...n.querySelectorAll(".ui-metric-v, .ui-metric-l")].filter((x) => x.scrollWidth > x.clientWidth + 1).map((x) => x.textContent) }; });
+    eq([m.tracks, m.over], [4, []], `${w}px: the four plan metrics sit in four tracks and none is wider than its track`);
+    await page.close();
+  }
+  {
+    const page = await openDesk(browser, { payloads: payloads(), query: "?t=SYX101,SYX102,SYX103&strategy=sc&bp=100000", errors, viewport: { width: 390, height: 844 } });
+    await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='sc']").length >= 4, null, { timeout: 20000 });
+    await showView(page, "plan");
+    await page.waitForTimeout(400);
+    const m = await page.evaluate(() => { const n = document.querySelector("#deskPlan .ui-metrics"); const mod = document.getElementById("dkSizingM").getBoundingClientRect(), p = document.getElementById("deskPlan").getBoundingClientRect(); return { over: [...n.querySelectorAll(".ui-metric-v, .ui-metric-l")].filter((x) => x.scrollWidth > x.clientWidth + 1).map((x) => x.textContent), inside: p.bottom <= mod.bottom + 1, values: [...n.querySelectorAll(".ui-metric-v")].map((x) => x.textContent) }; });
+    eq([m.over, m.inside], [[], true], `Short calls at 390 with $100,000: the plan's metrics are not cut and the card stays inside its module (${m.values.join(" ")})`);
+    await page.close();
+  }
+
+  {
+    const page = await openDesk(browser, { payloads: payloads(), query: QUERY, errors, viewport: { width: 1060, height: 900 } });
+    await waitRows(page, 6);
+    await showView(page, "lines");
+    await page.waitForTimeout(300);
+    const m = await page.evaluate(() => [...document.querySelectorAll("#dkList .dk-row:not([hidden])")].map((r) => [...new Set([...r.querySelectorAll(".dk-c")].map((c) => (() => { const b = c.getBoundingClientRect(); return Math.round((b.top + b.height / 2) / 12); })()))].length));
+    ok(m.length > 0 && m.every((n) => n === 1), `at 1060 px every cell of a line sits on one row of the grid, so the narrower grid never wraps a cell onto a second row (${m.join(",")})`);
+    await page.close();
+  }
+
+  {
+    const page = await openDesk(browser, { payloads: payloads(), query: QUERY + "&rank=yieldOnCollateral", errors, viewport: { width: 1440, height: 820 } });
+    await waitRows(page, 6);
+    eq(await page.$eval("#deskRank", (n) => [n.value, n.selectedOptions[0].textContent]), ["yieldOnCollateral", "Time value ÷ collateral"], "a saved address with the old rank key lands on the same ranking under its new name");
+    await page.close();
+    const sc = await openDesk(browser, { payloads: payloads(), query: "?t=SYX101,SYX102&strategy=sc&cv=regt&rank=ratio", errors, viewport: { width: 1440, height: 820 } });
+    await sc.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='sc']").length >= 4, null, { timeout: 20000 });
+    eq(await sc.$eval("#deskRank", (n) => [n.value, n.selectedOptions[0].textContent]), ["ratio", "Time value ÷ collateral"], "and so does a Short calls address with rank=ratio, which keeps its time-value meaning");
+    await sc.close();
+  }
+
+  {
+    const pl = { SYX104: chain({ ticker: "SYX104", spot: 100, asOf: "2026-09-29", lines: [{ type: "P", strike: 100.5, expiry: "2026-10-09", bid: 1 }, { type: "P", strike: 100.5, expiry: "2026-10-23", bid: 0.99 }], engine: null }) };
+    const page = await openDesk(browser, { payloads: pl, query: "?t=SYX104&strategy=csp", errors, viewport: { width: 1440, height: 820 } });
+    await waitRows(page, 2);
+    await showView(page, "lines");
+    const tones = await page.$$eval("#dkList .dk-row", (rs) => Object.fromEntries(rs.map((r) => [r.dataset.expiry, r.querySelector(".dk-pc").dataset.tone || null])));
+    eq(tones, { "2026-10-09": null, "2026-10-23": "silent" }, "exactly half the premium in the money is not muted; one cent more is");
+    await page.close();
+  }
+
+  {
+    const page = await openDesk(browser, { payloads: payloads(), query: "?t=SYX101,SYX102&strategy=sc&cv=shares&bp=25000", errors, viewport: { width: 1440, height: 820 } });
+    await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='sc']").length >= 4, null, { timeout: 20000 });
+    await showView(page, "frontier");
+    const t = await page.$eval("#dkP-frontier", (n) => n.textContent);
+    ok(!/null|undefined/.test(t), "Short calls under Shares held, where there is no uncovered warning, prints no stray null in the plan column");
+    await page.close();
+  }
+
   const SRC = (rel) => fs.readFileSync(new URL(rel, REPO), "utf8");
   const CLIENT = [
     ["the percentage floors instead of rounding half up", "assets/js/flows-desk.js", [["const hundredths = Math.floor((2 * p * 10000 + c) / (2 * c));", "const hundredths = Math.floor((p * 10000) / c);"]]],
@@ -520,11 +673,14 @@ try {
     ["the rank sorts by the annualised yield", "assets/js/flows-desk.js", [["rank === \"premiumRatio\" ? (r) => r.__pc.ratio", "rank === \"premiumRatio\" ? (r) => r.annualized"]]],
     ["the frontier tooltip drops the ratio", "assets/js/flows-desk.js", [["C.part(pcText + \" of collateral\", \"k\"), ", ""]]],
     ["the plan drops the ratio", "assets/js/flows-desk.js", [[", UI.metric(\"Prem. ÷ coll.\", planRatio(best))", ""]]],
-    ["a missing premium prints zero", "assets/js/flows-desk.js", [["cell(\"dk-prem\", \"Premium\", DASH, \"silent\", T(\"pc-no-bid\"), ", "cell(\"dk-prem\", \"Premium\", \"$0.00\", \"silent\", T(\"pc-no-bid\"), "]]],
+    ["a missing premium prints zero", "assets/js/flows-desk.js", [["cell(\"dk-prem\", \"Premium\", DASH, \"silent\", T(\"pc-no-bid\"))", "cell(\"dk-prem\", \"Premium\", \"$0.00\", \"silent\", T(\"pc-no-bid\"))"]]],
     ["a deep in-the-money premium is not muted", "assets/js/flows-desk.js", [["mostlyIntrinsic(r, pc) ? \"silent\" : null, mostlyIntrinsic(r, pc) ? T(\"t-pc-itm\") : T(\"t-pc\")", "null, T(\"t-pc\")"]]],
     ["the forward warning is dropped", "assets/js/flows-desk.js", [["(move !== null && move > DELTA_MOVE_NOTE ? \" \" + T(\"fwd-delta\", { x: move.toFixed(2) }) : \"\")", "\"\""]]],
+    ["the forward warning is the first-order formula", "assets/js/flows-desk.js", [["return Math.abs(Q.normCdf(d1(F)) - Q.normCdf(d1(used)));", "return Math.exp(-d1(used) * d1(used) / 2) / Math.sqrt(2 * Math.PI) * Math.abs(Math.log(F / used)) / sd;"]]],
+    ["the forward warning fires on four pairs", "assets/js/flows-desk.js", [["!(f.pairs >= DELTA_MOVE_PAIRS) || ", ""]]],
     ["the forward warning always fires", "assets/js/flows-desk.js", [["move !== null && move > DELTA_MOVE_NOTE ?", "move !== null ?"]]],
     ["a plan with no in-the-money note prints the word null", "assets/js/flows-desk.js", [["const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));", "const putKids = (node, kids) => node.replaceChildren(...kids);"]]],
+    ["the premium cell is hidden on a phone even when the ratio is a dash", "assets/css/flows-tools.css", [[".dk-list:not(.is-sc) .dk-prem.is-dup { display: none; }", ".dk-list:not(.is-sc) .dk-prem { display: none; }"]]],
     ["the dollars are hidden on a narrow screen", "assets/css/flows-tools.css", [["  .dk-pc .dk-sub, .dk-ratio .dk-sub { display: block; }\n", ""]]],
   ];
   for (const [name, rel, edits] of CLIENT) {
@@ -532,7 +688,9 @@ try {
     for (const [from, to] of edits) { assert.equal(body.split(from).length - 1, 1, `mutant "${name}" applies exactly once`); body = body.replace(from, () => to); }
     const css = rel.endsWith(".css");
     let bad;
-    if (css) {
+    if (css && /premium cell/.test(name)) {
+      bad = await phoneDashProbe(async (p) => { await p.route(new RegExp("/" + rel.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "text/css", body })); });
+    } else if (css) {
       const page = await openDesk(browser, { payloads: payloads(), query: QUERY, errors: [], viewport: { width: 390, height: 844 },
         before: async (p) => { await p.route(new RegExp("/" + rel.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "text/css", body })); } });
       await waitRows(page, 6);
@@ -545,11 +703,12 @@ try {
       bad = /forward warning/.test(name) ? await forwardProbe(plant) : await pageProbe(plant);
       if (["the plan drops the ratio", "a missing premium prints zero", "a plan with no in-the-money note prints the word null"].includes(name)) bad = await planProbe(body, name);
     }
-    ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (page): ${name}`);
+    plants++; ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (page): ${name}`);
   }
   const SC = [
     ["the short-call ratio cell shows the time value ratio", "assets/js/flows-desk-calls.js", [["cellOf(\"dk-ratio\", \"Premium ÷ collateral\", pcOf(sc), sc.intrC * 2", "cellOf(\"dk-ratio\", \"Premium ÷ collateral\", fmtRatio(sc.ratio), sc.intrC * 2"]]],
     ["the short-call gross rank sorts by time value", "assets/js/flows-desk-calls.js", [["premiumRatio: (r) => (r.__sc && r.__sc.ok && r.__sc.m1C > 0 ? r.__sc.bidC / r.__sc.m1C : null),", "premiumRatio: (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null),"]]],
+    ["the shares-held plan prints the word null", "assets/js/flows-desk-calls.js", [["const uncovered = terms.cv === \"shares\" ? [] :", "const uncovered = terms.cv === \"shares\" ? [null] :"]]],
     ["the short-call plan prints the word null", "assets/js/flows-desk-calls.js", [["const putKids = (node, kids) => node.replaceChildren(...kids.filter((x) => x !== null && x !== undefined && x !== false));", "const putKids = (node, kids) => node.replaceChildren(...kids);"]]],
     ["the short-call dollars are the totals of N contracts", "assets/js/flows-desk-calls.js", [["centsText(sc.bidC, true) + \" ÷ \" + centsText(sc.m1C))", "centsText(sc.premiumC, true) + \" ÷ \" + centsText(sc.collateralC))"]]],
   ];
@@ -557,7 +716,7 @@ try {
     let body = SRC(rel);
     for (const [from, to] of edits) { assert.equal(body.split(from).length - 1, 1, `mutant "${name}" applies exactly once`); body = body.replace(from, () => to); }
     const bad = await scProbe(async (p) => { await p.route(new RegExp("/" + rel.replace(/[.]/g, "\\.") + "(\\?.*)?$"), (r) => r.fulfill({ contentType: "text/javascript", body })); });
-    ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (short calls): ${name}`);
+    plants++; ok(bad.length > 0, `PLANTED WRONG BUILD IS CAUGHT (short calls): ${name}`);
   }
   eq(errors, [], "no page error");
 } finally {
@@ -591,4 +750,4 @@ async function planProbe(body, name) {
   return bad;
 }
 
-console.log(`✓ flows-desk-ratio: ${checks} assertions — Premium ÷ collateral per contract on every put, covered-call and short-call line: the bid over the collateral in integer cents half-up, printed with both dollar amounts and no click at five widths, sortable and in the address, in the frontier tooltip, the plan and the export, derived by the page from the bid and the collateral so an older kept copy still shows it, a dash with its reason for a missing figure, and twenty-three planted wrong builds caught`);
+console.log(`✓ flows-desk-ratio: ${checks} assertions — Premium ÷ collateral per contract on every put, covered-call and short-call line: the bid over the collateral in integer cents half-up, printed with both dollar amounts and no click at five widths, sortable and in the address, in the frontier tooltip, the plan and the export, derived by the page from the bid and the collateral so an older kept copy still shows it, a dash with its reason for a missing figure, and ${plants} planted wrong builds caught`);

@@ -818,7 +818,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fwd-rate">the interest rate alone: the chain placed no parity forward for this expiry and the card holds no usable carry.</p>
       <p data-k="fwd-none">this payload did not name a forward for this expiry.</p>
       <p data-k="fwd-engine">The engine prices delta, win % and EV on {g} (the card&#39;s carry), {d} from it.</p>
-      <p data-k="fwd-delta">At this strike a gap that size would move the delta by about {x}; the line is priced on the card&#39;s forward, not the chain&#39;s.</p>
+      <p data-k="fwd-delta">At this strike the gap between the two forwards moves the delta by {x}; the line is priced on the card&#39;s forward, not the chain&#39;s.</p>
       <p data-k="fwd-engine-same">The engine prices delta, win % and EV on {g} (the card&#39;s carry).</p>
       <p data-k="sm-ex">Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion.</p>
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>

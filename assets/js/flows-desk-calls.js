@@ -340,10 +340,10 @@
     const plan = mods.plan, bp = st.buyingPower;
     mods.best.replaceChildren();
     const lines = rows.filter((r) => r.__sc && r.__sc.ok);
-    const uncovered = terms.cv === "shares" ? null : h("p", { class: "dk-hint dk-uncovered" }, T("sc-uncovered"));
+    const uncovered = terms.cv === "shares" ? [] : [h("p", { class: "dk-hint dk-uncovered" }, T("sc-uncovered"))];
     if (bp === null || !rows.length) {
       const top = lines[0];
-      if (!top) { plan.hidden = true; plan.replaceChildren(); mods.best.append(h("p", { class: "dk-hint" }, rows.length ? "" : T(st.bpBad ? "bp-bad" : "bp-ask")), uncovered); return; }
+      if (!top) { plan.hidden = true; plan.replaceChildren(); mods.best.append(h("p", { class: "dk-hint" }, rows.length ? "" : T(st.bpBad ? "bp-bad" : "bp-ask")), ...uncovered); return; }
       const z = top.__sc;
       plan.hidden = false;
       plan.className = "dk-plan";
@@ -354,7 +354,7 @@
         UI.metrics([UI.metric("Earns", usdC(z.timeValueC), { tone: "up" }), UI.metric("Needs", usdC(z.collateralC)), UI.metric("Prem. ÷ coll.", pcOf(z))], { min: 72 }),
         h("p", { class: "dk-hint" }, T("sc-bp-ask")),
         z.premiumC > z.timeValueC ? h("p", { class: "dk-hint dk-itm" }, T("plan-itm", { x: usdC(z.premiumC - z.timeValueC), t: usdC(z.timeValueC) })) : null]);
-      mods.best.append(uncovered);
+      mods.best.append(...uncovered);
       return;
     }
     const { best, affordable } = planShortCalls(lines.map((r) => r.__sc));
@@ -385,7 +385,7 @@
           next.map((r) => h("div", { class: "dk-alt", role: "listitem" }, h("span", null, r.__sc.n + "× " + r.ticker + " " + kf(r.strike) + " call"), h("span", { class: "dk-alt-d" }, F.day(r.expiry)), h("span", { class: "dk-alt-r" }, pcOf(r.__sc)), h("b", null, usdC(r.__sc.timeValueC))))));
       }
     }
-    mods.best.append(uncovered);
+    mods.best.append(...uncovered);
     plan.dataset.plan = sentence;
   }
 
