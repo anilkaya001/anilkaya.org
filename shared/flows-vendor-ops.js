@@ -82,6 +82,10 @@ const RAW = [
   { id: "ownership", path: "/api/institution/{ticker}/ownership", licence: "text", klass: "slow", limiter: "ondemand", maxBytes: 131072, reads: ["name", "short_name", "units", "units_changed", "historical_units", "report_date", "filing_date", "shares_outstanding", "value"] },
   { id: "short-interest", path: "/api/shorts/{ticker}/interest-float/v2", licence: "aggregate", klass: "slow", limiter: "ondemand", maxBytes: 32768, reads: ["market_date", "short_interest", "total_float", "days_to_cover"] },
   { id: "insider-flow", path: "/api/insider/{ticker}/ticker-flow", licence: "aggregate", klass: "slow", limiter: "ondemand", maxBytes: 65536, reads: ["date", "buy_sell", "transactions", "uniq_insiders", "volume", "premium"] },
+  { id: "dividends", path: "/api/companies/{ticker}/dividends", licence: "aggregate", klass: "slow", maxBytes: 65536, reads: ["dividends", "ex_date", "declaration_date", "record_date", "payment_date", "amount"] },
+  { id: "splits", path: "/api/companies/{ticker}/splits", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["splits", "effective_date", "split_factor"] },
+  { id: "interpolated-iv", path: "/api/stock/{ticker}/interpolated-iv", licence: "derived", klass: "nightly", maxBytes: 32768, reads: ["date", "days", "percentile"] },
+  { id: "etf-exposure", path: "/api/etfs/{ticker}/exposure", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["etf", "weight", "shares"] },
 ];
 
 export const OPS = Object.freeze(RAW.map((e) => Object.freeze({
