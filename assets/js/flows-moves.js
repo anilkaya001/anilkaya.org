@@ -29,6 +29,7 @@
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const ivDays = (chg, iv) => (num(chg) === null || num(iv) === null || !(iv > 0) ? null : chg / (iv / SQRT_YEAR));
+  const logMove = (chg) => (num(chg) !== null && chg > -1 ? Math.log1p(chg) : null);
   const signed = (m) => (m < 0 ? MINUS : m > 0 ? "+" : "") + Math.abs(m).toFixed(1);
   const dirOf = (m) => (m > 0 ? "up" : m < 0 ? "dn" : "fl");
   const toneOf = (d) => (d === "up" ? "up" : d === "dn" ? "down" : "mut");
@@ -46,8 +47,9 @@
   }
   function rarityParts(x) {
     if (x.sig === null || !(x.sig > 0)) return null;
-    const k = Math.abs(x.chg) / x.sig;
-    const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+    const lm = logMove(x.chg);
+    if (lm === null) return null;
+    const level = Math.abs(lm) >= 3 * x.sig ? 3 : Math.abs(lm) >= 2 * x.sig ? 2 : 0;
     const hits = level === 3 ? x.f3 : level === 2 ? x.f2 : null;
     if (!level || hits === null || !Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return null;
     let how, short;
@@ -64,18 +66,21 @@
   }
   function rarityWhy(x) {
     if (x.sig === null || !(x.sig > 0)) return "No typical day is published for this name.";
-    if (Math.abs(x.chg) / x.sig < 2) return "No count is kept below 2 typical days.";
+    const lm = logMove(x.chg);
+    if (lm === null) return "No usable move is published for this name.";
+    if (Math.abs(lm) < 2 * x.sig) return "No count is kept below 2 typical days.";
     return "The count of days beyond that is not published.";
   }
 
   function sigOf(x) {
     const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
     if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
-    const z = chg / sig;
+    const lm = logMove(chg);
+    if (lm === null) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
+    const z = lm / sig;
     if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
-    const k = Math.abs(z);
-    if (k < SIG_MIN_Z) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
-    const level = k >= 3 ? 3 : 2;
+    if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
+    const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
     const hits = level === 3 ? x.f3 : x.f2;
     if (!Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return { t: x.t, state: "nocount", z, level, hits: null, p: null };
     return { t: x.t, state: "tested", z, level, hits, p: (hits + 1) / (SESSIONS + 1) };
@@ -168,7 +173,7 @@
       if (m === null) continue;
       const sig = num(r.sig);
       const ed = num(r.ed);
-      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 ? r.chg / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, event: ed !== null && ed <= EVENT_SESSIONS });
+      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, event: ed !== null && ed <= EVENT_SESSIONS });
     }
     return out;
   }

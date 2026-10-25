@@ -43,8 +43,9 @@
   function often(r) {
     const sig = r.sig;
     if (sig === null || !(sig > 0)) return { why: "scale" };
-    const k = Math.abs(r.chg) / sig;
-    const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+    if (!(r.chg > -1)) return { why: "scale" };
+    const lm = Math.abs(Math.log1p(r.chg));
+    const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;
     if (!level) return { why: "under" };
     const hits = level === 3 ? r.f3 : r.f2;
     if (!Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return { why: "scale" };
