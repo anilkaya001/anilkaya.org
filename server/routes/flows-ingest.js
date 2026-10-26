@@ -7,6 +7,7 @@ import {
 } from "../store.js";
 import { createDoor } from "../door.js";
 import { doorMode } from "../../shared/flows-door.js";
+import { carriesMarker } from "../../shared/flows-card-pack.js";
 
 const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE.FLOWS_MAX_PAYLOAD_BYTES;
 
@@ -133,8 +134,10 @@ export function flowsIngestRows(deps) {
       await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"),
     );
 
-    try { JSON.parse(payload); }
+    let parsed;
+    try { parsed = JSON.parse(payload); }
     catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }
+    if (key.startsWith("card-x:") && carriesMarker(parsed)) throw new HttpError(400, "invalid_payload", "A card-x payload may not carry the storage key pk");
 
     const bodyRefusal = contentRefusal(url, key, payload);
     if (bodyRefusal) throw bodyRefusal;

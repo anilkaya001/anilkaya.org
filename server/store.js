@@ -2,6 +2,7 @@ import { nightlyFreshMeta, TICKER_RE } from "../shared/flows-live.js";
 import { NIGHTLY_ROW_SQL, nightlyLedger, batchWithLedger } from "../shared/flows-live-worker.js";
 import { DOOR_LIMITS } from "../shared/flows-door.js";
 import { errorText } from "../shared/flows-log.js";
+import { packText, unpackText } from "../shared/flows-card-pack.js";
 
 export const DATED_ARCHIVE_KEY_RE = /^(board:(long|short)|scores):\d{4}-\d{2}-\d{2}$/;
 
@@ -116,9 +117,15 @@ export function ingestMetadata(asked, rows) {
   return keys;
 }
 
-export const storedFrom = (row) => (row && row.payload
-  ? { payload: row.payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) }
-  : null);
+const CARD_X_KEY_RE = /^card-x:/;
+
+const toStored = (env, key, text) => (env && env.FLOWS_CARDX_PACK === "on" && CARD_X_KEY_RE.test(key) ? packText(text) : text);
+
+export const storedFrom = (row, key = row && row.id) => {
+  if (!row || !row.payload) return null;
+  const payload = typeof key === "string" && CARD_X_KEY_RE.test(key) ? unpackText(row.payload) : row.payload;
+  return payload === null ? null : { payload, updatedAt: row.updated_at, fresh: nightlyFreshMeta(row) };
+};
 
 export function createFlowsStore({ ensureFlowsTables }) {
   return Object.freeze({
@@ -127,7 +134,7 @@ export function createFlowsStore({ ensureFlowsTables }) {
       await ensureFlowsTables(env);
       const row = await env.DB.prepare(NIGHTLY_ROW_SQL).bind(key).first()
         .catch(() => { if (trace) trace.failed = true; return null; });
-      return storedFrom(row);
+      return storedFrom(row, key);
     },
 
     async readMany(env, keys) {
@@ -161,7 +168,7 @@ export function createFlowsStore({ ensureFlowsTables }) {
     },
 
     async write(env, key, payload, at) {
-      const upsert = env.DB.prepare(UPSERT_SQL).bind(key, payload, at);
+      const upsert = env.DB.prepare(UPSERT_SQL).bind(key, toStored(env, key, payload), at);
       const landing = key === "meta" ? nightlyLedger(env.DB, JSON.parse(payload), at) : null;
       if (landing) await batchWithLedger(env.DB, [upsert], landing);
       else await upsert.run();
@@ -186,7 +193,7 @@ export function createFlowsStore({ ensureFlowsTables }) {
 
     async doorWrite(env, key, payload, at, m, { enforce = false } = {}) {
       const upsert = env.DB.prepare(DOOR_UPSERT_SQL + (enforce ? DOOR_CAS_SQL : ""))
-        .bind(key, payload, at, m.chash, m.session, m.quality, m.epoch, m.asof);
+        .bind(key, toStored(env, key, payload), at, m.chash, m.session, m.quality, m.epoch, m.asof);
       const landing = key === "meta" ? nightlyLedger(env.DB, JSON.parse(payload), at) : null;
       const done = landing ? await batchWithLedger(env.DB, [upsert], landing) : await upsert.run();
       const first = Array.isArray(done) ? done[0] : done;
@@ -198,7 +205,7 @@ export function createFlowsStore({ ensureFlowsTables }) {
       const prepared = items.map((it, index) => ({
         index,
         stmt: env.DB.prepare(DOOR_UPSERT_SQL + (enforce ? DOOR_CAS_SQL : ""))
-          .bind(it.key, it.payload, at, it.m.chash, it.m.session, it.m.quality, it.m.epoch, it.m.asof),
+          .bind(it.key, toStored(env, it.key, it.payload), at, it.m.chash, it.m.session, it.m.quality, it.m.epoch, it.m.asof),
       }));
       let trips = 0;
       let failed = 0;

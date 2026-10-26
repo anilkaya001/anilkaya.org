@@ -206,7 +206,7 @@ export async function runFocus(ctx) {
       skip: deepen ? deepen.keep : new Set(),
     });
     console.log(`  card-x: ${cx.written} written` + (cx.kept ? `, ${cx.kept} deep read(s) kept as they stand` : "") + (cx.failed ? `, ${cx.failed} failed` : "") +
-      (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes`);
+      (cx.over ? `, ${cx.over} over the cap` : "") + `, largest ${cx.largest} bytes, ${cx.largestStored} stored`);
   }
   Object.assign(ctx, { dossierBuilt });
 }

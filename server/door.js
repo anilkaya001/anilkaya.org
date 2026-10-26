@@ -2,6 +2,7 @@ import { HttpError, json, readBounded, requireMethod } from "./http.js";
 import { logFailure } from "./log.js";
 import { DATED_ARCHIVE_KEY_RE, ingestKeyParts } from "./store.js";
 import { PERMANENT_ARCHIVE_KEY_RE } from "../shared/flows-archive.js";
+import { carriesMarker } from "../shared/flows-card-pack.js";
 import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
 import {
   DOOR_LIMITS, assess, inspect, membershipFlag, parseHashHeader, planOf, producerOf, sha256Hex, tickerOfKey,
@@ -115,7 +116,9 @@ export function createDoor({ store, ensureFlowsTables, storeGone, log = logFailu
       const text = typeof item.payload === "string" ? item.payload : item.payload === undefined ? null : JSON.stringify(item.payload);
       if (text === null) { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
       if (text.length > FLOWS_MAX_PAYLOAD_BYTES) { refuse("payload_too_large", "Payload too large"); continue; }
-      try { JSON.parse(text); } catch { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
+      let value;
+      try { value = JSON.parse(text); } catch { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
+      if (key.startsWith("card-x:") && carriesMarker(value)) { refuse("invalid_payload", "A card-x payload may not carry the storage key pk"); continue; }
       live.push({ i, key, text, header: typeof item.hash === "string" ? item.hash : null });
     }
     const examined = [];
