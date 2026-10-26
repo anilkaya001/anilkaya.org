@@ -2,6 +2,7 @@ import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
 import { askShareRead } from "./flows-tape-stats.js";
 import { opById } from "./flows-vendor-ops.js";
+import { usableX, exSplit, ETF_TOP } from "./flows-vendor-extras.js";
 
 export const DOSSIER_VERSION = 1;
 
@@ -47,6 +48,7 @@ export const REASONS = Object.freeze({
   behind: "the source describes an earlier session than the last close",
   expired: "the source is two or more sessions behind the last close",
   scope: "this build does not read it",
+  shed: "the nightly left it out of the stored card to keep the card inside its size limit",
 });
 
 const MINUS = String.fromCharCode(0x2212);
@@ -823,6 +825,47 @@ export function buildEventsPacket(inp) {
   if (!day && uni && isNum(uni.u && uni.u.ed)) {
     rec.fact("sessions", "Sessions until the next earnings report", uni.u.ed, "sessions", { grade: gradeBySession(behindBy(uni.sessionDate, ctx.expected)), note: "the nightly screen's count" });
   }
+  const vx = h.cardX && isObj(h.cardX.vx) ? h.cardX.vx : null;
+  const vxGrade = (u) => (u.state === "stale" ? Math.min(1, gradeBySession(xGap)) : gradeBySession(xGap));
+  const vxNote = (u) => "read " + String(isoOf(u.at)).slice(0, 10) + (u.state === "stale" ? ", older than the refresh age" : "");
+  const dv = vx && xGap < 2 ? usableX(vx, "dividends", ctx.now) : null;
+  const sp = vx && xGap < 2 ? usableX(vx, "splits", ctx.now) : null;
+  if (dv && dv.x.ok === true) {
+    parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
+    const g = vxGrade(dv);
+    if (dv.x.none === true) {
+      rec.fact("dividend.history", "Dividend events on record", "none on record", "text", { grade: g, note: vxNote(dv) + "; the vendor's list was read and holds no dividend for this name, and the list can be incomplete" });
+    } else {
+      const ex = exSplit(dv.x, ctx.expected);
+      rec.fact("dividend.next", "Next declared ex-dividend date", ex.next, "date", { grade: g, note: vxNote(dv) + "; a call in the money can be exercised early in the session before this date", why: why("absent", "no future ex-dividend date is declared; the vendor's list can be incomplete") });
+      rec.fact("dividend.last", "Last ex-dividend date", ex.last, "date", { grade: g, note: vxNote(dv) });
+      if (dv.x.cadence && dv.x.cadence !== "insufficient") {
+        rec.fact("dividend.cadence", "Dividend cadence", dv.x.cadence, "text", { grade: Math.min(g, 2), note: "derived from the median gap of " + Math.round(dv.x.gapDays) + " days between the last ex-dividend dates" });
+      }
+      if (!ex.next && isObj(dv.x.expected) && isoDay(dv.x.expected.from) && isoDay(dv.x.expected.to) && dv.x.expected.to > ctx.expected) {
+        rec.fact("dividend.expected", "Expected ex-dividend window", dv.x.expected.from + " to " + dv.x.expected.to, "text", { grade: Math.min(g, 1), note: "inferred from the usual schedule, not declared" });
+      }
+      rec.hold("dividend.amount", why("unit", "dividends route: amount"));
+    }
+  } else if (dv && dv.x.ok === false) {
+    rec.hold("dividend", why(dv.x.reason === "plan" ? "plan" : "empty", "dividends route"));
+  }
+  if (vx && xGap < 2 && isObj(vx.parts)) {
+    if (isObj(vx.parts.dividends) && vx.parts.dividends.shed === 1) rec.hold("dividend", why("shed", "dividends route"));
+    if (isObj(vx.parts.splits) && vx.parts.splits.shed === 1) rec.hold("split", why("shed", "splits route"));
+  }
+  if (sp && sp.x.ok === true) {
+    if (!parts.some((q) => q.key === "card-x:" + ctx.ticker)) parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
+    const g = vxGrade(sp);
+    if (sp.x.none === true) {
+      rec.fact("split.history", "Stock splits on record", "none on record", "text", { grade: g, note: vxNote(sp) });
+    } else {
+      const future = arr(sp.x.upcoming).filter((d) => isoDay(d) && d > ctx.expected);
+      rec.fact("split.last", "Last stock split effective date", sp.x.last, "date", { grade: g, note: vxNote(sp) });
+      if (future.length) rec.fact("split.next", "Next stock split effective date", future[0], "date", { grade: g, note: vxNote(sp) });
+      rec.hold("split.factor", why("unit", "splits route: split_factor"));
+    }
+  }
   if (!info) miss(rec, inp, "info", "info route");
   return build("events", inp, {
     title: "Events and catalysts", source: nightlySource("events", parts),
@@ -1416,6 +1459,32 @@ export function buildPeersPacket(inp) {
     rec.hold("universe", why("expired", "the screen describes " + uni.sessionDate));
   } else {
     rec.hold("universe", why("absent", "this name is not in tonight's universe"));
+  }
+  const vx = h.cardX && isObj(h.cardX.vx) ? h.cardX.vx : null;
+  const xGapP = h.cardX ? behindBy(h.cardX.sessionDate, ctx.expected) : 0;
+  const ef = vx && xGapP < 2 ? usableX(vx, "etf", ctx.now) : null;
+  const iv = vx && xGapP < 2 ? usableX(vx, "ivp", ctx.now) : null;
+  const vgP = (u) => (u.state === "stale" ? Math.min(1, gradeBySession(xGapP)) : gradeBySession(xGapP));
+  const readNote = (u) => "read " + String(isoOf(u.at)).slice(0, 10) + (u.state === "stale" ? ", older than the refresh age" : "");
+  if (ef && ef.x.ok === true) {
+    parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
+    const g = vgP(ef);
+    const top = arr(ef.x.top).filter((e) => Array.isArray(e) && typeof e[0] === "string").slice(0, ETF_TOP);
+    rec.fact("etf.count", "ETFs that hold this name (vendor list)", ef.x.n, "count", { grade: g, note: readNote(ef) + "; the list can be incomplete" });
+    if (top.length) rec.fact("etf.top", "Largest ETF holders by weight", top.slice(0, 5).map((e) => e[0]).join(", "), "text", { grade: g, note: "ordered by weight; the weight itself is withheld because the vendor states no unit for it" });
+    if (isNum(ef.x.sharesSum) && ef.x.sharesRows > 0) {
+      rec.fact("etf.shares", "Shares held by those ETFs", ef.x.sharesSum, "shares", { grade: Math.min(g, 2), note: "the sum of " + ef.x.sharesRows + " of " + ef.x.n + " ETF rows that state a share count; a floor" });
+    }
+  } else if (ef && ef.x.ok === false) {
+    rec.hold("etf", why(ef.x.reason === "plan" ? "plan" : "empty", "ETF exposure route"));
+  }
+  if (vx && xGapP < 2 && isObj(vx.parts) && isObj(vx.parts.etf) && vx.parts.etf.shed === 1) rec.hold("etf", why("shed", "ETF exposure route"));
+  if (iv && iv.x.ok === true) {
+    if (!parts.some((q) => q.key === "card-x:" + ctx.ticker)) parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
+    const g = vgP(iv);
+    if (isNum(iv.x.p30)) rec.fact("ivp.30", "30-day implied volatility, percentile of its own past year (vendor)", iv.x.p30, "pctile", { grade: g, note: readNote(iv) + "; dated " + iv.x.date });
+    const curve = arr(iv.x.tenors).filter((e) => Array.isArray(e) && isNum(e[0]) && isNum(e[1])).slice(0, 8);
+    if (curve.length > 1) rec.fact("ivp.curve", "Implied volatility percentile of its own past year, by tenor (vendor)", curve.map((e) => e[0] + "d " + Math.round(e[1])).join(", "), "text", { grade: g, silent: true });
   }
   const etf = h.sectorEtf && isObj(h.sectorEtf) ? h.sectorEtf : null;
   let asOf = null;

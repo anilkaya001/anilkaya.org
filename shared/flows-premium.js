@@ -102,6 +102,21 @@ export function midImpliedVol({ spot, strike, type, mid, years, rate = PRICING_R
   return Number.isFinite(iv) && iv > 0 ? iv : null;
 }
 
+export const roundCents = (dollars) => Math.round(dollars * 100 + 1e-9 + Math.abs(dollars) * 1e-13);
+
+export function premiumLine({ bid, strategy, strike, spot } = {}) {
+  const none = (why, premiumC = null) => ({ ok: false, why, premiumC, collateralC: null, ratio: null });
+  const b = numOrNull(bid);
+  if (b === null || !(b > 0)) return none("no-bid");
+  const premiumC = roundCents(b * SHARES_PER_CONTRACT);
+  if (!(premiumC > 0)) return none("no-bid");
+  const base = numOrNull(strategy === "csp" ? strike : spot);
+  if (base === null || !(base > 0)) return none(strategy === "csp" ? "no-strike" : "no-spot", premiumC);
+  const collateralC = roundCents(base * SHARES_PER_CONTRACT);
+  if (!(collateralC > 0)) return none("no-collateral", premiumC);
+  return { ok: true, why: null, premiumC, collateralC, ratio: premiumC / collateralC };
+}
+
 const QUOTE_NOISE = 1e-9;
 const withoutNoise = (dollars) => (Math.abs(dollars) < QUOTE_NOISE ? 0 : dollars);
 
@@ -157,6 +172,8 @@ export function priceSale(row, {
   const oi = numOrNull(row.open_interest);
   const prevOi = numOrNull(row.prev_oi);
 
+  const line = premiumLine({ bid, strategy, strike: parsed.strike, spot });
+
   const priced = {
     symbol: row.option_symbol,
     ticker: parsed.ticker,
@@ -168,6 +185,9 @@ export function priceSale(row, {
     bid, ask, mid, spread,
     premium,
     collateral,
+    premiumC: line.premiumC,
+    collateralC: line.collateralC,
+    premiumRatio: line.ratio,
     intrinsic: inherent,
     extrinsic,
     yieldOnCollateral,
@@ -312,7 +332,7 @@ export const DEFAULT_GATES = Object.freeze({
   maxDays: 400,
 });
 
-export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollateral", "cushionSigmas"]);
+export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollateral", "cushionSigmas", "premiumRatio"]);
 
 const before = (x, y) => {
   if (x === null || x === undefined) return y === null || y === undefined ? 0 : 1;
@@ -653,7 +673,7 @@ export function crossesEarnings(expiry, earningsDate, announceTime, { asOf = nul
   return null;
 }
 
-const cents = (dollars) => Math.round(dollars * 100);
+const cents = roundCents;
 
 export function betterDeployment(a, b) {
   if (a.timeValueC !== b.timeValueC) return a.timeValueC > b.timeValueC;
@@ -713,8 +733,6 @@ export const SC_REG_T = Object.freeze({ base: 0.2, floor: 0.1 });
 export const SC_LIMITS = Object.freeze({ contractsMax: 100000, haircut: Object.freeze([0.05, 1]), floor: Object.freeze([0, 0.5]) });
 export const SC_CONVENTIONS = Object.freeze(["delta", "regt", "shares"]);
 
-export const roundCents = (dollars) => Math.round(dollars * 100 + 1e-9 + Math.abs(dollars) * 1e-13);
-
 export function parseContracts(raw) {
   const text = String(raw === null || raw === undefined ? "" : raw).trim().toLowerCase();
   const m = /^(\d{1,3}(?:,\d{3})+|\d+)(k?)$/.exec(text);
@@ -770,8 +788,8 @@ export function shortCallLine(row, { spot, delta = null, days, contracts = SC_DE
   if (bid === null || !(bid > 0)) return { ...base, why: "no-bid" };
   const col = shortCallCollateral({ convention, spot: S, strike: K, delta, haircut, floor });
   const regt = shortCallCollateral({ convention: "regt", spot: S, strike: K });
-  const bidC = Math.round(bid * 10000);
-  const intrC = Math.round(Math.max(0, S - K) * 10000);
+  const bidC = roundCents(bid * SHARES_PER_CONTRACT);
+  const intrC = roundCents(Math.max(0, S - K) * SHARES_PER_CONTRACT);
   const tvC = Math.max(0, bidC - intrC);
   const out = { ...base, bidC, intrC, tvC, regtM1C: regt.ok ? regt.m1C : null };
   if (!col.ok) return { ...out, why: col.why };

@@ -11,6 +11,7 @@ import { DRY_RUN } from "../flags.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { num } from "../../../shared/flows-features.js";
 import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
+import { extrasCap, extrasMode } from "../../../shared/flows-vendor-extras.js";
 import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, candleDate, candlesAscending, daysToEarnings, repairCandles, sessionCandles, sessionRow } from "../rank.mjs";
 
 export async function runMarket(ctx) {
@@ -124,6 +125,7 @@ export async function runMarket(ctx) {
       deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
+      extras: extrasMode(process.env) === "off" ? null : { readPrior: (t) => readStored("card-x:" + t), cap: extrasCap(process.env) },
       log: (line) => console.log(line),
     });
     for (const [t, part] of marketLegs.ownership) {
@@ -131,6 +133,12 @@ export async function runMarket(ctx) {
       cardX.add(t, "insiders", part.insiders);
     }
     for (const [t, e] of marketLegs.earnings) cardX.add(t, "earnings", e);
+    if (marketLegs.extras) {
+      for (const [t, sec] of marketLegs.extras.sections) {
+        if (sec.dx) cardX.add(t, "dx", sec.dx);
+        if (sec.vx) cardX.add(t, "vx", sec.vx);
+      }
+    }
     console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
   }, (error) => {
     console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);

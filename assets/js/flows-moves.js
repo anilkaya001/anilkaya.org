@@ -20,7 +20,7 @@
   const SIG_Q = 0.1, SIG_MIN_Z = 2;
   const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
   const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
-  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 21 sessions: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
@@ -29,6 +29,7 @@
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const ivDays = (chg, iv) => (num(chg) === null || num(iv) === null || !(iv > 0) ? null : chg / (iv / SQRT_YEAR));
+  const logMove = (chg) => (num(chg) !== null && chg > -1 ? Math.log1p(chg) : null);
   const signed = (m) => (m < 0 ? MINUS : m > 0 ? "+" : "") + Math.abs(m).toFixed(1);
   const dirOf = (m) => (m > 0 ? "up" : m < 0 ? "dn" : "fl");
   const toneOf = (d) => (d === "up" ? "up" : d === "dn" ? "down" : "mut");
@@ -46,8 +47,9 @@
   }
   function rarityParts(x) {
     if (x.sig === null || !(x.sig > 0)) return null;
-    const k = Math.abs(x.chg) / x.sig;
-    const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+    const lm = logMove(x.chg);
+    if (lm === null) return null;
+    const level = Math.abs(lm) >= 3 * x.sig ? 3 : Math.abs(lm) >= 2 * x.sig ? 2 : 0;
     const hits = level === 3 ? x.f3 : level === 2 ? x.f2 : null;
     if (!level || hits === null || !Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return null;
     let how, short;
@@ -64,18 +66,21 @@
   }
   function rarityWhy(x) {
     if (x.sig === null || !(x.sig > 0)) return "No typical day is published for this name.";
-    if (Math.abs(x.chg) / x.sig < 2) return "No count is kept below 2 typical days.";
+    const lm = logMove(x.chg);
+    if (lm === null) return "No usable move is published for this name.";
+    if (Math.abs(lm) < 2 * x.sig) return "No count is kept below 2 typical days.";
     return "The count of days beyond that is not published.";
   }
 
   function sigOf(x) {
     const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
     if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
-    const z = chg / sig;
+    const lm = logMove(chg);
+    if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
+    const z = lm / sig;
     if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
-    const k = Math.abs(z);
-    if (k < SIG_MIN_Z) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
-    const level = k >= 3 ? 3 : 2;
+    if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
+    const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
     const hits = level === 3 ? x.f3 : x.f2;
     if (!Number.isInteger(hits) || hits < 0 || hits > SESSIONS) return { t: x.t, state: "nocount", z, level, hits: null, p: null };
     return { t: x.t, state: "tested", z, level, hits, p: (hits + 1) / (SESSIONS + 1) };
@@ -168,7 +173,7 @@
       if (m === null) continue;
       const sig = num(r.sig);
       const ed = num(r.ed);
-      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 ? r.chg / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, event: ed !== null && ed <= EVENT_SESSIONS });
+      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, event: ed !== null && ed <= EVENT_SESSIONS });
     }
     return out;
   }

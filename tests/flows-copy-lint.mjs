@@ -15,9 +15,17 @@ const BADGE = /["'`>]NOW["'`<]/;
 const LITERAL = /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`/g;
 const TAPE = /\btapes?\b/i;
 
+const RR_NAMED = /risk reversal/i;
+const RR_SIGNED = /risk reversal[^"'`]{0,80}\bput\b/i;
+export const unsignedRiskReversal = (text) => (String(text).match(LITERAL) || []).filter((lit) => RR_NAMED.test(lit) && !RR_SIGNED.test(lit));
+
+const NET_SIDE_FIELD = /\bnet(?:Positive|Negative)\b/;
+const NET_SIDE_LABEL = /\bnet (?:call|put) premium\b/i;
+
 const RULES = Object.freeze([
   { id: "side", re: SIDE, scope: "all", why: "the vendor's term is ask side and bid side; a fill price is not carried by the field" },
   { id: "now", re: BADGE, scope: "browser", why: "NOW is retired as a name for the Screen" },
+  { id: "netsplit", test: (line, next) => NET_SIDE_FIELD.test(line) && (line.match(LITERAL) || []).concat(NET_SIDE_FIELD.test(line) ? (next || "").match(LITERAL) || [] : []).some((lit) => NET_SIDE_LABEL.test(lit)), scope: "browser", why: "netPositive and netNegative are sums of each name's calls less puts over the names leaning each way, not call premium and not put premium" },
   { id: "tape", test: (line) => (line.match(LITERAL) || []).some((lit) => TAPE.test(lit) && (/\s/.test(lit) || /^.(?:Tapes?|TAPES?|tapes)\W?.$/.test(lit))), scope: "all", why: "the word is not used in reader-facing or model-visible text; identifiers without a space are not text" },
 ]);
 
@@ -28,7 +36,7 @@ export function lintText(text, kind) {
     if (rule.scope === "browser" && kind !== "browser") continue;
     for (let i = 0; i < lines.length; i++) {
       if (rule.test) {
-        if (rule.test(lines[i])) hits.push({ rule: rule.id, line: i + 1, text: lines[i].trim().slice(0, 80) });
+        if (rule.test(lines[i], lines[i + 1])) hits.push({ rule: rule.id, line: i + 1, text: lines[i].trim().slice(0, 80) });
         continue;
       }
       const m = rule.re.exec(lines[i]);
@@ -74,6 +82,14 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
   eq(lintText('const k = "tape", u = "/api/flows/tape", x = "X-Tape", g = "m-tape"; STATE.tape = tapeSub("live")', "browser").length, 0, "identifiers pass");
   eq(lintText("Calls · ask side, Puts · bid side, Unsided", "browser").length, 0, "the vendor's terms pass");
   eq(lintText("sold into the bid", "browser").length, 0, "and so does a sale into the bid");
+  eq(unsignedRiskReversal('"risk reversal " + volPts(rr) + " vol points."').length, 1, "a planted risk reversal with no sign convention is found");
+  eq(unsignedRiskReversal('"risk reversal (put minus call) " + volPts(rr)').length, 0, "and the stated convention passes");
+  eq(unsignedRiskReversal('"25 and 10 delta risk reversals (put volatility minus call volatility)"').length, 0, "so does a spelled-out one");
+  eq(unsignedRiskReversal('xSt(X.skew, "risk-reversal history")').length, 0, "and a hyphenated identifier-like phrase");
+  eq(lintText('row("By dollars", usd(premium.netPositive) + " of net call premium against " +\n usd(premium.netNegative) + " of net put premium.")', "browser")[0].rule, "netsplit", "a planted 'net call premium' label on netPositive is found");
+  eq(lintText('["Net put premium", usd(premium.netNegative)],', "browser")[0].rule, "netsplit", "a planted 'Net put premium' label on netNegative is found");
+  eq(lintText('words: usd(pos) + " net call premium against " + usd(neg)', "browser").length, 0, "a sentence about the tide's own net call premium passes");
+  eq(lintText('usd(premium.netPositive) + " of net premium in names leaning bullish"', "browser").length, 0, "the corrected label passes");
 }
 
 {
@@ -84,6 +100,14 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
   for (const f of browserFiles) for (const h of lintText(fs.readFileSync(path.join(ROOT, f), "utf8"), "browser")) found.push(`${f}:${h.line} [${h.rule}] ${h.text}`);
   for (const f of serverFiles) for (const h of lintText(fs.readFileSync(path.join(ROOT, f), "utf8"), "server")) found.push(`${f}:${h.line} [${h.rule}] ${h.text}`);
   eq(found.join("\n"), "", "no reader-facing or model-visible string says 'tape', 'at ask', 'at the ask', 'at bid' or 'at the bid', and no browser file badges the Screen NOW; the allowlist is empty");
+}
+
+{
+  const bare = [];
+  for (const f of ["assets/js/flows-ticker-glance.js", "assets/js/flows-ticker-surface.js", "assets/js/flows-ticker.js"]) {
+    for (const lit of unsignedRiskReversal(fs.readFileSync(path.join(ROOT, f), "utf8"))) bare.push(`${f}: ${lit.slice(0, 90)}`);
+  }
+  eq(bare.join("\n"), "", "every reader-facing mention of a risk reversal on the ticker page states that it is the put volatility minus the call volatility");
 }
 
 {

@@ -1,4 +1,4 @@
-.dk-list.is-sc .dk-row, .dk-list.is-sc .dk-head { grid-template-columns: 22px minmax(150px, 1.5fr) repeat(7, minmax(58px, 1fr)) 28px; }
+.dk-list.is-sc .dk-row, .dk-list.is-sc .dk-head { grid-template-columns: 22px minmax(150px, 1.5fr) minmax(112px, 1.5fr) repeat(6, minmax(58px, 1fr)) 28px; }
 .dk-list.is-sc .dk-ratio { color: var(--accent-ink); font: var(--t-headline); font-variant-numeric: tabular-nums; }
 .dk-list.is-sc .dk-ratio[data-tone] { color: var(--tone); }
 .dk-list.is-sc .dk-nd { color: var(--label-1); }
@@ -124,6 +124,7 @@
 }
 .dk-list > * { flex: none; }
 .dk-list.is-sc .dk-sub { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dk-list.is-sc .dk-ratio .dk-sub { white-space: normal; max-width: none; overflow: visible; text-align: right; }
 
 @media (max-width: 639.98px) {
   .dk-all-btn { padding: 0 10px; }

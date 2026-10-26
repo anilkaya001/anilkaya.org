@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
 import { flowsPageRows } from "../server/routes/flows-pages.js";
@@ -69,8 +70,8 @@ function freqOf(r, event) {
   if (event) return { why: "event", freq: null };
   const sig = r[5];
   if (sig === undefined || sig === null) return { why: "scale", freq: null };
-  const k = Math.abs(r[2]) / sig;
-  const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+  const lr = Math.abs(Math.log1p(r[2]));
+  const level = lr >= 3 * sig ? 3 : lr >= 2 * sig ? 2 : 0;
   if (!level) return { why: "under", freq: null };
   const hits = level === 3 ? r[7] : r[6];
   const floored = hits === 0 || SESS / hits > FLOOR;
@@ -222,6 +223,18 @@ const reveal = async (page) => {
   }
   throw new Error("the skyline never mounted");
 };
+
+const rungOf = (src) => {
+  const win = {};
+  vm.runInNewContext(src, { window: win, Math, Number, Array, Object, String, Set, Map, JSON, Date, Error });
+  const rows = [["UP97", 0, 0.097, 0.2, 40, 0.032, 11, 5], ["DN95", 0, -0.095, 0.2, 40, 0.032, 11, 5], ["UP25", 0, Math.expm1(2.5 * 0.02), 0.2, 40, 0.02, 11, 5],
+    ["DN25", 0, Math.expm1(-2.5 * 0.02), 0.2, 40, 0.02, 11, 5], ["UP301", 0, Math.expm1(3.01 * 0.02), 0.2, 40, 0.02, 11, 5], ["UP199", 0, Math.expm1(1.99 * 0.02), 0.2, 40, 0.02, 11, 5]];
+  const md = JSON.parse(JSON.stringify(win.FlowsUI.skyline.model(universe(rows))));
+  return Object.fromEntries(md.prisms.map((p) => [p.t, p.often ? p.often.level : 0]));
+};
+const RUNG = { UP97: 2, DN95: 3, UP25: 2, DN25: 2, UP301: 3, UP199: 0 };
+eq(rungOf(SRC), RUNG, "the rung of a move is read off its log return, the way the nightly counts are: +9.7% on a 3.2% typical day is 2.9 typical days, -9.5% is 3.1");
+ok(Object.keys(rungOf(SRC.replace("const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;", "const level = Math.abs(r.chg) >= 3 * sig ? 3 : Math.abs(r.chg) >= 2 * sig ? 2 : 0;"))).some((t) => rungOf(SRC.replace("const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;", "const level = Math.abs(r.chg) >= 3 * sig ? 3 : Math.abs(r.chg) >= 2 * sig ? 2 : 0;"))[t] !== RUNG[t]), "and the planted build that reads the rung off the simple change fails that table");
 
 const TAB = { ivdays: 0, often: 1 };
 const tabs = (page) => page.locator('#mkSkyline [role="tab"]');
@@ -539,7 +552,7 @@ try {
     ["colour not tied to the direction", "const c = it.dir > 0 ? up : down;", "const c = up;"],
     ["IV-days printed without a sign", 'const sign = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");', 'const sign = () => "";'],
     ["a 1 in N printed past the floor", "const floored = hits === 0 || SESSIONS / hits > FLOOR_N;", "const floored = hits === 0;"],
-    ["the 3x count taken at 2x", "const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;", "const level = k >= 2 ? 2 : 0;"],
+    ["the 3x count taken at 2x", "const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;", "const level = lm >= 2 * sig ? 2 : 0;"],
     ["the rung's count read from the wrong column", "const hits = level === 3 ? r.f3 : r.f2;", "const hits = r.f2;"],
     ["callouts for the most common days", "? (a, b) => b.often.n - a.often.n || byHeight(a, b)", "? (a, b) => a.often.n - b.often.n || byHeight(a, b)"],
     ["callout boxes over the prisms", "const r = { ...b, x: bx, y };", "const r = { ...b, x: Math.round(ox), y };"],

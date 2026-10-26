@@ -670,18 +670,20 @@ function priceCandidate(cand, ctx) {
 
 export function scenarioGrid(legs, vctx, cost, S, front, levels) {
   const dte = front.dte;
-  const days = [0, Math.round(dte / 3), Math.round(2 * dte / 3), dte];
+  const raw = [0, Math.round(dte / 3), Math.round(2 * dte / 3), dte];
+  const days = raw.filter((d, i) => i === 0 || i === raw.length - 1 || (d > 0 && d < dte && d !== raw[i - 1]));
   const atmVol = sliceVolK(front.slice, 0);
-  const sd = atmVol * Math.sqrt(dte / 365);
+  if (!(front.T > 0) || !fin(atmVol)) return null;
+  const sd = atmVol * Math.sqrt(front.T);
   const spots = ENGINE_LINES.GRID_Z.map((z) => S * Math.exp(z * sd));
   const lo = spots[0], hi = spots[spots.length - 1];
   const extra = [];
   if (levels) for (const key of ["callWall", "putWall", "flip"]) { const v = levels[key]; if (fin(v) && v > lo && v < hi) extra.push(v); }
   const rows = [...spots, ...extra];
   const vols = ENGINE_LINES.GRID_VOL.slice();
-  const pnl = rows.map((x) => vols.map((dv) => days.map((d) => {
-    const t = Math.min(front.T, d / 365);
-    const tt = d >= dte ? front.T : t;
+  const last = days.length - 1;
+  const pnl = rows.map((x) => vols.map((dv) => days.map((d, j) => {
+    const tt = j === last ? front.T : Math.min(front.T, d / 365);
     return r$((structureValue(legs, vctx, x, tt, dv) - cost) * LOT);
   })));
   return { spot: rows.map(rp), vol: vols, days, pnl };

@@ -37,9 +37,28 @@ const plain = (x) => JSON.parse(JSON.stringify(x));
 
 const dayText = (iso) => MONTHS[+iso.slice(5, 7) - 1] + " " + +iso.slice(8, 10);
 const halfUp = (num, den) => (2n * BigInt(num) + BigInt(den)) / (2n * BigInt(den));
+const SCALE = 10n ** 60n;
+const expUp = (x, den) => {
+  let term = SCALE, sum = SCALE;
+  for (let n = 1n; n < 120n; n++) {
+    term = (term * x) / (den * n);
+    sum += term;
+    if (term === 0n) break;
+  }
+  return sum;
+};
+const factorOf = (sigInt, k, dir) => {
+  const up = expUp(BigInt(k) * BigInt(sigInt), 100000n);
+  return dir > 0 ? up : (SCALE * SCALE) / up;
+};
 const dollars = (spotCents, sigInt, k, dir) => {
-  const cents = halfUp(BigInt(spotCents) * (100000n + BigInt(dir) * BigInt(k) * BigInt(sigInt)), 100000n);
+  const cents = halfUp(BigInt(spotCents) * factorOf(sigInt, k, dir), SCALE);
   return "$" + Number(cents / 100n).toLocaleString("en-US") + "." + String(cents % 100n).padStart(2, "0");
+};
+const simplePct = (sigInt, k, dir) => {
+  const f = factorOf(sigInt, k, dir);
+  const hundredths = halfUp((dir > 0 ? f - SCALE : SCALE - f) * 10000n, SCALE);
+  return (dir > 0 ? "+" : "\u2212") + (hundredths / 100n) + "." + String(hundredths % 100n).padStart(2, "0") + "%";
 };
 const usdOf = (cents) => "$" + Number(BigInt(cents) / 100n).toLocaleString("en-US") + "." + String(BigInt(cents) % 100n).padStart(2, "0");
 const pctOf = (units, perUnit) => {
@@ -146,7 +165,9 @@ function modelFailures(M) {
       note(M.fmt.usd(r.up) === dollars(spotCents, sigInt, k, 1), `${spotCents}/${sigInt}: up at ${k} prints ${M.fmt.usd(r.up)}, the exact figure is ${dollars(spotCents, sigInt, k, 1)}`);
       note(M.fmt.usd(r.down) === dollars(spotCents, sigInt, k, -1), `${spotCents}/${sigInt}: down at ${k} prints ${M.fmt.usd(r.down)}, the exact figure is ${dollars(spotCents, sigInt, k, -1)}`);
       note(r.up > spot && r.down < spot && r.down > 0, "up is above spot, down is below it and above zero");
-      note(Math.abs((r.up - spot) - (spot - r.down)) < 1e-9 * spot, "the two steps from spot are equal");
+      note(Math.abs(r.up * r.down - spot * spot) < 1e-9 * spot * spot, "the two levels are mirror images in log space: their product is the price squared");
+      note(Math.abs(Math.log(r.up / spot) - r.move) < 1e-12 && Math.abs(Math.log(spot / r.down) - r.move) < 1e-12, `${spotCents}/${sigInt}: size ${k} is a log move, the same rule the count applies`);
+      note(`+${M.fmt.pct(r.upPct)}` === simplePct(sigInt, k, 1) && `\u2212${M.fmt.pct(r.downPct)}` === simplePct(sigInt, k, -1), `${spotCents}/${sigInt}: size ${k} states its simple percent, ${simplePct(sigInt, k, 1)} up and ${simplePct(sigInt, k, -1)} down`);
     });
     note(m.ladder[1].count.basis === "nightly" && m.ladder[1].count.hits === 11 && m.ladder[2].count.hits === 5, "two and three typical days read the nightly counts");
     note(m.ladder[0].count.hits === undefined && m.ladder[3].count.hits === undefined, "one and four typical days with no closes on the card are withheld, never zero");
@@ -256,7 +277,9 @@ eq(hitsOf(), [], "every count from 0 to 252 reads as the leaf's sentence");
 const MUTANTS = [
   ["const move = k * sig;", "const move = (k * sig) / 100;", "the typical day taken as a percent in the levels"],
   ["const pctText = (x) => r2(x * 100).toFixed(2) + \"%\";", "const pctText = (x) => r2(x).toFixed(2) + \"%\";", "the typical day printed as if already a percent"],
-  ["out.ladder.push({ k, move, up: spot * (1 + move), down: spot * (1 - move), count });", "out.ladder.push({ k, move, up: spot * (1 - move), down: spot * (1 + move), count });", "up and down levels swapped"],
+  ["out.ladder.push({ k, move, up: spot * Math.exp(move), down: spot * Math.exp(-move), upPct: Math.expm1(move), downPct: -Math.expm1(-move), count });", "out.ladder.push({ k, move, up: spot * Math.exp(-move), down: spot * Math.exp(move), upPct: Math.expm1(move), downPct: -Math.expm1(-move), count });", "up and down levels swapped"],
+  ["out.ladder.push({ k, move, up: spot * Math.exp(move), down: spot * Math.exp(-move), upPct: Math.expm1(move), downPct: -Math.expm1(-move), count });", "out.ladder.push({ k, move, up: spot * (1 + move), down: spot * (1 - move), upPct: move, downPct: move, count });", "straight-line levels beside a log-return count"],
+  ["out.ladder.push({ k, move, up: spot * Math.exp(move), down: spot * Math.exp(-move), upPct: Math.expm1(move), downPct: -Math.expm1(-move), count });", "out.ladder.push({ k, move, up: spot * Math.exp(move), down: spot * Math.exp(-move), upPct: move, downPct: move, count });", "the simple percent printed as the log size"],
   ["if (hits === 0 || SESSIONS / hits > FLOOR_N) {", "if (hits === 0) {", "the 1 in 250 floor missing"],
   ["const FLOOR_N = 250;", "const FLOOR_N = 500;", "the floor at 1 in 500"],
   ["const SIG_CEILING = 0.25;", "const SIG_CEILING = 5;", "no ceiling on the typical day"],
@@ -372,7 +395,8 @@ const readPage = () => {
     base: txt(root.querySelector(".ft-ml-base p")),
     rows: [...root.querySelectorAll(".ft-ml-row")].map((li) => ({
       k: li.dataset.k, head: txt(li.querySelector(".ft-ml-k")), move: txt(li.querySelector(".ft-ml-mv")),
-      up: txt(li.querySelector('dd[data-tone="up"]')), down: txt(li.querySelector('dd[data-tone="down"]')),
+      up: li.querySelector('dd[data-tone="up"]').firstChild.textContent, down: li.querySelector('dd[data-tone="down"]').firstChild.textContent,
+      upPct: txt(li.querySelector('dd[data-tone="up"] small')), downPct: txt(li.querySelector('dd[data-tone="down"] small')),
       labels: [...li.querySelectorAll("dt")].map(txt), n: txt(li.querySelector(".ft-ml-n")), bold: txt(li.querySelector(".ft-ml-n b")), how: txt(li.querySelector(".ft-ml-how")),
     })),
     ladderWhy: txt(ladder && ladder.querySelector(".ft-ml-why")),
@@ -417,6 +441,7 @@ function expectFull(world, got, w) {
     note(r.up === dollars(s.spotCents, s.sigInt, k, 1), `size ${k} goes up to ${r.up}, exactly ${dollars(s.spotCents, s.sigInt, k, 1)}`);
     note(r.down === dollars(s.spotCents, s.sigInt, k, -1), `size ${k} goes down to ${r.down}, exactly ${dollars(s.spotCents, s.sigInt, k, -1)}`);
     note(r.labels.join("|") === "Rise to|Fall to", `size ${k} labels its two levels`);
+    note(r.upPct === simplePct(s.sigInt, k, 1) && r.downPct === simplePct(s.sigInt, k, -1), `size ${k} prints its simple percent beside each level, ${r.upPct} and ${r.downPct}`);
     const published = k === 2 ? s.f2 : k === 3 ? s.f3 : null;
     const hits = published !== null ? published : cardCounts[k].hits;
     note(r.bold === `${hits} per 252 sessions`, `size ${k} counts ${r.bold}, expected ${hits} per 252 sessions`);
@@ -460,6 +485,7 @@ try {
     ok(trace.some((p) => /flows-ticker-movelab\.js/.test(p)) && world.hits === 1, `${w}px: the file and one universe read arrive once the module is near`);
     ok(trace.some((p) => p === "/api/flows/universe?cols=ed,f2,f3,sig,t"), `${w}px: and the read asks for the five columns, sorted`);
     const got = await page.evaluate(readPage);
+    if (process.env.ML_SHOTS) await page.locator("#m-movelab").screenshot({ path: path.join(process.env.ML_SHOTS, `movelab-${w}.png`) });
     eq(expectFull(world, got, w), [], `${w}px: every printed figure matches the independent computation`);
     eq(errors, [], `${w}px: no page errors`);
     await ctx.close();

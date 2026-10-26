@@ -64,6 +64,9 @@ function battery(mod, tag) {
   if (small.n !== 0 || small.affordable || !(small.ratio > 0)) bad.push(tag + " unaffordable keeps its ratio");
   const itm = mod.shortCallLine({ bid: 8.6, strike: 220 }, { spot: 227.28, delta: 0.66, days: 12 });
   if (itm.tvC !== 13200 || itm.m1C !== 450014 || Math.abs(itm.ratio - 0.029332) > 1e-5) bad.push(tag + " ITM ratio is on time value");
+  for (const [b, c] of [[0.06195, 620], [0.06495, 650], [0.05015, 502], [1.235, 12350]]) if (L({}, { bid: b, strike: 230 }).bidC !== c) bad.push(tag + " a " + b + " bid is " + c + " cents, half up");
+  const gr = L({}, { bid: 8.6, strike: 220 });
+  if (gr.grossRatio !== gr.bidC / gr.m1C || !(gr.grossRatio > gr.ratio)) bad.push(tag + " the gross ratio is the whole bid over the collateral");
   if (Math.abs(L({}).annRatio - 8.3697308) > 1e-6) bad.push(tag + " annualised on 365");
   if (L({ days: 0 }).annRatio !== null) bad.push(tag + " zero days annualise to null");
   if (L({ contracts: 5 }).ratio !== L({ contracts: 500 }).ratio) bad.push(tag + " ratio is independent of N");
@@ -209,6 +212,8 @@ const MUTANTS = [
   ["delta clamped", "if (d < 0 || d > 1) return fail(\"bad-delta\");", "if (d < 0 || d > 1) return shortCallCollateral({ convention, spot, strike, delta: Math.min(1, Math.max(0, d)), haircut, floor });"],
   ["binding tie goes to delta", "binding = hc * d > fl ? \"delta\" : \"floor\";", "binding = hc * d >= fl ? \"delta\" : \"floor\";"],
   ["binding inverted", "binding = hc * d > fl ? \"delta\" : \"floor\";", "binding = hc * d > fl ? \"floor\" : \"delta\";"],
+  ["the gross ratio on the time value", "grossRatio: bidC / col.m1C", "grossRatio: tvC / col.m1C"],
+  ["the bid rounds without the half-cent epsilon", "const bidC = roundCents(bid * SHARES_PER_CONTRACT);", "const bidC = Math.round(bid * SHARES_PER_CONTRACT * 100);"],
   ["time value ignored for in the money", "const tvC = Math.max(0, bidC - intrC);", "const tvC = bidC;"],
   ["shares convention is the strike", "m = SHARES_PER_CONTRACT * S;\n    binding = \"shares\";", "m = SHARES_PER_CONTRACT * K;\n    binding = \"shares\";"],
   ["dividends flag inverted", "!(qq > 0)", "!(qq < 0)"],

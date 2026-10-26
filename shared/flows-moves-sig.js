@@ -29,11 +29,12 @@ const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 export function sigOf(x) {
   const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
   if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
-  const z = chg / sig;
+  const lm = chg > -1 ? Math.log1p(chg) : null;
+  if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
+  const z = lm / sig;
   if (ed !== null && ed <= SIG_EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
-  const k = Math.abs(z);
-  if (k < SIG_MIN_Z) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
-  const level = k >= 3 ? 3 : 2;
+  if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
+  const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
   const hits = level === 3 ? x.f3 : x.f2;
   if (!Number.isInteger(hits) || hits < 0 || hits > SIG_SESSIONS) return { t: x.t, state: "nocount", z, level, hits: null, p: null };
   return { t: x.t, state: "tested", z, level, hits, p: (hits + 1) / (SIG_SESSIONS + 1) };

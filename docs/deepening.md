@@ -218,3 +218,59 @@ and the run's `deepen:` log lines carry it.
   names the chain endpoint returns nothing for) is unverified offline. A name
   with no chain fails its turn, goes on the retry list and waits out its backoff.
 - The squeeze score is computed for board and focus names only.
+
+## Sizing, 2026-10-25: the extras leg
+
+The market legs now also read, for every name read that night, the dossier's
+seven slow sources and four operations the spec documents and no code read
+before (dividends, splits, ETF exposure, interpolated implied volatility), and
+store them in the card-x sections `dx` and `vx` (design and decisions in
+`docs/vendor-coverage.md`). That costs calls and time the rotation used to have,
+so the governor's constants moved:
+
+| | before | now |
+|---|---|---|
+| calls a rotated name | 38 | 39 (one interpolated implied volatility read a name every night) |
+| milliseconds a rotated name | 6,500 | 6,650 (one more call at the 150 ms pace) |
+| baseline calls | 4,500 | 6,200 (the nominal 4,432, 182 interpolated reads and an expected 1,500 slow reads) |
+| baseline time | 14 minutes | 19 minutes (the slow cap of 2,000 calls at 150 ms is five minutes) |
+| time term, nothing else spent | 535 names | 478 names |
+| default cap | 530 | 470, so the cap still binds on an ordinary night and the night still fits the 72 minute time share (19 + 470 x 6.65 s = 71.1 minutes) |
+| nights to a deep read of 794 names | 2 | 2 |
+
+The slow parts are read on a cadence, not every night. Each part has a refresh
+age and a maximum age (`PARTS` in `shared/flows-vendor-extras.js`): a part inside
+its refresh age is not read, one past it is read when its turn comes, one past its
+maximum age is not shown. The night reads the due parts in order of how close they
+are to their maximum age, a missing or outdated one first and ties by a hash of the
+ticker and the part, up to `FLOWS_EXTRAS_CAP` calls (2,000). The leg reads each
+name's stored card-x first so a part it does not read is carried forward with its
+own read time. A 40-night simulation on 700 and on 856 names (the suite
+`flows-vendor-extras`) gives a cold start of five nights at 856, about 1,300 to
+1,900 calls a night after it, one night in forty at the cap, and no part ever read
+after its maximum age. `FLOWS_EXTRAS=off` (repository variable) turns the leg off
+and leaves the nightly as it was.
+
+Three limits keep the extras from costing the rest of the night.
+
+A card-x is held to 60 KiB so the card beside it keeps room. When the extras would
+carry it past that, parts are turned into stubs in the order `SHED_ORDER` declares
+(the dossier sources first, since the Worker can fetch them for a member who opens
+the name, then the four operations only the nightly reads), one at a time and only
+until the card fits, counted in bytes. A stub keeps its read time and is not read
+again before the part's maximum age, because the card would only shed it again; the
+dossier prints it as withheld with the reason `shed`, the card's size limit. A card
+that has shrunk by then gets the part back at the next read. The cost is one wasted
+call per shed part per maximum age on the heaviest names.
+
+The shape verdict of each part (`shapeHealth`) is kept in `meta.extras` with the
+count of clean nights behind it (`extrasStanding`: fifty or more reads and a failure
+rate of at most 5 per cent). A part fails the night only when it has seven clean
+nights behind it and did not fail the night before; a new part that is past the
+failing line, or one that is still failing, is a warning. A vendor change in a
+never-observed operation therefore cannot turn the nightly red on its first night
+or every night after, and the first night of a regression in a proven part does.
+
+What is not done: a part that keeps failing is still read each night (no
+quarantine that stops the calls), and a stub is not re-read earlier when the card
+has shrunk before the maximum age.

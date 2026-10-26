@@ -150,8 +150,8 @@ export function stepOf(m) {
 export function zOf(chg, sig) {
   const c = finite(chg);
   const s = finite(sig);
-  if (c === null || s === null || !(s > 0)) return null;
-  return c / s;
+  if (c === null || s === null || !(s > 0) || !(c > -1)) return null;
+  return Math.log1p(c) / s;
 }
 
 export function impliedDay(iv30p) {
