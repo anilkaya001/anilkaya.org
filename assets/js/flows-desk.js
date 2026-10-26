@@ -443,7 +443,7 @@
       return T("band-dash", { x });
     }
     const w = winHalfOf(r);
-    return T("band-pm", { d: b.half.toFixed(2), w: w === null ? DASH : Math.round(w * 100) + "%" });
+    return T("band-pm", { d: fmt2(b.half), w: w === null ? DASH : fmtPct(w, 0) });
   };
 
   const winHalfOf = (r, struct) => {
@@ -456,7 +456,7 @@
     const b = r.__band;
     if (b && b.band === "pm") {
       const half = winHalfOf(r, struct);
-      return { text: fmtPct(pq, 0) + " ± " + Math.round((half === null ? b.half : half) * 100) + "%", title: bandNote(r) };
+      return { text: fmtPct(pq, 0) + " ± " + fmtPct(half === null ? b.half : half, 0), title: bandNote(r) };
     }
     return { text: fmtPct(pq, 0), title: null };
   };
@@ -905,7 +905,7 @@
   const gapText = (f) => {
     if (f.src !== "parity" || isNum(f.gapBp) === null) return "";
     const x = Math.abs(f.gapBp);
-    return " " + T(f.gapBp < 0 ? "fwd-below" : "fwd-above", { x: x >= 10 ? String(Math.round(x)) : x.toFixed(1) });
+    return " " + T(f.gapBp < 0 ? "fwd-below" : "fwd-above", { x: x >= 10 ? fmtInt(x) : fmtPct(x / 100, 1).replace("%", "") });
   };
 
   const carryWhy = (f) => (f.n === 0 ? T("fwd-why-0") : T("fwd-why-few", { n: f.n }));
@@ -984,7 +984,7 @@
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],
         ["Chance of profit", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (bandNote(r) ? " · " + bandNote(r) : "")) : DASH],
         ["Expected value", e ? (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract sold into the bid · " + T("ev-implied", { x: usd(e.ev.q) }) : DASH],
-        ["Delta", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmt2(shortDelta(r)) + (r.__band && r.__band.band === "pm" ? " ± " + r.__band.half.toFixed(2) : "") + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock") : DASH],
+        ["Delta", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmt2(shortDelta(r)) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock") : DASH],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(whyText).join(" ") : "") : DASH],
       ],
       notes: [sh.intrinsic > 0 ? (sh.timeValue >= 0 ? T("int-in", { i: fmtMoney(sh.intrinsic * LOT), t: fmtMoney(sh.timeValue * LOT) }) : T("int-below")) : null,

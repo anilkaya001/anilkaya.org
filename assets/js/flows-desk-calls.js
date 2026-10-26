@@ -283,7 +283,7 @@
         : cellOf("dk-prem", "Premium", usdC(sc.premiumC), "up", T("sc-premium"), sc.limited ? sc.n + " × of " + sc.asked + " · limited by buying power" : groupN(sc.n) + " × · bid " + fmt2(r.bid));
     const collat = sc.ok ? cellOf("dk-collat", "Collateral", usdC(sc.collateralC), null, T("t-collat"), collateralSub(sc)) : cellOf("dk-collat", "Collateral", DASH, "silent", bad);
     const nd = sc.netDelta;
-    const band = r.__band && r.__band.band === "pm" ? " ± " + r.__band.half.toFixed(2) : "";
+    const band = r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "";
     const ndTitle = K.dashed(r) ? K.bandNote(r) : nd === null ? noEng : [T("sc-frontier-x"), band ? K.bandNote(r) : null].filter(Boolean).join(" ");
     const wq = sc.popQ === null || sc.popQ === undefined ? { text: DASH, title: K.dashed(r) ? K.bandNote(r) : null } : K.winText(r, sc.popQ, structFor(r));
     return h("div", {
@@ -313,7 +313,7 @@
     return "/flows/strategy/?t=" + encodeURIComponent(r.ticker) + "&s=custom&expiry=" + r.expiry + "&basis=natural&legs=" + encodeURIComponent(r.symbol + "@-1");
   }
 
-  const pct0 = (v) => Math.round(v * 100) + "%";
+  const pct0 = (v) => fmtPct(v, 0);
 
   function rangeLine(r, sc) {
     if (terms.cv === "shares") return DASH;
@@ -351,7 +351,7 @@
         ["Shares held", S === null ? DASH : "$" + groupN(S * SHARES_PER_CONTRACT * n) + " of stock for " + groupN(n) + " contract" + (n === 1 ? "" : "s")],
         ["Premium ÷ collateral", sc.ok ? pcOf(sc) + " = " + centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C, true) + " a contract, intrinsic value included" + (sc.intrC > 0 ? " (" + centsText(Math.min(sc.intrC, sc.bidC), true) + " of it intrinsic)" : "") + " · " + T("sc-conv-" + terms.cv) : DASH],
         ["Time value ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only" : DASH],
-        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : DASH) : signedD(sc.netDelta) + (r.__band && r.__band.band === "pm" ? " ± " + r.__band.half.toFixed(2) : "") + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the chain's own forward, with a floor of 0.05 in the collateral"],
+        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : DASH) : signedD(sc.netDelta) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the chain's own forward, with a floor of 0.05 in the collateral"],
         ["Forward", K.forwardText(r)],
         ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S))],
