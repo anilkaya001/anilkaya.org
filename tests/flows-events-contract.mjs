@@ -1319,6 +1319,60 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
   }
 }
 
+{
+  const base = buildEvents([nameAt("WEEK", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  base.earningsCalendar = { status: "ok", reaction: { status: "ok", n: 1, medianRatio: 1.1, beat: 0.5, rows: [["RAA", 0.08, 0.05, 1.6]] } };
+  const withRecent = (recent) => ({ ...JSON.parse(JSON.stringify(base)), recent });
+  const OK = { status: "ok", asOf: SESSION_DATE, within: 5, hz: 21, n: 8, counts: [3, 2], cut: [], unstated: 1, older: 2,
+    rows: [["RAA", 0.0821, 2.14], ["RBB", -0.0412, -1.18], ["RCC", null, null]], laterRows: [["RDD", 2], ["REE", 4]] };
+  const browser = await chromium.launch();
+  try {
+    const read = async (payload, width = 1440) => {
+      const { page, errors } = await openEvents(browser, payload, { width, css: true });
+      const out = await page.evaluate(() => {
+        const box = document.querySelector("#evReact .fe-recent");
+        if (!box) return null;
+        const tiles = [...box.querySelectorAll(".ui-metric")].map((m) => [m.querySelector(".ui-metric-l").textContent, m.querySelector(".ui-metric-n") ? m.querySelector(".ui-metric-n").textContent : null, (m.querySelector(".ui-metric-s") || {}).textContent || null]);
+        const rowsOf = (label) => [...box.querySelectorAll('[aria-label^="' + label + '"] a.fe-rrow')].map((a) => [a.querySelector("b").textContent, ...[...a.querySelectorAll(".fu-v")].map((v) => v.textContent), a.getAttribute("href"), a.getAttribute("title")]);
+        const tail = document.querySelector('#evReact > .fe-beyond[aria-label^="Names that reacted two or more"]');
+        return { tiles, rows: rowsOf("Names in their reaction session"), later: tail ? [...tail.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("title")]) : null, tail: tail ? tail.textContent.replace(/\s+/g, " ").trim() : null, head: [...box.querySelectorAll(".fu-head")].map((h) => h.textContent.replace(/\s+/g, " ").trim()), silent: [...box.querySelectorAll(".ui-silent")].map((x) => x.textContent.replace(/\s+/g, " ").trim()), overflow: document.scrollingElement.scrollWidth > innerWidth, text: box.innerText };
+      });
+      if (out && out.silent.length) out.why = await disclose(page, "#evReact .fe-recent .ui-silent button");
+      await page.close();
+      return { box: out, errors };
+    };
+    const ok1 = await read(withRecent(OK));
+    deep(ok1.errors, [], "the reaction tab renders the reacted-lately block without throwing");
+    deep(ok1.box.tiles.map((t) => [t[0], t[1], t[2]]), [["Reaction session", "3", null], ["Reacted one session ago", "2", null], ["Report time not stated", "1", null]], "it counts the names by the Moves page's own labels, the three counts adding to the names that reacted lately, and a measured zero is printed as 0");
+    deep(ok1.box.rows.map((r) => r.slice(0, 4)), [["RAA", "+8.2%", "+2.1", "/flows/ticker/?t=RAA"], ["RBB", "−4.1%", "−1.2", "/flows/ticker/?t=RBB"], ["RCC", "—", "—", "/flows/ticker/?t=RCC"]],
+      "and lists the names that reacted on the session in the payload's order, the move in per cent and in typical days, each a link to its ticker, a move not read as a dash");
+    ok(/typical days/.test(ok1.box.rows[0][4]) && /no typical day published/.test(ok1.box.rows[2][4]), "a name with no typical day says so in its title, never a zero");
+    deep(ok1.box.later.map((r) => [r[0], r[1]]), [["RDD", "/flows/ticker/?t=RDD"], ["REE", "/flows/ticker/?t=REE"]], "the names that reacted two to five sessions ago are one line of links, grouped by age, with no move beside them since the move on their reaction day is not in the universe");
+    ok(/^Reacted 2\u20135 sessions ago, with the move on their reaction day not carried here\. 2 sessions: RDD \u00b7 4 sessions: REE$/.test(ok1.box.tail), "worded as the range it covers and the reason there is no move: " + ok1.box.tail);
+    ok(/reacted 2 sessions ago$/.test(ok1.box.later[0][2]), "each name's title says its age");
+    ok(!/Aug 24|reported|tape/i.test(ok1.box.text), "and says nothing of a date it does not hold, of a report time it does not know or of a tape");
+    eq(ok1.box.overflow, false, "with no sideways scroll at 1440");
+    const narrow = await read(withRecent(OK), 390);
+    eq(narrow.box.overflow, false, "or at 390");
+    const many = await read(withRecent({ ...OK, older: 30 }));
+    ok(/REE and 28 more$/.test(many.box.tail), "names past the ones the payload carries are counted, not hidden: " + many.box.tail);
+    const cutDay = await read(withRecent({ ...OK, counts: [3, null], unstated: null, cut: [1, 2] }));
+    deep(cutDay.box.tiles.map((t) => [t[0], t[1], t[2]]), [["Reaction session", "3", null], ["Reacted one session ago", "—", "report ledger cut that day"], ["Report time not stated", "—", "report ledger cut that day"]], "A DAY THE REPORT LEDGER WAS CUT ON IS A DASH WITH ITS REASON, never a partial count");
+    const gone = await read(withRecent({ status: "unavailable", reason: "withheld_budget", within: 5 }));
+    ok(gone.box && /size budget/.test(gone.box.why || "") && gone.box.tiles.length === 0, "a report column withheld for the universe's size budget says so and counts nothing");
+    const none = await read(withRecent({ status: "unavailable", reason: "not_published", within: 5 }));
+    ok(none.box && /ships with the next nightly run/.test(none.box.why || ""), "a payload from before the column says it is pending, not empty");
+    const nowin = await read(withRecent({ status: "unavailable", reason: "no_window", within: 5 }));
+    ok(nowin.box && /does not state the earnings window/.test(nowin.box.why || ""), "a universe with no earnings window says so");
+    const quiet = await read(withRecent({ status: "quiet", reason: "none_recent", asOf: SESSION_DATE, within: 5, hz: 21, n: 0, counts: [0, 0], cut: [], unstated: 0, older: 0, rows: [], laterRows: [] }));
+    ok(quiet.box && /No name has reacted to a report in the last 5 sessions/.test(quiet.box.why || ""), "a measured nothing says so");
+    const old = await read({ ...JSON.parse(JSON.stringify(base)) });
+    eq(old.box, null, "a payload with no block at all draws none, and the reaction list is as it was");
+  } finally {
+    await browser.close();
+  }
+}
+
 console.log(`✓ flows-events: ${checks} assertions — a session count measured from the ` +
   `next session and never from the last completed session, with the wrong integer ` +
   `written down beside every right one, a window bound tested in the unit its name carries ` +

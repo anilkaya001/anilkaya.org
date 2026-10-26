@@ -238,12 +238,12 @@ export const EVENTS_NOTES = Object.freeze({
     "expiry, which is a different horizon from the one beside it. Both are " +
     "published and neither is reconciled into the other: an average of two " +
     "numbers quoted to two horizons is quoted to neither.",
-  announce: "Whether a name reports before the open or after the close is not on " +
-    "the screener. The endpoints that carry it are scoped to a single date, so " +
-    "covering this window would cost forty-four calls — a twelve per cent " +
-    "increase on the run for one column. It is withheld rather than half-filled, " +
-    "because a column populated for the first fortnight and blank after invites " +
-    "the wrong inference about everything in the blank half.",
+  announce: "The screener carries when each report lands: before the open, after " +
+    "the close, or not stated. It places the report on the session it moves the " +
+    "price (a report after the close moves the next session, one before the open " +
+    "moves its own, and one with no stated time may move either, so it is counted " +
+    "to the nearer), and every session count on this page is to that session. The " +
+    "time itself is not printed on a row: it is not a column of this table.",
   order: "Sorted by date, then by name. Never by the priced move: that would " +
     "make this a leaderboard of expensive options, which is a different page and " +
     "a claim this one does not make.",

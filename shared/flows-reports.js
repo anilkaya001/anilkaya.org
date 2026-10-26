@@ -1,6 +1,6 @@
 import { impactSession, sessionsBetween, addSessions, covered } from "./flows-calendar.js";
 import { reportTiming } from "./flows-targets.js";
-import { RD_MAX } from "./flows-horizon.js";
+import { RD_MAX, earningsState } from "./flows-horizon.js";
 
 export const RD_RECENT = 5;
 export const SAME_REPORT = 10;
@@ -206,7 +206,7 @@ export function reportsPayload(ledger, { generatedAt = null, readAt = null } = {
   return { ...body, bytes: JSON.stringify(body).length };
 }
 
-export function recentReporters(universe, { within = RD_RECENT, max = 8 } = {}) {
+export function recentReporters(universe, { within = RD_RECENT, max = 8, older = 24 } = {}) {
   const head = { within };
   if (!universe || universe.status !== "ok" || !Array.isArray(universe.t)) return { status: "unavailable", reason: "universe_unavailable", ...head };
   const rd = universe.cols && universe.cols.rd;
@@ -214,20 +214,51 @@ export function recentReporters(universe, { within = RD_RECENT, max = 8 } = {}) 
     const basis = universe.rdBasis || null;
     return { status: "unavailable", reason: basis && basis.withheld ? "withheld_budget" : "not_published", ...head };
   }
-  const chg = universe.cols.chg;
-  const scale = universe.units && universe.units.chg ? universe.units.chg[1] : null;
-  const counts = Array.from({ length: within + 1 }, () => 0);
+  const hz = universe.hz;
+  if (!whole(hz) || hz < 1) return { status: "unavailable", reason: "no_window", ...head };
+  const basis = universe.rdBasis && typeof universe.rdBasis === "object" ? universe.rdBasis : {};
+  const unstated = basis.unstated && typeof basis.unstated === "object" ? basis.unstated : {};
+  const scaled = (k) => {
+    const c = universe.cols[k], u = universe.units && universe.units[k];
+    return Array.isArray(c) && u && Number.isFinite(u[1]) && u[1] > 0 ? (i) => (Number.isFinite(c[i]) ? c[i] / u[1] : null) : () => null;
+  };
+  const chgAt = scaled("chg"), sigAt = scaled("sig");
+  const edCol = Array.isArray(universe.cols.ed) ? universe.cols.ed : [];
+  const asOf = universe.sessionDate || null;
+  const cutDays = Array.isArray(basis.cut) ? basis.cut.filter((d) => typeof d === "string") : [];
+  const cut = [];
+  for (let k = 0; k <= within; k++) {
+    const s = addSessions(asOf, -k);
+    const p = s ? addSessions(s, -1) : null;
+    if (s && p && cutDays.some((c) => c >= p && c <= s)) cut.push(k);
+  }
+  const counts = [0, 0];
   const today = [];
+  const late = [];
+  let notStated = 0;
   universe.t.forEach((t, i) => {
-    const r = rd[i];
-    if (!whole(r) || r < 0 || r > within) return;
-    counts[r]++;
-    if (r === 0) today.push([t, Array.isArray(chg) && Number.isFinite(chg[i]) && scale ? chg[i] / scale : null]);
+    const row = { ed: whole(edCol[i]) ? edCol[i] : null, rd: rd[i], rdMax: unstated[t] };
+    const state = earningsState(row, hz, 0);
+    if (state === "reaction" || state === "after") {
+      const age = state === "reaction" ? 0 : 1;
+      counts[age]++;
+      if (age === 0) {
+        const chg = chgAt(i), sg = sigAt(i);
+        const z = chg !== null && chg > -1 && sg !== null && sg > 0 ? Math.log1p(chg) / sg : null;
+        today.push([t, chg, z]);
+      }
+    } else if (state === "unstated") notStated++;
+    else if (whole(rd[i]) && rd[i] >= 2 && rd[i] <= within) late.push([t, rd[i]]);
   });
-  today.sort((a, b) => (b[1] === null ? -1 : a[1] === null ? 1 : Math.abs(b[1]) - Math.abs(a[1])) || (a[0] < b[0] ? -1 : 1));
-  const n = counts.reduce((a, b) => a + b, 0);
+  today.sort((a, b) => (a[2] === null) - (b[2] === null) || (a[2] === null ? 0 : Math.abs(b[2]) - Math.abs(a[2])) || (a[1] === null) - (b[1] === null) || (a[1] === null ? 0 : Math.abs(b[1]) - Math.abs(a[1])) || (a[0] < b[0] ? -1 : 1));
+  late.sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1));
+  const n = counts[0] + counts[1] + notStated + late.length;
+  const unsure = cut.includes(0) || cut.includes(1);
+  const round4 = (v) => (v === null ? null : Math.round(v * 1e4) / 1e4);
   return {
-    status: n ? "ok" : "quiet", ...(n ? {} : { reason: "none_recent" }), asOf: universe.sessionDate || null, ...head, n, counts,
-    rows: today.slice(0, max).map(([t, c]) => [t, c === null ? null : Math.round(c * 1e4) / 1e4]),
+    status: n ? "ok" : "quiet", ...(n ? {} : { reason: "none_recent" }), asOf, ...head, hz, n,
+    counts: counts.map((c, k) => (cut.includes(k) ? null : c)), cut, unstated: unsure ? null : notStated, older: late.length,
+    rows: today.slice(0, max).map(([t, c, z]) => [t, round4(c), z === null ? null : Math.round(z * 100) / 100]),
+    laterRows: late.slice(0, older),
   };
 }

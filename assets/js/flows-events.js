@@ -506,13 +506,75 @@
     };
   }
 
+  const RECENT_WHY = {
+    withheld_budget: "The report column does not fit the universe's size budget tonight, so who reacted lately is not listed.",
+    not_published: "This payload has no report column yet; it ships with the next nightly run.",
+    universe_unavailable: "The universe was not published, so who reacted lately is not listed.",
+    no_window: "This universe does not state the earnings window, so who reacted lately is not listed.",
+  };
+  const typical = (z) => (n(z) === null ? DASH : (z > 0 ? "+" : z < 0 ? "\u2212" : "") + Math.abs(z).toFixed(1));
+
+  function recentBlock(payload) {
+    const rc = payload.recent;
+    if (!rc || typeof rc !== "object") return null;
+    const box = h("section", { class: "fe-recent", "aria-label": "Reacted lately" });
+    if (rc.status === "unavailable") {
+      box.append(UI.silent({ state: "unavailable", reason: RECENT_WHY[rc.reason] || "Who reacted lately was not measured." }, "Reacted lately", 96));
+      return { parts: [box] };
+    }
+    if (rc.status !== "ok") {
+      box.append(UI.silent({ state: "quiet", reason: "No name has reacted to a report in the last " + sessions(n(rc.within) ?? 5) + "." }, "Reacted lately", 96));
+      return { parts: [box] };
+    }
+    const counts = Array.isArray(rc.counts) ? rc.counts : [];
+    const cut = Array.isArray(rc.cut) ? rc.cut : [];
+    const tile = (value, label, off) => UI.metric(label, off || n(value) === null ? DASH : count(value), { sub: off || n(value) === null ? "report ledger cut that day" : null });
+    box.append(UI.metrics([
+      tile(counts[0], "Reaction session", cut.includes(0)),
+      tile(counts[1], "Reacted one session ago", cut.includes(1)),
+      tile(rc.unstated, "Report time not stated", cut.includes(0) || cut.includes(1)),
+    ], { min: 64 }));
+    const rows = (Array.isArray(rc.rows) ? rc.rows : []).filter((x) => Array.isArray(x) && typeof x[0] === "string");
+    if (rows.length) {
+      const items = rows.map((x) => {
+        const chg = n(x[1]);
+        return h("a", { class: "fe-rrow", href: tickerHref(x[0]), title: String(x[0]) + " " + MID + " reaction session, " + (chg === null ? "move not read" : F.pct(chg, 1, true)) + (n(x[2]) === null ? ", no typical day published" : ", " + typical(x[2]) + " typical days") },
+          h("span", { class: "fu-tk" }, h("b", null, String(x[0]))),
+          h("span", { class: "fu-v fu-strong", "data-tone": chg === null ? null : chg > 0 ? "up" : chg < 0 ? "down" : null }, chg === null ? DASH : F.pct(chg, 1, true)),
+          h("span", { class: "fu-v" }, typical(x[2])));
+      });
+      box.append(h("div", { class: "fe-rrow fu-head", ...HIDE }, h("span", null, "Name"), h("span", V, "Move"), h("span", V, "Typical days")),
+        withList(UI.list(items, { visible: typeof matchMedia === "function" && matchMedia("(max-width: 420px)").matches ? 2 : 3, label: "Names in their reaction session, largest move in typical days first" })));
+    }
+    const later = (Array.isArray(rc.laterRows) ? rc.laterRows : []).filter((x) => Array.isArray(x) && typeof x[0] === "string" && n(x[1]) !== null);
+    let tail = null;
+    if (later.length) {
+      const ages = [...new Set(later.map((x) => n(x[1])))].sort((x, y) => x - y);
+      const parts = [];
+      for (const age of ages) {
+        if (parts.length) parts.push(" " + MID + " ");
+        parts.push(sessions(age) + ": ");
+        later.filter((x) => n(x[1]) === age).forEach((x, i) => {
+          if (i) parts.push(", ");
+          parts.push(h("a", { href: tickerHref(x[0]), title: String(x[0]) + " " + MID + " reacted " + sessions(age) + " ago" + (cut.includes(age) ? ", report ledger cut that day" : "") }, String(x[0])));
+        });
+      }
+      const more = (n(rc.older) ?? later.length) - later.length;
+      if (more > 0) parts.push(" and " + count(more) + " more");
+      tail = h("p", { class: "fe-beyond", "aria-label": "Names that reacted two or more sessions ago" }, "Reacted 2\u2013" + (n(rc.within) ?? 5) + " sessions ago, with the move on their reaction day not carried here. ", ...parts);
+    }
+    return { parts: tail ? [box, tail] : [box] };
+  }
+
   function paintReact(payload) {
     const cal = payload.earningsCalendar;
     const r0 = cal && typeof cal === "object" ? cal.reaction : undefined;
     const st = r0 === undefined ? blockState(undefined, "earnings reaction") : blockState(r0, "earnings reaction");
-    if (st.state !== "ok") { silence(host.react, st, "Reaction", 200); return; }
+    const recent = recentBlock(payload);
+    const put = () => { if (recent) host.react.prepend(...recent.parts); };
+    if (st.state !== "ok") { silence(host.react, st, "Reaction", 200); put(); return; }
     const rows = (Array.isArray(r0.rows) ? r0.rows : []).filter((x) => Array.isArray(x) && n(x[3]) !== null);
-    if (!rows.length) { silence(host.react, { state: "quiet", reason: "No reporter had reacted by the session, which is common the evening of a report." }, "Reaction", 200); return; }
+    if (!rows.length) { silence(host.react, { state: "quiet", reason: "No reporter had reacted by the session, which is common the evening of a report." }, "Reaction", 200); put(); return; }
     setModuleState(host.react, { state: "ok" }, "Reaction");
     const maxDev = Math.max(0.25, ...rows.map((x) => Math.abs(n(x[3]) - 1)));
     const items = rows.map((x, i) => {
@@ -526,6 +588,7 @@
       h("span", { class: "fu-v fu-strong" }, ratio.toFixed(2) + "×"));
     });
     host.react.replaceChildren(
+      ...(recent ? recent.parts : []),
       UI.metrics([
         UI.metric("Realized ÷ implied", n(r0.medianRatio) === null ? DASH : n(r0.medianRatio).toFixed(2) + "×", { sub: "median of " + (n(r0.n) ?? rows.length) }),
         UI.metric("Moved more", n(r0.beat) === null ? DASH : Math.round(n(r0.beat) * 100) + "%", { sub: "than implied" }),

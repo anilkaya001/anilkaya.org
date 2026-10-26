@@ -387,6 +387,11 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
 }
 a.fe-rrow:hover { background: var(--fill-4); }
 .fe-rrow.fu-head { min-height: 24px; color: var(--label-3); font: var(--t-caption); }
+.fe-recent .fe-rrow { grid-template-columns: minmax(64px, 1fr) 76px 96px; min-height: 36px; }
+.fe-recent .fe-rrow.fu-head { min-height: 24px; }
+.fe-recent .ui-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-3); }
+.fe-recent .ui-metric-l { white-space: normal; line-height: 1.25; }
+@media (pointer: coarse) { .fe-recent .fe-rrow { min-height: 44px; } .fe-recent .fe-rrow.fu-head { min-height: 24px; } }
 .fe-dv { position: relative; height: 14px; }
 .fe-dv::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--sep-strong); }
 .fe-dv::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--sep); }
@@ -596,6 +601,8 @@ a.pl-tick:hover { text-decoration: underline; }
 @media (pointer: coarse) { .fd-tabs button { min-height: 44px; } .fd-all { min-height: 44px; } }
 @media (forced-colors: active) { .fd-tabs button[aria-selected="true"] { outline: 2px solid CanvasText; } }
 .fe-beyond { margin: var(--sp-2) 0 0; color: var(--label-2); font: var(--t-footnote); }
+.fe-beyond a { color: var(--label-1); text-decoration: none; }
+.fe-beyond a:hover { text-decoration: underline; }
 .fe-built { white-space: nowrap; }
 .fd-stage > .fd-mod > .fd-body > * { flex-shrink: 0; }
 @media (max-width: 767.98px) {

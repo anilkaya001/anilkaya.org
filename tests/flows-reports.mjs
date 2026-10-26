@@ -260,14 +260,181 @@ let planted = 0;
   }
   const state = (mut) => ({ s: (row, hz, j) => mut.earningsState(row, hz, j) });
   const hz = await loadMutated("shared/flows-horizon.js", [], { salt: 50 });
-  const bad1 = await loadMutated("shared/flows-horizon.js", [["if (whole(rd) && rd >= 0) ages.push(rd + j);", "if (rd <= 99) ages.push(rd + j);"]], { salt: 51 });
+  const bad1 = await loadMutated("shared/flows-horizon.js", [["if (whole(rd) && rd >= 0) seen.push(ageState(rd + j, back));", "if (rd <= 99) seen.push(ageState(rd + j, back));"]], { salt: 51 });
   eq(hz.earningsState({ ed: 5, rd: null }, 21, 0), "ahead", "a null rd is no age at all");
   eq(bad1.earningsState({ ed: 5, rd: null }, 21, 0), "reaction", "PLANTED WRONG BUILD, null <= 99: a name with no rd becomes a reaction");
-  const bad2 = await loadMutated("shared/flows-horizon.js", [["if (whole(ed) && ed >= 0 && ed <= j) ages.push(j - ed);", ""]], { salt: 52 });
+  const bad2 = await loadMutated("shared/flows-horizon.js", [["seen.push(late === null ? first : agreed(first, late <= j ? ageState(j - late, back) : \"ahead\"));", ""]], { salt: 52 });
   eq(bad2.earningsState({ ed: 1, rd: null }, 21, 1), "clear", "PLANTED WRONG BUILD, rd plus the elapsed sessions alone: a name whose next report lands today is not seen");
   eq(state(hz).s({ ed: 1, rd: null }, 21, 1), "reaction", "while the real one tags it");
   eq(H.RD_MAX, 99, "the rd ceiling is 99: two digits in the universe column");
   planted += 2;
+}
+
+{
+  const UNI = (over = {}) => ({
+    status: "ok", sessionDate: "2026-03-09", hz: 21,
+    t: ["SYA101", "SYB102", "SYC103", "SYD104", "SYE105", "SYF106", "SYG107", "SYH108", "SYI109", "SYJ110", "SYK111", "SYL112"],
+    cols: {
+      chg: [800, -1000, 50, 20, 10, 300, null, 5, 10, 120, null, 40],
+      sig: [2000, 5000, 2000, 2000, 2000, null, 2000, 2000, 2000, null, 2000, 2000],
+      rd: [0, 0, 1, 2, 4, null, null, null, 6, 0, 0, null],
+      ed: [null, null, null, null, null, 0, null, 5, null, null, null, 1],
+    },
+    units: { chg: ["fraction", 1e4], sig: ["fraction", 1e5], rd: ["sessions", 1], ed: ["sessions", 1] },
+    rdBasis: { unstated: { SYG107: 1 }, cut: [] },
+    ...over,
+  });
+  const probe = (mod, uni) => mod.recentReporters(uni, { max: 4, older: 4 });
+  const battery = (mod) => {
+    try {
+      const a = probe(mod, UNI());
+      if (a.status !== "ok" || a.hz !== 21 || JSON.stringify(a.counts) !== "[4,1]" || a.unstated !== 2 || a.older !== 2) return false;
+      if (JSON.stringify(a.cut) !== "[]") return false;
+      if (JSON.stringify(a.rows.map((r) => r[0])) !== JSON.stringify(["SYA101", "SYB102", "SYJ110", "SYK111"])) return false;
+      if (Math.abs(a.rows[0][2] - Math.log1p(0.08) / 0.02) > 0.006 || a.rows[3][1] !== null || a.rows[2][2] !== null || a.rows[2][1] !== 0.012) return false;
+      if (JSON.stringify(a.laterRows) !== JSON.stringify([["SYD104", 2], ["SYE105", 4]])) return false;
+      const c1 = probe(mod, UNI({ rdBasis: { unstated: { SYG107: 1 }, cut: ["2026-03-05"] } }));
+      if (JSON.stringify(c1.cut) !== "[1,2]" || JSON.stringify(c1.counts) !== "[4,null]" || c1.unstated !== null) return false;
+      const c2 = probe(mod, UNI({ rdBasis: { unstated: { SYG107: 1 }, cut: ["2026-03-07"] } }));
+      if (JSON.stringify(c2.cut) !== "[0]" || JSON.stringify(c2.counts) !== "[null,1]" || c2.unstated !== null) return false;
+      const c3 = probe(mod, UNI({ rdBasis: { unstated: {}, cut: ["2026-02-02"] } }));
+      if (JSON.stringify(c3.cut) !== "[]" || JSON.stringify(c3.counts) !== "[4,1]" || c3.unstated !== 1 || c3.rows.length !== 4) return false;
+      if (probe(mod, UNI({ hz: null })).reason !== "no_window" || probe(mod, UNI({ hz: 0 })).status !== "unavailable") return false;
+      const w = UNI(); delete w.cols.rd;
+      if (probe(mod, w).reason !== "not_published") return false;
+      if (probe(mod, UNI({ rdBasis: { withheld: true }, cols: { chg: [], rd: null } })).reason !== "withheld_budget") return false;
+      if (probe(mod, { status: "pending" }).reason !== "universe_unavailable") return false;
+      const q = probe(mod, UNI({ cols: { chg: [1, 1], sig: [1, 1], rd: [null, 9], ed: [null, null] }, t: ["SYA101", "SYB102"], rdBasis: {} }));
+      return q.status === "quiet" && q.reason === "none_recent" && q.rows.length === 0 && JSON.stringify(q.counts) === "[0,0]";
+    } catch {
+      return false;
+    }
+  };
+  ok(battery(R), "the recent-reporters battery passes the real module");
+  const bytes = JSON.stringify(probe(R, UNI())).length;
+  ok(bytes < 700, "and the block is small: " + bytes + " bytes for four rows and two later names");
+  const pr = [
+    ["a cut report day ignored", [["cut.push(k)", "void k"]]],
+    ["a cut report day matched on the session only", [["cutDays.some((c) => c >= p && c <= s)", "cutDays.some((c) => c === s)"]]],
+    ["a cut weekend day missed", [["cutDays.some((c) => c >= p && c <= s)", "cutDays.some((c) => c === s || c === p)"]]],
+    ["the cut counts printed anyway", [["counts: counts.map((c, k) => (cut.includes(k) ? null : c))", "counts: counts.map((c) => c)"]]],
+    ["ranked by the raw move, not the move in typical days", [["today.sort((a, b) => (a[2] === null) - (b[2] === null) || (a[2] === null ? 0 : Math.abs(b[2]) - Math.abs(a[2])) ||", "today.sort((a, b) => Math.abs(b[1] ?? 0) - Math.abs(a[1] ?? 0) ||"]]],
+    ["a report of unstated time not counted", [["const state = earningsState(row, hz, 0);", "const state = whole(row.rd) ? earningsState({ rd: row.rd }, hz, 0) : null;"]]],
+    ["the unstated names counted as reactions", [["} else if (state === \"unstated\") notStated++;", "} else if (state === \"unstated\") { counts[0]++; today.push([t, null, null]); }"]]],
+    ["the unstated count printed over a cut day", [["unstated: unsure ? null : notStated,", "unstated: notStated,"]]],
+    ["no window tolerated", [["if (!whole(hz) || hz < 1) return { status: \"unavailable\", reason: \"no_window\", ...head };", ""]]],
+    ["a name that reacted six sessions ago listed", [["rd[i] >= 2 && rd[i] <= within", "rd[i] >= 2 && rd[i] <= within + 1"]]],
+    ["a missing move read as zero", [["const chg = chgAt(i), sg = sigAt(i);", "const chg = chgAt(i) ?? 0, sg = sigAt(i);"]]],
+  ];
+  let salt2 = 80;
+  planted += pr.length;
+  for (const [title, transforms] of pr) {
+    const bad = await loadMutated("shared/flows-reports.js", transforms, { salt: salt2++ });
+    ok(!battery(bad), `PLANTED WRONG BUILD, ${title}: the battery fails it`);
+  }
+}
+
+{
+  const X = await import("../shared/flows-cross.js");
+  const SESSIONS = ["2026-03-02", "2026-03-06", "2026-04-01", "2026-04-02", "2026-04-06", "2026-11-25", "2026-11-27", "2026-12-23", "2026-12-24", "2026-12-31", "2027-01-04", "2027-07-02"];
+  const TIMES = [undefined, null, "unconfirmed", "unknown", "premarket", "postmarket"];
+  const oracle = (list, asOf) => {
+    const want = [];
+    for (const r of list) {
+      const d = r.next_earnings_date;
+      if (!d || d < asOf || !C.isSession(d)) continue;
+      if (r.er_time === "premarket" || r.er_time === "postmarket") continue;
+      const ed = between(asOf, d);
+      if (ed <= C.AHEAD_SESSIONS) want.push([r.ticker, ed + 1]);
+    }
+    return Object.fromEntries(want.sort((a, b) => (a[0] < b[0] ? -1 : 1)));
+  };
+  const rowsFor = (asOf) => {
+    const rows = [];
+    let k = 100;
+    for (let off = -4; off <= 16; off++) {
+      const d = day(Date.parse(asOf + "T00:00:00Z") + off * 86400000);
+      for (const t of TIMES) rows.push({ ticker: "SYX" + k++, next_earnings_date: d, er_time: t });
+    }
+    rows.push({ ticker: "SYX" + k++, next_earnings_date: null, er_time: null });
+    return rows;
+  };
+  let swept = 0;
+  const sweep = (mod) => {
+    for (const asOf of SESSIONS) {
+      const rows = rowsFor(asOf);
+      const got = mod.unstatedAhead(rows, asOf);
+      const want = oracle(rows, asOf);
+      if (JSON.stringify(got.map) !== JSON.stringify(want) || got.n !== Object.keys(want).length) return false;
+      swept += Object.keys(want).length;
+    }
+    return true;
+  };
+  ok(sweep(X), "the forward unstated-time map equals the calendar oracle on twelve sessions, twenty-one report days and six time words");
+  ok(swept > 250, "and the sweep is not vacuous: " + swept + " entries");
+  const small = [["SYA101", "2026-03-02", null], ["SYB102", "2026-03-03", "unconfirmed"], ["SYC103", "2026-03-09", "unknown"], ["SYD104", "2026-03-10", "unknown"], ["SYE105", "2026-03-03", "premarket"], ["SYG107", "2026-03-01", "unknown"], ["SYH108", "2026-02-27", "unknown"], ["SYI109", null, null], ["SYJ110", "2026-03-07", "unknown"]].map(([ticker, d, t]) => ({ ticker, next_earnings_date: d, er_time: t }));
+  deep(X.unstatedAhead(small, "2026-03-02"), { map: { SYA101: 1, SYB102: 2, SYC103: 6 }, n: 3 }, "a report dated today with no stated time reaches up to the next session, one dated five sessions out is carried, six is not, a stated time and a weekend date are certain, and a past date is behind");
+  deep(X.unstatedAhead(small, "2026-03-03"), { map: { SYB102: 1, SYC103: 5, SYD104: 6 }, n: 3 }, "a session later the same reports are one session nearer, and the one that was six away is now five and carried");
+  {
+    const many = [];
+    for (let i = 0; i < 100; i++) many.push({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null });
+    for (let i = 0; i < 20; i++) many.push({ ticker: "SYB" + String(100 + i), next_earnings_date: "2026-03-03", er_time: null });
+    for (let i = 0; i < 150; i++) many.push({ ticker: "SYC" + String(100 + i), next_earnings_date: "2026-03-06", er_time: null });
+    const got = X.unstatedAhead(many.reverse(), "2026-03-02");
+    eq(Object.keys(got.map).length, X.ED_UNSTATED_MAX, "past the cap the map holds exactly the cap");
+    eq(got.n, 270, "and the count says how many there were");
+    ok(Object.entries(got.map).every(([t, v]) => (t.startsWith("SYA") ? v === 1 : t.startsWith("SYB") ? v === 2 : v === 5)), "each kept name carries its own count");
+    ok(Object.keys(got.map).filter((t) => t.startsWith("SYA")).length === 100 && Object.keys(got.map).filter((t) => t.startsWith("SYB")).length === 20, "the nearest are kept first, whatever the input order: the ones the live page needs");
+    deep(Object.keys(got.map).filter((t) => t.startsWith("SYC")), Array.from({ length: 80 }, (_, i) => "SYC" + String(100 + i)), "and the farthest are cut by ticker order");
+    deep(Object.keys(got.map), [...Object.keys(got.map)].sort(), "the map is in ticker order");
+  }
+  {
+    const rows = small.map((r, i) => ({ ...r, marketcap: 1e12 - i * 1e9, sector: "Technology" }));
+    const columns = X.UNIVERSE_COLUMNS.filter((c) => c.key === "ed");
+    const u = X.buildUniverse(rows, { sessionDate: "2026-03-02", generatedAt: "2026-03-02T21:45:00Z", columns, sigma: new Map() });
+    deep([u.edUnstated, u.edUnstatedN], [{ SYA101: 1, SYB102: 2, SYC103: 6 }, 3], "the universe carries the map and its count beside the session list");
+    deep(X.projectUniverse(u, X.projectionColumns("ed,t")).edUnstated, { SYA101: 1, SYB102: 2, SYC103: 6 }, "a projection that asks for the distance carries the map");
+    eq(X.projectUniverse(u, X.projectionColumns("t,chg")).edUnstated, undefined, "and one that does not ask for it does not");
+  }
+  const xbad = [
+    ["a stated time counted as unstated", [["if (!f || f.certain || f.ed > AHEAD_SESSIONS) continue;", "if (!f || f.ed > AHEAD_SESSIONS) continue;"]]],
+    ["the horizon of five sessions one short", [["f.ed > AHEAD_SESSIONS) continue;", "f.ed >= AHEAD_SESSIONS) continue;"]]],
+    ["the later candidate equal to the earlier", [["found.push([r.ticker, f.ed + 1]);", "found.push([r.ticker, f.ed]);"]]],
+    ["the farthest kept before the nearest", [["x[1] - y[1] || ", "y[1] - x[1] || "]]],
+    ["the cap ignored", [["slice(0, ED_UNSTATED_MAX)", "slice(0)"]]],
+    ["the count taken after the cap", [["n: found.length", "n: kept.length"]]],
+    ["the map not asked for with the distance", [["if (want.includes(\"ed\")) out.edUnstated", "if (want.includes(\"edx\")) out.edUnstated"]]],
+  ];
+  planted += xbad.length;
+  let salt3 = 120;
+  for (const [title, transforms] of xbad) {
+    const bad = await loadMutated("shared/flows-cross.js", transforms, { salt: salt3++ });
+    let caught = false;
+    try {
+      const got = bad.unstatedAhead(small, "2026-03-02");
+      caught = JSON.stringify(got) !== JSON.stringify({ map: { SYA101: 1, SYB102: 2, SYC103: 6 }, n: 3 }) || !sweep(bad);
+      if (!caught && title === "the farthest kept before the nearest") {
+        const many = [];
+        for (let i = 0; i < 150; i++) many.push({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null });
+        for (let i = 0; i < 150; i++) many.push({ ticker: "SYB" + String(100 + i), next_earnings_date: "2026-03-06", er_time: null });
+        const g = bad.unstatedAhead(many, "2026-03-02");
+        caught = Object.keys(g.map).filter((t) => t.startsWith("SYA")).length !== 150;
+      }
+      if (!caught && (title === "the cap ignored" || title === "the count taken after the cap")) {
+        const many = Array.from({ length: 250 }, (_, i) => ({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null }));
+        const g = bad.unstatedAhead(many, "2026-03-02");
+        caught = Object.keys(g.map).length !== 200 || g.n !== 250;
+      }
+      if (!caught && title === "the map not asked for with the distance") {
+        const rows = small.map((r, i) => ({ ...r, marketcap: 1e12 - i * 1e9, sector: "Technology" }));
+        const u = bad.buildUniverse(rows, { sessionDate: "2026-03-02", generatedAt: "2026-03-02T21:45:00Z", columns: bad.UNIVERSE_COLUMNS.filter((c) => c.key === "ed"), sigma: new Map() });
+        caught = bad.projectUniverse(u, bad.projectionColumns("ed,t")).edUnstated === undefined;
+      }
+    } catch {
+      caught = true;
+    }
+    ok(caught, `PLANTED WRONG BUILD, ${title}: the battery fails it`);
+  }
 }
 
 console.log(`✓ flows-reports: ${checks} assertions — the last report of a name read from history rows and the date-scoped calendars with its impact session (premarket on a Monday, after the close on a Friday, before Thanksgiving and Good Friday, on a Saturday and on Presidents Day), unknown times kept as intervals and never defaulted, rd 99 kept and 100 refused against an independent count, estimation rows refused without a figure, the precedence of a stated time and of the calendar, the ledger's skipped night, cut calendar day, universe churn and wire round trip, and ${planted} planted wrong builds`);
