@@ -24,17 +24,11 @@ export const NARROW_PX = 640;
 
 export const NO_SECTOR = "No sector";
 
-export const VIEWS = Object.freeze(["field", "map", "sectors"]);
+export const LIST_VIEWS = Object.freeze(["names", "sectors"]);
 
 export const STEP_EDGES = Object.freeze([0.5, 1, 2, 3]);
 
-export const MAP_CAP_LINE = "Tile area is market cap; colour is the move in IV-days.";
-
-export const MAP_EQUAL_LINE = "Every tile has the same area; colour is the move in IV-days.";
-
 export const SECTORS_LINE = "Each sector's median move, and its names beyond 2 IV-days.";
-
-export const KEY_EVENT = "Dashed outline: earnings within 30 days, event not separated.";
 
 export const MEDIAN_NOTE = "Median is signed, in IV-days.";
 
@@ -43,6 +37,12 @@ export const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat,
 export const SHARE_NOTE = "Share is that count over the sector's names.";
 
 export const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
+
+export const PINS_NOTE = "SPY and QQQ are left out by ticker.";
+
+export const WHY_NO_IV = "No implied volatility is published for these names.";
+
+export const WHY_ALL_EVENT = "Every measured name reports within 30 days.";
 
 export const X_LINE = "Across: the move in the name's own typical days.";
 
@@ -203,7 +203,9 @@ export const PARTS_LABELS = Object.freeze({
 export const PARTS_SENTENCES = Object.freeze([
   "Parts of the move: market, peers against market, the name against its peers.",
   "Market is the change in SPY. Peers are the other names in the sector.",
-  "Peers need at least 10 names. SPY and QQQ are never peers.",
+  "Peers need at least 10 names.",
+  "SPY and QQQ are left out by ticker.",
+  "No fund flag exists, so another fund with a sector counts.",
   "The parts add to the move. They are not beta-adjusted.",
   "Peer spread is 1.48 times the median distance of peers from their median.",
 ]);
@@ -248,10 +250,47 @@ export function partsOf(rows, t) {
   return { t, chg, total: tenths(chg), market, peers, peerWhy, parts };
 }
 
+export function sectorStats(rows) {
+  const by = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r.t !== "string" || !r.t || PEER_PINS.includes(r.t)) continue;
+    const key = typeof r.sector === "string" && r.sector ? r.sector : NO_SECTOR;
+    if (!by.has(key)) by.set(key, { name: key, total: 0, measured: 0, ms: [] });
+    const b = by.get(key);
+    b.total++;
+    const m = ivDays(r.chg, r.iv30p);
+    if (m === null) continue;
+    b.measured++;
+    if (!eventInside(r.ed)) b.ms.push(m);
+  }
+  const out = [...by.values()].map((b) => {
+    const n = b.ms.length;
+    const beyond = b.ms.filter((m) => Math.abs(m) > SECTOR_BEYOND).length;
+    return {
+      name: b.name,
+      total: b.total,
+      measured: b.measured,
+      n,
+      apart: b.measured - n,
+      median: n ? median(b.ms) : null,
+      beyond: n ? beyond : null,
+      share: n ? beyond / n : null,
+      why: n ? null : b.measured === 0 ? WHY_NO_IV : WHY_ALL_EVENT,
+    };
+  });
+  return out.sort((a, b) => (a.median === null) - (b.median === null) || (b.median ?? 0) - (a.median ?? 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+export function shareText(beyond, n) {
+  if (!(n > 0) || !Number.isInteger(beyond) || beyond < 0 || beyond > n) return null;
+  const p = Math.round((100 * beyond) / n);
+  return beyond > 0 && p === 0 ? "<1%" : p + "%";
+}
+
 export const wordCount = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
 export const VIEW_SENTENCES = Object.freeze([
-  MAP_CAP_LINE, MAP_EQUAL_LINE, SECTORS_LINE, KEY_EVENT, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE,
+  SECTORS_LINE, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE, PINS_NOTE, WHY_NO_IV, WHY_ALL_EVENT,
 ]);
 
 export const RADAR_SENTENCES = Object.freeze([X_LINE, Y_LINE, SIZE_LINE, REF_LINE, FROZEN_LINE]);

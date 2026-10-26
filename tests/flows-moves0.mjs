@@ -59,6 +59,124 @@ const SQRT252 = 15.874507866387544;
 }
 
 {
+  const IV = SQRT252;
+  const r = (t, m, sector, ed) => ({ t, chg: m, iv30p: IV, sector, ed: ed === undefined ? null : ed });
+  const find = (list, name) => list.find((x) => x.name === name);
+  eq(M.ivDays(2, IV), 2, "a change of 2 on an IV of the square root of 252 is exactly 2 IV-days, so the boundary can be hit exactly");
+  const hand = M.sectorStats([
+    r("A1", -3, "Alpha"), r("A2", -0.5, "Alpha"), r("A3", 0.4, "Alpha"), r("A4", 2, "Alpha"), r("A5", 2.01, "Alpha"),
+    r("A6", 9, "Alpha", 21), r("A7", 9, "Alpha", 22),
+  ]);
+  const alpha = find(hand, "Alpha");
+  eq(alpha.total, 7, "hand worked: seven names in the sector");
+  eq(alpha.measured, 7, "all seven have an implied day");
+  eq(alpha.apart, 1, "one reports within 21 sessions and is left out of every figure");
+  eq(alpha.n, 6, "which leaves six");
+  near(alpha.median, 1.2, 1e-12, "the median of -3, -0.5, 0.4, 2, 2.01 and 9 is (0.4 + 2) over 2");
+  eq(alpha.beyond, 3, "-3 and 2.01 are beyond 2, and so is the 9 that reports in 22 sessions; exactly 2 is not");
+  near(alpha.share, 3 / 6, 1e-12, "share is that count over the six");
+  eq(alpha.why, null, "a sector with figures gives no reason");
+  eq(M.sectorStats([r("X", 2, "S"), r("Y", -2, "S")])[0].beyond, 0, "exactly 2 and exactly -2 are on the line and are not beyond it");
+  eq(M.sectorStats([r("X", 2.0000001, "S")])[0].beyond, 1, "just past 2 is beyond");
+  eq(M.sectorStats([r("X", -2.0000001, "S")])[0].beyond, 1, "and just past -2 is beyond");
+  const mixed = M.sectorStats([
+    r("B1", 1, "Ghost"), { t: "B2", chg: 1, iv30p: null, sector: "Ghost", ed: null }, { t: "B3", chg: 1, iv30p: 0, sector: "Ghost", ed: null },
+    r("C1", 1, "Soon", 3), r("C2", 2, "Soon", 21),
+    r("D1", 1, null), r("D2", 3, ""),
+  ]);
+  const ghost = find(mixed, "Ghost");
+  eq(ghost.n, 1, "a name with no implied volatility is not measured and a name with it is");
+  const none = M.sectorStats([{ t: "B2", chg: 1, iv30p: null, sector: "Ghost", ed: null }, { t: "B3", chg: 1, iv30p: 0, sector: "Ghost", ed: null }])[0];
+  eq(none.median, null, "a sector with no implied volatility has no median, never zero");
+  eq(none.beyond, null, "no count of names beyond, never zero");
+  eq(none.share, null, "no share");
+  eq(none.why, M.WHY_NO_IV, "and says why");
+  eq(none.total, 2, "its names are still counted");
+  eq(none.measured, 0, "though none is measured");
+  const soon = find(mixed, "Soon");
+  eq(soon.median, null, "a sector whose measured names all report soon has no median");
+  eq(soon.why, M.WHY_ALL_EVENT, "and says that");
+  eq(soon.apart, 2, "with both names counted apart");
+  eq(soon.measured, 2, "and measured");
+  const ns = find(mixed, M.NO_SECTOR);
+  eq(ns.total, 2, "names with a null or empty sector are one sector, No sector");
+  near(ns.median, 2, 1e-12, "whose median is the middle of 1 and 3");
+  const pinned = M.sectorStats([r("SPY", 50, "Alpha"), r("QQQ", -50, "Alpha"), r("A1", 1, "Alpha"), r("SPY2", 1, "Funds")]);
+  eq(pinned.length, 2, "SPY and QQQ are not in any sector");
+  near(find(pinned, "Alpha").median, 1, 1e-12, "so they cannot move a sector's median");
+  eq(find(pinned, "Alpha").total, 1, "or its count");
+  eq(M.sectorStats([r("SPY", 1, "Funds"), r("QQQ", 1, "Funds")]).length, 0, "a sector holding only the two is not listed");
+  eq(M.sectorStats(null).length, 0, "no rows, no sectors");
+  eq(M.sectorStats([null, { t: 4 }, { t: "" }, undefined]).length, 0, "rows without a ticker are ignored");
+  const tied = M.sectorStats([r("a", 1, "Zulu"), r("b", 1, "Alpha"), r("c", 1, "Mike"), r("d", 2, "Low"), r("e", -1, "Neg"), { t: "g", chg: 1, iv30p: null, sector: "Zed" }, { t: "h", chg: 1, iv30p: null, sector: "Abe" }]);
+  deep(tied.map((x) => x.name), ["Low", "Alpha", "Mike", "Zulu", "Neg", "Abe", "Zed"], "largest median first, ties by name, a sector with no median last and by name");
+  deep(M.sectorStats([r("a", 1, "Zulu"), r("b", 1, "Alpha")]).map((x) => x.name), M.sectorStats([r("b", 1, "Alpha"), r("a", 1, "Zulu")]).map((x) => x.name), "and the order does not depend on the order of the rows");
+  eq(M.shareText(0, 5), "0%", "none of five is 0%");
+  eq(M.shareText(1, 300), "<1%", "one of 300 is under half a percent and prints as under 1%, not as 0%");
+  eq(M.shareText(1, 200), "1%", "one of 200 is half a percent and rounds to 1%");
+  eq(M.shareText(3, 8), "38%", "three of eight is 37.5 and rounds up");
+  eq(M.shareText(5, 5), "100%", "all of them");
+  eq(M.shareText(0, 0), null, "of no names there is no share");
+  eq(M.shareText(2, 1), null, "more than all is refused");
+  eq(M.shareText(-1, 5), null, "and so is a negative count");
+  eq(M.shareText(1.5, 5), null, "and a fraction");
+  for (const sentence of [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE, M.WHY_NO_IV, M.WHY_ALL_EVENT]) {
+    ok(M.HEADER_SENTENCES.includes(sentence) && M.wordCount(sentence) <= M.HEADER_WORDS_MAX, "a sector sentence is held with the header sentences and is short: " + sentence);
+  }
+  eq(M.SECTOR_BEYOND, 2, "the line is 2 IV-days");
+  deep(M.LIST_VIEWS, ["names", "sectors"], "the list has two views");
+  for (const gone of ["MAP_CAP_LINE", "MAP_EQUAL_LINE", "KEY_EVENT", "VIEWS"]) ok(!(gone in M), gone + " described a map view that does not exist and is removed");
+  const rnd = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const q = rnd(20261027);
+  const NAMES = ["Alpha", "Beta", "Gamma", null, "", "Delta"];
+  const brute = (rows) => {
+    const groups = {};
+    for (const x of rows) {
+      if (!x || typeof x.t !== "string" || !x.t || x.t === "SPY" || x.t === "QQQ") continue;
+      const name = x.sector ? x.sector : "No sector";
+      (groups[name] = groups[name] || []).push(x);
+    }
+    const out = Object.keys(groups).map((name) => {
+      const g = groups[name];
+      const ms = g.map((x) => (typeof x.chg === "number" && typeof x.iv30p === "number" && x.iv30p > 0 ? x.chg / (x.iv30p / Math.sqrt(252)) : null));
+      const measured = ms.filter((m) => m !== null).length;
+      const clean = ms.filter((m, i) => m !== null && !(typeof g[i].ed === "number" && g[i].ed <= 21)).sort((a, b) => a - b);
+      let median = null;
+      if (clean.length) median = clean.length % 2 ? clean[(clean.length - 1) / 2] : (clean[clean.length / 2 - 1] + clean[clean.length / 2]) / 2;
+      const beyond = clean.filter((m) => m > 2 || m < -2).length;
+      return { name, total: g.length, measured, n: clean.length, median, beyond: clean.length ? beyond : null };
+    });
+    out.sort((a, b) => (a.median === null) - (b.median === null) || (a.median === null ? 0 : b.median - a.median) || (a.name < b.name ? -1 : 1));
+    return out;
+  };
+  let worlds = 0, sectors = 0, empties = 0;
+  for (let w = 0; w < 300; w++) {
+    const rows = [];
+    const n = Math.floor(q() * (w % 4 === 0 ? 8 : 90));
+    for (let i = 0; i < n; i++) {
+      rows.push({ t: "T" + i, chg: q() < 0.06 ? null : Math.round((q() - 0.5) * 0.3 * 1e4) / 1e4, iv30p: q() < 0.08 ? (q() < 0.5 ? null : 0) : Math.round((0.15 + q() * 0.6) * 1e4) / 1e4, sector: NAMES[Math.floor(q() * 6)], ed: q() < 0.2 ? Math.floor(q() * 40) : null });
+    }
+    if (q() < 0.6) rows.push({ t: "SPY", chg: 0.5, iv30p: 0.2, sector: "Alpha", ed: null });
+    if (q() < 0.6) rows.push({ t: "QQQ", chg: -0.5, iv30p: 0.2, sector: "Beta", ed: null });
+    const got = M.sectorStats(rows);
+    const want = brute(rows);
+    worlds++;
+    sectors += got.length;
+    empties += got.filter((x) => x.median === null).length;
+    eq(got.length, want.length, "world " + w + ": the same sectors");
+    got.forEach((x, i) => {
+      const y = want[i];
+      eq(x.name, y.name, "world " + w + ": order position " + i);
+      deep([x.total, x.measured, x.n, x.beyond], [y.total, y.measured, y.n, y.beyond], "world " + w + " " + x.name + ": counts");
+      if (y.median === null) eq(x.median, null, "world " + w + " " + x.name + ": no median"); else near(x.median, y.median, 1e-12, "world " + w + " " + x.name + ": median");
+      eq(x.apart, y.measured - y.n, "world " + w + " " + x.name + ": apart");
+      eq(x.share === null, y.n === 0, "world " + w + " " + x.name + ": a share only with figures");
+    });
+  }
+  ok(worlds === 300 && sectors > 600 && empties > 20, "the leaf equals an independent computation over " + worlds + " worlds, " + sectors + " sectors and " + empties + " with no median");
+}
+
+{
   near(M.ivDays(-0.031, 0.35), -0.031 * SQRT252 / 0.35, 1e-12, "the definition worked by hand: chg / (iv30p / sqrt(252))");
   near(M.ivDays(-0.031, 0.35), -1.4062, 5e-4, "chg -3.1% on iv30p 35% is -1.4062 IV-days");
   eq(M.signedIvDays(M.ivDays(-0.031, 0.35)), "−1.4", "and prints as minus 1.4");

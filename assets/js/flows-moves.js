@@ -26,7 +26,17 @@
   const PEER_MIN = 10;
   const MAD_SCALE = 1.4826;
   const PARTS_LABELS = { market: "Market (SPY)", peers: "Peers' median", peersVsMarket: "Peers vs market", nameVsPeers: "Name vs peers", nameVsMarket: "Name vs market" };
-  const PARTS_SENTENCES = ["Parts of the move: market, peers against market, the name against its peers.", "Market is the change in SPY. Peers are the other names in the sector.", "Peers need at least 10 names. SPY and QQQ are never peers.", "The parts add to the move. They are not beta-adjusted.", "Peer spread is 1.48 times the median distance of peers from their median."];
+  const PARTS_SENTENCES = ["Parts of the move: market, peers against market, the name against its peers.", "Market is the change in SPY. Peers are the other names in the sector.", "Peers need at least 10 names.", "SPY and QQQ are left out by ticker.", "No fund flag exists, so another fund with a sector counts.", "The parts add to the move. They are not beta-adjusted.", "Peer spread is 1.48 times the median distance of peers from their median."];
+  const SECTOR_BEYOND = 2;
+  const NO_SECTOR = "No sector";
+  const SECTORS_LINE = "Each sector's median move, and its names beyond 2 IV-days.";
+  const MEDIAN_NOTE = "Median is signed, in IV-days.";
+  const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat, up or down.";
+  const SHARE_NOTE = "Share is that count over the sector's names.";
+  const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
+  const PINS_NOTE = "SPY and QQQ are left out by ticker.";
+  const WHY_NO_IV = "No implied volatility is published for these names.";
+  const WHY_ALL_EVENT = "Every measured name reports within 30 days.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
   const SHAPE = { up: "▲", dn: "▼", fl: "◆" };
   const TRI = 2 * Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
@@ -130,6 +140,32 @@
     return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
   };
   const tenthsOf = (v) => Math.round(v * 1000) + 0;
+
+  function sectorStats(rows) {
+    const by = new Map();
+    for (const r of rows) {
+      if (!r || PINS.includes(r.t)) continue;
+      const key = r.sector || NO_SECTOR;
+      let b = by.get(key);
+      if (!b) by.set(key, b = { name: key, key: r.sector || "__none", total: 0, measured: 0, ms: [] });
+      b.total++;
+      const m = ivDays(r.chg, r.iv);
+      if (m === null) continue;
+      b.measured++;
+      const ed = num(r.ed);
+      if (!(ed !== null && ed <= EVENT_SESSIONS)) b.ms.push(m);
+    }
+    return [...by.values()].map((b) => {
+      const n = b.ms.length;
+      const beyond = b.ms.filter((m) => Math.abs(m) > SECTOR_BEYOND).length;
+      return { name: b.name, key: b.key, total: b.total, measured: b.measured, n, apart: b.measured - n, median: n ? med(b.ms) : null, beyond: n ? beyond : null, share: n ? beyond / n : null, why: n ? null : b.measured === 0 ? WHY_NO_IV : WHY_ALL_EVENT };
+    }).sort((a, b) => (a.median === null) - (b.median === null) || (b.median === null ? 0 : b.median) - (a.median === null ? 0 : a.median) || cmp(a.name, b.name));
+  }
+  function shareText(beyond, n) {
+    if (!(n > 0) || !Number.isInteger(beyond) || beyond < 0 || beyond > n) return null;
+    const p = Math.round((100 * beyond) / n);
+    return beyond > 0 && p === 0 ? "<1%" : p + "%";
+  }
   function peerParts(rows, t) {
     const me = rows.find((r) => r.t === t);
     const chg = me ? num(me.chg) : null;
@@ -165,7 +201,7 @@
   }
 
   if (typeof document === "undefined") {
-    globalThis.__MovesTest = Object.freeze({ rarityParts, sigRun, SIG_Q, ivDays, signed, domainOf, radiusOf, markerPath, TRI, peerParts });
+    globalThis.__MovesTest = Object.freeze({ rarityParts, sigRun, SIG_Q, ivDays, signed, domainOf, radiusOf, markerPath, TRI, peerParts, sectorStats, shareText });
     return;
   }
 
@@ -178,7 +214,7 @@
   const coarse = () => matchMedia("(pointer:coarse)").matches;
   const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
 
-  const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6 };
+  const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, listView: "names", dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6 };
   const cards = new Map();
   let cardTimer = 0;
 
@@ -228,7 +264,7 @@
     const pins = plotted.filter((x) => PINS.includes(x.t));
     const sg = sigRun(all, SIG_Q);
     all.forEach((x, i) => { x.sg = sg.items[i]; });
-    return { live, sg, rows: rows || [], all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
+    return { live, sg, rows: rows || [], sectors: sectorStats(rows || []), all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
   }
 
   function lists(M) {
@@ -266,8 +302,8 @@
     if (sel.dataset.sig !== sig) {
       sel.dataset.sig = sig;
       sel.replaceChildren(...[["", "All sectors"], ...names.map((n) => [n, n === "__none" ? "No sector" : n])].map(([v, l]) => { const o = document.createElement("option"); o.value = v; o.textContent = l; return o; }));
-      sel.value = S.sector;
     }
+    sel.value = S.sector;
     const any = S.dir || S.earn || S.sector;
     $("mvClear").hidden = !any;
   }
@@ -391,6 +427,7 @@
   function paintLists() {
     const M = S.model;
     if (!M) return;
+    if (S.listView === "sectors") { paintSectors(); return; }
     const lt = lists(M);
     const rh = rhOf();
     const apartBox = $("mvApart");
@@ -406,6 +443,48 @@
     $("mvNowNote").textContent = S.listHeld && S.dirty ? "Order held while you read." : lt.now.length ? n + " of " + lt.now.length : "";
     $("mvMore").hidden = lt.now.length <= n;
     syncRows();
+  }
+
+  const flatten = (m) => ((m < 0 ? -1 : 1) * Math.round(Math.abs(m) * 10)) / 10 + 0;
+  const secLabel = (r) => r.name + ", " + (r.median === null ? "no median. " + r.why : r.n + " of " + r.total + " names measured, median " + signed(flatten(r.median)) + " IV-days, " + r.beyond + " beyond 2, " + shareText(r.beyond, r.n));
+
+  function secRowHtml(r) {
+    const shown = r.median === null ? null : flatten(r.median);
+    const dir = shown === null ? null : dirOf(shown);
+    const sub = r.median === null ? r.why : r.n === r.total ? plural(r.total, "name", "names") : r.n + " of " + plural(r.total, "name", "names");
+    return '<button type="button" class="mv-srow" data-sector="' + esc(r.key) + '" aria-pressed="' + (S.sector === r.key) + '"' + (r.measured ? "" : " disabled") + ' tabindex="-1" aria-label="' + esc(secLabel(r)) + '" title="' + esc(r.median === null ? r.why : secLabel(r)) + '"><span class="mv-sn"><b>' + esc(r.name) + '</b><span class="sub">' + esc(sub) + '</span></span><span class="mv-sm ' + (dir ? toneOf(dir) + "-t" : "mut-t") + '" data-k="median">' + (dir ? SHAPE[dir] + " " + signed(shown) : DASH) + '</span><span class="mv-sb" data-k="beyond">' + (r.median === null ? DASH : r.beyond + " · " + shareText(r.beyond, r.n)) + "</span></button>";
+  }
+
+  function paintSectors() {
+    const M = S.model;
+    if (!M) return;
+    const rows = M.sectors;
+    const box = $("mvSec");
+    const rh = rhOf();
+    const room = Math.floor(box.clientHeight / rh);
+    const n = Math.max(1, Math.min(rows.length, room || 1));
+    box.innerHTML = rows.length ? rows.slice(0, n).map(secRowHtml).join("") : '<p class="mv-empty">No sector could be listed.</p>';
+    $("mvSecNote").textContent = S.listHeld && S.dirty ? "Order held while you read." : rows.length ? n + " of " + rows.length : "";
+    $("mvSecMore").hidden = rows.length <= n;
+    syncSecRows();
+  }
+
+  function syncSecRows() {
+    const rows = [...$("mvSec").querySelectorAll(".mv-srow")];
+    const cur = rows.find((b) => b.getAttribute("aria-pressed") === "true") || rows[0];
+    for (const b of rows) b.tabIndex = b === cur ? 0 : -1;
+  }
+
+  function applyListView() {
+    const sec = S.listView === "sectors";
+    for (const b of document.querySelectorAll("#mvLists .mv-box-now, #mvLists .mv-box-apart")) b.hidden = sec;
+    $("mvSecBox").hidden = !sec;
+    for (const b of $("mvListSeg").children) b.setAttribute("aria-pressed", String(b.dataset.lv === S.listView));
+  }
+
+  function pickSector(key) {
+    S.sector = S.sector === key ? "" : key;
+    redraw();
   }
 
   function syncRows() {
@@ -498,7 +577,7 @@
       return '<span class="mv-pt" data-k="' + p.key + '" title="' + esc(p.label + " " + signedTenths(p.tenths) + (note ? ", " + note : "")) + '"><i>' + esc(head) + (tail ? '<span class="x">' + esc(tail) + "</span>" : "") + '</i><b class="' + toneOf(dirOf(p.tenths)) + '-t">' + signedTenths(p.tenths) + "</b>" + (note ? '<em class="' + (p.key === "peers" ? "n" : "z") + '">' + esc(note) + "</em>" : "") + "</span>";
     }).join("");
     const note = P.peers ? "" : '<span class="mv-pn" data-k="why">' + esc(P.peerWhy) + "</span>";
-    return '<span class="mv-parts" role="group" aria-label="Parts of the move" title="' + esc(PARTS_SENTENCES[3]) + '">' + items + note + "</span>";
+    return '<span class="mv-parts" role="group" aria-label="Parts of the move" title="' + esc(PARTS_SENTENCES[5]) + '">' + items + note + "</span>";
   }
 
   function sigLine(x) {
@@ -608,7 +687,7 @@
   }
 
   function request() {
-    if (holding()) { S.dirty = true; if (S.listHeld) $("mvNowNote").textContent = "Order held while you read."; return; }
+    if (holding()) { S.dirty = true; if (S.listHeld) { $("mvNowNote").textContent = "Order held while you read."; $("mvSecNote").textContent = "Order held while you read."; } return; }
     paint();
   }
 
@@ -633,6 +712,19 @@
     if (f) f.focus();
   }
 
+  function openSectors() {
+    const rows = S.model.sectors;
+    const rh = rhOf();
+    const n = Math.min(rows.length, Math.max(1, Math.floor((innerHeight - 24 - 230) / rh)));
+    $("mvSecT").textContent = n === rows.length ? "Sectors, " + rows.length : "Largest " + n + " of " + rows.length + " sectors";
+    $("mvSecP").textContent = [SECTORS_LINE, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE, PINS_NOTE].join(" ");
+    $("mvSecG").innerHTML = rows.slice(0, n).map(secRowHtml).join("");
+    for (const b of $("mvSecG").children) b.tabIndex = 0;
+    $("mvSecDlg").showModal();
+    const f = $("mvSecG").querySelector('[aria-pressed="true"]') || $("mvSecG").firstElementChild;
+    if (f) f.focus();
+  }
+
   function openInfo() {
     $("mvInfoB").innerHTML = [
       "Across: the move in the name's own typical days. A typical day is a robust one-day scale from the last 252 sessions.",
@@ -644,6 +736,7 @@
       REF_LINE,
       SIG_INFO_SENTENCES.join(" "),
       PARTS_SENTENCES.join(" "),
+      SECTORS_LINE,
       "Not built yet: flow clusters and replay.",
     ].map((t, i, a) => '<p' + (i === a.length - 1 ? ' class="q"' : "") + ">" + esc(t) + "</p>").join("");
     $("mvInfoDlg").showModal();
@@ -690,6 +783,32 @@
     $("mvNow").addEventListener("click", click);
     $("mvApart").addEventListener("click", click);
     $("mvMore").addEventListener("click", openMore);
+    $("mvSecMore").addEventListener("click", openSectors);
+    $("mvSecX").addEventListener("click", () => $("mvSecDlg").close());
+    $("mvSecG").addEventListener("click", (e) => { const b = e.target.closest(".mv-srow"); if (!b) return; $("mvSecDlg").close(); pickSector(b.dataset.sector); });
+    $("mvSecG").addEventListener("keydown", (e) => {
+      const bs = [...$("mvSecG").children], i = bs.indexOf(document.activeElement);
+      const d = i < 0 ? 0 : { ArrowDown: 1, ArrowUp: -1 }[e.key];
+      if (!d || !bs[i + d]) return;
+      e.preventDefault();
+      bs[i + d].focus();
+    });
+    $("mvListSeg").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b || b.dataset.lv === S.listView) return;
+      S.listView = b.dataset.lv;
+      applyListView();
+      paintLists();
+    });
+    $("mvSec").addEventListener("click", (e) => { const b = e.target.closest(".mv-srow"); if (b) pickSector(b.dataset.sector); });
+    $("mvSec").addEventListener("keydown", (e) => {
+      const bs = [...$("mvSec").querySelectorAll(".mv-srow")], i = bs.indexOf(e.target.closest(".mv-srow"));
+      if (i < 0) return;
+      const to = { ArrowDown: bs[i + 1], ArrowUp: bs[i - 1], Home: bs[0], End: bs[bs.length - 1] }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      if (to) { for (const b of bs) b.tabIndex = b === to ? 0 : -1; to.focus(); }
+    });
     $("mvMoreG").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $("mvMoreDlg").close(); select(b.dataset.t, { now: true }); if (mobile()) setView("detail"); });
     $("mvMoreG").addEventListener("keydown", (e) => {
       const bs = [...$("mvMoreG").children], i = bs.indexOf(document.activeElement);
@@ -743,6 +862,7 @@
     ro.observe($("mvStage"));
     ro.observe($("mvPlot"));
     ro.observe($("mvNow"));
+    ro.observe($("mvSec"));
   }
 
   function fail(kind, text) {

@@ -48,10 +48,13 @@ ok(/^FLOWS_MOVES = "on"$/m.test(wrangler), "the switch ships on: the owner opene
   for (const w of M.HEADER_SENTENCES) ok(M.wordCount(w) <= M.HEADER_WORDS_MAX, "a header sentence stays inside fourteen words: " + w);
   ok(!FORBID.test(M.HEADER_SENTENCES.join(" ")), "and uses none of the forbidden words");
   for (const w of [M.LINE, M.CAPTION, M.APART, ...M.RADAR_SENTENCES]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sentence: " + w);
+  for (const w of [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE, M.WHY_NO_IV, M.WHY_ALL_EVENT]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sector sentence: " + w);
+  ok(HTML.includes(M.SECTORS_LINE.replace("'", "&#39;")), "and the served sector box carries the one line that says what the table is");
+  ok(JS.includes("const SECTOR_BEYOND = 2;") && M.SECTOR_BEYOND === 2 && JS.includes('const NO_SECTOR = "No sector";') && M.NO_SECTOR === "No sector", "the line at 2 IV-days and the name of the empty sector are shared with the leaf");
   ok(!JS.includes("not yet published") && JS.includes(JSON.stringify(SIG.SIG_FLAGGED_LINE).slice(1, -1)), "the muted note is gone and the test's sentence is carried");
   const panels = [...HTML.matchAll(/role="tab" aria-selected="(\w+)" aria-controls="(\w+)" data-v="(\w+)"/g)];
   eq(panels.map((x) => [x[2], x[3], x[1]]), [["mvMain", "field", "true"], ["mvLists", "lists", "false"], ["mvRail", "detail", "false"]], "three phone tabs control three panels, Field first");
-  for (const id of ["mvMain", "mvLists", "mvRail", "mvPlot", "mvNow", "mvApart", "mvMoreDlg", "mvInfoDlg", "mvDir", "mvEarn", "mvSector", "mvClear", "mvFreeze"]) ok(new RegExp('id="' + id + '"').test(HTML), "the shell carries #" + id);
+  for (const id of ["mvMain", "mvLists", "mvRail", "mvPlot", "mvNow", "mvApart", "mvMoreDlg", "mvInfoDlg", "mvListSeg", "mvSecBox", "mvSec", "mvSecMore", "mvSecNote", "mvSecDlg", "mvSecG", "mvDir", "mvEarn", "mvSector", "mvClear", "mvFreeze"]) ok(new RegExp('id="' + id + '"').test(HTML), "the shell carries #" + id);
   const sentences = text.replace(/<[^>]+>/g, ". ").split(/[.!?]\s+/).map((s) => s.trim()).filter((s) => s.length > 3);
   for (const s of sentences) ok(M.wordCount(s) <= 14, "a sentence of the served HTML stays short: " + s.slice(0, 60));
   ok(!COLOUR_LITERAL.test(CSS), "the sheet holds no colour literal: tokens only");
@@ -153,6 +156,36 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
     eq(T.peerParts(world.map((x) => (x.t === "P0" ? { ...x, chg: null } : x)), "S").peerWhy, "9 peers, needs 10.", "a null change is not a peer and is never a zero");
     eq(T.peerParts([{ t: "S", chg: 0.01, sector: "X" }, ...Array.from({ length: 10 }, (_, i) => ({ t: "P" + i, chg: 0.01, sector: "X" }))], "S").peers.z, null, "a zero spread has no z, not infinity");
     eq(T.peerParts([{ t: "S", chg: null, sector: "X" }], "S"), null, "a name with no change has no parts");
+  }
+  {
+    const IV = Math.sqrt(252);
+    const toLeaf = (rows) => rows.map((x) => ({ t: x.t, chg: x.chg, iv30p: x.iv, ed: x.ed, sector: x.sector }));
+    const strip = (v) => JSON.parse(JSON.stringify(v.map(({ key, ...rest }) => rest)));
+    const rnd = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const q = rnd(20261028);
+    const NAMES = ["Alpha", "Beta", "Gamma", null, "Delta"];
+    let worlds = 0, sectors = 0, empties = 0;
+    for (let w = 0; w < 300; w++) {
+      const rows = [];
+      const n = Math.floor(q() * (w % 4 === 0 ? 8 : 90));
+      for (let i = 0; i < n; i++) rows.push({ t: "T" + i, chg: q() < 0.06 ? null : Math.round((q() - 0.5) * 0.3 * 1e4) / 1e4, iv: q() < 0.08 ? (q() < 0.5 ? null : 0) : Math.round((0.15 + q() * 0.6) * 1e4) / 1e4, sector: NAMES[Math.floor(q() * 5)], ed: q() < 0.2 ? Math.floor(q() * 40) : null });
+      if (q() < 0.6) rows.push({ t: "SPY", chg: 0.5, iv: 0.2, sector: "Alpha", ed: null });
+      if (q() < 0.6) rows.push({ t: "QQQ", chg: -0.5, iv: 0.2, sector: "Beta", ed: null });
+      const got = T.sectorStats(rows);
+      const want = M.sectorStats(toLeaf(rows));
+      worlds++;
+      sectors += got.length;
+      empties += got.filter((x) => x.median === null).length;
+      eq(strip(got), JSON.parse(JSON.stringify(want)), "the page's sector figures equal the leaf's in world " + w);
+      eq(JSON.parse(JSON.stringify(got.map((x) => x.key))), want.map((x) => (x.name === M.NO_SECTOR ? "__none" : x.name)), "and each row carries the key the sector filter uses, in world " + w);
+    }
+    ok(worlds === 300 && sectors > 600 && empties > 20, "the page's sector table equals the leaf's over " + worlds + " worlds, " + sectors + " sectors and " + empties + " with no median");
+    const edge = (list) => JSON.parse(JSON.stringify(T.sectorStats(list.map((m, i) => ({ t: "E" + i, chg: m, iv: IV, sector: "X", ed: null })))))[0];
+    eq(edge([2, -2]).beyond, 0, "the page: exactly 2 and exactly -2 are not beyond 2");
+    eq(edge([2.01]).beyond, 1, "and 2.01 is");
+    eq(edge([-2.01]).beyond, 1, "and -2.01");
+    eq(T.sectorStats([{ t: "A", chg: 1, iv: IV, sector: "X", ed: 21 }, { t: "B", chg: 1, iv: IV, sector: "X", ed: 22 }])[0].n, 1, "the page: 21 sessions is inside the earnings window and 22 is not");
+    for (const [b, n] of [[0, 5], [1, 300], [1, 200], [3, 8], [5, 5], [0, 0], [2, 1], [-1, 5], [1.5, 5]]) eq(T.shareText(b, n), M.shareText(b, n), "the page's share text equals the leaf's for " + b + " of " + n);
   }
   for (const level of [2, 3]) {
     for (let hits = 0; hits <= 252; hits++) {
@@ -395,10 +428,187 @@ async function partsBlock(browser, js, P, same) {
   }
 }
 
+const flatShown = (m) => { const a = Math.round(Math.abs(m) * 10) / 10; return a === 0 ? 0 : m < 0 ? -a : a; };
+const glyphOf = (v) => (v > 0 ? "▲" : v < 0 ? "▼" : "◆");
+const shareExp = (b, n) => { const p = Math.round((100 * b) / n); return b > 0 && p === 0 ? "<1%" : p + "%"; };
+const namesOf = (n) => n + (n === 1 ? " name" : " names");
+const secExpect = (r) => [r.name === M.NO_SECTOR ? "__none" : r.name, r.name, r.median === null ? r.why : r.n === r.total ? namesOf(r.total) : r.n + " of " + namesOf(r.total), r.median === null ? DASH : glyphOf(flatShown(r.median)) + " " + sgn1(flatShown(r.median)), r.median === null ? DASH : r.beyond + " · " + shareExp(r.beyond, r.n), r.measured === 0];
+const secRead = (page, sel) => page.evaluate((q) => Array.from(document.querySelectorAll(q + " .mv-srow"), (b) => ({ key: b.dataset.sector, name: b.querySelector(".mv-sn b").textContent, sub: b.querySelector(".mv-sn .sub").textContent, median: b.querySelector('[data-k="median"]').textContent, beyond: b.querySelector('[data-k="beyond"]').textContent, pressed: b.getAttribute("aria-pressed"), disabled: b.disabled, title: b.title, label: b.getAttribute("aria-label"), tab: b.tabIndex, h: b.offsetHeight })), sel);
+const txt = (page, id) => page.evaluate((i) => document.getElementById(i).textContent, id);
+const secKey = (r) => [r.key, r.name, r.sub, r.median, r.beyond, r.disabled];
+
+const SEC_IV = Math.sqrt(252);
+const SEC_T = 1e12;
+const SEC_LIST = [
+  ["SPY", 0.004, 0.16, 90, "Line", 40 * SEC_T, 0.0065, 14, 3],
+  ["TB1", 0.01, 0.3, 60, "Tie B", 1e10, 0.01, 10, 1], ["TA1", 0.01, 0.3, 60, "Tie A", 1e10, 0.01, 10, 1],
+  ...["L1", "L2", "L3", "L4", "L5", "L6"].map((t) => [t, 0.01, 0.3, 60, "Line", 1e10, 0.01, 10, 1]),
+  ["F1", 0.001, 0.3, 60, "Flat", 1e10, 0.01, 10, 1],
+  ["G1", 0.01, null, 60, "Ghost", 1e10, 0.01, 10, 1], ["G2", 0.01, null, 60, "Ghost", 1e10, 0.01, 10, 1],
+  ["S1", 0.01, 0.3, 5, "Soon", 1e10, 0.01, 10, 1], ["S2", 0.01, 0.3, 5, "Soon", 1e10, 0.01, 10, 1],
+];
+const SEC_STRIPS = { TB1: [1, SEC_IV], TA1: [1, SEC_IV], L1: [2, SEC_IV], L2: [2.01, SEC_IV], L3: [-2, SEC_IV], L4: [-2.01, SEC_IV], L5: [0.4, SEC_IV], L6: [0, SEC_IV], F1: [-0.04, SEC_IV], G1: [0.01, null], G2: [0.02, null], S1: [3, SEC_IV], S2: [0.1, SEC_IV], SPY: [50, SEC_IV] };
+const SEC_BIG = [["SPY", 0.004, 0.16, 90, "Funds", 40 * SEC_T, 0.0065, 14, 3], ...Array.from({ length: 30 }, (_, i) => ["Sec" + String(i).padStart(2, "0"), 0.004 * (i - 14), 0.3, 60, "Sector " + String(i).padStart(2, "0"), 1e10, 0.01, 10, 1]).flatMap((a, i) => [a, ["B" + String(i).padStart(2, "0"), 0.003 * (((i * 7) % 11) - 5), 0.3, 60, a[4], 1e10, 0.01, 10, 1]])];
+
+async function sectorsBlock(browser, js, P, same) {
+  const want = M.sectorStats(DEC.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+  const M1 = model(DEC);
+  for (const [w, h, extra] of VIEWPORTS) {
+    const phone = w < 900;
+    const tag = w + "x" + h;
+    const { ctx, page, errors } = await mount(browser, w, h, { context: extra, js });
+    if (phone) { await page.click('#mvSeg5 [data-v="lists"]'); await page.waitForTimeout(150); }
+    P(await page.locator("#mvSecBox").isHidden() && await page.locator("#mvNow").isVisible(), tag + ": the name lists are the opening view and the sector table is not shown");
+    P((await page.locator('#mvListSeg [data-lv="names"]').getAttribute("aria-pressed")) === "true" && (await page.locator('#mvListSeg [data-lv="sectors"]').getAttribute("aria-pressed")) === "false", tag + ": the switch says Names");
+    await page.click('#mvListSeg [data-lv="sectors"]');
+    await page.waitForTimeout(150);
+    P(await page.locator("#mvNow").isHidden() && await page.locator("#mvApart").isHidden() && await page.locator("#mvSecBox").isVisible(), tag + ": Sectors replaces both name lists");
+    P((await page.locator('#mvListSeg [data-lv="sectors"]').getAttribute("aria-pressed")) === "true", tag + ": the switch says Sectors");
+    const rows = await secRead(page, "#mvSec");
+    const rh = rows.length ? rows[0].h : 36;
+    P(rh === (phone ? 44 : 36), tag + ": a sector row is " + (phone ? 44 : 36) + " px high (" + rh + ")");
+    const boxH = await page.evaluate(() => document.getElementById("mvSec").clientHeight);
+    const shown = Math.max(1, Math.min(want.length, Math.floor(boxH / rh)));
+    P(rows.length === shown, tag + ": as many sectors as fit are listed (" + rows.length + " of " + shown + ")");
+    same(rows.map(secKey), want.slice(0, shown).map(secExpect), tag + ": every sector row is the leaf's name, count, median and beyond-2 share");
+    P((await page.locator("#mvSecNote").innerText()) === shown + " of " + want.length, tag + ": the note counts the sectors");
+    P((await page.locator("#mvSecMore").isHidden()) === (want.length <= shown), tag + ": Show all is offered exactly when sectors are left out");
+    P(rows.every((r) => r.label.startsWith(r.name + ", ")) && rows.filter((r) => r.tab === 0).length === 1, tag + ": every row is named and exactly one is in the tab order");
+    P(rows.every((r) => r.pressed === "false"), tag + ": no sector is selected at first");
+    const f = await fit(page);
+    P(f.v && f.h, tag + ": the page does not scroll with the sector table (" + f.sh + " of " + f.ih + ")");
+    const cl = await clipped(page);
+    P(cl.length === 0, tag + ": nothing clipped or past its panel in Sectors " + cl.slice(0, 3).join(" | "));
+    if (!(await page.locator("#mvSecMore").isHidden())) {
+      await page.click("#mvSecMore");
+      await page.waitForTimeout(150);
+      const k = Math.min(want.length, Math.max(1, Math.floor((h - 24 - 230) / rh)));
+      const dr = await secRead(page, "#mvSecG");
+      same(dr.map(secKey), want.slice(0, k).map(secExpect), tag + ": the dialog lists " + k + " sectors in the same order and figures");
+      P((await page.locator("#mvSecT").innerText()) === (k === want.length ? "Sectors, " + want.length : "Largest " + k + " of " + want.length + " sectors"), tag + ": the dialog title counts what it shows");
+      same(await page.locator("#mvSecP").innerText(), [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE].join(" "), tag + ": the dialog says how to read the table");
+      const fd = await fit(page);
+      P(fd.v && fd.h && fd.dlg, tag + ": the dialog sits inside the viewport and scrolls nothing (" + JSON.stringify(fd) + ")");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(80);
+    }
+    const countNow = async () => {
+      if (phone) { await page.click('#mvSeg5 [data-v="field"]'); await page.waitForTimeout(150); }
+      const t = await txt(page, "mvCount");
+      if (phone) { await page.click('#mvSeg5 [data-v="lists"]'); await page.waitForTimeout(150); }
+      return t;
+    };
+    const first = rows[0];
+    const pick = '#mvSec .mv-srow[data-sector="' + first.key + '"]';
+    await page.click(pick);
+    await page.waitForTimeout(150);
+    const nIn = M1.plotted.filter((x) => (x.sector || "__none") === first.key).length;
+    same(await page.locator("#mvSector").inputValue(), first.key, tag + ": choosing a sector sets the sector filter");
+    P((await countNow()) === nIn + " of " + M1.plotted.length + " shown", tag + ": the field shows that sector's " + nIn + " names");
+    const after = await secRead(page, "#mvSec");
+    P(after[0].pressed === "true" && after.slice(1).every((r) => r.pressed === "false"), tag + ": and only that row says it is pressed");
+    same(after.map(secKey), rows.map(secKey), tag + ": the table still lists every sector: the filter does not narrow it");
+    await page.click(pick);
+    await page.waitForTimeout(150);
+    same(await page.locator("#mvSector").inputValue(), "", tag + ": choosing it again clears the filter");
+    P((await countNow()) === M1.plotted.length + " of " + M1.plotted.length + " shown", tag + ": and the whole field is back");
+    await page.focus('#mvSec .mv-srow[tabindex="0"]');
+    await page.keyboard.press("ArrowDown");
+    P(await page.evaluate(() => document.activeElement.dataset.sector) === rows[1].key, tag + ": ArrowDown moves to the next sector");
+    await page.keyboard.press("End");
+    P(await page.evaluate(() => document.activeElement.dataset.sector) === rows[rows.length - 1].key, tag + ": End moves to the last");
+    await page.keyboard.press("Home");
+    P(await page.evaluate(() => document.activeElement.dataset.sector) === rows[0].key, tag + ": Home moves to the first");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(120);
+    same(await page.locator("#mvSector").inputValue(), rows[0].key, tag + ": Enter chooses the focused sector");
+    await page.evaluate(() => document.getElementById("mvClear").click());
+    await page.waitForTimeout(100);
+    P((await secRead(page, "#mvSec")).every((r) => r.pressed === "false"), tag + ": Clear releases the row");
+    await page.click('#mvListSeg [data-lv="names"]');
+    await page.waitForTimeout(120);
+    P(await page.locator("#mvSecBox").isHidden() && await page.locator("#mvNow").isVisible() && await page.locator("#mvApart").isVisible(), tag + ": Names brings the two lists back");
+    if (phone) {
+      const small = await page.evaluate(() => Array.from(document.querySelectorAll("#mvListSeg button"), (b) => { const r = b.getBoundingClientRect(); return r.width < 44 || r.height < 44 ? b.textContent : null; }).filter(Boolean));
+      P(small.length === 0, tag + ": the list switch has 44 px targets " + small.join());
+    }
+    P(errors.length === 0, tag + ": no page error in the sector block " + errors.join(" | "));
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await mount(browser, 1440, 820, { js, body: FX.universe(SEC_LIST), now: "2026-10-19T14:05:00Z" });
+    await page.evaluate(([r]) => { window.__strips = { status: "ok", fields: ["chg", "iv30p"], rows: r, session: "2026-10-19" }; window.__rtFire(); }, [SEC_STRIPS]);
+    await page.waitForTimeout(200);
+    await page.click('#mvListSeg [data-lv="sectors"]');
+    await page.waitForTimeout(150);
+    const rows = await secRead(page, "#mvSec");
+    same(rows.map(secKey), [
+      ["Tie A", "Tie A", "1 name", "▲ +1.0", "0 · 0%", false],
+      ["Tie B", "Tie B", "1 name", "▲ +1.0", "0 · 0%", false],
+      ["Line", "Line", "6 names", "▲ +0.2", "2 · 33%", false],
+      ["Flat", "Flat", "1 name", "◆ 0.0", "0 · 0%", false],
+      ["Ghost", "Ghost", M.WHY_NO_IV, DASH, DASH, true],
+      ["Soon", "Soon", M.WHY_ALL_EVENT, DASH, DASH, false],
+    ], "hand worked: ties by name, six names whose medians 0 and 0.4 give 0.2 and whose two beyond 2 give 33%, -0.04 as a flat 0.0, no implied volatility and all-reporting as dashes with their reasons, and SPY (a 50 move in Line) left out");
+    P(rows[0].title.includes("Tie A") && rows[4].title === M.WHY_NO_IV && rows[5].title === M.WHY_ALL_EVENT, "a dash carries its reason in the title");
+    P(rows[4].label === "Ghost, no median. " + M.WHY_NO_IV, "and in the spoken label: " + rows[4].label);
+    await page.evaluate(() => document.querySelector('#mvSec .mv-srow[data-sector="Ghost"]').click());
+    await page.waitForTimeout(100);
+    same(await page.locator("#mvSector").inputValue(), "", "a sector with no measured name cannot be chosen");
+    await page.click('#mvSec .mv-srow[data-sector="Soon"]');
+    await page.waitForTimeout(100);
+    same(await page.locator("#mvSector").inputValue(), "Soon", "a sector whose names all report soon can");
+    P(errors.length === 0, "no page error in the controlled sector world " + errors.join(" | "));
+    await ctx.close();
+  }
+  {
+    const list = [["SPY", 0.004, 0.16, 90, "Funds", 40 * SEC_T, 0.0065, 14, 3], ...Array.from({ length: 300 }, (_, i) => ["W" + String(i).padStart(3, "0"), i === 0 ? 0.05 : 0.001, 0.3, 60, "Wide", 1e10, 0.01, 10, 1])];
+    const dec = FX.decoded(FX.universe(list));
+    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+    P(all.length === 1 && all[0].n === 300 && all[0].beyond === 1, "the wide fixture is one sector of 300 names with exactly one beyond 2");
+    const { ctx, page, errors } = await mount(browser, 1440, 820, { js, body: FX.universe(list) });
+    await page.click('#mvListSeg [data-lv="sectors"]');
+    await page.waitForTimeout(150);
+    const rows = await secRead(page, "#mvSec");
+    same(rows.map(secKey), all.map(secExpect), "one beyond 2 among 300 names is a third of a percent and prints as under 1%, not 0%");
+    P(rows[0].beyond === "1 · <1%", "spelled out: " + rows[0].beyond);
+    P(errors.length === 0, "no page error in the wide sector world " + errors.join(" | "));
+    await ctx.close();
+  }
+  for (const [w, h, extra] of [VIEWPORTS[1], VIEWPORTS[2]]) {
+    const phone = w < 900;
+    const tag = "30 sectors at " + w + "x" + h;
+    const dec = FX.decoded(FX.universe(SEC_BIG));
+    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+    P(all.length === 30, tag + ": the fixture has 30 sectors and the Funds sector holding only SPY is not one of them");
+    const { ctx, page, errors } = await mount(browser, w, h, { context: extra, js, body: FX.universe(SEC_BIG) });
+    if (phone) { await page.click('#mvSeg5 [data-v="lists"]'); await page.waitForTimeout(150); }
+    await page.click('#mvListSeg [data-lv="sectors"]');
+    await page.waitForTimeout(150);
+    const rows = await secRead(page, "#mvSec");
+    const rh = rows[0].h;
+    const boxH = await page.evaluate(() => document.getElementById("mvSec").clientHeight);
+    const shown = Math.max(1, Math.min(30, Math.floor(boxH / rh)));
+    P(rows.length === shown && shown < 30, tag + ": " + shown + " rows fit and 30 do not (" + rows.length + ")");
+    same(rows.map(secKey), all.slice(0, shown).map(secExpect), tag + ": the rows are the largest medians first");
+    P(!(await page.locator("#mvSecMore").isHidden()) && (await page.locator("#mvSecNote").innerText()) === shown + " of 30", tag + ": Show all is offered and the note says " + shown + " of 30");
+    await page.click("#mvSecMore");
+    await page.waitForTimeout(150);
+    const k = Math.min(30, Math.max(1, Math.floor((h - 24 - 230) / rh)));
+    const dr = await secRead(page, "#mvSecG");
+    same(dr.map(secKey), all.slice(0, k).map(secExpect), tag + ": the dialog lists the " + k + " that fit its height");
+    P((await page.locator("#mvSecT").innerText()) === "Largest " + k + " of 30 sectors", tag + ": and says it left some out");
+    const fd = await fit(page);
+    P(fd.v && fd.h && fd.dlg, tag + ": the dialog stays inside the viewport and scrolls nothing (" + JSON.stringify(fd) + ")");
+    P(errors.length === 0, tag + ": no page error " + errors.join(" | "));
+    await ctx.close();
+  }
+}
+
 const VIEWPORTS = [[1440, 820, {}], [1024, 768, {}], [390, 844, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
 class Stop extends Error {}
-async function exercise(browser, js, early) {
+async function exercise(browser, js, early, only) {
   const problems = [];
   const P = (c, m) => { if (c) { checks++; return; } problems.push(m); if (early) throw new Stop(m); };
   const same = (a, b, m) => P(JSON.stringify(a) === JSON.stringify(b), m + " " + (JSON.stringify(a) === JSON.stringify(b) ? "" : JSON.stringify(a) + " != " + JSON.stringify(b)));
@@ -406,6 +616,7 @@ async function exercise(browser, js, early) {
   const ranked = M0.all.filter((x) => !x.event).sort(byA);
   const apart = M0.all.filter((x) => x.event).sort(byA);
   try {
+    if (only === "sectors") { await sectorsBlock(browser, js, P, same); return problems; }
     await partsBlock(browser, js, P, same);
     for (const [w, h, extra] of VIEWPORTS) {
       const phone = w < 900;
@@ -792,6 +1003,7 @@ async function exercise(browser, js, early) {
       P(await page.evaluate(() => document.getElementById("mvStage").dataset.view) === "detail" && (await railKv(page)).big === ranked[3].t, "a tap within 22 px of a dot selects it");
       await ctx.close();
     }
+    await sectorsBlock(browser, js, P, same);
   } catch (e) {
     if (!(e instanceof Stop)) problems.push("threw: " + String(e && e.message).split("\n")[0]);
   }
@@ -850,6 +1062,33 @@ for (const [name, from, to] of MUTANTS) {
   ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
   const mutated = JS.replace(from, to);
   const problems = await exercise(browser, mutated, true).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
+  ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (first: " + problems[0] + ")");
+}
+
+const SEC_MUTANTS = [
+  ["beyond counts a name exactly on the line", "Math.abs(m) > SECTOR_BEYOND).length;", "Math.abs(m) >= SECTOR_BEYOND).length;"],
+  ["names reporting soon counted in the median", "if (!(ed !== null && ed <= EVENT_SESSIONS)) b.ms.push(m);", "b.ms.push(m);"],
+  ["SPY and QQQ counted in their sector", "if (!r || PINS.includes(r.t)) continue;", "if (!r) continue;"],
+  ["a sector with no figures given a median of zero", "median: n ? med(b.ms) : null,", "median: n ? med(b.ms) : 0,"],
+  ["ties left in the order the rows came", "|| cmp(a.name, b.name));", ");"],
+  ["smallest median first", "(b.median === null ? 0 : b.median) - (a.median === null ? 0 : a.median)", "(a.median === null ? 0 : a.median) - (b.median === null ? 0 : b.median)"],
+  ["a share that rounds to nothing printed as 0%", "return beyond > 0 && p === 0 ? \"<1%\" : p + \"%\";", "return p + \"%\";"],
+  ["a flat median printed with a sign", "const flatten = (m) => ((m < 0 ? -1 : 1) * Math.round(Math.abs(m) * 10)) / 10 + 0;", "const flatten = (m) => m;"],
+  ["choosing a chosen sector does not clear it", "S.sector = S.sector === key ? \"\" : key;", "S.sector = key;"],
+  ["Show all never offered", "$(\"mvSecMore\").hidden = rows.length <= n;", "$(\"mvSecMore\").hidden = true;"],
+  ["the count of names ignores the unmeasured", "r.n === r.total ? plural(r.total, \"name\", \"names\") : r.n + \" of \" + plural(r.total, \"name\", \"names\");", "plural(r.total, \"name\", \"names\");"],
+  ["the share taken over every name, not the measured", "r.beyond + \" · \" + shareText(r.beyond, r.n))", "r.beyond + \" · \" + shareText(r.beyond, r.total))"],
+  ["a sector with no names measured can be chosen", "(r.measured ? \"\" : \" disabled\")", "\"\""],
+  ["the empty sector named Other", "const NO_SECTOR = \"No sector\";", "const NO_SECTOR = \"Other\";"],
+  ["the dialog ignores its height", "Math.max(1, Math.floor((innerHeight - 24 - 230) / rh))", "999"],
+  ["the name lists stay under the sector table", "for (const b of document.querySelectorAll(\"#mvLists .mv-box-now, #mvLists .mv-box-apart\")) b.hidden = sec;", "for (const b of document.querySelectorAll(\"#mvLists .mv-box-now, #mvLists .mv-box-apart\")) b.hidden = false;"],
+  ["the table lists more rows than fit", "Math.min(rows.length, room || 1)", "rows.length"],
+  ["the pressed state never set", "aria-pressed=\"' + (S.sector === r.key) + '\"", "aria-pressed=\"false\""],
+  ["the filter key is the display name", "data-sector=\"' + esc(r.key) + '\"", "data-sector=\"' + esc(r.name) + '\""],
+];
+for (const [name, from, to] of SEC_MUTANTS) {
+  ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
+  const problems = await exercise(browser, JS.replace(from, to), true, "sectors").catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
   ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (first: " + problems[0] + ")");
 }
 

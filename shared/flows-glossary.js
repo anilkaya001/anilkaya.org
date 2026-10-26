@@ -15,6 +15,10 @@ export const GLOSSARY = Object.freeze([
   { key: "ask-share", term: "Ask share", ...UNUSUAL, lines: [
     "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side.",
   ] },
+  { key: "beyond-2", term: "Beyond 2", ...MOVES, lines: [
+    "Beyond 2 counts names more than 2 IV-days from flat, up or down.",
+    "Share is that count over the sector's names.",
+  ] },
   { key: "board-map", term: "Board map", ...BOARDS, lines: [
     "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
   ] },
@@ -44,6 +48,15 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "lean", term: "Lean", ...UNUSUAL, lines: [
     "Lean is a convention: ask-side calls and bid-side puts count bullish.",
+  ] },
+  { key: "parts-of-move", term: "Parts of the move", ...MOVES, lines: [
+    "Parts of the move: market, peers against market, the name against its peers.",
+    "The parts add to the move. They are not beta-adjusted.",
+  ] },
+  { key: "sector-median", term: "Sector median", ...MOVES, lines: [
+    "Each sector's median move, and its names beyond 2 IV-days.",
+    "Median is signed, in IV-days.",
+    "Names reporting within 30 days are left out of every row.",
   ] },
   { key: "score", term: "Score", ...BOARDS, lines: [
     "Scores run from −100 to +100 and rank names against every scored name; they are a ranked attention signal, not a return forecast.",

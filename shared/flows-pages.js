@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "393";
+export const ASSET_VERSION = "394";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -373,8 +373,9 @@ export function loginPage({ error = "" } = {}) {
     : "";
   return `${head("Flows — Sign in", "Restricted options-flow intelligence.")}
 <body class="flows-body">
+<a class="flows-skip" href="#authMain">Skip to content</a>
 ${sitePill()}
-<main class="flows-auth">
+<main class="flows-auth" id="authMain" tabindex="-1">
   <div class="flows-auth__card">
     <span class="fx-mark" aria-hidden="true">&#949;</span>
     <h1>Flows</h1>
@@ -398,8 +399,9 @@ ${sitePill()}
 
 const doc = (title, description, body) => `${head(title, description, ["/assets/css/flows-public.css"])}
 <body class="flows-body">
+<a class="flows-skip" href="#docMain">Skip to content</a>
 ${sitePill()}
-<main class="fx-doc" id="docMain">
+<main class="fx-doc" id="docMain" tabindex="-1">
 ${body}
 </main>
 <script src="${v("/assets/js/nav.js")}" defer></script>
@@ -430,7 +432,7 @@ export function aboutPage() {
       <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the vendor flagged, what changed and who reports next.</li>
       <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
-      <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year.</li>
+      <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from the side of the quote through sector and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
@@ -1071,6 +1073,7 @@ export function movesPage({ username = "" } = {}) {
         <div class="mv-foot"><div class="mv-lg" id="mvLegend"></div><span class="mv-fnote" id="mvFnote"></span></div>
       </section>
       <section class="mv-panel mv-lists" id="mvLists" aria-label="Largest moves">
+        <div class="mv-lh"><div class="mv-seg" role="group" aria-label="List" id="mvListSeg"><button type="button" data-lv="names" aria-pressed="true">Names</button><button type="button" data-lv="sectors" aria-pressed="false">Sectors</button></div></div>
         <div class="mv-box mv-box-now">
           <div class="mv-bh"><h2>Large now</h2><span class="note" id="mvNowNote"></span><button type="button" class="link" id="mvMore" aria-haspopup="dialog">Show more</button></div>
           <div class="mv-listbox" id="mvNow" role="group" aria-label="Largest moves in IV-days"></div>
@@ -1079,11 +1082,18 @@ export function movesPage({ username = "" } = {}) {
           <div class="mv-bh"><h2>Earnings within 30 days</h2><span class="note" id="mvApartNote"></span></div>
           <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within 30 days"></div>
         </div>
+        <div class="mv-box mv-box-sec" id="mvSecBox" hidden>
+          <div class="mv-bh"><h2>Sectors</h2><span class="note" id="mvSecNote"></span><button type="button" class="link" id="mvSecMore" aria-haspopup="dialog">Show all</button></div>
+          <p class="mv-sline">Each sector&#39;s median move, and its names beyond 2 IV-days.</p>
+          <div class="mv-sh" aria-hidden="true"><span>Sector</span><span>Median</span><span>Beyond 2</span></div>
+          <div class="mv-listbox" id="mvSec" role="group" aria-label="Sectors by median move in IV-days"></div>
+        </div>
       </section>
       <section class="mv-panel mv-rail" id="mvRail" aria-label="Selected name"></section>
     </div>
   </div>
   <dialog class="mv-dlg" id="mvMoreDlg" aria-labelledby="mvMoreT"><div class="dg"><h2 id="mvMoreT"></h2><p id="mvMoreP"></p><div class="mv-grid3" id="mvMoreG"></div><div class="x"><button type="button" class="link" id="mvMoreX">Close</button></div></div></dialog>
+  <dialog class="mv-dlg" id="mvSecDlg" aria-labelledby="mvSecT"><div class="dg"><h2 id="mvSecT"></h2><p id="mvSecP"></p><div class="mv-secg" id="mvSecG"></div><div class="x"><button type="button" class="link" id="mvSecX">Close</button></div></div></dialog>
   <dialog class="mv-dlg" id="mvInfoDlg" aria-labelledby="mvInfoT"><div class="dg"><h2 id="mvInfoT">How to read this page</h2><div class="body" id="mvInfoB"></div><div class="x"><button type="button" class="link" id="mvInfoX">Close</button></div></div></dialog>
 `,
   });
