@@ -60,17 +60,24 @@ function tideReason(scope, tides) {
   return "No sector tide in this scope.";
 }
 
-function scopeOutside(scope, columns, totals, tides) {
+function outsideColumns(columns, tides, aligner) {
+  if (!aligner) return columns;
+  const out = new Map(columns);
+  for (const [c, tide] of tides.sectors) out.set(c, aligner.column(c, tide.at));
+  return out;
+}
+
+function scopeOutside(scope, columns, totals, tides, aligner) {
   if (scope.kind === "all") {
     const sectors = new Map([...tides.sectors].map(([k, v]) => [k, { calls: safe(v.calls), puts: safe(v.puts) }]));
-    return outsideAll(columns, sectors);
+    return outsideAll(outsideColumns(columns, tides, aligner), sectors);
   }
   if (scope.kind === "sector") {
     const tide = SECTORS.includes(scope.sector) ? tides.sectors.get(scope.sector) : null;
-    return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, totals) : null;
+    return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, aligner ? aligner.column(scope.sector, tide.at) : totals) : null;
   }
   const tide = TIDE_ETFS.includes(scope.name) ? tides.etf.get(scope.name) : null;
-  return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, totals) : null;
+  return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, aligner ? aligner.name(scope.name, tide.at) : totals) : null;
 }
 
 function ledgerTable(matrix, outsideReason) {
@@ -149,12 +156,13 @@ function tiltView(columns, uni, shed) {
   };
 }
 
-function sectorTable(columns, selected, tides, uni, tilt) {
+function sectorTable(columns, selected, tides, uni, tilt, aligner = null) {
   const held = COLUMNS.filter((c) => columns.has(c) && columns.get(c).n > 0);
   const tideCols = SECTORS.filter((c) => tides.sectors.has(c));
   const g1 = held.map((c) => { const t = columns.get(c); return [t.AC - t.BC, t.AP - t.BP]; });
   const g2 = held.map((c) => [unsidedOf(columns.get(c))]);
-  const outsideOfCol = (c) => { const o = outsideOf({ calls: safe(tides.sectors.get(c).calls), puts: safe(tides.sectors.get(c).puts) }, columns.get(c) || emptyTotals()); return o.calls + o.puts; };
+  const heldOutside = outsideColumns(columns, tides, aligner);
+  const outsideOfCol = (c) => { const o = outsideOf({ calls: safe(tides.sectors.get(c).calls), puts: safe(tides.sectors.get(c).puts) }, heldOutside.get(c) || emptyTotals()); return o.calls + o.puts; };
   const g3 = tideCols.map((c) => [outsideOfCol(c)]);
   const all = [...g1.flat(), ...g1.map((r) => r[0] + r[1]), ...g2.flat(), ...g3.flat()];
   const unit = unitFor(maxAbs(all.length ? all : [0]));
@@ -382,6 +390,7 @@ function readingView({ scope, totals, tilt, shed }) {
 export function ledgerView(input) {
   const {
     now, scope = { kind: "all", key: "all" }, period: requested = null, live = null, nightly = null, breadth = null, universe = null, clock = null,
+    booked = null, aligner = null,
   } = input;
   const liveP = live ? obj(live.payload) : null;
   const nightlyP = nightly ? obj(nightly.payload) : null;
@@ -406,7 +415,7 @@ export function ledgerView(input) {
   if (rowsIn === null) return { ...head, status: "failed", why: "The record has no readable windows.", scope: { kind: scope.kind, key: scope.key } };
   try {
     const uni = readUniverse(universe);
-    const { books, counts, accepted } = bookWindows(rowsIn, { column: uni.columnOf, deltaMicro: deltaMicroOf, session, collect: scope.kind === "name" });
+    const { books, counts, accepted } = booked || bookWindows(rowsIn, { column: uni.columnOf, deltaMicro: deltaMicroOf, session, collect: scope.kind === "name" });
     const everEntered = sourceP.record && Number.isFinite(sourceP.record.everEntered) ? sourceP.record.everEntered : null;
     const held = rowsIn.length;
     const totalSeen = everEntered !== null && everEntered >= held ? everEntered : null;
@@ -421,13 +430,13 @@ export function ledgerView(input) {
       return { ...head, status: "quiet", why: `${scope.name} has no held windows in this period.`, scope: { kind: scope.kind, key: scope.key }, counts };
     }
     if (totals.n === 0) return { ...head, status: "quiet", why: C.EMPTY.page.quiet(chosen.label ? chosen.label.split(" · ")[0] : "Period"), scope: { kind: scope.kind, key: scope.key }, counts };
-    const outside = scopeOutside(scope, columns, totals, tides);
+    const outside = scopeOutside(scope, columns, totals, tides, aligner);
     const matrix = buildMatrix(totals, outside);
     const sums = matrixSums(matrix);
     const outsideReason = tideReason(scope, tides);
     const ledger = ledgerTable(matrix, outsideReason);
     const tilt = tiltView(columns, uni, shed);
-    const sectors = sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, tilt);
+    const sectors = sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, tilt, aligner);
     const allTotals = sumBooks(books);
     const sectorExact = { taker: scope.kind === "all" ? sectors.exact.taker : -(matrix.rows[0][0] + matrix.rows[1][0] + matrix.rows[2][0] + matrix.rows[3][0]), noside: scope.kind === "all" ? sectors.exact.noside : unsidedOf(totals) };
     const sideDiff = totals.T - (totals.AC + totals.BC + totals.AP + totals.BP + unsidedOf(totals));
@@ -450,7 +459,7 @@ export function ledgerView(input) {
       ? C.SCOPE_LINE.all(money(totals.T), held, shed, totalSeen)
       : scope.kind === "sector" ? C.SCOPE_LINE.sector(money(totals.T), totals.n, scope.sector, shed) : C.SCOPE_LINE.name(money(totals.T), totals.n, scope.name, shed);
     const tiltHold = checks.tiltFail ? C.WITHHELD.tilt(hashOf({ sum: String(tilt.sum) })) : null;
-    const sectorsOut = checks.tiltFail ? sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, { status: "absent", reason: tiltHold, rows: [], unweighted: [] }) : sectors;
+    const sectorsOut = checks.tiltFail ? sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, { status: "absent", reason: tiltHold, rows: [], unweighted: [] }, aligner) : sectors;
     const out = {
       ...head, status: "ok", why: null,
       scope: {
@@ -463,6 +472,7 @@ export function ledgerView(input) {
       hero,
       tide: { at: tides.lastAt === null ? null : trtStamp(tides.lastAt, session), groups: tides.sectors.size },
       stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire at the session close: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },
+      align: aligner ? { on: true, at: tides.lastAt, atText: tides.lastAt === null ? null : trtStamp(tides.lastAt, session), newer: tides.lastAt === null ? null : aligner.newer(tides.lastAt) } : { on: false, at: null, atText: null, newer: null },
       dq: { ...counts },
       notes: C.DELTA_NOTES,
     };
