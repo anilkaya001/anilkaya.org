@@ -263,12 +263,15 @@ export function validateList(list) {
       throw new Error(`probe list: gated status for ${op} must be a 4xx status`);
     }
   }
-  for (const key of ["liveOnly", "entitlement"]) {
+  for (const key of ["liveOnly", "entitlement", "proveRows"]) {
     const named = list[key];
     if (named === undefined) continue;
     if (!Array.isArray(named) || named.some((op) => typeof op !== "string" || !ops.has(op)) || new Set(named).size !== named.length) {
       throw new Error(`probe list: ${key} must list distinct operations a probe exercises`);
     }
+  }
+  for (const op of list.proveRows || []) {
+    if (!list.probes.some((p) => p.op === op && p.tier === "used")) throw new Error(`probe list: ${op} must arrive with rows, so it can only be an operation the code reads`);
   }
   for (const op of list.entitlement || []) {
     if (list.probes.some((p) => p.op === op && p.tier === "used")) throw new Error(`probe list: ${op} is read by the code, so a refusal is a failure, not an entitlement finding`);
@@ -946,6 +949,7 @@ export function exitCode(results) {
 
 export function strictVerdict(results, list) {
   const gated = (list && list.gated) || {};
+  const proveRows = (list && list.proveRows) || [];
   const failures = [];
   const notes = [];
   for (const r of results) {
@@ -960,6 +964,7 @@ export function strictVerdict(results, list) {
       continue;
     }
     if (expected !== null) notes.push(`${r.id} answers ${r.status} where ${expected} was expected: the plan changed`);
+    if (r.cls === "empty" && proveRows.includes(r.op)) failures.push(`UNPROVEN ${r.id}: answered with no rows, so none of the fields the code reads was checked`);
     if (r.reads && r.reads.unseen.length) failures.push(`DRIFT ${r.id}: ${r.reads.unseen.join(" ")} did not arrive`);
   }
   return { failures, notes };

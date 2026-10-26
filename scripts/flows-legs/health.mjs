@@ -6,6 +6,7 @@ import { LEDGER_LIMITS } from "../../shared/flows-ledger.js";
 import { ledgerSum, LEDGER_TIERS } from "../../shared/flows-neuron-coverage.js";
 import { LIVE_LOOP } from "./live.mjs";
 import { fixtureNameIn } from "../../shared/flows-fixture-names.js";
+import { HEALTH_LINES as EXTRAS_LINES } from "../../shared/flows-vendor-extras.js";
 
 export const HEALTH = Object.freeze({
   focusCron: "3-58/5 13-21 * * MON-FRI",
@@ -453,6 +454,38 @@ export function neuronChecks(ledger) {
   return { failures, warnings, notes };
 }
 
+export function extrasChecks(extras) {
+  const failures = [], warnings = [], notes = [];
+  if (!extras || typeof extras !== "object" || !extras.health || typeof extras.health !== "object") return { failures, warnings, notes };
+  const rows = Object.entries(extras.health);
+  const pct = (e) => `${Math.round(Number(e.rate) * 1000) / 10}%`;
+  const line = (id, e) => `${id} ${Number(e.bad)} of ${Number(e.attempted)} (${pct(e)})`;
+  const failing = rows.filter(([, e]) => e && e.state === "fail");
+  const eligible = new Set(Array.isArray(extras.eligible) ? extras.eligible : []);
+  const bad = failing.filter(([id]) => eligible.has(id));
+  const probation = failing.filter(([id]) => !eligible.has(id));
+  const soft = rows.filter(([, e]) => e && e.state === "warn");
+  const quiet = rows.filter(([, e]) => e && e.state === "report" && Number(e.bad) > 0);
+  if (bad.length) {
+    failures.push(`HEALTH: the vendor extras came back in a shape the reducers do not read for ${bad.map(([id, e]) => line(id, e)).join(", ")}: ` +
+      "the vendor changed a field these parts rely on, so the stored extract is withheld for those names until a reducer is fixed");
+  }
+  if (probation.length) {
+    warnings.push(`WARNING: vendor extras shape: ${probation.map(([id, e]) => line(id, e)).join(", ")} is past the failing line but is not failed tonight: ` +
+      `it has not yet had ${EXTRAS_LINES.matureNights} clean nights of ${EXTRAS_LINES.minAttempted} or more reads, or it already failed the night before`);
+  }
+  if (soft.length) {
+    warnings.push(`WARNING: vendor extras shape: ${soft.map(([id, e]) => line(id, e)).join(", ")} answered in a shape the reducers do not read`);
+  }
+  if (quiet.length) {
+    notes.push(`vendor extras under ${EXTRAS_LINES.minAttempted} attempts, reported not judged: ${quiet.map(([id, e]) => line(id, e)).join(", ")}`);
+  }
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  notes.push(`vendor extras: ${n(extras.calls)} call(s), ${n(extras.due)} due, ${n(extras.deferred)} deferred to a later night` +
+    (n(extras.priorFailed) ? `, ${n(extras.priorFailed)} prior card-x unread` : ""));
+  return { failures, warnings, notes };
+}
+
 export function ledgerChecks({ ledger, sessionDate, clock = null } = {}) {
   const failures = [], warnings = [], notes = [];
   const days = ledger && Array.isArray(ledger.days) ? ledger.days : null;
@@ -536,6 +569,10 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   failures.push(...neuron.failures);
   warnings.push(...neuron.warnings);
   notes.push(...neuron.notes);
+  const extras = extrasChecks(night && night.extras);
+  failures.push(...extras.failures);
+  warnings.push(...extras.warnings);
+  notes.push(...extras.notes);
   const lab = labCheck(clockRead, now);
   if (lab.failure) failures.push(lab.failure);
   if (lab.warning) warnings.push(lab.warning);
@@ -694,12 +731,14 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   if (dry) {
     log("health gate: skipped in a dry run, which reads no store");
     const neuron = neuronChecks(night && night.neuron);
-    const failures = [...runChecks(night), ...neuron.failures];
+    const extras = extrasChecks(night && night.extras);
+    const failures = [...runChecks(night), ...neuron.failures, ...extras.failures];
     if (night) log(`  run facts: ${night.planned} planned, ${night.rostered} rostered, ${night.cardsFailed} failed, ${night.deadlineSkipped} skipped; ${failures.length} failure(s)`);
     if (night && night.neuron) for (const line of neuron.notes) log("  " + line);
     for (const line of neuron.warnings) warn(line);
+    for (const line of extras.warnings) warn(line);
     for (const line of failures) warn(line);
-    return { applies: false, failures, warnings: neuron.warnings, notes: neuron.notes };
+    return { applies: false, failures, warnings: [...neuron.warnings, ...extras.warnings], notes: [...neuron.notes, ...extras.notes] };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {
@@ -714,7 +753,7 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);
-  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : "Lab sign-in"}::${line}` : line);
+  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : /^WARNING: vendor extras/.test(line) ? "Vendor extras" : "Lab sign-in"}::${line}` : line);
   for (const line of verdict.failures) warn(line);
   return verdict;
 }
@@ -742,6 +781,7 @@ export const HEALTH_CODES = Object.freeze([
   ["roster-short", /the roster lists/, "the roster lists fewer names than were planned"],
   ["neuron-ledger", /coverage ledger does not add up/, "the Neuron coverage ledger does not add up"],
   ["neuron-missing", /have no Neuron reading tonight/, "universe names have no Neuron reading"],
+  ["extras-shape", /vendor extras came back in a shape/, "a vendor extras part came back in a shape the reducers do not read"],
   ["ledger-empty", /session ledger holds/, "the session ledger has no row for the session"],
   ["ledger-rth", /rth cron did not tick/, "the Worker's rth cron missed ticks inside the session"],
   ["ledger-tier1", /without writing live:market/, "Tier 1 went too long without writing live:market"],

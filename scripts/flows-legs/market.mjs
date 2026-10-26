@@ -6,6 +6,7 @@ import {
 import { readRegime, assembleRegime, REGIME_CALLS } from "./regime.mjs";
 import { readDeepOwnership, ownershipParts } from "./ownership.mjs";
 import { readCatalysts, assembleCatalysts, calendarPlan } from "./events.mjs";
+import { runExtras } from "./extras.mjs";
 import { isoDay, sessionsBetween, vnum, compactNumbers } from "../../shared/flows-cross.js";
 import { putCallHistory } from "../../shared/flows-regime.js";
 
@@ -27,7 +28,7 @@ export const MARKET_LEG_CALLS =
 export async function runMarketLegs({
   uw, sessionDate = null, screenerDate = null, generatedAt = null, harvest = null, filters = {},
   eligible = () => true, rowOf = (r) => r, cardedTickers = [], deepTickers = [], readTickers = [], windowTickers = [],
-  deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null,
+  deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null, extras: extrasOptions = null,
 } = {}) {
   const meter = makeCallMeter(stats);
   const lines = [];
@@ -99,9 +100,13 @@ export async function runMarketLegs({
     `${additions.fda.rows ? ":" + additions.fda.rows.length : ""}, calendar ${additions.earningsCalendar.status}` +
     `, earnings history ${[...earnings.values()].filter((e) => e.status === "ok").length}/${earnings.size}`);
 
+  const extras = extrasOptions
+    ? await runExtras({ uw, names: owned, sessionDate, now: Date.parse(readAt) || Date.now(), deadline, pool, width, log: say, ...extrasOptions })
+    : null;
+
   return {
     universe, regime, indexRows: index.rows, eventsAdditions: additions,
-    ownership, earnings, calls: meter(), lines, readAt, harvested,
+    ownership, earnings, extras, calls: meter(), lines, readAt, harvested,
   };
 }
 

@@ -11,6 +11,7 @@ import { healthRecord } from "../stages.mjs";
 import { CALL_BUDGET, CALL_OVERRUN_MARGIN, RATE, callModel } from "../vendor-params.mjs";
 import { delayFloorMs, delayMs, describeFloorVerdict, permits, stats, wire } from "../vendor.mjs";
 import { summarize } from "../../../shared/flows-call-meter.js";
+import { extrasStanding } from "../../../shared/flows-vendor-extras.js";
 import {
   ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish,
   publishedStore, readStored,
@@ -151,6 +152,21 @@ export async function runClose(ctx) {
     console.warn(`  neuron coverage: ${error.message} — the ledger is not published this run`);
   });
 
+  const extrasRun = marketLegs && marketLegs.extras ? marketLegs.extras : null;
+  let priorExtras = null;
+  if (extrasRun) {
+    try {
+      const held = await readStored("meta");
+      priorExtras = held && held.payload && typeof held.payload === "object" ? held.payload.extras || null : null;
+    } catch {
+      priorExtras = null;
+    }
+  }
+  const extrasSummary = extrasRun ? {
+    calls: extrasRun.calls, due: extrasRun.plan.due, deferred: extrasRun.plan.deferred, picked: extrasRun.plan.picked,
+    priorFailed: extrasRun.priorFailed, health: extrasRun.health, ...extrasStanding(extrasRun.health, priorExtras),
+  } : null;
+
   let metaBody = null;
   try {
     metaBody = {
@@ -160,6 +176,7 @@ export async function runClose(ctx) {
       liquid: liquid.length,
       cardsBuilt, cardsFailed, cardsSkipped,
       ...(neuronLedger ? { neuron: neuronLedger } : {}),
+      ...(extrasSummary ? { extras: extrasSummary } : {}),
       ...(deepen && deepen.plan ? { deepen: {
         mode: deepen.mode, chosen: deepen.plan.n, built: rotationCards ? rotationCards.built : 0,
         failed: rotationCards ? rotationCards.failed : 0, carried: carriedDeep.size, never: deepen.plan.never ?? 0,
@@ -326,6 +343,7 @@ export async function runClose(ctx) {
       planned: byCard.size - (deepen ? deepen.added.size : 0) - [...(deepen ? deepen.keep : [])].filter((t) => byCard.has(t)).length + dossierBuilt.size, rostered: rosterSummary ? rosterSummary.rostered : null,
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
       neuron: neuronLedger,
+      extras: extrasSummary,
     } });
   stages.finish();
   bindStages(null);
