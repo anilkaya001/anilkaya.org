@@ -248,7 +248,10 @@ export function recentReporters(universe, { within = RD_RECENT, max = 8, older =
         today.push([t, chg, z]);
       }
     } else if (state === "unstated") notStated++;
-    else if (whole(rd[i]) && rd[i] >= 2 && rd[i] <= within) late.push([t, rd[i]]);
+    else {
+      const age = whole(rd[i]) ? rd[i] : whole(unstated[t]) ? unstated[t] - 1 : null;
+      if (age !== null && age >= 2 && age <= within) late.push([t, age, whole(rd[i]) ? 0 : 1]);
+    }
   });
   today.sort((a, b) => (a[2] === null) - (b[2] === null) || (a[2] === null ? 0 : Math.abs(b[2]) - Math.abs(a[2])) || (a[1] === null) - (b[1] === null) || (a[1] === null ? 0 : Math.abs(b[1]) - Math.abs(a[1])) || (a[0] < b[0] ? -1 : 1));
   late.sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1));

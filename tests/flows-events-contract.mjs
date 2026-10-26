@@ -818,7 +818,8 @@ async function openEvents(browser, payload, opts = {}) {
   await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
   if (opts.css) for (const sheet of SHEETS) await page.addStyleTag({ path: path.join(ROOT, sheet) });
   await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-ui.js") });
-  await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
+  if (opts.js) await page.addScriptTag({ content: opts.js });
+  else await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
   await page.waitForFunction(() => !/^Loading/.test(document.getElementById("evStatus").textContent), null, { timeout: 15000 });
   return { page, errors };
 }
@@ -1324,11 +1325,11 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
   base.earningsCalendar = { status: "ok", reaction: { status: "ok", n: 1, medianRatio: 1.1, beat: 0.5, rows: [["RAA", 0.08, 0.05, 1.6]] } };
   const withRecent = (recent) => ({ ...JSON.parse(JSON.stringify(base)), recent });
   const OK = { status: "ok", asOf: SESSION_DATE, within: 5, hz: 21, n: 8, counts: [3, 2], cut: [], unstated: 1, older: 2,
-    rows: [["RAA", 0.0821, 2.14], ["RBB", -0.0412, -1.18], ["RCC", null, null]], laterRows: [["RDD", 2], ["REE", 4]] };
+    rows: [["RAA", 0.0821, 2.14], ["RBB", -0.0412, -1.18], ["RCC", null, null]], laterRows: [["RDD", 2, 0], ["REE", 4, 1]] };
   const browser = await chromium.launch();
   try {
-    const read = async (payload, width = 1440) => {
-      const { page, errors } = await openEvents(browser, payload, { width, css: true });
+    const read = async (payload, width = 1440, js = null) => {
+      const { page, errors } = await openEvents(browser, payload, { width, css: true, js });
       const out = await page.evaluate(() => {
         const box = document.querySelector("#evReact .fe-recent");
         if (!box) return null;
@@ -1348,14 +1349,27 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
       "and lists the names that reacted on the session in the payload's order, the move in per cent and in typical days, each a link to its ticker, a move not read as a dash");
     ok(/typical days/.test(ok1.box.rows[0][4]) && /no typical day published/.test(ok1.box.rows[2][4]), "a name with no typical day says so in its title, never a zero");
     deep(ok1.box.later.map((r) => [r[0], r[1]]), [["RDD", "/flows/ticker/?t=RDD"], ["REE", "/flows/ticker/?t=REE"]], "the names that reacted two to five sessions ago are one line of links, grouped by age, with no move beside them since the move on their reaction day is not in the universe");
-    ok(/^Reacted 2\u20135 sessions ago, with the move on their reaction day not carried here\. 2 sessions: RDD \u00b7 4 sessions: REE$/.test(ok1.box.tail), "worded as the range it covers and the reason there is no move: " + ok1.box.tail);
+    ok(/^Reacted 2\u20135 sessions ago, with the move on their reaction day not carried here\. 2 sessions: RDD \u00b7 4 sessions: REE \(time not stated\)$/.test(ok1.box.tail), "worded as the range it covers and the reason there is no move, and a name whose report time is not stated says so beside it: " + ok1.box.tail);
     ok(/reacted 2 sessions ago$/.test(ok1.box.later[0][2]), "each name's title says its age");
+    ok(/reacted 4 sessions ago, report time not stated, so it may be one session older$/.test(ok1.box.later[1][2]), "and a name whose time is not stated says in its title that its age is the later of two");
     ok(!/Aug 24|reported|tape/i.test(ok1.box.text), "and says nothing of a date it does not hold, of a report time it does not know or of a tape");
     eq(ok1.box.overflow, false, "with no sideways scroll at 1440");
     const narrow = await read(withRecent(OK), 390);
     eq(narrow.box.overflow, false, "or at 390");
     const many = await read(withRecent({ ...OK, older: 30 }));
-    ok(/REE and 28 more$/.test(many.box.tail), "names past the ones the payload carries are counted, not hidden: " + many.box.tail);
+    ok(/REE \(time not stated\) and 28 more$/.test(many.box.tail), "names past the ones the payload carries are counted, not hidden: " + many.box.tail);
+    const SRC = fs.readFileSync(path.join(ROOT, "assets/js/flows-events.js"), "utf8");
+    const builds = [
+      ["the unstated flag not printed beside the name", 'if (x[2] === 1) parts.push(" (time not stated)");', "", (b) => !/REE \(time not stated\)/.test(b.tail)],
+      ["the unstated flag printed beside every name", 'if (x[2] === 1) parts.push(" (time not stated)");', 'if (true) parts.push(" (time not stated)");', (b) => /RDD \(time not stated\)/.test(b.tail)],
+      ["the title does not say the age may be one older", ', report time not stated, so it may be one session older', "", (b) => !/one session older/.test(b.later[1][2])],
+      ["the title says it of every name", '(x[2] === 1 ? ", report time not stated, so it may be one session older" : "")', '", report time not stated, so it may be one session older"', (b) => /one session older/.test(b.later[0][2])],
+    ];
+    for (const [title, from, to, caught] of builds) {
+      ok(SRC.split(from).length === 2, "the planted build changes the page exactly once: " + title);
+      const bad = await read(withRecent(OK), 1440, SRC.replace(from, () => to));
+      ok(caught(bad.box), "PLANTED WRONG BUILD, " + title + ": the tail or its titles differ from the real page's");
+    }
     const cutDay = await read(withRecent({ ...OK, counts: [3, null], unstated: null, cut: [1, 2] }));
     deep(cutDay.box.tiles.map((t) => [t[0], t[1], t[2]]), [["Reaction session", "3", null], ["Reacted one session ago", "—", "report ledger cut that day"], ["Report time not stated", "—", "report ledger cut that day"]], "A DAY THE REPORT LEDGER WAS CUT ON IS A DASH WITH ITS REASON, never a partial count");
     const gone = await read(withRecent({ status: "unavailable", reason: "withheld_budget", within: 5 }));

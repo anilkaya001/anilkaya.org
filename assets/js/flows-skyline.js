@@ -87,7 +87,7 @@
       const s = Array.isArray(u.sec) && u.sec[i] !== null && u.sec[i] !== undefined ? names[u.sec[i]] || null : null;
       all.push({
         t, sector: s, secIx: s === null ? names.length : u.sec[i], chg: c, iv: v, m, h: Math.abs(m), dir: m > 0 ? 1 : -1,
-        event: words === null ? false : F.earnIn({ ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null, edMax: Number.isInteger(edUn[t]) ? edUn[t] : null }, u.hz, 0) === true,
+        event: words === null ? false : F.earnIn({ ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null, edMax: F.later(edUn, u.edUnstatedThrough, t, ed ? ed[i] : null) }, u.hz, 0) === true,
         sig: sg ? sg[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null,
       });
     });

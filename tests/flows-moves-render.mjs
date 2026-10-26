@@ -1025,6 +1025,18 @@ async function exercise(browser, js, early, only) {
       await ctx.close();
     }
 
+    for (const [label, opts, wantHow, why] of [
+      ["current", {}, ["Reaction day", "Time unstated"], "a report with a stated time due on the next session is its reaction day while that session trades, and one with no stated time is not called one: the map of unstated reports names only the second, and the horizon it is complete through covers the first"],
+      ["older", { noThrough: true }, ["Time unstated", "Time unstated"], "a payload that carries no horizon for its map cannot tell a stated report from one it did not list, so it reads both as unstated rather than call either a reaction"],
+    ]) {
+      const live = await mount(browser, 1440, 820, { js, now: "2026-10-19T14:05:00Z", body: FX.universe(FX.names(), opts) });
+      await live.page.evaluate(() => { window.__strips = { status: "ok", fields: ["chg", "iv30p"], rows: { FWDST: [0.05, 0.3], FWDUN: [0.05, 0.3] }, session: "2026-10-19" }; window.__rtFire(); });
+      await live.page.waitForTimeout(150);
+      const rows = (await listRows(live.page, "mvApart")).filter((r) => r.t === "FWDST" || r.t === "FWDUN").sort((a, b) => (a.t < b.t ? -1 : 1));
+      same(rows.map((r) => r.how), wantHow, `ONE SESSION AFTER THE NIGHTLY, ${label} payload: ${why}`);
+      await live.ctx.close();
+    }
+
     {
       const nowhere = await mount(browser, 1440, 820, { js, body: FX.universe(FX.names(), { hz: null }) });
       same((await listRows(nowhere.page, "mvApart")).map((r) => r.t), [], "a payload with no earnings window sets nothing apart");
@@ -1158,8 +1170,11 @@ const MUTANTS = [
   ["dot area linear in market cap", "rMax * Math.sqrt(cap / capMax)", "rMax * (cap / capMax)"],
   ["the earnings window is one session short", ": F.earn(r, hz, j);", ": F.earn(r, hz - 1, j);"],
   ["the report-session column ignored", "rd: rd ? rd[i] : null, rdMax: num(un[t])", "rd: null, rdMax: num(un[t])"],
-  ["the unstated-time ages ignored", "rdMax: num(un[t]), edMax: num(eu[t]), sector: sector(i)", "rdMax: null, edMax: num(eu[t]), sector: sector(i)"],
-  ["the forward unstated-time ages ignored", "edMax: num(eu[t]), sector: sector(i)", "edMax: null, sector: sector(i)"],
+  ["the unstated-time ages ignored", "rdMax: num(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null), sector: sector(i)", "rdMax: null, edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null), sector: sector(i)"],
+  ["the forward unstated-time ages ignored", "edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null), sector: sector(i)", "edMax: null, sector: sector(i)"],
+  ["the forward unstated-time map read straight", "edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null), sector: sector(i)", "edMax: num(eu[t]), sector: sector(i)"],
+  ["the horizon the map is complete through ignored", "F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null)", "F.later(eu, undefined, t, ed ? ed[i] : null)"],
+  ["every name outside the map read as stated", "F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null)", "F.later(eu, 99, t, ed ? ed[i] : null)"],
   ["the live rows lose the forward unstated-time ages", "edMax: pick(t, \"edMax\"), sector: pick(t, \"sector\")", "edMax: null, sector: pick(t, \"sector\")"],
   ["a live session placed as the nightly's own", "const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);", "const j = S.hz === null ? null : 0;"],
   ["the window taken from nowhere", "S.hz = got.hz;", "S.hz = 21;"],

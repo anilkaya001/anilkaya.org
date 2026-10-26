@@ -1110,7 +1110,7 @@
     FOCUS.words = F.horizon(FOCUS.hz);
     FOCUS.ahead = ok ? u.ahead : null;
     FOCUS.asOf = ok ? u.sessionDate : null;
-    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, { ed: ed[i], rd: rd ? rd[i] : null, rdMax: isNum(un[t]), edMax: isNum(eu[t]) }]) : []);
+    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, { ed: ed[i], rd: rd ? rd[i] : null, rdMax: isNum(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null) }]) : []);
     FOCUS.nightly = new Map(iv ? u.t.map((t, i) => [t, iv[i]]) : []);
   }
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);

@@ -278,6 +278,37 @@ const mutate = async (transforms, salt) => loadMutated("shared/flows-calendar.js
 const fixtureAgrees = (m) => {
   try { return fixtureAgreesRaw(m); } catch { return false; }
 };
+const invariants = (m) => {
+  const KINDS = ["premarket", "postmarket", "unknown"];
+  const bad = [];
+  let zeros = 0, straddles = 0, seen = 0;
+  for (const asOf of C.SESSION_DAYS.slice(40, 340)) {
+    const t0 = Date.parse(asOf + "T00:00:00Z");
+    for (let off = -12; off <= 30; off++) {
+      const report = new Date(t0 + off * 86400000).toISOString().slice(0, 10);
+      for (const time of KINDS) {
+        const f = m.forward(report, asOf, time), b = m.backward(report, asOf, time);
+        if (m.impactSession(report, time) === null) continue;
+        seen++;
+        if ((f === null) === (b === null)) bad.push(`${asOf} ${report} ${time}: ${f === null ? "neither" : "both"} a forward and a backward place`);
+        if (f && f.ed === 0) {
+          zeros++;
+          if (f.certain || time !== "unknown" || report !== asOf) bad.push(`${asOf} ${report} ${time}: ed 0 is certain or is not an unstated report dated on the session`);
+        }
+        if (f && f.certain && f.ed < 1) bad.push(`${asOf} ${report} ${time}: a certain forward report at ed ${f.ed}`);
+        if (b) {
+          if (b.certain && b.rdMax !== b.rd) bad.push(`${asOf} ${report} ${time}: a certain report with rdMax ${b.rdMax} and rd ${b.rd}`);
+          if (!b.certain) { straddles++; if (b.rdMax !== b.rd + 1) bad.push(`${asOf} ${report} ${time}: an uncertain report with rdMax ${b.rdMax} and rd ${b.rd}`); }
+        }
+        const c = { ed: f ? f.ed : null, rd: b && b.certain ? b.rd : null, rdMax: b && !b.certain ? b.rdMax : null };
+        if (c.rd !== null && c.rdMax !== null) bad.push(`${asOf} ${report} ${time}: a report with both rd and rdMax`);
+        if (c.ed !== null && (c.rd !== null || c.rdMax !== null)) bad.push(`${asOf} ${report} ${time}: a report both ahead and behind`);
+      }
+    }
+  }
+  if (zeros <= 200 || straddles <= 400 || seen <= 30000) bad.push(`the sweep does not reach the cases: ${zeros} at ed 0, ${straddles} uncertain past reports, ${seen} cells`);
+  return { bad: bad.slice(0, 5), zeros, straddles, seen };
+};
 const fixtureAgreesRaw = (m) => {
   const holidays = new Set(FIX.holidays);
   for (const d of allDays) {
@@ -304,6 +335,21 @@ const fixtureAgreesRaw = (m) => {
 {
   const real = await mutate([], 1);
   ok(fixtureAgrees(real), "the unmutated copy passes the same battery the wrong builds are held to");
+  const inv = invariants(real);
+  deep(inv.bad, [], "THE INVARIANTS THE READERS RELY ON HOLD OVER 300 SESSIONS, 43 REPORT DATES AND THREE TIMES: every report is ahead of the session or behind it and never both, ed 0 is only an unstated report dated on the session, a certain report has rdMax equal to rd, an uncertain one is one session older at most, and rd and rdMax are never both published");
+  ok(inv.zeros > 200 && inv.straddles > 400 && inv.seen > 30000, `and the sweep reaches them: ${inv.zeros} reports at ed 0, ${inv.straddles} uncertain past reports, ${inv.seen} cells`);
+  const invBuilds = [
+    ["an uncertain past report aged by its later candidate", [["rdMax: sessionsBetween(imp.early, asOf) };", "rdMax: sessionsBetween(imp.late, asOf) };"]]],
+    ["every forward report called certain", [["return { ed: sessionsBetween(asOf, imp.early), certain: imp.certain };", "return { ed: sessionsBetween(asOf, imp.early), certain: true };"]]],
+    ["a report that reacted today also placed ahead", [["if (!imp || sessionsBetween(asOf, imp.late) < 1) return null;", "if (!imp || sessionsBetween(asOf, imp.late) < 0) return null;"]]],
+    ["a report dated on the session pushed one session on", [["return { ed: sessionsBetween(asOf, imp.early), certain: imp.certain };", "return { ed: Math.max(1, sessionsBetween(asOf, imp.early)), certain: imp.certain };"]]],
+    ["a certain past report with the later candidate as its maximum", [["rdMax: sessionsBetween(imp.early, asOf) };", "rdMax: sessionsBetween(imp.early, asOf) + 1 };"]]],
+  ];
+  let invSalt = 40;
+  for (const [title, transforms] of invBuilds) {
+    const bad = await mutate(transforms, invSalt++);
+    ok(invariants(bad).bad.length > 0, `PLANTED WRONG BUILD, ${title}: the invariants fail it`);
+  }
   const builds = [
     ["weekends only, no holidays", [["if (ruleSession(day)) SESSIONS.push(day);", "if (new Date(day + \"T00:00:00Z\").getUTCDay() % 6 !== 0) SESSIONS.push(day);"]]],
     ["Juneteenth 2027 dropped from the closed days", [["if (ruleSession(day)) SESSIONS.push(day);", "if (ruleSession(day) || day === \"2027-06-18\") SESSIONS.push(day);"]]],
@@ -324,4 +370,4 @@ const fixtureAgreesRaw = (m) => {
   }
 }
 
-console.log(`✓ flows-calendar: ${checks} assertions — every day of 2020 to 2027 is a session exactly when the exchange_calendars oracle says so, the early closes and holidays agree with the rule tables, sessionsBetween and addSessions agree with the oracle and with each other, the three session counters in the tree agree wherever they are all defined, the impact session of every report date and time (Thanksgiving, Good Friday, Presidents Day, weekends, the 2027 Juneteenth) agrees with the oracle, the boundary tables of the horizon at the Monday, the Thursday before Good Friday and the Wednesday before Thanksgiving give the stated ed, rd and state, the live adjustment is exact, the table is checked against the clock with a 120 day lead, and ${11} planted wrong builds are each refused`);
+console.log(`✓ flows-calendar: ${checks} assertions — every day of 2020 to 2027 is a session exactly when the exchange_calendars oracle says so, the early closes and holidays agree with the rule tables, sessionsBetween and addSessions agree with the oracle and with each other, the three session counters in the tree agree wherever they are all defined, the impact session of every report date and time (Thanksgiving, Good Friday, Presidents Day, weekends, the 2027 Juneteenth) agrees with the oracle, the boundary tables of the horizon at the Monday, the Thursday before Good Friday and the Wednesday before Thanksgiving give the stated ed, rd and state, the live adjustment is exact, the table is checked against the clock with a 120 day lead, the invariants the readers rely on (ed 0 only for an unstated report dated on the session, a report is ahead or behind and never both, rdMax equal to rd for a certain one and one older for an uncertain one) over 300 sessions, and ${16} planted wrong builds are each refused`);

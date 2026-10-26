@@ -1,6 +1,7 @@
 import { isTradingDay } from "./flows-freshness.js";
 import { mean, sampleSd, median as medianOf } from "./flows-stats.js";
-import { forward, horizonEnd, ahead as aheadOf, HORIZON_SESSIONS, AHEAD_SESSIONS } from "./flows-calendar.js";
+import { forward, horizonEnd, ahead as aheadOf, HORIZON_SESSIONS } from "./flows-calendar.js";
+import { LIVE_ELAPSED_MAX } from "./flows-horizon.js";
 import { basisOf, cellOf } from "./flows-reports.js";
 
 export { mean, sampleSd, medianOf };
@@ -311,11 +312,14 @@ export function unstatedAhead(list, sessionDate) {
   const found = [];
   for (const r of list) {
     const f = forward(isoDay(r.next_earnings_date), sessionDate, r.er_time);
-    if (!f || f.certain || f.ed > AHEAD_SESSIONS) continue;
+    if (!f || f.certain || f.ed > LIVE_ELAPSED_MAX) continue;
     found.push([r.ticker, f.ed + 1]);
   }
-  const kept = found.sort((x, y) => x[1] - y[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)).slice(0, ED_UNSTATED_MAX);
-  return { map: Object.fromEntries(kept.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))), n: found.length };
+  found.sort((x, y) => x[1] - y[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  const edge = found.length > ED_UNSTATED_MAX ? found[ED_UNSTATED_MAX][1] : null;
+  const kept = edge === null ? found : found.filter((x) => x[1] < edge);
+  const through = edge === null ? LIVE_ELAPSED_MAX : edge - 2;
+  return { map: Object.fromEntries(kept.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))), n: found.length, through };
 }
 
 const sessionsToEarnings = (row, ctx) => {
@@ -539,6 +543,7 @@ export function buildUniverse(rows, {
     ahead: aheadOf(sessionDate),
     edUnstated: edUnstated.map,
     edUnstatedN: edUnstated.n,
+    edUnstatedThrough: edUnstated.through,
     ...(reports ? { rdBasis: basisOf(new Map(list.map((r) => [r.ticker, cellOf(reports, r.ticker)])), { asOf: sessionDate, from: reports.from || null, cutDays: reports.cut || [] }) } : {}),
     shed: [],
     budgetBytes,
@@ -638,7 +643,10 @@ export function projectUniverse(universe, wanted) {
     out.through = u.through ?? null;
     out.ahead = u.ahead ?? null;
   }
-  if (want.includes("ed")) out.edUnstated = u.edUnstated ?? null;
+  if (want.includes("ed")) {
+    out.edUnstated = u.edUnstated ?? null;
+    out.edUnstatedThrough = u.edUnstatedThrough ?? null;
+  }
   if (want.includes("rd")) out.rdBasis = u.rdBasis ?? null;
   return out;
 }

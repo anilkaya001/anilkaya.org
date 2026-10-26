@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { bootUI } from "./lib/ui-boot.mjs";
-import { earningsState, earningsInside, horizonWords, EVENT_STATES, HORIZON_SESSIONS, REACTION_BACK_SESSIONS, AHEAD_SESSIONS, LIVE_ELAPSED_MAX } from "../shared/flows-horizon.js";
+import { earningsState, earningsInside, horizonWords, laterCandidate, EVENT_STATES, HORIZON_SESSIONS, REACTION_BACK_SESSIONS, AHEAD_SESSIONS, LIVE_ELAPSED_MAX } from "../shared/flows-horizon.js";
+import { loadMutated } from "./truth/mutants.mjs";
 import { ahead as aheadOf, addSessions, sessionsBetween, isSession, forward, backward, impactSession } from "../shared/flows-calendar.js";
 
 let checks = 0;
@@ -181,7 +185,11 @@ const CASES = [
   [{ rdMax: 1 }, 0, "unstated", "a past report of unstated time that is one session old at most is reaction or after"],
   [{ rdMax: 2 }, 0, "unstated", "two at most is after or clear, and an event if it was after"],
   [{ rdMax: 3 }, 0, "undated", "three at most is behind either way, with no date ahead to place"],
-  [{ rdMax: 0 }, 0, "reaction", "an unstated report that cannot be older than the session reacted on it"],
+  [{ rdMax: 0 }, 0, "unstated", "an unstated report whose earlier candidate is the session itself: the later one is still to come, so it is not said to have reacted"],
+  [{ rdMax: 0 }, 1, "unstated", "and a session on it is a day after or a reaction"],
+  [{ ed: 0, edMax: 0 }, 1, "after", "an explicit later candidate equal to ed says the time is stated, even at ed 0"],
+  [{ ed: 0, edMax: 0 }, 2, "clear", "and then it is behind, a dated report outside the window"],
+  [{ ed: 0, edMax: 1, rdMax: 0 }, 0, "unstated", "a report that is both ahead and behind with an unstated time is not a reaction by precedence"],
   [{ rd: 1, ed: 0 }, 0, "unstated", "two reports: the one that is not certain outranks the day after"],
   [{ rd: 0, ed: 0 }, 0, "reaction", "and a certain reaction outranks the one that is not"],
   [{ ed: null, rd: 1 }, 0, "after", "a name with a past report only"],
@@ -203,6 +211,52 @@ eq(real.F.earnIn({ ed: 40 }, 21, 1), false, "and a clear one is not");
 eq(real.F.earnIn({ ed: 40 }, 21), null, "an unplaced one is neither");
 eq(EVENT_STATES.unstated, true, "the leaf says so too");
 
+const LATER_TABLE = [
+  [{ A: 2 }, 2, "A", 0, 2, "a name in the map carries its later candidate whatever the through says"],
+  [{ A: 2 }, 2, "B", 0, null, "a name not in the map with ed inside through is stated: no later candidate"],
+  [{ A: 2 }, 2, "B", 2, null, "and at the edge of through"],
+  [{ A: 2 }, 2, "B", 3, 4, "a name beyond through is unknown and read as an unstated report with the next session as its later candidate"],
+  [{ A: 2 }, 0, "B", 0, null, "through of zero covers ed 0"],
+  [{ A: 2 }, 0, "B", 1, 2, "and not ed 1"],
+  [{ A: 2 }, -1, "B", 0, 1, "a through of minus one (more than the cap at ed 0) leaves every name unknown"],
+  [{}, undefined, "B", 0, 1, "an older payload with no through is read conservatively"],
+  [null, undefined, "B", 1, 2, "and so is one with no map at all"],
+  [{ A: 2 }, 2, "B", null, null, "a name with no distance has no candidate"],
+  [{ A: 2 }, 2, "B", -1, null, "nor a negative one"],
+  [{ A: 2 }, 2, "B", 1.5, null, "nor a fractional one"],
+  [{ A: "2" }, 2, "A", 1, null, "a map value that is not a whole number is not read"],
+];
+for (const [map, through, t, ed, want, why] of LATER_TABLE) {
+  eq(laterCandidate(map, through, t, ed), want, `the leaf, ${JSON.stringify([map, through, t, ed])}: ${why}`);
+  eq(real.F.later(map, through, t, ed), want, "and the kernel");
+}
+{
+  const laterBuilds = [
+    ["the map ignored", "if (map && typeof map === \"object\" && whole(map[ticker])) return map[ticker];", ""],
+    ["a name beyond through read as stated", "return whole(through) && ed <= through ? null : ed + 1;", "return null;"],
+    ["a name inside through read as unknown", "return whole(through) && ed <= through ? null : ed + 1;", "return ed + 1;"],
+    ["through one short", "return whole(through) && ed <= through ? null : ed + 1;", "return whole(through) && ed < through ? null : ed + 1;"],
+    ["a payload with no through read as complete", "return whole(through) && ed <= through ? null : ed + 1;", "return !whole(through) || ed <= through ? null : ed + 1;"],
+    ["the unknown name given no later candidate", "return whole(through) && ed <= through ? null : ed + 1;", "return whole(through) && ed <= through ? null : ed;"],
+  ];
+  let salt = 70;
+  for (const [name, from, to] of laterBuilds) {
+    const bad = await loadMutated("shared/flows-horizon.js", [[from, to]], { salt: salt++ });
+    const caught = LATER_TABLE.some(([map, through, t, ed, want]) => bad.laterCandidate(map, through, t, ed) !== want);
+    ok(caught, `PLANTED WRONG BUILD, ${name}: the table fails it`);
+  }
+  const kernelBuilds = [
+    ["the kernel's map ignored", [["if (map && typeof map === \"object\" && Number.isInteger(map[t])) return map[t];", ""]]],
+    ["the kernel's unknown name read as stated", [["return Number.isInteger(through) && ed <= through ? null : ed + 1;", "return null;"]]],
+    ["the kernel's through one short", [["return Number.isInteger(through) && ed <= through ? null : ed + 1;", "return Number.isInteger(through) && ed < through ? null : ed + 1;"]]],
+  ];
+  for (const [name, patches] of kernelBuilds) {
+    const mutant = bootUI(patches);
+    const caught = LATER_TABLE.some(([map, through, t, ed, want]) => mutant.F.later(map, through, t, ed) !== want);
+    ok(caught, `PLANTED WRONG BUILD, ${name}: the table fails it`);
+  }
+}
+
 const BUILDS = [
   ["the reaction window is zero sessions", [["age <= back ? \"after\"", "age <= 0 ? \"after\""]]],
   ["the reaction window is two sessions", [["age <= back ? \"after\"", "age <= 2 ? \"after\""]]],
@@ -211,13 +265,15 @@ const BUILDS = [
   ["a null rd is an age", [["if (w(r.rd) && r.rd >= 0) s.push(at(r.rd + j));", "if (r.rd >= 0) s.push(at(r.rd + j));"]]],
   ["the elapsed sessions are not added to rd", [["s.push(at(r.rd + j));", "s.push(at(r.rd));"]]],
   ["a report that landed in the elapsed sessions is not seen", [["s.push(late === null ? first : two(first, late <= j ? at(j - late) : \"ahead\"));", ""]]],
-  ["a report of unstated time dated on the session aged as if its time were known", [["r.edMax : r.ed === 0 ? 1 : null;", "r.edMax : null;"]]],
-  ["the later candidate of a report ahead ignored", [["const late = w(r.edMax) && r.edMax > r.ed ? r.edMax : r.ed === 0 ? 1 : null;", "const late = r.ed === 0 ? 1 : null;"]]],
+  ["a report of unstated time dated on the session aged as if its time were known", [[": r.ed === 0 ? 1 : null;", ": null;"]]],
+  ["the later candidate of a report ahead ignored", [["const late = w(r.edMax) ? (r.edMax > r.ed ? r.edMax : null) : r.ed === 0 ? 1 : null;", "const late = r.ed === 0 ? 1 : null;"]]],
+  ["an explicit later candidate equal to ed at ed 0 read as unstated", [["const late = w(r.edMax) ? (r.edMax > r.ed ? r.edMax : null) : r.ed === 0 ? 1 : null;", "const late = w(r.edMax) && r.edMax > r.ed ? r.edMax : r.ed === 0 ? 1 : null;"]]],
+  ["an unstated past report whose earlier candidate is the session clamped to the session", [["r.rdMax - 1 + j >= 0 ? at(r.rdMax - 1 + j) : \"ahead\"", "at(Math.max(r.rdMax - 1, 0) + j)"]]],
   ["the later candidate that has not happened counted as the same state", [["late <= j ? at(j - late) : \"ahead\"", "late <= j ? at(j - late) : first"]]],
   ["two candidates that disagree resolved to the first", [["const two = (x, y) => (x === y ? x : \"unstated\");", "const two = (x, y) => x;"]]],
   ["two candidates that disagree resolved to the younger", [["const two = (x, y) => (x === y ? x : \"unstated\");", "const two = (x, y) => y;"]]],
-  ["an unstated past report read at its younger age only", [["s.push(two(at(r.rdMax + j), at(Math.max(r.rdMax - 1, 0) + j)));", "s.push(at(Math.max(r.rdMax - 1, 0) + j));"]]],
-  ["an unstated past report read at its older age only", [["s.push(two(at(r.rdMax + j), at(Math.max(r.rdMax - 1, 0) + j)));", "s.push(at(r.rdMax + j));"]]],
+  ["an unstated past report read at its younger age only", [["s.push(two(at(r.rdMax + j), r.rdMax - 1 + j >= 0 ? at(r.rdMax - 1 + j) : \"ahead\"));", "s.push(at(Math.max(r.rdMax - 1, 0) + j));"]]],
+  ["an unstated past report read at its older age only", [["s.push(two(at(r.rdMax + j), r.rdMax - 1 + j >= 0 ? at(r.rdMax - 1 + j) : \"ahead\"));", "s.push(at(r.rdMax + j));"]]],
   ["the day after outranking an unstated state", [["for (const k of [\"reaction\", \"unstated\", \"after\"])", "for (const k of [\"reaction\", \"after\", \"unstated\"])"]]],
   ["an unstated state outranking a reaction", [["for (const k of [\"reaction\", \"unstated\", \"after\"])", "for (const k of [\"unstated\", \"reaction\", \"after\"])"]]],
   ["a missing elapsed count read as none", [["|| !w(j) || j < 0 ||", "|| j < 0 ||"]]],
@@ -242,6 +298,28 @@ for (const [name, patches] of BUILDS) {
   if (!bad.length) bad = elapsedGrid(mutant.F);
   if (!bad.length) bad = worlds(mutant.F, true).bad;
   ok(bad.length > 0, `PLANTED WRONG BUILD, ${name}: the grid fails it (${bad[0]})`);
+}
+
+{
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const jsDir = path.join(ROOT, "assets", "js");
+  const readers = fs.readdirSync(jsDir).filter((f) => f.endsWith(".js") && !/bundle|curriculum|lab-suite|catalog/.test(f)).map((f) => [f, fs.readFileSync(path.join(jsDir, f), "utf8")]).filter(([, t]) => /\bedUnstated\b/.test(t));
+  const sound = (text) => /edUnstatedThrough/.test(text) && /F\.later\(/.test(text) && !/edMax:\s*(?:eu|edUn)\[/.test(text) && !/edMax:\s*[A-Za-z_.]*edUnstated\[/.test(text);
+  const names = readers.map(([f]) => f).sort();
+  eq(names, ["flows-market-below.js", "flows-moves.js", "flows-overview.js", "flows-skyline.js", "flows-ticker-movelab.js"], "the pages that read the map of unstated forward reports");
+  for (const [f, text] of readers) {
+    ok(sound(text), `${f} reads the horizon the map is complete through and the later candidate from F.later, never straight from the map`);
+    ok((text.match(/F\.later\(/g) || []).length === 1, `${f} calls F.later once`);
+  }
+  const [name, text] = readers[0];
+  const plants = [
+    ["the horizon never read", (t) => t.replace(/u\.edUnstatedThrough/g, "null")],
+    ["the later candidate read straight from the map", (t) => t.replace(/F\.later\(([A-Za-z]+), [^,]+, ([A-Za-z]+), [^)]*\)\)?/, (m, map, t2) => `${map}[${t2}] ?? null`)],
+  ];
+  for (const [title, transform] of plants) {
+    const changed = transform(text);
+    ok(changed !== text && !sound(changed), `PLANTED WRONG BUILD, ${title}: the scan fails ${name}`);
+  }
 }
 
 console.log(`✓ flows-horizon: ${checks} assertions, no server, no vendor data: the page kernel's earnings state, inside test, elapsed-session count and sentences held equal to shared/flows-horizon.js over ${EDS.length * RDS.length * RDMAXS.length * HZS.length * JS.length} cells and the calendar's own reaction sessions over 12 sessions, 76 report dates, four report times, six elapsed counts and three windows, and ${BUILDS.length} planted wrong builds`);

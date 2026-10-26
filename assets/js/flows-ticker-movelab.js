@@ -96,7 +96,7 @@
     const unstated = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
     const edUn = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     const hz = F.horizon(u.hz) ? u.hz : null;
-    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), edMax: num(edUn[ticker]), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
+    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell("ed") ?? null), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
     if (sig === undefined) row.why = "The nightly run does not publish a typical daily move yet.";
     else if (row.sig === null) row.why = "No typical daily move is published for " + ticker + ": it needs " + MIN_RETURNS + " clean sessions of history, with report days, splits and data breaks left out.";
     return row;

@@ -257,7 +257,7 @@
     const names = Array.isArray(u.sectors) ? u.sectors : [];
     const sec = Array.isArray(u.sec) ? u.sec : [];
     const sector = (i) => (typeof names[sec[i]] === "string" && names[sec[i]] ? names[sec[i]] : null);
-    return { cap: Boolean(cap), hz, ahead: u.ahead, rdOn: Boolean(rd), rows: u.t.map((t, i) => { const r = { t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: num(un[t]), edMax: num(eu[t]), sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null }; return Object.assign(r, earn(r, hz, 0)); }) };
+    return { cap: Boolean(cap), hz, ahead: u.ahead, rdOn: Boolean(rd), rows: u.t.map((t, i) => { const r = { t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: num(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null), sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null }; return Object.assign(r, earn(r, hz, 0)); }) };
   }
 
   function liveRows() {

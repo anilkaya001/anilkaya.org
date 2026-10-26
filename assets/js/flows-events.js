@@ -556,7 +556,8 @@
         parts.push(sessions(age) + ": ");
         later.filter((x) => n(x[1]) === age).forEach((x, i) => {
           if (i) parts.push(", ");
-          parts.push(h("a", { href: tickerHref(x[0]), title: String(x[0]) + " " + MID + " reacted " + sessions(age) + " ago" + (cut.includes(age) ? ", report ledger cut that day" : "") }, String(x[0])));
+          parts.push(h("a", { href: tickerHref(x[0]), title: String(x[0]) + " " + MID + " reacted " + sessions(age) + " ago" + (x[2] === 1 ? ", report time not stated, so it may be one session older" : "") + (cut.includes(age) ? ", report ledger cut that day" : "") }, String(x[0])));
+          if (x[2] === 1) parts.push(" (time not stated)");
         });
       }
       const more = (n(rc.older) ?? later.length) - later.length;

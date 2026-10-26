@@ -351,15 +351,20 @@
       const two = (x, y) => (x === y ? x : "unstated");
       const s = [];
       if (w(r.rd) && r.rd >= 0) s.push(at(r.rd + j));
-      if (w(r.rdMax) && r.rdMax >= 0) s.push(two(at(r.rdMax + j), at(Math.max(r.rdMax - 1, 0) + j)));
+      if (w(r.rdMax) && r.rdMax >= 0) s.push(two(at(r.rdMax + j), r.rdMax - 1 + j >= 0 ? at(r.rdMax - 1 + j) : "ahead"));
       if (w(r.ed) && r.ed >= 0 && r.ed <= j) {
-        const late = w(r.edMax) && r.edMax > r.ed ? r.edMax : r.ed === 0 ? 1 : null;
+        const late = w(r.edMax) ? (r.edMax > r.ed ? r.edMax : null) : r.ed === 0 ? 1 : null;
         const first = at(j - r.ed);
         s.push(late === null ? first : two(first, late <= j ? at(j - late) : "ahead"));
       }
       for (const k of ["reaction", "unstated", "after"]) if (s.includes(k)) return k;
       if (!w(r.ed) || r.ed < 0) return "undated";
       return r.ed - j >= 1 && r.ed - j <= hz ? "ahead" : "clear";
+    },
+    later: (map, through, t, ed) => {
+      if (!Number.isInteger(ed) || ed < 0) return null;
+      if (map && typeof map === "object" && Number.isInteger(map[t])) return map[t];
+      return Number.isInteger(through) && ed <= through ? null : ed + 1;
     },
     earnIn: (r, hz, j, back) => { const e = F.earn(r, hz, j, back); return e === null ? null : e !== "clear" && e !== "undated"; },
     elapsed: (asOf, ahead, day, jmax = 2) => {

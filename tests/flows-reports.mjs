@@ -273,26 +273,26 @@ let planted = 0;
 {
   const UNI = (over = {}) => ({
     status: "ok", sessionDate: "2026-03-09", hz: 21,
-    t: ["SYA101", "SYB102", "SYC103", "SYD104", "SYE105", "SYF106", "SYG107", "SYH108", "SYI109", "SYJ110", "SYK111", "SYL112"],
+    t: ["SYA101", "SYB102", "SYC103", "SYD104", "SYE105", "SYF106", "SYG107", "SYH108", "SYI109", "SYJ110", "SYK111", "SYL112", "SYM113"],
     cols: {
-      chg: [800, -1000, 50, 20, 10, 300, null, 5, 10, 120, null, 40],
-      sig: [2000, 5000, 2000, 2000, 2000, null, 2000, 2000, 2000, null, 2000, 2000],
-      rd: [0, 0, 1, 2, 4, null, null, null, 6, 0, 0, null],
-      ed: [null, null, null, null, null, 0, null, 5, null, null, null, 1],
+      chg: [800, -1000, 50, 20, 10, 300, null, 5, 10, 120, null, 40, 7],
+      sig: [2000, 5000, 2000, 2000, 2000, null, 2000, 2000, 2000, null, 2000, 2000, 2000],
+      rd: [0, 0, 1, 2, 4, null, null, null, 6, 0, 0, null, null],
+      ed: [null, null, null, null, null, 0, null, 5, null, null, null, 1, null],
     },
     units: { chg: ["fraction", 1e4], sig: ["fraction", 1e5], rd: ["sessions", 1], ed: ["sessions", 1] },
-    rdBasis: { unstated: { SYG107: 1 }, cut: [] },
+    rdBasis: { unstated: { SYG107: 1, SYM113: 4 }, cut: [] },
     ...over,
   });
   const probe = (mod, uni) => mod.recentReporters(uni, { max: 4, older: 4 });
   const battery = (mod) => {
     try {
       const a = probe(mod, UNI());
-      if (a.status !== "ok" || a.hz !== 21 || JSON.stringify(a.counts) !== "[4,1]" || a.unstated !== 2 || a.older !== 2) return false;
+      if (a.status !== "ok" || a.hz !== 21 || JSON.stringify(a.counts) !== "[4,1]" || a.unstated !== 2 || a.older !== 3) return false;
       if (JSON.stringify(a.cut) !== "[]") return false;
       if (JSON.stringify(a.rows.map((r) => r[0])) !== JSON.stringify(["SYA101", "SYB102", "SYJ110", "SYK111"])) return false;
       if (Math.abs(a.rows[0][2] - Math.log1p(0.08) / 0.02) > 0.006 || a.rows[3][1] !== null || a.rows[2][2] !== null || a.rows[2][1] !== 0.012) return false;
-      if (JSON.stringify(a.laterRows) !== JSON.stringify([["SYD104", 2], ["SYE105", 4]])) return false;
+      if (JSON.stringify(a.laterRows) !== JSON.stringify([["SYD104", 2, 0], ["SYM113", 3, 1], ["SYE105", 4, 0]])) return false;
       const c1 = probe(mod, UNI({ rdBasis: { unstated: { SYG107: 1 }, cut: ["2026-03-05"] } }));
       if (JSON.stringify(c1.cut) !== "[1,2]" || JSON.stringify(c1.counts) !== "[4,null]" || c1.unstated !== null) return false;
       const c2 = probe(mod, UNI({ rdBasis: { unstated: { SYG107: 1 }, cut: ["2026-03-07"] } }));
@@ -312,7 +312,7 @@ let planted = 0;
   };
   ok(battery(R), "the recent-reporters battery passes the real module");
   const bytes = JSON.stringify(probe(R, UNI())).length;
-  ok(bytes < 700, "and the block is small: " + bytes + " bytes for four rows and two later names");
+  ok(bytes < 700, "and the block is small: " + bytes + " bytes for four rows and three later names");
   const pr = [
     ["a cut report day ignored", [["cut.push(k)", "void k"]]],
     ["a cut report day matched on the session only", [["cutDays.some((c) => c >= p && c <= s)", "cutDays.some((c) => c === s)"]]],
@@ -323,7 +323,10 @@ let planted = 0;
     ["the unstated names counted as reactions", [["} else if (state === \"unstated\") notStated++;", "} else if (state === \"unstated\") { counts[0]++; today.push([t, null, null]); }"]]],
     ["the unstated count printed over a cut day", [["unstated: unsure ? null : notStated,", "unstated: notStated,"]]],
     ["no window tolerated", [["if (!whole(hz) || hz < 1) return { status: \"unavailable\", reason: \"no_window\", ...head };", ""]]],
-    ["a name that reacted six sessions ago listed", [["rd[i] >= 2 && rd[i] <= within", "rd[i] >= 2 && rd[i] <= within + 1"]]],
+    ["a name that reacted six sessions ago listed", [["age >= 2 && age <= within", "age >= 2 && age <= within + 1"]]],
+    ["the later candidate of an unstated report taken as its age", [["whole(unstated[t]) ? unstated[t] - 1 : null", "whole(unstated[t]) ? unstated[t] : null"]]],
+    ["the unstated flag of a later name dropped", [["late.push([t, age, whole(rd[i]) ? 0 : 1]);", "late.push([t, age, 0]);"]]],
+    ["a later name's flag set when its time is stated", [["late.push([t, age, whole(rd[i]) ? 0 : 1]);", "late.push([t, age, 1]);"]]],
     ["a missing move read as zero", [["const chg = chgAt(i), sg = sigAt(i);", "const chg = chgAt(i) ?? 0, sg = sigAt(i);"]]],
   ];
   let salt2 = 80;
@@ -345,7 +348,7 @@ let planted = 0;
       if (!d || d < asOf || !C.isSession(d)) continue;
       if (r.er_time === "premarket" || r.er_time === "postmarket") continue;
       const ed = between(asOf, d);
-      if (ed <= C.AHEAD_SESSIONS) want.push([r.ticker, ed + 1]);
+      if (ed <= H.LIVE_ELAPSED_MAX) want.push([r.ticker, ed + 1]);
     }
     return Object.fromEntries(want.sort((a, b) => (a[0] < b[0] ? -1 : 1)));
   };
@@ -371,39 +374,52 @@ let planted = 0;
     return true;
   };
   ok(sweep(X), "the forward unstated-time map equals the calendar oracle on twelve sessions, twenty-one report days and six time words");
-  ok(swept > 250, "and the sweep is not vacuous: " + swept + " entries");
-  const small = [["SYA101", "2026-03-02", null], ["SYB102", "2026-03-03", "unconfirmed"], ["SYC103", "2026-03-09", "unknown"], ["SYD104", "2026-03-10", "unknown"], ["SYE105", "2026-03-03", "premarket"], ["SYG107", "2026-03-01", "unknown"], ["SYH108", "2026-02-27", "unknown"], ["SYI109", null, null], ["SYJ110", "2026-03-07", "unknown"]].map(([ticker, d, t]) => ({ ticker, next_earnings_date: d, er_time: t }));
-  deep(X.unstatedAhead(small, "2026-03-02"), { map: { SYA101: 1, SYB102: 2, SYC103: 6 }, n: 3 }, "a report dated today with no stated time reaches up to the next session, one dated five sessions out is carried, six is not, a stated time and a weekend date are certain, and a past date is behind");
-  deep(X.unstatedAhead(small, "2026-03-03"), { map: { SYB102: 1, SYC103: 5, SYD104: 6 }, n: 3 }, "a session later the same reports are one session nearer, and the one that was six away is now five and carried");
+  ok(swept > 100, "and the sweep is not vacuous: " + swept + " entries within the two sessions the page places a name");
+  const small = [["SYA101", "2026-03-02", null], ["SYB102", "2026-03-03", "unconfirmed"], ["SYC103", "2026-03-09", "unknown"], ["SYD104", "2026-03-10", "unknown"], ["SYE105", "2026-03-03", "premarket"], ["SYG107", "2026-03-01", "unknown"], ["SYH108", "2026-02-27", "unknown"], ["SYI109", null, null], ["SYJ110", "2026-03-07", "unknown"], ["SYK111", "2026-03-04", "unknown"]].map(([ticker, d, t]) => ({ ticker, next_earnings_date: d, er_time: t }));
+  deep(X.unstatedAhead(small, "2026-03-02"), { map: { SYA101: 1, SYB102: 2, SYK111: 3 }, n: 3, through: 2 }, "a report dated today with no stated time reaches up to the next session, one two sessions out is carried, one five out is not (the page places a name at most two sessions on), a stated time and a weekend date are certain, and a past date is behind");
+  deep(X.unstatedAhead(small, "2026-03-03"), { map: { SYB102: 1, SYK111: 2 }, n: 2, through: 2 }, "a session later the same reports are one session nearer");
+  deep(X.unstatedAhead(small, "2026-03-04"), { map: { SYK111: 1 }, n: 1, through: 2 }, "and the one dated two sessions out is dated today");
   {
-    const many = [];
-    for (let i = 0; i < 100; i++) many.push({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null });
-    for (let i = 0; i < 20; i++) many.push({ ticker: "SYB" + String(100 + i), next_earnings_date: "2026-03-03", er_time: null });
-    for (let i = 0; i < 150; i++) many.push({ ticker: "SYC" + String(100 + i), next_earnings_date: "2026-03-06", er_time: null });
-    const got = X.unstatedAhead(many.reverse(), "2026-03-02");
-    eq(Object.keys(got.map).length, X.ED_UNSTATED_MAX, "past the cap the map holds exactly the cap");
-    eq(got.n, 270, "and the count says how many there were");
-    ok(Object.entries(got.map).every(([t, v]) => (t.startsWith("SYA") ? v === 1 : t.startsWith("SYB") ? v === 2 : v === 5)), "each kept name carries its own count");
-    ok(Object.keys(got.map).filter((t) => t.startsWith("SYA")).length === 100 && Object.keys(got.map).filter((t) => t.startsWith("SYB")).length === 20, "the nearest are kept first, whatever the input order: the ones the live page needs");
-    deep(Object.keys(got.map).filter((t) => t.startsWith("SYC")), Array.from({ length: 80 }, (_, i) => "SYC" + String(100 + i)), "and the farthest are cut by ticker order");
-    deep(Object.keys(got.map), [...Object.keys(got.map)].sort(), "the map is in ticker order");
+    const group = (prefix, date, count) => Array.from({ length: count }, (_, i) => ({ ticker: prefix + String(100 + i), next_earnings_date: date, er_time: null }));
+    const cut = X.unstatedAhead([...group("SYA", "2026-03-02", 100), ...group("SYB", "2026-03-03", 20), ...group("SYC", "2026-03-04", 150)].reverse(), "2026-03-02");
+    eq(Object.keys(cut.map).length, 120, "past the cap the group the cap falls in is dropped whole: the map holds the two nearer groups only");
+    eq(cut.n, 270, "the count says how many there were");
+    eq(cut.through, 1, "and the horizon the map is complete through falls to one session, so the page reads a name two sessions out and not in it as unknown");
+    ok(Object.entries(cut.map).every(([t, v]) => (t.startsWith("SYA") ? v === 1 : v === 2)), "each kept name carries its own count");
+    deep(Object.keys(cut.map), [...Object.keys(cut.map)].sort(), "the map is in ticker order");
+    const heavy = X.unstatedAhead([...group("SYA", "2026-03-02", 150), ...group("SYB", "2026-03-03", 100)], "2026-03-02");
+    deep([Object.keys(heavy.map).length, heavy.n, heavy.through], [150, 250, 0], "a cap that falls in the second group keeps the first and is complete through none");
+    const whole = X.unstatedAhead(group("SYA", "2026-03-02", 200), "2026-03-02");
+    deep([Object.keys(whole.map).length, whole.n, whole.through], [200, 200, 2], "exactly the cap is no cut");
+    const first = X.unstatedAhead(group("SYA", "2026-03-02", 201), "2026-03-02");
+    deep([Object.keys(first.map).length, first.n, first.through], [0, 201, -1], "one over the cap in the nearest group leaves the map empty and complete through nothing");
+    const none = X.unstatedAhead([], "2026-03-02");
+    deep(none, { map: {}, n: 0, through: 2 }, "no reports is a complete empty map");
   }
   {
     const rows = small.map((r, i) => ({ ...r, marketcap: 1e12 - i * 1e9, sector: "Technology" }));
     const columns = X.UNIVERSE_COLUMNS.filter((c) => c.key === "ed");
     const u = X.buildUniverse(rows, { sessionDate: "2026-03-02", generatedAt: "2026-03-02T21:45:00Z", columns, sigma: new Map() });
-    deep([u.edUnstated, u.edUnstatedN], [{ SYA101: 1, SYB102: 2, SYC103: 6 }, 3], "the universe carries the map and its count beside the session list");
-    deep(X.projectUniverse(u, X.projectionColumns("ed,t")).edUnstated, { SYA101: 1, SYB102: 2, SYC103: 6 }, "a projection that asks for the distance carries the map");
-    eq(X.projectUniverse(u, X.projectionColumns("t,chg")).edUnstated, undefined, "and one that does not ask for it does not");
+    deep([u.edUnstated, u.edUnstatedN, u.edUnstatedThrough], [{ SYA101: 1, SYB102: 2, SYK111: 3 }, 3, 2], "the universe carries the map, its count and the horizon it is complete through beside the session list");
+    const asked = X.projectUniverse(u, X.projectionColumns("ed,t"));
+    deep([asked.edUnstated, asked.edUnstatedThrough], [{ SYA101: 1, SYB102: 2, SYK111: 3 }, 2], "a projection that asks for the distance carries the map and its horizon");
+    const unasked = X.projectUniverse(u, X.projectionColumns("t,chg"));
+    deep([unasked.edUnstated, unasked.edUnstatedThrough], [undefined, undefined], "and one that does not ask for it carries neither");
   }
   const xbad = [
-    ["a stated time counted as unstated", [["if (!f || f.certain || f.ed > AHEAD_SESSIONS) continue;", "if (!f || f.ed > AHEAD_SESSIONS) continue;"]]],
-    ["the horizon of five sessions one short", [["f.ed > AHEAD_SESSIONS) continue;", "f.ed >= AHEAD_SESSIONS) continue;"]]],
+    ["a stated time counted as unstated", [["if (!f || f.certain || f.ed > LIVE_ELAPSED_MAX) continue;", "if (!f || f.ed > LIVE_ELAPSED_MAX) continue;"]]],
+    ["the horizon of two sessions one short", [["f.ed > LIVE_ELAPSED_MAX) continue;", "f.ed >= LIVE_ELAPSED_MAX) continue;"]]],
+    ["the horizon of two sessions one long", [["f.ed > LIVE_ELAPSED_MAX) continue;", "f.ed > LIVE_ELAPSED_MAX + 1) continue;"]]],
     ["the later candidate equal to the earlier", [["found.push([r.ticker, f.ed + 1]);", "found.push([r.ticker, f.ed]);"]]],
     ["the farthest kept before the nearest", [["x[1] - y[1] || ", "y[1] - x[1] || "]]],
-    ["the cap ignored", [["slice(0, ED_UNSTATED_MAX)", "slice(0)"]]],
+    ["the cap ignored", [["const edge = found.length > ED_UNSTATED_MAX ? found[ED_UNSTATED_MAX][1] : null;", "const edge = null;"]]],
+    ["a group split by the cap", [["const kept = edge === null ? found : found.filter((x) => x[1] < edge);", "const kept = found.slice(0, ED_UNSTATED_MAX);"]]],
+    ["the horizon not lowered by a cut", [["const through = edge === null ? LIVE_ELAPSED_MAX : edge - 2;", "const through = LIVE_ELAPSED_MAX;"]]],
+    ["the horizon one session too far after a cut", [["edge - 2;", "edge - 1;"]]],
+    ["the horizon one session too short after a cut", [["edge - 2;", "edge - 3;"]]],
     ["the count taken after the cap", [["n: found.length", "n: kept.length"]]],
-    ["the map not asked for with the distance", [["if (want.includes(\"ed\")) out.edUnstated", "if (want.includes(\"edx\")) out.edUnstated"]]],
+    ["the map not asked for with the distance", [["if (want.includes(\"ed\")) {\n    out.edUnstated", "if (want.includes(\"edx\")) {\n    out.edUnstated"]]],
+    ["the horizon not carried with the map", [["out.edUnstatedThrough = u.edUnstatedThrough ?? null;", ""]]],
   ];
   planted += xbad.length;
   let salt3 = 120;
@@ -412,23 +428,18 @@ let planted = 0;
     let caught = false;
     try {
       const got = bad.unstatedAhead(small, "2026-03-02");
-      caught = JSON.stringify(got) !== JSON.stringify({ map: { SYA101: 1, SYB102: 2, SYC103: 6 }, n: 3 }) || !sweep(bad);
-      if (!caught && title === "the farthest kept before the nearest") {
-        const many = [];
-        for (let i = 0; i < 150; i++) many.push({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null });
-        for (let i = 0; i < 150; i++) many.push({ ticker: "SYB" + String(100 + i), next_earnings_date: "2026-03-06", er_time: null });
-        const g = bad.unstatedAhead(many, "2026-03-02");
-        caught = Object.keys(g.map).filter((t) => t.startsWith("SYA")).length !== 150;
+      caught = JSON.stringify(got) !== JSON.stringify({ map: { SYA101: 1, SYB102: 2, SYK111: 3 }, n: 3, through: 2 }) || !sweep(bad);
+      if (!caught) {
+        const group = (prefix, date, count) => Array.from({ length: count }, (_, i) => ({ ticker: prefix + String(100 + i), next_earnings_date: date, er_time: null }));
+        const g = bad.unstatedAhead([...group("SYA", "2026-03-02", 100), ...group("SYB", "2026-03-03", 20), ...group("SYC", "2026-03-04", 150)].reverse(), "2026-03-02");
+        const h = bad.unstatedAhead([...group("SYA", "2026-03-02", 150), ...group("SYB", "2026-03-03", 100)], "2026-03-02");
+        caught = Object.keys(g.map).length !== 120 || g.n !== 270 || g.through !== 1 || Object.keys(h.map).length !== 150 || h.through !== 0;
       }
-      if (!caught && (title === "the cap ignored" || title === "the count taken after the cap")) {
-        const many = Array.from({ length: 250 }, (_, i) => ({ ticker: "SYA" + String(100 + i), next_earnings_date: "2026-03-02", er_time: null }));
-        const g = bad.unstatedAhead(many, "2026-03-02");
-        caught = Object.keys(g.map).length !== 200 || g.n !== 250;
-      }
-      if (!caught && title === "the map not asked for with the distance") {
+      if (!caught && (title === "the map not asked for with the distance" || title === "the horizon not carried with the map")) {
         const rows = small.map((r, i) => ({ ...r, marketcap: 1e12 - i * 1e9, sector: "Technology" }));
         const u = bad.buildUniverse(rows, { sessionDate: "2026-03-02", generatedAt: "2026-03-02T21:45:00Z", columns: bad.UNIVERSE_COLUMNS.filter((c) => c.key === "ed"), sigma: new Map() });
-        caught = bad.projectUniverse(u, bad.projectionColumns("ed,t")).edUnstated === undefined;
+        const asked = bad.projectUniverse(u, bad.projectionColumns("ed,t"));
+        caught = asked.edUnstated === undefined || asked.edUnstatedThrough === undefined;
       }
     } catch {
       caught = true;

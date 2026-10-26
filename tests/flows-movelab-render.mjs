@@ -33,7 +33,7 @@ ok(!/sigma|σ|standard deviation/i.test(SRC) && !/sigma|σ|standard deviation/i.
 
 function load(src) {
   const kernel = bootUI().F;
-  const win = { FlowsUI: { h: () => ({}), F: { day: (d) => d, earn: kernel.earn, elapsed: kernel.elapsed, etDay: kernel.etDay, horizon: kernel.horizon }, DASH: "—", infoButton: () => ({}), tag: () => ({}) } };
+  const win = { FlowsUI: { h: () => ({}), F: { day: (d) => d, earn: kernel.earn, later: kernel.later, elapsed: kernel.elapsed, etDay: kernel.etDay, horizon: kernel.horizon }, DASH: "—", infoButton: () => ({}), tag: () => ({}) } };
   vm.runInNewContext(src, { window: win, Math, Number, Array, Object, String, Set, JSON, Date, Promise, Error, fetch: () => Promise.reject(new Error("no network")) }, { filename: "flows-ticker-movelab.js" });
   return win.FlowsUI.moveLab;
 }
@@ -273,11 +273,14 @@ function modelFailures(M) {
   note(rep(card(), { ed: 21, hz: 30 }).state === "inside" && rep(card(), { ed: 30, hz: 30 }).state === "inside" && rep(card(), { ed: 31, hz: 30 }).state === "outside", "the window is the payload's, not a constant of the module");
 
   const col = (rowIn) => plain(M.rowOf(rowIn.u, rowIn.t, Date.UTC(2026, 7, 24, 15, 0, 0)));
-  const u = universeFor([{ t: "AAA", sig: 0.0123, f2: 11, f3: 5, ed: 7 }, { t: "BBB", sig: null, f2: null, f3: null, ed: null }, { t: "CCC", sig: 0.031, f2: 9, f3: 0, ed: 40 }]);
+  const u = universeFor([{ t: "AAA", sig: 0.0123, f2: 11, f3: 5, ed: 7 }, { t: "BBB", sig: null, f2: null, f3: null, ed: null }, { t: "CCC", sig: 0.031, f2: 9, f3: 0, ed: 40 }, { t: "DDD", sig: 0.02, f2: 3, f3: 1, ed: 1 }]);
   const a = col({ u, t: "AAA" });
   note(Math.abs(a.sig - 0.0123) < 1e-12 && a.f2 === 11 && a.f3 === 5 && a.ed === 7 && a.why === null && a.hz === HORIZON_SESSIONS && a.j === 0, "a row is read from the projection with each column's own scale, the payload's window and the sessions elapsed since the nightly");
-  const ua = { ...u, edUnstated: { AAA: 8 } };
-  note(col({ u: ua, t: "AAA" }).edMax === 8 && col({ u: ua, t: "CCC" }).edMax === null && col({ u, t: "AAA" }).edMax === null, "a forward report of unstated time is read from the universe's carried map, and a name outside it has none");
+  const ua = { ...u, edUnstated: { AAA: 8 }, edUnstatedThrough: 2 };
+  note(col({ u: ua, t: "AAA" }).edMax === 8 && col({ u: ua, t: "DDD" }).edMax === null && col({ u: ua, t: "CCC" }).edMax === 41, "a forward report of unstated time is read from the universe's carried map, a name inside the horizon the map is complete through and outside it has a stated time, and one beyond it is read as unknown, one session on");
+  const old = { ...u };
+  delete old.edUnstatedThrough;
+  note(col({ u: old, t: "DDD" }).edMax === 2 && col({ u: old, t: "AAA" }).edMax === 8, "a payload that carries no horizon for its map reads every forward report as unknown-time, never as stated");
   const c = col({ u, t: "CCC" });
   note(c.f3 === 0 && c.f2 === 9, "a published zero is a zero, not a gap");
   note(col({ u, t: "BBB" }).sig === null && /needs 200 clean sessions/.test(col({ u, t: "BBB" }).why), "a null typical day is withheld with the history rule");
@@ -319,7 +322,10 @@ const MUTANTS = [
   ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: null, edMax: row.edMax }, hz, row.j)", "the unstated-time age ignored"],
   ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: null }, hz, row.j)", "the forward unstated-time age ignored"],
   ["if (st === \"unstated\") return { state: \"unclear\", ...out };", "if (st === \"unstated\") return { state: \"reacted\", age: 0, ...out };", "an unstated report read as a reaction"],
-  ["rdMax: num(unstated[ticker]), edMax: num(edUn[ticker]),", "rdMax: num(unstated[ticker]), edMax: null,", "the carried forward unstated-time ages not read"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: null,", "the carried forward unstated-time ages not read"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: num(edUn[ticker]),", "the map read straight, a name outside it given no later candidate"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: F.later(edUn, undefined, ticker, cell(\"ed\") ?? null),", "the horizon the map is complete through ignored"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: F.later(edUn, 99, ticker, cell(\"ed\") ?? null),", "every name outside the map read as stated"],
   ["if (pub !== null && Number.isInteger(pub) && pub >= 0 && pub <= SESSIONS)", "if (false)", "the nightly counts ignored"],
   ["if (hits < 5) return core;", "if (hits < 1) return core;", "an interval from one hit"],
   ["const PUBLISHED = { 2: \"f2\", 3: \"f3\" };", "const PUBLISHED = { 2: \"f3\", 3: \"f2\" };", "the two nightly counts crossed"],

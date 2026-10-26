@@ -23,15 +23,21 @@ export function earningsState(row, hz, j, back = REACTION_BACK_SESSIONS) {
   const { ed, rd, rdMax, edMax } = row;
   const seen = [];
   if (whole(rd) && rd >= 0) seen.push(ageState(rd + j, back));
-  if (whole(rdMax) && rdMax >= 0) seen.push(agreed(ageState(rdMax + j, back), ageState(Math.max(rdMax - 1, 0) + j, back)));
+  if (whole(rdMax) && rdMax >= 0) seen.push(agreed(ageState(rdMax + j, back), rdMax - 1 + j >= 0 ? ageState(rdMax - 1 + j, back) : "ahead"));
   if (whole(ed) && ed >= 0 && ed <= j) {
-    const late = whole(edMax) && edMax > ed ? edMax : ed === 0 ? 1 : null;
+    const late = whole(edMax) ? (edMax > ed ? edMax : null) : ed === 0 ? 1 : null;
     const first = ageState(j - ed, back);
     seen.push(late === null ? first : agreed(first, late <= j ? ageState(j - late, back) : "ahead"));
   }
   for (const state of PRECEDENCE) if (seen.includes(state)) return state;
   if (!whole(ed) || ed < 0) return "undated";
   return ed - j >= 1 && ed - j <= hz ? "ahead" : "clear";
+}
+
+export function laterCandidate(map, through, ticker, ed) {
+  if (!whole(ed) || ed < 0) return null;
+  if (map && typeof map === "object" && whole(map[ticker])) return map[ticker];
+  return whole(through) && ed <= through ? null : ed + 1;
 }
 
 export function earningsInside(row, hz, j, back = REACTION_BACK_SESSIONS) {

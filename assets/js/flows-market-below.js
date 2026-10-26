@@ -145,7 +145,7 @@
     const col = (k) => { const c = u.cols && u.cols[k], sc = u.units && u.units[k] && isNum(u.units[k][1]); return Array.isArray(c) && sc ? c.map((x) => (isNum(x) === null ? null : x / sc)) : null; };
     const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), rd = u.cols && u.cols.rd, un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {}, eu = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     if (!(okFeed(u) && u.status === "ok" && Array.isArray(u.t) && chg)) return null;
-    const rows = u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: Array.isArray(rd) ? isNum(rd[i]) : null, rdMax: isNum(un[t]), edMax: isNum(eu[t]) }));
+    const rows = u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: Array.isArray(rd) ? isNum(rd[i]) : null, rdMax: isNum(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null) }));
     rows.hz = F.horizon(u.hz) ? u.hz : null;
     rows.ahead = u.ahead;
     return rows;
