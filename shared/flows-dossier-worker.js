@@ -8,6 +8,7 @@ import { SECTOR_TIDES } from "./flows-live.js";
 import { batchWithClock, ondemandAllowed, memoizedClock } from "./flows-live-worker.js";
 import { expectedNightlySession, freshHeaders } from "./flows-freshness.js";
 import { opById, pathFor } from "./flows-vendor-ops.js";
+import { PARTS, usableX } from "./flows-vendor-extras.js";
 
 export const DOSSIER_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS flows_dossier_cache (ticker TEXT NOT NULL CHECK (length(ticker) BETWEEN 1 AND 10), " +
@@ -78,7 +79,7 @@ export const DOSSIER_SQL = Object.freeze({
     "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso FROM flows_payload WHERE id = ?",
   cardX: "SELECT updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
     "json_extract(payload, '$.engine') AS engine, json_extract(payload, '$.short') AS short, json_extract(payload, '$.insiders') AS insiders, " +
-    "json_extract(payload, '$.earnings') AS earnings FROM flows_payload WHERE id = ?",
+    "json_extract(payload, '$.earnings') AS earnings, json_extract(payload, '$.dx') AS dx, json_extract(payload, '$.vx') AS vx FROM flows_payload WHERE id = ?",
   universe: "SELECT p.updated_at AS updated_at, json_extract(p.payload, '$.sessionDate') AS session, json_extract(p.payload, '$.generatedAt') AS generated, " +
     "json_extract(p.payload, '$.n') AS n, json_extract(p.payload, '$.units') AS units, x.i AS i, " +
     UNIVERSE_KEYS.map((k) => "json_extract(p.payload, '$.cols." + k + "[' || x.i || ']') AS c_" + k).join(", ") + ", " +
@@ -241,6 +242,27 @@ function mergeEngine(card, x) {
   return card;
 }
 
+const ttlOf = (src, part) => (part && isNum(part.ttlS) ? part.ttlS : CACHE_TTL_S[src.kind]);
+
+export function nightlyView(cache, cardX, now) {
+  const view = {};
+  for (const [kind, v] of Object.entries(cache || {})) view[kind] = { fetchedAt: v.fetchedAt, parts: { ...v.parts } };
+  const dx = cardX && isObj(cardX.dx) ? cardX.dx : null;
+  const used = [];
+  if (!dx) return { view, used };
+  for (const src of SOURCES) {
+    if (src.fast || !PARTS[src.id] || PARTS[src.id].group !== "dx") continue;
+    const got = usableX(dx, src.id, now);
+    if (!got) continue;
+    const have = view[src.kind] && view[src.kind].parts[src.id];
+    if (have && isNum(have.at) && have.at >= got.at) continue;
+    if (!view[src.kind]) view[src.kind] = { fetchedAt: got.at, parts: {} };
+    view[src.kind].parts[src.id] = { at: got.at, x: got.x, ttlS: PARTS[src.id].refreshS, nightly: true };
+    used.push(src.id);
+  }
+  return { view, used };
+}
+
 function decodeCache(rows) {
   const out = {};
   for (const r of arr(rows)) {
@@ -270,8 +292,8 @@ export function planFetches({ ticker, known, own, cache, fast, held, now, marks 
     if (src.id === "levels" && darkHeld) { skipped.push(skip(src.id, "held-card")); continue; }
     if (src.id === "short" && cardXOk && isObj(cardX.short) && isObj(cardX.short.interest) && cardX.short.interest.shares !== undefined) { skipped.push(skip(src.id, "held-card-x")); continue; }
     if (src.id === "insiders" && cardXOk && isObj(cardX.insiders) && cardX.insiders.status && cardX.insiders.status !== "unavailable") { skipped.push(skip(src.id, "held-card-x")); continue; }
-    const ttl = src.fast ? FAST_TTL_S[src.id] : CACHE_TTL_S[src.kind];
     const part = src.fast ? fast[src.id] : cache[src.kind] && cache[src.kind].parts[src.id];
+    const ttl = src.fast ? FAST_TTL_S[src.id] : ttlOf(src, part);
     const at = part && isNum(part.at) ? part.at : null;
     if (src.id === "quote") { need.push({ src, state: "missing", ttl }); continue; }
     const rv = EXTRACT_VERSIONS[src.id];
@@ -420,6 +442,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     sessionDate: typeof xRow.session === "string" ? xRow.session.slice(0, 10) : null,
     generatedAt: typeof xRow.generated === "string" ? xRow.generated : null,
     engine: tryParse(xRow.engine, null), short: tryParse(xRow.short, null), insiders: tryParse(xRow.insiders, null), earnings: tryParse(xRow.earnings, null),
+    dx: tryParse(xRow.dx, null), vx: tryParse(xRow.vx, null),
   } : null;
   if (card) card = mergeEngine(card, cardX);
   const universe = decodeUniverse(first(rows.universe));
@@ -451,6 +474,8 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     ...newsRowsFrom(first(rows.news) && first(rows.news).rows, ticker),
   ];
   const cache = decodeCache(rows.cache && rows.cache.results);
+  const nightly = nightlyView(cache, cardX, now);
+  trace.nightly = nightly.used;
   const held = {
     expected, card, cardX, universe, regime: decodeRegime(first(rows.regime)), events: decodeEvents(first(rows.events)),
     strip, market, sectorEtf, alerts, tape, newsRows, neuron, liveBehind,
@@ -469,7 +494,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     const verdict = await Promise.resolve(deps.admit(ticker)).catch(() => null);
     if (verdict === false) admitted = false;
   }
-  const planArgs = { ticker, known, own: opts.own === true, cache, fast, held, now, maxCalls: budget.maxCalls };
+  const planArgs = { ticker, known, own: opts.own === true, cache: nightly.view, fast, held, now, maxCalls: budget.maxCalls };
   const planning = admitted && !cacheOnly;
   let plan = planning
     ? planFetches(planArgs)
@@ -480,10 +505,10 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   trace.queued = plan.queued;
 
   for (const src of SOURCES) {
-    const part = src.fast ? fast[src.id] : cache[src.kind] && cache[src.kind].parts[src.id];
+    const part = src.fast ? fast[src.id] : nightly.view[src.kind] && nightly.view[src.kind].parts[src.id];
     if (part && isObj(part.x)) {
       extracts[src.id] = part.x;
-      if (!src.fast && now - part.at >= CACHE_TTL_S[src.kind] * 1000) trace.stale.push(src.id);
+      if (!src.fast && now - part.at >= ttlOf(src, part) * 1000) trace.stale.push(src.id);
     }
   }
   for (const id of plan.queued) if (!extracts[id]) extracts[id] = { pending: true, reason: "budget" };

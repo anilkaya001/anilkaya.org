@@ -1,11 +1,23 @@
 import { freshStamp } from "./common.mjs";
 import { compactNumbers } from "../../shared/flows-cross.js";
+import { hasLiveParts, shedNextPart, stubSection } from "../../shared/flows-vendor-extras.js";
 
 export const CARD_X_SCHEMA_VERSION = 1;
 
 export const CARD_X_BUDGET_BYTES = 100 * 1024;
+export const CARD_X_SOFT_BYTES = 60 * 1024;
+
+function fitSoft(payload) {
+  let bytes = Buffer.byteLength(JSON.stringify(payload));
+  while (bytes > CARD_X_SOFT_BYTES && shedNextPart(payload)) {
+    if (!payload.shed.includes("extras.soft")) payload.shed.push("extras.soft");
+    bytes = Buffer.byteLength(JSON.stringify(payload));
+  }
+}
 
 export const CARD_X_SHED = Object.freeze([
+  ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
+  ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
   ["insiders.dots", (p) => { if (p.insiders && p.insiders.dots) p.insiders.dots = p.insiders.dots.slice(-10); }],
   ["earnings.events", (p) => { if (p.earnings && p.earnings.events) p.earnings.events = p.earnings.events.slice(0, 8); }],
   ["short.volume.path", (p) => { if (p.short && p.short.volume) delete p.short.volume.path; }],
@@ -36,10 +48,11 @@ export function cardXPayload(ticker, parts, { generatedAt = null, sessionDate = 
     ...compactNumbers(JSON.parse(JSON.stringify(parts || {}))),
     shed: [],
   };
+  fitSoft(payload);
   let bytes = JSON.stringify(payload).length;
   for (const [name, drop] of CARD_X_SHED) {
     if (bytes <= budgetBytes) break;
-    drop(payload);
+    if (drop(payload) === false) continue;
     payload.shed.push(name);
     bytes = JSON.stringify(payload).length;
   }
@@ -68,10 +81,11 @@ export function composeCardXPayload(prior, own, { budgetBytes = CARD_X_BUDGET_BY
     shed: [...new Set([...(Array.isArray(base.shed) ? base.shed : []), ...own.shed])],
   };
   delete payload.bytes;
+  fitSoft(payload);
   let bytes = JSON.stringify(payload).length;
   for (const [name, drop] of CARD_X_SHED) {
     if (bytes <= budgetBytes) break;
-    drop(payload);
+    if (drop(payload) === false) continue;
     if (!payload.shed.includes(name)) payload.shed.push(name);
     bytes = JSON.stringify(payload).length;
   }
