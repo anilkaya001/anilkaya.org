@@ -1093,22 +1093,24 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const FOCUS = { focus: null, strips: null, series: null, live: null, lk: false, ed: new Map(), nightly: new Map(), streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, live: null, lk: false, ed: new Map(), hz: null, words: null, ahead: null, asOf: null, nightly: new Map(), streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
   const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
   leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
   const newest = (a, b) => (readOf(b) || 0) - (readOf(a) || 0);
   const FK = ["px", "prev", "chg", "net", "lean", "iv30", "iv30p"];
   const IV_YEAR = Math.sqrt(252);
-  const IV_EVENT = 21;
-  const IV_APART = "Earnings within 21 sessions: event not separated.";
   const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => { const c = isNum(chg), v = isNum(iv); return c === null || v === null || !(v > 0) ? null : c / (v / IV_YEAR); };
   function ivdIndex(u) {
     const ok = u && u.status === "ok" && Array.isArray(u.t) && u.cols && u.units;
     const col = (k) => (ok && Array.isArray(u.cols[k]) && u.units[k] && isNum(u.units[k][1]) ? u.cols[k].map((x) => (isNum(x) === null ? null : x / u.units[k][1])) : null);
-    const ed = col("ed"), iv = col("iv30p");
-    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, ed[i]]) : []);
+    const ed = col("ed"), rd = col("rd"), iv = col("iv30p"), un = ok && u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {}, eu = ok && u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
+    FOCUS.hz = ok && F.horizon(u.hz) ? u.hz : null;
+    FOCUS.words = F.horizon(FOCUS.hz);
+    FOCUS.ahead = ok ? u.ahead : null;
+    FOCUS.asOf = ok ? u.sessionDate : null;
+    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, { ed: ed[i], rd: rd ? rd[i] : null, rdMax: isNum(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null) }]) : []);
     FOCUS.nightly = new Map(iv ? u.t.map((t, i) => [t, iv[i]]) : []);
   }
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);
@@ -1134,7 +1136,7 @@
       for (const k of FK) v[k] = pick(row, fields, k);
       if (v.chg === null && v.px !== null && v.prev) v.chg = v.px / v.prev - 1;
       if (v.iv30p === null && src === "nightly") v.iv30p = FOCUS.nightly.has(t) ? FOCUS.nightly.get(t) : null;
-      v.ed = FOCUS.ed.has(t) ? FOCUS.ed.get(t) : null;
+      v.ev = FOCUS.ed.has(t) ? FOCUS.ed.get(t) : null;
       const b = se && se.base ? isNum(se.base[t]) : null;
       const col = se && se.cols && se.cols.px ? se.cols.px[t] : null;
       const d = s && Array.isArray(se && se.t) ? readOf(s) - Date.parse(se.t.at(-1)) : 0;
@@ -1162,9 +1164,10 @@
   const chgOf = (v) => h("span", { class: "hm-chg", "data-tone": toneOf(v.chg) }, pct(v.chg));
   const ivdOf = (v) => {
     const m = ivDays(v.chg, v.iv30p);
-    const event = isNum(v.ed) !== null && v.ed <= IV_EVENT;
+    const j = v.day ? F.elapsed(FOCUS.asOf, FOCUS.ahead, v.day) : null;
+    const event = FOCUS.hz !== null && j !== null && v.ev !== null && F.earnIn(v.ev, FOCUS.hz, j) === true;
     return h("span", { class: "hm-qd", "data-tone": toneOf(m), title: m === null ? "No prior-close implied volatility" : "Day move over the IV struck at the previous close" },
-      m === null ? DASH : fmtSigned(m, 1), event ? h("i", { class: "hm-qd-e", role: "img", title: IV_APART, "aria-label": IV_APART }) : null);
+      m === null ? DASH : fmtSigned(m, 1), event ? h("i", { class: "hm-qd-e", role: "img", title: FOCUS.words.apart, "aria-label": FOCUS.words.apart }) : null);
   };
   const premOf = (v) => h("span", { class: "hm-prem", "data-tone": toneOf(v.net) }, usdS(v.net));
   const said = (v, label) => [label, v.t, "price " + F.px(v.px), "day " + pct(v.chg), "net premium " + usd(v.net),
@@ -1547,7 +1550,7 @@
   const R = {};
   const P = { lng: loadBoard("long"), sht: loadBoard("short"), lk: loadLive(["market", "vol", "breadth", "strips", "strips:series", "focus"]) };
   for (const [k, path, soon] of [["watch", "board?side=watch"], ["market", "market"], ["alerts", "flowalerts"], ["events", "events"], ["track", "scoretrack"],
-    ["ivd", "universe?cols=t,sec,chg,iv30p,ed", true],
+    ["ivd", "universe?cols=t,sec,chg,iv30p,ed,rd", true],
     ["lean", "sector-premium"], ["news", "news"], ["pulse", "pulse"], ["regime", "regime", true], ["focus", "focus"]]) P[k] = loadRegion("/api/flows/" + path, soon);
   for (const k in P) P[k] = P[k].then((v) => (R[k] = v));
 

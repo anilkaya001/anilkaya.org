@@ -7,6 +7,8 @@ import { chromium } from "playwright";
 import * as M from "../shared/flows-moves0.js";
 import * as PAGES from "../shared/flows-pages.js";
 import { targetFor } from "../shared/flows-targets.js";
+import { HORIZON_SESSIONS } from "../shared/flows-horizon.js";
+import { ahead as aheadOf } from "../shared/flows-calendar.js";
 import { revealBelow } from "./lib/below-fold.mjs";
 
 let checks = 0;
@@ -243,6 +245,17 @@ const SQRT252 = 15.874507866387544;
   eq(M.eventInside(21), true, "ed 21 is inside the window");
   eq(M.eventInside(22), false, "ed 22 is not");
   eq(M.eventInside(null), false, "an unknown ed is not treated as an event");
+  eq(M.eventInside({ ed: 21 }), true, "a row is read the same way as its ed");
+  eq(M.eventInside({ ed: null, rd: 0 }), true, "a name that reported on the session is an event: its move is the report's");
+  eq(M.eventInside({ ed: null, rd: 1 }), true, "and so is one that reported the session before, whose move still carries the drift");
+  eq(M.eventInside({ ed: null, rd: 2 }), false, "but not one that reported two sessions before");
+  eq(M.eventInside({ ed: null, rd: 1 }, 21, 1), false, "a day later the same row has aged out of the window");
+  eq(M.eventInside({ ed: 21, rd: null }, 21, 1), true, "and a report 21 sessions out is 20 sessions out a day later");
+  eq(M.eventInside({ ed: 22, rd: null }, 21, 1), true, "which brings a 22 inside it");
+  eq(M.eventInside({ ed: 22, rd: null }), false, "where it was outside");
+  eq(M.eventInside({ ed: null, rd: null, rdMax: 2 }), true, "a report of unstated time that may be one session old is an event");
+  eq(M.eventInside({ ed: null, rd: null, rdMax: 3 }), false, "and one that is at least two old is not");
+  eq(M.eventInside({}), false, "a row with neither is not");
   eq(M.moveOf(rows[2]).grade, 0, "an event name is grade 0");
   eq(M.moveOf(rows[0]).grade, 1, "a clean name is grade 1");
   const ctx = M.context(rows);
@@ -361,9 +374,10 @@ const stripsOf = (rows, session = "2026-09-29") => ({
 });
 const universeOf = (rows, { day = "2026-09-28", iv = false } = {}) => ({
   status: "ok", v: 1, sessionDate: day, generatedAt: iso(TUE_1330 - 20 * 3600000), n: rows.length, screened: rows.length,
+  hz: HORIZON_SESSIONS, ahead: aheadOf(day),
   t: rows.map((r) => r.t),
-  cols: { chg: rows.map((r) => Math.round(r.chg * 1e4)), ed: rows.map((r) => r.ed), ...(iv ? { iv30p: rows.map((r) => (r.iv30p === null || r.iv30p === undefined ? null : Math.round(r.iv30p * 1e3))) } : {}) },
-  units: { chg: ["fraction", 1e4], ed: ["sessions", 1], ...(iv ? { iv30p: ["vol", 1e3] } : {}) },
+  cols: { chg: rows.map((r) => Math.round(r.chg * 1e4)), ed: rows.map((r) => r.ed), ...(rows.some((r) => r.rd !== undefined) ? { rd: rows.map((r) => (r.rd === undefined ? null : r.rd)) } : {}), ...(iv ? { iv30p: rows.map((r) => (r.iv30p === null || r.iv30p === undefined ? null : Math.round(r.iv30p * 1e3))) } : {}) },
+  units: { chg: ["fraction", 1e4], ed: ["sessions", 1], ...(rows.some((r) => r.rd !== undefined) ? { rd: ["sessions", 1] } : {}), ...(iv ? { iv30p: ["vol", 1e3] } : {}) },
 });
 const MOVERS = {
   status: "ok", sessionDate: "2026-09-28", universe: 600, ranked: 590, priced: 500, unrankedChange: 10, unrankedPremium: 100,
@@ -506,7 +520,7 @@ await showTab(page, "#mktMovers");
       { t: "U21", chg: 0.1, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 21 },
       { t: "U22", chg: 0.09, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 22 },
     ];
-    const state = { strips: stripsOf(EDGE), upd: 1, universe: EDGE };
+    const state = { strips: stripsOf(EDGE, "2026-09-29"), upd: 1, universe: EDGE, uniOpts: { day: "2026-09-29", iv: true } };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
     const got = await readLists(page);
@@ -514,6 +528,30 @@ await showTab(page, "#mktMovers");
     deep(got.cols[1].apart.map((r) => r[0]), ["E21", "E0"], "and one 21 sessions from them is ranked apart, as is one reporting today");
     deep(got.cols[0].clean.map((r) => r[0]), ["U22"], "on the risers' side likewise");
     deep(got.cols[0].apart.map((r) => r[0]), ["U21"], "ed 21 never ranks beside the clean names");
+    await page.close();
+  }
+
+  {
+    const LIVE = [
+      { t: "E21", chg: -0.1, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 21 },
+      { t: "E22", chg: -0.09, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 22 },
+      { t: "E23", chg: -0.085, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 23 },
+      { t: "E0", chg: -0.08, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 0 },
+      { t: "R0", chg: -0.07, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: null, rd: 0 },
+      { t: "R1", chg: -0.06, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: null, rd: 1 },
+      { t: "R2", chg: -0.05, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: null, rd: 2 },
+      { t: "U22", chg: 0.09, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 22 },
+      { t: "U23", chg: 0.08, iv30: 0.3, iv30p: 0.3, im: 0.1, ed: 23 },
+    ];
+    const state = { strips: stripsOf(LIVE), upd: 1, universe: LIVE };
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(page, { html: PAGES.marketPage({ username: "test", owner: true }), url: "/flows/market/", answer: marketAnswer(state) });
+    const got = await readLists(page);
+    deep(got.cols[1].clean.map((r) => r[0]), ["E23", "R1", "R2"], "ONE SESSION AFTER THE NIGHTLY a report 23 sessions out is 22 away and clean, as are names that reacted two or more sessions ago, R1 having aged out of the window");
+    deep(got.cols[1].apart.map((r) => r[0]), ["E21", "E22", "E0"], "while 22 is now inside the window and a report due on the nightly's own session has reacted, the three largest being listed");
+    deep(got.cols[0].clean.map((r) => r[0]), ["U23"], "the risers' side moves the same way");
+    deep(got.cols[0].apart.map((r) => r[0]), ["U22"], "a rise 22 sessions out is ranked apart a session later");
+    deep(LIVE.filter((r) => M.eventInside(r, 21, 1)).map((r) => r.t).sort(), ["E0", "E21", "E22", "R0", "U22"], "which is the leaf's reading of the same rows one session on");
     await page.close();
   }
 
@@ -570,7 +608,7 @@ await showTab(page, "#mktMovers");
       closes: { AAA: [100, 92], CCC: [100, 96], NOIV: [100, 109] },
     };
     const proj = {
-      status: "ok", v: 1, sessionDate: NIGHT, generatedAt: iso(TUE_1330 - 20 * 3600000), n: 3, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [],
+      status: "ok", v: 1, sessionDate: NIGHT, generatedAt: iso(TUE_1330 - 20 * 3600000), n: 3, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [], hz: HORIZON_SESSIONS, ahead: aheadOf(NIGHT),
       t: ["AAA", "CCC", "NOIV"], sectors: ["Tech"], sec: [0, 0, 0],
       cols: { chg: [-800, -400, 900], iv30p: [400, 230, null], ed: [4, 40, 40] },
       units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
@@ -602,7 +640,7 @@ await showTab(page, "#mktMovers");
 
   {
     const NIGHT = "2026-09-28";
-    const names = ["AAA", "CCC", "UUU", "NOIV", "E21", "E22"];
+    const names = ["AAA", "CCC", "UUU", "NOIV", "E21", "E23"];
     const focus = {
       status: "ok", sessionDate: NIGHT, generatedAt: iso(TUE_1330 - 20 * 3600000), readAt: iso(TUE_1330 - 20 * 3600000),
       fields: ["px", "prev", "chg", "net", "lean", "iv30"],
@@ -610,12 +648,12 @@ await showTab(page, "#mktMovers");
       rows: Object.fromEntries(names.map((t) => [t, [100, 100, 0, 0, 0, 0.3]])), closes: Object.fromEntries(names.map((t) => [t, [100, 100]])),
     };
     const strips = stripsOf(ROSTER.filter((r) => names.includes(r.t)).concat([
-      { t: "E21", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 }, { t: "E22", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 },
+      { t: "E21", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 }, { t: "E23", chg: -0.05, iv30: 0.3, iv30p: 0.25, im: 0.1 },
     ]));
     const proj = {
-      status: "ok", v: 1, sessionDate: NIGHT, n: 6, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [],
+      status: "ok", v: 1, sessionDate: NIGHT, n: 6, projection: ["chg", "ed", "iv30p", "sec", "t"], absent: [], hz: HORIZON_SESSIONS, ahead: aheadOf(NIGHT),
       t: names, sectors: ["Tech"], sec: [0, 0, 0, 0, 0, 0],
-      cols: { chg: [0, 0, 0, 0, 0, 0], iv30p: [111, 111, 111, 111, 111, 111], ed: [40, 40, 40, 40, 21, 22] }, units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
+      cols: { chg: [0, 0, 0, 0, 0, 0], iv30p: [111, 111, 111, 111, 111, 111], ed: [40, 40, 40, 40, 21, 23] }, units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
     };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, {
@@ -639,9 +677,9 @@ await showTab(page, "#mktMovers");
     eq(NUM(got.UUU[1]), NUM(M.signedIvDays(M.ivDays(0.05, 0.25))), "UUU likewise");
     eq(got.NOIV[0], "live", "NOIV is read from the live rows");
     eq(got.NOIV[1], "—", "A LIVE ROW WITH NO STRIP IV is a dash: last night's 11.1 points are never paired with today's change");
-    eq(got.E21[2], true, "a name 21 sessions from earnings carries the event mark");
-    eq(got.E22[2], false, "and one 22 sessions from them does not");
-    eq(NUM(got.E22[1]), NUM(M.signedIvDays(M.ivDays(-0.05, 0.25))), "E22 is read on its strip IV");
+    eq(got.E21[2], true, "a name 21 sessions from earnings at the nightly is 20 away on the live session and carries the event mark");
+    eq(got.E23[2], false, "and one 23 sessions from them, 22 away on the live session, does not");
+    eq(NUM(got.E23[1]), NUM(M.signedIvDays(M.ivDays(-0.05, 0.25))), "E23 is read on its strip IV");
     await page.close();
   }
 } finally {

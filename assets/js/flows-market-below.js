@@ -137,25 +137,31 @@
     return box;
   }
 
-  const IV_EVENT = 21;
-  const IV_APART = "Earnings within 21 sessions: event not separated.";
+  const IV_NOSEP = "Earnings are not separated: the payload does not state the earnings window.";
   const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => (chg === null || iv === null || !(iv > 0) ? null : chg / (iv / Math.sqrt(252)));
 
   function uniRows(u) {
     const col = (k) => { const c = u.cols && u.cols[k], sc = u.units && u.units[k] && isNum(u.units[k][1]); return Array.isArray(c) && sc ? c.map((x) => (isNum(x) === null ? null : x / sc)) : null; };
-    const chg = col("chg"), iv = col("iv30p"), ed = col("ed");
-    return okFeed(u) && u.status === "ok" && Array.isArray(u.t) && chg ? u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null })) : null;
+    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), rd = u.cols && u.cols.rd, un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {}, eu = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
+    if (!(okFeed(u) && u.status === "ok" && Array.isArray(u.t) && chg)) return null;
+    const rows = u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: Array.isArray(rd) ? isNum(rd[i]) : null, rdMax: isNum(un[t]), edMax: F.later(eu, u.edUnstatedThrough, t, ed ? ed[i] : null) }));
+    rows.hz = F.horizon(u.hz) ? u.hz : null;
+    rows.ahead = u.ahead;
+    return rows;
   }
 
   function lensMoves() {
     const s = LENS.strips, f = s && s.status === "ok" && Array.isArray(s.fields) && s.rows ? s.fields : [], u = LENS.uni;
-    const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), ed = new Map(u ? u.map((r) => [r.t, r.ed]) : []), out = [];
+    const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), by = new Map(u ? u.map((r) => [r.t, r]) : []), out = [];
     const useU = u && LENS.priced && !(ci >= 0 && ii >= 0 && s.session > LENS.day);
-    const rows = useU ? u : ci < 0 || ii < 0 ? [] : Object.keys(s.rows).map((t) => ({ t, chg: isNum(s.rows[t][ci]), iv: isNum(s.rows[t][ii]), ed: ed.get(t) }));
+    const rows = useU ? u : ci < 0 || ii < 0 ? [] : Object.keys(s.rows).map((t) => ({ t, chg: isNum(s.rows[t][ci]), iv: isNum(s.rows[t][ii]), ...(by.get(t) ? { ed: by.get(t).ed, rd: by.get(t).rd, rdMax: by.get(t).rdMax, edMax: by.get(t).edMax } : {}) }));
+    const hz = u ? u.hz : null, j = hz === null ? null : useU || !s ? 0 : F.elapsed(LENS.day, u.ahead, s.session);
+    LENS.words = hz === null ? null : F.horizon(hz);
+    LENS.sep = hz !== null && j !== null;
     for (const r of rows) {
       const m = ivDays(r.chg, r.iv);
-      if (m !== null) out.push({ t: r.t, chg: r.chg, iv: r.iv, m, event: isNum(r.ed) !== null && r.ed <= IV_EVENT });
+      if (m !== null) out.push({ t: r.t, chg: r.chg, iv: r.iv, m, event: LENS.sep && F.earnIn(r, hz, j) === true });
     }
     LENS.src = (useU ? "Nightly, session " + LENS.day : "Live roster, session " + (s && s.session)) + ": " + out.length + " names.";
     return out.length ? out : null;
@@ -187,7 +193,8 @@
     box.querySelector("h3").append(h("span", { class: "mk-movers-n" }, " · " + Math.min(8, ranked[0].length) + " of " + ranked[0].length));
     if (ranked[0].length) box.append(rows(ranked[0].slice(0, 8), ""));
     else if (!ranked[1].length) box.append(emptyLine("quiet", "No name with a prior-close implied volatility closed on this side.", said, 64));
-    if (ranked[1].length) box.append(h("p", { class: "mk-apart" }, IV_APART), rows(ranked[1].slice(0, 3), " is-apart"));
+    if (ranked[1].length) box.append(h("p", { class: "mk-apart" }, LENS.words.apart), rows(ranked[1].slice(0, 3), " is-apart"));
+    if (!LENS.sep) box.append(h("p", { class: "mk-apart" }, IV_NOSEP));
     return box;
   }
 
@@ -767,7 +774,7 @@
     const plot = h("div", { class: "mk-term" });
     host.append(plot, UI.legend(names.map((k) => [COL[k], "ln", k])));
     C.line(plot, {
-      x: TEN, xType: "number", xScale: "sqrt", height: [180, 210, 230],
+      x: TEN, xType: "number", xScale: "sqrt", height: [150, 160, 180],
       xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
       series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
       yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",

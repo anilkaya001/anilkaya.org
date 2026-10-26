@@ -1,6 +1,7 @@
 import { impliedVolB76 } from "./flows-quant-bs.js";
 import { factEntry } from "./flows-fact-ids.js";
 import { sessionsBetween } from "./flows-cross.js";
+import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { callSay, STANCE_LINES, MODEL_IMPLIED, BUILDING_LINES, calmLine } from "./flows-oracle-words.js";
 
 export const ORACLE_VERSION = 1;
@@ -189,7 +190,7 @@ export function contextOf(card, cardX, block, { sector = null, sectorEtf = null,
     leanBase: { callShare: isObj(flowNorm) && fin(flowNorm.callShare) ? flowNorm.callShare : null },
     ivRank: fin(ctxPanel.ivRank) ? ctxPanel.ivRank : null,
     ivRankGrade: fin(ctxPanel.ivRank) ? 1 : null,
-    earnings: ev ? { sessions, inWindow: fin(sessions) && sessions <= 21 } : null,
+    earnings: ev ? { sessions, inWindow: fin(sessions) && sessions <= HORIZON_SESSIONS } : null,
     sector: typeof sector === "string" && sector ? sector : null,
     sectorEtf: typeof sectorEtf === "string" && sectorEtf ? sectorEtf : null,
     walls: lv ? { call: fin(lv.callWall) ? lv.callWall : null, put: fin(lv.putWall) ? lv.putWall : null, flip: fin(lv.flip) ? lv.flip : null } : null,

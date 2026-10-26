@@ -1,7 +1,8 @@
 import { benjaminiHochberg } from "./flows-stats.js";
+import { HORIZON_SESSIONS, earningsInside, horizonWords } from "./flows-horizon.js";
 
 export const SIG_SESSIONS = 252;
-export const SIG_EVENT_SESSIONS = 21;
+export const SIG_EVENT_SESSIONS = HORIZON_SESSIONS;
 export const SIG_MIN_Z = 2;
 export const SIG_Q = 0.1;
 
@@ -9,7 +10,7 @@ export const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correctin
 export const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
 export const SIG_REASONS = Object.freeze({
   below: "Below 2 typical days: not tested, but counted in the correction.",
-  event: "Earnings within 21 sessions: not tested.",
+  event: horizonWords(SIG_EVENT_SESSIONS).untested,
   noscale: "No typical day is published, so no test.",
   nocount: "The count of days beyond that is not published, so no test.",
 });
@@ -27,12 +28,12 @@ export const SIG_FOOT_NONE = "No name could be tested.";
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 export function sigOf(x) {
-  const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
+  const chg = num(x.chg), sig = num(x.sig);
   if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
   const lm = chg > -1 ? Math.log1p(chg) : null;
   if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
   const z = lm / sig;
-  if (ed !== null && ed <= SIG_EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
+  if (earningsInside(x, SIG_EVENT_SESSIONS, 0) === true) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
   if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
   const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
   const hits = level === 3 ? x.f3 : x.f2;

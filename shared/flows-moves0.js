@@ -1,10 +1,13 @@
 import { isTarget } from "./flows-targets.js";
+import { HORIZON_SESSIONS, earningsInside, horizonWords } from "./flows-horizon.js";
 
 export const MOVE_ID = "move.im1.h1";
 
 export const SESSIONS_PER_YEAR = 252;
 
-export const EVENT_SESSIONS = 21;
+export const EVENT_SESSIONS = HORIZON_SESSIONS;
+
+const WORDS = horizonWords(EVENT_SESSIONS);
 
 export const BEYOND = 3;
 
@@ -14,7 +17,7 @@ export const LINE = "A ranking, not a test: no error rate measured.";
 
 export const CAPTION = "IV as of the previous close.";
 
-export const APART = "Earnings within 21 sessions: event not separated.";
+export const APART = WORDS.apart;
 
 export const GRADE_NOTE = "From 30-day IV; no surface.";
 
@@ -36,13 +39,13 @@ export const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat,
 
 export const SHARE_NOTE = "Share is that count over the sector's names.";
 
-export const LEFT_OUT_NOTE = "Names reporting within 21 sessions are left out of every row.";
+export const LEFT_OUT_NOTE = WORDS.leftOut;
 
 export const PINS_NOTE = "SPY and QQQ are left out by ticker.";
 
 export const WHY_NO_IV = "No implied volatility is published for these names.";
 
-export const WHY_ALL_EVENT = "Every measured name reports within 21 sessions.";
+export const WHY_ALL_EVENT = WORDS.allEvent;
 
 export const X_LINE = "Across: the move in the name's own typical days.";
 
@@ -74,16 +77,16 @@ export function ivDays(chg, iv30p) {
   return c / (iv / SQRT_YEAR);
 }
 
-export function eventInside(ed) {
-  const e = finite(ed);
-  return e !== null && e <= EVENT_SESSIONS;
+export function eventInside(row, hz = EVENT_SESSIONS, j = 0) {
+  const r = row !== null && typeof row === "object" ? row : { ed: finite(row) };
+  return earningsInside(r, hz, j) === true;
 }
 
 export function moveOf(row) {
   if (!row || typeof row.t !== "string" || !row.t) return null;
   const m = ivDays(row.chg, row.iv30p);
   if (m === null) return null;
-  const event = eventInside(row.ed);
+  const event = eventInside(row);
   return { t: row.t, chg: row.chg, iv30p: row.iv30p, ed: finite(row.ed), m, event, grade: event ? 0 : 1, src: row.src || null };
 }
 
@@ -261,7 +264,7 @@ export function sectorStats(rows) {
     const m = ivDays(r.chg, r.iv30p);
     if (m === null) continue;
     b.measured++;
-    if (!eventInside(r.ed)) b.ms.push(m);
+    if (!eventInside(r)) b.ms.push(m);
   }
   const out = [...by.values()].map((b) => {
     const n = b.ms.length;

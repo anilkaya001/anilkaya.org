@@ -7,7 +7,10 @@ import { chromium } from "playwright";
 import * as FLOWS_PAGES from "../shared/flows-pages.js";
 import { buildUniverse, projectUniverse, projectionColumns, UNIVERSE_COLUMNS } from "../shared/flows-cross.js";
 import { frequencyText, rarityText, sigmaProfile, sigmaRef } from "../shared/flows-targets.js";
+import { HORIZON_SESSIONS } from "../shared/flows-horizon.js";
+import { ahead as aheadOf } from "../shared/flows-calendar.js";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { bootUI } from "./lib/ui-boot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -29,7 +32,8 @@ ok(/\.defer\("movelab", \{ when: "visible"/.test(TICKER_SRC) && !/data-defer="mo
 ok(!/sigma|σ|standard deviation/i.test(SRC) && !/sigma|σ|standard deviation/i.test(TICKER_SRC.slice(TICKER_SRC.indexOf("function buildMoveLab"), TICKER_SRC.indexOf("const VERDICT_HOME"))), "no sigma wording in the module or in its stub");
 
 function load(src) {
-  const win = { FlowsUI: { h: () => ({}), F: { day: (d) => d }, DASH: "—", infoButton: () => ({}), tag: () => ({}) } };
+  const kernel = bootUI().F;
+  const win = { FlowsUI: { h: () => ({}), F: { day: (d) => d, earn: kernel.earn, later: kernel.later, elapsed: kernel.elapsed, etDay: kernel.etDay, horizon: kernel.horizon }, DASH: "—", infoButton: () => ({}), tag: () => ({}) } };
   vm.runInNewContext(src, { window: win, Math, Number, Array, Object, String, Set, JSON, Date, Promise, Error, fetch: () => Promise.reject(new Error("no network")) }, { filename: "flows-ticker-movelab.js" });
   return win.FlowsUI.moveLab;
 }
@@ -115,9 +119,10 @@ function universeFor(entries, { omit = [] } = {}) {
   const rows = entries.map((e, i) => ({ ticker: e.t, marketcap: 1e12 - i * 1e9, sector: "Technology" }));
   const sigma = new Map(entries.filter((e) => e.sig !== null && e.sig !== undefined).map((e) => [e.t, { s: e.sig, f2: e.f2 === undefined ? null : e.f2, f3: e.f3 === undefined ? null : e.f3 }]));
   const days = { key: "ed", unit: "sessions", scale: 1, prio: 2, get: (r) => { const e = entries.find((x) => x.t === r.ticker); return e && e.ed !== undefined ? e.ed : null; } };
-  const columns = [...UNIVERSE_COLUMNS.filter((c) => ["sig", "f2", "f3"].includes(c.key)), days].filter((c) => !omit.includes(c.key));
+  const since = { key: "rd", unit: "sessions", scale: 1, prio: 1, get: (r) => { const e = entries.find((x) => x.t === r.ticker); return e && e.rd !== undefined ? e.rd : null; } };
+  const columns = [...UNIVERSE_COLUMNS.filter((c) => ["sig", "f2", "f3"].includes(c.key)), days, since].filter((c) => !omit.includes(c.key));
   const u = buildUniverse(rows, { sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00Z", columns, sigma });
-  return projectUniverse(u, projectionColumns("ed,f2,f3,sig,t"));
+  return projectUniverse(u, projectionColumns("ed,f2,f3,rd,sig,t"));
 }
 
 const API = load(SRC);
@@ -241,20 +246,41 @@ function modelFailures(M) {
   note(imp({ move: 0.024, low: 97.6, high: 102.4, rule: "the nearest end-of-week expiry", asOf: "2026-08-24" }).move === 0.024, "the market's move is carried as given");
   note(imp(null).why && imp({ why: "No quote." }).why === "No quote." && imp({ move: 0 }).why && imp({ move: -0.02 }).why, "an absent, zero or negative implied move is withheld with a reason");
 
-  const rep = (report, ed, why) => plain(M.model({ ticker: "T", spot: 100, report, reportWhy: why }, { sig: 0.01, ed })).report;
-  note(rep({ d: "2026-09-08", sessions: 21 }, null).state === "inside" && rep({ d: "2026-09-09", sessions: 22 }, null).state === "outside", "a report 21 sessions away is inside the window and 22 is outside it");
-  note(rep({ d: "2026-09-08", sessions: 1 }, null).state === "inside", "tomorrow is inside");
-  note(rep(null, 21).state === "inside" && rep(null, 22).state === "outside" && rep(null, 0).state === "inside", "tonight's universe supplies the distance when the card has no date");
-  note(rep({ d: "2026-09-08", sessions: 30 }, 5).sessions === 30, "the card's own distance wins over the universe's");
-  note(rep({ d: "2026-09-08", sessions: null, gate: true }, null).state === "inside", "a name inside the earnings gate is inside");
-  note(rep(null, null, "Not built.").state === "unknown" && rep(null, null, "Not built.").why === "Not built.", "no date and no distance is unknown with the reason the card gave");
-  note(rep({ d: "2026-09-08", sessions: null }, null).state === "unknown", "a date with no distance is unknown, not outside");
-  note(rep({ d: "2026-09-08", sessions: 4, em: 0.0618 }, null).em === 0.0618 && rep({ d: "2026-09-08", sessions: 4, em: 0 }, null).em === null, "a report move of zero is not a move");
+  const rep = (report, over, why) => plain(M.model({ ticker: "T", spot: 100, report, reportWhy: why }, { sig: 0.01, hz: HORIZON_SESSIONS, j: 0, ed: null, rd: null, rdMax: null, edMax: null, ...over })).report;
+  const card = (extra) => ({ d: "2026-09-08", sessions: 99, ...extra });
+  note(rep(card(), { ed: 21 }).state === "inside" && rep(card(), { ed: 22 }).state === "outside", "a report 21 sessions away is inside the window and 22 is outside it");
+  note(rep(card(), { ed: 1 }).state === "inside" && rep(card(), { ed: 1 }).sessions === 1, "tomorrow is inside, one session away");
+  note(rep(null, { ed: 21 }).state === "inside" && rep(null, { ed: 22 }).state === "outside", "tonight's universe supplies the state when the card has no date");
+  note(rep(card({ sessions: 30 }), { ed: 5 }).sessions === 5, "the universe's count to the price reaction wins over the card's weekday count");
+  note(rep(card(), { ed: 0 }).state === "unclear" && rep(card(), { ed: 0, j: 1 }).state === "unclear" && rep(card(), { ed: 0, j: 2 }).state === "unclear" && rep(card(), { ed: 0, j: 3 }).state === "outside", "a report of unstated time dated tonight may have reacted on the session itself or be due after the close: it is unclear, not a reaction, until both candidates are behind");
+  note(rep(null, { rd: 0 }).state === "reacted" && rep(null, { rd: 0 }).age === 0, "a name whose report reacted on the nightly's session has reacted today");
+  note(rep(null, { rd: 1 }).state === "reacted" && rep(null, { rd: 1 }).age === 1, "and one that reacted the session before, one session ago");
+  note(rep(null, { rd: 2 }).state === "unknown", "but not one that reacted two sessions before, which is behind the window");
+  note(rep(card(), { rd: 1, ed: 30 }).state === "reacted", "a report behind the name outranks the next one far off");
+  note(rep(null, { rd: null, rdMax: 1 }).state === "unclear" && rep(null, { rd: null, rdMax: 2 }).state === "unclear" && rep(null, { rd: null, rdMax: 3 }).state === "unknown", "a report of unstated time that is 0 or 1, or 1 or 2, sessions old is unclear; one at least two old has not reacted");
+  note(rep(card(), { ed: 3, edMax: 4, j: 2 }).state === "inside" && rep(card(), { ed: 3, edMax: 4, j: 3 }).state === "unclear" && rep(card(), { ed: 3, edMax: 4, j: 4 }).state === "unclear" && rep(card(), { ed: 3, edMax: 4, j: 6 }).state === "outside", "a forward report of unstated time is unclear from its earlier candidate session until both are behind");
+  note(rep(card(), { ed: 3, edMax: 4, j: 1 }).sessions === 2 && rep(card(), { ed: 3, edMax: 4, j: 3 }).state === "unclear", "and the sessions away are counted to the earlier candidate");
+  note(rep(card(), { ed: 22 }, "x").state === "outside" && rep(card(), { ed: 22, j: 1 }).state === "inside" && rep(card(), { ed: 22, j: 1 }).sessions === 21, "a day later the same report is 21 sessions away and inside the window");
+  note(rep(card(), { ed: 1, j: 1 }).state === "reacted" && rep(card(), { ed: 1, j: 2 }).state === "reacted" && rep(card(), { ed: 1, j: 3 }).state === "outside", "a report that lands in the elapsed sessions has reacted, and a day later it is the day after");
+  note(rep(card({ sessions: null, gate: true }), {}).state === "inside", "a name inside the earnings gate is inside");
+  note(rep(card({ sessions: null, gate: true }), { hz: null, j: null }).state === "inside", "whatever the payload says about the window");
+  note(rep(null, {}, "Not built.").state === "unknown" && rep(null, {}, "Not built.").why === "Not built.", "no date and no distance is unknown with the reason the card gave");
+  note(rep(card(), { ed: null }).state === "unknown", "a date on the card with no date in the universe is unknown, not outside");
+  note(/does not state the earnings window/.test(rep(card(), { ed: 5, hz: null }).why), "a payload with no earnings window classifies nothing and says so");
+  note(/more than two sessions old/.test(rep(card(), { ed: 5, j: null }).why), "a nightly more than two sessions old classifies nothing and says so");
+  note(rep(card(), { ed: 5, hz: 0 }).state === "unknown" && rep(card(), { ed: 5, hz: "21" }).state === "unknown", "a window that is not a whole count of sessions is no window");
+  note(rep(card({ em: 0.0618 }), { ed: 4 }).em === 0.0618 && rep(card({ em: 0 }), { ed: 4 }).em === null, "a report move of zero is not a move");
+  note(rep(card(), { ed: 21, hz: 30 }).state === "inside" && rep(card(), { ed: 30, hz: 30 }).state === "inside" && rep(card(), { ed: 31, hz: 30 }).state === "outside", "the window is the payload's, not a constant of the module");
 
-  const col = (rowIn) => plain(M.rowOf(rowIn.u, rowIn.t));
-  const u = universeFor([{ t: "AAA", sig: 0.0123, f2: 11, f3: 5, ed: 7 }, { t: "BBB", sig: null, f2: null, f3: null, ed: null }, { t: "CCC", sig: 0.031, f2: 9, f3: 0, ed: 40 }]);
+  const col = (rowIn) => plain(M.rowOf(rowIn.u, rowIn.t, Date.UTC(2026, 7, 24, 15, 0, 0)));
+  const u = universeFor([{ t: "AAA", sig: 0.0123, f2: 11, f3: 5, ed: 7 }, { t: "BBB", sig: null, f2: null, f3: null, ed: null }, { t: "CCC", sig: 0.031, f2: 9, f3: 0, ed: 40 }, { t: "DDD", sig: 0.02, f2: 3, f3: 1, ed: 1 }]);
   const a = col({ u, t: "AAA" });
-  note(Math.abs(a.sig - 0.0123) < 1e-12 && a.f2 === 11 && a.f3 === 5 && a.ed === 7 && a.why === null, "a row is read from the projection with each column's own scale");
+  note(Math.abs(a.sig - 0.0123) < 1e-12 && a.f2 === 11 && a.f3 === 5 && a.ed === 7 && a.why === null && a.hz === HORIZON_SESSIONS && a.j === 0, "a row is read from the projection with each column's own scale, the payload's window and the sessions elapsed since the nightly");
+  const ua = { ...u, edUnstated: { AAA: 8 }, edUnstatedThrough: 2 };
+  note(col({ u: ua, t: "AAA" }).edMax === 8 && col({ u: ua, t: "DDD" }).edMax === null && col({ u: ua, t: "CCC" }).edMax === 41, "a forward report of unstated time is read from the universe's carried map, a name inside the horizon the map is complete through and outside it has a stated time, and one beyond it is read as unknown, one session on");
+  const old = { ...u };
+  delete old.edUnstatedThrough;
+  note(col({ u: old, t: "DDD" }).edMax === 2 && col({ u: old, t: "AAA" }).edMax === 8, "a payload that carries no horizon for its map reads every forward report as unknown-time, never as stated");
   const c = col({ u, t: "CCC" });
   note(c.f3 === 0 && c.f2 === 9, "a published zero is a zero, not a gap");
   note(col({ u, t: "BBB" }).sig === null && /needs 200 clean sessions/.test(col({ u, t: "BBB" }).why), "a null typical day is withheld with the history rule");
@@ -288,13 +314,22 @@ const MUTANTS = [
   ["hits: returns.length === SESSIONS ? hits : Math.round((hits * SESSIONS) / returns.length)", "hits: hits", "short history not scaled to 252"],
   ["|| gap > MAX_GAP_DAYS) continue;", ") continue;", "gaps of a week kept as daily returns"],
   ["broken.has(a.d) || broken.has(b.d) || ", "", "returns across a data break kept"],
-  ["const EVENT_SESSIONS = 21;", "const EVENT_SESSIONS = 30;", "a wider report window"],
-  ["if (gate || (sessions !== null && sessions <= EVENT_SESSIONS)) return", "if (gate || (sessions !== null && sessions < EVENT_SESSIONS)) return", "the 21st session outside the window"],
+  ["if (gate || st === \"ahead\") return { state: \"inside\", ...out };", "if (st === \"ahead\") return { state: \"inside\", ...out };", "the earnings gate ignored"],
+  ["if (st === \"reaction\" || st === \"after\") return { state: \"reacted\", age: st === \"reaction\" ? 0 : 1, ...out };", "", "a report that already reacted read as no report"],
+  ["const sessions = st !== null && Number.isInteger(row.ed) ? row.ed - row.j : null;", "const sessions = st !== null && Number.isInteger(row.ed) ? row.ed : null;", "the elapsed sessions not taken off the distance"],
+  ["Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j) : null;", "Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, 0) : null;", "the elapsed sessions ignored in the state"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: null, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "the report-session column ignored"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: null, edMax: row.edMax }, hz, row.j)", "the unstated-time age ignored"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: null }, hz, row.j)", "the forward unstated-time age ignored"],
+  ["if (st === \"unstated\") return { state: \"unclear\", ...out };", "if (st === \"unstated\") return { state: \"reacted\", age: 0, ...out };", "an unstated report read as a reaction"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: null,", "the carried forward unstated-time ages not read"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: num(edUn[ticker]),", "the map read straight, a name outside it given no later candidate"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: F.later(edUn, undefined, ticker, cell(\"ed\") ?? null),", "the horizon the map is complete through ignored"],
+  ["edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell(\"ed\") ?? null),", "edMax: F.later(edUn, 99, ticker, cell(\"ed\") ?? null),", "every name outside the map read as stated"],
   ["if (pub !== null && Number.isInteger(pub) && pub >= 0 && pub <= SESSIONS)", "if (false)", "the nightly counts ignored"],
-  ["const sessions = r && num(r.sessions) !== null ? Number(r.sessions) : ed;", "const sessions = ed !== null ? ed : r ? num(r.sessions) : null;", "the universe's distance over the card's"],
   ["if (hits < 5) return core;", "if (hits < 1) return core;", "an interval from one hit"],
   ["const PUBLISHED = { 2: \"f2\", 3: \"f3\" };", "const PUBLISHED = { 2: \"f3\", 3: \"f2\" };", "the two nightly counts crossed"],
-  ["const gone = (why) => ({ sig: null, f2: null, f3: null, ed: null, why });", "const gone = (why) => ({ sig: 0.01, f2: 0, f3: 0, ed: null, why });", "an unreadable universe read as a flat typical day"],
+  ["const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "const gone = (why, rwhy) => ({ sig: 0.01, f2: 0, f3: 0, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "an unreadable universe read as a flat typical day"],
 ];
 for (const [from, to, why] of MUTANTS) {
   ok(SRC.includes(from), `the planted build "${why}" targets a line that exists`);
@@ -483,7 +518,7 @@ try {
     ok(!trace.some((p) => /flows-ticker-movelab/.test(p)) && world.hits === 0, `${w}px: nothing of the move lab loads, and no universe is read, while the module is below the fold`);
     await reveal(page);
     ok(trace.some((p) => /flows-ticker-movelab\.js/.test(p)) && world.hits === 1, `${w}px: the file and one universe read arrive once the module is near`);
-    ok(trace.some((p) => p === "/api/flows/universe?cols=ed,f2,f3,sig,t"), `${w}px: and the read asks for the five columns, sorted`);
+    ok(trace.some((p) => p === "/api/flows/universe?cols=ed,f2,f3,rd,sig,t"), `${w}px: and the read asks for the six columns, sorted`);
     const got = await page.evaluate(readPage);
     if (process.env.ML_SHOTS) await page.locator("#m-movelab").screenshot({ path: path.join(process.env.ML_SHOTS, `movelab-${w}.png`) });
     eq(expectFull(world, got, w), [], `${w}px: every printed figure matches the independent computation`);
@@ -533,6 +568,31 @@ try {
   await scenario("typical day null for the name", { sig: null, f2: null, f3: null }, (got) => {
     eq(got.rows.length, 0, "no ladder for a name with no typical day");
     ok(/No typical daily move is published for AAPL: it needs 200 clean sessions of history/.test(got.ladderWhy), "the history rule is the reason");
+  });
+
+  const aapl = (extra) => [{ t: "MSFT", sig: 0.01, f2: 3, f3: 1, ed: 30 }, { t: "AAPL", sig: 0.0123, f2: 11, f3: 5, ed: null, ...extra }];
+  await scenario("the report reacted on the nightly's own session", { entries: aapl({ rd: 0 }) }, (got) => {
+    eq(got.reportState, "reacted", "a name whose report moved the nightly's session is marked as having reacted");
+    ok(/Reacting today/.test(got.all) && /The move over the sessions since the report carries the report/.test(got.all), "the tag and the caution are printed");
+    ok(!/Event-contaminated/.test(got.all), "and it is not called event-contaminated, which is for a report still ahead");
+    eq(got.rows.length, 4, "the ladder is untouched");
+  });
+  await scenario("the report reacted the session before", { entries: aapl({ rd: 1 }) }, (got) => {
+    eq(got.reportState, "reacted", "one session on it is still marked");
+    ok(/Reacted one session ago/.test(got.all), "with its own tag");
+  });
+  await scenario("the report reacted two sessions before", { entries: aapl({ rd: 2 }) }, (got) => {
+    eq(got.reportState, "unknown", "two sessions on it is behind the window, and a next report the universe has no distance for is not classified");
+    ok(/distance in sessions is not/.test(got.all), "the card's date is printed and the missing distance is said");
+  });
+  await scenario("the payload states no earnings window", { universe: (() => { const u = universeFor(aapl({ ed: 10 })); delete u.hz; return u; })() }, (got) => {
+    eq(got.reportState, "unknown", "a universe with no window classifies nothing");
+    ok(/does not state the earnings window/.test(got.all), "and says so");
+    ok(/Sep 8/.test(got.all), "while the card's own date is still printed");
+  });
+  await scenario("the nightly is more than two sessions old", { universe: (() => { const u = universeFor(aapl({ ed: 10 })); u.sessionDate = "2026-08-19"; u.ahead = aheadOf("2026-08-19"); return u; })() }, (got) => {
+    eq(got.reportState, "unknown", "a nightly three sessions behind classifies nothing");
+    ok(/more than two sessions old/.test(got.all), "and says so");
   });
 
   await scenario("name not in the universe", { entries: [{ t: "MSFT", sig: 0.01, f2: 3, f3: 1, ed: 30 }] }, (got) => {
@@ -635,7 +695,7 @@ try {
     eq(got.rows.length, 0, "a failed universe read draws no ladder");
     ok(/The nightly universe could not be read, so the typical daily move is not available\./.test(got.ladderWhy), "and says what failed");
     ok(got.retry, "and offers Retry");
-    ok(got.impliedBig !== null && got.reportState === "inside", "the other two blocks still stand");
+    ok(got.impliedBig !== null && got.reportState === "unknown", "the options market's block still stands and the report is not classified without the universe");
     eq(world.hits, 1, "one read so far");
     await page.locator("#m-movelab button.ft-scene-btn").focus();
     await page.keyboard.press("Enter");

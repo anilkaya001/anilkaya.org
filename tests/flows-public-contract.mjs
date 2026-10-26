@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
 import { FLOWS_NAV } from "../shared/flows-pages.js";
 import { GLOSSARY, GLOSSARY_PAGES } from "../shared/flows-glossary.js";
+import { HORIZON_SESSIONS } from "../shared/flows-horizon.js";
 import { workerSource } from "./lib/source-scan.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,7 +23,10 @@ const driftOf = (entries, read) => {
   const found = [];
   for (const g of entries) {
     const text = read(g.file);
-    for (const line of g.lines) if (!text.includes(line)) found.push(`${g.key}: ${line.slice(0, 60)}`);
+    for (const line of g.lines) {
+      const pieces = line.split(String(HORIZON_SESSIONS));
+      if (!pieces.every((piece) => text.includes(piece))) found.push(`${g.key}: ${line.slice(0, 60)}`);
+    }
   }
   return found;
 };
@@ -142,6 +146,13 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   const moved = GLOSSARY.map((g, i) => (i === 0 ? { ...g, file: "assets/js/flows-board.js" } : g));
   ok(driftOf(moved, readRepo).length > 0, "so is an entry whose source moved to a file that does not hold the string");
   for (const g of GLOSSARY) ok(fs.existsSync(path.join(ROOT, g.file)), `${g.key} cites ${g.file} and it exists`);
+  const horizonLine = GLOSSARY.flatMap((g) => g.lines).find((l) => l.includes(String(HORIZON_SESSIONS)));
+  ok(horizonLine !== undefined, "one glossary line states the earnings window in sessions");
+  const entry = [{ key: "k", file: "f", lines: [horizonLine] }];
+  const built = "x = \"" + horizonLine.split(String(HORIZON_SESSIONS)).join("\" + hz + \"") + "\";";
+  eq(driftOf(entry, () => built).length, 0, "a line with the window in it is held by the text around the number, which the page builds around the payload's own");
+  ok(driftOf(entry, () => built.replace("sessions are left out", "sessions are kept")).length === 1, "and a changed word around the number is caught");
+  ok(driftOf(entry, () => "x = " + String(HORIZON_SESSIONS) + ";").length === 1, "as is a source that carries the number and not the sentence");
 }
 
 {
