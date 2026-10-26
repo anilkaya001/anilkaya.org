@@ -2900,7 +2900,7 @@
 
   function buildNetwork(card) {
     if (!UI.defer || !$("ftNetwork")) return;
-    const host = NETWORK.host || (NETWORK.host = h("div", { class: "ft-fnw is-slot" }, UI.silent(ST("quiet", "The flow network loads when this module comes into view."), "Flow network", 140)));
+    const host = NETWORK.host || (NETWORK.host = h("div", { class: "is-slot" }, UI.silent(ST("quiet", "The flow network loads when this module comes into view."), "Flow network", 140)));
     const raw = { card, cardX: STATE.cardX, spot: spotOf(card) };
     mod({ id: "m-network", title: "Flow network", span: [12, 12], st: OK, body: [host], index: 4 });
     UI.defer("network", { when: "visible", el: host, label: "The flow network" }).then(() => { const f = window.FlowsUI.flowNet; if (f) f.ready.then(() => f.mount(host, raw)); });

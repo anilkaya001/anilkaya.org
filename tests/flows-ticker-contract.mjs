@@ -177,7 +177,7 @@ async function pickView(page, mod, label) {
   return true;
 }
 
-const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow", "m-tape", "m-events", "m-pos", "m-context", "m-movelab"];
+const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow", "m-tape", "m-events", "m-pos", "m-context", "m-movelab", "m-network"];
 
 {
   for (const k of SENTINEL_KEYS) ok(!TICKER_PANEL_KEYS.includes(k), `the sentinel "${k}" is not a card.panels key`);
@@ -186,7 +186,7 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const map = new Map([...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*): "([a-zA-Z-]+)"/g)].map((m) => [m[1], m[2]]));
   const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]).filter((id) => id !== "m-ideas"));
   eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
-     "the page builds exactly the eleven dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
+     "the page builds exactly the twelve dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
   for (const p of TICKER_PANELS) {
     ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
@@ -672,7 +672,7 @@ try {
     ok(pal.filter((r) => ["GLD", "NVDA", "COST"].includes(r[0])).every((r) => r[2]), "beside its depth glyph");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
-    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 11 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
+    ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 12 && !document.getElementById("ftGrid").hidden), "and closing it leaves the dossier exactly where it was");
     eq(errors.length, 0, `the switcher throws nothing (${errors.join("; ")})`);
     await page.close();
   }
@@ -1573,7 +1573,7 @@ try {
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, full, { hash: bad });
-      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 11), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
+      ok(await page.evaluate(() => document.querySelectorAll("#ftGrid > section:not(#m-ideas)").length === 12), `a hash of ${JSON.stringify(bad)} paints the page anyway`);
       eq(errors.length, 0, `and throws nothing (${errors.join("; ")})`);
       await page.close();
     }
@@ -1963,7 +1963,7 @@ try {
         unavailable: [...document.querySelectorAll("#ftGrid .ui-silent[data-state=unavailable], #ftGrid .ui-tile [data-state=unavailable], #ftGrid .ft-crow [data-state=unavailable]")].filter(vis).map((n) => (n.closest("[id]") || {}).id + ":" + ((n.closest(".ui-metric") || n).innerText || "").replace(/\s+/g, " ").trim()),
       };
     });
-    eq(got.mods.join(" "), "m-gamma m-hedge m-vol m-flow m-tape m-context", "an index dossier leaves out every module an index card never carries: the two worlds the engine does not price for an index, the score, earnings, insiders and short interest");
+    eq(got.mods.join(" "), "m-gamma m-hedge m-vol m-flow m-tape m-context m-network", "an index dossier leaves out every module an index card never carries: the two worlds the engine does not price for an index, the score, earnings, insiders and short interest, and keeps the Flow network, which reads the name's own flagged windows");
     eq(got.read, "card", "a verdict still being worded by the Neuron shows the card's own reading at once");
     ok(/^The greeks imply an? [a-z -]+ state/.test(got.line) && !/No read/.test(got.line), `and it is the implied-state reading the card carries, not a bare wait (${got.line})`);
     eq(got.vStates.filter((x) => x === "pending").length, 0, "with no pending pill on the verdict");
