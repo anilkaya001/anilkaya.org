@@ -64,8 +64,10 @@ const STATIC_DIALOG = /<dialog[\s\S]*?<\/dialog>/g;
   ok(FLOWS_PAGE_SLUGS.includes("ledger"), "the route table lists the page");
   const rows = flowsPageRows({ currentFlowsUser: async () => ({ username: "u" }), readFlowsSummary: async () => null, isOwner: () => false });
   const row = rows.find((r) => r.id === "flows.pages.ledger");
-  const res = await row.handler({ request: new Request("https://x.test/flows/ledger/"), env: {}, url: new URL("https://x.test/flows/ledger/") });
-  eq(res.status, 200, "a member is served the page, with no switch in front of it");
+  const closed = await row.handler({ request: new Request("https://x.test/flows/ledger/"), env: {}, url: new URL("https://x.test/flows/ledger/") }).then(() => null, (e) => e.status);
+  eq(closed, 404, "a member does not find the page while FLOWS_LEDGER is unset");
+  const res = await row.handler({ request: new Request("https://x.test/flows/ledger/"), env: { FLOWS_LEDGER: "on" }, url: new URL("https://x.test/flows/ledger/") });
+  eq(res.status, 200, "and is served it once the switch is on");
   ok((await res.text()).includes('data-flows-page="ledger"'), "and it is the ledger");
   const bare = rows.find((r) => r.id === "flows.pages.ledger.bare");
   eq(bare.path, "/flows/ledger", "the bare path has a redirect row");
@@ -132,7 +134,7 @@ const audit = (page) => page.evaluate(() => {
   for (const scroller of [document.querySelector(".flows-main"), document.querySelector(".flows-shell, .flows-body")]) {
     if (scroller && scroller.scrollHeight > scroller.clientHeight + 1 && getComputedStyle(scroller).overflowY !== "visible") out.push("a container scrolls: " + scroller.className + " " + scroller.scrollHeight + " over " + scroller.clientHeight);
   }
-  for (const host of document.querySelectorAll(".sf-mat, .sf-body")) {
+  for (const host of document.querySelectorAll(".sf-mat, .sf-body, .sf-fl")) {
     if (vis(host) && host.scrollHeight > host.clientHeight + 1) out.push("rows clipped in " + host.id + ": " + host.scrollHeight + " over " + host.clientHeight);
   }
   for (const panel of document.querySelectorAll(".sf-panel")) {
@@ -292,6 +294,14 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   eq(await audit(m.page), [], "the flow view is one clean screen");
   eq((await m.page.evaluate(() => location.hash)), "#period=intraday&w=flow", "and the address remembers the flow view");
   await m.ctx.close();
+  for (const [w, h] of SIZES) {
+    const f = await mount(browser, w, h, { hash: "#w=flow" });
+    if (w < 900) { await f.page.click('#sfTabs [data-v="side"]'); await f.page.waitForTimeout(300); }
+    eq(await audit(f.page), [], `${w}x${h}: the flow view is one clean screen, every figure in full`);
+    const labels = await f.page.$$eval(".fl-lab", (a) => a.map((e) => [e.textContent, e.scrollWidth <= e.clientWidth + 1]));
+    ok(labels.length === 6 && labels.every(([t, whole]) => whole && /\$\d/.test(t)), `${w}x${h}: all six lane labels show their figure`);
+    await f.ctx.close();
+  }
   const re = await mount(browser, 1440, 820, { hash: "#scope=sector%3AEnergy&period=intraday&w=flow" });
   eq(await re.page.textContent("#sfSideT"), "Names", "a reload opens on the sector named in the address");
   ok(await re.page.$(".sf-fl") !== null, "in the flow view the address names");
@@ -485,13 +495,14 @@ const DEEP_ROWS = respondWith(DEEP)(new URL("https://x.test/api/flows/ledger?sco
     ["an absent figure drawn as a zero", "js", [['+ DASH + "</span></td>"', '+ "0</span></td>"']], async (page) => (await page.$$eval(".sf-lt td.a", (a) => a.length > 0 && a.every((x) => x.textContent.trim() === "—")))],
     ["net before balancing drawn without its sign flipped", "js", [["const body = L.rows.slice(0, 10).concat([{ ...L.net, always: true, kind: \"net\" }", "const body = L.rows.slice(0, 10).concat([{ ...L.rows[10], label: L.net.label, hover: L.net.hover, always: true, kind: \"net\" }"]], async (page) => { const rows = await page.$$eval(".sf-lt tbody tr", (a) => a.slice(-2).map((r) => [...r.querySelectorAll("td")].map((c) => c.textContent.trim()))); return rows[0].every((t, i) => t === rows[1][i] || (t === "0" && rows[1][i] === "0") || t === rows[1][i].replace("−", "").replace(/^(?!−)/, "−")) && rows[0].some((t, i) => t !== rows[1][i]); }],
     ["the period button loads even when it is unavailable", "js", [["if (period.getAttribute(\"aria-disabled\") === \"true\") { setNote(period.title || \"\", false); return; }", "if (false) { return; }"]], async (page, asked) => !asked.some((u) => u.includes("period=session"))],
-    ["arrow widths not proportional", "js", [["return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (ARROW_MAX * c) / max) : 0));", "return cents.map((c) => (max > 0 && c > 0 ? ARROW_MAX : 0));"]], async (page) => { const w = await page.$$eval(".fl-ar", (a) => a.map((x) => Number(x.dataset.w))); return new Set(w.filter((x) => x > 0)).size > 1; }, "#w=flow"],
+    ["arrow widths not proportional", "js", [["return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (cap * c) / max) : 0));", "return cents.map((c) => (max > 0 && c > 0 ? cap : 0));"]], async (page) => { const w = await page.$$eval(".fl-ar", (a) => a.map((x) => Number(x.dataset.w))); return new Set(w.filter((x) => x > 0)).size > 1; }, "#w=flow"],
     ["the summary line is a button even when empty or on a wide screen", "js", [["if (small() && el.textContent !== \"\") {", "if (true) {"]], async (page) => (await page.$eval("#sfCheckLine", (e) => e.getAttribute("role"))) === null],
     ["the sub-heading of the side-unknown rows left out", "js", [["if (group) html += '<tr class=\"sub\"", "if (false) html += '<tr class=\"sub\""]], async (page) => (await page.$$("tr.sub")).length === 1],
     ["rows given padding they cannot fit, so the last ones are cut", "css", [[".sf-t th, .sf-t td { padding: 0 4px;", ".sf-t th, .sf-t td { padding: 12px 4px;"]], async (page) => (await audit(page)).length === 0],
     ["the row fitter switched off, so a long table is cut silently", "js", [["if (!table || !table.tBodies[0] || host.clientHeight === 0) return;", "return;"]], async (page) => (await audit(page)).length === 0, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
     ["the total keeps its plain name when rows are set aside", "js", [["if (foot) foot.cells[0].textContent = WORDS.totalAll;", "if (foot) foot.cells[0].textContent = WORDS.total;"]], async (page) => { await page.click('#sfTabs [data-v="side"]'); await page.waitForTimeout(300); return (await page.$eval(".sf-st tfoot th", (e) => e.textContent)) === COPY_TOTAL_ALL; }, "", { w: 390, h: 664 }],
     ["the dialog holds only the rows that were shown", "js", [["$(\"sfAllBody\").innerHTML = S.sideHtml;", "$(\"sfAllBody\").innerHTML = $(\"sfBody\").innerHTML;"]], async (page) => { await page.click("#sfAll"); return (await page.$$eval("#sfAllBody .sf-st tbody tr", (a) => a.filter((r) => getComputedStyle(r).display !== "none").length)) === DEEP_ROWS; }, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
+    ["the flow view keeps its node boxes on a short phone, so the lanes are squeezed", "css", [[".fl-node { display: none; }", ".fl-node { display: flex; }"]], async (page) => { await page.click('#sfTabs [data-v="side"]'); await page.waitForTimeout(300); await page.click('#sfView [data-w="flow"]'); await page.waitForTimeout(300); return (await audit(page)).length === 0; }, "", { w: 390, h: 664 }],
     ["an old read overwriting a newer one", "js", [["if (seq !== S.seq) return null;\n        freshFrom(res, body);", "freshFrom(res, body);"]], null],
     ["the sheet lets the page scroll", "css", [[".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  height: 100vh;\n  height: 100dvh;\n  padding-bottom: var(--sf-pad-b);\n  display: flex;\n  flex-direction: column;\n  overflow: hidden;\n}", ".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  padding-bottom: var(--sf-pad-b);\n}"], [".sf { flex: 1; min-height: 0; display: flex;", ".sf { flex: 1; min-height: 130vh; display: flex;"]], async (page) => (await audit(page)).length === 0],
     ["the label column squeezed", "css", [["@media (min-width: 1280px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 30%; }", "@media (min-width: 1280px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 6%; }"]], async (page) => (await audit(page)).length === 0],

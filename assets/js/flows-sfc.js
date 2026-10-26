@@ -4,6 +4,7 @@
   const MINUS = "−", DASH = "—";
   const HALF = 100;
   const ARROW_MAX = 20;
+  const ARROW_COMPACT = 9;
   const ARROW_MIN = 1.5;
   const GLYPH = { pass: "✓", fail: "✕", absent: "○" };
   const STATE_WORD = { pass: "passes", fail: "fails", absent: "not checked" };
@@ -25,7 +26,7 @@
     outBand: "Outside held windows",
     buyers: "Buyers",
     sellers: "Sellers",
-    noside: "side unknown",
+    noside: "held",
     outside: "outside",
     held: "held",
     leanTitle: "Share of premium on the ask side",
@@ -53,8 +54,8 @@
     return { x: Math.min(0, m), width: Math.abs(m), mid: m };
   }
 
-  function arrowWidths(cents, max) {
-    return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (ARROW_MAX * c) / max) : 0));
+  function arrowWidths(cents, max, cap = ARROW_MAX) {
+    return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (cap * c) / max) : 0));
   }
 
   function groupColumns(groups, id) {
@@ -110,6 +111,7 @@
   if (!UI || !root) return;
   const $ = (id) => document.getElementById(id);
   const small = () => matchMedia("(max-width:899px)").matches;
+  const short = () => matchMedia("(max-width:899px) and (max-height:720px)").matches;
   const clockOf = (ms) => {
     const d = new Date(ms + 3 * 3600 * 1000);
     return pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + " TRT";
@@ -276,10 +278,12 @@
     return '<div class="fl-lane ' + dir + '" data-id="' + a.id + '" title="' + esc(a.exact) + '"><span class="fl-lab">' + esc(a.label) + " <b>" + esc(a.text) + '</b></span><span class="fl-ar" data-w="' + width.toFixed(2) + '"></span></div>';
   }
 
+  const ends = (left, right) => '<span class="fl-ends">' + esc(left) + " left, " + esc(right) + " right</span>";
+
   function flowHtml(F) {
     const cents = [...F.arrows.map((a) => a.cents), F.noside.cents, F.outside.cents === null ? 0 : Math.abs(F.outside.cents)];
     const max = Math.max(0, ...cents);
-    const w = arrowWidths(cents, max);
+    const w = arrowWidths(cents, max, short() ? ARROW_COMPACT : ARROW_MAX);
     const held = F.arrows.map((a, i) => lane(a, w[i])).join("");
     const side = '<div class="fl-lane r" data-id="noside" title="' + esc(F.noside.exact) + '"><span class="fl-lab">' + esc(F.noside.line) + '</span><span class="fl-ar" data-w="' + w[4].toFixed(2) + '"></span></div>';
     const out = F.outside.s === "absent"
@@ -287,9 +291,9 @@
       : '<div class="fl-lane ' + (F.outside.cents >= 0 ? "r" : "l") + ' dashed" data-id="outside" title="' + esc(F.outside.exact) + '"><span class="fl-lab">' + esc(F.outside.line) + '</span><span class="fl-ar" data-w="' + w[5].toFixed(2) + '"></span></div>';
     const node = (name, sub, cls) => '<div class="fl-node ' + cls + '"><b>' + esc(name) + "</b><i>" + esc(sub) + "</i></div>";
     return '<div class="sf-fl">' +
-      '<section class="fl-band" data-b="held"><h3>' + WORDS.heldBand + '</h3><div class="fl-grid">' + node(F.takers, WORDS.held, "l") + '<div class="fl-lanes">' + held + "</div>" + node(F.providers, WORDS.held, "r") + '</div><p class="fl-net">' + esc(F.net.line) + "</p></section>" +
-      '<section class="fl-band" data-b="side"><h3>' + WORDS.sideBand + '</h3><div class="fl-grid">' + node(WORDS.buyers, WORDS.noside, "l") + '<div class="fl-lanes">' + side + "</div>" + node(WORDS.sellers, WORDS.noside, "r") + "</div></section>" +
-      '<section class="fl-band" data-b="out"><h3>' + WORDS.outBand + '</h3><div class="fl-grid">' + node(F.takers, WORDS.outside, "l") + '<div class="fl-lanes">' + out + "</div>" + node(F.providers, WORDS.outside, "r") + "</div></section></div>";
+      '<section class="fl-band" data-b="held"><h3>' + WORDS.heldBand + ends(F.takers, F.providers) + '</h3><div class="fl-grid">' + node(F.takers, WORDS.held, "l") + '<div class="fl-lanes">' + held + "</div>" + node(F.providers, WORDS.held, "r") + '</div><p class="fl-net">' + esc(F.net.line) + "</p></section>" +
+      '<section class="fl-band" data-b="side"><h3>' + WORDS.sideBand + ends(WORDS.buyers, WORDS.sellers) + '</h3><div class="fl-grid">' + node(WORDS.buyers, WORDS.noside, "l") + '<div class="fl-lanes">' + side + "</div>" + node(WORDS.sellers, WORDS.noside, "r") + "</div></section>" +
+      '<section class="fl-band" data-b="out"><h3>' + WORDS.outBand + ends(F.takers, F.providers) + '</h3><div class="fl-grid">' + node(F.takers, WORDS.outside, "l") + '<div class="fl-lanes">' + out + "</div>" + node(F.providers, WORDS.outside, "r") + "</div></section></div>";
   }
 
   function paintSide(d) {

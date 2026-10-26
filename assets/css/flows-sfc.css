@@ -143,26 +143,35 @@
 .sf-fl { display: flex; flex-direction: column; gap: 10px; height: 100%; overflow: hidden; padding: 4px 4px 0; }
 .fl-band { display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 .fl-band[data-b="held"] { flex: 4 1 0; }
-.fl-band h3 { margin: 0; font: var(--t-caption2); letter-spacing: 0.03em; text-transform: uppercase; color: var(--label-3); }
+.fl-band h3 { margin: 0; font: var(--t-caption2); letter-spacing: 0.03em; text-transform: uppercase; color: var(--label-3); display: flex; justify-content: space-between; gap: 8px; }
+.fl-ends { display: none; text-transform: none; letter-spacing: 0; }
 .fl-grid { display: grid; grid-template-columns: 76px minmax(0, 1fr) 76px; gap: 8px; align-items: stretch; flex: 1; min-height: 0; }
 .fl-node { display: flex; flex-direction: column; justify-content: center; align-items: center; background: var(--fill-3); border-radius: var(--r-sm); padding: 4px; text-align: center; min-height: 40px; }
 .fl-node b { font-weight: 600; font-size: 13px; }
 .fl-node i { font-style: normal; font: var(--t-caption2); color: var(--label-3); }
 .fl-lanes { display: flex; flex-direction: column; justify-content: space-around; gap: 6px; min-width: 0; }
-.fl-lane { display: flex; flex-direction: column; gap: 2px; min-width: 0; --c: var(--s-blue); }
+.fl-lane { display: flex; flex-direction: column; gap: 4px; padding-bottom: 5px; min-width: 0; --c: var(--s-blue); }
 .fl-lane.l { --c: var(--s-orange); }
 .fl-lane[data-id="noside"] { --c: var(--label-3); }
 .fl-lane[data-id="outside"] { --c: var(--label-2); }
 .fl-lab { font: var(--t-caption); color: var(--label-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-lab b { color: var(--label-1); font-weight: 600; margin-left: 4px; }
-.fl-ar { display: block; position: relative; height: var(--w, 0px); min-height: 1px; background: var(--c); margin-right: calc(var(--w, 0px) * 0.9 + 6px); border-radius: 2px; }
-.fl-ar::after { content: ""; position: absolute; top: 50%; left: 100%; transform: translateY(-50%); border-style: solid; border-color: transparent; border-width: calc(var(--w, 0px) * 0.9 + 6px) 0 calc(var(--w, 0px) * 0.9 + 6px) calc(var(--w, 0px) * 0.9 + 6px); border-left-color: var(--c); }
-.fl-lane.l .fl-ar { margin-right: 0; margin-left: calc(var(--w, 0px) * 0.9 + 6px); }
-.fl-lane.l .fl-ar::after { left: auto; right: 100%; border-width: calc(var(--w, 0px) * 0.9 + 6px) calc(var(--w, 0px) * 0.9 + 6px) calc(var(--w, 0px) * 0.9 + 6px) 0; border-left-color: transparent; border-right-color: var(--c); }
+.fl-ar { --hl: calc(var(--w, 0px) * 0.7 + 6px); --hh: calc(var(--w, 0px) * 0.5 + 5px); display: block; position: relative; height: var(--w, 0px); min-height: 1px; background: var(--c); margin-right: var(--hl); border-radius: 2px; }
+.fl-ar::after { content: ""; position: absolute; top: 50%; left: 100%; transform: translateY(-50%); border-style: solid; border-color: transparent; border-width: var(--hh) 0 var(--hh) var(--hl); border-left-color: var(--c); }
+.fl-lane.l .fl-ar { margin-right: 0; margin-left: var(--hl); }
+.fl-lane.l .fl-ar::after { left: auto; right: 100%; border-width: var(--hh) var(--hl) var(--hh) 0; border-left-color: transparent; border-right-color: var(--c); }
 .fl-lane.dashed .fl-ar { background: repeating-linear-gradient(90deg, var(--c) 0 8px, transparent 8px 12px); }
 .fl-lane.l .fl-lab { text-align: right; }
 .fl-lane.gone .fl-lab { color: var(--label-3); }
 .fl-net { margin: 0; font: var(--t-caption); color: var(--label-1); font-weight: 500; }
+@media (max-width: 899px) and (max-height: 720px) {
+  .sf-fl { gap: 6px; }
+  .fl-band[data-b="held"] { flex: none; }
+  .sf-fl .fl-grid { grid-template-columns: minmax(0, 1fr); }
+  .fl-node { display: none; }
+  .fl-ends { display: inline; }
+  .fl-lanes { justify-content: flex-start; gap: 3px; }
+}
 .sf-readbox { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.9fr); gap: 4px 20px; padding: 2px 14px 10px; min-height: 0; align-items: start; }
 .rd-t { margin: 0 0 4px; font-size: 13px; color: var(--label-1); }
 .rd-k { margin: 2px 0 0; font: var(--t-caption2); color: var(--label-3); }

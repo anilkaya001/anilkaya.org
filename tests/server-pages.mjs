@@ -80,8 +80,9 @@ function oldChain(path, rc, d) {
     if (Object.hasOwn(FLOWS_ROUTES, path)) {
       requireMethod(request, ["GET", "HEAD"]);
       const session = await d.currentFlowsUser(request, env);
-      if (session && path === "/flows/moves/") {
-        const mode = String(env.FLOWS_MOVES || "owner").trim().toLowerCase();
+      const gateOf = { "/flows/moves/": "FLOWS_MOVES", "/flows/ledger/": "FLOWS_LEDGER" }[path];
+      if (session && gateOf) {
+        const mode = String(env[gateOf] || "owner").trim().toLowerCase();
         if (mode === "off" || (mode !== "on" && !d.isOwner(env, session.username))) throw HttpError.of("not_found");
       }
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
@@ -133,7 +134,7 @@ const PATHS = [...new Set([...expectedPaths, "/flows/zz/", "/flows/zz", "/flows/
 const QUERIES = ["", "?t=NVDA", "?t=", "?t=%20", "?t=%20nvda%20", "?t=a%26b", "?x=1", "?t=NVDA&t=AAPL", "?t=BRK.B&refresh=1", "?T=NVDA"];
 const METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 const USERS = [null, { username: "anilkaya" }, { username: "member<x>" }];
-const ENVS = [{ tag: "env" }, { tag: "env", FLOWS_FRONT_DOOR: "off" }, { tag: "env", FLOWS_FRONT_DOOR: " OFF " }, { tag: "env", FLOWS_FRONT_DOOR: "maybe" }, { tag: "env", FLOWS_FRONT_DOOR: "" }];
+const ENVS = [{ tag: "env" }, { tag: "env", FLOWS_FRONT_DOOR: "off" }, { tag: "env", FLOWS_FRONT_DOOR: " OFF " }, { tag: "env", FLOWS_FRONT_DOOR: "maybe" }, { tag: "env", FLOWS_FRONT_DOOR: "" }, { tag: "env", FLOWS_LEDGER: "on" }, { tag: "env", FLOWS_LEDGER: " OFF " }, { tag: "env", FLOWS_LEDGER: "maybe" }];
 const isOff = (env) => String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() === "off";
 
 let compared = 0;
@@ -212,7 +213,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "events", "political", "status"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
-    const env = { FLOWS_MOVES: "on" };
+    const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on" };
     const call = (deps) => createRouter(flowsPageRows(deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
     if (slug === "status") {
@@ -229,6 +230,23 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
     eq(noBrand(asOwner.replace(/\n    <p class="rail-group" id="railOps">[\s\S]*?<\/div>(?=\n  <\/nav>)/, "")), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
   }
+  const ledgerAs = async (user, env) => {
+    const t = createRouter(flowsPageRows(scenario(user).deps));
+    try {
+      const res = await t.find("/flows/ledger/").handler({ ...rc("/flows/ledger/"), env });
+      return [res.status, (await res.text()) === FLOWS_PAGES.loginPage() ? "login" : "page"];
+    } catch (e) {
+      return [e.status, e.code];
+    }
+  };
+  eq(await ledgerAs({ username: "member<x>" }, {}), [404, "not_found"], "the Ledger page is closed to a member while FLOWS_LEDGER is unset: the owner opens it by setting it to on");
+  eq(await ledgerAs({ username: "anilkaya" }, {}), [200, "page"], "and open to an owner");
+  eq(await ledgerAs({ username: "member<x>" }, { FLOWS_LEDGER: "on" }), [200, "page"], "on opens it to a member");
+  eq(await ledgerAs({ username: "anilkaya" }, { FLOWS_LEDGER: "off" }), [404, "not_found"], "off closes it to the owner too");
+  eq(await ledgerAs({ username: "member<x>" }, { FLOWS_LEDGER: "members" }), [404, "not_found"], "a value that is not on, off or owner fails closed for a member");
+  eq(await ledgerAs(null, {}), [200, "login"], "and an anonymous visitor is answered with the sign-in page whatever the switch says");
+  const wrangler = (await import("node:fs")).readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  ok(/^FLOWS_LEDGER = "owner"$/m.test(wrangler), "wrangler.toml ships the switch at owner: the page is the owner's until the production checks pass and the value is changed to on");
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
 }
