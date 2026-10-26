@@ -56,7 +56,7 @@ export const GLOSSARY = Object.freeze([
   { key: "sector-median", term: "Sector median", ...MOVES, lines: [
     "Each sector's median move, and its names beyond 2 IV-days.",
     "Median is signed, in IV-days.",
-    "Names reporting within 30 days are left out of every row.",
+    "Names reporting within 21 sessions are left out of every row.",
   ] },
   { key: "score", term: "Score", ...BOARDS, lines: [
     "Scores run from −100 to +100 and rank names against every scored name; they are a ranked attention signal, not a return forecast.",

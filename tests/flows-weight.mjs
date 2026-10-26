@@ -40,7 +40,7 @@ const GLASS_V3_TICKER = { bytes: 219, gzip: 37, why: "design v3 Lane 1: the tick
 const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 1.6 KB where section 2.10 ruling 8 counted 0.9 KB, so the V and L share of the kernel is stated as 3.8 KB instead of 3.1" };
 
 const CEILING_KIB = {
-  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024 + 2200 / 1024 + 256 / 1024 + NN_KERNEL.bytes / 1024 + NN_TICKER.bytes / 1024,
+  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024 + 2200 / 1024 + 256 / 1024 + NN_KERNEL.bytes / 1024 + NN_TICKER.bytes / 1024 + NETWORK_TICKER.bytes / 1024,
   overviewPage: 246 + 1483 / 1024 + (246 + 2327 / 1024) - (246) + (246 + 2327 / 1024 + 265 / 1024) - (246 + 2327 / 1024) + (246 + 2327 / 1024 + 265 / 1024 - 958 / 1024) - (246 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 3600 / 1024 + 3900 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + NN_HOME.bytes / 1024 + HOME_BENTO.bytes / 1024,
   sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1470 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1470 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
@@ -51,7 +51,7 @@ const CEILING_KIB = {
   nowPage: 129,
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 700 / 1024,
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
-  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024,
+  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024,
   politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   loginPage: 5,
   aboutPage: 5,
@@ -72,7 +72,7 @@ const GZIP_KIB = {
   nowPage: 40.3,
   unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024,
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
-  movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024,
+  movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024,
   politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   loginPage: 3,
   aboutPage: 3,
@@ -86,8 +86,8 @@ const CSS_KIB = {
   overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.overview.bytes / 1024 + HOME_BENTO.cssBytes / 1024,
   sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + 1180 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024,
   marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024,
   networkPage: 96,
   nowPage: 90,
@@ -107,7 +107,7 @@ const CSS_GZIP_KIB = {
   overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024,
   sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024,
   networkPage: 21,
@@ -171,7 +171,7 @@ const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracl
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
   unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
 

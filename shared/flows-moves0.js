@@ -30,8 +30,6 @@ export const STEP_EDGES = Object.freeze([0.5, 1, 2, 3]);
 
 export const SECTORS_LINE = "Each sector's median move, and its names beyond 2 IV-days.";
 
-export const KEY_EVENT = "Dashed outline: earnings within 21 sessions, event not separated.";
-
 export const MEDIAN_NOTE = "Median is signed, in IV-days.";
 
 export const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat, up or down.";
@@ -44,7 +42,7 @@ export const PINS_NOTE = "SPY and QQQ are left out by ticker.";
 
 export const WHY_NO_IV = "No implied volatility is published for these names.";
 
-export const WHY_ALL_EVENT = "Every measured name reports within 30 days.";
+export const WHY_ALL_EVENT = "Every measured name reports within 21 sessions.";
 
 export const X_LINE = "Across: the move in the name's own typical days.";
 

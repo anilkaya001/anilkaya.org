@@ -33,10 +33,10 @@
   const MEDIAN_NOTE = "Median is signed, in IV-days.";
   const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat, up or down.";
   const SHARE_NOTE = "Share is that count over the sector's names.";
-  const LEFT_OUT_NOTE = "Names reporting within 30 days are left out of every row.";
+  const LEFT_OUT_NOTE = "Names reporting within 21 sessions are left out of every row.";
   const PINS_NOTE = "SPY and QQQ are left out by ticker.";
   const WHY_NO_IV = "No implied volatility is published for these names.";
-  const WHY_ALL_EVENT = "Every measured name reports within 30 days.";
+  const WHY_ALL_EVENT = "Every measured name reports within 21 sessions.";
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
   const SHAPE = { up: "▲", dn: "▼", fl: "◆" };
   const TRI = 2 * Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
