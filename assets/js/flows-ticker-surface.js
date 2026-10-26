@@ -1099,7 +1099,7 @@
         k ? F.signed(k.rr * 100, 1) : DASH, r.eng && r.eng.rr25 !== null && r.state !== "none" ? F.signed(r.eng.rr25 * 100, 1) : DASH,
         k ? F.signed(k.bf * 100, 1) : DASH, r.eng && r.eng.bf25 !== null && r.state !== "none" ? F.signed(r.eng.bf25 * 100, 1) : DASH];
     });
-    const tabV = tableOf(ticker + " fitted smile by expiry: 25-delta strikes and implied volatilities, risk reversal and butterfly in vol points, this page against the engine's stored figures", ["Expiry", "Fit", "At the money", "25Δ put", "25Δ call", "RR", "RR engine", "BF", "BF engine"], rowsT);
+    const tabV = tableOf(ticker + " fitted smile by expiry: 25-delta strikes and implied volatilities, risk reversal (25-delta put volatility minus call volatility) and butterfly in vol points, this page against the engine's stored figures", ["Expiry", "Fit", "At the money", "25Δ put", "25Δ call", "RR put − call", "RR engine", "BF", "BF engine"], rowsT);
     const calNote = h("p", { class: "ftsf-cap" }, sm.calendar.breaks.length
       ? "Calendar check: " + sm.calendar.breaks.length + " strikes where total variance falls with expiry across fitted expiries, first at " + F.px(sm.calendar.breaks[0].K) + "."
       : fitN > 1 ? "Calendar check: no break in total variance across " + fitN + " fitted expiries, " + sm.calendar.checked + " strike and expiry pairs." : "Calendar check: fewer than two fitted expiries, nothing to compare.");

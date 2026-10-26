@@ -27,7 +27,7 @@ function bhReference(ps, q) {
   return { reject, m };
 }
 
-const row = (t, z, f2, f3, o = {}) => ({ t, chg: z * 0.01, sig: 0.01, f2, f3, ed: null, ...o });
+const row = (t, z, f2, f3, o = {}) => ({ t, chg: Math.expm1(z * 0.01), sig: 0.01, f2, f3, ed: null, ...o });
 
 function battery(mod) {
   const bad = [];
@@ -170,10 +170,11 @@ const MUTANTS = [
   ["earnings names tested", "if (ed !== null && ed <= SIG_EVENT_SESSIONS)", "if (false)"],
   ["the earnings window one session short", "ed <= SIG_EVENT_SESSIONS", "ed < SIG_EVENT_SESSIONS"],
   ["the two and three typical day counts swapped", "const hits = level === 3 ? x.f3 : x.f2;", "const hits = level === 3 ? x.f2 : x.f3;"],
-  ["the level always 2", "const level = k >= 3 ? 3 : 2;", "const level = 2;"],
+  ["the level always 2", "const level = Math.abs(lm) >= 3 * sig ? 3 : 2;", "const level = 2;"],
+  ["the simple change read as the log return", "const lm = chg > -1 ? Math.log1p(chg) : null;", "const lm = chg;"],
   ["the test starts at 1 typical day", "export const SIG_MIN_Z = 2;", "export const SIG_MIN_Z = 1;"],
   ["a missing count read as zero", "if (!Number.isInteger(hits) || hits < 0 || hits > SIG_SESSIONS) return", "if (false) return"],
-  ["the sign dropped", "const z = chg / sig;", "const z = Math.abs(chg) / sig;"],
+  ["the sign dropped", "const z = lm / sig;", "const z = Math.abs(lm) / sig;"],
   ["q at 0.5", "export const SIG_Q = 0.1;", "export const SIG_Q = 0.5;"],
 ];
 

@@ -578,4 +578,58 @@ const b76 = (F, D, K, sig, T, type) => {
   eq(block.assumptions, { exercise: "european", carry: "continuous", drift: "forward", equityPremium: 0, intraday: "time-uniform" }, "the card block states its modelling assumptions as data: European exercise, continuous carry, a forward-drifted real-world law with no equity premium, and variance spread evenly over the session for the part of today still to come");
 }
 
+{
+  const { applyTransforms, absolutise } = await import("./truth/mutants.mjs");
+  const enginePath = path.join(ROOT, "shared/flows-quant-engine.js");
+  const engineSource = fs.readFileSync(enginePath, "utf8");
+  const mutantEngine = (transforms) => import("data:text/javascript;base64," + Buffer.from(absolutise(applyTransforms(engineSource, transforms, "engine"), path.dirname(enginePath))).toString("base64"));
+  const put = { K: 225, type: "P", bid: 0.68, ask: 0.72, oi: 5000, volume: 900, sym: "NVDA", ivSeed: 0.5 };
+  const gridOf = (E, exp) => {
+    const asOfMs = Date.parse("2026-09-30T15:30:00Z");
+    const fit = QC.contractFit({ expiry: exp, asOfMs, spot: S0, rate: 0.04, row: put });
+    const setup = QC.labSetup({ asOfMs, spot: S0, facts: [], state: null, pLaw: null, event: null, stale: false, books: [{ fit, rows: [put] }], lawCache: new Map() });
+    const st = E.priceStructure(setup, { family: "short-put", expiry: exp, legs: [{ type: "P", K: put.K, side: -1, qty: 1 }], basis: "natural" }, { detail: true, curves: true });
+    return { st, front: setup.expiries.get(exp) };
+  };
+  const gridFailures = (E) => {
+    const bad = [];
+    const note = (c, m) => { if (!c) bad.push(m); };
+    for (const [exp, days] of [["2026-09-30", [0, 0]], ["2026-10-01", [0, 1]], ["2026-10-02", [0, 1, 2]], ["2026-10-09", [0, 3, 6, 9]]]) {
+      const { st, front } = gridOf(E, exp);
+      const g = st && st.grid;
+      note(!!g, `${exp}: a scenario grid is built`);
+      if (!g) continue;
+      note(JSON.stringify(g.days) === JSON.stringify(days), `${exp}: the columns are ${JSON.stringify(days)}, not ${JSON.stringify(g.days)}`);
+      const atm = SMILE.sliceVolK(front.slice, 0), sd = atm * Math.sqrt(front.T);
+      const z = [-2, -1, -0.5, 0, 0.5, 1, 2];
+      note(g.spot.length >= 7 && g.spot.slice(0, 7).every((x, i) => Math.abs(Math.log(x / S0) - z[i] * sd) < 1e-6 + 5e-5 / S0), `${exp}: the spot rows are spot * exp(z * atm * sqrt(T)) with T the exact time to the close (${g.spot.slice(0, 7).join(" ")})`);
+      note(g.spot.slice(0, 7).every((x, i, a) => i === 0 || x > a[i - 1]), `${exp}: the seven spot rows are distinct and rising`);
+      const last = g.days.length - 1;
+      g.spot.forEach((x, i) => {
+        const payoff = (-Math.max(0, put.K - x) + put.bid) * 100;
+        note(Math.abs(g.pnl[i][1][last] - payoff) <= 0.51 + 1e-6, `${exp}: the last column at ${x} is the expiry P&L ${payoff.toFixed(2)}, got ${g.pnl[i][1][last]}`);
+      });
+      const gap = Math.max(...g.spot.map((x, i) => Math.abs(g.pnl[i][1][0] - g.pnl[i][1][last])));
+      note(gap > 1, `${exp}: the first column is today's value, not the expiry value (largest gap ${gap.toFixed(2)})`);
+    }
+    const { front } = gridOf(E, "2026-10-02");
+    for (const T of [0, -0.001, NaN, null]) {
+      let got;
+      try { got = E.scenarioGrid([], {}, 0, S0, { dte: 3, T, slice: front.slice }, null); } catch { got = "threw"; }
+      note(got === null, `a front expiry with no time left (${String(T)}) has no scenario grid rather than seven copies of spot`);
+    }
+    return bad;
+  };
+  eq(gridFailures(ENGINE), [], "the scenario grid of an expiry today has seven distinct spot rows, a now column and an expiry column, and an expiry two or more days out keeps its thirds");
+  for (const [why, transforms] of [
+    ["the spread taken from the whole calendar days left", [["const sd = atmVol * Math.sqrt(front.T);", "const sd = atmVol * Math.sqrt(dte / 365);"]]],
+    ["the columns not deduplicated", [["const days = raw.filter((d, i) => i === 0 || i === raw.length - 1 || (d > 0 && d < dte && d !== raw[i - 1]));", "const days = raw;"]]],
+    ["no guard on a front expiry with no time left", [["if (!(front.T > 0) || !fin(atmVol)) return null;", ""]]],
+    ["the last column read as expiry only when the day count reaches it", [["const tt = j === last ? front.T : Math.min(front.T, d / 365);", "const tt = d >= dte ? front.T : Math.min(front.T, d / 365);"]]],
+  ]) {
+    const mutated = await mutantEngine(transforms);
+    ok(gridFailures(mutated).length > 0, `the planted build "${why}" fails the scenario grid checks`);
+  }
+}
+
 console.log(`✓ flows-quant-audit: ${n} assertions`);

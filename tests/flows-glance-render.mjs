@@ -76,7 +76,7 @@ async function boot(vp, o = {}) {
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto("https://example.test/flows/ticker/?t=" + card.ticker);
-  await page.evaluate(({ chartW, pad }) => {
+  await page.evaluate(({ chartW, pad, cal }) => {
     const wrap = document.createElement("div");
     wrap.id = "wrap";
     wrap.style.cssText = `padding:0 ${pad}px;box-sizing:border-box;width:100vw`;
@@ -90,7 +90,12 @@ async function boot(vp, o = {}) {
     cardsEl.style.marginTop = "12px";
     wrap.append(row, cardsEl);
     document.body.replaceChildren(wrap);
-  }, { chartW: o.chartW || 0, pad: o.pad === undefined ? 20 : o.pad });
+    if (cal) {
+      const mark = Object.assign(document.createElement("i"), { id: "ftCal", hidden: true });
+      mark.dataset.sessions = cal;
+      document.body.append(mark);
+    }
+  }, { chartW: o.chartW || 0, pad: o.pad === undefined ? 20 : o.pad, cal: o.cal || "" });
   await page.addScriptTag({ url: "https://example.test/assets/js/flows-ticker-glance.js" });
   await page.evaluate(({ card, x, reading, range, tape }) => {
     window.__g = window.FlowsUI.tickerGlance.mount(card, { chart: document.getElementById("ftGlanceChart"), cards: document.getElementById("ftGlanceCards") }, { reading, range, cardX: x, tape });
@@ -110,10 +115,16 @@ async function fixtureAnswers(page) {
   }, { card, x: X });
 }
 
+const CAL_NOW = Date.parse("2026-08-26T15:00:00Z");
+const CAL = FLOWS_PAGES.sessionCalendar(CAL_NOW);
 const S = card.panels.pricedMove.spot;
 const pm = card.panels.pricedMove;
 const Hs = pm.sessions;
 const qUp = Math.log(pm.impliedHigh / S), qDn = Math.log(S / pm.impliedLow), pUp = Math.log(pm.realizedHigh / S), pDn = Math.log(S / pm.realizedLow);
+const PAST = X.earnings.events.map((r) => r[3]);
+const dailyP = (pUp * pUp / Hs + pDn * pDn / Hs) / 2;
+const P_JUMP = Math.sqrt(PAST.reduce((a, v) => a + Math.log1p(v) ** 2, 0) / PAST.length - dailyP);
+const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
 
 {
   const page = await boot({ width: 1440, height: 900 }, { chartW: 868 });
@@ -124,8 +135,9 @@ const qUp = Math.log(pm.impliedHigh / S), qDn = Math.log(S / pm.impliedLow), pUp
   near(m.S, S, 1e-9, "the cone is anchored at the card's spot");
   const tE = SIM_SESSIONS + 0.5;
   eq(m.event.h, tE, "a report after the close steps the cone half a session after the report session");
-  eq(m.event.q, 0.042, "the step uses the card's implied event move");
-  eq(m.event.p, 0.01, "and the realised history's median absolute move");
+  eq(m.event.q, 0.042, "the Q step is the term structure's one-sigma event move, ahead of the quoted expected move");
+  near(m.event.p, P_JUMP, 1e-12, "the P step is the root mean square of the past one-day report moves less one ordinary session of the realised variance");
+  ok(Math.abs(P_JUMP - 0.01) > 0.03, `and it is not the median absolute move that the old step took as a standard deviation (${P_JUMP})`);
   const exp = (hh, dd, J, sign) => S * Math.exp(sign * Math.sqrt(hh * dd + (J ? J * J : 0)));
   let maxErr = 0;
   for (const o of m.q) {
@@ -139,10 +151,44 @@ const qUp = Math.log(pm.impliedHigh / S), qDn = Math.log(S / pm.impliedLow), pUp
   eq(pair.length, 2, "the report is two points at one time: the cone before and after the jump");
   near(Math.log(pair[1].up / S) ** 2 - Math.log(pair[0].up / S) ** 2, 0.042 * 0.042, 1e-12, "and the squared log half-width jumps by the implied event move squared");
   const pp = m.p.filter((o) => o.h === tE);
-  near(Math.log(pp[1].up / S) ** 2 - Math.log(pp[0].up / S) ** 2, 0.01 * 0.01, 1e-12, "the real-world cone steps by the realised median squared");
+  near(Math.log(pp[1].up / S) ** 2 - Math.log(pp[0].up / S) ** 2, P_JUMP * P_JUMP, 1e-12, "the real-world cone steps by the realised second moment squared");
   near(Math.log(m.p.find((o) => o.h === 5).up / S) ** 2, 5 * pUp * pUp / Hs, 1e-12, "and P's variance grows linearly in sessions from the realised range");
   ok(m.p[m.p.length - 1].up < m.q[m.q.length - 1].up, "the card's realised band is narrower than its implied band");
   eq(m.q.length, 23, "21 integer sessions plus the two points at the step");
+
+  ok(CAL.length === 60 && CAL[0] === "2026-08-12" && CAL.every((d, i) => i === 0 || d > CAL[i - 1]), "the page carries sixty exchange sessions, from two weeks back, in order");
+  ok(!CAL.includes("2026-09-07") && !CAL.includes("2026-08-15") && CAL.includes("2026-09-08") && CAL.includes("2026-10-12"), "Labor Day and a Saturday are not in it, the day after Labor Day is, and Columbus Day, which the exchange keeps open, is");
+  ok(HTML.includes('<i hidden id="ftCal" data-sessions="'), "and the ticker page writes the list into its markup");
+  ok(FLOWS_PAGES.tickerPage({ username: "u", now: CAL_NOW }).includes('<i hidden id="ftCal" data-sessions="' + CAL.join(",") + '"></i>'), "from the clock it is given");
+  const calPage = await boot({ width: 1440, height: 900 }, { chartW: 868, cal: CAL.join(",") });
+  const dates = await calPage.evaluate(({ card, x }) => {
+    const G = window.FlowsUI.tickerGlance.model, m = G(card, "1M", { cardX: x });
+    const n = m.hist.length;
+    return { last: m.hist[n - 1].d, at: [1, 5, 9, 10, 11, 20].map((t) => G.readout(m, n + t - 1)) };
+  }, { card, x: X });
+  eq(dates.last, "2026-08-24", "the card's last close is Monday 24 August");
+  ok(/\+9 sessions \(Sep 4\)/.test(dates.at[2]) && /\+10 sessions \(Sep 8\)/.test(dates.at[3]) && /\+11 sessions \(Sep 9\)/.test(dates.at[4]) && /\+20 sessions \(Sep 22\)/.test(dates.at[5]),
+    `with the calendar, ten sessions on from 24 August is Tuesday 8 September, over the Labor Day closure, and twenty is 22 September (${dates.at.join(" | ")})`);
+  const uncovered = await calPage.evaluate(({ card, x, list }) => {
+    document.getElementById("ftCal").dataset.sessions = list;
+    const G = window.FlowsUI.tickerGlance.model, m = G(card, "1M", { cardX: x });
+    return G.readout(m, m.hist.length + 9);
+  }, { card, x: X, list: CAL.filter((d) => d >= "2026-08-26").join(",") });
+  ok(/\+10 sessions \(Sep 7\)/.test(uncovered), `a list that starts after the card's last close is not used (it would skip the sessions in between): ${uncovered}`);
+  await calPage.context().close();
+
+  const alt = await page.evaluate(({ card, x }) => {
+    const G = window.FlowsUI.tickerGlance.model, y = JSON.parse(JSON.stringify(x));
+    delete y.term.eventMove;
+    const a = G(card, "1M", { cardX: y });
+    y.earnings.events = y.earnings.events.slice(0, 3);
+    const b = G(card, "1M", { cardX: y });
+    return { q: a.event.q, p: a.event.p, bq: b.event.q, bp: b.event.p, bwhy: b.why.eventP, bPair: b.p.filter((o) => o.h === b.event.h).length, bStep: Math.log(b.p.filter((o) => o.h === b.event.h)[1].up / b.S) ** 2 - Math.log(b.p.filter((o) => o.h === b.event.h)[0].up / b.S) ** 2 };
+  }, { card, x: X });
+  near(alt.q, Q_FALLBACK, 1e-12, "without a term-structure event move the quoted expected move is read as a mean absolute move and scaled by the square root of pi over two to a standard deviation");
+  eq(alt.bp, null, "fewer than four past reports give the real-world band no step");
+  ok(/Fewer than 4 past reports/.test(alt.bwhy), "and say why");
+  near(alt.bStep, 0, 1e-12, "so the P cone is continuous through the report");
 
   const far = await page.evaluate(({ card, x }) => {
     const G = window.FlowsUI.tickerGlance.model, y = JSON.parse(JSON.stringify(x));
@@ -502,7 +548,7 @@ async function coreFailures(src) {
   let page;
   try {
     page = await boot({ width: 1440, height: 900 }, { chartW: 868, src, reading: READING });
-    const r = await page.evaluate(({ card, x }) => {
+    const r = await page.evaluate(({ card, x, cal, calLate }) => {
       const G = window.FlowsUI.tickerGlance, M = G.model, m = M(card, "1M", { cardX: x });
       const L = M.layout(m, 868, 344);
       const ys = L.labels.map((l) => l.y).sort((a, b) => a - b);
@@ -511,15 +557,41 @@ async function coreFailures(src) {
       const cs = M.cards(noScore, { cardX: x });
       const neg = M.cards(card, { cardX: x })[0];
       return {
+        dateLate: (() => {
+          const el = Object.assign(document.createElement("i"), { id: "ftCal", hidden: true });
+          el.dataset.sessions = calLate;
+          document.body.append(el);
+          const out = M.readout(m, m.hist.length + 9);
+          el.remove();
+          return out;
+        })(),
+        dateTen: (() => {
+          const el = Object.assign(document.createElement("i"), { id: "ftCal", hidden: true });
+          el.dataset.sessions = cal;
+          document.body.append(el);
+          const out = M.readout(m, m.hist.length + 9);
+          el.remove();
+          return out;
+        })(),
+        pairP: (() => { const pp = m.p.filter((o) => o.h === m.event.h); return Math.log(pp[1].up / m.S) ** 2 - Math.log(pp[0].up / m.S) ** 2; })(),
+        pTiny: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.map((r) => [r[0], r[1], r[2], 0.001, r[4], r[5], r[6], r[7]]); const e = M(card, "1M", { cardX: y }); return { p: e.event.p, why: e.why.eventP, said: M.describe(e) }; })(),
+        pFew: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.slice(0, 3); return M(card, "1M", { cardX: y }).event.p; })(),
+        qAlt: (() => { const y = JSON.parse(JSON.stringify(x)); delete y.term.eventMove; return M(card, "1M", { cardX: y }).event.q; })(),
         h5: m.q.find((o) => o.h === 2), h14: m.q.find((o) => o.h === 6), pair: m.q.filter((o) => o.h === m.event.h), n: m.q.length, gap: ys.slice(1).map((y, i) => y - ys[i]),
         bars: L.bars.map((b) => [b.g, b.w]), mg: m.bars.map((b) => Math.abs(b.g)), sbars: L.score.bars.filter(Boolean).map((b) => [b.v, b.h]), k: L.score.k, gmax: L.profW,
         longs: [...document.querySelectorAll(".ftg-svg .ftg-gl")].length, shorts: [...document.querySelectorAll(".ftg-svg .ftg-gs")].length, signalTone: neg.fig.tone, signalFig: cs[0].fig.text, signalMissing: cs[0].missing, hist: m.hist.length,
         marksBare: 0, clusterOverlap: (() => { const ys2 = M.cluster([100, 101, 102, 103], 12, 0, 400).sort((a, b) => a - b); return Math.min(...ys2.slice(1).map((y, i) => y - ys2[i])); })(), bareFig: bare.map((c) => c.fig.text), bareFoot: bare.map((c) => c.foot),
         gammaClaims: document.querySelector('[data-layer="gamma"]').getAttribute("data-claims"), coneClaims: document.querySelector('[data-layer="cone"]').getAttribute("data-claims"), marks: document.querySelectorAll(".ftg-mk").length,
       };
-    }, { card, x: X });
+    }, { card, x: X, cal: CAL.join(","), calLate: CAL.filter((d) => d >= "2026-08-26").join(",") });
+    note(/\+10 sessions \(Sep 7\)/.test(r.dateLate), "a calendar that starts after the card's close is used");
+    note(/\+10 sessions \(Sep 8\)/.test(r.dateTen), "forward dates ignore the exchange calendar: ten sessions on from 24 August is not 8 September");
     note(Math.abs(Math.log(r.h14.up / S) / Math.log(r.h5.up / S) - Math.sqrt(6 / 2)) < 1e-9, "cone half-width is not the square root of time");
     note(r.pair.length === 2 && r.n === 23 && Math.abs(Math.log(r.pair[1].up / S) ** 2 - Math.log(r.pair[0].up / S) ** 2 - 0.042 ** 2) < 1e-9, "the report step is missing or the wrong size");
+    note(Math.abs(r.pairP - P_JUMP * P_JUMP) < 1e-9, "the real-world report step is not the root mean square of the past moves");
+    note(r.pFew === null, "three past reports give the real-world band a step");
+    note(r.pTiny.p === null && /no more than an ordinary day/.test(r.pTiny.why || "") && r.pTiny.said.includes(r.pTiny.why), "reports that moved less than an ordinary day give no step, and the chart's description says why");
+    note(Math.abs(r.qAlt - Q_FALLBACK) < 1e-12, "the quoted expected move is not scaled to a standard deviation");
     note(r.clusterOverlap >= 12 - 1e-6 && r.gap.every((g) => g >= 12 - 1e-6), "level labels overlap");
     const gmax = Math.max(...r.mg);
     note(r.bars.every((b) => Math.abs(b[1] - Math.abs(b[0]) / gmax * r.gmax * 0.95) < 1e-9), "gamma bar widths are not proportional");
@@ -554,6 +626,16 @@ async function boot2(page, bad, note) {
 const MUTANTS = [
   ["cone linear in time", "const sUp = Math.sqrt(hh * b.dUp + (ev ? J * J : 0)), sDn = Math.sqrt(hh * b.dDn + (ev ? J * J : 0));", "const sUp = hh * Math.sqrt(b.dUp) * 1.2 + (ev ? J : 0), sDn = hh * Math.sqrt(b.dDn) * 1.2 + (ev ? J : 0);"],
   ["event step missing", "const tE = event ? event.h : null;", "const tE = null;"],
+  ["a calendar that does not reach back to the card's close", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = cal.filter((x) => x > from);"],
+  ["forward dates counted over weekends only", "const known = cal.length && cal[0] <= from ? cal.filter((x) => x > from) : [];", "const known = [];"],
+  ["the calendar read from the wrong element", 'document.getElementById("ftCal")', 'document.getElementById("ftCalx")'],
+  ["the median absolute move taken as a standard deviation", "return { sd: Math.sqrt(extra), n: rows.length, why: null };", "return { sd: Math.abs(E.medianAbsMove), n: rows.length, why: null };"],
+  ["the ordinary session left in the report move", "const extra = Math.max(0, second - (pb.dUp + pb.dDn) / 2);", "const extra = Math.max(0, second);"],
+  ["simple returns squared where the band is on log returns", "Math.log1p(r[3]) ** 2", "r[3] * r[3]"],
+  ["a zero step drawn for reports quieter than a day", "if (!(extra > 0)) return { sd: null, n: rows.length, why: \"Past reports moved no more than an ordinary day, so the real-world band takes no step.\" };", ""],
+  ["the mean absolute expected move taken as a standard deviation", "return em === null ? null : em * SD_OVER_MEAN_ABS;", "return em === null ? null : em;"],
+  ["the quoted move ahead of the term structure's", "const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;\n    if (sd !== null) return sd;", "const sd = null;"],
+  ["a step from fewer than four reports", "if (rows.length < MIN_REPORTS) return", "if (rows.length < 1) return"],
   ["labels overlapping", "if (a.top + a.n * gap > b.top + 1e-9) {", "if (false) {"],
   ["short and long gamma swapped", 'class: b.g > 0 ? "ftg-gl" : "ftg-gs"', 'class: b.g > 0 ? "ftg-gs" : "ftg-gl"'],
   ["wrong sign colour", 'const tone = (v) => (num(v) === null || v === 0 ? "flat" : v > 0 ? "up" : "down");', 'const tone = (v) => (num(v) === null || v === 0 ? "flat" : v > 0 ? "down" : "up");'],

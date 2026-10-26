@@ -92,7 +92,7 @@ const model = (rows) => {
   for (const r of rows) {
     if (!(r.iv > 0)) continue;
     const m = r.chg / (r.iv / SQRT252);
-    const z = r.sig > 0 ? r.chg / r.sig : null;
+    const z = r.sig > 0 ? Math.log1p(r.chg) / r.sig : null;
     all.push({ ...r, m, a: Math.abs(m), z, event: r.ed !== null && r.ed <= 21 });
   }
   const plotted = all.filter((x) => x.z !== null);
@@ -104,8 +104,8 @@ const model = (rows) => {
 const byA = (a, b) => b.a - a.a || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
 const rarityFull = (x) => {
   if (!(x.sig > 0)) return null;
-  const k = Math.abs(x.chg) / x.sig;
-  const level = k >= 3 ? 3 : k >= 2 ? 2 : 0;
+  const lr = Math.abs(Math.log1p(x.chg));
+  const level = lr >= 3 * x.sig ? 3 : lr >= 2 * x.sig ? 2 : 0;
   const hits = level === 3 ? x.f3 : level === 2 ? x.f2 : null;
   if (!level || hits === null || !Number.isInteger(hits) || hits < 0 || hits > 252) return null;
   return rarityText({ k: level, sigmaRef: x.sig, route: "empirical", hits });
@@ -121,7 +121,7 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
   for (const level of [2, 3]) {
     for (let hits = 0; hits <= 252; hits++) {
       const sig = 0.02;
-      const x = { chg: level * sig + 0.001, sig, f2: level === 2 ? hits : 99, f3: level === 3 ? hits : 99 };
+      const x = { chg: Math.expm1(level * sig + 0.001), sig, f2: level === 2 ? hits : 99, f3: level === 3 ? hits : 99 };
       const got = T.rarityParts(x);
       const want = rarityText({ k: level, sigmaRef: sig, route: "empirical", hits });
       eq(got.text, want, "the rarity sentence equals the leaf's rarityText at level " + level + ", " + hits + " of 252");
@@ -131,7 +131,9 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
   eq(T.rarityParts({ chg: 0.03, sig: 0.02, f2: null, f3: null }), null, "a missing count is no sentence, never a guess");
   eq(T.rarityParts({ chg: 0.03, sig: null, f2: 3, f3: 1 }), null, "a missing typical day is no sentence");
   eq(T.rarityParts({ chg: 0.019, sig: 0.01, f2: 3, f3: 1 }), T.rarityParts({ chg: 0.019, sig: 0.01, f2: 3, f3: 1 }), "deterministic");
-  eq(T.rarityParts({ chg: 0.0199, sig: 0.01, f2: 3, f3: 1 }), null, "1.99 typical days has no count");
+  eq(T.rarityParts({ chg: 0.0199, sig: 0.01, f2: 3, f3: 1 }), null, "a simple change that is 1.99 typical days has no count");
+  eq(T.rarityParts({ chg: 0.0201, sig: 0.01, f2: 3, f3: 1 }), null, "and so has one of 2.01 typical days that is 1.99 as a log return: the counts are on log returns");
+  eq(T.rarityParts({ chg: -1.5, sig: 0.01, f2: 3, f3: 1 }), null, "a change of minus 100% or worse has no log return and no sentence");
   for (const [chg, iv] of [[-0.031, 0.35], [0.0231, 0.3], [0, 0.3], [-0.08, 0.4]]) eq(T.ivDays(chg, iv), M.ivDays(chg, iv), "ivDays equals the leaf for " + chg + " / " + iv);
   for (const bad of [null, 0, -1, NaN, "0.3"]) eq(T.ivDays(0.02, bad), null, "ivDays of " + String(bad) + " is null");
   eq(T.signed(-1.04), MINUS + "1.0", "a negative prints U+2212");
@@ -668,10 +670,41 @@ const browser = await launch();
   eq(bad, [], "the page passes the whole exercise: " + bad.slice(0, 3).join(" | "));
 }
 
+const rungFailures = (src) => {
+  const bad = [];
+  const sb = { globalThis: null };
+  sb.globalThis = sb;
+  vm.runInNewContext(src, sb);
+  const X = sb.__MovesTest;
+  const table = [[0.097, 0.032, 2], [-0.095, 0.032, 3], [Math.expm1(2.5 * 0.02), 0.02, 2], [Math.expm1(-2.5 * 0.02), 0.02, 2], [Math.expm1(3.01 * 0.02), 0.02, 3], [Math.expm1(1.99 * 0.02), 0.02, 0]];
+  for (const [chg, sig, level] of table) {
+    const got = X.rarityParts({ chg, sig, f2: 11, f3: 5 });
+    if ((got ? got.level : 0) !== level) bad.push(`chg ${chg} on sig ${sig} is rung ${got ? got.level : 0}, the log return puts it at ${level}`);
+    const run = X.sigRun([{ t: "AAA", chg, sig, f2: 11, f3: 5, ed: null }], 0.1);
+    const it = run.items[0];
+    if ((it.level === null ? 0 : it.level) !== level) bad.push(`the test puts chg ${chg} on sig ${sig} at rung ${it.level}, not ${level}`);
+    const z = Math.log1p(chg) / sig;
+    if (!(Math.abs((it.z === null ? NaN : it.z) - z) < 1e-12)) bad.push(`its typical days are ${it.z}, not ${z}`);
+  }
+  const total = X.sigRun([{ t: "AAA", chg: -1, sig: 0.02, f2: 11, f3: 5, ed: null }], 0.1).items[0];
+  if (total.state !== "nomove" || total.p !== null || total.z !== null) bad.push(`a change of -100% is state ${total.state}, not a move that cannot be tested`);
+  return bad;
+};
+eq(rungFailures(JS), [], "the rung of a move, the test's rung and its typical days are read off the log return, the way the nightly counts are");
+for (const [why, from, to] of [
+  ["the rung read off the simple change", "const level = Math.abs(lm) >= 3 * x.sig ? 3 : Math.abs(lm) >= 2 * x.sig ? 2 : 0;", "const level = Math.abs(x.chg) >= 3 * x.sig ? 3 : Math.abs(x.chg) >= 2 * x.sig ? 2 : 0;"],
+  ["the test's rung read off the simple change", "const level = Math.abs(lm) >= 3 * sig ? 3 : 2;", "const level = Math.abs(chg) >= 3 * sig ? 3 : 2;"],
+  ["the test's typical days from the simple change", "const z = lm / sig;", "const z = chg / sig;"],
+  ["a total loss said to have no typical day", 'state: "nomove", z: null', 'state: "noscale", z: null'],
+]) {
+  ok(JS.split(from).length === 2, `the planted build "${why}" targets one line`);
+  ok(rungFailures(JS.replace(from, to)).length > 0, `the rung table fails the planted build "${why}"`);
+}
+
 const MUTANTS = [
   ["IV-days without the square root of 252", "(num(chg) === null || num(iv) === null || !(iv > 0) ? null : chg / (iv / SQRT_YEAR))", "(num(chg) === null || num(iv) === null || !(iv > 0) ? null : chg / iv)"],
-  ["typical days lose their sign", "z: sig !== null && sig > 0 ? r.chg / sig : null", "z: sig !== null && sig > 0 ? Math.abs(r.chg) / sig : null"],
-  ["a name with no typical day drawn at zero", "z: sig !== null && sig > 0 ? r.chg / sig : null", "z: sig !== null && sig > 0 ? r.chg / sig : 0"],
+  ["typical days lose their sign", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? Math.abs(logMove(r.chg)) / sig : null"],
+  ["a name with no typical day drawn at zero", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : 0"],
   ["dot area linear in market cap", "rMax * Math.sqrt(cap / capMax)", "rMax * (cap / capMax)"],
   ["the earnings window is one session short", "event: ed !== null && ed <= EVENT_SESSIONS", "event: ed !== null && ed < EVENT_SESSIONS"],
   ["earnings names ranked with the rest", "now: ok.filter((x) => !x.event).sort(byA)", "now: ok.sort(byA)"],

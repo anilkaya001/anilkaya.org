@@ -375,6 +375,7 @@ button.ft-idea-t:hover { color: var(--accent-ink); }
 .ft-ml-lv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin: 0 0 var(--sp-3); }
 .ft-ml-lv dt { color: var(--label-3); font: var(--t-caption); }
 .ft-ml-lv dd { margin: 0; color: var(--tone); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ft-ml-lv dd .ft-ml-pc { display: block; color: var(--label-3); font: var(--t-caption); font-weight: 400; }
 .ft-ml-n, .ft-ml-how, .ft-ml-why, .ft-ml-flag { margin: var(--sp-1) 0 0; color: var(--label-2); font: var(--t-footnote); }
 .ft-ml-flag { margin-top: var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--warn); }
 .ft-ml .ui-info { flex: none; margin: -6px 6px -6px 0; }
