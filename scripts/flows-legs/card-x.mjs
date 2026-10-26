@@ -7,11 +7,17 @@ export const CARD_X_SCHEMA_VERSION = 1;
 export const CARD_X_BUDGET_BYTES = 100 * 1024;
 export const CARD_X_SOFT_BYTES = 60 * 1024;
 
+const STORED_BYTES_FIELD = 99999;
+
+function storedSize(payload) {
+  return Buffer.byteLength(JSON.stringify({ ...payload, bytes: STORED_BYTES_FIELD }));
+}
+
 function fitSoft(payload) {
-  let bytes = Buffer.byteLength(JSON.stringify(payload));
+  let bytes = storedSize(payload);
   while (bytes > CARD_X_SOFT_BYTES && shedNextPart(payload)) {
     if (!payload.shed.includes("extras.soft")) payload.shed.push("extras.soft");
-    bytes = Buffer.byteLength(JSON.stringify(payload));
+    bytes = storedSize(payload);
   }
 }
 
