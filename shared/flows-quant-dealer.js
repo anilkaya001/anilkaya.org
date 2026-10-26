@@ -26,32 +26,54 @@ function kernels(contracts, r, q) {
   return { c1, c2, lk, w, m };
 }
 
+function profileValue(k, x) {
+  if (!(x > 0)) return 0;
+  const lx = Math.log(x);
+  let g = 0;
+  for (let j = 0; j < k.m; j++) {
+    const d1 = k.c1[j] * (lx - k.lk[j]) + k.c2[j];
+    g += k.w[j] * (Number.isFinite(d1) ? expNegHalfSq(d1) : 0);
+  }
+  return g * x;
+}
+
+export function polishRoot(f, a, fa, b, fb, tol) {
+  let side = 0;
+  for (let n = 0; n < 60 && Math.abs(b - a) > tol; n++) {
+    const c = (a * fb - b * fa) / (fb - fa);
+    const fc = f(c);
+    if (fc === 0) return c;
+    if ((fc < 0) === (fb < 0)) { b = c; fb = fc; if (side === 1) fa /= 2; side = 1; }
+    else { a = c; fa = fc; if (side === -1) fb /= 2; side = -1; }
+  }
+  return (a * fb - b * fa) / (fb - fa);
+}
+
+export function zeroCrossings(grid, values, at, tol) {
+  const out = [];
+  let last = -1;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] === 0) continue;
+    if (last >= 0 && (values[i] < 0) !== (values[last] < 0)) {
+      out.push(i - last > 1 ? grid[last + 1] : polishRoot(at, grid[last], values[last], grid[i], values[i], tol));
+    }
+    last = i;
+  }
+  return out;
+}
+
 export function gammaProfile(input) {
   const { spot, contracts } = input;
   const points = input.points || 121, span = input.span || 0.15;
   const r = fin(input.r) ? input.r : 0, q = fin(input.q) ? input.q : 0;
+  const k = kernels(contracts, r, q);
+  const at = (x) => profileValue(k, x);
   const grid = [], gex = [];
-  const { c1, c2, lk, w, m } = kernels(contracts, r, q);
   for (let i = 0; i < points; i++) {
     const x = spot * (1 - span + 2 * span * i / (points - 1));
-    let g = 0;
-    if (x > 0) {
-      const lx = Math.log(x);
-      for (let j = 0; j < m; j++) {
-        const d1 = c1[j] * (lx - lk[j]) + c2[j];
-        g += w[j] * (Number.isFinite(d1) ? expNegHalfSq(d1) : 0);
-      }
-      g *= x;
-    }
-    grid.push(x); gex.push(g);
+    grid.push(x); gex.push(at(x));
   }
-  const flips = [];
-  for (let i = 1; i < points; i++) {
-    if ((gex[i - 1] < 0) !== (gex[i] < 0)) {
-      const t = gex[i - 1] / (gex[i - 1] - gex[i]);
-      flips.push(grid[i - 1] + t * (grid[i] - grid[i - 1]));
-    }
-  }
+  const flips = zeroCrossings(grid, gex, at, 1e-10 * spot);
   flips.sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot) || a - b);
-  return { grid, gex, flip: flips.length ? flips[0] : null, flips };
+  return { grid, gex, flip: flips.length ? flips[0] : null, flips, at };
 }

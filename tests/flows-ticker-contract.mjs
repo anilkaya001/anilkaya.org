@@ -769,10 +769,10 @@ try {
       eq(got.flags, "Screen", "and names its depth in one word");
       eq(got.chips.join(" "), "IV pct IV 30d Dealer γ Earnings Size", "with the five screen readings as hero chips, the universe's one-year IV percentile named pct, never rank");
       eq(got.clipped, 0, `${width}px no chip label is cut off`);
-      eq(got.ranks.join(" "), "IV 30d VRP Term γ / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
+      eq(got.ranks.join(" "), "IV 30d VRP Term γ$ per 1% / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
       eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live prints once it resolves");
       ok(got.verdict, "and no verdict: there is no card for the Neuron to read");
-      ok(["IV 30d", "VRP", "γ / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
+      ok(["IV 30d", "VRP", "γ$ per 1% / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
          `the Screen draws every column the row carries and none it lacks (${got.screen.join(", ")})`);
       eq(got.waiting, 0, "and nothing on the page waits on a sign");
       const sw = await page.evaluate(sweep);

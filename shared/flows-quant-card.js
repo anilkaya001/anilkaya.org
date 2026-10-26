@@ -1,4 +1,4 @@
-import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
+import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf, CONTRACT_SHARES } from "./flows-quant-bs.js";
 import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, eventShape, sliceCallU, slicePutU, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
 import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, rndMoments, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
@@ -312,6 +312,8 @@ export function eventJump(built, event) {
   return out;
 }
 
+const BOOK_MIXED_SHARE = 0.01;
+
 export function bookLevels(strikeRows, { spot } = {}) {
   if (!(spot > 0)) return null;
   const rows = [];
@@ -320,14 +322,14 @@ export function bookLevels(strikeRows, { spot } = {}) {
     const k = num(r && r.strike);
     const c = num(r && r.call_gamma_oi), p = num(r && r.put_gamma_oi);
     if (k === null || !(k > 0) || (c === null && p === null)) continue;
-    if (p !== null && p > 0) pos++;
-    if (p !== null && p < 0) neg++;
+    if (p !== null && p > 0) pos += p;
+    if (p !== null && p < 0) neg -= p;
     rows.push({ k, c: c === null ? 0 : c, p: p === null ? 0 : p });
   }
   if (!rows.length) return null;
   rows.sort((a, b) => a.k - b.k);
   const sign = neg >= pos ? 1 : -1;
-  const mixed = pos > 0 && neg > 0 && Math.min(pos, neg) / (pos + neg) > 0.05;
+  const mixed = pos > 0 && neg > 0 && Math.min(pos, neg) / (pos + neg) > BOOK_MIXED_SHARE;
   let callWall = null, putWall = null, magnet = null, cBest = 0, pBest = 0, mBest = 0, gex = 0;
   for (const r of rows) {
     const put = sign * r.p;
@@ -339,7 +341,7 @@ export function bookLevels(strikeRows, { spot } = {}) {
   }
   return {
     callWall, putWall, magnet: mixed ? null : magnet, gex: mixed ? null : gex, strikes: rows.length,
-    putSign: mixed ? "mixed" : sign === 1 ? "dealer" : "holder", bandMin: rows[0].k, bandMax: rows[rows.length - 1].k,
+    putSign: pos + neg === 0 ? "none" : mixed ? "mixed" : sign === 1 ? "dealer" : "holder", bandMin: rows[0].k, bandMax: rows[rows.length - 1].k,
   };
 }
 
@@ -361,7 +363,7 @@ export function zeroGammaOf(built, { spot, atr = null, vendorGross = null } = {}
   let gross = 0;
   for (const c of contracts) {
     const gr = bsmGreeks({ S: spot, K: c.K, r: near.r, q: near.qImpl, sigma: c.sigma, T: c.T, type: c.type });
-    if (gr) gross += c.oi * 100 * gr.gamma * spot * spot * 0.01;
+    if (gr) gross += c.oi * CONTRACT_SHARES * gr.gamma * spot * spot * 0.01;
   }
   const coverage = fin(vendorGross) && vendorGross > 0 ? gross / vendorGross : null;
   const L = QUANT_CARD_LINES;

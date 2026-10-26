@@ -124,6 +124,10 @@
     if (!out.gamma_flip && num(card.zeroGamma) !== null) out.gamma_flip = { kind: "gamma_flip", label: "Zero-gamma level", px: card.zeroGamma };
     return out;
   }
+  const flipCount = (L) => {
+    const n = L && L.zeroGamma ? num(L.zeroGamma.count) : null;
+    return n === null || n < 1 ? "" : n === 1 ? " · only sign change within ±15%" : " · nearest to spot of " + n + " sign changes within ±15%";
+  };
   const levelList = (card) => Object.values(levelsOf(card)).filter((l) => C.LEVELS[l.kind]);
   const LVL_KEY = { gamma_flip: ["--lvl-flip", "dia", "Flip"], call_wall: ["--lvl-call", "dot", "Call wall"], put_wall: ["--lvl-put", "dot", "Put wall"], max_pain: ["--lvl-pain", "dia", "Max pain"] };
   const atrOf = (card) => numOr(card.atr, card.panels && card.panels.levels && card.panels.levels.atr, card.engine && card.engine.atr);
@@ -299,10 +303,10 @@
     const lvls = L && L.status === "ok" && Array.isArray(L.levels) ? L.levels : [];
     for (const l of lvls) {
       if (num(l.px) === null) continue;
-      rows.push([l.label || l.kind, "$" + F.px(l.px) + (num(l.distAtr) !== null ? " · " + sgn(l.distAtr) + Math.abs(l.distAtr).toFixed(2) + " ATR" : "") + (l.edge ? " (" + (l.note || "window edge") + ")" : "")]);
+      rows.push([l.label || l.kind, "$" + F.px(l.px) + (num(l.distAtr) !== null ? " · " + sgn(l.distAtr) + Math.abs(l.distAtr).toFixed(2) + " ATR" : "") + (l.edge ? " (" + (l.note || "window edge") + ")" : "") + (l.kind === "zero_gamma" ? flipCount(L) : "")]);
     }
     if (!lvls.some((l) => l.kind === "strike_sum_crossing")) rows.push(["Strike-sum crossing", num(card.strikeSumCrossing) !== null ? "$" + F.px(card.strikeSumCrossing) : "— quiet: the strike ladder's running sum does not change sign over the strikes read"]);
-    if (!lvls.some((l) => l.kind === "zero_gamma")) rows.push(["Zero-gamma level", num(card.zeroGamma) !== null ? "$" + F.px(card.zeroGamma) : "— unavailable: the card carries no chain profile to find one"]);
+    if (!lvls.some((l) => l.kind === "zero_gamma")) rows.push(["Zero-gamma level", num(card.zeroGamma) !== null ? "$" + F.px(card.zeroGamma) : "— unavailable: the card carries no chain profile, or its profile changes no sign within ±15% of spot"]);
     const pm = (card.panels || {}).pricedMove;
     if (pm && pm.status === "ok") rows.push(["Priced move", num(pm.movePerc) !== null ? "±" + F.pct(pm.movePerc) : num(pm.impliedMove) !== null ? "±" + F.pct(pm.impliedMove) : null]);
     const rk = rankByDate(card);
@@ -474,7 +478,7 @@
         info: () => ({ title: "Conviction", lead: "How far the families agree, how much of the card was measured, and how long the flow persisted.", facts: convFacts(card), notes: [convMath(card)] }) }),
       UI.gaugeChip({ icon: "gamma", color: gl === "short" ? "--g-short-ink" : "--g-long-ink", value: gl ? (gl === "short" ? "Short" : "Long") : chipDash("unavailable"), label: "Dealer γ", tone: gl,
         info: () => ({ title: "Dealer gamma", lead: gl ? "Dealers are " + gl + " gamma " + DEALER_CLAUSE + ": their hedging " + (gl === "short" ? "buys rallies and sells dips, which amplifies moves." : "sells rallies and buys dips, which dampens moves.") : "No regime reading on this card.",
-          facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Read from", reg.labelFrom || null], ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)],
+          facts: [["Book γ per 1%", F.money(reg.bookGamma, true)], ["Added today per 1%", F.money(numOr(reg.flowGamma, reg.netGamma), true)], ["Read from", reg.labelFrom || null], ["Zero crossings", num(reg.crossings) === null ? null : String(reg.crossings)], ["Zero-gamma level", P.levels && P.levels.zeroGamma && num(P.levels.zeroGamma.px) !== null ? F.px(P.levels.zeroGamma.px) + flipCount(P.levels) + ". Open-interest dealer gamma re-priced at each hypothetical spot, each contract at its own volatility and expiry, assuming dealers long calls and short puts" : null],
             ["1Y z", cx && num(cx.z) !== null ? F.signed(cx.z, 2) : null], ["Same sign for", cx && num(cx.persist) !== null ? SESSIONS(cx.persist) : null], ["Long share of the year", cx ? F.pct(cx.longShare, 0) : null]] }) }),
       UI.gaugeChip({ ring: ivr.v, color: "--s-blue", value: ivr.v === null ? chipDash(ivr.st.state) : String(Math.round(ivr.v * 100)), label: "IV rank",
         info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks." : ivr.st.reason,
@@ -2966,7 +2970,7 @@
   };
 
   const LITE = [["Volatility", [["iv30", "IV 30d", "p"], ["ivp", "IV pct", "i"], ["ivRank", "IV rank", "i"], ["rv20", "RV 20d", "p"], ["vrp", "VRP", "v"], ["ts", "Term", "s"], ["im", "Move", "m"], ["dIv1w", "IV 1w", "v"]]],
-    ["Dealers", [["gexAdv", "γ / ADV", "s"], ["gOi", "γ per 1%", "$"], ["gexRatio", "γ ratio", "x"], ["dDelta", "Δ / ADV", "t"]]],
+    ["Dealers", [["gexAdv", "γ$ per 1% / ADV", "s", "Dealer gamma per 1% move (the vendor's dollars, dealers long calls and short puts) as a share of 30-day average dollar volume, which is average share volume times the last close. Read it as the fraction of a normal day's dollar volume that dealers would trade to re-hedge a 1% move. Positive is long gamma, negative short."], ["gOi", "γ $ per 1%", "$", "Dealer gamma in dollars of delta change for a 1% move: gamma times open interest times 100 shares times spot squared times 0.01, dealers long calls and short puts."], ["gexRatio", "γ ratio (vendor)", "x", "The vendor's gamma ratio. The vendor documents no unit for it, so compare it across names and do not read it as an amount."], ["dDelta", "Flow Δ / ADV", "t", "The vendor's cumulative directional delta of the day's option flow over 30-day average share volume. The vendor documents no unit for the delta, so compare it across names and do not read it as shares."]]],
     ["Flow", [["net", "Net premium", "$"], ["lean", "Lean", "s"], ["pcr", "P/C", "x"]]],
     ["Trend", [["rsi", "RSI", "i"], ["adx", "ADX", "i"], ["bb", "Band", "p"], ["atr", "ATR", "p"], ["sma50", "vs 50d", "s"], ["rvol", "RVOL", "x"], ["si", "Short float", "p"]]]];
   const liteV = (v, f) => (f === "p" ? F.pct(v, 1) : f === "s" ? F.pct(v, 1, true) : f === "t" ? F.pct(v, 2, true) : f === "v" ? volPts(v) + " pts" : f === "m" ? "±" + F.pct(v, 1) : f === "x" ? "×" + v.toFixed(2) : f === "$" ? moneyPx(v) : String(Math.round(v)));
@@ -3006,7 +3010,7 @@
     const groups = LITE.map(([g, l]) => [g, l.filter(([k]) => num(u[k]) !== null)]).filter(([, l]) => l.length);
     if (!groups.length) return;
     mod({ id: "m-screen", title: "Screen", span: [12, 12], index: 2,
-      body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null })), { min: 96 }))),
+      body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f, long]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null, info: long ? UI.infoButton(lab, () => ({ title: lab, lead: long }), { small: true }) : null })), { min: 96 }))),
       info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + ", taken at " + F.time(card.generatedAt) + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
         facts: [["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"]] }) });
   }

@@ -894,8 +894,7 @@ const OUT = ENGINE.runEngine(BASE);
     const points = input.points || 121, span = input.span || 0.15;
     const r = Number.isFinite(input.r) ? input.r : 0, q = Number.isFinite(input.q) ? input.q : 0;
     const grid = [], gex = [];
-    for (let i = 0; i < points; i++) {
-      const x = spot * (1 - span + 2 * span * i / (points - 1));
+    const valueAt = (x) => {
       let g = 0;
       for (const c of contracts) {
         const gr = BS.bsmGreeks({ S: x, K: c.K, r, q, sigma: c.sigma, T: c.T, type: c.type });
@@ -903,13 +902,21 @@ const OUT = ENGINE.runEngine(BASE);
         const sgn = c.type === "C" ? 1 : -1;
         g += sgn * c.oi * 100 * gr.gamma * x * x * 0.01;
       }
-      grid.push(x); gex.push(g);
+      return g;
+    };
+    for (let i = 0; i < points; i++) {
+      const x = spot * (1 - span + 2 * span * i / (points - 1));
+      grid.push(x); gex.push(valueAt(x));
     }
     const flips = [];
     for (let i = 1; i < points; i++) {
       if ((gex[i - 1] < 0) !== (gex[i] < 0)) {
-        const t = gex[i - 1] / (gex[i - 1] - gex[i]);
-        flips.push(grid[i - 1] + t * (grid[i] - grid[i - 1]));
+        let lo = grid[i - 1], hi = grid[i], flo = gex[i - 1];
+        for (let n = 0; n < 200; n++) {
+          const mid = (lo + hi) / 2, fm = valueAt(mid);
+          if ((fm < 0) === (flo < 0)) { lo = mid; flo = fm; } else hi = mid;
+        }
+        flips.push((lo + hi) / 2);
       }
     }
     flips.sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot) || a - b);
@@ -938,7 +945,7 @@ const OUT = ENGINE.runEngine(BASE);
     cases++;
   }
   ok(worstPeak <= 1e-12, `THE GAMMA-ONLY KERNEL REPRODUCES THE GREEKS-BASED PROFILE: the largest difference at any of the 121 grid points, over ${cases} books of up to 1,620 contracts, is ${worstPeak.toExponential(2)} of the profile's peak (limit 1e-12)`);
-  ok(flips >= 30 && worstFlip <= 1e-9, `and the flip is unchanged to ${worstFlip.toExponential(2)} relative on ${flips} books that have one (limit 1e-9)`);
+  ok(flips >= 30 && worstFlip <= 1e-9, `and the flip is the bisected root of the greeks-based profile to ${worstFlip.toExponential(2)} relative on ${flips} books that have one (limit 1e-9)`);
   const edge = [
     { K: 100, T: 0, sigma: 0.3, type: "C", oi: 10 }, { K: 100, T: 0.1, sigma: 0, type: "P", oi: 10 }, { K: 0, T: 0.1, sigma: 0.3, type: "C", oi: 10 },
     { K: 100, T: 0.1, sigma: NaN, type: "C", oi: 10 }, { K: -5, T: 0.1, sigma: 0.3, type: "P", oi: 10 }, { K: 1e9, T: 0.1, sigma: 0.3, type: "C", oi: 10 },
