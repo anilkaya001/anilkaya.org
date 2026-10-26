@@ -25,6 +25,7 @@ const PAGES = Object.freeze([
   { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
+  { slug: "ledger", gate: "FLOWS_LEDGER", render: (username) => FLOWS_PAGES.ledgerPage({ username }) },
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
   { slug: "political", render: (username) => FLOWS_PAGES.politicalPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },

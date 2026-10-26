@@ -41,6 +41,7 @@ import { flowsDeskRows } from "./server/routes/flows-desk.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
+import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
 import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
 import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
@@ -3006,6 +3007,7 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
+flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows }),
 flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
