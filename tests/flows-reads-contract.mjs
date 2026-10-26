@@ -15,6 +15,7 @@ import { flowsPipelineRows, COVERAGE_ROW_CEILING } from "../server/routes/flows-
 import { flowsIngestRows } from "../server/routes/flows-ingest.js";
 import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
+import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -830,6 +831,8 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ready", 8, { owner: true }],
     ["/api/flows/ops", 24, { owner: true }],
     ["/api/flows/ops?part=ai", 280, { owner: true }],
+    ["/api/flows/ledger", LEDGER_ROW_CEILING],
+    ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -859,7 +862,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
   ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");

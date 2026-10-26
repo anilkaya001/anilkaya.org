@@ -108,6 +108,7 @@ const SUITE = [
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA", ms: 20000 },
   { id: "political", fn: "politicalPage", url: "/flows/political/", ms: 20000 },
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/", ms: 20000 },
+  { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/", ms: 20000 },
   { id: "desk", fn: "deskPage", url: "/flows/desk/?t=NVDA", ms: 45000 },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA", ms: 45000 },
 ];
