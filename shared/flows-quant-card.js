@@ -317,19 +317,20 @@ const BOOK_MIXED_SHARE = 0.01;
 export function bookLevels(strikeRows, { spot } = {}) {
   if (!(spot > 0)) return null;
   const rows = [];
-  let pos = 0, neg = 0;
+  let pos = 0, neg = 0, posN = 0, negN = 0;
   for (const r of strikeRows || []) {
     const k = num(r && r.strike);
     const c = num(r && r.call_gamma_oi), p = num(r && r.put_gamma_oi);
     if (k === null || !(k > 0) || (c === null && p === null)) continue;
-    if (p !== null && p > 0) pos += p;
-    if (p !== null && p < 0) neg -= p;
+    if (p !== null && p > 0) { pos += p; posN++; }
+    if (p !== null && p < 0) { neg -= p; negN++; }
     rows.push({ k, c: c === null ? 0 : c, p: p === null ? 0 : p });
   }
   if (!rows.length) return null;
   rows.sort((a, b) => a.k - b.k);
   const sign = neg >= pos ? 1 : -1;
-  const mixed = pos > 0 && neg > 0 && Math.min(pos, neg) / (pos + neg) > BOOK_MIXED_SHARE;
+  const mixed = pos > 0 && neg > 0
+    && (Math.min(pos, neg) / (pos + neg) > BOOK_MIXED_SHARE || (posN !== negN && (negN > posN) !== (neg >= pos)));
   let callWall = null, putWall = null, magnet = null, cBest = 0, pBest = 0, mBest = 0, gex = 0;
   for (const r of rows) {
     const put = sign * r.p;

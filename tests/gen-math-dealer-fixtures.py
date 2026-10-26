@@ -214,6 +214,11 @@ def book_cases():
         r["put_gamma_oi"] = "-1000"
     big[20]["put_gamma_oi"] = "400000"
     cases.append({"name": "the largest strike flipped: few rows, most of the dollars", "spot": 250, "rows": big, "expect": {"putSign": "mixed"}})
+    giant = [dict(r) for r in base]
+    for r in giant:
+        r["put_gamma_oi"] = "-10"
+    giant[20]["put_gamma_oi"] = "400000"
+    cases.append({"name": "one giant strike flipped among thirty-nine small ones: the dollars say holder, the strikes say dealer", "spot": 250, "rows": giant, "expect": {"putSign": "mixed"}})
     calls_only = [row(k, "500000", "0") for k in strikes[:5]]
     cases.append({"name": "no put gamma at all", "spot": 250, "rows": calls_only, "expect": {"putSign": "none"}})
     return cases

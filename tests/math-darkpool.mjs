@@ -75,16 +75,22 @@ ok(FX.scenarios.some((s) => s.perName.shed > 0 && s.perName.canceled > 0) && FX.
     { ticker: "SYA101", executed_at: "2026-10-02T15:00:00Z", price: "10.00", size: 100, premium: "1000.00", canceled: true },
     { ticker: "SYA101", executed_at: "2026-10-02T15:01:00Z", price: "10.00", size: 50, premium: "500.00", canceled: true },
   ] });
-  eq([all.status, all.rows.length, all.canceled, all.reason], ["quiet", 2, 2, "all 2 priced off-exchange prints were canceled"], "when every priced print was canceled the panel is quiet and says so, never $0 across 0 prints");
+  eq([all.status, all.rows.length, all.canceled, all.reason], ["quiet", 2, 2, "all 2 off-exchange prints were canceled"], "when every priced print was canceled the panel is quiet and says so, never $0 across 0 prints");
   eq(CARD.darkpoolLead(all), null, "and has no lead figure");
+  const mixed = STOCK.shapeStockDarkpool({ data: [
+    { ticker: "SYA101", executed_at: "2026-10-02T15:00:00Z", price: "10.00", size: 100, canceled: true },
+    { ticker: "SYA101", executed_at: "2026-10-02T15:01:00Z", price: "10.00", size: 50 },
+  ] });
+  eq([mixed.status, mixed.canceled, mixed.unpriced, mixed.reason], ["quiet", 1, 1, "1 canceled and 1 carried no premium, so none could be ranked"], "a canceled print with no premium is counted as canceled, not as unpriced, and the reason names both");
   const none = STOCK.shapeStockDarkpool({ data: [] });
   eq([none.status, none.canceled, none.reason], ["quiet", 0, undefined], "an empty feed is quiet with no canceled count to explain");
 }
 
 const MUTANTS = [
-  ["a canceled print takes a ranked slot", "shared/flows-stock.js", [["const live = rows.filter((r) => r.canceled !== true);", "const live = rows;"]], "STOCK"],
+  ["a canceled print takes a ranked slot", "shared/flows-stock.js", [["if (flag(r.canceled) === true) { canceled++; if (row) voided.push(row); continue; }", ""]], "STOCK"],
   ["the canceled prints are not listed", "shared/flows-stock.js", [["rows: kept.concat(voided.slice(0, CANCELED_SHOWN))", "rows: kept"]], "STOCK"],
-  ["the canceled prints are not counted", "shared/flows-stock.js", [["canceled: voided.length,", "canceled: 0,"]], "STOCK"],
+  ["a canceled print without a premium is counted as unpriced", "shared/flows-stock.js", [["if (flag(r.canceled) === true) { canceled++; if (row) voided.push(row); continue; }\n    if (row === null) { unpriced++; continue; }", "if (row === null) { unpriced++; continue; }\n    if (flag(r.canceled) === true) { canceled++; voided.push(row); continue; }"]], "STOCK"],
+  ["the canceled prints are not counted", "shared/flows-stock.js", [["unpriced,\n    canceled,\n  };", "unpriced,\n    canceled: 0,\n  };"]], "STOCK"],
   ["the lead sums the canceled prints", "shared/flows-card.js", [["const rows = (panel.rows || []).filter((r) => r.canceled !== true);\n  if (!rows.length) return null;\n  const total", "const rows = (panel.rows || []);\n  if (!rows.length) return null;\n  const total"]], "CARD"],
   ["the share goes through Math.round of a float product", "shared/flows-card.js", [["const topPct = wholePercent(top / total);", "const topPct = Math.round(top / total * 100);"]], "CARD"],
   ["the lead forgets the canceled sentence", "shared/flows-card.js", [["const voided = panel.canceled > 0", "const voided = false && panel.canceled > 0"]], "CARD"],

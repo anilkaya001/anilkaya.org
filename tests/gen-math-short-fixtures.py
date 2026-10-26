@@ -7,7 +7,11 @@ from decimal import Decimal, getcontext
 from fractions import Fraction
 from pathlib import Path
 
+import exchange_calendars as xc
+import pandas as pd
+
 getcontext().prec = 50
+CAL = xc.get_calendar("XNYS")
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "fixtures-math-short.json"
@@ -52,6 +56,14 @@ def build(rng, n, shape):
         rows[k]["total_volume"] = 0
         rows[k]["short_volume"] = 0
         rows[k]["short_volume_ratio"] = "0.4500"
+    if shape == "percent-ratio-day":
+        k = rng.randrange(max(0, n - 5), n)
+        rows[k]["short_volume_ratio"] = f"{Decimal(rows[k]['short_volume_ratio']) * 100:.2f}"
+    if shape == "short-over-total-day":
+        k = rng.randrange(max(0, n - 5), n)
+        rows[k]["short_volume"] = rows[k]["total_volume"] + 1000
+    if shape == "gap-in-five" and n >= 7:
+        del rows[n - 3]
     if shape == "counts-only-day":
         k = rng.randrange(max(0, n - 5), n)
         rows[k].pop("short_volume_ratio")
@@ -63,7 +75,16 @@ def number(row, key):
     return None if v is None else Fraction(str(v))
 
 
+def invalid(row):
+    ratio, sv, tv = number(row, "short_volume_ratio"), number(row, "short_volume"), number(row, "total_volume")
+    if (sv is not None and sv < 0) or (tv is not None and tv < 0) or (sv is not None and tv is not None and sv > tv):
+        return True
+    return ratio is not None and (ratio < 0 or ratio > 1)
+
+
 def daily(row):
+    if invalid(row):
+        return None
     r = number(row, "short_volume_ratio")
     if r is not None:
         return r
@@ -71,6 +92,14 @@ def daily(row):
     if sv is not None and tv is not None and tv > 0:
         return sv / tv
     return None
+
+
+def sessions_between(a, b):
+    start = pd.Timestamp(a) + pd.Timedelta(days=1)
+    end = pd.Timestamp(b)
+    if end < start:
+        return 0
+    return len(CAL.sessions_in_range(start, end))
 
 
 def dec(f):
@@ -85,6 +114,7 @@ def expect(rows):
     x = daily(latest)
     out = {"ratio": None if x is None else f"{dec(x):.20f}", "n": len(prior), "z": None, "mean60": None, "sd60": None, "reason": None}
     if x is None:
+        out["n"] = 0
         out["reason"] = "absent"
     elif len(prior) < MIN_PRIOR:
         out["reason"] = "too_few"
@@ -99,8 +129,13 @@ def expect(rows):
         else:
             out["reason"] = "degenerate"
     five = rows[-5:]
+    none = lambda why: out.update({"ratio5": None, "ratio5Basis": None, "ratio5Why": why})
     if len(five) < 5:
-        out.update({"ratio5": None, "ratio5Basis": None, "ratio5Why": "too_few"})
+        none("too_few")
+    elif any(invalid(r) for r in five):
+        none("unreadable")
+    elif any(sessions_between(five[i - 1]["market_date"], five[i]["market_date"]) != 1 for i in range(1, 5)):
+        none("low_coverage")
     elif all(number(r, "short_volume") is not None and number(r, "total_volume") is not None and number(r, "total_volume") > 0 for r in five):
         s = sum((number(r, "short_volume") for r in five), Fraction(0))
         t = sum((number(r, "total_volume") for r in five), Fraction(0))
@@ -108,15 +143,15 @@ def expect(rows):
     elif all(daily(r) is not None for r in five):
         out.update({"ratio5": f"{dec(sum((daily(r) for r in five), Fraction(0)) / 5):.20f}", "ratio5Basis": "mean", "ratio5Why": None})
     else:
-        out.update({"ratio5": None, "ratio5Basis": None, "ratio5Why": "too_few"})
+        none("low_coverage")
     return out
 
 
 def main():
     rng = random.Random(20261026)
     scenarios = []
-    for i in range(70):
-        shape = rng.choice(["plain", "plain", "plain", "ratio-only-day", "zero-total-day", "counts-only-day", "constant"])
+    for i in range(90):
+        shape = rng.choice(["plain", "plain", "plain", "ratio-only-day", "zero-total-day", "counts-only-day", "constant", "percent-ratio-day", "short-over-total-day", "gap-in-five"])
         n = rng.choice([1, 2, 3, 4, 5, 6, 30, 41, 42, 45, 61, 70])
         rows = build(rng, n, shape)
         rng.shuffle(rows)

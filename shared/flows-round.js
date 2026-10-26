@@ -10,6 +10,7 @@ const SHORT_DP = Object.freeze([0, 0, 1, 2, 2]);
 
 export function fixedHalfUp(a, dp, shift = 0) {
   const m = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(a));
+  if (!m) throw new RangeError("fixedHalfUp needs a finite number that is not negative: " + a);
   const digits = m[1] + (m[2] || "");
   const keep = m[1].length + (m[3] ? Number(m[3]) : 0) + shift + dp;
   let n;
@@ -63,6 +64,7 @@ export function formatScaled(v, dpFor, prefix = "", plus = false) {
 }
 
 export const wholePercent = (v) => {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
   const n = Number(fixedHalfUp(Math.abs(v), 0, 2));
   return v < 0 ? -n : n;
 };

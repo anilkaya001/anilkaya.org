@@ -69,6 +69,13 @@ const words = (v) => {
 
 const TICKS_PER_DOLLAR = 1e6;
 
+const OFF_GRID_TICKS = 1e-3;
+
+const offGrid = (v) => {
+  const n = num(v);
+  return n !== null && Math.abs(n * TICKS_PER_DOLLAR - Math.round(n * TICKS_PER_DOLLAR)) > OFF_GRID_TICKS;
+};
+
 const ticksOf = (v) => {
   const n = num(v);
   if (n === null) return null;
@@ -82,9 +89,11 @@ export const NO_SIDE_WORDS = Object.freeze({
   "no-offer": "no offer",
   crossed: "crossed quote",
   locked: "locked quote, side cannot be told",
+  "off-grid": "a price finer than a millionth of a dollar",
 });
 
 export function readQuote(price, bid, ask) {
+  if (offGrid(price) || offGrid(bid) || offGrid(ask)) return { tier: "n", why: "off-grid" };
   const p = ticksOf(price);
   const b = ticksOf(bid);
   const a = ticksOf(ask);
@@ -198,7 +207,7 @@ function timeOf(v) {
 
 const blank = () => ({
   n: 0, undated: 0, unpriced: 0, canceled: 0, gross: 0, askPrem: 0, bidPrem: 0, otherPrem: 0,
-  callSigned: 0, putSigned: 0, sweeps: 0, large: 0, multiLeg: 0, excluded: 0, extended: 0, conflicts: 0,
+  callSigned: 0, putSigned: 0, sweeps: 0, large: 0, multiLeg: 0, excluded: 0, extended: 0, conflicts: 0, locked: 0, unquoted: 0,
 });
 
 export function aggregate(prints, { now, windowsS = WINDOWS_S, floor = null } = {}) {
@@ -212,6 +221,7 @@ export function aggregate(prints, { now, windowsS = WINDOWS_S, floor = null } = 
       if ((r.flags & FLAGS.canceled) !== 0) { acc.canceled += 1; continue; }
       acc.n += 1;
       if (r.parity === "disagree") acc.conflicts += 1;
+      if (r.tier === "n") { if (r.why === "locked") acc.locked += 1; else acc.unquoted += 1; }
       if ((r.flags & FLAGS.sweep) !== 0) acc.sweeps += 1;
       if ((r.flags & FLAGS.large) !== 0) acc.large += 1;
       if ((r.flags & FLAGS.multiLeg) !== 0) acc.multiLeg += 1;

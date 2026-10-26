@@ -53,6 +53,7 @@ export function zeroCrossings(grid, values, at, tol) {
   const out = [];
   let last = -1;
   for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) { last = -1; continue; }
     if (values[i] === 0) continue;
     if (last >= 0 && (values[i] < 0) !== (values[last] < 0)) {
       out.push(i - last > 1 ? grid[last + 1] : polishRoot(at, grid[last], values[last], grid[i], values[i], tol));

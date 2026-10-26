@@ -47,13 +47,18 @@ def key_of(r):
 
 
 def per_name(raw_rows):
-    live, voided, unpriced = [], [], 0
+    live, voided, unpriced, canceled = [], [], 0, 0
     for r in raw_rows:
-        if r.get("premium") is None:
+        item = None if r.get("premium") is None else {"prem": Decimal(r["premium"]), "at": r["executed_at"], "size": r["size"]}
+        if r.get("canceled") is True:
+            canceled += 1
+            if item:
+                voided.append(item)
+            continue
+        if item is None:
             unpriced += 1
             continue
-        item = {"prem": Decimal(r["premium"]), "at": r["executed_at"], "size": r["size"]}
-        (voided if r.get("canceled") is True else live).append(item)
+        live.append(item)
     live.sort(key=key_of)
     voided.sort(key=key_of)
     kept = live[:NAME_CAP]
@@ -63,7 +68,7 @@ def per_name(raw_rows):
         "voided": [f"{v['prem']:.2f}" for v in voided[:VOID_SHOWN]],
         "seen": len(live),
         "shed": len(live) - len(kept),
-        "canceled": len(voided),
+        "canceled": canceled,
         "unpriced": unpriced,
         "total": f"{total:.2f}",
     }

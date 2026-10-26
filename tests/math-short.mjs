@@ -57,6 +57,10 @@ const MUTANTS = [
   ["the basis is always named pooled", [['ratio5Basis: "mean"', 'ratio5Basis: "pooled"']]],
   ["the latest day is part of its own comparison window", [["list.slice(0, -1).slice(-window)", "list.slice(-window)"]]],
   ["the minimum history is ignored", [["ownZ(prior, latest.ratio, { min })", "ownZ(prior, latest.ratio, { min: 2 })"]]],
+  ["a session with an impossible row is pooled", [["if (five.some((x) => x.invalid)) return noFive(SILENCE.unreadable);", ""]]],
+  ["a gap inside the five sessions is pooled across", [["for (let i = 1; i < five.length; i++) if (sessionsBetween(five[i - 1].d, five[i].d) !== 1) return noFive(SILENCE.coverage);", ""]]],
+  ["short volume above total volume is believed", [["(svRaw !== null && tvRaw !== null && svRaw > tvRaw)", "false"]]],
+  ["a ratio stated in percent is believed", [["(stated < 0 || stated > 1)", "stated < 0"]]],
   ["the old mean-of-ratios field is kept beside the new one", [["...pooledFive(list),", "...pooledFive(list), avg5: mean(list.slice(-5).map((x) => x.ratio)),"]]],
 ];
 for (const [name, transforms] of MUTANTS) {

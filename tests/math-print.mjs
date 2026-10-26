@@ -21,13 +21,20 @@ function cases(M) {
     if (M.tierOf(price, bid, ask) !== tier) bad.push(`tierOf disagrees with readQuote at ${price} ${bid} ${ask}`);
     if (bad.length > 6) break;
   }
+  if (M.aggregate) {
+    const NOW = Date.parse("2026-10-02T15:00:00Z");
+    const mk = (o) => ({ id: "t", executed_at: new Date(NOW - 10000).toISOString(), option_type: "call", size: 1, price: "1.00", nbbo_bid: "1.00", nbbo_ask: "1.00", premium: "100", tags: [], report_flags: [], canceled: false, ...o });
+    const w = M.aggregate([mk({}), mk({}), mk({ nbbo_bid: null }), mk({ price: "1.01" })], { now: NOW })[60];
+    if (w.locked !== 2 || w.unquoted !== 1) bad.push(`a window of two locked fills, one unquoted and one through the offer counts ${w.locked} locked and ${w.unquoted} unquoted`);
+    if (w.n !== 4 || w.askPrem !== 100) bad.push(`and still has four prints with one signed ask-side (${w.n}, ${w.askPrem})`);
+  }
   return bad;
 }
 
 eq(cases(TS).join("; "), "", `all ${FX.rows.length} quote and price triples classify as the Fraction oracle does, tier and reason`);
 
 const tiers = new Set(FX.rows.map((r) => r[3] + "/" + r[4]));
-for (const t of ["A/null", "a/null", "m/null", "b/null", "B/null", "n/locked", "n/crossed", "n/no-offer", "n/no-price", "n/no-quote"]) ok(tiers.has(t), `the fixture holds ${t}`);
+for (const t of ["A/null", "a/null", "m/null", "b/null", "B/null", "n/locked", "n/crossed", "n/no-offer", "n/no-price", "n/no-quote", "n/off-grid"]) ok(tiers.has(t), `the fixture holds ${t}`);
 ok(FX.rows.some((r) => r[1] === "0.00" && r[3] === "A"), "and a zero bid with a fill at the ask, which is still a buyer paying the offer");
 ok(FX.rows.some((r) => r[3] === "A" && r[0] !== r[2] && r[1] === r[2]), "and a fill through a locked offer");
 
@@ -62,6 +69,8 @@ const MUTANTS = [
   ["above and below the midpoint are swapped", [['twice > sum ? "a" : "b"', 'twice > sum ? "b" : "a"']]],
   ["a zero ask is a quote", [["if (a <= 0) return", "if (a < 0) return"]]],
   ["a zero price is a fill", [["if (p === null || p <= 0) return", "if (p === null || p < 0) return"]]],
+  ["a locked fill is counted as unquoted", [['if (r.why === "locked") acc.locked += 1; else acc.unquoted += 1;', "acc.unquoted += 1;"]]],
+  ["a price finer than a tick is rounded onto the grid", [["if (offGrid(price) || offGrid(bid) || offGrid(ask)) return { tier: \"n\", why: \"off-grid\" };", ""]]],
 ];
 for (const [name, transforms] of MUTANTS) {
   let mod;

@@ -123,16 +123,22 @@ const CSS_GZIP_KIB = {
   statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
 };
 
-const FORMAT_CORE = { od: "MATH-1", bytes: 1572, gzip: 489, why: "lane 2 math audit: flows-ui.js carries the one rounding rule of shared/flows-round.js (fixedHalfUp, formatFixed, formatScaled and the unit floors, 1,344 B) and F.strike and F.etDay (228 B), measured as 71,076 to 72,648 B raw and 22,524 to 23,013 B gzip, so every route that ships flows-ui.js grows by it; the browser imports nothing, so the copy is the price of one rounding rule that tests/math-format.mjs holds equal to the leaf" };
+const FORMAT_CORE = { od: "MATH-1", bytes: 1737, gzip: 543, why: "lane 2 math audit: flows-ui.js carries the one rounding rule of shared/flows-round.js (fixedHalfUp, formatFixed, formatScaled and the unit floors, 1,344 B), F.strike and F.etDay (228 B) and the guards that make an unreadable number throw or answer null instead of printing a zero (165 B), measured as 71,076 to 72,813 B raw and 22,524 to 23,067 B gzip, so every route that ships flows-ui.js grows by it; the browser imports nothing, so the copy is the price of one rounding rule that tests/math-format.mjs holds equal to the leaf" };
 const TICKER_DEALER_LABELS = { bytes: 1595, gzip: 601, why: "lane 2 math audit: the ticker's Dealers tiles state their convention (dollars per 1% move, over dollar average daily volume, the vendor's sign) in long text with an information button, the zero-gamma line counts its crossings, and the ticker's rounding sites call the shared rule, measured as 263,737 to 265,332 B raw and 77,181 to 77,782 B gzip" };
+const TICKER_PRINTS_MOVE = { bytes: 848, gzip: 249, why: "lane 2 math audit: the ticker lists canceled prints after the live ones with their own count and sentence, names the vendor's end-of-week move and the one-standard-deviation move by what each is, and states the convention in the facts, measured as 265,332 to 266,180 B raw and 77,782 to 78,031 B gzip" };
+const BOARD_MOVE_LABEL = { bytes: 280, gzip: 80, why: "lane 2 math audit: the board's Move column title, cell tooltip and legend line say it is one standard deviation of 30-day implied volatility over the board's horizon on a 252-session year, a priced range and not a forecast, measured as 85,645 to 85,925 B raw and 24,959 to 25,039 B gzip in flows-board.js" };
 const NO_UI_ROUTES = new Set(["loginPage", "aboutPage", "glossaryPage", "notFoundPage"]);
 for (const name of Object.keys(CEILING_KIB)) {
   if (NO_UI_ROUTES.has(name)) continue;
   if (name !== "eventsPage") CEILING_KIB[name] += FORMAT_CORE.bytes / 1024;
   GZIP_KIB[name] += FORMAT_CORE.gzip / 1024;
 }
-CEILING_KIB.tickerPage += TICKER_DEALER_LABELS.bytes / 1024;
-GZIP_KIB.tickerPage += TICKER_DEALER_LABELS.gzip / 1024;
+CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
+GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
+for (const name of ["sidePage", "watchPage"]) {
+  CEILING_KIB[name] += BOARD_MOVE_LABEL.bytes / 1024;
+  GZIP_KIB[name] += BOARD_MOVE_LABEL.gzip / 1024;
+}
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
@@ -185,6 +191,8 @@ const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
   unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
+const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
+DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 
 const FLOOR_BYTES = 1024;
 const EAGER_KERNEL = [

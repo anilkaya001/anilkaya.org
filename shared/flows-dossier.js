@@ -1247,7 +1247,7 @@ export function buildPositioningPacket(inp) {
   }
   const sv = S && isObj(S.volume) && S.volume.status === "ok" ? S.volume : null;
   if (sv) {
-    rec.fact("shortVolume.ratio", "Share of volume sold short (FINRA)", sv.ratio, "fraction", { grade: xg, note: "a 40-50% baseline is market-making, not short interest; as of " + sv.date });
+    rec.fact("shortVolume.ratio", "Share of volume sold short (FINRA)", sv.ratio, "fraction", { grade: xg, note: "a 40-50% baseline is market-making, not short interest; FINRA-reported volume only, not all trading; as of " + sv.date });
     rec.fact("shortVolume.z", "That ratio against its own last 60 sessions", sv.z, "z", { signed: true, grade: xg, silent: true });
   }
 

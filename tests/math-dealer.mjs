@@ -108,6 +108,8 @@ function crossingCases(DM) {
     [[1, 2, 3, 4], [-1, 0, 0, 1], 1, "a run of zeros between opposite signs is one crossing"],
     [[1, 2, 3], [0, 0, 0], 0, "a profile of zeros has none"],
     [[1, 2, 3, 4], [1, -1, 1, -1], 3, "three alternating crossings are three"],
+    [[1, 2, 3], [-1, NaN, 1], 0, "a point with no value is not a sign change across it"],
+    [[1, 2, 3, 4], [-1, NaN, -1, 1], 1, "and the crossing after it is still found"],
   ];
   for (const [grid, values, want, what] of cases) {
     const got = DM.zeroCrossings(grid, values, line, 1e-12);
@@ -154,10 +156,12 @@ const MUTANTS = [
   ["a profile cell that touches zero counts twice", "shared/flows-quant-dealer.js", [["if (values[i] === 0) continue;", ""]], crossingCases, DEALER],
   ["the first zero of a run is not the crossing", "shared/flows-quant-dealer.js", [["i - last > 1 ? grid[last + 1] :", "i - last > 1 ? grid[i] :"]], crossingCases, DEALER],
   ["the profile forgets the factor of spot", "shared/flows-quant-dealer.js", [["return g * x;", "return g;"]], profileCases, DEALER],
-  ["the put sign is voted by row count", "shared/flows-quant-card.js", [["if (p !== null && p > 0) pos += p;\n    if (p !== null && p < 0) neg -= p;", "if (p !== null && p > 0) pos += 1;\n    if (p !== null && p < 0) neg += 1;"]], bookCases, CARD],
+  ["the put sign is voted by row count", "shared/flows-quant-card.js", [["if (p !== null && p > 0) { pos += p; posN++; }\n    if (p !== null && p < 0) { neg -= p; negN++; }", "if (p !== null && p > 0) { pos += 1; posN++; }\n    if (p !== null && p < 0) { neg += 1; negN++; }"]], bookCases, CARD],
   ["the mixed line sits at five percent", "shared/flows-quant-card.js", [["const BOOK_MIXED_SHARE = 0.01;", "const BOOK_MIXED_SHARE = 0.05;"]], bookCases, CARD],
   ["the put sign is always the dealer's", "shared/flows-quant-card.js", [["const sign = neg >= pos ? 1 : -1;", "const sign = 1;"]], bookCases, CARD],
   ["no puts is called a dealer book", "shared/flows-quant-card.js", [['putSign: pos + neg === 0 ? "none" : mixed', 'putSign: mixed']], bookCases, CARD],
+  ["a missing value reads as a positive profile", "shared/flows-quant-dealer.js", [["if (!Number.isFinite(values[i])) { last = -1; continue; }", ""]], crossingCases, DEALER],
+  ["the dollar majority alone decides the put sign", "shared/flows-quant-card.js", [["(posN !== negN && (negN > posN) !== (neg >= pos))", "false"]], bookCases, CARD],
   ["the book net adds the put leg twice", "shared/flows-quant-card.js", [["const book = r.c + put;", "const book = r.c + put + r.p;"]], bookCases, CARD],
 ];
 for (const [name, rel, transforms, battery] of MUTANTS) {

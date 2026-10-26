@@ -125,6 +125,19 @@ function battery(UIx) {
 eq(battery(UI).join("; "), "", "the shipped formatters pass every probe: ties, floors, carries, units chosen after rounding, absent values and the Unicode minus");
 
 const swap = (from, to) => [[from, to]];
+{
+  for (const bad of [null, undefined, NaN, Infinity, -Infinity, "0.5", {}, []]) eq(LEAF.wholePercent(bad), null, `a whole percent of ${String(bad)} is absent, never a zero and never a throw`);
+  eq(LEAF.wholePercent(0.004), 0, "a value that rounds to zero is the number zero for a comparison, and the printed form owns the floor");
+  eq(LEAF.wholePercent(-0.285), -29, "and a negative share rounds away from zero as a positive one does");
+  for (const bad of [-1.5, NaN, Infinity, -0.1]) {
+    assert.throws(() => LEAF.fixedHalfUp(bad, 0), RangeError, `fixedHalfUp refuses ${bad} by name instead of failing on a null match`);
+    checks++;
+  }
+  eq(LEAF.formatScaled(999999.5, LEAF.compactDp), "1.00M", "999,999.5 rounds up into the million");
+  eq(LEAF.formatFixed(9.99e-10, { dp: 2 }), "0.00", "float noise under a nano is an exact zero");
+  eq(LEAF.formatFixed(1e-9, { dp: 2 }), "<0.01", "and the first value that is not noise prints its floor");
+}
+
 const MUTANTS = [
     ["toFixed in place of the decimal core", swap("const s = fixedHalfUp(a, dp, shift);\n    if (/^[0.]+$/.test(s)) return sign + \"<\" + prefix + unitFloor(dp) + suffix;", "const s = (a * 10 ** shift).toFixed(dp);\n    if (/^[0.]+$/.test(s)) return sign + \"<\" + prefix + unitFloor(dp) + suffix;")],
     ["a nano nudge before rounding", swap("const s = fixedHalfUp(a, dp, shift);\n    if (/^[0.]+$/.test(s)) return sign + \"<\" + prefix + unitFloor(dp) + suffix;", "const s = fixedHalfUp(a + 1e-9, dp, shift);\n    if (/^[0.]+$/.test(s)) return sign + \"<\" + prefix + unitFloor(dp) + suffix;")],
@@ -137,7 +150,7 @@ const MUTANTS = [
     ["the digits are not recomputed after a rollover to a hundred", swap("if (d2 < dp) { dp = d2; s = fixedHalfUp(a, d2, -3 * i); }", "if (d2 < dp) { dp = d2; }")],
     ["a percent is multiplied by a hundred before the decimal point is moved", swap("pct: (v, dp = 1, signed = false) => formatFixed(v, { dp, shift: 2, suffix: \"%\", plus: signed }),", "pct: (v, dp = 1, signed = false) => formatFixed(v * 100, { dp, suffix: \"%\", plus: signed }),")],
     ["the minus is a hyphen", swap("const MINUS = \"−\";", "const MINUS = \"-\";")],
-    ["the exponent of a small number is not read", swap("(?:e([+-]\\d+))?$/.exec(String(a));\n    const digits", "(?:e(x))?$/.exec(String(a));\n    const digits")],
+    ["the exponent of a small number is not read", swap("(?:e([+-]\\d+))?$/.exec(String(a));\n    if (!m)", "(?:e(x))?$/.exec(String(a));\n    if (!m)")],
     ["the exact money form still nudges by a nano", swap("const exactUsd = (n, signed) => formatFixed(n, { dp: Math.abs(n) < 1000 ? 2 : 0, prefix: \"$\", plus: signed, group: true });", "const exactUsd = (n, signed) => formatFixed(n + 1e-9, { dp: Math.abs(n) < 1000 ? 2 : 0, prefix: \"$\", plus: signed, group: true });")],
     ["a trillion prints with the billion suffix", swap('const SCALE_SUFFIX = ["", "K", "M", "B", "T"];', 'const SCALE_SUFFIX = ["", "K", "M", "B", "B"];')],
     ["a strike is run through the compact form", swap("strike: (k) => (num(k) === null || !(k > 0) ? DASH : Number.isInteger(k) ? String(k) : fixedHalfUp(k, Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? 1 : 2)),", "strike: (k) => (num(k) === null || !(k > 0) ? DASH : compact(k, Number.isInteger(k) ? 0 : 1)),")],
