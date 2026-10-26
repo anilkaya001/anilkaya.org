@@ -28,7 +28,9 @@ const print = (o = {}) => ({
   ];
   for (const [price, tier] of grid) eq(tierOf(price, "1.00", "1.10"), tier, `bid 1.00 ask 1.10: a fill at ${price} is tier ${tier}`);
   eq(tierOf(1.1, 1, 1.1), "A", "numbers read like their strings");
-  eq(tierOf("1.00", "1.00", "1.00"), "m", "a locked market fills at the midpoint, which is the bid and the ask");
+  eq(tierOf("1.00", "1.00", "1.00"), "n", "a fill at a locked quote is at the bid and the ask at once, so it has no side and is not a midpoint fill");
+  eq(tierOf("1.01", "1.00", "1.00"), "A", "a fill through a locked offer is still at the ask");
+  eq(tierOf("0.99", "1.00", "1.00"), "B", "and one through a locked bid is still at the bid");
   eq(tierOf("1.00", "1.10", "1.00"), "n", "a crossed market has no side to read");
   eq(tierOf("0.05", "0.00", "0.05"), "A", "a zero bid is a quote: a fill at the ask is still at the ask");
   eq(tierOf("0.025", "0.00", "0.05"), "m", "and the midpoint of it is 0.025");
@@ -347,7 +349,8 @@ const print = (o = {}) => ({
   }
   ok(/^at or above the ask$/.test(SIDE_WORDS.A) && /^at or below the bid$/.test(SIDE_WORDS.B), "the strong tiers use the lexicon's phrases");
   ok(!banned.test(largeLabel(25000)), "and the large-print label");
-  ok(!/\bimport\b|\brequire\(/.test(SOURCE), "the classifier is a leaf: it imports nothing");
+  deep([...SOURCE.matchAll(/^import[^\n]*from "([^"]+)";/gm)].map((m) => m[1]), ["./flows-round.js"], "the classifier is a leaf over the rounding leaf alone");
+  ok(!/\brequire\(|\bimport\(/.test(SOURCE), "and loads nothing at run time");
   ok(!/Date\.now|new Date\(\)|Math\.random|process\.|globalThis/.test(SOURCE), "and reads no clock, no randomness and no environment: the caller passes the time");
 }
 

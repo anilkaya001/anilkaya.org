@@ -100,6 +100,20 @@ export function borrowSummary(rows, { sessionDate = null, dfeeSessions = 5, path
   };
 }
 
+export const SVR_FIVE = 5;
+
+export function pooledFive(list) {
+  const five = list.slice(-SVR_FIVE);
+  if (five.length < SVR_FIVE) return { ratio5: null, ratio5Basis: null, ratio5Why: SILENCE.few };
+  if (five.every((x) => x.sv !== null && x.tv !== null && x.tv > 0)) {
+    let s = 0, t = 0;
+    for (const x of five) { s += x.sv; t += x.tv; }
+    return { ratio5: s / t, ratio5Basis: "pooled", ratio5Why: null };
+  }
+  if (five.every((x) => x.ratio !== null)) return { ratio5: mean(five.map((x) => x.ratio)), ratio5Basis: "mean", ratio5Why: null };
+  return { ratio5: null, ratio5Basis: null, ratio5Why: SILENCE.few };
+}
+
 export function shortVolumeSummary(rows, { sessionDate = null, window = SVR_WINDOW, min = SVR_MIN } = {}) {
   const list = [];
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -123,7 +137,7 @@ export function shortVolumeSummary(rows, { sessionDate = null, window = SVR_WIND
     shortVolume: latest.sv,
     totalVolume: latest.tv,
     mean60: z.mean, sd60: z.sd, z: z.z, n: z.n, reason: z.reason,
-    avg5: mean(list.slice(-5).map((x) => x.ratio)),
+    ...pooledFive(list),
     path: list.slice(-20).map((x) => [x.d, x.ratio === null ? null : Number(x.ratio.toFixed(4))]),
     rule: "z of the latest FINRA short-volume ratio against the 60 sessions before it; a 40-50% baseline is market-making, not short interest",
   };

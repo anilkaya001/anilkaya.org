@@ -67,17 +67,41 @@ const words = (v) => {
   return v.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
 };
 
-export function tierOf(price, bid, ask) {
-  const p = num(price);
-  const b = num(bid);
-  const a = num(ask);
-  if (p === null || b === null || a === null || p <= 0 || b < 0 || a <= 0 || a < b) return "n";
-  const mid = (a + b) / 2;
-  if (Math.abs(p - mid) <= EPS) return "m";
-  if (p >= a) return "A";
-  if (p <= b) return "B";
-  return p > mid ? "a" : "b";
+const TICKS_PER_DOLLAR = 1e6;
+
+const ticksOf = (v) => {
+  const n = num(v);
+  if (n === null) return null;
+  const t = Math.round(n * TICKS_PER_DOLLAR);
+  return Number.isSafeInteger(t) ? t : null;
+};
+
+export const NO_SIDE_WORDS = Object.freeze({
+  "no-price": "no usable price",
+  "no-quote": "no usable quote",
+  "no-offer": "no offer",
+  crossed: "crossed quote",
+  locked: "locked quote, side cannot be told",
+});
+
+export function readQuote(price, bid, ask) {
+  const p = ticksOf(price);
+  const b = ticksOf(bid);
+  const a = ticksOf(ask);
+  if (p === null || p <= 0) return { tier: "n", why: "no-price" };
+  if (b === null || a === null || b < 0) return { tier: "n", why: "no-quote" };
+  if (a <= 0) return { tier: "n", why: "no-offer" };
+  if (a < b) return { tier: "n", why: "crossed" };
+  if (a === b && p === a) return { tier: "n", why: "locked" };
+  const twice = 2 * p;
+  const sum = a + b;
+  if (twice === sum) return { tier: "m", why: null };
+  if (p >= a) return { tier: "A", why: null };
+  if (p <= b) return { tier: "B", why: null };
+  return { tier: twice > sum ? "a" : "b", why: null };
 }
+
+export const tierOf = (price, bid, ask) => readQuote(price, bid, ask).tier;
 
 export function sideTagOf(tags) {
   const seen = words(tags).filter((t) => SIDE_TAGS.includes(t));
@@ -127,7 +151,7 @@ export function classifyPrint(print, { floor = null } = {}) {
   const ask = num(p.nbbo_ask);
   const size = num(p.size);
   const premium = num(p.premium);
-  const tier = tierOf(price, bid, ask);
+  const { tier, why } = readQuote(price, bid, ask);
   const tag = sideTagOf(p.tags);
   const parity = parityOf(tag, tier);
   const sw = sweepOf(p);
@@ -150,6 +174,7 @@ export function classifyPrint(print, { floor = null } = {}) {
     id: typeof p.id === "string" || typeof p.id === "number" ? p.id : null,
     side,
     tier,
+    why,
     tag,
     parity,
     basis,
