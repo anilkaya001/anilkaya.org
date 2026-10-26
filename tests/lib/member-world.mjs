@@ -68,7 +68,8 @@ export function universePayload(tickers = UNIVERSE_NAMES, extra = {}) {
 export async function build({ modules, payloads = {}, env: envExtra = {}, now = clock(), live = null, owners = [OWNER] } = {}) {
   const f = fakeD1({ latencyMs: 0 });
   const store = modules.store.createMemberStore({ schemaSql: memberSchemaSql() });
-  const { flowsStore, reads } = stores({ universe: universePayload(), ...payloads });
+  const merged = { universe: universePayload(), ...payloads };
+  const { flowsStore, reads } = stores(merged);
   const limits = { read: limiter(120), write: limiter(30), export: limiter(10) };
   const rows = modules.route.flowsMeRows({
     store, flowsStore, readLiveRows: typeof live === "function" ? live : async () => live || { rows: [] }, isOwner: (env, u) => owners.includes(u), now,
@@ -77,7 +78,7 @@ export async function build({ modules, payloads = {}, env: envExtra = {}, now = 
     DB: f.D1, MEMBER_STATE_KEY: KEY, FLOWS_MEMBER_STATE: "on", FLOWS_EXPORTS: "on",
     MEMBER_STATE_READ: limits.read, MEMBER_STATE_WRITE: limits.write, MEMBER_EXPORT: limits.export, ...envExtra,
   };
-  const world = { f, store, rows, env, limits, now, reads, flowsStore };
+  const world = { f, store, rows, env, limits, now, reads, flowsStore, payloads: merged };
   world.call = (id, opts) => call(world, id, opts);
   return world;
 }

@@ -204,6 +204,16 @@ export function buildBattery(B) {
   eq([wj.meta.rows, wj.meta.available, wj.meta.truncated, wj.rows[0].ticker, wj.rows[999].ticker], [1000, 1001, true, "SYB000", "SYB999"], "1,001 names given in reverse are cut to the first 1,000 in ticker order, after sorting, and the cut is stated");
   const exact = JSON.parse(B.buildExport("moves", { universe: X.columnStore(big.slice(1)), flowalerts: null }, { now: NOW, format: "json" }).body);
   eq([exact.meta.rows, exact.meta.available, exact.meta.truncated], [1000, 1000, false], "exactly 1,000 names are not truncated");
+  const cutCsv = parseCsv(B.buildExport("moves", { universe: X.columnStore(big), flowalerts: null }, { now: NOW, format: "csv" }).body);
+  eq(cutCsv.length, 1 + 1000 + 1, "a cut CSV has the header, 1,000 rows and one more line");
+  eq(cutCsv[1001], [B.cutNote(1000, 1001), ...cutCsv[0].slice(1).map(() => "")], "which says the cut and is padded to the width of the header");
+  eq(B.cutNote(1000, 1234), "Cut at 1,000 of 1,234 rows, in the order of this file. The rest are not in it.", "the sentence groups its numbers");
+  eq(B.cutNote(3, 1000001), "Cut at 3 of 1,000,001 rows, in the order of this file. The rest are not in it.", "and groups millions");
+  ok(cutCsv.slice(1, 1001).every((r) => r[1] === "flows-export-1"), "and every line above it is a data row");
+  const exactCsv = parseCsv(B.buildExport("moves", { universe: X.columnStore(big.slice(1)), flowalerts: null }, { now: NOW, format: "csv" }).body);
+  eq([exactCsv.length, exactCsv[exactCsv.length - 1][1]], [1001, "flows-export-1"], "exactly 1,000 rows end on a data row: no note when nothing is cut");
+  const smallCsv = parseCsv(B.buildExport("moves", { universe: X.columnStore(big), flowalerts: null }, { now: NOW, format: "csv", limit: 3 }).body);
+  eq(smallCsv[smallCsv.length - 1][0], B.cutNote(3, 1001), "a lower limit says its own numbers");
   const small = JSON.parse(B.buildExport("moves", { universe: X.columnStore(big), flowalerts: null }, { now: NOW, format: "json", limit: 3 }).body);
   eq([small.rows.map((r) => r.ticker), small.meta.truncated], [["SYB000", "SYB001", "SYB002"], true], "a lower limit takes the head of the order");
   const ev = X.eventsPayload([{ t: "SYA201", sdte: 21, d: "2026-11-23" }, { t: "SYA202", sdte: 22, d: "2026-11-24" }, { t: "SYA203", sdte: null, d: null }, { t: "SYA204", sdte: 0, d: "2026-10-23" }]);

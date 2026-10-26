@@ -6,7 +6,7 @@ import { LEAN_REASONS, REASONS } from "./flows-columns.js";
 import { moveZ } from "./flows-member-state.js";
 import { dayOf, tickerOf, windowsByTicker, pooled } from "./flows-member-windows.js";
 
-export const SINCE_LIMITS = Object.freeze({ moveZ: 3, lines: 5, keep: 30 });
+export const SINCE_LIMITS = Object.freeze({ moveZ: 3, shown: 5, keep: 1000 });
 
 export const SINCE_COPY = Object.freeze({
   title: "Since your last visit",
@@ -21,6 +21,7 @@ export const SINCE_COPY = Object.freeze({
     soon: "Report dated this session or the next",
   }),
   soonNote: "Before-open or after-close timing is not published yet.",
+  noHistory: "Score history does not reach your last visit.",
   failed: Object.freeze({
     flow: "New flagged windows: the flow record did not load.",
     moves: "Large moves: nightly data did not load.",
@@ -58,11 +59,21 @@ function column(universe, key) {
   return decodeColumn(col, unit[1]);
 }
 
-const group = (id, title, summary, lines, total, extra = {}) => ({
-  id, title, summary, total, error: false, lines: lines.slice(0, SINCE_LIMITS.keep), more: Math.max(0, total - SINCE_LIMITS.keep), ...extra,
+export const SINCE_PLACES = Object.freeze({
+  flow: Object.freeze({ place: "the Unusual page", href: "/flows/unusual/" }),
+  moves: Object.freeze({ place: "the Moves page", href: "/flows/moves/" }),
+  board: Object.freeze({ place: "the Bullish and Bearish pages", href: "/flows/long/" }),
+  entering: Object.freeze({ place: "the Events page", href: "/flows/events/" }),
+  soon: Object.freeze({ place: "the Events page", href: "/flows/events/" }),
 });
 
-const failed = (id) => ({ id, title: SINCE_COPY.titles[id], summary: SINCE_COPY.failed[id], total: 0, error: true, lines: [], more: 0 });
+const group = (id, title, summary, lines, total, extra = {}) => ({
+  id, title, summary, total, error: false, lines: lines.slice(0, SINCE_LIMITS.keep), more: Math.max(0, total - SINCE_LIMITS.keep),
+  ...(total > SINCE_LIMITS.keep ? { names: [...new Set(lines.map((l) => l.t))] } : {}),
+  ...SINCE_PLACES[id], ...extra,
+});
+
+const failed = (id) => ({ id, title: SINCE_COPY.titles[id], summary: SINCE_COPY.failed[id], total: 0, error: true, lines: [], more: 0, ...SINCE_PLACES[id] });
 
 const leanText = (read) => {
   if (read.side === "buyers") return "buyers lean";
@@ -132,6 +143,7 @@ export function boardGroup(track, base) {
   for (let i = last - 1; i >= 0; i -= 1) {
     if (base !== null && sessions[i] !== null && sessions[i] <= base) { from = i; break; }
   }
+  if (from < 0 && last >= 0 && sessions[last] !== null && base !== null && sessions[last] > base) return { ...failed("board"), summary: SINCE_COPY.noHistory };
   if (last < 1 || sessions[last] === null || from < 0 || sessions[last] <= sessions[from]) {
     return group("board", SINCE_COPY.titles.board, "", [], 0, { since: from >= 0 ? sessions[from] : null });
   }
@@ -140,9 +152,9 @@ export function boardGroup(track, base) {
     const t = tickerOf(entry && entry.t);
     if (t === null) continue;
     const now = scoreAt(entry.s, last);
-    if (now === null) continue;
     const then = scoreAt(entry.s, from);
-    const wasIn = then === null || Math.abs(then) <= band;
+    if (now === null || then === null) continue;
+    const wasIn = Math.abs(then) <= band;
     const isIn = Math.abs(now) <= band;
     let kind = null;
     if (wasIn && !isIn) kind = "cleared";

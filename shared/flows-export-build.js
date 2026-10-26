@@ -32,6 +32,8 @@ const NOTES = Object.freeze({
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+export const cutNote = (shown, available) => "Cut at " + grouped(shown) + " of " + grouped(available) + " rows, in the order of this file. The rest are not in it.";
 const byTicker = (a, b) => (a.values.ticker < b.values.ticker ? -1 : a.values.ticker > b.values.ticker ? 1 : 0);
 
 export function bandOf(totalCents) {
@@ -304,8 +306,9 @@ export function buildExport(page, sources, { now, format = "csv", limit = MAX_RO
     columns: specs.map((c) => ({ key: c.key, label: c.label, unit: c.unit, prov: c.prov, dp: c.dp, held: c.held ? c.held.reason : null })),
     notes: [...NOTES[page]],
   };
+  const cutLine = truncated ? [textCell(cutNote(shown.length, available)), ...header.slice(1).map(() => "")].join(",") : null;
   const out = format === "csv"
-    ? "\uFEFF" + [header.join(","), ...lines].join("\r\n") + "\r\n"
+    ? "\uFEFF" + [header.join(","), ...lines, ...(cutLine === null ? [] : [cutLine])].join("\r\n") + "\r\n"
     : JSON.stringify({ meta: published, rows: objects });
   const meta = { ...published, asofDay: trtDay(asofMs), methodVersion: METHOD_VERSION };
   return { header, rows: shown, objects, body: out, meta, type: format === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8" };

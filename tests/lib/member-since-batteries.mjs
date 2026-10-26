@@ -95,7 +95,7 @@ export function usdBattery(S) {
 }
 
 export function sinceBattery(S) {
-  eq(S.SINCE_LIMITS, { moveZ: 3, lines: 5, keep: 30 }, "the limits");
+  eq(S.SINCE_LIMITS, { moveZ: 3, shown: 5, keep: 1000 }, "the limits");
   const w = worldOf();
   const m = S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w });
   eq([m.v, m.state, m.lastVisitMs, m.session, m.base, m.missed], [1, "some", PREV, "2026-10-23", "2026-10-21", 2], "the model: some, last visit, session, base and nights missed");
@@ -137,14 +137,13 @@ export function sinceBattery(S) {
   eq(lineText(board), [
     "SYB010 | cleared | joined the bearish board",
     "SYB001 | cleared | joined the bullish board",
-    "SYB005 | cleared | joined the bullish board",
     "SYB007 | cleared | joined the bullish board",
     "SYB002 | flipped | flipped from bullish to bearish",
     "SYB011 | flipped | flipped from bullish to bearish",
     "SYB008 | faded | fell out of the bullish board",
     "SYB003 | faded | fell out of the bullish board",
-  ], "board: crossings of the dead band between the session at the last visit and the latest, cleared then flipped then faded, strongest first; at the band is inside it; a name with no score then has joined; a name with no score now is left out");
-  eq([board.summary, board.since], ["8 names crossed the board line since 2026-10-21.", "2026-10-21"], "board: the summary names the session compared");
+  ], "board: crossings of the dead band between the session at the last visit and the latest, cleared then flipped then faded, strongest first; at the band is inside it; a name with no score at either end is left out, not reported as joined or faded");
+  eq([board.summary, board.since], ["7 names crossed the board line since 2026-10-21.", "2026-10-21"], "board: the summary names the session compared");
 
   const entering = byId(m, "entering");
   eq(lineText(entering), ["SYE002 | entering | reports in 20 sessions · 2026-11-20", "SYE003 | entering | reports in 21 sessions · 2026-11-23"], "entering: dates that were beyond 21 sessions at the last visit and are within 21 now; 22 is outside, 19 was inside already");
@@ -220,15 +219,34 @@ export function sinceBattery(S) {
   eq(lineText(byId(partial, "entering")), ["SYE003 | entering | reports in 21 sessions \u00b7 2026-11-23"], "and so is the report window");
 
   const track1 = trackPayload({ sessions: [{ d: "2026-10-23" }], names: [{ t: "SYB001", s: [30] }] });
-  eq(byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: track1 }), "board"), undefined, "a track of one session has no crossings and is left out");
-  const trackOld = trackPayload({ sessions: [{ d: "2026-10-22" }, { d: "2026-10-23" }] , names: [{ t: "SYB001", s: [5, 30] }] });
-  eq(byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: trackOld }), "board"), undefined, "a track that begins after the visit's session has nothing to compare with");
+  const noHist = byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: track1 }), "board");
+  eq([noHist.error, noHist.summary, noHist.lines], [true, "Score history does not reach your last visit.", []], "a track that begins after the session at the last visit says so, and compares nothing");
+  const trackOld = trackPayload({ sessions: [{ d: "2026-10-22" }, { d: "2026-10-23" }], names: [{ t: "SYB001", s: [5, 30] }] });
+  eq(byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: trackOld }), "board").summary, S.SINCE_COPY.noHistory, "also when it holds two sessions, both after it");
+  const sameDay = trackPayload({ sessions: [{ d: "2026-10-21" }], names: [{ t: "SYB001", s: [30] }] });
+  eq(byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: sameDay }), "board"), undefined, "a track that ends at the visit's own session has nothing new and is left out");
+  const nightly = Date.parse("2026-10-22T23:00:00.000Z");
+  const twoAm = S.sinceModel({ now: NOW, prevSeenMs: nightly, ...worldOf(nightly) });
+  eq([twoAm.base, twoAm.state], ["2026-10-21", "some"], "a visit at 02:00 TRT on the 23rd belongs to the US session before the 22nd's nightly");
+  const fiveAm = Date.parse("2026-10-23T02:00:00.000Z");
+  eq(S.sinceModel({ now: NOW, prevSeenMs: fiveAm, ...worldOf(fiveAm) }).base, "2026-10-22", "and one at 05:00 TRT, after the 22nd's nightly has landed, belongs to the 22nd");
   const trackBand = trackPayload({ deadBand: -1 });
   eq(byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, track: trackBand }), "board").error, true, "a track with a negative band is unreadable");
 
-  const many = X.columnStore(Array.from({ length: 45 }, (_, i) => ({ t: "SYM" + String(100 + i), cols: { sig: 0.02, chg: 0.2, ed: null } })));
-  const big = byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, universe: many }), "moves");
-  eq([big.total, big.lines.length, big.more, big.lines[0].t, big.lines[29].t], [45, 30, 15, "SYM100", "SYM129"], "thirty lines are kept and the rest are counted");
+  const names = (n) => X.columnStore(Array.from({ length: n }, (_, i) => ({ t: "SYM" + String(1000 + i), cols: { sig: 0.02, chg: 0.2, ed: null } })));
+  const some = byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, universe: names(45) }), "moves");
+  eq([some.total, some.lines.length, some.more], [45, 45, 0], "every line of a group is sent, so the page can find a member's own names whatever their rank");
+  const edge = byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, universe: names(1000) }), "moves");
+  eq([edge.total, edge.lines.length, edge.more], [1000, 1000, 0], "up to a thousand");
+  const big = byId(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w, universe: names(1001) }), "moves");
+  eq([big.total, big.lines.length, big.more, big.lines[0].t, big.lines[999].t], [1001, 1000, 1, "SYM1000", "SYM1999"], "and the thousand-and-first is counted, not sent");
+  ok(JSON.stringify(big).length < 100000, "a group of a thousand lines stays under 100 KB");
+  eq([big.names.length, big.names[0], big.names[1000], some.names, edge.names], [1001, "SYM1000", "SYM2000", undefined, undefined], "a group cut at a thousand lines still names every ticker in it, and a group that fits sends no list");
+  eq(m.groups.map((g) => [g.id, g.place, g.href]), [
+    ["flow", "the Unusual page", "/flows/unusual/"], ["moves", "the Moves page", "/flows/moves/"], ["board", "the Bullish and Bearish pages", "/flows/long/"],
+    ["entering", "the Events page", "/flows/events/"], ["soon", "the Events page", "/flows/events/"],
+  ], "every group says where the rest of it lives");
+  eq(gone.groups.find((g) => g.id === "board").place, "the Bullish and Bearish pages", "and so does a group that failed");
 
   const hostile = X.columnStore([{ t: "SYA001", cols: { sig: 0.02, chg: 0.2, ed: null } }]);
   hostile.t = ["<img src=x onerror=alert(1)>"];
@@ -241,5 +259,4 @@ export function sinceBattery(S) {
   const repeat = JSON.stringify(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w }));
   eq(JSON.stringify(S.sinceModel({ now: NOW, prevSeenMs: PREV, ...w })), repeat, "and gives the same answer twice");
   ok(!/\btape\b|unsided/i.test(JSON.stringify(S.SINCE_COPY)) && !/\btape\b|unsided/i.test(repeat), "the words the product retired are not in the copy");
-  ok(JSON.stringify(big).length < 4096, "a group of thirty lines stays under 4 KiB");
 }

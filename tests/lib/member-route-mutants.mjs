@@ -12,6 +12,7 @@ export const EXPORT_ROUTE_MUTANTS = [
   ["route", "truncation not announced", [['"X-Export-Truncated": built.meta.truncated ? "1" : "0",', '"X-Export-Truncated": "0",']]],
   ["route", "exports behind the member-state switch", [['limiter: "MEMBER_EXPORT", flag: "FLOWS_EXPORTS", write: true', 'limiter: "MEMBER_EXPORT", flag: "FLOWS_MEMBER_STATE", write: true']]],
   ["route", "exports on the state write limiter", [['limiter: "MEMBER_EXPORT", flag', 'limiter: "MEMBER_STATE_WRITE", flag']]],
+  ["route", "the limit body without the server clock", [["{ freesAtMs: frees === undefined ? null : frees, serverNow: at }", "{ freesAtMs: frees === undefined ? null : frees }"]]],
   ["route", "a lost insert race still sending the file", [["if (!logged) throw await limited(env, id, at, MEMBER_LIMITS.exportsPer24h);", ""]]],
   ["route", "the wait rounded down", [["Math.max(1, Math.ceil((frees - at) / 1000))", "Math.max(1, Math.floor((frees - at) / 1000))"]]],
   ["route", "every page listed as open", [["hold === null ? { open: true } : { open: false, hold: hold.reason, why: REASONS[hold.reason] }", "{ open: true }"]]],

@@ -74,6 +74,7 @@ export const ERRORS = Object.freeze({
   member_state_unavailable: entry(503, "The server does not store watchlists; the list stays on this device"),
   precondition_required: entry(428, "Send the version you are replacing in If-Match"),
   stale_version: entry(412, "The saved state changed since you read it; reload and try again"),
+  universe_unreadable: entry(503, "The ticker list could not be read; try again"),
 });
 
 export const errorEntry = (code) => (Object.hasOwn(ERRORS, code) ? ERRORS[code] : null);

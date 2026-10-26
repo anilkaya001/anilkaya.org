@@ -101,6 +101,7 @@ export async function exportCapBattery(modules) {
   w.now.set(t0 + 50000);
   const r = await w.post(MOVES);
   eq([r.status, code(r), r.headers.get("retry-after"), r.json.freesAtMs], [429, "export_limit", String((DAY - 50000) / 1000), t0 + DAY], "the 51st is refused, with the second the oldest ages out");
+  eq(r.json.serverNow, t0 + 50000, "and the body carries the server's own clock, so a page never judges a day by a skewed device clock");
   const view = await w.log();
   eq(view.json.window, { used: 50, cap: 50, freesAtMs: t0 + DAY }, "and the log says the same");
   eq(view.json.exports.length, 50, "fifty rows are listed");
@@ -175,7 +176,10 @@ export async function exportTruncationBattery(modules) {
   const r = await w.post(MOVES);
   ok200(r, "an export of 1,001 names");
   eq([r.headers.get("x-export-rows"), r.headers.get("x-export-available"), r.headers.get("x-export-truncated")], ["1000", "1001", "1"], "is cut to 1,000 and says so in its headers");
-  eq(parseCsv(r.text).length, 1001, "the file has a header and 1,000 rows");
+  const grid = parseCsv(r.text);
+  eq([grid.length, grid[grid.length - 1][0]], [1002, "Cut at 1,000 of 1,001 rows, in the order of this file. The rest are not in it."], "the file has a header, 1,000 rows and a last line that says where it was cut");
+  const json = JSON.parse((await w.post({ page: "moves", format: "json" })).text);
+  eq([json.meta.rows, json.meta.available, json.meta.truncated, json.rows.length], [1000, 1001, true, 1000], "and the JSON says it in its meta and has no note line");
   eq((await w.log()).json.exports[0].rows, 1000, "the log records the rows sent");
   const missing = await fresh(modules, { payloads: { universe: null } });
   const empty = await missing.post(MOVES);
@@ -214,12 +218,16 @@ export async function sinceRouteBattery(modules) {
   const expected = SI.sinceModel({ now: NOW, prevSeenMs: prevMs, universe: w0.universe, track: w0.track, events: w0.events, alerts: w0.alerts });
   eq(got.json, JSON.parse(JSON.stringify(expected)), "is exactly the model run on the stored nightly rows and the previous visit's last ping");
   eq([got.json.lastVisitMs, got.json.state], [prevMs, "some"], "whose last visit is that ping, not the start of the visit");
+  w.now.set(NOW + 10000);
+  const quick = await w.call("me.visit", { method: "POST" });
+  eq([quick.json.visit.previousEndedMs, quick.json.visit.newVisit, quick.json.visit.lastSeenMs], [prevMs, false, NOW], "a ping ten seconds into a visit neither moves the baseline nor writes the last-seen time");
+  eq((await since()).json.lastVisitMs, prevMs, "and Since still compares with the previous visit");
   const before = JSON.stringify(W.allRows(w.f));
   w.now.set(NOW + 60000);
   const again = await since();
   eq([again.json.lastVisitMs, again.json.state], [prevMs, got.json.state], "reading it again in the same visit moves nothing");
   eq(JSON.stringify(W.allRows(w.f)), before, "and writes nothing");
-  eq([lim.MEMBER_STATE_READ.calls.length, lim.MEMBER_STATE_WRITE.calls.length], [5, 3], "five reads of Since went through the read limiter and the three pings through the write limiter");
+  eq([lim.MEMBER_STATE_READ.calls.length, lim.MEMBER_STATE_WRITE.calls.length], [6, 4], "six reads of Since went through the read limiter and the four pings through the write limiter");
 
   const liveBody = X.flowPayload([X.win("SYL001", 2000000, 1500000, 100000, {}), X.win("SYL001", 1000000, 700000, 100000, {}), X.win("SYL002", 900000, 600000, 100000, {})].map((r) => ({ ...r, firstAt: SN.ISO(NOW - 1000) })), { readAt: SN.ISO(NOW - 500) });
   const liveRow = (session) => ({ rows: [{ id: "live:alerts", payload: JSON.stringify(liveBody), session }] });

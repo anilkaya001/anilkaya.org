@@ -106,8 +106,12 @@ export function flowsMeRows(deps) {
       return reply(await stateView(env, wrote.row, id));
     }
     if (!secretUsable(env.MEMBER_STATE_KEY)) throw HttpError.of("member_state_unavailable");
-    const known = await universeNames(env);
-    if (known === null) throw HttpError.of("store_unreadable");
+    const universe = await universeNames(env);
+    if (universe === null) throw HttpError.of("universe_unreadable", undefined, { "Retry-After": "30" });
+    const stored = await store.read(env, id);
+    if (stored === undefined) throw HttpError.of("store_unreadable");
+    const kept = (await stateView(env, stored, id)).watchlist;
+    const known = new Set([...universe, ...(Array.isArray(kept) ? kept : [])]);
     const checked = normalizeWatchlist(body.watchlist, { known, fixtureHost: fixtureHost(url.hostname) });
     if (!checked.ok) {
       const details = checked.code === "too_many"
@@ -198,7 +202,7 @@ export function flowsMeRows(deps) {
   const limited = async (env, id, at, used) => {
     const frees = await store.exportFrees(env, id, at, used, MEMBER_LIMITS.exportsPer24h);
     const seconds = frees === null || frees === undefined ? MEMBER_PERIOD_S : Math.max(1, Math.ceil((frees - at) / 1000));
-    return HttpError.of("export_limit", undefined, { "Retry-After": String(seconds) }, { freesAtMs: frees === undefined ? null : frees });
+    return HttpError.of("export_limit", undefined, { "Retry-After": String(seconds) }, { freesAtMs: frees === undefined ? null : frees, serverNow: at });
   };
 
   const exportFile = async (ctx) => {

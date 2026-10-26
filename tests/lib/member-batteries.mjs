@@ -208,12 +208,27 @@ export async function routeBattery(modules) {
     eq(prod.json.rejected[0].reason, "a reserved test name", "a reserved name is refused on a production host");
     const uni = await make({ payloads: { universe: null } });
     const un = await uni.call("me.state", PUT(0, LIST(["SYA001"])));
-    eq([un.status, un.json.error.code], [503, "store_unreadable"], "no universe row is 503 and nothing is saved");
+    eq([un.status, un.json.error.code, un.headers.get("Retry-After")], [503, "universe_unreadable", "30"], "no universe row is 503 with its own code and nothing is saved");
     const bad = await make({ payloads: { universe: { t: [], sessionDate: "2026-10-23" } } });
     eq((await bad.call("me.state", PUT(0, LIST(["SYA001"])))).status, 503, "an empty universe list is 503");
     const odd = await make({ payloads: { universe: { t: ["SYA001", 7] } } });
     eq((await odd.call("me.state", PUT(0, LIST(["SYA001"])))).status, 503, "and a malformed one");
     eq(count(uni, "member_state") + count(bad, "member_state") + count(odd, "member_state"), 0, "none of them wrote a row");
+  }
+  {
+    const w = await make();
+    await w.call("me.state", PUT(0, LIST(["SYA001", "SYA399"])));
+    w.payloads.universe = W.universePayload(W.names("SYA", 100));
+    const keep = await w.call("me.state", PUT(1, LIST(["SYA001", "SYA399", "SYA002"])));
+    eq([keep.status, keep.json.watchlist], [200, ["SYA001", "SYA002", "SYA399"]], "a saved name that left the universe stays, beside a new covered name");
+    const fresh = await w.call("me.state", PUT(2, LIST(["SYA001", "SYA399", "SYA250"])));
+    eq([fresh.status, fresh.json.rejected.map((x) => x.ticker)], [400, ["SYA250"]], "a new name outside the universe is still refused");
+    const other = await w.call("me.state", { ...PUT(0, LIST(["SYA399"])), session: { username: W.BOB } });
+    eq([other.status, other.json.rejected.map((x) => x.ticker)], [400, ["SYA399"]], "another member's saved name earns this member nothing");
+    const drop = await w.call("me.state", PUT(2, LIST(["SYA001"])));
+    eq([drop.status, drop.json.watchlist], [200, ["SYA001"]], "and removing the departed name works");
+    const gone = await w.call("me.state", PUT(3, LIST(["SYA001", "SYA399"])));
+    eq([gone.status, gone.json.rejected.map((x) => x.ticker)], [400, ["SYA399"]], "once removed it cannot come back");
   }
   for (const key of [undefined, "", "k".repeat(31)]) {
     const w = await make({ env: { MEMBER_STATE_KEY: key } });
