@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "399";
+export const ASSET_VERSION = "400";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -447,7 +447,7 @@ export function aboutPage() {
       <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
-      <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from the side of the quote through sector and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
@@ -1190,6 +1190,7 @@ ${feedTabs([["network", "Network", "uaNetCard"], ["timeline", "Timeline", "uaTim
     <header class="ui-mod-h"><h2 class="ui-mod-t" id="uaNetCardT">Flow network</h2><span class="ui-mod-sp"></span></header>
     <div class="fn-host is-slot" id="uaNet"></div>
     <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
+    <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}" data-css="${v("/assets/css/flows-net-map.css")}"></i>
   </section>
 ${feedModule("uaTimelineCard", "Timeline", `<div class="fd-body" id="uaTimeline"></div>`, { tab: "timeline" })}
 ${feedModule("uaNamesCard", "Names", `<div class="fd-body" id="uaNames"></div>`, { tab: "names" })}

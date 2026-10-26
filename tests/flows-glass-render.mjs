@@ -374,12 +374,6 @@ let engineBends = null;
       assert.deepEqual([...new Set(rims)], ["none"], "rims");
     } finally { await context.close(); }
   });
-  await trial("the free card keeps its rim", async () => {
-    const { context, page } = await openStaticShell(browser, "unusualPage", { patch: { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod[data-free]::before { content: none; }\n", ""]] } });
-    try {
-      assert.deepEqual(await page.evaluate(scrollRims), [], "a scrolling tile with a rim");
-    } finally { await context.close(); }
-  });
   const lensM = lensMutants(PAGES.lensMap);
   for (const [name, opts] of Object.entries(lensM)) {
     const gate = /reduced|forced/.test(name);

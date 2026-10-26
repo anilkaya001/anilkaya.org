@@ -206,7 +206,7 @@
   .fn-fw { display: none; }
   .fn-lg-g + .fn-lg-g { margin-left: 0; }
   .fn-scale { gap: 8px 12px; }
-  .fn-lg-g { flex: 0 0 100%; gap: 8px 10px; }
+  .fn-lg-g { flex: 0 0 100%; gap: 8px 6px; }
   .fn-lg-i { gap: 4px; }
   .fn-lg-t { flex: 0 0 100%; margin-right: 0; }
   .fn-stage { margin: 0 calc(-1 * var(--sp-2)); }
@@ -227,3 +227,4 @@
   .fn-lw { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .fn-lean .ui-g { font-size: 12px; }
 }
+.fn-fit > .fn-scale { flex: none; overflow: hidden; box-sizing: border-box; }
