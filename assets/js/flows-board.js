@@ -750,9 +750,8 @@
       if (!allBtn.isConnected && sp) sp.append(allBtn);
     } finally { fitting = false; }
   }
-  if (typeof ResizeObserver === "function") { const ro = new ResizeObserver(() => fitRows()); ro.observe(table); ro.observe(body); }
+  if (typeof ResizeObserver === "function") { const ro = new ResizeObserver(fitRows); ro.observe(table); ro.observe(body); }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitRows);
-  if (document.fonts && typeof document.fonts.addEventListener === "function") document.fonts.addEventListener("loadingdone", fitRows);
 
   function paintRows(animate) {
     if (!st.rows.length) return;

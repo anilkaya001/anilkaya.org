@@ -39,12 +39,10 @@
       for (const g of groups.values()) {
         if (g.length < 4 || g.length * 2 < el.children.length) continue;
         const score = stacked(g);
-        if (score > 0) found.push({ g, score });
+        if (score > 0) found.push([score, g]);
       }
     }
-    found.sort((a, b) => b.score - a.score);
-    const taken = new Set();
-    return found.filter((f) => !f.g.some((c) => taken.has(c))).map((f) => { for (const c of f.g) for (let e = c; e && e !== body; e = e.parentElement) taken.add(e); return f.g; });
+    return found.sort((a, b) => b[0] - a[0]).map((f) => f[1]);
   };
 
   function allButton(mod, show, body) {

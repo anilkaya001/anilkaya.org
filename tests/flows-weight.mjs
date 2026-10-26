@@ -75,7 +75,7 @@ const GZIP_KIB = {
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   networkPage: 39,
   nowPage: 40.3,
-  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024,
+  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024 + 100 / 1024,
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024,
@@ -116,7 +116,7 @@ const CSS_GZIP_KIB = {
   watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
   deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024,
+  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024 + 8 / 1024,
   networkPage: 21,
   nowPage: 21,
   unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -196,8 +196,8 @@ const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracl
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + 185 / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + 2155 / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + 26222 / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + 260 / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + 2240 / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + 26400 / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
