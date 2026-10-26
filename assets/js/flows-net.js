@@ -43,11 +43,11 @@
   }
 
   const KINDS = {
-    ca: { label: "Calls \u00b7 ask side", lean: "bull" },
-    pb: { label: "Puts \u00b7 bid side", lean: "bull" },
+    ca: { label: "Calls \u00b7 ask side", lean: "bull", short: "Calls ask" },
+    pb: { label: "Puts \u00b7 bid side", lean: "bull", short: "Puts bid" },
     nx: { label: "Unsided", lean: "nx" },
-    pa: { label: "Puts \u00b7 ask side", lean: "bear" },
-    cb: { label: "Calls \u00b7 bid side", lean: "bear" },
+    pa: { label: "Puts \u00b7 ask side", lean: "bear", short: "Puts ask" },
+    cb: { label: "Calls \u00b7 bid side", lean: "bear", short: "Calls bid" },
   };
   const LEANS = { bull: "Bullish", nx: "Unsided", bear: "Bearish" };
   const LEAN_GLYPH = { bull: "up", bear: "down", nx: "flat" };
@@ -115,7 +115,7 @@
       const ids = [sid, "i:" + p.k, nid, oid];
       const ns = [
         node(sid, 0, sid === "s:~" ? { label: "Other", tok: "--sect-none" } : { label: p.g.label, short: p.g.short, full: p.g.full, tok: p.g.tok }),
-        node(ids[1], 1, { label: KINDS[p.k].label, lean: KINDS[p.k].lean, kind: p.k }),
+        node(ids[1], 1, { label: KINDS[p.k].label, short: KINDS[p.k].short, shortW: 1100, lean: KINDS[p.k].lean, kind: p.k }),
         node(nid, 2, nid === "n:~" ? { label: "Other names" } : { label: p.t, ticker: p.t, sec: p.g.label }),
         node(oid, 3, mode === "lean" ? { label: LEANS[p.lean], lean: p.lean } : { label: DTE[p.x], bucket: p.x }),
       ];
@@ -376,7 +376,7 @@
       const sub = d.layer === 3 ? pct(d.share) + (vt ? "" : " " + MID + " " + money(d.v)) : money(d.v);
       const gl = d.layer === 3 && d.lean ? { g: LEAN_GLYPH[d.lean], c: d.lean === "bull" ? UP : d.lean === "bear" ? DOWN : BLUE } : null;
       const rank = d.pos ? { t: String(d.pos), f: "500 " + (vt ? 9.5 : 11.5) + "px", c: W3 } : null;
-      const nm = { t: vt && d.id === "n:~" ? "+" + d.members.length + " more" : (vt || W < 1500) && d.short ? d.short : d.label, f: "600 " + (vt ? 10.5 : 12.5) + "px", c: W1 };
+      const nm = { t: vt && d.id === "n:~" ? "+" + d.members.length + " more" : (d.shortW ? !vt && W < d.shortW : vt || W < 1500) && d.short ? d.short : d.label, f: "600 " + (vt ? 10.5 : 12.5) + "px", c: W1 };
       const top = [rank, gl, nm].filter(Boolean), o = { dpr, ff: FF, bg: true, padX: vt ? 4 : 7 };
       if (form === "line") return chip([{ lh: 16, runs: top.concat({ t: sub, f: "400 12px", c: W2 }) }], Object.assign(o, { h: 22 }));
       if (form === "stack") return chip([{ lh: 15, runs: top }, { lh: 13, runs: [{ t: sub, f: "400 11px", c: W2 }] }], Object.assign(o, { h: 32 }));
