@@ -1131,7 +1131,7 @@ const MIN = 60 * 1000;
      /in the abandoned pass before it was given up/.test(pipelineSrc) && !/if \(loop\.exit === "hung" && loop\.why === "pass-deadline"\)/.test(pipelineSrc),
   "THE COMMAND LINE hands the loop the vendor and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
   ok(/\)\.finally\(\(\) => wireProgress\.settled\(\)\);\n    const refusal = response\.status === 403/.test(pipelineSrc) &&
-     /body,\n    \},\n  \)\.finally\(\(\) => wireProgress\.settled\(\)\);/.test(pipelineSrc) &&
+     /body: wire,\n    },\n  \)\.finally\(\(\) => wireProgress\.settled\(\)\);/.test(pipelineSrc) &&
      /wireProgress\.quiet\(quotaWait\);\n    await sleep\(quotaWait\);/.test(pipelineSrc) && /wireProgress\.quiet\(wait\);\n    await sleep\(wait\);/.test(pipelineSrc),
   "and every ingest read and write settles the progress clock, and a store-quota or retry wait is announced to it");
 

@@ -78,7 +78,7 @@ const planted = (from, to) => {
     ok(row && Number(row.i) === payload.t.indexOf(t), "UNIVERSE ROW BY INDEX ARITHMETIC finds " + t + " at its position even where another name is its prefix (" + (row && row.i) + ")");
     const got = DW.decodeUniverse(row);
     const want = {};
-    for (const k of Object.keys(payload.cols)) want[k] = universeValue(payload, t, k);
+    for (const k of new Set([...Object.keys(payload.cols), ...Object.keys(got.u)])) want[k] = universeValue(payload, t, k);
     same(got.u, Object.fromEntries(Object.keys(want).map((k) => [k, want[k]])), t + ": every decoded column equals the JS reader's value");
     eq(got.rank, payload.t.indexOf(t) + 1, t + ": rank");
     eq(got.sector, payload.sectors[payload.sec[payload.t.indexOf(t)]] ?? null, t + ": sector from the index of the sector table");

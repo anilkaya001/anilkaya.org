@@ -7,6 +7,7 @@ import {
 } from "../store.js";
 import { createDoor } from "../door.js";
 import { doorMode } from "../../shared/flows-door.js";
+import { decodeWire } from "../../shared/flows-card-pack.js";
 
 const FLOWS_MAX_PAYLOAD_BYTES = FLOWS_LIVE.FLOWS_MAX_PAYLOAD_BYTES;
 
@@ -129,9 +130,13 @@ export function flowsIngestRows(deps) {
       return json({ ok: true, key, removed });
     }
 
-    const payload = new TextDecoder().decode(
+    const posted = new TextDecoder().decode(
       await readBounded(request, FLOWS_MAX_PAYLOAD_BYTES, "Payload too large"),
     );
+    const wire = decodeWire(key, posted);
+    if (wire.error) throw new HttpError(400, "invalid_payload", wire.error);
+    const payload = wire.text;
+    if (payload.length > FLOWS_MAX_PAYLOAD_BYTES) throw new HttpError(413, "payload_too_large", "Payload too large");
 
     try { JSON.parse(payload); }
     catch { throw new HttpError(400, "invalid_payload", "Payload is not valid JSON"); }

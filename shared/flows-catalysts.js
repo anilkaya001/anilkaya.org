@@ -1,7 +1,8 @@
 import {
-  vnum, vstr, isoDay, addDays, nextWeekdayIso, sessionsBetween, easternDayOfInstant,
+  vnum, vstr, isoDay, addDays, sessionsBetween, easternDayOfInstant,
   medianOf, mean, SILENCE,
 } from "./flows-cross.js";
+import { span, timingOf } from "./flows-reports.js";
 
 export const EARNINGS_EVENTS = 12;
 
@@ -33,9 +34,8 @@ export const MOVE_FIELDS = Object.freeze({
 export function reactionDay(reportDate, reportTime) {
   const d = isoDay(reportDate);
   if (!d) return null;
-  const when = String(reportTime || "").toLowerCase();
-  if (when === "premarket" || when === "pre" || when === "bmo") return d;
-  return nextWeekdayIso(d);
+  const s = span(d, timingOf(reportTime));
+  return s ? s.late : null;
 }
 
 export function earningsHistory(rows, {

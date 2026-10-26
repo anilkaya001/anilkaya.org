@@ -11,6 +11,7 @@ import { DRY_RUN } from "../flags.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { num } from "../../../shared/flows-features.js";
 import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
+import { decodeLedger, recentReporters } from "../../../shared/flows-reports.js";
 import { extrasCap, extrasMode } from "../../../shared/flows-vendor-extras.js";
 import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, candleDate, candlesAscending, daysToEarnings, repairCandles, sessionCandles, sessionRow } from "../rank.mjs";
 
@@ -113,9 +114,22 @@ export async function runMarket(ctx) {
   } catch (error) {
     console.warn(`  sigma ledger: ${error.message}`);
   }
+  let priorReports = null;
+  let reportsWritable = false;
+  if (sessionDate) {
+    const got = await readStored("reports");
+    if (got.failed) {
+      console.warn(`  reports ledger: the previous ledger could not be read (HTTP ${got.status || 0}); tonight's rd comes from the reaction reads alone and the stored ledger is left as it is`);
+      priorReports = decodeLedger(null);
+    } else {
+      priorReports = decodeLedger(got.payload || null);
+      reportsWritable = true;
+    }
+  }
   let marketLegs = null;
   await stages.run("market-legs", async () => {
     marketLegs = await runMarketLegs({
+      reports: priorReports ? { prior: priorReports } : null,
       uw: withPrefetched(vendor, new Map([[holdings.path, holdings]])),
       sessionDate, screenerDate, generatedAt, harvest: harvest || universeSource, filters: screenerFilters, eligible: eligibleFor,
       cardedTickers: [...byCard.keys()],
@@ -146,7 +160,11 @@ export async function runMarket(ctx) {
   if (marketLegs) {
     if (sigmaBasis) marketLegs.universe = { ...marketLegs.universe, sigmaBasis };
     if (sigmaLedger) marketLegs.regime = { ...marketLegs.regime, sigmaLedger };
-    await stages.run("market-universe", () => publish("universe", marketLegs.universe), (error) => {
+    await stages.run("market-universe", async () => {
+      await publish("universe", marketLegs.universe);
+      if (reportsWritable && marketLegs.reports) await publish("reports", marketLegs.reports.payload);
+      else console.warn(`  reports: the ledger was not written (${reportsWritable ? "none was built" : "the previous one could not be read"}) and stays as it was`);
+    }, (error) => {
       console.warn(`  universe: ${error.message} — the other market keys are published regardless`);
     });
     await stages.run("market-regime", () => publish("regime", marketLegs.regime), (error) => {
@@ -208,6 +226,7 @@ export async function runMarket(ctx) {
 
       announce: { status: "unavailable", reason: EVENTS_NOTES.announce },
       ...events,
+      recent: recentReporters(marketLegs ? marketLegs.universe : null),
       ...(marketLegs ? marketLegs.eventsAdditions : {}),
       notes: EVENTS_NOTES,
     });

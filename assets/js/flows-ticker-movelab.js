@@ -8,11 +8,10 @@
   const FLOOR_N = 250;
   const MIN_RETURNS = 200;
   const MAX_GAP_DAYS = 4;
-  const EVENT_SESSIONS = 21;
   const SIG_CEILING = 0.25;
   const SIZES = [1, 2, 3, 4];
   const PUBLISHED = { 2: "f2", 3: "f3" };
-  const UNIVERSE_URL = "/api/flows/universe?cols=ed,f2,f3,sig,t";
+  const UNIVERSE_URL = "/api/flows/universe?cols=ed,f2,f3,rd,sig,t";
   const MULT = "×";
   const MINUS = "\u2212";
   const WHEN = { premarket: "before the open", afterhours: "after the close", postmarket: "after the close" };
@@ -80,13 +79,13 @@
     return { hits: returns.length === SESSIONS ? hits : Math.round((hits * SESSIONS) / returns.length), n: returns.length };
   }
 
-  function rowOf(u, ticker) {
-    const gone = (why) => ({ sig: null, f2: null, f3: null, ed: null, why });
+  function rowOf(u, ticker, now = Date.now()) {
+    const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });
     if (!u || typeof u !== "object") return gone("The nightly universe could not be read.");
     if (u.status === "pending") return gone("Tonight's universe has not published yet.");
     if (u.status !== "ok" || !Array.isArray(u.t)) return gone("The nightly universe is unavailable" + (u.reason ? ": " + String(u.reason).replace(/_/g, " ") : "") + ".");
     const i = u.t.indexOf(ticker);
-    if (i < 0) return gone(ticker + " is not in tonight's screened universe, so no typical daily move is published for it.");
+    if (i < 0) return gone(ticker + " is not in tonight's screened universe, so no typical daily move is published for it.", ticker + " is not in tonight's screened universe, so its report is not classified.");
     const cell = (key) => {
       const col = u.cols && u.cols[key], unit = u.units && u.units[key];
       if (!Array.isArray(col) || !Array.isArray(unit) || !(num(unit[1]) > 0)) return undefined;
@@ -94,7 +93,10 @@
       return v === null ? null : v / unit[1];
     };
     const sig = cell("sig");
-    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, why: null };
+    const unstated = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const edUn = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
+    const hz = F.horizon(u.hz) ? u.hz : null;
+    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell("ed") ?? null), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
     if (sig === undefined) row.why = "The nightly run does not publish a typical daily move yet.";
     else if (row.sig === null) row.why = "No typical daily move is published for " + ticker + ": it needs " + MIN_RETURNS + " clean sessions of history, with report days, splits and data breaks left out.";
     return row;
@@ -108,19 +110,24 @@
 
   function reportOf(input, row) {
     const r = input.report;
-    const ed = row ? num(row.ed) : null;
-    const sessions = r && num(r.sessions) !== null ? Number(r.sessions) : ed;
-    if (!r && ed === null) return { state: "unknown", why: input.reportWhy || "No report date is on the card or in tonight's universe." };
+    const hz = row && F.horizon(row.hz) ? row.hz : null;
+    const st = hz !== null && Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j) : null;
     const gate = !!(r && r.gate);
-    const out = { date: r ? r.d || null : null, sessions, when: r && r.when ? r.when : null, confirmed: r && typeof r.confirmed === "boolean" ? r.confirmed : null, em: r && pos(r.em) !== null ? Number(r.em) : null, gate };
-    if (gate || (sessions !== null && sessions <= EVENT_SESSIONS)) return { state: "inside", ...out };
-    if (sessions !== null) return { state: "outside", ...out };
-    return { state: "unknown", why: "A report date is on the card but its distance in sessions is not." };
+    const sessions = st !== null && Number.isInteger(row.ed) ? row.ed - row.j : null;
+    const out = { date: r ? r.d || null : null, sessions, hz, when: r && r.when ? r.when : null, confirmed: r && typeof r.confirmed === "boolean" ? r.confirmed : null, em: r && pos(r.em) !== null ? Number(r.em) : null, gate };
+    if (st === "reaction" || st === "after") return { state: "reacted", age: st === "reaction" ? 0 : 1, ...out };
+    if (st === "unstated") return { state: "unclear", ...out };
+    if (gate || st === "ahead") return { state: "inside", ...out };
+    if (st === "clear") return { state: "outside", ...out };
+    if (!r && st !== "undated") return { state: "unknown", ...out, why: input.reportWhy || "No report date is on the card or in tonight's universe." };
+    if (st === null && hz === null) return { state: "unknown", ...out, why: row && row.rwhy ? row.rwhy : "The nightly universe does not state the earnings window, so the report is not classified." };
+    if (st === null) return { state: "unknown", ...out, why: "The nightly universe is more than two sessions old, so the report is not classified." };
+    return { state: "unknown", ...out, why: !r ? input.reportWhy || "No report date is on the card or in tonight's universe." : "A report date is on the card but its distance in sessions is not." };
   }
 
   function model(input, row) {
     const inp = input || {};
-    const r = row || { sig: null, f2: null, f3: null, ed: null, why: "Reading the nightly universe." };
+    const r = row || { sig: null, f2: null, f3: null, ed: null, why: "Reading the nightly universe.", rwhy: "Reading the nightly universe." };
     const spot = pos(inp.spot);
     const sig = pos(r.sig);
     const out = { ticker: inp.ticker || null, spot, asOf: inp.asOf || null, sig, ladder: [], why: null, implied: impliedOf(inp), report: reportOf(inp, r) };
@@ -226,20 +233,34 @@
     const r = m.report;
     const box = h("section", { class: "ft-ml-blk", "aria-labelledby": "ftMlReport", "data-state": r.state },
       h("div", { class: "ft-ml-h" }, h("h3", { id: "ftMlReport" }, "Earnings report"),
-        r.state === "inside" ? UI.tag("Event-contaminated", { tone: "warn" }) : null,
+        r.state === "inside" || r.state === "unclear" ? UI.tag("Event-contaminated", { tone: "warn" }) : r.state === "reacted" ? UI.tag(r.age === 0 ? "Reacting today" : "Reacted one session ago", { tone: "warn" }) : null,
         info("the report row", () => ({
           title: "Earnings report",
-          lead: "A report inside " + EVENT_SESSIONS + " sessions is flagged because a report day is not an ordinary day.",
-          facts: [["Date", r.date ? F.day(r.date) : null], ["Sessions away", r.sessions === null || r.sessions === undefined ? null : String(r.sessions)], ["Time", r.when ? WHEN[String(r.when).toLowerCase()] || r.when : null], ["Basis", r.confirmed === null || r.confirmed === undefined ? null : r.confirmed ? "confirmed" : "estimated"]],
-          notes: ["The sessions come from the card's event record, else from tonight's universe."],
+          lead: r.hz ? "A report inside " + r.hz + " sessions is flagged because a report day is not an ordinary day. One that moved the price on the latest session, or the one before, is marked too." : "The nightly universe does not state the earnings window, so no report is flagged.",
+          facts: r.state === "reacted" ? [] : [["Date", r.date ? F.day(r.date) : null], ["Sessions away", r.sessions === null || r.sessions === undefined ? null : String(r.sessions)], ["Time", r.when ? WHEN[String(r.when).toLowerCase()] || r.when : null], ["Basis", r.confirmed === null || r.confirmed === undefined ? null : r.confirmed ? "confirmed" : "estimated"]],
+          notes: ["Sessions are counted to the session the report moves the price: a report after the close counts to the next session."],
         }))));
-    if (r.state === "unknown") { box.append(why(r.why)); return box; }
+    if (r.state === "unknown") {
+      if (r.date) box.append(h("p", { class: "ft-ml-big" }, F.day(r.date), h("span", { class: "ft-ml-cap" }, (r.when ? ", " + (WHEN[String(r.when).toLowerCase()] || r.when) : "") + (r.confirmed === null ? "" : r.confirmed ? ", confirmed" : ", estimated"))));
+      box.append(why(r.why));
+      return box;
+    }
+    if (r.state === "reacted") {
+      box.append(h("p", { class: "ft-ml-big" }, "Reported", h("span", { class: "ft-ml-cap" }, (r.age === 0 ? ", the price reaction is today" : ", the price reaction was the session before"))),
+        h("p", { class: "ft-ml-flag" }, "The move over the sessions since the report carries the report. The ladder above leaves report days out of its nightly counts."));
+      return box;
+    }
+    if (r.state === "unclear") {
+      box.append(h("p", { class: "ft-ml-big" }, "Report time not stated", h("span", { class: "ft-ml-cap" }, r.date ? ", " + F.day(r.date) : "")),
+        h("p", { class: "ft-ml-flag" }, "The report is on the latest session or beside it, and it may not have come out yet. The ladder above leaves report days out of its nightly counts, so it does not describe that day."));
+      return box;
+    }
     const away = r.gate && r.sessions === null ? "inside the earnings gate" : r.sessions + (r.sessions === 1 ? " session" : " sessions") + " away";
     const timing = r.when ? ", " + (WHEN[String(r.when).toLowerCase()] || r.when) : "";
     const basis = r.confirmed === null ? "" : r.confirmed ? ", confirmed" : ", estimated";
     box.append(h("p", { class: "ft-ml-big" }, r.date ? F.day(r.date) : away.charAt(0).toUpperCase() + away.slice(1), h("span", { class: "ft-ml-cap" }, (r.date ? ", " + away : ", date not on the card") + timing + basis)));
     if (r.state === "outside") {
-      box.append(h("p", { class: "ft-ml-cap" }, "More than " + EVENT_SESSIONS + " sessions away, so it is not flagged here."));
+      box.append(h("p", { class: "ft-ml-cap" }, "More than " + r.hz + " sessions away, so it is not flagged here."));
       return box;
     }
     box.append(
@@ -284,11 +305,11 @@
     const input = inputOf(raw);
     if (!host.querySelector(".ft-ml-in")) host.replaceChildren(h("p", { class: "visually-hidden ft-ml-st", role: "status" }), h("div", { class: "ft-ml-in", tabindex: "-1" }));
     if (KEPT) { paint(host, input, rowOf(KEPT, input.ticker), null); return; }
-    const pending = { sig: null, f2: null, f3: null, ed: null, why: "Reading the nightly universe\u2026" };
+    const pending = { sig: null, f2: null, f3: null, ed: null, why: "Reading the nightly universe\u2026", rwhy: "Reading the nightly universe\u2026" };
     const go = () => {
       paint(host, input, pending, null);
       universe().then((u) => paint(host, input, rowOf(u, input.ticker), null), () => {
-        paint(host, input, { sig: null, f2: null, f3: null, ed: null, why: "The nightly universe could not be read, so the typical daily move is not available." }, () => { go(); host.querySelector(".ft-ml-in").focus({ preventScroll: true }); });
+        paint(host, input, { sig: null, f2: null, f3: null, ed: null, why: "The nightly universe could not be read, so the typical daily move is not available.", rwhy: "The nightly universe could not be read, so the report is not classified." }, () => { go(); host.querySelector(".ft-ml-in").focus({ preventScroll: true }); });
       });
     };
     go();

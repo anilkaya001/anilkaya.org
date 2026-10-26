@@ -701,7 +701,7 @@ for (const [title, transforms, expected] of planted) {
   const stubbed = { dx: { v: 1, status: "partial", parts: Object.fromEntries(X.GROUPS.dx.map((id) => [id, { at: NOW - 6 * DAY, rv: 1, shed: 1 }])) } };
   await runExtras({ uw: wz.uw, names: ["SYX101"], sessionDate: TODAY, now: NOW, cap: 1000, only: X.GROUPS.dx, readPrior: async () => ({ payload: stubbed }) });
   eq(wz.calls.filter((c) => c.key === "financials").length, 0, "the leg makes no financials call for a part the card shed within its maximum age");
-  const noSoft = await loadMutated("scripts/flows-legs/card-x.mjs", [["while (bytes > CARD_X_SOFT_BYTES && shedNextPart(payload))", "while (false && shedNextPart(payload))"]], { salt: checks + 20 });
+  const noSoft = await loadMutated("scripts/flows-legs/card-x.mjs", [["while (overSoft(payload) && shedNextPart(payload))", "while (false && shedNextPart(payload))"]], { salt: checks + 20 });
   ok(noSoft.cardXPayload("SYX101", big, stamp).bytes > CARD_X_SOFT_BYTES, "PLANTED WRONG BUILD, a card-x that ignores the soft ceiling: it stays over it, which the real one does not");
   const reversed = await loadMutated("shared/flows-vendor-extras.js", [["export function shedNextPart(payload) {\n  for (const id of SHED_ORDER) {", "export function shedNextPart(payload) {\n  for (const id of [...SHED_ORDER].reverse()) {"]], { salt: checks + 21 });
   const cut = { dx: { v: 1, parts: { info: xp(300), financials: xp(3000) } }, vx: { v: 1, parts: { dividends: xp(100) } } };
