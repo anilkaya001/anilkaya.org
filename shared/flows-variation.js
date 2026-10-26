@@ -87,8 +87,19 @@ function quantileOf(values, p) {
   return xs[lo] + (h - lo) * (xs[hi] - xs[lo]);
 }
 
+const flatSeries = (xs) => {
+  let lo = Infinity, hi = -Infinity, big = 0;
+  for (const x of xs) {
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+    if (Math.abs(x) > big) big = Math.abs(x);
+  }
+  return hi - lo <= 1e-9 * big;
+};
+
 function sampleSd(xs) {
   if (xs.length < 2) return null;
+  if (flatSeries(xs)) return 0;
   const m = xs.reduce((a, b) => a + b, 0) / xs.length;
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) * (b - m), 0) / (xs.length - 1));
 }
@@ -96,6 +107,7 @@ function sampleSd(xs) {
 function pearsonOf(a, b) {
   const n = Math.min(a.length, b.length);
   if (n < 2) return null;
+  if (flatSeries(a.slice(0, n)) || flatSeries(b.slice(0, n))) return null;
   let sa = 0, sb = 0;
   for (let i = 0; i < n; i++) { sa += a[i]; sb += b[i]; }
   const ma = sa / n, mb = sb / n;

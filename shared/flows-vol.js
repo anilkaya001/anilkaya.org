@@ -1,5 +1,5 @@
 import { rowsOrNull as rowsOf } from "./flows-rows.js";
-import { eventTerms } from "./flows-event-variance.js";
+import { eventTerms, assessEvent } from "./flows-event-variance.js";
 import { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson } from "./flows-stats.js";
 
 export { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson };
@@ -61,6 +61,10 @@ export const VOL_WHY = Object.freeze({
   "no-event": "no upcoming earnings date falls inside the listed expiries",
   "no-premium": "the event expiry is not elevated over the one after it, so there is no event variance",
   "calendar-arbitrage": "total variance falls from one expiry to the next",
+  "front-too-short": "the event expiry is under a day away, so a few hours of day count would move the event variance by a tenth or more",
+  "pair-too-close": "the two expiries are under a week apart, so the variance between them rests on too short a stretch",
+  "below-resolution": "the gap between the two volatilities is inside what the quotes can resolve, two standard errors of a half-point volatility quote on each side",
+  immaterial: "the event move is under a quarter of one percent of the price",
   "single-expiry": "there is no later expiry to pair with",
   "not-mean-reverting": "the AR(1) coefficient is at or above one",
   oscillating: "the AR(1) coefficient is at or below zero",
@@ -178,6 +182,14 @@ export function varianceRiskPremium(iv, rvForecast) {
     relativeToForecast: (a - b) / b,
     ratioVar: (a * a) / (b * b),
   };
+}
+
+export function eventMaterial(front, back) {
+  const a = assessEvent(
+    { vol: vnum(front && front.vol), T: vnum(front && front.T), dv: front && front.dv },
+    { vol: vnum(back && back.vol), T: vnum(back && back.T), dv: back && back.dv },
+  );
+  return { diffusiveVol: a.diffusiveVol, eventSd: a.eventSd, eventMeanAbs: a.eventMeanAbs, code: a.code };
 }
 
 export function eventVariance(front, back) {
@@ -700,7 +712,7 @@ export function buildTermPanel(body, { sessionDate = null, earnings = null } = {
   const eventExpiry = eventIndex >= 0 ? rows[eventIndex].expiry : null;
   const move = eventIndex < 0 ? noMove("no-event")
     : eventIndex + 1 >= rows.length ? noMove("single-expiry")
-      : eventVariance({ vol: rows[eventIndex].iv, T: rows[eventIndex].T },
+      : eventMaterial({ vol: rows[eventIndex].iv, T: rows[eventIndex].T },
         { vol: rows[eventIndex + 1].iv, T: rows[eventIndex + 1].T });
   if (move.eventSd === null) silent.eventMove = move.code || "input-absent";
   const eventRead = out.find((r) => r.event && r.pct !== null) || null;

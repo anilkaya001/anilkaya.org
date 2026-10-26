@@ -1,4 +1,5 @@
 const SIDES = "shared/flows-sides.js";
+const CENTS_FILE = "shared/flows-cents.js";
 const SFC = "shared/flows-sfc.js";
 const TIME = "shared/flows-sfc-time.js";
 const DISPLAY = "shared/flows-sfc-display.js";
@@ -62,9 +63,9 @@ export const PLANTS = [
     "sides.windows"),
   plant("P22-sides-gate-ge", "sides equal to the premium are called invalid", SIDES,
     [["if (askCents + bidCents > total.cents) return", "if (askCents + bidCents >= total.cents) return"]], "sides.windows"),
-  plant("P23-half-up-ingest", "ingest rounds half up instead of half to even", SIDES,
+  plant("P23-half-up-ingest", "ingest rounds half up instead of half to even", CENTS_FILE,
     [["else if (lead === \"5\" && cents % 2 === 1) cents += 1;", "else if (lead === \"5\") cents += 1;"]], "ingest.strings"),
-  plant("P24-float-ingest", "dollars are multiplied by 100 as floats", SIDES,
+  plant("P24-float-ingest", "dollars are multiplied by 100 as floats", CENTS_FILE,
     [["let cents = Number(m[1]) * CENTS + Number((frac + \"00\").slice(0, 2));", "let cents = Math.trunc(Number(text) * CENTS);"]], "ingest.strings"),
   plant("P25-coverage-gate-strict", "the 40% coverage gate is strict", SIDES,
     [["if (5n * sided < 2n * T)", "if (5n * sided <= 2n * T)"]], "lean.read"),

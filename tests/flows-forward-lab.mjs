@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { DTES, LIQUIDITY, REGIMES, runCell, summarize } from "./lib/forward-lab.mjs";
+import { DTES, LIQUIDITY, REGIMES, DECLARED, runCell, summarize } from "./lib/forward-lab.mjs";
 import * as FWD from "../shared/flows-quant-forward.js";
 import { loadMutated } from "./truth/mutants.mjs";
 
@@ -108,6 +108,37 @@ function criteria(results) {
   return bad;
 }
 
+function declaredCriteria(results) {
+  const bad = [];
+  const fail = (label) => bad.push(label);
+  const stat = (r) => summarize(r.acc);
+  for (const r of results.filter((x) => x.regime === "american-declared")) {
+    const s = stat(r);
+    if (s.coverage < 0.97) fail(`${s.cell}: with the ex-date declared the forward covers the truth ${s.coverage.toFixed(2)}`);
+    if (s.plainN >= 100 && s.plain < 0.99) fail(`${s.cell}: plain bands are right ${s.plain.toFixed(3)}`);
+    if (s.pmN >= 100 && s.pm < 0.95) fail(`${s.cell}: plus-minus bands are right ${s.pm.toFixed(3)}`);
+    if (r.liquidity === "liquid" && ["2d", "7d", "30d"].includes(r.dte.id) && s.dashShare < 0.1) fail(`${s.cell}: rows an early exercise can reach print a delta (dash share ${s.dashShare.toFixed(2)})`);
+    if (s.medianCarryErrBp > 20 && s.medianErrBp > s.medianCarryErrBp / 5) fail(`${s.cell}: the chosen forward (${s.medianErrBp.toFixed(1)} bp) is not a fifth of the carry's error (${s.medianCarryErrBp.toFixed(1)} bp)`);
+  }
+  for (const r of results.filter((x) => x.regime === "special-declared")) {
+    const s = stat(r);
+    if (s.coverage < 0.97) fail(`${s.cell}: with a special dividend declared the forward covers the truth ${s.coverage.toFixed(2)}`);
+    if (s.plainN >= 20 && s.plain < 0.99) fail(`${s.cell}: plain bands are right ${s.plain.toFixed(3)}`);
+    if (s.pmN >= 20 && s.pm < 0.95) fail(`${s.cell}: plus-minus bands are right ${s.pm.toFixed(3)}`);
+    if (["0dte", "1d", "2d"].includes(r.dte.id) && s.dashShare < 0.95) fail(`${s.cell}: a delta is printed on ${(1 - s.dashShare).toFixed(2)} of the rows of a chain whose special dividend the card cannot size`);
+  }
+  return bad;
+}
+
+function capCriteria(results) {
+  const bad = [];
+  for (const r of results.filter((x) => x.dte.id === "0dte" || x.dte.id === "1d")) {
+    const s = summarize(r.acc);
+    if (s.plainCarryOnly > 0) bad.push(`${s.cell}: ${s.plainCarryOnly} rows of a chain with fewer than three pairs print a plain band under two days`);
+  }
+  return bad;
+}
+
 const fmt = (v, d = 3) => (v === null ? "-" : v.toFixed(d));
 
 function report(results) {
@@ -126,6 +157,17 @@ const all = run(cellsOf(REGIMES));
 report(all);
 
 eq(criteria(all), [], "every calibration criterion holds on the correct build");
+const declared = run(cellsOf(DECLARED));
+report(declared);
+eq(declaredCriteria(declared), [], "with the ex-dividend date declared, the American and special-dividend cells hold their criteria");
+eq(capCriteria([...all, ...declared]), [], "and no chain with fewer than three pairs prints a plain band under two days");
+ok(declared.length === 20, "twenty declared cells");
+{
+  const base = summarize(all.find((r) => r.regime === "american-dividend" && r.dte.id === "0dte" && r.liquidity === "liquid").acc);
+  const fix = summarize(declared.find((r) => r.regime === "american-declared" && r.dte.id === "0dte" && r.liquidity === "liquid").acc);
+  console.log(`three hours, liquid, American: coverage ${fmt(base.coverage, 2)} without the calendar, ${fmt(fix.coverage, 2)} with the ex-date declared`);
+  ok(fix.coverage > base.coverage + 0.3, "declaring the ex-date repairs the three-hour American cell");
+}
 ok(all.length === 40, "forty cells: two liquidities, five expiries (three hours, one, two, seven and thirty days), four regimes");
 
 {
@@ -181,6 +223,36 @@ ok(all.length === 40, "forty cells: two liquidities, five expiries (three hours,
     checks++;
   }
   eq(survived, [], `all ${mutants.length} planted wrong builds fail a calibration criterion`);
+}
+
+{
+  const pick = (regimes, liq, ids) => cellsOf(regimes).filter((c) => c.liquidity === liq && ids.includes(c.dte.id));
+  const cells = [
+    ...pick(DECLARED, "liquid", ["1d", "2d", "7d"]),
+    ...pick(["special-declared"], "illiquid", ["1d"]),
+    ...pick(["hard-to-borrow", "normal"], "illiquid", ["0dte", "1d"]),
+  ];
+  const judge = (impl) => {
+    const rs = run(cells, impl);
+    return [...declaredCriteria(rs), ...capCriteria(rs)];
+  };
+  eq(judge(FWD), [], "the reduced declared set passes on the correct build");
+  const mutants = [
+    ["the declared dividend never moves the carry", "shared/flows-quant-forward.js", [["if (!ex || (ex.state !== \"declared\" && ex.state !== \"expected\") || !(ex.n >= 1) || ex.irregular === true) return null;", "return null;"]]],
+    ["the exercise strikes stay in the parity pairs", "shared/flows-quant-forward.js", [["if (fin(skipAtOrBelow) && q.K <= skipAtOrBelow) continue;", ""]]],
+    ["a row an exercise can reach prints a band", "shared/flows-quant-forward.js", [["if (exercise) return { band: \"dash\", half: null, reason: \"exercise\" };", ""]]],
+    ["a carry-only chain under two days prints a plain band", "shared/flows-quant-forward.js", [["if (h95 <= FWD_LINES.BAND_PLAIN && !capPm) return", "if (h95 <= FWD_LINES.BAND_PLAIN) return"]]],
+    ["the cap ignores a fresh calendar that rules a dividend out", "shared/flows-quant-forward.js", [["out.cap = T < L.CAP_DAYS / 365 && !exFresh;\n  if (!par) return out;", "out.cap = false;\n  if (!par) return out;"]]],
+    ["a special dividend is shifted like a regular one", "shared/flows-quant-forward.js", [["|| !(ex.n >= 1) || ex.irregular === true) return null;", "|| !(ex.n >= 1)) return null;"]]],
+    ["the dividend's uncertainty is never added", "shared/flows-quant-forward.js", [["return { F, se: F * Math.sqrt(base + dis.se ** 2), known: true, discrete: true, dHat: dis.dHat };", "return { F, se: F * Math.sqrt(base), known: true, discrete: true, dHat: dis.dHat };"]]],
+  ];
+  const survived = [];
+  for (const [title, file, transforms] of mutants) {
+    const mod = await loadMutated(file, transforms);
+    if (judge({ ...FWD, ...mod }).length === 0) survived.push(title);
+    checks++;
+  }
+  eq(survived, [], `all ${mutants.length} planted wrong builds of the dividend calendar fail a criterion`);
 }
 
 console.log(`flows-forward-lab: ${checks} checks in ${((Date.now() - t0) / 1000).toFixed(1)} s`);

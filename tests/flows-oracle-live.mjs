@@ -33,8 +33,8 @@ const quiet = (t = "SYO001", from = 0, to = 60, step = 12) => Array.from({ lengt
   const out = detect(s, burst, ctxOf(), OPEN + 92 * MIN, OPTS);
   const surge = out.find((m) => m.kind === "surge");
   ok(surge, "a burst over the floor is a surge");
-  ok(surge.strength >= 1 && /flagged options flow across \d+ windows/.test(surge.say) && /The bar for this name is \$/.test(surge.say) && !/pace|usual|typical/.test(surge.say), "with its wording: the sum, the windows and the bar, and no claim about a pace the ledger cannot support");
-  ok(surge.facts.map((f) => f.label).join("|") === "Flagged premium|Bar for this name" && !("k" in surge.f) && !("norm" in surge.f), "and its facts carry the bar and no multiple");
+  ok(surge.strength >= 1 && /flagged options flow across \d+ windows/.test(surge.say) && /The minimum bar is \$/.test(surge.say) && !/pace|usual|typical/.test(surge.say), "with its wording: the sum, the windows and the bar, and no claim about a pace the ledger cannot support");
+  ok(surge.facts.map((f) => f.label).join("|") === "Flagged premium|Minimum bar" && !("k" in surge.f) && !("norm" in surge.f), "and its facts carry the bar and no multiple");
   ok(guardAnswer(surge.say, [{ say: surge.say }], { smallIntegers: false, modals: true }).forecast === false, "that passes the ask guard");
   eq(surge.id.split(":")[0], "SYO001", "the id leads with the ticker");
   const again = detect(s, burst, ctxOf(), OPEN + 93 * MIN, OPTS);

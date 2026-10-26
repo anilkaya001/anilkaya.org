@@ -21,6 +21,7 @@ export const LIQUIDITY = {
   illiquid: { tick: 0.05, rel: 0.08, abs: 0.02, minTicks: 1, missing: 0.25 },
 };
 export const REGIMES = ["normal", "hard-to-borrow", "special-dividend", "american-dividend"];
+export const DECLARED = ["american-declared", "special-declared"];
 
 const BORROW = 0.30;
 const SPECIAL = 0.02;
@@ -35,6 +36,18 @@ function worldOf(rng, dte, regime) {
   if (regime === "hard-to-borrow") borrow = BORROW;
   if (regime === "special-dividend") div = { t: 0.5 * T, amount: SPECIAL * SPOT };
   if (regime === "american-dividend") { div = { t: 0.6 * T, amount: ORDINARY * SPOT }; qTrue = 0; american = true; }
+  let ex = null;
+  if (regime === "american-declared") {
+    const dHat = CARD_YIELD * 91 / 365;
+    div = { t: 0.6 * T, amount: dHat * SPOT * (0.8 + 0.4 * rng.uniform()) };
+    qTrue = 0;
+    american = true;
+    ex = { state: "declared", n: 1, g: 91, irregular: false, fresh: true, tEx: div.t, tau2: T - div.t };
+  }
+  if (regime === "special-declared") {
+    div = { t: 0.5 * T, amount: SPECIAL * SPOT };
+    ex = { state: "declared", n: 1, g: 91, irregular: true, fresh: true, tEx: div.t, tau2: T - div.t };
+  }
   const pv = div ? div.amount * Math.exp(-RATE * div.t) : 0;
   const F = (SPOT - pv) * Math.exp((RATE - qTrue - borrow) * T);
   const D = Math.exp(-RATE * T);
@@ -44,7 +57,7 @@ function worldOf(rng, dte, regime) {
     const c = Math.max(-4, Math.min(4, x));
     return sigma * (1 + skew * c + curve * c * c);
   };
-  return { T, D, F, sigma, vol, div, qCard, american };
+  return { T, D, F, sigma, vol, div, qCard, american, ex };
 }
 
 export function quotesOf(rng, world, liq, steps) {
@@ -79,14 +92,14 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
   const acc = {
     dte: dte.id, liquidity, regime, trials, src: { carry: 0, blend: 0, parity: 0 }, vetoed: 0, covered: 0, coveredQualified: 0, qualified: 0,
     errChosen: [], errCarry: [], plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 }, dash: 0, rows: 0, bracket: { n: 0, ok: 0, suppressed: 0, calls: { n: 0, ok: 0 }, puts: { n: 0, ok: 0 } },
-    errs: [], zbins: { low: { n: 0, ok: 0 }, mid: { n: 0, ok: 0 }, high: { n: 0, ok: 0 } }, chains: { n: 0, bad: 0 }, early: 0, coveredCarry: 0, withPairs: { plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 } }, trialsWithPairs: 0,
+    errs: [], zbins: { low: { n: 0, ok: 0 }, mid: { n: 0, ok: 0 }, high: { n: 0, ok: 0 } }, chains: { n: 0, bad: 0 }, early: 0, plainCarryOnly: 0, coveredCarry: 0, withPairs: { plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 } }, trialsWithPairs: 0,
   };
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(`forward-lab|${dte.id}|${liquidity}|${regime}|${seed}|${t}`);
     const world = worldOf(rng, dte, regime);
     const quotes = quotesOf(rng, world, liq, steps);
     const seen = SPOT * (1 + SPOT_NOISE * rng.normal());
-    const rec = impl.chooseForward({ quotes, S: seen, r: RATE, T: world.T, q: world.qCard });
+    const rec = impl.chooseForward({ quotes, S: seen, r: RATE, T: world.T, q: world.qCard, ex: world.ex });
     if (onTrial) onTrial(rec, world, quotes);
     if (rec.ee === true) acc.early++;
     if (rec.n >= FWD.FWD_LINES.MIN_PAIRS) acc.trialsWithPairs++;
@@ -109,6 +122,7 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
       const usable = (b, a) => b > 0 && a >= b && (a - b) / ((a + b) / 2) <= GATE_SPREAD;
       let held = q.K >= rec.F ? "C" : "P";
       if (rec.ee === true && held === "C" && usable(q.pb, q.pa)) held = "P";
+      if (Number.isFinite(rec.exKSoft) && q.K <= rec.exKSoft && held === "C" && usable(q.pb, q.pa)) held = "P";
       const bid = held === "C" ? q.cb : q.pb, ask = held === "C" ? q.ca : q.pa;
       if (!usable(bid, ask)) continue;
       const trueDelta = forwardDelta(world.F, q.K, world.vol(q.K), world.T, "C");
@@ -116,11 +130,12 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
       const iv = impliedVolB76(rec.F, world.D, q.K, world.T, (bid + ask) / 2, held, null);
       if (!(iv > 0)) continue;
       const delta = forwardDelta(rec.F, q.K, iv, world.T, "C");
-      const band = impl.deltaBand({ F: rec.F, se: rec.se, K: q.K, sigma: iv, T: world.T, held, veto: rec.veto });
+      const band = impl.deltaBand({ F: rec.F, se: rec.se, K: q.K, sigma: iv, T: world.T, held, veto: rec.veto, capPm: rec.cap === true, exercise: Number.isFinite(rec.exK) && q.K <= rec.exK });
       const err = Math.abs(delta - trueDelta);
       acc.errs.push([err, held]);
       acc.rows++;
       const solid = rec.n >= FWD.FWD_LINES.MIN_PAIRS;
+      if (band.band === "plain" && rec.n < FWD.FWD_LINES.MIN_PAIRS && world.T < FWD.FWD_LINES.CAP_DAYS / 365) acc.plainCarryOnly++;
       if (band.band === "plain") { acc.plain.n++; const hit = err <= 0.02 + 1e-12; if (hit) acc.plain.ok++; if (solid) { acc.withPairs.plain.n++; chainRows++; if (hit) acc.withPairs.plain.ok++; else chainBad = true; } }
       else if (band.band === "pm") { acc.pm.n++; const hit = err <= band.half + 1e-12; if (hit) acc.pm.ok++; if (solid) { acc.withPairs.pm.n++; chainRows++; if (hit) acc.withPairs.pm.ok++; else chainBad = true; } }
       else acc.dash++;
@@ -190,6 +205,7 @@ export function summarize(acc) {
     pmWithPairsN: acc.withPairs.pm.n,
     trialsWithPairs: acc.trialsWithPairs,
     early: pct(acc.early, n),
+    plainCarryOnly: acc.plainCarryOnly,
     chainsBad: pct(acc.chains.bad, acc.chains.n),
     chainsN: acc.chains.n,
     zLow: pct(acc.zbins.low.ok, acc.zbins.low.n),

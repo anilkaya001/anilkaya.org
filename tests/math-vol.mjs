@@ -122,9 +122,19 @@ function statsBattery(St, Fe) {
     for (const n of [3, 40, 252]) {
       const xs = Array(n).fill(v);
       xs[n - 1] = nudged(v);
-      if (!(St.sampleVar(xs) > 0)) say(`one value an ulp above ${v} in ${n} makes no variance`);
+      if (St.sampleVar(xs) !== 0) say(`one value an ulp above ${v} in ${n} has a variance of ${St.sampleVar(xs)}, not the exact zero the rounding floor gives`);
+      const ys = Array(n).fill(v);
+      ys[n - 1] = v * (1 + 1e-7);
+      if (!(St.sampleVar(ys) > 0)) say(`one value 1e-7 above ${v} in ${n} makes no variance`);
+      const zs = Array(n).fill(v);
+      zs[n - 1] = v * (1 + 2e-9);
+      if (!(St.sampleVar(zs) > 0)) say(`one value 2e-9 above ${v} in ${n} makes no variance`);
+      const flatY = Array.from({ length: n }, (_, i) => i);
+      if (St.pearson(flatY, xs) !== null || St.spearman(flatY, xs) !== null) say(`a correlation against a series an ulp from constant is not null (${n} points)`);
     }
   }
+  if (St.sampleVar([1e5, 1e5 + 1e-3, 1e5 + 2e-3]) <= 0) say("a price of 1e5 moving by a tenth of a cent is real data and has a variance");
+  if (St.sampleVar([0, 2.220446049250313e-16, -2.220446049250313e-16]) <= 0) say("a returns series of a few ulps around zero is judged against its own scale and has a variance");
   for (const n of [3, 10, 60, 252]) {
     for (const [a, b] of [[1, 0], [2, 1], [0.1, 3.3], [7.77, -2.1], [-0.3, 0.7], [1e-3, 5]]) {
       const x = Array.from({ length: n }, (_, i) => Math.sin(i) * 3 + i / 7);
@@ -239,11 +249,13 @@ const EVENT_MUTANTS = [
   ["a back expiry that is not later is accepted", [["|| !(t2 > t1)) return", "|| !(t2 >= t1)) return"]]],
 ];
 const STATS_MUTANTS = [
-  ["a one-ulp difference is called flat", "shared/flows-stats.js", [["if (v[i] !== v[0]) return false;", "if (Math.abs(v[i] - v[0]) > 1e-12 * Math.abs(v[0])) return false;"]]],
+  ["a one-ulp difference has a variance", "shared/flows-stats.js", [["return hi - lo <= DEGENERATE_REL * big;", "return hi === lo;"]]],
+  ["a real spread is called flat", "shared/flows-stats.js", [["export const DEGENERATE_REL = 1e-9;", "export const DEGENERATE_REL = 1e-3;"]]],
+  ["spearman ranks the noise", "shared/flows-stats.js", [["  if (isFlat(pts.map((p) => p[0])) || isFlat(pts.map((p) => p[1]))) return null;\n  return pearson(ranks(", "  return pearson(ranks("]]],
   ["a correlation can exceed one", "shared/flows-stats.js", [["Math.max(-1, Math.min(1, sxy / Math.sqrt(sxx * syy)))", "sxy / Math.sqrt(sxx * syy)"]]],
   ["the variance divides by n", "shared/flows-stats.js", [["/ (v.length - 1);\n}", "/ v.length;\n}"]]],
   ["a constant series has a noise variance", "shared/flows-stats.js", [["if (flat(v)) return 0;", ""]]],
-  ["a constant series has a correlation", "shared/flows-stats.js", [["if (fx || fy) return null;", ""]]],
+  ["a constant series has a correlation", "shared/flows-stats.js", [["  if (isFlat(pts.map((p) => p[0])) || isFlat(pts.map((p) => p[1]))) return null;\n  let mx = 0", "  let mx = 0"]]],
   ["the percentile rank divides by m", "shared/flows-stats.js", [["out[idx[k]] = avgRank / (m + 1);", "out[idx[k]] = avgRank / m;"]]],
   ["ties take the lowest rank", "shared/flows-stats.js", [["const avgRank = (i + j) / 2 + 1;", "const avgRank = i + 1;"]]],
   ["the share at or below is strict", "shared/flows-stats.js", [["for (const y of v) if (y <= x) k++;", "for (const y of v) if (y < x) k++;"]]],

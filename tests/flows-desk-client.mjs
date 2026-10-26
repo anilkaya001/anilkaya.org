@@ -236,13 +236,13 @@ try {
     const page = await openDesk(browser, { payloads: { NVDA: nvdaAfter() }, query, errors });
     await ready(page, 9);
     const head = flat(await page.locator("#dkList .dk-head").textContent());
-    ok(head.includes("Win % (implied)") && head.includes("Win % (real-world)"), `the column headers say what the two chances are (${head})`);
+    ok(head.includes("Win % (implied)") && head.includes("Win % (model vol)"), `the column headers say what the two chances are (${head})`);
     ok(!/Implied[^ ]/.test(head.replace("Win % (implied)", "")) && !/Real world/.test(head), "and no bare 'Implied' or 'Real world' is left to be read as a volatility");
     const first = page.locator("#dkList .dk-row").first();
-    eq(await first.locator(".dk-ev").getAttribute("title"), "Expected profit per contract sold into the bid, under the real-world law: the card's published volatility model with the forward as drift. Not a forecast.", "the EV cell says what it is: expected profit per contract, sold into the bid, under the real-world law, with the drift it uses");
-    ok(head.includes("EV (real-world)"), `the EV column is labelled by the law it reads (${head})`);
+    eq(await first.locator(".dk-ev").getAttribute("title"), "Expected profit per contract sold into the bid, under the card's published volatility model, with the stock drifting to the forward so no direction is assumed. Not a forecast. Win % (implied) is read from option prices and carries a risk premium. EV uses this site's volatility model, so the two differ.", "the EV cell says what it is: expected profit per contract, sold into the bid, under the volatility model, with the drift it uses and why it differs from the implied chance");
+    ok(head.includes("EV (model vol)"), `the EV column is labelled by the law it reads (${head})`);
     ok(/risk-neutral density/.test(await first.locator(".dk-pq").getAttribute("title")), "the implied win chance says which density it reads");
-    ok(/real-world law/.test(await first.locator(".dk-pp").getAttribute("title")), "and the real-world one which law");
+    ok(/volatility model/.test(await first.locator(".dk-pp").getAttribute("title")), "and the model-vol one which model");
     ok(/Time-value yield, annualised/.test(await first.locator(".dk-ann").getAttribute("title")), "the Ann. cell says it is a time-value yield");
     await page.close();
   }
@@ -268,8 +268,8 @@ try {
     eq(await broken.locator(".dk-ev").getAttribute("title"), brokenWhy, "and so does the EV");
     const noCard = page.locator(rowSel("BBB", 47, "2026-10-16", "csp"));
     eq(flat(await noCard.locator(".dk-pp").textContent()).endsWith(DASH), true, "a name with no card has no real-world chance: a dash");
-    ok(/No real-world figure: no card is published for BBB/.test(await noCard.locator(".dk-pp").getAttribute("title")), "and its tooltip says there is no card");
-    ok(/No real-world figure: no card is published for BBB/.test(await noCard.locator(".dk-ev").getAttribute("title")), "as does the EV cell's");
+    ok(/No model-volatility figure: no card is published for BBB/.test(await noCard.locator(".dk-pp").getAttribute("title")), "and its tooltip says there is no card");
+    ok(/No model-volatility figure: no card is published for BBB/.test(await noCard.locator(".dk-ev").getAttribute("title")), "as does the EV cell's");
     ok(/risk-neutral density/.test(await noCard.locator(".dk-pq").getAttribute("title")), "while the implied chance, which needs no card, keeps its definition");
 
     const plot = await page.$eval("#dkFrontierM .dk-hint", (n) => n.textContent);
@@ -336,7 +336,7 @@ try {
     eq(await clear.getAttribute("data-why"), null, "the same chain's line that expires before the report is priced in the real world");
     ok(!flat(await clear.locator(".dk-pp").textContent()).endsWith(DASH), "with a real-world Win %");
     const crossInfo = await lineInfo(page, sel("ERN", 95));
-    ok(/No real-world figure: An earnings report falls inside this expiry/.test(crossInfo.text), "and the disclosure names the reason");
+    ok(/No model-volatility figure: An earnings report falls inside this expiry/.test(crossInfo.text), "and the disclosure names the reason");
 
     const cush = await lineInfo(page, sel("CSH", 95));
     eq(cush.facts.Cushion.replace(/^[\d.]+ SD /, ""), "on 30.0% volatility", "a cushion is measured in the volatility inverted from the mid the row states, 30.0%, and not in a stale 90.0% last trade");

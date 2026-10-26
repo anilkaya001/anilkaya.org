@@ -1,7 +1,8 @@
 import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
-import { closeUtcMs, etDayOf, isSession, shiftDay, yearFraction } from "./flows-quant-time.js";
+import { closeUtcMs, etDayOf, isSession, shiftDay, yearFraction, rootOfSymbol } from "./flows-quant-time.js";
 import { median } from "./flows-stats.js";
-import { chooseForward, quotesByExpiry, forwardRecord } from "./flows-quant-forward.js";
+import { chooseForward, quotesByExpiry, forwardRecord, exFrame } from "./flows-quant-forward.js";
+import { dividendOutlook } from "./flows-vendor-extras.js";
 
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -218,7 +219,7 @@ export function priceSale(row, {
   return midIv === false ? priced : attachMidIv(priced, { spot, readMs, rate });
 }
 
-const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR);
+const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry, rootOfSymbol(p.symbol)) : p.days / DAYS_PER_YEAR);
 
 export const FORWARD_MIN_PAIRS = 3;
 export const FORWARD_MAX_PAIRS = 10;
@@ -353,7 +354,7 @@ const byText = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
-  ticker = null, readMs = null, rate = PRICING_RATE, carry = null, fwdCarry = null,
+  ticker = null, readMs = null, rate = PRICING_RATE, carry = null, fwdCarry = null, dividends = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
@@ -406,7 +407,8 @@ export function rankChain(contracts, {
   const fwd = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => {
     const sample = kept.find((p) => p.expiry === expiry);
     const T = yearsTo(sample, readMs);
-    return forwardRecord(expiry, T > 0 && spot > 0 ? chooseForward({ quotes: quotes.get(expiry), S: spot, r: rate, T, q: fwdCarry }) : null);
+    const ex = dividends ? exFrame(dividendOutlook({ x: dividends.x, expiry, today: asOf, ageDays: dividends.ageDays }), { readMs, expiryMs: closeUtcMs(expiry) }) : null;
+    return forwardRecord(expiry, T > 0 && spot > 0 ? chooseForward({ quotes: quotes.get(expiry), S: spot, r: rate, T, q: fwdCarry, ex }) : null);
   });
 
   const { divisor, basis } = ivConvention(

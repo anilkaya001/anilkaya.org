@@ -311,6 +311,41 @@ export function exercisePressure({ exDates = null, expected = null, expiry = nul
   return { state: "none-known", exDate: null, lastExerciseDay: null, note: EXERCISE_WORDS.none };
 }
 
+export const NOTICE_DAYS = 10;
+
+export const FRESH_NOTICE_DAYS = 3;
+
+export const DEFAULT_GAP_DAYS = 91;
+
+export const SPECIAL_GAP_SHARE = 0.6;
+
+export function dividendOutlook({ x = null, expiry = null, today = null, ageDays = null } = {}) {
+  const t = isoDay(today);
+  const e = isoDay(expiry);
+  const none = { state: "unknown", exDate: null, n: 0, g: DEFAULT_GAP_DAYS, irregular: false, fresh: false, ageDays: null, lastExerciseDay: null };
+  if (!t || !e || !isObj(x) || x.ok !== true || !isNum(ageDays) || ageDays < 0) return none;
+  const fresh = ageDays <= FRESH_NOTICE_DAYS;
+  const regular = ["monthly", "quarterly", "semiannual", "annual"].includes(x.cadence) && isNum(x.gapDays) && x.gapDays > 0;
+  const g = regular ? x.gapDays : DEFAULT_GAP_DAYS;
+  const past = arr(x.history).map((h) => (isObj(h) ? isoDay(h.ex) : null)).filter(Boolean).sort();
+  const lastEx = past.length ? past[past.length - 1] : isoDay(x.lastEx);
+  const declared = arr(x.declared).map((h) => (isObj(h) ? isoDay(h.ex) : null)).filter((d) => d && d > t && d <= e).sort();
+  const base = { g, fresh, ageDays };
+  if (declared.length) {
+    const first = declared[0];
+    const gap = lastEx && lastEx < first ? daysBetween(lastEx, first) : null;
+    return { ...base, state: "declared", exDate: first, n: declared.length, irregular: gap !== null && gap < SPECIAL_GAP_SHARE * g, lastExerciseDay: priorTradingDay(first) };
+  }
+  if (regular && lastEx) {
+    const projected = addDays(lastEx, Math.round(g));
+    const notBefore = addDays(t, Math.max(0, NOTICE_DAYS - Math.floor(ageDays)));
+    if (projected && projected > notBefore && projected <= e && projected > t) {
+      return { ...base, state: "expected", exDate: projected, n: 1, irregular: false, lastExerciseDay: priorTradingDay(projected) };
+    }
+  }
+  return { ...base, state: "none-known", exDate: null, n: 0, irregular: false, lastExerciseDay: null };
+}
+
 export function exDatesOf(x) {
   if (!isObj(x) || x.ok !== true) return null;
   const out = [];

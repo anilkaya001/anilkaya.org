@@ -297,8 +297,8 @@ const print = (o = {}) => ({
     [{ askPrem: 6496, bidPrem: 3504, prem: 10000 }, 0.6496, 1, "ask"],
     [{ askPrem: 6449, bidPrem: 3551, prem: 10000 }, 0.6449, 1, "mixed"],
     [{ askPrem: 0, bidPrem: 0, prem: 100 }, null, 0, "thin"],
-    [{ askPrem: 900, bidPrem: 700, prem: 1000 }, 0.5625, 1, "mixed"],
-    [{ askPrem: 1500, bidPrem: 100, prem: 1000 }, 0.9375, 1, "ask"],
+    [{ askPrem: 900, bidPrem: 700, prem: 1000 }, null, null, null],
+    [{ askPrem: 1500, bidPrem: 100, prem: 1000 }, null, null, null],
     [{ askPrem: 10, bidPrem: 0, prem: 0 }, null, null, null],
     [{ askPrem: 10, bidPrem: 10 }, null, null, null],
     [{ askPrem: 5, bidPrem: 5, prem: null }, null, null, null],
@@ -315,7 +315,7 @@ const print = (o = {}) => ({
     [[{ askPrem: 200000, bidPrem: 50000, prem: 250000 }, { askPrem: 10000, bidPrem: 80000, prem: 90000 }], 210000 / 340000, 1, "mixed"],
     [[{ askPrem: 100, bidPrem: 0, prem: 100 }, { prem: 1000 }], 1, 100 / 1100, "thin"],
     [[{ askPrem: 600, bidPrem: 200, prem: 800 }, { askPrem: 200, prem: 200 }], 0.75, 0.8, "ask"],
-    [[{ askPrem: 1500, bidPrem: 500, prem: 1000 }, { prem: 1000 }], 0.75, 0.5, "ask"],
+    [[{ askPrem: 1500, bidPrem: 500, prem: 1000 }, { prem: 1000 }], null, null, null],
     [[{ askPrem: 30, bidPrem: 0, prem: 100 }, { askPrem: 0, bidPrem: 10, prem: 100 }], 0.75, 0.2, "thin"],
     [[{ prem: 100 }, { askPrem: 5, prem: 10 }], null, null, null],
   ];
@@ -325,7 +325,7 @@ const print = (o = {}) => ({
     if (classified === null) eq(r.classified, null, `${label}: classified null`); else near(r.classified, classified, `${label}: classified`, 1e-12);
     eq(r.side, side, `${label}: side ${side}`);
     eq(r.lean, side === "ask" || side === "bid" ? side : null, `${label}: lean is the coloured sides only`);
-    deep(askShare(row), { share: r.share, classified: r.classified }, `${label}: askShare is the same pair`);
+    deep(askShare(row), { share: r.share, classified: r.classified, invalid: r.invalid }, `${label}: askShare is the same pair and the same count of invalid windows`);
   };
   for (const [row, share, classified, side] of rows) check(row, share, classified, side, JSON.stringify(row));
   deep({ ...ASK_SHARE_RULE }, { askAt: 0.65, bidAt: 0.35, classifiedMin: 0.5 }, "the colour rule: 0.65 and 0.35 of the sided premium, at least half the premium sided, read as the whole percents printed");
@@ -335,7 +335,10 @@ const print = (o = {}) => ({
     const table = JSON.parse(readFileSync(path, "utf8"));
     const list = Array.isArray(table) ? table : table.cases || [];
     ok(list.length > 0, "the client's known-answer table has cases");
-    for (const c of list) check(c.rows, c.share, c.classified, c.side, "table " + c.name);
+    for (const c of list) {
+      check(c.rows, c.share, c.classified, c.side, "table " + c.name);
+      if (c.invalid !== undefined) eq(askShareRead(c.rows).invalid, c.invalid, `table ${c.name}: invalid windows`);
+    }
     console.log(`  ask-share: ${list.length} case(s) of tests/fixtures-ask-share.json hold on the server helper`);
   } else {
     console.log("  ask-share: tests/fixtures-ask-share.json is not in this tree yet; the inline table above stands alone");

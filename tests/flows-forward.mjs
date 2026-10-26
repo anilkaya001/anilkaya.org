@@ -21,6 +21,7 @@ const LINES = {
   REL_SPREAD: 0.25, WINDOW: 0.05, WIDEN_MAX: 0.15, WIDEN_PAIRS: 8, MAX_PAIRS: 12, MIN_PAIRS: 3, HALF_CENT: 0.005, RATE_SE: 0.02, BORROW_SE: 0.03,
   DIV_SE_UNKNOWN: 0.015, DIV_SHARE: 0.10, Z_TRUST: 3, VETO_Z: 4, BAND_PLAIN: 0.02, BAND_PM: 0.10, Z95: 1.96, BOUND_FLOOR: 0.51,
   PUT_DELTA_CUT: 0.30, CALL_DELTA_CUT: 0.70, EEP_SHARE: 0.15, EEP_SHIFT: 0.25, EEP_SD: 0.15, RAMP: 1, CARRY_WEIGHT_MIN: 0.05, SPOT_SE: 0.00015,
+  DECL_SHARE: 0.25, DECL_SHARE_UNKNOWN: 1, EXPECT_SHARE: 0.5, DHAT_UNKNOWN: 0.004, SPECIAL_SE: 0.02, EX_DIV_MULT: 1.5, EX_SOFT_Z: 1.645, CAP_DAYS: 2, CAP_PM_FLOOR: 0.03,
 };
 
 const refCarry = ({ S, r, T, q }) => {
@@ -620,9 +621,9 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
   };
   eq(probe(QC), [], "the card's fit passes the probe");
   const cases = [
-    ["parity forward ignored: the carry forward is used and the volatility re-solved there", [["const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === \"parity\" || fwd.src === \"blend\") ? fwd : null;", "const used = null;"]]],
+    ["parity forward ignored: the carry forward is used and the volatility re-solved there", [["const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === \"parity\" || fwd.src === \"blend\" || fwd.discrete === true) ? fwd : null;", "const used = null;"]]],
     ["the vendor's volatility combined with our forward", [["const iv = impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);", "const iv = seed !== null ? seed : impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);"]]],
-    ["T in whole days", [["const T = yearFraction(asOfMs, expiry);\n  if (!(T > 0)) return { bad: \"expired\" };", "const T = calendarDays(etDayOf(asOfMs), expiry) / 365;\n  if (!(T > 0)) return { bad: \"expired\" };"]]],
+    ["T in whole days", [["const T = yearFraction(asOfMs, expiry, input.root || null);\n  if (!(T > 0)) return { bad: \"expired\" };", "const T = calendarDays(etDayOf(asOfMs), expiry) / 365;\n  if (!(T > 0)) return { bad: \"expired\" };"]]],
     ["the forward refit on the rate alone", [["const F = used ? used.F : S * Math.exp((r - carry) * T);", "const F = S * Math.exp((r - carry) * T);"]]],
   ];
   const survived = [];
@@ -650,7 +651,7 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
     return ranked.fwd.length === 1 && Math.abs(ranked.fwd[0].T * 365 * 24 - 3) < 1e-9 ? [] : ["T"];
   };
   eq(run(PREM), [], "the premium module reads three hours as three hours");
-  const mod = await loadMutated("shared/flows-premium.js", [["const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry) : p.days / DAYS_PER_YEAR);", "const yearsTo = (p, readMs) => p.days / DAYS_PER_YEAR;"]]);
+  const mod = await loadMutated("shared/flows-premium.js", [["const yearsTo = (p, readMs) => (Number.isFinite(readMs) ? yearFraction(readMs, p.expiry, rootOfSymbol(p.symbol)) : p.days / DAYS_PER_YEAR);", "const yearsTo = (p, readMs) => p.days / DAYS_PER_YEAR;"]]);
   eq(run(mod).length > 0, true, "planted: T from the day count instead of the minutes");
 }
 

@@ -1,45 +1,13 @@
-import { ASK_SHARE_RULE, FLAGS } from "./flows-tape-stats.js";
+import { FLAGS, askShareRead } from "./flows-tape-stats.js";
+import { CENTS, centsOf } from "./flows-cents.js";
 
-export const CENTS = 100;
+export { CENTS, centsOf };
 
 export const CLASSIFIED_FLOOR_CENTS = 25000000;
 
 export const COVERAGE_FLOOR = Object.freeze({ num: 2, den: 5 });
 
 const isInt = Number.isSafeInteger;
-
-const DECIMAL = /^(\d+)(?:\.(\d+))?$/;
-
-export function centsOf(value, { signed = false } = {}) {
-  let negative = false;
-  let text;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return null;
-    negative = value < 0;
-    const abs = Math.abs(value);
-    text = String(abs);
-    if (/e/i.test(text)) return abs < 1 ? { cents: 0, rounded: abs > 0 } : null;
-  } else if (typeof value === "string") {
-    text = value.trim();
-    if (text.startsWith("-")) { negative = true; text = text.slice(1); }
-  } else return null;
-  if (negative && !signed) return null;
-  const m = DECIMAL.exec(text);
-  if (!m) return null;
-  const frac = m[2] || "";
-  let cents = Number(m[1]) * CENTS + Number((frac + "00").slice(0, 2));
-  let rounded = false;
-  if (frac.length > 2) {
-    const rest = frac.slice(2);
-    const lead = rest[0];
-    const tail = /[1-9]/.test(rest.slice(1));
-    if (lead > "5" || (lead === "5" && tail)) cents += 1;
-    else if (lead === "5" && cents % 2 === 1) cents += 1;
-    rounded = /[1-9]/.test(rest);
-  }
-  if (!isInt(cents)) return null;
-  return { cents: negative && cents !== 0 ? -cents : cents, rounded };
-}
 
 export const WINDOW_REASONS = Object.freeze(["btw", "cross", "leg", "ns"]);
 
@@ -177,39 +145,9 @@ export function leanRead(totals) {
   return { ...base, share, side, why: null, reason: null };
 }
 
-const whole = (v) => +(v * 100).toFixed(0);
-
 export function askShareCompat(rows) {
-  let ask = 0;
-  let bid = 0;
-  let prem = 0;
-  let any = false;
-  for (const row of [].concat(rows || [])) {
-    const total = row ? centsOf(row.prem) : null;
-    if (total === null || total.cents <= 0) continue;
-    const a = row.askPrem === null || row.askPrem === undefined ? null : centsOf(row.askPrem);
-    const b = row.bidPrem === null || row.bidPrem === undefined ? null : centsOf(row.bidPrem);
-    const T = total.cents / CENTS;
-    const x = a === null ? 0 : a.cents / CENTS;
-    const y = b === null ? 0 : b.cents / CENTS;
-    const k = x + y > T ? T / (x + y) : 1;
-    prem += x * k + y * k + Math.max(0, T - (x + y) * k);
-    if (a !== null && b !== null) {
-      ask += x * k;
-      bid += y * k;
-      any = true;
-    }
-  }
-  if (!any) return { share: null, classified: null, side: null, lean: null };
-  const share = ask + bid > 0 ? ask / (ask + bid) : null;
-  const classified = (ask + bid) / prem;
-  let side = "thin";
-  if (share !== null && whole(classified) >= whole(ASK_SHARE_RULE.classifiedMin)) {
-    if (whole(share) >= whole(ASK_SHARE_RULE.askAt)) side = "ask";
-    else if (whole(share) <= whole(ASK_SHARE_RULE.bidAt)) side = "bid";
-    else side = "mixed";
-  }
-  return { share, classified, side, lean: side === "ask" || side === "bid" ? side : null };
+  const read = askShareRead(rows);
+  return { share: read.share, classified: read.classified, side: read.side, lean: read.lean };
 }
 
 export function printEntry(print) {

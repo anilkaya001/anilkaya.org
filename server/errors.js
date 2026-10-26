@@ -55,6 +55,7 @@ export const ERRORS = Object.freeze({
   rt_forbidden: entry(403, "Real-time access is limited to the owner"),
   rt_off: entry(404, "The real-time rail is off"),
   rt_unavailable: entry(503, "The real-time rail is unavailable"),
+  sc_off: entry(503, "Short calls is paused"),
   service_unavailable: entry(503, "Service is temporarily unavailable"),
   store_quota: entry(503, "The store's daily quota is spent; it resets at 03:00 TRT (00:00 UTC)"),
   store_unreadable: entry(503, "The store could not be read"),

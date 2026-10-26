@@ -2,7 +2,7 @@ import {
   numOrNull, parseOptionSymbol, intrinsic, impossibleQuote, optionRoot, PRICING_RATE,
 } from "./flows-premium.js";
 import { impliedVolB76, black76, normPdf } from "./flows-quant-bs.js";
-import { closeUtcMs, etDayOf, nyseEarlyCloses, parseDay, yearFraction } from "./flows-quant-time.js";
+import { closeUtcMs, etDayOf, nyseEarlyCloses, parseDay, yearFraction, rootOfSymbol } from "./flows-quant-time.js";
 import { regularSessionRows, candleDay } from "./flows-vol.js";
 
 export { intrinsic };
@@ -145,7 +145,7 @@ function fitQuotes(quotes, { readMs, near }) {
   for (const q of quotes) {
     if (q.bid === null || q.ask === null || !(q.bid > 0) || !(q.ask >= q.bid)) continue;
     if (!(q.expiry > today)) continue;
-    const years = yearFraction(readMs, q.expiry);
+    const years = yearFraction(readMs, q.expiry, rootOfSymbol(q.symbol));
     if (!(years > 0)) continue;
     let g = byExpiry.get(q.expiry);
     if (!g) { g = { expiry: q.expiry, years, quotes: [] }; byExpiry.set(q.expiry, g); }

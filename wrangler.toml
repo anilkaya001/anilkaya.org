@@ -58,6 +58,16 @@ name = "LOGIN_NAME"
 namespace_id = "1106"
 simple = { limit = 20, period = 60 }
 
+[[ratelimits]]
+name = "SC_COLD"
+namespace_id = "1107"
+simple = { limit = 3, period = 60 }
+
+[[ratelimits]]
+name = "SC_REFRESH"
+namespace_id = "1108"
+simple = { limit = 1, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"

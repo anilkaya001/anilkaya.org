@@ -64,7 +64,8 @@ import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl, vendorMeter, newerMeter } from "./shared/flows-vendor-core.js";
 import { pathFor } from "./shared/flows-vendor-ops.js";
 import { rankShortCalls } from "./shared/flows-premium-rank.js";
-import { gatherPages, chainCacheGet, chainCachePut, singleFlight, SC_PAGE_SIZE, SC_MAX_PAGES, SC_PAGES_DEFAULT } from "./server/desk-sc.js";
+import { partState } from "./shared/flows-vendor-extras.js";
+import { gatherPages, chainCacheGet, chainCachePut, singleFlight, vendorCheck, vendorAnomalies, SC_PAGE_SIZE, SC_MAX_PAGES, SC_PAGES_DEFAULT } from "./server/desk-sc.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -82,6 +83,7 @@ function createState() {
     keyCounter: null,
     scChains: new Map(),
     scFlights: new Map(),
+    scVendorLogged: new Set(),
   };
 }
 const state = createState();
@@ -928,15 +930,25 @@ async function cardWithEngine(env, ticker, stored, trace = {}) {
       card.engine.key === "card-x:" + ticker) {
     const extra = await readFlowsPayload(env, card.engine.key, trace);
     let block = null;
+    let dividendPart = null;
     if (extra) {
       try {
         const x = JSON.parse(extra.payload);
         block = x && x.sessionDate === card.sessionDate && x.engine && typeof x.engine === "object" ? x.engine : null;
+        dividendPart = x && x.vx && typeof x.vx.dividends === "object" ? x.vx.dividends : null;
       } catch { block = null; }
     }
     card.engine = block || (trace.failed ? { ...STORE_GONE, key: card.engine.key } : { status: "unreadable", key: card.engine.key });
+    return { stored, card, unreadable: false, dividendPart };
   }
-  return { stored, card, unreadable: false };
+  return { stored, card, unreadable: false, dividendPart: null };
+}
+
+function dividendCalendar(cardRead, nowMs) {
+  const part = cardRead && cardRead.dividendPart;
+  const state = partState(part, "dividends", nowMs);
+  if (state !== "fresh" && state !== "stale") return null;
+  return { x: part.x, ageDays: Math.max(0, (nowMs - part.at) / 86400000) };
 }
 
 const STORE_QUOTA_RE = /exceeded D1's|free tier daily row|D1_ERROR[\s\S]*\b7500\b/i;
@@ -1205,14 +1217,20 @@ function vendorGate(env, session) {
   };
   gate.member = check;
   gate.call = () => FLOWS_LIVE.ondemandAllowed(env);
+  gate.cold = async () => {
+    for (let i = 0; i < scColdUnits(env); i++) if (!(await memberAllowed(env.SC_COLD, SC_COLD_KEY))) return false;
+    return true;
+  };
   return gate;
 }
 
 function chargedFetch(env, gate) {
-  return async (path, params, opts) => {
+  const fetcher = async (path, params, opts) => {
     if (!(await gate.call())) throw new VendorRefused();
     return uwFetch(env, path, params, opts);
   };
+  fetcher.cold = gate.cold;
+  return fetcher;
 }
 
 const FALLBACK_FAILED = Object.freeze({
@@ -2430,6 +2448,7 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
       spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate,
       carry: deskCarry(cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.facts, found.status),
       fwdCarry: cardEngine.status === "ok" ? cardCarry(cardEngine.facts) : null,
+      dividends: dividendCalendar(cardRead, readMs),
     });
 
   return chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info, cardRead, readMs, ranked, truncated });
@@ -2477,12 +2496,28 @@ function chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info,
   };
 }
 
+const SC_OFF_WORDS = new Set(["0", "off", "false"]);
+
 const scPageCeiling = (env) => {
-  const v = Number.parseInt(env && env.FLOWS_DESK_SC_PAGES, 10);
-  return Number.isInteger(v) && v >= 1 && v <= SC_MAX_PAGES ? v : SC_PAGES_DEFAULT;
+  const raw = env && env.FLOWS_DESK_SC_PAGES;
+  if (typeof raw === "string" && SC_OFF_WORDS.has(raw.trim().toLowerCase())) return 0;
+  const v = Number.parseInt(raw, 10);
+  if (Number.isInteger(v) && v >= 1) return Math.min(v, SC_MAX_PAGES);
+  return SC_PAGES_DEFAULT;
 };
 
+const scOff = (env) => scPageCeiling(env) === 0;
+
+const SC_COLD_KEY = Object.freeze({ username: "sc-cold" });
+
+const SC_CALLS_PER_UNIT = 14;
+
+const scColdUnits = (env) => Math.max(1, Math.ceil((scPageCeiling(env) + 2) / SC_CALLS_PER_UNIT));
+
+const scRefreshAllowed = (env, session) => memberAllowed(env.SC_REFRESH, session);
+
 async function readShortCallSnapshot(env, ctx, vf, ticker) {
+  if (typeof vf.cold === "function" && !(await vf.cold())) throw new VendorRefused();
   const maxPages = scPageCeiling(env);
   const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
     exclude_zero_oi_chains: "true",
@@ -2493,7 +2528,7 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
   }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
-  const [firstPage, candles, state, info, cardRead] = await Promise.all([
+  const [firstPage, candles, stockState, info, cardRead] = await Promise.all([
     chainPage(1),
     vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
     vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
@@ -2504,7 +2539,7 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
   if (!unwrap(firstPage).length) throw new HttpError(404, "chain_empty", "No listed options found for that symbol");
   const got = await gatherPages({ first: firstPage, page: chainPage, unwrap, refused: (error) => error instanceof VendorRefused, maxPages });
-  const print = printOf({ state, bars: unwrap(candles), readMs });
+  const print = printOf({ state: stockState, bars: unwrap(candles), readMs });
   if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
   const asOf = etDayOf(readMs);
   const engineRate = cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.rate &&
@@ -2516,7 +2551,13 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
     logFailure("warn", "chain coherence check failed", { ticker }, error);
     found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
   }
-  return { rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(state), info, cardRead, engineRate };
+  const vendor = vendorCheck(got.rows, { spot: found.spot, pages: got.pages, failed: got.failed, truncated: got.truncated });
+  for (const kind of vendorAnomalies(vendor)) {
+    if (state.scVendorLogged.has(kind)) continue;
+    state.scVendorLogged.add(kind);
+    logFailure("warn", "desk chain read anomaly", { ticker, kind, order: vendor.order, zeroOi: vendor.zeroOi, pages: vendor.pages, rows: vendor.rows });
+  }
+  return { rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(stockState), info, cardRead, engineRate, vendor };
 }
 
 async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = false }) {
@@ -2537,6 +2578,7 @@ async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = fa
     : rankShortCalls(rows, {
       ticker, spot, readMs, asOfDay: asOf, rate: engineRate, rateMethod: engine.status === "ok" && engine.rate ? engine.rate.method : null,
       facts: engine.status === "ok" ? engine.facts : [], terms: { h: terms.haircut, f: terms.floor }, pages: snap.pages, truncated: snap.truncated, shed,
+      dividends: dividendCalendar(cardRead, readMs), vendor: snap.vendor,
     });
   return chainEnvelope({ ticker, strategy: "sc", spot, asOf, print, found, live: snap.live, info: snap.info, cardRead, readMs, ranked, truncated: snap.truncated });
 }
@@ -2989,7 +3031,7 @@ const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpEr
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
-flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
+flowsDeskRows({ scOff, scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),

@@ -1,4 +1,5 @@
-import { impliedVolB76, normCdf, normPdf, forwardDelta } from "./flows-quant-bs.js";
+import { impliedVolB76, normCdf, normPdf, forwardDelta, black76 } from "./flows-quant-bs.js";
+import { openUtcMs, closeUtcMs, YEAR_SECONDS } from "./flows-quant-time.js";
 
 export const FWD_LINES = Object.freeze({
   REL_SPREAD: 0.25,
@@ -26,20 +27,78 @@ export const FWD_LINES = Object.freeze({
   RAMP: 1,
   CARRY_WEIGHT_MIN: 0.05,
   SPOT_SE: 0.00015,
+  DECL_SHARE: 0.25,
+  DECL_SHARE_UNKNOWN: 1,
+  EXPECT_SHARE: 0.5,
+  DHAT_UNKNOWN: 0.004,
+  SPECIAL_SE: 0.02,
+  EX_DIV_MULT: 1.5,
+  EX_SOFT_Z: 1.645,
+  CAP_DAYS: 2,
+  CAP_PM_FLOOR: 0.03,
 });
 
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const SQRT3 = Math.sqrt(3);
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
-export function carryOf({ S, r, T, q }) {
-  const known = fin(q);
-  const F = S * Math.exp((r - (known ? q : 0)) * T);
+const yearMs = YEAR_SECONDS * 1000;
+
+export function dividendFraction({ q, ex }) {
+  const g = ex && fin(ex.g) && ex.g > 0 ? ex.g : 91;
+  return fin(q) && q > 0 ? q * g / 365 : FWD_LINES.DHAT_UNKNOWN;
+}
+
+function discreteOf({ q, T, ex }) {
   const L = FWD_LINES;
+  if (!ex || (ex.state !== "declared" && ex.state !== "expected") || !(ex.n >= 1) || ex.irregular === true) return null;
+  const g = fin(ex.g) && ex.g > 0 ? ex.g : 91;
+  if (!(T <= g / 365)) return null;
+  const dHat = dividendFraction({ q, ex });
+  const share = ex.state === "expected" ? L.EXPECT_SHARE : fin(q) && q > 0 ? L.DECL_SHARE : L.DECL_SHARE_UNKNOWN;
+  return { n: ex.n, dHat, se: share * dHat * ex.n };
+}
+
+export function carryOf({ S, r, T, q, ex = null }) {
+  const known = fin(q);
+  const L = FWD_LINES;
+  const base = L.SPOT_SE ** 2 + (L.RATE_SE * T) ** 2 + (L.BORROW_SE * T) ** 2;
+  const dis = discreteOf({ q, T, ex });
+  if (dis !== null) {
+    const F = S * Math.exp(r * T) * (1 - dis.n * dis.dHat);
+    return { F, se: F * Math.sqrt(base + dis.se ** 2), known: true, discrete: true, dHat: dis.dHat };
+  }
+  const F = S * Math.exp((r - (known ? q : 0)) * T);
   const divRel = known ? L.DIV_SHARE * Math.abs(Math.exp(r * T) - Math.exp((r - q) * T)) : 0;
   const unknown = known ? 0 : L.DIV_SE_UNKNOWN * T;
-  const rel = Math.sqrt(L.SPOT_SE ** 2 + (L.RATE_SE * T) ** 2 + (L.BORROW_SE * T) ** 2 + divRel ** 2 + unknown ** 2);
-  return { F, se: F * rel, known };
+  const special = ex && ex.irregular === true && ex.state === "declared" ? L.SPECIAL_SE : 0;
+  const rel = Math.sqrt(base + divRel ** 2 + unknown ** 2 + special ** 2);
+  return { F, se: F * rel, known, discrete: false, dHat: null };
+}
+
+export function exerciseStrike({ S, D, sigma, r, tau }) {
+  if (![S, D, sigma, r, tau].every(fin) || !(S > 0) || !(D > 0) || !(sigma > 0) || !(tau > 0) || D >= S) return null;
+  const P = (K) => black76((S - D) * Math.exp(r * tau), Math.exp(-r * tau), K, sigma, tau, "P");
+  const gain = (K) => D - K * (1 - Math.exp(-r * tau)) - P(K);
+  let lo = 0, hi = 2 * S;
+  if (!(gain(lo + 1e-9) > 0)) return null;
+  if (gain(hi) >= 0) return hi;
+  for (let i = 0; i < 80; i++) {
+    const mid = (lo + hi) / 2;
+    if (gain(mid) >= 0) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+export function exFrame(outlook, { readMs, expiryMs }) {
+  if (!outlook || !fin(readMs) || !fin(expiryMs)) return null;
+  const open = outlook.exDate ? openUtcMs(outlook.exDate) : null;
+  return {
+    state: outlook.state, exDate: outlook.exDate || null, n: outlook.n || 0, g: outlook.g, irregular: outlook.irregular === true, fresh: outlook.fresh === true,
+    ageDays: outlook.ageDays, lastExerciseDay: outlook.lastExerciseDay || null,
+    tEx: open === null ? null : Math.max(0, (open - readMs) / yearMs),
+    tau2: open === null ? null : Math.max(0, (expiryMs - open) / yearMs),
+  };
 }
 
 export function sigmaAtm(quotes, F, D, T) {
@@ -66,11 +125,12 @@ function qualifies(q) {
   return { K: q.K, cb, ca, pb, pa, cm, pm };
 }
 
-export function selectPairs(quotes, { Fc, T, sigma = null, divides = true }) {
+export function selectPairs(quotes, { Fc, T, sigma = null, divides = true, skipAtOrBelow = null }) {
   const L = FWD_LINES;
   const all = [];
   for (const q of Array.isArray(quotes) ? quotes : []) {
     if (!q || !fin(q.K) || !(q.K > 0)) continue;
+    if (fin(skipAtOrBelow) && q.K <= skipAtOrBelow) continue;
     const p = qualifies(q);
     if (p === null) continue;
     all.push({ ...p, gap: Math.abs(Math.log(p.K / Fc)) });
@@ -136,24 +196,44 @@ export function dDeltaMax(se, F, sigma, T) {
   return Math.max(FWD_LINES.BOUND_FLOOR, s) * (se / F) / s;
 }
 
-export function chooseForward({ quotes, S, r, T, q }) {
+function exThresholds({ S, r, q, ex, sigma }) {
+  const L = FWD_LINES;
+  if (!ex || (ex.state !== "declared" && ex.state !== "expected") || !(ex.n >= 1) || !fin(ex.tau2) || !(ex.tau2 > 0) || !fin(sigma) || !(sigma > 0)) return { hard: null, soft: null };
+  const amount = Math.max(dividendFraction({ q, ex }), ex.irregular === true ? L.SPECIAL_SE : 0) * S;
+  const D = L.EX_DIV_MULT * amount;
+  const hard = exerciseStrike({ S, D, sigma, r, tau: ex.tau2 });
+  const lift = Math.exp(L.EX_SOFT_Z * sigma * Math.sqrt(Math.max(0, ex.tEx || 0)));
+  const soft = exerciseStrike({ S: S * lift, D, sigma, r, tau: ex.tau2 });
+  return { hard, soft: soft === null ? hard : Math.max(hard === null ? 0 : hard, soft) };
+}
+
+export function chooseForward({ quotes, S, r, T, q, ex = null }) {
   const L = FWD_LINES;
   const D = Math.exp(-r * T);
-  const carry = carryOf({ S, r, T, q });
+  const carry = carryOf({ S, r, T, q, ex });
   const sig0 = sigmaAtm(quotes, carry.F, D, T);
-  const dividends = !carry.known || q > 0;
-  const chosen = selectPairs(quotes, { Fc: carry.F, T, sigma: sig0, divides: dividends });
+  const dividends = !carry.known || q > 0 || carry.discrete;
+  const { hard: exK, soft: exKSoft } = exThresholds({ S, r, q, ex, sigma: sig0 });
+  const chosen = selectPairs(quotes, { Fc: carry.F, T, sigma: sig0, divides: dividends, skipAtOrBelow: exKSoft });
   const par = parityOf(chosen, D);
   const pairs = chosen.map((p) => [p.K, p.cb, p.ca, p.pb, p.pa]);
   const out = {
     F: carry.F, se: carry.se, src: "carry", n: par ? par.n : 0, z: null, gapBp: null, veto: false,
     Fc: carry.F, seC: carry.se, qKnown: carry.known, Fpar: par ? par.F : null, sePar: par ? par.se : null, birge: par ? par.birge : null,
     sigmaAtm: sig0, dDeltaMax: dDeltaMax(carry.se, carry.F, sig0, T), T, r, D, pairs,
+    discrete: carry.discrete === true,
+    exState: ex ? ex.state : "none",
+    exDate: ex && ex.exDate ? ex.exDate : null,
+    exK, exKSoft,
+    cap: false,
   };
+  const exFresh = ex && ex.state === "none-known" && ex.fresh === true;
+  out.cap = T < L.CAP_DAYS / 365 && !exFresh;
   if (!par) return out;
   const z = (par.F - carry.F) / Math.sqrt(par.se * par.se + carry.se * carry.se);
   out.z = z;
   if (par.n < L.MIN_PAIRS) {
+    out.cap = T < L.CAP_DAYS / 365 && !exFresh;
     const sv = par.n === 2 ? par.seStat * Math.max(1, Math.abs(par.rows[0].Fi - par.rows[1].Fi) / Math.sqrt(par.rows[0].sigma ** 2 + par.rows[1].sigma ** 2)) : par.seStat;
     const zv = (par.F - carry.F) / Math.sqrt(sv * sv + carry.se * carry.se);
     out.veto = Math.abs(zv) > L.VETO_Z;
@@ -175,6 +255,7 @@ export function chooseForward({ quotes, S, r, T, q }) {
   out.seC = seC;
   out.src = wc / (wp + wc) < L.CARRY_WEIGHT_MIN ? "parity" : "blend";
   out.gapBp = (par.F / carry.F - 1) * 1e4;
+  out.cap = false;
   out.ee = z < -L.Z_TRUST && par.slopeZ !== null && par.slopeZ < -L.Z_TRUST;
   out.slopeZ = par.slopeZ;
   out.dDeltaMax = dDeltaMax(out.se, out.F, out.sigmaAtm, T);
@@ -189,15 +270,17 @@ export function deltaSensitivity({ F, K, sigma, T, held }) {
   return g / s;
 }
 
-export function deltaBand({ F, se, K, sigma, T, held, veto = false }) {
+export function deltaBand({ F, se, K, sigma, T, held, veto = false, capPm = false, exercise = false }) {
+  if (exercise) return { band: "dash", half: null, reason: "exercise" };
   if (veto) return { band: "dash", half: null, reason: "veto" };
   if (!fin(se) || !(se >= 0)) return { band: "dash", half: null, reason: "no-forward" };
   const sens = deltaSensitivity({ F, K, sigma, T, held });
   if (sens === null) return { band: "dash", half: null, reason: "no-sensitivity" };
   const h95 = FWD_LINES.Z95 * Math.abs(sens) * se / F;
-  if (h95 <= FWD_LINES.BAND_PLAIN) return { band: "plain", half: h95, reason: null };
-  const half = Math.ceil(h95 * 100 - 1e-9) / 100;
-  if (h95 <= FWD_LINES.BAND_PM) return { band: "pm", half, reason: null };
+  if (h95 <= FWD_LINES.BAND_PLAIN && !capPm) return { band: "plain", half: h95, reason: null };
+  const rounded = Math.ceil(h95 * 100 - 1e-9) / 100;
+  const half = capPm ? Math.max(FWD_LINES.CAP_PM_FLOOR, rounded) : rounded;
+  if (h95 <= FWD_LINES.BAND_PM) return { band: "pm", half, reason: capPm && h95 <= FWD_LINES.BAND_PLAIN ? "capped" : null };
   return { band: "dash", half: null, reason: "wide" };
 }
 
@@ -220,6 +303,7 @@ export function forwardRecord(expiry, rec) {
   return {
     expiry, F: rec.F, se: rec.se, src: rec.src, n: rec.n, z: rec.z, gapBp: rec.gapBp, veto: rec.veto,
     Fc: rec.Fc, seC: rec.seC, qKnown: rec.qKnown, Fpar: rec.Fpar, sePar: rec.sePar, birge: rec.birge, sigmaAtm: rec.sigmaAtm, dDeltaMax: rec.dDeltaMax, ee: rec.ee === true, slopeZ: rec.slopeZ === undefined ? null : rec.slopeZ,
+    discrete: rec.discrete === true, exState: rec.exState || "none", exDate: rec.exDate || null, exK: rec.exK === undefined ? null : rec.exK, exKSoft: rec.exKSoft === undefined ? null : rec.exKSoft, cap: rec.cap === true,
     T: rec.T, r: rec.r, D: rec.D, pairList: rec.pairs,
     method: rec.src === "parity" || rec.src === "blend" ? "parity" : rec.src, pairs: rec.n,
   };

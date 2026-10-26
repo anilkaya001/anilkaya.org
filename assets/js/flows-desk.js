@@ -132,12 +132,12 @@
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const SIDES = ["csp", "cc", "both", "sc"];
   const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "sc" };
-  const RANKS = [["annualized", "Annualised yield"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["premium", "Premium received"], ["yieldOnCollateral", "Time value ÷ collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
-  const SC_RANKS = [["annualized", "Annualised ratio"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["ratio", "Time value ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
+  const RANKS = [["annualized", "Annualised yield"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["premium", "Premium received"], ["yieldOnCollateral", "Time value ÷ collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV model vol"]];
+  const SC_RANKS = [["annualized", "Annualised ratio"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["ratio", "Time value ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV model vol"]];
   const ranksFor = () => (side === "sc" ? SC_RANKS : RANKS);
   const calls = () => (side === "sc" ? window.FlowsUI.deskCalls || null : null);
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
-  const WIN_Q = "Win % (implied)", WIN_P = "Win % (real-world)", EV_P = "EV (real-world)";
+  const WIN_Q = "Win % (implied)", WIN_P = "Win % (model vol)", EV_P = "EV (model vol)";
 
   const book = new Map();
   let inflight = 0;
@@ -335,7 +335,7 @@
     const held = c.via === "own" ? type : type === "C" ? "P" : "C";
     const known = fit.forward.carry === "card";
     const se = fwd && isNum(fwd.se) !== null ? fwd.se : Q.carryOf({ S, r: fit.forward.r, T: fit.T, q: known ? fit.forward.q : null }).se;
-    return { ...Q.deltaBand({ F: fit.forward.F, se, K: r.strike, sigma: c.iv, T: fit.T, held, veto: !!(fwd && fwd.veto) }), se };
+    return { ...Q.deltaBand({ F: fit.forward.F, se, K: r.strike, sigma: c.iv, T: fit.T, held, veto: !!(fwd && fwd.veto), capPm: !!(fwd && fwd.cap), exercise: type === "C" && !!(fwd && isNum(fwd.exK) !== null && r.strike <= fwd.exK) }), se };
   };
 
   function structOf(r) {
@@ -437,13 +437,14 @@
     const b = r.__band;
     if (!b || b.band === "plain") return null;
     if (b.band === "dash") {
+      if (b.reason === "exercise") return T("band-exercise", { d: r.__fwd && r.__fwd.exDate ? r.__fwd.exDate : DASH });
       if (b.reason === "veto") return T("band-veto");
       const fit = r.__fitFull, f = r.__fwd;
       const x = f && fit && isNum(f.se) !== null ? "±" + fmtPct(1.96 * f.se / fit.forward.F, 2) : DASH;
       return T("band-dash", { x });
     }
     const w = winHalfOf(r);
-    return T("band-pm", { d: fmt2(b.half), w: w === null ? DASH : fmtPct(w, 0) });
+    return T("band-pm", { d: fmt2(b.half), w: w === null ? DASH : fmtPct(w, 0) }) + (b.reason === "capped" ? " " + T("band-cap") : "");
   };
 
   const winHalfOf = (r, struct) => {
@@ -627,8 +628,8 @@
     { label: "Annualised yield", unit: "fraction", get: (r) => isNum(r.annualized) },
     { label: "Collateral", unit: "USD", get: (r) => isNum(r.collateral) },
     { label: "Win probability (implied)", unit: "fraction", get: popQ },
-    { label: "Win probability (real-world)", unit: "fraction", get: popP },
-    { label: "Expected value, real world", unit: "USD", get: evP },
+    { label: "Win probability (model vol)", unit: "fraction", get: popP },
+    { label: "Expected value, model vol", unit: "USD", get: evP },
   ];
   const exportSpec = () => {
     const dc = calls();
@@ -685,7 +686,10 @@
       const has = (why) => shed.some((x) => x.why === why);
       const n = fmtInt(cut.nRaw);
       const kind = has("budget") ? "budget" : cut.truncated ? "partial" : "ranked";
-      const text = kind === "budget" ? T("sc-cut-budget", { n }) : kind === "partial" ? T("sc-cut-partial", { n }) : T("sc-cut", { n: fmtInt(cut.nIn), m: fmtInt(cut.nOut), k: cut.k });
+      const v = cut.vendor || null;
+      const where = kind === "partial" && v ? " " + T("sc-cut-" + (v.unseen || "unknown"), { x: v.partial || DASH, s: v.aboveStrike === undefined ? DASH : String(v.aboveStrike) }) : "";
+      const filter = v && v.honoured === false ? " " + T("sc-cut-filter") : "";
+      const text = (kind === "budget" ? T("sc-cut-budget", { n }) : kind === "partial" ? T("sc-cut-partial", { n }) : T("sc-cut", { n: fmtInt(cut.nIn), m: fmtInt(cut.nOut), k: cut.k })) + where + filter;
       out.push({ sym, kind, text, nIn: cut.nIn, nOut: cut.nOut });
     }
     return out;
@@ -884,7 +888,7 @@
       pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid")) : cell(pc.ok ? "dk-prem is-dup" : "dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem"), Number.isSafeInteger(pc.collateralC) ? "on " + centsText(pc.collateralC) : null),
       cell("dk-pq", WIN_Q, wq.text, null, wq.title || noEng || T("t-pq")),
       cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, wq.title || noEng || noLaw || T("t-pp")),
-      cell("dk-ev", EV_P, ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
+      cell("dk-ev", EV_P, ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev") + " " + T("ev-market")),
       collect),
     UI.infoButton(r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "call" : "put"), () => rowInfo(r), { small: true }));
   }
@@ -982,8 +986,8 @@
         ["Spread", fmtPct(r.spread, 1) + " of the mid"],
         ["Open interest", oi === null ? DASH : fmtInt(oi) + (ch ? " (" + sg(ch) + fmtInt(Math.abs(ch)) + ")" : "")],
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],
-        ["Chance of profit", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (bandNote(r) ? " · " + bandNote(r) : "")) : DASH],
-        ["Expected value", e ? (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract sold into the bid · " + T("ev-implied", { x: usd(e.ev.q) }) : DASH],
+        ["Chance of profit", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " model vol" + (bandNote(r) ? " · " + bandNote(r) : "")) : DASH],
+        ["Expected value", e ? (e.ev.p === null ? DASH : usd(e.ev.p)) + " model vol, per contract sold into the bid · " + T("ev-implied", { x: usd(e.ev.q) }) + " " + T("ev-market") : DASH],
         ["Delta", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmt2(shortDelta(r)) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock") : DASH],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(whyText).join(" ") : "") : DASH],
       ],

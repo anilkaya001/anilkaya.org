@@ -4,7 +4,9 @@ import {
 } from "./flows-premium.js";
 import { leanFrame, leanRead, leanDelta } from "./flows-quant-card.js";
 import { cardCarry } from "./flows-quant-engine.js";
-import { chooseForward, deltaBand, quotesByExpiry, forwardRecord } from "./flows-quant-forward.js";
+import { chooseForward, deltaBand, quotesByExpiry, forwardRecord, exFrame } from "./flows-quant-forward.js";
+import { dividendOutlook } from "./flows-vendor-extras.js";
+import { closeUtcMs } from "./flows-quant-time.js";
 import { bracketBook } from "./flows-quant-bracket.js";
 import { RANK_BUCKETS, bucketOf, lineCompare } from "./flows-quant-rank.js";
 
@@ -57,7 +59,7 @@ export function eligibleCall(c, g, { spot }) {
   return gateOf({ days: c.days, premium: c.bid * 100, oi: c.oi, spread: mid > 0 ? (c.ask - c.bid) / mid : null }, g);
 }
 
-export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms, k = RANK_K, cap = RANK_CAP, gates = {} }) {
+export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms, k = RANK_K, cap = RANK_CAP, gates = {}, dividends = null }) {
   const g = { ...DEFAULT_GATES, ...gates };
   const { rows, shed, dups } = leanRows(raw, ticker);
   const quotes = quotesByExpiry(rows);
@@ -80,6 +82,11 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
     cands.push(c);
   }
   gated.unpriceable += shed.parse;
+  const exOf = (expiry) => {
+    if (!dividends) return null;
+    const outlook = dividendOutlook({ x: dividends.x, expiry, today: asOfDay, ageDays: dividends.ageDays });
+    return exFrame(outlook, { readMs, expiryMs: closeUtcMs(expiry) });
+  };
   const fwdBy = new Map();
   const frameBy = new Map();
   const needed = new Set(cands.map((c) => c.expiry));
@@ -88,13 +95,13 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
     const input = frameInput(expiry);
     const base = leanFrame(input);
     if (base.bad) { frameBy.set(expiry, base); continue; }
-    const rec = chooseForward({ quotes: quotes.get(expiry), S: spot, r: base.r, T: base.T, q });
+    const rec = chooseForward({ quotes: quotes.get(expiry), S: spot, r: base.r, T: base.T, q, ex: exOf(expiry) });
     fwdBy.set(expiry, rec);
     frameBy.set(expiry, leanFrame({ ...input, fwd: rec }));
   }
   const keyed = [];
   const hit = { shares: 0, delta: 0, regt: 0 };
-  const dShed = { noDelta: 0, dash: 0 };
+  const dShed = { noDelta: 0, dash: 0, exercise: 0 };
   const strikesQuote = new Map();
   for (const [expiry, list] of quotes) strikesQuote.set(expiry, new Map(list.map((x) => [x.K, x])));
   for (const c of cands) {
@@ -112,11 +119,12 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
       const read = leanRead(frame, { K: c.strike, type: "C", bid: c.bid, ask: c.ask, ivSeed: null, opposite });
       if (read) {
         const rec = fwdBy.get(c.expiry);
-        c.band = deltaBand({ F: frame.F, se: rec.se, K: c.strike, sigma: read.iv, T: frame.T, held: read.via === "own" ? "C" : "P", veto: rec.veto });
+        c.band = deltaBand({ F: frame.F, se: rec.se, K: c.strike, sigma: read.iv, T: frame.T, held: read.via === "own" ? "C" : "P", veto: rec.veto, capPm: rec.cap === true, exercise: fin(rec.exK) && c.strike <= rec.exK });
         if (c.band.band !== "dash") {
           c.delta = leanDelta(frame, c.strike, read.iv);
           keys.delta = shortCallLine(line, { ...base, convention: "delta", delta: c.delta }).annRatio;
-        } else dShed.dash++;
+        } else if (c.band.reason === "exercise") dShed.exercise++;
+        else dShed.dash++;
       }
     }
     if (keys.delta === null && c.band === null) dShed.noDelta++;
@@ -158,14 +166,14 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
     cut: {
       nRaw: rows.length, nCalls, nIn: cands.length, nOut: picks.length,
       nKeyed: hit, k: kEff, kReq: k, cap, buckets: RANK_BUCKETS.map((b) => [b[0], b[1]]),
-      terms: { h: terms.h, f: terms.f }, spot, asOf: readMs, dups, noDelta: dShed.noDelta, dash: dShed.dash,
+      terms: { h: terms.h, f: terms.f }, spot, asOf: readMs, dups, noDelta: dShed.noDelta, dash: dShed.dash, exercise: dShed.exercise,
     },
   };
 }
 
-export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms = { h: SC_DEFAULTS.haircut, f: SC_DEFAULTS.floor }, k = RANK_K, gates = {}, pages = null, truncated = false, shed = [] }) {
+export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms = { h: SC_DEFAULTS.haircut, f: SC_DEFAULTS.floor }, k = RANK_K, gates = {}, pages = null, truncated = false, shed = [], dividends = null, vendor = null }) {
   const g = { ...DEFAULT_GATES, ...gates };
-  const pre = preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod, facts, terms, k, gates });
+  const pre = preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod, facts, terms, k, gates, dividends });
   const books = new Map();
   const bookOf = (expiry) => {
     if (!books.has(expiry)) {
@@ -207,6 +215,7 @@ export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateM
   }
   const cut = {
     ...pre.cut, pages, truncated,
+    ...(vendor ? { vendor } : {}),
     shed: shedList(pre, shed),
   };
   return {
@@ -222,6 +231,7 @@ function shedList(pre, shed) {
   }
   if (pre.cut.noDelta > 0) out.push({ why: "no fitted delta", n: pre.cut.noDelta });
   if (pre.cut.dash > 0) out.push({ why: "forward uncertain", n: pre.cut.dash });
+  if (pre.cut.exercise > 0) out.push({ why: "exercise", n: pre.cut.exercise });
   const ranked = pre.cut.nIn - pre.cut.nOut;
   if (ranked > 0) out.push({ why: pre.cut.k < pre.cut.kReq ? "cap" : "rank", n: ranked });
   for (const x of shed) out.push(x);

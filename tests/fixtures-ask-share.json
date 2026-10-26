@@ -1,6 +1,6 @@
 {
   "label": "Ask-side share of the premium the vendor sided",
-  "definition": "share = sum(ask) / (sum(ask) + sum(bid)) over the windows that state askPrem, bidPrem and a positive prem, with neither side negative, where a window whose two sides sum past its premium is scaled by prem / (askPrem + bidPrem) before it is pooled; classified = sum over those windows of those scaled dollars (at most the window premium) / sum(prem) over every window with a positive prem, so premium on a window that states no side counts against the coverage and never as sided",
+  "definition": "share = sum(ask) / (sum(ask) + sum(bid)) over the windows that state askPrem, bidPrem and a positive prem, with neither side negative, where a window whose two sides sum past its premium (compared in whole cents, parsed from the decimal digits as the closed ledger does) is invalid: it is left out of the share and out of the coverage and counted in invalid, which is the ledger's rule (shared/flows-sides.js), and the dollar split of a page that draws ask, bid and neither keeps the whole premium as neither; classified = sum over those windows of those scaled dollars (at most the window premium) / sum(prem) over every window with a positive prem, so premium on a window that states no side counts against the coverage and never as sided",
   "sides": {
     "ask": "classified >= 0.5 and share >= 0.65, both read as the whole percents printed",
     "bid": "classified >= 0.5 and share <= 0.35, both read as the whole percents printed",
@@ -10,7 +10,7 @@
   },
   "rounding": "the thresholds compare the whole percents the said form prints (+(v * 100).toFixed(0), half up), at 65, 35 and 50, so a figure is never printed once coloured and once plain; this departs from the literal thresholds of C-02 (share >= 0.65 or <= 0.35, classified >= 0.5) on three known answers (share 0.6496 is ask, share 0.3504 is bid, classified 0.4996 is coloured), and a server helper reproducing this table must round the same way",
   "said": "the share and classified as whole percents: \"<share>% ask side · <classified>% sided\"; \"none sided\" when classified is 0; an em dash when no window is usable",
-  "split": "askSplit(row) for one window with a positive premium: { ask, bid, none, askStated, bidStated }; a side is stated when it is a number and not negative, and an unstated side is 0 dollars, so its share of the premium goes to none while the stated side keeps its dollars; sides summing past the premium are scaled by prem / (ask + bid); when both are stated, ask / (ask + bid) is share and (ask + bid) / prem is classified",
+  "split": "askSplit(row) for one window with a positive premium: { ask, bid, none, askStated, bidStated, invalid }; a side is stated when it is a number and not negative, and an unstated side is 0 dollars, so its share of the premium goes to none while the stated side keeps its dollars; sides summing past the premium in whole cents make the window invalid (ask 0, bid 0, none the premium, neither side stated, invalid true), never scaled; when both are stated, ask / (ask + bid) is share and (ask + bid) / prem is classified",
   "tolerance": 1e-12,
   "cases": [
     {
@@ -218,28 +218,30 @@
       "said": "none sided"
     },
     {
-      "name": "sides summing past the premium are capped at fully sided",
+      "name": "sides summing past the premium make the window invalid",
       "rows": {
         "askPrem": 900,
         "bidPrem": 700,
         "prem": 1000
       },
-      "share": 0.5625,
-      "classified": 1,
-      "side": "mixed",
-      "said": "56% ask side · 100% sided"
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—",
+      "invalid": 1
     },
     {
-      "name": "over-sum and lopsided",
+      "name": "over-sum and lopsided is invalid, never scaled to a lean",
       "rows": {
         "askPrem": 1500,
         "bidPrem": 100,
         "prem": 1000
       },
-      "share": 0.9375,
-      "classified": 1,
-      "side": "ask",
-      "said": "94% ask side · 100% sided"
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—",
+      "invalid": 1
     },
     {
       "name": "ask stated with no bid stated has no share",
@@ -406,7 +408,7 @@
       "said": "75% ask side · 80% sided"
     },
     {
-      "name": "pooled: an over-sum window is sided at most its own premium",
+      "name": "pooled: an over-sum window is invalid and sides nothing",
       "rows": [
         {
           "askPrem": 1500,
@@ -417,10 +419,11 @@
           "prem": 1000
         }
       ],
-      "share": 0.75,
-      "classified": 0.5,
-      "side": "ask",
-      "said": "75% ask side · 50% sided"
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—",
+      "invalid": 1
     },
     {
       "name": "pooled: partly sided across windows",
@@ -456,6 +459,53 @@
       "classified": null,
       "side": null,
       "said": "—"
+    },
+    {
+      "name": "pooled: an invalid window beside a valid one leaves the share to the valid one and counts against coverage",
+      "rows": [
+        {
+          "askPrem": 600,
+          "bidPrem": 200,
+          "prem": 800
+        },
+        {
+          "askPrem": 1500,
+          "bidPrem": 500,
+          "prem": 1000
+        }
+      ],
+      "share": 0.75,
+      "classified": 1,
+      "side": "ask",
+      "said": "75% ask side · 100% sided",
+      "invalid": 1
+    },
+    {
+      "name": "one cent past the premium is invalid",
+      "rows": {
+        "askPrem": 600.01,
+        "bidPrem": 400,
+        "prem": 1000
+      },
+      "share": null,
+      "classified": null,
+      "side": null,
+      "said": "—",
+      "invalid": 1
+    },
+    {
+      "name": "balanced to the cent is valid",
+      "rows": {
+        "askPrem": 600.01,
+        "bidPrem": 399.99,
+        "prem": 1000
+      },
+      "share": 0.60001,
+      "classified": 1,
+      "side": "mixed",
+      "said": "60% ask side · 100% sided",
+      "invalid": 0
     }
-  ]
+  ],
+  "tolerance_note": "the invalid test is askPrem + bidPrem > prem in whole cents with no tolerance, the ledger's own predicate; the share, the ledger and the dossier call the same windows invalid"
 }

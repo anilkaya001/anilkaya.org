@@ -8,7 +8,7 @@ import {
   STRUCTURE_BY_ID, DELTA_TARGETS, BUCKET_LINES, scoreFamilies, eventBucket, eventAffinity, eventVeto, listedStrikes,
   buildLegs, legGate, liquidityTier, forwardDeltaOnSlice, statePreference,
 } from "./flows-quant-structures.js";
-import { yearFraction, sessionsBetween, remainingSessions, calendarDays, isMonthly, etDayOf } from "./flows-quant-time.js";
+import { yearFraction, lastTradeMs, sessionsBetween, remainingSessions, calendarDays, isMonthly, etDayOf } from "./flows-quant-time.js";
 import { settleSurface, surfaceSummary } from "./flows-quant-surface.js";
 
 export const ENGINE_VERSION = "q1";
@@ -732,8 +732,10 @@ function seedVol(rows, S) {
 export function buildExpiry(input) {
   const { expiry, rows, spot: S, asOfMs, rate, prev } = input;
   const asOfDay = etDayOf(asOfMs);
-  const T = yearFraction(asOfMs, expiry);
+  const T = yearFraction(asOfMs, expiry, input.root || null);
   if (!(T > 0)) return null;
+  const last = lastTradeMs(expiry, input.root || null);
+  if (last !== null && asOfMs >= last) return null;
   const clean = (rows || []).filter((r) => r && fin(r.K) && (r.type === "C" || r.type === "P")).slice()
     .sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0));
   const r0 = fin(rate) ? rate : ENGINE_LINES.RATE_FALLBACK;
@@ -974,7 +976,7 @@ export function runEngine(input) {
   if (evIn) firstAfter = raw.find((e) => e.expiry >= evIn.date) || null;
   for (const e of raw) {
     const ex = buildExpiry({
-      expiry: e.expiry, rows: e.rows, spot: S, asOfMs, rate: input.rate, rateMethod: input.rateMethod, q: cardCarry(input.facts), prev,
+      expiry: e.expiry, root: e.root || null, rows: e.rows, spot: S, asOfMs, rate: input.rate, rateMethod: input.rateMethod, q: cardCarry(input.facts), prev,
       event: evIn && firstAfter && firstAfter.expiry === e.expiry ? { firstAfter: true, sigmaD: null } : null,
     });
     if (!ex) continue;

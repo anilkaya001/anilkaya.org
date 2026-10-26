@@ -345,22 +345,25 @@
     open: (day) => (dayAt(day) === null ? null : 1470 - nyClock(new Date(day + "T12:00:00Z")).mins),
     compact,
     askSplit: (r) => {
-      const p = isNum(r && r.prem), side = (v) => { v = isNum(r && r[v]); return v !== null && v >= 0 ? v : null; }, x = side("askPrem"), y = side("bidPrem");
-      if (p === null || p <= 0) return null;
-      const a = x || 0, b = y || 0, k = a + b > p ? p / (a + b) : 1;
-      return { ask: a * k, bid: b * k, none: Math.max(0, p - (a + b) * k), askStated: x !== null, bidStated: y !== null };
+      const cents = (v) => { v = isNum(v); return v === null || v < 0 ? null : Math.round(v * 100); };
+      const T = cents(r && r.prem), x = cents(r && r.askPrem), y = cents(r && r.bidPrem);
+      if (T === null || T <= 0) return null;
+      const a = x || 0, b = y || 0;
+      if (a + b > T) return { ask: 0, bid: 0, none: T / 100, askStated: false, bidStated: false, invalid: true };
+      return { ask: a / 100, bid: b / 100, none: (T - a - b) / 100, askStated: x !== null, bidStated: y !== null, invalid: false };
     },
     askShare: (rows) => {
-      let a = 0, b = 0, p = 0, any = false;
+      let a = 0, b = 0, p = 0, any = false, bad = 0;
       for (const r of [].concat(rows || [])) {
         const x = F.askSplit(r);
         if (!x) continue;
+        if (x.invalid) { bad++; continue; }
         p += x.ask + x.bid + x.none;
         if (x.askStated && x.bidStated) { a += x.ask; b += x.bid; any = true; }
       }
-      if (!any) return { share: null, classified: null, side: null };
+      if (!any) return { share: null, classified: null, side: null, invalid: bad };
       const share = a + b ? a / (a + b) : null, classified = (a + b) / p, w = wholePercent;
-      return { share, classified, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
+      return { share, classified, invalid: bad, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
     },
     askSaid: (x) => (!x || x.classified === null ? DASH : x.share === null ? "none sided" : F.pct(x.share, 0) + " ask side " + MID + " " + F.pct(x.classified, 0) + " sided"),
     askLabel: "Ask-side share of the premium the vendor sided",

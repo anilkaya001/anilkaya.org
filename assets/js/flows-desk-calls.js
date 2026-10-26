@@ -304,7 +304,7 @@
       premium, collat,
       cellOf("dk-nd", "Net Δ", nd === null ? DASH : signedD(nd) + band, null, ndTitle),
       cellOf("dk-pq", WIN_Q, wq.text, null, wq.title || noEng || T("t-pq")),
-      cellOf("dk-ev", EV_P, ev === null ? DASH : K.usd(ev), ev === null ? "silent" : TONES[Math.sign(ev)], noEng || T("ev-measure"))),
+      cellOf("dk-ev", EV_P, ev === null ? DASH : K.usd(ev), ev === null ? "silent" : TONES[Math.sign(ev)], noEng || T("ev-measure") + " " + T("ev-market"))),
     UI.infoButton(r.ticker + " " + kf(r.strike) + " call", () => rowInfo(r), { small: true }));
   }
 
@@ -356,9 +356,9 @@
         ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S))],
         ["Cushion", fmtSd(r.cushionSigmas)],
-        ["Chance of profit", e ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (K.bandNote(r) ? " · " + K.bandNote(r) : "")) : DASH],
+        ["Chance of profit", e ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " model vol" + (K.bandNote(r) ? " · " + K.bandNote(r) : "")) : DASH],
         ["Neighbouring quotes", rangeLine(r, sc)],
-        ["Expected value", e ? T("ev-measure") + " " + K.usd(e.ev.p === null ? null : e.ev.p) + " per contract, " + (sc.evN === null || sc.evN === undefined ? DASH : K.usd(sc.evN)) + " on " + groupN(n) + ". " + T("ev-implied", { x: K.usd(e.ev.q) }) : DASH],
+        ["Expected value", e ? T("ev-measure") + " " + T("ev-market") + " " + K.usd(e.ev.p === null ? null : e.ev.p) + " per contract, " + (sc.evN === null || sc.evN === undefined ? DASH : K.usd(sc.evN)) + " on " + groupN(n) + ". " + T("ev-implied", { x: K.usd(e.ev.q) }) : DASH],
         ["Early exercise", earlyLines.length ? earlyLines.join(" ") : "No dividend flag from the card."],
         ["Assignment", T("sc-assign")],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(K.whyText).join(" ") : "") : DASH],
@@ -538,8 +538,8 @@
     { label: "Net delta", unit: "delta", get: (r) => (r.__sc ? r.__sc.netDelta : null) },
     { label: "Net delta band", unit: "delta", get: (r) => (r.__sc && r.__sc.netDelta !== null && r.__band && r.__band.band === "pm" ? r.__band.half : null) },
     { label: "Win probability (implied)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popQ : null) },
-    { label: "Win probability (real-world)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popP : null) },
-    { label: "Expected value (real-world) on contracts used", unit: "USD", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.evN : null) },
+    { label: "Win probability (model vol)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popP : null) },
+    { label: "Expected value (model vol) on contracts used", unit: "USD", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.evN : null) },
     { label: "Reg-T style collateral per contract", unit: "USD", get: (r) => (r.__sc && r.__sc.regtM1C !== null && r.__sc.regtM1C !== undefined ? r.__sc.regtM1C / 100 : null) },
   ];
 

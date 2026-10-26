@@ -2,7 +2,7 @@ import { OWNER_HOLDINGS } from "../../shared/flows-focus.js";
 import {
   num, quantile, winsorize, robustZ, neutralize, flowPurity, aggressorGamma, bookDisplacement, pathSignature,
   gammaDecayCalendar, positioningQuality, effectiveBreadth, crossFamilyRedundancy, qualityGate, percentileRank,
-  realizedVol, isLiveColumn, pearson, SCORE_SCALE, horizonMove, boundedScore, conviction, applyHysteresis,
+  realizedVol, isLiveColumn, pearson, SCORE_SCALE, horizonMove, impliedHorizonMove, boundedScore, conviction, applyHysteresis,
   callGammaLeg, openInterestGammaBook, strikeBookPutSign,
 } from "../../shared/flows-features.js";
 import {
@@ -933,7 +933,7 @@ export function boardRow(r, s, rank, memory = null, origin = null) {
     ivr: r.ivRank === null ? null : Number(r.ivRank.toFixed(3)),
 
     im: r.impliedMovePerc === null ? null : Number(r.impliedMovePerc.toFixed(4)),
-    hm: hz(horizonMove(r.iv30)),
+    hm: hz(impliedHorizonMove(r.iv30, { asOf: origin })),
     hr: hz(horizonMove(r.rv30)),
 
     nw: memory ? memory.nw : null,

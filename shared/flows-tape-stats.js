@@ -1,4 +1,5 @@
 import { wholePercent } from "./flows-display-round.js";
+import { CENTS, centsOf } from "./flows-cents.js";
 
 export const TIERS = Object.freeze(["A", "a", "m", "b", "B", "n"]);
 
@@ -250,20 +251,22 @@ export function reconciles(window) {
   return Math.abs(window.askPrem + window.bidPrem + window.otherPrem - window.gross) <= EPS * Math.max(1, Math.abs(window.gross));
 }
 
-const sideDollars = (v) => {
-  const n = num(v);
-  return n !== null && n >= 0 ? n : null;
+const sideCents = (v) => {
+  if (v === null || v === undefined) return null;
+  const c = centsOf(v);
+  return c === null ? null : c.cents;
 };
 
 export function askSplit(row) {
-  const prem = num(row && row.prem);
-  if (prem === null || prem <= 0) return null;
-  const x = sideDollars(row.askPrem);
-  const y = sideDollars(row.bidPrem);
-  const a = x || 0;
-  const b = y || 0;
-  const k = a + b > prem ? prem / (a + b) : 1;
-  return { ask: a * k, bid: b * k, none: Math.max(0, prem - (a + b) * k), askStated: x !== null, bidStated: y !== null };
+  const total = row ? centsOf(row.prem) : null;
+  if (total === null || total.cents <= 0) return null;
+  const T = total.cents;
+  const x = row.askPrem === undefined ? null : sideCents(row.askPrem);
+  const y = row.bidPrem === undefined ? null : sideCents(row.bidPrem);
+  const a = x === null ? 0 : x;
+  const b = y === null ? 0 : y;
+  if (a + b > T) return { ask: 0, bid: 0, none: T / CENTS, askStated: false, bidStated: false, invalid: true };
+  return { ask: a / CENTS, bid: b / CENTS, none: (T - a - b) / CENTS, askStated: x !== null, bidStated: y !== null, invalid: false };
 }
 
 const whole = wholePercent;
@@ -273,9 +276,11 @@ export function askShare(rows) {
   let bid = 0;
   let prem = 0;
   let any = false;
+  let invalid = 0;
   for (const row of [].concat(rows || [])) {
     const part = askSplit(row);
     if (!part) continue;
+    if (part.invalid) { invalid++; continue; }
     prem += part.ask + part.bid + part.none;
     if (part.askStated && part.bidStated) {
       ask += part.ask;
@@ -283,18 +288,18 @@ export function askShare(rows) {
       any = true;
     }
   }
-  if (!any) return { share: null, classified: null };
-  return { share: ask + bid > 0 ? ask / (ask + bid) : null, classified: (ask + bid) / prem };
+  if (!any) return { share: null, classified: null, invalid };
+  return { share: ask + bid > 0 ? ask / (ask + bid) : null, classified: (ask + bid) / prem, invalid };
 }
 
 export function askShareRead(rows) {
-  const { share, classified } = askShare(rows);
-  if (classified === null) return { share, classified, side: null, lean: null };
+  const { share, classified, invalid } = askShare(rows);
+  if (classified === null) return { share, classified, side: null, lean: null, invalid };
   let side = "thin";
   if (share !== null && whole(classified) >= whole(ASK_SHARE_RULE.classifiedMin)) {
     if (whole(share) >= whole(ASK_SHARE_RULE.askAt)) side = "ask";
     else if (whole(share) <= whole(ASK_SHARE_RULE.bidAt)) side = "bid";
     else side = "mixed";
   }
-  return { share, classified, side, lean: side === "ask" || side === "bid" ? side : null };
+  return { share, classified, side, lean: side === "ask" || side === "bid" ? side : null, invalid };
 }

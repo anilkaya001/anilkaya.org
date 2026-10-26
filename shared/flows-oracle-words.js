@@ -124,7 +124,7 @@ export function liveSay(m) {
   switch (m.kind) {
     case "surge":
       return T + " has " + usdShort(f.premium) + " of flagged options flow across " + f.n + " windows in the last " + mins(f.minutes) +
-        " minutes. The bar for this name is " + usdShort(f.bar) + "." + tail;
+        " minutes. The " + (f.floor ? "minimum bar" : "bar for this name") + " is " + usdShort(f.bar) + "." + tail;
     case "repeat":
       return "Flow keeps returning to the " + strikeLabel(f.strike) + " " + (SIDE_WORD[f.side] || "option") + " for " + dayLabel(f.expiry) + ": " +
         f.n + " flagged windows in " + mins(f.minutes) + " minutes, " + usdShort(f.premium) + " in all." + tail;

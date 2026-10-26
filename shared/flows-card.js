@@ -1,7 +1,7 @@
 export const CARD_SCHEMA_VERSION = 3;
 
 import {
-  horizonMove, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
+  horizonMove, impliedHorizonMove, impliedHorizonFactor, impliedWindowSessions, HORIZON_SESSIONS, callGammaLeg, putGammaLeg, pathSignature,
   greekTermStructure, callVannaLeg, putVannaLeg, callCharmLeg, putCharmLeg,
   callDeltaLeg, putDeltaLeg, CONVICTION_WEIGHTS, liveExpiry,
 } from "./flows-features.js";
@@ -466,7 +466,7 @@ export function buildPricedMove({
   const s = numOrNull(spot);
   const m = numOrNull(impliedMovePerc);
   const iv = numOrNull(iv30);
-  const impliedH = horizonMove(iv, { sessions });
+  const impliedH = impliedHorizonMove(iv, { sessions, asOf });
   const realizedH = horizonMove(numOrNull(rv30), { sessions });
 
   if (s === null || !(s > 0)) return unavailable("no spot price");
@@ -475,7 +475,9 @@ export function buildPricedMove({
   const quoted = m !== null && m > 0;
 
   const wings = impliedH === null ? null : skewWings(skew, iv);
-  const scale = Math.sqrt(sessions / 252);
+  const scale = impliedHorizonFactor({ sessions, asOf });
+  const windowSessions = impliedWindowSessions(asOf);
+  const clockText = windowSessions === null ? `${sessions}/252` : `(30/365) × ${sessions}/${windowSessions}`;
   const downH = impliedH === null ? null : wings ? wings.down * scale : impliedH;
   const upH = impliedH === null ? null : wings ? wings.up * scale : impliedH;
   const impliedLow = downH === null ? null : Number((s * Math.exp(-downH)).toFixed(2));
@@ -489,9 +491,9 @@ export function buildPricedMove({
       ? `Skew-adjusted log-normal band: the down end is priced at 30-day implied volatility plus ` +
         `half the ${wings.days === null ? "" : wings.days + "-day "}put-minus-call wing skew ` +
         `(${pct(wings.skew)} points), the up end at it minus half, each as ` +
-        `spot × exp(±σ√(${sessions}/252)). Both wings traded today, so the skew is used; the ` +
+        `spot × exp(±σ√(${clockText})). Both wings traded today, so the skew is used; the ` +
         `band's centre stays on 30-day implied volatility and only its lean comes from the wings.`
-      : `Log-normal band: spot × exp(±σ√(${sessions}/252)) at 30-day implied volatility, so the ` +
+      : `Log-normal band: spot × exp(±σ√(${clockText})) at 30-day implied volatility, so the ` +
         `down end sits closer to spot than the up end. No skew is applied: ` +
         (skew && numOrNull(skew.skew) !== null
           ? "the card's skew reading rests on a wing that did not trade today."
@@ -503,11 +505,11 @@ export function buildPricedMove({
       const horizon = `${sessions} session${sessions === 1 ? "" : "s"}`;
       const said = wings
         ? `Options price ${horizon} from −${downPct}% ` +
-          `to +${upPct}% (one standard deviation of 30-day implied volatility, each end at its own wing, on a 252-session year) — ` +
+          `to +${upPct}% (one standard deviation of 30-day implied volatility, each end at its own wing, scaled by the sessions of its 30-day window) — ` +
           `${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}, leaning ` +
           `${wings.skew > 0 ? "down" : wings.skew < 0 ? "up" : "neither way"} on the wing skew`
         : `Options price a one-standard-deviation move of ±${pct(impliedH)}% over ${horizon} ` +
-          `(30-day implied volatility on a 252-session year) — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
+          `(30-day implied volatility, scaled by the sessions of its 30-day window) — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
       const pinSaid = pin
         ? ` That is ${pct(impliedH)}% against ${pct(realizedH ?? 0)}% realized, with implied ` +
           `volatility at ${pct(iv)}%: the price reads as pinned by an event, so no ` +
@@ -530,7 +532,7 @@ export function buildPricedMove({
           realizedPct: realizedH === null ? null : pct(realizedH),
           ivPct: pin ? pct(iv) : null,
           tenorDays: 30,
-          yearSessions: 252,
+          windowSessions,
         });
     }
     if (!quoted) return null;

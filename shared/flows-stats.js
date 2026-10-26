@@ -9,10 +9,21 @@ export function mean(xs) {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 }
 
-const flat = (v) => {
-  for (let i = 1; i < v.length; i++) if (v[i] !== v[0]) return false;
-  return true;
-};
+export const DEGENERATE_REL = 1e-9;
+
+export function isFlat(xs) {
+  let lo = Infinity, hi = -Infinity, big = 0;
+  for (const x of xs) {
+    if (!fin(x)) continue;
+    if (x < lo) lo = x;
+    if (x > hi) hi = x;
+    const a = Math.abs(x);
+    if (a > big) big = a;
+  }
+  return hi - lo <= DEGENERATE_REL * big;
+}
+
+const flat = isFlat;
 
 export function sampleVar(xs) {
   const v = finite(xs);
@@ -87,12 +98,7 @@ export function pearson(xs, ys, { min = 3 } = {}) {
   const pts = pairs(xs, ys);
   const n = pts.length;
   if (n < min) return null;
-  let fx = true, fy = true;
-  for (let i = 1; i < n; i++) {
-    if (pts[i][0] !== pts[0][0]) fx = false;
-    if (pts[i][1] !== pts[0][1]) fy = false;
-  }
-  if (fx || fy) return null;
+  if (isFlat(pts.map((p) => p[0])) || isFlat(pts.map((p) => p[1]))) return null;
   let mx = 0, my = 0;
   for (const [x, y] of pts) { mx += x; my += y; }
   mx /= n; my /= n;
@@ -117,6 +123,7 @@ function ranks(values) {
 export function spearman(xs, ys, { min = 3 } = {}) {
   const pts = pairs(xs, ys);
   if (pts.length < min) return null;
+  if (isFlat(pts.map((p) => p[0])) || isFlat(pts.map((p) => p[1]))) return null;
   return pearson(ranks(pts.map((p) => p[0])), ranks(pts.map((p) => p[1])), { min });
 }
 

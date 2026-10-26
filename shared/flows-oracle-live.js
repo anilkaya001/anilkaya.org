@@ -13,10 +13,11 @@ export const LIVE_LINES = Object.freeze({
   globalCap: 6,
   minWindows: 5,
   minNorm: 20,
-  tradingMinutes: 390,
   surgeFloor: 500000,
-  surgeMultiple: 3,
+  surgeZ: 3.5,
   surgeWindows: 3,
+  surgeSessions: 10,
+  surgeSigmaMax: 1.5,
   repeatHits: 3,
   repeatFloor: 250000,
   repeatMedians: 2,
@@ -81,6 +82,21 @@ function eventOf(ctx) {
   return e && e.inWindow === true && fin(e.sessions) ? e.sessions : null;
 }
 
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+const Z90 = 1.2815515655446004;
+
+export function surgeBar(norm, scale = 1) {
+  const L = LIVE_LINES;
+  if (!norm || !fin(norm.blk) || !(norm.blk >= 0) || !fin(norm.blkN) || norm.blkN < L.surgeSessions) return null;
+  const med = norm.premiumMedian, p90 = norm.premiumP90;
+  if (!fin(med) || !(med > 0) || !fin(p90) || !(p90 >= med)) return null;
+  const sigma = clamp(Math.log(p90 / med) / Z90, 0, L.surgeSigmaMax);
+  const w = med * Math.exp(1.5 * sigma * sigma);
+  const own = scale * (norm.blk + L.surgeZ * Math.sqrt(norm.blk * w));
+  return { own, bar: Math.max(own, L.surgeFloor), floor: own < L.surgeFloor };
+}
+
 export function detectName(ticker, wins, ctx, nowMs) {
   const L = LIVE_LINES;
   const norm = ctx && ctx.norm;
@@ -91,14 +107,14 @@ export function detectName(ticker, wins, ctx, nowMs) {
   const recent = wins.filter((w) => w.at > nowMs - L.windowMs && w.at <= nowMs);
   const add = (kind, strength, f, facts, at) => found.push({ ticker, kind, strength, f: { ...f, ...(ev === null ? {} : { event: ev }) }, facts, at });
 
-  if (recent.length >= L.surgeWindows && fin(norm.premiumP90)) {
+  const sb = recent.length >= L.surgeWindows ? surgeBar(norm, scale) : null;
+  if (sb !== null) {
     const P = sum(recent, "prem");
-    const typical = norm.premiumP90 * (L.windowMs / 60000 / L.tradingMinutes);
-    const bar = Math.max(L.surgeMultiple * typical, L.surgeFloor) * scale;
+    const bar = sb.bar;
     if (P >= bar) {
       const minutes = (nowMs - Math.min(...recent.map((w) => w.at))) / 60000;
-      add("surge", strengthOf(P, bar), { premium: P, n: recent.length, minutes: Math.max(minutes, 1), bar },
-        [{ label: "Flagged premium", display: usdShort(P) }, { label: "Bar for this name", display: usdShort(bar) }], nowMs);
+      add("surge", strengthOf(P, bar), { premium: P, n: recent.length, minutes: Math.max(minutes, 1), bar, floor: sb.floor },
+        [{ label: "Flagged premium", display: usdShort(P) }, { label: sb.floor ? "Minimum bar" : "Bar for this name", display: usdShort(bar) }], nowMs);
     }
   }
 

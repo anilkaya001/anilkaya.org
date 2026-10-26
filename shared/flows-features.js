@@ -1,4 +1,5 @@
 import { normInv } from "./flows-quant-bs.js";
+import { sessionsBetween, shiftDay, parseDay } from "./flows-quant-time.js";
 import { median as statsMedian, quantile as statsQuantile, pearson as statsPearson, percentileRank } from "./flows-stats.js";
 
 export function num(value, fallback = 0) {
@@ -767,6 +768,28 @@ export function horizonMove(annualVol, { sessions = HORIZON_SESSIONS, periodsPer
   if (!Number.isFinite(annualVol) || annualVol <= 0) return null;
   if (!(sessions > 0) || !(periodsPerYear > 0)) return null;
   return annualVol * Math.sqrt(sessions / periodsPerYear);
+}
+
+export const IMPLIED_WINDOW_DAYS = 30;
+
+export function impliedWindowSessions(asOf) {
+  const day = typeof asOf === "string" ? asOf.slice(0, 10) : null;
+  if (!day || !parseDay(day)) return null;
+  const n = sessionsBetween(day, shiftDay(day, IMPLIED_WINDOW_DAYS));
+  return n > 0 ? n : null;
+}
+
+export function impliedHorizonFactor({ sessions = HORIZON_SESSIONS, asOf = null } = {}) {
+  if (!(sessions > 0)) return null;
+  const window = impliedWindowSessions(asOf);
+  if (window === null) return Math.sqrt(sessions / TRADING_YEAR);
+  return Math.sqrt((IMPLIED_WINDOW_DAYS / 365) * sessions / window);
+}
+
+export function impliedHorizonMove(iv30, { sessions = HORIZON_SESSIONS, asOf = null } = {}) {
+  if (!Number.isFinite(iv30) || iv30 <= 0) return null;
+  const f = impliedHorizonFactor({ sessions, asOf });
+  return f === null ? null : iv30 * f;
 }
 
 export function boundedScore(z, scale) {

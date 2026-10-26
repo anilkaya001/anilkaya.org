@@ -57,9 +57,22 @@ const chainCalls = (calls) => calls.filter((c) => c.kind === "chain");
     const got = await run({ FLOWS_DESK_SC_PAGES: value });
     eq(got.calls.length, pages, `FLOWS_DESK_SC_PAGES=${value} reads ${pages} pages`);
   }
-  for (const value of ["0", "-3", "25", "abc", "", "1.5e1x", "99"]) {
+  const off = await run({ FLOWS_DESK_SC_PAGES: "0" });
+  eq([off.out.res.status, off.out.body.error && off.out.body.error.code, off.calls.length], [503, "sc_off", 0], "FLOWS_DESK_SC_PAGES=0 switches Short calls off: a 503 sc_off and no vendor call");
+  for (const word of [" 0 ", " OFF ", "false", "False"]) {
+    const gone = await run({ FLOWS_DESK_SC_PAGES: word });
+    eq([gone.out.res.status, gone.calls.length], [503, 0], `${JSON.stringify(word)} is off as well, so a typo of the off word cannot leave the route on`);
+  }
+  const covered = chainWorld(ch);
+  const ccOut = await route(await freshWorker(), `/api/flows/chain?t=${ch.ticker}&strategy=cc`, covered.world, { ...pinned(ch), FLOWS_DESK_SC_PAGES: "0" });
+  eq(ccOut.res.status, 200, "the switch leaves the covered-call route alone");
+  for (const value of ["-3", "abc", "", "0.0"]) {
     const got = await run({ FLOWS_DESK_SC_PAGES: value });
-    eq(got.calls.length, value === "1.5e1x" ? 1 : 12, `FLOWS_DESK_SC_PAGES=${JSON.stringify(value)} falls back to the default`);
+    eq(got.calls.length, 12, `FLOWS_DESK_SC_PAGES=${JSON.stringify(value)} falls back to the default`);
+  }
+  for (const value of ["25", "99"]) {
+    const got = await run({ FLOWS_DESK_SC_PAGES: value });
+    eq(got.calls.length, 24, `FLOWS_DESK_SC_PAGES=${JSON.stringify(value)} is held at the ceiling of 24`);
   }
   const params = dflt.calls.map((c) => c.params);
   ok(params.every((p) => p.exclude_zero_oi_chains === "true" && p.min_dte === "0" && p.max_dte === "401" && p.limit === "500"), "every page asks for 500 contracts across zero to 401 days, without zero-open-interest chains");
@@ -151,6 +164,49 @@ const chainCalls = (calls) => calls.filter((c) => c.kind === "chain");
 }
 
 {
+  const ch = makeChain(14, { rows: 6000 });
+  const asks = [];
+  const cold = (verdicts) => ({ limit: async (arg) => { asks.push(arg); return { success: verdicts.length ? verdicts.shift() : true }; } });
+  const worker = await freshWorker();
+  const refused = chainWorld(ch);
+  const no = await route(worker, pathOf(ch), refused.world, { ...pinned(ch), SC_COLD: cold([false]) });
+  asks.length = 0;
+  eq([no.res.status, no.body.error && no.body.error.code, chainCalls(refused.calls).length], [429, "rate_limited", 0], "a cold Short calls read the cold limiter refuses is a 429 and makes no vendor call");
+  const open = chainWorld(ch);
+  const yes = await route(worker, pathOf(ch), open.world, { ...pinned(ch), SC_COLD: cold([]) });
+  eq(yes.res.status, 200, "and one it admits is read");
+  eq(asks.length, 1, "the limiter is asked once for a cold read at twelve pages");
+  const deep = chainWorld(ch);
+  await route(worker, pathOf(ch, "&refresh=1"), deep.world, { ...pinned(ch), SC_COLD: cold([]), FLOWS_DESK_SC_PAGES: "24" });
+  eq(asks.length, 3, "and twice more for a cold read that may spend up to twenty-six vendor calls: units follow the page ceiling");
+  ok(asks.every((a) => a && a.key === "sc-cold"), "under the one site-wide key");
+  const warm = await route(worker, pathOf(ch, "&h=0.4"), open.world, { ...pinned(ch), SC_COLD: cold([false]) });
+  eq(warm.res.status, 200, "a re-rank from the 60 s snapshot never asks it: terms change with no cold read");
+  eq(asks.length, 3, "so the limiter was not consulted");
+}
+
+{
+  const ch = makeChain(15, { rows: 6000 });
+  const worker = await freshWorker();
+  const { world, calls } = chainWorld(ch);
+  const seen = [];
+  const refresh = (verdict) => ({ limit: async (arg) => { seen.push(arg); return { success: verdict }; } });
+  await route(worker, pathOf(ch), world, pinned(ch));
+  const n = calls.length;
+  const limited = await route(worker, pathOf(ch, "&refresh=1&h=0.5"), world, { ...pinned(ch), SC_REFRESH: refresh(false) });
+  eq(calls.length, n, "a refresh the member limiter refuses does not drop the snapshot: no vendor call");
+  eq(limited.res.headers.get("X-Chain-Refresh"), "limited", "and the answer says the refresh was limited");
+  eq(limited.res.status, 200, "while it is still answered");
+  ok(seen.length === 1 && typeof seen[0].key === "string" && seen[0].key.length > 0, "keyed by the member");
+  const granted = await route(worker, pathOf(ch, "&refresh=1&h=0.45"), world, { ...pinned(ch), SC_REFRESH: refresh(true) });
+  ok(calls.length > n, "a refresh it admits reads the vendor again");
+  eq(granted.res.headers.get("X-Chain-Refresh"), null, "without the mark");
+  const plain = await route(worker, pathOf(ch, "&h=0.41"), world, { ...pinned(ch), SC_REFRESH: refresh(false) });
+  eq(plain.res.headers.get("X-Chain-Refresh"), null, "a read that did not ask to refresh is never asked of the limiter or marked");
+  eq(seen.length, 2, "so only the two refreshes were counted");
+}
+
+{
   const ch = makeChain(13, { rows: 3000 });
   const { world } = chainWorld(ch);
   const worker = await freshWorker();
@@ -208,6 +264,26 @@ const chainCalls = (calls) => calls.filter((c) => c.kind === "chain");
       await routes(w, [pathOf(ch, "&refresh=1&h=0.5")], world, pinned(ch));
       return calls.length === n;
     },
+    killSwitch: async (w) => {
+      const ch = makeChain(7, { rows: 600 });
+      const { world, calls } = chainWorld(ch);
+      const out = await route(w, pathOf(ch), world, { ...pinned(ch), FLOWS_DESK_SC_PAGES: "0" });
+      return out.res.status !== 503 || calls.length > 0;
+    },
+    coldBrake: async (w) => {
+      const ch = makeChain(7, { rows: 600 });
+      const { world, calls } = chainWorld(ch);
+      await route(w, pathOf(ch), world, { ...pinned(ch), SC_COLD: { limit: async () => ({ success: false }) } });
+      return calls.length > 0;
+    },
+    refreshBrake: async (w) => {
+      const ch = makeChain(8, { rows: 3000 });
+      const { world, calls } = chainWorld(ch);
+      await routes(w, [pathOf(ch)], world, pinned(ch));
+      const n = calls.length;
+      await routes(w, [pathOf(ch, "&refresh=1&h=0.5")], world, { ...pinned(ch), SC_REFRESH: { limit: async () => ({ success: false }) } });
+      return calls.length > n;
+    },
     terms: async (w) => {
       const ch = makeChain(7, { rows: 3000 });
       const out = await route(w, pathOf(ch, "&h=0.6&f=0.2"), chainWorld(ch).world, pinned(ch));
@@ -228,12 +304,15 @@ const chainCalls = (calls) => calls.filter((c) => c.kind === "chain");
   };
   for (const [name, scenario] of Object.entries(scenarios)) eq(await scenario(await freshWorker()), false, `the correct build passes the ${name} scenario`);
   const mutants = [
-    ["the page ceiling is two", "ceiling", [["? v : SC_PAGES_DEFAULT;", "? v : 2;"]]],
+    ["the page ceiling is two", "ceiling", [["return SC_PAGES_DEFAULT;", "return 2;"]]],
     ["the snapshot is never reused", "snapshot", [["let snap = chainCacheGet(state.scChains, ticker, Date.now());", "let snap = null;"]]],
     ["no single flight", "flight", [["snap = await singleFlight(state.scFlights, ticker, () => readShortCallSnapshot(env, ctx, vf, ticker));", "snap = await readShortCallSnapshot(env, ctx, vf, ticker);"]]],
     ["the out-of-the-money narrowing is back", "narrowing", [["exclude_zero_oi_chains: \"true\",\n    min_dte: 0,", "maybe_otm_only: \"true\",\n    exclude_zero_oi_chains: \"true\",\n    min_dte: 0,"]]],
     ["a partial read is kept as a snapshot", "partial", [["if (!snap.budget && snap.failed === 0) chainCachePut(state.scChains, ticker, snap, Date.now());", "chainCachePut(state.scChains, ticker, snap, Date.now());"]]],
     ["a refresh keeps the snapshot", "refresh", [["if (refresh) state.scChains.delete(ticker);", ""]]],
+    ["zero pages means twelve", "killSwitch", [["if (typeof raw === \"string\" && SC_OFF_WORDS.has(raw.trim().toLowerCase())) return 0;", ""]]],
+    ["the cold limiter is never asked", "coldBrake", [["if (typeof vf.cold === \"function\" && !(await vf.cold())) throw new VendorRefused();", ""]]],
+    ["a refresh the member limiter refuses is honoured", "refreshBrake", [["const scRefreshAllowed = (env, session) => memberAllowed(env.SC_REFRESH, session);", "const scRefreshAllowed = () => true;"]]],
     ["the terms are ignored by the ranking", "terms", [["terms: { h: terms.haircut, f: terms.floor }", "terms: { h: 0.3, f: 0.1 }"]]],
     ["the snapshot lives for ten minutes", "ttl", [["chainCacheGet(state.scChains, ticker, Date.now())", "chainCacheGet(state.scChains, ticker, Date.now() - 540000)"]]],
   ];

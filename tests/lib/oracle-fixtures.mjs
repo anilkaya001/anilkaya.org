@@ -34,7 +34,7 @@ export function card(over = {}, blockOver = {}, structures) {
   };
 }
 
-export const NORM = Object.freeze({ winN: 40, premiumMedian: 150000, premiumP90: 900000, sizeMedian: 80, sizeP90: 400, callShare: null });
+export const NORM = Object.freeze({ winN: 40, premiumMedian: 150000, premiumP90: 900000, sizeMedian: 80, sizeP90: 400, callShare: null, blk: 5000, blkN: 40 });
 
 const CORE_URL = new URL("../../assets/js/flows-oracle-core.js", import.meta.url);
 

@@ -1,7 +1,7 @@
 import { windowEntry, centsOf } from "./flows-sides.js";
 import { alertKey } from "./flows-alerts.js";
 import { bsmGreeks } from "./flows-quant-bs.js";
-import { yearFraction } from "./flows-quant-time.js";
+import { yearFraction, rootOfSymbol } from "./flows-quant-time.js";
 import { PRICING_RATE } from "./flows-premium.js";
 import { easternDay } from "./flows-freshness.js";
 
@@ -98,7 +98,7 @@ export function deltaMicroOf(row, { rate = PRICING_RATE } = {}) {
   if (!(S > 0) || !(K > 0) || sigma === null || !Number.isFinite(end) || typeof row.exp !== "string") return null;
   const day = easternDay(end);
   if (!day || row.exp < day) return null;
-  let T = yearFraction(end, row.exp);
+  let T = yearFraction(end, row.exp, typeof row.t === "string" ? row.t : null);
   if (T === null || !Number.isFinite(T)) return null;
   if (!(T > T_FLOOR)) T = T_FLOOR;
   const g = bsmGreeks({ S, K, r: rate, q: 0, sigma, T, type: row.cp === "P" ? "P" : "C" });

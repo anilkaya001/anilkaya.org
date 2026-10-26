@@ -182,7 +182,7 @@ export function contextOf(card, cardX, block, { sector = null, sectorEtf = null,
   const ev = block && isObj(block.event) && typeof block.event.date === "string" ? block.event : null;
   const sessions = ev && session ? sessionsBetween(session, ev.date) : null;
   const norm = isObj(flowNorm) && fin(flowNorm.winN) && flowNorm.winN >= 20
-    ? { premiumMedian: flowNorm.premiumMedian, premiumP90: flowNorm.premiumP90, winN: flowNorm.winN, sizeMedian: flowNorm.sizeMedian, sizeP90: flowNorm.sizeP90 }
+    ? { premiumMedian: flowNorm.premiumMedian, premiumP90: flowNorm.premiumP90, winN: flowNorm.winN, sizeMedian: flowNorm.sizeMedian, sizeP90: flowNorm.sizeP90, blk: fin(flowNorm.blk) ? flowNorm.blk : null, blkN: fin(flowNorm.blkN) ? flowNorm.blkN : 0 }
     : null;
   return {
     norm,

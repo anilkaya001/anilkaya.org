@@ -329,7 +329,7 @@
     return h("span", {
       class: "bd-n bd-move",
       title: st.horizon
-        ? `One standard deviation of the option market's 30-day implied volatility over ${st.horizon} trading sessions on a 252-session year is ±${(hm * 100).toFixed(1)}%` +
+        ? `One standard deviation of the option market's 30-day implied volatility over ${st.horizon} trading sessions scaled by the sessions of its 30-day window is ±${(hm * 100).toFixed(1)}%` +
           (hr !== null ? `; the same scaling of this name's realized volatility is ±${(hr * 100).toFixed(1)}%. A priced range, not a forecast.` : ". A priced range, not a forecast.")
         : "",
     }, "±" + (hm * 100).toFixed(1) + "%");
@@ -965,7 +965,7 @@
   ] : [
     "Score: the composite ranked across every scored name, +100 strongest bullish and −100 strongest bearish. Conv: how much of the evidence agrees; the count behind it is on the name's card.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
-    "Premium: call premium bought minus put premium bought across the session. Move: one standard deviation of the option market's 30-day implied volatility over the board's horizon, on a 252-session year; a priced range, not a forecast.",
+    "Premium: call premium bought minus put premium bought across the session. Move: one standard deviation of the option market's 30-day implied volatility over the board's horizon, scaled by the sessions of its 30-day window; a priced range, not a forecast.",
     "Dealer γ: blue where dealers are long gamma and hedging damps moves, orange where they are short and hedging amplifies them.",
     "IVR: where 30-day implied volatility sits within its own past year, 0 at the low and 100 at the high. VRP: implied minus realized volatility as a percentile across every eligible name. SI: short interest as a share of float, as a percentile across every eligible name.",
     "Flags: New to this side, places climbed or fallen since the previous board, held on incumbency, and earnings within " + EARNINGS_SOON_DAYS + " days.",

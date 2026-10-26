@@ -24,7 +24,7 @@
 
   var T = Object.freeze({
     windowMin: 30, repeatMin: 20, sweepMin: 10, warmMin: 20, minWindows: 5, cooldownMin: 30, cap: 6,
-    surgeMult: 3, surgeFloor: 500000, surgeN: 3, repeatN: 3, repeatMult: 2, repeatFloor: 250000,
+    surgeZ: 3.5, surgeFloor: 500000, surgeN: 3, surgeSessions: 10, surgeSigmaMax: 1.5, repeatN: 3, repeatMult: 2, repeatFloor: 250000,
     flipSided: 400000, flipAbs: 0.4, flipEarlierMin: 45, coverage: 0.5,
     clusterShare: 0.6, clusterFloor: 300000, sweepN: 4, sweepAsk: 65, sweepFloor: 300000,
     sizeMult: 5, sizeFloor: 500, sizePrem: 250000, sectorN: 4, sectorFloor: 5000000, eventMult: 1.5, eventSessions: 21
@@ -118,7 +118,7 @@
   var LIVE = {
     surge: function (m) {
       return m.ticker + " has " + money(m.prem) + " of flagged options flow across " + m.n + " windows in the last " + m.minutes +
-        " minutes. The bar for this name is " + money(m.bar) + "." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
+        " minutes. The " + (m.floor ? "minimum bar" : "bar for this name") + " is " + money(m.bar) + "." + (m.event ? " A report is " + m.sessions + " sessions away." : "");
     },
     repeat: function (m) {
       return "Flow keeps returning to the " + strikeText(m.strike) + " " + m.side + " for " + expiryText(m.expiry) + ": " + m.n + " flagged windows in " + m.minutes + " minutes, " + money(m.prem) + " in all." +
@@ -188,6 +188,16 @@
     return c && typeof c === "object" ? c : null;
   }
 
+  function surgeBar(norm, scale) {
+    var blk = fin(norm.blk), n = fin(norm.blkN), med = fin(norm.premiumMedian), p90 = fin(norm.premiumP90);
+    if (blk === null || blk < 0 || n === null || n < T.surgeSessions) return null;
+    if (med === null || !(med > 0) || p90 === null || !(p90 >= med)) return null;
+    var sigma = Math.min(T.surgeSigmaMax, Math.max(0, Math.log(p90 / med) / 1.2815515655446004));
+    var w = med * Math.exp(1.5 * sigma * sigma);
+    var own = scale * (blk + T.surgeZ * Math.sqrt(blk * w));
+    return { own: own, bar: Math.max(own, T.surgeFloor), floor: own < T.surgeFloor };
+  }
+
   function sumPrem(rows) {
     var s = 0;
     for (var i = 0; i < rows.length; i++) s += rows[i].prem;
@@ -248,14 +258,14 @@
       var recent = all.filter(function (x) { return x.at > now - T.windowMin * MIN && x.at <= now; });
       var p90 = fin(norm.premiumP90), med = fin(norm.premiumMedian), sp90 = fin(norm.sizeP90);
 
-      if (p90 !== null && p90 > 0 && recent.length >= T.surgeN) {
-        var P = sumPrem(recent), usual = p90 * (T.windowMin / 390);
-        var bar = Math.max(T.surgeMult * usual, T.surgeFloor) * mult;
+      var sb = recent.length >= T.surgeN ? surgeBar(norm, mult) : null;
+      if (sb !== null) {
+        var P = sumPrem(recent), bar = sb.bar;
         if (P >= bar) {
           var st = P >= 3 * bar ? 3 : P >= 2 * bar ? 2 : 1;
-          var m = { kind: "surge", ticker: t, prem: P, n: recent.length, bar: bar, minutes: T.windowMin, event: !!ev, sessions: sessions };
+          var m = { kind: "surge", ticker: t, prem: P, n: recent.length, bar: bar, floor: sb.floor, minutes: T.windowMin, event: !!ev, sessions: sessions };
           surges.push({ t: t, P: P, sector: ctx.sector || null, etf: ctx.sectorEtf || null });
-          found.push({ kind: "surge", t: t, strength: st, prem: P, m: m, facts: [{ label: "Flagged premium, 30 min", display: money(P) }, { label: "Bar for this name", display: money(bar) }] });
+          found.push({ kind: "surge", t: t, strength: st, prem: P, m: m, facts: [{ label: "Flagged premium, 30 min", display: money(P) }, { label: sb.floor ? "Minimum bar" : "Bar for this name", display: money(bar) }] });
         }
       }
 

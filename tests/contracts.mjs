@@ -1031,6 +1031,14 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
       `${name} must be ${limit} sign-in attempts per 60 s and LOGIN_PERIOD_S (the Retry-After) must equal its period; ` +
       `found limit ${simple[1]}, period ${simple[2]}, LOGIN_PERIOD_S ${loginPeriod}`);
   }
+  for (const [name, limit] of [["SC_COLD", "3"], ["SC_REFRESH", "1"]]) {
+    const block = blocks.find((b) => new RegExp(`^name\\s*=\\s*"${name}"\\s*$`, "m").test(b));
+    assert(block, `wrangler.toml must declare the [[ratelimits]] binding ${name}: memberAllowed fails open ` +
+      "when it is absent, so a renamed or dropped binding would turn the Short calls brake off silently");
+    const simple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(block) || [];
+    assert(simple[1] === limit && simple[2] === "60",
+      `${name} must be ${limit} per 60 s (3 cold reads of up to 14 calls are 35% of the 120-token UW_ONDEMAND bucket); found limit ${simple[1]}, period ${simple[2]}`);
+  }
   const ids = blocks.map((b) => (/^namespace_id\s*=\s*"(\d+)"\s*$/m.exec(b) || [])[1]);
   assert(ids.every(Boolean) && new Set(ids).size === ids.length,
     "every [[ratelimits]] binding needs its own namespace_id: two bindings on one namespace share one counter");

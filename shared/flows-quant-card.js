@@ -6,7 +6,7 @@ import {
   expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf, roundTo,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
-import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly, shiftDay, SESSIONS_PER_YEAR } from "./flows-quant-time.js";
+import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly, shiftDay, rootOfSymbol, settlementOf, lastTradeMs, SESSIONS_PER_YEAR } from "./flows-quant-time.js";
 
 export { rankModeOf };
 
@@ -63,6 +63,8 @@ export function chainRowsByExpiry(rows, opts = {}) {
   const m = median(ivs);
   const divisor = m !== null && m > QUANT_CARD_LINES.IV_PERCENT_LINE ? 100 : 1;
   const by = new Map();
+  const roots = new Map();
+  const styles = new Map();
   const seen = new Set();
   let foreign = 0, expired = 0;
   for (const r of list) {
@@ -79,14 +81,17 @@ export function chainRowsByExpiry(rows, opts = {}) {
     const tape = typeof r.last_tape_time === "string" ? Date.parse(r.last_tape_time) : NaN;
     const untraded = Number.isFinite(tape) && opts.sessionDate ? etDayOf(tape) < opts.sessionDate
       : volume !== null ? !(volume > 0) : false;
-    if (!by.has(p.expiry)) by.set(p.expiry, []);
+    const style = settlementOf(p.ticker, p.expiry);
+    if (!styles.has(p.expiry)) styles.set(p.expiry, style);
+    else if (styles.get(p.expiry) !== style) { foreign++; continue; }
+    if (!by.has(p.expiry)) { by.set(p.expiry, []); roots.set(p.expiry, p.ticker); }
     by.get(p.expiry).push({
       K: p.strike, type: p.type, bid: num(r.nbbo_bid), ask: num(r.nbbo_ask), oi: num(r.open_interest),
       volume, sym, ivSeed: iv !== null && iv > 0 ? iv / divisor : null, untraded,
     });
   }
   const expiries = [...by.keys()].sort().map((expiry) => ({
-    expiry, rows: by.get(expiry).sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0)),
+    expiry, root: roots.get(expiry) || null, rows: by.get(expiry).sort((a, b) => a.K - b.K || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0)),
   }));
   return { expiries, divisor, foreign, expired, contracts: seen.size };
 }
@@ -130,7 +135,7 @@ export function quoteImpliedVols(priced, { spot, rate, q = 0, asOfMs = null } = 
   const out = new Map();
   for (const [expiry, group] of [...byExpiry.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
     const days = group.find((p) => fin(p.days)) ? group.find((p) => fin(p.days)).days : null;
-    const exact = fin(asOfMs) ? yearFraction(asOfMs, expiry) : null;
+    const exact = fin(asOfMs) ? yearFraction(asOfMs, expiry, rootOfSymbol(group[0].symbol)) : null;
     const T = exact !== null ? exact : fin(days) ? days / 365 : null;
     if (!(T > 0)) { for (const p of group) out.set(p, { iv: null, why: "expired" }); continue; }
     const D = Math.exp(-r * T);
@@ -168,7 +173,7 @@ export function parityRate(expiries, { spot, asOfMs, symbol = null } = {}) {
   const L = QUANT_CARD_LINES;
   const points = [];
   for (const e of expiries || []) {
-    const T = yearFraction(asOfMs, e.expiry);
+    const T = yearFraction(asOfMs, e.expiry, e.root || null);
     if (!(T >= L.RATE_MIN_DAYS / 365 && T <= L.RATE_MAX_DAYS / 365)) continue;
     const f = parityForward({ S: spot, T, chain: pairsOf(e.rows), sigmaSeed: seedNear(e.rows, spot) });
     if (!f || f.method !== "regression" || !(f.r >= L.RATE_LO && f.r <= L.RATE_HI)) continue;
@@ -211,7 +216,7 @@ export function buildSlices(expiries, { spot, asOfMs, rate, event = null } = {})
   let prev = null;
   for (const e of eligible) {
     const ex = buildExpiry({
-      expiry: e.expiry, rows: e.rows, spot, asOfMs, rate, prev,
+      expiry: e.expiry, root: e.root || null, rows: e.rows, spot, asOfMs, rate, prev,
       event: firstAfter && firstAfter.expiry === e.expiry ? { firstAfter: true, sigmaD: null } : null,
     });
     if (!ex) continue;
@@ -672,14 +677,14 @@ function expiryFrame(input) {
   const r = fin(input.rate) ? input.rate : ENGINE_LINES.RATE_FALLBACK;
   const rateMethod = typeof input.rateMethod === "string" ? input.rateMethod : fin(input.rate) ? "given" : "fallback";
   const q = fin(input.q) ? input.q : cardCarry(input.facts);
-  const T = yearFraction(asOfMs, expiry);
+  const T = yearFraction(asOfMs, expiry, input.root || null);
   if (!(T > 0)) return { bad: "expired" };
   if (!(S > 0)) return { bad: "spot.missing" };
   const carry = q === null ? 0 : q;
   const fwd = input.fwd && typeof input.fwd === "object" ? input.fwd : null;
-  const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === "parity" || fwd.src === "blend") ? fwd : null;
+  const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === "parity" || fwd.src === "blend" || fwd.discrete === true) ? fwd : null;
   const F = used ? used.F : S * Math.exp((r - carry) * T);
-  return { T, S, r, rateMethod, q, carry: used ? r - Math.log(F / S) / T : carry, F, D: Math.exp(-r * T), fwd: used };
+  return { T, S, r, rateMethod, q, carry: used ? r - Math.log(F / S) / T : carry, F, D: Math.exp(-r * T), fwd: used, exKSoft: fwd && fin(fwd.exKSoft) ? fwd.exKSoft : null, exK: fwd && fin(fwd.exK) ? fwd.exK : null };
 }
 
 export function leanFrame(input) {
@@ -772,7 +777,8 @@ function readContract(f, row, width = true) {
   } else {
     const otm = row.type === "P" ? row.K < f.F : row.K >= f.F;
     const early = row.type === "C" && f.fwd !== null && f.fwd.ee === true;
-    const opp = otm && !early ? null : oppositeQuote(row);
+    const exercise = row.type === "C" && fin(f.exKSoft) && row.K <= f.exKSoft;
+    const opp = otm && !early && !exercise ? null : oppositeQuote(row);
     read = opp ? pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed, width) : null;
     if (read) via = "opposite";
     else read = pricedVol(f, row.K, row.type, row.bid, row.ask, seed, width);

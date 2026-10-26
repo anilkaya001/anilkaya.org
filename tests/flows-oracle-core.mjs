@@ -7,10 +7,17 @@ const SRC = readFileSync(new URL("../assets/js/flows-oracle-core.js", import.met
 const MIN = 60000;
 const MINUS = "−";
 
-const NORM = { premiumMedian: 60000, premiumP90: 4000000, sizeMedian: 40, sizeP90: 150, winN: 40 };
+const NORM = { premiumMedian: 60000, premiumP90: 4000000, sizeMedian: 40, sizeP90: 150, winN: 40, blk: 10000, blkN: 40 };
+const SN = { ...NORM, premiumMedian: 266000, premiumP90: 900000, blk: 627000 };
 const ctxOf = (over = {}) => ({ norm: NORM, sector: null, sectorEtf: null, earnings: null, ...over });
-const USUAL = NORM.premiumP90 * 30 / 390;
-const BAR = Math.max(3 * USUAL, 500000);
+const Z90 = 1.2815515655446004;
+const barOf = (n, scale = 1) => {
+  const sigma = Math.min(1.5, Math.max(0, Math.log(n.premiumP90 / n.premiumMedian) / Z90));
+  const w = n.premiumMedian * Math.exp(1.5 * sigma * sigma);
+  return Math.max(scale * (n.blk + 3.5 * Math.sqrt(n.blk * w)), 500000);
+};
+const BAR = barOf(SN);
+const each = (bar) => Math.ceil(bar / 6);
 
 function battery(src) {
   const core = loadCore(src);
@@ -77,25 +84,42 @@ function battery(src) {
   }
   check(bad === 0 && openCount > 3000, `the Eastern session arithmetic equals the zone at every quarter hour (${bad} wrong)`);
 
-  const surge = run(six("SYO001", 160000), ctxOf());
-  eq(kinds(surge, "surge").length, 1, "surge fires at 960K");
+  check(Math.abs(BAR - 3443000) < 15000, `the worked bar for a name with 1.5 windows a block, median 266K and p90 900K is about 3.44M (${Math.round(BAR)})`);
+  const surge = run(six("SYO001", each(BAR)), ctxOf({ norm: SN }));
+  eq(kinds(surge, "surge").length, 1, "surge fires at the bar");
   const sm = kinds(surge, "surge")[0];
-  eq(sm && sm.say, `SYO001 has ${fmt.money(960000)} of flagged options flow across 6 windows in the last 30 minutes. The bar for this name is ${fmt.money(BAR)}.`, "surge words say what was measured: the sum, the windows and the bar, with no pace and no multiple");
-  check(!/pace|usual|typical|\bx\b|\u00D7/.test(sm.say), "and the surge carries no multiple of a usual pace, which the ledger (a single window's p90) cannot support");
-  eq(sm.facts.map((f) => f.label), ["Flagged premium, 30 min", "Bar for this name"], "and its two facts are the sum and the bar");
+  eq(sm && sm.say, `SYO001 has ${fmt.money(6 * each(BAR))} of flagged options flow across 6 windows in the last 30 minutes. The bar for this name is ${fmt.money(BAR)}.`, "surge words say what was measured: the sum, the windows and the bar, with no pace and no multiple");
+  check(!/pace|usual|typical|\bx\b|\u00D7/.test(sm.say), "and the surge carries no multiple of a usual pace");
+  eq(sm.facts.map((f) => f.label), ["Flagged premium, 30 min", "Bar for this name"], "and its two facts are the sum and the bar, labelled as the name's own while its own level binds");
   eq(sm && sm.strength, 1, "surge strength 1");
-  eq(kinds(run(six("SYO001", 153000), ctxOf()), "surge").length, 0, "surge silent below the bar");
-  eq(kinds(run(six("SYO001", 225000), ctxOf({ norm: { ...NORM, premiumP90: 5850000 } })), "surge").length, 1, "surge fires exactly at the bar");
-  eq(kinds(run(six("SYO001", 70000), ctxOf({ norm: { ...NORM, premiumP90: 1000000 } })), "surge").length, 0, "the 500K floor holds a small name");
-  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: { ...NORM, premiumP90: 1000000 } })), "surge").length, 1, "and is met at 500K");
-  eq(kinds(run(six("SYO001", 224999), ctxOf({ norm: { ...NORM, premiumP90: 5850000 } })), "surge").length, 0, "and not a dollar under it");
-  eq(kinds(run(six("SYO001", Math.ceil(2 * BAR / 6)), ctxOf()), "surge")[0].strength, 2, "surge strength 2 at twice the bar");
-  eq(kinds(run(six("SYO001", Math.ceil(3 * BAR / 6)), ctxOf()), "surge")[0].strength, 3, "surge strength 3 at three times the bar");
-  eq(kinds(run(six("SYO001", 160000).slice(0, 2).concat(six("SYO001", 1000).slice(2)), ctxOf()), "surge").length, 0, "surge needs the premium, not the count");
-  const ev = ctxOf({ earnings: { sessions: 3, inWindow: true } });
-  eq(kinds(run(six("SYO001", Math.ceil(BAR * 1.2 / 6)), ev), "surge").length, 0, "an event multiplies the bar by 1.5");
-  const evm = kinds(run(six("SYO001", Math.ceil(BAR * 1.5 / 6)), ev), "surge")[0];
+  eq(kinds(run(six("SYO001", each(BAR) - 2), ctxOf({ norm: SN })), "surge").length, 0, "surge silent below the bar");
+  eq(kinds(run(six("SYO001", 50000), ctxOf({ norm: SN })), "surge").length, 0, "and silent at the old 500K floor, which was the bar for almost every name");
+  const small = { ...SN, blk: 50000, premiumMedian: 60000, premiumP90: 150000 };
+  eq(barOf(small), 500000, "a small name's own bar is under the floor");
+  eq(kinds(run(six("SYO001", 70000), ctxOf({ norm: small })), "surge").length, 0, "the 500K floor holds a small name");
+  const flo = kinds(run(six("SYO001", 83334), ctxOf({ norm: small })), "surge");
+  eq(flo.length, 1, "and is met at 500K");
+  eq(flo[0].facts.map((f) => f.label), ["Flagged premium, 30 min", "Minimum bar"], "where the label says it is the minimum, not the name's own bar");
+  check(flo[0].say.includes("The minimum bar is $500K."), "and so do the words");
+  const atBar = Array.from({ length: 5 }, (_, i) => row("SYO001", 2 + i * 4, { prem: 100000, k: 60 + i }));
+  eq(kinds(run(atBar, ctxOf({ norm: small })), "surge").length, 1, "premium exactly at the bar fires");
+  const edge = { ...SN, blk: 0, premiumMedian: 100000, premiumP90: 100000 };
+  eq(barOf(edge), 500000, "a zero block level is allowed and sits on the floor");
+  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: edge })), "surge").length, 1, "a zero level still fires at the floor");
+  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: { ...small, blk: undefined } })), "surge").length, 0, "no block level is silent");
+  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: { ...small, blkN: 9 } })), "surge").length, 0, "nine sessions of history is silent");
+  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: { ...small, blkN: 10 } })), "surge").length, 1, "ten sessions is enough");
+  eq(kinds(run(six("SYO001", Math.ceil(2 * BAR / 6)), ctxOf({ norm: SN })), "surge")[0].strength, 2, "surge strength 2 at twice the bar");
+  eq(kinds(run(six("SYO001", Math.ceil(3 * BAR / 6)), ctxOf({ norm: SN })), "surge")[0].strength, 3, "surge strength 3 at three times the bar");
+  eq(kinds(run(six("SYO001", 160000).slice(0, 2).concat(six("SYO001", 1000).slice(2)), ctxOf({ norm: SN })), "surge").length, 0, "surge needs the premium, not the count");
+  const ev = ctxOf({ norm: SN, earnings: { sessions: 3, inWindow: true } });
+  const BARE = barOf(SN, 1.5);
+  check(BARE > 1.4 * BAR && BARE < 1.5 * BAR + 1, "an event multiplies the name's own level by 1.5");
+  eq(kinds(run(six("SYO001", each(BAR * 1.2)), ev), "surge").length, 0, "so the bar for a report week is higher");
+  const evm = kinds(run(six("SYO001", each(BARE)), ev), "surge")[0];
   check(evm && evm.say.endsWith(" A report is 3 sessions away."), "the event is named in the text");
+  eq(barOf(small, 1.5), 500000, "the floor is not scaled by an event");
+  eq(kinds(run(six("SYO001", 83334), ctxOf({ norm: small, earnings: { sessions: 3, inWindow: true } })), "surge").length, 1, "a small name in a report week still fires at 500K");
 
   eq(run(six("SYO001", 160000), ctxOf({ norm: { ...NORM, winN: 19 } })).msgs.length, 0, "a thin norm is silent");
   eq(run(six("SYO001", 160000), ctxOf({ norm: null })).msgs.length, 0, "no norm is silent");
@@ -136,7 +160,7 @@ function battery(src) {
   eq(kinds(run([...lean([80, 60, 40], 20000, 180000, 200000), ...lean([4, 14, 24], 120000, 5000, 130000)], ctxOf()), "flip").length, 0, "flip needs 400K sided");
   eq(kinds(run([...lean([80, 60, 40], 20000, 180000, 200000), ...lean([4, 14, 24], 200000, 10000, 1200000)], ctxOf()), "flip").length, 0, "flip is silent when sided premium covers under half");
   eq(kinds(run([...lean([80, 60, 40], 20000, 180000, 200000), ...lean([4, 14, 24], 100000, 70000, 160000)], ctxOf()), "flip").length, 0, "flip needs a lean of 0.4");
-  const putFlip = kinds(run([...lean([80, 60, 40], 180000, 20000, 200000, "P"), ...lean([4, 14, 24], 20000, 150000, 160000, "P")], ctxOf()), "flip")[0];
+  const putFlip = kinds(run([...lean([80, 60, 40], 180000, 20000, 200000, "P"), ...lean([4, 14, 24], 20000, 140000, 160000, "P")], ctxOf()), "flip")[0];
   eq(putFlip && putFlip.say.includes("turned bullish"), true, "puts at the bid are bullish");
 
   const clu = (b) => [row("SYO001", 5, { prem: 50000, exp: "2026-10-16", k: 80 }), row("SYO001", 9, { prem: 50000, exp: "2026-10-16", k: 81 }), row("SYO001", 7, { prem: b / 2, exp: "2026-11-20", k: 82 }), row("SYO001", 12, { prem: b / 2, exp: "2026-11-20", k: 83 }), row("SYO001", 50, { prem: 1000, exp: "2026-11-20", k: 84 })];
@@ -187,17 +211,17 @@ function battery(src) {
   eq(kinds(run(sc.rows, sc.context), "sector").length, 0, "one name twice is still three names");
 
   const crowd = Array.from({ length: 8 }, (_, i) => `SYO0${10 + i}`);
-  const cr = run(crowd.flatMap((t) => six(t, 200000)), Object.fromEntries(crowd.map((t) => [t, ctxOf()])));
+  const cr = run(crowd.flatMap((t) => six(t, each(BAR))), Object.fromEntries(crowd.map((t) => [t, ctxOf({ norm: SN })])));
   eq(cr.msgs.length, 6, "six messages at most in thirty minutes");
   eq(cr.state.quiet, 2, "the rest are counted");
 
-  const first = run(six("SYO001", 160000), ctxOf());
+  const first = run(six("SYO001", each(BAR)), ctxOf({ norm: SN }));
   eq(first.msgs.length >= 1, true, "first firing");
-  const again = live.detect(first.state, [], ctxOf(), NOW + 5 * MIN, { live: true });
+  const again = live.detect(first.state, [], ctxOf({ norm: SN }), NOW + 5 * MIN, { live: true });
   eq(again.filter((m) => m.kind === "surge").length, 0, "no repeat inside the cooldown at the same strength");
-  const richer = live.detect(first.state, six("SYO001", 400000).map((r) => ({ ...r, id: r.id + "z", spanStart: new Date(NOW + 5 * MIN - 3 * MIN).toISOString() })), ctxOf(), NOW + 5 * MIN, { live: true });
+  const richer = live.detect(first.state, six("SYO001", each(2.5 * BAR)).map((r) => ({ ...r, id: r.id + "z", spanStart: new Date(NOW + 5 * MIN - 3 * MIN).toISOString() })), ctxOf({ norm: SN }), NOW + 5 * MIN, { live: true });
   eq(richer.filter((m) => m.kind === "surge").length, 1, "a higher strength speaks inside the cooldown");
-  const later = live.detect(first.state, six("SYO001", 160000).map((r) => ({ ...r, id: r.id + "w", spanStart: new Date(NOW + 40 * MIN - 3 * MIN).toISOString() })), ctxOf(), NOW + 40 * MIN, { live: true });
+  const later = live.detect(first.state, six("SYO001", each(BAR)).map((r) => ({ ...r, id: r.id + "w", spanStart: new Date(NOW + 40 * MIN - 3 * MIN).toISOString() })), ctxOf({ norm: SN }), NOW + 40 * MIN, { live: true });
   eq(later.filter((m) => m.kind === "surge").length, 1, "and again after the cooldown");
   eq(first.msgs[0].id, `SYO001:${first.msgs[0].kind}:${Math.floor(NOW / (30 * MIN))}`, "message ids carry the bucket");
   return out;
@@ -216,7 +240,14 @@ const MUTANTS = [
   ["stale feed fires", (s) => s.replace("o.live !== true", "false")],
   ["closed session fires", (s) => s.replace("if (!sess.open || sess.minutes < T.warmMin) return out;", "if (sess.minutes !== null && sess.minutes < T.warmMin) return out;")],
   ["surge strict", (s) => s.replace("if (P >= bar)", "if (P > bar)")],
-  ["surge floor gone", (s) => s.replace("Math.max(T.surgeMult * usual, T.surgeFloor)", "T.surgeMult * usual")],
+  ["surge floor gone", (s) => s.replace("bar: Math.max(own, T.surgeFloor)", "bar: own")],
+  ["surge bar from the old p90 slice", (s) => s.replace("var own = scale * (blk + T.surgeZ * Math.sqrt(blk * w));", "var own = scale * 3 * p90 * 30 / 390;")],
+  ["surge without the spread term", (s) => s.replace("var own = scale * (blk + T.surgeZ * Math.sqrt(blk * w));", "var own = scale * 3 * blk;")],
+  ["surge z of two", (s) => s.replace("surgeZ: 3.5", "surgeZ: 2")],
+  ["surge floor scaled by an event", (s) => s.replace("bar: Math.max(own, T.surgeFloor), floor: own < T.surgeFloor", "bar: Math.max(own, T.surgeFloor * scale), floor: own < T.surgeFloor")],
+  ["surge needs no history", (s) => s.replace("n < T.surgeSessions", "n < 0")],
+  ["surge label always the name's", (s) => s.replace('sb.floor ? "Minimum bar" : "Bar for this name"', '"Bar for this name"')],
+  ["surge spread unclamped", (s) => s.replace("Math.min(T.surgeSigmaMax, Math.max(0,", "Math.min(9, Math.max(0,")],
   ["event multiplier gone", (s) => s.replace("var mult = ev ? T.eventMult : 1;", "var mult = 1;")],
   ["repeat needs two", (s) => s.replace("repeatN: 3", "repeatN: 2")],
   ["flip same lean allowed", (s) => s.replace("Math.sign(el.l) !== Math.sign(recentLean.l)", "true")],
@@ -237,7 +268,7 @@ const MUTANTS = [
   ["minus sign dropped", (s) => s.replace('var NEG = Object.freeze({ "-1": MINUS,', 'var NEG = Object.freeze({ "-1": "",')],
   ["null read as zero", (s) => s.replace('return x === null ? DASH : (x * 100).toFixed(1);', 'return (x || 0) === 0 ? "0.0" : (x * 100).toFixed(1);')],
   ["eastern offset fixed", (s) => s.replace("return ms >= start && ms < end ? -4 : -5;", "return -5;")],
-  ["surge claims a pace", (s) => s.replace('" has " + money(m.prem) + " of flagged options flow across " + m.n + " windows in the last " + m.minutes +\n        " minutes. The bar for this name is " + money(m.bar) + "."', '" options flow is running " + times(m.prem / m.bar) + " its usual pace: " + money(m.prem) + " in the last " + m.minutes + " minutes."')],
+  ["surge claims a pace", (s) => s.replace('" has " + money(m.prem) + " of flagged options flow across " + m.n + " windows in the last " + m.minutes +\n        " minutes. The " + (m.floor ? "minimum bar" : "bar for this name") + " is " + money(m.bar) + "."', '" options flow is running " + times(m.prem / m.bar) + " its usual pace: " + money(m.prem) + " in the last " + m.minutes + " minutes."')],
   ["a repeat names someone", (s) => s.replace('"Flow keeps returning to the "', '"Someone keeps coming back to the "')],
   ["a window called a print", (s) => s.replace('" flagged windows in "', '" prints in "')],
   ["a window called one print", (s) => s.replace('m.ticker + " has one window of "', '"One print on " + m.ticker + ": "')],

@@ -97,9 +97,11 @@ const cents = (k) => k * 100000;
   const r = leanRead(totals);
   eq([r.pct.share, r.pct.coverage, r.pct.lo, r.pct.hi, r.side], [75, 80, 60, 80, "buyers"], "and left out of every sum");
   const legacy = askShareCompat(rows);
-  ok(Math.abs(legacy.share - 93 / 154) < 1e-9 && Math.abs(legacy.classified - 14 / 15) < 1e-9 && legacy.side === "mixed", "the compatible read scales it by 10/11, as the legacy read does");
+  ok(Math.abs(legacy.share - 0.75) < 1e-12 && Math.abs(legacy.classified - 0.8) < 1e-12 && legacy.side === "ask", "the compatible read leaves the invalid window out of the share and the coverage, as the ledger does, and no longer scales it by 10/11");
   const real = askShareRead(rows);
   ok(Math.abs(real.share - legacy.share) < 1e-12 && Math.abs(real.classified - legacy.classified) < 1e-12 && real.side === legacy.side, "and agrees with askShareRead on the same rows");
+  eq(real.invalid, counts.invalid, "which counts the same invalid windows the ledger counts");
+  eq([real.share, real.classified], [r.share, r.coverage], "and gives the share and coverage the ledger's own lean read gives, to the last digit");
 }
 
 {

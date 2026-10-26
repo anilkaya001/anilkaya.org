@@ -166,10 +166,46 @@ export function shiftDay(day, n) {
   return isoDay(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
-export function yearFraction(asOfMs, expiryDay) {
-  const close = closeUtcMs(expiryDay);
-  if (close === null || typeof asOfMs !== "number" || !Number.isFinite(asOfMs)) return null;
-  return (close - asOfMs) / (YEAR_SECONDS * 1000);
+export const AM_SETTLED_ROOTS = Object.freeze({
+  SPX: "monthly", NDX: "monthly", RUT: "monthly", DJX: "monthly", MRUT: "monthly", VIX: "always", VIXW: "always",
+});
+
+export function settlementOf(root, expiryDay) {
+  if (typeof root !== "string") return "pm";
+  const rule = AM_SETTLED_ROOTS[root.trim().toUpperCase()];
+  if (rule === "always") return parseDay(expiryDay) ? "am" : "pm";
+  if (rule === "monthly") return isMonthly(expiryDay) ? "am" : "pm";
+  return "pm";
+}
+
+const OCC_ROOT = /^([A-Z0-9]+?)\d{6}[CP]\d{8}$/;
+
+export function rootOfSymbol(symbol) {
+  if (typeof symbol !== "string") return null;
+  const m = OCC_ROOT.exec(symbol.trim().toUpperCase());
+  return m ? m[1] : null;
+}
+
+export function expiryUtcMs(expiryDay, root = null) {
+  return settlementOf(root, expiryDay) === "am" ? openUtcMs(expiryDay) : closeUtcMs(expiryDay);
+}
+
+export function previousSession(day) {
+  let d = shiftDay(day, -1);
+  for (let i = 0; i < 12 && d && !isSession(d); i++) d = shiftDay(d, -1);
+  return d;
+}
+
+export function lastTradeMs(expiryDay, root = null) {
+  if (settlementOf(root, expiryDay) !== "am") return closeUtcMs(expiryDay);
+  const prior = previousSession(expiryDay);
+  return prior === null ? null : closeUtcMs(prior);
+}
+
+export function yearFraction(asOfMs, expiryDay, root = null) {
+  const end = expiryUtcMs(expiryDay, root);
+  if (end === null || typeof asOfMs !== "number" || !Number.isFinite(asOfMs)) return null;
+  return (end - asOfMs) / (YEAR_SECONDS * 1000);
 }
 
 export function isMonthly(day) {

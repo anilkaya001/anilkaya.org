@@ -1,4 +1,4 @@
-import { horizonMove } from "./flows-features.js";
+import { impliedHorizonMove } from "./flows-features.js";
 import { isTradingDay } from "./flows-freshness.js";
 
 const numOrNull = (v) => {
@@ -62,7 +62,7 @@ export function eventRow(row, tilt, {
   const close = numOrNull(row && row.close);
 
   const ev = iv !== null && sdte !== null && sdte > 0
-    ? round(horizonMove(iv, { sessions: sdte }), 4) : null;
+    ? round(impliedHorizonMove(iv, { sessions: sdte, asOf: gateOrigin }), 4) : null;
   const vendorMove = round(numOrNull(t.impliedMovePerc), 4);
 
   return {
