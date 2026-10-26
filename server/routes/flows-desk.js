@@ -25,7 +25,7 @@ function shortCallTerms(url) {
 const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + name, methods: ["GET"], auth: "flows", handler });
 
 export function flowsDeskRows(deps) {
-  const { vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse } = deps;
+  const { scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse } = deps;
 
   const chain = async ({ env, ctx, url, session }) => {
     const ticker = requireTicker(url);
@@ -35,15 +35,16 @@ export function flowsDeskRows(deps) {
     const rawRank = url.searchParams.get("rank");
     const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
     const terms = strategy === "sc" ? shortCallTerms(url) : null;
+    const refresh = url.searchParams.get("refresh") === "1" && (strategy !== "sc" || scRefreshAllowed(session));
     const key = strategy === "sc" ? `${ticker}?strategy=sc&h=${terms.haircut}&f=${terms.floor}` : `${ticker}?strategy=${strategy}&rank=${rankBy}`;
 
     return serveCachedVendorRead({
       env,
       ctx,
       cacheKey: internalKey("chain", key),
-      wantsRefresh: url.searchParams.get("refresh") === "1",
+      wantsRefresh: refresh,
       gate: vendorGate(env, session),
-      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120, ...(terms ? { terms, refresh: url.searchParams.get("refresh") === "1" } : {}) }),
+      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120, ...(terms ? { terms, refresh } : {}) }),
     });
   };
 
