@@ -82,12 +82,12 @@ async function audit(page, exp, label) {
     }
   }
   const kindVals = Object.entries(exp.kinds).filter((e) => e[1] > 0);
-  eqCheck(layers[0].map((n) => Math.round(n.v)).sort((a, b) => a - b), kindVals.map((e) => Math.round(e[1])).sort((a, b) => a - b), () => note("the side chips are not the five independent side sums"));
+  eqCheck(layers[1].map((n) => Math.round(n.v)).sort((a, b) => a - b), kindVals.map((e) => Math.round(e[1])).sort((a, b) => a - b), () => note("the side chips are not the five independent side sums"));
   for (const [k, v] of kindVals) { const c = labels["i:" + k]; if (!c || c.label !== KIND[k]) note("side chip " + k + " is not labelled '" + KIND[k] + "'"); else void v; }
   const leanVals = Object.entries(exp.byLean).filter((e) => e[1] > 0);
   eqCheck(layers[3].map((n) => Math.round(n.v)).sort((a, b) => a - b), leanVals.map((e) => Math.round(e[1])).sort((a, b) => a - b), () => note("the lean chips are not the independent lean sums"));
   const secVals = [...exp.bySector.values()].sort((a, b) => b - a);
-  const named = layers[1].filter((n) => n.id !== "s:~");
+  const named = layers[0].filter((n) => n.id !== "s:~");
   const expTop = secVals.slice(0, named.length).map(Math.round).sort((a, b) => a - b);
   eqCheck(named.map((n) => Math.round(n.v)).sort((a, b) => a - b), expTop, () => note("the sector chips are not the largest independent sector sums"));
   for (const n of named) {
@@ -197,18 +197,18 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
     await page.click("#mkNet .nm-seg button[data-mode='dte']");
     const bad2 = await audit(page, { ...EXP, byLean: null, kinds: EXP.kinds }, `${w} expiry`).catch((e) => ["expiry audit threw " + e.message]);
     const caps = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-cap")].map((t) => t.textContent.split(" ")[0]));
-    eq(caps, ["Side", "Sector", "Name", "Expiry"], `${w}: the fourth caption names the expiry`);
+    eq(caps, ["Sector", "Side", "Name", "Expiry"], `${w}: the fourth caption names the expiry`);
     const exp4 = await page.evaluate(() => window.FlowsUI.netMap.of(document.getElementById("mkNet")).model().layers[3].map((n) => n.label));
     ok(exp4.every((l) => ["0DTE", "1–7 days", "8–31 days", "32+ days", "No expiry"].includes(l)), `${w}: expiry chips are labelled with their bucket: ${exp4.join(", ")}`);
     ok(bad2.every((m) => !/layer 3|sum/.test(m)), `${w}: expiry layer sums to the total`);
     await page.click("#mkNet .nm-seg button[data-mode='lean']");
     await page.click("#mkNet .nm-seg button[data-view='table']");
     const tb = await page.evaluate(() => ({ heads: [...document.querySelectorAll("#mkNet .nm-stage .nm-tbl thead th")].map((t) => t.textContent), rows: [...document.querySelectorAll("#mkNet .nm-stage .nm-tbl tbody tr")].map((tr) => [...tr.children].map((c) => c.textContent)), more: document.querySelector("#mkNet .nm-stage .nm-link") && document.querySelector("#mkNet .nm-stage .nm-link").textContent, sh: document.documentElement.scrollHeight, ih: innerHeight }));
-    eq(tb.heads, ["Side", "Sector", "Name", "Lean", "Premium", "Share"], `${w}: THE TABLE TWIN CARRIES THE SAME IDENTIFICATION: side, sector, name, lean, premium, share`);
+    eq(tb.heads, ["Sector", "Side", "Name", "Lean", "Premium", "Share"], `${w}: THE TABLE TWIN CARRIES THE SAME IDENTIFICATION: sector, side, name, lean, premium, share`);
     ok(tb.rows.length >= 4 && tb.rows.every((r) => r.every((c) => c.length > 0)), `${w}: no empty identification cell`);
     const topPath = EXP.paths[0];
-    const [kk, sec, nm, ln] = topPath[0].split("|");
-    eq(tb.rows[0].slice(0, 4).map((c) => c.replace(/ \(\d+\)$/, "")).join("|"), [KIND[kk], sec === "No sector in the universe" ? tb.rows[0][1] : tb.rows[0][1], nm, ln].join("|"), `${w}: the first table row is the largest path`);
+    const [kk, , nm, ln] = topPath[0].split("|");
+    eq(tb.rows[0].slice(0, 4).map((c) => c.replace(/ \(\d+\)$/, "")).join("|"), [tb.rows[0][0], KIND[kk], nm, ln].join("|"), `${w}: the first table row is the largest path`);
     ok(tb.more && /Show all \d+/.test(tb.more), `${w}: the table lists the top paths and offers Show all (${tb.more})`);
     ok(tb.sh <= tb.ih + 1, `${w}: the table view does not scroll the page`);
     await page.click("#mkNet .nm-stage .nm-link");
@@ -224,7 +224,7 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
 {
   const { context, page, errors } = await open({ viewport: { width: 390, height: 844 }, coarse: true });
   const segs = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-layers button")].map((b) => b.textContent));
-  eq(segs, ["Side", "Sector", "Name", "Lean"], "390: the four layers are a switch, not a squeeze");
+  eq(segs, ["Sector", "Side", "Name", "Lean"], "390: the four layers are a switch, not a squeeze");
   for (const [i, name] of segs.entries()) {
     await page.click(`#mkNet .nm-layers button:nth-child(${i + 1})`);
     const n = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-chip")].map((g) => [g.querySelector(".nm-lb").textContent, g.querySelector(".nm-fg").textContent, g.getBoundingClientRect().left >= 0 && g.getBoundingClientRect().right <= innerWidth]));
@@ -272,7 +272,7 @@ const MUTANTS = [
   ["the legend loses the band width key", [["h(\"span\", { class: \"nm-lg\" }, h(\"i\", { class: \"nm-sw s-band\"", "h(\"span\", { class: \"nm-lg\", hidden: true }, h(\"i\", { class: \"nm-sw s-band\""]]],
   ["chips overlap", [["const gap = 5;", "const gap = -9;"]]],
   ["the largest name is not selected at rest", [["const defaultSel = () => (M.layers[2][0] ? M.layers[2][0].id : M.layers[0][0] ? M.layers[0][0].id : null);", "const defaultSel = () => (M.layers[2][1] ? M.layers[2][1].id : null);"]]],
-  ["the table twin drops the sector", [["[\"Side\", \"Sector\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].map((c, i) => h(\"th\"", "[\"Side\", \"Sector\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].filter((c) => c !== \"Sector\").map((c, i) => h(\"th\""]]],
+  ["the table twin drops the sector", [["[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].map((c, i) => h(\"th\"", "[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].filter((c) => c !== \"Sector\").map((c, i) => h(\"th\""]]],
 ];
 
 async function mutantFails(name, edits) {

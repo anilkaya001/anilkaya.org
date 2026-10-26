@@ -12,7 +12,7 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 const SESSION = "2026-09-29";
 const NOW = Date.parse("2026-08-24T15:25:00.000Z");
-const SIZES = [{ width: 1440, height: 820 }, { width: 1024, height: 768 }, { width: 390, height: 844 }, { width: 320, height: 844 }];
+const SIZES = [{ width: 1440, height: 820 }, { width: 1920, height: 1080 }, { width: 1024, height: 768 }, { width: 390, height: 844 }, { width: 320, height: 844 }];
 
 const NAMES = [["NVDA", 1.0, 0.7], ["SPY", 0.8, 0.4], ["TSLA", 0.6, 0.5], ["AAPL", 0.5, 0.6], ["AMZN", 0.45, 0.65], ["META", 0.4, 0.7], ["MSFT", 0.35, 0.55],
   ["AMD", 0.3, 0.6], ["MU", 0.22, 0.66], ["NFLX", 0.2, 0.5], ["COIN", 0.15, 0.6], ["XOM", 0.1, 0.4]];
@@ -79,6 +79,17 @@ async function open(browser, kind, viewport, patch = null) {
 const MEASURE = () => {
   const d = document.documentElement;
   const clip = [];
+  const inner = [], canv = [];
+  for (const m of document.querySelectorAll(".fd-mod[data-on]")) {
+    if (m.scrollHeight > m.clientHeight + 1) inner.push(m.id + " " + m.scrollHeight + ">" + m.clientHeight);
+    for (const e of m.querySelectorAll("*")) {
+      if (e.tagName !== "CANVAS" || e.closest("[hidden]") || e.clientWidth < 100 || e.clientHeight < 100) continue;
+      const rx = e.width / e.clientWidth, ry = e.height / e.clientHeight;
+      if (Math.abs(rx - ry) / Math.max(rx, ry) > 0.02) canv.push(m.id + " css " + e.clientWidth + "x" + e.clientHeight + " backing " + e.width + "x" + e.height);
+    }
+    const lg = m.querySelector(".fn-scale:not([hidden])");
+    if (lg) { const a = lg.getBoundingClientRect(), b = m.getBoundingClientRect(); if (a.bottom > b.bottom + 1 || lg.scrollHeight > lg.clientHeight + 1) inner.push(m.id + " legend cut"); }
+  }
   for (const m of document.querySelectorAll(".fd-mod[data-on]:not([data-free])")) {
     const r = m.getBoundingClientRect();
     for (const e of m.querySelectorAll("*")) {
@@ -90,7 +101,7 @@ const MEASURE = () => {
   const sel = [...document.querySelectorAll("#fdTabs [role=tab]")].filter((t) => t.getAttribute("aria-selected") === "true").map((t) => t.dataset.tab);
   const on = [...document.querySelectorAll(".fd-mod")].filter((m) => m.hasAttribute("data-on") && getComputedStyle(m).visibility !== "hidden").map((m) => m.dataset.tab);
   const off = [...document.querySelectorAll(".fd-mod")].filter((m) => !m.hasAttribute("data-on")).every((m) => m.inert && getComputedStyle(m).visibility === "hidden");
-  return { sh: d.scrollHeight, ih: innerHeight, sw: d.scrollWidth, iw: innerWidth, clip, sel, on, off, view: document.getElementById("fdStage").dataset.view, hash: location.hash };
+  return { inner, canv, sh: d.scrollHeight, ih: innerHeight, sw: d.scrollWidth, iw: innerWidth, clip, sel, on, off, view: document.getElementById("fdStage").dataset.view, hash: location.hash };
 };
 
 async function sweep(page, label) {
@@ -105,6 +116,8 @@ async function sweep(page, label) {
     if (process.env.SHOTS) await page.screenshot({ path: path.join(process.env.SHOTS, label.replace(/ /g, "-") + "-" + t + ".png") });
     if (m.sh > m.ih + 1) bad.push(`${at}: the page scrolls (${m.sh} against ${m.ih})`);
     if (m.sw > m.iw) bad.push(`${at}: the page scrolls sideways`);
+    if (m.inner.length) bad.push(`${at}: a module scrolls inside or cuts its legend: ${m.inner.join(", ")}`);
+    if (m.canv.length) bad.push(`${at}: a canvas is drawn at one size and shown at another: ${m.canv.join(", ")}`);
     if (m.clip.length && process.env.DBG) console.log(at, await page.evaluate(() => { const b = document.querySelector(".fd-mod[data-on] .fd-body"); return [b.clientHeight, b.scrollHeight, b.querySelectorAll(".fd-cut").length, b.children.length, b.firstElementChild.className, b.firstElementChild.children.length, b.firstElementChild.scrollHeight].join(" | "); }));
     if (m.clip.length) bad.push(`${at}: content is clipped: ${m.clip.join(", ")}`);
     if (m.view !== t || m.sel.join() !== t || m.on.join() !== t) bad.push(`${at}: tab state is ${m.view}/${m.sel}/${m.on}`);
@@ -185,6 +198,8 @@ try {
 
   const MUTANTS = [
     ["the stage no longer clips: the page scrolls", "events", { "/assets/css/flows-feeds.css": [["  overflow: hidden;\n}\n.flows-body[data-flows-page=\"unusual\"] .flows-main > *", "}\n.flows-body[data-flows-page=\"unusual\"] .flows-main > *"], ["height: 100dvh;\n  padding-bottom: var(--fd-pad-b)", "height: auto;\n  padding-bottom: var(--fd-pad-b)"]] }],
+    ["the network module scrolls inside and its stage keeps a fixed height", "unusual", { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod[data-free] { overflow: hidden; }", ".fd-stage > .fd-mod[data-free] { overflow-y: auto; }"], [".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: 1; min-height: 0; height: auto; margin: 0; }", ".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: none; height: 560px; margin: 0; }"]] }],
+    ["the scene is laid out at a clamped height the canvas is not shown at", "unusual", { "/assets/js/flows-net.js": [["H = FIT ? avail :", "H = FIT ? Math.max(avail, 700) :"]] }],
     ["the fitter is off: content is clipped", "events", { "/assets/js/flows-feed-os.js": [["const later = () => { if (!queued) queued = requestAnimationFrame(fitAll); };", "const later = () => {};"]] }],
     ["inactive modules stay visible", "unusual", { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod { position: absolute; inset: 0; visibility: hidden;", ".fd-stage > .fd-mod { position: absolute; inset: 0; visibility: visible;"]] }],
   ];

@@ -131,13 +131,13 @@
   const QUOTE_STALE_SECONDS = 300;
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const SIDES = ["csp", "cc", "both", "sc"];
-  const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "cc" };
+  const SERVER_SIDE = { csp: "csp", cc: "cc", both: "both", sc: "sc" };
   const RANKS = [["annualized", "Annualised yield"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["premium", "Premium received"], ["yieldOnCollateral", "Time value ÷ collateral"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
   const SC_RANKS = [["annualized", "Annualised ratio"], ["premiumRatio", "Premium ÷ collateral, in-the-money value included"], ["ratio", "Time value ÷ collateral"], ["premium", "Premium received"], ["cushionSigmas", "Cushion"], ["collectible", "Time value collectible"], ["edge", "EV real world"]];
   const ranksFor = () => (side === "sc" ? SC_RANKS : RANKS);
   const calls = () => (side === "sc" ? window.FlowsUI.deskCalls || null : null);
   const SERIES = ["--s-blue", "--s-orange", "--s-purple", "--s-teal", "--s-yellow"];
-  const WIN_Q = "Win % (implied)", WIN_P = "Win % (real-world)";
+  const WIN_Q = "Win % (implied)", WIN_P = "Win % (real-world)", EV_P = "EV (real-world)";
 
   const book = new Map();
   let inflight = 0;
@@ -290,6 +290,8 @@
     e.seq = seq;
     renderChips();
     const params = new URLSearchParams({ t: sym, strategy: SERVER_SIDE[side], rank: serverRank(rank) });
+    const terms = side === "sc" ? shortCallTerms() : null;
+    if (terms) { params.set("h", String(terms.h)); params.set("f", String(terms.f)); }
     if (refresh) params.set("refresh", "1");
     const current = () => book.get(sym) === e && e.seq === seq;
     try {
@@ -327,31 +329,80 @@
     return Number.isFinite(read) ? Math.min(close, read) : close;
   }
 
+  const bandOf = (r, fit, fwd, S) => {
+    const c = fit.slice.contract;
+    const type = r.type === "P" ? "P" : "C";
+    const held = c.via === "own" ? type : type === "C" ? "P" : "C";
+    const known = fit.forward.carry === "card";
+    const se = fwd && isNum(fwd.se) !== null ? fwd.se : Q.carryOf({ S, r: fit.forward.r, T: fit.T, q: known ? fit.forward.q : null }).se;
+    return { ...Q.deltaBand({ F: fit.forward.F, se, K: r.strike, sigma: c.iv, T: fit.T, held, veto: !!(fwd && fwd.veto) }), se };
+  };
+
+  function structOf(r) {
+    return r.strategy === "cc"
+      ? { family: "covered-call", legs: [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] }
+      : { family: "short-put", legs: [{ type: "P", K: r.strike, side: -1, qty: 1 }] };
+  }
+
+  function priceStruct(r, fit, struct) {
+    const c = r.__ctx;
+    const setup = Q.labSetup({ asOfMs: c.asOfMs, spot: c.spot, facts: c.facts, state: c.eng ? c.eng.state : null, pLaw: c.eng ? c.eng.pLaw : null, event: c.eng ? c.eng.event : null, stale: c.eng ? c.eng.stale : false, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [c.row] }], lawCache: c.laws });
+    return { setup, eng: Q.priceStructure(setup, { family: struct.family, fam: struct.fam, expiry: r.expiry, legs: struct.legs, basis: "natural" }) };
+  }
+
+  function winHalf(r, struct) {
+    const c = r.__ctx;
+    if (!c || !r.__band || r.__band.band !== "pm") return null;
+    const base = r.__winBase;
+    if (!Number.isFinite(base)) return null;
+    const fwd = c.input.fwd || {};
+    const se = r.__band.se;
+    let worst = 0;
+    for (const sign of [-1, 1]) {
+      const F = c.F0 + sign * 1.96 * se;
+      const bumped = { ...fwd, F, src: "parity", n: fwd.n || 0 };
+      const fit = Q.contractFit({ ...c.input, fwd: bumped });
+      const got = fit ? priceStruct(r, fit, struct || r.__winStruct || structOf(r)) : null;
+      const pop = got && got.eng ? got.eng.prob.popQ : null;
+      if (pop === null) return null;
+      worst = Math.max(worst, Math.abs(pop - base));
+    }
+    return Math.ceil(worst * 100 - 1e-9) / 100;
+  }
+
   function price(sym, p) {
     const eng = p.engine && p.engine.status === "ok" ? p.engine : null;
     const rate = eng && eng.rate ? eng.rate : null;
     const spot = spotOf(p), laws = new Map();
-    const forwards = new Map((Array.isArray(p.forwards) ? p.forwards : []).map((f) => [f.expiry, f]));
-    const asOfMs = Q ? quoteMs(p) : null;
+    const forwards = new Map((Array.isArray(p.fwd) ? p.fwd : []).map((f) => [f.expiry, f]));
+    const legacy = new Map((Array.isArray(p.forwards) ? p.forwards : []).map((f) => [f.expiry, f]));
+    const cut = p.cut && typeof p.cut === "object" ? p.cut : null;
+    const asOfMs = Q ? (cut && isNum(cut.asOf) !== null ? cut.asOf : quoteMs(p)) : null;
     const chainDay = /^\d{4}-\d{2}-\d{2}$/.test(String(p.sessionDate || p.asOf || "")) ? String(p.sessionDate || p.asOf) : null;
     for (const r of p.rows || []) {
       r.__day = chainDay;
       r.__fwd = forwards.get(r.expiry) || null;
-      r.__eng = r.__fit = r.__code = r.__setup = null;
+      r.__fwdLegacy = legacy.get(r.expiry) || null;
+      r.__eng = r.__fit = r.__code = r.__setup = r.__band = r.__ctx = null;
+      r.__lazy = !!cut;
       r.__nk = undefined;
       if (!Q) { r.__why = T("why-q"); continue; }
       const type = r.type === "P" ? "P" : "C";
-      const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: isNum(r.iv), opposite: r.opposite };
-      const input = { expiry: r.expiry, asOfMs, spot, rate: rate ? rate.r : null, rateMethod: rate ? rate.method : null, facts: eng ? eng.facts : [], expiries: eng ? eng.expiries : null, row };
+      const row = { K: r.strike, type, bid: isNum(r.bid), ask: isNum(r.ask), oi: isNum(r.oi), volume: isNum(r.volume), sym: r.symbol, ivSeed: cut ? null : isNum(r.iv), opposite: r.opposite };
+      const input = { expiry: r.expiry, asOfMs, spot, rate: rate ? rate.r : null, rateMethod: rate ? rate.method : null, facts: eng ? eng.facts : [], expiries: eng ? eng.expiries : null, row, fwd: r.__fwd };
       try {
         const fit = Q.contractFit(input);
         if (!fit) { const d = Q.contractDiagnosis(input); r.__why = d.text || T("why-fit"); r.__code = d.code; continue; }
         r.__fit = fit.slice;
-        const setup = Q.labSetup({ asOfMs, spot, facts: eng ? eng.facts : [], state: eng ? eng.state : null, pLaw: eng ? eng.pLaw : null, event: eng ? eng.event : null, stale: eng ? eng.stale : false, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [row] }], lawCache: laws });
-        const legs = r.strategy === "cc" ? [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] : [{ type: "P", K: r.strike, side: -1, qty: 1 }];
-        r.__setup = setup;
-        r.__eng = Q.priceStructure(setup, { family: r.strategy === "cc" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
+        r.__band = bandOf(r, fit, r.__fwd, spot);
+        r.__ctx = { input, row, spot, eng, laws, asOfMs, facts: eng ? eng.facts : [], F0: fit.forward.F };
+        r.__fitFull = fit;
+        if (cut) { r.__law = eng && eng.pLaw ? null : eng ? T("law-none") : T("law-card", { sym }); continue; }
+        const got = priceStruct(r, fit, structOf(r));
+        r.__setup = got.setup;
+        r.__eng = got.eng;
         if (!r.__eng) r.__why = T("why-eng");
+        else r.__winBase = r.__eng.prob.popQ;
       } catch { r.__eng = null; r.__why = T("why-eng"); }
       r.__law = eng && eng.pLaw ? null : eng ? T("law-none") : T("law-card", { sym });
     }
@@ -376,10 +427,39 @@
 
   const shortLeg = (r) => (r.__eng ? r.__eng.legs.find((l) => l.type !== "S") : null);
   const shortDelta = (r) => { const leg = shortLeg(r); return leg && isNum(leg.delta) !== null ? Math.abs(leg.delta) : null; };
-  const netOf = (r) => netDelta(r.__eng);
-  const popQ = (r) => (r.__eng ? r.__eng.prob.popQ : null);
-  const popP = (r) => (r.__eng ? r.__eng.prob.popP : null);
+  const dashed = (r) => !!(r.__band && r.__band.band === "dash");
+  const netOf = (r) => (dashed(r) ? null : netDelta(r.__eng));
+  const popQ = (r) => (r.__eng && !dashed(r) ? r.__eng.prob.popQ : null);
+  const popP = (r) => (r.__eng && !dashed(r) ? r.__eng.prob.popP : null);
   const evP = (r) => (r.__eng ? r.__eng.ev.p : null);
+
+  const bandNote = (r) => {
+    const b = r.__band;
+    if (!b || b.band === "plain") return null;
+    if (b.band === "dash") {
+      if (b.reason === "veto") return T("band-veto");
+      const fit = r.__fitFull, f = r.__fwd;
+      const x = f && fit && isNum(f.se) !== null ? "±" + fmtPct(1.96 * f.se / fit.forward.F, 2) : DASH;
+      return T("band-dash", { x });
+    }
+    const w = winHalfOf(r);
+    return T("band-pm", { d: fmt2(b.half), w: w === null ? DASH : fmtPct(w, 0) });
+  };
+
+  const winHalfOf = (r, struct) => {
+    if (r.__wh === undefined) r.__wh = winHalf(r, struct);
+    return r.__wh;
+  };
+
+  const winText = (r, pq, struct) => {
+    if (pq === null) return { text: DASH, title: dashed(r) ? bandNote(r) : null };
+    const b = r.__band;
+    if (b && b.band === "pm") {
+      const half = winHalfOf(r, struct);
+      return { text: fmtPct(pq, 0) + " ± " + fmtPct(half === null ? b.half : half, 0), title: bandNote(r) };
+    }
+    return { text: fmtPct(pq, 0), title: null };
+  };
 
   function rowsNow() {
     const rows = [];
@@ -396,19 +476,20 @@
         screened += sc; priced += sell;
         for (const [k, n] of Object.entries(p.gated || {})) gated[k] = (gated[k] || 0) + (isNum(n) || 0);
       }
-      if (sell !== null && kept < sell) slices.push({ sym, kept, sell, rankedBy: p.rankedBy || null });
+      if (sell !== null && kept < sell && !p.cut) slices.push({ sym, kept, sell, rankedBy: p.rankedBy || null });
       for (const r of p.rows || []) if (side !== "sc" || r.type === "C") rows.push(Object.assign(r, { __spot: spotOf(p), __sym: sym }));
     }
     for (const r of rows) { r.__sizing = sizeRow(r, buyingPower); r.__pc = premiumLine(r); }
     const dc = calls();
     if (dc) dc.annotate(rows, buyingPower);
     const key = dc ? dc.key(rank) : rank === "collectible" ? (r) => (r.__sizing ? r.__sizing.timeValue : null) : rank === "edge" ? evP : rank === "premiumRatio" ? (r) => r.__pc.ratio : (r) => r[rank];
+    const tie = (a, b) => (Q ? Q.lineCompare({ key: 0, oi: isNum(a.oi), strike: a.strike, expiry: a.expiry, symbol: a.symbol }, { key: 0, oi: isNum(b.oi), strike: b.strike, expiry: b.expiry, symbol: b.symbol }) : 0);
     rows.sort((a, b) => {
       const x = isNum(key(a)), y = isNum(key(b));
-      if (x === null && y === null) return 0;
+      if (x === null && y === null) return tie(a, b);
       if (x === null) return 1;
       if (y === null) return -1;
-      return y - x;
+      return y - x || tie(a, b);
     });
     return { rows, screened, priced, gated, slices, uncounted };
   }
@@ -584,14 +665,44 @@
   function footText(v, chosen) {
     if (!v.rows.length) return "";
     const dropped = Object.entries(v.gated).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([k, n]) => n + " " + reasonWord(k));
-    const cut = chosen.filter((s0) => { const p = (book.get(s0) || {}).payload; return p && p.truncated; });
+    const cut = chosen.filter((s0) => { const p = (book.get(s0) || {}).payload; return p && p.truncated && !p.cut; });
     const one = (n, a, b) => (n === 1 ? a : b);
     const below = v.slices.reduce((t, c) => t + (c.sell - c.kept), 0);
     return T("f-uni", { p: v.priced, s: v.screened, least: cut.length ? "at least " : "" }) + (dropped.length ? ". " + T("f-gate", { list: dropped.join(", ") }) : ".") +
       (v.uncounted.length ? " " + T("f-unc", { who: v.uncounted.join(", "), is: one(v.uncounted.length, "is", "are"), that: one(v.uncounted.length, "that payload", "those payloads") }) : "") +
       (v.slices.length ? " " + T("f-slice", { parts: v.slices.map((c) => T("f-part", { sym: c.sym, kept: fmtInt(c.kept), sell: fmtInt(c.sell), by: rankWord(c.rankedBy) })).join("; "), n: fmtInt(below), lines: one(below, "line", "lines"), is: one(below, "is", "are"), names: one(v.slices.length, "this name", "these names") }) : "") +
-      (side === "sc" && v.slices.length ? " " + T("sc-slice") : "") +
+      (side === "sc" ? cutNotes(chosen) : "") +
       (cut.length ? " " + T("f-cut", { who: cut.join(", "), has: one(cut.length, "has", "have"), its: one(cut.length, "its", "their") }) : "");
+  }
+
+  function cutParts(chosen) {
+    const out = [];
+    for (const sym of chosen) {
+      const p = (book.get(sym) || {}).payload;
+      const cut = p && p.cut;
+      if (!cut) continue;
+      const shed = Array.isArray(cut.shed) ? cut.shed : [];
+      const has = (why) => shed.some((x) => x.why === why);
+      const n = fmtInt(cut.nRaw);
+      const kind = has("budget") ? "budget" : cut.truncated ? "partial" : "ranked";
+      const text = kind === "budget" ? T("sc-cut-budget", { n }) : kind === "partial" ? T("sc-cut-partial", { n }) : T("sc-cut", { n: fmtInt(cut.nIn), m: fmtInt(cut.nOut), k: cut.k });
+      out.push({ sym, kind, text, nIn: cut.nIn, nOut: cut.nOut });
+    }
+    return out;
+  }
+
+  function cutNotes(chosen) {
+    const parts = cutParts(chosen);
+    return parts.length ? " " + parts.map((x) => (chosen.length > 1 ? x.sym + ": " : "") + x.text).join(" ") : "";
+  }
+
+  function cutBrief(chosen) {
+    const parts = cutParts(chosen);
+    const ranked = parts.filter((x) => x.kind === "ranked");
+    const out = [];
+    if (ranked.length) out.push(T("sc-cut-brief", { n: fmtInt(ranked.reduce((t, x) => t + x.nIn, 0)), m: fmtInt(ranked.reduce((t, x) => t + x.nOut, 0)) }));
+    for (const x of parts) if (x.kind !== "ranked") out.push((chosen.length > 1 ? x.sym + ": " : "") + x.text);
+    return out;
   }
 
   function rankWord(k) {
@@ -676,7 +787,7 @@
   const planRatio = (r) => { const pc = r.__pc || premiumLine(r); return pc.ok ? ratioText(pc.premiumC, pc.collateralC) : DASH; };
 
   function listHead(dc) {
-    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", WIN_Q, WIN_P, "EV", buyingPower === null ? null : "Earns", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
+    return dc ? dc.head() : h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", WIN_Q, WIN_P, EV_P, buyingPower === null ? null : "Earns", ""].filter((x) => x !== null).map((x) => h("span", null, x)));
   }
 
   function fillList(box, rows, dc) {
@@ -748,7 +859,7 @@
     const cell = (cls, label, text, tone, title, sub) => h("span", { class: "dk-c " + cls, "data-tone": tone || null, title: title || null }, h("small", null, label), text, sub ? h("em", { class: "dk-sub" }, sub) : null);
     const pc = r.__pc || premiumLine(r);
     const pcText = pc.ok ? ratioText(pc.premiumC, pc.collateralC) : null;
-    const pq = popQ(r), pp = popP(r), ev = evP(r);
+    const pq = popQ(r), pp = popP(r), ev = evP(r), wq = winText(r, pq);
     const noEng = r.__eng ? null : r.__why || T("why-eng"), noLaw = r.__eng && pp === null ? lawNote(r) : null;
     const collect = buyingPower === null ? null : !z ? cell("dk-col", "Earns", DASH, null, T("col-none"))
       : z.timeValue === null ? cell("dk-col", "Earns", DASH, "silent", T("col-tv-none"))
@@ -771,9 +882,9 @@
       pc.ok ? cell("dk-pc", "Premium ÷ collateral", pcText, mostlyIntrinsic(r, pc) ? "silent" : null, mostlyIntrinsic(r, pc) ? T("t-pc-itm") : T("t-pc"), centsText(pc.premiumC, true) + " ÷ " + centsText(pc.collateralC)) : cell("dk-pc", "Premium ÷ collateral", DASH, "silent", T("pc-" + pc.why)),
       cell("dk-ann", "Ann.", fmtPct(r.annualized, 0), null, T("t-ann")),
       pc.premiumC === null ? cell("dk-prem", "Premium", DASH, "silent", T("pc-no-bid")) : cell(pc.ok ? "dk-prem is-dup" : "dk-prem", "Premium", centsText(pc.premiumC, true), null, T("t-prem"), Number.isSafeInteger(pc.collateralC) ? "on " + centsText(pc.collateralC) : null),
-      cell("dk-pq", WIN_Q, pq === null ? DASH : fmtPct(pq, 0), null, noEng || T("t-pq")),
-      cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, noEng || noLaw || T("t-pp")),
-      cell("dk-ev", "EV", ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
+      cell("dk-pq", WIN_Q, wq.text, null, wq.title || noEng || T("t-pq")),
+      cell("dk-pp", WIN_P, pp === null ? DASH : fmtPct(pp, 0), null, wq.title || noEng || noLaw || T("t-pp")),
+      cell("dk-ev", EV_P, ev === null ? DASH : usd(ev), ev === null ? "silent" : ev > 0 ? "up" : ev < 0 ? "down" : null, noEng || noLaw || T("t-ev")),
       collect),
     UI.infoButton(r.ticker + " " + kf(r.strike) + " " + (r.strategy === "cc" ? "call" : "put"), () => rowInfo(r), { small: true }));
   }
@@ -791,8 +902,29 @@
     return Math.abs(Q.normCdf(d1(F)) - Q.normCdf(d1(used)));
   };
 
+  const gapText = (f) => {
+    if (f.src !== "parity" || isNum(f.gapBp) === null) return "";
+    const x = Math.abs(f.gapBp);
+    return " " + T(f.gapBp < 0 ? "fwd-below" : "fwd-above", { x: x >= 10 ? fmtInt(x) : fmtPct(x / 100, 1).replace("%", "") });
+  };
+
+  const carryWhy = (f) => (f.n === 0 ? T("fwd-why-0") : T("fwd-why-few", { n: f.n }));
+
+  const fwdText = (r, f) => {
+    const e = isNum(f.se) === null ? DASH : fmt2(1.96 * f.se);
+    const fit = r.__fitFull;
+    const used = fit ? fit.forward.F : f.F;
+    if (f.veto) return T("fwd-veto", { f: fmt2(f.Fc) });
+    const early = f.ee === true ? " " + T("fwd-ee") : "";
+    if (f.src === "parity") return T("fwd-par", { f: fmt2(used), e, n: f.n }) + gapText(f) + early;
+    if (f.src === "blend") return T("fwd-blend", { f: fmt2(used), e, n: f.n, c: fmt2(f.Fc) }) + gapText(f) + early;
+    if (f.src === "carry") return T(f.qKnown === false ? "fwd-rate2" : "fwd-carry2", { f: fmt2(f.F), e, why: carryWhy(f) });
+    return T("fwd-rate2", { f: fmt2(f.F), e, why: carryWhy(f) });
+  };
+
   const forwardText = (r) => {
-    const f = r.__fwd;
+    if (r.__fwd) return fwdText(r, r.__fwd);
+    const f = r.__fwdLegacy;
     if (!f) return DASH + " " + T("fwd-none");
     const own = f.method === "parity" && isNum(f.F) !== null ? T("fwd-parity", { f: fmt2(f.F), n: f.pairs })
       : f.method === "carry" && isNum(f.F) !== null ? T("fwd-carry", { f: fmt2(f.F) })
@@ -850,9 +982,9 @@
         ["Spread", fmtPct(r.spread, 1) + " of the mid"],
         ["Open interest", oi === null ? DASH : fmtInt(oi) + (ch ? " (" + sg(ch) + fmtInt(Math.abs(ch)) + ")" : "")],
         ["Earnings", r.crossesEarnings === true ? "Expires after the next report" : r.crossesEarnings === null ? "Not determined" : "No report before expiry"],
-        ["Chance of profit", e ? fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" : DASH],
-        ["Expected value", e ? usd(e.ev.q) + " implied · " + (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract sold into the bid" : DASH],
-        ["Delta", e ? fmt2(shortDelta(r)) + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock" : DASH],
+        ["Chance of profit", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (bandNote(r) ? " · " + bandNote(r) : "")) : DASH],
+        ["Expected value", e ? (e.ev.p === null ? DASH : usd(e.ev.p)) + " real world, per contract sold into the bid · " + T("ev-implied", { x: usd(e.ev.q) }) : DASH],
+        ["Delta", e ? (dashed(r) ? DASH + " " + bandNote(r) : fmt2(shortDelta(r)) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + " on the short option · " + fmt2(netOf(r)) + " net exposure to the stock") : DASH],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(whyText).join(" ") : "") : DASH],
       ],
       notes: [sh.intrinsic > 0 ? (sh.timeValue >= 0 ? T("int-in", { i: fmtMoney(sh.intrinsic * LOT), t: fmtMoney(sh.timeValue * LOT) }) : T("int-below")) : null,
@@ -1172,9 +1304,10 @@
     const basis = basisLines(chosen);
     const session = sessions.size === 1 ? " · " + [...sessions][0] + " session" : "";
     const staleNote = stale.length ? " · " + stale.join(", ") + " priced off the last close, not a live print" : "";
-    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, ...keptBits, staleQuotes, earnBits.join(" · ")];
+    const cuts = side === "sc" ? cutBrief(chosen) : [];
+    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, ...keptBits, staleQuotes, ...cuts, earnBits.join(" · ")];
     statusEl.replaceChildren(...lines.filter(Boolean).map((t) => h("span", { class: "flows-status-l" }, t)));
-    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length || kept.length));
+    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length || kept.length || cuts.length));
   }
 
   function earningsBit(sym, p) {
@@ -1331,6 +1464,23 @@
     rankTimer = setTimeout(() => { rankTimer = null; runPool(recut, {}); }, wait);
   }
 
+  const shortCallTerms = () => { const dc = calls(); return dc ? dc.terms() : null; };
+  let termsTimer = null;
+  function recutTerms() {
+    const t = shortCallTerms();
+    if (side !== "sc" || !t) return;
+    const stale = selectedSymbols().filter((sym) => {
+      const e = book.get(sym);
+      const cut = e && e.payload && e.payload.cut;
+      return !!cut && (!cut.terms || cut.terms.h !== t.h || cut.terms.f !== t.f);
+    });
+    if (termsTimer !== null) { clearTimeout(termsTimer); termsTimer = null; }
+    if (!stale.length) return;
+    const wait = rankDebounceMs();
+    if (wait === 0) { runPool(stale, {}); return; }
+    termsTimer = setTimeout(() => { termsTimer = null; runPool(stale, {}); }, wait);
+  }
+
   async function topName() {
     try {
       const r = await fetch("/api/flows/board?side=long", { credentials: "same-origin", headers: { Accept: "application/json" }, signal: AbortSignal.timeout?.(8000) });
@@ -1344,7 +1494,7 @@
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { deskKit: Object.freeze({
     UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, roundCents, centsText, ratioText, ratioFraction, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
     filters, st: () => ({ side, rank, tenor, axis, buyingPower, bpBad, view, focused, quick: mods.quick }),
-    render, focusPoint, chartHeight, forwardText, betterDeployment, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); },
+    render, focusPoint, chartHeight, forwardText, betterDeployment, recutTerms, winHalf, winHalfOf, priceStruct, bandNote, winText, dashed, EV_P, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); recutTerms(); },
   }) }));
   ensureModules();
   showTab(viewFromHash(), false, true);

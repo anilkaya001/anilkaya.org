@@ -38,6 +38,7 @@ export const ERRORS = Object.freeze({
   invalid_scope: entry(400, "scope must be all, sector:<name> or name:<ticker>"),
   invalid_skill_attempt: entry(400, "Skill, item, and attempt data must be valid"),
   invalid_stats: entry(400, "Streak and activity date must be valid"),
+  invalid_terms: entry(400, "Haircut must be 0.05 to 1 and floor 0 to 0.5"),
   invalid_ticker: entry(400, "Unknown ticker"),
   invalid_topic: entry(400, "Unknown topic"),
   live_token_scope: entry(403, "The live token reads one key at a time"),
