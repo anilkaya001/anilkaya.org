@@ -1,6 +1,6 @@
 import { isTradingDay } from "./flows-freshness.js";
 import { mean, sampleSd, median as medianOf } from "./flows-stats.js";
-import { forward, horizonEnd, ahead as aheadOf, HORIZON_SESSIONS } from "./flows-calendar.js";
+import { forward, horizonEnd, ahead as aheadOf, HORIZON_SESSIONS, AHEAD_SESSIONS } from "./flows-calendar.js";
 import { basisOf, cellOf } from "./flows-reports.js";
 
 export { mean, sampleSd, medianOf };
@@ -305,6 +305,19 @@ export function impliedCorrelation(indexVol, members, { minCoverage = IMPLIED_CO
 
 const round = (v, scale) => (v === null || !Number.isFinite(v) ? null : Math.round(v * scale));
 
+export const ED_UNSTATED_MAX = 200;
+
+export function unstatedAhead(list, sessionDate) {
+  const found = [];
+  for (const r of list) {
+    const f = forward(isoDay(r.next_earnings_date), sessionDate, r.er_time);
+    if (!f || f.certain || f.ed > AHEAD_SESSIONS) continue;
+    found.push([r.ticker, f.ed + 1]);
+  }
+  const kept = found.sort((x, y) => x[1] - y[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0)).slice(0, ED_UNSTATED_MAX);
+  return { map: Object.fromEntries(kept.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))), n: found.length };
+}
+
 const sessionsToEarnings = (row, ctx) => {
   const f = forward(isoDay(row.next_earnings_date), ctx.sessionDate, row.er_time);
   return f ? f.ed : null;
@@ -464,6 +477,7 @@ export function buildUniverse(rows, {
       (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0));
   const tiltsBySector = sectorTilts(list);
   const ctx = { sessionDate, sectorTilts: tiltsBySector, sigma, reports };
+  const edUnstated = unstatedAhead(list, sessionDate);
   const sectors = [];
   const sectorIndex = new Map();
   const sec = list.map((r) => {
@@ -523,6 +537,8 @@ export function buildUniverse(rows, {
     hz: HORIZON_SESSIONS,
     through: horizonEnd(sessionDate),
     ahead: aheadOf(sessionDate),
+    edUnstated: edUnstated.map,
+    edUnstatedN: edUnstated.n,
     ...(reports ? { rdBasis: basisOf(new Map(list.map((r) => [r.ticker, cellOf(reports, r.ticker)])), { asOf: sessionDate, from: reports.from || null, cutDays: reports.cut || [] }) } : {}),
     shed: [],
     budgetBytes,
@@ -622,6 +638,7 @@ export function projectUniverse(universe, wanted) {
     out.through = u.through ?? null;
     out.ahead = u.ahead ?? null;
   }
+  if (want.includes("ed")) out.edUnstated = u.edUnstated ?? null;
   if (want.includes("rd")) out.rdBasis = u.rdBasis ?? null;
   return out;
 }

@@ -76,6 +76,7 @@
     const F = window.FlowsUI.F;
     const words = F.horizon(u.hz);
     const unstated = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const edUn = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     const sg = col(u, "sig"), f2 = col(u, "f2"), f3 = col(u, "f3");
     const names = Array.isArray(u.sectors) ? u.sectors : [];
     const all = [];
@@ -86,7 +87,7 @@
       const s = Array.isArray(u.sec) && u.sec[i] !== null && u.sec[i] !== undefined ? names[u.sec[i]] || null : null;
       all.push({
         t, sector: s, secIx: s === null ? names.length : u.sec[i], chg: c, iv: v, m, h: Math.abs(m), dir: m > 0 ? 1 : -1,
-        event: words === null ? false : F.earnIn({ ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null }, u.hz, 0) === true,
+        event: words === null ? false : F.earnIn({ ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null, edMax: Number.isInteger(edUn[t]) ? edUn[t] : null }, u.hz, 0) === true,
         sig: sg ? sg[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null,
       });
     });

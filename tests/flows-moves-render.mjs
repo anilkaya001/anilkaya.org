@@ -754,8 +754,10 @@ async function exercise(browser, js, early, only) {
       }
       const ap = await listRows(page, "mvApart");
       same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 21 sessions are ranked apart, three of them");
-      const reacted = new Map(apart.map((x) => [x.t, Number.isInteger(x.rd) ? x.rd : null]));
-      P(ap.every((r) => r.how === (reacted.get(r.t) === 0 ? "Reaction day" : reacted.get(r.t) === 1 ? "Day after" : "")), "an earnings name carries no rarity chip, and a name that has reacted says so in its place");
+      const chipFor = (x) => (x.rd === 0 ? "Reaction day" : x.ed === 0 || x.rdMax === 1 || x.rdMax === 2 ? "Time unstated" : x.rd === 1 ? "Day after" : "");
+      const chips = new Map(apart.map((x) => [x.t, chipFor(x)]));
+      P(ap.every((r) => r.how === chips.get(r.t)), "an earnings name carries no rarity chip, a name that has reacted says so in its place, and one whose report time is not stated says that");
+      P(ap.some((r) => r.t === "SAMEDAY" && r.how === "Time unstated"), "a report dated on the nightly's own session with no stated time is in the list with that chip, not as a reaction");
       P((await page.locator("#mvNowNote").innerText()) === now.length + " of " + ranked.length && (await page.locator("#mvApartNote").innerText()) === "3 of " + apart.length, "both notes count");
       P(!(await page.locator("#mvMore").isHidden()), "Show more is offered when the list is longer than the room");
 
@@ -791,11 +793,16 @@ async function exercise(browser, js, early, only) {
       P((await listRows(page, "mvNow"))[1].cur === "true", "the row says it is current");
       const dd = await dots(page);
       P(dd.pts.filter((p) => p.sel).map((p) => p.t).join() === now[1].t && dd.labels.some((l) => l.sel && l.t === now[1].t), "and so does the dot, with its label");
-      const evRow = apart[0];
+      const evRow = apart.find((x) => chipFor(x) === "");
       await page.click('#mvApart .mv-row[data-t="' + evRow.t + '"]');
       await page.waitForTimeout(450);
       rk = await railKv(page);
       P(/Earnings in \d+ sessions?/.test(rk.text) && rk.text.includes(M.APART), "an earnings name says so in the rail: event not separated");
+      const unRow = apart.find((x) => chipFor(x) === "Time unstated");
+      await page.click('#mvApart .mv-row[data-t="' + unRow.t + '"]');
+      await page.waitForTimeout(450);
+      rk = await railKv(page);
+      P(rk.text.includes("Report time not stated") && rk.text.includes("Report time not stated: event not separated.") && !/Reaction session/.test(rk.text), "a report whose time is not stated says that in the rail, not that it reacted: " + rk.text.slice(0, 160));
 
       const countBefore = await page.locator(".pt:not(.off)").count();
       await page.click('#mvDir [data-dir="up"]');
@@ -997,10 +1004,17 @@ async function exercise(browser, js, early, only) {
     {
       const { ctx, page } = await mount(browser, 1440, 820, { js, now: "2026-10-19T14:05:00Z" });
       const strips = (rows, session) => page.evaluate(([r, s]) => { window.__strips = { status: "ok", fields: ["chg", "iv30p"], rows: r, session: s }; window.__rtFire(); }, [rows, session]);
-      const LIVE = { EDGE22: [0.14, 0.2], REACT0: [0.11, 0.3], REACT1: [-0.07, 0.3], BIGUP: [0.09, 0.4] };
+      const LIVE = { EDGE22: [0.14, 0.2], REACT0: [0.11, 0.3], REACT1: [-0.07, 0.3], BIGUP: [0.09, 0.4], FWDUN: [0.05, 0.3] };
       await strips(LIVE, "2026-10-19");
       await page.waitForTimeout(150);
-      same((await listRows(page, "mvApart")).map((r) => r.t).sort(), ["EDGE22", "REACT0"], "ONE SESSION AFTER THE NIGHTLY a report 22 sessions out is 21 away and set apart, and one that reacted on the nightly's session is the day after");
+      same((await listRows(page, "mvApart")).map((r) => r.t).sort(), ["EDGE22", "FWDUN", "REACT0"], "ONE SESSION AFTER THE NIGHTLY a report 22 sessions out is 21 away and set apart, one that reacted on the nightly's session is the day after, and one due on this session or the next with no stated time is set apart");
+      same((await listRows(page, "mvApart")).filter((r) => r.t === "FWDUN").map((r) => r.how), ["Time unstated"], "and the one with no stated time says so and is not called a reaction");
+      await page.click('#mvApart .mv-row[data-t="FWDUN"]');
+      await page.waitForTimeout(100);
+      same(await page.evaluate(() => { const e = document.querySelector("#mvRail .mv-st.ev"); return e ? e.textContent : null; }), "Report time not stated", "its drill panel carries the tag that names the doubt");
+      await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
+      await page.mouse.move(700, 4);
+      await page.waitForTimeout(100);
       same((await listRows(page, "mvNow")).map((r) => r.t).sort(), ["BIGUP", "REACT1"], "while one that reacted a session before the nightly's has aged out of the window");
       same((await listRows(page, "mvApart")).filter((r) => r.t === "REACT0").map((r) => r.how), ["Day after"], "and the day after says so in the rarity chip's place");
       P(!(await page.locator("#mvFnote").innerText()).includes("more than two sessions old"), "with no warning while the nightly is one session old");
@@ -1142,9 +1156,11 @@ const MUTANTS = [
   ["typical days lose their sign", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? Math.abs(logMove(r.chg)) / sig : null"],
   ["a name with no typical day drawn at zero", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : 0"],
   ["dot area linear in market cap", "rMax * Math.sqrt(cap / capMax)", "rMax * (cap / capMax)"],
-  ["the earnings window is one session short", "F.earn(r, hz, j) : null; return { state: st,", "F.earn(r, hz - 1, j) : null; return { state: st,"],
+  ["the earnings window is one session short", ": F.earn(r, hz, j);", ": F.earn(r, hz - 1, j);"],
   ["the report-session column ignored", "rd: rd ? rd[i] : null, rdMax: num(un[t])", "rd: null, rdMax: num(un[t])"],
-  ["the unstated-time ages ignored", "rdMax: num(un[t]), sector: sector(i)", "rdMax: null, sector: sector(i)"],
+  ["the unstated-time ages ignored", "rdMax: num(un[t]), edMax: num(eu[t]), sector: sector(i)", "rdMax: null, edMax: num(eu[t]), sector: sector(i)"],
+  ["the forward unstated-time ages ignored", "edMax: num(eu[t]), sector: sector(i)", "edMax: null, sector: sector(i)"],
+  ["the live rows lose the forward unstated-time ages", "edMax: pick(t, \"edMax\"), sector: pick(t, \"sector\")", "edMax: null, sector: pick(t, \"sector\")"],
   ["a live session placed as the nightly's own", "const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);", "const j = S.hz === null ? null : 0;"],
   ["the window taken from nowhere", "S.hz = got.hz;", "S.hz = 21;"],
   ["earnings names ranked with the rest", "now: ok.filter((x) => !x.event).sort(byA)", "now: ok.sort(byA)"],
@@ -1166,7 +1182,10 @@ const MUTANTS = [
   ["no add-one in the page's rate", "p: (hits + 1) / (SESSIONS + 1) };\n  }\n  function sigRun", "p: hits / SESSIONS };\n  }\n  function sigRun"],
   ["names below 2 left out of the correction", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: 1 };\n    const level", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: null };\n    const level"],
   ["earnings names tested", "if (x.event === true) return { t: x.t, state: \"event\"", "if (false) return { t: x.t, state: \"event\""],
-  ["an earnings state that is not placed read as no event", "event: st === null ? null : st === \"reaction\"", "event: st === \"reaction\""],
+  ["an earnings state that is not placed read as no event", "? EARN_EVENT[st] : null;", "? EARN_EVENT[st] : false;"],
+  ["a report of unstated time not set apart", "unstated: true, after: true", "unstated: false, after: true"],
+  ["a report of unstated time called a reaction", "const tagText = (x) => (x.state === \"unstated\" ? \"Report time not stated\"", "const tagText = (x) => (x.state === \"unstated\" ? \"Reaction session\""],
+  ["the unstated chip dropped", " : x.state === \"unstated\" ? \"Time unstated\" : \"\"", " : \"\""],
   ["names whose earnings are not placed tested", "if (x.event !== true && x.event !== false) return { t: x.t, state: \"unplaced\"", "if (false) return { t: x.t, state: \"unplaced\""],
   ["the flagged sentence on every tested name", "if (g.state === \"tested\") return g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE;", "if (g.state === \"tested\") return SIG_FLAGGED_LINE;"],
   ["the foot counts the tested as flagged", "M.sg.flagged + \" of \"", "M.sg.tested + \" of \""],

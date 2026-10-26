@@ -6,7 +6,8 @@ export { HORIZON_SESSIONS, RD_MAX, AHEAD_SESSIONS, REACTION_BACK_SESSIONS, LIVE_
 
 export const CALENDAR_FIRST = "2020-01-01";
 export const CALENDAR_LAST = "2027-12-31";
-export const CALENDAR_LEAD_DAYS = 120;
+export const CALENDAR_LEAD_DAYS = Math.ceil((HORIZON_SESSIONS * 7) / 5) + 90;
+export const CALENDAR_WARN_DAYS = 365;
 
 const DAY_MS = 86400000;
 
@@ -81,5 +82,6 @@ export function withinHorizon(reportDate, asOf, reportTime) {
 
 export function coverage(nowMs = Date.now()) {
   const need = new Date(nowMs + CALENDAR_LEAD_DAYS * DAY_MS).toISOString().slice(0, 10);
-  return { ok: need <= CALENDAR_LAST, need, through: CALENDAR_LAST };
+  const soon = new Date(nowMs + CALENDAR_WARN_DAYS * DAY_MS).toISOString().slice(0, 10);
+  return { ok: need <= CALENDAR_LAST, warn: soon > CALENDAR_LAST, need, through: CALENDAR_LAST };
 }

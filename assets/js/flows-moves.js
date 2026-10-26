@@ -38,6 +38,8 @@
   const NO_RD = "Names that just reported are not separated: no report column tonight.";
   const REPORTED_UNTESTED = "Just reported: not tested.";
   const REPORTED_APART = "Just reported: event not separated.";
+  const UNSTATED_APART = "Report time not stated: event not separated.";
+  const UNSTATED_UNTESTED = "Report time not stated: not tested.";
   const WHY_UNPLACED = "Earnings are not separated, so no median.";
   const allEvent = (hz) => "Every measured name reports within " + hz + " sessions.";
   const sessionsText = (hz) => (hz === null || hz === undefined ? "the earnings window" : hz + " sessions");
@@ -229,10 +231,15 @@
   const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
 
   const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, listView: "names", dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6, hz: null, ahead: null, rdOn: false };
-  const earn = (r, hz, j) => { const st = hz !== null && j !== null ? F.earn(r, hz, j) : null; return { state: st, event: st === null ? null : st === "reaction" || st === "after" || st === "ahead" }; };
-  const tagText = (x) => (x.unstated ? "Report time not stated" : x.state === "reaction" ? "Reaction session" : x.state === "after" ? "Reacted one session ago" : "Earnings in " + x.away + (x.away === 1 ? " session" : " sessions"));
-  const eventSaid = (x) => (x.unstated ? "report time not stated, so the reaction is within a session of this one" : x.state === "reaction" ? "reacted to its report in this session" : x.state === "after" ? "reacted to its report one session ago" : "earnings within " + sessionsText(S.hz));
-  const eventNote = (x) => (x.state === "reaction" || x.state === "after" ? REPORTED_APART : W ? W.apart : NO_HORIZON);
+  const EARN_EVENT = Object.freeze({ reaction: true, unstated: true, after: true, ahead: true, clear: false, undated: false });
+  const earn = (r, hz, j) => {
+    const st = hz == null || !Number.isInteger(j) ? null : F.earn(r, hz, j);
+    const event = typeof st === "string" && Object.hasOwn(EARN_EVENT, st) ? EARN_EVENT[st] : null;
+    return { state: event === null ? null : st, event };
+  };
+  const tagText = (x) => (x.state === "unstated" ? "Report time not stated" : x.state === "reaction" ? "Reaction session" : x.state === "after" ? "Reacted one session ago" : "Earnings in " + x.away + (x.away === 1 ? " session" : " sessions"));
+  const eventSaid = (x) => (x.state === "unstated" ? "report time not stated, so it may not have come out yet" : x.state === "reaction" ? "reacted to its report in this session" : x.state === "after" ? "reacted to its report one session ago" : "earnings within " + sessionsText(S.hz));
+  const eventNote = (x) => (x.state === "unstated" ? UNSTATED_APART : x.state === "reaction" || x.state === "after" ? REPORTED_APART : W ? W.apart : NO_HORIZON);
   const cards = new Map();
   let cardTimer = 0;
 
@@ -246,10 +253,11 @@
     if (!chg) return null;
     const hz = F.horizon(u.hz) ? u.hz : null;
     const un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const eu = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     const names = Array.isArray(u.sectors) ? u.sectors : [];
     const sec = Array.isArray(u.sec) ? u.sec : [];
     const sector = (i) => (typeof names[sec[i]] === "string" && names[sec[i]] ? names[sec[i]] : null);
-    return { cap: Boolean(cap), hz, ahead: u.ahead, rdOn: Boolean(rd), rows: u.t.map((t, i) => { const r = { t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: num(un[t]), sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null }; return Object.assign(r, earn(r, hz, 0)); }) };
+    return { cap: Boolean(cap), hz, ahead: u.ahead, rdOn: Boolean(rd), rows: u.t.map((t, i) => { const r = { t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: num(un[t]), edMax: num(eu[t]), sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null }; return Object.assign(r, earn(r, hz, 0)); }) };
   }
 
   function liveRows() {
@@ -259,7 +267,7 @@
     if (ci < 0 || ii < 0) return null;
     const pick = (t, k) => (S.known.has(t) ? S.known.get(t)[k] : null);
     const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);
-    return { session: s.session, j, rows: Object.keys(s.rows).map((t) => { const r = { t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), rd: pick(t, "rd"), rdMax: pick(t, "rdMax"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") }; return Object.assign(r, earn(r, S.hz, j)); }) };
+    return { session: s.session, j, rows: Object.keys(s.rows).map((t) => { const r = { t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), rd: pick(t, "rd"), rdMax: pick(t, "rdMax"), edMax: pick(t, "edMax"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") }; return Object.assign(r, earn(r, S.hz, j)); }) };
   }
 
   function points(rows, j) {
@@ -269,13 +277,13 @@
       if (m === null) continue;
       const sig = num(r.sig);
       const ed = num(r.ed);
-      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, state: r.state, unstated: (r.state === "reaction" || r.state === "after") && (ed === 0 || (num(r.rdMax) !== null && !(Number.isInteger(r.rd) && r.rd >= 0))), event: r.event === true ? true : r.event === false ? false : null, away: r.state === "ahead" && ed !== null ? ed - j : null });
+      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, state: r.state, event: r.event === true ? true : r.event === false ? false : null, away: r.state === "ahead" && ed !== null ? ed - j : null });
     }
     return out;
   }
 
   const byA = (a, b) => b.a - a.a || cmp(a.t, b.t);
-  const match = (x) => !(S.dir === "up" && !(x.m > 0)) && !(S.dir === "down" && !(x.m < 0)) && !(S.earn && !x.event) && !(S.sector && (x.sector || "__none") !== S.sector);
+  const match = (x) => !(S.dir === "up" && !(x.m > 0)) && !(S.dir === "down" && !(x.m < 0)) && !(S.earn && x.event !== true) && !(S.sector && (x.sector || "__none") !== S.sector);
 
   function model() {
     const live = S.live;
@@ -446,7 +454,7 @@
     const rr = rarityParts(x);
     const how = rr ? rr.text : rarityWhy(x);
     const label = x.t + " " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + " " + signed(x.m) + " IV-days, " + pct(x.chg) + " on the day. " + (rr ? "Days like this: " + rr.text + "." : how);
-    return '<button type="button" class="mv-row" data-t="' + esc(x.t) + '" tabindex="-1" aria-label="' + esc(label) + '" title="' + esc(rr ? rr.text : how) + '"><span class="mv-rk" aria-hidden="true">' + (i + 1) + '</span><span class="mv-tk"><span class="gl ' + toneOf(dir) + '-t">' + SHAPE[dir] + "</span>" + esc(x.t) + '</span><span class="mv-v" data-k="m">' + signed(x.m) + '</span><span class="mv-chg" data-k="chg">' + pct(x.chg) + '</span><span class="mv-chip2" data-k="how">' + (x.event ? (x.state === "reaction" ? "Reaction day" : x.state === "after" ? "Day after" : "") : rr ? rr.short : DASH) + "</span></button>";
+    return '<button type="button" class="mv-row" data-t="' + esc(x.t) + '" tabindex="-1" aria-label="' + esc(label) + '" title="' + esc(rr ? rr.text : how) + '"><span class="mv-rk" aria-hidden="true">' + (i + 1) + '</span><span class="mv-tk"><span class="gl ' + toneOf(dir) + '-t">' + SHAPE[dir] + "</span>" + esc(x.t) + '</span><span class="mv-v" data-k="m">' + signed(x.m) + '</span><span class="mv-chg" data-k="chg">' + pct(x.chg) + '</span><span class="mv-chip2" data-k="how">' + (x.event ? (x.state === "reaction" ? "Reaction day" : x.state === "after" ? "Day after" : x.state === "unstated" ? "Time unstated" : "") : rr ? rr.short : DASH) + "</span></button>";
   }
 
   function paintLists() {
@@ -610,7 +618,7 @@
   function sigLine(x) {
     const g = x.sg;
     if (g.state === "tested") return g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE;
-    if (g.state === "event") return x.state === "reaction" || x.state === "after" ? REPORTED_UNTESTED : untestedText();
+    if (g.state === "event") return x.state === "unstated" ? UNSTATED_UNTESTED : x.state === "reaction" || x.state === "after" ? REPORTED_UNTESTED : untestedText();
     return SIG_REASONS[g.state];
   }
   const sigKv = (x) => (x.sg.state === "tested" ? kv("p, own rate", x.sg.p.toFixed(3)) + kv("p, adjusted", x.sg.adj.toFixed(3)) : "");

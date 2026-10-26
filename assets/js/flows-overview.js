@@ -1105,12 +1105,12 @@
   function ivdIndex(u) {
     const ok = u && u.status === "ok" && Array.isArray(u.t) && u.cols && u.units;
     const col = (k) => (ok && Array.isArray(u.cols[k]) && u.units[k] && isNum(u.units[k][1]) ? u.cols[k].map((x) => (isNum(x) === null ? null : x / u.units[k][1])) : null);
-    const ed = col("ed"), rd = col("rd"), iv = col("iv30p"), un = ok && u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const ed = col("ed"), rd = col("rd"), iv = col("iv30p"), un = ok && u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {}, eu = ok && u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     FOCUS.hz = ok && F.horizon(u.hz) ? u.hz : null;
     FOCUS.words = F.horizon(FOCUS.hz);
     FOCUS.ahead = ok ? u.ahead : null;
     FOCUS.asOf = ok ? u.sessionDate : null;
-    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, { ed: ed[i], rd: rd ? rd[i] : null, rdMax: isNum(un[t]) }]) : []);
+    FOCUS.ed = new Map(ed ? u.t.map((t, i) => [t, { ed: ed[i], rd: rd ? rd[i] : null, rdMax: isNum(un[t]), edMax: isNum(eu[t]) }]) : []);
     FOCUS.nightly = new Map(iv ? u.t.map((t, i) => [t, iv[i]]) : []);
   }
   const dossier = (t) => "/flows/ticker/?t=" + encodeURIComponent(t);

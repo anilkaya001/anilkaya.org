@@ -143,9 +143,9 @@
 
   function uniRows(u) {
     const col = (k) => { const c = u.cols && u.cols[k], sc = u.units && u.units[k] && isNum(u.units[k][1]); return Array.isArray(c) && sc ? c.map((x) => (isNum(x) === null ? null : x / sc)) : null; };
-    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), rd = u.cols && u.cols.rd, un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), rd = u.cols && u.cols.rd, un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {}, eu = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     if (!(okFeed(u) && u.status === "ok" && Array.isArray(u.t) && chg)) return null;
-    const rows = u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: Array.isArray(rd) ? isNum(rd[i]) : null, rdMax: isNum(un[t]) }));
+    const rows = u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: Array.isArray(rd) ? isNum(rd[i]) : null, rdMax: isNum(un[t]), edMax: isNum(eu[t]) }));
     rows.hz = F.horizon(u.hz) ? u.hz : null;
     rows.ahead = u.ahead;
     return rows;
@@ -155,7 +155,7 @@
     const s = LENS.strips, f = s && s.status === "ok" && Array.isArray(s.fields) && s.rows ? s.fields : [], u = LENS.uni;
     const ci = f.indexOf("chg"), ii = f.indexOf("iv30p"), by = new Map(u ? u.map((r) => [r.t, r]) : []), out = [];
     const useU = u && LENS.priced && !(ci >= 0 && ii >= 0 && s.session > LENS.day);
-    const rows = useU ? u : ci < 0 || ii < 0 ? [] : Object.keys(s.rows).map((t) => ({ t, chg: isNum(s.rows[t][ci]), iv: isNum(s.rows[t][ii]), ...(by.get(t) ? { ed: by.get(t).ed, rd: by.get(t).rd, rdMax: by.get(t).rdMax } : {}) }));
+    const rows = useU ? u : ci < 0 || ii < 0 ? [] : Object.keys(s.rows).map((t) => ({ t, chg: isNum(s.rows[t][ci]), iv: isNum(s.rows[t][ii]), ...(by.get(t) ? { ed: by.get(t).ed, rd: by.get(t).rd, rdMax: by.get(t).rdMax, edMax: by.get(t).edMax } : {}) }));
     const hz = u ? u.hz : null, j = hz === null ? null : useU || !s ? 0 : F.elapsed(LENS.day, u.ahead, s.session);
     LENS.words = hz === null ? null : F.horizon(hz);
     LENS.sep = hz !== null && j !== null;

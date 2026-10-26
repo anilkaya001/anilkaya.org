@@ -246,18 +246,20 @@ function modelFailures(M) {
   note(imp({ move: 0.024, low: 97.6, high: 102.4, rule: "the nearest end-of-week expiry", asOf: "2026-08-24" }).move === 0.024, "the market's move is carried as given");
   note(imp(null).why && imp({ why: "No quote." }).why === "No quote." && imp({ move: 0 }).why && imp({ move: -0.02 }).why, "an absent, zero or negative implied move is withheld with a reason");
 
-  const rep = (report, over, why) => plain(M.model({ ticker: "T", spot: 100, report, reportWhy: why }, { sig: 0.01, hz: HORIZON_SESSIONS, j: 0, ed: null, rd: null, rdMax: null, ...over })).report;
+  const rep = (report, over, why) => plain(M.model({ ticker: "T", spot: 100, report, reportWhy: why }, { sig: 0.01, hz: HORIZON_SESSIONS, j: 0, ed: null, rd: null, rdMax: null, edMax: null, ...over })).report;
   const card = (extra) => ({ d: "2026-09-08", sessions: 99, ...extra });
   note(rep(card(), { ed: 21 }).state === "inside" && rep(card(), { ed: 22 }).state === "outside", "a report 21 sessions away is inside the window and 22 is outside it");
   note(rep(card(), { ed: 1 }).state === "inside" && rep(card(), { ed: 1 }).sessions === 1, "tomorrow is inside, one session away");
   note(rep(null, { ed: 21 }).state === "inside" && rep(null, { ed: 22 }).state === "outside", "tonight's universe supplies the state when the card has no date");
   note(rep(card({ sessions: 30 }), { ed: 5 }).sessions === 5, "the universe's count to the price reaction wins over the card's weekday count");
-  note(rep(card(), { ed: 0 }).state === "reacted" && rep(card(), { ed: 0 }).age === 0, "a report of unstated time dated tonight may react on the session itself: it has reacted");
+  note(rep(card(), { ed: 0 }).state === "unclear" && rep(card(), { ed: 0, j: 1 }).state === "unclear" && rep(card(), { ed: 0, j: 2 }).state === "unclear" && rep(card(), { ed: 0, j: 3 }).state === "outside", "a report of unstated time dated tonight may have reacted on the session itself or be due after the close: it is unclear, not a reaction, until both candidates are behind");
   note(rep(null, { rd: 0 }).state === "reacted" && rep(null, { rd: 0 }).age === 0, "a name whose report reacted on the nightly's session has reacted today");
   note(rep(null, { rd: 1 }).state === "reacted" && rep(null, { rd: 1 }).age === 1, "and one that reacted the session before, one session ago");
   note(rep(null, { rd: 2 }).state === "unknown", "but not one that reacted two sessions before, which is behind the window");
   note(rep(card(), { rd: 1, ed: 30 }).state === "reacted", "a report behind the name outranks the next one far off");
-  note(rep(null, { rd: null, rdMax: 2 }).state === "reacted" && rep(null, { rd: null, rdMax: 3 }).state === "unknown", "a report of unstated time that may be a session old has reacted; one at least two old has not");
+  note(rep(null, { rd: null, rdMax: 1 }).state === "unclear" && rep(null, { rd: null, rdMax: 2 }).state === "unclear" && rep(null, { rd: null, rdMax: 3 }).state === "unknown", "a report of unstated time that is 0 or 1, or 1 or 2, sessions old is unclear; one at least two old has not reacted");
+  note(rep(card(), { ed: 3, edMax: 4, j: 2 }).state === "inside" && rep(card(), { ed: 3, edMax: 4, j: 3 }).state === "unclear" && rep(card(), { ed: 3, edMax: 4, j: 4 }).state === "unclear" && rep(card(), { ed: 3, edMax: 4, j: 6 }).state === "outside", "a forward report of unstated time is unclear from its earlier candidate session until both are behind");
+  note(rep(card(), { ed: 3, edMax: 4, j: 1 }).sessions === 2 && rep(card(), { ed: 3, edMax: 4, j: 3 }).state === "unclear", "and the sessions away are counted to the earlier candidate");
   note(rep(card(), { ed: 22 }, "x").state === "outside" && rep(card(), { ed: 22, j: 1 }).state === "inside" && rep(card(), { ed: 22, j: 1 }).sessions === 21, "a day later the same report is 21 sessions away and inside the window");
   note(rep(card(), { ed: 1, j: 1 }).state === "reacted" && rep(card(), { ed: 1, j: 2 }).state === "reacted" && rep(card(), { ed: 1, j: 3 }).state === "outside", "a report that lands in the elapsed sessions has reacted, and a day later it is the day after");
   note(rep(card({ sessions: null, gate: true }), {}).state === "inside", "a name inside the earnings gate is inside");
@@ -274,6 +276,8 @@ function modelFailures(M) {
   const u = universeFor([{ t: "AAA", sig: 0.0123, f2: 11, f3: 5, ed: 7 }, { t: "BBB", sig: null, f2: null, f3: null, ed: null }, { t: "CCC", sig: 0.031, f2: 9, f3: 0, ed: 40 }]);
   const a = col({ u, t: "AAA" });
   note(Math.abs(a.sig - 0.0123) < 1e-12 && a.f2 === 11 && a.f3 === 5 && a.ed === 7 && a.why === null && a.hz === HORIZON_SESSIONS && a.j === 0, "a row is read from the projection with each column's own scale, the payload's window and the sessions elapsed since the nightly");
+  const ua = { ...u, edUnstated: { AAA: 8 } };
+  note(col({ u: ua, t: "AAA" }).edMax === 8 && col({ u: ua, t: "CCC" }).edMax === null && col({ u, t: "AAA" }).edMax === null, "a forward report of unstated time is read from the universe's carried map, and a name outside it has none");
   const c = col({ u, t: "CCC" });
   note(c.f3 === 0 && c.f2 === 9, "a published zero is a zero, not a gap");
   note(col({ u, t: "BBB" }).sig === null && /needs 200 clean sessions/.test(col({ u, t: "BBB" }).why), "a null typical day is withheld with the history rule");
@@ -310,13 +314,16 @@ const MUTANTS = [
   ["if (gate || st === \"ahead\") return { state: \"inside\", ...out };", "if (st === \"ahead\") return { state: \"inside\", ...out };", "the earnings gate ignored"],
   ["if (st === \"reaction\" || st === \"after\") return { state: \"reacted\", age: st === \"reaction\" ? 0 : 1, ...out };", "", "a report that already reacted read as no report"],
   ["const sessions = st !== null && Number.isInteger(row.ed) ? row.ed - row.j : null;", "const sessions = st !== null && Number.isInteger(row.ed) ? row.ed : null;", "the elapsed sessions not taken off the distance"],
-  ["Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax }, hz, row.j) : null;", "Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax }, hz, 0) : null;", "the elapsed sessions ignored in the state"],
-  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: null, rdMax: row.rdMax }, hz, row.j)", "the report-session column ignored"],
-  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: null }, hz, row.j)", "the unstated-time age ignored"],
+  ["Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j) : null;", "Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, 0) : null;", "the elapsed sessions ignored in the state"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: null, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "the report-session column ignored"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: null, edMax: row.edMax }, hz, row.j)", "the unstated-time age ignored"],
+  ["F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j)", "F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: null }, hz, row.j)", "the forward unstated-time age ignored"],
+  ["if (st === \"unstated\") return { state: \"unclear\", ...out };", "if (st === \"unstated\") return { state: \"reacted\", age: 0, ...out };", "an unstated report read as a reaction"],
+  ["rdMax: num(unstated[ticker]), edMax: num(edUn[ticker]),", "rdMax: num(unstated[ticker]), edMax: null,", "the carried forward unstated-time ages not read"],
   ["if (pub !== null && Number.isInteger(pub) && pub >= 0 && pub <= SESSIONS)", "if (false)", "the nightly counts ignored"],
   ["if (hits < 5) return core;", "if (hits < 1) return core;", "an interval from one hit"],
   ["const PUBLISHED = { 2: \"f2\", 3: \"f3\" };", "const PUBLISHED = { 2: \"f3\", 3: \"f2\" };", "the two nightly counts crossed"],
-  ["const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "const gone = (why, rwhy) => ({ sig: 0.01, f2: 0, f3: 0, ed: null, rd: null, rdMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "an unreadable universe read as a flat typical day"],
+  ["const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "const gone = (why, rwhy) => ({ sig: 0.01, f2: 0, f3: 0, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });", "an unreadable universe read as a flat typical day"],
 ];
 for (const [from, to, why] of MUTANTS) {
   ok(SRC.includes(from), `the planted build "${why}" targets a line that exists`);

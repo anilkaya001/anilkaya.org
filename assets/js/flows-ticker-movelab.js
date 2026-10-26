@@ -80,7 +80,7 @@
   }
 
   function rowOf(u, ticker, now = Date.now()) {
-    const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, hz: null, j: null, why, rwhy: rwhy || why });
+    const gone = (why, rwhy) => ({ sig: null, f2: null, f3: null, ed: null, rd: null, rdMax: null, edMax: null, hz: null, j: null, why, rwhy: rwhy || why });
     if (!u || typeof u !== "object") return gone("The nightly universe could not be read.");
     if (u.status === "pending") return gone("Tonight's universe has not published yet.");
     if (u.status !== "ok" || !Array.isArray(u.t)) return gone("The nightly universe is unavailable" + (u.reason ? ": " + String(u.reason).replace(/_/g, " ") : "") + ".");
@@ -94,8 +94,9 @@
     };
     const sig = cell("sig");
     const unstated = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const edUn = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     const hz = F.horizon(u.hz) ? u.hz : null;
-    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
+    const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), edMax: num(edUn[ticker]), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
     if (sig === undefined) row.why = "The nightly run does not publish a typical daily move yet.";
     else if (row.sig === null) row.why = "No typical daily move is published for " + ticker + ": it needs " + MIN_RETURNS + " clean sessions of history, with report days, splits and data breaks left out.";
     return row;
@@ -110,11 +111,12 @@
   function reportOf(input, row) {
     const r = input.report;
     const hz = row && F.horizon(row.hz) ? row.hz : null;
-    const st = hz !== null && Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax }, hz, row.j) : null;
+    const st = hz !== null && Number.isInteger(row.j) ? F.earn({ ed: row.ed, rd: row.rd, rdMax: row.rdMax, edMax: row.edMax }, hz, row.j) : null;
     const gate = !!(r && r.gate);
     const sessions = st !== null && Number.isInteger(row.ed) ? row.ed - row.j : null;
     const out = { date: r ? r.d || null : null, sessions, hz, when: r && r.when ? r.when : null, confirmed: r && typeof r.confirmed === "boolean" ? r.confirmed : null, em: r && pos(r.em) !== null ? Number(r.em) : null, gate };
     if (st === "reaction" || st === "after") return { state: "reacted", age: st === "reaction" ? 0 : 1, ...out };
+    if (st === "unstated") return { state: "unclear", ...out };
     if (gate || st === "ahead") return { state: "inside", ...out };
     if (st === "clear") return { state: "outside", ...out };
     if (!r && st !== "undated") return { state: "unknown", ...out, why: input.reportWhy || "No report date is on the card or in tonight's universe." };
@@ -231,7 +233,7 @@
     const r = m.report;
     const box = h("section", { class: "ft-ml-blk", "aria-labelledby": "ftMlReport", "data-state": r.state },
       h("div", { class: "ft-ml-h" }, h("h3", { id: "ftMlReport" }, "Earnings report"),
-        r.state === "inside" ? UI.tag("Event-contaminated", { tone: "warn" }) : r.state === "reacted" ? UI.tag(r.age === 0 ? "Reacting today" : "Reacted one session ago", { tone: "warn" }) : null,
+        r.state === "inside" || r.state === "unclear" ? UI.tag("Event-contaminated", { tone: "warn" }) : r.state === "reacted" ? UI.tag(r.age === 0 ? "Reacting today" : "Reacted one session ago", { tone: "warn" }) : null,
         info("the report row", () => ({
           title: "Earnings report",
           lead: r.hz ? "A report inside " + r.hz + " sessions is flagged because a report day is not an ordinary day. One that moved the price on the latest session, or the one before, is marked too." : "The nightly universe does not state the earnings window, so no report is flagged.",
@@ -246,6 +248,11 @@
     if (r.state === "reacted") {
       box.append(h("p", { class: "ft-ml-big" }, "Reported", h("span", { class: "ft-ml-cap" }, (r.age === 0 ? ", the price reaction is today" : ", the price reaction was the session before"))),
         h("p", { class: "ft-ml-flag" }, "The move over the sessions since the report carries the report. The ladder above leaves report days out of its nightly counts."));
+      return box;
+    }
+    if (r.state === "unclear") {
+      box.append(h("p", { class: "ft-ml-big" }, "Report time not stated", h("span", { class: "ft-ml-cap" }, r.date ? ", " + F.day(r.date) : "")),
+        h("p", { class: "ft-ml-flag" }, "The report is on the latest session or beside it, and it may not have come out yet. The ladder above leaves report days out of its nightly counts, so it does not describe that day."));
       return box;
     }
     const away = r.gate && r.sessions === null ? "inside the earnings gate" : r.sessions + (r.sessions === 1 ? " session" : " sessions") + " away";

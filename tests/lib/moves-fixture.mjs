@@ -34,6 +34,8 @@ export const SPECIAL = [
   ["REACT2", 0.08, 0.3, null, "Industrials", 0.1 * T, 0.02, 12, 3, 2],
   ["UNSTATED2", 0.06, 0.3, null, "Energy", 0.1 * T, 0.02, 9, 1, null, 2],
   ["UNSTATED3", -0.06, 0.3, null, "Energy", 0.1 * T, 0.02, 9, 1, null, 3],
+  ["SAMEDAY", 0.2, 0.3, 0, "Technology", 0.2 * T, 0.02, 12, 3, undefined, undefined, 1],
+  ["FWDUN", 0.05, 0.3, 1, "Technology", 0.2 * T, 0.02, 12, 3, undefined, undefined, 2],
 ];
 
 export function names(n = 640, seed = 7) {
@@ -71,6 +73,7 @@ export function universe(list, o = {}) {
     body.units.rd = ["sessions", 1];
   }
   body.rdBasis = { unstated: Object.fromEntries(list.filter((n) => n[10] !== undefined).map((n) => [n[0], n[10]])) };
+  body.edUnstated = Object.fromEntries(list.filter((n) => n[11] !== undefined).map((n) => [n[0], n[11]]));
   if (!o.noSec) { body.sectors = sectors; body.sec = list.map((n) => (n[4] ? sectors.indexOf(n[4]) : null)); }
   if (!o.noCap) { body.cols.mcap = list.map((n) => (n[5] === null ? null : Math.round(n[5] / 1e8))); body.units.mcap = ["usd", 1e-8]; }
   return body;
@@ -85,6 +88,7 @@ export function decoded(body) {
     ed: body.cols.ed[i],
     rd: body.cols.rd ? body.cols.rd[i] : null,
     rdMax: body.rdBasis && body.rdBasis.unstated && Number.isInteger(body.rdBasis.unstated[t]) ? body.rdBasis.unstated[t] : null,
+    edMax: body.edUnstated && Number.isInteger(body.edUnstated[t]) ? body.edUnstated[t] : null,
     sig: body.cols.sig[i] === null ? null : body.cols.sig[i] / body.units.sig[1],
     f2: body.cols.f2[i], f3: body.cols.f3[i],
     cap: body.cols.mcap && body.cols.mcap[i] !== null ? body.cols.mcap[i] / body.units.mcap[1] : null,

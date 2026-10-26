@@ -33,7 +33,7 @@ export function sigOf(x) {
   const lm = chg > -1 ? Math.log1p(chg) : null;
   if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
   const z = lm / sig;
-  if (earningsInside(x, SIG_EVENT_SESSIONS) === true) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
+  if (earningsInside(x, SIG_EVENT_SESSIONS, 0) === true) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
   if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
   const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
   const hits = level === 3 ? x.f3 : x.f2;

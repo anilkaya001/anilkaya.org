@@ -10,23 +10,33 @@ export const LIVE_ELAPSED_MAX = 2;
 
 const whole = (v) => Number.isInteger(v);
 
-export function earningsState(row, hz, j = 0, back = REACTION_BACK_SESSIONS) {
+export const EVENT_STATES = Object.freeze({ reaction: true, unstated: true, after: true, ahead: true, clear: false, undated: false });
+
+const ageState = (age, back) => (age === 0 ? "reaction" : age <= back ? "after" : "clear");
+
+const agreed = (a, b) => (a === b ? a : "unstated");
+
+const PRECEDENCE = Object.freeze(["reaction", "unstated", "after"]);
+
+export function earningsState(row, hz, j, back = REACTION_BACK_SESSIONS) {
   if (!row || typeof row !== "object" || !whole(hz) || hz < 1 || !whole(j) || j < 0 || !whole(back) || back < 0) return null;
-  const { ed, rd, rdMax } = row;
-  const ages = [];
-  if (whole(rd) && rd >= 0) ages.push(rd + j);
-  if (whole(ed) && ed >= 0 && ed <= j) ages.push(ed === 0 ? Math.max(j - 1, 0) : j - ed);
-  if (whole(rdMax) && rdMax >= 0) ages.push(Math.max(rdMax - 1, 0) + j);
-  const age = ages.length ? Math.min(...ages) : null;
-  if (age !== null && age <= back) return age === 0 ? "reaction" : "after";
+  const { ed, rd, rdMax, edMax } = row;
+  const seen = [];
+  if (whole(rd) && rd >= 0) seen.push(ageState(rd + j, back));
+  if (whole(rdMax) && rdMax >= 0) seen.push(agreed(ageState(rdMax + j, back), ageState(Math.max(rdMax - 1, 0) + j, back)));
+  if (whole(ed) && ed >= 0 && ed <= j) {
+    const late = whole(edMax) && edMax > ed ? edMax : ed === 0 ? 1 : null;
+    const first = ageState(j - ed, back);
+    seen.push(late === null ? first : agreed(first, late <= j ? ageState(j - late, back) : "ahead"));
+  }
+  for (const state of PRECEDENCE) if (seen.includes(state)) return state;
   if (!whole(ed) || ed < 0) return "undated";
-  if (ed - j >= 1 && ed - j <= hz) return "ahead";
-  return "clear";
+  return ed - j >= 1 && ed - j <= hz ? "ahead" : "clear";
 }
 
-export function earningsInside(row, hz, j = 0, back = REACTION_BACK_SESSIONS) {
+export function earningsInside(row, hz, j, back = REACTION_BACK_SESSIONS) {
   const s = earningsState(row, hz, j, back);
-  return s === null ? null : s === "reaction" || s === "after" || s === "ahead";
+  return s === null ? null : EVENT_STATES[s];
 }
 
 export function horizonWords(hz) {

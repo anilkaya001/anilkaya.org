@@ -344,19 +344,24 @@
     tick: (m) => { if (typeof m !== "number" || !Number.isFinite(m)) return null; const n = ((Math.floor(m) % 1440) + 1440) % 1440; return two(Math.floor(n / 60)) + ":" + two(n % 60); },
     open: (day) => (dayAt(day) === null ? null : 1470 - nyClock(new Date(day + "T12:00:00Z")).mins),
     compact,
-    earn: (r, hz, j = 0, back = 1) => {
+    earn: (r, hz, j, back = 1) => {
       const w = Number.isInteger;
       if (!r || typeof r !== "object" || !w(hz) || hz < 1 || !w(j) || j < 0 || !w(back) || back < 0) return null;
-      const a = [];
-      if (w(r.rd) && r.rd >= 0) a.push(r.rd + j);
-      if (w(r.ed) && r.ed >= 0 && r.ed <= j) a.push(r.ed === 0 ? Math.max(j - 1, 0) : j - r.ed);
-      if (w(r.rdMax) && r.rdMax >= 0) a.push(Math.max(r.rdMax - 1, 0) + j);
-      const age = a.length ? Math.min(...a) : null;
-      if (age !== null && age <= back) return age === 0 ? "reaction" : "after";
+      const at = (age) => (age === 0 ? "reaction" : age <= back ? "after" : "clear");
+      const two = (x, y) => (x === y ? x : "unstated");
+      const s = [];
+      if (w(r.rd) && r.rd >= 0) s.push(at(r.rd + j));
+      if (w(r.rdMax) && r.rdMax >= 0) s.push(two(at(r.rdMax + j), at(Math.max(r.rdMax - 1, 0) + j)));
+      if (w(r.ed) && r.ed >= 0 && r.ed <= j) {
+        const late = w(r.edMax) && r.edMax > r.ed ? r.edMax : r.ed === 0 ? 1 : null;
+        const first = at(j - r.ed);
+        s.push(late === null ? first : two(first, late <= j ? at(j - late) : "ahead"));
+      }
+      for (const k of ["reaction", "unstated", "after"]) if (s.includes(k)) return k;
       if (!w(r.ed) || r.ed < 0) return "undated";
       return r.ed - j >= 1 && r.ed - j <= hz ? "ahead" : "clear";
     },
-    earnIn: (r, hz, j, back) => { const e = F.earn(r, hz, j, back); return e === null ? null : e === "reaction" || e === "after" || e === "ahead"; },
+    earnIn: (r, hz, j, back) => { const e = F.earn(r, hz, j, back); return e === null ? null : e !== "clear" && e !== "undated"; },
     elapsed: (asOf, ahead, day, jmax = 2) => {
       if (!isoDay(asOf) || !isoDay(day) || !Array.isArray(ahead) || !Number.isInteger(jmax)) return null;
       if (day === asOf) return 0;
