@@ -1,1 +1,1 @@
-{"name": "flows-events", "class": "C", "group": "shard", "timing": false, "medianS": 57.5, "shard": 4, "files": ["flows-events-contract.mjs"], "covers": ["assets/css/base.css","assets/css/flows-feeds.css","assets/css/flows.css","assets/js/flows-events.js","assets/js/flows-ui.js"]}
+{"name": "flows-events", "class": "C", "group": "shard", "timing": false, "medianS": 57.5, "shard": 2, "files": ["flows-events-contract.mjs"], "covers": ["assets/css/base.css","assets/css/flows-feeds.css","assets/css/flows.css","assets/js/flows-events.js","assets/js/flows-ui.js"]}
