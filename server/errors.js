@@ -65,6 +65,23 @@ export const ERRORS = Object.freeze({
   unavailable: entry(503, "Service is not configured"),
   unsupported_media_type: entry(415, "Content-Type must be application/json"),
   upgrade_required: entry(426, "Expected a WebSocket upgrade"),
+  ff_off: entry(404, "Fire & Forget is off"),
+  ff_wire_not_found: entry(404, "No such wire"),
+  ff_hit_not_found: entry(404, "No such hit"),
+  ff_wire_limit: entry(409, "The wire limit is reached; retire a wire first"),
+  ff_symbol_outside_universe: entry(422, "That name is not in the universe, so no wire can watch it"),
+  ff_grammar_invalid: entry(400, "The wire is not valid"),
+  ff_grammar_precision: entry(400, "A threshold is finer than the metric allows"),
+  ff_metric_unavailable: entry(409, "That quantity is not available yet"),
+  ff_version_immutable: entry(409, "An armed version cannot be changed; adjust the wire to make a new version"),
+  ff_house_readonly: entry(403, "A house wire cannot be edited"),
+  ff_house_duplicate: entry(409, "This is the house wire. Adjust it or turn the house wire off."),
+  ff_scope_reserved: entry(400, "That scope is not available"),
+  ff_note_too_long: entry(400, "The note is too long"),
+  ff_cursor_invalid: entry(400, "The cursor is not valid"),
+  ff_evaluator_unavailable: entry(503, "The evaluator is not available"),
+  ff_export_range: entry(400, "Choose a shorter date range"),
+  ff_budget_exceeded: entry(409, "The weekly false-alarm budget is spent; loosen or retire a wire"),
 });
 
 export const errorEntry = (code) => (Object.hasOwn(ERRORS, code) ? ERRORS[code] : null);
