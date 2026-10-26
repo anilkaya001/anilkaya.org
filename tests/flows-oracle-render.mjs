@@ -267,7 +267,7 @@ async function unbuiltChecks(mutate, why = null) {
   ok(/^Neuron, \d+ new, press to open$/.test(s1.label), "the accessible name carries the count");
   const spend = s1.s.messages.filter((m) => m.kind === "surge")[0];
   const expectedP = 960000;
-  eq(spend.say, `SYO001 options flow is running ${(expectedP / (4000000 * 30 / 390)).toFixed(1)}\u00D7 its usual pace: $960K in the last 30 minutes, against a typical $308K for that long.`, "the message is the independent computation");
+  eq(spend.say, `SYO001 has $960K of flagged options flow across 6 windows in the last 30 minutes. The bar for this name is $${Math.round(Math.max(3 * 4000000 * 30 / 390, 500000) / 1000)}K.`, "the message is the independent computation: the sum, the windows and the bar, with no pace");
 
 
   const before = await w.page.evaluate(() => window.FlowsUI.oracle.state().messages.length);
@@ -284,7 +284,7 @@ async function unbuiltChecks(mutate, why = null) {
   await sleep(500);
   eq(await w.page.evaluate(() => window.__pwn === undefined && !document.querySelector(".orc-sheet img")), true, "a hostile ticker never reaches innerHTML");
   const live = await w.page.evaluate(() => document.querySelector(".orc-sec[aria-label='Right now']").innerText);
-  ok(live.includes("SYO001 options flow is running"), "the sheet lists the message under Right now");
+  ok(live.includes("SYO001 has $960K of flagged options flow across 6 windows"), "the sheet lists the message under Right now");
   ok(/\d\d:\d\d TRT/.test(live), "with a TRT time");
   if (SHOTS) await w.page.screenshot({ path: path.join(SHOTS, "live-sheet-1440.png") });
   await w.close();

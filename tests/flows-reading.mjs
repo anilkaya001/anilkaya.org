@@ -404,10 +404,21 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
     ["outlook", "The outlook after the 2026-10-07 report is clear."],
     ["guaranteed", "The 2026-10-07 report is a guaranteed winner."],
     ["certain to", "The stock is certain to double after the 2026-10-07 report."],
+    ["'ll", "The shares'll test the gamma flip at $124.00" + clause + "."],
+    ["curly 'll", "The shares\u2019ll test the gamma flip at $124.00" + clause + "."],
+    ["won't", "Dealers won't stop pinning at $124.00" + clause + "."],
+    ["curly won't", "Dealers won\u2019t stop pinning at $124.00" + clause + "."],
+    ["shall", "The shares shall test the gamma flip at $124.00" + clause + "."],
+    ["unlikely", "A close below the gamma flip at $124.00 is unlikely" + clause + "."],
+    ["due for", "The shares are due for a test of the flip at $124.00" + clause + "."],
+    ["about to", "The shares are about to test the flip at $124.00" + clause + "."],
+    ["'s about to", "The stock\u2019s about to test the flip at $124.00" + clause + "."],
+    ["imminent", "A test of the gamma flip at $124.00 is imminent" + clause + "."],
   ]) {
     const cites = ["events.next", "events.impliedMove", "options.engine.level.flip", "options.engine.level.callWall", "analysts.target.median"].filter((id) => MP.shown.has(id));
     const r = vet(patch({ drivers: [{ text, cites: cites.slice(0, 6) }, ...GOOD.drivers.slice(1)] }));
     ok(hasWhy(r, "drivers.0", "forecast") || hasWhy(r, "drivers.0", "invented"), "A FORECAST WORD (" + word + ") is refused: " + JSON.stringify(why(r)));
+    if (/'ll|won|shall|unlikely|due for|about to|imminent/.test(word)) ok(hasWhy(r, "drivers.0", "forecast"), "and for the contraction and the later additions it is refused as a forecast, not by luck as something else (" + word + "): " + JSON.stringify(why(r)));
     ok(r.ok && r.sections.drivers.length === 3, "and only that driver goes (" + word + ")");
   }
   const cond = vet(patch({ watch: [{ text: "Below the gamma flip at $124.00 dealers are net short gamma" + clause + "; above it they are net long.", cites: ["options.engine.level.flip"] }] }));

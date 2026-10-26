@@ -867,6 +867,16 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
        "NO PAGE COMPUTES THE ALERT ASK SHARE ITSELF: no page script reads a window's askPrem or bidPrem, so the " +
        "share, its sided coverage and its colour class come only from FlowsUI.F.askShare. Unusual divided by the " +
        "premium and Home by the two sides, so one window printed two different shares on two pages");
+  {
+    const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : /\.m?js$/.test(e.name) ? [path.join(dir, e.name)] : []));
+    const files = [...walk("shared"), ...walk("server"), ...walk("scripts/flows-nightly"), ...walk("scripts/flows-legs"), "worker.js"];
+    const named = files.filter((f) => /\b(?:askPrem|bidPrem|total_ask_side_prem|total_bid_side_prem)\b/.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).sort();
+    deep(named, ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
+         "NO SHARED MODULE, SERVER FILE OR NIGHTLY LEG BUT THESE READS THE VENDOR'S ASK-SIDE AND BID-SIDE FIELDS: a new reader must be added here on review and use askShareRead, not divide by the premium itself (the ticker's alert card and the dossier did, and printed 30% for a name the Unusual page read at 75% of what the vendor sided)");
+    for (const f of ["shared/flows-positioning.js", "shared/flows-dossier.js"]) {
+      ok(/askShareRead/.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} takes the alert ask share from askShareRead`);
+    }
+  }
   const ui = fs.readFileSync(path.join(JS, "flows-ui.js"), "utf8");
   ok(/\baskShare: \(rows\) =>/.test(ui) && /\baskSaid: /.test(ui) && ui.includes('askLabel: "' + ASK_SHARE.label + '"'),
      "the core carries the one definition, its printed form and the label the known-answer table names");
@@ -878,7 +888,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     ok((src.match(/F\.askShare\(/g) || []).length >= 2 && /F\.askSaid\(/.test(src) && /F\.askLabel/.test(src),
        `${files.join(" with ")} reads the share, prints it and labels it through the core`);
   }
-  for (const f of ["flows-net.js", "flows-unusual.js"]) {
+  for (const f of ["flows-net.js", "flows-unusual.js", "flows-market-floor.js", "flows-market-river.js"]) {
     ok(/F\.askSplit\(/.test(fs.readFileSync(path.join(JS, f), "utf8")), `${f} draws its ask, bid and neither dollars from the core's askSplit`);
   }
   ok(ASK_SHARE.cases.length >= 20 && ASK_SHARE.cases.some((c) => c.side === "thin") && ASK_SHARE.cases.some((c) => c.classified === 0) &&

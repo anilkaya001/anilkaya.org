@@ -19,16 +19,31 @@ const ET_HM = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", h
 const etMinute = (ms) => { const p = ET_HM.formatToParts(new Date(ms)); const g = (k) => Number(p.find((x) => x.type === k).value); return g("hour") * 60 + g("minute"); };
 const trt = (ms) => { const m = Math.floor(((ms / 60000) % 1440 + 1440 + 180) % 1440); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
 const FUNDS = new Set(["SPY", "QQQ", "IWM", "DIA"]);
+const stated = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
+const scaled = (r) => {
+  const A = stated(r.askPrem), B = stated(r.bidPrem), a0 = A || 0, b0 = B || 0, k = a0 + b0 > r.prem ? r.prem / (a0 + b0) : 1;
+  return { a: a0 * k, b: b0 * k, both: A !== null && B !== null };
+};
 const sideOf = (r) => {
-  if (typeof r.askPrem !== "number" || typeof r.bidPrem !== "number" || r.askPrem === r.bidPrem) return "nx";
-  const ask = r.askPrem > r.bidPrem;
+  if (r.cp !== "C" && r.cp !== "P") return "nx";
+  const { a, b, both } = scaled(r);
+  if (!both || a + b === 0) return "nx";
+  const cls = +(((a + b) / r.prem) * 100).toFixed(0), share = +((a / (a + b)) * 100).toFixed(0);
+  if (cls < 50) return "nx";
+  const ask = share >= 65, bid = share <= 35;
+  if (!ask && !bid) return "nx";
   return r.cp === "C" ? (ask ? "up" : "down") : (ask ? "down" : "up");
+};
+const dollars = (r) => {
+  const { a, b } = scaled(r);
+  if (r.cp !== "C" && r.cp !== "P") return { up: 0, down: 0, nx: r.prem };
+  return r.cp === "C" ? { up: a, down: b, nx: Math.max(0, r.prem - a - b) } : { up: b, down: a, nx: Math.max(0, r.prem - a - b) };
 };
 function expected(alerts, universe) {
   const sec = new Map(universe.t.map((t, i) => [t, universe.sec[i] >= 0 ? universe.sectors[universe.sec[i]] : null]));
-  const windows = alerts.rows.map((r, i) => ({ r, i })).filter(({ r }) => r.prem > 0 && Number.isFinite(Date.parse(r.spanStart))).map(({ r, i }) => ({ i, t: r.t, lane: FUNDS.has(r.t) ? "Index funds" : sec.get(r.t) || "No sector", ms: Date.parse(r.spanStart), minute: etMinute(Date.parse(r.spanStart)), prem: r.prem, side: sideOf(r) }));
+  const windows = alerts.rows.map((r, i) => ({ r, i })).filter(({ r }) => r.prem > 0 && Number.isFinite(Date.parse(r.spanStart))).map(({ r, i }) => ({ i, t: r.t, lane: FUNDS.has(r.t) ? "Index funds" : sec.get(r.t) || "No sector", ms: Date.parse(r.spanStart), minute: etMinute(Date.parse(r.spanStart)), prem: r.prem, side: sideOf(r), d: dollars(r) }));
   const lanes = new Map();
-  for (const w of windows) { const l = lanes.get(w.lane) || { name: w.lane, prem: 0, n: 0 }; l.prem += w.prem; l.n++; lanes.set(w.lane, l); }
+  for (const w of windows) { const l = lanes.get(w.lane) || { name: w.lane, prem: 0, n: 0, up: 0, down: 0, nx: 0 }; l.prem += w.prem; l.n++; l.up += w.d.up; l.down += w.d.down; l.nx += w.d.nx; lanes.set(w.lane, l); }
   const order = [...lanes.values()].sort((a, b) => b.prem - a.prem || (a.name < b.name ? -1 : 1)).map((l) => l.name);
   const pMax = Math.max(...windows.map((w) => w.prem));
   const openMs = Math.min(...windows.map((w) => w.ms - (w.minute - 570) * 60000));
@@ -60,7 +75,7 @@ const INSPECT = () => {
     label: canvas.getAttribute("aria-label"), paints: api.paints(), reduced: api.reduced(),
     canvas: { w: cr.width, h: cr.height, left: cr.left, top: cr.top }, mod: { bottom: mod.bottom, right: mod.right },
     page: { sh: document.documentElement.scrollHeight, ih: innerHeight, sw: document.documentElement.scrollWidth, iw: innerWidth },
-    model: M && { session: M.session, openMs: M.openMs, readMs: M.readMs, total: M.total, pMax: M.pMax, dropped: M.dropped, tideWhy: M.tideWhy, marketTideWhy: M.marketTideWhy, steps: M.steps, lanes: M.lanes.map((l) => ({ name: l.name, k: l.k, prem: l.prem, n: l.n, tide: l.tide, path: l.path, tideWhy: l.tideWhy })) },
+    model: M && { session: M.session, openMs: M.openMs, readMs: M.readMs, total: M.total, pMax: M.pMax, dropped: M.dropped, tideWhy: M.tideWhy, marketTideWhy: M.marketTideWhy, steps: M.steps, lanes: M.lanes.map((l) => ({ name: l.name, k: l.k, prem: l.prem, n: l.n, up: l.up, down: l.down, nx: l.nx, tide: l.tide, path: l.path, tideWhy: l.tideWhy })) },
     scene: SC && { cam: SC.cam, xr: SC.xr, zr: SC.zr, openMs: SC.openMs, endMs: SC.endMs, phone: SC.phone, secMax: SC.secMax, nowZ: SC.nowZ, tide: Boolean(SC.tide),
       spheres: SC.spheres.map((s) => ({ i: s.w.i, t: s.w.t, lane: s.w.lane, ms: s.w.ms, prem: s.w.prem, side: s.w.side, x: s.x, z: s.z, r: s.r, px: s.px, py: s.py, pr: s.pr })),
       tiles: SC.tiles.map((t) => ({ lane: t.lane, k: t.k, v: t.v, pts: t.pts })), ticks: SC.ticks.map((t) => ({ ms: t.ms, text: t.text })) },
@@ -85,7 +100,7 @@ function verify(f, EXP, { tiles = null, phone = false } = {}) {
   const SC = f.scene, M = f.model;
   if (!SC || !M) return bad.concat(["no scene"]);
   need(M.lanes.map((l) => l.name).join("|") === EXP.order.join("|"), "lane order " + M.lanes.map((l) => l.name).join("|") + " is not by flagged premium " + EXP.order.join("|"));
-  for (const l of M.lanes) { const e = EXP.lanes.get(l.name); need(e && Math.abs(e.prem - l.prem) < 1 && e.n === l.n, "lane " + l.name + " sums " + l.prem + "/" + l.n + " against " + (e && e.prem + "/" + e.n)); }
+  for (const l of M.lanes) { const e = EXP.lanes.get(l.name); need(e && Math.abs(e.prem - l.prem) < 1 && e.n === l.n, "lane " + l.name + " sums " + l.prem + "/" + l.n + " against " + (e && e.prem + "/" + e.n)); need(e && Math.abs(e.up - l.up) < 1e-6 && Math.abs(e.down - l.down) < 1e-6 && Math.abs(e.nx - l.nx) < 1e-6, "lane " + l.name + " splits " + l.up + "/" + l.down + "/" + l.nx + " against " + (e && e.up + "/" + e.down + "/" + e.nx)); need(e && Math.abs(l.up + l.down + l.nx - l.prem) < 1e-6, "lane " + l.name + " splits do not add to its premium"); }
   need(SC.spheres.length === EXP.windows.length, SC.spheres.length + " spheres for " + EXP.windows.length + " windows");
   need(Math.abs(M.openMs - EXP.openMs) < 1, "open at " + M.openMs + " not " + EXP.openMs);
   const cam = camera(SC.cam);
@@ -282,7 +297,8 @@ try {
     ["the open at the front", "zr - (2 * zr * (ms - M.openMs)) / (endMs - M.openMs)", "-zr + (2 * zr * (ms - M.openMs)) / (endMs - M.openMs)"],
     ["lanes in name order", ".sort((a, c) => c.prem - a.prem || (a.name < c.name ? -1 : 1))", ".sort((a, c) => (a.name < c.name ? -1 : 1))"],
     ["a null tide painted as a value", "if (t.v === null) {", "if (false) {"],
-    ["sides swapped", 'return r.cp === "C" ? (askSide ? "up" : "down") : (askSide ? "down" : "up");', 'return r.cp === "C" ? (askSide ? "down" : "up") : (askSide ? "up" : "down");'],
+    ["sides swapped", 's === "ask" ? (c ? "up" : "down") : s === "bid" ? (c ? "down" : "up") : "nx"', 's === "ask" ? (c ? "down" : "up") : s === "bid" ? (c ? "up" : "down") : "nx"'],
+    ["lane sums take the whole window", "l.up += w.split.up; l.down += w.split.down; l.nx += w.split.nx;", "l[w.side] += w.prem;"],
     ["labels never declutter", "if (kept.some((k) => hit(k.box, box))) { out.dropped.push(it.text); continue; }", "if (false) { continue; }"],
     ["no now line", "if (SC.now) {", "if (false) {"],
     ["TRT off by an hour", "+ 1440 + 180) % 1440", "+ 1440 + 120) % 1440"],

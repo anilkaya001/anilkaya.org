@@ -9,7 +9,7 @@ export const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correctin
 export const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
 export const SIG_REASONS = Object.freeze({
   below: "Below 2 typical days: not tested, but counted in the correction.",
-  event: "Earnings within 30 days: not tested.",
+  event: "Earnings within 21 sessions: not tested.",
   noscale: "No typical day is published, so no test.",
   nocount: "The count of days beyond that is not published, so no test.",
 });

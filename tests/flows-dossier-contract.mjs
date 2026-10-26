@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loadMutated } from "./truth/mutants.mjs";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as D from "../shared/flows-dossier.js";
@@ -389,6 +390,26 @@ function checkDossier(d, label, ticker = T) {
   ok(d.packets.flow.facts.some((f) => f.k === "strip.net") && d.packets.flow.facts.some((f) => f.k === "alerts.largest") && d.packets.flow.facts.some((f) => f.k === "dark.level1"), "flow: the live strip, the flagged alerts and the vendor's dark-pool price levels");
   const askFact = d.packets.flow.facts.find((f) => f.k === "alerts.askShare");
   ok(askFact && /\bask side\b/.test(askFact.label) && /undocumented/.test(askFact.note) && !/\bat (the )?(ask|bid)\b/i.test(askFact.label + " " + askFact.note), "flow: the ask share is named in the vendor's term, ask side, and its note says the alert field is undocumented");
+  {
+    const rowsT = F.alertsPayload().rows.filter((r) => r.t === T && typeof r.prem === "number" && r.prem > 0);
+    const both = rowsT.filter((r) => typeof r.askPrem === "number" && r.askPrem >= 0 && typeof r.bidPrem === "number" && r.bidPrem >= 0);
+    const scale = (r) => (r.askPrem + r.bidPrem > r.prem ? r.prem / (r.askPrem + r.bidPrem) : 1);
+    const a = both.reduce((s, r) => s + r.askPrem * scale(r), 0), b = both.reduce((s, r) => s + r.bidPrem * scale(r), 0);
+    const total = rowsT.reduce((s, r) => s + r.prem, 0);
+    const sidedFact = d.packets.flow.facts.find((f) => f.k === "alerts.sidedShare");
+    ok(both.length > 0 && sidedFact && Math.abs(sidedFact.v - (a + b) / total) < 1e-6, "flow: the sided share of the premium is the vendor's ask plus bid dollars over the premium (" + (sidedFact && sidedFact.v) + " against " + (a + b) / total + ")");
+    if ((a + b) / total >= 0.5) ok(askFact && Math.abs(askFact.v - a / (a + b)) < 1e-6, "flow: the ask share is the ask over what the vendor sided, the site's one rule, not the ask over the premium (" + (askFact && askFact.v) + " against " + a / (a + b) + ")");
+    else ok(askFact === undefined, "flow: and with under half the premium sided there is no ask share to state");
+    for (const [name, transforms] of [
+      ["ask over the whole premium", [["sidedRead.share, \"fraction\"", "sum(rows.filter((r) => isNum(r.askPrem)).map((r) => r.askPrem)) / Math.max(1, sum(rows.map((r) => r.prem))), \"fraction\""]]],
+      ["coverage not published", [['rec.fact("alerts.sidedShare", "Share of that premium the vendor sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the vendor attributed to the ask or the bid side; the rest was left between the quotes or never split" });', ""]]],
+    ]) {
+      const mod = await loadMutated("shared/flows-dossier.js", transforms);
+      const dm = mod.buildDossier(inputs({}));
+      const am = dm.packets.flow.facts.find((f) => f.k === "alerts.askShare"), sm = dm.packets.flow.facts.find((f) => f.k === "alerts.sidedShare");
+      ok(!am || !sm || Math.abs(am.v - a / (a + b)) > 1e-6, "PLANTED WRONG BUILD FAILS THE ASK-SHARE CHECKS: " + name);
+    }
+  }
   const askVerdict = guardAnswer(askFact.label + ". " + askFact.note + ".", [{ say: askFact.label + " " + askFact.note }], { smallIntegers: false, modals: true });
   ok(askVerdict.forecast === false, "flow: and the model-visible wording passes the ask guard's forecast and modal lexicon");
   const heldDark = D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: heldAll(), vendor: { ...reduceAll(), levels: undefined } });

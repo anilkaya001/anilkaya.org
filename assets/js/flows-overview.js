@@ -1105,7 +1105,7 @@
   const FK = ["px", "prev", "chg", "net", "lean", "iv30", "iv30p"];
   const IV_YEAR = Math.sqrt(252);
   const IV_EVENT = 21;
-  const IV_APART = "Earnings within 30 days: event not separated.";
+  const IV_APART = "Earnings within 21 sessions: event not separated.";
   const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => { const c = isNum(chg), v = isNum(iv); return c === null || v === null || !(v > 0) ? null : c / (v / IV_YEAR); };
   function ivdIndex(u) {

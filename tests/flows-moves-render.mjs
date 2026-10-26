@@ -362,7 +362,7 @@ async function exercise(browser, js, early) {
       P(area === 0, "every triangle has the area of its circle (" + area + " off)");
       P(badShape === 0, "direction is the class and the shape of the marker (" + badShape + " off)");
       P(badMid === 0, "markers are centred on their data position (" + badMid + " off)");
-      P(badRing === 0, "a ring surrounds exactly the names reporting within 30 days (" + badRing + " off)");
+      P(badRing === 0, "a ring surrounds exactly the names reporting within 21 sessions (" + badRing + " off)");
       const edge = d.pts.find((p) => p.t === "EDGE");
       P(Math.abs(edge.x - (d.l + d.w)) < 0.01 && Math.abs(edge.y - d.t) < 0.01, "a name beyond the axis is drawn at the edge, not off the plot");
       const pins = d.pts.filter((p) => p.cls.includes("pin"));
@@ -398,7 +398,7 @@ async function exercise(browser, js, early) {
         P(full === null || r.label.includes(full), r.t + " spoken label carries the sentence");
       }
       const ap = await listRows(page, "mvApart");
-      same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 30 days are ranked apart, three of them");
+      same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 21 sessions are ranked apart, three of them");
       P(ap.every((r) => r.how === ""), "an earnings name carries no rarity chip");
       P((await page.locator("#mvNowNote").innerText()) === now.length + " of " + ranked.length && (await page.locator("#mvApartNote").innerText()) === "3 of " + apart.length, "both notes count");
       P(!(await page.locator("#mvMore").isHidden()), "Show more is offered when the list is longer than the room");
@@ -419,7 +419,7 @@ async function exercise(browser, js, early) {
       same(rk.kv["Past 2 typical"], sel.f2 + " of 252", "the beyond-2 count");
       same(rk.kv["Past 3 typical"], sel.f3 + " of 252", "the beyond-3 count");
       P(rk.spark === 21, "the 21-session sparkline holds the card's last 21 closes (" + rk.spark + ")");
-      P(rk.kv.Conviction === "64 /100" && rk.kv["IV rank"] === "42" && rk.kv["Dealer γ book"] === "Long" && rk.kv["Latest flow"] === "+$12.5M", "card context is read, with units");
+      P(rk.kv.Conviction === "64 /100" && rk.kv["IV percentile"] === "42" && !("IV rank" in rk.kv) && rk.kv["Dealer γ book"] === "Long" && rk.kv["Latest flow"] === "+$12.5M", "card context is read, with units");
       const wantSig = SIG.sigRun(DEC).items.find((i) => i.t === sel.t);
       const wantLine = wantSig.state === "tested" ? (wantSig.flag ? SIG.SIG_FLAGGED_LINE : SIG.SIG_PLAIN_LINE) : SIG.SIG_REASONS[wantSig.state];
       P(rk.text.includes(wantLine) && !rk.text.includes("not yet published"), "the drill panel carries the significance result or the reason for none: " + wantLine);
@@ -730,6 +730,7 @@ const MUTANTS = [
   ["the foot counts the tested as flagged", "M.sg.flagged + \" of \"", "M.sg.tested + \" of \""],
   ["the old muted note back", "<span class=\"sub c\" data-k=\"sig\">' + esc(sigLine(x)) + \"</span>\"", "<span class=\"sub c\" data-k=\"sig\">Significance test: not yet published.</span>\""],
   ["the adjusted p shown as the raw p", "kv(\"p, adjusted\", x.sg.adj.toFixed(3))", "kv(\"p, adjusted\", x.sg.p.toFixed(3))"],
+  ["the percentile called a rank", "kv(\"IV percentile\", cf.ivRank === null ? DASH : String(cf.ivRank))", "kv(\"IV rank\", cf.ivRank === null ? DASH : String(cf.ivRank))"],
   ["a ring on every name", "if (x.event) s += '<circle", "if (true) s += '<circle"],
 ];
 for (const [name, from, to] of MUTANTS) {

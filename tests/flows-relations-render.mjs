@@ -72,6 +72,14 @@ const browser = await launch();
   eq(thin.status, "thin", "TOO FEW WINDOWS IS NAMED THIN, NOT DRAWN");
   ok(/windows over/.test(thin.reason) && /relations need/.test(thin.reason), "and its reason says how many windows, bins and names it had and how many it needs");
   eq((await modelOf(page, [], null)).status, "quiet", "no rows is quiet");
+  {
+    const five = FIXTURE.cases[0].expected.names.slice(0, 5), six = FIXTURE.cases[0].expected.names.slice(0, 6);
+    const few = await modelOf(page, FIXTURE.cases[0].rows.filter((r) => five.includes(r.t)), { minWindows: 1 });
+    ok(few.status === "ok" && few.names.length === 5 && few.pairs.P.length === 0 && /needs at least 6 names/.test(few.pReason), "BEYOND THE MARKET NEEDS FOUR OTHER NAMES TO STAND FOR THE MARKET: five names give no pairs and say why (" + few.pReason + ")");
+    ok(few.pairs.A.length === 10 && few.pairs.L.length === 10, "and the other two relations are unaffected by it");
+    const enough = await modelOf(page, FIXTURE.cases[0].rows.filter((r) => six.includes(r.t)), { minWindows: 1 });
+    ok(enough.pReason === null && enough.pairs.P.length === 15, "six names give the third relation, 15 pairs");
+  }
   eq((await modelOf(page, [{ t: "X", prem: 0, spanStart: "2026-09-29T14:00:00.000Z" }, { t: "Y", prem: 5, spanStart: "nope" }, { prem: 5 }], null)).status, "quiet", "rows with no premium, no time or no name are not windows");
   const flat = [];
   for (let i = 0; i < 50; i++) for (const t of ["AA", "BB", "CC", "DD"]) flat.push({ t, cp: "C", prem: 1000, askPrem: 600, bidPrem: 100, spanStart: new Date(Date.parse("2026-09-29T14:00:00Z") + i * 600000).toISOString() });
@@ -98,6 +106,7 @@ const browser = await launch();
   eq(m.drawn, m.stable, "only pairs that passed in both halves are drawn, one curve each");
   ok(/windows/.test(m.stats) && /bins/.test(m.stats) && /read \d\d:\d\d TRT/.test(m.stats), "the stats line has windows, bins and the read time in TRT: " + m.stats);
   ok(/pass by chance/.test(m.note) && /not a forecast/i.test(m.note), "the note says how many pairs would pass by chance and that it is not a forecast");
+  ok(/(?:fewer than one of these \d+ is expected to pass by chance alone, on average|on average about \d+ of these \d+ would pass by chance alone)\. Not a forecast\./.test(m.note), "and states it as an average, 6 in 100 of the pairs, which the null grid in flows-lean holds: " + m.note);
   await page.click("#mkRelations .rl-seg button[data-l='P']");
   const pm = await page.evaluate(() => ({ note: document.querySelector("#mkRelations .rl-note").textContent, lead: document.querySelector("#mkRelations .rl-read").textContent, drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: window.FlowsUI.relations.of(document.getElementById("mkRelations")).model().pairs.P.filter((p) => p.stable).length }));
   ok(/not stock-price moves/.test(pm.note) && /daily closes/.test(pm.note), "THE THIRD RELATION SAYS IT REMOVES THE SHARED FLOW BURST, NOT PRICE MOVES, AND THAT PRICE LAYERS NEED DAILY CLOSES");
@@ -105,13 +114,25 @@ const browser = await launch();
   ok(!/\b(tape|unusual|alert|screen|rare|sigma|radar)\b/i.test(pm.note + pm.lead + SRC.match(/Beyond the market[^}]*/)[0]), "and uses none of the barred words");
   ok(pm.note.split(/(?<=\.)\s+/).filter((t) => t.split(/\s+/).length > 14 && /beyond|removes|closes/.test(t)).length === 0, "and its sentences stay within fourteen words");
   await page.click("#mkRelations .rl-seg button[data-l='A']");
-  ok(/pairs pass/.test(m.read), "the readout says how many pairs pass");
+  ok(/pairs? pass/.test(m.read), "the readout says how many pairs pass");
+  {
+    const head = await page.evaluate(() => (document.querySelector("#mkRelations .rl-lh") || { textContent: "" }).textContent);
+    ok(/^(None of \d+ tested pairs pass|\d+ pairs? pass(?:es)?, of \d+ tested)/.test(head.trim()), "THE LIST HEADER SAYS HOW MANY PASS OF HOW MANY WERE TESTED, NOT 'TESTED PAIRS' FOR THE ONES THAT PASSED: " + head);
+  }
   await page.click("#mkRelations .rl-node");
   const sel = await page.evaluate(() => ({ read: document.querySelector("#mkRelations .rl-read").textContent, on: document.querySelectorAll("#mkRelations .rl-node.is-sel").length }));
   eq(sel.on, 1, "a click selects one node");
   ok(/\(.+\):/.test(sel.read), "and the readout names it with its sector: " + sel.read);
   await page.click("#mkRelations .rl-seg button[data-l='L']");
   eq(await page.evaluate(() => document.querySelector("#mkRelations .rl-seg button[data-l='L']").getAttribute("aria-pressed")), "true", "the second relation can be chosen");
+  const held = await page.evaluate((rows) => {
+      const api = window.FlowsUI.relations.of(document.getElementById("mkRelations"));
+      api.take({ rows, sessionDate: "2026-09-29", readAt: "2026-09-29T20:00:00.000Z" }, null);
+      api.layer("P");
+      return { empty: (document.querySelector("#mkRelations .nm-empty") || { textContent: "" }).textContent, edges: document.querySelectorAll("#mkRelations .rl-edge").length, pairs: document.querySelectorAll("#mkRelations .rl-pair").length, read: document.querySelector("#mkRelations .rl-read").textContent };
+    }, FIXTURE.cases[0].rows.filter((r) => FIXTURE.cases[0].expected.names.slice(0, 5).includes(r.t)));
+    ok(/needs at least 6 names/.test(held.empty) && held.edges === 0 && held.pairs === 0 && /needs at least 6 names/.test(held.read), "WITH TOO FEW OTHER NAMES THE THIRD RELATION SAYS SO AND DRAWS NOTHING: " + JSON.stringify(held));
+
   const shape = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: innerHeight, sw: document.documentElement.scrollWidth, iw: innerWidth }));
   ok(shape.sh <= shape.ih + 1 && shape.sw <= shape.iw, "the Relations tab does not scroll the page");
   eq(errors, [], "no page error");
@@ -180,7 +201,10 @@ const MUTANTS = [
   ["Fisher interval uses n - 2", [["se = 1 / Math.sqrt(n - k - 3);", "se = 1 / Math.sqrt(n - k - 2);"]]],
   ["no factor removal", [["const corr = cond ? (x, y, f) => partial(x, y, f) : (x, y) => pearson(x, y);", "const corr = (x, y) => pearson(x, y);"]]],
   ["partial interval uses n - 3", [["fisher(r, B, cond ? 1 : 0)", "fisher(r, B, 0)"]]],
-  ["factor is only the first name", [["for (const z of zs) for (let b = 0; b < B; b++) factor[b] += z[b] / zs.length;", "for (let b = 0; b < B; b++) factor[b] = zs[0][b];"]]],
+  ["factor is only the first name", [["const factor = cond ? sum.map((v, b) => v - zs[i][b] - zs[j][b]) : null;", "const factor = cond ? zs[0] : null;"]]],
+  ["factor contains the pair itself", [["const factor = cond ? sum.map((v, b) => v - zs[i][b] - zs[j][b]) : null;", "const factor = cond ? sum : null;"]]],
+  ["factor leaves out only the first name of the pair", [["const factor = cond ? sum.map((v, b) => v - zs[i][b] - zs[j][b]) : null;", "const factor = cond ? sum.map((v, b) => v - zs[i][b]) : null;"]]],
+
   ["factor built from the lean series", [["const zs = cand.map((s) => standardise(s.A));", "const zs = cand.map((s) => standardise(s.L));"]]],
   ["partial sign flipped", [["return pearson(residual(x, f), residual(y, f));", "const q = pearson(residual(x, f), residual(y, f)); return q === null ? null : -q;"]]],
   ["residual keeps the factor slope", [["return x.map((v, i) => v - mx - b * (f[i] - mf));", "return x.map((v, i) => v - mx - 0.5 * b * (f[i] - mf));"]]],
@@ -191,13 +215,21 @@ const MUTANTS = [
   ["stable ignores the halves", [["const sameSign = r1 !== null && r2 !== null && Math.sign(r1) === Math.sign(r) && Math.sign(r2) === Math.sign(r);", "const sameSign = true;"]]],
   ["names kept by count instead of premium", [["b.prem - a.prem || (a.t < b.t ? -1 : 1)).slice(0, P.names)", "b.active.size - a.active.size || (a.t < b.t ? -1 : 1)).slice(0, P.names)"]]],
 ];
+{
+  const five = FIXTURE.cases[0].expected.names.slice(0, 5);
+  const { context, page } = await openMarket(browser, { patch: { [REL]: [["if (cond && base.pReason) continue;", ""]] } });
+  await page.waitForFunction(() => window.FlowsUI && window.FlowsUI.relations, null, { timeout: 15000 });
+  const m = await modelOf(page, FIXTURE.cases[0].rows.filter((r) => five.includes(r.t)), { minWindows: 1 });
+  ok(m.pairs.P.length !== 0, "PLANTED WRONG BUILD FAILS THE FEW-NAMES CHECK: the third relation drawn with too few other names");
+  await context.close();
+}
 for (const [name, edits] of MUTANTS) {
   ok(!(await modelVerdict(browser, { [REL]: edits })), `PLANTED WRONG BUILD FAILS THE NUMPY AND SCIPY FIXTURE: ${name}`);
 }
 
 const PAGE_MUTANTS = [
   ["draws pairs that did not pass", "const { shown } = pairsList();\n      const lit", "const shown = M.pairs[layer];\n      const lit", /drawn/],
-  ["the chance sentence is gone", "so about \" + chance + \" of these \" + total + \" would pass by chance. Not a forecast.", "so the interval is narrow.", /chance/],
+  ["the chance sentence is gone", "\" would pass by chance alone\")", "\" would be noise\")", /chance/],
 ];
 for (const [name, from, to] of PAGE_MUTANTS) {
   const { context, page } = await openMarket(browser, { patch: { [REL]: [[from, to]] }, alerts: alertsFixture({ n: 220, seed: 5 }) }).catch(() => ({ context: null }));

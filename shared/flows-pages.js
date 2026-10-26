@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "394";
+export const ASSET_VERSION = "395";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1089,8 +1089,8 @@ export function movesPage({ username = "" } = {}) {
           <div class="mv-listbox" id="mvNow" role="group" aria-label="Largest moves in IV-days"></div>
         </div>
         <div class="mv-box mv-box-apart">
-          <div class="mv-bh"><h2>Earnings within 30 days</h2><span class="note" id="mvApartNote"></span></div>
-          <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within 30 days"></div>
+          <div class="mv-bh"><h2>Earnings within 21 sessions</h2><span class="note" id="mvApartNote"></span></div>
+          <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within 21 sessions"></div>
         </div>
       </section>
       <section class="mv-panel mv-rail" id="mvRail" aria-label="Selected name"></section>
