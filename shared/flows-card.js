@@ -19,6 +19,7 @@ import { easternDay } from "./flows-freshness.js";
 import { parseOptionSymbol } from "./flows-premium.js";
 import { bookLevels } from "./flows-quant-card.js";
 import { compactNumbers } from "./flows-cross.js";
+import { formatScaled } from "./flows-round.js";
 export { HORIZON_SESSIONS };
 
 export function numOrNull(value) {
@@ -37,15 +38,15 @@ export function panelLead(say, n) {
   return { say: sentence, n: n && typeof n === "object" ? { ...n } : {} };
 }
 
+const SAID_DP = Object.freeze([2, 1, 2, 2, 2]);
+
 export function saidMagnitude(value) {
   const mag = Math.abs(value);
-  return {
-    shown: mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
-      : mag >= 1e3 ? Number((mag / 1e3).toFixed(1))
-        : Number(mag.toFixed(2)),
-    suffix: mag >= 1e6 ? "M" : mag >= 1e3 ? "k" : "",
-    exact: mag,
-  };
+  const base = Number(mag.toFixed(2));
+  if (base < 1000) return { shown: base, suffix: "", exact: mag };
+  const text = formatScaled(mag, (n, i) => SAID_DP[i]);
+  const unit = text.slice(-1);
+  return { shown: Number(text.slice(0, -1)), suffix: unit === "K" ? "k" : unit, exact: mag };
 }
 
 export function unavailable(reason) {
@@ -726,10 +727,9 @@ export function buildPath(tickRows, { buckets = 78, sessionDate = null } = {}) {
     : ` — ${Math.round(pers * 100)}% of minutes ran with it, against 50% for a directionless session`;
 
   const mag = Math.abs(nd);
-  const shown = mag >= 1e6 ? Number((mag / 1e6).toFixed(2))
-    : mag >= 1e3 ? Number((mag / 1e3).toFixed(1))
-      : mag;
-  const suffix = mag >= 1e6 ? "M" : mag >= 1e3 ? "k" : "";
+  const said = mag < 1000 ? null : saidMagnitude(nd);
+  const shown = said ? said.shown : mag;
+  const suffix = said ? said.suffix : "";
   const lead = panelLead(
     nd === 0
       ? `The session's prints closed FLAT on net delta over ${mins} minute(s): what was bought was sold.`

@@ -586,7 +586,9 @@ export function cardVariationInput(card, { expiries = null } = {}) {
 
 const signWord = (flow) => (flow > 0 ? "buy" : "sell");
 
-function sayer() {
+const MONEY_TIERS = Object.freeze([[1e9, 2, "B"], [1e6, 2, "M"], [1e3, 1, "k"], [1, 2, ""]]);
+
+export function sayer() {
   const n = {};
   const pin = (key, value, digits) => {
     const shown = Number(value.toFixed(digits));
@@ -595,10 +597,10 @@ function sayer() {
   };
   const money = (key, v) => {
     const m = Math.abs(v);
-    if (m >= 1e9) return "$" + pin(key, m / 1e9, 2) + "B";
-    if (m >= 1e6) return "$" + pin(key, m / 1e6, 2) + "M";
-    if (m >= 1e3) return "$" + pin(key, m / 1e3, 1) + "k";
-    return "$" + pin(key, m, 2);
+    let tier = m >= 1e9 ? 0 : m >= 1e6 ? 1 : m >= 1e3 ? 2 : 3;
+    while (tier > 0 && Number((m / MONEY_TIERS[tier][0]).toFixed(MONEY_TIERS[tier][1])) >= 1000) tier--;
+    const [size, digits, tag] = MONEY_TIERS[tier];
+    return "$" + pin(key, m / size, digits) + tag;
   };
   const pct = (key, frac) => pin(key, Math.abs(frac) * 100, 2) + "%";
   const whole = (key, v) => pin(key, v, 0);

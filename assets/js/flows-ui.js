@@ -20,10 +20,74 @@
     return Number.isFinite(n) ? n : null;
   };
 
+  const NOISE = 1e-9;
+
+  const SCALE_SUFFIX = ["", "K", "M", "B", "T"];
+
+  const SHORT_DP = [0, 0, 1, 2, 2];
+
+  function fixedHalfUp(a, dp, shift = 0) {
+    const m = /^(\d+)(?:\.(\d+))?(?:e([+-]\d+))?$/.exec(String(a));
+    const digits = m[1] + (m[2] || "");
+    const keep = m[1].length + (m[3] ? Number(m[3]) : 0) + shift + dp;
+    let n;
+    if (keep < 0) n = 0n;
+    else if (keep >= digits.length) n = BigInt(digits + "0".repeat(keep - digits.length));
+    else n = BigInt(digits.slice(0, keep) || "0") + (digits.charCodeAt(keep) >= 53 ? 1n : 0n);
+    const s = n.toString().padStart(dp + 1, "0");
+    return dp ? s.slice(0, s.length - dp) + "." + s.slice(s.length - dp) : s;
+  }
+
+  const unitFloor = (dp) => (dp ? "0." + "0".repeat(dp - 1) + "1" : "1");
+
+  const grouped = (s) => s.replace(/^\d+/, (d) => d.replace(/\B(?=(\d{3})+$)/g, ","));
+
+  function formatFixed(v, o) {
+    if (typeof v !== "number" || !Number.isFinite(v)) return DASH;
+    const { dp = 2, shift = 0, prefix = "", suffix = "", plus = false, group = false } = o || {};
+    const a = Math.abs(v);
+    if (a < NOISE) return prefix + fixedHalfUp(0, dp) + suffix;
+    const sign = v < 0 ? MINUS : v > 0 ? (plus ? "+" : "") : "";
+    const s = fixedHalfUp(a, dp, shift);
+    if (/^[0.]+$/.test(s)) return sign + "<" + prefix + unitFloor(dp) + suffix;
+    return sign + prefix + (group ? grouped(s) : s) + suffix;
+  }
+
+  const compactDp = (n, i) => (i === 0 ? 0 : n >= 100 ? 0 : n >= 10 ? 1 : i === 1 ? 1 : 2);
+
+  const shortDp = (n, i) => SHORT_DP[i];
+
+  const fixedUnitDp = (dp) => (dp === undefined ? compactDp : (n, i) => (i === 0 ? 0 : dp));
+
+  function formatScaled(v, dpFor, prefix = "", plus = false) {
+    if (typeof v !== "number" || !Number.isFinite(v)) return DASH;
+    const a = Math.abs(v);
+    if (a < NOISE) return prefix + "0";
+    const sign = v < 0 ? MINUS : v > 0 ? (plus ? "+" : "") : "";
+    let i = 0;
+    while (i < 4 && a >= 10 ** (3 * (i + 1))) i++;
+    let s, dp;
+    for (;;) {
+      dp = dpFor(a / 10 ** (3 * i), i);
+      s = fixedHalfUp(a, dp, -3 * i);
+      const n = Number(s);
+      if (n >= 1000 && i < 4) { i++; continue; }
+      const d2 = dpFor(n, i);
+      if (d2 < dp) { dp = d2; s = fixedHalfUp(a, d2, -3 * i); }
+      break;
+    }
+    if (/^[0.]+$/.test(s)) return sign + "<" + prefix + unitFloor(dp);
+    return sign + prefix + s + SCALE_SUFFIX[i];
+  }
+
+  const wholePercent = (v) => {
+    const n = Number(fixedHalfUp(Math.abs(v), 0, 2));
+    return v < 0 ? -n : n;
+  };
+
   const fmtSigned = (v, dp) => {
     const n = isNum(v);
-    if (n === null) return DASH;
-    return (n < 0 ? MINUS : n > 0 ? "+" : "") + Math.abs(n).toFixed(dp === undefined ? 0 : dp);
+    return n === null ? DASH : formatFixed(n, { dp: dp === undefined ? 0 : dp, plus: true });
   };
 
   const DAY = 864e5, off = (d) => new Date(d).getUTCDay() % 6 === 0;
@@ -222,18 +286,7 @@
   const paint = (c) => cssVar(c || "--label-2");
 
   const sgn = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
-  function compact(v, dp) {
-    const a = Math.abs(v);
-    const fmt = (x, suf) => {
-      const d = dp !== undefined ? dp : x >= 100 ? 0 : x >= 10 ? 1 : 2;
-      return x.toFixed(suf === "K" && d === 2 ? 1 : d) + suf;
-    };
-    let out = a >= 1e9 ? fmt(a / 1e9, "B") : a >= 1e6 ? fmt(a / 1e6, "M") : a >= 1e3 ? fmt(a / 1e3, "K") : String(Math.round(a));
-    if (/^1000(\.0+)?K$/.test(out)) out = fmt(a / 1e6, "M");
-    else if (/^1000(\.0+)?M$/.test(out)) out = fmt(a / 1e9, "B");
-    else if (out === "1000") out = fmt(a / 1e3, "K");
-    return out;
-  }
+  const compact = (v, dp) => formatScaled(typeof v === "number" ? Math.abs(v) : v, fixedUnitDp(dp));
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const isoDay = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
   const TRT_MS = 108e5;
@@ -270,21 +323,20 @@
   });
 
   const F = {
-    px: (v, dp = 2) => (num(v) === null ? DASH : (v < 0 ? MINUS : "") + Math.abs(v).toFixed(dp)),
-    pct: (v, dp = 1, signed = false) => {
-      if (num(v) === null) return DASH;
-      const r = +(v * 100).toFixed(dp);
-      return (signed ? sgn(r) : r < 0 ? MINUS : "") + Math.abs(r).toFixed(dp) + "%";
-    },
-    pts: (v, dp = 1) => (num(v) === null ? DASH : sgn(v) + Math.abs(v * 100).toFixed(dp)),
-    num: (v, signed = false, dp) => (num(v) === null ? DASH : (signed ? sgn(v) : v < 0 ? MINUS : "") + compact(v, dp)),
-    money: (v, signed = false, dp) => (num(v) === null ? DASH : (signed ? sgn(v) : v < 0 ? MINUS : "") + "$" + compact(v, dp)),
-    int: (v, signed = false) => (num(v) === null ? DASH : (signed ? sgn(Math.round(v)) : v < 0 ? MINUS : "") + Math.round(Math.abs(v)).toLocaleString("en-US")),
-    signed: (v, dp = 0) => (num(v) === null ? DASH : sgn(+v.toFixed(dp)) + Math.abs(v).toFixed(dp)),
+    px: (v, dp = 2) => formatFixed(v, { dp }),
+    pct: (v, dp = 1, signed = false) => formatFixed(v, { dp, shift: 2, suffix: "%", plus: signed }),
+    pts: (v, dp = 1) => formatFixed(v, { dp, shift: 2, plus: true }),
+    num: (v, signed = false, dp) => formatScaled(v, fixedUnitDp(dp), "", signed),
+    money: (v, signed = false, dp) => formatScaled(v, fixedUnitDp(dp), "$", signed),
+    int: (v, signed = false) => formatFixed(v, { dp: 0, plus: signed, group: true }),
+    signed: (v, dp = 0) => formatFixed(v, { dp, plus: true }),
+    scaled: (v, dpFor, prefix, plus) => formatScaled(v, dpFor, prefix, plus),
+    strike: (k) => (num(k) === null || !(k > 0) ? DASH : Number.isInteger(k) ? String(k) : fixedHalfUp(k, Math.abs(k * 10 - Math.round(k * 10)) < 1e-6 ? 1 : 2)),
     day: (d) => (isoDay(d) ? MON[+d.slice(5, 7) - 1] + " " + +d.slice(8, 10) : DASH),
     time: (v, zone) => { const d = trt(v); return d ? hhmm(d) + (zone === false ? "" : " TRT") : DASH; },
     stamp: (v) => { const d = trt(v); return d ? ymd(d) + " " + hhmm(d) + " TRT" : null; },
     trtDay: (v) => { const d = trt(v); return d ? ymd(d) : null; },
+    etDay: (v) => { const t = instant(v); return t === null ? null : nyClock(new Date(t)).date; },
     when: (v, now) => { const d = trt(v), n = trt(now); return d ? (n && ymd(n) === ymd(d) ? "" : ymd(d) + " ") + hhmm(d) + " TRT" : null; },
     axis: (v, day) => { const t = instant(v), b = dayAt(day); return t === null || b === null ? null : Math.floor((t + TRT_MS - b) / 6e4); },
     tick: (m) => { if (typeof m !== "number" || !Number.isFinite(m)) return null; const n = ((Math.floor(m) % 1440) + 1440) % 1440; return two(Math.floor(n / 60)) + ":" + two(n % 60); },
@@ -305,22 +357,14 @@
         if (x.askStated && x.bidStated) { a += x.ask; b += x.bid; any = true; }
       }
       if (!any) return { share: null, classified: null, side: null };
-      const share = a + b ? a / (a + b) : null, classified = (a + b) / p, w = (v) => +(v * 100).toFixed(0);
+      const share = a + b ? a / (a + b) : null, classified = (a + b) / p, w = wholePercent;
       return { share, classified, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
     },
     askSaid: (x) => (!x || x.classified === null ? DASH : x.share === null ? "none sided" : F.pct(x.share, 0) + " ask side " + MID + " " + F.pct(x.classified, 0) + " sided"),
     askLabel: "Ask-side share of the premium the vendor sided",
   };
-  const SHORT = [[1e9, 2, "B"], [1e6, 1, "M"], [1e3, 0, "K"]];
-  const shortUsd = (n, signed) => {
-    const a = Math.abs(n), t = SHORT.find((u) => a >= u[0]);
-    return (n < 0 ? MINUS : signed && n > 0 ? "+" : "") + "$" + (t ? (a / t[0]).toFixed(t[1]) + t[2] : a.toFixed(0));
-  };
-  const exactUsd = (n, signed) => {
-    const a = Math.abs(n), dp = a < 1000 ? 2 : 0, r = +(a + 1e-9).toFixed(dp);
-    return (n < 0 && r ? MINUS : signed && n > 0 && r ? "+" : "") + "$" +
-      r.toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp });
-  };
+  const shortUsd = (n, signed) => formatScaled(n, shortDp, "$", signed);
+  const exactUsd = (n, signed) => formatFixed(n, { dp: Math.abs(n) < 1000 ? 2 : 0, prefix: "$", plus: signed, group: true });
   const UNITS = {
     moneyCompact: (n, o) => (o.dp === "short" ? shortUsd(n, o.signed) : F.money(n, o.signed, o.dp)),
     money: (n, o) => exactUsd(n, o.signed),

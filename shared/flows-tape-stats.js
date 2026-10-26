@@ -1,3 +1,5 @@
+import { wholePercent } from "./flows-round.js";
+
 export const TIERS = Object.freeze(["A", "a", "m", "b", "B", "n"]);
 
 export const SIDE_TAGS = Object.freeze(["ask_side", "bid_side", "mid_side", "no_side"]);
@@ -229,7 +231,7 @@ export function askSplit(row) {
   return { ask: a * k, bid: b * k, none: Math.max(0, prem - (a + b) * k), askStated: x !== null, bidStated: y !== null };
 }
 
-const whole = (v) => +(v * 100).toFixed(0);
+const whole = wholePercent;
 
 export function askShare(rows) {
   let ask = 0;
