@@ -598,7 +598,7 @@
             if (!ghost) for (const n of NL) n.chip = nodeChip(n, t[0]);
             const rm = LN.map(rMax), cw = LN.map(cMax), s0 = (W - 2 * margin - (rm[0] + 8 + cw[0]) - (rm[3] + 8 + cw[3])) / 6;
             pick = t;
-            if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c + 1] + 8 <= 2 * s0)) break;
+            if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c === 1 ? 0 : 3] + 8 <= 2 * s0)) break;
           }
           return pick;
         };
@@ -625,7 +625,7 @@
         const left = rm[0] + 8 + cw[0], right = rm[3] + 8 + cw[3], s0 = (W - 2 * margin - left - right) / 6;
         G.ox = W / 2 + (left - right) / 2; G.s0 = Math.max(s0, 1); G.oy = G.midY;
         [-3, -1, 1, 3].forEach((wx, i) => {
-          const x = G.ox + wx * s0, side = i ? "start" : "end";
+          const x = G.ox + wx * s0, side = i > 1 ? "start" : "end";
           cols.push({ x, wx, side, rMax: rm[i], chipX: side === "end" ? x - rm[i] - 8 : x + rm[i] + 8 });
         });
         LN.forEach((L, li) => {

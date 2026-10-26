@@ -245,7 +245,7 @@ function auditFn(sc, rest) {
     const lo = Math.min(...c.map((s) => cross(s) - s.r)), hi = Math.max(...c.map((s) => cross(s) + s.r));
     if (Math.abs((lo + hi) / 2 - sc.midC) > 1) bad.push("layer " + i + " centred at " + ((lo + hi) / 2).toFixed(1) + " not " + sc.midC.toFixed(1));
     if (!sc.vert) {
-      const edges = new Set(L.filter((l) => l.col === i).map((l) => Math.round((i === 0 ? l.x + l.w : l.x) * 2)));
+      const edges = new Set(L.filter((l) => l.col === i).map((l) => Math.round((i <= 1 ? l.x + l.w : l.x) * 2)));
       if (edges.size > 1) bad.push("layer " + i + " chips on " + edges.size + " x edges");
     }
   });
