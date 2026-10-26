@@ -436,6 +436,9 @@ function evidenceJson(e) {
   text = canonicalJson(slim);
   if (utf8Length(text) <= LIMITS.evidenceBytes) return text;
   slim.clauses = slim.clauses.map((c) => ({ m: c.m, op: c.op, x: c.x, value: c.value, unit: c.unit, label: c.label.slice(0, 24), subject: c.subject, ok: c.ok }));
+  text = canonicalJson(slim);
+  if (utf8Length(text) <= LIMITS.evidenceBytes) return text;
+  for (const k of ["symbol", "sector", "occ", "subject"]) if (typeof slim[k] === "string") slim[k] = slim[k].slice(0, 64);
   return canonicalJson(slim);
 }
 
@@ -502,10 +505,11 @@ function stepSubject(wire, P, env, { row, t, h, key }) {
   return res;
 }
 
-const changed = (row, next) => {
+const changed = (row, next, live) => {
   if (!row) return true;
   const a = unpackState(row);
-  return a.phase !== next.phase || a.cnt !== next.cnt || (a.coolUntil || null) !== (next.coolUntil || null) || a.unseen !== next.unseen || a.c === null;
+  return a.phase !== next.phase || a.cnt !== next.cnt || (a.coolUntil || null) !== (next.coolUntil || null) || a.unseen !== next.unseen || a.c === null
+    || (live && a.lastSession !== next.lastSession);
 };
 
 function capRank(a, b) {
@@ -638,7 +642,7 @@ function runWire(wire, P, env) {
     if (step.next === null) {
       if (row) out.deletes.push({ wire_id: wire.id, subject: key });
     } else if (step.next !== undefined) {
-      if (changed(row, step.next)) out.upserts.push(packState(wire, key, step.next));
+      if (changed(row, step.next, wire.cadence === "live")) out.upserts.push(packState(wire, key, step.next));
     } else if (step.mismatch && row) out.deletes.push({ wire_id: wire.id, subject: key });
   };
   if (wire.subjectKind === "c") {
