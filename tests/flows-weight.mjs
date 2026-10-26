@@ -145,6 +145,8 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
 }
+const EVENTS_RECENT = { od: "LANE-4", bytes: 2548, gzip: 640, why: "lane 4: the Events page counts the names whose report moved the price on each of the last six sessions, lists the largest movers among those that reacted on the nightly's session and says why when the report column is withheld, pending or empty, and prints its window in sessions through a date (flows-events.js 49,786 to 52,334 B raw and 14,043 to 14,665 B gzip); the raw ceiling is held by HELD_RAW_KIB, so only gzip rises" };
+GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
 for (const name of ["sidePage", "watchPage"]) {
