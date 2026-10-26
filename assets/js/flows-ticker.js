@@ -1262,7 +1262,7 @@
     if (on) on.focus({ preventScroll: true });
   }
 
-  const DOCK_WHY = { "m-movelab": "Not for index funds and funds: they have no single-company report or typical day.", "m-worlds": "Not on this card: no fitted smile to draw two worlds from.", "m-hedge": "Not on this card: no priced structures to hedge with.", "m-ideas": "Not on this card: the engine priced no ideas.", "m-network": "Not built for this name.", "m-tape": "Not on this card: no prints read." };
+  const DOCK_WHY = { "m-movelab": "Not for index funds and funds: they have no single-company report or typical day.", "m-worlds": "Not on this card: no fitted smile to draw two worlds from.", "m-hedge": "Not on this card: no priced structures to hedge with.", "m-ideas": "Not on this card: the engine priced no ideas.", "m-network": "Not on this card: this page has no flow network to draw.", "m-tape": "Not on this card: no prints read." };
 
   function paintDock() {
     if (!dockEl) return;
@@ -2897,6 +2897,16 @@
     UI.defer("movelab", { when: "visible", el: host, label: "The move lab" }).then(() => window.FlowsUI.moveLab && window.FlowsUI.moveLab.mount(host, raw));
   }
 
+  const NETWORK = { host: null };
+
+  function buildNetwork(card) {
+    if (!UI.defer || !$("ftNetwork")) return;
+    const host = NETWORK.host || (NETWORK.host = h("div", { class: "is-slot" }, UI.silent(ST("quiet", "The flow network loads when this module comes into view."), "Flow network", 140)));
+    const raw = { card, cardX: STATE.cardX, spot: spotOf(card) };
+    mod({ id: "m-network", title: "Flow network", span: [12, 12], st: OK, body: [host], index: 4 });
+    UI.defer("network", { when: "visible", el: host, label: "The flow network" }).then(() => { const f = window.FlowsUI.flowNet; if (f) f.ready.then(() => f.mount(host, raw)); });
+  }
+
   const VERDICT_HOME = { parent: verdictEl.parentNode, before: verdictEl.nextSibling };
 
   function parkVerdict() {
@@ -2927,7 +2937,7 @@
     showGrid();
     parkVerdict();
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab];
+    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildNetwork];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }

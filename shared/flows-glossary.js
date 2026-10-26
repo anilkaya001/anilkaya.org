@@ -1,3 +1,5 @@
+const HOME = { file: "assets/js/flows-overview.js", page: "Home", href: "/flows/" };
+const EVENTS = { file: "assets/js/flows-events.js", page: "Events", href: "/flows/events/" };
 const MARKET = { file: "assets/js/flows-market.js", page: "Market", href: "/flows/market/" };
 const MARKET_BELOW = { ...MARKET, file: "assets/js/flows-market-below.js" };
 const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker page", href: null };
@@ -12,6 +14,10 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "ask-share", term: "Ask share", ...UNUSUAL, lines: [
     "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side.",
+  ] },
+  { key: "beyond-2", term: "Beyond 2", ...MOVES, lines: [
+    "Beyond 2 counts names more than 2 IV-days from flat, up or down.",
+    "Share is that count over the sector's names.",
   ] },
   { key: "board-map", term: "Board map", ...BOARDS, lines: [
     "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
@@ -43,6 +49,15 @@ export const GLOSSARY = Object.freeze([
   { key: "lean", term: "Lean", ...UNUSUAL, lines: [
     "Lean is a convention: ask-side calls and bid-side puts count bullish.",
   ] },
+  { key: "parts-of-move", term: "Parts of the move", ...MOVES, lines: [
+    "Parts of the move: market, peers against market, the name against its peers.",
+    "The parts add to the move. They are not beta-adjusted.",
+  ] },
+  { key: "sector-median", term: "Sector median", ...MOVES, lines: [
+    "Each sector's median move, and its names beyond 2 IV-days.",
+    "Median is signed, in IV-days.",
+    "Names reporting within 21 sessions are left out of every row.",
+  ] },
   { key: "score", term: "Score", ...BOARDS, lines: [
     "Scores run from −100 to +100 and rank names against every scored name; they are a ranked attention signal, not a return forecast.",
   ] },
@@ -54,6 +69,28 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "typical-day", term: "Typical day", ...MOVES, lines: [
     "A typical day is a robust one-day scale from the last 252 sessions.",
+  ] },
+  { key: "cleared-the-band", term: "Cleared the band", ...HOME, lines: [
+    "Names past the dead band on each board, counted whole rather than to the rows this page draws.",
+  ] },
+  { key: "earnings-bars", term: "Earnings bars", ...EVENTS, lines: [
+    "The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
+  ] },
+  { key: "flagged-windows", term: "Flagged windows", ...HOME, lines: [
+    "Option windows the vendor's own rules flagged in this read.",
+  ] },
+  { key: "implied-move", term: "Implied move", ...EVENTS, lines: [
+    "The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.",
+  ] },
+  { key: "put-call", term: "Put/call volume", ...HOME, lines: [
+    "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",
+  ] },
+  { key: "reaction", term: "Reaction", ...EVENTS, lines: [
+    "The last session's reporters: each bar is the realized one-day move over the move the options implied, less one.",
+    "Above the line a name moved more than it was priced to; below, less.",
+  ] },
+  { key: "report-timing", term: "Before the open or after the close", ...EVENTS, lines: [
+    "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it.",
   ] },
   { key: "conviction", term: "Conviction", ...TICKER, lines: [
     "How far the families agree, how much of the card was measured, and how long the flow persisted.",
@@ -102,4 +139,4 @@ export const GLOSSARY = Object.freeze([
   ] },
 ]);
 
-export const GLOSSARY_PAGES = Object.freeze([MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, BOARDS.page, TICKER.page]);
+export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page]);

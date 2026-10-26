@@ -1,1 +1,1 @@
-{"name": "flows-garch", "class": "N", "group": "shard", "timing": false, "medianS": 23.6, "shard": 9, "files": ["flows-garch.mjs"], "covers": []}
+{"name": "flows-garch", "class": "N", "group": "shard", "timing": false, "medianS": 23.6, "shard": 1, "files": ["flows-garch.mjs"], "covers": []}

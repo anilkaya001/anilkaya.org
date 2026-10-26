@@ -1,0 +1,1 @@
+{"name": "flows-flow-net-render", "class": "C", "group": "shard", "timing": false, "medianS": 92, "shard": 12, "command": "node flows-flow-net-render.mjs", "files": ["flows-flow-net-render.mjs"], "covers": ["assets/css/flows-ticker-network.css","assets/js/flows-ticker-network.js","assets/js/flows-ticker.js","scripts/flows-pipeline.mjs"]}

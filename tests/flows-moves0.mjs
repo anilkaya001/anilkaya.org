@@ -20,6 +20,163 @@ const read = (p) => fs.readFileSync(ROOT + p, "utf8");
 const SQRT252 = 15.874507866387544;
 
 {
+  const px = (t, chg, sector = "X") => ({ t, chg, sector });
+  const base = [0.002, 0.005, 0.008, 0.010, 0.012, 0.012, 0.014, 0.016, 0.020, 0.030].map((c, i) => px("P" + i, c));
+  const world = [px("S", 0.031), px("SPY", 0.004), ...base];
+  const got = M.partsOf(world, "S");
+  deep(got.parts.map((p) => p.tenths), [4, 8, 19], "hand worked: SPY 0.4, the peer median 1.2 is 0.8 above it, the name's 3.1 is 1.9 above that");
+  deep(got.parts.map((p) => p.label), ["Market (SPY)", "Peers vs market", "Name vs peers"], "and the labels say what each gap is");
+  eq(got.total, 31, "the printed move is 3.1");
+  near(got.peers.median, 0.012, 1e-15, "the peer median of ten is the mean of the fifth and sixth: 0.012");
+  near(got.peers.spread, 1.4826 * 0.004, 1e-12, "the spread is 1.4826 times the median absolute deviation 0.004");
+  near(got.peers.z, 0.019 / (1.4826 * 0.004), 1e-9, "z is 0.019 over that spread: 3.2038");
+  eq(got.peers.n, 10, "ten peers");
+  eq(M.partsOf(world.filter((x) => x.t !== "P0"), "S").peers, null, "nine peers is not enough");
+  eq(M.partsOf(world.filter((x) => x.t !== "P0"), "S").peerWhy, "9 peers, needs 10.", "and says how many there were");
+  deep(M.partsOf(world.filter((x) => x.t !== "P0"), "S").parts.map((p) => p.tenths), [4, 27], "with no peers the name is read against the market alone: 0.4, then 2.7");
+  eq(M.partsOf(world.map((x) => (x.t === "P0" ? { ...x, chg: null } : x)), "S").peerWhy, "9 peers, needs 10.", "a null change is not a peer and is never a zero");
+  eq(M.partsOf([...world, px("QQQ", 0.5)], "S").peers.n, 10, "QQQ is never a peer");
+  eq(M.partsOf([...world, px("PX", 0.5, "Y")], "S").peers.n, 10, "nor is a name of another sector");
+  eq(M.partsOf([...world, px("PN", 0.5, null)], "S").peers.n, 10, "nor one with no sector");
+  eq(M.partsOf(world, "SPY").parts.length, 0, "SPY has no parts");
+  eq(M.partsOf(world, "SPY").peerWhy, "A market reference has no peers.", "only the reason");
+  deep(M.partsOf([...world, px("NOSEC", 0.02, null)], "NOSEC").parts.map((p) => p.tenths), [4, 16], "a name with no sector keeps the market part");
+  eq(M.partsOf([...world, px("NOSEC", 0.02, null)], "NOSEC").peerWhy, "No sector, so no peers.", "and says why there are no peers");
+  eq(M.partsOf(world.map((x) => (x.t === "SPY" ? { ...x, chg: null } : x)), "S").parts.length, 2, "with no SPY the parts are the peer median and the name's gap to it");
+  deep(M.partsOf(world.map((x) => (x.t === "SPY" ? { ...x, chg: null } : x)), "S").parts.map((p) => p.label), ["Peers' median", "Name vs peers"], "labelled as such");
+  eq(M.partsOf(world, "NOPE"), null, "an unknown name has none");
+  eq(M.partsOf([px("S", null)], "S"), null, "a name with no change has none");
+  eq(M.partsOf(null, "S"), null, "no rows, no parts");
+  eq(M.partsOf([px("S", 0.01), ...Array.from({ length: 10 }, (_, i) => px("Q" + i, 0.01))], "S").peers.z, null, "a zero spread has no z");
+  const flat = M.partsOf([px("S", -0.0003), px("SPY", 0.0002)], "S");
+  eq(flat.total, 0, "a move that rounds to nothing is a plain zero, not minus zero");
+  eq(flat.parts.reduce((a, p) => a + p.tenths, 0), flat.total, "and the parts still add to it");
+  const drift = M.partsOf([px("S", 0.0344), px("SPY", 0.0044), ...[0.001, 0.004, 0.008, 0.011, 0.0126, 0.0126, 0.014, 0.017, 0.02, 0.03].map((c, i) => px("P" + i, c))], "S");
+  deep(drift.parts.map((p) => p.tenths), [4, 9, 21], "levels are rounded, not gaps: 0.44 and 1.26 are 0.4 and 1.3, so the name's 3.44 leaves 2.1");
+  eq(drift.parts.reduce((a, p) => a + p.tenths, 0), 34, "and the three add to the printed 3.4");
+  for (const sentence of M.PARTS_SENTENCES) ok(M.wordCount(sentence) <= M.HEADER_WORDS_MAX && !M.FORBIDDEN_WORDS.some((w) => new RegExp("\\b" + w + "\\b", "i").test(sentence)), "a parts sentence is short and clean: " + sentence);
+  ok(M.HEADER_SENTENCES.includes(M.PARTS_SENTENCES[0]), "and is held with the other header sentences");
+}
+
+{
+  const IV = SQRT252;
+  const r = (t, m, sector, ed) => ({ t, chg: m, iv30p: IV, sector, ed: ed === undefined ? null : ed });
+  const find = (list, name) => list.find((x) => x.name === name);
+  eq(M.ivDays(2, IV), 2, "a change of 2 on an IV of the square root of 252 is exactly 2 IV-days, so the boundary can be hit exactly");
+  const hand = M.sectorStats([
+    r("A1", -3, "Alpha"), r("A2", -0.5, "Alpha"), r("A3", 0.4, "Alpha"), r("A4", 2, "Alpha"), r("A5", 2.01, "Alpha"),
+    r("A6", 9, "Alpha", 21), r("A7", 9, "Alpha", 22),
+  ]);
+  const alpha = find(hand, "Alpha");
+  eq(alpha.total, 7, "hand worked: seven names in the sector");
+  eq(alpha.measured, 7, "all seven have an implied day");
+  eq(alpha.apart, 1, "one reports within 21 sessions and is left out of every figure");
+  eq(alpha.n, 6, "which leaves six");
+  near(alpha.median, 1.2, 1e-12, "the median of -3, -0.5, 0.4, 2, 2.01 and 9 is (0.4 + 2) over 2");
+  eq(alpha.beyond, 3, "-3 and 2.01 are beyond 2, and so is the 9 that reports in 22 sessions; exactly 2 is not");
+  near(alpha.share, 3 / 6, 1e-12, "share is that count over the six");
+  eq(alpha.why, null, "a sector with figures gives no reason");
+  eq(M.sectorStats([r("X", 2, "S"), r("Y", -2, "S")])[0].beyond, 0, "exactly 2 and exactly -2 are on the line and are not beyond it");
+  eq(M.sectorStats([r("X", 2.0000001, "S")])[0].beyond, 1, "just past 2 is beyond");
+  eq(M.sectorStats([r("X", -2.0000001, "S")])[0].beyond, 1, "and just past -2 is beyond");
+  const mixed = M.sectorStats([
+    r("B1", 1, "Ghost"), { t: "B2", chg: 1, iv30p: null, sector: "Ghost", ed: null }, { t: "B3", chg: 1, iv30p: 0, sector: "Ghost", ed: null },
+    r("C1", 1, "Soon", 3), r("C2", 2, "Soon", 21),
+    r("D1", 1, null), r("D2", 3, ""),
+  ]);
+  const ghost = find(mixed, "Ghost");
+  eq(ghost.n, 1, "a name with no implied volatility is not measured and a name with it is");
+  const none = M.sectorStats([{ t: "B2", chg: 1, iv30p: null, sector: "Ghost", ed: null }, { t: "B3", chg: 1, iv30p: 0, sector: "Ghost", ed: null }])[0];
+  eq(none.median, null, "a sector with no implied volatility has no median, never zero");
+  eq(none.beyond, null, "no count of names beyond, never zero");
+  eq(none.share, null, "no share");
+  eq(none.why, M.WHY_NO_IV, "and says why");
+  eq(none.total, 2, "its names are still counted");
+  eq(none.measured, 0, "though none is measured");
+  const soon = find(mixed, "Soon");
+  eq(soon.median, null, "a sector whose measured names all report soon has no median");
+  eq(soon.why, M.WHY_ALL_EVENT, "and says that");
+  eq(soon.apart, 2, "with both names counted apart");
+  eq(soon.measured, 2, "and measured");
+  const ns = find(mixed, M.NO_SECTOR);
+  eq(ns.total, 2, "names with a null or empty sector are one sector, No sector");
+  near(ns.median, 2, 1e-12, "whose median is the middle of 1 and 3");
+  const pinned = M.sectorStats([r("SPY", 50, "Alpha"), r("QQQ", -50, "Alpha"), r("A1", 1, "Alpha"), r("SPY2", 1, "Funds")]);
+  eq(pinned.length, 2, "SPY and QQQ are not in any sector");
+  near(find(pinned, "Alpha").median, 1, 1e-12, "so they cannot move a sector's median");
+  eq(find(pinned, "Alpha").total, 1, "or its count");
+  eq(M.sectorStats([r("SPY", 1, "Funds"), r("QQQ", 1, "Funds")]).length, 0, "a sector holding only the two is not listed");
+  eq(M.sectorStats(null).length, 0, "no rows, no sectors");
+  eq(M.sectorStats([null, { t: 4 }, { t: "" }, undefined]).length, 0, "rows without a ticker are ignored");
+  const tied = M.sectorStats([r("a", 1, "Zulu"), r("b", 1, "Alpha"), r("c", 1, "Mike"), r("d", 2, "Low"), r("e", -1, "Neg"), { t: "g", chg: 1, iv30p: null, sector: "Zed" }, { t: "h", chg: 1, iv30p: null, sector: "Abe" }]);
+  deep(tied.map((x) => x.name), ["Low", "Alpha", "Mike", "Zulu", "Neg", "Abe", "Zed"], "largest median first, ties by name, a sector with no median last and by name");
+  deep(M.sectorStats([r("a", 1, "Zulu"), r("b", 1, "Alpha")]).map((x) => x.name), M.sectorStats([r("b", 1, "Alpha"), r("a", 1, "Zulu")]).map((x) => x.name), "and the order does not depend on the order of the rows");
+  eq(M.shareText(0, 5), "0%", "none of five is 0%");
+  eq(M.shareText(1, 300), "<1%", "one of 300 is under half a percent and prints as under 1%, not as 0%");
+  eq(M.shareText(1, 200), "1%", "one of 200 is half a percent and rounds to 1%");
+  eq(M.shareText(3, 8), "38%", "three of eight is 37.5 and rounds up");
+  eq(M.shareText(5, 5), "100%", "all of them");
+  eq(M.shareText(0, 0), null, "of no names there is no share");
+  eq(M.shareText(2, 1), null, "more than all is refused");
+  eq(M.shareText(-1, 5), null, "and so is a negative count");
+  eq(M.shareText(1.5, 5), null, "and a fraction");
+  for (const sentence of [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE, M.WHY_NO_IV, M.WHY_ALL_EVENT]) {
+    ok(M.HEADER_SENTENCES.includes(sentence) && M.wordCount(sentence) <= M.HEADER_WORDS_MAX, "a sector sentence is held with the header sentences and is short: " + sentence);
+  }
+  eq(M.SECTOR_BEYOND, 2, "the line is 2 IV-days");
+  deep(M.LIST_VIEWS, ["names", "sectors"], "the list has two views");
+  for (const gone of ["MAP_CAP_LINE", "MAP_EQUAL_LINE", "KEY_EVENT", "VIEWS"]) ok(!(gone in M), gone + " described a map view that does not exist and is removed");
+  const rnd = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const q = rnd(20261027);
+  const NAMES = ["Alpha", "Beta", "Gamma", null, "", "Delta"];
+  const brute = (rows) => {
+    const groups = {};
+    for (const x of rows) {
+      if (!x || typeof x.t !== "string" || !x.t || x.t === "SPY" || x.t === "QQQ") continue;
+      const name = x.sector ? x.sector : "No sector";
+      (groups[name] = groups[name] || []).push(x);
+    }
+    const out = Object.keys(groups).map((name) => {
+      const g = groups[name];
+      const ms = g.map((x) => (typeof x.chg === "number" && typeof x.iv30p === "number" && x.iv30p > 0 ? x.chg / (x.iv30p / Math.sqrt(252)) : null));
+      const measured = ms.filter((m) => m !== null).length;
+      const clean = ms.filter((m, i) => m !== null && !(typeof g[i].ed === "number" && g[i].ed <= 21)).sort((a, b) => a - b);
+      let median = null;
+      if (clean.length) median = clean.length % 2 ? clean[(clean.length - 1) / 2] : (clean[clean.length / 2 - 1] + clean[clean.length / 2]) / 2;
+      const beyond = clean.filter((m) => m > 2 || m < -2).length;
+      return { name, total: g.length, measured, n: clean.length, median, beyond: clean.length ? beyond : null };
+    });
+    out.sort((a, b) => (a.median === null) - (b.median === null) || (a.median === null ? 0 : b.median - a.median) || (a.name < b.name ? -1 : 1));
+    return out;
+  };
+  let worlds = 0, sectors = 0, empties = 0;
+  for (let w = 0; w < 300; w++) {
+    const rows = [];
+    const n = Math.floor(q() * (w % 4 === 0 ? 8 : 90));
+    for (let i = 0; i < n; i++) {
+      rows.push({ t: "T" + i, chg: q() < 0.06 ? null : Math.round((q() - 0.5) * 0.3 * 1e4) / 1e4, iv30p: q() < 0.08 ? (q() < 0.5 ? null : 0) : Math.round((0.15 + q() * 0.6) * 1e4) / 1e4, sector: NAMES[Math.floor(q() * 6)], ed: q() < 0.2 ? Math.floor(q() * 40) : null });
+    }
+    if (q() < 0.6) rows.push({ t: "SPY", chg: 0.5, iv30p: 0.2, sector: "Alpha", ed: null });
+    if (q() < 0.6) rows.push({ t: "QQQ", chg: -0.5, iv30p: 0.2, sector: "Beta", ed: null });
+    const got = M.sectorStats(rows);
+    const want = brute(rows);
+    worlds++;
+    sectors += got.length;
+    empties += got.filter((x) => x.median === null).length;
+    eq(got.length, want.length, "world " + w + ": the same sectors");
+    got.forEach((x, i) => {
+      const y = want[i];
+      eq(x.name, y.name, "world " + w + ": order position " + i);
+      deep([x.total, x.measured, x.n, x.beyond], [y.total, y.measured, y.n, y.beyond], "world " + w + " " + x.name + ": counts");
+      if (y.median === null) eq(x.median, null, "world " + w + " " + x.name + ": no median"); else near(x.median, y.median, 1e-12, "world " + w + " " + x.name + ": median");
+      eq(x.apart, y.measured - y.n, "world " + w + " " + x.name + ": apart");
+      eq(x.share === null, y.n === 0, "world " + w + " " + x.name + ": a share only with figures");
+    });
+  }
+  ok(worlds === 300 && sectors > 600 && empties > 20, "the leaf equals an independent computation over " + worlds + " worlds, " + sectors + " sectors and " + empties + " with no median");
+}
+
+{
   near(M.ivDays(-0.031, 0.35), -0.031 * SQRT252 / 0.35, 1e-12, "the definition worked by hand: chg / (iv30p / sqrt(252))");
   near(M.ivDays(-0.031, 0.35), -1.4062, 5e-4, "chg -3.1% on iv30p 35% is -1.4062 IV-days");
   eq(M.signedIvDays(M.ivDays(-0.031, 0.35)), "−1.4", "and prints as minus 1.4");

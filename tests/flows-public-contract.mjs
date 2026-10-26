@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
+import { FLOWS_NAV } from "../shared/flows-pages.js";
 import { GLOSSARY, GLOSSARY_PAGES } from "../shared/flows-glossary.js";
 import { workerSource } from "./lib/source-scan.mjs";
 
@@ -73,6 +74,27 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 }
 
 {
+  const html = await (await call("/flows/about/")).text();
+  const NEEDLE = {
+    overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
+    market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", events: "<strong>Events.</strong>",
+    political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
+  };
+  const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();
+  eq(Object.keys(NEEDLE).sort().join(","), members.join(","), "the about page's table names every page the members' sidebar links, so a new page cannot ship unlisted");
+  const unlisted = (page) => Object.entries(NEEDLE).filter(([, needle]) => !page.includes(needle)).map(([key]) => key);
+  eq(unlisted(html).join(","), "", "the about page describes every page the members' sidebar links");
+  ok(unlisted(html.replace(/<li><strong>Moves\.<\/strong>.*?<\/li>/, "")).join(",") === "moves", "PLANTED WRONG BUILD caught: an about page that forgot Moves is named");
+  ok(unlisted(html.replace(/<li><strong>Events\.<\/strong>.*?<\/li>/, "").replace(/<li><strong>Political\.<\/strong>.*?<\/li>/, "")).join(",") === "events,political", "and one that forgot two pages names both");
+  const keys = html.slice(html.indexOf('id="aKeys"'), html.indexOf('id="aKeep"'));
+  ok(/<kbd>Ctrl<\/kbd> <kbd>K<\/kbd>/.test(keys) && /<kbd>\?<\/kbd>/.test(keys) && /<kbd>Esc<\/kbd>/.test(keys), "the about page's keyboard section names Ctrl K, ? and Esc");
+  const pages = readRepo("shared/flows-pages.js");
+  ok(pages.includes('aria-keyshortcuts="Meta+K Control+K"') && pages.includes('aria-keyshortcuts="?"'), "and the shell really declares those two shortcuts, so the section cannot describe keys nothing answers");
+  const ui = readRepo("assets/js/flows-ui.js");
+  ok(/\(e\.metaKey \|\| e\.ctrlKey\)[^\n]*"k"/.test(ui) && /e\.key === "Escape"/.test(ui), "the kernel binds Ctrl or Command K and Escape");
+}
+
+{
   const login = await (await call("/flows/login/")).text();
   ok(login.includes('href="/flows/about/"'), "the sign-in page links to the about page");
   ok(login.includes('href="/flows/glossary/"'), "and to the glossary");
@@ -106,7 +128,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   for (const p of GLOSSARY_PAGES) ok(lede.replace(/&#39;/g, "'").includes(p), `the lede names ${p}, and claims no page it does not cover`);
   ok(!/each page/.test(lede), "the lede does not claim every page");
   const covered = new Set(GLOSSARY.map((g) => g.href).filter(Boolean));
-  for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
+  for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/", "/flows/", "/flows/events/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
   ok(!/<(?:img|iframe|style)|<script(?![^>]*src=)/i.test(html), "no markup of that kind reaches the page");
   ok(html.includes("expected P&amp;L") && !html.includes("expected P&L"), "ampersands in the strings are escaped");
   ok(html.includes("members&#39; own variances"), "and so are apostrophes");
@@ -139,6 +161,39 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   eq(winter[2], "2026-11-03 01:05 TRT", "and its date follows the TRT day across midnight");
   eq(time(stamped("2026-10-12"))[2], "", "a date-only stamp has no clock to print");
   ok(!/ UTC</.test(stamped("2026-10-12T13:31:00.000Z")), "no UTC label is left on the Home page");
+}
+
+{
+  const bypass = (html) => {
+    const problems = [];
+    const body = html.slice(html.indexOf("<body"));
+    const first = /<(a|button|input|select|textarea)\b[^>]*>/.exec(body);
+    if (!first || first[1] !== "a" || !/class="flows-skip"/.test(first[0])) return ["the first focusable element is not the skip link"];
+    const target = /href="#([^"]+)"/.exec(first[0]);
+    if (!target) return ["the skip link has no target"];
+    if (!/^<a[^>]*>Skip to content<\/a>/.test(body.slice(first.index))) problems.push("the skip link does not say Skip to content");
+    const mains = body.match(/<main\b[^>]*>/g) || [];
+    if (mains.length !== 1) problems.push("the page has " + mains.length + " main elements");
+    else if (!mains[0].includes('id="' + target[1] + '"')) problems.push("the skip link targets #" + target[1] + " and main is " + mains[0]);
+    else if (!mains[0].includes('tabindex="-1"')) problems.push("main cannot take focus, so the skip lands nowhere");
+    return problems;
+  };
+  const pages = { login: PAGES.loginPage({}), about: PAGES.aboutPage(), glossary: PAGES.glossaryPage(), notFound: PAGES.notFoundPage() };
+  for (const [name, html] of Object.entries(pages)) {
+    eq(bypass(html).join("; "), "", `${name}: the first Tab stop is a skip link to a main that can take focus`);
+    ok(html.includes('class="topbar"') && html.indexOf('class="flows-skip"') > 0 && html.indexOf('class="flows-skip"') < html.indexOf('class="topbar"'), `${name}: the skip link comes before the site navigation it bypasses`);
+  }
+  const about = pages.about;
+  ok(bypass(about.replace('<a class="flows-skip" href="#docMain">Skip to content</a>', "")).length > 0, "PLANTED WRONG BUILD caught: a page with no skip link");
+  ok(bypass(about.replace('href="#docMain"', 'href="#nowhere"')).length > 0, "and a link to an id that is not main");
+  ok(bypass(about.replace('id="docMain" tabindex="-1"', 'id="docMain"')).length > 0, "and a main that cannot take focus");
+  ok(bypass(about.replace("Skip to content</a>", "Menu</a>")).length > 0, "and a link that does not say what it does");
+  const link = '<a class="flows-skip" href="#docMain">Skip to content</a>';
+  const pill = /<header class="topbar">[\s\S]*?<\/header>/.exec(about);
+  ok(pill !== null && bypass(about.replace(link, "").replace(pill[0], pill[0] + link)).length > 0, "and a skip link placed after the navigation it should bypass");
+  const css = readRepo("assets/css/flows.css");
+  ok(/\.flows-skip\s*\{[^}]*top:-5rem/.test(css) && /\.flows-skip:focus\s*\{[^}]*top:1rem/.test(css), "the skip link is off screen until it is focused");
+  ok(/\.flows-auth:focus, \.fx-doc:focus \{ outline: 0; \}/.test(css), "and the main it lands on draws no outline of its own");
 }
 
 console.log(`✓ flows-public: ${checks} assertions — the front door and the glossary answer a signed-out reader as static, noindexed, headered pages, move to a 404 behind one switch, name only strings the pages themselves show, and link in from the sign-in form`);
