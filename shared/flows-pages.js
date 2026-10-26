@@ -3,6 +3,18 @@ export const ASSET_VERSION = "394";
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
+import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
+
+export const CALENDAR_BACK_DAYS = 14;
+export const CALENDAR_SESSIONS = 60;
+
+export function sessionCalendar(now = Date.now()) {
+  const today = Number.isFinite(now) ? etDayOf(now) : null;
+  if (!today) return [];
+  const out = [];
+  for (let d = shiftDay(today, -CALENDAR_BACK_DAYS); d && out.length < CALENDAR_SESSIONS; d = shiftDay(d, 1)) if (isSession(d)) out.push(d);
+  return out;
+}
 
 export const FONTS_VERSION = "230";
 
@@ -1133,7 +1145,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false } = {}) {
+export function tickerPage({ username = "", scenes = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1144,6 +1156,7 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker-glance.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
     body: `
   <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>
+  <i hidden id="ftCal" data-sessions="${sessionCalendar(now).join(",")}"></i>
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <div class="ft-glance" id="ftGlance" data-glance="off">
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
