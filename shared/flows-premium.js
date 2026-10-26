@@ -736,6 +736,7 @@ export function planBuyingPower(rows, buyingPower) {
 
 export const SC_DEFAULTS = Object.freeze({ contracts: 100, convention: "delta", haircut: 0.3, floor: 0.1 });
 export const SC_REG_T = Object.freeze({ base: 0.2, floor: 0.1 });
+export const SC_DELTA_FLOOR = 0.05;
 export const SC_LIMITS = Object.freeze({ contractsMax: 100000, haircut: Object.freeze([0.05, 1]), floor: Object.freeze([0, 0.5]) });
 export const SC_CONVENTIONS = Object.freeze(["delta", "regt", "shares"]);
 
@@ -773,8 +774,9 @@ export function shortCallCollateral({ convention = SC_DEFAULTS.convention, spot,
     const d = numOrNull(delta);
     if (d === null) return fail("no-delta");
     if (d < 0 || d > 1) return fail("bad-delta");
-    m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);
-    binding = hc * d > fl ? "delta" : "floor";
+    const dd = Math.max(d, SC_DELTA_FLOOR);
+    m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);
+    binding = hc * dd > fl ? "delta" : "floor";
   } else return fail("bad-terms");
   const m1C = roundCents(m);
   if (!(m1C > 0)) return fail("no-collateral");

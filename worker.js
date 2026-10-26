@@ -61,6 +61,8 @@ import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
 import { memberAllowed } from "./shared/flows-access.js";
 import { vendorBase, vendorRedirected, vendorUrl, vendorMeter, newerMeter } from "./shared/flows-vendor-core.js";
 import { pathFor } from "./shared/flows-vendor-ops.js";
+import { rankShortCalls } from "./shared/flows-premium-rank.js";
+import { gatherPages, chainCacheGet, chainCachePut, singleFlight, SC_PAGE_SIZE, SC_MAX_PAGES, SC_PAGES_DEFAULT } from "./server/desk-sc.js";
 
 export { Pulse } from "./shared/flows-rt-hub.js";
 
@@ -76,6 +78,8 @@ function createState() {
     dispatchCheckAt: 0,
     vendorMeter: createCallMeter(),
     keyCounter: null,
+    scChains: new Map(),
+    scFlights: new Map(),
   };
 }
 const state = createState();
@@ -2362,7 +2366,8 @@ function offMarketChain(list, ivBasis, rankBy) {
   };
 }
 
-async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit }) {
+async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit, terms }) {
+  if (strategy === "sc") return buildShortCallPayload(env, ctx, vf, { ticker, terms });
   const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
 
     maybe_otm_only: "true",
@@ -2422,6 +2427,10 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
       carry: deskCarry(cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.facts, found.status),
     });
 
+  return chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info, cardRead, readMs, ranked, truncated });
+}
+
+function chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info, cardRead, readMs, ranked, truncated, extra = null }) {
   const earnDate = info ? info.nextEarningsDate : null;
   const noEarnings = info ? earnDate === null && hasNoEarnings(info.issueType) : false;
   for (const row of ranked.rows) {
@@ -2459,7 +2468,71 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
       : null,
     engine: deskEngine(cardRead && cardRead.card, Date.now()),
     generatedAt: new Date(readMs).toISOString(),
+    ...(extra || {}),
   };
+}
+
+const scPageCeiling = (env) => {
+  const v = Number.parseInt(env && env.FLOWS_DESK_SC_PAGES, 10);
+  return Number.isInteger(v) && v >= 1 && v <= SC_MAX_PAGES ? v : SC_PAGES_DEFAULT;
+};
+
+async function readShortCallSnapshot(env, ctx, vf, ticker) {
+  const maxPages = scPageCeiling(env);
+  const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
+    exclude_zero_oi_chains: "true",
+    min_dte: 0,
+    max_dte: 401,
+    limit: SC_PAGE_SIZE,
+    ...(page > 1 ? { page } : {}),
+  }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
+
+  const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
+  const [firstPage, candles, state, info, cardRead] = await Promise.all([
+    chainPage(1),
+    vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
+    vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
+    cachedTickerInfo(env, ctx, ticker, vf),
+    cardPending,
+  ]);
+  const readMs = chainReadMs(env);
+  const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
+  if (!unwrap(firstPage).length) throw new HttpError(404, "chain_empty", "No listed options found for that symbol");
+  const got = await gatherPages({ first: firstPage, page: chainPage, unwrap, refused: (error) => error instanceof VendorRefused, maxPages });
+  const print = printOf({ state, bars: unwrap(candles), readMs });
+  if (print === null) throw new HttpError(502, "chain_no_spot", "No regular-session price for that symbol");
+  const asOf = etDayOf(readMs);
+  const engineRate = cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.rate &&
+    Number.isFinite(cardRead.card.engine.rate.r) ? cardRead.card.engine.rate.r : PRICING_RATE;
+  let found;
+  try {
+    found = coherence({ rows: got.rows, spot: print.spot, asOf, printSource: print.source, readMs, rate: engineRate, ticker });
+  } catch (error) {
+    logFailure("warn", "chain coherence check failed", { ticker }, error);
+    found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
+  }
+  return { rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(state), info, cardRead, engineRate };
+}
+
+async function buildShortCallPayload(env, ctx, vf, { ticker, terms }) {
+  let snap = chainCacheGet(state.scChains, ticker, Date.now());
+  if (snap === null) {
+    snap = await singleFlight(state.scFlights, ticker, () => readShortCallSnapshot(env, ctx, vf, ticker));
+    if (!snap.budget && snap.failed === 0) chainCachePut(state.scChains, ticker, snap, Date.now());
+  }
+  const { rows, print, found, asOf, readMs, cardRead, engineRate } = snap;
+  const spot = found.spot;
+  const engine = deskEngine(cardRead && cardRead.card, Date.now());
+  const shed = [];
+  if (snap.truncated) shed.push({ why: "input-ceiling", n: snap.pages });
+  if (snap.budget) shed.push({ why: "budget", n: 1 });
+  const ranked = found.status === "mismatch"
+    ? { ...offMarketChain(rows, "not read: the quotes and the price disagree", "annualized"), cut: null }
+    : rankShortCalls(rows, {
+      ticker, spot, readMs, asOfDay: asOf, rate: engineRate, rateMethod: engine.status === "ok" && engine.rate ? engine.rate.method : null,
+      facts: engine.status === "ok" ? engine.facts : [], terms: { h: terms.haircut, f: terms.floor }, pages: snap.pages, truncated: snap.truncated, shed,
+    });
+  return chainEnvelope({ ticker, strategy: "sc", spot, asOf, print, found, live: snap.live, info: snap.info, cardRead, readMs, ranked, truncated: snap.truncated });
 }
 
 function deskEngine(card, nowMs) {

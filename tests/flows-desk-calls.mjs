@@ -49,7 +49,12 @@ function battery(mod, tag) {
     if (w.ok || (w.why !== "bad-delta" && w.why !== "no-delta")) bad.push(tag + " bad delta " + d);
   }
   const z = L({ delta: 0, floor: 0 });
-  if (z.ok || z.why !== "no-collateral" || z.ratio !== null) bad.push(tag + " no-collateral");
+  if (!z.ok || z.m1C !== 34092 || z.binding !== "delta") bad.push(tag + " a zero delta is collateralised as at least 5 delta, never as nothing");
+  const tiny = mod.shortCallLine({ bid: 0.01, strike: 0.0001 }, { spot: 0.0001, delta: 0, days: 3, floor: 0 });
+  if (tiny.ok || tiny.why !== "no-collateral" || tiny.ratio !== null) bad.push(tag + " no-collateral");
+  const lo = L({ delta: 0.01, floor: 0 }), at = L({ delta: 0.05, floor: 0 }), above = L({ delta: 0.06, floor: 0 });
+  if (lo.m1C !== at.m1C || !(above.m1C > at.m1C)) bad.push(tag + " delta counts as 0.05 at the least and as itself above it");
+  if (L({ delta: 0.01 }).m1C !== L({ delta: 0.05 }).m1C || L({ delta: 0.01 }).binding !== "floor") bad.push(tag + " the stated floor still binds under the delta floor");
   if (L({ haircut: 0.01 }).why !== "bad-terms" || L({ floor: 0.6 }).why !== "bad-terms" || L({ haircut: NaN }).why !== "bad-terms") bad.push(tag + " bad-terms");
   const tie = mod.shortCallCollateral({ spot: 100, strike: 105, delta: 0.2, haircut: 0.5, floor: 0.1 });
   if (tie.binding !== "floor" || tie.m1C !== 100000) bad.push(tag + " tie is floor");

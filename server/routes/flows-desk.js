@@ -1,5 +1,5 @@
 import { HttpError, internalKey, requireTicker } from "../http.js";
-import { RANK_KEYS, isRealDate } from "../../shared/flows-premium.js";
+import { RANK_KEYS, SC_DEFAULTS, SC_LIMITS, isRealDate, numOrNull } from "../../shared/flows-premium.js";
 
 const EXPIRY_YEARS = [2000, 2100];
 
@@ -8,6 +8,19 @@ const validExpiry = (text) => {
   const year = Number(text.slice(0, 4));
   return year >= EXPIRY_YEARS[0] && year <= EXPIRY_YEARS[1];
 };
+
+const inRange = (v, [lo, hi]) => v !== null && v >= lo && v <= hi;
+
+function shortCallTerms(url) {
+  const read = (name, fallback, limits) => {
+    const raw = url.searchParams.get(name);
+    if (raw === null) return fallback;
+    const v = numOrNull(raw);
+    if (!inRange(v, limits)) throw HttpError.of("invalid_terms");
+    return Math.round(v * 1e4) / 1e4;
+  };
+  return { haircut: read("h", SC_DEFAULTS.haircut, SC_LIMITS.haircut), floor: read("f", SC_DEFAULTS.floor, SC_LIMITS.floor) };
+}
 
 const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + name, methods: ["GET"], auth: "flows", handler });
 
@@ -18,17 +31,19 @@ export function flowsDeskRows(deps) {
     const ticker = requireTicker(url);
 
     const rawStrategy = url.searchParams.get("strategy");
-    const strategy = rawStrategy === "csp" || rawStrategy === "cc" ? rawStrategy : "both";
+    const strategy = rawStrategy === "csp" || rawStrategy === "cc" || rawStrategy === "sc" ? rawStrategy : "both";
     const rawRank = url.searchParams.get("rank");
     const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
+    const terms = strategy === "sc" ? shortCallTerms(url) : null;
+    const key = strategy === "sc" ? `${ticker}?strategy=sc&h=${terms.haircut}&f=${terms.floor}` : `${ticker}?strategy=${strategy}&rank=${rankBy}`;
 
     return serveCachedVendorRead({
       env,
       ctx,
-      cacheKey: internalKey("chain", `${ticker}?strategy=${strategy}&rank=${rankBy}`),
+      cacheKey: internalKey("chain", key),
       wantsRefresh: url.searchParams.get("refresh") === "1",
       gate: vendorGate(env, session),
-      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120 }),
+      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120, ...(terms ? { terms } : {}) }),
     });
   };
 

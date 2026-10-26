@@ -383,7 +383,7 @@ export function structureMetrics(input) {
   return out;
 }
 
-function roundTo(v, dp) {
+export function roundTo(v, dp) {
   if (v === null || v === undefined) return null;
   if (!fin(v)) return null;
   const f = Math.pow(10, dp);

@@ -1,9 +1,9 @@
-import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf } from "./flows-quant-bs.js";
+import { parityForward, black76, bsmGreeks, impliedVolB76, normPdf, forwardDelta } from "./flows-quant-bs.js";
 import { asSlice, sliceVolK, sliceTotalVariance, skewMetrics, eventTermFit, eventShape, sliceCallU, slicePutU, sviW, sviG, SMILE_LINES } from "./flows-quant-smile.js";
 import { impliedMove, lawFromSlice, lawBinned, binsAtHorizon, modelFreeWindow, rndMoments, MIN_HORIZON_SESSIONS } from "./flows-quant-density.js";
 import {
   runEngine, buildExpiry, ENGINE_VERSION, ENGINE_LINES, expiryProfile, normaliseLeg, lawIntervalsProb, lawExpect,
-  expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf,
+  expiryFromFit, setupEngine, cardCarry, settleExpiries, rankModeOf, roundTo,
 } from "./flows-quant-engine.js";
 import { gammaProfile } from "./flows-quant-dealer.js";
 import { etDayOf, calendarDays, yearFraction, sessionsBetween, remainingSessions, isMonthly, shiftDay, SESSIONS_PER_YEAR } from "./flows-quant-time.js";
@@ -673,7 +673,23 @@ function expiryFrame(input) {
   if (!(T > 0)) return { bad: "expired" };
   if (!(S > 0)) return { bad: "spot.missing" };
   const carry = q === null ? 0 : q;
-  return { T, S, r, rateMethod, q, carry, F: S * Math.exp((r - carry) * T), D: Math.exp(-r * T) };
+  const fwd = input.fwd && typeof input.fwd === "object" ? input.fwd : null;
+  const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === "parity" || fwd.src === "blend") ? fwd : null;
+  const F = used ? used.F : S * Math.exp((r - carry) * T);
+  return { T, S, r, rateMethod, q, carry: used ? r - Math.log(F / S) / T : carry, F, D: Math.exp(-r * T), fwd: used };
+}
+
+export function leanFrame(input) {
+  return expiryFrame(input);
+}
+
+export function leanRead(frame, row) {
+  const got = readContract(frame, row, false);
+  return got ? { iv: got.read.iv, via: got.via } : null;
+}
+
+export function leanDelta(frame, K, iv) {
+  return roundTo(forwardDelta(frame.F, K, iv, frame.T, "C"), 4);
 }
 
 function contractFrame(input) {
@@ -772,7 +788,7 @@ export function contractFit(input) {
   const day = etDayOf(asOfMs);
   const head = {
     expiry, T, dte: calendarDays(day, expiry), sessions: sessionsBetween(day, expiry), hSessions: remainingSessions(asOfMs, expiry), monthly: isMonthly(expiry),
-    forward: { F, D, r, q: carry, pairs: 0, method: "rate-only", rateMethod, carry: q === null ? "none" : "card" },
+    forward: { F, D, r, q: carry, pairs: f.fwd ? f.fwd.n : 0, method: f.fwd ? f.fwd.src : "rate-only", rateMethod, carry: q === null ? "none" : "card" },
     points: 1,
   };
   const contract = { spreadRel: (row.ask - row.bid) / ((row.ask + row.bid) / 2), z: Math.abs(Math.log(row.K / F)) / (iv * Math.sqrt(T)), ivWidth: read.width, iv, via };

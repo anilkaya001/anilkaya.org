@@ -1,8 +1,8 @@
 {
  "provenance": {
   "generator": "tests/gen-shortcall-fixtures.py",
-  "generatorSha256": "820324b48a0b46e29963e75836da0b4685120e8bce443aaa8971f819018afc17",
-  "python": "3.11.15",
+  "generatorSha256": "204d8cb488518d0f4e1c2509c354394253fccc4515532e3d7ad49801a7057472",
+  "python": "3.11.17",
   "seed": 20261018,
   "arithmetic": "fractions.Fraction, round half up on exact ties",
   "synthetic": true
@@ -394,8 +394,21 @@
     "buyingPower": null
    },
    "out": {
-    "ok": false,
-    "why": "no-collateral"
+    "ok": true,
+    "binding": "delta",
+    "m1C": 1500,
+    "bidC": 5000,
+    "intrC": 0,
+    "tvC": 5000,
+    "n": 1,
+    "premiumC": 5000,
+    "collateralC": 1500,
+    "idleC": null,
+    "ratio": 3.3333333333333335,
+    "grossRatio": 3.3333333333333335,
+    "annRatio": 243.33333333333334,
+    "affordable": true,
+    "limited": false
    }
   },
   {
@@ -6924,17 +6937,17 @@
    "out": {
     "ok": true,
     "binding": "delta",
-    "m1C": 41508,
+    "m1C": 45020,
     "bidC": 11500,
     "intrC": 0,
     "tvC": 11500,
     "n": 2,
     "premiumC": 23000,
-    "collateralC": 83016,
-    "idleC": 2416984,
-    "ratio": 0.2770550255372458,
-    "grossRatio": 0.2770550255372458,
-    "annRatio": 8.427090360091228,
+    "collateralC": 90040,
+    "idleC": 2409960,
+    "ratio": 0.2554420257663261,
+    "grossRatio": 0.2554420257663261,
+    "annRatio": 7.769694950392418,
     "affordable": true,
     "limited": false
    }
