@@ -23,7 +23,7 @@ export const STAGES = Object.freeze([
   stage("market", ISOLATION.isolated, ["boards"], ["market"]),
   stage("movers", ISOLATION.isolated, ["boards"], ["movers"]),
   stage("market-legs", ISOLATION.isolated, ["boards"]),
-  stage("market-universe", ISOLATION.isolated, ["market-legs"], ["universe"]),
+  stage("market-universe", ISOLATION.isolated, ["market-legs"], ["universe", "reports"]),
   stage("market-regime", ISOLATION.isolated, ["market-legs"], ["regime"]),
   stage("events", ISOLATION.isolated, ["market-legs"], ["events"]),
   stage("record", ISOLATION.isolated, ["boards"], ["record"]),

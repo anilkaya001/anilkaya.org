@@ -260,14 +260,22 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     deep(["dex", "vanna", "charm", "gexAdv"].map((k) => universeValue(noAdv, "SYB202", k)), [null, null, null, null],
       "and a name with no average volume has no dollar volume to normalise by, so no exposure is published for it");
   }
-  eq(universeValue(u, "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date), "ed counts weekdays to next_earnings_date");
+  eq(row.er_time, "postmarket", "the fixture row reports after the close");
+  eq(universeValue(u, "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date) + 1,
+    "ed counts sessions to the impact session: a report after the close moves the price on the next session, one more than the sessions to its date");
+  eq(universeValue(buildUniverse([{ ...row, er_time: "premarket" }], { sessionDate: row.date }), "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date),
+    "while one before the open is counted to its own date");
+  eq(universeValue(buildUniverse([{ ...row, er_time: "unknown" }], { sessionDate: row.date }), "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date),
+    "and one with no stated time to the nearer of its two sessions, so uncertainty never hides an event");
   eq(row.short_int, "0", "the fixture row reads short_int '0', the vendor's placeholder for no reading");
   eq(universeValue(u, "SYB202", "si"), null, "so a zero short_int is the vendor's placeholder and publishes as absent, not a measured 0");
   eq(u.counts.si, 0, "and it does not enter the column's count or its percentile");
 
   const tonight = { ...row, next_earnings_date: row.date };
-  eq(universeValue(buildUniverse([{ ...tonight, er_time: "postmarket" }], { sessionDate: row.date }), "SYB202", "ed"), 0,
-    "a report after the session's close is 0 sessions away");
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "postmarket" }], { sessionDate: row.date }), "SYB202", "ed"), 1,
+    "a report after the session's close is on the next session: 1 session away");
+  eq(universeValue(buildUniverse([{ ...tonight, er_time: "unknown" }], { sessionDate: row.date }), "SYB202", "ed"), 0,
+    "and one whose time is not stated may be this session's or the next, so it is 0, the only way ed is 0");
   eq(universeValue(buildUniverse([{ ...tonight, er_time: "premarket" }], { sessionDate: row.date }), "SYB202", "ed"), null,
     "a report before the session's open is behind the session, never 'tonight'");
   const blank = buildUniverse([{ ...row, volatility_30: "", volatility_90: "0.4" }], { sessionDate: row.date });
@@ -1001,7 +1009,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "when the harvest is refused the market legs are handed the sweep's rows, not left to read the screener again");
   ok(/const held = fetched\.rows\.filter\(ownerHeld\);\s*if \(held\.length\) \{\s*if \(harvest\) harvest = \{ \.\.\.harvest, rows: harvest\.rows\.concat\(held\) \};\s*if \(universeSource\) universeSource = \{ \.\.\.universeSource, rows: universeSource\.rows\.concat\(held\) \};/.test(pipe),
     "an owner holding read by ticker joins whichever source the market legs are handed, the harvest when it was usable and the sweep's rows when it was not, so the published universe carries it on both paths");
-  ok(/await stages\.run\("market-universe", \(\) => publish\("universe", marketLegs\.universe\), \(error\) => \{/.test(pipe) &&
+  ok(/await stages\.run\("market-universe", async \(\) => \{\s*await publish\("universe", marketLegs\.universe\);\s*if \(reportsWritable && marketLegs\.reports\) await publish\("reports", marketLegs\.reports\.payload\);/.test(pipe) &&
      /await stages\.run\("market-regime", \(\) => publish\("regime", marketLegs\.regime\), \(error\) => \{/.test(pipe) &&
      !/for \(const key of \["universe", "regime"\]\) await publish/.test(pipe),
     "universe and regime publish one at a time, each as its own isolated stage, so a refused universe cannot take the regime and every card-x down with it");

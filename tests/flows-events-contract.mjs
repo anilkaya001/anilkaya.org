@@ -6,9 +6,10 @@ import { chromium } from "playwright";
 
 import {
   buildEvents, eventRow, sessionsToEarnings, calendarDaysTo, ivPathOf,
-  IV_PATH_LABELS, EVENT_ROWS, EVENT_WINDOW_DAYS, EVENTS_NOTES,
+  IV_PATH_LABELS, EVENT_ROWS, EVENTS_NOTES,
 } from "../shared/flows-events.js";
 import { eventsPage } from "../shared/flows-pages.js";
+import { HORIZON_SESSIONS, horizonEnd, previousSession } from "../shared/flows-calendar.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 import { nextTradingDay } from "../shared/flows-freshness.js";
@@ -64,7 +65,9 @@ const gateDteFrom = (origin) => (date) =>
   eq(PAYLOAD.gateDays, EARNINGS_GATE_DAYS,
      "the payload republishes the gate width from the pipeline's own constant");
   eq(PAYLOAD.cap, EVENT_ROWS, "and the cap from the module's");
-  eq(PAYLOAD.windowDays, EVENT_WINDOW_DAYS, "and the window from the module's");
+  eq(PAYLOAD.windowSessions, HORIZON_SESSIONS, "and the window, in trading sessions, from the calendar's one horizon");
+  eq(PAYLOAD.windowDays, undefined, "the calendar-day window is gone, because 21 calendar days is about 15 sessions and no longer the horizon");
+  eq(PAYLOAD.through, horizonEnd(previousSession(PAYLOAD.gateOrigin)), "and the payload names the last session the window reaches");
 
   ok(ROWS.every((r) => Number.isInteger(r.dte)),
      `all ${ROWS.length} rows carry an integer dte — CALENDAR days, the gate's unit`);
@@ -367,8 +370,10 @@ const gateDteFrom = (origin) => (date) =>
      "and beyondCap counts what it did not show — a measured zero when it showed everything");
   eq(PAYLOAD.lastShownDate, ROWS.length ? ROWS[ROWS.length - 1].d : null,
      "while lastShownDate is the newest date the drawing can speak for");
-  ok(!ROWS.some((r) => r.dte > PAYLOAD.windowDays),
-     `no published row reports beyond the ${PAYLOAD.windowDays}-CALENDAR-DAY window`);
+  ok(!ROWS.some((r) => r.sdte >= PAYLOAD.windowSessions),
+     `no published row is more than ${PAYLOAD.windowSessions - 1} sessions from the gate's origin, which is ${PAYLOAD.windowSessions} sessions from the session`);
+  ok(!ROWS.some((r) => r.d > PAYLOAD.through),
+     "and none reports after the window's last session");
   ok(!ROWS.some((r) => r.dte === null || r.sdte === null),
      "and none carries a null on either horizon");
 
@@ -376,16 +381,26 @@ const gateDteFrom = (origin) => (date) =>
     { gateOrigin: GATE_ORIGIN });
   eq(straddle.dte, 14, "Wed 26 → Wed Sep 9 is fourteen calendar days");
   eq(straddle.sdte, 9, "and nine trading sessions: Labor Day, Monday Sep 7, is a weekday the exchange is shut");
+  const wide = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowSessions: 10 });
+  deep(wide.rows.map((r) => r.t), ["INSIDE", "STRADDLE"],
+     "a 10-SESSION window keeps a name 14 calendar days out, because Labor Day is not a session: " +
+     "ten sessions from the last completed one, where a bound tested in calendar days would drop it");
   const cut = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
-    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowDays: 10 });
-  deep(cut.rows.map((r) => r.t), ["INSIDE"],
-     "a 10-day window EXCLUDES a name 14 calendar days out whose nine SESSIONS would have " +
-     "cleared a bound tested in the wrong unit");
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowSessions: 9 });
+  deep(cut.rows.map((r) => r.t), ["INSIDE"], "and a 9-session window drops it, the tenth session out");
   eq(cut.inWindow, 1, "and does not count it as in the window");
-  eq(cut.rows[0].dte, 7, "while the name that is genuinely inside — seven days — is kept");
-  eq(cut.rows[0].sdte, 5, "at five sessions");
-  ok(cut.rows[0].sdte <= cut.windowDays && cut.rows[0].dte <= cut.windowDays,
-     "the kept name is inside the bound on BOTH horizons, which is the only unambiguous case");
+  eq(cut.rows[0].dte, 7, "while the name that is genuinely inside is kept, seven calendar days out");
+  eq(cut.rows[0].sdte, 5, "at five sessions from the gate's origin");
+  eq(cut.windowSessions, 9, "and the payload says which window it was built on");
+
+  const post = (t, d, when) => ({ row: { ticker: t, close: "100.00", next_earnings_date: d, er_time: when, sector: "Technology" }, tilt: tiltOf() });
+  const edge = buildEvents([post("PRE", "2026-09-23", "premarket"), post("POST", "2026-09-23", "postmarket"), post("UNK", "2026-09-23", "unknown"), post("LATE", "2026-09-24", "premarket")],
+    { gateOrigin: "2026-08-25", sessionDate: "2026-08-24" });
+  deep(edge.rows.map((r) => r.t), ["PRE", "UNK"],
+     "the window is measured to the impact session: before the open on the 21st session out is inside, after the close that day lands on the 22nd and is outside, " +
+     "an unstated time keeps the earlier candidate, and the 22nd is outside");
+  eq(edge.through, "2026-09-23", "the last session of the window is 21 sessions after the last completed one, which is 23 September from 24 August with Labor Day shut");
 
   const far = buildEvents([
     nameAt("D4", "2026-09-04"), nameAt("D1", "2026-08-27"),
@@ -803,7 +818,8 @@ async function openEvents(browser, payload, opts = {}) {
   await page.goto("https://x.test/flows/events/", { waitUntil: "domcontentloaded" });
   if (opts.css) for (const sheet of SHEETS) await page.addStyleTag({ path: path.join(ROOT, sheet) });
   await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-ui.js") });
-  await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
+  if (opts.js) await page.addScriptTag({ content: opts.js });
+  else await page.addScriptTag({ path: path.join(ROOT, "assets/js/flows-events.js") });
   await page.waitForFunction(() => !/^Loading/.test(document.getElementById("evStatus").textContent), null, { timeout: 15000 });
   return { page, errors };
 }
@@ -1299,6 +1315,73 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     const past = await marks(Date.parse("2026-12-01T15:00:00Z"));
     deep(past.marks, [], "when every listed day is already past no column reads Today or Next");
     ok(past.cols > 0, "and the past days are still drawn");
+  } finally {
+    await browser.close();
+  }
+}
+
+{
+  const base = buildEvents([nameAt("WEEK", plusDays(GATE_ORIGIN, 1))], { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE });
+  base.earningsCalendar = { status: "ok", reaction: { status: "ok", n: 1, medianRatio: 1.1, beat: 0.5, rows: [["RAA", 0.08, 0.05, 1.6]] } };
+  const withRecent = (recent) => ({ ...JSON.parse(JSON.stringify(base)), recent });
+  const OK = { status: "ok", asOf: SESSION_DATE, within: 5, hz: 21, n: 8, counts: [3, 2], cut: [], unstated: 1, older: 2,
+    rows: [["RAA", 0.0821, 2.14], ["RBB", -0.0412, -1.18], ["RCC", null, null]], laterRows: [["RDD", 2, 0], ["REE", 4, 1]] };
+  const browser = await chromium.launch();
+  try {
+    const read = async (payload, width = 1440, js = null) => {
+      const { page, errors } = await openEvents(browser, payload, { width, css: true, js });
+      const out = await page.evaluate(() => {
+        const box = document.querySelector("#evReact .fe-recent");
+        if (!box) return null;
+        const tiles = [...box.querySelectorAll(".ui-metric")].map((m) => [m.querySelector(".ui-metric-l").textContent, m.querySelector(".ui-metric-n") ? m.querySelector(".ui-metric-n").textContent : null, (m.querySelector(".ui-metric-s") || {}).textContent || null]);
+        const rowsOf = (label) => [...box.querySelectorAll('[aria-label^="' + label + '"] a.fe-rrow')].map((a) => [a.querySelector("b").textContent, ...[...a.querySelectorAll(".fu-v")].map((v) => v.textContent), a.getAttribute("href"), a.getAttribute("title")]);
+        const tail = document.querySelector('#evReact > .fe-beyond[aria-label^="Names that reacted two or more"]');
+        return { tiles, rows: rowsOf("Names in their reaction session"), later: tail ? [...tail.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("title")]) : null, tail: tail ? tail.textContent.replace(/\s+/g, " ").trim() : null, head: [...box.querySelectorAll(".fu-head")].map((h) => h.textContent.replace(/\s+/g, " ").trim()), silent: [...box.querySelectorAll(".ui-silent")].map((x) => x.textContent.replace(/\s+/g, " ").trim()), overflow: document.scrollingElement.scrollWidth > innerWidth, text: box.innerText };
+      });
+      if (out && out.silent.length) out.why = await disclose(page, "#evReact .fe-recent .ui-silent button");
+      await page.close();
+      return { box: out, errors };
+    };
+    const ok1 = await read(withRecent(OK));
+    deep(ok1.errors, [], "the reaction tab renders the reacted-lately block without throwing");
+    deep(ok1.box.tiles.map((t) => [t[0], t[1], t[2]]), [["Reaction session", "3", null], ["Reacted one session ago", "2", null], ["Report time not stated", "1", null]], "it counts the names by the Moves page's own labels, the three counts adding to the names that reacted lately, and a measured zero is printed as 0");
+    deep(ok1.box.rows.map((r) => r.slice(0, 4)), [["RAA", "+8.2%", "+2.1", "/flows/ticker/?t=RAA"], ["RBB", "−4.1%", "−1.2", "/flows/ticker/?t=RBB"], ["RCC", "—", "—", "/flows/ticker/?t=RCC"]],
+      "and lists the names that reacted on the session in the payload's order, the move in per cent and in typical days, each a link to its ticker, a move not read as a dash");
+    ok(/typical days/.test(ok1.box.rows[0][4]) && /no typical day published/.test(ok1.box.rows[2][4]), "a name with no typical day says so in its title, never a zero");
+    deep(ok1.box.later.map((r) => [r[0], r[1]]), [["RDD", "/flows/ticker/?t=RDD"], ["REE", "/flows/ticker/?t=REE"]], "the names that reacted two to five sessions ago are one line of links, grouped by age, with no move beside them since the move on their reaction day is not in the universe");
+    ok(/^Reacted 2\u20135 sessions ago, with the move on their reaction day not carried here\. 2 sessions: RDD \u00b7 4 sessions: REE \(time not stated\)$/.test(ok1.box.tail), "worded as the range it covers and the reason there is no move, and a name whose report time is not stated says so beside it: " + ok1.box.tail);
+    ok(/reacted 2 sessions ago$/.test(ok1.box.later[0][2]), "each name's title says its age");
+    ok(/reacted 4 sessions ago, report time not stated, so it may be one session older$/.test(ok1.box.later[1][2]), "and a name whose time is not stated says in its title that its age is the later of two");
+    ok(!/Aug 24|reported|tape/i.test(ok1.box.text), "and says nothing of a date it does not hold, of a report time it does not know or of a tape");
+    eq(ok1.box.overflow, false, "with no sideways scroll at 1440");
+    const narrow = await read(withRecent(OK), 390);
+    eq(narrow.box.overflow, false, "or at 390");
+    const many = await read(withRecent({ ...OK, older: 30 }));
+    ok(/REE \(time not stated\) and 28 more$/.test(many.box.tail), "names past the ones the payload carries are counted, not hidden: " + many.box.tail);
+    const SRC = fs.readFileSync(path.join(ROOT, "assets/js/flows-events.js"), "utf8");
+    const builds = [
+      ["the unstated flag not printed beside the name", 'if (x[2] === 1) parts.push(" (time not stated)");', "", (b) => !/REE \(time not stated\)/.test(b.tail)],
+      ["the unstated flag printed beside every name", 'if (x[2] === 1) parts.push(" (time not stated)");', 'if (true) parts.push(" (time not stated)");', (b) => /RDD \(time not stated\)/.test(b.tail)],
+      ["the title does not say the age may be one older", ', report time not stated, so it may be one session older', "", (b) => !/one session older/.test(b.later[1][2])],
+      ["the title says it of every name", '(x[2] === 1 ? ", report time not stated, so it may be one session older" : "")', '", report time not stated, so it may be one session older"', (b) => /one session older/.test(b.later[0][2])],
+    ];
+    for (const [title, from, to, caught] of builds) {
+      ok(SRC.split(from).length === 2, "the planted build changes the page exactly once: " + title);
+      const bad = await read(withRecent(OK), 1440, SRC.replace(from, () => to));
+      ok(caught(bad.box), "PLANTED WRONG BUILD, " + title + ": the tail or its titles differ from the real page's");
+    }
+    const cutDay = await read(withRecent({ ...OK, counts: [3, null], unstated: null, cut: [1, 2] }));
+    deep(cutDay.box.tiles.map((t) => [t[0], t[1], t[2]]), [["Reaction session", "3", null], ["Reacted one session ago", "—", "report ledger cut that day"], ["Report time not stated", "—", "report ledger cut that day"]], "A DAY THE REPORT LEDGER WAS CUT ON IS A DASH WITH ITS REASON, never a partial count");
+    const gone = await read(withRecent({ status: "unavailable", reason: "withheld_budget", within: 5 }));
+    ok(gone.box && /size budget/.test(gone.box.why || "") && gone.box.tiles.length === 0, "a report column withheld for the universe's size budget says so and counts nothing");
+    const none = await read(withRecent({ status: "unavailable", reason: "not_published", within: 5 }));
+    ok(none.box && /ships with the next nightly run/.test(none.box.why || ""), "a payload from before the column says it is pending, not empty");
+    const nowin = await read(withRecent({ status: "unavailable", reason: "no_window", within: 5 }));
+    ok(nowin.box && /does not state the earnings window/.test(nowin.box.why || ""), "a universe with no earnings window says so");
+    const quiet = await read(withRecent({ status: "quiet", reason: "none_recent", asOf: SESSION_DATE, within: 5, hz: 21, n: 0, counts: [0, 0], cut: [], unstated: 0, older: 0, rows: [], laterRows: [] }));
+    ok(quiet.box && /No name has reacted to a report in the last 5 sessions/.test(quiet.box.why || ""), "a measured nothing says so");
+    const old = await read({ ...JSON.parse(JSON.stringify(base)) });
+    eq(old.box, null, "a payload with no block at all draws none, and the reaction list is as it was");
   } finally {
     await browser.close();
   }

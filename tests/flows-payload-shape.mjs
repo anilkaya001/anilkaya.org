@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
 import { moduleSource, slice } from "./lib/source-scan.mjs";
+import { wireBytes } from "../shared/flows-card-pack.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -666,6 +667,7 @@ assert.deepEqual(missingReport, [],
     }
     const bytes = Buffer.byteLength(JSON.stringify(d));
     ok(bytes < 60 * 1024, `card-x:${d.ticker} is ${(bytes / 1024).toFixed(1)}KB, leaving the other areas' panels room under the 100KB cap`);
+    ok(wireBytes(d) <= Math.floor(0.95 * 60 * 1024), `card-x:${d.ticker} is ${(wireBytes(d) / 1024).toFixed(1)}KB on the wire when the pipeline packs it (FLOWS_CARDX_WIRE=pack), at most 95% of the 60KB soft limit`);
   }
   for (const arm of ["cone:ok", "rv:ok", "vrp:ok", "term:ok", "term:unavailable", "skew:ok", "ivDyn:ok",
     "anomaly:ok", "anomaly:unavailable", "sentiment:ok", "sentiment:unreadable", "character:ok"]) {

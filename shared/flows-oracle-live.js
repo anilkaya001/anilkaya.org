@@ -33,7 +33,6 @@ export const LIVE_LINES = Object.freeze({
   sizePremium: 250000,
   sectorNames: 4,
   sectorFloor: 5000000,
-  eventSessions: 21,
   eventScale: 1.5,
   retainMs: 8 * 3600000,
 });

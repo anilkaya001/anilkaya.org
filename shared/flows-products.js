@@ -61,6 +61,7 @@ const GLOBALS = [
   global("ideas"),
   global("focus"),
   global("deepen"),
+  global("reports", { required: ["v", "asOf", "t"] }),
   global("oracle-top", { capBytes: 16 * 1024, required: ["items", "sessionDate"] }),
   global("oracle-norm", { capBytes: 100 * 1024, required: ["t", "sessionDate"] }),
 ];
