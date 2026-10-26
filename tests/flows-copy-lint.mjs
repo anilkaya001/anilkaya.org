@@ -80,7 +80,7 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
   eq(lintText("note: 'the tape\\'s floor'", "server").length, 1, "a planted possessive is found");
   eq(lintText('"TAPE closed"', "server").length, 1, "and any case");
   eq(lintText('const k = "tape", u = "/api/flows/tape", x = "X-Tape", g = "m-tape"; STATE.tape = tapeSub("live")', "browser").length, 0, "identifiers pass");
-  eq(lintText("Calls · ask side, Puts · bid side, Unsided", "browser").length, 0, "the vendor's terms pass");
+  eq(lintText("Calls · ask side, Puts · bid side, Side not stated", "browser").length, 0, "the vendor's terms pass");
   eq(lintText("sold into the bid", "browser").length, 0, "and so does a sale into the bid");
   eq(unsignedRiskReversal('"risk reversal " + volPts(rr) + " vol points."').length, 1, "a planted risk reversal with no sign convention is found");
   eq(unsignedRiskReversal('"risk reversal (put minus call) " + volPts(rr)').length, 0, "and the stated convention passes");
@@ -112,10 +112,18 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
 
 {
   const net = fs.readFileSync(path.join(ROOT, "assets/js/flows-net.js"), "utf8");
-  for (const label of ["Calls \\u00b7 ask side", "Puts \\u00b7 bid side", "Puts \\u00b7 ask side", "Calls \\u00b7 bid side", "Unsided"]) {
+  for (const label of ["Calls \\u00b7 ask side", "Puts \\u00b7 bid side", "Puts \\u00b7 ask side", "Calls \\u00b7 bid side"]) {
     ok(net.includes(`"${label}"`), `the network names a side "${label}"`);
   }
-  ok(!/Unattributed/.test(net), "and 'Unattributed' is retired for 'Unsided'");
+  ok(!/Unattributed/i.test(net) && !/\bun[\s-]?sided\b/i.test(net), "and neither 'Unattributed' nor 'Unsided' names a peer bucket in the network");
+  const BANNED = /\bun[\s\u2010-\u2015-]?sided\b|\bunattributed\b/i;
+  const SURFACES = ["assets/js/flows-net.js", "assets/js/flows-net-map.js", "assets/js/flows-market-river.js", "assets/js/flows-market-floor.js", "assets/js/flows-now.js", "assets/js/flows-ticker-network.js", "assets/js/flows-overview.js", "assets/js/flows-unusual.js", "shared/flows-flow-net.js", "shared/flows-glossary.js"];
+  for (const f of SURFACES) {
+    const hit = fs.readFileSync(path.join(ROOT, f), "utf8").split("\n").filter((line) => BANNED.test(line) && !/excluded\.unattributed|unattributed:/.test(line));
+    eq(hit.length, 0, `${f} prints no unsided or unattributed bucket (${hit[0] ? hit[0].trim().slice(0, 80) : ""})`);
+  }
+  eq(BANNED.test("Unsided"), true, "a planted Unsided label is caught");
+  eq(BANNED.test("Side not stated"), false, "and the replacement passes");
   ok(/fill above the midpoint/.test(net) && /does not document the alert field/.test(net) && /Lean is a convention/.test(net),
     "the network's legend defines the vendor's ask side as a fill above the midpoint, says the alert field is undocumented and calls the lean a convention");
 }

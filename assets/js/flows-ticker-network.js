@@ -6,7 +6,7 @@
   const MIN_WINDOWS = 5;
   const DAYS_PER_YEAR = 365;
   const NODES = {
-    side: [["side:ca", "Calls · ask side"], ["side:cr", "Calls · rest"], ["side:pa", "Puts · ask side"], ["side:pr", "Puts · rest"]],
+    side: [["side:ca", "Calls · ask side"], ["side:cb", "Calls · bid side"], ["side:pa", "Puts · ask side"], ["side:pb", "Puts · bid side"]],
     expiry: [["exp:d0", "Same day"], ["exp:w1", "1 to 7 days"], ["exp:m1", "8 to 31 days"], ["exp:far", "32 days and over"]],
     scaled: [["mny:itm", "In the money"], ["mny:near", "Near the money"], ["mny:otm", "Out of the money"]],
     fixed: [["mny:itm", "In the money, past 2.5%"], ["mny:near", "Within 2.5% of spot"], ["mny:otm", "Out of the money, past 2.5%"]],
@@ -15,7 +15,7 @@
   const TITLES = { side: "Side", expiry: "Expiry", money: "Strike against spot", flags: "Flags" };
   const FACE = {
     gross: "Vendor-flagged windows, not every execution. Premium is gross; legs of a spread count separately.",
-    ask: "Ask side is the vendor's attribution of premium; the rest is bid, mid or unattributed. No lean on this page.",
+    ask: "Ask side is the vendor's attribution of premium; the bid side is the same attribution for the other quote. Premium with no stated side is not drawn and is counted apart. No lean on this page.",
     flags: "Opening: every trade in the window is flagged opening by the vendor. Sweep: the window contains a sweep.",
     spot: "One session spot, not the price at each window's time.",
   };
@@ -85,7 +85,7 @@
       return { state: "stale", reason: "The windows are for " + String(alerts.asOf).slice(0, 10) + ", not the card's session " + session + "." };
     }
     const day = session || (alerts.asOf ? String(alerts.asOf).slice(0, 10) : null);
-    const excluded = { window: 0, unattributed: 0, unflagged: 0 };
+    const excluded = { window: 0, noSide: 0, noSidePrem: 0, unflagged: 0 };
     const spot = num(ctx.spot) !== null && ctx.spot > 0 ? ctx.spot : null;
     const iv30 = num(ctx.iv30) !== null && ctx.iv30 > 0 ? ctx.iv30 : null;
     const basis = spot === null ? "none" : termRows(ctx.term).length ? "term" : iv30 !== null ? "iv30" : "fixed";
@@ -100,13 +100,18 @@
       const money = spot === null ? null : moneyOf(cp, k, spot, basis === "term" || basis === "iv30" ? volAt(days, ctx.term, iv30) : null, days);
       const flag = typeof d.sw === "boolean" && typeof d.op === "boolean" ? (d.sw && d.op ? "flg:so" : d.sw ? "flg:s" : d.op ? "flg:o" : "flg:n") : "flg:u";
       if (flag === "flg:u") excluded.unflagged++;
-      const a = num(d.a);
-      const ok = a !== null && a >= 0 && a <= 1;
-      if (!ok) excluded.unattributed++;
-      const ask = ok ? p * a : 0;
+      let a = num(d.a);
+      let b = num(d.b);
+      if (a !== null && !(a >= 0 && a <= 1)) a = null;
+      if (b !== null && !(b >= 0 && b <= 1)) b = null;
+      if (a !== null && b !== null && a + b > 1 + 1e-9) { a = null; b = null; }
+      const ask = a === null ? 0 : p * a;
+      const bid = b === null ? 0 : p * b;
+      const left = Math.max(0, p - ask - bid);
+      if (!(a !== null && b !== null && left <= p * 1e-9)) { excluded.noSide++; excluded.noSidePrem += left; }
       const c = cp === "C";
       if (ask > 0) parts.push({ w: i, v: ask, nodes: [c ? "side:ca" : "side:pa", bucket, money, flag] });
-      if (p - ask > 0) parts.push({ w: i, v: p - ask, nodes: [c ? "side:cr" : "side:pr", bucket, money, flag] });
+      if (bid > 0) parts.push({ w: i, v: bid, nodes: [c ? "side:cb" : "side:pb", bucket, money, flag] });
     });
     const total = parts.reduce((s, x) => s + x.v, 0);
     const drawn = new Set(parts.map((x) => x.w)).size;
@@ -115,6 +120,7 @@
     if (prem !== null && listed > prem * 1.001 + 1) return { state: "inconsistent", reason: "The listed windows add to more than the name's flagged premium, so no network is drawn." };
     if (!(total > 0)) return { state: "unavailable", reason: day === null ? "The windows carry no session date, so days to expiry cannot be counted." : "No listed window could be placed: " + excluded.window + " had a missing or invalid price, side, strike or expiry." };
     const cover = prem !== null && prem > 0 ? total / prem : null;
+    const sidedShare = total + excluded.noSidePrem > 0 ? total / (total + excluded.noSidePrem) : null;
     const defs = [NODES.side, NODES.expiry, spot === null ? null : basis === "fixed" ? NODES.fixed : NODES.scaled, NODES.flags];
     const keys = ["side", "expiry", "money", "flags"];
     const columns = [];
@@ -152,7 +158,7 @@
     return {
       state: drawn < MIN_WINDOWS ? "thin" : "ok", reason: drawn < MIN_WINDOWS ? "Too few windows for a map." : null,
       session: day, total, windows: drawn, listed: dots.length, n: num(alerts.n), complete: typeof alerts.complete === "boolean" ? alerts.complete : null,
-      cover, coverNote: cover === null ? "not stated" : cover >= 0.75 ? "standard" : cover >= 0.5 ? "wide" : "largest",
+      cover, sidedShare, coverNote: cover === null ? "not stated" : cover >= 0.75 ? "standard" : cover >= 0.5 ? "wide" : "largest",
       gap: cover === null ? null : Math.max(0, Math.round(100 * (1 - cover))), prem, basis, spot, excluded, columns, bands, paths, parts,
     };
   }
@@ -259,7 +265,7 @@
     const head = h("div", { class: "fnw-bar" }, thin ? null : seg, h("span", { class: "fnw-stamp" }, net.session ? "Session " + F.day(net.session) + (gen && F.trtDay(gen) ? " \u00b7 read " + F.day(F.trtDay(gen)) + " " + F.time(gen) : "") : ""));
     const notes = [FACE.gross, FACE.ask, FACE.flags, spotLine(net)];
     if (net.excluded.window) notes.push(net.excluded.window + (net.excluded.window === 1 ? " window is" : " windows are") + " left out of every column: a missing price, strike or expiry.");
-    if (net.excluded.unattributed) notes.push(net.excluded.unattributed + (net.excluded.unattributed === 1 ? " window carries" : " windows carry") + " no side attribution, so " + (net.excluded.unattributed === 1 ? "its premium sits" : "their premium sits") + " in the rest and the ask-side figures are a lower bound.");
+    if (net.excluded.noSide) notes.push(net.excluded.noSide + (net.excluded.noSide === 1 ? " window has" : " windows have") + " premium with no stated side, " + F.money(net.excluded.noSidePrem) + " in all, left out of the map and counted here; " + Math.round(net.sidedShare * 100) + "% of the placed premium has a stated side.");
     if (net.excluded.unflagged) notes.push(net.excluded.unflagged + (net.excluded.unflagged === 1 ? " window has" : " windows have") + " no sweep or opening flag read, shown as flags not read.");
     const face = h("p", { class: "fnw-face" }, notes.join(" "));
     wrap.append(head, read, warn, cover, narrow, stage, tableBox, face);

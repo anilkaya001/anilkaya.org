@@ -110,7 +110,7 @@
 .fn-tip-l i .ui-g { font-size: 10px; }
 .fn-tip-l i[data-g="up"] .ui-g, .fn-k.is-up .ui-g, .fn-lean[data-lean="bull"] .ui-g { color: var(--up); }
 .fn-tip-l i[data-g="down"] .ui-g, .fn-k.is-down .ui-g, .fn-lean[data-lean="bear"] .ui-g { color: var(--down); }
-.fn-tip-l i[data-g="flat"] .ui-g, .fn-k.is-nx .ui-g, .fn-lean[data-lean="nx"] .ui-g { color: var(--accent-ink); }
+
 .fn-tip-c { color: var(--label-2); }
 .fn-tip-go { margin-top: 3px; color: var(--accent-ink); font-weight: 500; }
 

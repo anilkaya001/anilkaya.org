@@ -887,7 +887,7 @@
     const nearest = drawn.length + " name" + (drawn.length === 1 ? "" : "s") + " nearest the edge";
     const lede = above + below + onRule === 0
       ? "None of the " + nearest + " published a number to place against the zero rule, so " +
-        "this list is ordered and unsided."
+        "this list is ordered, with no side to read."
       : above + " of the " + nearest + " sit above the zero rule and " + below + " below it" +
         (onRule ? ", " + onRule + " exactly on it" : "") +
         (unplaced ? "; " + unplaced + " published no number to place" : "") + ".";

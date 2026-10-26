@@ -50,7 +50,7 @@ function leanWord(r) {
   if (share === null) return DASH;
   const whole = (v) => +(v * 100).toFixed(0);
   const at = whole(sided / r.prem) < 50 ? "" : whole(share) >= 65 ? "ask" : whole(share) <= 35 ? "bid" : "";
-  if (!at) return "Unsided";
+  if (!at) return "Side not stated";
   const call = r.cp === "C";
   return (call && at === "ask") || (!call && at === "bid") ? "Bullish" : "Bearish";
 }

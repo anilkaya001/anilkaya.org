@@ -785,7 +785,7 @@ try {
        "the watch module mints no opener, because no watched name has a card");
 
     const wt = await moduleWhy(page, "hmWatch");
-    ok(/zero rule|unsided/.test(wt.lead), `#ccWatch leads with its own finding (${wt.lead})`);
+    ok(/zero rule|no side/.test(wt.lead), `#ccWatch leads with its own finding (${wt.lead})`);
     ok(/\d/.test(wt.lead), `and the lead carries a figure (${wt.lead})`);
     ok(wt.leadFirst, "and it is the first thing in its disclosure");
     await shut(page);
