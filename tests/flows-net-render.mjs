@@ -71,8 +71,8 @@ function universe(names = NAMES) {
   return { v: 1, status: "ok", sessionDate: "2026-09-28", t: listed.map((x) => x[0]), sectors, sec: listed.map((x) => sectors.indexOf(x[1])) };
 }
 
-const SHORT = [[/tech/, "Tech"], [/health/, "Health"], [/financ/, "Financial"], [/cyclical|discretionary/, "Cyclical"], [/defensive|staples/, "Defensive"],
-  [/industr/, "Industrial"], [/energy/, "Energy"], [/material/, "Materials"], [/real estate/, "Real estate"], [/utilit/, "Utilities"], [/communic/, "Comms"]];
+const SHORT = [[/tech/, "Technology"], [/health/, "Health Care"], [/financ/, "Financials"], [/cyclical|discretionary/, "Consumer Discretionary"], [/defensive|staples/, "Consumer Staples"],
+  [/industr/, "Industrials"], [/energy/, "Energy"], [/material/, "Materials"], [/real estate/, "Real Estate"], [/utilit/, "Utilities"], [/communic/, "Communication Services"]];
 function expected(flow, { names = 10 } = {}) {
   const rows = flow.rows.filter((r) => r.prem > 0);
   const total = rows.reduce((s, r) => s + r.prem, 0);
@@ -94,7 +94,7 @@ function expected(flow, { names = 10 } = {}) {
   }));
   return {
     total, kinds, byName, bySector, windows: rows.length,
-    layers: [Object.values(kinds).filter((v) => v > 0).length, bySector.size > 6 ? 6 : bySector.size, byName.size > names + 1 ? names + 1 : byName.size, 3],
+    layers: [bySector.size > 14 ? 14 : bySector.size, Object.values(kinds).filter((v) => v > 0).length, byName.size > names + 1 ? names + 1 : byName.size, 3],
     dteOut: dte.size, bull: kinds.ca + kinds.pb, bear: kinds.cb + kinds.pa,
   };
 }
@@ -124,11 +124,15 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
       if (delayFonts && u.pathname.endsWith(".woff2")) await new Promise((r) => setTimeout(r, delayFonts));
-      if (eager && u.pathname === "/assets/js/flows-unusual.js") {
-        const from = 'UI.defer("net", { when: "visible", el: host.net, label: "The flow network" })';
-        const src = fs.readFileSync(f, "utf8");
-        if (!src.includes(from)) throw new Error("the lazy load call is not where the eager variant expects it");
-        return route.fulfill({ body: src.replace(from, "Promise.resolve()"), contentType: "text/javascript" });
+      if (u.pathname === "/assets/js/flows-unusual.js") {
+        let src = fs.readFileSync(f, "utf8");
+        const swaps = [
+          ["const netWant = () => (host.net.clientWidth >= NET_3D.w && host.net.clientHeight >= NET_3D.h ? \"3d\" : \"map\");", "const netWant = () => \"3d\";"],
+          ["{ ambient: true, fit: true, barInHead: true } : { fit: true, barInHead: true }", "{ ambient: true } : {}"],
+        ];
+        if (eager) swaps.push(["UI.defer(\"net\", { when: \"visible\", el: host.net, label })", "Promise.resolve()"]);
+        for (const [from, to] of swaps) { if (!src.includes(from)) throw new Error("the net mount call is not where the harness expects it: " + from); src = src.replace(from, to); }
+        return route.fulfill({ body: src, contentType: "text/javascript" });
       }
       if (patch && u.pathname === "/assets/js/flows-net.js") {
         let src = fs.readFileSync(f, "utf8");
@@ -149,7 +153,7 @@ async function mount(browser, { width = 1440, height = 1300, reduced = false, fl
   });
   await page.goto("https://example.test/flows/unusual/", delayFonts ? { waitUntil: "commit" } : undefined);
   if (!wait) await page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
-  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
+  if (wait) await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[0] > 2; }, null, { timeout: 15000 });
   return { ctx, page };
 }
 
@@ -195,19 +199,20 @@ const adrift = (labels, layout, vert) => {
   }
   return bad;
 };
-const RESID_ORDER = ["s:~", "s:none", "s:unread", "s:wait"];
-const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; }));`);
+const RESID_RANK = (id) => ({ "s:idx": 1, "s:fund": 1, "s:~": 2, "s:none": 3, "s:unread": 4, "s:wait": 5 })[id];
+const layout = (page) => net(page, `const m = net.model(); return m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, sy: n.sy, label: d.label }; }));`);
 async function ranked(page, tag, axis = "y") {
   return rankedL(await layout(page), tag, axis);
 }
 function rankedL(L, tag, axis = "y") {
   L.forEach((layer, li) => {
     const screen = [...layer].sort((a, b) => a[axis] - b[axis]);
+    if (process.env.DBG2 && li === 0) console.log(JSON.stringify(layer.map((d) => [d.id, Math.round(d.y), Math.round(d.sy), d.resid])));
     deep(screen.map((d) => d.id), layer.map((d) => d.id), `layer ${li} reads in rank order ${axis === "y" ? "top to bottom" : "left to right"} on screen (${tag})`);
     const main = screen.filter((d) => !d.resid), rest = screen.filter((d) => d.resid);
     ok(main.every((d, i) => !i || main[i - 1].v >= d.v), `layer ${li}: premium never increases down the ranking (${tag}: ${main.map((d) => d.label).join(", ")})`);
     deep(screen.slice(main.length).map((d) => d.id), rest.map((d) => d.id), `layer ${li}: the residual buckets sit after every ranked node (${tag})`);
-    if (li === 1 && rest.length) ok(rest.every((d, i) => !i || RESID_ORDER.indexOf(rest[i - 1].id) < RESID_ORDER.indexOf(d.id)), `and in the stated order Other, No sector, unread, pending (${rest.map((d) => d.label).join(", ")})`);
+    if (li === 0 && rest.length) ok(rest.every((d, i) => !i || RESID_RANK(rest[i - 1].id) <= RESID_RANK(d.id)), `and in the stated order index buckets, Other, No sector, unread, pending (${rest.map((d) => d.label).join(", ")})`);
   });
   return L;
 }
@@ -240,7 +245,7 @@ function auditFn(sc, rest) {
     const lo = Math.min(...c.map((s) => cross(s) - s.r)), hi = Math.max(...c.map((s) => cross(s) + s.r));
     if (Math.abs((lo + hi) / 2 - sc.midC) > 1) bad.push("layer " + i + " centred at " + ((lo + hi) / 2).toFixed(1) + " not " + sc.midC.toFixed(1));
     if (!sc.vert) {
-      const edges = new Set(L.filter((l) => l.col === i).map((l) => Math.round((i === 0 ? l.x + l.w : l.x) * 2)));
+      const edges = new Set(L.filter((l) => l.col === i).map((l) => Math.round((i <= 1 ? l.x + l.w : l.x) * 2)));
       if (edges.size > 1) bad.push("layer " + i + " chips on " + edges.size + " x edges");
     }
   });
@@ -295,9 +300,9 @@ try {
     const flow = alerts();
     const want = expected(flow);
     const { ctx, page } = await mount(browser, { width: 1440, height: 900, init: () => { document.cookie = "fn_ambient=1; Path=/flows"; } });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(2000);
     const st = await stats(page);
-    deep(st.layers, want.layers, `the four layers carry the node counts the data implies: ${want.layers.join("-")} (side, sector, name, lean)`);
+    deep(st.layers, want.layers, `the four layers carry the node counts the data implies: ${want.layers.join("-")} (sector, side, name, lean)`);
     const m = await net(page, `const m = net.model(); return { total: m.total, windows: m.windows, lean: m.lean,
       layers: m.layers.map((l) => l.map((d) => ({ id: d.id, v: d.v, label: d.label, share: d.share }))),
       edges: m.edges.map((hop) => hop.map((e) => ({ a: e.a, b: e.b, v: e.v }))) };`);
@@ -313,13 +318,15 @@ try {
     const node = (id) => m.layers.flat().find((d) => d.id === id);
     for (const k of ["ca", "cb", "pa", "pb", "nx"]) near(node("i:" + k).v, want.kinds[k], `the ${k} input carries exactly that side's premium`);
     near(node("n:NVDA").v, want.byName.get("NVDA"), "a name node carries its own windows' premium");
-    near(node("s:tech").v, want.bySector.get("Tech"), "a sector node carries its names' premium");
+    near(node("s:tech").v, want.bySector.get("Technology"), "a sector node carries its names' premium");
     near(m.lean.bull, want.bull, "bullish lean is ask-side calls plus bid-side puts");
     near(m.lean.bear, want.bear, "bearish lean is bid-side calls plus ask-side puts");
     eq(node("s:fund").label, "Index funds", "SPY, QQQ and IWM, which the universe gives no sector, are the fixed Index funds class the Market Floor uses, not a guessed sector");
     eq(node("s:none"), undefined, "and with every other name carried by the universe there is no No sector node at all");
-    deep(m.layers[1].map((d) => d.label), ["Tech", "Index funds", "Cyclical", "Comms", "Energy", "Other"],
-      "the sector layer is ranked by premium with Other last, and Index funds, which carries the second largest premium, ranks second as a class of its own");
+    const gics = [...want.bySector.entries()].filter((e) => e[0] !== "Index funds" && e[0] !== "No sector").sort((a, b) => b[1] - a[1]).map((e) => e[0]);
+    deep(m.layers[0].map((d) => d.label), [...gics, "Index funds"],
+      "the sector layer is the real sectors ranked by premium and never folded into Other while there are eleven or fewer, with the Index funds class after them");
+    eq(m.layers[0].some((d) => d.id === "s:~"), false, "no sector is folded into Other");
     deep(m.layers[2].slice(0, 3).map((d) => d.label), ["NVDA", "SPY", "QQQ"], "the name layer is ranked by premium, not grouped by sector");
     eq(m.layers[2][m.layers[2].length - 1].id, "n:~", "and Other names closes it");
     await ranked(page, "at rest");
@@ -375,7 +382,7 @@ try {
     const nv = await page.evaluate(() => { const a = document.querySelector('#uaNet .fn-hit[data-id="n:NVDA"]'); return { tag: a.tagName, href: a.getAttribute("href"), label: a.getAttribute("aria-label") }; });
     eq(nv.tag, "A", "a name node is a link");
     eq(nv.href, "/flows/ticker/?t=NVDA", "to the ticker page");
-    ok(/^Rank 1, NVDA, Tech: \$[\d.]+M, \d+% of flagged premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
+    ok(/^Rank 1, NVDA, Technology: \$[\d.]+M, \d+% of flagged premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
 
     await page.evaluate(() => document.activeElement.blur());
     await toStage(page);
@@ -431,7 +438,8 @@ try {
     deep(rowLit, [1, 1, 0, 0], "hovering a row of the table lights that one path: NVDA through ask-side calls, not its bid-side calls");
     await page.mouse.move(5, 5);
 
-    await page.focus("#uaNet .fn-home");
+    await page.focus('#uaNet .fn-hit[tabindex="0"]');
+    await page.keyboard.press("Shift+Tab");
     await page.keyboard.press("Tab");
     const first = await page.evaluate(() => document.activeElement.dataset.id);
     const names = m.layers[2].map((d) => d.id);
@@ -442,7 +450,7 @@ try {
     ok(ring && ring !== "none", `the focused node shows a visible focus ring (${ring})`);
     eq(await page.evaluate(() => document.querySelector("#uaNet .fn-tip").hidden), false, "and its tooltip, so focus reads like hover");
     await page.keyboard.press("ArrowLeft");
-    ok((await page.evaluate(() => document.activeElement.dataset.id)).startsWith("s:"), "ArrowLeft steps back to the sector layer");
+    ok((await page.evaluate(() => document.activeElement.dataset.id)).startsWith("i:"), "ArrowLeft steps back to the side layer");
     await page.keyboard.press("Enter");
     eq(await page.evaluate(() => document.activeElement.getAttribute("aria-pressed")), "true", "Enter pins a non-name node's subgraph");
     await page.keyboard.press("Escape");
@@ -540,13 +548,15 @@ try {
     const cv = document.querySelector("#uaNet canvas"), g = cv.getContext("2d"), k = cv.width / s.w, nv = net.labels().find((l) => l.id === "n:NVDA");
     const px = nv ? [...g.getImageData(Math.round((nv.x + 4) * k), Math.round((nv.y + nv.h / 2) * k), 1, 1).data] : null;
     return { y, p, yaw: c.yaw, pitch: c.pitch, w: s.w, h: s.h, labels: net.labels(), px,
-      layout: m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, label: d.label }; })) }; });`, pts);
+      layout: m.layers.map((l) => l.map((d) => { const n = net.node(d.id); return { id: d.id, layer: d.layer, v: d.v, resid: d.resid, x: n.x, y: n.y, sy: n.sy, label: d.label }; })) }; });`, pts);
   const lin = (a, n) => Array.from({ length: n }, (_, i) => -a + 2 * a * i / (n - 1));
   for (const width of [320, 390, 700, 768, 1024, 1280, 1440]) {
     const { ctx, page } = await mount(browser, { width, height: 1400 });
+    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); return n && !n.stats().running; }, null, { timeout: 8000 }).catch(() => {});
     for (const mode of ["lean", "dte"]) {
       await net(page, `net.mode(arg); return null;`, mode);
-      await page.waitForTimeout(700);
+      await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); return n && !n.stats().running; }, null, { timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(500);
       const box = await page.evaluate(() => {
         const st = document.querySelector("#uaNet .fn-stage").getBoundingClientRect(), card = document.getElementById("uaNetCard").getBoundingClientRect();
         return { sw: document.documentElement.scrollWidth, iw: window.innerWidth, stage: [st.left, st.right], card: [card.left, card.right] };
@@ -631,7 +641,7 @@ try {
     const r0 = await atRest();
     deep(overlaps(r0.labels), [], `no two labels or captions collide at rest in the fallback face, ${width}px`);
     deep(adrift(r0.labels, r0.layout, width < 560), [], `and every label stays by its sphere in the fallback face, ${width}px`);
-    await page.waitForFunction(() => document.fonts.status === "loaded" && [...document.fonts].some((f) => f.status === "loaded"), null, { timeout: 20000 });
+    await page.waitForFunction(() => document.fonts.status === "loaded" && [...document.fonts].some((f) => f.status === "loaded"), null, { timeout: 20000 }).catch(async (e) => { console.log("FONTS", await page.evaluate(() => document.fonts.status + " " + [...document.fonts].map((f) => f.family + ":" + f.status).join(","))); throw e; });
     await page.waitForTimeout(600);
     const w1 = await widths();
     ok(Math.abs(w1 - w0) > 1, `THE CHIPS ARE MEASURED AGAIN WHEN THE FONT ARRIVES: total chip width ${w0.toFixed(0)} px in the fallback face, ${w1.toFixed(0)} px in the loaded one (${width}px)`);
@@ -720,11 +730,11 @@ try {
     await page.waitForTimeout(2500);
     const fr1 = await camera(page);
     ok(fr1.spin === 0 && fr1.yaw - fr0.yaw <= 20 && fr1.yaw <= fr1.limits[0] - 5, `A FLICK FROM REST COASTS A LITTLE: released at yaw ${fr0.yaw.toFixed(1)}, settled at ${fr1.yaw.toFixed(1)} with spin ${fr1.spin}, limit ${fr1.limits[0]}`);
-    await page.click("#uaNet .fn-home");
+    await page.click("#uaNetCard .fn-home");
     await settle(page);
     c = await camera(page);
     ok(c.auto && Math.abs(c.yaw - c.rest[0]) <= 9.6, `the recentre control returns the camera to its rest angle and sway (yaw ${c.yaw.toFixed(1)})`);
-    eq(await page.evaluate(() => document.querySelector("#uaNet .fn-home").getAttribute("aria-label")), "Recentre the view", "and has an accessible name");
+    eq(await page.evaluate(() => document.querySelector("#uaNetCard .fn-home").getAttribute("aria-label")), "Recentre the view", "and has an accessible name");
     await net(page, "net.orbit(50, 20); return null;");
     await page.focus('#uaNet .fn-hit[tabindex="0"]');
     await page.keyboard.press("Home");
@@ -754,7 +764,7 @@ try {
     await Promise.all([page.waitForURL(/\/flows\/ticker\/\?t=AAPL$/, { timeout: 10000 }), page.mouse.click(b.x + aapl2.x, b.y + aapl2.y)]);
     ok(true, `and a click there after the rotation opens AAPL's ticker page (${page.url()})`);
     await page.goto(backUrl);
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[0] > 2; }, null, { timeout: 15000 });
     await page.evaluate((y) => window.scrollTo({ top: y, behavior: "instant" }), sy);
 
     await page.mouse.move(5, 5);
@@ -763,7 +773,7 @@ try {
     const order = await net(page, "return net.paints();");
     deep(order.filter((it) => it.k !== "node").map((it) => it.k), ["floor", "shadows", "planes", "bands", "pulses", "heads", "spheres", "labels"], "PAINTER'S ORDER: floor, shadows, glass planes, bands, pulses, headers, spheres, then the labels last");
     const nodes = order.filter((it) => it.k === "node");
-    ok(nodes.length === 25 && nodes.every((n, i) => !i || nodes[i - 1].z >= n.z), "the spheres are drawn back to front");
+    ok(nodes.length === await net(page, "return net.model().layers.flat().length;") && nodes.every((n, i) => !i || nodes[i - 1].z >= n.z), "the spheres are drawn back to front");
     const ix = (k) => order.findIndex((it) => it.k === k);
     ok(order.findIndex((it) => it.k === "node") > ix("heads") && order.findIndex((it) => it.k === "node") < ix("spheres"), "after every band and pulse, so a sphere always covers the light that reaches it");
     deep(page.errors, [], "nothing threw while orbiting");
@@ -798,7 +808,7 @@ try {
     const c3 = await camera(page);
     ok(c3.yaw !== c0.yaw, `another horizontal touch drag turns it again (yaw ${c3.yaw.toFixed(1)})`);
     const hb = await page.evaluate(() => new Promise((done) => {
-      const h = document.querySelector("#uaNet .fn-home");
+      const h = document.querySelector("#uaNetCard .fn-home");
       let last = NaN, calm = 0, n = 0;
       const tick = () => {
         h.scrollIntoView({ block: "center", behavior: "instant" });
@@ -893,7 +903,7 @@ try {
         rank: (() => {
           const at = "2026-09-29T15:00:00Z";
           const m = model([{ t: "Q", prem: 5, exp: "2026-12-18", spanStart: at }, { t: "R", prem: 9, exp: "2026-09-29", spanStart: at }, { t: "S", prem: 9 }, { t: "T", prem: 1, exp: "nope" }, { t: "U", prem: 2 }], { names: 3, sectorOf: (t) => (t === "Q" ? null : "Energy"), out: "dte" });
-          return { names: m.layers[2].map((d) => d.label + (d.pos ? "#" + d.pos : "")), sectors: m.layers[1].map((d) => d.label), out: m.layers[3].map((d) => d.label) };
+          return { names: m.layers[2].map((d) => d.label + (d.pos ? "#" + d.pos : "")), sectors: m.layers[0].map((d) => d.label), out: m.layers[3].map((d) => d.label) };
         })(),
       };
     });
@@ -975,7 +985,7 @@ try {
 
   {
     const { ctx, page } = await mount(browser, { width: 1440, height: 900, uniStatus: 500, wait: false });
-    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); const l = m && m.layers[1].map((d) => d.label); return l && l.includes("Sector unread") && l.every((x) => x === "Sector unread" || x === "Index funds"); }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI.net.of(document.getElementById("uaNet")); const m = n && n.model(); const l = m && m.layers[0].map((d) => d.label); return l && l.includes("Sector unread") && l.every((x) => x === "Sector unread" || x === "Index funds"); }, null, { timeout: 15000 });
     ok(true, "an unreadable universe draws one honest Sector unread node beside the fixed Index funds class, never No sector");
     await ctx.close();
   }
@@ -1009,8 +1019,9 @@ try {
         const big = Math.max(...sc.spheres.map((s) => s.r));
         near(big, 34, "the largest node is 34 px (r = 6 + 28 sqrt(v / vMax))");
         ok(sc.spheres.every((s) => s.r >= 9 - 1e-9), "and no node is under 9 px");
-        eq((await net(page, "return net.scale().form;")), "line", "chips are 22 px single lines");
-        ok(sc.labels.every((l) => Math.abs(l.h - 22) < 1e-9), "every chip is 22 px tall");
+        const form = await net(page, "return net.scale().form;");
+        ok(form === "line" || form === "stack", `chips are single lines or, when the side chips of the middle layer would not fit one line between their neighbours, two (${form})`);
+        ok(sc.labels.every((l) => Math.abs(l.h - (form === "line" ? 22 : 32)) < 1e-9), "every chip has the height of its form");
       }
       await net(page, "net.freeze(false); return null;");
       const sw = await sweepOf(page);
@@ -1040,8 +1051,8 @@ try {
       ["a stack off the midline", [["let y = -(sum + gap * units) / 2;", "let y = -(sum + gap * units) / 2 + 20;"]], /centred/],
       ["chips on a ragged edge", [["n.px + cl.rMax * n.f + 8", "n.px + n.R + 8"]], /x edges/],
       ["a header with another total", [['t.toUpperCase() + " " + MID + " " + total', 't.toUpperCase() + " " + MID + " " + (i === 2 ? "$1M" : total)']], /headers/],
-      ["headers up under the readout", [["G.hd = cols.map((c) => [c.x, 52]);", "G.hd = cols.map((c) => [c.x, 34]);"]], /readout within/, true],
-      ["headers down on the spheres", [["G.hd = cols.map((c) => [c.x, 52]);", "G.hd = cols.map((c) => [c.x, 100]);"]], /over sphere/],
+      ["headers up under the readout", [["G.hd = cols.map((c) => [c.x, tops - 36]);", "G.hd = cols.map((c) => [c.x, 34]);"]], /readout within/, true],
+      ["headers down on the spheres", [["G.hd = cols.map((c) => [c.x, tops - 36]);", "G.hd = cols.map((c) => [c.x, 100]);"]], /over sphere/],
     ];
     for (const [name, patch, want, hover] of mutants) {
       const { ctx, page } = await mount(browser, { width: 1440, height: 1300, patch });
@@ -1052,6 +1063,31 @@ try {
       ok(bad.some((b) => want.test(b)), `THE AUDIT FAILS ON A MUTANT (${name}): ${bad.slice(0, 2).join("; ")}`);
       await ctx.close();
     }
+  }
+
+  {
+    const problems = (m) => {
+      const bad = [];
+      if (!m.layers[0].every((d) => d.id.startsWith("s:"))) bad.push("the first layer is not the sectors");
+      if (!m.layers[1].every((d) => d.id.startsWith("i:"))) bad.push("the second layer is not the sides");
+      if (m.layers[0].some((d) => d.id === "s:~")) bad.push("a sector was folded into Other");
+      const ids = m.layers[0].map((d) => d.id), at = (id) => ids.indexOf(id);
+      if (at("s:fund") >= 0 && ids.some((id, i) => !/^s:(fund|idx|~|none|unread|wait)$/.test(id) && i > at("s:fund"))) bad.push("Index funds ranks among the real sectors");
+      for (const l of m.layers) if (Math.abs(l.reduce((s, d) => s + d.v, 0) - m.total) > 1e-6 * m.total) bad.push("a layer does not sum to the total");
+      return bad;
+    };
+    const run = async (patch) => {
+      const { ctx, page } = await mount(browser, { width: 1440, height: 1000, patch });
+      const bad = problems(await net(page, "return JSON.parse(JSON.stringify(net.model()));"));
+      await ctx.close();
+      return bad;
+    };
+    deep(await run(null), [], "THE SECTOR LAYER COMES FIRST, THE SIDES SECOND, NO SECTOR IS FOLDED, THE INDEX BUCKETS FOLLOW THE REAL SECTORS and every layer sums to the total");
+    for (const [name, patch] of [
+      ["the sides lead and the sectors follow", [['node(sid, 0, sid === "s:~"', 'node(sid, 1, sid === "s:~"'], ['node(ids[1], 1, {', 'node(ids[1], 0, {']]],
+      ["sectors fold into Other past six", [["const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs)", "const keepS = new Set((secs.length > 6 ? secs.slice(0, 5) : secs)"]]],
+      ["Index funds rank among the sectors", [['"s:fund": 1,', '"s:fund": 0,']]],
+    ]) ok((await run(patch)).length > 0, `PLANTED WRONG BUILD FAILS: ${name}`);
   }
 
   {
@@ -1066,9 +1102,9 @@ try {
     const rel = r3.map((r, i) => r / flat[i]), rel0 = r0.map((r, i) => r / flat[i]);
     ok(Math.min(...rel, ...rel0) >= 1 - 1e-9 && Math.max(...rel, ...rel0) <= 1.0301 && Math.max(...rel) - Math.min(...rel0) > 0.01, `the spheres breathe between 1.00 and 1.03 of their size (${Math.min(...rel).toFixed(4)} to ${Math.max(...rel).toFixed(4)})`);
     ok(new Set(rel0.map((x) => x.toFixed(3))).size > 3, "each in its own phase");
-    await page.click("#uaNet .fn-freeze");
+    await page.click("#uaNetCard .fn-freeze");
     await page.waitForTimeout(200);
-    const fz = await page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-freeze").hasAttribute("aria-pressed"), t: document.querySelector("#uaNet .fn-freeze").textContent }));
+    const fz = await page.evaluate(() => ({ p: document.querySelector("#uaNetCard .fn-freeze").hasAttribute("aria-pressed"), t: document.querySelector("#uaNetCard .fn-freeze").textContent }));
     const f1 = await stats(page);
     ok(fz.p === false && /Resume/.test(fz.t) && f1.still && !f1.running && f1.pulses === 0, `FREEZE stops the pulses, the breathing and the sway and the loop with them (${JSON.stringify(fz)})`);
     const fc = await camera(page);
@@ -1076,12 +1112,12 @@ try {
     eq((await camera(page)).yaw, fc.yaw, "and the camera holds");
     await drag(page, 120, 10);
     ok((await camera(page)).yaw !== fc.yaw && !(await stats(page)).running, "a drag still turns a frozen network, with no loop");
-    await page.click("#uaNet .fn-freeze");
+    await page.click("#uaNetCard .fn-freeze");
     await page.waitForTimeout(300);
     ok((await stats(page)).running && !(await stats(page)).still, "and Resume starts it again");
     await ctx.close();
     const rm = await mount(browser, { width: 1440, height: 1000, reduced: true });
-    eq(await rm.page.evaluate(() => document.querySelector("#uaNet .fn-freeze").hidden), true, "under reduced motion there is nothing to freeze, so the control is hidden");
+    eq(await rm.page.evaluate(() => document.querySelector("#uaNetCard .fn-freeze").hidden), true, "under reduced motion there is nothing to freeze, so the control is hidden");
     await rm.ctx.close();
   }
 
@@ -1229,7 +1265,7 @@ try {
     const { ctx, page } = await mount(browser, { width: 1440, height: 1000, owner: false, init: SPY, clock: AT });
     const s0 = await stats(page);
     eq(s0.ambient, false, "MEMBERS LOAD LIVE: ambient is off");
-    const amb = () => page.evaluate(() => ({ p: document.querySelector("#uaNet .fn-amb").getAttribute("aria-pressed"), tag: !document.querySelector("#uaNet .fn-tag").hidden, legend: document.querySelector("#uaNet .fn-legend").textContent }));
+    const amb = () => page.evaluate(() => ({ p: document.querySelector("#uaNetCard .fn-amb").getAttribute("aria-pressed"), tag: !document.querySelector("#uaNetCard .fn-tag").hidden, legend: document.querySelector("#uaNet .fn-legend").textContent }));
     deep(await amb(), { p: "false", tag: false, legend: (await amb()).legend }, "the Ambient button is offered, unpressed, with no ambient tag");
     ok(!/ambient motion, not data/.test((await amb()).legend), "and the legend does not claim an ambient motion that is not running");
     await net(page, "net.mode('dte'); return null;");
@@ -1275,7 +1311,7 @@ try {
     await page.waitForTimeout(600);
     const arr = await stats(page);
     const lanes1 = await net(page, "return net.lanes().filter((l) => l.n > 0);");
-    ok(arr.running && arr.pulses > 0 && arr.pulses <= 28 && lanes1.length >= 1 && lanes1.length <= 7 && lanes1.some((l) => l.to === "n:NVDA" || l.from === "n:NVDA") && arr.arrivals === 1,
+    ok(arr.running && arr.pulses > 0 && arr.pulses <= 28 && lanes1.length >= 1 && lanes1.length <= 9 && lanes1.some((l) => l.to === "n:NVDA" || l.from === "n:NVDA") && arr.arrivals === 1,
       `AN ARRIVAL lights only the bands its premium travelled: ${arr.pulses} pulses on ${lanes1.length} of ${arr.edges} bands (${JSON.stringify(lanes1.map((l) => l.n))})`);
     ok(arr.hot >= 1, "and flares its name");
     const camArr = await camera(page);
@@ -1288,7 +1324,7 @@ try {
     ok(gone.pulses === 0 && !gone.running, `FIVE MINUTES LATER the light is gone and the loop is idle again (${JSON.stringify({ pulses: gone.pulses, running: gone.running })})`);
 
     const events = await page.evaluate(() => { window.__ev = []; const h = document.getElementById("uaNet"); h.addEventListener("ambient:on", (e) => window.__ev.push("on:" + e.detail.user)); h.addEventListener("ambient:off", (e) => window.__ev.push("off:" + e.detail.user)); return true; });
-    await page.click("#uaNet .fn-amb");
+    await page.click("#uaNetCard .fn-amb");
     await page.waitForTimeout(1500);
     const on = await amb(), onStats = await stats(page);
     ok(on.p === "true" && on.tag && /ambient motion, not data/.test(on.legend) && /not individual trades/.test(on.legend), `AMBIENT: the button is pressed, the 'ambient' tag shows and the legend reads 'ambient motion, not data' (${on.p}, tag ${on.tag})`);
@@ -1305,9 +1341,9 @@ try {
     eq(await page.evaluate(() => (/(?:^|; )fn_ambient=([01])/.exec(document.cookie) || [])[1]), "1", "THE CHOICE IS REMEMBERED on this device, in a first-party preference cookie scoped to /flows");
     deep(await page.evaluate(() => window.__ev), ["on:true"], "ambient:on is announced with the reader's own click as its cause");
     await page.reload();
-    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[1] > 2; }, null, { timeout: 15000 });
+    await page.waitForFunction(() => { const n = window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet")); return n && n.stats().layers.length === 4 && n.stats().layers[0] > 2; }, null, { timeout: 15000 });
     eq((await stats(page)).ambient, true, "and a reload opens on Ambient for this reader");
-    await page.click("#uaNet .fn-amb");
+    await page.click("#uaNetCard .fn-amb");
     await page.waitForTimeout(3000);
     const offStats = await stats(page);
     ok(offStats.ambient === false && offStats.pulses === 0, "switching it off puts the network back in Live");
@@ -1327,7 +1363,7 @@ try {
 
   {
     const { ctx, page } = await mount(browser, { width: 1000, height: 800, owner: false, reduced: true, clock: AT });
-    const hidden = await page.evaluate(() => ({ amb: document.querySelector("#uaNet .fn-amb").hidden, tag: document.querySelector("#uaNet .fn-tag").hidden }));
+    const hidden = await page.evaluate(() => ({ amb: document.querySelector("#uaNetCard .fn-amb").hidden, tag: document.querySelector("#uaNetCard .fn-tag").hidden }));
     deep(hidden, { amb: true, tag: true }, "REDUCED MOTION ALWAYS WINS: no Ambient button and no tag are offered");
     await ctx.close();
   }

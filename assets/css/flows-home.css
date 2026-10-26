@@ -626,6 +626,7 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 .hm-stage .is-glance #ccVol .ui-metric:nth-child(n+3) { display: none; }
 .hm-stage .is-glance .hm-news-open { display: block; padding: 0; background: none; }
 .hm-stage .is-glance .hm-news-h { -webkit-line-clamp: 3; line-clamp: 3; }
+@container mod (max-width: 330px) { .hm-stage .is-glance .hm-news-h { -webkit-line-clamp: 2; line-clamp: 2; } }
 .hm-stage .is-glance :is(.hm-news-a, .hm-news-n, .hm-news-open > .ui-g, #ccChgStats .ui-metric-s) { display: none; }
 .hm-stage .is-glance .hm-mhead .hm-t { display: none; }
 .hm-stage .is-glance :is(.hm-mrow, .hm-mlead, a.hm-qrow) { min-height: 24px; }

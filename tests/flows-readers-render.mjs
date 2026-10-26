@@ -662,7 +662,7 @@ try {
       ok(narrowed.role === "dialog" && narrowed.modal === "true" && narrowed.behind === 0 && narrowed.focusIn,
          `narrowed to 390 px while open, it becomes the modal dialog and takes the focus (${JSON.stringify(narrowed)})`);
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => document.getElementById("askDockPanel").getAttribute("role") === "complementary", null, { timeout: 5000 }).catch(() => {});
       const widened = await state(page);
       ok(widened.open && widened.role === "complementary" && widened.modal === null && widened.anyInert === 0 && widened.behind >= 20,
          `widened back to 1280 px, it is a side panel again and the page is live (${JSON.stringify(widened)})`);

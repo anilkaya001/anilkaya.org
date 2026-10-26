@@ -123,11 +123,11 @@ try {
       const rows = [row("SPX", 119e6), row("SPXW", 9e6), row("VIX", 4e6), row("SPY", 30e6), row("QQQ", 20e6), row("SYX900", 5e6), row("SYX901", 3e6)];
       const sectors = (sectorOf) => {
         const M = window.FlowsUI.net.model(rows, { out: "lean", sectorOf });
-        return Object.fromEntries(M.layers[1].map((n) => [n.label, Math.round(n.v)]));
+        return Object.fromEntries(M.layers[0].map((n) => [n.label, Math.round(n.v)]));
       };
       return { read: sectors((t) => (t === "SYX901" ? "Technology" : null)), pending: sectors(() => undefined), names: window.FlowsUI.net.model(rows, { out: "lean", sectorOf: () => null }).layers[2].filter((n) => n.ticker).map((n) => n.ticker + ":" + n.sec) };
     });
-    eq(idx.read, { "Index options": 132e6, "Index funds": 50e6, "No sector": 5e6, Tech: 3e6 },
+    eq(idx.read, { "Index options": 132e6, "Index funds": 50e6, "No sector": 5e6, Technology: 3e6 },
       "INDEX PRODUCTS ARE THEIR OWN CLASSES IN THE NETWORK: SPX, SPXW and VIX are Index options, SPY and QQQ Index funds, and No sector holds only a name the universe does not carry");
     eq(idx.pending, { "Index options": 132e6, "Index funds": 50e6, "Sector pending": 8e6 }, "and the index classes stand before the universe is read, which only stocks wait for");
     ok(idx.names.includes("SPX:Index options") && idx.names.includes("SPY:Index funds"), `a name node says its class (${idx.names.join(", ")})`);

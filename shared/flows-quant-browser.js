@@ -9,4 +9,7 @@ export {
   QUANT_CARD_VERSION, repriceStructure, sliceFromSummary, lawAtSessions, structureLegsText, bookRows, contractFit, labSetup,
   contractDiagnosis, codeText, QUANT_CODE_TEXT,
 } from "./flows-quant-card.js";
+export { lineCompare } from "./flows-quant-rank.js";
+export { carryOf, deltaBand } from "./flows-quant-forward.js";
+export { winRange, outsideRange } from "./flows-quant-bracket.js";
 export { closeUtcMs, remainingSessions, etDayOf } from "./flows-quant-time.js";

@@ -21,7 +21,7 @@ def collateral(conv, S, K, d, h, f):
         a = Fr(1, 5) * S - max(Fr(0), K - S)
         fl = Fr(1, 10) * S
         return 100 * max(a, fl), ("regt-otm" if a > fl else "floor")
-    t = h * d
+    t = h * max(d, Fr(1, 20))
     return 100 * S * max(t, f), ("delta" if t > f else "floor")
 
 
