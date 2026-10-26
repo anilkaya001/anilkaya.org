@@ -32,6 +32,7 @@ const ALLOWED = [
   ["assets/js/flows-ticker.js", 1, "chart"],
   ["assets/js/mastery.js", 1, "repeat"],
   ["assets/js/skill-mastery.js", 1, "repeat"],
+  ["shared/ff-contract.js", 2, "wire label and dte"],
   ["scripts/flows-legs/dispersion.mjs", 2, "month"],
   ["scripts/flows-legs/flow.mjs", 1, "month"],
   ["scripts/flows-legs/live-day.mjs", 10, "clock"],
