@@ -66,7 +66,7 @@
     const st = ff ? ff.stateAt() : fr.state;
     if (st !== "live") return { ff, why: st === "stale" ? "the streamed quote is stale" : "the streamed quote is not live" + (fr.reason === "vendor-lag" ? ", it is behind the vendor" : "") };
     const at = ms(q.tapeTime) ?? ms(q.readAt);
-    return { ff, q, fr, live: { px: q.price, prev: num(q.prevClose), at, session: typeof fr.session === "string" ? fr.session.slice(0, 10) : F.trtDay(at) } };
+    return { ff, q, fr, live: { px: q.price, prev: num(q.prevClose), at, session: typeof fr.session === "string" ? fr.session.slice(0, 10) : F.etDay(at) } };
   }
 
   function take(live) {

@@ -9,9 +9,15 @@ export function mean(xs) {
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 }
 
+const flat = (v) => {
+  for (let i = 1; i < v.length; i++) if (v[i] !== v[0]) return false;
+  return true;
+};
+
 export function sampleVar(xs) {
   const v = finite(xs);
   if (v.length < 2) return null;
+  if (flat(v)) return 0;
   const m = v.reduce((a, b) => a + b, 0) / v.length;
   return v.reduce((a, b) => a + (b - m) * (b - m), 0) / (v.length - 1);
 }
@@ -81,12 +87,18 @@ export function pearson(xs, ys, { min = 3 } = {}) {
   const pts = pairs(xs, ys);
   const n = pts.length;
   if (n < min) return null;
+  let fx = true, fy = true;
+  for (let i = 1; i < n; i++) {
+    if (pts[i][0] !== pts[0][0]) fx = false;
+    if (pts[i][1] !== pts[0][1]) fy = false;
+  }
+  if (fx || fy) return null;
   let mx = 0, my = 0;
   for (const [x, y] of pts) { mx += x; my += y; }
   mx /= n; my /= n;
   let sxx = 0, syy = 0, sxy = 0;
   for (const [x, y] of pts) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
-  return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+  return sxx > 0 && syy > 0 ? Math.max(-1, Math.min(1, sxy / Math.sqrt(sxx * syy))) : null;
 }
 
 function ranks(values) {

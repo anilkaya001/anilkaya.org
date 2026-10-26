@@ -1,1 +1,1 @@
-{"name": "flows-scores", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 12, "files": ["flows-scores-contract.mjs"], "covers": []}
+{"name": "flows-scores", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 10, "files": ["flows-scores-contract.mjs"], "covers": []}

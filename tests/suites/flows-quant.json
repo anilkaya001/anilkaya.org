@@ -1,1 +1,1 @@
-{"name": "flows-quant", "class": "N", "group": "shard", "timing": true, "medianS": 14.5, "shard": 12, "files": ["flows-quant.mjs"], "covers": ["tests/fixtures-quant-cases.json"]}
+{"name": "flows-quant", "class": "N", "group": "shard", "timing": true, "medianS": 14.5, "shard": 6, "files": ["flows-quant.mjs"], "covers": ["tests/fixtures-quant-cases.json"]}

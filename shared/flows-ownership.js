@@ -100,15 +100,36 @@ export function borrowSummary(rows, { sessionDate = null, dfeeSessions = 5, path
   };
 }
 
+export const SVR_FIVE = 5;
+
+const noFive = (why) => ({ ratio5: null, ratio5Basis: null, ratio5Why: why });
+
+export function pooledFive(list) {
+  const five = list.slice(-SVR_FIVE);
+  if (five.length < SVR_FIVE) return noFive(SILENCE.few);
+  if (five.some((x) => x.invalid)) return noFive(SILENCE.unreadable);
+  for (let i = 1; i < five.length; i++) if (sessionsBetween(five[i - 1].d, five[i].d) !== 1) return noFive(SILENCE.coverage);
+  if (five.every((x) => x.sv !== null && x.tv !== null && x.tv > 0)) {
+    let s = 0, t = 0;
+    for (const x of five) { s += x.sv; t += x.tv; }
+    return { ratio5: s / t, ratio5Basis: "pooled" };
+  }
+  if (five.every((x) => x.ratio !== null)) return { ratio5: mean(five.map((x) => x.ratio)), ratio5Basis: "mean" };
+  return noFive(SILENCE.coverage);
+}
+
 export function shortVolumeSummary(rows, { sessionDate = null, window = SVR_WINDOW, min = SVR_MIN } = {}) {
   const list = [];
   for (const r of Array.isArray(rows) ? rows : []) {
     const d = isoDay(r && r.market_date);
     if (!d || (sessionDate && d > sessionDate)) continue;
-    const ratio = vnum(r.short_volume_ratio);
-    const sv = vnum(r.short_volume), tv = vnum(r.total_volume);
-    const derived = ratio !== null ? ratio : sv !== null && tv !== null && tv > 0 ? sv / tv : null;
-    list.push({ d, ratio: derived, sv, tv });
+    const stated = vnum(r.short_volume_ratio);
+    const svRaw = vnum(r.short_volume), tvRaw = vnum(r.total_volume);
+    const countsBad = (svRaw !== null && svRaw < 0) || (tvRaw !== null && tvRaw < 0) || (svRaw !== null && tvRaw !== null && svRaw > tvRaw);
+    const invalid = countsBad || (stated !== null && (stated < 0 || stated > 1));
+    const sv = invalid ? null : svRaw, tv = invalid ? null : tvRaw;
+    const ratio = invalid ? null : stated !== null ? stated : sv !== null && tv !== null && tv > 0 ? sv / tv : null;
+    list.push({ d, ratio, sv, tv, invalid });
   }
   list.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
   if (!list.length) return { status: "quiet", reason: SILENCE.absent };
@@ -123,9 +144,9 @@ export function shortVolumeSummary(rows, { sessionDate = null, window = SVR_WIND
     shortVolume: latest.sv,
     totalVolume: latest.tv,
     mean60: z.mean, sd60: z.sd, z: z.z, n: z.n, reason: z.reason,
-    avg5: mean(list.slice(-5).map((x) => x.ratio)),
+    ...pooledFive(list),
     path: list.slice(-20).map((x) => [x.d, x.ratio === null ? null : Number(x.ratio.toFixed(4))]),
-    rule: "z of the latest FINRA short-volume ratio against the 60 sessions before it; a 40-50% baseline is market-making, not short interest",
+    rule: "z of the latest FINRA-reported short-volume ratio against the 60 sessions before it; a 40-50% baseline is market-making, not short interest",
   };
 }
 
