@@ -332,6 +332,14 @@ export const DEFAULT_GATES = Object.freeze({
   maxDays: 400,
 });
 
+export function gateOf(p, g = DEFAULT_GATES) {
+  if (p.days < g.minDays || p.days > g.maxDays) return "expiry";
+  if (p.premium < g.minPremium) return "premium";
+  if (p.oi === null || p.oi < g.minOi) return "openInterest";
+  if (p.spread === null || p.spread > g.maxSpread) return "spread";
+  return null;
+}
+
 export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollateral", "cushionSigmas", "premiumRatio"]);
 
 const before = (x, y) => {
@@ -369,10 +377,8 @@ export function rankChain(contracts, {
   const rows = [];
   for (const p of standing) {
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
-    if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
-    if (p.premium < g.minPremium) { gated.premium++; continue; }
-    if (p.oi === null || p.oi < g.minOi) { gated.openInterest++; continue; }
-    if (p.spread === null || p.spread > g.maxSpread) { gated.spread++; continue; }
+    const why = gateOf(p, g);
+    if (why !== null) { gated[why]++; continue; }
     rows.push(p);
   }
 

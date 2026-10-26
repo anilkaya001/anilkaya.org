@@ -664,19 +664,27 @@ export function codeText(code) {
   return typeof code === "string" && Object.prototype.hasOwnProperty.call(QUANT_CODE_TEXT, code) ? QUANT_CODE_TEXT[code] : null;
 }
 
-function contractFrame(input) {
-  const { expiry, asOfMs, spot: S, row } = input;
+function expiryFrame(input) {
+  const { expiry, asOfMs, spot: S } = input;
   const r = fin(input.rate) ? input.rate : ENGINE_LINES.RATE_FALLBACK;
   const rateMethod = typeof input.rateMethod === "string" ? input.rateMethod : fin(input.rate) ? "given" : "fallback";
   const q = fin(input.q) ? input.q : cardCarry(input.facts);
   const T = yearFraction(asOfMs, expiry);
-  if (!(T > 0) || !(S > 0) || !row || !fin(row.K)) return { bad: !(T > 0) ? "expired" : !(S > 0) ? "spot.missing" : "quote.one-sided" };
+  if (!(T > 0)) return { bad: "expired" };
+  if (!(S > 0)) return { bad: "spot.missing" };
   const carry = q === null ? 0 : q;
   return { T, S, r, rateMethod, q, carry, F: S * Math.exp((r - carry) * T), D: Math.exp(-r * T) };
 }
 
-function oppositeQuote(input) {
+function contractFrame(input) {
+  const f = expiryFrame(input);
+  if (f.bad) return f;
   const { row } = input;
+  if (!row || !fin(row.K)) return { bad: "quote.one-sided" };
+  return f;
+}
+
+function oppositeQuote(row) {
   const two = (x) => x && fin(x.bid) && fin(x.ask) && x.bid > 0 && x.ask >= x.bid;
   return two(row.opposite) ? { K: row.K, type: row.type === "C" ? "P" : "C", bid: row.opposite.bid, ask: row.opposite.ask } : null;
 }
@@ -692,10 +700,7 @@ function nearestSmile(expiries, expiry, T) {
   return best !== null && gap <= Math.log(4) ? best : null;
 }
 
-export function contractDiagnosis(input) {
-  const f = contractFrame(input);
-  const { row } = input;
-  if (f.bad) return { code: f.bad, text: codeText(f.bad) };
+function diagnose(f, row) {
   const call = row.type === "C";
   const intrinsic = Math.max(0, call ? f.S - row.K : row.K - f.S);
   const floor = f.D * Math.max(0, call ? f.F - row.K : row.K - f.F);
@@ -719,12 +724,40 @@ export function contractDiagnosis(input) {
   return out;
 }
 
-function pricedVol(f, K, type, bid, ask, seed) {
+export function contractDiagnosis(input) {
+  const f = contractFrame(input);
+  if (f.bad) return { code: f.bad, text: codeText(f.bad) };
+  return diagnose(f, input.row);
+}
+
+function pricedVol(f, K, type, bid, ask, seed, width = true) {
   const mid = (bid + ask) / 2;
   const iv = impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);
   if (!fin(iv) || !(iv > 0)) return null;
+  if (!width) return { iv, width: null, spreadRel: (ask - bid) / mid };
   const lo = impliedVolB76(f.F, f.D, K, f.T, bid, type, iv), hi = impliedVolB76(f.F, f.D, K, f.T, ask, type, iv);
   return { iv, width: lo === null || hi === null ? Infinity : hi - lo, spreadRel: (ask - bid) / mid };
+}
+
+function readContract(f, row, width = true) {
+  const seed = fin(row.ivSeed) && row.ivSeed > 0 ? row.ivSeed : null;
+  const own = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid;
+  if (!own) return null;
+  const diag = diagnose(f, row);
+  let read = null, via = "own";
+  if (diag.code !== null) {
+    const opp = oppositeQuote(row);
+    if (!opp) return null;
+    read = pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed, width);
+    via = "opposite";
+  } else {
+    const otm = row.type === "P" ? row.K < f.F : row.K >= f.F;
+    const opp = otm ? null : oppositeQuote(row);
+    read = opp ? pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed, width) : null;
+    if (read) via = "opposite";
+    else read = pricedVol(f, row.K, row.type, row.bid, row.ask, seed, width);
+  }
+  return read ? { read, via } : null;
 }
 
 export function contractFit(input) {
@@ -732,24 +765,9 @@ export function contractFit(input) {
   const f = contractFrame(input);
   if (f.bad) return null;
   const { S, T, F, D, r, rateMethod, q, carry } = f;
-  const seed = fin(row.ivSeed) && row.ivSeed > 0 ? row.ivSeed : null;
-  const own = fin(row.bid) && fin(row.ask) && row.bid > 0 && row.ask >= row.bid;
-  if (!own) return null;
-  const diag = contractDiagnosis(input);
-  let read = null, via = "own";
-  if (diag.code !== null) {
-    const opp = oppositeQuote(input);
-    if (!opp) return null;
-    read = pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed);
-    via = "opposite";
-  } else {
-    const otm = row.type === "P" ? row.K < F : row.K >= F;
-    const opp = otm ? null : oppositeQuote(input);
-    read = opp ? pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed) : null;
-    if (read) via = "opposite";
-    else read = pricedVol(f, row.K, row.type, row.bid, row.ask, seed);
-  }
-  if (!read) return null;
+  const got = readContract(f, row);
+  if (!got) return null;
+  const { read, via } = got;
   const iv = read.iv;
   const day = etDayOf(asOfMs);
   const head = {
