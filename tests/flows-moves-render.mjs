@@ -617,7 +617,7 @@ async function exercise(browser, js, early, only) {
   const apart = M0.all.filter((x) => x.event).sort(byA);
   try {
     if (only === "sectors") { await sectorsBlock(browser, js, P, same); return problems; }
-    await partsBlock(browser, js, P, same);
+    if (only === "parts") { await partsBlock(browser, js, P, same); return problems; }
     for (const [w, h, extra] of VIEWPORTS) {
       const phone = w < 900;
       const { ctx, page, errors, asked } = await mount(browser, w, h, { context: extra, js });
@@ -1003,6 +1003,7 @@ async function exercise(browser, js, early, only) {
       P(await page.evaluate(() => document.getElementById("mvStage").dataset.view) === "detail" && (await railKv(page)).big === ranked[3].t, "a tap within 22 px of a dot selects it");
       await ctx.close();
     }
+    await partsBlock(browser, js, P, same);
     await sectorsBlock(browser, js, P, same);
   } catch (e) {
     if (!(e instanceof Stop)) problems.push("threw: " + String(e && e.message).split("\n")[0]);
@@ -1058,10 +1059,12 @@ const MUTANTS = [
   ["a part printed in hundredths", "Math.abs(k / 10).toFixed(1) + \"%\"", "Math.abs(k / 100).toFixed(1) + \"%\""],
   ["the parts strip dropped", "+ partsHtml(peerParts(M.rows, x.t)) +", "+ "],
 ];
+const PARTS_MUTANTS = new Set(["the name counted among its own peers", "the mean of the peers instead of the median", "a missing change counted as a zero peer", "SPY and QQQ counted as peers", "a floor of five peers", "the name's part rounded apart from the others", "the market read from QQQ", "the spread without the 1.4826", "a part printed in hundredths", "the parts strip dropped"]);
+ok([...PARTS_MUTANTS].every((n) => MUTANTS.some((m) => m[0] === n)) && PARTS_MUTANTS.size === 10, "the ten parts-of-the-move builds are the ones judged by the parts block alone");
 for (const [name, from, to] of MUTANTS) {
   ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
   const mutated = JS.replace(from, to);
-  const problems = await exercise(browser, mutated, true).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
+  const problems = await exercise(browser, mutated, true, PARTS_MUTANTS.has(name) ? "parts" : undefined).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
   ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (first: " + problems[0] + ")");
 }
 
