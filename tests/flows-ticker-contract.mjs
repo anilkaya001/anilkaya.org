@@ -1138,9 +1138,10 @@ try {
     ok(prints.every((r) => /^\d{2}:\d{2}$/.test(r.time) || r.time === "—"), `every print carries its time off the tape's own timestamp (${prints[0] && prints[0].time})`);
     eq(prints.filter((r) => r.tags.includes("canceled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the canceled prints carry the tag, and the tag says what the flag says");
     ok(prints.slice(-1)[0].canceled && prints.filter((r) => r.canceled).length === 1 && !prints.slice(0, -1).some((r) => r.canceled), "and a canceled print is listed after every live one, never ranked among them");
-    const iBoth = dp.rows.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
+    const listed = dp.rows.filter((r) => r.canceled !== true).concat(dp.rows.filter((r) => r.canceled === true));
+    const iBoth = listed.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
     if (iBoth >= 0) ok(/^\d+\.\d{2} \/ \d+\.\d{2}$/.test(prints[iBoth].quote), `a quoted print carries bid and ask side by side (${prints[iBoth].quote})`);
-    const iNone = dp.rows.findIndex((r) => r.bid === null || r.ask === null);
+    const iNone = listed.findIndex((r) => r.bid === null || r.ask === null);
     if (iNone >= 0) eq(prints[iNone].quote, "—", "a print missing either side of the quote carries the dash, never half a spread");
     const tapeInfo = await modInfo(page, "m-tape");
     if (dp.shed > 0) ok(tapeInfo.includes(dp.rows.filter((r) => r.canceled !== true).length + " kept of " + dp.seen), `the disclosure states ${dp.rows.filter((r) => r.canceled !== true).length} kept of ${dp.seen}`);
@@ -2474,6 +2475,14 @@ try {
       window.FlowsUI.closeInfo();
       return t;
     }, label);
+    const chipText = (label) => page.evaluate((label) => {
+      const b = [...document.querySelectorAll("#ftChips .ui-gchip")].find((n) => n.querySelector(".ui-chip-l").textContent === label);
+      if (!b) return null;
+      window.FlowsUI.openInfo(b);
+      const t = document.querySelector("#fxPop").innerText;
+      window.FlowsUI.closeInfo();
+      return t;
+    }, label);
     const engineSummary = (card) => ({ status: "ok", scope: card.ticker, llm: false, model: null, generatedAt: card.generatedAt, engine: true, verdict: null, verdictWord: null, claims: [], refused: [], ideas: [],
       summary: "The engine priced this name. A second sentence.", provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.", context: null });
     for (const [label, hedge] of [["short", "buys rallies and sells dips, which amplifies moves."], ["long", "sells rallies and buys dips, which dampens moves."]]) {
@@ -2482,6 +2491,15 @@ try {
       await mount(page, c);
       eq(await chipLead("Dealer γ"), "Dealers are " + label + " gamma " + DEALER_CLAUSE + ": their hedging " + hedge,
         `the ${label}-gamma chip asserts a hedging direction only on the vendor's convention, and says so in DEALER_CLAUSE's words`);
+    }
+    {
+      const withZero = clone(full);
+      withZero.regime = { ...(withZero.regime || {}), label: "long" };
+      ok(withZero.panels.levels && withZero.panels.levels.zeroGamma && typeof withZero.panels.levels.zeroGamma.px === "number", "the emitted card carries a zero-gamma level");
+      await mount(page, withZero);
+      const facts = await chipText("Dealer γ");
+      ok(/Zero-gamma level/.test(facts || "") && /sign change/.test(facts || ""), `the dealer chip's facts name the zero-gamma level and how many sign changes lie within the grid (${String(facts || "").slice(0, 200)})`);
+      eq(errors.length, 0, "and opening it throws nothing");
     }
     const flat = clone(full);
     flat.regime = { ...(flat.regime || {}), label: null };

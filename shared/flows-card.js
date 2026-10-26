@@ -529,6 +529,8 @@ export function buildPricedMove({
           upPct,
           realizedPct: realizedH === null ? null : pct(realizedH),
           ivPct: pin ? pct(iv) : null,
+          tenorDays: 30,
+          yearSessions: 252,
         });
     }
     if (!quoted) return null;
@@ -539,7 +541,7 @@ export function buildPricedMove({
       `about 0.85 of the at-the-money straddle, a band the market prices to hold about half the time ` +
       `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. Not a forecast and not a one-day move. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
-      { quotedPct: pct(m), low: lo, high: hi });
+      { quotedPct: pct(m), low: lo, high: hi, straddleShare: 0.85 });
   })();
 
   const vrp = varianceRiskPremium({ iv30: iv, rv30, rvForward, rvForwardGrade });
