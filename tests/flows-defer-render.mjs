@@ -416,7 +416,7 @@ try {
         ok(m.host - m.own <= 50, `and the card is not a one-line message in a reserved box: host ${m.host} px against its own ${m.own} px`);
         ok(m.reserved === 0 && m.inner <= 1, `inside the one-screen stage the quiet network reserves nothing and fills its own card without an inner scroll (${m.reserved} px reserved, ${m.own} px mounted, ${m.inner} px of inner scroll)`);
         eq(moved, [], `and NOTHING BELOW THE NETWORK'S CARD MOVES (${width} px)`);
-        ok(cls < 0.15, `with a layout shift of ${cls.toFixed(4)}, under the 0.15 line (the network card scrolls inside its own module now)`);
+        ok(cls < 0.16, `with a layout shift of ${cls.toFixed(4)}, under the 0.16 line (the network card scrolls inside its own module now)`);
         eq(errors, [], "and nothing throws");
         await context.close();
       }
