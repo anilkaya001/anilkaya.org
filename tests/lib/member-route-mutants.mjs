@@ -7,7 +7,8 @@ export const EXPORT_ROUTE_MUTANTS = [
   ["route", "the format not checked against the list", [["|| !EXPORT_FORMATS.includes(body.format)) throw", ") throw"]]],
   ["route", "the log counting the rows available", [["rows: built.rows.length, cols: built.header", "rows: built.meta.available, cols: built.header"]]],
   ["route", "the log without the column names", [["cols: built.header, now: at", 'cols: ["x"], now: at']]],
-  ["route", "the file named for the day of the request", [["exportFileName(body.page, built.meta.asofDay, body.format)", "exportFileName(body.page, new Date(at + 10800000).toISOString().slice(0, 10), body.format)"]]],
+  ["route", "the file named for the day of the request", [["exportFileName(body.page, built.meta.asofDay, body.format, ", "exportFileName(body.page, new Date(at + 10800000).toISOString().slice(0, 10), body.format, "]]],
+  ["route", "a cut file named as a whole one", [["built.meta.truncated ? { shown: built.rows.length, available: built.meta.available } : null", "null"]]],
   ["route", "no nosniff", [['"X-Content-Type-Options": "nosniff",', ""]]],
   ["route", "truncation not announced", [['"X-Export-Truncated": built.meta.truncated ? "1" : "0",', '"X-Export-Truncated": "0",']]],
   ["route", "exports behind the member-state switch", [['limiter: "MEMBER_EXPORT", flag: "FLOWS_EXPORTS", write: true', 'limiter: "MEMBER_EXPORT", flag: "FLOWS_MEMBER_STATE", write: true']]],
@@ -30,6 +31,10 @@ export const EXPORT_ROUTE_MUTANTS = [
   ["store", "the log without a limit", [["LIMIT ?3\";", "LIMIT 100000 + 0 * ?3\";"]]],
   ["store", "the log of every member", [["FROM member_export WHERE member_id = ?1 AND at_ms >= ?2 ORDER BY", "FROM member_export WHERE ?1 IS NOT NULL AND at_ms >= ?2 ORDER BY"]]],
   ["store", "the sweep removing the 90th day", [["WHERE at_ms < ?1 ORDER BY at_ms LIMIT 500", "WHERE at_ms <= ?1 ORDER BY at_ms LIMIT 500"]]],
+  ["store", "the sweep at 89 days", [["now - MEMBER_LIMITS.exportLogDays * DAY_MS).run());", "now - (MEMBER_LIMITS.exportLogDays - 1) * DAY_MS).run());"]]],
+  ["store", "the sweep a second short", [["now - MEMBER_LIMITS.exportLogDays * DAY_MS).run());", "now - MEMBER_LIMITS.exportLogDays * DAY_MS - 1000).run());"]]],
+  ["store", "the sweep a second long", [["now - MEMBER_LIMITS.exportLogDays * DAY_MS).run());", "now - MEMBER_LIMITS.exportLogDays * DAY_MS + 1000).run());"]]],
+  ["store", "the log cut a second long", [["listExports(env, memberId, now) {\n      const d = await db(env);\n      if (d === null) return undefined;\n      const result = await d.prepare(EXPORT_LIST_SQL).bind(memberId, now - MEMBER_LIMITS.exportLogDays * DAY_MS,", "listExports(env, memberId, now) {\n      const d = await db(env);\n      if (d === null) return undefined;\n      const result = await d.prepare(EXPORT_LIST_SQL).bind(memberId, now - MEMBER_LIMITS.exportLogDays * DAY_MS + 1000,"]]],
 ];
 
 export const SINCE_ROUTE_MUTANTS = [

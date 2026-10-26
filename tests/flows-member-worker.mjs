@@ -183,7 +183,7 @@ for (const file of MODULES) {
   ok(!/\bAI\b|env\.AI|uwFetch|\bfetch\(|XMLHttpRequest|WebSocket/.test(text), file + " names no model, no vendor call and no network call");
   ok(!/console\./.test(text), file + " writes nothing to the console");
   const logs = [...text.matchAll(/logFailure\(([^;]*)\);/g)].map((m) => m[1]);
-  for (const log of logs) ok(/^"error", "member state unreadable", \{ route: "\/api\/me\/state", code: "unreadable" \}$/.test(log.trim()), file + " logs only a fixed event with a route and a code: " + log);
+  for (const log of logs) ok(/^"error", "member state unreadable", \{ route: "\/api\/me\/state", code: "unreadable", reason \}$/.test(log.trim()), file + " logs only a fixed event with a route and a code: " + log);
 }
 
 {

@@ -19,7 +19,9 @@ const VISIT_SQL =
   "seen_ms = ?2, updated_ms = ?2 " +
   "WHERE member_state.seen_ms IS NULL OR ?2 - member_state.seen_ms >= 60000";
 
-const DELETE_SQL = "DELETE FROM member_state WHERE member_id = ?1";
+const DELETE_SQL =
+  "UPDATE member_state SET wl_kid = NULL, wl_iv = NULL, wl_ct = NULL, device_only = 0, seen_ms = NULL, visit_ms = NULL, prev_seen_ms = NULL, wl_ver = wl_ver + 1, updated_ms = ?2 " +
+  "WHERE member_id = ?1 AND (wl_kid IS NOT NULL OR wl_ct IS NOT NULL OR device_only = 1 OR seen_ms IS NOT NULL OR visit_ms IS NOT NULL OR prev_seen_ms IS NOT NULL)";
 
 const EXPORT_COUNT_SQL = "SELECT count(*) AS n FROM member_export WHERE member_id = ?1 AND at_ms > ?2 - 86400000";
 
@@ -111,6 +113,7 @@ export function createMemberStore({ schemaSql }) {
     async put(env, memberId, { expected, kid, iv, ct, deviceOnly, now }) {
       const d = await db(env);
       if (d === null) return undefined;
+      for (const value of [iv, ct]) if (value !== null && typeof value !== "string") throw new TypeError("a sealed value is bound as text, never as bytes");
       const [written, read] = await d.batch([
         d.prepare(PUT_SQL).bind(memberId, kid, iv, ct, expected, expected + 1, deviceOnly ? 1 : 0, now),
         d.prepare(STATE_SQL).bind(memberId),
@@ -126,10 +129,10 @@ export function createMemberStore({ schemaSql }) {
       return { row, wrote: changes(written) === 1, newVisit: changes(written) === 1 && row !== null && row.visitMs === now };
     },
 
-    async remove(env, memberId) {
+    async remove(env, memberId, now) {
       const d = await db(env);
       if (d === null) return undefined;
-      const [state, kept] = await d.batch([d.prepare(DELETE_SQL).bind(memberId), d.prepare(EXPORT_KEPT_SQL).bind(memberId)]);
+      const [state, kept] = await d.batch([d.prepare(DELETE_SQL).bind(memberId, now), d.prepare(EXPORT_KEPT_SQL).bind(memberId)]);
       const left = rowsOf(kept)[0] || {};
       return { state: changes(state), exports: int(left.n) || 0, lastExportMs: int(left.last_ms) };
     },

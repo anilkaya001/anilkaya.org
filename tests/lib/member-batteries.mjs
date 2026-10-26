@@ -128,6 +128,14 @@ export function stateBattery(S) {
   eq(["ON", " on", "onn", "", undefined, "Owner", "off", "true"].map(S.modeOf), ["on", "on", "off", "off", "off", "owner", "off", "off"], "a switch is on, owner or off after trim and lower-casing, and anything else is off");
 }
 
+async function captured(fn) {
+  const prev = console.error;
+  const out = [];
+  console.error = (...args) => out.push(args.map(String).join(" "));
+  try { await fn(); } finally { console.error = prev; }
+  return out;
+}
+
 export const PUT = (version, body) => ({ method: "PUT", headers: { "If-Match": '"w' + version + '"' }, body });
 export const LIST = (names) => ({ deviceOnly: false, watchlist: names });
 export const rowOf = (w, id = W.ALICE) => w.f.db.prepare("SELECT * FROM member_state WHERE member_id = ?").get(id);
@@ -247,6 +255,10 @@ export async function routeBattery(modules) {
     const gone = { ...w.env, MEMBER_STATE_KEY: undefined };
     const g = await w.call("me.state", { env: gone });
     eq([g.json.mode, g.json.reason, g.json.unreadable, g.json.watchlist], ["device-only", "key_absent", true, null], "a stored list with the key removed is unreadable, never an error");
+    const keyless = await w.call("me.state", { ...PUT(1, LIST(["SYA002"])), env: gone });
+    eq([keyless.status, keyless.json.error.code], [503, "member_state_unavailable"], "a list cannot be written with the key removed");
+    const keylessDevice = await w.call("me.state", { ...PUT(1, { deviceOnly: true }), env: gone });
+    eq([keylessDevice.status, keylessDevice.json.error.code, rowOf(w).wl_ct !== null], [409, "unreadable_row", true], "and the switch to device-only does not drop a sealed list that cannot be opened, without the flag");
     const d = await w.call("me.state", PUT(1, { deviceOnly: true }));
     eq([d.status, d.json.mode, d.json.reason, d.json.version, d.json.watchlist], [200, "device-only", "member_choice", 2, null], "switching to device-only drops the ciphertext and bumps the version");
     const r = rowOf(w);
@@ -260,10 +272,35 @@ export async function routeBattery(modules) {
     const row = rowOf(w);
     const flip = (ct) => ct.slice(0, 20) + (ct[20] === "A" ? "B" : "A") + ct.slice(21);
     w.f.db.prepare("UPDATE member_state SET wl_ct = ? WHERE member_id = ?").run(flip(row.wl_ct), W.ALICE);
-    const g = await w.call("me.state");
+    let g;
+    const lines = await captured(async () => { g = await w.call("me.state"); });
     eq([g.status, g.json.unreadable, g.json.watchlist, g.json.version], [200, true, null, 1], "a corrupted ciphertext is unreadable with the version, not an error");
-    const fixed = await w.call("me.state", PUT(1, LIST(["SYA002"])));
-    eq([fixed.status, fixed.json.watchlist], [200, ["SYA002"]], "and a PUT with the right version replaces it");
+    eq(lines.map((l) => { const j = JSON.parse(l); return [j.event, j.route, j.code, j.reason]; }), [["member state unreadable", "/api/me/state", "unreadable", "open_failed"]], "it is logged once, with a fixed reason");
+    ok(!lines.join(" ").includes(W.ALICE) && !lines.join(" ").includes(row.wl_ct.slice(0, 12)), "and the line holds no member name and no stored value");
+    const blob = await make();
+    await blob.call("me.state", PUT(0, LIST(["SYA001"])));
+    let refusedBytes = null;
+    try { blob.f.db.prepare("UPDATE member_state SET wl_ct = ? WHERE member_id = ?").run(new Uint8Array([1, 2, 3]), W.ALICE); } catch (error) { refusedBytes = String(error.message); }
+    ok(refusedBytes !== null && /CHECK constraint failed/.test(refusedBytes), "the table itself refuses a sealed value that is bytes and not text");
+    let threw = null;
+    try { await blob.store.put(blob.env, W.ALICE, { expected: 1, kid: 1, iv: new Uint8Array(12), ct: "x", deviceOnly: false, now: 1 }); } catch (error) { threw = error; }
+    ok(threw instanceof TypeError, "and a store call that binds bytes is refused before it reaches the database");
+    const before = JSON.stringify(rowOf(w));
+    const refused = await w.call("me.state", PUT(1, LIST(["SYA002"])));
+    eq([refused.status, refused.json.error.code], [409, "unreadable_row"], "a PUT with the right version does not replace a list the server cannot open");
+    const refusedDevice = await w.call("me.state", PUT(1, { deviceOnly: true }));
+    eq([refusedDevice.status, refusedDevice.json.error.code], [409, "unreadable_row"], "nor does the switch to device-only");
+    const behind = await w.call("me.state", PUT(0, LIST(["SYA002"])));
+    eq(behind.status, 412, "a stale version is a 412 first, so the browser reads the row before it is asked to decide");
+    const odd = await w.call("me.state", PUT(1, { ...LIST(["SYA002"]), replaceUnreadable: "yes" }));
+    eq([odd.status, odd.json.error.code], [400, "invalid_watchlist"], "a flag that is not a boolean is refused");
+    const no = await w.call("me.state", PUT(1, { ...LIST(["SYA002"]), replaceUnreadable: false }));
+    eq([no.status, no.json.error.code], [409, "unreadable_row"], "and false is no consent");
+    eq(JSON.stringify(rowOf(w)), before, "none of them changed a byte of the row");
+    const fixed = await w.call("me.state", PUT(1, { ...LIST(["SYA002"]), replaceUnreadable: true }));
+    eq([fixed.status, fixed.json.watchlist], [200, ["SYA002"]], "with the flag a PUT with the right version replaces it");
+    const readable = await w.call("me.state", PUT(2, { ...LIST(["SYA003"]), replaceUnreadable: true }));
+    eq([readable.status, readable.json.watchlist], [200, ["SYA003"]], "and the flag on a readable row is harmless");
     const second = rowOf(w);
     w.f.db.prepare("INSERT INTO member_state (member_id, wl_kid, wl_iv, wl_ct, wl_ver, updated_ms) VALUES (?, ?, ?, ?, ?, 1)").run(W.BOB, second.wl_kid, second.wl_iv, second.wl_ct, second.wl_ver);
     eq((await w.call("me.state", { session: { username: W.BOB } })).json.unreadable, true, "a row copied to another member does not open");
@@ -276,6 +313,10 @@ export async function routeBattery(modules) {
     const kid1 = rowOf(w).wl_kid;
     const rotated = { ...w.env, MEMBER_STATE_KEY: W.KEY, MEMBER_STATE_KEY_PREV: W.KEY_PREV };
     eq((await w.call("me.state", { env: rotated })).json.watchlist, ["SYA001", "SYA002"], "a row sealed under the previous key still reads after rotation");
+    let lost;
+    const lostLines = await captured(async () => { lost = await w.call("me.state", { env: { ...w.env, MEMBER_STATE_KEY: W.KEY } }); });
+    eq([lost.json.unreadable, lost.json.watchlist], [true, null], "a row whose key the key ring no longer holds is unreadable");
+    eq(lostLines.map((l) => JSON.parse(l).reason), ["unknown_kid"], "and the log says the key id is unknown");
     const swept = await w.store.housekeeping(rotated, w.now(), [W.KEY, W.KEY_PREV]);
     eq([swept.resealed, swept.remaining], [1, 0], "the sweep re-seals it under the new key");
     const after = rowOf(w);
@@ -307,6 +348,15 @@ export async function routeBattery(modules) {
     now.tick(51000);
     const v3 = await w.call("me.visit");
     eq([v3.json.visit.startedMs, v3.json.visit.lastSeenMs, v3.json.visit.newVisit, rowOf(w).updated_ms > before], [t0, t0 + 61000, false, true], "at 61 s the last-seen time moves and the visit goes on");
+    now.set(rowOf(w).seen_ms + 59999);
+    const edgeShort = await w.call("me.visit");
+    eq(edgeShort.json.visit.lastSeenMs, t0 + 61000, "a ping 59.999 s after the last one writes nothing");
+    now.set(rowOf(w).seen_ms + 60000);
+    const edgeStep = await w.call("me.visit");
+    eq(edgeStep.json.visit.lastSeenMs, t0 + 61000 + 60000, "and one at exactly 60 s writes");
+    now.set(rowOf(w).seen_ms + 30 * 60 * 1000 - 1);
+    const edgeIdle = await w.call("me.visit");
+    eq([edgeIdle.json.visit.newVisit, edgeIdle.json.visit.startedMs], [false, t0], "one millisecond short of 30 minutes idle is the same visit");
     const g = await w.call("me.state");
     await w.call("me.state", PUT(g.json.version, LIST(["SYA001"])));
     eq(rowOf(w).wl_ver, 1, "a visit does not move the list version");
@@ -330,12 +380,25 @@ export async function routeBattery(modules) {
     await w.call("me.state", PUT(0, LIST(["SYA001"])));
     await w.call("me.state", { ...PUT(0, LIST(["SYA009"])), session: { username: W.BOB } });
     w.f.db.prepare("INSERT INTO member_export (member_id, page, n_rows, cols, at_ms) VALUES (?, 'moves', 3, 'ticker,sig', ?)").run(W.ALICE, w.now() - 1000);
+    await w.call("me.visit");
+    ok(rowOf(w).seen_ms !== null && rowOf(w).visit_ms !== null, "the member has a visit clock before the deletion");
     const d = await w.call("me.state", { method: "DELETE" });
     eq([d.status, d.json.deleted, d.json.kept.exports, d.json.kept.untilMs, d.json.kept.reason], [200, { state: 1 }, 1, w.now() - 1000 + 90 * 86400000, "export record, kept 90 days"], "DELETE removes the state and says the export record stays");
-    eq([rowOf(w), rowOf(w, W.BOB) !== undefined, count(w, "member_export")], [undefined, true, 1], "only the caller's row went; another member's stayed; the export log stayed");
+    const tomb = rowOf(w);
+    eq([tomb.wl_kid, tomb.wl_iv, tomb.wl_ct, tomb.device_only, tomb.seen_ms, tomb.visit_ms, tomb.prev_seen_ms, tomb.wl_ver], [null, null, null, 0, null, null, null, 2], "only the member id and a version that went up by one stay");
+    eq([rowOf(w, W.BOB) !== undefined, count(w, "member_export")], [true, 1], "another member's row stayed and the export log stayed");
     const g = await w.call("me.state");
-    eq([g.json.version, g.json.watchlist], [0, null], "the next read is a fresh member");
+    eq([g.json.version, g.json.watchlist, g.json.unreadable], [2, null, false], "the next read is an empty list at the new version");
     eq((await w.call("me.state", { method: "DELETE" })).json.deleted, { state: 0 }, "and DELETE is idempotent");
+    eq(rowOf(w).wl_ver, 2, "the second one does not move the version");
+    const staleTab = await w.call("me.state", PUT(1, LIST(["SYA001", "SYA002"])));
+    eq(staleTab.status, 412, "a tab that held the deleted list's version cannot bring the list back");
+    const zero = await w.call("me.state", PUT(0, LIST(["SYA001"])));
+    eq(zero.status, 412, "nor can a tab that thinks the member is new");
+    const recreated = await w.call("me.state", PUT(2, LIST(["SYA005"])));
+    eq([recreated.status, recreated.json.version], [200, 3], "a save after the deletion continues the count");
+    const oldTab = await w.call("me.state", PUT(1, LIST(["SYA001", "SYA002", "SYA003"])));
+    eq([oldTab.status, rowOf(w).wl_ver], [412, 3], "so a version seen before the deletion is never current again, and the new list is untouched");
   }
   {
     const w = await make();

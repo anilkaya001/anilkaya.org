@@ -158,6 +158,7 @@ export function buildBattery(B) {
   eq(grid.find((r) => r[2] === "SYA002")[4], FIXED(zOf(-0.0502, 0.015), 2), "a negative number is written bare, not defanged");
   eq(csv.meta.asofDay, "2026-10-24", "the file date is the TRT date of the as-of instant, not the UTC date 2026-10-23");
   eq(B.exportFileName("moves", csv.meta.asofDay, "csv"), "flows-moves-2026-10-24-TRT.csv", "the file name");
+  eq(B.exportFileName("moves", "2026-10-24", "json", { shown: 1000, available: 1234 }), "flows-moves-2026-10-24-TRT-cut-1000-of-1234.json", "a cut file says so in its name");
   eq(csv.meta.available, 8, "the available count");
 
   const u = body("unusual", src);

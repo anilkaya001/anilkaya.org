@@ -75,6 +75,7 @@ export const ERRORS = Object.freeze({
   precondition_required: entry(428, "Send the version you are replacing in If-Match"),
   stale_version: entry(412, "The saved state changed since you read it; reload and try again"),
   universe_unreadable: entry(503, "The ticker list could not be read; try again"),
+  unreadable_row: entry(409, "The saved list cannot be read; send replaceUnreadable true to replace it"),
 });
 
 export const errorEntry = (code) => (Object.hasOwn(ERRORS, code) ? ERRORS[code] : null);

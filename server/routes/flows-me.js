@@ -54,13 +54,17 @@ export function flowsMeRows(deps) {
     if (!sealed) return { ...base, mode: "server", reason: null, watchlist: null, unreadable: false };
     let watchlist = null;
     let unreadable = false;
+    let reason = "open_failed";
     try {
       const secret = await pickSecret(secretsOf(env), row.kid);
-      if (secret === null) throw new Error("kid");
+      if (secret === null) {
+        reason = "unknown_kid";
+        throw new Error("kid");
+      }
       watchlist = await open(secret, id, version, row.iv, row.ct);
     } catch {
       unreadable = true;
-      logFailure("error", "member state unreadable", { route: "/api/me/state", code: "unreadable" });
+      logFailure("error", "member state unreadable", { route: "/api/me/state", code: "unreadable", reason });
     }
     return { ...base, mode: "server", reason: null, watchlist, unreadable };
   };
@@ -93,24 +97,27 @@ export function flowsMeRows(deps) {
     if (precondition.state === "missing") throw HttpError.of("precondition_required");
     if (precondition.state === "invalid") throw HttpError.of("invalid_precondition");
     const expected = precondition.version;
-    const body = await readJSON(request);
+    const { replaceUnreadable, ...body } = await readJSON(request);
+    if (replaceUnreadable !== undefined && typeof replaceUnreadable !== "boolean") throw HttpError.of("invalid_watchlist");
     const keys = Object.keys(body).sort().join(",");
     const toDevice = keys === "deviceOnly" && body.deviceOnly === true;
     const toServer = keys === "deviceOnly,watchlist" && body.deviceOnly === false && Array.isArray(body.watchlist);
     if (!toDevice && !toServer) throw HttpError.of("invalid_watchlist");
     const t = now();
+    if (toServer && !secretUsable(env.MEMBER_STATE_KEY)) throw HttpError.of("member_state_unavailable");
+    const stored = await store.read(env, id);
+    if (stored === undefined) throw HttpError.of("store_unreadable");
+    const view = await stateView(env, stored, id);
+    if (view.unreadable && replaceUnreadable !== true) throw stored !== null && stored.version === expected ? HttpError.of("unreadable_row") : stale(stored);
     if (toDevice) {
       const wrote = await store.put(env, id, { expected, kid: null, iv: null, ct: null, deviceOnly: true, now: t });
       if (wrote === undefined) throw HttpError.of("store_unreadable");
       if (!wrote.ok) throw stale(wrote.row);
       return reply(await stateView(env, wrote.row, id));
     }
-    if (!secretUsable(env.MEMBER_STATE_KEY)) throw HttpError.of("member_state_unavailable");
     const universe = await universeNames(env);
     if (universe === null) throw HttpError.of("universe_unreadable", undefined, { "Retry-After": "30" });
-    const stored = await store.read(env, id);
-    if (stored === undefined) throw HttpError.of("store_unreadable");
-    const kept = (await stateView(env, stored, id)).watchlist;
+    const kept = view.watchlist;
     const known = new Set([...universe, ...(Array.isArray(kept) ? kept : [])]);
     const checked = normalizeWatchlist(body.watchlist, { known, fixtureHost: fixtureHost(url.hostname) });
     if (!checked.ok) {
@@ -128,7 +135,7 @@ export function flowsMeRows(deps) {
 
   const deleteState = async (ctx) => {
     const id = await gate(ctx, { limiter: "MEMBER_STATE_WRITE", flag: "FLOWS_MEMBER_STATE", write: true });
-    const removed = await store.remove(ctx.env, id);
+    const removed = await store.remove(ctx.env, id, now());
     if (removed === undefined) throw HttpError.of("store_unreadable");
     return json({
       deleted: { state: removed.state },
@@ -227,7 +234,7 @@ export function flowsMeRows(deps) {
       status: 200,
       headers: {
         "Content-Type": built.type,
-        "Content-Disposition": 'attachment; filename="' + exportFileName(body.page, built.meta.asofDay, body.format) + '"',
+        "Content-Disposition": 'attachment; filename="' + exportFileName(body.page, built.meta.asofDay, body.format, built.meta.truncated ? { shown: built.rows.length, available: built.meta.available } : null) + '"',
         "X-Export-Rows": String(built.rows.length),
         "X-Export-Available": String(built.meta.available),
         "X-Export-Truncated": built.meta.truncated ? "1" : "0",

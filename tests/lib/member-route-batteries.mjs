@@ -150,24 +150,24 @@ export async function exportCapBattery(modules) {
 
 export async function exportWindowBattery(modules) {
   const w = await fresh(modules, { env: BIG });
-  for (const days of [91, 90, 89]) {
-    w.now.set(NOW - days * DAY);
-    ok200(await w.post(MOVES), "an export " + days + " days ago");
+  for (const age of [91 * DAY, 90 * DAY + 1000, 90 * DAY, 90 * DAY - 1000, 89 * DAY]) {
+    w.now.set(NOW - age);
+    ok200(await w.post(MOVES), "an export " + age + " ms ago");
   }
   w.now.set(NOW);
   const log = await w.log();
-  eq(log.json.exports.map((e) => e.atMs), [NOW - 89 * DAY, NOW - 90 * DAY], "the log shows 90 days back, the 90th day included and the 91st not");
+  eq(log.json.exports.map((e) => e.atMs), [NOW - 89 * DAY, NOW - 90 * DAY + 1000, NOW - 90 * DAY], "the log shows 90 days back: 90 days exactly and 90 days less a second are in, 90 days and a second and 91 days are not");
   eq(log.json.window.used, 0, "none counts against the 24-hour cap");
   const swept = await w.store.housekeeping(w.env, NOW, [W.KEY]);
-  eq(swept.pruned, 1, "the 03:00 sweep removes what is past 90 days");
-  eq(W.allRows(w.f).member_export.map((x) => x.at_ms), [NOW - 90 * DAY, NOW - 89 * DAY], "and nothing else");
+  eq(swept.pruned, 2, "the 03:00 sweep removes what is past 90 days, down to the second");
+  eq(W.allRows(w.f).member_export.map((x) => x.at_ms), [NOW - 90 * DAY, NOW - 90 * DAY + 1000, NOW - 89 * DAY], "and nothing else: a row of exactly 90 days and one a second younger stay");
   const insert = w.f.db.prepare("INSERT INTO member_export (member_id, page, n_rows, cols, at_ms) VALUES (?, ?, ?, ?, ?)");
   for (let i = 0; i < 205; i += 1) insert.run(W.BOB, "moves", i, "ticker", NOW - 60 * DAY + i);
   const many = await w.log({ session: { username: W.BOB } });
   eq([many.json.exports.length, many.json.exports[0].rows, many.json.exports[199].rows], [200, 204, 5], "at most 200 rows are listed, newest first");
   const del = await w.call("me.state", { method: "DELETE" });
-  eq(del.json.kept.exports, 2, "deleting saved state keeps the member's export record");
-  eq((await w.log()).json.exports.length, 2, "and the log still shows it");
+  eq(del.json.kept.exports, 3, "deleting saved state keeps the member's export record");
+  eq((await w.log()).json.exports.length, 3, "and the log still shows it");
 }
 
 export async function exportTruncationBattery(modules) {
@@ -176,6 +176,7 @@ export async function exportTruncationBattery(modules) {
   const r = await w.post(MOVES);
   ok200(r, "an export of 1,001 names");
   eq([r.headers.get("x-export-rows"), r.headers.get("x-export-available"), r.headers.get("x-export-truncated")], ["1000", "1001", "1"], "is cut to 1,000 and says so in its headers");
+  eq(r.headers.get("content-disposition"), 'attachment; filename="flows-moves-2026-10-24-TRT-cut-1000-of-1001.csv"', "the cut is in the file name");
   const grid = parseCsv(r.text);
   eq([grid.length, grid[grid.length - 1][0]], [1002, "Cut at 1,000 of 1,001 rows, in the order of this file. The rest are not in it."], "the file has a header, 1,000 rows and a last line that says where it was cut");
   const json = JSON.parse((await w.post({ page: "moves", format: "json" })).text);

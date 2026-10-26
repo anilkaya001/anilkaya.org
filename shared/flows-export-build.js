@@ -314,4 +314,5 @@ export function buildExport(page, sources, { now, format = "csv", limit = MAX_RO
   return { header, rows: shown, objects, body: out, meta, type: format === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8" };
 }
 
-export const exportFileName = (page, day, format) => "flows-" + page + "-" + day + "-TRT." + format;
+export const exportFileName = (page, day, format, cut = null) =>
+  "flows-" + page + "-" + day + "-TRT" + (cut ? "-cut-" + cut.shown + "-of-" + cut.available : "") + "." + format;
