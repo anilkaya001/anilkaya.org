@@ -12,6 +12,7 @@ import * as FLOWS_LIVE from "../shared/flows-live-worker.js";
 import { FLOWS_REGISTRY, FLOWS_SCHEMA_SQL, upgradeColumns, upgradeTables, addedOf } from "../server/schema.js";
 import * as FLOWS_DOSSIER from "../shared/flows-dossier-worker.js";
 import { SIGNED_IN_COLUMN_SQL } from "../shared/lab-sign-in.js";
+import { FF_SCHEMA_SQL } from "../shared/ff-schema.js";
 
 const root = new URL("../", import.meta.url);
 const read = (file) => readFileSync(new URL(file, root), "utf8");
@@ -179,7 +180,7 @@ assert.deepEqual(schemaDdl.filter((sql) => !FLOWS_SCHEMA_SQL.includes(sql)), [],
   "every table server/schema.js declares is in the registry the Worker's first-use batch is derived from");
 assert.deepEqual(FLOWS_REGISTRY.map((entry) => entry.ddl), [...FLOWS_SCHEMA_SQL],
   "and the first-use batch is the registry's DDL in registry order");
-workerDdl.unshift(...FLOWS_SCHEMA_SQL);
+workerDdl.unshift(...FLOWS_SCHEMA_SQL, ...FF_SCHEMA_SQL);
 const runtimeStatements = new Set(workerDdl);
 for (const file of readdirSync(new URL("shared/", root)).filter((f) => f.endsWith(".js")).sort()) {
   const src = read(`shared/${file}`);

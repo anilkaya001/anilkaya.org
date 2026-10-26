@@ -126,11 +126,11 @@ try {
     eq(back.slice(16, 20), ["-0.5", "0", "1e+21", "true"], "finite numbers are written bare (a negative keeps its ASCII minus), zero is not empty, and a boolean is its word");
 
     await page.selectOption("#fbSort", { label: "Ticker" });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => { const r = [...document.querySelectorAll("#flowsBody .bd-row, #watchBody .bd-row")].filter((r) => !r.hidden && r.getClientRects().length); return r.length >= 4 && /AAPL/.test(r[0].textContent) && /AMD/.test(r[1].textContent); }, null, { timeout: 15000 });
     const sorted = parseCsv((await download(page, "CSV")).bytes.toString("utf8").slice(1));
     eq(sorted.slice(1, 5).map((r) => r[1]), ["AAPL", "AMD", "MSFT", "NVDA"], "a re-sorted board exports in the order the reader sees");
     await page.fill("#fbQ", "AM");
-    await page.waitForTimeout(250);
+    await page.waitForFunction(() => { const r = [...document.querySelectorAll("#flowsBody .bd-row, #watchBody .bd-row")].filter((r) => !r.hidden && r.getClientRects().length); return r.length === 1 && /AMD/.test(r[0].textContent); }, null, { timeout: 15000 });
     const filtered = parseCsv((await download(page, "CSV")).bytes.toString("utf8").slice(1));
     eq(filtered.slice(1, -2).map((r) => r[1]), ["AMD"], "and a filtered board exports only the rows that match");
 
