@@ -123,6 +123,17 @@ const CSS_GZIP_KIB = {
   statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
 };
 
+const FORMAT_CORE = { od: "MATH-1", bytes: 1572, gzip: 489, why: "lane 2 math audit: flows-ui.js carries the one rounding rule of shared/flows-round.js (fixedHalfUp, formatFixed, formatScaled and the unit floors, 1,344 B) and F.strike and F.etDay (228 B), measured as 71,076 to 72,648 B raw and 22,524 to 23,013 B gzip, so every route that ships flows-ui.js grows by it; the browser imports nothing, so the copy is the price of one rounding rule that tests/math-format.mjs holds equal to the leaf" };
+const TICKER_DEALER_LABELS = { bytes: 1595, gzip: 601, why: "lane 2 math audit: the ticker's Dealers tiles state their convention (dollars per 1% move, over dollar average daily volume, the vendor's sign) in long text with an information button, the zero-gamma line counts its crossings, and the ticker's rounding sites call the shared rule, measured as 263,737 to 265,332 B raw and 77,181 to 77,782 B gzip" };
+const NO_UI_ROUTES = new Set(["loginPage", "aboutPage", "glossaryPage", "notFoundPage"]);
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += FORMAT_CORE.bytes / 1024;
+  GZIP_KIB[name] += FORMAT_CORE.gzip / 1024;
+}
+CEILING_KIB.tickerPage += TICKER_DEALER_LABELS.bytes / 1024;
+GZIP_KIB.tickerPage += TICKER_DEALER_LABELS.gzip / 1024;
+
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
 
@@ -445,7 +456,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000 + NN_KERNEL.uiBytes + 64, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
