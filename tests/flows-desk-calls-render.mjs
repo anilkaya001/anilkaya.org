@@ -514,6 +514,51 @@ try {
   }
 
   {
+    const cutOf = (o) => ({ nRaw: 6000, nIn: 4210, nOut: 48, k: 25, truncated: false, shed: [], ...o });
+    const served = {
+      ...payloads,
+      SYX101: { ...payloads.SYX101, cut: cutOf({}) },
+      SYX102: { ...payloads.SYX102, cut: cutOf({ nRaw: 960, nIn: 700, truncated: true }) },
+    };
+    const statusOf = (page) => page.$eval("#deskStatus", (n) => ({ hidden: n.classList.contains("visually-hidden"), text: n.textContent.replace(/\s+/g, " ").trim(), height: n.getBoundingClientRect().height }));
+    {
+      const page = await openDesk(browser, { payloads: served, query: "?t=SYX101,SYX102&strategy=sc", errors });
+      await ready(page, 48);
+      const st = await statusOf(page);
+      ok(!st.hidden && st.height > 0, "the note on how the list was cut is on the page, not only in the screen-reader footnote");
+      ok(st.text.includes("Ranked from 4,210 eligible calls; 48 sent.") && !st.text.includes("Top 25 exact"), `a ranked chain says how many eligible calls were read and how many were sent, in one short line (${st.text.slice(0, 160)})`);
+      ok(st.text.includes("SYX102: Partial chain: first 960 contracts read (page limit); ranking covers these only and is not exact."), "a chain cut by the page ceiling says the ranking is not exact");
+      const foot = await page.$eval("#deskFoot", (n) => n.textContent.replace(/\s+/g, " "));
+      ok(foot.includes("SYX101: Ranked from 4,210 eligible calls; 48 sent. Top 25 exact for annualised time value over collateral; other orders rank sent rows only.") && foot.includes("SYX102: Partial chain: first 960 contracts read"), "the full sentences stay in the footnote and the Lines information");
+      await showView(page, "lines");
+      await infoClick(page, '#dkLinesM [aria-label="About lines"]');
+      await page.waitForSelector("#fxPop:popover-open");
+      ok(flat(await page.locator("#fxPop").textContent()).includes("Ranked from 4,210 eligible calls; 48 sent. Top 25 exact for annualised time value over collateral; other orders rank sent rows only."), "the Lines information carries the whole sentence, with what is exact and what is not");
+      await page.keyboard.press("Escape");
+      await page.locator("#deskStrategy .ui-seg-i", { hasText: /^Calls$/ }).click();
+      await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='cc']").length >= 48, null, { timeout: 10000 });
+      ok(!/Ranked from|Partial chain/.test((await statusOf(page)).text), "outside Short calls there is no cut note");
+      await page.close();
+    }
+    {
+      const one = { ...payloads, SYX101: { ...payloads.SYX101, cut: cutOf({ nRaw: 7, truncated: true, shed: [{ why: "budget" }] }) } };
+      const page = await openDesk(browser, { payloads: one, query: "?t=SYX101&strategy=sc", errors });
+      await ready(page, 24);
+      const st = await statusOf(page);
+      ok(st.text.includes("Partial chain: the site's market-data budget ran out after 7 contracts; ranking covers these only and is not exact."), `a chain the vendor budget cut short says so and names the contracts read (${st.text.slice(0, 160)})`);
+      ok(!/SYX101: /.test(st.text.replace(/^\d+ symbols? priced.*?(?=Partial)/, "")), "one name carries no symbol prefix");
+      await page.close();
+    }
+    const CORE_RAW = fs.readFileSync(new URL("assets/js/flows-desk.js", REPO), "utf8");
+    const planted = CORE_RAW.replace("staleQuotes, ...cuts, earnBits.join", "staleQuotes, earnBits.join");
+    ok(planted !== CORE_RAW, "the planted build removes the cut lines from the status");
+    const bad = await openDesk(browser, { payloads: served, query: "?t=SYX101,SYX102&strategy=sc", errors: [], before: async (p) => { await p.route(/\/assets\/js\/flows-desk\.js(\?.*)?$/, (r) => r.fulfill({ contentType: "text/javascript", body: planted })); } });
+    await ready(bad, 48);
+    ok(!/Ranked from/.test((await statusOf(bad)).text), "PLANTED WRONG BUILD IS CAUGHT (cut note): without the line the status does not carry it, and the probe above fails");
+    await bad.close();
+  }
+
+  {
     const CALLS = "assets/js/flows-desk-calls.js", CORE = "assets/js/flows-desk.js";
     const MUTS = [
       ["sort by the server's annualised yield", CALLS, [["annualized: (r) => (r.__sc ? r.__sc.annRatio : null),", "annualized: (r) => r.annualized,"]], "order"],

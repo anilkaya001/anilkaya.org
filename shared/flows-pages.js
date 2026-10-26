@@ -868,6 +868,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="range-ee">withheld: the chain shows early-exercise pricing, which the call-side range does not allow for</p>
       <p data-k="fwd-ee">The chain shows early-exercise pricing: parity falls as the strike rises. The forward is moved away from the carry, call volatility is read from the matching put, and the error is widened.</p>
       <p data-k="sc-cut">Ranked from {n} eligible calls; {m} sent. Top {k} exact for annualised time value over collateral; other orders rank sent rows only.</p>
+      <p data-k="sc-cut-brief">Ranked from {n} eligible calls; {m} sent.</p>
       <p data-k="sc-cut-partial">Partial chain: first {n} contracts read (page limit); ranking covers these only and is not exact.</p>
       <p data-k="sc-cut-budget">Partial chain: the site&#39;s market-data budget ran out after {n} contracts; ranking covers these only and is not exact.</p>
       <p data-k="sc-why-fwd">The forward is too uncertain at this expiry to size the delta.</p>

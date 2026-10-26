@@ -675,7 +675,7 @@
       (cut.length ? " " + T("f-cut", { who: cut.join(", "), has: one(cut.length, "has", "have"), its: one(cut.length, "its", "their") }) : "");
   }
 
-  function cutNotes(chosen) {
+  function cutParts(chosen) {
     const out = [];
     for (const sym of chosen) {
       const p = (book.get(sym) || {}).payload;
@@ -684,10 +684,25 @@
       const shed = Array.isArray(cut.shed) ? cut.shed : [];
       const has = (why) => shed.some((x) => x.why === why);
       const n = fmtInt(cut.nRaw);
-      const text = has("budget") ? T("sc-cut-budget", { n }) : cut.truncated ? T("sc-cut-partial", { n }) : T("sc-cut", { n: fmtInt(cut.nIn), m: fmtInt(cut.nOut), k: cut.k });
-      out.push((chosen.length > 1 ? sym + ": " : "") + text);
+      const kind = has("budget") ? "budget" : cut.truncated ? "partial" : "ranked";
+      const text = kind === "budget" ? T("sc-cut-budget", { n }) : kind === "partial" ? T("sc-cut-partial", { n }) : T("sc-cut", { n: fmtInt(cut.nIn), m: fmtInt(cut.nOut), k: cut.k });
+      out.push({ sym, kind, text, nIn: cut.nIn, nOut: cut.nOut });
     }
-    return out.length ? " " + out.join(" ") : "";
+    return out;
+  }
+
+  function cutNotes(chosen) {
+    const parts = cutParts(chosen);
+    return parts.length ? " " + parts.map((x) => (chosen.length > 1 ? x.sym + ": " : "") + x.text).join(" ") : "";
+  }
+
+  function cutBrief(chosen) {
+    const parts = cutParts(chosen);
+    const ranked = parts.filter((x) => x.kind === "ranked");
+    const out = [];
+    if (ranked.length) out.push(T("sc-cut-brief", { n: fmtInt(ranked.reduce((t, x) => t + x.nIn, 0)), m: fmtInt(ranked.reduce((t, x) => t + x.nOut, 0)) }));
+    for (const x of parts) if (x.kind !== "ranked") out.push((chosen.length > 1 ? x.sym + ": " : "") + x.text);
+    return out;
   }
 
   function rankWord(k) {
@@ -1289,9 +1304,10 @@
     const basis = basisLines(chosen);
     const session = sessions.size === 1 ? " · " + [...sessions][0] + " session" : "";
     const staleNote = stale.length ? " · " + stale.join(", ") + " priced off the last close, not a live print" : "";
-    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, ...keptBits, staleQuotes, earnBits.join(" · ")];
+    const cuts = side === "sc" ? cutBrief(chosen) : [];
+    const lines = [(failed.length ? chosen.length - failed.length + " of " + chosen.length + " symbols priced · " + failed.join(", ") + " unavailable" : chosen.length + " symbol" + (chosen.length === 1 ? "" : "s") + " priced") + session + age + unagedNote + staleNote, ...basis, ...keptBits, staleQuotes, ...cuts, earnBits.join(" · ")];
     statusEl.replaceChildren(...lines.filter(Boolean).map((t) => h("span", { class: "flows-status-l" }, t)));
-    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length || kept.length));
+    statusEl.classList.toggle("visually-hidden", !(failed.length || staleQuotes || stale.length || basis.length || kept.length || cuts.length));
   }
 
   function earningsBit(sym, p) {
