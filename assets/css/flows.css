@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=393") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=394") center / cover no-repeat;
   --aur-1: rgba(64, 120, 255, 0.16);
   --aur-2: rgba(150, 100, 255, 0.11);
   --aur-3: rgba(60, 200, 240, 0.07);
@@ -514,6 +514,7 @@
 .flows-skip:focus {
   top:1rem;
 }
+.flows-auth:focus, .fx-doc:focus { outline: 0; }
 .flows-body {
 
   --flow-reading-font: var(--font-ui);

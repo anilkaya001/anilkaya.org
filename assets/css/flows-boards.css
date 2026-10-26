@@ -170,7 +170,7 @@
   font: inherit;
   cursor: pointer;
 }
-.bd-hs::after { content: ""; position: absolute; inset: -6px -4px; }
+.bd-hs::after { content: ""; position: absolute; inset: -6px min(-4px, calc((100% - 24px) / 2)); }
 .bd-hs:hover:not(:disabled) { color: var(--label-1); }
 .bd-hs:disabled { cursor: default; }
 .bd-hs:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }

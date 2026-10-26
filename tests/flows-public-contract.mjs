@@ -163,4 +163,37 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   ok(!/ UTC</.test(stamped("2026-10-12T13:31:00.000Z")), "no UTC label is left on the Home page");
 }
 
+{
+  const bypass = (html) => {
+    const problems = [];
+    const body = html.slice(html.indexOf("<body"));
+    const first = /<(a|button|input|select|textarea)\b[^>]*>/.exec(body);
+    if (!first || first[1] !== "a" || !/class="flows-skip"/.test(first[0])) return ["the first focusable element is not the skip link"];
+    const target = /href="#([^"]+)"/.exec(first[0]);
+    if (!target) return ["the skip link has no target"];
+    if (!/^<a[^>]*>Skip to content<\/a>/.test(body.slice(first.index))) problems.push("the skip link does not say Skip to content");
+    const mains = body.match(/<main\b[^>]*>/g) || [];
+    if (mains.length !== 1) problems.push("the page has " + mains.length + " main elements");
+    else if (!mains[0].includes('id="' + target[1] + '"')) problems.push("the skip link targets #" + target[1] + " and main is " + mains[0]);
+    else if (!mains[0].includes('tabindex="-1"')) problems.push("main cannot take focus, so the skip lands nowhere");
+    return problems;
+  };
+  const pages = { login: PAGES.loginPage({}), about: PAGES.aboutPage(), glossary: PAGES.glossaryPage(), notFound: PAGES.notFoundPage() };
+  for (const [name, html] of Object.entries(pages)) {
+    eq(bypass(html).join("; "), "", `${name}: the first Tab stop is a skip link to a main that can take focus`);
+    ok(html.includes('class="topbar"') && html.indexOf('class="flows-skip"') > 0 && html.indexOf('class="flows-skip"') < html.indexOf('class="topbar"'), `${name}: the skip link comes before the site navigation it bypasses`);
+  }
+  const about = pages.about;
+  ok(bypass(about.replace('<a class="flows-skip" href="#docMain">Skip to content</a>', "")).length > 0, "PLANTED WRONG BUILD caught: a page with no skip link");
+  ok(bypass(about.replace('href="#docMain"', 'href="#nowhere"')).length > 0, "and a link to an id that is not main");
+  ok(bypass(about.replace('id="docMain" tabindex="-1"', 'id="docMain"')).length > 0, "and a main that cannot take focus");
+  ok(bypass(about.replace("Skip to content</a>", "Menu</a>")).length > 0, "and a link that does not say what it does");
+  const link = '<a class="flows-skip" href="#docMain">Skip to content</a>';
+  const pill = /<header class="topbar">[\s\S]*?<\/header>/.exec(about);
+  ok(pill !== null && bypass(about.replace(link, "").replace(pill[0], pill[0] + link)).length > 0, "and a skip link placed after the navigation it should bypass");
+  const css = readRepo("assets/css/flows.css");
+  ok(/\.flows-skip\s*\{[^}]*top:-5rem/.test(css) && /\.flows-skip:focus\s*\{[^}]*top:1rem/.test(css), "the skip link is off screen until it is focused");
+  ok(/\.flows-auth:focus, \.fx-doc:focus \{ outline: 0; \}/.test(css), "and the main it lands on draws no outline of its own");
+}
+
 console.log(`✓ flows-public: ${checks} assertions — the front door and the glossary answer a signed-out reader as static, noindexed, headered pages, move to a 404 behind one switch, name only strings the pages themselves show, and link in from the sign-in form`);
