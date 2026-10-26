@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { chromium } from "playwright";
 import * as P from "../shared/flows-premium.js";
+import { carryOf, deltaBand } from "../shared/flows-quant-forward.js";
 import { syxChain, NODE_Q, REPO, openDesk, showView } from "./desk-fixtures.mjs";
 import { ratioTextExact, dollarsTextExact, ratioMicroExact } from "./lib/pc-oracle.mjs";
 
@@ -13,12 +14,23 @@ const flat = (s) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
 
 const SC_FAM = Object.freeze({ id: "custom", risk: "undefined", dir: "neutral" });
 const asOfOf = (p) => Math.min(NODE_Q.closeUtcMs(p.asOf), Date.parse(p.generatedAt));
-const setupOf = (p, r) => {
+const fitOf = (p, r) => {
   const eng = p.engine, rate = eng.rate;
   const asOfMs = asOfOf(p);
   const row = { K: r.strike, type: "C", bid: r.bid, ask: r.ask, oi: r.oi, volume: r.volume, sym: r.symbol, ivSeed: r.iv, opposite: r.opposite };
   const input = { expiry: r.expiry, asOfMs, spot: p.spot, rate: rate.r, rateMethod: rate.method, facts: eng.facts, expiries: eng.expiries, row };
-  const fit = NODE_Q.contractFit(input);
+  return { fit: NODE_Q.contractFit(input), asOfMs, row };
+};
+const bandOracle = (p, r) => {
+  const { fit } = fitOf(p, r);
+  if (!fit) return null;
+  const c = fit.slice.contract;
+  const se = carryOf({ S: p.spot, r: fit.forward.r, T: fit.T, q: fit.forward.carry === "card" ? fit.forward.q : null }).se;
+  return deltaBand({ F: fit.forward.F, se, K: r.strike, sigma: c.iv, T: fit.T, held: c.via === "own" ? "C" : "P", veto: false });
+};
+const setupOf = (p, r) => {
+  const eng = p.engine;
+  const { fit, asOfMs, row } = fitOf(p, r);
   if (!fit) return null;
   return NODE_Q.labSetup({ asOfMs, spot: p.spot, facts: eng.facts, state: eng.state, pLaw: eng.pLaw, event: eng.event, stale: eng.stale, crossesEarnings: r.crossesEarnings, books: [{ fit, rows: [row] }], lawCache: new Map() });
 };
@@ -43,9 +55,10 @@ const expectedOf = (payloads, syms, t) => {
     for (const r of p.rows) {
       const e = p.engine && p.engine.status === "ok" ? engOf(p, r, t.cv === "shares") : null;
       const leg = e && e.legs.find((l) => l.type !== "S");
-      const delta = leg ? Math.abs(leg.delta) : null;
+      const band = e ? bandOracle(p, r) : null;
+      const delta = leg && !(band && band.band === "dash") ? Math.abs(leg.delta) : null;
       const line = P.shortCallLine({ bid: r.bid, strike: r.strike }, { spot: p.spot, delta, days: r.days, contracts: t.n, convention: t.cv, haircut: t.h, floor: t.f, buyingPower: t.bp });
-      out.set(sym + "|" + r.strike + "|" + r.expiry, { r, p, e, delta, line });
+      out.set(sym + "|" + r.strike + "|" + r.expiry, { r, p, e, delta, line, band });
     }
   }
   return out;
@@ -106,7 +119,9 @@ try {
     const askedBefore = page.asked.length;
     await page.locator("#deskStrategy .ui-seg-i", { hasText: "Short calls" }).click();
     await ready(page, 48);
-    eq(page.asked.length, askedBefore, "Calls to Short calls issues no new chain request: it reuses the cached payload");
+    eq(page.asked.length, askedBefore + 2, "Calls to Short calls asks the server once per name for its own ranking");
+    const scAsks = page.asked.slice(askedBefore);
+    ok(scAsks.every((q) => q.get("strategy") === "sc" && !q.has("h") && !q.has("f")), "and each ask names the strategy, leaving the default collateral terms to the server");
     ok(page.url().includes("strategy=sc"), "the address says sc");
     const rows = await readRows(page);
     eq(rows.length, 48, "every call is a line");
@@ -121,7 +136,8 @@ try {
     ok(rows.some((r) => r.cells.pq !== coveredWin.get(key(r))), "Win % changes to the naked call's chance, not the buy-write's");
     await page.locator("#deskStrategy .ui-seg-i", { hasText: /^Calls$/ }).click();
     await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-row[data-strategy='cc']").length >= 48, null, { timeout: 10000 });
-    eq(page.asked.length, askedBefore, "and back to Calls, still no request");
+    eq(page.asked.length, askedBefore + 4, "and back to Calls asks once per name again, for the covered-call ranking");
+    ok(page.asked.slice(askedBefore + 2).every((q) => q.get("strategy") === "cc"), "with the covered-call strategy");
     ok(!(await page.$("#dkTerms:not([hidden])")), "the Terms pill hides outside Short calls");
     await page.close();
   }
@@ -147,17 +163,24 @@ try {
     for (const r of rows) {
       const w = want.get(key(r)), l = w.line;
       shown++;
-      if (!l.ok) { bad++; continue; }
+      const dash = !!(w.band && w.band.band === "dash");
+      if (!l.ok) {
+        if (!(dash && t.cv === "delta" && r.cells.ratio === "—" && r.cells.nd === "—" && r.cells.pq === "—" && r.cells.ev === "—")) bad++;
+        continue;
+      }
       if (r.cells.ratio !== ratioTextExact(l.bidC, l.m1C) || r.pc !== r.cells.ratio || r.cells.ann !== annText(l.annRatio)) bad++;
       if (r.subs.ratio !== dollarsTextExact(l.bidC) + " ÷ " + dollarsTextExact(l.m1C, false)) bad++;
       if (r.premiumC !== String(l.bidC)) bad++;
       if (r.cells.collat !== usdC(l.collateralC)) bad++;
       if (r.cells.prem !== (l.n === 0 ? "$0" : usdC(l.premiumC))) bad++;
-      const nd = w.e ? (t.cv === "shares" ? 1 - w.delta : -w.delta) : null;
+      const leg = w.e && w.e.legs.find((x) => x.type !== "S");
+      const dl = leg ? Math.abs(leg.delta) : null;
+      const nd = w.e && !dash ? (t.cv === "shares" ? 1 - dl : -dl) : null;
       const ndText = nd === null ? "—" : (nd < 0 ? "−" : "+") + Math.abs(nd).toFixed(2);
-      if (r.cells.nd !== ndText) bad++;
-      const pq = w.e ? Math.round(w.e.prob.popQ * 100) + "%" : "—";
-      if (r.cells.pq !== pq) bad++;
+      const pm = !!(w.band && w.band.band === "pm");
+      if (r.cells.nd !== ndText + (pm && nd !== null ? " ± " + w.band.half.toFixed(2) : "")) bad++;
+      const pq = w.e && !dash ? Math.round(w.e.prob.popQ * 100) + "%" : "—";
+      if (pm ? !(r.cells.pq.startsWith(pq + " ± ") && /^\d+%$/.test(r.cells.pq.slice(pq.length + 3))) : r.cells.pq !== pq) bad++;
       if (w.e && w.e.ev.p !== null && l.n > 0) {
         const ev = w.e.ev.p * l.n;
         const txt = (ev < 0 ? "−" : ev > 0 ? "+" : "") + "$" + Math.abs(Math.round(ev)).toLocaleString("en-US");
@@ -414,13 +437,15 @@ try {
     await page.locator(".ui-exp > summary").click();
     const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".ui-exp-i", { hasText: /^CSV$/ }).click()]);
     const grid = parseCsv(fs.readFileSync(await dl.path(), "utf8").slice(1));
-    same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Time value ÷ collateral (fraction)", "Annualised time value ÷ collateral (fraction)", "Net delta (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
+    same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Time value ÷ collateral (fraction)", "Annualised time value ÷ collateral (fraction)", "Net delta (delta)", "Net delta band (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value (real-world) on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
     ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the vendor's quoted figures are not exported");
     const body = grid.slice(1, -2);
     ok(body.length === 48 && body.every((r) => r[1] === "short call, uncovered" && r[9] === "Delta-adjusted"), "every line is a row, named as uncovered, with its convention");
     ok(body.every((r) => r.every((c) => !/−/.test(c))), "no U+2212 in a CSV number");
     ok(body.every((r) => /^-?[\d.]+$/.test(r[15]) || r[15] === ""), "net delta is a plain signed number or empty");
     ok(body.some((r) => Number(r[15]) < 0), "naked net delta is negative");
+    ok(body.every((r) => r[16] === "" || (/^[\d.]+$/.test(r[16]) && Number(r[16]) > 0 && r[15] !== "")), "the delta band is empty or a positive half-width beside a delta");
+    ok(body.some((r) => r[16] !== ""), "and some line carries one");
     const wantCsv = expectedOf(payloads, SYMS, t);
     let csvBad = 0;
     for (const r of body) {
@@ -497,8 +522,8 @@ try {
       ["signed net delta plotted", CALLS, [["Math.abs(sc.netDelta)", "sc.netDelta"]], "geometry"],
       ["collateral shown on one contract", CALLS, [["cellOf(\"dk-collat\", \"Collateral\", usdC(sc.collateralC)", "cellOf(\"dk-collat\", \"Collateral\", usdC(sc.m1C)"]], "rows"],
       ["export carries the premium", CALLS, [["{ label: \"Contracts used\", unit: \"contracts\"", "{ label: \"Premium\", unit: \"USD\", get: (r) => r.premium },\n    { label: \"Contracts used\", unit: \"contracts\""]], "export"],
-      ["Calls to Short calls refetches", CORE, [["const reuse = SERVER_SIDE[next] === SERVER_SIDE[side];", "const reuse = false;"]], "reuse"],
-      ["shares convention keeps the naked pricing", CALLS, [["if (terms.cv === \"shares\") return r.__eng || null;", "void 0;"]], "shares"],
+      ["Short calls asks for the covered-call ranking", CORE, [["both: \"both\", sc: \"sc\" };", "both: \"both\", sc: \"cc\" };"]], "reuse"],
+      ["shares convention keeps the naked pricing", CALLS, [["function engFor(r) {\n    if (terms.cv === \"shares\") {", "function engFor(r) {\n    if (false) {"]], "shares"],
     ];
     const serve = (rel, edits) => {
       let text = fs.readFileSync(new URL(rel, REPO), "utf8");
@@ -513,7 +538,7 @@ try {
         const n = page.asked.length;
         await page.locator("#deskStrategy .ui-seg-i", { hasText: "Short calls" }).click();
         await ready(page, 48);
-        if (page.asked.length !== n) bad.push("a new request");
+        if (page.asked.length !== n + 2 || !page.asked.slice(n).every((q) => q.get("strategy") === "sc")) bad.push("no sc request");
         await page.close();
         return bad;
       }
@@ -526,8 +551,9 @@ try {
         for (const r of rows) {
           const w = want.get(key(r)), l = w.line;
           if (r.cells.collat !== usdC(l.collateralC)) bad.push("collateral " + key(r));
-          const pq = w.e ? Math.round(w.e.prob.popQ * 100) + "%" : "—";
-          if (r.cells.pq !== pq) bad.push("win " + key(r));
+          const pq = w.e && !(w.band && w.band.band === "dash") ? Math.round(w.e.prob.popQ * 100) + "%" : "—";
+          const have = r.cells.pq.replace(/ ± \d+%$/, "");
+          if (have !== pq) bad.push("win " + key(r));
         }
       }
       if (kind === "order") {
@@ -575,4 +601,4 @@ try {
   await browser.close();
 }
 
-console.log(`✓ flows-desk-calls-render: ${checks} assertions — Short calls reusing the Calls payload with no new request, every row's premium, collateral, ratio, annualised ratio, net delta, win and EV against the oracle under nine sets of terms, points that never move with contracts or buying power, the frontier at its independently mapped pixels with its Pareto set and floor guide, the formulas in the information popovers recomputed, the early-assignment flag, the missing-engine and no-card paths, the Terms dialog and its URL round trip, the export with no quoted figure, the chunk's failure and Data Saver paths, and no sideways scroll`);
+console.log(`✓ flows-desk-calls-render: ${checks} assertions — Short calls asking the server for its own ranking, every row's premium, collateral, ratio, annualised ratio, net delta, win and EV against the oracle under nine sets of terms, points that never move with contracts or buying power, the frontier at its independently mapped pixels with its Pareto set and floor guide, the formulas in the information popovers recomputed, the early-assignment flag, the missing-engine and no-card paths, the Terms dialog and its URL round trip, the export with no quoted figure, the chunk's failure and Data Saver paths, and no sideways scroll`);

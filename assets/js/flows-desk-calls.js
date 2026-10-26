@@ -5,6 +5,7 @@
   const DAYS_PER_YEAR = 365;
   const SC_DEFAULTS = Object.freeze({ contracts: 100, convention: "delta", haircut: 0.3, floor: 0.1 });
   const SC_REG_T = Object.freeze({ base: 0.2, floor: 0.1 });
+  const SC_DELTA_FLOOR = 0.05;
   const SC_LIMITS = Object.freeze({ contractsMax: 100000, haircut: Object.freeze([0.05, 1]), floor: Object.freeze([0, 0.5]) });
   const SC_CONVENTIONS = Object.freeze(["delta", "regt", "shares"]);
   const SC_FAM = Object.freeze({ id: "custom", risk: "undefined", dir: "neutral" });
@@ -51,8 +52,9 @@
       const d = numOrNull(delta);
       if (d === null) return fail("no-delta");
       if (d < 0 || d > 1) return fail("bad-delta");
-      m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);
-      binding = hc * d > fl ? "delta" : "floor";
+      const dd = Math.max(d, SC_DELTA_FLOOR);
+      m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);
+      binding = hc * dd > fl ? "delta" : "floor";
     } else return fail("bad-terms");
     const m1C = roundCents(m);
     if (!(m1C > 0)) return fail("no-collateral");
@@ -107,13 +109,13 @@
   }
 
   if (typeof document === "undefined") {
-    globalThis.__FlowsDeskCallsTest = Object.freeze({ SC_DEFAULTS, SC_REG_T, SC_LIMITS, roundCents, parseContracts, parsePercent, shortCallCollateral, dividendsToExpiry, shortCallLine, planShortCalls });
+    globalThis.__FlowsDeskCallsTest = Object.freeze({ SC_DEFAULTS, SC_REG_T, SC_DELTA_FLOOR, SC_LIMITS, roundCents, parseContracts, parsePercent, shortCallCollateral, dividendsToExpiry, shortCallLine, planShortCalls });
     return;
   }
 
   const K = window.FlowsUI && window.FlowsUI.deskKit;
   if (!K) return;
-  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, ratioText, centsText, ratioFraction } = K;
+  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, EV_P, ratioText, centsText, ratioFraction } = K;
 
   const SIGNS = { "-1": MINUS, "0": "", "1": "+" };
   const pcOf = (sc) => (sc && sc.ok ? ratioText(sc.bidC, sc.m1C) : null) || DASH;
@@ -121,7 +123,7 @@
   const CONV_LABEL = { delta: "Delta-adjusted", regt: "Reg-T style", shares: "Shares held (covered)" };
   const TICKS = [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
   const BIND_WORD = { delta: "delta", floor: "floor", "regt-otm": "20% rule", shares: "shares held" };
-  const WHY_KEY = { "no-delta": "sc-no-delta", "no-spot": "sc-why-no-spot", "bad-delta": "sc-why-bad-delta", "no-collateral": "sc-why-no-collateral", "bad-terms": "sc-why-bad-terms", "no-bid": "sc-why-no-bid" };
+  const WHY_KEY = { "no-delta": "sc-no-delta", "no-spot": "sc-why-no-spot", "bad-delta": "sc-why-bad-delta", "no-collateral": "sc-why-no-collateral", "bad-terms": "sc-why-bad-terms", "no-bid": "sc-why-no-bid", "fwd-dash": "sc-why-fwd" };
 
   const DEFAULT_TERMS = Object.freeze({ n: SC_DEFAULTS.contracts, cv: SC_DEFAULTS.convention, h: SC_DEFAULTS.haircut, f: SC_DEFAULTS.floor });
   let terms = { ...DEFAULT_TERMS };
@@ -153,7 +155,7 @@
   const formulaText = () => {
     if (terms.cv === "regt") return "Collateral per contract = 100 × max(20% × spot − the amount the strike is above spot, 10% × spot)";
     if (terms.cv === "shares") return "Collateral per contract = 100 × spot";
-    return "Collateral per contract = 100 × spot × max(" + pctWord(terms.h) + " × |delta|, " + pctWord(terms.f) + ")";
+    return "Collateral per contract = 100 × spot × max(" + pctWord(terms.h) + " × max(|delta|, 0.05), " + pctWord(terms.f) + ")";
   };
 
   function readTerms() {
@@ -181,12 +183,22 @@
 
   const SC_ENGINE_LEGS = (r) => [{ type: "C", K: r.strike, side: -1, qty: 1 }];
 
+  const ccStruct = (r) => ({ family: "covered-call", legs: [{ type: "S", side: 1, qty: 1 }, { type: "C", K: r.strike, side: -1, qty: 1 }] });
+  const scStruct = (r) => ({ family: "custom", fam: SC_FAM, legs: SC_ENGINE_LEGS(r) });
+  const structFor = (r) => (terms.cv === "shares" ? ccStruct(r) : scStruct(r));
+
   function engFor(r) {
-    if (terms.cv === "shares") return r.__eng || null;
+    if (terms.cv === "shares") {
+      if (r.__eng === null && r.__lazy && r.__ctx && r.__fitFull && !r.__ccTried) {
+        r.__ccTried = true;
+        try { const got = K.priceStruct(r, r.__fitFull, ccStruct(r)); r.__eng = got.eng || null; } catch { r.__eng = null; }
+      }
+      return r.__eng || null;
+    }
     if (r.__nk !== undefined) return r.__nk;
     r.__nk = null;
-    if (r.__setup && Q) {
-      try { r.__nk = Q.priceStructure(r.__setup, { family: "custom", fam: SC_FAM, expiry: r.expiry, legs: SC_ENGINE_LEGS(r), basis: "natural" }) || null; } catch { r.__nk = null; }
+    if (r.__ctx && r.__fitFull && Q) {
+      try { const got = K.priceStruct(r, r.__fitFull, scStruct(r)); r.__nk = got.eng || null; } catch { r.__nk = null; }
     }
     return r.__nk;
   }
@@ -194,15 +206,24 @@
   function annotate(rows, buyingPower) {
     for (const r of rows) {
       const eng = engFor(r);
+      const dash = K.dashed(r);
       const leg = eng && Array.isArray(eng.legs) ? eng.legs.find((l) => l.type !== "S") : null;
-      const delta = leg && isNum(leg.delta) !== null ? Math.abs(leg.delta) : null;
+      const delta = !dash && leg && isNum(leg.delta) !== null ? Math.abs(leg.delta) : null;
       const line = shortCallLine({ bid: r.bid, strike: r.strike }, { spot: r.__spot, delta, days: r.days, contracts: terms.n, convention: terms.cv, haircut: terms.h, floor: terms.f, buyingPower });
-      const nd = eng ? netDelta(eng) : null;
+      if (dash && !line.ok && line.why === "no-delta") line.why = "fwd-dash";
+      const nd = eng && !dash ? netDelta(eng) : null;
       const carry = eng && eng.carry ? eng.carry : null;
       const div = carry ? dividendsToExpiry({ spot: r.__spot, r: carry.r, q: carry.q, years: eng.T }) : 0;
       const tvShare = line.tvC === null ? null : line.tvC / 10000;
+      if (r.__whCv !== terms.cv) { r.__wh = undefined; r.__whCv = terms.cv; }
+      r.__winBase = eng ? eng.prob.popQ : undefined;
+      r.__winStruct = structFor(r);
+      const popQ = eng && !dash ? eng.prob.popQ : null;
+      const fit = r.__fitFull;
+      const range = r.br && fit && terms.cv !== "shares" ? Q.winRange(r.br, { profit: "below", D: fit.forward.D }) : null;
+      const outside = range && popQ !== null ? Q.outsideRange(popQ, range, { side: r.br.s, D: fit.forward.D }) : false;
       r.__sc = Object.assign(line, {
-        delta, eng, spot: r.__spot, netDelta: nd, popQ: eng ? eng.prob.popQ : null, popP: eng ? eng.prob.popP : null,
+        delta, eng, spot: r.__spot, netDelta: nd, popQ, popP: eng && !dash ? eng.prob.popP : null, range, outside,
         evN: eng && isNum(eng.ev.p) !== null && line.n !== null ? eng.ev.p * line.n : null,
         early: { div, tv: tvShare, watch: div > 0 && tvShare !== null && tvShare < div, deep: delta !== null && delta >= 0.9 },
       });
@@ -239,7 +260,7 @@
   };
 
   function head() {
-    return h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", "Collateral", "Net Δ", WIN_Q, "EV", ""].map((x) => h("span", null, x)));
+    return h("div", { class: "dk-head", "aria-hidden": "true" }, ["", "Line", "Prem. ÷ coll.", "Ann.", "Premium", "Collateral", "Net Δ", WIN_Q, EV_P, ""].map((x) => h("span", null, x)));
   }
 
   function cellOf(cls, label, text, tone, title, sub) {
@@ -261,6 +282,9 @@
         : cellOf("dk-prem", "Premium", usdC(sc.premiumC), "up", T("sc-premium"), sc.limited ? sc.n + " × of " + sc.asked + " · limited by buying power" : groupN(sc.n) + " × · bid " + fmt2(r.bid));
     const collat = sc.ok ? cellOf("dk-collat", "Collateral", usdC(sc.collateralC), null, T("t-collat"), collateralSub(sc)) : cellOf("dk-collat", "Collateral", DASH, "silent", bad);
     const nd = sc.netDelta;
+    const band = r.__band && r.__band.band === "pm" ? " ± " + r.__band.half.toFixed(2) : "";
+    const ndTitle = K.dashed(r) ? K.bandNote(r) : nd === null ? noEng : [T("sc-frontier-x"), band ? K.bandNote(r) : null].filter(Boolean).join(" ");
+    const wq = sc.popQ === null || sc.popQ === undefined ? { text: DASH, title: K.dashed(r) ? K.bandNote(r) : null } : K.winText(r, sc.popQ, structFor(r));
     return h("div", {
       class: "dk-row" + (K.isItm(r) ? " is-itm" : ""), role: "listitem", "data-t": r.ticker, "data-strike": String(r.strike), "data-strategy": "sc", "data-expiry": r.expiry, "data-days": String(r.days), "data-i": String(i),
       "data-n": sc.ok ? String(sc.n) : null, "data-m1": sc.ok ? String(sc.m1C) : null, "data-bind": sc.ok ? sc.binding : null, "data-ratio": sc.ok ? sc.ratio.toFixed(6) : null, "data-pc": sc.ok ? pcOf(sc) : null, "data-premium-c": Number.isSafeInteger(sc.bidC) ? String(sc.bidC) : null,
@@ -277,15 +301,24 @@
       sc.ok ? cellOf("dk-ratio", "Premium ÷ collateral", pcOf(sc), sc.intrC * 2 > sc.bidC ? "silent" : null, sc.intrC * 2 > sc.bidC ? T("t-pc-itm") : T("t-ratio"), centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C)) : cellOf("dk-ratio", "Premium ÷ collateral", DASH, "silent", bad),
       sc.ok ? cellOf("dk-ann", "Ann.", fmtAnn(sc.annRatio), null, T("t-ann")) : cellOf("dk-ann", "Ann.", DASH, "silent", bad),
       premium, collat,
-      cellOf("dk-nd", "Net Δ", signedD(nd), null, nd === null ? noEng : T("sc-frontier-x")),
-      cellOf("dk-pq", WIN_Q, sc.popQ === null || sc.popQ === undefined ? DASH : fmtPct(sc.popQ, 0), null, noEng || T("t-pq")),
-      cellOf("dk-ev", "EV", ev === null ? DASH : K.usd(ev), ev === null ? "silent" : TONES[Math.sign(ev)], noEng || T("t-ev"))),
+      cellOf("dk-nd", "Net Δ", nd === null ? DASH : signedD(nd) + band, null, ndTitle),
+      cellOf("dk-pq", WIN_Q, wq.text, null, wq.title || noEng || T("t-pq")),
+      cellOf("dk-ev", EV_P, ev === null ? DASH : K.usd(ev), ev === null ? "silent" : TONES[Math.sign(ev)], noEng || T("ev-measure"))),
     UI.infoButton(r.ticker + " " + kf(r.strike) + " call", () => rowInfo(r), { small: true }));
   }
 
   function labHref(r) {
     if (terms.cv === "shares") return K.labHref(r);
     return "/flows/strategy/?t=" + encodeURIComponent(r.ticker) + "&s=custom&expiry=" + r.expiry + "&basis=natural&legs=" + encodeURIComponent(r.symbol + "@-1");
+  }
+
+  const pct0 = (v) => Math.round(v * 100) + "%";
+
+  function rangeLine(r, sc) {
+    if (terms.cv === "shares") return DASH;
+    if (!sc.range) return T("range-none");
+    const base = T("range-in", { lo: pct0(sc.range.lo), hi: pct0(sc.range.hi) });
+    return sc.outside ? T("range-out", { lo: pct0(sc.range.lo), hi: pct0(sc.range.hi) }) : base;
   }
 
   function rowInfo(r) {
@@ -316,13 +349,14 @@
         ["Shares held", S === null ? DASH : "$" + groupN(S * SHARES_PER_CONTRACT * n) + " of stock for " + groupN(n) + " contract" + (n === 1 ? "" : "s")],
         ["Premium ÷ collateral", sc.ok ? pcOf(sc) + " = " + centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C, true) + " a contract, intrinsic value included" + (sc.intrC > 0 ? " (" + centsText(Math.min(sc.intrC, sc.bidC), true) + " of it intrinsic)" : "") + " · " + T("sc-conv-" + terms.cv) : DASH],
         ["Time value ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only" : DASH],
-        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? DASH : signedD(sc.netDelta) + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the card's smile, which can only over-state collateral on a dividend payer"],
+        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : DASH) : signedD(sc.netDelta) + (r.__band && r.__band.band === "pm" ? " ± " + r.__band.half.toFixed(2) : "") + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the chain's own forward, with a floor of 0.05 in the collateral"],
         ["Forward", K.forwardText(r)],
         ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S))],
         ["Cushion", fmtSd(r.cushionSigmas)],
-        ["Chance of profit", e ? fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" : DASH],
-        ["Expected value", e ? K.usd(e.ev.q) + " implied · " + (e.ev.p === null ? DASH : K.usd(e.ev.p)) + " real world, per contract; " + (sc.evN === null || sc.evN === undefined ? DASH : K.usd(sc.evN)) + " on " + groupN(n) : DASH],
+        ["Chance of profit", e ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (K.bandNote(r) ? " · " + K.bandNote(r) : "")) : DASH],
+        ["Neighbouring quotes", rangeLine(r, sc)],
+        ["Expected value", e ? T("ev-measure") + " " + K.usd(e.ev.p === null ? null : e.ev.p) + " per contract, " + (sc.evN === null || sc.evN === undefined ? DASH : K.usd(sc.evN)) + " on " + groupN(n) + ". " + T("ev-implied", { x: K.usd(e.ev.q) }) : DASH],
         ["Early exercise", earlyLines.length ? earlyLines.join(" ") : "No dividend flag from the card."],
         ["Assignment", T("sc-assign")],
         ["Grade", e ? e.grade + " of 3" + (e.gradeWhy.length ? " · " + e.gradeWhy.map(K.whyText).join(" ") : "") : DASH],
@@ -399,7 +433,7 @@
     if (!rows.length) { K.emptyFrontier(host, H, phone); return; }
     const xf = xOf(axis);
     const pts = rows.map((r) => ({ r, x: xf(r), y: yOf(r) })).filter((p) => p.x !== null && p.y !== null);
-    const noDelta = terms.cv === "delta" && rows.every((r) => r.__sc.why === "no-delta");
+    const noDelta = terms.cv === "delta" && rows.every((r) => r.__sc.why === "no-delta" || r.__sc.why === "fwd-dash");
     if (!pts.length) {
       host.append(UI.silent({ state: "withheld", reason: noDelta ? T("sc-no-delta-all") : T("fr-none") }, "Frontier", H));
       if (noDelta) mods.legend.replaceChildren(h("p", { class: "dk-hint" }, T("sc-no-delta-all")));
@@ -500,9 +534,10 @@
     { label: "Time value ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null) },
     { label: "Annualised time value ÷ collateral", unit: "fraction", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.annRatio : null) },
     { label: "Net delta", unit: "delta", get: (r) => (r.__sc ? r.__sc.netDelta : null) },
+    { label: "Net delta band", unit: "delta", get: (r) => (r.__sc && r.__sc.netDelta !== null && r.__band && r.__band.band === "pm" ? r.__band.half : null) },
     { label: "Win probability (implied)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popQ : null) },
     { label: "Win probability (real-world)", unit: "fraction", get: (r) => (r.__sc ? r.__sc.popP : null) },
-    { label: "Expected value on contracts used", unit: "USD", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.evN : null) },
+    { label: "Expected value (real-world) on contracts used", unit: "USD", get: (r) => (r.__sc && r.__sc.ok ? r.__sc.evN : null) },
     { label: "Reg-T style collateral per contract", unit: "USD", get: (r) => (r.__sc && r.__sc.regtM1C !== null && r.__sc.regtM1C !== undefined ? r.__sc.regtM1C / 100 : null) },
   ];
 
@@ -527,6 +562,7 @@
     if (pill) pill.textContent = termsSummary();
     if (ui) refreshDialog();
     K.render();
+    K.recutTerms();
   }
 
   function setError(input, msg, bad) {

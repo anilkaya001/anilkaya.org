@@ -31,7 +31,7 @@ const factsOf = (ch) => [{ id: "carry.implied", v: ch.carry, g: 3 }];
 const argsOf = (ch, terms, extra = {}) => ({ raw: ch.rows, ticker: ch.ticker, spot: ch.spot, readMs: ch.readMs, asOfDay: ch.asOf, rate: ch.rate, facts: factsOf(ch), terms, ...extra });
 
 function pageRow(r, out, facts, rate) {
-  const fwds = new Map(out.forwards.map((f) => [f.expiry, f]));
+  const fwds = new Map(out.fwd.map((f) => [f.expiry, f]));
   const row = { K: r.strike, type: "C", bid: r.bid, ask: r.ask, oi: r.oi, volume: r.volume, sym: r.symbol, ivSeed: null, opposite: r.opposite };
   const fwd = fwds.get(r.expiry) || null;
   const input = { expiry: r.expiry, asOfMs: out.cut.asOf, spot: out.cut.spot, rate, rateMethod: "given", facts, expiries: null, row, fwd };

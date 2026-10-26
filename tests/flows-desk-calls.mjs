@@ -94,7 +94,7 @@ function battery(mod, tag) {
   for (let k = 0; k < 20000; k++) {
     const sN = int(100, 600000), hN = int(500, 10000), fN = int(0, 5000), dN = int(0, 10000);
     const S = sN / 100, h = hN / 10000, f = fN / 10000, d = dN / 10000;
-    const X = BigInt(Math.max(hN * dN, fN * 10000));
+    const X = BigInt(Math.max(hN * Math.max(dN, 500), fN * 10000));
     const want = (2n * BigInt(sN) * X + 1000000n) / 2000000n;
     const args = { convention: "delta", spot: S, strike: S + 1, delta: d, haircut: h, floor: f };
     const got = PREM.shortCallCollateral(args);
@@ -196,9 +196,12 @@ function battery(mod, tag) {
 }
 
 const MUTANTS = [
-  ["floor dropped", "m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);", "m = SHARES_PER_CONTRACT * S * hc * d;"],
-  ["min instead of max", "m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);", "m = SHARES_PER_CONTRACT * S * Math.min(hc * d, fl);"],
-  ["haircut on one minus delta", "m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);", "m = SHARES_PER_CONTRACT * S * Math.max(hc * (1 - d), fl);"],
+  ["the delta floor dropped", "const dd = Math.max(d, SC_DELTA_FLOOR);", "const dd = d;"],
+  ["the delta floor at ten per cent", "export const SC_DELTA_FLOOR = 0.05;", "export const SC_DELTA_FLOOR = 0.1;"],
+  ["the delta floor at zero", "export const SC_DELTA_FLOOR = 0.05;", "export const SC_DELTA_FLOOR = 0;"],
+  ["floor dropped", "m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);", "m = SHARES_PER_CONTRACT * S * hc * dd;"],
+  ["min instead of max", "m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);", "m = SHARES_PER_CONTRACT * S * Math.min(hc * dd, fl);"],
+  ["haircut on one minus delta", "m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);", "m = SHARES_PER_CONTRACT * S * Math.max(hc * (1 - dd), fl);"],
   ["Reg-T adds the out-of-the-money amount", "SC_REG_T.base * S - Math.max(0, K - S)", "SC_REG_T.base * S + Math.max(0, K - S)"],
   ["Reg-T floor on the strike", "fl = SC_REG_T.floor * S;", "fl = SC_REG_T.floor * K;"],
   ["Reg-T base 15%", "export const SC_REG_T = Object.freeze({ base: 0.2,", "export const SC_REG_T = Object.freeze({ base: 0.15,"],
@@ -208,15 +211,15 @@ const MUTANTS = [
   ["annualised on days plus one", "ratio * DAYS_PER_YEAR / dayN", "ratio * DAYS_PER_YEAR / (dayN + 1)"],
   ["premium without n", "premiumC: n * bidC", "premiumC: bidC"],
   ["collateral without n", "collateralC: n * col.m1C", "collateralC: col.m1C"],
-  ["multiplier of ten", "m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);", "m = 10 * S * Math.max(hc * d, fl);"],
+  ["multiplier of ten", "m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);", "m = 10 * S * Math.max(hc * dd, fl);"],
   ["truncated cents", "Math.round(dollars * 100 + 1e-9 + Math.abs(dollars) * 1e-13)", "Math.floor(dollars * 100)"],
   ["ceil on the affordable count", "Math.floor(bpC / col.m1C)", "Math.ceil(bpC / col.m1C)"],
   ["N cap ignored", "Math.min(contracts, Math.floor(bpC / col.m1C))", "Math.floor(bpC / col.m1C)"],
   ["missing delta read as zero", "if (d === null) return fail(\"no-delta\");", "if (d === null) return { ok: true, m1C: roundCents(SHARES_PER_CONTRACT * S * fl), binding: \"floor\", why: null };"],
   ["zero collateral passes", "if (!(m1C > 0)) return fail(\"no-collateral\");", ""],
   ["delta clamped", "if (d < 0 || d > 1) return fail(\"bad-delta\");", "if (d < 0 || d > 1) return shortCallCollateral({ convention, spot, strike, delta: Math.min(1, Math.max(0, d)), haircut, floor });"],
-  ["binding tie goes to delta", "binding = hc * d > fl ? \"delta\" : \"floor\";", "binding = hc * d >= fl ? \"delta\" : \"floor\";"],
-  ["binding inverted", "binding = hc * d > fl ? \"delta\" : \"floor\";", "binding = hc * d > fl ? \"floor\" : \"delta\";"],
+  ["binding tie goes to delta", "binding = hc * dd > fl ? \"delta\" : \"floor\";", "binding = hc * dd >= fl ? \"delta\" : \"floor\";"],
+  ["binding inverted", "binding = hc * dd > fl ? \"delta\" : \"floor\";", "binding = hc * dd > fl ? \"floor\" : \"delta\";"],
   ["the gross ratio on the time value", "grossRatio: bidC / col.m1C", "grossRatio: tvC / col.m1C"],
   ["the bid rounds without the half-cent epsilon", "const bidC = roundCents(bid * SHARES_PER_CONTRACT);", "const bidC = Math.round(bid * SHARES_PER_CONTRACT * 100);"],
   ["time value ignored for in the money", "const tvC = Math.max(0, bidC - intrC);", "const tvC = bidC;"],
