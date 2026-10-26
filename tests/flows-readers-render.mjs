@@ -50,20 +50,33 @@ async function mount(page, { html, url, answer, at = TUE_1330 }) {
   page.on("requestfinished", done);
   page.on("requestfailed", done);
   await page.clock.install({ time: new Date(at) });
+  await page.clock.pauseAt(new Date(at + 1));
   await page.goto("https://example.test" + url);
-  await settle(page);
+  await settle(page, 2000);
 }
 
-const settle = async (page) => {
-  await page.waitForTimeout(150);
-  for (let i = 0; i < 200 && page._inflight > 0; i++) await page.waitForTimeout(50);
-  await page.waitForTimeout(150);
+const frames = (page, n) => page.waitForFunction((n) => { const c = (window.__rf = (window.__rf || 0) + 1); if (c <= n) return false; window.__rf = 0; return true; }, n, { polling: "raf", timeout: 30000 });
+const settle = async (page, pumpMs = 0) => {
+  await page.waitForFunction(() => document.readyState === "complete", null, { polling: "raf", timeout: 30000 });
+  for (let spent = 0; spent < pumpMs; spent += 250) {
+    for (let i = 0; i < 4000 && page._inflight > 0; i++) await frames(page, 1);
+    await page.clock.runFor(250);
+    await frames(page, 2);
+  }
+  let quiet = 0;
+  for (let i = 0; i < 4000 && quiet < 8; i++) {
+    await frames(page, 2);
+    if (page._inflight > 0) { quiet = 0; continue; }
+    await page.clock.runFor(5);
+    quiet++;
+  }
 };
 const tick = async (page, ms) => {
   NOW += ms;
   for (let left = ms; left > 0; left -= 5000) {
     await page.clock.runFor(Math.min(left, 5000));
-    for (let i = 0; i < 400 && page._inflight > 0; i++) await page.waitForTimeout(10);
+    await frames(page, 2);
+    for (let i = 0; i < 2000 && page._inflight > 0; i++) await frames(page, 1);
   }
   await settle(page);
 };
@@ -519,6 +532,17 @@ try {
     };
     const answer = (key) => (key.startsWith("board?side=long") ? { body: board } : null);
     const html = PAGES.sidePage({ username: "test", side: "long" });
+    const steady = async (page) => {
+      let st = await state(page), key = st.all.join("|"), same = 0;
+      for (let i = 0; i < 1200 && same < 12; i++) {
+        await frames(page, 1);
+        st = await state(page);
+        const k = st.all.join("|");
+        same = k === key ? same + 1 : 0;
+        key = k;
+      }
+      return st;
+    };
     const lostFrom = (before, after) => before.all.filter((k) => !after.all.includes(k));
     const state = (page) => page.evaluate(() => {
       const dock = document.getElementById("askDock");
@@ -543,13 +567,18 @@ try {
         pal: (() => { const d = document.getElementById("fxPal"); return !!(d && d.open); })(),
       };
     });
+    const until = async (page, pred) => {
+      let st = await state(page);
+      for (let i = 0; i < 600 && !pred(st); i++) { await frames(page, 1); st = await state(page); }
+      return st;
+    };
 
     {
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, { html, url: "/flows/long/", answer });
-      const before = await state(page);
+      const before = await steady(page);
       ok(before.behind >= 10 && !before.open, `THE ASK DOCK AT 390 PX: closed, the page offers ${before.behind} tabbable elements, so the count below is measuring something`);
       eq(before.role, "dialog", "the panel is announced as a dialog below 1200 px, before it is ever opened");
       const opener = await page.evaluate(() => {
@@ -583,8 +612,8 @@ try {
       await page.evaluate(() => window.FlowsUI.openInfo(document.querySelector(".ak-dock-close"), { title: "A note", lead: "Opened from inside the dock." }));
       ok((await state(page)).pop, "an explanation popover opened from inside the dock is open");
       await page.keyboard.press("Escape");
-      await page.waitForTimeout(700);
-      const afterPop = await state(page);
+      let afterPop = await state(page);
+      for (let i = 0; i < 600 && (afterPop.pop || afterPop.behind > 0); i++) { await frames(page, 1); afterPop = await state(page); }
       ok(!afterPop.pop && afterPop.open, `ESCAPE CLOSES THE POPOVER FIRST and leaves the dock open (${JSON.stringify(afterPop)})`);
       eq(afterPop.behind, 0, `with the page behind it still inert (${JSON.stringify(afterPop.sample)})`);
 
@@ -592,12 +621,12 @@ try {
       await page.keyboard.press("Control+k");
       await page.waitForFunction(() => { const d = document.getElementById("fxPal"); return !!(d && d.open); }, null, { timeout: 5000 });
       await page.keyboard.press("Escape");
-      const afterPal = await state(page);
+      const afterPal = await until(page, (st) => !st.pal);
       ok(!afterPal.pal && afterPal.open, `Escape in the search palette closes the palette and not the dock under it (${JSON.stringify(afterPal)})`);
 
       await page.focus("#askQ");
       await page.keyboard.press("Escape");
-      const shut = await state(page);
+      const shut = await until(page, (st) => !st.open && st.anyInert === 0);
       ok(!shut.open && shut.hidden, "a second Escape closes the dock");
       eq(shut.anyInert, 0, "and gives the page back: nothing is left inert");
       const lost = lostFrom(before, shut);
@@ -609,7 +638,7 @@ try {
       await page.keyboard.press("?");
       await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 5000 });
       await page.click(".ak-dock-close");
-      const closed = await state(page);
+      const closed = await until(page, (st) => !st.open && st.anyInert === 0);
       ok(!closed.open && lostFrom(before, closed).length === 0 && closed.focus !== "BODY", `the close button gives the page and the focus back the same way (${JSON.stringify(closed)})`);
       eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
       await page.close();
@@ -620,17 +649,22 @@ try {
       const errors = [];
       page.on("pageerror", (e) => errors.push(String(e)));
       await mount(page, { html, url: "/flows/long/", answer });
-      const before = await state(page);
       await page.click("#askDockTab");
       await page.waitForFunction(() => document.activeElement && document.activeElement.id === "askQ", null, { timeout: 8000 });
       const open = await state(page);
       ok(open.role === "dialog" && open.modal === "true" && open.behind === 0, `AT 1100 PX the side sheet over its scrim is a modal dialog too (${JSON.stringify(open)})`);
       await page.setViewportSize({ width: 1000, height: 900 });
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => innerWidth === 1000 && matchMedia("(max-width: 1024.98px)").matches, null, { polling: "raf", timeout: 10000 });
+      await frames(page, 3);
       eq((await state(page)).behind, 0, "and stays one when the window crosses the drawer's 1025 px line, which used to clear the inert flag on the page");
       await page.keyboard.press("Escape");
-      const shut = await state(page);
-      ok(!shut.open && lostFrom(before, shut).length === 0, "Escape closes it and gives the page back");
+      await until(page, (st) => !st.open && st.anyInert === 0);
+      const shut = await steady(page);
+      const refPage = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+      await mount(refPage, { html, url: "/flows/long/", answer });
+      const ref = await steady(refPage);
+      await refPage.close();
+      ok(!shut.open && lostFrom(ref, shut).length === 0, `Escape closes it and gives the page back, tabbable as a page that was never opened at the same width (open ${shut.open}; lost ${JSON.stringify(lostFrom(ref, shut))}; behind ${ref.behind} in the reference, ${shut.behind} now)`);
       eq(shut.focus, "askDockTab", "with the focus on the tab that opened it");
       eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
       await page.close();
@@ -657,18 +691,18 @@ try {
       await page.keyboard.press("Escape");
       ok((await state(page)).open, "Escape pressed in the page does not close the side panel");
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.waitForTimeout(100);
+      await page.waitForFunction(() => { const p = document.getElementById("askDockPanel"); return innerWidth === 390 && p.getAttribute("role") === "dialog" && p.getAttribute("aria-modal") === "true" && !!document.activeElement && p.contains(document.activeElement); }, null, { polling: "raf", timeout: 10000 });
       const narrowed = await state(page);
       ok(narrowed.role === "dialog" && narrowed.modal === "true" && narrowed.behind === 0 && narrowed.focusIn,
          `narrowed to 390 px while open, it becomes the modal dialog and takes the focus (${JSON.stringify(narrowed)})`);
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.waitForFunction(() => document.getElementById("askDockPanel").getAttribute("role") === "complementary", null, { timeout: 5000 }).catch(() => {});
+      await page.waitForFunction(() => { const p = document.getElementById("askDockPanel"); return innerWidth === 1280 && p.getAttribute("role") === "complementary" && !p.getAttribute("aria-modal") && !document.querySelector("[inert]"); }, null, { polling: "raf", timeout: 15000 });
       const widened = await state(page);
       ok(widened.open && widened.role === "complementary" && widened.modal === null && widened.anyInert === 0 && widened.behind >= 20,
          `widened back to 1280 px, it is a side panel again and the page is live (${JSON.stringify(widened)})`);
       await page.focus("#askQ");
       await page.keyboard.press("Escape");
-      ok(!(await state(page)).open, "and Escape inside it still closes it");
+      ok(!(await until(page, (st) => !st.open)).open, "and Escape inside it still closes it");
       eq(errors.length, 0, `nothing threw (${errors.join("; ")})`);
       await page.close();
     }

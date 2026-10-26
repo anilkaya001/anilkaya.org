@@ -12,6 +12,21 @@ const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const stable = (page, sel, frames = 8) => page.evaluate(({ sel, frames }) => new Promise((res, rej) => {
+  const t0 = performance.now();
+  const read = () => { const h = document.querySelector(sel); const r = h.getBoundingClientRect(); return [Math.round(r.width * 10), Math.round(r.height * 10), h.scrollHeight, h.clientHeight, Math.round(scrollY)].join(":"); };
+  let prev = null, same = 0;
+  const loop = async () => {
+    await document.fonts.ready;
+    const now = read();
+    same = now === prev ? same + 1 : 0;
+    prev = now;
+    if (same >= frames) return res(now);
+    if (performance.now() - t0 > 20000) return rej(new Error("layout never settled: " + now));
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}), { sel, frames });
 
 const body = `
 <div id="top" style="height:40px">top</div>
@@ -308,7 +323,7 @@ try {
       const hostH = await page.evaluate(() => Math.round(document.getElementById("uaNet").getBoundingClientRect().height));
       console.log(`  unusual ${width}px: card ${await page.evaluate(() => Math.round(document.getElementById('uaNet').getBoundingClientRect().width))} px, slot ${Math.round(slot.heights)} px, mounted ${hostH} px, chips ${before} to ${after}, layout shift ${await page.evaluate(() => window.__cls.toFixed(4))}`);
       ok(Math.abs(after - before) <= 8, `THE SLOT RESERVES ITS SPACE (${width} px): what sits below the card moved ${Math.abs(after - before)} px when the network mounted, of ${hostH}`);
-      await sleep(700);
+      await stable(page, "#uaNet");
       const moved = await page.evaluate(() => window.__ls.filter((e) => e.outside.length).map((e) => e.at + " ms: " + e.outside.join(", ")));
       eq(moved, [], `NOTHING BELOW THE NETWORK'S CARD MOVES (${width} px): no layout shift, from first paint to the mounted network, has a source that comes after #uaNetCard in the page`);
       const lcp = await page.evaluate(() => window.__lcp);
@@ -325,7 +340,7 @@ try {
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
         await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage, #uaNet .nm-stage"));
-        await sleep(300);
+        await stable(page, "#uaNet");
         const m = await page.evaluate(() => {
           const h = document.getElementById("uaNet");
           return { w: Math.round(h.getBoundingClientRect().width), content: h.scrollHeight, reserved: h.clientHeight };
@@ -392,7 +407,7 @@ try {
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
         await page.waitForSelector("#uaNet .fn-empty:not([hidden]), #uaNet .nm-empty");
-        await sleep(500);
+        await stable(page, "#uaNet");
         const m = await natural(page);
         const cls = await page.evaluate(() => window.__cls);
         const moved = await page.evaluate(() => window.__ls.filter((e) => e.outside.length).map((e) => e.at + " ms: " + e.outside.join(", ")));
@@ -414,7 +429,7 @@ try {
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
         await page.waitForSelector("#uaNet .fn-empty:not([hidden]), #uaNet .nm-empty");
-        await sleep(300);
+        await stable(page, "#uaNet");
         const m = await natural(page);
         off.push({ w, reserved: m.reserved, gap: m.host - m.own, inner: m.inner });
         await context.close();
