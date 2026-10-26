@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { nightlyEmit, DRY_NOW } from "./lib/nightly-emit.mjs";
 import * as P from "../shared/flows-card-pack.js";
 import { mulberry32 } from "../shared/flows-stats.js";
-import { CARD_X_SOFT_BYTES, CARD_X_BUDGET_BYTES, cardXPayload, composeCardXPayload } from "../scripts/flows-legs/card-x.mjs";
-import { DOSSIER_SQL } from "../shared/flows-dossier-worker.js";
+import { CARD_X_SOFT_BYTES, CARD_X_BUDGET_BYTES, CARD_X_SERVED_BYTES, cardXPayload, composeCardXPayload, cardXWire, cardXBytes } from "../scripts/flows-legs/card-x.mjs";
 import { loadMutated } from "./truth/mutants.mjs";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 let checks = 0;
 let planted = 0;
@@ -18,7 +20,7 @@ const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES);
-const STORED_CEILING = 56500;
+const WIRE_CEILING = 56500;
 const SERVED_CEILING = 62500;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
@@ -44,15 +46,11 @@ function battery(m) {
       v: 1, ticker: "SYA101",
       vrp: { series: { d: ["2026-02-27", "2026-03-02", "2026-03-03"], iv: [1, 2, 3] } },
       contracts: { rows: [{ d: ["2024-02-28", "2024-02-29", "2024-03-01", "2024-03-01"] }, { d: ["2026-12-31", "2027-01-04", "2027-01-05"] }] },
-      short: { volume: { d: ["2026-01-01", "2026-01-02", "2026-01-05"] } },
     };
-    const want = '{"pk":1,"v":1,"ticker":"SYA101","vrp":{"series":{"d0":"2026-02-27","dd":[3,1],"iv":[1,2,3]}},"contracts":{"rows":[{"d0":"2024-02-28","dd":[1,1,0]},{"d0":"2026-12-31","dd":[4,1]}]},"short":{"volume":{"d":["2026-01-01","2026-01-02","2026-01-05"]}}}';
+    const want = '{"pk":1,"v":1,"ticker":"SYA101","vrp":{"series":{"d0":"2026-02-27","dd":[3,1],"iv":[1,2,3]}},"contracts":{"rows":[{"d0":"2024-02-28","dd":[1,1,0]},{"d0":"2026-12-31","dd":[4,1]}]}}';
     if (json(m.packCardX(doc)) !== want) note("the packed form of a known document is " + json(m.packCardX(doc)));
     if (json(m.unpackCardX(JSON.parse(want))) !== json(doc)) note("and it unpacks to the document, key order kept");
-    if (m.packCardX(doc).short !== doc.short) note("a skipped section is passed through as it stands");
     if (!m.isPackedText(want) || m.isPackedText(json(doc))) note("the marker is the first key");
-    const odd = { v: 1, earnings: { d0: "2026-01-01", dd: [1, 2], pk: 1 }, vrp: { d: trail("2026-01-01", [1, 1, 1]) } };
-    same2(m.unpackCardX(m.packCardX(odd)), odd, "a skipped section may hold the keys the packer reserves, and comes back as it was");
   });
 
   guard("refusals", () => {
@@ -98,14 +96,13 @@ function battery(m) {
     if (m.unpackText("") !== "" || m.unpackText(5) !== 5) note("text that is not a packed document is returned as it is");
     const pretty = '{ "v": 1, "a": { "d": ["2026-01-01", "2026-01-02", "2026-01-03"] } }';
     if (m.packText(pretty) !== pretty) note("a body that is not the compact form of its own value is stored whole, so the reader can serve the bytes that were posted");
-    if (!m.carriesMarker({ pk: 1 }) || m.carriesMarker({ a: 1 }) || m.carriesMarker([{ pk: 1 }]) || m.carriesMarker(null) || m.carriesMarker({ x: { pk: 1 } }) || m.carriesMarker({ dd: 1 })) note("a document carries the marker when its own top-level key is pk");
   });
 
   guard("units", () => {
-    if (m.storedBytes({ a: 1 }) !== utf8(json({ a: 1, bytes: 99999 }))) note("the stored size of a document with nothing to pack is its own with the five-digit bytes field");
+    if (m.wireBytes({ a: 1 }) !== utf8(json({ a: 1, bytes: 99999 }))) note("the wire size of a document with nothing to pack is its own with the five-digit bytes field");
     const doc = { v: 1, a: { d: trail("2026-01-01", Array.from({ length: 40 }, () => 1)) } };
-    if (!(m.storedBytes(doc) < utf8(json({ ...doc, bytes: 99999 })) - 300)) note("a packable list takes its gaps off the stored size");
-    if (m.storedBytes({ s: "é€𝄞" }) !== utf8(json({ s: "é€𝄞", bytes: 99999 }))) note("and the size is counted in UTF-8 bytes");
+    if (!(m.wireBytes(doc) < utf8(json({ ...doc, bytes: 99999 })) - 300)) note("a packable list takes its gaps off the wire size");
+    if (m.wireBytes({ s: "é€𝄞" }) !== utf8(json({ s: "é€𝄞", bytes: 99999 }))) note("and the size is counted in UTF-8 bytes");
   });
 
   return bad;
@@ -162,7 +159,6 @@ function properties(m, seeds) {
         packedDocs++;
         const gain = utf8(text) - utf8(json(packed));
         if (gain < -16) bad.push(`seed ${seed}: packing grew the document by ${-gain} bytes`);
-        for (const k of P.PACK_SKIP[P.PACK_VERSION]) if (Object.hasOwn(doc, k) && packed[k] !== doc[k]) bad.push(`seed ${seed}: the ${k} section was touched`);
         lists += (json(packed).match(/"dd":/g) || []).length;
       } else skipped++;
     } catch (e) {
@@ -192,28 +188,18 @@ if (process.argv.includes("--child")) {
 
 eq(json(battery(P)), "[]", "the pack battery passes the real leaf: " + battery(P).slice(0, 2).join(" | "));
 eq(P.PACK_PREFIX, json({ [P.PACK_KEY]: P.PACK_VERSION, x: 1 }).slice(0, P.PACK_PREFIX.length), "the marker prefix is what JSON.stringify writes for the first key");
-same([...P.PACK_SKIP[1]].sort(), ["dx", "earnings", "engine", "insiders", "short", "vx"], "the sections the dossier reads out of the row with SQL are the ones left as they are");
-same(Object.keys(P.PACK_SKIP), ["1"], "version 1 of the format is the only one, and its skip list is a snapshot: changing it once rows are packed needs version 2");
-ok(Object.isFrozen(P.PACK_SKIP) && Object.isFrozen(P.PACK_SKIP[1]) && Object.isFrozen(P.PACK_RESERVED), "frozen");
 same([...P.PACK_RESERVED], ["pk", "d0", "dd", "__proto__"], "and so is the list of keys the format reserves");
 
 {
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-  const vars = /\[vars\]([\s\S]*?)(?:\n\[|$)/.exec(toml);
-  ok(vars && /^FLOWS_CARDX_PACK = "on"$/m.test(vars[1]), "wrangler.toml turns packing on in the variables the Worker deploys with: a named environment does not inherit them, so the pipeline's count of the soft limit on the stored form would otherwise be wrong");
-  eq((toml.match(/^\[env\./gm) || []).length, 0, "and there is no named environment that would need the same line");
+  ok(!/CARDX/.test(toml), "wrangler.toml carries no card-x switch: the Worker decodes a packed card-x body whenever it is sent one, and the switch that sends them is the pipeline's");
   const staging = readFileSync(new URL("../wrangler.staging.toml", import.meta.url), "utf8");
-  ok(!/FLOWS_CARDX_PACK/.test(staging), "staging has its own configuration and stores whole");
-}
-
-{
-  const extracted = [...DOSSIER_SQL.cardX.matchAll(/json_extract\(payload, '\$\.([A-Za-z]+)'\)/g)].map((x) => x[1]).filter((k) => !["sessionDate", "generatedAt"].includes(k)).sort();
-  same(extracted, [...P.PACK_SKIP[1]].sort(), "and they are exactly the sections the dossier's card-x statement extracts, so a section added to that statement fails here until it is added to the skip list");
+  ok(!/CARDX/.test(staging), "and neither does staging");
 }
 
 {
   const run = properties(P, 600);
-  same(run.bad, [], "600 seeded random documents round-trip exactly, pack and unpack are idempotent, and nothing in a skipped section moves");
+  same(run.bad, [], "600 seeded random documents round-trip exactly, pack and unpack are idempotent");
   ok(run.packedDocs > 250 && run.lists > 400 && run.skipped > 20, `and the corpus reaches both arms (${run.packedDocs} packed with ${run.lists} lists, ${run.skipped} left alone)`);
 }
 
@@ -231,72 +217,161 @@ const emit = nightlyEmit();
 const names = readdirSync(emit).filter((f) => /^-card-x-[A-Z0-9.\-]+\.json$/.test(f));
 const cards = names.map((f) => ({ file: f, text: readFileSync(join(emit, f), "utf8") }));
 ok(cards.length >= 150, `the dry-run emit holds ${cards.length} card-x payloads`);
-
-let rawMax = 0, storedMax = 0, storedMaxName = "", softShed = 0, listsSeen = 0;
+let rawMax = 0, rawMaxName = "", softShed = 0, listsSeen = 0;
 for (const c of cards) {
   const doc = JSON.parse(c.text);
   const text = json(doc);
   const packed = P.packCardX(doc);
   eq(json(P.unpackCardX(packed)), text, "round trip, " + c.file);
   eq(P.unpackText(P.packText(text)), text, "text round trip, " + c.file);
-  const raw = utf8(text), stored = P.storedBytes(doc);
-  rawMax = Math.max(rawMax, raw);
-  if (stored > storedMax) { storedMax = stored; storedMaxName = doc.ticker; }
+  const raw = utf8(text);
+  if (raw > rawMax) { rawMax = raw; rawMaxName = doc.ticker; }
   if ((doc.shed || []).includes("extras.soft")) softShed++;
   if (packed !== doc) {
     listsSeen += (json(packed).match(/"dd":/g) || []).length;
     ok(utf8(json(packed)) < raw, "a packed card is smaller, " + c.file);
     ok(P.isPackedText(json(packed)), "and carries the marker first, " + c.file);
   }
-  for (const k of P.PACK_SKIP[1]) if (Object.hasOwn(doc, k)) ok(packed[k] === doc[k], `the ${k} section of ${c.file} is the very object it was`);
   const left = [];
   const scan = (v, path) => {
-    if (Array.isArray(v)) v.forEach((x, i) => scan(x, path));
+    if (Array.isArray(v)) v.forEach((x) => scan(x, path));
     else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) {
       if (k === "d" && Array.isArray(x) && x.length >= 3 && x.every((e) => typeof e === "string" && /^\d{4}-\d{2}-\d{2}$/.test(e))) left.push(path + ".d");
       scan(x, path + "." + k);
     }
   };
-  for (const [k, v] of Object.entries(packed)) if (!P.PACK_SKIP[1].includes(k)) scan(v, k);
-  same(left, [], "no day list is left in full outside the skipped sections, " + c.file);
+  for (const [k, v] of Object.entries(packed)) scan(v, k);
+  same(left, [], "no day list is left in full, " + c.file);
 }
 ok(listsSeen > 500, `the emit carries ${listsSeen} day lists`);
-ok(storedMax <= HEADROOM_BYTES, `THE LARGEST CARD-X IS ${storedMax} BYTES STORED (${storedMaxName}), AT MOST 95% OF THE SOFT LIMIT: ${HEADROOM_BYTES} of ${CARD_X_SOFT_BYTES}`);
-ok(storedMax <= STORED_CEILING, `and it is held at ${STORED_CEILING}, a ratchet that falls and is not raised without a named decision (${STORED_CEILING - storedMax} bytes of room)`);
-eq(softShed, 0, "no card-x sheds its extras to the soft limit now: every part of every card stays whole");
-ok(rawMax > CARD_X_SOFT_BYTES, `and the served text is larger than the soft limit for the largest (${rawMax} bytes), which is why the limit is counted on the stored form`);
-ok(rawMax <= SERVED_CEILING, `the served text has its own ratchet at ${SERVED_CEILING} bytes, so growth that packing hides is seen: the largest is ${rawMax}`);
-ok(rawMax <= Math.floor(0.9 * CARD_X_BUDGET_BYTES), `and stays under 90% of the 100 KiB ingest cap (${Math.floor(0.9 * CARD_X_BUDGET_BYTES)})`);
-console.log(`  card-x: ${cards.length} cards, largest served ${rawMax} bytes, largest stored ${storedMax} bytes (${storedMaxName}), ${(100 * storedMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit`);
+ok(rawMax < CARD_X_SOFT_BYTES, `THE DEFAULT PIPELINE IS WHAT IT WAS: every card-x it builds is under the ${CARD_X_SOFT_BYTES}-byte soft limit as posted, the largest ${rawMax} (${rawMaxName}), which is what the pipeline contract and the payload-shape suite hold it to`);
+ok(softShed > 0, `and the cards that would be over it shed their extras to stay under (${softShed} of ${cards.length})`);
+eq(cardXWire(), false, "the pipeline posts card-x whole unless FLOWS_CARDX_WIRE is exactly pack");
+
+const wireDir = mkdtempSync(join(tmpdir(), "flows-wire-"));
+{
+  const run = spawnSync(process.execPath, [join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", wireDir + "/"], {
+    cwd: ROOT, env: { ...process.env, FLOWS_DRY_NOW: DRY_NOW, FLOWS_CARDX_WIRE: "pack" }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
+  });
+  eq(run.status, 0, "the dry-run pipeline runs with FLOWS_CARDX_WIRE=pack: " + String(run.stderr).slice(0, 200));
+}
+const wireCards = readdirSync(wireDir).filter((f) => /^-card-x-[A-Z0-9.\-]+\.json$/.test(f)).map((f) => ({ file: f, text: readFileSync(join(wireDir, f), "utf8") }));
+let wireRawMax = 0, wireMax = 0, wireMaxName = "", wireShed = 0;
+for (const c of wireCards) {
+  const doc = JSON.parse(c.text);
+  const raw = utf8(c.text), wire = P.wireBytes(doc);
+  wireRawMax = Math.max(wireRawMax, raw);
+  if (wire > wireMax) { wireMax = wire; wireMaxName = doc.ticker; }
+  if ((doc.shed || []).includes("extras.soft")) wireShed++;
+  ok(wire <= CARD_X_SOFT_BYTES, `with the wire switch on, ${c.file} is ${wire} bytes on the wire, inside the soft limit`);
+}
+eq(wireCards.length, cards.length, "the same cards are built with the switch on");
+ok(wireMax <= HEADROOM_BYTES, `WITH THE SWITCH ON THE LARGEST CARD-X IS ${wireMax} BYTES ON THE WIRE (${wireMaxName}), AT MOST 95% OF THE SOFT LIMIT: ${HEADROOM_BYTES} of ${CARD_X_SOFT_BYTES}`);
+ok(wireMax <= WIRE_CEILING, `held at ${WIRE_CEILING}, a ratchet that falls and is not raised without a named decision`);
+eq(wireShed, 0, "and no card sheds its extras to the soft limit: every part of every card stays whole");
+ok(wireRawMax > CARD_X_SOFT_BYTES, `while the document the Worker serves is larger than the soft limit for the largest (${wireRawMax} bytes), which is why this is a decision and not a default`);
+ok(wireRawMax <= SERVED_CEILING, `it has its own ratchet at ${SERVED_CEILING} bytes so growth the packing hides is seen`);
+ok(wireRawMax <= CARD_X_SERVED_BYTES, `and stays inside the served ceiling of ${CARD_X_SERVED_BYTES} bytes, 90% of the ${CARD_X_BUDGET_BYTES}-byte budget, which the pipeline enforces on every card-x`);
+console.log(`  card-x: ${cards.length} cards; as posted today the largest is ${rawMax} bytes (${rawMaxName}) and ${softShed} shed their extras; with FLOWS_CARDX_WIRE=pack the largest is ${wireMax} bytes on the wire (${wireMaxName}), ${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit, and ${wireRawMax} bytes served`);
+rmSync(wireDir, { recursive: true, force: true });
 
 {
   const stamp = { generatedAt: "2026-10-20T21:00:00Z", sessionDate: "2026-10-20", readAt: "2026-10-20T21:00:00Z" };
   const xp = (n) => ({ at: Date.parse("2026-10-20T20:00:00Z"), rv: 1, x: { ok: true, pad: "x".repeat(n) } });
-  const parts = (series) => ({
+  const parts = (series, padBytes = CARD_X_SOFT_BYTES - 30000) => ({
     dx: { v: 1, status: "ok", parts: { info: xp(300), financials: xp(3000), analysts: xp(500) } },
     vx: { v: 1, status: "ok", parts: { dividends: xp(900), etf: xp(300) } },
     vrp: { series: { d: series, iv: series.map((_, i) => i % 7) } },
-    pad: { rows: "y".repeat(CARD_X_SOFT_BYTES - 30000) },
+    pad: { rows: "y".repeat(padBytes) },
   });
   const dates = trail("2018-01-02", Array.from({ length: 2199 }, (_, i) => (i % 5 === 4 ? 3 : 1)));
-  const rich = cardXPayload("SYX101", parts(dates), stamp);
-  ok(utf8(json(rich)) > CARD_X_SOFT_BYTES, `a card-x whose served text is ${utf8(json(rich))} bytes, over the soft limit`);
-  ok(P.storedBytes(rich) <= CARD_X_SOFT_BYTES, `is ${P.storedBytes(rich)} bytes stored, under it`);
-  ok(!rich.shed.includes("extras.soft") && rich.dx.parts.financials.x && rich.vx.parts.dividends.x, "and keeps every part whole, since the limit is on the stored form");
-  const tooMuch = cardXPayload("SYX101", { ...parts(dates), pad: { rows: "y".repeat(CARD_X_SOFT_BYTES) } }, stamp);
+  const withWire = (on, run) => {
+    const before = process.env.FLOWS_CARDX_WIRE;
+    if (on) process.env.FLOWS_CARDX_WIRE = "pack"; else delete process.env.FLOWS_CARDX_WIRE;
+    try { return run(); } finally { if (before === undefined) delete process.env.FLOWS_CARDX_WIRE; else process.env.FLOWS_CARDX_WIRE = before; }
+  };
+  const asPosted = withWire(false, () => cardXPayload("SYX101", parts(dates), stamp));
+  ok(asPosted.shed.includes("extras.soft"), "a card-x whose document is over the soft limit sheds its extras when it is posted whole");
+  const onWire = withWire(true, () => cardXPayload("SYX101", parts(dates), stamp));
+  ok(utf8(json(onWire)) > CARD_X_SOFT_BYTES, `the same card is ${utf8(json(onWire))} bytes as a document, over the soft limit`);
+  ok(P.wireBytes(onWire) <= CARD_X_SOFT_BYTES, `and ${P.wireBytes(onWire)} bytes on the wire, under it`);
+  ok(!onWire.shed.includes("extras.soft") && onWire.dx.parts.financials.x && onWire.vx.parts.dividends.x, "so with the switch on it keeps every part whole");
+  const tooMuch = withWire(true, () => cardXPayload("SYX101", { ...parts(dates), pad: { rows: "y".repeat(CARD_X_SOFT_BYTES) } }, stamp));
   ok(tooMuch.shed.includes("extras.soft") && tooMuch.dx.parts.financials.shed === 1, "while a card that is over the limit even packed sheds its extras as before");
-  const base = cardXPayload("SYX101", { vrp: { series: { d: dates, iv: dates.map(() => 0) } } }, stamp);
-  const merged = composeCardXPayload(base, cardXPayload("SYX101", { dx: parts(dates).dx, vx: parts(dates).vx, pad: { rows: "y".repeat(CARD_X_SOFT_BYTES - 33000) } }, stamp));
-  ok(!merged.shed.includes("extras.soft") && P.storedBytes(merged) <= CARD_X_SOFT_BYTES, "a merge onto a prior is counted on the stored form too");
-  const rawSized = await loadMutated("scripts/flows-legs/card-x.mjs", [
-    ["let bytes = storedBytes(payload);", "let bytes = Buffer.byteLength(JSON.stringify(payload));"],
-    ["    bytes = storedBytes(payload);\n  }", "    bytes = Buffer.byteLength(JSON.stringify(payload));\n  }"],
-  ], { salt: 900 });
-  ok(rawSized.cardXPayload("SYX101", parts(dates), stamp).shed.includes("extras.soft"), "PLANTED WRONG BUILD, the soft limit counted on the served text: it sheds parts the stored form has room for");
-  planted++;
-  const noPack = await loadMutated("shared/flows-card-pack.js", [["return utf8Length(JSON.stringify(packCardX({ ...payload, bytes: SOFT_BYTES_PLACEHOLDER })));", "return utf8Length(JSON.stringify({ ...payload, bytes: SOFT_BYTES_PLACEHOLDER }));"]], { salt: 901 });
-  ok(noPack.storedBytes(rich) > CARD_X_SOFT_BYTES, "PLANTED WRONG BUILD, a stored size that does not pack: it reads the served size");
-  planted++;
+  const base = withWire(true, () => cardXPayload("SYX101", { vrp: { series: { d: dates, iv: dates.map(() => 0) } } }, stamp));
+  const merged = withWire(true, () => composeCardXPayload(base, cardXPayload("SYX101", { dx: parts(dates).dx, vx: parts(dates).vx, pad: { rows: "y".repeat(CARD_X_SOFT_BYTES - 33000) } }, stamp)));
+  ok(!merged.shed.includes("extras.soft") && P.wireBytes(merged) <= CARD_X_SOFT_BYTES, "a merge onto a prior is counted on the wire too");
+
+  const longDates = trail("2000-01-03", Array.from({ length: 4999 }, () => 1));
+  const whole = { v: 1, ticker: "SYX101", ...stamp, fresh: { readAt: stamp.readAt, session: stamp.sessionDate }, ...parts(longDates, 0), shed: [] };
+  const servedFloor = P.servedBytes(whole);
+  ok(servedFloor < CARD_X_SERVED_BYTES - 5000 && P.wireBytes(whole) < CARD_X_SOFT_BYTES / 2, `a card of ${longDates.length} days is ${servedFloor} bytes served and ${P.wireBytes(whole)} on the wire before the padding that takes it over the ceiling`);
+  const heavy = withWire(true, () => cardXPayload("SYX101", parts(longDates, CARD_X_SERVED_BYTES + 1500 - servedFloor), stamp));
+  ok(P.wireBytes(heavy) < CARD_X_SOFT_BYTES, "its wire form is inside the soft limit on its own");
+  ok(heavy.dx.parts.financials.shed === 1 && heavy.dx.parts.info.x && heavy.vx.parts.dividends.x, "so the parts that go are the first in the shed order and no more than the ceiling needs");
+  ok(P.servedBytes(heavy) <= CARD_X_SERVED_BYTES, `a card with ${longDates.length} days whose wire form fits and whose served form would be over the ${CARD_X_SERVED_BYTES}-byte ceiling sheds until the served form fits (${P.servedBytes(heavy)})`);
+  ok(heavy.shed.includes("extras.soft") && P.wireBytes(heavy) <= CARD_X_SOFT_BYTES, "and is still inside the soft limit on the wire");
+  eq(withWire(true, () => cardXBytes(heavy)), P.wireBytes(heavy), "cardXBytes is the wire size while the switch is on");
+  eq(withWire(false, () => cardXBytes(heavy)), P.servedBytes(heavy), "and the served size while it is off");
+
+  const WIRE_ON = ["export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));", "export const cardXBytes = (payload) => servedBytes(payload);"];
+  const builds = [
+    ["the soft limit counted on the document with the switch on", [WIRE_ON]],
+    ["the soft limit counted on the wire with the switch off", [["export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));", "export const cardXBytes = (payload) => wireBytes(payload);"]]],
+    ["the served ceiling dropped", [["const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES || servedBytes(payload) > CARD_X_SERVED_BYTES;", "const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES;"]]],
+    ["the served ceiling at the whole budget", [["export const CARD_X_SERVED_BYTES = Math.floor(0.9 * CARD_X_BUDGET_BYTES);", "export const CARD_X_SERVED_BYTES = CARD_X_BUDGET_BYTES * 2;"]]],
+    ["any value of the switch packs", [["export const cardXWire = () => process.env.FLOWS_CARDX_WIRE === \"pack\";", "export const cardXWire = () => Boolean(process.env.FLOWS_CARDX_WIRE);"]]],
+    ["the soft limit not enforced", [["while (overSoft(payload) && shedNextPart(payload)) {", "while (false && shedNextPart(payload)) {"]]],
+  ];
+  const probeBuild = (m) => withWire(true, () => {
+    const a = m.cardXPayload("SYX101", parts(dates), stamp);
+    const h = m.cardXPayload("SYX101", parts(longDates, CARD_X_SERVED_BYTES + 1500 - servedFloor), stamp);
+    const off = withWire(false, () => m.cardXPayload("SYX101", parts(dates), stamp));
+    const flag = process.env.FLOWS_CARDX_WIRE;
+    process.env.FLOWS_CARDX_WIRE = "yes";
+    const odd = m.cardXWire();
+    process.env.FLOWS_CARDX_WIRE = flag;
+    return a.shed.includes("extras.soft") || !off.shed.includes("extras.soft") || P.servedBytes(h) > CARD_X_SERVED_BYTES || odd !== false || !(m.CARD_X_SERVED_BYTES <= 92160);
+  });
+  let cardSalt = 900;
+  for (const [name, transforms] of builds) {
+    const bad = await loadMutated("scripts/flows-legs/card-x.mjs", transforms, { salt: cardSalt++ });
+    ok(probeBuild(bad), `PLANTED WRONG BUILD, ${name}: the fit fails it`);
+    planted++;
+  }
+  ok(!probeBuild(await loadMutated("scripts/flows-legs/card-x.mjs", [], { salt: cardSalt++ })), "and the real build passes the same probe");
+}
+
+{
+  const sendSource = readFileSync(join(ROOT, "scripts/flows-nightly/store.mjs"), "utf8");
+  const send = /async function send\(key, payload\) \{[\s\S]*?\n\}\n/.exec(sendSource);
+  ok(send, "the pipeline's send function is found");
+  const scan = (text) => {
+    const dry = /if \(EMIT \|\| DRY_RUN\) \{[\s\S]*?return;\n  \}/.exec(text);
+    const post = /const wire = wireText\(key, body, process\.env\.FLOWS_CARDX_WIRE === "pack"\);[\s\S]*?body: wire,/.exec(text);
+    return Boolean(dry) && !/wireText/.test(dry[0]) && Boolean(post) && /const leak = publishRefusal\(key, body\);/.test(text) && text.indexOf("const leak = publishRefusal(key, body);") < text.indexOf("wireText(");
+  };
+  ok(scan(send[0]), "the body is packed after the fixture check and only on the way to the network: the dry run's emit stays whole for every reader of it");
+  for (const [name, from, to] of [
+    ["the dry run packs", "if (EMIT || DRY_RUN) {\n", "if (EMIT || DRY_RUN) {\n    wireText(key, body, true);\n"],
+    ["the packed body never sent", "      body: wire,", "      body,"],
+    ["the fixture check on the packed body", "const leak = publishRefusal(key, body);", "const leak = publishRefusal(key, wireText(key, body, true));"],
+    ["the switch read as anything", "process.env.FLOWS_CARDX_WIRE === \"pack\"", "process.env.FLOWS_CARDX_WIRE"],
+  ]) {
+    ok(send[0].split(from).length === 2, "the planted build changes send exactly once: " + name);
+    ok(!scan(send[0].replace(from, to)), `PLANTED WRONG BUILD, ${name}: the scan fails it`);
+    planted++;
+  }
+  const text = json({ v: 1, a: { d: trail("2026-01-01", [1, 1, 3]) } });
+  eq(P.wireText("card-x:SYX101", text, false), text, "wireText posts the body whole with the switch off");
+  ok(P.isPackedText(P.wireText("card-x:SYX101", text, true)), "packs a card-x body with it on");
+  eq(P.wireText("card:SYX101", text, true), text, "and no other key");
+  eq(P.wireText("card-x:SYX101", text, "pack"), text, "and only for the boolean the caller computed");
+  eq(P.wireText(null, text, true), text, "and a missing key packs nothing");
+  eq(P.wireText("card-x:SYX101", 5, true), 5, "and a body that is not text is left as it is");
+  same([P.decodeWire("card-x:SYX101", text), P.decodeWire("card-x:SYX101", P.packText(text)), P.decodeWire("card:SYX101", P.packText(text)), P.decodeWire("card-x:SYX101", '{"pk":1,"a":{"d0":"2026-01-01","dd":[1,-3]}}'), P.decodeWire("card-x:SYX101", '{"pk":2,"a":1}'), P.decodeWire("card-x:SYX101", 5)],
+    [{ text }, { text }, { text: P.packText(text) }, { error: "A packed card-x does not decode" }, { error: "A packed card-x does not decode" }, { text: 5 }],
+    "decodeWire opens a packed card-x body, leaves a whole one and every other key alone, and names one it cannot decode");
 }
 
 const LEAF = [
@@ -304,19 +379,16 @@ const LEAF = [
   ["a day one too late", "const dayText = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);", "const dayText = (n) => new Date((n + 1) * DAY_MS).toISOString().slice(0, 10);"],
   ["an unsorted list packed", "if (at === null || at < prev) return null;", "if (at === null) return null;"],
   ["an impossible day packed", " && new Date(ms).toISOString().slice(0, 10) === text ? ms / DAY_MS : null;", " ? ms / DAY_MS : null;"],
-  ["a skipped section packed", "out[k] = skip.includes(k) ? payload[k] : lower(payload[k], tally)", "out[k] = lower(payload[k], tally)"],
-  ["a skipped section lifted", "out[k] = skip.includes(k) ? x : lift(x);", "out[k] = lift(x);"],
-  ["the reserved keys not looked for", "if (!skip.includes(k) && hasReserved(payload[k])) return payload;", ""],
+  ["the reserved keys not looked for", "    if (hasReserved(payload[k])) return payload;\n", ""],
   ["the top-level reserved keys not looked for", 'if (k === "d0" || k === "dd" || k === "__proto__") return payload;', ""],
   ["a document already packed packed again", "if (!isObject(payload) || Object.hasOwn(payload, PACK_KEY)) return payload;", "if (!isObject(payload)) return payload;"],
-  ["the marker last", "const out = { [PACK_KEY]: PACK_VERSION };\n  const tally = { lists: 0 };\n  for (const k of keys) out[k] = skip.includes(k) ? payload[k] : lower(payload[k], tally);", "const out = {};\n  const tally = { lists: 0 };\n  for (const k of keys) out[k] = skip.includes(k) ? payload[k] : lower(payload[k], tally);\n  out[PACK_KEY] = PACK_VERSION;"],
+  ["the marker last", "const out = { [PACK_KEY]: PACK_VERSION };\n  const tally = { lists: 0 };\n  for (const k of keys) out[k] = lower(payload[k], tally);", "const out = {};\n  const tally = { lists: 0 };\n  for (const k of keys) out[k] = lower(payload[k], tally);\n  out[PACK_KEY] = PACK_VERSION;"],
   ["the list put back at the end of the object", [["  const out = {};\n  for (const [k, x] of Object.entries(v)) {\n    if (k === \"dd\" && Object.hasOwn(v, \"d0\")) continue;", "  const out = {};\n  let tailDays = null;\n  for (const [k, x] of Object.entries(v)) {\n    if (k === \"dd\" && Object.hasOwn(v, \"d0\")) continue;"], ["      out.d = days;\n    } else out[k] = lift(x);\n  }\n  return out;", "      tailDays = days;\n    } else out[k] = lift(x);\n  }\n  if (tailDays) out.d = tailDays;\n  return out;"]]],
   ["a list with no change packed", "return tally.lists > 0 ? out : payload;", "return out;"],
   ["a negative gap decoded", "if (!Number.isInteger(g) || g < 0) return null;", "if (!Number.isInteger(g)) return null;"],
-  ["a corrupt packed row served as it is", [["    return isPacked(value) ? JSON.stringify(unpackCardX(value)) : null;\n  } catch {\n    return null;\n  }", "    return isPacked(value) ? JSON.stringify(unpackCardX(value)) : null;\n  } catch {\n    return text;\n  }"]]],
-  ["a version this build does not know served as it is", [["JSON.stringify(unpackCardX(value)) : null;", "JSON.stringify(unpackCardX(value)) : text;"]]],
+  ["a corrupt packed body decoded as it is", [["    return isPacked(value) ? JSON.stringify(unpackCardX(value)) : null;\n  } catch {\n    return null;\n  }", "    return isPacked(value) ? JSON.stringify(unpackCardX(value)) : null;\n  } catch {\n    return text;\n  }"]]],
+  ["a version this build does not know decoded as it is", [["JSON.stringify(unpackCardX(value)) : null;", "JSON.stringify(unpackCardX(value)) : text;"]]],
   ["the round trip checked against the value and not the text", [["JSON.stringify(unpackCardX(JSON.parse(out))) === text ? out : text;", "JSON.stringify(unpackCardX(JSON.parse(out))) === JSON.stringify(value) ? out : text;"]]],
-  ["the marker looked for in nested keys", [["export const carriesMarker = (value) => isObject(value) && Object.hasOwn(value, PACK_KEY);", "export const carriesMarker = (value) => isObject(value) && hasReserved(value);"]]],
   ["a day count in bytes", "export const utf8Length = (text) => new TextEncoder().encode(text).length;", "export const utf8Length = (text) => text.length;"],
   ["one day list too few", "export const PACK_MIN_DAYS = 3;", "export const PACK_MIN_DAYS = 4;"],
 ];
@@ -340,32 +412,26 @@ for (const [name, first, second] of LEAF) {
   const blind = await loadMutated("shared/flows-card-pack.js", [GAP, VERIFY], { salt: 951 });
   const doc = { v: 1, a: { d: trail("2026-01-01", [1, 1, 3]) } };
   const text = json(doc);
-  eq(gappy.packText(text), text, "A PACKER WITH A BUG STILL WRITES THE DOCUMENT WHOLE: the write checks its own round trip and falls back to the text it was given");
-  ok(blind.unpackText(blind.packText(text)) !== text, "PLANTED WRONG BUILD, a write that does not check its round trip: with the same bug it stores a document that reads back wrong");
+  eq(gappy.packText(text), text, "A PACKER WITH A BUG STILL POSTS THE DOCUMENT WHOLE: the pipeline checks its own round trip and falls back to the text it was given");
+  ok(blind.unpackText(blind.packText(text)) !== text, "PLANTED WRONG BUILD, a pack that does not check its round trip: with the same bug it posts a document that decodes wrong");
   planted++;
-}
-
-{
-  const store = readFileSync(new URL("../server/store.js", import.meta.url), "utf8");
-  const writes = store.match(/\.bind\([^)]*\b(?:payload|it\.payload)\b[^)]*\)/g) || [];
-  ok(writes.length >= 4, `the store binds a payload in ${writes.length} statements`);
-  const unpacked = writes.filter((w) => !/toStored\(env, (?:it\.)?key, (?:it\.)?payload\)/.test(w) && !/bind\(text, at\)/.test(w) && !/bind\(key, payload, at\)/.test(w));
-  same(unpacked, [], "every statement that writes a key's payload goes through toStored: " + unpacked.join(" ; "));
-  same((store.match(/bind\(key, payload, at\)/g) || []).length, 1, "and the only exception is the write-once archive insert, whose keys are dated board and score rows");
-  ok(/const payload = typeof key === "string" && CARD_X_KEY_RE\.test\(key\) \? unpackText\(row\.payload\) : row\.payload;/.test(store), "every nightly read goes through storedFrom, which unpacks a card-x key and no other");
-  ok(/return payload === null \? null : \{ payload, updatedAt/.test(store), "and a card-x row that does not decode is absent, not served packed");
-  const planRead = /async planRead\(env\) \{[\s\S]*?\n    \},/.exec(store);
-  ok(planRead && /payload: row\.payload,/.test(planRead[0]), "the other place a stored payload is returned is the plan row, which is never a card-x");
-  eq((store.match(/storedFrom\(/g) || []).length, 2, "storedFrom is called by read, with its key, and by readMany, which selects the id");
-  ok(/CARD_X_KEY_RE = \/\^card-x:\//.test(store) && /env\.FLOWS_CARDX_PACK === "on"/.test(store), "only a card-x key is packed, and only while the switch reads on");
+  for (const [name, from, to] of [
+    ["decodeWire opening any key", "if (typeof key !== \"string\" || !key.startsWith(\"card-x:\") || typeof text !== \"string\" || !text.startsWith(PACK_ANY_PREFIX)) return { text };", "if (typeof text !== \"string\" || !text.startsWith(PACK_ANY_PREFIX)) return { text };"],
+    ["decodeWire passing a corrupt body through", "return plain === null ? { error: \"A packed card-x does not decode\" } : { text: plain };", "return { text: plain === null ? text : plain };"],
+    ["wireText packing any key", "on === true && typeof key === \"string\" && key.startsWith(\"card-x:\") ? packText(text) : text", "on === true ? packText(text) : text"],
+    ["wireText packing with the switch off", "on === true && typeof key === \"string\"", "typeof key === \"string\""],
+  ]) {
+    const bad = await loadMutated("shared/flows-card-pack.js", [[from, to]], { salt: salt++ });
+    const caught = bad.decodeWire("card:SYX101", P.packText(text)).text === P.packText(text) ? (bad.wireText("card:SYX101", text, true) !== text || bad.wireText("card-x:SYX101", text, false) !== text || bad.decodeWire("card-x:SYX101", '{"pk":2,"a":1}').error === undefined) : true;
+    ok(caught, `PLANTED WRONG BUILD, ${name}: the table fails it`);
+    planted++;
+  }
 }
 
 const { FLOWS_COOKIE, sessionEpoch, signFlowsSession } = await import("../shared/flows-auth.js");
 const { FIXTURE_ROSTER } = await import("./lib/fixture-roster.mjs");
 const H = await import("./dossier-harness.mjs");
 const DF = await import("./dossier-fixtures.mjs");
-const W = await import("../shared/flows-live-worker.js");
-const { createFlowsStore } = await import("../server/store.js");
 
 const NIGHTLY = "nightly-token-abcdefghijklmnopqrstuvwxyz";
 let instance = 0;
@@ -382,156 +448,88 @@ async function rig(env, base) {
 const rowOf = (d, id) => d.db.prepare("SELECT payload FROM flows_payload WHERE id = ?").get(id);
 
 {
-  const biggest = cards.map((c) => JSON.parse(c.text)).find((d) => d.ticker === storedMaxName);
+  const biggest = wireCards.map((c) => JSON.parse(c.text)).find((d) => d.ticker === wireMaxName);
   const text = json(biggest);
-  const key = "card-x:" + storedMaxName;
+  const packed = P.wireText("card-x:" + wireMaxName, text, true);
+  ok(P.isPackedText(packed) && utf8(packed) < utf8(text) - 5000, `the largest card-x with the switch on, ${utf8(text)} bytes, posts as ${utf8(packed)}`);
+  const key = "card-x:" + wireMaxName;
   const post = (call, k, body) => call("/api/flows/ingest?key=" + encodeURIComponent(k), { method: "POST", headers: { Authorization: "Bearer " + NIGHTLY, "Content-Type": "application/json" }, body });
   const get = (call, k) => call("/api/flows/ingest?key=" + encodeURIComponent(k), { headers: { Authorization: "Bearer " + NIGHTLY } });
   const restoreCache = H.cacheFake();
 
-  const d = H.fakeD1();
-  const on = await rig({ DB: d.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "on" }, "https://anilkaya.test");
-  const w1 = await post(on, key, text);
-  eq(w1.res.status, 200, "the ingest door takes the largest card-x of the emit with the switch on: " + w1.text.slice(0, 120));
-  const stored = rowOf(d, key).payload;
-  ok(P.isPackedText(stored), "the row is stored packed");
-  ok(stored.length < text.length - 5000, `and is ${text.length - stored.length} characters shorter than the body that was posted`);
-  eq(stored, json(P.packCardX(biggest)), "the stored text is the packed form of the document and nothing else");
-  eq(utf8(stored), P.storedBytes(biggest), "and is exactly the size the pipeline counted it at when it fitted the card to the soft limit");
-  const served = await on("/api/flows/card-x?t=" + storedMaxName);
-  eq(served.res.status, 200, "the card-x route answers");
-  eq(served.text, text, "AND SERVES THE DOCUMENT AS POSTED, byte for byte: no reader sees the packed form");
-  eq((await get(on, key)).text, text, "the pipeline's own read of the key through the ingest door gets the document too");
-  const meta = await post(on, "card:" + storedMaxName, json({ v: 2, ticker: storedMaxName, sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true, x: { d: trail("2026-08-17", [1, 1, 1, 1, 3]) } }));
-  eq(meta.res.status, 200, "a card key is taken: " + meta.text.slice(0, 100));
-  ok(!P.isPackedText(rowOf(d, "card:" + storedMaxName).payload) && rowOf(d, "card:" + storedMaxName).payload.includes('"d":["2026-08-17"'), "and stored whole: only card-x rows are packed");
-  const hist = await post(on, "hist:" + storedMaxName, json({ v: 1, ticker: storedMaxName, sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true, d: trail("2026-08-17", [1, 1, 1, 1, 3]) }));
-  eq(hist.res.status, 200, "a hist key is taken: " + hist.text.slice(0, 100));
-  ok(!P.isPackedText(rowOf(d, "hist:" + storedMaxName).payload), "and stored whole");
-
-  for (const [label, env] of [["off", { FLOWS_CARDX_PACK: "off" }], ["unset", {}], ["a misspelt on", { FLOWS_CARDX_PACK: "On" }], ["warn", { FLOWS_CARDX_PACK: "warn" }]]) {
-    const dd = H.fakeD1();
-    const call = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, ...env }, "https://anilkaya.test");
-    eq((await post(call, key, text)).res.status, 200, `with the switch ${label} the door takes the card`);
-    eq(rowOf(dd, key).payload, text, "and stores it whole: only the word on packs");
-    eq((await call("/api/flows/card-x?t=" + storedMaxName)).text, text, "and serves it");
+  for (const mode of ["off", "warn", undefined]) {
+    const env = mode === undefined ? {} : { FLOWS_DOOR_V2: mode };
+    const dWhole = H.fakeD1(), dPacked = H.fakeD1();
+    const whole = await rig({ DB: dWhole.D1, FLOWS_INGEST_TOKEN: NIGHTLY, ...env }, "https://anilkaya.test");
+    const wired = await rig({ DB: dPacked.D1, FLOWS_INGEST_TOKEN: NIGHTLY, ...env }, "https://anilkaya.test");
+    const w1 = await post(whole, key, text);
+    const w2 = await post(wired, key, packed);
+    same([w1.res.status, w2.res.status], [200, 200], `the ingest door takes the largest card-x whole and packed (door ${mode === undefined ? "unset" : mode}): ${w2.text.slice(0, 100)}`);
+    eq(rowOf(dPacked, key).payload, text, "THE ROW IS THE DOCUMENT: the Worker stores what the pipeline built, never the packed form");
+    eq(rowOf(dPacked, key).payload, rowOf(dWhole, key).payload, "the same row as a whole post leaves");
+    eq((await wired("/api/flows/card-x?t=" + wireMaxName)).text, text, "and every reader gets the document with no change of its own");
+    eq((await get(wired, key)).text, text, "the pipeline's own read of the key gets it too");
+    const a = JSON.parse(w1.text), b = JSON.parse(w2.text);
+    eq(b.bytes, a.bytes, "the bytes the door reports are the document's");
+    if (a.door) eq(b.door.chash, a.door.chash, "and the content hash is the document's, so a repeat of the same card is unchanged whichever way it is posted");
   }
 
   {
     const dd = H.fakeD1();
-    const whole = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "off" }, "https://anilkaya.test");
-    await post(whole, key, text);
-    const flipped = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "on" }, "https://anilkaya.test");
-    eq((await flipped("/api/flows/card-x?t=" + storedMaxName)).text, text, "a row written before the switch went on is served as it is");
-    await post(flipped, key, text);
-    ok(P.isPackedText(rowOf(dd, key).payload), "and is packed the next time it is written");
-    const back = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "off" }, "https://anilkaya.test");
-    eq((await back("/api/flows/card-x?t=" + storedMaxName)).text, text, "and a packed row is still served whole after the switch is put back to off: the reader never needs the switch");
-    await post(back, key, text);
-    eq(rowOf(dd, key).payload, text, "which stores the next write whole, the way back");
-  }
-
-  {
-    const dd = H.fakeD1();
-    const store = createFlowsStore({ ensureFlowsTables: async () => {} });
-    const env = { DB: dd.D1, FLOWS_CARDX_PACK: "on" };
-    const m = { chash: "a".repeat(64), session: "2026-08-24", quality: 255, epoch: 1, asof: 1 };
-    await store.write(env, key, text, 5);
-    ok(P.isPackedText(rowOf(dd, key).payload), "the plain write packs");
-    await store.doorWrite(env, "card-x:ZZZ", text, 6, m);
-    ok(P.isPackedText(rowOf(dd, "card-x:ZZZ").payload), "the door's write packs");
-    await store.doorBatch(env, [{ key: "card-x:YYY", payload: text, m }, { key: "board:long", payload: json({ d: trail("2026-08-17", [1, 1, 1]) }), m }], 7);
-    ok(P.isPackedText(rowOf(dd, "card-x:YYY").payload), "the door's batch packs");
-    ok(!P.isPackedText(rowOf(dd, "board:long").payload), "and leaves another key in the same batch alone");
-    eq((await store.read(env, "card-x:YYY")).payload, text, "the store reads it back whole");
-    eq((await store.readMany(env, ["card-x:YYY", key])).get(key).payload, text, "and so does the many-key read");
-    ok(rowOf(dd, "card-x:YYY").payload.length < text.length, "from a smaller row");
-  }
-
-  {
-    const dd = H.fakeD1();
-    const store = createFlowsStore({ ensureFlowsTables: async () => {} });
-    const env = { DB: dd.D1 };
-    const other = '{"pk":1,"d0":"2025-01-02","dd":[1,1],"x":1}';
-    dd.put("board:long", other);
-    eq((await store.read(env, "board:long")).payload, other, "a row of another key that happens to start with a pk field comes back byte for byte, unpacked by nothing");
-    eq((await store.readMany(env, ["board:long"])).get("board:long").payload, other, "by the many-key read too");
-    dd.put("card-x:BRKN", '{"pk":1,"a":{"d0":"2026-01-01","dd":[1,-3]}}');
-    eq(await store.read(env, "card-x:BRKN"), null, "a card-x row whose gaps do not decode is absent");
-    dd.put("card-x:NEWV", '{"pk":2,"a":1}');
-    eq(await store.read(env, "card-x:NEWV"), null, "and so is one written by a later version of the format");
-    eq((await store.readMany(env, ["card-x:BRKN", "card-x:NEWV", "board:long"])).get("card-x:BRKN"), null, "by the many-key read as well");
-    const on = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "on" }, "https://anilkaya.test");
-    const seen = await on("/api/flows/card-x?t=BRKN");
-    ok(!seen.text.includes('"d0"') && !seen.text.includes('"pk"'), "the card-x route never serves a packed document: " + seen.text.slice(0, 100));
-    const sent = await post(on, "card-x:SYN010", json({ pk: 1, v: 1, ticker: "SYN010", sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true }));
-    eq(sent.res.status, 400, "a body that carries the marker key itself is refused by the ingest door whatever the switch says: " + sent.text.slice(0, 120));
-    eq(rowOf(dd, "card-x:SYN010"), undefined, "and nothing is stored");
-    const off = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY }, "https://anilkaya.test");
-    eq((await post(off, "card-x:SYN010", json({ pk: 1, v: 1, ticker: "SYN010", sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true }))).res.status, 400, "with the switch unset too");
-    const nested = await post(on, "card-x:SYN010", json({ v: 1, ticker: "SYN010", sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true, a: { pk: 1 } }));
-    eq(nested.res.status, 200, "a nested pk is data");
-    const warn = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_CARDX_PACK: "on", FLOWS_DOOR_V2: "warn" }, "https://anilkaya.test");
-    const batch = await warn("/api/flows/ingest?op=batch", { method: "POST", headers: { Authorization: "Bearer " + NIGHTLY, "Content-Type": "application/json" }, body: json({ items: [
-      { key: "card-x:SYN011", payload: json({ ...biggest, ticker: "SYN011" }) },
-      { key: "card-x:SYN012", payload: json({ pk: 1, v: 1, ticker: "SYN012" }) },
+    const call = await rig({ DB: dd.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_DOOR_V2: "warn" }, "https://anilkaya.test");
+    const broken = '{"pk":1,"a":{"d0":"2026-01-01","dd":[1,-3]}}';
+    const bad = await post(call, "card-x:SYX102", broken);
+    eq(bad.res.status, 400, "a packed card-x that does not decode is refused: " + bad.text.slice(0, 100));
+    eq(JSON.parse(bad.text).error.code, "invalid_payload", "as invalid_payload");
+    eq(rowOf(dd, "card-x:SYX102"), undefined, "and nothing is stored");
+    eq((await post(call, "card-x:SYX102", '{"pk":2,"a":1}')).res.status, 400, "a packed body of a version this Worker does not know is refused");
+    const same2 = '{"pk":1,"d0":"2025-01-02","dd":[1,1],"x":1}';
+    eq((await post(call, "board:long", same2)).res.status, 200, "a body of another key that happens to start with the marker is a document like any other");
+    eq(rowOf(dd, "board:long").payload, same2, "and is stored as it is");
+    const stub = { v: 1, ticker: "SYX103", sessionDate: "2026-08-24", generatedAt: "2026-08-24T21:45:00.000Z", fixture: true };
+    const huge = json({ ...stub, a: { d: trail("2000-01-03", Array.from({ length: 13000 }, () => 1)) } });
+    const hugePacked = P.wireText("card-x:SYX103", huge, true);
+    ok(utf8(hugePacked) < 128 * 1024 && huge.length > 128 * 1024, `a card that is ${huge.length} bytes as a document and ${hugePacked.length} packed`);
+    const over = await post(call, "card-x:SYX103", hugePacked);
+    eq(over.res.status, 413, "is refused for what it decodes to, past the ingest cap: " + over.text.slice(0, 100));
+    eq(rowOf(dd, "card-x:SYX103"), undefined, "and nothing is stored");
+    const batch = await call("/api/flows/ingest?op=batch", { method: "POST", headers: { Authorization: "Bearer " + NIGHTLY, "Content-Type": "application/json" }, body: json({ items: [
+      { key: "card-x:SYX104", payload: P.wireText("card-x:SYX104", json({ ...biggest, ticker: "SYX104" }), true) },
+      { key: "card-x:SYX105", payload: broken },
+      { key: "card-x:SYX106", payload: hugePacked },
+      { key: "card-x:SYX107", payload: json({ ...biggest, ticker: "SYX107" }) },
     ] }) });
-    eq(batch.res.status, 200, "the door's batch answers: " + batch.text.slice(0, 120));
+    eq(batch.res.status, 200, "the door's batch answers: " + batch.text.slice(0, 100));
     const results = JSON.parse(batch.text).results;
-    same([results[0].ok, results[1].ok, results[1].code], [true, false, "invalid_payload"], "and refuses the item that carries the marker, whatever it does with the others");
-    ok(P.isPackedText(rowOf(dd, "card-x:SYN011").payload), "while the other item is stored packed");
-    eq(rowOf(dd, "card-x:SYN012"), undefined, "and the refused one is not stored");
+    same(results.map((r) => [r.ok, r.code || null]), [[true, null], [false, "invalid_payload"], [false, "payload_too_large"], [true, null]], "and decodes the packed item, refuses the broken one and the one that expands past the cap, and takes the whole one");
+    eq(rowOf(dd, "card-x:SYX104").payload, json({ ...biggest, ticker: "SYX104" }), "the packed item is stored as the document");
+    eq(rowOf(dd, "card-x:SYX105"), undefined, "the broken one is not stored");
+  }
+
+  {
+    const route = readFileSync(join(ROOT, "server/routes/flows-ingest.js"), "utf8");
+    const door = readFileSync(join(ROOT, "server/door.js"), "utf8");
+    const routeOk = (t) => /const wire = decodeWire\(key, posted\);\s*if \(wire\.error\) throw new HttpError\(400, "invalid_payload", wire\.error\);\s*const payload = wire\.text;\s*if \(payload\.length > FLOWS_MAX_PAYLOAD_BYTES\) throw new HttpError\(413, "payload_too_large"/.test(t)
+      && t.indexOf("decodeWire(key, posted)") < t.indexOf("JSON.parse(payload)") && t.indexOf("contentRefusal(url, key, payload)") > t.indexOf("decodeWire(key, posted)");
+    const doorOk = (t) => /const wire = decodeWire\(key, posted\);\s*if \(wire\.error\) \{ refuse\("invalid_payload", wire\.error\); continue; \}\s*const text = wire\.text;\s*if \(text\.length > FLOWS_MAX_PAYLOAD_BYTES\) \{ refuse\("payload_too_large"/.test(t)
+      && t.indexOf("decodeWire(key, posted)") < t.indexOf("JSON.parse(text)");
+    ok(routeOk(route), "the ingest route decodes a packed card-x before it parses, checks the content or hashes it, and caps what it decodes to");
+    ok(doorOk(door), "and so does the door's batch, item by item");
+    ok(!/carriesMarker/.test(route + door), "neither refuses a body for carrying the marker key any more: a body that starts with it is a packed card-x or it is refused");
+    for (const [name, text, check, from, to] of [
+      ["the route stops decoding", route, routeOk, "const wire = decodeWire(key, posted);", "const wire = { text: posted };"],
+      ["the route forgets the cap on the decoded text", route, routeOk, "if (payload.length > FLOWS_MAX_PAYLOAD_BYTES) throw new HttpError(413, \"payload_too_large\", \"Payload too large\");", ""],
+      ["the route does not refuse a body that does not decode", route, routeOk, "if (wire.error) throw new HttpError(400, \"invalid_payload\", wire.error);", ""],
+      ["the batch stops decoding", door, doorOk, "const wire = decodeWire(key, posted);", "const wire = { text: posted };"],
+      ["the batch forgets the cap on the decoded text", door, doorOk, "if (text.length > FLOWS_MAX_PAYLOAD_BYTES) { refuse(\"payload_too_large\", \"Payload too large\"); continue; }\n      try { JSON.parse(text);", "try { JSON.parse(text);"],
+    ]) {
+      ok(text.split(from).length === 2, "the planted build changes the source exactly once: " + name);
+      ok(!check(text.replace(from, () => to)), `PLANTED WRONG BUILD, ${name}: the scan fails it`);
+      planted++;
+    }
   }
 
   restoreCache.restore();
 }
 
-{
-  const restoreClock = H.shiftClock();
-  const cache = H.cacheFake();
-  const stub = H.vendorStub();
-  const x0 = (() => { const f = H.fakeD1(); DF.seed(f); return JSON.parse(rowOf(f, "card-x:" + DF.T).payload); })();
-  const rich = {
-    ...x0,
-    vrp: { status: "ok", series: { d: trail("2026-05-01", Array.from({ length: 80 }, (_, i) => (i % 5 === 4 ? 3 : 1))), iv: Array.from({ length: 81 }, (_, i) => 20 + (i % 9)) } },
-    skew: { status: "ok", series: { d: trail("2026-06-01", Array.from({ length: 40 }, (_, i) => (i % 5 === 4 ? 3 : 1))), rr: Array.from({ length: 41 }, (_, i) => i / 10) } },
-    contracts: { status: "ok", rows: [{ k: 100, d: trail("2026-08-03", [1, 1, 1]) }, { k: 105, d: trail("2026-08-03", [1, 2, 1, 1]) }] },
-  };
-  const plainText = json(rich);
-  const packedText = P.packText(plainText);
-  ok(P.isPackedText(packedText) && packedText.length < plainText.length - 600, `the seeded card-x for the dossier harness carries ${plainText.length - packedText.length} characters of day lists`);
-  const worlds = [];
-  for (const [label, body] of [["whole", plainText], ["packed", packedText]]) {
-    const f = H.fakeD1();
-    DF.seed(f);
-    f.put("card-x:" + DF.T, body);
-    W.memoClock(null, 0);
-    stub.reset();
-    cache.clear();
-    const call = await rig({ DB: f.D1, FLOWS_CARDX_PACK: "on" }, "https://anilkaya.org");
-    const out = {};
-    for (const [name, route] of [["cardX", "/api/flows/card-x?t=" + DF.T], ["card", "/api/flows/card?t=" + DF.T], ["dossier", "/api/flows/dossier?t=" + DF.T], ["render", "/api/flows/dossier?t=" + DF.T + "&render=1"], ["hist", "/api/flows/hist?t=" + DF.T]]) {
-      const r = await call(route);
-      out[name] = { status: r.res.status, text: r.text, fingerprint: r.res.headers.get("X-Dossier-Fingerprint") };
-    }
-    worlds.push([label, out, rowOf(f, "card-x:" + DF.T).payload]);
-  }
-  const [[, whole, wholeRow], [, packed, packedRow]] = worlds;
-  eq(wholeRow, plainText, "the first world holds the document whole");
-  ok(P.isPackedText(packedRow), "and the second holds it packed");
-  eq(packed.cardX.text, whole.cardX.text, "the card-x route answers the same bytes from a packed row");
-  eq(packed.cardX.text, plainText, "which are the document");
-  eq(packed.card.text, whole.card.text, "the card route, which reads the engine out of card-x, answers the same");
-  eq(packed.dossier.status, 200, "the dossier route answers");
-  const clockless = (t) => t.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "T");
-  eq(clockless(packed.dossier.text), clockless(whole.dossier.text), "THE DOSSIER IS THE SAME TEXT FROM A PACKED ROW: it reads its subtrees with SQL and the packer leaves those sections as they are");
-  eq(packed.dossier.fingerprint, whole.dossier.fingerprint, "with the same fingerprint");
-  eq(clockless(packed.render.text), clockless(whole.render.text), "and the same text for a model");
-  eq(packed.hist.text, whole.hist.text, "the hist route is untouched");
-  ok(packed.dossier.text.length > 2000, "and the dossier is not empty (" + packed.dossier.text.length + " characters)");
-  stub.restore();
-  cache.restore();
-  restoreClock();
-}
-
-console.log(`✓ flows-card-pack: ${checks} assertions, no server, no vendor call: card-x rows are stored with their day lists as gaps (a marker, the first day and the gaps) and read back whole at the store, so the largest of ${cards.length} emitted cards is ${storedMax} bytes stored of ${CARD_X_SOFT_BYTES} (${(100 * storedMax / CARD_X_SOFT_BYTES).toFixed(1)}%), 600 random documents and ${cards.length} real ones round-trip exactly in six time zones, the Worker serves, the ingest door answers and the dossier reads the same bytes from a packed row as from a whole one, the switch fails closed, a packer with a bug writes the document whole, and ${planted} planted wrong builds fail`);
+console.log(`✓ flows-card-pack: ${checks} assertions, no server, no vendor call: with FLOWS_CARDX_WIRE=pack the pipeline posts card-x with its day lists as gaps (a marker, the first day and the gaps), the Worker's door decodes them and stores the document, so no reader changes and the largest of ${cards.length} emitted cards is ${wireMax} bytes on the wire (${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit); posted whole, as it is by default, nothing changes; 600 random documents and ${cards.length} real ones round-trip exactly in six time zones; a packer with a bug posts the document whole; and ${planted} planted wrong builds fail`);

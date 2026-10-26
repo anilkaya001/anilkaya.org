@@ -2,7 +2,6 @@ export const PACK_KEY = "pk";
 export const PACK_VERSION = 1;
 export const PACK_PREFIX = '{"pk":1,';
 export const PACK_ANY_PREFIX = '{"pk":';
-export const PACK_SKIP = Object.freeze({ 1: Object.freeze(["engine", "short", "insiders", "earnings", "dx", "vx"]) });
 export const PACK_RESERVED = Object.freeze(["pk", "d0", "dd", "__proto__"]);
 export const PACK_MIN_DAYS = 3;
 export const SOFT_BYTES_PLACEHOLDER = 99999;
@@ -89,29 +88,25 @@ export const isPacked = (v) => isObject(v) && v[PACK_KEY] === PACK_VERSION;
 
 export const isPackedText = (text) => typeof text === "string" && text.startsWith(PACK_PREFIX);
 
-export const carriesMarker = (value) => isObject(value) && Object.hasOwn(value, PACK_KEY);
-
 export function packCardX(payload) {
   if (!isObject(payload) || Object.hasOwn(payload, PACK_KEY)) return payload;
-  const skip = PACK_SKIP[PACK_VERSION];
   const keys = Object.keys(payload);
   for (const k of keys) {
     if (k === "d0" || k === "dd" || k === "__proto__") return payload;
-    if (!skip.includes(k) && hasReserved(payload[k])) return payload;
+    if (hasReserved(payload[k])) return payload;
   }
   const out = { [PACK_KEY]: PACK_VERSION };
   const tally = { lists: 0 };
-  for (const k of keys) out[k] = skip.includes(k) ? payload[k] : lower(payload[k], tally);
+  for (const k of keys) out[k] = lower(payload[k], tally);
   return tally.lists > 0 ? out : payload;
 }
 
 export function unpackCardX(payload) {
   if (!isPacked(payload)) return payload;
-  const skip = PACK_SKIP[PACK_VERSION];
   const out = {};
   for (const [k, x] of Object.entries(payload)) {
     if (k === PACK_KEY) continue;
-    out[k] = skip.includes(k) ? x : lift(x);
+    out[k] = lift(x);
   }
   return out;
 }
@@ -142,6 +137,18 @@ export function unpackText(text) {
 
 export const utf8Length = (text) => new TextEncoder().encode(text).length;
 
-export function storedBytes(payload) {
+export function servedBytes(payload) {
+  return utf8Length(JSON.stringify({ ...payload, bytes: SOFT_BYTES_PLACEHOLDER }));
+}
+
+export function wireBytes(payload) {
   return utf8Length(JSON.stringify(packCardX({ ...payload, bytes: SOFT_BYTES_PLACEHOLDER })));
+}
+
+export const wireText = (key, text, on) => (on === true && typeof key === "string" && key.startsWith("card-x:") ? packText(text) : text);
+
+export function decodeWire(key, text) {
+  if (typeof key !== "string" || !key.startsWith("card-x:") || typeof text !== "string" || !text.startsWith(PACK_ANY_PREFIX)) return { text };
+  const plain = unpackText(text);
+  return plain === null ? { error: "A packed card-x does not decode" } : { text: plain };
 }
