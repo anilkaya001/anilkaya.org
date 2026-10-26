@@ -767,7 +767,7 @@
     const plot = h("div", { class: "mk-term" });
     host.append(plot, UI.legend(names.map((k) => [COL[k], "ln", k])));
     C.line(plot, {
-      x: TEN, xType: "number", xScale: "sqrt", height: [180, 210, 230],
+      x: TEN, xType: "number", xScale: "sqrt", height: [150, 160, 180],
       xTicks: [{ v: 7, label: "1w" }, { v: 30, label: "1m" }, { v: 90, label: "3m" }, { v: 180, label: "6m" }, { v: 365, label: "1y" }],
       series: names.map((k) => ({ values: idx[k].iv, color: COL[k], label: k, format: (x) => F.pct(x, 1) })),
       yFormat: (x) => F.pct(x, 0), label: "Implied volatility by tenor for the index ETFs",

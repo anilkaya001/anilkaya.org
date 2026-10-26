@@ -27,7 +27,7 @@
     return sum;
   };
   const repeated = (body) => {
-    let best = null, bestScore = 0;
+    const found = [];
     for (const el of [body, ...body.querySelectorAll("*")]) {
       if (el.closest("svg, canvas, dialog") || el.children.length < 4) continue;
       const groups = new Map();
@@ -39,10 +39,12 @@
       for (const g of groups.values()) {
         if (g.length < 4 || g.length * 2 < el.children.length) continue;
         const score = stacked(g);
-        if (score > bestScore) { best = g; bestScore = score; }
+        if (score > 0) found.push({ g, score });
       }
     }
-    return best;
+    found.sort((a, b) => b.score - a.score);
+    const taken = new Set();
+    return found.filter((f) => !f.g.some((c) => taken.has(c))).map((f) => { for (const c of f.g) for (let e = c; e && e !== body; e = e.parentElement) taken.add(e); return f.g; });
   };
 
   function allButton(mod, show, body) {
@@ -74,9 +76,9 @@
     const body = mod.querySelector(":scope > .fd-body");
     if (!body || mod.hasAttribute("data-free") || mod.inert || !body.clientHeight) return;
     for (const el of body.querySelectorAll(".fd-cut")) el.classList.remove("fd-cut");
-    const kids = repeated(body);
+    const groups = repeated(body);
     let cut = false;
-    if (kids) {
+    for (const kids of groups) {
       for (const k of kids) if (k.hidden && !k.dataset.fit) { k.hidden = false; k.dataset.fit = "1"; }
       let n = kids.length;
       while (n > 1 && body.scrollHeight > body.clientHeight + 1) {
