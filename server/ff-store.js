@@ -401,7 +401,7 @@ export function validateHit(h) {
 }
 
 export function encodeCursor(c) {
-  return btoa(JSON.stringify({ v: 1, h: c.h, m: c.m })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(JSON.stringify({ v: 1, h: c.h, m: c.m })).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 export function decodeCursor(text) {

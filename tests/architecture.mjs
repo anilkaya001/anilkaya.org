@@ -83,7 +83,7 @@ const LAYERS = [
   { name: "worker.js", from: /^worker\.js$/, to: [/^shared\//, /^server\//], bare: [/^cloudflare:/, /^node:/] },
   {
     name: "a route", from: /^server\/routes\/[^/]+\.js$/,
-    to: [/^server\/(?:http|store|door|vendor|ops|ai|config|log|errors|policy)\.js$/, /^shared\//], bare: [],
+    to: [/^server\/(?:http|store|door|vendor|ops|ai|config|log|errors|policy|ff-[a-z]+)\.js$/, /^shared\//], bare: [],
   },
   { name: "a server service", from: /^server\/(?!routes\/)[^/]+\.js$/, to: [/^server\/(?!routes\/)[^/]+\.js$/, /^shared\//], bare: [] },
   {

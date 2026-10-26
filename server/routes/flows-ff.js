@@ -188,7 +188,8 @@ export function flowsFfRows(deps) {
     const etag = etagOf(result.view);
     const headers = { ETag: etag, Vary: "Cookie" };
     const offered = ctx.request.headers.get("If-None-Match");
-    const same = (t) => t.trim().replace(/^W\//, "") === etag.replace(/^W\//, "");
+    const bare = (t) => (t.trim().startsWith("W/") ? t.trim().slice(2) : t.trim());
+    const same = (t) => bare(t) === bare(etag);
     if (offered !== null && offered.split(",").some(same)) return new Response(null, { status: 304, headers });
     return json(result.view, 200, headers);
   };
