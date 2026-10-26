@@ -35,7 +35,7 @@ export function flowsDeskRows(deps) {
     const rawRank = url.searchParams.get("rank");
     const rankBy = RANK_KEYS.includes(rawRank) ? rawRank : "annualized";
     const terms = strategy === "sc" ? shortCallTerms(url) : null;
-    const refresh = url.searchParams.get("refresh") === "1" && (strategy !== "sc" || scRefreshAllowed(session));
+    const refresh = url.searchParams.get("refresh") === "1" && (strategy !== "sc" || typeof scRefreshAllowed !== "function" || scRefreshAllowed(session));
     const key = strategy === "sc" ? `${ticker}?strategy=sc&h=${terms.haircut}&f=${terms.floor}` : `${ticker}?strategy=${strategy}&rank=${rankBy}`;
 
     return serveCachedVendorRead({

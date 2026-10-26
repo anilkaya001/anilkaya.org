@@ -220,7 +220,7 @@ for (const t of TICKERS) {
   const mutants = [
     ["the key drops the terms", [["`${ticker}?strategy=sc&h=${terms.haircut}&f=${terms.floor}`", "`${ticker}?strategy=sc`"]], "&strategy=sc&h=0.6&f=0.2", (g) => !/h=0\.6&f=0\.2$/.test(g.key[1])],
     ["the terms are not validated", [["if (!inRange(v, limits)) throw HttpError.of(\"invalid_terms\");", ""]], "&strategy=sc&h=0.0499", (g) => g.out.threw === undefined],
-    ["the refresh flag is not handed on", [["terms, refresh: url.searchParams.get(\"refresh\") === \"1\"", "terms, refresh: false"]], "&strategy=sc&refresh=1", (g) => !g.chain || g.chain[2].refresh === false],
+    ["the refresh flag is not handed on", [["{ terms, refresh } : {}", "{ terms, refresh: false } : {}"]], "&strategy=sc&refresh=1", (g) => !g.chain || g.chain[2].refresh === false],
     ["the floor is read from the haircut", [["floor: read(\"f\", SC_DEFAULTS.floor, SC_LIMITS.floor)", "floor: read(\"h\", SC_DEFAULTS.floor, SC_LIMITS.floor)"]], "&strategy=sc&h=0.6&f=0.2", (g) => !g.chain || g.chain[2].terms.floor !== 0.2],
     ["the terms are not rounded", [["return Math.round(v * 1e4) / 1e4;", "return v;"]], "&strategy=sc&h=0.30004", (g) => !g.chain || g.chain[2].terms.haircut === 0.30004],
   ];
