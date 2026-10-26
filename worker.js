@@ -2368,8 +2368,8 @@ function offMarketChain(list, ivBasis, rankBy) {
   };
 }
 
-async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit, terms }) {
-  if (strategy === "sc") return buildShortCallPayload(env, ctx, vf, { ticker, terms });
+async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit, terms, refresh }) {
+  if (strategy === "sc") return buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh });
   const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
 
     maybe_otm_only: "true",
@@ -2518,7 +2518,8 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
   return { rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(state), info, cardRead, engineRate };
 }
 
-async function buildShortCallPayload(env, ctx, vf, { ticker, terms }) {
+async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = false }) {
+  if (refresh) state.scChains.delete(ticker);
   let snap = chainCacheGet(state.scChains, ticker, Date.now());
   if (snap === null) {
     snap = await singleFlight(state.scFlights, ticker, () => readShortCallSnapshot(env, ctx, vf, ticker));

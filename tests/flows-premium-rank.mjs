@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { makeChain, regressionChain } from "./lib/sc-chain.mjs";
+import { makeChain, regressionChain, nextSessions } from "./lib/sc-chain.mjs";
 import { makeRng } from "./truth/rng.mjs";
 import { preRank, rankShortCalls, leanRows, RANK_K, RANK_CAP, RANK_CONVENTIONS } from "../shared/flows-premium-rank.js";
 import { lineCompare, RANK_BUCKETS, bucketOf } from "../shared/flows-quant-rank.js";
@@ -56,7 +56,12 @@ function topOf(entries, tenor) {
 
 function truthEntries(pre, conv, terms) {
   const out = [];
-  for (const { c, keys } of pre.keyed) if (keys[conv] !== null) out.push({ key: keys[conv], oi: c.oi, strike: c.strike, expiry: c.expiry, symbol: c.symbol, days: c.days });
+  const spot = pre.cut.spot;
+  for (const { c } of pre.keyed) {
+    const dash = !!(c.band && c.band.band === "dash");
+    const key = conv === "delta" ? (c.delta === null || dash ? null : pageKey(c, conv, terms, c.delta, spot)) : pageKey(c, conv, terms, null, spot);
+    if (key !== null && key !== undefined) out.push({ key, oi: c.oi, strike: c.strike, expiry: c.expiry, symbol: c.symbol, days: c.days });
+  }
   return out;
 }
 
@@ -205,6 +210,110 @@ let lastReport = null;
   ok(ch.rows.length >= 11000, `a ${ch.rows.length}-row chain`);
   ok(ms < 150, `the whole ranking of ${ch.rows.length} rows costs ${ms.toFixed(1)} ms of CPU, under the 150 ms budget`);
   console.log(`rank CPU: ${ms.toFixed(1)} ms for ${ch.rows.length} rows`);
+}
+
+{
+  const ch = makeChain(5, { rows: 900, expiries: nextSessions("2026-10-26", 3), spreadRel: 0.04, shift: 0.5 });
+  const args = argsOf(ch, TERMS[0]);
+  const pre = preRank(args);
+  const out = rankShortCalls(ch.rows, args);
+  ok(pre.cut.dash > 0, `a forward the chain contradicts leaves ${pre.cut.dash} calls without a delta band`);
+  const dashed = pre.keyed.filter((e) => e.c.band && e.c.band.band === "dash");
+  ok(dashed.length === pre.cut.dash && dashed.every((e) => e.keys.delta === null && e.c.delta === null), "each of them has no delta and no delta key");
+  ok(dashed.every((e) => e.keys.shares !== null && e.keys.regt !== null), "but still ranks under the two conventions that need no delta");
+  const sent = new Map(out.rows.map((r) => [r.symbol, r.pk]));
+  ok(dashed.every((e) => !sent.has(e.c.symbol) || (sent.get(e.c.symbol) & 2) === 0), "no dash call is sent as a delta-adjusted pick");
+  ok(out.cut.shed.some((x) => x.why === "forward uncertain" && x.n === pre.cut.dash), "and the cut names them as shed for an uncertain forward");
+  ok(out.fwd.some((f) => f.veto) || out.fwd.some((f) => f.n >= 3), "the forward records say why: a veto or a parity the card contradicts");
+}
+
+function bitsOf(truthLists) {
+  const bits = new Map();
+  for (const [bit, list] of truthLists) for (const sym of list) bits.set(sym, (bits.get(sym) || 0) | bit);
+  return bits;
+}
+
+function probe(mod, { seeds = [3, 7, 11, 17, 23, 29, 31, 37], engineRows = 40 } = {}) {
+  const bad = new Set();
+  const flag = (what) => bad.add(what);
+  const configs = seeds.map((seed) => {
+    const rng = makeRng("rank-probe|" + seed);
+    return { seed, opts: { rows: 3500, plant: true, spreadRel: seed % 3 === 0 ? 0.04 + rng.uniform() * 0.3 : null, shift: seed % 2 ? -0.05 : 0.02 } };
+  });
+  configs.push({ seed: 5, opts: { rows: 900, expiries: nextSessions("2026-10-26", 3), spreadRel: 0.04, shift: 0.5 } });
+  configs.push({ seed: 6, opts: { rows: 900, expiries: nextSessions("2026-10-26", 3), spreadRel: 0.12, shift: 1, plant: true } });
+  for (const { seed, opts } of configs) {
+    const ch = makeChain(seed, opts);
+    const terms = TERMS[seed % TERMS.length];
+    const args = argsOf(ch, terms);
+    const out = mod.rankShortCalls(ch.rows, args);
+    const pre = mod.preRank(args);
+    if (out.rows.length > RANK_CAP) flag("cap");
+    if (new Set(out.rows.map((r) => r.symbol)).size !== out.rows.length) flag("dup");
+    if (out.cut.k !== RANK_K || out.cut.kReq !== RANK_K) flag("k");
+    if (JSON.stringify(out.cut.buckets) !== JSON.stringify(RANK_BUCKETS.map((b) => [b[0], b[1]]))) flag("buckets");
+    if (JSON.stringify(out.cut.terms) !== JSON.stringify(terms)) flag("terms");
+    if (JSON.stringify(mod.rankShortCalls(ch.rows.slice().reverse(), args)) !== JSON.stringify(out)) flag("order");
+    const best = new Map();
+    for (const r of ch.rows) {
+      const b = Number(r.nbbo_bid);
+      if (!best.has(r.option_symbol) || b > best.get(r.option_symbol)) best.set(r.option_symbol, b);
+    }
+    if (out.rows.some((r) => r.bid !== best.get(r.symbol))) flag("dedupe");
+    const ranked = PREM.rankChain(ch.rows, { spot: ch.spot, asOf: ch.asOf, strategy: "cc", limit: 1e6, ticker: ch.ticker, readMs: ch.readMs, rate: ch.rate });
+    { const a = Array.from(new Set(pre.keyed.map((e) => e.c.symbol))).sort(), b = Array.from(new Set(ranked.rows.map((r) => r.symbol))).sort(); if (a.length !== b.length || a.some((x, i) => x !== b[i])) flag("gate"); }
+    const small = mod.preRank({ ...args, cap: 60 });
+    if (small.picks.length > 60) flag("shrink");
+    const facts = factsOf(ch);
+    const step = Math.max(1, Math.floor(out.rows.length / engineRows));
+    for (const r of out.rows.filter((_, i) => i % step === 0)) {
+      const pr = pageRow(r, out, facts, ch.rate);
+      const lean = pre.keyed.find((e) => e.c.symbol === r.symbol);
+      if (!lean || !Object.is(lean.c.delta, pr.delta)) flag("delta");
+    }
+    const kept = new Set(out.rows.map((r) => r.symbol));
+    const truthLists = [];
+    for (const conv of CONV) {
+      const entries = truthEntries(pre, conv, terms);
+      for (const t of TENORS) if (!topOf(entries, t).every((sym) => kept.has(sym))) flag("sent " + conv);
+      const bit = mod.RANK_CONVENTIONS.find((c) => c[0] === conv)[1];
+      for (const [lo, hi] of RANK_BUCKETS) truthLists.push([bit, topOf(entries, { lo, hi })]);
+    }
+    const bits = bitsOf(truthLists);
+    if (out.rows.some((r) => (bits.get(r.symbol) || 0) !== r.pk)) flag("pk");
+    if (out.rows.length !== bits.size) flag("members");
+  }
+  const reg = regressionChain();
+  const regOut = mod.rankShortCalls(reg.rows, argsOf(reg, TERMS[0]));
+  const row = regOut.rows.find((r) => r.symbol === reg.xSymbol);
+  if (!row || (row.pk & 2) !== 2) flag("regression");
+  return Array.from(bad);
+}
+
+{
+  eq(probe({ rankShortCalls, preRank, RANK_CONVENTIONS }), [], "the probe finds nothing wrong with the correct build");
+  const MUT = [
+    ["a second copy of the delta maths, rounded to three places", [["c.delta = leanDelta(frame, c.strike, read.iv);", "c.delta = Math.round(leanDelta(frame, c.strike, read.iv) * 1000) / 1000;"]]],
+    ["the spread gate dropped from the shared gate call", [["spread: mid > 0 ? (c.ask - c.bid) / mid : null }, g);", "spread: null }, g);"]]],
+    ["buckets that straddle the page's tenor edges", [["c.bucket = bucketOf(c.days);", "c.bucket = c.days <= 10 ? 0 : c.days <= 30 ? 1 : c.days <= 60 ? 2 : c.days <= 120 ? 3 : 4;"]]],
+    ["the Reg-T key is the whole bid, not the time value", [["keys.regt = shortCallLine(line, { ...base, convention: \"regt\" }).annRatio;", "keys.regt = shortCallLine(line, { ...base, convention: \"regt\" }).grossRatio;"]]],
+    ["the delta key is the whole bid, not the time value", [["keys.delta = shortCallLine(line, { ...base, convention: \"delta\", delta: c.delta }).annRatio;", "keys.delta = shortCallLine(line, { ...base, convention: \"delta\", delta: c.delta }).grossRatio;"]]],
+    ["haircut and floor missing from the key", [["const base = { spot, days: c.days, haircut: terms.h, floor: terms.f };", "const base = { spot, days: c.days };"]]],
+    ["k lowered to 20", [["export const RANK_K = 25;", "export const RANK_K = 20;"]]],
+    ["the forward bypassed: carry only", [["frameBy.set(expiry, leanFrame({ ...input, fwd: rec }));", "frameBy.set(expiry, base);"]]],
+    ["the opposite quote not sent", [["if (qt && fin(qt.pb) && fin(qt.pa) && qt.pb > 0 && qt.pa >= qt.pb) p.opposite = { bid: qt.pb, ask: qt.pa };", ""]]],
+    ["the better duplicate loses", [["if (better(lean, held)) bySymbol.set(sym, lean);", "if (!better(lean, held)) bySymbol.set(sym, lean);"]]],
+    ["a convention bit overwritten rather than added", [["out.set(e.symbol, { c: e.c, pk: (held ? held.pk : 0) | bit });", "out.set(e.symbol, { c: e.c, pk: bit });"]]],
+    ["the cap never enforced", [["if (chosen.size > cap) {", "if (false) {"]]],
+    ["a dash band still ranks on delta", [["if (c.band.band !== \"dash\") {", "if (true) {"]]],
+  ];
+  const survived = [];
+  for (const [title, transforms] of MUT) {
+    const mod = await loadMutated("shared/flows-premium-rank.js", transforms);
+    if (probe(mod).length === 0) survived.push(title);
+    checks++;
+  }
+  eq(survived, [], `all ${MUT.length} planted wrong builds of the pre-rank are caught`);
 }
 
 console.log(JSON.stringify(lastReport));

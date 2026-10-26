@@ -127,3 +127,15 @@ export function regressionChain({ ticker = SC_TICKER, asOf = "2026-10-26", at = 
   filler(200);
   return { ticker, spot: S, asOf, readMs, rate, carry: 0, rows, expiries: [], xSymbol: symbolOf(ticker, "2026-10-30", "C", 54) };
 }
+
+export function coherentRegression({ seed = 3, ticker = SC_TICKER, asOf = "2026-10-26", at = 1200, rows = 1500 } = {}) {
+  const base = makeChain(seed, { ticker, spot: 50, asOf, rows, carry: 0.01 });
+  const expiry = "2026-10-30";
+  const x = {
+    option_symbol: symbolOf(ticker, expiry, "C", 54), nbbo_bid: "0.40", nbbo_ask: "0.44",
+    implied_volatility: "0.7", open_interest: "500", volume: "10", prev_oi: "500",
+  };
+  const list = base.rows.filter((r) => r.option_symbol !== x.option_symbol).slice(0, rows - 1);
+  list.splice(at, 0, x);
+  return { ...base, rows: list, xSymbol: x.option_symbol };
+}

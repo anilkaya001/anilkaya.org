@@ -43,7 +43,7 @@ export function flowsDeskRows(deps) {
       cacheKey: internalKey("chain", key),
       wantsRefresh: url.searchParams.get("refresh") === "1",
       gate: vendorGate(env, session),
-      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120, ...(terms ? { terms } : {}) }),
+      build: (vf) => buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit: 120, ...(terms ? { terms, refresh: url.searchParams.get("refresh") === "1" } : {}) }),
     });
   };
 
