@@ -107,6 +107,14 @@ inputMoves("a file moved to another domain", "docs/modules.json", (t) => t.repla
   const part = assign([{ paths: ["a/b.js", "q/*.js"], role: "r", domain: "tests" }], new Set(["a/b.js", "a/c.js"]));
   deep(part.uncovered, ["a/c.js"], "an uncovered file is listed");
   eq(part.dead.length, 1, "a glob that matches nothing is dead");
+  const reserved = assign([{ paths: ["a/b.js", "q/*.js"], role: "r", domain: "tests", optional: true }], new Set(["a/b.js", "a/c.js"]));
+  deep(reserved.dead, [], "an optional row that matches nothing is reserved, not dead");
+  deep(reserved.uncovered, ["a/c.js"], "an optional row covers only what it matches");
+  const claimed = assign([{ paths: ["q/*.js"], role: "r", domain: "tests", optional: true }], new Set(["q/x.js"]));
+  deep(claimed.dead, [], "an optional row that matches a file covers it");
+  deep([...claimed.best.keys()], ["q/x.js"], "and the file is assigned to it");
+  const strict = assign([{ paths: ["q/*.js"], role: "r", domain: "tests", optional: false }], new Set(["a/b.js"]));
+  eq(strict.dead.length, 1, "only an optional of true reserves a glob; false or any other value leaves it dead");
 }
 
 {
