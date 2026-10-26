@@ -1,3 +1,5 @@
+const HOME = { file: "assets/js/flows-overview.js", page: "Home", href: "/flows/" };
+const EVENTS = { file: "assets/js/flows-events.js", page: "Events", href: "/flows/events/" };
 const MARKET = { file: "assets/js/flows-market.js", page: "Market", href: "/flows/market/" };
 const MARKET_BELOW = { ...MARKET, file: "assets/js/flows-market-below.js" };
 const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker page", href: null };
@@ -55,6 +57,28 @@ export const GLOSSARY = Object.freeze([
   { key: "typical-day", term: "Typical day", ...MOVES, lines: [
     "A typical day is a robust one-day scale from the last 252 sessions.",
   ] },
+  { key: "cleared-the-band", term: "Cleared the band", ...HOME, lines: [
+    "Names past the dead band on each board, counted whole rather than to the rows this page draws.",
+  ] },
+  { key: "earnings-bars", term: "Earnings bars", ...EVENTS, lines: [
+    "The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
+  ] },
+  { key: "flagged-windows", term: "Flagged windows", ...HOME, lines: [
+    "Option windows the vendor's own rules flagged in this read.",
+  ] },
+  { key: "implied-move", term: "Implied move", ...EVENTS, lines: [
+    "The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.",
+  ] },
+  { key: "put-call", term: "Put/call volume", ...HOME, lines: [
+    "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",
+  ] },
+  { key: "reaction", term: "Reaction", ...EVENTS, lines: [
+    "The last session's reporters: each bar is the realized one-day move over the move the options implied, less one.",
+    "Above the line a name moved more than it was priced to; below, less.",
+  ] },
+  { key: "report-timing", term: "Before the open or after the close", ...EVENTS, lines: [
+    "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it.",
+  ] },
   { key: "conviction", term: "Conviction", ...TICKER, lines: [
     "How far the families agree, how much of the card was measured, and how long the flow persisted.",
   ] },
@@ -102,4 +126,4 @@ export const GLOSSARY = Object.freeze([
   ] },
 ]);
 
-export const GLOSSARY_PAGES = Object.freeze([MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, BOARDS.page, TICKER.page]);
+export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page]);

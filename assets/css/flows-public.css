@@ -9,6 +9,7 @@
 .fx-doc p, .fx-doc li, .fx-doc dd { font: var(--t-body); color: var(--label-1); }
 .fx-doc ul { margin: 0; padding-left: var(--sp-6); display: grid; gap: var(--sp-3); }
 .fx-doc a { color: var(--accent-soft); }
+.fx-doc kbd { padding: 1px 6px; border: 1px solid var(--sep-strong); border-radius: 5px; color: var(--label-1); font: var(--t-footnote); }
 .fx-doc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-5); margin-top: var(--sp-6); }
 .fx-doc-actions .flows-submit { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--sp-6); text-decoration: none; }
 .fx-doc-list { margin: var(--sp-6) 0 0; display: grid; gap: var(--sp-6); }

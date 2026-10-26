@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "391";
+export const ASSET_VERSION = "392";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -427,10 +427,23 @@ export function aboutPage() {
   <section aria-labelledby="aWhat">
     <h2 id="aWhat">What it does</h2>
     <ul>
-      <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified.</li>
+      <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the vendor flagged, what changed and who reports next.</li>
+      <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
+      <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year.</li>
+      <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from the side of the quote through sector and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
+      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
+    </ul>
+  </section>
+  <section aria-labelledby="aKeys">
+    <h2 id="aKeys">Keyboard</h2>
+    <ul>
+      <li><kbd>Ctrl</kbd> <kbd>K</kbd> (<kbd>&#8984;</kbd> <kbd>K</kbd> on a Mac) opens the search for a name.</li>
+      <li><kbd>?</kbd> opens Ask, and <kbd>Esc</kbd> closes whatever is open.</li>
+      <li>Tabs and switches take the arrow keys, <kbd>Home</kbd> and <kbd>End</kbd>.</li>
     </ul>
   </section>
   <section aria-labelledby="aKeep">

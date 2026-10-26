@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as PAGES from "../shared/flows-pages.js";
+import { FLOWS_NAV } from "../shared/flows-pages.js";
 import { GLOSSARY, GLOSSARY_PAGES } from "../shared/flows-glossary.js";
 import { workerSource } from "./lib/source-scan.mjs";
 
@@ -73,6 +74,27 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 }
 
 {
+  const html = await (await call("/flows/about/")).text();
+  const NEEDLE = {
+    overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
+    market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", events: "<strong>Events.</strong>",
+    political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
+  };
+  const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();
+  eq(Object.keys(NEEDLE).sort().join(","), members.join(","), "the about page's table names every page the members' sidebar links, so a new page cannot ship unlisted");
+  const unlisted = (page) => Object.entries(NEEDLE).filter(([, needle]) => !page.includes(needle)).map(([key]) => key);
+  eq(unlisted(html).join(","), "", "the about page describes every page the members' sidebar links");
+  ok(unlisted(html.replace(/<li><strong>Moves\.<\/strong>.*?<\/li>/, "")).join(",") === "moves", "PLANTED WRONG BUILD caught: an about page that forgot Moves is named");
+  ok(unlisted(html.replace(/<li><strong>Events\.<\/strong>.*?<\/li>/, "").replace(/<li><strong>Political\.<\/strong>.*?<\/li>/, "")).join(",") === "events,political", "and one that forgot two pages names both");
+  const keys = html.slice(html.indexOf('id="aKeys"'), html.indexOf('id="aKeep"'));
+  ok(/<kbd>Ctrl<\/kbd> <kbd>K<\/kbd>/.test(keys) && /<kbd>\?<\/kbd>/.test(keys) && /<kbd>Esc<\/kbd>/.test(keys), "the about page's keyboard section names Ctrl K, ? and Esc");
+  const pages = readRepo("shared/flows-pages.js");
+  ok(pages.includes('aria-keyshortcuts="Meta+K Control+K"') && pages.includes('aria-keyshortcuts="?"'), "and the shell really declares those two shortcuts, so the section cannot describe keys nothing answers");
+  const ui = readRepo("assets/js/flows-ui.js");
+  ok(/\(e\.metaKey \|\| e\.ctrlKey\)[^\n]*"k"/.test(ui) && /e\.key === "Escape"/.test(ui), "the kernel binds Ctrl or Command K and Escape");
+}
+
+{
   const login = await (await call("/flows/login/")).text();
   ok(login.includes('href="/flows/about/"'), "the sign-in page links to the about page");
   ok(login.includes('href="/flows/glossary/"'), "and to the glossary");
@@ -106,7 +128,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   for (const p of GLOSSARY_PAGES) ok(lede.replace(/&#39;/g, "'").includes(p), `the lede names ${p}, and claims no page it does not cover`);
   ok(!/each page/.test(lede), "the lede does not claim every page");
   const covered = new Set(GLOSSARY.map((g) => g.href).filter(Boolean));
-  for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
+  for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/", "/flows/", "/flows/events/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
   ok(!/<(?:img|iframe|style)|<script(?![^>]*src=)/i.test(html), "no markup of that kind reaches the page");
   ok(html.includes("expected P&amp;L") && !html.includes("expected P&L"), "ampersands in the strings are escaped");
   ok(html.includes("members&#39; own variances"), "and so are apostrophes");
