@@ -893,7 +893,7 @@
     return " " + T(f.gapBp < 0 ? "fwd-below" : "fwd-above", { x: x >= 10 ? String(Math.round(x)) : x.toFixed(1) });
   };
 
-  const carryWhy = (f) => (f.n === 0 ? T("fwd-why-0") : f.n < 3 ? T("fwd-why-few", { n: f.n }) : T("fwd-why-noisy"));
+  const carryWhy = (f) => (f.n === 0 ? T("fwd-why-0") : T("fwd-why-few", { n: f.n }));
 
   const fwdText = (r, f) => {
     const e = isNum(f.se) === null ? DASH : fmt2(1.96 * f.se);

@@ -12,7 +12,6 @@ export const FWD_LINES = Object.freeze({
   BORROW_SE: 0.03,
   DIV_SE_UNKNOWN: 0.015,
   DIV_SHARE: 0.10,
-  QUALIFY: 0.02,
   Z_TRUST: 3,
   VETO_Z: 4,
   BAND_PLAIN: 0.02,
@@ -22,6 +21,7 @@ export const FWD_LINES = Object.freeze({
   PUT_DELTA_CUT: 0.30,
   CALL_DELTA_CUT: 0.70,
   EEP_SHARE: 0.15,
+  DIV_EEP: 0.5,
 });
 
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
@@ -140,13 +140,15 @@ export function chooseForward({ quotes, S, r, T, q }) {
     return out;
   }
   const sigPar = sigmaAtm(quotes, par.F, D, T);
-  const bound = dDeltaMax(par.se, par.F, sigPar, T);
   out.sigmaAtm = fin(sigPar) ? sigPar : sig0;
-  if (bound === null || bound > L.QUALIFY) return out;
-  const seC = carry.se * Math.max(1, Math.abs(z) / L.Z_TRUST);
-  const wp = 1 / (par.se * par.se), wc = 1 / (seC * seC);
+  const gap = par.F - carry.F;
+  const sePar = z < -L.Z_TRUST ? Math.sqrt(par.se * par.se + (L.DIV_EEP * gap) ** 2) : par.se;
+  out.sePar = sePar;
+  const seC = Math.sqrt(carry.se * carry.se + Math.max(0, gap * gap - sePar * sePar - carry.se * carry.se));
+  const wp = 1 / (sePar * sePar), wc = 1 / (seC * seC);
   out.F = (par.F * wp + carry.F * wc) / (wp + wc);
   out.se = 1 / Math.sqrt(wp + wc);
+  out.seC = seC;
   out.src = Math.abs(z) > L.Z_TRUST ? "parity" : "blend";
   out.gapBp = (par.F / carry.F - 1) * 1e4;
   out.dDeltaMax = dDeltaMax(out.se, out.F, out.sigmaAtm, T);

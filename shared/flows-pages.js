@@ -856,7 +856,6 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fwd-above">Options imply a forward {x} bp above carry: the card&#39;s dividend may be too high.</p>
       <p data-k="fwd-why-0">no clean call-put pair near the money</p>
       <p data-k="fwd-why-few">only {n} clean pair(s), and three are needed</p>
-      <p data-k="fwd-why-noisy">the pairs are too noisy to hold delta to 0.02</p>
       <p data-k="band-pm">The forward is uncertain at this expiry, so delta carries a 95% band of ± {d} and win % of ± {w}.</p>
       <p data-k="band-dash">Forward uncertain at this expiry (± {x}): delta and win % are not shown.</p>
       <p data-k="band-veto">Forward uncertain at this expiry: the options market disagrees with the card&#39;s forward and cannot settle it, so delta and win % are not shown.</p>
