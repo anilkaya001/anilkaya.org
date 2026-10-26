@@ -69,7 +69,7 @@ export const ENGINE_CEILINGS = Object.freeze({
   rth: Object.freeze({ trips: 3, read: 13, written: 5 }),
   focus: Object.freeze({ trips: 2, read: 650, written: 2 }),
   summary: Object.freeze({ trips: 2, read: 5, written: 1 }),
-  housekeeping: Object.freeze({ trips: 9, read: 4, written: 3 }),
+  housekeeping: Object.freeze({ trips: 10, read: 4, written: 3 }),
 });
 
 export const COLD_START = Object.freeze({
@@ -113,7 +113,7 @@ export const PLANNED = Object.freeze([
   Object.freeze({ id: "archive.ideas", row: "P0-42, P3-01", written: 3, read: 0, source: "PLAN.final.md 5.3" }),
   Object.freeze({ id: "lab.attempt-index", row: "P0-10", written: 200, read: 0, source: "PLAN.final.md 5.3: one index row per attempt" }),
   Object.freeze({ id: "dossier.slow-kinds", row: "P3-11", written: 800, read: 0, source: "PLAN.final.md 5.3" }),
-  Object.freeze({ id: "prefs", row: "P3-35", written: 3000, read: 1200, source: "PLAN.final.md 5.3: 100 members times 30 changes; about 10 reads a member-day" }),
+  Object.freeze({ id: "member.state", row: "P3-35, Decision 6", written: 3600, read: 54000, source: "100 members a day: 30 visit writes (a ping writes at most once a minute and otherwise reads 2 rows), 3 list writes, 3 exports (one row written each; the daily count read twice, about 100 rows), 100 pings (200 rows), 10 state reads and 5 Since reads of 5 rows; the 03:00 ET sweep deletes at most 500 export rows and re-seals at most 50" }),
   Object.freeze({ id: "audit.log", row: "P2-26", written: 10, read: 0, source: "PLAN.final.md 5.3" }),
   Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 4800, source: "24 rows a minute for 2.5 hours of owner viewing plus ten AI-block reads of 280 plus thirty coverage reads of 48" }),
   Object.freeze({ id: "coverage.view", row: "B1", written: 0, read: 6000, source: "B1 of the pipeline design: the owner's coverage read costs the 2,001-row listing ceiling at worst and about 500 rows in production (167 cards, 167 card-x, about 150 hist, 26 metadata ids), held 60 s in the Cache API, so a dozen reads a day is under 6,000" }),
@@ -128,6 +128,7 @@ export const MEASURED_CEILINGS = Object.freeze({ nightlyPostWritten: 1, rosterRe
 export const D1_USERS = Object.freeze({
   "worker.js": ["engines", "members.pages", "nightly.ingest", "tier2.ingest", "ops.views", "ai.counters"],
   "server/ai.js": ["ai.counters"],
+  "server/member-store.js": ["member.state"],
   "server/ops.js": ["ops.views"],
   "server/schema.js": ["engines"],
   "server/store.js": ["nightly.ingest", "members.pages", "door.v2", "coverage.view"],

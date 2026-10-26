@@ -58,6 +58,21 @@ name = "LOGIN_NAME"
 namespace_id = "1106"
 simple = { limit = 20, period = 60 }
 
+[[ratelimits]]
+name = "MEMBER_STATE_READ"
+namespace_id = "1121"
+simple = { limit = 120, period = 60 }
+
+[[ratelimits]]
+name = "MEMBER_STATE_WRITE"
+namespace_id = "1122"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "MEMBER_EXPORT"
+namespace_id = "1123"
+simple = { limit = 10, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"
@@ -88,6 +103,8 @@ FLOWS_HEALTH = "on"
 FLOWS_COVERAGE = "on"
 FLOWS_METER = "off"
 FLOWS_OPS = "on"
+FLOWS_MEMBER_STATE = "on"
+FLOWS_EXPORTS = "owner"
 FLOWS_PREMARKET_NEWS = "on"
 FLOWS_HOME_NET = "on"
 FLOWS_LIVE_MODE = "actions"

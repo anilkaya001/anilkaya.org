@@ -64,6 +64,16 @@ export const ERRORS = Object.freeze({
   unavailable: entry(503, "Service is not configured"),
   unsupported_media_type: entry(415, "Content-Type must be application/json"),
   upgrade_required: entry(426, "Expected a WebSocket upgrade"),
+  export_held: entry(403, "This page's export is held pending a licence review"),
+  export_limit: entry(429, "The export limit is spent; the next export frees as the oldest ages past 24 hours"),
+  exports_off: entry(404, "Exports are off"),
+  invalid_export: entry(400, "Choose a page and a format from the lists"),
+  invalid_precondition: entry(400, "If-Match must be the version the server sent"),
+  invalid_watchlist: entry(400, "The watchlist is not valid"),
+  member_state_off: entry(404, "Member state is off"),
+  member_state_unavailable: entry(503, "The server does not store watchlists; the list stays on this device"),
+  precondition_required: entry(428, "Send the version you are replacing in If-Match"),
+  stale_version: entry(412, "The saved state changed since you read it; reload and try again"),
 });
 
 export const errorEntry = (code) => (Object.hasOwn(ERRORS, code) ? ERRORS[code] : null);
