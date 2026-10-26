@@ -167,6 +167,37 @@ function battery(mod) {
     fail("a vetoed forward is a dash", at(0.001, { veto: true }).band === "dash" && at(0.001, { veto: true }).reason === "veto");
     fail("a missing standard error is a dash", mod.deltaBand({ F, se: null, K, sigma, T, held: "C" }).band === "dash" && mod.deltaBand({ F, se: -1, K, sigma, T, held: "C" }).band === "dash");
     fail("an unusable volatility is a dash", mod.deltaBand({ F, se: 0.1, K, sigma: 0, T, held: "C" }).band === "dash");
+    const rank = { plain: 0, pm: 1, dash: 2 };
+    let last = 0, monotone = true;
+    for (let h = 0.001; h < 0.2; h += 0.0005) { const r = rank[at(h).band]; if (r < last) monotone = false; last = r; }
+    fail("a larger forward error never narrows the printed band", monotone && last === 2);
+  }
+
+  {
+    const D = Math.exp(-0.04 * 0.1);
+    const q = (K, cb, ca, pb, pa) => ({ K, cb, ca, pb, pa });
+    const finite = (p) => p !== null && [p.F, p.se, p.seStat, p.sePure].every(Number.isFinite);
+    const one = mod.parityOf([q(100, 1, 1.02, 1, 1.02)], D);
+    fail("one pair gives a finite forward and error and no slope", finite(one) && one.slopeZ === null && one.birge === null);
+    const two = mod.parityOf([q(100, 1, 1.02, 1, 1.02), q(101, 0.6, 0.62, 1.4, 1.42)], D);
+    fail("two pairs give a finite forward and error and no slope", finite(two) && two.slopeZ === null && Number.isFinite(two.birge));
+    const same = mod.parityOf([q(100, 1, 1.02, 1, 1.02), q(100, 1.01, 1.03, 1, 1.02), q(100, 1, 1.02, 1.01, 1.03), q(100, 1, 1.02, 1, 1.02)], D);
+    fail("four pairs at one strike give a finite forward and no slope, never a NaN", finite(same) && same.slopeZ === null);
+    const flat = mod.parityOf(exactQuotes({ F: 100, D, T: 0.1, sigma: 0.3, strikes: [98, 99, 100, 101, 102] }), D);
+    fail("a set of pairs that all give one forward has a slope statistic of zero or a hair from it", finite(flat) && Math.abs(flat.slopeZ) < 1e-6);
+    fail("negative discount rates are refused rather than squared", mod.parityOf([q(100, 1, 1.02, 1, 1.02)], -1) === null);
+    const S = 100, r = 0.04, T = 30 / 365;
+    const rec = (quotes) => mod.chooseForward({ quotes, S, r, T, q: 0.015 });
+    const bad = [
+      [q(100, 0, 1.02, 1, 1.02), q(101, 1, 1.02, 0, 1)],
+      [q(100, 1.02, 1, 1, 1.02), q(101, 1, 1.02, 1.02, 1)],
+      [q(100, NaN, 1.02, 1, 1.02), q(101, null, 1.02, 1, 1.02), q(102, undefined, 1, 1, 1)],
+      [q(100, 1, 1.02, 1, 1.02), q(NaN, 1, 1.02, 1, 1.02), q(-5, 1, 1.02, 1, 1.02)],
+    ];
+    bad.forEach((quotes, i) => {
+      const out = rec(quotes);
+      fail("one-sided, crossed and non-numeric quotes leave a finite carry forward and no veto", Number.isFinite(out.F) && Number.isFinite(out.se) && out.src === "carry" && out.veto === false && out.n === (i === 3 ? 1 : 0));
+    });
   }
 
   {
@@ -238,6 +269,23 @@ function battery(mod) {
         fail(`the shift moves the parity forward away from the carry, never toward it (offset ${a}, slope ${c})`, par.F < carry.F && close(rec.Fpar, par.F, 1e-12) && rec.F < carry.F);
         fail(`the exercise term widens the parity error (offset ${a}, slope ${c})`, rec.sePar > par.se);
       }
+    }
+    {
+      const step = 0.02;
+      let prev = null, worstF = 0, worstSe = 0;
+      for (let a = 0; a <= 4 + 1e-9; a += step) {
+        const out = mod.chooseForward({ quotes: american(carry.F, a, 0.02), S, r, T, q });
+        if (prev) { worstF = Math.max(worstF, Math.abs(out.F - prev.F) / step); worstSe = Math.max(worstSe, Math.abs(out.se - prev.se) / step); }
+        prev = out;
+      }
+      fail(`sweeping the level through the ramp moves the forward by at most 2 a unit and its error by at most 0.5 a unit, never by a jump (${worstF.toFixed(2)}, ${worstSe.toFixed(2)})`, worstF <= 2 && worstSe <= 0.5);
+      prev = null; worstF = 0; worstSe = 0;
+      for (let c = 0; c <= 0.006 + 1e-12; c += 0.0001) {
+        const out = mod.chooseForward({ quotes: american(carry.F, 2.5, c), S, r, T, q });
+        if (prev) { worstF = Math.max(worstF, Math.abs(out.F - prev.F)); worstSe = Math.max(worstSe, Math.abs(out.se - prev.se)); }
+        prev = out;
+      }
+      fail(`sweeping the slope through the ramp moves the forward and its error by under 0.05 a step (${worstF.toFixed(3)}, ${worstSe.toFixed(3)})`, worstF < 0.05 && worstSe < 0.05);
     }
     fail("the grid covers no, partial and full early exercise", early.none > 0 && early.partial >= 3 && early.full >= 3 && flagged >= 3 && unflagged >= 3);
     const strong = mod.chooseForward({ quotes: american(carry.F, 2.5, 0.02), S, r, T, q });
