@@ -149,6 +149,8 @@
     return true;
   };
 
+  const geo = (n, d = 2) => n.toFixed(d);
+
   const attr = (el, name, value) => { if (el.getAttribute(name) !== value) el.setAttribute(name, value); };
 
   const data = (el, key, value) => { if (el.dataset[key] !== value) el.dataset[key] = value; };
@@ -321,13 +323,13 @@
   }
 
   function barSvg(b, verdict) {
-    const fill = b.fill ? '<rect class="sf-fo ' + (verdict === "above" ? "up" : "dn") + '" x="' + b.fill.x.toFixed(2) + '" y="4" width="' + b.fill.width.toFixed(2) + '" height="8"/>' : "";
+    const fill = b.fill ? '<rect class="sf-fo ' + (verdict === "above" ? "up" : "dn") + '" x="' + geo(b.fill.x) + '" y="4" width="' + geo(b.fill.width) + '" height="8"/>' : "";
     return '<svg class="sf-bar" viewBox="-' + HALF + ' 0 ' + 2 * HALF + ' 16" preserveAspectRatio="none" aria-hidden="true" focusable="false">' + fill +
-      '<rect class="sf-bd" x="' + Math.min(b.lo, b.hi).toFixed(2) + '" y="3" width="' + Math.abs(b.hi - b.lo).toFixed(2) + '" height="10"/><line class="sf-ax" x1="0" x2="0" y1="0" y2="16"/><line class="sf-tk" x1="' + b.mid.toFixed(2) + '" x2="' + b.mid.toFixed(2) + '" y1="1" y2="15"/></svg>';
+      '<rect class="sf-bd" x="' + geo(Math.min(b.lo, b.hi)) + '" y="3" width="' + geo(Math.abs(b.hi - b.lo)) + '" height="10"/><line class="sf-ax" x1="0" x2="0" y1="0" y2="16"/><line class="sf-tk" x1="' + geo(b.mid) + '" x2="' + geo(b.mid) + '" y1="1" y2="15"/></svg>';
   }
 
   function nameSvg(b) {
-    return '<svg class="sf-bar" viewBox="-' + HALF + ' 0 ' + 2 * HALF + ' 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="sf-fo nt" x="' + b.x.toFixed(2) + '" y="4" width="' + b.width.toFixed(2) + '" height="8"/><line class="sf-ax" x1="0" x2="0" y1="0" y2="16"/></svg>';
+    return '<svg class="sf-bar" viewBox="-' + HALF + ' 0 ' + 2 * HALF + ' 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="sf-fo nt" x="' + geo(b.x) + '" y="4" width="' + geo(b.width) + '" height="8"/><line class="sf-ax" x1="0" x2="0" y1="0" y2="16"/></svg>';
   }
 
   function tiltTd(cell, scale) {
@@ -375,7 +377,7 @@
 
   function lane(a, width) {
     const dir = a.from === "TK" ? "r" : "l";
-    return '<div class="fl-lane ' + dir + '" data-id="' + a.id + '" title="' + esc(a.exact) + '"><span class="fl-lab">' + esc(a.label) + " <b>" + esc(a.text) + '</b></span><span class="fl-ar" data-w="' + width.toFixed(2) + '"></span></div>';
+    return '<div class="fl-lane ' + dir + '" data-id="' + a.id + '" title="' + esc(a.exact) + '"><span class="fl-lab">' + esc(a.label) + " <b>" + esc(a.text) + '</b></span><span class="fl-ar" data-w="' + geo(width) + '"></span></div>';
   }
 
   const ends = (left, right) => '<span class="fl-ends">' + esc(left) + " left, " + esc(right) + " right</span>";
@@ -385,10 +387,10 @@
     const max = Math.max(0, ...cents);
     const w = arrowWidths(cents, max, short() ? ARROW_COMPACT : ARROW_MAX);
     const held = F.arrows.map((a, i) => lane(a, w[i])).join("");
-    const side = '<div class="fl-lane r" data-id="noside" title="' + esc(F.noside.exact) + '"><span class="fl-lab">' + esc(F.noside.line) + '</span><span class="fl-ar" data-w="' + w[4].toFixed(2) + '"></span></div>';
+    const side = '<div class="fl-lane r" data-id="noside" title="' + esc(F.noside.exact) + '"><span class="fl-lab">' + esc(F.noside.line) + '</span><span class="fl-ar" data-w="' + geo(w[4]) + '"></span></div>';
     const out = F.outside.s === "absent"
       ? '<div class="fl-lane gone" data-id="outside"><span class="fl-lab">' + esc(F.outside.line) + "</span></div>"
-      : '<div class="fl-lane ' + (F.outside.cents >= 0 ? "r" : "l") + ' dashed" data-id="outside" title="' + esc(F.outside.exact) + '"><span class="fl-lab">' + esc(F.outside.line) + '</span><span class="fl-ar" data-w="' + w[5].toFixed(2) + '"></span></div>';
+      : '<div class="fl-lane ' + (F.outside.cents >= 0 ? "r" : "l") + ' dashed" data-id="outside" title="' + esc(F.outside.exact) + '"><span class="fl-lab">' + esc(F.outside.line) + '</span><span class="fl-ar" data-w="' + geo(w[5]) + '"></span></div>';
     const node = (name, sub, cls) => '<div class="fl-node ' + cls + '"><b>' + esc(name) + "</b><i>" + esc(sub) + "</i></div>";
     return '<div class="sf-fl">' +
       '<section class="fl-band" data-b="held"><h3>' + WORDS.heldBand + ends(F.takers, F.providers) + '</h3><div class="fl-grid">' + node(F.takers, WORDS.held, "l") + '<div class="fl-lanes">' + held + "</div>" + node(F.providers, WORDS.held, "r") + '</div><p class="fl-net">' + esc(F.net.line) + "</p></section>" +
@@ -490,7 +492,7 @@
     put($("sfLeanVerdict"), L.verdict.text);
     put($("sfLeanSay"), L.verdict.long);
     const bar = $("sfLeanBar");
-    const pc = (f) => (100 * f).toFixed(3) + "%";
+    const pc = (f) => geo(100 * f, 3) + "%";
     const lo = L.frac.lo, hi = L.frac.hi;
     const at = (cls, x, w) => { const r = bar.querySelector("." + cls); attr(r, "x", x); attr(r, "width", w); };
     at("a", "0%", pc(lo));

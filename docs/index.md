@@ -1799,7 +1799,7 @@ The Network pop-out, `/flows/network/` (`networkPage` in `shared/flows-pages.js`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-popout.css` |  | flows-glass-render, flows-layout-sweep, flows-now-render, flows-popout-render |
+| `assets/css/flows-popout.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-now-render, flows-popout-render |
 | `assets/js/flows-popout.js` |  | flows-layout-sweep, flows-popout-render |
 | `tests/flows-popout-render.mjs` |  | flows-popout-render |
 
@@ -1809,7 +1809,7 @@ The Flagged now pop-out, `/flows/now/` (`nowPage` in `shared/flows-pages.js`, a 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-now.css` |  | flows-glass-render, flows-layout-sweep, flows-now-render |
+| `assets/css/flows-now.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-now-render |
 | `assets/js/flows-now.js` |  | flows-layout-sweep, flows-lean, flows-now-render |
 | `tests/flows-now-render.mjs` |  | flows-now-render |
 
@@ -1893,7 +1893,7 @@ The flow network, attached as `FlowsUI.net` (`model`, `mount`, `of`) and loaded 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-net.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-net-map-render, flows-net-render and 1 more |
+| `assets/css/flows-net.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-motion, flows-net-map-render and 2 more |
 | `assets/js/flows-net.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-lean, flows-net-map-render and 4 more |
 
 ### `assets/js/flows-export.js`, `tests/flows-export.mjs`
@@ -1911,13 +1911,13 @@ Stylesheets of the Flows pages: the shared system, boards, home, market, ticker,
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-ask.css` |  | flows-glass-render, flows-layout-sweep |
-| `assets/css/flows-boards.css` |  | flows-board-hit-render, flows-glass-render, flows-layout-sweep |
-| `assets/css/flows-feeds.css` |  | flows-events, flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-moves-render and 3 more |
-| `assets/css/flows-home.css` |  | flows-glass-render, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-layout-sweep and 2 more |
-| `assets/css/flows-market.css` |  | flows-glass-render, flows-layout-sweep, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render and 3 more |
-| `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-glass-render, flows-layout-sweep, flows-movelab-render and 4 more |
-| `assets/css/flows-tools.css` |  | flows-defaults-render, flows-desk-ratio, flows-glass-render, flows-layout-sweep |
+| `assets/css/flows-ask.css` |  | flows-glass-render, flows-layout-sweep, flows-motion |
+| `assets/css/flows-boards.css` |  | flows-board-hit-render, flows-glass-render, flows-layout-sweep, flows-motion |
+| `assets/css/flows-feeds.css` |  | flows-events, flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-motion and 4 more |
+| `assets/css/flows-home.css` |  | flows-glass-render, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-layout-sweep and 3 more |
+| `assets/css/flows-market.css` |  | flows-glass-render, flows-layout-sweep, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render and 4 more |
+| `assets/css/flows-ticker.css` |  | flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-glass-render, flows-layout-sweep, flows-motion and 5 more |
+| `assets/css/flows-tools.css` |  | flows-defaults-render, flows-desk-ratio, flows-glass-render, flows-layout-sweep, flows-motion |
 | `assets/css/flows.css` |  | contracts, flows-brand-render, flows-events, flows-glass-render, flows-home-onescreen, flows-kit and 13 more |
 
 ### `assets/js/flows-ui.js`, `assets/js/flows-dock.js`
@@ -1951,7 +1951,7 @@ The owner-only Status and Capacity page, `/flows/status/` (`statusPage`, a row i
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-status.css` |  | flows-glass-render, flows-layout-sweep, flows-status-render |
+| `assets/css/flows-status.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-status-render |
 | `assets/js/flows-status-capacity.js` |  | flows-layout-sweep |
 | `assets/js/flows-status-coverage.js` |  | flows-layout-sweep |
 | `assets/js/flows-status-latency.js` |  | flows-layout-sweep |
@@ -1992,7 +1992,7 @@ The sticky section index on Market and Ticker: an empty hidden `nav#fxIndex` in 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-index.css` |  | flows-glass-render, flows-layout-sweep |
+| `assets/css/flows-index.css` |  | flows-glass-render, flows-layout-sweep, flows-motion |
 | `assets/js/flows-index.js` |  | flows-index, flows-layout-sweep |
 
 ### `shared/flows-glossary.js`, `assets/css/flows-public.css`, `tests/flows-public-contract.mjs`
@@ -2001,7 +2001,7 @@ The public front door: `aboutPage` and `glossaryPage` in `shared/flows-pages.js`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-public.css` |  | flows-glass-render, flows-layout-sweep |
+| `assets/css/flows-public.css` |  | flows-glass-render, flows-layout-sweep, flows-motion |
 | `shared/flows-glossary.js` | `shared/flows-glossary.js#GLOSSARY`, `shared/flows-glossary.js#GLOSSARY_PAGES` | contracts, flows, flows-basis, flows-board-hit-render, flows-brand-render, flows-deadline-render and 65 more |
 | `tests/flows-public-contract.mjs` |  | flows-public |
 
@@ -2028,7 +2028,7 @@ The Moves page (`/flows/moves/`, F-57), a one-screen field of every name in the 
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-moves.css` |  | flows-glass-render, flows-layout-sweep, flows-moves-render |
+| `assets/css/flows-moves.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-moves-render |
 | `assets/js/flows-moves.js` |  | flows-horizon-lint, flows-layout-sweep, flows-moves-render, flows-moves-sig |
 | `tests/flows-moves-render.mjs` |  | flows-moves-render |
 | `tests/lib/moves-fixture.mjs` | `tests/lib/moves-fixture.mjs#CARD`, `tests/lib/moves-fixture.mjs#GENERATED_AT`, `tests/lib/moves-fixture.mjs#NIGHT`, `tests/lib/moves-fixture.mjs#SPECIAL`, `tests/lib/moves-fixture.mjs#decoded`, `tests/lib/moves-fixture.mjs#names`, `tests/lib/moves-fixture.mjs#universe` | flows-moves-render |
@@ -2039,7 +2039,7 @@ The ticker's Flow network, the dock's last module (its button used to say it was
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-ticker-network.css` |  | flows-flow-net-render, flows-glass-render, flows-layout-sweep |
+| `assets/css/flows-ticker-network.css` |  | flows-flow-net-render, flows-glass-render, flows-layout-sweep, flows-motion |
 | `assets/js/flows-ticker-network.js` |  | flows-flow-net-render, flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-layout-sweep, flows-movelab-render and 4 more |
 | `shared/flows-flow-net.js` | `shared/flows-flow-net.js#COLUMN_KEYS`, `shared/flows-flow-net.js#DAYS_PER_YEAR`, `shared/flows-flow-net.js#EXPIRY_NODES`, `shared/flows-flow-net.js#FACE_LINES`, `shared/flows-flow-net.js#FIXED_BAND`, `shared/flows-flow-net.js#FLAG_NODES`, `shared/flows-flow-net.js#MIN_WINDOWS`, `shared/flows-flow-net.js#MONEY_NODES`, `shared/flows-flow-net.js#NEAR_Z`, `shared/flows-flow-net.js#SESSION_CAP`, `shared/flows-flow-net.js#SIDE_NODES`, `shared/flows-flow-net.js#TITLES`, `shared/flows-flow-net.js#buildNet`, `shared/flows-flow-net.js#calendarDays`, `shared/flows-flow-net.js#expiryBucket`, `shared/flows-flow-net.js#flagNode`, `shared/flows-flow-net.js#moneyness`, `shared/flows-flow-net.js#readoutFor`, `shared/flows-flow-net.js#shares`, `shared/flows-flow-net.js#sideSplit`, `shared/flows-flow-net.js#volFor` | flows-flow-net-render |
 | `tests/flows-flow-net-render.mjs` |  | flows-flow-net-render |
@@ -2059,7 +2059,7 @@ The Political page (`/flows/political/`), stock first and one screen with no pag
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-political.css` |  | flows-glass-render, flows-layout-sweep, flows-political-render |
+| `assets/css/flows-political.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-political-render |
 | `assets/js/flows-political.js` |  | flows-layout-sweep, flows-payload-shape, flows-political-render |
 | `tests/flows-political-render.mjs` |  | flows-political-render |
 
@@ -2080,7 +2080,7 @@ The Market page's flow network, condensed (`FlowsUI.netMap`: `mount`, `of`, `rea
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-net-map.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-net-map-render, flows-net-render and 2 more |
+| `assets/css/flows-net-map.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-motion, flows-net-map-render and 3 more |
 | `assets/js/flows-net-map.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-net-map-render, flows-net-render, flows-pages-render and 1 more |
 | `tests/flows-net-map-render.mjs` |  | flows-net-map-render |
 
@@ -2159,7 +2159,7 @@ The premium desk's Short calls view (`strategy=sc`, the fourth item of Sell) and
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-desk.css` |  | flows-desk, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-wiring, flows-glass-render and 1 more |
+| `assets/css/flows-desk.css` |  | flows-desk, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-wiring, flows-glass-render and 2 more |
 | `assets/js/flows-desk-calls.js` |  | flows-desk, flows-desk-calls, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen, flows-desk-ratio and 2 more |
 | `tests/fixtures-shortcall.json` |  | flows-desk-calls |
 | `tests/flows-desk-calls-render.mjs` |  | flows-desk-calls-render |
@@ -2192,7 +2192,7 @@ The Neuron identity (design v3 Lane 2). `flows-nn.css` holds the `--nn-*` tokens
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-nn.css` |  | flows-glass-render, flows-layout-sweep, flows-nn-render |
+| `assets/css/flows-nn.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-nn-render |
 | `assets/js/flows-nn-orb.js` |  | flows-layout-sweep, flows-nn-render |
 
 ### `docs/design/neuron-icon.svg`
@@ -2217,7 +2217,7 @@ The Neuron's always-on presence in the Flows shell (the client lane of the Oracl
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-oracle.css` |  | flows-glass-render, flows-layout-sweep, flows-nn-render, flows-oracle-render |
+| `assets/css/flows-oracle.css` |  | flows-glass-render, flows-layout-sweep, flows-motion, flows-nn-render, flows-oracle-render |
 | `assets/js/flows-oracle-boot.js` |  | flows-layout-sweep, flows-oracle-core |
 | `assets/js/flows-oracle-core.js` |  | flows-layout-sweep, flows-oracle, flows-oracle-core, flows-oracle-live, flows-oracle-render, server-oracle |
 | `assets/js/flows-oracle.js` |  | flows-layout-sweep, flows-nn-render, flows-oracle-core, flows-oracle-render |
@@ -2228,7 +2228,7 @@ The Premium ledger page, behind `FLOWS_LEDGER` (`wrangler.toml`, shipped `owner`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/css/flows-sfc.css` |  | flows-board-hit-render, flows-film, flows-glass-render, flows-layout-sweep, flows-sfc-firstpaint, flows-sfc-render |
+| `assets/css/flows-sfc.css` |  | flows-board-hit-render, flows-film, flows-glass-render, flows-layout-sweep, flows-motion, flows-sfc-firstpaint and 1 more |
 | `assets/js/flows-sfc.js` |  | flows-board-hit-render, flows-film, flows-glass-render, flows-layout-sweep, flows-sfc-firstpaint, flows-sfc-render |
 | `shared/flows-page-ledger.js` | `shared/flows-page-ledger.js#LEDGER_DESCRIPTION`, `shared/flows-page-ledger.js#LEDGER_SCRIPTS`, `shared/flows-page-ledger.js#LEDGER_STYLES`, `shared/flows-page-ledger.js#ledgerBody` | contracts, flows, flows-basis, flows-board-hit-render, flows-brand-render, flows-deadline-render and 65 more |
 | `tests/flows-sfc-firstpaint.mjs` |  | flows-sfc-firstpaint |

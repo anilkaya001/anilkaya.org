@@ -422,7 +422,7 @@
   .sf-strip { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 6px; }
   .fl-lane { gap: 3px; }
 }
-@media (max-width: 899px) and (max-height: 720px) and (min-width: 380px) {
+@media (max-width: 899px) and (max-height: 720px) and (min-width: 381px) {
   .sf-strip { display: flex; gap: 4px; }
   .sf-sc { flex: 1 1 0; justify-content: center; padding: 0 4px; min-height: 22px; font-size: 10.5px; }
   .sf-sc .sc-t { display: none; }
