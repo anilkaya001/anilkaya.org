@@ -329,13 +329,10 @@ function contractProblems(w, repo) {
   const ownerOf = (file) => {
     if (w.PHASE0_FILES.includes(file)) return "phase0";
     if (owned.has(file)) return owned.get(file);
-    const base = file.split("/").pop();
     for (const [letter, lane] of lanes) {
-      const p = lane.prefix;
-      if (new RegExp(`^(tests/(lib/)?${p}[a-z0-9-]*\\.mjs|tests/fixtures-${p}[a-z0-9-]*\\.json|tests/suites/${p}[a-z0-9-]*\\.json|docs/ff/${p}[a-z0-9-]*\\.md)$`).test(file)) return letter;
+      const patterns = w.TEST_ARTIFACTS.map((t) => t.replace("<prefix>", lane.prefix).replace(/\./g, "\\.").replace("*", "[a-z0-9-]*"));
+      if (new RegExp("^(" + patterns.join("|") + ")$").test(file)) return letter;
     }
-    if (file === "tests/lib/d1-budget-ff.mjs") return "B";
-    if (/^docs\/ff\/[a-z-]+\.md$/.test(file) && base) return "docs";
     return null;
   };
   const namespace = (f) => /(^|\/)(ff-|flows-ff-|fixtures-ff-|d1-budget-ff)/.test(f) || f.startsWith("docs/ff/") || f === "server/routes/flows-ff.js" || /0026_ff\.sql$/.test(f);
@@ -647,6 +644,8 @@ plant("a file owned by two lanes", (w) => { w.LANES.B.files.push(w.LANES.A.files
 plant("a lane that owns a shared file", (w) => { w.LANES.D.files.push("worker.js"); }, "lane_owns_shared");
 plant("two lanes with one prefix", (w) => { w.LANES.E.prefix = w.LANES.D.prefix; }, "lane_prefix_overlap");
 plant("an unowned file in the FF namespace", (w, r) => { r.tracked = [...r.tracked, "assets/js/flows-ff-rogue.js"]; }, "unowned_ff_file");
+plant("a test artifact pattern off the lane prefix", (w, r) => { w.TEST_ARTIFACTS = ["tests/ff-<p>*.mjs"]; r.tracked = [...r.tracked, "tests/ff-a-grammar.mjs"]; }, "unowned_ff_file");
+plant("a document pattern keyed by the lane letter", (w, r) => { w.TEST_ARTIFACTS = w.TEST_ARTIFACTS.map((t) => t.replace("docs/ff/<prefix>*.md", "docs/ff/<l>-*.md")); r.tracked = [...r.tracked, "docs/ff/ff-e-notes.md"]; }, "unowned_ff_file");
 plant("an unowned test in the FF namespace", (w, r) => { r.tracked = [...r.tracked, "tests/ff-x-rogue.mjs"]; }, "unowned_ff_file");
 plant("a missing Phase 0 file", (w, r) => { r.tracked = r.tracked.filter((f) => f !== "docs/ff/inventory.md"); }, "phase0_missing");
 plant("a lane file that imports the vendor client", (w, r) => { r.ffSources = [{ path: "server/ff-eval.js", text: 'import { uwFetch } from "../shared/flows-vendor-core.js";\n' }]; }, "forbidden_import");

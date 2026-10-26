@@ -603,7 +603,7 @@ export const PHASE0_FILES = deepFreeze([
 ]);
 
 export const TEST_ARTIFACTS = deepFreeze([
-  "tests/ff-<p>*.mjs", "tests/lib/ff-<p>*.mjs", "tests/fixtures-ff-<p>*.json", "tests/suites/ff-<p>*.json", "docs/ff/<l>-*.md",
+  "tests/<prefix>*.mjs", "tests/lib/<prefix>*.mjs", "tests/fixtures-<prefix>*.json", "tests/suites/<prefix>*.json", "docs/ff/<prefix>*.md",
 ]);
 
 export const SHARED_EDITS = deepFreeze({

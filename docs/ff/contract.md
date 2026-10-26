@@ -189,7 +189,7 @@ Error codes were added to `server/errors.js` in Phase 0 and are listed in `ERROR
 
 ## 15. Lanes and the files they own
 
-Lanes only create new files named below; test artifacts are named by lane prefix so that no two lanes can collide: `tests/ff-<p>*.mjs`, `tests/lib/ff-<p>*.mjs`, `tests/fixtures-ff-<p>*.json`, `tests/suites/ff-<p>*.json`, `docs/ff/<p>*.md`. `tests/ff-contract.mjs` fails a pull request that adds a file in the Fire & Forget namespace that no lane owns, and any FF source file that imports a forbidden module or calls the vendor.
+Lanes only create new files named below; test artifacts are named by the lane's prefix from the table below (`ff-a-` for lane A) so that no two lanes can collide: `tests/<prefix>*.mjs`, `tests/lib/<prefix>*.mjs`, `tests/fixtures-<prefix>*.json`, `tests/suites/<prefix>*.json`, `docs/ff/<prefix>*.md`, for example `tests/ff-a-grammar.mjs` and `tests/fixtures-ff-a-grammar.json`. `tests/ff-contract.mjs` fails a pull request that adds a file in the Fire & Forget namespace that no lane owns, and any FF source file that imports a forbidden module or calls the vendor.
 
 | Lane | Owns | Prefix |
 |---|---|---|
