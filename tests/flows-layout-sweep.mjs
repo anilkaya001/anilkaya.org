@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
+import { realisticWorld, respondWith } from "./lib/sfc-render-world.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -24,6 +25,7 @@ const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/wof
 const NOW = Date.parse("2026-08-24T15:25:00.000Z");
 const iso = (ms) => new Date(ms).toISOString();
 
+let ledgerAnswer = null;
 const dir = mkdtempSync(path.join(tmpdir(), "flows-pages-"));
 try {
   execFileSync("node", [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", path.join(dir, "p.json")], { stdio: "pipe" });
@@ -82,6 +84,7 @@ function answer(route, u) {
     case "card-x": return emitted("card-x-" + q.get("t")) || { status: "pending" };
     case "hist": return emitted("hist-" + q.get("t")) || { status: "pending" };
     case "ai-usage": return { spend: { neurons: 4200, cap: 30000, calls: 40 } };
+    case "ledger": { ledgerAnswer ||= respondWith(realisticWorld()); return ledgerAnswer(u); }
     case "summary": return { status: "ok", scope: q.get("t") || "", summary: null, ideas: [], tier: "family", code: null, why: "x", read: READ };
     case "lk": {
       const keys = {};
@@ -186,7 +189,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger"]);
 
 const SWEEP = () => {
   const vis = (e) => {
