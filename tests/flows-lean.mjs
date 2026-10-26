@@ -216,6 +216,13 @@ const MUTANTS = [
   ["Relations lean ignores puts", { "flows-relations.js": [['const lean = sp ? (r.cp === "C" ? sp.ask - sp.bid : sp.bid - sp.ask) : 0;', 'const lean = sp && r.cp === "C" ? sp.ask - sp.bid : 0;']] }],
 ];
 
+const TICKER_SRC = readFileSync(new URL("flows-ticker.js", JS), "utf8");
+const askRule = (src) => /F\.askSaid\(al && \{ share: al\.askShare, classified: num\(al\.sidedShare\) \}\)/.test(src) && !/\["Ask side", F\.pct\(al && al\.askShare/.test(src) && /al\.sidedShare >= 0 \? al\.askShare : null/.test(src);
+checks++;
+if (!askRule(TICKER_SRC)) { console.error("the ticker's alert card prints its ask side through F.askSaid with the sided share, and withholds the figure from a card that predates it"); process.exit(1); }
+checks++;
+if (askRule(TICKER_SRC.replace("[F.askLabel, F.askSaid(al && { share: al.askShare, classified: num(al.sidedShare) })]", '["Ask side", F.pct(al && al.askShare, 0)]'))) { console.error("the ask-side scan does not catch the old ask-over-premium print"); process.exit(1); }
+
 let killed = 0;
 const alive = [];
 for (const [name, patches] of MUTANTS) {

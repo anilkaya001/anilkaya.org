@@ -2487,8 +2487,8 @@
     const tileList = [
       offIndex(card, X.alerts) ? null : UI.tile({ title: "Alerts", value: al ? String(al.n) : DASH, unit: al ? F.money(al.prem) : null, state: al ? null : xSt(X.alerts, "alerts"),
         info: () => ({ title: "Flow alerts", lead: al ? al.n + " alerts on this name in the session, " + F.money(al.prem) + " of premium" + (al.complete ? "." : "; the read stopped before the open, so the count is a floor.") : null,
-          facts: [["Ask side", F.pct(al && al.askShare, 0)], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
-        body: al ? h("div", { class: "ft-meters" }, meter("Ask", al.askShare, "--up-mark"), meter("Sweep", al.sweepShare, "--s-orange"), meter("Open", al.openingShare, "--s-blue")) : null }),
+          facts: [[F.askLabel, F.askSaid(al && { share: al.askShare, classified: num(al.sidedShare) })], ["Sweeps", F.pct(al && al.sweepShare, 0)], ["Opening", F.pct(al && al.openingShare, 0)], ["Calls", F.pct(al && al.callShare, 0)], ["Urgency", al ? F.pct(al.urgency, 2) + " of ADV" : null]] }),
+        body: al ? h("div", { class: "ft-meters" }, meter("Ask", al.sidedShare >= 0 ? al.askShare : null, "--up-mark"), meter("Sweep", al.sweepShare, "--s-orange"), meter("Open", al.openingShare, "--s-blue")) : null }),
       offIndex(card, X.multiLeg) ? null : UI.tile({ title: "Structures", value: ml ? String(ml.n) : DASH, unit: ml ? F.money(ml.grossPrem) : null, state: ml ? null : xSt(X.multiLeg, "multi-leg read"),
         info: () => ({ title: "Multi-leg structures", lead: ml ? ml.n + " multi-leg structures traded in the session" + (ml.truncated ? " (the read hit its page ceiling, so this is a floor)" : "") + "." : null,
           facts: ml ? [["Net premium", moneyPx(ml.netPrem)], ["Credit share", F.pct(ml.creditShare, 0)], ["Opening share", F.pct(ml.openingShare, 0)], ["Long / short", ml.long + " / " + ml.short],

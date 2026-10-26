@@ -1,5 +1,6 @@
 import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
+import { askShareRead } from "./flows-tape-stats.js";
 import { opById } from "./flows-vendor-ops.js";
 
 export const DOSSIER_VERSION = 1;
@@ -1343,8 +1344,11 @@ export function buildFlowPacket(inp) {
       rec.fact("alerts.premium", "Premium across those alerts", sum(rows.map((r) => r.prem)), "usd", { grade: g });
       rec.fact("alerts.callPremium", "Of which calls", sum(calls.map((r) => r.prem)), "usd", { grade: g, silent: true });
       rec.fact("alerts.putPremium", "Of which puts", sum(puts.map((r) => r.prem)), "usd", { grade: g, silent: true });
-      const ask = rows.filter((r) => isNum(r.askPrem));
-      if (ask.length) rec.fact("alerts.askShare", "Share of that premium on the ask side", sum(ask.map((r) => r.askPrem)) / Math.max(1, sum(ask.map((r) => r.prem))), "fraction", { grade: 2, note: "the vendor's ask-side attribution; the alert field is undocumented, and no intent is implied" });
+      const sidedRead = askShareRead(rows);
+      if (sidedRead.classified !== null) {
+        rec.fact("alerts.sidedShare", "Share of that premium the vendor sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the vendor attributed to the ask or the bid side; the rest was left between the quotes or never split" });
+        if (sidedRead.side === "ask" || sidedRead.side === "bid" || sidedRead.side === "mixed") rec.fact("alerts.askShare", "Share of the premium the vendor sided that is on the ask side", sidedRead.share, "fraction", { grade: 2, note: "the vendor's ask-side attribution against the premium it sided, the site's one ask-share rule; the alert field is undocumented, and no intent is implied" });
+      }
       rec.fact("alerts.sweeps", "Alerts flagged as sweeps", rows.filter((r) => r.sweep === true).length, "count", { grade: g, silent: true });
       const top = rows.slice().sort((a, b) => b.prem - a.prem)[0];
       if (top) {
