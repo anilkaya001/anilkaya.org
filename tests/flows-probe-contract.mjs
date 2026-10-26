@@ -100,7 +100,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     .filter((f) => !/fake|live-day\.mjs$|flows-ws-probe\.mjs$|ops-probe\.mjs$|launch-readiness\.mjs$/.test(f));
   ok(files.length > 40 && files.includes("worker.js") && files.includes("scripts/flows-pipeline.mjs") && files.includes("scripts/flows-probe.mjs"),
     `the production sources are scanned: worker.js, shared/ and scripts/ less the fakes, the socket probe and the two tools that read this site's own origin (${files.length} files)`);
-  const OWN = /^\/api\/(flows|rt|me|bootstrap|progress|stats|mastery|placement|v2|markets|auth)(\/|$)|^\/api\/?$/;
+  const OWN = /^\/api\/(flows|ff|rt|me|bootstrap|progress|stats|mastery|placement|v2|markets|auth)(\/|$)|^\/api\/?$/;
   const REGISTRY = "shared/flows-vendor-ops.js";
   const literals = [];
   const refs = new Map();

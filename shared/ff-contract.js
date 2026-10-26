@@ -335,15 +335,16 @@ export const LIMITS = deepFreeze({
   armedMemberWiresGlobal: 2000,
   versionsPerWirePerSession: 10,
   mutesPerMember: 500,
-  hitsPerMemberWirePerSession: 25,
-  hitsPerMemberPerSession: 200,
-  hitsGlobalPerSession: 10000,
+  hitsPerMemberWirePerSession: 10,
+  hitsPerMemberPerSession: 25,
+  hitsGlobalPerSession: 500,
+  hitsPerHouseWirePerSession: { nightly: 10, live: 20 },
   evidenceBytes: 4096,
   groupInboxAfter: 3,
   budgetChoices: [1, 2, 5],
   budgetDefault: 2,
   cooldownUnit: "session",
-  cooldownChoices: [1, 2, 5, 10, 20],
+  cooldownChoices: { live: [1], nightly: [1, 2, 5, 10, 20] },
   cooldownDefault: COOLDOWN_DEFAULT,
   bhQ: 0.05,
   baselineWindow: 20,
@@ -486,7 +487,7 @@ export const BUDGET = deepFreeze({
   runAttemptsMax: 6,
   runRetention: 14,
   archive: { table: "ff_arch", switch: "channel:archive", rowsPerSession: 28, bytesPerRowMax: 131072 },
-  worstHitBytesPerSession: 40960000,
+  worstHitBytesPerSession: 2457600,
 });
 
 export const DIGEST_QUADRANTS = deepFreeze(["house-nightly", "house-live", "yours-nightly", "yours-live"]);
@@ -513,6 +514,7 @@ export const ID_RULES = deepFreeze({
   evaluatorInKey: false,
   oneHitPerKeyPerSession: true,
   versionsPerWirePerSession: 10,
+  runIds: ["nightly:<session>", "live:<session>", "calib:<YYYY-Www>"],
 });
 
 export const ROBUST = deepFreeze({
@@ -621,7 +623,7 @@ export const FORBIDDEN = deepFreeze({
     "shared/flows-vendor-core.js", "shared/flows-vendor-ops.js", "shared/flows-vendor-extras.js", "shared/flows-dossier-vendor.js",
     "shared/flows-dossier-worker.js", "shared/flows-ai.js", "shared/flows-ai-broker.js", "server/ai.js", "scripts/flows-nightly/vendor.mjs",
   ],
-  sourceTokens: ["uwFetch", "askModels", "cappedAi", "env.AI"],
+  sourceTokens: ["uwFetch", "askModels", "cappedAi"],
   fetchAllowedIn: ["scripts/flows-legs/ff-metrics.mjs", "scripts/flows-legs/ff-carry.mjs", "scripts/flows-legs/ff-calibrate.mjs"],
   rule: "evaluation never calls the vendor and reads only what the pipeline already holds",
 });

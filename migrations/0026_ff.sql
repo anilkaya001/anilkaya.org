@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS ff_wire (
   CHECK ((layer = 'house' AND member_id IS NULL AND (id GLOB 'h-t[0-9][0-9]' OR id GLOB 'h-t[0-9][0-9][a-z]')) OR (layer = 'member' AND member_id IS NOT NULL AND length(member_id) BETWEEN 3 AND 32 AND member_id NOT GLOB '*[^a-z0-9_.-]*' AND length(id) = 18 AND id GLOB 'w-[a-z2-7]*' AND id NOT GLOB 'w-*[^a-z2-7]*'))
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS ff_wire_by_member ON ff_wire (member_id, status);
-CREATE INDEX IF NOT EXISTS ff_wire_by_layer ON ff_wire (layer, status);
 CREATE TABLE IF NOT EXISTS ff_wire_version (
   wire_id TEXT NOT NULL,
   version INTEGER NOT NULL CHECK (version >= 1),
@@ -28,7 +27,7 @@ CREATE TABLE IF NOT EXISTS ff_wire_version (
   effective_session TEXT NOT NULL CHECK (effective_session GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   created_at INTEGER NOT NULL CHECK (created_at > 0),
   PRIMARY KEY (wire_id, version)
-);
+) WITHOUT ROWID;
 CREATE TRIGGER IF NOT EXISTS ff_wire_version_frozen BEFORE UPDATE ON ff_wire_version BEGIN SELECT RAISE(ABORT, 'ff_wire_version is frozen'); END;
 CREATE TRIGGER IF NOT EXISTS ff_wire_version_kept BEFORE DELETE ON ff_wire_version BEGIN SELECT RAISE(ABORT, 'ff_wire_version is kept'); END;
 CREATE TABLE IF NOT EXISTS ff_wire_symbol (
@@ -75,7 +74,7 @@ CREATE TABLE IF NOT EXISTS ff_hit (
   UNIQUE (hit_id),
   CHECK ((member_id IS NULL AND stream = 'house') OR (member_id IS NOT NULL AND stream = member_id)),
   CHECK ((withdrawn_at IS NULL) = (withdrawn_reason IS NULL))
-);
+) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS ff_hit_by_wire ON ff_hit (wire_id, seq);
 CREATE INDEX IF NOT EXISTS ff_hit_by_symbol ON ff_hit (stream, symbol, seq);
 CREATE TRIGGER IF NOT EXISTS ff_hit_frozen BEFORE UPDATE OF stream, seq, hit_id, wire_id, wire_version, member_id, subject, symbol, sector, dedupe_key, session, session_label, fired_at, data_as_of, evaluator, evaluator_version, evidence_json, state ON ff_hit BEGIN SELECT RAISE(ABORT, 'ff_hit is frozen'); END;
@@ -134,7 +133,7 @@ CREATE TABLE IF NOT EXISTS ff_receipt (
   run_id TEXT CHECK (run_id IS NULL OR length(run_id) BETWEEN 1 AND 64),
   PRIMARY KEY (wire_id, version, session),
   CHECK (status = 'evaluated' OR reason IS NOT NULL)
-);
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS ff_record (
   wire_id TEXT NOT NULL,
   version INTEGER NOT NULL CHECK (version >= 1),
@@ -167,6 +166,7 @@ CREATE TABLE IF NOT EXISTS ff_run (
   kind TEXT NOT NULL CHECK (kind IN ('nightly', 'live', 'calib', 'rail')),
   session TEXT NOT NULL CHECK (session GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   slot TEXT NOT NULL CHECK (length(slot) BETWEEN 1 AND 16),
+  slots TEXT CHECK (slots IS NULL OR length(slots) <= 200),
   src_hash TEXT CHECK (src_hash IS NULL OR length(src_hash) BETWEEN 8 AND 64),
   status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed', 'superseded')),
   attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
@@ -178,9 +178,10 @@ CREATE TABLE IF NOT EXISTS ff_run (
   names_evaluated INTEGER NOT NULL DEFAULT 0 CHECK (names_evaluated >= 0),
   hits_written INTEGER NOT NULL DEFAULT 0 CHECK (hits_written >= 0),
   unknown_count INTEGER NOT NULL DEFAULT 0 CHECK (unknown_count >= 0),
+  rows_read INTEGER NOT NULL DEFAULT 0 CHECK (rows_read >= 0),
+  rows_written INTEGER NOT NULL DEFAULT 0 CHECK (rows_written >= 0),
   version TEXT CHECK (version IS NULL OR length(version) <= 40)
 ) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS ff_run_by_kind ON ff_run (kind, finished_at);
 CREATE TABLE IF NOT EXISTS ff_switches (
   scope TEXT NOT NULL CHECK (scope IN ('evaluator', 'template', 'house', 'wire', 'member', 'channel')),
   target TEXT NOT NULL CHECK (length(target) BETWEEN 1 AND 40),

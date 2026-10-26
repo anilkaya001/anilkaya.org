@@ -19,7 +19,6 @@ export const FF_SCHEMA_SQL = Object.freeze([
     `(layer = 'member' AND member_id IS NOT NULL AND ${MEMBER} AND length(id) = 18 AND id GLOB 'w-[a-z2-7]*' AND id NOT GLOB 'w-*[^a-z2-7]*'))` +
     ") WITHOUT ROWID",
   "CREATE INDEX IF NOT EXISTS ff_wire_by_member ON ff_wire (member_id, status)",
-  "CREATE INDEX IF NOT EXISTS ff_wire_by_layer ON ff_wire (layer, status)",
 
   "CREATE TABLE IF NOT EXISTS ff_wire_version (" +
     "wire_id TEXT NOT NULL, " +
@@ -36,7 +35,7 @@ export const FF_SCHEMA_SQL = Object.freeze([
     "registry_version INTEGER NOT NULL CHECK (registry_version >= 1), " +
     `effective_session TEXT NOT NULL CHECK (effective_session ${SESSION}), ` +
     "created_at INTEGER NOT NULL CHECK (created_at > 0), " +
-    "PRIMARY KEY (wire_id, version))",
+    "PRIMARY KEY (wire_id, version)) WITHOUT ROWID",
   "CREATE TRIGGER IF NOT EXISTS ff_wire_version_frozen BEFORE UPDATE ON ff_wire_version " +
     "BEGIN SELECT RAISE(ABORT, 'ff_wire_version is frozen'); END",
   "CREATE TRIGGER IF NOT EXISTS ff_wire_version_kept BEFORE DELETE ON ff_wire_version " +
@@ -85,7 +84,7 @@ export const FF_SCHEMA_SQL = Object.freeze([
     "UNIQUE (wire_id, dedupe_key), " +
     "UNIQUE (hit_id), " +
     "CHECK ((member_id IS NULL AND stream = 'house') OR (member_id IS NOT NULL AND stream = member_id)), " +
-    "CHECK ((withdrawn_at IS NULL) = (withdrawn_reason IS NULL)))",
+    "CHECK ((withdrawn_at IS NULL) = (withdrawn_reason IS NULL))) WITHOUT ROWID",
   "CREATE INDEX IF NOT EXISTS ff_hit_by_wire ON ff_hit (wire_id, seq)",
   "CREATE INDEX IF NOT EXISTS ff_hit_by_symbol ON ff_hit (stream, symbol, seq)",
   `CREATE TRIGGER IF NOT EXISTS ff_hit_frozen BEFORE UPDATE OF ${FROZEN_HIT} ON ff_hit ` +
@@ -146,7 +145,7 @@ export const FF_SCHEMA_SQL = Object.freeze([
     "upgraded_at INTEGER CHECK (upgraded_at IS NULL OR upgraded_at > 0), " +
     "run_id TEXT CHECK (run_id IS NULL OR length(run_id) BETWEEN 1 AND 64), " +
     "PRIMARY KEY (wire_id, version, session), " +
-    "CHECK (status = 'evaluated' OR reason IS NOT NULL))",
+    "CHECK (status = 'evaluated' OR reason IS NOT NULL)) WITHOUT ROWID",
 
   "CREATE TABLE IF NOT EXISTS ff_record (" +
     "wire_id TEXT NOT NULL, " +
@@ -180,6 +179,7 @@ export const FF_SCHEMA_SQL = Object.freeze([
     "kind TEXT NOT NULL CHECK (kind IN ('nightly', 'live', 'calib', 'rail')), " +
     `session TEXT NOT NULL CHECK (session ${SESSION}), ` +
     "slot TEXT NOT NULL CHECK (length(slot) BETWEEN 1 AND 16), " +
+    "slots TEXT CHECK (slots IS NULL OR length(slots) <= 200), " +
     "src_hash TEXT CHECK (src_hash IS NULL OR length(src_hash) BETWEEN 8 AND 64), " +
     "status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'done', 'failed', 'superseded')), " +
     "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), " +
@@ -191,8 +191,9 @@ export const FF_SCHEMA_SQL = Object.freeze([
     "names_evaluated INTEGER NOT NULL DEFAULT 0 CHECK (names_evaluated >= 0), " +
     "hits_written INTEGER NOT NULL DEFAULT 0 CHECK (hits_written >= 0), " +
     "unknown_count INTEGER NOT NULL DEFAULT 0 CHECK (unknown_count >= 0), " +
+    "rows_read INTEGER NOT NULL DEFAULT 0 CHECK (rows_read >= 0), " +
+    "rows_written INTEGER NOT NULL DEFAULT 0 CHECK (rows_written >= 0), " +
     "version TEXT CHECK (version IS NULL OR length(version) <= 40)) WITHOUT ROWID",
-  "CREATE INDEX IF NOT EXISTS ff_run_by_kind ON ff_run (kind, finished_at)",
 
   "CREATE TABLE IF NOT EXISTS ff_switches (" +
     "scope TEXT NOT NULL CHECK (scope IN ('evaluator', 'template', 'house', 'wire', 'member', 'channel')), " +

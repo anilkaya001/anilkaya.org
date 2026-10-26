@@ -11,7 +11,7 @@ import { FRESH_CLASSES } from "../shared/flows-freshness.js";
 import { TRT_OFFSET_MIN, TRT_LABEL, boundaries } from "../shared/flows-time.js";
 import { fixtureNameIn } from "../shared/flows-fixture-names.js";
 import { ROOT, trackedFiles } from "./lib/suite-registry.mjs";
-import { FF_PLANNED, FF_BUDGET_PARAMS, FF_ROW_COSTS, ffRows } from "./lib/d1-budget-ff.mjs";
+import { FF_PLANNED, FF_BUDGET_PARAMS, FF_ROW_COSTS, FF_TABLE_ROW_COSTS, ffRows } from "./lib/d1-budget-ff.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -154,7 +154,7 @@ function astProblems(body, w, { derived = false } = {}) {
   if (!Number.isInteger(body.persist) || body.persist < range[0] || body.persist > range[1]) add("grammar_invalid");
   const cd = body.cooldown;
   if (!cd || typeof cd !== "object" || JSON.stringify(Object.keys(cd).sort()) !== JSON.stringify([...w.AST_GRAMMAR.cooldown].sort())
-    || cd.unit !== w.LIMITS.cooldownUnit || !w.LIMITS.cooldownChoices.includes(cd.n)) add("grammar_invalid");
+    || cd.unit !== w.LIMITS.cooldownUnit || !(w.LIMITS.cooldownChoices[body.cadence] || []).includes(cd.n)) add("grammar_invalid");
   return out;
 }
 
@@ -248,9 +248,15 @@ function contractProblems(w, repo) {
   if (!w.LIMITS.budgetChoices.includes(w.LIMITS.budgetDefault)) bad("limits_budget");
   if (w.LIMITS.evidenceBytes !== 4096 || w.LIMITS.astBytes !== 4096) bad("limits_bytes");
   if (w.LIMITS.baselineMin > w.LIMITS.baselineWindow || w.LIMITS.bhQ !== 0.05 || w.LIMITS.madScale !== 1.4826) bad("limits_stats");
+  const cc = w.LIMITS.cooldownChoices;
   if (JSON.stringify(w.LIMITS.cooldownDefault) !== JSON.stringify({ live: 1, nightly: 5 }) || w.LIMITS.cooldownUnit !== "session"
-    || !w.LIMITS.cooldownChoices.includes(w.LIMITS.cooldownDefault.live) || !w.LIMITS.cooldownChoices.includes(w.LIMITS.cooldownDefault.nightly)
-    || JSON.stringify(w.LIMITS.cooldownChoices) !== JSON.stringify([...w.LIMITS.cooldownChoices].sort((a, b) => a - b))) bad("limits_cooldown");
+    || JSON.stringify(cc.live) !== JSON.stringify([1]) || !cc.nightly.includes(w.LIMITS.cooldownDefault.nightly)
+    || JSON.stringify(cc.nightly) !== JSON.stringify([...cc.nightly].sort((a, b) => a - b)) || !cc.nightly.includes(1)) bad("limits_cooldown");
+  const hc = w.LIMITS;
+  if (!(hc.hitsPerMemberWirePerSession <= hc.hitsPerMemberPerSession && hc.hitsPerMemberPerSession <= hc.hitsGlobalPerSession)
+    || !(hc.hitsPerHouseWirePerSession.nightly >= 1 && hc.hitsPerHouseWirePerSession.live >= 1)) bad("limits_hit_caps");
+  if (w.BUDGET.worstHitBytesPerSession !== (hc.hitsGlobalPerSession + hc.hitsPerHouseWirePerSession.nightly * w.TEMPLATES.filter((t) => t.cadence === "nightly").flatMap((t) => t.house).length
+    + hc.hitsPerHouseWirePerSession.live * w.TEMPLATES.filter((t) => t.cadence === "live").flatMap((t) => t.house).length) * hc.evidenceBytes) bad("budget_worst_bytes");
   if (w.AST_GRAMMAR.rejectedFromClient.includes("cooldown") || !w.AST_GRAMMAR.body.includes("cooldown")) bad("grammar_cooldown");
 
   const keysExist = ["states", "pages", "slots", "attributes", "tokens"].every((k) => Array.isArray(w.HOOKS[k]));
@@ -347,6 +353,8 @@ function contractProblems(w, repo) {
   return out;
 }
 
+const MODEL_BINDINGS = ["AI"];
+
 function forbiddenProblems(file, source, w) {
   const out = [];
   const isTest = file.startsWith("tests/") || file === "shared/ff-contract.js";
@@ -356,6 +364,7 @@ function forbiddenProblems(file, source, w) {
   }
   if (!isTest) {
     for (const t of w.FORBIDDEN.sourceTokens) if (source.includes(t)) out.push("forbidden_token");
+    for (const b of MODEL_BINDINGS) if (new RegExp(`\\b(?:env|self|globalThis|this)\\s*\\.\\s*${b}\\b|\\[\\s*["']${b}["']\\s*\\]`).test(source)) out.push("forbidden_token");
     if (/\bfetch\(/.test(source) && !w.FORBIDDEN.fetchAllowedIn.includes(file)) out.push("forbidden_fetch");
   }
   return out;
@@ -550,8 +559,31 @@ for (const p of FF_PLANNED) {
 }
 eq(FF_PLANNED.length, 4, "four FF budget rows");
 ok(FF_BUDGET_PARAMS.wiresPerMember <= NS.LIMITS.armedMemberWires && FF_BUDGET_PARAMS.symbolsPerWire <= NS.LIMITS.symbolsMax, "the budget plans inside the limits");
-ok(FF_ROW_COSTS.hit === 6, "a hit costs its row, its key, two unique indexes and two plain indexes");
-ok(FF_PLANNED.reduce((n, p) => n + p.written, 0) < 8000 && FF_PLANNED.reduce((n, p) => n + p.read, 0) < 150000, "Fire & Forget stays inside its share of the daily rows");
+eq(FF_BUDGET_PARAMS.houseWires, NS.HOUSE_IDS.length, "the budget counts the house wires the contract registers");
+eq(FF_BUDGET_PARAMS.hitsNightlyHouse, 80, "the nightly house hits are the caps of the eight nightly house wires");
+ok(FF_BUDGET_PARAMS.hitsLiveHouse === NS.LIMITS.hitsPerHouseWirePerSession.live, "and the live house hits are the cap of the live house wire");
+ok(FF_PLANNED.reduce((n, p) => n + p.written, 0) < 3300 && FF_PLANNED.reduce((n, p) => n + p.read, 0) < 100000, "Fire & Forget stays inside the headroom the daily ledger leaves it");
+
+const tableCosts = (statements) => {
+  const mem = new DatabaseSync(":memory:");
+  for (const sql of statements) mem.exec(sql);
+  const wr = new Map(mem.prepare("PRAGMA table_list").all().map((r) => [r.name, r.wr === 1]));
+  return Object.fromEntries(FF_TABLES.map((t) => [t, 1 + mem.prepare(`PRAGMA index_list(${t})`).all().filter((i) => !(wr.get(t) && i.origin === "pk")).length]));
+};
+eq(tableCosts(FF_SCHEMA_SQL), FF_TABLE_ROW_COSTS, "rows written per insert, derived from the DDL (the row plus every index entry), are the costs the budget prices");
+eq([FF_ROW_COSTS.hit, FF_ROW_COSTS.receipt, FF_ROW_COSTS.record, FF_ROW_COSTS.state, FF_ROW_COSTS.confirm, FF_ROW_COSTS.runWrite, FF_ROW_COSTS.archiveInsert],
+  [FF_TABLE_ROW_COSTS.ff_hit, FF_TABLE_ROW_COSTS.ff_receipt, FF_TABLE_ROW_COSTS.ff_record, FF_TABLE_ROW_COSTS.ff_state, FF_TABLE_ROW_COSTS.ff_confirm, FF_TABLE_ROW_COSTS.ff_run, FF_TABLE_ROW_COSTS.ff_arch],
+  "and the per-event costs are those table costs");
+const costPlant = (name, mutate) => {
+  const statements = [...FF_SCHEMA_SQL];
+  mutate(statements);
+  ok(JSON.stringify(tableCosts(statements)) !== JSON.stringify(FF_TABLE_ROW_COSTS), `planted wrong schema "${name}" changes a priced row cost`);
+};
+costPlant("an index nobody priced on receipts", (s) => s.push("CREATE INDEX IF NOT EXISTS ff_receipt_by_status ON ff_receipt (status)"));
+costPlant("hits as a rowid table", (s) => { const i = s.findIndex((x) => /CREATE TABLE IF NOT EXISTS ff_hit \(/.test(x)); s[i] = s[i].replace(" WITHOUT ROWID", ""); });
+costPlant("receipts as a rowid table", (s) => { const i = s.findIndex((x) => /CREATE TABLE IF NOT EXISTS ff_receipt \(/.test(x)); s[i] = s[i].replace(" WITHOUT ROWID", ""); });
+costPlant("the run index back", (s) => s.push("CREATE INDEX IF NOT EXISTS ff_run_by_kind ON ff_run (kind, finished_at)"));
+costPlant("the layer index back", (s) => s.push("CREATE INDEX IF NOT EXISTS ff_wire_by_layer ON ff_wire (layer, status)"));
 
 const plant = (name, mutate, expect) => {
   const w = world();
@@ -620,6 +652,8 @@ plant("a missing Phase 0 file", (w, r) => { r.tracked = r.tracked.filter((f) => 
 plant("a lane file that imports the vendor client", (w, r) => { r.ffSources = [{ path: "server/ff-eval.js", text: 'import { uwFetch } from "../shared/flows-vendor-core.js";\n' }]; }, "forbidden_import");
 plant("a lane file that calls fetch", (w, r) => { r.ffSources = [{ path: "shared/ff-engine.js", text: "const r = await fetch(url);\n" }]; }, "forbidden_fetch");
 plant("a lane file that touches the model binding", (w, r) => { r.ffSources = [{ path: "server/ff-preview.js", text: "const x = env.AI;\n" }]; }, "forbidden_token");
+plant("a lane file that reads the model binding by key", (w, r) => { r.ffSources = [{ path: "server/ff-preview.js", text: "const x = env[\"AI\"];\n" }]; }, "forbidden_token");
+plant("a lane file that asks the capped model helper", (w, r) => { r.ffSources = [{ path: "server/ff-records.js", text: "await cappedAi(env, null, {});\n" }]; }, "forbidden_token");
 plant("a price column in the record", (w) => { w.RECORD.priceScoring = true; }, "record_price");
 plant("a price column in the export", (w) => { w.EXPORT_COLUMNS.push("ref_px"); }, "export_price_column");
 plant("the evaluator in the hit key", (w) => { w.ID_RULES.evaluatorInKey = true; }, "id_rules");
@@ -631,6 +665,10 @@ plant("a missing viewport", (w) => { w.HOOKS.viewports.pop(); }, "hooks_viewport
 plant("a nightly default cooldown of one session", (w) => { w.LIMITS.cooldownDefault.nightly = 1; }, "limits_cooldown");
 plant("a live default cooldown of five sessions", (w) => { w.LIMITS.cooldownDefault.live = 5; }, "limits_cooldown");
 plant("a cooldown choice outside the list", (w) => { w.LIMITS.cooldownDefault.nightly = 7; }, "limits_cooldown");
+plant("a live cooldown that spans sessions", (w) => { w.LIMITS.cooldownChoices.live = [1, 2]; }, "limits_cooldown");
+plant("a house wire with no hit cap", (w) => { w.LIMITS.hitsPerHouseWirePerSession.nightly = 0; }, "limits_hit_caps");
+plant("a member cap above the global fuse", (w) => { w.LIMITS.hitsPerMemberPerSession = 900; }, "limits_hit_caps");
+plant("a worst-case size that forgets the house wires", (w) => { w.BUDGET.worstHitBytesPerSession = 500 * 4096; }, "budget_worst_bytes");
 plant("a cooldown the client may not send", (w) => { w.AST_GRAMMAR.rejectedFromClient.push("cooldown"); }, "grammar_cooldown");
 plant("a template without its default cooldown", (w) => { delete tmpl(w, "T01").ast.cooldown; }, "template_cooldown");
 plant("a template with a cooldown of the other cadence", (w) => { tmpl(w, "T03").ast.cooldown.n = 5; }, "template_cooldown");
@@ -680,6 +718,7 @@ astPlant("a cooldown of zero sessions", (b) => { b.cooldown = { unit: "session",
 astPlant("a cooldown counted in minutes", (b) => { b.cooldown = { unit: "minute", n: 5 }; }, "grammar_invalid");
 astPlant("a bare cooldown number", (b) => { b.cooldown = 5; }, "grammar_invalid");
 astPlant("a missing cooldown", (b) => { delete b.cooldown; }, "grammar_invalid");
+astPlant("a live wire that stays quiet for five sessions", (b) => { b.cooldown = { unit: "session", n: 5 }; }, "grammar_invalid");
 astPlant("a cooldown with a stray key", (b) => { b.cooldown = { unit: "session", n: 1, until: "2026-03-09" }; }, "grammar_invalid");
 astPlant("a delivery list", (b) => { b.deliver = ["inbox"]; }, "client_derived_field");
 astPlant("a threshold off the step", (b) => { b.all[0].x = 20.5; }, "grammar_precision");
