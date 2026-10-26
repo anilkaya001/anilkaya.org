@@ -1,6 +1,7 @@
 import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
 import { closeUtcMs, etDayOf, isSession, shiftDay, yearFraction } from "./flows-quant-time.js";
 import { median } from "./flows-stats.js";
+import { chooseForward, quotesByExpiry, forwardRecord } from "./flows-quant-forward.js";
 
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -332,6 +333,14 @@ export const DEFAULT_GATES = Object.freeze({
   maxDays: 400,
 });
 
+export function gateOf(p, g = DEFAULT_GATES) {
+  if (p.days < g.minDays || p.days > g.maxDays) return "expiry";
+  if (p.premium < g.minPremium) return "premium";
+  if (p.oi === null || p.oi < g.minOi) return "openInterest";
+  if (p.spread === null || p.spread > g.maxSpread) return "spread";
+  return null;
+}
+
 export const RANK_KEYS = Object.freeze(["annualized", "premium", "yieldOnCollateral", "cushionSigmas", "premiumRatio"]);
 
 const before = (x, y) => {
@@ -344,7 +353,7 @@ const byText = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
-  ticker = null, readMs = null, rate = PRICING_RATE, carry = null,
+  ticker = null, readMs = null, rate = PRICING_RATE, carry = null, fwdCarry = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
@@ -369,10 +378,8 @@ export function rankChain(contracts, {
   const rows = [];
   for (const p of standing) {
     if (strategy !== "both" && p.strategy !== strategy) { gated.strategy++; continue; }
-    if (p.days < g.minDays || p.days > g.maxDays) { gated.expiry++; continue; }
-    if (p.premium < g.minPremium) { gated.premium++; continue; }
-    if (p.oi === null || p.oi < g.minOi) { gated.openInterest++; continue; }
-    if (p.spread === null || p.spread > g.maxSpread) { gated.spread++; continue; }
+    const why = gateOf(p, g);
+    if (why !== null) { gated[why]++; continue; }
     rows.push(p);
   }
 
@@ -395,6 +402,13 @@ export function rankChain(contracts, {
     return { expiry, method: f.method, pairs: f.pairs, F: f.F };
   });
 
+  const quotes = quotesByExpiry(standing);
+  const fwd = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => {
+    const sample = kept.find((p) => p.expiry === expiry);
+    const T = yearsTo(sample, readMs);
+    return forwardRecord(expiry, T > 0 && spot > 0 ? chooseForward({ quotes: quotes.get(expiry), S: spot, r: rate, T, q: fwdCarry }) : null);
+  });
+
   const { divisor, basis } = ivConvention(
     list.map((r) => r && r.implied_volatility),
     { pairs: kept.map((p) => [p.iv, p.ivMid]) });
@@ -409,6 +423,7 @@ export function rankChain(contracts, {
     rankedBy: key,
     gates: g,
     forwards,
+    fwd,
 
     ivSurface: ivSurface(standing, { ivBasis: basis }),
   };
@@ -730,6 +745,7 @@ export function planBuyingPower(rows, buyingPower) {
 
 export const SC_DEFAULTS = Object.freeze({ contracts: 100, convention: "delta", haircut: 0.3, floor: 0.1 });
 export const SC_REG_T = Object.freeze({ base: 0.2, floor: 0.1 });
+export const SC_DELTA_FLOOR = 0.05;
 export const SC_LIMITS = Object.freeze({ contractsMax: 100000, haircut: Object.freeze([0.05, 1]), floor: Object.freeze([0, 0.5]) });
 export const SC_CONVENTIONS = Object.freeze(["delta", "regt", "shares"]);
 
@@ -767,8 +783,9 @@ export function shortCallCollateral({ convention = SC_DEFAULTS.convention, spot,
     const d = numOrNull(delta);
     if (d === null) return fail("no-delta");
     if (d < 0 || d > 1) return fail("bad-delta");
-    m = SHARES_PER_CONTRACT * S * Math.max(hc * d, fl);
-    binding = hc * d > fl ? "delta" : "floor";
+    const dd = Math.max(d, SC_DELTA_FLOOR);
+    m = SHARES_PER_CONTRACT * S * Math.max(hc * dd, fl);
+    binding = hc * dd > fl ? "delta" : "floor";
   } else return fail("bad-terms");
   const m1C = roundCents(m);
   if (!(m1C > 0)) return fail("no-collateral");
